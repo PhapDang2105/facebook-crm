@@ -7,6 +7,7 @@ import AdmZip from 'adm-zip';
 import { createLead, getSegments, updateLead } from './domain.mjs';
 import { buildExportRows } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
+import { getSpxTracking } from './spx-tracking.mjs';
 
 const appDirectory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(appDirectory);
@@ -461,6 +462,14 @@ const server = http.createServer(async (request, response) => {
     const match=url.pathname.match(/^\/api\/leads\/([^/]+)$/);
     if(request.method==='PATCH'&&match){const store=await readStore();const lead=store.leads.find(x=>x.id===match[1]);if(!lead)return sendJson(response,404,{error:'Lead not found.'});updateLead(lead,await readBody(request));await writeStore(store);return sendJson(response,200,lead);}
     if(request.method==='GET'&&url.pathname==='/api/segments'){const {leads}=await readStore();return sendJson(response,200,{items:getSegments(leads)});}
+    if (request.method === 'GET' && url.pathname === '/api/shipping/spx/track') {
+      try {
+        const tracking = await getSpxTracking(url.searchParams.get('trackingNumber'));
+        return sendJson(response, 200, tracking);
+      } catch (error) {
+        return sendJson(response, error.statusCode || 502, { error: error.message });
+      }
+    }
     if (request.method === 'POST' && url.pathname === '/api/orders/import/xlsx') {
       const workbook = await readBinaryBody(request);
       return sendJson(response, 200, parseXlsx(workbook));

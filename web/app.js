@@ -91,11 +91,18 @@ const facebookPageDialog = document.querySelector('#facebook-page-dialog');
 const facebookPageOptions = document.querySelector('#facebook-page-options');
 const facebookPageDialogStatus = document.querySelector('#facebook-page-dialog-status');
 const facebookPageConfirm = document.querySelector('#facebook-page-confirm');
+const shippingTrackingForm = document.querySelector('#shipping-tracking-form');
+const shippingTrackingInput = document.querySelector('#shipping-tracking-input');
+const shippingTrackingSubmit = document.querySelector('#shipping-tracking-submit');
+const shippingResult = document.querySelector('#shipping-result');
+const shippingRecentList = document.querySelector('#shipping-recent-list');
+const shippingClearHistory = document.querySelector('#shipping-clear-history');
 const appSettingsKey = 'crm-app-settings';
 const savedChatMessagesKey = 'crm-chat-messages';
 const chatMessageActionsKey = 'crm-chat-message-actions';
 const chatPinnedMessagesKey = 'crm-chat-pinned-messages';
 const chatMessageReactionsKey = 'crm-chat-message-reactions';
+const shippingHistoryKey = 'crm-spx-tracking-history';
 const chatTimeBreakMs = 15 * 60 * 1000;
 const unreadConversationsKey = 'crm-unread-conversations';
 const mutedConversationsKey = 'crm-muted-conversations';
@@ -173,6 +180,153 @@ function showView(name) {
   orderNav.setAttribute('aria-expanded', String(name === 'orders'));
   settingsNav?.setAttribute('aria-expanded', String(name === 'settings'));
   if (window.location.hash !== `#${name}`) window.location.hash = name;
+}
+
+function formatShippingTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('vi-VN', {
+    hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric'
+  }).format(date);
+}
+
+function formatShippingDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' }).format(date);
+}
+
+function shippingVietnameseStatus(tracking) {
+  if (tracking.description) return tracking.description;
+  const status = String(tracking.status || '').toLowerCase();
+  if (status.includes('delivered')) return 'Đã giao hàng';
+  if (status.includes('out for delivery')) return 'Đang giao hàng';
+  if (status.includes('transit')) return 'Đang vận chuyển';
+  if (status.includes('pickup')) return 'Chờ lấy hàng';
+  return tracking.status || 'Đã tiếp nhận thông tin vận đơn';
+}
+
+function shippingMilestoneIndex(tracking) {
+  const text = `${tracking.status || ''} ${tracking.description || ''}`.toLowerCase();
+  if (text.includes('delivered') || text.includes('đã giao hàng') || text.includes('giao hàng thành công')) return 3;
+  if (text.includes('out for delivery') || text.includes('đang giao hàng')) return 2;
+  if (text.includes('transit') || text.includes('vận chuyển') || text.includes('đã đến kho')) return 1;
+  return 0;
+}
+
+function renderShippingMilestones(tracking) {
+  const current = shippingMilestoneIndex(tracking);
+  const labels = ['Chờ lấy hàng', 'Đang vận chuyển', 'Đang giao hàng', 'Đã giao hàng'];
+  return `<div class="shipping-milestones" aria-label="Tiến trình giao hàng">
+    ${labels.map((label, index) => {
+      const state = index < current ? ' complete' : index === current ? ' current' : '';
+      const icon = index < current ? 'check' : index === 2 ? 'scooter' : index === 3 ? 'delivered' : 'check';
+      const item = `<div class="shipping-milestone${state}"><span class="shipping-milestone-icon icon-${icon}" aria-hidden="true"></span><span class="shipping-milestone-label">${label}</span></div>`;
+      if (index === labels.length - 1) return item;
+      return `${item}<span class="shipping-milestone-line${index < current ? ' complete' : ''}" aria-hidden="true"></span>`;
+    }).join('')}
+  </div>`;
+}
+
+function readShippingHistory() {
+  try {
+    const history = JSON.parse(localStorage.getItem(shippingHistoryKey) || '[]');
+    return Array.isArray(history) ? history.filter(item => item && item.trackingNumber).slice(0, 8) : [];
+  } catch {
+    localStorage.removeItem(shippingHistoryKey);
+    return [];
+  }
+}
+
+function renderShippingHistory() {
+  if (!shippingRecentList) return;
+  const history = readShippingHistory();
+  shippingClearHistory?.classList.toggle('hidden', history.length === 0);
+  if (!history.length) {
+    shippingRecentList.innerHTML = '<p class="shipping-recent-empty">Chưa có mã vận đơn nào.</p>';
+    return;
+  }
+  shippingRecentList.innerHTML = history.map(item => `
+    <button class="shipping-recent-item" type="button" data-tracking-number="${escapeHtml(item.trackingNumber)}">
+      <span><strong>${escapeHtml(item.trackingNumber)}</strong><small>${escapeHtml(item.status || 'SPX Express')}</small></span>
+      <time>${escapeHtml(formatShippingTime(item.checkedAt))}</time>
+    </button>`).join('');
+}
+
+function rememberShippingLookup(tracking) {
+  const history = readShippingHistory().filter(item => item.trackingNumber !== tracking.trackingNumber);
+  history.unshift({
+    trackingNumber: tracking.trackingNumber,
+    status: shippingVietnameseStatus(tracking),
+    checkedAt: new Date().toISOString()
+  });
+  localStorage.setItem(shippingHistoryKey, JSON.stringify(history.slice(0, 8)));
+  renderShippingHistory();
+}
+
+function renderShippingLoading(trackingNumber) {
+  shippingResult.innerHTML = `
+    <div class="shipping-loading" role="status">
+      <span class="shipping-spinner" aria-hidden="true"></span>
+      <h2>Đang kiểm tra ${escapeHtml(trackingNumber)}</h2>
+      <p>Đang lấy trạng thái mới nhất từ SPX Express...</p>
+    </div>`;
+}
+
+function renderShippingError(message) {
+  shippingResult.innerHTML = `
+    <div class="shipping-error-state" role="alert">
+      <span aria-hidden="true">!</span>
+      <h2>Chưa tra cứu được vận đơn</h2>
+      <p>${escapeHtml(message)}</p>
+    </div>`;
+}
+
+function renderShippingTracking(tracking) {
+  const vietnameseStatus = shippingVietnameseStatus(tracking);
+  const timeline = tracking.records?.length
+    ? tracking.records.map((record, index) => `
+      <li class="shipping-timeline-item${index === 0 ? ' current' : ''}">
+        <time class="shipping-timeline-time">${escapeHtml(formatShippingTime(record.time))}</time>
+        <span class="shipping-timeline-dot" aria-hidden="true"></span>
+        <div>
+          <div class="shipping-timeline-head"><strong>${escapeHtml(record.description || record.status)}</strong></div>
+          ${record.location ? `<small>${escapeHtml(record.location)}</small>` : ''}
+        </div>
+      </li>`).join('')
+    : '<li class="shipping-timeline-empty">SPX chưa cập nhật hành trình chi tiết cho vận đơn này.</li>';
+  shippingResult.innerHTML = `
+    <header class="shipping-order-summary">
+      <div class="shipping-order-title">Mã Vận Đơn: <strong>${escapeHtml(tracking.trackingNumber)}</strong><span class="shipping-status-tag">${escapeHtml(vietnameseStatus)}</span></div>
+      ${tracking.customerTrackingNumber ? `<div class="shipping-customer-code">Mã khách hàng: ${escapeHtml(tracking.customerTrackingNumber)}</div>` : ''}
+      ${tracking.expectedDeliveryAt ? `<div class="shipping-edd"><i class="shipping-edd-calendar" aria-hidden="true"></i><span>Ngày dự kiến giao hàng: ${escapeHtml(formatShippingDate(tracking.expectedDeliveryAt))}</span><i class="shipping-edd-info" aria-hidden="true"></i></div>` : ''}
+    </header>
+    ${renderShippingMilestones(tracking)}
+    <ol class="shipping-timeline">${timeline}</ol>`;
+}
+
+async function lookupSpxTracking(value) {
+  const trackingNumber = String(value || '').trim().toUpperCase();
+  if (!trackingNumber) {
+    shippingTrackingInput?.focus();
+    return;
+  }
+  shippingTrackingInput.value = trackingNumber;
+  shippingTrackingSubmit.disabled = true;
+  renderShippingLoading(trackingNumber);
+  try {
+    const response = await fetch(`/api/shipping/spx/track?trackingNumber=${encodeURIComponent(trackingNumber)}`);
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Không thể tra cứu vận đơn SPX.');
+    renderShippingTracking(result);
+    rememberShippingLookup(result);
+  } catch (error) {
+    renderShippingError(error.message);
+  } finally {
+    shippingTrackingSubmit.disabled = false;
+  }
 }
 
 function loadAppSettings() {
@@ -2707,6 +2861,20 @@ navItems.forEach(item => {
   item.onclick = () => item.dataset.view === 'orders' ? showOrderStage(getRecommendedOrderStage()) : showView(item.dataset.view);
 });
 
+shippingTrackingForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  lookupSpxTracking(shippingTrackingInput?.value);
+});
+shippingRecentList?.addEventListener('click', event => {
+  const item = event.target.closest('[data-tracking-number]');
+  if (!item) return;
+  lookupSpxTracking(item.dataset.trackingNumber);
+});
+shippingClearHistory?.addEventListener('click', () => {
+  localStorage.removeItem(shippingHistoryKey);
+  renderShippingHistory();
+});
+
 settingsForm?.addEventListener('submit', event => {
   event.preventDefault();
   appSettings = {
@@ -3213,6 +3381,7 @@ orderExport.onclick = async () => {
 const initialView = viewNames.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'dashboard';
 const metaConnectionParams = new URLSearchParams(window.location.search);
 renderOrderImportHistory();
+renderShippingHistory();
 renderUnreadConversations();
 renderMutedConversations();
 restoreConversationActivity();

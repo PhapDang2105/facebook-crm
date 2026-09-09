@@ -2551,10 +2551,8 @@ function openMessageReactionPicker(row) {
       event.stopPropagation();
       saveChatMessageReaction(name, messageId, reaction);
       renderConversation(getActiveConversation());
-      // Meta has no Send API for Page reactions, so this never leaves the CRM.
-      showComposerStatus(isFacebookConversation()
-        ? `Đã ghi cảm xúc ${reaction} trong CRM. Facebook không cho Page thả cảm xúc nên khách không nhìn thấy.`
-        : `Đã thả cảm xúc ${reaction}`, 6000);
+      // No toast here: reacting is a frequent, low-stakes action and a notice
+      // on every tap is noise. The badge carries the explanation on hover.
     });
     picker.appendChild(button);
   });

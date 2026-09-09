@@ -116,6 +116,18 @@ sudo -u crm sed -i 's/"pictureAttemptedAt": [0-9]*,//g; s/"profileResolvedAt": [
 sudo systemctl start facebook-crm
 ```
 
+## Những thao tác chỉ có tác dụng trong CRM
+
+Meta không mở API cho Page thực hiện các thao tác sau, nên chúng chỉ là ghi chú nội bộ và **khách không nhìn thấy**:
+
+| Thao tác | Vì sao |
+| --- | --- |
+| Thả cảm xúc | Send API không có lệnh gửi reaction. Webhook `message_reactions` chỉ cho phép **nhận** cảm xúc khách thả. |
+| Thu hồi tin nhắn | Không có endpoint unsend cho Page. |
+| Ghim, báo cáo | Khái niệm riêng của CRM, không tồn tại phía Messenger. |
+
+Giao diện nói rõ điều này mỗi khi thực hiện. Đừng bỏ dòng thông báo đó: khi thiếu, người dùng tưởng đã thả tim cho khách trong khi thực tế không có gì được gửi đi.
+
 ## API nội bộ
 
 | Endpoint | Mô tả |

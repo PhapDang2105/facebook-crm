@@ -28,8 +28,11 @@
 		}
 	}
 
+	# Log đi vào journald, xem bằng: journalctl -u caddy -f
+	# Không ghi ra tệp riêng: unit systemd của gói Caddy giới hạn thư mục được
+	# phép ghi, nên "output file" làm dịch vụ chết ngay khi khởi động dù thư
+	# mục đã chown đúng chủ.
 	log {
-		output file /var/log/caddy/crm-access.log
 		format json
 	}
 }

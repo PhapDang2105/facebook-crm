@@ -128,10 +128,13 @@ sed -e "s#<DOMAIN>#$DOMAIN#" \
     -e "s#<USERNAME>#$ADMIN_USER#" \
     -e "s#<BCRYPT_HASH>#$CADDY_HASH#" \
     "$APP_DIR/deploy/Caddyfile" > /etc/caddy/Caddyfile
-mkdir -p /var/log/caddy
-chown -R caddy:caddy /var/log/caddy
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-systemctl reload caddy || systemctl restart caddy
+systemctl restart caddy
+sleep 2
+if ! systemctl is-active --quiet caddy; then
+  echo "Caddy không khởi động được. Xem chi tiết: journalctl -xeu caddy.service" >&2
+  exit 1
+fi
 
 cat <<EOF
 

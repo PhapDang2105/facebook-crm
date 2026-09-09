@@ -65,8 +65,11 @@ export async function fetchCustomerProfile(psid, pageAccessToken) {
   try {
     const profile = await metaRequest(psid, { query: { fields: 'name,profile_pic', access_token: pageAccessToken } });
     return { name: profile.name || '', picture: profile.profile_pic || '' };
-  } catch {
-    // Meta hides the profile until the customer has messaged the Page and granted access.
+  } catch (error) {
+    // Meta hides the profile until the customer has messaged the Page and
+    // granted access. Log the reason: swallowing it silently made a missing
+    // avatar impossible to diagnose.
+    console.error(`Không lấy được hồ sơ khách ${psid}: ${error.message}`);
     return { name: '', picture: '' };
   }
 }

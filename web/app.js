@@ -2553,7 +2553,8 @@ function closeChatMessageMenu() {
 }
 
 function closeMessageReactionPicker() {
-  chatBody?.querySelector('.message-reaction-picker')?.remove();
+  document.querySelector('.message-reaction-picker')?.remove();
+  document.querySelector('.message-row.message-reaction-open')?.classList.remove('message-reaction-open');
 }
 
 function openMessageReactionPicker(row) {
@@ -2585,17 +2586,28 @@ function openMessageReactionPicker(row) {
   // anchoring to its edge threw the picker far from the message. Centre it on
   // the bubble instead. It cannot live inside the bubble: media bubbles clip
   // their overflow to keep the rounded corners.
-  row.appendChild(picker);
-  const bubble = row.querySelector('.bubble');
-  if (bubble && chatBody) {
-    const bubbleBounds = bubble.getBoundingClientRect();
-    const rowBounds = row.getBoundingClientRect();
-    const chatBounds = chatBody.getBoundingClientRect();
-    const pickerWidth = picker.getBoundingClientRect().width;
-    const centred = bubbleBounds.left + bubbleBounds.width / 2 - rowBounds.left;
-    const smallestLeft = chatBounds.left - rowBounds.left + pickerWidth / 2 + 9;
-    const largestLeft = chatBounds.right - rowBounds.left - pickerWidth / 2 - 9;
-    picker.style.left = `${Math.max(smallestLeft, Math.min(largestLeft, centred))}px`;
+  // Float above the page rather than inside the chat body: the chat clips its
+  // overflow, and the picker is wider than the gap left by the contact panel,
+  // so anchoring it inside pushed it back over the bubble.
+  document.body.appendChild(picker);
+  row.classList.add('message-reaction-open');
+  const reactButton = row.querySelector('[data-message-quick="react"]');
+  if (reactButton) {
+    const buttonBounds = reactButton.getBoundingClientRect();
+    const pickerBounds = picker.getBoundingClientRect();
+    const margin = 9;
+    // Open away from the bubble: rightwards for incoming, leftwards for
+    // outgoing. If that would run off screen, flip to the other side of the
+    // button rather than sliding the picker away from it.
+    const openRight = buttonBounds.left;
+    const openLeft = buttonBounds.right - pickerBounds.width;
+    const fits = candidate => candidate >= margin && candidate + pickerBounds.width <= window.innerWidth - margin;
+    const preferred = row.classList.contains('outgoing') ? openLeft : openRight;
+    const fallback = row.classList.contains('outgoing') ? openRight : openLeft;
+    const wanted = fits(preferred) ? preferred : fits(fallback) ? fallback : preferred;
+    const largestLeft = window.innerWidth - pickerBounds.width - margin;
+    picker.style.left = `${Math.max(margin, Math.min(largestLeft, wanted))}px`;
+    picker.style.top = `${Math.max(margin, buttonBounds.top - pickerBounds.height - 6.75)}px`;
   }
   picker.querySelector('button')?.focus();
 }
@@ -3679,7 +3691,11 @@ chatBody?.addEventListener('mousemove', event => {
   showMessageTimeTooltip(row);
 });
 chatBody?.addEventListener('mouseleave', hideMessageTimeTooltip);
-chatBody?.addEventListener('scroll', hideMessageTimeTooltip, { passive: true });
+chatBody?.addEventListener('scroll', () => {
+  hideMessageTimeTooltip();
+  // The picker is fixed to the viewport, so it would drift away when scrolling.
+  closeMessageReactionPicker();
+}, { passive: true });
 chatBody?.addEventListener('click', event => {
   const image = event.target.closest('.chat-image');
   if (image) {
@@ -3723,7 +3739,8 @@ chatBody?.addEventListener('keydown', event => {
 });
 document.addEventListener('click', event => {
   if (!event.target.closest('.message-row')) closeChatMessageMenu();
-  if (!event.target.closest('.message-row')) closeMessageReactionPicker();
+  // The picker now lives outside the row, so it must exclude itself too.
+  if (!event.target.closest('.message-row') && !event.target.closest('.message-reaction-picker')) closeMessageReactionPicker();
   if (!event.target.closest('#sticker-picker') && !event.target.closest('#sticker-button') && !event.target.closest('#emoji-picker') && !event.target.closest('#emoji-button')) closeComposerPopovers();
 });
 document.querySelectorAll('[data-close-image-lightbox]').forEach(button => button.addEventListener('click', closeImageLightbox));

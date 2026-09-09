@@ -66,11 +66,9 @@ export async function fetchCustomerProfile(psid, pageAccessToken) {
     const profile = await metaRequest(psid, { query: { fields: 'name,profile_pic', access_token: pageAccessToken } });
     return { name: profile.name || '', picture: profile.profile_pic || '' };
   } catch (error) {
-    // Meta hides the profile until the customer has messaged the Page and
-    // granted access. Log the reason: swallowing it silently made a missing
-    // avatar impossible to diagnose.
-    console.error(`Không lấy được hồ sơ khách ${psid}: ${error.message}`);
-    return { name: '', picture: '' };
+    // Standard access cannot read customer profiles, so this fails for every
+    // conversation at once. Return the reason instead of logging per customer.
+    return { name: '', picture: '', error: error.message };
   }
 }
 

@@ -95,6 +95,27 @@ Nút **Làm mới** kiểm tra lại tên Page, ảnh đại diện và trạng 
 - Mở một hội thoại sẽ gọi `sender_action: mark_seen` để đánh dấu đã xem trên Facebook.
 - Meta chỉ cho trả lời trong **24 giờ** kể từ tin nhắn gần nhất của khách. API trả về `replyWindowEndsAt` và `canReply` cho từng hội thoại; quá hạn thì Send API báo lỗi và tin nhắn hiện trạng thái gửi hỏng.
 
+## Ảnh đại diện khách hàng
+
+CRM hiển thị chữ cái đầu thay cho ảnh đại diện. Đây là giới hạn của Meta, không phải lỗi: Messenger User Profile API (`GET /{psid}?fields=name,profile_pic`) đòi quyền `pages_messaging` ở mức **Advanced Access**, còn ứng dụng chưa qua App Review chỉ có Standard Access. Graph trả về:
+
+```
+Unsupported get request. Object with ID '...' does not exist, cannot be
+loaded due to missing permissions, or does not support this operation.
+```
+
+Tên khách vẫn hiển thị đúng vì lấy từ `participants` của Conversations API, không qua lời gọi hồ sơ.
+
+CRM chỉ thử lấy ảnh **một lần cho mỗi khách** rồi ghi cờ `pictureAttemptedAt` (khi đồng bộ) hoặc `profileResolvedAt` (khi nhận webhook). Không có cờ này thì mỗi tin nhắn đến lại gọi Graph một lần vô ích và nhanh chóng chạm rate limit.
+
+Sau khi được cấp Advanced Access, xóa cờ để CRM thử lại:
+
+```bash
+sudo systemctl stop facebook-crm
+sudo -u crm sed -i 's/"pictureAttemptedAt": [0-9]*,//g; s/"profileResolvedAt": [0-9]*,//g' /opt/facebook-crm/data/processed/meta-conversations.json
+sudo systemctl start facebook-crm
+```
+
 ## API nội bộ
 
 | Endpoint | Mô tả |

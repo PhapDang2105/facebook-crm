@@ -155,23 +155,26 @@ async function resolveMissingProfiles(changes) {
     .filter(change => change.type === 'message' && !change.conversation.profileResolvedAt)
     .map(change => ({ pageId: change.conversation.pageId, psid: change.conversation.psid }));
   const unique = [...new Map(pending.map(item => [`${item.pageId}:${item.psid}`, item])).values()];
+  if (!unique.length) return [];
   const profiles = [];
   for (const item of unique) {
     try {
       const profile = await fetchCustomerProfile(item.psid, await getPageAccessToken(item.pageId));
-      if (profile.name || profile.picture) profiles.push({ ...item, ...profile });
-    } catch {
-      // Without a valid Page token the conversation simply keeps its placeholder name.
+      profiles.push({ ...item, ...profile });
+    } catch (error) {
+      // Without a valid Page token the conversation keeps its placeholder name.
+      profiles.push({ ...item, name: '', picture: '', error: error.message });
     }
   }
-  if (!profiles.length) return [];
+  // Mark every attempt, including the failures. Standard access refuses these
+  // lookups, and without the marker every incoming message would retry.
   return updateMessagingStore(store => profiles.map(profile => {
     const conversation = store.conversations.find(item => item.id === conversationId(profile.pageId, profile.psid));
     if (!conversation) return null;
+    conversation.profileResolvedAt = Date.now();
     if (profile.name) conversation.name = profile.name;
     if (profile.picture) conversation.picture = profile.picture;
-    conversation.profileResolvedAt = Date.now();
-    return { type: 'conversation', conversation };
+    return profile.name || profile.picture ? { type: 'conversation', conversation } : null;
   }).filter(Boolean));
 }
 

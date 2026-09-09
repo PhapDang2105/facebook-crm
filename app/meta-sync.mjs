@@ -40,25 +40,43 @@ export async function syncPageConversations(pageId, { limit = 25 } = {}) {
     return { conversations: threads.length, messages: importedMessages };
   });
 
-  const missingPictures = threads.slice(0, maximumProfileLookupsPerSync).map(thread => thread.psid);
+  // Only look up customers we have never successfully resolved, and stop the
+  // whole batch on the first refusal: when access is missing every lookup
+  // fails the same way, and retrying 25 times just burns rate limit.
+  const storedBeforeLookup = await readMessagingStore();
+  const pending = threads
+    .filter(thread => {
+      const conversation = storedBeforeLookup.conversations.find(item => item.id === conversationId(pageId, thread.psid));
+      return !conversation?.picture && !conversation?.pictureAttemptedAt;
+    })
+    .slice(0, maximumProfileLookupsPerSync);
+
   const pictures = [];
-  for (const psid of missingPictures) {
-    const profile = await fetchCustomerProfile(psid, pageAccessToken);
-    if (profile.picture) pictures.push({ psid, ...profile });
+  let profileError = '';
+  for (const thread of pending) {
+    const profile = await fetchCustomerProfile(thread.psid, pageAccessToken);
+    if (profile.error) { profileError = profile.error; break; }
+    if (profile.picture) pictures.push({ psid: thread.psid, ...profile });
   }
-  if (pictures.length) {
-    await updateMessagingStore(store => {
-      for (const profile of pictures) {
-        const conversation = store.conversations.find(item => item.id === conversationId(pageId, profile.psid));
+  if (profileError) {
+    console.error(`Không lấy được ảnh đại diện khách của Page ${pageId}: ${profileError}`);
+  }
+  if (pending.length) {
+    await updateMessagingStore(current => {
+      for (const thread of pending) {
+        const conversation = current.conversations.find(item => item.id === conversationId(pageId, thread.psid));
         if (!conversation) continue;
+        conversation.pictureAttemptedAt = Date.now();
+        const profile = pictures.find(item => item.psid === thread.psid);
+        if (!profile) continue;
         conversation.picture = profile.picture;
         if (profile.name) conversation.name = profile.name;
       }
     });
   }
 
-  const store = await readMessagingStore();
-  const conversations = store.conversations
+  const storedAfterSync = await readMessagingStore();
+  const conversations = storedAfterSync.conversations
     .filter(conversation => conversation.pageId === String(pageId))
     .sort((first, second) => (second.lastMessageAt || 0) - (first.lastMessageAt || 0))
     .map(publicConversation);

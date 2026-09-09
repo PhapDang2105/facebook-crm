@@ -87,6 +87,7 @@ const settingsStatus = document.querySelector('#settings-status');
 const facebookConnectButton = document.querySelector('#facebook-connect-button');
 const zaloConnectButton = document.querySelector('#zalo-connect-button');
 const facebookChannelList = document.querySelector('#facebook-channel-list');
+const facebookWebhookStatus = document.querySelector('#facebook-webhook-status');
 const facebookPageDialog = document.querySelector('#facebook-page-dialog');
 const facebookPageOptions = document.querySelector('#facebook-page-options');
 const facebookPageDialogStatus = document.querySelector('#facebook-page-dialog-status');
@@ -129,6 +130,11 @@ let messageTimeTooltipFrame = 0;
 let conversationMenuTarget = null;
 let conversationSearchMatches = [];
 let conversationSearchIndex = -1;
+let usingRemoteConversations = false;
+let messagingStream = null;
+const remoteConversations = new Map();
+const remoteMessages = new Map();
+const syncedChannelIds = new Set();
 
 const conversationProfiles = {
   'Lan Anh': {
@@ -436,16 +442,31 @@ function channelAvatar(channel) {
     : `<span class="channel-item-avatar">${escapeHtml(channel.name.trim().charAt(0).toUpperCase() || 'f')}</span>`;
 }
 
+function renderWebhookStatus(state) {
+  if (!facebookWebhookStatus) return;
+  const missing = Array.isArray(state.missingWebhookConfiguration) ? state.missingWebhookConfiguration : [];
+  const ready = Boolean(state.webhookConfigured);
+  facebookWebhookStatus.innerHTML = `
+    <div class="channel-webhook-head"><span class="channel-connected-dot${ready ? '' : ' warning'}"></span><strong>Webhook Messenger</strong></div>
+    <p class="channel-webhook-url">Callback URL: <code>${escapeHtml(state.webhookUrl || '')}</code></p>
+    ${ready
+      ? '<p class="channel-webhook-hint">Dán URL này kèm Verify Token vào Meta App → Webhooks → Page, rồi đăng ký trường <code>messages</code>.</p>'
+      : `<p class="channel-webhook-hint warning">Chưa đủ cấu hình: ${escapeHtml(missing.join(', '))}. Bổ sung vào tệp <code>.env</code> rồi khởi động lại CRM.</p>`}`;
+}
+
 function renderFacebookChannels(state) {
   const items = Array.isArray(state.items) ? state.items : [];
   if (facebookConnectButton) {
     facebookConnectButton.disabled = false;
     facebookConnectButton.title = '';
   }
+  renderWebhookStatus(state);
   if (!facebookChannelList) return;
   facebookChannelList.innerHTML = items.length ? items.map(channel => {
     const healthy = channel.status === 'connected';
-    const subscriptionText = channel.subscribed ? 'Đã đồng bộ tin nhắn' : 'Đã kết nối · cần kiểm tra webhook';
+    const subscriptionText = channel.subscribed
+      ? 'Đã đăng ký nhận tin nhắn'
+      : `Đã kết nối · ${channel.subscriptionError || 'chưa đăng ký webhook'}`;
     return `<article class="channel-item" data-channel-id="${escapeHtml(channel.id)}">
       ${channelAvatar(channel)}
       <div class="channel-item-copy"><strong>${escapeHtml(channel.name)}</strong><small><span class="channel-connected-dot${healthy ? '' : ' warning'}"></span>${escapeHtml(subscriptionText)} · ID ${escapeHtml(channel.id)}</small></div>
@@ -515,9 +536,10 @@ async function confirmFacebookPages() {
       body: JSON.stringify({ ticket: facebookPageOptions.dataset.ticket, pageIds: selected })
     }));
     closeFacebookPageDialog();
-    renderFacebookChannels({ ...result, metaConfigured: true });
-    showToast(`Đã kết nối ${selected.length} Facebook Page.`, 'success');
+    showToast(`Đã kết nối ${result.items?.length || selected.length} Facebook Page.`, 'success');
     history.replaceState(null, '', `${window.location.pathname}#settings`);
+    await loadFacebookChannels().catch(() => {});
+    await loadMessageChannels().catch(() => {});
   } catch (error) {
     if (facebookPageDialogStatus) facebookPageDialogStatus.textContent = error.message;
   } finally {
@@ -614,11 +636,222 @@ function activateCurrentMessageChannel() {
     visibleConversations[0].classList.add('active');
     if (messageComposerInput) messageComposerInput.disabled = false;
     renderConversation(visibleConversations[0]);
+    ensureRemoteMessages(visibleConversations[0]);
     updateMessageSendState();
   } else {
     showEmptyChannelConversation();
   }
   updateMarkUnreadButton();
+}
+
+function conversationPreviewText(conversation) {
+  const preview = conversation.lastMessagePreview || 'Chưa có tin nhắn';
+  return conversation.lastMessageDirection === 'outgoing' ? `Bạn: ${preview}` : preview;
+}
+
+function conversationInitial(name) {
+  return String(name || '').trim().charAt(0).toUpperCase() || 'F';
+}
+
+function updateConversationElement(element, conversation) {
+  element.dataset.channelId = conversation.channelId;
+  element.dataset.psid = conversation.psid;
+  element.dataset.source = conversation.source || 'inbox';
+  element.dataset.avatar = conversation.picture || '';
+  element.dataset.labels = (conversation.labels || []).join(' ');
+  element.classList.toggle('unread', Boolean(conversation.unread));
+  element.classList.toggle('muted', Boolean(conversation.muted));
+  const avatar = element.querySelector('.avatar');
+  if (avatar) {
+    avatar.textContent = conversationInitial(conversation.name);
+    applyAvatarPhoto(avatar, conversation.picture || '');
+  }
+  const name = element.querySelector('strong');
+  if (name) name.textContent = conversation.name;
+  const preview = element.querySelector('small');
+  if (preview) preview.textContent = conversationPreviewText(conversation);
+  const time = element.querySelector('time');
+  if (time) time.textContent = conversation.lastMessageAt ? formatConversationActivityTime(conversation.lastMessageAt) : '';
+  if (conversation.lastMessageAt) element.dataset.latestSentAt = String(conversation.lastMessageAt);
+  element.dataset.initialPreview = conversationPreviewText(conversation);
+  element.dataset.initialTime = time?.textContent || '';
+  renderConversationSourceBadge(element);
+  renderConversationMuteIcon(element);
+  return element;
+}
+
+function buildConversationElement(conversation) {
+  const element = document.createElement('div');
+  element.className = 'conversation';
+  element.setAttribute('role', 'button');
+  element.tabIndex = 0;
+  element.dataset.conversationId = conversation.id;
+  const avatar = document.createElement('span');
+  avatar.className = 'avatar';
+  const copy = document.createElement('span');
+  copy.className = 'conversation-copy';
+  copy.append(document.createElement('strong'), document.createElement('small'));
+  const time = document.createElement('time');
+  const more = document.createElement('button');
+  more.className = 'conversation-more';
+  more.type = 'button';
+  more.title = 'Tùy chọn';
+  more.setAttribute('aria-label', 'Tùy chọn hội thoại');
+  more.setAttribute('aria-haspopup', 'menu');
+  more.setAttribute('aria-expanded', 'false');
+  const moreIcon = document.createElement('img');
+  moreIcon.src = '/assets/icons/more-horizontal.svg';
+  moreIcon.alt = '';
+  more.appendChild(moreIcon);
+  element.append(avatar, copy, time, more);
+  return updateConversationElement(element, conversation);
+}
+
+function findConversationElement(conversationId) {
+  return getConversationItems().find(item => item.dataset.conversationId === conversationId) || null;
+}
+
+function applyRemoteConversation(conversation) {
+  remoteConversations.set(conversation.id, conversation);
+  const existing = findConversationElement(conversation.id);
+  if (existing) return updateConversationElement(existing, conversation);
+  const element = buildConversationElement(conversation);
+  element.dataset.initialOrder = String(getConversationItems().length);
+  conversationList?.insertBefore(element, conversationEmpty);
+  return element;
+}
+
+function renderRemoteConversations(items) {
+  if (!conversationList) return;
+  const activeId = getActiveConversation()?.dataset.conversationId || '';
+  remoteConversations.clear();
+  getConversationItems().forEach(item => item.remove());
+  items.forEach((conversation, index) => {
+    remoteConversations.set(conversation.id, conversation);
+    const element = buildConversationElement(conversation);
+    element.dataset.initialOrder = String(index);
+    element.classList.toggle('active', conversation.id === activeId);
+    conversationList.insertBefore(element, conversationEmpty);
+  });
+}
+
+async function loadRemoteConversations(channelId) {
+  const state = await readApiResponse(await fetch(`/api/messaging/conversations?channelId=${encodeURIComponent(channelId)}`));
+  let items = state.items || [];
+  // An empty inbox usually means the Page was connected before this build; pull its history once.
+  if (!items.length && !syncedChannelIds.has(channelId)) {
+    syncedChannelIds.add(channelId);
+    try {
+      const synced = await readApiResponse(await fetch('/api/messaging/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId })
+      }));
+      items = synced.items || [];
+    } catch { /* An empty inbox is still a usable inbox. */ }
+  }
+  renderRemoteConversations(items);
+  return items;
+}
+
+async function ensureRemoteMessages(conversation, { force = false } = {}) {
+  const id = conversation?.dataset.conversationId;
+  if (!id || (!force && remoteMessages.has(id))) return;
+  if (!remoteMessages.has(id)) remoteMessages.set(id, []);
+  try {
+    const state = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(id)}/messages`));
+    remoteMessages.set(id, state.items || []);
+    if (state.conversation) remoteConversations.set(id, state.conversation);
+    if (getActiveConversation()?.dataset.conversationId === id) renderConversation(getActiveConversation());
+  } catch (error) {
+    showComposerStatus(error.message);
+  }
+}
+
+async function markRemoteConversationRead(conversation) {
+  const id = conversation?.dataset.conversationId;
+  if (!id) return;
+  try {
+    const updated = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(id)}/read`, { method: 'POST' }));
+    remoteConversations.set(id, updated);
+  } catch { /* The thread still reads as opened locally. */ }
+}
+
+async function patchRemoteConversationFlags(conversation, changes) {
+  const id = conversation?.dataset.conversationId;
+  if (!id) return;
+  try {
+    const updated = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(id)}/flags`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(changes)
+    }));
+    remoteConversations.set(id, updated);
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function cacheRemoteMessage(conversationId, message) {
+  const messages = remoteMessages.get(conversationId);
+  if (!messages) return;
+  const index = messages.findIndex(item => item.id === message.id || (message.mid && item.mid === message.mid));
+  if (index >= 0) messages[index] = { ...messages[index], ...message, dataUrl: message.dataUrl || messages[index].dataUrl };
+  else messages.push(message);
+  messages.sort((first, second) => (first.createdAt || 0) - (second.createdAt || 0));
+}
+
+function handleMessagingEvent(event) {
+  if (event.type === 'sync') {
+    if (event.pageId === currentMessageChannelId) renderRemoteConversations(event.conversations || []);
+    return;
+  }
+  const conversation = event.conversation;
+  if (!conversation || conversation.channelId !== currentMessageChannelId) return;
+  const isActive = getActiveConversation()?.dataset.conversationId === conversation.id;
+  if (event.message) cacheRemoteMessage(conversation.id, event.message);
+  const element = applyRemoteConversation({ ...conversation, unread: isActive ? false : conversation.unread });
+  if (isActive) {
+    renderConversation(element);
+    if (event.message?.direction === 'incoming') markRemoteConversationRead(element);
+  }
+  sortConversationsByRecentActivity();
+  filterConversations();
+}
+
+function connectMessagingStream() {
+  if (messagingStream || typeof EventSource === 'undefined') return;
+  let droppedConnection = false;
+  messagingStream = new EventSource('/api/messaging/stream');
+  messagingStream.addEventListener('message', event => {
+    try {
+      handleMessagingEvent(JSON.parse(event.data));
+    } catch { /* Ignore payloads this build does not understand. */ }
+  });
+  messagingStream.addEventListener('error', () => { droppedConnection = true; });
+  messagingStream.addEventListener('open', () => {
+    if (!droppedConnection) return;
+    droppedConnection = false;
+    // Events sent while the stream was down are only recoverable by reloading the inbox.
+    loadRemoteConversations(currentMessageChannelId)
+      .then(() => {
+        const active = getActiveConversation();
+        if (active) ensureRemoteMessages(active, { force: true });
+      })
+      .catch(() => {});
+  });
+}
+
+async function switchMessageChannel(channelId) {
+  currentMessageChannelId = channelId;
+  if (usingRemoteConversations) {
+    try {
+      await loadRemoteConversations(channelId);
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+  activateCurrentMessageChannel();
 }
 
 async function loadMessageChannels() {
@@ -627,18 +860,28 @@ async function loadMessageChannels() {
     const state = await readApiResponse(await fetch('/api/channels'));
     connected = (state.items || []).map(item => ({ id: String(item.id), name: item.name, picture: item.picture, platform: item.platform || 'facebook' }));
   } catch { /* Keep the local demo channel available while the server reconnects. */ }
-  messageChannels = connected.length ? connected : [{
+  usingRemoteConversations = connected.length > 0;
+  messageChannels = usingRemoteConversations ? connected : [{
     id: 'local-facebook',
     name: 'Nông Sản Giọt Nắng',
     picture: '/assets/giot-nang-logo.webp',
     platform: 'facebook'
   }];
   if (!messageChannels.some(channel => channel.id === currentMessageChannelId)) currentMessageChannelId = messageChannels[0].id;
-  const labelCycle = ['new', 'consulting', 'customer'];
-  getConversationItems().forEach((conversation, index) => {
-    if (!conversation.dataset.channelId) conversation.dataset.channelId = currentMessageChannelId;
-    if (!conversation.dataset.labels) conversation.dataset.labels = labelCycle[index % labelCycle.length];
-  });
+  if (usingRemoteConversations) {
+    try {
+      await loadRemoteConversations(currentMessageChannelId);
+    } catch (error) {
+      showToast(error.message);
+    }
+    connectMessagingStream();
+  } else {
+    const labelCycle = ['new', 'consulting', 'customer'];
+    getConversationItems().forEach((conversation, index) => {
+      if (!conversation.dataset.channelId) conversation.dataset.channelId = currentMessageChannelId;
+      if (!conversation.dataset.labels) conversation.dataset.labels = labelCycle[index % labelCycle.length];
+    });
+  }
   activateCurrentMessageChannel();
 }
 
@@ -665,6 +908,7 @@ function getConversationName(conversation) {
 }
 
 function getConversationStorageKey(name, conversation = getActiveConversation()) {
+  if (conversation?.dataset.conversationId) return conversation.dataset.conversationId;
   const channelId = conversation?.dataset.channelId || currentMessageChannelId;
   return `${channelId}::${name}`;
 }
@@ -871,6 +1115,8 @@ function getSavedChatMessageMap() {
 }
 
 function getSavedChatMessages(name = getConversationName(getActiveConversation()), conversation = getActiveConversation()) {
+  // Server-backed threads live entirely on the server; never fall back to a demo thread of the same name.
+  if (conversation?.dataset.conversationId) return [];
   const saved = getSavedChatMessageMap();
   return saved[getConversationStorageKey(name, conversation)] || saved[name] || [];
 }
@@ -1022,6 +1268,16 @@ function appendChatTimeSeparator(timestamp) {
   chatBody.appendChild(separator);
 }
 
+function formatChatDateLabel(timestamp) {
+  if (!timestamp) return 'Hôm nay';
+  const date = new Date(timestamp);
+  const now = new Date();
+  if (isSameCalendarDay(date, now)) return 'Hôm nay';
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (isSameCalendarDay(date, yesterday)) return 'Hôm qua';
+  return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 function formatConversationActivityTime(timestamp) {
   const elapsed = Math.max(0, Date.now() - timestamp);
   if (elapsed < 60000) return 'Bây giờ';
@@ -1089,6 +1345,11 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   const isVideo = item.type === 'video';
   const isSticker = item.type === 'sticker';
   bubble.className = `bubble${isDocument ? ' bubble-document' : ''}${isMedia ? ' bubble-media' : ''}${isImage ? ' bubble-image' : ''}${isVideo ? ' bubble-video' : ''}${isSticker ? ' bubble-sticker' : ''}${action === 'recalled' ? ' bubble-recalled' : ''}`;
+  if (item.status === 'sending') bubble.classList.add('bubble-sending');
+  if (item.status === 'failed') {
+    bubble.classList.add('bubble-failed');
+    bubble.title = 'Không gửi được tin nhắn này tới Facebook.';
+  }
   if (action === 'recalled') {
     bubble.textContent = 'Bạn đã thu hồi một tin nhắn';
   } else if (item.type === 'image') {
@@ -1306,6 +1567,8 @@ function updateMessageGrouping() {
 }
 
 function getConversationMessages(conversation) {
+  const remoteId = conversation?.dataset.conversationId;
+  if (remoteId) return remoteMessages.get(remoteId) || [];
   const name = getConversationName(conversation);
   if (conversationProfiles[name]?.messages) return conversationProfiles[name].messages;
   const preview = conversation?.dataset.initialPreview || '';
@@ -1348,10 +1611,12 @@ function renderConversation(conversation = getActiveConversation()) {
   chatBody.replaceChildren();
   const date = document.createElement('div');
   date.className = 'chat-date';
-  date.textContent = conversation.dataset.initialTime === 'Hôm qua' ? 'Hôm qua' : 'Hôm nay';
+  date.textContent = conversation.dataset.conversationId
+    ? formatChatDateLabel(getChatTimestamp(getConversationMessages(conversation)[0]?.createdAt))
+    : conversation.dataset.initialTime === 'Hôm qua' ? 'Hôm qua' : 'Hôm nay';
   chatBody.appendChild(date);
   getConversationMessages(conversation).forEach((message, index) => {
-    const messageId = `base-${normalizeColumnName(name)}-${index}`;
+    const messageId = message.id || `base-${normalizeColumnName(name)}-${index}`;
     const action = message.direction === 'outgoing' ? getChatMessageAction(name, messageId) : '';
     appendChatMessage(message, message.direction, initial, messageId, action);
   });
@@ -1835,10 +2100,16 @@ function selectConversation(conversation) {
   clearMessageReply();
   ensureConversationMetadata(conversation);
   getConversationItems().forEach(item => item.classList.toggle('active', item === conversation));
+  const wasUnread = conversation.classList.contains('unread');
   conversation.classList.remove('unread');
   currentChatHeadView = 'chat';
   renderConversation(conversation);
-  saveUnreadConversations();
+  if (conversation.dataset.conversationId) {
+    ensureRemoteMessages(conversation);
+    if (wasUnread) markRemoteConversationRead(conversation);
+  } else {
+    saveUnreadConversations();
+  }
   updateMarkUnreadButton();
   filterConversations();
 }
@@ -1912,15 +2183,18 @@ function runConversationMenuAction(action, conversation) {
   if (action === 'unread') {
     const isUnread = !conversation.classList.contains('unread');
     conversation.classList.toggle('unread', isUnread);
-    saveUnreadConversations();
+    if (conversation.dataset.conversationId) patchRemoteConversationFlags(conversation, { unread: isUnread });
+    else saveUnreadConversations();
     updateMarkUnreadButton();
     filterConversations();
     return;
   }
   if (action === 'mute') {
-    conversation.classList.toggle('muted');
+    const isMuted = !conversation.classList.contains('muted');
+    conversation.classList.toggle('muted', isMuted);
     renderConversationMuteIcon(conversation);
-    saveMutedConversations();
+    if (conversation.dataset.conversationId) patchRemoteConversationFlags(conversation, { muted: isMuted });
+    else saveMutedConversations();
     return;
   }
   if (action === 'open') {
@@ -2139,12 +2413,62 @@ function updateMessageSendState() {
   if (messageSendButton) messageSendButton.disabled = !messageComposerInput?.value.trim() && !pendingAttachment;
 }
 
+async function sendRemoteMessage(conversation, text, attachment) {
+  const conversationId = conversation.dataset.conversationId;
+  const pending = {
+    id: globalThis.crypto?.randomUUID?.() || `pending-${Date.now()}`,
+    direction: 'outgoing',
+    type: attachment?.type || 'text',
+    text: text || '',
+    createdAt: Date.now(),
+    status: 'sending',
+    ...(attachment ? { dataUrl: attachment.dataUrl, name: attachment.name || '', size: attachment.size || 0 } : {})
+  };
+  cacheRemoteMessage(conversationId, pending);
+  renderConversation(conversation);
+  try {
+    const result = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, attachment })
+    }));
+    const messages = remoteMessages.get(conversationId) || [];
+    const index = messages.findIndex(item => item.id === pending.id);
+    // Keep the local preview so an uploaded image still renders before Meta echoes its own URL.
+    if (index >= 0) messages[index] = { ...result.message, dataUrl: result.message.dataUrl || pending.dataUrl || '' };
+    if (result.conversation) applyRemoteConversation(result.conversation);
+  } catch (error) {
+    const messages = remoteMessages.get(conversationId) || [];
+    const failed = messages.find(item => item.id === pending.id);
+    if (failed) {
+      failed.status = 'failed';
+      failed.text = failed.text || 'Không gửi được';
+    }
+    showComposerStatus(error.message, 6000);
+  }
+  renderConversation(conversation);
+  sortConversationsByRecentActivity();
+  filterConversations();
+  if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+}
+
 function sendCurrentMessage() {
   const text = messageComposerInput?.value.trim();
   if (!text && !pendingAttachment) return;
   const activeConversation = getActiveConversation();
   const conversationName = getConversationName(activeConversation);
   if (!conversationName) return;
+  if (activeConversation?.dataset.conversationId) {
+    const attachment = pendingAttachment && pendingAttachment.type !== 'sticker' ? pendingAttachment : null;
+    const outgoingText = pendingAttachment?.type === 'sticker' ? [text, pendingAttachment.sticker].filter(Boolean).join(' ') : text;
+    messageComposerInput.value = '';
+    clearMessageReply();
+    clearPendingAttachment();
+    updateMessageSendState();
+    messageComposerInput.focus();
+    sendRemoteMessage(activeConversation, outgoingText, attachment);
+    return;
+  }
   const replyTo = messageComposerInput?.dataset.replyTo
     ? {
         id: messageComposerInput.dataset.replyTo,
@@ -2995,10 +3319,9 @@ messageChannelTrigger?.addEventListener('click', event => {
 messageChannelMenu?.addEventListener('click', event => {
   const option = event.target.closest('[data-message-channel]');
   if (!option) return;
-  currentMessageChannelId = option.dataset.messageChannel;
   messageChannelMenu.classList.add('hidden');
   messageChannelTrigger?.setAttribute('aria-expanded', 'false');
-  activateCurrentMessageChannel();
+  switchMessageChannel(option.dataset.messageChannel);
 });
 messageLabelFilter?.addEventListener('click', event => {
   event.stopPropagation();
@@ -3092,7 +3415,8 @@ markUnreadButton?.addEventListener('click', () => {
   const activeConversation = document.querySelector('.conversation.active');
   if (!activeConversation) return;
   activeConversation.classList.add('unread');
-  saveUnreadConversations();
+  if (activeConversation.dataset.conversationId) patchRemoteConversationFlags(activeConversation, { unread: true });
+  else saveUnreadConversations();
   updateMarkUnreadButton();
   filterConversations();
 });

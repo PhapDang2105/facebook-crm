@@ -1,0 +1,35 @@
+# Caddy đứng trước CRM: tự xin chứng chỉ HTTPS và chặn truy cập bằng mật khẩu.
+#
+# Thay <DOMAIN> bằng tên miền thật và <BCRYPT_HASH> bằng chuỗi băm sinh ra từ:
+#   caddy hash-password
+#
+# Meta gọi webhook bằng máy, không đăng nhập được, nên đường dẫn webhook phải
+# đi thẳng. Mọi đường dẫn còn lại đều yêu cầu Basic Auth vì ứng dụng CRM chưa
+# có cơ chế đăng nhập của riêng nó.
+
+<DOMAIN> {
+	encode zstd gzip
+
+	# Chỉ webhook của Meta được vào tự do; chính nó tự xác thực bằng chữ ký
+	# X-Hub-Signature-256 nên không cần thêm lớp mật khẩu.
+	@webhook path /webhooks/facebook
+	handle @webhook {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Toàn bộ giao diện và API quản trị nằm sau mật khẩu.
+	handle {
+		basic_auth {
+			<USERNAME> <BCRYPT_HASH>
+		}
+		reverse_proxy 127.0.0.1:8080 {
+			# Server-Sent Events cho hộp thư thời gian thực: không được đệm.
+			flush_interval -1
+		}
+	}
+
+	log {
+		output file /var/log/caddy/crm-access.log
+		format json
+	}
+}

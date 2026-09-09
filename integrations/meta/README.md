@@ -1,23 +1,131 @@
-# Kết nối Facebook Page
+# Kết nối Facebook Messenger
 
-Trang **Cài đặt → Kết nối kênh** hỗ trợ nhiều Facebook Page. Mã truy cập Page chỉ được lưu ở máy chủ và được mã hóa bằng App Secret; trình duyệt không lưu mã truy cập.
+CRM nhận và trả lời tin nhắn Messenger của Facebook Page thông qua một ứng dụng Meta riêng.
 
-## Cấu hình Meta App
+Luồng đầy đủ gồm bốn phần: cấu hình ứng dụng → đăng nhập chọn Page (OAuth) → đăng ký webhook → nhận/gửi tin nhắn.
 
-Thiết lập các biến môi trường trước khi chạy `run.ps1`:
+## 0. Vì sao CRM cần ứng dụng Meta riêng
 
-- `META_APP_ID`: App ID của ứng dụng Meta.
-- `META_APP_SECRET`: App Secret của ứng dụng Meta.
-- `META_GRAPH_VERSION`: phiên bản Graph API mà ứng dụng đang dùng, ví dụ `vXX.X`.
-- `META_REDIRECT_URI`: không bắt buộc khi chạy ở cổng 8080; mặc định là `http://localhost:8080/api/channels/meta/callback`.
+Đã có một ứng dụng Meta khác trỏ webhook đối tượng Page về hệ thống tự động hóa nội bộ, đăng ký các trường `feed`, `messages`, `messaging_postbacks`.
 
-Redirect URI trong Meta App phải khớp chính xác với `META_REDIRECT_URI`. Ứng dụng yêu cầu các quyền `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata` và `pages_messaging`.
+Mỗi ứng dụng Meta chỉ có **một** Callback URL cho mỗi đối tượng, nên không thể dùng chung app đó cho CRM mà không cắt luồng đang chạy. Ngược lại, **một Facebook Page có thể đăng ký nhiều ứng dụng cùng lúc**, mỗi ứng dụng nhận webhook về endpoint riêng. Vì vậy CRM dùng app riêng, hệ thống cũ giữ nguyên app cũ, hai bên không đụng nhau.
 
-Sau khi cấu hình, khởi động lại CRM, mở **Cài đặt**, chọn **Kết nối Facebook Page**, đăng nhập Facebook và chọn các Page cần sử dụng.
+Khi tạo app mới cần lưu ý:
+
+- Thêm sản phẩm **Messenger**, **Webhooks** và **Facebook Login for Business**.
+- Nâng `public_profile` lên quyền truy cập nâng cao, nếu không Facebook Login sẽ báo lỗi.
+- Điền **URI chuyển hướng OAuth hợp lệ**; app bật "Chế độ sử dụng nghiêm ngặt cho URI chuyển hướng" nên URI phải khớp từng ký tự.
+
+## 1. Cấu hình ứng dụng
+
+Sao chép `.env.example` thành `.env` ở thư mục gốc rồi điền:
+
+| Biến | Ý nghĩa | Lấy ở đâu |
+| --- | --- | --- |
+| `META_APP_ID` | App ID | App Dashboard |
+| `META_APP_SECRET` | App Secret | App settings → Basic → App secret |
+| `META_GRAPH_VERSION` | Phiên bản Graph API, ví dụ `v21.0` | App settings → Advanced → API version |
+| `META_VERIFY_TOKEN` | Chuỗi bí mật tự đặt để Meta xác minh webhook | Tự sinh, phải khớp với ô Verify token |
+| `PUBLIC_BASE_URL` | Domain HTTPS công khai trỏ về máy chủ CRM | Hạ tầng của bạn |
+| `HOST` | Đặt `0.0.0.0` khi chạy sau reverse proxy | — |
+
+Giá trị đã chốt cho dự án này:
+
+- Domain CRM: `https://fb.giotnang.vn`
+- Callback URL webhook: `https://fb.giotnang.vn/webhooks/facebook`
+- OAuth Redirect URI: `https://fb.giotnang.vn/api/channels/meta/callback`
+- `META_GRAPH_VERSION=v26.0`
+
+## Hạ tầng
+
+CRM chạy trên một máy ảo Google Compute Engine đặt tại Singapore (`e2-small`, 2 GB RAM, Debian 13), dùng IP tĩnh và mở sẵn HTTP/HTTPS. Tên miền trỏ về máy đó bằng bản ghi A quản lý tại TenTen.
+
+Số hiệu cụ thể — IP, project ID, mã billing account, tên tài nguyên — **không lưu trong repo** vì đây là repository công khai. Chúng nằm trong ghi chú vận hành nội bộ và trong bảng điều khiển Google Cloud.
+
+Chi phí máy chủ khoảng 16 USD/tháng. Có ngân sách theo dõi kèm cảnh báo email tại 25% / 50% / 90% / 100%; ngân sách cố ý **không** trừ Promotional credits, vì nếu trừ thì số liệu luôn bằng 0 và cảnh báo không bao giờ kích hoạt.
+
+Khởi động lại CRM sau khi sửa `.env`. Khi chạy, máy chủ in ra Callback URL cần dùng và liệt kê biến còn thiếu:
+
+```powershell
+.\run.ps1
+```
+
+Trang **Cài đặt → Kênh** cũng hiển thị Callback URL và trạng thái webhook.
+
+## 2. Quyền và Redirect URI trong Meta App
+
+- Sản phẩm cần bật: **Messenger** và **Facebook Login for Business**.
+- Redirect URI hợp lệ (Facebook Login → Settings → Valid OAuth Redirect URIs):
+  `${PUBLIC_BASE_URL}/api/channels/meta/callback`
+- Quyền ứng dụng yêu cầu: `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata`, `pages_messaging`.
+
+Muốn dùng với Page của người khác thì các quyền trên phải qua **App Review**. Trong lúc phát triển, tài khoản có vai trò Admin/Developer/Tester của ứng dụng vẫn dùng được ngay.
+
+## 3. Đăng ký webhook
+
+Vào **Meta App → Webhooks → Page** rồi nhấn *Subscribe to this object*:
+
+- **Callback URL**: `${PUBLIC_BASE_URL}/webhooks/facebook`
+- **Verify Token**: đúng giá trị `META_VERIFY_TOKEN`
+- **Trường cần đăng ký**: `messages`, `message_echoes`, `messaging_postbacks`, `messaging_optins`, `messaging_reactions`, `message_deliveries`, `message_reads`
+
+Meta gọi `GET` tới Callback URL để xác minh; CRM trả lại `hub.challenge` khi Verify Token khớp. Mọi `POST` sau đó đều được kiểm tra chữ ký `X-Hub-Signature-256` bằng App Secret — sai chữ ký thì bị từ chối với mã 401.
+
+Việc đăng ký diễn ra ở **hai cấp** và cần cả hai:
+
+1. **Cấp ứng dụng** — danh sách trường ở màn hình Webhooks này. Trường nào chưa bật ở đây thì Page sẽ không bao giờ gửi, kể cả khi đã đăng ký ở bước 2.
+2. **Cấp Page ↔ ứng dụng** — CRM tự gọi `POST /{page-id}/subscribed_apps` khi bạn kết nối Page ở màn hình Cài đặt.
+
+`message_echoes` cho phép CRM thấy cả những tin nhân viên trả lời trực tiếp trong hộp thư của Facebook, và bổ sung URL do Meta lưu trữ cho tệp mà CRM đã gửi lên.
+
+## 4. Kết nối Page và đồng bộ
+
+Mở **Cài đặt → Kênh → Kết nối Facebook**, đăng nhập rồi chọn các Page cần dùng. Với mỗi Page, CRM sẽ:
+
+1. Lưu Page Access Token đã mã hóa AES-256-GCM bằng khóa dẫn xuất từ App Secret.
+2. Gọi `POST /{page-id}/subscribed_apps` để Page bắt đầu đẩy webhook về ứng dụng.
+3. Nhập sẵn tối đa 25 hội thoại gần nhất qua `GET /{page-id}/conversations` để hộp thư không trống.
+
+Nút **Làm mới** kiểm tra lại tên Page, ảnh đại diện và trạng thái đăng ký webhook.
+
+## 5. Nhận và gửi tin nhắn
+
+- Tin nhắn đến đi qua webhook, được lưu vào `data/processed/meta-conversations.json` và đẩy tới trình duyệt qua Server-Sent Events (`GET /api/messaging/stream`), nên hộp thư cập nhật ngay mà không cần tải lại trang.
+- Tin nhắn gửi đi dùng Send API `POST /{page-id}/messages`. Tệp đính kèm được tải lên bằng `multipart/form-data`; chú thích đi kèm tệp được gửi thành một tin nhắn riêng vì Send API không cho gộp.
+- Mở một hội thoại sẽ gọi `sender_action: mark_seen` để đánh dấu đã xem trên Facebook.
+- Meta chỉ cho trả lời trong **24 giờ** kể từ tin nhắn gần nhất của khách. API trả về `replyWindowEndsAt` và `canReply` cho từng hội thoại; quá hạn thì Send API báo lỗi và tin nhắn hiện trạng thái gửi hỏng.
+
+## API nội bộ
+
+| Endpoint | Mô tả |
+| --- | --- |
+| `GET /webhooks/facebook` | Xác minh đăng ký webhook |
+| `POST /webhooks/facebook` | Nhận sự kiện, bắt buộc chữ ký hợp lệ |
+| `GET /api/messaging/conversations?channelId=` | Danh sách hội thoại của một Page |
+| `GET /api/messaging/conversations/{id}/messages` | Lịch sử tin nhắn |
+| `POST /api/messaging/conversations/{id}/messages` | Gửi tin nhắn hoặc tệp |
+| `POST /api/messaging/conversations/{id}/read` | Đánh dấu đã đọc |
+| `PATCH /api/messaging/conversations/{id}/flags` | Cập nhật chưa đọc / tắt thông báo / nhãn |
+| `POST /api/messaging/sync` | Nhập lại hội thoại từ Graph API |
+| `GET /api/messaging/stream` | Luồng SSE cho cập nhật thời gian thực |
 
 ## Bảo mật và vận hành
 
 - Không ghi App Secret hoặc Page Access Token vào mã nguồn, HTML hay localStorage.
-- Tệp `data/processed/meta-channels.json` chứa mã truy cập đã mã hóa và đã được loại khỏi Git.
-- Nếu App Secret thay đổi, cần ngắt và kết nối lại các Page vì mã truy cập cũ không thể giải mã bằng khóa mới.
-- Việc nhận tin nhắn thực tế còn yêu cầu cấu hình Webhooks Messenger và URL HTTPS công khai trong Meta App.
+- `data/processed/meta-channels.json` và `data/processed/meta-conversations.json` chứa dữ liệu khách hàng và mã truy cập đã mã hóa; cả hai đã bị loại khỏi Git.
+- Nếu App Secret thay đổi, phải ngắt và kết nối lại các Page vì mã truy cập cũ không giải mã được bằng khóa mới.
+- Mỗi hội thoại chỉ giữ 500 tin nhắn gần nhất trong tệp JSON.
+- Webhook trả `200` trước rồi mới xử lý, tránh việc Meta gửi lại do phản hồi chậm. Tin nhắn trùng `mid` không bị lưu hai lần.
+
+## Kiểm thử
+
+```powershell
+.\tools\node\node.exe .\tests\meta-webhook.test.mjs
+.\tools\node\node.exe .\tests\integration\meta-webhook.integration.mjs
+```
+
+Bài kiểm thử tích hợp tự khởi động CRM ở cổng 8123 với cấu hình giả, gửi webhook có chữ ký thật rồi kiểm tra hội thoại được tạo đúng. Nó ghi vào thư mục tạm qua biến `META_CONVERSATIONS_PATH` nên không đụng tới dữ liệu thật. Truyền số cổng khác nếu 8123 đang bận:
+
+```powershell
+.\tools\node\node.exe .\tests\integration\meta-webhook.integration.mjs 8199
+```

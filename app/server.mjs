@@ -1,28 +1,40 @@
 import http from 'node:http';
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import AdmZip from 'adm-zip';
 import { createLead, getSegments, updateLead } from './domain.mjs';
 import { buildExportRows } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
+import {
+  isMetaConfigured,
+  isWebhookConfigured,
+  metaConfig,
+  missingMetaConfiguration,
+  missingWebhookConfiguration,
+  projectRoot,
+  serverConfig
+} from './config.mjs';
+import { encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
+import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
+import { processWebhookPayload, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
+import { sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
+import { subscribeToMessagingEvents } from './message-events.mjs';
+import {
+  getConversation,
+  listConversations,
+  listMessages,
+  publicConversation,
+  setConversationFlags,
+  updateMessagingStore
+} from './messaging-store.mjs';
 
-const appDirectory = path.dirname(fileURLToPath(import.meta.url));
-const root = path.dirname(appDirectory);
+const root = projectRoot;
 const webRoot = path.join(root, 'web');
 const storePath = path.join(root, 'data', 'processed', 'crm-store.json');
 const seedPath = path.join(root, 'database', 'seeds', 'demo-store.json');
 const exportTemplatePath = path.join(root, 'assets', 'templates', 'facebook-order-export.xlsx');
-const channelStorePath = path.join(root, 'data', 'processed', 'meta-channels.json');
-const port = Number(process.argv[2] || 8080);
-const metaConfig = {
-  appId: process.env.META_APP_ID || '',
-  appSecret: process.env.META_APP_SECRET || '',
-  graphVersion: process.env.META_GRAPH_VERSION || '',
-  redirectUri: process.env.META_REDIRECT_URI || `http://localhost:${port}/api/channels/meta/callback`
-};
 const metaOauthStates = new Map();
 const metaPendingPages = new Map();
 
@@ -41,74 +53,10 @@ async function writeStore(store) {
   await rename(temporaryPath, storePath);
 }
 
-function isMetaConfigured() {
-  return Boolean(metaConfig.appId && metaConfig.appSecret && metaConfig.graphVersion && metaConfig.redirectUri);
-}
-
-async function readChannelStore() {
-  try {
-    const value = JSON.parse(await readFile(channelStorePath, 'utf8'));
-    return Array.isArray(value.items) ? value : { items: [] };
-  } catch {
-    return { items: [] };
-  }
-}
-
-async function writeChannelStore(store) {
-  await mkdir(path.dirname(channelStorePath), { recursive: true });
-  const temporaryPath = `${channelStorePath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-  await rename(temporaryPath, channelStorePath);
-}
-
-function tokenKey() {
-  return createHash('sha256').update(metaConfig.appSecret).digest();
-}
-
-function encryptToken(token) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', tokenKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
-  return { iv: iv.toString('base64'), value: encrypted.toString('base64'), tag: cipher.getAuthTag().toString('base64') };
-}
-
-function decryptToken(encrypted) {
-  const decipher = createDecipheriv('aes-256-gcm', tokenKey(), Buffer.from(encrypted.iv, 'base64'));
-  decipher.setAuthTag(Buffer.from(encrypted.tag, 'base64'));
-  return Buffer.concat([decipher.update(Buffer.from(encrypted.value, 'base64')), decipher.final()]).toString('utf8');
-}
-
-function publicChannel(channel) {
-  return {
-    id: channel.id,
-    name: channel.name,
-    picture: channel.picture || '',
-    platform: 'facebook',
-    status: channel.status || 'connected',
-    subscribed: Boolean(channel.subscribed),
-    connectedAt: channel.connectedAt,
-    checkedAt: channel.checkedAt || channel.connectedAt
-  };
-}
-
 function cleanExpiredMetaSessions() {
   const now = Date.now();
   for (const [key, expiresAt] of metaOauthStates) if (expiresAt < now) metaOauthStates.delete(key);
   for (const [key, pending] of metaPendingPages) if (pending.expiresAt < now) metaPendingPages.delete(key);
-}
-
-async function metaRequest(pathname, options = {}) {
-  const endpoint = new URL(`https://graph.facebook.com/${metaConfig.graphVersion}/${pathname.replace(/^\//, '')}`);
-  const method = options.method || 'GET';
-  if (options.query) Object.entries(options.query).forEach(([key, value]) => endpoint.searchParams.set(key, value));
-  const response = await fetch(endpoint, {
-    method,
-    headers: options.body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
-    body: options.body ? new URLSearchParams(options.body) : undefined
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.error) throw new Error(payload.error?.message || `Meta trả về lỗi ${response.status}.`);
-  return payload;
 }
 
 function redirect(response, location) {
@@ -251,10 +199,27 @@ function removeDataRowBackgrounds(workbook, worksheetPath) {
   return { stylesXml, worksheetXml };
 }
 
-async function readBody(request) {
+async function readBody(request, maximumBytes = 32 * 1024 * 1024) {
   const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
+  let totalBytes = 0;
+  for await (const chunk of request) {
+    totalBytes += chunk.length;
+    if (totalBytes > maximumBytes) throw new Error('Nội dung gửi lên vượt quá giới hạn cho phép.');
+    chunks.push(chunk);
+  }
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+}
+
+/** Meta signs the exact bytes it sent, so the webhook body must stay unparsed. */
+async function readRawBody(request, maximumBytes = 1024 * 1024) {
+  const chunks = [];
+  let totalBytes = 0;
+  for await (const chunk of request) {
+    totalBytes += chunk.length;
+    if (totalBytes > maximumBytes) throw new Error('Webhook payload vượt quá giới hạn cho phép.');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readBinaryBody(request, maximumBytes = 25 * 1024 * 1024) {
@@ -304,24 +269,18 @@ const server = http.createServer(async (request, response) => {
       const store = await readChannelStore();
       return sendJson(response, 200, {
         metaConfigured: isMetaConfigured(),
-        missingConfiguration: isMetaConfigured() ? [] : [
-          !metaConfig.appId && 'META_APP_ID',
-          !metaConfig.appSecret && 'META_APP_SECRET',
-          !metaConfig.graphVersion && 'META_GRAPH_VERSION'
-        ].filter(Boolean),
+        missingConfiguration: missingMetaConfiguration(),
+        webhookConfigured: isWebhookConfigured(),
+        missingWebhookConfiguration: missingWebhookConfiguration(),
+        webhookUrl: metaConfig.webhookUrl,
         items: store.items.map(publicChannel)
       });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels/meta/connect') {
       if (!isMetaConfigured()) return sendJson(response, 503, {
         error: 'Chưa cấu hình Meta App để kết nối Facebook Page.',
-        missingConfiguration: [
-          !metaConfig.appId && 'META_APP_ID',
-          !metaConfig.appSecret && 'META_APP_SECRET',
-          !metaConfig.graphVersion && 'META_GRAPH_VERSION'
-        ].filter(Boolean)
+        missingConfiguration: missingMetaConfiguration()
       });
-      const store = await readChannelStore();
       cleanExpiredMetaSessions();
       const state = randomUUID();
       metaOauthStates.set(state, Date.now() + 10 * 60 * 1000);
@@ -393,14 +352,12 @@ const server = http.createServer(async (request, response) => {
       const connected = [];
       for (const page of selectedPages) {
         let subscribed = false;
+        let subscriptionError = '';
         try {
-          await metaRequest(`${page.id}/subscribed_apps`, { method: 'POST', body: {
-            subscribed_fields: 'messages,messaging_postbacks,messaging_optins,message_deliveries,message_reads',
-            access_token: page.accessToken
-          } });
+          await subscribePageToApp(page.id, page.accessToken);
           subscribed = true;
-        } catch {
-          subscribed = false;
+        } catch (error) {
+          subscriptionError = error.message;
         }
         connected.push({
           id: page.id,
@@ -408,6 +365,7 @@ const server = http.createServer(async (request, response) => {
           picture: page.picture,
           status: 'connected',
           subscribed,
+          subscriptionError,
           token: encryptToken(page.accessToken),
           connectedAt: store.items.find(item => item.id === page.id)?.connectedAt || now,
           checkedAt: now
@@ -416,6 +374,14 @@ const server = http.createServer(async (request, response) => {
       store.items = [...retained, ...connected];
       await writeChannelStore(store);
       metaPendingPages.delete(payload.ticket);
+      // Import existing threads so the inbox is populated before the first webhook arrives.
+      for (const page of connected) {
+        try {
+          await syncPageConversations(page.id);
+          page.syncedAt = new Date().toISOString();
+        } catch { /* The Page stays connected even when the first import fails. */ }
+      }
+      await writeChannelStore(store);
       return sendJson(response, 200, { items: store.items.map(publicChannel) });
     }
     const channelMatch = url.pathname.match(/^\/api\/channels\/facebook\/([^/]+)$/);
@@ -425,7 +391,7 @@ const server = http.createServer(async (request, response) => {
       const channel = store.items.find(item => item.id === pageId);
       if (!channel) return sendJson(response, 404, { error: 'Không tìm thấy Facebook Page đã kết nối.' });
       try {
-        await metaRequest(`${pageId}/subscribed_apps`, { method: 'DELETE', body: { access_token: decryptToken(channel.token) } });
+        await unsubscribePageFromApp(pageId, await getPageAccessToken(pageId));
       } catch { /* The local connection can still be removed if Meta is unavailable. */ }
       store.items = store.items.filter(item => item.id !== pageId);
       await writeChannelStore(store);
@@ -438,16 +404,119 @@ const server = http.createServer(async (request, response) => {
       const channel = store.items.find(item => item.id === pageId);
       if (!channel) return sendJson(response, 404, { error: 'Không tìm thấy Facebook Page đã kết nối.' });
       try {
-        const page = await metaRequest(pageId, { query: { fields: 'id,name,picture{url}', access_token: decryptToken(channel.token) } });
+        const pageAccessToken = await getPageAccessToken(pageId);
+        const page = await metaRequest(pageId, { query: { fields: 'id,name,picture{url}', access_token: pageAccessToken } });
         channel.name = page.name || channel.name;
         channel.picture = page.picture?.data?.url || channel.picture;
         channel.status = 'connected';
-      } catch {
+        const subscription = await fetchPageSubscription(pageId, pageAccessToken);
+        channel.subscribed = subscription.subscribed;
+        channel.subscriptionError = subscription.subscribed ? '' : 'Page chưa đăng ký nhận webhook của ứng dụng.';
+      } catch (error) {
         channel.status = 'needs_attention';
+        channel.subscriptionError = error.message;
       }
       channel.checkedAt = new Date().toISOString();
       await writeChannelStore(store);
       return sendJson(response, 200, publicChannel(channel));
+    }
+    if (request.method === 'GET' && url.pathname === metaConfig.webhookPath) {
+      const challenge = verifyWebhookSubscription(url.searchParams, metaConfig.verifyToken);
+      if (challenge === null) {
+        response.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return response.end('Forbidden');
+      }
+      response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return response.end(challenge);
+    }
+    if (request.method === 'POST' && url.pathname === metaConfig.webhookPath) {
+      const rawBody = await readRawBody(request);
+      if (!verifyWebhookSignature(rawBody, request.headers['x-hub-signature-256'], metaConfig.appSecret)) {
+        response.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return response.end('Invalid signature');
+      }
+      // Meta retries whenever the reply is slow, so acknowledge first and store afterwards.
+      response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end('EVENT_RECEIVED');
+      try {
+        await processWebhookPayload(JSON.parse(rawBody.toString('utf8')));
+      } catch (error) {
+        console.error('Webhook processing failed:', error.message);
+      }
+      return undefined;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/messaging/conversations') {
+      const items = await listConversations(url.searchParams.get('channelId') || '');
+      return sendJson(response, 200, { items });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/messaging/sync') {
+      const payload = await readBody(request);
+      const pageId = String(payload.channelId || '');
+      if (!pageId) return sendJson(response, 400, { error: 'Thiếu channelId của Facebook Page cần đồng bộ.' });
+      const summary = await syncPageConversations(pageId, { limit: Number(payload.limit) || 25 });
+      return sendJson(response, 200, { ...summary, items: await listConversations(pageId) });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/messaging/stream') {
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-store',
+        Connection: 'keep-alive'
+      });
+      response.write(': connected\n\n');
+      const unsubscribe = subscribeToMessagingEvents(event => response.write(`data: ${JSON.stringify(event)}\n\n`));
+      const heartbeat = setInterval(() => response.write(': keep-alive\n\n'), 25000);
+      request.on('close', () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
+      return undefined;
+    }
+    const conversationMessagesMatch = url.pathname.match(/^\/api\/messaging\/conversations\/([^/]+)\/messages$/);
+    if (conversationMessagesMatch) {
+      const id = decodeURIComponent(conversationMessagesMatch[1]);
+      const conversation = await getConversation(id);
+      if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+      if (request.method === 'GET') {
+        return sendJson(response, 200, {
+          conversation: publicConversation(conversation),
+          items: await listMessages(id, Number(url.searchParams.get('limit')) || 100)
+        });
+      }
+      if (request.method === 'POST') {
+        const payload = await readBody(request);
+        const text = String(payload.text || '').trim();
+        const attachment = payload.attachment?.dataUrl ? payload.attachment : null;
+        if (!text && !attachment) return sendJson(response, 400, { error: 'Nội dung tin nhắn không được để trống.' });
+        try {
+          const sent = await sendConversationMessage(conversation, { text, attachment });
+          return sendJson(response, 200, sent);
+        } catch (error) {
+          return sendJson(response, error.statusCode === 400 ? 400 : 502, { error: error.message });
+        }
+      }
+    }
+    const conversationReadMatch = url.pathname.match(/^\/api\/messaging\/conversations\/([^/]+)\/read$/);
+    if (request.method === 'POST' && conversationReadMatch) {
+      const id = decodeURIComponent(conversationReadMatch[1]);
+      const conversation = await updateMessagingStore(store => setConversationFlags(store, id, { unread: false }));
+      if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+      try {
+        await sendSenderAction({
+          pageId: conversation.pageId,
+          psid: conversation.psid,
+          action: 'mark_seen',
+          pageAccessToken: await getPageAccessToken(conversation.pageId)
+        });
+      } catch { /* Marking the thread seen on Facebook is best effort. */ }
+      return sendJson(response, 200, publicConversation(conversation));
+    }
+    const conversationFlagsMatch = url.pathname.match(/^\/api\/messaging\/conversations\/([^/]+)\/flags$/);
+    if (request.method === 'PATCH' && conversationFlagsMatch) {
+      const id = decodeURIComponent(conversationFlagsMatch[1]);
+      const payload = await readBody(request);
+      const conversation = await updateMessagingStore(store => setConversationFlags(store, id, payload));
+      if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+      return sendJson(response, 200, publicConversation(conversation));
     }
     if (request.method === 'GET' && url.pathname === '/api/dashboard') {
       const { leads } = await readStore();
@@ -498,4 +567,9 @@ const server = http.createServer(async (request, response) => {
   } catch(error) { sendJson(response,400,{error:error.message}); }
 });
 
-server.listen(port, '127.0.0.1', () => console.log(`CRM running at http://localhost:${port}/`));
+server.listen(serverConfig.port, serverConfig.host, () => {
+  console.log(`CRM running at http://${serverConfig.host}:${serverConfig.port}/`);
+  console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);
+  const missing = missingWebhookConfiguration();
+  if (missing.length) console.log(`Webhook chưa sẵn sàng, còn thiếu: ${missing.join(', ')}`);
+});

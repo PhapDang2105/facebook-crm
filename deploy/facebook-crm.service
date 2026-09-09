@@ -1,0 +1,34 @@
+[Unit]
+Description=Facebook CRM
+Documentation=https://github.com/OWNER/REPO
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=crm
+Group=crm
+WorkingDirectory=/opt/facebook-crm
+EnvironmentFile=/opt/facebook-crm/.env
+ExecStart=/usr/bin/node /opt/facebook-crm/app/server.mjs
+Restart=always
+RestartSec=3
+
+# Ứng dụng chỉ nghe trên loopback; Caddy là thứ duy nhất chạm tới nó.
+Environment=HOST=127.0.0.1
+Environment=PORT=8080
+
+# Giới hạn quyền: tiến trình chỉ được ghi vào thư mục dữ liệu của chính nó.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/facebook-crm/data /opt/facebook-crm/logs
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

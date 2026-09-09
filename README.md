@@ -20,6 +20,10 @@ Chạy kiểm thử logic:
 .\tools\node\node.exe .\tests\domain\run-tests.mjs
 ```
 
+## Kết nối Facebook Messenger
+
+Sao chép `.env.example` thành `.env`, điền thông tin ứng dụng Meta rồi khởi động lại. Hướng dẫn đầy đủ về quyền, webhook và cách vận hành nằm trong `integrations/meta/README.md`.
+
 ## GraphCode
 
 GraphCode and a portable Node.js runtime are installed locally under `tools/`; no system-wide installation is required.

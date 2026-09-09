@@ -409,9 +409,21 @@ const server = http.createServer(async (request, response) => {
         channel.name = page.name || channel.name;
         channel.picture = page.picture?.data?.url || channel.picture;
         channel.status = 'connected';
-        const subscription = await fetchPageSubscription(pageId, pageAccessToken);
+        let subscription = await fetchPageSubscription(pageId, pageAccessToken);
+        // Retry the subscription here so a failed connect can be repaired from
+        // the UI instead of forcing the Page to be disconnected and re-added.
+        if (!subscription.subscribed) {
+          try {
+            await subscribePageToApp(pageId, pageAccessToken);
+            subscription = await fetchPageSubscription(pageId, pageAccessToken);
+            channel.subscriptionError = '';
+          } catch (subscribeError) {
+            channel.subscriptionError = subscribeError.message;
+          }
+        } else {
+          channel.subscriptionError = '';
+        }
         channel.subscribed = subscription.subscribed;
-        channel.subscriptionError = subscription.subscribed ? '' : 'Page chưa đăng ký nhận webhook của ứng dụng.';
       } catch (error) {
         channel.status = 'needs_attention';
         channel.subscriptionError = error.message;

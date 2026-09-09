@@ -27,13 +27,19 @@ export async function metaRequest(pathname, options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.error) {
-    const error = new Error(payload.error?.message || `Meta trả về lỗi ${response.status}.`);
+    const error = new Error(shortenMetaError(payload.error?.message) || `Meta trả về lỗi ${response.status}.`);
     error.metaCode = payload.error?.code;
     error.metaSubcode = payload.error?.error_subcode;
     error.statusCode = response.status;
     throw error;
   }
   return payload;
+}
+
+/** Meta lists every accepted value on a bad field, which floods the UI. */
+export function shortenMetaError(message) {
+  const text = String(message || '');
+  return text.replace(/\{[^{}]{80,}\}/g, '{...}');
 }
 
 export function subscribePageToApp(pageId, pageAccessToken) {

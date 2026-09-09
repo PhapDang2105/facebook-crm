@@ -28,18 +28,43 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y ca-certificates curl git gnupg debian-keyring debian-archive-keyring apt-transport-https
 
-echo "==> Cài Node.js 22 LTS"
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt-get install -y nodejs
-node --version
+echo "==> Cài Node.js"
+# Ưu tiên NodeSource để có bản LTS mới. Kho này có thể chưa hỗ trợ bản Debian
+# mới nhất, nên khi hỏng thì quay về gói nodejs của chính Debian.
+if curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs; then
+  echo "    Cài từ NodeSource."
+else
+  echo "    NodeSource không dùng được, chuyển sang kho Debian."
+  rm -f /etc/apt/sources.list.d/nodesource.list
+  apt-get update -y
+  apt-get install -y nodejs npm
+fi
+
+NODE_MAJOR="$(node --version | sed 's/^v\([0-9]*\).*/\1/')"
+echo "    Node $(node --version)"
+if [[ "$NODE_MAJOR" -lt 18 ]]; then
+  echo "Cần Node.js 18 trở lên: mã nguồn dùng fetch, FormData và Blob toàn cục." >&2
+  exit 1
+fi
 
 echo "==> Cài Caddy"
-curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
-  | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
-  > /etc/apt/sources.list.d/caddy-stable.list
-apt-get update -y
-apt-get install -y caddy
+if ! command -v caddy >/dev/null 2>&1; then
+  install -d -m 0755 /usr/share/keyrings
+  if curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+       | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+     && curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+       > /etc/apt/sources.list.d/caddy-stable.list \
+     && apt-get update -y \
+     && apt-get install -y caddy; then
+    echo "    Cài từ kho Cloudsmith."
+  else
+    echo "    Kho Cloudsmith không dùng được, chuyển sang gói của Debian."
+    rm -f /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -y
+    apt-get install -y caddy
+  fi
+fi
+caddy version
 
 echo "==> Tạo người dùng dịch vụ"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"

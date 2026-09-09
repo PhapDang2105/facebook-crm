@@ -23,6 +23,29 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+# Cloud Shell trông giống một máy Debian nhưng là container tạm: không có
+# systemd, không mang IP công khai, và mất sạch khi đóng phiên. Cài ở đó thì
+# script chạy được gần hết rồi mới chết, nên chặn ngay từ đầu.
+if [[ -n "${CLOUD_SHELL:-}" || "$(hostname)" == cs-* || "$(hostname)" == cloudshell* ]]; then
+  cat >&2 <<'EOF'
+Đây là Google Cloud Shell, không phải máy chủ đích.
+
+Cloud Shell không chạy systemd và không giữ /opt sau khi đóng phiên, nên
+cài ở đây là công cốc. Hãy SSH vào VM rồi chạy lại:
+
+  gcloud compute ssh crm-facebook --zone=asia-southeast1-c
+
+Sau khi dấu nhắc đổi thành tên máy ảo thì mới chạy script này.
+EOF
+  exit 1
+fi
+
+if ! [[ -d /run/systemd/system ]]; then
+  echo "Máy này không chạy systemd nên không cài dịch vụ được." >&2
+  echo "Script cần một máy Linux thật, ví dụ VM Compute Engine." >&2
+  exit 1
+fi
+
 echo "==> Cập nhật hệ thống và cài gói nền"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y

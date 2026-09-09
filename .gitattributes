@@ -1,0 +1,18 @@
+# Chuẩn hóa xuống dòng. Dự án phát triển trên Windows nhưng chạy trên Linux.
+
+* text=auto
+
+# Script và tệp cấu hình chạy trên máy chủ Linux bắt buộc dùng LF.
+# Nếu lẫn CRLF, bash báo lỗi khó hiểu kiểu "bad interpreter: /bin/bash^M".
+*.sh text eol=lf
+*.service text eol=lf
+Caddyfile text eol=lf
+
+# Tệp nhị phân: Git không được đụng vào nội dung.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.xlsx binary
+*.lnk binary
+*.exe binary

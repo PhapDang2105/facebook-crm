@@ -1049,8 +1049,8 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .message-actions-menu button:hover,
 .message-actions-menu button:focus-visible { background: rgba(255, 255, 255, .1); outline: none; }
 .message-reaction-picker { position: absolute; z-index: 22; bottom: calc(100% + 6.75px); display: flex; gap: 3.375px; padding: 5.625px; background: #fff; border: 1.125px solid #dfe2e7; border-radius: 1123.875px; box-shadow: 0 7.875px 24.75px rgba(0, 0, 0, .18); }
-.incoming .message-reaction-picker { right: 42.75px; left: auto; }
-.outgoing .message-reaction-picker { right: auto; left: 42.75px; }
+/* Left is set in script so the picker sits over the middle of the bubble. */
+.message-reaction-picker { transform: translateX(-50%); }
 .message-reaction-picker button { display: grid; place-items: center; width: 32.625px; height: 32.625px; padding: 0; background: transparent; border: 0; border-radius: 50%; font-size: 20.25px; cursor: pointer; }
 .message-reaction-picker button:hover { background: #f0f2f5; transform: scale(1.12); }
 .message-reaction { position: absolute; right: -4.5px; bottom: -11.25px; display: grid; place-items: center; min-width: 25.875px; height: 25.875px; padding: 0 3.375px; background: #fff; border: 2.25px solid #fff; border-radius: 1123.875px; box-shadow: 0 1.125px 4.5px rgba(0, 0, 0, .2); font-size: 15.75px; line-height: 1; }

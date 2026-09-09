@@ -2581,7 +2581,22 @@ function openMessageReactionPicker(row) {
     });
     picker.appendChild(button);
   });
+  // The row stretches to 75% of the chat width whatever the bubble size, so
+  // anchoring to its edge threw the picker far from the message. Centre it on
+  // the bubble instead. It cannot live inside the bubble: media bubbles clip
+  // their overflow to keep the rounded corners.
   row.appendChild(picker);
+  const bubble = row.querySelector('.bubble');
+  if (bubble && chatBody) {
+    const bubbleBounds = bubble.getBoundingClientRect();
+    const rowBounds = row.getBoundingClientRect();
+    const chatBounds = chatBody.getBoundingClientRect();
+    const pickerWidth = picker.getBoundingClientRect().width;
+    const centred = bubbleBounds.left + bubbleBounds.width / 2 - rowBounds.left;
+    const smallestLeft = chatBounds.left - rowBounds.left + pickerWidth / 2 + 9;
+    const largestLeft = chatBounds.right - rowBounds.left - pickerWidth / 2 - 9;
+    picker.style.left = `${Math.max(smallestLeft, Math.min(largestLeft, centred))}px`;
+  }
   picker.querySelector('button')?.focus();
 }
 

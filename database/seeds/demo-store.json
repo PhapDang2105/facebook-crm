@@ -1,0 +1,9 @@
+{
+  "leads": [
+    {"id":"demo-001","name":"Nguyễn Minh Anh","phone":"+84901234567","email":"minhanh@example.test","source":"facebook_lead_ads","campaign":"Granola tháng 9","product":"Granola","status":"new","owner":"","value":350000,"tags":["granola"],"createdAt":"2026-09-04T01:20:00Z","updatedAt":"2026-09-04T01:20:00Z"},
+    {"id":"demo-002","name":"Trần Gia Hân","phone":"+84987654321","email":"","source":"messenger","campaign":"Nghệ Lành remarketing","product":"Nghệ Lành","status":"consulting","owner":"Hằng","value":520000,"tags":["remarketing"],"createdAt":"2026-09-03T08:00:00Z","updatedAt":"2026-09-04T02:15:00Z"},
+    {"id":"demo-003","name":"Lê Quốc Bảo","phone":"+84911222333","email":"bao@example.test","source":"website","campaign":"Khách hàng cũ","product":"Combo gia đình","status":"won","owner":"Giang","value":890000,"tags":["customer"],"createdAt":"2026-09-01T03:10:00Z","updatedAt":"2026-09-03T09:30:00Z"}
+  ],
+  "activities": []
+}
+

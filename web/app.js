@@ -1,0 +1,3235 @@
+const sidebarToggle = document.querySelector('#sidebar-toggle');
+const viewNames = ['dashboard', 'messages', 'campaigns', 'orders', 'shipping', 'reports', 'settings'];
+const views = new Map(viewNames.map(name => [name, document.querySelector(`#${name}-view`)]));
+const navItems = [...document.querySelectorAll('.nav[data-view]')];
+const messageSearchInput = document.querySelector('#message-search-input');
+const conversationList = document.querySelector('.conversation-list');
+const conversationEmpty = document.querySelector('#conversation-empty');
+const conversationFilterButtons = [...document.querySelectorAll('[data-message-filter]')];
+const messageChannelTrigger = document.querySelector('#message-channel-trigger');
+const messageChannelLogo = document.querySelector('#message-channel-logo');
+const messageChannelName = document.querySelector('#message-channel-name');
+const messageChannelMenu = document.querySelector('#message-channel-menu');
+const messageLabelFilter = document.querySelector('#message-label-filter');
+const messageLabelMenu = document.querySelector('#message-label-menu');
+const markUnreadButton = document.querySelector('#mark-unread-button');
+const messageComposerInput = document.querySelector('#message-composer-input');
+const messageSendButton = document.querySelector('#message-send-button');
+const messageReplyPreview = document.querySelector('#message-reply-preview');
+const messageReplyTitle = document.querySelector('#message-reply-title');
+const messageReplyText = document.querySelector('#message-reply-text');
+const messageReplyClose = document.querySelector('#message-reply-close');
+const messageImageInput = document.querySelector('#message-image-input');
+const stickerButton = document.querySelector('#sticker-button');
+const stickerPicker = document.querySelector('#sticker-picker');
+const emojiButton = document.querySelector('#emoji-button');
+const emojiPicker = document.querySelector('#emoji-picker');
+const composerPreview = document.querySelector('#composer-preview');
+const composerPreviewContent = document.querySelector('#composer-preview-content');
+const composerPreviewRemove = document.querySelector('#composer-preview-remove');
+const composerStatus = document.querySelector('#composer-status');
+const audioRecordButton = document.querySelector('#audio-record-button');
+const audioRecording = document.querySelector('#audio-recording');
+const audioRecordingTime = document.querySelector('#audio-recording-time');
+const audioRecordingCancel = document.querySelector('#audio-recording-cancel');
+const audioRecordingStop = document.querySelector('#audio-recording-stop');
+const chatBody = document.querySelector('.chat-body');
+const imageLightbox = document.querySelector('#image-lightbox');
+const imageLightboxContent = document.querySelector('#image-lightbox-content');
+const imageLightboxDownload = document.querySelector('#image-lightbox-download');
+const imageLightboxShare = document.querySelector('#image-lightbox-share');
+const imageLightboxPrev = document.querySelector('#image-lightbox-prev');
+const imageLightboxNext = document.querySelector('#image-lightbox-next');
+const imageLightboxThumbnails = document.querySelector('#image-lightbox-thumbnails');
+const imageLightboxZoom = document.querySelector('#image-lightbox-zoom');
+const chatHeadAvatar = document.querySelector('.chat-head > .avatar');
+const chatHeadName = document.querySelector('.chat-head > div:not(.chat-actions) strong');
+const chatHeadMeta = document.querySelector('#chat-head-meta');
+const chatHeadChannelLogo = document.querySelector('#chat-head-channel-logo');
+const chatHeadChatTab = document.querySelector('#chat-head-chat-tab');
+const chatHeadFileTab = document.querySelector('#chat-head-file-tab');
+const chatHeadPinnedTab = document.querySelector('#chat-head-pinned-tab');
+const chatHeadDocsTab = document.querySelector('#chat-head-docs-tab');
+const chatPinnedPanel = document.querySelector('#chat-pinned-panel');
+const chatPinnedSearch = document.querySelector('#chat-pinned-search');
+const chatPinnedCount = document.querySelector('#chat-pinned-count');
+const chatPinnedResults = document.querySelector('#chat-pinned-results');
+const chatPinnedClose = document.querySelector('#chat-pinned-close');
+const pinnedBanner = document.querySelector('#pinned-banner');
+const messageDocumentInput = document.querySelector('#message-document-input');
+const chatHeadAdd = document.querySelector('#chat-head-add');
+const composerArea = document.querySelector('.composer-area');
+const conversationSearchButton = document.querySelector('#conversation-search-button');
+const conversationMenu = document.querySelector('#conversation-menu');
+const contactInfoButton = document.querySelector('#contact-info-button');
+const chatSearchBar = document.querySelector('#chat-search-bar');
+const chatSearchInput = document.querySelector('#chat-search-input');
+const chatSearchCount = document.querySelector('#chat-search-count');
+const chatSearchClose = document.querySelector('#chat-search-close');
+const chatSearchSender = document.querySelector('#chat-search-sender');
+const chatSearchDate = document.querySelector('#chat-search-date');
+const chatSearchResults = document.querySelector('#chat-search-results');
+const contactPanelContent = document.querySelector('#contact-panel-content');
+const contactProfileAvatar = document.querySelector('.contact-profile .avatar');
+const contactProfileName = document.querySelector('.contact-profile strong');
+const contactProfileType = document.querySelector('.contact-profile small');
+const contactSections = [...document.querySelectorAll('.contact-panel .contact-section')];
+const contactDetails = [...(contactSections[0]?.querySelectorAll('p') || [])];
+const contactOrderValues = [...(contactSections[2]?.querySelectorAll('.order-row strong') || [])];
+const topbarUserAvatar = document.querySelector('#topbar-user-avatar');
+const topbarUserName = document.querySelector('#topbar-user-name');
+const settingsForm = document.querySelector('#settings-form');
+const settingsDisplayName = document.querySelector('#settings-display-name');
+const settingsSendEnter = document.querySelector('#settings-send-enter');
+const settingsShowContact = document.querySelector('#settings-show-contact');
+const settingsCollapseSidebar = document.querySelector('#settings-collapse-sidebar');
+const settingsStatus = document.querySelector('#settings-status');
+const facebookConnectButton = document.querySelector('#facebook-connect-button');
+const zaloConnectButton = document.querySelector('#zalo-connect-button');
+const facebookChannelList = document.querySelector('#facebook-channel-list');
+const facebookPageDialog = document.querySelector('#facebook-page-dialog');
+const facebookPageOptions = document.querySelector('#facebook-page-options');
+const facebookPageDialogStatus = document.querySelector('#facebook-page-dialog-status');
+const facebookPageConfirm = document.querySelector('#facebook-page-confirm');
+const appSettingsKey = 'crm-app-settings';
+const savedChatMessagesKey = 'crm-chat-messages';
+const chatMessageActionsKey = 'crm-chat-message-actions';
+const chatPinnedMessagesKey = 'crm-chat-pinned-messages';
+const chatMessageReactionsKey = 'crm-chat-message-reactions';
+const chatTimeBreakMs = 15 * 60 * 1000;
+const unreadConversationsKey = 'crm-unread-conversations';
+const mutedConversationsKey = 'crm-muted-conversations';
+let currentConversationFilter = 'all';
+let currentMessageLabel = 'all';
+let currentMessageChannelId = 'local-facebook';
+let currentChatHeadView = 'chat';
+let messageChannels = [];
+let appSettings = loadAppSettings();
+let pendingAttachment = null;
+let audioRecorder = null;
+let audioStream = null;
+let audioChunks = [];
+let audioRecordingStartedAt = 0;
+let audioRecordingTimer = null;
+let discardAudioRecording = false;
+let composerStatusTimer = null;
+let lightboxImages = [];
+let lightboxIndex = 0;
+let lightboxZoom = 1;
+let messageTimeTooltip = null;
+let messageTimeTooltipRow = null;
+let messageTimeTooltipFrame = 0;
+let conversationMenuTarget = null;
+let conversationSearchMatches = [];
+let conversationSearchIndex = -1;
+
+const conversationProfiles = {
+  'Lan Anh': {
+    status: 'Đang hoạt động',
+    email: 'lananh@example.com',
+    phone: '+84 912 345 678',
+    order: ['#GN-240901', 'Granola tháng 9', '1', 'Đã mua', '+84 912 345 678', '12 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh', '890.000 đ'],
+    messages: [
+      { direction: 'incoming', text: 'Chào shop, mình muốn hỏi về sản phẩm Granola tháng 9 ạ.' },
+      { direction: 'outgoing', text: 'Chào Lan Anh, mình hỗ trợ bạn ngay nhé.' },
+      { direction: 'incoming', text: 'Sản phẩm này còn hàng không shop?' }
+    ]
+  }
+};
+
+getConversationItems().forEach(ensureConversationMetadata);
+const orderNav = document.querySelector('.nav[data-view="orders"]');
+const orderStageButtons = [...document.querySelectorAll('[data-order-stage]')];
+const settingsNav = document.querySelector('.nav[data-view="settings"]');
+const settingsSectionButtons = [...document.querySelectorAll('[data-settings-section]')];
+const orderPanels = new Map([...document.querySelectorAll('[data-order-panel]')].map(panel => [panel.dataset.orderPanel, panel]));
+const orderImport = document.querySelector('#order-import');
+const orderSearch = document.querySelector('#order-search');
+const orderFilter = document.querySelector('#order-filter');
+const orderHistoryButton = document.querySelector('#order-history-button');
+const orderHistoryPanel = document.querySelector('#order-history-panel');
+const orderExport = document.querySelector('#order-export');
+let orderData = { headers: [], rows: [] };
+let orderImportHistory = [];
+const hiddenPreviewColumns = new Set(['ma don hang', 'phuong xa', 'quan huyen', 'tinh thanh pho', 'ma mau ma']);
+
+try {
+  const savedOrderData = JSON.parse(localStorage.getItem('crm-orders') || 'null');
+  if (savedOrderData && Array.isArray(savedOrderData.headers) && Array.isArray(savedOrderData.rows)) orderData = savedOrderData;
+} catch {
+  localStorage.removeItem('crm-orders');
+}
+
+try {
+  const savedImportHistory = JSON.parse(localStorage.getItem('crm-order-import-history') || '[]');
+  if (Array.isArray(savedImportHistory)) orderImportHistory = savedImportHistory;
+} catch {
+  localStorage.removeItem('crm-order-import-history');
+}
+
+function showView(name) {
+  views.forEach((view, viewName) => view.classList.toggle('hidden', viewName !== name));
+  navItems.forEach(item => item.classList.toggle('active', item.dataset.view === name));
+  orderNav.setAttribute('aria-expanded', String(name === 'orders'));
+  settingsNav?.setAttribute('aria-expanded', String(name === 'settings'));
+  if (window.location.hash !== `#${name}`) window.location.hash = name;
+}
+
+function loadAppSettings() {
+  const defaults = {
+    displayName: 'Huy Facebook',
+    sendWithEnter: true,
+    showContactPanel: true,
+    collapseSidebar: localStorage.getItem('crm-sidebar-collapsed') === 'true'
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(appSettingsKey) || '{}');
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return defaults;
+    return {
+      displayName: typeof saved.displayName === 'string' && saved.displayName.trim() ? saved.displayName.trim() : defaults.displayName,
+      sendWithEnter: typeof saved.sendWithEnter === 'boolean' ? saved.sendWithEnter : defaults.sendWithEnter,
+      showContactPanel: typeof saved.showContactPanel === 'boolean' ? saved.showContactPanel : defaults.showContactPanel,
+      collapseSidebar: typeof saved.collapseSidebar === 'boolean' ? saved.collapseSidebar : defaults.collapseSidebar
+    };
+  } catch {
+    localStorage.removeItem(appSettingsKey);
+    return defaults;
+  }
+}
+
+function saveAppSettings() {
+  localStorage.setItem(appSettingsKey, JSON.stringify(appSettings));
+}
+
+function applyAppSettings() {
+  const displayName = appSettings.displayName || 'Huy Facebook';
+  if (topbarUserName) topbarUserName.textContent = displayName;
+  if (topbarUserAvatar) topbarUserAvatar.textContent = displayName.trim().charAt(0).toUpperCase() || 'H';
+  document.body.classList.toggle('hide-contact-panel', !appSettings.showContactPanel);
+  if (settingsDisplayName) settingsDisplayName.value = displayName;
+  if (settingsSendEnter) settingsSendEnter.checked = appSettings.sendWithEnter;
+  if (settingsShowContact) settingsShowContact.checked = appSettings.showContactPanel;
+  if (settingsCollapseSidebar) settingsCollapseSidebar.checked = appSettings.collapseSidebar;
+  updateContactInfoButton();
+}
+
+function updateContactInfoButton() {
+  if (!contactInfoButton) return;
+  contactInfoButton.classList.toggle('active', appSettings.showContactPanel);
+  contactInfoButton.setAttribute('aria-pressed', String(appSettings.showContactPanel));
+  contactInfoButton.title = appSettings.showContactPanel ? 'Ẩn thông tin khách hàng' : 'Xem thông tin khách hàng';
+}
+
+function showOrderStage(stage) {
+  showView('orders');
+  orderPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== stage));
+  orderStageButtons.forEach(button => button.classList.toggle('active', button.dataset.orderStage === stage));
+}
+
+function parseCsv(text) {
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const delimiter = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';
+  const output = [];
+  let row = [];
+  let value = '';
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') { value += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (character === delimiter && !quoted) {
+      row.push(value);
+      value = '';
+    } else if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && text[index + 1] === '\n') index += 1;
+      row.push(value);
+      output.push(row);
+      row = [];
+      value = '';
+    } else {
+      value += character;
+    }
+  }
+  if (value || row.length) { row.push(value); output.push(row); }
+  return output;
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+}
+
+function showToast(message, type = 'error') {
+  document.querySelector('.app-toast')?.remove();
+  const toast = document.createElement('div');
+  toast.className = `app-toast app-toast--${type}`;
+  toast.textContent = message;
+  toast.setAttribute('role', 'status');
+  document.body.appendChild(toast);
+  window.setTimeout(() => toast.remove(), 3500);
+}
+
+async function readApiResponse(response) {
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || 'Không thể hoàn tất yêu cầu. Vui lòng thử lại.');
+  return payload;
+}
+
+function channelAvatar(channel) {
+  return channel.picture
+    ? `<span class="channel-item-avatar"><img src="${escapeHtml(channel.picture)}" alt=""></span>`
+    : `<span class="channel-item-avatar">${escapeHtml(channel.name.trim().charAt(0).toUpperCase() || 'f')}</span>`;
+}
+
+function renderFacebookChannels(state) {
+  const items = Array.isArray(state.items) ? state.items : [];
+  if (facebookConnectButton) {
+    facebookConnectButton.disabled = false;
+    facebookConnectButton.title = '';
+  }
+  if (!facebookChannelList) return;
+  facebookChannelList.innerHTML = items.length ? items.map(channel => {
+    const healthy = channel.status === 'connected';
+    const subscriptionText = channel.subscribed ? 'Đã đồng bộ tin nhắn' : 'Đã kết nối · cần kiểm tra webhook';
+    return `<article class="channel-item" data-channel-id="${escapeHtml(channel.id)}">
+      ${channelAvatar(channel)}
+      <div class="channel-item-copy"><strong>${escapeHtml(channel.name)}</strong><small><span class="channel-connected-dot${healthy ? '' : ' warning'}"></span>${escapeHtml(subscriptionText)} · ID ${escapeHtml(channel.id)}</small></div>
+      <div class="channel-item-actions"><button type="button" data-channel-action="refresh">Làm mới</button><button class="channel-remove-button" type="button" data-channel-action="remove">Ngắt kết nối</button></div>
+    </article>`;
+  }).join('') : '<p class="channel-empty">Chưa có Facebook Page nào được kết nối.</p>';
+}
+
+async function loadFacebookChannels() {
+  try {
+    const state = await readApiResponse(await fetch('/api/channels'));
+    renderFacebookChannels(state);
+    return state;
+  } catch (error) {
+    if (facebookChannelList) facebookChannelList.innerHTML = `<p class="channel-empty">${escapeHtml(error.message)}</p>`;
+    throw error;
+  }
+}
+
+function closeFacebookPageDialog() {
+  facebookPageDialog?.classList.add('hidden');
+  if (facebookPageDialogStatus) facebookPageDialogStatus.textContent = '';
+}
+
+async function openPendingFacebookPages(ticket) {
+  const pending = await readApiResponse(await fetch(`/api/channels/meta/pending?ticket=${encodeURIComponent(ticket)}`));
+  if (!facebookPageOptions) return;
+  facebookPageOptions.dataset.ticket = ticket;
+  facebookPageOptions.innerHTML = pending.pages.map(page => {
+    const connected = pending.connectedIds.includes(page.id);
+    return `<label class="facebook-page-option">
+      <input type="checkbox" value="${escapeHtml(page.id)}"${connected ? ' checked' : ''}>
+      ${channelAvatar(page)}
+      <span><strong>${escapeHtml(page.name)}</strong><small>Facebook Page · ID ${escapeHtml(page.id)}</small></span>
+    </label>`;
+  }).join('');
+  facebookPageDialog?.classList.remove('hidden');
+}
+
+async function beginFacebookConnection() {
+  if (!facebookConnectButton) return;
+  const originalText = facebookConnectButton.innerHTML;
+  facebookConnectButton.disabled = true;
+  facebookConnectButton.textContent = 'Đang mở Facebook...';
+  try {
+    const result = await readApiResponse(await fetch('/api/channels/meta/connect'));
+    window.location.assign(result.authorizationUrl);
+  } catch (error) {
+    showToast(error.message);
+    facebookConnectButton.disabled = false;
+    facebookConnectButton.innerHTML = originalText;
+  }
+}
+
+async function confirmFacebookPages() {
+  const selected = [...(facebookPageOptions?.querySelectorAll('input:checked') || [])].map(input => input.value);
+  if (!selected.length) {
+    if (facebookPageDialogStatus) facebookPageDialogStatus.textContent = 'Hãy chọn ít nhất 1 Facebook Page.';
+    return;
+  }
+  facebookPageConfirm.disabled = true;
+  if (facebookPageDialogStatus) facebookPageDialogStatus.textContent = 'Đang kết nối và đăng ký nhận tin nhắn...';
+  try {
+    const result = await readApiResponse(await fetch('/api/channels/meta/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket: facebookPageOptions.dataset.ticket, pageIds: selected })
+    }));
+    closeFacebookPageDialog();
+    renderFacebookChannels({ ...result, metaConfigured: true });
+    showToast(`Đã kết nối ${selected.length} Facebook Page.`, 'success');
+    history.replaceState(null, '', `${window.location.pathname}#settings`);
+  } catch (error) {
+    if (facebookPageDialogStatus) facebookPageDialogStatus.textContent = error.message;
+  } finally {
+    facebookPageConfirm.disabled = false;
+  }
+}
+
+function renderOrderImportHistory() {
+  if (!orderImportHistory.length) {
+    orderHistoryPanel.innerHTML = '<p>Chưa có lịch sử Import.</p>';
+    return;
+  }
+  orderHistoryPanel.innerHTML = orderImportHistory.map(entry => {
+    const importedAt = new Date(entry.importedAt);
+    const timeLabel = Number.isNaN(importedAt.getTime()) ? '' : importedAt.toLocaleString('vi-VN');
+    return `<div class="order-history-item"><div><strong>${escapeHtml(entry.fileName || 'Tệp dữ liệu')}</strong><small>${escapeHtml(timeLabel)}</small></div><span>${Number(entry.rowCount) || 0} đơn</span></div>`;
+  }).join('');
+}
+
+function recordOrderImport(fileName) {
+  orderImportHistory.unshift({ fileName, rowCount: orderData.rows.length, importedAt: new Date().toISOString() });
+  orderImportHistory = orderImportHistory.slice(0, 10);
+  localStorage.setItem('crm-order-import-history', JSON.stringify(orderImportHistory));
+  renderOrderImportHistory();
+}
+
+function createExportFilename(date = new Date()) {
+  const pad = value => String(value).padStart(2, '0');
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const time = `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+  return `don-hang-facebook-${day}-${time}.xlsx`;
+}
+
+function normalizeColumnName(value) {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function getMessageChannelLogo(channel) {
+  if (channel.picture) return channel.picture;
+  if (channel.platform === 'zalo') return '/assets/icons/zalo.png?v=1';
+  return '/assets/giot-nang-logo.webp';
+}
+
+function renderMessageChannelMenu() {
+  if (!messageChannelMenu) return;
+  messageChannelMenu.innerHTML = messageChannels.map(channel => `<button class="message-channel-option${channel.id === currentMessageChannelId ? ' active' : ''}" type="button" role="menuitem" data-message-channel="${escapeHtml(channel.id)}">
+    <img src="${escapeHtml(getMessageChannelLogo(channel))}" alt="">
+    <span><strong>${escapeHtml(channel.name)}</strong><small>${channel.platform === 'zalo' ? 'Zalo OA' : 'Facebook Page'}</small></span>
+    ${channel.id === currentMessageChannelId ? '<b aria-hidden="true">✓</b>' : ''}
+  </button>`).join('');
+}
+
+function updateMessageChannelTrigger() {
+  const channel = messageChannels.find(item => item.id === currentMessageChannelId) || messageChannels[0];
+  if (!channel) return;
+  if (messageChannelLogo) messageChannelLogo.src = getMessageChannelLogo(channel);
+  if (messageChannelName) messageChannelName.textContent = channel.name;
+  if (messageChannelTrigger) {
+    messageChannelTrigger.title = `${channel.name} · Bấm để chuyển kênh`;
+    messageChannelTrigger.setAttribute('aria-label', `Chọn kênh kết nối. Kênh hiện tại: ${channel.name}`);
+  }
+  renderMessageChannelMenu();
+}
+
+function showEmptyChannelConversation() {
+  const channel = messageChannels.find(item => item.id === currentMessageChannelId);
+  const channelName = channel?.name || 'kênh này';
+  clearMessageReply();
+  if (chatHeadAvatar) chatHeadAvatar.textContent = channel?.platform === 'zalo' ? 'Z' : 'F';
+  if (chatHeadName) chatHeadName.textContent = 'Chưa có hội thoại';
+  chatHeadMeta?.classList.add('hidden');
+  if (chatBody) chatBody.innerHTML = `<div class="chat-empty-state">Chưa có tin nhắn trong ${escapeHtml(channelName)}.</div>`;
+  if (contactProfileAvatar) contactProfileAvatar.textContent = channel?.platform === 'zalo' ? 'Z' : 'F';
+  if (contactProfileName) contactProfileName.textContent = 'Chưa chọn khách hàng';
+  if (contactProfileType) contactProfileType.textContent = channel?.platform === 'zalo' ? 'Khách hàng Zalo' : 'Khách hàng Facebook';
+  contactDetails.forEach(item => { item.textContent = '—'; });
+  contactOrderValues.forEach(item => { item.textContent = '—'; });
+  if (messageComposerInput) { messageComposerInput.value = ''; messageComposerInput.disabled = true; }
+  if (messageSendButton) messageSendButton.disabled = true;
+}
+
+function activateCurrentMessageChannel() {
+  updateMessageChannelTrigger();
+  filterConversations();
+  const visibleConversations = getConversationItems().filter(item => !item.classList.contains('hidden'));
+  getConversationItems().forEach(item => item.classList.remove('active'));
+  if (visibleConversations.length) {
+    visibleConversations[0].classList.add('active');
+    if (messageComposerInput) messageComposerInput.disabled = false;
+    renderConversation(visibleConversations[0]);
+    updateMessageSendState();
+  } else {
+    showEmptyChannelConversation();
+  }
+  updateMarkUnreadButton();
+}
+
+async function loadMessageChannels() {
+  let connected = [];
+  try {
+    const state = await readApiResponse(await fetch('/api/channels'));
+    connected = (state.items || []).map(item => ({ id: String(item.id), name: item.name, picture: item.picture, platform: item.platform || 'facebook' }));
+  } catch { /* Keep the local demo channel available while the server reconnects. */ }
+  messageChannels = connected.length ? connected : [{
+    id: 'local-facebook',
+    name: 'Nông Sản Giọt Nắng',
+    picture: '/assets/giot-nang-logo.webp',
+    platform: 'facebook'
+  }];
+  if (!messageChannels.some(channel => channel.id === currentMessageChannelId)) currentMessageChannelId = messageChannels[0].id;
+  const labelCycle = ['new', 'consulting', 'customer'];
+  getConversationItems().forEach((conversation, index) => {
+    if (!conversation.dataset.channelId) conversation.dataset.channelId = currentMessageChannelId;
+    if (!conversation.dataset.labels) conversation.dataset.labels = labelCycle[index % labelCycle.length];
+  });
+  activateCurrentMessageChannel();
+}
+
+function filterConversations() {
+  sortConversationsByRecentActivity();
+  const query = normalizeColumnName(messageSearchInput?.value || '');
+  let visibleCount = 0;
+  getConversationItems().forEach(conversation => {
+    const matchesSearch = !query || normalizeColumnName(conversation.textContent).includes(query);
+    const matchesFilter = currentConversationFilter !== 'unread' || conversation.classList.contains('unread');
+    const matchesChannel = conversation.dataset.channelId === currentMessageChannelId;
+    const labels = (conversation.dataset.labels || '').split(/\s+/).filter(Boolean);
+    const matchesLabel = currentMessageLabel === 'all'
+      || (currentMessageLabel === 'unread' ? conversation.classList.contains('unread') : labels.includes(currentMessageLabel));
+    const matches = matchesSearch && matchesFilter && matchesChannel && matchesLabel;
+    conversation.classList.toggle('hidden', !matches);
+    if (matches) visibleCount += 1;
+  });
+  conversationEmpty?.classList.toggle('hidden', visibleCount > 0);
+}
+
+function getConversationName(conversation) {
+  return conversation?.querySelector('strong')?.textContent.trim() || '';
+}
+
+function getConversationStorageKey(name, conversation = getActiveConversation()) {
+  const channelId = conversation?.dataset.channelId || currentMessageChannelId;
+  return `${channelId}::${name}`;
+}
+
+function getConversationItems() {
+  return [...document.querySelectorAll('.conversation-list .conversation')];
+}
+
+function applyAvatarPhoto(avatar, source) {
+  if (!avatar) return;
+  let photo = avatar.querySelector('.avatar-photo');
+  if (!source) {
+    photo?.remove();
+    avatar.classList.remove('has-photo');
+    return;
+  }
+  if (!photo) {
+    photo = document.createElement('img');
+    photo.className = 'avatar-photo';
+    photo.alt = '';
+    avatar.prepend(photo);
+  }
+  if (photo.getAttribute('src') !== source) photo.setAttribute('src', source);
+  avatar.classList.add('has-photo');
+}
+
+function renderConversationSourceBadge(conversation) {
+  const avatar = conversation?.querySelector('.avatar');
+  if (!avatar) return;
+  const source = conversation.dataset.source === 'comment' ? 'comment' : 'inbox';
+  let badge = avatar.querySelector('.conversation-source-badge');
+  if (!badge) {
+    badge = document.createElement('img');
+    badge.className = 'conversation-source-badge';
+    badge.alt = '';
+    avatar.appendChild(badge);
+  }
+  badge.src = source === 'comment' ? '/assets/icons/facebook.png' : '/assets/icons/messenger.png';
+  badge.title = source === 'comment' ? 'Bình luận Facebook' : 'Inbox Messenger';
+}
+
+function ensureConversationMetadata(conversation) {
+  if (!conversation?.dataset.initialPreview) {
+    conversation.dataset.initialPreview = conversation?.querySelector('small')?.textContent.trim() || '';
+  }
+  if (!conversation?.dataset.initialTime) {
+    conversation.dataset.initialTime = conversation?.querySelector('time')?.textContent.trim() || '';
+  }
+  if (!conversation?.dataset.initialOrder) {
+    conversation.dataset.initialOrder = String(getConversationItems().indexOf(conversation));
+  }
+  renderConversationSourceBadge(conversation);
+  return conversation;
+}
+
+function sortConversationsByRecentActivity() {
+  if (!conversationList) return;
+  const conversations = getConversationItems();
+  const ordered = [...conversations].sort((first, second) => {
+    const firstTimestamp = getChatTimestamp(first.dataset.latestSentAt);
+    const secondTimestamp = getChatTimestamp(second.dataset.latestSentAt);
+    if (firstTimestamp !== secondTimestamp) return secondTimestamp - firstTimestamp;
+    return Number(first.dataset.initialOrder || 0) - Number(second.dataset.initialOrder || 0);
+  });
+  if (ordered.every((conversation, index) => conversation === conversations[index])) return;
+  ordered.forEach(conversation => conversationList.insertBefore(conversation, conversationEmpty));
+}
+
+function restoreConversationActivity() {
+  getConversationItems().forEach(conversation => {
+    const latestMessage = getSavedChatMessages(getConversationName(conversation), conversation).at(-1);
+    const latestTimestamp = getChatTimestamp(latestMessage?.createdAt);
+    if (!latestTimestamp) return;
+    conversation.dataset.latestSentAt = String(latestTimestamp);
+    const preview = conversation.querySelector('small');
+    const time = conversation.querySelector('time');
+    if (preview) preview.textContent = `Bạn: ${getMessagePreview(latestMessage)}`;
+    if (time) time.textContent = formatConversationActivityTime(latestTimestamp);
+  });
+  sortConversationsByRecentActivity();
+}
+
+function getUnreadConversations() {
+  return readStoredJson(unreadConversationsKey, [], names => new Set(Array.isArray(names) ? names.filter(name => typeof name === 'string') : []));
+}
+
+function saveUnreadConversations() {
+  const keys = getConversationItems().filter(item => item.classList.contains('unread')).map(item => getConversationStorageKey(getConversationName(item), item));
+  writeStoredJson(unreadConversationsKey, new Set(keys), set => [...set]);
+}
+
+function getMutedConversations() {
+  return readStoredJson(mutedConversationsKey, [], keys => new Set(Array.isArray(keys) ? keys.filter(key => typeof key === 'string') : []));
+}
+
+function saveMutedConversations() {
+  const keys = getConversationItems().filter(item => item.classList.contains('muted')).map(item => getConversationStorageKey(getConversationName(item), item));
+  writeStoredJson(mutedConversationsKey, new Set(keys), set => [...set]);
+}
+
+function renderConversationMuteIcon(conversation) {
+  let icon = conversation?.querySelector('.conversation-muted-icon');
+  if (!conversation?.classList.contains('muted')) {
+    icon?.remove();
+    return;
+  }
+  if (icon) return;
+  icon = document.createElement('img');
+  icon.className = 'conversation-muted-icon';
+  icon.src = '/assets/icons/alert-off.svg';
+  icon.alt = 'Đã tắt thông báo';
+  icon.title = 'Đã tắt thông báo';
+  conversation.querySelector('time')?.before(icon);
+}
+
+function renderMutedConversations() {
+  const mutedKeys = getMutedConversations();
+  getConversationItems().forEach(item => {
+    const name = getConversationName(item);
+    item.classList.toggle('muted', mutedKeys.has(getConversationStorageKey(name, item)) || mutedKeys.has(name));
+    renderConversationMuteIcon(item);
+  });
+}
+
+function updateMarkUnreadButton() {
+  const isUnread = document.querySelector('.conversation.active')?.classList.contains('unread') || false;
+  if (!markUnreadButton) return;
+  markUnreadButton.classList.toggle('active', isUnread);
+  markUnreadButton.setAttribute('aria-pressed', String(isUnread));
+  markUnreadButton.title = isUnread ? 'Đã đánh dấu chưa đọc' : 'Đánh dấu là chưa đọc';
+}
+
+function renderUnreadConversations() {
+  const unreadNames = getUnreadConversations();
+  getConversationItems().forEach(item => {
+    const name = getConversationName(item);
+    item.classList.toggle('unread', unreadNames.has(getConversationStorageKey(name, item)) || unreadNames.has(name));
+  });
+  updateMarkUnreadButton();
+}
+
+function getActiveConversation() {
+  return document.querySelector('.conversation.active');
+}
+
+const storedJsonCache = new Map();
+
+function readStoredJson(key, fallback, normalize = value => value) {
+  if (storedJsonCache.has(key)) return storedJsonCache.get(key);
+  let value;
+  try {
+    const raw = localStorage.getItem(key);
+    value = normalize(raw === null ? fallback : JSON.parse(raw));
+  } catch {
+    localStorage.removeItem(key);
+    value = normalize(fallback);
+  }
+  storedJsonCache.set(key, value);
+  return value;
+}
+
+function writeStoredJson(key, value, serialize = item => item) {
+  storedJsonCache.set(key, value);
+  localStorage.setItem(key, JSON.stringify(serialize(value)));
+}
+
+function getSavedChatMessageMap() {
+  const normalizeMessages = messages => Array.isArray(messages) ? messages.map((message, index) => {
+    if (typeof message === 'string') return { id: `legacy-${index}`, text: message };
+    if (!message || typeof message !== 'object') return null;
+    const type = ['image', 'video', 'audio', 'sticker', 'document', 'system'].includes(message.type) ? message.type : 'text';
+    const normalized = {
+      id: String(message.id || `saved-${index}`),
+      type,
+      text: typeof message.text === 'string' ? message.text : ''
+    };
+    const numericCreatedAt = Number(message.createdAt);
+    const createdAt = Number.isFinite(numericCreatedAt) && message.createdAt !== '' && message.createdAt != null
+      ? numericCreatedAt
+      : Date.parse(message.createdAt || '');
+    if (Number.isFinite(createdAt)) normalized.createdAt = createdAt;
+    if (type === 'image' || type === 'video' || type === 'audio' || type === 'document') {
+      if (typeof message.dataUrl !== 'string' || !message.dataUrl.startsWith('data:')) return null;
+      normalized.dataUrl = message.dataUrl;
+      normalized.name = typeof message.name === 'string' ? message.name : '';
+    }
+    if (type === 'audio') normalized.duration = Number(message.duration) || 0;
+    if (type === 'document') normalized.size = Number(message.size) || 0;
+    if (type === 'sticker') normalized.sticker = typeof message.sticker === 'string' ? message.sticker : '👍';
+    if (message.replyTo && typeof message.replyTo === 'object') {
+      normalized.replyTo = {
+        id: String(message.replyTo.id || ''),
+        name: String(message.replyTo.name || 'tin nhắn'),
+        text: String(message.replyTo.text || 'tin nhắn')
+      };
+    }
+    return normalized;
+  }).filter(Boolean) : [];
+  return readStoredJson(savedChatMessagesKey, {}, saved => {
+    if (Array.isArray(saved)) return { 'Lan Anh': normalizeMessages(saved) };
+    if (!saved || typeof saved !== 'object') return {};
+    return Object.fromEntries(Object.entries(saved).map(([name, messages]) => [name, normalizeMessages(messages)]));
+  });
+}
+
+function getSavedChatMessages(name = getConversationName(getActiveConversation()), conversation = getActiveConversation()) {
+  const saved = getSavedChatMessageMap();
+  return saved[getConversationStorageKey(name, conversation)] || saved[name] || [];
+}
+
+function saveChatMessage(name, message) {
+  const saved = getSavedChatMessageMap();
+  const key = getConversationStorageKey(name);
+  saved[key] = [...(saved[key] || saved[name] || []), message].slice(-100);
+  try {
+    writeStoredJson(savedChatMessagesKey, saved);
+    return true;
+  } catch {
+    showComposerStatus('Nội dung đã gửi trong phiên này nhưng tệp quá lớn để lưu lâu dài trên trình duyệt.');
+    return false;
+  }
+}
+
+function getChatMessageActions() {
+  return readStoredJson(chatMessageActionsKey, {}, actions => actions && typeof actions === 'object' && !Array.isArray(actions) ? actions : {});
+}
+
+function getChatMessageAction(name, messageId) {
+  const actions = getChatMessageActions();
+  return actions[`${getConversationStorageKey(name)}:${messageId}`] || actions[`${name}:${messageId}`] || '';
+}
+
+function saveChatMessageAction(name, messageId, action) {
+  const actions = getChatMessageActions();
+  actions[`${getConversationStorageKey(name)}:${messageId}`] = action;
+  writeStoredJson(chatMessageActionsKey, actions);
+}
+
+function getMessageStateKey(name, messageId) {
+  return `${getConversationStorageKey(name)}:${messageId}`;
+}
+
+function getPinnedChatMessages() {
+  return readStoredJson(chatPinnedMessagesKey, [], items => new Set(Array.isArray(items) ? items : []));
+}
+
+function togglePinnedChatMessage(name, messageId) {
+  const items = getPinnedChatMessages();
+  const key = getMessageStateKey(name, messageId);
+  if (items.has(key)) items.delete(key);
+  else items.add(key);
+  writeStoredJson(chatPinnedMessagesKey, items, set => [...set]);
+  return items.has(key);
+}
+
+function getChatMessageReactions() {
+  return readStoredJson(chatMessageReactionsKey, {}, items => items && typeof items === 'object' && !Array.isArray(items) ? items : {});
+}
+
+function saveChatMessageReaction(name, messageId, reaction) {
+  const items = getChatMessageReactions();
+  const key = getMessageStateKey(name, messageId);
+  if (reaction) items[key] = reaction;
+  else delete items[key];
+  writeStoredJson(chatMessageReactionsKey, items);
+}
+
+function getMessagePreview(message) {
+  const item = typeof message === 'string' ? { type: 'text', text: message } : message;
+  if (item?.type === 'image') return item.text ? `Ảnh · ${item.text}` : 'Đã gửi một ảnh';
+  if (item?.type === 'video') return item.text ? `Video · ${item.text}` : 'Đã gửi một video';
+  if (item?.type === 'document') return item.name ? `Tài liệu · ${item.name}` : 'Đã gửi một tài liệu';
+  if (item?.type === 'audio') return 'Đã gửi một tin nhắn thoại';
+  if (item?.type === 'sticker') return `Nhãn dán ${item.sticker || ''}`.trim();
+  return item?.text || '';
+}
+
+function getChatTimestamp(value) {
+  const numericTimestamp = Number(value);
+  const timestamp = Number.isFinite(numericTimestamp) && value !== '' && value != null ? numericTimestamp : Date.parse(value || '');
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function isSameCalendarDay(first, second) {
+  return first.getFullYear() === second.getFullYear()
+    && first.getMonth() === second.getMonth()
+    && first.getDate() === second.getDate();
+}
+
+function formatChatTime(timestamp) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const time = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  if (isSameCalendarDay(date, now)) return time;
+  const dayDistance = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(date.getFullYear(), date.getMonth(), date.getDate())) / 86400000);
+  if (dayDistance > 0 && dayDistance < 7) return `${time} ${['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][date.getDay()]}`;
+  const calendarDate = date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) });
+  return `${time} ${calendarDate}`;
+}
+
+function formatMessageHoverTime(timestamp) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const weekday = ['Chủ nhật', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy'][date.getDay()];
+  const time = `${date.getHours() % 12 || 12}:${String(date.getMinutes()).padStart(2, '0')}`;
+  const period = date.getHours() < 12 ? 'SA' : 'CH';
+  const label = `${weekday} ${time} ${period}`;
+  return isSameCalendarDay(date, now) ? label : `${label} · ${date.toLocaleDateString('vi-VN')}`;
+}
+
+function hideMessageTimeTooltip() {
+  window.cancelAnimationFrame(messageTimeTooltipFrame);
+  messageTimeTooltipFrame = 0;
+  messageTimeTooltip?.remove();
+  messageTimeTooltip = null;
+  messageTimeTooltipRow = null;
+}
+
+function positionMessageTimeTooltip() {
+  if (!messageTimeTooltip?.isConnected || !messageTimeTooltipRow?.isConnected) return;
+  const anchorRect = (messageTimeTooltipRow.querySelector('.bubble') || messageTimeTooltipRow).getBoundingClientRect();
+  const tooltipRect = messageTimeTooltip.getBoundingClientRect();
+  messageTimeTooltip.style.left = `${anchorRect.right + 10.125}px`;
+  messageTimeTooltip.style.top = `${Math.max(9, Math.min(window.innerHeight - tooltipRect.height - 9, anchorRect.top + (anchorRect.height - tooltipRect.height) / 2))}px`;
+  messageTimeTooltipFrame = window.requestAnimationFrame(positionMessageTimeTooltip);
+}
+
+function showMessageTimeTooltip(row) {
+  const label = row?.dataset.hoverTime;
+  if (!label) return;
+  hideMessageTimeTooltip();
+  const tooltip = document.createElement('div');
+  tooltip.className = 'message-time-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.textContent = label;
+  document.body.appendChild(tooltip);
+  messageTimeTooltip = tooltip;
+  messageTimeTooltipRow = row;
+  positionMessageTimeTooltip();
+}
+
+function hasChatTimeBreak(previousTimestamp, currentTimestamp) {
+  if (!previousTimestamp || !currentTimestamp) return false;
+  const previous = new Date(previousTimestamp);
+  const current = new Date(currentTimestamp);
+  return currentTimestamp - previousTimestamp >= chatTimeBreakMs || !isSameCalendarDay(previous, current);
+}
+
+function appendChatTimeSeparator(timestamp) {
+  if (!chatBody) return;
+  const separator = document.createElement('time');
+  separator.className = 'chat-time-separator';
+  separator.dateTime = new Date(timestamp).toISOString();
+  separator.textContent = formatChatTime(timestamp);
+  chatBody.appendChild(separator);
+}
+
+function formatConversationActivityTime(timestamp) {
+  const elapsed = Math.max(0, Date.now() - timestamp);
+  if (elapsed < 60000) return 'Bây giờ';
+  if (elapsed < 3600000) return `${Math.floor(elapsed / 60000)} phút`;
+  const date = new Date(timestamp);
+  const now = new Date();
+  if (isSameCalendarDay(date, now)) return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (isSameCalendarDay(date, yesterday)) return 'Hôm qua';
+  return date.toLocaleDateString('vi-VN', { weekday: 'short' }).replace('Th ', 'T');
+}
+
+function updateConversationTimeLabels() {
+  getConversationItems().forEach(conversation => {
+    const timestamp = getChatTimestamp(conversation.dataset.latestSentAt);
+    const time = conversation.querySelector('time');
+    if (timestamp && time) time.textContent = formatConversationActivityTime(timestamp);
+  });
+}
+
+function appendChatSystemNotice(item) {
+  if (!chatBody) return;
+  const notice = document.createElement('div');
+  notice.className = 'chat-system-notice';
+  const icon = document.createElement('img');
+  icon.src = '/assets/icons/pin-color.svg';
+  icon.alt = '';
+  const text = document.createElement('span');
+  text.textContent = item.text || '';
+  notice.append(icon, text);
+  chatBody.appendChild(notice);
+}
+
+function appendChatMessage(message, direction = 'outgoing', initial = '', messageId = '', action = '') {
+  if (action === 'deleted') return;
+  const item = typeof message === 'string' ? { type: 'text', text: message } : { type: 'text', text: '', ...message };
+  if (item.type === 'system') {
+    appendChatSystemNotice(item);
+    return;
+  }
+  const sentAt = getChatTimestamp(item.createdAt);
+  let previousRow = chatBody?.lastElementChild || null;
+  while (previousRow && !previousRow.classList.contains('message-row')) previousRow = previousRow.previousElementSibling;
+  const previousSentAt = getChatTimestamp(previousRow?.dataset.sentAt);
+  if (previousRow && hasChatTimeBreak(previousSentAt, sentAt)) appendChatTimeSeparator(sentAt);
+  const row = document.createElement('div');
+  row.className = `message-row ${direction === 'outgoing' ? 'outgoing' : 'incoming'}`;
+  row.dataset.preview = getMessagePreview(item);
+  row.dataset.searchText = [row.dataset.preview, item.name || ''].filter(Boolean).join(' ');
+  if (sentAt) {
+    row.dataset.sentAt = String(sentAt);
+    row.dataset.hoverTime = formatMessageHoverTime(sentAt);
+  }
+  if (direction !== 'outgoing') {
+    const avatar = document.createElement('span');
+    avatar.className = 'avatar avatar-small';
+    avatar.textContent = initial;
+    applyAvatarPhoto(avatar, getActiveConversation()?.dataset.avatar || '');
+    row.appendChild(avatar);
+  }
+  const bubble = document.createElement('div');
+  const isMedia = ['image', 'video', 'audio'].includes(item.type);
+  const isDocument = item.type === 'document';
+  const isImage = item.type === 'image';
+  const isVideo = item.type === 'video';
+  const isSticker = item.type === 'sticker';
+  bubble.className = `bubble${isDocument ? ' bubble-document' : ''}${isMedia ? ' bubble-media' : ''}${isImage ? ' bubble-image' : ''}${isVideo ? ' bubble-video' : ''}${isSticker ? ' bubble-sticker' : ''}${action === 'recalled' ? ' bubble-recalled' : ''}`;
+  if (action === 'recalled') {
+    bubble.textContent = 'Bạn đã thu hồi một tin nhắn';
+  } else if (item.type === 'image') {
+    const image = document.createElement('img');
+    image.className = 'chat-image';
+    image.src = item.dataUrl;
+    image.alt = item.name ? `Ảnh đính kèm: ${item.name}` : 'Ảnh đính kèm';
+    bubble.appendChild(image);
+    if (item.text) {
+      const caption = document.createElement('span');
+      caption.className = 'bubble-caption';
+      caption.textContent = item.text;
+      bubble.appendChild(caption);
+    }
+  } else if (item.type === 'audio') {
+    const audio = document.createElement('audio');
+    audio.className = 'chat-audio';
+    audio.controls = true;
+    audio.preload = 'metadata';
+    audio.src = item.dataUrl;
+    bubble.appendChild(audio);
+  } else if (item.type === 'video') {
+    const video = document.createElement('video');
+    video.className = 'chat-video';
+    video.controls = true;
+    video.preload = 'metadata';
+    video.src = item.dataUrl;
+    bubble.appendChild(video);
+  } else if (item.type === 'document') {
+    bubble.appendChild(buildDocumentCard(item));
+    if (item.text) {
+      const caption = document.createElement('span');
+      caption.className = 'bubble-caption';
+      caption.textContent = item.text;
+      bubble.appendChild(caption);
+    }
+  } else if (item.type === 'sticker') {
+    bubble.textContent = item.sticker || '👍';
+  } else {
+    bubble.textContent = item.text;
+  }
+  if (messageId) {
+    row.dataset.messageId = messageId;
+    bubble.tabIndex = 0;
+    bubble.setAttribute('role', 'button');
+    bubble.setAttribute('aria-haspopup', 'menu');
+    const ownerLabel = direction === 'outgoing' ? 'Tin nhắn đã gửi' : 'Tin nhắn của khách';
+    bubble.setAttribute('aria-label', action === 'recalled' ? 'Tin nhắn đã thu hồi' : `${ownerLabel}: ${getMessagePreview(item)}. Nhấp để mở tùy chọn.`);
+  }
+  let quickActions = null;
+  if (messageId) {
+    quickActions = document.createElement('div');
+    quickActions.className = 'message-quick-actions';
+    quickActions.setAttribute('aria-label', 'Thao tác nhanh');
+    const quickActionButtons = [
+      ['more', '⋮', 'Thêm thao tác'],
+      ['reply', '↩', 'Trả lời'],
+      ['react', '☺', 'Bày tỏ cảm xúc']
+    ];
+    (direction === 'outgoing' ? [...quickActionButtons].reverse() : quickActionButtons).forEach(([quickAction, symbol, label]) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.messageQuick = quickAction;
+      button.textContent = symbol;
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      quickActions.appendChild(button);
+    });
+    if (direction === 'outgoing') row.appendChild(quickActions);
+  }
+  let messageContent = bubble;
+  if (item.replyTo) {
+    const stack = document.createElement('div');
+    stack.className = 'message-content-stack';
+    const attribution = document.createElement('span');
+    attribution.className = 'message-reply-attribution';
+    attribution.textContent = item.replyTo.name === 'Bạn'
+      ? '↩ Bạn đã trả lời chính mình'
+      : `↩ Bạn đã trả lời ${item.replyTo.name}`;
+    const source = document.createElement('span');
+    source.className = 'message-reply-source';
+    source.textContent = item.replyTo.text || 'tin nhắn';
+    source.title = item.replyTo.text || 'tin nhắn';
+    stack.append(attribution, source, bubble);
+    messageContent = stack;
+  }
+  row.appendChild(messageContent);
+  if (direction !== 'outgoing' && quickActions) row.appendChild(quickActions);
+  if (messageId) {
+    const name = getConversationName(getActiveConversation());
+    const stateKey = getMessageStateKey(name, messageId);
+    if (getPinnedChatMessages().has(stateKey)) {
+      row.classList.add('message-pinned');
+      const pin = document.createElement('span');
+      pin.className = 'message-pin-badge';
+      pin.textContent = 'Đã ghim';
+      bubble.appendChild(pin);
+    }
+    const reaction = getChatMessageReactions()[stateKey];
+    if (reaction) {
+      const badge = document.createElement('span');
+      badge.className = 'message-reaction';
+      badge.textContent = reaction;
+      bubble.appendChild(badge);
+    }
+  }
+  chatBody?.appendChild(row);
+}
+
+function getLightboxFileName(image) {
+  return (image?.alt || 'anh-dinh-kem').replace(/^Ảnh đính kèm:\s*/i, '') || 'anh-dinh-kem.png';
+}
+
+function setLightboxZoom(value) {
+  lightboxZoom = Math.min(4, Math.max(.5, Math.round(value * 10) / 10));
+  if (imageLightboxContent) imageLightboxContent.style.transform = `scale(${lightboxZoom})`;
+  if (imageLightboxZoom) imageLightboxZoom.value = `${Math.round(lightboxZoom * 100)}%`;
+  imageLightbox?.classList.toggle('is-zoomed', lightboxZoom > 1);
+}
+
+function renderLightboxImage(index) {
+  if (!lightboxImages.length || !imageLightboxContent) return;
+  lightboxIndex = (index + lightboxImages.length) % lightboxImages.length;
+  const image = lightboxImages[lightboxIndex];
+  imageLightboxContent.src = image.src;
+  imageLightboxContent.alt = image.alt || 'Ảnh xem kích thước lớn';
+  setLightboxZoom(1);
+  if (imageLightboxDownload) {
+    imageLightboxDownload.href = image.src;
+    imageLightboxDownload.download = getLightboxFileName(image);
+  }
+  imageLightboxPrev?.toggleAttribute('disabled', lightboxImages.length < 2);
+  imageLightboxNext?.toggleAttribute('disabled', lightboxImages.length < 2);
+  [...(imageLightboxThumbnails?.children || [])].forEach((thumbnail, thumbnailIndex) => {
+    thumbnail.classList.toggle('is-active', thumbnailIndex === lightboxIndex);
+    thumbnail.setAttribute('aria-current', thumbnailIndex === lightboxIndex ? 'true' : 'false');
+  });
+}
+
+function renderLightboxThumbnails() {
+  if (!imageLightboxThumbnails) return;
+  imageLightboxThumbnails.replaceChildren();
+  lightboxImages.forEach((image, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'image-lightbox-thumbnail';
+    button.setAttribute('aria-label', `Xem ${getLightboxFileName(image)}`);
+    const preview = document.createElement('img');
+    preview.src = image.src;
+    preview.alt = '';
+    button.appendChild(preview);
+    button.addEventListener('click', () => renderLightboxImage(index));
+    imageLightboxThumbnails.appendChild(button);
+  });
+}
+
+function openImageLightbox(image) {
+  if (!imageLightbox || !imageLightboxContent || !image?.src) return;
+  lightboxImages = [...(chatBody?.querySelectorAll('.chat-image') || [])];
+  lightboxIndex = Math.max(0, lightboxImages.indexOf(image));
+  renderLightboxThumbnails();
+  renderLightboxImage(lightboxIndex);
+  imageLightbox.classList.remove('hidden');
+  document.body.classList.add('image-lightbox-open');
+  imageLightbox.querySelector('.image-lightbox-close')?.focus();
+}
+
+function closeImageLightbox() {
+  if (!imageLightbox || imageLightbox.classList.contains('hidden')) return;
+  imageLightbox.classList.add('hidden');
+  document.body.classList.remove('image-lightbox-open');
+  if (imageLightboxContent) {
+    imageLightboxContent.src = '';
+    imageLightboxContent.alt = '';
+  }
+  lightboxImages = [];
+  setLightboxZoom(1);
+  imageLightboxThumbnails?.replaceChildren();
+}
+
+async function shareLightboxImage() {
+  const image = lightboxImages[lightboxIndex];
+  if (!image?.src) return;
+  try {
+    const response = await fetch(image.src);
+    const blob = await response.blob();
+    const file = new File([blob], getLightboxFileName(image), { type: blob.type || 'image/png' });
+    if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+      await navigator.share({ files: [file], title: 'Chia sẻ ảnh' });
+      return;
+    }
+    window.open(image.src, '_blank', 'noopener,noreferrer');
+  } catch {
+    showComposerStatus('Không thể chia sẻ ảnh lúc này.');
+  }
+}
+
+function updateMessageGrouping() {
+  const rows = [...(chatBody?.querySelectorAll(':scope > .message-row') || [])];
+  rows.forEach((row, index) => {
+    row.classList.remove('message-group-single', 'message-group-first', 'message-group-middle', 'message-group-last', 'message-group-continued');
+    const direction = row.classList.contains('outgoing') ? 'outgoing' : 'incoming';
+    const previous = rows[index - 1];
+    const next = rows[index + 1];
+    const matches = candidate => candidate
+      && (candidate.classList.contains('outgoing') ? 'outgoing' : 'incoming') === direction
+      && !hasChatTimeBreak(getChatTimestamp(candidate.dataset.sentAt), getChatTimestamp(row.dataset.sentAt));
+    const samePrevious = matches(previous);
+    const sameNext = matches(next);
+    if (!samePrevious && !sameNext) row.classList.add('message-group-single');
+    else if (!samePrevious) row.classList.add('message-group-first');
+    else if (!sameNext) row.classList.add('message-group-last', 'message-group-continued');
+    else row.classList.add('message-group-middle', 'message-group-continued');
+  });
+}
+
+function getConversationMessages(conversation) {
+  const name = getConversationName(conversation);
+  if (conversationProfiles[name]?.messages) return conversationProfiles[name].messages;
+  const preview = conversation?.dataset.initialPreview || '';
+  if (!preview) return [];
+  const isOutgoing = preview.startsWith('Bạn:');
+  const text = preview.replace(/^Bạn:\s*/, '');
+  return isOutgoing
+    ? [{ direction: 'incoming', text: 'Chào shop, mình cần được hỗ trợ với ạ.' }, { direction: 'outgoing', text }]
+    : [{ direction: 'incoming', text }];
+}
+
+function renderConversationHeader(conversation) {
+  const name = getConversationName(conversation);
+  const initial = conversation.querySelector('.avatar')?.textContent.trim() || name.charAt(0);
+  const avatarPhoto = conversation.dataset.avatar || '';
+  const profile = conversationProfiles[name] || {};
+  const channel = messageChannels.find(item => item.id === currentMessageChannelId);
+  const customerPlatform = channel?.platform === 'zalo' ? 'Khách hàng Zalo' : 'Khách hàng Facebook';
+
+  if (chatHeadAvatar) chatHeadAvatar.textContent = initial;
+  applyAvatarPhoto(chatHeadAvatar, avatarPhoto);
+  if (chatHeadName) chatHeadName.textContent = name;
+  chatHeadMeta?.classList.remove('hidden');
+  if (chatHeadChannelLogo) chatHeadChannelLogo.src = channel?.platform === 'zalo' ? '/assets/icons/zalo.png' : '/assets/icons/facebook.png';
+  if (contactProfileAvatar) contactProfileAvatar.textContent = initial;
+  applyAvatarPhoto(contactProfileAvatar, avatarPhoto);
+  if (contactProfileName) contactProfileName.textContent = name;
+  if (contactProfileType) contactProfileType.textContent = customerPlatform;
+  if (messageComposerInput) messageComposerInput.disabled = false;
+  if (contactDetails[0]) contactDetails[0].textContent = profile.email || 'Chưa cập nhật email';
+  if (contactDetails[1]) contactDetails[1].textContent = profile.phone || 'Chưa cập nhật số điện thoại';
+  contactOrderValues.forEach((element, index) => { element.textContent = profile.order?.[index] || '—'; });
+  updateChatHeadViewState();
+  return { name, initial };
+}
+
+function renderConversation(conversation = getActiveConversation()) {
+  if (!conversation || !chatBody) return;
+  const { name, initial } = renderConversationHeader(conversation);
+  chatBody.replaceChildren();
+  const date = document.createElement('div');
+  date.className = 'chat-date';
+  date.textContent = conversation.dataset.initialTime === 'Hôm qua' ? 'Hôm qua' : 'Hôm nay';
+  chatBody.appendChild(date);
+  getConversationMessages(conversation).forEach((message, index) => {
+    const messageId = `base-${normalizeColumnName(name)}-${index}`;
+    const action = message.direction === 'outgoing' ? getChatMessageAction(name, messageId) : '';
+    appendChatMessage(message, message.direction, initial, messageId, action);
+  });
+  const messages = getSavedChatMessages(name);
+  messages.forEach(message => appendChatMessage(message, 'outgoing', initial, message.id, getChatMessageAction(name, message.id)));
+  const latestMessage = [...messages].reverse().find(message => message.type !== 'system');
+  if (latestMessage) {
+    const preview = conversation.querySelector('small');
+    const time = conversation.querySelector('time');
+    const latestAction = getChatMessageAction(name, latestMessage.id);
+    if (preview && latestAction !== 'deleted') preview.textContent = latestAction === 'recalled' ? 'Bạn: Đã thu hồi một tin nhắn' : `Bạn: ${getMessagePreview(latestMessage)}`;
+    const latestSentAt = getChatTimestamp(latestMessage.createdAt);
+    if (latestSentAt) conversation.dataset.latestSentAt = String(latestSentAt);
+    if (time) time.textContent = latestSentAt ? formatConversationActivityTime(latestSentAt) : 'Bây giờ';
+  }
+  updateMessageGrouping();
+  chatBody.scrollTop = chatBody.scrollHeight;
+  renderPinnedBanner(conversation);
+  if (!chatPinnedPanel?.classList.contains('hidden')) renderPinnedPanel(conversation);
+  if (!chatSearchBar?.classList.contains('hidden')) updateConversationSearch();
+}
+
+function updateChatHeadViewState() {
+  const showingFiles = currentChatHeadView === 'files';
+  const showingDocs = currentChatHeadView === 'docs';
+  const showingChat = !showingFiles && !showingDocs;
+  chatHeadChatTab?.classList.toggle('active', showingChat);
+  chatHeadFileTab?.classList.toggle('active', showingFiles);
+  chatHeadDocsTab?.classList.toggle('active', showingDocs);
+  chatHeadChatTab?.setAttribute('aria-pressed', String(showingChat));
+  chatHeadFileTab?.setAttribute('aria-pressed', String(showingFiles));
+  chatHeadDocsTab?.setAttribute('aria-pressed', String(showingDocs));
+  composerArea?.classList.toggle('hidden', !showingChat);
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(0)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getDocumentExtension(name) {
+  const match = /\.([a-z0-9]+)$/i.exec(name || '');
+  return match ? match[1].toLowerCase() : '';
+}
+
+const documentIcons = {
+  pdf: 'file-pdf',
+  doc: 'file-word',
+  docx: 'file-word',
+  xls: 'file-excel',
+  xlsx: 'file-excel',
+  csv: 'file-excel',
+  ppt: 'file-powerpoint',
+  pptx: 'file-powerpoint',
+  zip: 'file-zip',
+  txt: 'file-text'
+};
+
+function getDocumentIconSource(name) {
+  return `/assets/icons/${documentIcons[getDocumentExtension(name)] || 'file-generic'}.svg`;
+}
+
+function buildDocumentIcon(name) {
+  const icon = document.createElement('img');
+  icon.className = 'document-icon';
+  icon.src = getDocumentIconSource(name);
+  icon.alt = '';
+  return icon;
+}
+
+function buildDocumentCard(item) {
+  const card = document.createElement('a');
+  card.className = 'document-card';
+  card.href = item.dataUrl || '#';
+  card.download = item.name || 'tai-lieu';
+  card.title = item.name || 'Tài liệu';
+  const icon = buildDocumentIcon(item.name);
+  const copy = document.createElement('span');
+  copy.className = 'document-card-copy';
+  const title = document.createElement('strong');
+  title.textContent = item.name || 'Tài liệu';
+  const meta = document.createElement('small');
+  meta.textContent = [getDocumentExtension(item.name).toUpperCase(), formatFileSize(item.size)].filter(Boolean).join(' · ');
+  copy.append(title, meta);
+  card.append(icon, copy);
+  return card;
+}
+
+function getConversationDocuments(conversation = getActiveConversation()) {
+  if (!conversation) return [];
+  const name = getConversationName(conversation);
+  return [...getConversationMessages(conversation), ...getSavedChatMessages(name, conversation)]
+    .filter(message => message?.type === 'document' && message.dataUrl)
+    .map(message => ({
+      name: message.name || 'Tài liệu',
+      size: message.size || 0,
+      dataUrl: message.dataUrl,
+      sender: message.direction === 'incoming' ? name : 'Bạn',
+      sentAt: getChatTimestamp(message.createdAt)
+    }))
+    .sort((first, second) => second.sentAt - first.sentAt);
+}
+
+function getPinnedConversationMessages(conversation = getActiveConversation()) {
+  if (!conversation || !chatBody) return [];
+  const name = getConversationName(conversation);
+  const pinnedKeys = getPinnedChatMessages();
+  return [...chatBody.querySelectorAll('.message-row[data-message-id]')]
+    .filter(row => pinnedKeys.has(getMessageStateKey(name, row.dataset.messageId)))
+    .map(row => ({
+      messageId: row.dataset.messageId,
+      preview: row.dataset.preview || 'Tệp đính kèm',
+      sender: row.classList.contains('outgoing') ? 'Bạn' : name,
+      outgoing: row.classList.contains('outgoing'),
+      sentAt: getChatTimestamp(row.dataset.sentAt)
+    }));
+}
+
+function jumpToChatMessage(messageId) {
+  if (!messageId) return;
+  const row = chatBody?.querySelector(`.message-row[data-message-id="${CSS.escape(messageId)}"]`);
+  if (!row) return;
+  chatBody?.querySelectorAll('.message-jump-target').forEach(item => item.classList.remove('message-jump-target'));
+  row.classList.add('message-jump-target');
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  window.setTimeout(() => row.classList.remove('message-jump-target'), 1600);
+}
+
+function renderPinnedBanner(conversation = getActiveConversation()) {
+  if (!pinnedBanner) return;
+  const pinned = currentChatHeadView === 'chat' ? getPinnedConversationMessages(conversation) : [];
+  const latest = pinned.at(-1);
+  pinnedBanner.classList.toggle('hidden', !latest);
+  if (!latest) {
+    pinnedBanner.replaceChildren();
+    return;
+  }
+  const icon = document.createElement('img');
+  icon.className = 'pinned-banner-icon';
+  icon.src = '/assets/icons/pin-color.svg';
+  icon.alt = '';
+  const copy = document.createElement('span');
+  copy.className = 'pinned-banner-copy';
+  const who = document.createElement('strong');
+  who.textContent = latest.sender;
+  const text = document.createElement('span');
+  text.textContent = latest.preview;
+  copy.append(who, text);
+  const jump = document.createElement('button');
+  jump.type = 'button';
+  jump.className = 'pinned-banner-jump';
+  jump.title = 'Tới tin nhắn';
+  jump.setAttribute('aria-label', 'Tới tin nhắn đã ghim');
+  jump.innerHTML = '<img src="/assets/icons/jump.svg" alt="">';
+  jump.addEventListener('click', () => jumpToChatMessage(latest.messageId));
+  const openList = document.createElement('button');
+  openList.type = 'button';
+  openList.className = 'pinned-banner-list';
+  openList.textContent = pinned.length > 1 ? `${pinned.length} tin đã ghim` : 'Xem';
+  openList.addEventListener('click', openPinnedPanel);
+  pinnedBanner.replaceChildren(icon, copy, openList, jump);
+}
+
+function renderPinnedPanel(conversation = getActiveConversation()) {
+  if (!chatPinnedResults) return;
+  const query = normalizeColumnName(chatPinnedSearch?.value || '');
+  const pinned = getPinnedConversationMessages(conversation)
+    .filter(item => !query || normalizeColumnName(`${item.sender} ${item.preview}`).includes(query));
+  if (chatPinnedCount) chatPinnedCount.textContent = pinned.length ? `${pinned.length} tin nhắn` : '';
+  if (!pinned.length) {
+    const empty = document.createElement('div');
+    empty.className = 'conversation-search-empty';
+    const image = document.createElement('img');
+    image.src = '/assets/icons/search-empty.svg';
+    image.alt = '';
+    const text = document.createElement('p');
+    text.textContent = query
+      ? 'Không tìm thấy tin nhắn đã ghim phù hợp.'
+      : 'Chưa có tin nhắn nào được ghim. Nhấp vào một tin nhắn rồi chọn Ghim để thêm vào đây.';
+    empty.append(image, text);
+    chatPinnedResults.replaceChildren(empty);
+    return;
+  }
+  chatPinnedResults.replaceChildren(...pinned.map(item => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'pinned-card';
+    const head = document.createElement('span');
+    head.className = 'pinned-card-head';
+    const avatar = document.createElement('span');
+    avatar.className = 'avatar avatar-small';
+    avatar.textContent = item.sender.charAt(0);
+    if (!item.outgoing) applyAvatarPhoto(avatar, conversation?.dataset.avatar || '');
+    const who = document.createElement('span');
+    who.className = 'pinned-card-who';
+    const senderName = document.createElement('strong');
+    senderName.textContent = item.sender;
+    const posted = document.createElement('small');
+    posted.textContent = item.sentAt ? `Đã ghim: ${formatConversationActivityTime(item.sentAt)}` : 'Trong hội thoại';
+    who.append(senderName, posted);
+    head.append(avatar, who);
+    const body = document.createElement('span');
+    body.className = 'pinned-card-body';
+    body.textContent = item.preview;
+    card.append(head, body);
+    card.addEventListener('click', () => jumpToChatMessage(item.messageId));
+    return card;
+  }));
+}
+
+function openPinnedPanel() {
+  if (currentChatHeadView !== 'chat') {
+    currentChatHeadView = 'chat';
+    renderConversation();
+  }
+  closeConversationSearch();
+  document.body.classList.remove('hide-contact-panel');
+  contactPanelContent?.classList.add('hidden');
+  chatPinnedPanel?.classList.remove('hidden');
+  chatHeadPinnedTab?.classList.add('active');
+  chatHeadPinnedTab?.setAttribute('aria-pressed', 'true');
+  renderPinnedPanel();
+}
+
+function closePinnedPanel() {
+  if (chatPinnedPanel?.classList.contains('hidden')) return;
+  chatPinnedPanel?.classList.add('hidden');
+  contactPanelContent?.classList.remove('hidden');
+  document.body.classList.toggle('hide-contact-panel', !appSettings.showContactPanel);
+  chatHeadPinnedTab?.classList.remove('active');
+  chatHeadPinnedTab?.setAttribute('aria-pressed', 'false');
+  if (chatPinnedSearch) chatPinnedSearch.value = '';
+  if (chatPinnedCount) chatPinnedCount.textContent = '';
+}
+
+function renderConversationDocs(conversation = getActiveConversation()) {
+  if (!conversation || !chatBody) return;
+  renderConversationHeader(conversation);
+  const documents = getConversationDocuments(conversation);
+  chatBody.replaceChildren();
+  pinnedBanner?.classList.add('hidden');
+  const view = document.createElement('section');
+  view.className = 'conversation-docs';
+
+  const field = document.createElement('label');
+  field.className = 'conversation-docs-search';
+  const searchIcon = document.createElement('span');
+  searchIcon.className = 'search-icon';
+  searchIcon.setAttribute('aria-hidden', 'true');
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = 'Tìm tài liệu trong hội thoại';
+  search.setAttribute('aria-label', 'Tìm tài liệu trong hội thoại');
+  field.append(searchIcon, search);
+  view.appendChild(field);
+
+  const table = document.createElement('div');
+  table.className = 'conversation-docs-table';
+  const head = document.createElement('div');
+  head.className = 'conversation-docs-row conversation-docs-head';
+  ['Tiêu đề', 'Người gửi', 'Thời gian', ''].forEach(label => {
+    const cell = document.createElement('span');
+    cell.textContent = label;
+    head.appendChild(cell);
+  });
+  table.appendChild(head);
+
+  const empty = document.createElement('div');
+  empty.className = 'conversation-files-empty';
+  empty.textContent = 'Chưa có tài liệu nào trong hội thoại này.';
+
+  const renderRows = () => {
+    const query = normalizeColumnName(search.value || '');
+    const matches = documents.filter(item => !query || normalizeColumnName(item.name).includes(query));
+    table.querySelectorAll('.conversation-docs-row:not(.conversation-docs-head)').forEach(row => row.remove());
+    empty.textContent = documents.length
+      ? 'Không tìm thấy tài liệu phù hợp.'
+      : 'Chưa có tài liệu nào trong hội thoại này.';
+    empty.classList.toggle('hidden', matches.length > 0);
+    matches.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'conversation-docs-row';
+      const title = document.createElement('span');
+      title.className = 'conversation-docs-title';
+      const icon = buildDocumentIcon(item.name);
+      const label = document.createElement('span');
+      label.textContent = item.name;
+      label.title = item.name;
+      title.append(icon, label);
+      const sender = document.createElement('span');
+      sender.textContent = item.sender;
+      const time = document.createElement('span');
+      time.textContent = item.sentAt ? formatConversationActivityTime(item.sentAt) : '—';
+      const actions = document.createElement('span');
+      actions.className = 'conversation-docs-actions';
+      const download = document.createElement('a');
+      download.href = item.dataUrl;
+      download.download = item.name;
+      download.title = 'Tải xuống';
+      download.setAttribute('aria-label', `Tải xuống ${item.name}`);
+      download.innerHTML = '<img src="/assets/icons/download.svg" alt="">';
+      actions.appendChild(download);
+      row.append(title, sender, time, actions);
+      table.appendChild(row);
+    });
+  };
+
+  search.addEventListener('input', renderRows);
+  view.append(table, empty);
+  chatBody.appendChild(view);
+  renderRows();
+  search.focus();
+}
+
+function getConversationMedia(conversation = getActiveConversation()) {
+  if (!conversation) return [];
+  const name = getConversationName(conversation);
+  return [...getConversationMessages(conversation), ...getSavedChatMessages(name, conversation)]
+    .filter(message => ['image', 'video'].includes(message?.type) && message.dataUrl);
+}
+
+function renderConversationFiles(conversation = getActiveConversation()) {
+  if (!conversation || !chatBody) return;
+  renderConversationHeader(conversation);
+  const media = getConversationMedia(conversation);
+  chatBody.replaceChildren();
+  pinnedBanner?.classList.add('hidden');
+  const library = document.createElement('section');
+  library.className = 'conversation-files';
+  const heading = document.createElement('div');
+  heading.className = 'conversation-files-head';
+  const title = document.createElement('strong');
+  title.textContent = 'Ảnh và video';
+  const count = document.createElement('span');
+  count.textContent = `${media.length} tệp`;
+  heading.append(title, count);
+  library.appendChild(heading);
+  if (!media.length) {
+    const empty = document.createElement('div');
+    empty.className = 'conversation-files-empty';
+    empty.textContent = 'Chưa có ảnh hoặc video nào trong hội thoại này.';
+    library.appendChild(empty);
+  } else {
+    const grid = document.createElement('div');
+    grid.className = 'conversation-files-grid';
+    media.forEach((item, index) => {
+      const card = document.createElement('article');
+      card.className = 'conversation-file-card';
+      if (item.type === 'image') {
+        const image = document.createElement('img');
+        image.className = 'chat-image conversation-file-preview';
+        image.src = item.dataUrl;
+        image.alt = item.name ? `Ảnh đính kèm: ${item.name}` : `Ảnh ${index + 1}`;
+        card.appendChild(image);
+      } else {
+        const video = document.createElement('video');
+        video.className = 'conversation-file-preview';
+        video.controls = true;
+        video.preload = 'metadata';
+        video.src = item.dataUrl;
+        card.appendChild(video);
+      }
+      const label = document.createElement('span');
+      label.textContent = item.name || (item.type === 'image' ? `Ảnh ${index + 1}` : `Video ${index + 1}`);
+      card.appendChild(label);
+      grid.appendChild(card);
+    });
+    library.appendChild(grid);
+  }
+  chatBody.appendChild(library);
+}
+
+function clearConversationSearchHighlights() {
+  chatBody?.querySelectorAll('.conversation-search-match, .conversation-search-current').forEach(row =>
+    row.classList.remove('conversation-search-match', 'conversation-search-current')
+  );
+  chatSearchResults?.querySelectorAll('.active').forEach(item => item.classList.remove('active'));
+  conversationSearchMatches = [];
+  conversationSearchIndex = -1;
+}
+
+function selectConversationSearchMatch(index) {
+  chatBody?.querySelectorAll('.conversation-search-current').forEach(row => row.classList.remove('conversation-search-current'));
+  chatSearchResults?.querySelectorAll('.active').forEach(item => item.classList.remove('active'));
+  if (!conversationSearchMatches.length) {
+    conversationSearchIndex = -1;
+    return;
+  }
+  conversationSearchIndex = (index + conversationSearchMatches.length) % conversationSearchMatches.length;
+  const match = conversationSearchMatches[conversationSearchIndex];
+  const selector = match.messageId ? `.message-row[data-message-id="${CSS.escape(match.messageId)}"]` : '.message-row';
+  const candidates = [...(chatBody?.querySelectorAll(selector) || [])];
+  const current = candidates.find(row => row.dataset.preview === match.preview && row.classList.contains(match.direction)) || candidates[0];
+  current?.classList.add('conversation-search-current');
+  current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  chatSearchResults?.children[conversationSearchIndex]?.classList.add('active');
+  chatSearchResults?.children[conversationSearchIndex]?.scrollIntoView({ block: 'nearest' });
+}
+
+function messageMatchesSearchDate(timestamp, filter) {
+  if (filter === 'all') return true;
+  if (!timestamp) return false;
+  const date = new Date(timestamp);
+  const now = new Date();
+  if (filter === 'today') return isSameCalendarDay(date, now);
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (filter === 'yesterday') return isSameCalendarDay(date, yesterday);
+  return filter === 'week' && now - date <= 7 * 86400000;
+}
+
+function renderConversationSearchEmpty(message) {
+  if (!chatSearchResults) return;
+  const empty = document.createElement('div');
+  empty.className = 'conversation-search-empty';
+  const image = document.createElement('img');
+  image.src = '/assets/icons/search-empty.svg';
+  image.alt = '';
+  const text = document.createElement('p');
+  text.textContent = message;
+  empty.append(image, text);
+  chatSearchResults.replaceChildren(empty);
+}
+
+function updateConversationSearch() {
+  clearConversationSearchHighlights();
+  const query = normalizeColumnName(chatSearchInput?.value || '');
+  if (!query) {
+    if (chatSearchCount) chatSearchCount.textContent = '';
+    renderConversationSearchEmpty('Hãy nhập từ khóa để bắt đầu tìm kiếm tin nhắn và file trong trò chuyện.');
+    return;
+  }
+  const senderFilter = chatSearchSender?.value || 'all';
+  const dateFilter = chatSearchDate?.value || 'all';
+  conversationSearchMatches = [...(chatBody?.querySelectorAll('.message-row') || [])]
+    .filter(row => normalizeColumnName(row.dataset.searchText || row.dataset.preview || '').includes(query))
+    .filter(row => senderFilter === 'all' || (senderFilter === 'me' ? row.classList.contains('outgoing') : row.classList.contains('incoming')))
+    .filter(row => messageMatchesSearchDate(getChatTimestamp(row.dataset.sentAt), dateFilter))
+    .map(row => ({
+      messageId: row.dataset.messageId || '',
+      preview: row.dataset.preview || '',
+      direction: row.classList.contains('outgoing') ? 'outgoing' : 'incoming',
+      sentAt: getChatTimestamp(row.dataset.sentAt)
+    }));
+  if (chatSearchCount) chatSearchCount.textContent = `${conversationSearchMatches.length} kết quả`;
+  if (!conversationSearchMatches.length) {
+    renderConversationSearchEmpty('Không tìm thấy tin nhắn hoặc file phù hợp.');
+    return;
+  }
+  const customerName = getConversationName(getActiveConversation()) || 'Khách hàng';
+  const resultItems = conversationSearchMatches.map((match, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'conversation-search-result';
+    const meta = document.createElement('span');
+    meta.className = 'conversation-search-result-meta';
+    const sender = document.createElement('strong');
+    sender.textContent = match.direction === 'outgoing' ? 'Bạn' : customerName;
+    const time = document.createElement('time');
+    time.textContent = match.sentAt ? formatConversationActivityTime(match.sentAt) : 'Trong hội thoại';
+    meta.append(sender, time);
+    const preview = document.createElement('span');
+    preview.className = 'conversation-search-result-preview';
+    preview.textContent = match.preview || 'Tệp đính kèm';
+    button.append(meta, preview);
+    button.addEventListener('click', () => selectConversationSearchMatch(index));
+    return button;
+  });
+  chatSearchResults?.replaceChildren(...resultItems);
+  selectConversationSearchMatch(0);
+}
+
+function selectConversation(conversation) {
+  if (!conversation) return;
+  closeConversationMenu();
+  closeConversationSearch();
+  stopAudioRecording(true);
+  clearPendingAttachment();
+  closeComposerPopovers();
+  clearMessageReply();
+  ensureConversationMetadata(conversation);
+  getConversationItems().forEach(item => item.classList.toggle('active', item === conversation));
+  conversation.classList.remove('unread');
+  currentChatHeadView = 'chat';
+  renderConversation(conversation);
+  saveUnreadConversations();
+  updateMarkUnreadButton();
+  filterConversations();
+}
+
+function getConversationMenuItems(conversation) {
+  const isUnread = conversation.classList.contains('unread');
+  const isMuted = conversation.classList.contains('muted');
+  return [
+    { action: 'unread', icon: 'mail-unread', label: isUnread ? 'Đánh dấu là đã đọc' : 'Đánh dấu là chưa đọc' },
+    { action: 'open', icon: 'chat', label: 'Mở phần nhắn tin' },
+    { action: 'mute', icon: isMuted ? 'alert' : 'alert-off', label: isMuted ? 'Bật thông báo' : 'Tắt thông báo' },
+    { action: 'profile', icon: 'person', label: 'Xem trang cá nhân' },
+    { action: 'call', icon: 'call', label: 'Gọi thoại', separated: true }
+  ];
+}
+
+function renderConversationMenu(conversation) {
+  if (!conversationMenu) return;
+  conversationMenu.replaceChildren(...getConversationMenuItems(conversation).map(item => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = `conversation-menu-item${item.separated ? ' conversation-menu-item--separated' : ''}`;
+    option.setAttribute('role', 'menuitem');
+    option.dataset.conversationAction = item.action;
+    const icon = document.createElement('img');
+    icon.src = `/assets/icons/${item.icon}.svg`;
+    icon.alt = '';
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    option.append(icon, label);
+    return option;
+  }));
+}
+
+function positionConversationMenu(trigger) {
+  if (!conversationMenu) return;
+  const margin = 9;
+  const gap = 4.5;
+  const anchorBox = trigger.getBoundingClientRect();
+  const menuBox = conversationMenu.getBoundingClientRect();
+  const left = Math.min(Math.max(margin, anchorBox.right - menuBox.width), window.innerWidth - menuBox.width - margin);
+  const below = anchorBox.bottom + gap;
+  const top = below + menuBox.height > window.innerHeight - margin
+    ? Math.max(margin, anchorBox.top - menuBox.height - gap)
+    : below;
+  conversationMenu.style.left = `${left}px`;
+  conversationMenu.style.top = `${top}px`;
+}
+
+function openConversationMenu(trigger) {
+  const conversation = trigger?.closest('.conversation');
+  if (!conversation || !conversationMenu) return;
+  closeConversationMenu();
+  conversationMenuTarget = conversation;
+  renderConversationMenu(conversation);
+  conversationMenu.classList.remove('hidden');
+  trigger.setAttribute('aria-expanded', 'true');
+  positionConversationMenu(trigger);
+  conversationMenu.querySelector('.conversation-menu-item')?.focus();
+}
+
+function closeConversationMenu() {
+  if (!conversationMenu || conversationMenu.classList.contains('hidden')) return;
+  conversationMenu.classList.add('hidden');
+  conversationMenuTarget?.querySelector('.conversation-more')?.setAttribute('aria-expanded', 'false');
+  conversationMenuTarget = null;
+}
+
+function runConversationMenuAction(action, conversation) {
+  if (!conversation) return;
+  if (action === 'unread') {
+    const isUnread = !conversation.classList.contains('unread');
+    conversation.classList.toggle('unread', isUnread);
+    saveUnreadConversations();
+    updateMarkUnreadButton();
+    filterConversations();
+    return;
+  }
+  if (action === 'mute') {
+    conversation.classList.toggle('muted');
+    renderConversationMuteIcon(conversation);
+    saveMutedConversations();
+    return;
+  }
+  if (action === 'open') {
+    selectConversation(conversation);
+    messageComposerInput?.focus();
+    return;
+  }
+  if (action === 'profile') {
+    selectConversation(conversation);
+    appSettings = { ...appSettings, showContactPanel: true };
+    saveAppSettings();
+    applyAppSettings();
+    return;
+  }
+  if (action === 'call') {
+    selectConversation(conversation);
+    showComposerStatus(`Chưa kết nối dịch vụ gọi thoại cho ${getConversationName(conversation)}.`);
+  }
+}
+
+function openConversationSearch() {
+  closePinnedPanel();
+  currentChatHeadView = 'chat';
+  renderConversation();
+  document.body.classList.remove('hide-contact-panel');
+  contactPanelContent?.classList.add('hidden');
+  chatSearchBar?.classList.remove('hidden');
+  conversationSearchButton?.classList.add('active');
+  conversationSearchButton?.setAttribute('aria-expanded', 'true');
+  updateConversationSearch();
+  chatSearchInput?.focus();
+}
+
+function closeConversationSearch() {
+  clearConversationSearchHighlights();
+  chatSearchBar?.classList.add('hidden');
+  contactPanelContent?.classList.remove('hidden');
+  document.body.classList.toggle('hide-contact-panel', !appSettings.showContactPanel);
+  conversationSearchButton?.classList.remove('active');
+  conversationSearchButton?.setAttribute('aria-expanded', 'false');
+  if (chatSearchInput) chatSearchInput.value = '';
+  if (chatSearchCount) chatSearchCount.textContent = '';
+  if (chatSearchSender) chatSearchSender.value = 'all';
+  if (chatSearchDate) chatSearchDate.value = 'all';
+}
+
+function renderSavedChatMessages() {
+  renderConversation();
+}
+
+function closeComposerPopovers() {
+  stickerPicker?.classList.add('hidden');
+  stickerButton?.setAttribute('aria-expanded', 'false');
+  emojiPicker?.classList.add('hidden');
+  emojiButton?.setAttribute('aria-expanded', 'false');
+}
+
+function clearComposerStatus() {
+  window.clearTimeout(composerStatusTimer);
+  composerStatusTimer = null;
+  if (composerStatus) composerStatus.textContent = '';
+}
+
+function showComposerStatus(message, duration = 3500) {
+  clearComposerStatus();
+  if (!composerStatus) return;
+  composerStatus.textContent = message;
+  composerStatusTimer = window.setTimeout(clearComposerStatus, duration);
+}
+
+function renderComposerPreview() {
+  if (!composerPreview || !composerPreviewContent) return;
+  composerPreviewContent.replaceChildren();
+  composerPreview.classList.toggle('hidden', !pendingAttachment);
+  if (!pendingAttachment) return;
+
+  if (pendingAttachment.type === 'image') {
+    const image = document.createElement('img');
+    image.src = pendingAttachment.dataUrl;
+    image.alt = 'Xem trước ảnh đính kèm';
+    const label = document.createElement('span');
+    label.textContent = pendingAttachment.name || 'Ảnh đính kèm';
+    composerPreviewContent.append(image, label);
+  } else if (pendingAttachment.type === 'audio') {
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.preload = 'metadata';
+    audio.src = pendingAttachment.dataUrl;
+    const label = document.createElement('span');
+    label.textContent = `Tin nhắn thoại · ${formatRecordingTime(pendingAttachment.duration || 0)}`;
+    composerPreviewContent.append(audio, label);
+  } else if (pendingAttachment.type === 'video') {
+    const video = document.createElement('video');
+    video.controls = true;
+    video.preload = 'metadata';
+    video.src = pendingAttachment.dataUrl;
+    const label = document.createElement('span');
+    label.textContent = pendingAttachment.name || 'Video đính kèm';
+    composerPreviewContent.append(video, label);
+  } else if (pendingAttachment.type === 'document') {
+    const card = buildDocumentCard(pendingAttachment);
+    card.removeAttribute('href');
+    card.removeAttribute('download');
+    composerPreviewContent.append(card);
+  } else if (pendingAttachment.type === 'sticker') {
+    const sticker = document.createElement('span');
+    sticker.className = 'composer-preview-sticker';
+    sticker.textContent = pendingAttachment.sticker;
+    const label = document.createElement('span');
+    label.textContent = 'Nhãn dán';
+    composerPreviewContent.append(sticker, label);
+  }
+}
+
+function setPendingAttachment(attachment) {
+  pendingAttachment = attachment;
+  clearComposerStatus();
+  renderComposerPreview();
+  updateMessageSendState();
+}
+
+function clearPendingAttachment() {
+  pendingAttachment = null;
+  renderComposerPreview();
+  if (messageImageInput) messageImageInput.value = '';
+  updateMessageSendState();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Không thể đọc tệp'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatRecordingTime(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
+}
+
+function resetAudioRecorderUi() {
+  window.clearInterval(audioRecordingTimer);
+  audioRecordingTimer = null;
+  audioRecording?.classList.add('hidden');
+  audioRecordButton?.classList.remove('active');
+  audioRecordButton?.setAttribute('aria-label', 'Ghi âm');
+  if (audioRecordingTime) audioRecordingTime.textContent = '0:00';
+}
+
+function stopAudioRecording(discard = false) {
+  if (!audioRecorder || audioRecorder.state === 'inactive') return;
+  discardAudioRecording = discard;
+  audioRecorder.stop();
+}
+
+async function startAudioRecording() {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    showComposerStatus('Trình duyệt này chưa hỗ trợ ghi âm.');
+    return;
+  }
+  clearComposerStatus();
+  clearPendingAttachment();
+  closeComposerPopovers();
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    discardAudioRecording = false;
+    audioRecorder = new MediaRecorder(audioStream);
+    audioRecorder.addEventListener('dataavailable', event => {
+      if (event.data?.size) audioChunks.push(event.data);
+    });
+    audioRecorder.addEventListener('stop', async () => {
+      const duration = Date.now() - audioRecordingStartedAt;
+      const shouldDiscard = discardAudioRecording;
+      const mimeType = audioRecorder?.mimeType || 'audio/webm';
+      audioStream?.getTracks().forEach(track => track.stop());
+      audioStream = null;
+      resetAudioRecorderUi();
+      if (shouldDiscard) {
+        audioChunks = [];
+        showComposerStatus('Đã hủy đoạn ghi âm.');
+        return;
+      }
+      const blob = new Blob(audioChunks, { type: mimeType });
+      audioChunks = [];
+      if (!blob.size) {
+        showComposerStatus('Không thu được âm thanh. Hãy thử ghi lại.');
+        return;
+      }
+      if (blob.size > 2 * 1024 * 1024) {
+        showComposerStatus('Đoạn ghi âm quá lớn. Vui lòng ghi clip ngắn hơn 90 giây.');
+        return;
+      }
+      const dataUrl = await readFileAsDataUrl(blob);
+      setPendingAttachment({ type: 'audio', dataUrl, duration, name: `ghi-am-${Date.now()}.webm` });
+    });
+    audioRecorder.start(250);
+    audioRecordingStartedAt = Date.now();
+    audioRecording?.classList.remove('hidden');
+    audioRecordButton?.classList.add('active');
+    audioRecordButton?.setAttribute('aria-label', 'Dừng ghi âm');
+    audioRecordingTimer = window.setInterval(() => {
+      const duration = Date.now() - audioRecordingStartedAt;
+      if (audioRecordingTime) audioRecordingTime.textContent = formatRecordingTime(duration);
+      if (duration >= 90000) stopAudioRecording(false);
+    }, 250);
+  } catch {
+    resetAudioRecorderUi();
+    showComposerStatus('Không thể dùng micro. Hãy cho phép quyền micro rồi thử lại.');
+  }
+}
+
+function updateMessageSendState() {
+  if (messageSendButton) messageSendButton.disabled = !messageComposerInput?.value.trim() && !pendingAttachment;
+}
+
+function sendCurrentMessage() {
+  const text = messageComposerInput?.value.trim();
+  if (!text && !pendingAttachment) return;
+  const activeConversation = getActiveConversation();
+  const conversationName = getConversationName(activeConversation);
+  if (!conversationName) return;
+  const replyTo = messageComposerInput?.dataset.replyTo
+    ? {
+        id: messageComposerInput.dataset.replyTo,
+        name: messageComposerInput.dataset.replyName || conversationName,
+        text: messageComposerInput.dataset.replyText || 'tin nhắn'
+      }
+    : null;
+  const message = {
+    id: globalThis.crypto?.randomUUID?.() || `message-${Date.now()}`,
+    type: pendingAttachment?.type || 'text',
+    text: text || '',
+    createdAt: Date.now(),
+    ...(pendingAttachment || {}),
+    ...(replyTo ? { replyTo } : {})
+  };
+  appendChatMessage(message, 'outgoing', '', message.id);
+  updateMessageGrouping();
+  saveChatMessage(conversationName, message);
+  messageComposerInput.value = '';
+  clearMessageReply();
+  clearPendingAttachment();
+  updateMessageSendState();
+  const preview = activeConversation?.querySelector('small');
+  const time = activeConversation?.querySelector('time');
+  if (preview) preview.textContent = `Bạn: ${getMessagePreview(message)}`;
+  if (activeConversation) activeConversation.dataset.latestSentAt = String(message.createdAt);
+  if (time) time.textContent = formatConversationActivityTime(message.createdAt);
+  sortConversationsByRecentActivity();
+  if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+  messageComposerInput.focus();
+}
+
+function closeChatMessageMenu() {
+  const openRow = chatBody?.querySelector('.message-row.message-menu-open');
+  openRow?.classList.remove('message-menu-open');
+  openRow?.querySelector('.message-actions-menu')?.remove();
+}
+
+function closeMessageReactionPicker() {
+  chatBody?.querySelector('.message-reaction-picker')?.remove();
+}
+
+function openMessageReactionPicker(row) {
+  const name = getConversationName(getActiveConversation());
+  const messageId = row?.dataset.messageId;
+  if (!name || !messageId) return;
+  const wasOpen = Boolean(row.querySelector('.message-reaction-picker'));
+  closeMessageReactionPicker();
+  closeChatMessageMenu();
+  if (wasOpen) return;
+  const picker = document.createElement('div');
+  picker.className = 'message-reaction-picker';
+  picker.setAttribute('role', 'menu');
+  ['👍', '❤️', '😂', '😮', '😢', '😡'].forEach(reaction => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = reaction;
+    button.setAttribute('aria-label', `Thả cảm xúc ${reaction}`);
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      saveChatMessageReaction(name, messageId, reaction);
+      renderConversation(getActiveConversation());
+      showComposerStatus(`Đã thả cảm xúc ${reaction}`);
+    });
+    picker.appendChild(button);
+  });
+  row.appendChild(picker);
+  picker.querySelector('button')?.focus();
+}
+
+function prepareMessageReply(row) {
+  if (!messageComposerInput) return;
+  const preview = row?.dataset.preview || 'tin nhắn';
+  const customerName = getConversationName(getActiveConversation()) || 'khách hàng';
+  const replyName = row?.classList.contains('incoming') ? customerName : 'Bạn';
+  messageComposerInput.dataset.replyTo = row?.dataset.messageId || '';
+  messageComposerInput.dataset.replyName = replyName;
+  messageComposerInput.dataset.replyText = preview;
+  messageComposerInput.placeholder = 'Aa';
+  if (messageReplyTitle) messageReplyTitle.textContent = `Đang trả lời ${replyName}`;
+  if (messageReplyText) messageReplyText.textContent = preview;
+  messageReplyPreview?.classList.remove('hidden');
+  messageComposerInput.focus();
+  clearComposerStatus();
+}
+
+function clearMessageReply() {
+  if (messageComposerInput) {
+    delete messageComposerInput.dataset.replyTo;
+    delete messageComposerInput.dataset.replyName;
+    delete messageComposerInput.dataset.replyText;
+    messageComposerInput.placeholder = 'Aa';
+  }
+  messageReplyPreview?.classList.add('hidden');
+  if (messageReplyTitle) messageReplyTitle.textContent = 'Đang trả lời';
+  if (messageReplyText) messageReplyText.textContent = '';
+}
+
+function prepareForwardMessage(row) {
+  if (!messageComposerInput) return;
+  messageComposerInput.value = row?.dataset.preview || '';
+  messageComposerInput.dispatchEvent(new Event('input', { bubbles: true }));
+  messageComposerInput.focus();
+  showComposerStatus('Đã đưa nội dung vào ô soạn để chuyển tiếp.');
+}
+
+function syncConversationPreview(conversation = getActiveConversation()) {
+  if (!conversation) return;
+  const preview = conversation.querySelector('small');
+  const time = conversation.querySelector('time');
+  const visibleOutgoing = [...(chatBody?.querySelectorAll('.message-row.outgoing .bubble') || [])].at(-1);
+  if (preview) {
+    preview.textContent = visibleOutgoing
+      ? `Bạn: ${visibleOutgoing.classList.contains('bubble-recalled') ? 'Đã thu hồi một tin nhắn' : visibleOutgoing.closest('.message-row')?.dataset.preview || visibleOutgoing.textContent}`
+      : conversation.dataset.initialPreview;
+  }
+  if (time) time.textContent = visibleOutgoing ? 'Bây giờ' : conversation.dataset.initialTime;
+}
+
+function openChatMessageMenu(row) {
+  const conversation = getActiveConversation();
+  const name = getConversationName(conversation);
+  const messageId = row?.dataset.messageId;
+  if (!name || !messageId) return;
+  hideMessageTimeTooltip();
+  const wasOpen = row.classList.contains('message-menu-open');
+  closeMessageReactionPicker();
+  closeChatMessageMenu();
+  if (wasOpen) return;
+
+  const menu = document.createElement('div');
+  menu.className = 'message-actions-menu';
+  menu.setAttribute('role', 'menu');
+  const isRecalled = row.querySelector('.bubble')?.classList.contains('bubble-recalled');
+  const isOutgoing = row.classList.contains('outgoing');
+  const isPinned = getPinnedChatMessages().has(getMessageStateKey(name, messageId));
+  const actions = isRecalled
+    ? [['deleted', 'Xóa']]
+    : [...(isOutgoing ? [['recalled', 'Thu hồi']] : []), ['forward', 'Chuyển tiếp'], ['pin', isPinned ? 'Bỏ ghim' : 'Ghim'], ['report', 'Báo cáo']];
+  actions.forEach(([action, label]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.setAttribute('role', 'menuitem');
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      if (action === 'forward') {
+        closeChatMessageMenu();
+        prepareForwardMessage(row);
+        return;
+      }
+      if (action === 'pin') {
+        const pinned = togglePinnedChatMessage(name, messageId);
+        saveChatMessage(name, {
+          id: `system-${Date.now()}`,
+          type: 'system',
+          text: pinned ? 'Bạn đã ghim một tin nhắn' : 'Bạn đã bỏ ghim một tin nhắn',
+          createdAt: Date.now()
+        });
+        closeChatMessageMenu();
+        renderConversation(conversation);
+        renderPinnedBanner();
+        if (!chatPinnedPanel?.classList.contains('hidden')) renderPinnedPanel();
+        return;
+      }
+      if (action === 'report') {
+        closeChatMessageMenu();
+        showComposerStatus('Đã ghi nhận báo cáo cho tin nhắn này.');
+        return;
+      }
+      saveChatMessageAction(name, messageId, action);
+      closeChatMessageMenu();
+      renderConversation(conversation);
+      syncConversationPreview(conversation);
+    });
+    menu.appendChild(button);
+  });
+  const quickActions = row.querySelector('.message-quick-actions');
+  (quickActions || row).appendChild(menu);
+  row.classList.add('message-menu-open');
+  const chatRect = chatBody.getBoundingClientRect();
+  const bubbleRect = row.querySelector('.bubble').getBoundingClientRect();
+  menu.classList.toggle('message-actions-menu--above', bubbleRect.bottom + 237.5 > chatRect.bottom);
+  menu.querySelector('button')?.focus();
+}
+
+function normalizeExportLocation(value) {
+  const location = String(value ?? '').trim();
+  return ({
+    'Hồ Chí Minh': 'TP Hồ Chí Minh',
+    'Thành phố Thanh Hoá': 'Thành phố Thanh Hóa'
+  })[location] || location;
+}
+
+function getPreviewValue(value, header) {
+  if (normalizeColumnName(header) !== 'san pham') return value;
+  const text = String(value);
+  const marker = text.match(/phân\s*loại\s*:\s*/iu) || text.match(/phan\s*loai\s*:\s*/i);
+  return normalizeProductName(marker ? text.slice(marker.index + marker[0].length).trim() : text);
+}
+
+function normalizeProductName(value) {
+  let text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  const words = [
+    ['combo', 'Combo'],
+    ['granola', 'Granola'],
+    ['túi', 'Túi'],
+    ['tui', 'Túi'],
+    ['vàng', 'Vàng'],
+    ['vang', 'Vàng'],
+    ['xanh', 'Xanh'],
+    ['nâu', 'Nâu'],
+    ['nau', 'Nâu'],
+    ['klt', 'KLT']
+  ];
+  words.forEach(([source, replacement]) => {
+    text = text.replace(new RegExp(`\\b${source}\\b`, 'giu'), replacement);
+  });
+  text = text.replace(/\bGranola\s+(?=(?:Xanh|Vàng|Nâu)\b)/giu, 'Túi ');
+  text = text.replace(/\bTúi\s+Túi\b/giu, 'Túi');
+  return text;
+}
+
+function normalizeImportedValue(value, header) {
+  const text = String(value ?? '').trim();
+  if (normalizeColumnName(header) === 'san pham') return normalizeProductName(text);
+  if (normalizeColumnName(header) !== 'so dien thoai') return text;
+  return text.replace(/^\+84(?:[\s-]*)/u, '0');
+}
+
+function getInvalidOrderRows(data = orderData) {
+  const addressIndex = data.headers.findIndex(header => normalizeColumnName(header) === 'dia chi');
+  if (addressIndex < 0) return [];
+  return data.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => isInvalidOrderAddress(row[addressIndex]));
+}
+
+function getRecommendedOrderStage(data = orderData) {
+  if (!data.rows.length) return 'import';
+  return getOrdersNeedingProcessing(data).length ? 'process' : 'export';
+}
+
+function getDuplicateOrderRowIndexes(data = orderData) {
+  const ignoredColumns = new Set(['stt', 'ma don hang']);
+  const comparableIndexes = data.headers
+    .map((header, index) => ({ index, name: normalizeColumnName(header) }))
+    .filter(column => !ignoredColumns.has(column.name))
+    .map(column => column.index);
+  if (!comparableIndexes.length) return new Set();
+  const indexesBySignature = new Map();
+  data.rows.forEach((row, index) => {
+    const signature = JSON.stringify(comparableIndexes.map(columnIndex =>
+      String(row[columnIndex] ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi')
+    ));
+    const indexes = indexesBySignature.get(signature) || [];
+    indexes.push(index);
+    indexesBySignature.set(signature, indexes);
+  });
+  return new Set([...indexesBySignature.values()].filter(indexes => indexes.length > 1).flat());
+}
+
+function getDuplicatePhoneRowIndexes(data = orderData) {
+  const phoneIndex = data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  if (phoneIndex < 0) return new Set();
+  const indexesByPhone = new Map();
+  data.rows.forEach((row, index) => {
+    let phone = String(row[phoneIndex] ?? '').replace(/\D/g, '');
+    if (phone.startsWith('84')) phone = `0${phone.slice(2)}`;
+    if (!phone) return;
+    const indexes = indexesByPhone.get(phone) || [];
+    indexes.push(index);
+    indexesByPhone.set(phone, indexes);
+  });
+  return new Set([...indexesByPhone.values()].filter(indexes => indexes.length > 1).flat());
+}
+
+function getOrdersNeedingProcessing(data = orderData) {
+  const invalidRowIndexes = new Set(getInvalidOrderRows(data).map(entry => entry.index));
+  const duplicateRowIndexes = getDuplicateOrderRowIndexes(data);
+  const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes(data);
+  return data.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ index }) => invalidRowIndexes.has(index)
+      || duplicateRowIndexes.has(index)
+      || duplicatePhoneRowIndexes.has(index));
+}
+
+function isInvalidOrderAddress(value) {
+  return String(value ?? '').trim().toUpperCase().startsWith('GXN');
+}
+
+function renderPreviewCell(value, header) {
+  const previewValue = getPreviewValue(value, header);
+  const column = normalizeColumnName(header);
+  if (column === 'don gia') {
+    const price = String(previewValue ?? '').trim();
+    return price && !/[đ₫]$/iu.test(price) ? `${escapeHtml(price)} đ` : escapeHtml(price);
+  }
+  if (column === 'san pham') {
+    const productName = normalizeColumnName(previewValue);
+    const isSingleBag = productName.includes('1 tui');
+    const imageName = productName.includes('combo 2') && productName.includes('xanh') ? 'combo2_green'
+      : productName.includes('combo 2') && productName.includes('vang') ? 'combo2_yellow'
+      : productName.includes('combo 3') && productName.includes('xanh') ? 'combo3_green'
+        : productName.includes('combo 3') && productName.includes('vang') ? 'combo3_yellow'
+          : isSingleBag && productName.includes('xanh') ? 'product_green'
+            : isSingleBag && productName.includes('vang') ? 'product_yellow'
+              : isSingleBag && productName.includes('nau') ? 'product_brown' : '';
+    if (imageName) {
+      const imageAlt = ({
+        combo2_green: 'Combo 2 Túi Xanh',
+        combo2_yellow: 'Combo 2 Túi Vàng',
+        combo3_green: 'Combo 3 Túi Xanh',
+        combo3_yellow: 'Combo 3 Túi Vàng',
+        product_green: '1 Túi Xanh',
+        product_yellow: '1 Túi Vàng',
+        product_brown: '1 Túi Nâu'
+      })[imageName];
+      const imageClass = imageName.startsWith('combo2_') ? ' product-image--combo2' : imageName.startsWith('combo3_') ? ' product-image--combo3' : '';
+      return `<span class="product-with-image">${escapeHtml(previewValue)}<img class="${imageClass.trim()}" src="/assets/logos/${imageName}.png" alt="${imageAlt}"></span>`;
+    }
+  }
+  const network = normalizeColumnName(previewValue);
+  if (column === 'nha mang' && network === 'i telecom') {
+    return '<img class="network-logo network-logo--itel" src="/assets/logos/itel-hq.png" alt="iTel">';
+  }
+  if (column === 'nha mang' && ['viettel', 'mobifone', 'vinaphone'].includes(network)) {
+    const label = network === 'viettel' ? 'Viettel' : network === 'mobifone' ? 'Mobifone' : 'Vinaphone';
+    if (network === 'vinaphone') {
+      return `<span class="network-logo network-logo--vinaphone"><img src="/assets/logos/${network}.png" alt="${label}"></span>`;
+    }
+    if (network === 'viettel') {
+      return `<span class="network-logo network-logo--viettel"><img src="/assets/logos/${network}.png?v=3" alt="${label}"></span>`;
+    }
+    const logoClass = network === 'mobifone' ? ' network-logo--mobifone' : '';
+    return `<img class="network-logo${logoClass}" src="/assets/logos/${network}.png" alt="${label}">`;
+  }
+  return escapeHtml(previewValue);
+}
+
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '') {
+  if (!rowEntries.length) {
+    preview.innerHTML = `<p>${escapeHtml(emptyMessage)}</p>`;
+    return;
+  }
+  const visibleColumns = headers
+    .map((header, index) => ({ index, name: normalizeColumnName(header) }))
+    .filter(column => !hiddenPreviewColumns.has(column.name));
+  const productColumn = visibleColumns.find(column => column.name === 'san pham');
+  let orderedColumns = visibleColumns.filter(column => column !== productColumn);
+  if (productColumn) {
+    const carrierPosition = orderedColumns.findIndex(column => column.name === 'nha mang');
+    const addressPosition = orderedColumns.findIndex(column => column.name === 'dia chi');
+    const insertPosition = carrierPosition >= 0 && (addressPosition < 0 || carrierPosition < addressPosition)
+      ? carrierPosition + 1
+      : addressPosition >= 0 ? addressPosition : orderedColumns.length;
+    orderedColumns.splice(insertPosition, 0, productColumn);
+  }
+  const trailingColumnNames = ['so luong', 'don gia', 'dia chi'];
+  const trailingColumns = trailingColumnNames
+    .map(name => orderedColumns.find(column => column.name === name))
+    .filter(Boolean);
+  orderedColumns = orderedColumns
+    .filter(column => !trailingColumnNames.includes(column.name))
+    .concat(trailingColumns);
+  const visibleIndexes = orderedColumns.map(column => column.index);
+  const columnTemplate = orderedColumns.map(column => column.name === 'dia chi' ? 'minmax(360px, 1fr)' : column.name === 'san pham' ? 'minmax(180px, max-content)' : 'max-content').join(' ');
+  const previewClassName = index => {
+    const columnName = normalizeColumnName(headers[index]);
+    return columnName === 'dia chi' ? 'preview-address'
+      : columnName === 'so luong' ? 'preview-quantity'
+        : columnName === 'so dien thoai' ? 'preview-phone' : '';
+  };
+  const previewHeaderClassName = index => normalizeColumnName(headers[index]) === 'san pham'
+    ? `${previewClassName(index)} preview-product-heading`.trim()
+    : previewClassName(index);
+  const head = visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('');
+  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}">${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}</tr>`).join('');
+  preview.innerHTML = `<table style="--preview-template: ${columnTemplate}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function renderOrderData() {
+  const { headers } = orderData;
+  let { rows } = orderData;
+  if (rows.length) {
+    orderData.rows = rows.map(row => row.map((value, index) => normalizeImportedValue(value, headers[index])));
+    rows = orderData.rows;
+    localStorage.setItem('crm-orders', JSON.stringify(orderData));
+  }
+  const allRows = rows.map((row, index) => ({ row, index }));
+  const invalidRows = getInvalidOrderRows();
+  const invalidRowIndexes = new Set(invalidRows.map(entry => entry.index));
+  const duplicateRowIndexes = getDuplicateOrderRowIndexes();
+  const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes();
+  const processingRows = allRows.filter(({ index }) => invalidRowIndexes.has(index)
+    || duplicateRowIndexes.has(index)
+    || duplicatePhoneRowIndexes.has(index));
+  const processingRowIndexes = new Set(processingRows.map(entry => entry.index));
+  const filterValue = orderFilter?.value || 'all';
+  let importRows = filterValue === 'valid' ? allRows.filter(entry => !processingRowIndexes.has(entry.index))
+    : filterValue === 'invalid' ? processingRows
+      : filterValue === 'duplicate' ? allRows.filter(entry => duplicateRowIndexes.has(entry.index))
+        : filterValue === 'duplicate-phone' ? allRows.filter(entry => duplicatePhoneRowIndexes.has(entry.index))
+          : allRows;
+  const searchValue = normalizeColumnName(orderSearch?.value || '');
+  if (searchValue) {
+    importRows = importRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue));
+  }
+  renderExportPreview();
+  orderExport.disabled = buildExportRows().length === 0;
+
+  renderOrderTable(
+    document.querySelector('#order-import-preview'), headers, importRows,
+    rows.length ? 'Không tìm thấy đơn hàng phù hợp.' : 'Import một tệp CSV hoặc XLSX để xem toàn bộ dữ liệu.',
+    ({ index }) => duplicateRowIndexes.has(index)
+      ? 'order-row-duplicate'
+      : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : ''
+  );
+  renderOrderTable(
+    document.querySelector('#order-preview'), headers, processingRows,
+    'Không có đơn hàng cần xử lý.', ({ index }) => duplicateRowIndexes.has(index)
+      ? 'order-row-duplicate'
+      : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : 'order-row-invalid'
+  );
+}
+
+const exportColumns = [
+  'STT*', 'Mã đơn hàng', 'Nguồn đơn hàng', 'Ngày đặt hàng', 'Tác động tồn kho', 'Gửi email thông báo',
+  'Giá đã bao gồm thuế', 'Trạng thái thanh toán', 'Phương thức thanh toán', 'Trạng thái giao hàng',
+  'Hình thức giao hàng', 'Đối tác vận chuyển', 'Phí giao hàng', 'Giảm giá đơn hàng', '', '', 'Mã phiên bản',
+  'Tên sản phẩm', 'Tên phiên bản', 'SKU', 'Đơn vị', 'Số lượng*', 'Giá bán', 'Giảm giá sản phẩm', 'Khối lượng',
+  'Yêu cầu vận chuyển', 'Ghi chú sản phẩm', 'Nhãn hiệu', 'Thuế', '', 'Số điện thoại', 'Email', 'Họ khách hàng',
+  'Tên khách hàng', 'SĐT giao hàng', 'Địa chỉ', 'Tỉnh thành', 'Quận huyện', 'Phường xã', 'SĐT nhân viên phụ trách',
+  'Ghi chú', 'Tags', 'Tham chiếu'
+];
+const exportHeaderFills = [0,3,2,3,2,3,2,3,2,3,3,3,3,3,0,0,3,3,3,2,3,2,2,3,2,4,3,3,3,0,3,3,3,2,2,2,2,2,2,3,3,3,3];
+const exportPreviewIndexes = [0,2,4,6,8,19,21,22,24,28,33,34,35,36,37,38];
+const exportPreviewGroups = [
+  { label:'STT', span:1, fill:2, rowspan:2 },
+  { label:'Thông tin đơn hàng', span:4, fill:3 },
+  { label:'Thông tin mua hàng', span:5, fill:3 },
+  { label:'Địa chỉ giao hàng', span:6, fill:3 }
+];
+const exportPreviewWidths = [55,130,135,155,165,175,95,110,105,105,165,145,255,145,155,145];
+
+const skuWeights = {
+  'GRA-VANG-H350': 400,
+  'GRA-XANH-Z450': 500,
+  'GRA-NAU-Z350': 400,
+  'GRA-NAU-G35': 35,
+  'GRA-XANH-G35': 35,
+  'GRA-CAM-G30': 30,
+  'HT-YM-T500': 500,
+  'YM-VO-T500': 500,
+  'HU-300ML': 10,
+  'BGD': 10,
+  'MUONG': 10
+};
+
+const skuPrices = {
+  'GRA-NAU-Z350': { single:179000, combo:144000 },
+  'GRA-VANG-H350': { single:189000, combo:149000 },
+  'GRA-XANH-Z450': { single:189000, combo:149000 }
+};
+
+function normalizeSkuToken(symbol) {
+  return String(symbol || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+}
+
+function getSkuPrice(sku, isCombo, fallbackPrice) {
+  const configuredPrice = skuPrices[sku];
+  if (configuredPrice) return isCombo ? configuredPrice.combo : configuredPrice.single;
+  return Number(fallbackPrice) || 0;
+}
+
+function getOatUnitPrice(bagCount, descriptor, orderPrice) {
+  const normalizedDescriptor = normalizeSkuToken(descriptor);
+  const calculatedPrice = bagCount ? Math.round((Number(orderPrice) || 0) / bagCount) : 0;
+  if (bagCount === 2) {
+    if (normalizedDescriptor.includes('SHIP') || (calculatedPrice > 0 && calculatedPrice <= 60000)) return 58000;
+    return 65500;
+  }
+  if (bagCount === 4) return 55500;
+  if (bagCount === 6) return 49800;
+  return calculatedPrice;
+}
+
+function mapSingleSku(symbol) {
+  const value = String(symbol || '').trim();
+  const upper = normalizeSkuToken(value);
+  if (upper === 'HU-300ML' || upper.includes('HU 300ML')) return 'HU-300ML';
+  if (upper === 'HT-YM-T500' || (upper.includes('YEN MACH') && upper.includes('CAN DET'))) return 'HT-YM-T500';
+  if (upper === 'YM-VO-T500' || (upper.includes('YEN MACH') && upper.includes('CAN VO'))) return 'YM-VO-T500';
+  if (upper.endsWith('G35') && upper.includes('NAU')) return 'GRA-NAU-G35';
+  if (upper.endsWith('G35') && upper.includes('XANH')) return 'GRA-XANH-G35';
+  if (upper.endsWith('G30') && upper.includes('CAM')) return 'GRA-CAM-G30';
+  if (upper.includes('VANGG') || upper.includes('VANG')) return 'GRA-VANG-H350';
+  if (upper.includes('XANH')) return 'GRA-XANH-Z450';
+  if (upper.includes('NAU')) return 'GRA-NAU-Z350';
+  if (upper === 'BGD') return 'BGD';
+  if (upper === 'M' || upper === 'MUONG') return 'MUONG';
+  return value;
+}
+
+function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPricing = false, productLabel = '') {
+  const raw = String(symbol || productLabel || '').trim();
+  const quantity = Math.max(1, Number(orderQuantity) || 1);
+  const price = Number(orderPrice) || 0;
+  if (!raw) return [{ sku:'', quantity, price }];
+
+  const parts = raw.split('+').map(part => part.trim()).filter(Boolean);
+  const comboMatch = parts[0].match(/^CB\s*(\d+)\s*(?:-|\s)\s*(.*)$/i);
+  const descriptor = `${raw} ${productLabel}`;
+  const normalizedDescriptor = normalizeSkuToken(descriptor);
+  const kgMatch = normalizedDescriptor.match(/\b([123])\s*KG\b/);
+  const oatBundleMatch = normalizeSkuToken(raw).match(/^CB\s*(\d+)\s*(?:-|\s)\s*(HT-YM-T500|YM-VO-T500)$/);
+  const isMixedOat = normalizeSkuToken(raw) === 'CB-YM-DET+VO'
+    || (normalizedDescriptor.includes('CAN DET') && normalizedDescriptor.includes('CAN VO'))
+    || (normalizedDescriptor.includes('HT-YM-T500') && normalizedDescriptor.includes('YM-VO-T500'));
+
+  if (comboMatch && Number(comboMatch[1]) === 10 && comboMatch[2].toUpperCase() === 'MIX') {
+    const unitPrice = Math.round(price / 10);
+    return [
+      { sku:'GRA-NAU-G35', quantity:3 * quantity, price:unitPrice },
+      { sku:'GRA-XANH-G35', quantity:4 * quantity, price:unitPrice },
+      { sku:'GRA-CAM-G30', quantity:3 * quantity, price:unitPrice }
+    ];
+  }
+
+  if (isMixedOat) {
+    const kilograms = kgMatch ? Number(kgMatch[1]) : 1;
+    const totalBags = comboMatch ? Number(comboMatch[1]) : kilograms * 2;
+    const itemQuantity = Math.max(1, Math.round(totalBags / 2)) * quantity;
+    const unitPrice = totalBags === 2 ? 58000 : getOatUnitPrice(totalBags, descriptor, price);
+    return [
+      { sku:'HT-YM-T500', quantity:itemQuantity, price:unitPrice },
+      { sku:'YM-VO-T500', quantity:itemQuantity, price:unitPrice },
+      { sku:'HU-300ML', quantity:Math.max(1, Math.round(totalBags / 2)) * quantity, price:0 }
+    ];
+  }
+
+  const directOatSku = mapSingleSku(raw);
+  const oatBagCount = oatBundleMatch
+    ? Number(oatBundleMatch[1])
+    : (kgMatch && (directOatSku === 'HT-YM-T500' || directOatSku === 'YM-VO-T500') ? Number(kgMatch[1]) * 2 : 0);
+  if (oatBagCount && (directOatSku === 'HT-YM-T500' || directOatSku === 'YM-VO-T500' || oatBundleMatch)) {
+    const oatSku = oatBundleMatch ? oatBundleMatch[2] : directOatSku;
+    return [
+      { sku:oatSku, quantity:oatBagCount * quantity, price:getOatUnitPrice(oatBagCount, descriptor, price) },
+      { sku:'HU-300ML', quantity:Math.max(1, Math.round(oatBagCount / 2)) * quantity, price:0 }
+    ];
+  }
+
+  if (comboMatch) {
+    const baseSku = mapSingleSku(comboMatch[2]);
+    if (baseSku && (skuWeights[baseSku] !== undefined || baseSku !== comboMatch[2])) {
+      const multiplier = Number(comboMatch[1]);
+      const extraSkus = parts.slice(1).map(mapSingleSku);
+      const productSkus = [baseSku, ...extraSkus.filter(sku => skuPrices[sku])];
+      const giftSkus = extraSkus.filter(sku => !skuPrices[sku]);
+      const totalUnits = multiplier * quantity;
+      const items = productSkus.map((sku, index) => {
+        const itemQuantity = productSkus.length === 1
+          ? totalUnits
+          : (index === 0 ? totalUnits - quantity * (productSkus.length - 1) : quantity);
+        return {
+          sku,
+          quantity:Math.max(quantity, itemQuantity),
+          price:getSkuPrice(sku, true, Math.round(price / multiplier))
+        };
+      });
+      giftSkus.forEach(giftSku => {
+        if (!items.some(item => item.sku === giftSku)) items.push({ sku:giftSku, quantity, price:0 });
+      });
+      if (multiplier === 3) {
+        ['BGD', 'MUONG'].forEach(giftSku => {
+          if (!items.some(item => item.sku === giftSku)) items.push({ sku:giftSku, quantity, price:0 });
+        });
+      }
+      return items;
+    }
+  }
+
+  if (parts.length > 1) {
+    const mappedParts = parts.map(part => mapSingleSku(part.replace(/^CB-/i, '')));
+    const allMapped = mappedParts.every(sku => sku && (skuWeights[sku] !== undefined || skuPrices[sku]));
+    if (allMapped) {
+      const productSkus = mappedParts.filter(sku => sku !== 'BGD' && sku !== 'MUONG');
+      const fallbackPrice = productSkus.length ? Math.round(price / productSkus.length) : 0;
+      return mappedParts.map(sku => ({
+        sku,
+        quantity,
+        price:sku === 'BGD' || sku === 'MUONG' ? 0 : getSkuPrice(sku, true, fallbackPrice)
+      }));
+    }
+  }
+
+  const singleSku = mapSingleSku(raw);
+  return [{ sku:singleSku, quantity, price:getSkuPrice(singleSku, useComboPricing, price) }];
+}
+
+function buildExportRows() {
+  const sourceIndex = new Map(orderData.headers.map((header, index) => [normalizeColumnName(header), index]));
+  const value = (row, header) => { const index = sourceIndex.get(normalizeColumnName(header)); return index === undefined ? '' : row[index] || ''; };
+  const exportableRows = orderData.rows.filter(row => !isInvalidOrderAddress(value(row, 'Địa chỉ')));
+  const outputRows = [];
+  const seenOrders = new Set();
+  const bagQuantityByOrder = new Map();
+  let orderNumber = 0;
+
+  exportableRows.forEach((row, rowIndex) => {
+    const sourceOrderId = value(row, 'Mã đơn hàng');
+    const orderKey = sourceOrderId ? `id:${sourceOrderId}` : `row:${rowIndex}`;
+    const items = splitSkuForExport(
+      value(row, 'Mã mẫu mã'),
+      value(row, 'Số lượng'),
+      value(row, 'Đơn giá'),
+      false,
+      value(row, 'Sản phẩm')
+    );
+    const bagQuantity = items
+      .filter(item => skuPrices[item.sku])
+      .reduce((total, item) => total + (Number(item.quantity) || 0), 0);
+    bagQuantityByOrder.set(orderKey, (bagQuantityByOrder.get(orderKey) || 0) + bagQuantity);
+  });
+
+  exportableRows.forEach((row, rowIndex) => {
+    const phone = value(row, 'Số điện thoại');
+    const sourceOrderId = value(row, 'Mã đơn hàng');
+    const orderKey = sourceOrderId ? `id:${sourceOrderId}` : `row:${rowIndex}`;
+    const isFirstOrderLine = !seenOrders.has(orderKey);
+    if (isFirstOrderLine) {
+      seenOrders.add(orderKey);
+      orderNumber += 1;
+    }
+
+    const items = splitSkuForExport(
+      value(row, 'Mã mẫu mã'),
+      value(row, 'Số lượng'),
+      value(row, 'Đơn giá'),
+      (bagQuantityByOrder.get(orderKey) || 0) >= 2,
+      value(row, 'Sản phẩm')
+    );
+    items.forEach((item, itemIndex) => {
+      const isFirstExportLine = isFirstOrderLine && itemIndex === 0;
+      const output = Array(exportColumns.length).fill('');
+      if (isFirstExportLine) {
+        output[0] = orderNumber;
+        output[2] = 'Facebook';
+        output[4] = 'Có';
+        output[6] = 'Có';
+        output[8] = 'Thanh toán COD';
+        output[28] = '8%';
+        output[30] = phone;
+        output[33] = value(row, 'Khách hàng');
+        output[34] = phone;
+        output[35] = value(row, 'Địa chỉ');
+        output[36] = normalizeExportLocation(value(row, 'Tỉnh/Thành phố'));
+        output[37] = normalizeExportLocation(value(row, 'Quận/Huyện'));
+        output[38] = normalizeExportLocation(value(row, 'Phường/Xã'));
+      }
+      output[19] = item.sku;
+      output[21] = item.quantity;
+      output[22] = item.price;
+      output[24] = skuWeights[item.sku] ?? '';
+      outputRows.push(output);
+    });
+  });
+  return outputRows;
+}
+
+function renderExportPreview() {
+  const preview = document.querySelector('#order-export-preview');
+  if (!preview) return;
+  const rows = buildExportRows();
+  if (!rows.length) {
+    preview.innerHTML = '<p>Chưa có dữ liệu xuất.</p>';
+    return;
+  }
+  const groupHead = exportPreviewGroups.map(group => `<th class="export-fill-${group.fill}" colspan="${group.span}"${group.rowspan ? ` rowspan="${group.rowspan}"` : ''}>${escapeHtml(group.label)}</th>`).join('');
+  const columnHead = exportPreviewIndexes.filter(index => index !== 0).map(index => {
+    const label = index === 28 ? 'Thuế (Tỷ lệ)' : exportColumns[index];
+    return `<th class="export-fill-${exportHeaderFills[index]}">${escapeHtml(label)}</th>`;
+  }).join('');
+  const tableWidth = exportPreviewWidths.reduce((total, width) => total + width, 0);
+  const columns = exportPreviewWidths.map(width => `<col style="width:${width}px">`).join('');
+  const body = rows.map(row => `<tr>${exportPreviewIndexes.map(index => `<td>${escapeHtml(row[index])}</td>`).join('')}</tr>`).join('');
+  preview.innerHTML = `<table class="export-template-table" style="width:${tableWidth}px"><colgroup>${columns}</colgroup><thead><tr class="export-group-row">${groupHead}</tr><tr>${columnHead}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  sidebarToggle.textContent = collapsed ? '›' : '‹';
+  sidebarToggle.title = collapsed ? 'Mở rộng' : 'Thu gọn';
+  sidebarToggle.setAttribute('aria-label', sidebarToggle.title);
+  localStorage.setItem('crm-sidebar-collapsed', String(collapsed));
+}
+
+sidebarToggle.onclick = () => {
+  const collapsed = !document.body.classList.contains('sidebar-collapsed');
+  setSidebarCollapsed(collapsed);
+  appSettings.collapseSidebar = collapsed;
+  saveAppSettings();
+};
+setSidebarCollapsed(appSettings.collapseSidebar);
+applyAppSettings();
+
+navItems.forEach(item => {
+  item.onclick = () => item.dataset.view === 'orders' ? showOrderStage(getRecommendedOrderStage()) : showView(item.dataset.view);
+});
+
+settingsForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  appSettings = {
+    displayName: settingsDisplayName?.value.trim() || 'Huy Facebook',
+    sendWithEnter: Boolean(settingsSendEnter?.checked),
+    showContactPanel: Boolean(settingsShowContact?.checked),
+    collapseSidebar: Boolean(settingsCollapseSidebar?.checked)
+  };
+  saveAppSettings();
+  applyAppSettings();
+  setSidebarCollapsed(appSettings.collapseSidebar);
+  if (settingsStatus) settingsStatus.textContent = 'Đã lưu cài đặt.';
+});
+
+facebookConnectButton?.addEventListener('click', beginFacebookConnection);
+zaloConnectButton?.addEventListener('click', () => {
+  showToast('Cần cấu hình ứng dụng Zalo Official Account trước khi kết nối.');
+});
+facebookPageConfirm?.addEventListener('click', confirmFacebookPages);
+document.querySelectorAll('[data-close-channel-dialog]').forEach(button => button.addEventListener('click', closeFacebookPageDialog));
+facebookPageOptions?.addEventListener('change', event => {
+  if (!event.target.matches('input[type="checkbox"]')) return;
+  if (facebookPageDialogStatus) facebookPageDialogStatus.textContent = '';
+});
+facebookChannelList?.addEventListener('click', async event => {
+  const actionButton = event.target.closest('[data-channel-action]');
+  const channelItem = actionButton?.closest('[data-channel-id]');
+  if (!actionButton || !channelItem) return;
+  const pageId = channelItem.dataset.channelId;
+  const pageName = channelItem.querySelector('.channel-item-copy strong')?.textContent || 'Facebook Page';
+  if (actionButton.dataset.channelAction === 'remove' && !window.confirm(`Ngắt kết nối “${pageName}”? Tin nhắn mới từ Page này sẽ không được đồng bộ.`)) return;
+  actionButton.disabled = true;
+  try {
+    const endpoint = actionButton.dataset.channelAction === 'refresh'
+      ? `/api/channels/facebook/${encodeURIComponent(pageId)}/refresh`
+      : `/api/channels/facebook/${encodeURIComponent(pageId)}`;
+    await readApiResponse(await fetch(endpoint, { method: actionButton.dataset.channelAction === 'refresh' ? 'POST' : 'DELETE' }));
+    await loadFacebookChannels();
+    showToast(actionButton.dataset.channelAction === 'refresh' ? 'Đã làm mới trạng thái Page.' : 'Đã ngắt kết nối Page.', 'success');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    actionButton.disabled = false;
+  }
+});
+
+orderStageButtons.forEach(button => {
+  button.onclick = () => showOrderStage(button.dataset.orderStage);
+});
+
+settingsSectionButtons.forEach(button => {
+  button.onclick = () => {
+    settingsSectionButtons.forEach(item => item.classList.toggle('active', item === button));
+    showView('settings');
+  };
+});
+
+function applyImportedRecords(sourceHeaders, records) {
+  sourceHeaders = sourceHeaders.map((header, index) => String(header).trim() || `Cột ${index + 1}`);
+  const retainedIndexes = sourceHeaders.map((_, index) => index);
+  const headers = retainedIndexes.map(index => sourceHeaders[index]);
+  const nonEmptyRows = records.filter(row => row.some(value => String(value ?? '').trim()));
+  orderData = {
+    headers,
+    rows: nonEmptyRows.map(row => retainedIndexes.map(index => normalizeImportedValue(row[index] || '', sourceHeaders[index])))
+  };
+  localStorage.setItem('crm-orders', JSON.stringify(orderData));
+  renderOrderData();
+  showOrderStage(getRecommendedOrderStage());
+}
+
+orderImport.onchange = async () => {
+  const file = orderImport.files[0];
+  if (!file) return;
+  try {
+    if (file.name.toLowerCase().endsWith('.xlsx')) {
+      const response = await fetch('/api/orders/import/xlsx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        body: file
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Không thể đọc tệp XLSX.');
+      applyImportedRecords(result.headers || [], result.rows || []);
+    } else {
+      const records = parseCsv((await file.text()).replace(/^\uFEFF/, ''));
+      applyImportedRecords(records.shift() || [], records);
+    }
+    recordOrderImport(file.name);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    orderImport.value = '';
+  }
+};
+
+orderHistoryButton.addEventListener('click', () => {
+  const willOpen = orderHistoryPanel.classList.contains('hidden');
+  orderHistoryPanel.classList.toggle('hidden', !willOpen);
+  orderHistoryButton.setAttribute('aria-expanded', String(willOpen));
+});
+
+let orderSearchTimer;
+orderSearch.addEventListener('input', () => {
+  window.clearTimeout(orderSearchTimer);
+  orderSearchTimer = window.setTimeout(renderOrderData, 120);
+});
+orderFilter.addEventListener('change', renderOrderData);
+
+messageChannelTrigger?.addEventListener('click', event => {
+  event.stopPropagation();
+  const willOpen = messageChannelMenu?.classList.contains('hidden');
+  messageChannelMenu?.classList.toggle('hidden', !willOpen);
+  messageLabelMenu?.classList.add('hidden');
+  messageChannelTrigger.setAttribute('aria-expanded', String(willOpen));
+  messageLabelFilter?.setAttribute('aria-expanded', 'false');
+});
+messageChannelMenu?.addEventListener('click', event => {
+  const option = event.target.closest('[data-message-channel]');
+  if (!option) return;
+  currentMessageChannelId = option.dataset.messageChannel;
+  messageChannelMenu.classList.add('hidden');
+  messageChannelTrigger?.setAttribute('aria-expanded', 'false');
+  activateCurrentMessageChannel();
+});
+messageLabelFilter?.addEventListener('click', event => {
+  event.stopPropagation();
+  const willOpen = messageLabelMenu?.classList.contains('hidden');
+  messageLabelMenu?.classList.toggle('hidden', !willOpen);
+  messageChannelMenu?.classList.add('hidden');
+  messageLabelFilter.setAttribute('aria-expanded', String(willOpen));
+  messageChannelTrigger?.setAttribute('aria-expanded', 'false');
+});
+messageLabelMenu?.addEventListener('click', event => {
+  const option = event.target.closest('[data-message-label]');
+  if (!option) return;
+  currentMessageLabel = option.dataset.messageLabel || 'all';
+  messageLabelMenu.querySelectorAll('[data-message-label]').forEach(item => item.classList.toggle('active', item === option));
+  messageLabelFilter.innerHTML = `${currentMessageLabel === 'all' ? 'Nhãn' : 'Nhãn (1)'} <span aria-hidden="true">▾</span>`;
+  messageLabelFilter.classList.toggle('active', currentMessageLabel !== 'all');
+  messageLabelMenu.classList.add('hidden');
+  messageLabelFilter.setAttribute('aria-expanded', 'false');
+  activateCurrentMessageChannel();
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.message-channel-picker')) {
+    messageChannelMenu?.classList.add('hidden');
+    messageChannelTrigger?.setAttribute('aria-expanded', 'false');
+  }
+  if (!event.target.closest('.message-label-picker')) {
+    messageLabelMenu?.classList.add('hidden');
+    messageLabelFilter?.setAttribute('aria-expanded', 'false');
+  }
+  if (!event.target.closest('#conversation-menu') && !event.target.closest('.conversation-more')) closeConversationMenu();
+});
+
+messageSearchInput?.addEventListener('input', filterConversations);
+messageSearchInput?.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  messageSearchInput.value = '';
+  filterConversations();
+  messageSearchInput.blur();
+});
+
+conversationFilterButtons.forEach(button => {
+  button.addEventListener('click', () => {
+    currentConversationFilter = button.dataset.messageFilter || 'all';
+    conversationFilterButtons.forEach(item => item.classList.toggle('active', item === button));
+    filterConversations();
+  });
+});
+
+conversationList?.addEventListener('click', event => {
+  if (event.target.closest('.conversation-more')) return;
+  const conversation = event.target.closest('.conversation');
+  if (!conversation || !conversationList.contains(conversation)) return;
+  selectConversation(conversation);
+});
+
+conversationList?.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  if (event.target.closest('.conversation-more')) return;
+  const conversation = event.target.closest('.conversation');
+  if (!conversation || !conversationList.contains(conversation)) return;
+  event.preventDefault();
+  selectConversation(conversation);
+});
+
+conversationList?.addEventListener('scroll', closeConversationMenu);
+
+conversationList?.addEventListener('click', event => {
+  const trigger = event.target.closest('.conversation-more');
+  if (!trigger) return;
+  event.stopPropagation();
+  const conversation = trigger.closest('.conversation');
+  if (conversationMenuTarget === conversation) closeConversationMenu();
+  else openConversationMenu(trigger);
+});
+
+conversationMenu?.addEventListener('click', event => {
+  const item = event.target.closest('[data-conversation-action]');
+  if (!item) return;
+  event.stopPropagation();
+  const conversation = conversationMenuTarget;
+  closeConversationMenu();
+  runConversationMenuAction(item.dataset.conversationAction, conversation);
+});
+
+window.addEventListener('resize', closeConversationMenu);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeConversationMenu();
+});
+
+markUnreadButton?.addEventListener('click', () => {
+  const activeConversation = document.querySelector('.conversation.active');
+  if (!activeConversation) return;
+  activeConversation.classList.add('unread');
+  saveUnreadConversations();
+  updateMarkUnreadButton();
+  filterConversations();
+});
+
+messageImageInput?.addEventListener('change', async () => {
+  const file = messageImageInput.files?.[0];
+  if (!file) return;
+  clearComposerStatus();
+  closeComposerPopovers();
+  const type = file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'image' : '';
+  if (!type) {
+    showComposerStatus('Vui lòng chọn một tệp ảnh hoặc video.');
+    messageImageInput.value = '';
+    return;
+  }
+  const sizeLimit = type === 'video' ? 20 * 1024 * 1024 : 2 * 1024 * 1024;
+  if (file.size > sizeLimit) {
+    showComposerStatus(type === 'video' ? 'Video quá lớn. Vui lòng chọn video dưới 20 MB.' : 'Ảnh quá lớn. Vui lòng chọn ảnh dưới 2 MB.');
+    messageImageInput.value = '';
+    return;
+  }
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    setPendingAttachment({ type, dataUrl, name: file.name });
+    messageComposerInput?.focus();
+  } catch {
+    showComposerStatus('Không thể đọc tệp này. Vui lòng chọn tệp khác.');
+  }
+});
+
+chatHeadChatTab?.addEventListener('click', () => {
+  currentChatHeadView = 'chat';
+  renderConversation();
+});
+
+chatHeadFileTab?.addEventListener('click', () => {
+  closeConversationSearch();
+  closePinnedPanel();
+  currentChatHeadView = 'files';
+  renderConversationFiles();
+});
+
+chatHeadDocsTab?.addEventListener('click', () => {
+  closeConversationSearch();
+  closePinnedPanel();
+  currentChatHeadView = 'docs';
+  renderConversationDocs();
+});
+
+chatHeadPinnedTab?.addEventListener('click', () => {
+  if (chatPinnedPanel?.classList.contains('hidden')) openPinnedPanel();
+  else closePinnedPanel();
+});
+
+chatPinnedClose?.addEventListener('click', closePinnedPanel);
+chatPinnedSearch?.addEventListener('input', () => renderPinnedPanel());
+chatPinnedSearch?.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  closePinnedPanel();
+  chatHeadPinnedTab?.focus();
+});
+
+messageDocumentInput?.addEventListener('change', async () => {
+  const file = messageDocumentInput.files?.[0];
+  if (!file) return;
+  clearComposerStatus();
+  closeComposerPopovers();
+  if (file.size > 2 * 1024 * 1024) {
+    showComposerStatus('Tài liệu quá lớn. Vui lòng chọn tệp dưới 2 MB.');
+    messageDocumentInput.value = '';
+    return;
+  }
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    setPendingAttachment({ type: 'document', dataUrl, name: file.name, size: file.size });
+    messageDocumentInput.value = '';
+    updateMessageSendState();
+    messageComposerInput?.focus();
+  } catch {
+    showComposerStatus('Không thể đọc tệp này. Vui lòng chọn tệp khác.');
+  }
+});
+
+chatHeadAdd?.addEventListener('click', () => {
+  currentChatHeadView = 'chat';
+  renderConversation();
+  messageImageInput?.click();
+});
+
+conversationSearchButton?.addEventListener('click', () => {
+  if (chatSearchBar?.classList.contains('hidden')) openConversationSearch();
+  else closeConversationSearch();
+});
+
+chatSearchInput?.addEventListener('input', updateConversationSearch);
+chatSearchSender?.addEventListener('change', updateConversationSearch);
+chatSearchDate?.addEventListener('change', updateConversationSearch);
+chatSearchInput?.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    closeConversationSearch();
+    conversationSearchButton?.focus();
+  } else if (event.key === 'Enter' && conversationSearchMatches.length) {
+    event.preventDefault();
+    selectConversationSearchMatch(conversationSearchIndex + (event.shiftKey ? -1 : 1));
+  }
+});
+chatSearchClose?.addEventListener('click', closeConversationSearch);
+
+contactInfoButton?.addEventListener('click', () => {
+  if (!chatSearchBar?.classList.contains('hidden')) {
+    closeConversationSearch();
+    appSettings = { ...appSettings, showContactPanel: true };
+    saveAppSettings();
+    applyAppSettings();
+    return;
+  }
+  appSettings = { ...appSettings, showContactPanel: !appSettings.showContactPanel };
+  saveAppSettings();
+  applyAppSettings();
+});
+
+stickerButton?.addEventListener('click', event => {
+  event.stopPropagation();
+  const willOpen = stickerPicker?.classList.contains('hidden');
+  closeComposerPopovers();
+  stickerPicker?.classList.toggle('hidden', !willOpen);
+  stickerButton.setAttribute('aria-expanded', String(willOpen));
+});
+stickerPicker?.addEventListener('click', event => {
+  event.stopPropagation();
+  if (event.target.closest('[data-close-composer-popover]')) {
+    closeComposerPopovers();
+    return;
+  }
+  const option = event.target.closest('[data-sticker]');
+  if (!option) return;
+  setPendingAttachment({ type: 'sticker', sticker: option.dataset.sticker || '👍' });
+  closeComposerPopovers();
+});
+
+emojiButton?.addEventListener('click', event => {
+  event.stopPropagation();
+  if (!messageComposerInput || messageComposerInput.disabled) return;
+  const willOpen = emojiPicker?.classList.contains('hidden');
+  closeComposerPopovers();
+  emojiPicker?.classList.toggle('hidden', !willOpen);
+  emojiButton.setAttribute('aria-expanded', String(willOpen));
+});
+emojiPicker?.addEventListener('click', event => {
+  event.stopPropagation();
+  if (event.target.closest('[data-close-composer-popover]')) {
+    closeComposerPopovers();
+    return;
+  }
+  const option = event.target.closest('[data-emoji]');
+  if (!option || !messageComposerInput || messageComposerInput.disabled) return;
+  const emoji = option.dataset.emoji || '😊';
+  const start = messageComposerInput.selectionStart ?? messageComposerInput.value.length;
+  const end = messageComposerInput.selectionEnd ?? start;
+  messageComposerInput.setRangeText(emoji, start, end, 'end');
+  messageComposerInput.dispatchEvent(new Event('input', { bubbles: true }));
+  messageComposerInput.focus();
+});
+
+composerPreviewRemove?.addEventListener('click', () => {
+  clearPendingAttachment();
+  clearComposerStatus();
+  messageComposerInput?.focus();
+});
+messageReplyClose?.addEventListener('click', () => {
+  clearMessageReply();
+  messageComposerInput?.focus();
+});
+audioRecordButton?.addEventListener('click', () => {
+  if (audioRecorder?.state === 'recording') stopAudioRecording(false);
+  else startAudioRecording();
+});
+audioRecordingStop?.addEventListener('click', () => stopAudioRecording(false));
+audioRecordingCancel?.addEventListener('click', () => stopAudioRecording(true));
+
+messageComposerInput?.addEventListener('input', updateMessageSendState);
+messageComposerInput?.addEventListener('keydown', event => {
+  if (!appSettings.sendWithEnter || event.key !== 'Enter' || event.isComposing) return;
+  event.preventDefault();
+  sendCurrentMessage();
+});
+messageSendButton?.addEventListener('click', sendCurrentMessage);
+chatBody?.addEventListener('mousemove', event => {
+  const row = event.target.closest('.message-row[data-hover-time]');
+  if (!row) {
+    hideMessageTimeTooltip();
+    return;
+  }
+  if (row === messageTimeTooltipRow && messageTimeTooltip?.isConnected) return;
+  showMessageTimeTooltip(row);
+});
+chatBody?.addEventListener('mouseleave', hideMessageTimeTooltip);
+chatBody?.addEventListener('scroll', hideMessageTimeTooltip, { passive: true });
+chatBody?.addEventListener('click', event => {
+  const image = event.target.closest('.chat-image');
+  if (image) {
+    event.stopPropagation();
+    openImageLightbox(image);
+    return;
+  }
+  const quickAction = event.target.closest('[data-message-quick]');
+  if (quickAction) {
+    event.stopPropagation();
+    const row = quickAction.closest('.message-row');
+    if (quickAction.dataset.messageQuick === 'more') openChatMessageMenu(row);
+    if (quickAction.dataset.messageQuick === 'reply') prepareMessageReply(row);
+    if (quickAction.dataset.messageQuick === 'react') openMessageReactionPicker(row);
+    return;
+  }
+  const bubble = event.target.closest('.message-row .bubble');
+  if (bubble) openChatMessageMenu(bubble.closest('.message-row'));
+});
+chatBody?.addEventListener('keydown', event => {
+  if (!['Enter', ' '].includes(event.key)) return;
+  const imageBubble = event.target.closest('.bubble-image');
+  if (imageBubble) {
+    event.preventDefault();
+    openImageLightbox(imageBubble.querySelector('.chat-image'));
+    return;
+  }
+  const bubble = event.target.closest('.message-row .bubble');
+  if (!bubble) return;
+  event.preventDefault();
+  openChatMessageMenu(bubble.closest('.message-row'));
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.message-row')) closeChatMessageMenu();
+  if (!event.target.closest('.message-row')) closeMessageReactionPicker();
+  if (!event.target.closest('#sticker-picker') && !event.target.closest('#sticker-button') && !event.target.closest('#emoji-picker') && !event.target.closest('#emoji-button')) closeComposerPopovers();
+});
+document.querySelectorAll('[data-close-image-lightbox]').forEach(button => button.addEventListener('click', closeImageLightbox));
+imageLightboxPrev?.addEventListener('click', () => renderLightboxImage(lightboxIndex - 1));
+imageLightboxNext?.addEventListener('click', () => renderLightboxImage(lightboxIndex + 1));
+imageLightboxShare?.addEventListener('click', shareLightboxImage);
+imageLightboxContent?.addEventListener('dblclick', () => setLightboxZoom(1));
+imageLightbox?.addEventListener('wheel', event => {
+  if (imageLightbox.classList.contains('hidden')) return;
+  event.preventDefault();
+  setLightboxZoom(lightboxZoom + (event.deltaY < 0 ? .2 : -.2));
+}, { passive: false });
+document.addEventListener('keydown', event => {
+  if (!imageLightbox?.classList.contains('hidden') && event.key === 'ArrowLeft') renderLightboxImage(lightboxIndex - 1);
+  if (!imageLightbox?.classList.contains('hidden') && event.key === 'ArrowRight') renderLightboxImage(lightboxIndex + 1);
+  if (event.key === 'Escape') {
+    closeChatMessageMenu();
+    closeMessageReactionPicker();
+    closeComposerPopovers();
+    closeImageLightbox();
+  }
+});
+
+orderExport.onclick = async () => {
+  orderExport.disabled = true;
+  const originalLabel = orderExport.textContent;
+  orderExport.textContent = 'Đang xuất...';
+  try {
+    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData }) });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.error || 'Không thể tạo file Excel.');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = createExportFilename();
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`Đã tải ${filename}.`, 'success');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    orderExport.textContent = originalLabel;
+    orderExport.disabled = buildExportRows().length === 0;
+  }
+};
+
+const initialView = viewNames.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'dashboard';
+const metaConnectionParams = new URLSearchParams(window.location.search);
+renderOrderImportHistory();
+renderUnreadConversations();
+renderMutedConversations();
+restoreConversationActivity();
+renderSavedChatMessages();
+updateMessageSendState();
+window.setInterval(updateConversationTimeLabels, 30000);
+if (initialView === 'orders') {
+  if (orderData.rows.length) renderOrderData();
+  showOrderStage(getRecommendedOrderStage());
+}
+else showView(initialView);
+loadFacebookChannels().catch(() => {});
+loadMessageChannels().catch(() => {});
+if (metaConnectionParams.has('meta_error')) {
+  showToast(metaConnectionParams.get('meta_error'));
+  history.replaceState(null, '', `${window.location.pathname}#settings`);
+}
+if (metaConnectionParams.has('meta_ticket')) {
+  openPendingFacebookPages(metaConnectionParams.get('meta_ticket')).catch(error => showToast(error.message));
+}

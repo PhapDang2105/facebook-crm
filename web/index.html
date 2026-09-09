@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nông Sản Giọt Nắng | Facebook</title>
+  <link rel="icon" type="image/webp" href="/assets/giot-nang-logo.webp">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-brand"><img src="/assets/giot-nang-logo.webp" alt="Giọt Nắng"><strong>Nông Sản Giọt Nắng</strong></div>
+    <button class="search-trigger" type="button" aria-label="Tìm kiếm">Tìm kiếm <kbd>Ctrl K</kbd></button>
+    <div class="topbar-actions">
+      <button class="assistant-link" type="button">Trợ lý</button>
+      <button class="notification-button" type="button" aria-label="Thông báo">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
+          <path d="M10 21h4"></path>
+        </svg>
+      </button>
+      <div class="topbar-user"><span id="topbar-user-avatar">H</span><b id="topbar-user-name">Huy Facebook</b></div>
+    </div>
+  </div>
+  <aside class="sidebar">
+    <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Thu gọn thanh điều hướng" title="Thu gọn">‹</button>
+    <nav>
+      <button class="nav active" type="button" data-view="dashboard"><span><img class="nav-icon--dashboard" src="/assets/icons/general-info.png" alt=""></span>Tổng quan</button>
+      <button class="nav" type="button" data-view="messages"><span><img class="nav-icon--messages" src="/assets/icons/message-logo-transparent.png?v=4" alt=""></span>Tin nhắn</button>
+      <button class="nav" type="button" data-view="campaigns"><span><img class="nav-icon--campaigns" src="/assets/icons/strategy-logo-orange.png?v=4" alt=""></span>Quản lý chiến dịch</button>
+      <button class="nav" type="button" data-view="orders" aria-expanded="false"><span><img class="nav-icon--orders" src="/assets/icons/order-bag-logo.png?v=1" alt=""></span>Đơn hàng</button>
+      <div class="order-subnav" aria-label="Chức năng đơn hàng">
+        <button class="order-subnav-item active" type="button" data-order-stage="import">Nhập dữ liệu</button>
+        <button class="order-subnav-item" type="button" data-order-stage="process">Xử lý dữ liệu</button>
+        <button class="order-subnav-item" type="button" data-order-stage="export">Xuất dữ liệu</button>
+      </div>
+      <button class="nav" type="button" data-view="shipping"><span><img class="nav-icon--shipping" src="/assets/icons/transport.png" alt=""></span>Vận chuyển</button>
+      <button class="nav" type="button" data-view="reports"><span><img class="nav-icon--reports" src="/assets/icons/report-logo.png?v=1" alt=""></span>Báo cáo</button>
+      <button class="nav" type="button" data-view="settings" aria-expanded="false"><span><img class="nav-icon--settings" src="/assets/icons/settings.png?v=2" alt=""></span>Cài đặt</button>
+      <div class="settings-subnav" aria-label="Chức năng cài đặt">
+        <button class="settings-subnav-item active" type="button" data-settings-section="channels">Kênh</button>
+      </div>
+    </nav>
+  </aside>
+  <main>
+    <section id="dashboard-view" class="view">
+      <div class="cards">
+        <article class="card"><p>Doanh thu</p><strong>0 ₫</strong></article>
+        <article class="card"><p>Chi phí</p><strong>0 ₫</strong></article>
+        <article class="card"><p>Khách hàng</p><strong>0</strong></article>
+        <article class="card"><p>Chiến dịch</p><strong>0</strong></article>
+      </div>
+    </section>
+    <section id="messages-view" class="view hidden">
+      <div class="messenger-shell">
+        <aside class="conversation-panel">
+          <div class="message-channel-toolbar">
+            <div class="message-channel-picker">
+              <button class="message-channel-trigger" id="message-channel-trigger" type="button" aria-label="Chọn kênh kết nối" aria-expanded="false" title="Chọn kênh kết nối"><img id="message-channel-logo" src="/assets/giot-nang-logo.webp" alt=""><span id="message-channel-name">Nông Sản Giọt Nắng</span><span class="message-channel-chevron" aria-hidden="true">▾</span></button>
+              <div class="message-channel-menu hidden" id="message-channel-menu" role="menu"></div>
+            </div>
+            <label class="message-search message-search--toolbar"><input id="message-search-input" type="search" aria-label="Tìm kiếm hội thoại" placeholder="Tìm kiếm..."><span class="search-icon" aria-hidden="true"></span></label>
+            <div class="message-label-picker">
+              <button class="message-label-filter" id="message-label-filter" type="button" aria-expanded="false">Nhãn <span aria-hidden="true">▾</span></button>
+              <div class="message-label-menu hidden" id="message-label-menu" role="menu">
+                <button class="active" type="button" data-message-label="all">Tất cả</button>
+                <button type="button" data-message-label="unread">Chưa đọc</button>
+                <button type="button" data-message-label="new">Khách mới</button>
+                <button type="button" data-message-label="consulting">Cần tư vấn</button>
+                <button type="button" data-message-label="customer">Đã mua</button>
+              </div>
+            </div>
+          </div>
+          <div class="conversation-list">
+            <div class="conversation active" role="button" tabindex="0" data-source="inbox" data-avatar="/assets/avatars/lan-anh.jpg"><span class="avatar has-photo"><img class="avatar-photo" src="/assets/avatars/lan-anh.jpg" alt="">L</span><span class="conversation-copy"><strong>Lan Anh</strong><small>Chào shop, mình muốn hỏi về sản phẩm...</small></span><time>10:42</time><button class="conversation-more" type="button" aria-label="Tùy chọn hội thoại" title="Tùy chọn" aria-haspopup="menu" aria-expanded="false"><img src="/assets/icons/more-horizontal.svg" alt=""></button></div>
+            <div class="conversation" role="button" tabindex="0" data-source="comment" data-avatar="/assets/avatars/minh-quan.jpg"><span class="avatar has-photo"><img class="avatar-photo" src="/assets/avatars/minh-quan.jpg" alt="">M</span><span class="conversation-copy"><strong>Minh Quân</strong><small>Bạn: Mình đã gửi thông tin đơn hàng</small></span><time>09:18</time><button class="conversation-more" type="button" aria-label="Tùy chọn hội thoại" title="Tùy chọn" aria-haspopup="menu" aria-expanded="false"><img src="/assets/icons/more-horizontal.svg" alt=""></button></div>
+            <div class="conversation" role="button" tabindex="0" data-source="inbox" data-avatar="/assets/avatars/gia-han.jpg"><span class="avatar has-photo"><img class="avatar-photo" src="/assets/avatars/gia-han.jpg" alt="">G</span><span class="conversation-copy"><strong>Gia Hân</strong><small>Bạn: Shop đã ghi nhận thông tin ạ</small></span><time>Hôm qua</time><button class="conversation-more" type="button" aria-label="Tùy chọn hội thoại" title="Tùy chọn" aria-haspopup="menu" aria-expanded="false"><img src="/assets/icons/more-horizontal.svg" alt=""></button></div>
+            <p class="conversation-empty hidden" id="conversation-empty">Không tìm thấy cuộc trò chuyện.</p>
+          </div>
+        </aside>
+        <section class="chat-panel">
+          <header class="chat-head"><span class="avatar avatar-large has-photo"><img class="avatar-photo" src="/assets/avatars/lan-anh.jpg" alt="">L</span><div class="chat-head-copy"><strong>Lan Anh</strong><div class="chat-head-meta" id="chat-head-meta"><button class="chat-head-tab active" id="chat-head-chat-tab" type="button" aria-pressed="true"><img id="chat-head-channel-logo" src="/assets/icons/facebook.png" alt=""><span>Chat</span></button><button class="chat-head-tab" id="chat-head-file-tab" type="button" aria-pressed="false"><img class="chat-head-folder-icon" src="/assets/icons/folder.png" alt=""><span>File</span></button><button class="chat-head-tab" id="chat-head-pinned-tab" type="button" aria-pressed="false"><img class="chat-head-pin-icon" src="/assets/icons/pin-color.svg" alt=""><span>Ghim</span></button><button class="chat-head-tab" id="chat-head-docs-tab" type="button" aria-pressed="false"><img class="chat-head-doc-icon" src="/assets/icons/document-color.svg" alt=""><span>Tài liệu</span></button><button class="chat-head-add" id="chat-head-add" type="button" aria-label="Thêm ảnh hoặc video" title="Thêm ảnh hoặc video"><img src="/assets/icons/add.png" alt=""></button></div></div><div class="chat-actions"><button class="mark-unread-button" id="mark-unread-button" type="button" aria-label="Đánh dấu là chưa đọc" title="Đánh dấu là chưa đọc" aria-pressed="false"><img src="/assets/icons/unread-logo.png?v=2" alt=""></button><button class="icon-button" id="conversation-search-button" type="button" aria-label="Tra cứu trong hội thoại" title="Tra cứu trong hội thoại" aria-expanded="false"><img src="/assets/icons/search.svg" alt=""></button><button class="icon-button" id="contact-info-button" type="button" aria-label="Xem thông tin khách hàng" title="Xem thông tin khách hàng" aria-pressed="true"><img src="/assets/icons/information.png" alt=""></button></div></header>
+          <div class="pinned-banner hidden" id="pinned-banner" role="status"></div>
+          <div class="chat-body"><div class="chat-date">Hôm nay, 10:38</div><div class="message-row"><span class="avatar avatar-small has-photo"><img class="avatar-photo" src="/assets/avatars/lan-anh.jpg" alt="">L</span><div class="bubble">Chào shop, mình muốn hỏi về sản phẩm Granola tháng 9 ạ.</div></div><div class="message-row outgoing"><div class="bubble">Chào Lan Anh, mình hỗ trợ bạn ngay nhé.</div></div><div class="message-row"><span class="avatar avatar-small has-photo"><img class="avatar-photo" src="/assets/avatars/lan-anh.jpg" alt="">L</span><div class="bubble">Sản phẩm này còn hàng không shop?</div></div></div>
+          <div class="composer-area">
+            <div class="message-reply-preview hidden" id="message-reply-preview">
+              <div class="message-reply-copy"><strong id="message-reply-title">Đang trả lời</strong><span id="message-reply-text"></span></div>
+              <button class="message-reply-close" id="message-reply-close" type="button" aria-label="Hủy trả lời">×</button>
+            </div>
+            <div class="composer-popover hidden" id="sticker-picker" role="dialog" aria-label="Chọn nhãn dán">
+              <div class="composer-popover-head"><strong>Nhãn dán</strong><button type="button" aria-label="Đóng bảng nhãn dán" data-close-composer-popover>×</button></div>
+              <div class="sticker-grid">
+                <button type="button" data-sticker="❤️" aria-label="Trái tim">❤️</button><button type="button" data-sticker="👍" aria-label="Thích">👍</button><button type="button" data-sticker="😂" aria-label="Cười">😂</button><button type="button" data-sticker="🥰" aria-label="Yêu thích">🥰</button>
+                <button type="button" data-sticker="🎉" aria-label="Chúc mừng">🎉</button><button type="button" data-sticker="🙏" aria-label="Cảm ơn">🙏</button><button type="button" data-sticker="✨" aria-label="Lấp lánh">✨</button><button type="button" data-sticker="🌻" aria-label="Hoa hướng dương">🌻</button>
+              </div>
+            </div>
+            <div class="composer-popover emoji-picker-popover hidden" id="emoji-picker" role="dialog" aria-label="Chọn biểu tượng cảm xúc">
+              <div class="composer-popover-head"><strong>Biểu tượng cảm xúc</strong><button type="button" aria-label="Đóng bảng biểu tượng" data-close-composer-popover>×</button></div>
+              <div class="emoji-grid">
+                <button type="button" data-emoji="😊" aria-label="Mỉm cười">😊</button><button type="button" data-emoji="😁" aria-label="Cười tươi">😁</button><button type="button" data-emoji="😂" aria-label="Cười ra nước mắt">😂</button><button type="button" data-emoji="🥰" aria-label="Yêu thích">🥰</button><button type="button" data-emoji="😍" aria-label="Mắt trái tim">😍</button><button type="button" data-emoji="😘" aria-label="Hôn">😘</button>
+                <button type="button" data-emoji="😉" aria-label="Nháy mắt">😉</button><button type="button" data-emoji="😎" aria-label="Ngầu">😎</button><button type="button" data-emoji="🤔" aria-label="Suy nghĩ">🤔</button><button type="button" data-emoji="😢" aria-label="Buồn">😢</button><button type="button" data-emoji="😭" aria-label="Khóc">😭</button><button type="button" data-emoji="😮" aria-label="Ngạc nhiên">😮</button>
+                <button type="button" data-emoji="👍" aria-label="Thích">👍</button><button type="button" data-emoji="👏" aria-label="Vỗ tay">👏</button><button type="button" data-emoji="🙏" aria-label="Cảm ơn">🙏</button><button type="button" data-emoji="💪" aria-label="Cố lên">💪</button><button type="button" data-emoji="👌" aria-label="Đồng ý">👌</button><button type="button" data-emoji="🤝" aria-label="Bắt tay">🤝</button>
+                <button type="button" data-emoji="❤️" aria-label="Trái tim đỏ">❤️</button><button type="button" data-emoji="💙" aria-label="Trái tim xanh">💙</button><button type="button" data-emoji="🎉" aria-label="Chúc mừng">🎉</button><button type="button" data-emoji="✨" aria-label="Lấp lánh">✨</button><button type="button" data-emoji="🔥" aria-label="Tuyệt vời">🔥</button><button type="button" data-emoji="🌻" aria-label="Hoa hướng dương">🌻</button>
+              </div>
+            </div>
+            <div class="composer-preview hidden" id="composer-preview">
+              <div class="composer-preview-content" id="composer-preview-content"></div>
+              <button class="composer-preview-remove" id="composer-preview-remove" type="button" aria-label="Bỏ nội dung đính kèm">×</button>
+            </div>
+            <div class="audio-recording hidden" id="audio-recording" role="status"><span class="recording-dot" aria-hidden="true"></span><strong>Đang ghi âm</strong><time id="audio-recording-time">0:00</time><button id="audio-recording-cancel" type="button">Hủy</button><button id="audio-recording-stop" type="button">Dừng</button></div>
+            <p class="composer-status" id="composer-status" role="status" aria-live="polite"></p>
+            <div class="composer">
+              <button class="composer-icon" id="audio-record-button" type="button" aria-label="Ghi âm" title="Ghi âm"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6"></path></svg></button>
+              <label class="composer-icon composer-file-button" aria-label="Đính kèm ảnh hoặc video" title="Đính kèm ảnh hoặc video"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"></rect><circle cx="9" cy="9" r="2"></circle><path d="m5 18 5-5 3 3 2-2 4 4"></path></svg><input id="message-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime"></label>
+              <label class="composer-icon composer-file-button" aria-label="Đính kèm tài liệu" title="Đính kèm tài liệu"><img src="/assets/icons/attach.svg" alt="" aria-hidden="true"><input id="message-document-input" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/csv,text/plain,application/zip"></label><button class="composer-icon" id="sticker-button" type="button" aria-label="Chọn nhãn dán" aria-expanded="false" title="Nhãn dán"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v10a6 6 0 0 1-6 6H4z"></path><path d="M14 20v-6h6M8 10h.01M16 10h.01M8.5 14a5 5 0 0 0 7 0"></path></svg></button>
+              <div class="composer-input-wrap"><input id="message-composer-input" type="text" aria-label="Nhập tin nhắn" placeholder="Aa" autocomplete="off"><button class="composer-emoji-button" id="emoji-button" type="button" aria-label="Chọn biểu tượng cảm xúc" aria-expanded="false" title="Biểu tượng cảm xúc"><img src="assets/icons/fluent-smile.png" alt="" aria-hidden="true"></button></div>
+              <button class="send-button" id="message-send-button" type="button" aria-label="Gửi" title="Gửi tin nhắn" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg></button>
+            </div>
+          </div>
+        </section>
+        <aside class="contact-panel">
+          <div class="contact-panel-content" id="contact-panel-content"><div class="contact-profile"><span class="avatar avatar-profile has-photo"><img class="avatar-photo" src="/assets/avatars/lan-anh.jpg" alt="">L</span><strong>Lan Anh</strong><small>Khách hàng Facebook</small></div><div class="contact-section"><h3>Thông tin liên hệ</h3><p>lananh@example.com</p><p>+84 912 345 678</p></div><div class="contact-section"><h3>Hành động</h3><button type="button" class="contact-action">Gắn nhãn khách hàng</button><button type="button" class="contact-action">Xem lịch sử tương tác</button></div><div class="contact-section"><h3>Thông tin đơn hàng</h3><div class="order-row"><span>Mã đơn</span><strong>#GN-240901</strong></div><div class="order-row"><span>Sản phẩm</span><strong>Granola tháng 9</strong></div><div class="order-row"><span>Số lượng</span><strong>1</strong></div><div class="order-row"><span>Trạng thái</span><strong>Đã mua</strong></div><div class="order-row"><span>Số điện thoại</span><strong>+84 912 345 678</strong></div><div class="order-row"><span>Địa chỉ</span><strong>12 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh</strong></div><div class="order-row"><span>Tổng tiền</span><strong>890.000 đ</strong></div></div></div>
+          <section class="conversation-pinned-panel hidden" id="chat-pinned-panel"><header><strong>Tin nhắn đã ghim</strong><button id="chat-pinned-close" type="button" aria-label="Đóng danh sách ghim" title="Đóng"><img src="/assets/icons/dismiss.svg" alt=""></button></header><div class="conversation-search-controls"><div class="chat-search-field"><span class="search-icon" aria-hidden="true"></span><input id="chat-pinned-search" type="search" placeholder="Tìm trong tin đã ghim" aria-label="Tìm trong tin nhắn đã ghim"></div><span class="chat-search-count" id="chat-pinned-count"></span></div><div class="conversation-search-results" id="chat-pinned-results"></div></section><section class="conversation-search-panel hidden" id="chat-search-bar"><header><strong>Tìm kiếm trong trò chuyện</strong><button id="chat-search-close" type="button" aria-label="Đóng tìm kiếm" title="Đóng tìm kiếm"><img src="/assets/icons/dismiss.svg" alt=""></button></header><div class="conversation-search-controls"><div class="chat-search-field"><span class="search-icon" aria-hidden="true"></span><input id="chat-search-input" type="search" placeholder="Nhập từ khóa để tìm kiếm" aria-label="Tìm trong hội thoại"></div><div class="conversation-search-filters"><span>Lọc theo:</span><label class="conversation-search-filter"><img src="/assets/icons/person.svg" alt="" aria-hidden="true"><select id="chat-search-sender" aria-label="Lọc theo người gửi"><option value="all">Người gửi</option><option value="customer">Khách hàng</option><option value="me">Bạn</option></select></label><label class="conversation-search-filter"><img src="/assets/icons/calendar.svg" alt="" aria-hidden="true"><select id="chat-search-date" aria-label="Lọc theo ngày gửi"><option value="all">Ngày gửi</option><option value="today">Hôm nay</option><option value="yesterday">Hôm qua</option><option value="week">7 ngày qua</option></select></label></div><span class="chat-search-count" id="chat-search-count"></span></div><div class="conversation-search-results" id="chat-search-results"></div></section>
+        </aside>
+      </div>
+    </section>
+    <section id="campaigns-view" class="view hidden"></section>
+    <section id="orders-view" class="view hidden">
+      <section class="order-stage" data-order-panel="import">
+        <div class="order-import-controls">
+          <label class="order-search-control"><input id="order-search" type="search" aria-label="Tìm kiếm đơn hàng" placeholder="Tên, số điện thoại, sản phẩm, địa chỉ..."></label>
+          <label class="order-filter-control"><select id="order-filter" aria-label="Lọc đơn hàng">
+            <option value="all">Tất cả đơn hàng</option>
+            <option value="valid">Đơn hợp lệ</option>
+            <option value="invalid">Cần xử lý</option>
+            <option value="duplicate">Trùng dữ liệu</option>
+            <option value="duplicate-phone">Trùng số điện thoại</option>
+          </select></label>
+          <label class="file-button">Import<input id="order-import" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+          <button class="order-history-button" id="order-history-button" type="button" aria-expanded="false" aria-controls="order-history-panel">Lịch sử</button>
+        </div>
+        <div class="order-history-panel hidden" id="order-history-panel"></div>
+        <div class="data-preview" id="order-import-preview"><p>Import một tệp CSV hoặc XLSX để xem toàn bộ dữ liệu.</p></div>
+      </section>
+
+      <section class="order-stage hidden" data-order-panel="process">
+        <div class="data-preview" id="order-preview"><p>Không có đơn hàng cần xử lý.</p></div>
+      </section>
+
+      <section class="order-stage hidden" data-order-panel="export">
+        <button class="export-button" id="order-export" type="button" disabled>Xuất XLSX</button>
+        <div class="export-preview" id="order-export-preview"></div>
+      </section>
+    </section>
+    <section id="shipping-view" class="view hidden"></section>
+    <section id="reports-view" class="view hidden"></section>
+    <section id="settings-view" class="view hidden">
+      <div class="settings-page">
+        <section class="settings-section-content" data-settings-panel="channels" aria-labelledby="channel-settings-title">
+          <section class="settings-card channel-settings-card">
+            <header class="settings-card-head"><h1 id="channel-settings-title">Kênh</h1></header>
+            <div class="channel-summary">
+              <div class="channel-summary-platform"><img class="channel-platform-logo facebook-badge" src="/assets/icons/facebook.png" alt=""><strong>Facebook</strong></div>
+              <button class="channel-connect-button" id="facebook-connect-button" type="button">Kết nối Facebook</button>
+            </div>
+            <div class="channel-list" id="facebook-channel-list" aria-live="polite"><p class="channel-empty">Đang tải danh sách kênh...</p></div>
+            <div class="channel-summary">
+              <div class="channel-summary-platform"><img class="channel-platform-logo zalo-badge" src="/assets/icons/zalo.png" alt=""><strong>Zalo</strong></div>
+              <button class="channel-connect-button" id="zalo-connect-button" type="button">Kết nối Zalo</button>
+            </div>
+            <div class="channel-list" id="zalo-channel-list"><p class="channel-empty">Chưa có tài khoản Zalo OA nào được kết nối.</p></div>
+          </section>
+        </section>
+      </div>
+    </section>
+  </main>
+  <div class="channel-dialog hidden" id="facebook-page-dialog" role="dialog" aria-modal="true" aria-labelledby="facebook-page-dialog-title">
+    <div class="channel-dialog-backdrop" data-close-channel-dialog></div>
+    <section class="channel-dialog-panel">
+    <div class="channel-dialog-head"><div><h2 id="facebook-page-dialog-title">Chọn Facebook Page</h2><p>Chọn các Page bạn muốn kết nối với trang này.</p></div><button type="button" aria-label="Đóng" data-close-channel-dialog>×</button></div>
+      <div class="facebook-page-options" id="facebook-page-options"></div>
+      <p class="channel-dialog-status" id="facebook-page-dialog-status" role="status"></p>
+      <div class="channel-dialog-actions"><button class="channel-cancel-button" type="button" data-close-channel-dialog>Hủy</button><button class="settings-save-button" id="facebook-page-confirm" type="button">Kết nối Page đã chọn</button></div>
+    </section>
+  </div>
+  <div class="image-lightbox hidden" id="image-lightbox" role="dialog" aria-modal="true" aria-label="Xem ảnh kích thước lớn">
+    <button class="image-lightbox-backdrop" type="button" aria-label="Đóng ảnh" data-close-image-lightbox></button>
+    <output class="image-lightbox-zoom" id="image-lightbox-zoom" aria-live="polite">100%</output>
+    <div class="image-lightbox-toolbar">
+      <a class="image-lightbox-tool" id="image-lightbox-download" href="" download aria-label="Tải ảnh xuống" title="Tải ảnh xuống"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5"></path><path d="M5 15v4h14v-4"></path></svg></a>
+      <button class="image-lightbox-tool" id="image-lightbox-share" type="button" aria-label="Chia sẻ ảnh" title="Chia sẻ ảnh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3m0 0-5 5m5-5 5 5"></path><path d="M5 13v6h14v-6"></path></svg></button>
+      <button class="image-lightbox-tool image-lightbox-close" type="button" aria-label="Đóng ảnh" title="Đóng" data-close-image-lightbox><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
+    </div>
+    <button class="image-lightbox-nav image-lightbox-prev" id="image-lightbox-prev" type="button" aria-label="Ảnh trước"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+    <div class="image-lightbox-stage">
+      <img id="image-lightbox-content" src="" alt="">
+    </div>
+    <button class="image-lightbox-nav image-lightbox-next" id="image-lightbox-next" type="button" aria-label="Ảnh tiếp theo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
+    <div class="image-lightbox-thumbnails" id="image-lightbox-thumbnails" aria-label="Danh sách ảnh"></div>
+  </div>
+  <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
+  <script src="app.js"></script>
+</body>
+</html>

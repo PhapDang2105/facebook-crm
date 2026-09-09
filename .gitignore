@@ -1,0 +1,41 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+config/local/
+config/secrets/
+*.pem
+*.key
+
+# Customer data and generated exports
+data/incoming/**
+data/raw/**
+data/processed/**
+data/exports/**
+data/quarantine/**
+!data/incoming/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/exports/.gitkeep
+!data/quarantine/.gitkeep
+
+# Logs and temporary files
+logs/**
+!logs/.gitkeep
+*.log
+tmp/
+temp/
+.tmp-ui-profile/
+orders-ui-check.png
+
+# Common tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+node_modules/
+tools/
+.graphcode/
+references/
+__pycache__/
+.pytest_cache/

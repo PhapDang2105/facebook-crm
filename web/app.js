@@ -1054,6 +1054,11 @@ function getActiveConversation() {
   return document.querySelector('.conversation.active');
 }
 
+/** True for threads backed by a real Facebook Page rather than the demo data. */
+function isFacebookConversation(conversation = getActiveConversation()) {
+  return Boolean(conversation?.dataset.conversationId);
+}
+
 const storedJsonCache = new Map();
 
 function readStoredJson(key, fallback, normalize = value => value) {
@@ -1233,8 +1238,18 @@ function positionMessageTimeTooltip() {
   if (!messageTimeTooltip?.isConnected || !messageTimeTooltipRow?.isConnected) return;
   const anchorRect = (messageTimeTooltipRow.querySelector('.bubble') || messageTimeTooltipRow).getBoundingClientRect();
   const tooltipRect = messageTimeTooltip.getBoundingClientRect();
-  messageTimeTooltip.style.left = `${anchorRect.right + 10.125}px`;
-  messageTimeTooltip.style.top = `${Math.max(9, Math.min(window.innerHeight - tooltipRect.height - 9, anchorRect.top + (anchorRect.height - tooltipRect.height) / 2))}px`;
+  const margin = 9;
+  const gap = 10.125;
+  // The quick actions sit on the side of the bubble the reply comes from, so
+  // put the tooltip on the opposite side or it covers the buttons it explains.
+  const quickActions = messageTimeTooltipRow.querySelector('.message-quick-actions');
+  const actionsWidth = quickActions ? quickActions.getBoundingClientRect().width + gap : 0;
+  const preferredLeft = messageTimeTooltipRow.classList.contains('outgoing')
+    ? anchorRect.left - actionsWidth - gap - tooltipRect.width
+    : anchorRect.right + actionsWidth + gap;
+  const maximumLeft = window.innerWidth - tooltipRect.width - margin;
+  messageTimeTooltip.style.left = `${Math.max(margin, Math.min(maximumLeft, preferredLeft))}px`;
+  messageTimeTooltip.style.top = `${Math.max(margin, Math.min(window.innerHeight - tooltipRect.height - margin, anchorRect.top + (anchorRect.height - tooltipRect.height) / 2))}px`;
   messageTimeTooltipFrame = window.requestAnimationFrame(positionMessageTimeTooltip);
 }
 
@@ -1453,6 +1468,7 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
       const badge = document.createElement('span');
       badge.className = 'message-reaction';
       badge.textContent = reaction;
+      badge.title = 'Cảm xúc ghi trong CRM. Khách không nhìn thấy trên Messenger.';
       bubble.appendChild(badge);
     }
   }
@@ -2535,7 +2551,10 @@ function openMessageReactionPicker(row) {
       event.stopPropagation();
       saveChatMessageReaction(name, messageId, reaction);
       renderConversation(getActiveConversation());
-      showComposerStatus(`Đã thả cảm xúc ${reaction}`);
+      // Meta has no Send API for Page reactions, so this never leaves the CRM.
+      showComposerStatus(isFacebookConversation()
+        ? `Đã ghi cảm xúc ${reaction} trong CRM. Facebook không cho Page thả cảm xúc nên khách không nhìn thấy.`
+        : `Đã thả cảm xúc ${reaction}`, 6000);
     });
     picker.appendChild(button);
   });
@@ -2647,6 +2666,10 @@ function openChatMessageMenu(row) {
       closeChatMessageMenu();
       renderConversation(conversation);
       syncConversationPreview(conversation);
+      // Meta gives Pages no way to unsend, so this only hides the bubble here.
+      if (action === 'recalled' && isFacebookConversation(conversation)) {
+        showComposerStatus('Đã ẩn tin nhắn trong CRM. Facebook không cho Page thu hồi nên khách vẫn thấy tin gốc.', 6000);
+      }
     });
     menu.appendChild(button);
   });

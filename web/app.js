@@ -2432,10 +2432,14 @@ async function sendRemoteMessage(conversation, text, attachment) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, attachment })
     }));
+    // Drop the optimistic copy before caching the saved one. The stream may
+    // already have delivered the same message under Meta's id, and leaving the
+    // placeholder behind would show the reply twice.
     const messages = remoteMessages.get(conversationId) || [];
     const index = messages.findIndex(item => item.id === pending.id);
+    if (index >= 0) messages.splice(index, 1);
     // Keep the local preview so an uploaded image still renders before Meta echoes its own URL.
-    if (index >= 0) messages[index] = { ...result.message, dataUrl: result.message.dataUrl || pending.dataUrl || '' };
+    cacheRemoteMessage(conversationId, { ...result.message, dataUrl: result.message.dataUrl || pending.dataUrl || '' });
     if (result.conversation) applyRemoteConversation(result.conversation);
   } catch (error) {
     const messages = remoteMessages.get(conversationId) || [];

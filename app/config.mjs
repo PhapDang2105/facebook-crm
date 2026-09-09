@@ -64,7 +64,9 @@ export const metaConfig = {
   webhookUrl: `${publicBaseUrl}${webhookPath}`,
   redirectUri: process.env.META_REDIRECT_URI || `${publicBaseUrl}/api/channels/meta/callback`,
   // message_echoes also captures replies staff send from Facebook's own Page inbox.
-  subscribedFields: 'messages,message_echoes,messaging_postbacks,messaging_optins,messaging_reactions,message_deliveries,message_reads'
+  // Meta names the reaction field message_reactions, not messaging_reactions;
+  // sending the wrong name makes the whole subscribed_apps call fail.
+  subscribedFields: 'messages,message_echoes,messaging_postbacks,messaging_optins,message_reactions,message_deliveries,message_reads'
 };
 
 export function missingMetaConfiguration() {

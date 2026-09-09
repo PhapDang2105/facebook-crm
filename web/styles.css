@@ -1015,7 +1015,9 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .outgoing .bubble[role="button"]:hover { background: var(--messenger-blue-hover); }
 .outgoing .bubble.bubble-recalled { color: #65676b; background: #fff; border-color: #ced0d4; font-style: italic; }
 .outgoing .bubble.bubble-recalled:hover { background: #f7f7f7; }
-.message-quick-actions { position: relative; display: flex; align-items: center; gap: 2.25px; opacity: 0; transform: translateX(-5.625px); transition: opacity 140ms ease, transform 140ms ease; }
+/* The row aligns to flex-end so the avatar sits by the last line, but the
+   action buttons look off pinned to the bottom of a tall image or video. */
+.message-quick-actions { position: relative; align-self: center; display: flex; align-items: center; gap: 2.25px; opacity: 0; transform: translateX(-5.625px); transition: opacity 140ms ease, transform 140ms ease; }
 .incoming .message-quick-actions { transform: translateX(5.625px); }
 .message-row:hover .message-quick-actions,
 .message-row:focus-within .message-quick-actions,

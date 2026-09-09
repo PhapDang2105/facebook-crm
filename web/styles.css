@@ -1113,6 +1113,13 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .outgoing .bubble.bubble-image,
 .outgoing .bubble.bubble-image[role="button"]:hover { background: transparent; border-color: transparent; }
 .chat-image { display: block; max-width: 100%; max-height: 371.25px; object-fit: contain; border-radius: 16.875px 16.875px 5.625px 16.875px; cursor: zoom-in; }
+/* Video needs the same override as images: ".outgoing .bubble" outranks
+   ".bubble-media", so without this the blue bubble frames the player. */
+.bubble.bubble-video { padding: 0; }
+.outgoing .bubble.bubble-video,
+.outgoing .bubble.bubble-video[role="button"]:hover { background: transparent; border-color: transparent; }
+/* Once the bubble is transparent the caption sits on the page, not on blue. */
+.bubble-media .bubble-caption { color: #1c1e21; }
 .chat-video { display: block; max-width: 100%; max-height: 371.25px; border-radius: 16.875px; }
 .conversation-files { width: 100%; }
 .conversation-files-head { display: flex; align-items: center; justify-content: space-between; padding: 0 9px 13.5px; }

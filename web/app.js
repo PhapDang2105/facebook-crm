@@ -1475,6 +1475,31 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   chatBody?.appendChild(row);
 }
 
+const videoLightbox = document.querySelector('#video-lightbox');
+const videoLightboxContent = document.querySelector('#video-lightbox-content');
+
+function openVideoLightbox(video) {
+  if (!videoLightbox || !videoLightboxContent || !video?.src) return;
+  // Carry the playback position across so the clip does not restart.
+  const resumeAt = video.currentTime;
+  video.pause();
+  videoLightboxContent.src = video.src;
+  videoLightboxContent.currentTime = resumeAt;
+  videoLightbox.classList.remove('hidden');
+  document.body.classList.add('video-lightbox-open');
+  videoLightboxContent.play().catch(() => { /* Autoplay may be blocked; controls still work. */ });
+  videoLightbox.querySelector('.video-lightbox-close')?.focus();
+}
+
+function closeVideoLightbox() {
+  if (!videoLightbox || videoLightbox.classList.contains('hidden')) return;
+  videoLightbox.classList.add('hidden');
+  document.body.classList.remove('video-lightbox-open');
+  videoLightboxContent.pause();
+  videoLightboxContent.removeAttribute('src');
+  videoLightboxContent.load();
+}
+
 function getLightboxFileName(image) {
   return (image?.alt || 'anh-dinh-kem').replace(/^Ảnh đính kèm:\s*/i, '') || 'anh-dinh-kem.png';
 }
@@ -3647,6 +3672,15 @@ chatBody?.addEventListener('click', event => {
     openImageLightbox(image);
     return;
   }
+  const video = event.target.closest('.chat-video');
+  if (video) {
+    event.stopPropagation();
+    // Only enlarge a clip that is already playing, and ignore clicks that land
+    // on the player controls along the bottom edge.
+    const bounds = video.getBoundingClientRect();
+    if (!video.paused && event.clientY < bounds.bottom - 45) openVideoLightbox(video);
+    return;
+  }
   const quickAction = event.target.closest('[data-message-quick]');
   if (quickAction) {
     event.stopPropagation();
@@ -3678,6 +3712,7 @@ document.addEventListener('click', event => {
   if (!event.target.closest('#sticker-picker') && !event.target.closest('#sticker-button') && !event.target.closest('#emoji-picker') && !event.target.closest('#emoji-button')) closeComposerPopovers();
 });
 document.querySelectorAll('[data-close-image-lightbox]').forEach(button => button.addEventListener('click', closeImageLightbox));
+document.querySelectorAll('[data-close-video-lightbox]').forEach(button => button.addEventListener('click', closeVideoLightbox));
 imageLightboxPrev?.addEventListener('click', () => renderLightboxImage(lightboxIndex - 1));
 imageLightboxNext?.addEventListener('click', () => renderLightboxImage(lightboxIndex + 1));
 imageLightboxShare?.addEventListener('click', shareLightboxImage);
@@ -3695,6 +3730,7 @@ document.addEventListener('keydown', event => {
     closeMessageReactionPicker();
     closeComposerPopovers();
     closeImageLightbox();
+    closeVideoLightbox();
   }
 });
 

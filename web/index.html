@@ -228,6 +228,11 @@
     <button class="image-lightbox-nav image-lightbox-next" id="image-lightbox-next" type="button" aria-label="Ảnh tiếp theo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
     <div class="image-lightbox-thumbnails" id="image-lightbox-thumbnails" aria-label="Danh sách ảnh"></div>
   </div>
+  <div class="video-lightbox hidden" id="video-lightbox" role="dialog" aria-modal="true" aria-label="Xem video kích thước lớn">
+    <button class="video-lightbox-backdrop" type="button" aria-label="Đóng video" data-close-video-lightbox></button>
+    <button class="video-lightbox-close" type="button" aria-label="Đóng video" title="Đóng" data-close-video-lightbox><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
+    <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
+  </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
   <script src="app.js"></script>
 </body>

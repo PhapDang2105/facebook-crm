@@ -1,3 +1,8 @@
+@font-face { font-family: Roboto; src: url('/assets/fonts/Roboto-Regular.ttf') format('truetype'); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: Roboto; src: url('/assets/fonts/Roboto-Medium.ttf') format('truetype'); font-style: normal; font-weight: 500; font-display: swap; }
+@font-face { font-family: Roboto; src: url('/assets/fonts/Roboto-SemiBold.ttf') format('truetype'); font-style: normal; font-weight: 600; font-display: swap; }
+@font-face { font-family: Roboto; src: url('/assets/fonts/Roboto-Bold.ttf') format('truetype'); font-style: normal; font-weight: 700; font-display: swap; }
+
 :root {
   --ink: #171923;
   --messenger-blue: #0866ff;
@@ -701,7 +706,7 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .customer-order-card[open] { border-color: #4388f6; box-shadow: 0 0 0 1px #4388f6; }
 .customer-order-card summary { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 10px; color: #fff; background: #4388f6; cursor: pointer; list-style: none; }
 .customer-order-card summary::-webkit-details-marker { display: none; }
-.customer-order-card summary::before { font-size: 12px; content: '›'; transform: rotate(0); transition: transform .15s ease; }
+.customer-order-card summary::before { width: 13px; height: 13px; background: url('/assets/icons/customer-panel/right.png') center / contain no-repeat; filter: invert(1); content: ''; transform: rotate(0); transition: transform .15s ease; }
 .customer-order-card[open] summary::before { transform: rotate(90deg); }
 .customer-order-card summary strong { font-size: 13px; }
 .customer-order-card summary img { width: 18px; height: 18px; margin-left: 2px; }
@@ -759,6 +764,59 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 #customer-order-reset { color: #8b929d; background: #f1f2f5; }
 #customer-order-submit { color: #fff; background: #376bc7; }
 #customer-order-submit:disabled { opacity: .45; cursor: default; }
+
+/* Match the density and typography of Pancake's customer panel. */
+.contact-panel-content { font: 14px/1.5 Roboto, Helvetica, Arial, sans-serif; }
+.customer-panel-tabs { flex-basis: 52px; }
+.customer-panel-tab { font-size: 15px; font-weight: 400; }
+.customer-panel-tab.active { font-weight: 500; }
+.customer-note-empty { min-height: 126px; gap: 12px; font-size: 14px; }
+.customer-note-illustration { width: 64px; height: 64px; }
+.customer-note-illustration img { width: 30px; height: 30px; opacity: .42; }
+.customer-note-list li { font-size: 14px; }
+.customer-note-list time { font-size: 12px; }
+.customer-note-composer textarea { height: 58px; font-size: 13px; line-height: 20px; }
+.customer-note-composer > img { position: absolute; top: 19px; right: 13px; width: 20px; height: 20px; opacity: .55; }
+.customer-order-heading { margin-top: 11px; font-size: 14px; }
+.customer-orders-empty { font-size: 13px; }
+.customer-order-card summary { min-height: 37px; }
+.customer-order-card summary strong { font-size: 15px; }
+.customer-order-card summary time { font-size: 12px; }
+.customer-order-statuses { gap: 9px; font-size: 14px; }
+.customer-order-statuses span,
+.customer-order-statuses b,
+.customer-order-tags span { display: inline-flex; align-items: center; gap: 5px; }
+.customer-order-statuses > .customer-panel-icon { width: 11px; height: 11px; flex-basis: 11px; opacity: .45; }
+.customer-panel-icon { flex: 0 0 17px; width: 17px; height: 17px; object-fit: contain; opacity: .72; }
+.customer-order-detail { grid-template-columns: 20px minmax(0, 1fr) auto; gap: 7px; font-size: 14px; line-height: 21px; }
+.customer-order-detail .customer-panel-icon { margin-top: 2px; }
+.customer-order-metric { font-size: 14px; }
+.customer-order-meta { gap: 10px; }
+.customer-order-meta .customer-order-detail { grid-template-columns: 20px 1fr auto; }
+.customer-order-tags { font-size: 14px; }
+.customer-order-tags button { font-size: 13px; }
+.customer-form-section { padding: 14px 12px; }
+.customer-form-section h3 { gap: 8px; margin-bottom: 12px; font-size: 14px; line-height: 21px; font-weight: 500; }
+.customer-form-section h3 img { width: 20px; height: 20px; object-fit: contain; opacity: .76; }
+.customer-form-section input,
+.customer-form-section select { height: 33px; font-size: 13px; line-height: 20px; }
+.customer-product-table-head { grid-template-columns: minmax(0, 1fr) 44px 82px 91px; padding: 8px; font-size: 13px; font-weight: 500; }
+.customer-product-empty { height: 105px; font-size: 12px; }
+.customer-product-empty > img { width: 55px; height: 35px; object-fit: contain; opacity: .48; }
+.customer-product-row { grid-template-columns: minmax(0, 1fr) 44px 82px 91px; min-height: 42px; font-size: 13px; }
+.customer-product-add { grid-template-columns: minmax(0, 1fr) 52px 88px 36px; }
+.customer-product-search { display: flex; height: 33px; align-items: center; gap: 6px; padding-left: 8px; background: #f2f3f6; border: 1px solid transparent; border-radius: 3px; }
+.customer-product-search:focus-within { background: #fff; border-color: #77a8f3; }
+.customer-product-search > img { width: 16px; height: 16px; opacity: .58; }
+.customer-product-search > input { height: 31px; padding-left: 0; background: transparent; border: 0; }
+.customer-product-add button { display: grid; place-items: center; }
+.customer-product-add button img { width: 19px; height: 19px; filter: invert(1); }
+.customer-payment-options { font-size: 14px; line-height: 22px; }
+.customer-money-row { min-height: 33px; font-size: 14px; line-height: 21px; }
+.customer-money-row strong { font-size: 14px; font-weight: 500; }
+.customer-form-line { grid-template-columns: 120px minmax(0, 1fr); min-height: 34px; font-size: 14px; }
+.customer-create-footer > strong { font-size: 16px; line-height: 24px; }
+.customer-create-footer button { height: 36px; font-size: 14px; font-weight: 500; }
 
 .message-channel-toolbar { position: relative; z-index: 8; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 7.875px; padding: 9px 10.125px 9px 23.625px; border-bottom: 1.125px solid #eef0f3; }
 .message-channel-picker,

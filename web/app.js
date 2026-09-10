@@ -1741,6 +1741,10 @@ function formatOrderMoney(value) {
   return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, Number(value) || 0))} đ`;
 }
 
+function customerPanelIcon(name, alt = '') {
+  return `<img class="customer-panel-icon" src="/assets/icons/customer-panel/${name}.png" alt="${escapeHtml(alt)}">`;
+}
+
 function formatCustomerPanelTime(value, includeDate = false) {
   const date = new Date(value || Date.now());
   if (Number.isNaN(date.getTime())) return '—';
@@ -1814,23 +1818,23 @@ function renderCustomerOrders(conversation = getActiveConversation()) {
     const total = Number(order.total) || products.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0);
     return `<details class="customer-order-card" ${index === 0 ? 'open' : ''}>
       <summary><strong>${escapeHtml(String(order.id))}</strong><img src="/assets/icons/facebook.png" alt="Facebook"><time>${escapeHtml(formatCustomerPanelTime(order.createdAt))}</time></summary>
-      <div class="customer-order-statuses"><span>☆ ${escapeHtml(order.status || 'Mới')}</span><span>›</span><b>♢ Đã xác nhận</b><span>›</span><span>⊗ Hủy</span></div>
+      <div class="customer-order-statuses"><span>${customerPanelIcon('star')} ${escapeHtml(order.status || 'Mới')}</span>${customerPanelIcon('right')}<b>${customerPanelIcon('shield')} Đã xác nhận</b>${customerPanelIcon('right')}<span>${customerPanelIcon('cancel')} Hủy</span></div>
       <div class="customer-order-details">
         <div class="customer-order-customer">
-          <div class="customer-order-detail"><i>♙</i><span>${escapeHtml(order.name || 'Chưa có tên')}</span></div>
-          <div class="customer-order-detail"><i>⌂</i><span>${escapeHtml(order.address || 'Chưa có địa chỉ')}</span></div>
-          <div class="customer-order-detail"><i>♧</i><a href="tel:${escapeHtml(order.phone || '')}">${escapeHtml(order.phone || 'Chưa có số điện thoại')}</a><small>${escapeHtml(order.source || 'Facebook')}</small></div>
-          <div class="customer-order-detail customer-order-detail--products"><i>🛒</i><span>${escapeHtml(productLabel || 'Chưa có sản phẩm')} ›</span><strong>Đơn đủ</strong></div>
-          <div class="customer-order-metrics"><div class="customer-order-metric"><span>▣</span><strong>${escapeHtml(formatOrderMoney(total))}</strong></div><div class="customer-order-metric"><span>Số lượng</span><span>${quantity}</span></div></div>
+          <div class="customer-order-detail">${customerPanelIcon('user')}<span>${escapeHtml(order.name || 'Chưa có tên')}</span></div>
+          <div class="customer-order-detail">${customerPanelIcon('location')}<span>${escapeHtml(order.address || 'Chưa có địa chỉ')}</span></div>
+          <div class="customer-order-detail">${customerPanelIcon('phone')}<a href="tel:${escapeHtml(order.phone || '')}">${escapeHtml(order.phone || 'Chưa có số điện thoại')}</a><small>${escapeHtml(order.source || 'Facebook')}</small></div>
+          <div class="customer-order-detail customer-order-detail--products">${customerPanelIcon('cart')}<span>${escapeHtml(productLabel || 'Chưa có sản phẩm')} ${customerPanelIcon('right')}</span><strong>Đơn đủ</strong></div>
+          <div class="customer-order-metrics"><div class="customer-order-metric">${customerPanelIcon('wallet')}<strong>${escapeHtml(formatOrderMoney(total))}</strong></div><div class="customer-order-metric"><span>Số lượng</span><span>${quantity}</span></div></div>
         </div>
         <div class="customer-order-meta">
-          <div class="customer-order-detail"><i>◷</i><span>Tạo lúc</span><span>${escapeHtml(formatCustomerPanelTime(order.createdAt))}</span></div>
-          <div class="customer-order-detail"><i>◉</i><span>Cập nhật TT</span><span>${escapeHtml(formatCustomerPanelTime(order.updatedAt))}</span></div>
-          <div class="customer-order-detail"><i>▤</i><span>Ghi chú</span><a>${escapeHtml(order.note || 'Chưa có')}</a></div>
-          <div class="customer-order-detail"><i>♙</i><span>NV tạo đơn</span><span>${escapeHtml(order.employee || 'Bạn')}</span></div>
-          <div class="customer-order-detail"><i>◇</i><span>Dự kiến nhận hàng</span><a>Chưa có</a></div>
+          <div class="customer-order-detail">${customerPanelIcon('clock')}<span>Tạo lúc</span><span>${escapeHtml(formatCustomerPanelTime(order.createdAt))}</span></div>
+          <div class="customer-order-detail">${customerPanelIcon('check')}<span>Cập nhật TT</span><span>${escapeHtml(formatCustomerPanelTime(order.updatedAt))}</span></div>
+          <div class="customer-order-detail">${customerPanelIcon('document')}<span>Ghi chú</span><a>${escapeHtml(order.note || 'Chưa có')}</a></div>
+          <div class="customer-order-detail">${customerPanelIcon('user')}<span>NV tạo đơn</span><span>${escapeHtml(order.employee || 'Bạn')}</span></div>
+          <div class="customer-order-detail">${customerPanelIcon('calendar')}<span>Dự kiến nhận hàng</span><a>Chưa có</a></div>
         </div>
-        <div class="customer-order-tags"><span>◇ &nbsp;Thẻ</span><button type="button">Thêm thẻ</button></div>
+        <div class="customer-order-tags"><span>${customerPanelIcon('tag')} Thẻ</span><button type="button">Thêm thẻ</button></div>
       </div>
     </details>`;
   }).join('');

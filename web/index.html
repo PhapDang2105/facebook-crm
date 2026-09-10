@@ -250,10 +250,10 @@
           <form class="settings-card chatbot-settings-card" id="chatbot-settings-form">
             <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1><p>Cấu hình cách chatbot hỗ trợ các hội thoại đã được bật bot.</p></div><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label></header>
             <div class="chatbot-settings-body">
-              <div class="chatbot-status-card"><img src="/assets/icons/smart-toy.svg" alt=""><div><strong>Chatbot Giọt Nắng</strong><span id="chatbot-provider-status">Chưa kết nối mô hình AI</span></div><em id="chatbot-provider-badge">Chưa kết nối</em></div>
+              <div class="chatbot-status-card"><img src="/assets/icons/smart-toy.svg" alt=""><div><strong>Chatbot Giọt Nắng</strong></div><em id="chatbot-provider-badge">Chưa kết nối</em></div>
               <nav class="chatbot-workspace-tabs" aria-label="Khu vực thiết lập chatbot">
-                <button class="active" type="button" data-chatbot-workspace="messages"><span>💬</span><b>Thiết lập tin nhắn</b><small>Mẫu trả lời như Smax</small></button>
-                <button type="button" data-chatbot-workspace="processing"><span>⌘</span><b>Thiết lập xử lý</b><small>Luồng tự động như n8n</small></button>
+                <button class="active" type="button" data-chatbot-workspace="messages"><img src="/assets/icons/bot-chat.svg" alt=""><b>Thiết lập tin nhắn</b><small>Mẫu trả lời như Smax</small></button>
+                <button type="button" data-chatbot-workspace="processing"><img src="/assets/icons/workflow.svg" alt=""><b>Thiết lập xử lý</b><small>Luồng tự động như n8n</small></button>
               </nav>
               <section class="chatbot-workspace-panel" data-chatbot-workspace-panel="messages">
                 <div class="chatbot-template-layout">
@@ -272,11 +272,11 @@
               <section class="chatbot-workspace-panel hidden" data-chatbot-workspace-panel="processing">
                 <div class="chatbot-processing-layout">
                   <div class="chatbot-workflow-column">
-                    <div class="chatbot-section-heading"><div><strong>Luồng xử lý tự động</strong><span>Smax – Dify AI – Smax Version 2</span></div><em>Đang hoạt động</em></div>
+                    <div class="chatbot-section-heading"><img src="/assets/icons/workflow.svg" alt=""><strong>Luồng xử lý tự động</strong></div>
                     <div class="chatbot-workflow" id="chatbot-workflow"></div>
                   </div>
                   <div class="chatbot-processing-config">
-                    <div class="chatbot-section-heading"><div><strong>Cấu hình xử lý</strong><span>Kết nối AI và quy tắc vận hành</span></div></div>
+                    <div class="chatbot-section-heading"><img src="/assets/icons/tune.svg" alt=""><strong>Cấu hình xử lý</strong></div>
                     <div class="chatbot-settings-grid">
                       <label class="chatbot-field"><span>Tên chatbot</span><input id="chatbot-settings-name" maxlength="100" placeholder="Trợ lý Giọt Nắng"></label>
                       <label class="chatbot-field"><span>Chế độ phản hồi</span><select id="chatbot-settings-mode"><option value="draft">Gợi ý để nhân viên duyệt</option><option value="automatic">Tự động trả lời</option></select></label>

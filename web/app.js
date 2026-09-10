@@ -1819,10 +1819,21 @@ function renderChatbotTemplateEditor() {
 function renderChatbotWorkflow() {
   if (!chatbotWorkflow) return;
   const typeLabels = { trigger: 'Điểm bắt đầu', transform: 'Xử lý dữ liệu', merge: 'Gộp dữ liệu', ai: 'Mô hình AI', guard: 'Kiểm tra an toàn', output: 'Đầu ra' };
+  const icons = {
+    webhook: '/assets/icons/webhook.svg',
+    message_normalizer: '/assets/icons/bot-chat.svg',
+    product_extractor: '/assets/icons/data-process.svg',
+    customer_extractor: '/assets/icons/person.svg',
+    context_merge: '/assets/icons/merge.svg',
+    dify: '/assets/icons/ai-model.svg',
+    template_renderer: '/assets/icons/bot-chat.svg',
+    duplicate_guard: '/assets/icons/safety-check.svg',
+    meta_sender: '/assets/icons/send-message.svg'
+  };
   chatbotWorkflow.innerHTML = chatbotProcessingSteps.map((step, index) => `
     <div class="chatbot-workflow-node" data-type="${escapeHtml(step.type)}">
-      <span class="chatbot-workflow-icon">${index + 1}</span>
-      <span class="chatbot-workflow-copy"><strong>${escapeHtml(step.name)}</strong><small>${escapeHtml(typeLabels[step.type] || 'Bước xử lý')}</small></span>
+      <span class="chatbot-workflow-icon"><img src="${icons[step.id] || '/assets/icons/settings.png'}" alt=""></span>
+      <span class="chatbot-workflow-copy"><strong>${escapeHtml(step.name)}</strong><small>Bước ${index + 1} · ${escapeHtml(typeLabels[step.type] || 'Xử lý')}</small></span>
       <label class="chatbot-workflow-toggle" title="Bật hoặc tắt bước"><input type="checkbox" data-chatbot-step="${escapeHtml(step.id)}" ${step.enabled !== false ? 'checked' : ''}></label>
     </div>`).join('');
 }

@@ -7,6 +7,7 @@ import { createLead, getSegments, updateLead } from './domain.mjs';
 import { buildExportRows } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
+import { buildCustomerOrderConfirmation, normalizeCustomerOrder } from './conversation-orders.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -26,6 +27,7 @@ import {
   listConversations,
   listMessages,
   publicConversation,
+  readMessagingStore,
   setConversationFlags,
   updateMessagingStore
 } from './messaging-store.mjs';
@@ -73,36 +75,6 @@ function publicCustomerPanel(conversation) {
   return {
     notes: Array.isArray(conversation?.customerNotes) ? conversation.customerNotes : [],
     orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : []
-  };
-}
-
-function cleanCustomerOrder(input = {}) {
-  const products = Array.isArray(input.products) ? input.products.slice(0, 100).map(item => ({
-    name: String(item?.name || '').trim().slice(0, 200),
-    quantity: Math.max(1, Number(item?.quantity) || 1),
-    price: Math.max(0, Number(item?.price) || 0)
-  })).filter(item => item.name) : [];
-  if (!String(input.name || '').trim() || !String(input.phone || '').trim() || !String(input.address || '').trim() || !products.length) {
-    throw new Error('Đơn hàng cần đủ tên, số điện thoại, địa chỉ và sản phẩm.');
-  }
-  const now = Date.now();
-  return {
-    id: String(input.id || randomUUID().slice(0, 8)).replace(/[^\w-]/g, '').slice(0, 40),
-    name: String(input.name).trim().slice(0, 200),
-    phone: String(input.phone).trim().slice(0, 40),
-    address: String(input.address).trim().slice(0, 500),
-    products,
-    status: String(input.status || 'Mới').trim().slice(0, 80),
-    source: String(input.source || 'Facebook').trim().slice(0, 80),
-    payment: String(input.payment || 'COD').trim().slice(0, 80),
-    freeShipping: Boolean(input.freeShipping),
-    shippingFee: Math.max(0, Number(input.shippingFee) || 0),
-    discount: Math.max(0, Number(input.discount) || 0),
-    total: Math.max(0, Number(input.total) || 0),
-    note: String(input.note || '').trim().slice(0, 1000),
-    employee: String(input.employee || 'Bạn').trim().slice(0, 120),
-    createdAt: Number(input.createdAt) || now,
-    updatedAt: now
   };
 }
 
@@ -575,6 +547,34 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'GET') return sendJson(response, 200, publicCustomerPanel(conversation));
       if (request.method === 'POST') {
         const payload = await readBody(request);
+        if (payload.type === 'order') {
+          let order;
+          try {
+            order = normalizeCustomerOrder(payload.order);
+          } catch (error) {
+            return sendJson(response, 400, { error: error.message });
+          }
+          try {
+            const sent = await sendConversationMessage(conversation, { text: buildCustomerOrderConfirmation(order) });
+            order.delivery = {
+              status: 'sent',
+              messageId: String(sent?.message?.mid || sent?.message?.id || ''),
+              sentAt: Date.now()
+            };
+          } catch (error) {
+            return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });
+          }
+          const panel = await updateMessagingStore(store => {
+            const item = store.conversations.find(entry => entry.id === id);
+            if (!item) return null;
+            if (!Array.isArray(item.customerOrders)) item.customerOrders = [];
+            item.customerOrders.unshift(order);
+            item.customerOrders = item.customerOrders.slice(0, 200);
+            return publicCustomerPanel(item);
+          });
+          if (!panel) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+          return sendJson(response, 201, panel);
+        }
         const panel = await updateMessagingStore(store => {
           const item = store.conversations.find(entry => entry.id === id);
           if (!item) return null;
@@ -584,10 +584,6 @@ const server = http.createServer(async (request, response) => {
             if (!Array.isArray(item.customerNotes)) item.customerNotes = [];
             item.customerNotes.unshift({ id: randomUUID(), text, createdAt: Date.now() });
             item.customerNotes = item.customerNotes.slice(0, 100);
-          } else if (payload.type === 'order') {
-            if (!Array.isArray(item.customerOrders)) item.customerOrders = [];
-            item.customerOrders.unshift(cleanCustomerOrder(payload.order));
-            item.customerOrders = item.customerOrders.slice(0, 200);
           } else {
             throw new Error('Loại cập nhật thông tin khách hàng không hợp lệ.');
           }
@@ -596,6 +592,17 @@ const server = http.createServer(async (request, response) => {
         if (!panel) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
         return sendJson(response, 200, panel);
       }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/customer-orders') {
+      const messagingStore = await readMessagingStore();
+      const items = messagingStore.conversations.flatMap(conversation =>
+        (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).map(order => ({
+          ...order,
+          conversationId: conversation.id,
+          conversationName: conversation.name || ''
+        }))
+      ).sort((first, second) => (Number(second.createdAt) || 0) - (Number(first.createdAt) || 0));
+      return sendJson(response, 200, { items, total: items.length });
     }
     if (request.method === 'GET' && url.pathname === '/api/dashboard') {
       const { leads } = await readStore();

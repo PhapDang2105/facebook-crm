@@ -197,6 +197,7 @@ const orderSearch = document.querySelector('#order-search');
 const orderFilter = document.querySelector('#order-filter');
 const orderHistoryButton = document.querySelector('#order-history-button');
 const orderHistoryPanel = document.querySelector('#order-history-panel');
+const customerOrdersPreview = document.querySelector('#customer-orders-preview');
 const orderExport = document.querySelector('#order-export');
 let orderData = { headers: [], rows: [] };
 let orderImportHistory = [];
@@ -222,6 +223,24 @@ function showView(name) {
   orderNav.setAttribute('aria-expanded', String(name === 'orders'));
   settingsNav?.setAttribute('aria-expanded', String(name === 'settings'));
   if (window.location.hash !== `#${name}`) window.location.hash = name;
+  if (name === 'orders') loadCustomerOrdersManagement();
+}
+
+async function loadCustomerOrdersManagement() {
+  if (!customerOrdersPreview) return;
+  try {
+    const result = await readApiResponse(await fetch('/api/customer-orders'));
+    if (!result.items?.length) {
+      customerOrdersPreview.innerHTML = '<p>Chưa có đơn nào được tạo từ hội thoại.</p>';
+      return;
+    }
+    customerOrdersPreview.innerHTML = `<div class="customer-orders-management-list">${result.items.map(order => `<div class="customer-orders-management-row">
+      <strong>#${escapeHtml(order.id)}</strong><span>${escapeHtml(order.name || order.conversationName)}</span><span>${escapeHtml(order.phone)}</span>
+      <span class="customer-orders-management-status">${order.delivery?.status === 'sent' ? '✓ Đã gửi khách' : escapeHtml(order.status || 'Mới')}</span><strong>${escapeHtml(formatOrderMoney(order.total))}</strong>
+    </div>`).join('')}</div>`;
+  } catch (error) {
+    customerOrdersPreview.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+  }
 }
 
 function formatShippingTime(value) {
@@ -4033,7 +4052,7 @@ customerProductList?.addEventListener('click', event => {
 customerFreeShipping?.addEventListener('change', updateCustomerOrderTotals);
 customerOrderReset?.addEventListener('click', () => resetCustomerOrderForm());
 
-customerOrderForm?.addEventListener('submit', event => {
+customerOrderForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const conversation = getActiveConversation();
   const key = getCustomerPanelKey(conversation);
@@ -4061,16 +4080,27 @@ customerOrderForm?.addEventListener('submit', event => {
     updatedAt: now,
     employee: appSettings.displayName || topbarUserName?.textContent || 'Bạn'
   };
-  const orders = getCustomerOrders(conversation);
-  orders.unshift(order);
-  customerPanelStore.orders[key] = orders;
-  saveCustomerPanelStore();
-  renderCustomerOrders(conversation);
-  renderConversationOrderCards(conversation);
-  if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
-  setCustomerPanelTab('info');
-  showToast(`Đã tạo đơn ${order.id}.`);
-  saveCustomerPanelChange(conversation, { type: 'order', order });
+  customerOrderSubmit.disabled = true;
+  const originalLabel = customerOrderSubmit.textContent;
+  customerOrderSubmit.textContent = 'Đang gửi...';
+  try {
+    const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversation.dataset.conversationId)}/customer-panel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'order', order })
+    }));
+    customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
+    saveCustomerPanelStore();
+    renderCustomerOrders(conversation);
+    await ensureRemoteMessages(conversation, { force: true });
+    setCustomerPanelTab('info');
+    showToast(`Đã gửi xác nhận cho khách và tạo đơn ${order.id}.`, 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa gửi được xác nhận cho khách. Đơn chưa được tạo.');
+  } finally {
+    customerOrderSubmit.textContent = originalLabel;
+    updateCustomerOrderTotals();
+  }
 });
 
 contactInfoButton?.addEventListener('click', () => {

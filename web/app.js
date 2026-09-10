@@ -1183,6 +1183,37 @@ function saveChatMessageReaction(name, messageId, reaction) {
   writeStoredJson(chatMessageReactionsKey, items);
 }
 
+// A marker only counts when it does not sit against a letter or digit, which
+// is why Messenger renders *0385805700* in bold but leaves *298.000*đ alone.
+const inlineMessageFormats = [
+  { tag: 'strong', pattern: /(?<![\p{L}\p{N}*])\*(\S|\S[^*\n]*?\S)\*(?![\p{L}\p{N}*])/u },
+  { tag: 'em', pattern: /(?<![\p{L}\p{N}_])_(\S|\S[^_\n]*?\S)_(?![\p{L}\p{N}_])/u },
+  { tag: 's', pattern: /(?<![\p{L}\p{N}~])~(\S|\S[^~\n]*?\S)~(?![\p{L}\p{N}~])/u },
+  { tag: 'code', pattern: /(?<![\p{L}\p{N}`])`(\S|\S[^`\n]*?\S)`(?![\p{L}\p{N}`])/u }
+];
+
+/**
+ * Renders the inline formatting Messenger applies: *bold*, _italic_, ~strike~
+ * and `code`. Builds real nodes rather than HTML, so text written by a customer
+ * can never reach the page as markup.
+ */
+function appendMessageText(target, value) {
+  let rest = String(value ?? '');
+  while (rest) {
+    const hit = inlineMessageFormats
+      .map(format => ({ format, match: rest.match(format.pattern) }))
+      .filter(item => item.match)
+      .sort((first, second) => first.match.index - second.match.index)[0];
+    if (!hit) break;
+    if (hit.match.index > 0) target.appendChild(document.createTextNode(rest.slice(0, hit.match.index)));
+    const element = document.createElement(hit.format.tag);
+    appendMessageText(element, hit.match[1]);
+    target.appendChild(element);
+    rest = rest.slice(hit.match.index + hit.match[0].length);
+  }
+  if (rest) target.appendChild(document.createTextNode(rest));
+}
+
 function getMessagePreview(message) {
   const item = typeof message === 'string' ? { type: 'text', text: message } : message;
   if (item?.type === 'image') return item.text ? `Ảnh · ${item.text}` : 'Đã gửi một ảnh';
@@ -1376,7 +1407,7 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
     if (item.text) {
       const caption = document.createElement('span');
       caption.className = 'bubble-caption';
-      caption.textContent = item.text;
+      appendMessageText(caption, item.text);
       bubble.appendChild(caption);
     }
   } else if (item.type === 'audio') {
@@ -1398,13 +1429,13 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
     if (item.text) {
       const caption = document.createElement('span');
       caption.className = 'bubble-caption';
-      caption.textContent = item.text;
+      appendMessageText(caption, item.text);
       bubble.appendChild(caption);
     }
   } else if (item.type === 'sticker') {
     bubble.textContent = item.sticker || '👍';
   } else {
-    bubble.textContent = item.text;
+    appendMessageText(bubble, item.text);
   }
   if (messageId) {
     row.dataset.messageId = messageId;

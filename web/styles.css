@@ -1000,7 +1000,7 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .message-reply-source { display: block; max-width: 100%; margin-bottom: 3.375px; padding: 8px 13.5px; overflow: hidden; color: #4b4f56; background: #e4e6eb; border-radius: 16.875px; font-size: 14.625px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 .outgoing .message-reply-source { color: #365899; background: #dbe7ff; }
 .message-time-tooltip { position: fixed; z-index: 1500; padding: 5.625px 9px; color: #fff; background: rgba(28, 30, 33, .88); border-radius: 6.75px; box-shadow: 0 3.375px 11.25px rgba(0, 0, 0, .16); font-size: 12.375px; font-weight: 600; line-height: 1; pointer-events: none; white-space: nowrap; }
-.bubble { padding: 10.125px 14.625px; background: #f0f2f5; border: 1.125px solid #f0f2f5; border-radius: 20.25px 20.25px 20.25px 5.625px; font-size: 16.875px; line-height: 1.4; }
+.bubble { padding: 10.125px 14.625px; white-space: pre-wrap; overflow-wrap: anywhere; background: #f0f2f5; border: 1.125px solid #f0f2f5; border-radius: 20.25px 20.25px 20.25px 5.625px; font-size: 16.875px; line-height: 1.4; }
 .outgoing .bubble { color: #fff; background: var(--messenger-blue); border-color: var(--messenger-blue); border-radius: 20.25px 20.25px 5.625px 20.25px; }
 .outgoing.message-group-first .bubble:not(.bubble-sticker):not(.bubble-media) { border-radius: 20.25px 20.25px 5.625px 20.25px; }
 .outgoing.message-group-middle .bubble:not(.bubble-sticker):not(.bubble-media) { border-radius: 20.25px 5.625px 5.625px 20.25px; }

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260910-chatbot-settings">
+  <link rel="stylesheet" href="styles.css?v=20260910-chatbot-native">
 </head>
 <body>
   <div class="topbar">
@@ -250,11 +250,14 @@
           <form class="settings-card chatbot-settings-card" id="chatbot-settings-form">
             <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1><p>Cấu hình cách chatbot hỗ trợ các hội thoại đã được bật bot.</p></div><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label></header>
             <div class="chatbot-settings-body">
-              <div class="chatbot-status-card"><img src="/assets/icons/smart-toy.svg" alt=""><div><strong>Chatbot Giọt Nắng</strong><span>Chưa kết nối mô hình AI</span></div><em>Chuẩn bị cấu hình</em></div>
+              <div class="chatbot-status-card"><img src="/assets/icons/smart-toy.svg" alt=""><div><strong>Chatbot Giọt Nắng</strong><span id="chatbot-provider-status">Chưa kết nối mô hình AI</span></div><em id="chatbot-provider-badge">Chưa kết nối</em></div>
               <div class="chatbot-settings-grid">
                 <label class="chatbot-field"><span>Tên chatbot</span><input id="chatbot-settings-name" maxlength="100" placeholder="Trợ lý Giọt Nắng"></label>
                 <label class="chatbot-field"><span>Chế độ phản hồi</span><select id="chatbot-settings-mode"><option value="draft">Gợi ý để nhân viên duyệt</option><option value="automatic">Tự động trả lời</option></select></label>
+                <label class="chatbot-field"><span>Nền tảng AI</span><select id="chatbot-settings-provider"><option value="dify">Dify – GONA Việt Nam Version 2</option></select></label>
+                <label class="chatbot-field"><span>Địa chỉ API Dify</span><input id="chatbot-settings-endpoint" type="url" maxlength="500" placeholder="https://api.dify.ai/v1/chat-messages"></label>
               </div>
+              <label class="chatbot-field"><span>Khóa API Dify</span><input id="chatbot-settings-api-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="app-••••••••"><small id="chatbot-api-key-help">Khóa được lưu ở máy chủ và không bao giờ gửi trở lại trình duyệt.</small></label>
               <label class="chatbot-field"><span>Tin nhắn chào mừng</span><textarea id="chatbot-settings-welcome" maxlength="2000" rows="3" placeholder="Lời chào khi chatbot bắt đầu hỗ trợ khách hàng"></textarea></label>
               <label class="chatbot-field"><span>Hướng dẫn cho chatbot</span><textarea id="chatbot-settings-instructions" maxlength="12000" rows="7" placeholder="Ví dụ: Chỉ tư vấn sản phẩm Giọt Nắng, trả lời ngắn gọn, không tự đưa ra cam kết ngoài chính sách..."></textarea><small>Đây sẽ là nguyên tắc nền khi kết nối mô hình AI.</small></label>
               <label class="chatbot-field"><span>Từ khóa chuyển cho nhân viên</span><input id="chatbot-settings-handoff" maxlength="1000" placeholder="gặp nhân viên, tư vấn viên, khiếu nại"><small>Phân tách các cụm từ bằng dấu phẩy.</small></label>
@@ -295,6 +298,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260910-chatbot-settings"></script>
+  <script src="app.js?v=20260910-chatbot-native"></script>
 </body>
 </html>

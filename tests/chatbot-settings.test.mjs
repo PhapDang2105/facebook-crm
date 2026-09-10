@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultChatbotSettings, normalizeChatbotSettings } from '../app/chatbot-settings.mjs';
+import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from '../app/chatbot-settings.mjs';
 
 test('chatbot mặc định ở chế độ gợi ý và chưa hoạt động', () => {
   const settings = normalizeChatbotSettings();
@@ -14,6 +14,8 @@ test('chuẩn hóa cấu hình chatbot trước khi lưu', () => {
     enabled: true,
     name: '  Bot bán hàng  ',
     responseMode: 'automatic',
+    endpoint: 'https://api.dify.ai/v1/chat-messages',
+    apiKey: 'app-secret',
     welcomeMessage: '  Xin chào  ',
     instructions: '  Chỉ trả lời về sản phẩm.  ',
     handoffKeywords: '  gặp người thật  '
@@ -33,4 +35,10 @@ test('chuẩn hóa cấu hình chatbot trước khi lưu', () => {
     instructions: 'Chỉ trả lời về sản phẩm.',
     handoffKeywords: 'gặp người thật'
   });
+});
+
+test('không trả khóa API về trình duyệt', () => {
+  const settings = publicChatbotSettings({ apiKey: 'app-secret' });
+  assert.equal(settings.apiKeyConfigured, true);
+  assert.equal('apiKey' in settings, false);
 });

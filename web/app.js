@@ -110,6 +110,12 @@ const chatbotSettingsForm = document.querySelector('#chatbot-settings-form');
 const chatbotSettingsEnabled = document.querySelector('#chatbot-settings-enabled');
 const chatbotSettingsName = document.querySelector('#chatbot-settings-name');
 const chatbotSettingsMode = document.querySelector('#chatbot-settings-mode');
+const chatbotSettingsProvider = document.querySelector('#chatbot-settings-provider');
+const chatbotSettingsEndpoint = document.querySelector('#chatbot-settings-endpoint');
+const chatbotSettingsApiKey = document.querySelector('#chatbot-settings-api-key');
+const chatbotApiKeyHelp = document.querySelector('#chatbot-api-key-help');
+const chatbotProviderStatus = document.querySelector('#chatbot-provider-status');
+const chatbotProviderBadge = document.querySelector('#chatbot-provider-badge');
 const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome');
 const chatbotSettingsInstructions = document.querySelector('#chatbot-settings-instructions');
 const chatbotSettingsHandoff = document.querySelector('#chatbot-settings-handoff');
@@ -1735,6 +1741,15 @@ async function loadChatbotSettings() {
     chatbotSettingsEnabled.checked = settings.enabled === true;
     chatbotSettingsName.value = settings.name || 'Trợ lý Giọt Nắng';
     chatbotSettingsMode.value = settings.responseMode === 'automatic' ? 'automatic' : 'draft';
+    chatbotSettingsProvider.value = settings.provider || 'dify';
+    chatbotSettingsEndpoint.value = settings.endpoint || 'https://api.dify.ai/v1/chat-messages';
+    chatbotSettingsApiKey.value = '';
+    chatbotSettingsApiKey.placeholder = settings.apiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : 'app-••••••••';
+    if (chatbotApiKeyHelp) chatbotApiKeyHelp.textContent = settings.apiKeyConfigured
+      ? 'Đã có khóa API trên máy chủ. Nhập khóa mới chỉ khi muốn thay đổi.'
+      : 'Khóa được lưu ở máy chủ và không bao giờ gửi trở lại trình duyệt.';
+    if (chatbotProviderStatus) chatbotProviderStatus.textContent = settings.apiKeyConfigured ? 'Đã kết nối Dify trực tiếp với CRM' : 'Chưa nhập khóa API Dify';
+    if (chatbotProviderBadge) chatbotProviderBadge.textContent = settings.apiKeyConfigured ? 'Đã cấu hình' : 'Chưa kết nối';
     chatbotSettingsWelcome.value = settings.welcomeMessage || '';
     chatbotSettingsInstructions.value = settings.instructions || '';
     chatbotSettingsHandoff.value = settings.handoffKeywords || '';
@@ -3798,12 +3813,19 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         enabled: chatbotSettingsEnabled.checked,
         name: chatbotSettingsName.value,
         responseMode: chatbotSettingsMode.value,
+        provider: chatbotSettingsProvider.value,
+        endpoint: chatbotSettingsEndpoint.value,
+        apiKey: chatbotSettingsApiKey.value,
         welcomeMessage: chatbotSettingsWelcome.value,
         instructions: chatbotSettingsInstructions.value,
         handoffKeywords: chatbotSettingsHandoff.value
       })
     }));
     chatbotSettingsEnabled.checked = settings.enabled === true;
+    chatbotSettingsApiKey.value = '';
+    chatbotSettingsApiKey.placeholder = settings.apiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : 'app-••••••••';
+    if (chatbotProviderStatus) chatbotProviderStatus.textContent = settings.apiKeyConfigured ? 'Đã kết nối Dify trực tiếp với CRM' : 'Chưa nhập khóa API Dify';
+    if (chatbotProviderBadge) chatbotProviderBadge.textContent = settings.apiKeyConfigured ? 'Đã cấu hình' : 'Chưa kết nối';
     if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = 'Đã lưu thiết lập chatbot.';
     showToast('Đã lưu thiết lập chatbot.', 'success');
   } catch (error) {

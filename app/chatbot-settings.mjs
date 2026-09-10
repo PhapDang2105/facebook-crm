@@ -2,6 +2,9 @@ export const defaultChatbotSettings = Object.freeze({
   enabled: false,
   name: 'Trợ lý Giọt Nắng',
   responseMode: 'draft',
+  provider: 'dify',
+  endpoint: 'https://api.dify.ai/v1/chat-messages',
+  apiKey: '',
   welcomeMessage: '',
   instructions: '',
   handoffKeywords: 'gặp nhân viên, tư vấn viên, khiếu nại'
@@ -18,9 +21,18 @@ export function normalizeChatbotSettings(value = {}) {
     enabled: value.enabled === true,
     name: cleanText(value.name, defaultChatbotSettings.name, 100),
     responseMode,
+    provider: 'dify',
+    endpoint: cleanText(value.endpoint, defaultChatbotSettings.endpoint, 500),
+    apiKey: cleanText(value.apiKey, '', 1000),
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     instructions: cleanText(value.instructions, '', 12000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
     updatedAt: Number(value.updatedAt) || Date.now()
   };
+}
+
+export function publicChatbotSettings(value = {}) {
+  const settings = normalizeChatbotSettings(value);
+  const { apiKey, ...visible } = settings;
+  return { ...visible, apiKeyConfigured: Boolean(apiKey) };
 }

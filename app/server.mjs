@@ -8,7 +8,8 @@ import { buildExportRows } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, normalizeCustomerOrder } from './conversation-orders.mjs';
-import { defaultChatbotSettings, normalizeChatbotSettings } from './chatbot-settings.mjs';
+import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
+import { processChatbotChanges } from './chatbot-engine.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -18,7 +19,7 @@ import {
   projectRoot,
   serverConfig
 } from './config.mjs';
-import { encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
+import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
@@ -84,7 +85,9 @@ function publicCustomerPanel(conversation) {
 
 async function readChatbotSettings() {
   try {
-    return normalizeChatbotSettings(JSON.parse(await readFile(chatbotSettingsPath, 'utf8')));
+    const stored = JSON.parse(await readFile(chatbotSettingsPath, 'utf8'));
+    const apiKey = stored.apiKeyEncrypted ? decryptToken(stored.apiKeyEncrypted) : stored.apiKey;
+    return normalizeChatbotSettings({ ...stored, apiKey });
   } catch {
     return normalizeChatbotSettings(defaultChatbotSettings);
   }
@@ -92,8 +95,10 @@ async function readChatbotSettings() {
 
 async function writeChatbotSettings(settings) {
   const normalized = normalizeChatbotSettings(settings);
+  const { apiKey, ...safeSettings } = normalized;
+  const stored = { ...safeSettings, ...(apiKey ? { apiKeyEncrypted: encryptToken(apiKey) } : {}) };
   const temporaryPath = `${chatbotSettingsPath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(normalized, null, 2), 'utf8');
+  await writeFile(temporaryPath, JSON.stringify(stored, null, 2), 'utf8');
   await rename(temporaryPath, chatbotSettingsPath);
   return normalized;
 }
@@ -294,10 +299,19 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
     if (request.method === 'GET' && url.pathname === '/api/health') return sendJson(response, 200, { status:'ok', time:new Date().toISOString() });
-    if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') return sendJson(response, 200, await readChatbotSettings());
+    if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') return sendJson(response, 200, publicChatbotSettings(await readChatbotSettings()));
     if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
-      const settings = await writeChatbotSettings({ ...(await readBody(request)), updatedAt: Date.now() });
-      return sendJson(response, 200, settings);
+      const current = await readChatbotSettings();
+      const payload = await readBody(request);
+      const endpoint = String(payload.endpoint || current.endpoint || '');
+      if (!endpoint.startsWith('https://')) return sendJson(response, 400, { error: 'Địa chỉ Dify phải bắt đầu bằng https://.' });
+      const settings = await writeChatbotSettings({
+        ...current,
+        ...payload,
+        apiKey: String(payload.apiKey || '').trim() || current.apiKey,
+        updatedAt: Date.now()
+      });
+      return sendJson(response, 200, publicChatbotSettings(settings));
     }
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const store = await readChannelStore();
@@ -485,7 +499,18 @@ const server = http.createServer(async (request, response) => {
       response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end('EVENT_RECEIVED');
       try {
-        await processWebhookPayload(JSON.parse(rawBody.toString('utf8')));
+        const changes = await processWebhookPayload(JSON.parse(rawBody.toString('utf8')));
+        await processChatbotChanges(changes, {
+          readSettings: readChatbotSettings,
+          listMessages,
+          sendMessage: sendConversationMessage,
+          saveBotState: (id, botState) => updateMessagingStore(store => {
+            const conversation = store.conversations.find(item => item.id === id);
+            if (!conversation) return null;
+            Object.assign(conversation, botState);
+            return conversation;
+          })
+        });
       } catch (error) {
         console.error('Webhook processing failed:', error.message);
       }

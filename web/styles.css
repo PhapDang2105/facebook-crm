@@ -1038,6 +1038,12 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .icon-button.active { background: #e4e6eb; border-radius: 50%; }
 #conversation-search-button img { width: 23.625px; height: 23.625px; filter: grayscale(1) brightness(.42); }
 #conversation-search-button.active img { filter: none; }
+.chatbot-toggle-button { position: relative; display: grid; place-items: center; width: 40.5px; height: 40.5px; padding: 6.75px; border-radius: 50%; }
+.chatbot-toggle-button img { width: 24.75px; height: 24.75px; filter: grayscale(1) brightness(.35); }
+.chatbot-toggle-button.active { background: #e7f3ff; }
+.chatbot-toggle-button.active img { filter: invert(32%) sepia(96%) saturate(3645%) hue-rotate(215deg) brightness(101%) contrast(102%); }
+.chatbot-toggle-button.active::after { position: absolute; right: 3.375px; bottom: 3.375px; width: 7.875px; height: 7.875px; background: #31a24c; border: 1.8px solid #fff; border-radius: 50%; content: ''; }
+.chatbot-toggle-button:disabled { cursor: wait; opacity: .55; }
 
 .conversation-search-panel,
 .conversation-pinned-panel {

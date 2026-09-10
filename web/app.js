@@ -13,6 +13,7 @@ const messageChannelMenu = document.querySelector('#message-channel-menu');
 const messageLabelFilter = document.querySelector('#message-label-filter');
 const messageLabelMenu = document.querySelector('#message-label-menu');
 const markUnreadButton = document.querySelector('#mark-unread-button');
+const chatbotToggleButton = document.querySelector('#chatbot-toggle-button');
 const messageComposerInput = document.querySelector('#message-composer-input');
 const messageSendButton = document.querySelector('#message-send-button');
 const messageReplyPreview = document.querySelector('#message-reply-preview');
@@ -157,7 +158,7 @@ const remoteConversations = new Map();
 const remoteMessages = new Map();
 const syncedChannelIds = new Set();
 let customerDraftProducts = [];
-let customerPanelStore = { notes: {}, orders: {} };
+let customerPanelStore = { notes: {}, orders: {}, bots: {} };
 let customerPanelRequestId = 0;
 
 try {
@@ -165,7 +166,8 @@ try {
   if (savedCustomerPanel && typeof savedCustomerPanel === 'object') {
     customerPanelStore = {
       notes: savedCustomerPanel.notes && typeof savedCustomerPanel.notes === 'object' ? savedCustomerPanel.notes : {},
-      orders: savedCustomerPanel.orders && typeof savedCustomerPanel.orders === 'object' ? savedCustomerPanel.orders : {}
+      orders: savedCustomerPanel.orders && typeof savedCustomerPanel.orders === 'object' ? savedCustomerPanel.orders : {},
+      bots: savedCustomerPanel.bots && typeof savedCustomerPanel.bots === 'object' ? savedCustomerPanel.bots : {}
     };
   }
 } catch {
@@ -1716,6 +1718,17 @@ function saveCustomerPanelStore() {
   localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore));
 }
 
+function renderChatbotToggle(conversation = getActiveConversation()) {
+  if (!chatbotToggleButton) return;
+  const key = getCustomerPanelKey(conversation);
+  const enabled = Boolean(key && customerPanelStore.bots[key]);
+  const label = enabled ? 'Tắt bot cho hội thoại này' : 'Bật bot cho hội thoại này';
+  chatbotToggleButton.classList.toggle('active', enabled);
+  chatbotToggleButton.setAttribute('aria-pressed', String(enabled));
+  chatbotToggleButton.setAttribute('aria-label', label);
+  chatbotToggleButton.title = label;
+}
+
 async function loadCustomerPanelFromServer(conversation = getActiveConversation()) {
   const conversationId = conversation?.dataset.conversationId;
   const key = getCustomerPanelKey(conversation);
@@ -1726,7 +1739,9 @@ async function loadCustomerPanelFromServer(conversation = getActiveConversation(
     if (requestId !== customerPanelRequestId || getCustomerPanelKey() !== key) return;
     customerPanelStore.notes[key] = Array.isArray(panel.notes) ? panel.notes : [];
     customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
+    customerPanelStore.bots[key] = panel.botEnabled === true;
     saveCustomerPanelStore();
+    renderChatbotToggle(conversation);
     renderCustomerNotes(conversation);
     renderCustomerOrders(conversation);
     renderConversationOrderCards(conversation);
@@ -1748,7 +1763,9 @@ async function saveCustomerPanelChange(conversation, payload) {
     }));
     customerPanelStore.notes[key] = Array.isArray(panel.notes) ? panel.notes : [];
     customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
+    customerPanelStore.bots[key] = panel.botEnabled === true;
     saveCustomerPanelStore();
+    renderChatbotToggle(conversation);
     if (getCustomerPanelKey() === key) {
       renderCustomerNotes(conversation);
       renderCustomerOrders(conversation);
@@ -1976,6 +1993,7 @@ function setCustomerPanelTab(name) {
 }
 
 function renderCustomerPanel(conversation = getActiveConversation()) {
+  renderChatbotToggle(conversation);
   renderCustomerNotes(conversation);
   renderCustomerOrders(conversation);
   const profile = getCustomerPanelProfile(conversation);
@@ -4100,6 +4118,37 @@ customerOrderForm?.addEventListener('submit', async event => {
   } finally {
     customerOrderSubmit.textContent = originalLabel;
     updateCustomerOrderTotals();
+  }
+});
+
+chatbotToggleButton?.addEventListener('click', async () => {
+  const conversation = getActiveConversation();
+  const conversationId = conversation?.dataset.conversationId;
+  const key = getCustomerPanelKey(conversation);
+  if (!key || chatbotToggleButton.disabled) return;
+  const enabled = !Boolean(customerPanelStore.bots[key]);
+  if (!conversationId) {
+    customerPanelStore.bots[key] = enabled;
+    saveCustomerPanelStore();
+    renderChatbotToggle(conversation);
+    showToast(enabled ? 'Đã bật bot cho hội thoại này.' : 'Đã tắt bot cho hội thoại này.', 'success');
+    return;
+  }
+  chatbotToggleButton.disabled = true;
+  try {
+    const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversationId)}/customer-panel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'bot', enabled })
+    }));
+    customerPanelStore.bots[key] = panel.botEnabled === true;
+    saveCustomerPanelStore();
+    renderChatbotToggle(conversation);
+    showToast(panel.botEnabled ? 'Đã bật bot cho hội thoại này.' : 'Đã tắt bot cho hội thoại này.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa cập nhật được trạng thái bot.');
+  } finally {
+    chatbotToggleButton.disabled = false;
   }
 });
 

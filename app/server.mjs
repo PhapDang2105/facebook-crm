@@ -74,7 +74,8 @@ function sendJson(response, statusCode, value) {
 function publicCustomerPanel(conversation) {
   return {
     notes: Array.isArray(conversation?.customerNotes) ? conversation.customerNotes : [],
-    orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : []
+    orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [],
+    botEnabled: conversation?.botEnabled === true
   };
 }
 
@@ -584,6 +585,8 @@ const server = http.createServer(async (request, response) => {
             if (!Array.isArray(item.customerNotes)) item.customerNotes = [];
             item.customerNotes.unshift({ id: randomUUID(), text, createdAt: Date.now() });
             item.customerNotes = item.customerNotes.slice(0, 100);
+          } else if (payload.type === 'bot') {
+            item.botEnabled = payload.enabled === true;
           } else {
             throw new Error('Loại cập nhật thông tin khách hàng không hợp lệ.');
           }

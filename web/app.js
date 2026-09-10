@@ -2577,6 +2577,36 @@ function sendCurrentMessage() {
   messageComposerInput.focus();
 }
 
+/** Message text as shown, without the pin and reaction badges layered on top. */
+function getMessageRowText(row) {
+  const bubble = row?.querySelector('.bubble');
+  if (!bubble || bubble.classList.contains('bubble-recalled')) return '';
+  const copy = bubble.cloneNode(true);
+  copy.querySelectorAll('.message-pin-badge, .message-reaction').forEach(badge => badge.remove());
+  return copy.textContent.trim();
+}
+
+async function copyMessageText(row) {
+  const text = getMessageRowText(row);
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showComposerStatus('Đã sao chép tin nhắn.');
+  } catch {
+    // The Clipboard API needs a secure context; fall back for plain HTTP.
+    const carrier = document.createElement('textarea');
+    carrier.value = text;
+    carrier.setAttribute('readonly', '');
+    carrier.style.position = 'fixed';
+    carrier.style.opacity = '0';
+    document.body.appendChild(carrier);
+    carrier.select();
+    const copied = document.execCommand('copy');
+    carrier.remove();
+    showComposerStatus(copied ? 'Đã sao chép tin nhắn.' : 'Trình duyệt không cho phép sao chép.');
+  }
+}
+
 function closeChatMessageMenu() {
   const openRow = chatBody?.querySelector('.message-row.message-menu-open');
   openRow?.classList.remove('message-menu-open');
@@ -2711,7 +2741,14 @@ function openChatMessageMenu(row) {
   const isPinned = getPinnedChatMessages().has(getMessageStateKey(name, messageId));
   const actions = isRecalled
     ? [['deleted', 'Xóa']]
-    : [...(isOutgoing ? [['recalled', 'Thu hồi']] : []), ['forward', 'Chuyển tiếp'], ['pin', isPinned ? 'Bỏ ghim' : 'Ghim'], ['report', 'Báo cáo']];
+    : [
+        ...(isOutgoing ? [['recalled', 'Thu hồi']] : []),
+        ['forward', 'Chuyển tiếp'],
+        // Only offer copying when there is text to copy.
+        ...(getMessageRowText(row) ? [['copy', 'Sao chép']] : []),
+        ['pin', isPinned ? 'Bỏ ghim' : 'Ghim'],
+        ['report', 'Báo cáo']
+      ];
   actions.forEach(([action, label]) => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -2736,6 +2773,11 @@ function openChatMessageMenu(row) {
         renderConversation(conversation);
         renderPinnedBanner();
         if (!chatPinnedPanel?.classList.contains('hidden')) renderPinnedPanel();
+        return;
+      }
+      if (action === 'copy') {
+        closeChatMessageMenu();
+        copyMessageText(row);
         return;
       }
       if (action === 'report') {

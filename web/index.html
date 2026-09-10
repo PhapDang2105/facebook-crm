@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260910-chatbot-code-editor">
+  <link rel="stylesheet" href="styles.css?v=20260910-chatbot-general-tab">
 </head>
 <body>
   <div class="topbar">
@@ -254,6 +254,7 @@
               <nav class="chatbot-workspace-tabs" aria-label="Khu vực thiết lập chatbot">
                 <button class="active" type="button" data-chatbot-workspace="messages"><img src="/assets/icons/bot-chat.svg" alt=""><b>Thiết lập tin nhắn</b></button>
                 <button type="button" data-chatbot-workspace="processing"><img src="/assets/icons/workflow.svg" alt=""><b>Thiết lập xử lý</b></button>
+                <button type="button" data-chatbot-workspace="general"><img src="/assets/icons/tune.svg" alt=""><b>Cấu hình chung</b></button>
               </nav>
               <section class="chatbot-workspace-panel" data-chatbot-workspace-panel="messages">
                 <div class="chatbot-template-layout">
@@ -279,22 +280,27 @@
                     <div class="chatbot-section-heading"><img src="/assets/icons/workflow.svg" alt=""><strong>Luồng xử lý tự động</strong></div>
                     <div class="chatbot-workflow" id="chatbot-workflow"></div>
                   </div>
-                  <div class="chatbot-processing-config">
-                    <div class="chatbot-section-heading"><img src="/assets/icons/tune.svg" alt=""><strong>Cấu hình xử lý</strong></div>
+                  <div class="chatbot-processing-config chatbot-processing-code">
+                    <div class="chatbot-section-heading"><img src="/assets/icons/data-process.svg" alt=""><strong>Mã xử lý</strong></div>
                     <section class="chatbot-code-editor">
                       <div class="chatbot-code-editor-head"><img src="/assets/icons/data-process.svg" alt=""><strong id="chatbot-step-code-title">Chọn một bước xử lý</strong></div>
                       <textarea id="chatbot-step-code" rows="14" maxlength="30000" spellcheck="false" placeholder="Bấm vào một bước bên trái để chỉnh sửa mã"></textarea>
                       <button class="settings-save-button" id="chatbot-step-code-apply" type="button">Áp dụng mã</button>
                     </section>
-                    <div class="chatbot-settings-grid">
-                      <label class="chatbot-field"><span>Tên chatbot</span><input id="chatbot-settings-name" maxlength="100" placeholder="Trợ lý Giọt Nắng"></label>
-                      <label class="chatbot-field"><span>Chế độ phản hồi</span><select id="chatbot-settings-mode"><option value="draft">Gợi ý để nhân viên duyệt</option><option value="automatic">Tự động trả lời</option></select></label>
-                      <label class="chatbot-field"><span>Nền tảng AI</span><select id="chatbot-settings-provider"><option value="dify">Dify – GONA Việt Nam Version 2</option></select></label>
-                      <label class="chatbot-field"><span>Địa chỉ API Dify</span><input id="chatbot-settings-endpoint" type="url" maxlength="500" placeholder="https://api.dify.ai/v1/chat-messages"></label>
-                    </div>
-                    <label class="chatbot-field"><span>Khóa API Dify</span><input id="chatbot-settings-api-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="app-••••••••"></label>
-                    <label class="chatbot-field"><span>Từ khóa chuyển cho nhân viên</span><input id="chatbot-settings-handoff" maxlength="1000" placeholder="gặp nhân viên, tư vấn viên, khiếu nại"></label>
                   </div>
+                </div>
+              </section>
+              <section class="chatbot-workspace-panel hidden" data-chatbot-workspace-panel="general">
+                <div class="chatbot-general-config">
+                  <div class="chatbot-section-heading"><img src="/assets/icons/tune.svg" alt=""><strong>Cấu hình chung</strong></div>
+                  <div class="chatbot-settings-grid">
+                    <label class="chatbot-field"><span>Tên chatbot</span><input id="chatbot-settings-name" maxlength="100" placeholder="Trợ lý Giọt Nắng"></label>
+                    <label class="chatbot-field"><span>Chế độ phản hồi</span><select id="chatbot-settings-mode"><option value="draft">Gợi ý để nhân viên duyệt</option><option value="automatic">Tự động trả lời</option></select></label>
+                    <label class="chatbot-field"><span>Nền tảng AI</span><select id="chatbot-settings-provider"><option value="dify">Dify – GONA Việt Nam Version 2</option></select></label>
+                    <label class="chatbot-field"><span>Địa chỉ API Dify</span><input id="chatbot-settings-endpoint" type="url" maxlength="500" placeholder="https://api.dify.ai/v1/chat-messages"></label>
+                  </div>
+                  <label class="chatbot-field"><span>Khóa API Dify</span><input id="chatbot-settings-api-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="app-••••••••"></label>
+                  <label class="chatbot-field"><span>Từ khóa chuyển cho nhân viên</span><input id="chatbot-settings-handoff" maxlength="1000" placeholder="gặp nhân viên, tư vấn viên, khiếu nại"></label>
                 </div>
               </section>
               <textarea id="chatbot-settings-welcome" class="hidden" aria-hidden="true"></textarea>
@@ -335,6 +341,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260910-chatbot-code-editor"></script>
+  <script src="app.js?v=20260910-chatbot-general-tab"></script>
 </body>
 </html>

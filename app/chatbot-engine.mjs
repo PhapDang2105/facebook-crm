@@ -10,7 +10,6 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
   return [
     `KÊNH: Facebook Messenger`,
     `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
-    settings.instructions ? `HƯỚNG DẪN BỔ SUNG: ${settings.instructions}` : '',
     history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
     `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`
   ].filter(Boolean).join('\n\n');

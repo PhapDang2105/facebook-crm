@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260910-chatbot-workspace">
+  <link rel="stylesheet" href="styles.css?v=20260910-chatbot-code-editor">
 </head>
 <body>
   <div class="topbar">
@@ -248,23 +248,27 @@
         </section>
         <section class="settings-section-content hidden" data-settings-panel="chatbot" aria-labelledby="chatbot-settings-title">
           <form class="settings-card chatbot-settings-card" id="chatbot-settings-form">
-            <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1><p>Cấu hình cách chatbot hỗ trợ các hội thoại đã được bật bot.</p></div><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label></header>
+            <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1></div><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label></header>
             <div class="chatbot-settings-body">
               <div class="chatbot-status-card"><img src="/assets/icons/smart-toy.svg" alt=""><div><strong>Chatbot Giọt Nắng</strong></div><em id="chatbot-provider-badge">Chưa kết nối</em></div>
               <nav class="chatbot-workspace-tabs" aria-label="Khu vực thiết lập chatbot">
-                <button class="active" type="button" data-chatbot-workspace="messages"><img src="/assets/icons/bot-chat.svg" alt=""><b>Thiết lập tin nhắn</b><small>Mẫu trả lời như Smax</small></button>
-                <button type="button" data-chatbot-workspace="processing"><img src="/assets/icons/workflow.svg" alt=""><b>Thiết lập xử lý</b><small>Luồng tự động như n8n</small></button>
+                <button class="active" type="button" data-chatbot-workspace="messages"><img src="/assets/icons/bot-chat.svg" alt=""><b>Thiết lập tin nhắn</b></button>
+                <button type="button" data-chatbot-workspace="processing"><img src="/assets/icons/workflow.svg" alt=""><b>Thiết lập xử lý</b></button>
               </nav>
               <section class="chatbot-workspace-panel" data-chatbot-workspace-panel="messages">
                 <div class="chatbot-template-layout">
                   <aside class="chatbot-template-sidebar">
-                    <div class="chatbot-template-sidebar-head"><strong>Mẫu tin nhắn</strong><span id="chatbot-template-count">0 mẫu</span></div>
+                    <div class="chatbot-template-sidebar-head"><strong>Mẫu tin nhắn</strong><button id="chatbot-template-add" type="button" title="Thêm mẫu tin nhắn" aria-label="Thêm mẫu tin nhắn"><img src="/assets/icons/add.png" alt=""></button></div>
+                    <div class="chatbot-template-create hidden" id="chatbot-template-create">
+                      <input id="chatbot-template-new-id" maxlength="100" placeholder="Mã mẫu tin" aria-label="Mã mẫu tin mới">
+                      <div><button id="chatbot-template-create-cancel" type="button">Hủy</button><button id="chatbot-template-create-confirm" type="button">Tạo mẫu</button></div>
+                    </div>
                     <input id="chatbot-template-search" type="search" placeholder="Tìm tên hoặc nội dung mẫu..." aria-label="Tìm mẫu tin nhắn">
                     <div class="chatbot-template-list" id="chatbot-template-list"></div>
                   </aside>
                   <div class="chatbot-template-editor">
                     <div class="chatbot-template-editor-head"><div><small>Mã mẫu tin</small><strong id="chatbot-template-id">Chọn một mẫu tin</strong></div><label class="chatbot-template-active"><input id="chatbot-template-active" type="checkbox" checked><span></span>Đang sử dụng</label></div>
-                    <label class="chatbot-field"><span>Nội dung trả lời</span><textarea id="chatbot-template-content" rows="13" maxlength="12000" placeholder="Chọn một mẫu ở danh sách bên trái để chỉnh sửa"></textarea><small>Dùng <b>###</b> để tách thành nhiều tin gửi liên tiếp, giống cấu trúc đang dùng trên Smax.</small></label>
+                    <label class="chatbot-field"><span>Nội dung trả lời</span><textarea id="chatbot-template-content" rows="13" maxlength="12000" placeholder="Chọn một mẫu ở danh sách bên trái để chỉnh sửa"></textarea></label>
                     <div class="chatbot-template-actions"><button id="chatbot-template-reset" type="button">Khôi phục mẫu gốc</button><button class="settings-save-button" id="chatbot-template-apply" type="button">Áp dụng nội dung</button></div>
                   </div>
                 </div>
@@ -277,15 +281,19 @@
                   </div>
                   <div class="chatbot-processing-config">
                     <div class="chatbot-section-heading"><img src="/assets/icons/tune.svg" alt=""><strong>Cấu hình xử lý</strong></div>
+                    <section class="chatbot-code-editor">
+                      <div class="chatbot-code-editor-head"><img src="/assets/icons/data-process.svg" alt=""><strong id="chatbot-step-code-title">Chọn một bước xử lý</strong></div>
+                      <textarea id="chatbot-step-code" rows="14" maxlength="30000" spellcheck="false" placeholder="Bấm vào một bước bên trái để chỉnh sửa mã"></textarea>
+                      <button class="settings-save-button" id="chatbot-step-code-apply" type="button">Áp dụng mã</button>
+                    </section>
                     <div class="chatbot-settings-grid">
                       <label class="chatbot-field"><span>Tên chatbot</span><input id="chatbot-settings-name" maxlength="100" placeholder="Trợ lý Giọt Nắng"></label>
                       <label class="chatbot-field"><span>Chế độ phản hồi</span><select id="chatbot-settings-mode"><option value="draft">Gợi ý để nhân viên duyệt</option><option value="automatic">Tự động trả lời</option></select></label>
                       <label class="chatbot-field"><span>Nền tảng AI</span><select id="chatbot-settings-provider"><option value="dify">Dify – GONA Việt Nam Version 2</option></select></label>
                       <label class="chatbot-field"><span>Địa chỉ API Dify</span><input id="chatbot-settings-endpoint" type="url" maxlength="500" placeholder="https://api.dify.ai/v1/chat-messages"></label>
                     </div>
-                    <label class="chatbot-field"><span>Khóa API Dify</span><input id="chatbot-settings-api-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="app-••••••••"><small id="chatbot-api-key-help">Khóa được lưu ở máy chủ và không bao giờ gửi trở lại trình duyệt.</small></label>
-                    <label class="chatbot-field"><span>Hướng dẫn cho chatbot</span><textarea id="chatbot-settings-instructions" maxlength="12000" rows="7" placeholder="Nguyên tắc xử lý và tư vấn của chatbot..."></textarea></label>
-                    <label class="chatbot-field"><span>Từ khóa chuyển cho nhân viên</span><input id="chatbot-settings-handoff" maxlength="1000" placeholder="gặp nhân viên, tư vấn viên, khiếu nại"><small>Phân tách các cụm từ bằng dấu phẩy.</small></label>
+                    <label class="chatbot-field"><span>Khóa API Dify</span><input id="chatbot-settings-api-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="app-••••••••"></label>
+                    <label class="chatbot-field"><span>Từ khóa chuyển cho nhân viên</span><input id="chatbot-settings-handoff" maxlength="1000" placeholder="gặp nhân viên, tư vấn viên, khiếu nại"></label>
                   </div>
                 </div>
               </section>
@@ -327,6 +335,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260910-chatbot-workspace"></script>
+  <script src="app.js?v=20260910-chatbot-code-editor"></script>
 </body>
 </html>

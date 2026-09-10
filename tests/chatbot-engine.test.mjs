@@ -13,7 +13,7 @@ test('ngữ cảnh gửi Dify có lịch sử và tin nhắn hiện tại', () =
     conversation: { name: 'Lan Anh' },
     message: { text: 'Túi xanh giá bao nhiêu?' },
     recentMessages: [{ direction: 'outgoing', text: 'Giọt Nắng xin chào' }],
-    settings: { instructions: 'Trả lời ngắn gọn.' }
+    settings: {}
   });
   assert.match(query, /Lan Anh/);
   assert.match(query, /Giọt Nắng xin chào/);
@@ -22,7 +22,7 @@ test('ngữ cảnh gửi Dify có lịch sử và tin nhắn hiện tại', () =
 
 test('gọi Dify và chuyển template thành tin nhắn', async () => {
   const reply = await requestDifyReply({
-    settings: { apiKey: 'secret', endpoint: 'https://api.dify.ai/v1/chat-messages', instructions: '' },
+    settings: { apiKey: 'secret', endpoint: 'https://api.dify.ai/v1/chat-messages' },
     conversation: { psid: '123', name: 'Khách' },
     message: { type: 'text', text: 'xin chào' },
     fetchImpl: async (_url, options) => {
@@ -43,7 +43,7 @@ test('chỉ tự trả lời khi cả hệ thống và hội thoại đều bậ
     conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true },
     message: { direction: 'incoming', type: 'text', text: 'xin chào' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', apiKey: 'secret', endpoint: 'https://api.dify.ai/v1/chat-messages', instructions: '', handoffKeywords: '' }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', apiKey: 'secret', endpoint: 'https://api.dify.ai/v1/chat-messages', handoffKeywords: '' }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => sent.push(message.text),
     saveBotState: async (_id, value) => state.push(value),

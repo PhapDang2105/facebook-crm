@@ -18,7 +18,6 @@ test('chuẩn hóa cấu hình chatbot trước khi lưu', () => {
     endpoint: 'https://api.dify.ai/v1/chat-messages',
     apiKey: 'app-secret',
     welcomeMessage: '  Xin chào  ',
-    instructions: '  Chỉ trả lời về sản phẩm.  ',
     handoffKeywords: '  gặp người thật  '
   });
   assert.deepEqual({
@@ -26,14 +25,12 @@ test('chuẩn hóa cấu hình chatbot trước khi lưu', () => {
     name: settings.name,
     responseMode: settings.responseMode,
     welcomeMessage: settings.welcomeMessage,
-    instructions: settings.instructions,
     handoffKeywords: settings.handoffKeywords
   }, {
     enabled: true,
     name: 'Bot bán hàng',
     responseMode: 'automatic',
     welcomeMessage: 'Xin chào',
-    instructions: 'Chỉ trả lời về sản phẩm.',
     handoffKeywords: 'gặp người thật'
   });
 });
@@ -47,9 +44,11 @@ test('không trả khóa API về trình duyệt', () => {
 test('chuẩn hóa mẫu tin và trạng thái từng bước xử lý', () => {
   const settings = normalizeChatbotSettings({
     messageTemplates: { WELCOME: '  Xin chào mới  ' },
-    processingSteps: [{ id: 'dify', enabled: false }]
+    processingSteps: [{ id: 'dify', enabled: false, code: 'return input.answer;' }]
   });
   assert.equal(settings.messageTemplates.WELCOME, 'Xin chào mới');
   assert.equal(settings.processingSteps.find(step => step.id === 'dify').enabled, false);
+  assert.equal(settings.processingSteps.find(step => step.id === 'dify').code, 'return input.answer;');
   assert.equal(settings.processingSteps.find(step => step.id === 'webhook').enabled, true);
+  assert.match(settings.processingSteps.find(step => step.id === 'webhook').code, /receivedAt/);
 });

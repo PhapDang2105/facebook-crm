@@ -106,6 +106,14 @@ const settingsSendEnter = document.querySelector('#settings-send-enter');
 const settingsShowContact = document.querySelector('#settings-show-contact');
 const settingsCollapseSidebar = document.querySelector('#settings-collapse-sidebar');
 const settingsStatus = document.querySelector('#settings-status');
+const chatbotSettingsForm = document.querySelector('#chatbot-settings-form');
+const chatbotSettingsEnabled = document.querySelector('#chatbot-settings-enabled');
+const chatbotSettingsName = document.querySelector('#chatbot-settings-name');
+const chatbotSettingsMode = document.querySelector('#chatbot-settings-mode');
+const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome');
+const chatbotSettingsInstructions = document.querySelector('#chatbot-settings-instructions');
+const chatbotSettingsHandoff = document.querySelector('#chatbot-settings-handoff');
+const chatbotSettingsStatus = document.querySelector('#chatbot-settings-status');
 const facebookConnectButton = document.querySelector('#facebook-connect-button');
 const zaloConnectButton = document.querySelector('#zalo-connect-button');
 const facebookChannelList = document.querySelector('#facebook-channel-list');
@@ -193,6 +201,7 @@ const orderNav = document.querySelector('.nav[data-view="orders"]');
 const orderStageButtons = [...document.querySelectorAll('[data-order-stage]')];
 const settingsNav = document.querySelector('.nav[data-view="settings"]');
 const settingsSectionButtons = [...document.querySelectorAll('[data-settings-section]')];
+const settingsPanels = new Map([...document.querySelectorAll('[data-settings-panel]')].map(panel => [panel.dataset.settingsPanel, panel]));
 const orderPanels = new Map([...document.querySelectorAll('[data-order-panel]')].map(panel => [panel.dataset.orderPanel, panel]));
 const orderImport = document.querySelector('#order-import');
 const orderSearch = document.querySelector('#order-search');
@@ -1716,6 +1725,31 @@ function getCustomerPanelKey(conversation = getActiveConversation()) {
 
 function saveCustomerPanelStore() {
   localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore));
+}
+
+async function loadChatbotSettings() {
+  if (!chatbotSettingsForm) return;
+  if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = 'Đang tải thiết lập...';
+  try {
+    const settings = await readApiResponse(await fetch('/api/chatbot/settings'));
+    chatbotSettingsEnabled.checked = settings.enabled === true;
+    chatbotSettingsName.value = settings.name || 'Trợ lý Giọt Nắng';
+    chatbotSettingsMode.value = settings.responseMode === 'automatic' ? 'automatic' : 'draft';
+    chatbotSettingsWelcome.value = settings.welcomeMessage || '';
+    chatbotSettingsInstructions.value = settings.instructions || '';
+    chatbotSettingsHandoff.value = settings.handoffKeywords || '';
+    if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = '';
+  } catch (error) {
+    if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = error.message || 'Chưa tải được thiết lập chatbot.';
+  }
+}
+
+function showSettingsSection(name = 'channels') {
+  const section = settingsPanels.has(name) ? name : 'channels';
+  showView('settings');
+  settingsPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== section));
+  settingsSectionButtons.forEach(button => button.classList.toggle('active', button.dataset.settingsSection === section));
+  if (section === 'chatbot') loadChatbotSettings();
 }
 
 function renderChatbotToggle(conversation = getActiveConversation()) {
@@ -3748,10 +3782,35 @@ orderStageButtons.forEach(button => {
 });
 
 settingsSectionButtons.forEach(button => {
-  button.onclick = () => {
-    settingsSectionButtons.forEach(item => item.classList.toggle('active', item === button));
-    showView('settings');
-  };
+  button.onclick = () => showSettingsSection(button.dataset.settingsSection);
+});
+
+chatbotSettingsForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const submit = chatbotSettingsForm.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = 'Đang lưu...';
+  try {
+    const settings = await readApiResponse(await fetch('/api/chatbot/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: chatbotSettingsEnabled.checked,
+        name: chatbotSettingsName.value,
+        responseMode: chatbotSettingsMode.value,
+        welcomeMessage: chatbotSettingsWelcome.value,
+        instructions: chatbotSettingsInstructions.value,
+        handoffKeywords: chatbotSettingsHandoff.value
+      })
+    }));
+    chatbotSettingsEnabled.checked = settings.enabled === true;
+    if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = 'Đã lưu thiết lập chatbot.';
+    showToast('Đã lưu thiết lập chatbot.', 'success');
+  } catch (error) {
+    if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = error.message || 'Chưa lưu được thiết lập chatbot.';
+  } finally {
+    submit.disabled = false;
+  }
 });
 
 function applyImportedRecords(sourceHeaders, records) {

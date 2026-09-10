@@ -8,6 +8,7 @@ import { buildExportRows } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, normalizeCustomerOrder } from './conversation-orders.mjs';
+import { defaultChatbotSettings, normalizeChatbotSettings } from './chatbot-settings.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -35,6 +36,7 @@ import {
 const root = projectRoot;
 const webRoot = path.join(root, 'web');
 const storePath = path.join(root, 'data', 'processed', 'crm-store.json');
+const chatbotSettingsPath = path.join(root, 'data', 'processed', 'chatbot-settings.json');
 const seedPath = path.join(root, 'database', 'seeds', 'demo-store.json');
 const exportTemplatePath = path.join(root, 'assets', 'templates', 'facebook-order-export.xlsx');
 const metaOauthStates = new Map();
@@ -43,6 +45,7 @@ const metaPendingPages = new Map();
 async function initializeStore() {
   await mkdir(path.dirname(storePath), { recursive: true });
   try { await stat(storePath); } catch { await copyFile(seedPath, storePath); }
+  try { await stat(chatbotSettingsPath); } catch { await writeChatbotSettings(defaultChatbotSettings); }
 }
 
 async function readStore() {
@@ -77,6 +80,22 @@ function publicCustomerPanel(conversation) {
     orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [],
     botEnabled: conversation?.botEnabled === true
   };
+}
+
+async function readChatbotSettings() {
+  try {
+    return normalizeChatbotSettings(JSON.parse(await readFile(chatbotSettingsPath, 'utf8')));
+  } catch {
+    return normalizeChatbotSettings(defaultChatbotSettings);
+  }
+}
+
+async function writeChatbotSettings(settings) {
+  const normalized = normalizeChatbotSettings(settings);
+  const temporaryPath = `${chatbotSettingsPath}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(normalized, null, 2), 'utf8');
+  await rename(temporaryPath, chatbotSettingsPath);
+  return normalized;
 }
 
 function sendBinary(response, statusCode, body, contentType, filename) {
@@ -275,6 +294,11 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
     if (request.method === 'GET' && url.pathname === '/api/health') return sendJson(response, 200, { status:'ok', time:new Date().toISOString() });
+    if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') return sendJson(response, 200, await readChatbotSettings());
+    if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
+      const settings = await writeChatbotSettings({ ...(await readBody(request)), updatedAt: Date.now() });
+      return sendJson(response, 200, settings);
+    }
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const store = await readChannelStore();
       return sendJson(response, 200, {

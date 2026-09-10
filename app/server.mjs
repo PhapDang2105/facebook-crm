@@ -69,6 +69,43 @@ function sendJson(response, statusCode, value) {
   response.end(JSON.stringify(value));
 }
 
+function publicCustomerPanel(conversation) {
+  return {
+    notes: Array.isArray(conversation?.customerNotes) ? conversation.customerNotes : [],
+    orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : []
+  };
+}
+
+function cleanCustomerOrder(input = {}) {
+  const products = Array.isArray(input.products) ? input.products.slice(0, 100).map(item => ({
+    name: String(item?.name || '').trim().slice(0, 200),
+    quantity: Math.max(1, Number(item?.quantity) || 1),
+    price: Math.max(0, Number(item?.price) || 0)
+  })).filter(item => item.name) : [];
+  if (!String(input.name || '').trim() || !String(input.phone || '').trim() || !String(input.address || '').trim() || !products.length) {
+    throw new Error('Đơn hàng cần đủ tên, số điện thoại, địa chỉ và sản phẩm.');
+  }
+  const now = Date.now();
+  return {
+    id: String(input.id || randomUUID().slice(0, 8)).replace(/[^\w-]/g, '').slice(0, 40),
+    name: String(input.name).trim().slice(0, 200),
+    phone: String(input.phone).trim().slice(0, 40),
+    address: String(input.address).trim().slice(0, 500),
+    products,
+    status: String(input.status || 'Mới').trim().slice(0, 80),
+    source: String(input.source || 'Facebook').trim().slice(0, 80),
+    payment: String(input.payment || 'COD').trim().slice(0, 80),
+    freeShipping: Boolean(input.freeShipping),
+    shippingFee: Math.max(0, Number(input.shippingFee) || 0),
+    discount: Math.max(0, Number(input.discount) || 0),
+    total: Math.max(0, Number(input.total) || 0),
+    note: String(input.note || '').trim().slice(0, 1000),
+    employee: String(input.employee || 'Bạn').trim().slice(0, 120),
+    createdAt: Number(input.createdAt) || now,
+    updatedAt: now
+  };
+}
+
 function sendBinary(response, statusCode, body, contentType, filename) {
   response.writeHead(statusCode, { 'Content-Type': contentType, 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control':'no-store' });
   response.end(body);
@@ -529,6 +566,36 @@ const server = http.createServer(async (request, response) => {
       const conversation = await updateMessagingStore(store => setConversationFlags(store, id, payload));
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
       return sendJson(response, 200, publicConversation(conversation));
+    }
+    const customerPanelMatch = url.pathname.match(/^\/api\/messaging\/conversations\/([^/]+)\/customer-panel$/);
+    if (customerPanelMatch) {
+      const id = decodeURIComponent(customerPanelMatch[1]);
+      const conversation = await getConversation(id);
+      if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+      if (request.method === 'GET') return sendJson(response, 200, publicCustomerPanel(conversation));
+      if (request.method === 'POST') {
+        const payload = await readBody(request);
+        const panel = await updateMessagingStore(store => {
+          const item = store.conversations.find(entry => entry.id === id);
+          if (!item) return null;
+          if (payload.type === 'note') {
+            const text = String(payload.text || '').trim().slice(0, 2000);
+            if (!text) throw new Error('Nội dung ghi chú không được để trống.');
+            if (!Array.isArray(item.customerNotes)) item.customerNotes = [];
+            item.customerNotes.unshift({ id: randomUUID(), text, createdAt: Date.now() });
+            item.customerNotes = item.customerNotes.slice(0, 100);
+          } else if (payload.type === 'order') {
+            if (!Array.isArray(item.customerOrders)) item.customerOrders = [];
+            item.customerOrders.unshift(cleanCustomerOrder(payload.order));
+            item.customerOrders = item.customerOrders.slice(0, 200);
+          } else {
+            throw new Error('Loại cập nhật thông tin khách hàng không hợp lệ.');
+          }
+          return publicCustomerPanel(item);
+        });
+        if (!panel) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+        return sendJson(response, 200, panel);
+      }
     }
     if (request.method === 'GET' && url.pathname === '/api/dashboard') {
       const { leads } = await readStore();

@@ -158,6 +158,7 @@ const remoteMessages = new Map();
 const syncedChannelIds = new Set();
 let customerDraftProducts = [];
 let customerPanelStore = { notes: {}, orders: {} };
+let customerPanelRequestId = 0;
 
 try {
   const savedCustomerPanel = JSON.parse(localStorage.getItem('crm-customer-panel-v1') || 'null');
@@ -1696,6 +1697,46 @@ function saveCustomerPanelStore() {
   localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore));
 }
 
+async function loadCustomerPanelFromServer(conversation = getActiveConversation()) {
+  const conversationId = conversation?.dataset.conversationId;
+  const key = getCustomerPanelKey(conversation);
+  if (!conversationId || !key) return;
+  const requestId = ++customerPanelRequestId;
+  try {
+    const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversationId)}/customer-panel`));
+    if (requestId !== customerPanelRequestId || getCustomerPanelKey() !== key) return;
+    customerPanelStore.notes[key] = Array.isArray(panel.notes) ? panel.notes : [];
+    customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
+    saveCustomerPanelStore();
+    renderCustomerNotes(conversation);
+    renderCustomerOrders(conversation);
+  } catch {
+    // Keep the local copy available if the server cannot be reached.
+  }
+}
+
+async function saveCustomerPanelChange(conversation, payload) {
+  const conversationId = conversation?.dataset.conversationId;
+  const key = getCustomerPanelKey(conversation);
+  if (!conversationId || !key) return;
+  try {
+    const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversationId)}/customer-panel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }));
+    customerPanelStore.notes[key] = Array.isArray(panel.notes) ? panel.notes : [];
+    customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
+    saveCustomerPanelStore();
+    if (getCustomerPanelKey() === key) {
+      renderCustomerNotes(conversation);
+      renderCustomerOrders(conversation);
+    }
+  } catch (error) {
+    showToast(error.message || 'Chưa đồng bộ được thông tin khách hàng lên máy chủ.');
+  }
+}
+
 function formatOrderMoney(value) {
   return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, Number(value) || 0))} đ`;
 }
@@ -1849,6 +1890,7 @@ function renderCustomerPanel(conversation = getActiveConversation()) {
   if (customerOrderPhone) customerOrderPhone.value = profile.phone;
   if (customerOrderAddress) customerOrderAddress.value = profile.address;
   updateCustomerOrderTotals();
+  loadCustomerPanelFromServer(conversation);
 }
 
 function renderConversationHeader(conversation) {
@@ -3875,7 +3917,8 @@ customerNoteInput?.addEventListener('keydown', event => {
   if (event.key !== 'Enter' || event.shiftKey) return;
   event.preventDefault();
   const text = customerNoteInput.value.trim();
-  const key = getCustomerPanelKey();
+  const conversation = getActiveConversation();
+  const key = getCustomerPanelKey(conversation);
   if (!text || !key) return;
   const notes = customerPanelStore.notes[key] || [];
   notes.unshift({ text, createdAt: Date.now() });
@@ -3883,6 +3926,7 @@ customerNoteInput?.addEventListener('keydown', event => {
   saveCustomerPanelStore();
   customerNoteInput.value = '';
   renderCustomerNotes();
+  saveCustomerPanelChange(conversation, { type: 'note', text });
 });
 
 customerProductAddButton?.addEventListener('click', () => {
@@ -3949,6 +3993,7 @@ customerOrderForm?.addEventListener('submit', event => {
   renderCustomerOrders(conversation);
   setCustomerPanelTab('info');
   showToast(`Đã tạo đơn ${order.id}.`);
+  saveCustomerPanelChange(conversation, { type: 'order', order });
 });
 
 contactInfoButton?.addEventListener('click', () => {

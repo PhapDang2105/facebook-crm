@@ -671,6 +671,22 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
   border-radius: 0;
 }
 
+#messages-view {
+  font-family: Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+#messages-view button,
+#messages-view input,
+#messages-view textarea,
+#messages-view select {
+  font-family: inherit;
+}
+
 main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .hide-contact-panel .messenger-shell { grid-template-columns: 427.5px minmax(517.5px, 1fr); }
 .hide-contact-panel .contact-panel { display: none; }

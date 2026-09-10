@@ -1710,6 +1710,8 @@ async function loadCustomerPanelFromServer(conversation = getActiveConversation(
     saveCustomerPanelStore();
     renderCustomerNotes(conversation);
     renderCustomerOrders(conversation);
+    renderConversationOrderCards(conversation);
+    if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
   } catch {
     // Keep the local copy available if the server cannot be reached.
   }
@@ -1731,6 +1733,8 @@ async function saveCustomerPanelChange(conversation, payload) {
     if (getCustomerPanelKey() === key) {
       renderCustomerNotes(conversation);
       renderCustomerOrders(conversation);
+      renderConversationOrderCards(conversation);
+      if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
     }
   } catch (error) {
     showToast(error.message || 'Chưa đồng bộ được thông tin khách hàng lên máy chủ.');
@@ -1840,6 +1844,72 @@ function renderCustomerOrders(conversation = getActiveConversation()) {
   }).join('');
 }
 
+function getCustomerOrderProductImage(productName) {
+  const name = normalizeColumnName(productName);
+  const imageName = name.includes('combo 2') && name.includes('xanh') ? 'combo2_green'
+    : name.includes('combo 2') && name.includes('vang') ? 'combo2_yellow'
+      : name.includes('combo 3') && name.includes('xanh') ? 'combo3_green'
+        : name.includes('combo 3') && name.includes('vang') ? 'combo3_yellow'
+          : name.includes('xanh') ? 'product_green'
+            : name.includes('vang') ? 'product_yellow'
+              : name.includes('nau') ? 'product_brown' : '';
+  return imageName ? `/assets/logos/${imageName}.png` : '';
+}
+
+function formatCustomerOrderCardTime(value) {
+  const date = new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return '—';
+  const time = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const day = date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+  return `${time} ${day}`;
+}
+
+function appendConversationOrderCard(order) {
+  if (!chatBody || !order) return;
+  const products = Array.isArray(order.products) ? order.products : [];
+  const subtotal = products.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0);
+  const total = Number(order.total) || Math.max(0, subtotal + (Number(order.shippingFee) || 0) - (Number(order.discount) || 0));
+  const fullChannelName = messageChannels.find(item => item.id === currentMessageChannelId)?.name || 'Giọt Nắng';
+  const channelName = fullChannelName.replace(/^Nông Sản\s+/i, '') || fullChannelName;
+  const productRows = products.map(item => {
+    const image = getCustomerOrderProductImage(item.name);
+    const imageMarkup = image ? `<img src="${image}" alt="${escapeHtml(item.name || 'Sản phẩm')}">` : '';
+    return `<div class="conversation-order-product${image ? '' : ' conversation-order-product--no-image'}">
+      ${imageMarkup}
+      <div><strong>${escapeHtml(item.name || 'Sản phẩm')}</strong><span>Phân loại: ${escapeHtml(item.variant || 'Sản phẩm')}</span><span>Số lượng: ${Math.max(1, Number(item.quantity) || 1)}</span><span>Đơn giá ${escapeHtml(formatOrderMoney(item.price))}</span></div>
+    </div>`;
+  }).join('');
+  const row = document.createElement('div');
+  row.className = 'conversation-order-row';
+  row.dataset.orderId = String(order.id || '');
+  const orderTime = getChatTimestamp(order.createdAt) || Date.now();
+  row.dataset.sentAt = String(orderTime);
+  row.innerHTML = `<article class="conversation-order-card" aria-label="Xác nhận đơn đặt hàng ${escapeHtml(String(order.id || ''))}">
+    <header><span>Xác nhận đơn đặt hàng</span><strong>${escapeHtml(channelName)}</strong></header>
+    <div class="conversation-order-card-body">
+      <div class="conversation-order-products">${productRows}</div>
+      <dl class="conversation-order-info">
+        <div><dt>Đã đặt hàng vào</dt><dd><strong>${escapeHtml(formatCustomerOrderCardTime(order.createdAt))}</strong></dd></div>
+        <div><dt>Số điện thoại</dt><dd>${escapeHtml(order.phone || 'Chưa có')}</dd></div>
+        <div><dt>Đã thanh toán bằng</dt><dd>${escapeHtml(order.payment === 'Chuyển khoản' ? 'Chuyển khoản' : 'Thanh toán khi giao hàng (COD)')}</dd></div>
+        <div><dt>Giao hàng đến</dt><dd><strong>${escapeHtml(order.name || 'Chưa có tên')}</strong><span>${escapeHtml(order.address || 'Chưa có địa chỉ')}</span></dd></div>
+        <div><dt>Giá trị ĐH</dt><dd><strong>${escapeHtml(formatOrderMoney(total))}</strong></dd></div>
+      </dl>
+    </div>
+  </article>`;
+  const nextTimelineItem = [...chatBody.children].find(item => Number(item.dataset.sentAt) > orderTime);
+  if (nextTimelineItem) chatBody.insertBefore(row, nextTimelineItem);
+  else chatBody.appendChild(row);
+}
+
+function renderConversationOrderCards(conversation = getActiveConversation()) {
+  if (!chatBody || !conversation || currentChatHeadView !== 'chat') return;
+  chatBody.querySelectorAll(':scope > .conversation-order-row').forEach(row => row.remove());
+  [...getCustomerOrders(conversation)]
+    .sort((first, second) => (Number(first.createdAt) || 0) - (Number(second.createdAt) || 0))
+    .forEach(appendConversationOrderCard);
+}
+
 function updateCustomerOrderTotals() {
   const subtotal = customerDraftProducts.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const shipping = customerFreeShipping?.checked ? 0 : Math.max(0, Number(customerShippingFee?.value) || 0);
@@ -1933,6 +2003,7 @@ function renderConversation(conversation = getActiveConversation()) {
   });
   const messages = getSavedChatMessages(name);
   messages.forEach(message => appendChatMessage(message, 'outgoing', initial, message.id, getChatMessageAction(name, message.id)));
+  renderConversationOrderCards(conversation);
   const latestMessage = [...messages].reverse().find(message => message.type !== 'system');
   if (latestMessage) {
     const preview = conversation.querySelector('small');
@@ -3995,6 +4066,8 @@ customerOrderForm?.addEventListener('submit', event => {
   customerPanelStore.orders[key] = orders;
   saveCustomerPanelStore();
   renderCustomerOrders(conversation);
+  renderConversationOrderCards(conversation);
+  if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
   setCustomerPanelTab('info');
   showToast(`Đã tạo đơn ${order.id}.`);
   saveCustomerPanelChange(conversation, { type: 'order', order });

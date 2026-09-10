@@ -120,6 +120,21 @@ const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome
 const chatbotSettingsInstructions = document.querySelector('#chatbot-settings-instructions');
 const chatbotSettingsHandoff = document.querySelector('#chatbot-settings-handoff');
 const chatbotSettingsStatus = document.querySelector('#chatbot-settings-status');
+const chatbotWorkspaceButtons = [...document.querySelectorAll('[data-chatbot-workspace]')];
+const chatbotWorkspacePanels = [...document.querySelectorAll('[data-chatbot-workspace-panel]')];
+const chatbotTemplateSearch = document.querySelector('#chatbot-template-search');
+const chatbotTemplateList = document.querySelector('#chatbot-template-list');
+const chatbotTemplateCount = document.querySelector('#chatbot-template-count');
+const chatbotTemplateId = document.querySelector('#chatbot-template-id');
+const chatbotTemplateContent = document.querySelector('#chatbot-template-content');
+const chatbotTemplateActive = document.querySelector('#chatbot-template-active');
+const chatbotTemplateApply = document.querySelector('#chatbot-template-apply');
+const chatbotTemplateReset = document.querySelector('#chatbot-template-reset');
+const chatbotWorkflow = document.querySelector('#chatbot-workflow');
+let chatbotTemplatesState = {};
+let chatbotOriginalTemplates = {};
+let chatbotProcessingSteps = [];
+let selectedChatbotTemplate = '';
 const facebookConnectButton = document.querySelector('#facebook-connect-button');
 const zaloConnectButton = document.querySelector('#zalo-connect-button');
 const facebookChannelList = document.querySelector('#facebook-channel-list');
@@ -1753,10 +1768,63 @@ async function loadChatbotSettings() {
     chatbotSettingsWelcome.value = settings.welcomeMessage || '';
     chatbotSettingsInstructions.value = settings.instructions || '';
     chatbotSettingsHandoff.value = settings.handoffKeywords || '';
+    chatbotTemplatesState = { ...(settings.templates || {}) };
+    chatbotOriginalTemplates = { ...(settings.templates || {}) };
+    chatbotProcessingSteps = Array.isArray(settings.processingSteps) ? settings.processingSteps.map(step => ({ ...step })) : [];
+    selectedChatbotTemplate = selectedChatbotTemplate && chatbotTemplatesState[selectedChatbotTemplate] !== undefined
+      ? selectedChatbotTemplate
+      : Object.keys(chatbotTemplatesState)[0] || '';
+    renderChatbotTemplateList();
+    renderChatbotTemplateEditor();
+    renderChatbotWorkflow();
     if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = '';
   } catch (error) {
     if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = error.message || 'Chưa tải được thiết lập chatbot.';
   }
+}
+
+function chatbotTemplateLabel(id) {
+  const labels = {
+    WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
+    ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',
+    BANK_TRANSFER: 'Thông tin chuyển khoản', THANK_YOU: 'Cảm ơn khách hàng'
+  };
+  return labels[id] || id.replace(/^PRICE_/, 'Bảng giá · ').replaceAll('_', ' ').toLowerCase().replace(/^./, value => value.toUpperCase());
+}
+
+function renderChatbotTemplateList() {
+  if (!chatbotTemplateList) return;
+  const keyword = (chatbotTemplateSearch?.value || '').trim().toLowerCase();
+  const entries = Object.entries(chatbotTemplatesState).filter(([id, content]) => `${id} ${content}`.toLowerCase().includes(keyword));
+  if (chatbotTemplateCount) chatbotTemplateCount.textContent = `${Object.keys(chatbotTemplatesState).length} mẫu`;
+  chatbotTemplateList.innerHTML = entries.map(([id, content]) => `
+    <button class="chatbot-template-item ${id === selectedChatbotTemplate ? 'active' : ''}" type="button" data-chatbot-template-id="${escapeHtml(id)}">
+      <strong>${escapeHtml(chatbotTemplateLabel(id))}</strong><small>${escapeHtml(String(content).replaceAll('###', ' · '))}</small>
+    </button>`).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
+}
+
+function renderChatbotTemplateEditor() {
+  const id = selectedChatbotTemplate;
+  if (chatbotTemplateId) chatbotTemplateId.textContent = id || 'Chọn một mẫu tin';
+  if (chatbotTemplateContent) {
+    chatbotTemplateContent.disabled = !id;
+    chatbotTemplateContent.value = id ? chatbotTemplatesState[id] || '' : '';
+  }
+  if (chatbotTemplateActive) {
+    chatbotTemplateActive.disabled = !id;
+    chatbotTemplateActive.checked = Boolean(id && chatbotTemplatesState[id]);
+  }
+}
+
+function renderChatbotWorkflow() {
+  if (!chatbotWorkflow) return;
+  const typeLabels = { trigger: 'Điểm bắt đầu', transform: 'Xử lý dữ liệu', merge: 'Gộp dữ liệu', ai: 'Mô hình AI', guard: 'Kiểm tra an toàn', output: 'Đầu ra' };
+  chatbotWorkflow.innerHTML = chatbotProcessingSteps.map((step, index) => `
+    <div class="chatbot-workflow-node" data-type="${escapeHtml(step.type)}">
+      <span class="chatbot-workflow-icon">${index + 1}</span>
+      <span class="chatbot-workflow-copy"><strong>${escapeHtml(step.name)}</strong><small>${escapeHtml(typeLabels[step.type] || 'Bước xử lý')}</small></span>
+      <label class="chatbot-workflow-toggle" title="Bật hoặc tắt bước"><input type="checkbox" data-chatbot-step="${escapeHtml(step.id)}" ${step.enabled !== false ? 'checked' : ''}></label>
+    </div>`).join('');
 }
 
 function showSettingsSection(name = 'channels') {
@@ -3800,6 +3868,43 @@ settingsSectionButtons.forEach(button => {
   button.onclick = () => showSettingsSection(button.dataset.settingsSection);
 });
 
+chatbotWorkspaceButtons.forEach(button => {
+  button.addEventListener('click', () => {
+    const workspace = button.dataset.chatbotWorkspace;
+    chatbotWorkspaceButtons.forEach(item => item.classList.toggle('active', item === button));
+    chatbotWorkspacePanels.forEach(panel => panel.classList.toggle('hidden', panel.dataset.chatbotWorkspacePanel !== workspace));
+  });
+});
+
+chatbotTemplateSearch?.addEventListener('input', renderChatbotTemplateList);
+chatbotTemplateList?.addEventListener('click', event => {
+  const button = event.target.closest('[data-chatbot-template-id]');
+  if (!button) return;
+  selectedChatbotTemplate = button.dataset.chatbotTemplateId;
+  renderChatbotTemplateList();
+  renderChatbotTemplateEditor();
+});
+
+chatbotTemplateApply?.addEventListener('click', () => {
+  if (!selectedChatbotTemplate) return;
+  chatbotTemplatesState[selectedChatbotTemplate] = chatbotTemplateActive.checked ? chatbotTemplateContent.value.trim() : '';
+  renderChatbotTemplateList();
+  showToast('Đã áp dụng nội dung. Bấm “Lưu thiết lập” để lưu lên máy chủ.', 'success');
+});
+
+chatbotTemplateReset?.addEventListener('click', () => {
+  if (!selectedChatbotTemplate) return;
+  chatbotTemplatesState[selectedChatbotTemplate] = chatbotOriginalTemplates[selectedChatbotTemplate] || '';
+  renderChatbotTemplateList();
+  renderChatbotTemplateEditor();
+});
+
+chatbotWorkflow?.addEventListener('change', event => {
+  const id = event.target.dataset.chatbotStep;
+  const step = chatbotProcessingSteps.find(item => item.id === id);
+  if (step) step.enabled = event.target.checked;
+});
+
 chatbotSettingsForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const submit = chatbotSettingsForm.querySelector('button[type="submit"]');
@@ -3818,7 +3923,9 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         apiKey: chatbotSettingsApiKey.value,
         welcomeMessage: chatbotSettingsWelcome.value,
         instructions: chatbotSettingsInstructions.value,
-        handoffKeywords: chatbotSettingsHandoff.value
+        handoffKeywords: chatbotSettingsHandoff.value,
+        messageTemplates: chatbotTemplatesState,
+        processingSteps: chatbotProcessingSteps
       })
     }));
     chatbotSettingsEnabled.checked = settings.enabled === true;

@@ -94,12 +94,13 @@ function renderOrder(value) {
   };
 }
 
-export function renderChatbotReply(value = {}) {
+export function renderChatbotReply(value = {}, overrides = {}) {
   const templateId = String(value.template_id || '').trim();
   if (templateId === 'ORDER_CONFIRMATION') return renderOrder(value);
-  const raw = templates[templateId] || value.reply || value.message || value.text || templates.CSKH_HANDOFF;
+  const available = { ...templates, ...overrides };
+  const raw = available[templateId] || value.reply || value.message || value.text || available.CSKH_HANDOFF;
   return {
-    templateId: templates[templateId] ? templateId : 'CSKH_HANDOFF',
+    templateId: available[templateId] ? templateId : 'CSKH_HANDOFF',
     messages: String(raw).replace(/\\n/g, '\n').split('###').map(item => item.trim()).filter(Boolean).slice(0, 3),
     handoff: templateId === 'CSKH_HANDOFF'
   };

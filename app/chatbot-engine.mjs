@@ -46,7 +46,7 @@ export async function requestDifyReply({ settings, conversation, message, recent
     payload = await request('');
   }
   return {
-    ...renderChatbotReply(parseDifyAnswer(payload.answer)),
+    ...renderChatbotReply(parseDifyAnswer(payload.answer), settings.messageTemplates),
     conversationId: String(payload.conversation_id || '')
   };
 }
@@ -63,7 +63,7 @@ export async function processChatbotChanges(changes, dependencies) {
       const keywords = settings.handoffKeywords.split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
       const asksForHuman = keywords.some(keyword => String(change.message.text || '').toLowerCase().includes(keyword));
       const reply = asksForHuman || change.message.type !== 'text'
-        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' })
+        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates)
         : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id) });
       if (settings.responseMode === 'automatic') {
         for (const text of reply.messages) await sendMessage(conversation, { text });

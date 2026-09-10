@@ -10,6 +10,7 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges } from './chatbot-engine.mjs';
+import { chatbotTemplates } from './chatbot-templates.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -299,7 +300,13 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
     if (request.method === 'GET' && url.pathname === '/api/health') return sendJson(response, 200, { status:'ok', time:new Date().toISOString() });
-    if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') return sendJson(response, 200, publicChatbotSettings(await readChatbotSettings()));
+    if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
+      const settings = await readChatbotSettings();
+      return sendJson(response, 200, {
+        ...publicChatbotSettings(settings),
+        templates: { ...chatbotTemplates, ...settings.messageTemplates }
+      });
+    }
     if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
       const current = await readChatbotSettings();
       const payload = await readBody(request);
@@ -311,7 +318,10 @@ const server = http.createServer(async (request, response) => {
         apiKey: String(payload.apiKey || '').trim() || current.apiKey,
         updatedAt: Date.now()
       });
-      return sendJson(response, 200, publicChatbotSettings(settings));
+      return sendJson(response, 200, {
+        ...publicChatbotSettings(settings),
+        templates: { ...chatbotTemplates, ...settings.messageTemplates }
+      });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const store = await readChannelStore();

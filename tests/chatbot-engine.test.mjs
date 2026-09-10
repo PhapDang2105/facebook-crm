@@ -65,3 +65,8 @@ test('xác nhận đơn dùng giá nội bộ khi đủ dữ liệu', () => {
   assert.equal(reply.order.total, 298000);
   assert.match(reply.messages[0], /298\.000đ/);
 });
+
+test('mẫu tin chỉnh trong Smax nội bộ ghi đè mẫu mặc định', () => {
+  const reply = renderChatbotReply({ template_id: 'WELCOME' }, { WELCOME: 'Xin chào từ mẫu tùy chỉnh' });
+  assert.deepEqual(reply.messages, ['Xin chào từ mẫu tùy chỉnh']);
+});

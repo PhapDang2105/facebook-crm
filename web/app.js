@@ -1372,6 +1372,10 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   const row = document.createElement('div');
   row.className = `message-row ${direction === 'outgoing' ? 'outgoing' : 'incoming'}`;
   row.dataset.preview = getMessagePreview(item);
+    // Keep the original message separately from the rendered bubble. Rendering
+  // turns Messenger markers such as *bold* into elements, so reading the DOM
+  // back would lose those markers when the message is copied and pasted.
+  row.dataset.copyText = item.type === 'sticker' ? (item.sticker || '👍') : String(item.text ?? '');
   row.dataset.searchText = [row.dataset.preview, item.name || ''].filter(Boolean).join(' ');
   if (sentAt) {
     row.dataset.sentAt = String(sentAt);
@@ -2581,6 +2585,7 @@ function sendCurrentMessage() {
 function getMessageRowText(row) {
   const bubble = row?.querySelector('.bubble');
   if (!bubble || bubble.classList.contains('bubble-recalled')) return '';
+    if (row?.dataset.copyText !== undefined) return row.dataset.copyText.trim();
   const copy = bubble.cloneNode(true);
   copy.querySelectorAll('.message-pin-badge, .message-reaction').forEach(badge => badge.remove());
   return copy.textContent.trim();

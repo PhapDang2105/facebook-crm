@@ -122,7 +122,50 @@
           </div>
         </section>
         <aside class="contact-panel">
-          <div class="contact-panel-content" id="contact-panel-content"><div class="contact-profile"><span class="avatar avatar-profile has-photo"><img class="avatar-photo" src="/assets/avatars/lan-anh.jpg" alt="">L</span><strong>Lan Anh</strong><small>Khách hàng Facebook</small></div><div class="contact-section"><h3>Thông tin liên hệ</h3><p>lananh@example.com</p><p>+84 912 345 678</p></div><div class="contact-section"><h3>Hành động</h3><button type="button" class="contact-action">Gắn nhãn khách hàng</button><button type="button" class="contact-action">Xem lịch sử tương tác</button></div><div class="contact-section"><h3>Thông tin đơn hàng</h3><div class="order-row"><span>Mã đơn</span><strong>#GN-240901</strong></div><div class="order-row"><span>Sản phẩm</span><strong>Granola tháng 9</strong></div><div class="order-row"><span>Số lượng</span><strong>1</strong></div><div class="order-row"><span>Trạng thái</span><strong>Đã mua</strong></div><div class="order-row"><span>Số điện thoại</span><strong>+84 912 345 678</strong></div><div class="order-row"><span>Địa chỉ</span><strong>12 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh</strong></div><div class="order-row"><span>Tổng tiền</span><strong>890.000 đ</strong></div></div></div>
+          <div class="contact-panel-content" id="contact-panel-content">
+            <nav class="customer-panel-tabs" aria-label="Thông tin khách hàng">
+              <button class="customer-panel-tab active" type="button" data-customer-tab="info" aria-selected="true">Thông tin</button>
+              <button class="customer-panel-tab" type="button" data-customer-tab="create" aria-selected="false">Tạo đơn</button>
+            </nav>
+
+            <section class="customer-panel-view customer-info-view" data-customer-panel="info">
+              <div class="customer-note-block">
+                <div class="customer-note-empty" id="customer-note-empty"><span class="customer-note-illustration" aria-hidden="true">❞</span><span>Bạn chưa có ghi chú nào</span></div>
+                <ul class="customer-note-list hidden" id="customer-note-list"></ul>
+                <div class="customer-note-composer"><textarea id="customer-note-input" rows="2" placeholder="Nhập ghi chú (Enter để gửi)" aria-label="Nhập ghi chú"></textarea><span aria-hidden="true">▧</span></div>
+              </div>
+              <div class="customer-order-heading"><span></span><strong id="customer-order-count">Đơn hàng (0)</strong><span></span></div>
+              <div class="customer-order-list" id="customer-order-list"></div>
+            </section>
+
+            <form class="customer-panel-view customer-create-view hidden" data-customer-panel="create" id="customer-order-form">
+              <section class="customer-form-section">
+                <h3><span aria-hidden="true">♙</span> Khách hàng</h3>
+                <div class="customer-form-grid"><input id="customer-order-name" name="name" placeholder="Tên khách hàng" autocomplete="name"><input id="customer-order-phone" name="phone" placeholder="Số điện thoại" inputmode="tel" autocomplete="tel"></div>
+                <input id="customer-order-address" name="address" placeholder="Địa chỉ nhận hàng" autocomplete="street-address">
+              </section>
+              <section class="customer-form-section customer-products-section">
+                <h3><span aria-hidden="true">🛒</span> Sản phẩm</h3>
+                <div class="customer-product-table-head"><span>Tên SP</span><span>SL</span><span>Đơn giá</span><span>Thành tiền</span></div>
+                <div class="customer-product-empty" id="customer-product-empty"><span aria-hidden="true">▱</span><small>Chưa có sản phẩm nào</small></div>
+                <div class="customer-product-list" id="customer-product-list"></div>
+                <div class="customer-product-add"><input id="customer-product-name" placeholder="Tìm kiếm sản phẩm"><input id="customer-product-quantity" type="number" min="1" value="1" aria-label="Số lượng"><input id="customer-product-price" type="number" min="0" step="1000" placeholder="Đơn giá"><button id="customer-product-add-button" type="button" aria-label="Thêm sản phẩm">+</button></div>
+              </section>
+              <section class="customer-form-section">
+                <h3><span aria-hidden="true">▣</span> Thanh toán</h3>
+                <div class="customer-payment-options"><label><input id="customer-free-shipping" type="checkbox"> Miễn phí giao hàng</label><label><input id="customer-bank-transfer" type="checkbox"> Chuyển khoản</label></div>
+                <div class="customer-money-row"><span>Tổng giá trị đơn hàng</span><strong id="customer-order-subtotal">0 đ</strong></div>
+                <label class="customer-money-row"><span>Phí vận chuyển</span><input id="customer-shipping-fee" type="number" min="0" step="1000" value="0"></label>
+                <label class="customer-money-row"><span>Giảm giá</span><input id="customer-order-discount" type="number" min="0" step="1000" value="0"></label>
+              </section>
+              <section class="customer-form-section">
+                <h3><span aria-hidden="true">☷</span> Thông tin khác</h3>
+                <label class="customer-form-line"><span>Nguồn đơn</span><select id="customer-order-source"><option>Facebook</option><option>Zalo</option><option>Khác</option></select></label>
+                <label class="customer-form-line"><span>Ghi chú</span><input id="customer-order-note" placeholder="Thêm ghi chú"></label>
+              </section>
+              <footer class="customer-create-footer"><strong id="customer-order-total">0 đ</strong><div><button id="customer-order-reset" type="button">Thiết lập lại</button><button id="customer-order-submit" type="submit">Tạo đơn</button></div></footer>
+            </form>
+          </div>
           <section class="conversation-pinned-panel hidden" id="chat-pinned-panel"><header><strong>Tin nhắn đã ghim</strong><button id="chat-pinned-close" type="button" aria-label="Đóng danh sách ghim" title="Đóng"><img src="/assets/icons/dismiss.svg" alt=""></button></header><div class="conversation-search-controls"><div class="chat-search-field"><span class="search-icon" aria-hidden="true"></span><input id="chat-pinned-search" type="search" placeholder="Tìm trong tin đã ghim" aria-label="Tìm trong tin nhắn đã ghim"></div><span class="chat-search-count" id="chat-pinned-count"></span></div><div class="conversation-search-results" id="chat-pinned-results"></div></section><section class="conversation-search-panel hidden" id="chat-search-bar"><header><strong>Tìm kiếm trong trò chuyện</strong><button id="chat-search-close" type="button" aria-label="Đóng tìm kiếm" title="Đóng tìm kiếm"><img src="/assets/icons/dismiss.svg" alt=""></button></header><div class="conversation-search-controls"><div class="chat-search-field"><span class="search-icon" aria-hidden="true"></span><input id="chat-search-input" type="search" placeholder="Nhập từ khóa để tìm kiếm" aria-label="Tìm trong hội thoại"></div><div class="conversation-search-filters"><span>Lọc theo:</span><label class="conversation-search-filter"><img src="/assets/icons/person.svg" alt="" aria-hidden="true"><select id="chat-search-sender" aria-label="Lọc theo người gửi"><option value="all">Người gửi</option><option value="customer">Khách hàng</option><option value="me">Bạn</option></select></label><label class="conversation-search-filter"><img src="/assets/icons/calendar.svg" alt="" aria-hidden="true"><select id="chat-search-date" aria-label="Lọc theo ngày gửi"><option value="all">Ngày gửi</option><option value="today">Hôm nay</option><option value="yesterday">Hôm qua</option><option value="week">7 ngày qua</option></select></label></div><span class="chat-search-count" id="chat-search-count"></span></div><div class="conversation-search-results" id="chat-search-results"></div></section>
         </aside>
       </div>

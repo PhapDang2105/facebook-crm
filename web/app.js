@@ -70,12 +70,33 @@ const chatSearchSender = document.querySelector('#chat-search-sender');
 const chatSearchDate = document.querySelector('#chat-search-date');
 const chatSearchResults = document.querySelector('#chat-search-results');
 const contactPanelContent = document.querySelector('#contact-panel-content');
-const contactProfileAvatar = document.querySelector('.contact-profile .avatar');
-const contactProfileName = document.querySelector('.contact-profile strong');
-const contactProfileType = document.querySelector('.contact-profile small');
-const contactSections = [...document.querySelectorAll('.contact-panel .contact-section')];
-const contactDetails = [...(contactSections[0]?.querySelectorAll('p') || [])];
-const contactOrderValues = [...(contactSections[2]?.querySelectorAll('.order-row strong') || [])];
+const customerPanelTabs = [...document.querySelectorAll('[data-customer-tab]')];
+const customerPanelViews = [...document.querySelectorAll('[data-customer-panel]')];
+const customerNoteEmpty = document.querySelector('#customer-note-empty');
+const customerNoteList = document.querySelector('#customer-note-list');
+const customerNoteInput = document.querySelector('#customer-note-input');
+const customerOrderCount = document.querySelector('#customer-order-count');
+const customerOrderList = document.querySelector('#customer-order-list');
+const customerOrderForm = document.querySelector('#customer-order-form');
+const customerOrderName = document.querySelector('#customer-order-name');
+const customerOrderPhone = document.querySelector('#customer-order-phone');
+const customerOrderAddress = document.querySelector('#customer-order-address');
+const customerProductName = document.querySelector('#customer-product-name');
+const customerProductQuantity = document.querySelector('#customer-product-quantity');
+const customerProductPrice = document.querySelector('#customer-product-price');
+const customerProductAddButton = document.querySelector('#customer-product-add-button');
+const customerProductEmpty = document.querySelector('#customer-product-empty');
+const customerProductList = document.querySelector('#customer-product-list');
+const customerFreeShipping = document.querySelector('#customer-free-shipping');
+const customerBankTransfer = document.querySelector('#customer-bank-transfer');
+const customerShippingFee = document.querySelector('#customer-shipping-fee');
+const customerOrderDiscount = document.querySelector('#customer-order-discount');
+const customerOrderSource = document.querySelector('#customer-order-source');
+const customerOrderNote = document.querySelector('#customer-order-note');
+const customerOrderSubtotal = document.querySelector('#customer-order-subtotal');
+const customerOrderTotal = document.querySelector('#customer-order-total');
+const customerOrderReset = document.querySelector('#customer-order-reset');
+const customerOrderSubmit = document.querySelector('#customer-order-submit');
 const topbarUserAvatar = document.querySelector('#topbar-user-avatar');
 const topbarUserName = document.querySelector('#topbar-user-name');
 const settingsForm = document.querySelector('#settings-form');
@@ -135,6 +156,20 @@ let messagingStream = null;
 const remoteConversations = new Map();
 const remoteMessages = new Map();
 const syncedChannelIds = new Set();
+let customerDraftProducts = [];
+let customerPanelStore = { notes: {}, orders: {} };
+
+try {
+  const savedCustomerPanel = JSON.parse(localStorage.getItem('crm-customer-panel-v1') || 'null');
+  if (savedCustomerPanel && typeof savedCustomerPanel === 'object') {
+    customerPanelStore = {
+      notes: savedCustomerPanel.notes && typeof savedCustomerPanel.notes === 'object' ? savedCustomerPanel.notes : {},
+      orders: savedCustomerPanel.orders && typeof savedCustomerPanel.orders === 'object' ? savedCustomerPanel.orders : {}
+    };
+  }
+} catch {
+  localStorage.removeItem('crm-customer-panel-v1');
+}
 
 const conversationProfiles = {
   'Lan Anh': {
@@ -618,11 +653,7 @@ function showEmptyChannelConversation() {
   if (chatHeadName) chatHeadName.textContent = 'Chưa có hội thoại';
   chatHeadMeta?.classList.add('hidden');
   if (chatBody) chatBody.innerHTML = `<div class="chat-empty-state">Chưa có tin nhắn trong ${escapeHtml(channelName)}.</div>`;
-  if (contactProfileAvatar) contactProfileAvatar.textContent = channel?.platform === 'zalo' ? 'Z' : 'F';
-  if (contactProfileName) contactProfileName.textContent = 'Chưa chọn khách hàng';
-  if (contactProfileType) contactProfileType.textContent = channel?.platform === 'zalo' ? 'Khách hàng Zalo' : 'Khách hàng Facebook';
-  contactDetails.forEach(item => { item.textContent = '—'; });
-  contactOrderValues.forEach(item => { item.textContent = '—'; });
+  renderCustomerPanel(null);
   if (messageComposerInput) { messageComposerInput.value = ''; messageComposerInput.disabled = true; }
   if (messageSendButton) messageSendButton.disabled = true;
 }
@@ -1372,7 +1403,7 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   const row = document.createElement('div');
   row.className = `message-row ${direction === 'outgoing' ? 'outgoing' : 'incoming'}`;
   row.dataset.preview = getMessagePreview(item);
-    // Keep the original message separately from the rendered bubble. Rendering
+  // Keep the original message separately from the rendered bubble. Rendering
   // turns Messenger markers such as *bold* into elements, so reading the DOM
   // back would lose those markers when the message is copied and pasted.
   row.dataset.copyText = item.type === 'sticker' ? (item.sticker || '👍') : String(item.text ?? '');
@@ -1656,6 +1687,170 @@ function getConversationMessages(conversation) {
     : [{ direction: 'incoming', text }];
 }
 
+function getCustomerPanelKey(conversation = getActiveConversation()) {
+  if (!conversation) return '';
+  return conversation.dataset.conversationId || `name:${getConversationName(conversation)}`;
+}
+
+function saveCustomerPanelStore() {
+  localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore));
+}
+
+function formatOrderMoney(value) {
+  return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, Number(value) || 0))} đ`;
+}
+
+function formatCustomerPanelTime(value, includeDate = false) {
+  const date = new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return '—';
+  const options = includeDate
+    ? { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }
+    : { hour: '2-digit', minute: '2-digit' };
+  return new Intl.DateTimeFormat('vi-VN', options).format(date);
+}
+
+function getCustomerPanelProfile(conversation = getActiveConversation()) {
+  if (!conversation) return { name: '', phone: '', address: '', avatar: '' };
+  const name = getConversationName(conversation);
+  const profile = conversationProfiles[name] || {};
+  return {
+    name,
+    phone: profile.phone || '',
+    address: profile.address || profile.order?.[5] || '',
+    avatar: conversation.dataset.avatar || ''
+  };
+}
+
+function getSeedCustomerOrder(conversation = getActiveConversation()) {
+  if (!conversation) return [];
+  const profile = conversationProfiles[getConversationName(conversation)];
+  if (!profile?.order?.length) return [];
+  const values = profile.order;
+  return [{
+    id: String(values[0] || 'GN-240901').replace(/^#/, ''),
+    name: getConversationName(conversation),
+    phone: values[4] || profile.phone || '',
+    address: values[5] || '',
+    products: [{ name: values[1] || 'Sản phẩm', quantity: Number(values[2]) || 1, price: Number(String(values[6] || '').replace(/\D/g, '')) || 0 }],
+    status: values[3] || 'Mới',
+    shippingFee: 0,
+    discount: 0,
+    total: Number(String(values[6] || '').replace(/\D/g, '')) || 0,
+    source: 'Facebook',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    employee: appSettings.displayName || 'Bạn'
+  }];
+}
+
+function getCustomerOrders(conversation = getActiveConversation()) {
+  const key = getCustomerPanelKey(conversation);
+  if (!key) return [];
+  if (!Array.isArray(customerPanelStore.orders[key])) customerPanelStore.orders[key] = getSeedCustomerOrder(conversation);
+  return customerPanelStore.orders[key];
+}
+
+function renderCustomerNotes(conversation = getActiveConversation()) {
+  if (!customerNoteList || !customerNoteEmpty) return;
+  const notes = customerPanelStore.notes[getCustomerPanelKey(conversation)] || [];
+  customerNoteEmpty.classList.toggle('hidden', notes.length > 0);
+  customerNoteList.classList.toggle('hidden', notes.length === 0);
+  customerNoteList.innerHTML = notes.map(note => `<li>${escapeHtml(note.text)}<time>${escapeHtml(formatCustomerPanelTime(note.createdAt, true))}</time></li>`).join('');
+}
+
+function renderCustomerOrders(conversation = getActiveConversation()) {
+  if (!customerOrderList || !customerOrderCount) return;
+  const orders = getCustomerOrders(conversation);
+  customerOrderCount.textContent = `Đơn hàng (${orders.length})`;
+  if (!orders.length) {
+    customerOrderList.innerHTML = '<div class="customer-orders-empty">Khách hàng chưa có đơn hàng nào</div>';
+    return;
+  }
+  customerOrderList.innerHTML = orders.map((order, index) => {
+    const products = Array.isArray(order.products) ? order.products : [];
+    const quantity = products.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+    const productLabel = products.length === 1 ? products[0].name : `${products.length} sản phẩm`;
+    const total = Number(order.total) || products.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0);
+    return `<details class="customer-order-card" ${index === 0 ? 'open' : ''}>
+      <summary><strong>${escapeHtml(String(order.id))}</strong><img src="/assets/icons/facebook.png" alt="Facebook"><time>${escapeHtml(formatCustomerPanelTime(order.createdAt))}</time></summary>
+      <div class="customer-order-statuses"><span>☆ ${escapeHtml(order.status || 'Mới')}</span><span>›</span><b>♢ Đã xác nhận</b><span>›</span><span>⊗ Hủy</span></div>
+      <div class="customer-order-details">
+        <div class="customer-order-customer">
+          <div class="customer-order-detail"><i>♙</i><span>${escapeHtml(order.name || 'Chưa có tên')}</span></div>
+          <div class="customer-order-detail"><i>⌂</i><span>${escapeHtml(order.address || 'Chưa có địa chỉ')}</span></div>
+          <div class="customer-order-detail"><i>♧</i><a href="tel:${escapeHtml(order.phone || '')}">${escapeHtml(order.phone || 'Chưa có số điện thoại')}</a><small>${escapeHtml(order.source || 'Facebook')}</small></div>
+          <div class="customer-order-detail customer-order-detail--products"><i>🛒</i><span>${escapeHtml(productLabel || 'Chưa có sản phẩm')} ›</span><strong>Đơn đủ</strong></div>
+          <div class="customer-order-metrics"><div class="customer-order-metric"><span>▣</span><strong>${escapeHtml(formatOrderMoney(total))}</strong></div><div class="customer-order-metric"><span>Số lượng</span><span>${quantity}</span></div></div>
+        </div>
+        <div class="customer-order-meta">
+          <div class="customer-order-detail"><i>◷</i><span>Tạo lúc</span><span>${escapeHtml(formatCustomerPanelTime(order.createdAt))}</span></div>
+          <div class="customer-order-detail"><i>◉</i><span>Cập nhật TT</span><span>${escapeHtml(formatCustomerPanelTime(order.updatedAt))}</span></div>
+          <div class="customer-order-detail"><i>▤</i><span>Ghi chú</span><a>${escapeHtml(order.note || 'Chưa có')}</a></div>
+          <div class="customer-order-detail"><i>♙</i><span>NV tạo đơn</span><span>${escapeHtml(order.employee || 'Bạn')}</span></div>
+          <div class="customer-order-detail"><i>◇</i><span>Dự kiến nhận hàng</span><a>Chưa có</a></div>
+        </div>
+        <div class="customer-order-tags"><span>◇ &nbsp;Thẻ</span><button type="button">Thêm thẻ</button></div>
+      </div>
+    </details>`;
+  }).join('');
+}
+
+function updateCustomerOrderTotals() {
+  const subtotal = customerDraftProducts.reduce((sum, item) => sum + item.quantity * item.price, 0);
+  const shipping = customerFreeShipping?.checked ? 0 : Math.max(0, Number(customerShippingFee?.value) || 0);
+  const discount = Math.max(0, Number(customerOrderDiscount?.value) || 0);
+  const total = Math.max(0, subtotal + shipping - discount);
+  if (customerOrderSubtotal) customerOrderSubtotal.textContent = formatOrderMoney(subtotal);
+  if (customerOrderTotal) customerOrderTotal.textContent = formatOrderMoney(total);
+  if (customerShippingFee) customerShippingFee.disabled = Boolean(customerFreeShipping?.checked);
+  if (customerOrderSubmit) customerOrderSubmit.disabled = !customerOrderName?.value.trim() || !customerOrderPhone?.value.trim() || !customerOrderAddress?.value.trim() || !customerDraftProducts.length;
+  return { subtotal, shipping, discount, total };
+}
+
+function renderCustomerDraftProducts() {
+  if (!customerProductList || !customerProductEmpty) return;
+  customerProductEmpty.classList.toggle('hidden', customerDraftProducts.length > 0);
+  customerProductList.innerHTML = customerDraftProducts.map((item, index) => `<div class="customer-product-row"><span>${escapeHtml(item.name)}<button type="button" data-remove-customer-product="${index}">Xóa</button></span><span>${item.quantity}</span><span>${escapeHtml(formatOrderMoney(item.price))}</span><span>${escapeHtml(formatOrderMoney(item.quantity * item.price))}</span></div>`).join('');
+  updateCustomerOrderTotals();
+}
+
+function resetCustomerOrderForm(conversation = getActiveConversation()) {
+  const profile = getCustomerPanelProfile(conversation);
+  customerDraftProducts = [];
+  if (customerOrderName) customerOrderName.value = profile.name;
+  if (customerOrderPhone) customerOrderPhone.value = profile.phone;
+  if (customerOrderAddress) customerOrderAddress.value = profile.address;
+  if (customerProductName) customerProductName.value = '';
+  if (customerProductQuantity) customerProductQuantity.value = '1';
+  if (customerProductPrice) customerProductPrice.value = '';
+  if (customerFreeShipping) customerFreeShipping.checked = false;
+  if (customerBankTransfer) customerBankTransfer.checked = false;
+  if (customerShippingFee) customerShippingFee.value = '0';
+  if (customerOrderDiscount) customerOrderDiscount.value = '0';
+  if (customerOrderNote) customerOrderNote.value = '';
+  renderCustomerDraftProducts();
+}
+
+function setCustomerPanelTab(name) {
+  customerPanelTabs.forEach(tab => {
+    const active = tab.dataset.customerTab === name;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  customerPanelViews.forEach(view => view.classList.toggle('hidden', view.dataset.customerPanel !== name));
+  if (name === 'create') resetCustomerOrderForm();
+}
+
+function renderCustomerPanel(conversation = getActiveConversation()) {
+  renderCustomerNotes(conversation);
+  renderCustomerOrders(conversation);
+  const profile = getCustomerPanelProfile(conversation);
+  if (customerOrderName) customerOrderName.value = profile.name;
+  if (customerOrderPhone) customerOrderPhone.value = profile.phone;
+  if (customerOrderAddress) customerOrderAddress.value = profile.address;
+  updateCustomerOrderTotals();
+}
+
 function renderConversationHeader(conversation) {
   const name = getConversationName(conversation);
   const initial = conversation.querySelector('.avatar')?.textContent.trim() || name.charAt(0);
@@ -1669,14 +1864,8 @@ function renderConversationHeader(conversation) {
   if (chatHeadName) chatHeadName.textContent = name;
   chatHeadMeta?.classList.remove('hidden');
   if (chatHeadChannelLogo) chatHeadChannelLogo.src = channel?.platform === 'zalo' ? '/assets/icons/zalo.png' : '/assets/icons/facebook.png';
-  if (contactProfileAvatar) contactProfileAvatar.textContent = initial;
-  applyAvatarPhoto(contactProfileAvatar, avatarPhoto);
-  if (contactProfileName) contactProfileName.textContent = name;
-  if (contactProfileType) contactProfileType.textContent = customerPlatform;
   if (messageComposerInput) messageComposerInput.disabled = false;
-  if (contactDetails[0]) contactDetails[0].textContent = profile.email || 'Chưa cập nhật email';
-  if (contactDetails[1]) contactDetails[1].textContent = profile.phone || 'Chưa cập nhật số điện thoại';
-  contactOrderValues.forEach((element, index) => { element.textContent = profile.order?.[index] || '—'; });
+  renderCustomerPanel(conversation);
   updateChatHeadViewState();
   return { name, initial };
 }
@@ -2585,7 +2774,7 @@ function sendCurrentMessage() {
 function getMessageRowText(row) {
   const bubble = row?.querySelector('.bubble');
   if (!bubble || bubble.classList.contains('bubble-recalled')) return '';
-    if (row?.dataset.copyText !== undefined) return row.dataset.copyText.trim();
+  if (row?.dataset.copyText !== undefined) return row.dataset.copyText.trim();
   const copy = bubble.cloneNode(true);
   copy.querySelectorAll('.message-pin-badge, .message-reaction').forEach(badge => badge.remove());
   return copy.textContent.trim();
@@ -3679,6 +3868,88 @@ chatSearchInput?.addEventListener('keydown', event => {
   }
 });
 chatSearchClose?.addEventListener('click', closeConversationSearch);
+
+customerPanelTabs.forEach(tab => tab.addEventListener('click', () => setCustomerPanelTab(tab.dataset.customerTab)));
+
+customerNoteInput?.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey) return;
+  event.preventDefault();
+  const text = customerNoteInput.value.trim();
+  const key = getCustomerPanelKey();
+  if (!text || !key) return;
+  const notes = customerPanelStore.notes[key] || [];
+  notes.unshift({ text, createdAt: Date.now() });
+  customerPanelStore.notes[key] = notes.slice(0, 50);
+  saveCustomerPanelStore();
+  customerNoteInput.value = '';
+  renderCustomerNotes();
+});
+
+customerProductAddButton?.addEventListener('click', () => {
+  const name = customerProductName?.value.trim() || '';
+  const quantity = Math.max(1, Number(customerProductQuantity?.value) || 1);
+  const price = Math.max(0, Number(customerProductPrice?.value) || 0);
+  if (!name || !price) {
+    showToast('Nhập tên sản phẩm và đơn giá trước khi thêm.');
+    return;
+  }
+  customerDraftProducts.push({ name, quantity, price });
+  customerProductName.value = '';
+  customerProductQuantity.value = '1';
+  customerProductPrice.value = '';
+  renderCustomerDraftProducts();
+  customerProductName.focus();
+});
+
+customerProductList?.addEventListener('click', event => {
+  const button = event.target.closest('[data-remove-customer-product]');
+  if (!button) return;
+  customerDraftProducts.splice(Number(button.dataset.removeCustomerProduct), 1);
+  renderCustomerDraftProducts();
+});
+
+[customerOrderName, customerOrderPhone, customerOrderAddress, customerShippingFee, customerOrderDiscount]
+  .filter(Boolean)
+  .forEach(input => input.addEventListener('input', updateCustomerOrderTotals));
+customerFreeShipping?.addEventListener('change', updateCustomerOrderTotals);
+customerOrderReset?.addEventListener('click', () => resetCustomerOrderForm());
+
+customerOrderForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  const conversation = getActiveConversation();
+  const key = getCustomerPanelKey(conversation);
+  const totals = updateCustomerOrderTotals();
+  if (!key || customerOrderSubmit?.disabled) {
+    showToast('Điền đủ thông tin khách hàng và thêm ít nhất một sản phẩm.');
+    return;
+  }
+  const now = Date.now();
+  const order = {
+    id: String(now).slice(-5),
+    name: customerOrderName.value.trim(),
+    phone: customerOrderPhone.value.trim(),
+    address: customerOrderAddress.value.trim(),
+    products: customerDraftProducts.map(item => ({ ...item })),
+    status: 'Mới',
+    source: customerOrderSource?.value || 'Facebook',
+    payment: customerBankTransfer?.checked ? 'Chuyển khoản' : 'COD',
+    freeShipping: Boolean(customerFreeShipping?.checked),
+    shippingFee: totals.shipping,
+    discount: totals.discount,
+    total: totals.total,
+    note: customerOrderNote?.value.trim() || '',
+    createdAt: now,
+    updatedAt: now,
+    employee: appSettings.displayName || topbarUserName?.textContent || 'Bạn'
+  };
+  const orders = getCustomerOrders(conversation);
+  orders.unshift(order);
+  customerPanelStore.orders[key] = orders;
+  saveCustomerPanelStore();
+  renderCustomerOrders(conversation);
+  setCustomerPanelTab('info');
+  showToast(`Đã tạo đơn ${order.id}.`);
+});
 
 contactInfoButton?.addEventListener('click', () => {
   if (!chatSearchBar?.classList.contains('hidden')) {

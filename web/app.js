@@ -106,6 +106,23 @@ const settingsSendEnter = document.querySelector('#settings-send-enter');
 const settingsShowContact = document.querySelector('#settings-show-contact');
 const settingsCollapseSidebar = document.querySelector('#settings-collapse-sidebar');
 const settingsStatus = document.querySelector('#settings-status');
+const productCreateButton = document.querySelector('#product-create-button');
+const productSearch = document.querySelector('#product-search');
+const productCount = document.querySelector('#product-count');
+const productList = document.querySelector('#product-list');
+const productDialog = document.querySelector('#product-dialog');
+const productForm = document.querySelector('#product-form');
+const productDialogTitle = document.querySelector('#product-dialog-title');
+const productImageInput = document.querySelector('#product-image-input');
+const productImagePreview = document.querySelector('#product-image-preview');
+const productImageRemove = document.querySelector('#product-image-remove');
+const productName = document.querySelector('#product-name');
+const productSku = document.querySelector('#product-sku');
+const productOriginalPrice = document.querySelector('#product-original-price');
+const productSalePrice = document.querySelector('#product-sale-price');
+const productFormStatus = document.querySelector('#product-form-status');
+const productSubmit = document.querySelector('#product-submit');
+const sharedProductOptions = document.querySelector('#shared-product-options');
 const chatbotSettingsForm = document.querySelector('#chatbot-settings-form');
 const chatbotSettingsEnabled = document.querySelector('#chatbot-settings-enabled');
 const chatbotSettingsProvider = document.querySelector('#chatbot-settings-provider');
@@ -148,6 +165,10 @@ let chatbotOriginalTemplates = {};
 let chatbotProcessingSteps = [];
 let selectedChatbotTemplate = '';
 let selectedChatbotStep = '';
+let sharedProducts = [];
+let selectedProductId = '';
+let pendingProductImage = '';
+let removeCurrentProductImage = false;
 const facebookConnectButton = document.querySelector('#facebook-connect-button');
 const zaloConnectButton = document.querySelector('#zalo-connect-button');
 const facebookChannelList = document.querySelector('#facebook-channel-list');
@@ -1892,12 +1913,103 @@ function renderChatbotStepEditor() {
   if (chatbotStepCodeApply) chatbotStepCodeApply.disabled = !step;
 }
 
+function renderProductImagePreview(source = '') {
+  if (!productImagePreview) return;
+  productImagePreview.innerHTML = source
+    ? `<img src="${escapeHtml(source)}" alt="Ảnh sản phẩm">`
+    : '<span>Ảnh sản phẩm</span><small>PNG, JPG, WebP · tối đa 5 MB</small>';
+  productImageRemove?.classList.toggle('hidden', !source);
+}
+
+function syncSharedProductOptions() {
+  if (!sharedProductOptions) return;
+  sharedProductOptions.innerHTML = sharedProducts.map(product =>
+    `<option value="${escapeHtml(product.name)}">${escapeHtml(product.sku)} · ${escapeHtml(formatOrderMoney(product.salePrice))}</option>`
+  ).join('');
+}
+
+function renderProducts() {
+  if (!productList) return;
+  const query = String(productSearch?.value || '').trim().toLocaleLowerCase('vi');
+  const items = query
+    ? sharedProducts.filter(product => `${product.name} ${product.sku}`.toLocaleLowerCase('vi').includes(query))
+    : sharedProducts;
+  if (productCount) productCount.textContent = query ? `${items.length}/${sharedProducts.length} sản phẩm` : `${sharedProducts.length} sản phẩm`;
+  if (!items.length) {
+    productList.innerHTML = `<div class="product-empty"><img src="/assets/icons/products/empty-product.png" alt=""><strong>${query ? 'Không tìm thấy sản phẩm' : 'Chưa có sản phẩm nào'}</strong></div>`;
+    return;
+  }
+  productList.innerHTML = items.map(product => {
+    const initial = escapeHtml(String(product.name || 'S').trim().charAt(0).toUpperCase());
+    const image = product.image ? `<img src="${escapeHtml(product.image)}" alt="">` : initial;
+    return `<article class="product-row" data-product-id="${escapeHtml(product.id)}">
+      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}</small></span></div>
+      <code class="product-row-sku">${escapeHtml(product.sku)}</code>
+      <span class="product-row-price">${escapeHtml(formatOrderMoney(product.originalPrice))}</span>
+      <strong class="product-row-price product-row-sale">${escapeHtml(formatOrderMoney(product.salePrice))}</strong>
+      <span class="product-row-actions"><button type="button" data-product-action="edit" title="Sửa sản phẩm" aria-label="Sửa sản phẩm"><img src="/assets/icons/products/edit.png" alt=""></button><button type="button" data-product-action="delete" title="Xóa sản phẩm" aria-label="Xóa sản phẩm"><img src="/assets/icons/products/delete.png" alt=""></button></span>
+    </article>`;
+  }).join('');
+}
+
+async function loadProducts() {
+  const result = await readApiResponse(await fetch('/api/products'));
+  sharedProducts = Array.isArray(result.items) ? result.items : [];
+  syncSharedProductOptions();
+  renderProducts();
+  return sharedProducts;
+}
+
+function renderProductLoadError() {
+  sharedProducts = [];
+  syncSharedProductOptions();
+  if (productCount) productCount.textContent = '0 sản phẩm';
+  if (productList) productList.innerHTML = '<div class="product-empty"><img src="/assets/icons/products/empty-product.png" alt=""><strong>Chưa tải được danh mục sản phẩm</strong></div>';
+}
+
+function openProductDialog(product = null) {
+  selectedProductId = product?.id || '';
+  pendingProductImage = '';
+  removeCurrentProductImage = false;
+  if (productDialogTitle) productDialogTitle.textContent = product ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm';
+  if (productName) productName.value = product?.name || '';
+  if (productSku) productSku.value = product?.sku || '';
+  if (productOriginalPrice) productOriginalPrice.value = String(product?.originalPrice || 0);
+  if (productSalePrice) productSalePrice.value = String(product?.salePrice || 0);
+  if (productImageInput) productImageInput.value = '';
+  if (productFormStatus) productFormStatus.textContent = '';
+  renderProductImagePreview(product?.image || '');
+  productDialog?.classList.remove('hidden');
+  window.setTimeout(() => productName?.focus(), 0);
+}
+
+function closeProductDialog() {
+  productDialog?.classList.add('hidden');
+  productForm?.reset();
+  selectedProductId = '';
+  pendingProductImage = '';
+  removeCurrentProductImage = false;
+}
+
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Không thể đọc ảnh sản phẩm.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function showSettingsSection(name = 'channels') {
   const section = settingsPanels.has(name) ? name : 'channels';
   showView('settings');
   settingsPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== section));
   settingsSectionButtons.forEach(button => button.classList.toggle('active', button.dataset.settingsSection === section));
   if (section === 'chatbot') loadChatbotSettings();
+  if (section === 'products') loadProducts().catch(error => {
+    renderProductLoadError();
+    showToast(error.message || 'Chưa tải được danh mục sản phẩm.', 'error');
+  });
 }
 
 function renderChatbotToggle(conversation = getActiveConversation()) {
@@ -3933,6 +4045,92 @@ settingsSectionButtons.forEach(button => {
   button.onclick = () => showSettingsSection(button.dataset.settingsSection);
 });
 
+productCreateButton?.addEventListener('click', () => openProductDialog());
+productSearch?.addEventListener('input', renderProducts);
+document.querySelectorAll('[data-close-product-dialog]').forEach(button => button.addEventListener('click', closeProductDialog));
+productImageInput?.addEventListener('change', async () => {
+  const file = productImageInput.files?.[0];
+  if (!file) return;
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    productFormStatus.textContent = 'Chỉ hỗ trợ ảnh PNG, JPG hoặc WebP.';
+    productImageInput.value = '';
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    productFormStatus.textContent = 'Ảnh sản phẩm phải nhỏ hơn 5 MB.';
+    productImageInput.value = '';
+    return;
+  }
+  try {
+    pendingProductImage = await readImageFile(file);
+    removeCurrentProductImage = false;
+    productFormStatus.textContent = '';
+    renderProductImagePreview(pendingProductImage);
+  } catch (error) {
+    productFormStatus.textContent = error.message;
+  }
+});
+productImageRemove?.addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  pendingProductImage = '';
+  removeCurrentProductImage = true;
+  if (productImageInput) productImageInput.value = '';
+  renderProductImagePreview();
+});
+productForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const payload = {
+    name: productName.value.trim(),
+    sku: productSku.value.trim(),
+    originalPrice: Number(productOriginalPrice.value),
+    salePrice: Number(productSalePrice.value),
+    imageData: pendingProductImage,
+    removeImage: removeCurrentProductImage
+  };
+  productSubmit.disabled = true;
+  productFormStatus.textContent = '';
+  try {
+    const endpoint = selectedProductId ? `/api/products/${encodeURIComponent(selectedProductId)}` : '/api/products';
+    await readApiResponse(await fetch(endpoint, {
+      method: selectedProductId ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }));
+    const wasEditing = Boolean(selectedProductId);
+    closeProductDialog();
+    await loadProducts();
+    showToast(wasEditing ? 'Đã cập nhật sản phẩm.' : 'Đã thêm sản phẩm.', 'success');
+  } catch (error) {
+    productFormStatus.textContent = error.message || 'Chưa lưu được sản phẩm.';
+  } finally {
+    productSubmit.disabled = false;
+  }
+});
+productList?.addEventListener('click', async event => {
+  const action = event.target.closest('[data-product-action]');
+  const row = action?.closest('[data-product-id]');
+  const product = sharedProducts.find(item => item.id === row?.dataset.productId);
+  if (!action || !product) return;
+  if (action.dataset.productAction === 'edit') return openProductDialog(product);
+  if (!window.confirm(`Xóa sản phẩm “${product.name}”? Sản phẩm sẽ không còn xuất hiện trong danh mục dùng chung.`)) return;
+  action.disabled = true;
+  try {
+    await readApiResponse(await fetch(`/api/products/${encodeURIComponent(product.id)}`, { method: 'DELETE' }));
+    await loadProducts();
+    showToast('Đã xóa sản phẩm.', 'success');
+  } catch (error) {
+    action.disabled = false;
+    showToast(error.message || 'Chưa xóa được sản phẩm.', 'error');
+  }
+});
+
+customerProductName?.addEventListener('change', () => {
+  const value = customerProductName.value.trim().toLocaleLowerCase('vi');
+  const product = sharedProducts.find(item => item.name.toLocaleLowerCase('vi') === value || item.sku.toLocaleLowerCase('vi') === value);
+  if (product && customerProductPrice) customerProductPrice.value = String(product.salePrice || 0);
+});
+
 chatbotWorkspaceButtons.forEach(button => {
   button.addEventListener('click', () => {
     const workspace = button.dataset.chatbotWorkspace;
@@ -4639,6 +4837,7 @@ document.addEventListener('keydown', event => {
     closeComposerPopovers();
     closeImageLightbox();
     closeVideoLightbox();
+    closeProductDialog();
   }
 });
 
@@ -4688,6 +4887,7 @@ if (initialView === 'orders') {
 else showView(initialView);
 loadFacebookChannels().catch(() => {});
 loadMessageChannels().catch(() => {});
+loadProducts().catch(renderProductLoadError);
 if (metaConnectionParams.has('meta_error')) {
   showToast(metaConnectionParams.get('meta_error'));
   history.replaceState(null, '', `${window.location.pathname}#settings`);

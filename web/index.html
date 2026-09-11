@@ -151,7 +151,8 @@
                 <div class="customer-product-table-head"><span>Tên SP</span><span>SL</span><span>Đơn giá</span><span>Thành tiền</span></div>
                 <div class="customer-product-empty" id="customer-product-empty"><img src="/assets/icons/customer-panel/empty-box.png" alt=""><small>Chưa có sản phẩm nào</small></div>
                 <div class="customer-product-list" id="customer-product-list"></div>
-                <div class="customer-product-add"><label class="customer-product-search"><img src="/assets/icons/customer-panel/search.png" alt=""><input id="customer-product-name" placeholder="Tìm kiếm sản phẩm"></label><input id="customer-product-quantity" type="number" min="1" value="1" aria-label="Số lượng"><input id="customer-product-price" type="number" min="0" step="1000" placeholder="Đơn giá"><button id="customer-product-add-button" type="button" aria-label="Thêm sản phẩm"><img src="/assets/icons/customer-panel/plus.png" alt=""></button></div>
+                <div class="customer-product-add"><label class="customer-product-search"><img src="/assets/icons/customer-panel/search.png" alt=""><input id="customer-product-name" list="shared-product-options" placeholder="Tìm kiếm sản phẩm" autocomplete="off"></label><input id="customer-product-quantity" type="number" min="1" value="1" aria-label="Số lượng"><input id="customer-product-price" type="number" min="0" step="1000" placeholder="Đơn giá"><button id="customer-product-add-button" type="button" aria-label="Thêm sản phẩm"><img src="/assets/icons/customer-panel/plus.png" alt=""></button></div>
+                <datalist id="shared-product-options"></datalist>
               </section>
               <section class="customer-form-section">
                 <h3><img src="/assets/icons/customer-panel/wallet.png" alt=""> Thanh toán</h3>
@@ -319,7 +320,20 @@
             <footer class="chatbot-settings-footer"><button class="settings-save-button" type="submit">Lưu cấu hình AI</button></footer>
           </form>
         </section>
-        <section class="settings-section-content hidden" data-settings-panel="products"></section>
+        <section class="settings-section-content hidden" data-settings-panel="products" aria-labelledby="product-settings-title">
+          <section class="settings-card product-settings-card">
+            <header class="settings-card-head product-settings-head">
+              <h1 id="product-settings-title">Sản phẩm</h1>
+              <label class="product-search"><img src="/assets/icons/search.svg" alt=""><input id="product-search" type="search" placeholder="Tìm theo tên sản phẩm hoặc SKU..." autocomplete="off"></label>
+              <span class="product-count" id="product-count">0 sản phẩm</span>
+              <button class="product-primary-button" id="product-create-button" type="button"><span aria-hidden="true">＋</span> Thêm sản phẩm</button>
+            </header>
+            <div class="product-table-wrap">
+              <div class="product-table-head"><span>Sản phẩm</span><span>SKU</span><span>Giá gốc</span><span>Giá bán</span><span>Thao tác</span></div>
+              <div class="product-list" id="product-list" aria-live="polite"><div class="product-empty"><img src="/assets/icons/products/empty-product.png" alt=""><strong>Đang tải danh mục sản phẩm...</strong></div></div>
+            </div>
+          </section>
+        </section>
       </div>
     </section>
   </main>
@@ -331,6 +345,29 @@
       <p class="channel-dialog-status" id="facebook-page-dialog-status" role="status"></p>
       <div class="channel-dialog-actions"><button class="channel-cancel-button" type="button" data-close-channel-dialog>Hủy</button><button class="settings-save-button" id="facebook-page-confirm" type="button">Kết nối Page đã chọn</button></div>
     </section>
+  </div>
+  <div class="product-dialog hidden" id="product-dialog" role="dialog" aria-modal="true" aria-labelledby="product-dialog-title">
+    <button class="product-dialog-backdrop" type="button" data-close-product-dialog aria-label="Đóng"></button>
+    <form class="product-dialog-panel" id="product-form">
+      <header class="product-dialog-head"><h2 id="product-dialog-title">Thêm sản phẩm</h2><button type="button" aria-label="Đóng" data-close-product-dialog>×</button></header>
+      <div class="product-form-body">
+        <div class="product-image-field">
+          <label class="product-image-upload" for="product-image-input">
+            <span class="product-image-preview" id="product-image-preview"><span>Ảnh sản phẩm</span><small>PNG, JPG, WebP · tối đa 5 MB</small></span>
+            <input id="product-image-input" type="file" accept="image/png,image/jpeg,image/webp">
+          </label>
+          <button class="product-image-remove hidden" id="product-image-remove" type="button">Xóa ảnh</button>
+        </div>
+        <div class="product-form-grid">
+          <label><span>Tên sản phẩm <b>*</b></span><input id="product-name" maxlength="200" required placeholder="Ví dụ: Granola Túi Xanh" autocomplete="off"></label>
+          <label><span>SKU <b>*</b></span><input id="product-sku" maxlength="80" required placeholder="Ví dụ: GN-XANH-01" autocomplete="off"></label>
+          <label><span>Giá gốc</span><div class="product-price-input"><input id="product-original-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
+          <label><span>Giá bán</span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
+        </div>
+      </div>
+      <p class="product-form-status" id="product-form-status" role="alert"></p>
+      <footer class="product-dialog-actions"><button class="product-secondary-button" type="button" data-close-product-dialog>Hủy</button><button class="product-primary-button" id="product-submit" type="submit">Lưu sản phẩm</button></footer>
+    </form>
   </div>
   <div class="image-lightbox hidden" id="image-lightbox" role="dialog" aria-modal="true" aria-label="Xem ảnh kích thước lớn">
     <button class="image-lightbox-backdrop" type="button" aria-label="Đóng ảnh" data-close-image-lightbox></button>

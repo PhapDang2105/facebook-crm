@@ -11,6 +11,7 @@ import { buildCustomerOrderConfirmation, normalizeCustomerOrder } from './conver
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges } from './chatbot-engine.mjs';
 import { chatbotTemplates } from './chatbot-templates.mjs';
+import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -39,6 +40,8 @@ const root = projectRoot;
 const webRoot = path.join(root, 'web');
 const storePath = path.join(root, 'data', 'processed', 'crm-store.json');
 const chatbotSettingsPath = path.join(root, 'data', 'processed', 'chatbot-settings.json');
+const productsPath = path.join(root, 'data', 'processed', 'products.json');
+const productImagesPath = path.join(root, 'data', 'processed', 'product-images');
 const seedPath = path.join(root, 'database', 'seeds', 'demo-store.json');
 const exportTemplatePath = path.join(root, 'assets', 'templates', 'facebook-order-export.xlsx');
 const metaOauthStates = new Map();
@@ -48,6 +51,7 @@ async function initializeStore() {
   await mkdir(path.dirname(storePath), { recursive: true });
   try { await stat(storePath); } catch { await copyFile(seedPath, storePath); }
   try { await stat(chatbotSettingsPath); } catch { await writeChatbotSettings(defaultChatbotSettings); }
+  try { await stat(productsPath); } catch { await writeProductStore({ items: [], updatedAt: Date.now() }); }
 }
 
 async function readStore() {
@@ -58,6 +62,36 @@ async function writeStore(store) {
   const temporaryPath = `${storePath}.tmp`;
   await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
   await rename(temporaryPath, storePath);
+}
+
+async function readProductStore() {
+  try {
+    return normalizeProductStore(JSON.parse(await readFile(productsPath, 'utf8')));
+  } catch {
+    return { items: [], updatedAt: 0 };
+  }
+}
+
+async function writeProductStore(store) {
+  const normalized = normalizeProductStore(store);
+  normalized.updatedAt = Date.now();
+  const temporaryPath = `${productsPath}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(normalized, null, 2), 'utf8');
+  await rename(temporaryPath, productsPath);
+  return normalized;
+}
+
+async function saveProductImage(dataUrl, productId) {
+  if (!dataUrl) return '';
+  const match = String(dataUrl).match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) throw new Error('Ảnh sản phẩm phải là tệp PNG, JPG hoặc WebP.');
+  const image = Buffer.from(match[2], 'base64');
+  if (!image.length || image.length > 5 * 1024 * 1024) throw new Error('Ảnh sản phẩm phải nhỏ hơn 5 MB.');
+  const extension = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[match[1]];
+  const filename = `${productId}-${Date.now()}.${extension}`;
+  await mkdir(productImagesPath, { recursive: true });
+  await writeFile(path.join(productImagesPath, filename), image);
+  return `/product-images/${filename}`;
 }
 
 function cleanExpiredMetaSessions() {
@@ -280,6 +314,17 @@ async function serveFile(request, response, pathname) {
       return response.end(body);
     } catch { return sendJson(response, 404, { error:'Resource not found.' }); }
   }
+  if (pathname.startsWith('/product-images/')) {
+    const filename = pathname.slice('/product-images/'.length);
+    if (!/^[A-Za-z0-9-]+\.(?:png|jpg|webp)$/.test(filename)) return sendJson(response, 400, { error:'Invalid product image path.' });
+    const imagePath = path.join(productImagesPath, filename);
+    const types = { '.png':'image/png', '.jpg':'image/jpeg', '.webp':'image/webp' };
+    try {
+      const body = await readFile(imagePath);
+      response.writeHead(200, { 'Content-Type':types[path.extname(filename)], 'Cache-Control':'public, max-age=86400' });
+      return response.end(body);
+    } catch { return sendJson(response, 404, { error:'Resource not found.' }); }
+  }
   const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
   const filePath = path.resolve(webRoot, relative);
   if (!filePath.startsWith(path.resolve(webRoot))) return sendJson(response, 400, { error:'Invalid path.' });
@@ -303,6 +348,44 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
     if (request.method === 'GET' && url.pathname === '/api/health') return sendJson(response, 200, { status:'ok', time:new Date().toISOString() });
+    if (request.method === 'GET' && url.pathname === '/api/products') {
+      const store = await readProductStore();
+      const query = String(url.searchParams.get('q') || '').trim().toLocaleLowerCase('vi');
+      const items = query
+        ? store.items.filter(product => `${product.name} ${product.sku}`.toLocaleLowerCase('vi').includes(query))
+        : store.items;
+      return sendJson(response, 200, { items, total: items.length, updatedAt: store.updatedAt });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/products') {
+      const payload = await readBody(request, 8 * 1024 * 1024);
+      const store = await readProductStore();
+      const id = randomUUID();
+      const product = normalizeProduct(payload, { id, createdAt: Date.now(), image: '' });
+      assertUniqueSku(store.items, product.sku);
+      if (payload.imageData) product.image = await saveProductImage(payload.imageData, id);
+      store.items.unshift(product);
+      await writeProductStore(store);
+      return sendJson(response, 201, product);
+    }
+    const productMatch = url.pathname.match(/^\/api\/products\/([^/]+)$/);
+    if (productMatch && ['PUT', 'DELETE'].includes(request.method)) {
+      const store = await readProductStore();
+      const index = store.items.findIndex(product => product.id === productMatch[1]);
+      if (index < 0) return sendJson(response, 404, { error: 'Không tìm thấy sản phẩm.' });
+      if (request.method === 'DELETE') {
+        const [removed] = store.items.splice(index, 1);
+        await writeProductStore(store);
+        return sendJson(response, 200, removed);
+      }
+      const payload = await readBody(request, 8 * 1024 * 1024);
+      const product = normalizeProduct(payload, store.items[index]);
+      assertUniqueSku(store.items, product.sku, product.id);
+      if (payload.removeImage === true) product.image = '';
+      if (payload.imageData) product.image = await saveProductImage(payload.imageData, product.id);
+      store.items[index] = product;
+      await writeProductStore(store);
+      return sendJson(response, 200, product);
+    }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
       const settings = await readChatbotSettings();
       return sendJson(response, 200, {

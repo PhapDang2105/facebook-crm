@@ -108,16 +108,23 @@ const settingsCollapseSidebar = document.querySelector('#settings-collapse-sideb
 const settingsStatus = document.querySelector('#settings-status');
 const chatbotSettingsForm = document.querySelector('#chatbot-settings-form');
 const chatbotSettingsEnabled = document.querySelector('#chatbot-settings-enabled');
-const chatbotSettingsName = document.querySelector('#chatbot-settings-name');
-const chatbotSettingsMode = document.querySelector('#chatbot-settings-mode');
 const chatbotSettingsProvider = document.querySelector('#chatbot-settings-provider');
-const chatbotSettingsEndpoint = document.querySelector('#chatbot-settings-endpoint');
-const chatbotSettingsApiKey = document.querySelector('#chatbot-settings-api-key');
-const chatbotProviderStatus = document.querySelector('#chatbot-provider-status');
-const chatbotProviderBadge = document.querySelector('#chatbot-provider-badge');
+const chatbotSettingsAuthType = document.querySelector('#chatbot-settings-auth-type');
+const chatbotAuthTypeField = document.querySelector('#chatbot-auth-type-field');
+const chatbotSettingsProtocol = document.querySelector('#chatbot-settings-protocol');
+const chatbotProtocolField = document.querySelector('#chatbot-protocol-field');
+const chatbotSettingsDirectEndpoint = document.querySelector('#chatbot-settings-direct-endpoint');
+const chatbotSettingsDirectKey = document.querySelector('#chatbot-settings-direct-key');
+const chatbotSettingsDirectModel = document.querySelector('#chatbot-settings-direct-model');
+const chatbotEndpointLabel = document.querySelector('#chatbot-endpoint-label');
+const chatbotApiKeyLabel = document.querySelector('#chatbot-api-key-label');
+const chatbotSettingsSystemPrompt = document.querySelector('#chatbot-settings-system-prompt');
+const chatbotSettingsMemoryEnabled = document.querySelector('#chatbot-settings-memory-enabled');
+const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
+const chatbotSettingsStructuredOutput = document.querySelector('#chatbot-settings-structured-output');
+const chatbotSettingsRetryCount = document.querySelector('#chatbot-settings-retry-count');
+const chatbotSettingsRetryInterval = document.querySelector('#chatbot-settings-retry-interval');
 const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome');
-const chatbotSettingsHandoff = document.querySelector('#chatbot-settings-handoff');
-const chatbotSettingsStatus = document.querySelector('#chatbot-settings-status');
 const chatbotWorkspaceButtons = [...document.querySelectorAll('[data-chatbot-workspace]')];
 const chatbotWorkspacePanels = [...document.querySelectorAll('[data-chatbot-workspace-panel]')];
 const chatbotTemplateSearch = document.querySelector('#chatbot-template-search');
@@ -144,7 +151,6 @@ let selectedChatbotStep = '';
 const facebookConnectButton = document.querySelector('#facebook-connect-button');
 const zaloConnectButton = document.querySelector('#zalo-connect-button');
 const facebookChannelList = document.querySelector('#facebook-channel-list');
-const facebookWebhookStatus = document.querySelector('#facebook-webhook-status');
 const facebookPageDialog = document.querySelector('#facebook-page-dialog');
 const facebookPageOptions = document.querySelector('#facebook-page-options');
 const facebookPageDialogStatus = document.querySelector('#facebook-page-dialog-status');
@@ -535,25 +541,12 @@ function channelAvatar(channel) {
     : `<span class="channel-item-avatar">${escapeHtml(channel.name.trim().charAt(0).toUpperCase() || 'f')}</span>`;
 }
 
-function renderWebhookStatus(state) {
-  if (!facebookWebhookStatus) return;
-  const missing = Array.isArray(state.missingWebhookConfiguration) ? state.missingWebhookConfiguration : [];
-  const ready = Boolean(state.webhookConfigured);
-  facebookWebhookStatus.innerHTML = `
-    <div class="channel-webhook-head"><span class="channel-connected-dot${ready ? '' : ' warning'}"></span><strong>Webhook Messenger</strong></div>
-    <p class="channel-webhook-url">Callback URL: <code>${escapeHtml(state.webhookUrl || '')}</code></p>
-    ${ready
-      ? '<p class="channel-webhook-hint">Dán URL này kèm Verify Token vào Meta App → Webhooks → Page, rồi đăng ký trường <code>messages</code>.</p>'
-      : `<p class="channel-webhook-hint warning">Chưa đủ cấu hình: ${escapeHtml(missing.join(', '))}. Bổ sung vào tệp <code>.env</code> rồi khởi động lại CRM.</p>`}`;
-}
-
 function renderFacebookChannels(state) {
   const items = Array.isArray(state.items) ? state.items : [];
   if (facebookConnectButton) {
     facebookConnectButton.disabled = false;
     facebookConnectButton.title = '';
   }
-  renderWebhookStatus(state);
   if (!facebookChannelList) return;
   facebookChannelList.innerHTML = items.length ? items.map(channel => {
     const healthy = channel.status === 'connected';
@@ -1754,22 +1747,73 @@ function saveCustomerPanelStore() {
   localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore));
 }
 
+const chatbotProviderProfiles = {
+  vertex: {
+    endpoint: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-2.5-flash:generateContent',
+    model: 'gemini-2.5-flash', endpointLabel: 'Endpoint Vertex AI', keyLabel: 'Access token Vertex AI', keyPlaceholder: 'Nhập access token Google Cloud'
+  },
+  deepseek: {
+    endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash', endpointLabel: 'Endpoint DeepSeek', keyLabel: 'Khóa API DeepSeek', keyPlaceholder: 'Nhập khóa API DeepSeek'
+  },
+  custom: {
+    endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini', endpointLabel: 'Endpoint API', keyLabel: 'Khóa API', keyPlaceholder: 'Nhập khóa API của nhà cung cấp'
+  }
+};
+
+const chatbotAnthropicProfile = {
+  endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-sonnet-4-6', endpointLabel: 'Endpoint Anthropic', keyLabel: 'Khóa API Anthropic', keyPlaceholder: 'Nhập khóa API Anthropic'
+};
+
+function getChatbotProviderProfile() {
+  if (chatbotSettingsProvider?.value === 'custom' && chatbotSettingsProtocol?.value === 'anthropic') return chatbotAnthropicProfile;
+  return chatbotProviderProfiles[chatbotSettingsProvider?.value] || chatbotProviderProfiles.vertex;
+}
+
+function renderChatbotProvider(resetValues = false) {
+  const profile = getChatbotProviderProfile();
+  const vertex = chatbotSettingsProvider?.value === 'vertex';
+  const custom = chatbotSettingsProvider?.value === 'custom';
+  chatbotAuthTypeField?.classList.toggle('hidden', !vertex);
+  chatbotProtocolField?.classList.toggle('hidden', !custom);
+  if (chatbotEndpointLabel) chatbotEndpointLabel.textContent = profile.endpointLabel;
+  if (chatbotApiKeyLabel) chatbotApiKeyLabel.textContent = vertex && chatbotSettingsAuthType?.value === 'api_key' ? 'Google Cloud API key' : profile.keyLabel;
+  if (chatbotSettingsDirectEndpoint) chatbotSettingsDirectEndpoint.placeholder = profile.endpoint;
+  if (chatbotSettingsDirectModel) chatbotSettingsDirectModel.placeholder = profile.model;
+  if (chatbotSettingsDirectKey && !chatbotSettingsDirectKey.value) {
+    chatbotSettingsDirectKey.placeholder = vertex && chatbotSettingsAuthType?.value === 'api_key' ? 'Nhập Google Cloud API key' : profile.keyPlaceholder;
+  }
+  if (resetValues) {
+    chatbotSettingsDirectEndpoint.value = profile.endpoint;
+    chatbotSettingsDirectModel.value = profile.model;
+    chatbotSettingsDirectKey.value = '';
+  }
+}
+
+chatbotSettingsProvider?.addEventListener('change', () => renderChatbotProvider(true));
+chatbotSettingsAuthType?.addEventListener('change', () => renderChatbotProvider());
+chatbotSettingsProtocol?.addEventListener('change', () => renderChatbotProvider(true));
+
 async function loadChatbotSettings() {
   if (!chatbotSettingsForm) return;
-  if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = 'Đang tải thiết lập...';
   try {
     const settings = await readApiResponse(await fetch('/api/chatbot/settings'));
     chatbotSettingsEnabled.checked = settings.enabled === true;
-    chatbotSettingsName.value = settings.name || 'Trợ lý Giọt Nắng';
-    chatbotSettingsMode.value = settings.responseMode === 'automatic' ? 'automatic' : 'draft';
-    chatbotSettingsProvider.value = settings.provider || 'dify';
-    chatbotSettingsEndpoint.value = settings.endpoint || 'https://api.dify.ai/v1/chat-messages';
-    chatbotSettingsApiKey.value = '';
-    chatbotSettingsApiKey.placeholder = settings.apiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : 'app-••••••••';
-    if (chatbotProviderStatus) chatbotProviderStatus.textContent = settings.apiKeyConfigured ? 'Đã kết nối Dify trực tiếp với CRM' : 'Chưa nhập khóa API Dify';
-    if (chatbotProviderBadge) chatbotProviderBadge.textContent = settings.apiKeyConfigured ? 'Đã cấu hình' : 'Chưa kết nối';
+    chatbotSettingsProvider.value = settings.provider || 'vertex';
+    chatbotSettingsAuthType.value = settings.directAuthType === 'api_key' ? 'api_key' : 'access_token';
+    chatbotSettingsProtocol.value = settings.directProtocol === 'anthropic' ? 'anthropic' : 'openai';
+    renderChatbotProvider();
+    const profile = getChatbotProviderProfile();
+    chatbotSettingsDirectEndpoint.value = settings.directEndpoint || profile.endpoint;
+    chatbotSettingsDirectModel.value = settings.directModel || profile.model;
+    chatbotSettingsDirectKey.value = '';
+    chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
+    chatbotSettingsSystemPrompt.value = settings.systemPrompt || '';
+    chatbotSettingsMemoryEnabled.checked = settings.memoryEnabled !== false;
+    chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
+    chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;
+    chatbotSettingsRetryCount.value = settings.retryCount ?? 1;
+    chatbotSettingsRetryInterval.value = settings.retryIntervalMs || 1000;
     chatbotSettingsWelcome.value = settings.welcomeMessage || '';
-    chatbotSettingsHandoff.value = settings.handoffKeywords || '';
     chatbotTemplatesState = { ...(settings.templates || {}) };
     chatbotOriginalTemplates = { ...(settings.templates || {}) };
     chatbotProcessingSteps = Array.isArray(settings.processingSteps) ? settings.processingSteps.map(step => ({ ...step })) : [];
@@ -1783,9 +1827,8 @@ async function loadChatbotSettings() {
     renderChatbotTemplateEditor();
     renderChatbotWorkflow();
     renderChatbotStepEditor();
-    if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = '';
   } catch (error) {
-    if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = error.message || 'Chưa tải được thiết lập chatbot.';
+    showToast(error.message || 'Chưa tải được thiết lập chatbot.', 'error');
   }
 }
 
@@ -1824,15 +1867,12 @@ function renderChatbotTemplateEditor() {
 function renderChatbotWorkflow() {
   if (!chatbotWorkflow) return;
   const icons = {
-    webhook: '/assets/icons/webhook.svg',
     message_normalizer: '/assets/icons/bot-chat.svg',
     product_extractor: '/assets/icons/data-process.svg',
     customer_extractor: '/assets/icons/person.svg',
     context_merge: '/assets/icons/merge.svg',
-    dify: '/assets/icons/ai-model.svg',
     template_renderer: '/assets/icons/bot-chat.svg',
-    duplicate_guard: '/assets/icons/safety-check.svg',
-    meta_sender: '/assets/icons/send-message.svg'
+    duplicate_guard: '/assets/icons/safety-check.svg'
   };
   chatbotWorkflow.innerHTML = chatbotProcessingSteps.map(step => `
     <div class="chatbot-workflow-node ${step.id === selectedChatbotStep ? 'active' : ''}" data-type="${escapeHtml(step.type)}" data-chatbot-step-node="${escapeHtml(step.id)}" role="button" tabindex="0">
@@ -3949,7 +3989,6 @@ chatbotTemplateApply?.addEventListener('click', () => {
   if (!selectedChatbotTemplate) return;
   chatbotTemplatesState[selectedChatbotTemplate] = chatbotTemplateActive.checked ? chatbotTemplateContent.value.trim() : '';
   renderChatbotTemplateList();
-  showToast('Đã áp dụng nội dung. Bấm “Lưu thiết lập” để lưu lên máy chủ.', 'success');
 });
 
 chatbotTemplateReset?.addEventListener('click', () => {
@@ -3986,7 +4025,6 @@ chatbotStepCodeApply?.addEventListener('click', () => {
   const step = chatbotProcessingSteps.find(item => item.id === selectedChatbotStep);
   if (!step) return;
   step.code = chatbotStepCode.value;
-  showToast('Đã áp dụng mã. Bấm “Lưu thiết lập” để lưu lên máy chủ.', 'success');
 });
 
 chatbotStepCode?.addEventListener('input', () => {
@@ -4004,35 +4042,39 @@ chatbotStepCode?.addEventListener('keydown', event => {
 
 chatbotSettingsForm?.addEventListener('submit', async event => {
   event.preventDefault();
-  const submit = chatbotSettingsForm.querySelector('button[type="submit"]');
+  const submit = event.submitter || chatbotSettingsForm.querySelector('button[type="submit"]');
   submit.disabled = true;
-  if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = 'Đang lưu...';
   try {
     const settings = await readApiResponse(await fetch('/api/chatbot/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enabled: chatbotSettingsEnabled.checked,
-        name: chatbotSettingsName.value,
-        responseMode: chatbotSettingsMode.value,
+        responseMode: 'automatic',
         provider: chatbotSettingsProvider.value,
-        endpoint: chatbotSettingsEndpoint.value,
-        apiKey: chatbotSettingsApiKey.value,
+        directAuthType: chatbotSettingsAuthType.value,
+        directProtocol: chatbotSettingsProtocol.value,
+        directEndpoint: chatbotSettingsDirectEndpoint.value,
+        directApiKey: chatbotSettingsDirectKey.value,
+        directModel: chatbotSettingsDirectModel.value,
+        systemPrompt: chatbotSettingsSystemPrompt.value,
+        memoryEnabled: chatbotSettingsMemoryEnabled.checked,
+        memoryWindow: chatbotSettingsMemoryWindow.value,
+        structuredOutput: chatbotSettingsStructuredOutput.checked,
+        retryCount: chatbotSettingsRetryCount.value,
+        retryIntervalMs: chatbotSettingsRetryInterval.value,
         welcomeMessage: chatbotSettingsWelcome.value,
-        handoffKeywords: chatbotSettingsHandoff.value,
+        handoffKeywords: '',
         messageTemplates: chatbotTemplatesState,
         processingSteps: chatbotProcessingSteps
       })
     }));
     chatbotSettingsEnabled.checked = settings.enabled === true;
-    chatbotSettingsApiKey.value = '';
-    chatbotSettingsApiKey.placeholder = settings.apiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : 'app-••••••••';
-    if (chatbotProviderStatus) chatbotProviderStatus.textContent = settings.apiKeyConfigured ? 'Đã kết nối Dify trực tiếp với CRM' : 'Chưa nhập khóa API Dify';
-    if (chatbotProviderBadge) chatbotProviderBadge.textContent = settings.apiKeyConfigured ? 'Đã cấu hình' : 'Chưa kết nối';
-    if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = 'Đã lưu thiết lập chatbot.';
-    showToast('Đã lưu thiết lập chatbot.', 'success');
+    chatbotSettingsDirectKey.value = '';
+    const profile = getChatbotProviderProfile();
+    chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
   } catch (error) {
-    if (chatbotSettingsStatus) chatbotSettingsStatus.textContent = error.message || 'Chưa lưu được thiết lập chatbot.';
+    showToast(error.message || 'Chưa lưu được thiết lập chatbot.', 'error');
   } finally {
     submit.disabled = false;
   }

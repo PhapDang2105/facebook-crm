@@ -87,8 +87,8 @@ function publicCustomerPanel(conversation) {
 async function readChatbotSettings() {
   try {
     const stored = JSON.parse(await readFile(chatbotSettingsPath, 'utf8'));
-    const apiKey = stored.apiKeyEncrypted ? decryptToken(stored.apiKeyEncrypted) : stored.apiKey;
-    return normalizeChatbotSettings({ ...stored, apiKey });
+    const directApiKey = stored.directApiKeyEncrypted ? decryptToken(stored.directApiKeyEncrypted) : stored.directApiKey;
+    return normalizeChatbotSettings({ ...stored, directApiKey });
   } catch {
     return normalizeChatbotSettings(defaultChatbotSettings);
   }
@@ -96,8 +96,11 @@ async function readChatbotSettings() {
 
 async function writeChatbotSettings(settings) {
   const normalized = normalizeChatbotSettings(settings);
-  const { apiKey, ...safeSettings } = normalized;
-  const stored = { ...safeSettings, ...(apiKey ? { apiKeyEncrypted: encryptToken(apiKey) } : {}) };
+  const { directApiKey, ...safeSettings } = normalized;
+  const stored = {
+    ...safeSettings,
+    ...(directApiKey ? { directApiKeyEncrypted: encryptToken(directApiKey) } : {})
+  };
   const temporaryPath = `${chatbotSettingsPath}.tmp`;
   await writeFile(temporaryPath, JSON.stringify(stored, null, 2), 'utf8');
   await rename(temporaryPath, chatbotSettingsPath);
@@ -310,12 +313,13 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
       const current = await readChatbotSettings();
       const payload = await readBody(request);
-      const endpoint = String(payload.endpoint || current.endpoint || '');
-      if (!endpoint.startsWith('https://')) return sendJson(response, 400, { error: 'Địa chỉ Dify phải bắt đầu bằng https://.' });
+      const directEndpoint = String(payload.directEndpoint || current.directEndpoint || '');
+      if (!directEndpoint.startsWith('https://')) return sendJson(response, 400, { error: 'Endpoint AI phải bắt đầu bằng https://.' });
+      const providerChanged = payload.provider && payload.provider !== current.provider;
       const settings = await writeChatbotSettings({
         ...current,
         ...payload,
-        apiKey: String(payload.apiKey || '').trim() || current.apiKey,
+        directApiKey: String(payload.directApiKey || '').trim() || (providerChanged ? '' : current.directApiKey),
         updatedAt: Date.now()
       });
       return sendJson(response, 200, {

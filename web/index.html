@@ -43,6 +43,7 @@
       <div class="settings-subnav" aria-label="Chức năng cài đặt">
         <button class="settings-subnav-item active" type="button" data-settings-section="channels">Kênh</button>
         <button class="settings-subnav-item" type="button" data-settings-section="chatbot">Thiết lập chatbot</button>
+        <button class="settings-subnav-item" type="button" data-settings-section="products">Sản phẩm</button>
       </div>
     </nav>
   </aside>
@@ -238,7 +239,6 @@
               <button class="channel-connect-button" id="facebook-connect-button" type="button">Kết nối Facebook</button>
             </div>
             <div class="channel-list" id="facebook-channel-list" aria-live="polite"><p class="channel-empty">Đang tải danh sách kênh...</p></div>
-            <div class="channel-webhook" id="facebook-webhook-status" aria-live="polite"></div>
             <div class="channel-summary">
               <div class="channel-summary-platform"><img class="channel-platform-logo zalo-badge" src="/assets/icons/zalo.png" alt=""><strong>Zalo</strong></div>
               <button class="channel-connect-button" id="zalo-connect-button" type="button">Kết nối Zalo</button>
@@ -250,7 +250,6 @@
           <form class="settings-card chatbot-settings-card" id="chatbot-settings-form">
             <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1></div><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label></header>
             <div class="chatbot-settings-body">
-              <div class="chatbot-status-card"><img src="/assets/icons/smart-toy.svg" alt=""><div><strong>Chatbot Giọt Nắng</strong></div><em id="chatbot-provider-badge">Chưa kết nối</em></div>
               <nav class="chatbot-workspace-tabs" aria-label="Khu vực thiết lập chatbot">
                 <button class="active" type="button" data-chatbot-workspace="messages"><img src="/assets/icons/bot-chat.svg" alt=""><b>Thiết lập tin nhắn</b></button>
                 <button type="button" data-chatbot-workspace="processing"><img src="/assets/icons/workflow.svg" alt=""><b>Thiết lập xử lý</b></button>
@@ -270,7 +269,7 @@
                   <div class="chatbot-template-editor">
                     <div class="chatbot-template-editor-head"><div><small>Mã mẫu tin</small><strong id="chatbot-template-id">Chọn một mẫu tin</strong></div><label class="chatbot-template-active"><input id="chatbot-template-active" type="checkbox" checked><span></span>Đang sử dụng</label></div>
                     <label class="chatbot-field"><span>Nội dung trả lời</span><textarea id="chatbot-template-content" rows="13" maxlength="12000" placeholder="Chọn một mẫu ở danh sách bên trái để chỉnh sửa"></textarea></label>
-                    <div class="chatbot-template-actions"><button id="chatbot-template-reset" type="button">Khôi phục mẫu gốc</button><button class="settings-save-button" id="chatbot-template-apply" type="button">Áp dụng nội dung</button></div>
+                    <div class="chatbot-template-actions"><button id="chatbot-template-reset" type="button">Khôi phục mẫu gốc</button><button class="settings-save-button" id="chatbot-template-apply" type="submit">Áp dụng nội dung</button></div>
                   </div>
                 </div>
               </section>
@@ -281,33 +280,46 @@
                     <div class="chatbot-workflow" id="chatbot-workflow"></div>
                   </div>
                   <div class="chatbot-processing-config chatbot-processing-code">
-                    <div class="chatbot-section-heading"><img src="/assets/icons/data-process.svg" alt=""><strong>Mã xử lý</strong></div>
                     <section class="chatbot-code-editor">
                       <div class="chatbot-code-editor-head"><img src="/assets/icons/data-process.svg" alt=""><strong id="chatbot-step-code-title">Chọn một bước xử lý</strong></div>
                       <textarea id="chatbot-step-code" rows="14" maxlength="30000" spellcheck="false" placeholder="Bấm vào một bước bên trái để chỉnh sửa mã"></textarea>
-                      <button class="settings-save-button" id="chatbot-step-code-apply" type="button">Áp dụng mã</button>
+                      <button class="settings-save-button" id="chatbot-step-code-apply" type="submit">Áp dụng mã</button>
                     </section>
                   </div>
                 </div>
               </section>
               <section class="chatbot-workspace-panel hidden" data-chatbot-workspace-panel="general">
                 <div class="chatbot-general-config">
-                  <div class="chatbot-section-heading"><img src="/assets/icons/tune.svg" alt=""><strong>Cấu hình chung</strong></div>
-                  <div class="chatbot-settings-grid">
-                    <label class="chatbot-field"><span>Tên chatbot</span><input id="chatbot-settings-name" maxlength="100" placeholder="Trợ lý Giọt Nắng"></label>
-                    <label class="chatbot-field"><span>Chế độ phản hồi</span><select id="chatbot-settings-mode"><option value="draft">Gợi ý để nhân viên duyệt</option><option value="automatic">Tự động trả lời</option></select></label>
-                    <label class="chatbot-field"><span>Nền tảng AI</span><select id="chatbot-settings-provider"><option value="dify">Dify – GONA Việt Nam Version 2</option></select></label>
-                    <label class="chatbot-field"><span>Địa chỉ API Dify</span><input id="chatbot-settings-endpoint" type="url" maxlength="500" placeholder="https://api.dify.ai/v1/chat-messages"></label>
+                  <div class="chatbot-ai-overview">
+                    <span class="chatbot-ai-overview-icon"><img src="/assets/icons/ai-model.svg" alt=""></span>
+                    <div><strong>Mô hình AI</strong></div>
                   </div>
-                  <label class="chatbot-field"><span>Khóa API Dify</span><input id="chatbot-settings-api-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="app-••••••••"></label>
-                  <label class="chatbot-field"><span>Từ khóa chuyển cho nhân viên</span><input id="chatbot-settings-handoff" maxlength="1000" placeholder="gặp nhân viên, tư vấn viên, khiếu nại"></label>
+                  <div class="chatbot-provider-card" id="chatbot-direct-config">
+                    <div class="chatbot-settings-grid">
+                      <label class="chatbot-field"><span>Nhà cung cấp mô hình</span><select id="chatbot-settings-provider"><option value="vertex">Google Vertex AI</option><option value="deepseek">DeepSeek</option><option value="custom">+ Khác</option></select></label>
+                      <label class="chatbot-field"><span>Tên model</span><input id="chatbot-settings-direct-model" maxlength="200" placeholder="gemini-2.5-flash"></label>
+                      <label class="chatbot-field" id="chatbot-auth-type-field"><span>Kiểu xác thực</span><select id="chatbot-settings-auth-type"><option value="access_token">OAuth 2.0 access token</option><option value="api_key">Google Cloud API key</option></select></label>
+                      <label class="chatbot-field hidden" id="chatbot-protocol-field"><span>Giao thức API</span><select id="chatbot-settings-protocol"><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label>
+                    </div>
+                    <label class="chatbot-field"><span id="chatbot-endpoint-label">Endpoint Vertex AI</span><input id="chatbot-settings-direct-endpoint" type="url" maxlength="500" placeholder="https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-2.5-flash:generateContent"></label>
+                    <label class="chatbot-field"><span id="chatbot-api-key-label">Access token Vertex AI</span><input id="chatbot-settings-direct-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="Nhập access token Google Cloud"></label>
+                  </div>
+                  <div class="chatbot-llm-card">
+                    <label class="chatbot-field"><span>System prompt</span><textarea id="chatbot-settings-system-prompt" rows="12" maxlength="30000" placeholder="Nhập chỉ dẫn hệ thống cho model..."></textarea></label>
+                    <div class="chatbot-llm-options">
+                      <div class="chatbot-option-group"><label class="chatbot-option-check"><input id="chatbot-settings-memory-enabled" type="checkbox" checked><span>Bộ nhớ hội thoại</span></label><label class="chatbot-mini-field"><span>Cửa sổ</span><input id="chatbot-settings-memory-window" type="number" min="1" max="100" value="50"></label></div>
+                      <div class="chatbot-option-group chatbot-option-group--single"><label class="chatbot-option-check"><input id="chatbot-settings-structured-output" type="checkbox" checked><span>JSON có cấu trúc</span></label></div>
+                      <div class="chatbot-option-group"><label class="chatbot-mini-field"><span>Thử lại</span><input id="chatbot-settings-retry-count" type="number" min="0" max="5" value="1"></label><label class="chatbot-mini-field"><span>Khoảng nghỉ (ms)</span><input id="chatbot-settings-retry-interval" type="number" min="100" max="10000" step="100" value="1000"></label></div>
+                    </div>
+                  </div>
                 </div>
               </section>
               <textarea id="chatbot-settings-welcome" class="hidden" aria-hidden="true"></textarea>
             </div>
-            <footer class="chatbot-settings-footer"><span id="chatbot-settings-status" role="status"></span><button class="settings-save-button" type="submit">Lưu thiết lập</button></footer>
+            <footer class="chatbot-settings-footer"><button class="settings-save-button" type="submit">Lưu cấu hình AI</button></footer>
           </form>
         </section>
+        <section class="settings-section-content hidden" data-settings-panel="products"></section>
       </div>
     </section>
   </main>

@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from '../app/chatbot-settings.mjs';
 
-test('chatbot mặc định ở chế độ gợi ý và chưa hoạt động', () => {
+test('chatbot mặc định gọi Vertex AI trực tiếp và chưa hoạt động', () => {
   const settings = normalizeChatbotSettings();
   assert.equal(settings.enabled, false);
-  assert.equal(settings.responseMode, 'draft');
+  assert.equal(settings.responseMode, 'automatic');
   assert.equal(settings.name, defaultChatbotSettings.name);
-  assert.equal(settings.processingSteps.length, 9);
+  assert.equal(settings.provider, 'vertex');
+  assert.equal(settings.memoryWindow, 50);
+  assert.equal(settings.retryCount, 1);
+  assert.equal(settings.processingSteps.length, 6);
 });
 
 test('chuẩn hóa cấu hình chatbot trước khi lưu', () => {
@@ -15,7 +18,7 @@ test('chuẩn hóa cấu hình chatbot trước khi lưu', () => {
     enabled: true,
     name: '  Bot bán hàng  ',
     responseMode: 'automatic',
-    endpoint: 'https://api.dify.ai/v1/chat-messages',
+    directEndpoint: 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/publishers/google/models/gemini-2.5-flash:generateContent',
     apiKey: 'app-secret',
     welcomeMessage: '  Xin chào  ',
     handoffKeywords: '  gặp người thật  '
@@ -38,17 +41,49 @@ test('chuẩn hóa cấu hình chatbot trước khi lưu', () => {
 test('không trả khóa API về trình duyệt', () => {
   const settings = publicChatbotSettings({ apiKey: 'app-secret' });
   assert.equal(settings.apiKeyConfigured, true);
-  assert.equal('apiKey' in settings, false);
+  assert.equal(settings.directApiKeyConfigured, true);
+  assert.equal('directApiKey' in settings, false);
+});
+
+test('lưu cấu hình nhà cung cấp mô hình trực tiếp', () => {
+  const settings = normalizeChatbotSettings({
+    provider: 'deepseek',
+    directApiKey: 'deepseek-token',
+    directEndpoint: 'https://api.deepseek.com/chat/completions',
+    directModel: 'deepseek-v4-flash',
+    systemPrompt: 'Chỉ trả JSON',
+    memoryWindow: 30,
+    retryCount: 2
+  });
+  assert.equal(settings.provider, 'deepseek');
+  assert.equal(settings.directApiKey, 'deepseek-token');
+  assert.equal(settings.directModel, 'deepseek-v4-flash');
+  assert.equal(settings.systemPrompt, 'Chỉ trả JSON');
+  assert.equal(settings.memoryWindow, 30);
+  assert.equal(settings.retryCount, 2);
+});
+
+test('hỗ trợ nhà cung cấp và giao thức tùy chọn để mở rộng', () => {
+  const settings = normalizeChatbotSettings({
+    provider: 'custom',
+    directProtocol: 'anthropic',
+    directEndpoint: 'https://api.anthropic.com/v1/messages',
+    directModel: 'claude-sonnet-4-6'
+  });
+  assert.equal(settings.provider, 'custom');
+  assert.equal(settings.directProtocol, 'anthropic');
+  assert.equal(settings.directEndpoint, 'https://api.anthropic.com/v1/messages');
+  assert.equal(settings.directModel, 'claude-sonnet-4-6');
 });
 
 test('chuẩn hóa mẫu tin và trạng thái từng bước xử lý', () => {
   const settings = normalizeChatbotSettings({
     messageTemplates: { WELCOME: '  Xin chào mới  ' },
-    processingSteps: [{ id: 'dify', enabled: false, code: 'return input.answer;' }]
+    processingSteps: [{ id: 'duplicate_guard', enabled: false, code: 'return input.signature;' }]
   });
   assert.equal(settings.messageTemplates.WELCOME, 'Xin chào mới');
-  assert.equal(settings.processingSteps.find(step => step.id === 'dify').enabled, false);
-  assert.equal(settings.processingSteps.find(step => step.id === 'dify').code, 'return input.answer;');
-  assert.equal(settings.processingSteps.find(step => step.id === 'webhook').enabled, true);
-  assert.match(settings.processingSteps.find(step => step.id === 'webhook').code, /receivedAt/);
+  assert.equal(settings.processingSteps.find(step => step.id === 'duplicate_guard').enabled, false);
+  assert.equal(settings.processingSteps.find(step => step.id === 'duplicate_guard').code, 'return input.signature;');
+  assert.equal(settings.processingSteps.find(step => step.id === 'message_normalizer').enabled, true);
+  assert.match(settings.processingSteps.find(step => step.id === 'message_normalizer').code, /trim/);
 });

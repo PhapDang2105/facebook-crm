@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildChatbotQuery, parseDifyAnswer, processChatbotChanges, requestDifyReply } from '../app/chatbot-engine.mjs';
+import { buildChatbotQuery, parseModelAnswer, processChatbotChanges, requestDirectModelReply } from '../app/chatbot-engine.mjs';
 import { renderChatbotReply } from '../app/chatbot-templates.mjs';
 
-test('đọc JSON có hàng rào markdown từ Dify', () => {
-  assert.equal(parseDifyAnswer('```json\n{"template_id":"WELCOME"}\n```').template_id, 'WELCOME');
-  assert.equal(parseDifyAnswer('không hợp lệ').template_id, 'CSKH_HANDOFF');
+test('đọc JSON có hàng rào markdown từ mô hình', () => {
+  assert.equal(parseModelAnswer('```json\n{"template_id":"WELCOME"}\n```').template_id, 'WELCOME');
+  assert.equal(parseModelAnswer('không hợp lệ').template_id, 'CSKH_HANDOFF');
 });
 
-test('ngữ cảnh gửi Dify có lịch sử và tin nhắn hiện tại', () => {
+test('ngữ cảnh gửi mô hình có lịch sử và tin nhắn hiện tại', () => {
   const query = buildChatbotQuery({
     conversation: { name: 'Lan Anh' },
     message: { text: 'Túi xanh giá bao nhiêu?' },
@@ -20,19 +20,84 @@ test('ngữ cảnh gửi Dify có lịch sử và tin nhắn hiện tại', () =
   assert.match(query, /Túi xanh giá bao nhiêu/);
 });
 
-test('gọi Dify và chuyển template thành tin nhắn', async () => {
-  const reply = await requestDifyReply({
-    settings: { apiKey: 'secret', endpoint: 'https://api.dify.ai/v1/chat-messages' },
+test('gọi Gemini trực tiếp trên Vertex AI', async () => {
+  const reply = await requestDirectModelReply({
+    settings: {
+      provider: 'vertex',
+      directApiKey: 'google-token',
+      directEndpoint: 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/publishers/google/models/gemini-2.5-flash:generateContent',
+      directModel: 'gemini-2.5-flash',
+      systemPrompt: 'Chỉ trả JSON',
+      structuredOutput: true,
+      retryCount: 0,
+      messageTemplates: {}
+    },
     conversation: { psid: '123', name: 'Khách' },
     message: { type: 'text', text: 'xin chào' },
-    fetchImpl: async (_url, options) => {
-      assert.equal(options.headers.Authorization, 'Bearer secret');
-      return { ok: true, json: async () => ({ answer: '{"template_id":"WELCOME"}', conversation_id: 'dify-1' }) };
+    fetchImpl: async (url, options) => {
+      assert.equal(url, 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/publishers/google/models/gemini-2.5-flash:generateContent');
+      assert.equal(options.headers.Authorization, 'Bearer google-token');
+      const body = JSON.parse(options.body);
+      assert.equal(body.systemInstruction.parts[0].text, 'Chỉ trả JSON');
+      assert.equal(body.contents[0].role, 'user');
+      assert.equal(body.generationConfig.responseMimeType, 'application/json');
+      return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"template_id":"WELCOME"}' }] } }] }) };
     }
   });
   assert.equal(reply.templateId, 'WELCOME');
-  assert.equal(reply.conversationId, 'dify-1');
-  assert.match(reply.messages[0], /Giọt Nắng xin chào/);
+});
+
+test('gọi DeepSeek trực tiếp bằng API OpenAI-compatible', async () => {
+  const reply = await requestDirectModelReply({
+    settings: {
+      provider: 'deepseek', directApiKey: 'deepseek-token', directEndpoint: 'https://api.deepseek.com/chat/completions',
+      directModel: 'deepseek-v4-flash', systemPrompt: 'Chỉ trả JSON', structuredOutput: true, retryCount: 0, messageTemplates: {}
+    },
+    conversation: { psid: '123', name: 'Khách' },
+    message: { type: 'text', text: 'xin chào' },
+    fetchImpl: async (url, options) => {
+      assert.equal(url, 'https://api.deepseek.com/chat/completions');
+      assert.equal(options.headers.Authorization, 'Bearer deepseek-token');
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, 'deepseek-v4-flash');
+      assert.equal(body.messages[0].role, 'system');
+      assert.deepEqual(body.response_format, { type: 'json_object' });
+      return { ok: true, json: async () => ({ choices: [{ message: { content: '{"template_id":"WELCOME"}' } }] }) };
+    }
+  });
+  assert.equal(reply.templateId, 'WELCOME');
+});
+
+test('gọi Claude bằng giao thức Anthropic Messages', async () => {
+  const reply = await requestDirectModelReply({
+    settings: {
+      provider: 'custom', directProtocol: 'anthropic', directApiKey: 'anthropic-token',
+      directEndpoint: 'https://api.anthropic.com/v1/messages', directModel: 'claude-sonnet-4-6',
+      systemPrompt: 'Chỉ trả JSON', retryCount: 0, messageTemplates: {}
+    },
+    conversation: { psid: '123', name: 'Khách' },
+    message: { type: 'text', text: 'xin chào' },
+    fetchImpl: async (url, options) => {
+      assert.equal(url, 'https://api.anthropic.com/v1/messages');
+      assert.equal(options.headers['x-api-key'], 'anthropic-token');
+      assert.equal(options.headers['anthropic-version'], '2023-06-01');
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, 'claude-sonnet-4-6');
+      assert.equal(body.system, 'Chỉ trả JSON');
+      return { ok: true, json: async () => ({ content: [{ type: 'text', text: '{"template_id":"WELCOME"}' }] }) };
+    }
+  });
+  assert.equal(reply.templateId, 'WELCOME');
+});
+
+test('tắt bộ nhớ không đưa lịch sử vào câu hỏi model', () => {
+  const query = buildChatbotQuery({
+    conversation: { name: 'Khách' },
+    message: { text: 'tin hiện tại' },
+    recentMessages: [{ direction: 'incoming', text: 'tin cũ' }],
+    settings: { memoryEnabled: false }
+  });
+  assert.doesNotMatch(query, /tin cũ/);
 });
 
 test('chỉ tự trả lời khi cả hệ thống và hội thoại đều bật bot', async () => {
@@ -43,15 +108,15 @@ test('chỉ tự trả lời khi cả hệ thống và hội thoại đều bậ
     conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true },
     message: { direction: 'incoming', type: 'text', text: 'xin chào' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', apiKey: 'secret', endpoint: 'https://api.dify.ai/v1/chat-messages', handoffKeywords: '' }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', provider: 'vertex', directApiKey: 'secret', handoffKeywords: '' }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => sent.push(message.text),
     saveBotState: async (_id, value) => state.push(value),
-    requestReply: async () => ({ templateId: 'WELCOME', messages: ['Xin chào'], conversationId: 'dify-1', handoff: false })
+    requestReply: async () => ({ templateId: 'WELCOME', messages: ['Xin chào'], conversationId: '', handoff: false })
   });
   assert.equal(result[0].templateId, 'WELCOME');
   assert.deepEqual(sent, ['Xin chào']);
-  assert.equal(state[0].botConversationId, 'dify-1');
+  assert.equal(state[0].botConversationId, '');
 });
 
 test('xác nhận đơn dùng giá nội bộ khi đủ dữ liệu', () => {

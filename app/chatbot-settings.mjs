@@ -1,23 +1,29 @@
 export const defaultChatbotSettings = Object.freeze({
   enabled: false,
   name: 'Trợ lý Giọt Nắng',
-  responseMode: 'draft',
-  provider: 'dify',
-  endpoint: 'https://api.dify.ai/v1/chat-messages',
-  apiKey: '',
+  responseMode: 'automatic',
+  provider: 'vertex',
+  directEndpoint: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-2.5-flash:generateContent',
+  directApiKey: '',
+  directAuthType: 'access_token',
+  directProtocol: 'vertex',
+  directModel: 'gemini-2.5-flash',
+  systemPrompt: '',
+  memoryEnabled: true,
+  memoryWindow: 50,
+  structuredOutput: true,
+  retryCount: 1,
+  retryIntervalMs: 1000,
   welcomeMessage: '',
-  handoffKeywords: 'gặp nhân viên, tư vấn viên, khiếu nại',
+  handoffKeywords: '',
   messageTemplates: {},
   processingSteps: [
-    { id: 'webhook', name: 'Webhook Facebook', type: 'trigger', enabled: true, code: "return { ...input, receivedAt: Date.now() };" },
     { id: 'message_normalizer', name: 'Xử lý bình luận và tin nhắn', type: 'transform', enabled: true, code: "const text = String(input.message?.text || '').trim();\nreturn { ...input, text };" },
     { id: 'product_extractor', name: 'Xử lý sản phẩm', type: 'transform', enabled: true, code: "const products = ['Túi Xanh', 'Túi Vàng', 'Túi Nâu'];\nreturn { ...input, products: products.filter(name => input.text?.includes(name)) };" },
     { id: 'customer_extractor', name: 'Xử lý xưng hô và số điện thoại', type: 'transform', enabled: true, code: "const phone = input.text?.match(/(?:\\+84|0)\\d{9}/)?.[0] || '';\nreturn { ...input, phone };" },
     { id: 'context_merge', name: 'Gộp dữ liệu đầu vào', type: 'merge', enabled: true, code: "return { ...input, context: { ...input.customer, ...input.conversation } };" },
-    { id: 'dify', name: 'Gọi Dify AI', type: 'ai', enabled: true, code: "return { query: input.text, inputs: input.context, user: input.senderId };" },
     { id: 'template_renderer', name: 'Hậu xử lý mẫu tin', type: 'transform', enabled: true, code: "return { ...input, reply: String(input.answer || '').trim() };" },
-    { id: 'duplicate_guard', name: 'Chặn phản hồi trùng', type: 'guard', enabled: true, code: "return { ...input, signature: `${input.senderId}:${input.reply}` };" },
-    { id: 'meta_sender', name: 'Gửi trả Facebook', type: 'output', enabled: true, code: "return { recipient: input.senderId, message: { text: input.reply } };" }
+    { id: 'duplicate_guard', name: 'Chặn phản hồi trùng', type: 'guard', enabled: true, code: "return { ...input, signature: `${input.senderId}:${input.reply}` };" }
   ]
 });
 
@@ -27,7 +33,21 @@ function cleanText(value, fallback, maximumLength) {
 }
 
 export function normalizeChatbotSettings(value = {}) {
-  const responseMode = value.responseMode === 'automatic' ? 'automatic' : 'draft';
+  const responseMode = 'automatic';
+  const requestedProvider = value.provider === 'openai_compatible' ? 'custom' : value.provider;
+  const provider = ['vertex', 'deepseek', 'custom'].includes(requestedProvider) ? requestedProvider : 'vertex';
+  const directProtocol = provider === 'vertex' ? 'vertex' : provider === 'deepseek' ? 'openai' : value.directProtocol === 'anthropic' ? 'anthropic' : 'openai';
+  const providerDefaults = provider === 'deepseek'
+    ? { endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash' }
+    : provider === 'custom' && directProtocol === 'anthropic'
+      ? { endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-sonnet-4-6' }
+      : provider === 'custom'
+        ? { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini' }
+      : { endpoint: defaultChatbotSettings.directEndpoint, model: defaultChatbotSettings.directModel };
+  const submittedDirectEndpoint = String(value.directEndpoint ?? '').trim();
+  const submittedDirectModel = String(value.directModel ?? '').trim();
+  const directEndpoint = cleanText(submittedDirectEndpoint, providerDefaults.endpoint, 500);
+  const directModel = cleanText(submittedDirectModel, providerDefaults.model, 200);
   const messageTemplates = Object.fromEntries(Object.entries(value.messageTemplates || {})
     .slice(0, 100)
     .map(([key, text]) => [String(key).trim().slice(0, 100), String(text ?? '').trim().slice(0, 12000)])
@@ -42,9 +62,18 @@ export function normalizeChatbotSettings(value = {}) {
     enabled: value.enabled === true,
     name: cleanText(value.name, defaultChatbotSettings.name, 100),
     responseMode,
-    provider: 'dify',
-    endpoint: cleanText(value.endpoint, defaultChatbotSettings.endpoint, 500),
-    apiKey: cleanText(value.apiKey, '', 1000),
+    provider,
+    directEndpoint,
+    directApiKey: cleanText(value.directApiKey ?? value.apiKey, '', 1000),
+    directAuthType: provider === 'vertex' && value.directAuthType === 'api_key' ? 'api_key' : 'access_token',
+    directProtocol,
+    directModel,
+    systemPrompt: String(value.systemPrompt ?? '').trim().slice(0, 30000),
+    memoryEnabled: value.memoryEnabled !== false,
+    memoryWindow: Math.max(1, Math.min(100, Number(value.memoryWindow) || defaultChatbotSettings.memoryWindow)),
+    structuredOutput: value.structuredOutput !== false,
+    retryCount: Math.max(0, Math.min(5, value.retryCount === undefined ? defaultChatbotSettings.retryCount : Number(value.retryCount) || 0)),
+    retryIntervalMs: Math.max(100, Math.min(10000, Number(value.retryIntervalMs) || defaultChatbotSettings.retryIntervalMs)),
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
     messageTemplates,
@@ -55,6 +84,10 @@ export function normalizeChatbotSettings(value = {}) {
 
 export function publicChatbotSettings(value = {}) {
   const settings = normalizeChatbotSettings(value);
-  const { apiKey, messageTemplates, ...visible } = settings;
-  return { ...visible, apiKeyConfigured: Boolean(apiKey) };
+  const { directApiKey, messageTemplates, ...visible } = settings;
+  return {
+    ...visible,
+    apiKeyConfigured: Boolean(directApiKey),
+    directApiKeyConfigured: Boolean(directApiKey)
+  };
 }

@@ -313,7 +313,7 @@
                     </div>
                   </div>
                   <section class="chatbot-preview-card" aria-labelledby="chatbot-preview-title">
-                    <div class="chatbot-preview-head"><div><strong id="chatbot-preview-title">Xem trước &amp; test bot</strong><span>Gửi thử một tin nhắn bằng đúng cấu hình hiện tại.</span></div><button class="settings-save-button chatbot-preview-button" id="chatbot-preview-send" type="button">Gửi thử</button></div>
+                    <div class="chatbot-preview-head"><div><strong id="chatbot-preview-title">Xem trước &amp; test bot</strong><span>Gửi thử một tin nhắn bằng đúng cấu hình hiện tại.</span></div><div class="chatbot-preview-actions"><button class="chatbot-preview-open" id="chatbot-preview-open" type="button">Mở hộp thoại</button><button class="settings-save-button chatbot-preview-button" id="chatbot-preview-send" type="button">Gửi thử</button></div></div>
                     <div class="chatbot-preview-body"><textarea id="chatbot-preview-input" rows="2" maxlength="2000" placeholder="Ví dụ: Túi Xanh giá bao nhiêu ạ?"></textarea><div id="chatbot-preview-result" class="chatbot-preview-result" aria-live="polite">Chưa có lượt test.</div></div>
                   </section>
                 </div>
@@ -322,6 +322,11 @@
             </div>
             <footer class="chatbot-settings-footer"><button class="settings-save-button" type="submit">Lưu cấu hình AI</button></footer>
           </form>
+          <dialog class="chatbot-preview-dialog" id="chatbot-preview-dialog">
+            <div class="chatbot-preview-dialog-head"><div><strong>XEM TRƯỚC BOT</strong><span>Kiểm tra JSON đầu ra trước khi bật luồng thật.</span></div><button id="chatbot-preview-close" type="button" aria-label="Đóng">×</button></div>
+            <div class="chatbot-preview-dialog-body"><div class="chatbot-preview-chat"><div class="chatbot-preview-empty">Nhập nội dung để bắt đầu cuộc trò chuyện</div></div><textarea id="chatbot-preview-dialog-input" rows="3" placeholder="Nhập tin nhắn test..."></textarea></div>
+            <div class="chatbot-preview-dialog-foot"><span id="chatbot-preview-dialog-status">Vertex AI · gemini-3-flash-preview</span><button class="settings-save-button" id="chatbot-preview-dialog-send" type="button">Gửi thử</button></div>
+          </dialog>
         </section>
         <section class="settings-section-content hidden" data-settings-panel="products" aria-labelledby="product-settings-title">
           <section class="settings-card product-settings-card">

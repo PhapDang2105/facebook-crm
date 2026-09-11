@@ -145,6 +145,11 @@ const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome
 const chatbotPreviewSend = document.querySelector('#chatbot-preview-send');
 const chatbotPreviewInput = document.querySelector('#chatbot-preview-input');
 const chatbotPreviewResult = document.querySelector('#chatbot-preview-result');
+const chatbotPreviewDialog = document.querySelector('#chatbot-preview-dialog');
+const chatbotPreviewOpen = document.querySelector('#chatbot-preview-open');
+const chatbotPreviewClose = document.querySelector('#chatbot-preview-close');
+const chatbotPreviewDialogInput = document.querySelector('#chatbot-preview-dialog-input');
+const chatbotPreviewDialogSend = document.querySelector('#chatbot-preview-dialog-send');
 const chatbotWorkspaceButtons = [...document.querySelectorAll('[data-chatbot-workspace]')];
 const chatbotWorkspacePanels = [...document.querySelectorAll('[data-chatbot-workspace-panel]')];
 const chatbotTemplateSearch = document.querySelector('#chatbot-template-search');
@@ -4303,6 +4308,22 @@ chatbotPreviewSend?.addEventListener('click', async () => {
   } catch (error) {
     chatbotPreviewResult.textContent = `Test lỗi: ${error.message}`;
   } finally { chatbotPreviewSend.disabled = false; }
+});
+
+chatbotPreviewOpen?.addEventListener('click', () => chatbotPreviewDialog?.showModal());
+chatbotPreviewClose?.addEventListener('click', () => chatbotPreviewDialog?.close());
+chatbotPreviewDialog?.addEventListener('click', event => { if (event.target === chatbotPreviewDialog) chatbotPreviewDialog.close(); });
+chatbotPreviewDialogSend?.addEventListener('click', async () => {
+  const message = chatbotPreviewDialogInput.value.trim();
+  const chat = chatbotPreviewDialog.querySelector('.chatbot-preview-chat');
+  if (!message) return;
+  chatbotPreviewDialogSend.disabled = true;
+  chat.innerHTML += `<div class="chatbot-preview-user">${escapeHtml(message)}</div><div class="chatbot-preview-bot">Đang xử lý…</div>`;
+  try {
+    const result = await readApiResponse(await fetch('/api/chatbot/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: chatbotSettingsProvider.value, directEndpoint: chatbotSettingsDirectEndpoint.value, directModel: chatbotSettingsDirectModel.value, systemPrompt: chatbotSettingsSystemPrompt.value.trim() || 'Bạn là trợ lý chăm sóc khách hàng. Trả lời bằng JSON hợp lệ.', structuredOutput: chatbotSettingsStructuredOutput.checked, directAuthType: 'access_token', message }) }));
+    chat.lastElementChild.textContent = JSON.stringify(result.parsed || result.raw || {}, null, 2);
+  } catch (error) { chat.lastElementChild.textContent = `Lỗi: ${error.message}`; }
+  finally { chatbotPreviewDialogSend.disabled = false; }
 });
 
 function applyImportedRecords(sourceHeaders, records) {

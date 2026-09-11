@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui">
+  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui-2">
 </head>
 <body>
   <div class="topbar">
@@ -291,7 +291,7 @@
               </section>
               <section class="chatbot-workspace-panel hidden" data-chatbot-workspace-panel="general">
                 <div class="chatbot-general-config">
-                  <div class="chatbot-ai-overview">
+                  <div class="chatbot-ai-overview hidden" aria-hidden="true">
                     <span class="chatbot-ai-overview-icon"><img src="/assets/icons/ai-model.svg" alt=""></span>
                     <div><strong>Mô hình AI</strong></div>
                   </div>
@@ -302,7 +302,7 @@
                       <label class="chatbot-field" id="chatbot-auth-type-field"><span>Kiểu xác thực</span><select id="chatbot-settings-auth-type"><option value="access_token">OAuth 2.0 access token</option><option value="api_key">Google Cloud API key</option></select></label>
                       <label class="chatbot-field hidden" id="chatbot-protocol-field"><span>Giao thức API</span><select id="chatbot-settings-protocol"><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label>
                     </div>
-                    <label class="chatbot-field"><span id="chatbot-endpoint-label">Endpoint Vertex AI</span><input id="chatbot-settings-direct-endpoint" type="url" maxlength="500" placeholder="https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-2.5-flash:generateContent"></label>
+                    <label class="chatbot-field"><span id="chatbot-endpoint-label">Endpoint Vertex AI</span><input id="chatbot-settings-direct-endpoint" type="url" maxlength="500" placeholder="https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent"></label>
                   </div>
                   <div class="chatbot-llm-card">
                     <label class="chatbot-field"><span>System prompt</span><textarea id="chatbot-settings-system-prompt" rows="12" maxlength="30000" placeholder="Nhập chỉ dẫn hệ thống cho model..."></textarea></label>
@@ -389,6 +389,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260911-vertex-ui"></script>
+  <script src="app.js?v=20260911-vertex-ui-2"></script>
 </body>
 </html>

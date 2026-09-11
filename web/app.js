@@ -136,6 +136,14 @@ const chatbotSettingsDirectModel = document.querySelector('#chatbot-settings-dir
 const chatbotEndpointLabel = document.querySelector('#chatbot-endpoint-label');
 const chatbotApiKeyLabel = document.querySelector('#chatbot-api-key-label');
 const chatbotSettingsSystemPrompt = document.querySelector('#chatbot-settings-system-prompt');
+const chatbotSettingsSystemPromptCounter = document.querySelector('#chatbot-settings-system-prompt-counter');
+
+function updateChatbotSystemPromptCounter() {
+  if (!chatbotSettingsSystemPromptCounter || !chatbotSettingsSystemPrompt) return;
+  const count = chatbotSettingsSystemPrompt.value ? chatbotSettingsSystemPrompt.value.length : 0;
+  chatbotSettingsSystemPromptCounter.textContent = `${count.toLocaleString('vi-VN')} / 30.000 ký tự`;
+}
+chatbotSettingsSystemPrompt?.addEventListener('input', updateChatbotSystemPromptCounter);
 const chatbotSettingsMemoryEnabled = document.querySelector('#chatbot-settings-memory-enabled');
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
 const chatbotSettingsStructuredOutput = document.querySelector('#chatbot-settings-structured-output');
@@ -1847,6 +1855,7 @@ async function loadChatbotSettings() {
       chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
     }
     chatbotSettingsSystemPrompt.value = settings.systemPrompt || '';
+    updateChatbotSystemPromptCounter();
     chatbotSettingsMemoryEnabled.checked = settings.memoryEnabled !== false;
     chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
     chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;

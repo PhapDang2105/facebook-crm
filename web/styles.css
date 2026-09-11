@@ -637,6 +637,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-field textarea { resize: vertical; line-height: 1.5; }
 .chatbot-field input:focus, .chatbot-field select:focus, .chatbot-field textarea:focus { border-color: #77a7f7; box-shadow: 0 0 0 2px rgba(8,102,255,.1); }
 .chatbot-field small { color: #8a91a0; font-size: 12px; font-weight: 400; }
+.chatbot-field-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+.chatbot-field-counter { color: #8a91a0; font-size: 12px; font-weight: 500; }
 .chatbot-settings-footer { display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 13.5px 18px; border-top: 1.125px solid #eef0f3; }
 .chatbot-workspace-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 0 8px; background: #fff; border-bottom: 1px solid #e3e8ef; border-radius: 0; }
 .chatbot-workspace-tabs button { display: grid; grid-template-columns: 30px 1fr; align-items: center; column-gap: 9px; padding: 13px 15px; color: #606770; text-align: left; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; cursor: pointer; }
@@ -703,8 +705,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-provider-card, .chatbot-llm-card { display: grid; gap: 15px; padding: 16px; background: #f7f9fc; border: 1px solid #dce5f1; border-radius: 12px; }
 .chatbot-llm-card { background: #fff; }
 .chatbot-provider-card > .chatbot-field { grid-template-columns: 142px minmax(0, 1fr); align-items: center; gap: 12px; }
-.chatbot-general-settings-pane > .chatbot-llm-card { min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
-.chatbot-general-settings-pane > .chatbot-llm-card > .chatbot-field { min-height: 0; }
+.chatbot-general-settings-pane > .chatbot-llm-card { min-height: 0; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; }
+.chatbot-general-settings-pane > .chatbot-llm-card > .chatbot-field { min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-content: stretch; }
 .chatbot-general-settings-pane > .chatbot-llm-card > .chatbot-field textarea { height: 100%; min-height: 260px; resize: none; }
 .chatbot-preview-card { position: relative; display: grid; grid-template-rows: auto 1fr; gap: 0; min-width: 0; height: 100%; min-height: 0; padding: 0; overflow: hidden; background: #fff; border: 1px solid #e0e5ed; border-radius: 14px; box-shadow: 0 6px 18px rgba(41, 57, 85, .05); }
 .chatbot-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 0 16px; border-bottom: 1px solid #e7ebf1; }

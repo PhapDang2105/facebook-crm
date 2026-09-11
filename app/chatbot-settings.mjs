@@ -17,6 +17,7 @@ export const defaultChatbotSettings = Object.freeze({
   welcomeMessage: '',
   handoffKeywords: '',
   messageTemplates: {},
+  deletedTemplateIds: [],
   processingSteps: [
     { id: 'message_normalizer', name: 'Xử lý bình luận và tin nhắn', type: 'transform', enabled: true, code: "const text = String(input.message?.text || '').trim();\nreturn { ...input, text };" },
     { id: 'product_extractor', name: 'Xử lý sản phẩm', type: 'transform', enabled: true, code: "const products = ['Túi Xanh', 'Túi Vàng', 'Túi Nâu'];\nreturn { ...input, products: products.filter(name => input.text?.includes(name)) };" },
@@ -35,15 +36,22 @@ function cleanText(value, fallback, maximumLength) {
 export function normalizeChatbotSettings(value = {}) {
   const responseMode = 'automatic';
   const requestedProvider = value.provider === 'openai_compatible' ? 'custom' : value.provider;
-  const provider = ['vertex', 'deepseek', 'custom'].includes(requestedProvider) ? requestedProvider : 'vertex';
-  const directProtocol = provider === 'vertex' ? 'vertex' : provider === 'deepseek' ? 'openai' : value.directProtocol === 'anthropic' ? 'anthropic' : 'openai';
-  const providerDefaults = provider === 'deepseek'
-    ? { endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash' }
-    : provider === 'custom' && directProtocol === 'anthropic'
+  const supportedProviders = ['vertex', 'openai', 'anthropic', 'deepseek', 'xai', 'groq', 'mistral', 'openrouter', 'custom'];
+  const provider = supportedProviders.includes(requestedProvider) ? requestedProvider : 'vertex';
+  const directProtocol = provider === 'vertex' ? 'vertex' : provider === 'anthropic' || (provider === 'custom' && value.directProtocol === 'anthropic') ? 'anthropic' : 'openai';
+  const providerDefaults = {
+    vertex: { endpoint: defaultChatbotSettings.directEndpoint, model: defaultChatbotSettings.directModel },
+    openai: { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini' },
+    anthropic: { endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-sonnet-4-6' },
+    deepseek: { endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash' },
+    xai: { endpoint: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.5' },
+    groq: { endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b' },
+    mistral: { endpoint: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-large-latest' },
+    openrouter: { endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: '~openai/gpt-latest' },
+    custom: directProtocol === 'anthropic'
       ? { endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-sonnet-4-6' }
-      : provider === 'custom'
-        ? { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini' }
-      : { endpoint: defaultChatbotSettings.directEndpoint, model: defaultChatbotSettings.directModel };
+      : { endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini' }
+  }[provider];
   const submittedDirectEndpoint = String(value.directEndpoint ?? '').trim();
   const submittedDirectModel = String(value.directModel ?? '').trim();
   const migratedDirectModel = provider === 'vertex' && submittedDirectModel === 'gemini-2.5-flash'
@@ -55,6 +63,9 @@ export function normalizeChatbotSettings(value = {}) {
     .slice(0, 100)
     .map(([key, text]) => [String(key).trim().slice(0, 100), String(text ?? '').trim().slice(0, 12000)])
     .filter(([key]) => key));
+  const deletedTemplateIds = [...new Set((Array.isArray(value.deletedTemplateIds) ? value.deletedTemplateIds : [])
+    .map(id => String(id || '').trim().slice(0, 100))
+    .filter(Boolean))].slice(0, 100);
   const submittedSteps = new Map((Array.isArray(value.processingSteps) ? value.processingSteps : []).map(step => [step?.id, step]));
   const processingSteps = defaultChatbotSettings.processingSteps.map(step => ({
     ...step,
@@ -80,6 +91,7 @@ export function normalizeChatbotSettings(value = {}) {
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
     messageTemplates,
+    deletedTemplateIds,
     processingSteps,
     updatedAt: Number(value.updatedAt) || Date.now()
   };

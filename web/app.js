@@ -173,12 +173,14 @@ const chatbotTemplateContent = document.querySelector('#chatbot-template-content
 const chatbotTemplateActive = document.querySelector('#chatbot-template-active');
 const chatbotTemplateApply = document.querySelector('#chatbot-template-apply');
 const chatbotTemplateReset = document.querySelector('#chatbot-template-reset');
+const chatbotTemplateDelete = document.querySelector('#chatbot-template-delete');
 const chatbotWorkflow = document.querySelector('#chatbot-workflow');
 const chatbotStepCodeTitle = document.querySelector('#chatbot-step-code-title');
 const chatbotStepCode = document.querySelector('#chatbot-step-code');
 const chatbotStepCodeApply = document.querySelector('#chatbot-step-code-apply');
 let chatbotTemplatesState = {};
 let chatbotOriginalTemplates = {};
+let chatbotDeletedTemplateIds = new Set();
 let chatbotProcessingSteps = [];
 let chatbotPreviewHistory = [];
 let selectedChatbotTemplate = '';
@@ -1789,27 +1791,127 @@ function saveCustomerPanelStore() {
 const chatbotProviderProfiles = {
   vertex: {
     endpoint: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent',
-    model: 'gemini-3-flash-preview', endpointLabel: 'Endpoint Vertex AI', keyLabel: 'Access token Vertex AI', keyPlaceholder: 'Được cấu hình bảo mật trên máy chủ'
+    model: 'gemini-3-flash-preview',
+    models: [
+      { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+      { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+      { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+      { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+      { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
+      { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (Preview)' },
+      { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Preview)' },
+      { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (Preview)' },
+      { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite' },
+      { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+      { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+      { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite' }
+    ],
+    endpointLabel: 'Endpoint Vertex AI', keyLabel: 'Access token Vertex AI', keyPlaceholder: 'Được cấu hình bảo mật trên máy chủ'
   },
   deepseek: {
-    endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash', endpointLabel: 'Endpoint DeepSeek', keyLabel: 'Khóa API DeepSeek', keyPlaceholder: 'Nhập khóa API DeepSeek'
+    endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash', models: [
+      { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+      { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+      { value: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash Vision (Experimental)' }
+    ], endpointLabel: 'Endpoint DeepSeek', keyLabel: 'Khóa API DeepSeek', keyPlaceholder: 'Nhập khóa API DeepSeek'
+  },
+  openai: {
+    endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini', models: [
+      { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+      { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+      { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+      { value: 'gpt-5', label: 'GPT-5' },
+      { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
+      { value: 'gpt-5-nano', label: 'GPT-5 Nano' },
+      { value: 'gpt-4.1', label: 'GPT-4.1' },
+      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+      { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' }
+    ], endpointLabel: 'Endpoint OpenAI', keyLabel: 'Khóa API OpenAI', keyPlaceholder: 'Nhập khóa API OpenAI'
+  },
+  anthropic: {
+    endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-sonnet-4-6', models: [
+      { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
+      { value: 'claude-opus-5', label: 'Claude Opus 5' },
+      { value: 'claude-fable-5', label: 'Claude Fable 5' },
+      { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+      { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+      { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' }
+    ], endpointLabel: 'Endpoint Anthropic', keyLabel: 'Khóa API Anthropic', keyPlaceholder: 'Nhập khóa API Anthropic'
+  },
+  xai: {
+    endpoint: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.5', models: [
+      { value: 'grok-4.5', label: 'Grok 4.5' },
+      { value: 'grok-4.5-latest', label: 'Grok 4.5 Latest' }
+    ], endpointLabel: 'Endpoint xAI', keyLabel: 'Khóa API xAI', keyPlaceholder: 'Nhập khóa API xAI'
+  },
+  groq: {
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b', models: [
+      { value: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B' },
+      { value: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B' },
+      { value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versatile' },
+      { value: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant' },
+      { value: 'groq/compound', label: 'Groq Compound' },
+      { value: 'groq/compound-mini', label: 'Groq Compound Mini' }
+    ], endpointLabel: 'Endpoint Groq', keyLabel: 'Khóa API Groq', keyPlaceholder: 'Nhập khóa API Groq'
+  },
+  mistral: {
+    endpoint: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-large-latest', models: [
+      { value: 'mistral-large-latest', label: 'Mistral Large (Latest)' },
+      { value: 'mistral-medium-latest', label: 'Mistral Medium (Latest)' },
+      { value: 'mistral-small-latest', label: 'Mistral Small (Latest)' }
+    ], endpointLabel: 'Endpoint Mistral AI', keyLabel: 'Khóa API Mistral AI', keyPlaceholder: 'Nhập khóa API Mistral AI'
+  },
+  openrouter: {
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: '~openai/gpt-latest', models: [
+      { value: '~openai/gpt-latest', label: 'OpenAI GPT Latest' },
+      { value: '~anthropic/claude-sonnet-latest', label: 'Claude Sonnet Latest' },
+      { value: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+      { value: 'x-ai/grok-4.5', label: 'Grok 4.5' },
+      { value: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash' }
+    ], endpointLabel: 'Endpoint OpenRouter', keyLabel: 'Khóa API OpenRouter', keyPlaceholder: 'Nhập khóa API OpenRouter'
   },
   custom: {
-    endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini', endpointLabel: 'Endpoint API', keyLabel: 'Khóa API', keyPlaceholder: 'Nhập khóa API của nhà cung cấp'
+    endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini', models: [
+      { value: 'gpt-5', label: 'GPT-5' },
+      { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
+      { value: 'gpt-4.1', label: 'GPT-4.1' },
+      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+      { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' }
+    ], endpointLabel: 'Endpoint API tương thích OpenAI', keyLabel: 'Khóa API', keyPlaceholder: 'Nhập khóa API của nhà cung cấp'
   }
 };
 
-const chatbotAnthropicProfile = {
-  endpoint: 'https://api.anthropic.com/v1/messages', model: 'claude-sonnet-4-6', endpointLabel: 'Endpoint Anthropic', keyLabel: 'Khóa API Anthropic', keyPlaceholder: 'Nhập khóa API Anthropic'
-};
-
 function getChatbotProviderProfile() {
-  if (chatbotSettingsProvider?.value === 'custom' && chatbotSettingsProtocol?.value === 'anthropic') return chatbotAnthropicProfile;
+  if (chatbotSettingsProvider?.value === 'custom' && chatbotSettingsProtocol?.value === 'anthropic') return chatbotProviderProfiles.anthropic;
   return chatbotProviderProfiles[chatbotSettingsProvider?.value] || chatbotProviderProfiles.vertex;
+}
+
+function renderChatbotModelOptions(selectedModel = '') {
+  if (!chatbotSettingsDirectModel) return;
+  const profile = getChatbotProviderProfile();
+  const models = [...(profile.models || [])];
+  const activeModel = selectedModel || profile.model;
+  if (activeModel && !models.some(model => model.value === activeModel)) {
+    models.push({ value: activeModel, label: `${activeModel} (đang sử dụng)` });
+  }
+  chatbotSettingsDirectModel.replaceChildren(...models.map(model => {
+    const option = document.createElement('option');
+    option.value = model.value;
+    option.textContent = model.label;
+    return option;
+  }));
+  chatbotSettingsDirectModel.value = activeModel;
+}
+
+function syncVertexEndpointModel() {
+  if (chatbotSettingsProvider?.value !== 'vertex' || !chatbotSettingsDirectEndpoint || !chatbotSettingsDirectModel?.value) return;
+  const currentEndpoint = chatbotSettingsDirectEndpoint.value || chatbotProviderProfiles.vertex.endpoint;
+  chatbotSettingsDirectEndpoint.value = currentEndpoint.replace(/\/models\/[^:]+(?=:generateContent)/, `/models/${chatbotSettingsDirectModel.value}`);
 }
 
 function renderChatbotProvider(resetValues = false) {
   const profile = getChatbotProviderProfile();
+  const currentModel = chatbotSettingsDirectModel?.value || '';
   const vertex = chatbotSettingsProvider?.value === 'vertex';
   const custom = chatbotSettingsProvider?.value === 'custom';
   chatbotAuthTypeField?.classList.toggle('hidden', true);
@@ -1822,13 +1924,12 @@ function renderChatbotProvider(resetValues = false) {
   if (chatbotEndpointLabel) chatbotEndpointLabel.textContent = profile.endpointLabel;
   if (chatbotApiKeyLabel) chatbotApiKeyLabel.textContent = vertex && chatbotSettingsAuthType?.value === 'api_key' ? 'Google Cloud API key' : profile.keyLabel;
   if (chatbotSettingsDirectEndpoint) chatbotSettingsDirectEndpoint.placeholder = profile.endpoint;
-  if (chatbotSettingsDirectModel) chatbotSettingsDirectModel.placeholder = profile.model;
+  renderChatbotModelOptions(resetValues ? profile.model : currentModel || profile.model);
   if (chatbotSettingsDirectKey && !chatbotSettingsDirectKey.value) {
     chatbotSettingsDirectKey.placeholder = vertex && chatbotSettingsAuthType?.value === 'api_key' ? 'Nhập Google Cloud API key' : profile.keyPlaceholder;
   }
   if (resetValues) {
     chatbotSettingsDirectEndpoint.value = profile.endpoint;
-    chatbotSettingsDirectModel.value = profile.model;
     if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.value = '';
   }
 }
@@ -1836,6 +1937,7 @@ function renderChatbotProvider(resetValues = false) {
 chatbotSettingsProvider?.addEventListener('change', () => renderChatbotProvider(true));
 chatbotSettingsAuthType?.addEventListener('change', () => renderChatbotProvider());
 chatbotSettingsProtocol?.addEventListener('change', () => renderChatbotProvider(true));
+chatbotSettingsDirectModel?.addEventListener('change', syncVertexEndpointModel);
 
 async function loadChatbotSettings() {
   if (!chatbotSettingsForm) return;
@@ -1849,7 +1951,8 @@ async function loadChatbotSettings() {
     const profile = getChatbotProviderProfile();
     const migratedModel = settings.provider === 'vertex' && settings.directModel === 'gemini-2.5-flash' ? 'gemini-3-flash-preview' : (settings.directModel || profile.model);
     chatbotSettingsDirectEndpoint.value = (settings.directEndpoint || profile.endpoint).replace('gemini-2.5-flash', migratedModel);
-    chatbotSettingsDirectModel.value = migratedModel;
+    renderChatbotModelOptions(migratedModel);
+    syncVertexEndpointModel();
     if (chatbotSettingsDirectKey) {
       chatbotSettingsDirectKey.value = '';
       chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
@@ -1864,6 +1967,7 @@ async function loadChatbotSettings() {
     chatbotSettingsWelcome.value = settings.welcomeMessage || '';
     chatbotTemplatesState = { ...(settings.templates || {}) };
     chatbotOriginalTemplates = { ...(settings.templates || {}) };
+    chatbotDeletedTemplateIds = new Set(settings.deletedTemplateIds || []);
     chatbotProcessingSteps = Array.isArray(settings.processingSteps) ? settings.processingSteps.map(step => ({ ...step })) : [];
     selectedChatbotTemplate = selectedChatbotTemplate && chatbotTemplatesState[selectedChatbotTemplate] !== undefined
       ? selectedChatbotTemplate
@@ -1909,6 +2013,11 @@ function renderChatbotTemplateEditor() {
   if (chatbotTemplateActive) {
     chatbotTemplateActive.disabled = !id;
     chatbotTemplateActive.checked = Boolean(id && chatbotTemplatesState[id]);
+  }
+  if (chatbotTemplateDelete) {
+    const canDelete = Boolean(id);
+    chatbotTemplateDelete.classList.toggle('hidden', !canDelete);
+    chatbotTemplateDelete.disabled = !canDelete;
   }
 }
 
@@ -4195,6 +4304,7 @@ function createChatbotTemplate() {
   if (Object.hasOwn(chatbotTemplatesState, id)) return showToast('Mã mẫu tin này đã tồn tại.', 'error');
   chatbotTemplatesState[id] = '';
   chatbotOriginalTemplates[id] = '';
+  chatbotDeletedTemplateIds.delete(id);
   selectedChatbotTemplate = id;
   closeChatbotTemplateCreator();
   renderChatbotTemplateList();
@@ -4221,6 +4331,19 @@ chatbotTemplateReset?.addEventListener('click', () => {
   chatbotTemplatesState[selectedChatbotTemplate] = chatbotOriginalTemplates[selectedChatbotTemplate] || '';
   renderChatbotTemplateList();
   renderChatbotTemplateEditor();
+});
+
+chatbotTemplateDelete?.addEventListener('click', () => {
+  const id = selectedChatbotTemplate;
+  if (!id) return;
+  if (!window.confirm(`Xóa mẫu tin ${id}? Thao tác này không thể hoàn tác sau khi lưu.`)) return;
+  delete chatbotTemplatesState[id];
+  delete chatbotOriginalTemplates[id];
+  chatbotDeletedTemplateIds.add(id);
+  selectedChatbotTemplate = Object.keys(chatbotTemplatesState)[0] || '';
+  renderChatbotTemplateList();
+  renderChatbotTemplateEditor();
+  chatbotSettingsForm?.requestSubmit();
 });
 
 chatbotWorkflow?.addEventListener('change', event => {
@@ -4268,7 +4391,9 @@ chatbotStepCode?.addEventListener('keydown', event => {
 chatbotSettingsForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const submit = event.submitter || chatbotSettingsForm.querySelector('button[type="submit"]');
+  const submitLabel = submit.textContent;
   submit.disabled = true;
+  submit.textContent = 'Đang lưu...';
   try {
     const settings = await readApiResponse(await fetch('/api/chatbot/settings', {
       method: 'PUT',
@@ -4291,6 +4416,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         welcomeMessage: chatbotSettingsWelcome.value,
         handoffKeywords: '',
         messageTemplates: chatbotTemplatesState,
+        deletedTemplateIds: [...chatbotDeletedTemplateIds],
         processingSteps: chatbotProcessingSteps
       })
     }));
@@ -4298,10 +4424,12 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
     if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.value = '';
     const profile = getChatbotProviderProfile();
     if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
+    showToast('Đã lưu cấu hình AI thành công.', 'success');
   } catch (error) {
     showToast(error.message || 'Chưa lưu được thiết lập chatbot.', 'error');
   } finally {
     submit.disabled = false;
+    submit.textContent = submitLabel;
   }
 });
 

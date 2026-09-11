@@ -56,8 +56,12 @@ export async function requestDirectModelReply({ settings, conversation, message,
     try {
       const anthropic = settings.directProtocol === 'anthropic';
       const model = settings.directModel || (vertex ? 'gemini-2.5-flash' : 'deepseek-v4-flash');
+      const configuredEndpoint = String(settings.directEndpoint || '');
       const endpoint = vertex
-        ? String(settings.directEndpoint || '').replace('PROJECT_ID', encodeURIComponent(vertexProjectId())).replace(/\/models\/[^/:]+:generateContent(?:\?.*)?$/, `/models/${encodeURIComponent(model)}:generateContent`)
+        ? (configuredEndpoint.includes('PROJECT_ID')
+            ? configuredEndpoint.replace('PROJECT_ID', encodeURIComponent(vertexProjectId()))
+            : configuredEndpoint)
+          .replace(/\/models\/[^/:]+:generateContent(?:\?.*)?$/, `/models/${encodeURIComponent(model)}:generateContent`)
         : settings.directEndpoint;
       const accessToken = vertex && settings.directAuthType !== 'api_key'
         ? (settings.directApiKey || await getVertexAccessToken({ fetchImpl }))
@@ -71,7 +75,6 @@ export async function requestDirectModelReply({ settings, conversation, message,
           { role: 'user', parts: [{ text: query }] }
         ],
         generationConfig: {
-          temperature: 0.1,
           ...(settings.structuredOutput !== false ? { responseMimeType: 'application/json' } : {})
         }
       } : anthropic ? {
@@ -115,7 +118,7 @@ export async function requestDirectModelReply({ settings, conversation, message,
       if (!answer) throw new Error('Mô hình không trả về nội dung.');
       const parsedAnswer = parseModelAnswer(answer);
       if (rawResponse) return { raw: answer, parsed: parsedAnswer, conversationId: '' };
-      return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates), conversationId: '' };
+      return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates, settings.deletedTemplateIds), conversationId: '' };
     } catch (error) {
       lastError = error;
       if (attempt + 1 < attempts) await wait(Math.max(100, Number(settings.retryIntervalMs) || 1000));
@@ -140,7 +143,7 @@ export async function processChatbotChanges(changes, dependencies) {
       const keywords = settings.handoffKeywords.split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
       const asksForHuman = keywords.some(keyword => String(change.message.text || '').toLowerCase().includes(keyword));
       const reply = asksForHuman || change.message.type !== 'text'
-        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates)
+        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, settings.deletedTemplateIds)
         : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id) });
       if (settings.responseMode === 'automatic') {
         for (const text of reply.messages) await sendMessage(conversation, { text });

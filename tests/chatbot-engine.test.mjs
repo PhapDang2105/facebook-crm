@@ -135,3 +135,9 @@ test('mẫu tin chỉnh trong Smax nội bộ ghi đè mẫu mặc định', () 
   const reply = renderChatbotReply({ template_id: 'WELCOME' }, { WELCOME: 'Xin chào từ mẫu tùy chỉnh' });
   assert.deepEqual(reply.messages, ['Xin chào từ mẫu tùy chỉnh']);
 });
+
+test('mẫu tin đã xóa không còn được chatbot sử dụng', () => {
+  const reply = renderChatbotReply({ template_id: 'WELCOME' }, {}, ['WELCOME']);
+  assert.equal(reply.templateId, 'CSKH_HANDOFF');
+  assert.notEqual(reply.messages[0], 'Dạ Giọt Nắng xin chào anh/chị ạ 👋 Anh/chị đang cần thông tin nào về sản phẩm để em tư vấn cho chính xác nhé ạ 🍀');
+});

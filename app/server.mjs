@@ -388,9 +388,11 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
       const settings = await readChatbotSettings();
+      const templates = { ...chatbotTemplates, ...settings.messageTemplates };
+      for (const id of settings.deletedTemplateIds) delete templates[id];
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
-        templates: { ...chatbotTemplates, ...settings.messageTemplates }
+        templates
       });
     }
     if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
@@ -405,9 +407,11 @@ const server = http.createServer(async (request, response) => {
         directApiKey: String(payload.directApiKey || '').trim() || (providerChanged ? '' : current.directApiKey),
         updatedAt: Date.now()
       });
+      const templates = { ...chatbotTemplates, ...settings.messageTemplates };
+      for (const id of settings.deletedTemplateIds) delete templates[id];
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
-        templates: { ...chatbotTemplates, ...settings.messageTemplates }
+        templates
       });
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/test') {

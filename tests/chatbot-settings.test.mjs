@@ -76,12 +76,33 @@ test('hỗ trợ nhà cung cấp và giao thức tùy chọn để mở rộng',
   assert.equal(settings.directModel, 'claude-sonnet-4-6');
 });
 
+test('chuẩn hóa các nhà cung cấp model tích hợp sẵn', () => {
+  const cases = [
+    ['openai', 'https://api.openai.com/v1/chat/completions', 'gpt-4.1-mini', 'openai'],
+    ['anthropic', 'https://api.anthropic.com/v1/messages', 'claude-sonnet-4-6', 'anthropic'],
+    ['xai', 'https://api.x.ai/v1/chat/completions', 'grok-4.5', 'openai'],
+    ['groq', 'https://api.groq.com/openai/v1/chat/completions', 'openai/gpt-oss-120b', 'openai'],
+    ['mistral', 'https://api.mistral.ai/v1/chat/completions', 'mistral-large-latest', 'openai'],
+    ['openrouter', 'https://openrouter.ai/api/v1/chat/completions', '~openai/gpt-latest', 'openai']
+  ];
+
+  for (const [provider, endpoint, model, protocol] of cases) {
+    const settings = normalizeChatbotSettings({ provider });
+    assert.equal(settings.provider, provider);
+    assert.equal(settings.directEndpoint, endpoint);
+    assert.equal(settings.directModel, model);
+    assert.equal(settings.directProtocol, protocol);
+  }
+});
+
 test('chuẩn hóa mẫu tin và trạng thái từng bước xử lý', () => {
   const settings = normalizeChatbotSettings({
     messageTemplates: { WELCOME: '  Xin chào mới  ' },
+    deletedTemplateIds: [' XIN_LOI ', 'XIN_LOI', 'WELCOME'],
     processingSteps: [{ id: 'duplicate_guard', enabled: false, code: 'return input.signature;' }]
   });
   assert.equal(settings.messageTemplates.WELCOME, 'Xin chào mới');
+  assert.deepEqual(settings.deletedTemplateIds, ['XIN_LOI', 'WELCOME']);
   assert.equal(settings.processingSteps.find(step => step.id === 'duplicate_guard').enabled, false);
   assert.equal(settings.processingSteps.find(step => step.id === 'duplicate_guard').code, 'return input.signature;');
   assert.equal(settings.processingSteps.find(step => step.id === 'message_normalizer').enabled, true);

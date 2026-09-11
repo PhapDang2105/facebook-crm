@@ -94,11 +94,12 @@ function renderOrder(value) {
   };
 }
 
-export function renderChatbotReply(value = {}, overrides = {}) {
+export function renderChatbotReply(value = {}, overrides = {}, deletedTemplateIds = []) {
   const templateId = String(value.template_id || '').trim();
   if (templateId === 'ORDER_CONFIRMATION') return renderOrder(value);
   const available = { ...templates, ...overrides };
-  const raw = available[templateId] || value.reply || value.message || value.text || available.CSKH_HANDOFF;
+  for (const id of deletedTemplateIds) delete available[id];
+  const raw = available[templateId] || value.reply || value.message || value.text || available.CSKH_HANDOFF || templates.CSKH_HANDOFF;
   return {
     templateId: available[templateId] ? templateId : 'CSKH_HANDOFF',
     messages: String(raw).replace(/\\n/g, '\n').split('###').map(item => item.trim()).filter(Boolean).slice(0, 3),

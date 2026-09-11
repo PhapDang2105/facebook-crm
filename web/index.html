@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui-6">
+  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui-7">
 </head>
 <body>
   <div class="topbar">
@@ -248,6 +248,10 @@
           </section>
         </section>
         <section class="settings-section-content hidden" data-settings-panel="chatbot" aria-labelledby="chatbot-settings-title">
+          <div class="chatbot-dify-toolbar" aria-label="Thanh công cụ workflow">
+            <div class="chatbot-dify-toolbar-left"><strong>LLM</strong><span class="chatbot-dify-toolbar-status">Đã tự động lưu</span></div>
+            <div class="chatbot-dify-toolbar-actions"><button type="button" class="chatbot-toolbar-button chatbot-toolbar-preview">▷ &nbsp; Xem trước</button><button type="button" class="chatbot-toolbar-button">◷</button><button type="button" class="chatbot-toolbar-button">☷</button><button type="button" class="chatbot-toolbar-button chatbot-toolbar-feature">⚙ &nbsp; Tính năng</button><button type="button" class="chatbot-toolbar-publish">Xuất bản⌄</button></div>
+          </div>
           <form class="settings-card chatbot-settings-card" id="chatbot-settings-form">
             <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1></div><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label></header>
             <div class="chatbot-settings-body">
@@ -400,6 +404,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260911-vertex-ui-6"></script>
+  <script src="app.js?v=20260911-vertex-ui-7"></script>
 </body>
 </html>

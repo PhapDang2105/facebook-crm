@@ -702,6 +702,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-ai-overview a:hover { background: #eef6ff; }
 .chatbot-provider-card, .chatbot-llm-card { display: grid; gap: 15px; padding: 16px; background: #f7f9fc; border: 1px solid #dce5f1; border-radius: 12px; }
 .chatbot-llm-card { background: #fff; }
+.chatbot-provider-card > .chatbot-field { grid-template-columns: 142px minmax(0, 1fr); align-items: center; gap: 12px; }
 .chatbot-general-settings-pane > .chatbot-llm-card { min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
 .chatbot-general-settings-pane > .chatbot-llm-card > .chatbot-field { min-height: 0; }
 .chatbot-general-settings-pane > .chatbot-llm-card > .chatbot-field textarea { height: 100%; min-height: 260px; resize: none; }

@@ -298,12 +298,12 @@
                   <div class="chatbot-provider-card" id="chatbot-direct-config">
                     <div class="chatbot-settings-grid">
                       <label class="chatbot-field"><span>Nhà cung cấp mô hình</span><select id="chatbot-settings-provider"><option value="vertex">Google Vertex AI</option><option value="deepseek">DeepSeek</option><option value="custom">+ Khác</option></select></label>
-                      <label class="chatbot-field"><span>Tên model</span><input id="chatbot-settings-direct-model" maxlength="200" placeholder="gemini-2.5-flash"></label>
+                      <label class="chatbot-field"><span>Tên model</span><input id="chatbot-settings-direct-model" maxlength="200" placeholder="gemini-3-flash-preview"></label>
                       <label class="chatbot-field" id="chatbot-auth-type-field"><span>Kiểu xác thực</span><select id="chatbot-settings-auth-type"><option value="access_token">OAuth 2.0 access token</option><option value="api_key">Google Cloud API key</option></select></label>
                       <label class="chatbot-field hidden" id="chatbot-protocol-field"><span>Giao thức API</span><select id="chatbot-settings-protocol"><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label>
                     </div>
                     <label class="chatbot-field"><span id="chatbot-endpoint-label">Endpoint Vertex AI</span><input id="chatbot-settings-direct-endpoint" type="url" maxlength="500" placeholder="https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-2.5-flash:generateContent"></label>
-                    <label class="chatbot-field"><span id="chatbot-api-key-label">Access token Vertex AI</span><input id="chatbot-settings-direct-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="Nhập access token Google Cloud"></label>
+                      <label class="chatbot-field chatbot-service-credential-field" hidden><span id="chatbot-api-key-label">Access token Vertex AI</span><input id="chatbot-settings-direct-key" type="password" maxlength="1000" autocomplete="new-password" placeholder="Được cấu hình bảo mật trên máy chủ"></label>
                   </div>
                   <div class="chatbot-llm-card">
                     <label class="chatbot-field"><span>System prompt</span><textarea id="chatbot-settings-system-prompt" rows="12" maxlength="30000" placeholder="Nhập chỉ dẫn hệ thống cho model..."></textarea></label>

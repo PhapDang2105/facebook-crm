@@ -3,11 +3,11 @@ export const defaultChatbotSettings = Object.freeze({
   name: 'Trợ lý Giọt Nắng',
   responseMode: 'automatic',
   provider: 'vertex',
-  directEndpoint: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-2.5-flash:generateContent',
+  directEndpoint: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent',
   directApiKey: '',
   directAuthType: 'access_token',
   directProtocol: 'vertex',
-  directModel: 'gemini-2.5-flash',
+  directModel: 'gemini-3-flash-preview',
   systemPrompt: '',
   memoryEnabled: true,
   memoryWindow: 50,
@@ -46,8 +46,11 @@ export function normalizeChatbotSettings(value = {}) {
       : { endpoint: defaultChatbotSettings.directEndpoint, model: defaultChatbotSettings.directModel };
   const submittedDirectEndpoint = String(value.directEndpoint ?? '').trim();
   const submittedDirectModel = String(value.directModel ?? '').trim();
+  const migratedDirectModel = provider === 'vertex' && submittedDirectModel === 'gemini-2.5-flash'
+    ? 'gemini-3-flash-preview'
+    : submittedDirectModel;
   const directEndpoint = cleanText(submittedDirectEndpoint, providerDefaults.endpoint, 500);
-  const directModel = cleanText(submittedDirectModel, providerDefaults.model, 200);
+  const directModel = cleanText(migratedDirectModel, providerDefaults.model, 200);
   const messageTemplates = Object.fromEntries(Object.entries(value.messageTemplates || {})
     .slice(0, 100)
     .map(([key, text]) => [String(key).trim().slice(0, 100), String(text ?? '').trim().slice(0, 12000)])

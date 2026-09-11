@@ -1770,8 +1770,8 @@ function saveCustomerPanelStore() {
 
 const chatbotProviderProfiles = {
   vertex: {
-    endpoint: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-2.5-flash:generateContent',
-    model: 'gemini-2.5-flash', endpointLabel: 'Endpoint Vertex AI', keyLabel: 'Access token Vertex AI', keyPlaceholder: 'Nhập access token Google Cloud'
+    endpoint: 'https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent',
+    model: 'gemini-3-flash-preview', endpointLabel: 'Endpoint Vertex AI', keyLabel: 'Access token Vertex AI', keyPlaceholder: 'Được cấu hình bảo mật trên máy chủ'
   },
   deepseek: {
     endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-v4-flash', endpointLabel: 'Endpoint DeepSeek', keyLabel: 'Khóa API DeepSeek', keyPlaceholder: 'Nhập khóa API DeepSeek'

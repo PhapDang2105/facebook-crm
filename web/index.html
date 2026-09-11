@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui-11">
+  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui-12">
 </head>
 <body>
   <div class="topbar">
@@ -249,7 +249,7 @@
         </section>
         <section class="settings-section-content hidden" data-settings-panel="chatbot" aria-labelledby="chatbot-settings-title">
           <form class="settings-card chatbot-settings-card" id="chatbot-settings-form">
-            <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1></div><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label></header>
+            <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1></div><div class="chatbot-header-actions"><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label><button class="settings-save-button chatbot-settings-save-top" type="submit">Lưu cấu hình AI</button></div></header>
             <div class="chatbot-settings-body">
               <nav class="chatbot-workspace-tabs" aria-label="Khu vực thiết lập chatbot">
                 <button class="active" type="button" data-chatbot-workspace="messages"><img src="/assets/icons/bot-chat.svg" alt=""><b>Thiết lập tin nhắn</b></button>
@@ -328,7 +328,6 @@
               </section>
               <textarea id="chatbot-settings-welcome" class="hidden" aria-hidden="true"></textarea>
             </div>
-            <footer class="chatbot-settings-footer"><button class="settings-save-button" type="submit">Lưu cấu hình AI</button></footer>
           </form>
           <dialog class="chatbot-preview-dialog" id="chatbot-preview-dialog">
             <div class="chatbot-preview-dialog-head"><div><strong>XEM TRƯỚC BOT</strong><span>Kiểm tra JSON đầu ra trước khi bật luồng thật.</span></div><button id="chatbot-preview-close" type="button" aria-label="Đóng">×</button></div>
@@ -406,6 +405,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260911-vertex-ui-11"></script>
+  <script src="app.js?v=20260911-vertex-ui-12"></script>
 </body>
 </html>

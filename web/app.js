@@ -4257,7 +4257,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         directAuthType: chatbotSettingsAuthType.value,
         directProtocol: chatbotSettingsProtocol.value,
         directEndpoint: chatbotSettingsDirectEndpoint.value,
-        directApiKey: chatbotSettingsDirectKey.value,
+        directApiKey: chatbotSettingsDirectKey?.value || '',
         directModel: chatbotSettingsDirectModel.value,
         systemPrompt: chatbotSettingsSystemPrompt.value,
         memoryEnabled: chatbotSettingsMemoryEnabled.checked,

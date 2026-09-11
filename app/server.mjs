@@ -7,7 +7,7 @@ import { createLead, getSegments, updateLead } from './domain.mjs';
 import { buildExportRows } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
-import { buildCustomerOrderConfirmation, normalizeCustomerOrder } from './conversation-orders.mjs';
+import { buildCustomerOrderConfirmation, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { chatbotTemplates } from './chatbot-templates.mjs';
@@ -25,7 +25,7 @@ import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChan
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
-import { subscribeToMessagingEvents } from './message-events.mjs';
+import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
 import {
   getConversation,
   listConversations,
@@ -116,6 +116,26 @@ function publicCustomerPanel(conversation) {
     orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [],
     botEnabled: conversation?.botEnabled === true
   };
+}
+
+async function createChatbotCustomerOrder(conversation, input, context = {}) {
+  const sourceMessageId = String(context.sourceMessageId || '').trim();
+  const order = normalizeChatbotOrder(input, conversation, context);
+  const result = await updateMessagingStore(store => {
+    const item = store.conversations.find(entry => entry.id === conversation.id);
+    if (!item) return null;
+    if (!Array.isArray(item.customerOrders)) item.customerOrders = [];
+    const existing = sourceMessageId
+      ? item.customerOrders.find(entry => entry.chatbotSourceMessageId === sourceMessageId)
+      : null;
+    if (existing) return { order: existing, created: false };
+    item.customerOrders.unshift(order);
+    item.customerOrders = item.customerOrders.slice(0, 200);
+    return { order, created: true };
+  });
+  if (!result) throw new Error('Không tìm thấy hội thoại để tự tạo đơn.');
+  if (result.created) publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+  return result.order;
 }
 
 async function readChatbotSettings() {
@@ -628,6 +648,7 @@ const server = http.createServer(async (request, response) => {
           readSettings: readChatbotSettings,
           listMessages,
           sendMessage: sendConversationMessage,
+          createOrder: createChatbotCustomerOrder,
           saveBotState: (id, botState) => updateMessagingStore(store => {
             const conversation = store.conversations.find(item => item.id === id);
             if (!conversation) return null;

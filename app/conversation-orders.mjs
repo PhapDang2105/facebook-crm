@@ -45,6 +45,42 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
   };
 }
 
+export function normalizeChatbotOrder(input = {}, conversation = {}, {
+  now = Date.now(),
+  id = randomUUID().slice(0, 8),
+  sourceMessageId = '',
+  deliveryMessageId = ''
+} = {}) {
+  const items = Array.isArray(input.items) ? input.items.slice(0, 100).map(item => ({
+    name: text(item?.name || item?.product, 200),
+    quantity: Math.max(1, Math.round(Number(item?.quantity) || 1))
+  })).filter(item => item.name) : [];
+  const total = money(input.total);
+  const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+  const averageUnitPrice = totalQuantity ? Math.round(total / totalQuantity) : 0;
+  const order = normalizeCustomerOrder({
+    name: text(conversation.name || 'Khách Facebook', 200),
+    phone: input.phone,
+    address: input.address,
+    products: items.map(item => ({ ...item, price: averageUnitPrice })),
+    status: 'Mới',
+    source: 'Facebook',
+    payment: 'COD',
+    freeShipping: true,
+    note: 'Tạo tự động từ xác nhận của chatbot.',
+    employee: 'Chatbot AI'
+  }, { now, id });
+  if (total) order.total = total;
+  order.chatbotSourceMessageId = text(sourceMessageId, 200);
+  order.automatic = true;
+  order.delivery = {
+    status: 'sent',
+    messageId: text(deliveryMessageId, 200),
+    sentAt: now
+  };
+  return order;
+}
+
 export function formatOrderMoney(value) {
   return `${new Intl.NumberFormat('vi-VN').format(Number(value) || 0)}đ`;
 }

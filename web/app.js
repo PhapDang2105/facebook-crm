@@ -925,6 +925,11 @@ function cacheRemoteMessage(conversationId, message) {
 }
 
 function handleMessagingEvent(event) {
+  if (event.type === 'customer-panel') {
+    const active = getActiveConversation();
+    if (active?.dataset.conversationId === event.conversationId) loadCustomerPanelFromServer(active);
+    return;
+  }
   if (event.type === 'sync') {
     if (event.pageId === currentMessageChannelId) renderRemoteConversations(event.conversations || []);
     return;

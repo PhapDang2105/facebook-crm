@@ -132,7 +132,7 @@ export function requestChatbotReply(options) {
 }
 
 export async function processChatbotChanges(changes, dependencies) {
-  const { readSettings, listMessages, saveBotState, sendMessage, requestReply = requestChatbotReply } = dependencies;
+  const { readSettings, listMessages, saveBotState, sendMessage, createOrder, requestReply = requestChatbotReply } = dependencies;
   const settings = await readSettings();
   if (!settings.enabled) return [];
   const results = [];
@@ -145,9 +145,19 @@ export async function processChatbotChanges(changes, dependencies) {
       const reply = asksForHuman || change.message.type !== 'text'
         ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, settings.deletedTemplateIds)
         : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id) });
+      let firstSentMessageId = '';
       if (settings.responseMode === 'automatic') {
-        for (const text of reply.messages) await sendMessage(conversation, { text });
+        for (const text of reply.messages) {
+          const sent = await sendMessage(conversation, { text });
+          firstSentMessageId ||= String(sent?.message?.mid || sent?.message?.id || '');
+        }
       }
+      const order = settings.responseMode === 'automatic' && reply.order && createOrder
+        ? await createOrder(conversation, reply.order, {
+            sourceMessageId: String(change.message.mid || change.message.id || ''),
+            deliveryMessageId: firstSentMessageId
+          })
+        : null;
       await saveBotState(conversation.id, {
         botConversationId: reply.conversationId || conversation.botConversationId || '',
         botLastTemplateId: reply.templateId,
@@ -155,7 +165,7 @@ export async function processChatbotChanges(changes, dependencies) {
         botDraft: settings.responseMode === 'draft' ? reply.messages.join('\n\n') : '',
         ...(reply.handoff ? { botEnabled: false } : {})
       });
-      results.push({ conversationId: conversation.id, mode: settings.responseMode, templateId: reply.templateId });
+      results.push({ conversationId: conversation.id, mode: settings.responseMode, templateId: reply.templateId, ...(order ? { orderId: order.id } : {}) });
     } catch (error) {
       await saveBotState(conversation.id, { botLastError: error.message, botLastErrorAt: Date.now() });
       results.push({ conversationId: conversation.id, error: error.message });

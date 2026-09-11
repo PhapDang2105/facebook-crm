@@ -119,6 +119,32 @@ test('chỉ tự trả lời khi cả hệ thống và hội thoại đều bậ
   assert.equal(state[0].botConversationId, '');
 });
 
+test('tự tạo đơn sau khi chatbot gửi xác nhận thành công', async () => {
+  const created = [];
+  const result = await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true },
+    message: { id: 'mid.customer.1', mid: 'mid.customer.1', direction: 'incoming', type: 'text', text: 'chốt đơn' }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '' }),
+    listMessages: async () => [],
+    sendMessage: async () => ({ message: { mid: 'mid.bot.1' } }),
+    saveBotState: async () => {},
+    requestReply: async () => ({
+      templateId: 'ORDER_CONFIRMATION', messages: ['Xác nhận đơn'], handoff: false,
+      order: { items: [{ product: 'Túi Xanh', quantity: 2 }], phone: '0909123456', address: 'Quận 12', total: 298000 }
+    }),
+    createOrder: async (_conversation, order, context) => {
+      created.push({ order, context });
+      return { id: 'AUTO-01' };
+    }
+  });
+  assert.equal(created.length, 1);
+  assert.equal(created[0].context.sourceMessageId, 'mid.customer.1');
+  assert.equal(created[0].context.deliveryMessageId, 'mid.bot.1');
+  assert.equal(result[0].orderId, 'AUTO-01');
+});
+
 test('xác nhận đơn dùng giá nội bộ khi đủ dữ liệu', () => {
   const reply = renderChatbotReply({
     template_id: 'ORDER_CONFIRMATION',

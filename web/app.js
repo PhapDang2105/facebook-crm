@@ -4294,19 +4294,32 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
   }
 });
 
+function appendInlinePreviewBubble(kind, text) {
+  if (!chatbotPreviewResult) return null;
+  chatbotPreviewResult.querySelector('.chatbot-preview-empty')?.remove();
+  const bubble = document.createElement('div');
+  bubble.className = kind === 'user' ? 'chatbot-preview-user' : 'chatbot-preview-bot';
+  bubble.textContent = text;
+  chatbotPreviewResult.appendChild(bubble);
+  chatbotPreviewResult.scrollTop = chatbotPreviewResult.scrollHeight;
+  return bubble;
+}
+
 chatbotPreviewSend?.addEventListener('click', async () => {
   const message = chatbotPreviewInput.value.trim();
-  if (!message) { chatbotPreviewResult.textContent = 'Nhập một tin nhắn để bắt đầu test.'; return; }
+  if (!message) return;
   chatbotPreviewSend.disabled = true;
-  chatbotPreviewResult.textContent = 'Đang gọi model…';
+  appendInlinePreviewBubble('user', message);
+  const pendingBubble = appendInlinePreviewBubble('bot', 'Đang xử lý…');
+  chatbotPreviewInput.value = '';
   try {
     const result = await readApiResponse(await fetch('/api/chatbot/test', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: chatbotSettingsProvider.value, directEndpoint: chatbotSettingsDirectEndpoint.value, directModel: chatbotSettingsDirectModel.value, systemPrompt: chatbotSettingsSystemPrompt.value.trim() || 'Bạn là trợ lý chăm sóc khách hàng. Trả lời ngắn gọn, thân thiện bằng tiếng Việt.', structuredOutput: chatbotSettingsStructuredOutput.checked, directAuthType: 'access_token', message })
     }));
-    chatbotPreviewResult.textContent = JSON.stringify(result.parsed || result.raw || {}, null, 2);
+    if (pendingBubble) pendingBubble.textContent = JSON.stringify(result.parsed || result.raw || {}, null, 2);
   } catch (error) {
-    chatbotPreviewResult.textContent = `Test lỗi: ${error.message}`;
+    if (pendingBubble) pendingBubble.textContent = `Test lỗi: ${error.message}`;
   } finally { chatbotPreviewSend.disabled = false; }
 });
 

@@ -723,6 +723,14 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-preview-body { display: grid; grid-template-rows: 1fr auto; gap: 12px; align-items: stretch; min-height: 0; padding: 18px; background: #fff; }
 .chatbot-preview-body textarea { width: 100%; min-height: 62px; padding: 10px 12px; resize: vertical; color: #172033; border: 1px solid #dce5f1; border-radius: 8px; font: inherit; font-size: 13px; }
 .chatbot-preview-result { min-height: 0; overflow: auto; padding: 18px; white-space: pre-wrap; color: #3a4356; background: #f8fafc; border: 1px solid #e3e8ef; border-radius: 10px; font-size: 13px; line-height: 1.55; }
+.chatbot-preview-chat-inline { display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; white-space: normal; }
+.chatbot-preview-chat-inline .chatbot-preview-empty { margin: auto; text-align: center; }
+.chatbot-preview-chat-inline .chatbot-preview-user, .chatbot-preview-chat-inline .chatbot-preview-bot { max-width: 86%; padding: 10px 12px; white-space: pre-wrap; font-size: 13px; line-height: 1.45; }
+.chatbot-preview-chat-inline .chatbot-preview-user { align-self: flex-end; color: #fff; background: #4b68f5; border-radius: 12px 12px 3px 12px; }
+.chatbot-preview-chat-inline .chatbot-preview-bot { align-self: flex-start; color: #29364d; background: #fff; border: 1px solid #dce5f1; border-radius: 12px 12px 12px 3px; }
+.chatbot-preview-compose { display: grid; grid-template-columns: 1fr 42px; gap: 8px; align-items: end; padding: 10px; background: #fff; border: 1px solid #dce5f1; border-radius: 10px; box-shadow: 0 3px 12px rgba(42, 65, 100, .06); }
+.chatbot-preview-compose textarea { min-height: 42px; max-height: 100px; padding: 10px 12px; resize: none; color: #172033; border: 0; outline: 0; font: inherit; font-size: 13px; }
+.chatbot-preview-compose .chatbot-preview-button { min-width: 42px; width: 42px; height: 38px; padding: 0; border-radius: 9px; }
 .chatbot-llm-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
 .chatbot-option-group { display: grid; grid-template-columns: minmax(0, 1fr) 88px; align-items: stretch; min-height: 62px; overflow: hidden; background: #f7f9fc; border: 1px solid #dce5f1; border-radius: 9px; }
 .chatbot-option-group--single { grid-template-columns: 1fr; }

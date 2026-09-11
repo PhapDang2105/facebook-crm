@@ -43,6 +43,7 @@ input:focus-visible {
 }
 
 .hidden { display: none !important; }
+.chatbot-field:has(#chatbot-settings-direct-key) { display: none !important; }
 
 .topbar {
   position: fixed;

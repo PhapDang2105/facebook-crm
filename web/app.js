@@ -1814,7 +1814,7 @@ function renderChatbotProvider(resetValues = false) {
   if (resetValues) {
     chatbotSettingsDirectEndpoint.value = profile.endpoint;
     chatbotSettingsDirectModel.value = profile.model;
-    chatbotSettingsDirectKey.value = '';
+    if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.value = '';
   }
 }
 
@@ -1835,8 +1835,10 @@ async function loadChatbotSettings() {
     const migratedModel = settings.provider === 'vertex' && settings.directModel === 'gemini-2.5-flash' ? 'gemini-3-flash-preview' : (settings.directModel || profile.model);
     chatbotSettingsDirectEndpoint.value = (settings.directEndpoint || profile.endpoint).replace('gemini-2.5-flash', migratedModel);
     chatbotSettingsDirectModel.value = migratedModel;
-    chatbotSettingsDirectKey.value = '';
-    chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
+    if (chatbotSettingsDirectKey) {
+      chatbotSettingsDirectKey.value = '';
+      chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
+    }
     chatbotSettingsSystemPrompt.value = settings.systemPrompt || '';
     chatbotSettingsMemoryEnabled.checked = settings.memoryEnabled !== false;
     chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
@@ -4279,7 +4281,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
     chatbotSettingsEnabled.checked = settings.enabled === true;
     if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.value = '';
     const profile = getChatbotProviderProfile();
-    chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
+    if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
   } catch (error) {
     showToast(error.message || 'Chưa lưu được thiết lập chatbot.', 'error');
   } finally {

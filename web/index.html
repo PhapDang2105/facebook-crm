@@ -295,6 +295,7 @@
                     <span class="chatbot-ai-overview-icon"><img src="/assets/icons/ai-model.svg" alt=""></span>
                     <div><strong>Mô hình AI</strong></div>
                   </div>
+                  <div class="chatbot-general-settings-pane">
                   <div class="chatbot-provider-card" id="chatbot-direct-config">
                     <div class="chatbot-settings-grid">
                       <label class="chatbot-field"><span>Nhà cung cấp mô hình</span><select id="chatbot-settings-provider"><option value="vertex">Google Vertex AI</option><option value="deepseek">DeepSeek</option><option value="custom">+ Khác</option></select></label>
@@ -311,6 +312,7 @@
                       <div class="chatbot-option-group chatbot-option-group--single"><label class="chatbot-option-check"><input id="chatbot-settings-structured-output" type="checkbox" checked><span>JSON có cấu trúc</span></label></div>
                       <div class="chatbot-option-group"><label class="chatbot-mini-field"><span>Thử lại</span><input id="chatbot-settings-retry-count" type="number" min="0" max="5" value="1"></label><label class="chatbot-mini-field"><span>Khoảng nghỉ (ms)</span><input id="chatbot-settings-retry-interval" type="number" min="100" max="10000" step="100" value="1000"></label></div>
                     </div>
+                  </div>
                   </div>
                   <section class="chatbot-preview-card" aria-labelledby="chatbot-preview-title">
                     <div class="chatbot-preview-head"><div><strong id="chatbot-preview-title">Xem trước &amp; test bot</strong><span>Gửi thử một tin nhắn bằng đúng cấu hình hiện tại.</span></div><div class="chatbot-preview-actions"><button class="chatbot-preview-open" id="chatbot-preview-open" type="button">Mở hộp thoại</button><button class="settings-save-button chatbot-preview-button" id="chatbot-preview-send" type="button">Gửi thử</button></div></div>

@@ -1794,7 +1794,8 @@ function renderChatbotProvider(resetValues = false) {
   const profile = getChatbotProviderProfile();
   const vertex = chatbotSettingsProvider?.value === 'vertex';
   const custom = chatbotSettingsProvider?.value === 'custom';
-  chatbotAuthTypeField?.classList.toggle('hidden', !vertex);
+  chatbotAuthTypeField?.classList.toggle('hidden', true);
+  chatbotSettingsDirectKey?.closest('label')?.setAttribute('hidden', 'hidden');
   chatbotProtocolField?.classList.toggle('hidden', !custom);
   if (chatbotEndpointLabel) chatbotEndpointLabel.textContent = profile.endpointLabel;
   if (chatbotApiKeyLabel) chatbotApiKeyLabel.textContent = vertex && chatbotSettingsAuthType?.value === 'api_key' ? 'Google Cloud API key' : profile.keyLabel;
@@ -1824,8 +1825,9 @@ async function loadChatbotSettings() {
     chatbotSettingsProtocol.value = settings.directProtocol === 'anthropic' ? 'anthropic' : 'openai';
     renderChatbotProvider();
     const profile = getChatbotProviderProfile();
-    chatbotSettingsDirectEndpoint.value = settings.directEndpoint || profile.endpoint;
-    chatbotSettingsDirectModel.value = settings.directModel || profile.model;
+    const migratedModel = settings.provider === 'vertex' && settings.directModel === 'gemini-2.5-flash' ? 'gemini-3-flash-preview' : (settings.directModel || profile.model);
+    chatbotSettingsDirectEndpoint.value = (settings.directEndpoint || profile.endpoint).replace('gemini-2.5-flash', migratedModel);
+    chatbotSettingsDirectModel.value = migratedModel;
     chatbotSettingsDirectKey.value = '';
     chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
     chatbotSettingsSystemPrompt.value = settings.systemPrompt || '';

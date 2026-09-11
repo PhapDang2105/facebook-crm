@@ -2018,6 +2018,7 @@ function readImageFile(file) {
 
 function showSettingsSection(name = 'channels') {
   const section = settingsPanels.has(name) ? name : 'channels';
+  document.body.classList.toggle('chatbot-dify-mode', section === 'chatbot');
   showView('settings');
   settingsPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== section));
   settingsSectionButtons.forEach(button => button.classList.toggle('active', button.dataset.settingsSection === section));

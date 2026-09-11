@@ -304,6 +304,16 @@ main {
   transition: margin-left 180ms var(--ease-out), width 180ms var(--ease-out);
 }
 
+body.chatbot-dify-mode { background: #f4f6fb; overflow: hidden; }
+body.chatbot-dify-mode .topbar,
+body.chatbot-dify-mode > .sidebar { display: none; }
+body.chatbot-dify-mode main { width: 100%; height: 100vh; margin: 0; padding: 16px; overflow: auto; }
+body.chatbot-dify-mode #settings-view { min-height: calc(100vh - 32px); }
+body.chatbot-dify-mode .settings-page { width: 100%; max-width: none; }
+body.chatbot-dify-mode .chatbot-settings-card { min-height: calc(100vh - 112px); border: 1px solid #dfe6f0; border-radius: 12px; box-shadow: 0 8px 28px rgba(36, 55, 90, .08); }
+body.chatbot-dify-mode .chatbot-settings-card > .settings-card-head { min-height: 54px; background: #fff; }
+body.chatbot-dify-mode .chatbot-dify-toolbar { margin-top: 0; }
+
 .sidebar-collapsed .sidebar { width: 68.4px; }
 .sidebar-collapsed main { width: calc(100% - 68.4px); margin-left: 68.4px; }
 

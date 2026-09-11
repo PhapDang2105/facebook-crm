@@ -9,7 +9,7 @@ import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
-import { processChatbotChanges } from './chatbot-engine.mjs';
+import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { chatbotTemplates } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import {
@@ -409,6 +409,20 @@ const server = http.createServer(async (request, response) => {
         ...publicChatbotSettings(settings),
         templates: { ...chatbotTemplates, ...settings.messageTemplates }
       });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/test') {
+      const current = await readChatbotSettings();
+      const payload = await readBody(request, 256 * 1024);
+      const text = String(payload.message || '').trim();
+      if (!text) return sendJson(response, 400, { error: 'Vui lòng nhập tin nhắn thử.' });
+      const settings = normalizeChatbotSettings({ ...current, ...payload, enabled: true, directApiKey: '' });
+      const reply = await requestDirectModelReply({
+        settings,
+        conversation: { id: 'preview', name: 'Khách xem trước', botEnabled: true },
+        message: { type: 'text', text },
+        recentMessages: []
+      });
+      return sendJson(response, 200, { messages: reply.messages, templateId: reply.templateId });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const store = await readChannelStore();

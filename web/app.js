@@ -142,6 +142,9 @@ const chatbotSettingsStructuredOutput = document.querySelector('#chatbot-setting
 const chatbotSettingsRetryCount = document.querySelector('#chatbot-settings-retry-count');
 const chatbotSettingsRetryInterval = document.querySelector('#chatbot-settings-retry-interval');
 const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome');
+const chatbotPreviewSend = document.querySelector('#chatbot-preview-send');
+const chatbotPreviewInput = document.querySelector('#chatbot-preview-input');
+const chatbotPreviewResult = document.querySelector('#chatbot-preview-result');
 const chatbotWorkspaceButtons = [...document.querySelectorAll('[data-chatbot-workspace]')];
 const chatbotWorkspacePanels = [...document.querySelectorAll('[data-chatbot-workspace-panel]')];
 const chatbotTemplateSearch = document.querySelector('#chatbot-template-search');
@@ -4274,7 +4277,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
       })
     }));
     chatbotSettingsEnabled.checked = settings.enabled === true;
-    chatbotSettingsDirectKey.value = '';
+    if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.value = '';
     const profile = getChatbotProviderProfile();
     chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
   } catch (error) {
@@ -4282,6 +4285,22 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
   } finally {
     submit.disabled = false;
   }
+});
+
+chatbotPreviewSend?.addEventListener('click', async () => {
+  const message = chatbotPreviewInput.value.trim();
+  if (!message) { chatbotPreviewResult.textContent = 'Nhập một tin nhắn để bắt đầu test.'; return; }
+  chatbotPreviewSend.disabled = true;
+  chatbotPreviewResult.textContent = 'Đang gọi model…';
+  try {
+    const result = await readApiResponse(await fetch('/api/chatbot/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: chatbotSettingsProvider.value, directEndpoint: chatbotSettingsDirectEndpoint.value, directModel: chatbotSettingsDirectModel.value, systemPrompt: chatbotSettingsSystemPrompt.value, structuredOutput: chatbotSettingsStructuredOutput.checked, directAuthType: 'access_token', message })
+    }));
+    chatbotPreviewResult.textContent = (result.messages || []).join('\n\n') || 'Model chưa trả về nội dung.';
+  } catch (error) {
+    chatbotPreviewResult.textContent = `Test lỗi: ${error.message}`;
+  } finally { chatbotPreviewSend.disabled = false; }
 });
 
 function applyImportedRecords(sourceHeaders, records) {

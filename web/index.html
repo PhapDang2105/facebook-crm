@@ -305,13 +305,17 @@
                     <label class="chatbot-field"><span id="chatbot-endpoint-label">Endpoint Vertex AI</span><input id="chatbot-settings-direct-endpoint" type="url" maxlength="500" placeholder="https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent"></label>
                   </div>
                   <div class="chatbot-llm-card">
-                    <label class="chatbot-field"><span>System prompt</span><textarea id="chatbot-settings-system-prompt" rows="12" maxlength="30000" placeholder="Nhập chỉ dẫn hệ thống cho model..."></textarea></label>
+                    <label class="chatbot-field"><span>System prompt</span><textarea id="chatbot-settings-system-prompt" rows="6" maxlength="30000" placeholder="Nhập chỉ dẫn hệ thống cho model..."></textarea></label>
                     <div class="chatbot-llm-options">
                       <div class="chatbot-option-group"><label class="chatbot-option-check"><input id="chatbot-settings-memory-enabled" type="checkbox" checked><span>Bộ nhớ hội thoại</span></label><label class="chatbot-mini-field"><span>Cửa sổ</span><input id="chatbot-settings-memory-window" type="number" min="1" max="100" value="50"></label></div>
                       <div class="chatbot-option-group chatbot-option-group--single"><label class="chatbot-option-check"><input id="chatbot-settings-structured-output" type="checkbox" checked><span>JSON có cấu trúc</span></label></div>
                       <div class="chatbot-option-group"><label class="chatbot-mini-field"><span>Thử lại</span><input id="chatbot-settings-retry-count" type="number" min="0" max="5" value="1"></label><label class="chatbot-mini-field"><span>Khoảng nghỉ (ms)</span><input id="chatbot-settings-retry-interval" type="number" min="100" max="10000" step="100" value="1000"></label></div>
                     </div>
                   </div>
+                  <section class="chatbot-preview-card" aria-labelledby="chatbot-preview-title">
+                    <div class="chatbot-preview-head"><div><strong id="chatbot-preview-title">Xem trước &amp; test bot</strong><span>Gửi thử một tin nhắn bằng đúng cấu hình hiện tại.</span></div><button class="settings-save-button chatbot-preview-button" id="chatbot-preview-send" type="button">Gửi thử</button></div>
+                    <div class="chatbot-preview-body"><textarea id="chatbot-preview-input" rows="2" maxlength="2000" placeholder="Ví dụ: Túi Xanh giá bao nhiêu ạ?"></textarea><div id="chatbot-preview-result" class="chatbot-preview-result" aria-live="polite">Chưa có lượt test.</div></div>
+                  </section>
                 </div>
               </section>
               <textarea id="chatbot-settings-welcome" class="hidden" aria-hidden="true"></textarea>

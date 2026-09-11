@@ -6,7 +6,7 @@ export function parseModelAnswer(answer) {
   try { return JSON.parse(raw); } catch { return { template_id: 'CSKH_HANDOFF' }; }
 }
 
-export function buildChatbotQuery({ conversation, message, recentMessages = [], settings }) {
+export function buildChatbotQuery({ conversation, message, recentMessages = [], settings, includeHistory = true }) {
   const historyLimit = settings?.memoryEnabled === false ? 0 : Math.max(1, Number(settings?.memoryWindow) || 12);
   const history = historyLimit
     ? recentMessages.slice(-historyLimit).map(item => `${item.direction === 'incoming' ? 'Khách' : 'Giọt Nắng'}: ${item.text || `[${item.type}]`}`).join('\n')
@@ -14,9 +14,32 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
   return [
     `KÊNH: Facebook Messenger`,
     `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
-    history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
+    includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
     `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`
   ].filter(Boolean).join('\n\n');
+}
+
+function buildMemoryTurns({ recentMessages = [], message, settings }) {
+  if (settings?.memoryEnabled === false) return [];
+  const limit = Math.max(1, Number(settings?.memoryWindow) || 12);
+  return recentMessages
+    .filter(item => item && item.id !== message?.id && String(item.text || '').trim())
+    .slice(-limit)
+    .map(item => ({
+      role: item.direction === 'incoming' ? 'user' : 'model',
+      text: String(item.text).trim()
+    }));
+}
+
+function mergeAnthropicTurns(turns) {
+  const merged = [];
+  for (const turn of turns) {
+    const role = turn.role === 'user' ? 'user' : 'assistant';
+    const previous = merged.at(-1);
+    if (previous?.role === role) previous.content += `\n${turn.text}`;
+    else merged.push({ role, content: turn.text });
+  }
+  return merged;
 }
 
 function wait(milliseconds) {
@@ -39,10 +62,14 @@ export async function requestDirectModelReply({ settings, conversation, message,
       const accessToken = vertex && settings.directAuthType !== 'api_key'
         ? (settings.directApiKey || await getVertexAccessToken({ fetchImpl }))
         : settings.directApiKey;
-      const query = buildChatbotQuery({ conversation, message, recentMessages, settings });
+      const memoryTurns = buildMemoryTurns({ recentMessages, message, settings });
+      const query = buildChatbotQuery({ conversation, message, recentMessages, settings, includeHistory: false });
       const body = vertex ? {
         systemInstruction: { parts: [{ text: settings.systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: query }] }],
+        contents: [
+          ...memoryTurns.map(turn => ({ role: turn.role, parts: [{ text: turn.text }] })),
+          { role: 'user', parts: [{ text: query }] }
+        ],
         generationConfig: {
           temperature: 0.1,
           ...(settings.structuredOutput !== false ? { responseMimeType: 'application/json' } : {})
@@ -51,10 +78,14 @@ export async function requestDirectModelReply({ settings, conversation, message,
         model,
         max_tokens: 1024,
         system: settings.systemPrompt,
-        messages: [{ role: 'user', content: query }]
+        messages: mergeAnthropicTurns([...memoryTurns, { role: 'user', text: query }])
       } : {
         model,
-        messages: [{ role: 'system', content: settings.systemPrompt }, { role: 'user', content: query }],
+        messages: [
+          { role: 'system', content: settings.systemPrompt },
+          ...memoryTurns.map(turn => ({ role: turn.role === 'model' ? 'assistant' : 'user', content: turn.text })),
+          { role: 'user', content: query }
+        ],
         temperature: 0.1,
         ...(settings.structuredOutput !== false ? { response_format: { type: 'json_object' } } : {})
       };

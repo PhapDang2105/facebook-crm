@@ -172,6 +172,7 @@ const chatbotStepCodeApply = document.querySelector('#chatbot-step-code-apply');
 let chatbotTemplatesState = {};
 let chatbotOriginalTemplates = {};
 let chatbotProcessingSteps = [];
+let chatbotPreviewHistory = [];
 let selectedChatbotTemplate = '';
 let selectedChatbotStep = '';
 let sharedProducts = [];
@@ -4309,6 +4310,7 @@ function appendInlinePreviewBubble(kind, text) {
 chatbotPreviewReset?.addEventListener('click', () => {
   chatbotPreviewResult.innerHTML = '<div class="chatbot-preview-empty"><img src="/assets/icons/bot-chat.svg" alt=""><span>Nhập nội dung vào hộp bên dưới để bắt đầu gỡ lỗi Chatbot</span></div>';
   chatbotPreviewInput.value = '';
+  chatbotPreviewHistory = [];
   chatbotPreviewInput.focus();
 });
 
@@ -4322,9 +4324,11 @@ chatbotPreviewSend?.addEventListener('click', async () => {
   try {
     const result = await readApiResponse(await fetch('/api/chatbot/test', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: chatbotSettingsProvider.value, directEndpoint: chatbotSettingsDirectEndpoint.value, directModel: chatbotSettingsDirectModel.value, systemPrompt: chatbotSettingsSystemPrompt.value.trim() || 'Bạn là trợ lý chăm sóc khách hàng. Trả lời ngắn gọn, thân thiện bằng tiếng Việt.', structuredOutput: chatbotSettingsStructuredOutput.checked, directAuthType: 'access_token', message })
+      body: JSON.stringify({ provider: chatbotSettingsProvider.value, directEndpoint: chatbotSettingsDirectEndpoint.value, directModel: chatbotSettingsDirectModel.value, systemPrompt: chatbotSettingsSystemPrompt.value.trim() || 'Bạn là trợ lý chăm sóc khách hàng. Trả lời ngắn gọn, thân thiện bằng tiếng Việt.', structuredOutput: chatbotSettingsStructuredOutput.checked, directAuthType: 'access_token', message, recentMessages: chatbotPreviewHistory })
     }));
-    if (pendingBubble) pendingBubble.textContent = JSON.stringify(result.parsed || result.raw || {}, null, 2);
+    const answerText = JSON.stringify(result.parsed || result.raw || {}, null, 2);
+    if (pendingBubble) pendingBubble.textContent = answerText;
+    chatbotPreviewHistory.push({ id: `preview-user-${Date.now()}`, direction: 'incoming', text: message }, { id: `preview-bot-${Date.now()}`, direction: 'outgoing', text: answerText });
   } catch (error) {
     if (pendingBubble) pendingBubble.textContent = `Test lỗi: ${error.message}`;
   } finally { chatbotPreviewSend.disabled = false; }

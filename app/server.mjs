@@ -415,12 +415,20 @@ const server = http.createServer(async (request, response) => {
       const payload = await readBody(request, 256 * 1024);
       const text = String(payload.message || '').trim();
       if (!text) return sendJson(response, 400, { error: 'Vui lòng nhập tin nhắn thử.' });
+      const recentMessages = Array.isArray(payload.recentMessages)
+        ? payload.recentMessages.slice(-100).map(item => ({
+          id: String(item?.id || '').slice(0, 120),
+          direction: item?.direction === 'outgoing' ? 'outgoing' : 'incoming',
+          type: 'text',
+          text: String(item?.text || '').slice(0, 12000)
+        })).filter(item => item.text.trim())
+        : [];
       const settings = normalizeChatbotSettings({ ...current, ...payload, enabled: true, directApiKey: '' });
       const reply = await requestDirectModelReply({
         settings,
         conversation: { id: 'preview', name: 'Khách xem trước', botEnabled: true },
         message: { type: 'text', text },
-        recentMessages: [],
+        recentMessages,
         rawResponse: true
       });
       return sendJson(response, 200, { raw: reply.raw, parsed: reply.parsed });

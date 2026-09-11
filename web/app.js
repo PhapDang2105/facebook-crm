@@ -4297,7 +4297,7 @@ chatbotPreviewSend?.addEventListener('click', async () => {
   try {
     const result = await readApiResponse(await fetch('/api/chatbot/test', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: chatbotSettingsProvider.value, directEndpoint: chatbotSettingsDirectEndpoint.value, directModel: chatbotSettingsDirectModel.value, systemPrompt: chatbotSettingsSystemPrompt.value, structuredOutput: chatbotSettingsStructuredOutput.checked, directAuthType: 'access_token', message })
+      body: JSON.stringify({ provider: chatbotSettingsProvider.value, directEndpoint: chatbotSettingsDirectEndpoint.value, directModel: chatbotSettingsDirectModel.value, systemPrompt: chatbotSettingsSystemPrompt.value.trim() || 'Bạn là trợ lý chăm sóc khách hàng. Trả lời ngắn gọn, thân thiện bằng tiếng Việt.', structuredOutput: chatbotSettingsStructuredOutput.checked, directAuthType: 'access_token', message })
     }));
     chatbotPreviewResult.textContent = (result.messages || []).join('\n\n') || 'Model chưa trả về nội dung.';
   } catch (error) {

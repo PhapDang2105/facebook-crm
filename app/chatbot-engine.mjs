@@ -1,4 +1,5 @@
 import { renderChatbotReply } from './chatbot-templates.mjs';
+import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
 
 export function parseModelAnswer(answer) {
   const raw = String(answer || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -23,18 +24,21 @@ function wait(milliseconds) {
 }
 
 export async function requestDirectModelReply({ settings, conversation, message, recentMessages = [], fetchImpl = fetch }) {
-  if (!settings.directApiKey) throw new Error('Chatbot chưa có khóa API hoặc access token của nhà cung cấp.');
+  const vertex = settings.provider === 'vertex';
+  if (!settings.directApiKey && (!vertex || settings.directAuthType === 'api_key')) throw new Error('Chatbot chưa có khóa API hoặc access token của nhà cung cấp.');
   if (!settings.systemPrompt) throw new Error('Chatbot chưa có system prompt.');
   const attempts = 1 + Math.max(0, Number(settings.retryCount) || 0);
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const vertex = settings.provider === 'vertex';
       const anthropic = settings.directProtocol === 'anthropic';
       const model = settings.directModel || (vertex ? 'gemini-2.5-flash' : 'deepseek-v4-flash');
       const endpoint = vertex
-        ? String(settings.directEndpoint).replace(/\/models\/[^/:]+:generateContent(?:\?.*)?$/, `/models/${encodeURIComponent(model)}:generateContent`)
+        ? String(settings.directEndpoint || '').replace('PROJECT_ID', encodeURIComponent(vertexProjectId())).replace(/\/models\/[^/:]+:generateContent(?:\?.*)?$/, `/models/${encodeURIComponent(model)}:generateContent`)
         : settings.directEndpoint;
+      const accessToken = vertex && settings.directAuthType !== 'api_key'
+        ? (settings.directApiKey || await getVertexAccessToken({ fetchImpl }))
+        : settings.directApiKey;
       const query = buildChatbotQuery({ conversation, message, recentMessages, settings });
       const body = vertex ? {
         systemInstruction: { parts: [{ text: settings.systemPrompt }] },
@@ -61,7 +65,7 @@ export async function requestDirectModelReply({ settings, conversation, message,
             ? { 'x-api-key': settings.directApiKey, 'anthropic-version': '2023-06-01' }
             : vertex && settings.directAuthType === 'api_key'
             ? { 'x-goog-api-key': settings.directApiKey }
-            : { Authorization: `Bearer ${settings.directApiKey}` }),
+            : { Authorization: `Bearer ${accessToken}` }),
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(body)

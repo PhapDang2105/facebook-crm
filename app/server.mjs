@@ -420,9 +420,10 @@ const server = http.createServer(async (request, response) => {
         settings,
         conversation: { id: 'preview', name: 'Khách xem trước', botEnabled: true },
         message: { type: 'text', text },
-        recentMessages: []
+        recentMessages: [],
+        rawResponse: true
       });
-      return sendJson(response, 200, { messages: reply.messages, templateId: reply.templateId });
+      return sendJson(response, 200, { raw: reply.raw, parsed: reply.parsed });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const store = await readChannelStore();

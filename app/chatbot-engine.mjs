@@ -23,7 +23,7 @@ function wait(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
-export async function requestDirectModelReply({ settings, conversation, message, recentMessages = [], fetchImpl = fetch }) {
+export async function requestDirectModelReply({ settings, conversation, message, recentMessages = [], fetchImpl = fetch, rawResponse = false }) {
   const vertex = settings.provider === 'vertex';
   if (!settings.directApiKey && (!vertex || settings.directAuthType === 'api_key')) throw new Error('Chatbot chưa có khóa API hoặc access token của nhà cung cấp.');
   if (!settings.systemPrompt) throw new Error('Chatbot chưa có system prompt.');
@@ -82,10 +82,9 @@ export async function requestDirectModelReply({ settings, conversation, message,
           ? payload?.content?.map(part => part.type === 'text' ? part.text || '' : '').join('').trim()
         : payload?.choices?.[0]?.message?.content;
       if (!answer) throw new Error('Mô hình không trả về nội dung.');
-      return {
-        ...renderChatbotReply(parseModelAnswer(answer), settings.messageTemplates),
-        conversationId: ''
-      };
+      const parsedAnswer = parseModelAnswer(answer);
+      if (rawResponse) return { raw: answer, parsed: parsedAnswer, conversationId: '' };
+      return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates), conversationId: '' };
     } catch (error) {
       lastError = error;
       if (attempt + 1 < attempts) await wait(Math.max(100, Number(settings.retryIntervalMs) || 1000));

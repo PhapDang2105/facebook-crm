@@ -1796,6 +1796,8 @@ function renderChatbotProvider(resetValues = false) {
   const custom = chatbotSettingsProvider?.value === 'custom';
   chatbotAuthTypeField?.classList.toggle('hidden', true);
   chatbotSettingsDirectKey?.closest('label')?.setAttribute('hidden', 'hidden');
+  chatbotSettingsDirectKey?.parentElement?.classList.add('hidden');
+  chatbotApiKeyLabel?.parentElement?.classList.add('hidden');
   chatbotProtocolField?.classList.toggle('hidden', !custom);
   if (chatbotEndpointLabel) chatbotEndpointLabel.textContent = profile.endpointLabel;
   if (chatbotApiKeyLabel) chatbotApiKeyLabel.textContent = vertex && chatbotSettingsAuthType?.value === 'api_key' ? 'Google Cloud API key' : profile.keyLabel;

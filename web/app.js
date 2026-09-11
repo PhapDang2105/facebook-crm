@@ -143,6 +143,7 @@ const chatbotSettingsRetryCount = document.querySelector('#chatbot-settings-retr
 const chatbotSettingsRetryInterval = document.querySelector('#chatbot-settings-retry-interval');
 const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome');
 const chatbotPreviewSend = document.querySelector('#chatbot-preview-send');
+const chatbotPreviewReset = document.querySelector('#chatbot-preview-reset');
 const chatbotPreviewInput = document.querySelector('#chatbot-preview-input');
 const chatbotPreviewResult = document.querySelector('#chatbot-preview-result');
 const chatbotPreviewDialog = document.querySelector('#chatbot-preview-dialog');
@@ -2018,7 +2019,6 @@ function readImageFile(file) {
 
 function showSettingsSection(name = 'channels') {
   const section = settingsPanels.has(name) ? name : 'channels';
-  document.body.classList.toggle('chatbot-dify-mode', section === 'chatbot');
   showView('settings');
   settingsPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== section));
   settingsSectionButtons.forEach(button => button.classList.toggle('active', button.dataset.settingsSection === section));
@@ -4306,6 +4306,12 @@ function appendInlinePreviewBubble(kind, text) {
   return bubble;
 }
 
+chatbotPreviewReset?.addEventListener('click', () => {
+  chatbotPreviewResult.innerHTML = '<div class="chatbot-preview-empty"><img src="/assets/icons/bot-chat.svg" alt=""><span>Nhập nội dung vào hộp bên dưới để bắt đầu gỡ lỗi Chatbot</span></div>';
+  chatbotPreviewInput.value = '';
+  chatbotPreviewInput.focus();
+});
+
 chatbotPreviewSend?.addEventListener('click', async () => {
   const message = chatbotPreviewInput.value.trim();
   if (!message) return;
@@ -4322,6 +4328,12 @@ chatbotPreviewSend?.addEventListener('click', async () => {
   } catch (error) {
     if (pendingBubble) pendingBubble.textContent = `Test lỗi: ${error.message}`;
   } finally { chatbotPreviewSend.disabled = false; }
+});
+
+chatbotPreviewInput?.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey) return;
+  event.preventDefault();
+  chatbotPreviewSend?.click();
 });
 
 chatbotPreviewOpen?.addEventListener('click', () => chatbotPreviewDialog?.showModal());

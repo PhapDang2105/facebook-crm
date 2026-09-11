@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui-9">
+  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui-10">
 </head>
 <body>
   <div class="topbar">
@@ -248,10 +248,6 @@
           </section>
         </section>
         <section class="settings-section-content hidden" data-settings-panel="chatbot" aria-labelledby="chatbot-settings-title">
-          <div class="chatbot-dify-toolbar" aria-label="Thanh công cụ workflow">
-            <div class="chatbot-dify-toolbar-left"><strong>LLM</strong><span class="chatbot-dify-toolbar-status">Đã tự động lưu</span></div>
-            <div class="chatbot-dify-toolbar-actions"><button type="button" class="chatbot-toolbar-button chatbot-toolbar-preview">▷ &nbsp; Xem trước</button><button type="button" class="chatbot-toolbar-button">◷</button><button type="button" class="chatbot-toolbar-button">☷</button><button type="button" class="chatbot-toolbar-button chatbot-toolbar-feature">⚙ &nbsp; Tính năng</button><button type="button" class="chatbot-toolbar-publish">Xuất bản⌄</button></div>
-          </div>
           <form class="settings-card chatbot-settings-card" id="chatbot-settings-form">
             <header class="settings-card-head"><div><h1 id="chatbot-settings-title">Thiết lập chatbot</h1></div><label class="chatbot-master-toggle"><input id="chatbot-settings-enabled" type="checkbox"><span></span><b>Cho phép chatbot hoạt động</b></label></header>
             <div class="chatbot-settings-body">
@@ -300,6 +296,8 @@
                     <div><strong>Mô hình AI</strong></div>
                   </div>
                   <div class="chatbot-general-settings-pane">
+                    <div class="chatbot-llm-pane-head"><div><img src="/assets/icons/ai-model.svg" alt=""><strong>LLM</strong></div><div class="chatbot-llm-pane-actions"><button type="button" aria-label="Chạy thử">▷</button><button type="button" aria-label="Tài liệu">▣</button><button type="button" aria-label="Thêm">•••</button></div></div>
+                    <div class="chatbot-llm-pane-tabs"><button class="active" type="button">CÀI ĐẶT</button><button type="button">CHẠY LẦN CUỐI</button></div>
                   <div class="chatbot-provider-card" id="chatbot-direct-config">
                     <div class="chatbot-settings-grid">
                       <label class="chatbot-field"><span>Nhà cung cấp mô hình</span><select id="chatbot-settings-provider"><option value="vertex">Google Vertex AI</option><option value="deepseek">DeepSeek</option><option value="custom">+ Khác</option></select></label>
@@ -319,8 +317,12 @@
                   </div>
                   </div>
                   <section class="chatbot-preview-card" aria-labelledby="chatbot-preview-title">
-                    <div class="chatbot-preview-head"><div><strong id="chatbot-preview-title">XEM TRƯỚC</strong><span>Kiểm tra luồng chatbot theo thời gian thực.</span></div></div>
-                    <div class="chatbot-preview-body"><div id="chatbot-preview-result" class="chatbot-preview-result chatbot-preview-chat-inline" aria-live="polite"><div class="chatbot-preview-empty">Nhập nội dung vào ô bên dưới để bắt đầu gỡ lỗi Chatbot</div></div><div class="chatbot-preview-compose"><textarea id="chatbot-preview-input" rows="2" maxlength="2000" placeholder="Nhập tin nhắn..."></textarea><button class="settings-save-button chatbot-preview-button" id="chatbot-preview-send" type="button" aria-label="Gửi tin nhắn">➤</button></div></div>
+                    <div class="chatbot-preview-head"><strong id="chatbot-preview-title">XEM TRƯỚC</strong><div class="chatbot-preview-window-actions"><button id="chatbot-preview-reset" type="button" aria-label="Làm mới"><span aria-hidden="true">↻</span></button><button type="button" aria-label="Đóng xem trước"><img src="/assets/icons/dismiss.svg" alt=""></button></div></div>
+                    <div class="chatbot-preview-body">
+                      <div id="chatbot-preview-result" class="chatbot-preview-result chatbot-preview-chat-inline" aria-live="polite"><div class="chatbot-preview-empty"><img src="/assets/icons/bot-chat.svg" alt=""><span>Nhập nội dung vào hộp bên dưới để bắt đầu gỡ lỗi Chatbot</span></div></div>
+                      <div class="chatbot-preview-compose"><textarea id="chatbot-preview-input" rows="1" maxlength="2000" placeholder="Nói chuyện với Bot"></textarea><button class="chatbot-preview-button" id="chatbot-preview-send" type="button" aria-label="Gửi tin nhắn"><img src="/assets/icons/send-message.svg" alt=""></button></div>
+                      <div class="chatbot-preview-feature"><span><img src="/assets/icons/bot-chat.svg" alt="">Tính năng đã được bật</span><button type="button">Quản lý&nbsp; →</button></div>
+                    </div>
                   </section>
                 </div>
               </section>
@@ -404,6 +406,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260911-vertex-ui-9"></script>
+  <script src="app.js?v=20260911-vertex-ui-10"></script>
 </body>
 </html>

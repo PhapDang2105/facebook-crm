@@ -72,6 +72,7 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     return {
       name: text(product?.name || item?.name || item?.product, 200),
       sku: product?.sku || '',
+      image: product?.image || '',
       weight: product?.weight || 0,
       quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)),
       price: money(product?.unitPrice)

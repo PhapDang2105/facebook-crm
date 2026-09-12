@@ -61,6 +61,7 @@ test('nhận diện theo tên và tên gọi khác, không nhận màu đơn l�
 test('đơn chatbot mang SKU, giá lẻ, giá khách trả, ship và giảm giá combo; receipt cộng khớp', () => {
   const one = normalizeChatbotOrder({ phone: '0385805790', address: '12 Lê Lợi, Quận 1, TP.HCM', items: [{ name: 'Túi Xanh', quantity: 1 }], total: 189000 }, { name: 'A' });
   assert.equal(one.products[0].sku, 'GRA-XANH-Z450');
+  assert.equal(one.products[0].image, '');
   assert.equal(one.products[0].price, 174000);
   assert.equal(one.products[0].paidPrice, 189000);
   assert.equal(one.shippingFee, 15000);
@@ -165,6 +166,19 @@ test('tin xác nhận đơn: 2 túi ghép — không dòng ship, miễn ship ghi
   ].join('\n'));
   const single = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0385805700', Customer_Address: 'Q12' }, templates).messages[0];
   assert.match(single, /🚚 Phí vận chuyển: 15\.000đ\n━+\n💰 Tổng tiền: 189\.000đ\n\nEm cảm ơn/);
+});
+
+test('ảnh sản phẩm ở Cài đặt → Sản phẩm đi vào đơn chatbot, receipt và bảng giá', () => {
+  const products = JSON.parse(readFileSync(process.env.PRODUCTS_PATH, 'utf8'));
+  products.items[0].image = '/product-images/xanh.jpg';
+  writeFileSync(process.env.PRODUCTS_PATH, JSON.stringify(products));
+  catalog.reloadCatalog();
+  const order = normalizeChatbotOrder({ phone: '0385805790', address: '12 Lê Lợi, Quận 1', items: [{ name: 'Túi Xanh', quantity: 2 }], total: 298000 }, { name: 'A' });
+  assert.equal(order.products[0].image, '/product-images/xanh.jpg');
+  assert.equal(buildOrderReceiptPayload(order, { baseUrl: 'https://fb.example.vn' }).elements[0].image_url, 'https://fb.example.vn/product-images/xanh.jpg');
+  const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
+  assert.equal(quote.images.length, 1);
+  assert.match(quote.images[0], /\/product-images\/xanh\.jpg$/);
 });
 
 test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu lực ngay sau khi lưu', () => {

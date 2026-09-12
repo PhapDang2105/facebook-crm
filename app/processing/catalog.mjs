@@ -62,6 +62,8 @@ function normalizeCatalogProduct(item) {
     comboPrice: money(item?.comboPrice),
     weight: money(item?.weight),
     unit: String(item?.unit ?? '').trim(),
+    // The picture uploaded in Cài đặt → Sản phẩm: sent with the price quote and shown on the receipt.
+    image: String(item?.image ?? '').trim(),
     aliases: normalizeAliases(item?.aliases),
     // Mixable products (the granola bags) may share one order in any mix of up
     // to maxComboQuantity units; every other product is sold on its own.

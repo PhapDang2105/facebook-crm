@@ -569,7 +569,8 @@ const server = http.createServer(async (request, response) => {
       authorizationUrl.searchParams.set('redirect_uri', metaConfig.redirectUri);
       authorizationUrl.searchParams.set('state', state);
       authorizationUrl.searchParams.set('response_type', 'code');
-      authorizationUrl.searchParams.set('scope', 'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging');
+      // pages_read_user_content: read comments; pages_manage_engagement: reply to them and send private replies.
+      authorizationUrl.searchParams.set('scope', 'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_read_user_content,pages_manage_engagement');
       return sendJson(response, 200, { authorizationUrl: authorizationUrl.toString() });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels/meta/callback') {
@@ -793,7 +794,8 @@ const server = http.createServer(async (request, response) => {
         const attachment = payload.attachment?.dataUrl ? payload.attachment : null;
         if (!text && !attachment) return sendJson(response, 400, { error: 'Nội dung tin nhắn không được để trống.' });
         try {
-          const sent = await sendConversationMessage(conversation, { text, attachment });
+          // Comment threads: reply under the comment, or privately to Messenger.
+          const sent = await sendConversationMessage(conversation, { text, attachment, privateReply: payload.privateReply === true });
           return sendJson(response, 200, sent);
         } catch (error) {
           return sendJson(response, error.statusCode === 400 ? 400 : 502, { error: error.message });
@@ -805,6 +807,7 @@ const server = http.createServer(async (request, response) => {
       const id = decodeURIComponent(conversationReadMatch[1]);
       const conversation = await updateMessagingStore(store => setConversationFlags(store, id, { unread: false }));
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+      if (conversation.source === 'comment') return sendJson(response, 200, publicConversation(conversation));
       try {
         await sendSenderAction({
           pageId: conversation.pageId,

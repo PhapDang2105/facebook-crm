@@ -11,7 +11,7 @@ let cachedStore = null;
 let writeQueue = Promise.resolve();
 
 function emptyStore() {
-  return { conversations: [], messages: {} };
+  return { conversations: [], messages: {}, commentIndex: {} };
 }
 
 // Order confirmations recorded before the Messenger receipt template existed were
@@ -47,12 +47,24 @@ function normalizeStore(value) {
   if (!value || typeof value !== 'object') return emptyStore();
   return migrateLegacyReceipts({
     conversations: Array.isArray(value.conversations) ? value.conversations : [],
-    messages: value.messages && typeof value.messages === 'object' && !Array.isArray(value.messages) ? value.messages : {}
+    messages: value.messages && typeof value.messages === 'object' && !Array.isArray(value.messages) ? value.messages : {},
+    // comment id → conversation id, so the Page's own replies (which arrive
+    // with only a parent id) and later edits find their thread.
+    commentIndex: value.commentIndex && typeof value.commentIndex === 'object' ? value.commentIndex : {}
   });
 }
 
 export function conversationId(pageId, psid) {
   return `${pageId}:${psid}`;
+}
+
+/**
+ * A comment thread is one conversation per person per post — the way an inbox
+ * thread is one per person — so replies land in context and the bot answers
+ * the comment it was asked under.
+ */
+export function commentConversationId(pageId, userId, postId) {
+  return `${pageId}:comment:${userId}:${postId}`;
 }
 
 export async function readMessagingStore() {
@@ -98,8 +110,8 @@ function findConversation(store, id) {
   return store.conversations.find(item => item.id === id) || null;
 }
 
-export function ensureConversation(store, { pageId, psid, name, picture }) {
-  const id = conversationId(pageId, psid);
+export function ensureConversation(store, { pageId, psid, name, picture, id: explicitId, source = 'inbox', post }) {
+  const id = explicitId || conversationId(pageId, psid);
   let conversation = findConversation(store, id);
   if (!conversation) {
     conversation = {
@@ -108,7 +120,10 @@ export function ensureConversation(store, { pageId, psid, name, picture }) {
       psid: String(psid),
       name: name || `Khách Facebook ${String(psid).slice(-4)}`,
       picture: picture || '',
-      source: 'inbox',
+      source,
+      ...(post ? { post } : {}),
+      // A comment gets no staff first: the bot answers it unless staff turn it off.
+      ...(source === 'comment' ? { botEnabled: true } : {}),
       unread: false,
       muted: false,
       labels: ['new'],
@@ -152,8 +167,8 @@ function insertMessage(messages, message) {
 }
 
 /** Adds a message and returns the updated conversation plus whether it was new. */
-export function saveMessage(store, { pageId, psid, name, picture, message, markUnread = false }) {
-  const conversation = ensureConversation(store, { pageId, psid, name, picture });
+export function saveMessage(store, { pageId, psid, name, picture, message, markUnread = false, id, source, post }) {
+  const conversation = ensureConversation(store, { pageId, psid, name, picture, id, source, post });
   const messages = store.messages[conversation.id];
   const { message: saved, inserted } = insertMessage(messages, message);
   applyLatestMessage(conversation, messages);
@@ -188,9 +203,11 @@ export function markOutgoingStatusUntil(store, { conversationId: id, until, stat
 }
 
 export function publicConversation(conversation) {
-  const replyWindowEndsAt = conversation.lastCustomerMessageAt
-    ? conversation.lastCustomerMessageAt + 24 * 60 * 60 * 1000
-    : 0;
+  // Messenger allows replies for 24 hours after the customer's last message;
+  // a comment can be answered any time.
+  const replyWindowEndsAt = conversation.source === 'comment'
+    ? Number.MAX_SAFE_INTEGER
+    : conversation.lastCustomerMessageAt ? conversation.lastCustomerMessageAt + 24 * 60 * 60 * 1000 : 0;
   return {
     id: conversation.id,
     channelId: conversation.pageId,
@@ -198,6 +215,11 @@ export function publicConversation(conversation) {
     name: conversation.name,
     picture: conversation.picture || '',
     source: conversation.source || 'inbox',
+    // Comment threads: which post, and the latest customer comment to reply under.
+    ...(conversation.post ? { post: conversation.post } : {}),
+    ...(conversation.lastCommentId ? { lastCommentId: conversation.lastCommentId } : {}),
+    // The ad the customer arrived from, when Messenger told us.
+    ...(conversation.referral?.adTitle || conversation.referral?.adId ? { ad: { id: conversation.referral.adId || '', title: conversation.referral.adTitle || '' } } : {}),
     unread: Boolean(conversation.unread),
     muted: Boolean(conversation.muted),
     labels: Array.isArray(conversation.labels) ? conversation.labels : [],

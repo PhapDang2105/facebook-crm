@@ -3,7 +3,9 @@ import {
   fetchCustomerProfile,
   fetchPageConversations,
   normalizeGraphConversation,
+  replyToComment,
   sendPageAttachment,
+  sendPrivateReply,
   sendPageImageUrl,
   sendPageMessage,
   sendPageTemplate
@@ -86,8 +88,47 @@ export async function syncPageConversations(pageId, { limit = 25 } = {}) {
   return summary;
 }
 
+/**
+ * A comment thread answers under the customer's latest comment — publicly —
+ * or, with `privateReply`, as one Messenger message to that person. The
+ * public reply is echoed back by the feed webhook under the same comment id,
+ * so recording it here and the echo merge into one bubble.
+ */
+async function sendCommentReply(conversation, { text, imageUrl, privateReply }) {
+  const body = String(text || imageUrl || '').trim();
+  if (!body) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });
+  if (!conversation.lastCommentId) throw Object.assign(new Error('Chưa có bình luận nào của khách để trả lời.'), { statusCode: 400 });
+  const pageAccessToken = await getPageAccessToken(conversation.pageId);
+  const result = privateReply
+    ? await sendPrivateReply({ commentId: conversation.lastCommentId, message: body, pageAccessToken })
+    : await replyToComment({ commentId: conversation.lastCommentId, message: body, pageAccessToken });
+  const id = String(result.id || `sent-${Date.now()}`);
+  const message = {
+    id,
+    mid: id,
+    direction: 'outgoing',
+    type: 'text',
+    text: body,
+    createdAt: Date.now(),
+    status: 'sent',
+    ...(privateReply ? { privateReply: true } : { commentId: id, parentId: conversation.lastCommentId })
+  };
+  const saved = await updateMessagingStore(store => {
+    const outcome = saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, id: conversation.id, source: 'comment', message });
+    outcome.conversation.unread = false;
+    if (!privateReply) store.commentIndex[id] = conversation.id;
+    return { message: outcome.message, conversation: publicConversation(outcome.conversation) };
+  });
+  publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: saved.message });
+  return saved;
+}
+
 /** Sends a reply through the Send API and records it in the local conversation. */
-export async function sendConversationMessage(conversation, { text = '', attachment = null, imageUrl = '', template = null, templateText = '' }) {
+export async function sendConversationMessage(conversation, { text = '', attachment = null, imageUrl = '', template = null, templateText = '', privateReply = false }) {
+  if (conversation.source === 'comment') {
+    if (attachment || template) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });
+    return sendCommentReply(conversation, { text, imageUrl, privateReply });
+  }
   const pageAccessToken = await getPageAccessToken(conversation.pageId);
   const target = { pageId: conversation.pageId, psid: conversation.psid, pageAccessToken };
   let usedTemplate = Boolean(template);

@@ -30,7 +30,7 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
     pending.address ? `Địa chỉ đã có: ${pending.address}` : ''
   ].filter(Boolean).join('\n');
   return [
-    `KÊNH: Facebook Messenger`,
+    `KÊNH: ${conversation.source === 'comment' ? 'Bình luận Facebook' : 'Facebook Messenger'}`,
     `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
     hint,
     remembered ? `DỮ LIỆU ĐÃ LƯU:\n${remembered}` : '',
@@ -193,14 +193,25 @@ export async function processChatbotChanges(changes, dependencies) {
       // The order is persisted BEFORE anything is sent. Sending first meant a
       // failed order left the customer holding a confirmation for an order that
       // did not exist, and a retried webhook sent the whole reply a second time.
-      const outcome = settings.responseMode === 'automatic' && reply.order && createOrder
+      const isComment = conversation.source === 'comment';
+      const outcome = settings.responseMode === 'automatic' && reply.order && createOrder && !isComment
         ? await createOrder(conversation, reply.order, {
             sourceMessageId: String(change.message.mid || change.message.id || '')
           })
         : null;
       const order = outcome?.order || null;
       const alreadyHandled = Boolean(outcome) && outcome.created === false;
-      if (settings.responseMode === 'automatic' && !alreadyHandled) {
+      if (settings.responseMode === 'automatic' && isComment) {
+        // Under a comment: the full answer goes to the person's Messenger as a
+        // private reply (Facebook allows one per comment, so the messages are
+        // joined), and one short public reply tells them to check their inbox.
+        // Orders are never created from a comment — the customer is asked to
+        // continue in Messenger, where the address exchange is private.
+        const privateText = reply.messages.join('\n\n');
+        if (privateText) await sendMessage(conversation, { text: privateText, privateReply: true });
+        const publicReply = renderChatbotReply({ template_id: 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
+        for (const text of publicReply.messages) await sendMessage(conversation, { text });
+      } else if (settings.responseMode === 'automatic' && !alreadyHandled) {
         for (const text of reply.messages) await sendMessage(conversation, { text });
         // Pictures a template carries (![tên](url)) follow the text.
         for (const imageUrl of reply.images || []) await sendMessage(conversation, { imageUrl });
@@ -216,7 +227,7 @@ export async function processChatbotChanges(changes, dependencies) {
         botLastError: '',
         botLastErrorAt: 0,
         // undefined leaves the stored basket alone; null clears it once ordered.
-        ...(reply.pendingOrder !== undefined ? { pendingOrder: reply.pendingOrder } : {}),
+        ...(reply.pendingOrder !== undefined && !isComment ? { pendingOrder: reply.pendingOrder } : {}),
         ...(reply.handoff ? { botEnabled: false } : {})
       });
       results.push({

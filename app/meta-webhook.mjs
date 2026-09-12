@@ -1,8 +1,9 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getPageAccessToken } from './channel-store.mjs';
-import { fetchCustomerProfile } from './meta-graph.mjs';
+import { fetchCommentDetails, fetchCustomerProfile, fetchPostSummary } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import {
+  commentConversationId,
   ensureConversation,
   conversationId,
   markOutgoingStatusUntil,
@@ -133,6 +134,33 @@ export function normalizeWebhookEvent(messagingEvent, pageId) {
   return null;
 }
 
+/**
+ * A comment from the `feed` field. Only comments are kept — likes, shares and
+ * new posts also arrive here — and only additions or edits: a removed comment
+ * stays in the thread as history.
+ */
+export function normalizeCommentEvent(change, pageId) {
+  const value = change?.value || {};
+  if (change?.field !== 'feed' || value.item !== 'comment' || !['add', 'edited'].includes(value.verb)) return null;
+  const commentId = String(value.comment_id || '');
+  const postId = String(value.post_id || '');
+  const fromId = String(value.from?.id || '');
+  if (!commentId || !postId || !fromId) return null;
+  return {
+    type: 'comment',
+    pageId: String(pageId),
+    commentId,
+    postId,
+    parentId: String(value.parent_id || ''),
+    fromId,
+    fromName: String(value.from?.name || '').trim(),
+    text: String(value.message || '').trim(),
+    photo: String(value.photo || '').trim(),
+    createdAt: (Number(value.created_time) || Math.floor(Date.now() / 1000)) * 1000,
+    fromPage: fromId === String(pageId)
+  };
+}
+
 export function collectWebhookEvents(payload) {
   if (payload?.object !== 'page') return [];
   const events = [];
@@ -141,13 +169,68 @@ export function collectWebhookEvents(payload) {
       const normalized = normalizeWebhookEvent(messagingEvent, entry.id);
       if (normalized) events.push(normalized);
     }
+    for (const change of entry.changes || []) {
+      const normalized = normalizeCommentEvent(change, entry.id);
+      if (normalized) events.push(normalized);
+    }
   }
   return events;
 }
 
-function applyWebhookEvents(store, events) {
+/** Comment webhooks into the store: a customer's comment opens or continues their thread on that post; the Page's reply joins the thread it answers. */
+function applyCommentEvent(store, event) {
+  const message = {
+    id: event.commentId,
+    mid: event.commentId,
+    direction: event.fromPage ? 'outgoing' : 'incoming',
+    type: event.photo && !event.text ? 'image' : 'text',
+    text: event.text,
+    ...(event.photo ? { dataUrl: event.photo, name: '' } : {}),
+    createdAt: event.createdAt,
+    status: event.fromPage ? 'sent' : 'received',
+    commentId: event.commentId,
+    parentId: event.parentId
+  };
+  if (event.fromPage) {
+    // Our own reply, echoed back. Attach it to the thread of the comment it
+    // answers; a Page comment with no known parent is not a customer thread.
+    const id = store.commentIndex[event.parentId] || store.commentIndex[event.commentId];
+    if (!id) return null;
+    const conversation = store.conversations.find(item => item.id === id);
+    if (!conversation) return null;
+    const { message: saved, inserted } = saveMessage(store, { pageId: event.pageId, psid: conversation.psid, id, source: 'comment', message });
+    store.commentIndex[event.commentId] = id;
+    return inserted ? { type: 'message', conversation, message: saved } : null;
+  }
+  // A reply the customer writes under our reply belongs to the thread that
+  // reply is in; a fresh top-level comment opens their thread on this post.
+  const parentThreadId = event.parentId ? store.commentIndex[event.parentId] : '';
+  const parentThread = parentThreadId ? store.conversations.find(item => item.id === parentThreadId) : null;
+  // Someone else answering under another customer's comment gets their own thread.
+  const id = parentThread && parentThread.psid === event.fromId ? parentThread.id : commentConversationId(event.pageId, event.fromId, event.postId);
+  const { conversation, message: saved, inserted } = saveMessage(store, {
+    pageId: event.pageId,
+    psid: event.fromId,
+    name: event.fromName,
+    id,
+    source: 'comment',
+    post: { id: event.postId },
+    message,
+    markUnread: true
+  });
+  conversation.lastCommentId = event.commentId;
+  store.commentIndex[event.commentId] = conversation.id;
+  return inserted ? { type: 'message', conversation, message: saved } : null;
+}
+
+export function applyWebhookEvents(store, events) {
   const changes = [];
   for (const event of events) {
+    if (event.type === 'comment') {
+      const change = applyCommentEvent(store, event);
+      if (change) changes.push(change);
+      continue;
+    }
     const id = conversationId(event.pageId, event.psid);
     if (event.type === 'message') {
       const { conversation, message, inserted } = saveMessage(store, {
@@ -185,10 +268,34 @@ function applyWebhookEvents(store, events) {
   return changes;
 }
 
+/** For a new comment thread: the commenter's picture and what post it is on. */
+async function resolveCommentContext(changes) {
+  const pending = changes.filter(change => change.type === 'message' && change.conversation.source === 'comment'
+    && change.message.direction === 'incoming' && !change.conversation.profileResolvedAt);
+  if (!pending.length) return [];
+  const details = [];
+  for (const change of pending) {
+    const token = await getPageAccessToken(change.conversation.pageId).catch(() => '');
+    if (!token) continue;
+    const comment = await fetchCommentDetails(change.message.commentId, token);
+    const post = change.conversation.post?.permalink ? null : await fetchPostSummary(change.conversation.post?.id, token);
+    details.push({ id: change.conversation.id, comment, post });
+  }
+  return updateMessagingStore(store => details.map(({ id, comment, post }) => {
+    const conversation = store.conversations.find(item => item.id === id);
+    if (!conversation) return null;
+    conversation.profileResolvedAt = Date.now();
+    if (comment.name) conversation.name = comment.name;
+    if (comment.picture) conversation.picture = comment.picture;
+    if (post && (post.message || post.permalink)) conversation.post = { ...conversation.post, message: post.message, permalink: post.permalink };
+    return { type: 'conversation', conversation };
+  }).filter(Boolean));
+}
+
 /** Fills in the customer name and photo once, right after their first message arrives. */
 async function resolveMissingProfiles(changes) {
   const pending = changes
-    .filter(change => change.type === 'message' && !change.conversation.profileResolvedAt)
+    .filter(change => change.type === 'message' && change.conversation.source !== 'comment' && !change.conversation.profileResolvedAt)
     .map(change => ({ pageId: change.conversation.pageId, psid: change.conversation.psid }));
   const unique = [...new Map(pending.map(item => [`${item.pageId}:${item.psid}`, item])).values()];
   if (!unique.length) return [];
@@ -218,7 +325,7 @@ export async function processWebhookPayload(payload) {
   const events = collectWebhookEvents(payload);
   if (!events.length) return [];
   const changes = await updateMessagingStore(store => applyWebhookEvents(store, events));
-  const profileChanges = await resolveMissingProfiles(changes);
+  const profileChanges = [...await resolveMissingProfiles(changes), ...await resolveCommentContext(changes)];
   for (const change of [...changes, ...profileChanges]) {
     publishMessagingEvent(change.conversation
       ? { ...change, conversation: publicConversation(change.conversation) }

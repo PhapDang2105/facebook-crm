@@ -47,6 +47,9 @@ const chatHeadAvatar = document.querySelector('.chat-head > .avatar');
 const chatHeadName = document.querySelector('.chat-head > div:not(.chat-actions) strong');
 const chatHeadMeta = document.querySelector('#chat-head-meta');
 const chatHeadChannelLogo = document.querySelector('#chat-head-channel-logo');
+const chatHeadPost = document.querySelector('#chat-head-post');
+const composerReplyMode = document.querySelector('#composer-reply-mode');
+let currentComposerReplyMode = 'public';
 const chatHeadChatTab = document.querySelector('#chat-head-chat-tab');
 const chatHeadFileTab = document.querySelector('#chat-head-file-tab');
 const chatHeadPinnedTab = document.querySelector('#chat-head-pinned-tab');
@@ -940,6 +943,9 @@ function updateConversationElement(element, conversation) {
   element.dataset.channelId = conversation.channelId;
   element.dataset.psid = conversation.psid;
   element.dataset.source = conversation.source || 'inbox';
+  element.dataset.adTitle = conversation.ad ? (conversation.ad.title || 'Quảng cáo') : '';
+  element.dataset.postTitle = conversation.post?.message || '';
+  element.dataset.postUrl = conversation.post?.permalink || '';
   element.dataset.avatar = conversation.picture || '';
   element.dataset.labels = (conversation.labels || []).join(' ');
   element.classList.toggle('unread', Boolean(conversation.unread));
@@ -959,6 +965,7 @@ function updateConversationElement(element, conversation) {
   element.dataset.initialPreview = conversationPreviewText(conversation);
   element.dataset.initialTime = time?.textContent || '';
   renderConversationSourceBadge(element);
+  renderConversationAdTag(element);
   renderConversationMuteIcon(element);
   return element;
 }
@@ -1123,6 +1130,8 @@ function connectMessagingStream() {
     // Events sent while the stream was down are only recoverable by reloading the inbox.
     loadRemoteConversations(currentMessageChannelId)
       .then(() => {
+        // The rebuilt list must respect the label/search filter in force.
+        filterConversations();
         const active = getActiveConversation();
         if (active) ensureRemoteMessages(active, { force: true });
       })
@@ -1182,8 +1191,12 @@ function filterConversations() {
     const matchesFilter = currentConversationFilter !== 'unread' || conversation.classList.contains('unread');
     const matchesChannel = conversation.dataset.channelId === currentMessageChannelId;
     const labels = (conversation.dataset.labels || '').split(/\s+/).filter(Boolean);
+    const source = conversation.dataset.source || 'inbox';
     const matchesLabel = currentMessageLabel === 'all'
-      || (currentMessageLabel === 'unread' ? conversation.classList.contains('unread') : labels.includes(currentMessageLabel));
+      || (currentMessageLabel === 'unread' ? conversation.classList.contains('unread')
+        : currentMessageLabel === 'inbox' || currentMessageLabel === 'comment' ? source === currentMessageLabel
+        : currentMessageLabel === 'ad' ? Boolean(conversation.dataset.adTitle)
+        : labels.includes(currentMessageLabel));
     const matches = matchesSearch && matchesFilter && matchesChannel && matchesLabel;
     conversation.classList.toggle('hidden', !matches);
     if (matches) visibleCount += 1;
@@ -1192,7 +1205,10 @@ function filterConversations() {
 }
 
 function getConversationName(conversation) {
-  return conversation?.querySelector('strong')?.textContent.trim() || '';
+  const name = conversation?.querySelector('strong');
+  if (!name) return '';
+  // Text nodes only: the "QC" ad tag sits inside the same element.
+  return [...name.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim();
 }
 
 function getConversationStorageKey(name, conversation = getActiveConversation()) {
@@ -1236,6 +1252,22 @@ function renderConversationSourceBadge(conversation) {
   }
   badge.src = source === 'comment' ? '/assets/icons/facebook.png' : '/assets/icons/messenger.png';
   badge.title = source === 'comment' ? 'Bình luận Facebook' : 'Inbox Messenger';
+}
+
+/** "QC" beside the name when Messenger told us which ad the customer came from. */
+function renderConversationAdTag(conversation) {
+  const name = conversation?.querySelector('.conversation-copy strong');
+  if (!name) return;
+  let tag = name.querySelector('.conversation-ad-tag');
+  const title = conversation.dataset.adTitle || '';
+  if (!title) { tag?.remove(); return; }
+  if (!tag) {
+    tag = document.createElement('span');
+    tag.className = 'conversation-ad-tag';
+    tag.textContent = 'QC';
+    name.append(tag);
+  }
+  tag.title = title;
 }
 
 function ensureConversationMetadata(conversation) {
@@ -1764,7 +1796,16 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
     if (direction === 'outgoing') row.appendChild(quickActions);
   }
   let messageContent = bubble;
-  if (item.replyTo) {
+  if (item.privateReply) {
+    // Sent from a comment thread straight to the person's Messenger.
+    const stack = document.createElement('div');
+    stack.className = 'message-content-stack';
+    const attribution = document.createElement('span');
+    attribution.className = 'message-reply-attribution';
+    attribution.textContent = 'Nhắn riêng qua Messenger';
+    stack.append(attribution, bubble);
+    messageContent = stack;
+  } else if (item.replyTo) {
     const stack = document.createElement('div');
     stack.className = 'message-content-stack';
     const attribution = document.createElement('span');
@@ -2157,7 +2198,7 @@ async function loadChatbotSettings() {
 
 function chatbotTemplateLabel(id) {
   const labels = {
-    WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
+    WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', COMMENT_PUBLIC_REPLY: 'Trả lời công khai dưới bình luận', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
     ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
     ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
     PRICE_MIX_TUI_LON: 'Bảng giá mix túi lớn', PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_COMBO: 'Báo giá sản phẩm (đơn vị Combo)',
@@ -2935,7 +2976,17 @@ function setCustomerPanelTab(name) {
   if (name === 'create') resetCustomerOrderForm();
 }
 
+/** Which ad the customer came from, when Messenger reported one. */
+function renderCustomerSourceLine(conversation) {
+  const line = document.querySelector('#customer-source-line');
+  if (!line) return;
+  const adTitle = conversation?.dataset.adTitle || '';
+  line.classList.toggle('hidden', !adTitle);
+  line.textContent = adTitle ? `Từ quảng cáo: ${adTitle}` : '';
+}
+
 function renderCustomerPanel(conversation = getActiveConversation()) {
+  renderCustomerSourceLine(conversation);
   renderChatbotToggle(conversation);
   renderChatbotError(conversation);
   renderCustomerNotes(conversation);
@@ -2964,9 +3015,47 @@ function renderConversationHeader(conversation) {
   chatHeadMeta?.classList.remove('hidden');
   if (chatHeadChannelLogo) chatHeadChannelLogo.src = channel?.platform === 'zalo' ? '/assets/icons/zalo.png' : '/assets/icons/facebook.png';
   if (messageComposerInput) messageComposerInput.disabled = false;
+  renderCommentThreadState(conversation);
   renderCustomerPanel(conversation);
   updateChatHeadViewState();
   return { name, initial };
+}
+
+/**
+ * A comment thread reads differently from an inbox thread: the header names
+ * the post, the tab says "Bình luận", and the composer offers replying under
+ * the comment or privately to Messenger. Attachments are Messenger-only.
+ */
+function renderCommentThreadState(conversation) {
+  const isComment = conversation?.dataset.source === 'comment';
+  if (chatHeadChatTab) {
+    const label = chatHeadChatTab.querySelector('span');
+    if (label) label.textContent = isComment ? 'Bình luận' : 'Chat';
+  }
+  if (chatHeadPost) {
+    const title = conversation?.dataset.postTitle || '';
+    const url = conversation?.dataset.postUrl || '';
+    chatHeadPost.classList.toggle('hidden', !isComment);
+    chatHeadPost.textContent = isComment ? `Bài viết: ${title || 'trên Facebook'}` : '';
+    chatHeadPost.title = title;
+    if (url) chatHeadPost.href = url; else chatHeadPost.removeAttribute('href');
+  }
+  composerArea?.classList.toggle('composer-area--comment', isComment);
+  composerReplyMode?.classList.toggle('hidden', !isComment);
+  if (!isComment) currentComposerReplyMode = 'public';
+  updateComposerReplyMode();
+}
+
+function updateComposerReplyMode() {
+  const isComment = getActiveConversation()?.dataset.source === 'comment';
+  composerReplyMode?.querySelectorAll('[data-reply-mode]').forEach(button => {
+    const active = button.dataset.replyMode === currentComposerReplyMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  if (messageComposerInput && !messageComposerInput.dataset.replyTo) {
+    messageComposerInput.placeholder = !isComment ? 'Aa' : currentComposerReplyMode === 'private' ? 'Nhắn riêng qua Messenger…' : 'Trả lời bình luận…';
+  }
 }
 
 function renderConversation(conversation = getActiveConversation()) {
@@ -3789,13 +3878,18 @@ async function sendRemoteMessage(conversation, text, attachment) {
     status: 'sending',
     ...(attachment ? { dataUrl: attachment.dataUrl, name: attachment.name || '', size: attachment.size || 0 } : {})
   };
+  if (conversation.dataset.source === 'comment' && currentComposerReplyMode === 'private') pending.privateReply = true;
   cacheRemoteMessage(conversationId, pending);
   renderConversation(conversation);
   try {
     const result = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversationId)}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, attachment })
+      body: JSON.stringify({
+        text,
+        attachment,
+        ...(conversation.dataset.source === 'comment' && currentComposerReplyMode === 'private' ? { privateReply: true } : {})
+      })
     }));
     // Drop the optimistic copy before caching the saved one. The stream may
     // already have delivered the same message under Meta's id, and leaving the
@@ -3989,6 +4083,7 @@ function clearMessageReply() {
     delete messageComposerInput.dataset.replyName;
     delete messageComposerInput.dataset.replyText;
     messageComposerInput.placeholder = 'Aa';
+    updateComposerReplyMode();
   }
   messageReplyPreview?.classList.add('hidden');
   if (messageReplyTitle) messageReplyTitle.textContent = 'Đang trả lời';
@@ -5239,6 +5334,14 @@ customerOrderForm?.addEventListener('submit', async event => {
     customerOrderSubmit.textContent = originalLabel;
     updateCustomerOrderTotals();
   }
+});
+
+composerReplyMode?.addEventListener('click', event => {
+  const button = event.target.closest('[data-reply-mode]');
+  if (!button) return;
+  currentComposerReplyMode = button.dataset.replyMode === 'private' ? 'private' : 'public';
+  updateComposerReplyMode();
+  messageComposerInput?.focus();
 });
 
 chatbotToggleButton?.addEventListener('click', async () => {

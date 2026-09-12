@@ -72,6 +72,47 @@ export async function fetchCustomerProfile(psid, pageAccessToken) {
   }
 }
 
+/** Public reply under a comment; Meta answers with the new comment's id. */
+export function replyToComment({ commentId, message, pageAccessToken }) {
+  return metaRequest(`${commentId}/comments`, { method: 'POST', body: { message, access_token: pageAccessToken } });
+}
+
+/**
+ * Private reply: one Messenger message to the person who wrote the comment,
+ * allowed once per comment within seven days. It opens (or continues) their
+ * inbox thread, which the messaging webhook then reports like any other.
+ */
+export function sendPrivateReply({ commentId, message, pageAccessToken }) {
+  return metaRequest(`${commentId}/private_replies`, { method: 'POST', body: { message, access_token: pageAccessToken } });
+}
+
+/** The commenter's picture and the comment's permalink — details the webhook does not carry. */
+export async function fetchCommentDetails(commentId, pageAccessToken) {
+  try {
+    const comment = await metaRequest(commentId, {
+      query: { fields: 'from{id,name,picture{url}},permalink_url,attachment', access_token: pageAccessToken }
+    });
+    return {
+      name: comment.from?.name || '',
+      picture: comment.from?.picture?.data?.url || '',
+      permalink: comment.permalink_url || '',
+      image: comment.attachment?.media?.image?.src || ''
+    };
+  } catch (error) {
+    return { name: '', picture: '', permalink: '', image: '', error: error.message };
+  }
+}
+
+/** The first line of the post a comment sits under, so the thread says what was commented on. */
+export async function fetchPostSummary(postId, pageAccessToken) {
+  try {
+    const post = await metaRequest(postId, { query: { fields: 'message,permalink_url', access_token: pageAccessToken } });
+    return { message: String(post.message || '').split('\n')[0].slice(0, 120), permalink: post.permalink_url || '' };
+  } catch (error) {
+    return { message: '', permalink: '', error: error.message };
+  }
+}
+
 export function sendPageMessage({ pageId, psid, text, pageAccessToken, messagingType = 'RESPONSE' }) {
   return metaRequest(`${pageId}/messages`, {
     method: 'POST',

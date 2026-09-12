@@ -1034,11 +1034,11 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .customer-order-detail > span { min-width: 0; }
 .customer-order-detail .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customer-order-detail a { color: #1677ff; text-decoration: none; }
-.customer-panel-icon { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 3px; color: #8c8c8c; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
+.customer-panel-icon { width: 18px; height: 18px; flex: 0 0 18px; margin-top: 2px; color: #8c8c8c; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
 .customer-order-tag-carrier { padding: 0 7px; color: #d46b08; background: #ffe7ba; border-radius: 2px; font-size: 12px; line-height: 20px; }
 .customer-order-sku { color: #262626; font-weight: 500; }
 .customer-order-product-name { color: #8c8c8c; }
-.customer-order-info-dot { width: 15px; height: 15px; flex: 0 0 15px; margin-top: 4px; opacity: .55; }
+.customer-order-info-dot { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 3px; opacity: .6; }
 .customer-order-full { flex: 0 0 auto; color: #00a854; font-weight: 500; }
 .customer-order-price { color: #237804; font-weight: 500; }
 .customer-order-weight { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; margin-left: auto; color: #595959; }
@@ -1059,7 +1059,7 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .customer-create-view { padding-bottom: 92px; background: #ecedf4; }
 .customer-form-section { margin-bottom: 8px; background: #fff; }
 .customer-form-section > h3 { display: flex; min-height: 38px; align-items: center; gap: 8px; margin: 0; padding: 8px 10px; color: rgba(0, 0, 0, .85); font-size: 14px; font-weight: 500; line-height: 21px; }
-.customer-form-section > h3 > .customer-section-icon { width: 20px; height: 20px; flex: 0 0 20px; color: #595959; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
+.customer-form-section > h3 > .customer-section-icon { width: 21px; height: 21px; flex: 0 0 21px; color: #595959; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
 .customer-section-link { display: inline-flex; margin-left: auto; align-items: center; gap: 4px; color: #2d65c3; background: transparent; border: 0; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
 .customer-section-link svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .customer-section-icons { display: flex; margin-left: auto; gap: 8px; }

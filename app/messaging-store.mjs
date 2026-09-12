@@ -14,12 +14,41 @@ function emptyStore() {
   return { conversations: [], messages: {} };
 }
 
+// Order confirmations recorded before the Messenger receipt template existed were
+// stored either as the long plain-text confirmation or, for the template echo, as
+// the generic "unsupported attachment" label. Both describe an order the timeline
+// already draws as a card, so they are retagged once when the store is loaded.
+const legacyReceiptAttachmentText = 'Đã gửi một tệp đính kèm chưa hỗ trợ';
+const legacyReceiptTextPrefix = 'XÁC NHẬN ĐƠN ĐẶT HÀNG GIỌT NẮNG #';
+const receiptPreview = 'Đã gửi xác nhận đơn hàng';
+
+function isLegacyReceiptText(value) {
+  const text = String(value || '');
+  return text === legacyReceiptAttachmentText || text.startsWith(legacyReceiptTextPrefix);
+}
+
+function migrateLegacyReceipts(store) {
+  for (const list of Object.values(store.messages)) {
+    if (!Array.isArray(list)) continue;
+    for (const message of list) {
+      if (message?.direction !== 'outgoing' || !isLegacyReceiptText(message.text)) continue;
+      message.type = 'order-receipt';
+      message.text = receiptPreview;
+    }
+  }
+  for (const conversation of store.conversations) {
+    if (conversation?.lastMessageDirection !== 'outgoing') continue;
+    if (isLegacyReceiptText(conversation.lastMessagePreview)) conversation.lastMessagePreview = receiptPreview;
+  }
+  return store;
+}
+
 function normalizeStore(value) {
   if (!value || typeof value !== 'object') return emptyStore();
-  return {
+  return migrateLegacyReceipts({
     conversations: Array.isArray(value.conversations) ? value.conversations : [],
     messages: value.messages && typeof value.messages === 'object' && !Array.isArray(value.messages) ? value.messages : {}
-  };
+  });
 }
 
 export function conversationId(pageId, psid) {
@@ -57,6 +86,7 @@ export function updateMessagingStore(mutate) {
 
 export function messagePreview(message) {
   if (!message) return '';
+  if (message.type === 'order-receipt') return receiptPreview;
   if (message.type === 'image') return message.text ? `Ảnh · ${message.text}` : 'Đã gửi một ảnh';
   if (message.type === 'video') return message.text ? `Video · ${message.text}` : 'Đã gửi một video';
   if (message.type === 'audio') return 'Đã gửi một tin nhắn thoại';

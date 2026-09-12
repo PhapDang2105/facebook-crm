@@ -1504,10 +1504,6 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   // renderConversationOrderCards, so its message record must not also appear
   // as a text bubble repeating the same order.
   if (item.type === 'order-receipt') return;
-  // Orders created before the receipt template existed stored the confirmation as
-  // plain text. Those records stay in the store, so they are recognised by their
-  // fixed opening line and hidden the same way.
-  if (typeof item.text === 'string' && item.text.startsWith('XÁC NHẬN ĐƠN ĐẶT HÀNG GIỌT NẮNG #')) return;
   const sentAt = getChatTimestamp(item.createdAt);
   let previousRow = chatBody?.lastElementChild || null;
   while (previousRow && !previousRow.classList.contains('message-row')) previousRow = previousRow.previousElementSibling;

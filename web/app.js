@@ -226,6 +226,7 @@ const chatbotStepCode = document.querySelector('#chatbot-step-code');
 const chatbotStepCodeApply = document.querySelector('#chatbot-step-code-apply');
 let chatbotTemplatesState = {};
 let chatbotOriginalTemplates = {};
+let chatbotBuiltInTemplateIds = new Set();
 let chatbotProcessingSteps = [];
 let chatbotPreviewHistory = [];
 let selectedChatbotTemplate = '';
@@ -2140,6 +2141,7 @@ async function loadChatbotSettings() {
     chatbotTemplatesState = { ...(settings.templates || {}) };
     chatbotOriginalTemplates = { ...(settings.templates || {}) };
     chatbotDynamicTemplates = { ...(settings.dynamicTemplates || {}) };
+    chatbotBuiltInTemplateIds = new Set(settings.builtInTemplateIds || []);
     // Pipeline comes from the server modules now, not from editable settings.
     selectedChatbotTemplate = selectedChatbotTemplate && chatbotTemplatesState[selectedChatbotTemplate] !== undefined
       ? selectedChatbotTemplate
@@ -2207,7 +2209,9 @@ function renderChatbotTemplateEditor() {
     chatbotTemplateActive.checked = Boolean(dynamic) || Boolean(id && chatbotTemplatesState[id]);
   }
   if (chatbotTemplateDelete) {
-    const canDelete = Boolean(id) && !dynamic;
+    // Only templates staff created can be removed; a shipped one is switched
+    // off with the checkbox (an id the settings lack is read back from the seed).
+    const canDelete = Boolean(id) && !dynamic && !chatbotBuiltInTemplateIds.has(id);
     chatbotTemplateDelete.classList.toggle('hidden', !canDelete);
     chatbotTemplateDelete.disabled = !canDelete;
   }

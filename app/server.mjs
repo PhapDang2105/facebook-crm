@@ -10,7 +10,7 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
-import { listDynamicTemplates } from './chatbot-templates.mjs';
+import { defaultMessageTemplates, listDynamicTemplates } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { getGiftAssignments, getGifts, getShippingFee, listCombos, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
@@ -500,7 +500,8 @@ const server = http.createServer(async (request, response) => {
         ...publicChatbotSettings(settings),
         // Thiết lập tin nhắn: the stored texts, plus the ids the catalogue writes at reply time with their live text.
         templates: settings.messageTemplates,
-        dynamicTemplates: listDynamicTemplates(settings.messageTemplates)
+        dynamicTemplates: listDynamicTemplates(settings.messageTemplates),
+        builtInTemplateIds: Object.keys(defaultMessageTemplates())
       });
     }
     if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
@@ -519,7 +520,8 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
         templates: settings.messageTemplates,
-        dynamicTemplates: listDynamicTemplates(settings.messageTemplates)
+        dynamicTemplates: listDynamicTemplates(settings.messageTemplates),
+        builtInTemplateIds: Object.keys(defaultMessageTemplates())
       });
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/test') {

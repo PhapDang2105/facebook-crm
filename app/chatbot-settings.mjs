@@ -53,14 +53,15 @@ export function normalizeChatbotSettings(value = {}) {
   const directEndpoint = cleanText(submittedDirectEndpoint, providerDefaults.endpoint, 500);
   const directModel = cleanText(migratedDirectModel, providerDefaults.model, 200);
   // Thiết lập tin nhắn is the only place reply text lives. What is stored is
-  // what the bot says — a blank text switches that template off, and a
-  // template removed on screen is gone. Catalogue-written ids (GENERAL_INFO,
-  // PRICE_QUOTE, ...) never store text. Settings written before the texts
-  // moved here hold only the handful of edits staff made, never the hand-off
-  // line every bot needs; that is the one case where the shipped defaults are
-  // read in, underneath those edits, until the screen saves the full set.
+  // what the bot says — a blank text switches that template off. A shipped
+  // id the settings do not hold yet (a new release added it, or the settings
+  // predate the texts moving here) is read in from the seed underneath the
+  // stored texts; the screen turns a shipped template off rather than
+  // dropping it, so nothing staff switched off ever comes back. Ids staff
+  // created themselves are theirs alone: removed on screen, gone. Catalogue-
+  // written ids (GENERAL_INFO, PRICE_QUOTE, ...) never store text.
   const stored = value.messageTemplates && typeof value.messageTemplates === 'object' ? value.messageTemplates : {};
-  const submitted = stored.CSKH_HANDOFF ? stored : { ...defaultMessageTemplates(), ...stored };
+  const submitted = { ...defaultMessageTemplates(), ...stored };
   const messageTemplates = Object.fromEntries(Object.entries(submitted)
     .slice(0, 100)
     .map(([key, text]) => [String(key).trim().slice(0, 100), String(text ?? '').trim().slice(0, 12000)])

@@ -329,7 +329,10 @@ function renderDynamicTemplate(templateId, value, templates) {
 export function listDynamicTemplates(templates = {}) {
   const result = {};
   for (const id of [...Object.keys(dynamicTemplateRenderers), ...legacyPriceTemplateIds]) {
-    if (isDynamicTemplate(id, templates)) result[id] = renderDynamicTemplate(id, {}, templates);
+    if (!isDynamicTemplate(id, templates)) continue;
+    // Shown as the customer will read it: one message per paragraph, pictures listed last.
+    const { messages, images } = splitMessages(renderDynamicTemplate(id, {}, templates));
+    result[id] = [...messages, ...images.map(url => `🖼 ${url}`)].join('\n\n');
   }
   return result;
 }

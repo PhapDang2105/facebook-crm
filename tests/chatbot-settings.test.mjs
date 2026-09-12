@@ -117,16 +117,14 @@ test('mẫu tin: chỉ lưu những gì thiết lập gửi lên, không có b�
   assert.equal(settings.processingSteps, undefined);
 });
 
-test('thiết lập chưa có bộ mẫu đầy đủ thì đọc bộ mặc định vào dưới các mẫu đã sửa', () => {
+test('mẫu mặc định bổ sung cho mọi mã còn thiếu; mẫu đã tắt (để trống) không quay lại', () => {
   const settings = normalizeChatbotSettings({});
   assert.ok(settings.messageTemplates.WELCOME);
   assert.ok(settings.messageTemplates.ORDER_CONFIRMATION.includes('{total}'));
   assert.equal(settings.messageTemplates.GENERAL_INFO, undefined);
-  // File cũ chỉ lưu vài mẫu đã sửa (chưa có CSKH_HANDOFF): giữ mẫu đã sửa, bổ sung phần còn lại.
-  const partial = normalizeChatbotSettings({ messageTemplates: { WELCOME: 'Chào riêng' } });
+  // File cũ chỉ có 22 mẫu: giữ mẫu đã sửa, thêm PRICE_QUOTE_LAYOUT... của bản mới.
+  const partial = normalizeChatbotSettings({ messageTemplates: { WELCOME: 'Chào riêng', CSKH_HANDOFF: 'Chuyển', STORE_ADDRESS: '' } });
   assert.equal(partial.messageTemplates.WELCOME, 'Chào riêng');
-  assert.ok(partial.messageTemplates.CSKH_HANDOFF);
-  // Bộ đầy đủ đã lưu thì đúng như đã lưu — xóa là mất, không có gì trộn thêm.
-  const full = normalizeChatbotSettings({ messageTemplates: { CSKH_HANDOFF: 'Chuyển', WELCOME: 'Chào' } });
-  assert.deepEqual(full.messageTemplates, { CSKH_HANDOFF: 'Chuyển', WELCOME: 'Chào' });
+  assert.ok(partial.messageTemplates.PRICE_QUOTE_LAYOUT);
+  assert.equal(partial.messageTemplates.STORE_ADDRESS, '');
 });

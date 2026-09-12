@@ -777,7 +777,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-section-heading span { color: #8a91a0; font-size: 10.5px; }
 .chatbot-section-heading em { padding: 4px 8px; color: #287541; background: #e6f7eb; border-radius: 999px; font-size: 10px; font-style: normal; font-weight: 700; }
 .chatbot-workflow { display: grid; justify-items: stretch; gap: 0; }
-.chatbot-workflow-node { position: relative; display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 10px; padding: 10px 11px; background: #fff; border: 1px solid #dfe4ea; border-radius: 9px; box-shadow: 0 1px 2px rgba(15,23,42,.06); cursor: pointer; }
+.chatbot-workflow-node { position: relative; display: grid; grid-template-columns: 38px 1fr; align-items: center; gap: 10px; padding: 10px 11px; background: #fff; border: 1px solid #dfe4ea; border-radius: 9px; box-shadow: 0 1px 2px rgba(15,23,42,.06); cursor: pointer; }
 .chatbot-workflow-node:hover { border-color: #9fc4ff; }
 .chatbot-workflow-node.active { background: #eef6ff; border-color: #0866ff; box-shadow: 0 0 0 2px rgba(8,102,255,.08); }
 .chatbot-workflow-node:not(:last-child) { margin-bottom: 20px; }
@@ -791,7 +791,10 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-workflow-copy { display: grid; gap: 2px; }
 .chatbot-workflow-copy strong { color: #263041; font-size: 14px; }
 .chatbot-workflow-toggle input { accent-color: #0866ff; }
-.chatbot-code-editor { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 11px; height: 100%; min-height: 0; padding: 13px; background: #f7f9fc; border: 1px solid #dce5f1; border-radius: 10px; }
+/* Ba phần tử nằm trong khối này: tiêu đề, mô tả, vùng mã. Template cũ chỉ khai
+   báo hai hàng nên hàng 1fr rơi vào thẻ mô tả — nó giãn ra thành một mảng trắng
+   lớn và đẩy vùng mã xuống hàng auto ở đáy. */
+.chatbot-code-editor { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 11px; height: 100%; min-height: 0; padding: 13px; background: #f7f9fc; border: 1px solid #dce5f1; border-radius: 10px; }
 .chatbot-code-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .chatbot-code-editor-head > div { display: flex; align-items: center; gap: 9px; }
 .chatbot-code-editor-head img { width: 24px; height: 24px; }
@@ -910,8 +913,9 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 }
 
 .chatbot-code-readonly { margin-left: auto; padding: 2px 8px; color: #676f83; background: #f2f4f7; border-radius: 4px; font-size: 11px; font-weight: 500; text-transform: uppercase; }
-.chatbot-step-summary { margin: 0 0 8px; color: #595959; font-size: 13px; line-height: 19px; }
-.chatbot-workflow-kind { margin-left: auto; padding: 1px 7px; color: #676f83; background: #f2f4f7; border-radius: 4px; font-size: 10px; text-transform: uppercase; }
+/* Khoảng cách giữa các hàng đã do grid gap lo, margin dưới sẽ thành thừa. */
+.chatbot-step-summary { margin: 0; color: #595959; font-size: 13px; line-height: 19px; }
+.chatbot-step-summary:empty { display: none; }
 #chatbot-step-code[readonly] { color: #344054; background: #fbfcfd; cursor: default; }
 .gift-settings-card { display: flex; flex-direction: column; gap: 14px; }
 .price-master-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: flex-start; }

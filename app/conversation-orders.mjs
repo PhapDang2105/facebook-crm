@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { toLocalPhone } from './processing/customer-info.mjs';
+import { productCode } from './processing/order-key.mjs';
+import { findPrice } from './processing/price-master.mjs';
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
@@ -53,6 +55,17 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
   };
 }
 
+/**
+ * The list price of a single unit, read from that product's own "CODE=1" row in
+ * the price table. No second table to keep in step: edit a price in Cài đặt →
+ * Quà tặng and the per-line price on new orders follows it.
+ */
+function unitPriceFor(productName) {
+  const code = productCode(productName);
+  if (!code) return 0;
+  return money(findPrice(`${code}=1`)?.final_price);
+}
+
 export function normalizeChatbotOrder(input = {}, conversation = {}, {
   now = Date.now(),
   id = randomUUID().slice(0, 8),
@@ -64,13 +77,24 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     quantity: Math.max(1, Math.round(Number(item?.quantity) || 1))
   })).filter(item => item.name) : [];
   const total = money(input.total);
+  const priced = items.map(item => ({ ...item, price: unitPriceFor(item.name) }));
+  // Every line priced at its own list price, or none of them. Mixing a real unit
+  // price with an averaged one makes the receipt add up to a number the customer
+  // cannot reconcile, which is worse than an honest average on every line.
+  const listed = priced.every(item => item.price > 0);
+  const subtotal = priced.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
   const averageUnitPrice = totalQuantity ? Math.round(total / totalQuantity) : 0;
+  // The combo total is the price the customer agreed to. The gap between it and
+  // the sum of list prices is the combo discount, shown as its own line rather
+  // than silently smeared across the products.
+  const comboDiscount = listed && total && subtotal > total ? subtotal - total : 0;
   const order = normalizeCustomerOrder({
     name: text(conversation.name || 'Khách Facebook', 200),
     phone: input.phone,
     address: input.address,
-    products: items.map(item => ({ ...item, price: averageUnitPrice })),
+    products: listed ? priced : items.map(item => ({ ...item, price: averageUnitPrice })),
+    discount: comboDiscount,
     status: 'Mới',
     source: 'Facebook',
     payment: 'COD',

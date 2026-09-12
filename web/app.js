@@ -2087,7 +2087,6 @@ function renderChatbotWorkflow() {
     <div class="chatbot-workflow-node ${step.id === selectedChatbotStep ? 'active' : ''}" data-type="${escapeHtml(step.type)}" data-chatbot-step-node="${escapeHtml(step.id)}" role="button" tabindex="0">
       <span class="chatbot-workflow-icon"><img src="${icons[step.id] || '/assets/icons/settings.png'}" alt=""></span>
       <span class="chatbot-workflow-copy"><strong>${escapeHtml(step.name)}</strong></span>
-      <span class="chatbot-workflow-kind">${escapeHtml(step.type || '')}</span>
     </div>`).join('');
 }
 

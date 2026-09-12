@@ -39,3 +39,6 @@ tools/
 references/
 __pycache__/
 .pytest_cache/
+
+# Scratch output from AI sessions — not part of the app
+Claude outputs/

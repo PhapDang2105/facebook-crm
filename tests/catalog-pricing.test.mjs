@@ -178,7 +178,7 @@ test('ảnh sản phẩm ở Cài đặt → Sản phẩm đi vào đơn chatbot
   const element = buildOrderReceiptPayload(order, { baseUrl: 'https://fb.example.vn' }).elements[0];
   assert.match(element.image_url, /^https:\/\/fb\.example\.vn\/product-images\/xanh\.jpg\?v=\d+$/);
   // Messenger chỉ vẽ tiêu đề từng dòng, nên số lượng và đơn giá nằm luôn trong tiêu đề.
-  assert.equal(element.title, 'Granola Túi Xanh 450g · SL 2 · 174.000đ');
+  assert.equal(element.title, 'Granola Túi Xanh 450g\nSố lượng: 2\nĐơn giá: 174.000đ');
   assert.equal(element.quantity, 2);
   const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
   assert.equal(quote.images.length, 1);

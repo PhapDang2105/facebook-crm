@@ -178,10 +178,11 @@ export function buildOrderReceiptPayload(order, { merchantName = 'Giọt Nắng'
     const quantity = Math.max(1, Math.round(Number(item.quantity) || 1));
     const price = money(item.price);
     return {
-      // Messenger's receipt view shows only the title of each line on the
-      // customer's phone — subtitle, quantity and price fields exist in the
-      // payload but are not drawn — so the line reads as a whole in the title.
-      title: `${text(item.name, 50) || 'Sản phẩm'} · SL ${quantity} · ${price.toLocaleString('vi-VN')}đ`.slice(0, 80),
+      // Messenger's receipt view on the phone draws only the title of each
+      // line — subtitle, quantity and price fields exist in the payload but
+      // are not shown — so quantity and unit price go into the title, one per
+      // line, the way the order card in the inbox lays them out.
+      title: `${text(item.name, 40) || 'Sản phẩm'}\nSố lượng: ${quantity}\nĐơn giá: ${price.toLocaleString('vi-VN')}đ`.slice(0, 80),
       subtitle: text(item.variant || item.sku || merchantName, 80),
       quantity,
       price,

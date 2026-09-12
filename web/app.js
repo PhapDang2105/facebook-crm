@@ -2220,7 +2220,7 @@ function renderChatbotWorkflow() {
 
 function renderChatbotStepEditor() {
   const step = chatbotProcessingSteps.find(item => item.id === selectedChatbotStep);
-  if (chatbotStepCodeTitle) chatbotStepCodeTitle.textContent = step ? `${step.name} · ${step.file || ''}` : 'Chọn một bước xử lý';
+  if (chatbotStepCodeTitle) chatbotStepCodeTitle.textContent = step ? step.name : 'Chọn một bước xử lý';
   if (chatbotStepCode) {
     chatbotStepCode.readOnly = true;
     chatbotStepCode.value = step?.code ?? (step ? 'Đang tải mã nguồn...' : '');
@@ -2262,18 +2262,10 @@ async function loadChatbotPipeline() {
 const giftRowsElement = document.querySelector('#gift-rows');
 const giftAddButton = document.querySelector('#gift-add');
 const giftSaveButton = document.querySelector('#gift-save');
-const giftStatus = document.querySelector('#gift-status');
 const giftShippingFee = document.querySelector('#gift-shipping-fee');
 let giftItems = [];
 let giftProducts = [];
 let giftsLoaded = false;
-
-function setGiftStatus(message, tone = '') {
-  if (!giftStatus) return;
-  giftStatus.textContent = message;
-  giftStatus.classList.toggle('is-error', tone === 'error');
-  giftStatus.classList.toggle('is-ok', tone === 'ok');
-}
 
 // Each gift is a rule — "from N units, except these products" — so the row
 // carries the threshold and, underneath, one chip per product to exclude.
@@ -2307,13 +2299,10 @@ async function loadGifts() {
     if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
     giftsLoaded = true;
     renderGifts();
-    setGiftStatus(`${giftItems.length} quà tặng. Chatbot, đơn hàng và file xuất kho đang dùng quy tắc này.`);
   } catch (error) {
-    setGiftStatus(error.message || 'Chưa tải được quà tặng.', 'error');
+    showToast(error.message || 'Chưa tải được quà tặng.', 'error');
   }
 }
-
-const giftUnsavedNote = 'Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.';
 
 giftRowsElement?.addEventListener('input', event => {
   const field = event.target.dataset.giftField;
@@ -2323,7 +2312,6 @@ giftRowsElement?.addEventListener('input', event => {
   else if (field === 'sku') gift.sku = event.target.value.trim().toUpperCase();
   else if (field === 'weight') gift.weight = Math.max(0, Math.round(Number(event.target.value) || 0));
   else if (field === 'minQuantity') gift.minQuantity = Math.max(1, Math.round(Number(event.target.value) || 1));
-  setGiftStatus(giftUnsavedNote);
 });
 
 giftRowsElement?.addEventListener('change', event => {
@@ -2338,10 +2326,7 @@ giftRowsElement?.addEventListener('change', event => {
     if (event.target.checked) set.add(sku); else set.delete(sku);
     gift.excludedSkus = [...set];
     event.target.closest('.gift-chip')?.classList.toggle('is-on', event.target.checked);
-  } else {
-    return;
   }
-  setGiftStatus(giftUnsavedNote);
 });
 
 giftRowsElement?.addEventListener('click', event => {
@@ -2349,10 +2334,7 @@ giftRowsElement?.addEventListener('click', event => {
   if (!button) return;
   giftItems.splice(Number(button.dataset.giftRemove), 1);
   renderGifts();
-  setGiftStatus('Đã xóa quà tặng. Nhớ bấm “Lưu quà tặng”.');
 });
-
-giftShippingFee?.addEventListener('input', () => setGiftStatus(giftUnsavedNote));
 
 giftAddButton?.addEventListener('click', () => {
   giftItems.push({ id: '', name: '', active: true, minQuantity: 2, excludedSkus: [], sku: '', weight: 0 });
@@ -2363,7 +2345,7 @@ giftAddButton?.addEventListener('click', () => {
 giftSaveButton?.addEventListener('click', async () => {
   const blank = giftItems.find(gift => !String(gift.name || '').trim());
   if (blank) {
-    setGiftStatus('Có quà tặng chưa đặt tên.', 'error');
+    showToast('Có quà tặng chưa đặt tên.', 'error');
     return;
   }
   giftSaveButton.disabled = true;
@@ -2377,9 +2359,9 @@ giftSaveButton?.addEventListener('click', async () => {
     giftProducts = Array.isArray(result.products) ? result.products : giftProducts;
     if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
     renderGifts();
-    setGiftStatus(`Đã lưu ${giftItems.length} quà tặng. Chatbot áp dụng ngay cho đơn kế tiếp.`, 'ok');
+    showToast('Đã lưu quà tặng.', 'success');
   } catch (error) {
-    setGiftStatus(error.message || 'Chưa lưu được quà tặng.', 'error');
+    showToast(error.message || 'Chưa lưu được quà tặng.', 'error');
   } finally {
     giftSaveButton.disabled = false;
   }

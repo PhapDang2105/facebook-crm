@@ -10,7 +10,7 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
-import { defaultMessageTemplates, listDynamicTemplates } from './chatbot-templates.mjs';
+import { defaultMessageTemplates } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { getGiftAssignments, getGifts, getShippingFee, listCombos, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
@@ -498,9 +498,8 @@ const server = http.createServer(async (request, response) => {
       const settings = await readChatbotSettings();
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
-        // Thiết lập tin nhắn: the stored texts, plus the ids the catalogue writes at reply time with their live text.
+        // Thiết lập tin nhắn: every text the bot can say, all editable.
         templates: settings.messageTemplates,
-        dynamicTemplates: listDynamicTemplates(settings.messageTemplates),
         builtInTemplateIds: Object.keys(defaultMessageTemplates())
       });
     }
@@ -520,7 +519,6 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
         templates: settings.messageTemplates,
-        dynamicTemplates: listDynamicTemplates(settings.messageTemplates),
         builtInTemplateIds: Object.keys(defaultMessageTemplates())
       });
     }

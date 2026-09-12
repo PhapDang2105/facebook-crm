@@ -2140,7 +2140,6 @@ async function loadChatbotSettings() {
     chatbotSettingsWelcome.value = settings.welcomeMessage || '';
     chatbotTemplatesState = { ...(settings.templates || {}) };
     chatbotOriginalTemplates = { ...(settings.templates || {}) };
-    chatbotDynamicTemplates = { ...(settings.dynamicTemplates || {}) };
     chatbotBuiltInTemplateIds = new Set(settings.builtInTemplateIds || []);
     // Pipeline comes from the server modules now, not from editable settings.
     selectedChatbotTemplate = selectedChatbotTemplate && chatbotTemplatesState[selectedChatbotTemplate] !== undefined
@@ -2157,23 +2156,12 @@ async function loadChatbotSettings() {
   }
 }
 
-// Templates the server writes from Cài đặt → Sản phẩm / Quà tặng at reply
-// time. Shown with their live text and locked: editing them here would be
-// overridden on the next reply anyway.
-let chatbotDynamicTemplates = {};
-
 function chatbotTemplateLabel(id) {
   const labels = {
     WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
     ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
     ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
-    GENERAL_INFO_LAYOUT: 'Thông tin chung · khung', GENERAL_INFO_LINE: 'Thông tin chung · dòng sản phẩm', GENERAL_INFO_SEPARATOR: 'Thông tin chung · dòng kẻ', GENERAL_INFO_SHIPPING: 'Thông tin chung · ghi chú ship',
-    GIFT_POLICY_LAYOUT: 'Quà tặng · khung', GIFT_POLICY_LINE: 'Quà tặng · dòng', PRICE_MIX_TUI_LON: 'Bảng giá · mua ghép',
-    PRICE_MIX_TUI_LON_LAYOUT: 'Bảng giá mix túi · khung', PRICE_MIX_TUI_LON_LINE: 'Bảng giá mix túi · từng cặp', PRICE_MIX_TUI_LON_FULL: 'Bảng giá mix túi · trọn bộ',
-    PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_LAYOUT: 'Báo giá · khung', PRICE_QUOTE_SEPARATOR: 'Báo giá · dòng kẻ',
-    PRICE_QUOTE_TIER_1: 'Báo giá · 1 sản phẩm', PRICE_QUOTE_TIER_2: 'Báo giá · combo 2', PRICE_QUOTE_TIER_3: 'Báo giá · combo 3',
-    PRICE_QUOTE_TIER_1_COMBO: 'Báo giá đơn vị Combo · 1 combo', PRICE_QUOTE_TIER_2_COMBO: 'Báo giá đơn vị Combo · 2 combo', PRICE_QUOTE_TIER_3_COMBO: 'Báo giá đơn vị Combo · 3 combo',
-    PRICE_QUOTE_SHIPPING: 'Báo giá · có phí ship', PRICE_QUOTE_FREE_SHIPPING: 'Báo giá · miễn ship', PRICE_QUOTE_GIFT: 'Báo giá · quà kèm',
+    PRICE_MIX_TUI_LON: 'Bảng giá mix túi lớn', PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_COMBO: 'Báo giá sản phẩm (đơn vị Combo)',
     ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',
     BANK_TRANSFER: 'Thông tin chuyển khoản', THANK_YOU: 'Cảm ơn khách hàng'
   };
@@ -2184,34 +2172,30 @@ function renderChatbotTemplateList() {
   if (!chatbotTemplateList) return;
   const keyword = (chatbotTemplateSearch?.value || '').trim().toLowerCase();
   // Texts stored in Thiết lập tin nhắn (editable) and catalogue-written ones (read-only) in one list.
-  const entries = [
-    ...Object.entries(chatbotTemplatesState).map(([id, content]) => ({ id, content, dynamic: false })),
-    ...Object.entries(chatbotDynamicTemplates).map(([id, content]) => ({ id, content, dynamic: true }))
-  ].filter(({ id, content }) => `${id} ${content}`.toLowerCase().includes(keyword));
-  chatbotTemplateList.innerHTML = entries.map(({ id, content, dynamic }) => `
+  const entries = Object.entries(chatbotTemplatesState)
+    .map(([id, content]) => ({ id, content }))
+    .filter(({ id, content }) => `${id} ${content}`.toLowerCase().includes(keyword));
+  chatbotTemplateList.innerHTML = entries.map(({ id, content }) => `
     <button class="chatbot-template-item ${id === selectedChatbotTemplate ? 'active' : ''}" type="button" data-chatbot-template-id="${escapeHtml(id)}">
-      <strong>${escapeHtml(chatbotTemplateLabel(id))}${dynamic ? '<span class="chatbot-template-dynamic-badge">Tự soạn</span>' : ''}</strong><small>${escapeHtml(String(content).replaceAll('###', ' · '))}</small>
+      <strong>${escapeHtml(chatbotTemplateLabel(id))}</strong><small>${escapeHtml(String(content).replaceAll('###', ' · '))}</small>
     </button>`).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
 }
 
 function renderChatbotTemplateEditor() {
   const id = selectedChatbotTemplate;
-  const dynamic = id ? chatbotDynamicTemplates[id] : '';
   if (chatbotTemplateId) chatbotTemplateId.textContent = id || 'Chọn một mẫu tin';
   if (chatbotTemplateContent) {
-    chatbotTemplateContent.disabled = !id || Boolean(dynamic);
-    chatbotTemplateContent.value = id ? (dynamic || chatbotTemplatesState[id] || '') : '';
+    chatbotTemplateContent.disabled = !id;
+    chatbotTemplateContent.value = id ? (chatbotTemplatesState[id] || '') : '';
   }
-  if (chatbotTemplateApply) chatbotTemplateApply.classList.toggle('hidden', Boolean(dynamic));
-  if (chatbotTemplateReset) chatbotTemplateReset.classList.toggle('hidden', Boolean(dynamic));
   if (chatbotTemplateActive) {
-    chatbotTemplateActive.disabled = !id || Boolean(dynamic);
-    chatbotTemplateActive.checked = Boolean(dynamic) || Boolean(id && chatbotTemplatesState[id]);
+    chatbotTemplateActive.disabled = !id;
+    chatbotTemplateActive.checked = Boolean(id && chatbotTemplatesState[id]);
   }
   if (chatbotTemplateDelete) {
     // Only templates staff created can be removed; a shipped one is switched
     // off with the checkbox (an id the settings lack is read back from the seed).
-    const canDelete = Boolean(id) && !dynamic && !chatbotBuiltInTemplateIds.has(id);
+    const canDelete = Boolean(id) && !chatbotBuiltInTemplateIds.has(id);
     chatbotTemplateDelete.classList.toggle('hidden', !canDelete);
     chatbotTemplateDelete.disabled = !canDelete;
   }
@@ -4703,7 +4687,6 @@ function createChatbotTemplate() {
     .replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   if (!id) return showToast('Nhập mã cho mẫu tin nhắn mới.', 'error');
   if (Object.hasOwn(chatbotTemplatesState, id)) return showToast('Mã mẫu tin này đã tồn tại.', 'error');
-  if (Object.hasOwn(chatbotDynamicTemplates, id)) return showToast('Mẫu này được soạn tự động từ danh mục, không tạo bản tĩnh.', 'error');
   chatbotTemplatesState[id] = '';
   chatbotOriginalTemplates[id] = '';
   selectedChatbotTemplate = id;

@@ -97,22 +97,21 @@ test('chuẩn hóa các nhà cung cấp model tích hợp sẵn', () => {
   }
 });
 
-test('mẫu tin: chỉ lưu những gì thiết lập gửi lên, không có bản mặc định nào được trộn vào', () => {
+test('mẫu tin: giữ đúng text đã gửi, bỏ giá Smax cũ, không nhận mã trống', () => {
   const settings = normalizeChatbotSettings({
     messageTemplates: {
-      WELCOME: '  Xin chào mới  ', GENERAL_INFO: 'không được lưu vì soạn từ danh mục', PRICE_QUOTE: 'cũng vậy',
+      WELCOME: '  Xin chào mới  ', GENERAL_INFO: 'Có {count} sản phẩm', PRICE_QUOTE: 'Giá {price_1}',
       // Text Smax cũ lưu cho một sản phẩm có trong danh mục: cũ, bỏ; giá không có trong danh mục thì giữ.
-      PRICE_TUI_XANH: 'Dạ Túi Xanh 450g: 1 túi 174.000đ', PRICE_YEN_MACH_UC_NGUYEN_CAM: 'Dạ Yến Mạch 1kg 116.000đ', PRICE_QUOTE_TIER_1: '🌱 1 {unit}'
+      PRICE_TUI_XANH: 'Dạ Túi Xanh 450g: 1 túi 174.000đ', PRICE_YEN_MACH_UC_NGUYEN_CAM: 'Dạ Yến Mạch 1kg 116.000đ'
     },
     deletedTemplateIds: ['WELCOME'],
     processingSteps: [{ id: 'duplicate_guard', enabled: false }]
   });
   assert.equal(settings.messageTemplates.WELCOME, 'Xin chào mới');
-  assert.equal(settings.messageTemplates.GENERAL_INFO, undefined);
-  assert.equal(settings.messageTemplates.PRICE_QUOTE, undefined);
+  assert.equal(settings.messageTemplates.GENERAL_INFO, 'Có {count} sản phẩm');
+  assert.equal(settings.messageTemplates.PRICE_QUOTE, 'Giá {price_1}');
   assert.equal(settings.messageTemplates.PRICE_TUI_XANH, undefined);
   assert.equal(settings.messageTemplates.PRICE_YEN_MACH_UC_NGUYEN_CAM, 'Dạ Yến Mạch 1kg 116.000đ');
-  assert.equal(settings.messageTemplates.PRICE_QUOTE_TIER_1, '🌱 1 {unit}');
   assert.equal(settings.deletedTemplateIds, undefined);
   assert.equal(settings.processingSteps, undefined);
 });
@@ -121,10 +120,10 @@ test('mẫu mặc định bổ sung cho mọi mã còn thiếu; mẫu đã tắt
   const settings = normalizeChatbotSettings({});
   assert.ok(settings.messageTemplates.WELCOME);
   assert.ok(settings.messageTemplates.ORDER_CONFIRMATION.includes('{total}'));
-  assert.equal(settings.messageTemplates.GENERAL_INFO, undefined);
-  // File cũ chỉ có 22 mẫu: giữ mẫu đã sửa, thêm PRICE_QUOTE_LAYOUT... của bản mới.
+  assert.ok(settings.messageTemplates.GENERAL_INFO.includes('[[products]]'));
+  // File cũ chỉ có 22 mẫu: giữ mẫu đã sửa, thêm PRICE_QUOTE... của bản mới.
   const partial = normalizeChatbotSettings({ messageTemplates: { WELCOME: 'Chào riêng', CSKH_HANDOFF: 'Chuyển', STORE_ADDRESS: '' } });
   assert.equal(partial.messageTemplates.WELCOME, 'Chào riêng');
-  assert.ok(partial.messageTemplates.PRICE_QUOTE_LAYOUT);
+  assert.ok(partial.messageTemplates.PRICE_QUOTE);
   assert.equal(partial.messageTemplates.STORE_ADDRESS, '');
 });

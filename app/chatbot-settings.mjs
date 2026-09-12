@@ -1,4 +1,4 @@
-import { defaultMessageTemplates, isDynamicTemplate } from './chatbot-templates.mjs';
+import { defaultMessageTemplates, isProductQuoteId } from './chatbot-templates.mjs';
 
 export const defaultChatbotSettings = Object.freeze({
   enabled: false,
@@ -58,14 +58,14 @@ export function normalizeChatbotSettings(value = {}) {
   // predate the texts moving here) is read in from the seed underneath the
   // stored texts; the screen turns a shipped template off rather than
   // dropping it, so nothing staff switched off ever comes back. Ids staff
-  // created themselves are theirs alone: removed on screen, gone. Catalogue-
-  // written ids (GENERAL_INFO, PRICE_QUOTE, ...) never store text.
+  // created themselves are theirs alone: removed on screen, gone. A text
+  // stored under a Smax-era PRICE_<sản phẩm> id is a stale price: dropped.
   const stored = value.messageTemplates && typeof value.messageTemplates === 'object' ? value.messageTemplates : {};
   const submitted = { ...defaultMessageTemplates(), ...stored };
   const messageTemplates = Object.fromEntries(Object.entries(submitted)
     .slice(0, 100)
     .map(([key, text]) => [String(key).trim().slice(0, 100), String(text ?? '').trim().slice(0, 12000)])
-    .filter(([key]) => key && !isDynamicTemplate(key, submitted)));
+    .filter(([key]) => key && !isProductQuoteId(key)));
   // The processing pipeline is code in app/processing, not editable settings.
   return {
     enabled: value.enabled === true,

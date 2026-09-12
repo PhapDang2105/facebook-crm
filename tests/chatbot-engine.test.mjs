@@ -223,10 +223,10 @@ test('mẫu tin bị xóa hoặc bỏ tick không còn được chatbot sử d�
 });
 
 test('tin xác nhận đơn và lời xin địa chỉ điền chỗ trống của mẫu trong thiết lập', () => {
-  const custom = { ...templates, ORDER_CONFIRMATION: 'Đơn: {items} | {phone} | {address} | {total} | {gift}', ORDER_AFTER_SALE: '', ORDER_ADDRESS_PARTIAL: 'Có {known}, thiếu {missing}.' };
+  const custom = { ...templates, ORDER_CONFIRMATION: 'Đơn: [[items]]{product} x{quantity}[[/items]] | {phone} | {address} | {total}\n🎁 {gift}', ORDER_AFTER_SALE: '', ORDER_ADDRESS_PARTIAL: 'Có {known}, thiếu {missing}.' };
   const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '3', Phone_Number: '0909123456', Customer_Address: 'Quận 12' }, custom);
   assert.deepEqual(reply.messages, [
-    'Đơn: 🌾 Granola Túi Xanh 450g – Số lượng: 3 | 0909123456 | Quận 12 | 447.000đ | \n━━━━━━━━━━━━\n🎁 Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa',
+    'Đơn: Granola Túi Xanh 450g x3 | 0909123456 | Quận 12 | 447.000đ\n🎁 Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa',
     templates.SHIPPING_POLICY
   ]);
   assert.deepEqual(reply.images, []);

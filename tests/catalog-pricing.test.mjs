@@ -7,7 +7,7 @@ const catalog = await import('../app/processing/catalog.mjs');
 const pricing = await import('../app/processing/pricing.mjs');
 const { detectProduct } = await import('../app/processing/product-detect.mjs');
 const { orderKey } = await import('../app/processing/order-key.mjs');
-const { renderChatbotReply, listDynamicTemplates, defaultMessageTemplates } = await import('../app/chatbot-templates.mjs');
+const { renderChatbotReply, defaultMessageTemplates, isProductQuoteId } = await import('../app/chatbot-templates.mjs');
 const { normalizeChatbotOrder, buildOrderReceiptPayload } = await import('../app/conversation-orders.mjs');
 const { buildExportRows, splitSkuForExport } = await import('../app/order-export.mjs');
 const { normalizeProduct } = await import('../app/products.mjs');
@@ -98,12 +98,16 @@ test('file xuất kho: mỗi sản phẩm một mã, gộp ship vào giá đơn 
   assert.deepEqual(splitSkuForExport('CB2-XANH', 1, 298000, true).map(item => item.sku), ['GRA-XANH-Z450']);
 });
 
-test('mẫu tin giá và quà chỉ tồn tại ở dạng động, soạn từ danh mục', () => {
-  for (const id of ['GENERAL_INFO', 'GIFT_POLICY', 'PRICE_TUI_XANH', 'PRICE_QUOTE', 'PRICE_MIX_TUI_LON']) {
-    assert.equal(templates[id], undefined, `${id} không được là text tĩnh`);
-    assert.ok(listDynamicTemplates(templates)[id], `${id} phải là mẫu động`);
+test('mẫu giá và quà là một mẫu sửa được, số liệu điền từ danh mục lúc trả lời', () => {
+  for (const id of ['GENERAL_INFO', 'GIFT_POLICY', 'PRICE_QUOTE', 'PRICE_QUOTE_COMBO', 'PRICE_MIX_TUI_LON']) {
+    assert.ok(templates[id], `${id} phải có mẫu để sửa`);
+    assert.doesNotMatch(templates[id], /\d{3}\.\d{3}đ/, `${id} không được chứa giá cứng`);
   }
-  // Đơn vị "Combo" có bộ mẫu bậc riêng (PRICE_QUOTE_TIER_n_COMBO).
+  // PRICE_TUI_XANH kiểu Smax là báo giá của sản phẩm "túi xanh", không có mẫu riêng.
+  assert.equal(isProductQuoteId('PRICE_TUI_XANH'), true);
+  assert.equal(isProductQuoteId('PRICE_YEN_MACH_UC_NGUYEN_CAM'), false);
+  assert.equal(isProductQuoteId('PRICE_QUOTE_COMBO'), false);
+  // Đơn vị "Combo" dùng mẫu PRICE_QUOTE_COMBO.
   assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_NAU_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Nâu.*\n🌿 Combo Dùng Thử \(350g\):\n🏷️ Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ\n━+\n🔥 2 Combo Tiện Lợi \(700g\):/);
   const policy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates).messages[0];
   assert.match(policy, /• Miễn phí vận chuyển: .*2 × Granola Túi Xanh 450g/);
@@ -134,7 +138,11 @@ test('mẫu tin giá và quà chỉ tồn tại ở dạng động, soạn từ 
   const mix = renderChatbotReply({ template_id: 'PRICE_MIX_TUI_LON' }, templates).messages[0];
   assert.match(mix, /• Granola Túi Xanh 450g \+ Granola Túi Vàng nhiều hạt quả 350g: 298\.000đ \(Miễn phí vận chuyển\)/);
   assert.match(mix, /• Granola Túi Xanh 450g \+ Granola Túi Nâu vị cacao 350g: 293\.000đ \(Miễn phí vận chuyển\)/);
-  assert.match(mix, /🎁 Trọn bộ 3 túi \(.*\): 442\.000đ \(Miễn phí vận chuyển\)\n🎁 Tặng kèm: Bộ bát gáo dừa \+ Muỗng dừa ạ\./);
+  assert.match(mix, /🎁 Trọn bộ 3 túi \(.*\): 442\.000đ \(Miễn phí vận chuyển\) \+ tặng Bộ bát gáo dừa \+ Muỗng dừa/);
+  // Sản phẩm không có giá combo chỉ còn bậc 1; các bậc trống và dòng kẻ thừa tự rụng.
+  const single = { ...templates, PRICE_QUOTE: templates.PRICE_QUOTE };
+  const solo = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'yến mạch' }, { ...single, PRICE_QUOTE: templates.PRICE_QUOTE });
+  assert.equal(solo.messages[0], templates.ASK_PRODUCT);
   assert.deepEqual(pricing.quoteTiers('hạt an lành').tiers.map(tier => [tier.price, tier.freeShipping, tier.gifts.length]), [[269000, false, 0], [528000, true, 0], [792000, true, 0]]);
 });
 

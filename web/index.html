@@ -335,25 +335,101 @@
                     <span class="chatbot-ai-overview-icon"><img src="/assets/icons/ai-model.svg" alt=""></span>
                     <div><strong>Mô hình AI</strong></div>
                   </div>
-                  <div class="chatbot-general-settings-pane">
+                  <div class="chatbot-general-settings-pane dify-pane">
                     <div class="chatbot-llm-pane-tabs"><button class="active" type="button">CÀI ĐẶT</button><button type="button">CHẠY LẦN CUỐI</button></div>
-                  <div class="chatbot-provider-card" id="chatbot-direct-config">
-                    <div class="chatbot-settings-grid">
-                      <label class="chatbot-field"><span>Nhà cung cấp mô hình</span><select id="chatbot-settings-provider"><option value="vertex">Google Vertex AI</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="deepseek">DeepSeek</option><option value="xai">xAI</option><option value="groq">Groq</option><option value="mistral">Mistral AI</option><option value="openrouter">OpenRouter</option><option value="custom">Khác (OpenAI-compatible)</option></select></label>
-                      <label class="chatbot-field"><span>Tên model</span><select id="chatbot-settings-direct-model"><option value="gemini-3.8-flash">Gemini 3.8 Flash</option><option value="gemini-3.7-flash">Gemini 3.7 Flash</option><option value="gemini-3.6-flash">Gemini 3.6 Flash</option><option value="gemini-3.5-flash">Gemini 3.5 Flash</option><option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option><option value="gemini-3-flash-preview">Gemini 3 Flash (Preview)</option><option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Preview)</option><option value="gemini-3-pro-preview">Gemini 3 Pro (Preview)</option><option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option><option value="gemini-2.5-pro">Gemini 2.5 Pro</option><option value="gemini-2.5-flash">Gemini 2.5 Flash</option><option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option></select></label>
-                      <label class="chatbot-field" id="chatbot-auth-type-field"><span>Kiểu xác thực</span><select id="chatbot-settings-auth-type"><option value="access_token">OAuth 2.0 access token</option><option value="api_key">Google Cloud API key</option></select></label>
-                      <label class="chatbot-field hidden" id="chatbot-protocol-field"><span>Giao thức API</span><select id="chatbot-settings-protocol"><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label>
-                      <label class="chatbot-field chatbot-endpoint-field"><span id="chatbot-endpoint-label">Endpoint Vertex AI</span><input id="chatbot-settings-direct-endpoint" type="url" maxlength="500" placeholder="https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent"></label>
+                    <div class="dify-pane-body">
+
+                      <section class="dify-block">
+                        <div class="dify-block-head">
+                          <span class="dify-label">MÔ HÌNH<em class="dify-required">*</em></span>
+                          <span class="dify-head-actions">
+                            <button class="dify-icon-btn" type="button" title="Chèn biến" aria-label="Chèn biến"><span class="dify-var-glyph">{x}</span></button>
+                            <button class="dify-icon-btn" type="button" title="Sửa" aria-label="Sửa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16Z"></path><path d="m14 6 4 4"></path></svg></button>
+                          </span>
+                        </div>
+                        <div class="dify-model-row">
+                          <span class="dify-model-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 14 10l6.5 2-6.5 2-2 6.5-2-6.5L3.5 12 10 10Z"></path></svg></span>
+                          <span class="dify-model-name" id="chatbot-model-display">Gemini 3.5 Flash</span>
+                          <span class="dify-badge">CHAT</span>
+                          <span class="dify-model-caps" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.5 12h17M12 3.5c4 4.6 4 11.4 0 17M12 3.5c-4 4.6-4 11.4 0 17"></path></svg>
+                            <svg viewBox="0 0 24 24"><path d="M6.5 3.5h7L18 8v12.5H6.5Z"></path><path d="M13.3 3.6V8H18"></path></svg>
+                            <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"></rect><circle cx="8.5" cy="10" r="1.6"></circle><path d="m5 17 4.5-4.5 3 3L16 12l3.5 3.5"></path></svg>
+                            <svg viewBox="0 0 24 24"><path d="M5 10v4M9 6.5v11M13 8.5v7M17 11v2M21 9.5v5"></path></svg>
+                          </span>
+                          <button class="dify-model-params" id="chatbot-model-params" type="button" title="Thông số mô hình" aria-label="Thông số mô hình" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h9M17 17h3"></path><circle cx="16" cy="7" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="15" cy="17" r="2"></circle></svg></button>
+                        </div>
+                      </section>
+
+                      <section class="dify-block">
+                        <div class="dify-block-head"><span class="dify-label">NGỮ CẢNH<svg class="dify-info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11.2v5"></path><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"></circle></svg></span></div>
+                        <div class="dify-context-box"><span class="dify-var-glyph">{x}</span><span class="dify-placeholder">Đặt giá trị biến</span></div>
+                      </section>
+
+                      <div class="dify-prompt">
+                        <div class="dify-prompt-head">
+                          <span class="dify-role">SYSTEM<svg class="dify-info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11.2v5"></path><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"></circle></svg></span>
+                          <span class="dify-token" id="chatbot-settings-system-prompt-counter">0</span>
+                          <svg class="dify-spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9.3 19.5 11l-5.8 1.7L12 18.5l-1.7-5.8L4.5 11l5.8-1.7Z"></path></svg>
+                          <span class="dify-jinja">Jinja<span class="dify-switch dify-switch--xs" aria-hidden="true"><span></span></span></span>
+                          <span class="dify-prompt-tools">
+                            <button class="dify-icon-btn" type="button" title="Chèn biến" aria-label="Chèn biến"><span class="dify-var-glyph">{x}</span></button>
+                            <button class="dify-icon-btn" id="chatbot-prompt-copy" type="button" title="Sao chép" aria-label="Sao chép"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"></rect><path d="M15.5 5.5h-8a2 2 0 0 0-2 2v8"></path></svg></button>
+                            <button class="dify-icon-btn" id="chatbot-prompt-expand" type="button" title="Mở rộng" aria-label="Mở rộng"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"></path></svg></button>
+                          </span>
+                        </div>
+                        <textarea id="chatbot-settings-system-prompt" rows="12" maxlength="30000" placeholder="Nhập chỉ dẫn hệ thống cho model..."></textarea>
+                      </div>
+
+                      <button class="dify-add-message" type="button"><span class="dify-plus">+</span> Thêm tin nhắn</button>
+
+                      <section class="dify-block">
+                        <div class="dify-block-head"><span class="dify-label">BỘ NHỚ<svg class="dify-info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11.2v5"></path><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"></circle></svg></span><span class="dify-badge-outline">TÍCH HỢP SẴN</span></div>
+                        <div class="dify-prompt dify-prompt--static">
+                          <div class="dify-prompt-head">
+                            <span class="dify-role">USER<svg class="dify-info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11.2v5"></path><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"></circle></svg></span>
+                            <span class="dify-token">15</span>
+                            <span class="dify-prompt-tools">
+                              <button class="dify-icon-btn" type="button" title="Chèn biến" aria-label="Chèn biến"><span class="dify-var-glyph">{x}</span></button>
+                              <button class="dify-icon-btn" type="button" title="Sao chép" aria-label="Sao chép"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"></rect><path d="M15.5 5.5h-8a2 2 0 0 0-2 2v8"></path></svg></button>
+                              <button class="dify-icon-btn" type="button" title="Mở rộng" aria-label="Mở rộng"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"></path></svg></button>
+                            </span>
+                          </div>
+                          <div class="dify-chips"><span class="dify-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.6 12 4.2l8 6.4"></path><path d="M6.6 9.9V19.4h10.8V9.9"></path></svg>Bắt đầu</span><span class="dify-chip dify-chip--var"><span class="dify-var-glyph">{x}</span>query</span></div>
+                        </div>
+                      </section>
+
+                      <section class="dify-block">
+                        <div class="dify-block-head"><span class="dify-label">BỘ NHỚ<svg class="dify-info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11.2v5"></path><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"></circle></svg></span><label class="dify-switch"><input id="chatbot-settings-memory-enabled" type="checkbox" checked><span></span></label></div>
+                        <div class="dify-window-row">
+                          <label class="dify-switch dify-switch--sm"><input id="chatbot-settings-memory-window-enabled" type="checkbox" checked><span></span></label>
+                          <span class="dify-sub-label">KÍCH THƯỚC CỬA SỔ</span>
+                          <input class="dify-range" id="chatbot-settings-memory-window-range" type="range" min="1" max="100" value="50" aria-label="Kích thước cửa sổ bộ nhớ">
+                          <input class="dify-num" id="chatbot-settings-memory-window" type="number" min="1" max="100" value="50">
+                        </div>
+                      </section>
+
+                      <section class="dify-block">
+                        <div class="dify-block-head"><span class="dify-label">TẦM NHÌN<svg class="dify-info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11.2v5"></path><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"></circle></svg></span><label class="dify-switch"><input id="chatbot-settings-vision" type="checkbox"><span></span></label></div>
+                      </section>
+
+                      <details class="dify-advanced" id="chatbot-direct-config">
+                        <summary><span class="dify-label">CÀI ĐẶT NÂNG CAO</span><svg class="dify-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></summary>
+                        <div class="dify-advanced-body">
+                          <label class="dify-field"><span>Nhà cung cấp mô hình</span><select id="chatbot-settings-provider"><option value="vertex">Google Vertex AI</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="deepseek">DeepSeek</option><option value="xai">xAI</option><option value="groq">Groq</option><option value="mistral">Mistral AI</option><option value="openrouter">OpenRouter</option><option value="custom">Khác (OpenAI-compatible)</option></select></label>
+                          <label class="dify-field"><span>Tên model</span><select id="chatbot-settings-direct-model"><option value="gemini-3.8-flash">Gemini 3.8 Flash</option><option value="gemini-3.7-flash">Gemini 3.7 Flash</option><option value="gemini-3.6-flash">Gemini 3.6 Flash</option><option value="gemini-3.5-flash">Gemini 3.5 Flash</option><option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option><option value="gemini-3-flash-preview">Gemini 3 Flash (Preview)</option><option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Preview)</option><option value="gemini-3-pro-preview">Gemini 3 Pro (Preview)</option><option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option><option value="gemini-2.5-pro">Gemini 2.5 Pro</option><option value="gemini-2.5-flash">Gemini 2.5 Flash</option><option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option></select></label>
+                          <label class="dify-field" id="chatbot-auth-type-field"><span>Kiểu xác thực</span><select id="chatbot-settings-auth-type"><option value="access_token">OAuth 2.0 access token</option><option value="api_key">Google Cloud API key</option></select></label>
+                          <label class="dify-field hidden" id="chatbot-protocol-field"><span>Giao thức API</span><select id="chatbot-settings-protocol"><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label>
+                          <label class="dify-field chatbot-endpoint-field"><span id="chatbot-endpoint-label">Endpoint Vertex AI</span><input id="chatbot-settings-direct-endpoint" type="url" maxlength="500" placeholder="https://aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent"></label>
+                          <div class="dify-field-row">
+                            <label class="dify-field"><span>Thử lại</span><input id="chatbot-settings-retry-count" type="number" min="0" max="5" value="1"></label>
+                            <label class="dify-field"><span>Khoảng nghỉ (ms)</span><input id="chatbot-settings-retry-interval" type="number" min="100" max="10000" step="100" value="1000"></label>
+                          </div>
+                          <label class="dify-toggle-line"><span>JSON có cấu trúc</span><span class="dify-switch"><input id="chatbot-settings-structured-output" type="checkbox" checked><span></span></span></label>
+                        </div>
+                      </details>
+
                     </div>
-                  </div>
-                  <div class="chatbot-llm-card">
-                    <div class="chatbot-llm-options">
-                      <div class="chatbot-option-group"><label class="chatbot-option-check"><input id="chatbot-settings-memory-enabled" type="checkbox" checked><span>Bộ nhớ hội thoại</span></label><label class="chatbot-mini-field"><span>Cửa sổ</span><input id="chatbot-settings-memory-window" type="number" min="1" max="100" value="50"></label></div>
-                      <div class="chatbot-option-group chatbot-option-group--single"><label class="chatbot-option-check"><input id="chatbot-settings-structured-output" type="checkbox" checked><span>JSON có cấu trúc</span></label></div>
-                      <div class="chatbot-option-group"><label class="chatbot-mini-field"><span>Thử lại</span><input id="chatbot-settings-retry-count" type="number" min="0" max="5" value="1"></label><label class="chatbot-mini-field"><span>Khoảng nghỉ (ms)</span><input id="chatbot-settings-retry-interval" type="number" min="100" max="10000" step="100" value="1000"></label></div>
-                    </div>
-                    <label class="chatbot-field"><span class="chatbot-field-header"><span>System prompt</span><span class="chatbot-field-counter" id="chatbot-settings-system-prompt-counter">0 / 30.000 ký tự</span></span><textarea id="chatbot-settings-system-prompt" rows="6" maxlength="30000" placeholder="Nhập chỉ dẫn hệ thống cho model..."></textarea></label>
-                  </div>
                   </div>
                   <section class="chatbot-preview-card" aria-labelledby="chatbot-preview-title">
                     <div class="chatbot-preview-head"><strong id="chatbot-preview-title">XEM TRƯỚC</strong><div class="chatbot-preview-window-actions"><button id="chatbot-preview-reset" type="button" aria-label="Làm mới"><span aria-hidden="true">↻</span></button><button type="button" aria-label="Đóng xem trước"><img src="/assets/icons/dismiss.svg" alt=""></button></div></div>

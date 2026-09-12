@@ -149,11 +149,43 @@ const chatbotSettingsSystemPromptCounter = document.querySelector('#chatbot-sett
 function updateChatbotSystemPromptCounter() {
   if (!chatbotSettingsSystemPromptCounter || !chatbotSettingsSystemPrompt) return;
   const count = chatbotSettingsSystemPrompt.value ? chatbotSettingsSystemPrompt.value.length : 0;
-  chatbotSettingsSystemPromptCounter.textContent = `${count.toLocaleString('vi-VN')} / 30.000 ký tự`;
+  // Dify hiển thị đúng một con số ở góc khối prompt, không kèm đơn vị.
+  chatbotSettingsSystemPromptCounter.textContent = count.toLocaleString('vi-VN');
+  chatbotSettingsSystemPromptCounter.title = `${count.toLocaleString('vi-VN')} / 30.000 ký tự`;
 }
 chatbotSettingsSystemPrompt?.addEventListener('input', updateChatbotSystemPromptCounter);
 const chatbotSettingsMemoryEnabled = document.querySelector('#chatbot-settings-memory-enabled');
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
+const chatbotSettingsMemoryWindowRange = document.querySelector('#chatbot-settings-memory-window-range');
+const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
+const chatbotModelParamsButton = document.querySelector('#chatbot-model-params');
+const chatbotDirectConfig = document.querySelector('#chatbot-direct-config');
+
+/** Keeps the Dify-style summary row in step with the advanced fields behind it. */
+function syncChatbotModelDisplay() {
+  if (!chatbotModelDisplay) return;
+  const select = document.querySelector('#chatbot-settings-direct-model');
+  const label = select?.selectedOptions?.[0]?.textContent?.trim();
+  if (label) chatbotModelDisplay.textContent = label;
+}
+
+function syncChatbotMemoryWindow(source) {
+  if (!chatbotSettingsMemoryWindow || !chatbotSettingsMemoryWindowRange) return;
+  const raw = Number(source === 'range' ? chatbotSettingsMemoryWindowRange.value : chatbotSettingsMemoryWindow.value);
+  const value = Math.min(100, Math.max(1, Math.round(raw) || 1));
+  chatbotSettingsMemoryWindow.value = String(value);
+  chatbotSettingsMemoryWindowRange.value = String(value);
+}
+
+chatbotSettingsMemoryWindowRange?.addEventListener('input', () => syncChatbotMemoryWindow('range'));
+chatbotSettingsMemoryWindow?.addEventListener('input', () => syncChatbotMemoryWindow('number'));
+document.querySelector('#chatbot-settings-direct-model')?.addEventListener('change', syncChatbotModelDisplay);
+chatbotModelParamsButton?.addEventListener('click', () => {
+  if (!chatbotDirectConfig) return;
+  chatbotDirectConfig.open = !chatbotDirectConfig.open;
+  chatbotModelParamsButton.setAttribute('aria-expanded', String(chatbotDirectConfig.open));
+  if (chatbotDirectConfig.open) chatbotDirectConfig.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
 const chatbotSettingsStructuredOutput = document.querySelector('#chatbot-settings-structured-output');
 const chatbotSettingsRetryCount = document.querySelector('#chatbot-settings-retry-count');
 const chatbotSettingsRetryInterval = document.querySelector('#chatbot-settings-retry-interval');
@@ -1928,6 +1960,7 @@ function syncVertexEndpointModel() {
 }
 
 function renderChatbotProvider(resetValues = false) {
+  queueMicrotask(syncChatbotModelDisplay);
   const profile = getChatbotProviderProfile();
   const currentModel = chatbotSettingsDirectModel?.value || '';
   const vertex = chatbotSettingsProvider?.value === 'vertex';
@@ -1979,6 +2012,7 @@ async function loadChatbotSettings() {
     updateChatbotSystemPromptCounter();
     chatbotSettingsMemoryEnabled.checked = settings.memoryEnabled !== false;
     chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
+    syncChatbotMemoryWindow('number');
     chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;
     chatbotSettingsRetryCount.value = settings.retryCount ?? 1;
     chatbotSettingsRetryInterval.value = settings.retryIntervalMs || 1000;

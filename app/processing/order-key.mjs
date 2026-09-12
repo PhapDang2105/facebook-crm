@@ -18,18 +18,27 @@ export function normalizeProductText(value) {
     .toLowerCase();
 }
 
-/** Maps a free-text product name to a pricing code, or '' when unrecognised. */
+/**
+ * Maps a free-text product name to a pricing code, or '' when unrecognised.
+ *
+ * Two products carry cacao: Túi Nâu 350g and Tropical Cacao 300g. The rule
+ * inherited from n8n sent every mention of "cacao" to CACAO300, so "Granola Túi
+ * Nâu vị cacao" — the bag's own full name — priced at 219.000đ instead of
+ * 179.000đ, and contradicted product-detect.mjs, which reads the same text as
+ * Túi Nâu. CACAO300 now has to be named by "tropical" or by its 300g size.
+ */
 export function productCode(product) {
-  const name = normalizeProductText(product);
+  const name = normalizeProductText(product).replace(/ca cao/g, 'cacao');
   if (!name) return '';
-  if (name.includes('cacao') || name.includes('tropical')) return 'CACAO300';
   if (name.includes('combo 10') && name.includes('mix')) return 'COMBO10_MIX';
   if (name.includes('combo 10') && name.includes('xanh')) return 'COMBO10_XANH';
   if (name.includes('combo 10') && name.includes('nau')) return 'COMBO10_NAU';
   if (name.includes('combo 10') && name.includes('cam')) return 'COMBO10_CAM';
+  if (name.includes('tropical') || (name.includes('cacao') && name.includes('300'))) return 'CACAO300';
   if (name.includes('xanh')) return 'XANH';
   if (name.includes('vang')) return 'VANG';
-  if (name.includes('nau')) return 'NAU';
+  // Bare cacao means the brown bag — the same answer product-detect.mjs gives.
+  if (name.includes('nau') || name.includes('cacao')) return 'NAU';
   return '';
 }
 

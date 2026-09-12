@@ -1,0 +1,68 @@
+{
+  "items": [
+    {
+      "id": "seed-granola-xanh",
+      "name": "Granola Túi Xanh 350g",
+      "sku": "XANH",
+      "originalPrice": 189000,
+      "salePrice": 189000,
+      "image": ""
+    },
+    {
+      "id": "seed-granola-vang",
+      "name": "Granola Túi Vàng nhiều hạt quả 350g",
+      "sku": "VANG",
+      "originalPrice": 189000,
+      "salePrice": 189000,
+      "image": ""
+    },
+    {
+      "id": "seed-granola-nau",
+      "name": "Granola Túi Nâu vị cacao 350g",
+      "sku": "NAU",
+      "originalPrice": 179000,
+      "salePrice": 179000,
+      "image": ""
+    },
+    {
+      "id": "seed-cacao-300",
+      "name": "Granola Tropical Cacao 300g",
+      "sku": "CACAO300",
+      "originalPrice": 219000,
+      "salePrice": 219000,
+      "image": ""
+    },
+    {
+      "id": "seed-combo10-xanh",
+      "name": "Combo 10 gói Xanh",
+      "sku": "COMBO10_XANH",
+      "originalPrice": 204000,
+      "salePrice": 204000,
+      "image": ""
+    },
+    {
+      "id": "seed-combo10-nau",
+      "name": "Combo 10 gói Nâu",
+      "sku": "COMBO10_NAU",
+      "originalPrice": 204000,
+      "salePrice": 204000,
+      "image": ""
+    },
+    {
+      "id": "seed-combo10-cam",
+      "name": "Combo 10 gói Cam",
+      "sku": "COMBO10_CAM",
+      "originalPrice": 204000,
+      "salePrice": 204000,
+      "image": ""
+    },
+    {
+      "id": "seed-combo10-mix",
+      "name": "Combo 10 gói Mix",
+      "sku": "COMBO10_MIX",
+      "originalPrice": 204000,
+      "salePrice": 204000,
+      "image": ""
+    }
+  ]
+}

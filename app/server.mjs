@@ -13,6 +13,7 @@ import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine
 import { chatbotTemplates } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { ensurePriceMaster, getPriceMaster, writePriceMaster } from './processing/price-master.mjs';
+import { reloadUnitPrices } from './processing/unit-price.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import {
   isMetaConfigured,
@@ -53,7 +54,7 @@ async function initializeStore() {
   await mkdir(path.dirname(storePath), { recursive: true });
   try { await stat(storePath); } catch { await copyFile(seedPath, storePath); }
   try { await stat(chatbotSettingsPath); } catch { await writeChatbotSettings(defaultChatbotSettings); }
-  try { await stat(productsPath); } catch { await writeProductStore({ items: [], updatedAt: Date.now() }); }
+  await ensureProductCatalogue();
   // Creates data/processed/price-master.json from the bundled seed on first boot
   // so the table can be edited without touching the repo.
   await ensurePriceMaster();
@@ -83,7 +84,30 @@ async function writeProductStore(store) {
   const temporaryPath = `${productsPath}.tmp`;
   await writeFile(temporaryPath, JSON.stringify(normalized, null, 2), 'utf8');
   await rename(temporaryPath, productsPath);
+  // Orders price from this catalogue, so the cached copy has to drop with it.
+  reloadUnitPrices();
   return normalized;
+}
+
+/**
+ * Lays down the eight real products the first time only. Their SKU is the
+ * pricing code the chatbot resolves, which is what ties an edit here to the
+ * price on both hand-made and bot-made orders.
+ */
+async function ensureProductCatalogue() {
+  const existing = await readProductStore().catch(() => null);
+  if (existing?.seeded) return existing;
+  if (existing?.items?.length) return writeProductStore({ ...existing, seeded: true });
+  let seed = [];
+  try {
+    const raw = JSON.parse(await readFile(path.join(root, 'app', 'products.seed.json'), 'utf8'));
+    seed = Array.isArray(raw?.items) ? raw.items : [];
+  } catch { seed = []; }
+  const now = Date.now();
+  return writeProductStore({
+    items: seed.map(item => ({ ...item, createdAt: now, updatedAt: now })),
+    seeded: true
+  });
 }
 
 async function saveProductImage(dataUrl, productId) {

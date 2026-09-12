@@ -47,6 +47,9 @@ export function normalizeProductStore(value) {
   const items = Array.isArray(value) ? value : value?.items;
   return {
     items: Array.isArray(items) ? items.filter(item => item && item.id && item.name && item.sku) : [],
-    updatedAt: Number(value?.updatedAt) || 0
+    updatedAt: Number(value?.updatedAt) || 0,
+    // Survives every write so the starter catalogue is only ever laid down once.
+    // Without it, emptying the catalogue on purpose would refill it on restart.
+    seeded: value?.seeded === true
   };
 }

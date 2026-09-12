@@ -917,7 +917,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-step-summary { margin: 0; color: #595959; font-size: 13px; line-height: 19px; }
 .chatbot-step-summary:empty { display: none; }
 #chatbot-step-code[readonly] { color: #344054; background: #fbfcfd; cursor: default; }
-.gift-settings-card { display: flex; flex-direction: column; gap: 14px; }
+/* Bảng giá ở trên, khối quản lý quà tặng lấp phần còn lại bên dưới. */
+.gift-settings-card { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .price-master-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: flex-start; }
 .price-master-actions > button { white-space: nowrap; }
 .price-master-add { padding: 0 14px; height: 34px; color: #1677ff; background: #eff4ff; border: 1px solid #c7dbff; border-radius: 6px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
@@ -926,7 +927,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .price-master-head,
 .price-master-row { display: grid; grid-template-columns: 168px minmax(0, 1fr) 120px minmax(0, 1.4fr) 74px 40px; align-items: center; gap: 8px; padding: 8px 12px; }
 .price-master-head { color: #475467; background: #f7f8fa; border-bottom: 1px solid #e9ebf0; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-.price-master-rows { max-height: 60vh; overflow-y: auto; }
+.price-master-rows { max-height: 42vh; overflow-y: auto; }
 .price-master-row { border-bottom: 1px solid #f2f4f7; font-size: 13px; }
 .price-master-row:last-child { border-bottom: 0; }
 .price-master-row.is-invalid { background: #fff6f5; }
@@ -944,6 +945,34 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .price-master-status { margin: 0; color: #475467; font-size: 13px; }
 .price-master-status.is-error { color: #b42318; }
 .price-master-status.is-ok { color: #027a48; }
+
+/* ===== Quản lý quà tặng (Cài đặt → Quà tặng) ===== */
+.gift-manager { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 180px; padding: 14px; background: #fbfcfe; border: 1px solid #e9ebf0; border-radius: 8px; }
+.gift-manager-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.gift-manager-head h2 { margin: 0 0 3px; color: #101828; font-size: 15px; font-weight: 600; }
+.gift-manager-head p { margin: 0; color: #667085; font-size: 12.5px; line-height: 18px; }
+.gift-manager-list { display: flex; flex: 1 1 auto; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
+.gift-manager-empty { margin: 0; padding: 10px 2px; color: #667085; font-size: 13px; }
+.gift-manager-item { padding: 9px 11px; background: #fff; border: 1px solid #e6e9ef; border-radius: 7px; }
+.gift-manager-item.is-open { border-color: #b7d1ff; box-shadow: 0 0 0 2px rgba(21, 94, 239, .06); }
+.gift-manager-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; }
+.gift-name-input { width: 100%; height: 32px; padding: 0 9px; color: #101828; background: #fff; border: 1px solid #e0e3ea; border-radius: 6px; outline: none; font: inherit; font-size: 13px; }
+.gift-name-input:focus { border-color: #84adff; box-shadow: 0 0 0 2px rgba(21, 94, 239, .12); }
+.gift-manager-count { padding: 3px 9px; color: #475467; background: #f2f4f7; border-radius: 20px; font-size: 12px; white-space: nowrap; }
+.gift-manager-expand,
+.gift-manager-detach { height: 30px; padding: 0 11px; background: #fff; border: 1px solid #e0e3ea; border-radius: 6px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.gift-manager-expand { color: #1677ff; border-color: #c7dbff; }
+.gift-manager-expand:hover { background: #eff4ff; }
+.gift-manager-detach { color: #98a2b2; }
+.gift-manager-detach:hover { color: #b42318; background: #fff1f0; border-color: #fecdc9; }
+.gift-combo-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e6e9ef; }
+.gift-combo-chip { padding: 5px 10px; color: #475467; background: #f7f8fa; border: 1px solid #e6e9ef; border-radius: 20px; font: inherit; font-size: 12px; cursor: pointer; }
+.gift-combo-chip:hover { border-color: #b7d1ff; }
+.gift-combo-chip.is-on { color: #0b4fd1; background: #eff4ff; border-color: #84adff; font-weight: 500; }
+@media (max-width: 860px) {
+  .gift-manager-row { grid-template-columns: 1fr; }
+  .gift-manager-head { flex-direction: column; }
+}
 @media (max-width: 980px) {
   .price-master-head { display: none; }
   .price-master-row { grid-template-columns: 1fr 1fr; gap: 6px; }

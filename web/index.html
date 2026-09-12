@@ -453,8 +453,8 @@
           <section class="settings-card gift-settings-card" aria-label="Bảng giá và quà tặng">
             <header class="settings-card-head">
               <div>
-                <h1 id="price-master-title">Bảng giá &amp; quà tặng</h1>
-                <p>Chatbot chỉ chốt đơn khi giỏ hàng khớp đúng một mã tổ hợp dưới đây. Tổ hợp không có trong bảng sẽ được chuyển cho nhân viên thay vì đoán giá.</p>
+                <h1 id="price-master-title">Giá combo &amp; quà tặng</h1>
+                <p>Chatbot chỉ chốt đơn khi giỏ hàng khớp đúng một mã tổ hợp dưới đây. Tổ hợp không có trong bảng sẽ được chuyển cho nhân viên thay vì đoán giá. Đơn giá từng sản phẩm đặt ở mục <b>Sản phẩm</b>.</p>
               </div>
               <div class="price-master-actions">
                 <button class="price-master-add" id="price-master-add" type="button">+ Thêm dòng</button>
@@ -466,6 +466,16 @@
               <div class="price-master-rows" id="price-master-rows"></div>
             </div>
             <p class="price-master-status" id="price-master-status" role="status"></p>
+            <section class="gift-manager" aria-label="Quản lý quà tặng">
+              <header class="gift-manager-head">
+                <div>
+                  <h2>Quà tặng đang dùng</h2>
+                  <p>Sửa tên một lần, mọi tổ hợp đang gắn quà đó đổi theo. Bấm vào tổ hợp để gắn hoặc gỡ quà.</p>
+                </div>
+                <button class="price-master-add" id="gift-add" type="button">+ Thêm quà tặng</button>
+              </header>
+              <div class="gift-manager-list" id="gift-manager-list"></div>
+            </section>
           </section>
         </section>
       </div>

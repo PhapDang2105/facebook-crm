@@ -2190,6 +2190,7 @@ async function loadPriceMaster() {
     priceMasterRows = Array.isArray(result.items) ? result.items.map(row => ({ ...row })) : [];
     priceMasterLoaded = true;
     renderPriceMaster();
+    renderGiftManager();
     setPriceMasterStatus(`${priceMasterRows.length} tổ hợp đang có trong bảng giá.`);
   } catch (error) {
     setPriceMasterStatus(error.message || 'Chưa tải được bảng giá.', 'error');
@@ -2201,7 +2202,8 @@ priceMasterRowsElement?.addEventListener('input', event => {
   const index = Number(event.target.dataset.priceIndex);
   const row = priceMasterRows[index];
   if (!field || !row) return;
-  if (field === 'final_price') row.final_price = Math.max(0, Number(event.target.value) || 0);
+  if (field === 'gift') { row.gift = event.target.value; renderGiftManager(); }
+  else if (field === 'final_price') row.final_price = Math.max(0, Number(event.target.value) || 0);
   else if (field === 'order_key') {
     row.order_key = event.target.value.trim().toUpperCase();
     // Only the basket label is refreshed, so the caret stays where it was.
@@ -2223,6 +2225,7 @@ priceMasterRowsElement?.addEventListener('click', event => {
   if (!button) return;
   priceMasterRows.splice(Number(button.dataset.priceRemove), 1);
   renderPriceMaster();
+  renderGiftManager();
   setPriceMasterStatus('Đã xóa dòng. Nhớ bấm “Lưu bảng giá”.');
 });
 
@@ -2246,13 +2249,125 @@ priceMasterSaveButton?.addEventListener('click', async () => {
       body: JSON.stringify({ items: priceMasterRows })
     }));
     priceMasterRows = Array.isArray(result.items) ? result.items.map(row => ({ ...row })) : priceMasterRows;
+    draftGifts = [];
     renderPriceMaster();
+    renderGiftManager();
     setPriceMasterStatus(`Đã lưu ${priceMasterRows.length} tổ hợp. Chatbot dùng bảng mới ngay.`, 'ok');
   } catch (error) {
     setPriceMasterStatus(error.message || 'Chưa lưu được bảng giá.', 'error');
   } finally {
     priceMasterSaveButton.disabled = false;
   }
+});
+
+// ===== Quản lý quà tặng =====
+// The gift text lives on each price row, so the same gift used to be retyped on
+// every combo — one typo and the customer was promised something slightly
+// different. This view groups the rows by gift and edits them together.
+const giftManagerList = document.querySelector('#gift-manager-list');
+const giftAddButton = document.querySelector('#gift-add');
+// Gifts created here but not yet attached to a combo; they have nowhere to live
+// in priceMasterRows until the first combo is ticked.
+let draftGifts = [];
+let expandedGift = null;
+
+function giftGroups() {
+  const groups = new Map();
+  for (const name of draftGifts) if (name.trim()) groups.set(name, []);
+  priceMasterRows.forEach((row, index) => {
+    const gift = String(row.gift || '').trim();
+    if (!gift) return;
+    if (!groups.has(gift)) groups.set(gift, []);
+    groups.get(gift).push(index);
+  });
+  return [...groups.entries()].map(([gift, rows]) => ({ gift, rows }));
+}
+
+function renderGiftManager() {
+  if (!giftManagerList) return;
+  const groups = giftGroups();
+  if (!groups.length) {
+    giftManagerList.innerHTML = '<p class="gift-manager-empty">Chưa có quà tặng nào. Bấm “Thêm quà tặng” hoặc gõ trực tiếp vào cột Quà tặng ở bảng trên.</p>';
+    return;
+  }
+  const priceable = priceMasterRows
+    .map((row, index) => ({ row, index }))
+    .filter(entry => String(entry.row.order_key || '').trim());
+  giftManagerList.innerHTML = groups.map(group => {
+    const open = expandedGift === group.gift;
+    const chips = open ? priceable.map(entry => {
+      const attached = String(entry.row.gift || '').trim() === group.gift;
+      return `<button class="gift-combo-chip${attached ? ' is-on' : ''}" type="button" data-gift-toggle="${entry.index}" data-gift-name="${escapeHtml(group.gift)}" aria-pressed="${attached}">${escapeHtml(describePriceMasterKey(entry.row.order_key).text)}</button>`;
+    }).join('') : '';
+    return `<article class="gift-manager-item${open ? ' is-open' : ''}">
+      <div class="gift-manager-row">
+        <input type="text" class="gift-name-input" value="${escapeHtml(group.gift)}" data-gift-rename="${escapeHtml(group.gift)}" placeholder="Tên quà tặng" aria-label="Tên quà tặng">
+        <span class="gift-manager-count">${group.rows.length} tổ hợp</span>
+        <button class="gift-manager-expand" type="button" data-gift-expand="${escapeHtml(group.gift)}" aria-expanded="${open}">${open ? 'Thu gọn' : 'Chọn tổ hợp'}</button>
+        <button class="gift-manager-detach" type="button" data-gift-clear="${escapeHtml(group.gift)}" title="Gỡ quà này khỏi mọi tổ hợp">Gỡ tất cả</button>
+      </div>
+      ${open ? `<div class="gift-combo-chips">${chips || '<span class="gift-manager-empty">Bảng giá chưa có tổ hợp nào để gắn.</span>'}</div>` : ''}
+    </article>`;
+  }).join('');
+}
+
+function applyGiftRename(oldName, newName) {
+  const next = newName.trim();
+  if (next === oldName) return;
+  for (const row of priceMasterRows) {
+    if (String(row.gift || '').trim() === oldName) row.gift = next;
+  }
+  // Renaming onto an existing gift merges the two groups, which is the point:
+  // it is how two near-identical spellings get reconciled.
+  draftGifts = draftGifts.filter(name => name !== oldName);
+  if (next && !priceMasterRows.some(row => String(row.gift || '').trim() === next)) draftGifts.push(next);
+  if (expandedGift === oldName) expandedGift = next || null;
+  renderPriceMaster();
+  renderGiftManager();
+  setPriceMasterStatus(next ? `Đã đổi tên quà tặng. Nhớ bấm “Lưu bảng giá”.` : 'Đã gỡ quà tặng khỏi các tổ hợp. Nhớ bấm “Lưu bảng giá”.');
+}
+
+giftManagerList?.addEventListener('change', event => {
+  const input = event.target.closest('[data-gift-rename]');
+  if (!input) return;
+  applyGiftRename(input.dataset.giftRename, input.value);
+});
+
+giftManagerList?.addEventListener('click', event => {
+  const expand = event.target.closest('[data-gift-expand]');
+  if (expand) {
+    expandedGift = expandedGift === expand.dataset.giftExpand ? null : expand.dataset.giftExpand;
+    renderGiftManager();
+    return;
+  }
+  const clear = event.target.closest('[data-gift-clear]');
+  if (clear) {
+    applyGiftRename(clear.dataset.giftClear, '');
+    return;
+  }
+  const toggle = event.target.closest('[data-gift-toggle]');
+  if (!toggle) return;
+  const row = priceMasterRows[Number(toggle.dataset.giftToggle)];
+  if (!row) return;
+  const name = toggle.dataset.giftName;
+  const attached = String(row.gift || '').trim() === name;
+  row.gift = attached ? '' : name;
+  // A gift detached from its last combo would disappear from the list while the
+  // user is still working on it, so it is kept as a draft.
+  if (attached && !draftGifts.includes(name)) draftGifts.push(name);
+  renderPriceMaster();
+  renderGiftManager();
+  setPriceMasterStatus('Đã đổi quà tặng của tổ hợp. Nhớ bấm “Lưu bảng giá”.');
+});
+
+giftAddButton?.addEventListener('click', () => {
+  let name = 'Quà tặng mới';
+  let counter = 2;
+  while (giftGroups().some(group => group.gift === name)) name = `Quà tặng mới ${counter++}`;
+  draftGifts.push(name);
+  expandedGift = name;
+  renderGiftManager();
+  giftManagerList?.querySelector(`[data-gift-rename="${CSS.escape(name)}"]`)?.select();
 });
 
 function renderProductImagePreview(source = '') {

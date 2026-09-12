@@ -979,6 +979,10 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .customer-panel-view { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 .customer-panel-view.hidden { display: none; }
 
+.customer-bot-alert { display: flex; flex-direction: column; gap: 2px; margin: 10px 10px 0; padding: 10px 12px; color: #7a2a12; background: #fff2e8; border: 1px solid #ffbb96; border-radius: 6px; font-size: 13px; line-height: 19px; }
+.customer-bot-alert.hidden { display: none; }
+.customer-bot-alert strong { color: #ad2102; font-weight: 500; }
+
 /* --- Thông tin: ghi chú --- */
 .customer-info-view { display: flex; flex-direction: column; background: #fff; }
 .customer-note-block { display: flex; min-height: 280px; flex: 0 0 auto; flex-direction: column; justify-content: center; padding: 0 10px; }

@@ -73,6 +73,7 @@ const chatSearchResults = document.querySelector('#chat-search-results');
 const contactPanelContent = document.querySelector('#contact-panel-content');
 const customerPanelTabs = [...document.querySelectorAll('[data-customer-tab]')];
 const customerPanelViews = [...document.querySelectorAll('[data-customer-panel]')];
+const customerBotAlert = document.querySelector('#customer-bot-alert');
 const customerNoteEmpty = document.querySelector('#customer-note-empty');
 const customerNoteList = document.querySelector('#customer-note-list');
 const customerNoteInput = document.querySelector('#customer-note-input');
@@ -2187,8 +2188,10 @@ async function loadCustomerPanelFromServer(conversation = getActiveConversation(
     customerPanelStore.notes[key] = Array.isArray(panel.notes) ? panel.notes : [];
     customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
     customerPanelStore.bots[key] = panel.botEnabled === true;
+    customerBotErrors[key] = { message: String(panel.botLastError || ''), at: Number(panel.botLastErrorAt) || 0 };
     saveCustomerPanelStore();
     renderChatbotToggle(conversation);
+    renderChatbotError(conversation);
     renderCustomerNotes(conversation);
     renderCustomerOrders(conversation);
     renderConversationOrderCards(conversation);
@@ -2312,6 +2315,19 @@ function getCustomerOrders(conversation = getActiveConversation()) {
   if (!key) return [];
   if (!Array.isArray(customerPanelStore.orders[key])) customerPanelStore.orders[key] = getSeedCustomerOrder(conversation);
   return customerPanelStore.orders[key];
+}
+
+// Chatbot failures are reported per conversation by the server and are not worth
+// persisting locally: a stale warning would be worse than none.
+const customerBotErrors = {};
+
+function renderChatbotError(conversation = getActiveConversation()) {
+  if (!customerBotAlert) return;
+  const failure = customerBotErrors[getCustomerPanelKey(conversation)];
+  customerBotAlert.classList.toggle('hidden', !failure?.message);
+  if (!failure?.message) return;
+  const when = failure.at ? ` lúc ${formatCustomerPanelTime(failure.at, true)}` : '';
+  customerBotAlert.innerHTML = `<strong>Chatbot chưa tạo được đơn${escapeHtml(when)}</strong><span>${escapeHtml(failure.message)}</span><span>Khách có thể đã nhận tin xác nhận. Kiểm tra lại và tạo đơn thủ công nếu cần.</span>`;
 }
 
 function renderCustomerNotes(conversation = getActiveConversation()) {
@@ -2617,6 +2633,7 @@ function setCustomerPanelTab(name) {
 
 function renderCustomerPanel(conversation = getActiveConversation()) {
   renderChatbotToggle(conversation);
+  renderChatbotError(conversation);
   renderCustomerNotes(conversation);
   renderCustomerOrders(conversation);
   const profile = getCustomerPanelProfile(conversation);

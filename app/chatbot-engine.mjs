@@ -131,6 +131,17 @@ export function requestChatbotReply(options) {
   return requestDirectModelReply(options);
 }
 
+/** Strips Vietnamese tone marks so a handoff keyword still matches when the
+ *  customer types without diacritics, which is how most people type on a phone. */
+export function foldVietnamese(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u0111/g, 'd')
+    .replace(/\u0110/g, 'D')
+    .toLowerCase();
+}
+
 export async function processChatbotChanges(changes, dependencies) {
   const { readSettings, listMessages, saveBotState, sendMessage, createOrder, requestReply = requestChatbotReply } = dependencies;
   const settings = await readSettings();
@@ -140,32 +151,41 @@ export async function processChatbotChanges(changes, dependencies) {
     if (change.type !== 'message' || change.message?.direction !== 'incoming' || change.conversation?.botEnabled !== true) continue;
     const conversation = change.conversation;
     try {
-      const keywords = settings.handoffKeywords.split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
-      const asksForHuman = keywords.some(keyword => String(change.message.text || '').toLowerCase().includes(keyword));
+      const keywords = settings.handoffKeywords.split(',').map(item => foldVietnamese(item.trim())).filter(Boolean);
+      const incomingText = foldVietnamese(change.message.text);
+      const asksForHuman = keywords.some(keyword => incomingText.includes(keyword));
       const reply = asksForHuman || change.message.type !== 'text'
         ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, settings.deletedTemplateIds)
         : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id) });
-      let firstSentMessageId = '';
-      if (settings.responseMode === 'automatic') {
-        for (const text of reply.messages) {
-          const sent = await sendMessage(conversation, { text });
-          firstSentMessageId ||= String(sent?.message?.mid || sent?.message?.id || '');
-        }
-      }
-      const order = settings.responseMode === 'automatic' && reply.order && createOrder
+      // The order is persisted BEFORE anything is sent. Sending first meant a
+      // failed order left the customer holding a confirmation for an order that
+      // did not exist, and a retried webhook sent the whole reply a second time.
+      const outcome = settings.responseMode === 'automatic' && reply.order && createOrder
         ? await createOrder(conversation, reply.order, {
-            sourceMessageId: String(change.message.mid || change.message.id || ''),
-            deliveryMessageId: firstSentMessageId
+            sourceMessageId: String(change.message.mid || change.message.id || '')
           })
         : null;
+      const order = outcome?.order || null;
+      const alreadyHandled = Boolean(outcome) && outcome.created === false;
+      if (settings.responseMode === 'automatic' && !alreadyHandled) {
+        for (const text of reply.messages) await sendMessage(conversation, { text });
+      }
       await saveBotState(conversation.id, {
         botConversationId: reply.conversationId || conversation.botConversationId || '',
         botLastTemplateId: reply.templateId,
         botLastReplyAt: Date.now(),
         botDraft: settings.responseMode === 'draft' ? reply.messages.join('\n\n') : '',
+        botLastError: '',
+        botLastErrorAt: 0,
         ...(reply.handoff ? { botEnabled: false } : {})
       });
-      results.push({ conversationId: conversation.id, mode: settings.responseMode, templateId: reply.templateId, ...(order ? { orderId: order.id } : {}) });
+      results.push({
+        conversationId: conversation.id,
+        mode: settings.responseMode,
+        templateId: reply.templateId,
+        ...(order ? { orderId: order.id } : {}),
+        ...(alreadyHandled ? { duplicate: true } : {})
+      });
     } catch (error) {
       await saveBotState(conversation.id, { botLastError: error.message, botLastErrorAt: Date.now() });
       results.push({ conversationId: conversation.id, error: error.message });

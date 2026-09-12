@@ -114,9 +114,18 @@ function publicCustomerPanel(conversation) {
   return {
     notes: Array.isArray(conversation?.customerNotes) ? conversation.customerNotes : [],
     orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [],
-    botEnabled: conversation?.botEnabled === true
+    botEnabled: conversation?.botEnabled === true,
+    // Surfaced so a chatbot order that failed to save is visible to staff instead
+    // of sitting silently in the store while the customer believes it went through.
+    botLastError: String(conversation?.botLastError || ''),
+    botLastErrorAt: Number(conversation?.botLastErrorAt) || 0
   };
 }
+
+// A customer who confirms twice in slightly different words produces two model
+// replies with different message ids, so the source-message guard alone still let
+// the warehouse pack the same basket twice.
+const duplicateChatbotOrderWindowMs = 10 * 60 * 1000;
 
 async function createChatbotCustomerOrder(conversation, input, context = {}) {
   const sourceMessageId = String(context.sourceMessageId || '').trim();
@@ -125,9 +134,13 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
     const item = store.conversations.find(entry => entry.id === conversation.id);
     if (!item) return null;
     if (!Array.isArray(item.customerOrders)) item.customerOrders = [];
-    const existing = sourceMessageId
+    const existing = (sourceMessageId
       ? item.customerOrders.find(entry => entry.chatbotSourceMessageId === sourceMessageId)
-      : null;
+      : null)
+      || item.customerOrders.find(entry => entry.automatic
+        && entry.phone === order.phone
+        && Number(entry.total) === Number(order.total)
+        && order.createdAt - (Number(entry.createdAt) || 0) < duplicateChatbotOrderWindowMs);
     if (existing) return { order: existing, created: false };
     item.customerOrders.unshift(order);
     item.customerOrders = item.customerOrders.slice(0, 200);
@@ -148,7 +161,7 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
       console.error(`Không gửi được hoá đơn cho đơn ${result.order.id}: ${error.message}`);
     }
   }
-  return result.order;
+  return result;
 }
 
 async function readChatbotSettings() {

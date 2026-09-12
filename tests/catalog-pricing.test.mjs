@@ -146,6 +146,26 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   assert.deepEqual(pricing.quoteTiers('hạt an lành').tiers.map(tier => [tier.price, tier.freeShipping, tier.gifts.length]), [[269000, false, 0], [528000, true, 0], [792000, true, 0]]);
 });
 
+test('tin xác nhận đơn: 2 túi ghép — không dòng ship, miễn ship ghi cạnh tổng tiền, không dòng quà', () => {
+  const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Product_N2: 'Túi Nâu', No_B: '1', Phone_Number: '0385805700', Customer_Address: 'kp6 Đông Hải, pr-tc, Ninh Thuận' }, templates);
+  assert.equal(reply.messages[0], [
+    'Dạ, em xin phép xác nhận lại thông tin đặt hàng của mình nha:',
+    '',
+    '🌾 Granola Túi Xanh 450g – Số lượng: 1',
+    '🌾 Granola Túi Nâu vị cacao 350g – Số lượng: 1',
+    '━━━━━━━━━━━━',
+    '📞 Số điện thoại: 0385805700',
+    '━━━━━━━━━━━━',
+    '🏡 Địa chỉ nhận hàng: kp6 Đông Hải, pr-tc, Ninh Thuận',
+    '━━━━━━━━━━━━',
+    '💰 Tổng tiền: 293.000đ (Miễn phí vận chuyển)',
+    '',
+    'Em cảm ơn anh/ chị đã ủng hộ Giọt Nắng, nếu có gì sai sót, anh/ chị nhắn cho em biết nhé ạ.'
+  ].join('\n'));
+  const single = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0385805700', Customer_Address: 'Q12' }, templates).messages[0];
+  assert.match(single, /🚚 Phí vận chuyển: 15\.000đ\n━+\n💰 Tổng tiền: 189\.000đ\n\nEm cảm ơn/);
+});
+
 test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu lực ngay sau khi lưu', () => {
   const products = JSON.parse(readFileSync(process.env.PRODUCTS_PATH, 'utf8'));
   products.items[0].salePrice = 199000;

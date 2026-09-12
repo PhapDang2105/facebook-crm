@@ -187,7 +187,9 @@ function renderOrder(value, templates, context = {}) {
     shipping: price.shippingFee ? formatMoney(price.shippingFee) : '',
     subtotal: formatMoney(price.subtotal),
     total: formatMoney(total),
-    gift: price.gift
+    // Free shipping is written next to the total; other gifts get their own line.
+    free_ship: price.gifts.find(isFreeShippingGift)?.name || '',
+    gift: price.gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + ')
   }, { items: orderItems.map(item => ({ product: item.product, quantity: item.quantity })) });
   return {
     templateId: 'ORDER_CONFIRMATION',

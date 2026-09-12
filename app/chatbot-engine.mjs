@@ -143,7 +143,7 @@ export function foldVietnamese(value) {
 }
 
 export async function processChatbotChanges(changes, dependencies) {
-  const { readSettings, listMessages, saveBotState, sendMessage, createOrder, requestReply = requestChatbotReply } = dependencies;
+  const { readSettings, listMessages, saveBotState, sendMessage, createOrder, sendReceipt, requestReply = requestChatbotReply } = dependencies;
   const settings = await readSettings();
   if (!settings.enabled) return [];
   const results = [];
@@ -169,6 +169,9 @@ export async function processChatbotChanges(changes, dependencies) {
       const alreadyHandled = Boolean(outcome) && outcome.created === false;
       if (settings.responseMode === 'automatic' && !alreadyHandled) {
         for (const text of reply.messages) await sendMessage(conversation, { text });
+        // The receipt closes the exchange, so it is sent after the reply text and
+        // never before it — the order itself was already persisted above.
+        if (order && sendReceipt) await sendReceipt(conversation, order);
       }
       await saveBotState(conversation.id, {
         botConversationId: reply.conversationId || conversation.botConversationId || '',

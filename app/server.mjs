@@ -147,21 +147,23 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
     return { order, created: true };
   });
   if (!result) throw new Error('Không tìm thấy hội thoại để tự tạo đơn.');
-  if (result.created) {
-    publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
-    // The customer gets the same tappable Messenger receipt as an order created by hand.
-    try {
-      const confirmationText = buildCustomerOrderConfirmation(result.order);
-      await sendConversationMessage(conversation, {
-        text: confirmationText,
-        templateText: confirmationText,
-        template: buildOrderReceiptPayload(result.order, { baseUrl: metaConfig.publicBaseUrl })
-      });
-    } catch (error) {
-      console.error(`Không gửi được hoá đơn cho đơn ${result.order.id}: ${error.message}`);
-    }
-  }
+  if (result.created) publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
   return result;
+}
+
+/** Sends the tappable Messenger receipt. Kept separate from creating the order so
+ *  the chatbot can persist the order first and still close with the receipt. */
+async function sendChatbotOrderReceipt(conversation, order) {
+  try {
+    const confirmationText = buildCustomerOrderConfirmation(order);
+    await sendConversationMessage(conversation, {
+      text: confirmationText,
+      templateText: confirmationText,
+      template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl })
+    });
+  } catch (error) {
+    console.error(`Không gửi được hoá đơn cho đơn ${order.id}: ${error.message}`);
+  }
 }
 
 async function readChatbotSettings() {
@@ -675,6 +677,7 @@ const server = http.createServer(async (request, response) => {
           listMessages,
           sendMessage: sendConversationMessage,
           createOrder: createChatbotCustomerOrder,
+          sendReceipt: sendChatbotOrderReceipt,
           saveBotState: (id, botState) => updateMessagingStore(store => {
             const conversation = store.conversations.find(item => item.id === id);
             if (!conversation) return null;

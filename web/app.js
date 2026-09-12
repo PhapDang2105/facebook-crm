@@ -4256,7 +4256,7 @@ function renderPreviewCell(value, header) {
 
 // An empty screen shows one centred empty-box icon and nothing else: no
 // bordered frame, no toolbar button that has nothing to act on.
-const emptyBoxIcon = '<img src="/assets/icons/empty-box.svg" alt="" width="72" height="72">';
+const emptyBoxIcon = '<img src="/assets/icons/empty-box.svg" alt="" width="140" height="140">';
 
 function renderEmptyState(container, message) {
   container.classList.add('is-empty');

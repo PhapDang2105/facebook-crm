@@ -559,8 +559,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .data-preview.is-empty::before { display: none; }
 .order-stage:has(.is-empty) { display: flex; flex: 1 1 auto; height: auto; min-height: calc(100vh - 57px); }
 .order-stage:has(.is-empty) .is-empty { display: flex; flex: 1 1 auto; }
-.order-empty { display: grid; flex: 1 1 auto; justify-items: center; align-content: center; gap: 8px; color: #8c8c8c; font-size: 13px; }
-.order-empty img { width: 72px; height: 72px; opacity: .92; }
+.order-empty { display: grid; flex: 1 1 auto; justify-items: center; align-content: center; gap: 14px; color: #8c8c8c; font-size: 14px; }
+.order-empty img { width: 140px; height: 140px; opacity: .92; }
 .data-preview table { display: grid; grid-template-columns: var(--preview-template); column-gap: 58.5px; width: 100%; background: linear-gradient(to bottom, #fff 0 46.8px, #fe2c55 46.8px 48.6px, transparent 48.6px); border-collapse: collapse; }
 .data-preview thead,
 .data-preview tbody,

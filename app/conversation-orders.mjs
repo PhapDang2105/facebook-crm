@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { toLocalPhone } from './processing/customer-info.mjs';
-import { unitPriceForProduct } from './processing/unit-price.mjs';
+import { unitPriceForProduct } from './processing/pricing.mjs';
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);

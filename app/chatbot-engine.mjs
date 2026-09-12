@@ -1,5 +1,6 @@
 import { renderChatbotReply } from './chatbot-templates.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
+import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
 
 export function parseModelAnswer(answer) {
@@ -27,6 +28,12 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
     includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
     `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`
   ].filter(Boolean).join('\n\n');
+}
+
+/** The saved prompt plus the live catalogue block. Exported so the settings screen can preview exactly what the model receives. */
+export function composeSystemPrompt(basePrompt) {
+  const catalog = buildCatalogPrompt();
+  return catalog ? `${String(basePrompt || '').trim()}\n\n${catalog}` : String(basePrompt || '').trim();
 }
 
 function buildMemoryTurns({ recentMessages = [], message, settings }) {
@@ -61,6 +68,9 @@ export async function requestDirectModelReply(options) {
   const vertex = settings.provider === 'vertex';
   if (!settings.directApiKey && (!vertex || settings.directAuthType === 'api_key')) throw new Error('Chatbot chưa có khóa API hoặc access token của nhà cung cấp.');
   if (!settings.systemPrompt) throw new Error('Chatbot chưa có system prompt.');
+  // The catalogue is appended on every request, never baked into the saved
+  // prompt: a product added in settings is known to the model on its next reply.
+  const systemPrompt = composeSystemPrompt(settings.systemPrompt);
   const attempts = 1 + Math.max(0, Number(settings.retryCount) || 0);
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -80,7 +90,7 @@ export async function requestDirectModelReply(options) {
       const memoryTurns = buildMemoryTurns({ recentMessages, message, settings });
       const query = buildChatbotQuery({ conversation, message, recentMessages, settings, includeHistory: false });
       const body = vertex ? {
-        systemInstruction: { parts: [{ text: settings.systemPrompt }] },
+        systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [
           ...memoryTurns.map(turn => ({ role: turn.role, parts: [{ text: turn.text }] })),
           { role: 'user', parts: [{ text: query }] }
@@ -91,12 +101,12 @@ export async function requestDirectModelReply(options) {
       } : anthropic ? {
         model,
         max_tokens: 1024,
-        system: settings.systemPrompt,
+        system: systemPrompt,
         messages: mergeAnthropicTurns([...memoryTurns, { role: 'user', text: query }])
       } : {
         model,
         messages: [
-          { role: 'system', content: settings.systemPrompt },
+          { role: 'system', content: systemPrompt },
           ...memoryTurns.map(turn => ({ role: turn.role === 'model' ? 'assistant' : 'user', content: turn.text })),
           { role: 'user', content: query }
         ],

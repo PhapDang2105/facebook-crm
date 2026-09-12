@@ -128,6 +128,12 @@ const productName = document.querySelector('#product-name');
 const productSku = document.querySelector('#product-sku');
 const productOriginalPrice = document.querySelector('#product-original-price');
 const productSalePrice = document.querySelector('#product-sale-price');
+const productCombo2 = document.querySelector('#product-combo-2');
+const productCombo3 = document.querySelector('#product-combo-3');
+const productMixGroup = document.querySelector('#product-mix-group');
+const productMixGroupOptions = document.querySelector('#product-mix-group-options');
+const productActive = document.querySelector('#product-active');
+const productAliases = document.querySelector('#product-aliases');
 const productFormStatus = document.querySelector('#product-form-status');
 const productSubmit = document.querySelector('#product-submit');
 const sharedProductOptions = document.querySelector('#shared-product-options');
@@ -2126,248 +2132,124 @@ async function loadChatbotPipeline() {
   renderChatbotStepEditor();
 }
 
-// ===== Bảng giá & quà tặng (Cài đặt → Quà tặng) =====
-const priceMasterRowsElement = document.querySelector('#price-master-rows');
-const priceMasterAddButton = document.querySelector('#price-master-add');
-const priceMasterSaveButton = document.querySelector('#price-master-save');
-const priceMasterStatus = document.querySelector('#price-master-status');
-let priceMasterRows = [];
-let priceMasterLoaded = false;
-
-// Mirrors productCode() on the server: the key is what the chatbot looks up, so
-// the screen has to speak the same language.
-const priceMasterCodeNames = {
-  XANH: 'Túi Xanh', VANG: 'Túi Vàng', NAU: 'Túi Nâu',
-  COMBO10_XANH: 'Combo 10 gói Xanh', COMBO10_NAU: 'Combo 10 gói Nâu',
-  COMBO10_CAM: 'Combo 10 gói Cam', COMBO10_MIX: 'Combo 10 gói Mix',
-  CACAO300: 'Cacao Tropical 300g'
-};
-
-function describePriceMasterKey(orderKey) {
-  const parts = String(orderKey || '').trim().split('|').filter(Boolean);
-  if (!parts.length) return { text: 'Chưa có mã', unknown: true };
-  const pieces = [];
-  let unknown = false;
-  for (const part of parts) {
-    const [code, quantity] = part.split('=');
-    const name = priceMasterCodeNames[code];
-    if (!name || !Number(quantity)) unknown = true;
-    pieces.push(`${Number(quantity) || '?'} × ${name || code || '?'}`);
-  }
-  return { text: pieces.join(' + '), unknown };
-}
-
-function setPriceMasterStatus(message, tone = '') {
-  if (!priceMasterStatus) return;
-  priceMasterStatus.textContent = message;
-  priceMasterStatus.classList.toggle('is-error', tone === 'error');
-  priceMasterStatus.classList.toggle('is-ok', tone === 'ok');
-}
-
-function renderPriceMaster() {
-  if (!priceMasterRowsElement) return;
-  if (!priceMasterRows.length) {
-    priceMasterRowsElement.innerHTML = '<div class="price-master-row"><span class="price-master-basket">Chưa có dòng nào. Bấm “Thêm dòng” để bắt đầu.</span></div>';
-    return;
-  }
-  priceMasterRowsElement.innerHTML = priceMasterRows.map((row, index) => {
-    const basket = describePriceMasterKey(row.order_key);
-    return `<div class="price-master-row${basket.unknown ? ' is-invalid' : ''}">
-      <input type="text" data-price-field="order_key" data-price-index="${index}" value="${escapeHtml(row.order_key)}" placeholder="XANH=2" spellcheck="false">
-      <span class="price-master-basket${basket.unknown ? ' is-unknown' : ''}">${escapeHtml(basket.text)}</span>
-      <input type="number" data-price-field="final_price" data-price-index="${index}" value="${Number(row.final_price) || 0}" min="0" step="1000">
-      <input type="text" data-price-field="gift" data-price-index="${index}" value="${escapeHtml(row.gift || '')}" placeholder="Miễn phí vận chuyển...">
-      <label class="price-master-active"><input type="checkbox" data-price-field="active" data-price-index="${index}" ${row.active !== false ? 'checked' : ''} aria-label="Đang áp dụng"></label>
-      <button class="price-master-remove" type="button" data-price-remove="${index}" aria-label="Xóa dòng" title="Xóa dòng">×</button>
-    </div>`;
-  }).join('');
-}
-
-async function loadPriceMaster() {
-  if (!priceMasterRowsElement || priceMasterLoaded) return;
-  try {
-    const result = await readApiResponse(await fetch('/api/price-master'));
-    priceMasterRows = Array.isArray(result.items) ? result.items.map(row => ({ ...row })) : [];
-    priceMasterLoaded = true;
-    renderPriceMaster();
-    renderGiftManager();
-    setPriceMasterStatus(`${priceMasterRows.length} tổ hợp đang có trong bảng giá.`);
-  } catch (error) {
-    setPriceMasterStatus(error.message || 'Chưa tải được bảng giá.', 'error');
-  }
-}
-
-priceMasterRowsElement?.addEventListener('input', event => {
-  const field = event.target.dataset.priceField;
-  const index = Number(event.target.dataset.priceIndex);
-  const row = priceMasterRows[index];
-  if (!field || !row) return;
-  if (field === 'gift') { row.gift = event.target.value; renderGiftManager(); }
-  else if (field === 'final_price') row.final_price = Math.max(0, Number(event.target.value) || 0);
-  else if (field === 'order_key') {
-    row.order_key = event.target.value.trim().toUpperCase();
-    // Only the basket label is refreshed, so the caret stays where it was.
-    const basket = describePriceMasterKey(row.order_key);
-    const cell = event.target.parentElement?.querySelector('.price-master-basket');
-    if (cell) { cell.textContent = basket.text; cell.classList.toggle('is-unknown', basket.unknown); }
-    event.target.parentElement?.classList.toggle('is-invalid', basket.unknown);
-  } else row[field] = event.target.value;
-});
-
-priceMasterRowsElement?.addEventListener('change', event => {
-  if (event.target.dataset.priceField !== 'active') return;
-  const row = priceMasterRows[Number(event.target.dataset.priceIndex)];
-  if (row) row.active = event.target.checked;
-});
-
-priceMasterRowsElement?.addEventListener('click', event => {
-  const button = event.target.closest('[data-price-remove]');
-  if (!button) return;
-  priceMasterRows.splice(Number(button.dataset.priceRemove), 1);
-  renderPriceMaster();
-  renderGiftManager();
-  setPriceMasterStatus('Đã xóa dòng. Nhớ bấm “Lưu bảng giá”.');
-});
-
-priceMasterAddButton?.addEventListener('click', () => {
-  priceMasterRows.unshift({ order_key: '', final_price: 0, gift: '', active: true });
-  renderPriceMaster();
-  priceMasterRowsElement?.querySelector('input')?.focus();
-});
-
-priceMasterSaveButton?.addEventListener('click', async () => {
-  const invalid = priceMasterRows.find(row => describePriceMasterKey(row.order_key).unknown);
-  if (invalid) {
-    setPriceMasterStatus(`Mã tổ hợp chưa đúng: ${invalid.order_key || '(trống)'}. Dạng đúng là XANH=2 hoặc XANH=1|NAU=1.`, 'error');
-    return;
-  }
-  priceMasterSaveButton.disabled = true;
-  try {
-    const result = await readApiResponse(await fetch('/api/price-master', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: priceMasterRows })
-    }));
-    priceMasterRows = Array.isArray(result.items) ? result.items.map(row => ({ ...row })) : priceMasterRows;
-    draftGifts = [];
-    renderPriceMaster();
-    renderGiftManager();
-    setPriceMasterStatus(`Đã lưu ${priceMasterRows.length} tổ hợp. Chatbot dùng bảng mới ngay.`, 'ok');
-  } catch (error) {
-    setPriceMasterStatus(error.message || 'Chưa lưu được bảng giá.', 'error');
-  } finally {
-    priceMasterSaveButton.disabled = false;
-  }
-});
-
-// ===== Quản lý quà tặng =====
-// The gift text lives on each price row, so the same gift used to be retyped on
-// every combo — one typo and the customer was promised something slightly
-// different. This view groups the rows by gift and edits them together.
-const giftManagerList = document.querySelector('#gift-manager-list');
+// ===== Quà tặng (Cài đặt → Quà tặng) =====
+// A gift is a name and the total quantity it unlocks at. Gifts stack: an order
+// of three gets every gift whose threshold is three or lower. The chatbot reads
+// the same list, so ticking a gift here changes the next confirmation it sends.
+const giftRowsElement = document.querySelector('#gift-rows');
 const giftAddButton = document.querySelector('#gift-add');
-// Gifts created here but not yet attached to a combo; they have nowhere to live
-// in priceMasterRows until the first combo is ticked.
-let draftGifts = [];
-let expandedGift = null;
+const giftSaveButton = document.querySelector('#gift-save');
+const giftStatus = document.querySelector('#gift-status');
+const giftPreview = document.querySelector('#gift-preview');
+let giftItems = [];
+let giftsLoaded = false;
 
-function giftGroups() {
-  const groups = new Map();
-  for (const name of draftGifts) if (name.trim()) groups.set(name, []);
-  priceMasterRows.forEach((row, index) => {
-    const gift = String(row.gift || '').trim();
-    if (!gift) return;
-    if (!groups.has(gift)) groups.set(gift, []);
-    groups.get(gift).push(index);
-  });
-  return [...groups.entries()].map(([gift, rows]) => ({ gift, rows }));
+function setGiftStatus(message, tone = '') {
+  if (!giftStatus) return;
+  giftStatus.textContent = message;
+  giftStatus.classList.toggle('is-error', tone === 'error');
+  giftStatus.classList.toggle('is-ok', tone === 'ok');
 }
 
-function renderGiftManager() {
-  if (!giftManagerList) return;
-  const groups = giftGroups();
-  if (!groups.length) {
-    giftManagerList.innerHTML = '<p class="gift-manager-empty">Chưa có quà tặng nào. Bấm “Thêm quà tặng” hoặc gõ trực tiếp vào cột Quà tặng ở bảng trên.</p>';
-    return;
+function renderGiftPreview() {
+  if (!giftPreview) return;
+  const maximum = Math.max(3, ...giftItems.filter(gift => gift.active !== false).map(gift => Number(gift.minQuantity) || 1));
+  const cells = [];
+  for (let quantity = 1; quantity <= Math.min(maximum, 6); quantity += 1) {
+    const names = giftItems
+      .filter(gift => gift.active !== false && String(gift.name || '').trim() && (Number(gift.minQuantity) || 1) <= quantity)
+      .sort((a, b) => (Number(a.minQuantity) || 1) - (Number(b.minQuantity) || 1))
+      .map(gift => escapeHtml(gift.name.trim()));
+    cells.push(`<div class="gift-preview-cell"><strong>${quantity} sản phẩm</strong>${names.length ? `<ul>${names.map(name => `<li>${name}</li>`).join('')}</ul>` : '<em>Không có quà</em>'}</div>`);
   }
-  const priceable = priceMasterRows
-    .map((row, index) => ({ row, index }))
-    .filter(entry => String(entry.row.order_key || '').trim());
-  giftManagerList.innerHTML = groups.map(group => {
-    const open = expandedGift === group.gift;
-    const chips = open ? priceable.map(entry => {
-      const attached = String(entry.row.gift || '').trim() === group.gift;
-      return `<button class="gift-combo-chip${attached ? ' is-on' : ''}" type="button" data-gift-toggle="${entry.index}" data-gift-name="${escapeHtml(group.gift)}" aria-pressed="${attached}">${escapeHtml(describePriceMasterKey(entry.row.order_key).text)}</button>`;
-    }).join('') : '';
-    return `<article class="gift-manager-item${open ? ' is-open' : ''}">
-      <div class="gift-manager-row">
-        <input type="text" class="gift-name-input" value="${escapeHtml(group.gift)}" data-gift-rename="${escapeHtml(group.gift)}" placeholder="Tên quà tặng" aria-label="Tên quà tặng">
-        <span class="gift-manager-count">${group.rows.length} tổ hợp</span>
-        <button class="gift-manager-expand" type="button" data-gift-expand="${escapeHtml(group.gift)}" aria-expanded="${open}">${open ? 'Thu gọn' : 'Chọn tổ hợp'}</button>
-        <button class="gift-manager-detach" type="button" data-gift-clear="${escapeHtml(group.gift)}" title="Gỡ quà này khỏi mọi tổ hợp">Gỡ tất cả</button>
-      </div>
-      ${open ? `<div class="gift-combo-chips">${chips || '<span class="gift-manager-empty">Bảng giá chưa có tổ hợp nào để gắn.</span>'}</div>` : ''}
-    </article>`;
-  }).join('');
+  giftPreview.innerHTML = cells.join('');
 }
 
-function applyGiftRename(oldName, newName) {
-  const next = newName.trim();
-  if (next === oldName) return;
-  for (const row of priceMasterRows) {
-    if (String(row.gift || '').trim() === oldName) row.gift = next;
+function renderGifts() {
+  if (!giftRowsElement) return;
+  if (!giftItems.length) {
+    giftRowsElement.innerHTML = '<div class="gift-row gift-row-empty"><span>Chưa có quà tặng nào. Bấm “Thêm quà tặng” để bắt đầu.</span></div>';
+  } else {
+    giftRowsElement.innerHTML = giftItems.map((gift, index) => `<div class="gift-row${gift.active === false ? ' is-off' : ''}">
+      <label class="gift-active"><input type="checkbox" data-gift-field="active" data-gift-index="${index}" ${gift.active !== false ? 'checked' : ''} aria-label="Áp dụng quà tặng"></label>
+      <input type="text" data-gift-field="name" data-gift-index="${index}" value="${escapeHtml(gift.name || '')}" maxlength="200" placeholder="Ví dụ: Miễn phí vận chuyển">
+      <span class="gift-quantity"><span>từ</span><input type="number" data-gift-field="minQuantity" data-gift-index="${index}" value="${Number(gift.minQuantity) || 1}" min="1" max="20" step="1"><span>sản phẩm</span></span>
+      <button class="price-master-remove" type="button" data-gift-remove="${index}" aria-label="Xóa quà tặng" title="Xóa quà tặng">×</button>
+    </div>`).join('');
   }
-  // Renaming onto an existing gift merges the two groups, which is the point:
-  // it is how two near-identical spellings get reconciled.
-  draftGifts = draftGifts.filter(name => name !== oldName);
-  if (next && !priceMasterRows.some(row => String(row.gift || '').trim() === next)) draftGifts.push(next);
-  if (expandedGift === oldName) expandedGift = next || null;
-  renderPriceMaster();
-  renderGiftManager();
-  setPriceMasterStatus(next ? `Đã đổi tên quà tặng. Nhớ bấm “Lưu bảng giá”.` : 'Đã gỡ quà tặng khỏi các tổ hợp. Nhớ bấm “Lưu bảng giá”.');
+  renderGiftPreview();
 }
 
-giftManagerList?.addEventListener('change', event => {
-  const input = event.target.closest('[data-gift-rename]');
-  if (!input) return;
-  applyGiftRename(input.dataset.giftRename, input.value);
+async function loadGifts() {
+  if (!giftRowsElement || giftsLoaded) return;
+  try {
+    const result = await readApiResponse(await fetch('/api/gifts'));
+    giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift })) : [];
+    giftsLoaded = true;
+    renderGifts();
+    setGiftStatus(`${giftItems.length} quà tặng. Chatbot đang dùng danh sách này.`);
+  } catch (error) {
+    setGiftStatus(error.message || 'Chưa tải được quà tặng.', 'error');
+  }
+}
+
+giftRowsElement?.addEventListener('input', event => {
+  const field = event.target.dataset.giftField;
+  const gift = giftItems[Number(event.target.dataset.giftIndex)];
+  if (!field || !gift) return;
+  if (field === 'name') gift.name = event.target.value;
+  else if (field === 'minQuantity') gift.minQuantity = Math.min(20, Math.max(1, Math.round(Number(event.target.value) || 1)));
+  renderGiftPreview();
+  setGiftStatus('Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.');
 });
 
-giftManagerList?.addEventListener('click', event => {
-  const expand = event.target.closest('[data-gift-expand]');
-  if (expand) {
-    expandedGift = expandedGift === expand.dataset.giftExpand ? null : expand.dataset.giftExpand;
-    renderGiftManager();
-    return;
-  }
-  const clear = event.target.closest('[data-gift-clear]');
-  if (clear) {
-    applyGiftRename(clear.dataset.giftClear, '');
-    return;
-  }
-  const toggle = event.target.closest('[data-gift-toggle]');
-  if (!toggle) return;
-  const row = priceMasterRows[Number(toggle.dataset.giftToggle)];
-  if (!row) return;
-  const name = toggle.dataset.giftName;
-  const attached = String(row.gift || '').trim() === name;
-  row.gift = attached ? '' : name;
-  // A gift detached from its last combo would disappear from the list while the
-  // user is still working on it, so it is kept as a draft.
-  if (attached && !draftGifts.includes(name)) draftGifts.push(name);
-  renderPriceMaster();
-  renderGiftManager();
-  setPriceMasterStatus('Đã đổi quà tặng của tổ hợp. Nhớ bấm “Lưu bảng giá”.');
+giftRowsElement?.addEventListener('change', event => {
+  if (event.target.dataset.giftField !== 'active') return;
+  const gift = giftItems[Number(event.target.dataset.giftIndex)];
+  if (!gift) return;
+  gift.active = event.target.checked;
+  event.target.closest('.gift-row')?.classList.toggle('is-off', !gift.active);
+  renderGiftPreview();
+  setGiftStatus('Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.');
+});
+
+giftRowsElement?.addEventListener('click', event => {
+  const button = event.target.closest('[data-gift-remove]');
+  if (!button) return;
+  giftItems.splice(Number(button.dataset.giftRemove), 1);
+  renderGifts();
+  setGiftStatus('Đã xóa quà tặng. Nhớ bấm “Lưu quà tặng”.');
 });
 
 giftAddButton?.addEventListener('click', () => {
-  let name = 'Quà tặng mới';
-  let counter = 2;
-  while (giftGroups().some(group => group.gift === name)) name = `Quà tặng mới ${counter++}`;
-  draftGifts.push(name);
-  expandedGift = name;
-  renderGiftManager();
-  giftManagerList?.querySelector(`[data-gift-rename="${CSS.escape(name)}"]`)?.select();
+  // A new gift defaults to the next threshold up, which is the usual reason to add one.
+  const nextQuantity = giftItems.length ? Math.max(...giftItems.map(gift => Number(gift.minQuantity) || 1)) + 1 : 2;
+  giftItems.push({ id: '', name: '', minQuantity: Math.min(20, nextQuantity), active: true });
+  renderGifts();
+  giftRowsElement?.querySelector('.gift-row:last-child input[data-gift-field="name"]')?.focus();
+});
+
+giftSaveButton?.addEventListener('click', async () => {
+  const blank = giftItems.find(gift => !String(gift.name || '').trim());
+  if (blank) {
+    setGiftStatus('Có quà tặng chưa đặt tên.', 'error');
+    return;
+  }
+  giftSaveButton.disabled = true;
+  try {
+    const result = await readApiResponse(await fetch('/api/gifts', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: giftItems })
+    }));
+    giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift })) : giftItems;
+    renderGifts();
+    setGiftStatus(`Đã lưu ${giftItems.length} quà tặng. Chatbot áp dụng ngay cho đơn kế tiếp.`, 'ok');
+  } catch (error) {
+    setGiftStatus(error.message || 'Chưa lưu được quà tặng.', 'error');
+  } finally {
+    giftSaveButton.disabled = false;
+  }
 });
 
 function renderProductImagePreview(source = '') {
@@ -2385,6 +2267,15 @@ function syncSharedProductOptions() {
   ).join('');
 }
 
+function describeComboPrices(product) {
+  const tiers = Object.entries(product.comboPrices || {})
+    .map(([quantity, price]) => [Number(quantity), Number(price) || 0])
+    .filter(([quantity, price]) => quantity >= 2 && price > 0)
+    .sort((a, b) => a[0] - b[0]);
+  if (!tiers.length) return '<em>Chưa có · tính giá bán × SL</em>';
+  return tiers.map(([quantity, price]) => `<span class="product-combo-tier"><b>${quantity}</b> ${escapeHtml(formatOrderMoney(price))}</span>`).join('');
+}
+
 function renderProducts() {
   if (!productList) return;
   const query = String(productSearch?.value || '').trim().toLocaleLowerCase('vi');
@@ -2399,11 +2290,12 @@ function renderProducts() {
   productList.innerHTML = items.map(product => {
     const initial = escapeHtml(String(product.name || 'S').trim().charAt(0).toUpperCase());
     const image = product.image ? `<img src="${escapeHtml(product.image)}" alt="">` : initial;
-    return `<article class="product-row" data-product-id="${escapeHtml(product.id)}">
-      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}</small></span></div>
+    return `<article class="product-row${product.active === false ? ' is-off' : ''}" data-product-id="${escapeHtml(product.id)}">
+      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}</small></span></div>
       <code class="product-row-sku">${escapeHtml(product.sku)}</code>
-      <span class="product-row-price">${escapeHtml(formatOrderMoney(product.originalPrice))}</span>
       <strong class="product-row-price product-row-sale">${escapeHtml(formatOrderMoney(product.salePrice))}</strong>
+      <span class="product-row-combo">${describeComboPrices(product)}</span>
+      <span class="product-row-group">${product.mixGroup ? `<code>${escapeHtml(product.mixGroup)}</code>` : '<em>Không ghép</em>'}</span>
       <span class="product-row-actions"><button type="button" data-product-action="edit" title="Sửa sản phẩm" aria-label="Sửa sản phẩm"><img src="/assets/icons/products/edit.png" alt=""></button><button type="button" data-product-action="delete" title="Xóa sản phẩm" aria-label="Xóa sản phẩm"><img src="/assets/icons/products/delete.png" alt=""></button></span>
     </article>`;
   }).join('');
@@ -2433,6 +2325,15 @@ function openProductDialog(product = null) {
   if (productSku) productSku.value = product?.sku || '';
   if (productOriginalPrice) productOriginalPrice.value = String(product?.originalPrice || 0);
   if (productSalePrice) productSalePrice.value = String(product?.salePrice || 0);
+  if (productCombo2) productCombo2.value = product?.comboPrices?.['2'] ? String(product.comboPrices['2']) : '';
+  if (productCombo3) productCombo3.value = product?.comboPrices?.['3'] ? String(product.comboPrices['3']) : '';
+  if (productMixGroup) productMixGroup.value = product?.mixGroup || '';
+  if (productActive) productActive.checked = product ? product.active !== false : true;
+  if (productAliases) productAliases.value = Array.isArray(product?.aliases) ? product.aliases.join('\n') : '';
+  if (productMixGroupOptions) {
+    const groups = [...new Set(sharedProducts.map(item => item.mixGroup).filter(Boolean))];
+    productMixGroupOptions.innerHTML = groups.map(group => `<option value="${escapeHtml(group)}"></option>`).join('');
+  }
   if (productImageInput) productImageInput.value = '';
   if (productFormStatus) productFormStatus.textContent = '';
   renderProductImagePreview(product?.image || '');
@@ -2467,7 +2368,7 @@ function showSettingsSection(name = 'channels') {
     renderProductLoadError();
     showToast(error.message || 'Chưa tải được danh mục sản phẩm.', 'error');
   });
-  if (section === 'gifts') loadPriceMaster();
+  if (section === 'gifts') loadGifts();
 }
 
 function renderChatbotToggle(conversation = getActiveConversation()) {
@@ -4737,6 +4638,13 @@ productForm?.addEventListener('submit', async event => {
     sku: productSku.value.trim(),
     originalPrice: Number(productOriginalPrice.value),
     salePrice: Number(productSalePrice.value),
+    comboPrices: {
+      ...(Number(productCombo2?.value) > 0 ? { 2: Number(productCombo2.value) } : {}),
+      ...(Number(productCombo3?.value) > 0 ? { 3: Number(productCombo3.value) } : {})
+    },
+    mixGroup: productMixGroup?.value.trim() || '',
+    active: productActive ? productActive.checked : true,
+    aliases: productAliases?.value || '',
     imageData: pendingProductImage,
     removeImage: removeCurrentProductImage
   };

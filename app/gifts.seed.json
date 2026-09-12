@@ -1,0 +1,6 @@
+{
+  "items": [
+    { "id": "freeship", "name": "Miễn phí vận chuyển", "minQuantity": 2, "active": true },
+    { "id": "bo-bat-gao-dua", "name": "Bộ bát gáo dừa xinh xắn", "minQuantity": 3, "active": true }
+  ]
+}

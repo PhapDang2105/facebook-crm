@@ -16,11 +16,18 @@ const steps = [
     summary: 'Đọc sự kiện Messenger từ Meta. Nếu khách đến từ quảng cáo Click-to-Messenger thì giữ lại tiêu đề quảng cáo để biết họ đang quan tâm sản phẩm nào.'
   },
   {
+    id: 'catalog',
+    name: 'Danh mục sản phẩm & quà tặng',
+    type: 'data',
+    file: 'catalog.mjs',
+    summary: 'Đọc sản phẩm từ Cài đặt → Sản phẩm (giá lẻ, giá combo, nhóm ghép, tên gọi khác) và quà tặng từ Cài đặt → Quà tặng. Mọi bước sau đều lấy dữ liệu từ đây, nên thêm sản phẩm là bot nhận ngay.'
+  },
+  {
     id: 'product_detect',
     name: 'Nhận diện sản phẩm',
     type: 'transform',
     file: 'product-detect.mjs',
-    summary: 'Dò sản phẩm từ lời khách nói; nếu khách chưa nói gì thì lấy từ quảng cáo họ bấm vào. Cố tình không nhận từ màu đơn lẻ để tránh nhầm với tên nguyên liệu.'
+    summary: 'Dò sản phẩm từ lời khách nói theo tên và tên gọi khác trong danh mục; nếu khách chưa nói gì thì lấy từ quảng cáo họ bấm vào. Cụm dài nhất thắng để "combo 10 gói xanh" không bị đọc thành "túi xanh".'
   },
   {
     id: 'customer_info',
@@ -37,18 +44,18 @@ const steps = [
     summary: 'Nhớ sản phẩm, số điện thoại và địa chỉ trong 2 giờ để khách đưa từng phần qua nhiều tin nhắn vẫn chốt được đơn.'
   },
   {
-    id: 'order_key',
-    name: 'Mã tổ hợp đơn',
+    id: 'pricing',
+    name: 'Tính tiền & quà tặng',
     type: 'transform',
-    file: 'order-key.mjs',
-    summary: 'Quy giỏ hàng về một mã tra giá. Trả về rỗng khi có sản phẩm lạ, số lượng quá 3, hoặc combo bị trộn — không định giá được thì không chốt đơn.'
+    file: 'pricing.mjs',
+    summary: 'Mỗi sản phẩm tính theo giá bậc ứng với TỔNG số lượng cả đơn (2 túi khác màu vẫn hưởng giá combo 2). Quà tặng cộng dồn theo tổng số lượng. Sản phẩm lạ, trộn khác nhóm, hoặc quá 5 sản phẩm thì chuyển nhân viên thay vì đoán giá. Đây cũng là nơi soạn khối danh mục gắn vào system prompt.'
   },
   {
-    id: 'price_master',
-    name: 'Bảng giá & quà tặng',
-    type: 'data',
-    file: 'price-master.mjs',
-    summary: 'Tra giá và quà tặng theo mã tổ hợp. Bảng nằm trong data/processed/price-master.json, sửa được mà không cần đụng mã nguồn.'
+    id: 'order_key',
+    name: 'Mã giỏ hàng',
+    type: 'transform',
+    file: 'order-key.mjs',
+    summary: 'Quy giỏ hàng về một mã chuẩn (ví dụ NAU=1|XANH=2) để nhớ giỏ chờ và chặn tạo đơn trùng.'
   },
   {
     id: 'compose_reply',

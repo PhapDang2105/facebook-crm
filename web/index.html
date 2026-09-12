@@ -444,37 +444,31 @@
               <button class="product-primary-button" id="product-create-button" type="button"><span aria-hidden="true">＋</span> Thêm sản phẩm</button>
             </header>
             <div class="product-table-wrap">
-              <div class="product-table-head"><span>Sản phẩm</span><span>SKU</span><span>Giá gốc</span><span>Giá bán</span><span>Thao tác</span></div>
+              <div class="product-table-head"><span>Sản phẩm</span><span>SKU</span><span>Giá bán</span><span>Giá combo</span><span>Nhóm ghép</span><span>Thao tác</span></div>
               <div class="product-list" id="product-list" aria-live="polite"><div class="product-empty"><img src="/assets/icons/products/empty-product.png" alt=""><strong>Đang tải danh mục sản phẩm...</strong></div></div>
             </div>
           </section>
         </section>
         <section class="settings-section-content hidden" data-settings-panel="gifts" aria-label="Quà tặng">
-          <section class="settings-card gift-settings-card" aria-label="Bảng giá và quà tặng">
+          <section class="settings-card gift-settings-card" aria-label="Quà tặng">
             <header class="settings-card-head">
               <div>
-                <h1 id="price-master-title">Giá combo &amp; quà tặng</h1>
-                <p>Chatbot chỉ chốt đơn khi giỏ hàng khớp đúng một mã tổ hợp dưới đây. Tổ hợp không có trong bảng sẽ được chuyển cho nhân viên thay vì đoán giá. Đơn giá từng sản phẩm đặt ở mục <b>Sản phẩm</b>.</p>
+                <h1 id="gift-settings-title">Quà tặng</h1>
+                <p>Quà mở theo <b>tổng số lượng</b> sản phẩm trong đơn và cộng dồn: đơn 3 túi nhận cả quà “từ 2” lẫn quà “từ 3”. Tick để bật, chatbot áp dụng ngay cho đơn kế tiếp.</p>
               </div>
               <div class="price-master-actions">
-                <button class="price-master-add" id="price-master-add" type="button">+ Thêm dòng</button>
-                <button class="settings-save-button" id="price-master-save" type="button">Lưu bảng giá</button>
+                <button class="price-master-add" id="gift-add" type="button">+ Thêm quà tặng</button>
+                <button class="settings-save-button" id="gift-save" type="button">Lưu quà tặng</button>
               </div>
             </header>
-            <div class="price-master-table" id="price-master-table">
-              <div class="price-master-head"><span>Mã tổ hợp</span><span>Giỏ hàng</span><span>Giá bán</span><span>Quà tặng</span><span>Áp dụng</span><span></span></div>
-              <div class="price-master-rows" id="price-master-rows"></div>
+            <div class="gift-table">
+              <div class="gift-table-head"><span>Áp dụng</span><span>Tên quà tặng</span><span>Từ số lượng</span><span></span></div>
+              <div class="gift-rows" id="gift-rows"></div>
             </div>
-            <p class="price-master-status" id="price-master-status" role="status"></p>
-            <section class="gift-manager" aria-label="Quản lý quà tặng">
-              <header class="gift-manager-head">
-                <div>
-                  <h2>Quà tặng đang dùng</h2>
-                  <p>Sửa tên một lần, mọi tổ hợp đang gắn quà đó đổi theo. Bấm vào tổ hợp để gắn hoặc gỡ quà.</p>
-                </div>
-                <button class="price-master-add" id="gift-add" type="button">+ Thêm quà tặng</button>
-              </header>
-              <div class="gift-manager-list" id="gift-manager-list"></div>
+            <p class="price-master-status" id="gift-status" role="status"></p>
+            <section class="gift-preview" aria-label="Xem trước quà theo số lượng">
+              <h2>Khách nhận gì theo số lượng</h2>
+              <div class="gift-preview-grid" id="gift-preview"></div>
             </section>
           </section>
         </section>
@@ -506,8 +500,14 @@
           <label><span>Tên sản phẩm <b>*</b></span><input id="product-name" maxlength="200" required placeholder="Ví dụ: Granola Túi Xanh" autocomplete="off"></label>
           <label><span>SKU <b>*</b></span><input id="product-sku" maxlength="80" required placeholder="Ví dụ: GN-XANH-01" autocomplete="off"></label>
           <label><span>Giá gốc</span><div class="product-price-input"><input id="product-original-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
-          <label><span>Giá bán</span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
+          <label><span>Giá bán (1 sản phẩm) <b>*</b></span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
+          <label><span>Giá combo 2 sản phẩm</span><div class="product-price-input"><input id="product-combo-2" type="number" min="0" step="1000" placeholder="Bỏ trống = 2 × giá bán"><span>₫</span></div></label>
+          <label><span>Giá combo 3 sản phẩm</span><div class="product-price-input"><input id="product-combo-3" type="number" min="0" step="1000" placeholder="Bỏ trống = 3 × giá bán"><span>₫</span></div></label>
+          <label><span>Nhóm ghép</span><input id="product-mix-group" maxlength="60" list="product-mix-group-options" placeholder="Ví dụ: granola-tui · bỏ trống = không ghép" autocomplete="off"><datalist id="product-mix-group-options"></datalist></label>
+          <label class="product-form-checkbox"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
+          <label class="product-form-wide"><span>Tên gọi khác (mỗi dòng hoặc cách nhau bằng dấu phẩy)</span><textarea id="product-aliases" rows="3" placeholder="túi xanh, granola xanh, #granolatuixanh&#10;Khách gọi sản phẩm bằng những tên này thì bot vẫn nhận ra."></textarea></label>
         </div>
+        <p class="product-form-hint">Sản phẩm cùng <b>nhóm ghép</b> được mua chung một đơn; mỗi sản phẩm tính theo giá combo ứng với <b>tổng</b> số lượng cả đơn. Không có giá combo thì tính giá bán × số lượng. Đơn quá 5 sản phẩm chuyển cho nhân viên.</p>
       </div>
       <p class="product-form-status" id="product-form-status" role="alert"></p>
       <footer class="product-dialog-actions"><button class="product-secondary-button" type="button" data-close-product-dialog>Hủy</button><button class="product-primary-button" id="product-submit" type="submit">Lưu sản phẩm</button></footer>

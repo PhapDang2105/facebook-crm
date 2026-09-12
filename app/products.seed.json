@@ -6,6 +6,10 @@
       "sku": "XANH",
       "originalPrice": 189000,
       "salePrice": 189000,
+      "comboPrices": { "2": 298000, "3": 447000 },
+      "mixGroup": "granola-tui",
+      "aliases": ["túi xanh", "granola túi xanh", "granola xanh", "#granolatuixanh"],
+      "active": true,
       "image": ""
     },
     {
@@ -14,6 +18,10 @@
       "sku": "VANG",
       "originalPrice": 189000,
       "salePrice": 189000,
+      "comboPrices": { "2": 298000, "3": 447000 },
+      "mixGroup": "granola-tui",
+      "aliases": ["túi vàng", "granola túi vàng", "granola vàng", "granola nhiều hạt quả", "nhiều hạt quả 350g", "#granolatuivang"],
+      "active": true,
       "image": ""
     },
     {
@@ -22,6 +30,10 @@
       "sku": "NAU",
       "originalPrice": 179000,
       "salePrice": 179000,
+      "comboPrices": { "2": 288000, "3": 432000 },
+      "mixGroup": "granola-tui",
+      "aliases": ["túi nâu", "granola túi nâu", "granola nâu", "granola cacao", "granola vị cacao", "granola vị ca cao", "granola ca cao", "vị cacao 350g", "vị ca cao 350g", "#granolatuinau"],
+      "active": true,
       "image": ""
     },
     {
@@ -30,6 +42,10 @@
       "sku": "CACAO300",
       "originalPrice": 219000,
       "salePrice": 219000,
+      "comboPrices": { "2": 348000, "3": 522000 },
+      "mixGroup": "",
+      "aliases": ["tropical cacao", "granola tropical", "cacao 300g", "cacao 300"],
+      "active": true,
       "image": ""
     },
     {
@@ -38,6 +54,10 @@
       "sku": "COMBO10_XANH",
       "originalPrice": 204000,
       "salePrice": 204000,
+      "comboPrices": { "2": 358000, "3": 537000 },
+      "mixGroup": "",
+      "aliases": ["combo 10 gói xanh", "combo 10 xanh", "túi xanh nhỏ", "10 gói xanh"],
+      "active": true,
       "image": ""
     },
     {
@@ -46,6 +66,10 @@
       "sku": "COMBO10_NAU",
       "originalPrice": 204000,
       "salePrice": 204000,
+      "comboPrices": { "2": 358000, "3": 537000 },
+      "mixGroup": "",
+      "aliases": ["combo 10 gói nâu", "combo 10 nâu", "túi nâu nhỏ", "10 gói nâu"],
+      "active": true,
       "image": ""
     },
     {
@@ -54,6 +78,10 @@
       "sku": "COMBO10_CAM",
       "originalPrice": 204000,
       "salePrice": 204000,
+      "comboPrices": { "2": 358000, "3": 537000 },
+      "mixGroup": "",
+      "aliases": ["combo 10 gói cam", "combo 10 cam", "túi cam nhỏ", "10 gói cam", "túi cam", "granola túi cam", "granola cam", "granola bơ hạt điều", "vị bơ hạt điều", "#granolatuicam"],
+      "active": true,
       "image": ""
     },
     {
@@ -62,6 +90,10 @@
       "sku": "COMBO10_MIX",
       "originalPrice": 204000,
       "salePrice": 204000,
+      "comboPrices": { "2": 358000, "3": 537000 },
+      "mixGroup": "",
+      "aliases": ["combo 10 gói mix", "combo 10 mix", "10 gói mix", "mix 3 vị", "combo mix"],
+      "active": true,
       "image": ""
     }
   ]

@@ -12,8 +12,8 @@ import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { chatbotTemplates } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
-import { ensurePriceMaster, getPriceMaster, writePriceMaster } from './processing/price-master.mjs';
-import { reloadUnitPrices } from './processing/unit-price.mjs';
+import { getGifts, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
+import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import {
   isMetaConfigured,
@@ -44,6 +44,7 @@ const webRoot = path.join(root, 'web');
 const storePath = path.join(root, 'data', 'processed', 'crm-store.json');
 const chatbotSettingsPath = path.join(root, 'data', 'processed', 'chatbot-settings.json');
 const productsPath = path.join(root, 'data', 'processed', 'products.json');
+const giftsPath = path.join(root, 'data', 'processed', 'gifts.json');
 const productImagesPath = path.join(root, 'data', 'processed', 'product-images');
 const seedPath = path.join(root, 'database', 'seeds', 'demo-store.json');
 const exportTemplatePath = path.join(root, 'assets', 'templates', 'facebook-order-export.xlsx');
@@ -55,9 +56,7 @@ async function initializeStore() {
   try { await stat(storePath); } catch { await copyFile(seedPath, storePath); }
   try { await stat(chatbotSettingsPath); } catch { await writeChatbotSettings(defaultChatbotSettings); }
   await ensureProductCatalogue();
-  // Creates data/processed/price-master.json from the bundled seed on first boot
-  // so the table can be edited without touching the repo.
-  await ensurePriceMaster();
+  await ensureGifts();
 }
 
 async function readStore() {
@@ -84,8 +83,8 @@ async function writeProductStore(store) {
   const temporaryPath = `${productsPath}.tmp`;
   await writeFile(temporaryPath, JSON.stringify(normalized, null, 2), 'utf8');
   await rename(temporaryPath, productsPath);
-  // Orders price from this catalogue, so the cached copy has to drop with it.
-  reloadUnitPrices();
+  // Pricing, detection and the prompt all read this catalogue through a cache.
+  reloadCatalog();
   return normalized;
 }
 
@@ -94,20 +93,66 @@ async function writeProductStore(store) {
  * pricing code the chatbot resolves, which is what ties an edit here to the
  * price on both hand-made and bot-made orders.
  */
+async function readSeedItems(fileName) {
+  try {
+    const raw = JSON.parse(await readFile(path.join(root, 'app', fileName), 'utf8'));
+    return Array.isArray(raw?.items) ? raw.items : [];
+  } catch {
+    return [];
+  }
+}
+
 async function ensureProductCatalogue() {
   const existing = await readProductStore().catch(() => null);
-  if (existing?.seeded) return existing;
-  if (existing?.items?.length) return writeProductStore({ ...existing, seeded: true });
-  let seed = [];
-  try {
-    const raw = JSON.parse(await readFile(path.join(root, 'app', 'products.seed.json'), 'utf8'));
-    seed = Array.isArray(raw?.items) ? raw.items : [];
-  } catch { seed = []; }
+  const seed = await readSeedItems('products.seed.json');
   const now = Date.now();
+  if (existing?.items?.length) {
+    // Products written before combo prices, groups and aliases existed get
+    // those fields from the seed, matched by SKU. Anything staff already set
+    // is left alone.
+    let changed = !existing.seeded;
+    const items = existing.items.map(item => {
+      if (item.comboPrices !== undefined) return item;
+      const template = seed.find(entry => entry.sku === item.sku);
+      changed = true;
+      return template
+        ? { ...item, comboPrices: template.comboPrices, mixGroup: template.mixGroup, aliases: template.aliases, active: true, updatedAt: now }
+        : { ...item, comboPrices: {}, mixGroup: '', aliases: [], active: true, updatedAt: now };
+    });
+    return changed ? writeProductStore({ ...existing, items, seeded: true }) : existing;
+  }
+  if (existing?.seeded) return existing;
   return writeProductStore({
     items: seed.map(item => ({ ...item, createdAt: now, updatedAt: now })),
     seeded: true
   });
+}
+
+async function readGiftStore() {
+  try {
+    return normalizeGiftStore(JSON.parse(await readFile(giftsPath, 'utf8')));
+  } catch {
+    return { items: [], updatedAt: 0 };
+  }
+}
+
+async function writeGiftStore(store) {
+  const normalized = normalizeGiftStore(store);
+  normalized.updatedAt = Date.now();
+  const temporaryPath = `${giftsPath}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(normalized, null, 2), 'utf8');
+  await rename(temporaryPath, giftsPath);
+  reloadCatalog();
+  return normalized;
+}
+
+/** Lays down the two gifts the old price table encoded, the first time only. */
+async function ensureGifts() {
+  try {
+    await stat(giftsPath);
+  } catch {
+    await writeGiftStore({ items: await readSeedItems('gifts.seed.json') });
+  }
 }
 
 async function saveProductImage(dataUrl, productId) {
@@ -792,26 +837,25 @@ const server = http.createServer(async (request, response) => {
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
       return sendJson(response, 200, publicConversation(conversation));
     }
-    if (url.pathname === '/api/price-master') {
-      if (request.method === 'GET') return sendJson(response, 200, { items: getPriceMaster() });
+    if (url.pathname === '/api/gifts') {
+      if (request.method === 'GET') return sendJson(response, 200, { items: getGifts() });
       if (request.method === 'PUT') {
         const payload = await readBody(request);
-        const rows = Array.isArray(payload.items) ? payload.items : [];
-        if (rows.length > 500) return sendJson(response, 400, { error: 'Bảng giá tối đa 500 dòng.' });
-        const seen = new Set();
-        for (const row of rows) {
-          const key = String(row?.order_key || '').trim();
-          if (!key) return sendJson(response, 400, { error: 'Mỗi dòng phải có mã tổ hợp.' });
-          if (!/^[A-Z0-9_]+=[1-9]\d*(\|[A-Z0-9_]+=[1-9]\d*)*$/.test(key)) {
-            return sendJson(response, 400, { error: `Mã tổ hợp không hợp lệ: ${key}` });
-          }
-          if (seen.has(key)) return sendJson(response, 400, { error: `Mã tổ hợp bị trùng: ${key}` });
-          seen.add(key);
-          if (!(Number(row?.final_price) > 0)) return sendJson(response, 400, { error: `Dòng ${key} chưa có giá.` });
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        if (items.length > 50) return sendJson(response, 400, { error: 'Tối đa 50 quà tặng.' });
+        for (const item of items) {
+          if (!String(item?.name || '').trim()) return sendJson(response, 400, { error: 'Mỗi quà tặng phải có tên.' });
+          const quantity = Number(item?.minQuantity);
+          if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) return sendJson(response, 400, { error: `Quà “${item.name}”: số lượng áp dụng phải từ 1 đến 20.` });
         }
-        const table = await writePriceMaster({ rows });
-        return sendJson(response, 200, { items: table.rows, updatedAt: table.updatedAt });
+        const store = await writeGiftStore({ items });
+        return sendJson(response, 200, { items: store.items, updatedAt: store.updatedAt });
       }
+    }
+    // What the model actually receives: the saved prompt plus the live catalogue block.
+    if (url.pathname === '/api/chatbot/system-prompt' && request.method === 'GET') {
+      const settings = await readChatbotSettings();
+      return sendJson(response, 200, { prompt: composeSystemPrompt(settings.systemPrompt) });
     }
     if (url.pathname === '/api/chatbot/pipeline' && request.method === 'GET') {
       return sendJson(response, 200, { items: listPipelineSteps() });

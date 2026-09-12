@@ -1,4 +1,4 @@
-import { findPrice } from './processing/price-master.mjs';
+import { priceBasket, renderPriceQuote } from './processing/pricing.mjs';
 import { orderKey as buildOrderKey, productCode, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
@@ -37,7 +37,10 @@ const templates = {
   PRICE_TUI_NAU_NHO: 'Dạ Combo Túi Nâu nhỏ: 10 gói 189.000đ + ship 15.000đ; 20 gói 358.000đ; 30 gói 537.000đ và tặng bộ bát muỗng dừa. Combo từ 20 gói được miễn phí vận chuyển ạ.',
   PRICE_TUI_CAM_NHO: 'Dạ Combo Túi Cam nhỏ: 10 gói 189.000đ + ship 15.000đ; 20 gói 358.000đ; 30 gói 537.000đ và tặng bộ bát muỗng dừa. Combo từ 20 gói được miễn phí vận chuyển ạ.',
   PRICE_COMBO_10_GOI_MIX_3_MAU: 'Dạ Combo 10 gói mix 3 vị: 10 gói 189.000đ + ship 15.000đ; 20 gói 358.000đ; 30 gói 537.000đ và tặng bộ bát muỗng dừa. Combo từ 20 gói được miễn phí vận chuyển ạ.',
-  PRICE_HAT_AN_LANH_DANG_HU: 'Dạ Hạt An Lành dạng hũ: 1 hũ 269.000đ + ship 15.000đ; combo 2 hũ 528.000đ và miễn phí vận chuyển ạ.'
+  PRICE_HAT_AN_LANH_DANG_HU: 'Dạ Hạt An Lành dạng hũ: 1 hũ 269.000đ + ship 15.000đ; combo 2 hũ 528.000đ và miễn phí vận chuyển ạ.',
+  // Rendered from Cài đặt → Sản phẩm at reply time; this text is only the
+  // fallback when the model names a product the catalogue does not have.
+  PRICE_QUOTE: 'Dạ anh/chị đang quan tâm sản phẩm nào để em gửi bảng giá chi tiết ạ?'
 };
 
 function renderOrder(value, context = {}) {
@@ -50,16 +53,15 @@ function renderOrder(value, context = {}) {
     quantity: Number(String(quantities[index] || '').replace(/\D/g, '')) || 0
   })).filter(item => item.product && item.product !== '0' && item.quantity > 0));
 
-  // The key comes from the basket itself. A key the model declared is consulted
-  // only when the basket yields none, and never overrides it: an order_key the
-  // model invented used to price three bags as one.
+  // The price comes from the basket itself, never from a key the model
+  // declared: an order_key the model invented used to price three bags as one.
   const freshKey = buildOrderKey(freshItems);
-  const freshPrice = findPrice(freshKey);
+  const freshPrice = freshKey ? priceBasket(freshItems) : null;
   const pending = usablePendingOrder(context.pendingOrder, { now, templateId });
   const items = freshItems.length ? freshItems : (pending?.items || []);
-  const declared = String(value.order_key || '').trim();
-  const key = freshKey || (declared && declared !== '0' ? declared : '') || pending?.key || '';
-  const price = findPrice(key);
+  const key = freshKey || pending?.key || '';
+  const priced = items.length ? priceBasket(items) : null;
+  const price = priced?.priceable ? priced : null;
 
   const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number);
   const freshAddress = String(value.Customer_Address || '').trim();
@@ -70,11 +72,12 @@ function renderOrder(value, context = {}) {
 
   // Remember a priceable basket, plus whatever contact detail has arrived so
   // far, so the customer never has to repeat something already given.
-  const nextPending = (freshItems.length && freshPrice) || pending || hasPhone || hasAddress
+  const freshPriceable = Boolean(freshItems.length && freshPrice?.priceable);
+  const nextPending = freshPriceable || pending || hasPhone || hasAddress
     ? {
-        items: freshItems.length && freshPrice ? freshItems : (pending?.items || []),
-        key: freshItems.length && freshPrice ? freshKey : (pending?.key || ''),
-        at: freshItems.length && freshPrice ? now : (pending?.at || now),
+        items: freshPriceable ? freshItems : (pending?.items || []),
+        key: freshPriceable ? freshKey : (pending?.key || ''),
+        at: freshPriceable ? now : (pending?.at || now),
         phone,
         address
       }
@@ -103,8 +106,11 @@ function renderOrder(value, context = {}) {
     };
   }
 
-  const total = price.final_price;
-  const lines = items.map(item => `🌾 ${item.product} – Số lượng: ${item.quantity}`).join('\n');
+  const total = price.total;
+  // Catalogue names, not the customer's wording, so the confirmation and the
+  // order record agree on what is being shipped.
+  const orderItems = price.lines.map(line => ({ product: line.name, code: line.sku, quantity: line.quantity }));
+  const lines = orderItems.map(item => `🌾 ${item.product} – Số lượng: ${item.quantity}`).join('\n');
   return {
     templateId: 'ORDER_CONFIRMATION',
     messages: [
@@ -115,7 +121,7 @@ function renderOrder(value, context = {}) {
     handoff: false,
     // Cleared: the basket has become a real order.
     pendingOrder: null,
-    order: { items, phone, address, total, orderKey: price.order_key, gift: price.gift }
+    order: { items: orderItems, phone, address, total, orderKey: key, gift: price.gift }
   };
 }
 
@@ -124,6 +130,12 @@ export function renderChatbotReply(value = {}, overrides = {}, deletedTemplateId
   if (isOrderStep(templateId)) return renderOrder(value, context);
   const available = { ...templates, ...overrides };
   for (const id of deletedTemplateIds) delete available[id];
+  // Built from the catalogue at reply time, so it can never quote a stale price
+  // the way a static PRICE_* template can.
+  if (templateId === 'PRICE_QUOTE') {
+    const quote = renderPriceQuote(value.Product_N1 || value.product || '');
+    if (quote) return { templateId: 'PRICE_QUOTE', messages: [quote], handoff: false };
+  }
   const raw = available[templateId] || value.reply || value.message || value.text || available.CSKH_HANDOFF || templates.CSKH_HANDOFF;
   return {
     templateId: available[templateId] ? templateId : 'CSKH_HANDOFF',

@@ -17,15 +17,7 @@ export const defaultChatbotSettings = Object.freeze({
   welcomeMessage: '',
   handoffKeywords: '',
   messageTemplates: {},
-  deletedTemplateIds: [],
-  processingSteps: [
-    { id: 'message_normalizer', name: 'Xử lý bình luận và tin nhắn', type: 'transform', enabled: true, code: "const text = String(input.message?.text || '').trim();\nreturn { ...input, text };" },
-    { id: 'product_extractor', name: 'Xử lý sản phẩm', type: 'transform', enabled: true, code: "const products = ['Túi Xanh', 'Túi Vàng', 'Túi Nâu'];\nreturn { ...input, products: products.filter(name => input.text?.includes(name)) };" },
-    { id: 'customer_extractor', name: 'Xử lý xưng hô và số điện thoại', type: 'transform', enabled: true, code: "const phone = input.text?.match(/(?:\\+84|0)\\d{9}/)?.[0] || '';\nreturn { ...input, phone };" },
-    { id: 'context_merge', name: 'Gộp dữ liệu đầu vào', type: 'merge', enabled: true, code: "return { ...input, context: { ...input.customer, ...input.conversation } };" },
-    { id: 'template_renderer', name: 'Hậu xử lý mẫu tin', type: 'transform', enabled: true, code: "return { ...input, reply: String(input.answer || '').trim() };" },
-    { id: 'duplicate_guard', name: 'Chặn phản hồi trùng', type: 'guard', enabled: true, code: "return { ...input, signature: `${input.senderId}:${input.reply}` };" }
-  ]
+  deletedTemplateIds: []
 });
 
 function cleanText(value, fallback, maximumLength) {
@@ -66,12 +58,7 @@ export function normalizeChatbotSettings(value = {}) {
   const deletedTemplateIds = [...new Set((Array.isArray(value.deletedTemplateIds) ? value.deletedTemplateIds : [])
     .map(id => String(id || '').trim().slice(0, 100))
     .filter(Boolean))].slice(0, 100);
-  const submittedSteps = new Map((Array.isArray(value.processingSteps) ? value.processingSteps : []).map(step => [step?.id, step]));
-  const processingSteps = defaultChatbotSettings.processingSteps.map(step => ({
-    ...step,
-    enabled: submittedSteps.has(step.id) ? submittedSteps.get(step.id)?.enabled !== false : step.enabled,
-    code: String(submittedSteps.get(step.id)?.code ?? step.code).slice(0, 30000)
-  }));
+  // The processing pipeline is code in app/processing, not editable settings.
   return {
     enabled: value.enabled === true,
     name: cleanText(value.name, defaultChatbotSettings.name, 100),
@@ -92,7 +79,6 @@ export function normalizeChatbotSettings(value = {}) {
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
     messageTemplates,
     deletedTemplateIds,
-    processingSteps,
     updatedAt: Number(value.updatedAt) || Date.now()
   };
 }

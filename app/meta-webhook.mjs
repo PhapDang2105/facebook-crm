@@ -3,6 +3,7 @@ import { getPageAccessToken } from './channel-store.mjs';
 import { fetchCustomerProfile } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import {
+  ensureConversation,
   conversationId,
   markOutgoingStatusUntil,
   publicConversation,
@@ -45,6 +46,20 @@ export function normalizeWebhookAttachment(attachment) {
   return { type: 'text', text: [payload.title, url].filter(Boolean).join(' — ') || 'Đã gửi một tệp đính kèm chưa hỗ trợ' };
 }
 
+export function normalizeWebhookReferral(referral) {
+  if (!referral) return null;
+  const context = referral.ads_context_data || {};
+  const value = {
+    ref: String(referral.ref || '').trim(),
+    source: String(referral.source || '').trim(),
+    adId: String(referral.ad_id || '').trim(),
+    adTitle: String(context.ad_title || '').trim(),
+    postId: String(context.post_id || '').trim(),
+    photoUrl: String(context.photo_url || '').trim()
+  };
+  return Object.values(value).some(Boolean) ? value : null;
+}
+
 export function normalizeWebhookMessage(messagingEvent) {
   const message = messagingEvent?.message || {};
   const isEcho = Boolean(message.is_echo);
@@ -72,15 +87,23 @@ export function normalizeWebhookEvent(messagingEvent, pageId) {
   const psid = isFromPage ? recipientId : senderId;
   if (!psid) return null;
   const shared = { pageId: String(pageId), psid, timestamp: Number(messagingEvent.timestamp) || Date.now() };
+  // Click-to-Messenger ads carry the creative's title. It is the only signal
+  // saying which product the customer was looking at when they opened the chat,
+  // and it arrives once — on the first event — so it is captured here.
+  const referral = normalizeWebhookReferral(messagingEvent.referral || messagingEvent.message?.referral || messagingEvent.postback?.referral);
 
   if (messagingEvent.message) {
-    return { ...shared, type: 'message', message: normalizeWebhookMessage(messagingEvent) };
+    return { ...shared, type: 'message', message: normalizeWebhookMessage(messagingEvent), ...(referral ? { referral } : {}) };
+  }
+  if (messagingEvent.referral && !messagingEvent.message && !messagingEvent.postback) {
+    return { ...shared, type: 'referral', referral };
   }
   if (messagingEvent.postback) {
     const title = messagingEvent.postback.title || messagingEvent.postback.payload || 'Đã bấm một nút';
     return {
       ...shared,
       type: 'message',
+      ...(referral ? { referral } : {}),
       message: {
         id: String(messagingEvent.postback.mid || `postback-${shared.timestamp}`),
         mid: String(messagingEvent.postback.mid || `postback-${shared.timestamp}`),
@@ -133,7 +156,15 @@ function applyWebhookEvents(store, events) {
         message: event.message,
         markUnread: event.message.direction === 'incoming'
       });
+      // Kept on the conversation, not the message: the ad is context for the
+      // whole thread and only ever arrives on the first event.
+      if (event.referral && !conversation.referral) conversation.referral = event.referral;
       if (inserted) changes.push({ type: 'message', conversation, message });
+      continue;
+    }
+    if (event.type === 'referral' && event.referral) {
+      const conversation = ensureConversation(store, { pageId: event.pageId, psid: event.psid });
+      if (!conversation.referral) conversation.referral = event.referral;
       continue;
     }
     if (event.type === 'delivery' || event.type === 'read') {

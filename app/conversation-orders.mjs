@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { toLocalPhone } from './processing/customer-info.mjs';
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
@@ -24,7 +25,10 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
   if (!name || !phone || !address || !products.length) {
     throw new Error('Đơn hàng cần đủ tên, số điện thoại, địa chỉ và sản phẩm.');
   }
-  if (!/^(?:\+?84|0)\d{8,10}$/.test(phone)) throw new Error('Số điện thoại không hợp lệ.');
+  // Checked against the real Vietnamese carrier prefixes: the previous pattern
+  // let 012/030/051 through, and those orders can never be delivered.
+  const localPhone = toLocalPhone(phone);
+  if (!localPhone) throw new Error('Số điện thoại không hợp lệ.');
   const subtotal = products.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const freeShipping = Boolean(input.freeShipping);
   const shippingFee = freeShipping ? 0 : money(input.shippingFee);
@@ -32,7 +36,7 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
   return {
     id: text(input.id || id, 40).replace(/[^\w-]/g, ''),
     name,
-    phone,
+    phone: localPhone,
     address,
     products,
     status: text(input.status || 'Mới', 80),

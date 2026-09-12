@@ -1,4 +1,5 @@
 import { renderChatbotReply } from './chatbot-templates.mjs';
+import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
 
 export function parseModelAnswer(answer) {
@@ -11,9 +12,18 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
   const history = historyLimit
     ? recentMessages.slice(-historyLimit).map(item => `${item.direction === 'incoming' ? 'Khách' : 'Giọt Nắng'}: ${item.text || `[${item.type}]`}`).join('\n')
     : '';
+  // What the customer names beats the ad they arrived from; the ad is used only
+  // when the message itself says nothing about a product.
+  const { product } = resolveConversationProduct({
+    messageText: message.text,
+    adTitle: conversation.referral?.adTitle,
+    referralRef: conversation.referral?.ref
+  });
+  const hint = productHint(product);
   return [
     `KÊNH: Facebook Messenger`,
     `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
+    hint,
     includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
     `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`
   ].filter(Boolean).join('\n\n');
@@ -46,7 +56,8 @@ function wait(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
-export async function requestDirectModelReply({ settings, conversation, message, recentMessages = [], fetchImpl = fetch, rawResponse = false }) {
+export async function requestDirectModelReply(options) {
+  const { settings, conversation, message, recentMessages = [], fetchImpl = fetch, rawResponse = false } = options;
   const vertex = settings.provider === 'vertex';
   if (!settings.directApiKey && (!vertex || settings.directAuthType === 'api_key')) throw new Error('Chatbot chưa có khóa API hoặc access token của nhà cung cấp.');
   if (!settings.systemPrompt) throw new Error('Chatbot chưa có system prompt.');
@@ -118,7 +129,7 @@ export async function requestDirectModelReply({ settings, conversation, message,
       if (!answer) throw new Error('Mô hình không trả về nội dung.');
       const parsedAnswer = parseModelAnswer(answer);
       if (rawResponse) return { raw: answer, parsed: parsedAnswer, conversationId: '' };
-      return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates, settings.deletedTemplateIds), conversationId: '' };
+      return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates, settings.deletedTemplateIds, options.context || {}), conversationId: '' };
     } catch (error) {
       lastError = error;
       if (attempt + 1 < attempts) await wait(Math.max(100, Number(settings.retryIntervalMs) || 1000));
@@ -154,9 +165,12 @@ export async function processChatbotChanges(changes, dependencies) {
       const keywords = settings.handoffKeywords.split(',').map(item => foldVietnamese(item.trim())).filter(Boolean);
       const incomingText = foldVietnamese(change.message.text);
       const asksForHuman = keywords.some(keyword => incomingText.includes(keyword));
+      // The basket the customer named earlier travels with the request so a later
+      // "0385805790" alone is still enough to close the same order.
+      const replyContext = { pendingOrder: conversation.pendingOrder, now: Date.now() };
       const reply = asksForHuman || change.message.type !== 'text'
-        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, settings.deletedTemplateIds)
-        : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id) });
+        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, settings.deletedTemplateIds, replyContext)
+        : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id), context: replyContext });
       // The order is persisted BEFORE anything is sent. Sending first meant a
       // failed order left the customer holding a confirmation for an order that
       // did not exist, and a retried webhook sent the whole reply a second time.
@@ -180,6 +194,8 @@ export async function processChatbotChanges(changes, dependencies) {
         botDraft: settings.responseMode === 'draft' ? reply.messages.join('\n\n') : '',
         botLastError: '',
         botLastErrorAt: 0,
+        // undefined leaves the stored basket alone; null clears it once ordered.
+        ...(reply.pendingOrder !== undefined ? { pendingOrder: reply.pendingOrder } : {}),
         ...(reply.handoff ? { botEnabled: false } : {})
       });
       results.push({

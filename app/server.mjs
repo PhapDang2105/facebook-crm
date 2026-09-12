@@ -12,6 +12,8 @@ import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { chatbotTemplates } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
+import { ensurePriceMaster, getPriceMaster, writePriceMaster } from './processing/price-master.mjs';
+import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -52,6 +54,9 @@ async function initializeStore() {
   try { await stat(storePath); } catch { await copyFile(seedPath, storePath); }
   try { await stat(chatbotSettingsPath); } catch { await writeChatbotSettings(defaultChatbotSettings); }
   try { await stat(productsPath); } catch { await writeProductStore({ items: [], updatedAt: Date.now() }); }
+  // Creates data/processed/price-master.json from the bundled seed on first boot
+  // so the table can be edited without touching the repo.
+  await ensurePriceMaster();
 }
 
 async function readStore() {
@@ -762,6 +767,36 @@ const server = http.createServer(async (request, response) => {
       const conversation = await updateMessagingStore(store => setConversationFlags(store, id, payload));
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
       return sendJson(response, 200, publicConversation(conversation));
+    }
+    if (url.pathname === '/api/price-master') {
+      if (request.method === 'GET') return sendJson(response, 200, { items: getPriceMaster() });
+      if (request.method === 'PUT') {
+        const payload = await readBody(request);
+        const rows = Array.isArray(payload.items) ? payload.items : [];
+        if (rows.length > 500) return sendJson(response, 400, { error: 'Bảng giá tối đa 500 dòng.' });
+        const seen = new Set();
+        for (const row of rows) {
+          const key = String(row?.order_key || '').trim();
+          if (!key) return sendJson(response, 400, { error: 'Mỗi dòng phải có mã tổ hợp.' });
+          if (!/^[A-Z0-9_]+=[1-9]\d*(\|[A-Z0-9_]+=[1-9]\d*)*$/.test(key)) {
+            return sendJson(response, 400, { error: `Mã tổ hợp không hợp lệ: ${key}` });
+          }
+          if (seen.has(key)) return sendJson(response, 400, { error: `Mã tổ hợp bị trùng: ${key}` });
+          seen.add(key);
+          if (!(Number(row?.final_price) > 0)) return sendJson(response, 400, { error: `Dòng ${key} chưa có giá.` });
+        }
+        const table = await writePriceMaster({ rows });
+        return sendJson(response, 200, { items: table.rows, updatedAt: table.updatedAt });
+      }
+    }
+    if (url.pathname === '/api/chatbot/pipeline' && request.method === 'GET') {
+      return sendJson(response, 200, { items: listPipelineSteps() });
+    }
+    const pipelineStepMatch = url.pathname.match(/^\/api\/chatbot\/pipeline\/([a-z_]+)$/);
+    if (pipelineStepMatch && request.method === 'GET') {
+      const step = await readPipelineStep(pipelineStepMatch[1]);
+      if (!step) return sendJson(response, 404, { error: 'Không có bước xử lý này.' });
+      return sendJson(response, 200, step);
     }
     const customerPanelMatch = url.pathname.match(/^\/api\/messaging\/conversations\/([^/]+)\/customer-panel$/);
     if (customerPanelMatch) {

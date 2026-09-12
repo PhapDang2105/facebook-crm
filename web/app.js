@@ -218,6 +218,7 @@ const chatbotWorkflow = document.querySelector('#chatbot-workflow');
 const chatbotStepCodeTitle = document.querySelector('#chatbot-step-code-title');
 const chatbotStepCode = document.querySelector('#chatbot-step-code');
 const chatbotStepCodeApply = document.querySelector('#chatbot-step-code-apply');
+const chatbotStepSummary = document.querySelector('#chatbot-step-summary');
 let chatbotTemplatesState = {};
 let chatbotOriginalTemplates = {};
 let chatbotDeletedTemplateIds = new Set();
@@ -2020,7 +2021,7 @@ async function loadChatbotSettings() {
     chatbotTemplatesState = { ...(settings.templates || {}) };
     chatbotOriginalTemplates = { ...(settings.templates || {}) };
     chatbotDeletedTemplateIds = new Set(settings.deletedTemplateIds || []);
-    chatbotProcessingSteps = Array.isArray(settings.processingSteps) ? settings.processingSteps.map(step => ({ ...step })) : [];
+    // Pipeline comes from the server modules now, not from editable settings.
     selectedChatbotTemplate = selectedChatbotTemplate && chatbotTemplatesState[selectedChatbotTemplate] !== undefined
       ? selectedChatbotTemplate
       : Object.keys(chatbotTemplatesState)[0] || '';
@@ -2029,8 +2030,7 @@ async function loadChatbotSettings() {
       : chatbotProcessingSteps[0]?.id || '';
     renderChatbotTemplateList();
     renderChatbotTemplateEditor();
-    renderChatbotWorkflow();
-    renderChatbotStepEditor();
+    loadChatbotPipeline();
   } catch (error) {
     showToast(error.message || 'Chưa tải được thiết lập chatbot.', 'error');
   }
@@ -2087,19 +2087,174 @@ function renderChatbotWorkflow() {
     <div class="chatbot-workflow-node ${step.id === selectedChatbotStep ? 'active' : ''}" data-type="${escapeHtml(step.type)}" data-chatbot-step-node="${escapeHtml(step.id)}" role="button" tabindex="0">
       <span class="chatbot-workflow-icon"><img src="${icons[step.id] || '/assets/icons/settings.png'}" alt=""></span>
       <span class="chatbot-workflow-copy"><strong>${escapeHtml(step.name)}</strong></span>
-      <label class="chatbot-workflow-toggle" title="Bật hoặc tắt bước"><input type="checkbox" data-chatbot-step="${escapeHtml(step.id)}" ${step.enabled !== false ? 'checked' : ''}></label>
+      <span class="chatbot-workflow-kind">${escapeHtml(step.type || '')}</span>
     </div>`).join('');
 }
 
 function renderChatbotStepEditor() {
   const step = chatbotProcessingSteps.find(item => item.id === selectedChatbotStep);
-  if (chatbotStepCodeTitle) chatbotStepCodeTitle.textContent = step?.name || 'Chọn một bước xử lý';
+  if (chatbotStepCodeTitle) chatbotStepCodeTitle.textContent = step ? `${step.name} · ${step.file || ''}` : 'Chọn một bước xử lý';
+  if (chatbotStepSummary) chatbotStepSummary.textContent = step?.summary || '';
   if (chatbotStepCode) {
-    chatbotStepCode.disabled = !step;
-    chatbotStepCode.value = step?.code || '';
+    chatbotStepCode.readOnly = true;
+    chatbotStepCode.value = step?.code ?? (step ? 'Đang tải mã nguồn...' : '');
   }
-  if (chatbotStepCodeApply) chatbotStepCodeApply.disabled = !step;
+  if (chatbotStepCodeApply) chatbotStepCodeApply.classList.add('hidden');
 }
+
+/** Fetches the module source the first time a step is opened. */
+async function loadChatbotPipelineStep(id) {
+  const step = chatbotProcessingSteps.find(item => item.id === id);
+  if (!step || typeof step.code === 'string') return;
+  try {
+    const detail = await readApiResponse(await fetch(`/api/chatbot/pipeline/${encodeURIComponent(id)}`));
+    step.code = String(detail.code || '');
+  } catch {
+    step.code = 'Không tải được mã nguồn của bước này.';
+  }
+  if (selectedChatbotStep === id) renderChatbotStepEditor();
+}
+
+async function loadChatbotPipeline() {
+  if (!chatbotWorkflow) return;
+  try {
+    const result = await readApiResponse(await fetch('/api/chatbot/pipeline'));
+    chatbotProcessingSteps = Array.isArray(result.items) ? result.items : [];
+  } catch {
+    chatbotProcessingSteps = [];
+  }
+  renderChatbotWorkflow();
+  renderChatbotStepEditor();
+}
+
+// ===== Bảng giá & quà tặng (Cài đặt → Quà tặng) =====
+const priceMasterRowsElement = document.querySelector('#price-master-rows');
+const priceMasterAddButton = document.querySelector('#price-master-add');
+const priceMasterSaveButton = document.querySelector('#price-master-save');
+const priceMasterStatus = document.querySelector('#price-master-status');
+let priceMasterRows = [];
+let priceMasterLoaded = false;
+
+// Mirrors productCode() on the server: the key is what the chatbot looks up, so
+// the screen has to speak the same language.
+const priceMasterCodeNames = {
+  XANH: 'Túi Xanh', VANG: 'Túi Vàng', NAU: 'Túi Nâu',
+  COMBO10_XANH: 'Combo 10 gói Xanh', COMBO10_NAU: 'Combo 10 gói Nâu',
+  COMBO10_CAM: 'Combo 10 gói Cam', COMBO10_MIX: 'Combo 10 gói Mix',
+  CACAO300: 'Cacao Tropical 300g'
+};
+
+function describePriceMasterKey(orderKey) {
+  const parts = String(orderKey || '').trim().split('|').filter(Boolean);
+  if (!parts.length) return { text: 'Chưa có mã', unknown: true };
+  const pieces = [];
+  let unknown = false;
+  for (const part of parts) {
+    const [code, quantity] = part.split('=');
+    const name = priceMasterCodeNames[code];
+    if (!name || !Number(quantity)) unknown = true;
+    pieces.push(`${Number(quantity) || '?'} × ${name || code || '?'}`);
+  }
+  return { text: pieces.join(' + '), unknown };
+}
+
+function setPriceMasterStatus(message, tone = '') {
+  if (!priceMasterStatus) return;
+  priceMasterStatus.textContent = message;
+  priceMasterStatus.classList.toggle('is-error', tone === 'error');
+  priceMasterStatus.classList.toggle('is-ok', tone === 'ok');
+}
+
+function renderPriceMaster() {
+  if (!priceMasterRowsElement) return;
+  if (!priceMasterRows.length) {
+    priceMasterRowsElement.innerHTML = '<div class="price-master-row"><span class="price-master-basket">Chưa có dòng nào. Bấm “Thêm dòng” để bắt đầu.</span></div>';
+    return;
+  }
+  priceMasterRowsElement.innerHTML = priceMasterRows.map((row, index) => {
+    const basket = describePriceMasterKey(row.order_key);
+    return `<div class="price-master-row${basket.unknown ? ' is-invalid' : ''}">
+      <input type="text" data-price-field="order_key" data-price-index="${index}" value="${escapeHtml(row.order_key)}" placeholder="XANH=2" spellcheck="false">
+      <span class="price-master-basket${basket.unknown ? ' is-unknown' : ''}">${escapeHtml(basket.text)}</span>
+      <input type="number" data-price-field="final_price" data-price-index="${index}" value="${Number(row.final_price) || 0}" min="0" step="1000">
+      <input type="text" data-price-field="gift" data-price-index="${index}" value="${escapeHtml(row.gift || '')}" placeholder="Miễn phí vận chuyển...">
+      <label class="price-master-active"><input type="checkbox" data-price-field="active" data-price-index="${index}" ${row.active !== false ? 'checked' : ''} aria-label="Đang áp dụng"></label>
+      <button class="price-master-remove" type="button" data-price-remove="${index}" aria-label="Xóa dòng" title="Xóa dòng">×</button>
+    </div>`;
+  }).join('');
+}
+
+async function loadPriceMaster() {
+  if (!priceMasterRowsElement || priceMasterLoaded) return;
+  try {
+    const result = await readApiResponse(await fetch('/api/price-master'));
+    priceMasterRows = Array.isArray(result.items) ? result.items.map(row => ({ ...row })) : [];
+    priceMasterLoaded = true;
+    renderPriceMaster();
+    setPriceMasterStatus(`${priceMasterRows.length} tổ hợp đang có trong bảng giá.`);
+  } catch (error) {
+    setPriceMasterStatus(error.message || 'Chưa tải được bảng giá.', 'error');
+  }
+}
+
+priceMasterRowsElement?.addEventListener('input', event => {
+  const field = event.target.dataset.priceField;
+  const index = Number(event.target.dataset.priceIndex);
+  const row = priceMasterRows[index];
+  if (!field || !row) return;
+  if (field === 'final_price') row.final_price = Math.max(0, Number(event.target.value) || 0);
+  else if (field === 'order_key') {
+    row.order_key = event.target.value.trim().toUpperCase();
+    // Only the basket label is refreshed, so the caret stays where it was.
+    const basket = describePriceMasterKey(row.order_key);
+    const cell = event.target.parentElement?.querySelector('.price-master-basket');
+    if (cell) { cell.textContent = basket.text; cell.classList.toggle('is-unknown', basket.unknown); }
+    event.target.parentElement?.classList.toggle('is-invalid', basket.unknown);
+  } else row[field] = event.target.value;
+});
+
+priceMasterRowsElement?.addEventListener('change', event => {
+  if (event.target.dataset.priceField !== 'active') return;
+  const row = priceMasterRows[Number(event.target.dataset.priceIndex)];
+  if (row) row.active = event.target.checked;
+});
+
+priceMasterRowsElement?.addEventListener('click', event => {
+  const button = event.target.closest('[data-price-remove]');
+  if (!button) return;
+  priceMasterRows.splice(Number(button.dataset.priceRemove), 1);
+  renderPriceMaster();
+  setPriceMasterStatus('Đã xóa dòng. Nhớ bấm “Lưu bảng giá”.');
+});
+
+priceMasterAddButton?.addEventListener('click', () => {
+  priceMasterRows.unshift({ order_key: '', final_price: 0, gift: '', active: true });
+  renderPriceMaster();
+  priceMasterRowsElement?.querySelector('input')?.focus();
+});
+
+priceMasterSaveButton?.addEventListener('click', async () => {
+  const invalid = priceMasterRows.find(row => describePriceMasterKey(row.order_key).unknown);
+  if (invalid) {
+    setPriceMasterStatus(`Mã tổ hợp chưa đúng: ${invalid.order_key || '(trống)'}. Dạng đúng là XANH=2 hoặc XANH=1|NAU=1.`, 'error');
+    return;
+  }
+  priceMasterSaveButton.disabled = true;
+  try {
+    const result = await readApiResponse(await fetch('/api/price-master', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: priceMasterRows })
+    }));
+    priceMasterRows = Array.isArray(result.items) ? result.items.map(row => ({ ...row })) : priceMasterRows;
+    renderPriceMaster();
+    setPriceMasterStatus(`Đã lưu ${priceMasterRows.length} tổ hợp. Chatbot dùng bảng mới ngay.`, 'ok');
+  } catch (error) {
+    setPriceMasterStatus(error.message || 'Chưa lưu được bảng giá.', 'error');
+  } finally {
+    priceMasterSaveButton.disabled = false;
+  }
+});
 
 function renderProductImagePreview(source = '') {
   if (!productImagePreview) return;
@@ -2198,6 +2353,7 @@ function showSettingsSection(name = 'channels') {
     renderProductLoadError();
     showToast(error.message || 'Chưa tải được danh mục sản phẩm.', 'error');
   });
+  if (section === 'gifts') loadPriceMaster();
 }
 
 function renderChatbotToggle(conversation = getActiveConversation()) {
@@ -4518,6 +4674,7 @@ chatbotWorkspaceButtons.forEach(button => {
     const workspace = button.dataset.chatbotWorkspace;
     chatbotWorkspaceButtons.forEach(item => item.classList.toggle('active', item === button));
     chatbotWorkspacePanels.forEach(panel => panel.classList.toggle('hidden', panel.dataset.chatbotWorkspacePanel !== workspace));
+    if (workspace === 'processing' && !chatbotProcessingSteps.length) loadChatbotPipeline();
   });
 });
 
@@ -4592,19 +4749,13 @@ chatbotTemplateDelete?.addEventListener('click', () => {
   chatbotSettingsForm?.requestSubmit();
 });
 
-chatbotWorkflow?.addEventListener('change', event => {
-  const id = event.target.dataset.chatbotStep;
-  const step = chatbotProcessingSteps.find(item => item.id === id);
-  if (step) step.enabled = event.target.checked;
-});
-
 function selectChatbotWorkflowStep(target) {
   const node = target.closest?.('[data-chatbot-step-node]');
   if (!node || target.matches?.('input')) return;
   selectedChatbotStep = node.dataset.chatbotStepNode;
   renderChatbotWorkflow();
   renderChatbotStepEditor();
-  chatbotStepCode?.focus();
+  loadChatbotPipelineStep(selectedChatbotStep);
 }
 
 chatbotWorkflow?.addEventListener('click', event => selectChatbotWorkflowStep(event.target));
@@ -4613,17 +4764,6 @@ chatbotWorkflow?.addEventListener('keydown', event => {
     event.preventDefault();
     selectChatbotWorkflowStep(event.target);
   }
-});
-
-chatbotStepCodeApply?.addEventListener('click', () => {
-  const step = chatbotProcessingSteps.find(item => item.id === selectedChatbotStep);
-  if (!step) return;
-  step.code = chatbotStepCode.value;
-});
-
-chatbotStepCode?.addEventListener('input', () => {
-  const step = chatbotProcessingSteps.find(item => item.id === selectedChatbotStep);
-  if (step) step.code = chatbotStepCode.value;
 });
 
 chatbotStepCode?.addEventListener('keydown', event => {
@@ -4662,8 +4802,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         welcomeMessage: chatbotSettingsWelcome.value,
         handoffKeywords: '',
         messageTemplates: chatbotTemplatesState,
-        deletedTemplateIds: [...chatbotDeletedTemplateIds],
-        processingSteps: chatbotProcessingSteps
+        deletedTemplateIds: [...chatbotDeletedTemplateIds]
       })
     }));
     chatbotSettingsEnabled.checked = settings.enabled === true;

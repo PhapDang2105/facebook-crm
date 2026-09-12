@@ -323,8 +323,9 @@
                   </div>
                   <div class="chatbot-processing-config chatbot-processing-code">
                     <section class="chatbot-code-editor">
-                      <div class="chatbot-code-editor-head"><div><img src="/assets/icons/data-process.svg" alt=""><strong id="chatbot-step-code-title">Chọn một bước xử lý</strong></div><button class="settings-save-button" id="chatbot-step-code-apply" type="submit">Áp dụng mã</button></div>
-                      <textarea id="chatbot-step-code" rows="14" maxlength="30000" spellcheck="false" placeholder="Bấm vào một bước bên trái để chỉnh sửa mã"></textarea>
+                      <div class="chatbot-code-editor-head"><div><img src="/assets/icons/data-process.svg" alt=""><strong id="chatbot-step-code-title">Chọn một bước xử lý</strong></div><span class="chatbot-code-readonly">Chỉ đọc</span><button class="settings-save-button hidden" id="chatbot-step-code-apply" type="button">Áp dụng mã</button></div>
+                      <p class="chatbot-step-summary" id="chatbot-step-summary"></p>
+                      <textarea id="chatbot-step-code" rows="14" spellcheck="false" readonly placeholder="Bấm vào một bước bên trái để xem mã đang chạy"></textarea>
                     </section>
                   </div>
                 </div>
@@ -449,7 +450,23 @@
           </section>
         </section>
         <section class="settings-section-content hidden" data-settings-panel="gifts" aria-label="Quà tặng">
-          <section class="settings-card gift-settings-card" aria-label="Khu vực cấu hình quà tặng"></section>
+          <section class="settings-card gift-settings-card" aria-label="Bảng giá và quà tặng">
+            <header class="settings-card-head">
+              <div>
+                <h1 id="price-master-title">Bảng giá &amp; quà tặng</h1>
+                <p>Chatbot chỉ chốt đơn khi giỏ hàng khớp đúng một mã tổ hợp dưới đây. Tổ hợp không có trong bảng sẽ được chuyển cho nhân viên thay vì đoán giá.</p>
+              </div>
+              <div class="price-master-actions">
+                <button class="price-master-add" id="price-master-add" type="button">+ Thêm dòng</button>
+                <button class="settings-save-button" id="price-master-save" type="button">Lưu bảng giá</button>
+              </div>
+            </header>
+            <div class="price-master-table" id="price-master-table">
+              <div class="price-master-head"><span>Mã tổ hợp</span><span>Giỏ hàng</span><span>Giá bán</span><span>Quà tặng</span><span>Áp dụng</span><span></span></div>
+              <div class="price-master-rows" id="price-master-rows"></div>
+            </div>
+            <p class="price-master-status" id="price-master-status" role="status"></p>
+          </section>
         </section>
       </div>
     </section>

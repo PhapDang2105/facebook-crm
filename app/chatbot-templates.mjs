@@ -1,3 +1,8 @@
+import { findPrice } from './processing/price-master.mjs';
+import { orderKey as buildOrderKey, productCode, toPricedItems } from './processing/order-key.mjs';
+import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
+import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
+
 const templates = {
   WELCOME: 'Dạ Giọt Nắng xin chào anh/chị ạ 👋 Anh/chị đang cần thông tin nào về sản phẩm để em tư vấn cho chính xác nhé ạ 🍀',
   CSKH_HANDOFF: 'Dạ em đã tiếp nhận thông tin của mình và chuyển bộ phận chăm sóc khách hàng hỗ trợ kỹ hơn nhé ạ. Bên em sẽ phản hồi mình sớm ạ.',
@@ -35,68 +40,88 @@ const templates = {
   PRICE_HAT_AN_LANH_DANG_HU: 'Dạ Hạt An Lành dạng hũ: 1 hũ 269.000đ + ship 15.000đ; combo 2 hũ 528.000đ và miễn phí vận chuyển ạ.'
 };
 
-const fallbackPrices = new Map([
-  ['XANH=1', 189000], ['XANH=2', 298000], ['XANH=3', 447000],
-  ['VANG=1', 189000], ['VANG=2', 298000], ['VANG=3', 447000],
-  ['NAU=1', 179000], ['NAU=2', 288000], ['NAU=3', 432000],
-  ['XANH=1|VANG=1', 298000], ['XANH=1|NAU=1', 293000], ['VANG=1|NAU=1', 293000],
-  ['XANH=1|VANG=1|NAU=1', 442000],
-  ['COMBO10_XANH=1', 204000], ['COMBO10_XANH=2', 358000], ['COMBO10_XANH=3', 537000],
-  ['COMBO10_NAU=1', 204000], ['COMBO10_NAU=2', 358000], ['COMBO10_NAU=3', 537000],
-  ['COMBO10_CAM=1', 204000], ['COMBO10_CAM=2', 358000], ['COMBO10_CAM=3', 537000],
-  ['COMBO10_MIX=1', 204000], ['COMBO10_MIX=2', 358000], ['COMBO10_MIX=3', 537000],
-  ['CACAO300=1', 219000], ['CACAO300=2', 348000], ['CACAO300=3', 522000]
-]);
-
-function productCode(product) {
-  const name = String(product || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLowerCase();
-  if (name.includes('cacao') && (name.includes('premium') || name.includes('300'))) return 'CACAO300';
-  if (name.includes('combo 10') && name.includes('mix')) return 'COMBO10_MIX';
-  if (name.includes('combo 10') && name.includes('xanh')) return 'COMBO10_XANH';
-  if (name.includes('combo 10') && name.includes('nau')) return 'COMBO10_NAU';
-  if (name.includes('combo 10') && name.includes('cam')) return 'COMBO10_CAM';
-  if (name.includes('xanh')) return 'XANH';
-  if (name.includes('vang')) return 'VANG';
-  if (name.includes('nau')) return 'NAU';
-  return '';
-}
-
-function renderOrder(value) {
+function renderOrder(value, context = {}) {
+  const now = Number(context.now) || Date.now();
+  const templateId = String(value.template_id || '').trim();
   const products = [value.Product_N1, value.Product_N2, value.Product_N3];
   const quantities = [value.No_A, value.No_B, value.No_C];
-  const items = products.map((product, index) => ({ product: String(product || '').trim(), quantity: Number(String(quantities[index] || '').replace(/\D/g, '')) || 0 }))
-    .filter(item => item.product && item.product !== '0' && item.quantity > 0);
-  const phone = String(value.Phone_Number || '').trim();
-  const address = String(value.Customer_Address || '').trim();
-  if (!phone || phone === '0' || !address || address === '0') {
-    const missing = !phone || phone === '0' ? 'số điện thoại' : 'địa chỉ nhận hàng đầy đủ';
-    return { templateId: 'ORDER_ADDRESS', messages: [`Dạ em đã ghi nhận sản phẩm rồi ạ. Anh/chị cho em xin ${missing} để em lên đơn gửi mình nha ạ.`], handoff: false };
+  const freshItems = toPricedItems(products.map((product, index) => ({
+    product: String(product || '').trim(),
+    quantity: Number(String(quantities[index] || '').replace(/\D/g, '')) || 0
+  })).filter(item => item.product && item.product !== '0' && item.quantity > 0));
+
+  // The key comes from the basket itself. A key the model declared is consulted
+  // only when the basket yields none, and never overrides it: an order_key the
+  // model invented used to price three bags as one.
+  const freshKey = buildOrderKey(freshItems);
+  const freshPrice = findPrice(freshKey);
+  const pending = usablePendingOrder(context.pendingOrder, { now, templateId });
+  const items = freshItems.length ? freshItems : (pending?.items || []);
+  const declared = String(value.order_key || '').trim();
+  const key = freshKey || (declared && declared !== '0' ? declared : '') || pending?.key || '';
+  const price = findPrice(key);
+
+  const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number);
+  const freshAddress = String(value.Customer_Address || '').trim();
+  const phone = freshPhone || pending?.phone || '';
+  const address = (freshAddress && freshAddress !== '0' ? freshAddress : '') || pending?.address || '';
+  const hasPhone = Boolean(phone);
+  const hasAddress = Boolean(address);
+
+  // Remember a priceable basket, plus whatever contact detail has arrived so
+  // far, so the customer never has to repeat something already given.
+  const nextPending = (freshItems.length && freshPrice) || pending || hasPhone || hasAddress
+    ? {
+        items: freshItems.length && freshPrice ? freshItems : (pending?.items || []),
+        key: freshItems.length && freshPrice ? freshKey : (pending?.key || ''),
+        at: freshItems.length && freshPrice ? now : (pending?.at || now),
+        phone,
+        address
+      }
+    : null;
+
+  const confirmed = isOrderStep(templateId) && Boolean(price) && hasPhone && hasAddress;
+
+  if (!confirmed) {
+    // Only a request to close the order is escalated. While still collecting
+    // details the bot keeps asking rather than dropping the customer on a human.
+    if (templateId === 'ORDER_CONFIRMATION' && items.length && !price) {
+      return { templateId: 'CSKH_HANDOFF', messages: [templates.CSKH_HANDOFF], handoff: true, pendingOrder: null };
+    }
+    const missing = hasPhone && !hasAddress ? 'địa chỉ nhận hàng đầy đủ'
+      : !hasPhone && hasAddress ? 'số điện thoại'
+      : 'số điện thoại và địa chỉ nhận hàng đầy đủ';
+    const known = hasPhone ? 'số điện thoại' : hasAddress ? 'địa chỉ' : '';
+    const opening = known
+      ? `Dạ em đã nhận được ${known} của mình rồi ạ.`
+      : 'Dạ em đã ghi nhận sản phẩm rồi ạ.';
+    return {
+      templateId: 'ORDER_ADDRESS',
+      messages: [`${opening} Anh/chị cho em xin ${missing} để em lên đơn gửi mình nha ạ.`],
+      handoff: false,
+      pendingOrder: nextPending
+    };
   }
-  const counts = new Map();
-  for (const item of items) {
-    const code = productCode(item.product);
-    if (code) counts.set(code, (counts.get(code) || 0) + item.quantity);
-  }
-  const key = ['XANH', 'VANG', 'NAU'].filter(code => counts.has(code)).map(code => `${code}=${counts.get(code)}`).join('|')
-    || [...counts].map(([code, quantity]) => `${code}=${quantity}`).join('|');
-  const total = fallbackPrices.get(String(value.order_key || '').trim()) || fallbackPrices.get(key);
-  if (!items.length || !total) return { templateId: 'CSKH_HANDOFF', messages: [templates.CSKH_HANDOFF], handoff: true };
+
+  const total = price.final_price;
   const lines = items.map(item => `🌾 ${item.product} – Số lượng: ${item.quantity}`).join('\n');
   return {
     templateId: 'ORDER_CONFIRMATION',
     messages: [
-      `Dạ em xin phép xác nhận lại thông tin đặt hàng của mình nha:\n\n${lines}\n━━━━━━━━━━━━\n📞 Số điện thoại: ${phone}\n━━━━━━━━━━━━\n🏡 Địa chỉ nhận hàng: ${address}\n━━━━━━━━━━━━\n💰 Tổng tiền: ${total.toLocaleString('vi-VN')}đ\n\nEm cảm ơn anh/chị đã ủng hộ Giọt Nắng. Nếu có gì sai sót, mình nhắn em biết nhé ạ.`,
+      `Dạ em xin phép xác nhận lại thông tin đặt hàng của mình nha:\n\n${lines}\n━━━━━━━━━━━━\n📞 Số điện thoại: ${phone}\n━━━━━━━━━━━━\n🏡 Địa chỉ nhận hàng: ${address}\n━━━━━━━━━━━━\n💰 Tổng tiền: ${total.toLocaleString('vi-VN')}đ${price.gift ? `\n━━━━━━━━━━━━\n🎁 ${price.gift}` : ''}\n\nEm cảm ơn anh/chị đã ủng hộ Giọt Nắng. Nếu có gì sai sót, mình nhắn em biết nhé ạ.`,
       templates.SHIPPING_POLICY,
       'Dạ sau khi nhận hàng mình giúp em kiểm tra sản phẩm và quay video đủ 6 mặt hộp khi mở. Bên em hỗ trợ đổi trả trong 7 ngày nếu sản phẩm có lỗi ạ.'
     ],
     handoff: false,
-    order: { items, phone, address, total }
+    // Cleared: the basket has become a real order.
+    pendingOrder: null,
+    order: { items, phone, address, total, orderKey: price.order_key, gift: price.gift }
   };
 }
 
-export function renderChatbotReply(value = {}, overrides = {}, deletedTemplateIds = []) {
+export function renderChatbotReply(value = {}, overrides = {}, deletedTemplateIds = [], context = {}) {
   const templateId = String(value.template_id || '').trim();
-  if (templateId === 'ORDER_CONFIRMATION') return renderOrder(value);
+  if (isOrderStep(templateId)) return renderOrder(value, context);
   const available = { ...templates, ...overrides };
   for (const id of deletedTemplateIds) delete available[id];
   const raw = available[templateId] || value.reply || value.message || value.text || available.CSKH_HANDOFF || templates.CSKH_HANDOFF;
@@ -108,3 +133,4 @@ export function renderChatbotReply(value = {}, overrides = {}, deletedTemplateId
 }
 
 export const chatbotTemplates = Object.freeze(templates);
+export { productCode };

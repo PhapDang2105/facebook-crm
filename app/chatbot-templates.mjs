@@ -4,18 +4,26 @@ import { orderKey as buildOrderKey, productCode, toPricedItems } from './process
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
 
+// Fallback text only. Every price-bearing reply is composed from Cài đặt →
+// Sản phẩm and Cài đặt → Quà tặng at reply time (see renderDynamicTemplate
+// below); the entries here are what the settings screen lists and what the
+// bot says when the catalogue has no such product. None of them carries a
+// number on purpose — a figure typed here would be the one thing that could
+// go stale.
+const askForProduct = 'Dạ anh/chị đang quan tâm sản phẩm nào để em gửi bảng giá chi tiết ạ?';
+
 const templates = {
   WELCOME: 'Dạ Giọt Nắng xin chào anh/chị ạ 👋 Anh/chị đang cần thông tin nào về sản phẩm để em tư vấn cho chính xác nhé ạ 🍀',
   CSKH_HANDOFF: 'Dạ em đã tiếp nhận thông tin của mình và chuyển bộ phận chăm sóc khách hàng hỗ trợ kỹ hơn nhé ạ. Bên em sẽ phản hồi mình sớm ạ.',
   ORDER_ADDRESS: 'Dạ để lên đơn đúng tuyến cho đơn vị vận chuyển.###Anh/chị cho em xin số điện thoại và địa chỉ trước sáp nhập để em lên đơn gửi mình cho chính xác nha ạ.',
   ECOMMERCE_LINKS: 'Dạ em gửi mình link gian hàng chính hãng của Giọt Nắng ạ 💛\n🛒 Shopee: https://shopee.vn/nongsangiotnang\n🛒 TikTok Shop: https://www.tiktok.com/@nongsangiotnang',
-  GENERAL_INFO: 'Dạ hiện tại nhà em có 3 vị chính ạ:\n🌾 Túi Xanh nguyên bản 450g: 174.000đ\n🌾 Túi Vàng nguyên bản 350g: 174.000đ\n🌾 Túi Nâu cacao 350g: 164.000đ\nGiá trên chưa gồm phí vận chuyển. Anh/chị đang quan tâm loại nào để em gửi bảng giá chi tiết ạ?',
+  GENERAL_INFO: askForProduct,
   BAG_COMPARISON: 'Dạ các túi đều dùng chung các loại hạt, khác nhau về tỷ lệ và hương vị ạ 🥰\n🤎 Túi Nâu: vị cacao, 50% hạt và quả.\n💚 Túi Xanh: vị nguyên bản, tỷ lệ hạt 50%.\n💛 Túi Vàng: vị nguyên bản, tỷ lệ hạt 70%.',
   BAG_COMPARISON_XANH_VANG: 'Dạ Túi Xanh 450g có khoảng 50% hạt và trái cây, vị cân bằng, dễ ăn. Túi Vàng 350g có khoảng 70% hạt và trái cây nên rõ vị hạt hơn. Thích dễ ăn chọn Túi Xanh; thích nhiều hạt chọn Túi Vàng nha ạ.',
   HOW_TO_USE_GRANOLA: 'Dạ mình có thể ăn granola trực tiếp như snack, hoặc dùng cùng sữa chua/sữa tươi cho bữa sáng nhanh gọn. Có thể thêm chuối, dâu hoặc xoài để dễ ăn hơn nha ạ.',
   CALORIES_DIET: 'Dạ 100g granola khoảng 445 Kcal. Nếu dùng trong chế độ giảm cân, mình có thể dùng 20–30g cùng sữa chua không đường hoặc trái cây thay bữa sáng. Hiệu quả còn phụ thuộc chế độ ăn và cơ địa ạ.',
   WHOLESALE_CTV_CONTACT: 'Dạ anh/chị cho em xin số Zalo được không ạ. Bên em có bộ phận CSKH sỉ/CTV tư vấn cho mình.',
-  GIFT_POLICY: 'Dạ chương trình tặng bộ bát và muỗng dừa hiện áp dụng với combo 3 túi ạ.',
+  GIFT_POLICY: 'Dạ hiện tại bên em chưa có chương trình quà tặng ạ.',
   SHIPPING_POLICY: 'Dạ thời gian giao dự kiến: TP.HCM và tỉnh lân cận 1–3 ngày, các tỉnh khác 4–6 ngày ạ. Bên em sẽ gửi mã vận đơn để mình theo dõi nha ạ.',
   STORE_ADDRESS: 'Dạ địa chỉ bên em là 176/1A Khu phố 1, An Phú Đông, Quận 12, TP.HCM. SĐT: 0899 677 899 (Giọt Nắng) ạ.',
   BANK_TRANSFER: 'Dạ thông tin chuyển khoản: ACB – 18066788 – Công ty Cổ phần GONA Việt Nam. Sau khi chuyển, mình gửi ảnh giao dịch thành công để bên em xác nhận nha ạ.',
@@ -23,25 +31,26 @@ const templates = {
   NO_ADDED_SUGAR: 'Dạ trong quá trình sản xuất bên em không thêm đường, nhưng trái cây sấy vốn có đường tự nhiên ạ.',
   OIL_SMELL_WARRANTY: 'Dạ các loại hạt có dầu tự nhiên nên đôi khi có thể ỉu hoặc hôi dầu do bảo quản hay vận chuyển. Bên em có chính sách bảo hành và sẽ hỗ trợ mình ạ.',
   WEIGHT_EXPIRY: 'Dạ một túi Granola Nguyên Bản nặng 450g. Hạn sử dụng 6 tháng kể từ ngày sản xuất và được in đầy đủ trên bao bì ạ.',
-  PRICE_ADJUSTMENT: 'Dạ giá túi lẻ có điều chỉnh theo chi phí nguyên liệu. Bên em vẫn giữ giá combo và hỗ trợ 50% phí vận chuyển cho đơn một túi nên phí ship còn khoảng 15.000đ ạ.',
+  PRICE_ADJUSTMENT: 'Dạ giá sản phẩm lẻ có điều chỉnh theo chi phí nguyên liệu. Bên em vẫn giữ giá combo và hỗ trợ một phần phí vận chuyển cho đơn một sản phẩm ạ.',
   DELIVERY_DELAY: 'Dạ em xin lỗi mình vì đơn giao chậm ạ. Bên em đang theo dõi và thúc đẩy đơn vị vận chuyển giao sớm nhất cho mình.',
   INSPECTION_RETURN_POLICY: 'Dạ khi nhận hàng mình có thể đồng kiểm mẫu mã cùng shipper. Sau khi trải nghiệm, nếu sản phẩm có vấn đề bên em hỗ trợ theo chính sách bảo hành ạ.',
   REFUSED_DELIVERY: 'Dạ hệ thống ghi nhận đơn bị từ chối nhận và đang hoàn về. Anh/chị cho em biết mình có nhận được cuộc gọi từ shipper không để bên em làm việc với đơn vị vận chuyển ạ.',
   THANK_YOU: 'Dạ em cảm ơn anh/chị rất nhiều ạ. Chúc mình một ngày thật nhiều năng lượng và niềm vui ạ.',
-  PRICE_MIX_TUI_LON: 'Dạ bảng giá mix túi lớn ạ:\n• Xanh + Vàng: 298.000đ\n• Xanh + Nâu: 293.000đ\n• Vàng + Nâu: 293.000đ\n• Trọn bộ Xanh + Vàng + Nâu: 442.000đ, miễn phí vận chuyển và tặng bộ bát muỗng dừa ạ.',
-  PRICE_NGHE_LANH: 'Dạ Bột ngũ cốc Nghệ Lành 14 gói/hộp: 1 hộp 174.000đ + ship 15.000đ; combo 2 hộp 298.000đ, miễn phí vận chuyển ạ.',
+  PRICE_MIX_TUI_LON: askForProduct,
+  PRICE_NGHE_LANH: askForProduct,
+  // The only price kept as text: oats sell at three different per-kg rates
+  // (1kg / 2kg / 3kg), which the single-combo-price catalogue cannot express.
+  // Replace once the catalogue can hold a third tier or the pricing is simplified.
   PRICE_YEN_MACH_UC_NGUYEN_CAM: 'Dạ Yến Mạch Úc Nguyên Cám: 1kg 116.000đ + ship 15.000đ; 2kg 222.000đ miễn phí vận chuyển; 3kg 299.000đ miễn phí vận chuyển ạ.',
-  PRICE_TUI_XANH: 'Dạ Túi Xanh 450g: 1 túi 174.000đ + ship 15.000đ; combo 2 túi 298.000đ; combo 3 túi 447.000đ và tặng bộ bát muỗng dừa. Combo được miễn phí vận chuyển ạ.',
-  PRICE_TUI_VANG: 'Dạ Túi Vàng 350g: 1 túi 174.000đ + ship 15.000đ; combo 2 túi 298.000đ; combo 3 túi 447.000đ và tặng bộ bát muỗng dừa. Combo được miễn phí vận chuyển ạ.',
-  PRICE_TUI_NAU: 'Dạ Túi Nâu cacao 350g: 1 túi 164.000đ + ship 15.000đ; combo 2 túi 288.000đ; combo 3 túi 432.000đ và tặng bộ bát muỗng dừa. Combo được miễn phí vận chuyển ạ.',
-  PRICE_TUI_XANH_NHO: 'Dạ Combo Túi Xanh nhỏ: 10 gói 189.000đ + ship 15.000đ; 20 gói 358.000đ; 30 gói 537.000đ và tặng bộ bát muỗng dừa. Combo từ 20 gói được miễn phí vận chuyển ạ.',
-  PRICE_TUI_NAU_NHO: 'Dạ Combo Túi Nâu nhỏ: 10 gói 189.000đ + ship 15.000đ; 20 gói 358.000đ; 30 gói 537.000đ và tặng bộ bát muỗng dừa. Combo từ 20 gói được miễn phí vận chuyển ạ.',
-  PRICE_TUI_CAM_NHO: 'Dạ Combo Túi Cam nhỏ: 10 gói 189.000đ + ship 15.000đ; 20 gói 358.000đ; 30 gói 537.000đ và tặng bộ bát muỗng dừa. Combo từ 20 gói được miễn phí vận chuyển ạ.',
-  PRICE_COMBO_10_GOI_MIX_3_MAU: 'Dạ Combo 10 gói mix 3 vị: 10 gói 189.000đ + ship 15.000đ; 20 gói 358.000đ; 30 gói 537.000đ và tặng bộ bát muỗng dừa. Combo từ 20 gói được miễn phí vận chuyển ạ.',
-  PRICE_HAT_AN_LANH_DANG_HU: 'Dạ Hạt An Lành dạng hũ: 1 hũ 269.000đ + ship 15.000đ; combo 2 hũ 528.000đ và miễn phí vận chuyển ạ.',
-  // Rendered from Cài đặt → Sản phẩm at reply time; this text is only the
-  // fallback when the model names a product the catalogue does not have.
-  PRICE_QUOTE: 'Dạ anh/chị đang quan tâm sản phẩm nào để em gửi bảng giá chi tiết ạ?'
+  PRICE_TUI_XANH: askForProduct,
+  PRICE_TUI_VANG: askForProduct,
+  PRICE_TUI_NAU: askForProduct,
+  PRICE_TUI_XANH_NHO: askForProduct,
+  PRICE_TUI_NAU_NHO: askForProduct,
+  PRICE_TUI_CAM_NHO: askForProduct,
+  PRICE_COMBO_10_GOI_MIX_3_MAU: askForProduct,
+  PRICE_HAT_AN_LANH_DANG_HU: askForProduct,
+  PRICE_QUOTE: askForProduct
 };
 
 function renderOrder(value, context = {}) {
@@ -170,7 +179,17 @@ function renderMixPricing() {
   return `Dạ mua ghép từ 2 sản phẩm (cùng loại hay khác loại) thì mỗi sản phẩm tính theo giá combo ạ:\n${lines.join('\n')}${example}${giftText}`;
 }
 
+function renderPriceAdjustment() {
+  const fee = shippingFeeFor(1);
+  const from = freeShippingFrom();
+  const ship = fee
+    ? ` Bên em vẫn giữ giá combo và hỗ trợ phí vận chuyển cho đơn một sản phẩm nên phí ship còn ${formatMoney(fee)}${Number.isFinite(from) ? `; từ ${from} sản phẩm miễn phí vận chuyển` : ''} ạ.`
+    : ' Bên em vẫn giữ giá combo và miễn phí vận chuyển ạ.';
+  return `Dạ giá sản phẩm lẻ có điều chỉnh theo chi phí nguyên liệu.${ship}`;
+}
+
 const dynamicTemplateRenderers = {
+  PRICE_ADJUSTMENT: () => renderPriceAdjustment(),
   GENERAL_INFO: () => renderGeneralInfo(),
   GIFT_POLICY: () => renderGiftPolicy(),
   PRICE_MIX_TUI_LON: () => renderMixPricing(),
@@ -187,7 +206,7 @@ function productForPriceTemplate(templateId, value = {}) {
 export function renderDynamicTemplate(templateId, value = {}) {
   const id = String(templateId || '').trim();
   if (dynamicTemplateRenderers[id]) return dynamicTemplateRenderers[id](value) || '';
-  if (id.startsWith('PRICE_') && id !== 'PRICE_ADJUSTMENT') {
+  if (id.startsWith('PRICE_')) {
     const product = productForPriceTemplate(id, value);
     return product ? renderPriceQuote(product.name) : '';
   }

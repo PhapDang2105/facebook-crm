@@ -151,6 +151,13 @@ async function ensureProductCatalogue() {
   if (existing?.items?.length) {
     if (existing.schema >= productSchemaVersion && existing.seeded) return existing;
     const items = existing.items.map(item => upgradeProductRecord(item, seed, now, existing.schema));
+    // Seed products added in a later release join an existing catalogue once,
+    // matched by seed id, so a deleted one is not resurrected on every boot.
+    const known = new Set(items.map(item => item.id));
+    const removed = new Set(Array.isArray(existing.removedSeedIds) ? existing.removedSeedIds : []);
+    for (const entry of seed) {
+      if (!known.has(entry.id) && !removed.has(entry.id) && (existing.schema || 0) < productSchemaVersion) items.push({ ...entry, createdAt: now, updatedAt: now });
+    }
     return writeProductStore({ ...existing, items, seeded: true, schema: productSchemaVersion });
   }
   if (existing?.seeded) return existing;
@@ -546,6 +553,7 @@ const server = http.createServer(async (request, response) => {
       if (index < 0) return sendJson(response, 404, { error: 'Không tìm thấy sản phẩm.' });
       if (request.method === 'DELETE') {
         const [removed] = store.items.splice(index, 1);
+        if (String(removed.id).startsWith('seed-')) store.removedSeedIds = [...new Set([...(store.removedSeedIds || []), removed.id])];
         await writeProductStore(store);
         return sendJson(response, 200, removed);
       }

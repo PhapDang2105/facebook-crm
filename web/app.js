@@ -133,7 +133,6 @@ const productWeight = document.querySelector('#product-weight');
 const productActive = document.querySelector('#product-active');
 const productAliases = document.querySelector('#product-aliases');
 const productComponents = document.querySelector('#product-components');
-const customerOrdersImportButton = document.querySelector('#customer-orders-import');
 const productFormStatus = document.querySelector('#product-form-status');
 const productSubmit = document.querySelector('#product-submit');
 const sharedProductOptions = document.querySelector('#shared-product-options');
@@ -329,7 +328,6 @@ const orderSearch = document.querySelector('#order-search');
 const orderFilter = document.querySelector('#order-filter');
 const orderHistoryButton = document.querySelector('#order-history-button');
 const orderHistoryPanel = document.querySelector('#order-history-panel');
-const customerOrdersPreview = document.querySelector('#customer-orders-preview');
 const orderExport = document.querySelector('#order-export');
 let orderData = { headers: [], rows: [] };
 let orderImportHistory = [];
@@ -355,33 +353,26 @@ function showView(name) {
   orderNav.setAttribute('aria-expanded', String(name === 'orders'));
   settingsNav?.setAttribute('aria-expanded', String(name === 'settings'));
   if (window.location.hash !== `#${name}`) window.location.hash = name;
-  if (name === 'orders') loadCustomerOrdersManagement();
+  if (name === 'orders') syncChatbotOrdersIntoTable();
 }
 
-async function loadCustomerOrdersManagement() {
-  if (!customerOrdersPreview) return;
+// Chatbot orders are ordinary rows in the order table, tagged "Chatbot" in the
+// Nguồn đơn column, so they are checked, processed and exported like a Pancake
+// import. This pulls any new ones in whenever the orders view opens.
+async function syncChatbotOrdersIntoTable() {
   try {
     const result = await readApiResponse(await fetch('/api/customer-orders'));
-    if (!result.items?.length) {
-      customerOrdersPreview.innerHTML = '<p>Chưa có đơn nào được tạo từ hội thoại.</p>';
-      return;
-    }
-    customerOrdersPreview.innerHTML = `<div class="customer-orders-management-list">${result.items.map(order => `<div class="customer-orders-management-row" data-customer-order-id="${escapeHtml(order.id)}">
-      <strong>#${escapeHtml(order.id)}</strong><span>${escapeHtml(order.name || order.conversationName)}</span><span>${escapeHtml(order.phone)}</span>
-      <span class="customer-orders-management-status">${order.delivery?.status === 'sent' ? '✓ Đã gửi khách' : escapeHtml(order.status || 'Mới')}</span><strong>${escapeHtml(formatOrderMoney(order.total))}</strong>
-      <button type="button" class="order-row-delete" data-customer-order-delete="${escapeHtml(order.id)}" title="Xóa đơn này" aria-label="Xóa đơn này">×</button>
-    </div>`).join('')}</div>`;
-    // Every chatbot order flows into the table on its own; the button above only forces a refresh.
-    const added = mergeChatbotOrdersIntoTable(result.items);
-    if (added) showToast(`Đã đưa ${added} đơn mới từ hội thoại vào bảng.`, 'success');
+    const added = mergeChatbotOrdersIntoTable(Array.isArray(result.items) ? result.items : []);
+    if (added) showToast(`Đã đưa ${added} đơn mới từ chatbot vào bảng.`, 'success');
   } catch (error) {
-    customerOrdersPreview.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+    showToast(error.message || 'Chưa lấy được đơn từ chatbot.', 'error');
   }
 }
 
 // The columns the import table already understands, so a chatbot order lands
 // in the same pipeline as a Pancake export: check → process → export file.
-const chatbotOrderHeaders = ['Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
+const orderSourceHeader = 'Nguồn đơn';
+const chatbotOrderHeaders = [orderSourceHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
 
 function chatbotOrderToRows(order) {
   const parts = String(order.address || '').split(',').map(part => part.trim()).filter(Boolean);
@@ -390,7 +381,7 @@ function chatbotOrderToRows(order) {
   const ward = parts.length > 3 ? parts.at(-3) : '';
   const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
   return products.map(item => [
-    `CB-${order.id}`, order.name || order.conversationName || '', order.phone || '', order.address || '',
+    'Chatbot', `CB-${order.id}`, order.name || order.conversationName || '', order.phone || '', order.address || '',
     province, district, ward,
     item.name || '', item.sku || '', String(Number(item.quantity) || 1),
     // Unit price as the customer paid it (combo price from 2 units), so the
@@ -427,10 +418,32 @@ function deleteOrderRows(indexes) {
   renderOrderData();
 }
 
-document.querySelector('#order-import-preview')?.addEventListener('click', event => {
+document.querySelector('#order-import-preview')?.addEventListener('click', async event => {
   const button = event.target.closest('[data-order-row-delete]');
   if (!button) return;
-  deleteOrderRows([Number(button.dataset.orderRowDelete)]);
+  const rowIndex = Number(button.dataset.orderRowDelete);
+  const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  const orderId = idColumn >= 0 ? String(orderData.rows[rowIndex]?.[idColumn] || '') : '';
+  // A chatbot order is one record in the system, not a table row: deleting any
+  // of its lines deletes the order everywhere, after asking.
+  if (orderId.startsWith('CB-')) {
+    const id = orderId.slice(3);
+    if (!window.confirm(`Xóa đơn #${id} tạo từ chatbot khỏi hệ thống? Đơn sẽ mất ở cả bảng này lẫn hội thoại.`)) return;
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/customer-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      // 404 means the order is already gone from the system; the row still goes.
+      if (response.status !== 404) await readApiResponse(response);
+    } catch (error) {
+      button.disabled = false;
+      showToast(error.message || 'Chưa xóa được đơn.', 'error');
+      return;
+    }
+    deleteOrderRows(orderData.rows.map((row, index) => String(row[idColumn] || '') === orderId ? index : -1).filter(index => index >= 0));
+    showToast(`Đã xóa đơn #${id}.`, 'success');
+    return;
+  }
+  deleteOrderRows([rowIndex]);
   showToast('Đã xóa dòng khỏi bảng.', 'success');
 });
 
@@ -441,7 +454,15 @@ document.querySelector('#order-clear-table')?.addEventListener('click', () => {
   showToast('Đã xóa bảng đơn hàng.', 'success');
 });
 
+/** Adds the Nguồn đơn column to a table that lacks it, tagging existing rows as imported. */
+function ensureOrderSourceColumn(data) {
+  if (!data.headers.length) return data;
+  if (data.headers.some(header => normalizeColumnName(header) === normalizeColumnName(orderSourceHeader))) return data;
+  return { headers: [orderSourceHeader, ...data.headers], rows: data.rows.map(row => ['Import', ...row]) };
+}
+
 function mergeChatbotOrdersIntoTable(orders) {
+  orderData = ensureOrderSourceColumn(orderData);
   const headers = orderData.headers.length ? orderData.headers : chatbotOrderHeaders;
   const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
   const idColumn = index.get('ma don hang');
@@ -467,37 +488,6 @@ function mergeChatbotOrdersIntoTable(orders) {
   renderOrderData();
   return added;
 }
-
-customerOrdersPreview?.addEventListener('click', async event => {
-  const button = event.target.closest('[data-customer-order-delete]');
-  if (!button) return;
-  const id = button.dataset.customerOrderDelete;
-  if (!window.confirm(`Xóa đơn #${id} tạo từ hội thoại? Đơn cũng sẽ được gỡ khỏi bảng đơn hàng.`)) return;
-  button.disabled = true;
-  try {
-    await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(id)}`, { method: 'DELETE' }));
-    const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
-    if (idColumn >= 0) deleteOrderRows(orderData.rows.map((row, index) => String(row[idColumn] || '') === `CB-${id}` ? index : -1).filter(index => index >= 0));
-    await loadCustomerOrdersManagement();
-    showToast('Đã xóa đơn.', 'success');
-  } catch (error) {
-    button.disabled = false;
-    showToast(error.message || 'Chưa xóa được đơn.', 'error');
-  }
-});
-
-customerOrdersImportButton?.addEventListener('click', async () => {
-  customerOrdersImportButton.disabled = true;
-  try {
-    const result = await readApiResponse(await fetch('/api/customer-orders'));
-    const added = mergeChatbotOrdersIntoTable(Array.isArray(result.items) ? result.items : []);
-    showToast(added ? `Đã đưa ${added} đơn từ hội thoại vào bảng.` : 'Không có đơn mới — các đơn đã có trong bảng.', added ? 'success' : 'info');
-  } catch (error) {
-    showToast(error.message || 'Chưa lấy được đơn từ hội thoại.', 'error');
-  } finally {
-    customerOrdersImportButton.disabled = false;
-  }
-});
 
 function formatShippingTime(value) {
   if (!value) return '';
@@ -4849,10 +4839,10 @@ function applyImportedRecords(sourceHeaders, records) {
   const retainedIndexes = sourceHeaders.map((_, index) => index);
   const headers = retainedIndexes.map(index => sourceHeaders[index]);
   const nonEmptyRows = records.filter(row => row.some(value => String(value ?? '').trim()));
-  orderData = {
+  orderData = ensureOrderSourceColumn({
     headers,
     rows: nonEmptyRows.map(row => retainedIndexes.map(index => normalizeImportedValue(row[index] || '', sourceHeaders[index])))
-  };
+  });
   localStorage.setItem('crm-orders', JSON.stringify(orderData));
   renderOrderData();
   showOrderStage(getRecommendedOrderStage());

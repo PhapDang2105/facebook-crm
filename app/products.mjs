@@ -66,8 +66,10 @@ export function normalizeProductStore(value) {
     // Without it, emptying the catalogue on purpose would refill it on restart.
     seeded: value?.seeded === true,
     // Bumped when the product shape changes so old records get upgraded once.
-    schema: Number(value?.schema) || 0
+    schema: Number(value?.schema) || 0,
+    // Seed ids staff deleted on purpose; ensureProductCatalogue must not re-add them.
+    removedSeedIds: Array.isArray(value?.removedSeedIds) ? value.removedSeedIds.filter(Boolean) : []
   };
 }
 
-export const productSchemaVersion = 3;
+export const productSchemaVersion = 4;

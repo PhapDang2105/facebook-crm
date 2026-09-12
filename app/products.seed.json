@@ -186,6 +186,41 @@
       ],
       "active": true,
       "image": ""
+    },
+    {
+      "id": "seed-nghe-lanh",
+      "name": "Bột ngũ cốc Nghệ Lành hộp 14 gói",
+      "sku": "NGHE-LANH-H14",
+      "originalPrice": 174000,
+      "salePrice": 174000,
+      "comboPrice": 149000,
+      "weight": 0,
+      "aliases": [
+        "nghệ lành",
+        "bột ngũ cốc nghệ lành",
+        "ngũ cốc nghệ lành",
+        "bột nghệ lành"
+      ],
+      "components": [],
+      "active": true,
+      "image": ""
+    },
+    {
+      "id": "seed-hat-an-lanh",
+      "name": "Hạt An Lành dạng hũ",
+      "sku": "HAL-HU",
+      "originalPrice": 269000,
+      "salePrice": 269000,
+      "comboPrice": 264000,
+      "weight": 0,
+      "aliases": [
+        "hạt an lành",
+        "hũ hạt an lành",
+        "an lành dạng hũ"
+      ],
+      "components": [],
+      "active": true,
+      "image": ""
     }
   ]
 }

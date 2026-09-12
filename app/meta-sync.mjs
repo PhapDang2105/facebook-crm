@@ -113,10 +113,10 @@ export async function sendConversationMessage(conversation, { text = '', attachm
     id: String(result.message_id || `sent-${Date.now()}`),
     mid: String(result.message_id || ''),
     direction: 'outgoing',
-    // The local timeline keeps rendering its own order card, so a delivered template
-    // is still recorded as the plain confirmation text rather than a new message type.
-    type: attachment?.type || 'text',
-    text: usedTemplate ? (templateText || text) : text,
+    // A delivered receipt template is tagged so the timeline shows only the order
+    // card, not a second bubble repeating the same thing as plain text.
+    type: usedTemplate ? 'order-receipt' : (attachment?.type || 'text'),
+    text: usedTemplate ? 'Đã gửi xác nhận đơn hàng' : text,
     createdAt: Date.now(),
     status: 'sent',
     // The uploaded bytes stay out of the store; the echo webhook supplies Meta's hosted URL.

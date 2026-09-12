@@ -1351,6 +1351,7 @@ function appendMessageText(target, value) {
 
 function getMessagePreview(message) {
   const item = typeof message === 'string' ? { type: 'text', text: message } : message;
+  if (item?.type === 'order-receipt') return 'Đã gửi xác nhận đơn hàng';
   if (item?.type === 'image') return item.text ? `Ảnh · ${item.text}` : 'Đã gửi một ảnh';
   if (item?.type === 'video') return item.text ? `Video · ${item.text}` : 'Đã gửi một video';
   if (item?.type === 'document') return item.name ? `Tài liệu · ${item.name}` : 'Đã gửi một tài liệu';
@@ -1499,6 +1500,14 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
     appendChatSystemNotice(item);
     return;
   }
+  // The receipt sent to the customer is already drawn as an order card by
+  // renderConversationOrderCards, so its message record must not also appear
+  // as a text bubble repeating the same order.
+  if (item.type === 'order-receipt') return;
+  // Orders created before the receipt template existed stored the confirmation as
+  // plain text. Those records stay in the store, so they are recognised by their
+  // fixed opening line and hidden the same way.
+  if (typeof item.text === 'string' && item.text.startsWith('XÁC NHẬN ĐƠN ĐẶT HÀNG GIỌT NẮNG #')) return;
   const sentAt = getChatTimestamp(item.createdAt);
   let previousRow = chatBody?.lastElementChild || null;
   while (previousRow && !previousRow.classList.contains('message-row')) previousRow = previousRow.previousElementSibling;
@@ -2223,8 +2232,34 @@ function formatOrderMoney(value) {
   return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, Number(value) || 0))} đ`;
 }
 
+// Line icons drawn as inline SVG. The 16px PNGs they replaced were raster art
+// upscaled by the device pixel ratio, which made every icon in the order card
+// look soft and broken up on high-density screens.
+const customerPanelIconPaths = {
+  star: '<path d="M12 3.7l2.6 5.2 5.8.9-4.2 4.1 1 5.7-5.2-2.7-5.2 2.7 1-5.7L3.6 9.8l5.8-.9Z"/>',
+  shield: '<path d="M12 3.2 5.2 6v5.4c0 4.2 2.9 8.1 6.8 9.4 3.9-1.3 6.8-5.2 6.8-9.4V6Z"/><path d="m9.2 12 2 2 3.9-3.9"/>',
+  cancel: '<circle cx="12" cy="12" r="8.4"/><path d="m9.6 9.6 4.8 4.8M14.4 9.6l-4.8 4.8"/>',
+  user: '<circle cx="12" cy="8" r="3.3"/><path d="M5.6 19.4c.9-3.4 3.4-5.2 6.4-5.2s5.5 1.8 6.4 5.2"/>',
+  location: '<path d="M4 10.6 12 4.2l8 6.4"/><path d="M6.6 9.9V19.4h10.8V9.9"/><path d="M10.1 19.4v-4.4h3.8v4.4"/>',
+  phone: '<path d="M7.3 4.6h2.1l1.4 3.3-1.7 1.3a10.4 10.4 0 0 0 5.7 5.7l1.3-1.7 3.3 1.4v2.1a2 2 0 0 1-2.2 2C11 18 6 13 5.3 6.8a2 2 0 0 1 2-2.2Z"/>',
+  cart: '<path d="M3.2 4.6h2.1l2.3 10h9.4l1.9-7.1H6.6"/><circle cx="9.6" cy="18.8" r="1.4"/><circle cx="16.4" cy="18.8" r="1.4"/>',
+  wallet: '<rect x="3.2" y="5.8" width="17.6" height="12.6" rx="2.2"/><path d="M3.2 10.2h17.6"/>',
+  clock: '<circle cx="12" cy="12" r="8.4"/><path d="M12 7.4V12l3.1 1.9"/>',
+  check: '<circle cx="12" cy="12" r="8.4"/><path d="m8.4 12.2 2.6 2.6 4.6-4.7"/>',
+  document: '<path d="M6.6 3.6h6.8L17.9 8v12.4H6.6Z"/><path d="M13.3 3.7V8h4.5"/>',
+  printer: '<path d="M7.6 9.2V4.1h8.8v5.1"/><rect x="4.1" y="9.2" width="15.8" height="6.8" rx="1.6"/><path d="M7.6 14.1h8.8v5.8H7.6z"/>',
+  delivery: '<path d="M20.3 8.1 12 4.2 3.7 8.1l8.3 3.9Z"/><path d="M3.7 8.1v7.9l8.3 3.9 8.3-3.9V8.1"/><path d="M12 12v7.9"/>',
+  calendar: '<rect x="3.8" y="5.4" width="16.4" height="14.2" rx="2"/><path d="M3.8 9.8h16.4M8.4 3.6v3.6M15.6 3.6v3.6"/>',
+  tag: '<path d="M4.1 4.1h7.1l8.3 8.3-7.1 7.1L4.1 11.2Z"/><circle cx="8.4" cy="8.4" r="1.3"/>',
+  list: '<path d="M4.2 7h1.6M4.2 12h1.6M4.2 17h1.6M9 7h10.8M9 12h10.8M9 17h10.8"/>',
+  search: '<circle cx="10.7" cy="10.7" r="6.2"/><path d="m15.3 15.3 4.3 4.3"/>',
+  plus: '<path d="M12 5.6v12.8M5.6 12h12.8"/>'
+};
+
 function customerPanelIcon(name, alt = '') {
-  return `<img class="customer-panel-icon" src="/assets/icons/customer-panel/${name}.png" alt="${escapeHtml(alt)}">`;
+  const paths = customerPanelIconPaths[name] || customerPanelIconPaths.document;
+  const label = alt ? ` role="img" aria-label="${escapeHtml(alt)}"` : ' aria-hidden="true"';
+  return `<svg class="customer-panel-icon" viewBox="0 0 24 24"${label}>${paths}</svg>`;
 }
 
 function formatCustomerPanelTime(value, includeDate = false) {
@@ -2343,10 +2378,11 @@ function describeOrderProducts(order) {
   return { products, quantity, weight, sku, name: `${name}${extra}` };
 }
 
+const customerAvatarPlaceholder = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23e6e8ec'/%3E%3Ccircle cx='20' cy='15.5' r='6' fill='%23b6bcc6'/%3E%3Cpath d='M8.5 34c2-6 6.2-9 11.5-9s9.5 3 11.5 9z' fill='%23b6bcc6'/%3E%3C/svg%3E";
+
 function customerOrderStaff(name, avatar) {
   const label = escapeHtml(String(name || 'Bạn'));
-  const image = avatar ? `<img src="${escapeHtml(avatar)}" alt="">` : '<img src="/assets/icons/customer-panel/user.png" alt="">';
-  return `<span class="customer-order-staff">${image}${label}</span>`;
+  return `<span class="customer-order-staff"><img src="${escapeHtml(avatar || customerAvatarPlaceholder)}" alt="">${label}</span>`;
 }
 
 function customerOrderMetaRow(icon, label, valueMarkup, link = false) {
@@ -2537,7 +2573,7 @@ function renderCustomerOrderChip(conversation = getActiveConversation()) {
   if (!name) return;
   if (customerOrderChipName) customerOrderChipName.textContent = name;
   if (customerOrderChipPhone) customerOrderChipPhone.textContent = phone || 'Chưa có số điện thoại';
-  if (customerOrderChipAvatar) customerOrderChipAvatar.src = profile.avatar || '/assets/icons/customer-panel/user.png';
+  if (customerOrderChipAvatar) customerOrderChipAvatar.src = profile.avatar || customerAvatarPlaceholder;
   const carrier = detectPhoneCarrier(phone);
   if (customerOrderChipCarrier) {
     customerOrderChipCarrier.hidden = !carrier;

@@ -34,6 +34,10 @@ export function normalizeWebhookAttachment(attachment) {
   if (attachment?.type === 'video') return { type: 'video', dataUrl: url, name: '' };
   if (attachment?.type === 'audio') return { type: 'audio', dataUrl: url, name: '' };
   if (attachment?.type === 'file') return { type: 'document', dataUrl: url, name: payload.name || 'Tài liệu' };
+  // Messenger echoes back the receipt template we sent. The order card in the
+  // timeline already shows that order, so this is tagged instead of being
+  // rendered as an "unsupported attachment" bubble.
+  if (attachment?.type === 'template') return { type: 'order-receipt', text: 'Đã gửi xác nhận đơn hàng' };
   if (attachment?.type === 'location') {
     const { lat, long } = payload.coordinates || {};
     return { type: 'text', text: lat && long ? `Đã gửi vị trí: ${lat}, ${long}` : 'Đã gửi một vị trí' };
@@ -55,6 +59,7 @@ export function normalizeWebhookMessage(messagingEvent) {
     status: isEcho ? 'sent' : 'received'
   };
   if (!attachment) return { ...base, type: 'text' };
+  if (attachment.type === 'order-receipt') return { ...base, type: 'order-receipt', text: attachment.text };
   if (attachment.type === 'text') return { ...base, type: 'text', text: base.text || attachment.text };
   return { ...base, ...attachment, text: base.text };
 }

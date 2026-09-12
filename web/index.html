@@ -149,7 +149,7 @@
 
             <form class="customer-panel-view customer-create-view hidden" data-customer-panel="create" id="customer-order-form">
               <section class="customer-form-section">
-                <h3><img src="/assets/icons/customer-panel/user.png" alt=""> Khách hàng
+                <h3><svg class="customer-section-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.3"></circle><path d="M5.6 19.4c.9-3.4 3.4-5.2 6.4-5.2s5.5 1.8 6.4 5.2"></path></svg> Khách hàng
                   <span class="customer-section-icons">
                     <button type="button" id="customer-order-new" title="Tạo khách hàng mới" aria-label="Tạo khách hàng mới"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="2"></rect><path d="M3 10h18M8 15h4M16 13v4M14 15h4"></path></svg></button>
                     <button type="button" id="customer-order-pick" title="Chọn khách hàng có sẵn" aria-label="Chọn khách hàng có sẵn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="9" cy="10" r="2.4"></circle><path d="M5.5 17c.7-2 2-3 3.5-3s2.8 1 3.5 3M15 9h4M15 13h4"></path></svg></button>
@@ -163,32 +163,32 @@
                   <input id="customer-order-address" name="address" placeholder="Địa chỉ" autocomplete="street-address">
                   <select id="customer-order-saved-address" aria-label="Chọn địa chỉ đã lưu"><option value="">Chọn địa chỉ</option></select>
                   <div class="customer-customer-chip" id="customer-order-chip" hidden>
-                    <img id="customer-order-chip-avatar" src="/assets/icons/customer-panel/user.png" alt="">
+                    <img id="customer-order-chip-avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23e6e8ec'/%3E%3Ccircle cx='20' cy='15.5' r='6' fill='%23b6bcc6'/%3E%3Cpath d='M8.5 34c2-6 6.2-9 11.5-9s9.5 3 11.5 9z' fill='%23b6bcc6'/%3E%3C/svg%3E" alt="">
                     <span class="chip-copy"><strong id="customer-order-chip-name"></strong><span class="chip-line"><span id="customer-order-chip-phone"></span><span class="customer-order-tag-carrier" id="customer-order-chip-carrier" hidden></span></span></span>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
                   </div>
                 </div>
               </section>
               <section class="customer-form-section customer-products-section">
-                <h3><img src="/assets/icons/customer-panel/cart.png" alt=""> Sản phẩm
+                <h3><svg class="customer-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.2 4.6h2.1l2.3 10h9.4l1.9-7.1H6.6"></path><circle cx="9.6" cy="18.8" r="1.4"></circle><circle cx="16.4" cy="18.8" r="1.4"></circle></svg> Sản phẩm
                   <button class="customer-section-link" id="customer-open-warehouse" type="button">Kho Giọt Nắng <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
                 </h3>
                 <div class="customer-form-body">
                   <div class="customer-product-table">
                     <div class="customer-product-table-head"><span>Tên SP</span><span id="customer-product-quantity-label">SL:0</span><span>Đơn giá</span><span>Thành tiền</span></div>
-                    <div class="customer-product-empty" id="customer-product-empty"><img src="/assets/icons/customer-panel/empty-box.png" alt=""><small>Chưa có sản phẩm nào</small></div>
+                    <div class="customer-product-empty" id="customer-product-empty"><svg viewBox="0 0 44 34" aria-hidden="true"><path d="M2.5 12.5h39l-3.5 19H6Z" fill="#f2f4f8" stroke="#cfd6e0" stroke-width="1.6" stroke-linejoin="round"></path><path d="M6.5 3.5h14l-2 9H4Z" fill="#fff" stroke="#cfd6e0" stroke-width="1.6" stroke-linejoin="round"></path><path d="M37.5 3.5h-14l2 9h14Z" fill="#fff" stroke="#cfd6e0" stroke-width="1.6" stroke-linejoin="round"></path></svg><small>Chưa có sản phẩm nào</small></div>
                     <div class="customer-product-list" id="customer-product-list"></div>
                   </div>
                   <div class="customer-product-search-row">
-                    <label class="customer-product-search"><img src="/assets/icons/customer-panel/search.png" alt=""><input id="customer-product-name" list="shared-product-options" placeholder="Tìm kiếm sản phẩm" autocomplete="off"><button class="customer-product-combo" id="customer-product-combo" type="button">Combo</button></label>
-                    <button id="customer-product-add-button" type="button" aria-label="Thêm sản phẩm" title="Thêm sản phẩm"><img src="/assets/icons/customer-panel/plus.png" alt=""></button>
+                    <label class="customer-product-search"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.7" cy="10.7" r="6.2"></circle><path d="m15.3 15.3 4.3 4.3"></path></svg><input id="customer-product-name" list="shared-product-options" placeholder="Tìm kiếm sản phẩm" autocomplete="off"><button class="customer-product-combo" id="customer-product-combo" type="button">Combo</button></label>
+                    <button id="customer-product-add-button" type="button" aria-label="Thêm sản phẩm" title="Thêm sản phẩm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.6v12.8M5.6 12h12.8"></path></svg></button>
                   </div>
                   <datalist id="shared-product-options"></datalist>
                   <div class="customer-weight-row"><span>Tổng khối lượng</span><span id="customer-order-weight">0 g</span></div>
                 </div>
               </section>
               <section class="customer-form-section">
-                <h3><img src="/assets/icons/customer-panel/wallet.png" alt=""> Thanh toán
+                <h3><svg class="customer-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.2" y="5.8" width="17.6" height="12.6" rx="2.2"></rect><path d="M3.2 10.2h17.6"></path></svg> Thanh toán
                   <button class="customer-section-link" id="customer-add-payment" type="button">Thêm hình thức <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
                 </h3>
                 <div class="customer-form-body">
@@ -199,7 +199,7 @@
                 </div>
               </section>
               <section class="customer-form-section">
-                <h3><img src="/assets/icons/customer-panel/list.png" alt=""> Thông tin khác
+                <h3><svg class="customer-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.2 7h1.6M4.2 12h1.6M4.2 17h1.6M9 7h10.8M9 12h10.8M9 17h10.8"></path></svg> Thông tin khác
                   <button class="customer-section-link" id="customer-assign-staff" type="button">Phân công <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><path d="M4 19c.8-3.2 2.7-5 5-5s4.2 1.8 5 5M16 11h5M18.5 8.5v5"></path></svg></button>
                 </h3>
                 <div class="customer-form-body">

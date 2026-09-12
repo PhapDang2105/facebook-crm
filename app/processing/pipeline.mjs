@@ -12,57 +12,49 @@ const steps = [
     id: 'webhook_referral',
     name: 'Nhận tin & bắt quảng cáo',
     type: 'input',
-    file: '../meta-webhook.mjs',
-    summary: 'Đọc sự kiện Messenger từ Meta. Nếu khách đến từ quảng cáo Click-to-Messenger thì giữ lại tiêu đề quảng cáo để biết họ đang quan tâm sản phẩm nào.'
+    file: '../meta-webhook.mjs'
   },
   {
     id: 'catalog',
     name: 'Danh mục sản phẩm & quà tặng',
     type: 'data',
-    file: 'catalog.mjs',
-    summary: 'Đọc sản phẩm từ Cài đặt → Sản phẩm (giá bán, giá combo, SKU xuất kho, khối lượng, ghép đơn, tên gọi khác) và quà tặng theo tổ hợp từ Cài đặt → Quà tặng. Mọi bước sau — kể cả file xuất kho của Đơn hàng — đều lấy dữ liệu từ đây, nên thêm sản phẩm là bot và đơn hàng nhận ngay.'
+    file: 'catalog.mjs'
   },
   {
     id: 'product_detect',
     name: 'Nhận diện sản phẩm',
     type: 'transform',
-    file: 'product-detect.mjs',
-    summary: 'Dò sản phẩm từ lời khách nói theo tên và tên gọi khác trong danh mục; nếu khách chưa nói gì thì lấy từ quảng cáo họ bấm vào. Cụm dài nhất thắng để "combo 10 gói xanh" không bị đọc thành "túi xanh".'
+    file: 'product-detect.mjs'
   },
   {
     id: 'customer_info',
     name: 'Xưng hô & số điện thoại',
     type: 'transform',
-    file: 'customer-info.mjs',
-    summary: 'Bóc số điện thoại theo đúng đầu số nhà mạng Việt Nam, chuẩn hoá +84 về 0. Xác định xưng hô anh/chị theo giới tính.'
+    file: 'customer-info.mjs'
   },
   {
     id: 'pending_order',
     name: 'Giỏ hàng chờ',
     type: 'state',
-    file: 'pending-order.mjs',
-    summary: 'Nhớ sản phẩm, số điện thoại và địa chỉ trong 2 giờ để khách đưa từng phần qua nhiều tin nhắn vẫn chốt được đơn.'
+    file: 'pending-order.mjs'
   },
   {
     id: 'pricing',
     name: 'Tính tiền & quà tặng',
     type: 'transform',
-    file: 'pricing.mjs',
-    summary: 'Đơn 1 sản phẩm tính giá bán cộng phí vận chuyển; đơn từ 2 sản phẩm (cùng loại hay ghép) thì mỗi sản phẩm tính giá combo của chính nó. Quà tặng và miễn ship lấy theo đúng tổ hợp đã tick ở Cài đặt → Quà tặng. Tổ hợp không có trong bảng, sản phẩm lạ hoặc quá 3 sản phẩm thì chuyển nhân viên thay vì đoán giá. Đây cũng là nơi soạn khối danh mục và bảng quà gắn vào system prompt.'
+    file: 'pricing.mjs'
   },
   {
     id: 'order_key',
     name: 'Mã giỏ hàng',
     type: 'transform',
-    file: 'order-key.mjs',
-    summary: 'Quy giỏ hàng về một mã chuẩn (ví dụ NAU=1|XANH=2) để nhớ giỏ chờ và chặn tạo đơn trùng.'
+    file: 'order-key.mjs'
   },
   {
     id: 'compose_reply',
     name: 'Soạn tin trả lời',
     type: 'output',
-    file: '../chatbot-templates.mjs',
-    summary: 'Chọn mẫu tin và điền chỗ trống. Toàn bộ lời bot nói nằm ở Thiết lập tin nhắn — file này không chứa câu chữ nào; giá và quà được soạn từ danh mục ngay lúc trả lời.'
+    file: '../chatbot-templates.mjs'
   }
 ];
 

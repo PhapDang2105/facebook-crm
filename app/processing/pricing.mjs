@@ -129,23 +129,32 @@ export function buildCatalogPrompt() {
   ].join('\n');
 }
 
-/** Reply text for PRICE_QUOTE: one product's prices and gifts, from the catalogue. */
-export function renderPriceQuote(productText) {
+/**
+ * The price ladder of one product for the quote: ×1, then ×2..×maxComboQuantity
+ * when it has a combo price. Each rung carries what the tier template needs —
+ * list price at the single rate, the price actually paid, shipping or free
+ * shipping for that combination, gifts other than free shipping, total weight.
+ */
+export function quoteTiers(productText) {
   const product = matchProduct(productText);
-  if (!product) return '';
-  const single = comboKey([{ sku: product.sku, quantity: 1 }]);
-  const ship = shippingFeeForKey(single);
-  const singleGift = giftTextForKey(single);
-  const parts = [`1 sản phẩm ${formatMoney(product.unitPrice)}${ship ? ` + ship ${formatMoney(ship)}` : ''}${singleGift ? ` (${singleGift})` : ''}`];
-  if (product.comboPrice > 0) {
-    for (let quantity = 2; quantity <= maxComboQuantity; quantity += 1) {
-      const key = comboKey([{ sku: product.sku, quantity }]);
-      const gift = giftTextForKey(key);
-      parts.push(`combo ${quantity} sản phẩm ${formatMoney(product.comboPrice * quantity + shippingFeeForKey(key))}${gift ? ` (${gift})` : ''}`);
-    }
-    if (product.mixable) parts.push(`mua ghép với sản phẩm ghép khác cũng được giá combo ${formatMoney(product.comboPrice)}/sản phẩm`);
+  if (!product) return null;
+  const tiers = [];
+  const top = product.comboPrice > 0 ? maxComboQuantity : 1;
+  for (let quantity = 1; quantity <= top; quantity += 1) {
+    const key = comboKey([{ sku: product.sku, quantity }]);
+    const gifts = giftsForKey(key);
+    const shippingFee = shippingFeeForKey(key);
+    tiers.push({
+      quantity,
+      listPrice: product.unitPrice * quantity,
+      price: unitPriceInBasket(product, quantity) * quantity,
+      shippingFee,
+      freeShipping: gifts.some(isFreeShippingGift),
+      gifts: gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name),
+      weight: product.weight * quantity
+    });
   }
-  return `Dạ ${product.name}: ${parts.join('; ')} ạ.`;
+  return { product, tiers };
 }
 
 /** Human-readable name of a basket key: "2 × Granola Túi Xanh 450g + 1 × Granola Túi Nâu". */

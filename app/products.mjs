@@ -34,6 +34,8 @@ export function normalizeProduct(input = {}, existing = {}) {
     throw new Error(`Giá combo (${comboPrice.toLocaleString('vi-VN')}đ) cao hơn giá bán lẻ (${salePrice.toLocaleString('vi-VN')}đ).`);
   }
   const weight = cleanPrice(input.weight ?? existing.weight ?? 0, 'Khối lượng');
+  // The word the bot counts the product in: "Túi", "Hũ", "Hộp" — "Combo 2 Túi bán chạy".
+  const unit = cleanText(input.unit ?? existing.unit, 30);
   return {
     ...existing,
     name,
@@ -42,6 +44,7 @@ export function normalizeProduct(input = {}, existing = {}) {
     salePrice,
     comboPrice,
     weight,
+    unit,
     aliases: normalizeAliases(input.aliases ?? existing.aliases ?? []),
     components: normalizeComponents(input.components ?? existing.components ?? []),
     mixable: (input.mixable ?? existing.mixable) === true,

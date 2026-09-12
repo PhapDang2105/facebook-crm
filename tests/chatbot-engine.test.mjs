@@ -6,7 +6,7 @@ import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-temp
 
 // The texts the bot speaks come only from Thiết lập tin nhắn; the shipped
 // defaults stand in for a saved settings file here.
-const templates = defaultMessageTemplates();
+const templates = Object.fromEntries(Object.entries(defaultMessageTemplates()).map(([id, text]) => [id, text.trim()]));
 
 test('đọc JSON có hàng rào markdown từ mô hình', () => {
   assert.equal(parseModelAnswer('```json\n{"template_id":"WELCOME"}\n```').template_id, 'WELCOME');
@@ -194,7 +194,7 @@ test('xác nhận đơn 1 túi cộng phí vận chuyển', () => {
 test('mẫu giá được soạn từ danh mục; không có text tĩnh nào để ghi đè', () => {
   const quote = renderChatbotReply({ template_id: 'PRICE_TUI_XANH' }, templates);
   assert.equal(quote.templateId, 'PRICE_TUI_XANH');
-  assert.match(quote.messages[0], /174\.000đ \+ ship 15\.000đ; combo 2 sản phẩm 298\.000đ/);
+  assert.match(quote.messages[0], /Giá niêm yết: 174\.000đ \+ Phí vận chuyển 15\.000đ[\s\S]*Giảm còn: 298\.000đ \(Miễn phí vận chuyển\)/);
   const general = renderChatbotReply({ template_id: 'GENERAL_INFO' }, templates);
   assert.match(general.messages[0], /Granola Túi Xanh 450g: 174\.000đ/);
   const unknown = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'sữa hạt' }, templates);

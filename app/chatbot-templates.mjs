@@ -1,4 +1,4 @@
-import { describeGiftTable, priceBasket, renderPriceQuote } from './processing/pricing.mjs';
+import { describeGiftTable, priceBasket, quoteTiers } from './processing/pricing.mjs';
 import { getCatalogProducts, getGifts, getShippingFee, matchProduct } from './processing/catalog.mjs';
 import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
@@ -99,6 +99,7 @@ function renderOrder(value, templates, context = {}) {
   // order record agree on what is being shipped.
   const orderItems = price.lines.map(line => ({ product: line.name, code: line.sku, quantity: line.quantity }));
   const confirmation = fill(templates.ORDER_CONFIRMATION, {
+    ...commonValues(),
     items: orderItems.map(item => `🌾 ${item.product} – Số lượng: ${item.quantity}`).join('\n'),
     phone,
     address,
@@ -120,54 +121,89 @@ function renderOrder(value, templates, context = {}) {
 }
 
 // ===== Replies written from the catalogue at reply time =====
-// Each renderer returns the reply text for the current catalogue, or the
-// ask-for-product line when the catalogue has nothing to say. PRICE_<name>
-// ids resolve the product from Product_N1 first and then from the id itself
-// (PRICE_TUI_XANH → "tui xanh" → the product's alias), so a new product needs
-// no new template: PRICE_QUOTE + its name is enough.
+// GENERAL_INFO, GIFT_POLICY, PRICE_MIX_TUI_LON and every PRICE_* quote are
+// composed from Cài đặt → Sản phẩm / Quà tặng when the reply is sent, so no
+// figure is ever typed into a message. Their wording still comes from
+// Thiết lập tin nhắn: each has a *_LAYOUT template plus the line/piece
+// templates it fills (see chatbot-templates.seed.json).
 
 function formatMoney(value) {
   return `${Math.max(0, Math.round(Number(value) || 0)).toLocaleString('vi-VN')}đ`;
 }
 
+/** Placeholders every stored template may use. */
+function commonValues() {
+  return { shipping_fee: formatMoney(getShippingFee()) };
+}
+
 function renderGeneralInfo(templates) {
   const products = getCatalogProducts().filter(product => product.active && product.unitPrice > 0);
   if (!products.length) return templates.ASK_PRODUCT;
-  const lines = products.map(product => `🌾 ${product.name}: ${formatMoney(product.unitPrice)}`);
   const fee = getShippingFee();
-  const shipText = fee ? ` Giá trên là giá mua lẻ, chưa gồm phí vận chuyển ${formatMoney(fee)}; combo và các tổ hợp được miễn ship theo chương trình.` : ' Giá trên là giá mua lẻ.';
-  return `Dạ hiện tại nhà em có ${products.length} sản phẩm ạ:\n${lines.join('\n')}${shipText} Anh/chị đang quan tâm loại nào để em gửi bảng giá combo chi tiết ạ?`;
+  return fill(templates.GENERAL_INFO_LAYOUT, {
+    count: products.length,
+    products: products.map(product => fill(templates.GENERAL_INFO_LINE, { product: product.name, price: formatMoney(product.unitPrice) })).join('\n'),
+    shipping_note: fee ? ` ${fill(templates.GENERAL_INFO_SHIPPING, { fee: formatMoney(fee) })}` : ''
+  });
 }
 
 function renderGiftPolicy(templates) {
   if (!getGifts().some(gift => gift.active)) return templates.GIFT_POLICY_EMPTY;
-  const lines = describeGiftTable().map(line => line.replace(/^- /, '• '));
-  return `Dạ chương trình quà tặng hiện tại ạ:\n${lines.join('\n')}`;
+  const lines = describeGiftTable().map(line => fill(templates.GIFT_POLICY_LINE, { line: line.replace(/^- /, '') }));
+  return fill(templates.GIFT_POLICY_LAYOUT, { lines: lines.join('\n') });
 }
 
 function renderMixPricing(templates) {
   const products = getCatalogProducts().filter(product => product.active && product.comboPrice > 0);
   if (!products.length) return templates.ASK_PRODUCT;
-  const lines = products.map(product => `• ${product.name}: ${formatMoney(product.comboPrice)}/sản phẩm`);
-  const mixable = products.filter(product => product.mixable);
-  const [first, second] = mixable;
-  const example = second ? ` Ví dụ ${first.name} + ${second.name} = ${formatMoney(first.comboPrice + second.comboPrice)}.` : '';
-  return `Dạ mua từ 2 sản phẩm thì mỗi sản phẩm tính theo giá combo ạ:\n${lines.join('\n')}${example} Quà tặng theo từng tổ hợp, anh/chị chọn combo em báo quà kèm nha ạ.`;
+  const [first, second] = products.filter(product => product.mixable);
+  return fill(templates.PRICE_MIX_TUI_LON_LAYOUT, {
+    products: products.map(product => fill(templates.PRICE_MIX_TUI_LON_LINE, { product: product.name, price: formatMoney(product.comboPrice) })).join('\n'),
+    example: second ? ` ${fill(templates.PRICE_MIX_TUI_LON_EXAMPLE, { first: first.name, second: second.name, total: formatMoney(first.comboPrice + second.comboPrice) })}` : ''
+  });
 }
 
-function renderPriceAdjustment() {
-  const fee = getShippingFee();
-  const ship = fee
-    ? ` Bên em vẫn giữ giá combo và hỗ trợ phí vận chuyển cho đơn một sản phẩm nên phí ship còn ${formatMoney(fee)}; các combo được miễn phí vận chuyển theo chương trình ạ.`
-    : ' Bên em vẫn giữ giá combo và miễn phí vận chuyển ạ.';
-  return `Dạ giá sản phẩm lẻ có điều chỉnh theo chi phí nguyên liệu.${ship}`;
+/** Combining long-stroke overlay: the only way Messenger shows a struck-out price. */
+function strike(text) {
+  return [...String(text)].map(char => `${char}\u0336`).join('');
 }
 
-/** The product a PRICE_* id names: PRICE_TUI_XANH → "tui xanh" → the catalogue alias. */
+function formatWeight(grams) {
+  if (!(grams > 0)) return '';
+  return grams >= 1000 ? `${(grams / 1000).toLocaleString('vi-VN', { maximumFractionDigits: 2 })}kg` : `${grams}g`;
+}
+
+/**
+ * The price ladder of one product, one tier template per rung
+ * (PRICE_QUOTE_TIER_1, _2, _3), joined by PRICE_QUOTE_SEPARATOR inside
+ * PRICE_QUOTE. Figures come from the catalogue; every word comes from
+ * Thiết lập tin nhắn. PRICE_TUI_XANH → "tui xanh" → the product's alias, so
+ * a new product needs no new template: PRICE_QUOTE + its name is enough.
+ */
 function renderPriceTemplate(templateId, value, templates) {
-  const product = matchProduct(value.Product_N1 || value.product || '')
-    || matchProduct(templateId.replace(/^PRICE_/, '').replace(/_/g, ' '));
-  return product ? renderPriceQuote(product.name) : templates.ASK_PRODUCT;
+  const quote = quoteTiers(value.Product_N1 || value.product || '')
+    || quoteTiers(templateId.replace(/^PRICE_/, '').replace(/_/g, ' '));
+  if (!quote) return templates.ASK_PRODUCT;
+  const tiers = quote.tiers.map(tier => {
+    const template = templates[`PRICE_QUOTE_TIER_${tier.quantity}`];
+    if (!template) return '';
+    // Stored texts are trimmed on save, so the joining space/newline is added
+    // here rather than expected inside the piece templates.
+    const shipping = tier.freeShipping
+      ? templates.PRICE_QUOTE_FREE_SHIPPING
+      : tier.shippingFee ? fill(templates.PRICE_QUOTE_SHIPPING, { fee: formatMoney(tier.shippingFee) }) : '';
+    return fill(template, {
+      product: quote.product.name,
+      unit: quote.product.unit,
+      quantity: tier.quantity,
+      weight: tier.weight ? ` (${formatWeight(tier.weight)})` : '',
+      list_price: strike(formatMoney(tier.listPrice)),
+      price: formatMoney(tier.price),
+      shipping: shipping ? ` ${shipping}` : '',
+      gift: tier.gifts.length ? `\n${fill(templates.PRICE_QUOTE_GIFT, { gifts: tier.gifts.join(' + ') })}` : ''
+    }).replace(/ {2,}/g, ' ').trim(); // a product with no unit word leaves no double space behind
+  }).filter(Boolean);
+  return fill(templates.PRICE_QUOTE_LAYOUT, { product: quote.product.name, tiers: tiers.join(templates.PRICE_QUOTE_SEPARATOR ? `\n${templates.PRICE_QUOTE_SEPARATOR}\n` : '\n') }).trim();
 }
 
 // Ids with a fixed renderer. Any other PRICE_* id is a product quote.
@@ -175,7 +211,6 @@ const dynamicTemplateRenderers = {
   GENERAL_INFO: (value, templates) => renderGeneralInfo(templates),
   GIFT_POLICY: (value, templates) => renderGiftPolicy(templates),
   PRICE_MIX_TUI_LON: (value, templates) => renderMixPricing(templates),
-  PRICE_ADJUSTMENT: () => renderPriceAdjustment(),
   PRICE_QUOTE: (value, templates) => renderPriceTemplate('PRICE_QUOTE', value, templates)
 };
 
@@ -187,7 +222,7 @@ const legacyPriceTemplateIds = ['PRICE_TUI_XANH', 'PRICE_TUI_VANG', 'PRICE_TUI_N
 /** A dynamic id is one the catalogue writes: it has a renderer, or it is a PRICE_* quote with no stored text. */
 export function isDynamicTemplate(templateId, templates = {}) {
   const id = String(templateId || '').trim();
-  return Boolean(dynamicTemplateRenderers[id]) || (id.startsWith('PRICE_') && !templates[id]);
+  return Boolean(dynamicTemplateRenderers[id]) || (id.startsWith('PRICE_') && !Object.hasOwn(templates, id));
 }
 
 function renderDynamicTemplate(templateId, value, templates) {
@@ -200,7 +235,7 @@ function renderDynamicTemplate(templateId, value, templates) {
 export function listDynamicTemplates(templates = {}) {
   const result = {};
   for (const id of [...Object.keys(dynamicTemplateRenderers), ...legacyPriceTemplateIds]) {
-    if (!templates[id]) result[id] = renderDynamicTemplate(id, {}, templates);
+    if (isDynamicTemplate(id, templates)) result[id] = renderDynamicTemplate(id, {}, templates);
   }
   return result;
 }
@@ -220,7 +255,7 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   const raw = templates[templateId] || value.reply || value.message || value.text || templates.CSKH_HANDOFF;
   return {
     templateId: templates[templateId] ? templateId : 'CSKH_HANDOFF',
-    messages: splitMessages(raw),
+    messages: splitMessages(fill(raw, commonValues())),
     handoff: templateId === 'CSKH_HANDOFF'
   };
 }

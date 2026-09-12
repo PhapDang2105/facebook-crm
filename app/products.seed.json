@@ -7,7 +7,8 @@
       "originalPrice": 174000,
       "salePrice": 174000,
       "comboPrice": 149000,
-      "weight": 500,
+      "weight": 450,
+      "unit": "Túi",
       "aliases": [
         "túi xanh",
         "granola túi xanh",
@@ -26,7 +27,8 @@
       "originalPrice": 174000,
       "salePrice": 174000,
       "comboPrice": 149000,
-      "weight": 400,
+      "weight": 350,
+      "unit": "Túi",
       "aliases": [
         "túi vàng",
         "granola túi vàng",
@@ -47,7 +49,8 @@
       "originalPrice": 164000,
       "salePrice": 164000,
       "comboPrice": 144000,
-      "weight": 400,
+      "weight": 350,
+      "unit": "Túi",
       "aliases": [
         "túi nâu",
         "granola túi nâu",
@@ -72,7 +75,8 @@
       "originalPrice": 204000,
       "salePrice": 204000,
       "comboPrice": 174000,
-      "weight": 350,
+      "weight": 300,
+      "unit": "Túi",
       "aliases": [
         "tropical cacao",
         "granola tropical",
@@ -92,6 +96,7 @@
       "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 350,
+      "unit": "Set",
       "aliases": [
         "combo 10 gói xanh",
         "combo 10 xanh",
@@ -116,6 +121,7 @@
       "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 350,
+      "unit": "Set",
       "aliases": [
         "combo 10 gói nâu",
         "combo 10 nâu",
@@ -140,6 +146,7 @@
       "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 300,
+      "unit": "Set",
       "aliases": [
         "combo 10 gói cam",
         "combo 10 cam",
@@ -170,6 +177,7 @@
       "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 335,
+      "unit": "Set",
       "aliases": [
         "combo 10 gói mix",
         "combo 10 mix",
@@ -203,6 +211,7 @@
       "salePrice": 174000,
       "comboPrice": 149000,
       "weight": 0,
+      "unit": "Hộp",
       "aliases": [
         "nghệ lành",
         "bột ngũ cốc nghệ lành",
@@ -222,6 +231,7 @@
       "salePrice": 269000,
       "comboPrice": 264000,
       "weight": 0,
+      "unit": "Hũ",
       "aliases": [
         "hạt an lành",
         "hũ hạt an lành",

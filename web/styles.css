@@ -801,7 +801,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 /* Ba phần tử nằm trong khối này: tiêu đề, mô tả, vùng mã. Template cũ chỉ khai
    báo hai hàng nên hàng 1fr rơi vào thẻ mô tả — nó giãn ra thành một mảng trắng
    lớn và đẩy vùng mã xuống hàng auto ở đáy. */
-.chatbot-code-editor { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 11px; height: 100%; min-height: 0; padding: 13px; background: #f7f9fc; border: 1px solid #dce5f1; border-radius: 10px; }
+.chatbot-code-editor { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 11px; height: 100%; min-height: 0; padding: 13px; background: #f7f9fc; border: 1px solid #dce5f1; border-radius: 10px; }
 .chatbot-code-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .chatbot-code-editor-head > div { display: flex; align-items: center; gap: 9px; }
 .chatbot-code-editor-head img { width: 24px; height: 24px; }
@@ -921,8 +921,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 
 .chatbot-code-readonly { margin-left: auto; padding: 2px 8px; color: #676f83; background: #f2f4f7; border-radius: 4px; font-size: 11px; font-weight: 500; text-transform: uppercase; }
 /* Khoảng cách giữa các hàng đã do grid gap lo, margin dưới sẽ thành thừa. */
-.chatbot-step-summary { margin: 0; color: #595959; font-size: 13px; line-height: 19px; }
-.chatbot-step-summary:empty { display: none; }
 #chatbot-step-code[readonly] { color: #344054; background: #fbfcfd; cursor: default; }
 /* Bảng giá ở trên, khối quản lý quà tặng lấp phần còn lại bên dưới. */
 .gift-settings-card { display: flex; flex-direction: column; gap: 14px; min-height: 0; }

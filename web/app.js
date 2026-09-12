@@ -130,6 +130,7 @@ const productOriginalPrice = document.querySelector('#product-original-price');
 const productSalePrice = document.querySelector('#product-sale-price');
 const productComboPrice = document.querySelector('#product-combo-price');
 const productWeight = document.querySelector('#product-weight');
+const productUnit = document.querySelector('#product-unit');
 const productActive = document.querySelector('#product-active');
 const productMixable = document.querySelector('#product-mixable');
 const productAliases = document.querySelector('#product-aliases');
@@ -224,7 +225,6 @@ const chatbotWorkflow = document.querySelector('#chatbot-workflow');
 const chatbotStepCodeTitle = document.querySelector('#chatbot-step-code-title');
 const chatbotStepCode = document.querySelector('#chatbot-step-code');
 const chatbotStepCodeApply = document.querySelector('#chatbot-step-code-apply');
-const chatbotStepSummary = document.querySelector('#chatbot-step-summary');
 let chatbotTemplatesState = {};
 let chatbotOriginalTemplates = {};
 let chatbotProcessingSteps = [];
@@ -2166,6 +2166,12 @@ function chatbotTemplateLabel(id) {
     WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
     ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
     ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
+    GENERAL_INFO_LAYOUT: 'Thông tin chung · khung', GENERAL_INFO_LINE: 'Thông tin chung · dòng sản phẩm', GENERAL_INFO_SHIPPING: 'Thông tin chung · ghi chú ship',
+    GIFT_POLICY_LAYOUT: 'Quà tặng · khung', GIFT_POLICY_LINE: 'Quà tặng · dòng', PRICE_MIX_TUI_LON: 'Bảng giá · mua ghép',
+    PRICE_MIX_TUI_LON_LAYOUT: 'Bảng giá mua ghép · khung', PRICE_MIX_TUI_LON_LINE: 'Bảng giá mua ghép · dòng', PRICE_MIX_TUI_LON_EXAMPLE: 'Bảng giá mua ghép · ví dụ',
+    PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_LAYOUT: 'Báo giá · khung', PRICE_QUOTE_SEPARATOR: 'Báo giá · dòng kẻ',
+    PRICE_QUOTE_TIER_1: 'Báo giá · 1 sản phẩm', PRICE_QUOTE_TIER_2: 'Báo giá · combo 2', PRICE_QUOTE_TIER_3: 'Báo giá · combo 3',
+    PRICE_QUOTE_SHIPPING: 'Báo giá · có phí ship', PRICE_QUOTE_FREE_SHIPPING: 'Báo giá · miễn ship', PRICE_QUOTE_GIFT: 'Báo giá · quà kèm',
     ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',
     BANK_TRANSFER: 'Thông tin chuyển khoản', THANK_YOU: 'Cảm ơn khách hàng'
   };
@@ -2227,7 +2233,6 @@ function renderChatbotWorkflow() {
 function renderChatbotStepEditor() {
   const step = chatbotProcessingSteps.find(item => item.id === selectedChatbotStep);
   if (chatbotStepCodeTitle) chatbotStepCodeTitle.textContent = step ? `${step.name} · ${step.file || ''}` : 'Chọn một bước xử lý';
-  if (chatbotStepSummary) chatbotStepSummary.textContent = step?.summary || '';
   if (chatbotStepCode) {
     chatbotStepCode.readOnly = true;
     chatbotStepCode.value = step?.code ?? (step ? 'Đang tải mã nguồn...' : '');
@@ -2501,6 +2506,7 @@ function openProductDialog(product = null) {
   if (productSalePrice) productSalePrice.value = String(product?.salePrice || 0);
   if (productComboPrice) productComboPrice.value = Number(product?.comboPrice) > 0 ? String(product.comboPrice) : '';
   if (productWeight) productWeight.value = Number(product?.weight) > 0 ? String(product.weight) : '';
+  if (productUnit) productUnit.value = product?.unit || '';
   if (productActive) productActive.checked = product ? product.active !== false : true;
   if (productMixable) productMixable.checked = product ? product.mixable === true : false;
   if (productAliases) productAliases.value = Array.isArray(product?.aliases) ? product.aliases.join('\n') : '';
@@ -4606,6 +4612,7 @@ productForm?.addEventListener('submit', async event => {
     salePrice: Number(productSalePrice.value),
     comboPrice: Number(productComboPrice?.value) || 0,
     weight: Number(productWeight?.value) || 0,
+    unit: productUnit?.value.trim() || '',
     active: productActive ? productActive.checked : true,
     mixable: productMixable ? productMixable.checked : false,
     aliases: productAliases?.value || '',

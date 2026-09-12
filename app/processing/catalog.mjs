@@ -85,6 +85,7 @@ function normalizeCatalogProduct(item) {
     unitPrice: money(item?.salePrice),
     comboPrice: money(item?.comboPrice),
     weight: money(item?.weight),
+    unit: String(item?.unit ?? '').trim(),
     aliases: normalizeAliases(item?.aliases),
     components: normalizeComponents(item?.components),
     // Mixable products (the granola bags) may share one order in any mix of up

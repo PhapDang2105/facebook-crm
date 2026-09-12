@@ -14,7 +14,8 @@ const { normalizeProduct } = await import('../app/products.mjs');
 
 const basket = (...items) => pricing.priceBasket(items);
 const gift3 = 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa';
-const templates = defaultMessageTemplates();
+// Trimmed exactly as the server stores them, so spacing bugs cannot hide in the seed.
+const templates = Object.fromEntries(Object.entries(defaultMessageTemplates()).map(([id, text]) => [id, text.trim()]));
 
 test('giá lẻ + ship cho 1 sản phẩm, giá combo và miễn ship từ 2 — khớp bảng giá gốc', () => {
   const rows = [
@@ -85,9 +86,9 @@ test('file xuất kho: bung thành phần, gộp ship vào giá đơn lẻ, thê
   const out = buildExportRows({ headers, rows }).map(row => `${row[19]}x${row[21]}@${row[22]}/${row[24]}`);
   assert.deepEqual(out, [
     // 1 túi: giá lẻ + ship gộp vào đơn giá.
-    'GRA-XANH-Z450x1@189000/500',
+    'GRA-XANH-Z450x1@189000/450',
     // 2 xanh + 1 nâu là tổ hợp có quà: giá combo, miễn ship, quà có SKU thành dòng xuất kho.
-    'GRA-XANH-Z450x2@149000/500', 'GRA-NAU-Z350x1@144000/400', 'BGDx1@0/10', 'MUONGx1@0/10',
+    'GRA-XANH-Z450x2@149000/450', 'GRA-NAU-Z350x1@144000/350', 'BGDx1@0/10', 'MUONGx1@0/10',
     // 1 combo 10 gói: (189.000 + 15.000 ship) chia đều 10 gói thành phần.
     'GRA-NAU-G35x3@20400/35', 'GRA-XANH-G35x4@20400/35', 'GRA-CAM-G30x3@20400/30',
     // 2 combo 10 gói: giá combo, miễn ship theo bảng quà.
@@ -98,15 +99,30 @@ test('file xuất kho: bung thành phần, gộp ship vào giá đơn lẻ, thê
 });
 
 test('mẫu tin giá và quà chỉ tồn tại ở dạng động, soạn từ danh mục', () => {
-  for (const id of ['GENERAL_INFO', 'GIFT_POLICY', 'PRICE_TUI_XANH', 'PRICE_QUOTE', 'PRICE_ADJUSTMENT', 'PRICE_MIX_TUI_LON']) {
+  for (const id of ['GENERAL_INFO', 'GIFT_POLICY', 'PRICE_TUI_XANH', 'PRICE_QUOTE', 'PRICE_MIX_TUI_LON']) {
     assert.equal(templates[id], undefined, `${id} không được là text tĩnh`);
     assert.ok(listDynamicTemplates(templates)[id], `${id} phải là mẫu động`);
   }
-  assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_NAU_NHO' }, templates).messages[0], /Combo 10 gói Nâu: 1 sản phẩm 189\.000đ \+ ship 15\.000đ/);
+  assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_NAU_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Nâu.*\n🌱 1 Set dùng thử \(350g\):\n🔸 Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ/);
   const policy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates).messages[0];
   assert.match(policy, /• Miễn phí vận chuyển: .*2 × Granola Túi Xanh 450g/);
   assert.match(policy, /• Miễn phí vận chuyển \+ Bộ bát gáo dừa \+ Muỗng dừa: .*3 × Granola Túi Xanh 450g/);
-  assert.match(pricing.renderPriceQuote('túi xanh'), /1 sản phẩm 174\.000đ \+ ship 15\.000đ; combo 2 sản phẩm 298\.000đ \(Miễn phí vận chuyển\); combo 3 sản phẩm 447\.000đ \(Miễn phí vận chuyển \+ Bộ bát gáo dừa \+ Muỗng dừa\)/);
+  const strike = text => [...text].map(char => `${char}\u0336`).join('');
+  assert.equal(renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates).messages[0], [
+    'Dạ, em gửi anh/chị Bảng giá Granola Túi Xanh 450g để mình dễ tham khảo ạ:',
+    '🌱 1 Túi dùng thử (450g):',
+    '🔸 Giá niêm yết: 174.000đ + Phí vận chuyển 15.000đ',
+    '━━━━━━━━━━━━',
+    '🔥 Combo 2 Túi bán chạy (900g):',
+    `🔸 Giá gốc: ${strike('348.000đ')}`,
+    '✨ Giảm còn: 298.000đ (Miễn phí vận chuyển)',
+    '━━━━━━━━━━━━',
+    '🏡 Combo 3 Túi Gia Đình (1,35kg):',
+    `🔸 Giá gốc: ${strike('522.000đ')}`,
+    '✨ Giảm còn: 447.000đ (Miễn phí vận chuyển)',
+    '🎁 Tặng kèm: Bộ bát gáo dừa + Muỗng dừa ạ.'
+  ].join('\n'));
+  assert.deepEqual(pricing.quoteTiers('hạt an lành').tiers.map(tier => [tier.price, tier.freeShipping, tier.gifts.length]), [[269000, false, 0], [528000, true, 0], [792000, true, 0]]);
 });
 
 test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu lực ngay sau khi lưu', () => {

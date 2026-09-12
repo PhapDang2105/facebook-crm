@@ -324,7 +324,6 @@
                   <div class="chatbot-processing-config chatbot-processing-code">
                     <section class="chatbot-code-editor">
                       <div class="chatbot-code-editor-head"><div><img src="/assets/icons/data-process.svg" alt=""><strong id="chatbot-step-code-title">Chọn một bước xử lý</strong></div><span class="chatbot-code-readonly">Chỉ đọc</span><button class="settings-save-button hidden" id="chatbot-step-code-apply" type="button">Áp dụng mã</button></div>
-                      <p class="chatbot-step-summary" id="chatbot-step-summary"></p>
                       <textarea id="chatbot-step-code" rows="14" spellcheck="false" readonly placeholder="Bấm vào một bước bên trái để xem mã đang chạy"></textarea>
                     </section>
                   </div>
@@ -503,6 +502,7 @@
           <label><span>Giá gốc</span><div class="product-price-input"><input id="product-original-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
           <label><span>Giá bán (1 sản phẩm, chưa gồm ship) <b>*</b></span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
           <label><span>Giá combo (mỗi sản phẩm)</span><div class="product-price-input"><input id="product-combo-price" type="number" min="0" step="1000" placeholder="Bỏ trống = không giảm"><span>₫</span></div></label>
+          <label><span>Đơn vị (chữ bot dùng để đếm)</span><input id="product-unit" maxlength="30" placeholder="Túi, Hũ, Hộp, Set..." autocomplete="off"></label>
           <label><span>Khối lượng xuất kho</span><div class="product-price-input"><input id="product-weight" type="number" min="0" step="10" placeholder="0"><span>g</span></div></label>
           <label class="product-form-checkbox"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
           <label class="product-form-checkbox"><span>Ghép đơn</span><span class="product-form-switch"><input id="product-mixable" type="checkbox"><span>Ghép được với sản phẩm ghép khác trong cùng đơn</span></span></label>

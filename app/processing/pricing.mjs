@@ -88,50 +88,26 @@ export function priceBasket(items = []) {
   };
 }
 
-function formatMoney(value) {
-  return `${money(value).toLocaleString('vi-VN')}đ`;
-}
-
-/** One product's prices as a sentence for the model and the price quote. */
-export function describeProductPrices(product) {
-  if (!product) return '';
-  const ship = shippingFeeForKey(comboKey([{ sku: product.sku, quantity: 1 }]));
-  const single = ship
-    ? `mua lẻ 1 sản phẩm ${formatMoney(product.unitPrice)} + phí vận chuyển ${formatMoney(ship)} = ${formatMoney(product.unitPrice + ship)}`
-    : `mua lẻ 1 sản phẩm ${formatMoney(product.unitPrice)}`;
-  const parts = [single];
-  if (product.comboPrice > 0) parts.push(`từ 2 sản phẩm hoặc mua kèm sản phẩm khác ${formatMoney(product.comboPrice)}/sản phẩm`);
-  return parts.join('; ');
-}
-
 /**
  * The catalogue as text for the model, appended to the system prompt on every
- * request. This is what makes a product added in settings known to the bot
- * immediately, with no prompt edit.
+ * request: one line per product — its exact name and the words customers use
+ * for it. No prices, no gifts: the model only names products and picks a
+ * template; every figure is computed and written by the server. Kept this
+ * short on purpose, because it is paid for on every single reply.
  */
 export function buildCatalogPrompt() {
   const products = getCatalogProducts().filter(product => product.active);
   if (!products.length) return '';
-  const productLines = products.map(product => {
-    const aliases = product.aliases.length ? ` Tên gọi khác: ${product.aliases.join(', ')}.` : '';
-    const mix = product.mixable ? ' Ghép được với sản phẩm ghép khác trong cùng đơn.' : ' Chỉ bán riêng, không ghép với sản phẩm khác.';
-    return `- ${product.name} (mã ${product.sku}): ${describeProductPrices(product)}.${mix}${aliases}`;
-  });
   return [
-    'DANH MỤC SẢN PHẨM (nguồn chính thức, tự cập nhật từ hệ thống — ưu tiên hơn mọi bảng giá khác trong hướng dẫn):',
-    ...productLines,
-    `Cách tính tiền: đơn có TỔNG từ 2 sản phẩm trở lên thì mỗi sản phẩm tính theo giá combo của chính nó; đơn 1 sản phẩm tính giá lẻ${getShippingFee() ? ` cộng phí vận chuyển ${formatMoney(getShippingFee())} trừ khi tổ hợp được miễn phí vận chuyển` : ''}. Tối đa ${maxComboQuantity} sản phẩm một đơn; nhiều hơn thì chuyển nhân viên.`,
-    '',
-    'QUÀ TẶNG THEO TỔ HỢP:',
-    ...describeGiftTable(),
-    '',
-    'Khi trả về Product_N1/Product_N2/Product_N3 hãy dùng đúng tên sản phẩm trong danh mục. Khi khách hỏi giá một sản phẩm có trong danh mục, trả về template_id PRICE_QUOTE kèm Product_N1.'
+    'SẢN PHẨM (tên chuẩn → cách khách gọi):',
+    ...products.map(product => `- ${product.name}${product.aliases.length ? `: ${product.aliases.join(', ')}` : ''}`),
+    `Tối đa ${maxComboQuantity} sản phẩm/đơn.`
   ].join('\n');
 }
 
 /**
  * The price ladder of one product for the quote: ×1, then ×2..×maxComboQuantity
- * when it has a combo price. Each rung carries what the tier template needs —
+ * when it has a combo price. Each rung carries what the template needs —
  * list price at the single rate, the price actually paid, shipping or free
  * shipping for that combination, gifts other than free shipping, total weight.
  */
@@ -172,14 +148,30 @@ export function describeComboKey(key) {
 export function describeGiftTable() {
   const assignments = getGiftAssignments();
   const active = new Map(getGifts().filter(gift => gift.active).map(gift => [gift.id, gift.name]));
+  const combos = listCombos();
   const groups = new Map();
-  for (const combo of listCombos()) {
+  for (const combo of combos) {
     const names = (assignments[combo.key] || []).map(id => active.get(id)).filter(Boolean);
     if (!names.length) continue;
     const label = names.join(' + ');
-    groups.set(label, [...(groups.get(label) || []), describeComboKey(combo.key)]);
+    groups.set(label, [...(groups.get(label) || []), combo]);
   }
   if (!groups.size) return ['- Hiện chưa có quà tặng.'];
-  return [...groups.entries()].map(([label, combos]) => `- ${label}: ${combos.join('; ')}`);
+  // When a gift set covers every combination of N units it is said once as
+  // "mọi đơn N sản phẩm"; only the exceptions are spelled out.
+  const byTotal = new Map();
+  for (const combo of combos) byTotal.set(combo.totalQuantity, (byTotal.get(combo.totalQuantity) || 0) + 1);
+  return [...groups.entries()].map(([label, list]) => {
+    const parts = [];
+    let rest = list;
+    for (const [total, count] of [...byTotal.entries()].sort((a, b) => a[0] - b[0])) {
+      const mine = list.filter(combo => combo.totalQuantity === total);
+      if (mine.length === count) {
+        parts.push(`mọi đơn ${total} sản phẩm`);
+        rest = rest.filter(combo => combo.totalQuantity !== total);
+      }
+    }
+    return `- ${label}: ${[...parts, ...rest.map(combo => describeComboKey(combo.key))].join('; ')}`;
+  });
 }
 

@@ -849,7 +849,7 @@ const server = http.createServer(async (request, response) => {
     // What the model actually receives: the saved prompt plus the live catalogue block.
     if (url.pathname === '/api/chatbot/system-prompt' && request.method === 'GET') {
       const settings = await readChatbotSettings();
-      return sendJson(response, 200, { prompt: composeSystemPrompt(settings.systemPrompt) });
+      return sendJson(response, 200, { prompt: composeSystemPrompt(settings.systemPrompt, settings.messageTemplates) });
     }
     if (url.pathname === '/api/chatbot/pipeline' && request.method === 'GET') {
       return sendJson(response, 200, { items: listPipelineSteps() });

@@ -23,6 +23,11 @@ test('ngữ cảnh gửi mô hình có lịch sử và tin nhắn hiện tại',
   assert.match(query, /Lan Anh/);
   assert.match(query, /Giọt Nắng xin chào/);
   assert.match(query, /Túi xanh giá bao nhiêu/);
+  const remembered = buildChatbotQuery({
+    conversation: { name: 'Lan Anh', pendingOrder: { items: [{ product: 'Túi Xanh', quantity: 2 }], phone: '0909123456', address: '' } },
+    message: { text: '12 Lê Lợi Q1' }, settings: {}
+  });
+  assert.match(remembered, /DỮ LIỆU ĐÃ LƯU:\nSản phẩm đang chờ lên đơn: Túi Xanh x2\nSố điện thoại đã có: 0909123456\n\nTIN NHẮN CẦN TRẢ LỜI/);
 });
 
 test('gọi Gemini trực tiếp trên Vertex AI', async () => {
@@ -43,7 +48,9 @@ test('gọi Gemini trực tiếp trên Vertex AI', async () => {
       assert.equal(url, 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/publishers/google/models/gemini-2.5-flash:generateContent');
       assert.equal(options.headers.Authorization, 'Bearer google-token');
       const body = JSON.parse(options.body);
-      assert.match(body.systemInstruction.parts[0].text, /^Chỉ trả JSON\n\nDANH MỤC SẢN PHẨM/);
+      assert.match(body.systemInstruction.parts[0].text, /^Chỉ trả JSON\n\nSẢN PHẨM \(tên chuẩn → cách khách gọi\):\n- Granola Túi Xanh 450g: túi xanh/);
+      // Danh sách mẫu tin đọc từ Thiết lập tin nhắn, nối vào sau danh mục.
+      assert.match(body.systemInstruction.parts[0].text, /MẪU TIN \(template_id → ý nghĩa\):[\s\S]*- BAG_COMPARISON: các túi bên em đều dùng chung[\s\S]*PRICE_QUOTE dùng cho mọi sản phẩm/);
       assert.equal(body.contents[0].role, 'user');
       assert.equal(body.generationConfig.responseMimeType, 'application/json');
       return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"template_id":"WELCOME"}' }] } }] }) };
@@ -88,7 +95,7 @@ test('gọi Claude bằng giao thức Anthropic Messages', async () => {
       assert.equal(options.headers['anthropic-version'], '2023-06-01');
       const body = JSON.parse(options.body);
       assert.equal(body.model, 'claude-sonnet-4-6');
-      assert.match(body.system, /^Chỉ trả JSON\n\nDANH MỤC SẢN PHẨM/);
+      assert.match(body.system, /^Chỉ trả JSON\n\nSẢN PHẨM \(tên chuẩn → cách khách gọi\):\n- Granola Túi Xanh 450g: túi xanh/);
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: '{"template_id":"WELCOME"}' }] }) };
     }
   });

@@ -1,4 +1,4 @@
-import { renderChatbotReply } from './chatbot-templates.mjs';
+import { buildTemplatePrompt, renderChatbotReply } from './chatbot-templates.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
 import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
@@ -21,19 +21,32 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
     referralRef: conversation.referral?.ref
   });
   const hint = productHint(product);
+  // What the customer already gave in earlier messages, so the model neither
+  // asks for it again nor drops it from the JSON.
+  const pending = conversation.pendingOrder || {};
+  const remembered = [
+    pending.items?.length ? `Sản phẩm đang chờ lên đơn: ${pending.items.map(item => `${item.product} x${item.quantity}`).join(', ')}` : '',
+    pending.phone ? `Số điện thoại đã có: ${pending.phone}` : '',
+    pending.address ? `Địa chỉ đã có: ${pending.address}` : ''
+  ].filter(Boolean).join('\n');
   return [
     `KÊNH: Facebook Messenger`,
     `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
     hint,
+    remembered ? `DỮ LIỆU ĐÃ LƯU:\n${remembered}` : '',
     includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
     `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`
   ].filter(Boolean).join('\n\n');
 }
 
-/** The saved prompt plus the live catalogue block. Exported so the settings screen can preview exactly what the model receives. */
-export function composeSystemPrompt(basePrompt) {
-  const catalog = buildCatalogPrompt();
-  return catalog ? `${String(basePrompt || '').trim()}\n\n${catalog}` : String(basePrompt || '').trim();
+/**
+ * The saved prompt plus the live catalogue and template blocks. Exported so
+ * the settings screen can preview exactly what the model receives. The saved
+ * prompt holds only the rules; products, prices, gifts and template ids are
+ * appended from Cài đặt and Thiết lập tin nhắn on every request.
+ */
+export function composeSystemPrompt(basePrompt, templates = {}) {
+  return [String(basePrompt || '').trim(), buildCatalogPrompt(), buildTemplatePrompt(templates)].filter(Boolean).join('\n\n');
 }
 
 function buildMemoryTurns({ recentMessages = [], message, settings }) {
@@ -70,7 +83,7 @@ export async function requestDirectModelReply(options) {
   if (!settings.systemPrompt) throw new Error('Chatbot chưa có system prompt.');
   // The catalogue is appended on every request, never baked into the saved
   // prompt: a product added in settings is known to the model on its next reply.
-  const systemPrompt = composeSystemPrompt(settings.systemPrompt);
+  const systemPrompt = composeSystemPrompt(settings.systemPrompt, settings.messageTemplates);
   const attempts = 1 + Math.max(0, Number(settings.retryCount) || 0);
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {

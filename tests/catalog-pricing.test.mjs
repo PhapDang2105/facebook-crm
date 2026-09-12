@@ -110,7 +110,8 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   // Đơn vị "Combo" dùng mẫu PRICE_QUOTE_COMBO.
   assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_NAU_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Nâu.*\n🌿 Combo Dùng Thử \(350g\):\n🏷️ Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ\n━+\n🔥 2 Combo Tiện Lợi \(700g\):/);
   const policy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates).messages[0];
-  assert.match(policy, /• Miễn phí vận chuyển: .*2 × Granola Túi Xanh 450g/);
+  // Quà phủ hết mọi tổ hợp cùng tổng số lượng thì nói gọn "mọi đơn N sản phẩm"; ngoại lệ liệt kê riêng.
+  assert.match(policy, /• Miễn phí vận chuyển: mọi đơn 2 sản phẩm; 3 × Hạt An Lành dạng hũ; 3 × Bột ngũ cốc Nghệ Lành hộp 14 gói/);
   assert.match(policy, /• Miễn phí vận chuyển \+ Bộ bát gáo dừa \+ Muỗng dừa: .*3 × Granola Túi Xanh 450g/);
   const strike = text => [...text].map(char => `${char}\u0336`).join('');
   const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
@@ -180,7 +181,9 @@ test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu 
   assert.equal(pricing.giftTextForKey('GRA-XANH-Z450=3'), 'Miễn phí vận chuyển + Bộ bát gáo dừa');
   // Bỏ tick miễn ship cho 2 túi xanh → combo 2 túi lại chịu phí ship mới.
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 2 }).total, 298000 + 20000);
-  assert.match(pricing.buildCatalogPrompt(), /Granola Túi Xanh 450g \(mã GRA-XANH-Z450\): mua lẻ 1 sản phẩm 199\.000đ \+ phí vận chuyển 20\.000đ/);
+  // Khối gửi model chỉ có tên và cách gọi — không giá, không quà — để tiết kiệm token; giá mới vẫn vào báo giá.
+  assert.doesNotMatch(pricing.buildCatalogPrompt(), /\d{3}\.\d{3}đ/);
+  assert.match(renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates).messages[0], /Giá niêm yết: 199\.000đ \+ Phí vận chuyển 20\.000đ/);
 });
 
 test('giá combo cao hơn giá lẻ bị từ chối; SKU và tên gọi khác được chuẩn hóa', () => {

@@ -1,5 +1,5 @@
-import { priceBasket, quoteTiers, shippingFeeForKey } from './processing/pricing.mjs';
-import { comboKey, getCatalogProducts, getGiftAssignments, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity, normalizeText } from './processing/catalog.mjs';
+import { describeGiftTable, priceBasket, quoteTiers, shippingFeeForKey } from './processing/pricing.mjs';
+import { comboKey, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity, normalizeText } from './processing/catalog.mjs';
 import { metaConfig } from './config.mjs';
 import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
@@ -217,21 +217,18 @@ function renderGeneralInfo(templates) {
   });
 }
 
-/** One line per distinct gift set: which combinations earn it. */
+/** One line per distinct gift set: which combinations earn it (same wording the model reads). */
 function renderGiftPolicy(templates) {
-  const active = new Map(getGifts().filter(gift => gift.active).map(gift => [gift.id, gift.name]));
-  const assignments = getGiftAssignments();
-  const groups = new Map();
-  for (const combo of listCombos()) {
-    const names = (assignments[combo.key] || []).map(id => active.get(id)).filter(Boolean);
-    if (!names.length) continue;
-    const label = names.join(' + ');
-    groups.set(label, [...(groups.get(label) || []), combo.items.map(item => `${item.quantity} × ${item.name}`).join(' + ')]);
-  }
-  if (!groups.size) return fill(templates.GIFT_POLICY_EMPTY, commonValues());
-  return fill(templates.GIFT_POLICY, commonValues(), {
-    gifts: [...groups.entries()].map(([gifts, combos]) => ({ gifts, combos: combos.join('; ') }))
-  });
+  if (!getGifts().some(gift => gift.active)) return fill(templates.GIFT_POLICY_EMPTY, commonValues());
+  const gifts = describeGiftTable()
+    .map(line => line.replace(/^- /, ''))
+    .map(line => {
+      const at = line.indexOf(': ');
+      return at > 0 ? { gifts: line.slice(0, at), combos: line.slice(at + 2) } : null;
+    })
+    .filter(Boolean);
+  if (!gifts.length) return fill(templates.GIFT_POLICY_EMPTY, commonValues());
+  return fill(templates.GIFT_POLICY, commonValues(), { gifts });
 }
 
 /**
@@ -313,6 +310,35 @@ export function isProductQuoteId(templateId) {
   const id = String(templateId || '').trim();
   if (!id.startsWith('PRICE_') || catalogRenderers[id] || Object.hasOwn(defaultMessageTemplates(), id)) return false;
   return Boolean(matchProduct(id.replace(/^PRICE_/, '').replace(/_/g, ' ')));
+}
+
+// Templates the server picks on its own; the model never needs to name them.
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_ADDRESS_PARTIAL', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION']);
+
+/**
+ * The template inventory as text for the model, appended to the system
+ * prompt on every request next to the catalogue. Built from Thiết lập tin
+ * nhắn, so a template added, renamed or switched off there changes what the
+ * model may answer with — nothing about templates has to be typed into the
+ * prompt itself.
+ */
+export function buildTemplatePrompt(templates = {}) {
+  // The opening words of the template, syntax stripped: enough for the model to tell the ids apart.
+  const gist = text => String(text)
+    .replace(/###[\s\S]*$/, '').replace(/\[\[[^\]]*\]\]|\[\?[a-z_0-9]+\]|\[\/\?\]/gi, '').replace(/\{[a-z_0-9]+\}/gi, '…')
+    .replace(/^Dạ,? ?(em |mình )?/i, '').replace(/\s+/g, ' ').trim().match(/^.{0,47}(?=\s|$)/u)?.[0] || '';
+  const lines = Object.entries(templates)
+    .filter(([id, text]) => text && !internalTemplateIds.has(id) && !isProductQuoteId(id))
+    .map(([id, text]) => `- ${id}: ${gist(text)}`);
+  if (!lines.length) return '';
+  return [
+    'MẪU TIN (template_id → ý nghĩa):',
+    ...lines,
+    '- ORDER_ADDRESS: muốn mua, thiếu SĐT/địa chỉ',
+    '- ORDER_CONFIRMATION: muốn mua, đủ sản phẩm+số lượng+SĐT+địa chỉ',
+    '- CSKH_HANDOFF: cần người thật',
+    'PRICE_QUOTE dùng cho mọi sản phẩm (kèm Product_N1); không có mẫu giá riêng từng sản phẩm.'
+  ].join('\n');
 }
 
 /**

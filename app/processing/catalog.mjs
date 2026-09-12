@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { projectRoot } from '../config.mjs';
 
-// The catalogue IS the configuration. Products carry their own tier prices,
-// grouping and keywords; gifts carry the quantity they unlock at. Every other
-// module derives what it needs from here, so adding a product in Cài đặt →
-// Sản phẩm is the whole job — no keyword table, no price row, no prompt edit.
+// The catalogue IS the configuration. A product carries its single price, its
+// combo price, its warehouse SKU and the words customers use for it; a gift
+// carries the quantity it unlocks at and its warehouse SKU. Pricing, detection,
+// the model prompt and the warehouse export all derive from here, so adding a
+// product in Cài đặt → Sản phẩm is the whole job.
 const productsPath = process.env.PRODUCTS_PATH
   || path.join(projectRoot, 'data', 'processed', 'products.json');
 const giftsPath = process.env.GIFTS_PATH
@@ -30,16 +31,8 @@ function money(value) {
   return Math.max(0, Math.round(Number(value) || 0));
 }
 
-/** Tier prices keyed by quantity: { "2": 298000, "3": 447000 }. */
-export function normalizeComboPrices(value) {
-  const source = value && typeof value === 'object' ? value : {};
-  const result = {};
-  for (const [key, price] of Object.entries(source)) {
-    const quantity = Math.round(Number(key));
-    const amount = money(price);
-    if (quantity >= 2 && quantity <= 20 && amount > 0) result[String(quantity)] = amount;
-  }
-  return result;
+export function normalizeSkuText(value) {
+  return String(value ?? '').trim().toUpperCase().replace(/\s+/g, '_');
 }
 
 export function normalizeAliases(value) {
@@ -56,8 +49,32 @@ export function normalizeAliases(value) {
   return aliases.slice(0, 40);
 }
 
+/**
+ * What the warehouse ships for one unit of this product. Accepts the array
+ * form or text such as "GRA-XANH-G35 x10" / "GRA-NAU-G35 x3, GRA-XANH-G35 x4".
+ * Empty means one unit of the product's own SKU.
+ */
+export function normalizeComponents(value) {
+  const list = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(/[\n,;]+/).map(part => {
+        const match = part.trim().match(/^([A-Za-z0-9_\-+.]+)\s*(?:[x×*]\s*(\d+))?$/);
+        return match ? { sku: match[1], quantity: match[2] || 1 } : null;
+      });
+  const components = [];
+  for (const item of list) {
+    const sku = normalizeSkuText(item?.sku);
+    const quantity = Math.max(1, Math.round(Number(item?.quantity) || 1));
+    if (!sku) continue;
+    const existing = components.find(component => component.sku === sku);
+    if (existing) existing.quantity += quantity;
+    else components.push({ sku, quantity });
+  }
+  return components.slice(0, 20);
+}
+
 function normalizeCatalogProduct(item) {
-  const sku = String(item?.sku ?? '').trim().toUpperCase();
+  const sku = normalizeSkuText(item?.sku);
   const name = String(item?.name ?? '').trim();
   if (!sku || !name) return null;
   return {
@@ -65,9 +82,10 @@ function normalizeCatalogProduct(item) {
     sku,
     name,
     unitPrice: money(item?.salePrice),
-    comboPrices: normalizeComboPrices(item?.comboPrices),
-    mixGroup: String(item?.mixGroup ?? '').trim().toLowerCase(),
+    comboPrice: money(item?.comboPrice),
+    weight: money(item?.weight),
     aliases: normalizeAliases(item?.aliases),
+    components: normalizeComponents(item?.components),
     active: item?.active !== false
   };
 }
@@ -92,7 +110,10 @@ export function normalizeGift(item) {
     id: String(item?.id ?? '').trim() || normalizeText(name).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
     name: name.slice(0, 200),
     minQuantity: Math.min(20, Math.max(1, Math.round(Number(item?.minQuantity) || 1))),
-    active: item?.active !== false
+    active: item?.active !== false,
+    // Warehouse SKU and weight so the export can list the gift as a shipped line.
+    sku: normalizeSkuText(item?.sku).slice(0, 80),
+    weight: money(item?.weight)
   };
 }
 
@@ -129,7 +150,7 @@ export function reloadCatalog() {
 
 /**
  * Every phrase that names a product: the aliases staff entered and the name
- * itself with the weight stripped ("Granola Túi Xanh 350g" also matches
+ * itself with the weight stripped ("Granola Túi Xanh 450g" also matches
  * "granola túi xanh"). The SKU is deliberately not a text keyword — "XANH"
  * would match "bột chuối xanh" in an ingredient question — it only matches
  * when the whole text is the SKU. Longest first so "combo 10 gói xanh" is
@@ -167,7 +188,7 @@ export function matchProduct(text) {
 }
 
 export function findProductBySku(sku) {
-  const key = String(sku ?? '').trim().toUpperCase();
+  const key = normalizeSkuText(sku);
   if (!key) return null;
   return getCatalogProducts().find(product => product.sku === key) || null;
 }

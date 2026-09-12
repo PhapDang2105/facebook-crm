@@ -1,4 +1,4 @@
-import { normalizeAliases, normalizeComboPrices } from './processing/catalog.mjs';
+import { normalizeAliases, normalizeComponents, normalizeSkuText } from './processing/catalog.mjs';
 
 const maximumNameLength = 200;
 const maximumSkuLength = 80;
@@ -16,18 +16,7 @@ function cleanPrice(value, label) {
 }
 
 export function normalizeSku(value) {
-  return cleanText(value, maximumSkuLength).toUpperCase().replace(/\s+/g, '_');
-}
-
-/** Lower-case slug; products sharing one may be bought together in one order. */
-export function normalizeMixGroup(value) {
-  return cleanText(value, 60)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
+  return normalizeSkuText(cleanText(value, maximumSkuLength));
 }
 
 export function normalizeProduct(input = {}, existing = {}) {
@@ -38,23 +27,23 @@ export function normalizeProduct(input = {}, existing = {}) {
 
   const originalPrice = cleanPrice(input.originalPrice ?? existing.originalPrice ?? 0, 'Giá gốc');
   const salePrice = cleanPrice(input.salePrice ?? existing.salePrice ?? 0, 'Giá bán');
-  const comboPrices = normalizeComboPrices(input.comboPrices ?? existing.comboPrices ?? {});
-  for (const [quantity, price] of Object.entries(comboPrices)) {
-    // A combo that costs more than buying singly is almost always a typo, and
-    // the bot would quote it to customers as a deal.
-    if (salePrice > 0 && price > salePrice * Number(quantity)) {
-      throw new Error(`Giá combo ${quantity} sản phẩm (${price.toLocaleString('vi-VN')}đ) cao hơn mua lẻ ${quantity} × ${salePrice.toLocaleString('vi-VN')}đ.`);
-    }
+  const comboPrice = cleanPrice(input.comboPrice ?? existing.comboPrice ?? 0, 'Giá combo');
+  // A combo unit that costs more than a single is almost always a typo, and
+  // the bot would quote it to customers as a deal.
+  if (comboPrice > 0 && salePrice > 0 && comboPrice > salePrice) {
+    throw new Error(`Giá combo (${comboPrice.toLocaleString('vi-VN')}đ) cao hơn giá bán lẻ (${salePrice.toLocaleString('vi-VN')}đ).`);
   }
+  const weight = cleanPrice(input.weight ?? existing.weight ?? 0, 'Khối lượng');
   return {
     ...existing,
     name,
     sku,
     originalPrice,
     salePrice,
-    comboPrices,
-    mixGroup: normalizeMixGroup(input.mixGroup ?? existing.mixGroup ?? ''),
+    comboPrice,
+    weight,
     aliases: normalizeAliases(input.aliases ?? existing.aliases ?? []),
+    components: normalizeComponents(input.components ?? existing.components ?? []),
     active: (input.active ?? existing.active) !== false,
     image: cleanText(input.image ?? existing.image, 500),
     updatedAt: Date.now()
@@ -75,6 +64,10 @@ export function normalizeProductStore(value) {
     updatedAt: Number(value?.updatedAt) || 0,
     // Survives every write so the starter catalogue is only ever laid down once.
     // Without it, emptying the catalogue on purpose would refill it on restart.
-    seeded: value?.seeded === true
+    seeded: value?.seeded === true,
+    // Bumped when the product shape changes so old records get upgraded once.
+    schema: Number(value?.schema) || 0
   };
 }
+
+export const productSchemaVersion = 2;

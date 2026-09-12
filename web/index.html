@@ -231,7 +231,7 @@
           <button class="order-history-button" id="order-history-button" type="button" aria-expanded="false" aria-controls="order-history-panel">Lịch sử</button>
         </div>
         <div class="order-history-panel hidden" id="order-history-panel"></div>
-        <section class="customer-orders-management"><h2>Đơn tạo từ hội thoại</h2><div id="customer-orders-preview"><p>Đang tải đơn hàng...</p></div></section>
+        <section class="customer-orders-management"><div class="customer-orders-management-head"><h2>Đơn tạo từ hội thoại</h2><button class="order-history-button" id="customer-orders-import" type="button">Đưa vào bảng đơn hàng</button></div><div id="customer-orders-preview"><p>Đang tải đơn hàng...</p></div></section>
         <div class="data-preview" id="order-import-preview"><p>Import một tệp CSV hoặc XLSX để xem toàn bộ dữ liệu.</p></div>
       </section>
 
@@ -444,7 +444,7 @@
               <button class="product-primary-button" id="product-create-button" type="button"><span aria-hidden="true">＋</span> Thêm sản phẩm</button>
             </header>
             <div class="product-table-wrap">
-              <div class="product-table-head"><span>Sản phẩm</span><span>SKU</span><span>Giá bán</span><span>Giá combo</span><span>Nhóm ghép</span><span>Thao tác</span></div>
+              <div class="product-table-head"><span>Sản phẩm</span><span>SKU</span><span>Giá bán</span><span>Giá combo</span><span>Thao tác</span></div>
               <div class="product-list" id="product-list" aria-live="polite"><div class="product-empty"><img src="/assets/icons/products/empty-product.png" alt=""><strong>Đang tải danh mục sản phẩm...</strong></div></div>
             </div>
           </section>
@@ -454,7 +454,7 @@
             <header class="settings-card-head">
               <div>
                 <h1 id="gift-settings-title">Quà tặng</h1>
-                <p>Quà mở theo <b>tổng số lượng</b> sản phẩm trong đơn và cộng dồn: đơn 3 túi nhận cả quà “từ 2” lẫn quà “từ 3”. Tick để bật, chatbot áp dụng ngay cho đơn kế tiếp.</p>
+                <p>Quà mở theo <b>tổng số lượng</b> sản phẩm trong đơn và cộng dồn: đơn 3 túi nhận cả quà “từ 2” lẫn quà “từ 3”. Tick để bật, chatbot áp dụng ngay cho đơn kế tiếp. Quà có <b>SKU xuất kho</b> sẽ thành một dòng riêng trong file Xuất dữ liệu.</p>
               </div>
               <div class="price-master-actions">
                 <button class="price-master-add" id="gift-add" type="button">+ Thêm quà tặng</button>
@@ -462,7 +462,7 @@
               </div>
             </header>
             <div class="gift-table">
-              <div class="gift-table-head"><span>Áp dụng</span><span>Tên quà tặng</span><span>Từ số lượng</span><span></span></div>
+              <div class="gift-table-head"><span>Áp dụng</span><span>Tên quà tặng</span><span>Từ số lượng</span><span>SKU xuất kho</span><span>Khối lượng</span><span></span></div>
               <div class="gift-rows" id="gift-rows"></div>
             </div>
             <p class="price-master-status" id="gift-status" role="status"></p>
@@ -501,13 +501,13 @@
           <label><span>SKU <b>*</b></span><input id="product-sku" maxlength="80" required placeholder="Ví dụ: GN-XANH-01" autocomplete="off"></label>
           <label><span>Giá gốc</span><div class="product-price-input"><input id="product-original-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
           <label><span>Giá bán (1 sản phẩm) <b>*</b></span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
-          <label><span>Giá combo 2 sản phẩm</span><div class="product-price-input"><input id="product-combo-2" type="number" min="0" step="1000" placeholder="Bỏ trống = 2 × giá bán"><span>₫</span></div></label>
-          <label><span>Giá combo 3 sản phẩm</span><div class="product-price-input"><input id="product-combo-3" type="number" min="0" step="1000" placeholder="Bỏ trống = 3 × giá bán"><span>₫</span></div></label>
-          <label><span>Nhóm ghép</span><input id="product-mix-group" maxlength="60" list="product-mix-group-options" placeholder="Ví dụ: granola-tui · bỏ trống = không ghép" autocomplete="off"><datalist id="product-mix-group-options"></datalist></label>
-          <label class="product-form-checkbox"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
+          <label><span>Giá combo (mỗi sản phẩm)</span><div class="product-price-input"><input id="product-combo-price" type="number" min="0" step="1000" placeholder="Bỏ trống = không giảm"><span>₫</span></div></label>
+          <label><span>Khối lượng xuất kho</span><div class="product-price-input"><input id="product-weight" type="number" min="0" step="10" placeholder="0"><span>g</span></div></label>
+          <label class="product-form-checkbox product-form-wide"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
           <label class="product-form-wide"><span>Tên gọi khác (mỗi dòng hoặc cách nhau bằng dấu phẩy)</span><textarea id="product-aliases" rows="3" placeholder="túi xanh, granola xanh, #granolatuixanh&#10;Khách gọi sản phẩm bằng những tên này thì bot vẫn nhận ra."></textarea></label>
+          <label class="product-form-wide"><span>Thành phần xuất kho (nếu 1 sản phẩm gồm nhiều mã)</span><textarea id="product-components" rows="2" placeholder="GRA-NAU-G35 x3, GRA-XANH-G35 x4, GRA-CAM-G30 x3&#10;Bỏ trống = xuất chính mã SKU ở trên."></textarea></label>
         </div>
-        <p class="product-form-hint">Sản phẩm cùng <b>nhóm ghép</b> được mua chung một đơn; mỗi sản phẩm tính theo giá combo ứng với <b>tổng</b> số lượng cả đơn. Không có giá combo thì tính giá bán × số lượng. Đơn quá 5 sản phẩm chuyển cho nhân viên.</p>
+        <p class="product-form-hint"><b>Giá bán</b> áp dụng khi mua lẻ 1 sản phẩm. <b>Giá combo</b> áp dụng cho từng sản phẩm khi đơn có từ 2 sản phẩm trở lên, cùng loại hay mua kèm sản phẩm khác đều được. <b>SKU</b> là mã đi vào file Xuất dữ liệu của Đơn hàng.</p>
       </div>
       <p class="product-form-status" id="product-form-status" role="alert"></p>
       <footer class="product-dialog-actions"><button class="product-secondary-button" type="button" data-close-product-dialog>Hủy</button><button class="product-primary-button" id="product-submit" type="submit">Lưu sản phẩm</button></footer>

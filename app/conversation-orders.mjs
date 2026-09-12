@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { toLocalPhone } from './processing/customer-info.mjs';
-import { unitPriceForProduct } from './processing/pricing.mjs';
+import { matchProduct, findProductBySku } from './processing/catalog.mjs';
+import { giftTextFor, unitPriceInBasket } from './processing/pricing.mjs';
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
@@ -18,7 +19,10 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
     image: text(item?.image, 500),
     weight: Math.max(0, Math.round(Number(item?.weight) || 0)),
     quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)),
-    price: money(item?.price)
+    price: money(item?.price),
+    // What the customer actually pays per unit once combo pricing applies;
+    // `price` stays the list price so the receipt can show the discount.
+    paidPrice: money(item?.paidPrice)
   })).filter(item => item.name) : [];
   const name = text(input.name, 200);
   const phone = text(input.phone, 40).replace(/[\s.-]/g, '');
@@ -60,14 +64,25 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   sourceMessageId = '',
   deliveryMessageId = ''
 } = {}) {
-  const items = Array.isArray(input.items) ? input.items.slice(0, 100).map(item => ({
-    name: text(item?.name || item?.product, 200),
-    quantity: Math.max(1, Math.round(Number(item?.quantity) || 1))
-  })).filter(item => item.name) : [];
+  // Each line is resolved against the catalogue (Cài đặt → Sản phẩm) so the
+  // order carries the warehouse SKU, weight and the same list price staff see
+  // when they build an order by hand.
+  const items = Array.isArray(input.items) ? input.items.slice(0, 100).map(item => {
+    const product = findProductBySku(item?.code || item?.sku) || matchProduct(item?.name || item?.product);
+    return {
+      name: text(product?.name || item?.name || item?.product, 200),
+      sku: product?.sku || '',
+      weight: product?.weight || 0,
+      quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)),
+      price: money(product?.unitPrice)
+    };
+  }).filter(item => item.name) : [];
   const total = money(input.total);
-  // Unit price comes from the product catalogue (Cài đặt → Sản phẩm), the same
-  // number staff see when they build an order by hand.
-  const priced = items.map(item => ({ ...item, price: money(unitPriceForProduct(item.name)) }));
+  const totalQuantityForPricing = items.reduce((sum, item) => sum + item.quantity, 0);
+  const priced = items.map(item => {
+    const product = findProductBySku(item.sku);
+    return { ...item, paidPrice: unitPriceInBasket(product, totalQuantityForPricing) || item.price };
+  });
   // Every line priced at its own list price, or none of them. Mixing a real unit
   // price with an averaged one makes the receipt add up to a number the customer
   // cannot reconcile, which is worse than an honest average on every line.
@@ -93,6 +108,7 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     employee: 'Chatbot AI'
   }, { now, id });
   if (total) order.total = total;
+  order.gift = text(input.gift ?? giftTextFor(totalQuantity), 300);
   order.chatbotSourceMessageId = text(sourceMessageId, 200);
   order.automatic = true;
   order.delivery = {

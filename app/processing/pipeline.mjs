@@ -20,7 +20,7 @@ const steps = [
     name: 'Danh mục sản phẩm & quà tặng',
     type: 'data',
     file: 'catalog.mjs',
-    summary: 'Đọc sản phẩm từ Cài đặt → Sản phẩm (giá lẻ, giá combo, nhóm ghép, tên gọi khác) và quà tặng từ Cài đặt → Quà tặng. Mọi bước sau đều lấy dữ liệu từ đây, nên thêm sản phẩm là bot nhận ngay.'
+    summary: 'Đọc sản phẩm từ Cài đặt → Sản phẩm (giá bán, giá combo, SKU xuất kho, tên gọi khác) và quà tặng từ Cài đặt → Quà tặng. Mọi bước sau — kể cả file xuất kho của Đơn hàng — đều lấy dữ liệu từ đây, nên thêm sản phẩm là bot và đơn hàng nhận ngay.'
   },
   {
     id: 'product_detect',
@@ -48,7 +48,7 @@ const steps = [
     name: 'Tính tiền & quà tặng',
     type: 'transform',
     file: 'pricing.mjs',
-    summary: 'Mỗi sản phẩm tính theo giá bậc ứng với TỔNG số lượng cả đơn (2 túi khác màu vẫn hưởng giá combo 2). Quà tặng cộng dồn theo tổng số lượng. Sản phẩm lạ, trộn khác nhóm, hoặc quá 5 sản phẩm thì chuyển nhân viên thay vì đoán giá. Đây cũng là nơi soạn khối danh mục gắn vào system prompt.'
+    summary: 'Đơn 1 sản phẩm tính giá bán; đơn từ 2 sản phẩm (cùng loại hay mua kèm) thì mỗi sản phẩm tính giá combo của chính nó. Quà tặng cộng dồn theo tổng số lượng. Sản phẩm lạ hoặc quá 20 sản phẩm thì chuyển nhân viên thay vì đoán giá. Đây cũng là nơi soạn khối danh mục gắn vào system prompt và tách dòng xuất kho.'
   },
   {
     id: 'order_key',

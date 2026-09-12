@@ -128,12 +128,12 @@ const productName = document.querySelector('#product-name');
 const productSku = document.querySelector('#product-sku');
 const productOriginalPrice = document.querySelector('#product-original-price');
 const productSalePrice = document.querySelector('#product-sale-price');
-const productCombo2 = document.querySelector('#product-combo-2');
-const productCombo3 = document.querySelector('#product-combo-3');
-const productMixGroup = document.querySelector('#product-mix-group');
-const productMixGroupOptions = document.querySelector('#product-mix-group-options');
+const productComboPrice = document.querySelector('#product-combo-price');
+const productWeight = document.querySelector('#product-weight');
 const productActive = document.querySelector('#product-active');
 const productAliases = document.querySelector('#product-aliases');
+const productComponents = document.querySelector('#product-components');
+const customerOrdersImportButton = document.querySelector('#customer-orders-import');
 const productFormStatus = document.querySelector('#product-form-status');
 const productSubmit = document.querySelector('#product-submit');
 const sharedProductOptions = document.querySelector('#shared-product-options');
@@ -374,6 +374,66 @@ async function loadCustomerOrdersManagement() {
     customerOrdersPreview.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
   }
 }
+
+// The columns the import table already understands, so a chatbot order lands
+// in the same pipeline as a Pancake export: check → process → export file.
+const chatbotOrderHeaders = ['Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
+
+function chatbotOrderToRows(order) {
+  const parts = String(order.address || '').split(',').map(part => part.trim()).filter(Boolean);
+  const province = parts.length > 1 ? parts.at(-1) : '';
+  const district = parts.length > 2 ? parts.at(-2) : '';
+  const ward = parts.length > 3 ? parts.at(-3) : '';
+  const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
+  return products.map(item => [
+    `CB-${order.id}`, order.name || order.conversationName || '', order.phone || '', order.address || '',
+    province, district, ward,
+    item.name || '', item.sku || '', String(Number(item.quantity) || 1),
+    // Unit price as the customer paid it (combo price from 2 units), so the
+    // table's totals match the confirmation the customer received.
+    String(Number(item.paidPrice) || Number(item.price) || 0),
+    [order.gift ? `Quà: ${order.gift}` : '', order.note || ''].filter(Boolean).join(' · ')
+  ]);
+}
+
+function mergeChatbotOrdersIntoTable(orders) {
+  const headers = orderData.headers.length ? orderData.headers : chatbotOrderHeaders;
+  const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
+  const idColumn = index.get('ma don hang');
+  const existingIds = new Set(idColumn === undefined ? [] : orderData.rows.map(row => String(row[idColumn] || '')));
+  let added = 0;
+  const rows = [...orderData.rows];
+  for (const order of orders) {
+    if (existingIds.has(`CB-${order.id}`)) continue;
+    for (const source of chatbotOrderToRows(order)) {
+      const row = Array(headers.length).fill('');
+      chatbotOrderHeaders.forEach((header, position) => {
+        const target = index.get(normalizeColumnName(header));
+        if (target !== undefined) row[target] = source[position];
+      });
+      rows.push(row);
+    }
+    added += 1;
+  }
+  orderData = { headers, rows };
+  localStorage.setItem('crm-orders', JSON.stringify(orderData));
+  renderOrderData();
+  showOrderStage(getRecommendedOrderStage());
+  return added;
+}
+
+customerOrdersImportButton?.addEventListener('click', async () => {
+  customerOrdersImportButton.disabled = true;
+  try {
+    const result = await readApiResponse(await fetch('/api/customer-orders'));
+    const added = mergeChatbotOrdersIntoTable(Array.isArray(result.items) ? result.items : []);
+    showToast(added ? `Đã đưa ${added} đơn từ hội thoại vào bảng.` : 'Không có đơn mới — các đơn đã có trong bảng.', added ? 'success' : 'info');
+  } catch (error) {
+    showToast(error.message || 'Chưa lấy được đơn từ hội thoại.', 'error');
+  } finally {
+    customerOrdersImportButton.disabled = false;
+  }
+});
 
 function formatShippingTime(value) {
   if (!value) return '';
@@ -2174,6 +2234,8 @@ function renderGifts() {
       <label class="gift-active"><input type="checkbox" data-gift-field="active" data-gift-index="${index}" ${gift.active !== false ? 'checked' : ''} aria-label="Áp dụng quà tặng"></label>
       <input type="text" data-gift-field="name" data-gift-index="${index}" value="${escapeHtml(gift.name || '')}" maxlength="200" placeholder="Ví dụ: Miễn phí vận chuyển">
       <span class="gift-quantity"><span>từ</span><input type="number" data-gift-field="minQuantity" data-gift-index="${index}" value="${Number(gift.minQuantity) || 1}" min="1" max="20" step="1"><span>sản phẩm</span></span>
+      <input type="text" class="gift-sku" data-gift-field="sku" data-gift-index="${index}" value="${escapeHtml(gift.sku || '')}" maxlength="80" placeholder="Không xuất kho" spellcheck="false">
+      <span class="gift-weight"><input type="number" data-gift-field="weight" data-gift-index="${index}" value="${Number(gift.weight) || 0}" min="0" step="10"><span>g</span></span>
       <button class="price-master-remove" type="button" data-gift-remove="${index}" aria-label="Xóa quà tặng" title="Xóa quà tặng">×</button>
     </div>`).join('');
   }
@@ -2198,6 +2260,8 @@ giftRowsElement?.addEventListener('input', event => {
   const gift = giftItems[Number(event.target.dataset.giftIndex)];
   if (!field || !gift) return;
   if (field === 'name') gift.name = event.target.value;
+  else if (field === 'sku') gift.sku = event.target.value.trim().toUpperCase();
+  else if (field === 'weight') gift.weight = Math.max(0, Math.round(Number(event.target.value) || 0));
   else if (field === 'minQuantity') gift.minQuantity = Math.min(20, Math.max(1, Math.round(Number(event.target.value) || 1)));
   renderGiftPreview();
   setGiftStatus('Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.');
@@ -2224,7 +2288,7 @@ giftRowsElement?.addEventListener('click', event => {
 giftAddButton?.addEventListener('click', () => {
   // A new gift defaults to the next threshold up, which is the usual reason to add one.
   const nextQuantity = giftItems.length ? Math.max(...giftItems.map(gift => Number(gift.minQuantity) || 1)) + 1 : 2;
-  giftItems.push({ id: '', name: '', minQuantity: Math.min(20, nextQuantity), active: true });
+  giftItems.push({ id: '', name: '', minQuantity: Math.min(20, nextQuantity), active: true, sku: '', weight: 0 });
   renderGifts();
   giftRowsElement?.querySelector('.gift-row:last-child input[data-gift-field="name"]')?.focus();
 });
@@ -2267,15 +2331,6 @@ function syncSharedProductOptions() {
   ).join('');
 }
 
-function describeComboPrices(product) {
-  const tiers = Object.entries(product.comboPrices || {})
-    .map(([quantity, price]) => [Number(quantity), Number(price) || 0])
-    .filter(([quantity, price]) => quantity >= 2 && price > 0)
-    .sort((a, b) => a[0] - b[0]);
-  if (!tiers.length) return '<em>Chưa có · tính giá bán × SL</em>';
-  return tiers.map(([quantity, price]) => `<span class="product-combo-tier"><b>${quantity}</b> ${escapeHtml(formatOrderMoney(price))}</span>`).join('');
-}
-
 function renderProducts() {
   if (!productList) return;
   const query = String(productSearch?.value || '').trim().toLocaleLowerCase('vi');
@@ -2294,8 +2349,7 @@ function renderProducts() {
       <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}</small></span></div>
       <code class="product-row-sku">${escapeHtml(product.sku)}</code>
       <strong class="product-row-price product-row-sale">${escapeHtml(formatOrderMoney(product.salePrice))}</strong>
-      <span class="product-row-combo">${describeComboPrices(product)}</span>
-      <span class="product-row-group">${product.mixGroup ? `<code>${escapeHtml(product.mixGroup)}</code>` : '<em>Không ghép</em>'}</span>
+      <span class="product-row-combo">${Number(product.comboPrice) > 0 ? `<b>${escapeHtml(formatOrderMoney(product.comboPrice))}</b><small>/sp từ 2 sp</small>` : '<em>Không giảm</em>'}</span>
       <span class="product-row-actions"><button type="button" data-product-action="edit" title="Sửa sản phẩm" aria-label="Sửa sản phẩm"><img src="/assets/icons/products/edit.png" alt=""></button><button type="button" data-product-action="delete" title="Xóa sản phẩm" aria-label="Xóa sản phẩm"><img src="/assets/icons/products/delete.png" alt=""></button></span>
     </article>`;
   }).join('');
@@ -2325,15 +2379,11 @@ function openProductDialog(product = null) {
   if (productSku) productSku.value = product?.sku || '';
   if (productOriginalPrice) productOriginalPrice.value = String(product?.originalPrice || 0);
   if (productSalePrice) productSalePrice.value = String(product?.salePrice || 0);
-  if (productCombo2) productCombo2.value = product?.comboPrices?.['2'] ? String(product.comboPrices['2']) : '';
-  if (productCombo3) productCombo3.value = product?.comboPrices?.['3'] ? String(product.comboPrices['3']) : '';
-  if (productMixGroup) productMixGroup.value = product?.mixGroup || '';
+  if (productComboPrice) productComboPrice.value = Number(product?.comboPrice) > 0 ? String(product.comboPrice) : '';
+  if (productWeight) productWeight.value = Number(product?.weight) > 0 ? String(product.weight) : '';
   if (productActive) productActive.checked = product ? product.active !== false : true;
   if (productAliases) productAliases.value = Array.isArray(product?.aliases) ? product.aliases.join('\n') : '';
-  if (productMixGroupOptions) {
-    const groups = [...new Set(sharedProducts.map(item => item.mixGroup).filter(Boolean))];
-    productMixGroupOptions.innerHTML = groups.map(group => `<option value="${escapeHtml(group)}"></option>`).join('');
-  }
+  if (productComponents) productComponents.value = Array.isArray(product?.components) ? product.components.map(item => `${item.sku} x${item.quantity}`).join('\n') : '';
   if (productImageInput) productImageInput.value = '';
   if (productFormStatus) productFormStatus.textContent = '';
   renderProductImagePreview(product?.image || '');
@@ -4638,13 +4688,11 @@ productForm?.addEventListener('submit', async event => {
     sku: productSku.value.trim(),
     originalPrice: Number(productOriginalPrice.value),
     salePrice: Number(productSalePrice.value),
-    comboPrices: {
-      ...(Number(productCombo2?.value) > 0 ? { 2: Number(productCombo2.value) } : {}),
-      ...(Number(productCombo3?.value) > 0 ? { 3: Number(productCombo3.value) } : {})
-    },
-    mixGroup: productMixGroup?.value.trim() || '',
+    comboPrice: Number(productComboPrice?.value) || 0,
+    weight: Number(productWeight?.value) || 0,
     active: productActive ? productActive.checked : true,
     aliases: productAliases?.value || '',
+    components: productComponents?.value || '',
     imageData: pendingProductImage,
     removeImage: removeCurrentProductImage
   };

@@ -11,7 +11,7 @@ import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChat
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { chatbotTemplates } from './chatbot-templates.mjs';
-import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
+import { assertUniqueSku, normalizeProduct, normalizeProductStore, productSchemaVersion } from './products.mjs';
 import { getGifts, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
@@ -102,29 +102,53 @@ async function readSeedItems(fileName) {
   }
 }
 
+/**
+ * Lays down the starter catalogue the first time only, and upgrades records
+ * written under an older shape. Two upgrades exist: legacy pricing codes
+ * (XANH, COMBO10_MIX…) become the warehouse SKU the export needs, and the old
+ * per-tier combo table becomes the single combo price. Both match on the seed
+ * id or the legacy code, and neither touches a price staff already changed.
+ */
+const legacySkuByCode = {
+  XANH: 'GRA-XANH-Z450', VANG: 'GRA-VANG-H350', NAU: 'GRA-NAU-Z350', CACAO300: 'GRA-TROPICAL-300',
+  COMBO10_XANH: 'CB10-XANH', COMBO10_NAU: 'CB10-NAU', COMBO10_CAM: 'CB10-CAM', COMBO10_MIX: 'CB10-MIX'
+};
+
+function upgradeProductRecord(item, seed, now) {
+  const template = seed.find(entry => entry.id === item.id)
+    || seed.find(entry => entry.sku === item.sku)
+    || seed.find(entry => entry.sku === legacySkuByCode[item.sku]);
+  const next = { ...item };
+  if (legacySkuByCode[item.sku]) next.sku = legacySkuByCode[item.sku];
+  if (next.comboPrice === undefined) {
+    // The old shape stored totals per tier; the per-unit combo price is tier 2 halved.
+    const tier2 = Number(item.comboPrices?.['2']) || 0;
+    next.comboPrice = tier2 ? Math.round(tier2 / 2) : (template?.comboPrice || 0);
+  }
+  if (next.weight === undefined) next.weight = template?.weight || 0;
+  if (!Array.isArray(next.aliases) || !next.aliases.length) next.aliases = template?.aliases || [];
+  if (!Array.isArray(next.components)) next.components = template?.components || [];
+  if (next.active === undefined) next.active = true;
+  delete next.comboPrices;
+  delete next.mixGroup;
+  next.updatedAt = now;
+  return next;
+}
+
 async function ensureProductCatalogue() {
   const existing = await readProductStore().catch(() => null);
   const seed = await readSeedItems('products.seed.json');
   const now = Date.now();
   if (existing?.items?.length) {
-    // Products written before combo prices, groups and aliases existed get
-    // those fields from the seed, matched by SKU. Anything staff already set
-    // is left alone.
-    let changed = !existing.seeded;
-    const items = existing.items.map(item => {
-      if (item.comboPrices !== undefined) return item;
-      const template = seed.find(entry => entry.sku === item.sku);
-      changed = true;
-      return template
-        ? { ...item, comboPrices: template.comboPrices, mixGroup: template.mixGroup, aliases: template.aliases, active: true, updatedAt: now }
-        : { ...item, comboPrices: {}, mixGroup: '', aliases: [], active: true, updatedAt: now };
-    });
-    return changed ? writeProductStore({ ...existing, items, seeded: true }) : existing;
+    if (existing.schema >= productSchemaVersion && existing.seeded) return existing;
+    const items = existing.items.map(item => upgradeProductRecord(item, seed, now));
+    return writeProductStore({ ...existing, items, seeded: true, schema: productSchemaVersion });
   }
   if (existing?.seeded) return existing;
   return writeProductStore({
     items: seed.map(item => ({ ...item, createdAt: now, updatedAt: now })),
-    seeded: true
+    seeded: true,
+    schema: productSchemaVersion
   });
 }
 
@@ -146,13 +170,26 @@ async function writeGiftStore(store) {
   return normalized;
 }
 
-/** Lays down the two gifts the old price table encoded, the first time only. */
+/**
+ * Lays down the starter gifts the first time only. A gift list written before
+ * gifts carried a warehouse SKU gets the SKU and weight from the seed, matched
+ * by id, so the export can ship them; names and thresholds staff set stay.
+ */
 async function ensureGifts() {
+  const seed = await readSeedItems('gifts.seed.json');
+  let existing;
   try {
-    await stat(giftsPath);
+    existing = normalizeGiftStore(JSON.parse(await readFile(giftsPath, 'utf8')));
   } catch {
-    await writeGiftStore({ items: await readSeedItems('gifts.seed.json') });
+    return writeGiftStore({ items: seed });
   }
+  if (existing.items.some(gift => gift.sku)) return existing;
+  const items = existing.items.map(gift => {
+    const template = seed.find(entry => entry.id === gift.id);
+    return template ? { ...gift, sku: template.sku, weight: template.weight } : gift;
+  });
+  const missing = seed.filter(entry => entry.sku && !items.some(gift => gift.id === entry.id));
+  return writeGiftStore({ items: [...items, ...missing] });
 }
 
 async function saveProductImage(dataUrl, productId) {

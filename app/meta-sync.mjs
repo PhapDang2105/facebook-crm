@@ -4,6 +4,7 @@ import {
   fetchPageConversations,
   normalizeGraphConversation,
   sendPageAttachment,
+  sendPageImageUrl,
   sendPageMessage,
   sendPageTemplate
 } from './meta-graph.mjs';
@@ -86,7 +87,7 @@ export async function syncPageConversations(pageId, { limit = 25 } = {}) {
 }
 
 /** Sends a reply through the Send API and records it in the local conversation. */
-export async function sendConversationMessage(conversation, { text = '', attachment = null, template = null, templateText = '' }) {
+export async function sendConversationMessage(conversation, { text = '', attachment = null, imageUrl = '', template = null, templateText = '' }) {
   const pageAccessToken = await getPageAccessToken(conversation.pageId);
   const target = { pageId: conversation.pageId, psid: conversation.psid, pageAccessToken };
   let usedTemplate = Boolean(template);
@@ -104,6 +105,9 @@ export async function sendConversationMessage(conversation, { text = '', attachm
     }
   } else if (attachment) {
     result = await sendPageAttachment({ ...target, attachment });
+  } else if (imageUrl) {
+    // A product photo from a template: Messenger fetches the URL, nothing is uploaded.
+    result = await sendPageImageUrl({ ...target, url: imageUrl });
   } else {
     result = await sendPageMessage({ ...target, text });
   }
@@ -115,12 +119,13 @@ export async function sendConversationMessage(conversation, { text = '', attachm
     direction: 'outgoing',
     // A delivered receipt template is tagged so the timeline shows only the order
     // card, not a second bubble repeating the same thing as plain text.
-    type: usedTemplate ? 'order-receipt' : (attachment?.type || 'text'),
+    type: usedTemplate ? 'order-receipt' : (attachment?.type || (imageUrl ? 'image' : 'text')),
     text: usedTemplate ? 'Đã gửi xác nhận đơn hàng' : text,
     createdAt: Date.now(),
     status: 'sent',
     // The uploaded bytes stay out of the store; the echo webhook supplies Meta's hosted URL.
-    ...(attachment ? { name: attachment.name || '', dataUrl: '' } : {})
+    ...(attachment ? { name: attachment.name || '', dataUrl: '' } : {}),
+    ...(imageUrl ? { name: 'anh-san-pham', dataUrl: imageUrl } : {})
   };
   const saved = await updateMessagingStore(store => {
     const outcome = saveMessage(store, {

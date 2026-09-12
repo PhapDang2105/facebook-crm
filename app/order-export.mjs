@@ -155,23 +155,16 @@ export function skuWeight(sku) {
 
 /**
  * A row whose "Mã mẫu mã" is a catalogue SKU — every order the chatbot or the
- * manual form creates — is expanded from the catalogue: its components (a
- * Combo 10 gói ships as ten small bags) at the single or combo price, with
- * the weight staff entered. The legacy Pancake symbols below stay untouched.
+ * manual form creates — leaves as one line of that SKU at the single or combo
+ * price, with the weight staff entered. The legacy Pancake symbols below stay
+ * untouched.
  */
 function splitCatalogSku(product, quantity, useComboPricing, shippingFee = 0) {
   const unit = unitPriceInBasket(product, useComboPricing ? 2 : 1);
-  const components = product.components.length ? product.components : [{ sku: product.sku, quantity: 1 }];
-  const unitsPerProduct = components.reduce((sum, component) => sum + component.quantity, 0) || 1;
   // Shipping is folded into the price of the shipped units: one bag leaves
   // at 189.000đ (174.000đ + 15.000đ), which is what the order must show.
-  const shipPerUnit = shippingFee ? Math.round(shippingFee / (unitsPerProduct * quantity)) : 0;
-  return components.map(component => ({
-    sku: component.sku,
-    quantity: component.quantity * quantity,
-    price: Math.round(unit / unitsPerProduct) + shipPerUnit,
-    catalog: true
-  }));
+  const shipPerUnit = shippingFee ? Math.round(shippingFee / quantity) : 0;
+  return [{ sku: product.sku, quantity, price: unit + shipPerUnit, catalog: true }];
 }
 
 export function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPricing = false, productLabel = '', shippingFee = 0) {

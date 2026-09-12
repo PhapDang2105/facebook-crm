@@ -192,7 +192,9 @@ test('xác nhận đơn 1 túi cộng phí vận chuyển', () => {
 });
 
 test('mẫu giá được soạn từ danh mục; không có text tĩnh nào để ghi đè', () => {
-  const quote = renderChatbotReply({ template_id: 'PRICE_TUI_XANH' }, templates);
+  // Text cũ lưu dưới mã PRICE_TUI_XANH không bao giờ được dùng: giá luôn từ danh mục.
+  const quote = renderChatbotReply({ template_id: 'PRICE_TUI_XANH' }, { ...templates, PRICE_TUI_XANH: 'Túi Xanh 999.000đ' });
+  assert.doesNotMatch(quote.messages[0], /999/);
   assert.equal(quote.templateId, 'PRICE_TUI_XANH');
   assert.match(quote.messages[0], /Giá niêm yết: 174\.000đ \+ Phí vận chuyển 15\.000đ[\s\S]*Giảm còn: 298\.000đ \(Miễn phí vận chuyển\)/);
   const general = renderChatbotReply({ template_id: 'GENERAL_INFO' }, templates);
@@ -215,6 +217,7 @@ test('mẫu tin bị xóa hoặc bỏ tick không còn được chatbot sử d�
   const reply = renderChatbotReply({ template_id: 'WELCOME' }, withoutWelcome);
   assert.equal(reply.templateId, 'CSKH_HANDOFF');
   assert.deepEqual(reply.messages, [templates.CSKH_HANDOFF]);
+  assert.deepEqual(reply.images, []);
   const off = renderChatbotReply({ template_id: 'WELCOME' }, { ...templates, WELCOME: '' });
   assert.equal(off.templateId, 'CSKH_HANDOFF');
 });
@@ -226,6 +229,7 @@ test('tin xác nhận đơn và lời xin địa chỉ điền chỗ trống c�
     'Đơn: 🌾 Granola Túi Xanh 450g – Số lượng: 3 | 0909123456 | Quận 12 | 447.000đ | \n━━━━━━━━━━━━\n🎁 Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa',
     templates.SHIPPING_POLICY
   ]);
+  assert.deepEqual(reply.images, []);
   const partial = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0909123456' }, custom);
   assert.deepEqual(partial.messages, ['Có số điện thoại, thiếu địa chỉ nhận hàng đầy đủ.']);
 });

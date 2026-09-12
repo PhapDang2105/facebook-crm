@@ -990,7 +990,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .product-form-switch { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 13px; color: #344054; background: #f9fafb; border: 1px solid #e4e7ec; border-radius: 9px; font-size: 14px; font-weight: 500; }
 /* Specificity has to beat the grid's generic 100%-wide, 48px-tall input rule. */
 .product-form-grid .product-form-switch input { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; padding: 0; accent-color: #1677ff; cursor: pointer; }
-.product-form-hint { margin: 14px 0 0; color: #667085; font-size: 13px; line-height: 19px; }
 @media (max-width: 860px) {
   .gift-table-head { display: none; }
   .gift-row { grid-template-columns: 40px minmax(0, 1fr) 40px; }

@@ -84,6 +84,19 @@ export function sendPageMessage({ pageId, psid, text, pageAccessToken, messaging
   });
 }
 
+/** Sends a picture by public URL; Messenger fetches and hosts it itself. */
+export function sendPageImageUrl({ pageId, psid, url, pageAccessToken, messagingType = 'RESPONSE' }) {
+  return metaRequest(`${pageId}/messages`, {
+    method: 'POST',
+    body: {
+      recipient: JSON.stringify({ id: psid }),
+      messaging_type: messagingType,
+      message: JSON.stringify({ attachment: { type: 'image', payload: { url, is_reusable: true } } }),
+      access_token: pageAccessToken
+    }
+  });
+}
+
 /**
  * Sends a structured template (receipt, generic, button...) through the Send API.
  * Messenger renders these itself, which is how the tappable order receipt appears

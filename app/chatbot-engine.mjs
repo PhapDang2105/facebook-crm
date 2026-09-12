@@ -189,6 +189,8 @@ export async function processChatbotChanges(changes, dependencies) {
       const alreadyHandled = Boolean(outcome) && outcome.created === false;
       if (settings.responseMode === 'automatic' && !alreadyHandled) {
         for (const text of reply.messages) await sendMessage(conversation, { text });
+        // Pictures a template carries (![tên](url)) follow the text, like Smax did.
+        for (const imageUrl of reply.images || []) await sendMessage(conversation, { imageUrl });
         // The receipt closes the exchange, so it is sent after the reply text and
         // never before it — the order itself was already persisted above.
         if (order && sendReceipt) await sendReceipt(conversation, order);

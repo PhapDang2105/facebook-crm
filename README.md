@@ -54,7 +54,7 @@ Thiết kế giao diện tuân theo `docs/design/ui-principles.md`: tối giản
 
 ## Nguyên tắc cấu hình
 
-- **Cài đặt → Sản phẩm** là nguồn duy nhất về giá bán (chưa gồm ship), giá combo, SKU xuất kho, khối lượng, tên gọi khách hay dùng và thành phần xuất kho.
+- **Cài đặt → Sản phẩm** là nguồn duy nhất về giá bán (chưa gồm ship), giá combo, SKU xuất kho (mỗi sản phẩm một mã), khối lượng, đơn vị đếm (Túi/Hũ/Hộp/Combo) và tên gọi khách hay dùng.
 - **Cài đặt → Sản phẩm** cũng đánh dấu sản phẩm nào *ghép được* (các túi granola); sản phẩm không ghép chỉ bán riêng ×1/×2/×3.
 - **Cài đặt → Quà tặng** giữ danh sách quà, phí vận chuyển và bảng **quà theo tổ hợp**: hệ thống tự sinh mọi tổ hợp bot có thể chốt (tối đa 3 sản phẩm), nhân viên tick quà cho từng dòng. Quà tên "Miễn phí vận chuyển" tick ở tổ hợp nào thì tổ hợp đó không cộng ship. Tổ hợp không có trong bảng thì bot chuyển nhân viên.
 - **Thiết lập chatbot → Thiết lập tin nhắn** là nơi duy nhất chứa lời bot nói; `app/chatbot-templates.mjs` chỉ chọn mẫu và điền chỗ trống `{...}`. `app/chatbot-templates.seed.json` chỉ được đọc vào khi thiết lập chưa có bộ mẫu. Mẫu giá/quà (GENERAL_INFO, GIFT_POLICY, PRICE_*) được soạn từ danh mục ngay lúc trả lời, không lưu text.

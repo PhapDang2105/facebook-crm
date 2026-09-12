@@ -15,7 +15,6 @@
         "granola xanh",
         "#granolatuixanh"
       ],
-      "components": [],
       "active": true,
       "image": "",
       "mixable": true
@@ -37,7 +36,6 @@
         "nhiều hạt quả 350g",
         "#granolatuivang"
       ],
-      "components": [],
       "active": true,
       "image": "",
       "mixable": true
@@ -63,7 +61,6 @@
         "vị ca cao 350g",
         "#granolatuinau"
       ],
-      "components": [],
       "active": true,
       "image": "",
       "mixable": true
@@ -83,7 +80,6 @@
         "cacao 300g",
         "cacao 300"
       ],
-      "components": [],
       "active": true,
       "image": "",
       "mixable": false
@@ -96,18 +92,12 @@
       "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 350,
-      "unit": "Set",
+      "unit": "Combo",
       "aliases": [
         "combo 10 gói xanh",
         "combo 10 xanh",
         "túi xanh nhỏ",
         "10 gói xanh"
-      ],
-      "components": [
-        {
-          "sku": "GRA-XANH-G35",
-          "quantity": 10
-        }
       ],
       "active": true,
       "image": "",
@@ -121,18 +111,12 @@
       "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 350,
-      "unit": "Set",
+      "unit": "Combo",
       "aliases": [
         "combo 10 gói nâu",
         "combo 10 nâu",
         "túi nâu nhỏ",
         "10 gói nâu"
-      ],
-      "components": [
-        {
-          "sku": "GRA-NAU-G35",
-          "quantity": 10
-        }
       ],
       "active": true,
       "image": "",
@@ -146,7 +130,7 @@
       "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 300,
-      "unit": "Set",
+      "unit": "Combo",
       "aliases": [
         "combo 10 gói cam",
         "combo 10 cam",
@@ -158,12 +142,6 @@
         "granola bơ hạt điều",
         "vị bơ hạt điều",
         "#granolatuicam"
-      ],
-      "components": [
-        {
-          "sku": "GRA-CAM-G30",
-          "quantity": 10
-        }
       ],
       "active": true,
       "image": "",
@@ -177,27 +155,13 @@
       "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 335,
-      "unit": "Set",
+      "unit": "Combo",
       "aliases": [
         "combo 10 gói mix",
         "combo 10 mix",
         "10 gói mix",
         "mix 3 vị",
         "combo mix"
-      ],
-      "components": [
-        {
-          "sku": "GRA-NAU-G35",
-          "quantity": 3
-        },
-        {
-          "sku": "GRA-XANH-G35",
-          "quantity": 4
-        },
-        {
-          "sku": "GRA-CAM-G30",
-          "quantity": 3
-        }
       ],
       "active": true,
       "image": "",
@@ -218,7 +182,6 @@
         "ngũ cốc nghệ lành",
         "bột nghệ lành"
       ],
-      "components": [],
       "active": true,
       "image": "",
       "mixable": false
@@ -237,7 +200,6 @@
         "hũ hạt an lành",
         "an lành dạng hũ"
       ],
-      "components": [],
       "active": true,
       "image": "",
       "mixable": false

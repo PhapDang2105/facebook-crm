@@ -502,14 +502,12 @@
           <label><span>Giá gốc</span><div class="product-price-input"><input id="product-original-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
           <label><span>Giá bán (1 sản phẩm, chưa gồm ship) <b>*</b></span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
           <label><span>Giá combo (mỗi sản phẩm)</span><div class="product-price-input"><input id="product-combo-price" type="number" min="0" step="1000" placeholder="Bỏ trống = không giảm"><span>₫</span></div></label>
-          <label><span>Đơn vị (chữ bot dùng để đếm)</span><input id="product-unit" maxlength="30" placeholder="Túi, Hũ, Hộp, Set..." autocomplete="off"></label>
+          <label><span>Đơn vị (chữ bot dùng để đếm)</span><input id="product-unit" maxlength="30" placeholder="Túi, Hũ, Hộp, Combo..." autocomplete="off"></label>
           <label><span>Khối lượng xuất kho</span><div class="product-price-input"><input id="product-weight" type="number" min="0" step="10" placeholder="0"><span>g</span></div></label>
           <label class="product-form-checkbox"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
           <label class="product-form-checkbox"><span>Ghép đơn</span><span class="product-form-switch"><input id="product-mixable" type="checkbox"><span>Ghép được với sản phẩm ghép khác trong cùng đơn</span></span></label>
           <label class="product-form-wide"><span>Tên gọi khác (mỗi dòng hoặc cách nhau bằng dấu phẩy)</span><textarea id="product-aliases" rows="3" placeholder="túi xanh, granola xanh, #granolatuixanh&#10;Khách gọi sản phẩm bằng những tên này thì bot vẫn nhận ra."></textarea></label>
-          <label class="product-form-wide"><span>Thành phần xuất kho (nếu 1 sản phẩm gồm nhiều mã)</span><textarea id="product-components" rows="2" placeholder="GRA-NAU-G35 x3, GRA-XANH-G35 x4, GRA-CAM-G30 x3&#10;Bỏ trống = xuất chính mã SKU ở trên."></textarea></label>
         </div>
-        <p class="product-form-hint"><b>Giá bán</b> là giá mua lẻ, <b>chưa gồm</b> phí vận chuyển — phí đặt ở Cài đặt → Quà tặng và tự cộng vào tổ hợp chưa được miễn (174.000đ + 15.000đ = 189.000đ trên đơn và file xuất kho). <b>Giá combo</b> áp dụng cho từng sản phẩm khi đơn có từ 2 sản phẩm. Sản phẩm <b>ghép đơn</b> được mua chung với nhau tối đa 3 sản phẩm; sản phẩm không ghép chỉ bán riêng ×1/×2/×3. Mỗi tổ hợp sinh ra sẽ xuất hiện trong bảng Quà tặng để tick quà. <b>SKU</b> là mã đi vào file Xuất dữ liệu.</p>
       </div>
       <p class="product-form-status" id="product-form-status" role="alert"></p>
       <footer class="product-dialog-actions"><button class="product-secondary-button" type="button" data-close-product-dialog>Hủy</button><button class="product-primary-button" id="product-submit" type="submit">Lưu sản phẩm</button></footer>

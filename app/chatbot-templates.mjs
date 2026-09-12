@@ -1,5 +1,6 @@
-import { describeGiftTable, priceBasket, quoteTiers } from './processing/pricing.mjs';
-import { getCatalogProducts, getGifts, getShippingFee, matchProduct } from './processing/catalog.mjs';
+import { describeGiftTable, priceBasket, quoteTiers, shippingFeeForKey } from './processing/pricing.mjs';
+import { comboKey, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity, normalizeText } from './processing/catalog.mjs';
+import { metaConfig } from './config.mjs';
 import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
@@ -27,9 +28,29 @@ function fill(text, values = {}) {
   return String(text ?? '').replace(/\{([a-z_]+)\}/gi, (_, key) => (values[key] ?? ''));
 }
 
-/** Splits one stored template into up to three messages ("###" separates them). */
+const imagePattern = /!\s*\[[^\]]*\]\s*\(\s*(https?:\/\/[^\s)]+)[^)]*\)/g;
+
+/**
+ * Splits one stored template into up to three messages ("###" separates
+ * them). An image written Markdown-style — ![tên](https://…) — is lifted out
+ * and sent as a picture after the text, which is how the Smax templates
+ * carried product photos.
+ */
 function splitMessages(text) {
-  return String(text ?? '').replace(/\\n/g, '\n').split('###').map(item => item.trim()).filter(Boolean).slice(0, 3);
+  const images = [];
+  const content = String(text ?? '').replace(/\\n/g, '\n').replace(imagePattern, (_match, url) => {
+    images.push(url.trim());
+    return '';
+  });
+  const messages = content.split('###').map(item => item.trim()).filter(Boolean).slice(0, 3);
+  return { messages, images };
+}
+
+/** Absolute URL for a picture the catalogue stores, so Messenger can fetch it. */
+function publicImageUrl(image) {
+  const value = String(image || '').trim();
+  if (!value) return '';
+  return /^https?:\/\//i.test(value) ? value : `${metaConfig.publicBaseUrl}${value.startsWith('/') ? '' : '/'}${value}`;
 }
 
 function renderOrder(value, templates, context = {}) {
@@ -78,7 +99,7 @@ function renderOrder(value, templates, context = {}) {
     // Only a request to close the order is escalated. While still collecting
     // details the bot keeps asking rather than dropping the customer on a human.
     if (templateId === 'ORDER_CONFIRMATION' && items.length && !price) {
-      return { templateId: 'CSKH_HANDOFF', messages: splitMessages(templates.CSKH_HANDOFF), handoff: true, pendingOrder: null };
+      return { templateId: 'CSKH_HANDOFF', ...splitMessages(templates.CSKH_HANDOFF), handoff: true, pendingOrder: null };
     }
     const missing = hasPhone && !hasAddress ? 'địa chỉ nhận hàng đầy đủ'
       : !hasPhone && hasAddress ? 'số điện thoại'
@@ -88,7 +109,7 @@ function renderOrder(value, templates, context = {}) {
     const template = known ? templates.ORDER_ADDRESS_PARTIAL : templates.ORDER_ADDRESS;
     return {
       templateId: 'ORDER_ADDRESS',
-      messages: splitMessages(fill(template, { missing, known })),
+      ...splitMessages(fill(template, { missing, known })),
       handoff: false,
       pendingOrder: nextPending
     };
@@ -112,7 +133,8 @@ function renderOrder(value, templates, context = {}) {
     templateId: 'ORDER_CONFIRMATION',
     // The confirmation, then the delivery policy and the after-sale note —
     // each one is a template of its own so staff can rewrite or blank it.
-    messages: [confirmation, templates.SHIPPING_POLICY, templates.ORDER_AFTER_SALE].flatMap(splitMessages).slice(0, 3),
+    messages: [confirmation, templates.SHIPPING_POLICY, templates.ORDER_AFTER_SALE].flatMap(text => splitMessages(text).messages).slice(0, 3),
+    images: [],
     handoff: false,
     // Cleared: the basket has become a real order.
     pendingOrder: null,
@@ -140,10 +162,11 @@ function renderGeneralInfo(templates) {
   const products = getCatalogProducts().filter(product => product.active && product.unitPrice > 0);
   if (!products.length) return templates.ASK_PRODUCT;
   const fee = getShippingFee();
+  const lines = products.map(product => fill(templates.GENERAL_INFO_LINE, { product: product.name, price: formatMoney(product.unitPrice) }));
   return fill(templates.GENERAL_INFO_LAYOUT, {
     count: products.length,
-    products: products.map(product => fill(templates.GENERAL_INFO_LINE, { product: product.name, price: formatMoney(product.unitPrice) })).join('\n'),
-    shipping_note: fee ? ` ${fill(templates.GENERAL_INFO_SHIPPING, { fee: formatMoney(fee) })}` : ''
+    products: lines.join(templates.GENERAL_INFO_SEPARATOR ? `\n${templates.GENERAL_INFO_SEPARATOR}\n` : '\n'),
+    shipping_note: fee ? fill(templates.GENERAL_INFO_SHIPPING, { fee: formatMoney(fee) }) : ''
   });
 }
 
@@ -153,14 +176,58 @@ function renderGiftPolicy(templates) {
   return fill(templates.GIFT_POLICY_LAYOUT, { lines: lines.join('\n') });
 }
 
+/** Shipping wording for one basket key, shared by the quote and the mix table. */
+function shippingPiece(key, templates) {
+  const gifts = giftsForKey(key);
+  if (gifts.some(isFreeShippingGift)) return templates.PRICE_QUOTE_FREE_SHIPPING;
+  const fee = shippingFeeForKey(key);
+  return fee ? fill(templates.PRICE_QUOTE_SHIPPING, { fee: formatMoney(fee) }) : '';
+}
+
+function giftPiece(key, templates) {
+  const names = giftsForKey(key).filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name);
+  return names.length ? fill(templates.PRICE_QUOTE_GIFT, { gifts: names.join(' + ') }) : '';
+}
+
+/**
+ * PRICE_MIX_TUI_LON: every two-product mix of the mixable products, then the
+ * full set when all of them fit in one order — priced and gifted per the
+ * combination table, so the lines change the moment a tick changes.
+ */
 function renderMixPricing(templates) {
-  const products = getCatalogProducts().filter(product => product.active && product.comboPrice > 0);
-  if (!products.length) return templates.ASK_PRODUCT;
-  const [first, second] = products.filter(product => product.mixable);
-  return fill(templates.PRICE_MIX_TUI_LON_LAYOUT, {
-    products: products.map(product => fill(templates.PRICE_MIX_TUI_LON_LINE, { product: product.name, price: formatMoney(product.comboPrice) })).join('\n'),
-    example: second ? ` ${fill(templates.PRICE_MIX_TUI_LON_EXAMPLE, { first: first.name, second: second.name, total: formatMoney(first.comboPrice + second.comboPrice) })}` : ''
-  });
+  const mixable = getCatalogProducts().filter(product => product.active && product.mixable && product.comboPrice > 0);
+  if (mixable.length < 2) return templates.ASK_PRODUCT;
+  const combos = new Set(listCombos().map(combo => combo.key));
+  const priceOf = items => items.reduce((sum, product) => sum + product.comboPrice, 0);
+  const pairs = [];
+  for (let a = 0; a < mixable.length; a += 1) {
+    for (let b = a + 1; b < mixable.length; b += 1) {
+      const key = comboKey([{ sku: mixable[a].sku, quantity: 1 }, { sku: mixable[b].sku, quantity: 1 }]);
+      if (!combos.has(key)) continue;
+      const shipping = shippingPiece(key, templates);
+      pairs.push(fill(templates.PRICE_MIX_TUI_LON_LINE, {
+        first: mixable[a].name, second: mixable[b].name,
+        price: formatMoney(priceOf([mixable[a], mixable[b]])),
+        shipping: shipping ? ` ${shipping}` : ''
+      }));
+    }
+  }
+  let fullSet = '';
+  if (mixable.length >= 3 && mixable.length <= maxComboQuantity) {
+    const key = comboKey(mixable.map(product => ({ sku: product.sku, quantity: 1 })));
+    if (combos.has(key)) {
+      const shipping = shippingPiece(key, templates);
+      const gift = giftPiece(key, templates);
+      fullSet = fill(templates.PRICE_MIX_TUI_LON_FULL, {
+        count: mixable.length,
+        names: mixable.map(product => product.name).join(' + '),
+        price: formatMoney(priceOf(mixable)),
+        shipping: shipping ? ` ${shipping}` : '',
+        gift: gift ? `\n${gift}` : ''
+      });
+    }
+  }
+  return fill(templates.PRICE_MIX_TUI_LON_LAYOUT, { pairs: pairs.join('\n'), full_set: fullSet }).replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** Combining long-stroke overlay: the only way Messenger shows a struck-out price. */
@@ -170,22 +237,31 @@ function strike(text) {
 
 function formatWeight(grams) {
   if (!(grams > 0)) return '';
-  return grams >= 1000 ? `${(grams / 1000).toLocaleString('vi-VN', { maximumFractionDigits: 2 })}kg` : `${grams}g`;
+  return grams >= 1000 ? `${Math.round(grams / 10) / 100}kg` : `${grams}g`;
+}
+
+/** PRICE_QUOTE_TIER_2_COMBO for a product whose unit word is "Combo". */
+function unitSlug(unit) {
+  return normalizeText(unit).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 }
 
 /**
  * The price ladder of one product, one tier template per rung
  * (PRICE_QUOTE_TIER_1, _2, _3), joined by PRICE_QUOTE_SEPARATOR inside
- * PRICE_QUOTE. Figures come from the catalogue; every word comes from
- * Thiết lập tin nhắn. PRICE_TUI_XANH → "tui xanh" → the product's alias, so
- * a new product needs no new template: PRICE_QUOTE + its name is enough.
+ * PRICE_QUOTE_LAYOUT. A product whose unit word is, say, "Combo" uses
+ * PRICE_QUOTE_TIER_n_COMBO when that exists, so packs read "2 Combo Tiện Lợi
+ * (20 gói)" while bags read "Combo 2 Túi bán chạy". Figures come from the
+ * catalogue; every word comes from Thiết lập tin nhắn. PRICE_TUI_XANH →
+ * "tui xanh" → the product's alias, so a new product needs no new template.
  */
 function renderPriceTemplate(templateId, value, templates) {
   const quote = quoteTiers(value.Product_N1 || value.product || '')
     || quoteTiers(templateId.replace(/^PRICE_/, '').replace(/_/g, ' '));
   if (!quote) return templates.ASK_PRODUCT;
+  const { product } = quote;
+  const slug = unitSlug(product.unit);
   const tiers = quote.tiers.map(tier => {
-    const template = templates[`PRICE_QUOTE_TIER_${tier.quantity}`];
+    const template = (slug && templates[`PRICE_QUOTE_TIER_${tier.quantity}_${slug}`]) || templates[`PRICE_QUOTE_TIER_${tier.quantity}`];
     if (!template) return '';
     // Stored texts are trimmed on save, so the joining space/newline is added
     // here rather than expected inside the piece templates.
@@ -193,17 +269,24 @@ function renderPriceTemplate(templateId, value, templates) {
       ? templates.PRICE_QUOTE_FREE_SHIPPING
       : tier.shippingFee ? fill(templates.PRICE_QUOTE_SHIPPING, { fee: formatMoney(tier.shippingFee) }) : '';
     return fill(template, {
-      product: quote.product.name,
-      unit: quote.product.unit,
+      product: product.name,
+      unit: product.unit,
       quantity: tier.quantity,
-      weight: tier.weight ? ` (${formatWeight(tier.weight)})` : '',
+      weight: formatWeight(tier.weight),
       list_price: strike(formatMoney(tier.listPrice)),
       price: formatMoney(tier.price),
       shipping: shipping ? ` ${shipping}` : '',
       gift: tier.gifts.length ? `\n${fill(templates.PRICE_QUOTE_GIFT, { gifts: tier.gifts.join(' + ') })}` : ''
-    }).replace(/ {2,}/g, ' ').trim(); // a product with no unit word leaves no double space behind
+    })
+      // A product with no unit word or weight leaves no "()" or double space behind.
+      .replace(/\(\s*\)/g, '').replace(/,\s*\)/g, ')').replace(/ {2,}/g, ' ').replace(/ +:/g, ':').trim();
   }).filter(Boolean);
-  return fill(templates.PRICE_QUOTE_LAYOUT, { product: quote.product.name, tiers: tiers.join(templates.PRICE_QUOTE_SEPARATOR ? `\n${templates.PRICE_QUOTE_SEPARATOR}\n` : '\n') }).trim();
+  const image = publicImageUrl(product.image);
+  return fill(templates.PRICE_QUOTE_LAYOUT, {
+    product: product.name,
+    tiers: tiers.join(templates.PRICE_QUOTE_SEPARATOR ? `\n${templates.PRICE_QUOTE_SEPARATOR}\n` : '\n'),
+    image: image ? `![${product.name}](${image})` : ''
+  }).trim();
 }
 
 // Ids with a fixed renderer. Any other PRICE_* id is a product quote.
@@ -219,10 +302,21 @@ const dynamicTemplateRenderers = {
 // through renderPriceTemplate.
 const legacyPriceTemplateIds = ['PRICE_TUI_XANH', 'PRICE_TUI_VANG', 'PRICE_TUI_NAU', 'PRICE_TUI_XANH_NHO', 'PRICE_TUI_NAU_NHO', 'PRICE_TUI_CAM_NHO', 'PRICE_COMBO_10_GOI_MIX_3_MAU', 'PRICE_NGHE_LANH', 'PRICE_HAT_AN_LANH_DANG_HU'];
 
-/** A dynamic id is one the catalogue writes: it has a renderer, or it is a PRICE_* quote with no stored text. */
+/**
+ * A dynamic id is one the catalogue writes: it has a renderer, or it is a
+ * PRICE_<product> quote. A stored text under such an id (the Smax-era
+ * "PRICE_TUI_XANH: Dạ Túi Xanh 450g: 1 túi 174.000đ…") is stale by
+ * definition and is never used or kept. Wording pieces of a renderer
+ * (PRICE_QUOTE_TIER_1, PRICE_MIX_TUI_LON_LINE…) and PRICE_* ids that name no
+ * catalogue product (PRICE_YEN_MACH_UC_NGUYEN_CAM) stay ordinary templates.
+ */
 export function isDynamicTemplate(templateId, templates = {}) {
   const id = String(templateId || '').trim();
-  return Boolean(dynamicTemplateRenderers[id]) || (id.startsWith('PRICE_') && !Object.hasOwn(templates, id));
+  if (dynamicTemplateRenderers[id]) return true;
+  if (!id.startsWith('PRICE_')) return false;
+  if (Object.keys(dynamicTemplateRenderers).some(renderer => id.startsWith(`${renderer}_`))) return false;
+  if (!Object.hasOwn(templates, id)) return true;
+  return Boolean(matchProduct(id.replace(/^PRICE_/, '').replace(/_/g, ' ')));
 }
 
 function renderDynamicTemplate(templateId, value, templates) {
@@ -250,12 +344,12 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   const templateId = String(value.template_id || '').trim();
   if (isOrderStep(templateId)) return renderOrder(value, templates, context);
   if (isDynamicTemplate(templateId, templates)) {
-    return { templateId, messages: [renderDynamicTemplate(templateId, value, templates)], handoff: false };
+    return { templateId, ...splitMessages(renderDynamicTemplate(templateId, value, templates)), handoff: false };
   }
   const raw = templates[templateId] || value.reply || value.message || value.text || templates.CSKH_HANDOFF;
   return {
     templateId: templates[templateId] ? templateId : 'CSKH_HANDOFF',
-    messages: splitMessages(fill(raw, commonValues())),
+    ...splitMessages(fill(raw, commonValues())),
     handoff: templateId === 'CSKH_HANDOFF'
   };
 }

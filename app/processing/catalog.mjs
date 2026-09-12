@@ -50,30 +50,6 @@ export function normalizeAliases(value) {
   return aliases.slice(0, 40);
 }
 
-/**
- * What the warehouse ships for one unit of this product. Accepts the array
- * form or text such as "GRA-XANH-G35 x10" / "GRA-NAU-G35 x3, GRA-XANH-G35 x4".
- * Empty means one unit of the product's own SKU.
- */
-export function normalizeComponents(value) {
-  const list = Array.isArray(value)
-    ? value
-    : String(value ?? '').split(/[\n,;]+/).map(part => {
-        const match = part.trim().match(/^([A-Za-z0-9_\-+.]+)\s*(?:[x×*]\s*(\d+))?$/);
-        return match ? { sku: match[1], quantity: match[2] || 1 } : null;
-      });
-  const components = [];
-  for (const item of list) {
-    const sku = normalizeSkuText(item?.sku);
-    const quantity = Math.max(1, Math.round(Number(item?.quantity) || 1));
-    if (!sku) continue;
-    const existing = components.find(component => component.sku === sku);
-    if (existing) existing.quantity += quantity;
-    else components.push({ sku, quantity });
-  }
-  return components.slice(0, 20);
-}
-
 function normalizeCatalogProduct(item) {
   const sku = normalizeSkuText(item?.sku);
   const name = String(item?.name ?? '').trim();
@@ -87,7 +63,6 @@ function normalizeCatalogProduct(item) {
     weight: money(item?.weight),
     unit: String(item?.unit ?? '').trim(),
     aliases: normalizeAliases(item?.aliases),
-    components: normalizeComponents(item?.components),
     // Mixable products (the granola bags) may share one order in any mix of up
     // to maxComboQuantity units; every other product is sold on its own.
     mixable: item?.mixable === true,

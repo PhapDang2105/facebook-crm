@@ -134,7 +134,6 @@ const productUnit = document.querySelector('#product-unit');
 const productActive = document.querySelector('#product-active');
 const productMixable = document.querySelector('#product-mixable');
 const productAliases = document.querySelector('#product-aliases');
-const productComponents = document.querySelector('#product-components');
 const productFormStatus = document.querySelector('#product-form-status');
 const productSubmit = document.querySelector('#product-submit');
 const sharedProductOptions = document.querySelector('#shared-product-options');
@@ -2166,11 +2165,12 @@ function chatbotTemplateLabel(id) {
     WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
     ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
     ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
-    GENERAL_INFO_LAYOUT: 'Thông tin chung · khung', GENERAL_INFO_LINE: 'Thông tin chung · dòng sản phẩm', GENERAL_INFO_SHIPPING: 'Thông tin chung · ghi chú ship',
+    GENERAL_INFO_LAYOUT: 'Thông tin chung · khung', GENERAL_INFO_LINE: 'Thông tin chung · dòng sản phẩm', GENERAL_INFO_SEPARATOR: 'Thông tin chung · dòng kẻ', GENERAL_INFO_SHIPPING: 'Thông tin chung · ghi chú ship',
     GIFT_POLICY_LAYOUT: 'Quà tặng · khung', GIFT_POLICY_LINE: 'Quà tặng · dòng', PRICE_MIX_TUI_LON: 'Bảng giá · mua ghép',
-    PRICE_MIX_TUI_LON_LAYOUT: 'Bảng giá mua ghép · khung', PRICE_MIX_TUI_LON_LINE: 'Bảng giá mua ghép · dòng', PRICE_MIX_TUI_LON_EXAMPLE: 'Bảng giá mua ghép · ví dụ',
+    PRICE_MIX_TUI_LON_LAYOUT: 'Bảng giá mix túi · khung', PRICE_MIX_TUI_LON_LINE: 'Bảng giá mix túi · từng cặp', PRICE_MIX_TUI_LON_FULL: 'Bảng giá mix túi · trọn bộ',
     PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_LAYOUT: 'Báo giá · khung', PRICE_QUOTE_SEPARATOR: 'Báo giá · dòng kẻ',
     PRICE_QUOTE_TIER_1: 'Báo giá · 1 sản phẩm', PRICE_QUOTE_TIER_2: 'Báo giá · combo 2', PRICE_QUOTE_TIER_3: 'Báo giá · combo 3',
+    PRICE_QUOTE_TIER_1_COMBO: 'Báo giá đơn vị Combo · 1 combo', PRICE_QUOTE_TIER_2_COMBO: 'Báo giá đơn vị Combo · 2 combo', PRICE_QUOTE_TIER_3_COMBO: 'Báo giá đơn vị Combo · 3 combo',
     PRICE_QUOTE_SHIPPING: 'Báo giá · có phí ship', PRICE_QUOTE_FREE_SHIPPING: 'Báo giá · miễn ship', PRICE_QUOTE_GIFT: 'Báo giá · quà kèm',
     ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',
     BANK_TRANSFER: 'Thông tin chuyển khoản', THANK_YOU: 'Cảm ơn khách hàng'
@@ -2510,7 +2510,6 @@ function openProductDialog(product = null) {
   if (productActive) productActive.checked = product ? product.active !== false : true;
   if (productMixable) productMixable.checked = product ? product.mixable === true : false;
   if (productAliases) productAliases.value = Array.isArray(product?.aliases) ? product.aliases.join('\n') : '';
-  if (productComponents) productComponents.value = Array.isArray(product?.components) ? product.components.map(item => `${item.sku} x${item.quantity}`).join('\n') : '';
   if (productImageInput) productImageInput.value = '';
   if (productFormStatus) productFormStatus.textContent = '';
   renderProductImagePreview(product?.image || '');
@@ -4616,7 +4615,6 @@ productForm?.addEventListener('submit', async event => {
     active: productActive ? productActive.checked : true,
     mixable: productMixable ? productMixable.checked : false,
     aliases: productAliases?.value || '',
-    components: productComponents?.value || '',
     imageData: pendingProductImage,
     removeImage: removeCurrentProductImage
   };

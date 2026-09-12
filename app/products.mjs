@@ -1,4 +1,4 @@
-import { normalizeAliases, normalizeComponents, normalizeSkuText } from './processing/catalog.mjs';
+import { normalizeAliases, normalizeSkuText } from './processing/catalog.mjs';
 
 const maximumNameLength = 200;
 const maximumSkuLength = 80;
@@ -46,7 +46,6 @@ export function normalizeProduct(input = {}, existing = {}) {
     weight,
     unit,
     aliases: normalizeAliases(input.aliases ?? existing.aliases ?? []),
-    components: normalizeComponents(input.components ?? existing.components ?? []),
     mixable: (input.mixable ?? existing.mixable) === true,
     active: (input.active ?? existing.active) !== false,
     image: cleanText(input.image ?? existing.image, 500),

@@ -74,7 +74,7 @@ test('đơn chatbot mang SKU, giá lẻ, giá khách trả, ship và giảm giá
   assert.deepEqual(two.products.map(item => item.paidPrice), [149000, 144000]);
 });
 
-test('file xuất kho: bung thành phần, gộp ship vào giá đơn lẻ, thêm quà có SKU', () => {
+test('file xuất kho: mỗi sản phẩm một mã, gộp ship vào giá đơn lẻ, thêm quà có SKU', () => {
   const headers = ['Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá'];
   const rows = [
     ['CB-1', 'A', '0385805790', '12 Lê Lợi', 'Granola Túi Xanh 450g', 'GRA-XANH-Z450', '1', '189000'],
@@ -89,10 +89,10 @@ test('file xuất kho: bung thành phần, gộp ship vào giá đơn lẻ, thê
     'GRA-XANH-Z450x1@189000/450',
     // 2 xanh + 1 nâu là tổ hợp có quà: giá combo, miễn ship, quà có SKU thành dòng xuất kho.
     'GRA-XANH-Z450x2@149000/450', 'GRA-NAU-Z350x1@144000/350', 'BGDx1@0/10', 'MUONGx1@0/10',
-    // 1 combo 10 gói: (189.000 + 15.000 ship) chia đều 10 gói thành phần.
-    'GRA-NAU-G35x3@20400/35', 'GRA-XANH-G35x4@20400/35', 'GRA-CAM-G30x3@20400/30',
+    // 1 combo 10 gói: giá lẻ + ship, một dòng đúng mã SKU của nó.
+    'CB10-MIXx1@204000/335',
     // 2 combo 10 gói: giá combo, miễn ship theo bảng quà.
-    'GRA-NAU-G35x6@17900/35', 'GRA-XANH-G35x8@17900/35', 'GRA-CAM-G30x6@17900/30'
+    'CB10-MIXx2@179000/335'
   ]);
   // Pancake-era symbols still follow the legacy mapping.
   assert.deepEqual(splitSkuForExport('CB2-XANH', 1, 298000, true).map(item => item.sku), ['GRA-XANH-Z450']);
@@ -103,25 +103,38 @@ test('mẫu tin giá và quà chỉ tồn tại ở dạng động, soạn từ 
     assert.equal(templates[id], undefined, `${id} không được là text tĩnh`);
     assert.ok(listDynamicTemplates(templates)[id], `${id} phải là mẫu động`);
   }
-  assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_NAU_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Nâu.*\n🌱 1 Set dùng thử \(350g\):\n🔸 Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ/);
+  // Đơn vị "Combo" có bộ mẫu bậc riêng (PRICE_QUOTE_TIER_n_COMBO).
+  assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_NAU_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Nâu.*\n🌿 Combo Dùng Thử \(350g\):\n🏷️ Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ\n━+\n🔥 2 Combo Tiện Lợi \(700g\):/);
   const policy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates).messages[0];
   assert.match(policy, /• Miễn phí vận chuyển: .*2 × Granola Túi Xanh 450g/);
   assert.match(policy, /• Miễn phí vận chuyển \+ Bộ bát gáo dừa \+ Muỗng dừa: .*3 × Granola Túi Xanh 450g/);
   const strike = text => [...text].map(char => `${char}\u0336`).join('');
-  assert.equal(renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates).messages[0], [
+  const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
+  assert.equal(quote.messages[0], [
     'Dạ, em gửi anh/chị Bảng giá Granola Túi Xanh 450g để mình dễ tham khảo ạ:',
-    '🌱 1 Túi dùng thử (450g):',
-    '🔸 Giá niêm yết: 174.000đ + Phí vận chuyển 15.000đ',
+    '🌿 1 Túi dùng thử (450g):',
+    '🏷️ Giá niêm yết: 174.000đ + Phí vận chuyển 15.000đ',
     '━━━━━━━━━━━━',
     '🔥 Combo 2 Túi bán chạy (900g):',
-    `🔸 Giá gốc: ${strike('348.000đ')}`,
+    `🏷️ Giá gốc: ${strike('348.000đ')}`,
     '✨ Giảm còn: 298.000đ (Miễn phí vận chuyển)',
     '━━━━━━━━━━━━',
-    '🏡 Combo 3 Túi Gia Đình (1,35kg):',
-    `🔸 Giá gốc: ${strike('522.000đ')}`,
+    '👨‍👩‍👧‍👦 Combo 3 Túi Gia Đình (1.35kg):',
+    `🏷️ Giá gốc: ${strike('522.000đ')}`,
     '✨ Giảm còn: 447.000đ (Miễn phí vận chuyển)',
     '🎁 Tặng kèm: Bộ bát gáo dừa + Muỗng dừa ạ.'
   ].join('\n'));
+  // Tin thứ hai là lời mời hỏi thêm; sản phẩm chưa có ảnh thì không có tin thứ ba và không gửi ảnh.
+  assert.equal(quote.messages.length, 2);
+  assert.deepEqual(quote.images, []);
+  // Ảnh viết kiểu ![tên](url) trong mẫu được tách ra gửi riêng.
+  const withImage = renderChatbotReply({ template_id: 'STORE_ADDRESS' }, { ...templates, STORE_ADDRESS: 'Địa chỉ ạ###![Bản đồ](https://example.com/map.png)' });
+  assert.deepEqual(withImage, { templateId: 'STORE_ADDRESS', messages: ['Địa chỉ ạ'], images: ['https://example.com/map.png'], handoff: false });
+  // Bảng mix: từng cặp túi ghép và trọn bộ, giá + ship + quà theo bảng tổ hợp.
+  const mix = renderChatbotReply({ template_id: 'PRICE_MIX_TUI_LON' }, templates).messages[0];
+  assert.match(mix, /• Granola Túi Xanh 450g \+ Granola Túi Vàng nhiều hạt quả 350g: 298\.000đ \(Miễn phí vận chuyển\)/);
+  assert.match(mix, /• Granola Túi Xanh 450g \+ Granola Túi Nâu vị cacao 350g: 293\.000đ \(Miễn phí vận chuyển\)/);
+  assert.match(mix, /🎁 Trọn bộ 3 túi \(.*\): 442\.000đ \(Miễn phí vận chuyển\)\n🎁 Tặng kèm: Bộ bát gáo dừa \+ Muỗng dừa ạ\./);
   assert.deepEqual(pricing.quoteTiers('hạt an lành').tiers.map(tier => [tier.price, tier.freeShipping, tier.gifts.length]), [[269000, false, 0], [528000, true, 0], [792000, true, 0]]);
 });
 
@@ -142,10 +155,10 @@ test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu 
   assert.match(pricing.buildCatalogPrompt(), /Granola Túi Xanh 450g \(mã GRA-XANH-Z450\): mua lẻ 1 sản phẩm 199\.000đ \+ phí vận chuyển 20\.000đ/);
 });
 
-test('giá combo cao hơn giá lẻ bị từ chối; thành phần xuất kho đọc từ chữ', () => {
+test('giá combo cao hơn giá lẻ bị từ chối; SKU và tên gọi khác được chuẩn hóa', () => {
   assert.throws(() => normalizeProduct({ name: 'X', sku: 'X', salePrice: 100000, comboPrice: 120000 }), /cao hơn giá bán lẻ/);
-  const product = normalizeProduct({ name: 'X', sku: 'cb10 x', salePrice: 189000, comboPrice: 179000, components: 'gra-xanh-g35 x10', aliases: 'a, b,, a' });
+  const product = normalizeProduct({ name: 'X', sku: 'cb10 x', salePrice: 189000, comboPrice: 179000, unit: ' Hũ ', aliases: 'a, b,, a' });
   assert.equal(product.sku, 'CB10_X');
-  assert.deepEqual(product.components, [{ sku: 'GRA-XANH-G35', quantity: 10 }]);
+  assert.equal(product.unit, 'Hũ');
   assert.deepEqual(product.aliases, ['a', 'b']);
 });

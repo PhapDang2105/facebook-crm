@@ -155,7 +155,7 @@ const chatbotSettingsSystemPromptCounter = document.querySelector('#chatbot-sett
 function updateChatbotSystemPromptCounter() {
   if (!chatbotSettingsSystemPromptCounter || !chatbotSettingsSystemPrompt) return;
   const count = chatbotSettingsSystemPrompt.value ? chatbotSettingsSystemPrompt.value.length : 0;
-  // Dify hiển thị đúng một con số ở góc khối prompt, không kèm đơn vị.
+  // Chỉ một con số ở góc khối prompt, không kèm đơn vị.
   chatbotSettingsSystemPromptCounter.textContent = count.toLocaleString('vi-VN');
   chatbotSettingsSystemPromptCounter.title = `${count.toLocaleString('vi-VN')} / 30.000 ký tự`;
 }
@@ -167,7 +167,7 @@ const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
 const chatbotModelParamsButton = document.querySelector('#chatbot-model-params');
 const chatbotDirectConfig = document.querySelector('#chatbot-direct-config');
 
-/** Keeps the Dify-style summary row in step with the advanced fields behind it. */
+/** Keeps the summary row in step with the advanced fields behind it. */
 function syncChatbotModelDisplay() {
   if (!chatbotModelDisplay) return;
   const select = document.querySelector('#chatbot-settings-direct-model');

@@ -59,7 +59,7 @@ export function normalizeChatbotSettings(value = {}) {
   // stored texts; the screen turns a shipped template off rather than
   // dropping it, so nothing staff switched off ever comes back. Ids staff
   // created themselves are theirs alone: removed on screen, gone. A text
-  // stored under a Smax-era PRICE_<sản phẩm> id is a stale price: dropped.
+  // stored under an old PRICE_<sản phẩm> id is a stale price: dropped.
   const stored = value.messageTemplates && typeof value.messageTemplates === 'object' ? value.messageTemplates : {};
   const submitted = { ...defaultMessageTemplates(), ...stored };
   const messageTemplates = Object.fromEntries(Object.entries(submitted)

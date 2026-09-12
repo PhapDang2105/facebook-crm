@@ -69,8 +69,8 @@ const imagePattern = /!\s*\[[^\]]*\]\s*\(\s*(https?:\/\/[^\s)]+)[^)]*\)/g;
 /**
  * Splits one filled template into up to three messages ("###" separates
  * them). An image written Markdown-style — ![tên](https://…) — is lifted out
- * and sent as a picture after the text, which is how the Smax templates
- * carried product photos.
+ * and sent as a picture after the text, so a template can carry a product
+ * photo.
  */
 function splitMessages(text) {
   const images = [];
@@ -303,7 +303,7 @@ const catalogRenderers = {
 };
 
 /**
- * A PRICE_<sản phẩm> id the model was taught in the Smax days. It is answered
+ * A PRICE_<sản phẩm> id from the old prompt vocabulary. It is answered
  * by PRICE_QUOTE for that product; a text stored under it (the old
  * "Dạ Túi Xanh 450g: 1 túi 174.000đ…") is stale by definition and dropped.
  */

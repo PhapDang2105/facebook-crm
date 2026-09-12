@@ -97,11 +97,11 @@ test('chuẩn hóa các nhà cung cấp model tích hợp sẵn', () => {
   }
 });
 
-test('mẫu tin: giữ đúng text đã gửi, bỏ giá Smax cũ, không nhận mã trống', () => {
+test('mẫu tin: giữ đúng text đã gửi, bỏ giá cũ ghi dưới mã sản phẩm, không nhận mã trống', () => {
   const settings = normalizeChatbotSettings({
     messageTemplates: {
       WELCOME: '  Xin chào mới  ', GENERAL_INFO: 'Có {count} sản phẩm', PRICE_QUOTE: 'Giá {price_1}',
-      // Text Smax cũ lưu cho một sản phẩm có trong danh mục: cũ, bỏ; giá không có trong danh mục thì giữ.
+      // Text cũ lưu dưới mã của một sản phẩm có trong danh mục: bỏ; giá không có trong danh mục thì giữ.
       PRICE_TUI_XANH: 'Dạ Túi Xanh 450g: 1 túi 174.000đ', PRICE_YEN_MACH_UC_NGUYEN_CAM: 'Dạ Yến Mạch 1kg 116.000đ'
     },
     deletedTemplateIds: ['WELCOME'],

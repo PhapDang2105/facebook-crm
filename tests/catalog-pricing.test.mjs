@@ -103,7 +103,7 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
     assert.ok(templates[id], `${id} phải có mẫu để sửa`);
     assert.doesNotMatch(templates[id], /\d{3}\.\d{3}đ/, `${id} không được chứa giá cứng`);
   }
-  // PRICE_TUI_XANH kiểu Smax là báo giá của sản phẩm "túi xanh", không có mẫu riêng.
+  // PRICE_TUI_XANH kiểu cũ là báo giá của sản phẩm "túi xanh", không có mẫu riêng.
   assert.equal(isProductQuoteId('PRICE_TUI_XANH'), true);
   assert.equal(isProductQuoteId('PRICE_YEN_MACH_UC_NGUYEN_CAM'), false);
   assert.equal(isProductQuoteId('PRICE_QUOTE_COMBO'), false);

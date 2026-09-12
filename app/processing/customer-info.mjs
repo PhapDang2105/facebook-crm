@@ -1,4 +1,4 @@
-// Ported from the n8n node "Xử lý xưng hô và số điện thoại".
+// Xử lý xưng hô và số điện thoại.
 // The looser pattern the CRM used before accepted prefixes that do not exist in
 // Vietnam (012, 030, 051, 001...), so a typo became a shipped order that could
 // never be delivered.

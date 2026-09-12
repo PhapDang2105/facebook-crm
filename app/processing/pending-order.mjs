@@ -1,5 +1,5 @@
 // The basket a customer named and the phone/address they give afterwards almost
-// never arrive in the same message. n8n kept the basket in workflow static data
+// never arrive in the same message. The old workflow kept the basket in static data
 // for two hours; here it is stored on the conversation record so it survives a
 // restart and stays scoped to one customer.
 

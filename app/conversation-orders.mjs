@@ -11,6 +11,10 @@ function money(value) {
 export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = randomUUID().slice(0, 8) } = {}) {
   const products = Array.isArray(input.products) ? input.products.slice(0, 100).map(item => ({
     name: text(item?.name, 200),
+    sku: text(item?.sku, 80),
+    variant: text(item?.variant, 120),
+    image: text(item?.image, 500),
+    weight: Math.max(0, Math.round(Number(item?.weight) || 0)),
     quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)),
     price: money(item?.price)
   })).filter(item => item.name) : [];
@@ -97,4 +101,63 @@ export function buildCustomerOrderConfirmation(order) {
     `💰 Tổng đơn: ${formatOrderMoney(order.total)}`,
     'Giọt Nắng đã nhận đơn. Bạn vui lòng kiểm tra lại thông tin và phản hồi ngay nếu cần điều chỉnh. Cảm ơn bạn!'
   ].join('\n\n');
+}
+
+function splitDeliveryAddress(address) {
+  const parts = String(address || '').split(',').map(part => part.trim()).filter(Boolean);
+  if (!parts.length) return { street_1: 'Chưa có địa chỉ', city: '—', postal_code: '00000', state: '—', country: 'VN' };
+  const street = parts[0];
+  const state = parts.length > 1 ? parts[parts.length - 1] : '—';
+  const city = parts.length > 2 ? parts[parts.length - 2] : (parts.length > 1 ? parts[parts.length - 1] : '—');
+  return { street_1: street, city, postal_code: '00000', state, country: 'VN' };
+}
+
+function publicImageUrl(value, baseUrl) {
+  const raw = String(value || '').trim();
+  if (/^https:\/\//i.test(raw)) return raw;
+  const base = String(baseUrl || '').replace(/\/+$/, '');
+  if (!raw || !base.startsWith('https://')) return '';
+  return `${base}/${raw.replace(/^\/+/, '')}`;
+}
+
+/**
+ * Builds the Messenger Receipt Template for an order. Messenger renders this as a
+ * compact "Xác nhận đơn đặt hàng" bubble that opens the full receipt when tapped.
+ * Docs: Messenger Platform → Templates → Receipt Template.
+ */
+export function buildOrderReceiptPayload(order, { merchantName = 'Giọt Nắng', baseUrl = '', orderUrl = '' } = {}) {
+  const subtotal = order.products.reduce((sum, item) => sum + item.quantity * item.price, 0);
+  const elements = order.products.slice(0, 100).map(item => {
+    const image = publicImageUrl(item.image, baseUrl);
+    return {
+      title: text(item.name, 80) || 'Sản phẩm',
+      subtitle: text(item.variant || item.sku || merchantName, 80),
+      quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
+      price: money(item.price),
+      currency: 'VND',
+      ...(image ? { image_url: image } : {})
+    };
+  });
+  const payload = {
+    template_type: 'receipt',
+    recipient_name: text(order.name, 80) || 'Khách hàng',
+    order_number: String(order.id),
+    currency: 'VND',
+    payment_method: order.payment === 'Chuyển khoản' ? 'Chuyển khoản' : 'Thanh toán khi giao hàng (COD)',
+    timestamp: String(Math.floor((Number(order.createdAt) || Date.now()) / 1000)),
+    address: splitDeliveryAddress(order.address),
+    summary: {
+      subtotal: money(subtotal),
+      shipping_cost: money(order.shippingFee),
+      total_tax: 0,
+      total_cost: money(order.total)
+    },
+    elements
+  };
+  if (money(order.discount) > 0) {
+    payload.adjustments = [{ name: 'Giảm giá', amount: -money(order.discount) }];
+  }
+  const url = publicImageUrl(orderUrl, baseUrl);
+  if (url) payload.order_url = url;
+  return payload;
 }

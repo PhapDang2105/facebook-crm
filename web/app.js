@@ -82,9 +82,16 @@ const customerOrderForm = document.querySelector('#customer-order-form');
 const customerOrderName = document.querySelector('#customer-order-name');
 const customerOrderPhone = document.querySelector('#customer-order-phone');
 const customerOrderAddress = document.querySelector('#customer-order-address');
+const customerOrderSavedAddress = document.querySelector('#customer-order-saved-address');
+const customerOrderChip = document.querySelector('#customer-order-chip');
+const customerOrderChipAvatar = document.querySelector('#customer-order-chip-avatar');
+const customerOrderChipName = document.querySelector('#customer-order-chip-name');
+const customerOrderChipPhone = document.querySelector('#customer-order-chip-phone');
+const customerOrderChipCarrier = document.querySelector('#customer-order-chip-carrier');
 const customerProductName = document.querySelector('#customer-product-name');
-const customerProductQuantity = document.querySelector('#customer-product-quantity');
-const customerProductPrice = document.querySelector('#customer-product-price');
+const customerProductQuantityLabel = document.querySelector('#customer-product-quantity-label');
+const customerProductCombo = document.querySelector('#customer-product-combo');
+const customerOrderWeight = document.querySelector('#customer-order-weight');
 const customerProductAddButton = document.querySelector('#customer-product-add-button');
 const customerProductEmpty = document.querySelector('#customer-product-empty');
 const customerProductList = document.querySelector('#customer-product-list');
@@ -2278,38 +2285,133 @@ function renderCustomerNotes(conversation = getActiveConversation()) {
   customerNoteList.innerHTML = notes.map(note => `<li>${escapeHtml(note.text)}<time>${escapeHtml(formatCustomerPanelTime(note.createdAt, true))}</time></li>`).join('');
 }
 
+const vietnamCarrierPrefixes = {
+  Viettel: ['032', '033', '034', '035', '036', '037', '038', '039', '086', '096', '097', '098'],
+  Vinaphone: ['081', '082', '083', '084', '085', '088', '091', '094'],
+  Mobifone: ['070', '076', '077', '078', '079', '089', '090', '093'],
+  Vietnamobile: ['052', '056', '058', '092'],
+  Gmobile: ['059', '099'],
+  Itelecom: ['087']
+};
+
+function detectPhoneCarrier(phone) {
+  const digits = String(phone || '').replace(/\D/g, '').replace(/^84/, '0');
+  if (digits.length < 10) return '';
+  const prefix = digits.slice(0, 3);
+  return Object.keys(vietnamCarrierPrefixes).find(carrier => vietnamCarrierPrefixes[carrier].includes(prefix)) || '';
+}
+
+function findSharedProduct(value) {
+  const query = String(value || '').trim().toLocaleLowerCase('vi');
+  if (!query) return null;
+  return sharedProducts.find(item => String(item.sku || '').toLocaleLowerCase('vi') === query)
+    || sharedProducts.find(item => String(item.name || '').toLocaleLowerCase('vi') === query)
+    || sharedProducts.find(item => `${item.name} ${item.sku}`.toLocaleLowerCase('vi').includes(query))
+    || null;
+}
+
+function getProductUnitWeight(item) {
+  if (Number(item?.weight) > 0) return Number(item.weight);
+  const sku = String(item?.sku || '').toUpperCase();
+  if (sku && Number(skuWeights[sku]) > 0) return Number(skuWeights[sku]);
+  const matched = findSharedProduct(item?.sku || item?.name);
+  if (Number(matched?.weight) > 0) return Number(matched.weight);
+  const matchedSku = String(matched?.sku || '').toUpperCase();
+  return Number(skuWeights[matchedSku]) || 0;
+}
+
+function formatGramWeight(grams) {
+  const value = Math.max(0, Math.round(Number(grams) || 0));
+  return `${new Intl.NumberFormat('vi-VN').format(value)} g`;
+}
+
+function describeOrderProducts(order) {
+  const products = Array.isArray(order?.products) ? order.products : [];
+  const quantity = products.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+  const weight = products.reduce((sum, item) => sum + getProductUnitWeight(item) * (Number(item.quantity) || 0), 0);
+  const first = products[0] || null;
+  const matched = first ? findSharedProduct(first.sku || first.name) : null;
+  const sku = String(first?.sku || matched?.sku || '').trim();
+  const name = String(first?.name || '').trim();
+  const extra = products.length > 1 ? ` +${products.length - 1} SP` : '';
+  return { products, quantity, weight, sku, name: `${name}${extra}` };
+}
+
+function customerOrderStaff(name, avatar) {
+  const label = escapeHtml(String(name || 'Bạn'));
+  const image = avatar ? `<img src="${escapeHtml(avatar)}" alt="">` : '<img src="/assets/icons/customer-panel/user.png" alt="">';
+  return `<span class="customer-order-staff">${image}${label}</span>`;
+}
+
+function customerOrderMetaRow(icon, label, valueMarkup, link = false) {
+  return `<div class="customer-order-detail">${customerPanelIcon(icon)}<span>${escapeHtml(label)}</span><span class="value${link ? ' link' : ''}">${valueMarkup}</span></div>`;
+}
+
+const customerOrderEmptyIllustration = `<svg viewBox="0 0 140 128" aria-hidden="true">
+  <path d="M32 58h76l-8 46H40Z" fill="#f2f4f8" stroke="#dbe0e8" stroke-width="2" stroke-linejoin="round"></path>
+  <path d="M22 46h44l-6 14H28Z" fill="#fff" stroke="#dbe0e8" stroke-width="2" stroke-linejoin="round"></path>
+  <path d="M118 46H74l6 14h32Z" fill="#fff" stroke="#dbe0e8" stroke-width="2" stroke-linejoin="round"></path>
+  <path d="M70 44V22M70 22l-9 8M70 22l9 8" stroke="#cfd6e0" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+  <circle cx="42" cy="26" r="3" fill="#e3e8ef"></circle>
+  <circle cx="104" cy="34" r="2.4" fill="#e3e8ef"></circle>
+  <path d="M28 36h5M114 20h5M116.5 17.5v5" stroke="#e3e8ef" stroke-width="2" stroke-linecap="round"></path>
+</svg>`;
+
 function renderCustomerOrders(conversation = getActiveConversation()) {
   if (!customerOrderList || !customerOrderCount) return;
   const orders = getCustomerOrders(conversation);
-  customerOrderCount.textContent = `Đơn hàng (${orders.length})`;
+  customerOrderCount.textContent = orders.length ? `Đơn hàng (${orders.length})` : 'Đơn hàng';
   if (!orders.length) {
-    customerOrderList.innerHTML = '<div class="customer-orders-empty">Khách hàng chưa có đơn hàng nào</div>';
+    customerOrderList.innerHTML = `<div class="customer-orders-empty">${customerOrderEmptyIllustration}<span>Chưa có đơn hàng trong khoảng thời gian này</span><button type="button" id="customer-order-create-new">+ Tạo mới</button></div>`;
     return;
   }
   customerOrderList.innerHTML = orders.map((order, index) => {
-    const products = Array.isArray(order.products) ? order.products : [];
-    const quantity = products.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-    const productLabel = products.length === 1 ? products[0].name : `${products.length} sản phẩm`;
-    const total = Number(order.total) || products.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0);
+    const summary = describeOrderProducts(order);
+    const total = Number(order.total) || summary.products.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0);
+    const carrier = detectPhoneCarrier(order.phone);
+    const channelIcon = String(order.source || '').toLocaleLowerCase('vi').includes('zalo') ? 'zalo' : 'facebook';
+    const avatar = order.employeeAvatar || '';
+    const updated = Number(order.updatedAt) && Number(order.updatedAt) !== Number(order.createdAt)
+      ? customerOrderMetaRow('check', 'Cập nhật TT', escapeHtml(formatCustomerPanelTime(order.updatedAt)))
+      : '';
+    const productCell = summary.sku
+      ? `<b class="customer-order-sku">${escapeHtml(summary.sku)}</b> <span class="customer-order-product-name">${escapeHtml(summary.name || 'Sản phẩm')}</span>`
+      : `<span class="customer-order-product-name">${escapeHtml(summary.name || 'Chưa có sản phẩm')}</span>`;
     return `<details class="customer-order-card" ${index === 0 ? 'open' : ''}>
-      <summary><strong>${escapeHtml(String(order.id))}</strong><img src="/assets/icons/facebook.png" alt="Facebook"><time>${escapeHtml(formatCustomerPanelTime(order.createdAt))}</time></summary>
-      <div class="customer-order-statuses"><span>${customerPanelIcon('star')} ${escapeHtml(order.status || 'Mới')}</span>${customerPanelIcon('right')}<b>${customerPanelIcon('shield')} Đã xác nhận</b>${customerPanelIcon('right')}<span>${customerPanelIcon('cancel')} Hủy</span></div>
+      <summary>
+        ${avatar ? `<img class="order-owner" src="${escapeHtml(avatar)}" alt="">` : ''}
+        <strong>${escapeHtml(String(order.id))}</strong>
+        <img class="order-channel" src="/assets/icons/${channelIcon}.png" alt="${escapeHtml(order.source || 'Facebook')}">
+        <span class="customer-order-actions">
+          <button type="button" data-order-action="note" data-order-id="${escapeHtml(String(order.id))}" title="Ghi chú đơn" aria-label="Ghi chú đơn"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg></button>
+          <button type="button" data-order-action="share" data-order-id="${escapeHtml(String(order.id))}" title="Gửi lại cho khách" aria-label="Gửi lại cho khách"><svg viewBox="0 0 24 24"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"></path><path d="M12 16V4M8 8l4-4 4 4"></path></svg></button>
+          <button type="button" data-order-action="edit" data-order-id="${escapeHtml(String(order.id))}" title="Sửa đơn" aria-label="Sửa đơn"><svg viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16Z"></path><path d="m14 6 4 4"></path></svg></button>
+        </span>
+      </summary>
+      <div class="customer-order-statuses">
+        <span>${customerPanelIcon('star')}${escapeHtml(order.status || 'Mới')}</span><i>&rsaquo;</i><b>${customerPanelIcon('shield')}Đã xác nhận</b><i>&rsaquo;</i><span>${customerPanelIcon('cancel')}Hủy</span>
+      </div>
       <div class="customer-order-details">
         <div class="customer-order-customer">
-          <div class="customer-order-detail">${customerPanelIcon('user')}<span>${escapeHtml(order.name || 'Chưa có tên')}</span></div>
-          <div class="customer-order-detail">${customerPanelIcon('location')}<span>${escapeHtml(order.address || 'Chưa có địa chỉ')}</span></div>
-          <div class="customer-order-detail">${customerPanelIcon('phone')}<a href="tel:${escapeHtml(order.phone || '')}">${escapeHtml(order.phone || 'Chưa có số điện thoại')}</a><small>${escapeHtml(order.source || 'Facebook')}</small></div>
-          <div class="customer-order-detail customer-order-detail--products">${customerPanelIcon('cart')}<span>${escapeHtml(productLabel || 'Chưa có sản phẩm')} ${customerPanelIcon('right')}</span><strong>Đơn đủ</strong></div>
-          <div class="customer-order-metrics"><div class="customer-order-metric">${customerPanelIcon('wallet')}<strong>${escapeHtml(formatOrderMoney(total))}</strong></div><div class="customer-order-metric"><span>Số lượng</span><span>${quantity}</span></div></div>
+          <div class="customer-order-detail">${customerPanelIcon('user')}<span class="grow">${escapeHtml(order.name || 'Chưa có tên')}</span></div>
+          <div class="customer-order-detail">${customerPanelIcon('location')}<span class="grow">${escapeHtml(order.address || 'Chưa có địa chỉ')}</span></div>
+          <div class="customer-order-detail">${customerPanelIcon('phone')}<a href="tel:${escapeHtml(order.phone || '')}">${escapeHtml(order.phone || 'Chưa có số điện thoại')}</a>${carrier ? `<span class="customer-order-tag-carrier">${escapeHtml(carrier)}</span>` : ''}</div>
+          <div class="customer-order-detail">${customerPanelIcon('cart')}<span class="grow">${productCell}</span><svg class="customer-order-info-dot" viewBox="0 0 24 24" fill="none" stroke="#8c8c8c" stroke-width="1.8"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5" stroke-linecap="round"></path><circle cx="12" cy="7.8" r="1" fill="#8c8c8c" stroke="none"></circle></svg><span class="customer-order-full">Đơn đủ</span></div>
+          <div class="customer-order-detail">${customerPanelIcon('wallet')}<span class="customer-order-price">${escapeHtml(formatOrderMoney(total))}</span><span class="customer-order-weight">${customerPanelIcon('delivery')}${escapeHtml(summary.weight ? formatGramWeight(summary.weight) : `SL ${summary.quantity}`)}</span></div>
         </div>
         <div class="customer-order-meta">
-          <div class="customer-order-detail">${customerPanelIcon('clock')}<span>Tạo lúc</span><span>${escapeHtml(formatCustomerPanelTime(order.createdAt))}</span></div>
-          <div class="customer-order-detail">${customerPanelIcon('check')}<span>Cập nhật TT</span><span>${escapeHtml(formatCustomerPanelTime(order.updatedAt))}</span></div>
-          <div class="customer-order-detail">${customerPanelIcon('document')}<span>Ghi chú</span><a>${escapeHtml(order.note || 'Chưa có')}</a></div>
-          <div class="customer-order-detail">${customerPanelIcon('user')}<span>NV tạo đơn</span><span>${escapeHtml(order.employee || 'Bạn')}</span></div>
-          <div class="customer-order-detail">${customerPanelIcon('calendar')}<span>Dự kiến nhận hàng</span><a>Chưa có</a></div>
+          ${customerOrderMetaRow('clock', 'Tạo lúc', escapeHtml(formatCustomerPanelTime(order.createdAt)))}
+          ${updated}
+          ${order.note ? customerOrderMetaRow('document', 'Ghi chú', escapeHtml(order.note)) : customerOrderMetaRow('document', 'Ghi chú', 'Chưa có', true)}
+          ${customerOrderMetaRow('printer', 'Ghi chú in', 'Chưa có', true)}
+          ${customerOrderMetaRow('user', 'NV sửa cuối', customerOrderStaff(order.employee, avatar))}
+          ${customerOrderMetaRow('user', 'NV tạo đơn', customerOrderStaff(order.employee, avatar))}
+          ${customerOrderMetaRow('delivery', 'Dự kiến nhận hàng', 'Chưa có', true)}
         </div>
-        <div class="customer-order-tags"><span>${customerPanelIcon('tag')} Thẻ</span><button type="button">Thêm thẻ</button></div>
+        <div class="customer-order-tags">
+          <div class="customer-order-detail">${customerPanelIcon('tag')}<span class="grow">Thẻ</span><button type="button">Thêm thẻ</button></div>
+          <div class="customer-order-detail">${customerPanelIcon('tag')}<span class="grow">Thẻ KH</span><button type="button">Thêm thẻ</button></div>
+        </div>
       </div>
     </details>`;
   }).join('');
@@ -2381,23 +2483,71 @@ function renderConversationOrderCards(conversation = getActiveConversation()) {
     .forEach(appendConversationOrderCard);
 }
 
+function getCustomerDraftWeight() {
+  return customerDraftProducts.reduce((sum, item) => sum + getProductUnitWeight(item) * (Number(item.quantity) || 0), 0);
+}
+
 function updateCustomerOrderTotals() {
   const subtotal = customerDraftProducts.reduce((sum, item) => sum + item.quantity * item.price, 0);
+  const quantity = customerDraftProducts.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
   const shipping = customerFreeShipping?.checked ? 0 : Math.max(0, Number(customerShippingFee?.value) || 0);
   const discount = Math.max(0, Number(customerOrderDiscount?.value) || 0);
   const total = Math.max(0, subtotal + shipping - discount);
   if (customerOrderSubtotal) customerOrderSubtotal.textContent = formatOrderMoney(subtotal);
   if (customerOrderTotal) customerOrderTotal.textContent = formatOrderMoney(total);
+  if (customerProductQuantityLabel) customerProductQuantityLabel.textContent = `SL:${quantity}`;
+  if (customerOrderWeight) customerOrderWeight.textContent = formatGramWeight(getCustomerDraftWeight());
   if (customerShippingFee) customerShippingFee.disabled = Boolean(customerFreeShipping?.checked);
   if (customerOrderSubmit) customerOrderSubmit.disabled = !customerOrderName?.value.trim() || !customerOrderPhone?.value.trim() || !customerOrderAddress?.value.trim() || !customerDraftProducts.length;
-  return { subtotal, shipping, discount, total };
+  return { subtotal, shipping, discount, total, quantity };
 }
 
 function renderCustomerDraftProducts() {
   if (!customerProductList || !customerProductEmpty) return;
   customerProductEmpty.classList.toggle('hidden', customerDraftProducts.length > 0);
-  customerProductList.innerHTML = customerDraftProducts.map((item, index) => `<div class="customer-product-row"><span>${escapeHtml(item.name)}<button type="button" data-remove-customer-product="${index}">Xóa</button></span><span>${item.quantity}</span><span>${escapeHtml(formatOrderMoney(item.price))}</span><span>${escapeHtml(formatOrderMoney(item.quantity * item.price))}</span></div>`).join('');
+  customerProductList.innerHTML = customerDraftProducts.map((item, index) => {
+    const unitWeight = getProductUnitWeight(item);
+    const variant = [item.variant || '', unitWeight ? formatGramWeight(unitWeight * Math.max(1, Number(item.quantity) || 1)) : '']
+      .filter(Boolean);
+    const subline = variant.length
+      ? `<small>${escapeHtml(variant[0])}${variant[1] ? `, <em>${escapeHtml(variant[1])}</em>` : ''}</small>`
+      : (item.sku ? `<small>${escapeHtml(item.sku)}</small>` : '');
+    return `<div class="customer-product-row">
+      <span class="cell-name"><strong>${escapeHtml(item.name)}</strong>${subline}<button type="button" data-remove-customer-product="${index}">Xóa</button></span>
+      <input type="number" min="1" step="1" value="${Math.max(1, Number(item.quantity) || 1)}" data-customer-quantity="${index}" aria-label="Số lượng">
+      <input type="number" min="0" step="1000" value="${Math.max(0, Number(item.price) || 0)}" data-customer-price="${index}" aria-label="Đơn giá">
+      <span class="cell-total">${escapeHtml(formatOrderMoney(item.quantity * item.price))}</span>
+    </div>`;
+  }).join('');
   updateCustomerOrderTotals();
+}
+
+function renderCustomerOrderChip(conversation = getActiveConversation()) {
+  if (!customerOrderChip) return;
+  const profile = getCustomerPanelProfile(conversation);
+  const name = profile.name || customerOrderName?.value.trim() || '';
+  const phone = customerOrderPhone?.value.trim() || profile.phone || '';
+  customerOrderChip.hidden = !name;
+  if (!name) return;
+  if (customerOrderChipName) customerOrderChipName.textContent = name;
+  if (customerOrderChipPhone) customerOrderChipPhone.textContent = phone || 'Chưa có số điện thoại';
+  if (customerOrderChipAvatar) customerOrderChipAvatar.src = profile.avatar || '/assets/icons/customer-panel/user.png';
+  const carrier = detectPhoneCarrier(phone);
+  if (customerOrderChipCarrier) {
+    customerOrderChipCarrier.hidden = !carrier;
+    customerOrderChipCarrier.textContent = carrier;
+  }
+}
+
+function renderCustomerSavedAddresses(conversation = getActiveConversation()) {
+  if (!customerOrderSavedAddress) return;
+  const profile = getCustomerPanelProfile(conversation);
+  const addresses = [...new Set([profile.address, ...getCustomerOrders(conversation).map(order => order.address)].filter(Boolean))];
+  const current = customerOrderSavedAddress.value;
+  customerOrderSavedAddress.innerHTML = ['<option value="">Chọn địa chỉ</option>']
+    .concat(addresses.map(address => `<option value="${escapeHtml(address)}">${escapeHtml(address)}</option>`))
+    .join('');
+  if (addresses.includes(current)) customerOrderSavedAddress.value = current;
 }
 
 function resetCustomerOrderForm(conversation = getActiveConversation()) {
@@ -2407,13 +2557,13 @@ function resetCustomerOrderForm(conversation = getActiveConversation()) {
   if (customerOrderPhone) customerOrderPhone.value = profile.phone;
   if (customerOrderAddress) customerOrderAddress.value = profile.address;
   if (customerProductName) customerProductName.value = '';
-  if (customerProductQuantity) customerProductQuantity.value = '1';
-  if (customerProductPrice) customerProductPrice.value = '';
   if (customerFreeShipping) customerFreeShipping.checked = false;
   if (customerBankTransfer) customerBankTransfer.checked = false;
   if (customerShippingFee) customerShippingFee.value = '0';
   if (customerOrderDiscount) customerOrderDiscount.value = '0';
   if (customerOrderNote) customerOrderNote.value = '';
+  renderCustomerSavedAddresses(conversation);
+  renderCustomerOrderChip(conversation);
   renderCustomerDraftProducts();
 }
 
@@ -2435,6 +2585,8 @@ function renderCustomerPanel(conversation = getActiveConversation()) {
   if (customerOrderName) customerOrderName.value = profile.name;
   if (customerOrderPhone) customerOrderPhone.value = profile.phone;
   if (customerOrderAddress) customerOrderAddress.value = profile.address;
+  renderCustomerSavedAddresses(conversation);
+  renderCustomerOrderChip(conversation);
   updateCustomerOrderTotals();
   loadCustomerPanelFromServer(conversation);
 }
@@ -4269,7 +4421,7 @@ productList?.addEventListener('click', async event => {
 customerProductName?.addEventListener('change', () => {
   const value = customerProductName.value.trim().toLocaleLowerCase('vi');
   const product = sharedProducts.find(item => item.name.toLocaleLowerCase('vi') === value || item.sku.toLocaleLowerCase('vi') === value);
-  if (product && customerProductPrice) customerProductPrice.value = String(product.salePrice || 0);
+  if (product) addCustomerDraftProduct(product.sku || product.name);
 });
 
 chatbotWorkspaceButtons.forEach(button => {
@@ -4785,20 +4937,50 @@ customerNoteInput?.addEventListener('keydown', event => {
   saveCustomerPanelChange(conversation, { type: 'note', text });
 });
 
-customerProductAddButton?.addEventListener('click', () => {
-  const name = customerProductName?.value.trim() || '';
-  const quantity = Math.max(1, Number(customerProductQuantity?.value) || 1);
-  const price = Math.max(0, Number(customerProductPrice?.value) || 0);
-  if (!name || !price) {
-    showToast('Nhập tên sản phẩm và đơn giá trước khi thêm.');
-    return;
+function addCustomerDraftProduct(query) {
+  const raw = String(query || '').trim();
+  if (!raw) {
+    showToast('Nhập tên hoặc mã sản phẩm để thêm vào đơn.');
+    return false;
   }
-  customerDraftProducts.push({ name, quantity, price });
-  customerProductName.value = '';
-  customerProductQuantity.value = '1';
-  customerProductPrice.value = '';
+  const matched = findSharedProduct(raw);
+  const existing = matched
+    ? customerDraftProducts.find(item => item.sku && item.sku === matched.sku)
+    : customerDraftProducts.find(item => item.name === raw);
+  if (existing) {
+    existing.quantity = Math.max(1, Number(existing.quantity) || 1) + 1;
+  } else {
+    customerDraftProducts.push({
+      name: matched?.name || raw,
+      sku: matched?.sku || '',
+      variant: matched?.variant || matched?.category || '',
+      image: matched?.image || getCustomerOrderProductImage(matched?.name || raw) || '',
+      weight: Number(matched?.weight) || 0,
+      quantity: 1,
+      price: Math.max(0, Number(matched?.salePrice ?? matched?.originalPrice) || 0)
+    });
+  }
+  if (customerProductName) customerProductName.value = '';
   renderCustomerDraftProducts();
+  customerProductName?.focus();
+  return true;
+}
+
+customerProductAddButton?.addEventListener('click', () => {
+  addCustomerDraftProduct(customerProductName?.value);
+});
+
+customerProductName?.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  addCustomerDraftProduct(customerProductName.value);
+});
+
+customerProductCombo?.addEventListener('click', () => {
+  if (!customerProductName) return;
+  customerProductName.value = 'combo';
   customerProductName.focus();
+  showToast('Đang lọc sản phẩm dạng combo trong kho.');
 });
 
 customerProductList?.addEventListener('click', event => {
@@ -4808,9 +4990,44 @@ customerProductList?.addEventListener('click', event => {
   renderCustomerDraftProducts();
 });
 
+customerProductList?.addEventListener('input', event => {
+  const field = event.target.closest('[data-customer-quantity], [data-customer-price]');
+  if (!field) return;
+  const isQuantity = field.hasAttribute('data-customer-quantity');
+  const index = Number(isQuantity ? field.dataset.customerQuantity : field.dataset.customerPrice);
+  const item = customerDraftProducts[index];
+  if (!item) return;
+  if (isQuantity) item.quantity = Math.max(1, Math.round(Number(field.value) || 1));
+  else item.price = Math.max(0, Math.round(Number(field.value) || 0));
+  const row = field.closest('.customer-product-row');
+  const totalCell = row?.querySelector('.cell-total');
+  if (totalCell) totalCell.textContent = formatOrderMoney(item.quantity * item.price);
+  updateCustomerOrderTotals();
+});
+
+customerOrderSavedAddress?.addEventListener('change', () => {
+  if (!customerOrderSavedAddress.value || !customerOrderAddress) return;
+  customerOrderAddress.value = customerOrderSavedAddress.value;
+  updateCustomerOrderTotals();
+});
+
+customerOrderList?.addEventListener('click', event => {
+  if (event.target.closest('#customer-order-create-new')) {
+    setCustomerPanelTab('create');
+    return;
+  }
+  const action = event.target.closest('[data-order-action]');
+  if (!action) return;
+  event.preventDefault();
+  const labels = { note: 'Ghi chú đơn', share: 'Gửi lại xác nhận cho khách', edit: 'Sửa đơn' };
+  showToast(`${labels[action.dataset.orderAction] || 'Thao tác'} — đơn ${action.dataset.orderId}. Chức năng này chưa được nối.`);
+});
+
 [customerOrderName, customerOrderPhone, customerOrderAddress, customerShippingFee, customerOrderDiscount]
   .filter(Boolean)
   .forEach(input => input.addEventListener('input', updateCustomerOrderTotals));
+[customerOrderName, customerOrderPhone].filter(Boolean)
+  .forEach(input => input.addEventListener('input', () => renderCustomerOrderChip()));
 customerFreeShipping?.addEventListener('change', updateCustomerOrderTotals);
 customerOrderReset?.addEventListener('click', () => resetCustomerOrderForm());
 
@@ -4829,7 +5046,7 @@ customerOrderForm?.addEventListener('submit', async event => {
     name: customerOrderName.value.trim(),
     phone: customerOrderPhone.value.trim(),
     address: customerOrderAddress.value.trim(),
-    products: customerDraftProducts.map(item => ({ ...item })),
+    products: customerDraftProducts.map(item => ({ ...item, weight: getProductUnitWeight(item) })),
     status: 'Mới',
     source: customerOrderSource?.value || 'Facebook',
     payment: customerBankTransfer?.checked ? 'Chuyển khoản' : 'COD',

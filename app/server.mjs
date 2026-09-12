@@ -7,7 +7,7 @@ import { createLead, getSegments, updateLead } from './domain.mjs';
 import { buildExportRows } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
-import { buildCustomerOrderConfirmation, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
+import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { chatbotTemplates } from './chatbot-templates.mjs';
@@ -134,7 +134,20 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
     return { order, created: true };
   });
   if (!result) throw new Error('Không tìm thấy hội thoại để tự tạo đơn.');
-  if (result.created) publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+  if (result.created) {
+    publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+    // The customer gets the same tappable Messenger receipt as an order created by hand.
+    try {
+      const confirmationText = buildCustomerOrderConfirmation(result.order);
+      await sendConversationMessage(conversation, {
+        text: confirmationText,
+        templateText: confirmationText,
+        template: buildOrderReceiptPayload(result.order, { baseUrl: metaConfig.publicBaseUrl })
+      });
+    } catch (error) {
+      console.error(`Không gửi được hoá đơn cho đơn ${result.order.id}: ${error.message}`);
+    }
+  }
   return result.order;
 }
 
@@ -750,7 +763,12 @@ const server = http.createServer(async (request, response) => {
             return sendJson(response, 400, { error: error.message });
           }
           try {
-            const sent = await sendConversationMessage(conversation, { text: buildCustomerOrderConfirmation(order) });
+            const confirmationText = buildCustomerOrderConfirmation(order);
+            const sent = await sendConversationMessage(conversation, {
+              text: confirmationText,
+              templateText: confirmationText,
+              template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl })
+            });
             order.delivery = {
               status: 'sent',
               messageId: String(sent?.message?.mid || sent?.message?.id || ''),

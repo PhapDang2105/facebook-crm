@@ -84,6 +84,23 @@ export function sendPageMessage({ pageId, psid, text, pageAccessToken, messaging
   });
 }
 
+/**
+ * Sends a structured template (receipt, generic, button...) through the Send API.
+ * Messenger renders these itself, which is how the tappable order receipt appears
+ * in the customer's chat instead of a plain block of text.
+ */
+export function sendPageTemplate({ pageId, psid, payload, pageAccessToken, messagingType = 'RESPONSE' }) {
+  return metaRequest(`${pageId}/messages`, {
+    method: 'POST',
+    body: {
+      recipient: JSON.stringify({ id: psid }),
+      messaging_type: messagingType,
+      message: JSON.stringify({ attachment: { type: 'template', payload } }),
+      access_token: pageAccessToken
+    }
+  });
+}
+
 const sendAttachmentTypes = { image: 'image', video: 'video', audio: 'audio', document: 'file' };
 
 export function parseDataUrl(dataUrl) {

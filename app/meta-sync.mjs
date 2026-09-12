@@ -4,7 +4,8 @@ import {
   fetchPageConversations,
   normalizeGraphConversation,
   sendPageAttachment,
-  sendPageMessage
+  sendPageMessage,
+  sendPageTemplate
 } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import {
@@ -85,20 +86,37 @@ export async function syncPageConversations(pageId, { limit = 25 } = {}) {
 }
 
 /** Sends a reply through the Send API and records it in the local conversation. */
-export async function sendConversationMessage(conversation, { text = '', attachment = null }) {
+export async function sendConversationMessage(conversation, { text = '', attachment = null, template = null, templateText = '' }) {
   const pageAccessToken = await getPageAccessToken(conversation.pageId);
   const target = { pageId: conversation.pageId, psid: conversation.psid, pageAccessToken };
-  const result = attachment
-    ? await sendPageAttachment({ ...target, attachment })
-    : await sendPageMessage({ ...target, text });
+  let usedTemplate = Boolean(template);
+  let result;
+  if (template) {
+    try {
+      result = await sendPageTemplate({ ...target, payload: template });
+    } catch (error) {
+      // Messenger rejects a template for reasons the operator cannot fix mid-send
+      // (unsupported field, image not publicly reachable). Falling back to the plain
+      // text keeps the customer informed instead of failing the whole order.
+      console.error(`Không gửi được receipt template, chuyển sang tin nhắn chữ: ${error.message}`);
+      usedTemplate = false;
+      result = await sendPageMessage({ ...target, text });
+    }
+  } else if (attachment) {
+    result = await sendPageAttachment({ ...target, attachment });
+  } else {
+    result = await sendPageMessage({ ...target, text });
+  }
   // A caption cannot ride along with an attachment, so it follows as its own message.
   if (attachment && text) await sendPageMessage({ ...target, text });
   const message = {
     id: String(result.message_id || `sent-${Date.now()}`),
     mid: String(result.message_id || ''),
     direction: 'outgoing',
+    // The local timeline keeps rendering its own order card, so a delivered template
+    // is still recorded as the plain confirmation text rather than a new message type.
     type: attachment?.type || 'text',
-    text,
+    text: usedTemplate ? (templateText || text) : text,
     createdAt: Date.now(),
     status: 'sent',
     // The uploaded bytes stay out of the store; the echo webhook supplies Meta's hosted URL.

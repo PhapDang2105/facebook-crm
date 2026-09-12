@@ -1,59 +1,38 @@
-import { giftsFor, priceBasket, renderPriceQuote, shippingFeeFor } from './processing/pricing.mjs';
-import { freeShippingFrom, getCatalogProducts, getGifts, matchProduct } from './processing/catalog.mjs';
-import { orderKey as buildOrderKey, productCode, toPricedItems } from './processing/order-key.mjs';
+import { describeGiftTable, priceBasket, renderPriceQuote } from './processing/pricing.mjs';
+import { getCatalogProducts, getGifts, getShippingFee, matchProduct } from './processing/catalog.mjs';
+import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Fallback text only. Every price-bearing reply is composed from Cài đặt →
-// Sản phẩm and Cài đặt → Quà tặng at reply time (see renderDynamicTemplate
-// below); the entries here are what the settings screen lists and what the
-// bot says when the catalogue has no such product. None of them carries a
-// number on purpose — a figure typed here would be the one thing that could
-// go stale.
-const askForProduct = 'Dạ anh/chị đang quan tâm sản phẩm nào để em gửi bảng giá chi tiết ạ?';
+// Every reply text lives in Thiết lập tin nhắn (chatbot settings →
+// messageTemplates); this module only chooses which template answers and
+// fills its placeholders. Nothing is typed here, so what staff edit on screen
+// is the whole truth. app/chatbot-templates.seed.json is copied into the
+// settings once, the first time they are read with no templates at all.
+// Replies that carry a price or a gift are not templates: they are composed
+// from Cài đặt → Sản phẩm and Cài đặt → Quà tặng at reply time (see
+// dynamicTemplateRenderers), so a figure can never be typed in and go stale.
+const seedPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'chatbot-templates.seed.json');
 
-const templates = {
-  WELCOME: 'Dạ Giọt Nắng xin chào anh/chị ạ 👋 Anh/chị đang cần thông tin nào về sản phẩm để em tư vấn cho chính xác nhé ạ 🍀',
-  CSKH_HANDOFF: 'Dạ em đã tiếp nhận thông tin của mình và chuyển bộ phận chăm sóc khách hàng hỗ trợ kỹ hơn nhé ạ. Bên em sẽ phản hồi mình sớm ạ.',
-  ORDER_ADDRESS: 'Dạ để lên đơn đúng tuyến cho đơn vị vận chuyển.###Anh/chị cho em xin số điện thoại và địa chỉ trước sáp nhập để em lên đơn gửi mình cho chính xác nha ạ.',
-  ECOMMERCE_LINKS: 'Dạ em gửi mình link gian hàng chính hãng của Giọt Nắng ạ 💛\n🛒 Shopee: https://shopee.vn/nongsangiotnang\n🛒 TikTok Shop: https://www.tiktok.com/@nongsangiotnang',
-  GENERAL_INFO: askForProduct,
-  BAG_COMPARISON: 'Dạ các túi đều dùng chung các loại hạt, khác nhau về tỷ lệ và hương vị ạ 🥰\n🤎 Túi Nâu: vị cacao, 50% hạt và quả.\n💚 Túi Xanh: vị nguyên bản, tỷ lệ hạt 50%.\n💛 Túi Vàng: vị nguyên bản, tỷ lệ hạt 70%.',
-  BAG_COMPARISON_XANH_VANG: 'Dạ Túi Xanh 450g có khoảng 50% hạt và trái cây, vị cân bằng, dễ ăn. Túi Vàng 350g có khoảng 70% hạt và trái cây nên rõ vị hạt hơn. Thích dễ ăn chọn Túi Xanh; thích nhiều hạt chọn Túi Vàng nha ạ.',
-  HOW_TO_USE_GRANOLA: 'Dạ mình có thể ăn granola trực tiếp như snack, hoặc dùng cùng sữa chua/sữa tươi cho bữa sáng nhanh gọn. Có thể thêm chuối, dâu hoặc xoài để dễ ăn hơn nha ạ.',
-  CALORIES_DIET: 'Dạ 100g granola khoảng 445 Kcal. Nếu dùng trong chế độ giảm cân, mình có thể dùng 20–30g cùng sữa chua không đường hoặc trái cây thay bữa sáng. Hiệu quả còn phụ thuộc chế độ ăn và cơ địa ạ.',
-  WHOLESALE_CTV_CONTACT: 'Dạ anh/chị cho em xin số Zalo được không ạ. Bên em có bộ phận CSKH sỉ/CTV tư vấn cho mình.',
-  GIFT_POLICY: 'Dạ hiện tại bên em chưa có chương trình quà tặng ạ.',
-  SHIPPING_POLICY: 'Dạ thời gian giao dự kiến: TP.HCM và tỉnh lân cận 1–3 ngày, các tỉnh khác 4–6 ngày ạ. Bên em sẽ gửi mã vận đơn để mình theo dõi nha ạ.',
-  STORE_ADDRESS: 'Dạ địa chỉ bên em là 176/1A Khu phố 1, An Phú Đông, Quận 12, TP.HCM. SĐT: 0899 677 899 (Giọt Nắng) ạ.',
-  BANK_TRANSFER: 'Dạ thông tin chuyển khoản: ACB – 18066788 – Công ty Cổ phần GONA Việt Nam. Sau khi chuyển, mình gửi ảnh giao dịch thành công để bên em xác nhận nha ạ.',
-  CRUNCHY_CEREAL_INFO: 'Dạ hạt tròn là viên ngũ cốc giòn làm từ yến mạch, gạo lứt, mật thốt nốt, bột chuối xanh và muối hồng Himalaya; được sấy và nướng, không chiên qua dầu ạ.',
-  NO_ADDED_SUGAR: 'Dạ trong quá trình sản xuất bên em không thêm đường, nhưng trái cây sấy vốn có đường tự nhiên ạ.',
-  OIL_SMELL_WARRANTY: 'Dạ các loại hạt có dầu tự nhiên nên đôi khi có thể ỉu hoặc hôi dầu do bảo quản hay vận chuyển. Bên em có chính sách bảo hành và sẽ hỗ trợ mình ạ.',
-  WEIGHT_EXPIRY: 'Dạ một túi Granola Nguyên Bản nặng 450g. Hạn sử dụng 6 tháng kể từ ngày sản xuất và được in đầy đủ trên bao bì ạ.',
-  PRICE_ADJUSTMENT: 'Dạ giá sản phẩm lẻ có điều chỉnh theo chi phí nguyên liệu. Bên em vẫn giữ giá combo và hỗ trợ một phần phí vận chuyển cho đơn một sản phẩm ạ.',
-  DELIVERY_DELAY: 'Dạ em xin lỗi mình vì đơn giao chậm ạ. Bên em đang theo dõi và thúc đẩy đơn vị vận chuyển giao sớm nhất cho mình.',
-  INSPECTION_RETURN_POLICY: 'Dạ khi nhận hàng mình có thể đồng kiểm mẫu mã cùng shipper. Sau khi trải nghiệm, nếu sản phẩm có vấn đề bên em hỗ trợ theo chính sách bảo hành ạ.',
-  REFUSED_DELIVERY: 'Dạ hệ thống ghi nhận đơn bị từ chối nhận và đang hoàn về. Anh/chị cho em biết mình có nhận được cuộc gọi từ shipper không để bên em làm việc với đơn vị vận chuyển ạ.',
-  THANK_YOU: 'Dạ em cảm ơn anh/chị rất nhiều ạ. Chúc mình một ngày thật nhiều năng lượng và niềm vui ạ.',
-  PRICE_MIX_TUI_LON: askForProduct,
-  PRICE_NGHE_LANH: askForProduct,
-  // The only price kept as text: oats sell at three different per-kg rates
-  // (1kg / 2kg / 3kg), which the single-combo-price catalogue cannot express.
-  // Replace once the catalogue can hold a third tier or the pricing is simplified.
-  PRICE_YEN_MACH_UC_NGUYEN_CAM: 'Dạ Yến Mạch Úc Nguyên Cám: 1kg 116.000đ + ship 15.000đ; 2kg 222.000đ miễn phí vận chuyển; 3kg 299.000đ miễn phí vận chuyển ạ.',
-  PRICE_TUI_XANH: askForProduct,
-  PRICE_TUI_VANG: askForProduct,
-  PRICE_TUI_NAU: askForProduct,
-  PRICE_TUI_XANH_NHO: askForProduct,
-  PRICE_TUI_NAU_NHO: askForProduct,
-  PRICE_TUI_CAM_NHO: askForProduct,
-  PRICE_COMBO_10_GOI_MIX_3_MAU: askForProduct,
-  PRICE_HAT_AN_LANH_DANG_HU: askForProduct,
-  PRICE_QUOTE: askForProduct
-};
+/** The shipped default texts — used only to seed settings that have none. */
+export function defaultMessageTemplates() {
+  return JSON.parse(readFileSync(seedPath, 'utf8'));
+}
 
-function renderOrder(value, context = {}) {
+/** Fills {name} placeholders; a placeholder with no value disappears. */
+function fill(text, values = {}) {
+  return String(text ?? '').replace(/\{([a-z_]+)\}/gi, (_, key) => (values[key] ?? ''));
+}
+
+/** Splits one stored template into up to three messages ("###" separates them). */
+function splitMessages(text) {
+  return String(text ?? '').replace(/\\n/g, '\n').split('###').map(item => item.trim()).filter(Boolean).slice(0, 3);
+}
+
+function renderOrder(value, templates, context = {}) {
   const now = Number(context.now) || Date.now();
   const templateId = String(value.template_id || '').trim();
   const products = [value.Product_N1, value.Product_N2, value.Product_N3];
@@ -99,18 +78,17 @@ function renderOrder(value, context = {}) {
     // Only a request to close the order is escalated. While still collecting
     // details the bot keeps asking rather than dropping the customer on a human.
     if (templateId === 'ORDER_CONFIRMATION' && items.length && !price) {
-      return { templateId: 'CSKH_HANDOFF', messages: [templates.CSKH_HANDOFF], handoff: true, pendingOrder: null };
+      return { templateId: 'CSKH_HANDOFF', messages: splitMessages(templates.CSKH_HANDOFF), handoff: true, pendingOrder: null };
     }
     const missing = hasPhone && !hasAddress ? 'địa chỉ nhận hàng đầy đủ'
       : !hasPhone && hasAddress ? 'số điện thoại'
       : 'số điện thoại và địa chỉ nhận hàng đầy đủ';
     const known = hasPhone ? 'số điện thoại' : hasAddress ? 'địa chỉ' : '';
-    const opening = known
-      ? `Dạ em đã nhận được ${known} của mình rồi ạ.`
-      : 'Dạ em đã ghi nhận sản phẩm rồi ạ.';
+    // One wording when nothing has arrived yet, another once part of it has.
+    const template = known ? templates.ORDER_ADDRESS_PARTIAL : templates.ORDER_ADDRESS;
     return {
       templateId: 'ORDER_ADDRESS',
-      messages: [`${opening} Anh/chị cho em xin ${missing} để em lên đơn gửi mình nha ạ.`],
+      messages: splitMessages(fill(template, { missing, known })),
       handoff: false,
       pendingOrder: nextPending
     };
@@ -120,14 +98,20 @@ function renderOrder(value, context = {}) {
   // Catalogue names, not the customer's wording, so the confirmation and the
   // order record agree on what is being shipped.
   const orderItems = price.lines.map(line => ({ product: line.name, code: line.sku, quantity: line.quantity }));
-  const lines = orderItems.map(item => `🌾 ${item.product} – Số lượng: ${item.quantity}`).join('\n');
+  const confirmation = fill(templates.ORDER_CONFIRMATION, {
+    items: orderItems.map(item => `🌾 ${item.product} – Số lượng: ${item.quantity}`).join('\n'),
+    phone,
+    address,
+    shipping: price.shippingFee ? `🚚 Phí vận chuyển: ${formatMoney(price.shippingFee)}\n━━━━━━━━━━━━\n` : '',
+    subtotal: formatMoney(price.subtotal),
+    total: formatMoney(total),
+    gift: price.gift ? `\n━━━━━━━━━━━━\n🎁 ${price.gift}` : ''
+  });
   return {
     templateId: 'ORDER_CONFIRMATION',
-    messages: [
-      `Dạ em xin phép xác nhận lại thông tin đặt hàng của mình nha:\n\n${lines}\n━━━━━━━━━━━━\n📞 Số điện thoại: ${phone}\n━━━━━━━━━━━━\n🏡 Địa chỉ nhận hàng: ${address}\n━━━━━━━━━━━━\n${price.shippingFee ? `🚚 Phí vận chuyển: ${price.shippingFee.toLocaleString('vi-VN')}đ\n━━━━━━━━━━━━\n` : ''}💰 Tổng tiền: ${total.toLocaleString('vi-VN')}đ${price.gift ? `\n━━━━━━━━━━━━\n🎁 ${price.gift}` : ''}\n\nEm cảm ơn anh/chị đã ủng hộ Giọt Nắng. Nếu có gì sai sót, mình nhắn em biết nhé ạ.`,
-      templates.SHIPPING_POLICY,
-      'Dạ sau khi nhận hàng mình giúp em kiểm tra sản phẩm và quay video đủ 6 mặt hộp khi mở. Bên em hỗ trợ đổi trả trong 7 ngày nếu sản phẩm có lỗi ạ.'
-    ],
+    // The confirmation, then the delivery policy and the after-sale note —
+    // each one is a template of its own so staff can rewrite or blank it.
+    messages: [confirmation, templates.SHIPPING_POLICY, templates.ORDER_AFTER_SALE].flatMap(splitMessages).slice(0, 3),
     handoff: false,
     // Cleared: the basket has become a real order.
     pendingOrder: null,
@@ -135,111 +119,108 @@ function renderOrder(value, context = {}) {
   };
 }
 
-// ===== Templates written from the catalogue at reply time =====
-// The static text of these ids used to carry prices by hand — Túi Xanh
-// "174.000đ" in GENERAL_INFO while the order charged 189.000đ. Now the text is
-// composed from Cài đặt → Sản phẩm and Cài đặt → Quà tặng on every reply, so a
-// price change in settings reaches the customer's next message. The static
-// entry above remains only as the fallback when the catalogue has nothing to
-// say (a product not yet entered), and as the label the settings screen shows.
+// ===== Replies written from the catalogue at reply time =====
+// Each renderer returns the reply text for the current catalogue, or the
+// ask-for-product line when the catalogue has nothing to say. PRICE_<name>
+// ids resolve the product from Product_N1 first and then from the id itself
+// (PRICE_TUI_XANH → "tui xanh" → the product's alias), so a new product needs
+// no new template: PRICE_QUOTE + its name is enough.
 
 function formatMoney(value) {
   return `${Math.max(0, Math.round(Number(value) || 0)).toLocaleString('vi-VN')}đ`;
 }
 
-function renderGeneralInfo() {
+function renderGeneralInfo(templates) {
   const products = getCatalogProducts().filter(product => product.active && product.unitPrice > 0);
-  if (!products.length) return '';
+  if (!products.length) return templates.ASK_PRODUCT;
   const lines = products.map(product => `🌾 ${product.name}: ${formatMoney(product.unitPrice)}`);
-  const ship = shippingFeeFor(1);
-  const shipText = ship ? ` Đơn 1 sản phẩm cộng phí vận chuyển ${formatMoney(ship)}${Number.isFinite(freeShippingFrom()) ? `, từ ${freeShippingFrom()} sản phẩm miễn phí vận chuyển` : ''}.` : '';
-  return `Dạ hiện tại nhà em có ${products.length} sản phẩm ạ:\n${lines.join('\n')}\nGiá trên là giá mua lẻ.${shipText} Anh/chị đang quan tâm loại nào để em gửi bảng giá combo chi tiết ạ?`;
+  const fee = getShippingFee();
+  const shipText = fee ? ` Giá trên là giá mua lẻ, chưa gồm phí vận chuyển ${formatMoney(fee)}; combo và các tổ hợp được miễn ship theo chương trình.` : ' Giá trên là giá mua lẻ.';
+  return `Dạ hiện tại nhà em có ${products.length} sản phẩm ạ:\n${lines.join('\n')}${shipText} Anh/chị đang quan tâm loại nào để em gửi bảng giá combo chi tiết ạ?`;
 }
 
-function renderGiftPolicy() {
-  const gifts = getGifts().filter(gift => gift.active);
-  if (!gifts.length) return 'Dạ hiện tại bên em chưa có chương trình quà tặng ạ.';
-  const byQuantity = new Map();
-  for (const gift of gifts) byQuantity.set(gift.minQuantity, [...(byQuantity.get(gift.minQuantity) || []), gift.name]);
-  const parts = [...byQuantity.entries()].sort((a, b) => a[0] - b[0]).map(([quantity, names]) => `từ ${quantity} sản phẩm tặng ${names.join(' + ')}`);
-  return `Dạ chương trình quà tặng hiện tại: ${parts.join('; ')} ạ. Quà tính theo tổng số lượng cả đơn và cộng dồn nha ạ.`;
+function renderGiftPolicy(templates) {
+  if (!getGifts().some(gift => gift.active)) return templates.GIFT_POLICY_EMPTY;
+  const lines = describeGiftTable().map(line => line.replace(/^- /, '• '));
+  return `Dạ chương trình quà tặng hiện tại ạ:\n${lines.join('\n')}`;
 }
 
-function renderMixPricing() {
+function renderMixPricing(templates) {
   const products = getCatalogProducts().filter(product => product.active && product.comboPrice > 0);
-  if (!products.length) return '';
+  if (!products.length) return templates.ASK_PRODUCT;
   const lines = products.map(product => `• ${product.name}: ${formatMoney(product.comboPrice)}/sản phẩm`);
-  const [first, second] = products;
-  const example = second
-    ? ` Ví dụ ${first.name} + ${second.name} = ${formatMoney(first.comboPrice + second.comboPrice)}.`
-    : '';
-  const gift2 = giftsFor(2).map(gift => gift.name).join(' + ');
-  const gift3 = giftsFor(3).map(gift => gift.name).join(' + ');
-  const giftText = gift3 ? ` Đơn từ 2 sản phẩm được ${gift2 || 'ưu đãi'}; đủ 3 sản phẩm được ${gift3} ạ.` : (gift2 ? ` Đơn từ 2 sản phẩm được ${gift2} ạ.` : '');
-  return `Dạ mua ghép từ 2 sản phẩm (cùng loại hay khác loại) thì mỗi sản phẩm tính theo giá combo ạ:\n${lines.join('\n')}${example}${giftText}`;
+  const mixable = products.filter(product => product.mixable);
+  const [first, second] = mixable;
+  const example = second ? ` Ví dụ ${first.name} + ${second.name} = ${formatMoney(first.comboPrice + second.comboPrice)}.` : '';
+  return `Dạ mua từ 2 sản phẩm thì mỗi sản phẩm tính theo giá combo ạ:\n${lines.join('\n')}${example} Quà tặng theo từng tổ hợp, anh/chị chọn combo em báo quà kèm nha ạ.`;
 }
 
 function renderPriceAdjustment() {
-  const fee = shippingFeeFor(1);
-  const from = freeShippingFrom();
+  const fee = getShippingFee();
   const ship = fee
-    ? ` Bên em vẫn giữ giá combo và hỗ trợ phí vận chuyển cho đơn một sản phẩm nên phí ship còn ${formatMoney(fee)}${Number.isFinite(from) ? `; từ ${from} sản phẩm miễn phí vận chuyển` : ''} ạ.`
+    ? ` Bên em vẫn giữ giá combo và hỗ trợ phí vận chuyển cho đơn một sản phẩm nên phí ship còn ${formatMoney(fee)}; các combo được miễn phí vận chuyển theo chương trình ạ.`
     : ' Bên em vẫn giữ giá combo và miễn phí vận chuyển ạ.';
   return `Dạ giá sản phẩm lẻ có điều chỉnh theo chi phí nguyên liệu.${ship}`;
 }
 
+/** The product a PRICE_* id names: PRICE_TUI_XANH → "tui xanh" → the catalogue alias. */
+function renderPriceTemplate(templateId, value, templates) {
+  const product = matchProduct(value.Product_N1 || value.product || '')
+    || matchProduct(templateId.replace(/^PRICE_/, '').replace(/_/g, ' '));
+  return product ? renderPriceQuote(product.name) : templates.ASK_PRODUCT;
+}
+
+// Ids with a fixed renderer. Any other PRICE_* id is a product quote.
 const dynamicTemplateRenderers = {
+  GENERAL_INFO: (value, templates) => renderGeneralInfo(templates),
+  GIFT_POLICY: (value, templates) => renderGiftPolicy(templates),
+  PRICE_MIX_TUI_LON: (value, templates) => renderMixPricing(templates),
   PRICE_ADJUSTMENT: () => renderPriceAdjustment(),
-  GENERAL_INFO: () => renderGeneralInfo(),
-  GIFT_POLICY: () => renderGiftPolicy(),
-  PRICE_MIX_TUI_LON: () => renderMixPricing(),
-  PRICE_QUOTE: value => renderPriceQuote(value.Product_N1 || value.product || '')
+  PRICE_QUOTE: (value, templates) => renderPriceTemplate('PRICE_QUOTE', value, templates)
 };
 
-/** The product a PRICE_* id names: PRICE_TUI_XANH → "tui xanh" → the catalogue alias. */
-function productForPriceTemplate(templateId, value = {}) {
-  return matchProduct(value.Product_N1 || value.product || '')
-    || matchProduct(templateId.replace(/^PRICE_/, '').replace(/_/g, ' '));
-}
+// PRICE_* ids the model was taught before quotes became catalogue-driven.
+// Listed so the settings screen can show them; each resolves to a product
+// through renderPriceTemplate.
+const legacyPriceTemplateIds = ['PRICE_TUI_XANH', 'PRICE_TUI_VANG', 'PRICE_TUI_NAU', 'PRICE_TUI_XANH_NHO', 'PRICE_TUI_NAU_NHO', 'PRICE_TUI_CAM_NHO', 'PRICE_COMBO_10_GOI_MIX_3_MAU', 'PRICE_NGHE_LANH', 'PRICE_HAT_AN_LANH_DANG_HU'];
 
-/** Text for a catalogue-driven template, or '' when it has to fall back to the static entry. */
-export function renderDynamicTemplate(templateId, value = {}) {
+/** A dynamic id is one the catalogue writes: it has a renderer, or it is a PRICE_* quote with no stored text. */
+export function isDynamicTemplate(templateId, templates = {}) {
   const id = String(templateId || '').trim();
-  if (dynamicTemplateRenderers[id]) return dynamicTemplateRenderers[id](value) || '';
-  if (id.startsWith('PRICE_')) {
-    const product = productForPriceTemplate(id, value);
-    return product ? renderPriceQuote(product.name) : '';
-  }
-  return '';
+  return Boolean(dynamicTemplateRenderers[id]) || (id.startsWith('PRICE_') && !templates[id]);
 }
 
-/** Every template the catalogue currently writes, with its live text — for the settings screen. */
-export function listDynamicTemplates() {
+function renderDynamicTemplate(templateId, value, templates) {
+  const id = String(templateId || '').trim();
+  if (dynamicTemplateRenderers[id]) return dynamicTemplateRenderers[id](value, templates);
+  return renderPriceTemplate(id, value, templates);
+}
+
+/** Every catalogue-written template with its live text — for the settings screen. */
+export function listDynamicTemplates(templates = {}) {
   const result = {};
-  for (const id of Object.keys(templates)) {
-    const text = renderDynamicTemplate(id);
-    if (text) result[id] = text;
+  for (const id of [...Object.keys(dynamicTemplateRenderers), ...legacyPriceTemplateIds]) {
+    if (!templates[id]) result[id] = renderDynamicTemplate(id, {}, templates);
   }
   return result;
 }
 
-export function renderChatbotReply(value = {}, overrides = {}, deletedTemplateIds = [], context = {}) {
+/**
+ * Turns the model's answer into the messages to send. `templates` is the
+ * messageTemplates block of the chatbot settings — the only place text comes
+ * from. A template whose text is blank is switched off: the bot hands over
+ * to a person instead of guessing.
+ */
+export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   const templateId = String(value.template_id || '').trim();
-  if (isOrderStep(templateId)) return renderOrder(value, context);
-  const available = { ...templates, ...overrides };
-  for (const id of deletedTemplateIds) delete available[id];
-  // Catalogue text wins over both the static entry and a hand-edited override:
-  // the whole point is that a price changed in settings cannot be contradicted
-  // by a message someone typed months ago. A deleted template stays deleted.
-  const dynamic = available[templateId] ? renderDynamicTemplate(templateId, value) : '';
-  if (dynamic) return { templateId, messages: [dynamic], handoff: false };
-  const raw = available[templateId] || value.reply || value.message || value.text || available.CSKH_HANDOFF || templates.CSKH_HANDOFF;
+  if (isOrderStep(templateId)) return renderOrder(value, templates, context);
+  if (isDynamicTemplate(templateId, templates)) {
+    return { templateId, messages: [renderDynamicTemplate(templateId, value, templates)], handoff: false };
+  }
+  const raw = templates[templateId] || value.reply || value.message || value.text || templates.CSKH_HANDOFF;
   return {
-    templateId: available[templateId] ? templateId : 'CSKH_HANDOFF',
-    messages: String(raw).replace(/\\n/g, '\n').split('###').map(item => item.trim()).filter(Boolean).slice(0, 3),
+    templateId: templates[templateId] ? templateId : 'CSKH_HANDOFF',
+    messages: splitMessages(raw),
     handoff: templateId === 'CSKH_HANDOFF'
   };
 }
-
-export const chatbotTemplates = Object.freeze(templates);
-export { productCode };

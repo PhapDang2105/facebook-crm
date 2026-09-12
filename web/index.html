@@ -312,6 +312,7 @@
                   <div class="chatbot-template-editor">
                     <div class="chatbot-template-editor-head"><div><small>Mã mẫu tin</small><strong id="chatbot-template-id">Chọn một mẫu tin</strong></div><div class="chatbot-template-head-controls"><label class="chatbot-template-active"><input id="chatbot-template-active" type="checkbox" checked><span></span>Đang sử dụng</label><div class="chatbot-template-actions"><button class="hidden" id="chatbot-template-delete" type="button">Xóa mẫu tin</button><button id="chatbot-template-reset" type="button">Khôi phục mẫu gốc</button><button class="settings-save-button" id="chatbot-template-apply" type="submit">Áp dụng nội dung</button></div></div></div>
                     <label class="chatbot-field"><span>Nội dung trả lời</span><textarea id="chatbot-template-content" rows="13" maxlength="12000" placeholder="Chọn một mẫu ở danh sách bên trái để chỉnh sửa"></textarea></label>
+                    <p class="chatbot-template-hint">Đây là nơi duy nhất chứa lời bot nói: bot đọc thẳng nội dung ở đây, không có bản mặc định nào trong code. Dùng <code>###</code> để tách thành nhiều tin (tối đa 3). Chỗ trống <code>{...}</code> được hệ thống điền khi trả lời: <code>ORDER_CONFIRMATION</code> có <code>{items}</code> <code>{phone}</code> <code>{address}</code> <code>{shipping}</code> <code>{subtotal}</code> <code>{total}</code> <code>{gift}</code>; <code>ORDER_ADDRESS</code>/<code>ORDER_ADDRESS_PARTIAL</code> có <code>{missing}</code> <code>{known}</code>. Bỏ tick “Đang sử dụng” thì bot chuyển nhân viên thay vì dùng mẫu đó.</p>
                   </div>
                 </div>
               </section>
@@ -444,7 +445,7 @@
               <button class="product-primary-button" id="product-create-button" type="button"><span aria-hidden="true">＋</span> Thêm sản phẩm</button>
             </header>
             <div class="product-table-wrap">
-              <div class="product-table-head"><span>Sản phẩm</span><span>SKU</span><span>Giá bán</span><span>Giá combo</span><span>Thao tác</span></div>
+              <div class="product-table-head"><span>Sản phẩm</span><span>SKU</span><span>Giá bán</span><span>Giá combo</span><span>Khối lượng</span><span>Thao tác</span></div>
               <div class="product-list" id="product-list" aria-live="polite"><div class="product-empty"><img src="/assets/icons/products/empty-product.png" alt=""><strong>Đang tải danh mục sản phẩm...</strong></div></div>
             </div>
           </section>
@@ -454,7 +455,7 @@
             <header class="settings-card-head">
               <div>
                 <h1 id="gift-settings-title">Quà tặng</h1>
-                <p>Quà mở theo <b>tổng số lượng</b> sản phẩm trong đơn và cộng dồn: đơn 3 túi nhận cả quà “từ 2” lẫn quà “từ 3”. Tick để bật, chatbot áp dụng ngay cho đơn kế tiếp. Quà có <b>SKU xuất kho</b> sẽ thành một dòng riêng trong file Xuất dữ liệu. Quà có tên <b>“Miễn phí vận chuyển”</b> quyết định từ số lượng nào khách hết trả phí ship; đơn chưa đủ sẽ cộng phí bên phải vào tổng và vào giá xuất kho.</p>
+                <p>Khai báo quà ở bảng trên, rồi <b>tick quà cho từng tổ hợp sản phẩm</b> ở bảng dưới — tổ hợp sinh tự động từ danh mục. Quà có <b>SKU xuất kho</b> thành một dòng riêng trong file Xuất dữ liệu. Quà tên <b>“Miễn phí vận chuyển”</b> tick ở tổ hợp nào thì tổ hợp đó không cộng phí ship.</p>
               </div>
               <div class="price-master-actions">
                 <label class="gift-shipping-field"><span>Phí vận chuyển đơn chưa được miễn</span><span class="product-price-input"><input id="gift-shipping-fee" type="number" min="0" step="1000" value="15000"><span>₫</span></span></label>
@@ -463,13 +464,13 @@
               </div>
             </header>
             <div class="gift-table">
-              <div class="gift-table-head"><span>Áp dụng</span><span>Tên quà tặng</span><span>Từ số lượng</span><span>SKU xuất kho</span><span>Khối lượng</span><span></span></div>
+              <div class="gift-table-head"><span>Áp dụng</span><span>Tên quà tặng</span><span>SKU xuất kho</span><span>Khối lượng</span><span></span></div>
               <div class="gift-rows" id="gift-rows"></div>
             </div>
             <p class="price-master-status" id="gift-status" role="status"></p>
-            <section class="gift-preview" aria-label="Xem trước quà theo số lượng">
-              <h2>Khách nhận gì theo số lượng</h2>
-              <div class="gift-preview-grid" id="gift-preview"></div>
+            <section class="gift-combos" aria-label="Quà theo tổ hợp sản phẩm">
+              <div class="gift-combos-head"><h2>Quà theo tổ hợp sản phẩm</h2><label class="product-search gift-combo-search"><img src="/assets/icons/search.svg" alt=""><input id="gift-combo-search" type="search" placeholder="Lọc tổ hợp..." autocomplete="off"></label></div>
+              <div class="gift-combo-table" id="gift-combo-table"></div>
             </section>
           </section>
         </section>
@@ -504,11 +505,12 @@
           <label><span>Giá bán (1 sản phẩm, chưa gồm ship) <b>*</b></span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
           <label><span>Giá combo (mỗi sản phẩm)</span><div class="product-price-input"><input id="product-combo-price" type="number" min="0" step="1000" placeholder="Bỏ trống = không giảm"><span>₫</span></div></label>
           <label><span>Khối lượng xuất kho</span><div class="product-price-input"><input id="product-weight" type="number" min="0" step="10" placeholder="0"><span>g</span></div></label>
-          <label class="product-form-checkbox product-form-wide"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
+          <label class="product-form-checkbox"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
+          <label class="product-form-checkbox"><span>Ghép đơn</span><span class="product-form-switch"><input id="product-mixable" type="checkbox"><span>Ghép được với sản phẩm ghép khác trong cùng đơn</span></span></label>
           <label class="product-form-wide"><span>Tên gọi khác (mỗi dòng hoặc cách nhau bằng dấu phẩy)</span><textarea id="product-aliases" rows="3" placeholder="túi xanh, granola xanh, #granolatuixanh&#10;Khách gọi sản phẩm bằng những tên này thì bot vẫn nhận ra."></textarea></label>
           <label class="product-form-wide"><span>Thành phần xuất kho (nếu 1 sản phẩm gồm nhiều mã)</span><textarea id="product-components" rows="2" placeholder="GRA-NAU-G35 x3, GRA-XANH-G35 x4, GRA-CAM-G30 x3&#10;Bỏ trống = xuất chính mã SKU ở trên."></textarea></label>
         </div>
-        <p class="product-form-hint"><b>Giá bán</b> là giá sản phẩm khi mua lẻ, <b>chưa gồm</b> phí vận chuyển — phí đặt ở Cài đặt → Quà tặng và tự cộng vào đơn chưa được miễn (174.000đ + 15.000đ = 189.000đ trên đơn và file xuất kho). <b>Giá combo</b> áp dụng cho từng sản phẩm khi đơn có từ 2 sản phẩm trở lên, cùng loại hay mua kèm sản phẩm khác đều được. <b>SKU</b> là mã đi vào file Xuất dữ liệu.</p>
+        <p class="product-form-hint"><b>Giá bán</b> là giá mua lẻ, <b>chưa gồm</b> phí vận chuyển — phí đặt ở Cài đặt → Quà tặng và tự cộng vào tổ hợp chưa được miễn (174.000đ + 15.000đ = 189.000đ trên đơn và file xuất kho). <b>Giá combo</b> áp dụng cho từng sản phẩm khi đơn có từ 2 sản phẩm. Sản phẩm <b>ghép đơn</b> được mua chung với nhau tối đa 3 sản phẩm; sản phẩm không ghép chỉ bán riêng ×1/×2/×3. Mỗi tổ hợp sinh ra sẽ xuất hiện trong bảng Quà tặng để tick quà. <b>SKU</b> là mã đi vào file Xuất dữ liệu.</p>
       </div>
       <p class="product-form-status" id="product-form-status" role="alert"></p>
       <footer class="product-dialog-actions"><button class="product-secondary-button" type="button" data-close-product-dialog>Hủy</button><button class="product-primary-button" id="product-submit" type="submit">Lưu sản phẩm</button></footer>

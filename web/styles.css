@@ -939,7 +939,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 /* ===== Quà tặng (Cài đặt → Quà tặng) ===== */
 .gift-table { overflow: hidden; border: 1px solid #e9ebf0; border-radius: 8px; }
 .gift-table-head,
-.gift-row { display: grid; grid-template-columns: 70px minmax(0, 1fr) 230px 150px 110px 40px; align-items: center; gap: 10px; padding: 9px 12px; }
+.gift-row { display: grid; grid-template-columns: 70px minmax(0, 1fr) 170px 120px 40px; align-items: center; gap: 10px; padding: 9px 12px; }
 .gift-table-head { color: #475467; background: #f7f8fa; border-bottom: 1px solid #e9ebf0; font-size: 12px; font-weight: 600; text-transform: uppercase; }
 .gift-row { border-bottom: 1px solid #f2f4f7; font-size: 13px; }
 .gift-row:last-child { border-bottom: 0; }
@@ -950,29 +950,42 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .gift-row input:focus { border-color: #84adff; box-shadow: 0 0 0 2px rgba(21, 94, 239, .12); }
 .gift-active { display: grid; place-items: center; }
 .gift-active input { width: 18px; height: 18px; accent-color: #1677ff; cursor: pointer; }
-.gift-quantity { display: grid; grid-template-columns: auto 72px auto; align-items: center; gap: 8px; color: #475467; white-space: nowrap; }
-.gift-quantity input { text-align: center; }
 .gift-sku { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px !important; text-transform: uppercase; }
 .gift-weight { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; color: #475467; }
 .gift-weight input { text-align: right; }
-.gift-preview { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; padding: 14px; background: #fbfcfe; border: 1px solid #e9ebf0; border-radius: 8px; }
-.gift-preview h2 { margin: 0; color: #101828; font-size: 14px; font-weight: 600; }
-.gift-preview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-.gift-preview-cell { padding: 10px 12px; background: #fff; border: 1px solid #e6e9ef; border-radius: 7px; font-size: 13px; }
-.gift-preview-cell strong { display: block; margin-bottom: 6px; color: #0b4fd1; font-size: 12px; text-transform: uppercase; }
-.gift-preview-cell ul { margin: 0; padding-left: 16px; color: #344054; }
-.gift-preview-cell li + li { margin-top: 3px; }
-.gift-preview-cell em { color: #98a2b2; }
-.gift-preview-ship { display: block; margin-top: 6px; color: #b54708; font-size: 12px; }
+/* Ma trận quà theo tổ hợp: cột đầu là tổ hợp, mỗi quà một cột tick. Số cột do JS đặt qua --gift-count. */
+.gift-combos { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; }
+.gift-combos-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.gift-combos-head h2 { margin: 0; color: #101828; font-size: 14px; font-weight: 600; }
+.gift-combos-head .gift-combo-search { width: min(320px, 100%); height: 36px; }
+.gift-combos-head .gift-combo-search input { font-size: 13px; }
+.gift-combo-table { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid #e9ebf0; border-radius: 8px; }
+.gift-combo-head,
+.gift-combo-row { display: grid; grid-template-columns: minmax(260px, 1fr) repeat(var(--gift-count, 1), minmax(110px, 150px)); align-items: center; gap: 10px; padding: 8px 12px; }
+.gift-combo-head { position: sticky; top: 0; z-index: 1; color: #475467; background: #f7f8fa; border-bottom: 1px solid #e9ebf0; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+.gift-combo-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.gift-combo-head span:first-child { text-align: left; }
+.gift-combo-row { border-bottom: 1px solid #f2f4f7; font-size: 13px; }
+.gift-combo-row:last-child { border-bottom: 0; }
+.gift-combo-row:hover { background: #fbfcfe; }
+.gift-combo-label { display: flex; align-items: center; gap: 10px; min-width: 0; color: #344054; }
+.gift-combo-label b { display: grid; flex: 0 0 auto; width: 24px; height: 24px; place-items: center; color: #0b4fd1; background: #eff4ff; border-radius: 6px; font-size: 12px; }
+.gift-combo-cell { display: grid; place-items: center; }
+.gift-combo-cell input { width: 18px; height: 18px; margin: 0; accent-color: #1677ff; cursor: pointer; }
+.gift-combo-cell input:disabled { cursor: not-allowed; opacity: .4; }
+.gift-manager-empty { margin: 0; padding: 14px; color: #667085; font-size: 13px; }
 .gift-shipping-field { display: grid; gap: 4px; color: #475467; font-size: 12px; }
 .gift-shipping-field .product-price-input { width: 150px; }
 .gift-shipping-field .product-price-input input { width: 100%; height: 34px; padding: 0 28px 0 10px; color: #101828; background: #fff; border: 1px solid #e0e3ea; border-radius: 6px; outline: none; font: inherit; font-size: 13px; text-align: right; }
 
+.chatbot-template-hint { margin: 10px 0 0; color: #667085; font-size: 12.5px; line-height: 19px; }
+.chatbot-template-hint code { padding: 1px 5px; background: #f2f4f7; border-radius: 4px; font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 11.5px; }
 /* ===== Sản phẩm: cột giá combo & nhóm ghép ===== */
 .product-row-combo { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 14px; font-variant-numeric: tabular-nums; }
 .product-row-combo b { color: #0b4fd1; }
 .product-row-combo small { color: #98a2b2; font-size: 11.5px; }
-.product-row-combo em { color: #98a2b2; font-size: 12.5px; font-style: normal; }
+.product-row-combo em, .product-row-weight em { color: #98a2b2; font-size: 12.5px; font-style: normal; }
+.product-row-weight { text-align: center; font-variant-numeric: tabular-nums; }
 .product-row.is-off { background: #fafbfc; }
 .product-row.is-off .product-row-copy strong { color: #98a2b2; }
 .product-row-off { margin-left: 6px; padding: 1px 7px; color: #b42318; background: #fff1f0; border-radius: 4px; font-size: 11px; font-weight: 600; vertical-align: middle; }
@@ -986,11 +999,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 @media (max-width: 860px) {
   .gift-table-head { display: none; }
   .gift-row { grid-template-columns: 40px minmax(0, 1fr) 40px; }
-  .gift-row .gift-quantity, .gift-row .gift-sku, .gift-row .gift-weight { grid-column: 2; }
-}
-
-
-
+  .gift-row .gift-sku, .gift-row .gift-weight { grid-column: 2; }
+  .gift-combo-head, .gift-combo-row { grid-template-columns: minmax(200px, 1fr) repeat(var(--gift-count, 1), 90px); }
 }
 @media (max-width: 1180px) { .chatbot-general-config { grid-template-columns: minmax(540px, 1.15fr) minmax(320px, .85fr); } }
 @media (max-width: 980px) { .chatbot-general-config { grid-template-columns: 1fr; height: auto; } .chatbot-general-settings-pane { height: auto; max-height: none; } .chatbot-preview-card { position: static; height: 520px; min-height: 0; } }
@@ -1065,7 +1075,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .product-search input { flex: 1; min-width: 0; padding: 0; background: transparent; border: 0; outline: 0; font: inherit; font-size: 15px; }
 .product-count { color: #667085; font-size: 14px; white-space: nowrap; }
 .product-table-wrap { min-width: 0; overflow-x: auto; }
-.product-table-head, .product-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, .8fr); align-items: center; min-width: 860px; }
+.product-table-head, .product-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, .9fr) minmax(0, .8fr); align-items: center; min-width: 900px; }
 .product-table-head { min-height: 62px; padding: 0 22px; color: #344054; background: linear-gradient(90deg, #f4f8ff 0%, #fbfaf5 100%); border-top: 1px solid #e7ebf1; border-bottom: 1px solid #dfe4eb; box-shadow: inset 0 1px 0 rgba(255,255,255,.8); font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: .045em; }
 .product-table-head span { display: flex; align-items: center; height: 100%; }
 .product-table-head span:not(:first-child) { justify-content: center; border-left: 1px solid rgba(208,216,227,.55); text-align: center; }

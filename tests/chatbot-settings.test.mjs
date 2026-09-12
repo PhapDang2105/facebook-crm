@@ -10,7 +10,8 @@ test('chatbot mặc định gọi Vertex AI trực tiếp và chưa hoạt độ
   assert.equal(settings.provider, 'vertex');
   assert.equal(settings.memoryWindow, 50);
   assert.equal(settings.retryCount, 1);
-  assert.equal(settings.processingSteps.length, 6);
+  // The processing pipeline is code in app/processing, not a setting.
+  assert.equal(settings.processingSteps, undefined);
 });
 
 test('chuẩn hóa cấu hình chatbot trước khi lưu', () => {
@@ -95,16 +96,29 @@ test('chuẩn hóa các nhà cung cấp model tích hợp sẵn', () => {
   }
 });
 
-test('chuẩn hóa mẫu tin và trạng thái từng bước xử lý', () => {
+test('mẫu tin: chỉ lưu những gì thiết lập gửi lên, không có bản mặc định nào được trộn vào', () => {
   const settings = normalizeChatbotSettings({
-    messageTemplates: { WELCOME: '  Xin chào mới  ' },
-    deletedTemplateIds: [' XIN_LOI ', 'XIN_LOI', 'WELCOME'],
-    processingSteps: [{ id: 'duplicate_guard', enabled: false, code: 'return input.signature;' }]
+    messageTemplates: { WELCOME: '  Xin chào mới  ', GENERAL_INFO: 'không được lưu vì soạn từ danh mục', PRICE_QUOTE: 'cũng vậy' },
+    deletedTemplateIds: ['WELCOME'],
+    processingSteps: [{ id: 'duplicate_guard', enabled: false }]
   });
   assert.equal(settings.messageTemplates.WELCOME, 'Xin chào mới');
-  assert.deepEqual(settings.deletedTemplateIds, ['XIN_LOI', 'WELCOME']);
-  assert.equal(settings.processingSteps.find(step => step.id === 'duplicate_guard').enabled, false);
-  assert.equal(settings.processingSteps.find(step => step.id === 'duplicate_guard').code, 'return input.signature;');
-  assert.equal(settings.processingSteps.find(step => step.id === 'message_normalizer').enabled, true);
-  assert.match(settings.processingSteps.find(step => step.id === 'message_normalizer').code, /trim/);
+  assert.equal(settings.messageTemplates.GENERAL_INFO, undefined);
+  assert.equal(settings.messageTemplates.PRICE_QUOTE, undefined);
+  assert.equal(settings.deletedTemplateIds, undefined);
+  assert.equal(settings.processingSteps, undefined);
+});
+
+test('thiết lập chưa có bộ mẫu đầy đủ thì đọc bộ mặc định vào dưới các mẫu đã sửa', () => {
+  const settings = normalizeChatbotSettings({});
+  assert.ok(settings.messageTemplates.WELCOME);
+  assert.ok(settings.messageTemplates.ORDER_CONFIRMATION.includes('{total}'));
+  assert.equal(settings.messageTemplates.GENERAL_INFO, undefined);
+  // File cũ chỉ lưu vài mẫu đã sửa (chưa có CSKH_HANDOFF): giữ mẫu đã sửa, bổ sung phần còn lại.
+  const partial = normalizeChatbotSettings({ messageTemplates: { WELCOME: 'Chào riêng' } });
+  assert.equal(partial.messageTemplates.WELCOME, 'Chào riêng');
+  assert.ok(partial.messageTemplates.CSKH_HANDOFF);
+  // Bộ đầy đủ đã lưu thì đúng như đã lưu — xóa là mất, không có gì trộn thêm.
+  const full = normalizeChatbotSettings({ messageTemplates: { CSKH_HANDOFF: 'Chuyển', WELCOME: 'Chào' } });
+  assert.deepEqual(full.messageTemplates, { CSKH_HANDOFF: 'Chuyển', WELCOME: 'Chào' });
 });

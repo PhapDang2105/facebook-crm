@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { toLocalPhone } from './processing/customer-info.mjs';
 import { matchProduct, findProductBySku } from './processing/catalog.mjs';
-import { giftTextFor, shippingFeeFor, unitPriceInBasket } from './processing/pricing.mjs';
+import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
@@ -79,8 +79,10 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   }).filter(item => item.name) : [];
   const total = money(input.total);
   const totalQuantityForPricing = items.reduce((sum, item) => sum + item.quantity, 0);
-  const shippingFee = input.shippingFee !== undefined ? money(input.shippingFee) : shippingFeeFor(totalQuantityForPricing);
-  const priced = items.map((item, index) => {
+  // Gift and shipping come from the basket's combination in the gift table.
+  const priced = priceBasket(items.map(item => ({ sku: item.sku, quantity: item.quantity })));
+  const shippingFee = input.shippingFee !== undefined ? money(input.shippingFee) : (priced.priceable ? priced.shippingFee : 0);
+  const pricedItems = items.map((item, index) => {
     const product = findProductBySku(item.sku);
     const basketPrice = unitPriceInBasket(product, totalQuantityForPricing) || item.price;
     // The price the customer pays per unit. On an order that still pays
@@ -92,8 +94,8 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   // Every line priced at its own list price, or none of them. Mixing a real unit
   // price with an averaged one makes the receipt add up to a number the customer
   // cannot reconcile, which is worse than an honest average on every line.
-  const listed = priced.every(item => item.price > 0);
-  const subtotal = priced.reduce((sum, item) => sum + item.quantity * item.price, 0);
+  const listed = pricedItems.every(item => item.price > 0);
+  const subtotal = pricedItems.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
   const averageUnitPrice = totalQuantity ? Math.round(total / totalQuantity) : 0;
   // The combo total is the price the customer agreed to. The gap between it and
@@ -104,7 +106,7 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     name: text(conversation.name || 'Khách Facebook', 200),
     phone: input.phone,
     address: input.address,
-    products: listed ? priced : items.map(item => ({ ...item, price: averageUnitPrice })),
+    products: listed ? pricedItems : items.map(item => ({ ...item, price: averageUnitPrice })),
     discount: comboDiscount,
     status: 'Mới',
     source: 'Facebook',
@@ -115,7 +117,7 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     employee: 'Chatbot AI'
   }, { now, id });
   if (total) order.total = total;
-  order.gift = text(input.gift ?? giftTextFor(totalQuantity), 300);
+  order.gift = text(input.gift ?? (priced.priceable ? priced.gift : ''), 300);
   order.chatbotSourceMessageId = text(sourceMessageId, 200);
   order.automatic = true;
   order.delivery = {

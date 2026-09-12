@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import './helpers/seed-catalog.mjs';
 import { buildCustomerOrderConfirmation, normalizeChatbotOrder, normalizeCustomerOrder } from '../app/conversation-orders.mjs';
 
 const input = {
@@ -51,7 +52,11 @@ test('chuyển xác nhận chatbot thành đơn tự động', () => {
   });
   assert.equal(order.id, 'AUTO-01');
   assert.equal(order.name, 'Lan Anh');
-  assert.equal(order.products[0].price, 149000);
+  assert.equal(order.products[0].sku, 'GRA-XANH-Z450');
+  assert.equal(order.products[0].price, 174000, 'dòng đơn ghi giá lẻ từ danh mục');
+  assert.equal(order.products[0].paidPrice, 149000, 'giá khách trả là giá combo');
+  assert.equal(order.discount, 2 * 174000 - 298000);
+  assert.equal(order.shippingFee, 0);
   assert.equal(order.total, 298000);
   assert.equal(order.chatbotSourceMessageId, 'mid.customer.1');
   assert.equal(order.delivery.messageId, 'mid.bot.1');

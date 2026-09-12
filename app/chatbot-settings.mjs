@@ -1,3 +1,5 @@
+import { defaultMessageTemplates, isDynamicTemplate } from './chatbot-templates.mjs';
+
 export const defaultChatbotSettings = Object.freeze({
   enabled: false,
   name: 'Trợ lý Giọt Nắng',
@@ -16,8 +18,7 @@ export const defaultChatbotSettings = Object.freeze({
   retryIntervalMs: 1000,
   welcomeMessage: '',
   handoffKeywords: '',
-  messageTemplates: {},
-  deletedTemplateIds: []
+  messageTemplates: {}
 });
 
 function cleanText(value, fallback, maximumLength) {
@@ -51,13 +52,19 @@ export function normalizeChatbotSettings(value = {}) {
     : submittedDirectModel;
   const directEndpoint = cleanText(submittedDirectEndpoint, providerDefaults.endpoint, 500);
   const directModel = cleanText(migratedDirectModel, providerDefaults.model, 200);
-  const messageTemplates = Object.fromEntries(Object.entries(value.messageTemplates || {})
+  // Thiết lập tin nhắn is the only place reply text lives. What is stored is
+  // what the bot says — a blank text switches that template off, and a
+  // template removed on screen is gone. Catalogue-written ids (GENERAL_INFO,
+  // PRICE_QUOTE, ...) never store text. Settings written before the texts
+  // moved here hold only the handful of edits staff made, never the hand-off
+  // line every bot needs; that is the one case where the shipped defaults are
+  // read in, underneath those edits, until the screen saves the full set.
+  const stored = value.messageTemplates && typeof value.messageTemplates === 'object' ? value.messageTemplates : {};
+  const submitted = stored.CSKH_HANDOFF ? stored : { ...defaultMessageTemplates(), ...stored };
+  const messageTemplates = Object.fromEntries(Object.entries(submitted)
     .slice(0, 100)
     .map(([key, text]) => [String(key).trim().slice(0, 100), String(text ?? '').trim().slice(0, 12000)])
-    .filter(([key]) => key));
-  const deletedTemplateIds = [...new Set((Array.isArray(value.deletedTemplateIds) ? value.deletedTemplateIds : [])
-    .map(id => String(id || '').trim().slice(0, 100))
-    .filter(Boolean))].slice(0, 100);
+    .filter(([key]) => key && !isDynamicTemplate(key, submitted)));
   // The processing pipeline is code in app/processing, not editable settings.
   return {
     enabled: value.enabled === true,
@@ -78,7 +85,6 @@ export function normalizeChatbotSettings(value = {}) {
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
     messageTemplates,
-    deletedTemplateIds,
     updatedAt: Number(value.updatedAt) || Date.now()
   };
 }

@@ -1,13 +1,9 @@
-import { matchProduct, normalizeText } from './catalog.mjs';
+import { matchProduct } from './catalog.mjs';
 import { priceBasket } from './pricing.mjs';
 
 // The hard-coded product codes and mixing rules that used to live here now come
 // from the catalogue. What remains is the canonical basket key, kept because
 // the duplicate-order guard and the pending-basket memory compare on it.
-
-export function normalizeProductText(value) {
-  return normalizeText(value);
-}
 
 /** Maps free text to the product's SKU, or '' when the catalogue has no match. */
 export function productCode(product) {

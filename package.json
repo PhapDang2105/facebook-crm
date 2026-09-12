@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "start": "node app/server.mjs",
+    "test": "node --test tests/*.test.mjs tests/domain/run-tests.mjs",
+    "test:integration": "node tests/integration/meta-webhook.integration.mjs"
+  },
   "dependencies": {
     "adm-zip": "^0.6.0"
   }

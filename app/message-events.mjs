@@ -15,6 +15,3 @@ export function publishMessagingEvent(event) {
   }
 }
 
-export function messagingSubscriberCount() {
-  return subscribers.size;
-}

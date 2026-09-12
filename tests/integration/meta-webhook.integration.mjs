@@ -6,7 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const nodePath = path.join(projectRoot, 'tools', 'node', 'node.exe');
+// The portable Windows runtime when present, otherwise whatever node is running this test.
+const nodePath = process.platform === 'win32' ? path.join(projectRoot, 'tools', 'node', 'node.exe') : process.execPath;
 // The test writes to a throwaway store so a real inbox is never touched.
 const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'crm-webhook-test-'));
 const storePath = path.join(temporaryDirectory, 'meta-conversations.json');

@@ -1,5 +1,5 @@
-import { findProductBySku } from './processing/catalog.mjs';
-import { giftsFor, shippingFeeFor, unitPriceInBasket } from './processing/pricing.mjs';
+import { comboKey, findProductBySku, giftsForKey } from './processing/catalog.mjs';
+import { shippingFeeForKey, unitPriceInBasket } from './processing/pricing.mjs';
 
 export const EXPORT_COLUMNS = [
   'STT*', 'Mã đơn hàng', 'Nguồn đơn hàng', 'Ngày đặt hàng', 'Tác động tồn kho', 'Gửi email thông báo',
@@ -252,7 +252,9 @@ export function buildExportRows(orderData = {}) {
   const bagQuantityByOrder = new Map();
   let orderNumber = 0;
 
-  const catalogQuantityByOrder = new Map();
+  // Catalogue lines of each order, so the order's combination decides its
+  // gifts and shipping exactly as the chatbot did when it closed the sale.
+  const catalogLinesByOrder = new Map();
   const lastRowIndexByOrder = new Map();
   exportableRows.forEach((row, rowIndex) => {
     const sourceOrderId = value(row, 'Mã đơn hàng');
@@ -260,8 +262,7 @@ export function buildExportRows(orderData = {}) {
     lastRowIndexByOrder.set(orderKey, rowIndex);
     const symbol = value(row, 'Mã mẫu mã');
     if (findProductBySku(symbol)) {
-      // Catalogue products count as sold units for combo pricing and gifts.
-      catalogQuantityByOrder.set(orderKey, (catalogQuantityByOrder.get(orderKey) || 0) + (Number(value(row, 'Số lượng')) || 1));
+      catalogLinesByOrder.set(orderKey, [...(catalogLinesByOrder.get(orderKey) || []), { sku: symbol, quantity: Number(value(row, 'Số lượng')) || 1 }]);
       return;
     }
     const items = splitSkuForExport(symbol, value(row, 'Số lượng'), value(row, 'Đơn giá'), false, value(row, 'Sản phẩm'));
@@ -275,15 +276,17 @@ export function buildExportRows(orderData = {}) {
     const orderKey = sourceOrderId ? `id:${sourceOrderId}` : `row:${rowIndex}`;
     const isFirstOrderLine = !seenOrders.has(orderKey);
     if (isFirstOrderLine) { seenOrders.add(orderKey); orderNumber += 1; }
-    const catalogQuantity = catalogQuantityByOrder.get(orderKey) || 0;
+    const catalogLines = catalogLinesByOrder.get(orderKey) || [];
+    const catalogQuantity = catalogLines.reduce((sum, line) => sum + line.quantity, 0);
+    const basketKey = catalogLines.length ? comboKey(catalogLines) : '';
     const useComboPricing = (bagQuantityByOrder.get(orderKey) || 0) + catalogQuantity >= 2;
-    // Shipping (when the order has not earned free shipping) rides on the
+    // Shipping (when the combination was not given free shipping) rides on the
     // order's first catalogue line only.
-    const shippingFee = catalogQuantity && isFirstOrderLine ? shippingFeeFor(catalogQuantity) : 0;
+    const shippingFee = basketKey && isFirstOrderLine ? shippingFeeForKey(basketKey) : 0;
     const items = splitSkuForExport(value(row, 'Mã mẫu mã'), value(row, 'Số lượng'), value(row, 'Đơn giá'), useComboPricing, value(row, 'Sản phẩm'), shippingFee);
-    // Gifts from Cài đặt → Quà tặng, once per order, after its last product line.
-    if (catalogQuantity && lastRowIndexByOrder.get(orderKey) === rowIndex) {
-      for (const gift of giftsFor(catalogQuantity)) {
+    // Gifts ticked for this combination in Cài đặt → Quà tặng, once per order, after its last product line.
+    if (basketKey && lastRowIndexByOrder.get(orderKey) === rowIndex) {
+      for (const gift of giftsForKey(basketKey)) {
         if (gift.sku && !items.some(item => item.sku === gift.sku)) items.push({ sku: gift.sku, quantity: 1, price: 0, weight: gift.weight });
       }
     }

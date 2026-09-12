@@ -131,6 +131,7 @@ const productSalePrice = document.querySelector('#product-sale-price');
 const productComboPrice = document.querySelector('#product-combo-price');
 const productWeight = document.querySelector('#product-weight');
 const productActive = document.querySelector('#product-active');
+const productMixable = document.querySelector('#product-mixable');
 const productAliases = document.querySelector('#product-aliases');
 const productComponents = document.querySelector('#product-components');
 const productFormStatus = document.querySelector('#product-form-status');
@@ -226,7 +227,6 @@ const chatbotStepCodeApply = document.querySelector('#chatbot-step-code-apply');
 const chatbotStepSummary = document.querySelector('#chatbot-step-summary');
 let chatbotTemplatesState = {};
 let chatbotOriginalTemplates = {};
-let chatbotDeletedTemplateIds = new Set();
 let chatbotProcessingSteps = [];
 let chatbotPreviewHistory = [];
 let selectedChatbotTemplate = '';
@@ -2141,7 +2141,6 @@ async function loadChatbotSettings() {
     chatbotTemplatesState = { ...(settings.templates || {}) };
     chatbotOriginalTemplates = { ...(settings.templates || {}) };
     chatbotDynamicTemplates = { ...(settings.dynamicTemplates || {}) };
-    chatbotDeletedTemplateIds = new Set(settings.deletedTemplateIds || []);
     // Pipeline comes from the server modules now, not from editable settings.
     selectedChatbotTemplate = selectedChatbotTemplate && chatbotTemplatesState[selectedChatbotTemplate] !== undefined
       ? selectedChatbotTemplate
@@ -2165,7 +2164,9 @@ let chatbotDynamicTemplates = {};
 function chatbotTemplateLabel(id) {
   const labels = {
     WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
-    ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',
+    ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
+    ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
+    ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',
     BANK_TRANSFER: 'Thông tin chuyển khoản', THANK_YOU: 'Cảm ơn khách hàng'
   };
   return labels[id] || id.replace(/^PRICE_/, 'Bảng giá · ').replaceAll('_', ' ').toLowerCase().replace(/^./, value => value.toUpperCase());
@@ -2174,14 +2175,15 @@ function chatbotTemplateLabel(id) {
 function renderChatbotTemplateList() {
   if (!chatbotTemplateList) return;
   const keyword = (chatbotTemplateSearch?.value || '').trim().toLowerCase();
-  const entries = Object.entries(chatbotTemplatesState).filter(([id, content]) => `${id} ${content}`.toLowerCase().includes(keyword));
-  chatbotTemplateList.innerHTML = entries.map(([id, content]) => {
-    const dynamic = chatbotDynamicTemplates[id];
-    return `
+  // Texts stored in Thiết lập tin nhắn (editable) and catalogue-written ones (read-only) in one list.
+  const entries = [
+    ...Object.entries(chatbotTemplatesState).map(([id, content]) => ({ id, content, dynamic: false })),
+    ...Object.entries(chatbotDynamicTemplates).map(([id, content]) => ({ id, content, dynamic: true }))
+  ].filter(({ id, content }) => `${id} ${content}`.toLowerCase().includes(keyword));
+  chatbotTemplateList.innerHTML = entries.map(({ id, content, dynamic }) => `
     <button class="chatbot-template-item ${id === selectedChatbotTemplate ? 'active' : ''}" type="button" data-chatbot-template-id="${escapeHtml(id)}">
-      <strong>${escapeHtml(chatbotTemplateLabel(id))}${dynamic ? '<span class="chatbot-template-dynamic-badge">Tự soạn</span>' : ''}</strong><small>${escapeHtml(String(dynamic || content).replaceAll('###', ' · '))}</small>
-    </button>`;
-  }).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
+      <strong>${escapeHtml(chatbotTemplateLabel(id))}${dynamic ? '<span class="chatbot-template-dynamic-badge">Tự soạn</span>' : ''}</strong><small>${escapeHtml(String(content).replaceAll('###', ' · '))}</small>
+    </button>`).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
 }
 
 function renderChatbotTemplateEditor() {
@@ -2205,11 +2207,11 @@ function renderChatbotTemplateEditor() {
   if (chatbotTemplateApply) chatbotTemplateApply.classList.toggle('hidden', Boolean(dynamic));
   if (chatbotTemplateReset) chatbotTemplateReset.classList.toggle('hidden', Boolean(dynamic));
   if (chatbotTemplateActive) {
-    chatbotTemplateActive.disabled = !id;
-    chatbotTemplateActive.checked = Boolean(id && chatbotTemplatesState[id]);
+    chatbotTemplateActive.disabled = !id || Boolean(dynamic);
+    chatbotTemplateActive.checked = Boolean(dynamic) || Boolean(id && chatbotTemplatesState[id]);
   }
   if (chatbotTemplateDelete) {
-    const canDelete = Boolean(id);
+    const canDelete = Boolean(id) && !dynamic;
     chatbotTemplateDelete.classList.toggle('hidden', !canDelete);
     chatbotTemplateDelete.disabled = !canDelete;
   }
@@ -2269,16 +2271,21 @@ async function loadChatbotPipeline() {
 }
 
 // ===== Quà tặng (Cài đặt → Quà tặng) =====
-// A gift is a name and the total quantity it unlocks at. Gifts stack: an order
-// of three gets every gift whose threshold is three or lower. The chatbot reads
-// the same list, so ticking a gift here changes the next confirmation it sends.
+// Gifts are declared once, then ticked per basket combination. The rows of
+// that table are generated by the server from the catalogue (every product on
+// its own ×1..×3, every mix of mixable products up to 3 units), so they are
+// exactly the baskets the chatbot can close. Assignments are keyed by the
+// same canonical basket key the pricing and the export use.
 const giftRowsElement = document.querySelector('#gift-rows');
 const giftAddButton = document.querySelector('#gift-add');
 const giftSaveButton = document.querySelector('#gift-save');
 const giftStatus = document.querySelector('#gift-status');
-const giftPreview = document.querySelector('#gift-preview');
 const giftShippingFee = document.querySelector('#gift-shipping-fee');
+const giftComboTable = document.querySelector('#gift-combo-table');
+const giftComboSearch = document.querySelector('#gift-combo-search');
 let giftItems = [];
+let giftCombos = [];
+let giftAssignments = {};
 let giftsLoaded = false;
 
 function setGiftStatus(message, tone = '') {
@@ -2288,21 +2295,15 @@ function setGiftStatus(message, tone = '') {
   giftStatus.classList.toggle('is-ok', tone === 'ok');
 }
 
-function renderGiftPreview() {
-  if (!giftPreview) return;
-  const maximum = Math.max(3, ...giftItems.filter(gift => gift.active !== false).map(gift => Number(gift.minQuantity) || 1));
-  const cells = [];
-  for (let quantity = 1; quantity <= Math.min(maximum, 6); quantity += 1) {
-    const names = giftItems
-      .filter(gift => gift.active !== false && String(gift.name || '').trim() && (Number(gift.minQuantity) || 1) <= quantity)
-      .sort((a, b) => (Number(a.minQuantity) || 1) - (Number(b.minQuantity) || 1))
-      .map(gift => escapeHtml(gift.name.trim()));
-    const freeFrom = Math.min(...giftItems.filter(gift => gift.active !== false && /mi[eễ]n ph[ií] v[aậ]n chuy[eể]n|mi[eễ]n ph[ií] ship|mi[eễ]n ship|free ?ship/i.test(String(gift.name || '').normalize('NFC'))).map(gift => Number(gift.minQuantity) || 1), Infinity);
-    const fee = Number(giftShippingFee?.value) || 0;
-    const shipping = quantity >= freeFrom ? '' : (fee ? `<small class="gift-preview-ship">+ phí ship ${escapeHtml(formatOrderMoney(fee))}</small>` : '');
-    cells.push(`<div class="gift-preview-cell"><strong>${quantity} sản phẩm</strong>${names.length ? `<ul>${names.map(name => `<li>${name}</li>`).join('')}</ul>` : '<em>Không có quà</em>'}${shipping}</div>`);
-  }
-  giftPreview.innerHTML = cells.join('');
+function giftClientId(gift, index) {
+  // Gifts added on screen have no id until saved; a stable key is still
+  // needed to tick them in the combo table before the first save.
+  if (!gift.id) gift.id = `gift-${Date.now().toString(36)}-${index}`;
+  return gift.id;
+}
+
+function describeCombo(combo) {
+  return combo.items.map(item => `${item.quantity} × ${item.name}`).join(' + ');
 }
 
 function renderGifts() {
@@ -2311,15 +2312,39 @@ function renderGifts() {
     giftRowsElement.innerHTML = '<div class="gift-row gift-row-empty"><span>Chưa có quà tặng nào. Bấm “Thêm quà tặng” để bắt đầu.</span></div>';
   } else {
     giftRowsElement.innerHTML = giftItems.map((gift, index) => `<div class="gift-row${gift.active === false ? ' is-off' : ''}">
-      <label class="gift-active"><input type="checkbox" data-gift-field="active" data-gift-index="${index}" ${gift.active !== false ? 'checked' : ''} aria-label="Áp dụng quà tặng"></label>
+      <label class="gift-active"><input type="checkbox" data-gift-field="active" data-gift-index="${index}" ${gift.active !== false ? 'checked' : ''} aria-label="Đang dùng"></label>
       <input type="text" data-gift-field="name" data-gift-index="${index}" value="${escapeHtml(gift.name || '')}" maxlength="200" placeholder="Ví dụ: Miễn phí vận chuyển">
-      <span class="gift-quantity"><span>từ</span><input type="number" data-gift-field="minQuantity" data-gift-index="${index}" value="${Number(gift.minQuantity) || 1}" min="1" max="20" step="1"><span>sản phẩm</span></span>
       <input type="text" class="gift-sku" data-gift-field="sku" data-gift-index="${index}" value="${escapeHtml(gift.sku || '')}" maxlength="80" placeholder="Không xuất kho" spellcheck="false">
       <span class="gift-weight"><input type="number" data-gift-field="weight" data-gift-index="${index}" value="${Number(gift.weight) || 0}" min="0" step="10"><span>g</span></span>
       <button class="price-master-remove" type="button" data-gift-remove="${index}" aria-label="Xóa quà tặng" title="Xóa quà tặng">×</button>
     </div>`).join('');
   }
-  renderGiftPreview();
+  renderGiftCombos();
+}
+
+function renderGiftCombos() {
+  if (!giftComboTable) return;
+  const gifts = giftItems.map((gift, index) => ({ ...gift, id: giftClientId(gift, index) })).filter(gift => String(gift.name || '').trim());
+  if (!giftCombos.length) {
+    giftComboTable.innerHTML = '<p class="gift-manager-empty">Chưa có sản phẩm nào đang bán, nên chưa có tổ hợp để gắn quà.</p>';
+    return;
+  }
+  if (!gifts.length) {
+    giftComboTable.innerHTML = '<p class="gift-manager-empty">Thêm ít nhất một quà tặng ở bảng trên để tick cho tổ hợp.</p>';
+    return;
+  }
+  const keyword = normalizeColumnName(giftComboSearch?.value || '');
+  const rows = giftCombos.filter(combo => !keyword || normalizeColumnName(describeCombo(combo)).includes(keyword));
+  const head = `<div class="gift-combo-head"><span>Tổ hợp</span>${gifts.map(gift => `<span title="${escapeHtml(gift.name)}">${escapeHtml(gift.name)}</span>`).join('')}</div>`;
+  const body = rows.map(combo => {
+    const ticked = new Set(giftAssignments[combo.key] || []);
+    return `<div class="gift-combo-row" data-combo-key="${escapeHtml(combo.key)}">
+      <span class="gift-combo-label"><b>${combo.totalQuantity}</b>${escapeHtml(describeCombo(combo))}</span>
+      ${gifts.map(gift => `<label class="gift-combo-cell"><input type="checkbox" data-combo-key="${escapeHtml(combo.key)}" data-gift-id="${escapeHtml(gift.id)}" ${ticked.has(gift.id) ? 'checked' : ''} ${gift.active === false ? 'disabled' : ''} aria-label="${escapeHtml(gift.name)}"></label>`).join('')}
+    </div>`;
+  }).join('');
+  giftComboTable.style.setProperty('--gift-count', String(gifts.length));
+  giftComboTable.innerHTML = head + (body || '<p class="gift-manager-empty">Không có tổ hợp nào khớp.</p>');
 }
 
 async function loadGifts() {
@@ -2327,14 +2352,18 @@ async function loadGifts() {
   try {
     const result = await readApiResponse(await fetch('/api/gifts'));
     giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift })) : [];
+    giftCombos = Array.isArray(result.combos) ? result.combos : [];
+    giftAssignments = result.assignments && typeof result.assignments === 'object' ? { ...result.assignments } : {};
     if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
     giftsLoaded = true;
     renderGifts();
-    setGiftStatus(`${giftItems.length} quà tặng. Chatbot đang dùng danh sách này.`);
+    setGiftStatus(`${giftItems.length} quà tặng · ${giftCombos.length} tổ hợp. Chatbot đang dùng bảng này.`);
   } catch (error) {
     setGiftStatus(error.message || 'Chưa tải được quà tặng.', 'error');
   }
 }
+
+const giftUnsavedNote = 'Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.';
 
 giftRowsElement?.addEventListener('input', event => {
   const field = event.target.dataset.giftField;
@@ -2343,9 +2372,13 @@ giftRowsElement?.addEventListener('input', event => {
   if (field === 'name') gift.name = event.target.value;
   else if (field === 'sku') gift.sku = event.target.value.trim().toUpperCase();
   else if (field === 'weight') gift.weight = Math.max(0, Math.round(Number(event.target.value) || 0));
-  else if (field === 'minQuantity') gift.minQuantity = Math.min(20, Math.max(1, Math.round(Number(event.target.value) || 1)));
-  renderGiftPreview();
-  setGiftStatus('Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.');
+  if (field === 'name') {
+    // Only the column header changes; re-rendering the rows would steal the caret.
+    giftComboTable?.querySelectorAll('.gift-combo-head span').forEach((cell, position) => {
+      if (position === Number(event.target.dataset.giftIndex) + 1) cell.textContent = event.target.value;
+    });
+  }
+  setGiftStatus(giftUnsavedNote);
 });
 
 giftRowsElement?.addEventListener('change', event => {
@@ -2354,24 +2387,34 @@ giftRowsElement?.addEventListener('change', event => {
   if (!gift) return;
   gift.active = event.target.checked;
   event.target.closest('.gift-row')?.classList.toggle('is-off', !gift.active);
-  renderGiftPreview();
-  setGiftStatus('Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.');
+  renderGiftCombos();
+  setGiftStatus(giftUnsavedNote);
 });
 
 giftRowsElement?.addEventListener('click', event => {
   const button = event.target.closest('[data-gift-remove]');
   if (!button) return;
-  giftItems.splice(Number(button.dataset.giftRemove), 1);
+  const [removed] = giftItems.splice(Number(button.dataset.giftRemove), 1);
+  if (removed?.id) for (const key of Object.keys(giftAssignments)) giftAssignments[key] = giftAssignments[key].filter(id => id !== removed.id);
   renderGifts();
   setGiftStatus('Đã xóa quà tặng. Nhớ bấm “Lưu quà tặng”.');
 });
 
-giftShippingFee?.addEventListener('input', () => { renderGiftPreview(); setGiftStatus('Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.'); });
+giftComboTable?.addEventListener('change', event => {
+  const key = event.target.dataset.comboKey;
+  const giftId = event.target.dataset.giftId;
+  if (!key || !giftId) return;
+  const current = new Set(giftAssignments[key] || []);
+  if (event.target.checked) current.add(giftId); else current.delete(giftId);
+  if (current.size) giftAssignments[key] = [...current]; else delete giftAssignments[key];
+  setGiftStatus(giftUnsavedNote);
+});
+
+giftComboSearch?.addEventListener('input', renderGiftCombos);
+giftShippingFee?.addEventListener('input', () => setGiftStatus(giftUnsavedNote));
 
 giftAddButton?.addEventListener('click', () => {
-  // A new gift defaults to the next threshold up, which is the usual reason to add one.
-  const nextQuantity = giftItems.length ? Math.max(...giftItems.map(gift => Number(gift.minQuantity) || 1)) + 1 : 2;
-  giftItems.push({ id: '', name: '', minQuantity: Math.min(20, nextQuantity), active: true, sku: '', weight: 0 });
+  giftItems.push({ id: '', name: '', active: true, sku: '', weight: 0 });
   renderGifts();
   giftRowsElement?.querySelector('.gift-row:last-child input[data-gift-field="name"]')?.focus();
 });
@@ -2387,12 +2430,14 @@ giftSaveButton?.addEventListener('click', async () => {
     const result = await readApiResponse(await fetch('/api/gifts', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: giftItems, shippingFee: Number(giftShippingFee?.value) || 0 })
+      body: JSON.stringify({ items: giftItems, assignments: giftAssignments, shippingFee: Number(giftShippingFee?.value) || 0 })
     }));
     giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift })) : giftItems;
+    giftCombos = Array.isArray(result.combos) ? result.combos : giftCombos;
+    giftAssignments = result.assignments && typeof result.assignments === 'object' ? { ...result.assignments } : giftAssignments;
     if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
     renderGifts();
-    setGiftStatus(`Đã lưu ${giftItems.length} quà tặng. Chatbot áp dụng ngay cho đơn kế tiếp.`, 'ok');
+    setGiftStatus(`Đã lưu ${giftItems.length} quà tặng cho ${Object.keys(giftAssignments).length} tổ hợp. Chatbot áp dụng ngay cho đơn kế tiếp.`, 'ok');
   } catch (error) {
     setGiftStatus(error.message || 'Chưa lưu được quà tặng.', 'error');
   } finally {
@@ -2433,7 +2478,8 @@ function renderProducts() {
       <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}</small></span></div>
       <code class="product-row-sku">${escapeHtml(product.sku)}</code>
       <strong class="product-row-price product-row-sale">${escapeHtml(formatOrderMoney(product.salePrice))}</strong>
-      <span class="product-row-combo">${Number(product.comboPrice) > 0 ? `<b>${escapeHtml(formatOrderMoney(product.comboPrice))}</b><small>/sp từ 2 sp</small>` : '<em>Không giảm</em>'}</span>
+      <span class="product-row-combo">${Number(product.comboPrice) > 0 ? `<b>${escapeHtml(formatOrderMoney(product.comboPrice))}</b>` : '<em>Không giảm</em>'}</span>
+      <span class="product-row-weight">${Number(product.weight) > 0 ? `${Number(product.weight).toLocaleString('vi-VN')} g` : '<em>Chưa có</em>'}</span>
       <span class="product-row-actions"><button type="button" data-product-action="edit" title="Sửa sản phẩm" aria-label="Sửa sản phẩm"><img src="/assets/icons/products/edit.png" alt=""></button><button type="button" data-product-action="delete" title="Xóa sản phẩm" aria-label="Xóa sản phẩm"><img src="/assets/icons/products/delete.png" alt=""></button></span>
     </article>`;
   }).join('');
@@ -2466,6 +2512,7 @@ function openProductDialog(product = null) {
   if (productComboPrice) productComboPrice.value = Number(product?.comboPrice) > 0 ? String(product.comboPrice) : '';
   if (productWeight) productWeight.value = Number(product?.weight) > 0 ? String(product.weight) : '';
   if (productActive) productActive.checked = product ? product.active !== false : true;
+  if (productMixable) productMixable.checked = product ? product.mixable === true : false;
   if (productAliases) productAliases.value = Array.isArray(product?.aliases) ? product.aliases.join('\n') : '';
   if (productComponents) productComponents.value = Array.isArray(product?.components) ? product.components.map(item => `${item.sku} x${item.quantity}`).join('\n') : '';
   if (productImageInput) productImageInput.value = '';
@@ -4131,13 +4178,6 @@ function openChatMessageMenu(row) {
   menu.querySelector('button')?.focus();
 }
 
-function normalizeExportLocation(value) {
-  const location = String(value ?? '').trim();
-  return ({
-    'Hồ Chí Minh': 'TP Hồ Chí Minh',
-    'Thành phố Thanh Hoá': 'Thành phố Thanh Hóa'
-  })[location] || location;
-}
 
 function getPreviewValue(value, header) {
   if (normalizeColumnName(header) !== 'san pham') return value;
@@ -4577,6 +4617,7 @@ productForm?.addEventListener('submit', async event => {
     comboPrice: Number(productComboPrice?.value) || 0,
     weight: Number(productWeight?.value) || 0,
     active: productActive ? productActive.checked : true,
+    mixable: productMixable ? productMixable.checked : false,
     aliases: productAliases?.value || '',
     components: productComponents?.value || '',
     imageData: pendingProductImage,
@@ -4594,6 +4635,7 @@ productForm?.addEventListener('submit', async event => {
     const wasEditing = Boolean(selectedProductId);
     closeProductDialog();
     await loadProducts();
+    giftsLoaded = false; // combo rows in Quà tặng follow the catalogue
     showToast(wasEditing ? 'Đã cập nhật sản phẩm.' : 'Đã thêm sản phẩm.', 'success');
   } catch (error) {
     productFormStatus.textContent = error.message || 'Chưa lưu được sản phẩm.';
@@ -4612,6 +4654,7 @@ productList?.addEventListener('click', async event => {
   try {
     await readApiResponse(await fetch(`/api/products/${encodeURIComponent(product.id)}`, { method: 'DELETE' }));
     await loadProducts();
+    giftsLoaded = false;
     showToast('Đã xóa sản phẩm.', 'success');
   } catch (error) {
     action.disabled = false;
@@ -4661,9 +4704,9 @@ function createChatbotTemplate() {
     .replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   if (!id) return showToast('Nhập mã cho mẫu tin nhắn mới.', 'error');
   if (Object.hasOwn(chatbotTemplatesState, id)) return showToast('Mã mẫu tin này đã tồn tại.', 'error');
+  if (Object.hasOwn(chatbotDynamicTemplates, id)) return showToast('Mẫu này được soạn tự động từ danh mục, không tạo bản tĩnh.', 'error');
   chatbotTemplatesState[id] = '';
   chatbotOriginalTemplates[id] = '';
-  chatbotDeletedTemplateIds.delete(id);
   selectedChatbotTemplate = id;
   closeChatbotTemplateCreator();
   renderChatbotTemplateList();
@@ -4698,7 +4741,6 @@ chatbotTemplateDelete?.addEventListener('click', () => {
   if (!window.confirm(`Xóa mẫu tin ${id}? Thao tác này không thể hoàn tác sau khi lưu.`)) return;
   delete chatbotTemplatesState[id];
   delete chatbotOriginalTemplates[id];
-  chatbotDeletedTemplateIds.add(id);
   selectedChatbotTemplate = Object.keys(chatbotTemplatesState)[0] || '';
   renderChatbotTemplateList();
   renderChatbotTemplateEditor();
@@ -4757,8 +4799,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         retryIntervalMs: chatbotSettingsRetryInterval.value,
         welcomeMessage: chatbotSettingsWelcome.value,
         handoffKeywords: '',
-        messageTemplates: chatbotTemplatesState,
-        deletedTemplateIds: [...chatbotDeletedTemplateIds]
+        messageTemplates: chatbotTemplatesState
       })
     }));
     chatbotSettingsEnabled.checked = settings.enabled === true;

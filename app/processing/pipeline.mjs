@@ -20,7 +20,7 @@ const steps = [
     name: 'Danh mục sản phẩm & quà tặng',
     type: 'data',
     file: 'catalog.mjs',
-    summary: 'Đọc sản phẩm từ Cài đặt → Sản phẩm (giá bán, giá combo, SKU xuất kho, tên gọi khác) và quà tặng từ Cài đặt → Quà tặng. Mọi bước sau — kể cả file xuất kho của Đơn hàng — đều lấy dữ liệu từ đây, nên thêm sản phẩm là bot và đơn hàng nhận ngay.'
+    summary: 'Đọc sản phẩm từ Cài đặt → Sản phẩm (giá bán, giá combo, SKU xuất kho, khối lượng, ghép đơn, tên gọi khác) và quà tặng theo tổ hợp từ Cài đặt → Quà tặng. Mọi bước sau — kể cả file xuất kho của Đơn hàng — đều lấy dữ liệu từ đây, nên thêm sản phẩm là bot và đơn hàng nhận ngay.'
   },
   {
     id: 'product_detect',
@@ -48,7 +48,7 @@ const steps = [
     name: 'Tính tiền & quà tặng',
     type: 'transform',
     file: 'pricing.mjs',
-    summary: 'Đơn 1 sản phẩm tính giá bán; đơn từ 2 sản phẩm (cùng loại hay mua kèm) thì mỗi sản phẩm tính giá combo của chính nó. Quà tặng cộng dồn theo tổng số lượng. Sản phẩm lạ hoặc quá 20 sản phẩm thì chuyển nhân viên thay vì đoán giá. Đây cũng là nơi soạn khối danh mục gắn vào system prompt và tách dòng xuất kho.'
+    summary: 'Đơn 1 sản phẩm tính giá bán cộng phí vận chuyển; đơn từ 2 sản phẩm (cùng loại hay ghép) thì mỗi sản phẩm tính giá combo của chính nó. Quà tặng và miễn ship lấy theo đúng tổ hợp đã tick ở Cài đặt → Quà tặng. Tổ hợp không có trong bảng, sản phẩm lạ hoặc quá 3 sản phẩm thì chuyển nhân viên thay vì đoán giá. Đây cũng là nơi soạn khối danh mục và bảng quà gắn vào system prompt.'
   },
   {
     id: 'order_key',
@@ -62,7 +62,7 @@ const steps = [
     name: 'Soạn tin trả lời',
     type: 'output',
     file: '../chatbot-templates.mjs',
-    summary: 'Chọn mẫu tin, hỏi đúng phần khách còn thiếu, và soạn tin xác nhận đơn kèm tổng tiền với quà tặng.'
+    summary: 'Chọn mẫu tin và điền chỗ trống. Toàn bộ lời bot nói nằm ở Thiết lập tin nhắn — file này không chứa câu chữ nào; giá và quà được soạn từ danh mục ngay lúc trả lời.'
   }
 ];
 

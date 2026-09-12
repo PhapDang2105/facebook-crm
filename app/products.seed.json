@@ -16,7 +16,8 @@
       ],
       "components": [],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": true
     },
     {
       "id": "seed-granola-vang",
@@ -36,7 +37,8 @@
       ],
       "components": [],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": true
     },
     {
       "id": "seed-granola-nau",
@@ -60,7 +62,8 @@
       ],
       "components": [],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": true
     },
     {
       "id": "seed-cacao-300",
@@ -78,7 +81,8 @@
       ],
       "components": [],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": false
     },
     {
       "id": "seed-combo10-xanh",
@@ -101,7 +105,8 @@
         }
       ],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": false
     },
     {
       "id": "seed-combo10-nau",
@@ -124,7 +129,8 @@
         }
       ],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": false
     },
     {
       "id": "seed-combo10-cam",
@@ -153,7 +159,8 @@
         }
       ],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": false
     },
     {
       "id": "seed-combo10-mix",
@@ -185,7 +192,8 @@
         }
       ],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": false
     },
     {
       "id": "seed-nghe-lanh",
@@ -203,7 +211,8 @@
       ],
       "components": [],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": false
     },
     {
       "id": "seed-hat-an-lanh",
@@ -220,7 +229,8 @@
       ],
       "components": [],
       "active": true,
-      "image": ""
+      "image": "",
+      "mixable": false
     }
   ]
 }

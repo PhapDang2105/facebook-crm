@@ -10,9 +10,9 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
-import { chatbotTemplates, listDynamicTemplates } from './chatbot-templates.mjs';
-import { assertUniqueSku, normalizeProduct, normalizeProductStore, productSchemaVersion } from './products.mjs';
-import { getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
+import { listDynamicTemplates } from './chatbot-templates.mjs';
+import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
+import { getGiftAssignments, getGifts, getShippingFee, listCombos, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import {
@@ -102,70 +102,15 @@ async function readSeedItems(fileName) {
   }
 }
 
-/**
- * Lays down the starter catalogue the first time only, and upgrades records
- * written under an older shape. Two upgrades exist: legacy pricing codes
- * (XANH, COMBO10_MIX…) become the warehouse SKU the export needs, and the old
- * per-tier combo table becomes the single combo price. Both match on the seed
- * id or the legacy code, and neither touches a price staff already changed.
- */
-const legacySkuByCode = {
-  XANH: 'GRA-XANH-Z450', VANG: 'GRA-VANG-H350', NAU: 'GRA-NAU-Z350', CACAO300: 'GRA-TROPICAL-300',
-  COMBO10_XANH: 'CB10-XANH', COMBO10_NAU: 'CB10-NAU', COMBO10_CAM: 'CB10-CAM', COMBO10_MIX: 'CB10-MIX'
-};
-
-// Prices recorded before shipping was split out: 189.000đ was 174.000đ + the
-// 15.000đ single-order fee. Only a price still at exactly that old figure is
-// lowered; anything staff changed is left alone.
-const legacyPriceWithShipping = { 'GRA-XANH-Z450': 189000, 'GRA-VANG-H350': 189000, 'GRA-NAU-Z350': 179000, 'GRA-TROPICAL-300': 219000, 'CB10-XANH': 204000, 'CB10-NAU': 204000, 'CB10-CAM': 204000, 'CB10-MIX': 204000 };
-
-function upgradeProductRecord(item, seed, now, schema = 0) {
-  const template = seed.find(entry => entry.id === item.id)
-    || seed.find(entry => entry.sku === item.sku)
-    || seed.find(entry => entry.sku === legacySkuByCode[item.sku]);
-  const next = { ...item };
-  if (legacySkuByCode[item.sku]) next.sku = legacySkuByCode[item.sku];
-  if (next.comboPrice === undefined) {
-    // The old shape stored totals per tier; the per-unit combo price is tier 2 halved.
-    const tier2 = Number(item.comboPrices?.['2']) || 0;
-    next.comboPrice = tier2 ? Math.round(tier2 / 2) : (template?.comboPrice || 0);
-  }
-  if (next.weight === undefined) next.weight = template?.weight || 0;
-  if (!Array.isArray(next.aliases) || !next.aliases.length) next.aliases = template?.aliases || [];
-  if (!Array.isArray(next.components)) next.components = template?.components || [];
-  if (next.active === undefined) next.active = true;
-  if (schema < 3 && legacyPriceWithShipping[next.sku] && Number(next.salePrice) === legacyPriceWithShipping[next.sku]) {
-    next.salePrice = legacyPriceWithShipping[next.sku] - 15000;
-    if (Number(next.originalPrice) === legacyPriceWithShipping[next.sku]) next.originalPrice = next.salePrice;
-  }
-  delete next.comboPrices;
-  delete next.mixGroup;
-  next.updatedAt = now;
-  return next;
-}
-
+/** Lays down the starter catalogue when no catalogue file exists yet. */
 async function ensureProductCatalogue() {
-  const existing = await readProductStore().catch(() => null);
-  const seed = await readSeedItems('products.seed.json');
-  const now = Date.now();
-  if (existing?.items?.length) {
-    if (existing.schema >= productSchemaVersion && existing.seeded) return existing;
-    const items = existing.items.map(item => upgradeProductRecord(item, seed, now, existing.schema));
-    // Seed products added in a later release join an existing catalogue once,
-    // matched by seed id, so a deleted one is not resurrected on every boot.
-    const known = new Set(items.map(item => item.id));
-    const removed = new Set(Array.isArray(existing.removedSeedIds) ? existing.removedSeedIds : []);
-    for (const entry of seed) {
-      if (!known.has(entry.id) && !removed.has(entry.id) && (existing.schema || 0) < productSchemaVersion) items.push({ ...entry, createdAt: now, updatedAt: now });
-    }
-    return writeProductStore({ ...existing, items, seeded: true, schema: productSchemaVersion });
+  try {
+    await stat(productsPath);
+  } catch {
+    const now = Date.now();
+    const seed = await readSeedItems('products.seed.json');
+    await writeProductStore({ items: seed.map(item => ({ ...item, createdAt: now, updatedAt: now })) });
   }
-  if (existing?.seeded) return existing;
-  return writeProductStore({
-    items: seed.map(item => ({ ...item, createdAt: now, updatedAt: now })),
-    seeded: true,
-    schema: productSchemaVersion
-  });
 }
 
 async function readGiftStore() {
@@ -186,30 +131,14 @@ async function writeGiftStore(store) {
   return normalized;
 }
 
-/**
- * Lays down the starter gifts the first time only. A gift list written before
- * gifts carried a warehouse SKU gets the SKU and weight from the seed, matched
- * by id, so the export can ship them; names and thresholds staff set stay.
- */
+/** Lays down the starter gifts and shipping fee when no gift file exists yet. */
 async function ensureGifts() {
-  const seed = await readSeedItems('gifts.seed.json');
-  let existing;
   try {
-    existing = normalizeGiftStore(JSON.parse(await readFile(giftsPath, 'utf8')));
+    await stat(giftsPath);
   } catch {
     const raw = JSON.parse(await readFile(path.join(root, 'app', 'gifts.seed.json'), 'utf8').catch(() => '{}'));
-    return writeGiftStore({ items: seed, shippingFee: raw?.shippingFee });
+    await writeGiftStore({ items: Array.isArray(raw?.items) ? raw.items : [], assignments: raw?.assignments, shippingFee: raw?.shippingFee });
   }
-  if (existing.items.some(gift => gift.sku)) return existing;
-  // Pre-SKU gift lists also predate the shipping fee: take it from the seed.
-  const seedFee = Number(JSON.parse(await readFile(path.join(root, 'app', 'gifts.seed.json'), 'utf8').catch(() => '{}'))?.shippingFee) || existing.shippingFee;
-  existing.shippingFee = seedFee;
-  const items = existing.items.map(gift => {
-    const template = seed.find(entry => entry.id === gift.id);
-    return template ? { ...gift, sku: template.sku, weight: template.weight } : gift;
-  });
-  const missing = seed.filter(entry => entry.sku && !items.some(gift => gift.id === entry.id));
-  return writeGiftStore({ items: [...items, ...missing], shippingFee: existing.shippingFee });
 }
 
 async function saveProductImage(dataUrl, productId) {
@@ -553,7 +482,6 @@ const server = http.createServer(async (request, response) => {
       if (index < 0) return sendJson(response, 404, { error: 'Không tìm thấy sản phẩm.' });
       if (request.method === 'DELETE') {
         const [removed] = store.items.splice(index, 1);
-        if (String(removed.id).startsWith('seed-')) store.removedSeedIds = [...new Set([...(store.removedSeedIds || []), removed.id])];
         await writeProductStore(store);
         return sendJson(response, 200, removed);
       }
@@ -568,13 +496,11 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
       const settings = await readChatbotSettings();
-      const templates = { ...chatbotTemplates, ...settings.messageTemplates };
-      for (const id of settings.deletedTemplateIds) delete templates[id];
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
-        templates,
-        // Ids the catalogue writes at reply time, with their live text.
-        dynamicTemplates: listDynamicTemplates()
+        // Thiết lập tin nhắn: the stored texts, plus the ids the catalogue writes at reply time with their live text.
+        templates: settings.messageTemplates,
+        dynamicTemplates: listDynamicTemplates(settings.messageTemplates)
       });
     }
     if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
@@ -586,16 +512,14 @@ const server = http.createServer(async (request, response) => {
       const settings = await writeChatbotSettings({
         ...current,
         ...payload,
+        messageTemplates: payload.messageTemplates ?? current.messageTemplates,
         directApiKey: String(payload.directApiKey || '').trim() || (providerChanged ? '' : current.directApiKey),
         updatedAt: Date.now()
       });
-      const templates = { ...chatbotTemplates, ...settings.messageTemplates };
-      for (const id of settings.deletedTemplateIds) delete templates[id];
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
-        templates,
-        // Ids the catalogue writes at reply time, with their live text.
-        dynamicTemplates: listDynamicTemplates()
+        templates: settings.messageTemplates,
+        dynamicTemplates: listDynamicTemplates(settings.messageTemplates)
       });
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/test') {
@@ -900,21 +824,26 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, publicConversation(conversation));
     }
     if (url.pathname === '/api/gifts') {
-      if (request.method === 'GET') return sendJson(response, 200, { items: getGifts(), shippingFee: getShippingFee() });
+      // Combos are generated from the catalogue so the gift table always has
+      // exactly the rows the chatbot can sell.
+      const giftResponse = () => ({ items: getGifts(), assignments: getGiftAssignments(), shippingFee: getShippingFee(), combos: listCombos() });
+      if (request.method === 'GET') return sendJson(response, 200, giftResponse());
       if (request.method === 'PUT') {
         const payload = await readBody(request);
         const items = Array.isArray(payload.items) ? payload.items : [];
         if (items.length > 50) return sendJson(response, 400, { error: 'Tối đa 50 quà tặng.' });
         for (const item of items) {
           if (!String(item?.name || '').trim()) return sendJson(response, 400, { error: 'Mỗi quà tặng phải có tên.' });
-          const quantity = Number(item?.minQuantity);
-          if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) return sendJson(response, 400, { error: `Quà “${item.name}”: số lượng áp dụng phải từ 1 đến 20.` });
         }
         const shippingFee = Number(payload.shippingFee);
         if (payload.shippingFee !== undefined && (!Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });
         const current = await readGiftStore();
-        const store = await writeGiftStore({ items, shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee });
-        return sendJson(response, 200, { items: store.items, shippingFee: store.shippingFee, updatedAt: store.updatedAt });
+        await writeGiftStore({
+          items,
+          assignments: payload.assignments && typeof payload.assignments === 'object' ? payload.assignments : current.assignments,
+          shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee
+        });
+        return sendJson(response, 200, giftResponse());
       }
     }
     // What the model actually receives: the saved prompt plus the live catalogue block.

@@ -31,21 +31,3 @@ export function extractVietnamesePhone(text) {
   }
   return '';
 }
-
-/**
- * Reads the gender hint the upstream platform puts in the prompt and turns it
- * into the pronoun the replies address the customer with.
- */
-export function detectHonorific(text) {
-  const match = String(text ?? '').match(/(?:Khách hàng có\s*)?giới tính là\s*([a-zA-Z]+)\s*\.?/i);
-  const gender = match?.[1]?.toLowerCase();
-  if (gender === 'male') return 'anh';
-  if (gender === 'female') return 'chị';
-  return 'bạn';
-}
-
-/** The form used when addressing a customer whose gender is unknown. */
-export function politeHonorific(value) {
-  const honorific = String(value ?? '').trim();
-  return !honorific || honorific === 'bạn' ? 'anh/chị' : honorific;
-}

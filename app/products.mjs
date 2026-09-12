@@ -44,6 +44,7 @@ export function normalizeProduct(input = {}, existing = {}) {
     weight,
     aliases: normalizeAliases(input.aliases ?? existing.aliases ?? []),
     components: normalizeComponents(input.components ?? existing.components ?? []),
+    mixable: (input.mixable ?? existing.mixable) === true,
     active: (input.active ?? existing.active) !== false,
     image: cleanText(input.image ?? existing.image, 500),
     updatedAt: Date.now()
@@ -61,15 +62,6 @@ export function normalizeProductStore(value) {
   const items = Array.isArray(value) ? value : value?.items;
   return {
     items: Array.isArray(items) ? items.filter(item => item && item.id && item.name && item.sku) : [],
-    updatedAt: Number(value?.updatedAt) || 0,
-    // Survives every write so the starter catalogue is only ever laid down once.
-    // Without it, emptying the catalogue on purpose would refill it on restart.
-    seeded: value?.seeded === true,
-    // Bumped when the product shape changes so old records get upgraded once.
-    schema: Number(value?.schema) || 0,
-    // Seed ids staff deleted on purpose; ensureProductCatalogue must not re-add them.
-    removedSeedIds: Array.isArray(value?.removedSeedIds) ? value.removedSeedIds.filter(Boolean) : []
+    updatedAt: Number(value?.updatedAt) || 0
   };
 }
-
-export const productSchemaVersion = 4;

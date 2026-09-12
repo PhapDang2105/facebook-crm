@@ -139,17 +139,13 @@ export async function requestDirectModelReply(options) {
       if (!answer) throw new Error('Mô hình không trả về nội dung.');
       const parsedAnswer = parseModelAnswer(answer);
       if (rawResponse) return { raw: answer, parsed: parsedAnswer, conversationId: '' };
-      return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates, settings.deletedTemplateIds, options.context || {}), conversationId: '' };
+      return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates, options.context || {}), conversationId: '' };
     } catch (error) {
       lastError = error;
       if (attempt + 1 < attempts) await wait(Math.max(100, Number(settings.retryIntervalMs) || 1000));
     }
   }
   throw lastError;
-}
-
-export function requestChatbotReply(options) {
-  return requestDirectModelReply(options);
 }
 
 /** Strips Vietnamese tone marks so a handoff keyword still matches when the
@@ -164,7 +160,7 @@ export function foldVietnamese(value) {
 }
 
 export async function processChatbotChanges(changes, dependencies) {
-  const { readSettings, listMessages, saveBotState, sendMessage, createOrder, sendReceipt, requestReply = requestChatbotReply } = dependencies;
+  const { readSettings, listMessages, saveBotState, sendMessage, createOrder, sendReceipt, requestReply = requestDirectModelReply } = dependencies;
   const settings = await readSettings();
   if (!settings.enabled) return [];
   const results = [];
@@ -179,7 +175,7 @@ export async function processChatbotChanges(changes, dependencies) {
       // "0385805790" alone is still enough to close the same order.
       const replyContext = { pendingOrder: conversation.pendingOrder, now: Date.now() };
       const reply = asksForHuman || change.message.type !== 'text'
-        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, settings.deletedTemplateIds, replyContext)
+        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
         : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id), context: replyContext });
       // The order is persisted BEFORE anything is sent. Sending first meant a
       // failed order left the customer holding a confirmation for an order that

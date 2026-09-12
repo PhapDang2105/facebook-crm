@@ -172,12 +172,19 @@ function publicImageUrl(value, baseUrl) {
 export function buildOrderReceiptPayload(order, { merchantName = 'Giọt Nắng', baseUrl = '', orderUrl = '' } = {}) {
   const subtotal = order.products.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const elements = order.products.slice(0, 100).map(item => {
-    const image = publicImageUrl(item.image, baseUrl);
+    // A version query defeats Messenger's cache of an earlier failed fetch of
+    // the same picture (the URL was behind the login until the proxy opened it).
+    const image = publicImageUrl(item.image, baseUrl).replace(/^(https:\/\/[^?]+)$/, `$1?v=${Number(order.createdAt) || Date.now()}`);
+    const quantity = Math.max(1, Math.round(Number(item.quantity) || 1));
+    const price = money(item.price);
     return {
-      title: text(item.name, 80) || 'Sản phẩm',
+      // Messenger's receipt view shows only the title of each line on the
+      // customer's phone — subtitle, quantity and price fields exist in the
+      // payload but are not drawn — so the line reads as a whole in the title.
+      title: `${text(item.name, 50) || 'Sản phẩm'} · SL ${quantity} · ${price.toLocaleString('vi-VN')}đ`.slice(0, 80),
       subtitle: text(item.variant || item.sku || merchantName, 80),
-      quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
-      price: money(item.price),
+      quantity,
+      price,
       currency: 'VND',
       ...(image ? { image_url: image } : {})
     };

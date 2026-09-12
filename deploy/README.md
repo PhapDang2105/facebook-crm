@@ -15,6 +15,7 @@ Thư mục này chứa mọi thứ cần để đưa CRM lên một máy chủ D
 `Caddyfile` xử lý việc đó bằng cách chia hai nhánh:
 
 - `/webhooks/facebook` đi thẳng, không hỏi mật khẩu. Meta gọi bằng máy nên không đăng nhập được; bản thân endpoint này đã tự xác thực bằng chữ ký `X-Hub-Signature-256`.
+- `/product-images/*` cũng đi thẳng: Messenger tải ảnh sản phẩm từ đây để hiện trên receipt và sau bảng giá.
 - Mọi đường dẫn còn lại yêu cầu tên đăng nhập và mật khẩu.
 
 Khi nào CRM có đăng nhập riêng thì có thể bỏ lớp này.

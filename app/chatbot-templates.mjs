@@ -86,7 +86,10 @@ function splitMessages(text) {
 function publicImageUrl(image) {
   const value = String(image || '').trim();
   if (!value) return '';
-  return /^https?:\/\//i.test(value) ? value : `${metaConfig.publicBaseUrl}${value.startsWith('/') ? '' : '/'}${value}`;
+  if (/^https?:\/\//i.test(value)) return value;
+  // Version query: Messenger caches a failed fetch per URL, so a picture that
+  // was once unreachable would otherwise stay blank.
+  return `${metaConfig.publicBaseUrl}${value.startsWith('/') ? '' : '/'}${value}?v=${Date.now()}`;
 }
 
 function formatMoney(value) {

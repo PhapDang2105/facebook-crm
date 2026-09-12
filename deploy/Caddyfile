@@ -17,6 +17,13 @@
 		reverse_proxy 127.0.0.1:8080
 	}
 
+	# Ảnh sản phẩm cũng phải công khai: Messenger tải ảnh từ link này để hiện
+	# trên receipt và sau bảng giá. Ứng dụng chỉ trả tệp ảnh có tên hợp lệ.
+	@productImages path /product-images/*
+	handle @productImages {
+		reverse_proxy 127.0.0.1:8080
+	}
+
 	# Toàn bộ giao diện và API quản trị nằm sau mật khẩu.
 	handle {
 		basic_auth {

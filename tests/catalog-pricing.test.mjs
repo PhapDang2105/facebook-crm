@@ -175,10 +175,14 @@ test('ảnh sản phẩm ở Cài đặt → Sản phẩm đi vào đơn chatbot
   catalog.reloadCatalog();
   const order = normalizeChatbotOrder({ phone: '0385805790', address: '12 Lê Lợi, Quận 1', items: [{ name: 'Túi Xanh', quantity: 2 }], total: 298000 }, { name: 'A' });
   assert.equal(order.products[0].image, '/product-images/xanh.jpg');
-  assert.equal(buildOrderReceiptPayload(order, { baseUrl: 'https://fb.example.vn' }).elements[0].image_url, 'https://fb.example.vn/product-images/xanh.jpg');
+  const element = buildOrderReceiptPayload(order, { baseUrl: 'https://fb.example.vn' }).elements[0];
+  assert.match(element.image_url, /^https:\/\/fb\.example\.vn\/product-images\/xanh\.jpg\?v=\d+$/);
+  // Messenger chỉ vẽ tiêu đề từng dòng, nên số lượng và đơn giá nằm luôn trong tiêu đề.
+  assert.equal(element.title, 'Granola Túi Xanh 450g · SL 2 · 174.000đ');
+  assert.equal(element.quantity, 2);
   const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
   assert.equal(quote.images.length, 1);
-  assert.match(quote.images[0], /\/product-images\/xanh\.jpg$/);
+  assert.match(quote.images[0], /\/product-images\/xanh\.jpg\?v=\d+$/);
 });
 
 test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu lực ngay sau khi lưu', () => {

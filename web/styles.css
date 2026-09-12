@@ -808,6 +808,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .dify-pane > .chatbot-llm-pane-tabs button.active { color: #101828; }
 .dify-pane > .chatbot-llm-pane-tabs button.active::after { background: #155eef; }
 .dify-pane-body { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 16px; padding: 16px; overflow-y: auto; }
+.dify-pane-body > * { flex: 0 0 auto; }
 
 .dify-block { display: flex; flex-direction: column; gap: 8px; }
 .dify-block-head { display: flex; min-height: 20px; align-items: center; gap: 6px; }
@@ -838,7 +839,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .dify-placeholder { color: #98a2b2; font-size: 13px; }
 
 /* Khối prompt */
-.dify-prompt { display: flex; flex-direction: column; padding: 2px; background: rgba(200, 206, 218, .25); border: 1px solid transparent; border-radius: 9px; }
+.dify-pane-body > .dify-prompt { flex: 1 1 auto; min-height: 260px; }
+.dify-prompt { display: flex; min-height: 0; flex-direction: column; padding: 2px; background: rgba(200, 206, 218, .25); border: 1px solid transparent; border-radius: 9px; }
 .dify-prompt:focus-within { background: #fff; border-color: #84adff; box-shadow: 0 0 0 2px rgba(21, 94, 239, .12); }
 .dify-prompt-head { display: flex; min-height: 30px; align-items: center; gap: 6px; padding: 4px 8px 0 12px; }
 .dify-role { display: inline-flex; align-items: center; gap: 4px; color: #354052; font-size: 12px; font-weight: 600; line-height: 16px; text-transform: uppercase; }
@@ -846,7 +848,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .dify-spark { width: 14px; height: 14px; color: #155eef; fill: currentColor; stroke: none; }
 .dify-jinja { display: inline-flex; align-items: center; gap: 5px; color: #c2c8d4; font-size: 12px; }
 .dify-prompt-tools { display: flex; margin-left: auto; gap: 1px; }
-.dify-prompt textarea { min-height: 220px; padding: 4px 12px 10px; resize: vertical; color: #101828; background: transparent; border: 0; outline: none; font: inherit; font-size: 13px; line-height: 20px; }
+.dify-prompt textarea { min-height: 0; flex: 1 1 auto; padding: 4px 12px 10px; resize: none; color: #101828; background: transparent; border: 0; outline: none; font: inherit; font-size: 13px; line-height: 20px; }
 .dify-prompt textarea::placeholder { color: #98a2b2; }
 .dify-prompt--static { padding-bottom: 8px; }
 

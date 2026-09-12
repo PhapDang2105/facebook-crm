@@ -2240,10 +2240,16 @@ function getCustomerPanelProfile(conversation = getActiveConversation()) {
   if (!conversation) return { name: '', phone: '', address: '', avatar: '' };
   const name = getConversationName(conversation);
   const profile = conversationProfiles[name] || {};
+  // Pancake pre-fills the order form from the customer record. The nearest
+  // equivalent here is the newest order already placed in this conversation,
+  // which is why a repeat customer never has to retype phone and address.
+  const key = getCustomerPanelKey(conversation);
+  const storedOrders = key && Array.isArray(customerPanelStore.orders[key]) ? customerPanelStore.orders[key] : [];
+  const latest = storedOrders.find(order => order?.phone || order?.address) || {};
   return {
     name,
-    phone: profile.phone || '',
-    address: profile.address || profile.order?.[5] || '',
+    phone: profile.phone || latest.phone || '',
+    address: profile.address || profile.order?.[5] || latest.address || '',
     avatar: conversation.dataset.avatar || ''
   };
 }

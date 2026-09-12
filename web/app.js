@@ -752,12 +752,11 @@ function renderFacebookChannels(state) {
   if (!facebookChannelList) return;
   facebookChannelList.innerHTML = items.length ? items.map(channel => {
     const healthy = channel.status === 'connected';
-    const subscriptionText = channel.subscribed
-      ? 'Đã đăng ký nhận tin nhắn'
-      : `Đã kết nối · ${channel.subscriptionError || 'chưa đăng ký webhook'}`;
+    // The dot says it all when the page is healthy; text appears only when something needs attention.
+    const problem = channel.subscribed ? '' : `${channel.subscriptionError || 'Chưa đăng ký webhook'} · `;
     return `<article class="channel-item" data-channel-id="${escapeHtml(channel.id)}">
       ${channelAvatar(channel)}
-      <div class="channel-item-copy"><strong>${escapeHtml(channel.name)}</strong><small><span class="channel-connected-dot${healthy ? '' : ' warning'}"></span>${escapeHtml(subscriptionText)} · ID ${escapeHtml(channel.id)}</small></div>
+      <div class="channel-item-copy"><strong>${escapeHtml(channel.name)}</strong><small><span class="channel-connected-dot${healthy && channel.subscribed ? '' : ' warning'}"></span>${escapeHtml(problem)}ID ${escapeHtml(channel.id)}</small></div>
       <div class="channel-item-actions"><button type="button" data-channel-action="refresh">Làm mới</button><button class="channel-remove-button" type="button" data-channel-action="remove">Ngắt kết nối</button></div>
     </article>`;
   }).join('') : '<p class="channel-empty">Chưa có Facebook Page nào được kết nối.</p>';
@@ -4255,9 +4254,19 @@ function renderPreviewCell(value, header) {
   return escapeHtml(previewValue);
 }
 
+// An empty screen shows one centred empty-box icon and nothing else: no
+// bordered frame, no toolbar button that has nothing to act on.
+const emptyBoxIcon = '<img src="/assets/icons/empty-box.svg" alt="" width="72" height="72">';
+
+function renderEmptyState(container, message) {
+  container.classList.add('is-empty');
+  container.innerHTML = `<div class="order-empty">${emptyBoxIcon}<small>${escapeHtml(message)}</small></div>`;
+}
+
 function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false } = {}) {
+  preview.classList.remove('is-empty');
   if (!rowEntries.length) {
-    preview.innerHTML = `<p>${escapeHtml(emptyMessage)}</p>`;
+    renderEmptyState(preview, emptyMessage);
     return;
   }
   const visibleColumns = headers
@@ -4329,7 +4338,7 @@ function renderOrderData() {
 
   renderOrderTable(
     document.querySelector('#order-import-preview'), headers, importRows,
-    rows.length ? 'Không tìm thấy đơn hàng phù hợp.' : 'Import một tệp CSV hoặc XLSX để xem toàn bộ dữ liệu.',
+    rows.length ? 'Không tìm thấy đơn hàng phù hợp' : 'Chưa có dữ liệu',
     ({ index }) => duplicateRowIndexes.has(index)
       ? 'order-row-duplicate'
       : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
@@ -4337,7 +4346,7 @@ function renderOrderData() {
   );
   renderOrderTable(
     document.querySelector('#order-preview'), headers, processingRows,
-    'Không có đơn hàng cần xử lý.', ({ index }) => duplicateRowIndexes.has(index)
+    'Không có đơn hàng cần xử lý', ({ index }) => duplicateRowIndexes.has(index)
       ? 'order-row-duplicate'
       : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : 'order-row-invalid'
   );
@@ -4384,16 +4393,20 @@ async function renderExportPreview() {
   const preview = document.querySelector('#order-export-preview');
   if (!preview) return;
   let rows = [];
+  preview.classList.remove('is-empty');
   try {
     rows = await fetchExportRows();
   } catch (error) {
-    preview.innerHTML = `<p>${escapeHtml(error.message || 'Chưa dựng được dữ liệu xuất.')}</p>`;
-    if (orderExport) orderExport.disabled = true;
+    renderEmptyState(preview, error.message || 'Chưa dựng được dữ liệu xuất.');
+    if (orderExport) orderExport.hidden = true;
     return;
   }
-  if (orderExport) orderExport.disabled = rows.length === 0;
+  if (orderExport) {
+    orderExport.disabled = rows.length === 0;
+    orderExport.hidden = rows.length === 0;
+  }
   if (!rows.length) {
-    preview.innerHTML = '<p>Chưa có dữ liệu xuất. Đưa đơn từ hội thoại vào bảng hoặc import tệp ở mục Nhập dữ liệu.</p>';
+    renderEmptyState(preview, 'Chưa có dữ liệu xuất');
     return;
   }
   const groupHead = exportPreviewGroups.map(group => `<th class="export-fill-${group.fill}" colspan="${group.span}"${group.rowspan ? ` rowspan="${group.rowspan}"` : ''}>${escapeHtml(group.label)}</th>`).join('');
@@ -5463,10 +5476,9 @@ restoreConversationActivity();
 renderSavedChatMessages();
 updateMessageSendState();
 window.setInterval(updateConversationTimeLabels, 30000);
-if (initialView === 'orders') {
-  if (orderData.rows.length) renderOrderData();
-  showOrderStage(getRecommendedOrderStage());
-}
+// Drawn even with no rows so each order panel shows its empty state.
+renderOrderData();
+if (initialView === 'orders') showOrderStage(getRecommendedOrderStage());
 else showView(initialView);
 loadFacebookChannels().catch(() => {});
 loadMessageChannels().catch(() => {});

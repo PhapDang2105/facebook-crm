@@ -70,4 +70,4 @@ export function normalizeProductStore(value) {
   };
 }
 
-export const productSchemaVersion = 2;
+export const productSchemaVersion = 3;

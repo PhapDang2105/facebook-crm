@@ -393,7 +393,7 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 
 .order-stage[data-order-panel="process"] { display: block; flex: 0 1 auto; height: fit-content; min-height: 0; }
 .order-stage[data-order-panel="import"] .data-preview { margin-top: 14.4px; }
-.order-import-controls { display: grid; grid-template-columns: minmax(252px, 468px) minmax(162px, 207px) max-content max-content; align-items: center; gap: 10.8px; max-width: 882px; }
+.order-import-controls { display: grid; grid-template-columns: minmax(252px, 468px) minmax(162px, 207px) max-content max-content max-content; align-items: center; gap: 10.8px; max-width: 990px; }
 .order-search-control,
 .order-filter-control { display: block; }
 .order-search-control input,
@@ -415,9 +415,18 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customer-orders-management { margin-top: 14.4px; padding: 14.4px; background: #f8fbf9; border: .9px solid #d8e5dc; border-radius: 9px; }
 .customer-orders-management h2 { margin: 0; color: #1d2b22; font-size: 14.4px; }
 .customer-orders-management-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10.8px; }
+.order-row-delete { display: inline-grid; width: 26px; height: 26px; place-items: center; padding: 0; color: #98a2b2; background: transparent; border: 0; border-radius: 6px; font-size: 17px; line-height: 1; cursor: pointer; }
+.order-row-delete:hover { color: #b42318; background: #fff1f0; }
+.order-row-delete:disabled { opacity: .4; cursor: default; }
+.customer-orders-management-row .order-row-delete { margin-left: 6px; }
+.preview-actions { width: 44px; text-align: center; }
+.order-clear-button { color: #b42318; border-color: #f4c7c3; }
+.order-clear-button:hover { color: #fff; background: #b42318; border-color: #b42318; }
+.chatbot-template-dynamic-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; color: #0b4fd1; background: #eff4ff; border-radius: 4px; font-size: 10.5px; font-weight: 600; vertical-align: middle; text-transform: uppercase; }
+.chatbot-template-dynamic-note { margin: 0 0 8px; padding: 8px 11px; color: #0b4fd1; background: #eff4ff; border: 1px solid #c7dbff; border-radius: 7px; font-size: 12.5px; line-height: 18px; }
 .customer-orders-management p { margin: 0; color: #687080; font-size: 11.7px; }
 .customer-orders-management-list { display: grid; gap: 6.3px; }
-.customer-orders-management-row { display: grid; grid-template-columns: 90px minmax(150px, 1fr) 130px 125px 100px; align-items: center; gap: 10.8px; padding: 9px 10.8px; background: #fff; border: .9px solid #e2e8e4; border-radius: 7.2px; font-size: 11.7px; }
+.customer-orders-management-row { display: grid; grid-template-columns: 90px minmax(150px, 1fr) 130px 125px 100px 32px; align-items: center; gap: 10.8px; padding: 9px 10.8px; background: #fff; border: .9px solid #e2e8e4; border-radius: 7.2px; font-size: 11.7px; }
 .customer-orders-management-row > strong:last-child { color: #27643a; text-align: right; }
 .customer-orders-management-status { color: #27643a; font-weight: 700; }
 .data-preview tbody tr.order-row-invalid td { background: #fff7e8; }
@@ -956,6 +965,10 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .gift-preview-cell ul { margin: 0; padding-left: 16px; color: #344054; }
 .gift-preview-cell li + li { margin-top: 3px; }
 .gift-preview-cell em { color: #98a2b2; }
+.gift-preview-ship { display: block; margin-top: 6px; color: #b54708; font-size: 12px; }
+.gift-shipping-field { display: grid; gap: 4px; color: #475467; font-size: 12px; }
+.gift-shipping-field .product-price-input { width: 150px; }
+.gift-shipping-field .product-price-input input { width: 100%; height: 34px; padding: 0 28px 0 10px; color: #101828; background: #fff; border: 1px solid #e0e3ea; border-radius: 6px; outline: none; font: inherit; font-size: 13px; text-align: right; }
 
 /* ===== Sản phẩm: cột giá combo & nhóm ghép ===== */
 .product-row-combo { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 14px; font-variant-numeric: tabular-nums; }

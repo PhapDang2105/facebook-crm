@@ -4,11 +4,16 @@
       "id": "seed-granola-xanh",
       "name": "Granola Túi Xanh 450g",
       "sku": "GRA-XANH-Z450",
-      "originalPrice": 189000,
-      "salePrice": 189000,
+      "originalPrice": 174000,
+      "salePrice": 174000,
       "comboPrice": 149000,
       "weight": 500,
-      "aliases": ["túi xanh", "granola túi xanh", "granola xanh", "#granolatuixanh"],
+      "aliases": [
+        "túi xanh",
+        "granola túi xanh",
+        "granola xanh",
+        "#granolatuixanh"
+      ],
       "components": [],
       "active": true,
       "image": ""
@@ -17,11 +22,18 @@
       "id": "seed-granola-vang",
       "name": "Granola Túi Vàng nhiều hạt quả 350g",
       "sku": "GRA-VANG-H350",
-      "originalPrice": 189000,
-      "salePrice": 189000,
+      "originalPrice": 174000,
+      "salePrice": 174000,
       "comboPrice": 149000,
       "weight": 400,
-      "aliases": ["túi vàng", "granola túi vàng", "granola vàng", "granola nhiều hạt quả", "nhiều hạt quả 350g", "#granolatuivang"],
+      "aliases": [
+        "túi vàng",
+        "granola túi vàng",
+        "granola vàng",
+        "granola nhiều hạt quả",
+        "nhiều hạt quả 350g",
+        "#granolatuivang"
+      ],
       "components": [],
       "active": true,
       "image": ""
@@ -30,11 +42,22 @@
       "id": "seed-granola-nau",
       "name": "Granola Túi Nâu vị cacao 350g",
       "sku": "GRA-NAU-Z350",
-      "originalPrice": 179000,
-      "salePrice": 179000,
+      "originalPrice": 164000,
+      "salePrice": 164000,
       "comboPrice": 144000,
       "weight": 400,
-      "aliases": ["túi nâu", "granola túi nâu", "granola nâu", "granola cacao", "granola vị cacao", "granola vị ca cao", "granola ca cao", "vị cacao 350g", "vị ca cao 350g", "#granolatuinau"],
+      "aliases": [
+        "túi nâu",
+        "granola túi nâu",
+        "granola nâu",
+        "granola cacao",
+        "granola vị cacao",
+        "granola vị ca cao",
+        "granola ca cao",
+        "vị cacao 350g",
+        "vị ca cao 350g",
+        "#granolatuinau"
+      ],
       "components": [],
       "active": true,
       "image": ""
@@ -43,11 +66,16 @@
       "id": "seed-cacao-300",
       "name": "Granola Tropical Cacao 300g",
       "sku": "GRA-TROPICAL-300",
-      "originalPrice": 219000,
-      "salePrice": 219000,
+      "originalPrice": 204000,
+      "salePrice": 204000,
       "comboPrice": 174000,
       "weight": 350,
-      "aliases": ["tropical cacao", "granola tropical", "cacao 300g", "cacao 300"],
+      "aliases": [
+        "tropical cacao",
+        "granola tropical",
+        "cacao 300g",
+        "cacao 300"
+      ],
       "components": [],
       "active": true,
       "image": ""
@@ -56,12 +84,22 @@
       "id": "seed-combo10-xanh",
       "name": "Combo 10 gói Xanh",
       "sku": "CB10-XANH",
-      "originalPrice": 204000,
-      "salePrice": 204000,
+      "originalPrice": 189000,
+      "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 350,
-      "aliases": ["combo 10 gói xanh", "combo 10 xanh", "túi xanh nhỏ", "10 gói xanh"],
-      "components": [{ "sku": "GRA-XANH-G35", "quantity": 10 }],
+      "aliases": [
+        "combo 10 gói xanh",
+        "combo 10 xanh",
+        "túi xanh nhỏ",
+        "10 gói xanh"
+      ],
+      "components": [
+        {
+          "sku": "GRA-XANH-G35",
+          "quantity": 10
+        }
+      ],
       "active": true,
       "image": ""
     },
@@ -69,12 +107,22 @@
       "id": "seed-combo10-nau",
       "name": "Combo 10 gói Nâu",
       "sku": "CB10-NAU",
-      "originalPrice": 204000,
-      "salePrice": 204000,
+      "originalPrice": 189000,
+      "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 350,
-      "aliases": ["combo 10 gói nâu", "combo 10 nâu", "túi nâu nhỏ", "10 gói nâu"],
-      "components": [{ "sku": "GRA-NAU-G35", "quantity": 10 }],
+      "aliases": [
+        "combo 10 gói nâu",
+        "combo 10 nâu",
+        "túi nâu nhỏ",
+        "10 gói nâu"
+      ],
+      "components": [
+        {
+          "sku": "GRA-NAU-G35",
+          "quantity": 10
+        }
+      ],
       "active": true,
       "image": ""
     },
@@ -82,12 +130,28 @@
       "id": "seed-combo10-cam",
       "name": "Combo 10 gói Cam",
       "sku": "CB10-CAM",
-      "originalPrice": 204000,
-      "salePrice": 204000,
+      "originalPrice": 189000,
+      "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 300,
-      "aliases": ["combo 10 gói cam", "combo 10 cam", "túi cam nhỏ", "10 gói cam", "túi cam", "granola túi cam", "granola cam", "granola bơ hạt điều", "vị bơ hạt điều", "#granolatuicam"],
-      "components": [{ "sku": "GRA-CAM-G30", "quantity": 10 }],
+      "aliases": [
+        "combo 10 gói cam",
+        "combo 10 cam",
+        "túi cam nhỏ",
+        "10 gói cam",
+        "túi cam",
+        "granola túi cam",
+        "granola cam",
+        "granola bơ hạt điều",
+        "vị bơ hạt điều",
+        "#granolatuicam"
+      ],
+      "components": [
+        {
+          "sku": "GRA-CAM-G30",
+          "quantity": 10
+        }
+      ],
       "active": true,
       "image": ""
     },
@@ -95,12 +159,31 @@
       "id": "seed-combo10-mix",
       "name": "Combo 10 gói Mix",
       "sku": "CB10-MIX",
-      "originalPrice": 204000,
-      "salePrice": 204000,
+      "originalPrice": 189000,
+      "salePrice": 189000,
       "comboPrice": 179000,
       "weight": 335,
-      "aliases": ["combo 10 gói mix", "combo 10 mix", "10 gói mix", "mix 3 vị", "combo mix"],
-      "components": [{ "sku": "GRA-NAU-G35", "quantity": 3 }, { "sku": "GRA-XANH-G35", "quantity": 4 }, { "sku": "GRA-CAM-G30", "quantity": 3 }],
+      "aliases": [
+        "combo 10 gói mix",
+        "combo 10 mix",
+        "10 gói mix",
+        "mix 3 vị",
+        "combo mix"
+      ],
+      "components": [
+        {
+          "sku": "GRA-NAU-G35",
+          "quantity": 3
+        },
+        {
+          "sku": "GRA-XANH-G35",
+          "quantity": 4
+        },
+        {
+          "sku": "GRA-CAM-G30",
+          "quantity": 3
+        }
+      ],
       "active": true,
       "image": ""
     }

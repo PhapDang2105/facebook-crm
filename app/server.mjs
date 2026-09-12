@@ -10,9 +10,9 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
-import { chatbotTemplates } from './chatbot-templates.mjs';
+import { chatbotTemplates, listDynamicTemplates } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore, productSchemaVersion } from './products.mjs';
-import { getGifts, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
+import { getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import {
@@ -114,7 +114,12 @@ const legacySkuByCode = {
   COMBO10_XANH: 'CB10-XANH', COMBO10_NAU: 'CB10-NAU', COMBO10_CAM: 'CB10-CAM', COMBO10_MIX: 'CB10-MIX'
 };
 
-function upgradeProductRecord(item, seed, now) {
+// Prices recorded before shipping was split out: 189.000đ was 174.000đ + the
+// 15.000đ single-order fee. Only a price still at exactly that old figure is
+// lowered; anything staff changed is left alone.
+const legacyPriceWithShipping = { 'GRA-XANH-Z450': 189000, 'GRA-VANG-H350': 189000, 'GRA-NAU-Z350': 179000, 'GRA-TROPICAL-300': 219000, 'CB10-XANH': 204000, 'CB10-NAU': 204000, 'CB10-CAM': 204000, 'CB10-MIX': 204000 };
+
+function upgradeProductRecord(item, seed, now, schema = 0) {
   const template = seed.find(entry => entry.id === item.id)
     || seed.find(entry => entry.sku === item.sku)
     || seed.find(entry => entry.sku === legacySkuByCode[item.sku]);
@@ -129,6 +134,10 @@ function upgradeProductRecord(item, seed, now) {
   if (!Array.isArray(next.aliases) || !next.aliases.length) next.aliases = template?.aliases || [];
   if (!Array.isArray(next.components)) next.components = template?.components || [];
   if (next.active === undefined) next.active = true;
+  if (schema < 3 && legacyPriceWithShipping[next.sku] && Number(next.salePrice) === legacyPriceWithShipping[next.sku]) {
+    next.salePrice = legacyPriceWithShipping[next.sku] - 15000;
+    if (Number(next.originalPrice) === legacyPriceWithShipping[next.sku]) next.originalPrice = next.salePrice;
+  }
   delete next.comboPrices;
   delete next.mixGroup;
   next.updatedAt = now;
@@ -141,7 +150,7 @@ async function ensureProductCatalogue() {
   const now = Date.now();
   if (existing?.items?.length) {
     if (existing.schema >= productSchemaVersion && existing.seeded) return existing;
-    const items = existing.items.map(item => upgradeProductRecord(item, seed, now));
+    const items = existing.items.map(item => upgradeProductRecord(item, seed, now, existing.schema));
     return writeProductStore({ ...existing, items, seeded: true, schema: productSchemaVersion });
   }
   if (existing?.seeded) return existing;
@@ -181,15 +190,19 @@ async function ensureGifts() {
   try {
     existing = normalizeGiftStore(JSON.parse(await readFile(giftsPath, 'utf8')));
   } catch {
-    return writeGiftStore({ items: seed });
+    const raw = JSON.parse(await readFile(path.join(root, 'app', 'gifts.seed.json'), 'utf8').catch(() => '{}'));
+    return writeGiftStore({ items: seed, shippingFee: raw?.shippingFee });
   }
   if (existing.items.some(gift => gift.sku)) return existing;
+  // Pre-SKU gift lists also predate the shipping fee: take it from the seed.
+  const seedFee = Number(JSON.parse(await readFile(path.join(root, 'app', 'gifts.seed.json'), 'utf8').catch(() => '{}'))?.shippingFee) || existing.shippingFee;
+  existing.shippingFee = seedFee;
   const items = existing.items.map(gift => {
     const template = seed.find(entry => entry.id === gift.id);
     return template ? { ...gift, sku: template.sku, weight: template.weight } : gift;
   });
   const missing = seed.filter(entry => entry.sku && !items.some(gift => gift.id === entry.id));
-  return writeGiftStore({ items: [...items, ...missing] });
+  return writeGiftStore({ items: [...items, ...missing], shippingFee: existing.shippingFee });
 }
 
 async function saveProductImage(dataUrl, productId) {
@@ -551,7 +564,9 @@ const server = http.createServer(async (request, response) => {
       for (const id of settings.deletedTemplateIds) delete templates[id];
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
-        templates
+        templates,
+        // Ids the catalogue writes at reply time, with their live text.
+        dynamicTemplates: listDynamicTemplates()
       });
     }
     if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
@@ -570,7 +585,9 @@ const server = http.createServer(async (request, response) => {
       for (const id of settings.deletedTemplateIds) delete templates[id];
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
-        templates
+        templates,
+        // Ids the catalogue writes at reply time, with their live text.
+        dynamicTemplates: listDynamicTemplates()
       });
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/test') {
@@ -875,7 +892,7 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, publicConversation(conversation));
     }
     if (url.pathname === '/api/gifts') {
-      if (request.method === 'GET') return sendJson(response, 200, { items: getGifts() });
+      if (request.method === 'GET') return sendJson(response, 200, { items: getGifts(), shippingFee: getShippingFee() });
       if (request.method === 'PUT') {
         const payload = await readBody(request);
         const items = Array.isArray(payload.items) ? payload.items : [];
@@ -885,8 +902,11 @@ const server = http.createServer(async (request, response) => {
           const quantity = Number(item?.minQuantity);
           if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) return sendJson(response, 400, { error: `Quà “${item.name}”: số lượng áp dụng phải từ 1 đến 20.` });
         }
-        const store = await writeGiftStore({ items });
-        return sendJson(response, 200, { items: store.items, updatedAt: store.updatedAt });
+        const shippingFee = Number(payload.shippingFee);
+        if (payload.shippingFee !== undefined && (!Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });
+        const current = await readGiftStore();
+        const store = await writeGiftStore({ items, shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee });
+        return sendJson(response, 200, { items: store.items, shippingFee: store.shippingFee, updatedAt: store.updatedAt });
       }
     }
     // What the model actually receives: the saved prompt plus the live catalogue block.
@@ -964,6 +984,24 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 200, panel);
       }
     }
+    const customerOrderDeleteMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)$/);
+    if (customerOrderDeleteMatch && request.method === 'DELETE') {
+      const orderId = decodeURIComponent(customerOrderDeleteMatch[1]);
+      let removed = null;
+      await updateMessagingStore(store => {
+        for (const conversation of store.conversations) {
+          const orders = Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [];
+          const index = orders.findIndex(order => order.id === orderId);
+          if (index < 0) continue;
+          [removed] = orders.splice(index, 1);
+          publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+          break;
+        }
+        return removed;
+      });
+      if (!removed) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
+      return sendJson(response, 200, removed);
+    }
     if (request.method === 'GET' && url.pathname === '/api/customer-orders') {
       const messagingStore = await readMessagingStore();
       const items = messagingStore.conversations.flatMap(conversation =>
@@ -999,6 +1037,15 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/orders/import/xlsx') {
       const workbook = await readBinaryBody(request);
       return sendJson(response, 200, parseXlsx(workbook));
+    }
+    // The export preview and the file come from the same function, so what
+    // staff see on screen is exactly what the warehouse receives.
+    if (request.method === 'POST' && url.pathname === '/api/orders/export/preview') {
+      const payload = await readBody(request);
+      if (!payload.orderData || !Array.isArray(payload.orderData.headers) || !Array.isArray(payload.orderData.rows)) {
+        return sendJson(response, 400, { error: 'Dữ liệu đơn hàng không hợp lệ.' });
+      }
+      return sendJson(response, 200, { rows: buildExportRows(payload.orderData) });
     }
     if (request.method === 'POST' && url.pathname === '/api/orders/export') {
       const payload = await readBody(request);

@@ -1,4 +1,5 @@
-import { priceBasket, renderPriceQuote } from './processing/pricing.mjs';
+import { giftsFor, priceBasket, renderPriceQuote, shippingFeeFor } from './processing/pricing.mjs';
+import { freeShippingFrom, getCatalogProducts, getGifts, matchProduct } from './processing/catalog.mjs';
 import { orderKey as buildOrderKey, productCode, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
@@ -114,15 +115,93 @@ function renderOrder(value, context = {}) {
   return {
     templateId: 'ORDER_CONFIRMATION',
     messages: [
-      `Dạ em xin phép xác nhận lại thông tin đặt hàng của mình nha:\n\n${lines}\n━━━━━━━━━━━━\n📞 Số điện thoại: ${phone}\n━━━━━━━━━━━━\n🏡 Địa chỉ nhận hàng: ${address}\n━━━━━━━━━━━━\n💰 Tổng tiền: ${total.toLocaleString('vi-VN')}đ${price.gift ? `\n━━━━━━━━━━━━\n🎁 ${price.gift}` : ''}\n\nEm cảm ơn anh/chị đã ủng hộ Giọt Nắng. Nếu có gì sai sót, mình nhắn em biết nhé ạ.`,
+      `Dạ em xin phép xác nhận lại thông tin đặt hàng của mình nha:\n\n${lines}\n━━━━━━━━━━━━\n📞 Số điện thoại: ${phone}\n━━━━━━━━━━━━\n🏡 Địa chỉ nhận hàng: ${address}\n━━━━━━━━━━━━\n${price.shippingFee ? `🚚 Phí vận chuyển: ${price.shippingFee.toLocaleString('vi-VN')}đ\n━━━━━━━━━━━━\n` : ''}💰 Tổng tiền: ${total.toLocaleString('vi-VN')}đ${price.gift ? `\n━━━━━━━━━━━━\n🎁 ${price.gift}` : ''}\n\nEm cảm ơn anh/chị đã ủng hộ Giọt Nắng. Nếu có gì sai sót, mình nhắn em biết nhé ạ.`,
       templates.SHIPPING_POLICY,
       'Dạ sau khi nhận hàng mình giúp em kiểm tra sản phẩm và quay video đủ 6 mặt hộp khi mở. Bên em hỗ trợ đổi trả trong 7 ngày nếu sản phẩm có lỗi ạ.'
     ],
     handoff: false,
     // Cleared: the basket has become a real order.
     pendingOrder: null,
-    order: { items: orderItems, phone, address, total, orderKey: key, gift: price.gift }
+    order: { items: orderItems, phone, address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift }
   };
+}
+
+// ===== Templates written from the catalogue at reply time =====
+// The static text of these ids used to carry prices by hand — Túi Xanh
+// "174.000đ" in GENERAL_INFO while the order charged 189.000đ. Now the text is
+// composed from Cài đặt → Sản phẩm and Cài đặt → Quà tặng on every reply, so a
+// price change in settings reaches the customer's next message. The static
+// entry above remains only as the fallback when the catalogue has nothing to
+// say (a product not yet entered), and as the label the settings screen shows.
+
+function formatMoney(value) {
+  return `${Math.max(0, Math.round(Number(value) || 0)).toLocaleString('vi-VN')}đ`;
+}
+
+function renderGeneralInfo() {
+  const products = getCatalogProducts().filter(product => product.active && product.unitPrice > 0);
+  if (!products.length) return '';
+  const lines = products.map(product => `🌾 ${product.name}: ${formatMoney(product.unitPrice)}`);
+  const ship = shippingFeeFor(1);
+  const shipText = ship ? ` Đơn 1 sản phẩm cộng phí vận chuyển ${formatMoney(ship)}${Number.isFinite(freeShippingFrom()) ? `, từ ${freeShippingFrom()} sản phẩm miễn phí vận chuyển` : ''}.` : '';
+  return `Dạ hiện tại nhà em có ${products.length} sản phẩm ạ:\n${lines.join('\n')}\nGiá trên là giá mua lẻ.${shipText} Anh/chị đang quan tâm loại nào để em gửi bảng giá combo chi tiết ạ?`;
+}
+
+function renderGiftPolicy() {
+  const gifts = getGifts().filter(gift => gift.active);
+  if (!gifts.length) return 'Dạ hiện tại bên em chưa có chương trình quà tặng ạ.';
+  const byQuantity = new Map();
+  for (const gift of gifts) byQuantity.set(gift.minQuantity, [...(byQuantity.get(gift.minQuantity) || []), gift.name]);
+  const parts = [...byQuantity.entries()].sort((a, b) => a[0] - b[0]).map(([quantity, names]) => `từ ${quantity} sản phẩm tặng ${names.join(' + ')}`);
+  return `Dạ chương trình quà tặng hiện tại: ${parts.join('; ')} ạ. Quà tính theo tổng số lượng cả đơn và cộng dồn nha ạ.`;
+}
+
+function renderMixPricing() {
+  const products = getCatalogProducts().filter(product => product.active && product.comboPrice > 0);
+  if (!products.length) return '';
+  const lines = products.map(product => `• ${product.name}: ${formatMoney(product.comboPrice)}/sản phẩm`);
+  const [first, second] = products;
+  const example = second
+    ? ` Ví dụ ${first.name} + ${second.name} = ${formatMoney(first.comboPrice + second.comboPrice)}.`
+    : '';
+  const gift2 = giftsFor(2).map(gift => gift.name).join(' + ');
+  const gift3 = giftsFor(3).map(gift => gift.name).join(' + ');
+  const giftText = gift3 ? ` Đơn từ 2 sản phẩm được ${gift2 || 'ưu đãi'}; đủ 3 sản phẩm được ${gift3} ạ.` : (gift2 ? ` Đơn từ 2 sản phẩm được ${gift2} ạ.` : '');
+  return `Dạ mua ghép từ 2 sản phẩm (cùng loại hay khác loại) thì mỗi sản phẩm tính theo giá combo ạ:\n${lines.join('\n')}${example}${giftText}`;
+}
+
+const dynamicTemplateRenderers = {
+  GENERAL_INFO: () => renderGeneralInfo(),
+  GIFT_POLICY: () => renderGiftPolicy(),
+  PRICE_MIX_TUI_LON: () => renderMixPricing(),
+  PRICE_QUOTE: value => renderPriceQuote(value.Product_N1 || value.product || '')
+};
+
+/** The product a PRICE_* id names: PRICE_TUI_XANH → "tui xanh" → the catalogue alias. */
+function productForPriceTemplate(templateId, value = {}) {
+  return matchProduct(value.Product_N1 || value.product || '')
+    || matchProduct(templateId.replace(/^PRICE_/, '').replace(/_/g, ' '));
+}
+
+/** Text for a catalogue-driven template, or '' when it has to fall back to the static entry. */
+export function renderDynamicTemplate(templateId, value = {}) {
+  const id = String(templateId || '').trim();
+  if (dynamicTemplateRenderers[id]) return dynamicTemplateRenderers[id](value) || '';
+  if (id.startsWith('PRICE_') && id !== 'PRICE_ADJUSTMENT') {
+    const product = productForPriceTemplate(id, value);
+    return product ? renderPriceQuote(product.name) : '';
+  }
+  return '';
+}
+
+/** Every template the catalogue currently writes, with its live text — for the settings screen. */
+export function listDynamicTemplates() {
+  const result = {};
+  for (const id of Object.keys(templates)) {
+    const text = renderDynamicTemplate(id);
+    if (text) result[id] = text;
+  }
+  return result;
 }
 
 export function renderChatbotReply(value = {}, overrides = {}, deletedTemplateIds = [], context = {}) {
@@ -130,12 +209,11 @@ export function renderChatbotReply(value = {}, overrides = {}, deletedTemplateId
   if (isOrderStep(templateId)) return renderOrder(value, context);
   const available = { ...templates, ...overrides };
   for (const id of deletedTemplateIds) delete available[id];
-  // Built from the catalogue at reply time, so it can never quote a stale price
-  // the way a static PRICE_* template can.
-  if (templateId === 'PRICE_QUOTE') {
-    const quote = renderPriceQuote(value.Product_N1 || value.product || '');
-    if (quote) return { templateId: 'PRICE_QUOTE', messages: [quote], handoff: false };
-  }
+  // Catalogue text wins over both the static entry and a hand-edited override:
+  // the whole point is that a price changed in settings cannot be contradicted
+  // by a message someone typed months ago. A deleted template stays deleted.
+  const dynamic = available[templateId] ? renderDynamicTemplate(templateId, value) : '';
+  if (dynamic) return { templateId, messages: [dynamic], handoff: false };
   const raw = available[templateId] || value.reply || value.message || value.text || available.CSKH_HANDOFF || templates.CSKH_HANDOFF;
   return {
     templateId: available[templateId] ? templateId : 'CSKH_HANDOFF',

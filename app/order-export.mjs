@@ -1,5 +1,5 @@
 import { findProductBySku } from './processing/catalog.mjs';
-import { giftsFor, unitPriceInBasket } from './processing/pricing.mjs';
+import { giftsFor, shippingFeeFor, unitPriceInBasket } from './processing/pricing.mjs';
 
 export const EXPORT_COLUMNS = [
   'STT*', 'Mã đơn hàng', 'Nguồn đơn hàng', 'Ngày đặt hàng', 'Tác động tồn kho', 'Gửi email thông báo',
@@ -159,26 +159,29 @@ export function skuWeight(sku) {
  * Combo 10 gói ships as ten small bags) at the single or combo price, with
  * the weight staff entered. The legacy Pancake symbols below stay untouched.
  */
-function splitCatalogSku(product, quantity, useComboPricing) {
+function splitCatalogSku(product, quantity, useComboPricing, shippingFee = 0) {
   const unit = unitPriceInBasket(product, useComboPricing ? 2 : 1);
   const components = product.components.length ? product.components : [{ sku: product.sku, quantity: 1 }];
   const unitsPerProduct = components.reduce((sum, component) => sum + component.quantity, 0) || 1;
+  // Shipping is folded into the price of the shipped units: one bag leaves
+  // at 189.000đ (174.000đ + 15.000đ), which is what the order must show.
+  const shipPerUnit = shippingFee ? Math.round(shippingFee / (unitsPerProduct * quantity)) : 0;
   return components.map(component => ({
     sku: component.sku,
     quantity: component.quantity * quantity,
-    price: Math.round(unit / unitsPerProduct),
+    price: Math.round(unit / unitsPerProduct) + shipPerUnit,
     catalog: true
   }));
 }
 
-export function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPricing = false, productLabel = '') {
+export function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPricing = false, productLabel = '', shippingFee = 0) {
   const raw = String(symbol || productLabel || '').trim();
   const quantity = Math.max(1, Number(orderQuantity) || 1);
   const price = Number(orderPrice) || 0;
   if (!raw) return [{ sku: '', quantity, price }];
 
   const catalogProduct = findProductBySku(symbol);
-  if (catalogProduct) return splitCatalogSku(catalogProduct, quantity, useComboPricing);
+  if (catalogProduct) return splitCatalogSku(catalogProduct, quantity, useComboPricing, shippingFee);
 
   const relation = resolveProductRelation(symbol, productLabel);
   if (relation) return expandRelation(relation, quantity);
@@ -274,7 +277,10 @@ export function buildExportRows(orderData = {}) {
     if (isFirstOrderLine) { seenOrders.add(orderKey); orderNumber += 1; }
     const catalogQuantity = catalogQuantityByOrder.get(orderKey) || 0;
     const useComboPricing = (bagQuantityByOrder.get(orderKey) || 0) + catalogQuantity >= 2;
-    const items = splitSkuForExport(value(row, 'Mã mẫu mã'), value(row, 'Số lượng'), value(row, 'Đơn giá'), useComboPricing, value(row, 'Sản phẩm'));
+    // Shipping (when the order has not earned free shipping) rides on the
+    // order's first catalogue line only.
+    const shippingFee = catalogQuantity && isFirstOrderLine ? shippingFeeFor(catalogQuantity) : 0;
+    const items = splitSkuForExport(value(row, 'Mã mẫu mã'), value(row, 'Số lượng'), value(row, 'Đơn giá'), useComboPricing, value(row, 'Sản phẩm'), shippingFee);
     // Gifts from Cài đặt → Quà tặng, once per order, after its last product line.
     if (catalogQuantity && lastRowIndexByOrder.get(orderKey) === rowIndex) {
       for (const gift of giftsFor(catalogQuantity)) {

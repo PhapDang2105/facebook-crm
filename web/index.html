@@ -229,6 +229,7 @@
           </select></label>
           <label class="file-button">Import<input id="order-import" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
           <button class="order-history-button" id="order-history-button" type="button" aria-expanded="false" aria-controls="order-history-panel">Lịch sử</button>
+          <button class="order-history-button order-clear-button" id="order-clear-table" type="button">Xóa bảng</button>
         </div>
         <div class="order-history-panel hidden" id="order-history-panel"></div>
         <section class="customer-orders-management"><div class="customer-orders-management-head"><h2>Đơn tạo từ hội thoại</h2><button class="order-history-button" id="customer-orders-import" type="button">Đưa vào bảng đơn hàng</button></div><div id="customer-orders-preview"><p>Đang tải đơn hàng...</p></div></section>
@@ -454,9 +455,10 @@
             <header class="settings-card-head">
               <div>
                 <h1 id="gift-settings-title">Quà tặng</h1>
-                <p>Quà mở theo <b>tổng số lượng</b> sản phẩm trong đơn và cộng dồn: đơn 3 túi nhận cả quà “từ 2” lẫn quà “từ 3”. Tick để bật, chatbot áp dụng ngay cho đơn kế tiếp. Quà có <b>SKU xuất kho</b> sẽ thành một dòng riêng trong file Xuất dữ liệu.</p>
+                <p>Quà mở theo <b>tổng số lượng</b> sản phẩm trong đơn và cộng dồn: đơn 3 túi nhận cả quà “từ 2” lẫn quà “từ 3”. Tick để bật, chatbot áp dụng ngay cho đơn kế tiếp. Quà có <b>SKU xuất kho</b> sẽ thành một dòng riêng trong file Xuất dữ liệu. Quà có tên <b>“Miễn phí vận chuyển”</b> quyết định từ số lượng nào khách hết trả phí ship; đơn chưa đủ sẽ cộng phí bên phải vào tổng và vào giá xuất kho.</p>
               </div>
               <div class="price-master-actions">
+                <label class="gift-shipping-field"><span>Phí vận chuyển đơn chưa được miễn</span><span class="product-price-input"><input id="gift-shipping-fee" type="number" min="0" step="1000" value="15000"><span>₫</span></span></label>
                 <button class="price-master-add" id="gift-add" type="button">+ Thêm quà tặng</button>
                 <button class="settings-save-button" id="gift-save" type="button">Lưu quà tặng</button>
               </div>
@@ -500,14 +502,14 @@
           <label><span>Tên sản phẩm <b>*</b></span><input id="product-name" maxlength="200" required placeholder="Ví dụ: Granola Túi Xanh" autocomplete="off"></label>
           <label><span>SKU <b>*</b></span><input id="product-sku" maxlength="80" required placeholder="Ví dụ: GN-XANH-01" autocomplete="off"></label>
           <label><span>Giá gốc</span><div class="product-price-input"><input id="product-original-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
-          <label><span>Giá bán (1 sản phẩm) <b>*</b></span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
+          <label><span>Giá bán (1 sản phẩm, chưa gồm ship) <b>*</b></span><div class="product-price-input"><input id="product-sale-price" type="number" min="0" step="1000" value="0" required><span>₫</span></div></label>
           <label><span>Giá combo (mỗi sản phẩm)</span><div class="product-price-input"><input id="product-combo-price" type="number" min="0" step="1000" placeholder="Bỏ trống = không giảm"><span>₫</span></div></label>
           <label><span>Khối lượng xuất kho</span><div class="product-price-input"><input id="product-weight" type="number" min="0" step="10" placeholder="0"><span>g</span></div></label>
           <label class="product-form-checkbox product-form-wide"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
           <label class="product-form-wide"><span>Tên gọi khác (mỗi dòng hoặc cách nhau bằng dấu phẩy)</span><textarea id="product-aliases" rows="3" placeholder="túi xanh, granola xanh, #granolatuixanh&#10;Khách gọi sản phẩm bằng những tên này thì bot vẫn nhận ra."></textarea></label>
           <label class="product-form-wide"><span>Thành phần xuất kho (nếu 1 sản phẩm gồm nhiều mã)</span><textarea id="product-components" rows="2" placeholder="GRA-NAU-G35 x3, GRA-XANH-G35 x4, GRA-CAM-G30 x3&#10;Bỏ trống = xuất chính mã SKU ở trên."></textarea></label>
         </div>
-        <p class="product-form-hint"><b>Giá bán</b> áp dụng khi mua lẻ 1 sản phẩm. <b>Giá combo</b> áp dụng cho từng sản phẩm khi đơn có từ 2 sản phẩm trở lên, cùng loại hay mua kèm sản phẩm khác đều được. <b>SKU</b> là mã đi vào file Xuất dữ liệu của Đơn hàng.</p>
+        <p class="product-form-hint"><b>Giá bán</b> là giá sản phẩm khi mua lẻ, <b>chưa gồm</b> phí vận chuyển — phí đặt ở Cài đặt → Quà tặng và tự cộng vào đơn chưa được miễn (174.000đ + 15.000đ = 189.000đ trên đơn và file xuất kho). <b>Giá combo</b> áp dụng cho từng sản phẩm khi đơn có từ 2 sản phẩm trở lên, cùng loại hay mua kèm sản phẩm khác đều được. <b>SKU</b> là mã đi vào file Xuất dữ liệu.</p>
       </div>
       <p class="product-form-status" id="product-form-status" role="alert"></p>
       <footer class="product-dialog-actions"><button class="product-secondary-button" type="button" data-close-product-dialog>Hủy</button><button class="product-primary-button" id="product-submit" type="submit">Lưu sản phẩm</button></footer>

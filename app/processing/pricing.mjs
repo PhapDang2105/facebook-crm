@@ -1,4 +1,4 @@
-import { findProductBySku, getCatalogProducts, getGifts, matchProduct, productKeywords } from './catalog.mjs';
+import { findProductBySku, freeShippingFrom, getCatalogProducts, getGifts, getShippingFee, matchProduct, productKeywords } from './catalog.mjs';
 
 // The rule, as the business states it: one unit sells at the single price;
 // from two units — of the same product or mixed with any other — every unit
@@ -22,6 +22,12 @@ export function unitPriceInBasket(product, totalQuantity) {
   return combo && product.comboPrice > 0 ? product.comboPrice : product.unitPrice;
 }
 
+/** Shipping charged on a basket of this size: the configured fee until the free-shipping gift kicks in. */
+export function shippingFeeFor(totalQuantity) {
+  const quantity = Math.max(0, Math.round(Number(totalQuantity) || 0));
+  return quantity >= freeShippingFrom() ? 0 : getShippingFee();
+}
+
 /** The single-unit price, for order lines and the manual order form. */
 export function unitPriceForProduct(name) {
   return money(matchProduct(name)?.unitPrice);
@@ -38,7 +44,7 @@ export function giftTextFor(totalQuantity) {
   return giftsFor(totalQuantity).map(gift => gift.name).join(' + ');
 }
 
-const unpriceable = (reason, totalQuantity = 0) => ({ priceable: false, reason, total: 0, gift: '', gifts: [], totalQuantity, lines: [] });
+const unpriceable = (reason, totalQuantity = 0) => ({ priceable: false, reason, total: 0, subtotal: 0, shippingFee: 0, gift: '', gifts: [], totalQuantity, lines: [] });
 
 /**
  * Prices a basket of { sku | product | name, quantity }. Returns
@@ -77,10 +83,13 @@ export function priceBasket(items = []) {
   });
   if (!(total > 0)) return unpriceable('no-price', totalQuantity);
   const gifts = giftsFor(totalQuantity);
+  const shippingFee = shippingFeeFor(totalQuantity);
   return {
     priceable: true,
     reason: '',
-    total: money(total),
+    subtotal: money(total),
+    shippingFee,
+    total: money(total + shippingFee),
     gift: gifts.map(gift => gift.name).join(' + '),
     gifts,
     totalQuantity,
@@ -95,7 +104,11 @@ function formatMoney(value) {
 /** One product's prices as a sentence for the model and the price quote. */
 export function describeProductPrices(product) {
   if (!product) return '';
-  const parts = [`mua lẻ 1 sản phẩm ${formatMoney(product.unitPrice)}`];
+  const ship = shippingFeeFor(1);
+  const single = ship
+    ? `mua lẻ 1 sản phẩm ${formatMoney(product.unitPrice)} + phí vận chuyển ${formatMoney(ship)} = ${formatMoney(product.unitPrice + ship)}`
+    : `mua lẻ 1 sản phẩm ${formatMoney(product.unitPrice)}`;
+  const parts = [single];
   if (product.comboPrice > 0) parts.push(`từ 2 sản phẩm hoặc mua kèm sản phẩm khác ${formatMoney(product.comboPrice)}/sản phẩm`);
   return parts.join('; ');
 }
@@ -119,7 +132,7 @@ export function buildCatalogPrompt() {
   return [
     'DANH MỤC SẢN PHẨM (nguồn chính thức, tự cập nhật từ hệ thống — ưu tiên hơn mọi bảng giá khác trong hướng dẫn):',
     ...productLines,
-    'Cách tính tiền: đơn có TỔNG từ 2 sản phẩm trở lên (cùng loại hay khác loại đều được) thì mỗi sản phẩm tính theo giá combo của chính nó; đơn 1 sản phẩm tính giá lẻ.',
+    `Cách tính tiền: đơn có TỔNG từ 2 sản phẩm trở lên (cùng loại hay khác loại đều được) thì mỗi sản phẩm tính theo giá combo của chính nó; đơn 1 sản phẩm tính giá lẻ${getShippingFee() ? ` cộng phí vận chuyển ${formatMoney(getShippingFee())}` : ''}. ${Number.isFinite(freeShippingFrom()) ? `Miễn phí vận chuyển từ ${freeShippingFrom()} sản phẩm.` : ''}`,
     '',
     'QUÀ TẶNG THEO TỔNG SỐ LƯỢNG (cộng dồn):',
     ...giftLines,
@@ -132,11 +145,13 @@ export function buildCatalogPrompt() {
 export function renderPriceQuote(productText) {
   const product = matchProduct(productText);
   if (!product) return '';
-  const parts = [`1 sản phẩm ${formatMoney(product.unitPrice)}`];
+  const ship = shippingFeeFor(1);
+  const parts = [ship ? `1 sản phẩm ${formatMoney(product.unitPrice)} + ship ${formatMoney(ship)}` : `1 sản phẩm ${formatMoney(product.unitPrice)}`];
   if (product.comboPrice > 0) {
     for (const quantity of [2, 3]) {
       const gift = giftTextFor(quantity);
-      parts.push(`combo ${quantity} sản phẩm ${formatMoney(product.comboPrice * quantity)}${gift ? ` (${gift})` : ''}`);
+      const comboShip = shippingFeeFor(quantity);
+      parts.push(`combo ${quantity} sản phẩm ${formatMoney(product.comboPrice * quantity + comboShip)}${gift ? ` (${gift})` : ''}`);
     }
     parts.push(`mua kèm sản phẩm khác cũng được giá combo ${formatMoney(product.comboPrice)}/sản phẩm`);
   }
@@ -151,6 +166,10 @@ export function renderPriceQuote(productText) {
 export function warehouseLines(priced) {
   if (!priced?.priceable) return [];
   const lines = [];
+  // Shipping is folded into the product price on the warehouse file — one bag
+  // goes out at 189.000đ, not 174.000đ plus a fee line — spread across the
+  // shipped units of the first product when there is a fee at all.
+  let shippingLeft = priced.shippingFee || 0;
   for (const line of priced.lines) {
     const product = findProductBySku(line.sku);
     const components = product?.components?.length ? product.components : [{ sku: line.sku, quantity: 1 }];
@@ -158,11 +177,13 @@ export function warehouseLines(priced) {
     for (const component of components) {
       const quantity = component.quantity * line.quantity;
       const part = findProductBySku(component.sku);
+      const shipShare = shippingLeft ? money(shippingLeft / quantity) : 0;
+      shippingLeft = 0;
       lines.push({
         sku: component.sku,
         quantity,
         // The product's basket price spread evenly over its shipped units.
-        price: money((line.basketUnitPrice * line.quantity) / (unitsPerProduct * line.quantity)),
+        price: money((line.basketUnitPrice * line.quantity) / (unitsPerProduct * line.quantity)) + shipShare,
         weight: part?.weight || (component.sku === line.sku ? line.weight : 0)
       });
     }

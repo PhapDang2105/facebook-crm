@@ -127,18 +127,52 @@ export function normalizeGiftStore(value) {
     seen.add(gift.id);
     items.push(gift);
   }
-  return { items, updatedAt: Number(value?.updatedAt) || 0 };
+  return {
+    items,
+    // Charged on orders that have not earned free shipping. The business
+    // quotes "174.000đ + ship 15.000đ" for one bag; 189.000đ is what the
+    // customer pays and what the warehouse file must show.
+    shippingFee: Math.max(0, Math.round(Number(value?.shippingFee ?? defaultShippingFee) || 0)),
+    updatedAt: Number(value?.updatedAt) || 0
+  };
 }
 
-export function getGifts() {
+export const defaultShippingFee = 15000;
+
+function readGiftStoreSync() {
   if (!giftCache) {
     try {
-      giftCache = normalizeGiftStore(JSON.parse(readFileSync(giftsPath, 'utf8'))).items;
+      giftCache = normalizeGiftStore(JSON.parse(readFileSync(giftsPath, 'utf8')));
     } catch {
-      giftCache = [];
+      giftCache = { items: [], shippingFee: defaultShippingFee, updatedAt: 0 };
     }
   }
   return giftCache;
+}
+
+export function getGifts() {
+  return readGiftStoreSync().items;
+}
+
+export function getShippingFee() {
+  return readGiftStoreSync().shippingFee;
+}
+
+const freeShippingPattern = /mien phi van chuyen|mien phi ship|mien ship|free ?ship/;
+
+export function isFreeShippingGift(gift) {
+  return freeShippingPattern.test(normalizeText(gift?.name));
+}
+
+/**
+ * The total quantity from which shipping is free: the lowest threshold of an
+ * active gift named as free shipping. Infinity when no such gift is ticked,
+ * so every order pays the fee. Read from the gift list so ticking the gift
+ * on or off is the whole configuration.
+ */
+export function freeShippingFrom() {
+  const thresholds = getGifts().filter(gift => gift.active && isFreeShippingGift(gift)).map(gift => gift.minQuantity);
+  return thresholds.length ? Math.min(...thresholds) : Infinity;
 }
 
 /** Drops both caches. Called after every write so pricing sees the new data. */

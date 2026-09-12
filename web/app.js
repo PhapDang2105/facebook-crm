@@ -366,10 +366,14 @@ async function loadCustomerOrdersManagement() {
       customerOrdersPreview.innerHTML = '<p>Chưa có đơn nào được tạo từ hội thoại.</p>';
       return;
     }
-    customerOrdersPreview.innerHTML = `<div class="customer-orders-management-list">${result.items.map(order => `<div class="customer-orders-management-row">
+    customerOrdersPreview.innerHTML = `<div class="customer-orders-management-list">${result.items.map(order => `<div class="customer-orders-management-row" data-customer-order-id="${escapeHtml(order.id)}">
       <strong>#${escapeHtml(order.id)}</strong><span>${escapeHtml(order.name || order.conversationName)}</span><span>${escapeHtml(order.phone)}</span>
       <span class="customer-orders-management-status">${order.delivery?.status === 'sent' ? '✓ Đã gửi khách' : escapeHtml(order.status || 'Mới')}</span><strong>${escapeHtml(formatOrderMoney(order.total))}</strong>
+      <button type="button" class="order-row-delete" data-customer-order-delete="${escapeHtml(order.id)}" title="Xóa đơn này" aria-label="Xóa đơn này">×</button>
     </div>`).join('')}</div>`;
+    // Every chatbot order flows into the table on its own; the button above only forces a refresh.
+    const added = mergeChatbotOrdersIntoTable(result.items);
+    if (added) showToast(`Đã đưa ${added} đơn mới từ hội thoại vào bảng.`, 'success');
   } catch (error) {
     customerOrdersPreview.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
   }
@@ -396,15 +400,57 @@ function chatbotOrderToRows(order) {
   ]);
 }
 
+// Chatbot orders removed from the table stay out on the next auto-merge;
+// otherwise a deleted test order would come straight back.
+const dismissedChatbotOrdersKey = 'crm-orders-dismissed';
+function readDismissedChatbotOrders() {
+  try { return new Set(JSON.parse(localStorage.getItem(dismissedChatbotOrdersKey) || '[]')); } catch { return new Set(); }
+}
+function dismissChatbotOrders(ids) {
+  const dismissed = readDismissedChatbotOrders();
+  ids.forEach(id => dismissed.add(id));
+  try { localStorage.setItem(dismissedChatbotOrdersKey, JSON.stringify([...dismissed])); } catch {}
+}
+
+function deleteOrderRows(indexes) {
+  const removing = new Set(indexes);
+  if (!removing.size) return;
+  const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  if (idColumn >= 0) {
+    dismissChatbotOrders(orderData.rows
+      .filter((row, index) => removing.has(index) && String(row[idColumn] || '').startsWith('CB-'))
+      .map(row => String(row[idColumn])));
+  }
+  orderData = { headers: orderData.headers, rows: orderData.rows.filter((row, index) => !removing.has(index)) };
+  if (!orderData.rows.length) orderData = { headers: [], rows: [] };
+  localStorage.setItem('crm-orders', JSON.stringify(orderData));
+  renderOrderData();
+}
+
+document.querySelector('#order-import-preview')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-order-row-delete]');
+  if (!button) return;
+  deleteOrderRows([Number(button.dataset.orderRowDelete)]);
+  showToast('Đã xóa dòng khỏi bảng.', 'success');
+});
+
+document.querySelector('#order-clear-table')?.addEventListener('click', () => {
+  if (!orderData.rows.length) return;
+  if (!window.confirm(`Xóa toàn bộ ${orderData.rows.length} dòng trong bảng đơn hàng? Đơn tạo từ hội thoại vẫn còn trong danh sách phía trên.`)) return;
+  deleteOrderRows(orderData.rows.map((row, index) => index));
+  showToast('Đã xóa bảng đơn hàng.', 'success');
+});
+
 function mergeChatbotOrdersIntoTable(orders) {
   const headers = orderData.headers.length ? orderData.headers : chatbotOrderHeaders;
   const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
   const idColumn = index.get('ma don hang');
   const existingIds = new Set(idColumn === undefined ? [] : orderData.rows.map(row => String(row[idColumn] || '')));
+  const dismissed = readDismissedChatbotOrders();
   let added = 0;
   const rows = [...orderData.rows];
   for (const order of orders) {
-    if (existingIds.has(`CB-${order.id}`)) continue;
+    if (existingIds.has(`CB-${order.id}`) || dismissed.has(`CB-${order.id}`)) continue;
     for (const source of chatbotOrderToRows(order)) {
       const row = Array(headers.length).fill('');
       chatbotOrderHeaders.forEach((header, position) => {
@@ -415,12 +461,30 @@ function mergeChatbotOrdersIntoTable(orders) {
     }
     added += 1;
   }
+  if (!added) return 0;
   orderData = { headers, rows };
   localStorage.setItem('crm-orders', JSON.stringify(orderData));
   renderOrderData();
-  showOrderStage(getRecommendedOrderStage());
   return added;
 }
+
+customerOrdersPreview?.addEventListener('click', async event => {
+  const button = event.target.closest('[data-customer-order-delete]');
+  if (!button) return;
+  const id = button.dataset.customerOrderDelete;
+  if (!window.confirm(`Xóa đơn #${id} tạo từ hội thoại? Đơn cũng sẽ được gỡ khỏi bảng đơn hàng.`)) return;
+  button.disabled = true;
+  try {
+    await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+    const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+    if (idColumn >= 0) deleteOrderRows(orderData.rows.map((row, index) => String(row[idColumn] || '') === `CB-${id}` ? index : -1).filter(index => index >= 0));
+    await loadCustomerOrdersManagement();
+    showToast('Đã xóa đơn.', 'success');
+  } catch (error) {
+    button.disabled = false;
+    showToast(error.message || 'Chưa xóa được đơn.', 'error');
+  }
+});
 
 customerOrdersImportButton?.addEventListener('click', async () => {
   customerOrdersImportButton.disabled = true;
@@ -2086,6 +2150,7 @@ async function loadChatbotSettings() {
     chatbotSettingsWelcome.value = settings.welcomeMessage || '';
     chatbotTemplatesState = { ...(settings.templates || {}) };
     chatbotOriginalTemplates = { ...(settings.templates || {}) };
+    chatbotDynamicTemplates = { ...(settings.dynamicTemplates || {}) };
     chatbotDeletedTemplateIds = new Set(settings.deletedTemplateIds || []);
     // Pipeline comes from the server modules now, not from editable settings.
     selectedChatbotTemplate = selectedChatbotTemplate && chatbotTemplatesState[selectedChatbotTemplate] !== undefined
@@ -2102,6 +2167,11 @@ async function loadChatbotSettings() {
   }
 }
 
+// Templates the server writes from Cài đặt → Sản phẩm / Quà tặng at reply
+// time. Shown with their live text and locked: editing them here would be
+// overridden on the next reply anyway.
+let chatbotDynamicTemplates = {};
+
 function chatbotTemplateLabel(id) {
   const labels = {
     WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
@@ -2115,19 +2185,35 @@ function renderChatbotTemplateList() {
   if (!chatbotTemplateList) return;
   const keyword = (chatbotTemplateSearch?.value || '').trim().toLowerCase();
   const entries = Object.entries(chatbotTemplatesState).filter(([id, content]) => `${id} ${content}`.toLowerCase().includes(keyword));
-  chatbotTemplateList.innerHTML = entries.map(([id, content]) => `
+  chatbotTemplateList.innerHTML = entries.map(([id, content]) => {
+    const dynamic = chatbotDynamicTemplates[id];
+    return `
     <button class="chatbot-template-item ${id === selectedChatbotTemplate ? 'active' : ''}" type="button" data-chatbot-template-id="${escapeHtml(id)}">
-      <strong>${escapeHtml(chatbotTemplateLabel(id))}</strong><small>${escapeHtml(String(content).replaceAll('###', ' · '))}</small>
-    </button>`).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
+      <strong>${escapeHtml(chatbotTemplateLabel(id))}${dynamic ? '<span class="chatbot-template-dynamic-badge">Tự soạn</span>' : ''}</strong><small>${escapeHtml(String(dynamic || content).replaceAll('###', ' · '))}</small>
+    </button>`;
+  }).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
 }
 
 function renderChatbotTemplateEditor() {
   const id = selectedChatbotTemplate;
+  const dynamic = id ? chatbotDynamicTemplates[id] : '';
   if (chatbotTemplateId) chatbotTemplateId.textContent = id || 'Chọn một mẫu tin';
   if (chatbotTemplateContent) {
-    chatbotTemplateContent.disabled = !id;
-    chatbotTemplateContent.value = id ? chatbotTemplatesState[id] || '' : '';
+    chatbotTemplateContent.disabled = !id || Boolean(dynamic);
+    chatbotTemplateContent.value = id ? (dynamic || chatbotTemplatesState[id] || '') : '';
+    let note = chatbotTemplateContent.parentElement?.querySelector('.chatbot-template-dynamic-note');
+    if (dynamic && !note) {
+      note = document.createElement('p');
+      note.className = 'chatbot-template-dynamic-note';
+      chatbotTemplateContent.parentElement?.insertBefore(note, chatbotTemplateContent);
+    }
+    if (note) {
+      note.textContent = 'Mẫu này được soạn tự động từ Cài đặt → Sản phẩm và Quà tặng mỗi lần trả lời. Muốn đổi giá hay quà, sửa ở đó — không sửa ở đây.';
+      note.hidden = !dynamic;
+    }
   }
+  if (chatbotTemplateApply) chatbotTemplateApply.classList.toggle('hidden', Boolean(dynamic));
+  if (chatbotTemplateReset) chatbotTemplateReset.classList.toggle('hidden', Boolean(dynamic));
   if (chatbotTemplateActive) {
     chatbotTemplateActive.disabled = !id;
     chatbotTemplateActive.checked = Boolean(id && chatbotTemplatesState[id]);
@@ -2201,6 +2287,7 @@ const giftAddButton = document.querySelector('#gift-add');
 const giftSaveButton = document.querySelector('#gift-save');
 const giftStatus = document.querySelector('#gift-status');
 const giftPreview = document.querySelector('#gift-preview');
+const giftShippingFee = document.querySelector('#gift-shipping-fee');
 let giftItems = [];
 let giftsLoaded = false;
 
@@ -2220,7 +2307,10 @@ function renderGiftPreview() {
       .filter(gift => gift.active !== false && String(gift.name || '').trim() && (Number(gift.minQuantity) || 1) <= quantity)
       .sort((a, b) => (Number(a.minQuantity) || 1) - (Number(b.minQuantity) || 1))
       .map(gift => escapeHtml(gift.name.trim()));
-    cells.push(`<div class="gift-preview-cell"><strong>${quantity} sản phẩm</strong>${names.length ? `<ul>${names.map(name => `<li>${name}</li>`).join('')}</ul>` : '<em>Không có quà</em>'}</div>`);
+    const freeFrom = Math.min(...giftItems.filter(gift => gift.active !== false && /mi[eễ]n ph[ií] v[aậ]n chuy[eể]n|mi[eễ]n ph[ií] ship|mi[eễ]n ship|free ?ship/i.test(String(gift.name || '').normalize('NFC'))).map(gift => Number(gift.minQuantity) || 1), Infinity);
+    const fee = Number(giftShippingFee?.value) || 0;
+    const shipping = quantity >= freeFrom ? '' : (fee ? `<small class="gift-preview-ship">+ phí ship ${escapeHtml(formatOrderMoney(fee))}</small>` : '');
+    cells.push(`<div class="gift-preview-cell"><strong>${quantity} sản phẩm</strong>${names.length ? `<ul>${names.map(name => `<li>${name}</li>`).join('')}</ul>` : '<em>Không có quà</em>'}${shipping}</div>`);
   }
   giftPreview.innerHTML = cells.join('');
 }
@@ -2247,6 +2337,7 @@ async function loadGifts() {
   try {
     const result = await readApiResponse(await fetch('/api/gifts'));
     giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift })) : [];
+    if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
     giftsLoaded = true;
     renderGifts();
     setGiftStatus(`${giftItems.length} quà tặng. Chatbot đang dùng danh sách này.`);
@@ -2285,6 +2376,8 @@ giftRowsElement?.addEventListener('click', event => {
   setGiftStatus('Đã xóa quà tặng. Nhớ bấm “Lưu quà tặng”.');
 });
 
+giftShippingFee?.addEventListener('input', () => { renderGiftPreview(); setGiftStatus('Có thay đổi chưa lưu. Nhớ bấm “Lưu quà tặng”.'); });
+
 giftAddButton?.addEventListener('click', () => {
   // A new gift defaults to the next threshold up, which is the usual reason to add one.
   const nextQuantity = giftItems.length ? Math.max(...giftItems.map(gift => Number(gift.minQuantity) || 1)) + 1 : 2;
@@ -2304,9 +2397,10 @@ giftSaveButton?.addEventListener('click', async () => {
     const result = await readApiResponse(await fetch('/api/gifts', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: giftItems })
+      body: JSON.stringify({ items: giftItems, shippingFee: Number(giftShippingFee?.value) || 0 })
     }));
     giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift })) : giftItems;
+    if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
     renderGifts();
     setGiftStatus(`Đã lưu ${giftItems.length} quà tặng. Chatbot áp dụng ngay cho đơn kế tiếp.`, 'ok');
   } catch (error) {
@@ -2620,12 +2714,9 @@ function findSharedProduct(value) {
 
 function getProductUnitWeight(item) {
   if (Number(item?.weight) > 0) return Number(item.weight);
-  const sku = String(item?.sku || '').toUpperCase();
-  if (sku && Number(skuWeights[sku]) > 0) return Number(skuWeights[sku]);
+  // Weight lives on the product in Cài đặt → Sản phẩm; the hard-coded table is gone.
   const matched = findSharedProduct(item?.sku || item?.name);
-  if (Number(matched?.weight) > 0) return Number(matched.weight);
-  const matchedSku = String(matched?.sku || '').toUpperCase();
-  return Number(skuWeights[matchedSku]) || 0;
+  return Number(matched?.weight) || 0;
 }
 
 function formatGramWeight(grams) {
@@ -4129,16 +4220,23 @@ function getDuplicateOrderRowIndexes(data = orderData) {
 function getDuplicatePhoneRowIndexes(data = orderData) {
   const phoneIndex = data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
   if (phoneIndex < 0) return new Set();
-  const indexesByPhone = new Map();
+  const orderIdIndex = data.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  // Lines of one order share a phone by definition; only two DIFFERENT orders
+  // on the same number are worth a second look. Rows without an order id are
+  // each treated as their own order, which keeps the old behaviour for them.
+  const rowsByPhone = new Map();
   data.rows.forEach((row, index) => {
     let phone = String(row[phoneIndex] ?? '').replace(/\D/g, '');
     if (phone.startsWith('84')) phone = `0${phone.slice(2)}`;
     if (!phone) return;
-    const indexes = indexesByPhone.get(phone) || [];
-    indexes.push(index);
-    indexesByPhone.set(phone, indexes);
+    const orderId = orderIdIndex >= 0 ? String(row[orderIdIndex] ?? '').trim() : '';
+    const entries = rowsByPhone.get(phone) || [];
+    entries.push({ index, orderId: orderId || `row:${index}` });
+    rowsByPhone.set(phone, entries);
   });
-  return new Set([...indexesByPhone.values()].filter(indexes => indexes.length > 1).flat());
+  return new Set([...rowsByPhone.values()]
+    .filter(entries => new Set(entries.map(entry => entry.orderId)).size > 1)
+    .flatMap(entries => entries.map(entry => entry.index)));
 }
 
 function getOrdersNeedingProcessing(data = orderData) {
@@ -4205,7 +4303,7 @@ function renderPreviewCell(value, header) {
   return escapeHtml(previewValue);
 }
 
-function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '') {
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false } = {}) {
   if (!rowEntries.length) {
     preview.innerHTML = `<p>${escapeHtml(emptyMessage)}</p>`;
     return;
@@ -4241,9 +4339,11 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const previewHeaderClassName = index => normalizeColumnName(headers[index]) === 'san pham'
     ? `${previewClassName(index)} preview-product-heading`.trim()
     : previewClassName(index);
-  const head = visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('');
-  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}">${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}</tr>`).join('');
-  preview.innerHTML = `<table style="--preview-template: ${columnTemplate}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  // The delete control leads the row so it stays visible when the wide table scrolls sideways.
+  const head = (deletable ? '<th class="preview-actions"></th>' : '')
+    + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('');
+  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${deletable ? `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa dòng" aria-label="Xóa dòng">×</button></td>` : ''}${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}</tr>`).join('');
+  preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : ''}${columnTemplate}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderOrderData() {
@@ -4274,14 +4374,14 @@ function renderOrderData() {
     importRows = importRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue));
   }
   renderExportPreview();
-  orderExport.disabled = buildExportRows().length === 0;
 
   renderOrderTable(
     document.querySelector('#order-import-preview'), headers, importRows,
     rows.length ? 'Không tìm thấy đơn hàng phù hợp.' : 'Import một tệp CSV hoặc XLSX để xem toàn bộ dữ liệu.',
     ({ index }) => duplicateRowIndexes.has(index)
       ? 'order-row-duplicate'
-      : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : ''
+      : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
+    { deletable: true }
   );
   renderOrderTable(
     document.querySelector('#order-preview'), headers, processingRows,
@@ -4310,242 +4410,38 @@ const exportPreviewGroups = [
 ];
 const exportPreviewWidths = [55,130,135,155,165,175,95,110,105,105,165,145,255,145,155,145];
 
-const skuWeights = {
-  'GRA-VANG-H350': 400,
-  'GRA-XANH-Z450': 500,
-  'GRA-NAU-Z350': 400,
-  'GRA-NAU-G35': 35,
-  'GRA-XANH-G35': 35,
-  'GRA-CAM-G30': 30,
-  'HT-YM-T500': 500,
-  'YM-VO-T500': 500,
-  'HU-300ML': 10,
-  'BGD': 10,
-  'MUONG': 10
-};
+// The export rows come from the server — the same function that writes the
+// XLSX — so the preview can never disagree with the file. The frontend used to
+// carry its own copy of the SKU mapping with hard-coded prices and weights.
+let exportRowsCache = { key: '', rows: [] };
 
-const skuPrices = {
-  'GRA-NAU-Z350': { single:179000, combo:144000 },
-  'GRA-VANG-H350': { single:189000, combo:149000 },
-  'GRA-XANH-Z450': { single:189000, combo:149000 }
-};
-
-function normalizeSkuToken(symbol) {
-  return String(symbol || '')
-    .trim()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase();
+async function fetchExportRows() {
+  if (!orderData.rows.length) return [];
+  const key = JSON.stringify(orderData);
+  if (exportRowsCache.key === key) return exportRowsCache.rows;
+  const result = await readApiResponse(await fetch('/api/orders/export/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orderData })
+  }));
+  exportRowsCache = { key, rows: Array.isArray(result.rows) ? result.rows : [] };
+  return exportRowsCache.rows;
 }
 
-function getSkuPrice(sku, isCombo, fallbackPrice) {
-  const configuredPrice = skuPrices[sku];
-  if (configuredPrice) return isCombo ? configuredPrice.combo : configuredPrice.single;
-  return Number(fallbackPrice) || 0;
-}
-
-function getOatUnitPrice(bagCount, descriptor, orderPrice) {
-  const normalizedDescriptor = normalizeSkuToken(descriptor);
-  const calculatedPrice = bagCount ? Math.round((Number(orderPrice) || 0) / bagCount) : 0;
-  if (bagCount === 2) {
-    if (normalizedDescriptor.includes('SHIP') || (calculatedPrice > 0 && calculatedPrice <= 60000)) return 58000;
-    return 65500;
-  }
-  if (bagCount === 4) return 55500;
-  if (bagCount === 6) return 49800;
-  return calculatedPrice;
-}
-
-function mapSingleSku(symbol) {
-  const value = String(symbol || '').trim();
-  const upper = normalizeSkuToken(value);
-  if (upper === 'HU-300ML' || upper.includes('HU 300ML')) return 'HU-300ML';
-  if (upper === 'HT-YM-T500' || (upper.includes('YEN MACH') && upper.includes('CAN DET'))) return 'HT-YM-T500';
-  if (upper === 'YM-VO-T500' || (upper.includes('YEN MACH') && upper.includes('CAN VO'))) return 'YM-VO-T500';
-  if (upper.endsWith('G35') && upper.includes('NAU')) return 'GRA-NAU-G35';
-  if (upper.endsWith('G35') && upper.includes('XANH')) return 'GRA-XANH-G35';
-  if (upper.endsWith('G30') && upper.includes('CAM')) return 'GRA-CAM-G30';
-  if (upper.includes('VANGG') || upper.includes('VANG')) return 'GRA-VANG-H350';
-  if (upper.includes('XANH')) return 'GRA-XANH-Z450';
-  if (upper.includes('NAU')) return 'GRA-NAU-Z350';
-  if (upper === 'BGD') return 'BGD';
-  if (upper === 'M' || upper === 'MUONG') return 'MUONG';
-  return value;
-}
-
-function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPricing = false, productLabel = '') {
-  const raw = String(symbol || productLabel || '').trim();
-  const quantity = Math.max(1, Number(orderQuantity) || 1);
-  const price = Number(orderPrice) || 0;
-  if (!raw) return [{ sku:'', quantity, price }];
-
-  const parts = raw.split('+').map(part => part.trim()).filter(Boolean);
-  const comboMatch = parts[0].match(/^CB\s*(\d+)\s*(?:-|\s)\s*(.*)$/i);
-  const descriptor = `${raw} ${productLabel}`;
-  const normalizedDescriptor = normalizeSkuToken(descriptor);
-  const kgMatch = normalizedDescriptor.match(/\b([123])\s*KG\b/);
-  const oatBundleMatch = normalizeSkuToken(raw).match(/^CB\s*(\d+)\s*(?:-|\s)\s*(HT-YM-T500|YM-VO-T500)$/);
-  const isMixedOat = normalizeSkuToken(raw) === 'CB-YM-DET+VO'
-    || (normalizedDescriptor.includes('CAN DET') && normalizedDescriptor.includes('CAN VO'))
-    || (normalizedDescriptor.includes('HT-YM-T500') && normalizedDescriptor.includes('YM-VO-T500'));
-
-  if (comboMatch && Number(comboMatch[1]) === 10 && comboMatch[2].toUpperCase() === 'MIX') {
-    const unitPrice = Math.round(price / 10);
-    return [
-      { sku:'GRA-NAU-G35', quantity:3 * quantity, price:unitPrice },
-      { sku:'GRA-XANH-G35', quantity:4 * quantity, price:unitPrice },
-      { sku:'GRA-CAM-G30', quantity:3 * quantity, price:unitPrice }
-    ];
-  }
-
-  if (isMixedOat) {
-    const kilograms = kgMatch ? Number(kgMatch[1]) : 1;
-    const totalBags = comboMatch ? Number(comboMatch[1]) : kilograms * 2;
-    const itemQuantity = Math.max(1, Math.round(totalBags / 2)) * quantity;
-    const unitPrice = totalBags === 2 ? 58000 : getOatUnitPrice(totalBags, descriptor, price);
-    return [
-      { sku:'HT-YM-T500', quantity:itemQuantity, price:unitPrice },
-      { sku:'YM-VO-T500', quantity:itemQuantity, price:unitPrice },
-      { sku:'HU-300ML', quantity:Math.max(1, Math.round(totalBags / 2)) * quantity, price:0 }
-    ];
-  }
-
-  const directOatSku = mapSingleSku(raw);
-  const oatBagCount = oatBundleMatch
-    ? Number(oatBundleMatch[1])
-    : (kgMatch && (directOatSku === 'HT-YM-T500' || directOatSku === 'YM-VO-T500') ? Number(kgMatch[1]) * 2 : 0);
-  if (oatBagCount && (directOatSku === 'HT-YM-T500' || directOatSku === 'YM-VO-T500' || oatBundleMatch)) {
-    const oatSku = oatBundleMatch ? oatBundleMatch[2] : directOatSku;
-    return [
-      { sku:oatSku, quantity:oatBagCount * quantity, price:getOatUnitPrice(oatBagCount, descriptor, price) },
-      { sku:'HU-300ML', quantity:Math.max(1, Math.round(oatBagCount / 2)) * quantity, price:0 }
-    ];
-  }
-
-  if (comboMatch) {
-    const baseSku = mapSingleSku(comboMatch[2]);
-    if (baseSku && (skuWeights[baseSku] !== undefined || baseSku !== comboMatch[2])) {
-      const multiplier = Number(comboMatch[1]);
-      const extraSkus = parts.slice(1).map(mapSingleSku);
-      const productSkus = [baseSku, ...extraSkus.filter(sku => skuPrices[sku])];
-      const giftSkus = extraSkus.filter(sku => !skuPrices[sku]);
-      const totalUnits = multiplier * quantity;
-      const items = productSkus.map((sku, index) => {
-        const itemQuantity = productSkus.length === 1
-          ? totalUnits
-          : (index === 0 ? totalUnits - quantity * (productSkus.length - 1) : quantity);
-        return {
-          sku,
-          quantity:Math.max(quantity, itemQuantity),
-          price:getSkuPrice(sku, true, Math.round(price / multiplier))
-        };
-      });
-      giftSkus.forEach(giftSku => {
-        if (!items.some(item => item.sku === giftSku)) items.push({ sku:giftSku, quantity, price:0 });
-      });
-      if (multiplier === 3) {
-        ['BGD', 'MUONG'].forEach(giftSku => {
-          if (!items.some(item => item.sku === giftSku)) items.push({ sku:giftSku, quantity, price:0 });
-        });
-      }
-      return items;
-    }
-  }
-
-  if (parts.length > 1) {
-    const mappedParts = parts.map(part => mapSingleSku(part.replace(/^CB-/i, '')));
-    const allMapped = mappedParts.every(sku => sku && (skuWeights[sku] !== undefined || skuPrices[sku]));
-    if (allMapped) {
-      const productSkus = mappedParts.filter(sku => sku !== 'BGD' && sku !== 'MUONG');
-      const fallbackPrice = productSkus.length ? Math.round(price / productSkus.length) : 0;
-      return mappedParts.map(sku => ({
-        sku,
-        quantity,
-        price:sku === 'BGD' || sku === 'MUONG' ? 0 : getSkuPrice(sku, true, fallbackPrice)
-      }));
-    }
-  }
-
-  const singleSku = mapSingleSku(raw);
-  return [{ sku:singleSku, quantity, price:getSkuPrice(singleSku, useComboPricing, price) }];
-}
-
-function buildExportRows() {
-  const sourceIndex = new Map(orderData.headers.map((header, index) => [normalizeColumnName(header), index]));
-  const value = (row, header) => { const index = sourceIndex.get(normalizeColumnName(header)); return index === undefined ? '' : row[index] || ''; };
-  const exportableRows = orderData.rows.filter(row => !isInvalidOrderAddress(value(row, 'Địa chỉ')));
-  const outputRows = [];
-  const seenOrders = new Set();
-  const bagQuantityByOrder = new Map();
-  let orderNumber = 0;
-
-  exportableRows.forEach((row, rowIndex) => {
-    const sourceOrderId = value(row, 'Mã đơn hàng');
-    const orderKey = sourceOrderId ? `id:${sourceOrderId}` : `row:${rowIndex}`;
-    const items = splitSkuForExport(
-      value(row, 'Mã mẫu mã'),
-      value(row, 'Số lượng'),
-      value(row, 'Đơn giá'),
-      false,
-      value(row, 'Sản phẩm')
-    );
-    const bagQuantity = items
-      .filter(item => skuPrices[item.sku])
-      .reduce((total, item) => total + (Number(item.quantity) || 0), 0);
-    bagQuantityByOrder.set(orderKey, (bagQuantityByOrder.get(orderKey) || 0) + bagQuantity);
-  });
-
-  exportableRows.forEach((row, rowIndex) => {
-    const phone = value(row, 'Số điện thoại');
-    const sourceOrderId = value(row, 'Mã đơn hàng');
-    const orderKey = sourceOrderId ? `id:${sourceOrderId}` : `row:${rowIndex}`;
-    const isFirstOrderLine = !seenOrders.has(orderKey);
-    if (isFirstOrderLine) {
-      seenOrders.add(orderKey);
-      orderNumber += 1;
-    }
-
-    const items = splitSkuForExport(
-      value(row, 'Mã mẫu mã'),
-      value(row, 'Số lượng'),
-      value(row, 'Đơn giá'),
-      (bagQuantityByOrder.get(orderKey) || 0) >= 2,
-      value(row, 'Sản phẩm')
-    );
-    items.forEach((item, itemIndex) => {
-      const isFirstExportLine = isFirstOrderLine && itemIndex === 0;
-      const output = Array(exportColumns.length).fill('');
-      if (isFirstExportLine) {
-        output[0] = orderNumber;
-        output[2] = 'Facebook';
-        output[4] = 'Có';
-        output[6] = 'Có';
-        output[8] = 'Thanh toán COD';
-        output[28] = '8%';
-        output[30] = phone;
-        output[33] = value(row, 'Khách hàng');
-        output[34] = phone;
-        output[35] = value(row, 'Địa chỉ');
-        output[36] = normalizeExportLocation(value(row, 'Tỉnh/Thành phố'));
-        output[37] = normalizeExportLocation(value(row, 'Quận/Huyện'));
-        output[38] = normalizeExportLocation(value(row, 'Phường/Xã'));
-      }
-      output[19] = item.sku;
-      output[21] = item.quantity;
-      output[22] = item.price;
-      output[24] = skuWeights[item.sku] ?? '';
-      outputRows.push(output);
-    });
-  });
-  return outputRows;
-}
-
-function renderExportPreview() {
+async function renderExportPreview() {
   const preview = document.querySelector('#order-export-preview');
   if (!preview) return;
-  const rows = buildExportRows();
+  let rows = [];
+  try {
+    rows = await fetchExportRows();
+  } catch (error) {
+    preview.innerHTML = `<p>${escapeHtml(error.message || 'Chưa dựng được dữ liệu xuất.')}</p>`;
+    if (orderExport) orderExport.disabled = true;
+    return;
+  }
+  if (orderExport) orderExport.disabled = rows.length === 0;
   if (!rows.length) {
-    preview.innerHTML = '<p>Chưa có dữ liệu xuất.</p>';
+    preview.innerHTML = '<p>Chưa có dữ liệu xuất. Đưa đơn từ hội thoại vào bảng hoặc import tệp ở mục Nhập dữ liệu.</p>';
     return;
   }
   const groupHead = exportPreviewGroups.map(group => `<th class="export-fill-${group.fill}" colspan="${group.span}"${group.rowspan ? ` rowspan="${group.rowspan}"` : ''}>${escapeHtml(group.label)}</th>`).join('');
@@ -5601,7 +5497,7 @@ orderExport.onclick = async () => {
     showToast(error.message);
   } finally {
     orderExport.textContent = originalLabel;
-    orderExport.disabled = buildExportRows().length === 0;
+    renderExportPreview();
   }
 };
 

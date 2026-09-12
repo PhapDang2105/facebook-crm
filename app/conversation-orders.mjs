@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { toLocalPhone } from './processing/customer-info.mjs';
 import { matchProduct, findProductBySku } from './processing/catalog.mjs';
-import { giftTextFor, unitPriceInBasket } from './processing/pricing.mjs';
+import { giftTextFor, shippingFeeFor, unitPriceInBasket } from './processing/pricing.mjs';
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
@@ -79,9 +79,15 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   }).filter(item => item.name) : [];
   const total = money(input.total);
   const totalQuantityForPricing = items.reduce((sum, item) => sum + item.quantity, 0);
-  const priced = items.map(item => {
+  const shippingFee = input.shippingFee !== undefined ? money(input.shippingFee) : shippingFeeFor(totalQuantityForPricing);
+  const priced = items.map((item, index) => {
     const product = findProductBySku(item.sku);
-    return { ...item, paidPrice: unitPriceInBasket(product, totalQuantityForPricing) || item.price };
+    const basketPrice = unitPriceInBasket(product, totalQuantityForPricing) || item.price;
+    // The price the customer pays per unit. On an order that still pays
+    // shipping, the fee is folded into the first line — the warehouse file
+    // and the order table both show 189.000đ for one bag, never 174.000đ.
+    const shipShare = index === 0 && shippingFee ? Math.round(shippingFee / item.quantity) : 0;
+    return { ...item, paidPrice: basketPrice + shipShare };
   });
   // Every line priced at its own list price, or none of them. Mixing a real unit
   // price with an averaged one makes the receipt add up to a number the customer
@@ -93,7 +99,7 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   // The combo total is the price the customer agreed to. The gap between it and
   // the sum of list prices is the combo discount, shown as its own line rather
   // than silently smeared across the products.
-  const comboDiscount = listed && total && subtotal > total ? subtotal - total : 0;
+  const comboDiscount = listed && total && subtotal + shippingFee > total ? subtotal + shippingFee - total : 0;
   const order = normalizeCustomerOrder({
     name: text(conversation.name || 'Khách Facebook', 200),
     phone: input.phone,
@@ -103,7 +109,8 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     status: 'Mới',
     source: 'Facebook',
     payment: 'COD',
-    freeShipping: true,
+    freeShipping: shippingFee === 0,
+    shippingFee,
     note: 'Tạo tự động từ xác nhận của chatbot.',
     employee: 'Chatbot AI'
   }, { now, id });

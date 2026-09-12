@@ -12,7 +12,7 @@ import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { defaultMessageTemplates } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
-import { getGiftAssignments, getGifts, getShippingFee, listCombos, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
+import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import {
@@ -137,7 +137,7 @@ async function ensureGifts() {
     await stat(giftsPath);
   } catch {
     const raw = JSON.parse(await readFile(path.join(root, 'app', 'gifts.seed.json'), 'utf8').catch(() => '{}'));
-    await writeGiftStore({ items: Array.isArray(raw?.items) ? raw.items : [], assignments: raw?.assignments, shippingFee: raw?.shippingFee });
+    await writeGiftStore({ items: Array.isArray(raw?.items) ? raw.items : [], shippingFee: raw?.shippingFee });
   }
 }
 
@@ -824,9 +824,12 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, publicConversation(conversation));
     }
     if (url.pathname === '/api/gifts') {
-      // Combos are generated from the catalogue so the gift table always has
-      // exactly the rows the chatbot can sell.
-      const giftResponse = () => ({ items: getGifts(), assignments: getGiftAssignments(), shippingFee: getShippingFee(), combos: listCombos() });
+      // The product list rides along so the screen can offer "không áp dụng cho" choices.
+      const giftResponse = () => ({
+        items: getGifts(),
+        shippingFee: getShippingFee(),
+        products: getCatalogProducts().filter(product => product.active).map(product => ({ sku: product.sku, name: product.name }))
+      });
       if (request.method === 'GET') return sendJson(response, 200, giftResponse());
       if (request.method === 'PUT') {
         const payload = await readBody(request);
@@ -840,7 +843,6 @@ const server = http.createServer(async (request, response) => {
         const current = await readGiftStore();
         await writeGiftStore({
           items,
-          assignments: payload.assignments && typeof payload.assignments === 'object' ? payload.assignments : current.assignments,
           shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee
         });
         return sendJson(response, 200, giftResponse());

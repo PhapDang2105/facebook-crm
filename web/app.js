@@ -2264,11 +2264,8 @@ const giftAddButton = document.querySelector('#gift-add');
 const giftSaveButton = document.querySelector('#gift-save');
 const giftStatus = document.querySelector('#gift-status');
 const giftShippingFee = document.querySelector('#gift-shipping-fee');
-const giftComboTable = document.querySelector('#gift-combo-table');
-const giftComboSearch = document.querySelector('#gift-combo-search');
 let giftItems = [];
-let giftCombos = [];
-let giftAssignments = {};
+let giftProducts = [];
 let giftsLoaded = false;
 
 function setGiftStatus(message, tone = '') {
@@ -2278,69 +2275,39 @@ function setGiftStatus(message, tone = '') {
   giftStatus.classList.toggle('is-ok', tone === 'ok');
 }
 
-function giftClientId(gift, index) {
-  // Gifts added on screen have no id until saved; a stable key is still
-  // needed to tick them in the combo table before the first save.
-  if (!gift.id) gift.id = `gift-${Date.now().toString(36)}-${index}`;
-  return gift.id;
-}
-
-function describeCombo(combo) {
-  return combo.items.map(item => `${item.quantity} × ${item.name}`).join(' + ');
-}
-
+// Each gift is a rule — "from N units, except these products" — so the row
+// carries the threshold and, underneath, one chip per product to exclude.
 function renderGifts() {
   if (!giftRowsElement) return;
   if (!giftItems.length) {
     giftRowsElement.innerHTML = '<div class="gift-row gift-row-empty"><span>Chưa có quà tặng nào. Bấm “Thêm quà tặng” để bắt đầu.</span></div>';
-  } else {
-    giftRowsElement.innerHTML = giftItems.map((gift, index) => `<div class="gift-row${gift.active === false ? ' is-off' : ''}">
+    return;
+  }
+  giftRowsElement.innerHTML = giftItems.map((gift, index) => {
+    const excluded = new Set(gift.excludedSkus || []);
+    const chips = giftProducts.map(product => `<label class="gift-chip${excluded.has(product.sku) ? ' is-on' : ''}"><input type="checkbox" data-gift-exclude="${escapeHtml(product.sku)}" data-gift-index="${index}" ${excluded.has(product.sku) ? 'checked' : ''}>${escapeHtml(product.name)}</label>`).join('');
+    return `<div class="gift-row${gift.active === false ? ' is-off' : ''}">
       <label class="gift-active"><input type="checkbox" data-gift-field="active" data-gift-index="${index}" ${gift.active !== false ? 'checked' : ''} aria-label="Đang dùng"></label>
       <input type="text" data-gift-field="name" data-gift-index="${index}" value="${escapeHtml(gift.name || '')}" maxlength="200" placeholder="Ví dụ: Miễn phí vận chuyển">
+      <span class="gift-quantity"><input type="number" data-gift-field="minQuantity" data-gift-index="${index}" value="${Math.max(1, Number(gift.minQuantity) || 1)}" min="1" max="99"><span>sản phẩm</span></span>
       <input type="text" class="gift-sku" data-gift-field="sku" data-gift-index="${index}" value="${escapeHtml(gift.sku || '')}" maxlength="80" placeholder="Không xuất kho" spellcheck="false">
       <span class="gift-weight"><input type="number" data-gift-field="weight" data-gift-index="${index}" value="${Number(gift.weight) || 0}" min="0" step="10"><span>g</span></span>
       <button class="price-master-remove" type="button" data-gift-remove="${index}" aria-label="Xóa quà tặng" title="Xóa quà tặng">×</button>
-    </div>`).join('');
-  }
-  renderGiftCombos();
-}
-
-function renderGiftCombos() {
-  if (!giftComboTable) return;
-  const gifts = giftItems.map((gift, index) => ({ ...gift, id: giftClientId(gift, index) })).filter(gift => String(gift.name || '').trim());
-  if (!giftCombos.length) {
-    giftComboTable.innerHTML = '<p class="gift-manager-empty">Chưa có sản phẩm nào đang bán, nên chưa có tổ hợp để gắn quà.</p>';
-    return;
-  }
-  if (!gifts.length) {
-    giftComboTable.innerHTML = '<p class="gift-manager-empty">Thêm ít nhất một quà tặng ở bảng trên để tick cho tổ hợp.</p>';
-    return;
-  }
-  const keyword = normalizeColumnName(giftComboSearch?.value || '');
-  const rows = giftCombos.filter(combo => !keyword || normalizeColumnName(describeCombo(combo)).includes(keyword));
-  const head = `<div class="gift-combo-head"><span>Tổ hợp</span>${gifts.map(gift => `<span title="${escapeHtml(gift.name)}">${escapeHtml(gift.name)}</span>`).join('')}</div>`;
-  const body = rows.map(combo => {
-    const ticked = new Set(giftAssignments[combo.key] || []);
-    return `<div class="gift-combo-row" data-combo-key="${escapeHtml(combo.key)}">
-      <span class="gift-combo-label"><b>${combo.totalQuantity}</b>${escapeHtml(describeCombo(combo))}</span>
-      ${gifts.map(gift => `<label class="gift-combo-cell"><input type="checkbox" data-combo-key="${escapeHtml(combo.key)}" data-gift-id="${escapeHtml(gift.id)}" ${ticked.has(gift.id) ? 'checked' : ''} ${gift.active === false ? 'disabled' : ''} aria-label="${escapeHtml(gift.name)}"></label>`).join('')}
+      <div class="gift-exclusions"><span>Không áp dụng cho:</span>${chips || '<em>Chưa có sản phẩm đang bán.</em>'}</div>
     </div>`;
   }).join('');
-  giftComboTable.style.setProperty('--gift-count', String(gifts.length));
-  giftComboTable.innerHTML = head + (body || '<p class="gift-manager-empty">Không có tổ hợp nào khớp.</p>');
 }
 
 async function loadGifts() {
   if (!giftRowsElement || giftsLoaded) return;
   try {
     const result = await readApiResponse(await fetch('/api/gifts'));
-    giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift })) : [];
-    giftCombos = Array.isArray(result.combos) ? result.combos : [];
-    giftAssignments = result.assignments && typeof result.assignments === 'object' ? { ...result.assignments } : {};
+    giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift, excludedSkus: [...(gift.excludedSkus || [])] })) : [];
+    giftProducts = Array.isArray(result.products) ? result.products : [];
     if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
     giftsLoaded = true;
     renderGifts();
-    setGiftStatus(`${giftItems.length} quà tặng · ${giftCombos.length} tổ hợp. Chatbot đang dùng bảng này.`);
+    setGiftStatus(`${giftItems.length} quà tặng. Chatbot, đơn hàng và file xuất kho đang dùng quy tắc này.`);
   } catch (error) {
     setGiftStatus(error.message || 'Chưa tải được quà tặng.', 'error');
   }
@@ -2355,49 +2322,40 @@ giftRowsElement?.addEventListener('input', event => {
   if (field === 'name') gift.name = event.target.value;
   else if (field === 'sku') gift.sku = event.target.value.trim().toUpperCase();
   else if (field === 'weight') gift.weight = Math.max(0, Math.round(Number(event.target.value) || 0));
-  if (field === 'name') {
-    // Only the column header changes; re-rendering the rows would steal the caret.
-    giftComboTable?.querySelectorAll('.gift-combo-head span').forEach((cell, position) => {
-      if (position === Number(event.target.dataset.giftIndex) + 1) cell.textContent = event.target.value;
-    });
-  }
+  else if (field === 'minQuantity') gift.minQuantity = Math.max(1, Math.round(Number(event.target.value) || 1));
   setGiftStatus(giftUnsavedNote);
 });
 
 giftRowsElement?.addEventListener('change', event => {
-  if (event.target.dataset.giftField !== 'active') return;
   const gift = giftItems[Number(event.target.dataset.giftIndex)];
   if (!gift) return;
-  gift.active = event.target.checked;
-  event.target.closest('.gift-row')?.classList.toggle('is-off', !gift.active);
-  renderGiftCombos();
+  if (event.target.dataset.giftField === 'active') {
+    gift.active = event.target.checked;
+    event.target.closest('.gift-row')?.classList.toggle('is-off', !gift.active);
+  } else if (event.target.dataset.giftExclude) {
+    const sku = event.target.dataset.giftExclude;
+    const set = new Set(gift.excludedSkus || []);
+    if (event.target.checked) set.add(sku); else set.delete(sku);
+    gift.excludedSkus = [...set];
+    event.target.closest('.gift-chip')?.classList.toggle('is-on', event.target.checked);
+  } else {
+    return;
+  }
   setGiftStatus(giftUnsavedNote);
 });
 
 giftRowsElement?.addEventListener('click', event => {
   const button = event.target.closest('[data-gift-remove]');
   if (!button) return;
-  const [removed] = giftItems.splice(Number(button.dataset.giftRemove), 1);
-  if (removed?.id) for (const key of Object.keys(giftAssignments)) giftAssignments[key] = giftAssignments[key].filter(id => id !== removed.id);
+  giftItems.splice(Number(button.dataset.giftRemove), 1);
   renderGifts();
   setGiftStatus('Đã xóa quà tặng. Nhớ bấm “Lưu quà tặng”.');
 });
 
-giftComboTable?.addEventListener('change', event => {
-  const key = event.target.dataset.comboKey;
-  const giftId = event.target.dataset.giftId;
-  if (!key || !giftId) return;
-  const current = new Set(giftAssignments[key] || []);
-  if (event.target.checked) current.add(giftId); else current.delete(giftId);
-  if (current.size) giftAssignments[key] = [...current]; else delete giftAssignments[key];
-  setGiftStatus(giftUnsavedNote);
-});
-
-giftComboSearch?.addEventListener('input', renderGiftCombos);
 giftShippingFee?.addEventListener('input', () => setGiftStatus(giftUnsavedNote));
 
 giftAddButton?.addEventListener('click', () => {
-  giftItems.push({ id: '', name: '', active: true, sku: '', weight: 0 });
+  giftItems.push({ id: '', name: '', active: true, minQuantity: 2, excludedSkus: [], sku: '', weight: 0 });
   renderGifts();
   giftRowsElement?.querySelector('.gift-row:last-child input[data-gift-field="name"]')?.focus();
 });
@@ -2413,14 +2371,13 @@ giftSaveButton?.addEventListener('click', async () => {
     const result = await readApiResponse(await fetch('/api/gifts', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: giftItems, assignments: giftAssignments, shippingFee: Number(giftShippingFee?.value) || 0 })
+      body: JSON.stringify({ items: giftItems, shippingFee: Number(giftShippingFee?.value) || 0 })
     }));
-    giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift })) : giftItems;
-    giftCombos = Array.isArray(result.combos) ? result.combos : giftCombos;
-    giftAssignments = result.assignments && typeof result.assignments === 'object' ? { ...result.assignments } : giftAssignments;
+    giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift, excludedSkus: [...(gift.excludedSkus || [])] })) : giftItems;
+    giftProducts = Array.isArray(result.products) ? result.products : giftProducts;
     if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
     renderGifts();
-    setGiftStatus(`Đã lưu ${giftItems.length} quà tặng cho ${Object.keys(giftAssignments).length} tổ hợp. Chatbot áp dụng ngay cho đơn kế tiếp.`, 'ok');
+    setGiftStatus(`Đã lưu ${giftItems.length} quà tặng. Chatbot áp dụng ngay cho đơn kế tiếp.`, 'ok');
   } catch (error) {
     setGiftStatus(error.message || 'Chưa lưu được quà tặng.', 'error');
   } finally {

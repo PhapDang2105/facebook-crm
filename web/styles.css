@@ -935,7 +935,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 /* ===== Quà tặng (Cài đặt → Quà tặng) ===== */
 .gift-table { overflow: hidden; border: 1px solid #e9ebf0; border-radius: 8px; }
 .gift-table-head,
-.gift-row { display: grid; grid-template-columns: 70px minmax(0, 1fr) 170px 120px 40px; align-items: center; gap: 10px; padding: 9px 12px; }
+.gift-row { display: grid; grid-template-columns: 70px minmax(0, 1fr) 150px 170px 120px 40px; align-items: center; gap: 10px; padding: 9px 12px; }
 .gift-table-head { color: #475467; background: #f7f8fa; border-bottom: 1px solid #e9ebf0; font-size: 12px; font-weight: 600; text-transform: uppercase; }
 .gift-row { border-bottom: 1px solid #f2f4f7; font-size: 13px; }
 .gift-row:last-child { border-bottom: 0; }
@@ -946,30 +946,17 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .gift-row input:focus { border-color: #84adff; box-shadow: 0 0 0 2px rgba(21, 94, 239, .12); }
 .gift-active { display: grid; place-items: center; }
 .gift-active input { width: 18px; height: 18px; accent-color: #1677ff; cursor: pointer; }
+.gift-quantity { display: grid; grid-template-columns: 64px auto; align-items: center; gap: 6px; color: #475467; white-space: nowrap; }
+.gift-quantity input { text-align: center; }
+/* Chip per product to exclude from the gift; sits under the row, spans all columns. */
+.gift-exclusions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; grid-column: 1 / -1; padding: 2px 0 2px 0; color: #667085; font-size: 12px; }
+.gift-exclusions em { font-style: normal; color: #98a2b2; }
+.gift-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; color: #475467; background: #f7f8fa; border: 1px solid #e0e3ea; border-radius: 999px; font-size: 12px; cursor: pointer; user-select: none; }
+.gift-chip input { width: 13px; height: 13px; margin: 0; accent-color: #b42318; cursor: pointer; }
+.gift-chip.is-on { color: #b42318; background: #fff1f0; border-color: #f5c2c0; }
 .gift-sku { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px !important; text-transform: uppercase; }
 .gift-weight { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; color: #475467; }
 .gift-weight input { text-align: right; }
-/* Ma trận quà theo tổ hợp: cột đầu là tổ hợp, mỗi quà một cột tick. Số cột do JS đặt qua --gift-count. */
-.gift-combos { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; }
-.gift-combos-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.gift-combos-head h2 { margin: 0; color: #101828; font-size: 14px; font-weight: 600; }
-.gift-combos-head .gift-combo-search { width: min(320px, 100%); height: 36px; }
-.gift-combos-head .gift-combo-search input { font-size: 13px; }
-.gift-combo-table { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid #e9ebf0; border-radius: 8px; }
-.gift-combo-head,
-.gift-combo-row { display: grid; grid-template-columns: minmax(260px, 1fr) repeat(var(--gift-count, 1), minmax(110px, 150px)); align-items: center; gap: 10px; padding: 8px 12px; }
-.gift-combo-head { position: sticky; top: 0; z-index: 1; color: #475467; background: #f7f8fa; border-bottom: 1px solid #e9ebf0; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-.gift-combo-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
-.gift-combo-head span:first-child { text-align: left; }
-.gift-combo-row { border-bottom: 1px solid #f2f4f7; font-size: 13px; }
-.gift-combo-row:last-child { border-bottom: 0; }
-.gift-combo-row:hover { background: #fbfcfe; }
-.gift-combo-label { display: flex; align-items: center; gap: 10px; min-width: 0; color: #344054; }
-.gift-combo-label b { display: grid; flex: 0 0 auto; width: 24px; height: 24px; place-items: center; color: #0b4fd1; background: #eff4ff; border-radius: 6px; font-size: 12px; }
-.gift-combo-cell { display: grid; place-items: center; }
-.gift-combo-cell input { width: 18px; height: 18px; margin: 0; accent-color: #1677ff; cursor: pointer; }
-.gift-combo-cell input:disabled { cursor: not-allowed; opacity: .4; }
-.gift-manager-empty { margin: 0; padding: 14px; color: #667085; font-size: 13px; }
 .gift-shipping-field { display: grid; gap: 4px; color: #475467; font-size: 12px; }
 .gift-shipping-field .product-price-input { width: 150px; }
 .gift-shipping-field .product-price-input input { width: 100%; height: 34px; padding: 0 28px 0 10px; color: #101828; background: #fff; border: 1px solid #e0e3ea; border-radius: 6px; outline: none; font: inherit; font-size: 13px; text-align: right; }
@@ -992,8 +979,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 @media (max-width: 860px) {
   .gift-table-head { display: none; }
   .gift-row { grid-template-columns: 40px minmax(0, 1fr) 40px; }
-  .gift-row .gift-sku, .gift-row .gift-weight { grid-column: 2; }
-  .gift-combo-head, .gift-combo-row { grid-template-columns: minmax(200px, 1fr) repeat(var(--gift-count, 1), 90px); }
+  .gift-row .gift-quantity, .gift-row .gift-sku, .gift-row .gift-weight { grid-column: 2; }
 }
 @media (max-width: 1180px) { .chatbot-general-config { grid-template-columns: minmax(540px, 1.15fr) minmax(320px, .85fr); } }
 @media (max-width: 980px) { .chatbot-general-config { grid-template-columns: 1fr; height: auto; } .chatbot-general-settings-pane { height: auto; max-height: none; } .chatbot-preview-card { position: static; height: 520px; min-height: 0; } }

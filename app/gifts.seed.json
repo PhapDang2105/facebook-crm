@@ -4,6 +4,8 @@
       "id": "freeship",
       "name": "Miễn phí vận chuyển",
       "active": true,
+      "minQuantity": 2,
+      "excludedSkus": [],
       "sku": "",
       "weight": 0
     },
@@ -11,6 +13,11 @@
       "id": "bo-bat-gao-dua",
       "name": "Bộ bát gáo dừa",
       "active": true,
+      "minQuantity": 3,
+      "excludedSkus": [
+        "NGHE-LANH-H14",
+        "HAL-HU"
+      ],
       "sku": "BGD",
       "weight": 10
     },
@@ -18,131 +25,14 @@
       "id": "muong-dua",
       "name": "Muỗng dừa",
       "active": true,
+      "minQuantity": 3,
+      "excludedSkus": [
+        "NGHE-LANH-H14",
+        "HAL-HU"
+      ],
       "sku": "MUONG",
       "weight": 10
     }
   ],
-  "shippingFee": 15000,
-  "assignments": {
-    "GRA-NAU-Z350=2": [
-      "freeship"
-    ],
-    "GRA-NAU-Z350=1|GRA-VANG-H350=1": [
-      "freeship"
-    ],
-    "GRA-NAU-Z350=1|GRA-XANH-Z450=1": [
-      "freeship"
-    ],
-    "GRA-VANG-H350=2": [
-      "freeship"
-    ],
-    "GRA-VANG-H350=1|GRA-XANH-Z450=1": [
-      "freeship"
-    ],
-    "GRA-XANH-Z450=2": [
-      "freeship"
-    ],
-    "GRA-NAU-Z350=3": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-NAU-Z350=2|GRA-VANG-H350=1": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-NAU-Z350=2|GRA-XANH-Z450=1": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-NAU-Z350=1|GRA-VANG-H350=2": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-NAU-Z350=1|GRA-VANG-H350=1|GRA-XANH-Z450=1": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-NAU-Z350=1|GRA-XANH-Z450=2": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-VANG-H350=3": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-VANG-H350=2|GRA-XANH-Z450=1": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-VANG-H350=1|GRA-XANH-Z450=2": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-XANH-Z450=3": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "GRA-TROPICAL-300=2": [
-      "freeship"
-    ],
-    "GRA-TROPICAL-300=3": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "CB10-XANH=2": [
-      "freeship"
-    ],
-    "CB10-XANH=3": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "CB10-NAU=2": [
-      "freeship"
-    ],
-    "CB10-NAU=3": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "CB10-CAM=2": [
-      "freeship"
-    ],
-    "CB10-CAM=3": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "CB10-MIX=2": [
-      "freeship"
-    ],
-    "CB10-MIX=3": [
-      "freeship",
-      "bo-bat-gao-dua",
-      "muong-dua"
-    ],
-    "NGHE-LANH-H14=2": [
-      "freeship"
-    ],
-    "NGHE-LANH-H14=3": [
-      "freeship"
-    ],
-    "HAL-HU=2": [
-      "freeship"
-    ],
-    "HAL-HU=3": [
-      "freeship"
-    ]
-  }
+  "shippingFee": 15000
 }

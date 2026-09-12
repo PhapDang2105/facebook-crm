@@ -227,7 +227,8 @@ function renderGiftPolicy(templates) {
     .map(line => line.replace(/^- /, ''))
     .map(line => {
       const at = line.indexOf(': ');
-      return at > 0 ? { gifts: line.slice(0, at), combos: line.slice(at + 2) } : null;
+      // `combos` kept as an alias so a saved GIFT_POLICY template written for the old table still fills.
+      return at > 0 ? { gifts: line.slice(0, at), rule: line.slice(at + 2), combos: line.slice(at + 2) } : null;
     })
     .filter(Boolean);
   if (!gifts.length) return fill(templates.GIFT_POLICY_EMPTY, commonValues());

@@ -1,4 +1,4 @@
-import { comboKey, findProductBySku, getCatalogProducts, getGiftAssignments, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity } from './catalog.mjs';
+import { comboKey, findProductBySku, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity } from './catalog.mjs';
 
 // The rule, as the business states it: one unit sells at the single price;
 // from two units — of the same product or mixed with other mixable products —
@@ -133,45 +133,18 @@ export function quoteTiers(productText) {
   return { product, tiers };
 }
 
-/** Human-readable name of a basket key: "2 × Granola Túi Xanh 450g + 1 × Granola Túi Nâu". */
-export function describeComboKey(key) {
-  return String(key || '').split('|').filter(Boolean).map(part => {
-    const [sku, quantity] = part.split('=');
-    return `${quantity} × ${findProductBySku(sku)?.name || sku}`;
-  }).join(' + ');
-}
-
 /**
- * The gift table as text, grouped so the model reads one line per distinct
- * gift set: "- Miễn phí vận chuyển: 2 × Túi Xanh, 1 × Túi Xanh + 1 × Túi Nâu, ...".
+ * The gift rules as text, one line per distinct rule: "- Miễn phí vận
+ * chuyển: từ 2 sản phẩm" / "- Bộ bát gáo dừa + Muỗng dừa: từ 3 sản phẩm (trừ
+ * Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ)".
  */
 export function describeGiftTable() {
-  const assignments = getGiftAssignments();
-  const active = new Map(getGifts().filter(gift => gift.active).map(gift => [gift.id, gift.name]));
-  const combos = listCombos();
   const groups = new Map();
-  for (const combo of combos) {
-    const names = (assignments[combo.key] || []).map(id => active.get(id)).filter(Boolean);
-    if (!names.length) continue;
-    const label = names.join(' + ');
-    groups.set(label, [...(groups.get(label) || []), combo]);
+  for (const gift of getGifts().filter(gift => gift.active)) {
+    const excluded = gift.excludedSkus.map(sku => findProductBySku(sku)?.name || sku);
+    const rule = `từ ${gift.minQuantity} sản phẩm${excluded.length ? ` (trừ ${excluded.join(', ')})` : ''}`;
+    groups.set(rule, [...(groups.get(rule) || []), gift.name]);
   }
   if (!groups.size) return ['- Hiện chưa có quà tặng.'];
-  // When a gift set covers every combination of N units it is said once as
-  // "mọi đơn N sản phẩm"; only the exceptions are spelled out.
-  const byTotal = new Map();
-  for (const combo of combos) byTotal.set(combo.totalQuantity, (byTotal.get(combo.totalQuantity) || 0) + 1);
-  return [...groups.entries()].map(([label, list]) => {
-    const parts = [];
-    let rest = list;
-    for (const [total, count] of [...byTotal.entries()].sort((a, b) => a[0] - b[0])) {
-      const mine = list.filter(combo => combo.totalQuantity === total);
-      if (mine.length === count) {
-        parts.push(`mọi đơn ${total} sản phẩm`);
-        rest = rest.filter(combo => combo.totalQuantity !== total);
-      }
-    }
-    return `- ${label}: ${[...parts, ...rest.map(combo => describeComboKey(combo.key))].join('; ')}`;
-  });
+  return [...groups.entries()].map(([rule, names]) => `- ${names.join(' + ')}: ${rule}`);
 }
-

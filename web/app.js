@@ -2193,16 +2193,6 @@ function renderChatbotTemplateEditor() {
   if (chatbotTemplateContent) {
     chatbotTemplateContent.disabled = !id || Boolean(dynamic);
     chatbotTemplateContent.value = id ? (dynamic || chatbotTemplatesState[id] || '') : '';
-    let note = chatbotTemplateContent.parentElement?.querySelector('.chatbot-template-dynamic-note');
-    if (dynamic && !note) {
-      note = document.createElement('p');
-      note.className = 'chatbot-template-dynamic-note';
-      chatbotTemplateContent.parentElement?.insertBefore(note, chatbotTemplateContent);
-    }
-    if (note) {
-      note.textContent = 'Mẫu này được soạn tự động từ Cài đặt → Sản phẩm và Quà tặng mỗi lần trả lời. Muốn đổi giá hay quà, sửa ở đó — không sửa ở đây.';
-      note.hidden = !dynamic;
-    }
   }
   if (chatbotTemplateApply) chatbotTemplateApply.classList.toggle('hidden', Boolean(dynamic));
   if (chatbotTemplateReset) chatbotTemplateReset.classList.toggle('hidden', Boolean(dynamic));

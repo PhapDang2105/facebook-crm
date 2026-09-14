@@ -274,15 +274,16 @@ export function applyWebhookEvents(store, events) {
 
 /** For a new comment thread: the commenter's picture and what post it is on. */
 async function resolveCommentContext(changes) {
+  const needsPost = conversation => !conversation.post?.permalink || conversation.post?.picture === undefined;
   const pending = changes.filter(change => change.type === 'message' && change.conversation.source === 'comment'
-    && change.message.direction === 'incoming' && !change.conversation.profileResolvedAt);
+    && change.message.direction === 'incoming' && (!change.conversation.profileResolvedAt || needsPost(change.conversation)));
   if (!pending.length) return [];
   const details = [];
   for (const change of pending) {
     const token = await getPageAccessToken(change.conversation.pageId).catch(() => '');
     if (!token) continue;
-    const comment = await fetchCommentDetails(change.message.commentId, token);
-    const post = change.conversation.post?.permalink ? null : await fetchPostSummary(change.conversation.post?.id, token);
+    const comment = change.conversation.profileResolvedAt ? {} : await fetchCommentDetails(change.message.commentId, token);
+    const post = needsPost(change.conversation) ? await fetchPostSummary(change.conversation.post?.id, token) : null;
     details.push({ id: change.conversation.id, comment, post });
   }
   return updateMessagingStore(store => details.map(({ id, comment, post }) => {
@@ -292,7 +293,7 @@ async function resolveCommentContext(changes) {
     if (comment.name) conversation.name = comment.name;
     if (comment.picture) conversation.picture = comment.picture;
     applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
-    if (post && (post.message || post.permalink)) conversation.post = { ...conversation.post, message: post.message, permalink: post.permalink };
+    if (post && !post.error) conversation.post = { ...conversation.post, message: post.message, permalink: post.permalink, picture: post.picture };
     return { type: 'conversation', conversation };
   }).filter(Boolean));
 }

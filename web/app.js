@@ -47,7 +47,6 @@ const chatHeadAvatar = document.querySelector('.chat-head > .avatar');
 const chatHeadName = document.querySelector('.chat-head > div:not(.chat-actions) strong');
 const chatHeadMeta = document.querySelector('#chat-head-meta');
 const chatHeadChannelLogo = document.querySelector('#chat-head-channel-logo');
-const chatHeadPost = document.querySelector('#chat-head-post');
 const composerReplyMode = document.querySelector('#composer-reply-mode');
 let currentComposerReplyMode = 'public';
 const chatHeadChatTab = document.querySelector('#chat-head-chat-tab');
@@ -1150,6 +1149,7 @@ function updateConversationElement(element, conversation) {
   element.dataset.genderSource = conversation.genderSource || '';
   element.dataset.postTitle = conversation.post?.message || '';
   element.dataset.postUrl = conversation.post?.permalink || '';
+  element.dataset.postPicture = conversation.post?.picture || '';
   element.dataset.avatar = conversation.picture || '';
   element.dataset.labels = (conversation.labels || []).join(' ');
   element.classList.toggle('unread', Boolean(conversation.unread));
@@ -3261,14 +3261,6 @@ function renderCommentThreadState(conversation) {
     const label = chatHeadChatTab.querySelector('span');
     if (label) label.textContent = isComment ? 'Bình luận' : 'Chat';
   }
-  if (chatHeadPost) {
-    const title = conversation?.dataset.postTitle || '';
-    const url = conversation?.dataset.postUrl || '';
-    chatHeadPost.classList.toggle('hidden', !isComment);
-    chatHeadPost.textContent = isComment ? `Bài viết: ${title || 'trên Facebook'}` : '';
-    chatHeadPost.title = title;
-    if (url) chatHeadPost.href = url; else chatHeadPost.removeAttribute('href');
-  }
   composerArea?.classList.toggle('composer-area--comment', isComment);
   composerReplyMode?.classList.toggle('hidden', !isComment);
   if (!isComment) currentComposerReplyMode = 'public';
@@ -3287,6 +3279,64 @@ function updateComposerReplyMode() {
   }
 }
 
+/**
+ * The post a comment thread hangs under, drawn the way Messenger shows a
+ * private reply: a notice line, then the post's picture and text with
+ * "Xem thêm" for long captions. The customer's comments follow below it.
+ */
+function buildPostContext(conversation) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'post-context';
+  const url = conversation.dataset.postUrl || '';
+  const notice = document.createElement('div');
+  notice.className = 'post-context-notice';
+  notice.textContent = 'Khách bình luận dưới bài viết của Trang. ';
+  if (url) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = '(Mở bài viết)';
+    notice.appendChild(link);
+  }
+  wrapper.appendChild(notice);
+  const text = conversation.dataset.postTitle || '';
+  const picture = conversation.dataset.postPicture || '';
+  if (text || picture) {
+    const card = document.createElement('div');
+    card.className = 'post-context-card';
+    if (picture) {
+      const image = document.createElement('img');
+      image.src = picture;
+      image.alt = '';
+      image.loading = 'lazy';
+      card.appendChild(image);
+    }
+    if (text) {
+      const body = document.createElement('div');
+      body.className = 'post-context-body';
+      const paragraph = document.createElement('p');
+      paragraph.className = 'post-context-text is-clamped';
+      paragraph.textContent = text;
+      body.appendChild(paragraph);
+      if (text.length > 90 || text.includes('\n')) {
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'post-context-more';
+        more.textContent = 'Xem thêm';
+        more.addEventListener('click', () => {
+          const clamped = paragraph.classList.toggle('is-clamped');
+          more.textContent = clamped ? 'Xem thêm' : 'Thu gọn';
+        });
+        body.appendChild(more);
+      }
+      card.appendChild(body);
+    }
+    wrapper.appendChild(card);
+  }
+  return wrapper;
+}
+
 function renderConversation(conversation = getActiveConversation()) {
   if (!conversation || !chatBody) return;
   const { name, initial } = renderConversationHeader(conversation);
@@ -3297,6 +3347,7 @@ function renderConversation(conversation = getActiveConversation()) {
     ? formatChatDateLabel(getChatTimestamp(getConversationMessages(conversation)[0]?.createdAt))
     : conversation.dataset.initialTime === 'Hôm qua' ? 'Hôm qua' : 'Hôm nay';
   chatBody.appendChild(date);
+  if (conversation.dataset.source === 'comment') chatBody.appendChild(buildPostContext(conversation));
   getConversationMessages(conversation).forEach((message, index) => {
     const messageId = message.id || `base-${normalizeColumnName(name)}-${index}`;
     const action = message.direction === 'outgoing' ? getChatMessageAction(name, messageId) : '';

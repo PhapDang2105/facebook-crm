@@ -117,13 +117,13 @@ export async function fetchCommentDetails(commentId, pageAccessToken) {
   }
 }
 
-/** The first line of the post a comment sits under, so the thread says what was commented on. */
+/** The post a comment sits under — text, link and picture — so the thread shows what was commented on. */
 export async function fetchPostSummary(postId, pageAccessToken) {
   try {
-    const post = await metaRequest(postId, { query: { fields: 'message,permalink_url', access_token: pageAccessToken } });
-    return { message: String(post.message || '').split('\n')[0].slice(0, 120), permalink: post.permalink_url || '' };
+    const post = await metaRequest(postId, { query: { fields: 'message,permalink_url,full_picture', access_token: pageAccessToken } });
+    return { message: String(post.message || '').trim().slice(0, 600), permalink: post.permalink_url || '', picture: post.full_picture || '' };
   } catch (error) {
-    return { message: '', permalink: '', error: error.message };
+    return { message: '', permalink: '', picture: '', error: error.message };
   }
 }
 

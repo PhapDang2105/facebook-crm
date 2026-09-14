@@ -65,6 +65,7 @@ export function publicChannel(channel) {
     platform: 'facebook',
     status: channel.status || 'connected',
     subscribed: Boolean(channel.subscribed),
+    subscribedFields: Array.isArray(channel.subscribedFields) ? channel.subscribedFields : [],
     subscriptionError: channel.subscriptionError || '',
     connectedAt: channel.connectedAt,
     checkedAt: channel.checkedAt || channel.connectedAt,

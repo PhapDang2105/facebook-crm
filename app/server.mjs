@@ -695,8 +695,12 @@ const server = http.createServer(async (request, response) => {
         channel.status = 'connected';
         let subscription = await fetchPageSubscription(pageId, pageAccessToken);
         // Retry the subscription here so a failed connect can be repaired from
-        // the UI instead of forcing the Page to be disconnected and re-added.
-        if (!subscription.subscribed) {
+        // the UI instead of forcing the Page to be disconnected and re-added —
+        // also when a field this build needs (feed, messaging_referrals…) is
+        // missing because the Page was subscribed by an older build.
+        const requiredFields = metaConfig.subscribedFields.split(',').map(field => field.trim()).filter(Boolean);
+        const missingFields = requiredFields.filter(field => !subscription.fields.includes(field));
+        if (!subscription.subscribed || missingFields.length) {
           try {
             await subscribePageToApp(pageId, pageAccessToken);
             subscription = await fetchPageSubscription(pageId, pageAccessToken);
@@ -708,6 +712,7 @@ const server = http.createServer(async (request, response) => {
           channel.subscriptionError = '';
         }
         channel.subscribed = subscription.subscribed;
+        channel.subscribedFields = subscription.fields;
       } catch (error) {
         channel.status = 'needs_attention';
         channel.subscriptionError = error.message;

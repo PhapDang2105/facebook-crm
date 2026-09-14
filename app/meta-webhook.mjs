@@ -327,8 +327,17 @@ async function resolveMissingProfiles(changes) {
   }).filter(Boolean));
 }
 
+/** One line per delivery so `journalctl` shows what Meta actually sent. */
+function describeWebhookPayload(payload, events) {
+  const fields = (payload?.entry || []).flatMap(entry => (entry.changes || []).map(change => `${change.field}:${change.value?.item || '?'}/${change.value?.verb || '?'}`));
+  const messaging = (payload?.entry || []).reduce((count, entry) => count + (entry.messaging || []).length, 0);
+  return `Webhook Meta: ${events.length} sự kiện xử lý (${events.map(event => event.type).join(', ') || 'không'})` +
+    (messaging ? `, messaging=${messaging}` : '') + (fields.length ? `, changes=${fields.join(' ')}` : '');
+}
+
 export async function processWebhookPayload(payload) {
   const events = collectWebhookEvents(payload);
+  console.log(describeWebhookPayload(payload, events));
   if (!events.length) return [];
   const changes = await updateMessagingStore(store => applyWebhookEvents(store, events));
   const profileChanges = [...await resolveMissingProfiles(changes), ...await resolveCommentContext(changes)];

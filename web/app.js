@@ -312,6 +312,7 @@ const labelSettingsPreview = document.querySelector('#label-settings-preview');
 const labelAdd = document.querySelector('#label-add');
 const labelReset = document.querySelector('#label-reset');
 let defaultInboxLabels = [];
+let labelIconChoices = [];
 const labelSave = document.querySelector('#label-save');
 const messageDefaultsForm = document.querySelector('#message-defaults-form');
 const quickReplyDialog = document.querySelector('#quick-reply-dialog');
@@ -5960,19 +5961,32 @@ function labelRgb(hex) {
   return [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16));
 }
 
-function labelTint(hex, alpha = 0.13) {
-  return `rgba(${labelRgb(hex).join(', ')}, ${alpha})`;
-}
-
-function labelInk(hex) {
-  const [red, green, blue] = labelRgb(hex).map(channel => Math.round(channel * 0.72));
+/** Mixes a colour towards white (ratio > 0) or black (ratio < 0). */
+function mixLabelColor(hex, ratio) {
+  const target = ratio >= 0 ? 255 : 0;
+  const amount = Math.abs(ratio);
+  const [red, green, blue] = labelRgb(hex).map(channel => Math.round(channel + (target - channel) * amount));
   return `rgb(${red}, ${green}, ${blue})`;
 }
 
+// Pastel chips: the label colour is the fill, a lighter mix is the resting
+// state and a darker mix draws the border and the check mark.
 function applyLabelColors(element, color) {
   element.style.setProperty('--label-color', color);
-  element.style.setProperty('--label-tint', labelTint(color));
-  element.style.setProperty('--label-ink', labelInk(color));
+  element.style.setProperty('--label-tint', mixLabelColor(color, 0.55));
+  element.style.setProperty('--label-line', mixLabelColor(color, -0.22));
+  element.style.setProperty('--label-ink', mixLabelColor(color, -0.62));
+}
+
+function labelIconElement(label) {
+  const icon = document.createElement(label?.icon ? 'img' : 'i');
+  icon.className = 'label-icon';
+  if (label?.icon) {
+    icon.src = `/assets/icons/labels/${label.icon}.svg`;
+    icon.alt = '';
+    icon.loading = 'lazy';
+  }
+  return icon;
 }
 
 function labelById(id) {
@@ -6006,7 +6020,7 @@ function renderConversationLabelBadges(conversation) {
     const badge = document.createElement('span');
     badge.className = 'conversation-label';
     applyLabelColors(badge, label.color);
-    badge.textContent = label.name;
+    badge.append(labelIconElement(label), document.createTextNode(label.name));
     return badge;
   }));
 }
@@ -6024,7 +6038,7 @@ function renderConversationLabelBar(conversation = getActiveConversation()) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.labelId = label.id;
-    button.textContent = label.name;
+    button.append(labelIconElement(label), document.createTextNode(label.name));
     button.title = active.has(label.id) ? `Bỏ thẻ ${label.name}` : `Gắn thẻ ${label.name}`;
     applyLabelColors(button, label.color);
     button.classList.toggle('active', active.has(label.id));
@@ -6040,10 +6054,10 @@ function renderMessageLabelMenu() {
     button.type = 'button';
     button.dataset.messageLabel = label.id;
     button.classList.toggle('active', currentMessageLabel === label.id);
-    const dot = document.createElement('i');
-    dot.className = 'message-label-dot';
-    dot.style.background = label.color;
-    button.append(dot, document.createTextNode(label.name));
+    const icon = labelIconElement(label);
+    icon.classList.add('message-label-icon');
+    if (!label.icon) icon.style.background = label.color;
+    button.append(icon, document.createTextNode(label.name));
     return button;
   }));
 }
@@ -6060,6 +6074,7 @@ function fillCustomersLabelOptions() {
 function applyInboxSettings(settings) {
   inboxLabels = Array.isArray(settings?.labels) ? settings.labels : [];
   if (Array.isArray(settings?.defaultLabels)) defaultInboxLabels = settings.defaultLabels;
+  if (Array.isArray(settings?.icons)) labelIconChoices = settings.icons;
   quickReplies = Array.isArray(settings?.quickReplies) ? settings.quickReplies : [];
   renderMessageLabelMenu();
   fillCustomersLabelOptions();
@@ -6363,6 +6378,13 @@ function renderLabelSettings() {
     const row = document.createElement('div');
     row.className = 'label-settings-row';
     row.dataset.labelIndex = String(index);
+    const iconButton = document.createElement('button');
+    iconButton.type = 'button';
+    iconButton.className = 'label-icon-button';
+    iconButton.dataset.labelIconPick = String(index);
+    iconButton.title = 'Chọn icon';
+    iconButton.setAttribute('aria-label', 'Chọn icon cho thẻ');
+    iconButton.appendChild(labelIconElement(label));
     const color = document.createElement('input');
     color.type = 'color';
     color.value = label.color;
@@ -6379,10 +6401,50 @@ function renderLabelSettings() {
     remove.dataset.labelRemove = String(index);
     remove.setAttribute('aria-label', `Xóa thẻ ${label.name}`);
     remove.textContent = '×';
-    row.append(color, name, remove);
+    row.append(iconButton, color, name, remove);
     return row;
   }));
   renderLabelSettingsPreview();
+}
+
+function closeLabelIconMenu() {
+  document.querySelector('.label-icon-menu')?.remove();
+}
+
+/** A grid of the shipped Fluent Emoji icons, opened under the icon button of one label row. */
+function openLabelIconMenu(index) {
+  closeLabelIconMenu();
+  const row = labelSettingsList?.querySelector(`[data-label-index="${index}"]`);
+  const label = labelDraft[index];
+  if (!row || !label) return;
+  const menu = document.createElement('div');
+  menu.className = 'label-icon-menu';
+  menu.setAttribute('role', 'listbox');
+  const none = document.createElement('button');
+  none.type = 'button';
+  none.dataset.labelIcon = '';
+  none.className = 'label-icon-option label-icon-option--none';
+  none.textContent = 'Không icon';
+  none.classList.toggle('active', !label.icon);
+  menu.appendChild(none);
+  for (const icon of labelIconChoices) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'label-icon-option';
+    option.dataset.labelIcon = icon;
+    option.title = icon;
+    option.classList.toggle('active', label.icon === icon);
+    option.appendChild(labelIconElement({ icon }));
+    menu.appendChild(option);
+  }
+  menu.addEventListener('click', event => {
+    const option = event.target.closest('[data-label-icon]');
+    if (!option) return;
+    label.icon = option.dataset.labelIcon;
+    closeLabelIconMenu();
+    renderLabelSettings();
+  });
+  row.appendChild(menu);
 }
 
 function renderLabelSettingsPreview() {
@@ -6392,7 +6454,7 @@ function renderLabelSettingsPreview() {
     chip.className = 'label-settings-chip';
     chip.classList.toggle('active', index % 3 === 1);
     applyLabelColors(chip, label.color);
-    chip.textContent = label.name;
+    chip.append(labelIconElement(label), document.createTextNode(label.name));
     return chip;
   }));
 }
@@ -6562,10 +6624,21 @@ labelSettingsList?.addEventListener('input', event => {
   renderLabelSettingsPreview();
 });
 labelSettingsList?.addEventListener('click', event => {
+  const pick = event.target.closest('[data-label-icon-pick]');
+  if (pick) {
+    event.stopPropagation();
+    if (document.querySelector('.label-icon-menu')) closeLabelIconMenu();
+    else openLabelIconMenu(Number(pick.dataset.labelIconPick));
+    return;
+  }
+  if (event.target.closest('.label-icon-menu')) return;
   const remove = event.target.closest('[data-label-remove]');
   if (!remove) return;
   labelDraft.splice(Number(remove.dataset.labelRemove), 1);
   renderLabelSettings();
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.label-icon-menu') && !event.target.closest('[data-label-icon-pick]')) closeLabelIconMenu();
 });
 labelSave?.addEventListener('click', saveLabelSettings);
 messageDefaultsForm?.addEventListener('submit', saveMessageDefaults);

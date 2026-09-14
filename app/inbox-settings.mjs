@@ -2,7 +2,7 @@
 // replies they pick from the composer. Both are plain lists staff edit on
 // screen — nothing here is hard-coded into the inbox, so renaming a label or
 // changing a reply never needs a deploy.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 
@@ -13,15 +13,15 @@ const inboxSettingsPath = process.env.INBOX_SETTINGS_PATH
 // and `customer` match the labels older conversations carry; `consulting`
 // is what the bot sets when it hands a thread to a person.
 export const defaultConversationLabels = Object.freeze([
-  { id: 'consulting', name: 'Cần người xử lý', color: '#7c3aed' },
-  { id: 'warranty', name: 'Bảo hành', color: '#f59e0b' },
-  { id: 'complaint', name: 'Khiếu nại', color: '#ef4444' },
-  { id: 'customer', name: 'Đã mua hàng', color: '#16a34a' },
-  { id: 'livestream', name: 'Livestream', color: '#db2777' },
-  { id: 'new', name: 'Mới', color: '#0ea5e9' },
-  { id: 'wholesale', name: 'Khách sỉ', color: '#4f46e5' },
-  { id: 'bad', name: 'Khách xấu', color: '#475569' },
-  { id: 'jt', name: 'Giao J&T', color: '#b45309' }
+  { id: 'consulting', name: 'Cần người xử lý', color: '#d6c8f5', icon: 'person-raising-hand' },
+  { id: 'warranty', name: 'Bảo hành', color: '#fbcfc3', icon: 'hammer-and-wrench' },
+  { id: 'complaint', name: 'Khiếu nại', color: '#f9c1c1', icon: 'warning' },
+  { id: 'customer', name: 'Đã mua hàng', color: '#c5e8cb', icon: 'shopping-bags' },
+  { id: 'livestream', name: 'Livestream', color: '#f9c9e4', icon: 'video-camera' },
+  { id: 'new', name: 'Mới', color: '#c6dff8', icon: 'sparkles' },
+  { id: 'wholesale', name: 'Khách sỉ', color: '#f6e3a8', icon: 'package' },
+  { id: 'bad', name: 'Khách xấu', color: '#d9dde4', icon: 'prohibited' },
+  { id: 'jt', name: 'Giao J&T', color: '#e8d2ba', icon: 'delivery-truck' }
 ]);
 
 export const defaultInboxSettings = Object.freeze({
@@ -59,7 +59,8 @@ export function normalizeConversationLabels(value) {
     let id = labelSlug(item?.id) || labelSlug(name) || `the-${labels.length + 1}`;
     while (seen.has(id)) id = `${id}-2`;
     seen.add(id);
-    labels.push({ id, name, color: cleanColor(item?.color, '#c9ced6') });
+    const icon = String(item?.icon || '').trim().toLowerCase();
+    labels.push({ id, name, color: cleanColor(item?.color, '#d9dde4'), icon: /^[a-z0-9-]{1,40}$/.test(icon) ? icon : '' });
     if (labels.length >= maximumLabels) break;
   }
   return labels;
@@ -128,6 +129,17 @@ export async function writeInboxSettings(value, storeImage) {
   await rename(temporaryPath, inboxSettingsPath);
   cached = settings;
   return settings;
+}
+
+const labelIconsPath = path.join(projectRoot, 'web', 'assets', 'icons', 'labels');
+
+/** Icons staff can put on a label: the Fluent Emoji files shipped under web/assets/icons/labels. */
+export async function listLabelIcons() {
+  try {
+    return (await readdir(labelIconsPath)).filter(name => name.endsWith('.svg')).map(name => name.slice(0, -4)).sort();
+  } catch {
+    return [];
+  }
 }
 
 /** Name and colour for a label id, so the customer list can show what staff chose. */

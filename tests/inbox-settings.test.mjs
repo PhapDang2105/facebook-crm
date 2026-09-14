@@ -28,7 +28,8 @@ test('tên thẻ tiếng Việt thành id ổn định, trùng tên thì tự th
   ]);
   assert.deepEqual(labels.map(label => label.id), ['khach-si', 'khach-si-2', 'customer']);
   assert.equal(labels[0].color, '#cf9de0');
-  assert.equal(labels[1].color, '#c9ced6');
+  assert.equal(labels[1].color, '#d9dde4');
+  assert.equal(labels[0].icon, '');
 });
 
 test('mẫu trả lời nhanh: ký tự tắt không dấu cách, ảnh tải lên được lưu qua storeImage', async () => {

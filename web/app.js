@@ -290,6 +290,8 @@ const remoteMessages = new Map();
 const syncedChannelIds = new Set();
 let customerDraftProducts = [];
 let customerPanelStore = { notes: {}, orders: {}, bots: {} };
+// Gender per conversation, from the server: {gender, source}. Not persisted locally.
+const customerGenders = new Map();
 let customerPanelRequestId = 0;
 
 try {
@@ -945,6 +947,7 @@ function updateConversationElement(element, conversation) {
   element.dataset.source = conversation.source || 'inbox';
   element.dataset.adTitle = conversation.ad ? (conversation.ad.title || 'Quảng cáo') : '';
   element.dataset.gender = conversation.gender || '';
+  element.dataset.genderSource = conversation.genderSource || '';
   element.dataset.postTitle = conversation.post?.message || '';
   element.dataset.postUrl = conversation.post?.permalink || '';
   element.dataset.avatar = conversation.picture || '';
@@ -2537,9 +2540,11 @@ async function loadCustomerPanelFromServer(conversation = getActiveConversation(
     customerPanelStore.notes[key] = Array.isArray(panel.notes) ? panel.notes : [];
     customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
     customerPanelStore.bots[key] = panel.botEnabled === true;
+    customerGenders.set(conversationId, { gender: panel.gender || '', source: panel.genderSource || '' });
     customerBotErrors[key] = { message: String(panel.botLastError || ''), at: Number(panel.botLastErrorAt) || 0 };
     saveCustomerPanelStore();
     renderChatbotToggle(conversation);
+    renderCustomerGender(conversation);
     renderChatbotError(conversation);
     renderCustomerNotes(conversation);
     renderCustomerOrders(conversation);
@@ -2977,22 +2982,38 @@ function setCustomerPanelTab(name) {
   if (name === 'create') resetCustomerOrderForm();
 }
 
-/** What Facebook told us about the customer: gender and the ad they came from. */
+/** Which ad the customer came from, when Messenger reported one. */
 function renderCustomerSourceLine(conversation) {
   const line = document.querySelector('#customer-source-line');
   if (!line) return;
-  const gender = conversation?.dataset.gender || '';
   const adTitle = conversation?.dataset.adTitle || '';
-  const parts = [
-    gender === 'male' ? 'Giới tính: Nam' : gender === 'female' ? 'Giới tính: Nữ' : '',
-    adTitle ? `Từ quảng cáo: ${adTitle}` : ''
-  ].filter(Boolean);
-  line.classList.toggle('hidden', !parts.length);
-  line.textContent = parts.join(' · ');
+  line.classList.toggle('hidden', !adTitle);
+  line.textContent = adTitle ? `Từ quảng cáo: ${adTitle}` : '';
+}
+
+/**
+ * anh/chị for this customer. Staff's click is the trusted source; a guess
+ * from the name or from how the customer refers to themselves is shown with
+ * its origin so staff know it is a guess.
+ */
+function renderCustomerGender(conversation) {
+  const group = document.querySelector('#customer-gender');
+  if (!group) return;
+  const conversationId = conversation?.dataset.conversationId || '';
+  group.classList.toggle('hidden', !conversationId);
+  const state = customerGenders.get(conversationId) || { gender: conversation?.dataset.gender || '', source: conversation?.dataset.genderSource || '' };
+  group.querySelectorAll('[data-customer-gender]').forEach(button => {
+    const active = button.dataset.customerGender === state.gender;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  const source = group.querySelector('#customer-gender-source');
+  if (source) source.textContent = state.gender && state.source === 'name' ? 'đoán theo tên' : state.gender && state.source === 'message' ? 'theo cách khách xưng' : '';
 }
 
 function renderCustomerPanel(conversation = getActiveConversation()) {
   renderCustomerSourceLine(conversation);
+  renderCustomerGender(conversation);
   renderChatbotToggle(conversation);
   renderChatbotError(conversation);
   renderCustomerNotes(conversation);
@@ -5339,6 +5360,27 @@ customerOrderForm?.addEventListener('submit', async event => {
   } finally {
     customerOrderSubmit.textContent = originalLabel;
     updateCustomerOrderTotals();
+  }
+});
+
+document.querySelector('#customer-gender')?.addEventListener('click', async event => {
+  const button = event.target.closest('[data-customer-gender]');
+  const conversation = getActiveConversation();
+  const conversationId = conversation?.dataset.conversationId;
+  if (!button || !conversationId) return;
+  // Clicking the active choice clears it, so a wrong guess can be undone.
+  const current = customerGenders.get(conversationId)?.gender || '';
+  const gender = current === button.dataset.customerGender ? '' : button.dataset.customerGender;
+  try {
+    const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversationId)}/customer-panel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'gender', gender })
+    }));
+    customerGenders.set(conversationId, { gender: panel.gender || '', source: panel.genderSource || '' });
+    renderCustomerGender(conversation);
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được cách xưng hô.');
   }
 });
 

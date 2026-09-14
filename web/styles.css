@@ -1744,6 +1744,11 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .message-reply-close { position: absolute; top: 8px; right: 13.5px; display: grid; place-items: center; width: 29.25px; height: 29.25px; padding: 0; color: #65676b; background: transparent; border: 0; border-radius: 50%; font-size: 22.5px; line-height: 1; cursor: pointer; }
 .message-reply-close:hover { color: #1c1e21; background: #e4e6eb; }
 .composer { display: flex; align-items: center; gap: 5.625px; padding: 10.125px 13.5px; }
+.customer-gender { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.customer-gender-label { color: #65676b; font-size: 12.5px; margin-right: 2px; }
+.customer-gender button { padding: 3px 12px; border: 1px solid #dfe2e6; border-radius: 999px; background: #fff; color: #4b4f56; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.customer-gender button.active { border-color: #0a66c2; background: #e7f0fb; color: #0a66c2; }
+.customer-gender-source { color: #8a8d91; font-size: 11.5px; margin-left: 2px; }
 .customer-source-line { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: #fff1e6; color: #9a3412; font-size: 12.5px; font-weight: 600; }
 .composer-reply-mode { display: flex; gap: 6px; padding: 8px 13.5px 0; }
 .composer-reply-mode button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid #dfe2e6; border-radius: 999px; background: #fff; color: #4b4f56; font-size: 12.5px; font-weight: 600; cursor: pointer; }

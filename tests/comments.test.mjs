@@ -100,3 +100,22 @@ test('{title} xưng anh/chị theo giới tính Messenger, trung tính khi khôn
   assert.equal(renderChatbotReply({ template_id: 'WELCOME' }, templates, { customer: { gender: 'male' } }).messages[0], 'Anh ơi, anh cần gì ạ?');
   assert.equal(renderChatbotReply({ template_id: 'WELCOME' }, templates, {}).messages[0], 'Anh/chị ơi, anh/chị cần gì ạ?');
 });
+
+test('giới tính đoán từ tên và cách khách tự xưng; nhân viên đặt tay thắng mọi phỏng đoán', async () => {
+  const { genderFromName, genderFromMessage } = await import('../app/processing/customer-info.mjs');
+  const { applyGenderGuess } = await import('../app/messaging-store.mjs');
+  assert.equal(genderFromName('Nguyễn Thị Lan Anh'), 'female');
+  assert.equal(genderFromName('Trần Văn Hoàng'), 'male');
+  assert.equal(genderFromName('Lan Anh'), '', 'no middle name, no guess');
+  assert.equal(genderFromName('Thị'), '');
+  assert.equal(genderFromMessage('chị muốn đặt 2 túi xanh'), 'female');
+  assert.equal(genderFromMessage('Anh cần giao về Q12'), 'male');
+  assert.equal(genderFromMessage('chị ơi cho em hỏi giá'), '', 'addressing the shop is not a self-reference');
+  const conversation = { name: 'Trần Văn Hoàng' };
+  assert.equal(applyGenderGuess(conversation, genderFromName(conversation.name), 'name'), true);
+  assert.equal(applyGenderGuess(conversation, 'female', 'message'), true, 'self-reference beats the name');
+  assert.equal(applyGenderGuess(conversation, 'male', 'name'), false, 'a weaker source never overwrites');
+  conversation.gender = 'male'; conversation.genderSource = 'staff';
+  assert.equal(applyGenderGuess(conversation, 'female', 'message'), false, 'staff choice is final');
+  assert.equal(conversation.gender, 'male');
+});

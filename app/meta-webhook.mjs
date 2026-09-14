@@ -2,7 +2,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getPageAccessToken } from './channel-store.mjs';
 import { fetchCommentDetails, fetchCustomerProfile, fetchPostSummary } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
+import { genderFromMessage, genderFromName } from './processing/customer-info.mjs';
 import {
+  applyGenderGuess,
   commentConversationId,
   ensureConversation,
   conversationId,
@@ -220,6 +222,7 @@ function applyCommentEvent(store, event) {
   });
   conversation.lastCommentId = event.commentId;
   store.commentIndex[event.commentId] = conversation.id;
+  if (inserted) applyGenderGuess(conversation, genderFromMessage(event.text), 'message');
   return inserted ? { type: 'message', conversation, message: saved } : null;
 }
 
@@ -242,6 +245,7 @@ export function applyWebhookEvents(store, events) {
       // Kept on the conversation, not the message: the ad is context for the
       // whole thread and only ever arrives on the first event.
       if (event.referral && !conversation.referral) conversation.referral = event.referral;
+      if (inserted && message.direction === 'incoming') applyGenderGuess(conversation, genderFromMessage(message.text), 'message');
       if (inserted) changes.push({ type: 'message', conversation, message });
       continue;
     }
@@ -287,6 +291,7 @@ async function resolveCommentContext(changes) {
     conversation.profileResolvedAt = Date.now();
     if (comment.name) conversation.name = comment.name;
     if (comment.picture) conversation.picture = comment.picture;
+    applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
     if (post && (post.message || post.permalink)) conversation.post = { ...conversation.post, message: post.message, permalink: post.permalink };
     return { type: 'conversation', conversation };
   }).filter(Boolean));
@@ -306,7 +311,7 @@ async function resolveMissingProfiles(changes) {
       profiles.push({ ...item, ...profile });
     } catch (error) {
       // Without a valid Page token the conversation keeps its placeholder name.
-      profiles.push({ ...item, name: '', picture: '', gender: '', error: error.message });
+      profiles.push({ ...item, name: '', picture: '', error: error.message });
     }
   }
   // Mark every attempt, including the failures. Standard access refuses these
@@ -317,7 +322,7 @@ async function resolveMissingProfiles(changes) {
     conversation.profileResolvedAt = Date.now();
     if (profile.name) conversation.name = profile.name;
     if (profile.picture) conversation.picture = profile.picture;
-    if (profile.gender) conversation.gender = profile.gender;
+    applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
     return profile.name || profile.picture ? { type: 'conversation', conversation } : null;
   }).filter(Boolean));
 }

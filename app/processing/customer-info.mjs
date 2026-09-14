@@ -31,3 +31,30 @@ export function extractVietnamesePhone(text) {
   }
   return '';
 }
+
+/**
+ * Gender for anh/chị addressing, without any Facebook permission: Meta's
+ * Facebook Login for Business does not offer pages_user_gender. Sources, in
+ * order of trust: what staff set by hand, how the customer refers to
+ * themselves at the start of a message, and the middle name — "Thị" is female
+ * and "Văn" is male in practice; every other name stays neutral.
+ */
+export function genderFromName(name) {
+  const words = String(name || '').trim().split(/\s+/);
+  if (words.length < 2) return '';
+  const middle = words.slice(1, -1).map(word => word.toLowerCase());
+  if (middle.includes('thị')) return 'female';
+  if (middle.includes('văn')) return 'male';
+  return '';
+}
+
+// Only a self-reference that opens the message counts ("chị muốn đặt…");
+// "chị ơi cho em hỏi" addresses the shop, not the customer.
+const selfReference = /^\s*(anh|chị|cô|chú|bác)\s+(muốn|cần|đặt|lấy|mua|hỏi|đang|có|gửi|ở|chốt|xin)\b/i;
+
+export function genderFromMessage(text) {
+  const match = String(text || '').match(selfReference);
+  if (!match) return '';
+  const word = match[1].toLowerCase();
+  return word === 'anh' || word === 'chú' ? 'male' : 'female';
+}

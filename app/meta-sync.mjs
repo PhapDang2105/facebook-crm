@@ -12,6 +12,7 @@ import {
 } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import {
+  applyGenderGuess,
   conversationId,
   ensureConversation,
   publicConversation,
@@ -19,6 +20,7 @@ import {
   saveMessage,
   updateMessagingStore
 } from './messaging-store.mjs';
+import { genderFromName } from './processing/customer-info.mjs';
 
 const maximumProfileLookupsPerSync = 25;
 
@@ -75,7 +77,7 @@ export async function syncPageConversations(pageId, { limit = 25 } = {}) {
         if (!profile) continue;
         conversation.picture = profile.picture;
         if (profile.name) conversation.name = profile.name;
-        if (profile.gender) conversation.gender = profile.gender;
+        applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
       }
     });
   }

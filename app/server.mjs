@@ -175,6 +175,8 @@ function publicCustomerPanel(conversation) {
     notes: Array.isArray(conversation?.customerNotes) ? conversation.customerNotes : [],
     orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [],
     botEnabled: conversation?.botEnabled === true,
+    gender: conversation?.gender || '',
+    genderSource: conversation?.genderSource || '',
     // Surfaced so a chatbot order that failed to save is visible to staff instead
     // of sitting silently in the store while the customer believes it went through.
     botLastError: String(conversation?.botLastError || ''),
@@ -569,9 +571,9 @@ const server = http.createServer(async (request, response) => {
       authorizationUrl.searchParams.set('redirect_uri', metaConfig.redirectUri);
       authorizationUrl.searchParams.set('state', state);
       authorizationUrl.searchParams.set('response_type', 'code');
-      // pages_read_user_content: read comments; pages_manage_engagement: reply to them and send private replies;
-      // pages_user_gender: the customer's gender, so replies say anh or chị instead of anh/chị.
-      authorizationUrl.searchParams.set('scope', 'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_read_user_content,pages_manage_engagement,pages_user_gender');
+      // pages_read_user_content: read comments; pages_manage_engagement: reply to them and send private replies.
+      // Gender is not requested: Facebook Login for Business has no pages_user_gender (Invalid Scope).
+      authorizationUrl.searchParams.set('scope', 'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_read_user_content,pages_manage_engagement');
       return sendJson(response, 200, { authorizationUrl: authorizationUrl.toString() });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels/meta/callback') {
@@ -918,6 +920,11 @@ const server = http.createServer(async (request, response) => {
             item.customerNotes = item.customerNotes.slice(0, 100);
           } else if (payload.type === 'bot') {
             item.botEnabled = payload.enabled === true;
+          } else if (payload.type === 'gender') {
+            // Staff's choice beats every guess; clearing it lets guesses back in.
+            const gender = ['male', 'female'].includes(payload.gender) ? payload.gender : '';
+            item.gender = gender;
+            item.genderSource = gender ? 'staff' : '';
           } else {
             throw new Error('Loại cập nhật thông tin khách hàng không hợp lệ.');
           }

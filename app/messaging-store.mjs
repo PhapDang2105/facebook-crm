@@ -215,7 +215,7 @@ export function publicConversation(conversation) {
     name: conversation.name,
     picture: conversation.picture || '',
     source: conversation.source || 'inbox',
-    ...(conversation.gender ? { gender: conversation.gender } : {}),
+    ...(conversation.gender ? { gender: conversation.gender, genderSource: conversation.genderSource || '' } : {}),
     // Comment threads: which post, and the latest customer comment to reply under.
     ...(conversation.post ? { post: conversation.post } : {}),
     ...(conversation.lastCommentId ? { lastCommentId: conversation.lastCommentId } : {}),
@@ -249,6 +249,18 @@ export async function listMessages(id, limit = 100) {
   const store = await readMessagingStore();
   const messages = store.messages[id];
   return Array.isArray(messages) ? messages.slice(-limit) : [];
+}
+
+// Trust order of gender sources; a guess never overwrites a stronger one.
+const genderRank = { staff: 3, message: 2, name: 1 };
+
+/** Records a guessed gender unless a more trusted source already set one. */
+export function applyGenderGuess(conversation, gender, source) {
+  if (!conversation || !gender) return false;
+  if ((genderRank[conversation.genderSource] || 0) >= (genderRank[source] || 0) && conversation.gender) return false;
+  conversation.gender = gender;
+  conversation.genderSource = source;
+  return true;
 }
 
 export function setConversationFlags(store, id, changes) {

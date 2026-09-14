@@ -133,7 +133,8 @@ function formatTime(value) {
 }
 
 /** CSV for Excel: UTF-8 with BOM, semicolon-free, quotes escaped. */
-export function customersToCsv(customers) {
+export function customersToCsv(customers, labels = []) {
+  const labelNamesById = new Map(labels.map(label => [label.id, label.name]));
   const headers = ['Tên', 'ID Facebook', 'Giới tính', 'Kênh', 'Nguồn', 'Liên hệ lần đầu', 'Khách nhắn cuối', 'Tương tác cuối', 'Số điện thoại', 'Địa chỉ', 'Số đơn', 'Tổng tiền', 'Thẻ', 'Quảng cáo'];
   const rows = customers.map(customer => [
     customer.name,
@@ -148,7 +149,7 @@ export function customersToCsv(customers) {
     customer.address,
     customer.orderCount,
     customer.orderTotal,
-    customer.labels.map(label => labelNames[label] || label).join(', '),
+    customer.labels.map(label => labelNamesById.get(label) || labelNames[label] || label).join(', '),
     customer.adTitle
   ]);
   const escape = value => {

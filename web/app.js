@@ -294,6 +294,41 @@ let customerPanelStore = { notes: {}, orders: {}, bots: {} };
 // Gender per conversation, from the server: {gender, source}. Not persisted locally.
 const customerGenders = new Map();
 let customerPanelRequestId = 0;
+// Cài đặt → Tin nhắn: thẻ hội thoại và mẫu trả lời nhanh (state and elements).
+const conversationLabelBar = document.querySelector('#conversation-label-bar');
+const messageLabelMenuLabels = document.querySelector('#message-label-menu-labels');
+const quickReplyButton = document.querySelector('#quick-reply-button');
+const quickReplyPicker = document.querySelector('#quick-reply-picker');
+const quickReplySearch = document.querySelector('#quick-reply-search');
+const quickReplyList = document.querySelector('#quick-reply-list');
+const quickReplyManage = document.querySelector('#quick-reply-manage');
+const messageSettingsTabs = [...document.querySelectorAll('[data-message-settings-tab]')];
+const messageSettingsPanels = new Map([...document.querySelectorAll('[data-message-settings-panel]')].map(panel => [panel.dataset.messageSettingsPanel, panel]));
+const quickReplySettingsTable = document.querySelector('#quick-reply-settings-table');
+const quickReplySettingsSearch = document.querySelector('#quick-reply-settings-search');
+const quickReplyAdd = document.querySelector('#quick-reply-add');
+const labelSettingsList = document.querySelector('#label-settings-list');
+const labelSettingsPreview = document.querySelector('#label-settings-preview');
+const labelAdd = document.querySelector('#label-add');
+const labelSave = document.querySelector('#label-save');
+const messageDefaultsForm = document.querySelector('#message-defaults-form');
+const quickReplyDialog = document.querySelector('#quick-reply-dialog');
+const quickReplyForm = document.querySelector('#quick-reply-form');
+const quickReplyDialogTitle = document.querySelector('#quick-reply-dialog-title');
+const quickReplyShortcut = document.querySelector('#quick-reply-shortcut');
+const quickReplyText = document.querySelector('#quick-reply-text');
+const quickReplyImageList = document.querySelector('#quick-reply-image-list');
+const quickReplyImageInput = document.querySelector('#quick-reply-image-input');
+const quickReplyFormStatus = document.querySelector('#quick-reply-form-status');
+const messageDefaultIds = ['WELCOME', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PRIVATE_REPLY', 'CSKH_HANDOFF'];
+let inboxLabels = [];
+let quickReplies = [];
+let labelDraft = [];
+let quickReplyDraft = null;
+let quickReplyPickerMatches = [];
+let quickReplyPickerIndex = 0;
+let quickReplyPickerFromSlash = false;
+let messageDefaultTemplates = {};
 
 try {
   const savedCustomerPanel = JSON.parse(localStorage.getItem('crm-customer-panel-v1') || 'null');
@@ -430,7 +465,7 @@ function renderCustomers(items, total) {
       : `<span class="avatar">${escapeHtml(initial)}</span>`;
     const sources = customer.sources.map(source => `<span class="customer-source"><img src="${customerSourceIcons[source] || customerSourceIcons.inbox}" alt="">${customerSourceNames[source] || source}</span>`).join('');
     const tags = [
-      ...customer.labels.map(label => `<span class="customer-tag">${escapeHtml(customerLabelNames[label] || label)}</span>`),
+      ...customer.labels.map(label => `<span class="customer-tag">${escapeHtml(labelName(label))}</span>`),
       customer.adTitle ? `<span class="customer-tag customer-tag--ad" title="${escapeHtml(customer.adTitle)}">QC</span>` : '',
       customer.botEnabled ? '<span class="customer-tag customer-tag--bot">Bot</span>' : ''
     ].join('');
@@ -498,7 +533,7 @@ function openCustomerDialog(customer) {
     ['Địa chỉ', customer.address],
     ['Đơn hàng', customer.orderCount ? `${customer.orderCount} đơn · ${formatOrderMoney(customer.orderTotal)}` : '0'],
     ['Ghi chú', String(customer.noteCount || 0)],
-    ['Thẻ', customer.labels.map(label => customerLabelNames[label] || label).join(', ')],
+    ['Thẻ', customer.labels.map(labelName).join(', ')],
     ['Bot', customer.botEnabled ? 'Đang bật' : 'Tắt'],
     ['Hội thoại', customer.conversations.map(item => item.source === 'comment' ? 'Bình luận' : 'Messenger').join(', ')]
   ];
@@ -1081,6 +1116,7 @@ function showEmptyChannelConversation() {
   chatHeadMeta?.classList.add('hidden');
   if (chatBody) chatBody.innerHTML = `<div class="chat-empty-state">Chưa có tin nhắn trong ${escapeHtml(channelName)}.</div>`;
   renderCustomerPanel(null);
+  renderConversationLabelBar(null);
   if (messageComposerInput) { messageComposerInput.value = ''; messageComposerInput.disabled = true; }
   if (messageSendButton) messageSendButton.disabled = true;
 }
@@ -1142,6 +1178,7 @@ function updateConversationElement(element, conversation) {
   renderConversationSourceBadge(element);
   renderConversationAdTag(element);
   renderConversationMuteIcon(element);
+  renderConversationLabelBadges(element);
   return element;
 }
 
@@ -1353,6 +1390,7 @@ async function loadMessageChannels() {
     getConversationItems().forEach((conversation, index) => {
       if (!conversation.dataset.channelId) conversation.dataset.channelId = currentMessageChannelId;
       if (!conversation.dataset.labels) conversation.dataset.labels = labelCycle[index % labelCycle.length];
+      renderConversationLabelBadges(conversation);
     });
   }
   activateCurrentMessageChannel();
@@ -2696,6 +2734,7 @@ function showSettingsSection(name = 'channels') {
   });
   if (section === 'gifts') loadGifts();
   if (section === 'customers') loadCustomers();
+  if (section === 'messages') loadMessageSettings();
 }
 
 function renderChatbotToggle(conversation = getActiveConversation()) {
@@ -3235,6 +3274,7 @@ function renderConversationHeader(conversation) {
   if (chatHeadChannelLogo) chatHeadChannelLogo.src = channel?.platform === 'zalo' ? '/assets/icons/zalo.png' : '/assets/icons/facebook.png';
   if (messageComposerInput) messageComposerInput.disabled = false;
   renderCommentThreadState(conversation);
+  renderConversationLabelBar(conversation);
   renderCustomerPanel(conversation);
   updateChatHeadViewState();
   return { name, initial };
@@ -3970,6 +4010,7 @@ function renderSavedChatMessages() {
 }
 
 function closeComposerPopovers() {
+  closeQuickReplyPicker();
   stickerPicker?.classList.add('hidden');
   stickerButton?.setAttribute('aria-expanded', 'false');
   emojiPicker?.classList.add('hidden');
@@ -4023,6 +4064,18 @@ function renderComposerPreview() {
     card.removeAttribute('href');
     card.removeAttribute('download');
     composerPreviewContent.append(card);
+  } else if (pendingAttachment.type === 'images') {
+    const strip = document.createElement('span');
+    strip.className = 'composer-preview-images';
+    for (const url of pendingAttachment.urls || []) {
+      const image = document.createElement('img');
+      image.src = url;
+      image.alt = '';
+      strip.appendChild(image);
+    }
+    const label = document.createElement('span');
+    label.textContent = `${(pendingAttachment.urls || []).length} ảnh từ mẫu trả lời nhanh`;
+    composerPreviewContent.append(strip, label);
   } else if (pendingAttachment.type === 'sticker') {
     const sticker = document.createElement('span');
     sticker.className = 'composer-preview-sticker';
@@ -4137,16 +4190,17 @@ function updateMessageSendState() {
   if (messageSendButton) messageSendButton.disabled = !messageComposerInput?.value.trim() && !pendingAttachment;
 }
 
-async function sendRemoteMessage(conversation, text, attachment) {
+async function sendRemoteMessage(conversation, text, attachment, imageUrls = []) {
   const conversationId = conversation.dataset.conversationId;
   const pending = {
     id: globalThis.crypto?.randomUUID?.() || `pending-${Date.now()}`,
     direction: 'outgoing',
-    type: attachment?.type || 'text',
+    type: attachment?.type || (!text && imageUrls.length ? 'image' : 'text'),
     text: text || '',
     createdAt: Date.now(),
     status: 'sending',
-    ...(attachment ? { dataUrl: attachment.dataUrl, name: attachment.name || '', size: attachment.size || 0 } : {})
+    ...(attachment ? { dataUrl: attachment.dataUrl, name: attachment.name || '', size: attachment.size || 0 } : {}),
+    ...(!attachment && !text && imageUrls.length ? { dataUrl: imageUrls[0] } : {})
   };
   if (conversation.dataset.source === 'comment' && currentComposerReplyMode === 'private') pending.privateReply = true;
   cacheRemoteMessage(conversationId, pending);
@@ -4158,6 +4212,7 @@ async function sendRemoteMessage(conversation, text, attachment) {
       body: JSON.stringify({
         text,
         attachment,
+        ...(imageUrls.length ? { imageUrls } : {}),
         ...(conversation.dataset.source === 'comment' && currentComposerReplyMode === 'private' ? { privateReply: true } : {})
       })
     }));
@@ -4172,7 +4227,10 @@ async function sendRemoteMessage(conversation, text, attachment) {
     const targetId = result.conversation?.id || conversationId;
     if (remoteMessages.has(targetId) || targetId === conversationId) {
       // Keep the local preview so an uploaded image still renders before Meta echoes its own URL.
-      cacheRemoteMessage(targetId, { ...result.message, dataUrl: result.message.dataUrl || pending.dataUrl || '' });
+      // Quick replies may have sent several messages (text, then each picture).
+      for (const message of result.messages || [result.message]) {
+        cacheRemoteMessage(targetId, { ...message, dataUrl: message.dataUrl || (message.id === result.message?.id ? pending.dataUrl : '') || '' });
+      }
     }
     if (result.conversation) applyRemoteConversation(result.conversation);
     if (targetId !== conversationId) showToast('Đã nhắn riêng qua Messenger — xem trong hội thoại Messenger của khách.', 'success');
@@ -4198,16 +4256,20 @@ function sendCurrentMessage() {
   const conversationName = getConversationName(activeConversation);
   if (!conversationName) return;
   if (activeConversation?.dataset.conversationId) {
-    const attachment = pendingAttachment && pendingAttachment.type !== 'sticker' ? pendingAttachment : null;
+    const imageUrls = pendingAttachment?.type === 'images' ? [...(pendingAttachment.urls || [])] : [];
+    const attachment = pendingAttachment && pendingAttachment.type !== 'sticker' && pendingAttachment.type !== 'images' ? pendingAttachment : null;
     const outgoingText = pendingAttachment?.type === 'sticker' ? [text, pendingAttachment.sticker].filter(Boolean).join(' ') : text;
     messageComposerInput.value = '';
     clearMessageReply();
     clearPendingAttachment();
     updateMessageSendState();
     messageComposerInput.focus();
-    sendRemoteMessage(activeConversation, outgoingText, attachment);
+    sendRemoteMessage(activeConversation, outgoingText, attachment, imageUrls);
     return;
   }
+  // Demo threads: quick reply pictures become one image bubble each.
+  const demoImageUrls = pendingAttachment?.type === 'images' ? [...(pendingAttachment.urls || [])] : [];
+  if (demoImageUrls.length) pendingAttachment = null;
   const replyTo = messageComposerInput?.dataset.replyTo
     ? {
         id: messageComposerInput.dataset.replyTo,
@@ -4223,9 +4285,16 @@ function sendCurrentMessage() {
     ...(pendingAttachment || {}),
     ...(replyTo ? { replyTo } : {})
   };
-  appendChatMessage(message, 'outgoing', '', message.id);
+  if (message.text || message.type !== 'text') {
+    appendChatMessage(message, 'outgoing', '', message.id);
+    saveChatMessage(conversationName, message);
+  }
+  demoImageUrls.forEach((url, index) => {
+    const picture = { id: `${message.id}-${index}`, type: 'image', text: '', dataUrl: url, createdAt: Date.now() + index };
+    appendChatMessage(picture, 'outgoing', '', picture.id);
+    saveChatMessage(conversationName, picture);
+  });
   updateMessageGrouping();
-  saveChatMessage(conversationName, message);
   messageComposerInput.value = '';
   clearMessageReply();
   clearPendingAttachment();
@@ -5748,6 +5817,7 @@ audioRecordingCancel?.addEventListener('click', () => stopAudioRecording(true));
 
 messageComposerInput?.addEventListener('input', updateMessageSendState);
 messageComposerInput?.addEventListener('keydown', event => {
+  if (handleQuickReplyPickerKeydown(event)) return;
   if (!appSettings.sendWithEnter || event.key !== 'Enter' || event.isComposing) return;
   event.preventDefault();
   sendCurrentMessage();
@@ -5877,6 +5947,609 @@ renderMutedConversations();
 restoreConversationActivity();
 renderSavedChatMessages();
 updateMessageSendState();
+// ---------------------------------------------------------------------------
+// Cài đặt → Tin nhắn: thẻ hội thoại và mẫu trả lời nhanh
+// ---------------------------------------------------------------------------
+
+/** Dark or light text so a label stays readable on the colour staff chose. */
+function labelTextColor(hex) {
+  const value = String(hex || '').replace('#', '');
+  if (value.length !== 6) return '#fff';
+  const [red, green, blue] = [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16) / 255);
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  return luminance > 0.62 ? '#3a3f47' : '#fff';
+}
+
+function labelById(id) {
+  return inboxLabels.find(label => label.id === id) || null;
+}
+
+function labelName(id) {
+  return labelById(id)?.name || customerLabelNames[id] || id;
+}
+
+function conversationLabelIds(conversation) {
+  return (conversation?.dataset.labels || '').split(/\s+/).filter(Boolean);
+}
+
+/** Coloured badges under the preview line, the way Pancake shows them. */
+function renderConversationLabelBadges(conversation) {
+  const copy = conversation?.querySelector('.conversation-copy');
+  if (!copy) return;
+  const labels = conversationLabelIds(conversation).map(labelById).filter(Boolean);
+  let holder = copy.querySelector('.conversation-labels');
+  if (!labels.length) {
+    holder?.remove();
+    return;
+  }
+  if (!holder) {
+    holder = document.createElement('span');
+    holder.className = 'conversation-labels';
+    copy.appendChild(holder);
+  }
+  holder.replaceChildren(...labels.map(label => {
+    const badge = document.createElement('span');
+    badge.className = 'conversation-label';
+    badge.style.background = label.color;
+    badge.style.color = labelTextColor(label.color);
+    badge.textContent = label.name;
+    return badge;
+  }));
+}
+
+/** The bar above the composer: every label, lit when the open thread carries it. */
+function renderConversationLabelBar(conversation = getActiveConversation()) {
+  if (!conversationLabelBar) return;
+  const active = new Set(conversationLabelIds(conversation));
+  conversationLabelBar.classList.toggle('hidden', !inboxLabels.length || !conversation);
+  conversationLabelBar.replaceChildren(...inboxLabels.map(label => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.labelId = label.id;
+    button.textContent = label.name;
+    button.title = active.has(label.id) ? `Bỏ thẻ ${label.name}` : `Gắn thẻ ${label.name}`;
+    button.style.setProperty('--label-color', label.color);
+    button.style.setProperty('--label-text', labelTextColor(label.color));
+    button.classList.toggle('active', active.has(label.id));
+    button.setAttribute('aria-pressed', String(active.has(label.id)));
+    return button;
+  }));
+}
+
+function renderMessageLabelMenu() {
+  if (!messageLabelMenuLabels) return;
+  messageLabelMenuLabels.replaceChildren(...inboxLabels.map(label => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.messageLabel = label.id;
+    button.classList.toggle('active', currentMessageLabel === label.id);
+    const dot = document.createElement('i');
+    dot.className = 'message-label-dot';
+    dot.style.background = label.color;
+    button.append(dot, document.createTextNode(label.name));
+    return button;
+  }));
+}
+
+function fillCustomersLabelOptions() {
+  const select = customersFilters.label;
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">Mọi thẻ</option>' + inboxLabels
+    .map(label => `<option value="${escapeHtml(label.id)}">${escapeHtml(label.name)}</option>`).join('');
+  select.value = inboxLabels.some(label => label.id === current) ? current : '';
+}
+
+function applyInboxSettings(settings) {
+  inboxLabels = Array.isArray(settings?.labels) ? settings.labels : [];
+  quickReplies = Array.isArray(settings?.quickReplies) ? settings.quickReplies : [];
+  renderMessageLabelMenu();
+  fillCustomersLabelOptions();
+  getConversationItems().forEach(renderConversationLabelBadges);
+  renderConversationLabelBar();
+  if (!quickReplyPicker?.classList.contains('hidden')) renderQuickReplyPicker();
+}
+
+async function loadInboxSettings() {
+  try {
+    applyInboxSettings(await readApiResponse(await fetch('/api/inbox/settings')));
+  } catch {
+    // Labels and quick replies are conveniences; the inbox still works without them.
+  }
+}
+
+async function saveInboxSettings(changes) {
+  const settings = await readApiResponse(await fetch('/api/inbox/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes)
+  }));
+  applyInboxSettings(settings);
+  return settings;
+}
+
+function toggleConversationLabel(labelId) {
+  const conversation = getActiveConversation();
+  if (!conversation || !labelById(labelId)) return;
+  const labels = conversationLabelIds(conversation);
+  const next = labels.includes(labelId) ? labels.filter(item => item !== labelId) : [...labels, labelId];
+  conversation.dataset.labels = next.join(' ');
+  renderConversationLabelBadges(conversation);
+  renderConversationLabelBar(conversation);
+  if (conversation.dataset.conversationId) patchRemoteConversationFlags(conversation, { labels: next });
+  filterConversations();
+}
+
+// ---- Mẫu trả lời nhanh trong khung soạn tin ----
+
+/** {name}, {title}/{Title} and {A|B} filled for the open thread, so staff send the text as is. */
+function fillQuickReplyText(text, conversation = getActiveConversation()) {
+  const name = getConversationName(conversation) || 'bạn';
+  const gender = conversation?.dataset.gender || '';
+  const title = gender === 'male' ? 'anh' : gender === 'female' ? 'chị' : 'anh/chị';
+  return String(text || '')
+    .replace(/\{([^{}|]*\|[^{}]*)\}/g, (_match, options) => {
+      const choices = options.split('|');
+      return choices[Math.floor(Math.random() * choices.length)];
+    })
+    .replaceAll('{name}', name)
+    .replaceAll('{Title}', title.charAt(0).toUpperCase() + title.slice(1))
+    .replaceAll('{title}', title);
+}
+
+function quickReplyMatches(query) {
+  const folded = normalizeColumnName(query || '');
+  if (!folded) return quickReplies;
+  const byShortcut = quickReplies.filter(reply => normalizeColumnName(reply.shortcut).startsWith(folded));
+  const byText = quickReplies.filter(reply => !byShortcut.includes(reply)
+    && (normalizeColumnName(reply.shortcut).includes(folded) || normalizeColumnName(reply.text).includes(folded)));
+  return [...byShortcut, ...byText];
+}
+
+function renderQuickReplyPicker() {
+  if (!quickReplyList) return;
+  quickReplyPickerMatches = quickReplyMatches(quickReplySearch?.value || '');
+  quickReplyPickerIndex = Math.min(quickReplyPickerIndex, Math.max(0, quickReplyPickerMatches.length - 1));
+  if (!quickReplies.length) {
+    quickReplyList.innerHTML = '<p class="quick-reply-empty">Chưa có mẫu trả lời nhanh. Thêm ở Cài đặt → Tin nhắn.</p>';
+    return;
+  }
+  if (!quickReplyPickerMatches.length) {
+    quickReplyList.innerHTML = '<p class="quick-reply-empty">Không có mẫu nào khớp.</p>';
+    return;
+  }
+  quickReplyList.replaceChildren(...quickReplyPickerMatches.map((reply, index) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'quick-reply-row';
+    row.setAttribute('role', 'option');
+    row.dataset.quickReplyId = reply.id;
+    row.classList.toggle('is-highlighted', index === quickReplyPickerIndex);
+    row.setAttribute('aria-selected', String(index === quickReplyPickerIndex));
+    const order = document.createElement('span');
+    order.className = 'quick-reply-order';
+    order.textContent = String(quickReplies.indexOf(reply) + 1);
+    const shortcut = document.createElement('b');
+    shortcut.className = 'quick-reply-shortcut';
+    shortcut.textContent = reply.shortcut;
+    const text = document.createElement('span');
+    text.className = 'quick-reply-text';
+    if (reply.images?.length) {
+      const badge = document.createElement('i');
+      badge.className = 'quick-reply-image-badge';
+      badge.textContent = `+${reply.images.length}`;
+      badge.title = `${reply.images.length} ảnh gửi kèm`;
+      text.appendChild(badge);
+    }
+    text.appendChild(document.createTextNode(reply.text || 'Chỉ gửi ảnh'));
+    row.append(order, shortcut, text);
+    return row;
+  }));
+  quickReplyList.querySelector('.is-highlighted')?.scrollIntoView({ block: 'nearest' });
+}
+
+function openQuickReplyPicker({ query = '', fromSlash = false } = {}) {
+  if (!quickReplyPicker || !messageComposerInput || messageComposerInput.disabled) return;
+  closeComposerPopovers();
+  quickReplyPickerFromSlash = fromSlash;
+  quickReplyPicker.classList.remove('hidden');
+  quickReplyButton?.setAttribute('aria-expanded', 'true');
+  if (quickReplySearch) quickReplySearch.value = query;
+  quickReplyPickerIndex = 0;
+  renderQuickReplyPicker();
+  if (!fromSlash) quickReplySearch?.focus();
+}
+
+function closeQuickReplyPicker() {
+  quickReplyPicker?.classList.add('hidden');
+  quickReplyButton?.setAttribute('aria-expanded', 'false');
+  quickReplyPickerFromSlash = false;
+}
+
+function isQuickReplyPickerOpen() {
+  return Boolean(quickReplyPicker && !quickReplyPicker.classList.contains('hidden'));
+}
+
+function applyQuickReply(reply) {
+  if (!reply || !messageComposerInput) return;
+  const conversation = getActiveConversation();
+  const filled = fillQuickReplyText(reply.text, conversation);
+  const current = messageComposerInput.value;
+  // Typed "/cb2": the whole token goes; otherwise the text lands at the cursor.
+  if (/^\/\S*$/.test(current.trim()) || !current.trim()) {
+    messageComposerInput.value = filled;
+  } else {
+    const start = messageComposerInput.selectionStart ?? current.length;
+    const end = messageComposerInput.selectionEnd ?? start;
+    const separator = start > 0 && !/\s$/.test(current.slice(0, start)) ? ' ' : '';
+    messageComposerInput.setRangeText(separator + filled, start, end, 'end');
+  }
+  if (reply.images?.length) {
+    if (conversation?.dataset.source === 'comment' && currentComposerReplyMode !== 'private') {
+      showComposerStatus('Ảnh chỉ gửi được qua Messenger — chọn "Nhắn riêng Messenger" để gửi kèm ảnh.', 5000);
+    } else {
+      setPendingAttachment({ type: 'images', urls: [...reply.images], name: `${reply.images.length} ảnh` });
+    }
+  }
+  closeQuickReplyPicker();
+  messageComposerInput.dispatchEvent(new Event('input', { bubbles: true }));
+  messageComposerInput.focus();
+  messageComposerInput.setSelectionRange(messageComposerInput.value.length, messageComposerInput.value.length);
+}
+
+/** Enter/arrow keys while the picker is open pick a reply instead of sending. */
+function handleQuickReplyPickerKeydown(event) {
+  if (!isQuickReplyPickerOpen()) return false;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const count = quickReplyPickerMatches.length;
+    if (!count) return true;
+    quickReplyPickerIndex = (quickReplyPickerIndex + (event.key === 'ArrowDown' ? 1 : count - 1)) % count;
+    renderQuickReplyPicker();
+    return true;
+  }
+  if (event.key === 'Enter' || event.key === 'Tab') {
+    if (!quickReplyPickerMatches.length) return false;
+    event.preventDefault();
+    applyQuickReply(quickReplyPickerMatches[quickReplyPickerIndex]);
+    return true;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeQuickReplyPicker();
+    return true;
+  }
+  return false;
+}
+
+// ---- Cài đặt → Tin nhắn ----
+
+function showMessageSettingsTab(name = 'quick') {
+  const tab = messageSettingsPanels.has(name) ? name : 'quick';
+  messageSettingsPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== tab));
+  messageSettingsTabs.forEach(button => button.classList.toggle('active', button.dataset.messageSettingsTab === tab));
+}
+
+async function loadMessageSettings() {
+  await loadInboxSettings();
+  labelDraft = inboxLabels.map(label => ({ ...label }));
+  renderQuickReplySettings();
+  renderLabelSettings();
+  loadMessageDefaults();
+}
+
+function renderQuickReplySettings() {
+  if (!quickReplySettingsTable) return;
+  const query = normalizeColumnName(quickReplySettingsSearch?.value || '');
+  const items = quickReplies.filter(reply => !query || normalizeColumnName(`${reply.shortcut} ${reply.text}`).includes(query));
+  if (!items.length) {
+    renderEmptyState(quickReplySettingsTable, quickReplies.length ? 'Không có mẫu nào khớp.' : 'Chưa có mẫu trả lời nhanh. Bấm "Thêm mẫu" để tạo mẫu đầu tiên.');
+    return;
+  }
+  quickReplySettingsTable.classList.remove('is-empty');
+  quickReplySettingsTable.innerHTML = `<table><thead><tr><th>#</th><th>Ký tự tắt</th><th>Tin nhắn</th><th>Ảnh</th><th></th></tr></thead><tbody>${items.map(reply => `
+    <tr data-quick-reply-id="${escapeHtml(reply.id)}">
+      <td class="quick-reply-order-cell">${quickReplies.indexOf(reply) + 1}</td>
+      <td><b class="quick-reply-shortcut">${escapeHtml(reply.shortcut)}</b></td>
+      <td class="quick-reply-text-cell">${escapeHtml(reply.text)}</td>
+      <td class="quick-reply-images-cell">${(reply.images || []).map(url => `<img src="${escapeHtml(url)}" alt="">`).join('')}</td>
+      <td class="quick-reply-actions-cell"><button type="button" data-quick-reply-edit>Sửa</button><button type="button" data-quick-reply-delete>Xóa</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function renderQuickReplyDraftImages() {
+  if (!quickReplyImageList || !quickReplyDraft) return;
+  quickReplyImageList.replaceChildren(...quickReplyDraft.images.map((source, index) => {
+    const item = document.createElement('span');
+    item.className = 'quick-reply-image-item';
+    const image = document.createElement('img');
+    image.src = source;
+    image.alt = '';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.dataset.quickReplyImageRemove = String(index);
+    remove.setAttribute('aria-label', 'Bỏ ảnh');
+    remove.textContent = '×';
+    item.append(image, remove);
+    return item;
+  }));
+}
+
+function openQuickReplyDialog(reply = null) {
+  if (!quickReplyDialog) return;
+  quickReplyDraft = reply
+    ? { id: reply.id, shortcut: reply.shortcut, text: reply.text, images: [...(reply.images || [])] }
+    : { id: '', shortcut: '', text: '', images: [] };
+  if (quickReplyDialogTitle) quickReplyDialogTitle.textContent = reply ? 'Sửa mẫu trả lời nhanh' : 'Thêm mẫu trả lời nhanh';
+  if (quickReplyShortcut) quickReplyShortcut.value = quickReplyDraft.shortcut;
+  if (quickReplyText) quickReplyText.value = quickReplyDraft.text;
+  if (quickReplyFormStatus) quickReplyFormStatus.textContent = '';
+  if (quickReplyImageInput) quickReplyImageInput.value = '';
+  renderQuickReplyDraftImages();
+  quickReplyDialog.classList.remove('hidden');
+  quickReplyShortcut?.focus();
+}
+
+function closeQuickReplyDialog() {
+  quickReplyDialog?.classList.add('hidden');
+  quickReplyDraft = null;
+}
+
+async function submitQuickReplyDialog(event) {
+  event.preventDefault();
+  if (!quickReplyDraft) return;
+  const shortcut = (quickReplyShortcut?.value || '').trim().replace(/^\/+/, '').replace(/\s+/g, '');
+  const text = (quickReplyText?.value || '').trim();
+  if (!shortcut) {
+    if (quickReplyFormStatus) quickReplyFormStatus.textContent = 'Nhập ký tự tắt để nhân viên gõ nhanh.';
+    return;
+  }
+  if (!text && !quickReplyDraft.images.length) {
+    if (quickReplyFormStatus) quickReplyFormStatus.textContent = 'Nhập nội dung tin nhắn hoặc thêm ít nhất một ảnh.';
+    return;
+  }
+  const duplicate = quickReplies.find(reply => reply.id !== quickReplyDraft.id && reply.shortcut.toLowerCase() === shortcut.toLowerCase());
+  if (duplicate) {
+    if (quickReplyFormStatus) quickReplyFormStatus.textContent = `Ký tự tắt "${shortcut}" đã dùng cho mẫu số ${quickReplies.indexOf(duplicate) + 1}.`;
+    return;
+  }
+  const submit = document.querySelector('#quick-reply-submit');
+  if (submit) submit.disabled = true;
+  try {
+    const entry = { ...quickReplyDraft, shortcut, text };
+    const next = entry.id ? quickReplies.map(reply => (reply.id === entry.id ? entry : reply)) : [...quickReplies, entry];
+    await saveInboxSettings({ quickReplies: next });
+    renderQuickReplySettings();
+    closeQuickReplyDialog();
+    showToast('Đã lưu mẫu trả lời nhanh.', 'success');
+  } catch (error) {
+    if (quickReplyFormStatus) quickReplyFormStatus.textContent = error.message || 'Chưa lưu được mẫu.';
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+async function deleteQuickReply(id) {
+  try {
+    await saveInboxSettings({ quickReplies: quickReplies.filter(reply => reply.id !== id) });
+    renderQuickReplySettings();
+    showToast('Đã xóa mẫu trả lời nhanh.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa xóa được mẫu.');
+  }
+}
+
+function renderLabelSettings() {
+  if (!labelSettingsList) return;
+  labelSettingsList.replaceChildren(...labelDraft.map((label, index) => {
+    const row = document.createElement('div');
+    row.className = 'label-settings-row';
+    row.dataset.labelIndex = String(index);
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.value = label.color;
+    color.setAttribute('aria-label', 'Màu thẻ');
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.maxLength = 40;
+    name.value = label.name;
+    name.placeholder = 'Tên thẻ';
+    name.setAttribute('aria-label', 'Tên thẻ');
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'label-settings-remove';
+    remove.dataset.labelRemove = String(index);
+    remove.setAttribute('aria-label', `Xóa thẻ ${label.name}`);
+    remove.textContent = '×';
+    row.append(color, name, remove);
+    return row;
+  }));
+  renderLabelSettingsPreview();
+}
+
+function renderLabelSettingsPreview() {
+  if (!labelSettingsPreview) return;
+  labelSettingsPreview.replaceChildren(...labelDraft.filter(label => label.name.trim()).map(label => {
+    const chip = document.createElement('span');
+    chip.className = 'label-settings-chip';
+    chip.style.background = label.color;
+    chip.style.color = labelTextColor(label.color);
+    chip.textContent = label.name;
+    return chip;
+  }));
+}
+
+async function saveLabelSettings() {
+  const labels = labelDraft.map(label => ({ ...label, name: label.name.trim() })).filter(label => label.name);
+  if (!labels.length) {
+    showToast('Giữ lại ít nhất một thẻ.');
+    return;
+  }
+  if (labelSave) labelSave.disabled = true;
+  try {
+    await saveInboxSettings({ labels });
+    labelDraft = inboxLabels.map(label => ({ ...label }));
+    renderLabelSettings();
+    showToast('Đã lưu thẻ hội thoại.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được thẻ.');
+  } finally {
+    if (labelSave) labelSave.disabled = false;
+  }
+}
+
+async function loadMessageDefaults() {
+  if (!messageDefaultsForm) return;
+  try {
+    const settings = await readApiResponse(await fetch('/api/chatbot/settings'));
+    messageDefaultTemplates = { ...(settings.templates || {}) };
+    for (const id of messageDefaultIds) {
+      const field = document.querySelector(`#message-default-${id}`);
+      if (field) field.value = messageDefaultTemplates[id] || '';
+    }
+  } catch (error) {
+    showToast(error.message || 'Chưa tải được mẫu câu mặc định.');
+  }
+}
+
+async function saveMessageDefaults(event) {
+  event.preventDefault();
+  const submit = messageDefaultsForm?.querySelector('button[type="submit"]');
+  if (submit) submit.disabled = true;
+  try {
+    const messageTemplates = { ...messageDefaultTemplates };
+    for (const id of messageDefaultIds) {
+      const field = document.querySelector(`#message-default-${id}`);
+      if (field) messageTemplates[id] = field.value.trim();
+    }
+    const settings = await readApiResponse(await fetch('/api/chatbot/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageTemplates })
+    }));
+    messageDefaultTemplates = { ...(settings.templates || {}) };
+    chatbotTemplatesState = { ...messageDefaultTemplates };
+    chatbotOriginalTemplates = { ...messageDefaultTemplates };
+    showToast('Đã lưu mẫu câu mặc định.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được mẫu câu.');
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+// ---- Sự kiện ----
+
+conversationLabelBar?.addEventListener('click', event => {
+  const button = event.target.closest('[data-label-id]');
+  if (button) toggleConversationLabel(button.dataset.labelId);
+});
+
+quickReplyButton?.addEventListener('click', event => {
+  event.stopPropagation();
+  if (isQuickReplyPickerOpen()) closeQuickReplyPicker();
+  else openQuickReplyPicker();
+});
+quickReplyPicker?.addEventListener('click', event => {
+  event.stopPropagation();
+  if (event.target.closest('[data-close-composer-popover]')) {
+    closeQuickReplyPicker();
+    return;
+  }
+  const row = event.target.closest('[data-quick-reply-id]');
+  if (row) applyQuickReply(quickReplies.find(reply => reply.id === row.dataset.quickReplyId));
+});
+quickReplyManage?.addEventListener('click', () => {
+  closeQuickReplyPicker();
+  showSettingsSection('messages');
+  showMessageSettingsTab('quick');
+});
+quickReplySearch?.addEventListener('input', () => {
+  quickReplyPickerIndex = 0;
+  renderQuickReplyPicker();
+});
+quickReplySearch?.addEventListener('keydown', event => {
+  handleQuickReplyPickerKeydown(event);
+});
+messageComposerInput?.addEventListener('input', () => {
+  const value = messageComposerInput.value;
+  if (/^\/\S*$/.test(value)) {
+    if (!isQuickReplyPickerOpen()) openQuickReplyPicker({ query: value.slice(1), fromSlash: true });
+    else if (quickReplySearch) {
+      quickReplySearch.value = value.slice(1);
+      quickReplyPickerIndex = 0;
+      renderQuickReplyPicker();
+    }
+  } else if (quickReplyPickerFromSlash) {
+    closeQuickReplyPicker();
+  }
+});
+
+messageSettingsTabs.forEach(button => button.addEventListener('click', () => showMessageSettingsTab(button.dataset.messageSettingsTab)));
+quickReplySettingsSearch?.addEventListener('input', renderQuickReplySettings);
+quickReplyAdd?.addEventListener('click', () => openQuickReplyDialog());
+quickReplySettingsTable?.addEventListener('click', event => {
+  const row = event.target.closest('[data-quick-reply-id]');
+  if (!row) return;
+  const reply = quickReplies.find(item => item.id === row.dataset.quickReplyId);
+  if (!reply) return;
+  if (event.target.closest('[data-quick-reply-edit]')) openQuickReplyDialog(reply);
+  else if (event.target.closest('[data-quick-reply-delete]')) deleteQuickReply(reply.id);
+});
+quickReplyForm?.addEventListener('submit', submitQuickReplyDialog);
+quickReplyDialog?.querySelectorAll('[data-close-quick-reply-dialog]').forEach(button => button.addEventListener('click', closeQuickReplyDialog));
+quickReplyImageInput?.addEventListener('change', async () => {
+  if (!quickReplyDraft) return;
+  const files = [...(quickReplyImageInput.files || [])];
+  quickReplyImageInput.value = '';
+  for (const file of files) {
+    if (quickReplyDraft.images.length >= 6) break;
+    if (file.size > 5 * 1024 * 1024) {
+      if (quickReplyFormStatus) quickReplyFormStatus.textContent = `Ảnh ${file.name} lớn hơn 5 MB.`;
+      continue;
+    }
+    try {
+      quickReplyDraft.images.push(await readImageFile(file));
+    } catch (error) {
+      if (quickReplyFormStatus) quickReplyFormStatus.textContent = error.message;
+    }
+  }
+  renderQuickReplyDraftImages();
+});
+quickReplyImageList?.addEventListener('click', event => {
+  const remove = event.target.closest('[data-quick-reply-image-remove]');
+  if (!remove || !quickReplyDraft) return;
+  quickReplyDraft.images.splice(Number(remove.dataset.quickReplyImageRemove), 1);
+  renderQuickReplyDraftImages();
+});
+
+labelAdd?.addEventListener('click', () => {
+  labelDraft.push({ id: '', name: '', color: '#c9ced6' });
+  renderLabelSettings();
+  labelSettingsList?.querySelector('.label-settings-row:last-child input[type="text"]')?.focus();
+});
+labelSettingsList?.addEventListener('input', event => {
+  const row = event.target.closest('[data-label-index]');
+  if (!row) return;
+  const label = labelDraft[Number(row.dataset.labelIndex)];
+  if (!label) return;
+  if (event.target.type === 'color') label.color = event.target.value;
+  else label.name = event.target.value;
+  renderLabelSettingsPreview();
+});
+labelSettingsList?.addEventListener('click', event => {
+  const remove = event.target.closest('[data-label-remove]');
+  if (!remove) return;
+  labelDraft.splice(Number(remove.dataset.labelRemove), 1);
+  renderLabelSettings();
+});
+labelSave?.addEventListener('click', saveLabelSettings);
+messageDefaultsForm?.addEventListener('submit', saveMessageDefaults);
+document.addEventListener('click', event => {
+  if (!event.target.closest('#quick-reply-picker') && !event.target.closest('#quick-reply-button')) closeQuickReplyPicker();
+});
+loadInboxSettings();
+
 window.setInterval(updateConversationTimeLabels, 30000);
 // Drawn even with no rows so each order panel shows its empty state.
 renderOrderData();

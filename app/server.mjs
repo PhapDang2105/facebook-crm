@@ -10,7 +10,7 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
-import { defaultMessageTemplates } from './chatbot-templates.mjs';
+import { defaultMessageTemplates, publicImageUrl } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
@@ -28,6 +28,7 @@ import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChan
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { customersToCsv, listCustomers } from './customers.mjs';
+import { readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
 import {
@@ -751,10 +752,14 @@ const server = http.createServer(async (request, response) => {
           moderateComment,
           createOrder: createChatbotCustomerOrder,
           sendReceipt: sendChatbotOrderReceipt,
-          saveBotState: (id, botState) => updateMessagingStore(store => {
+          saveBotState: (id, { addLabels = [], ...botState }) => updateMessagingStore(store => {
             const conversation = store.conversations.find(item => item.id === id);
             if (!conversation) return null;
             Object.assign(conversation, botState);
+            if (addLabels.length) {
+              conversation.labels = [...new Set([...(Array.isArray(conversation.labels) ? conversation.labels : []), ...addLabels])];
+              publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
+            }
             return conversation;
           })
         });
@@ -768,14 +773,32 @@ const server = http.createServer(async (request, response) => {
       const filters = Object.fromEntries(['q', 'channelId', 'source', 'gender', 'label', 'from', 'to'].map(key => [key, url.searchParams.get(key) || '']));
       const result = await listCustomers(filters);
       if (url.pathname.endsWith('.csv')) {
+        const { labels } = await readInboxSettings();
         response.writeHead(200, {
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="khach-hang-${new Date().toISOString().slice(0, 10)}.csv"`,
           'Cache-Control': 'no-store'
         });
-        return response.end(customersToCsv(result.items));
+        return response.end(customersToCsv(result.items, labels));
       }
       return sendJson(response, 200, result);
+    }
+    // Cài đặt → Tin nhắn: conversation labels and staff quick replies.
+    if (url.pathname === '/api/inbox/settings') {
+      if (request.method === 'GET') return sendJson(response, 200, await readInboxSettings());
+      if (request.method === 'PUT') {
+        const current = await readInboxSettings();
+        const payload = await readBody(request);
+        try {
+          const settings = await writeInboxSettings({
+            labels: payload.labels ?? current.labels,
+            quickReplies: payload.quickReplies ?? current.quickReplies
+          }, saveProductImage);
+          return sendJson(response, 200, settings);
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message });
+        }
+      }
     }
     if (request.method === 'GET' && url.pathname === '/api/messaging/conversations') {
       const items = await listConversations(url.searchParams.get('channelId') || '');
@@ -820,11 +843,28 @@ const server = http.createServer(async (request, response) => {
         const payload = await readBody(request);
         const text = String(payload.text || '').trim();
         const attachment = payload.attachment?.dataUrl ? payload.attachment : null;
-        if (!text && !attachment) return sendJson(response, 400, { error: 'Nội dung tin nhắn không được để trống.' });
+        const privateReply = payload.privateReply === true;
+        // Pictures a quick reply carries: stored paths only, sent by URL after the text.
+        const imageUrls = (Array.isArray(payload.imageUrls) ? payload.imageUrls : [])
+          .filter(item => /^\/product-images\/[A-Za-z0-9-]+\.(?:png|jpg|webp)$/.test(String(item)))
+          .filter(() => conversation.source !== 'comment' || privateReply)
+          .slice(0, 6);
+        if (!text && !attachment && !imageUrls.length) return sendJson(response, 400, { error: 'Nội dung tin nhắn không được để trống.' });
         try {
           // Comment threads: reply under the comment, or privately to Messenger.
-          const sent = await sendConversationMessage(conversation, { text, attachment, privateReply: payload.privateReply === true });
-          return sendJson(response, 200, sent);
+          const sent = text || attachment ? await sendConversationMessage(conversation, { text, attachment, privateReply }) : null;
+          const messages = sent ? [sent.message] : [];
+          let last = sent;
+          // A private reply lands in the person's Messenger thread; pictures follow it there.
+          const imageTarget = conversation.source === 'comment' && privateReply
+            ? await getConversation(sent?.conversation?.id || `${conversation.pageId}:${conversation.psid}`)
+            : conversation;
+          for (const imageUrl of imageTarget ? imageUrls : []) {
+            last = await sendConversationMessage(imageTarget, { imageUrl: publicImageUrl(imageUrl) });
+            messages.push(last.message);
+          }
+          if (!last) return sendJson(response, 400, { error: 'Khách chưa có hội thoại Messenger để nhận ảnh.' });
+          return sendJson(response, 200, { ...last, message: (sent || last).message, messages });
         } catch (error) {
           return sendJson(response, error.statusCode === 400 ? 400 : 502, { error: error.message });
         }

@@ -239,7 +239,10 @@ export async function processChatbotChanges(changes, dependencies) {
         botLastErrorAt: 0,
         // undefined leaves the stored basket alone; null clears it once ordered.
         ...(reply.pendingOrder !== undefined && !isComment ? { pendingOrder: reply.pendingOrder } : {}),
-        ...(reply.handoff ? { botEnabled: false } : {})
+        // Labels staff see in the inbox: a handed-off thread needs a person, an
+        // ordered one is a buyer. `addLabels` is merged, never replacing what staff set.
+        ...(reply.handoff ? { botEnabled: false, addLabels: ['consulting'] } : {}),
+        ...(order ? { addLabels: [...(reply.handoff ? ['consulting'] : []), 'customer'] } : {})
       });
       results.push({
         conversationId: conversation.id,

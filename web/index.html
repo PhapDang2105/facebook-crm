@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260911-vertex-ui-16">
+  <link rel="stylesheet" href="styles.css?v=20260914-inbox-1">
 </head>
 <body>
   <div class="topbar">
@@ -43,6 +43,7 @@
       <div class="settings-subnav" aria-label="Chức năng cài đặt">
         <button class="settings-subnav-item active" type="button" data-settings-section="channels">Kênh</button>
         <button class="settings-subnav-item" type="button" data-settings-section="chatbot">Thiết lập chatbot</button>
+        <button class="settings-subnav-item" type="button" data-settings-section="messages">Tin nhắn</button>
         <button class="settings-subnav-item" type="button" data-settings-section="products">Sản phẩm</button>
         <button class="settings-subnav-item" type="button" data-settings-section="gifts">Quà tặng</button>
         <button class="settings-subnav-item" type="button" data-settings-section="customers">Khách hàng</button>
@@ -72,9 +73,7 @@
               <div class="message-label-menu hidden" id="message-label-menu" role="menu">
                 <button class="active" type="button" data-message-label="all">Tất cả</button>
                 <button type="button" data-message-label="unread">Chưa đọc</button>
-                <button type="button" data-message-label="new">Khách mới</button>
-                <button type="button" data-message-label="consulting">Cần tư vấn</button>
-                <button type="button" data-message-label="customer">Đã mua</button>
+                <span class="message-label-menu-dynamic" id="message-label-menu-labels"></span>
                 <button type="button" data-message-label="inbox">Tin nhắn</button>
                 <button type="button" data-message-label="comment">Bình luận</button>
                 <button type="button" data-message-label="ad">Từ quảng cáo</button>
@@ -93,6 +92,13 @@
           <div class="pinned-banner hidden" id="pinned-banner" role="status"></div>
           <div class="chat-body"><div class="chat-date">Hôm nay, 10:38</div><div class="message-row"><span class="avatar avatar-small has-photo"><img class="avatar-photo" src="/assets/avatars/lan-anh.jpg" alt="">L</span><div class="bubble">Chào shop, mình muốn hỏi về sản phẩm Granola tháng 9 ạ.</div></div><div class="message-row outgoing"><div class="bubble">Chào Lan Anh, mình hỗ trợ bạn ngay nhé.</div></div><div class="message-row"><span class="avatar avatar-small has-photo"><img class="avatar-photo" src="/assets/avatars/lan-anh.jpg" alt="">L</span><div class="bubble">Sản phẩm này còn hàng không shop?</div></div></div>
           <div class="composer-area">
+            <div class="conversation-label-bar" id="conversation-label-bar" role="group" aria-label="Thẻ hội thoại"></div>
+            <div class="composer-popover quick-reply-popover hidden" id="quick-reply-picker" role="dialog" aria-label="Mẫu trả lời nhanh">
+              <div class="composer-popover-head"><strong>Mẫu trả lời nhanh</strong><span class="quick-reply-popover-tools"><button class="quick-reply-popover-edit" type="button" id="quick-reply-manage" title="Sửa mẫu trả lời nhanh" aria-label="Sửa mẫu trả lời nhanh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16Z"></path><path d="m14 6 4 4"></path></svg></button><button type="button" aria-label="Đóng mẫu trả lời nhanh" data-close-composer-popover>×</button></span></div>
+              <input class="quick-reply-search" id="quick-reply-search" type="search" placeholder="Gõ ký tự tắt hoặc nội dung..." aria-label="Tìm mẫu trả lời nhanh" autocomplete="off">
+              <div class="quick-reply-table-head"><span>#</span><span>Ký tự tắt</span><span>Tin nhắn</span></div>
+              <div class="quick-reply-list" id="quick-reply-list" role="listbox"></div>
+            </div>
             <div class="message-reply-preview hidden" id="message-reply-preview">
               <div class="message-reply-copy"><strong id="message-reply-title">Đang trả lời</strong><span id="message-reply-text"></span></div>
               <button class="message-reply-close" id="message-reply-close" type="button" aria-label="Hủy trả lời">×</button>
@@ -123,7 +129,7 @@
             <div class="composer">
               <button class="composer-icon" id="audio-record-button" type="button" aria-label="Ghi âm" title="Ghi âm"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6"></path></svg></button>
               <label class="composer-icon composer-file-button" aria-label="Đính kèm ảnh hoặc video" title="Đính kèm ảnh hoặc video"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"></rect><circle cx="9" cy="9" r="2"></circle><path d="m5 18 5-5 3 3 2-2 4 4"></path></svg><input id="message-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime"></label>
-              <label class="composer-icon composer-file-button" aria-label="Đính kèm tài liệu" title="Đính kèm tài liệu"><img src="/assets/icons/attach.svg" alt="" aria-hidden="true"><input id="message-document-input" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/csv,text/plain,application/zip"></label><button class="composer-icon" id="sticker-button" type="button" aria-label="Chọn nhãn dán" aria-expanded="false" title="Nhãn dán"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v10a6 6 0 0 1-6 6H4z"></path><path d="M14 20v-6h6M8 10h.01M16 10h.01M8.5 14a5 5 0 0 0 7 0"></path></svg></button>
+              <label class="composer-icon composer-file-button" aria-label="Đính kèm tài liệu" title="Đính kèm tài liệu"><img src="/assets/icons/attach.svg" alt="" aria-hidden="true"><input id="message-document-input" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/csv,text/plain,application/zip"></label><button class="composer-icon" id="sticker-button" type="button" aria-label="Chọn nhãn dán" aria-expanded="false" title="Nhãn dán"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v10a6 6 0 0 1-6 6H4z"></path><path d="M14 20v-6h6M8 10h.01M16 10h.01M8.5 14a5 5 0 0 0 7 0"></path></svg></button><button class="composer-icon composer-quick-reply-button" id="quick-reply-button" type="button" aria-label="Mẫu trả lời nhanh" aria-expanded="false" title="Trả lời nhanh (gõ / trong ô tin nhắn)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path><path d="M13 7 9.5 12H12l-1 4 3.5-5H12z" fill="currentColor" stroke="none"></path></svg></button>
               <div class="composer-input-wrap"><input id="message-composer-input" type="text" aria-label="Nhập tin nhắn" placeholder="Aa" autocomplete="off"><button class="composer-emoji-button" id="emoji-button" type="button" aria-label="Chọn biểu tượng cảm xúc" aria-expanded="false" title="Biểu tượng cảm xúc"><img src="assets/icons/fluent-smile.png" alt="" aria-hidden="true"></button></div>
               <button class="send-button" id="message-send-button" type="button" aria-label="Gửi" title="Gửi tin nhắn" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg></button>
             </div>
@@ -447,6 +453,43 @@
             <div class="chatbot-preview-dialog-foot"><span id="chatbot-preview-dialog-status">Vertex AI · gemini-3-flash-preview</span><button class="settings-save-button" id="chatbot-preview-dialog-send" type="button">Gửi thử</button></div>
           </dialog>
         </section>
+        <section class="settings-section-content hidden" data-settings-panel="messages" aria-labelledby="message-settings-title">
+          <section class="settings-card message-settings-card">
+            <header class="settings-card-head"><div><h1 id="message-settings-title">Tin nhắn</h1></div></header>
+            <nav class="message-settings-tabs" aria-label="Thiết lập tin nhắn">
+              <button class="active" type="button" data-message-settings-tab="quick">Mẫu trả lời nhanh</button>
+              <button type="button" data-message-settings-tab="labels">Thẻ hội thoại</button>
+              <button type="button" data-message-settings-tab="defaults">Mẫu câu mặc định</button>
+            </nav>
+            <section class="message-settings-panel" data-message-settings-panel="quick">
+              <div class="message-settings-toolbar">
+                <label class="order-search-control"><input id="quick-reply-settings-search" type="search" aria-label="Tìm mẫu trả lời nhanh" placeholder="Tìm ký tự tắt hoặc nội dung..."></label>
+                <span class="message-settings-hint">Nhân viên gõ <b>/</b> trong ô tin nhắn hoặc bấm nút ⚡ để chọn mẫu. Trong nội dung dùng được <b>{name}</b> (tên khách), <b>{title}</b> (anh/chị).</span>
+                <button class="price-master-add" id="quick-reply-add" type="button">+ Thêm mẫu</button>
+              </div>
+              <div class="quick-reply-settings-table" id="quick-reply-settings-table"></div>
+            </section>
+            <section class="message-settings-panel hidden" data-message-settings-panel="labels">
+              <div class="message-settings-toolbar">
+                <span class="message-settings-hint">Thẻ hiện thành thanh màu phía trên ô nhập tin nhắn; bấm để gắn hoặc bỏ cho hội thoại đang mở. Bot tự gắn <b>Cần người xử lý</b> khi chuyển nhân viên và <b>Đã mua hàng</b> khi chốt đơn.</span>
+                <button class="price-master-add" id="label-add" type="button">+ Thêm thẻ</button>
+                <button class="settings-save-button" id="label-save" type="button">Lưu thẻ</button>
+              </div>
+              <div class="label-settings-list" id="label-settings-list"></div>
+              <div class="label-settings-preview" id="label-settings-preview" aria-label="Xem trước thanh thẻ"></div>
+            </section>
+            <section class="message-settings-panel hidden" data-message-settings-panel="defaults">
+              <form class="message-defaults-form" id="message-defaults-form">
+                <p class="message-settings-hint">Đây là các câu bot dùng ở tin nhắn và bình luận. Dùng <b>{title}</b>/<b>{Title}</b> cho anh/chị, <b>{name}</b> cho tên khách, <b>{A|B}</b> để chọn ngẫu nhiên một cách viết, và <b>###</b> để tách nhiều câu (với câu công khai dưới bình luận, bot chọn ngẫu nhiên một câu).</p>
+                <label class="message-default-field"><span>Chào khách nhắn tin lần đầu</span><textarea id="message-default-WELCOME" rows="3" maxlength="12000"></textarea></label>
+                <label class="message-default-field"><span>Trả lời công khai dưới bình luận</span><textarea id="message-default-COMMENT_PUBLIC_REPLY" rows="5" maxlength="12000"></textarea></label>
+                <label class="message-default-field"><span>Câu mở đầu tin nhắn riêng gửi từ bình luận</span><textarea id="message-default-COMMENT_PRIVATE_REPLY" rows="3" maxlength="12000"></textarea></label>
+                <label class="message-default-field"><span>Khi bot chuyển cho nhân viên</span><textarea id="message-default-CSKH_HANDOFF" rows="3" maxlength="12000"></textarea></label>
+                <div class="message-defaults-actions"><button class="settings-save-button" type="submit">Lưu mẫu câu</button></div>
+              </form>
+            </section>
+          </section>
+        </section>
         <section class="settings-section-content hidden" data-settings-panel="products" aria-labelledby="product-settings-title">
           <section class="settings-card product-settings-card">
             <header class="settings-card-head product-settings-head">
@@ -480,9 +523,6 @@
               </select></label>
               <label class="order-filter-control"><select id="customers-label" aria-label="Thẻ">
                 <option value="">Mọi thẻ</option>
-                <option value="new">Khách mới</option>
-                <option value="consulting">Cần tư vấn</option>
-                <option value="customer">Đã mua</option>
               </select></label>
               <label class="order-filter-control customers-date"><input id="customers-from" type="date" aria-label="Từ ngày"></label>
               <label class="order-filter-control customers-date"><input id="customers-to" type="date" aria-label="Đến ngày"></label>
@@ -527,6 +567,25 @@
       <p class="channel-dialog-status" id="facebook-page-dialog-status" role="status"></p>
       <div class="channel-dialog-actions"><button class="channel-cancel-button" type="button" data-close-channel-dialog>Hủy</button><button class="settings-save-button" id="facebook-page-confirm" type="button">Kết nối Page đã chọn</button></div>
     </section>
+  </div>
+  <div class="product-dialog hidden" id="quick-reply-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-reply-dialog-title">
+    <button class="product-dialog-backdrop" type="button" data-close-quick-reply-dialog aria-label="Đóng"></button>
+    <form class="product-dialog-panel quick-reply-dialog-panel" id="quick-reply-form">
+      <header class="product-dialog-head"><h2 id="quick-reply-dialog-title">Thêm mẫu trả lời nhanh</h2><button type="button" aria-label="Đóng" data-close-quick-reply-dialog>×</button></header>
+      <div class="product-form-body">
+        <div class="product-form-grid quick-reply-form-grid">
+          <label><span>Ký tự tắt <b>*</b></span><input id="quick-reply-shortcut" maxlength="40" required placeholder="Ví dụ: CB2, LINK, Voucher" autocomplete="off"></label>
+          <label class="product-form-wide"><span>Tin nhắn</span><textarea id="quick-reply-text" rows="6" maxlength="4000" placeholder="Dạ em gửi {title} bảng giá ưu đãi khi mua combo 2 túi ạ..."></textarea></label>
+          <div class="product-form-wide quick-reply-images-field">
+            <span>Ảnh gửi kèm (tối đa 6)</span>
+            <div class="quick-reply-image-list" id="quick-reply-image-list"></div>
+            <label class="quick-reply-image-add"><input id="quick-reply-image-input" type="file" accept="image/png,image/jpeg,image/webp" multiple><span>+ Thêm ảnh</span></label>
+          </div>
+        </div>
+      </div>
+      <p class="product-form-status" id="quick-reply-form-status" role="alert"></p>
+      <footer class="product-dialog-actions"><button class="product-secondary-button" type="button" data-close-quick-reply-dialog>Hủy</button><button class="product-primary-button" id="quick-reply-submit" type="submit">Lưu mẫu</button></footer>
+    </form>
   </div>
   <div class="product-dialog hidden" id="product-dialog" role="dialog" aria-modal="true" aria-labelledby="product-dialog-title">
     <button class="product-dialog-backdrop" type="button" data-close-product-dialog aria-label="Đóng"></button>
@@ -578,6 +637,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260911-vertex-ui-16"></script>
+  <script src="app.js?v=20260914-inbox-1"></script>
 </body>
 </html>

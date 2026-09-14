@@ -91,7 +91,7 @@ function splitMessages(text) {
 }
 
 /** Absolute URL for a picture the catalogue stores, so Messenger can fetch it. */
-function publicImageUrl(image) {
+export function publicImageUrl(image) {
   const value = String(image || '').trim();
   if (!value) return '';
   if (/^https?:\/\//i.test(value)) return value;

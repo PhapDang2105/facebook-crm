@@ -45,6 +45,7 @@
         <button class="settings-subnav-item" type="button" data-settings-section="chatbot">Thiết lập chatbot</button>
         <button class="settings-subnav-item" type="button" data-settings-section="products">Sản phẩm</button>
         <button class="settings-subnav-item" type="button" data-settings-section="gifts">Quà tặng</button>
+        <button class="settings-subnav-item" type="button" data-settings-section="customers">Khách hàng</button>
       </div>
     </nav>
   </aside>
@@ -454,6 +455,36 @@
             </div>
           </section>
         </section>
+        <section class="settings-section-content hidden" data-settings-panel="customers" aria-labelledby="customer-settings-title">
+          <section class="settings-card customer-settings-card">
+            <header class="settings-card-head"><div><h1 id="customer-settings-title">Khách hàng</h1></div><button class="order-history-button" id="customers-export" type="button">Xuất CSV</button></header>
+            <div class="customers-toolbar">
+              <label class="order-search-control"><input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tên, ID, số điện thoại, địa chỉ..."></label>
+              <label class="order-filter-control"><select id="customers-channel" aria-label="Kênh"><option value="">Tất cả kênh</option></select></label>
+              <label class="order-filter-control"><select id="customers-source" aria-label="Nguồn">
+                <option value="">Mọi nguồn</option>
+                <option value="inbox">Tin nhắn</option>
+                <option value="comment">Bình luận</option>
+                <option value="ads">Quảng cáo</option>
+              </select></label>
+              <label class="order-filter-control"><select id="customers-gender" aria-label="Giới tính">
+                <option value="">Giới tính</option>
+                <option value="male">Nam</option>
+                <option value="female">Nữ</option>
+              </select></label>
+              <label class="order-filter-control"><select id="customers-label" aria-label="Thẻ">
+                <option value="">Mọi thẻ</option>
+                <option value="new">Khách mới</option>
+                <option value="consulting">Cần tư vấn</option>
+                <option value="customer">Đã mua</option>
+              </select></label>
+              <label class="order-filter-control customers-date"><input id="customers-from" type="date" aria-label="Từ ngày"></label>
+              <label class="order-filter-control customers-date"><input id="customers-to" type="date" aria-label="Đến ngày"></label>
+            </div>
+            <div class="customers-table" id="customers-table"></div>
+            <p class="customers-total" id="customers-total"></p>
+          </section>
+        </section>
         <section class="settings-section-content hidden" data-settings-panel="gifts" aria-label="Quà tặng">
           <section class="settings-card gift-settings-card" aria-label="Quà tặng">
             <header class="settings-card-head">
@@ -475,6 +506,14 @@
       </div>
     </section>
   </main>
+  <div class="channel-dialog hidden" id="customer-dialog" role="dialog" aria-modal="true" aria-labelledby="customer-dialog-title">
+    <div class="channel-dialog-backdrop" data-close-customer-dialog></div>
+    <section class="channel-dialog-panel customer-dialog-panel">
+      <div class="channel-dialog-head"><div class="customer-dialog-identity" id="customer-dialog-identity"><h2 id="customer-dialog-title">Khách hàng</h2></div><button type="button" aria-label="Đóng" data-close-customer-dialog>×</button></div>
+      <table class="customer-attributes" id="customer-attributes"></table>
+      <div class="channel-dialog-actions" id="customer-dialog-actions"></div>
+    </section>
+  </div>
   <div class="channel-dialog hidden" id="facebook-page-dialog" role="dialog" aria-modal="true" aria-labelledby="facebook-page-dialog-title">
     <div class="channel-dialog-backdrop" data-close-channel-dialog></div>
     <section class="channel-dialog-panel">

@@ -361,6 +361,206 @@ function showView(name) {
   if (name === 'orders') syncChatbotOrdersIntoTable();
 }
 
+// ---------------------------------------------------------------------------
+// Khách hàng: one row per person per Page, built by the server from every
+// thread they have (Messenger, comments, ads). Filters are query parameters
+// so the CSV export gets exactly what the table shows.
+const customersTable = document.querySelector('#customers-table');
+const customersTotal = document.querySelector('#customers-total');
+const customersFilters = {
+  q: document.querySelector('#customers-search'),
+  channelId: document.querySelector('#customers-channel'),
+  source: document.querySelector('#customers-source'),
+  gender: document.querySelector('#customers-gender'),
+  label: document.querySelector('#customers-label'),
+  from: document.querySelector('#customers-from'),
+  to: document.querySelector('#customers-to')
+};
+let customersRequestId = 0;
+let customersItems = [];
+const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo' };
+const customerSourceIcons = { inbox: '/assets/icons/messenger.png', comment: '/assets/icons/facebook.png', ads: '/assets/icons/facebook.png' };
+const customerLabelNames = { new: 'Khách mới', consulting: 'Cần tư vấn', customer: 'Đã mua' };
+
+function customersQueryString() {
+  const params = new URLSearchParams();
+  for (const [key, input] of Object.entries(customersFilters)) {
+    if (!input) continue;
+    let value = input.value.trim();
+    if (!value) continue;
+    // Dates cover whole days in the browser's zone.
+    if (key === 'from') value = String(new Date(`${value}T00:00:00`).getTime());
+    if (key === 'to') value = String(new Date(`${value}T23:59:59.999`).getTime());
+    params.set(key, value);
+  }
+  return params.toString();
+}
+
+function fillCustomersChannelOptions() {
+  const select = customersFilters.channelId;
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">Tất cả kênh</option>' + messageChannels
+    .filter(channel => channel.id !== 'local-facebook')
+    .map(channel => `<option value="${escapeHtml(channel.id)}">${escapeHtml(channel.name)}</option>`).join('');
+  select.value = current;
+}
+
+function formatCustomerTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  const pad = number => String(number).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
+function renderCustomers(items, total) {
+  if (!customersTable) return;
+  customersItems = items;
+  if (customersTotal) customersTotal.textContent = items.length === total ? `Tổng: ${total} khách hàng` : `Hiển thị ${items.length}/${total} khách hàng`;
+  if (!items.length) {
+    renderEmptyState(customersTable, total ? 'Không có khách hàng nào khớp bộ lọc.' : 'Chưa có khách hàng nào. Khách sẽ xuất hiện khi họ nhắn tin hoặc bình luận.');
+    return;
+  }
+  customersTable.classList.remove('is-empty');
+  const rows = items.map((customer, index) => {
+    const initial = String(customer.name || '').trim().charAt(0).toUpperCase() || 'K';
+    const avatar = customer.picture
+      ? `<span class="avatar has-photo"><img class="avatar-photo" src="${escapeHtml(customer.picture)}" alt="">${escapeHtml(initial)}</span>`
+      : `<span class="avatar">${escapeHtml(initial)}</span>`;
+    const sources = customer.sources.map(source => `<span class="customer-source"><img src="${customerSourceIcons[source] || customerSourceIcons.inbox}" alt="">${customerSourceNames[source] || source}</span>`).join('');
+    const tags = [
+      ...customer.labels.map(label => `<span class="customer-tag">${escapeHtml(customerLabelNames[label] || label)}</span>`),
+      customer.adTitle ? `<span class="customer-tag customer-tag--ad" title="${escapeHtml(customer.adTitle)}">QC</span>` : '',
+      customer.botEnabled ? '<span class="customer-tag customer-tag--bot">Bot</span>' : ''
+    ].join('');
+    const gender = customer.gender === 'male' ? 'Nam' : customer.gender === 'female' ? 'Nữ' : '';
+    const orders = customer.orderCount ? `${customer.orderCount} · ${formatOrderMoney(customer.orderTotal)}` : '';
+    return `<tr data-customer-index="${index}"${customer.unread ? ' class="is-unread"' : ''}>
+      <td><div class="customer-cell">${avatar}<div><strong>${escapeHtml(customer.name || 'Khách Facebook')}</strong><small>${escapeHtml(customer.psid)}</small></div></div></td>
+      <td>${gender}</td>
+      <td class="customer-channel">${escapeHtml(customer.channelName || customer.channelId)}</td>
+      <td>${sources}</td>
+      <td class="customer-time">${formatCustomerTime(customer.firstContactAt)}</td>
+      <td class="customer-time">${formatCustomerTime(customer.lastCustomerMessageAt)}</td>
+      <td class="customer-time">${formatCustomerTime(customer.lastMessageAt)}</td>
+      <td>${escapeHtml(customer.phone)}</td>
+      <td class="customer-money">${orders}</td>
+      <td>${tags}</td>
+    </tr>`;
+  }).join('');
+  customersTable.innerHTML = `<table><thead><tr>
+    <th>Khách hàng</th><th>Giới tính</th><th>Kênh</th><th>Nguồn</th><th>Liên hệ lần đầu</th><th>Khách nhắn cuối</th><th>Tương tác cuối</th><th>Số điện thoại</th><th>Đơn hàng</th><th>Thẻ</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function loadCustomers() {
+  if (!customersTable) return;
+  fillCustomersChannelOptions();
+  const requestId = ++customersRequestId;
+  try {
+    const result = await readApiResponse(await fetch(`/api/customers?${customersQueryString()}`));
+    if (requestId !== customersRequestId) return;
+    renderCustomers(Array.isArray(result.items) ? result.items : [], Number(result.total) || 0);
+  } catch (error) {
+    if (requestId !== customersRequestId) return;
+    renderEmptyState(customersTable, error.message || 'Chưa tải được danh sách khách hàng.');
+  }
+}
+
+// Attribute sheet: everything the CRM knows about one person, with links
+// into their threads. Mirrors the contact card staff used in Smax.
+const customerDialog = document.querySelector('#customer-dialog');
+
+function customerGenderText(customer) {
+  const gender = customer.gender === 'male' ? 'Nam' : customer.gender === 'female' ? 'Nữ' : '';
+  const source = { staff: 'nhân viên chọn', message: 'theo cách khách xưng', name: 'đoán theo tên' }[customer.genderSource];
+  return gender ? `${gender}${source ? ` (${source})` : ''}` : '';
+}
+
+function openCustomerDialog(customer) {
+  if (!customerDialog) return;
+  const initial = String(customer.name || '').trim().charAt(0).toUpperCase() || 'K';
+  const identity = customerDialog.querySelector('#customer-dialog-identity');
+  if (identity) {
+    identity.innerHTML = `${customer.picture ? `<span class="avatar has-photo"><img class="avatar-photo" src="${escapeHtml(customer.picture)}" alt="">${escapeHtml(initial)}</span>` : `<span class="avatar">${escapeHtml(initial)}</span>`}<div><h2 id="customer-dialog-title">${escapeHtml(customer.name || 'Khách Facebook')}</h2><small>${escapeHtml(customer.psid)}</small></div>`;
+  }
+  const rows = [
+    ['Kênh', customer.channelName || customer.channelId],
+    ['Nguồn', customer.sources.map(source => customerSourceNames[source] || source).join(', ')],
+    ['Quảng cáo', customer.adTitle],
+    ['Giới tính', customerGenderText(customer)],
+    ['Liên hệ lần đầu', formatCustomerTime(customer.firstContactAt)],
+    ['Khách nhắn cuối', formatCustomerTime(customer.lastCustomerMessageAt)],
+    ['Tương tác cuối', formatCustomerTime(customer.lastMessageAt)],
+    ['Tin cuối', customer.lastMessagePreview],
+    ['Số điện thoại', customer.phone],
+    ['Địa chỉ', customer.address],
+    ['Đơn hàng', customer.orderCount ? `${customer.orderCount} đơn · ${formatOrderMoney(customer.orderTotal)}` : '0'],
+    ['Ghi chú', String(customer.noteCount || 0)],
+    ['Thẻ', customer.labels.map(label => customerLabelNames[label] || label).join(', ')],
+    ['Bot', customer.botEnabled ? 'Đang bật' : 'Tắt'],
+    ['Hội thoại', customer.conversations.map(item => item.source === 'comment' ? 'Bình luận' : 'Messenger').join(', ')]
+  ];
+  const table = customerDialog.querySelector('#customer-attributes');
+  if (table) table.innerHTML = rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value || '—')}</td></tr>`).join('');
+  const actions = customerDialog.querySelector('#customer-dialog-actions');
+  if (actions) {
+    actions.innerHTML = customer.conversations.map(item => `<button class="settings-save-button" type="button" data-open-conversation="${escapeHtml(item.id)}">${item.source === 'comment' ? 'Mở bình luận' : 'Mở Messenger'}</button>`).join('');
+  }
+  customerDialog.dataset.channelId = customer.channelId;
+  customerDialog.classList.remove('hidden');
+}
+
+function closeCustomerDialog() {
+  customerDialog?.classList.add('hidden');
+}
+
+customerDialog?.addEventListener('click', event => {
+  if (event.target.closest('[data-close-customer-dialog]')) { closeCustomerDialog(); return; }
+  const open = event.target.closest('[data-open-conversation]');
+  if (open) {
+    closeCustomerDialog();
+    openCustomerConversation({ channelId: customerDialog.dataset.channelId, conversations: [{ id: open.dataset.openConversation }] });
+  }
+});
+
+/** Opens one of the customer's threads in Tin nhắn — the first listed. */
+async function openCustomerConversation(customer) {
+  const preferred = customer.conversations.find(item => item.source !== 'comment') || customer.conversations[0];
+  if (!preferred) return;
+  showView('messages');
+  if (currentMessageChannelId !== customer.channelId) await switchMessageChannel(customer.channelId);
+  currentMessageLabel = 'all';
+  messageLabelMenu?.querySelectorAll('[data-message-label]').forEach(item => item.classList.toggle('active', item.dataset.messageLabel === 'all'));
+  if (messageLabelFilter) messageLabelFilter.innerHTML = 'Nhãn <span aria-hidden="true">▾</span>';
+  messageLabelFilter?.classList.remove('active');
+  if (messageSearchInput) messageSearchInput.value = '';
+  filterConversations();
+  const element = findConversationElement(preferred.id);
+  if (element) {
+    selectConversation(element);
+    element.scrollIntoView({ block: 'nearest' });
+  } else {
+    showToast('Hội thoại này chưa có trong hộp thư đang mở.');
+  }
+}
+
+let customersSearchTimer = 0;
+customersFilters.q?.addEventListener('input', () => {
+  clearTimeout(customersSearchTimer);
+  customersSearchTimer = setTimeout(loadCustomers, 250);
+});
+['channelId', 'source', 'gender', 'label', 'from', 'to'].forEach(key => customersFilters[key]?.addEventListener('change', loadCustomers));
+document.querySelector('#customers-export')?.addEventListener('click', () => {
+  window.open(`/api/customers/export.csv?${customersQueryString()}`, '_blank');
+});
+customersTable?.addEventListener('click', event => {
+  const row = event.target.closest('tr[data-customer-index]');
+  if (!row) return;
+  const customer = customersItems[Number(row.dataset.customerIndex)];
+  if (customer) openCustomerDialog(customer);
+});
+
 // Chatbot orders are ordinary rows in the order table, tagged "Chatbot" in the
 // Nguồn đơn column, so they are checked, processed and exported like a Pancake
 // import. This pulls any new ones in whenever the orders view opens.
@@ -1169,6 +1369,7 @@ async function loadMessageChannels() {
     platform: 'facebook'
   }];
   if (!messageChannels.some(channel => channel.id === currentMessageChannelId)) currentMessageChannelId = messageChannels[0].id;
+  fillCustomersChannelOptions();
   if (usingRemoteConversations) {
     try {
       await loadRemoteConversations(currentMessageChannelId);
@@ -2516,6 +2717,7 @@ function showSettingsSection(name = 'channels') {
     showToast(error.message || 'Chưa tải được danh mục sản phẩm.', 'error');
   });
   if (section === 'gifts') loadGifts();
+  if (section === 'customers') loadCustomers();
 }
 
 function renderChatbotToggle(conversation = getActiveConversation()) {

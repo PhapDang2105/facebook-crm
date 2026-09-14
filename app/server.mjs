@@ -27,6 +27,7 @@ import {
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
+import { customersToCsv, listCustomers } from './customers.mjs';
 import { sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
 import {
@@ -760,6 +761,20 @@ const server = http.createServer(async (request, response) => {
         console.error('Webhook processing failed:', error.message);
       }
       return undefined;
+    }
+    // Khách hàng: every person who has messaged or commented, one row per Page.
+    if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv')) {
+      const filters = Object.fromEntries(['q', 'channelId', 'source', 'gender', 'label', 'from', 'to'].map(key => [key, url.searchParams.get(key) || '']));
+      const result = await listCustomers(filters);
+      if (url.pathname.endsWith('.csv')) {
+        response.writeHead(200, {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="khach-hang-${new Date().toISOString().slice(0, 10)}.csv"`,
+          'Cache-Control': 'no-store'
+        });
+        return response.end(customersToCsv(result.items));
+      }
+      return sendJson(response, 200, result);
     }
     if (request.method === 'GET' && url.pathname === '/api/messaging/conversations') {
       const items = await listConversations(url.searchParams.get('channelId') || '');

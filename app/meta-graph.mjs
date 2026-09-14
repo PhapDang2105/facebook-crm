@@ -84,11 +84,20 @@ export function replyToComment({ commentId, message, pageAccessToken }) {
 
 /**
  * Private reply: one Messenger message to the person who wrote the comment,
- * allowed once per comment within seven days. It opens (or continues) their
- * inbox thread, which the messaging webhook then reports like any other.
+ * allowed once per comment within seven days. It goes through the Send API
+ * with the comment as recipient — the old /{comment-id}/private_replies edge
+ * answers "Unsupported post request" on current Graph versions. The message
+ * lands in their inbox thread, which message_echoes then reports like any other.
  */
-export function sendPrivateReply({ commentId, message, pageAccessToken }) {
-  return metaRequest(`${commentId}/private_replies`, { method: 'POST', body: { message, access_token: pageAccessToken } });
+export function sendPrivateReply({ pageId, commentId, message, pageAccessToken }) {
+  return metaRequest(`${pageId}/messages`, {
+    method: 'POST',
+    body: {
+      recipient: JSON.stringify({ comment_id: commentId }),
+      message: JSON.stringify({ text: message }),
+      access_token: pageAccessToken
+    }
+  });
 }
 
 /** The commenter's picture and the comment's permalink — details the webhook does not carry. */

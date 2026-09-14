@@ -103,9 +103,10 @@ async function sendCommentReply(conversation, { text, imageUrl, privateReply }) 
   if (!conversation.lastCommentId) throw Object.assign(new Error('Chưa có bình luận nào của khách để trả lời.'), { statusCode: 400 });
   const pageAccessToken = await getPageAccessToken(conversation.pageId);
   const result = privateReply
-    ? await sendPrivateReply({ commentId: conversation.lastCommentId, message: body, pageAccessToken })
+    ? await sendPrivateReply({ pageId: conversation.pageId, commentId: conversation.lastCommentId, message: body, pageAccessToken })
     : await replyToComment({ commentId: conversation.lastCommentId, message: body, pageAccessToken });
-  const id = String(result.id || `sent-${Date.now()}`);
+  // A comment reply answers with {id}; the Send API with {message_id}.
+  const id = String(result.id || result.message_id || `sent-${Date.now()}`);
   const message = {
     id,
     mid: id,

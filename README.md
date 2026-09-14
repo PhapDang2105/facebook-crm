@@ -37,7 +37,7 @@ GraphCode and a portable Node.js runtime are installed locally under `tools/`; n
 
 ## Cấu trúc
 
-- `app/`: backend Node (server, webhook Meta, chatbot, đơn hàng). `app/processing/` là luồng xử lý của chatbot: danh mục → nhận diện → tính tiền → soạn tin.
+- `app/`: backend Node (server, webhook Meta, chatbot, đơn hàng, `customers.mjs` gộp mọi luồng của một người thành danh sách Khách hàng). `app/processing/` là luồng xử lý của chatbot: danh mục → nhận diện → tính tiền → soạn tin.
 - `app/products.seed.json`, `app/gifts.seed.json`: danh mục sản phẩm và quà tặng khởi tạo; sau lần chạy đầu, dữ liệu sống ở `data/processed/`.
 - `web/`: giao diện (HTML/CSS/JS thuần, không build).
 - `data/processed/`: dữ liệu vận hành (hội thoại, đơn, sản phẩm, quà tặng, cấu hình chatbot) — không commit.

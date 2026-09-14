@@ -10,6 +10,7 @@ import {
   conversationId,
   markOutgoingStatusUntil,
   publicConversation,
+  readMessagingStore,
   saveMessage,
   updateMessageStatus,
   updateMessagingStore
@@ -293,6 +294,7 @@ async function resolveCommentContext(changes) {
     const token = await getPageAccessToken(change.conversation.pageId).catch(() => '');
     if (!token) continue;
     const comment = change.conversation.profileResolvedAt ? {} : await fetchCommentDetails(change.message.commentId, token);
+    if (!change.conversation.profileResolvedAt && !comment.picture) logProfileMiss('bình luận', change.conversation.psid, comment.error);
     const post = needsPost(change.conversation) ? await fetchPostSummary(change.conversation.post?.id, token) : null;
     details.push({ id: change.conversation.id, comment, post });
   }
@@ -309,8 +311,54 @@ async function resolveCommentContext(changes) {
 }
 
 // A lookup that failed (Standard access, app still in Development) is retried
-// once a day, so pictures fill in by themselves after the app goes Live.
-const profileRetryAfterMs = 24 * 60 * 60 * 1000;
+// every few hours, so pictures fill in by themselves after the app goes Live.
+const profileRetryAfterMs = 3 * 60 * 60 * 1000;
+
+// The same Graph refusal repeats for every customer; journalctl gets it once
+// per reason, with the first PSID it happened for.
+const loggedProfileMisses = new Set();
+function logProfileMiss(kind, psid, error) {
+  const reason = error || 'Graph không trả về ảnh';
+  const key = `${kind}:${reason}`;
+  if (loggedProfileMisses.has(key)) return;
+  loggedProfileMisses.add(key);
+  console.warn(`Ảnh đại diện (${kind}) không lấy được cho ${psid}: ${reason}`);
+}
+
+/**
+ * Cài đặt → Kênh → "Tải ảnh khách": retries the profile lookup for every
+ * thread of a Page that still has no picture, and reports why it failed so
+ * the reason is visible without reading the server log.
+ */
+export async function refreshCustomerProfiles(pageId, { limit = 100 } = {}) {
+  const token = await getPageAccessToken(pageId);
+  const store = await readMessagingStore();
+  const targets = store.conversations
+    .filter(item => item.pageId === String(pageId) && !item.picture && item.psid !== item.pageId)
+    .sort((first, second) => (second.lastMessageAt || 0) - (first.lastMessageAt || 0))
+    .slice(0, limit)
+    .map(item => ({ id: item.id, psid: item.psid, source: item.source, lastCommentId: item.lastCommentId || '' }));
+  const results = [];
+  for (const target of targets) {
+    const profile = target.source === 'comment'
+      ? (target.lastCommentId ? await fetchCommentDetails(target.lastCommentId, token) : { error: 'Không còn mã bình luận để tra' })
+      : await fetchCustomerProfile(target.psid, token);
+    results.push({ ...target, name: profile.name || '', picture: profile.picture || '', error: profile.error || (profile.picture ? '' : 'Graph không trả về ảnh') });
+  }
+  await updateMessagingStore(current => {
+    for (const result of results) {
+      const conversation = current.conversations.find(item => item.id === result.id);
+      if (!conversation) continue;
+      conversation.profileResolvedAt = Date.now();
+      if (result.name) conversation.name = result.name;
+      if (result.picture) conversation.picture = result.picture;
+      if (result.name || result.picture) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
+    }
+    return null;
+  });
+  const errors = [...new Set(results.filter(item => !item.picture).map(item => item.error))];
+  return { checked: results.length, updated: results.filter(item => item.picture).length, errors: errors.slice(0, 3) };
+}
 
 /** Fills in the customer name and photo once, right after their first message arrives. */
 async function resolveMissingProfiles(changes) {
@@ -324,6 +372,7 @@ async function resolveMissingProfiles(changes) {
   for (const item of unique) {
     try {
       const profile = await fetchCustomerProfile(item.psid, await getPageAccessToken(item.pageId));
+      if (!profile.picture) logProfileMiss('Messenger', item.psid, profile.error);
       profiles.push({ ...item, ...profile });
     } catch (error) {
       // Without a valid Page token the conversation keeps its placeholder name.

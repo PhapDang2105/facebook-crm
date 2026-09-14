@@ -97,6 +97,31 @@ test('bot trả lời bình luận: nhắn riêng nội dung, công khai một c
   assert.ok(!/[{}#]/.test(sent[1].text), 'placeholders, spintax and separators are all resolved');
 });
 
+test('nhắn riêng thất bại (#10 app khác giữ thread): công khai mời khách inbox thay vì bảo kiểm tra tin nhắn, lưu lỗi', async () => {
+  const sent = [];
+  const state = [];
+  const templates = defaultMessageTemplates();
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: commentConversationId(pageId, userId, postId), psid: userId, name: 'Phạm Nhài', source: 'comment', lastCommentId: 'c9' },
+    message: { id: 'c9', mid: 'c9', direction: 'incoming', type: 'text', text: 'inbox' }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templates }),
+    listMessages: async () => [],
+    sendMessage: async (_conversation, message) => {
+      if (message.privateReply) throw new Error('(#10) Không gửi được tin nhắn do một ứng dụng khác hiện đang kiểm soát thread này.');
+      sent.push(message);
+      return { message: { mid: 'x' } };
+    },
+    saveBotState: async (_id, value) => state.push(value),
+    requestReply: async () => ({ templateId: 'WELCOME', messages: ['Xin chào'], images: [], handoff: false })
+  });
+  assert.equal(sent.length, 1);
+  assert.ok(/Messenger|ib cho Page/.test(sent[0].text), sent[0].text);
+  assert.ok(!/kiểm tra tin nhắn|check hộp/.test(sent[0].text), 'must not tell the customer to check an empty inbox');
+  assert.match(state.at(-1).botLastError, /#10/, 'the private-reply error is kept for staff');
+});
+
 test('bình luận: chọn ngẫu nhiên một mẫu, {Dạ|Hi} xoay chữ, thích và ẩn bình luận có số điện thoại', async () => {
   const { pickVariant, spin } = await import('../app/chatbot-templates.mjs');
   assert.deepEqual(pickVariant({ messages: ['a', 'b', 'c'] }, () => 0.99), ['c']);

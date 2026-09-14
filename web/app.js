@@ -323,7 +323,7 @@ const quickReplyText = document.querySelector('#quick-reply-text');
 const quickReplyImageList = document.querySelector('#quick-reply-image-list');
 const quickReplyImageInput = document.querySelector('#quick-reply-image-input');
 const quickReplyFormStatus = document.querySelector('#quick-reply-form-status');
-const messageDefaultIds = ['WELCOME', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PRIVATE_REPLY', 'CSKH_HANDOFF'];
+const messageDefaultIds = ['WELCOME', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PRIVATE_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'CSKH_HANDOFF'];
 let inboxLabels = [];
 let quickReplies = [];
 let labelDraft = [];
@@ -931,14 +931,14 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
 
-function showToast(message, type = 'error') {
+function showToast(message, type = 'error', duration = 3500) {
   document.querySelector('.app-toast')?.remove();
   const toast = document.createElement('div');
   toast.className = `app-toast app-toast--${type}`;
   toast.textContent = message;
   toast.setAttribute('role', 'status');
   document.body.appendChild(toast);
-  window.setTimeout(() => toast.remove(), 3500);
+  window.setTimeout(() => toast.remove(), duration);
 }
 
 async function readApiResponse(response) {
@@ -967,7 +967,7 @@ function renderFacebookChannels(state) {
     return `<article class="channel-item" data-channel-id="${escapeHtml(channel.id)}">
       ${channelAvatar(channel)}
       <div class="channel-item-copy"><strong>${escapeHtml(channel.name)}</strong><small><span class="channel-connected-dot${healthy && channel.subscribed ? '' : ' warning'}"></span>${escapeHtml(problem)}ID ${escapeHtml(channel.id)}</small></div>
-      <div class="channel-item-actions"><button type="button" data-channel-action="refresh">Làm mới</button><button class="channel-remove-button" type="button" data-channel-action="remove">Ngắt kết nối</button></div>
+      <div class="channel-item-actions"><button type="button" data-channel-action="refresh">Làm mới</button><button type="button" data-channel-action="profiles" title="Tra lại tên và ảnh đại diện cho các khách chưa có ảnh">Tải ảnh khách</button><button class="channel-remove-button" type="button" data-channel-action="remove">Ngắt kết nối</button></div>
     </article>`;
   }).join('') : '<p class="channel-empty">Chưa có Facebook Page nào được kết nối.</p>';
 }
@@ -2414,7 +2414,7 @@ async function loadChatbotSettings() {
 
 function chatbotTemplateLabel(id) {
   const labels = {
-    WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', COMMENT_PUBLIC_REPLY: 'Trả lời công khai dưới bình luận', COMMENT_PRIVATE_REPLY: 'Mở đầu tin nhắn riêng từ bình luận', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
+    WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', COMMENT_PUBLIC_REPLY: 'Trả lời công khai dưới bình luận', COMMENT_PRIVATE_REPLY: 'Mở đầu tin nhắn riêng từ bình luận', COMMENT_PUBLIC_FALLBACK: 'Trả lời công khai khi không nhắn riêng được', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
     ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
     ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
     PRICE_MIX_TUI_LON: 'Bảng giá mix túi lớn', PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_COMBO: 'Báo giá sản phẩm (đơn vị Combo)',
@@ -4928,6 +4928,14 @@ facebookChannelList?.addEventListener('click', async event => {
   if (actionButton.dataset.channelAction === 'remove' && !window.confirm(`Ngắt kết nối “${pageName}”? Tin nhắn mới từ Page này sẽ không được đồng bộ.`)) return;
   actionButton.disabled = true;
   try {
+    if (actionButton.dataset.channelAction === 'profiles') {
+      const result = await readApiResponse(await fetch(`/api/channels/facebook/${encodeURIComponent(pageId)}/profiles`, { method: 'POST' }));
+      if (!result.checked) showToast('Mọi khách của Page này đã có ảnh.', 'success');
+      else if (result.updated) showToast(`Đã lấy ảnh cho ${result.updated}/${result.checked} khách.${result.errors.length ? ` Còn lại: ${result.errors[0]}` : ''}`, result.updated === result.checked ? 'success' : 'error', 10000);
+      else showToast(`Facebook không trả ảnh cho ${result.checked} khách: ${result.errors[0] || 'không rõ lý do'}`, 'error', 12000);
+      if (usingRemoteConversations) loadRemoteConversations(currentMessageChannelId).catch(() => {});
+      return;
+    }
     const endpoint = actionButton.dataset.channelAction === 'refresh'
       ? `/api/channels/facebook/${encodeURIComponent(pageId)}/refresh`
       : `/api/channels/facebook/${encodeURIComponent(pageId)}`;

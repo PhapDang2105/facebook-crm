@@ -26,7 +26,7 @@ import {
 } from './config.mjs';
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
-import { processWebhookPayload, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
+import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { customersToCsv, listCustomers } from './customers.mjs';
 import { defaultConversationLabels, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
@@ -683,6 +683,15 @@ const server = http.createServer(async (request, response) => {
       store.items = store.items.filter(item => item.id !== pageId);
       await writeChannelStore(store);
       return sendJson(response, 200, { items: store.items.map(publicChannel) });
+    }
+    // Cài đặt → Kênh → Tải ảnh khách: retry avatars for threads still showing a letter.
+    const profilesChannelMatch = url.pathname.match(/^\/api\/channels\/facebook\/([^/]+)\/profiles$/);
+    if (request.method === 'POST' && profilesChannelMatch) {
+      try {
+        return sendJson(response, 200, await refreshCustomerProfiles(decodeURIComponent(profilesChannelMatch[1])));
+      } catch (error) {
+        return sendJson(response, 502, { error: error.message });
+      }
     }
     const refreshChannelMatch = url.pathname.match(/^\/api\/channels\/facebook\/([^/]+)\/refresh$/);
     if (request.method === 'POST' && refreshChannelMatch) {

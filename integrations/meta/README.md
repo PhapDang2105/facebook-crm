@@ -109,6 +109,10 @@ Nút **Làm mới** kiểm tra lại tên Page, ảnh đại diện và trạng 
 - Tên và ảnh người bình luận lấy từ `GET /{comment-id}?fields=from{name,picture}`; tiêu đề và link bài viết từ `GET /{post-id}?fields=message,permalink_url`.
 - Hội thoại đến từ quảng cáo Click-to-Messenger (webhook `referral` có `ad_id`/`ad_title`) mang nhãn **QC** trong danh sách, dòng "Từ quảng cáo" ở bảng thông tin khách và lọc được bằng **Nhãn → Từ quảng cáo**.
 
+### Lỗi (#10) "một ứng dụng khác hiện đang kiểm soát thread này"
+
+Messenger chỉ cho **một app** giữ quyền trả lời một hội thoại (Handover Protocol). Khi Page còn nối với Smax/Pancake/app cũ (Gona Managers) và app đó đang là *Primary Receiver*, tin nhắn riêng từ bình luận (và mọi tin bot gửi) bị Meta từ chối với mã #10. Bot khi đó không nói "kiểm tra tin nhắn" mà trả lời công khai bằng mẫu `COMMENT_PUBLIC_FALLBACK` (mời khách inbox Page) và ghi lỗi vào panel khách. Cách sửa dứt điểm: **Cài đặt Page → Tin nhắn nâng cao (Advanced Messaging) → Giao thức bàn giao (Handover Protocol)** → chọn *Giot Nang CRM* làm **Ứng dụng nhận chính** (Primary Receiver) và bỏ/hạ app cũ xuống Secondary; hoặc gỡ hẳn app cũ ở **Cài đặt Page → Ứng dụng đã liên kết**.
+
 ## Ảnh đại diện khách hàng
 
 CRM hiển thị chữ cái đầu thay cho ảnh đại diện. Đây là giới hạn của Meta, không phải lỗi: Messenger User Profile API (`GET /{psid}?fields=name,profile_pic`) đòi quyền `pages_messaging` ở mức **Advanced Access**, còn ứng dụng chưa qua App Review chỉ có Standard Access. Graph trả về:

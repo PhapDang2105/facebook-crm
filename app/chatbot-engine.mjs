@@ -204,6 +204,7 @@ export async function processChatbotChanges(changes, dependencies) {
         : null;
       const order = outcome?.order || null;
       const alreadyHandled = Boolean(outcome) && outcome.created === false;
+      let privateError = '';
       if (settings.responseMode === 'automatic' && isComment) {
         // Under a comment: the full answer goes to the person's Messenger as a
         // private reply (Facebook allows one per comment, so the messages are
@@ -212,8 +213,19 @@ export async function processChatbotChanges(changes, dependencies) {
         // continue in Messenger, where the address exchange is private.
         const intro = renderChatbotReply({ template_id: 'COMMENT_PRIVATE_REPLY' }, settings.messageTemplates, replyContext);
         const privateText = [...(intro.templateId === 'COMMENT_PRIVATE_REPLY' ? intro.messages : []), ...reply.messages].join('\n\n');
-        if (privateText) await sendMessage(conversation, { text: privateText, privateReply: true });
-        const publicReply = renderChatbotReply({ template_id: 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
+        // Messenger can refuse the private reply — most often error #10, another
+        // app holding the thread (Handover Protocol). Telling the customer to
+        // check an inbox that stays empty loses the lead, so the public reply
+        // then asks them to message the Page instead, and the error is kept
+        // for the customer panel.
+        if (privateText) {
+          try {
+            await sendMessage(conversation, { text: privateText, privateReply: true });
+          } catch (error) {
+            privateError = error.message;
+          }
+        }
+        const publicReply = renderChatbotReply({ template_id: privateError ? 'COMMENT_PUBLIC_FALLBACK' : 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
         for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
         // Like the comment so the customer sees it was noticed; hide it when it
         // carries a phone number (or always, per settings) so competitors
@@ -235,8 +247,8 @@ export async function processChatbotChanges(changes, dependencies) {
         botLastTemplateId: reply.templateId,
         botLastReplyAt: Date.now(),
         botDraft: settings.responseMode === 'draft' ? reply.messages.join('\n\n') : '',
-        botLastError: '',
-        botLastErrorAt: 0,
+        botLastError: privateError ? `Không nhắn riêng được: ${privateError}` : '',
+        botLastErrorAt: privateError ? Date.now() : 0,
         // undefined leaves the stored basket alone; null clears it once ordered.
         ...(reply.pendingOrder !== undefined && !isComment ? { pendingOrder: reply.pendingOrder } : {}),
         // Labels staff see in the inbox: a handed-off thread needs a person, an

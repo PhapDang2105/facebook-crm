@@ -1740,6 +1740,11 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .message-row:focus-within .message-quick-actions,
 .message-row.message-menu-open .message-quick-actions { opacity: 1; transform: translateX(0); }
 .message-row.message-menu-open .message-quick-actions { transition: none; }
+/* The quick-action strip is transformed, so it traps the menu in its own
+   stacking context: the open row has to rise above the later bubbles. */
+.message-row.message-menu-open,
+.message-row.message-reaction-open { z-index: 30; }
+.message-row.message-menu-open .message-quick-actions { z-index: 30; }
 .message-quick-actions > button { display: grid; place-items: center; width: 30.375px; height: 30.375px; padding: 0; color: #65676b; background: transparent; border: 0; border-radius: 50%; font-size: 19.125px; font-weight: 700; cursor: pointer; }
 .message-quick-actions > button:hover,
 .message-quick-actions > button:focus-visible { color: #1c1e21; background: #f0f2f5; outline: none; }

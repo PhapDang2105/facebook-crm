@@ -942,6 +942,9 @@ const server = http.createServer(async (request, response) => {
             item.customerNotes = item.customerNotes.slice(0, 100);
           } else if (payload.type === 'bot') {
             item.botEnabled = payload.enabled === true;
+          } else if (payload.type === 'bot-error' && payload.clear === true) {
+            item.botLastError = '';
+            item.botLastErrorAt = 0;
           } else if (payload.type === 'gender') {
             // Staff's choice beats every guess; clearing it lets guesses back in.
             const gender = ['male', 'female'].includes(payload.gender) ? payload.gender : '';

@@ -502,11 +502,6 @@ function openCustomerDialog(customer) {
   ];
   const table = customerDialog.querySelector('#customer-attributes');
   if (table) table.innerHTML = rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value || '—')}</td></tr>`).join('');
-  const actions = customerDialog.querySelector('#customer-dialog-actions');
-  if (actions) {
-    actions.innerHTML = customer.conversations.map(item => `<button class="settings-save-button" type="button" data-open-conversation="${escapeHtml(item.id)}">${item.source === 'comment' ? 'Mở bình luận' : 'Mở Messenger'}</button>`).join('');
-  }
-  customerDialog.dataset.channelId = customer.channelId;
   customerDialog.classList.remove('hidden');
 }
 
@@ -515,34 +510,8 @@ function closeCustomerDialog() {
 }
 
 customerDialog?.addEventListener('click', event => {
-  if (event.target.closest('[data-close-customer-dialog]')) { closeCustomerDialog(); return; }
-  const open = event.target.closest('[data-open-conversation]');
-  if (open) {
-    closeCustomerDialog();
-    openCustomerConversation({ channelId: customerDialog.dataset.channelId, conversations: [{ id: open.dataset.openConversation }] });
-  }
+  if (event.target.closest('[data-close-customer-dialog]')) closeCustomerDialog();
 });
-
-/** Opens one of the customer's threads in Tin nhắn — the first listed. */
-async function openCustomerConversation(customer) {
-  const preferred = customer.conversations.find(item => item.source !== 'comment') || customer.conversations[0];
-  if (!preferred) return;
-  showView('messages');
-  if (currentMessageChannelId !== customer.channelId) await switchMessageChannel(customer.channelId);
-  currentMessageLabel = 'all';
-  messageLabelMenu?.querySelectorAll('[data-message-label]').forEach(item => item.classList.toggle('active', item.dataset.messageLabel === 'all'));
-  if (messageLabelFilter) messageLabelFilter.innerHTML = 'Nhãn <span aria-hidden="true">▾</span>';
-  messageLabelFilter?.classList.remove('active');
-  if (messageSearchInput) messageSearchInput.value = '';
-  filterConversations();
-  const element = findConversationElement(preferred.id);
-  if (element) {
-    selectConversation(element);
-    element.scrollIntoView({ block: 'nearest' });
-  } else {
-    showToast('Hội thoại này chưa có trong hộp thư đang mở.');
-  }
-}
 
 let customersSearchTimer = 0;
 customersFilters.q?.addEventListener('input', () => {
@@ -2883,8 +2852,20 @@ function renderChatbotError(conversation = getActiveConversation()) {
   customerBotAlert.classList.toggle('hidden', !failure?.message);
   if (!failure?.message) return;
   const when = failure.at ? ` lúc ${formatCustomerPanelTime(failure.at, true)}` : '';
-  customerBotAlert.innerHTML = `<strong>Chatbot chưa tạo được đơn${escapeHtml(when)}</strong><span>${escapeHtml(failure.message)}</span><span>Khách có thể đã nhận tin xác nhận. Kiểm tra lại và tạo đơn thủ công nếu cần.</span>`;
+  // Meta's errors end with a documentation pointer that helps nobody here.
+  const reason = String(failure.message).replace(/\s*Please read the Graph API documentation.*$/i, '').trim();
+  customerBotAlert.innerHTML = `<strong>Bot chưa trả lời được${escapeHtml(when)}</strong><span>${escapeHtml(reason)}</span><button type="button" class="customer-bot-alert-dismiss" aria-label="Ẩn thông báo">×</button>`;
 }
+
+// Dismissing clears the error on the server, so it does not come back on reload.
+customerBotAlert?.addEventListener('click', async event => {
+  if (!event.target.closest('.customer-bot-alert-dismiss')) return;
+  const conversation = getActiveConversation();
+  const key = getCustomerPanelKey(conversation);
+  customerBotErrors[key] = { message: '', at: 0 };
+  renderChatbotError(conversation);
+  if (conversation?.dataset.conversationId) saveCustomerPanelChange(conversation, { type: 'bot-error', clear: true });
+});
 
 function renderCustomerNotes(conversation = getActiveConversation()) {
   if (!customerNoteList || !customerNoteEmpty) return;
@@ -3290,7 +3271,7 @@ function buildPostContext(conversation) {
   const url = conversation.dataset.postUrl || '';
   const notice = document.createElement('div');
   notice.className = 'post-context-notice';
-  notice.textContent = 'Khách bình luận dưới bài viết của Trang. ';
+  notice.textContent = conversation.dataset.source === 'comment' ? 'Khách bình luận dưới bài viết của Trang. ' : 'Khách đến từ bình luận dưới bài viết của Trang. ';
   if (url) {
     const link = document.createElement('a');
     link.href = url;
@@ -3347,7 +3328,7 @@ function renderConversation(conversation = getActiveConversation()) {
     ? formatChatDateLabel(getChatTimestamp(getConversationMessages(conversation)[0]?.createdAt))
     : conversation.dataset.initialTime === 'Hôm qua' ? 'Hôm qua' : 'Hôm nay';
   chatBody.appendChild(date);
-  if (conversation.dataset.source === 'comment') chatBody.appendChild(buildPostContext(conversation));
+  if (conversation.dataset.source === 'comment' || conversation.dataset.postTitle || conversation.dataset.postUrl) chatBody.appendChild(buildPostContext(conversation));
   getConversationMessages(conversation).forEach((message, index) => {
     const messageId = message.id || `base-${normalizeColumnName(name)}-${index}`;
     const action = message.direction === 'outgoing' ? getChatMessageAction(name, messageId) : '';

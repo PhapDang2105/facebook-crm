@@ -14,15 +14,18 @@ export function detectProduct(text) {
 }
 
 /**
- * Picks the product for a conversation. The ad or post the customer came from
- * is the stronger signal — they clicked it on purpose — but anything they name
- * themselves afterwards overrides it.
+ * Picks the product for a conversation. Anything the customer names
+ * themselves wins; otherwise the ad they clicked, then the Page post they
+ * commented under (or came from into Messenger) — both are things they chose
+ * to react to, so the product in them is what they are asking about.
  */
-export function resolveConversationProduct({ messageText = '', adTitle = '', referralRef = '' } = {}) {
+export function resolveConversationProduct({ messageText = '', adTitle = '', referralRef = '', postText = '' } = {}) {
   const fromMessage = detectProduct(messageText);
   if (fromMessage !== unknownProduct) return { product: fromMessage, source: 'message' };
   const fromAd = detectProduct([adTitle, referralRef].filter(Boolean).join(' '));
   if (fromAd !== unknownProduct) return { product: fromAd, source: 'ad' };
+  const fromPost = detectProduct(postText);
+  if (fromPost !== unknownProduct) return { product: fromPost, source: 'post' };
   return { product: unknownProduct, source: '' };
 }
 

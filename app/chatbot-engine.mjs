@@ -18,7 +18,8 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
   const { product } = resolveConversationProduct({
     messageText: message.text,
     adTitle: conversation.referral?.adTitle,
-    referralRef: conversation.referral?.ref
+    referralRef: conversation.referral?.ref,
+    postText: conversation.post?.message
   });
   const hint = productHint(product);
   // What the customer already gave in earlier messages, so the model neither

@@ -119,3 +119,21 @@ test('giới tính đoán từ tên và cách khách tự xưng; nhân viên đ�
   assert.equal(applyGenderGuess(conversation, 'female', 'message'), false, 'staff choice is final');
   assert.equal(conversation.gender, 'male');
 });
+
+test('bài viết của Trang là nguồn nhận diện sản phẩm; luồng Messenger kế thừa bài từ luồng bình luận', async () => {
+  const { resolveConversationProduct } = await import('../app/processing/product-detect.mjs');
+  const { normalizeWebhookEvent } = await import('../app/meta-webhook.mjs');
+  const post = 'GRANOLA TÚI VÀNG GIỌT NẮNG – HẠT NHIỀU HƠN, GIÒN THƠM, ĂN VUI MIỆNG NGAY TỪ MUỖNG ĐẦU!';
+  assert.equal(resolveConversationProduct({ messageText: 'giá sao ạ', postText: post }).source, 'post');
+  assert.match(resolveConversationProduct({ messageText: 'giá sao ạ', postText: post }).product, /Túi Vàng/);
+  assert.equal(resolveConversationProduct({ messageText: 'cho em túi xanh', postText: post }).source, 'message', 'what the customer names wins');
+  assert.equal(resolveConversationProduct({ messageText: 'ib', adTitle: 'Granola túi xanh', postText: post }).source, 'ad', 'the ad beats the post');
+
+  const store = emptyStore();
+  applyWebhookEvents(store, [normalizeCommentEvent(feedChange({ comment_id: `${postId}_1`, parent_id: postId, from: { id: userId, name: 'Minh Quân' }, message: 'ib' }), pageId)]);
+  store.conversations[0].post = { id: postId, message: post, permalink: 'https://facebook.com/x' };
+  const [change] = applyWebhookEvents(store, [normalizeWebhookEvent({ sender: { id: userId }, recipient: { id: pageId }, timestamp: 1757390100000, message: { mid: 'm1', text: 'giá sao ạ' } }, pageId)]);
+  assert.equal(change.conversation.source, 'inbox');
+  assert.equal(change.conversation.post.message, post, 'the Messenger thread carries the post the customer commented under');
+  assert.equal(change.conversation.post.inheritedFrom, store.conversations[0].id);
+});

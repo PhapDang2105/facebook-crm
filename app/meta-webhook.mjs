@@ -245,6 +245,14 @@ export function applyWebhookEvents(store, events) {
       // Kept on the conversation, not the message: the ad is context for the
       // whole thread and only ever arrives on the first event.
       if (event.referral && !conversation.referral) conversation.referral = event.referral;
+      // A customer who commented first and then writes in Messenger (after the
+      // bot's private reply) is still asking about that post's product.
+      if (!conversation.post && inserted && message.direction === 'incoming') {
+        const commentThread = store.conversations
+          .filter(item => item.source === 'comment' && item.pageId === conversation.pageId && item.psid === conversation.psid && item.post?.message)
+          .sort((first, second) => (second.lastMessageAt || 0) - (first.lastMessageAt || 0))[0];
+        if (commentThread) conversation.post = { ...commentThread.post, inheritedFrom: commentThread.id };
+      }
       if (inserted && message.direction === 'incoming') applyGenderGuess(conversation, genderFromMessage(message.text), 'message');
       if (inserted) changes.push({ type: 'message', conversation, message });
       continue;

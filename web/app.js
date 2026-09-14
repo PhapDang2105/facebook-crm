@@ -3233,13 +3233,23 @@ function renderCustomerGender(conversation) {
   const conversationId = conversation?.dataset.conversationId || '';
   group.classList.toggle('hidden', !conversationId);
   const state = customerGenders.get(conversationId) || { gender: conversation?.dataset.gender || '', source: conversation?.dataset.genderSource || '' };
-  group.querySelectorAll('[data-customer-gender]').forEach(button => {
-    const active = button.dataset.customerGender === state.gender;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
+  const sourceText = state.gender && state.source === 'name' ? 'Đoán theo tên' : state.gender && state.source === 'message' ? 'Theo cách khách xưng' : state.gender && state.source === 'staff' ? 'Nhân viên chọn' : 'Chưa rõ — chọn để bot xưng đúng';
+  const button = group.querySelector('#customer-gender-button');
+  const icon = group.querySelector('#customer-gender-icon');
+  const text = group.querySelector('#customer-gender-text');
+  if (icon) icon.src = `/assets/icons/gender/${state.gender === 'male' ? 'man' : state.gender === 'female' ? 'woman' : 'bust-in-silhouette'}.svg`;
+  if (text) text.textContent = state.gender === 'male' ? 'Anh' : state.gender === 'female' ? 'Chị' : 'Xưng hô';
+  if (button) {
+    button.classList.toggle('is-set', Boolean(state.gender));
+    button.title = `Xưng hô với khách · ${sourceText}`;
+  }
+  group.querySelectorAll('[data-customer-gender]').forEach(option => {
+    const active = option.dataset.customerGender === state.gender;
+    option.classList.toggle('active', active);
+    option.setAttribute('aria-checked', String(active));
   });
   const source = group.querySelector('#customer-gender-source');
-  if (source) source.textContent = state.gender && state.source === 'name' ? 'Đoán theo tên' : state.gender && state.source === 'message' ? 'Theo cách khách xưng' : state.gender && state.source === 'staff' ? 'Nhân viên chọn' : 'Chưa rõ — bấm để chọn';
+  if (source) source.textContent = sourceText;
 }
 
 function renderCustomerPanel(conversation = getActiveConversation()) {
@@ -5691,14 +5701,31 @@ customerOrderForm?.addEventListener('submit', async event => {
   }
 });
 
+function closeCustomerGenderMenu() {
+  document.querySelector('#customer-gender-menu')?.classList.add('hidden');
+  document.querySelector('#customer-gender-button')?.setAttribute('aria-expanded', 'false');
+}
+document.querySelector('#customer-gender-button')?.addEventListener('click', event => {
+  event.stopPropagation();
+  const menu = document.querySelector('#customer-gender-menu');
+  const willOpen = menu?.classList.contains('hidden');
+  closeCustomerGenderMenu();
+  if (willOpen) {
+    menu?.classList.remove('hidden');
+    event.currentTarget.setAttribute('aria-expanded', 'true');
+  }
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('#customer-gender')) closeCustomerGenderMenu();
+});
 document.querySelector('#customer-gender')?.addEventListener('click', async event => {
   const button = event.target.closest('[data-customer-gender]');
   const conversation = getActiveConversation();
   const conversationId = conversation?.dataset.conversationId;
   if (!button || !conversationId) return;
-  // Clicking the active choice clears it, so a wrong guess can be undone.
-  const current = customerGenders.get(conversationId)?.gender || '';
-  const gender = current === button.dataset.customerGender ? '' : button.dataset.customerGender;
+  event.stopPropagation();
+  closeCustomerGenderMenu();
+  const gender = button.dataset.customerGender;
   try {
     const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversationId)}/customer-panel`, {
       method: 'POST',

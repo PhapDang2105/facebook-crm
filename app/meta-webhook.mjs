@@ -247,11 +247,13 @@ export function applyWebhookEvents(store, events) {
       if (event.referral && !conversation.referral) conversation.referral = event.referral;
       // A customer who commented first and then writes in Messenger (after the
       // bot's private reply) is still asking about that post's product.
-      if (!conversation.post && inserted && message.direction === 'incoming') {
+      if (inserted && message.direction === 'incoming' && (!conversation.post || !conversation.picture)) {
         const commentThread = store.conversations
-          .filter(item => item.source === 'comment' && item.pageId === conversation.pageId && item.psid === conversation.psid && item.post?.message)
+          .filter(item => item.source === 'comment' && item.pageId === conversation.pageId && item.psid === conversation.psid)
           .sort((first, second) => (second.lastMessageAt || 0) - (first.lastMessageAt || 0))[0];
-        if (commentThread) conversation.post = { ...commentThread.post, inheritedFrom: commentThread.id };
+        if (commentThread?.post?.message && !conversation.post) conversation.post = { ...commentThread.post, inheritedFrom: commentThread.id };
+        // The comment webhook carries the person's picture; Messenger's profile lookup often does not.
+        if (commentThread?.picture && !conversation.picture) conversation.picture = commentThread.picture;
       }
       if (inserted && message.direction === 'incoming') applyGenderGuess(conversation, genderFromMessage(message.text), 'message');
       if (inserted) changes.push({ type: 'message', conversation, message });
@@ -306,10 +308,15 @@ async function resolveCommentContext(changes) {
   }).filter(Boolean));
 }
 
+// A lookup that failed (Standard access, app still in Development) is retried
+// once a day, so pictures fill in by themselves after the app goes Live.
+const profileRetryAfterMs = 24 * 60 * 60 * 1000;
+
 /** Fills in the customer name and photo once, right after their first message arrives. */
 async function resolveMissingProfiles(changes) {
   const pending = changes
-    .filter(change => change.type === 'message' && change.conversation.source !== 'comment' && !change.conversation.profileResolvedAt)
+    .filter(change => change.type === 'message' && change.conversation.source !== 'comment'
+      && (!change.conversation.profileResolvedAt || (!change.conversation.picture && change.conversation.profileResolvedAt < Date.now() - profileRetryAfterMs)))
     .map(change => ({ pageId: change.conversation.pageId, psid: change.conversation.psid }));
   const unique = [...new Map(pending.map(item => [`${item.pageId}:${item.psid}`, item])).values()];
   if (!unique.length) return [];

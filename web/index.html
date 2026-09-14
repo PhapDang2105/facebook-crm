@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260914-inbox-9">
+  <link rel="stylesheet" href="styles.css?v=20260914-inbox-11">
 </head>
 <body>
   <div class="topbar">
@@ -464,14 +464,12 @@
             <section class="message-settings-panel" data-message-settings-panel="quick">
               <div class="message-settings-toolbar">
                 <label class="order-search-control"><input id="quick-reply-settings-search" type="search" aria-label="Tìm mẫu trả lời nhanh" placeholder="Tìm ký tự tắt hoặc nội dung..."></label>
-                <span class="message-settings-hint">Nhân viên gõ <b>/</b> trong ô tin nhắn hoặc bấm nút ⚡ để chọn mẫu. Trong nội dung dùng được <b>{name}</b> (tên khách), <b>{title}</b> (anh/chị).</span>
                 <button class="price-master-add" id="quick-reply-add" type="button">+ Thêm mẫu</button>
               </div>
               <div class="quick-reply-settings-table" id="quick-reply-settings-table"></div>
             </section>
             <section class="message-settings-panel hidden" data-message-settings-panel="labels">
               <div class="message-settings-toolbar">
-                <span class="message-settings-hint">Thẻ hiện thành thanh màu phía trên ô nhập tin nhắn; bấm để gắn hoặc bỏ cho hội thoại đang mở. Bot tự gắn <b>Cần người xử lý</b> khi chuyển nhân viên và <b>Đã mua hàng</b> khi chốt đơn.</span>
                 <button class="price-master-add" id="label-reset" type="button">Bộ thẻ mặc định</button>
                 <button class="price-master-add" id="label-add" type="button">+ Thêm thẻ</button>
                 <button class="settings-save-button" id="label-save" type="button">Lưu thẻ</button>
@@ -481,7 +479,6 @@
             </section>
             <section class="message-settings-panel hidden" data-message-settings-panel="defaults">
               <form class="message-defaults-form" id="message-defaults-form">
-                <p class="message-settings-hint">Đây là các câu bot dùng ở tin nhắn và bình luận. Dùng <b>{title}</b>/<b>{Title}</b> cho anh/chị, <b>{name}</b> cho tên khách, <b>{A|B}</b> để chọn ngẫu nhiên một cách viết, và <b>###</b> để tách nhiều câu (với câu công khai dưới bình luận, bot chọn ngẫu nhiên một câu).</p>
                 <label class="message-default-field"><span>Chào khách nhắn tin lần đầu</span><textarea id="message-default-WELCOME" rows="3" maxlength="12000"></textarea></label>
                 <label class="message-default-field"><span>Trả lời công khai dưới bình luận</span><textarea id="message-default-COMMENT_PUBLIC_REPLY" rows="5" maxlength="12000"></textarea></label>
                 <label class="message-default-field"><span>Câu mở đầu tin nhắn riêng gửi từ bình luận</span><textarea id="message-default-COMMENT_PRIVATE_REPLY" rows="3" maxlength="12000"></textarea></label>
@@ -638,6 +635,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260914-inbox-5"></script>
+  <script src="app.js?v=20260914-inbox-6"></script>
 </body>
 </html>

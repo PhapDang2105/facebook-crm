@@ -479,16 +479,13 @@ function renderCustomers(items, total) {
       <td>${gender}</td>
       <td class="customer-channel">${escapeHtml(customer.channelName || customer.channelId)}</td>
       <td>${sources}</td>
-      <td class="customer-time">${formatCustomerTime(customer.firstContactAt)}</td>
-      <td class="customer-time">${formatCustomerTime(customer.lastCustomerMessageAt)}</td>
-      <td class="customer-time">${formatCustomerTime(customer.lastMessageAt)}</td>
       <td>${escapeHtml(customer.phone)}</td>
       <td class="customer-money">${orders}</td>
       <td>${tags}</td>
     </tr>`;
   }).join('');
   customersTable.innerHTML = `<table><thead><tr>
-    <th>Khách hàng</th><th>Giới tính</th><th>Kênh</th><th>Nguồn</th><th>Liên hệ lần đầu</th><th>Khách nhắn cuối</th><th>Tương tác cuối</th><th>Số điện thoại</th><th>Đơn hàng</th><th>Thẻ</th>
+    <th>Khách hàng</th><th>Giới tính</th><th>Kênh</th><th>Nguồn</th><th>Số điện thoại</th><th>Đơn hàng</th><th>Thẻ</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 

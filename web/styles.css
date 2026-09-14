@@ -394,10 +394,14 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-stage[data-order-panel="process"] { display: block; flex: 0 1 auto; height: fit-content; min-height: 0; }
 .settings-page:has([data-settings-panel="customers"]:not(.hidden)) { width: 100%; max-width: none; }
 .customer-settings-card .settings-card-head { display: flex; align-items: center; justify-content: space-between; }
-.customer-dialog-panel { width: min(640px, 100%); max-height: 90vh; }
-.customer-dialog-identity { display: flex; align-items: center; gap: 10px; }
-.customer-dialog-identity .avatar { width: 40px; height: 40px; }
-.customer-dialog-identity small { display: block; color: #8a8d91; font-size: 12.5px; }
+.customer-dialog-panel { width: min(900px, 100%); max-height: 92vh; padding: 26px 30px; }
+.customer-dialog-identity { display: flex; align-items: center; gap: 14px; }
+.customer-dialog-identity .avatar { width: 52px; height: 52px; font-size: 20px; }
+.customer-dialog-identity h2 { font-size: 20px; }
+.customer-dialog-identity small { display: block; margin-top: 2px; color: #8a8d91; font-size: 13px; }
+.customer-dialog-panel .customer-attributes { margin-top: 18px; font-size: 15px; }
+.customer-dialog-panel .customer-attributes th { width: 200px; padding: 11px 10px 11px 0; }
+.customer-dialog-panel .customer-attributes td { padding: 11px 0; }
 .customer-attributes { width: 100%; margin-top: 14px; border-collapse: collapse; font-size: 14px; }
 .customer-attributes th { width: 170px; padding: 9px 8px 9px 0; color: #687080; font-weight: 600; text-align: left; vertical-align: top; border-bottom: 0.9px solid #eef1ef; }
 .customer-attributes td { padding: 9px 0; color: #1d2b22; vertical-align: top; overflow-wrap: anywhere; border-bottom: 0.9px solid #eef1ef; }
@@ -2010,8 +2014,8 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .message-settings-tabs button.active { color: #111; border-bottom-color: #111; font-weight: 700; }
 .message-settings-panel { padding: 14px 18px 24px; }
 .message-settings-panel.hidden { display: none; }
-.message-settings-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.message-settings-toolbar .order-search-control { flex: 0 0 300px; }
+.message-settings-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.message-settings-toolbar .order-search-control { flex: 0 0 300px; margin-right: auto; }
 .message-settings-hint { flex: 1 1 320px; margin: 0; color: #4b4f56; font-size: 13.5px; line-height: 1.5; }
 .message-settings-hint b { padding: 0 4px; background: #f0f2f5; border-radius: 4px; font-weight: 700; }
 .quick-reply-settings-table { margin-top: 14px; overflow: auto; border: 0.9px solid #dfe5e1; border-radius: 9px; }

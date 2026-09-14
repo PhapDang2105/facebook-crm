@@ -1960,15 +1960,15 @@ i.label-icon { width: 8px; height: 8px; border-radius: 50%; background: var(--la
 .conversation-labels { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
 .conversation-label { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 7px 1px 5px; border-radius: 4px; background: var(--label-color, #6b7280); color: #fff; font-size: 10.5px; font-weight: 600; line-height: 14px; letter-spacing: .01em; white-space: nowrap; }
 .conversation-label .label-icon { width: 11px; height: 11px; }
-.conversation-label-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 8px; min-height: 56px; padding: 12px 13.5px 4px; }
+.conversation-label-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 48px; padding: 10px 13.5px 2px; }
 .conversation-label-bar.hidden { display: none; }
 .conversation-label-bar-title { display: inline-flex; align-items: center; margin-right: 4px; color: #98a2b3; }
 .conversation-label-bar-title svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
-.conversation-label-bar button { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px 0 10px; color: var(--label-ink, #3b3f46); background: #fff; border: 1.5px solid var(--label-line, #d0d5dd); border-radius: 999px; font-size: 13.5px; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer; transition: background .12s, border-color .12s, color .12s, box-shadow .12s; }
-.conversation-label-bar button .label-icon { width: 19px; height: 19px; }
+.conversation-label-bar button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px 0 8px; color: var(--label-ink, #3b3f46); background: #fff; border: 1px solid var(--label-line, #d0d5dd); border-radius: 6px; font-size: 12.5px; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer; transition: background .12s, border-color .12s, color .12s, box-shadow .12s; }
+.conversation-label-bar button .label-icon { width: 16px; height: 16px; }
 .conversation-label-bar button:hover { background: var(--label-tint); border-color: var(--label-color); }
-.conversation-label-bar button.active { color: #fff; background: var(--label-color); border-color: var(--label-color); box-shadow: 0 2px 6px rgba(16, 24, 40, .14); font-weight: 700; }
-.conversation-label-bar button.active::after { content: '✓'; margin-left: 2px; color: #fff; font-size: 12px; font-weight: 800; }
+.conversation-label-bar button.active { color: #fff; background: var(--label-color); border-color: var(--label-color); box-shadow: none; font-weight: 700; }
+.conversation-label-bar button.active::after { content: '✓'; margin-left: 1px; color: #fff; font-size: 11px; font-weight: 800; }
 .message-label-icon { width: 16px; height: 16px; margin-right: 8px; }
 i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .message-label-menu-dynamic { display: block; }
@@ -2050,7 +2050,7 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .label-settings-remove:hover { color: #fff; background: #d93025; }
 .label-settings-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 18px; padding: 10px 12px; border: 1px solid #e6e9ee; border-radius: 10px; background: #fafbfc; }
 .label-settings-preview:empty { display: none; }
-.label-settings-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 9px; color: var(--label-ink); background: #fff; border: 1.5px solid var(--label-line); border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.label-settings-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px 0 8px; color: var(--label-ink); background: #fff; border: 1px solid var(--label-line); border-radius: 6px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .label-settings-chip .label-icon { width: 16px; height: 16px; }
 .label-settings-chip.active { color: #fff; background: var(--label-color); border-color: var(--label-color); font-weight: 700; }
 .label-settings-chip.active::after { content: '✓'; font-size: 11px; font-weight: 800; }

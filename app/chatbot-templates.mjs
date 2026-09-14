@@ -80,9 +80,19 @@ const imagePattern = /!\s*\[[^\]]*\]\s*\(\s*(https?:\/\/[^\s)]+)[^)]*\)/g;
  * and sent as a picture after the text, so a template can carry a product
  * photo.
  */
+// "anh/ chị" written out in a template (or by the model) becomes the one
+// form that fits once the customer's gender is known; the neutral pair stays
+// only while it is not.
+const literalHonorific = /(?<![\p{L}\p{N}])(anh)\s*\/\s*(chị)(?![\p{L}\p{N}])/giu;
+export function applyHonorific(text, gender = activeCustomer.gender) {
+  if (gender !== 'male' && gender !== 'female') return text;
+  const title = honorific(gender);
+  return String(text ?? '').replace(literalHonorific, match => (match.charAt(0) === 'A' ? title.charAt(0).toUpperCase() + title.slice(1) : title));
+}
+
 function splitMessages(text) {
   const images = [];
-  const content = String(text ?? '').replace(imagePattern, (_match, url) => {
+  const content = applyHonorific(String(text ?? '')).replace(imagePattern, (_match, url) => {
     images.push(url.trim());
     return '';
   });

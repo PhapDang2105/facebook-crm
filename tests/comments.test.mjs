@@ -219,3 +219,17 @@ test('bot bật cho mọi hội thoại; chỉ im lặng khi nhân viên tắt',
   assert.equal((await run(true)).length, 1);
   assert.equal((await run(false)).length, 0, 'staff switched the bot off');
 });
+
+test('khách đã chọn Chị: mẫu cũ ghi "anh/ chị" và câu model tự viết đều đổi thành "chị"', async () => {
+  const { renderChatbotReply, applyHonorific } = await import('../app/chatbot-templates.mjs');
+  const { normalizeChatbotSettings } = await import('../app/chatbot-settings.mjs');
+  const settings = normalizeChatbotSettings({ messageTemplates: { THANK_YOU: 'Dạ em cảm ơn anh/ chị rất nhiều ạ. Anh/chị nhắn em nhé.' } });
+  assert.equal(settings.messageTemplates.THANK_YOU, 'Dạ em cảm ơn {title} rất nhiều ạ. {Title} nhắn em nhé.');
+  const reply = renderChatbotReply({ template_id: 'THANK_YOU' }, settings.messageTemplates, { customer: { gender: 'female', name: 'Lan' } });
+  assert.equal(reply.messages[0], 'Dạ em cảm ơn chị rất nhiều ạ. Chị nhắn em nhé.');
+  // Free text the model wrote itself, with the literal pair, is fixed too.
+  const free = renderChatbotReply({ template_id: 'NOPE', reply: 'Dạ anh/chị cần thêm gì không ạ?' }, settings.messageTemplates, { customer: { gender: 'male', name: 'Nam' } });
+  assert.equal(free.messages[0], 'Dạ anh cần thêm gì không ạ?');
+  // Unknown gender keeps the neutral pair.
+  assert.equal(applyHonorific('Dạ anh/chị ơi', ''), 'Dạ anh/chị ơi');
+});

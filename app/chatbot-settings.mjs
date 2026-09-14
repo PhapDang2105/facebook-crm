@@ -65,9 +65,14 @@ export function normalizeChatbotSettings(value = {}) {
   // stored under an old PRICE_<sản phẩm> id is a stale price: dropped.
   const stored = value.messageTemplates && typeof value.messageTemplates === 'object' ? value.messageTemplates : {};
   const submitted = { ...defaultMessageTemplates(), ...stored };
+  // Texts saved before {title} existed still spell out "anh/ chị"; they are
+  // rewritten to the placeholder so the bot addresses the customer properly.
+  const placeholderHonorific = text => String(text ?? '')
+    .replace(/(?<![\p{L}\p{N}])Anh\s*\/\s*[Cc]hị(?![\p{L}\p{N}])/gu, '{Title}')
+    .replace(/(?<![\p{L}\p{N}])anh\s*\/\s*[Cc]hị(?![\p{L}\p{N}])/gu, '{title}');
   const messageTemplates = Object.fromEntries(Object.entries(submitted)
     .slice(0, 100)
-    .map(([key, text]) => [String(key).trim().slice(0, 100), String(text ?? '').trim().slice(0, 12000)])
+    .map(([key, text]) => [String(key).trim().slice(0, 100), placeholderHonorific(text).trim().slice(0, 12000)])
     .filter(([key]) => key && !isProductQuoteId(key)));
   // The processing pipeline is code in app/processing, not editable settings.
   return {

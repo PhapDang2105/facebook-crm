@@ -435,7 +435,8 @@ async function serveFile(request, response, pathname) {
       return response.end(body);
     } catch { return sendJson(response, 404, { error:'Resource not found.' }); }
   }
-  const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
+  // Meta requires a public privacy policy URL; Caddy lets /privacy through without a password.
+  const relative = pathname === '/' ? 'index.html' : pathname === '/privacy' ? 'privacy.html' : pathname.slice(1);
   const filePath = path.resolve(webRoot, relative);
   if (!filePath.startsWith(path.resolve(webRoot))) return sendJson(response, 400, { error:'Invalid path.' });
   const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.webp':'image/webp' };

@@ -24,6 +24,13 @@
 		reverse_proxy 127.0.0.1:8080
 	}
 
+	# Chính sách quyền riêng tư phải đọc được không cần đăng nhập: Meta kiểm tra
+	# URL này để cho ứng dụng chuyển sang chế độ Chính thức.
+	@privacy path /privacy /privacy.html
+	handle @privacy {
+		reverse_proxy 127.0.0.1:8080
+	}
+
 	# Toàn bộ giao diện và API quản trị nằm sau mật khẩu.
 	handle {
 		basic_auth {

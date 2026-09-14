@@ -13,15 +13,15 @@ const inboxSettingsPath = process.env.INBOX_SETTINGS_PATH
 // and `customer` match the labels older conversations carry; `consulting`
 // is what the bot sets when it hands a thread to a person.
 export const defaultConversationLabels = Object.freeze([
-  { id: 'consulting', name: 'Cần người xử lý', color: '#b3a2d9' },
-  { id: 'warranty', name: 'Bảo Hành', color: '#e79c90' },
-  { id: 'complaint', name: 'Khiếu nại', color: '#9fc99c' },
-  { id: 'customer', name: 'Đã mua hàng', color: '#e3d69b' },
-  { id: 'livestream', name: 'Livestream', color: '#a37f7a' },
-  { id: 'new', name: 'Mới', color: '#e9c4ae' },
-  { id: 'wholesale', name: 'Khách sỉ', color: '#cf9de0' },
-  { id: 'bad', name: 'KHÁCH XẤU', color: '#a6c3e8' },
-  { id: 'jt', name: 'Giao J&T', color: '#c67d75' }
+  { id: 'consulting', name: 'Cần người xử lý', color: '#7c3aed' },
+  { id: 'warranty', name: 'Bảo hành', color: '#f59e0b' },
+  { id: 'complaint', name: 'Khiếu nại', color: '#ef4444' },
+  { id: 'customer', name: 'Đã mua hàng', color: '#16a34a' },
+  { id: 'livestream', name: 'Livestream', color: '#db2777' },
+  { id: 'new', name: 'Mới', color: '#0ea5e9' },
+  { id: 'wholesale', name: 'Khách sỉ', color: '#4f46e5' },
+  { id: 'bad', name: 'Khách xấu', color: '#475569' },
+  { id: 'jt', name: 'Giao J&T', color: '#b45309' }
 ]);
 
 export const defaultInboxSettings = Object.freeze({

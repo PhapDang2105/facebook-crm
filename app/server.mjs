@@ -28,7 +28,7 @@ import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChan
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { customersToCsv, listCustomers } from './customers.mjs';
-import { readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
+import { defaultConversationLabels, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
 import {
@@ -785,7 +785,7 @@ const server = http.createServer(async (request, response) => {
     }
     // Cài đặt → Tin nhắn: conversation labels and staff quick replies.
     if (url.pathname === '/api/inbox/settings') {
-      if (request.method === 'GET') return sendJson(response, 200, await readInboxSettings());
+      if (request.method === 'GET') return sendJson(response, 200, { ...(await readInboxSettings()), defaultLabels: defaultConversationLabels });
       if (request.method === 'PUT') {
         const current = await readInboxSettings();
         const payload = await readBody(request);

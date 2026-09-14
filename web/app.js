@@ -310,6 +310,8 @@ const quickReplyAdd = document.querySelector('#quick-reply-add');
 const labelSettingsList = document.querySelector('#label-settings-list');
 const labelSettingsPreview = document.querySelector('#label-settings-preview');
 const labelAdd = document.querySelector('#label-add');
+const labelReset = document.querySelector('#label-reset');
+let defaultInboxLabels = [];
 const labelSave = document.querySelector('#label-save');
 const messageDefaultsForm = document.querySelector('#message-defaults-form');
 const quickReplyDialog = document.querySelector('#quick-reply-dialog');
@@ -5951,13 +5953,26 @@ updateMessageSendState();
 // Cài đặt → Tin nhắn: thẻ hội thoại và mẫu trả lời nhanh
 // ---------------------------------------------------------------------------
 
-/** Dark or light text so a label stays readable on the colour staff chose. */
-function labelTextColor(hex) {
+/** Colour helpers: a soft tint for backgrounds and a darker ink for text on it. */
+function labelRgb(hex) {
   const value = String(hex || '').replace('#', '');
-  if (value.length !== 6) return '#fff';
-  const [red, green, blue] = [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16) / 255);
-  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-  return luminance > 0.62 ? '#3a3f47' : '#fff';
+  if (value.length !== 6) return [120, 130, 140];
+  return [0, 2, 4].map(offset => parseInt(value.slice(offset, offset + 2), 16));
+}
+
+function labelTint(hex, alpha = 0.13) {
+  return `rgba(${labelRgb(hex).join(', ')}, ${alpha})`;
+}
+
+function labelInk(hex) {
+  const [red, green, blue] = labelRgb(hex).map(channel => Math.round(channel * 0.72));
+  return `rgb(${red}, ${green}, ${blue})`;
+}
+
+function applyLabelColors(element, color) {
+  element.style.setProperty('--label-color', color);
+  element.style.setProperty('--label-tint', labelTint(color));
+  element.style.setProperty('--label-ink', labelInk(color));
 }
 
 function labelById(id) {
@@ -5990,8 +6005,7 @@ function renderConversationLabelBadges(conversation) {
   holder.replaceChildren(...labels.map(label => {
     const badge = document.createElement('span');
     badge.className = 'conversation-label';
-    badge.style.background = label.color;
-    badge.style.color = labelTextColor(label.color);
+    applyLabelColors(badge, label.color);
     badge.textContent = label.name;
     return badge;
   }));
@@ -6002,14 +6016,17 @@ function renderConversationLabelBar(conversation = getActiveConversation()) {
   if (!conversationLabelBar) return;
   const active = new Set(conversationLabelIds(conversation));
   conversationLabelBar.classList.toggle('hidden', !inboxLabels.length || !conversation);
-  conversationLabelBar.replaceChildren(...inboxLabels.map(label => {
+  const title = document.createElement('span');
+  title.className = 'conversation-label-bar-title';
+  title.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>';
+  title.title = 'Thẻ hội thoại';
+  conversationLabelBar.replaceChildren(title, ...inboxLabels.map(label => {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.labelId = label.id;
     button.textContent = label.name;
     button.title = active.has(label.id) ? `Bỏ thẻ ${label.name}` : `Gắn thẻ ${label.name}`;
-    button.style.setProperty('--label-color', label.color);
-    button.style.setProperty('--label-text', labelTextColor(label.color));
+    applyLabelColors(button, label.color);
     button.classList.toggle('active', active.has(label.id));
     button.setAttribute('aria-pressed', String(active.has(label.id)));
     return button;
@@ -6042,6 +6059,7 @@ function fillCustomersLabelOptions() {
 
 function applyInboxSettings(settings) {
   inboxLabels = Array.isArray(settings?.labels) ? settings.labels : [];
+  if (Array.isArray(settings?.defaultLabels)) defaultInboxLabels = settings.defaultLabels;
   quickReplies = Array.isArray(settings?.quickReplies) ? settings.quickReplies : [];
   renderMessageLabelMenu();
   fillCustomersLabelOptions();
@@ -6369,11 +6387,11 @@ function renderLabelSettings() {
 
 function renderLabelSettingsPreview() {
   if (!labelSettingsPreview) return;
-  labelSettingsPreview.replaceChildren(...labelDraft.filter(label => label.name.trim()).map(label => {
+  labelSettingsPreview.replaceChildren(...labelDraft.filter(label => label.name.trim()).map((label, index) => {
     const chip = document.createElement('span');
     chip.className = 'label-settings-chip';
-    chip.style.background = label.color;
-    chip.style.color = labelTextColor(label.color);
+    chip.classList.toggle('active', index % 3 === 1);
+    applyLabelColors(chip, label.color);
     chip.textContent = label.name;
     return chip;
   }));
@@ -6523,6 +6541,12 @@ quickReplyImageList?.addEventListener('click', event => {
   renderQuickReplyDraftImages();
 });
 
+labelReset?.addEventListener('click', () => {
+  if (!defaultInboxLabels.length) return;
+  labelDraft = defaultInboxLabels.map(label => ({ ...label }));
+  renderLabelSettings();
+  showToast('Đã nạp bộ thẻ mặc định — bấm "Lưu thẻ" để áp dụng.', 'success');
+});
 labelAdd?.addEventListener('click', () => {
   labelDraft.push({ id: '', name: '', color: '#c9ced6' });
   renderLabelSettings();

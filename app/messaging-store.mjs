@@ -215,6 +215,7 @@ export function publicConversation(conversation) {
     name: conversation.name,
     picture: conversation.picture || '',
     source: conversation.source || 'inbox',
+    ...(conversation.gender ? { gender: conversation.gender } : {}),
     // Comment threads: which post, and the latest customer comment to reply under.
     ...(conversation.post ? { post: conversation.post } : {}),
     ...(conversation.lastCommentId ? { lastCommentId: conversation.lastCommentId } : {}),

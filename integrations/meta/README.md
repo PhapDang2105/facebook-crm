@@ -57,7 +57,7 @@ Trang **Cài đặt → Kênh** cũng hiển thị Callback URL và trạng thá
 - Sản phẩm cần bật: **Messenger** và **Facebook Login for Business**.
 - Redirect URI hợp lệ (Facebook Login → Settings → Valid OAuth Redirect URIs):
   `${PUBLIC_BASE_URL}/api/channels/meta/callback`
-- Quyền ứng dụng yêu cầu: `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata`, `pages_messaging`, `pages_read_user_content` (đọc bình luận), `pages_manage_engagement` (trả lời bình luận, nhắn riêng từ bình luận).
+- Quyền ứng dụng yêu cầu: `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata`, `pages_messaging`, `pages_read_user_content` (đọc bình luận), `pages_manage_engagement` (trả lời bình luận, nhắn riêng từ bình luận), `pages_user_gender` (giới tính khách để xưng anh/chị).
 - Page đã kết nối trước khi có hai quyền bình luận phải **Kết nối lại** để token mới mang đủ quyền.
 
 Muốn dùng với Page của người khác thì các quyền trên phải qua **App Review**. Trong lúc phát triển, tài khoản có vai trò Admin/Developer/Tester của ứng dụng vẫn dùng được ngay.
@@ -68,7 +68,7 @@ Vào **Meta App → Webhooks → Page** rồi nhấn *Subscribe to this object*:
 
 - **Callback URL**: `${PUBLIC_BASE_URL}/webhooks/facebook`
 - **Verify Token**: đúng giá trị `META_VERIFY_TOKEN`
-- **Trường cần đăng ký**: `messages`, `message_echoes`, `messaging_postbacks`, `messaging_optins`, `messaging_reactions`, `message_deliveries`, `message_reads`, `feed` (bình luận trên bài viết)
+- **Trường cần đăng ký**: `messages`, `message_echoes`, `messaging_postbacks`, `messaging_optins`, `messaging_reactions`, `message_deliveries`, `message_reads`, `messaging_referrals` (khách bấm quảng cáo/link m.me khi đã có hội thoại), `feed` (bình luận trên bài viết)
 
 Meta gọi `GET` tới Callback URL để xác minh; CRM trả lại `hub.challenge` khi Verify Token khớp. Mọi `POST` sau đó đều được kiểm tra chữ ký `X-Hub-Signature-256` bằng App Secret — sai chữ ký thì bị từ chối với mã 401.
 
@@ -102,6 +102,7 @@ Nút **Làm mới** kiểm tra lại tên Page, ảnh đại diện và trạng 
 - Khách trả lời dưới bình luận của Page thì vào đúng hội thoại cũ; người khác trả lời dưới đó thì mở hội thoại riêng của họ.
 - Trả lời trong hội thoại bình luận: mặc định gửi công khai `POST /{comment-id}/comments` dưới bình luận mới nhất của khách; chọn **Nhắn riêng Messenger** thì gọi `POST /{comment-id}/private_replies` (Meta chỉ cho một tin riêng cho mỗi bình luận, chỉ chữ, không tệp). Bình luận không có giới hạn 24 giờ.
 - Bot với bình luận: hội thoại bình luận mở sẵn bot; nội dung đầy đủ theo mẫu do mô hình chọn được nhắn riêng, còn dưới bình luận chỉ có một câu theo mẫu `COMMENT_PUBLIC_REPLY` mời kiểm tra Messenger. Không tạo đơn từ bình luận — khách chốt đơn tiếp trong Messenger.
+- Hồ sơ khách Messenger lấy `name,profile_pic,gender`; giới tính hiện ở bảng Thông tin và cấp placeholder `{title}`/`{Title}` (anh, chị, hoặc anh/chị khi không biết) cho mọi mẫu tin nhắn.
 - Tên và ảnh người bình luận lấy từ `GET /{comment-id}?fields=from{name,picture}`; tiêu đề và link bài viết từ `GET /{post-id}?fields=message,permalink_url`.
 - Hội thoại đến từ quảng cáo Click-to-Messenger (webhook `referral` có `ad_id`/`ad_title`) mang nhãn **QC** trong danh sách, dòng "Từ quảng cáo" ở bảng thông tin khách và lọc được bằng **Nhãn → Từ quảng cáo**.
 

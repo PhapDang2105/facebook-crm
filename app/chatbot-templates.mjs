@@ -101,9 +101,19 @@ function formatWeight(grams) {
   return grams >= 1000 ? `${Math.round(grams / 10) / 100}kg` : `${grams}g`;
 }
 
-/** Placeholders every template may use. */
+// The customer the reply is for, set by renderChatbotReply for the duration
+// of one render so every template can address them correctly.
+let activeCustomer = {};
+
+/** anh / chị from the Messenger profile; the neutral form when unknown. */
+export function honorific(gender) {
+  return gender === 'male' ? 'anh' : gender === 'female' ? 'chị' : 'anh/chị';
+}
+
+/** Placeholders every template may use: {title} / {Title} and {shipping_fee}. */
 function commonValues() {
-  return { shipping_fee: formatMoney(getShippingFee()) };
+  const title = honorific(activeCustomer.gender);
+  return { shipping_fee: formatMoney(getShippingFee()), title, Title: title.charAt(0).toUpperCase() + title.slice(1) };
 }
 
 /** Shipping and gifts of one basket key as template values. */
@@ -352,6 +362,7 @@ export function buildTemplatePrompt(templates = {}) {
  * to a person instead of guessing.
  */
 export function renderChatbotReply(value = {}, templates = {}, context = {}) {
+  activeCustomer = context.customer || {};
   const templateId = String(value.template_id || '').trim();
   if (isOrderStep(templateId)) return renderOrder(value, templates, context);
   const catalogId = catalogRenderers[templateId] ? templateId : isProductQuoteId(templateId) ? 'PRICE_QUOTE' : '';

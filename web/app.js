@@ -944,6 +944,7 @@ function updateConversationElement(element, conversation) {
   element.dataset.psid = conversation.psid;
   element.dataset.source = conversation.source || 'inbox';
   element.dataset.adTitle = conversation.ad ? (conversation.ad.title || 'Quảng cáo') : '';
+  element.dataset.gender = conversation.gender || '';
   element.dataset.postTitle = conversation.post?.message || '';
   element.dataset.postUrl = conversation.post?.permalink || '';
   element.dataset.avatar = conversation.picture || '';
@@ -2976,13 +2977,18 @@ function setCustomerPanelTab(name) {
   if (name === 'create') resetCustomerOrderForm();
 }
 
-/** Which ad the customer came from, when Messenger reported one. */
+/** What Facebook told us about the customer: gender and the ad they came from. */
 function renderCustomerSourceLine(conversation) {
   const line = document.querySelector('#customer-source-line');
   if (!line) return;
+  const gender = conversation?.dataset.gender || '';
   const adTitle = conversation?.dataset.adTitle || '';
-  line.classList.toggle('hidden', !adTitle);
-  line.textContent = adTitle ? `Từ quảng cáo: ${adTitle}` : '';
+  const parts = [
+    gender === 'male' ? 'Giới tính: Nam' : gender === 'female' ? 'Giới tính: Nữ' : '',
+    adTitle ? `Từ quảng cáo: ${adTitle}` : ''
+  ].filter(Boolean);
+  line.classList.toggle('hidden', !parts.length);
+  line.textContent = parts.join(' · ');
 }
 
 function renderCustomerPanel(conversation = getActiveConversation()) {

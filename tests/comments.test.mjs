@@ -89,6 +89,14 @@ test('bot trả lời bình luận: nhắn riêng nội dung, công khai một c
   assert.equal(result[0].orderId, undefined);
   assert.equal(sent.length, 2);
   assert.deepEqual(sent[0], { text: 'Xác nhận đơn\n\nCảm ơn mình', privateReply: true });
-  assert.equal(sent[1].text, templates.COMMENT_PUBLIC_REPLY);
+  assert.equal(sent[1].text, templates.COMMENT_PUBLIC_REPLY.replaceAll('{title}', 'anh/chị'));
   assert.equal(sent[1].privateReply, undefined);
+});
+
+test('{title} xưng anh/chị theo giới tính Messenger, trung tính khi không biết', async () => {
+  const { renderChatbotReply, honorific } = await import('../app/chatbot-templates.mjs');
+  const templates = { WELCOME: '{Title} ơi, {title} cần gì ạ?', CSKH_HANDOFF: 'x' };
+  assert.equal(honorific('female'), 'chị');
+  assert.equal(renderChatbotReply({ template_id: 'WELCOME' }, templates, { customer: { gender: 'male' } }).messages[0], 'Anh ơi, anh cần gì ạ?');
+  assert.equal(renderChatbotReply({ template_id: 'WELCOME' }, templates, {}).messages[0], 'Anh/chị ơi, anh/chị cần gì ạ?');
 });

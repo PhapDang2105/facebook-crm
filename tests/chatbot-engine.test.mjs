@@ -8,6 +8,9 @@ import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-temp
 // defaults stand in for a saved settings file here.
 const templates = Object.fromEntries(Object.entries(defaultMessageTemplates()).map(([id, text]) => [id, text.trim()]));
 
+// {title} in the shipped templates renders as the neutral form when gender is unknown.
+const neutral = text => text.replaceAll('{Title}', 'Anh/chị').replaceAll('{title}', 'anh/chị');
+
 test('đọc JSON có hàng rào markdown từ mô hình', () => {
   assert.equal(parseModelAnswer('```json\n{"template_id":"WELCOME"}\n```').template_id, 'WELCOME');
   assert.equal(parseModelAnswer('không hợp lệ').template_id, 'CSKH_HANDOFF');
@@ -207,7 +210,7 @@ test('mẫu giá được soạn từ danh mục; không có text tĩnh nào đ�
   const general = renderChatbotReply({ template_id: 'GENERAL_INFO' }, templates);
   assert.match(general.messages[0], /Granola Túi Xanh 450g: 174\.000đ/);
   const unknown = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'sữa hạt' }, templates);
-  assert.equal(unknown.messages[0], templates.ASK_PRODUCT);
+  assert.equal(unknown.messages[0], neutral(templates.ASK_PRODUCT));
 });
 
 test('lời bot nói đọc từ Thiết lập tin nhắn, không có bản mặc định trong code', () => {
@@ -234,7 +237,7 @@ test('tin xác nhận đơn và lời xin địa chỉ điền chỗ trống c�
   const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '3', Phone_Number: '0909123456', Customer_Address: 'Quận 12' }, custom);
   assert.deepEqual(reply.messages, [
     'Đơn: Granola Túi Xanh 450g x3 | 0909123456 | Quận 12 | 447.000đ (Miễn phí vận chuyển)\n🎁 Bộ bát gáo dừa + Muỗng dừa',
-    templates.SHIPPING_POLICY
+    neutral(templates.SHIPPING_POLICY)
   ]);
   assert.deepEqual(reply.images, []);
   const partial = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0909123456' }, custom);

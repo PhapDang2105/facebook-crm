@@ -75,6 +75,7 @@ export async function syncPageConversations(pageId, { limit = 25 } = {}) {
         if (!profile) continue;
         conversation.picture = profile.picture;
         if (profile.name) conversation.name = profile.name;
+        if (profile.gender) conversation.gender = profile.gender;
       }
     });
   }

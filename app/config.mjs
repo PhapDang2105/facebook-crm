@@ -67,7 +67,7 @@ export const metaConfig = {
   // Meta names the reaction field message_reactions, not messaging_reactions;
   // sending the wrong name makes the whole subscribed_apps call fail.
   // `feed` delivers comments on the Page's posts and ads; the rest is Messenger.
-  subscribedFields: 'messages,message_echoes,messaging_postbacks,messaging_optins,message_reactions,message_deliveries,message_reads,feed'
+  subscribedFields: 'messages,message_echoes,messaging_postbacks,messaging_optins,message_reactions,message_deliveries,message_reads,messaging_referrals,feed'
 };
 
 export function missingMetaConfiguration() {

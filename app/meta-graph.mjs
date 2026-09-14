@@ -61,15 +61,31 @@ export async function fetchPageSubscription(pageId, pageAccessToken) {
   return { subscribed: Boolean(subscription), fields: subscription?.subscribed_fields || [] };
 }
 
+/**
+ * Name, picture and gender of a Messenger user. Gender needs the
+ * pages_user_gender permission; a Page connected without it still gets the
+ * name and picture from a second, narrower request.
+ */
 export async function fetchCustomerProfile(psid, pageAccessToken) {
+  const load = fields => metaRequest(psid, { query: { fields, access_token: pageAccessToken } });
   try {
-    const profile = await metaRequest(psid, { query: { fields: 'name,profile_pic', access_token: pageAccessToken } });
-    return { name: profile.name || '', picture: profile.profile_pic || '' };
+    let profile;
+    try {
+      profile = await load('name,profile_pic,gender');
+    } catch {
+      profile = await load('name,profile_pic');
+    }
+    return { name: profile.name || '', picture: profile.profile_pic || '', gender: normalizeGender(profile.gender) };
   } catch (error) {
     // Standard access cannot read customer profiles, so this fails for every
     // conversation at once. Return the reason instead of logging per customer.
-    return { name: '', picture: '', error: error.message };
+    return { name: '', picture: '', gender: '', error: error.message };
   }
+}
+
+export function normalizeGender(value) {
+  const gender = String(value || '').toLowerCase();
+  return gender === 'male' || gender === 'female' ? gender : '';
 }
 
 /** Public reply under a comment; Meta answers with the new comment's id. */

@@ -17,6 +17,9 @@ const gift3 = 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa
 // Trimmed exactly as the server stores them, so spacing bugs cannot hide in the seed.
 const templates = Object.fromEntries(Object.entries(defaultMessageTemplates()).map(([id, text]) => [id, text.trim()]));
 
+// {title} in the shipped templates renders as the neutral form when gender is unknown.
+const neutral = text => text.replaceAll('{Title}', 'Anh/chị').replaceAll('{title}', 'anh/chị');
+
 test('giá lẻ + ship cho 1 sản phẩm, giá combo và miễn ship từ 2 — khớp bảng giá gốc', () => {
   const rows = [
     [[['GRA-XANH-Z450', 1]], 189000, ''], [[['GRA-XANH-Z450', 2]], 298000, 'Miễn phí vận chuyển'], [[['GRA-XANH-Z450', 3]], 447000, gift3],
@@ -146,7 +149,7 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   // Sản phẩm không có giá combo chỉ còn bậc 1; các bậc trống và dòng kẻ thừa tự rụng.
   const single = { ...templates, PRICE_QUOTE: templates.PRICE_QUOTE };
   const solo = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'yến mạch' }, { ...single, PRICE_QUOTE: templates.PRICE_QUOTE });
-  assert.equal(solo.messages[0], templates.ASK_PRODUCT);
+  assert.equal(solo.messages[0], neutral(templates.ASK_PRODUCT));
   assert.deepEqual(pricing.quoteTiers('hạt an lành').tiers.map(tier => [tier.price, tier.freeShipping, tier.gifts.length]), [[269000, false, 0], [528000, true, 0], [792000, true, 0]]);
 });
 
@@ -164,7 +167,7 @@ test('tin xác nhận đơn: 2 túi ghép — không dòng ship, miễn ship ghi
     '━━━━━━━━━━━━',
     '💰 Tổng tiền: 293.000đ (Miễn phí vận chuyển)',
     '',
-    'Em cảm ơn anh/ chị đã ủng hộ Giọt Nắng, nếu có gì sai sót, anh/ chị nhắn cho em biết nhé ạ.'
+    'Em cảm ơn anh/chị đã ủng hộ Giọt Nắng, nếu có gì sai sót, anh/chị nhắn cho em biết nhé ạ.'
   ].join('\n'));
   const single = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0385805700', Customer_Address: 'Q12' }, templates).messages[0];
   assert.match(single, /🚚 Phí vận chuyển: 15\.000đ\n━+\n💰 Tổng tiền: 189\.000đ\n\nEm cảm ơn/);

@@ -306,7 +306,7 @@ async function resolveMissingProfiles(changes) {
       profiles.push({ ...item, ...profile });
     } catch (error) {
       // Without a valid Page token the conversation keeps its placeholder name.
-      profiles.push({ ...item, name: '', picture: '', error: error.message });
+      profiles.push({ ...item, name: '', picture: '', gender: '', error: error.message });
     }
   }
   // Mark every attempt, including the failures. Standard access refuses these
@@ -317,6 +317,7 @@ async function resolveMissingProfiles(changes) {
     conversation.profileResolvedAt = Date.now();
     if (profile.name) conversation.name = profile.name;
     if (profile.picture) conversation.picture = profile.picture;
+    if (profile.gender) conversation.gender = profile.gender;
     return profile.name || profile.picture ? { type: 'conversation', conversation } : null;
   }).filter(Boolean));
 }

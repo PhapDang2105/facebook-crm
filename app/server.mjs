@@ -569,8 +569,9 @@ const server = http.createServer(async (request, response) => {
       authorizationUrl.searchParams.set('redirect_uri', metaConfig.redirectUri);
       authorizationUrl.searchParams.set('state', state);
       authorizationUrl.searchParams.set('response_type', 'code');
-      // pages_read_user_content: read comments; pages_manage_engagement: reply to them and send private replies.
-      authorizationUrl.searchParams.set('scope', 'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_read_user_content,pages_manage_engagement');
+      // pages_read_user_content: read comments; pages_manage_engagement: reply to them and send private replies;
+      // pages_user_gender: the customer's gender, so replies say anh or chị instead of anh/chị.
+      authorizationUrl.searchParams.set('scope', 'pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_read_user_content,pages_manage_engagement,pages_user_gender');
       return sendJson(response, 200, { authorizationUrl: authorizationUrl.toString() });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels/meta/callback') {

@@ -3242,7 +3242,7 @@ function renderCustomerGender(conversation) {
     button.setAttribute('aria-pressed', String(active));
   });
   const source = group.querySelector('#customer-gender-source');
-  if (source) source.textContent = state.gender && state.source === 'name' ? 'đoán theo tên' : state.gender && state.source === 'message' ? 'theo cách khách xưng' : '';
+  if (source) source.textContent = state.gender && state.source === 'name' ? 'Đoán theo tên' : state.gender && state.source === 'message' ? 'Theo cách khách xưng' : state.gender && state.source === 'staff' ? 'Nhân viên chọn' : 'Chưa rõ — bấm để chọn';
 }
 
 function renderCustomerPanel(conversation = getActiveConversation()) {

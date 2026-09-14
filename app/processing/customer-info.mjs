@@ -50,11 +50,28 @@ export function genderFromName(name) {
 
 // Only a self-reference that opens the message counts ("chị muốn đặt…");
 // "chị ơi cho em hỏi" addresses the shop, not the customer.
-const selfReference = /^\s*(anh|chị|cô|chú|bác)\s+(muốn|cần|đặt|lấy|mua|hỏi|đang|có|gửi|ở|chốt|xin)\b/i;
+// How a customer refers to themself. "a"/"c" are the usual chat shorthands
+// for anh/chị; "cô"/"chú" are older customers. "bác" says nothing about gender.
+// \b is ASCII-only, so word edges are checked against Unicode letters instead.
+const edgeBefore = '(?<![\\p{L}\\p{N}])';
+const edgeAfter = '(?![\\p{L}\\p{N}])';
+const selfPronoun = '(anh|chị|cô|chú|a|c)';
+const selfVerb = '(?:muốn|cần|đặt|lấy|mua|hỏi|đang|có|gửi|ở|chốt|xin|thích|không|ko|chưa|đã|thấy|ăn|dùng|uống|bị|định|tính|sẽ|vừa|mới|order|đây|nè)';
+// "chị lấy 2 túi", "cô không ăn ngọt được", "a đặt 1 túi"
+const subjectForm = new RegExp(`${edgeBefore}${selfPronoun}\\s+${selfVerb}${edgeAfter}`, 'iu');
+// "lấy c 2 túi", "gửi cho chị", "cho anh hỏi", "của chị"
+const objectForm = new RegExp(`${edgeBefore}(?:lấy|gửi|gởi|ship|giao|bán|báo|cho|của|với|giúp|để)\\s+(?:cho\\s+)?${selfPronoun}${edgeAfter}(?!\\s*(?:ơi|oi|à|ạ|nhé|nha|nhen|ei|êi|shop))`, 'iu');
+// "chị ơi", "anh ơi" address the shop, never the customer.
+const vocative = new RegExp(`${edgeBefore}${selfPronoun}\\s+(?:ơi|oi|ei|êi)`, 'iu');
 
 export function genderFromMessage(text) {
-  const match = String(text || '').match(selfReference);
+  const message = String(text || '');
+  const match = message.match(subjectForm) || message.match(objectForm);
   if (!match) return '';
   const word = match[1].toLowerCase();
-  return word === 'anh' || word === 'chú' ? 'male' : 'female';
+  // "anh ơi … anh …" is the shop being addressed, so that word says nothing;
+  // a single letter is only shorthand when nobody is being called by it.
+  const called = message.match(vocative)?.[1]?.toLowerCase() || '';
+  if (called && (called === word || word === 'a' || word === 'c')) return '';
+  return word === 'anh' || word === 'chú' || word === 'a' ? 'male' : 'female';
 }

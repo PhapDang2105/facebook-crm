@@ -145,6 +145,14 @@ test('giới tính đoán từ tên và cách khách tự xưng; nhân viên đ�
   assert.equal(genderFromMessage('chị muốn đặt 2 túi xanh'), 'female');
   assert.equal(genderFromMessage('Anh cần giao về Q12'), 'male');
   assert.equal(genderFromMessage('chị ơi cho em hỏi giá'), '', 'addressing the shop is not a self-reference');
+  assert.equal(genderFromMessage('Lấy c 2 túi'), 'female', 'c is shorthand for chị');
+  assert.equal(genderFromMessage('cô không ăn ngọt được'), 'female');
+  assert.equal(genderFromMessage('Cho anh hỏi túi vàng bao nhiêu'), 'male');
+  assert.equal(genderFromMessage('gửi cho chị 2 túi nâu nhé'), 'female');
+  assert.equal(genderFromMessage('a ơi còn hàng không'), '', 'a ơi calls the shop');
+  assert.equal(genderFromMessage('anh ơi anh muốn lấy 2 túi'), '', 'the word used to call the shop is not trusted');
+  assert.equal(genderFromMessage('bác muốn mua 2 túi'), '', 'bác does not tell gender');
+  assert.equal(genderFromMessage('1 túi bao nhiêu a'), '');
   const conversation = { name: 'Trần Văn Hoàng' };
   assert.equal(applyGenderGuess(conversation, genderFromName(conversation.name), 'name'), true);
   assert.equal(applyGenderGuess(conversation, 'female', 'message'), true, 'self-reference beats the name');

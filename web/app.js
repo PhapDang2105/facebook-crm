@@ -1719,7 +1719,43 @@ function saveChatMessageReaction(name, messageId, reaction) {
 
 // A marker only counts when it does not sit against a letter or digit, which
 // is why Messenger renders *0385805700* in bold but leaves *298.000*đ alone.
+/** A short, readable name for a link instead of the raw address. */
+function messageLinkLabel(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'Xem liên kết';
+  }
+  const host = parsed.hostname.replace(/^www\./, '');
+  if (/(^|\.)facebook\.com$|(^|\.)fb\.watch$|(^|\.)fb\.me$/.test(host)) {
+    if (parsed.searchParams.has('comment_id') || /\/comment/.test(parsed.pathname)) return 'Xem bình luận';
+    if (/\/(reel|videos|watch)/.test(parsed.pathname)) return 'Xem video';
+    if (/\/(posts|permalink|photo|story|share)/.test(parsed.pathname) || parsed.searchParams.has('story_fbid')) return 'Xem bài viết';
+    return 'Xem trên Facebook';
+  }
+  if (/(^|\.)shopee\.vn$/.test(host)) return 'Xem trên Shopee';
+  if (/(^|\.)tiktok\.com$/.test(host)) return 'Xem trên TikTok';
+  return host;
+}
+
+function buildMessageLink(url, label) {
+  const link = document.createElement('a');
+  link.className = 'message-link';
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.title = url;
+  link.textContent = label || messageLinkLabel(url);
+  return link;
+}
+
 const inlineMessageFormats = [
+  // Facebook's own notice reads "… Xem bình luận. (https://…)": the phrase and
+  // the address are one link, so only the phrase is shown.
+  { pattern: /(Xem [^.()\n]{0,30})\.?\s*\((https?:\/\/[^\s)]+)\)/u, build: match => buildMessageLink(match[2], match[1].trim()) },
+  { pattern: /\((https?:\/\/[^\s)]+)\)/u, build: match => buildMessageLink(match[1]) },
+  { pattern: /https?:\/\/[^\s<>"']+/u, trimTrailing: true, build: match => buildMessageLink(match[0].replace(/[.,;:!?)\]]+$/, '')) },
   { tag: 'strong', pattern: /(?<![\p{L}\p{N}*])\*(\S|\S[^*\n]*?\S)\*(?![\p{L}\p{N}*])/u },
   { tag: 'em', pattern: /(?<![\p{L}\p{N}_])_(\S|\S[^_\n]*?\S)_(?![\p{L}\p{N}_])/u },
   { tag: 's', pattern: /(?<![\p{L}\p{N}~])~(\S|\S[^~\n]*?\S)~(?![\p{L}\p{N}~])/u },
@@ -1728,7 +1764,8 @@ const inlineMessageFormats = [
 
 /**
  * Renders the inline formatting Messenger applies: *bold*, _italic_, ~strike~
- * and `code`. Builds real nodes rather than HTML, so text written by a customer
+ * and `code`, plus links shown by name ("Xem bài viết") instead of a long
+ * address. Builds real nodes rather than HTML, so text written by a customer
  * can never reach the page as markup.
  */
 function appendMessageText(target, value) {
@@ -1740,10 +1777,18 @@ function appendMessageText(target, value) {
       .sort((first, second) => first.match.index - second.match.index)[0];
     if (!hit) break;
     if (hit.match.index > 0) target.appendChild(document.createTextNode(rest.slice(0, hit.match.index)));
-    const element = document.createElement(hit.format.tag);
-    appendMessageText(element, hit.match[1]);
-    target.appendChild(element);
-    rest = rest.slice(hit.match.index + hit.match[0].length);
+    if (hit.format.build) {
+      target.appendChild(hit.format.build(hit.match));
+    } else {
+      const element = document.createElement(hit.format.tag);
+      appendMessageText(element, hit.match[1]);
+      target.appendChild(element);
+    }
+    // Punctuation the bare-URL pattern swept up stays as text after the link.
+    const consumed = hit.format.trimTrailing
+      ? (hit.match[0].replace(/[.,;:!?)\]]+$/, '').length || hit.match[0].length)
+      : hit.match[0].length;
+    rest = rest.slice(hit.match.index + consumed);
   }
   if (rest) target.appendChild(document.createTextNode(rest));
 }

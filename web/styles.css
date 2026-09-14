@@ -1563,8 +1563,9 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 #conversation-search-button.active img { filter: none; }
 .chatbot-toggle-button { position: relative; display: grid; place-items: center; width: 40.5px; height: 40.5px; padding: 6.75px; border-radius: 50%; }
 .chatbot-toggle-button img { width: 24.75px; height: 24.75px; filter: grayscale(1) brightness(.35); }
-.chatbot-toggle-button.active { background: #e7f3ff; }
+.chatbot-toggle-button.active { background: transparent; }
 .chatbot-toggle-button.active img { filter: invert(32%) sepia(96%) saturate(3645%) hue-rotate(215deg) brightness(101%) contrast(102%); }
+.chatbot-toggle-button:hover { background: #f0f2f5; }
 .chatbot-toggle-button.active::after { position: absolute; right: 3.375px; bottom: 3.375px; width: 7.875px; height: 7.875px; background: #31a24c; border: 1.8px solid #fff; border-radius: 50%; content: ''; }
 .chatbot-toggle-button:disabled { cursor: wait; opacity: .55; }
 
@@ -1788,10 +1789,10 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .composer { display: flex; align-items: center; gap: 5.625px; padding: 10.125px 13.5px 14px; }
 .chat-gender { position: relative; display: flex; align-items: center; }
 .chat-gender.hidden { display: none; }
-.chat-gender-button { display: inline-flex; align-items: center; gap: 6px; height: 34px; margin-right: 4px; padding: 0 12px 0 8px; color: #1d2b22; background: #f0f2f5; border: 0; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-.chat-gender-button:hover { background: #e4e6eb; }
+.chat-gender-button { display: inline-flex; align-items: center; gap: 5px; height: 34px; margin-right: 2px; padding: 0 8px; color: #4b4f56; background: transparent; border: 0; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.chat-gender-button:hover { background: #f0f2f5; }
 .chat-gender-button img { width: 20px; height: 20px; }
-.chat-gender-button.is-set { background: #e7f3ff; color: #0a52a8; }
+.chat-gender-button.is-set { background: transparent; color: #1d2b22; }
 .chat-gender-menu { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; min-width: 150px; padding: 6px; background: #fff; border: 1px solid #dfe2e7; border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .16); }
 .chat-gender-menu.hidden { display: none; }
 .chat-gender-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; color: #1d2b22; background: transparent; border: 0; border-radius: 7px; font: inherit; font-size: 13.5px; font-weight: 500; text-align: left; cursor: pointer; }
@@ -2071,3 +2072,8 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .message-default-field textarea { width: 100%; padding: 10px 13px; color: #101828; background: #fff; border: 1px solid #d0d5dd; border-radius: 9px; outline: 0; font: inherit; font-size: 14px; font-weight: 400; line-height: 1.5; resize: vertical; }
 .message-default-field textarea:focus { border-color: #84adf0; box-shadow: 0 0 0 3px rgba(8,102,255,.08); }
 .message-defaults-actions { display: flex; justify-content: flex-end; }
+
+/* Liên kết trong tin nhắn: hiện tên ngắn thay cho địa chỉ dài */
+.message-link { color: var(--messenger-blue); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.message-link:hover { text-decoration-thickness: 2px; }
+.outgoing .bubble .message-link { color: #fff; }

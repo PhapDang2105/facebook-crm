@@ -1524,17 +1524,17 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
   font-weight: 700;
 }
 
-.avatar-large { flex-basis: 47.25px; width: 47.25px; height: 47.25px; min-width: 47.25px; min-height: 47.25px; }
+.avatar-large { flex-basis: 44px; width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
 .avatar-small { flex-basis: 31.5px; width: 31.5px; height: 31.5px; min-width: 31.5px; min-height: 31.5px; font-size: 13.5px; }
 .avatar-profile { flex-basis: 81px; width: 81px; height: 81px; min-width: 81px; min-height: 81px; font-size: 29.25px; }
 .avatar.has-photo { color: transparent; background: #e4e6eb; }
 .avatar-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 
 .chat-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #fff; border-radius: 18px; }
-.chat-head { position: relative; display: flex; align-items: center; gap: 12.375px; min-height: 85.5px; padding: 18px 24.75px; }
+.chat-head { position: relative; display: flex; align-items: center; gap: 12.375px; min-height: 64px; padding: 9px 24.75px; }
 .chat-head::after { position: absolute; right: 6.75px; bottom: 0; left: 6.75px; height: 1.125px; background: #e6e6e6; content: ''; }
-.chat-head-copy { display: flex; flex: 1; flex-direction: column; gap: 5.625px; min-width: 0; }
-.chat-head strong { font-size: 18px; }
+.chat-head-copy { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.chat-head strong { font-size: 17px; line-height: 1.2; }
 .chat-head-meta { display: flex; align-items: center; gap: 4.5px; min-height: 22.5px; }
 .chat-head-meta.hidden { display: none; }
 .chat-head-tab { display: inline-flex; align-items: center; justify-content: center; gap: 3.375px; height: 22.5px; padding: 0 6.75px; color: #4b4f56; background: transparent; border: 0; border-radius: 5.625px; font: inherit; font-size: 12.375px; line-height: 1; white-space: nowrap; cursor: pointer; }
@@ -1781,7 +1781,7 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .message-reply-copy span { overflow: hidden; color: #65676b; font-size: 13.5px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .message-reply-close { position: absolute; top: 8px; right: 13.5px; display: grid; place-items: center; width: 29.25px; height: 29.25px; padding: 0; color: #65676b; background: transparent; border: 0; border-radius: 50%; font-size: 22.5px; line-height: 1; cursor: pointer; }
 .message-reply-close:hover { color: #1c1e21; background: #e4e6eb; }
-.composer { display: flex; align-items: center; gap: 5.625px; padding: 10.125px 13.5px; }
+.composer { display: flex; align-items: center; gap: 5.625px; padding: 10.125px 13.5px 14px; }
 .customer-gender { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
 .customer-gender-label { color: #65676b; font-size: 12.5px; margin-right: 2px; }
 .customer-gender button { padding: 3px 12px; border: 1px solid #dfe2e6; border-radius: 999px; background: #fff; color: #4b4f56; font-size: 12.5px; font-weight: 600; cursor: pointer; }
@@ -1960,15 +1960,15 @@ i.label-icon { width: 8px; height: 8px; border-radius: 50%; background: var(--la
 .conversation-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
 .conversation-label { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 9px 2px 6px; border-radius: 999px; background: var(--label-color, #e6e9ee); color: var(--label-ink, #3b3f46); font-size: 11.5px; font-weight: 600; line-height: 15px; white-space: nowrap; }
 .conversation-label .label-icon { width: 13px; height: 13px; }
-.conversation-label-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 13.5px 0; }
+.conversation-label-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 8px; min-height: 56px; padding: 12px 13.5px 4px; }
 .conversation-label-bar.hidden { display: none; }
-.conversation-label-bar-title { display: inline-flex; align-items: center; margin-right: 2px; color: #98a2b3; }
-.conversation-label-bar-title svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
-.conversation-label-bar button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px 0 8px; color: var(--label-ink, #3b3f46); background: var(--label-tint, #f2f4f7); border: 1px solid transparent; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s, transform .12s; }
-.conversation-label-bar button .label-icon { width: 16px; height: 16px; }
+.conversation-label-bar-title { display: inline-flex; align-items: center; margin-right: 4px; color: #98a2b3; }
+.conversation-label-bar-title svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.conversation-label-bar button { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px 0 10px; color: var(--label-ink, #3b3f46); background: var(--label-tint, #f2f4f7); border: 1px solid transparent; border-radius: 999px; font-size: 13.5px; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s, transform .12s; }
+.conversation-label-bar button .label-icon { width: 19px; height: 19px; }
 .conversation-label-bar button:hover { background: var(--label-color); }
 .conversation-label-bar button.active { background: var(--label-color); border-color: var(--label-line); box-shadow: 0 1px 2px rgba(16, 24, 40, .08); font-weight: 700; }
-.conversation-label-bar button.active::after { content: '✓'; margin-left: 1px; color: var(--label-ink); font-size: 11px; font-weight: 800; }
+.conversation-label-bar button.active::after { content: '✓'; margin-left: 2px; color: var(--label-ink); font-size: 12px; font-weight: 800; }
 .message-label-icon { width: 16px; height: 16px; margin-right: 8px; }
 i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .message-label-menu-dynamic { display: block; }

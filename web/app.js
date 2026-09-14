@@ -419,7 +419,7 @@ let customersRequestId = 0;
 let customersItems = [];
 const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo' };
 const customerSourceIcons = { inbox: '/assets/icons/messenger.png', comment: '/assets/icons/facebook.png', ads: '/assets/icons/facebook.png' };
-const customerLabelNames = { new: 'Khách mới', consulting: 'Cần tư vấn', customer: 'Đã mua' };
+const customerLabelNames = { consulting: 'Cần người xử lý', customer: 'Đã mua hàng' };
 
 function customersQueryString() {
   const params = new URLSearchParams();
@@ -1389,7 +1389,7 @@ async function loadMessageChannels() {
     }
     connectMessagingStream();
   } else {
-    const labelCycle = ['new', 'consulting', 'customer'];
+    const labelCycle = ['', 'consulting', 'customer'];
     getConversationItems().forEach((conversation, index) => {
       if (!conversation.dataset.channelId) conversation.dataset.channelId = currentMessageChannelId;
       if (!conversation.dataset.labels) conversation.dataset.labels = labelCycle[index % labelCycle.length];
@@ -5969,13 +5969,13 @@ function mixLabelColor(hex, ratio) {
   return `rgb(${red}, ${green}, ${blue})`;
 }
 
-// Pastel chips: the label colour is the fill, a lighter mix is the resting
-// state and a darker mix draws the border and the check mark.
+// Outlined when resting, filled when the thread carries the label: the
+// colour draws the border and text, then becomes the fill under white text.
 function applyLabelColors(element, color) {
   element.style.setProperty('--label-color', color);
-  element.style.setProperty('--label-tint', mixLabelColor(color, 0.55));
-  element.style.setProperty('--label-line', mixLabelColor(color, -0.22));
-  element.style.setProperty('--label-ink', mixLabelColor(color, -0.62));
+  element.style.setProperty('--label-tint', mixLabelColor(color, 0.9));
+  element.style.setProperty('--label-line', mixLabelColor(color, 0.35));
+  element.style.setProperty('--label-ink', mixLabelColor(color, -0.28));
 }
 
 function labelIconElement(label) {

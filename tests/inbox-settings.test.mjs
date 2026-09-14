@@ -10,11 +10,12 @@ import {
 } from '../app/inbox-settings.mjs';
 import { processChatbotChanges } from '../app/chatbot-engine.mjs';
 
-test('thẻ mặc định là bộ thẻ của Pancake, giữ id new/customer/consulting cũ', () => {
+test('thẻ mặc định là bộ thẻ của Pancake, giữ id customer/consulting', () => {
   const ids = defaultConversationLabels.map(label => label.id);
-  assert.ok(ids.includes('new') && ids.includes('customer') && ids.includes('consulting'));
+  assert.ok(ids.includes('customer') && ids.includes('consulting'));
+  assert.ok(!ids.includes('new'));
   assert.equal(defaultConversationLabels.find(label => label.id === 'customer').name, 'Đã mua hàng');
-  assert.equal(defaultConversationLabels.length, 9);
+  assert.equal(defaultConversationLabels.length, 8);
 });
 
 test('tên thẻ tiếng Việt thành id ổn định, trùng tên thì tự thêm hậu tố', () => {
@@ -28,7 +29,7 @@ test('tên thẻ tiếng Việt thành id ổn định, trùng tên thì tự th
   ]);
   assert.deepEqual(labels.map(label => label.id), ['khach-si', 'khach-si-2', 'customer']);
   assert.equal(labels[0].color, '#cf9de0');
-  assert.equal(labels[1].color, '#d9dde4');
+  assert.equal(labels[1].color, '#6b7280');
   assert.equal(labels[0].icon, '');
 });
 
@@ -52,7 +53,7 @@ test('mẫu trả lời nhanh: ký tự tắt không dấu cách, ảnh tải l�
 
 test('xóa hết thẻ thì quay về bộ mặc định', async () => {
   const settings = await normalizeInboxSettings({ labels: [], quickReplies: null });
-  assert.equal(settings.labels.length, 9);
+  assert.equal(settings.labels.length, 8);
   assert.deepEqual(settings.quickReplies, []);
 });
 

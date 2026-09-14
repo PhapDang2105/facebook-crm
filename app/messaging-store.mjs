@@ -124,7 +124,7 @@ export function ensureConversation(store, { pageId, psid, name, picture, id: exp
       ...(post ? { post } : {}),
       unread: false,
       muted: false,
-      labels: ['new'],
+      labels: [],
       lastMessageAt: 0,
       lastMessagePreview: '',
       lastMessageDirection: '',

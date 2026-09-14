@@ -9,19 +9,18 @@ import { projectRoot } from './config.mjs';
 const inboxSettingsPath = process.env.INBOX_SETTINGS_PATH
   || path.join(projectRoot, 'data', 'processed', 'inbox-settings.json');
 
-// The Pancake set the team already works with, colours included. Ids `new`
-// and `customer` match the labels older conversations carry; `consulting`
-// is what the bot sets when it hands a thread to a person.
+// The Pancake set the team already works with. `customer` is what the bot
+// sets when an order is placed, `consulting` when it hands a thread to a
+// person. No "new" label: the inbox already shows unread and first-contact.
 export const defaultConversationLabels = Object.freeze([
-  { id: 'consulting', name: 'Cần người xử lý', color: '#d6c8f5', icon: 'person-raising-hand' },
-  { id: 'warranty', name: 'Bảo hành', color: '#fbcfc3', icon: 'hammer-and-wrench' },
-  { id: 'complaint', name: 'Khiếu nại', color: '#f9c1c1', icon: 'warning' },
-  { id: 'customer', name: 'Đã mua hàng', color: '#c5e8cb', icon: 'shopping-bags' },
-  { id: 'livestream', name: 'Livestream', color: '#f9c9e4', icon: 'video-camera' },
-  { id: 'new', name: 'Mới', color: '#c6dff8', icon: 'sparkles' },
-  { id: 'wholesale', name: 'Khách sỉ', color: '#f6e3a8', icon: 'package' },
-  { id: 'bad', name: 'Khách xấu', color: '#d9dde4', icon: 'prohibited' },
-  { id: 'jt', name: 'Giao J&T', color: '#e8d2ba', icon: 'delivery-truck' }
+  { id: 'consulting', name: 'Cần người xử lý', color: '#8f7ad0', icon: 'person-raising-hand' },
+  { id: 'warranty', name: 'Bảo hành', color: '#d9866f', icon: 'hammer-and-wrench' },
+  { id: 'complaint', name: 'Khiếu nại', color: '#c85f5b', icon: 'warning' },
+  { id: 'customer', name: 'Đã mua hàng', color: '#5fa871', icon: 'shopping-bags' },
+  { id: 'livestream', name: 'Livestream', color: '#c26a9a', icon: 'video-camera' },
+  { id: 'wholesale', name: 'Khách sỉ', color: '#c79a2c', icon: 'package' },
+  { id: 'bad', name: 'Khách xấu', color: '#6b7280', icon: 'prohibited' },
+  { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck' }
 ]);
 
 export const defaultInboxSettings = Object.freeze({
@@ -60,7 +59,7 @@ export function normalizeConversationLabels(value) {
     while (seen.has(id)) id = `${id}-2`;
     seen.add(id);
     const icon = String(item?.icon || '').trim().toLowerCase();
-    labels.push({ id, name, color: cleanColor(item?.color, '#d9dde4'), icon: /^[a-z0-9-]{1,40}$/.test(icon) ? icon : '' });
+    labels.push({ id, name, color: cleanColor(item?.color, '#6b7280'), icon: /^[a-z0-9-]{1,40}$/.test(icon) ? icon : '' });
     if (labels.length >= maximumLabels) break;
   }
   return labels;

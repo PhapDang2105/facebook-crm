@@ -733,6 +733,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === metaConfig.webhookPath) {
       const rawBody = await readRawBody(request);
       if (!verifyWebhookSignature(rawBody, request.headers['x-hub-signature-256'], metaConfig.appSecret)) {
+        console.error(`Webhook Meta: từ chối vì chữ ký không hợp lệ (${rawBody.length} byte, header ${request.headers['x-hub-signature-256'] ? 'có' : 'thiếu'})`);
         response.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
         return response.end('Invalid signature');
       }

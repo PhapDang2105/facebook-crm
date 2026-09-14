@@ -88,7 +88,8 @@ test('bot trả lời bình luận: nhắn riêng nội dung, công khai một c
   assert.equal(result[0].templateId, 'ORDER_CONFIRMATION');
   assert.equal(result[0].orderId, undefined);
   assert.equal(sent.length, 2);
-  assert.deepEqual(sent[0], { text: 'Xác nhận đơn\n\nCảm ơn mình', privateReply: true });
+  // The private message opens with the COMMENT_PRIVATE_REPLY intro, then the answer the model chose.
+  assert.deepEqual(sent[0], { text: `${templates.COMMENT_PRIVATE_REPLY.replaceAll('{title}', 'anh/chị')}\n\nXác nhận đơn\n\nCảm ơn mình`, privateReply: true });
   assert.equal(sent[1].text, templates.COMMENT_PUBLIC_REPLY.replaceAll('{title}', 'anh/chị'));
   assert.equal(sent[1].privateReply, undefined);
 });

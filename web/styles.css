@@ -423,6 +423,7 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customer-tag--ad { border-color: #fed7aa; background: #fff1e6; color: #c2410c; }
 .customer-tag--bot { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
 .customers-total { margin: 10px 0 0; color: #687080; font-size: 13px; }
+.chatbot-template-group { margin: 10px 0 4px; padding: 0 4px; color: #687080; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .customers-table.is-empty { min-height: 320px; }
 .customers-table td.customer-time { color: #4b4f56; white-space: nowrap; }
 .customers-table td.customer-money { text-align: right; white-space: nowrap; }
@@ -1792,7 +1793,7 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .composer-reply-mode button img { width: 14px; height: 14px; }
 .composer-reply-mode button.active { border-color: #0a66c2; background: #e7f0fb; color: #0a66c2; }
 .composer-area--comment .composer-icon, .composer-area--comment .composer-file-button { display: none; }
-.post-context { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin: 6px 0 14px; }
+.post-context { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 6px 0 14px 46px; }
 .post-context-notice { padding: 7px 12px; color: #1f5132; background: #e3f4e6; border-radius: 12px; font-size: 12.5px; }
 .post-context-notice a { color: #0a66c2; font-weight: 600; text-decoration: none; }
 .post-context-notice a:hover { text-decoration: underline; }

@@ -808,9 +808,11 @@ const server = http.createServer(async (request, response) => {
       const conversation = await getConversation(id);
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
       if (request.method === 'GET') {
+        const items = await listMessages(id, Number(url.searchParams.get('limit')) || 100);
         return sendJson(response, 200, {
           conversation: publicConversation(conversation),
-          items: await listMessages(id, Number(url.searchParams.get('limit')) || 100)
+          // A comment thread shows comments only; private replies live in Messenger.
+          items: conversation.source === 'comment' ? items.filter(item => !item.privateReply) : items
         });
       }
       if (request.method === 'POST') {

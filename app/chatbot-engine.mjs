@@ -208,7 +208,8 @@ export async function processChatbotChanges(changes, dependencies) {
         // joined), and one short public reply tells them to check their inbox.
         // Orders are never created from a comment — the customer is asked to
         // continue in Messenger, where the address exchange is private.
-        const privateText = reply.messages.join('\n\n');
+        const intro = renderChatbotReply({ template_id: 'COMMENT_PRIVATE_REPLY' }, settings.messageTemplates, replyContext);
+        const privateText = [...(intro.templateId === 'COMMENT_PRIVATE_REPLY' ? intro.messages : []), ...reply.messages].join('\n\n');
         if (privateText) await sendMessage(conversation, { text: privateText, privateReply: true });
         const publicReply = renderChatbotReply({ template_id: 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
         for (const text of publicReply.messages) await sendMessage(conversation, { text });

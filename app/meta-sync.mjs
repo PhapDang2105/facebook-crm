@@ -95,7 +95,10 @@ export async function syncPageConversations(pageId, { limit = 25 } = {}) {
  * A comment thread answers under the customer's latest comment — publicly —
  * or, with `privateReply`, as one Messenger message to that person. The
  * public reply is echoed back by the feed webhook under the same comment id,
- * so recording it here and the echo merge into one bubble.
+ * so recording it here and the echo merge into one bubble. A private reply
+ * is a Messenger message, so it is recorded in the person's Messenger thread
+ * (opened here if they never wrote in) — the comment thread keeps only
+ * comments, the way Facebook itself separates the two.
  */
 async function sendCommentReply(conversation, { text, imageUrl, privateReply }) {
   const body = String(text || imageUrl || '').trim();
@@ -118,9 +121,17 @@ async function sendCommentReply(conversation, { text, imageUrl, privateReply }) 
     ...(privateReply ? { privateReply: true } : { commentId: id, parentId: conversation.lastCommentId })
   };
   const saved = await updateMessagingStore(store => {
-    const outcome = saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, id: conversation.id, source: 'comment', message });
-    outcome.conversation.unread = false;
-    if (!privateReply) store.commentIndex[id] = conversation.id;
+    const outcome = privateReply
+      ? saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, name: conversation.name, picture: conversation.picture, message })
+      : saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, id: conversation.id, source: 'comment', message });
+    if (privateReply) {
+      // The Messenger thread inherits what the comment was about.
+      if (!outcome.conversation.post && conversation.post) outcome.conversation.post = { ...conversation.post, inheritedFrom: conversation.id };
+      if (!outcome.conversation.gender && conversation.gender) applyGenderGuess(outcome.conversation, conversation.gender, conversation.genderSource);
+    } else {
+      outcome.conversation.unread = false;
+      store.commentIndex[id] = conversation.id;
+    }
     return { message: outcome.message, conversation: publicConversation(outcome.conversation) };
   });
   publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: saved.message });

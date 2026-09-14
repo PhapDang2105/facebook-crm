@@ -2372,7 +2372,7 @@ async function loadChatbotSettings() {
 
 function chatbotTemplateLabel(id) {
   const labels = {
-    WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', COMMENT_PUBLIC_REPLY: 'Trả lời công khai dưới bình luận', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
+    WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', COMMENT_PUBLIC_REPLY: 'Trả lời công khai dưới bình luận', COMMENT_PRIVATE_REPLY: 'Mở đầu tin nhắn riêng từ bình luận', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
     ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
     ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
     PRICE_MIX_TUI_LON: 'Bảng giá mix túi lớn', PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_COMBO: 'Báo giá sản phẩm (đơn vị Combo)',
@@ -2389,10 +2389,15 @@ function renderChatbotTemplateList() {
   const entries = Object.entries(chatbotTemplatesState)
     .map(([id, content]) => ({ id, content }))
     .filter(({ id, content }) => `${id} ${content}`.toLowerCase().includes(keyword));
-  chatbotTemplateList.innerHTML = entries.map(({ id, content }) => `
+  // Comment replies first under their own heading; everything else is Messenger.
+  const groups = [
+    ['Bình luận', entries.filter(entry => entry.id.startsWith('COMMENT_'))],
+    ['Tin nhắn', entries.filter(entry => !entry.id.startsWith('COMMENT_'))]
+  ].filter(([, items]) => items.length);
+  chatbotTemplateList.innerHTML = groups.map(([title, items]) => `<p class="chatbot-template-group">${title}</p>` + items.map(({ id, content }) => `
     <button class="chatbot-template-item ${id === selectedChatbotTemplate ? 'active' : ''}" type="button" data-chatbot-template-id="${escapeHtml(id)}">
       <strong>${escapeHtml(chatbotTemplateLabel(id))}</strong><small>${escapeHtml(String(content).replaceAll('###', ' · '))}</small>
-    </button>`).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
+    </button>`).join('')).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
 }
 
 function renderChatbotTemplateEditor() {
@@ -4158,9 +4163,15 @@ async function sendRemoteMessage(conversation, text, attachment) {
     const messages = remoteMessages.get(conversationId) || [];
     const index = messages.findIndex(item => item.id === pending.id);
     if (index >= 0) messages.splice(index, 1);
-    // Keep the local preview so an uploaded image still renders before Meta echoes its own URL.
-    cacheRemoteMessage(conversationId, { ...result.message, dataUrl: result.message.dataUrl || pending.dataUrl || '' });
+    // A private reply from a comment thread is a Messenger message: it is
+    // stored in the person's Messenger thread, so it is cached there instead.
+    const targetId = result.conversation?.id || conversationId;
+    if (remoteMessages.has(targetId) || targetId === conversationId) {
+      // Keep the local preview so an uploaded image still renders before Meta echoes its own URL.
+      cacheRemoteMessage(targetId, { ...result.message, dataUrl: result.message.dataUrl || pending.dataUrl || '' });
+    }
     if (result.conversation) applyRemoteConversation(result.conversation);
+    if (targetId !== conversationId) showToast('Đã nhắn riêng qua Messenger — xem trong hội thoại Messenger của khách.', 'success');
   } catch (error) {
     const messages = remoteMessages.get(conversationId) || [];
     const failed = messages.find(item => item.id === pending.id);

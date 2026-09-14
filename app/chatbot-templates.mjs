@@ -32,8 +32,16 @@ export function defaultMessageTemplates() {
 const isDivider = line => line.trim() !== '' && line.trim() !== '###' && !/[\p{L}\p{N}]/u.test(line);
 
 /** Fills one template: lists, conditionals, placeholders, then line clean-up. */
+/** {Dạ|Hi|Chào} — one option chosen at random, so repeated replies differ. */
+export function spin(text, random = Math.random) {
+  return String(text ?? '').replace(/\{([^{}]*\|[^{}]*)\}/g, (_, options) => {
+    const choices = options.split('|');
+    return choices[Math.min(choices.length - 1, Math.floor(random() * choices.length))];
+  });
+}
+
 function fill(text, values = {}, lists = {}) {
-  let out = String(text ?? '').replace(/\\n/g, '\n');
+  let out = spin(String(text ?? '').replace(/\\n/g, '\n'), activeCustomer.random || Math.random);
   // [[list]]body[[|]]separator[[/list]] — the separator goes between items only.
   out = out.replace(/\[\[([a-z_]+)\]\]([\s\S]*?)\[\[\/\1\]\]/gi, (_, name, body) => {
     const [itemBody, separator = ''] = body.split('[[|]]');
@@ -110,10 +118,20 @@ export function honorific(gender) {
   return gender === 'male' ? 'anh' : gender === 'female' ? 'chị' : 'anh/chị';
 }
 
-/** Placeholders every template may use: {title} / {Title} and {shipping_fee}. */
+/** Placeholders every template may use: {title} / {Title}, {name} and {shipping_fee}. */
 function commonValues() {
   const title = honorific(activeCustomer.gender);
-  return { shipping_fee: formatMoney(getShippingFee()), title, Title: title.charAt(0).toUpperCase() + title.slice(1) };
+  return { shipping_fee: formatMoney(getShippingFee()), title, Title: title.charAt(0).toUpperCase() + title.slice(1), name: String(activeCustomer.name || '').trim() };
+}
+
+/**
+ * One of a template's ### variants at random — for the public comment reply,
+ * where Facebook treats the same sentence posted under every comment as spam.
+ */
+export function pickVariant(reply, random = Math.random) {
+  const messages = reply?.messages || [];
+  if (messages.length < 2) return messages;
+  return [messages[Math.min(messages.length - 1, Math.floor(random() * messages.length))]];
 }
 
 /** Shipping and gifts of one basket key as template values. */

@@ -83,7 +83,7 @@ export function buildCustomers(store, channels = []) {
     for (const label of Array.isArray(conversation.labels) ? conversation.labels : []) {
       if (!existing.labels.includes(label)) existing.labels.push(label);
     }
-    existing.botEnabled = existing.botEnabled || conversation.botEnabled === true;
+    existing.botEnabled = existing.botEnabled || conversation.botEnabled !== false;
     existing.unread = existing.unread || Boolean(conversation.unread);
     existing.conversations.push({ id: conversation.id, source: conversation.source || 'inbox' });
     customers.set(key, existing);

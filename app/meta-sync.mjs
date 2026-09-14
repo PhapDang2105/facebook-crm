@@ -8,7 +8,9 @@ import {
   sendPrivateReply,
   sendPageImageUrl,
   sendPageMessage,
-  sendPageTemplate
+  sendPageTemplate,
+  hideComment,
+  likeComment
 } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import {
@@ -136,6 +138,15 @@ async function sendCommentReply(conversation, { text, imageUrl, privateReply }) 
   });
   publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: saved.message });
   return saved;
+}
+
+/** Like and/or hide the customer's latest comment, as the bot settings ask. */
+export async function moderateComment(conversation, message, { like = false, hide = false } = {}) {
+  const commentId = message?.commentId || conversation.lastCommentId;
+  if (!commentId || (!like && !hide)) return;
+  const pageAccessToken = await getPageAccessToken(conversation.pageId);
+  if (like) await likeComment({ commentId, pageAccessToken }).catch(() => {});
+  if (hide) await hideComment({ commentId, pageAccessToken }).catch(() => {});
 }
 
 /** Sends a reply through the Send API and records it in the local conversation. */

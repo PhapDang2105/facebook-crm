@@ -77,6 +77,16 @@ export async function fetchCustomerProfile(psid, pageAccessToken) {
   }
 }
 
+/** Likes a customer's comment as the Page. */
+export function likeComment({ commentId, pageAccessToken }) {
+  return metaRequest(`${commentId}/likes`, { method: 'POST', body: { access_token: pageAccessToken } });
+}
+
+/** Hides a comment from everyone but its author (Page admins still see it). */
+export function hideComment({ commentId, pageAccessToken }) {
+  return metaRequest(commentId, { method: 'POST', body: { is_hidden: 'true', access_token: pageAccessToken } });
+}
+
 /** Public reply under a comment; Meta answers with the new comment's id. */
 export function replyToComment({ commentId, message, pageAccessToken }) {
   return metaRequest(`${commentId}/comments`, { method: 'POST', body: { message, access_token: pageAccessToken } });

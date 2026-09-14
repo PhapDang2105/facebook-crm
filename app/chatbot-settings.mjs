@@ -18,6 +18,9 @@ export const defaultChatbotSettings = Object.freeze({
   retryIntervalMs: 1000,
   welcomeMessage: '',
   handoffKeywords: '',
+  // Comments: like the customer's comment; hide it when it holds a phone number.
+  commentLike: true,
+  commentHide: 'phone',
   messageTemplates: {}
 });
 
@@ -85,6 +88,8 @@ export function normalizeChatbotSettings(value = {}) {
     retryIntervalMs: Math.max(100, Math.min(10000, Number(value.retryIntervalMs) || defaultChatbotSettings.retryIntervalMs)),
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
+    commentLike: value.commentLike !== false,
+    commentHide: ['none', 'phone', 'all'].includes(value.commentHide) ? value.commentHide : defaultChatbotSettings.commentHide,
     messageTemplates,
     updatedAt: Number(value.updatedAt) || Date.now()
   };

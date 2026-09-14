@@ -122,8 +122,6 @@ export function ensureConversation(store, { pageId, psid, name, picture, id: exp
       picture: picture || '',
       source,
       ...(post ? { post } : {}),
-      // A comment gets no staff first: the bot answers it unless staff turn it off.
-      ...(source === 'comment' ? { botEnabled: true } : {}),
       unread: false,
       muted: false,
       labels: ['new'],

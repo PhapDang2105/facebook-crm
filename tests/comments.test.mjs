@@ -39,7 +39,7 @@ test('bình luận của khách mở hội thoại riêng theo bài viết, gắ
   const conversation = changes[0].conversation;
   assert.equal(conversation.id, commentConversationId(pageId, userId, postId));
   assert.equal(conversation.source, 'comment');
-  assert.equal(conversation.botEnabled, true, 'a comment thread starts with the bot on');
+  assert.notEqual(conversation.botEnabled, false, 'a new thread starts with the bot on');
   assert.equal(conversation.lastCommentId, `${postId}_1`);
   assert.equal(conversation.unread, true);
   const view = publicConversation(conversation);
@@ -90,8 +90,41 @@ test('bot trả lời bình luận: nhắn riêng nội dung, công khai một c
   assert.equal(sent.length, 2);
   // The private message opens with the COMMENT_PRIVATE_REPLY intro, then the answer the model chose.
   assert.deepEqual(sent[0], { text: `${templates.COMMENT_PRIVATE_REPLY.replaceAll('{title}', 'anh/chị')}\n\nXác nhận đơn\n\nCảm ơn mình`, privateReply: true });
-  assert.equal(sent[1].text, templates.COMMENT_PUBLIC_REPLY.replaceAll('{title}', 'anh/chị'));
+  // The public line is one of the ### variants, addressed by name.
   assert.equal(sent[1].privateReply, undefined);
+  assert.equal(templates.COMMENT_PUBLIC_REPLY.split('###').length, 3);
+  assert.ok(/Minh Quân|anh\/chị/.test(sent[1].text), sent[1].text);
+  assert.ok(!/[{}#]/.test(sent[1].text), 'placeholders, spintax and separators are all resolved');
+});
+
+test('bình luận: chọn ngẫu nhiên một mẫu, {Dạ|Hi} xoay chữ, thích và ẩn bình luận có số điện thoại', async () => {
+  const { pickVariant, spin } = await import('../app/chatbot-templates.mjs');
+  assert.deepEqual(pickVariant({ messages: ['a', 'b', 'c'] }, () => 0.99), ['c']);
+  assert.deepEqual(pickVariant({ messages: ['a', 'b', 'c'] }, () => 0), ['a']);
+  assert.deepEqual(pickVariant({ messages: ['solo'] }), ['solo']);
+  assert.equal(spin('{Dạ|Hi} {name} ơi', () => 0.6), 'Hi {name} ơi', 'spintax resolves, {name} stays for fill');
+  const moderated = [];
+  const sent = [];
+  const run = (text, commentHide) => processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'c', psid: userId, name: 'Minh Quân', source: 'comment', lastCommentId: 'c1' },
+    message: { id: 'c1', mid: 'c1', direction: 'incoming', type: 'text', text, commentId: 'c1' }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', commentLike: true, commentHide, messageTemplates: defaultMessageTemplates() }),
+    listMessages: async () => [],
+    sendMessage: async (_c, message) => { sent.push(message); return {}; },
+    moderateComment: async (_c, message, actions) => { moderated.push({ id: message.commentId, ...actions }); },
+    saveBotState: async () => {},
+    requestReply: async () => ({ templateId: 'WELCOME', messages: ['Chào'], handoff: false })
+  });
+  await run('ib 0909123456', 'phone');
+  await run('ib', 'phone');
+  await run('ib', 'all');
+  assert.deepEqual(moderated, [
+    { id: 'c1', like: true, hide: true },
+    { id: 'c1', like: true, hide: false },
+    { id: 'c1', like: true, hide: true }
+  ]);
 });
 
 test('{title} xưng anh/chị theo giới tính Messenger, trung tính khi không biết', async () => {
@@ -137,4 +170,19 @@ test('bài viết của Trang là nguồn nhận diện sản phẩm; luồng Me
   assert.equal(change.conversation.source, 'inbox');
   assert.equal(change.conversation.post.message, post, 'the Messenger thread carries the post the customer commented under');
   assert.equal(change.conversation.post.inheritedFrom, store.conversations[0].id);
+});
+
+test('bot bật cho mọi hội thoại; chỉ im lặng khi nhân viên tắt', async () => {
+  const run = botEnabled => processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'c', psid: userId, name: 'Khách', ...(botEnabled === undefined ? {} : { botEnabled }) },
+    message: { id: 'm', mid: 'm', direction: 'incoming', type: 'text', text: 'hi' }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: defaultMessageTemplates() }),
+    listMessages: async () => [], sendMessage: async () => ({}), saveBotState: async () => {},
+    requestReply: async () => ({ templateId: 'WELCOME', messages: ['Chào'], handoff: false })
+  });
+  assert.equal((await run(undefined)).length, 1, 'a thread nobody touched is answered');
+  assert.equal((await run(true)).length, 1);
+  assert.equal((await run(false)).length, 0, 'staff switched the bot off');
 });

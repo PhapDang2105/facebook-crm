@@ -28,7 +28,7 @@ import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChan
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { customersToCsv, listCustomers } from './customers.mjs';
-import { sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
+import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
 import {
   getConversation,
@@ -175,7 +175,7 @@ function publicCustomerPanel(conversation) {
   return {
     notes: Array.isArray(conversation?.customerNotes) ? conversation.customerNotes : [],
     orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [],
-    botEnabled: conversation?.botEnabled === true,
+    botEnabled: conversation?.botEnabled !== false,
     gender: conversation?.gender || '',
     genderSource: conversation?.genderSource || '',
     // Surfaced so a chatbot order that failed to save is visible to staff instead
@@ -748,6 +748,7 @@ const server = http.createServer(async (request, response) => {
           readSettings: readChatbotSettings,
           listMessages,
           sendMessage: sendConversationMessage,
+          moderateComment,
           createOrder: createChatbotCustomerOrder,
           sendReceipt: sendChatbotOrderReceipt,
           saveBotState: (id, botState) => updateMessagingStore(store => {

@@ -163,6 +163,8 @@ function updateChatbotSystemPromptCounter() {
 }
 chatbotSettingsSystemPrompt?.addEventListener('input', updateChatbotSystemPromptCounter);
 const chatbotSettingsMemoryEnabled = document.querySelector('#chatbot-settings-memory-enabled');
+const chatbotSettingsCommentLike = document.querySelector('#chatbot-settings-comment-like');
+const chatbotSettingsCommentHide = document.querySelector('#chatbot-settings-comment-hide');
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
 const chatbotSettingsMemoryWindowRange = document.querySelector('#chatbot-settings-memory-window-range');
 const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
@@ -2346,6 +2348,8 @@ async function loadChatbotSettings() {
     chatbotSettingsSystemPrompt.value = settings.systemPrompt || '';
     updateChatbotSystemPromptCounter();
     chatbotSettingsMemoryEnabled.checked = settings.memoryEnabled !== false;
+    if (chatbotSettingsCommentLike) chatbotSettingsCommentLike.checked = settings.commentLike !== false;
+    if (chatbotSettingsCommentHide) chatbotSettingsCommentHide.value = settings.commentHide || 'phone';
     chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
     syncChatbotMemoryWindow('number');
     chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;
@@ -5094,6 +5098,8 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         directModel: chatbotSettingsDirectModel.value,
         systemPrompt: chatbotSettingsSystemPrompt.value,
         memoryEnabled: chatbotSettingsMemoryEnabled.checked,
+        commentLike: chatbotSettingsCommentLike?.checked !== false,
+        commentHide: chatbotSettingsCommentHide?.value || 'phone',
         memoryWindow: chatbotSettingsMemoryWindow.value,
         structuredOutput: chatbotSettingsStructuredOutput.checked,
         retryCount: chatbotSettingsRetryCount.value,

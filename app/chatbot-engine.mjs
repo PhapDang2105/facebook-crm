@@ -1,4 +1,5 @@
-import { buildTemplatePrompt, renderChatbotReply } from './chatbot-templates.mjs';
+import { buildTemplatePrompt, pickVariant, renderChatbotReply } from './chatbot-templates.mjs';
+import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
 import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
@@ -174,12 +175,13 @@ export function foldVietnamese(value) {
 }
 
 export async function processChatbotChanges(changes, dependencies) {
-  const { readSettings, listMessages, saveBotState, sendMessage, createOrder, sendReceipt, requestReply = requestDirectModelReply } = dependencies;
+  const { readSettings, listMessages, saveBotState, sendMessage, createOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
   const settings = await readSettings();
   if (!settings.enabled) return [];
   const results = [];
   for (const change of changes) {
-    if (change.type !== 'message' || change.message?.direction !== 'incoming' || change.conversation?.botEnabled !== true) continue;
+    // Every thread is answered unless staff switched the bot off for it.
+    if (change.type !== 'message' || change.message?.direction !== 'incoming' || change.conversation?.botEnabled === false) continue;
     const conversation = change.conversation;
     try {
       const keywords = settings.handoffKeywords.split(',').map(item => foldVietnamese(item.trim())).filter(Boolean);
@@ -187,7 +189,7 @@ export async function processChatbotChanges(changes, dependencies) {
       const asksForHuman = keywords.some(keyword => incomingText.includes(keyword));
       // The basket the customer named earlier travels with the request so a later
       // "0385805790" alone is still enough to close the same order.
-      const replyContext = { pendingOrder: conversation.pendingOrder, now: Date.now(), customer: { gender: conversation.gender || '' } };
+      const replyContext = { pendingOrder: conversation.pendingOrder, now: Date.now(), customer: { gender: conversation.gender || '', name: conversation.name || '' } };
       const reply = asksForHuman || change.message.type !== 'text'
         ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
         : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id), context: replyContext });
@@ -212,7 +214,14 @@ export async function processChatbotChanges(changes, dependencies) {
         const privateText = [...(intro.templateId === 'COMMENT_PRIVATE_REPLY' ? intro.messages : []), ...reply.messages].join('\n\n');
         if (privateText) await sendMessage(conversation, { text: privateText, privateReply: true });
         const publicReply = renderChatbotReply({ template_id: 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
-        for (const text of publicReply.messages) await sendMessage(conversation, { text });
+        for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
+        // Like the comment so the customer sees it was noticed; hide it when it
+        // carries a phone number (or always, per settings) so competitors
+        // cannot lift the lead from the post.
+        if (moderateComment) {
+          const hide = settings.commentHide === 'all' || (settings.commentHide === 'phone' && Boolean(extractVietnamesePhone(change.message.text)));
+          await moderateComment(conversation, change.message, { like: settings.commentLike !== false, hide }).catch(() => {});
+        }
       } else if (settings.responseMode === 'automatic' && !alreadyHandled) {
         for (const text of reply.messages) await sendMessage(conversation, { text });
         // Pictures a template carries (![tên](url)) follow the text.

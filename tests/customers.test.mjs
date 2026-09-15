@@ -56,3 +56,64 @@ test('CSV cho Excel: BOM, tiêu đề tiếng Việt, ô có dấu phẩy đư�
   assert.match(csv, /"Quảng cáo, Bình luận"/);
   assert.match(csv, /Nguyễn Thị Lan,55,Nữ/);
 });
+
+// --- Remarketing: ai đã mua gì, mua khi nào, mua combo mấy túi ---
+const now = Date.UTC(2026, 8, 15);
+const day = 86400000;
+const shopPage = '100000000000002';
+const remarketingStore = {
+  conversations: [
+    {
+      id: `${shopPage}:1`, pageId: shopPage, psid: '1', name: 'Chị Mai', source: 'inbox', labels: [],
+      createdAt: 1, lastMessageAt: now - day,
+      customerOrders: [
+        { createdAt: now - 3 * day, phone: '0909123456', address: 'Quận 7', total: 398000, products: [{ name: 'Granola Nguyên Bản', sku: 'GRA-01', quantity: 2 }] }
+      ]
+    },
+    {
+      id: `${shopPage}:2`, pageId: shopPage, psid: '2', name: 'Anh Dũng', source: 'inbox', labels: [],
+      createdAt: 1, lastMessageAt: now - day,
+      customerOrders: [
+        { createdAt: now - 40 * day, phone: '0912345678', address: 'Hà Nội', total: 199000, products: [{ name: 'Yến Mạch Úc', sku: 'YMU-01', quantity: 1 }] },
+        { createdAt: now - 60 * day, phone: '0912345678', address: 'Hà Nội', total: 597000, products: [{ name: 'Granola Nguyên Bản', sku: 'GRA-01', quantity: 3 }] }
+      ]
+    },
+    { id: `${shopPage}:3`, pageId: shopPage, psid: '3', name: 'Khách hỏi giá', source: 'inbox', labels: [], createdAt: 1, lastMessageAt: now - day }
+  ],
+  messages: {}
+};
+
+test('gộp sản phẩm đã mua, ngày mua và combo lớn nhất của từng khách', () => {
+  const [mai, dung, hoi] = buildCustomers(remarketingStore, []);
+  assert.equal(mai.lastOrderAt, now - 3 * day);
+  assert.equal(mai.comboMax, 2, 'combo tính theo tổng số túi trong một đơn');
+  assert.deepEqual(mai.products.map(item => [item.sku, item.quantity]), [['GRA-01', 2]]);
+  assert.equal(dung.comboMax, 3);
+  assert.equal(dung.firstOrderAt, now - 60 * day);
+  assert.equal(dung.lastOrderAt, now - 40 * day);
+  assert.deepEqual(dung.products.map(item => item.sku), ['YMU-01', 'GRA-01'], 'mua gần nhất đứng trước');
+  assert.equal(hoi.comboMax, 0);
+  assert.deepEqual(hoi.products, []);
+});
+
+test('lọc remarketing: mua trong N ngày, theo sản phẩm, theo combo, theo số lần mua', () => {
+  const all = buildCustomers(remarketingStore, []);
+  const names = filters => filterCustomers(all, filters, now).map(item => item.name);
+  assert.deepEqual(names({ orderedWithin: '7' }), ['Chị Mai'], 'chốt đơn trong 7 ngày trước');
+  assert.deepEqual(names({ orderedWithin: '90' }), ['Chị Mai', 'Anh Dũng']);
+  assert.deepEqual(names({ combo: '2' }), ['Chị Mai', 'Anh Dũng'], 'combo 2 là từ 2 túi trở lên');
+  assert.deepEqual(names({ combo: '3' }), ['Anh Dũng']);
+  assert.deepEqual(names({ product: 'YMU-01' }), ['Anh Dũng']);
+  assert.deepEqual(names({ product: 'granola' }), ['Chị Mai', 'Anh Dũng'], 'khớp cả tên không dấu');
+  assert.deepEqual(names({ minOrders: '2' }), ['Anh Dũng']);
+  assert.deepEqual(names({ hasPhone: '1' }), ['Chị Mai', 'Anh Dũng'], 'khách chưa để lại số bị loại');
+  assert.deepEqual(names({ orderedWithin: '7', combo: '3' }), [], 'các bộ lọc cộng dồn');
+  assert.deepEqual(names({ q: 'yen mach' }), ['Anh Dũng'], 'tìm kiếm chạm cả sản phẩm đã mua');
+});
+
+test('danh sách remarketing đổi số về dạng 84 và bỏ khách chưa có số', async () => {
+  const { customersToAudienceCsv } = await import('../app/customers.mjs');
+  const csv = customersToAudienceCsv(buildCustomers(remarketingStore, []));
+  const lines = csv.replace('﻿', '').trim().split('\r\n');
+  assert.deepEqual(lines, ['phone,fn,country', '84909123456,Chị Mai,VN', '84912345678,Anh Dũng,VN']);
+});

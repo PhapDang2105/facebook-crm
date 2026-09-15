@@ -5,3 +5,5 @@
 
 MIT License — Copyright (c) Microsoft Corporation. Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 - `gender/*.svg` — "Man", "Woman", "Bust in silhouette" từ bộ **Fluent Emoji Flat** của Microsoft (gói npm `@iconify-json/fluent-emoji-flat`), giấy phép MIT — nút Xưng hô trên đầu hội thoại.
+
+- `customers.svg` — "Multiple Users 1" từ bộ **Streamline Ultimate Color** (gói npm `@iconify-json/streamline-ultimate-color`, https://streamlinehq.com), giấy phép **CC BY 4.0** — icon mục Khách hàng trên thanh điều hướng. Yêu cầu ghi nguồn: Icons by Streamline (CC BY 4.0).

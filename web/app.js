@@ -1,5 +1,5 @@
 const sidebarToggle = document.querySelector('#sidebar-toggle');
-const viewNames = ['dashboard', 'messages', 'campaigns', 'orders', 'shipping', 'reports', 'settings'];
+const viewNames = ['dashboard', 'messages', 'campaigns', 'orders', 'customers', 'shipping', 'reports', 'settings'];
 const views = new Map(viewNames.map(name => [name, document.querySelector(`#${name}-view`)]));
 const navItems = [...document.querySelectorAll('.nav[data-view]')];
 const messageSearchInput = document.querySelector('#message-search-input');
@@ -406,6 +406,7 @@ function showView(name) {
   settingsNav?.setAttribute('aria-expanded', String(name === 'settings'));
   if (window.location.hash !== `#${name}`) window.location.hash = name;
   if (name === 'orders') syncChatbotOrdersIntoTable();
+  if (name === 'customers') loadCustomers();
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +422,13 @@ const customersFilters = {
   gender: document.querySelector('#customers-gender'),
   label: document.querySelector('#customers-label'),
   from: document.querySelector('#customers-from'),
-  to: document.querySelector('#customers-to')
+  to: document.querySelector('#customers-to'),
+  // Remarketing
+  orderedWithin: document.querySelector('#customers-ordered-within'),
+  product: document.querySelector('#customers-product'),
+  combo: document.querySelector('#customers-combo'),
+  minOrders: document.querySelector('#customers-min-orders'),
+  hasPhone: document.querySelector('#customers-has-phone')
 };
 let customersRequestId = 0;
 let customersItems = [];
@@ -433,6 +440,10 @@ function customersQueryString() {
   const params = new URLSearchParams();
   for (const [key, input] of Object.entries(customersFilters)) {
     if (!input) continue;
+    if (input.type === 'checkbox') {
+      if (input.checked) params.set(key, '1');
+      continue;
+    }
     let value = input.value.trim();
     if (!value) continue;
     // Dates cover whole days in the browser's zone.
@@ -460,6 +471,14 @@ function formatCustomerTime(value) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
+/** Ngày mua gọn cho ô đơn hàng — giờ phút không giúp gì cho remarketing. */
+function formatCustomerDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  const pad = number => String(number).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
 function renderCustomers(items, total) {
   if (!customersTable) return;
   customersItems = items;
@@ -482,18 +501,27 @@ function renderCustomers(items, total) {
     ].join('');
     const gender = customer.gender === 'male' ? 'Nam' : customer.gender === 'female' ? 'Nữ' : '';
     const orders = customer.orderCount ? `${customer.orderCount} · ${formatOrderMoney(customer.orderTotal)}` : '';
+    const bought = (customer.products || []);
+    const boughtCell = bought.length
+      ? `<span class="customer-products" title="${escapeHtml(bought.map(item => `${item.name} x${item.quantity}`).join(', '))}">${
+          bought.slice(0, 2).map(item => `<span class="customer-product">${escapeHtml(item.name)}${item.quantity > 1 ? ` <b>x${item.quantity}</b>` : ''}</span>`).join('')
+        }${bought.length > 2 ? `<span class="customer-product customer-product--more">+${bought.length - 2}</span>` : ''}</span>`
+      : '';
+    const combo = customer.comboMax > 1 ? `<span class="customer-combo">Combo ${customer.comboMax}</span>` : '';
     return `<tr data-customer-index="${index}"${customer.unread ? ' class="is-unread"' : ''}>
       <td><div class="customer-cell">${avatar}<div><strong>${escapeHtml(customer.name || 'Khách Facebook')}</strong><small>${escapeHtml(customer.psid)}</small></div></div></td>
       <td>${gender}</td>
       <td class="customer-channel">${escapeHtml(customer.channelName || customer.channelId)}</td>
       <td>${sources}</td>
       <td>${escapeHtml(customer.phone)}</td>
-      <td class="customer-money">${orders}</td>
+      <td class="customer-address" title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</td>
+      <td>${boughtCell}${combo}</td>
+      <td class="customer-money">${orders}${customer.lastOrderAt ? `<small>Mua ${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</small>` : ''}</td>
       <td>${tags}</td>
     </tr>`;
   }).join('');
   customersTable.innerHTML = `<table><thead><tr>
-    <th>Khách hàng</th><th>Giới tính</th><th>Kênh</th><th>Nguồn</th><th>Số điện thoại</th><th>Đơn hàng</th><th>Thẻ</th>
+    <th>Khách hàng</th><th>Giới tính</th><th>Kênh</th><th>Nguồn</th><th>Số điện thoại</th><th>Địa chỉ</th><th>Sản phẩm đã mua</th><th>Đơn hàng</th><th>Thẻ</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -563,9 +591,13 @@ customersFilters.q?.addEventListener('input', () => {
   clearTimeout(customersSearchTimer);
   customersSearchTimer = setTimeout(loadCustomers, 250);
 });
-['channelId', 'source', 'gender', 'label', 'from', 'to'].forEach(key => customersFilters[key]?.addEventListener('change', loadCustomers));
+['channelId', 'source', 'gender', 'label', 'from', 'to', 'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone']
+  .forEach(key => customersFilters[key]?.addEventListener('change', loadCustomers));
 document.querySelector('#customers-export')?.addEventListener('click', () => {
   window.open(`/api/customers/export.csv?${customersQueryString()}`, '_blank');
+});
+document.querySelector('#customers-audience')?.addEventListener('click', () => {
+  window.open(`/api/customers/audience.csv?${customersQueryString()}`, '_blank');
 });
 customersTable?.addEventListener('click', event => {
   const row = event.target.closest('tr[data-customer-index]');
@@ -2689,7 +2721,18 @@ function renderProductImagePreview(source = '') {
   productImageRemove?.classList.toggle('hidden', !source);
 }
 
+/** Lọc "đã mua sản phẩm nào" lấy thẳng từ danh mục, không gõ tay tên sản phẩm. */
+function fillCustomersProductOptions() {
+  const select = customersFilters.product;
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">Mọi sản phẩm</option>' + sharedProducts
+    .map(product => `<option value="${escapeHtml(product.sku || product.name)}">${escapeHtml(product.name)}</option>`).join('');
+  select.value = sharedProducts.some(product => (product.sku || product.name) === current) ? current : '';
+}
+
 function syncSharedProductOptions() {
+  fillCustomersProductOptions();
   if (!sharedProductOptions) return;
   sharedProductOptions.innerHTML = sharedProducts.map(product =>
     `<option value="${escapeHtml(product.name)}">${escapeHtml(product.sku)} · ${escapeHtml(formatOrderMoney(product.salePrice))}</option>`
@@ -2786,7 +2829,6 @@ function showSettingsSection(name = 'channels') {
     showToast(error.message || 'Chưa tải được danh mục sản phẩm.', 'error');
   });
   if (section === 'gifts') loadGifts();
-  if (section === 'customers') loadCustomers();
   if (section === 'messages') loadMessageSettings();
 }
 

@@ -27,7 +27,7 @@ import {
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
-import { customersToCsv, listCustomers } from './customers.mjs';
+import { customersToCsv, customersToAudienceCsv, listCustomers } from './customers.mjs';
 import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
@@ -789,9 +789,21 @@ const server = http.createServer(async (request, response) => {
       return undefined;
     }
     // Khách hàng: every person who has messaged or commented, one row per Page.
-    if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv')) {
-      const filters = Object.fromEntries(['q', 'channelId', 'source', 'gender', 'label', 'from', 'to'].map(key => [key, url.searchParams.get(key) || '']));
+    if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {
+      const filters = Object.fromEntries([
+        'q', 'channelId', 'source', 'gender', 'label', 'from', 'to',
+        // Remarketing: mua trong N ngày, mua sản phẩm nào, combo mấy túi, mua mấy lần.
+        'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone'
+      ].map(key => [key, url.searchParams.get(key) || '']));
       const result = await listCustomers(filters);
+      if (url.pathname === '/api/customers/audience.csv') {
+        response.writeHead(200, {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="remarketing-${new Date().toISOString().slice(0, 10)}.csv"`,
+          'Cache-Control': 'no-store'
+        });
+        return response.end(customersToAudienceCsv(result.items));
+      }
       if (url.pathname.endsWith('.csv')) {
         const { labels } = await readInboxSettings();
         response.writeHead(200, {

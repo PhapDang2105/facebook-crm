@@ -661,10 +661,13 @@ const orderSourceHeader = 'Nguồn đơn';
 const chatbotOrderHeaders = [orderSourceHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
 
 function chatbotOrderToRows(order) {
+  // The server resolves the three levels against the warehouse list when the
+  // order is created; the comma split only covers orders made before that.
   const parts = String(order.address || '').split(',').map(part => part.trim()).filter(Boolean);
-  const province = parts.length > 1 ? parts.at(-1) : '';
-  const district = parts.length > 2 ? parts.at(-2) : '';
-  const ward = parts.length > 3 ? parts.at(-3) : '';
+  const resolved = Boolean(order.province);
+  const province = resolved ? order.province : (parts.length > 1 ? parts.at(-1) : '');
+  const district = resolved ? (order.district || '') : (parts.length > 2 ? parts.at(-2) : '');
+  const ward = resolved ? (order.ward || '') : (parts.length > 3 ? parts.at(-3) : '');
   const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
   return products.map(item => [
     'Chatbot', `CB-${order.id}`, order.name || order.conversationName || '', order.phone || '', order.address || '',
@@ -2536,7 +2539,7 @@ async function loadChatbotSettings() {
 function chatbotTemplateLabel(id) {
   const labels = {
     WELCOME: 'Chào mừng', GENERAL_INFO: 'Thông tin chung', CSKH_HANDOFF: 'Chuyển nhân viên', COMMENT_PUBLIC_REPLY: 'Trả lời công khai dưới bình luận', COMMENT_PRIVATE_REPLY: 'Mở đầu tin nhắn riêng từ bình luận', COMMENT_PUBLIC_FALLBACK: 'Trả lời công khai khi không nhắn riêng được', ORDER_ADDRESS: 'Xin thông tin nhận hàng',
-    ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
+    ORDER_ADDRESS_PARTIAL: 'Xin phần thông tin còn thiếu', ORDER_ADDRESS_CLARIFY: 'Xin phần địa chỉ còn thiếu (phường/xã, tên đường)', ORDER_ADDRESS_CHOOSE: 'Hỏi khách chọn giữa các nơi trùng tên', ORDER_CONFIRMATION: 'Xác nhận đơn hàng', ORDER_AFTER_SALE: 'Dặn dò sau khi nhận hàng',
     ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
     PRICE_MIX_TUI_LON: 'Bảng giá mix túi lớn', PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_COMBO: 'Báo giá sản phẩm (đơn vị Combo)',
     ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',

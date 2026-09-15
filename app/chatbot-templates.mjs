@@ -4,6 +4,12 @@ import { metaConfig } from './config.mjs';
 import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
+import { describeDeliveryAddress, mergeAddressFragment } from './processing/locations.mjs';
+
+// The bot asks for a missing or ambiguous part of the address at most this
+// many times, then lets the order through with what it has (flagged on the
+// order) rather than trapping the customer in a loop.
+export const maxAddressAsks = 2;
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -178,9 +184,16 @@ function renderOrder(value, templates, context = {}) {
   const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number);
   const freshAddress = String(value.Customer_Address || '').trim();
   const phone = freshPhone || pending?.phone || '';
-  const address = (freshAddress && freshAddress !== '0' ? freshAddress : '') || pending?.address || '';
+  // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
+  // Lợi") is merged into the saved address; a whole new address replaces it.
+  const address = mergeAddressFragment(freshAddress !== '0' ? freshAddress : '', pending?.address || '');
   const hasPhone = Boolean(phone);
   const hasAddress = Boolean(address);
+  // The address is checked against the warehouse list: three levels plus a
+  // street. What is missing or ambiguous is asked back, up to maxAddressAsks.
+  const delivery = hasAddress ? describeDeliveryAddress(address) : null;
+  const addressAsks = pending?.addressAsks || 0;
+  const addressAccepted = Boolean(delivery) && (delivery.complete || addressAsks >= maxAddressAsks);
 
   // Remember a priceable basket, plus whatever contact detail has arrived so
   // far, so the customer never has to repeat something already given.
@@ -191,13 +204,35 @@ function renderOrder(value, templates, context = {}) {
         key: freshPriceable ? freshKey : (pending?.key || ''),
         at: freshPriceable ? now : (pending?.at || now),
         phone,
-        address
+        address,
+        addressAsks
       }
     : null;
 
-  const confirmed = isOrderStep(templateId) && Boolean(price) && hasPhone && hasAddress;
+  const confirmed = isOrderStep(templateId) && Boolean(price) && hasPhone && hasAddress && addressAccepted;
 
-  if (!confirmed) {
+  // Everything else is in hand but the address cannot be placed on the
+  // delivery map: ask for exactly the missing piece, or offer the choice
+  // between same-named places, instead of shipping to a guess.
+  if (isOrderStep(templateId) && Boolean(price) && hasPhone && hasAddress && !addressAccepted) {
+    const asked = { ...nextPending, addressAsks: addressAsks + 1 };
+    const choose = delivery.choices && templates.ORDER_ADDRESS_CHOOSE;
+    const template = choose ? templates.ORDER_ADDRESS_CHOOSE : templates.ORDER_ADDRESS_CLARIFY;
+    const values = {
+      ...commonValues(),
+      address,
+      known: delivery.known,
+      missing: delivery.missingLabel,
+      level: delivery.choices?.label || '',
+      options: delivery.choices ? delivery.choices.options.join(' hay ') : ''
+    };
+    if (template) {
+      return { templateId: 'ORDER_ADDRESS', ...splitMessages(fill(template, values)), handoff: false, pendingOrder: asked };
+    }
+    // No text configured for the question: fall through and accept the address as is.
+  }
+
+  if (!confirmed && !(isOrderStep(templateId) && Boolean(price) && hasPhone && hasAddress)) {
     // Only a request to close the order is escalated. While still collecting
     // details the bot keeps asking rather than dropping the customer on a human.
     if (templateId === 'ORDER_CONFIRMATION' && items.length && !price) {
@@ -221,10 +256,14 @@ function renderOrder(value, templates, context = {}) {
   // Catalogue names, not the customer's wording, so the confirmation and the
   // order record agree on what is being shipped.
   const orderItems = price.lines.map(line => ({ product: line.name, code: line.sku, quantity: line.quantity }));
+  // The confirmation repeats the address in the warehouse's own wording
+  // (ward, district, province spelled out) so the customer checks exactly what
+  // will be shipped to; the order keeps what they typed as rawAddress.
+  const deliveryAddress = delivery?.canonical || address;
   const confirmation = fill(templates.ORDER_CONFIRMATION, {
     ...commonValues(),
     phone,
-    address,
+    address: deliveryAddress,
     shipping: price.shippingFee ? formatMoney(price.shippingFee) : '',
     subtotal: formatMoney(price.subtotal),
     total: formatMoney(total),
@@ -241,7 +280,7 @@ function renderOrder(value, templates, context = {}) {
     handoff: false,
     // Cleared: the basket has become a real order.
     pendingOrder: null,
-    order: { items: orderItems, phone, address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift }
+    order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift }
   };
 }
 
@@ -355,7 +394,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_ADDRESS_PARTIAL', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION']);
 
 /**
  * The template inventory as text for the model, appended to the system

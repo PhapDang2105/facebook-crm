@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { toLocalPhone } from './processing/customer-info.mjs';
 import { matchProduct, findProductBySku } from './processing/catalog.mjs';
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
+import { resolveAddress } from './processing/locations.mjs';
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
@@ -38,11 +39,19 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
   const freeShipping = Boolean(input.freeShipping);
   const shippingFee = freeShipping ? 0 : money(input.shippingFee);
   const discount = money(input.discount);
+  // Ba cấp hành chính chuẩn được đọc ngay từ địa chỉ khách nhắn, để bảng đơn
+  // và file xuất kho dùng đúng tên trong danh mục mà không cần ai sửa tay.
+  const location = resolveAddress(address);
   return {
     id: text(input.id || id, 40).replace(/[^\w-]/g, ''),
     name,
     phone: localPhone,
     address,
+    street: location.street,
+    province: location.province?.name || '',
+    district: location.district?.name || '',
+    ward: location.ward?.name || '',
+    locationConfidence: location.confidence,
     products,
     status: text(input.status || 'Mới', 80),
     source: text(input.source || 'Facebook', 80),
@@ -119,6 +128,8 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   }, { now, id });
   if (total) order.total = total;
   order.gift = text(input.gift ?? (priced.priceable ? priced.gift : ''), 300);
+  // What the customer actually typed, next to the standardised address they confirmed.
+  order.rawAddress = text(input.rawAddress, 500);
   order.chatbotSourceMessageId = text(sourceMessageId, 200);
   order.automatic = true;
   order.delivery = {
@@ -148,12 +159,17 @@ export function buildCustomerOrderConfirmation(order) {
 }
 
 function splitDeliveryAddress(address) {
-  const parts = String(address || '').split(',').map(part => part.trim()).filter(Boolean);
-  if (!parts.length) return { street_1: 'Chưa có địa chỉ', city: '—', postal_code: '00000', state: '—', country: 'VN' };
-  const street = parts[0];
-  const state = parts.length > 1 ? parts[parts.length - 1] : '—';
-  const city = parts.length > 2 ? parts[parts.length - 2] : (parts.length > 1 ? parts[parts.length - 1] : '—');
-  return { street_1: street, city, postal_code: '00000', state, country: 'VN' };
+  const raw = String(address || '').trim();
+  if (!raw) return { street_1: 'Chưa có địa chỉ', city: '—', postal_code: '00000', state: '—', country: 'VN' };
+  const location = resolveAddress(raw);
+  const street = [location.street, location.ward?.name].filter(Boolean).join(', ') || raw;
+  return {
+    street_1: street.slice(0, 200),
+    city: location.district?.name || location.province?.name || '—',
+    postal_code: '00000',
+    state: location.province?.name || '—',
+    country: 'VN'
+  };
 }
 
 function publicImageUrl(value, baseUrl) {

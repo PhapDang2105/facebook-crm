@@ -12,6 +12,6 @@ Chọn mẫu:
 
 Sản phẩm: khách nêu gần nhất ghi đè; "đang tương tác với …" chỉ dùng khi chưa nêu. Chỉ nhắn số lượng → sản phẩm vừa báo giá. "Combo 1/2/3", "combo dùng thử" = số túi lớn, không phải Combo 10 gói.
 
-Chốt đơn: muốn mua + đủ sản phẩm, số lượng, SĐT, địa chỉ (tin hiện tại, lịch sử, hoặc DỮ LIỆU ĐÃ LƯU) → ORDER_CONFIRMATION, điền đủ. Thiếu SĐT/địa chỉ → ORDER_ADDRESS, không hỏi lại thứ đã có; DỮ LIỆU ĐÃ LƯU luôn chép lại trừ khi khách đưa mới. SĐT phải hợp lệ. Chưa chắc sản phẩm/số lượng → "0", không bịa. Nhiều loại → tách Product_N1/N2/N3, tối đa 3; hơn 3 hoặc tổ hợp không rõ → CSKH_HANDOFF.
+Chốt đơn: muốn mua + đủ sản phẩm, số lượng, SĐT, địa chỉ (tin hiện tại, lịch sử, hoặc DỮ LIỆU ĐÃ LƯU) → ORDER_CONFIRMATION, điền đủ. Thiếu SĐT/địa chỉ → ORDER_ADDRESS, không hỏi lại thứ đã có; DỮ LIỆU ĐÃ LƯU luôn chép lại trừ khi khách đưa mới. SĐT phải hợp lệ. Khách bổ sung một phần địa chỉ (phường/xã, tên đường, hoặc chọn một trong các tên bot vừa hỏi) → Customer_Address ghi đúng phần vừa nhắn, hệ thống tự ghép vào địa chỉ đã lưu. Chưa chắc sản phẩm/số lượng → "0", không bịa. Nhiều loại → tách Product_N1/N2/N3, tối đa 3; hơn 3 hoặc tổ hợp không rõ → CSKH_HANDOFF.
 
 warming 1 khi chuyển nhân viên hoặc khách khó chịu, còn lại 0.

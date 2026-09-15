@@ -61,4 +61,18 @@ test('chuyển xác nhận chatbot thành đơn tự động', () => {
   assert.equal(order.chatbotSourceMessageId, 'mid.customer.1');
   assert.equal(order.delivery.messageId, 'mid.bot.1');
   assert.equal(order.automatic, true);
+  assert.equal(order.province, 'TP Hồ Chí Minh');
+  assert.equal(order.district, 'Quận 12');
+  assert.equal(order.ward, '');
+  assert.equal(order.locationConfidence, 'partial');
+});
+
+test('đơn ghi ba cấp hành chính chuẩn đọc từ địa chỉ khách nhắn', () => {
+  const order = normalizeCustomerOrder({ ...input, address: '12 Nguyễn Huệ, P. Bến Nghé, Q1, HCM' }, { now: 1000 });
+  assert.equal(order.address, '12 Nguyễn Huệ, P. Bến Nghé, Q1, HCM', 'địa chỉ gốc giữ nguyên');
+  assert.equal(order.street, '12 Nguyễn Huệ');
+  assert.equal(order.province, 'TP Hồ Chí Minh');
+  assert.equal(order.district, 'Quận 1');
+  assert.equal(order.ward, 'Phường Bến Nghé');
+  assert.equal(order.locationConfidence, 'exact');
 });

@@ -1,5 +1,8 @@
 import { comboKey, findProductBySku, giftsForKey } from './processing/catalog.mjs';
 import { shippingFeeForKey, unitPriceInBasket } from './processing/pricing.mjs';
+import { canonicalLocationColumns, normalizeExportLocation } from './processing/locations.mjs';
+
+export { normalizeExportLocation };
 
 export const EXPORT_COLUMNS = [
   'STT*', 'Mã đơn hàng', 'Nguồn đơn hàng', 'Ngày đặt hàng', 'Tác động tồn kho', 'Gửi email thông báo',
@@ -65,14 +68,6 @@ export const PRODUCT_RELATIONS = Object.freeze([
 export function normalizeColumnName(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
     .replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-export function normalizeExportLocation(value) {
-  const location = String(value ?? '').trim();
-  return ({
-    'Hồ Chí Minh': 'TP Hồ Chí Minh',
-    'Thành phố Thanh Hoá': 'Thành phố Thanh Hóa'
-  })[location] || location;
 }
 
 export function isInvalidOrderAddress(value) {
@@ -289,9 +284,17 @@ export function buildExportRows(orderData = {}) {
         output[0] = orderNumber; output[2] = 'Facebook'; output[4] = 'Có'; output[6] = 'Có';
         output[8] = 'Thanh toán COD'; output[28] = '8%'; output[30] = phone;
         output[33] = value(row, 'Khách hàng'); output[34] = phone; output[35] = value(row, 'Địa chỉ');
-        output[36] = normalizeExportLocation(value(row, 'Tỉnh/Thành phố'));
-        output[37] = normalizeExportLocation(value(row, 'Quận/Huyện'));
-        output[38] = normalizeExportLocation(value(row, 'Phường/Xã'));
+        // Tên tỉnh/quận/phường đúng danh mục kho, đọc từ ba cột nếu có, còn
+        // không thì từ chính địa chỉ — cùng một hàm cho preview và file.
+        const location = canonicalLocationColumns({
+          province: value(row, 'Tỉnh/Thành phố'),
+          district: value(row, 'Quận/Huyện'),
+          ward: value(row, 'Phường/Xã'),
+          address: value(row, 'Địa chỉ')
+        });
+        output[36] = location.province;
+        output[37] = location.district;
+        output[38] = location.ward;
       }
       output[19] = item.sku; output[21] = item.quantity; output[22] = item.price; output[24] = item.weight || skuWeight(item.sku);
       outputRows.push(output);

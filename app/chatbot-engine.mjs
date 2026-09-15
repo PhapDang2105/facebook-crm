@@ -30,7 +30,7 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
   const remembered = [
     pending.items?.length ? `Sản phẩm đang chờ lên đơn: ${pending.items.map(item => `${item.product} x${item.quantity}`).join(', ')}` : '',
     pending.phone ? `Số điện thoại đã có: ${pending.phone}` : '',
-    pending.address ? `Địa chỉ đã có: ${pending.address}` : ''
+    pending.address ? `Địa chỉ đã có: ${pending.address}${pending.addressAsks ? ' (đang hỏi khách bổ sung phần còn thiếu; khách nhắn phần nào thì ghi phần đó vào Customer_Address)' : ''}` : ''
   ].filter(Boolean).join('\n');
   return [
     `KÊNH: ${conversation.source === 'comment' ? 'Bình luận Facebook' : 'Facebook Messenger'}`,

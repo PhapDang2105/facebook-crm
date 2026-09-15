@@ -57,6 +57,13 @@ const locationRows = buildExportRows({
 });
 assert.deepEqual(locationRows[0].slice(36, 39), ['TP Hồ Chí Minh', 'Thành phố Thanh Hóa', 'Phường Đông Sơn']);
 
+// Đơn chatbot chỉ có cột Địa chỉ: ba cấp được đọc từ đó.
+const addressOnlyRows = buildExportRows({
+  headers: [...headers, 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã'],
+  rows: [['DH-5', 'GRA-XANH-Z450', '1', '189000', 'Granola Xanh', '0901234567', '45 Lê Lợi, P. Đa Kao, Q1, HCM', '', '', '']]
+});
+assert.deepEqual(addressOnlyRows[0].slice(35, 39), ['45 Lê Lợi, P. Đa Kao, Q1, HCM', 'TP Hồ Chí Minh', 'Quận 1', 'Phường Đa Kao']);
+
 assert.equal(isInvalidOrderAddress('  gxn cần chuẩn hóa'), true);
 assert.equal(isInvalidOrderAddress('12 Nguyễn Huệ'), false);
 

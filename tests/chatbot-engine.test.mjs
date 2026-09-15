@@ -177,24 +177,73 @@ test('khách xác nhận lần hai không tạo đơn trùng và không gửi l�
   assert.deepEqual(log, []);
 });
 
+const fullAddress = '176/1A KP1, An Phú Đông, Quận 12, TP.HCM';
+
 test('xác nhận đơn tính giá từ danh mục: 2 túi giá combo, miễn ship', () => {
   const reply = renderChatbotReply({
     template_id: 'ORDER_CONFIRMATION',
     Product_N1: 'Túi Xanh', No_A: '2',
-    Phone_Number: '0909123456', Customer_Address: 'Quận 12, TP.HCM'
+    Phone_Number: '0909123456', Customer_Address: fullAddress
   }, templates);
   assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
   assert.equal(reply.order.total, 298000);
   assert.equal(reply.order.items[0].code, 'GRA-XANH-Z450');
   assert.match(reply.messages[0], /298\.000đ/);
   assert.doesNotMatch(reply.messages[0], /Phí vận chuyển/);
+  // Địa chỉ trong tin xác nhận và trên đơn là tên chuẩn của kho; bản khách gõ giữ ở rawAddress.
+  assert.match(reply.messages[0], /176\/1A KP1, Phường An Phú Đông, Quận 12, TP Hồ Chí Minh/);
+  assert.equal(reply.order.address, '176/1A KP1, Phường An Phú Đông, Quận 12, TP Hồ Chí Minh');
+  assert.equal(reply.order.rawAddress, fullAddress);
+});
+
+test('địa chỉ thiếu phường hoặc tên đường: bot hỏi đúng phần thiếu rồi mới chốt', () => {
+  const asked = renderChatbotReply({
+    template_id: 'ORDER_CONFIRMATION',
+    Product_N1: 'Túi Xanh', No_A: '2',
+    Phone_Number: '0909123456', Customer_Address: 'Quận 12, TP.HCM'
+  }, templates);
+  assert.equal(asked.templateId, 'ORDER_ADDRESS');
+  assert.equal(asked.order, undefined);
+  assert.match(asked.messages[0], /Quận 12, TP Hồ Chí Minh/);
+  assert.match(asked.messages[0], /phường\/xã và tên đường/);
+  assert.equal(asked.pendingOrder.addressAsks, 1);
+  assert.equal(asked.pendingOrder.address, 'Quận 12, TP.HCM');
+  // Khách trả lời phần thiếu: được ghép vào địa chỉ đã lưu và chốt đơn.
+  const done = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: '176/1A KP1, An Phú Đông' }, templates, { pendingOrder: asked.pendingOrder });
+  assert.equal(done.templateId, 'ORDER_CONFIRMATION');
+  assert.equal(done.order.address, '176/1A KP1, Phường An Phú Đông, Quận 12, TP Hồ Chí Minh');
+  assert.equal(done.order.total, 298000);
+  // Chỉ có số nhà: vẫn hỏi tên đường.
+  const numberOnly = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '2', Phone_Number: '0909123456', Customer_Address: '12, Phường Bến Nghé, Quận 1, HCM' }, templates);
+  assert.equal(numberOnly.templateId, 'ORDER_ADDRESS');
+  assert.match(numberOnly.messages[0], /tên đường/);
+});
+
+test('hai xã cùng tên: bot đưa hai lựa chọn, khách chọn xong thì chốt', () => {
+  const asked = renderChatbotReply({
+    template_id: 'ORDER_CONFIRMATION',
+    Product_N1: 'Túi Xanh', No_A: '2',
+    Phone_Number: '0909123456', Customer_Address: 'Thôn 3, Xa Hoang Dong, Huyen Hoang Hoa, Thanh Hoa'
+  }, templates);
+  assert.equal(asked.templateId, 'ORDER_ADDRESS');
+  assert.match(asked.messages[0], /Xã Hoằng Đ(ồng|ông) hay Xã Hoằng Đ(ồng|ông)/);
+  const done = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: 'Hoằng Đồng' }, templates, { pendingOrder: asked.pendingOrder });
+  assert.equal(done.templateId, 'ORDER_CONFIRMATION');
+  assert.equal(done.order.address, 'Thôn 3, Xã Hoằng Đồng, Huyện Hoằng Hóa, Thanh Hóa');
+});
+
+test('hỏi tối đa hai lần rồi vẫn lên đơn với địa chỉ khách đưa', () => {
+  const pending = { items: [{ product: 'Túi Xanh', quantity: 2 }], key: 'GRA-XANH-Z450=2', at: Date.now(), phone: '0909123456', address: 'gần chợ Bà Chiểu', addressAsks: 2 };
+  const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '2', Phone_Number: '0909123456', Customer_Address: 'gần chợ Bà Chiểu' }, templates, { pendingOrder: pending });
+  assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
+  assert.equal(reply.order.address, 'gần chợ Bà Chiểu');
 });
 
 test('xác nhận đơn 1 túi cộng phí vận chuyển', () => {
   const reply = renderChatbotReply({
     template_id: 'ORDER_CONFIRMATION',
     Product_N1: 'Túi Xanh', No_A: '1',
-    Phone_Number: '0909123456', Customer_Address: 'Quận 12, TP.HCM'
+    Phone_Number: '0909123456', Customer_Address: fullAddress
   }, templates);
   assert.equal(reply.order.total, 189000);
   assert.equal(reply.order.shippingFee, 15000);
@@ -234,9 +283,9 @@ test('mẫu tin bị xóa hoặc bỏ tick không còn được chatbot sử d�
 
 test('tin xác nhận đơn và lời xin địa chỉ điền chỗ trống của mẫu trong thiết lập', () => {
   const custom = { ...templates, ORDER_CONFIRMATION: 'Đơn: [[items]]{product} x{quantity}[[/items]] | {phone} | {address} | {total} ({free_ship})\n🎁 {gift}', ORDER_AFTER_SALE: '', ORDER_ADDRESS_PARTIAL: 'Có {known}, thiếu {missing}.' };
-  const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '3', Phone_Number: '0909123456', Customer_Address: 'Quận 12' }, custom);
+  const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '3', Phone_Number: '0909123456', Customer_Address: fullAddress }, custom);
   assert.deepEqual(reply.messages, [
-    'Đơn: Granola Túi Xanh 450g x3 | 0909123456 | Quận 12 | 447.000đ (Miễn phí vận chuyển)\n🎁 Bộ bát gáo dừa + Muỗng dừa',
+    'Đơn: Granola Túi Xanh 450g x3 | 0909123456 | 176/1A KP1, Phường An Phú Đông, Quận 12, TP Hồ Chí Minh | 447.000đ (Miễn phí vận chuyển)\n🎁 Bộ bát gáo dừa + Muỗng dừa',
     neutral(templates.SHIPPING_POLICY)
   ]);
   assert.deepEqual(reply.images, []);

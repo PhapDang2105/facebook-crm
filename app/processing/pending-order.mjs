@@ -16,6 +16,9 @@ export function normalizePendingOrder(value) {
   const at = Number(value?.at) || 0;
   const phone = String(value?.phone || '').trim();
   const address = String(value?.address || '').trim();
+  // How many times the bot has already asked for a missing part of the address,
+  // so it stops asking after two tries and lets the order through.
+  const addressAsks = Math.max(0, Math.round(Number(value?.addressAsks) || 0));
   // A record holding only a phone number is still worth keeping: customers give
   // contact details before naming products just as often as the other way round.
   if (!at || (!items.length && !phone && !address)) return null;
@@ -26,6 +29,7 @@ export function normalizePendingOrder(value) {
     // in a different message, and the model only echoes back what it just heard.
     phone,
     address,
+    addressAsks,
     items: items.map(item => ({
       product: String(item?.product || '').trim(),
       code: String(item?.code || '').trim(),

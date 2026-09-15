@@ -163,13 +163,14 @@ test('tin xác nhận đơn: 2 túi ghép — không dòng ship, miễn ship ghi
     '━━━━━━━━━━━━',
     '📞 Số điện thoại: 0385805700',
     '━━━━━━━━━━━━',
-    '🏡 Địa chỉ nhận hàng: kp6 Đông Hải, pr-tc, Ninh Thuận',
+    // Địa chỉ được nhắc lại theo tên chuẩn của kho để khách kiểm tra đúng nơi giao.
+    '🏡 Địa chỉ nhận hàng: kp6, Phường Đông Hải, Thành phố Phan Rang – Tháp Chàm, Ninh Thuận',
     '━━━━━━━━━━━━',
     '💰 Tổng tiền: 293.000đ (Miễn phí vận chuyển)',
     '',
     'Em cảm ơn anh/chị đã ủng hộ Giọt Nắng, nếu có gì sai sót, anh/chị nhắn cho em biết nhé ạ.'
   ].join('\n'));
-  const single = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0385805700', Customer_Address: 'Q12' }, templates).messages[0];
+  const single = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0385805700', Customer_Address: '176/1A KP1, An Phú Đông, Q12, HCM' }, templates).messages[0];
   assert.match(single, /🚚 Phí vận chuyển: 15\.000đ\n━+\n💰 Tổng tiền: 189\.000đ\n\nEm cảm ơn/);
 });
 

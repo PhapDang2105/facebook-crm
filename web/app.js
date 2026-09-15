@@ -418,9 +418,6 @@ const customersTotal = document.querySelector('#customers-total');
 const customersFilters = {
   q: document.querySelector('#customers-search'),
   channelId: document.querySelector('#customers-channel'),
-  source: document.querySelector('#customers-source'),
-  gender: document.querySelector('#customers-gender'),
-  label: document.querySelector('#customers-label'),
   from: document.querySelector('#customers-from'),
   to: document.querySelector('#customers-to'),
   // Remarketing
@@ -433,7 +430,6 @@ const customersFilters = {
 let customersRequestId = 0;
 let customersItems = [];
 const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo' };
-const customerSourceIcons = { inbox: '/assets/icons/messenger.png', comment: '/assets/icons/facebook.png', ads: '/assets/icons/facebook.png' };
 
 function customersQueryString() {
   const params = new URLSearchParams();
@@ -512,32 +508,34 @@ function renderCustomers(items, total) {
     const avatar = customer.picture
       ? `<span class="avatar has-photo"><img class="avatar-photo" src="${escapeHtml(customer.picture)}" alt="">${escapeHtml(initial)}</span>`
       : `<span class="avatar">${escapeHtml(initial)}</span>`;
-    const sources = customer.sources.map(source => `<span class="customer-source"><img src="${customerSourceIcons[source] || customerSourceIcons.inbox}" alt="">${customerSourceNames[source] || source}</span>`).join('');
     const gender = customer.gender === 'male' ? 'Nam' : customer.gender === 'female' ? 'Nữ' : '';
     // Remarketing đọc theo "mua khi nào, cách đây bao lâu" — số tiền không giúp gì ở đây.
     const boughtWhen = customer.lastOrderAt
       ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}${customer.orderCount > 1 ? ` · ${customer.orderCount} đơn` : ''}</small>`
       : '<span class="customer-never">Chưa mua</span>';
+    // Danh sách hàng đã mua đọc như một dòng kê khai, không phải một rổ nhãn màu:
+    // mỗi sản phẩm một dòng, phần phụ gộp xuống dòng cuối màu nhạt.
     const bought = (customer.products || []);
+    const extra = [
+      bought.length > 2 ? `+${bought.length - 2} sản phẩm khác` : '',
+      customer.comboMax > 1 ? `combo ${customer.comboMax}` : ''
+    ].filter(Boolean).join(' · ');
     const boughtCell = bought.length
-      ? `<span class="customer-products" title="${escapeHtml(bought.map(item => `${item.name} x${item.quantity}`).join(', '))}">${
-          bought.slice(0, 2).map(item => `<span class="customer-product">${escapeHtml(item.name)}${item.quantity > 1 ? ` <b>x${item.quantity}</b>` : ''}</span>`).join('')
-        }${bought.length > 2 ? `<span class="customer-product customer-product--more">+${bought.length - 2}</span>` : ''}</span>`
+      ? `<div class="customer-products" title="${escapeHtml(bought.map(item => `${item.name} ×${item.quantity}`).join(', '))}">${
+          bought.slice(0, 2).map(item => `<span class="customer-product">${escapeHtml(item.name)}<b>×${item.quantity}</b></span>`).join('')
+        }${extra ? `<span class="customer-product-meta">${escapeHtml(extra)}</span>` : ''}</div>`
       : '';
-    const combo = customer.comboMax > 1 ? `<span class="customer-combo">Combo ${customer.comboMax}</span>` : '';
     return `<tr data-customer-index="${index}"${customer.unread ? ' class="is-unread"' : ''}>
       <td><div class="customer-cell">${avatar}<div><strong>${escapeHtml(customer.name || 'Khách Facebook')}</strong><small>${escapeHtml(customer.psid)}</small></div></div></td>
       <td>${gender}</td>
-      <td class="customer-channel">${escapeHtml(customer.channelName || customer.channelId)}</td>
-      <td>${sources}</td>
       <td>${escapeHtml(customer.phone)}</td>
       <td class="customer-address" title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</td>
-      <td>${boughtCell}${combo}</td>
+      <td class="customer-bought">${boughtCell}</td>
       <td class="customer-bought-when">${boughtWhen}</td>
     </tr>`;
   }).join('');
   customersTable.innerHTML = `<table><thead><tr>
-    <th>Khách hàng</th><th>Giới tính</th><th>Kênh</th><th>Nguồn</th><th>Số điện thoại</th><th>Địa chỉ</th><th>Sản phẩm đã mua</th><th>Đã mua</th>
+    <th>Khách hàng</th><th>Giới tính</th><th>Số điện thoại</th><th>Địa chỉ</th><th>Sản phẩm đã mua</th><th>Đã mua</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -611,13 +609,35 @@ customersFilters.q?.addEventListener('input', () => {
   clearTimeout(customersSearchTimer);
   customersSearchTimer = setTimeout(loadCustomers, 250);
 });
-['channelId', 'source', 'gender', 'label', 'from', 'to', 'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone']
+['channelId', 'from', 'to', 'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone']
   .forEach(key => customersFilters[key]?.addEventListener('change', loadCustomers));
-document.querySelector('#customers-export')?.addEventListener('click', () => {
-  window.open(`/api/customers/export.csv?${customersQueryString()}`, '_blank');
+// Một nút Xuất danh sách, chọn định dạng trong menu — cả hai đều xuất đúng
+// những gì bảng đang lọc.
+const customersExportButton = document.querySelector('#customers-export');
+const customersExportMenu = document.querySelector('#customers-export-menu');
+
+function closeCustomersExportMenu() {
+  customersExportMenu?.classList.add('hidden');
+  customersExportButton?.setAttribute('aria-expanded', 'false');
+}
+
+customersExportButton?.addEventListener('click', event => {
+  event.stopPropagation();
+  const open = customersExportMenu?.classList.toggle('hidden') === false;
+  customersExportButton.setAttribute('aria-expanded', String(open));
 });
-document.querySelector('#customers-audience')?.addEventListener('click', () => {
-  window.open(`/api/customers/audience.csv?${customersQueryString()}`, '_blank');
+customersExportMenu?.addEventListener('click', event => {
+  const choice = event.target.closest('[data-export]')?.dataset.export;
+  if (!choice) return;
+  const file = choice === 'audience' ? 'audience.csv' : 'export.csv';
+  window.open(`/api/customers/${file}?${customersQueryString()}`, '_blank');
+  closeCustomersExportMenu();
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.customers-export')) closeCustomersExportMenu();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeCustomersExportMenu();
 });
 customersTable?.addEventListener('click', event => {
   const row = event.target.closest('tr[data-customer-index]');
@@ -6205,22 +6225,12 @@ function renderMessageLabelMenu() {
   }));
 }
 
-function fillCustomersLabelOptions() {
-  const select = customersFilters.label;
-  if (!select) return;
-  const current = select.value;
-  select.innerHTML = '<option value="">Mọi thẻ</option>' + inboxLabels
-    .map(label => `<option value="${escapeHtml(label.id)}">${escapeHtml(label.name)}</option>`).join('');
-  select.value = inboxLabels.some(label => label.id === current) ? current : '';
-}
-
 function applyInboxSettings(settings) {
   inboxLabels = Array.isArray(settings?.labels) ? settings.labels : [];
   if (Array.isArray(settings?.defaultLabels)) defaultInboxLabels = settings.defaultLabels;
   if (Array.isArray(settings?.icons)) labelIconChoices = settings.icons;
   quickReplies = Array.isArray(settings?.quickReplies) ? settings.quickReplies : [];
   renderMessageLabelMenu();
-  fillCustomersLabelOptions();
   getConversationItems().forEach(renderConversationLabelBadges);
   renderConversationLabelBar();
   if (!quickReplyPicker?.classList.contains('hidden')) renderQuickReplyPicker();

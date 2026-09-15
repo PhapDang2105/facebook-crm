@@ -259,29 +259,18 @@
     <section id="customers-view" class="view hidden">
       <section class="settings-card customer-settings-card">
         <header class="settings-card-head">
-          <div><h1 id="customer-settings-title">Khách hàng</h1><p class="settings-card-sub">Khách đã mua hàng — kho dữ liệu và danh sách remarketing, lọc rồi xuất ra để chạy lại quảng cáo.</p></div>
-          <div class="price-master-actions">
-            <button class="order-history-button" id="customers-audience" type="button" title="Tệp số điện thoại dạng 84… để tải lên Facebook Custom Audience">Xuất danh sách remarketing</button>
-            <button class="order-history-button" id="customers-export" type="button">Xuất CSV đầy đủ</button>
+          <div><h1 id="customer-settings-title">Khách hàng</h1></div>
+          <div class="customers-export">
+            <button class="order-history-button" id="customers-export" type="button" aria-haspopup="menu" aria-expanded="false">Xuất danh sách<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+            <div class="customers-export-menu hidden" id="customers-export-menu" role="menu">
+              <button type="button" role="menuitem" data-export="audience" title="Số điện thoại dạng 84… để tải lên Facebook Custom Audience">Danh sách remarketing</button>
+              <button type="button" role="menuitem" data-export="full" title="Toàn bộ cột: liên hệ, sản phẩm, thời gian mua">Toàn bộ dữ liệu</button>
+            </div>
           </div>
         </header>
         <div class="customers-toolbar">
           <label class="order-search-control"><input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tên, ID, số điện thoại, địa chỉ, sản phẩm..."></label>
           <label class="order-filter-control"><select id="customers-channel" aria-label="Kênh"><option value="">Tất cả kênh</option></select></label>
-          <label class="order-filter-control"><select id="customers-source" aria-label="Nguồn">
-            <option value="">Mọi nguồn</option>
-            <option value="inbox">Tin nhắn</option>
-            <option value="comment">Bình luận</option>
-            <option value="ads">Quảng cáo</option>
-          </select></label>
-          <label class="order-filter-control"><select id="customers-gender" aria-label="Giới tính">
-            <option value="">Giới tính</option>
-            <option value="male">Nam</option>
-            <option value="female">Nữ</option>
-          </select></label>
-          <label class="order-filter-control"><select id="customers-label" aria-label="Thẻ">
-            <option value="">Mọi thẻ</option>
-          </select></label>
           <span class="customers-date-range">
             <label class="order-filter-control customers-date"><input id="customers-from" type="date" aria-label="Tương tác từ ngày"></label>
             <span class="customers-date-sep">→</span>
@@ -289,7 +278,6 @@
           </span>
         </div>
         <div class="customers-toolbar customers-toolbar--remarketing" aria-label="Lọc remarketing">
-          <span class="customers-toolbar-title">Remarketing</span>
           <label class="order-filter-control"><select id="customers-ordered-within" aria-label="Đã chốt đơn trong">
             <option value="">Mọi thời điểm mua</option>
             <option value="7">Đã mua trong 7 ngày</option>

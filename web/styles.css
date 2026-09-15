@@ -295,7 +295,8 @@ input:focus-visible {
 .nav span img.nav-icon--campaigns,
 .nav span img.nav-icon--orders,
 .nav span img.nav-icon--reports { width: 30.6px; height: 30.6px; }
-.nav span img.nav-icon--customers { width: 30.6px; height: 30.6px; }
+/* Icon Khách hàng có viền trắng quanh vòng tròn nên phải to hơn chút mới cân với hàng xóm. */
+.nav span img.nav-icon--customers { width: 34.2px; height: 34.2px; margin: 0 -0.8px; }
 .nav span img.nav-icon--shipping { width: 37.8px; height: 30.6px; margin: 0 -2.6px; }
 .nav span img.nav-icon--settings { width: 32.4px; height: 32.4px; }
 
@@ -408,6 +409,12 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customer-attributes th { width: 170px; padding: 9px 8px 9px 0; color: #687080; font-weight: 600; text-align: left; vertical-align: top; border-bottom: 0.9px solid #eef1ef; }
 .customer-attributes td { padding: 9px 0; color: #1d2b22; vertical-align: top; overflow-wrap: anywhere; border-bottom: 0.9px solid #eef1ef; }
 .customer-attributes tr:last-child th, .customer-attributes tr:last-child td { border-bottom: 0; }
+.customers-export { position: relative; }
+.customers-export > .order-history-button { display: inline-flex; align-items: center; gap: 6px; }
+.customers-export > .order-history-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.customers-export-menu { position: absolute; z-index: 20; top: calc(100% + 6px); right: 0; min-width: 190px; padding: 5px; background: #fff; border: 1px solid #dfe2e7; border-radius: 8px; box-shadow: 0 10px 28px rgba(0, 0, 0, .14); }
+.customers-export-menu button { display: block; width: 100%; padding: 8px 10px; color: #1d2b22; background: transparent; border: 0; border-radius: 5px; font: inherit; font-size: 13.5px; text-align: left; white-space: nowrap; cursor: pointer; }
+.customers-export-menu button:hover { background: #f0f2f5; }
 .customers-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 12px; }
 .customers-toolbar > .order-search-control { flex: 1 1 240px; min-width: 220px; }
 .customers-toolbar > .order-filter-control { flex: 0 1 172px; min-width: 132px; }
@@ -415,20 +422,20 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customers-date-range .order-filter-control { flex: 0 0 auto; }
 .customers-date-sep { color: #98a2b3; font-size: 13px; }
 /* Hàng lọc remarketing: tách khỏi bộ lọc dữ liệu để nhân viên không lẫn hai việc. */
-.customers-toolbar--remarketing { margin-top: 9px; padding: 9px 11px; background: #f7f9fb; border: 1px solid #e6eaef; border-radius: 9px; }
-.customers-toolbar-title { color: #667085; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+/* Hàng lọc thứ hai: một đường kẻ mảnh là đủ tách, không cần khối nền. */
+.customers-toolbar--remarketing { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eef0f3; }
 .customers-toggle { display: inline-flex; align-items: center; gap: 7px; color: #475467; font-size: 13.5px; white-space: nowrap; cursor: pointer; }
 .customers-toggle input { width: 15px; height: 15px; accent-color: #1677ff; cursor: pointer; }
-.settings-card-sub { margin: 3px 0 0; color: #667085; font-size: 13.5px; }
-.customers-table td.customer-address { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customers-table td.customer-address { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customers-table td.customer-bought-when { white-space: nowrap; }
 .customers-table td.customer-bought-when b { display: block; color: #101828; font-weight: 600; }
 .customers-table td.customer-bought-when small { display: block; margin-top: 2px; color: #98a2b3; font-size: 12px; }
 .customer-never { color: #b0b7c3; font-size: 13px; }
-.customer-products { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-.customer-product { display: inline-block; padding: 2px 8px; color: #3f5a46; background: #eef6f0; border: 0.9px solid #d7e8dc; border-radius: 6px; font-size: 12.5px; white-space: nowrap; }
-.customer-product--more { color: #667085; background: #f0f2f5; border-color: #e0e3ea; }
-.customer-combo { display: inline-block; margin-left: 4px; padding: 2px 8px; color: #7a4d00; background: #fff4e0; border: 0.9px solid #f3dcb4; border-radius: 6px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.customers-table td.customer-bought { max-width: 280px; }
+.customer-products { display: block; }
+.customer-product { display: block; overflow: hidden; color: #344054; font-size: 13px; line-height: 1.55; text-overflow: ellipsis; white-space: nowrap; }
+.customer-product b { margin-left: 6px; color: #667085; font-weight: 600; font-variant-numeric: tabular-nums; }
+.customer-product-meta { display: block; margin-top: 1px; color: #98a2b3; font-size: 12px; white-space: nowrap; }
 .customers-date input { box-sizing: border-box; width: 100%; height: 37.8px; padding: 0 9px; color: #17251c; background: #f6fbf7; border: 0.9px solid #b9d6c0; border-radius: 8.1px; font: inherit; font-size: 12.6px; }
 .customers-table { margin-top: 14.4px; overflow: auto; border: 0.9px solid #dfe5e1; border-radius: 9px; }
 .customers-table.is-empty { display: flex; border: 0; }
@@ -442,9 +449,6 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customer-cell .avatar { flex: none; width: 34px; height: 34px; }
 .customer-cell strong { display: block; color: #1d2b22; font-size: 14.5px; }
 .customer-cell small { display: block; color: #8a8d91; font-size: 12px; }
-.customers-table td.customer-channel { white-space: nowrap; }
-.customer-source { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; color: #4b4f56; font-size: 13px; white-space: nowrap; }
-.customer-source img { width: 14px; height: 14px; }
 .customer-tag { display: inline-block; margin: 1px 4px 1px 0; padding: 2px 9px; border: 0.9px solid #dfe2e6; border-radius: 999px; color: #4b4f56; font-size: 12.5px; white-space: nowrap; }
 .customer-tag--ad { border-color: #fed7aa; background: #fff1e6; color: #c2410c; }
 .customer-tag--bot { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }

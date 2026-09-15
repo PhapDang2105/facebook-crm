@@ -151,12 +151,14 @@ export function flattenPayload(value, prefix = '', out = []) {
 const FIELD_PATTERNS = {
   name: [/^(ho ?ten|ho va ten|full ?name|fullname|name|ten khach( hang)?|customer ?name|ten|nguoi nhan|ten nguoi nhan)$/],
   phone: [/^(phone( ?number)?|so ?dien ?thoai|sdt|dien thoai|mobile|tel|telephone|so dt|dt)$/],
-  address: [/^(dia ?chi|address|full ?address|dia chi nhan hang|dia chi giao hang|street)$/],
+  address: [/^(dia ?chi|address|full ?address|dia chi nhan hang|dia chi giao hang|street|short ?address)$/],
+  // "location" của Webcake là địa chỉ đầy đủ đã ghép sẵn; chỉ dùng khi không có ô địa chỉ riêng.
+  location: [/^(location|full ?location|dia chi day du)$/],
   province: [/^(tinh( thanh)?( pho)?|province|city|state|thanh pho|tinh thanh pho)$/],
   // Ô "country" của Webcake thường là tỉnh/thành; chỉ bỏ qua khi giá trị là quốc gia.
   country: [/^(country|quoc gia)$/],
   district: [/^(quan( huyen)?|huyen|district)$/],
-  ward: [/^(phuong( xa)?|xa|ward)$/],
+  ward: [/^(phuong( xa)?|xa|ward|commune)$/],
   product: [/^(san ?pham|product( ?name)?|products?|item|ten san pham|mat hang|combo|goi|goi san pham|variant|variation|sku)$/],
   choice: [/^(single ?choice( \d+)?|multiple ?choice( \d+)?|lua chon|chon( san pham)?|select( \d+)?|option( \d+)?|radio( \d+)?|checkbox( \d+)?)$/],
   quantity: [/^(so ?luong|quantity|qty|sl)$/],
@@ -166,7 +168,7 @@ const FIELD_PATTERNS = {
   coupon: [/^(coupon|ma giam gia|voucher|ma khuyen mai)$/],
   id: [/^(order ?id|ma don( hang)?|id|submission ?id|entry ?id|uuid|order ?code|ma don hang)$/],
   campaign: [/^(utm ?campaign|campaign|chien dich|utm ?source|utm ?medium|utm ?content|utm ?term|landing( ?page)?( ?name)?|page ?name|page ?title|source|nguon|form ?name|form ?title|page ?url|url|link|event)$/],
-  ignored: [/^(date|time|upload|file|email|ip|user ?agent|referrer?|country ?code|captcha)$/]
+  ignored: [/^(date|time|upload|file|email|ip|user ?agent|referrer?|country ?code|captcha|inserted ?at|created ?at|updated ?at|status|payment ?status|transfer ?money|shipping ?fee|discount|currency|variation ?id|product ?id|id)$/]
 };
 const COUNTRY_VALUES = /^(viet ?nam|vn|vietnam)$/;
 
@@ -217,9 +219,11 @@ export function extractLineItems(fields) {
     const groupKey = parent.join('.');
     const group = groups.get(groupKey) || {};
     // Trong một dòng sản phẩm, "name"/"title" là tên sản phẩm chứ không phải tên khách.
-    const kind = /^(name|title|ten|label|product ?name|display ?name)$/.test(field.key) ? 'product'
+    // Webcake "variations": name / variation_name / product_display_name, quantity, price, sku, variation_id.
+    const kind = /^(name|title|ten|label|product ?name|display ?name|variation ?name|product ?display ?name|full ?name|variant ?name)$/.test(field.key) ? 'product'
       : Object.keys(FIELD_PATTERNS).find(name => ['product', 'quantity', 'price', 'total'].includes(name) && FIELD_PATTERNS[name].some(pattern => pattern.test(field.key)));
     if (kind === 'product' && /^sku$/.test(field.key)) group.sku = field.value;
+    else if (kind === 'product' && group.product && /^(name|title|label)$/.test(field.key) === false) continue; // giữ tên đầu tiên
     else if (kind) group[kind] = field.value;
     if (Object.keys(group).length) groups.set(groupKey, group);
   }
@@ -248,7 +252,7 @@ export function normalizeLandingPayload(payload = {}) {
   // "country" của Webcake là tỉnh/thành khi giá trị không phải tên quốc gia.
   const country = pick(fields, 'country');
   const province = pick(fields, 'province') || (country && !COUNTRY_VALUES.test(keyOf(country)) ? country : '');
-  const parts = [pick(fields, 'address'), pick(fields, 'ward'), pick(fields, 'district'), province].filter(Boolean);
+  const parts = [pick(fields, 'address') || pick(fields, 'location'), pick(fields, 'ward'), pick(fields, 'district'), province].filter(Boolean);
   const address = parts.join(', ');
   let lines = extractLineItems(fields);
   // Không có ô sản phẩm nhưng có ô lựa chọn (singlechoice "Combo 2 túi"...):
@@ -266,9 +270,10 @@ export function normalizeLandingPayload(payload = {}) {
   const externalId = pick(fields, 'id');
   const campaign = pickAll(fields, 'campaign').map(field => `${field.path}=${field.value}`).join('; ');
   const recognized = Object.keys(FIELD_PATTERNS);
+  const insideLineItem = field => /(^|\.)(products?|items?|line ?items?|cart|san pham|order ?items?|variations?)(\.\d+)?\.[^.]+$/.test(field.path.split('.').map(keyOf).join('.'));
   const unknown = fields
     .filter(field => field.value && !recognized.some(kind => FIELD_PATTERNS[kind].some(pattern => pattern.test(field.key))))
-    .filter(field => !/^(\d+|name|title|label)$/.test(field.key))
+    .filter(field => !/^(\d+|name|title|label)$/.test(field.key) && !insideLineItem(field))
     .map(field => `${field.path}=${field.value}`);
   return { name, phone, phoneRaw, address, lines, total, note, externalId, campaign, unknown };
 }

@@ -81,6 +81,27 @@ test('payload đúng tên trường mặc định của Webcake', () => {
   assert.deepEqual(normalizeLandingPayload({ phone_number: '0977111222', singlechoice: 'Túi Vàng' }).lines.map(line => line.product), ['Túi Vàng']);
 });
 
+test('payload theo cấu hình đã đặt trong Webcake (short_address, location, commune, variations, status...)', () => {
+  const parsed = normalizeLandingPayload({
+    name: 'Phạm Văn Nam', email: 'nam@example.com', phone: '0988 777 666',
+    address: '176/1A KP1', location: '176/1A KP1, Phường An Phú Đông, Quận 12, TP Hồ Chí Minh',
+    province: 'Hồ Chí Minh', district: 'Quận 12', ward: 'Phường An Phú Đông', inserted_at: '2026-09-15T10:00:00Z',
+    products: [{ variation_id: 'v1', product_display_name: 'Granola Túi Xanh 450g', quantity: 2, price: 149000 }],
+    status: 'new', payment_status: 'unpaid', utm_source: 'facebook', utm_campaign: 'granola-t9', total: 298000
+  });
+  assert.equal(parsed.name, 'Phạm Văn Nam');
+  assert.equal(parsed.phone, '0988777666');
+  assert.equal(parsed.address, '176/1A KP1, Phường An Phú Đông, Quận 12, Hồ Chí Minh');
+  assert.deepEqual(parsed.lines.map(line => [line.product, String(line.quantity)]), [['Granola Túi Xanh 450g', '2']]);
+  assert.equal(parsed.total, 298000);
+  assert.deepEqual(parsed.unknown, []);
+  // Không có ô địa chỉ riêng thì lấy location.
+  assert.equal(normalizeLandingPayload({ phone: '0988777666', location: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh' }).address, '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh');
+  const order = buildLandingOrder({ name: 'Nam', phone: '0988777666', location: '176/1A KP1, Phường An Phú Đông, Quận 12, TP Hồ Chí Minh', products: [{ name: 'Túi Xanh', quantity: 2 }], total: 298000 }, { now: 1000, id: 'LAND03' });
+  assert.equal(order.ward, 'Phường An Phú Đông');
+  assert.equal(order.products[0].sku, 'GRA-XANH-Z450');
+});
+
 test('tạo đơn: khớp SKU kho, ba cấp địa chỉ, tổng theo landing', () => {
   const order = buildLandingOrder({
     name: 'Nguyễn Lan', phone: '0909123456', address: '12 Lê Lợi, P. Bến Nghé, Q1, HCM', product: 'Túi Xanh', quantity: 2, total: 298000

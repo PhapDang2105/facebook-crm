@@ -472,14 +472,22 @@ function formatCustomerTime(value) {
 
 /** "3 ngày trước", "2 tháng trước" — nhân viên đọc nhanh hơn ngày tháng thuần. */
 function timeSince(value) {
-  const days = Math.floor((Date.now() - Number(value)) / 86400000);
+  const then = new Date(Number(value));
+  const now = new Date();
+  if (!Number(value) || Number.isNaN(then.getTime())) return '';
+  // Đếm theo ngày trên lịch, không theo số giờ trôi qua: đơn lúc 20h hôm qua
+  // cách sáng nay có 13 tiếng, nhưng vẫn phải đọc là "Hôm qua".
+  const startOfDay = date => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((startOfDay(now) - startOfDay(then)) / 86400000);
   if (days <= 0) return 'Hôm nay';
   if (days === 1) return 'Hôm qua';
   if (days < 30) return `${days} ngày trước`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months} tháng trước`;
-  const years = Math.floor(days / 365);
-  return `${years} năm trước`;
+  // Tháng cũng tính theo lịch: 31/08 → 01/10 là 1 tháng, không phải 30 ngày.
+  const months = (now.getFullYear() - then.getFullYear()) * 12
+    + (now.getMonth() - then.getMonth())
+    - (now.getDate() < then.getDate() ? 1 : 0);
+  if (months < 12) return `${Math.max(1, months)} tháng trước`;
+  return `${Math.floor(months / 12)} năm trước`;
 }
 
 /** Ngày mua gọn cho ô đơn hàng — giờ phút không giúp gì cho remarketing. */
@@ -495,7 +503,7 @@ function renderCustomers(items, total) {
   customersItems = items;
   if (customersTotal) customersTotal.textContent = items.length === total ? `Tổng: ${total} khách hàng` : `Hiển thị ${items.length}/${total} khách hàng`;
   if (!items.length) {
-    renderEmptyState(customersTable, total ? 'Không có khách hàng nào khớp bộ lọc.' : 'Chưa có khách hàng nào. Khách sẽ xuất hiện khi họ nhắn tin hoặc bình luận.');
+    renderEmptyState(customersTable, total ? 'Không có khách hàng nào khớp bộ lọc.' : 'Chưa có khách hàng nào. Khách xuất hiện ở đây sau khi chốt đơn đầu tiên.');
     return;
   }
   customersTable.classList.remove('is-empty');

@@ -176,8 +176,10 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
 
 export async function listCustomers(filters = {}) {
   const [store, channels] = await Promise.all([readMessagingStore(), readChannelStore()]);
-  const all = buildCustomers(store, channels.items || []);
-  return { total: all.length, items: filterCustomers(all, filters) };
+  // Màn Khách hàng là kho dữ liệu người ĐÃ MUA: người mới hỏi giá vẫn nằm trong
+  // Tin nhắn, đưa vào đây chỉ làm loãng danh sách remarketing.
+  const buyers = buildCustomers(store, channels.items || []).filter(customer => customer.orderCount > 0);
+  return { total: buyers.length, items: filterCustomers(buyers, filters) };
 }
 
 const sourceLabels = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo' };

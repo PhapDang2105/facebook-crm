@@ -1,3 +1,4 @@
+import { seed } from './helpers/temp-messaging-store.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCustomers, customersToCsv, filterCustomers } from '../app/customers.mjs';
@@ -116,4 +117,14 @@ test('danh sách remarketing đổi số về dạng 84 và bỏ khách chưa c�
   const csv = customersToAudienceCsv(buildCustomers(remarketingStore, []));
   const lines = csv.replace('﻿', '').trim().split('\r\n');
   assert.deepEqual(lines, ['phone,fn,country', '84909123456,Chị Mai,VN', '84912345678,Anh Dũng,VN']);
+});
+
+test('màn Khách hàng chỉ gồm người đã mua, khách mới hỏi giá không lọt vào', async () => {
+  const { listCustomers } = await import('../app/customers.mjs');
+  seed(remarketingStore);
+  const result = await listCustomers({});
+  assert.deepEqual(result.items.map(item => item.name), ['Chị Mai', 'Anh Dũng']);
+  assert.equal(result.total, 2, 'tổng số cũng chỉ đếm người đã mua');
+  assert.ok(buildCustomers(remarketingStore, []).some(customer => customer.orderCount === 0),
+    'buildCustomers vẫn giữ cả người chưa mua cho các nơi khác dùng');
 });

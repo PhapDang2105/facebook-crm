@@ -791,7 +791,7 @@ const server = http.createServer(async (request, response) => {
     // Khách hàng: every person who has messaged or commented, one row per Page.
     if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {
       const filters = Object.fromEntries([
-        'q', 'channelId', 'source', 'gender', 'label', 'from', 'to',
+        'q', 'channelId', 'source', 'gender', 'label', 'activeWithin',
         // Remarketing: mua trong N ngày, mua sản phẩm nào, combo mấy túi, mua mấy lần.
         'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone'
       ].map(key => [key, url.searchParams.get(key) || '']));

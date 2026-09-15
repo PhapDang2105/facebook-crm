@@ -38,7 +38,7 @@ test('gộp mọi luồng của một người thành một khách hàng, bỏ c
   assert.equal(hung.firstContactAt, 2000);
 });
 
-test('lọc theo từ khóa không dấu, nguồn, giới tính, thẻ, kênh và khoảng thời gian', () => {
+test('lọc theo từ khóa không dấu, nguồn, giới tính, thẻ, kênh và số ngày tương tác', () => {
   const customers = buildCustomers(store);
   assert.equal(filterCustomers(customers, { q: 'lan' }).length, 1);
   assert.equal(filterCustomers(customers, { q: '0385' }).length, 1);
@@ -47,8 +47,10 @@ test('lọc theo từ khóa không dấu, nguồn, giới tính, thẻ, kênh v�
   assert.equal(filterCustomers(customers, { gender: 'female' }).length, 1);
   assert.equal(filterCustomers(customers, { label: 'customer' }).length, 0);
   assert.equal(filterCustomers(customers, { channelId: 'other' }).length, 0);
-  assert.equal(filterCustomers(customers, { from: 4000 }).length, 1);
-  assert.equal(filterCustomers(customers, { to: 4000 }).length, 1);
+  // lastMessageAt của hai khách là 9000 và 3000; mốc "now" giả định là 9000.
+  assert.equal(filterCustomers(customers, { activeWithin: 1 }, 9000 + 86400000).length, 1);
+  assert.equal(filterCustomers(customers, { activeWithin: 1 }, 9000).length, 2);
+  assert.equal(filterCustomers(customers, { activeWithin: 0 }, 9000).length, 2, 'bỏ trống thì không lọc');
 });
 
 test('CSV cho Excel: BOM, tiêu đề tiếng Việt, ô có dấu phẩy được bọc', () => {

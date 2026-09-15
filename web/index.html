@@ -271,20 +271,25 @@
         <div class="customers-toolbar">
           <label class="order-search-control"><input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tên, ID, số điện thoại, địa chỉ, sản phẩm..."></label>
           <label class="order-filter-control"><select id="customers-channel" aria-label="Kênh"><option value="">Tất cả kênh</option></select></label>
-          <span class="customers-date-range">
-            <label class="order-filter-control customers-date"><input id="customers-from" type="date" aria-label="Tương tác từ ngày"></label>
-            <span class="customers-date-sep">→</span>
-            <label class="order-filter-control customers-date"><input id="customers-to" type="date" aria-label="Tương tác đến ngày"></label>
-          </span>
+          <label class="order-filter-control"><select id="customers-active-within" aria-label="Tương tác gần đây">
+            <option value="">Mọi lần tương tác</option>
+            <option value="7">Tương tác 7 ngày</option>
+            <option value="10">Tương tác 10 ngày</option>
+            <option value="14">Tương tác 14 ngày</option>
+            <option value="30">Tương tác 1 tháng</option>
+            <option value="60">Tương tác 2 tháng</option>
+            <option value="90">Tương tác 3 tháng</option>
+          </select></label>
         </div>
         <div class="customers-toolbar customers-toolbar--remarketing" aria-label="Lọc remarketing">
           <label class="order-filter-control"><select id="customers-ordered-within" aria-label="Đã chốt đơn trong">
             <option value="">Mọi thời điểm mua</option>
-            <option value="7">Đã mua trong 7 ngày</option>
-            <option value="14">Đã mua trong 14 ngày</option>
-            <option value="30">Đã mua trong 30 ngày</option>
-            <option value="60">Đã mua trong 60 ngày</option>
-            <option value="90">Đã mua trong 90 ngày</option>
+            <option value="7">Mua trong 7 ngày</option>
+            <option value="10">Mua trong 10 ngày</option>
+            <option value="14">Mua trong 14 ngày</option>
+            <option value="30">Mua trong 1 tháng</option>
+            <option value="60">Mua trong 2 tháng</option>
+            <option value="90">Mua trong 3 tháng</option>
           </select></label>
           <label class="order-filter-control"><select id="customers-product" aria-label="Sản phẩm đã mua"><option value="">Mọi sản phẩm</option></select></label>
           <label class="order-filter-control"><select id="customers-combo" aria-label="Combo đã mua">

@@ -418,8 +418,7 @@ const customersTotal = document.querySelector('#customers-total');
 const customersFilters = {
   q: document.querySelector('#customers-search'),
   channelId: document.querySelector('#customers-channel'),
-  from: document.querySelector('#customers-from'),
-  to: document.querySelector('#customers-to'),
+  activeWithin: document.querySelector('#customers-active-within'),
   // Remarketing
   orderedWithin: document.querySelector('#customers-ordered-within'),
   product: document.querySelector('#customers-product'),
@@ -439,11 +438,8 @@ function customersQueryString() {
       if (input.checked) params.set(key, '1');
       continue;
     }
-    let value = input.value.trim();
+    const value = input.value.trim();
     if (!value) continue;
-    // Dates cover whole days in the browser's zone.
-    if (key === 'from') value = String(new Date(`${value}T00:00:00`).getTime());
-    if (key === 'to') value = String(new Date(`${value}T23:59:59.999`).getTime());
     params.set(key, value);
   }
   return params.toString();
@@ -609,7 +605,7 @@ customersFilters.q?.addEventListener('input', () => {
   clearTimeout(customersSearchTimer);
   customersSearchTimer = setTimeout(loadCustomers, 250);
 });
-['channelId', 'from', 'to', 'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone']
+['channelId', 'activeWithin', 'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone']
   .forEach(key => customersFilters[key]?.addEventListener('change', loadCustomers));
 // Một nút Xuất danh sách, chọn định dạng trong menu — cả hai đều xuất đúng
 // những gì bảng đang lọc.

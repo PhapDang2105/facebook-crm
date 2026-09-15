@@ -137,13 +137,14 @@ function foldText(value) {
 
 /**
  * Bộ lọc cho cả hai việc: quản lý data (tìm kiếm, kênh, nguồn, giới tính, thẻ,
- * khoảng thời gian tương tác) và remarketing (đã mua trong N ngày, đã mua sản
- * phẩm nào, mua combo mấy túi, mua bao nhiêu lần, có số điện thoại chưa).
+ * tương tác trong N ngày) và remarketing (đã mua trong N ngày, đã mua sản phẩm
+ * nào, mua combo mấy túi, mua bao nhiêu lần, có số điện thoại chưa).
+ * Mọi mốc thời gian đều đếm bằng số ngày, không nhập ngày tháng thủ công.
  */
 export function filterCustomers(customers, filters = {}, now = Date.now()) {
   const query = foldText(filters.q).trim();
-  const from = Number(filters.from) || 0;
-  const to = Number(filters.to) || 0;
+  const activeWithin = Math.max(0, Number(filters.activeWithin) || 0);
+  const activeSince = activeWithin ? now - activeWithin * 86400000 : 0;
   const orderedWithin = Math.max(0, Number(filters.orderedWithin) || 0);
   const orderedSince = orderedWithin ? now - orderedWithin * 86400000 : 0;
   const product = foldText(filters.product).trim();
@@ -154,8 +155,7 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
     if (filters.source && !customer.sources.includes(filters.source)) return false;
     if (filters.gender && customer.gender !== filters.gender) return false;
     if (filters.label && !customer.labels.includes(filters.label)) return false;
-    if (from && customer.lastMessageAt < from) return false;
-    if (to && customer.lastMessageAt > to) return false;
+    if (activeSince && customer.lastMessageAt < activeSince) return false;
     // "Đã chốt đơn trong 7 ngày qua" tính theo ngày lên đơn, không phải ngày nhắn tin.
     if (orderedSince && (!customer.lastOrderAt || customer.lastOrderAt < orderedSince)) return false;
     if (minOrders && customer.orderCount < minOrders) return false;

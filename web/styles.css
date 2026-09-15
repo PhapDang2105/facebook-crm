@@ -420,8 +420,11 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customers-toggle { display: inline-flex; align-items: center; gap: 7px; color: #475467; font-size: 13.5px; white-space: nowrap; cursor: pointer; }
 .customers-toggle input { width: 15px; height: 15px; accent-color: #1677ff; cursor: pointer; }
 .settings-card-sub { margin: 3px 0 0; color: #667085; font-size: 13.5px; }
-.customers-table td.customer-address { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.customers-table td.customer-money small { display: block; margin-top: 2px; color: #98a2b3; font-size: 12px; white-space: nowrap; }
+.customers-table td.customer-address { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customers-table td.customer-bought-when { white-space: nowrap; }
+.customers-table td.customer-bought-when b { display: block; color: #101828; font-weight: 600; }
+.customers-table td.customer-bought-when small { display: block; margin-top: 2px; color: #98a2b3; font-size: 12px; }
+.customer-never { color: #b0b7c3; font-size: 13px; }
 .customer-products { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .customer-product { display: inline-block; padding: 2px 8px; color: #3f5a46; background: #eef6f0; border: 0.9px solid #d7e8dc; border-radius: 6px; font-size: 12.5px; white-space: nowrap; }
 .customer-product--more { color: #667085; background: #f0f2f5; border-color: #e0e3ea; }

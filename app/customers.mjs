@@ -211,7 +211,8 @@ export function customersToCsv(customers, labels = []) {
     formatTime(customer.lastOrderAt),
     (customer.products || []).map(item => `${item.name}${item.quantity > 1 ? ` x${item.quantity}` : ''}`).join(', '),
     customer.comboMax || '',
-    customer.labels.map(label => labelNamesById.get(label) || labelNames[label] || label).join(', '),
+    // Thẻ nhân viên đã xóa trong Cài đặt thì không xuất ra dưới dạng mã.
+    customer.labels.map(label => labelNamesById.get(label) || labelNames[label]).filter(Boolean).join(', '),
     customer.adTitle
   ]);
   const escape = value => {

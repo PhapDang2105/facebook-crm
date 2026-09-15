@@ -434,7 +434,6 @@ let customersRequestId = 0;
 let customersItems = [];
 const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo' };
 const customerSourceIcons = { inbox: '/assets/icons/messenger.png', comment: '/assets/icons/facebook.png', ads: '/assets/icons/facebook.png' };
-const customerLabelNames = { consulting: 'Cần người xử lý', customer: 'Đã mua hàng' };
 
 function customersQueryString() {
   const params = new URLSearchParams();
@@ -471,6 +470,18 @@ function formatCustomerTime(value) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
+/** "3 ngày trước", "2 tháng trước" — nhân viên đọc nhanh hơn ngày tháng thuần. */
+function timeSince(value) {
+  const days = Math.floor((Date.now() - Number(value)) / 86400000);
+  if (days <= 0) return 'Hôm nay';
+  if (days === 1) return 'Hôm qua';
+  if (days < 30) return `${days} ngày trước`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} tháng trước`;
+  const years = Math.floor(days / 365);
+  return `${years} năm trước`;
+}
+
 /** Ngày mua gọn cho ô đơn hàng — giờ phút không giúp gì cho remarketing. */
 function formatCustomerDate(value) {
   if (!value) return '';
@@ -494,13 +505,11 @@ function renderCustomers(items, total) {
       ? `<span class="avatar has-photo"><img class="avatar-photo" src="${escapeHtml(customer.picture)}" alt="">${escapeHtml(initial)}</span>`
       : `<span class="avatar">${escapeHtml(initial)}</span>`;
     const sources = customer.sources.map(source => `<span class="customer-source"><img src="${customerSourceIcons[source] || customerSourceIcons.inbox}" alt="">${customerSourceNames[source] || source}</span>`).join('');
-    const tags = [
-      ...customer.labels.map(label => `<span class="customer-tag">${escapeHtml(labelName(label))}</span>`),
-      customer.adTitle ? `<span class="customer-tag customer-tag--ad" title="${escapeHtml(customer.adTitle)}">QC</span>` : '',
-      customer.botEnabled ? '<span class="customer-tag customer-tag--bot">Bot</span>' : ''
-    ].join('');
     const gender = customer.gender === 'male' ? 'Nam' : customer.gender === 'female' ? 'Nữ' : '';
-    const orders = customer.orderCount ? `${customer.orderCount} · ${formatOrderMoney(customer.orderTotal)}` : '';
+    // Remarketing đọc theo "mua khi nào, cách đây bao lâu" — số tiền không giúp gì ở đây.
+    const boughtWhen = customer.lastOrderAt
+      ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}${customer.orderCount > 1 ? ` · ${customer.orderCount} đơn` : ''}</small>`
+      : '<span class="customer-never">Chưa mua</span>';
     const bought = (customer.products || []);
     const boughtCell = bought.length
       ? `<span class="customer-products" title="${escapeHtml(bought.map(item => `${item.name} x${item.quantity}`).join(', '))}">${
@@ -516,12 +525,11 @@ function renderCustomers(items, total) {
       <td>${escapeHtml(customer.phone)}</td>
       <td class="customer-address" title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</td>
       <td>${boughtCell}${combo}</td>
-      <td class="customer-money">${orders}${customer.lastOrderAt ? `<small>Mua ${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</small>` : ''}</td>
-      <td>${tags}</td>
+      <td class="customer-bought-when">${boughtWhen}</td>
     </tr>`;
   }).join('');
   customersTable.innerHTML = `<table><thead><tr>
-    <th>Khách hàng</th><th>Giới tính</th><th>Kênh</th><th>Nguồn</th><th>Số điện thoại</th><th>Địa chỉ</th><th>Sản phẩm đã mua</th><th>Đơn hàng</th><th>Thẻ</th>
+    <th>Khách hàng</th><th>Giới tính</th><th>Kênh</th><th>Nguồn</th><th>Số điện thoại</th><th>Địa chỉ</th><th>Sản phẩm đã mua</th><th>Đã mua</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -568,8 +576,12 @@ function openCustomerDialog(customer) {
     ['Số điện thoại', customer.phone],
     ['Địa chỉ', customer.address],
     ['Đơn hàng', customer.orderCount ? `${customer.orderCount} đơn · ${formatOrderMoney(customer.orderTotal)}` : '0'],
+    ['Sản phẩm đã mua', (customer.products || []).map(item => `${item.name} x${item.quantity}`).join(', ')],
+    ['Mua lần đầu', customer.firstOrderAt ? `${formatCustomerDate(customer.firstOrderAt)} (${timeSince(customer.firstOrderAt)})` : ''],
+    ['Mua lần cuối', customer.lastOrderAt ? `${formatCustomerDate(customer.lastOrderAt)} (${timeSince(customer.lastOrderAt)})` : ''],
     ['Ghi chú', String(customer.noteCount || 0)],
-    ['Thẻ', customer.labels.map(labelName).join(', ')],
+    // Thẻ nhân viên đã xóa trong Cài đặt thì không hiện lại ở đây dưới dạng mã.
+    ['Thẻ', customer.labels.map(labelById).filter(Boolean).map(label => label.name).join(', ')],
     ['Bot', customer.botEnabled ? 'Đang bật' : 'Tắt'],
     ['Hội thoại', customer.conversations.map(item => item.source === 'comment' ? 'Bình luận' : 'Messenger').join(', ')]
   ];
@@ -6118,10 +6130,6 @@ function labelIconElement(label) {
 
 function labelById(id) {
   return inboxLabels.find(label => label.id === id) || null;
-}
-
-function labelName(id) {
-  return labelById(id)?.name || customerLabelNames[id] || id;
 }
 
 function conversationLabelIds(conversation) {

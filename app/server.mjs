@@ -762,7 +762,9 @@ const server = http.createServer(async (request, response) => {
       }
       const rawBody = await readRawBody(request);
       const payload = parseLandingBody(rawBody, request.headers['content-type']);
-      const page = String(url.searchParams.get('page') || request.headers.referer || '').slice(0, 200);
+      // Webcake cho thêm ?event=... vào URL để phân biệt sự kiện; ghi nhận cùng trang gọi.
+      const page = [url.searchParams.get('page') || request.headers.referer || '', url.searchParams.get('event') ? `event=${url.searchParams.get('event')}` : '']
+        .filter(Boolean).join(' ').slice(0, 200);
       const result = await recordLandingOrder(payload, { page });
       if (result.error) {
         console.error(`Webhook landing: không tạo được đơn — ${result.error}`);

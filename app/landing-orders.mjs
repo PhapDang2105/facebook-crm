@@ -145,21 +145,30 @@ export function flattenPayload(value, prefix = '', out = []) {
   return out;
 }
 
+// Tên trường mặc định của form Webcake (full_name, phone_number, address,
+// country, district, ward, products, quantity, coupon, textarea_input_1,
+// utm_*, singlechoice, multiplechoice, link, date) và các tên phổ biến khác.
 const FIELD_PATTERNS = {
   name: [/^(ho ?ten|ho va ten|full ?name|fullname|name|ten khach( hang)?|customer ?name|ten|nguoi nhan|ten nguoi nhan)$/],
   phone: [/^(phone( ?number)?|so ?dien ?thoai|sdt|dien thoai|mobile|tel|telephone|so dt|dt)$/],
   address: [/^(dia ?chi|address|full ?address|dia chi nhan hang|dia chi giao hang|street)$/],
-  province: [/^(tinh( thanh)?( pho)?|province|city|thanh pho|tinh thanh pho)$/],
+  province: [/^(tinh( thanh)?( pho)?|province|city|state|thanh pho|tinh thanh pho)$/],
+  // Ô "country" của Webcake thường là tỉnh/thành; chỉ bỏ qua khi giá trị là quốc gia.
+  country: [/^(country|quoc gia)$/],
   district: [/^(quan( huyen)?|huyen|district)$/],
   ward: [/^(phuong( xa)?|xa|ward)$/],
   product: [/^(san ?pham|product( ?name)?|products?|item|ten san pham|mat hang|combo|goi|goi san pham|variant|variation|sku)$/],
+  choice: [/^(single ?choice( \d+)?|multiple ?choice( \d+)?|lua chon|chon( san pham)?|select( \d+)?|option( \d+)?|radio( \d+)?|checkbox( \d+)?)$/],
   quantity: [/^(so ?luong|quantity|qty|sl)$/],
   price: [/^(gia|price|unit ?price|don gia)$/],
   total: [/^(tong( tien)?|total( ?price| ?amount)?|amount|thanh tien|tong cong)$/],
-  note: [/^(ghi ?chu|note|notes|message|loi nhan|yeu cau|comment|content|noi dung)$/],
+  note: [/^(ghi ?chu|note|notes|message|loi nhan|yeu cau|comment|content|noi dung|textarea( input)?( \d+)?|text ?input( \d+)?)$/],
+  coupon: [/^(coupon|ma giam gia|voucher|ma khuyen mai)$/],
   id: [/^(order ?id|ma don( hang)?|id|submission ?id|entry ?id|uuid|order ?code|ma don hang)$/],
-  campaign: [/^(utm ?campaign|campaign|chien dich|utm ?source|utm ?medium|utm ?content|landing( ?page)?( ?name)?|page ?name|page ?title|source|nguon|form ?name|form ?title|page ?url|url|link)$/]
+  campaign: [/^(utm ?campaign|campaign|chien dich|utm ?source|utm ?medium|utm ?content|utm ?term|landing( ?page)?( ?name)?|page ?name|page ?title|source|nguon|form ?name|form ?title|page ?url|url|link|event)$/],
+  ignored: [/^(date|time|upload|file|email|ip|user ?agent|referrer?|country ?code|captcha)$/]
 };
+const COUNTRY_VALUES = /^(viet ?nam|vn|vietnam)$/;
 
 function pick(fields, kind) {
   const patterns = FIELD_PATTERNS[kind];
@@ -186,20 +195,35 @@ function quantityOf(value) {
  * Dòng sản phẩm: danh sách "products.0.name"/"products.0.quantity" nếu có,
  * còn không thì một dòng từ trường sản phẩm + số lượng ở cấp gốc.
  */
+/** "Túi Xanh x2", "Túi Xanh (x 2)", "2 x Túi Xanh" → tên và số lượng. */
+function splitProductText(value) {
+  const text = String(value ?? '').trim();
+  const trailing = text.match(/^(.*?)\s*[\(\[]?\s*[x×*]\s*(\d{1,3})\s*[\)\]]?$/iu);
+  if (trailing) return { product: trailing[1].trim(), quantity: trailing[2] };
+  const leading = text.match(/^(\d{1,3})\s*[x×*]\s*(.+)$/iu);
+  if (leading) return { product: leading[2].trim(), quantity: leading[1] };
+  return { product: text, quantity: '' };
+}
+
 export function extractLineItems(fields) {
+  // Dòng sản phẩm lồng nhau: products[0].name, products.name, items[1].quantity, cart.0.sku...
   const groups = new Map();
   for (const field of fields) {
-    const match = field.path.match(/^(.*?)(?:^|\.)(\d+)\.([^.]+)$/);
-    if (!match) continue;
-    const groupKey = `${match[1]}#${match[2]}`;
+    const segments = field.path.split('.');
+    if (segments.length < 2) continue;
+    const parent = segments.slice(0, -1);
+    const container = /^\d+$/.test(parent.at(-1)) ? parent.slice(0, -1) : parent;
+    if (!/^(products?|items?|line ?items?|cart|san pham|order ?items?)$/.test(keyOf(container.at(-1) || ''))) continue;
+    const groupKey = parent.join('.');
     const group = groups.get(groupKey) || {};
     // Trong một dòng sản phẩm, "name"/"title" là tên sản phẩm chứ không phải tên khách.
-    const kind = /^(name|title|ten|label)$/.test(field.key) ? 'product'
+    const kind = /^(name|title|ten|label|product ?name|display ?name)$/.test(field.key) ? 'product'
       : Object.keys(FIELD_PATTERNS).find(name => ['product', 'quantity', 'price', 'total'].includes(name) && FIELD_PATTERNS[name].some(pattern => pattern.test(field.key)));
-    if (kind) group[kind] = field.value;
+    if (kind === 'product' && /^sku$/.test(field.key)) group.sku = field.value;
+    else if (kind) group[kind] = field.value;
     if (Object.keys(group).length) groups.set(groupKey, group);
   }
-  const items = [...groups.values()].filter(group => group.product);
+  const items = [...groups.values()].filter(group => group.product || group.sku).map(group => ({ ...group, product: group.product || group.sku }));
   if (items.length) return items;
   const products = pickAll(fields, 'product');
   if (!products.length) return [];
@@ -208,7 +232,8 @@ export function extractLineItems(fields) {
   // Nhiều trường sản phẩm cùng lúc (ví dụ "sku" và "product") thì là một dòng.
   const named = products.find(field => !/^sku$/.test(field.key)) || products[0];
   const sku = products.find(field => /^sku$/.test(field.key))?.value || '';
-  return [{ product: named.value, sku, quantity, price }];
+  const split = splitProductText(named.value);
+  return [{ product: split.product, sku, quantity: quantity || split.quantity, price }];
 }
 
 /**
@@ -220,17 +245,30 @@ export function normalizeLandingPayload(payload = {}) {
   const name = pick(fields, 'name');
   const phoneRaw = pick(fields, 'phone');
   const phone = toLocalPhone(phoneRaw) || extractVietnamesePhone(phoneRaw) || extractVietnamesePhone(fields.map(field => field.value).join(' '));
-  const parts = [pick(fields, 'address'), pick(fields, 'ward'), pick(fields, 'district'), pick(fields, 'province')].filter(Boolean);
+  // "country" của Webcake là tỉnh/thành khi giá trị không phải tên quốc gia.
+  const country = pick(fields, 'country');
+  const province = pick(fields, 'province') || (country && !COUNTRY_VALUES.test(keyOf(country)) ? country : '');
+  const parts = [pick(fields, 'address'), pick(fields, 'ward'), pick(fields, 'district'), province].filter(Boolean);
   const address = parts.join(', ');
-  const lines = extractLineItems(fields);
+  let lines = extractLineItems(fields);
+  // Không có ô sản phẩm nhưng có ô lựa chọn (singlechoice "Combo 2 túi"...):
+  // lựa chọn nào khớp danh mục thì là sản phẩm, còn lại ghi vào ghi chú.
+  const choices = pickAll(fields, 'choice');
+  const choiceNotes = [];
+  for (const choice of choices) {
+    const split = splitProductText(choice.value);
+    if (!lines.length && matchProduct(split.product)) lines = [{ product: split.product, sku: '', quantity: split.quantity || pick(fields, 'quantity'), price: '' }];
+    else choiceNotes.push(`${choice.path}: ${choice.value}`);
+  }
   const total = money(pick(fields, 'total'));
-  const note = pickAll(fields, 'note').map(field => field.value).join(' · ');
+  const coupon = pick(fields, 'coupon');
+  const note = [...pickAll(fields, 'note').map(field => field.value), ...choiceNotes, coupon ? `Mã giảm giá: ${coupon}` : ''].filter(Boolean).join(' · ');
   const externalId = pick(fields, 'id');
   const campaign = pickAll(fields, 'campaign').map(field => `${field.path}=${field.value}`).join('; ');
-  const recognized = new Set(['name', 'phone', 'address', 'province', 'district', 'ward', 'product', 'quantity', 'price', 'total', 'note', 'id', 'campaign']);
+  const recognized = Object.keys(FIELD_PATTERNS);
   const unknown = fields
-    .filter(field => field.value && ![...recognized].some(kind => FIELD_PATTERNS[kind].some(pattern => pattern.test(field.key))))
-    .filter(field => !/^\d+$/.test(field.key))
+    .filter(field => field.value && !recognized.some(kind => FIELD_PATTERNS[kind].some(pattern => pattern.test(field.key))))
+    .filter(field => !/^(\d+|name|title|label)$/.test(field.key))
     .map(field => `${field.path}=${field.value}`);
   return { name, phone, phoneRaw, address, lines, total, note, externalId, campaign, unknown };
 }

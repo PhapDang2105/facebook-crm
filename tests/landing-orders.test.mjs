@@ -59,6 +59,28 @@ test('form_data dạng mảng {name, value} và danh sách sản phẩm', () => 
   assert.equal(parsed.externalId, 'WC-1001');
 });
 
+test('payload đúng tên trường mặc định của Webcake', () => {
+  const parsed = normalizeLandingPayload({
+    full_name: 'Lê Thị Hoa', phone_number: '0977 111 222', address: '45 Trần Hưng Đạo', ward: 'Phường 2', district: 'Quận 5', country: 'Hồ Chí Minh',
+    products: 'Túi Xanh x2', quantity: '', coupon: 'GIAM10', textarea_input_1: 'Giao buổi sáng',
+    utm_source: 'facebook', utm_campaign: 'granola-t9', utm_term: 'granola', link: 'https://lp.giotnang.vn/granola', date: '2026-09-15', singlechoice: 'Combo 2 túi'
+  });
+  assert.equal(parsed.name, 'Lê Thị Hoa');
+  assert.equal(parsed.phone, '0977111222');
+  assert.equal(parsed.address, '45 Trần Hưng Đạo, Phường 2, Quận 5, Hồ Chí Minh');
+  assert.deepEqual(parsed.lines.map(line => [line.product, line.quantity]), [['Túi Xanh', '2']]);
+  assert.match(parsed.note, /Giao buổi sáng/);
+  assert.match(parsed.note, /Mã giảm giá: GIAM10/);
+  assert.match(parsed.note, /singlechoice: Combo 2 túi/);
+  assert.match(parsed.campaign, /utm_term=granola/);
+  assert.deepEqual(parsed.unknown, []);
+  // "country" là quốc gia thật thì không thành tỉnh.
+  assert.equal(normalizeLandingPayload({ phone_number: '0977111222', address: '45 Trần Hưng Đạo', country: 'Việt Nam' }).address, '45 Trần Hưng Đạo');
+  // products dạng object và lựa chọn combo thay cho ô sản phẩm.
+  assert.deepEqual(normalizeLandingPayload({ phone_number: '0977111222', products: { name: 'Túi Nâu', quantity: 3, price: 149000 } }).lines.map(line => [line.product, line.quantity]), [['Túi Nâu', '3']]);
+  assert.deepEqual(normalizeLandingPayload({ phone_number: '0977111222', singlechoice: 'Túi Vàng' }).lines.map(line => line.product), ['Túi Vàng']);
+});
+
 test('tạo đơn: khớp SKU kho, ba cấp địa chỉ, tổng theo landing', () => {
   const order = buildLandingOrder({
     name: 'Nguyễn Lan', phone: '0909123456', address: '12 Lê Lợi, P. Bến Nghé, Q1, HCM', product: 'Túi Xanh', quantity: 2, total: 298000

@@ -70,6 +70,14 @@ export const metaConfig = {
   subscribedFields: 'messages,message_echoes,messaging_postbacks,messaging_optins,message_reactions,message_deliveries,message_reads,messaging_referrals,feed'
 };
 
+// Webhook nhận đơn từ landing page (Webcake...). Token tự đặt, đưa vào URL
+// hoặc header khi cấu hình bên nền tảng landing; để trống là tắt webhook.
+export const landingConfig = {
+  token: process.env.LANDING_WEBHOOK_TOKEN || '',
+  path: process.env.LANDING_WEBHOOK_PATH || '/webhooks/landing',
+  webhookUrl: `${publicBaseUrl}${process.env.LANDING_WEBHOOK_PATH || '/webhooks/landing'}`
+};
+
 export function missingMetaConfiguration() {
   return [
     !metaConfig.appId && 'META_APP_ID',

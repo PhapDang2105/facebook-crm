@@ -660,6 +660,16 @@ async function syncChatbotOrdersIntoTable() {
 const orderSourceHeader = 'Nguồn đơn';
 const chatbotOrderHeaders = [orderSourceHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
 
+// Orders the system created itself (chatbot, landing page) carry a prefix in
+// the order-id column so the table can tell them from imported rows.
+const systemOrderPrefixes = ['CB-', 'LP-'];
+function isSystemOrderId(orderId) {
+  return systemOrderPrefixes.some(prefix => String(orderId || '').startsWith(prefix));
+}
+function systemOrderRowId(order) {
+  return `${order.source === 'Landing page' ? 'LP' : 'CB'}-${order.id}`;
+}
+
 function chatbotOrderToRows(order) {
   // The server resolves the three levels against the warehouse list when the
   // order is created; the comma split only covers orders made before that.
@@ -669,14 +679,19 @@ function chatbotOrderToRows(order) {
   const district = resolved ? (order.district || '') : (parts.length > 2 ? parts.at(-2) : '');
   const ward = resolved ? (order.ward || '') : (parts.length > 3 ? parts.at(-3) : '');
   const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
+  const sourceLabel = order.source === 'Landing page' ? 'Landing page' : 'Chatbot';
+  const flags = [
+    order.landing?.needsAddress ? 'Thiếu địa chỉ' : '',
+    order.landing?.needsProduct ? 'Kiểm tra sản phẩm' : ''
+  ].filter(Boolean).join(' · ');
   return products.map(item => [
-    'Chatbot', `CB-${order.id}`, order.name || order.conversationName || '', order.phone || '', order.address || '',
+    sourceLabel, systemOrderRowId(order), order.name || order.conversationName || '', order.phone || '', order.address || '',
     province, district, ward,
     item.name || '', item.sku || '', String(Number(item.quantity) || 1),
     // Unit price as the customer paid it (combo price from 2 units), so the
     // table's totals match the confirmation the customer received.
     String(Number(item.paidPrice) || Number(item.price) || 0),
-    [order.gift ? `Quà: ${order.gift}` : '', order.note || ''].filter(Boolean).join(' · ')
+    [flags, order.gift ? `Quà: ${order.gift}` : '', order.note || ''].filter(Boolean).join(' · ')
   ]);
 }
 
@@ -698,7 +713,7 @@ function deleteOrderRows(indexes) {
   const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
   if (idColumn >= 0) {
     dismissChatbotOrders(orderData.rows
-      .filter((row, index) => removing.has(index) && String(row[idColumn] || '').startsWith('CB-'))
+      .filter((row, index) => removing.has(index) && isSystemOrderId(row[idColumn]))
       .map(row => String(row[idColumn])));
   }
   orderData = { headers: orderData.headers, rows: orderData.rows.filter((row, index) => !removing.has(index)) };
@@ -713,11 +728,12 @@ document.querySelector('#order-import-preview')?.addEventListener('click', async
   const rowIndex = Number(button.dataset.orderRowDelete);
   const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
   const orderId = idColumn >= 0 ? String(orderData.rows[rowIndex]?.[idColumn] || '') : '';
-  // A chatbot order is one record in the system, not a table row: deleting any
-  // of its lines deletes the order everywhere, after asking.
-  if (orderId.startsWith('CB-')) {
+  // A chatbot or landing-page order is one record in the system, not a table
+  // row: deleting any of its lines deletes the order everywhere, after asking.
+  if (isSystemOrderId(orderId)) {
     const id = orderId.slice(3);
-    if (!window.confirm(`Xóa đơn #${id} tạo từ chatbot khỏi hệ thống? Đơn sẽ mất ở cả bảng này lẫn hội thoại.`)) return;
+    const origin = orderId.startsWith('LP-') ? 'landing page' : 'chatbot';
+    if (!window.confirm(`Xóa đơn #${id} tạo từ ${origin} khỏi hệ thống? Đơn sẽ mất ở cả bảng này lẫn nơi tạo.`)) return;
     button.disabled = true;
     try {
       const response = await fetch(`/api/customer-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -760,7 +776,7 @@ function mergeChatbotOrdersIntoTable(orders) {
   let added = 0;
   const rows = [...orderData.rows];
   for (const order of orders) {
-    if (existingIds.has(`CB-${order.id}`) || dismissed.has(`CB-${order.id}`)) continue;
+    if (existingIds.has(systemOrderRowId(order)) || dismissed.has(systemOrderRowId(order))) continue;
     for (const source of chatbotOrderToRows(order)) {
       const row = Array(headers.length).fill('');
       chatbotOrderHeaders.forEach((header, position) => {

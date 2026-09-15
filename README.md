@@ -70,6 +70,10 @@ Thiết kế giao diện tuân theo `docs/design/ui-principles.md`: tối giản
 - Không đưa họ tên, số điện thoại hoặc email vào tên file.
 - Không commit dữ liệu khách hàng thật, access token, app secret hoặc file `.env`.
 
+## Đơn từ landing page (Webcake)
+
+`app/landing-orders.mjs` nhận đơn từ form landing qua webhook `POST /webhooks/landing?token=<LANDING_WEBHOOK_TOKEN>` (JSON hoặc form-urlencoded; token đặt trong `.env`, để trống là tắt). Trường được nhận dạng theo nghĩa nên tên khác nhau vẫn đọc được: họ tên / name / full_name, số điện thoại / phone / sđt, địa chỉ + phường/xã + quận/huyện + tỉnh/thành, sản phẩm / product / sku (một dòng hoặc danh sách `products[]`), số lượng, tổng tiền, ghi chú, mã đơn (order_id), utm/campaign/page. Sản phẩm được khớp với Cài đặt → Sản phẩm để lấy SKU kho và giá combo; địa chỉ được tách ba cấp như đơn chatbot. Thiếu địa chỉ hay sản phẩm lạ vẫn tạo đơn kèm cờ "Thiếu địa chỉ" / "Kiểm tra sản phẩm" trong cột Ghi chú; thiếu số điện thoại hợp lệ thì từ chối. Chống trùng theo `order_id` hoặc cùng SĐT + giỏ trong 10 phút. Đơn lưu ở `data/processed/landing-orders.json`, xuất hiện trong **Đơn hàng** với Nguồn đơn = Landing page (mã `LP-…`) và đi cùng luồng kiểm tra → xuất kho. `GET /api/landing/recent` (sau mật khẩu) trả 30 payload gần nhất để đối chiếu khi một trường chưa được nhận ra. Trên VPS, Caddy phải cho `/webhooks/landing` đi thẳng (đã có trong `deploy/Caddyfile`).
+
 ## Luồng đơn hàng
 
 Chatbot chốt đơn → đơn tự xuất hiện trong **Đơn hàng → Nhập dữ liệu** (cột Nguồn đơn = Chatbot) cùng các file import → kiểm tra ở **Xử lý dữ liệu** → **Xuất dữ liệu** tạo file XLSX cho kho; preview và file dùng chung một hàm trên server.

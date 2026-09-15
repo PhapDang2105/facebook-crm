@@ -17,6 +17,13 @@
 		reverse_proxy 127.0.0.1:8080
 	}
 
+	# Webhook nhận đơn từ landing page (Webcake...): nền tảng gọi bằng máy,
+	# tự xác thực bằng token trong URL/header (LANDING_WEBHOOK_TOKEN).
+	@landing path /webhooks/landing
+	handle @landing {
+		reverse_proxy 127.0.0.1:8080
+	}
+
 	# Ảnh sản phẩm cũng phải công khai: Messenger tải ảnh từ link này để hiện
 	# trên receipt và sau bảng giá. Ứng dụng chỉ trả tệp ảnh có tên hợp lệ.
 	@productImages path /product-images/*

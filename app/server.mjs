@@ -15,9 +15,11 @@ import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './prod
 import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
+import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder } from './landing-orders.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
+  landingConfig,
   metaConfig,
   missingMetaConfiguration,
   missingWebhookConfiguration,
@@ -742,6 +744,37 @@ const server = http.createServer(async (request, response) => {
       response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
       return response.end(challenge);
     }
+    // Đơn từ landing page: nền tảng landing gọi bằng máy, không đăng nhập
+    // được, nên đường dẫn này đi qua Caddy không cần mật khẩu và tự xác thực
+    // bằng token. Luôn trả lời nhanh để bên kia không gửi lại nhiều lần.
+    if (url.pathname === landingConfig.path) {
+      if (request.method === 'GET') {
+        return sendJson(response, 200, { status: 'ok', accepts: 'POST JSON hoặc form-urlencoded', configured: Boolean(landingConfig.token) });
+      }
+      if (request.method !== 'POST') return sendJson(response, 405, { error: 'Chỉ nhận POST.' });
+      if (!landingConfig.token) {
+        console.error('Webhook landing: từ chối vì LANDING_WEBHOOK_TOKEN chưa được đặt trong .env');
+        return sendJson(response, 503, { error: 'Webhook landing chưa được bật trên máy chủ.' });
+      }
+      if (!isLandingTokenValid(landingTokenFrom(request, url), landingConfig.token)) {
+        console.error('Webhook landing: từ chối vì token không hợp lệ');
+        return sendJson(response, 401, { error: 'Token không hợp lệ.' });
+      }
+      const rawBody = await readRawBody(request);
+      const payload = parseLandingBody(rawBody, request.headers['content-type']);
+      const page = String(url.searchParams.get('page') || request.headers.referer || '').slice(0, 200);
+      const result = await recordLandingOrder(payload, { page });
+      if (result.error) {
+        console.error(`Webhook landing: không tạo được đơn — ${result.error}`);
+        return sendJson(response, 202, { accepted: false, error: result.error });
+      }
+      console.log(`Webhook landing: ${result.created ? 'tạo đơn' : 'đơn trùng, bỏ qua'} #${result.order.id} (${result.order.phone})`);
+      publishMessagingEvent({ type: 'landing-order', orderId: result.order.id });
+      return sendJson(response, result.created ? 201 : 200, { accepted: true, created: result.created, orderId: result.order.id });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/landing/recent') {
+      return sendJson(response, 200, { webhookUrl: landingConfig.webhookUrl, configured: Boolean(landingConfig.token), items: await listRecentLandingPayloads() });
+    }
     if (request.method === 'POST' && url.pathname === metaConfig.webhookPath) {
       const rawBody = await readRawBody(request);
       if (!verifyWebhookSignature(rawBody, request.headers['x-hub-signature-256'], metaConfig.appSecret)) {
@@ -1049,18 +1082,24 @@ const server = http.createServer(async (request, response) => {
         }
         return removed;
       });
+      if (!removed) removed = await deleteLandingOrder(orderId);
       if (!removed) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
       return sendJson(response, 200, removed);
     }
     if (request.method === 'GET' && url.pathname === '/api/customer-orders') {
       const messagingStore = await readMessagingStore();
-      const items = messagingStore.conversations.flatMap(conversation =>
-        (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).map(order => ({
-          ...order,
-          conversationId: conversation.id,
-          conversationName: conversation.name || ''
-        }))
-      ).sort((first, second) => (Number(second.createdAt) || 0) - (Number(first.createdAt) || 0));
+      // Đơn chatbot (nằm trong hội thoại) và đơn landing page (kho riêng) cùng
+      // một danh sách, cùng đi vào bảng Đơn hàng.
+      const items = [
+        ...messagingStore.conversations.flatMap(conversation =>
+          (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).map(order => ({
+            ...order,
+            conversationId: conversation.id,
+            conversationName: conversation.name || ''
+          }))
+        ),
+        ...await listLandingOrders()
+      ].sort((first, second) => (Number(second.createdAt) || 0) - (Number(first.createdAt) || 0));
       return sendJson(response, 200, { items, total: items.length });
     }
     if (request.method === 'GET' && url.pathname === '/api/dashboard') {

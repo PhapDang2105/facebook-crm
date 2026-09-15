@@ -200,6 +200,7 @@ const chatbotSettingsStructuredOutput = document.querySelector('#chatbot-setting
 const chatbotSettingsRetryCount = document.querySelector('#chatbot-settings-retry-count');
 const chatbotSettingsRetryInterval = document.querySelector('#chatbot-settings-retry-interval');
 const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome');
+const labelComplaintKeywords = document.querySelector('#label-complaint-keywords');
 const chatbotPreviewSend = document.querySelector('#chatbot-preview-send');
 const chatbotPreviewReset = document.querySelector('#chatbot-preview-reset');
 const chatbotPreviewInput = document.querySelector('#chatbot-preview-input');
@@ -327,6 +328,13 @@ const messageDefaultIds = ['WELCOME', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PRIVATE_R
 let inboxLabels = [];
 let quickReplies = [];
 let labelDraft = [];
+// Sự kiện bot báo về — thẻ nào nhận sự kiện nào là do nhân viên chọn.
+const labelAutoChoices = [
+  { value: '', label: 'Không tự động' },
+  { value: 'order', label: 'Khi chốt đơn' },
+  { value: 'handoff', label: 'Khi chuyển nhân viên' },
+  { value: 'complaint', label: 'Khi khách khiếu nại' }
+];
 let quickReplyDraft = null;
 let quickReplyPickerMatches = [];
 let quickReplyPickerIndex = 0;
@@ -6346,6 +6354,18 @@ async function loadMessageSettings() {
   renderQuickReplySettings();
   renderLabelSettings();
   loadMessageDefaults();
+  loadComplaintKeywords();
+}
+
+/** Từ khóa khiếu nại nằm trong thiết lập chatbot; màn Thẻ hội thoại đọc riêng. */
+async function loadComplaintKeywords() {
+  if (!labelComplaintKeywords) return;
+  try {
+    const settings = await readApiResponse(await fetch('/api/chatbot/settings'));
+    labelComplaintKeywords.value = settings.complaintKeywords || '';
+  } catch {
+    labelComplaintKeywords.value = '';
+  }
 }
 
 function renderQuickReplySettings() {
@@ -6472,13 +6492,26 @@ function renderLabelSettings() {
     name.value = label.name;
     name.placeholder = 'Tên thẻ';
     name.setAttribute('aria-label', 'Tên thẻ');
+    const auto = document.createElement('select');
+    auto.className = 'label-auto-select';
+    auto.dataset.labelAuto = String(index);
+    auto.setAttribute('aria-label', 'Tự động gắn thẻ khi');
+    for (const choice of labelAutoChoices) {
+      const option = document.createElement('option');
+      option.value = choice.value;
+      // Một sự kiện chỉ gắn cho một thẻ; chọn lại thì thẻ cũ tự bỏ.
+      const holder = choice.value && labelDraft.find((item, position) => position !== index && item.auto === choice.value);
+      option.textContent = holder ? `${choice.label} (đang ở "${holder.name || 'thẻ chưa đặt tên'}")` : choice.label;
+      option.selected = (label.auto || '') === choice.value;
+      auto.appendChild(option);
+    }
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'label-settings-remove';
     remove.dataset.labelRemove = String(index);
     remove.setAttribute('aria-label', `Xóa thẻ ${label.name}`);
     remove.textContent = '×';
-    row.append(iconButton, color, name, remove);
+    row.append(iconButton, color, name, auto, remove);
     return row;
   }));
   renderLabelSettingsPreview();
@@ -6545,6 +6578,14 @@ async function saveLabelSettings() {
   if (labelSave) labelSave.disabled = true;
   try {
     await saveInboxSettings({ labels });
+    if (labelComplaintKeywords) {
+      // Từ khóa khiếu nại nằm trong thiết lập chatbot vì bot là nơi đọc tin khách.
+      await readApiResponse(await fetch('/api/chatbot/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ complaintKeywords: labelComplaintKeywords.value })
+      }));
+    }
     labelDraft = inboxLabels.map(label => ({ ...label }));
     renderLabelSettings();
     showToast('Đã lưu thẻ hội thoại.', 'success');
@@ -6687,7 +6728,7 @@ labelReset?.addEventListener('click', () => {
   showToast('Đã nạp bộ thẻ mặc định — bấm "Lưu thẻ" để áp dụng.', 'success');
 });
 labelAdd?.addEventListener('click', () => {
-  labelDraft.push({ id: '', name: '', color: '#c9ced6' });
+  labelDraft.push({ id: '', name: '', color: '#c9ced6', icon: '', auto: '' });
   renderLabelSettings();
   labelSettingsList?.querySelector('.label-settings-row:last-child input[type="text"]')?.focus();
 });
@@ -6697,7 +6738,13 @@ labelSettingsList?.addEventListener('input', event => {
   const label = labelDraft[Number(row.dataset.labelIndex)];
   if (!label) return;
   if (event.target.type === 'color') label.color = event.target.value;
-  else label.name = event.target.value;
+  else if (event.target.dataset.labelAuto !== undefined) {
+    const value = event.target.value;
+    if (value) for (const item of labelDraft) if (item !== label && item.auto === value) item.auto = '';
+    label.auto = value;
+    renderLabelSettings();
+    return;
+  } else label.name = event.target.value;
   renderLabelSettingsPreview();
 });
 labelSettingsList?.addEventListener('click', event => {

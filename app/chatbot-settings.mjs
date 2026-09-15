@@ -1,4 +1,5 @@
 import { defaultMessageTemplates, isProductQuoteId } from './chatbot-templates.mjs';
+import { defaultComplaintKeywords } from './processing/auto-label.mjs';
 
 export const defaultChatbotSettings = Object.freeze({
   enabled: false,
@@ -18,6 +19,8 @@ export const defaultChatbotSettings = Object.freeze({
   retryIntervalMs: 1000,
   welcomeMessage: '',
   handoffKeywords: '',
+  // Lời khách có những từ này thì hội thoại được gắn thẻ khiếu nại.
+  complaintKeywords: defaultComplaintKeywords,
   // Comments: like the customer's comment; hide it when it holds a phone number.
   commentLike: true,
   commentHide: 'phone',
@@ -93,6 +96,10 @@ export function normalizeChatbotSettings(value = {}) {
     retryIntervalMs: Math.max(100, Math.min(10000, Number(value.retryIntervalMs) || defaultChatbotSettings.retryIntervalMs)),
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
+    // Chuỗi rỗng là một lựa chọn: tắt hẳn việc đoán khiếu nại theo từ khoá.
+    complaintKeywords: value.complaintKeywords === undefined
+      ? defaultChatbotSettings.complaintKeywords
+      : String(value.complaintKeywords).trim().slice(0, 2000),
     commentLike: value.commentLike !== false,
     commentHide: ['none', 'phone', 'all'].includes(value.commentHide) ? value.commentHide : defaultChatbotSettings.commentHide,
     messageTemplates,

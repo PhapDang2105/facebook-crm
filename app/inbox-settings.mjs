@@ -5,22 +5,24 @@
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { autoLabelEvents } from './processing/auto-label.mjs';
 
 const inboxSettingsPath = process.env.INBOX_SETTINGS_PATH
   || path.join(projectRoot, 'data', 'processed', 'inbox-settings.json');
 
-// The Pancake set the team already works with. `customer` is what the bot
-// sets when an order is placed, `consulting` when it hands a thread to a
-// person. No "new" label: the inbox already shows unread and first-contact.
+// The Pancake set the team already works with. `auto` is what the bot watches
+// for: it tags the thread when an order is placed, when it hands the thread to
+// a person, or when the customer complains. No "new" label: the inbox already
+// shows unread and first-contact.
 export const defaultConversationLabels = Object.freeze([
-  { id: 'consulting', name: 'Cần người xử lý', color: '#8f7ad0', icon: 'person-raising-hand' },
-  { id: 'warranty', name: 'Bảo hành', color: '#d9866f', icon: 'hammer-and-wrench' },
-  { id: 'complaint', name: 'Khiếu nại', color: '#c85f5b', icon: 'warning' },
-  { id: 'customer', name: 'Đã mua hàng', color: '#5fa871', icon: 'shopping-bags' },
-  { id: 'livestream', name: 'Livestream', color: '#c26a9a', icon: 'video-camera' },
-  { id: 'wholesale', name: 'Khách sỉ', color: '#c79a2c', icon: 'package' },
-  { id: 'bad', name: 'Khách xấu', color: '#6b7280', icon: 'prohibited' },
-  { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck' }
+  { id: 'consulting', name: 'Cần người xử lý', color: '#8f7ad0', icon: 'person-raising-hand', auto: 'handoff' },
+  { id: 'warranty', name: 'Bảo hành', color: '#d9866f', icon: 'hammer-and-wrench', auto: '' },
+  { id: 'complaint', name: 'Khiếu nại', color: '#c85f5b', icon: 'warning', auto: 'complaint' },
+  { id: 'customer', name: 'Đã mua hàng', color: '#5fa871', icon: 'shopping-bags', auto: 'order' },
+  { id: 'livestream', name: 'Livestream', color: '#c26a9a', icon: 'video-camera', auto: '' },
+  { id: 'wholesale', name: 'Khách sỉ', color: '#c79a2c', icon: 'package', auto: '' },
+  { id: 'bad', name: 'Khách xấu', color: '#6b7280', icon: 'prohibited', auto: '' },
+  { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck', auto: '' }
 ]);
 
 export const defaultInboxSettings = Object.freeze({
@@ -51,6 +53,7 @@ function cleanColor(value, fallback) {
 export function normalizeConversationLabels(value) {
   const list = Array.isArray(value) ? value : [];
   const seen = new Set();
+  const used = new Set();
   const labels = [];
   for (const item of list) {
     const name = String(item?.name || '').trim().slice(0, 40);
@@ -59,7 +62,15 @@ export function normalizeConversationLabels(value) {
     while (seen.has(id)) id = `${id}-2`;
     seen.add(id);
     const icon = String(item?.icon || '').trim().toLowerCase();
-    labels.push({ id, name, color: cleanColor(item?.color, '#6b7280'), icon: /^[a-z0-9-]{1,40}$/.test(icon) ? icon : '' });
+    const auto = String(item?.auto || '').trim();
+    labels.push({
+      id,
+      name,
+      color: cleanColor(item?.color, '#6b7280'),
+      icon: /^[a-z0-9-]{1,40}$/.test(icon) ? icon : '',
+      // Mỗi sự kiện chỉ gắn cho một thẻ: thẻ đầu tiên giữ, thẻ sau bỏ trống.
+      auto: autoLabelEvents.includes(auto) && !used.has(auto) ? (used.add(auto), auto) : ''
+    });
     if (labels.length >= maximumLabels) break;
   }
   return labels;
@@ -139,6 +150,16 @@ export async function listLabelIcons() {
   } catch {
     return [];
   }
+}
+
+/**
+ * Thẻ nào được gắn cho các sự kiện bot báo về (order / handoff / complaint).
+ * Không thẻ nào nhận sự kiện thì đơn giản là không gắn gì — nhân viên đã tự
+ * bỏ tự động cho việc đó.
+ */
+export function labelsForEvents(labels, events = []) {
+  const byEvent = new Map((labels || []).filter(label => label.auto).map(label => [label.auto, label.id]));
+  return [...new Set(events.map(event => byEvent.get(event)).filter(Boolean))];
 }
 
 /** Name and colour for a label id, so the customer list can show what staff chose. */

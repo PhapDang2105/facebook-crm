@@ -1,5 +1,6 @@
 import { buildTemplatePrompt, pickVariant, renderChatbotReply } from './chatbot-templates.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
+import { autoLabelEventsFor, foldVietnamese } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
 import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
@@ -163,16 +164,8 @@ export async function requestDirectModelReply(options) {
   throw lastError;
 }
 
-/** Strips Vietnamese tone marks so a handoff keyword still matches when the
- *  customer types without diacritics, which is how most people type on a phone. */
-export function foldVietnamese(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\u0111/g, 'd')
-    .replace(/\u0110/g, 'D')
-    .toLowerCase();
-}
+// Bỏ dấu tiếng Việt: dùng chung với bước gắn thẻ tự động.
+export { foldVietnamese };
 
 export async function processChatbotChanges(changes, dependencies) {
   const { readSettings, listMessages, saveBotState, sendMessage, createOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
@@ -242,6 +235,13 @@ export async function processChatbotChanges(changes, dependencies) {
         // never before it — the order itself was already persisted above.
         if (order && sendReceipt) await sendReceipt(conversation, order);
       }
+      const labelEvents = autoLabelEventsFor({
+        order,
+        handoff: reply.handoff,
+        text: change.message.text,
+        templateId: reply.templateId,
+        keywords: settings.complaintKeywords
+      });
       await saveBotState(conversation.id, {
         botConversationId: reply.conversationId || conversation.botConversationId || '',
         botLastTemplateId: reply.templateId,
@@ -251,10 +251,11 @@ export async function processChatbotChanges(changes, dependencies) {
         botLastErrorAt: privateError ? Date.now() : 0,
         // undefined leaves the stored basket alone; null clears it once ordered.
         ...(reply.pendingOrder !== undefined && !isComment ? { pendingOrder: reply.pendingOrder } : {}),
-        // Labels staff see in the inbox: a handed-off thread needs a person, an
-        // ordered one is a buyer. `addLabels` is merged, never replacing what staff set.
-        ...(reply.handoff ? { botEnabled: false, addLabels: ['consulting'] } : {}),
-        ...(order ? { addLabels: [...(reply.handoff ? ['consulting'] : []), 'customer'] } : {})
+        ...(reply.handoff ? { botEnabled: false } : {}),
+        // Thẻ tự động: bot chỉ nói chuyện gì vừa xảy ra (chốt đơn / chuyển nhân
+        // viên / khách khiếu nại); thẻ nào được gắn là do Cài đặt → Tin nhắn.
+        // Thẻ được cộng thêm, không bao giờ xoá thẻ nhân viên đã gắn.
+        ...(labelEvents.length ? { addLabelEvents: labelEvents } : {})
       });
       results.push({
         conversationId: conversation.id,

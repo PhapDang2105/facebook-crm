@@ -4,10 +4,12 @@ import assert from 'node:assert/strict';
 import {
   defaultConversationLabels,
   labelSlug,
+  labelsForEvents,
   normalizeConversationLabels,
   normalizeInboxSettings,
   normalizeQuickReplies
 } from '../app/inbox-settings.mjs';
+import { isComplaint } from '../app/processing/auto-label.mjs';
 import { processChatbotChanges } from '../app/chatbot-engine.mjs';
 
 test('thẻ mặc định là bộ thẻ của Pancake, giữ id customer/consulting', () => {
@@ -71,5 +73,36 @@ test('bot gắn thẻ Cần người xử lý khi chuyển nhân viên và Đã 
     requestReply: async () => ({ templateId: 'CSKH_HANDOFF', messages: ['Em chuyển nhân viên ạ'], conversationId: '', handoff: true })
   });
   assert.equal(state[0].botEnabled, false);
-  assert.deepEqual(state[0].addLabels, ['consulting']);
+  assert.deepEqual(state[0].addLabelEvents, ['handoff']);
+});
+
+test('mỗi sự kiện chỉ gắn cho một thẻ, thẻ nào nhận sự kiện nào là do nhân viên chọn', () => {
+  const labels = normalizeConversationLabels([
+    { name: 'Đã mua hàng', auto: 'order' },
+    { name: 'Khách quen', auto: 'order' },
+    { name: 'Cần người xử lý', auto: 'handoff' },
+    { name: 'Khiếu nại', auto: 'khong-co-su-kien-nay' }
+  ]);
+  assert.deepEqual(labels.map(label => label.auto), ['order', '', 'handoff', '']);
+  assert.deepEqual(labelsForEvents(labels, ['order', 'handoff', 'complaint']), ['da-mua-hang', 'can-nguoi-xu-ly']);
+  assert.deepEqual(labelsForEvents(labels, []), []);
+});
+
+test('nhận diện khiếu nại theo cụm từ, không bắt nhầm câu hỏi thường', () => {
+  for (const text of [
+    'dầu bị hôi dầu rồi shop ơi',
+    'Gói granola nhận về bị ẩm hết',
+    'shop giao sai hàng cho mình nhé',
+    'mình muốn hoàn tiền',
+    'giao chậm quá mình chưa nhận được hàng'
+  ]) assert.equal(isComplaint({ text }), true, text);
+  for (const text of [
+    'shop còn hàng không ạ',
+    'shop có ship về Cần Thơ không',
+    'cho em hỏi túi xanh bao nhiêu',
+    'iu shop nhiều lắm',
+    'cho chị 2 túi granola'
+  ]) assert.equal(isComplaint({ text }), false, text);
+  assert.equal(isComplaint({ text: 'ok shop', templateId: 'OIL_SMELL_WARRANTY' }), true);
+  assert.equal(isComplaint({ text: 'hàng lỗi', keywords: '' }), false);
 });

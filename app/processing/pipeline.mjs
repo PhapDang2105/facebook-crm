@@ -51,6 +51,12 @@ const steps = [
     file: 'order-key.mjs'
   },
   {
+    id: 'auto_label',
+    name: 'Gắn thẻ tự động',
+    type: 'transform',
+    file: 'auto-label.mjs'
+  },
+  {
     id: 'compose_reply',
     name: 'Soạn tin trả lời',
     type: 'output',

@@ -28,7 +28,7 @@ import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChan
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { customersToCsv, listCustomers } from './customers.mjs';
-import { defaultConversationLabels, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
+import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
 import {
@@ -761,16 +761,27 @@ const server = http.createServer(async (request, response) => {
           moderateComment,
           createOrder: createChatbotCustomerOrder,
           sendReceipt: sendChatbotOrderReceipt,
-          saveBotState: (id, { addLabels = [], ...botState }) => updateMessagingStore(store => {
-            const conversation = store.conversations.find(item => item.id === id);
-            if (!conversation) return null;
-            Object.assign(conversation, botState);
-            if (addLabels.length) {
-              conversation.labels = [...new Set([...(Array.isArray(conversation.labels) ? conversation.labels : []), ...addLabels])];
-              publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
-            }
-            return conversation;
-          })
+          // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
+          // nhận sự kiện là do nhân viên chọn trong Cài đặt → Tin nhắn.
+          saveBotState: async (id, { addLabelEvents = [], ...botState }) => {
+            const addLabels = addLabelEvents.length
+              ? labelsForEvents((await readInboxSettings()).labels, addLabelEvents)
+              : [];
+            return updateMessagingStore(store => {
+              const conversation = store.conversations.find(item => item.id === id);
+              if (!conversation) return null;
+              Object.assign(conversation, botState);
+              if (addLabels.length) {
+                const before = Array.isArray(conversation.labels) ? conversation.labels : [];
+                const merged = [...new Set([...before, ...addLabels])];
+                if (merged.length !== before.length) {
+                  conversation.labels = merged;
+                  publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
+                }
+              }
+              return conversation;
+            });
+          }
         });
       } catch (error) {
         console.error('Webhook processing failed:', error.message);

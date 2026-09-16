@@ -476,9 +476,33 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-row-delete { display: inline-grid; width: 26px; height: 26px; place-items: center; padding: 0; color: #98a2b2; background: transparent; border: 0; border-radius: 6px; font-size: 17px; line-height: 1; cursor: pointer; }
 .order-row-delete:hover { color: #b42318; background: #fff1f0; }
 .order-row-delete:disabled { opacity: .4; cursor: default; }
-.order-row-reviewed { padding: 4px 10px; color: #1d2939; background: #fff; border: 0.9px solid #d0d5dd; border-radius: 6px; font: inherit; font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
-.order-row-reviewed:hover { border-color: #111; }
 .preview-actions { width: 44px; text-align: center; }
+/* Xử lý dữ liệu: bốn tab theo ngày đặt đơn, cùng kiểu nút viền đen của trang Đơn hàng. */
+.order-day-tabs { display: flex; flex-wrap: wrap; gap: 7.2px; margin: 0 0 12.6px; }
+.order-day-tab { display: inline-flex; align-items: center; gap: 7.2px; height: 33.3px; padding: 0 13.5px; color: #111; background: #fff; border: 0.9px solid #d0d5dd; border-radius: 8.1px; font: inherit; font-size: 12.6px; font-weight: 700; cursor: pointer; }
+.order-day-tab:hover { border-color: #111; }
+.order-day-tab.active { color: #fff; background: #111; border-color: #111; }
+.order-day-count { display: inline-grid; place-items: center; min-width: 19.8px; height: 19.8px; padding: 0 5.4px; color: #111; background: #ededed; border-radius: 9.9px; font-size: 10.8px; font-weight: 700; line-height: 1; }
+.order-day-tab.active .order-day-count { color: #111; background: #fff; }
+/* Bảng Xử lý dữ liệu: bấm dòng mở chi tiết đơn, nên cả dòng là vùng bấm. */
+#order-preview tbody td { cursor: pointer; }
+#order-preview tbody tr:hover td { background: #f7f8fa; }
+/* Hộp chi tiết đơn: mỗi đơn một thẻ, thông tin xếp dọc nhãn – giá trị để đọc khi gọi khách. */
+.order-dialog-panel { width: min(760px, 100%); max-height: 92vh; padding: 21.6px 25.2px; }
+.order-dialog-preview { display: grid; gap: 12.6px; margin-top: 16.2px; }
+.order-dialog-card { overflow: hidden; border: 0.9px solid #e4e7ec; border-radius: 9.9px; }
+.order-dialog-card.is-current { border-color: #111; }
+.order-dialog-card > header { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 9.9px 14.4px; background: #f7f8fa; font-size: 12.6px; font-weight: 700; }
+.order-dialog-card > header span { color: #b42318; font-size: 10.8px; letter-spacing: .02em; text-transform: uppercase; }
+.order-dialog-fields { display: grid; grid-template-columns: 126px minmax(0, 1fr); margin: 0; padding: 5.4px 14.4px; }
+.order-dialog-fields + .order-dialog-fields { border-top: 0.9px dashed #e4e7ec; }
+.order-dialog-fields dt { padding: 7.2px 9px 7.2px 0; color: #687080; font-size: 12.6px; font-weight: 600; }
+.order-dialog-fields dd { display: flex; align-items: center; gap: 6.3px; margin: 0; padding: 7.2px 0; color: #1d2b22; font-size: 13.5px; overflow-wrap: anywhere; }
+.order-dialog-fields dd .note-cell .note-line { font-size: 13.5px; }
+.order-dialog-fields dd .network-logo { margin-inline: 0; }
+.order-dialog-reviewed { padding: 9px 16.2px; color: #fff; background: #111; border: 0.9px solid #111; border-radius: 8.1px; font: inherit; font-weight: 700; cursor: pointer; }
+.order-dialog-reviewed:hover { background: #333; }
+.order-dialog-reviewed:disabled { opacity: .45; cursor: default; }
 .order-clear-button { color: #b42318; border-color: #f4c7c3; }
 .order-clear-button:hover { color: #fff; background: #b42318; border-color: #b42318; }
 .customer-orders-management p { margin: 0; color: #687080; font-size: 11.7px; }

@@ -927,26 +927,158 @@ function toggleOrderPhoneFilter(rowIndex) {
   renderOrderData();
 }
 
-// "Đã xử lý" ở Xử lý dữ liệu: đánh dấu cả đơn (mọi dòng cùng mã), đơn rời
-// bảng này và được phép sang Xuất dữ liệu.
+// Nhập dữ liệu: bấm dòng thì lọc bảng theo số điện thoại của dòng đó.
+document.querySelector('#order-import-preview')?.addEventListener('click', event => {
+  if (event.target.closest('button, a, input, select, textarea')) return;
+  const row = event.target.closest('tr[data-order-row-index]');
+  if (!row) return;
+  toggleOrderPhoneFilter(Number(row.dataset.orderRowIndex));
+});
+
+// Xử lý dữ liệu: bảng không có cột nút; bấm dòng mở chi tiết đơn (mọi đơn
+// cùng số điện thoại hiện chung) và nút "Đã xử lý" nằm trong đó.
 document.querySelector('#order-preview')?.addEventListener('click', event => {
-  const button = event.target.closest('[data-order-row-reviewed]');
-  if (!button) return;
-  event.stopPropagation();
-  const row = orderData.rows[Number(button.dataset.orderRowReviewed)];
+  if (event.target.closest('button, a, input, select, textarea')) return;
+  const row = event.target.closest('tr[data-order-row-index]');
+  if (!row) return;
+  openOrderDialog(Number(row.dataset.orderRowIndex));
+});
+
+// ===== Chi tiết đơn cần xử lý =====
+const orderDialog = document.querySelector('#order-dialog');
+let orderDialogRowIndex = -1;
+
+function orderPhoneColumnIndex(data = orderData) {
+  return data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+}
+
+function openOrderDialog(rowIndex) {
+  if (!orderDialog) return;
+  const row = orderData.rows[rowIndex];
+  if (!row) return;
+  orderDialogRowIndex = rowIndex;
+  const { headers } = orderData;
+  const phoneIndex = orderPhoneColumnIndex();
+  const nameIndex = headers.findIndex(header => normalizeColumnName(header) === 'khach hang');
+  const idIndex = headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  const phone = phoneIndex >= 0 ? normalizeRowPhone(row[phoneIndex]) : '';
+  // Cùng mã là cùng đơn (đơn nhiều dòng); cùng số điện thoại thì hiện kèm để
+  // nhân viên gọi khách một lần là xử lý được cả lượt.
+  const key = orderRowKey(row);
+  const entries = orderData.rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => orderRowKey(row) === key || (phone && phoneIndex >= 0 && normalizeRowPhone(row[phoneIndex]) === phone));
+  const otherOrders = new Set(entries.map(({ row }) => orderRowKey(row))).size - 1;
+  orderDialog.querySelector('#order-dialog-title').textContent = (nameIndex >= 0 && String(row[nameIndex] || '').trim()) || 'Đơn hàng';
+  orderDialog.querySelector('#order-dialog-subtitle').textContent = [
+    phoneIndex >= 0 ? String(row[phoneIndex] || '').trim() : '',
+    idIndex >= 0 ? String(row[idIndex] || '').trim() : '',
+    otherOrders > 0 ? `còn ${otherOrders} đơn khác cùng số` : ''
+  ].filter(Boolean).join(' · ');
+  const duplicateRowIndexes = getDuplicateOrderRowIndexes();
+  const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes();
+  const warningRowIndexes = getPhoneWarningRowIndexes();
+  const rowNotes = getRowProcessingNotes(orderData, { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes });
+  // Bảng ngang không vừa hộp thoại: mỗi đơn một thẻ, đơn đang bấm đứng đầu;
+  // thẻ ghi mã, ngày, nguồn ở đầu và các trường còn lại xếp dọc nhãn – giá trị.
+  const columns = headers.map((header, index) => ({ header, index, name: normalizeColumnName(header) }));
+  const columnByName = name => columns.find(column => column.name === name);
+  const headingNames = new Set(['ma don hang', 'ngay', 'nguon don', 'khach hang', 'so dien thoai']);
+  const fieldColumns = columns.filter(column => !hiddenPreviewColumns.has(column.name) && !headingNames.has(column.name));
+  const groups = new Map();
+  entries.forEach(entry => {
+    const groupKey = orderRowKey(entry.row);
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(entry);
+  });
+  const orderedKeys = [key, ...[...groups.keys()].filter(groupKey => groupKey !== key)];
+  const cellValue = (row, column) => String(row[column.index] || '').trim();
+  const renderField = (row, index, column) => {
+    const isNote = column.name === 'ghi chu';
+    const value = cellValue(row, column);
+    if (!value && !(isNote && rowNotes.get(index)?.length)) return '';
+    return `<dt>${escapeHtml(column.header)}</dt><dd>${isNote ? renderNoteCell(value, rowNotes.get(index)) : renderPreviewCell(value, column.header)}</dd>`;
+  };
+  orderDialog.querySelector('#order-dialog-preview').innerHTML = orderedKeys.map(groupKey => {
+    const lines = groups.get(groupKey);
+    const first = lines[0].row;
+    const heading = ['ma don hang', 'ngay', 'nguon don'].map(name => columnByName(name)).filter(Boolean).map(column => cellValue(first, column)).filter(Boolean).join(' · ');
+    const body = lines.map(({ row, index }) => `<dl class="order-dialog-fields">${fieldColumns.map(column => renderField(row, index, column)).join('')}</dl>`).join('');
+    return `<article class="order-dialog-card${groupKey === key ? ' is-current' : ''}"><header>${escapeHtml(heading || 'Đơn hàng')}${groupKey === key ? '<span>Đơn đang xử lý</span>' : ''}</header>${body}</article>`;
+  }).join('');
+  const reviewedButton = orderDialog.querySelector('#order-dialog-reviewed');
+  reviewedButton.disabled = isRowReviewed(row);
+  reviewedButton.textContent = reviewedButton.disabled ? 'Đã xử lý xong' : 'Đã xử lý';
+  orderDialog.classList.remove('hidden');
+}
+
+function closeOrderDialog() {
+  orderDialog?.classList.add('hidden');
+  orderDialogRowIndex = -1;
+}
+
+orderDialog?.addEventListener('click', event => {
+  if (event.target.closest('[data-close-order-dialog]')) closeOrderDialog();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && orderDialog && !orderDialog.classList.contains('hidden')) closeOrderDialog();
+});
+
+// "Đã xử lý": đánh dấu cả đơn (mọi dòng cùng mã), đơn rời Xử lý dữ liệu và
+// được phép sang Xuất dữ liệu.
+document.querySelector('#order-dialog-reviewed')?.addEventListener('click', () => {
+  const row = orderData.rows[orderDialogRowIndex];
   if (!row) return;
   markOrdersReviewed([orderRowKey(row)]);
+  closeOrderDialog();
   renderOrderData();
   showToast('Đã đánh dấu xử lý xong, đơn sẽ có ở Xuất dữ liệu.', 'success');
 });
 
-['#order-import-preview', '#order-preview'].forEach(selector => {
-  document.querySelector(selector)?.addEventListener('click', event => {
-    if (event.target.closest('button, a, input, select, textarea')) return;
-    const row = event.target.closest('tr[data-order-row-index]');
-    if (!row) return;
-    toggleOrderPhoneFilter(Number(row.dataset.orderRowIndex));
+// ===== Bốn tab theo ngày ở Xử lý dữ liệu =====
+//
+// Một ngày không gọi hết khách thì không ai phải chuyển đơn: qua nửa đêm đơn
+// tự nằm ở tab kế theo ngày đặt (cột Ngày). Tab cuối gom mọi đơn quá 3 ngày.
+const orderDayTabs = [...document.querySelectorAll('[data-order-day]')];
+const orderDayLastBucket = 3;
+const orderDayEmptyMessages = ['Không có đơn cần xử lý hôm nay', 'Không có đơn tồn từ hôm qua', 'Không có đơn tồn từ 2 ngày trước', 'Không có đơn tồn quá 3 ngày'];
+let activeOrderDay = 0;
+
+/** Tab của một dòng: số ngày từ ngày đặt ("16/09 07:52", không có năm) tới hôm nay, chặn ở 3. Dòng không có ngày tính là hôm nay. */
+function orderDayBucket(row, data = orderData, today = new Date()) {
+  const dateIndex = data.headers.findIndex(header => normalizeColumnName(header) === normalizeColumnName(orderDateHeader));
+  const match = dateIndex >= 0 ? String(row[dateIndex] || '').match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/) : null;
+  if (!match) return 0;
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let ordered = new Date(match[3] ? Number(match[3]) : today.getFullYear(), Number(match[2]) - 1, Number(match[1]));
+  // Không ghi năm mà rơi vào "sau hôm nay" thì là đơn của năm trước (qua Tết dương).
+  if (!match[3] && ordered > startOfToday) ordered = new Date(today.getFullYear() - 1, Number(match[2]) - 1, Number(match[1]));
+  const days = Math.round((startOfToday - ordered) / 86400000);
+  return Math.max(0, Math.min(orderDayLastBucket, days));
+}
+
+function setActiveOrderDay(day) {
+  activeOrderDay = Math.max(0, Math.min(orderDayLastBucket, Number(day) || 0));
+  orderDayTabs.forEach(tab => {
+    const active = Number(tab.dataset.orderDay) === activeOrderDay;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
   });
+}
+
+/** Số đơn (không phải số dòng) đang chờ ở mỗi tab, hiện thành huy hiệu nhỏ. */
+function renderOrderDayCounts(counts) {
+  orderDayTabs.forEach(tab => {
+    const badge = tab.querySelector('.order-day-count');
+    if (!badge) return;
+    const count = counts[Number(tab.dataset.orderDay)] || 0;
+    badge.textContent = String(count);
+    badge.hidden = count === 0;
+  });
+}
+
+orderDayTabs.forEach(tab => {
+  tab.onclick = () => { setActiveOrderDay(tab.dataset.orderDay); renderOrderData(); };
 });
 
 document.querySelector('#order-clear-table')?.addEventListener('click', () => {
@@ -5237,7 +5369,7 @@ function renderEmptyState(container, message) {
   container.innerHTML = `<div class="order-empty">${emptyBoxIcon}<small>${escapeHtml(message)}</small></div>`;
 }
 
-function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, rowNotes = new Map() } = {}) {
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, rowNotes = new Map() } = {}) {
   preview.classList.remove('is-empty');
   if (!rowEntries.length) {
     renderEmptyState(preview, emptyMessage);
@@ -5292,13 +5424,11 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   // The delete control leads the row so it stays visible when the wide table scrolls sideways.
   const actionCell = entry => deletable
     ? `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa dòng" aria-label="Xóa dòng">×</button></td>`
-    : reviewable
-      ? `<td class="preview-actions"><button type="button" class="order-row-reviewed" data-order-row-reviewed="${entry.index}" title="Đã xử lý xong, cho phép xuất kho">Đã xử lý</button></td>`
-      : '';
-  const head = (deletable || reviewable ? '<th class="preview-actions"></th>' : '')
+    : '';
+  const head = (deletable ? '<th class="preview-actions"></th>' : '')
     + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('');
   const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(entry.row[index] || '', rowNotes.get(entry.index)) : renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}</tr>`).join('');
-  preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : reviewable ? 'max-content ' : ''}${columnTemplate}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : ''}${columnTemplate}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderOrderData() {
@@ -5351,12 +5481,24 @@ function renderOrderData() {
           : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
     { deletable: true, rowNotes }
   );
-  // Xử lý dữ liệu: không tô màu dòng (lý do đã ghi ở cột Ghi chú), có nút
-  // "Đã xử lý"; ô tìm kiếm (và bấm dòng để lọc theo số) áp dụng cho cả bảng này.
+  // Xử lý dữ liệu: không tô màu dòng (lý do đã ghi ở cột Ghi chú), không có
+  // cột nút; bấm dòng mở chi tiết để đánh dấu "Đã xử lý". Đơn chia bốn tab theo
+  // ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.
+  const dayOfRow = new Map(processingRows.map(entry => [entry.index, orderDayBucket(entry.row)]));
+  const orderDayCounts = [0, 0, 0, 0];
+  const countedOrders = new Set();
+  processingRows.forEach(entry => {
+    const orderKey = `${dayOfRow.get(entry.index)}|${orderRowKey(entry.row)}`;
+    if (countedOrders.has(orderKey)) return;
+    countedOrders.add(orderKey);
+    orderDayCounts[dayOfRow.get(entry.index)] += 1;
+  });
+  renderOrderDayCounts(orderDayCounts);
+  const dayRows = processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay);
   renderOrderTable(
-    document.querySelector('#order-preview'), headers, searchValue ? processingRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processingRows,
-    'Không có đơn hàng cần xử lý', () => '',
-    { rowNotes, reviewable: true }
+    document.querySelector('#order-preview'), headers, searchValue ? dayRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : dayRows,
+    processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',
+    { rowNotes }
   );
 }
 

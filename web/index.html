@@ -250,6 +250,14 @@
       </section>
 
       <section class="order-stage hidden" data-order-panel="process">
+        <!-- Đơn cần xử lý chia theo ngày đặt: hôm nay chưa gọi được khách thì mai
+             đơn tự nằm ở tab kế, không ai phải chuyển tay. Tab cuối gom mọi đơn quá 3 ngày. -->
+        <div class="order-day-tabs" role="tablist" aria-label="Đơn cần xử lý theo ngày">
+          <button class="order-day-tab active" type="button" role="tab" aria-selected="true" data-order-day="0">Hôm nay<span class="order-day-count" hidden></span></button>
+          <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="1">Hôm qua<span class="order-day-count" hidden></span></button>
+          <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="2">2 ngày trước<span class="order-day-count" hidden></span></button>
+          <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="3">Quá 3 ngày<span class="order-day-count" hidden></span></button>
+        </div>
         <div class="data-preview" id="order-preview"></div>
       </section>
 
@@ -582,6 +590,16 @@
       </div>
     </section>
   </main>
+  <!-- Chi tiết một đơn cần xử lý: mọi đơn cùng số điện thoại hiện chung để nhân
+       viên gọi một lần; nút "Đã xử lý" nằm ở đây, bảng chính không còn cột nút. -->
+  <div class="channel-dialog hidden" id="order-dialog" role="dialog" aria-modal="true" aria-labelledby="order-dialog-title">
+    <div class="channel-dialog-backdrop" data-close-order-dialog></div>
+    <section class="channel-dialog-panel order-dialog-panel">
+      <div class="channel-dialog-head"><div><h2 id="order-dialog-title">Đơn hàng</h2><p id="order-dialog-subtitle"></p></div><button type="button" aria-label="Đóng" data-close-order-dialog>×</button></div>
+      <div class="order-dialog-preview" id="order-dialog-preview"></div>
+      <div class="channel-dialog-actions"><button class="channel-cancel-button" type="button" data-close-order-dialog>Đóng</button><button class="order-dialog-reviewed" id="order-dialog-reviewed" type="button" title="Đã xử lý xong, cho phép xuất kho">Đã xử lý</button></div>
+    </section>
+  </div>
   <div class="channel-dialog hidden" id="customer-dialog" role="dialog" aria-modal="true" aria-labelledby="customer-dialog-title">
     <div class="channel-dialog-backdrop" data-close-customer-dialog></div>
     <section class="channel-dialog-panel customer-dialog-panel">

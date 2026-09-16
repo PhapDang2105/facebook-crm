@@ -587,6 +587,12 @@
                 <p class="phone-warning-status" id="phone-warning-pos-status" role="status"></p>
               </div>
             </header>
+            <form class="phone-warning-form phone-warning-pos-form" id="phone-warning-pos-form">
+              <input id="phone-warning-pos-key" name="apiKey" placeholder="Dán khoá API của Pancake POS vào đây" autocomplete="off" spellcheck="false">
+              <button class="settings-save-button" type="submit">Kết nối Pancake POS</button>
+              <button class="price-master-add hidden" id="phone-warning-pos-disconnect" type="button">Ngắt kết nối</button>
+              <small class="phone-warning-pos-help">Lấy khoá trong POS: Cài đặt → Nâng cao → Kết nối bên thứ ba → Webhook/API → API KEY → Tạo. CRM tự tìm shop và lưu khoá trên máy chủ.</small>
+            </form>
             <form class="phone-warning-form" id="phone-warning-form">
               <input id="phone-warning-phone" name="phone" placeholder="Số điện thoại" inputmode="tel" required>
               <select id="phone-warning-level" name="level" aria-label="Mức cảnh báo">

@@ -492,17 +492,54 @@ async function loadPhoneWarningSettings() {
   try {
     const result = await readApiResponse(await fetch('/api/phone-warnings/manual'));
     phoneWarningsPosConfigured = Boolean(result.posConfigured);
-    const status = document.querySelector('#phone-warning-pos-status');
-    if (status) {
-      status.textContent = result.posConfigured
-        ? 'Pancake POS: đã kết nối, mỗi số được tra lịch sử đơn hoàn/huỷ và báo cáo bom hàng của POS (cache 24 giờ).'
-        : 'Pancake POS: chưa kết nối. Điền POS_API_KEY và POS_SHOP_ID trong .env trên máy chủ để tra tự động; hiện chỉ dùng danh sách dưới đây.';
-    }
+    renderPosStatus(result.pos || { configured: result.posConfigured });
     renderPhoneWarningRows(result.items || []);
   } catch (error) {
     showToast(error.message || 'Chưa tải được danh sách cảnh báo.', 'error');
   }
 }
+
+function renderPosStatus(pos) {
+  const status = document.querySelector('#phone-warning-pos-status');
+  const disconnect = document.querySelector('#phone-warning-pos-disconnect');
+  const keyInput = document.querySelector('#phone-warning-pos-key');
+  if (status) {
+    status.textContent = pos.configured
+      ? `Pancake POS: đã kết nối shop ${pos.shopName || ''} (ID ${pos.shopId}, khoá ${pos.keyHint}). Mỗi số được tra lịch sử đơn hoàn/huỷ và báo cáo bom hàng của POS, cache 24 giờ.`
+      : 'Pancake POS: chưa kết nối. Dán khoá API vào ô dưới để tra tự động; hiện chỉ dùng danh sách nhân viên đánh dấu.';
+  }
+  disconnect?.classList.toggle('hidden', !pos.configured || pos.source !== 'settings');
+  if (keyInput) keyInput.placeholder = pos.configured ? 'Dán khoá mới nếu muốn đổi' : 'Dán khoá API của Pancake POS vào đây';
+}
+
+document.querySelector('#phone-warning-pos-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const keyInput = document.querySelector('#phone-warning-pos-key');
+  const apiKey = keyInput?.value.trim() || '';
+  if (!apiKey) { showToast('Dán khoá API trước đã.', 'error'); return; }
+  try {
+    const result = await readApiResponse(await fetch('/api/phone-warnings/pos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey })
+    }));
+    keyInput.value = '';
+    phoneWarnings.clear();
+    renderPosStatus(result);
+    showToast(`Đã kết nối Pancake POS: ${result.shopName || result.shopId}.`, 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa kết nối được Pancake POS.', 'error');
+  }
+});
+
+document.querySelector('#phone-warning-pos-disconnect')?.addEventListener('click', async () => {
+  if (!window.confirm('Ngắt kết nối Pancake POS? Khoá đã lưu sẽ bị xóa khỏi máy chủ.')) return;
+  try {
+    const result = await readApiResponse(await fetch('/api/phone-warnings/pos', { method: 'DELETE' }));
+    phoneWarnings.clear();
+    renderPosStatus(result);
+  } catch (error) {
+    showToast(error.message || 'Chưa ngắt được.', 'error');
+  }
+});
 
 function renderPhoneWarningRows(items) {
   if (!items.length) {

@@ -16,7 +16,7 @@ import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloa
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder } from './landing-orders.mjs';
-import { attachPhoneWarning, listManualWarnings, lookupPhone, lookupPhones, posConfigured, removeManualWarning, setManualWarning } from './phone-warnings.mjs';
+import { attachPhoneWarning, connectPos, disconnectPos, listManualWarnings, lookupPhone, lookupPhones, posConfigured, posStatus, removeManualWarning, setManualWarning } from './phone-warnings.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -791,7 +791,20 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { posConfigured: posConfigured(), ...(await lookupPhone(phone, { force: url.searchParams.get('force') === '1' })) });
     }
     if (request.method === 'GET' && url.pathname === '/api/phone-warnings/manual') {
-      return sendJson(response, 200, { posConfigured: posConfigured(), items: await listManualWarnings() });
+      return sendJson(response, 200, { posConfigured: posConfigured(), pos: posStatus(), items: await listManualWarnings() });
+    }
+    // Kết nối Pancake POS bằng khoá nhân viên dán vào Cài đặt; khoá được kiểm
+    // tra với POS rồi lưu riêng trên máy chủ, giao diện chỉ thấy vài ký tự đầu/cuối.
+    if (request.method === 'POST' && url.pathname === '/api/phone-warnings/pos') {
+      const payload = await readBody(request);
+      try {
+        return sendJson(response, 200, await connectPos({ apiKey: payload.apiKey, shopId: payload.shopId }));
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
+    }
+    if (request.method === 'DELETE' && url.pathname === '/api/phone-warnings/pos') {
+      return sendJson(response, 200, await disconnectPos());
     }
     if (request.method === 'POST' && url.pathname === '/api/phone-warnings/manual') {
       const payload = await readBody(request);

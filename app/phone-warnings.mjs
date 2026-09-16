@@ -10,6 +10,7 @@
 // Kết quả được ghim vào đơn chatbot và đơn landing lúc tạo, và bảng Đơn hàng
 // tra lại mỗi lần mở để nhân viên gọi xác nhận trước khi giao.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { toLocalPhone } from './processing/customer-info.mjs';
@@ -132,8 +133,78 @@ export function posConfigured(config = posConfig()) {
   return Boolean(config.apiKey && config.shopId);
 }
 
+// Khoá POS: ưu tiên bản nhân viên dán trong Cài đặt → Cảnh báo SĐT (lưu ở
+// data/processed/pos-config.json, quyền 600), rồi mới đến biến môi trường.
+const posConfigPath = process.env.POS_CONFIG_PATH || path.join(projectRoot, 'data', 'processed', 'pos-config.json');
+let savedPosConfig = null;
+
+function loadSavedPosConfig() {
+  if (savedPosConfig) return savedPosConfig;
+  try {
+    const parsed = JSON.parse(readFileSyncSafe(posConfigPath));
+    savedPosConfig = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    savedPosConfig = {};
+  }
+  return savedPosConfig;
+}
+
+function readFileSyncSafe(filePath) {
+  // fs/promises is used elsewhere; the config is tiny and read on demand.
+  return readFileSync(filePath, 'utf8');
+}
+
 export function posConfig() {
-  return { apiKey: process.env.POS_API_KEY || '', shopId: process.env.POS_SHOP_ID || '', baseUrl: process.env.POS_API_BASE || 'https://pos.pages.fm/api/v1' };
+  const saved = loadSavedPosConfig();
+  return {
+    apiKey: saved.apiKey || process.env.POS_API_KEY || '',
+    shopId: String(saved.shopId || process.env.POS_SHOP_ID || ''),
+    shopName: saved.shopName || '',
+    baseUrl: process.env.POS_API_BASE || 'https://pos.pages.fm/api/v1'
+  };
+}
+
+/** Trạng thái để hiển thị: không bao giờ trả khoá đầy đủ. */
+export function posStatus() {
+  const config = posConfig();
+  return {
+    configured: posConfigured(config),
+    shopId: config.shopId,
+    shopName: config.shopName,
+    keyHint: config.apiKey ? `${config.apiKey.slice(0, 4)}…${config.apiKey.slice(-4)}` : '',
+    source: loadSavedPosConfig().apiKey ? 'settings' : (process.env.POS_API_KEY ? 'env' : '')
+  };
+}
+
+/** Kiểm tra khoá bằng GET /shops, chọn shop (theo id nếu đưa, không thì shop đầu tiên) rồi lưu. */
+export async function connectPos({ apiKey, shopId = '' }, { fetchImpl = fetch } = {}) {
+  const key = String(apiKey || '').trim();
+  if (!key) throw new Error('Chưa có khoá API.');
+  const base = posConfig().baseUrl.replace(/\/+$/, '');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  let payload;
+  try {
+    const response = await fetchImpl(`${base}/shops?api_key=${encodeURIComponent(key)}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.success === false) throw new Error(payload?.message || `Pancake POS từ chối khoá này (HTTP ${response.status}).`);
+  } finally {
+    clearTimeout(timer);
+  }
+  const shops = Array.isArray(payload?.shops) ? payload.shops : [];
+  if (!shops.length) throw new Error('Khoá hợp lệ nhưng không thấy shop nào. Tạo khoá trong đúng shop cần tra.');
+  const chosen = shops.find(shop => String(shop.id) === String(shopId)) || shops[0];
+  savedPosConfig = { apiKey: key, shopId: String(chosen.id), shopName: String(chosen.name || ''), savedAt: Date.now() };
+  await mkdir(path.dirname(posConfigPath), { recursive: true });
+  await writeFile(posConfigPath, JSON.stringify(savedPosConfig, null, 2), { encoding: 'utf8', mode: 0o600 });
+  return { ...posStatus(), shops: shops.map(shop => ({ id: String(shop.id), name: String(shop.name || '') })) };
+}
+
+export async function disconnectPos() {
+  savedPosConfig = {};
+  await mkdir(path.dirname(posConfigPath), { recursive: true });
+  await writeFile(posConfigPath, '{}', { encoding: 'utf8', mode: 0o600 });
+  return posStatus();
 }
 
 async function posRequest(pathname, params, config, fetchImpl) {

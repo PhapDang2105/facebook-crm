@@ -107,3 +107,22 @@ test('gắn cảnh báo vào đơn, không ném lỗi khi POS hỏng', async () 
   assert.equal(clean.phoneWarning, undefined);
   await removeManualWarning('0977000111');
 });
+
+test('kết nối POS bằng khoá dán vào Cài đặt: kiểm tra qua /shops, tự lấy shop, che khoá khi hiển thị', async () => {
+  process.env.POS_CONFIG_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'posconf-')), 'pos-config.json');
+  const { connectPos, disconnectPos, posStatus, posConfig } = await import('../app/phone-warnings.mjs?pos');
+  const fetchImpl = async url => {
+    assert.match(String(url), /\/shops\?api_key=abcd1234efgh$/);
+    return { ok: true, json: async () => ({ success: true, shops: [{ id: 6036602, name: 'Nông Sản Giọt Nắng' }] }) };
+  };
+  const result = await connectPos({ apiKey: 'abcd1234efgh' }, { fetchImpl });
+  assert.equal(result.configured, true);
+  assert.equal(result.shopId, '6036602');
+  assert.equal(result.shopName, 'Nông Sản Giọt Nắng');
+  assert.equal(result.keyHint, 'abcd…efgh');
+  assert.equal(posConfig().apiKey, 'abcd1234efgh');
+  await assert.rejects(connectPos({ apiKey: 'sai' }, { fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ success: false, message: 'Unauthorized' }) }) }), /Unauthorized/);
+  assert.equal(posStatus().configured, true, 'khoá sai không ghi đè khoá đang dùng');
+  await disconnectPos();
+  assert.equal(posStatus().configured, false);
+});

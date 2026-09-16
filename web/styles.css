@@ -2126,3 +2126,5 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .phone-warning-row { display: grid; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #f0f2f5; font-size: 13px; }
 .phone-warning-row button { width: 30px; height: 30px; border: 0; border-radius: 8px; background: #f2f4f7; color: #b42318; font-size: 16px; cursor: pointer; }
 .phone-warning-empty { padding: 24px 16px; color: #667085; font-size: 13px; }
+.phone-warning-pos-form { grid-template-columns: minmax(280px, 520px) auto auto; }
+.phone-warning-pos-form .phone-warning-pos-help { grid-column: 1 / -1; color: #667085; font-size: 12px; }

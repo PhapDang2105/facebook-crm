@@ -71,7 +71,8 @@ export function processingNotes(order) {
     notes.push('⚠ Chưa có địa chỉ giao hàng');
   } else {
     const missing = missingAddressParts(order);
-    if (missing.length) notes.push(`⚠ Địa chỉ thiếu ${missing.join(', ')}`);
+    if (missing.length === 4) notes.push(`⚠ Địa chỉ không đọc được tỉnh/quận/phường ("${address.slice(0, 60)}"), hỏi lại khách`);
+    else if (missing.length) notes.push(`⚠ Địa chỉ thiếu ${missing.join(', ')}`);
     if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên nhiều nơi, xác nhận lại với khách');
     else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('ℹ Địa chỉ đã sửa chính tả theo danh mục, đối chiếu khi gọi');
   }

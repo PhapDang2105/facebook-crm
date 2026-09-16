@@ -23,6 +23,8 @@ test('địa chỉ thiếu cấp, sản phẩm chưa khớp, địa chỉ trùng
   assert.deepEqual(notes, ['⚠ Địa chỉ thiếu số nhà/đường, phường/xã, quận/huyện', '⚠ Chưa chọn sản phẩm']);
   const ambiguous = processingNotes({ address: '12 Lê Lợi, Phường 1', street: '12 Lê Lợi', ward: 'Phường 1', district: '', province: 'TP Hồ Chí Minh', locationConfidence: 'ambiguous', products: [{ name: 'Combo lạ', sku: '', quantity: 1 }] });
   assert.deepEqual(ambiguous, ['⚠ Địa chỉ thiếu quận/huyện', '⚠ Địa chỉ trùng tên nhiều nơi, xác nhận lại với khách', '⚠ Sản phẩm chưa khớp danh mục: Combo lạ']);
+  const unreadable = processingNotes({ address: 'Thì địa chỉ trên rồi', street: '', ward: '', district: '', province: '', locationConfidence: 'none', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }] });
+  assert.deepEqual(unreadable, ['⚠ Địa chỉ không đọc được tỉnh/quận/phường ("Thì địa chỉ trên rồi"), hỏi lại khách']);
   // Đơn đủ: không có gì để ghi.
   assert.deepEqual(processingNotes({ address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', street: '12 Lê Lợi', ward: 'Phường Bến Nghé', district: 'Quận 1', province: 'TP Hồ Chí Minh', locationConfidence: 'exact', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }] }), []);
 });

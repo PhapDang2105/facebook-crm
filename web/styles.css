@@ -622,7 +622,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .order-stage:has(.is-empty) .is-empty { display: flex; flex: 1 1 auto; }
 .order-empty { display: grid; flex: 1 1 auto; justify-items: center; align-content: center; gap: 14px; color: #8c8c8c; font-size: 14px; }
 .order-empty img { width: 140px; height: 140px; opacity: .92; }
-.data-preview table { display: grid; grid-template-columns: var(--preview-template); column-gap: 58.5px; width: 100%; background: linear-gradient(to bottom, #fff 0 46.8px, #fe2c55 46.8px 48.6px, transparent 48.6px); border-collapse: collapse; }
+.data-preview table { display: grid; grid-template-columns: var(--preview-template); column-gap: 32px; width: 100%; background: linear-gradient(to bottom, #fff 0 46.8px, #fe2c55 46.8px 48.6px, transparent 48.6px); border-collapse: collapse; }
 .data-preview thead,
 .data-preview tbody,
 .data-preview tr { display: contents; }
@@ -644,8 +644,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .network-logo--viettel img { position: absolute; top: -10.8px; left: -3.6px; display: block; width: 46.8px; height: 47.7px; max-width: none; }
 .network-logo--vinaphone { position: relative; width: 68.4px; height: 13.5px; overflow: hidden; }
 .network-logo--vinaphone img { position: absolute; top: -26.1px; left: 0; display: block; width: 68.4px; height: 68.4px; max-width: none; }
-.data-preview th { position: sticky; top: 57.6px; z-index: 5; display: flex; align-items: center; box-sizing: border-box; height: 48.6px; padding-top: 0; padding-bottom: 2.7px; color: #111; background: #fff; border-bottom: 0; box-shadow: 29.7px 0 0 #fff, -29.7px 0 0 #fff; font-size: 14.4px; font-weight: 750; letter-spacing: .015em; }
-.data-preview th::after { position: absolute; right: -29.7px; bottom: 0; left: -29.7px; height: 1.8px; background: #fe2c55; content: ''; }
+.data-preview th { position: sticky; top: 57.6px; z-index: 5; display: flex; align-items: center; box-sizing: border-box; height: 48.6px; padding-top: 0; padding-bottom: 2.7px; color: #111; background: #fff; border-bottom: 0; box-shadow: 16px 0 0 #fff, -16px 0 0 #fff; font-size: 14.4px; font-weight: 750; letter-spacing: .015em; }
+.data-preview th::after { position: absolute; right: -16px; bottom: 0; left: -16px; height: 1.8px; background: #fe2c55; content: ''; }
 .data-preview th:first-child::before,
 .data-preview th:last-child::before { position: absolute; top: 0; bottom: 0; z-index: 1; width: 1.8px; background: linear-gradient(to bottom, #25f4ee, #fe2c55); content: ''; }
 .data-preview th:first-child::before { left: 0; }
@@ -2127,14 +2127,11 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .order-group-address { margin: 0 0 6px; color: #344054; font-size: 12.5px; }
 .order-group-item .note-cell { max-width: none; }
 .data-preview td.preview-note { white-space: normal; }
-.note-cell { display: flex; flex-wrap: wrap; gap: 4px; max-width: 460px; }
-.note-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.5; color: #344054; background: #f2f4f7; }
-.note-chip-warn { color: #b42318; background: #fee4e2; }
-.note-chip-pending { color: #b54708; background: #fef0c7; }
-.note-chip-auto { color: #175cd3; background: #d1e9ff; }
-.note-chip-phone { color: #b42318; background: #fee4e2; }
-.note-chip-info { color: #475467; background: #f2f4f7; }
-.note-plain { flex-basis: 100%; color: #344054; font-size: 11.7px; line-height: 1.45; }
+.note-cell { display: grid; gap: 1px; width: 100%; }
+.note-line { color: #344054; font-size: 11.7px; line-height: 1.45; overflow-wrap: anywhere; }
+.note-line-act { color: #1d2939; font-weight: 600; }
+.note-line-note { color: #475467; }
+.note-line-plain { color: #1d2939; }
 .phone-warning-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #b42318; background: #fee4e2; white-space: nowrap; }
 .phone-warning-badge.is-watch { color: #b54708; background: #fef0c7; }
 .phone-warning-badge.is-block { color: #fff; background: #b42318; }

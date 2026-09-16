@@ -44,6 +44,22 @@ function formatSubmittedAt(value) {
   return match ? `${match[4]}:${match[5]} ${match[3]}/${match[2]}` : text;
 }
 
+/** "Granola Túi Xanh 450g x2 (mặc định theo chiến dịch 1202…, 18 đơn)" → "… x2 (theo chiến dịch)". */
+function shortAutoFill(text) {
+  return String(text || '').replace(/\s*\(mặc định theo (chiến dịch|trang|mọi đơn)[^)]*\)/i, ' (theo $1)').trim();
+}
+
+const WARNING_SHORT = Object.freeze({ block: 'POS đã chặn số này', high: 'Hay bom hàng', watch: 'Từng không nhận hàng' });
+
+/** "Hay bom hàng: 5/12 đơn (42%), gọi xác nhận". */
+export function shortWarning(warning) {
+  const source = Array.isArray(warning.sources) && warning.sources.length ? String(warning.sources[0]) : '';
+  const numbers = source.match(/bom (\d+\/\d+ đơn(?: \(\d+%\))?)/i) || source.match(/hoàn\/huỷ (\d+) đơn/i);
+  const detail = numbers ? (numbers[0].startsWith('bom') ? numbers[1] : `hoàn ${numbers[1]} đơn ở shop`) : (source.includes('thẻ') ? 'POS gắn thẻ hoàn' : '');
+  const label = WARNING_SHORT[warning.level] || 'Số cần gọi xác nhận';
+  return `${label}${detail ? `: ${detail}` : ''}, gọi xác nhận`;
+}
+
 /** Cấp địa chỉ còn thiếu, theo thứ tự nhân viên hỏi khách. */
 export function missingAddressParts(order) {
   const parts = [];
@@ -68,32 +84,30 @@ export function processingNotes(order) {
   const hasProduct = products.some(item => item?.sku || item?.name);
   const unmatched = products.filter(item => item?.name && !item?.sku).map(item => item.name);
 
+  // Câu ngắn, đọc lướt được trong một ô: việc gì, thiếu gì, lấy từ đâu.
   if (landing.incomplete) {
     const when = formatSubmittedAt(landing.submittedAt);
-    notes.push(`⏳ Khách bỏ dở form${when ? ` lúc ${when}` : ''}, chưa bấm gửi: gọi xác nhận đơn`);
+    notes.push(`⏳ Bỏ dở form${when ? ` ${when}` : ''}, gọi xác nhận`);
   }
   if (noAddress) {
-    notes.push('⚠ Chưa có địa chỉ giao hàng');
+    notes.push('⚠ Chưa có địa chỉ');
   } else {
     const missing = missingAddressParts(order);
-    if (missing.length === 4) notes.push(`⚠ Địa chỉ không đọc được tỉnh/quận/phường ("${address.slice(0, 60)}"), hỏi lại khách`);
-    else if (missing.length) notes.push(`⚠ Địa chỉ thiếu ${missing.join(', ')}`);
-    if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên nhiều nơi, xác nhận lại với khách');
-    else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('ℹ Địa chỉ đã sửa chính tả theo danh mục, đối chiếu khi gọi');
+    if (missing.length === 4) notes.push(`⚠ Địa chỉ không rõ ba cấp: "${address.slice(0, 60)}"`);
+    else if (missing.length) notes.push(`⚠ Thiếu ${missing.join(', ')}`);
+    if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên nhiều nơi, hỏi lại');
+    else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('ℹ Địa chỉ đã sửa chính tả');
   }
   if (!hasProduct) notes.push('⚠ Chưa chọn sản phẩm');
-  else if (unmatched.length) notes.push(`⚠ Sản phẩm chưa khớp danh mục: ${unmatched.join(', ')}`);
+  else if (unmatched.length) notes.push(`⚠ Sản phẩm lạ: ${unmatched.join(', ')}`);
   else if (landing.needsProduct && landing.rawProducts && !landing.autoFilled?.product) notes.push(`⚠ Kiểm tra sản phẩm, form ghi: ${String(landing.rawProducts).slice(0, 120)}`);
 
   const autoFilled = landing.autoFilled || null;
-  if (autoFilled?.product) notes.push(`🤖 Tự điền sản phẩm: ${autoFilled.product}`);
+  if (autoFilled?.product) notes.push(`🤖 Tự điền SP: ${shortAutoFill(autoFilled.product)}`);
   if (autoFilled?.address) notes.push(`🤖 Tự điền địa chỉ: ${autoFilled.address}`);
 
   const warning = order.phoneWarning;
-  if (warning && warning.level && warning.level !== 'none') {
-    const detail = Array.isArray(warning.sources) && warning.sources.length ? `: ${warning.sources[0]}` : '';
-    notes.push(`☎ ${warning.label || 'Số điện thoại cần gọi xác nhận'}${detail}`);
-  }
+  if (warning && warning.level && warning.level !== 'none') notes.push(`☎ ${shortWarning(warning)}`);
 
   // Khách điền nhiều form thì mỗi form một đơn, không tự gộp; bảng Đơn hàng tự
   // ghi "cùng số điện thoại với đơn …" và bấm vào đơn thì hiện cả nhóm.

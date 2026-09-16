@@ -792,7 +792,19 @@ async function syncChatbotOrdersIntoTable() {
 // The columns the import table already understands, so a chatbot order lands
 // in the same pipeline as a Pancake export: check → process → export file.
 const orderSourceHeader = 'Nguồn đơn';
-const chatbotOrderHeaders = [orderSourceHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
+const orderDateHeader = 'Ngày';
+const chatbotOrderHeaders = [orderSourceHeader, orderDateHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
+
+/** Ngày khách gửi form (giờ Việt Nam) hoặc lúc đơn được tạo: "16/09 07:52". */
+function formatOrderDate(order) {
+  const submitted = String(order.landing?.submittedAt || '').match(/^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)/);
+  if (submitted) return `${submitted[3]}/${submitted[2]} ${submitted[4]}:${submitted[5]}`;
+  const createdAt = Number(order.createdAt);
+  if (!createdAt) return '';
+  const date = new Date(createdAt);
+  const pad = number => String(number).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 // Orders the system created itself (chatbot, landing page) carry a prefix in
 // the order-id column so the table can tell them from imported rows.
@@ -818,7 +830,7 @@ function chatbotOrderToRows(order) {
   // nhận, ℹ thông tin thêm) đứng trước lời khách; bảng tô màu theo ký hiệu.
   const flags = (Array.isArray(order.processingNotes) ? order.processingNotes : []).join(' · ');
   return products.map(item => [
-    sourceLabel, systemOrderRowId(order), order.name || order.conversationName || '', order.phone || '', order.address || '',
+    sourceLabel, formatOrderDate(order), systemOrderRowId(order), order.name || order.conversationName || '', order.phone || '', order.address || '',
     province, district, ward,
     item.name || '', item.sku || '', String(Number(item.quantity) || 1),
     // Unit price as the customer paid it (combo price from 2 units), so the
@@ -940,7 +952,7 @@ function renderOrderGroupDialog() {
     const noteHtml = renderNoteCell(cell(first, 'ghi chu'), [...new Set(notes)]);
     const isCurrent = group.id && group.id === orderGroupCurrentId;
     return `<article class="order-group-item${isCurrent ? ' is-current' : ''}">
-      <div class="order-group-item-head"><b>${escapeHtml(group.id || 'Dòng không mã')}</b><span class="order-group-source">${escapeHtml(cell(first, 'nguon don') || 'Import')}</span><span>${escapeHtml(cell(first, 'khach hang'))}</span>${isCurrent ? '<span class="order-group-source">đơn đang xem</span>' : ''}<button type="button" class="order-group-delete" data-order-group-delete="${group.entries[0].index}">Xóa đơn này</button></div>
+      <div class="order-group-item-head"><b>${escapeHtml(group.id || 'Dòng không mã')}</b><span class="order-group-source">${escapeHtml(cell(first, 'nguon don') || 'Import')}</span>${cell(first, 'ngay') ? `<span>${escapeHtml(cell(first, 'ngay'))}</span>` : ''}<span>${escapeHtml(cell(first, 'khach hang'))}</span>${isCurrent ? '<span class="order-group-source">đơn đang xem</span>' : ''}<button type="button" class="order-group-delete" data-order-group-delete="${group.entries[0].index}">Xóa đơn này</button></div>
       <ul class="order-group-lines">${lines}</ul>
       <p class="order-group-address">${street ? `${escapeHtml(street)}${levels ? `<br><small>${escapeHtml(levels)}</small>` : ''}` : 'Chưa có địa chỉ'}</p>
       ${noteHtml}
@@ -999,6 +1011,17 @@ document.querySelector('#order-clear-table')?.addEventListener('click', () => {
   showToast('Đã xóa bảng đơn hàng.', 'success');
 });
 
+/** Thêm cột Ngày (sau Nguồn đơn) cho bảng đã lưu từ trước khi có cột này; dòng cũ để trống. */
+function ensureOrderDateColumn(data) {
+  if (!data.headers.length) return data;
+  if (data.headers.some(header => normalizeColumnName(header) === normalizeColumnName(orderDateHeader))) return data;
+  const at = Math.min(1, data.headers.length);
+  return {
+    headers: [...data.headers.slice(0, at), orderDateHeader, ...data.headers.slice(at)],
+    rows: data.rows.map(row => [...row.slice(0, at), '', ...row.slice(at)])
+  };
+}
+
 /** Adds the Nguồn đơn column to a table that lacks it, tagging existing rows as imported. */
 function ensureOrderSourceColumn(data) {
   if (!data.headers.length) return data;
@@ -1007,7 +1030,7 @@ function ensureOrderSourceColumn(data) {
 }
 
 function mergeChatbotOrdersIntoTable(orders) {
-  orderData = ensureOrderSourceColumn(orderData);
+  orderData = ensureOrderDateColumn(ensureOrderSourceColumn(orderData));
   const headers = orderData.headers.length ? orderData.headers : chatbotOrderHeaders;
   const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
   const idColumn = index.get('ma don hang');
@@ -5058,6 +5081,16 @@ function getDuplicatePhoneRowIndexes(data = orderData) {
 
 // Ghi chú xử lý bắt đầu bằng một ký hiệu (cùng bộ với app/order-notes.mjs).
 const processingNoteMarkers = ['⚠', '⏳', '🤖', '☎'];
+
+/** "Hay bom hàng: 5/12 đơn (42%), gọi xác nhận" (cùng cách rút gọn với server). */
+function shortPhoneWarning(warning) {
+  const labels = { block: 'POS đã chặn số này', high: 'Hay bom hàng', watch: 'Từng không nhận hàng' };
+  const source = Array.isArray(warning.sources) && warning.sources.length ? String(warning.sources[0]) : '';
+  const bom = source.match(/bom (\d+\/\d+ đơn(?: \(\d+%\))?)/i);
+  const shop = source.match(/hoàn\/huỷ (\d+) đơn/i);
+  const detail = bom ? bom[1] : shop ? `hoàn ${shop[1]} đơn ở shop` : source.includes('thẻ') ? 'POS gắn thẻ hoàn' : '';
+  return `${labels[warning.level] || 'Số cần gọi xác nhận'}${detail ? `: ${detail}` : ''}, gọi xác nhận`;
+}
 function isProcessingNoteText(note) {
   return String(note || '').split(' · ').some(segment => processingNoteMarkers.some(marker => segment.trim().startsWith(marker)));
 }
@@ -5090,19 +5123,19 @@ function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicat
     const existing = noteIndex >= 0 ? String(row[noteIndex] || '') : '';
     const orderId = idIndex >= 0 ? String(row[idIndex] || '').trim() : '';
     const list = [];
-    if (duplicateRowIndexes?.has(index)) list.push('⚠ Trùng hoàn toàn với dòng khác (gửi hai lần), giữ một');
+    if (duplicateRowIndexes?.has(index)) list.push('⚠ Trùng dòng khác, giữ một');
     if (duplicatePhoneRowIndexes?.has(index) && phoneIndex >= 0) {
       const others = [...(ordersByPhone.get(normalizeWarningPhone(row[phoneIndex])) || [])].filter(id => id !== (orderId || `dòng ${index + 1}`));
-      list.push(`⚠ Cùng số điện thoại với đơn ${others.join(', ')}: bấm vào đơn để xem cả nhóm, hỏi khách có đặt thêm không`);
+      list.push(`⚠ Cùng SĐT với ${others.join(', ')}, bấm để xem nhóm`);
     }
-    if (addressIndex >= 0 && isInvalidOrderAddress(row[addressIndex])) list.push('⚠ Địa chỉ bắt đầu bằng GXN, sửa lại trước khi xuất');
+    if (addressIndex >= 0 && isInvalidOrderAddress(row[addressIndex])) list.push('⚠ Địa chỉ GXN, sửa lại');
     if (!isSystemOrderId(orderId)) {
       const missing = requiredColumns.filter(([name]) => { const i = column(name); return i >= 0 && !String(row[i] || '').trim(); }).map(([, label]) => label);
       if (missing.length) list.push(`⚠ Thiếu ${missing.join(', ')}`);
     }
     if (warningRowIndexes?.has(index) && !existing.includes('☎')) {
       const warning = phoneWarningFor(row[phoneIndex]);
-      if (warning?.label) list.push(`☎ ${warning.label}${warning.sources?.[0] ? `: ${warning.sources[0]}` : ''}`);
+      if (warning?.level) list.push(`☎ ${shortPhoneWarning(warning)}`);
     }
     if (list.length) notes.set(index, list);
   });
@@ -5148,10 +5181,11 @@ function renderNoteCell(value, extraNotes = []) {
   const machineFragment = /^(Quà|Nguồn|Chiến dịch|Đơn từ landing page|Tự điền, cần duyệt|Tạo tự động từ xác nhận|Kiểm tra sản phẩm|Thiếu địa chỉ|utm_[a-z]+=|address|link|IP|Order ID|select[ _-]?\d*|single ?choice[ _-]?\d*|multiple ?choice[ _-]?\d*)\s*[:=.]?\s*/i;
   const segments = [...(Array.isArray(extraNotes) ? extraNotes : []), ...String(value || '').split(/\r?\n| · /)].map(segment => segment.trim()).filter(segment => segment && !machineFragment.test(segment));
   if (!segments.length) return '';
-  const kind = segment => segment.startsWith('⚠') ? 'warn' : segment.startsWith('⏳') ? 'pending' : segment.startsWith('🤖') ? 'auto' : segment.startsWith('☎') ? 'phone' : segment.startsWith('ℹ') ? 'info' : '';
-  const chips = segments.filter(segment => kind(segment)).map(segment => `<span class="note-chip note-chip-${kind(segment)}">${escapeHtml(segment)}</span>`).join('');
-  const plain = segments.filter(segment => !kind(segment)).map(segment => escapeHtml(segment)).join(' · ');
-  return `<div class="note-cell">${chips}${plain ? `<span class="note-plain">${plain}</span>` : ''}</div>`;
+  // Mỗi ghi chú một dòng chữ thường, không biểu tượng, không nền màu; dòng cần
+  // làm ngay (thiếu, gọi xác nhận) chỉ đậm hơn một chút.
+  const kind = segment => /^[⚠☎]/.test(segment) ? 'act' : /^[⏳🤖ℹ]/.test(segment) ? 'note' : 'plain';
+  const strip = segment => segment.replace(/^[⚠⏳🤖☎ℹ]\s*/, '');
+  return `<div class="note-cell">${segments.map(segment => `<div class="note-line note-line-${kind(segment)}">${escapeHtml(strip(segment))}</div>`).join('')}</div>`;
 }
 
 function renderPreviewCell(value, header) {
@@ -5244,7 +5278,9 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const addressColumn = orderedColumns.find(column => column.name === 'dia chi');
   if (addressColumn) orderedColumns = orderedColumns.filter(column => column !== addressColumn).concat(addressColumn);
   const visibleIndexes = orderedColumns.map(column => column.index);
-  const columnTemplate = orderedColumns.map(column => column.name === 'dia chi' ? 'minmax(360px, 1fr)' : column.name === 'san pham' ? 'minmax(180px, max-content)' : column.name === 'ghi chu' ? 'minmax(260px, 460px)' : 'max-content').join(' ');
+  // Ghi chú và địa chỉ là hai cột chữ dài, chia nhau phần rộng còn lại; ghi chú
+  // rộng hơn vì gồm nhiều dòng việc cần làm.
+  const columnTemplate = orderedColumns.map(column => column.name === 'dia chi' ? 'minmax(240px, 1fr)' : column.name === 'san pham' ? 'minmax(180px, max-content)' : column.name === 'ghi chu' ? 'minmax(320px, 1.4fr)' : 'max-content').join(' ');
   const previewClassName = index => {
     const columnName = normalizeColumnName(headers[index]);
     return columnName === 'dia chi' ? 'preview-address'

@@ -332,7 +332,9 @@ export function normalizeLandingPayload(payload = {}) {
   }
   const total = money(pick(fields, 'total'));
   const coupon = pick(fields, 'coupon');
-  const note = [...pickAll(fields, 'note').map(field => field.value), ...choiceNotes, coupon ? `Mã giảm giá: ${coupon}` : ''].filter(Boolean).join(' · ');
+  // Ghi chú chỉ là lời khách và mã giảm giá; ô lựa chọn của form (select_1:
+  // "1 Túi Dùng Thử"...) là dữ liệu sản phẩm, không phải lời nhắn.
+  const note = [...pickAll(fields, 'note').map(field => field.value), coupon ? `Mã giảm giá: ${coupon}` : ''].filter(Boolean).join(' · ');
   // Không có mã đơn thì SĐT + thời điểm gửi form là khóa chống trùng khi Webcake gọi lại.
   const insertedAt = pick(fields, 'insertedAt');
   const externalId = pick(fields, 'id') || (insertedAt && phone ? `${phone}@${insertedAt}` : '');

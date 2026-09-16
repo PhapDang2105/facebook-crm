@@ -88,7 +88,7 @@ Kết nối Pancake POS ở **Cài đặt → Kênh** (dán khoá API một lầ
 
 ## Ghi chú xử lý trên bảng Đơn hàng
 
-`app/order-notes.mjs` dựng cho mỗi đơn chatbot/landing danh sách việc cần biết khi xử lý, trả về qua `/api/customer-orders` (`processingNotes`) và hiện thành nhãn màu ở cột **Ghi chú**: ⚠ thiếu địa chỉ (nêu đúng cấp thiếu), địa chỉ trùng tên nhiều nơi, chưa chọn/không khớp sản phẩm; ⏳ khách bỏ dở form (kèm giờ gửi); 🤖 máy đã tự điền gì từ đâu; ☎ số hay bom hàng (tính lại từ cache theo ngưỡng hiện hành, không dùng mức ghim lúc tạo đơn); ℹ khách gửi form mấy lần đã gộp, trang landing. Bảng tự thêm lý do chỉ bảng biết: trùng dòng, cùng số điện thoại với đơn nào, địa chỉ GXN, ô trống ở đơn nhập từ Pancake. Ô Ghi chú chỉ còn lời khách ("Khách ghi: …") và quà; cột này không đi vào file xuất kho.
+`app/order-notes.mjs` dựng cho mỗi đơn chatbot/landing danh sách việc cần biết khi xử lý, trả về qua `/api/customer-orders` (`processingNotes`) và hiện thành nhãn màu ở cột **Ghi chú**: ⚠ thiếu địa chỉ (nêu đúng cấp thiếu), địa chỉ trùng tên nhiều nơi, chưa chọn/không khớp sản phẩm; ⏳ khách bỏ dở form (kèm giờ gửi); 🤖 máy đã tự điền gì từ đâu; ☎ số hay bom hàng (tính lại từ cache theo ngưỡng hiện hành, không dùng mức ghim lúc tạo đơn); ℹ khách gửi form mấy lần đã gộp. Bảng tự thêm lý do chỉ bảng biết: trùng dòng, cùng số điện thoại với đơn nào, địa chỉ GXN, ô trống ở đơn nhập từ Pancake. Ô Ghi chú chỉ còn lời khách ("Khách ghi: …", không gồm ô lựa chọn của form hay quà tặng); cột này không đi vào file xuất kho.
 
 ## Đồng bộ đơn landing từ Pancake POS
 

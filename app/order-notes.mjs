@@ -13,7 +13,9 @@ export const NOTE_MARKERS = ['⚠', '⏳', '🤖', '☎', 'ℹ'];
 export const NOTE_SEPARATOR = ' · ';
 
 /** Các mẩu ghi chú máy tự thêm trước đây, không phải lời khách. */
-const SYSTEM_NOTE_FRAGMENTS = [/^Đơn từ landing page\.?$/i, /^Tự điền, cần duyệt trước khi giao$/i, /^Nguồn: /i, /^Chiến dịch: /i, /^utm_[a-z]+=/i];
+const SYSTEM_NOTE_FRAGMENTS = [/^Đơn từ landing page\.?$/i, /^Tự điền, cần duyệt trước khi giao$/i, /^Nguồn: /i, /^Chiến dịch: /i, /^utm_[a-z]+=/i,
+  // Ô lựa chọn của form Webcake từng bị ghi vào ghi chú ("select_1: 1 Túi Dùng Thử…").
+  /^(select|single ?choice|multiple ?choice|radio|checkbox|option|singlechoice|multiplechoice)[ _-]?\d*\s*:/i];
 
 export function isProcessingNote(segment) {
   const text = String(segment || '').trim();
@@ -93,9 +95,5 @@ export function processingNotes(order) {
   // formIds là các mã form gộp thêm (ngoài externalId); posIds gồm cả mã chính.
   const times = Math.max((landing.formIds || []).length + 1, (landing.posIds || []).length);
   if (times > 1) notes.push(`ℹ Khách gửi form ${times} lần, đã gộp thành một đơn`);
-  if (landing.page) {
-    const host = String(landing.page).replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-    if (host) notes.push(`ℹ Landing: ${host}`);
-  }
   return notes;
 }

@@ -71,7 +71,7 @@ test('payload đúng tên trường mặc định của Webcake', () => {
   assert.deepEqual(parsed.lines.map(line => [line.product, line.quantity]), [['Túi Xanh', '2']]);
   assert.match(parsed.note, /Giao buổi sáng/);
   assert.match(parsed.note, /Mã giảm giá: GIAM10/);
-  assert.match(parsed.note, /singlechoice: Combo 2 túi/);
+  assert.doesNotMatch(parsed.note, /singlechoice/, 'ô lựa chọn của form không phải lời khách');
   assert.match(parsed.campaign, /utm_term=granola/);
   assert.deepEqual(parsed.unknown, []);
   // "country" là quốc gia thật thì không thành tỉnh.

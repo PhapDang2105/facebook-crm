@@ -824,7 +824,7 @@ function chatbotOrderToRows(order) {
     // Unit price as the customer paid it (combo price from 2 units), so the
     // table's totals match the confirmation the customer received.
     String(Number(item.paidPrice) || Number(item.price) || 0),
-    [flags, order.gift ? `Quà: ${order.gift}` : '', order.note ? `Khách ghi: ${order.note}` : ''].filter(Boolean).join(' · ')
+    [flags, order.note ? `Khách ghi: ${order.note}` : ''].filter(Boolean).join(' · ')
   ]);
 }
 

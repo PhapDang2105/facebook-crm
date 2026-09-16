@@ -13,8 +13,7 @@ test('đơn bỏ dở thiếu địa chỉ, máy tự điền sản phẩm, số
     '⚠ Chưa có địa chỉ giao hàng',
     '🤖 Tự điền sản phẩm: Granola Túi Xanh 450g x2 (mặc định theo chiến dịch 1202, 18 đơn)',
     '☎ Hay bom hàng, gọi xác nhận trước khi giao: Hệ thống Pancake: bom 5/12 đơn (42%)',
-    'ℹ Khách gửi form 2 lần, đã gộp thành một đơn',
-    'ℹ Landing: granola.giotnang.vn'
+    'ℹ Khách gửi form 2 lần, đã gộp thành một đơn'
   ]);
 });
 
@@ -32,6 +31,7 @@ test('địa chỉ thiếu cấp, sản phẩm chưa khớp, địa chỉ trùng
 test('tách lời khách khỏi mẩu máy thêm; file xuất bỏ ghi chú xử lý', () => {
   assert.equal(customerNote({ note: 'Giao giờ hành chính · Nguồn: fb · Chiến dịch: 1202 · Tự điền, cần duyệt trước khi giao' }), 'Giao giờ hành chính');
   assert.equal(customerNote({ note: 'Đơn từ landing page.' }), '');
+  assert.equal(customerNote({ note: 'select_1: 1 Túi Dùng Thử: 1 Túi 174k + 15k phí ship, · Giao chiều' }), 'Giao chiều', 'ô lựa chọn form không phải lời khách');
   assert.equal(stripProcessingNotes('⏳ Khách bỏ dở form · ⚠ Chưa có địa chỉ giao hàng · Quà: 1 túi · Giao buổi sáng'), 'Quà: 1 túi · Giao buổi sáng');
   assert.equal(isProcessingNote('☎ Hay bom hàng'), true);
   assert.equal(isProcessingNote('Giao buổi sáng'), false);

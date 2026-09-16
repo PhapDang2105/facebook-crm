@@ -5214,11 +5214,11 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   // Bảng phải vừa khung (khung cắt phần thừa): cột chữ dài có trần và được
   // xuống dòng, phần rộng còn lại chia cho Ghi chú và Địa chỉ.
   const templates = {
-    'dia chi': 'minmax(220px, 1fr)',
-    'ghi chu': 'minmax(220px, 1.2fr)',
-    'san pham': 'minmax(150px, 200px)',
-    'khach hang': 'minmax(110px, 170px)',
-    'so dien thoai': 'minmax(110px, 150px)'
+    'dia chi': 'minmax(200px, 1fr)',
+    'ghi chu': 'minmax(200px, 1.2fr)',
+    'san pham': 'minmax(140px, 200px)',
+    'khach hang': 'minmax(100px, 170px)',
+    'so dien thoai': 'minmax(100px, 150px)'
   };
   const columnTemplate = orderedColumns.map(column => templates[column.name] || 'max-content').join(' ');
   const previewClassName = index => {

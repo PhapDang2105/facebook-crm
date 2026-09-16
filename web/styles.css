@@ -613,7 +613,9 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .export-button:hover:not(:disabled) { background: #333; }
 .export-button:disabled { color: #999; background: #e6e6e6; cursor: not-allowed; }
 
-.data-preview { position: relative; flex: none; height: auto; overflow: clip; overflow-x: auto; border: 0.9px solid #111; border-radius: 9px; }
+/* Giữ overflow: clip (không phải auto): khung không được thành vùng cuộn, nếu
+   không tiêu đề dính sẽ bám vào khung và các dòng lòi lên trên tiêu đề. */
+.data-preview { position: relative; flex: none; height: auto; overflow: clip; border: 0.9px solid #111; border-radius: 9px; }
 .data-preview::before { position: absolute; top: 0; right: 0; left: 0; z-index: 7; height: 1.8px; background: linear-gradient(90deg, #25f4ee, #fe2c55); pointer-events: none; content: ''; }
 .data-preview > p { margin: 0; padding: 27px; color: #687080; text-align: center; }
 .data-preview.is-empty, .export-preview.is-empty { border: 0; overflow: visible; margin-top: 0; }
@@ -622,7 +624,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .order-stage:has(.is-empty) .is-empty { display: flex; flex: 1 1 auto; }
 .order-empty { display: grid; flex: 1 1 auto; justify-items: center; align-content: center; gap: 14px; color: #8c8c8c; font-size: 14px; }
 .order-empty img { width: 140px; height: 140px; opacity: .92; }
-.data-preview table { display: grid; grid-template-columns: var(--preview-template); column-gap: 24px; width: 100%; background: linear-gradient(to bottom, #fff 0 46.8px, #fe2c55 46.8px 48.6px, transparent 48.6px); border-collapse: collapse; }
+.data-preview table { display: grid; grid-template-columns: var(--preview-template); column-gap: 16px; width: 100%; background: linear-gradient(to bottom, #fff 0 46.8px, #fe2c55 46.8px 48.6px, transparent 48.6px); border-collapse: collapse; }
 .data-preview thead,
 .data-preview tbody,
 .data-preview tr { display: contents; }
@@ -647,8 +649,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .network-logo--viettel img { position: absolute; top: -10.8px; left: -3.6px; display: block; width: 46.8px; height: 47.7px; max-width: none; }
 .network-logo--vinaphone { position: relative; width: 68.4px; height: 13.5px; overflow: hidden; }
 .network-logo--vinaphone img { position: absolute; top: -26.1px; left: 0; display: block; width: 68.4px; height: 68.4px; max-width: none; }
-.data-preview th { position: sticky; top: 57.6px; z-index: 5; display: flex; align-items: center; box-sizing: border-box; height: 48.6px; padding-top: 0; padding-bottom: 2.7px; color: #111; background: #fff; border-bottom: 0; box-shadow: 16px 0 0 #fff, -16px 0 0 #fff; font-size: 14.4px; font-weight: 750; letter-spacing: .015em; }
-.data-preview th::after { position: absolute; right: -16px; bottom: 0; left: -16px; height: 1.8px; background: #fe2c55; content: ''; }
+.data-preview th { position: sticky; top: 57.6px; z-index: 5; display: flex; align-items: center; box-sizing: border-box; height: 48.6px; padding-top: 0; padding-bottom: 2.7px; color: #111; background: #fff; border-bottom: 0; box-shadow: 8px 0 0 #fff, -8px 0 0 #fff; font-size: 14.4px; font-weight: 750; letter-spacing: .015em; }
+.data-preview th::after { position: absolute; right: -8px; bottom: 0; left: -8px; height: 1.8px; background: #fe2c55; content: ''; }
 .data-preview th:first-child::before,
 .data-preview th:last-child::before { position: absolute; top: 0; bottom: 0; z-index: 1; width: 1.8px; background: linear-gradient(to bottom, #25f4ee, #fe2c55); content: ''; }
 .data-preview th:first-child::before { left: 0; }

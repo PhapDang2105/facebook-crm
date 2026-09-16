@@ -5114,8 +5114,9 @@ function renderNoteCell(value, extraNotes = []) {
   if (!segments.length) return '';
   // Mỗi ghi chú một dòng chữ thường, không biểu tượng, không nền màu; dòng cần
   // làm ngay (thiếu, gọi xác nhận) chỉ đậm hơn một chút.
-  const kind = segment => /^[⚠☎]/.test(segment) ? 'act' : /^[⏳🤖ℹ]/.test(segment) ? 'note' : 'plain';
-  const strip = segment => segment.replace(/^[⚠⏳🤖☎ℹ]\s*/, '');
+  // Cờ `u`: 🤖 là cặp ký tự đôi, thiếu cờ này regex chỉ bỏ nửa đầu và để lại "�".
+  const kind = segment => /^[⚠☎]/u.test(segment) ? 'act' : /^[⏳🤖ℹ]/u.test(segment) ? 'note' : 'plain';
+  const strip = segment => segment.replace(/^[⚠⏳🤖☎ℹ]\s*/u, '');
   return `<div class="note-cell">${segments.map(segment => `<div class="note-line note-line-${kind(segment)}">${escapeHtml(strip(segment))}</div>`).join('')}</div>`;
 }
 

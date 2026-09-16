@@ -929,6 +929,19 @@ function toggleOrderPhoneFilter(rowIndex) {
   renderOrderData();
 }
 
+// "Đã xử lý" ở Xử lý dữ liệu: đánh dấu cả đơn (mọi dòng cùng mã), đơn rời
+// bảng này và được phép sang Xuất dữ liệu.
+document.querySelector('#order-preview')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-order-row-reviewed]');
+  if (!button) return;
+  event.stopPropagation();
+  const row = orderData.rows[Number(button.dataset.orderRowReviewed)];
+  if (!row) return;
+  markOrdersReviewed([orderRowKey(row)]);
+  renderOrderData();
+  showToast('Đã đánh dấu xử lý xong, đơn sẽ có ở Xuất dữ liệu.', 'success');
+});
+
 ['#order-import-preview', '#order-preview'].forEach(selector => {
   document.querySelector(selector)?.addEventListener('click', event => {
     if (event.target.closest('button, a, input, select, textarea')) return;
@@ -5101,19 +5114,50 @@ function getReviewRowIndexes(data = orderData) {
   return flagged;
 }
 
+// ===== Đánh dấu "Đã xử lý" =====
+//
+// Dòng cần xử lý (thiếu thông tin, trùng số, bom hàng, tự điền...) nằm ở Xử lý
+// dữ liệu và KHÔNG được đưa sang Xuất dữ liệu cho tới khi nhân viên bấm "Đã xử
+// lý". Dấu này lưu cùng chỗ với bảng (trình duyệt), theo mã đơn.
+const reviewedOrdersKey = 'crm-orders-reviewed';
+function orderRowKey(row, data = orderData) {
+  const idIndex = data.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  const id = idIndex >= 0 ? String(row[idIndex] || '').trim() : '';
+  return id ? `id:${id}` : `row:${JSON.stringify(row)}`;
+}
+function readReviewedOrders() {
+  try { return new Set(JSON.parse(localStorage.getItem(reviewedOrdersKey) || '[]')); } catch { return new Set(); }
+}
+function markOrdersReviewed(keys) {
+  const reviewed = readReviewedOrders();
+  keys.forEach(key => reviewed.add(key));
+  try { localStorage.setItem(reviewedOrdersKey, JSON.stringify([...reviewed])); } catch {}
+}
+function isRowReviewed(row, data = orderData, reviewed = readReviewedOrders()) {
+  return reviewed.has(orderRowKey(row, data));
+}
+
+/** Bảng chỉ gồm dòng sạch hoặc đã xử lý: đây là phần được xuất kho. */
+function exportableOrderData(data = orderData) {
+  if (!data.rows.length) return data;
+  const pending = new Set(getOrdersNeedingProcessing(data).map(entry => entry.index));
+  return { headers: data.headers, rows: data.rows.filter((row, index) => !pending.has(index)) };
+}
+
 function getOrdersNeedingProcessing(data = orderData) {
   const invalidRowIndexes = new Set(getInvalidOrderRows(data).map(entry => entry.index));
   const duplicateRowIndexes = getDuplicateOrderRowIndexes(data);
   const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes(data);
   const warningRowIndexes = getPhoneWarningRowIndexes(data);
   const reviewRowIndexes = getReviewRowIndexes(data);
+  const reviewed = readReviewedOrders();
   return data.rows
     .map((row, index) => ({ row, index }))
-    .filter(({ index }) => invalidRowIndexes.has(index)
+    .filter(({ row, index }) => !isRowReviewed(row, data, reviewed) && (invalidRowIndexes.has(index)
       || duplicateRowIndexes.has(index)
       || duplicatePhoneRowIndexes.has(index)
       || warningRowIndexes.has(index)
-      || reviewRowIndexes.has(index));
+      || reviewRowIndexes.has(index)));
 }
 
 function isInvalidOrderAddress(value) {
@@ -5195,7 +5239,7 @@ function renderEmptyState(container, message) {
   container.innerHTML = `<div class="order-empty">${emptyBoxIcon}<small>${escapeHtml(message)}</small></div>`;
 }
 
-function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, rowNotes = new Map() } = {}) {
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, rowNotes = new Map() } = {}) {
   preview.classList.remove('is-empty');
   if (!rowEntries.length) {
     renderEmptyState(preview, emptyMessage);
@@ -5248,10 +5292,15 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     ? `${previewClassName(index)} preview-product-heading`.trim()
     : previewClassName(index);
   // The delete control leads the row so it stays visible when the wide table scrolls sideways.
-  const head = (deletable ? '<th class="preview-actions"></th>' : '')
+  const actionCell = entry => deletable
+    ? `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa dòng" aria-label="Xóa dòng">×</button></td>`
+    : reviewable
+      ? `<td class="preview-actions"><button type="button" class="order-row-reviewed" data-order-row-reviewed="${entry.index}" title="Đã xử lý xong, cho phép xuất kho">Đã xử lý</button></td>`
+      : '';
+  const head = (deletable || reviewable ? '<th class="preview-actions"></th>' : '')
     + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('');
-  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${deletable ? `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa dòng" aria-label="Xóa dòng">×</button></td>` : ''}${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(entry.row[index] || '', rowNotes.get(entry.index)) : renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}</tr>`).join('');
-  preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : ''}${columnTemplate}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(entry.row[index] || '', rowNotes.get(entry.index)) : renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}</tr>`).join('');
+  preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : reviewable ? 'max-content ' : ''}${columnTemplate}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderOrderData() {
@@ -5269,11 +5318,12 @@ function renderOrderData() {
   const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes();
   const warningRowIndexes = getPhoneWarningRowIndexes();
   const reviewRowIndexes = getReviewRowIndexes();
-  const processingRows = allRows.filter(({ index }) => invalidRowIndexes.has(index)
+  const reviewed = readReviewedOrders();
+  const processingRows = allRows.filter(({ row, index }) => !isRowReviewed(row, orderData, reviewed) && (invalidRowIndexes.has(index)
     || duplicateRowIndexes.has(index)
     || duplicatePhoneRowIndexes.has(index)
     || warningRowIndexes.has(index)
-    || reviewRowIndexes.has(index));
+    || reviewRowIndexes.has(index)));
   const processingRowIndexes = new Set(processingRows.map(entry => entry.index));
   const rowNotes = getRowProcessingNotes(orderData, { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes });
   const filterValue = orderFilter?.value || 'all';
@@ -5303,15 +5353,12 @@ function renderOrderData() {
           : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
     { deletable: true, rowNotes }
   );
+  // Xử lý dữ liệu: không tô màu dòng (lý do đã ghi ở cột Ghi chú), có nút
+  // "Đã xử lý"; ô tìm kiếm (và bấm dòng để lọc theo số) áp dụng cho cả bảng này.
   renderOrderTable(
-    // Ô tìm kiếm (và bấm vào dòng để lọc theo số) áp dụng cho cả bảng Xử lý dữ liệu.
     document.querySelector('#order-preview'), headers, searchValue ? processingRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processingRows,
-    'Không có đơn hàng cần xử lý', ({ index }) => warningRowIndexes.get(index) && warningRowIndexes.get(index) !== 'watch' ? 'order-row-phone-warning'
-      : warningRowIndexes.get(index) === 'watch' ? 'order-row-phone-watch'
-        : duplicateRowIndexes.has(index)
-          ? 'order-row-duplicate'
-          : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : 'order-row-invalid',
-    { rowNotes }
+    'Không có đơn hàng cần xử lý', () => '',
+    { rowNotes, reviewable: true }
   );
 }
 
@@ -5341,12 +5388,14 @@ let exportRowsCache = { key: '', rows: [] };
 
 async function fetchExportRows() {
   if (!orderData.rows.length) return [];
-  const key = JSON.stringify(orderData);
+  // Chỉ đơn sạch hoặc đã bấm "Đã xử lý" mới sang Xuất dữ liệu.
+  const exportable = exportableOrderData();
+  const key = JSON.stringify(exportable);
   if (exportRowsCache.key === key) return exportRowsCache.rows;
   const result = await readApiResponse(await fetch('/api/orders/export/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orderData })
+    body: JSON.stringify({ orderData: exportable })
   }));
   exportRowsCache = { key, rows: Array.isArray(result.rows) ? result.rows : [] };
   return exportRowsCache.rows;
@@ -6462,7 +6511,7 @@ orderExport.onclick = async () => {
   const originalLabel = orderExport.textContent;
   orderExport.textContent = 'Đang xuất...';
   try {
-    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData }) });
+    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportableOrderData() }) });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       throw new Error(detail.error || 'Không thể tạo file Excel.');

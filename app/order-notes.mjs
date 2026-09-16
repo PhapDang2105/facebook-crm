@@ -96,7 +96,7 @@ export function processingNotes(order) {
     if (missing.length === 4) notes.push(`⚠ Địa chỉ không rõ ba cấp: "${address.slice(0, 60)}"`);
     else if (missing.length) notes.push(`⚠ Thiếu ${missing.join(', ')}`);
     if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên nhiều nơi, hỏi lại');
-    else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('ℹ Địa chỉ đã sửa chính tả');
+    else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('⚠ Địa chỉ đã sửa chính tả, đối chiếu lại');
   }
   if (!hasProduct) notes.push('⚠ Chưa chọn sản phẩm');
   else if (unmatched.length) notes.push(`⚠ Sản phẩm lạ: ${unmatched.join(', ')}`);

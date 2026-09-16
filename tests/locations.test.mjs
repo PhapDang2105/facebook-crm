@@ -9,6 +9,7 @@ import {
   loadLocationIndex,
   mergeAddressFragment,
   normalizeExportLocation,
+  mergedProvinceMembers,
   resolveAddress,
   streetForDisplay
 } from '../app/processing/locations.mjs';
@@ -95,6 +96,24 @@ test('phần đường phố để hiển thị: cắt tên cấp khách gõ dí
   assert.equal(streetForDisplay('Ngách 15 phường 15, Phường 15, Quận 10, TP.HCM'), 'Ngách 15');
   assert.equal(streetForDisplay('12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM'), '12 Nguyễn Huệ');
   assert.equal(streetForDisplay(''), '');
+});
+
+test('tỉnh mới sau sáp nhập 2025: phường/quận không có trong tỉnh ghi thì tìm ở tỉnh cũ đã nhập vào, ghi theo tên cũ của kho', () => {
+  const merged = resolveAddress('234/51 khu phố đông an phường tân đông hiệp , Phường Tân Đông Hiệp, Hồ Chí Minh');
+  assert.deepEqual(names(merged), ['Bình Dương', 'Thành phố Dĩ An', 'Phường Tân Đông Hiệp']);
+  assert.equal(merged.confidence, 'exact');
+  assert.deepEqual(names(resolveAddress('Dĩ An, Hồ Chí Minh')), ['Bình Dương', 'Thành phố Dĩ An', '']);
+  // Chơn Thành nay thuộc Đồng Nai; danh mục kho chưa có phường Hưng Long (lập sau) nên chỉ ra được hai cấp.
+  assert.deepEqual(names(resolveAddress('Phường Hưng Long, Thị xã Chơn Thành, Đồng Nai')), ['Bình Phước', 'Huyện Chơn Thành', '']);
+  // Phường trùng tên ở nhiều nơi trong tỉnh cũ, hay có sẵn trong tỉnh mới, thì không đoán.
+  assert.equal(resolveAddress('Phường 1, Hồ Chí Minh').district, null);
+  assert.deepEqual(names(resolveAddress('Phường Bến Nghé, Quận 1, Hồ Chí Minh')), ['TP Hồ Chí Minh', 'Quận 1', 'Phường Bến Nghé']);
+  // Mọi tên trong bảng sáp nhập đều có trong danh mục.
+  const index = loadLocationIndex();
+  for (const province of index.provinces) {
+    for (const member of mergedProvinceMembers(province, index)) assert.ok(member.code, `${province.name} → ${member.name}`);
+  }
+  assert.equal(mergedProvinceMembers(index.provinces.find(province => province.bare === 'ho chi minh'), index).length, 2);
 });
 
 test('thành phố trực thuộc tỉnh trùng tên tỉnh', () => {

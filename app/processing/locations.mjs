@@ -48,6 +48,43 @@ const DISTRICT_PREFIXES = ['thanh pho', 'thi xa', 'quan', 'huyen', 'tp', 'tx', '
 const WARD_PREFIXES = ['thi tran', 'phuong', 'xa', 'tt', 'p', 'x'];
 const ALL_PREFIXES = [...new Set([...PROVINCE_PREFIXES, ...DISTRICT_PREFIXES, ...WARD_PREFIXES])].sort((a, b) => b.length - a.length);
 
+// Sáp nhập tỉnh 1/7/2025: khách ghi tỉnh mới ("Phường Tân Đông Hiệp, Hồ Chí
+// Minh") nhưng danh mục kho vẫn là 63 tỉnh cũ. Tỉnh mới → các tỉnh cũ đã nhập
+// vào, để khi không tìm thấy phường/quận trong tỉnh ghi trên địa chỉ thì tìm
+// tiếp ở tỉnh cũ và ghi theo tên cũ mà kho đang dùng. Khoá là tên tỉnh đã
+// chuẩn hoá, bỏ tiền tố.
+const MERGED_PROVINCES = {
+  'ho chi minh': ['binh duong', 'ba ria vung tau'],
+  'tuyen quang': ['ha giang'],
+  'lao cai': ['yen bai'],
+  'thai nguyen': ['bac kan'],
+  'phu tho': ['vinh phuc', 'hoa binh'],
+  'bac ninh': ['bac giang'],
+  'hung yen': ['thai binh'],
+  'hai phong': ['hai duong'],
+  'ninh binh': ['ha nam', 'nam dinh'],
+  'quang tri': ['quang binh'],
+  'da nang': ['quang nam'],
+  'quang ngai': ['kon tum'],
+  'gia lai': ['binh dinh'],
+  'khanh hoa': ['ninh thuan'],
+  'lam dong': ['dak nong', 'binh thuan'],
+  'dak lak': ['phu yen'],
+  'dong nai': ['binh phuoc'],
+  'tay ninh': ['long an'],
+  'can tho': ['soc trang', 'hau giang'],
+  'vinh long': ['ben tre', 'tra vinh'],
+  'dong thap': ['tien giang'],
+  'ca mau': ['bac lieu'],
+  'an giang': ['kien giang']
+};
+
+/** Các tỉnh cũ đã nhập vào tỉnh này (theo danh mục), rỗng nếu tỉnh không nhận thêm ai. */
+export function mergedProvinceMembers(province, locationIndex = loadLocationIndex()) {
+  const members = MERGED_PROVINCES[province?.bare] || [];
+  return members.map(bare => locationIndex.provinces.find(entry => entry.bare === bare)).filter(Boolean);
+}
+
 function stripPrefix(key, prefixes) {
   for (const prefix of prefixes) {
     if (key === prefix) return '';
@@ -567,6 +604,34 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
       if (owners.size === 1 && !hit.ambiguous) { wardHit = hit; ward = hit.entry; district = ward.district; }
       else if (owners.size === 1) { district = [...owners][0]; markAmbiguous('ward', hit); }
       else markAmbiguous('district', { ambiguous: [...owners] });
+    }
+  }
+  // 4b. Tỉnh mới sau sáp nhập ("Phường Tân Đông Hiệp, Hồ Chí Minh"): quận hay
+  // phường không có trong tỉnh ghi trên địa chỉ nhưng có ở đúng một tỉnh cũ đã
+  // nhập vào → chuyển sang tỉnh cũ, đúng tên ba cấp mà kho đang dùng.
+  if (!district && !result.ambiguous) {
+    const found = [];
+    for (const member of mergedProvinceMembers(province, locationIndex)) {
+      const memberDistricts = [...member.districts.values()];
+      const districtInMember = findBest(norm, expanded, memberDistricts, { limit: districtLimit, ownPrefixes: DISTRICT_PREFIXES, foreignPrefixes: WARD_PREFIXES, fullKeys });
+      if (districtInMember && !districtInMember.ambiguous
+        && (districtInMember.prefixed || segments.some(segment => stripPrefix(segment.key, DISTRICT_PREFIXES) === districtInMember.entry.bare))) {
+        found.push({ province: member, district: districtInMember.entry, districtHit: districtInMember });
+        continue;
+      }
+      const wardInMember = findBest(norm, expanded, memberDistricts.flatMap(entry => [...entry.wards.values()]), wardSearchOptions({ limit: districtLimit }));
+      if (wardInMember && !wardInMember.ambiguous
+        && (wardInMember.prefixed || segments.some(segment => stripPrefix(segment.key, WARD_PREFIXES) === wardInMember.entry.bare))) {
+        found.push({ province: member, district: wardInMember.entry.district, ward: wardInMember.entry, wardHit: wardInMember });
+      }
+    }
+    if (found.length === 1) {
+      const [hit] = found;
+      province = hit.province;
+      result.province = { code: province.code, name: province.name };
+      district = hit.district;
+      districtHit = hit.districtHit || null;
+      if (hit.ward) { ward = hit.ward; wardHit = hit.wardHit; }
     }
   }
   if (!district && !result.ambiguous) {

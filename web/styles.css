@@ -697,6 +697,10 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .export-preview .export-group-row th { height:25.2px; text-align:center; }
 .export-preview tbody td { background:#fff; }
 .export-preview tr:last-child td { border-bottom: 0; }
+/* Vạch ngăn giữa các nhóm cột màu TikTok: tiêu đề dải xanh ngọc → đỏ, thân bảng đỏ đặc. */
+.export-preview td.export-group-end { position: relative; }
+.export-preview .export-group-end::after { position: absolute; top: 0; right: -0.9px; bottom: 0; width: 1.8px; background: #fe2c55; content: ''; }
+.export-preview th.export-group-end::after { background: linear-gradient(to bottom, #25f4ee, #fe2c55); }
 
 .app-toast {
   position: fixed;

@@ -5686,16 +5686,21 @@ async function renderExportPreview() {
     renderEmptyState(preview, 'Chưa có dữ liệu xuất');
     return;
   }
-  const groupHead = exportPreviewGroups.map(group => `<th class="export-fill-${group.fill}" colspan="${group.span}"${group.rowspan ? ` rowspan="${group.rowspan}"` : ''}>${escapeHtml(group.label)}</th>`).join('');
-  const columnHead = exportPreviewIndexes.filter(index => index !== 0).map(index => {
+  // Vạch ngăn giữa các nhóm cột (STT | đơn hàng | mua hàng | giao hàng) tô màu
+  // TikTok để dò dòng dễ hơn: ô cuối của mỗi nhóm (trừ nhóm cuối) mang lớp riêng.
+  const groupEndPositions = new Set();
+  exportPreviewGroups.slice(0, -1).reduce((position, group) => { groupEndPositions.add(position + group.span - 1); return position + group.span; }, 0);
+  const groupEndClass = position => (groupEndPositions.has(position) ? ' export-group-end' : '');
+  const groupHead = exportPreviewGroups.map((group, order) => `<th class="export-fill-${group.fill}${order < exportPreviewGroups.length - 1 ? ' export-group-end' : ''}" colspan="${group.span}"${group.rowspan ? ` rowspan="${group.rowspan}"` : ''}>${escapeHtml(group.label)}</th>`).join('');
+  const columnHead = exportPreviewIndexes.map((index, position) => ({ index, position })).filter(({ index }) => index !== 0).map(({ index, position }) => {
     const label = index === 28 ? 'Thuế (Tỷ lệ)' : exportColumns[index];
-    return `<th class="export-fill-${exportHeaderFills[index]}">${escapeHtml(label)}</th>`;
+    return `<th class="export-fill-${exportHeaderFills[index]}${groupEndClass(position)}">${escapeHtml(label)}</th>`;
   }).join('');
   const tableWidth = exportPreviewWidths.reduce((total, width) => total + width, 0);
   const columns = exportPreviewWidths.map(width => `<col style="width:${width}px">`).join('');
   // Cột Địa chỉ chỉ hiện số nhà/đường (ba cấp có cột riêng); file xuất vẫn đầy đủ.
   const cell = (row, rowIndex, index) => index === 35 ? (streets[rowIndex] ?? row[index]) : row[index];
-  const body = rows.map((row, rowIndex) => `<tr>${exportPreviewIndexes.map(index => `<td>${escapeHtml(cell(row, rowIndex, index))}</td>`).join('')}</tr>`).join('');
+  const body = rows.map((row, rowIndex) => `<tr>${exportPreviewIndexes.map((index, position) => `<td class="${groupEndClass(position).trim()}">${escapeHtml(cell(row, rowIndex, index))}</td>`).join('')}</tr>`).join('');
   preview.innerHTML = `<table class="export-template-table" style="width:${tableWidth}px"><colgroup>${columns}</colgroup><thead><tr class="export-group-row">${groupHead}</tr><tr>${columnHead}</tr></thead><tbody>${body}</tbody></table>`;
 }
 

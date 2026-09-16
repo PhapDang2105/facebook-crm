@@ -187,3 +187,31 @@ test('chuỗi sản phẩm thật của Webcake: biến thể combo quyết đ�
   const plain = buildLandingOrder({ ...payload, location: 'https://granola.giotnang.vn/' }, { now: 1000, id: 'LAND05' });
   assert.equal(plain.note, 'Đơn từ landing page.');
 });
+
+test('đơn chưa hoàn tất: giữ làm lead có trạng thái riêng, bản hoàn tất đè lên cùng một đơn', async () => {
+  const draft = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00', location: 'https://granola.giotnang.vn/' });
+  assert.equal(draft.created, true);
+  assert.equal(draft.order.status, 'Chưa hoàn tất');
+  assert.equal(draft.order.landing.incomplete, true);
+  assert.equal(draft.order.landing.needsProduct, true);
+  // Sự kiện cập nhật dở dang tiếp theo (cùng inserted_at) chỉ đè, không tạo đơn mới.
+  const draft2 = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', district: 'Huyện Chợ Đồn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00' });
+  assert.equal(draft2.created, false);
+  assert.equal(draft2.updated, true);
+  assert.equal(draft2.order.id, draft.order.id);
+  assert.equal(draft2.order.district, 'Huyện Chợ Đồn');
+  // Khách gửi xong (Webcake tạo bản ghi mới, inserted_at khác): đè lên đơn dở của cùng số điện thoại.
+  const done = await recordLandingOrder({ name: 'Nguyễn Tú Anh', phone: '0368419478', address: 'Tổ 5', ward: 'Phường Sông Cầu', district: 'Thành phố Bắc Kạn', province: 'Bắc Kạn', products: 'Granola Mới (Combo 2 Granola Xanh): 1 x 298.000 ₫', total: '298.000', status: 'Form hoàn tất', inserted_at: '2026-09-16 02:15:00' });
+  assert.equal(done.created, false);
+  assert.equal(done.updated, true);
+  assert.equal(done.order.id, draft.order.id);
+  assert.equal(done.order.status, 'Mới');
+  assert.equal(done.order.landing.incomplete, false);
+  assert.deepEqual(done.order.products.map(item => [item.sku, item.quantity]), [['GRA-XANH-Z450', 2]]);
+  // Bản dở dang đến muộn sau bản hoàn tất thì không đè ngược.
+  const late = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00' });
+  assert.equal(late.created, false);
+  assert.equal(late.order.status, 'Mới');
+  const listed = await listLandingOrders();
+  assert.equal(listed.filter(order => order.phone === '0368419478').length, 1);
+});

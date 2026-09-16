@@ -681,6 +681,7 @@ function chatbotOrderToRows(order) {
   const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
   const sourceLabel = order.source === 'Landing page' ? 'Landing page' : 'Chatbot';
   const flags = [
+    order.landing?.incomplete ? '⏳ Chưa hoàn tất, gọi lại khách' : '',
     order.landing?.needsAddress ? 'Thiếu địa chỉ' : '',
     order.landing?.needsProduct ? 'Kiểm tra sản phẩm' : ''
   ].filter(Boolean).join(' · ');
@@ -4896,13 +4897,15 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
       : addressPosition >= 0 ? addressPosition : orderedColumns.length;
     orderedColumns.splice(insertPosition, 0, productColumn);
   }
-  const trailingColumnNames = ['so luong', 'don gia', 'dia chi'];
-  const trailingColumns = trailingColumnNames
-    .map(name => orderedColumns.find(column => column.name === name))
-    .filter(Boolean);
-  orderedColumns = orderedColumns
-    .filter(column => !trailingColumnNames.includes(column.name))
-    .concat(trailingColumns);
+  // Quantity and unit price sit right after the product so they are read
+  // together; the address, the widest column, closes the row.
+  const afterProductNames = ['so luong', 'don gia'];
+  const afterProduct = afterProductNames.map(name => orderedColumns.find(column => column.name === name)).filter(Boolean);
+  orderedColumns = orderedColumns.filter(column => !afterProductNames.includes(column.name));
+  const productPosition = orderedColumns.findIndex(column => column.name === 'san pham');
+  orderedColumns.splice(productPosition >= 0 ? productPosition + 1 : orderedColumns.length, 0, ...afterProduct);
+  const addressColumn = orderedColumns.find(column => column.name === 'dia chi');
+  if (addressColumn) orderedColumns = orderedColumns.filter(column => column !== addressColumn).concat(addressColumn);
   const visibleIndexes = orderedColumns.map(column => column.index);
   const columnTemplate = orderedColumns.map(column => column.name === 'dia chi' ? 'minmax(360px, 1fr)' : column.name === 'san pham' ? 'minmax(180px, max-content)' : 'max-content').join(' ');
   const previewClassName = index => {

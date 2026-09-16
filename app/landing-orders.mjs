@@ -176,8 +176,12 @@ const FIELD_PATTERNS = {
   id: [/^(order ?id|ma don( hang)?|id|submission ?id|entry ?id|uuid|order ?code|ma don hang)$/],
   campaign: [/^(utm ?campaign|campaign|chien dich|utm ?source|utm ?medium|utm ?content|utm ?term|landing( ?page)?( ?name)?|page ?name|page ?title|source|nguon|form ?name|form ?title|page ?url|url|link|event)$/],
   insertedAt: [/^(inserted ?at|created ?at|submitted ?at|date ?time|timestamp)$/],
-  ignored: [/^(date|time|upload|file|email|ip|user ?agent|referrer?|country ?code|captcha|updated ?at|status|payment ?status|transfer ?money|shipping ?fee|discount|currency|variation ?id|product ?id|id)$/]
+  // Trạng thái form của Webcake: "Form chưa hoàn tất" / "Form hoàn tất" / "New form"…
+  formStatus: [/^(status|form ?status|trang thai|order ?status)$/],
+  ignored: [/^(date|time|upload|file|email|ip|user ?agent|referrer?|country ?code|captcha|updated ?at|payment ?status|transfer ?money|shipping ?fee|discount|currency|variation ?id|product ?id|id)$/]
 };
+const INCOMPLETE_STATUS = /(chua hoan tat|chua hoan thanh|incomplete|unfinished|partial|draft|in ?progress|not ?complete|dang dien)/;
+export const INCOMPLETE_LABEL = 'Chưa hoàn tất';
 const COUNTRY_VALUES = /^(viet ?nam|vn|vietnam)$/;
 
 function pick(fields, kind) {
@@ -337,13 +341,17 @@ export function normalizeLandingPayload(payload = {}) {
   // Ghi chú ngắn cho bảng đơn: nguồn và mã chiến dịch, không phải cả chuỗi utm.
   const campaignSummary = [utm.utm_source ? `Nguồn: ${utm.utm_source}` : '', utm.utm_campaign ? `Chiến dịch: ${utm.utm_campaign}` : ''].filter(Boolean).join(' · ');
   const rawProducts = pickAll(fields, 'product').map(field => field.value).join('\n');
+  // Khách đang điền dở (Webcake "Đồng bộ đơn chưa hoàn tất"): vẫn giữ làm lead,
+  // đánh dấu để nhân viên gọi lại; khi khách gửi xong, bản hoàn tất đè lên.
+  const formStatus = pick(fields, 'formStatus');
+  const incomplete = INCOMPLETE_STATUS.test(keyOf(formStatus));
   const recognized = Object.keys(FIELD_PATTERNS);
   const insideLineItem = field => /(^|\.)(products?|items?|line ?items?|cart|san pham|order ?items?|variations?)(\.\d+)?\.[^.]+$/.test(field.path.split('.').map(keyOf).join('.'));
   const unknown = fields
     .filter(field => field.value && !recognized.some(kind => FIELD_PATTERNS[kind].some(pattern => pattern.test(field.key))))
     .filter(field => !/^(\d+|name|title|label)$/.test(field.key) && !insideLineItem(field))
     .map(field => `${field.path}=${field.value}`);
-  return { name, phone, phoneRaw, address, lines, total, note, externalId, campaign, campaignSummary, pageUrl, insertedAt, rawProducts, unknown };
+  return { name, phone, phoneRaw, address, lines, total, note, externalId, campaign, campaignSummary, pageUrl, insertedAt, rawProducts, formStatus, incomplete, unknown };
 }
 
 /** Khớp từng dòng với danh mục để lấy SKU kho và giá; không khớp thì giữ tên khách chọn. */
@@ -400,7 +408,7 @@ export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID()
     address: parsed.address || 'Chưa có địa chỉ',
     products,
     discount,
-    status: 'Mới',
+    status: parsed.incomplete ? INCOMPLETE_LABEL : 'Mới',
     source: LANDING_SOURCE,
     payment: 'COD',
     freeShipping,
@@ -416,6 +424,8 @@ export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID()
     page: String(page || parsed.pageUrl || '').slice(0, 200),
     campaign: parsed.campaign.slice(0, 500),
     submittedAt: parsed.insertedAt,
+    formStatus: parsed.formStatus,
+    incomplete: parsed.incomplete,
     rawProducts: parsed.rawProducts.slice(0, 1000),
     needsAddress: !parsed.address,
     needsProduct: !items.length || !items.every(item => item.matched),
@@ -446,15 +456,47 @@ export async function recordLandingOrder(payload, context = {}) {
     store.recent.unshift({ at: receivedAt, page: String(context.page || ''), ok: !error, error, orderId: order?.id || '', payload });
     store.recent = store.recent.slice(0, maximumRecent);
     if (!order) return { order: null, created: false, error };
-    const existing = (order.landing.externalId
-      ? store.orders.find(entry => entry.landing?.externalId && entry.landing.externalId === order.landing.externalId)
-      : null)
-      || store.orders.find(entry => signature(entry) === signature(order) && receivedAt - (Number(entry.createdAt) || 0) < duplicateWindowMs);
-    if (existing) return { order: existing, created: false, error: '' };
+    // Một đơn có thể gom nhiều bản ghi form của Webcake (bản dở dang rồi bản
+    // hoàn tất): mọi mã đã gộp đều nhận ra đơn đó.
+    const formIds = entry => [entry.landing?.externalId, ...(entry.landing?.formIds || [])].filter(Boolean);
+    const sameForm = order.landing.externalId
+      ? store.orders.find(entry => formIds(entry).includes(order.landing.externalId))
+      : null;
+    // Cùng khách, bản trước còn dở dang: bản mới (đầy đủ hơn, hoặc đã hoàn tất) đè lên.
+    const sameCustomerDraft = !sameForm
+      ? store.orders.find(entry => entry.landing?.incomplete && entry.phone === order.phone && receivedAt - (Number(entry.createdAt) || 0) < incompleteUpgradeWindowMs)
+      : null;
+    const existing = sameForm || sameCustomerDraft;
+    if (existing) {
+      if (existing.landing?.incomplete && !isLessComplete(order, existing)) {
+        const index = store.orders.indexOf(existing);
+        const upgraded = {
+          ...order,
+          id: existing.id,
+          createdAt: existing.createdAt,
+          updatedAt: receivedAt,
+          landing: { ...order.landing, formIds: [...new Set([...formIds(existing), order.landing.externalId].filter(Boolean))] }
+        };
+        store.orders[index] = upgraded;
+        return { order: upgraded, created: false, updated: true, error: '' };
+      }
+      return { order: existing, created: false, error: '' };
+    }
+    const duplicate = store.orders.find(entry => signature(entry) === signature(order) && receivedAt - (Number(entry.createdAt) || 0) < duplicateWindowMs);
+    if (duplicate) return { order: duplicate, created: false, error: '' };
     store.orders.unshift(order);
     store.orders = store.orders.slice(0, maximumOrders);
     return { order, created: true, error: '' };
   });
+}
+
+// Khách bỏ dở rồi quay lại điền tiếp trong vòng này thì vẫn là cùng một đơn.
+const incompleteUpgradeWindowMs = 6 * 60 * 60 * 1000;
+
+/** Bản mới có ít thông tin hơn bản đang giữ (sự kiện đến muộn) thì không đè. */
+function isLessComplete(fresh, existing) {
+  const score = order => [order.address !== 'Chưa có địa chỉ', order.ward, order.district, order.province, order.products.some(item => item.sku), order.name !== 'Khách landing page', !order.landing?.incomplete].filter(Boolean).length;
+  return score(fresh) < score(existing);
 }
 
 export async function listLandingOrders() {

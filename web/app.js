@@ -5526,7 +5526,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     : '';
   const head = (deletable ? '<th class="preview-actions"></th>' : '')
     + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('')
-    + (reviewable ? '<th class="preview-actions preview-actions--tail"></th>' : '');
+    + (reviewable ? '<th class="preview-actions preview-actions--tail">Trạng thái</th>' : '');
   const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(entry.row[index] || '', rowNotes.get(entry.index)) : renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}${tailCell(entry)}</tr>`).join('');
   preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : ''}${columnTemplate}${reviewable ? ' max-content' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }

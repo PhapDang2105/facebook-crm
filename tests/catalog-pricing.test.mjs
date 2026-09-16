@@ -143,7 +143,7 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   assert.deepEqual(withImage, { templateId: 'STORE_ADDRESS', messages: ['Địa chỉ ạ'], images: ['https://example.com/map.png'], handoff: false });
   // Bảng mix: từng cặp túi ghép và trọn bộ, giá + ship + quà theo bảng tổ hợp.
   const mix = renderChatbotReply({ template_id: 'PRICE_MIX_TUI_LON' }, templates).messages[0];
-  assert.match(mix, /• Granola Túi Xanh 450g \+ Granola Túi Vàng nhiều hạt quả 350g: 298\.000đ \(Miễn phí vận chuyển\)/);
+  assert.match(mix, /• Granola Túi Xanh 450g \+ Granola Túi Vàng 350g: 298\.000đ \(Miễn phí vận chuyển\)/);
   assert.match(mix, /• Granola Túi Xanh 450g \+ Granola Túi Nâu vị cacao 350g: 293\.000đ \(Miễn phí vận chuyển\)/);
   assert.match(mix, /🎁 Trọn bộ 3 túi \(.*\): 442\.000đ \(Miễn phí vận chuyển\) \+ tặng Bộ bát gáo dừa \+ Muỗng dừa/);
   // Sản phẩm không có giá combo chỉ còn bậc 1; các bậc trống và dòng kẻ thừa tự rụng.

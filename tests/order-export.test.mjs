@@ -43,6 +43,8 @@ const rows = buildExportRows({
   rows: [['DH-1', 'CB2-HT-YM-T500', '3', '393000', 'Yến Mạch Úc / [CÁN DẸT] CB 1kg', '0901234567']]
 });
 assert.deepEqual(rows.map(row => [row[19], row[21]]), [['HT-YM-T500', 6], ['HU-300ML', 3]]);
+// Thuế 8% điền ở mọi dòng sản phẩm, không chỉ dòng đầu của đơn.
+assert.deepEqual(rows.map(row => row[28]), ['8%', '8%']);
 
 assert.equal(normalizeExportLocation('Hồ Chí Minh'), 'TP Hồ Chí Minh');
 assert.equal(normalizeExportLocation('Thành phố Thanh Hoá'), 'Thành phố Thanh Hóa');

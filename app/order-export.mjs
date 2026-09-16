@@ -282,7 +282,7 @@ export function buildExportRows(orderData = {}) {
       const output = Array(EXPORT_COLUMNS.length).fill('');
       if (isFirstOrderLine && itemIndex === 0) {
         output[0] = orderNumber; output[2] = 'Facebook'; output[4] = 'Có'; output[6] = 'Có';
-        output[8] = 'Thanh toán COD'; output[28] = '8%'; output[30] = phone;
+        output[8] = 'Thanh toán COD'; output[30] = phone;
         output[33] = value(row, 'Khách hàng'); output[34] = phone; output[35] = value(row, 'Địa chỉ');
         // Tên tỉnh/quận/phường đúng danh mục kho, đọc từ ba cột nếu có, còn
         // không thì từ chính địa chỉ — cùng một hàm cho preview và file.
@@ -297,6 +297,8 @@ export function buildExportRows(orderData = {}) {
         output[38] = location.ward;
       }
       output[19] = item.sku; output[21] = item.quantity; output[22] = item.price; output[24] = item.weight || skuWeight(item.sku);
+      // Thuế là thuộc tính của từng dòng sản phẩm (kể cả quà), không chỉ dòng đầu đơn.
+      output[28] = '8%';
       outputRows.push(output);
     });
   });

@@ -415,7 +415,9 @@ export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID()
     payment: 'COD',
     freeShipping,
     shippingFee,
-    note: [parsed.note, parsed.campaignSummary].filter(Boolean).join(' · ') || 'Đơn từ landing page.',
+    // Ghi chú chỉ giữ lời khách (yêu cầu giao, mã giảm giá); nguồn/chiến dịch
+    // nằm ở landing.campaign, việc cần làm do order-notes.mjs dựng.
+    note: parsed.note,
     employee: 'Landing page',
     createdAt: now
   }, { now, id });
@@ -543,7 +545,6 @@ export async function autoFillLandingOrder(order, payload, orders, context = {})
   rebuilt.status = order.status;
   rebuilt.phoneWarning = order.phoneWarning;
   rebuilt.landing = { ...rebuilt.landing, incomplete: order.landing.incomplete, formStatus: order.landing.formStatus, externalId: order.landing.externalId, formIds: order.landing.formIds, posId: order.landing.posId, autoFilled };
-  rebuilt.note = [rebuilt.note === 'Đơn từ landing page.' ? '' : rebuilt.note, 'Tự điền, cần duyệt trước khi giao'].filter(Boolean).join(' · ');
   return rebuilt;
 }
 

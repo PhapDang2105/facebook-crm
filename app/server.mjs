@@ -16,8 +16,9 @@ import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloa
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder } from './landing-orders.mjs';
-import { attachPhoneWarning, connectPos, disconnectPos, lookupPhone, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
+import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhone, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
+import { customerNote, processingNotes } from './order-notes.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -1141,7 +1142,18 @@ const server = http.createServer(async (request, response) => {
         ),
         ...await listLandingOrders()
       ].sort((first, second) => (Number(second.createdAt) || 0) - (Number(first.createdAt) || 0));
-      return sendJson(response, 200, { items, total: items.length });
+      // Cảnh báo số điện thoại tính lại từ cache theo ngưỡng hiện hành (mức ghim
+      // lúc tạo đơn có thể đã cũ), rồi dựng ghi chú xử lý (thiếu gì, tự điền gì,
+      // số cần gọi...) cho cột Ghi chú của bảng Đơn hàng.
+      const withNotes = [];
+      for (const order of items) {
+        const fresh = await cachedPhoneWarning(order.phone);
+        const phoneWarning = fresh ? (fresh.level === 'none' ? undefined : fresh) : order.phoneWarning;
+        // Ghi chú trả về chỉ còn lời khách; các mẩu máy từng chèn (nguồn, chiến dịch) bị bỏ.
+        const refreshed = { ...order, phoneWarning, note: customerNote(order) };
+        withNotes.push({ ...refreshed, processingNotes: processingNotes(refreshed) });
+      }
+      return sendJson(response, 200, { items: withNotes, total: withNotes.length });
     }
     if (request.method === 'GET' && url.pathname === '/api/dashboard') {
       const { leads } = await readStore();

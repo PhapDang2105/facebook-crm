@@ -322,6 +322,21 @@ export async function lookupPhone(phone, { force = false, fetchImpl = fetch, con
   return { phone: key, ...assessPhone({ pos }), pos: pos && !pos.error ? { failed: pos.failed, success: pos.success, report: pos.report, isBlock: pos.customer?.isBlock || false, tags: pos.customer?.tags || [] } : null };
 }
 
+/**
+ * Mức cảnh báo tính lại từ cache (không gọi POS), theo ngưỡng hiện hành; null
+ * nếu số này chưa được tra. Dùng khi liệt kê đơn để không hiện mức cũ đã ghim
+ * vào đơn lúc tạo.
+ */
+export async function cachedPhoneWarning(phone) {
+  const key = normalizeWarningPhone(phone);
+  if (!key) return null;
+  const store = await readWarningStore();
+  const pos = store.cache[key];
+  if (!pos || pos.error) return null;
+  const scored = assessPhone({ pos });
+  return { level: scored.level, label: scored.label, failed: scored.failed, success: scored.success, rate: scored.rate, sources: scored.sources, checkedAt: Number(pos.fetchedAt) || 0 };
+}
+
 /** Tra nhiều số một lượt, tối đa 5 yêu cầu POS song song. */
 export async function lookupPhones(phones, options = {}) {
   const unique = [...new Set((Array.isArray(phones) ? phones : []).map(normalizeWarningPhone).filter(Boolean))].slice(0, 500);

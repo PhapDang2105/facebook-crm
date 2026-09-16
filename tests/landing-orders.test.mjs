@@ -180,12 +180,14 @@ test('chuỗi sản phẩm thật của Webcake: biến thể combo quyết đ�
   assert.deepEqual(order.products.map(item => [item.sku, item.quantity, item.paidPrice]), [['GRA-XANH-Z450', 3, 149000]]);
   assert.equal(order.total, 447000);
   assert.equal(order.ward, 'Phường Láng Hạ');
-  assert.equal(order.note, 'Nguồn: fb · Chiến dịch: 120247850360290132');
+  assert.equal(order.note, '', 'ghi chú chỉ giữ lời khách; chiến dịch nằm ở landing.campaign');
+  assert.match(order.landing.campaign, /utm_campaign=120247850360290132/);
   assert.equal(order.landing.needsProduct, false);
   assert.match(order.landing.rawProducts, /Combo 3 Granola Xanh/);
-  // Không có utm nào cả: ghi chú mặc định, không có chuỗi "utm_campaign=utm_campaign".
+  // Không có utm nào cả: không có chuỗi "utm_campaign=utm_campaign" lọt vào đâu.
   const plain = buildLandingOrder({ ...payload, location: 'https://granola.giotnang.vn/' }, { now: 1000, id: 'LAND05' });
-  assert.equal(plain.note, 'Đơn từ landing page.');
+  assert.equal(plain.note, '');
+  assert.equal(plain.landing.campaign, '');
 });
 
 test('đơn chưa hoàn tất: giữ làm lead có trạng thái riêng, bản hoàn tất đè lên cùng một đơn', async () => {
@@ -264,7 +266,7 @@ test('tự điền cho đơn bỏ dở: sản phẩm mặc định theo chiến 
   assert.equal(filled.district, 'Thành Phố Bắc Kạn');
   assert.match(filled.landing.autoFilled.product, /Granola Túi Xanh 450g x2/);
   assert.match(filled.landing.autoFilled.address, /từ POS/);
-  assert.match(filled.note, /Tự điền, cần duyệt/);
+  assert.equal(filled.note, '', 'ghi chú không bị máy chèn; việc duyệt thể hiện qua landing.autoFilled');
   // Đơn đã đủ thì không đụng.
   const full = buildLandingOrder({ name: 'A', phone: '0368419478', address: '12 Lê Lợi, P. Bến Nghé, Q1, HCM', products: 'Granola Mới (Combo 2 Granola Xanh): 1 x 298.000 ₫', total: '298.000' }, { now: 5000, id: 'FULL1' });
   const untouched = await autoFillLandingOrder(full, {}, history, { fetchAddresses: posAddresses });

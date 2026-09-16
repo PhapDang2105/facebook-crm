@@ -26,3 +26,6 @@ tools/
 .graphcode/
 __pycache__/
 .pytest_cache/
+
+# Cấu hình chạy thử cục bộ của Claude Code (đường dẫn máy cá nhân)
+.claude/launch.json

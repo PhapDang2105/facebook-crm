@@ -147,3 +147,43 @@ test('lưu và chống trùng theo mã nền tảng hoặc cùng SĐT + giỏ tr
   assert.ok(await deleteLandingOrder(first.order.id));
   assert.equal((await listLandingOrders()).length, 1);
 });
+
+test('chuỗi sản phẩm thật của Webcake: biến thể combo quyết định số túi, ô trống gửi bằng tên trường bị bỏ qua', async () => {
+  const { parseWebcakeProducts } = await import('../app/landing-orders.mjs');
+  assert.deepEqual(
+    parseWebcakeProducts('Granola Mới Ngũ Cốc Ăn Sáng Healthy Lành Mạnh Với Hạt Dinh Dưỡng Trái Cây Từ Giọt Nắng (Combo 3 Granola Xanh): 1 x 447.000 ₫').map(line => [line.sku, line.quantity]),
+    [['GRA-XANH-Z450', 3]]
+  );
+  assert.deepEqual(parseWebcakeProducts('Granola Mới (1 Túi Granola Xanh 450g): 2 x 189.000 ₫').map(line => [line.sku, line.quantity]), [['GRA-XANH-Z450', 2]]);
+  assert.deepEqual(parseWebcakeProducts('Granola Mới (Combo 2 Xanh + 1 Vàng): 1 x 447.000 ₫').map(line => [line.sku, line.quantity]), [['GRA-XANH-Z450', 2], ['GRA-VANG-H350', 1]]);
+  const unknown = parseWebcakeProducts('Bộ quà Tết (Hộp lớn): 2 x 500.000 ₫');
+  assert.equal(unknown[0].sku, '');
+  assert.equal(unknown[0].quantity, 2);
+  assert.equal(unknown[0].price, '250000');
+  assert.equal(parseWebcakeProducts('Túi Xanh x2'), null);
+
+  const payload = {
+    address: 'Hateco Plaza - Lô 4A Huỳnh Thúc Kháng', district: 'Quận Đống Đa', email: 'email', inserted_at: '2026-09-16 07:52:24',
+    location: 'https://granola.giotnang.vn/?fbclid=abc&utm_medium=paid&utm_source=fb&utm_campaign=120247850360290132',
+    name: 'Nguyễn Thị Thu Hà', payment_status: 'payment_status.', phone: '0904636274',
+    products: 'Granola Mới Ngũ Cốc Ăn Sáng Healthy Lành Mạnh Với Hạt Dinh Dưỡng Trái Cây Từ Giọt Nắng (Combo 3 Granola Xanh): 1 x 447.000 ₫',
+    province: 'Hà Nội', status: 'New form', total: '447.000',
+    utm_campaign: 'utm_campaign', utm_content: 'utm_content', utm_medium: 'utm_medium', utm_source: 'utm_source', utm_term: 'utm_term', ward: 'Phường Láng Hạ'
+  };
+  const parsed = normalizeLandingPayload(payload);
+  assert.equal(parsed.address, 'Hateco Plaza - Lô 4A Huỳnh Thúc Kháng, Phường Láng Hạ, Quận Đống Đa, Hà Nội');
+  assert.equal(parsed.externalId, '0904636274@2026-09-16 07:52:24');
+  assert.equal(parsed.campaignSummary, 'Nguồn: fb · Chiến dịch: 120247850360290132');
+  assert.equal(parsed.pageUrl, 'https://granola.giotnang.vn/');
+  assert.deepEqual(parsed.unknown, []);
+  const order = buildLandingOrder(payload, { now: 1000, id: 'LAND04' });
+  assert.deepEqual(order.products.map(item => [item.sku, item.quantity, item.paidPrice]), [['GRA-XANH-Z450', 3, 149000]]);
+  assert.equal(order.total, 447000);
+  assert.equal(order.ward, 'Phường Láng Hạ');
+  assert.equal(order.note, 'Nguồn: fb · Chiến dịch: 120247850360290132');
+  assert.equal(order.landing.needsProduct, false);
+  assert.match(order.landing.rawProducts, /Combo 3 Granola Xanh/);
+  // Không có utm nào cả: ghi chú mặc định, không có chuỗi "utm_campaign=utm_campaign".
+  const plain = buildLandingOrder({ ...payload, location: 'https://granola.giotnang.vn/' }, { now: 1000, id: 'LAND05' });
+  assert.equal(plain.note, 'Đơn từ landing page.');
+});

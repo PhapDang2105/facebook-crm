@@ -21,7 +21,8 @@ const landingOrdersPath = process.env.LANDING_ORDERS_PATH
 
 export const LANDING_SOURCE = 'Landing page';
 const maximumOrders = 5000;
-const maximumRecent = 30;
+// Payload gốc được giữ cho mọi đơn gần đây, để tính lại đơn khi bộ nhận dạng thay đổi.
+const maximumRecent = 1000;
 const duplicateWindowMs = 10 * 60 * 1000;
 
 let cachedStore = null;
@@ -141,7 +142,13 @@ export function flattenPayload(value, prefix = '', out = []) {
     for (const [key, child] of Object.entries(value)) flattenPayload(child, prefix ? `${prefix}.${key}` : key, out);
     return out;
   }
-  out.push({ path: prefix, key: keyOf(prefix.split('.').at(-1)), fullKey: keyOf(prefix), value: String(value).trim() });
+  const key = keyOf(prefix.split('.').at(-1));
+  const text = String(value).trim();
+  // Webcake gửi chính tên trường làm giá trị khi ô đó trống ("utm_source":
+  // "utm_source", "email": "email", "payment_status": "payment_status."):
+  // đó là ô trống, không phải dữ liệu.
+  if (keyOf(text.replace(/[.:]+$/, '')) === key) return out;
+  out.push({ path: prefix, key, fullKey: keyOf(prefix), value: text });
   return out;
 }
 
@@ -168,7 +175,8 @@ const FIELD_PATTERNS = {
   coupon: [/^(coupon|ma giam gia|voucher|ma khuyen mai)$/],
   id: [/^(order ?id|ma don( hang)?|id|submission ?id|entry ?id|uuid|order ?code|ma don hang)$/],
   campaign: [/^(utm ?campaign|campaign|chien dich|utm ?source|utm ?medium|utm ?content|utm ?term|landing( ?page)?( ?name)?|page ?name|page ?title|source|nguon|form ?name|form ?title|page ?url|url|link|event)$/],
-  ignored: [/^(date|time|upload|file|email|ip|user ?agent|referrer?|country ?code|captcha|inserted ?at|created ?at|updated ?at|status|payment ?status|transfer ?money|shipping ?fee|discount|currency|variation ?id|product ?id|id)$/]
+  insertedAt: [/^(inserted ?at|created ?at|submitted ?at|date ?time|timestamp)$/],
+  ignored: [/^(date|time|upload|file|email|ip|user ?agent|referrer?|country ?code|captcha|updated ?at|status|payment ?status|transfer ?money|shipping ?fee|discount|currency|variation ?id|product ?id|id)$/]
 };
 const COUNTRY_VALUES = /^(viet ?nam|vn|vietnam)$/;
 
@@ -207,6 +215,43 @@ function splitProductText(value) {
   return { product: text, quantity: '' };
 }
 
+/**
+ * Chuỗi sản phẩm của Webcake, mỗi dòng dạng
+ *   "<Tên sản phẩm> (<Biến thể>): <số lượng> x <giá> ₫"
+ * ví dụ "Granola Mới … Từ Giọt Nắng (Combo 3 Granola Xanh): 1 x 447.000 ₫".
+ * Biến thể quyết định sản phẩm kho và số túi: "Combo 3 Granola Xanh" = 3 túi
+ * Xanh, "1 Túi Granola Xanh 450g" = 1 túi Xanh, "Combo 2 Xanh + 1 Vàng" =
+ * 2 Xanh và 1 Vàng. Không khớp danh mục thì giữ nguyên tên để nhân viên xem.
+ */
+export function parseWebcakeProducts(text) {
+  const entries = String(text ?? '').split(/\r?\n|\s*;\s*|\s*\|\s*/).map(part => part.trim()).filter(Boolean);
+  const lines = [];
+  for (const entry of entries) {
+    const match = entry.match(/^(.*?)(?:\s*\(([^()]*)\))?\s*:\s*(\d{1,3})\s*[x×*]\s*([\d.,]+)\s*(?:₫|đ|d|vnd|vnđ)?\s*$/iu);
+    if (!match) return null;
+    const [, productName, variation = '', lineQuantity, linePrice] = match;
+    const quantity = Number(lineQuantity) || 1;
+    // "\b" của JavaScript không hiểu chữ có dấu nên "Vàng" sẽ bị cắt tại "Và"; dùng ranh giới Unicode.
+    const parts = variation ? variation.split(/\s*(?:\+|&|(?<![\p{L}\p{N}])và(?![\p{L}\p{N}]))\s*/iu).map(part => part.trim()).filter(Boolean) : [];
+    const expanded = parts.map(part => {
+      const counted = part.match(/^(?:combo\s*)?(\d{1,3})\s*(?:túi|tui|hộp|hop|hũ|hu|gói|goi|bịch|bich|chai|lọ|lo|set|bộ|bo)?\s*(.*)$/iu);
+      const count = counted ? Number(counted[1]) : 1;
+      const label = (counted ? counted[2] : part).replace(/^combo\s*/iu, '').trim() || part;
+      // "Xanh" trong "Combo 2 Xanh + 1 Vàng" là túi Xanh: thử thêm tiền tố loại hình / tên dòng sản phẩm.
+      const product = matchProduct(label) || matchProduct(part) || matchProduct(`túi ${label}`) || matchProduct(`granola ${label}`) || matchProduct(`${productName} ${label}`);
+      return { product: product?.name || `${productName} (${part})`, sku: product?.sku || '', quantity: quantity * count, price: '' };
+    });
+    if (!expanded.length) {
+      const product = matchProduct(productName);
+      expanded.push({ product: product?.name || productName, sku: product?.sku || '', quantity, price: '' });
+    }
+    const unmatched = expanded.filter(item => !item.sku);
+    for (const item of unmatched) item.price = String(Math.round(money(linePrice) / Math.max(1, item.quantity)));
+    lines.push(...expanded);
+  }
+  return lines.length ? lines : null;
+}
+
 export function extractLineItems(fields) {
   // Dòng sản phẩm lồng nhau: products[0].name, products.name, items[1].quantity, cart.0.sku...
   const groups = new Map();
@@ -236,8 +281,20 @@ export function extractLineItems(fields) {
   // Nhiều trường sản phẩm cùng lúc (ví dụ "sku" và "product") thì là một dòng.
   const named = products.find(field => !/^sku$/.test(field.key)) || products[0];
   const sku = products.find(field => /^sku$/.test(field.key))?.value || '';
+  const webcake = parseWebcakeProducts(named.value);
+  if (webcake) return webcake;
   const split = splitProductText(named.value);
   return [{ product: split.product, sku, quantity: quantity || split.quantity, price }];
+}
+
+/** utm_* trong URL trang ("location" của Webcake) khi các ô utm riêng để trống. */
+function utmFromUrl(url) {
+  try {
+    const params = new URL(url).searchParams;
+    return Object.fromEntries(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id'].map(key => [key, params.get(key) || '']).filter(([, value]) => value));
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -252,7 +309,10 @@ export function normalizeLandingPayload(payload = {}) {
   // "country" của Webcake là tỉnh/thành khi giá trị không phải tên quốc gia.
   const country = pick(fields, 'country');
   const province = pick(fields, 'province') || (country && !COUNTRY_VALUES.test(keyOf(country)) ? country : '');
-  const parts = [pick(fields, 'address') || pick(fields, 'location'), pick(fields, 'ward'), pick(fields, 'district'), province].filter(Boolean);
+  // "location" của Webcake là URL trang (kèm utm); nơi khác có thể là địa chỉ ghép sẵn.
+  const location = pick(fields, 'location');
+  const locationIsUrl = /^https?:\/\//i.test(location);
+  const parts = [pick(fields, 'address') || (locationIsUrl ? '' : location), pick(fields, 'ward'), pick(fields, 'district'), province].filter(Boolean);
   const address = parts.join(', ');
   let lines = extractLineItems(fields);
   // Không có ô sản phẩm nhưng có ô lựa chọn (singlechoice "Combo 2 túi"...):
@@ -267,15 +327,23 @@ export function normalizeLandingPayload(payload = {}) {
   const total = money(pick(fields, 'total'));
   const coupon = pick(fields, 'coupon');
   const note = [...pickAll(fields, 'note').map(field => field.value), ...choiceNotes, coupon ? `Mã giảm giá: ${coupon}` : ''].filter(Boolean).join(' · ');
-  const externalId = pick(fields, 'id');
-  const campaign = pickAll(fields, 'campaign').map(field => `${field.path}=${field.value}`).join('; ');
+  // Không có mã đơn thì SĐT + thời điểm gửi form là khóa chống trùng khi Webcake gọi lại.
+  const insertedAt = pick(fields, 'insertedAt');
+  const externalId = pick(fields, 'id') || (insertedAt && phone ? `${phone}@${insertedAt}` : '');
+  const utm = { ...(locationIsUrl ? utmFromUrl(location) : {}) };
+  for (const field of pickAll(fields, 'campaign')) if (!/^(url|link|page ?url|location)$/.test(field.key)) utm[field.path.split('.').at(-1)] = field.value;
+  const pageUrl = locationIsUrl ? location.split('?')[0] : (pickAll(fields, 'campaign').find(field => /^(url|link|page ?url)$/.test(field.key))?.value || '');
+  const campaign = Object.entries(utm).map(([key, value]) => `${key}=${value}`).join('; ');
+  // Ghi chú ngắn cho bảng đơn: nguồn và mã chiến dịch, không phải cả chuỗi utm.
+  const campaignSummary = [utm.utm_source ? `Nguồn: ${utm.utm_source}` : '', utm.utm_campaign ? `Chiến dịch: ${utm.utm_campaign}` : ''].filter(Boolean).join(' · ');
+  const rawProducts = pickAll(fields, 'product').map(field => field.value).join('\n');
   const recognized = Object.keys(FIELD_PATTERNS);
   const insideLineItem = field => /(^|\.)(products?|items?|line ?items?|cart|san pham|order ?items?|variations?)(\.\d+)?\.[^.]+$/.test(field.path.split('.').map(keyOf).join('.'));
   const unknown = fields
     .filter(field => field.value && !recognized.some(kind => FIELD_PATTERNS[kind].some(pattern => pattern.test(field.key))))
     .filter(field => !/^(\d+|name|title|label)$/.test(field.key) && !insideLineItem(field))
     .map(field => `${field.path}=${field.value}`);
-  return { name, phone, phoneRaw, address, lines, total, note, externalId, campaign, unknown };
+  return { name, phone, phoneRaw, address, lines, total, note, externalId, campaign, campaignSummary, pageUrl, insertedAt, rawProducts, unknown };
 }
 
 /** Khớp từng dòng với danh mục để lấy SKU kho và giá; không khớp thì giữ tên khách chọn. */
@@ -337,7 +405,7 @@ export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID()
     payment: 'COD',
     freeShipping,
     shippingFee,
-    note: [parsed.note, parsed.campaign ? `Chiến dịch: ${parsed.campaign}` : ''].filter(Boolean).join(' · ') || 'Đơn từ landing page.',
+    note: [parsed.note, parsed.campaignSummary].filter(Boolean).join(' · ') || 'Đơn từ landing page.',
     employee: 'Landing page',
     createdAt: now
   }, { now, id });
@@ -345,8 +413,10 @@ export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID()
   order.gift = priced?.priceable ? String(priced.gift || '') : '';
   order.landing = {
     externalId: parsed.externalId,
-    page: String(page || '').slice(0, 200),
+    page: String(page || parsed.pageUrl || '').slice(0, 200),
     campaign: parsed.campaign.slice(0, 500),
+    submittedAt: parsed.insertedAt,
+    rawProducts: parsed.rawProducts.slice(0, 1000),
     needsAddress: !parsed.address,
     needsProduct: !items.length || !items.every(item => item.matched),
     unknownFields: parsed.unknown.slice(0, 40)

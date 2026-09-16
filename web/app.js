@@ -774,20 +774,34 @@ function mergeChatbotOrdersIntoTable(orders) {
   const existingIds = new Set(idColumn === undefined ? [] : orderData.rows.map(row => String(row[idColumn] || '')));
   const dismissed = readDismissedChatbotOrders();
   let added = 0;
-  const rows = [...orderData.rows];
+  let refreshed = 0;
+  let rows = [...orderData.rows];
   for (const order of orders) {
-    if (existingIds.has(systemOrderRowId(order)) || dismissed.has(systemOrderRowId(order))) continue;
-    for (const source of chatbotOrderToRows(order)) {
+    const rowId = systemOrderRowId(order);
+    if (dismissed.has(rowId)) continue;
+    const fresh = chatbotOrderToRows(order).map(source => {
       const row = Array(headers.length).fill('');
       chatbotOrderHeaders.forEach((header, position) => {
         const target = index.get(normalizeColumnName(header));
         if (target !== undefined) row[target] = source[position];
       });
-      rows.push(row);
+      return row;
+    });
+    if (existingIds.has(rowId)) {
+      // The server's copy is the truth for a system order: when its lines
+      // changed (re-priced, product corrected), the table's rows follow.
+      const current = rows.filter(row => String(row[idColumn] || '') === rowId);
+      if (JSON.stringify(current) === JSON.stringify(fresh)) continue;
+      const at = rows.findIndex(row => String(row[idColumn] || '') === rowId);
+      rows = rows.filter(row => String(row[idColumn] || '') !== rowId);
+      rows.splice(at, 0, ...fresh);
+      refreshed += 1;
+      continue;
     }
+    rows.push(...fresh);
     added += 1;
   }
-  if (!added) return 0;
+  if (!added && !refreshed) return 0;
   orderData = { headers, rows };
   localStorage.setItem('crm-orders', JSON.stringify(orderData));
   renderOrderData();

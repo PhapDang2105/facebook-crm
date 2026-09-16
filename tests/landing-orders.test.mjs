@@ -189,13 +189,13 @@ test('chuỗi sản phẩm thật của Webcake: biến thể combo quyết đ�
 });
 
 test('đơn chưa hoàn tất: giữ làm lead có trạng thái riêng, bản hoàn tất đè lên cùng một đơn', async () => {
-  const draft = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00', location: 'https://granola.giotnang.vn/' });
+  const draft = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00', location: 'https://granola.giotnang.vn/' }, { autoFill: false });
   assert.equal(draft.created, true);
   assert.equal(draft.order.status, 'Chưa hoàn tất');
   assert.equal(draft.order.landing.incomplete, true);
   assert.equal(draft.order.landing.needsProduct, true);
   // Sự kiện cập nhật dở dang tiếp theo (cùng inserted_at) chỉ đè, không tạo đơn mới.
-  const draft2 = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', district: 'Huyện Chợ Đồn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00' });
+  const draft2 = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', district: 'Huyện Chợ Đồn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00' }, { autoFill: false });
   assert.equal(draft2.created, false);
   assert.equal(draft2.updated, true);
   assert.equal(draft2.order.id, draft.order.id);
@@ -209,9 +209,77 @@ test('đơn chưa hoàn tất: giữ làm lead có trạng thái riêng, bản h
   assert.equal(done.order.landing.incomplete, false);
   assert.deepEqual(done.order.products.map(item => [item.sku, item.quantity]), [['GRA-XANH-Z450', 2]]);
   // Bản dở dang đến muộn sau bản hoàn tất thì không đè ngược.
-  const late = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00' });
+  const late = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00' }, { autoFill: false });
   assert.equal(late.created, false);
   assert.equal(late.order.status, 'Mới');
   const listed = await listLandingOrders();
   assert.equal(listed.filter(order => order.phone === '0368419478').length, 1);
+});
+
+test('tự điền cho đơn bỏ dở: sản phẩm mặc định theo chiến dịch, địa chỉ từ POS hoặc đơn trước, đưa vào Xử lý dữ liệu', async () => {
+  const { defaultBasketForCampaign, pickAddressForPhone, autoFillLandingOrder } = await import('../app/landing-orders.mjs');
+  const complete = (id, phone, products, campaign, createdAt = 1000) => ({
+    id, phone, address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', createdAt,
+    products: products.map(([sku, quantity]) => ({ sku, quantity })),
+    landing: { campaign: `utm_campaign=${campaign}`, page: 'https://granola.giotnang.vn/' }
+  });
+  const history = [
+    complete('a1', '0901', [['GRA-XANH-Z450', 2]], 'xanh'),
+    complete('a2', '0902', [['GRA-XANH-Z450', 2]], 'xanh'),
+    complete('a3', '0903', [['GRA-XANH-Z450', 3]], 'xanh'),
+    complete('a4', '0904', [['GRA-VANG-H350', 1]], 'vang'),
+    complete('a5', '0905', [['GRA-VANG-H350', 1]], 'vang'),
+    complete('a6', '0905', [['GRA-VANG-H350', 1]], 'vang')
+  ];
+  const draftOrder = { id: 'd1', products: [], landing: { campaign: 'utm_campaign=xanh', page: 'https://granola.giotnang.vn/' } };
+  assert.deepEqual(defaultBasketForCampaign(history, draftOrder).items, [{ sku: 'GRA-XANH-Z450', quantity: 2 }], 'combo 2 Xanh phổ biến nhất của chiến dịch xanh');
+  assert.match(defaultBasketForCampaign(history, draftOrder).basis, /chiến dịch xanh/);
+  const unknownCampaign = { id: 'd2', products: [], landing: { campaign: 'utm_campaign=moi', page: '' } };
+  assert.deepEqual(defaultBasketForCampaign(history, unknownCampaign).items, [{ sku: 'GRA-VANG-H350', quantity: 1 }], 'chiến dịch lạ thì lấy tổ hợp phổ biến nhất chung');
+
+  // Địa chỉ: POS trước, phải khớp tỉnh khách đã gõ.
+  const posAddresses = async () => ['Tổ 5, Phường Sông Cầu, Thành phố Bắc Kạn, Bắc Kạn', '45 Trần Hưng Đạo, Phường 2, Quận 5, TP Hồ Chí Minh'];
+  const typedHcm = { id: 'd3', phone: '0999', address: 'Hồ Chí Minh' };
+  const picked = await pickAddressForPhone(typedHcm, [], { fetchAddresses: posAddresses });
+  assert.equal(picked.address, '45 Trần Hưng Đạo, Phường 2, Quận 5, TP Hồ Chí Minh');
+  assert.equal(picked.source, 'POS');
+  const typedNothing = { id: 'd4', phone: '0999', address: 'Chưa có địa chỉ' };
+  assert.equal((await pickAddressForPhone(typedNothing, [], { fetchAddresses: posAddresses })).address, 'Tổ 5, Phường Sông Cầu, Thành phố Bắc Kạn, Bắc Kạn', 'không gõ gì thì lấy địa chỉ mới nhất');
+  const typedOther = { id: 'd5', phone: '0999', address: 'Hà Nội' };
+  assert.equal(await pickAddressForPhone(typedOther, [], { fetchAddresses: posAddresses }), null, 'không có địa chỉ cùng tỉnh thì không điền');
+  const fromCrm = await pickAddressForPhone(typedNothing, [complete('p1', '0999', [['GRA-XANH-Z450', 1]], 'xanh')], { fetchAddresses: async () => [] });
+  assert.match(fromCrm.source, /đơn trước/);
+
+  // Cả luồng: đơn dở chỉ có tên + SĐT + tỉnh → dựng lại đủ sản phẩm và địa chỉ, giữ id và trạng thái.
+  const payload = { name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00', location: 'https://granola.giotnang.vn/?utm_campaign=xanh' };
+  const draft = buildLandingOrder(payload, { now: 5000, id: 'DRAFT1' });
+  assert.equal(draft.landing.needsProduct, true);
+  const filled = await autoFillLandingOrder(draft, payload, history, { fetchAddresses: posAddresses });
+  assert.equal(filled.id, 'DRAFT1');
+  assert.equal(filled.status, 'Chưa hoàn tất');
+  assert.equal(filled.landing.incomplete, true);
+  assert.deepEqual(filled.products.map(item => [item.sku, item.quantity]), [['GRA-XANH-Z450', 2]]);
+  assert.equal(filled.total, 298000);
+  assert.equal(filled.ward, 'Phường Sông Cầu');
+  assert.equal(filled.district, 'Thành Phố Bắc Kạn');
+  assert.match(filled.landing.autoFilled.product, /Granola Túi Xanh 450g x2/);
+  assert.match(filled.landing.autoFilled.address, /từ POS/);
+  assert.match(filled.note, /Tự điền, cần duyệt/);
+  // Đơn đã đủ thì không đụng.
+  const full = buildLandingOrder({ name: 'A', phone: '0368419478', address: '12 Lê Lợi, P. Bến Nghé, Q1, HCM', products: 'Granola Mới (Combo 2 Granola Xanh): 1 x 298.000 ₫', total: '298.000' }, { now: 5000, id: 'FULL1' });
+  const untouched = await autoFillLandingOrder(full, {}, history, { fetchAddresses: posAddresses });
+  assert.equal(untouched.landing.autoFilled, undefined);
+});
+
+test('đơn dở được tự điền vẫn bị bản khách gửi xong đè lên', async () => {
+  const draft = await recordLandingOrder({ name: 'Mai', phone: '0977123123', province: 'Hồ Chí Minh', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 03:00:00', location: 'https://granola.giotnang.vn/?utm_campaign=xanh' }, { fetchAddresses: async () => ['45 Trần Hưng Đạo, Phường 2, Quận 5, TP Hồ Chí Minh'] });
+  assert.equal(draft.created, true);
+  assert.ok(draft.order.landing.autoFilled, 'đơn dở được tự điền');
+  assert.equal(draft.order.status, 'Chưa hoàn tất');
+  const done = await recordLandingOrder({ name: 'Mai', phone: '0977123123', address: '12 Lê Lợi', ward: 'Phường Bến Nghé', district: 'Quận 1', province: 'Hồ Chí Minh', products: 'Granola Mới (Combo 3 Granola Xanh): 1 x 447.000 ₫', total: '447.000', status: 'Form hoàn tất', inserted_at: '2026-09-16 03:05:00' });
+  assert.equal(done.updated, true);
+  assert.equal(done.order.id, draft.order.id);
+  assert.equal(done.order.landing.autoFilled, undefined, 'dữ liệu thật thay hoàn toàn phần tự điền');
+  assert.equal(done.order.ward, 'Phường Bến Nghé');
+  assert.deepEqual(done.order.products.map(item => [item.sku, item.quantity]), [['GRA-XANH-Z450', 3]]);
 });

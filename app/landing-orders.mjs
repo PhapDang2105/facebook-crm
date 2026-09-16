@@ -15,7 +15,8 @@ import { normalizeCustomerOrder } from './conversation-orders.mjs';
 import { findProductBySku, matchProduct, normalizeText } from './processing/catalog.mjs';
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
-import { attachPhoneWarning } from './phone-warnings.mjs';
+import { attachPhoneWarning, fetchPosCustomerAddresses } from './phone-warnings.mjs';
+import { isUsableStreet, resolveAddress } from './processing/locations.mjs';
 
 const landingOrdersPath = process.env.LANDING_ORDERS_PATH
   || path.join(projectRoot, 'data', 'processed', 'landing-orders.json');
@@ -444,12 +445,115 @@ function signature(order) {
  * Lưu đơn, chống trùng: cùng mã của nền tảng, hoặc cùng số điện thoại và
  * cùng giỏ trong 10 phút (form bấm gửi hai lần).
  */
+// ===== Tự điền cho đơn khách bỏ dở =====
+
+const campaignKey = order => {
+  const match = String(order?.landing?.campaign || '').match(/utm_campaign=([^;]+)/);
+  return (match ? match[1].trim() : '') || String(order?.landing?.page || '').trim();
+};
+
+/**
+ * Sản phẩm mặc định của một chiến dịch: tổ hợp (SKU × số lượng) xuất hiện
+ * nhiều nhất trong các đơn đã có sản phẩm của cùng utm_campaign hoặc cùng
+ * trang landing; không có thì lấy tổ hợp phổ biến nhất của mọi đơn landing.
+ * Đơn đã tự điền không được tính để không tự củng cố chính nó.
+ */
+export function defaultBasketForCampaign(orders, order) {
+  const key = campaignKey(order);
+  const candidates = orders.filter(entry => entry.id !== order.id && !entry.landing?.autoFilled?.product && entry.products.some(item => item.sku));
+  const tally = list => {
+    const counts = new Map();
+    for (const entry of list) {
+      const signature = entry.products.filter(item => item.sku).map(item => `${item.sku}x${item.quantity}`).sort().join('+');
+      counts.set(signature, (counts.get(signature) || 0) + 1);
+    }
+    const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    return best ? { signature: best[0], count: best[1], items: best[0].split('+').map(part => { const [sku, quantity] = part.split('x'); return { sku, quantity: Number(quantity) || 1 }; }) } : null;
+  };
+  const sameCampaign = key ? candidates.filter(entry => campaignKey(entry) === key) : [];
+  const chosen = tally(sameCampaign);
+  if (chosen) return { ...chosen, basis: `chiến dịch ${key}` };
+  const overall = tally(candidates);
+  return overall ? { ...overall, basis: 'mọi đơn landing' } : null;
+}
+
+function addressLevels(text) {
+  const resolved = resolveAddress(text);
+  return { resolved, complete: Boolean(resolved.province && resolved.district && resolved.ward && isUsableStreet(resolved.street)) };
+}
+
+/**
+ * Địa chỉ đầy đủ cho số điện thoại này: POS trước (hồ sơ khách + đơn trước),
+ * rồi đơn landing trước trong CRM. Chỉ nhận địa chỉ khớp với phần khách đã
+ * gõ (cùng tỉnh, cùng quận nếu có), để không gửi hàng về địa chỉ cũ ở nơi khác.
+ */
+export async function pickAddressForPhone(order, orders, { fetchAddresses = fetchPosCustomerAddresses } = {}) {
+  const typed = resolveAddress(order.address === 'Chưa có địa chỉ' ? '' : order.address);
+  const fromPos = (await fetchAddresses(order.phone)).map(address => ({ address, source: 'POS' }));
+  const fromCrm = orders
+    .filter(entry => entry.id !== order.id && entry.phone === order.phone && !entry.landing?.autoFilled?.address && entry.address && entry.address !== 'Chưa có địa chỉ')
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .map(entry => ({ address: entry.address, source: 'đơn trước trong CRM' }));
+  for (const candidate of [...fromPos, ...fromCrm]) {
+    const { resolved, complete } = addressLevels(candidate.address);
+    if (!complete) continue;
+    if (typed.province && typed.province.code !== resolved.province.code) continue;
+    if (typed.district && typed.district.code !== resolved.district.code) continue;
+    if (typed.ward && typed.ward.code !== resolved.ward.code) continue;
+    return candidate;
+  }
+  return null;
+}
+
+/**
+ * Đơn khách điền dở (Webcake "chưa hoàn tất", hoặc gửi xong nhưng thiếu sản
+ * phẩm/địa chỉ): điền sản phẩm mặc định của chiến dịch và địa chỉ đã biết
+ * của số điện thoại, dựng lại đơn từ payload đã vá, và đánh dấu autoFilled
+ * để bảng Đơn hàng đưa vào Xử lý dữ liệu cho nhân viên duyệt.
+ */
+export async function autoFillLandingOrder(order, payload, orders, context = {}) {
+  const needsProduct = order.landing.needsProduct;
+  const needsAddress = order.landing.needsAddress || order.locationConfidence !== 'exact';
+  if (!needsProduct && !needsAddress) return order;
+  const patched = { ...payload };
+  const autoFilled = {};
+  if (needsProduct) {
+    const basket = defaultBasketForCampaign(orders, order);
+    if (basket) {
+      const lines = basket.items.map(item => { const product = findProductBySku(item.sku); return product ? `${product.name} x${item.quantity}` : ''; }).filter(Boolean);
+      if (lines.length) {
+        for (const key of Object.keys(patched)) if (/^(products?|variations?|total|total_price|quantity|sku)$/i.test(key)) delete patched[key];
+        patched.products = lines.join('\n');
+        autoFilled.product = `${lines.join(' + ')} (mặc định theo ${basket.basis}, ${basket.count} đơn)`;
+      }
+    }
+  }
+  if (needsAddress) {
+    const picked = await pickAddressForPhone(order, orders, context);
+    if (picked) {
+      for (const key of Object.keys(patched)) if (/^(address|short_address|location|province|district|ward|commune|country|city|state)$/i.test(key)) delete patched[key];
+      patched.address = picked.address;
+      autoFilled.address = `${picked.address} (từ ${picked.source})`;
+    }
+  }
+  if (!Object.keys(autoFilled).length) return order;
+  const rebuilt = buildLandingOrder(patched, { now: order.createdAt, id: order.id, page: order.landing.page });
+  rebuilt.status = order.status;
+  rebuilt.phoneWarning = order.phoneWarning;
+  rebuilt.landing = { ...rebuilt.landing, incomplete: order.landing.incomplete, formStatus: order.landing.formStatus, externalId: order.landing.externalId, formIds: order.landing.formIds, autoFilled };
+  rebuilt.note = [rebuilt.note === 'Đơn từ landing page.' ? '' : rebuilt.note, 'Tự điền, cần duyệt trước khi giao'].filter(Boolean).join(' · ');
+  return rebuilt;
+}
+
 export async function recordLandingOrder(payload, context = {}) {
   const receivedAt = Date.now();
   let order;
   let error = '';
   try {
     order = buildLandingOrder(payload, { ...context, now: receivedAt });
+    // Khách điền dở: điền sản phẩm mặc định của chiến dịch và địa chỉ đã biết,
+    // đơn đi vào Xử lý dữ liệu chờ nhân viên duyệt.
+    if (context.autoFill !== false) order = await autoFillLandingOrder(order, payload, (await readLandingStore()).orders, context);
     // Khách hay bom hàng: đơn vẫn vào bảng, kèm cảnh báo để gọi xác nhận trước khi giao.
     if (context.checkPhone !== false) await attachPhoneWarning(order);
   } catch (failure) {
@@ -471,7 +575,9 @@ export async function recordLandingOrder(payload, context = {}) {
       : null;
     const existing = sameForm || sameCustomerDraft;
     if (existing) {
-      if (existing.landing?.incomplete && !isLessComplete(order, existing)) {
+      // Bản khách gửi xong luôn thắng bản dở dang đã được máy tự điền.
+      const realBeatsAutoFilled = Boolean(existing.landing?.autoFilled) && !order.landing.incomplete && !order.landing.autoFilled;
+      if (existing.landing?.incomplete && (realBeatsAutoFilled || !isLessComplete(order, existing))) {
         const index = store.orders.indexOf(existing);
         const upgraded = {
           ...order,

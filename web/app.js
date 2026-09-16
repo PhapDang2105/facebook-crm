@@ -814,8 +814,10 @@ function chatbotOrderToRows(order) {
   const ward = resolved ? (order.ward || '') : (parts.length > 3 ? parts.at(-3) : '');
   const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
   const sourceLabel = order.source === 'Landing page' ? 'Landing page' : 'Chatbot';
+  const autoFilled = order.landing?.autoFilled || null;
   const flags = [
     order.landing?.incomplete ? '⏳ Chưa hoàn tất, gọi lại khách' : '',
+    autoFilled ? `🤖 Tự điền: ${[autoFilled.product ? `sản phẩm ${autoFilled.product}` : '', autoFilled.address ? `địa chỉ ${autoFilled.address}` : ''].filter(Boolean).join('; ')}` : '',
     order.landing?.needsAddress ? 'Thiếu địa chỉ' : '',
     order.landing?.needsProduct ? 'Kiểm tra sản phẩm' : ''
   ].filter(Boolean).join(' · ');
@@ -4942,17 +4944,31 @@ function getDuplicatePhoneRowIndexes(data = orderData) {
     .flatMap(entries => entries.map(entry => entry.index)));
 }
 
+/** Rows the system filled in or the customer left unfinished: staff review them before export. */
+function getReviewRowIndexes(data = orderData) {
+  const noteIndex = data.headers.findIndex(header => normalizeColumnName(header) === 'ghi chu');
+  if (noteIndex < 0) return new Set();
+  const flagged = new Set();
+  data.rows.forEach((row, index) => {
+    const note = String(row[noteIndex] || '');
+    if (note.includes('🤖 Tự điền') || note.includes('⏳ Chưa hoàn tất')) flagged.add(index);
+  });
+  return flagged;
+}
+
 function getOrdersNeedingProcessing(data = orderData) {
   const invalidRowIndexes = new Set(getInvalidOrderRows(data).map(entry => entry.index));
   const duplicateRowIndexes = getDuplicateOrderRowIndexes(data);
   const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes(data);
   const warningRowIndexes = getPhoneWarningRowIndexes(data);
+  const reviewRowIndexes = getReviewRowIndexes(data);
   return data.rows
     .map((row, index) => ({ row, index }))
     .filter(({ index }) => invalidRowIndexes.has(index)
       || duplicateRowIndexes.has(index)
       || duplicatePhoneRowIndexes.has(index)
-      || warningRowIndexes.has(index));
+      || warningRowIndexes.has(index)
+      || reviewRowIndexes.has(index));
 }
 
 function isInvalidOrderAddress(value) {
@@ -5080,10 +5096,12 @@ function renderOrderData() {
   const duplicateRowIndexes = getDuplicateOrderRowIndexes();
   const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes();
   const warningRowIndexes = getPhoneWarningRowIndexes();
+  const reviewRowIndexes = getReviewRowIndexes();
   const processingRows = allRows.filter(({ index }) => invalidRowIndexes.has(index)
     || duplicateRowIndexes.has(index)
     || duplicatePhoneRowIndexes.has(index)
-    || warningRowIndexes.has(index));
+    || warningRowIndexes.has(index)
+    || reviewRowIndexes.has(index));
   const processingRowIndexes = new Set(processingRows.map(entry => entry.index));
   const filterValue = orderFilter?.value || 'all';
   let importRows = filterValue === 'valid' ? allRows.filter(entry => !processingRowIndexes.has(entry.index))

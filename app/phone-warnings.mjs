@@ -187,6 +187,32 @@ async function posRequest(pathname, params, config, fetchImpl) {
  * thành công của shop, lấy báo cáo theo số (`reports_by_phone`) do POS tính,
  * và trạng thái khách (chặn, thẻ). Lỗi mạng trả về null để không chặn việc lên đơn.
  */
+/**
+ * Địa chỉ đã lưu của một số điện thoại ở Pancake POS, mới nhất trước: địa chỉ
+ * trong hồ sơ khách và địa chỉ giao của các đơn trước. Dùng để điền cho đơn
+ * landing khách bỏ dở. Lỗi mạng trả về mảng rỗng.
+ */
+export async function fetchPosCustomerAddresses(phone, { config = posConfig(), fetchImpl = fetch } = {}) {
+  if (!posConfigured(config)) return [];
+  const key = normalizeWarningPhone(phone);
+  try {
+    const [orders, customers] = await Promise.all([
+      posRequest('/orders', { search: key, page_size: 20 }, config, fetchImpl),
+      posRequest('/customers', { search: key, page_size: 5 }, config, fetchImpl)
+    ]);
+    const fromOrders = (Array.isArray(orders?.data) ? orders.data : [])
+      .filter(order => normalizeWarningPhone(order.bill_phone_number || order.shipping_address?.phone_number) === key)
+      .sort((a, b) => String(b.inserted_at || '').localeCompare(String(a.inserted_at || '')))
+      .map(order => String(order.shipping_address?.full_address || ''));
+    const fromCustomers = (Array.isArray(customers?.data) ? customers.data : [])
+      .filter(customer => (customer.phone_numbers || []).some(value => normalizeWarningPhone(value) === key))
+      .flatMap(customer => (customer.shop_customer_address || []).map(address => String(address.full_address || '')));
+    return [...new Set([...fromOrders, ...fromCustomers].map(value => value.trim()).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchPosPhoneReport(phone, { config = posConfig(), fetchImpl = fetch } = {}) {
   if (!posConfigured(config)) return null;
   const key = normalizeWarningPhone(phone);

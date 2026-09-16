@@ -5,7 +5,8 @@ import {
   isInvalidOrderAddress,
   normalizeExportLocation,
   resolveProductRelation,
-  splitSkuForExport
+  splitSkuForExport,
+  exportPreviewStreets
 } from '../app/order-export.mjs';
 
 assert.ok(PRODUCT_RELATIONS.every(relation => ['single', 'combo'].includes(relation.type)));
@@ -78,5 +79,9 @@ const partitionedRows = buildExportRows({
 });
 assert.equal(partitionedRows.length, 1);
 assert.equal(partitionedRows[0][34], '0901234568');
+// Bảng xem trước: cột Địa chỉ chỉ còn số nhà/đường; file vẫn giữ nguyên địa chỉ đầy đủ.
+const fullRows = buildExportRows({ headers: [...headers, 'Địa chỉ'], rows: [['DH-5', 'GRA-XANH-Z450', '1', '189000', 'Granola Xanh', '0901234569', '12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM']] });
+assert.equal(fullRows[0][35], '12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM');
+assert.deepEqual(exportPreviewStreets(fullRows), ['12 Nguyễn Huệ']);
 
 console.log('PASS: order export single/combo relations');

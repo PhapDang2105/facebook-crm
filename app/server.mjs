@@ -4,7 +4,7 @@ import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/prom
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { createLead, getSegments, updateLead } from './domain.mjs';
-import { buildExportRows } from './order-export.mjs';
+import { buildExportRows, exportPreviewStreets } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
@@ -1187,7 +1187,9 @@ const server = http.createServer(async (request, response) => {
       if (!payload.orderData || !Array.isArray(payload.orderData.headers) || !Array.isArray(payload.orderData.rows)) {
         return sendJson(response, 400, { error: 'Dữ liệu đơn hàng không hợp lệ.' });
       }
-      return sendJson(response, 200, { rows: buildExportRows(payload.orderData) });
+      const rows = buildExportRows(payload.orderData);
+      // `streets`: phần đường phố cho cột Địa chỉ của bảng xem trước; file vẫn đủ.
+      return sendJson(response, 200, { rows, streets: exportPreviewStreets(rows) });
     }
     if (request.method === 'POST' && url.pathname === '/api/orders/export') {
       const payload = await readBody(request);

@@ -5599,30 +5599,31 @@ const exportPreviewWidths = [55,130,135,155,165,175,95,110,105,105,165,145,255,1
 // The export rows come from the server — the same function that writes the
 // XLSX — so the preview can never disagree with the file. The frontend used to
 // carry its own copy of the SKU mapping with hard-coded prices and weights.
-let exportRowsCache = { key: '', rows: [] };
+let exportRowsCache = { key: '', rows: [], streets: [] };
 
 async function fetchExportRows() {
-  if (!orderData.rows.length) return [];
+  if (!orderData.rows.length) return { rows: [], streets: [] };
   // Chỉ đơn sạch hoặc đã bấm "Đã xử lý" mới sang Xuất dữ liệu.
   const exportable = exportableOrderData();
   const key = JSON.stringify(exportable);
-  if (exportRowsCache.key === key) return exportRowsCache.rows;
+  if (exportRowsCache.key === key) return exportRowsCache;
   const result = await readApiResponse(await fetch('/api/orders/export/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orderData: exportable })
   }));
-  exportRowsCache = { key, rows: Array.isArray(result.rows) ? result.rows : [] };
-  return exportRowsCache.rows;
+  exportRowsCache = { key, rows: Array.isArray(result.rows) ? result.rows : [], streets: Array.isArray(result.streets) ? result.streets : [] };
+  return exportRowsCache;
 }
 
 async function renderExportPreview() {
   const preview = document.querySelector('#order-export-preview');
   if (!preview) return;
   let rows = [];
+  let streets = [];
   preview.classList.remove('is-empty');
   try {
-    rows = await fetchExportRows();
+    ({ rows, streets } = await fetchExportRows());
   } catch (error) {
     renderEmptyState(preview, error.message || 'Chưa dựng được dữ liệu xuất.');
     if (orderExport) orderExport.hidden = true;
@@ -5643,7 +5644,9 @@ async function renderExportPreview() {
   }).join('');
   const tableWidth = exportPreviewWidths.reduce((total, width) => total + width, 0);
   const columns = exportPreviewWidths.map(width => `<col style="width:${width}px">`).join('');
-  const body = rows.map(row => `<tr>${exportPreviewIndexes.map(index => `<td>${escapeHtml(row[index])}</td>`).join('')}</tr>`).join('');
+  // Cột Địa chỉ chỉ hiện số nhà/đường (ba cấp có cột riêng); file xuất vẫn đầy đủ.
+  const cell = (row, rowIndex, index) => index === 35 ? (streets[rowIndex] ?? row[index]) : row[index];
+  const body = rows.map((row, rowIndex) => `<tr>${exportPreviewIndexes.map(index => `<td>${escapeHtml(cell(row, rowIndex, index))}</td>`).join('')}</tr>`).join('');
   preview.innerHTML = `<table class="export-template-table" style="width:${tableWidth}px"><colgroup>${columns}</colgroup><thead><tr class="export-group-row">${groupHead}</tr><tr>${columnHead}</tr></thead><tbody>${body}</tbody></table>`;
 }
 

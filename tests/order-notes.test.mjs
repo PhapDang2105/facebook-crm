@@ -12,7 +12,7 @@ test('đơn bỏ dở thiếu địa chỉ, máy tự điền sản phẩm, số
     '⏳ Bỏ dở form',
     '⚠ Chưa có địa chỉ',
     '🤖 Tự điền SP: Granola Túi Xanh 450g x2',
-    '☎ Hay bom 5/12 (42%)'
+    '☎ Tỷ lệ nhận hàng: 7/12 (58%)'
   ]);
 });
 
@@ -23,8 +23,8 @@ test('địa chỉ thiếu cấp, sản phẩm chưa khớp, địa chỉ trùng
   assert.deepEqual(ambiguous, ['⚠ Thiếu quận/huyện', '⚠ Địa chỉ trùng tên, hỏi lại', '⚠ Sản phẩm lạ: Combo lạ']);
   const unreadable = processingNotes({ address: 'Thì địa chỉ trên rồi', street: '', ward: '', district: '', province: '', locationConfidence: 'none', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }] });
   assert.deepEqual(unreadable, ['⚠ Địa chỉ không rõ: "Thì địa chỉ trên rồi"']);
-  assert.equal(shortWarning({ level: 'watch', sources: ['Hệ thống Pancake: bom 3/12 đơn (25%), POS có đếm cảnh báo'] }), 'Từng bom 3/12 (25%)');
-  assert.equal(shortWarning({ level: 'high', sources: ['Shop mình: hoàn/huỷ 2 đơn, giao thành công 1'] }), 'Hay bom, hoàn 2 đơn ở shop');
+  assert.equal(shortWarning({ level: 'watch', sources: ['Hệ thống Pancake: bom 3/12 đơn (25%), POS có đếm cảnh báo'] }), 'Tỷ lệ nhận hàng: 9/12 (75%)');
+  assert.equal(shortWarning({ level: 'high', sources: ['Shop mình: hoàn/huỷ 2 đơn, giao thành công 1'] }), 'Tỷ lệ nhận hàng ở shop: 1/3 (33%)');
   assert.equal(shortWarning({ level: 'block', sources: ['POS đã chặn khách này'] }), 'POS chặn số');
   // Đơn đủ: không có gì để ghi.
   assert.deepEqual(processingNotes({ address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', street: '12 Lê Lợi', ward: 'Phường Bến Nghé', district: 'Quận 1', province: 'TP Hồ Chí Minh', locationConfidence: 'exact', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }] }), []);

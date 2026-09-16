@@ -43,18 +43,28 @@ function shortAutoFill(text) {
   return String(text || '').replace(/\s*\(mặc định theo (chiến dịch|trang|mọi đơn)[^)]*\)/i, '').trim();
 }
 
-const WARNING_SHORT = Object.freeze({ block: 'POS chặn số', high: 'Hay bom', watch: 'Từng bom' });
+/** "7/12 (58%)": số đơn khách đã nhận trên tổng số đơn. */
+export function receiveRate(received, total) {
+  if (!total) return '';
+  return `${received}/${total} (${Math.round((received / total) * 100)}%)`;
+}
 
-/** "Hay bom 5/12 (42%)", "Hay bom, hoàn 2 đơn ở shop", "POS chặn số". */
+/**
+ * Nói bằng tỷ lệ khách nhận hàng, không dùng chữ "bom": Pancake đếm số đơn bom
+ * trên tổng, shop mình đếm hoàn/huỷ và giao thành công. "Tỷ lệ nhận hàng: 7/12 (58%)".
+ */
 export function shortWarning(warning) {
   const source = Array.isArray(warning.sources) && warning.sources.length ? String(warning.sources[0]) : '';
-  const bom = source.match(/bom (\d+\/\d+)(?: đơn)?( \(\d+%\))?/i);
-  const shop = source.match(/hoàn\/huỷ (\d+) đơn/i);
-  const label = WARNING_SHORT[warning.level] || 'Số cần kiểm tra';
-  if (bom) return `${label} ${bom[1]}${bom[2] || ''}`;
-  if (shop) return `${label}, hoàn ${shop[1]} đơn ở shop`;
-  if (source.includes('thẻ')) return `${label}, POS gắn thẻ hoàn`;
-  return label;
+  if (warning.level === 'block') return 'POS chặn số';
+  const bom = source.match(/bom (\d+)\/(\d+)/i);
+  if (bom) return `Tỷ lệ nhận hàng: ${receiveRate(Number(bom[2]) - Number(bom[1]), Number(bom[2]))}`;
+  const shop = source.match(/hoàn\/huỷ (\d+) đơn(?:, giao thành công (\d+))?/i);
+  if (shop) {
+    const delivered = Number(shop[2]) || 0;
+    return `Tỷ lệ nhận hàng ở shop: ${receiveRate(delivered, delivered + Number(shop[1]))}`;
+  }
+  if (source.includes('thẻ')) return 'POS gắn thẻ hoàn';
+  return 'Số cần kiểm tra';
 }
 
 /** Cấp địa chỉ còn thiếu, theo thứ tự nhân viên hỏi khách. */

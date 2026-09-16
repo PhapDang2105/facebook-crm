@@ -474,7 +474,7 @@ function renderCustomerPhoneWarning() {
   element.hidden = !warning;
   element.className = `customer-phone-warning${warning?.level === 'watch' ? ' is-watch' : ''}`;
   element.innerHTML = warning
-    ? `${alertIconSvg}${escapeHtml(`${warning.label}${warning.failed ? ` (bom/hoàn ${warning.failed} đơn${warning.success ? `, giao thành công ${warning.success}` : ''})` : ''}`)}`
+    ? `${alertIconSvg}${escapeHtml(`${warning.label}${warning.failed ? ` (hoàn ${warning.failed} đơn${warning.success ? `, giao thành công ${warning.success}` : ''})` : ''}`)}`
     : '';
 }
 
@@ -5209,18 +5209,23 @@ function getDuplicatePhoneRowIndexes(data = orderData) {
 // Ghi chú xử lý bắt đầu bằng một ký hiệu (cùng bộ với app/order-notes.mjs).
 const processingNoteMarkers = ['⚠', '⏳', '🤖', '☎'];
 
-/** "Hay bom hàng: 5/12 đơn (42%)" (cùng cách rút gọn với server). */
-// Cùng câu chữ với shortWarning ở app/order-notes.mjs: "Hay bom 5/12 (42%)".
+// Cùng câu chữ với shortWarning ở app/order-notes.mjs: nói bằng tỷ lệ khách
+// nhận hàng, không dùng chữ "bom". "Tỷ lệ nhận hàng: 7/12 (58%)".
+function receiveRateText(received, total) {
+  return total ? `${received}/${total} (${Math.round((received / total) * 100)}%)` : '';
+}
 function shortPhoneWarning(warning) {
-  const labels = { block: 'POS chặn số', high: 'Hay bom', watch: 'Từng bom' };
   const source = Array.isArray(warning.sources) && warning.sources.length ? String(warning.sources[0]) : '';
-  const bom = source.match(/bom (\d+\/\d+)(?: đơn)?( \(\d+%\))?/i);
-  const shop = source.match(/hoàn\/huỷ (\d+) đơn/i);
-  const label = labels[warning.level] || 'Số cần kiểm tra';
-  if (bom) return `${label} ${bom[1]}${bom[2] || ''}`;
-  if (shop) return `${label}, hoàn ${shop[1]} đơn ở shop`;
-  if (source.includes('thẻ')) return `${label}, POS gắn thẻ hoàn`;
-  return label;
+  if (warning.level === 'block') return 'POS chặn số';
+  const bom = source.match(/bom (\d+)\/(\d+)/i);
+  if (bom) return `Tỷ lệ nhận hàng: ${receiveRateText(Number(bom[2]) - Number(bom[1]), Number(bom[2]))}`;
+  const shop = source.match(/hoàn\/huỷ (\d+) đơn(?:, giao thành công (\d+))?/i);
+  if (shop) {
+    const delivered = Number(shop[2]) || 0;
+    return `Tỷ lệ nhận hàng ở shop: ${receiveRateText(delivered, delivered + Number(shop[1]))}`;
+  }
+  if (source.includes('thẻ')) return 'POS gắn thẻ hoàn';
+  return 'Số cần kiểm tra';
 }
 function isProcessingNoteText(note) {
   return String(note || '').split(' · ').some(segment => processingNoteMarkers.some(marker => segment.trim().startsWith(marker)));
@@ -5353,10 +5358,12 @@ const legacyNoteRewrites = [
   [/^Trùng dòng khác, giữ một$/u, 'Trùng đơn'],
   [/^Cùng SĐT với (.+)$/u, (match, ids) => `Cùng SĐT ${ids.split(/,\s*/).filter(Boolean).length} đơn khác`],
   [/^Tự điền SP: (.+?)\s*\((?:theo|mặc định)[^)]*\)$/u, 'Tự điền SP: $1'],
-  [/^Hay bom hàng: (\d+\/\d+) đơn( \(\d+%\))?$/u, 'Hay bom $1$2'],
-  [/^Từng không nhận hàng: (\d+\/\d+) đơn( \(\d+%\))?$/u, 'Từng bom $1$2'],
-  [/^Hay bom hàng: (hoàn .+|POS gắn thẻ hoàn)$/u, 'Hay bom, $1'],
-  [/^Từng không nhận hàng: (hoàn .+|POS gắn thẻ hoàn)$/u, 'Từng bom, $1'],
+  // Cảnh báo bom cũ ("Hay bom hàng: 5/12 đơn (42%)", "Hay bom 5/12 (42%)") đổi
+  // sang tỷ lệ nhận hàng tính từ cùng con số.
+  [/^(?:Hay bom hàng|Từng không nhận hàng|Hay bom|Từng bom):? (\d+)\/(\d+)(?: đơn)?(?: \(\d+%\))?$/u,
+    (match, bombed, total) => `Tỷ lệ nhận hàng: ${receiveRateText(Number(total) - Number(bombed), Number(total))}`],
+  [/^(?:Hay bom hàng|Từng không nhận hàng|Hay bom|Từng bom)[:,] hoàn (\d+) đơn ở shop$/u, 'Hoàn $1 đơn ở shop'],
+  [/^(?:Hay bom hàng|Từng không nhận hàng|Hay bom|Từng bom)[:,] POS gắn thẻ hoàn$/u, 'POS gắn thẻ hoàn'],
   [/^POS đã chặn số này$/u, 'POS chặn số'],
   [/^Địa chỉ không rõ ba cấp: /u, 'Địa chỉ không rõ: '],
   [/^Địa chỉ trùng tên nhiều nơi, hỏi lại$/u, 'Địa chỉ trùng tên, hỏi lại'],

@@ -18,7 +18,7 @@ const warningsPath = process.env.PHONE_WARNINGS_PATH
 export const LEVELS = Object.freeze({ block: 3, high: 2, watch: 1, none: 0 });
 const LEVEL_LABELS = Object.freeze({
   block: 'Chặn: không giao, gọi xác nhận',
-  high: 'Hay bom hàng, gọi xác nhận trước khi giao',
+  high: 'Tỷ lệ nhận hàng thấp, gọi xác nhận trước khi giao',
   watch: 'Từng không nhận hàng, nên gọi xác nhận',
   none: ''
 });

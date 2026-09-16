@@ -5221,7 +5221,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const templates = {
     'dia chi': 'minmax(200px, 1fr)',
     'ghi chu': 'minmax(200px, 1.2fr)',
-    'san pham': 'minmax(140px, 200px)',
+    'san pham': 'fit-content(170px)',
     'khach hang': 'minmax(100px, 170px)',
     'so dien thoai': 'minmax(100px, 150px)'
   };

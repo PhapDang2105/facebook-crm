@@ -252,12 +252,17 @@
       <section class="order-stage hidden" data-order-panel="process">
         <!-- Đơn cần xử lý chia theo ngày đặt: hôm nay chưa gọi được khách thì mai
              đơn tự nằm ở tab kế, không ai phải chuyển tay. Tab cuối gom mọi đơn quá 3 ngày. -->
-        <div class="order-day-tabs" role="tablist" aria-label="Đơn cần xử lý theo ngày">
-          <button class="order-day-tab active" type="button" role="tab" aria-selected="true" data-order-day="0">Hôm nay<span class="order-day-count" hidden></span></button>
-          <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="1">Hôm qua<span class="order-day-count" hidden></span></button>
-          <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="2">2 ngày trước<span class="order-day-count" hidden></span></button>
-          <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="3">Quá 3 ngày<span class="order-day-count" hidden></span></button>
+        <div class="order-day-bar">
+          <div class="order-day-tabs" role="tablist" aria-label="Đơn cần xử lý theo ngày">
+            <button class="order-day-tab active" type="button" role="tab" aria-selected="true" data-order-day="0">Hôm nay</button>
+            <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="1">Hôm qua</button>
+            <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="2">2 ngày trước</button>
+            <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="3">Quá 3 ngày</button>
+          </div>
+          <!-- Lịch sử: những đơn đã bấm "Đã xử lý", mới nhất đứng đầu. -->
+          <button class="order-history-button" id="order-processed-history-button" type="button" aria-expanded="false" aria-controls="order-processed-history-panel">Lịch sử</button>
         </div>
+        <div class="order-history-panel hidden" id="order-processed-history-panel"></div>
         <div class="data-preview" id="order-preview"></div>
       </section>
 

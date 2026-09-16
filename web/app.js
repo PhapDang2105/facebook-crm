@@ -1029,10 +1029,40 @@ document.addEventListener('keydown', event => {
 document.querySelector('#order-dialog-reviewed')?.addEventListener('click', () => {
   const row = orderData.rows[orderDialogRowIndex];
   if (!row) return;
-  markOrdersReviewed([orderRowKey(row)]);
+  const { headers } = orderData;
+  const cell = name => { const index = headers.findIndex(header => normalizeColumnName(header) === name); return index >= 0 ? String(row[index] || '').trim() : ''; };
+  const phoneIndex = orderPhoneColumnIndex();
+  markOrdersReviewed([orderRowKey(row)], [{ key: orderRowKey(row), id: cell('ma don hang'), name: cell('khach hang'), phone: phoneIndex >= 0 ? String(row[phoneIndex] || '').trim() : '' }]);
   closeOrderDialog();
   renderOrderData();
+  renderProcessedHistory();
   showToast('Đã đánh dấu xử lý xong, đơn sẽ có ở Xuất dữ liệu.', 'success');
+});
+
+// ===== Lịch sử đã xử lý =====
+const processedHistoryButton = document.querySelector('#order-processed-history-button');
+const processedHistoryPanel = document.querySelector('#order-processed-history-panel');
+
+function renderProcessedHistory() {
+  if (!processedHistoryPanel) return;
+  const log = readReviewedOrdersLog();
+  if (!log.length) {
+    processedHistoryPanel.innerHTML = '<p>Chưa có đơn nào được đánh dấu xử lý.</p>';
+    return;
+  }
+  processedHistoryPanel.innerHTML = log.map(entry => {
+    const at = new Date(Number(entry.at));
+    const timeLabel = Number.isNaN(at.getTime()) ? '' : at.toLocaleString('vi-VN');
+    const title = [entry.name, entry.phone].filter(Boolean).join(' · ') || 'Đơn hàng';
+    return `<div class="order-history-item"><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(timeLabel)}</small></div><span>${escapeHtml(entry.id || '')}</span></div>`;
+  }).join('');
+}
+
+processedHistoryButton?.addEventListener('click', () => {
+  const willOpen = processedHistoryPanel.classList.contains('hidden');
+  if (willOpen) renderProcessedHistory();
+  processedHistoryPanel.classList.toggle('hidden', !willOpen);
+  processedHistoryButton.setAttribute('aria-expanded', String(willOpen));
 });
 
 // ===== Bốn tab theo ngày ở Xử lý dữ liệu =====
@@ -1044,17 +1074,34 @@ const orderDayLastBucket = 3;
 const orderDayEmptyMessages = ['Không có đơn cần xử lý hôm nay', 'Không có đơn tồn từ hôm qua', 'Không có đơn tồn từ 2 ngày trước', 'Không có đơn tồn quá 3 ngày'];
 let activeOrderDay = 0;
 
-/** Tab của một dòng: số ngày từ ngày đặt ("16/09 07:52", không có năm) tới hôm nay, chặn ở 3. Dòng không có ngày tính là hôm nay. */
-function orderDayBucket(row, data = orderData, today = new Date()) {
+/** Đọc cột Ngày "16/09 07:52" (có thể kèm năm) thành Date; không đọc được thì null. */
+function parseOrderRowDate(row, data = orderData, today = new Date()) {
   const dateIndex = data.headers.findIndex(header => normalizeColumnName(header) === normalizeColumnName(orderDateHeader));
-  const match = dateIndex >= 0 ? String(row[dateIndex] || '').match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/) : null;
-  if (!match) return 0;
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  let ordered = new Date(match[3] ? Number(match[3]) : today.getFullYear(), Number(match[2]) - 1, Number(match[1]));
+  const match = dateIndex >= 0 ? String(row[dateIndex] || '').match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?(?:\s+(\d{1,2}):(\d{2}))?/) : null;
+  if (!match) return null;
+  const [, day, month, year, hour, minute] = match;
+  const build = fullYear => new Date(fullYear, Number(month) - 1, Number(day), Number(hour) || 0, Number(minute) || 0);
+  let ordered = build(year ? Number(year) : today.getFullYear());
   // Không ghi năm mà rơi vào "sau hôm nay" thì là đơn của năm trước (qua Tết dương).
-  if (!match[3] && ordered > startOfToday) ordered = new Date(today.getFullYear() - 1, Number(match[2]) - 1, Number(match[1]));
-  const days = Math.round((startOfToday - ordered) / 86400000);
+  if (!year && ordered > today) ordered = build(today.getFullYear() - 1);
+  return Number.isNaN(ordered.getTime()) ? null : ordered;
+}
+
+/** Tab của một dòng: số ngày từ ngày đặt tới hôm nay, chặn ở 3. Dòng không có ngày tính là hôm nay. */
+function orderDayBucket(row, data = orderData, today = new Date()) {
+  const ordered = parseOrderRowDate(row, data, today);
+  if (!ordered) return 0;
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfOrder = new Date(ordered.getFullYear(), ordered.getMonth(), ordered.getDate());
+  const days = Math.round((startOfToday - startOfOrder) / 86400000);
   return Math.max(0, Math.min(orderDayLastBucket, days));
+}
+
+/** Bảng đọc theo thời gian: đơn mới nhất đứng đầu, dòng không có ngày xuống cuối theo thứ tự cũ. */
+function sortOrderEntriesByTime(entries, data = orderData) {
+  const now = new Date();
+  const time = new Map(entries.map(entry => [entry.index, parseOrderRowDate(entry.row, data, now)?.getTime() || 0]));
+  return [...entries].sort((first, second) => (time.get(second.index) - time.get(first.index)) || (first.index - second.index));
 }
 
 function setActiveOrderDay(day) {
@@ -1066,16 +1113,6 @@ function setActiveOrderDay(day) {
   });
 }
 
-/** Số đơn (không phải số dòng) đang chờ ở mỗi tab, hiện thành huy hiệu nhỏ. */
-function renderOrderDayCounts(counts) {
-  orderDayTabs.forEach(tab => {
-    const badge = tab.querySelector('.order-day-count');
-    if (!badge) return;
-    const count = counts[Number(tab.dataset.orderDay)] || 0;
-    badge.textContent = String(count);
-    badge.hidden = count === 0;
-  });
-}
 
 orderDayTabs.forEach(tab => {
   tab.onclick = () => { setActiveOrderDay(tab.dataset.orderDay); renderOrderData(); };
@@ -5258,10 +5295,20 @@ function orderRowKey(row, data = orderData) {
 function readReviewedOrders() {
   try { return new Set(JSON.parse(localStorage.getItem(reviewedOrdersKey) || '[]')); } catch { return new Set(); }
 }
-function markOrdersReviewed(keys) {
+const reviewedOrdersLogKey = 'crm-orders-reviewed-log';
+const reviewedOrdersLogLimit = 500;
+/** Nhật ký các lần bấm "Đã xử lý", mới nhất đứng đầu: { key, at, id, name, phone }. */
+function readReviewedOrdersLog() {
+  try { const log = JSON.parse(localStorage.getItem(reviewedOrdersLogKey) || '[]'); return Array.isArray(log) ? log : []; } catch { return []; }
+}
+function markOrdersReviewed(keys, details = []) {
   const reviewed = readReviewedOrders();
   keys.forEach(key => reviewed.add(key));
   try { localStorage.setItem(reviewedOrdersKey, JSON.stringify([...reviewed])); } catch {}
+  if (!details.length) return;
+  const at = Date.now();
+  const log = [...details.map(detail => ({ at, ...detail })), ...readReviewedOrdersLog()].slice(0, reviewedOrdersLogLimit);
+  try { localStorage.setItem(reviewedOrdersLogKey, JSON.stringify(log)); } catch {}
 }
 function isRowReviewed(row, data = orderData, reviewed = readReviewedOrders()) {
   return reviewed.has(orderRowKey(row, data));
@@ -5472,7 +5519,7 @@ function renderOrderData() {
   renderExportPreview();
 
   renderOrderTable(
-    document.querySelector('#order-import-preview'), headers, importRows,
+    document.querySelector('#order-import-preview'), headers, sortOrderEntriesByTime(importRows),
     rows.length ? 'Không tìm thấy đơn hàng phù hợp' : 'Chưa có dữ liệu',
     ({ index }) => warningRowIndexes.get(index) && warningRowIndexes.get(index) !== 'watch' ? 'order-row-phone-warning'
       : warningRowIndexes.get(index) === 'watch' ? 'order-row-phone-watch'
@@ -5485,16 +5532,7 @@ function renderOrderData() {
   // cột nút; bấm dòng mở chi tiết để đánh dấu "Đã xử lý". Đơn chia bốn tab theo
   // ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.
   const dayOfRow = new Map(processingRows.map(entry => [entry.index, orderDayBucket(entry.row)]));
-  const orderDayCounts = [0, 0, 0, 0];
-  const countedOrders = new Set();
-  processingRows.forEach(entry => {
-    const orderKey = `${dayOfRow.get(entry.index)}|${orderRowKey(entry.row)}`;
-    if (countedOrders.has(orderKey)) return;
-    countedOrders.add(orderKey);
-    orderDayCounts[dayOfRow.get(entry.index)] += 1;
-  });
-  renderOrderDayCounts(orderDayCounts);
-  const dayRows = processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay);
+  const dayRows = sortOrderEntriesByTime(processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay));
   renderOrderTable(
     document.querySelector('#order-preview'), headers, searchValue ? dayRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : dayRows,
     processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',

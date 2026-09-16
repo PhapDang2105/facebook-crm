@@ -477,13 +477,16 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-row-delete:hover { color: #b42318; background: #fff1f0; }
 .order-row-delete:disabled { opacity: .4; cursor: default; }
 .preview-actions { width: 44px; text-align: center; }
-/* Xử lý dữ liệu: bốn tab theo ngày đặt đơn, cùng kiểu nút viền đen của trang Đơn hàng. */
-.order-day-tabs { display: flex; flex-wrap: wrap; gap: 7.2px; margin: 0 0 12.6px; }
-.order-day-tab { display: inline-flex; align-items: center; gap: 7.2px; height: 33.3px; padding: 0 13.5px; color: #111; background: #fff; border: 0.9px solid #d0d5dd; border-radius: 8.1px; font: inherit; font-size: 12.6px; font-weight: 700; cursor: pointer; }
-.order-day-tab:hover { border-color: #111; }
-.order-day-tab.active { color: #fff; background: #111; border-color: #111; }
-.order-day-count { display: inline-grid; place-items: center; min-width: 19.8px; height: 19.8px; padding: 0 5.4px; color: #111; background: #ededed; border-radius: 9.9px; font-size: 10.8px; font-weight: 700; line-height: 1; }
-.order-day-tab.active .order-day-count { color: #111; background: #fff; }
+/* Xử lý dữ liệu: bốn tab theo ngày đặt, chữ trần không nền, tab đang chọn gạch
+   chân dải màu TikTok (xanh ngọc → đỏ) giống viền trên của bảng. */
+.order-day-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 9px 18px; margin: 0 0 12.6px; }
+.order-day-tabs { display: flex; flex-wrap: wrap; gap: 3.6px; }
+.order-day-tab { position: relative; padding: 8.1px 12.6px; color: #687080; background: transparent; border: 0; border-radius: 0; font: inherit; font-size: 12.6px; font-weight: 700; cursor: pointer; }
+.order-day-tab::after { position: absolute; right: 12.6px; bottom: 0; left: 12.6px; height: 2.7px; background: linear-gradient(90deg, #25f4ee, #fe2c55); border-radius: 2.7px; opacity: 0; transition: opacity .15s; content: ''; }
+.order-day-tab:hover { color: #111; }
+.order-day-tab.active { color: #111; }
+.order-day-tab.active::after { opacity: 1; }
+.order-day-bar + .order-history-panel { margin: 0 0 12.6px; }
 /* Bảng Xử lý dữ liệu: bấm dòng mở chi tiết đơn, nên cả dòng là vùng bấm. */
 #order-preview tbody td { cursor: pointer; }
 #order-preview tbody tr:hover td { background: #f7f8fa; }

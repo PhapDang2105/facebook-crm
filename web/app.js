@@ -5295,7 +5295,7 @@ function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicat
     if (duplicatePhoneRowIndexes?.has(index) && phoneIndex >= 0) {
       const others = [...(ordersByPhone.get(normalizeWarningPhone(row[phoneIndex])) || [])].filter(id => id !== (orderId || `dòng ${index + 1}`));
       // Mã các đơn kia không cần ghi ở đây: bấm dòng là thấy cả nhóm cùng số.
-      if (others.length) list.push(`⚠ Cùng SĐT ${others.length} đơn khác`);
+      if (others.length) list.push(`⚠ Trùng số điện thoại với ${others.length} đơn khác`);
     }
     if (addressIndex >= 0 && isInvalidOrderAddress(row[addressIndex])) list.push('⚠ Địa chỉ GXN, sửa lại');
     if (!isSystemOrderId(orderId)) {
@@ -5388,7 +5388,8 @@ function isInvalidOrderAddress(value) {
 const legacyNoteRewrites = [
   [/^Bỏ dở form \d\d:\d\d \d\d\/\d\d$/u, 'Bỏ dở form'],
   [/^Trùng dòng khác, giữ một$/u, 'Trùng đơn'],
-  [/^Cùng SĐT với (.+)$/u, (match, ids) => `Cùng SĐT ${ids.split(/,\s*/).filter(Boolean).length} đơn khác`],
+  [/^Cùng SĐT với (.+)$/u, (match, ids) => `Trùng số điện thoại với ${ids.split(/,\s*/).filter(Boolean).length} đơn khác`],
+  [/^Cùng SĐT (\d+) đơn khác$/u, 'Trùng số điện thoại với $1 đơn khác'],
   [/^Tự điền SP: (.+?)\s*\((?:theo|mặc định)[^)]*\)$/u, 'Tự điền SP: $1'],
   // Cảnh báo bom cũ ("Hay bom hàng: 5/12 đơn (42%)", "Hay bom 5/12 (42%)") đổi
   // sang tỷ lệ nhận hàng tính từ cùng con số.

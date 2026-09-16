@@ -38,32 +38,29 @@ export function stripProcessingNotes(note) {
   return String(note || '').split(NOTE_SEPARATOR).map(segment => segment.trim()).filter(segment => segment && !isProcessingNote(segment)).join(NOTE_SEPARATOR);
 }
 
-function formatSubmittedAt(value) {
-  const text = String(value || '').trim();
-  const match = text.match(/^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)/);
-  return match ? `${match[4]}:${match[5]} ${match[3]}/${match[2]}` : text;
-}
-
-/** "Granola Túi Xanh 450g x2 (mặc định theo chiến dịch 1202…, 18 đơn)" → "… x2 (theo chiến dịch)". */
+/** "Granola Túi Xanh 450g x2 (mặc định theo chiến dịch 1202…, 18 đơn)" → "Granola Túi Xanh 450g x2". */
 function shortAutoFill(text) {
-  return String(text || '').replace(/\s*\(mặc định theo (chiến dịch|trang|mọi đơn)[^)]*\)/i, ' (theo $1)').trim();
+  return String(text || '').replace(/\s*\(mặc định theo (chiến dịch|trang|mọi đơn)[^)]*\)/i, '').trim();
 }
 
-const WARNING_SHORT = Object.freeze({ block: 'POS đã chặn số này', high: 'Hay bom hàng', watch: 'Từng không nhận hàng' });
+const WARNING_SHORT = Object.freeze({ block: 'POS chặn số', high: 'Hay bom', watch: 'Từng bom' });
 
-/** "Hay bom hàng: 5/12 đơn (42%)". */
+/** "Hay bom 5/12 (42%)", "Hay bom, hoàn 2 đơn ở shop", "POS chặn số". */
 export function shortWarning(warning) {
   const source = Array.isArray(warning.sources) && warning.sources.length ? String(warning.sources[0]) : '';
-  const numbers = source.match(/bom (\d+\/\d+ đơn(?: \(\d+%\))?)/i) || source.match(/hoàn\/huỷ (\d+) đơn/i);
-  const detail = numbers ? (numbers[0].startsWith('bom') ? numbers[1] : `hoàn ${numbers[1]} đơn ở shop`) : (source.includes('thẻ') ? 'POS gắn thẻ hoàn' : '');
+  const bom = source.match(/bom (\d+\/\d+)(?: đơn)?( \(\d+%\))?/i);
+  const shop = source.match(/hoàn\/huỷ (\d+) đơn/i);
   const label = WARNING_SHORT[warning.level] || 'Số cần kiểm tra';
-  return `${label}${detail ? `: ${detail}` : ''}`;
+  if (bom) return `${label} ${bom[1]}${bom[2] || ''}`;
+  if (shop) return `${label}, hoàn ${shop[1]} đơn ở shop`;
+  if (source.includes('thẻ')) return `${label}, POS gắn thẻ hoàn`;
+  return label;
 }
 
 /** Cấp địa chỉ còn thiếu, theo thứ tự nhân viên hỏi khách. */
 export function missingAddressParts(order) {
   const parts = [];
-  if (!isUsableStreet(order.street || '')) parts.push('số nhà/đường');
+  if (!isUsableStreet(order.street || '')) parts.push('số nhà');
   if (!order.ward) parts.push('phường/xã');
   if (!order.district) parts.push('quận/huyện');
   if (!order.province) parts.push('tỉnh/thành');
@@ -84,23 +81,21 @@ export function processingNotes(order) {
   const hasProduct = products.some(item => item?.sku || item?.name);
   const unmatched = products.filter(item => item?.name && !item?.sku).map(item => item.name);
 
-  // Câu ngắn, đọc lướt được trong một ô: việc gì, thiếu gì, lấy từ đâu.
-  if (landing.incomplete) {
-    const when = formatSubmittedAt(landing.submittedAt);
-    notes.push(`⏳ Bỏ dở form${when ? ` ${when}` : ''}`);
-  }
+  // Câu ngắn, đọc lướt được trong một ô: việc gì, thiếu gì. Giờ bỏ dở không
+  // ghi vì trùng cột Ngày của bảng.
+  if (landing.incomplete) notes.push('⏳ Bỏ dở form');
   if (noAddress) {
     notes.push('⚠ Chưa có địa chỉ');
   } else {
     const missing = missingAddressParts(order);
-    if (missing.length === 4) notes.push(`⚠ Địa chỉ không rõ ba cấp: "${address.slice(0, 60)}"`);
+    if (missing.length === 4) notes.push(`⚠ Địa chỉ không rõ: "${address.slice(0, 60)}"`);
     else if (missing.length) notes.push(`⚠ Thiếu ${missing.join(', ')}`);
-    if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên nhiều nơi, hỏi lại');
-    else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('⚠ Địa chỉ đã sửa chính tả, đối chiếu lại');
+    if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên, hỏi lại');
+    else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('⚠ Địa chỉ đã sửa, đối chiếu');
   }
   if (!hasProduct) notes.push('⚠ Chưa chọn sản phẩm');
   else if (unmatched.length) notes.push(`⚠ Sản phẩm lạ: ${unmatched.join(', ')}`);
-  else if (landing.needsProduct && landing.rawProducts && !landing.autoFilled?.product) notes.push(`⚠ Kiểm tra sản phẩm, form ghi: ${String(landing.rawProducts).slice(0, 120)}`);
+  else if (landing.needsProduct && landing.rawProducts && !landing.autoFilled?.product) notes.push(`⚠ Form ghi SP: ${String(landing.rawProducts).slice(0, 80)}`);
 
   const autoFilled = landing.autoFilled || null;
   if (autoFilled?.product) notes.push(`🤖 Tự điền SP: ${shortAutoFill(autoFilled.product)}`);

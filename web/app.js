@@ -5210,13 +5210,17 @@ function getDuplicatePhoneRowIndexes(data = orderData) {
 const processingNoteMarkers = ['⚠', '⏳', '🤖', '☎'];
 
 /** "Hay bom hàng: 5/12 đơn (42%)" (cùng cách rút gọn với server). */
+// Cùng câu chữ với shortWarning ở app/order-notes.mjs: "Hay bom 5/12 (42%)".
 function shortPhoneWarning(warning) {
-  const labels = { block: 'POS đã chặn số này', high: 'Hay bom hàng', watch: 'Từng không nhận hàng' };
+  const labels = { block: 'POS chặn số', high: 'Hay bom', watch: 'Từng bom' };
   const source = Array.isArray(warning.sources) && warning.sources.length ? String(warning.sources[0]) : '';
-  const bom = source.match(/bom (\d+\/\d+ đơn(?: \(\d+%\))?)/i);
+  const bom = source.match(/bom (\d+\/\d+)(?: đơn)?( \(\d+%\))?/i);
   const shop = source.match(/hoàn\/huỷ (\d+) đơn/i);
-  const detail = bom ? bom[1] : shop ? `hoàn ${shop[1]} đơn ở shop` : source.includes('thẻ') ? 'POS gắn thẻ hoàn' : '';
-  return `${labels[warning.level] || 'Số cần kiểm tra'}${detail ? `: ${detail}` : ''}`;
+  const label = labels[warning.level] || 'Số cần kiểm tra';
+  if (bom) return `${label} ${bom[1]}${bom[2] || ''}`;
+  if (shop) return `${label}, hoàn ${shop[1]} đơn ở shop`;
+  if (source.includes('thẻ')) return `${label}, POS gắn thẻ hoàn`;
+  return label;
 }
 function isProcessingNoteText(note) {
   return String(note || '').split(' · ').some(segment => processingNoteMarkers.some(marker => segment.trim().startsWith(marker)));
@@ -5250,10 +5254,11 @@ function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicat
     const existing = noteIndex >= 0 ? String(row[noteIndex] || '') : '';
     const orderId = idIndex >= 0 ? String(row[idIndex] || '').trim() : '';
     const list = [];
-    if (duplicateRowIndexes?.has(index)) list.push('⚠ Trùng dòng khác, giữ một');
+    if (duplicateRowIndexes?.has(index)) list.push('⚠ Trùng đơn');
     if (duplicatePhoneRowIndexes?.has(index) && phoneIndex >= 0) {
       const others = [...(ordersByPhone.get(normalizeWarningPhone(row[phoneIndex])) || [])].filter(id => id !== (orderId || `dòng ${index + 1}`));
-      list.push(`⚠ Cùng SĐT với ${others.join(', ')}`);
+      // Mã các đơn kia không cần ghi ở đây: bấm dòng là thấy cả nhóm cùng số.
+      if (others.length) list.push(`⚠ Cùng SĐT ${others.length} đơn khác`);
     }
     if (addressIndex >= 0 && isInvalidOrderAddress(row[addressIndex])) list.push('⚠ Địa chỉ GXN, sửa lại');
     if (!isSystemOrderId(orderId)) {
@@ -5341,6 +5346,31 @@ function isInvalidOrderAddress(value) {
   return String(value ?? '').trim().toUpperCase().startsWith('GXN');
 }
 
+// Ghi chú cũ đã lưu trong trình duyệt (câu dài của bản trước) rút về câu ngắn
+// hiện hành, để bảng đọc đồng nhất mà không phải đồng bộ lại đơn.
+const legacyNoteRewrites = [
+  [/^Bỏ dở form \d\d:\d\d \d\d\/\d\d$/u, 'Bỏ dở form'],
+  [/^Trùng dòng khác, giữ một$/u, 'Trùng đơn'],
+  [/^Cùng SĐT với (.+)$/u, (match, ids) => `Cùng SĐT ${ids.split(/,\s*/).filter(Boolean).length} đơn khác`],
+  [/^Tự điền SP: (.+?)\s*\((?:theo|mặc định)[^)]*\)$/u, 'Tự điền SP: $1'],
+  [/^Hay bom hàng: (\d+\/\d+) đơn( \(\d+%\))?$/u, 'Hay bom $1$2'],
+  [/^Từng không nhận hàng: (\d+\/\d+) đơn( \(\d+%\))?$/u, 'Từng bom $1$2'],
+  [/^Hay bom hàng: (hoàn .+|POS gắn thẻ hoàn)$/u, 'Hay bom, $1'],
+  [/^Từng không nhận hàng: (hoàn .+|POS gắn thẻ hoàn)$/u, 'Từng bom, $1'],
+  [/^POS đã chặn số này$/u, 'POS chặn số'],
+  [/^Địa chỉ không rõ ba cấp: /u, 'Địa chỉ không rõ: '],
+  [/^Địa chỉ trùng tên nhiều nơi, hỏi lại$/u, 'Địa chỉ trùng tên, hỏi lại'],
+  [/^Địa chỉ đã sửa chính tả, đối chiếu lại$/u, 'Địa chỉ đã sửa, đối chiếu'],
+  [/^Kiểm tra sản phẩm, form ghi: /u, 'Form ghi SP: '],
+  [/^(Thiếu .*)số nhà\/đường/u, '$1số nhà']
+];
+function shortenLegacyNote(text) {
+  for (const [pattern, replacement] of legacyNoteRewrites) {
+    if (pattern.test(text)) return text.replace(pattern, replacement);
+  }
+  return text;
+}
+
 // Ô Ghi chú: nhãn màu cho ghi chú xử lý (bảng biết thêm: trùng đơn, trùng số,
 // cảnh báo), rồi đến lời khách/quà ở dạng chữ thường.
 function renderNoteCell(value, extraNotes = []) {
@@ -5354,7 +5384,7 @@ function renderNoteCell(value, extraNotes = []) {
   // Cờ `u`: 🤖 là cặp ký tự đôi, thiếu cờ này regex chỉ bỏ nửa đầu và để lại "�".
   const kind = segment => /^[⚠☎]/u.test(segment) ? 'act' : /^[⏳🤖ℹ]/u.test(segment) ? 'note' : 'plain';
   const strip = segment => segment.replace(/^[⚠⏳🤖☎ℹ]\s*/u, '');
-  return `<div class="note-cell">${segments.map(segment => `<div class="note-line note-line-${kind(segment)}">${escapeHtml(strip(segment))}</div>`).join('')}</div>`;
+  return `<div class="note-cell">${segments.map(segment => `<div class="note-line note-line-${kind(segment)}">${escapeHtml(shortenLegacyNote(strip(segment)))}</div>`).join('')}</div>`;
 }
 
 function renderPreviewCell(value, header) {

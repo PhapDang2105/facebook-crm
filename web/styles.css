@@ -2126,6 +2126,7 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .note-line-plain { color: #1d2939; }
 .phone-warning-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #b42318; background: #fee4e2; white-space: nowrap; }
 .phone-warning-badge.is-watch { color: #b54708; background: #fef0c7; }
+.alert-icon { display: inline-block; margin-right: 4px; vertical-align: -1px; }
 .phone-warning-badge.is-block { color: #fff; background: #b42318; }
 .customer-phone-warning { margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; color: #b42318; background: #fee4e2; }
 .customer-phone-warning.is-watch { color: #b54708; background: #fef0c7; }

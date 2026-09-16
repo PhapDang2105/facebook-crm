@@ -429,12 +429,16 @@ function phoneWarningFor(value) {
   return warning && warning.level !== 'none' ? warning : null;
 }
 
+// Biểu tượng cảnh báo: Lucide "triangle-alert" (ISC), nét mảnh, cùng phong cách
+// các icon nút bấm trong ứng dụng; không dùng ký tự emoji.
+const alertIconSvg = '<svg class="alert-icon" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+
 function phoneWarningBadge(warning) {
   if (!warning) return '';
   const text = warning.level === 'block' ? 'Chặn'
     : warning.failed ? `Bom ${warning.failed}${warning.success ? `/${warning.failed + warning.success}` : ''} đơn`
       : 'Cần gọi';
-  return `<span class="phone-warning-badge is-${warning.level}" title="${escapeHtml(warning.label || '')}${warning.sources?.length ? ` — ${escapeHtml(warning.sources.join('; '))}` : ''}">⚠ ${escapeHtml(text)}</span>`;
+  return `<span class="phone-warning-badge is-${warning.level}" title="${escapeHtml(warning.label || '')}${warning.sources?.length ? ` — ${escapeHtml(warning.sources.join('; '))}` : ''}">${alertIconSvg}${escapeHtml(text)}</span>`;
 }
 
 /** Looks up phones the cache lacks, then re-renders the orders table once. */
@@ -477,8 +481,8 @@ function renderCustomerPhoneWarning() {
   const warning = phoneWarningFor(customerOrderPhone?.value || '');
   element.hidden = !warning;
   element.className = `customer-phone-warning${warning?.level === 'watch' ? ' is-watch' : ''}`;
-  element.textContent = warning
-    ? `⚠ ${warning.label}${warning.failed ? ` (bom/hoàn ${warning.failed} đơn${warning.success ? `, giao thành công ${warning.success}` : ''})` : ''}`
+  element.innerHTML = warning
+    ? `${alertIconSvg}${escapeHtml(`${warning.label}${warning.failed ? ` (bom/hoàn ${warning.failed} đơn${warning.success ? `, giao thành công ${warning.success}` : ''})` : ''}`)}`
     : '';
 }
 

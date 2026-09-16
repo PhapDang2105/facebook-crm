@@ -2107,3 +2107,22 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .message-link { color: var(--messenger-blue); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .message-link:hover { text-decoration-thickness: 2px; }
 .outgoing .bubble .message-link { color: #fff; }
+
+/* Cảnh báo số điện thoại hay bom hàng */
+.data-preview tbody tr.order-row-phone-warning td { background: #ffe3e3; }
+.data-preview tbody tr.order-row-phone-watch td { background: #fff1d6; }
+.phone-warning-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #b42318; background: #fee4e2; white-space: nowrap; }
+.phone-warning-badge.is-watch { color: #b54708; background: #fef0c7; }
+.phone-warning-badge.is-block { color: #fff; background: #b42318; }
+.customer-phone-warning { margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; color: #b42318; background: #fee4e2; }
+.customer-phone-warning.is-watch { color: #b54708; background: #fef0c7; }
+.phone-warning-card { display: flex; flex-direction: column; gap: 14px; min-height: calc(100vh - 113.4px); }
+.phone-warning-intro { margin: 6px 0 0; max-width: 760px; color: #475467; font-size: 13px; line-height: 1.5; }
+.phone-warning-status { margin: 6px 0 0; font-size: 12px; font-weight: 600; color: #475467; }
+.phone-warning-form { display: grid; grid-template-columns: 170px 220px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 0 16px; }
+.phone-warning-form input, .phone-warning-form select { height: 38px; padding: 0 12px; border: 1px solid #d0d5dd; border-radius: 10px; font: inherit; }
+.phone-warning-lookup-result { margin: 0 16px; min-height: 18px; font-size: 13px; color: #344054; }
+.phone-warning-head, .phone-warning-row { grid-template-columns: 150px 210px minmax(0, 1fr) 70px 140px 40px; }
+.phone-warning-row { display: grid; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #f0f2f5; font-size: 13px; }
+.phone-warning-row button { width: 30px; height: 30px; border: 0; border-radius: 8px; background: #f2f4f7; color: #b42318; font-size: 16px; cursor: pointer; }
+.phone-warning-empty { padding: 24px 16px; color: #667085; font-size: 13px; }

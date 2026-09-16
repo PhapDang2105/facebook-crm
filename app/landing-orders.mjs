@@ -15,6 +15,7 @@ import { normalizeCustomerOrder } from './conversation-orders.mjs';
 import { findProductBySku, matchProduct, normalizeText } from './processing/catalog.mjs';
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
+import { attachPhoneWarning } from './phone-warnings.mjs';
 
 const landingOrdersPath = process.env.LANDING_ORDERS_PATH
   || path.join(projectRoot, 'data', 'processed', 'landing-orders.json');
@@ -449,6 +450,8 @@ export async function recordLandingOrder(payload, context = {}) {
   let error = '';
   try {
     order = buildLandingOrder(payload, { ...context, now: receivedAt });
+    // Khách hay bom hàng: đơn vẫn vào bảng, kèm cảnh báo để gọi xác nhận trước khi giao.
+    if (context.checkPhone !== false) await attachPhoneWarning(order);
   } catch (failure) {
     error = failure.message;
   }

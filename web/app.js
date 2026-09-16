@@ -410,6 +410,164 @@ function showView(name) {
 }
 
 // ---------------------------------------------------------------------------
+// Cảnh báo số điện thoại hay bom hàng. The server merges Pancake POS history
+// with the staff list; the table, the customer panel and system orders all
+// read from the same lookup, cached here so a re-render never re-queries.
+const phoneWarnings = new Map();
+let phoneWarningsPosConfigured = null;
+let phoneWarningRefresh = null;
+
+function normalizeWarningPhone(value) {
+  let phone = String(value ?? '').replace(/\D/g, '');
+  if (phone.startsWith('84') && phone.length === 11) phone = `0${phone.slice(2)}`;
+  return phone;
+}
+
+function phoneWarningFor(value) {
+  const warning = phoneWarnings.get(normalizeWarningPhone(value));
+  return warning && warning.level !== 'none' ? warning : null;
+}
+
+function phoneWarningBadge(warning) {
+  if (!warning) return '';
+  const text = warning.level === 'block' ? 'Chặn'
+    : warning.failed ? `Bom ${warning.failed}${warning.success ? `/${warning.failed + warning.success}` : ''} đơn`
+      : 'Cần gọi';
+  return `<span class="phone-warning-badge is-${warning.level}" title="${escapeHtml(warning.label || '')}${warning.sources?.length ? ` — ${escapeHtml(warning.sources.join('; '))}` : ''}">⚠ ${escapeHtml(text)}</span>`;
+}
+
+/** Looks up phones the cache lacks, then re-renders the orders table once. */
+async function refreshPhoneWarnings(phones, { force = false } = {}) {
+  const wanted = [...new Set(phones.map(normalizeWarningPhone).filter(phone => phone.length >= 9 && (force || !phoneWarnings.has(phone))))];
+  if (!wanted.length) return;
+  if (phoneWarningRefresh) await phoneWarningRefresh;
+  phoneWarningRefresh = (async () => {
+    try {
+      const result = await readApiResponse(await fetch('/api/phone-warnings/check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phones: wanted, force })
+      }));
+      phoneWarningsPosConfigured = Boolean(result.posConfigured);
+      for (const phone of wanted) phoneWarnings.set(phone, result.results?.[phone] || { level: 'none' });
+      renderOrderData();
+      renderCustomerPhoneWarning();
+    } catch (error) {
+      console.warn('Chưa tra được cảnh báo số điện thoại:', error.message);
+    } finally {
+      phoneWarningRefresh = null;
+    }
+  })();
+  await phoneWarningRefresh;
+}
+
+function getPhoneWarningRowIndexes(data = orderData) {
+  const phoneIndex = data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  if (phoneIndex < 0) return new Map();
+  const flagged = new Map();
+  data.rows.forEach((row, index) => {
+    const warning = phoneWarningFor(row[phoneIndex]);
+    if (warning) flagged.set(index, warning.level);
+  });
+  return flagged;
+}
+
+function renderCustomerPhoneWarning() {
+  const element = document.querySelector('#customer-phone-warning');
+  if (!element) return;
+  const warning = phoneWarningFor(customerOrderPhone?.value || '');
+  element.hidden = !warning;
+  element.className = `customer-phone-warning${warning?.level === 'watch' ? ' is-watch' : ''}`;
+  element.textContent = warning
+    ? `⚠ ${warning.label}${warning.failed ? ` (bom/hoàn ${warning.failed} đơn${warning.success ? `, giao thành công ${warning.success}` : ''})` : ''}`
+    : '';
+}
+
+// ---- Cài đặt → Cảnh báo SĐT
+const phoneWarningForm = document.querySelector('#phone-warning-form');
+const phoneWarningRows = document.querySelector('#phone-warning-rows');
+
+const warningLevelNames = { block: 'Chặn', high: 'Hay bom hàng', watch: 'Từng không nhận' };
+
+async function loadPhoneWarningSettings() {
+  if (!phoneWarningRows) return;
+  try {
+    const result = await readApiResponse(await fetch('/api/phone-warnings/manual'));
+    phoneWarningsPosConfigured = Boolean(result.posConfigured);
+    const status = document.querySelector('#phone-warning-pos-status');
+    if (status) {
+      status.textContent = result.posConfigured
+        ? 'Pancake POS: đã kết nối, mỗi số được tra lịch sử đơn hoàn/huỷ và báo cáo bom hàng của POS (cache 24 giờ).'
+        : 'Pancake POS: chưa kết nối. Điền POS_API_KEY và POS_SHOP_ID trong .env trên máy chủ để tra tự động; hiện chỉ dùng danh sách dưới đây.';
+    }
+    renderPhoneWarningRows(result.items || []);
+  } catch (error) {
+    showToast(error.message || 'Chưa tải được danh sách cảnh báo.', 'error');
+  }
+}
+
+function renderPhoneWarningRows(items) {
+  if (!items.length) {
+    phoneWarningRows.innerHTML = '<div class="phone-warning-empty">Chưa có số nào được đánh dấu. Thêm số ở trên, hoặc kết nối Pancake POS để tra tự động.</div>';
+    return;
+  }
+  phoneWarningRows.innerHTML = items.map(item => `<div class="phone-warning-row" data-phone="${escapeHtml(item.phone)}">
+    <strong>${escapeHtml(item.phone)}</strong>
+    <span>${phoneWarningBadge({ level: item.level, label: warningLevelNames[item.level] || item.level, failed: 0 })} ${escapeHtml(warningLevelNames[item.level] || item.level)}</span>
+    <span>${escapeHtml(item.reason || '')}${item.by ? ` <small>· ${escapeHtml(item.by)}</small>` : ''}</span>
+    <span>${Number(item.incidents) || 1}</span>
+    <span>${escapeHtml(formatShippingTime(item.updatedAt))}</span>
+    <button type="button" data-phone-warning-remove="${escapeHtml(item.phone)}" title="Bỏ khỏi danh sách" aria-label="Bỏ khỏi danh sách">×</button>
+  </div>`).join('');
+}
+
+phoneWarningForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const phone = document.querySelector('#phone-warning-phone')?.value || '';
+  const level = document.querySelector('#phone-warning-level')?.value || 'high';
+  const reason = document.querySelector('#phone-warning-reason')?.value || '';
+  try {
+    await readApiResponse(await fetch('/api/phone-warnings/manual', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, level, reason, by: 'Nhân viên' })
+    }));
+    phoneWarnings.delete(normalizeWarningPhone(phone));
+    phoneWarningForm.reset();
+    showToast(`Đã đánh dấu ${normalizeWarningPhone(phone)}.`, 'success');
+    await loadPhoneWarningSettings();
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được.', 'error');
+  }
+});
+
+document.querySelector('#phone-warning-lookup')?.addEventListener('click', async () => {
+  const phone = normalizeWarningPhone(document.querySelector('#phone-warning-phone')?.value || '');
+  const output = document.querySelector('#phone-warning-lookup-result');
+  if (!phone || !output) return;
+  output.textContent = 'Đang tra cứu...';
+  try {
+    const result = await readApiResponse(await fetch(`/api/phone-warnings/lookup?phone=${encodeURIComponent(phone)}&force=1`));
+    phoneWarnings.set(phone, result);
+    output.innerHTML = result.level === 'none'
+      ? `${escapeHtml(phone)}: không có cảnh báo${result.posChecked ? ` (POS: hoàn/huỷ ${result.failed}, giao thành công ${result.success})` : result.posError ? ` — POS lỗi: ${escapeHtml(result.posError)}` : ' (chưa kết nối POS)'}.`
+      : `${escapeHtml(phone)}: ${phoneWarningBadge(result)} ${escapeHtml(result.label)} — ${escapeHtml(result.sources.join('; '))}`;
+  } catch (error) {
+    output.textContent = error.message || 'Chưa tra được.';
+  }
+});
+
+phoneWarningRows?.addEventListener('click', async event => {
+  const button = event.target.closest('[data-phone-warning-remove]');
+  if (!button) return;
+  const phone = button.dataset.phoneWarningRemove;
+  if (!window.confirm(`Bỏ ${phone} khỏi danh sách cảnh báo?`)) return;
+  try {
+    await readApiResponse(await fetch(`/api/phone-warnings/manual/${encodeURIComponent(phone)}`, { method: 'DELETE' }));
+    phoneWarnings.delete(phone);
+    await loadPhoneWarningSettings();
+  } catch (error) {
+    showToast(error.message || 'Chưa xóa được.', 'error');
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Khách hàng: one row per person per Page, built by the server from every
 // thread they have (Messenger, comments, ads). Filters are query parameters
 // so the CSV export gets exactly what the table shows.
@@ -2894,6 +3052,7 @@ function showSettingsSection(name = 'channels') {
   settingsPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== section));
   settingsSectionButtons.forEach(button => button.classList.toggle('active', button.dataset.settingsSection === section));
   if (section === 'chatbot') loadChatbotSettings();
+  if (section === 'phone-warnings') loadPhoneWarningSettings();
   if (section === 'products') loadProducts().catch(error => {
     renderProductLoadError();
     showToast(error.message || 'Chưa tải được danh mục sản phẩm.', 'error');
@@ -3428,6 +3587,8 @@ function renderCustomerPanel(conversation = getActiveConversation()) {
   if (customerOrderName) customerOrderName.value = profile.name;
   if (customerOrderPhone) customerOrderPhone.value = profile.phone;
   if (customerOrderAddress) customerOrderAddress.value = profile.address;
+  renderCustomerPhoneWarning();
+  if (profile.phone) refreshPhoneWarnings([profile.phone]);
   renderCustomerSavedAddresses(conversation);
   renderCustomerOrderChip(conversation);
   updateCustomerOrderTotals();
@@ -4809,11 +4970,13 @@ function getOrdersNeedingProcessing(data = orderData) {
   const invalidRowIndexes = new Set(getInvalidOrderRows(data).map(entry => entry.index));
   const duplicateRowIndexes = getDuplicateOrderRowIndexes(data);
   const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes(data);
+  const warningRowIndexes = getPhoneWarningRowIndexes(data);
   return data.rows
     .map((row, index) => ({ row, index }))
     .filter(({ index }) => invalidRowIndexes.has(index)
       || duplicateRowIndexes.has(index)
-      || duplicatePhoneRowIndexes.has(index));
+      || duplicatePhoneRowIndexes.has(index)
+      || warningRowIndexes.has(index));
 }
 
 function isInvalidOrderAddress(value) {
@@ -4823,6 +4986,9 @@ function isInvalidOrderAddress(value) {
 function renderPreviewCell(value, header) {
   const previewValue = getPreviewValue(value, header);
   const column = normalizeColumnName(header);
+  if (['so dien thoai', 'sdt', 'dien thoai'].includes(column)) {
+    return `${escapeHtml(previewValue)}${phoneWarningBadge(phoneWarningFor(previewValue))}`;
+  }
   if (column === 'don gia') {
     const price = String(previewValue ?? '').trim();
     return price && !/[đ₫]$/iu.test(price) ? `${escapeHtml(price)} đ` : escapeHtml(price);
@@ -4937,16 +5103,23 @@ function renderOrderData() {
   const invalidRowIndexes = new Set(invalidRows.map(entry => entry.index));
   const duplicateRowIndexes = getDuplicateOrderRowIndexes();
   const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes();
+  const warningRowIndexes = getPhoneWarningRowIndexes();
   const processingRows = allRows.filter(({ index }) => invalidRowIndexes.has(index)
     || duplicateRowIndexes.has(index)
-    || duplicatePhoneRowIndexes.has(index));
+    || duplicatePhoneRowIndexes.has(index)
+    || warningRowIndexes.has(index));
   const processingRowIndexes = new Set(processingRows.map(entry => entry.index));
   const filterValue = orderFilter?.value || 'all';
   let importRows = filterValue === 'valid' ? allRows.filter(entry => !processingRowIndexes.has(entry.index))
     : filterValue === 'invalid' ? processingRows
       : filterValue === 'duplicate' ? allRows.filter(entry => duplicateRowIndexes.has(entry.index))
         : filterValue === 'duplicate-phone' ? allRows.filter(entry => duplicatePhoneRowIndexes.has(entry.index))
-          : allRows;
+          : filterValue === 'phone-warning' ? allRows.filter(entry => warningRowIndexes.has(entry.index))
+            : allRows;
+  // Phones the cache has not seen yet are looked up in the background; the
+  // table re-renders with badges once the answer arrives.
+  const phoneColumn = headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  if (phoneColumn >= 0) refreshPhoneWarnings(rows.map(row => row[phoneColumn]));
   const searchValue = normalizeColumnName(orderSearch?.value || '');
   if (searchValue) {
     importRows = importRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue));
@@ -4956,16 +5129,20 @@ function renderOrderData() {
   renderOrderTable(
     document.querySelector('#order-import-preview'), headers, importRows,
     rows.length ? 'Không tìm thấy đơn hàng phù hợp' : 'Chưa có dữ liệu',
-    ({ index }) => duplicateRowIndexes.has(index)
-      ? 'order-row-duplicate'
-      : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
+    ({ index }) => warningRowIndexes.get(index) && warningRowIndexes.get(index) !== 'watch' ? 'order-row-phone-warning'
+      : warningRowIndexes.get(index) === 'watch' ? 'order-row-phone-watch'
+        : duplicateRowIndexes.has(index)
+          ? 'order-row-duplicate'
+          : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
     { deletable: true }
   );
   renderOrderTable(
     document.querySelector('#order-preview'), headers, processingRows,
-    'Không có đơn hàng cần xử lý', ({ index }) => duplicateRowIndexes.has(index)
-      ? 'order-row-duplicate'
-      : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : 'order-row-invalid'
+    'Không có đơn hàng cần xử lý', ({ index }) => warningRowIndexes.get(index) && warningRowIndexes.get(index) !== 'watch' ? 'order-row-phone-warning'
+      : warningRowIndexes.get(index) === 'watch' ? 'order-row-phone-watch'
+        : duplicateRowIndexes.has(index)
+          ? 'order-row-duplicate'
+          : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : 'order-row-invalid'
   );
 }
 

@@ -47,6 +47,7 @@
         <button class="settings-subnav-item" type="button" data-settings-section="messages">Tin nhắn</button>
         <button class="settings-subnav-item" type="button" data-settings-section="products">Sản phẩm</button>
         <button class="settings-subnav-item" type="button" data-settings-section="gifts">Quà tặng</button>
+        <button class="settings-subnav-item" type="button" data-settings-section="phone-warnings">Cảnh báo SĐT</button>
       </div>
     </nav>
   </aside>
@@ -173,6 +174,7 @@
                     <input id="customer-order-name" name="name" placeholder="Tên khách hàng" autocomplete="name">
                     <input id="customer-order-phone" name="phone" placeholder="Số điện thoại" inputmode="tel" autocomplete="tel">
                   </div>
+                  <p class="customer-phone-warning" id="customer-phone-warning" hidden role="status"></p>
                   <input id="customer-order-address" name="address" placeholder="Địa chỉ" autocomplete="street-address">
                   <select id="customer-order-saved-address" aria-label="Chọn địa chỉ đã lưu"><option value="">Chọn địa chỉ</option></select>
                   <div class="customer-customer-chip" id="customer-order-chip" hidden>
@@ -238,6 +240,7 @@
             <option value="invalid">Cần xử lý</option>
             <option value="duplicate">Trùng dữ liệu</option>
             <option value="duplicate-phone">Trùng số điện thoại</option>
+            <option value="phone-warning">Cảnh báo bom hàng</option>
           </select></label>
           <label class="file-button">Import<input id="order-import" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
           <button class="order-history-button" id="order-history-button" type="button" aria-expanded="false" aria-controls="order-history-panel">Lịch sử</button>
@@ -572,6 +575,33 @@
             <div class="gift-table">
               <div class="gift-table-head"><span>Áp dụng</span><span>Tên quà tặng</span><span>Tặng từ</span><span>SKU xuất kho</span><span>Khối lượng</span><span></span></div>
               <div class="gift-rows" id="gift-rows"></div>
+            </div>
+          </section>
+        </section>
+        <section class="settings-section-content hidden" data-settings-panel="phone-warnings" aria-label="Cảnh báo số điện thoại">
+          <section class="settings-card phone-warning-card" aria-label="Cảnh báo số điện thoại">
+            <header class="settings-card-head">
+              <div>
+                <h1 id="phone-warning-title">Cảnh báo số điện thoại</h1>
+                <p class="phone-warning-intro">Số hay bom hàng được gắn cờ trên bảng Đơn hàng, panel khách trong Tin nhắn và đơn chatbot/landing để gọi xác nhận trước khi giao. Nguồn: lịch sử đơn hoàn/huỷ và báo cáo theo số điện thoại của Pancake POS, cộng với danh sách nhân viên tự đánh dấu dưới đây.</p>
+                <p class="phone-warning-status" id="phone-warning-pos-status" role="status"></p>
+              </div>
+            </header>
+            <form class="phone-warning-form" id="phone-warning-form">
+              <input id="phone-warning-phone" name="phone" placeholder="Số điện thoại" inputmode="tel" required>
+              <select id="phone-warning-level" name="level" aria-label="Mức cảnh báo">
+                <option value="high">Hay bom hàng, gọi xác nhận</option>
+                <option value="watch">Từng không nhận, nên gọi</option>
+                <option value="block">Chặn, không giao</option>
+              </select>
+              <input id="phone-warning-reason" name="reason" placeholder="Lý do (ví dụ: bom đơn 15/9, không nghe máy)">
+              <button class="settings-save-button" type="submit">Thêm vào danh sách</button>
+              <button class="price-master-add" id="phone-warning-lookup" type="button">Tra cứu số này</button>
+            </form>
+            <p class="phone-warning-lookup-result" id="phone-warning-lookup-result" role="status"></p>
+            <div class="gift-table phone-warning-table">
+              <div class="gift-table-head phone-warning-head"><span>Số điện thoại</span><span>Mức</span><span>Lý do</span><span>Số lần</span><span>Cập nhật</span><span></span></div>
+              <div class="gift-rows" id="phone-warning-rows"></div>
             </div>
           </section>
         </section>

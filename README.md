@@ -77,3 +77,7 @@ Thiết kế giao diện tuân theo `docs/design/ui-principles.md`: tối giản
 ## Luồng đơn hàng
 
 Chatbot chốt đơn → đơn tự xuất hiện trong **Đơn hàng → Nhập dữ liệu** (cột Nguồn đơn = Chatbot) cùng các file import → kiểm tra ở **Xử lý dữ liệu** → **Xuất dữ liệu** tạo file XLSX cho kho; preview và file dùng chung một hàm trên server.
+
+## Cảnh báo số điện thoại hay bom hàng
+
+`app/phone-warnings.mjs` gộp ba nguồn thành một mức cảnh báo cho mỗi số: **Pancake POS** qua Open API (`GET /shops/{id}/orders?search=<sđt>&extra_fields[]=return_rate` để đếm đơn hoàn/huỷ so với đơn giao thành công và đọc `reports_by_phone` với `order_fail`/`order_success`/`warning` mà POS tự tính; `GET /shops/{id}/customers?search=<sđt>` để biết khách bị chặn `is_block` và thẻ "thường xuyên hoàn"), **danh sách nhân viên đánh dấu** trong Cài đặt → Cảnh báo SĐT (kèm lý do, đếm số lần), và đơn ghi nhận trong CRM qua chính danh sách đó. Mức: `block` (POS chặn hoặc nhân viên chặn), `high` (từ 2 đơn hoàn/huỷ, tỷ lệ hoàn ≥ 50% khi có ≥ 2 đơn, hoặc POS cảnh báo), `watch` (1 đơn hoàn hoặc thẻ hoàn). Kết quả POS được cache 24 giờ trong `data/processed/phone-warnings.json`. Cảnh báo hiện ở: bảng **Đơn hàng** (huy hiệu cạnh số điện thoại, dòng tô đỏ/cam, bộ lọc "Cảnh báo bom hàng", và nằm trong "Cần xử lý"), panel khách trong **Tin nhắn**, đơn chatbot và đơn landing (`phoneWarning` trên đơn; đơn chatbot của số cảnh báo còn được gắn thẻ "Cần người xử lý"). Cấu hình POS bằng `POS_API_KEY` và `POS_SHOP_ID` trong `.env`; để trống thì chỉ dùng danh sách thủ công.

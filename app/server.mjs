@@ -16,6 +16,7 @@ import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloa
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder } from './landing-orders.mjs';
+import { attachPhoneWarning, listManualWarnings, lookupPhone, lookupPhones, posConfigured, removeManualWarning, setManualWarning } from './phone-warnings.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -196,6 +197,9 @@ const duplicateChatbotOrderWindowMs = 10 * 60 * 1000;
 async function createChatbotCustomerOrder(conversation, input, context = {}) {
   const sourceMessageId = String(context.sourceMessageId || '').trim();
   const order = normalizeChatbotOrder(input, conversation, context);
+  // Số điện thoại hay bom hàng: đơn vẫn được tạo (khách đã xác nhận) nhưng
+  // mang cảnh báo để nhân viên gọi lại trước khi giao.
+  await attachPhoneWarning(order);
   const result = await updateMessagingStore(store => {
     const item = store.conversations.find(entry => entry.id === conversation.id);
     if (!item) return null;
@@ -773,6 +777,36 @@ const server = http.createServer(async (request, response) => {
       console.log(`Webhook landing: ${result.created ? 'tạo đơn' : 'đơn trùng, bỏ qua'} #${result.order.id} (${result.order.phone})`);
       publishMessagingEvent({ type: 'landing-order', orderId: result.order.id });
       return sendJson(response, result.created ? 201 : 200, { accepted: true, created: result.created, orderId: result.order.id });
+    }
+    // Cảnh báo số điện thoại hay bom hàng: tra một lượt cho bảng Đơn hàng, và
+    // danh sách nhân viên tự đánh dấu.
+    if (request.method === 'POST' && url.pathname === '/api/phone-warnings/check') {
+      const payload = await readBody(request);
+      const phones = Array.isArray(payload.phones) ? payload.phones : [];
+      const results = await lookupPhones(phones, { force: Boolean(payload.force) });
+      return sendJson(response, 200, { posConfigured: posConfigured(), results });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/phone-warnings/lookup') {
+      const phone = String(url.searchParams.get('phone') || '');
+      return sendJson(response, 200, { posConfigured: posConfigured(), ...(await lookupPhone(phone, { force: url.searchParams.get('force') === '1' })) });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/phone-warnings/manual') {
+      return sendJson(response, 200, { posConfigured: posConfigured(), items: await listManualWarnings() });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/phone-warnings/manual') {
+      const payload = await readBody(request);
+      try {
+        const item = await setManualWarning({ phone: payload.phone, level: payload.level, reason: payload.reason, by: payload.by });
+        return sendJson(response, 200, item);
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
+    }
+    const manualWarningMatch = url.pathname.match(/^\/api\/phone-warnings\/manual\/([^/]+)$/);
+    if (manualWarningMatch && request.method === 'DELETE') {
+      const removed = await removeManualWarning(decodeURIComponent(manualWarningMatch[1]));
+      if (!removed) return sendJson(response, 404, { error: 'Không có số này trong danh sách.' });
+      return sendJson(response, 200, removed);
     }
     if (request.method === 'GET' && url.pathname === '/api/landing/recent') {
       return sendJson(response, 200, { webhookUrl: landingConfig.webhookUrl, configured: Boolean(landingConfig.token), items: await listRecentLandingPayloads() });

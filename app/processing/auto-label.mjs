@@ -71,6 +71,8 @@ export function autoLabelEventsFor({ order = null, handoff = false, text = '', t
   const events = [];
   if (handoff) events.push('handoff');
   if (order) events.push('order');
+  // Số điện thoại từng bom hàng: thẻ "Cần người xử lý" để nhân viên gọi xác nhận trước khi giao.
+  if (order?.phoneWarning && order.phoneWarning.level !== 'watch') events.push('handoff');
   if (isComplaint({ text, templateId, keywords })) events.push('complaint');
   return events;
 }

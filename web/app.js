@@ -935,8 +935,106 @@ document.querySelector('#order-import-preview')?.addEventListener('click', event
   toggleOrderPhoneFilter(Number(row.dataset.orderRowIndex));
 });
 
-// Xử lý dữ liệu: bảng không có cột nút; bấm dòng mở chi tiết đơn (mọi đơn
-// cùng số điện thoại hiện chung) và nút "Đã xử lý" nằm trong đó.
+// ===== Xử lý dữ liệu: sửa tại chỗ =====
+//
+// Bấm dòng thì các ô tên, số điện thoại, địa chỉ, số lượng, đơn giá thành ô
+// nhập; Enter hoặc nút Lưu để ghi, Esc hoặc Huỷ để bỏ. Đơn hệ thống (chatbot,
+// landing) ghi cả về server vì bản server là sự thật khi đồng bộ lại; địa chỉ
+// mới được tách ba cấp và ghi chú xử lý tự cập nhật ở đó.
+let editingOrderRowIndex = -1;
+const editableOrderColumns = new Set(['khach hang', 'so dien thoai', 'dia chi', 'so luong', 'don gia']);
+
+function orderColumnIndex(name, data = orderData) {
+  return data.headers.findIndex(header => normalizeColumnName(header) === name);
+}
+
+function startOrderRowEdit(rowIndex) {
+  editingOrderRowIndex = rowIndex;
+  renderOrderData();
+  const first = document.querySelector(`#order-preview tr[data-order-row-index="${rowIndex}"] [data-edit-column]`);
+  first?.focus();
+  first?.select?.();
+}
+
+function cancelOrderRowEdit() {
+  if (editingOrderRowIndex < 0) return;
+  editingOrderRowIndex = -1;
+  renderOrderData();
+}
+
+// Ghi chú xử lý về địa chỉ hết hiệu lực ngay khi nhân viên đã sửa ô địa chỉ
+// (server cũng dựng lại ghi chú từ dữ liệu mới ở lần đồng bộ sau).
+const staleAddressNote = /^[⚠🤖]\s*(Thiếu |Chưa có địa chỉ|Địa chỉ |Tự điền địa chỉ)/u;
+function dropStaleNotes(note, pattern) {
+  return String(note || '').split(' · ').map(segment => segment.trim()).filter(segment => segment && !pattern.test(segment)).join(' · ');
+}
+
+/** Mã đơn trên server từ mã dòng ("LP-abc" → "abc"); dòng import không có. */
+function serverOrderIdOf(rowId) {
+  const match = String(rowId || '').match(/^(?:LP|CB)-(.+)$/);
+  return match ? match[1] : '';
+}
+
+async function saveOrderRowEdit(rowIndex) {
+  const tr = document.querySelector(`#order-preview tr[data-order-row-index="${rowIndex}"]`);
+  const row = orderData.rows[rowIndex];
+  if (!tr || !row) { cancelOrderRowEdit(); return; }
+  const { headers } = orderData;
+  const key = orderRowKey(row);
+  // Tên, số điện thoại, địa chỉ là của cả đơn: áp cho mọi dòng cùng mã đơn.
+  const sameOrder = orderData.rows.map((item, index) => ({ item, index })).filter(({ item }) => orderRowKey(item) === key).map(({ index }) => index);
+  const sharedNames = new Set(['khach hang', 'so dien thoai', 'dia chi']);
+  const patch = {};
+  const line = {};
+  let changed = 0;
+  for (const input of tr.querySelectorAll('[data-edit-column]')) {
+    const index = Number(input.dataset.editColumn);
+    const name = normalizeColumnName(headers[index]);
+    const value = input.value.trim();
+    if (value === String(row[index] ?? '').trim()) continue;
+    if (['khach hang', 'dia chi'].includes(name) && !value) { showToast('Ô này không được để trống.'); input.focus(); return; }
+    if (name === 'so dien thoai' && value.replace(/\D/g, '').length < 9) { showToast('Số điện thoại chưa đúng.'); input.focus(); return; }
+    changed += 1;
+    const targets = sharedNames.has(name) ? sameOrder : [rowIndex];
+    for (const target of targets) orderData.rows[target][index] = value;
+    if (name === 'khach hang') patch.name = value;
+    if (name === 'so dien thoai') {
+      patch.phone = value;
+      const carrier = orderColumnIndex('nha mang');
+      if (carrier >= 0) for (const target of targets) orderData.rows[target][carrier] = carrierLabelFor(value);
+    }
+    if (name === 'dia chi') {
+      patch.address = value;
+      // Địa chỉ mới là sự thật: bỏ ba cấp cũ để file xuất đọc lại từ địa chỉ, bỏ ghi chú địa chỉ đã cũ.
+      for (const level of ['tinh thanh pho', 'quan huyen', 'phuong xa']) { const column = orderColumnIndex(level); if (column >= 0) for (const target of targets) orderData.rows[target][column] = ''; }
+      const note = orderColumnIndex('ghi chu');
+      if (note >= 0) for (const target of targets) orderData.rows[target][note] = dropStaleNotes(orderData.rows[target][note], staleAddressNote);
+    }
+    if (name === 'so luong') line.quantity = value;
+    if (name === 'don gia') line.price = value.replace(/[^\d]/g, '');
+  }
+  editingOrderRowIndex = -1;
+  renderOrderData();
+  if (!changed) return;
+  const serverId = serverOrderIdOf(row[orderColumnIndex('ma don hang')]);
+  if (!serverId) { showToast('Đã lưu thay đổi.', 'success'); return; }
+  if (Object.keys(line).length) {
+    const sku = orderColumnIndex('ma mau ma');
+    const product = orderColumnIndex('san pham');
+    patch.lines = [{ sku: sku >= 0 ? String(row[sku] || '').trim() : '', name: product >= 0 ? String(row[product] || '').trim() : '', ...line }];
+  }
+  try {
+    await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(serverId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    }));
+    showToast('Đã lưu thay đổi.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được lên máy chủ, bảng đang giữ bản sửa tạm.');
+  }
+}
+
 document.querySelector('#order-preview')?.addEventListener('click', event => {
   const reviewedButton = event.target.closest('[data-order-row-reviewed]');
   if (reviewedButton) {
@@ -944,109 +1042,34 @@ document.querySelector('#order-preview')?.addEventListener('click', event => {
     markOrderRowReviewed(Number(reviewedButton.dataset.orderRowReviewed));
     return;
   }
+  const saveButton = event.target.closest('[data-order-edit-save]');
+  if (saveButton) { saveOrderRowEdit(Number(saveButton.dataset.orderEditSave)); return; }
+  if (event.target.closest('[data-order-edit-cancel]')) { cancelOrderRowEdit(); return; }
   if (event.target.closest('button, a, input, select, textarea')) return;
   const row = event.target.closest('tr[data-order-row-index]');
   if (!row) return;
-  openOrderDialog(Number(row.dataset.orderRowIndex));
+  const rowIndex = Number(row.dataset.orderRowIndex);
+  if (rowIndex === editingOrderRowIndex) return;
+  // Đang sửa dòng khác mà bấm sang dòng mới: bỏ bản dở, không lưu ngầm.
+  startOrderRowEdit(rowIndex);
+});
+document.querySelector('#order-preview')?.addEventListener('keydown', event => {
+  if (!event.target.closest('[data-edit-column]')) return;
+  if (event.key === 'Enter') { event.preventDefault(); saveOrderRowEdit(editingOrderRowIndex); }
+  if (event.key === 'Escape') { event.preventDefault(); cancelOrderRowEdit(); }
 });
 
-// ===== Chi tiết đơn cần xử lý =====
-const orderDialog = document.querySelector('#order-dialog');
-let orderDialogRowIndex = -1;
-
-function orderPhoneColumnIndex(data = orderData) {
-  return data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
-}
-
-function openOrderDialog(rowIndex) {
-  if (!orderDialog) return;
-  const row = orderData.rows[rowIndex];
-  if (!row) return;
-  orderDialogRowIndex = rowIndex;
-  const { headers } = orderData;
-  const phoneIndex = orderPhoneColumnIndex();
-  const nameIndex = headers.findIndex(header => normalizeColumnName(header) === 'khach hang');
-  const idIndex = headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
-  const phone = phoneIndex >= 0 ? normalizeRowPhone(row[phoneIndex]) : '';
-  // Cùng mã là cùng đơn (đơn nhiều dòng); cùng số điện thoại thì hiện kèm để
-  // nhân viên gọi khách một lần là xử lý được cả lượt.
-  const key = orderRowKey(row);
-  const entries = orderData.rows
-    .map((row, index) => ({ row, index }))
-    .filter(({ row }) => orderRowKey(row) === key || (phone && phoneIndex >= 0 && normalizeRowPhone(row[phoneIndex]) === phone));
-  const otherOrders = new Set(entries.map(({ row }) => orderRowKey(row))).size - 1;
-  orderDialog.querySelector('#order-dialog-title').textContent = (nameIndex >= 0 && String(row[nameIndex] || '').trim()) || 'Đơn hàng';
-  orderDialog.querySelector('#order-dialog-subtitle').textContent = [
-    phoneIndex >= 0 ? String(row[phoneIndex] || '').trim() : '',
-    idIndex >= 0 ? String(row[idIndex] || '').trim() : '',
-    otherOrders > 0 ? `còn ${otherOrders} đơn khác cùng số` : ''
-  ].filter(Boolean).join(' · ');
-  const duplicateRowIndexes = getDuplicateOrderRowIndexes();
-  const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes();
-  const warningRowIndexes = getPhoneWarningRowIndexes();
-  const rowNotes = getRowProcessingNotes(orderData, { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes });
-  // Bảng ngang không vừa hộp thoại: mỗi đơn một thẻ, đơn đang bấm đứng đầu;
-  // thẻ ghi mã, ngày, nguồn ở đầu và các trường còn lại xếp dọc nhãn – giá trị.
-  const columns = headers.map((header, index) => ({ header, index, name: normalizeColumnName(header) }));
-  const columnByName = name => columns.find(column => column.name === name);
-  const headingNames = new Set(['ma don hang', 'ngay', 'nguon don', 'khach hang', 'so dien thoai']);
-  const fieldColumns = columns.filter(column => !hiddenPreviewColumns.has(column.name) && !headingNames.has(column.name));
-  const groups = new Map();
-  entries.forEach(entry => {
-    const groupKey = orderRowKey(entry.row);
-    if (!groups.has(groupKey)) groups.set(groupKey, []);
-    groups.get(groupKey).push(entry);
-  });
-  const orderedKeys = [key, ...[...groups.keys()].filter(groupKey => groupKey !== key)];
-  const cellValue = (row, column) => String(row[column.index] || '').trim();
-  const renderField = (row, index, column) => {
-    const isNote = column.name === 'ghi chu';
-    const value = cellValue(row, column);
-    if (!value && !(isNote && rowNotes.get(index)?.length)) return '';
-    return `<dt>${escapeHtml(column.header)}</dt><dd>${isNote ? renderNoteCell(value, rowNotes.get(index)) : renderPreviewCell(value, column.header)}</dd>`;
-  };
-  orderDialog.querySelector('#order-dialog-preview').innerHTML = orderedKeys.map(groupKey => {
-    const lines = groups.get(groupKey);
-    const first = lines[0].row;
-    const heading = ['ma don hang', 'ngay', 'nguon don'].map(name => columnByName(name)).filter(Boolean).map(column => cellValue(first, column)).filter(Boolean).join(' · ');
-    const body = lines.map(({ row, index }) => `<dl class="order-dialog-fields">${fieldColumns.map(column => renderField(row, index, column)).join('')}</dl>`).join('');
-    return `<article class="order-dialog-card${groupKey === key ? ' is-current' : ''}"><header>${escapeHtml(heading || 'Đơn hàng')}${groupKey === key ? '<span>Đơn đang xử lý</span>' : ''}</header>${body}</article>`;
-  }).join('');
-  const reviewedButton = orderDialog.querySelector('#order-dialog-reviewed');
-  reviewedButton.disabled = isRowReviewed(row);
-  reviewedButton.textContent = reviewedButton.disabled ? 'Đã xử lý xong' : 'Đã xử lý';
-  orderDialog.classList.remove('hidden');
-}
-
-function closeOrderDialog() {
-  orderDialog?.classList.add('hidden');
-  orderDialogRowIndex = -1;
-}
-
-orderDialog?.addEventListener('click', event => {
-  if (event.target.closest('[data-close-order-dialog]')) closeOrderDialog();
-});
-document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && orderDialog && !orderDialog.classList.contains('hidden')) closeOrderDialog();
-});
-
-// "Đã xử lý": đánh dấu cả đơn (mọi dòng cùng mã), đơn rời Xử lý dữ liệu và
-// được phép sang Xuất dữ liệu.
-/** Đánh dấu cả đơn của dòng này là đã xử lý, ghi Lịch sử, vẽ lại bảng. Dùng cho nút cuối dòng và nút trong hộp chi tiết. */
+/** Đánh dấu cả đơn của dòng này là đã xử lý, ghi Lịch sử, vẽ lại bảng. */
 function markOrderRowReviewed(rowIndex) {
   const row = orderData.rows[rowIndex];
   if (!row) return;
-  const { headers } = orderData;
-  const cell = name => { const index = headers.findIndex(header => normalizeColumnName(header) === name); return index >= 0 ? String(row[index] || '').trim() : ''; };
-  const phoneIndex = orderPhoneColumnIndex();
-  markOrdersReviewed([orderRowKey(row)], [{ key: orderRowKey(row), id: cell('ma don hang'), name: cell('khach hang'), phone: phoneIndex >= 0 ? String(row[phoneIndex] || '').trim() : '' }]);
-  closeOrderDialog();
+  const cell = name => { const index = orderColumnIndex(name); return index >= 0 ? String(row[index] || '').trim() : ''; };
+  markOrdersReviewed([orderRowKey(row)], [{ key: orderRowKey(row), id: cell('ma don hang'), name: cell('khach hang'), phone: cell('so dien thoai') }]);
+  if (editingOrderRowIndex === rowIndex) editingOrderRowIndex = -1;
   renderOrderData();
   renderProcessedHistory();
   showToast('Đã đánh dấu xử lý xong, đơn sẽ có ở Xuất dữ liệu.', 'success');
 }
-
-document.querySelector('#order-dialog-reviewed')?.addEventListener('click', () => markOrderRowReviewed(orderDialogRowIndex));
 
 // ===== Lịch sử đã xử lý =====
 const processedHistoryButton = document.querySelector('#order-processed-history-button');
@@ -5462,7 +5485,7 @@ function renderEmptyState(container, message) {
   container.innerHTML = `<div class="order-empty">${emptyBoxIcon}<small>${escapeHtml(message)}</small></div>`;
 }
 
-function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, rowNotes = new Map() } = {}) {
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, editingIndex = -1, rowNotes = new Map() } = {}) {
   preview.classList.remove('is-empty');
   if (!rowEntries.length) {
     renderEmptyState(preview, emptyMessage);
@@ -5520,14 +5543,24 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const actionCell = entry => deletable
     ? `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa dòng" aria-label="Xóa dòng">×</button></td>`
     : '';
-  // Xử lý dữ liệu: nút "Đã xử lý" đứng cuối dòng để bấm thẳng, không cần mở chi tiết.
-  const tailCell = entry => reviewable
-    ? `<td class="preview-actions preview-actions--tail"><button type="button" class="order-row-reviewed" data-order-row-reviewed="${entry.index}" title="Đã xử lý xong, cho phép xuất kho">Đã xử lý</button></td>`
-    : '';
+  // Xử lý dữ liệu: nút "Đã xử lý" đứng cuối dòng; dòng đang sửa thì cột này là Lưu/Huỷ.
+  const tailCell = entry => !reviewable ? ''
+    : entry.index === editingIndex
+      ? `<td class="preview-actions preview-actions--tail"><span class="order-row-edit-actions"><button type="button" class="order-row-reviewed order-row-save" data-order-edit-save="${entry.index}">Lưu</button><button type="button" class="order-row-cancel" data-order-edit-cancel="${entry.index}">Huỷ</button></span></td>`
+      : `<td class="preview-actions preview-actions--tail"><button type="button" class="order-row-reviewed" data-order-row-reviewed="${entry.index}" title="Đã xử lý xong, cho phép xuất kho">Đã xử lý</button></td>`;
+  // Dòng đang sửa: các ô sửa được thành ô nhập, giữ nguyên bề rộng cột.
+  const cellHtml = (entry, index) => {
+    const name = normalizeColumnName(headers[index]);
+    const raw = entry.row[index] || '';
+    if (entry.index === editingIndex && editableOrderColumns.has(name)) {
+      return `<td class="${previewClassName(index)} preview-editing"><input class="order-cell-input" type="text" data-edit-column="${index}" value="${escapeHtml(raw)}" aria-label="${escapeHtml(headers[index])}"></td>`;
+    }
+    return `<td class="${previewClassName(index)}">${name === 'ghi chu' ? renderNoteCell(raw, rowNotes.get(entry.index)) : renderPreviewCell(raw, headers[index])}</td>`;
+  };
   const head = (deletable ? '<th class="preview-actions"></th>' : '')
     + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('')
     + (reviewable ? '<th class="preview-actions preview-actions--tail">Trạng thái</th>' : '');
-  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(entry.row[index] || '', rowNotes.get(entry.index)) : renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}${tailCell(entry)}</tr>`).join('');
+  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}${entry.index === editingIndex ? ' order-row-editing' : ''}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map(index => cellHtml(entry, index)).join('')}${tailCell(entry)}</tr>`).join('');
   preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : ''}${columnTemplate}${reviewable ? ' max-content' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
@@ -5589,7 +5622,7 @@ function renderOrderData() {
   renderOrderTable(
     document.querySelector('#order-preview'), headers, searchValue ? dayRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : dayRows,
     processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',
-    { rowNotes, reviewable: true }
+    { rowNotes, reviewable: true, editingIndex: editingOrderRowIndex }
   );
 }
 

@@ -495,22 +495,16 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 /* Bảng Xử lý dữ liệu: bấm dòng mở chi tiết đơn, nên cả dòng là vùng bấm. */
 #order-preview tbody td { cursor: pointer; }
 #order-preview tbody tr:hover td { background: #f7f8fa; }
-/* Hộp chi tiết đơn: mỗi đơn một thẻ, thông tin xếp dọc nhãn – giá trị để đọc khi gọi khách. */
-.order-dialog-panel { width: min(760px, 100%); max-height: 92vh; padding: 21.6px 25.2px; }
-.order-dialog-preview { display: grid; gap: 12.6px; margin-top: 16.2px; }
-.order-dialog-card { overflow: hidden; border: 0.9px solid #e4e7ec; border-radius: 9.9px; }
-.order-dialog-card.is-current { border-color: #111; }
-.order-dialog-card > header { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 9.9px 14.4px; background: #f7f8fa; font-size: 12.6px; font-weight: 700; }
-.order-dialog-card > header span { color: #b42318; font-size: 10.8px; letter-spacing: .02em; text-transform: uppercase; }
-.order-dialog-fields { display: grid; grid-template-columns: 126px minmax(0, 1fr); margin: 0; padding: 5.4px 14.4px; }
-.order-dialog-fields + .order-dialog-fields { border-top: 0.9px dashed #e4e7ec; }
-.order-dialog-fields dt { padding: 7.2px 9px 7.2px 0; color: #687080; font-size: 12.6px; font-weight: 600; }
-.order-dialog-fields dd { display: flex; align-items: center; gap: 6.3px; margin: 0; padding: 7.2px 0; color: #1d2b22; font-size: 13.5px; overflow-wrap: anywhere; }
-.order-dialog-fields dd .note-cell .note-line { font-size: 13.5px; }
-.order-dialog-fields dd .network-logo { margin-inline: 0; }
-.order-dialog-reviewed { padding: 9px 16.2px; color: #fff; background: #111; border: 0.9px solid #111; border-radius: 8.1px; font: inherit; font-weight: 700; cursor: pointer; }
-.order-dialog-reviewed:hover { background: #333; }
-.order-dialog-reviewed:disabled { opacity: .45; cursor: default; }
+/* Sửa tại chỗ trên bảng Xử lý dữ liệu: dòng đang sửa nổi lên, ô sửa là input gọn. */
+#order-preview tbody tr.order-row-editing td { background: #fffaeb; cursor: default; }
+.order-cell-input { width: 100%; min-width: 70px; padding: 4px 6px; color: #111; background: #fff; border: 0.9px solid #d0d5dd; border-radius: 5px; font: inherit; font-size: 11.7px; }
+.order-cell-input:focus { outline: none; border-color: #111; }
+.preview-editing { min-width: 0; }
+.order-row-edit-actions { display: inline-flex; gap: 5.4px; }
+.order-row-save { color: #fff; background: #111; border-color: #111; }
+.order-row-save:hover { background: #333; }
+.order-row-cancel { padding: 4px 10px; color: #475467; background: #fff; border: 0.9px solid #d0d5dd; border-radius: 6px; font: inherit; font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.order-row-cancel:hover { border-color: #111; color: #111; }
 .order-clear-button { color: #b42318; border-color: #f4c7c3; }
 .order-clear-button:hover { color: #fff; background: #b42318; border-color: #b42318; }
 .customer-orders-management p { margin: 0; color: #687080; font-size: 11.7px; }

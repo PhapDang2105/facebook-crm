@@ -15,10 +15,11 @@ import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './prod
 import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
-import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder } from './landing-orders.mjs';
+import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhone, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
+import { applyCustomerOrderEdits } from './order-edits.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -1110,6 +1111,34 @@ const server = http.createServer(async (request, response) => {
       }
     }
     const customerOrderDeleteMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)$/);
+    // Sửa đơn từ bảng Xử lý dữ liệu: tên, số điện thoại, địa chỉ (tách lại ba
+    // cấp), số lượng/đơn giá từng dòng. Server là sự thật cho đơn hệ thống nên
+    // phải ghi về đây; ghi chú xử lý tự cập nhật theo dữ liệu mới.
+    if (customerOrderDeleteMatch && request.method === 'PATCH') {
+      const orderId = decodeURIComponent(customerOrderDeleteMatch[1]);
+      const patch = await readBody(request);
+      let updated = null;
+      let failure = null;
+      const apply = order => { try { applyCustomerOrderEdits(order, patch); updated = order; } catch (error) { failure = error; } };
+      await updateMessagingStore(store => {
+        for (const conversation of store.conversations) {
+          const order = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(item => item.id === orderId);
+          if (!order) continue;
+          apply(order);
+          if (updated) publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+          break;
+        }
+      });
+      if (!updated && !failure) {
+        await updateLandingStore(store => {
+          const order = store.orders.find(item => item.id === orderId);
+          if (order) apply(order);
+        });
+      }
+      if (failure) return sendJson(response, 400, { error: failure.message });
+      if (!updated) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
+      return sendJson(response, 200, { ...updated, processingNotes: processingNotes(updated) });
+    }
     if (customerOrderDeleteMatch && request.method === 'DELETE') {
       const orderId = decodeURIComponent(customerOrderDeleteMatch[1]);
       let removed = null;

@@ -9,7 +9,8 @@ import {
   loadLocationIndex,
   mergeAddressFragment,
   normalizeExportLocation,
-  resolveAddress
+  resolveAddress,
+  streetForDisplay
 } from '../app/processing/locations.mjs';
 
 const names = resolved => [resolved.province?.name || '', resolved.district?.name || '', resolved.ward?.name || ''];
@@ -78,6 +79,22 @@ test('huyện tên duy nhất không có tiền tố, không dấu phẩy: tin k
   assert.equal(hocMon.street, '105/3 ấp Tân thới 2');
   // Không có xã/phường xác nhận thì vẫn không đoán: "Hóc Môn" có thể là tên đường.
   assert.equal(resolveAddress('105/3 đường Hóc Môn').province, null);
+});
+
+test('phần đường phố để hiển thị: cắt tên cấp khách gõ dính trong ô địa chỉ', () => {
+  assert.equal(streetForDisplay('Sau thương thanh cao lương son hoa bình, Xã Thanh Cao, Huyện Lương Sơn, Hòa Bình'), 'Sau thương');
+  assert.equal(streetForDisplay('Sn 786-khu10 tt hùng Sơn - Lâm thao - Phú thọ, Thị trấn Hùng Sơn, Huyện Lâm Thao, Phú Thọ'), 'Sn 786-khu10');
+  assert.equal(streetForDisplay('77a Đặng Văn Ngữ, kim liên, Hà Nội, Phường Kim Liên, Quận Đống Đa, Hà Nội'), '77a Đặng Văn Ngữ');
+  assert.equal(streetForDisplay('A5 tô 1kp1 phuòng Thới an q12, Phường Thới An, Quận 12, Hồ Chí Minh'), 'A5 tô 1kp1');
+  assert.equal(streetForDisplay('Toà zr1 kđt vinhomes ocean park gia lâm, Xã Đa Tốn, Huyện Gia Lâm, Hà Nội'), 'Toà zr1 kđt vinhomes ocean park');
+  // Tên phường trùng tên đường: không cắt khi cắt xong chỉ còn số, hay khi có từ chỉ đường đứng trước.
+  assert.equal(streetForDisplay('33/63/239 lê lợi, Phường Lê Lợi, Quận Ngô Quyền, Hải Phòng'), '33/63/239 lê lợi');
+  assert.equal(streetForDisplay('12 đường Hà Nội, Phường Bến Nghé, Quận 1, TP.HCM'), '12 đường Hà Nội');
+  // Tên cấp chỉ là số phải có loại hình mới bị cắt: "Ngách 15" không phải Phường 15.
+  assert.equal(streetForDisplay('Ngách 15, Phường 15, Quận 10, TP.HCM'), 'Ngách 15');
+  assert.equal(streetForDisplay('Ngách 15 phường 15, Phường 15, Quận 10, TP.HCM'), 'Ngách 15');
+  assert.equal(streetForDisplay('12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM'), '12 Nguyễn Huệ');
+  assert.equal(streetForDisplay(''), '');
 });
 
 test('thành phố trực thuộc tỉnh trùng tên tỉnh', () => {

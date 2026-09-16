@@ -583,6 +583,54 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
   return finish();
 }
 
+// Từ chỉ đường đứng ngay trước một tên cấp cho biết đó là tên đường ("đường Hà Nội").
+const STREET_WORD_BEFORE = /(?:^|[\s,])(duong|pho|ngo|ngach|hem|kiet|so|dai lo|quoc lo|tinh lo|ql|tl|cau|cho|ben|kdc|kp|to|thon|ap|xom|khu|khu pho|to dan pho|tdp)\s*$/;
+
+/**
+ * Phần đường phố để hiển thị: khách hay gõ cả phường/huyện/tỉnh vào một ô
+ * không dấu phẩy ("Sau thương thanh cao lương son hoa bình"), rồi form nối
+ * thêm ba cấp chuẩn phía sau. Sau khi bộ đọc bỏ ba cấp chuẩn, hàm này cắt
+ * tiếp các tên cấp còn dính ở cuối, lớn trước nhỏ sau, mỗi tên kèm loại hình
+ * tuỳ ý ("tt hùng sơn"). Không cắt khi tên chỉ là số mà thiếu loại hình
+ * ("Ngách 15" với Phường 15), khi phía trước là từ chỉ đường ("đường Hà Nội"),
+ * hay khi cắt xong không còn chữ nào ("33/63/239 lê lợi" ở Phường Lê Lợi).
+ */
+export function streetForDisplay(address, hints = {}, locationIndex = loadLocationIndex()) {
+  const text = String(address || '').trim();
+  if (!text) return '';
+  const resolved = resolveAddress(text, locationIndex);
+  const names = [
+    resolved.province?.name || hints.province,
+    resolved.district?.name || hints.district,
+    resolved.ward?.name || hints.ward
+  ].map(name => stripPrefix(normalizeLocationKey(name || ''), ALL_PREFIXES)).filter(Boolean);
+  // Gạch ngang có khoảng trắng kề bên là dấu ngăn đoạn ("khu 10 - Lâm Thao - Phú Thọ").
+  let street = resolved.street.replace(/\s+[-–]\s*|\s*[-–]\s+/g, ', ');
+  const prefixGroup = `(?:(?:${ALL_PREFIXES.join('|')})\\s+)`;
+  const trimEnd = value => value.replace(/[\s,;.\-–]+$/u, '');
+  let changed = true;
+  while (changed && names.length) {
+    changed = false;
+    street = trimEnd(street);
+    const norm = normalizeAligned(street).toLowerCase();
+    for (const bare of names) {
+      const escaped = bare.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const numeric = /^\d+$/.test(bare);
+      const pattern = new RegExp(`(?<![a-z0-9])(${prefixGroup}${numeric ? '' : '?'})${escaped}\\s*$`, 'u');
+      const match = pattern.exec(norm);
+      if (!match) continue;
+      const prefixed = Boolean(match[1]);
+      const rest = street.slice(0, match.index);
+      if (!prefixed && STREET_WORD_BEFORE.test(norm.slice(0, match.index))) continue;
+      if (!prefixed && !/\p{L}/u.test(rest)) continue;
+      street = rest;
+      changed = true;
+      break;
+    }
+  }
+  return trimEnd(street).split(/\s*[,;]\s*/).map(part => part.trim()).filter(Boolean).join(', ');
+}
+
 /** Địa chỉ đầy đủ theo tên chuẩn: "số nhà đường, Phường, Quận, Tỉnh". */
 export function formatResolvedAddress(resolved) {
   return [resolved.street, resolved.ward?.name, resolved.district?.name, resolved.province?.name].filter(Boolean).join(', ');

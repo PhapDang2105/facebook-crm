@@ -1,6 +1,6 @@
 import { comboKey, findProductBySku, giftsForKey } from './processing/catalog.mjs';
 import { shippingFeeForKey, unitPriceInBasket } from './processing/pricing.mjs';
-import { canonicalLocationColumns, normalizeExportLocation, resolveAddress } from './processing/locations.mjs';
+import { canonicalLocationColumns, normalizeExportLocation, streetForDisplay } from './processing/locations.mjs';
 
 export { normalizeExportLocation };
 
@@ -231,10 +231,7 @@ export function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPri
  * bên cạnh. File xuất vẫn ghi địa chỉ đầy đủ để kho đối chiếu.
  */
 export function exportPreviewStreets(rows) {
-  return rows.map(row => {
-    const address = String(row[35] || '').trim();
-    return address ? resolveAddress(address).street : '';
-  });
+  return rows.map(row => streetForDisplay(row[35], { province: row[36], district: row[37], ward: row[38] }));
 }
 
 export function buildExportRows(orderData = {}) {

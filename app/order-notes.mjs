@@ -14,8 +14,11 @@ export const NOTE_SEPARATOR = ' · ';
 
 /** Các mẩu ghi chú máy tự thêm trước đây, không phải lời khách. */
 const SYSTEM_NOTE_FRAGMENTS = [/^Đơn từ landing page\.?$/i, /^Tự điền, cần duyệt trước khi giao$/i, /^Nguồn: /i, /^Chiến dịch: /i, /^utm_[a-z]+=/i,
-  // Ô lựa chọn của form Webcake từng bị ghi vào ghi chú ("select_1: 1 Túi Dùng Thử…").
-  /^(select|single ?choice|multiple ?choice|radio|checkbox|option|singlechoice|multiplechoice)[ _-]?\d*\s*:/i];
+  // Ô lựa chọn của form Webcake từng bị ghi vào ghi chú ("select_1: 1 Túi Dùng Thử…"),
+  // và các dòng POS tự chèn vào note đơn ("address: …", "link: …", "IP: …", "Order ID: …").
+  /^(select|single ?choice|multiple ?choice|radio|checkbox|option|singlechoice|multiplechoice)[ _-]?\d*\s*:/i,
+  /^(address|link|IP|Order ID)\s*:/i];
+const NOTE_SPLIT = /\r?\n| · /;
 
 export function isProcessingNote(segment) {
   const text = String(segment || '').trim();
@@ -24,7 +27,7 @@ export function isProcessingNote(segment) {
 
 /** Lời khách ghi trong form/tin nhắn, bỏ các mẩu máy tự thêm. */
 export function customerNote(order) {
-  return String(order?.note || '').split(NOTE_SEPARATOR)
+  return String(order?.note || '').split(NOTE_SPLIT)
     .map(segment => segment.trim())
     .filter(segment => segment && !isProcessingNote(segment) && !SYSTEM_NOTE_FRAGMENTS.some(pattern => pattern.test(segment)))
     .join(NOTE_SEPARATOR);

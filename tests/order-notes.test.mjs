@@ -32,6 +32,8 @@ test('tách lời khách khỏi mẩu máy thêm; file xuất bỏ ghi chú xử
   assert.equal(customerNote({ note: 'Giao giờ hành chính · Nguồn: fb · Chiến dịch: 1202 · Tự điền, cần duyệt trước khi giao' }), 'Giao giờ hành chính');
   assert.equal(customerNote({ note: 'Đơn từ landing page.' }), '');
   assert.equal(customerNote({ note: 'select_1: 1 Túi Dùng Thử: 1 Túi 174k + 15k phí ship, · Giao chiều' }), 'Giao chiều', 'ô lựa chọn form không phải lời khách');
+  // Note POS nhiều dòng (đơn đã đồng bộ trước khi lọc): bỏ address/select, giữ lời khách.
+  assert.equal(customerNote({ note: 'address: 381/17 lò lu,\r\nselect_1: 1 Túi Dùng Thử: 1 Túi 174k + 15k phí ship,\r\nGọi trước khi giao' }), 'Gọi trước khi giao');
   assert.equal(stripProcessingNotes('⏳ Khách bỏ dở form · ⚠ Chưa có địa chỉ giao hàng · Quà: 1 túi · Giao buổi sáng'), 'Quà: 1 túi · Giao buổi sáng');
   assert.equal(isProcessingNote('☎ Hay bom hàng'), true);
   assert.equal(isProcessingNote('Giao buổi sáng'), false);

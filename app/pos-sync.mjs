@@ -67,7 +67,9 @@ export function posOrderToPayload(order) {
     utm_campaign: order.p_utm_campaign || '',
     utm_content: order.p_utm_content || '',
     utm_term: order.p_utm_term || '',
-    note: String(order.note || '').split(/\r?\n/).filter(line => !/^(address|link|IP|Order ID):/i.test(line.trim())).join('\n').trim()
+    // POS chèn vào note các dòng address/link/IP/Order ID và ô lựa chọn của form
+    // (select_1: "Combo Bán Chạy…"); chỉ giữ lời khách thật.
+    note: String(order.note || '').split(/\r?\n/).filter(line => !/^(address|link|IP|Order ID|select[ _-]?\d*|single ?choice[ _-]?\d*|multiple ?choice[ _-]?\d*)\s*:/i.test(line.trim())).join('\n').trim()
   };
 }
 

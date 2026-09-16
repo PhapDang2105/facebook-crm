@@ -48,6 +48,8 @@ test('đơn POS → payload giống Webcake: chuỗi sản phẩm có phân lo�
   const prefixed = posOrderToPayload(posOrder({ is_abandoned_order: true, note: ['address: 73/37 bằng liệt bằng A,', 'link: https://granola.giotnang.vn/?x', 'IP: 1.2.3.4', 'Order ID: 48011'].join('\r\n'), shipping_address: { address: 'GXN 73/37 bằng liệt bằng A', commune_name: 'Phường Hoàng Liệt', district_name: 'Quận Hoàng Mai', province_name: 'Hà Nội', full_address: 'GXN 73/37 bằng liệt bằng A, Phường Hoàng Liệt, Quận Hoàng Mai, Hà Nội' } }));
   assert.equal(prefixed.address, '73/37 bằng liệt bằng A, Phường Hoàng Liệt, Quận Hoàng Mai, Hà Nội');
   assert.equal(prefixed.note, '');
+  const chosen = posOrderToPayload(posOrder({ note: ['address: 381/17 lò lu,', 'select_1: 1 Túi Dùng Thử: 1 Túi 174k + 15k phí ship,', 'Giao buổi chiều', 'link: https://x', 'IP: 1.1.1.1', 'Order ID: 1'].join('\r\n') }));
+  assert.equal(chosen.note, 'Giao buổi chiều', 'ô lựa chọn form và dòng POS chèn không vào ghi chú');
   const onlyPrefix = posOrderToPayload(posOrder({ is_abandoned_order: true, note: 'address: ,', shipping_address: { address: 'GXN', commune_name: 'Phường Tân Phong', district_name: 'Thành phố Biên Hòa', province_name: 'Đồng Nai', full_address: 'GXN, Phường Tân Phong, Thành phố Biên Hòa, Đồng Nai' } }));
   assert.equal(onlyPrefix.address, 'Phường Tân Phong, Thành phố Biên Hòa, Đồng Nai', 'khách chưa gõ số nhà thì chỉ còn ba cấp');
   assert.equal(isLandingPosOrder(posOrder()), true);

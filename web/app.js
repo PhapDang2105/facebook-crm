@@ -1002,12 +1002,97 @@ function orderColumnIndex(name, data = orderData) {
   return data.headers.findIndex(header => normalizeColumnName(header) === name);
 }
 
+function isEditableOrderColumn(name) {
+  return name === 'san pham' || editableOrderColumns.has(name);
+}
+
+/** Nội dung một ô bình thường của bảng đơn (dùng khi vẽ cả bảng và khi cập nhật lẻ một ô). */
+function orderCellInner(row, index, headers, notes = []) {
+  const raw = row[index] || '';
+  return normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(raw, notes) : renderPreviewCell(raw, headers[index]);
+}
+
+/** Nội dung ô đang sửa: ô chọn sản phẩm theo danh mục, hoặc vùng gõ thẳng lên chữ. */
+function editableCellInner(row, index, headers) {
+  const name = normalizeColumnName(headers[index]);
+  const raw = row[index] || '';
+  if (name === 'san pham') {
+    // Sản phẩm chọn từ danh mục đã cài (Cài đặt → Sản phẩm), theo SKU của dòng.
+    const skuIndex = headers.findIndex(header => normalizeColumnName(header) === 'ma mau ma');
+    const currentSku = skuIndex >= 0 ? String(row[skuIndex] || '').trim() : '';
+    const catalog = (Array.isArray(sharedProducts) ? sharedProducts : []).filter(product => product.active !== false && product.sku);
+    const known = catalog.some(product => product.sku === currentSku);
+    const options = [
+      known ? '' : `<option value="" selected>${escapeHtml(raw || 'Chưa chọn sản phẩm')}</option>`,
+      ...catalog.map(product => `<option value="${escapeHtml(product.sku)}"${product.sku === currentSku ? ' selected' : ''}>${escapeHtml(product.name)}</option>`)
+    ].join('');
+    return `<select class="order-cell-select" data-edit-column="${index}" data-current-sku="${escapeHtml(currentSku)}" aria-label="${escapeHtml(headers[index])}">${options}</select>`;
+  }
+  // Gõ thẳng lên chữ trong ô, không có khung ô nhập: chữ giữ nguyên cỡ, cách
+  // xuống dòng và bề rộng như lúc chưa sửa nên bảng không xê dịch.
+  return `<span class="order-cell-edit" contenteditable="plaintext-only" spellcheck="false" data-edit-column="${index}" role="textbox" aria-label="${escapeHtml(headers[index])}">${escapeHtml(raw)}</span>`;
+}
+
+// Vào/ra chế độ sửa chỉ đụng đúng một ô trong DOM, không vẽ lại bảng: đó là
+// thứ làm bấm-gõ-lưu tức thì. Vẽ lại toàn bộ (để tính lại trùng, ghi chú, tab
+// ngày...) được hoãn tới khi người dùng ngừng sửa.
+let editingCellBackup = '';
+let lockedTemplateBackup = '';
+// Ô đã sửa trong phiên này giữ một nền nhạt để nhân viên biết đã đi tới đâu.
+const editedOrderCells = new Set();
+let pendingOrderRefresh = 0;
+function scheduleOrderRefresh(delay = 1500) {
+  clearTimeout(pendingOrderRefresh);
+  pendingOrderRefresh = setTimeout(() => {
+    if (editingOrderRowIndex >= 0) { scheduleOrderRefresh(delay); return; }
+    renderOrderData();
+  }, delay);
+}
+function persistOrderData() {
+  try { localStorage.setItem('crm-orders', JSON.stringify(orderData)); } catch {}
+}
+/** Cập nhật lẻ vài ô của một dòng đang hiện trên bảng Xử lý dữ liệu, không vẽ lại bảng. */
+function refreshOrderCells(rowIndex, columnIndexes, rowNotes) {
+  const tr = document.querySelector(`#order-preview tr[data-order-row-index="${rowIndex}"]`);
+  const row = orderData.rows[rowIndex];
+  if (!tr || !row) return;
+  for (const columnIndex of columnIndexes) {
+    const td = tr.querySelector(`td[data-column-index="${columnIndex}"]`);
+    if (td && !td.classList.contains('preview-editing')) td.innerHTML = orderCellInner(row, columnIndex, orderData.headers, rowNotes.get(rowIndex));
+  }
+}
+/** Rời chế độ sửa: trả ô về nội dung thường (bản mới nếu có), mở khoá bề rộng cột. */
+function exitCellEdit(innerHtml = editingCellBackup) {
+  const table = document.querySelector('#order-preview table');
+  const td = document.querySelector('#order-preview td.preview-editing');
+  if (td) {
+    td.classList.remove('preview-editing');
+    td.innerHTML = innerHtml;
+  }
+  if (table) {
+    if (lockedTemplateBackup) table.style.setProperty('--preview-template', lockedTemplateBackup);
+    else table.style.removeProperty('--preview-template');
+  }
+  editingCellBackup = '';
+  lockedTemplateBackup = '';
+  stopOrderRowEdit();
+}
+
 function startOrderRowEdit(rowIndex, columnIndex) {
+  const table = document.querySelector('#order-preview table');
+  const td = document.querySelector(`#order-preview tr[data-order-row-index="${rowIndex}"] td[data-column-index="${columnIndex}"]`);
+  const row = orderData.rows[rowIndex];
+  if (!table || !td || !row) return;
+  // Khoá bề rộng cột đúng như đang thấy rồi mới đổi nội dung ô.
   lockedOrderTemplate = measureOrderTemplate();
+  lockedTemplateBackup = table.style.getPropertyValue('--preview-template');
+  table.style.setProperty('--preview-template', lockedOrderTemplate);
   editingOrderRowIndex = rowIndex;
   editingOrderColumn = columnIndex;
-  renderOrderData();
-  const first = document.querySelector(`#order-preview tr[data-order-row-index="${rowIndex}"] [data-edit-column]`);
+  editingCellBackup = td.innerHTML;
+  td.classList.add('preview-editing');
+  td.innerHTML = editableCellInner(row, columnIndex, orderData.headers);
+  const first = td.querySelector('[data-edit-column]');
   if (!first) return;
   first.focus();
   // Đặt con nháy ở cuối chữ, như bấm vào một ô bảng tính.
@@ -1023,8 +1108,7 @@ function startOrderRowEdit(rowIndex, columnIndex) {
 
 function cancelOrderRowEdit() {
   if (editingOrderRowIndex < 0) return;
-  stopOrderRowEdit();
-  renderOrderData();
+  exitCellEdit();
 }
 
 // Ghi chú xử lý về địa chỉ hết hiệu lực ngay khi nhân viên đã sửa ô địa chỉ
@@ -1058,6 +1142,11 @@ async function saveOrderRowEdit(rowIndex) {
   const originalSku = skuColumnIndex >= 0 ? String(row[skuColumnIndex] || '').trim() : '';
   const originalName = productColumnIndex >= 0 ? String(row[productColumnIndex] || '').trim() : '';
   let changed = 0;
+  // Những dòng/cột đã đổi, để cập nhật lẻ trên bảng thay vì vẽ lại tất cả.
+  const touchedRows = new Set();
+  const touchedColumns = new Set();
+  const touch = (targets, ...columns) => { targets.forEach(target => touchedRows.add(target)); columns.filter(column => column >= 0).forEach(column => touchedColumns.add(column)); };
+  const noteColumn = orderColumnIndex('ghi chu');
   for (const input of tr.querySelectorAll('[data-edit-column]')) {
     const index = Number(input.dataset.editColumn);
     const name = normalizeColumnName(headers[index]);
@@ -1069,10 +1158,9 @@ async function saveOrderRowEdit(rowIndex) {
       if (!product) continue;
       changed += 1;
       row[index] = product.name;
-      const skuColumn = orderColumnIndex('ma mau ma');
-      if (skuColumn >= 0) row[skuColumn] = product.sku;
-      const noteColumn = orderColumnIndex('ghi chu');
+      if (skuColumnIndex >= 0) row[skuColumnIndex] = product.sku;
       if (noteColumn >= 0) row[noteColumn] = dropStaleNotes(row[noteColumn], staleProductNote);
+      touch([rowIndex], index, noteColumn);
       line.product = product.sku;
       continue;
     }
@@ -1082,25 +1170,36 @@ async function saveOrderRowEdit(rowIndex) {
     changed += 1;
     const targets = sharedNames.has(name) ? sameOrder : [rowIndex];
     for (const target of targets) orderData.rows[target][index] = value;
+    touch(targets, index);
     if (name === 'khach hang') patch.name = value;
     if (name === 'so dien thoai') {
       patch.phone = value;
       const carrier = orderColumnIndex('nha mang');
       if (carrier >= 0) for (const target of targets) orderData.rows[target][carrier] = carrierLabelFor(value);
+      touch(targets, carrier);
     }
     if (name === 'dia chi') {
       patch.address = value;
       // Địa chỉ mới là sự thật: bỏ ba cấp cũ để file xuất đọc lại từ địa chỉ, bỏ ghi chú địa chỉ đã cũ.
       for (const level of ['tinh thanh pho', 'quan huyen', 'phuong xa']) { const column = orderColumnIndex(level); if (column >= 0) for (const target of targets) orderData.rows[target][column] = ''; }
-      const note = orderColumnIndex('ghi chu');
-      if (note >= 0) for (const target of targets) orderData.rows[target][note] = dropStaleNotes(orderData.rows[target][note], staleAddressNote);
+      if (noteColumn >= 0) for (const target of targets) orderData.rows[target][noteColumn] = dropStaleNotes(orderData.rows[target][noteColumn], staleAddressNote);
+      touch(targets, noteColumn);
     }
     if (name === 'so luong') line.quantity = value;
     if (name === 'don gia') line.price = value.replace(/[^\d]/g, '');
   }
-  stopOrderRowEdit();
-  renderOrderData();
-  if (!changed) return;
+  if (!changed) { exitCellEdit(); return; }
+  // Trả ô về dạng thường với giá trị mới, cập nhật các ô liên quan đang hiện,
+  // ghi vào trình duyệt, rồi hoãn việc vẽ lại toàn bộ tới khi ngừng sửa.
+  const editedColumn = editingOrderColumn;
+  const rowNotes = getRowProcessingNotes(orderData, { duplicateRowIndexes: getDuplicateOrderRowIndexes(), duplicatePhoneRowIndexes: getDuplicatePhoneRowIndexes(), warningRowIndexes: getPhoneWarningRowIndexes() });
+  const editedTd = document.querySelector('#order-preview td.preview-editing');
+  exitCellEdit(orderCellInner(row, editedColumn, headers, rowNotes.get(rowIndex)));
+  editedTd?.classList.add('preview-edited');
+  editedOrderCells.add(`${rowIndex}|${editedColumn}`);
+  for (const target of touchedRows) refreshOrderCells(target, [...touchedColumns].filter(column => target !== rowIndex || column !== editedColumn), rowNotes);
+  persistOrderData();
+  scheduleOrderRefresh();
   const serverId = serverOrderIdOf(row[orderColumnIndex('ma don hang')]);
   if (!serverId) { showToast('Đã lưu thay đổi.', 'success'); return; }
   if (Object.keys(line).length) patch.lines = [{ sku: originalSku, name: originalName, ...line }];
@@ -1182,9 +1281,16 @@ function markOrderRowReviewed(rowIndex) {
   const row = orderData.rows[rowIndex];
   if (!row) return;
   const cell = name => { const index = orderColumnIndex(name); return index >= 0 ? String(row[index] || '').trim() : ''; };
-  markOrdersReviewed([orderRowKey(row)], [{ key: orderRowKey(row), id: cell('ma don hang'), name: cell('khach hang'), phone: cell('so dien thoai') }]);
-  if (editingOrderRowIndex === rowIndex) stopOrderRowEdit();
-  renderOrderData();
+  const key = orderRowKey(row);
+  markOrdersReviewed([key], [{ key, id: cell('ma don hang'), name: cell('khach hang'), phone: cell('so dien thoai') }]);
+  if (editingOrderRowIndex === rowIndex) exitCellEdit();
+  // Gỡ ngay các dòng của đơn khỏi bảng, không vẽ lại; vẽ lại toàn bộ hoãn tới khi rảnh.
+  const tbody = document.querySelector('#order-preview tbody');
+  for (const tr of document.querySelectorAll('#order-preview tr[data-order-row-index]')) {
+    const index = Number(tr.dataset.orderRowIndex);
+    if (orderData.rows[index] && orderRowKey(orderData.rows[index]) === key) tr.remove();
+  }
+  if (!tbody || !tbody.children.length) renderOrderData(); else scheduleOrderRefresh(800);
   renderProcessedHistory();
   showToast('Đã đánh dấu xử lý xong, đơn sẽ có ở Xuất dữ liệu.', 'success');
 }
@@ -1554,6 +1660,8 @@ function showOrderStage(stage) {
   showView('orders');
   orderPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== stage));
   orderStageButtons.forEach(button => button.classList.toggle('active', button.dataset.orderStage === stage));
+  // Màn này bị bỏ qua ở lần vẽ trước (đang ẩn) thì vẽ bây giờ.
+  if (orderPanelsDirty.has(stage)) renderOrderData();
 }
 
 function parseCsv(text) {
@@ -5673,24 +5781,11 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     const name = normalizeColumnName(headers[index]);
     const raw = entry.row[index] || '';
     const isEditingCell = Boolean(editingCell) && entry.index === editingCell.row && index === editingCell.column;
-    if (isEditingCell && name === 'san pham') {
-      // Sản phẩm chọn từ danh mục đã cài (Cài đặt → Sản phẩm), theo SKU của dòng.
-      const skuIndex = headers.findIndex(header => normalizeColumnName(header) === 'ma mau ma');
-      const currentSku = skuIndex >= 0 ? String(entry.row[skuIndex] || '').trim() : '';
-      const catalog = (Array.isArray(sharedProducts) ? sharedProducts : []).filter(product => product.active !== false && product.sku);
-      const known = catalog.some(product => product.sku === currentSku);
-      const options = [
-        known ? '' : `<option value="" selected>${escapeHtml(raw || 'Chưa chọn sản phẩm')}</option>`,
-        ...catalog.map(product => `<option value="${escapeHtml(product.sku)}"${product.sku === currentSku ? ' selected' : ''}>${escapeHtml(product.name)}</option>`)
-      ].join('');
-      return `<td class="${previewClassName(index)} preview-editing" data-column-index="${index}"><select class="order-cell-select" data-edit-column="${index}" data-current-sku="${escapeHtml(currentSku)}" aria-label="${escapeHtml(headers[index])}">${options}</select></td>`;
+    if (isEditingCell && isEditableOrderColumn(name)) {
+      return `<td class="${previewClassName(index)} preview-editing" data-column-index="${index}">${editableCellInner(entry.row, index, headers)}</td>`;
     }
-    if (isEditingCell && editableOrderColumns.has(name)) {
-      // Gõ thẳng lên chữ trong ô, không có khung ô nhập: chữ giữ nguyên cỡ, cách
-      // xuống dòng và bề rộng như lúc chưa sửa nên bảng không xê dịch.
-      return `<td class="${previewClassName(index)} preview-editing" data-column-index="${index}"><span class="order-cell-edit" contenteditable="plaintext-only" spellcheck="false" data-edit-column="${index}" role="textbox" aria-label="${escapeHtml(headers[index])}">${escapeHtml(raw)}</span></td>`;
-    }
-    return `<td class="${previewClassName(index)}" data-column-index="${index}">${name === 'ghi chu' ? renderNoteCell(raw, rowNotes.get(entry.index)) : renderPreviewCell(raw, headers[index])}</td>`;
+    const edited = reviewable && editedOrderCells.has(`${entry.index}|${index}`) ? ' preview-edited' : '';
+    return `<td class="${previewClassName(index)}${edited}" data-column-index="${index}">${orderCellInner(entry.row, index, headers, rowNotes.get(entry.index))}</td>`;
   };
   const head = (deletable ? '<th class="preview-actions"></th>' : '')
     + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('')
@@ -5700,6 +5795,9 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const template = templateOverride || `${deletable ? '40px ' : ''}${columnTemplate}${reviewable ? ' max-content' : ''}`;
   preview.innerHTML = `<table style="--preview-template: ${template}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
+
+// Bảng của màn chưa mở được đánh dấu "cần vẽ lại", vẽ khi mở màn đó.
+const orderPanelsDirty = new Set();
 
 function renderOrderData() {
   const { headers } = orderData;
@@ -5739,18 +5837,27 @@ function renderOrderData() {
   if (searchValue) {
     importRows = importRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue));
   }
-  renderExportPreview();
+  // Chỉ vẽ bảng của màn đang mở; màn khác ghi "cần vẽ lại" và vẽ khi được mở.
+  // Vẽ cả ba (bảng import ~500 dòng có ảnh, bảng xuất còn gọi server) mỗi lần
+  // sửa một ô là thứ làm giao diện lag.
+  const panelVisible = name => !orderPanels.get(name)?.classList.contains('hidden');
+  if (panelVisible('export')) { orderPanelsDirty.delete('export'); renderExportPreview(); } else orderPanelsDirty.add('export');
 
-  renderOrderTable(
-    document.querySelector('#order-import-preview'), headers, sortOrderEntriesByTime(importRows),
-    rows.length ? 'Không tìm thấy đơn hàng phù hợp' : 'Chưa có dữ liệu',
-    ({ index }) => warningRowIndexes.get(index) && warningRowIndexes.get(index) !== 'watch' ? 'order-row-phone-warning'
-      : warningRowIndexes.get(index) === 'watch' ? 'order-row-phone-watch'
-        : duplicateRowIndexes.has(index)
-          ? 'order-row-duplicate'
-          : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
-    { deletable: true, rowNotes }
-  );
+  if (panelVisible('import')) {
+    orderPanelsDirty.delete('import');
+    renderOrderTable(
+      document.querySelector('#order-import-preview'), headers, sortOrderEntriesByTime(importRows),
+      rows.length ? 'Không tìm thấy đơn hàng phù hợp' : 'Chưa có dữ liệu',
+      ({ index }) => warningRowIndexes.get(index) && warningRowIndexes.get(index) !== 'watch' ? 'order-row-phone-warning'
+        : warningRowIndexes.get(index) === 'watch' ? 'order-row-phone-watch'
+          : duplicateRowIndexes.has(index)
+            ? 'order-row-duplicate'
+            : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
+      { deletable: true, rowNotes }
+    );
+  } else orderPanelsDirty.add('import');
+  if (!panelVisible('process')) { orderPanelsDirty.add('process'); return; }
+  orderPanelsDirty.delete('process');
   // Xử lý dữ liệu: không tô màu dòng (lý do đã ghi ở cột Ghi chú), không có
   // cột nút; bấm dòng mở chi tiết để đánh dấu "Đã xử lý". Đơn chia bốn tab theo
   // ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.

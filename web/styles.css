@@ -502,8 +502,13 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 /* Sửa tại chỗ trên bảng Xử lý dữ liệu: gõ thẳng lên chữ trong ô, không khung ô
    nhập, không đổi cỡ chữ hay cách xuống dòng; chỉ một gạch mảnh màu TikTok dưới
    ô đang sửa. Bề rộng cột được khoá bằng JS nên bảng đứng yên. */
-.preview-editing { min-width: 0; cursor: text; }
-.order-cell-edit { display: block; width: 100%; min-width: 1ch; min-height: 1.45em; padding: 0; margin: 0; color: inherit; background: transparent; border: 0; border-radius: 0; outline: none; font: inherit; line-height: 1.45; white-space: inherit; overflow-wrap: anywhere; box-shadow: inset 0 -1.8px 0 #fe2c55; caret-color: #fe2c55; }
+/* Ô đang sửa có nền hồng nhạt kiểu TikTok để biết đang ở đâu; ô đã sửa trong
+   phiên giữ nền xanh ngọc rất nhạt để biết đã đi tới đâu. */
+#order-preview tbody td.preview-editing,
+#order-preview tbody tr:hover td.preview-editing { background: #fff0f3; cursor: text; }
+#order-preview tbody td.preview-edited { background: #f0fdfc; }
+.preview-editing { min-width: 0; }
+.order-cell-edit { display: block; width: 100%; min-width: 1ch; min-height: 1.45em; padding: 0; margin: 0; color: #111; background: transparent; border: 0; border-radius: 0; outline: none; font: inherit; font-weight: 500; line-height: 1.45; white-space: inherit; overflow-wrap: anywhere; box-shadow: inset 0 -1.8px 0 #fe2c55; caret-color: #111; }
 .order-cell-select { display: block; width: 100%; max-width: 100%; padding: 0 14px 0 0; color: inherit; background: transparent; border: 0; border-radius: 0; outline: none; font: inherit; font-size: 11.7px; line-height: 1.45; appearance: none; -webkit-appearance: none; box-shadow: inset 0 -1.8px 0 #fe2c55; cursor: pointer; }
 .order-clear-button { color: #b42318; border-color: #f4c7c3; }
 .order-clear-button:hover { color: #fff; background: #b42318; border-color: #b42318; }

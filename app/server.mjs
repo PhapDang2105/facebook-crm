@@ -868,7 +868,7 @@ const server = http.createServer(async (request, response) => {
       const filters = Object.fromEntries([
         'q', 'channelId', 'source', 'gender', 'label', 'activeWithin',
         // Remarketing: mua trong N ngày, mua sản phẩm nào, combo mấy túi, mua mấy lần.
-        'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone'
+        'orderedWithin', 'product', 'combo', 'minOrders'
       ].map(key => [key, url.searchParams.get(key) || '']));
       const result = await listCustomers(filters);
       if (url.pathname === '/api/customers/audience.csv') {

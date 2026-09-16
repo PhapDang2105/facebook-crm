@@ -32,6 +32,16 @@ function collectPurchases(customer, orders) {
     // Combo tính theo tổng số túi trong MỘT đơn, vì bảng giá combo tính theo giỏ.
     const basket = items.reduce((sum, item) => sum + Math.max(1, Math.round(Number(item?.quantity) || 1)), 0);
     if (basket > customer.comboMax) customer.comboMax = basket;
+    // Bảng hiển thị đơn GẦN NHẤT; danh sách gộp bên dưới chỉ để lọc "đã từng mua".
+    if (createdAt >= customer.lastOrderSeenAt) {
+      customer.lastOrderSeenAt = createdAt;
+      customer.lastOrderCombo = basket;
+      customer.lastOrderProducts = items.map(item => ({
+        sku: String(item?.sku || '').trim(),
+        name: String(item?.name || '').trim() || String(item?.sku || '').trim(),
+        quantity: Math.max(1, Math.round(Number(item?.quantity) || 1))
+      })).filter(item => item.name);
+    }
     for (const item of items) {
       const name = String(item?.name || '').trim();
       const sku = String(item?.sku || '').trim();
@@ -83,6 +93,9 @@ export function buildCustomers(store, channels = []) {
       // Remarketing: ai đã mua gì, mua bao nhiêu túi một lần, mua lần cuối khi nào.
       firstOrderAt: 0,
       lastOrderAt: 0,
+      lastOrderSeenAt: -1,
+      lastOrderProducts: [],
+      lastOrderCombo: 0,
       products: [],
       comboMax: 0,
       noteCount: 0,
@@ -138,7 +151,7 @@ function foldText(value) {
 /**
  * Bộ lọc cho cả hai việc: quản lý data (tìm kiếm, kênh, nguồn, giới tính, thẻ,
  * tương tác trong N ngày) và remarketing (đã mua trong N ngày, đã mua sản phẩm
- * nào, mua combo mấy túi, mua bao nhiêu lần, có số điện thoại chưa).
+ * nào, mua combo mấy túi, mua bao nhiêu lần).
  * Mọi mốc thời gian đều đếm bằng số ngày, không nhập ngày tháng thủ công.
  */
 export function filterCustomers(customers, filters = {}, now = Date.now()) {
@@ -161,7 +174,6 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
     if (minOrders && customer.orderCount < minOrders) return false;
     // Combo: có ít nhất một đơn từ N túi trở lên.
     if (combo && customer.comboMax < combo) return false;
-    if (filters.hasPhone === '1' && !customer.phone) return false;
     if (product && !customer.products.some(item => foldText(`${item.sku} ${item.name}`).includes(product))) return false;
     if (query) {
       const haystack = foldText([
@@ -196,7 +208,7 @@ function formatTime(value) {
 /** CSV for Excel: UTF-8 with BOM, semicolon-free, quotes escaped. */
 export function customersToCsv(customers, labels = []) {
   const labelNamesById = new Map(labels.map(label => [label.id, label.name]));
-  const headers = ['Tên', 'ID Facebook', 'Giới tính', 'Kênh', 'Nguồn', 'Liên hệ lần đầu', 'Khách nhắn cuối', 'Tương tác cuối', 'Số điện thoại', 'Địa chỉ', 'Số đơn', 'Tổng tiền', 'Mua lần cuối', 'Sản phẩm đã mua', 'Combo lớn nhất', 'Thẻ', 'Quảng cáo'];
+  const headers = ['Tên', 'ID Facebook', 'Giới tính', 'Kênh', 'Nguồn', 'Liên hệ lần đầu', 'Khách nhắn cuối', 'Tương tác cuối', 'Số điện thoại', 'Địa chỉ', 'Số đơn', 'Tổng tiền', 'Mua lần cuối', 'Đơn gần nhất gồm', 'Đã mua từ trước tới nay', 'Combo lớn nhất', 'Thẻ', 'Quảng cáo'];
   const rows = customers.map(customer => [
     customer.name,
     customer.psid,
@@ -211,7 +223,8 @@ export function customersToCsv(customers, labels = []) {
     customer.orderCount,
     customer.orderTotal,
     formatTime(customer.lastOrderAt),
-    (customer.products || []).map(item => `${item.name}${item.quantity > 1 ? ` x${item.quantity}` : ''}`).join(', '),
+    (customer.lastOrderProducts || []).map(item => `${item.name} ×${item.quantity}`).join(', '),
+    (customer.products || []).map(item => `${item.name} ×${item.quantity}`).join(', '),
     customer.comboMax || '',
     // Thẻ nhân viên đã xóa trong Cài đặt thì không xuất ra dưới dạng mã.
     customer.labels.map(label => labelNamesById.get(label) || labelNames[label]).filter(Boolean).join(', '),

@@ -553,8 +553,7 @@ const customersFilters = {
   orderedWithin: document.querySelector('#customers-ordered-within'),
   product: document.querySelector('#customers-product'),
   combo: document.querySelector('#customers-combo'),
-  minOrders: document.querySelector('#customers-min-orders'),
-  hasPhone: document.querySelector('#customers-has-phone')
+  minOrders: document.querySelector('#customers-min-orders')
 };
 let customersRequestId = 0;
 let customersItems = [];
@@ -564,10 +563,6 @@ function customersQueryString() {
   const params = new URLSearchParams();
   for (const [key, input] of Object.entries(customersFilters)) {
     if (!input) continue;
-    if (input.type === 'checkbox') {
-      if (input.checked) params.set(key, '1');
-      continue;
-    }
     const value = input.value.trim();
     if (!value) continue;
     params.set(key, value);
@@ -637,14 +632,15 @@ function renderCustomers(items, total) {
     const gender = customer.gender === 'male' ? 'Nam' : customer.gender === 'female' ? 'Nữ' : '';
     // Remarketing đọc theo "mua khi nào, cách đây bao lâu" — số tiền không giúp gì ở đây.
     const boughtWhen = customer.lastOrderAt
-      ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}${customer.orderCount > 1 ? ` · ${customer.orderCount} đơn` : ''}</small>`
+      ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}</small>`
       : '<span class="customer-never">Chưa mua</span>';
-    // Danh sách hàng đã mua đọc như một dòng kê khai, không phải một rổ nhãn màu:
-    // mỗi sản phẩm một dòng, phần phụ gộp xuống dòng cuối màu nhạt.
-    const bought = (customer.products || []);
+    // Cột này là ĐƠN GẦN NHẤT, không phải tổng cả đời — nhân viên gọi lại khách
+    // cần biết lần rồi họ lấy gì, chứ không phải danh sách cộng dồn.
+    // Mỗi sản phẩm một dòng, phần phụ gộp xuống dòng cuối màu nhạt.
+    const bought = (customer.lastOrderProducts || []);
     const extra = [
       bought.length > 2 ? `+${bought.length - 2} sản phẩm khác` : '',
-      customer.comboMax > 1 ? `combo ${customer.comboMax}` : ''
+      customer.lastOrderCombo > 1 ? `combo ${customer.lastOrderCombo}` : ''
     ].filter(Boolean).join(' · ');
     const boughtCell = bought.length
       ? `<div class="customer-products" title="${escapeHtml(bought.map(item => `${item.name} ×${item.quantity}`).join(', '))}">${
@@ -657,11 +653,12 @@ function renderCustomers(items, total) {
       <td>${escapeHtml(customer.phone)}</td>
       <td class="customer-address" title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</td>
       <td class="customer-bought">${boughtCell}</td>
+      <td class="customer-order-count">${customer.orderCount || ''}</td>
       <td class="customer-bought-when">${boughtWhen}</td>
     </tr>`;
   }).join('');
   customersTable.innerHTML = `<table><thead><tr>
-    <th>Khách hàng</th><th>Giới tính</th><th>Số điện thoại</th><th>Địa chỉ</th><th>Sản phẩm đã mua</th><th>Đã mua</th>
+    <th>Khách hàng</th><th>Giới tính</th><th>Số điện thoại</th><th>Địa chỉ</th><th>Sản phẩm đã mua</th><th>Số đơn</th><th>Đã mua</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -708,7 +705,8 @@ function openCustomerDialog(customer) {
     ['Số điện thoại', customer.phone],
     ['Địa chỉ', customer.address],
     ['Đơn hàng', customer.orderCount ? `${customer.orderCount} đơn · ${formatOrderMoney(customer.orderTotal)}` : '0'],
-    ['Sản phẩm đã mua', (customer.products || []).map(item => `${item.name} x${item.quantity}`).join(', ')],
+    ['Đơn gần nhất gồm', (customer.lastOrderProducts || []).map(item => `${item.name} ×${item.quantity}`).join(', ')],
+    ['Đã mua từ trước tới nay', (customer.products || []).map(item => `${item.name} ×${item.quantity}`).join(', ')],
     ['Mua lần đầu', customer.firstOrderAt ? `${formatCustomerDate(customer.firstOrderAt)} (${timeSince(customer.firstOrderAt)})` : ''],
     ['Mua lần cuối', customer.lastOrderAt ? `${formatCustomerDate(customer.lastOrderAt)} (${timeSince(customer.lastOrderAt)})` : ''],
     ['Ghi chú', String(customer.noteCount || 0)],
@@ -735,7 +733,7 @@ customersFilters.q?.addEventListener('input', () => {
   clearTimeout(customersSearchTimer);
   customersSearchTimer = setTimeout(loadCustomers, 250);
 });
-['channelId', 'activeWithin', 'orderedWithin', 'product', 'combo', 'minOrders', 'hasPhone']
+['channelId', 'activeWithin', 'orderedWithin', 'product', 'combo', 'minOrders']
   .forEach(key => customersFilters[key]?.addEventListener('change', loadCustomers));
 // Một nút Xuất danh sách, chọn định dạng trong menu — cả hai đều xuất đúng
 // những gì bảng đang lọc.

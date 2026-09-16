@@ -416,14 +416,12 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customers-export-menu button { display: block; width: 100%; padding: 8px 10px; color: #1d2b22; background: transparent; border: 0; border-radius: 5px; font: inherit; font-size: 13.5px; text-align: left; white-space: nowrap; cursor: pointer; }
 .customers-export-menu button:hover { background: #f0f2f5; }
 .customers-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 12px; }
-.customers-toolbar > .order-search-control { flex: 1 1 240px; min-width: 220px; }
-.customers-toolbar > .order-filter-control { flex: 0 1 180px; min-width: 140px; }
+/* Các ô lọc giãn đều nhau nên khi xuống hàng vẫn kín chiều ngang, không lệch. */
+.customers-toolbar > .order-search-control { flex: 1 1 230px; min-width: 200px; }
+.customers-toolbar > .order-filter-control { flex: 1 1 150px; min-width: 140px; max-width: 230px; }
 /* Hàng lọc remarketing: tách khỏi bộ lọc dữ liệu để nhân viên không lẫn hai việc. */
-/* Hàng lọc thứ hai: một đường kẻ mảnh là đủ tách, không cần khối nền. */
-.customers-toolbar--remarketing { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eef0f3; }
-.customers-toggle { display: inline-flex; align-items: center; gap: 7px; color: #475467; font-size: 13.5px; white-space: nowrap; cursor: pointer; }
-.customers-toggle input { width: 15px; height: 15px; accent-color: #1677ff; cursor: pointer; }
 .customers-table td.customer-address { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customers-table td.customer-order-count { color: #344054; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .customers-table td.customer-bought-when { white-space: nowrap; }
 .customers-table td.customer-bought-when b { display: block; color: #101828; font-weight: 600; }
 .customers-table td.customer-bought-when small { display: block; margin-top: 2px; color: #98a2b3; font-size: 12px; }

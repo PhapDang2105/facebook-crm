@@ -95,6 +95,12 @@ test('gộp sản phẩm đã mua, ngày mua và combo lớn nhất của từng
   assert.equal(dung.firstOrderAt, now - 60 * day);
   assert.equal(dung.lastOrderAt, now - 40 * day);
   assert.deepEqual(dung.products.map(item => item.sku), ['YMU-01', 'GRA-01'], 'mua gần nhất đứng trước');
+  // Cột "Sản phẩm đã mua" trên bảng chỉ lấy đơn gần nhất, không cộng dồn.
+  assert.deepEqual(dung.lastOrderProducts.map(item => [item.sku, item.quantity]), [['YMU-01', 1]]);
+  assert.equal(dung.lastOrderCombo, 1, 'combo hiển thị theo đơn gần nhất');
+  assert.equal(dung.comboMax, 3, 'còn bộ lọc combo vẫn xét mọi đơn');
+  assert.deepEqual(mai.lastOrderProducts.map(item => [item.sku, item.quantity]), [['GRA-01', 2]]);
+  assert.deepEqual(hoi.lastOrderProducts, []);
   assert.equal(hoi.comboMax, 0);
   assert.deepEqual(hoi.products, []);
 });
@@ -109,7 +115,6 @@ test('lọc remarketing: mua trong N ngày, theo sản phẩm, theo combo, theo 
   assert.deepEqual(names({ product: 'YMU-01' }), ['Anh Dũng']);
   assert.deepEqual(names({ product: 'granola' }), ['Chị Mai', 'Anh Dũng'], 'khớp cả tên không dấu');
   assert.deepEqual(names({ minOrders: '2' }), ['Anh Dũng']);
-  assert.deepEqual(names({ hasPhone: '1' }), ['Chị Mai', 'Anh Dũng'], 'khách chưa để lại số bị loại');
   assert.deepEqual(names({ orderedWithin: '7', combo: '3' }), [], 'các bộ lọc cộng dồn');
   assert.deepEqual(names({ q: 'yen mach' }), ['Anh Dũng'], 'tìm kiếm chạm cả sản phẩm đã mua');
 });

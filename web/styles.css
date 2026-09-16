@@ -660,7 +660,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .data-preview td:has(> .network-logo) { justify-content: center; }
 .data-preview .preview-address,
 .data-preview .preview-wrap { white-space: normal; overflow-wrap: anywhere; }
-.data-preview .preview-quantity,
+.data-preview .preview-quantity { justify-content: center; text-align: center; }
 .data-preview .preview-phone { justify-content: flex-start; text-align: left; }
 .data-preview td.preview-phone { flex-wrap: wrap; white-space: normal; }
 .data-preview td.preview-phone .phone-warning-badge { margin-left: 0; }

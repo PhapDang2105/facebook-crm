@@ -29,3 +29,8 @@ __pycache__/
 
 # Cấu hình chạy thử cục bộ của Claude Code (đường dẫn máy cá nhân)
 .claude/launch.json
+
+# Hồ sơ Chrome tạm của trình chạy UI, ảnh chụp thử, và repo tham khảo: không thuộc dự án
+.tmp-ui-profile/
+Claude outputs/
+references/

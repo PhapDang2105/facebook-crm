@@ -1,8 +1,5 @@
 # Tích hợp
 
-- `meta/`: Lead Ads, Messenger, Marketing API, Custom Audiences và Conversions API.
-- `website/`: form, tracking và webhook từ website.
-- `orders/`: đơn hàng, POS hoặc sàn thương mại điện tử.
+- `meta/`: hướng dẫn kết nối Facebook Messenger (webhook, OAuth Page).
 
-Mỗi tích hợp cần mô tả authentication, rate limit, retry, idempotency, schema và quy trình đối soát.
-
+Đơn từ landing page (Webcake) và Pancake POS được mô tả trong `README.md` gốc.

@@ -1,9 +1,8 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
-import { createLead, getSegments, updateLead } from './domain.mjs';
 import { buildExportRows, exportPreviewStreets } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
@@ -13,10 +12,9 @@ import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine
 import { defaultMessageTemplates, publicImageUrl } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
-import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
-import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhone, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
+import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
@@ -49,32 +47,19 @@ import {
 
 const root = projectRoot;
 const webRoot = path.join(root, 'web');
-const storePath = path.join(root, 'data', 'processed', 'crm-store.json');
 const chatbotSettingsPath = path.join(root, 'data', 'processed', 'chatbot-settings.json');
 const productsPath = path.join(root, 'data', 'processed', 'products.json');
 const giftsPath = path.join(root, 'data', 'processed', 'gifts.json');
 const productImagesPath = path.join(root, 'data', 'processed', 'product-images');
-const seedPath = path.join(root, 'database', 'seeds', 'demo-store.json');
 const exportTemplatePath = path.join(root, 'assets', 'templates', 'facebook-order-export.xlsx');
 const metaOauthStates = new Map();
 const metaPendingPages = new Map();
 
 async function initializeStore() {
-  await mkdir(path.dirname(storePath), { recursive: true });
-  try { await stat(storePath); } catch { await copyFile(seedPath, storePath); }
+  await mkdir(path.dirname(chatbotSettingsPath), { recursive: true });
   try { await stat(chatbotSettingsPath); } catch { await writeChatbotSettings(defaultChatbotSettings); }
   await ensureProductCatalogue();
   await ensureGifts();
-}
-
-async function readStore() {
-  return JSON.parse(await readFile(storePath, 'utf8'));
-}
-
-async function writeStore(store) {
-  const temporaryPath = `${storePath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-  await rename(temporaryPath, storePath);
 }
 
 async function readProductStore() {
@@ -789,10 +774,6 @@ const server = http.createServer(async (request, response) => {
       const results = await lookupPhones(phones, { force: Boolean(payload.force) });
       return sendJson(response, 200, { posConfigured: posConfigured(), results });
     }
-    if (request.method === 'GET' && url.pathname === '/api/phone-warnings/lookup') {
-      const phone = String(url.searchParams.get('phone') || '');
-      return sendJson(response, 200, { posConfigured: posConfigured(), ...(await lookupPhone(phone, { force: url.searchParams.get('force') === '1' })) });
-    }
     // Kết nối Pancake POS (Cài đặt → Kênh): khoá dán một lần, được kiểm tra với
     // POS rồi lưu riêng trên máy chủ; giao diện chỉ thấy vài ký tự đầu/cuối.
     if (request.method === 'GET' && url.pathname === '/api/phone-warnings/pos') {
@@ -1028,10 +1009,6 @@ const server = http.createServer(async (request, response) => {
       }
     }
     // What the model actually receives: the saved prompt plus the live catalogue block.
-    if (url.pathname === '/api/chatbot/system-prompt' && request.method === 'GET') {
-      const settings = await readChatbotSettings();
-      return sendJson(response, 200, { prompt: composeSystemPrompt(settings.systemPrompt, settings.messageTemplates) });
-    }
     if (url.pathname === '/api/chatbot/pipeline' && request.method === 'GET') {
       return sendJson(response, 200, { items: listPipelineSteps() });
     }
@@ -1184,19 +1161,6 @@ const server = http.createServer(async (request, response) => {
       }
       return sendJson(response, 200, { items: withNotes, total: withNotes.length });
     }
-    if (request.method === 'GET' && url.pathname === '/api/dashboard') {
-      const { leads } = await readStore();
-      return sendJson(response, 200, { total:leads.length, new:leads.filter(x=>x.status==='new').length, active:leads.filter(x=>['assigned','contacting','qualified','consulting','waiting'].includes(x.status)).length, won:leads.filter(x=>x.status==='won').length, revenue:leads.filter(x=>x.status==='won').reduce((sum,x)=>sum+Number(x.value||0),0), segments:getSegments(leads) });
-    }
-    if (request.method === 'GET' && url.pathname === '/api/leads') {
-      let { leads } = await readStore(); const status=url.searchParams.get('status'); const query=(url.searchParams.get('q')||'').toLowerCase();
-      if(status) leads=leads.filter(x=>x.status===status); if(query) leads=leads.filter(x=>[x.name,x.phone,x.campaign].some(v=>String(v||'').toLowerCase().includes(query)));
-      return sendJson(response, 200, { items:leads, total:leads.length });
-    }
-    if (request.method === 'POST' && url.pathname === '/api/leads') { const store=await readStore(); const lead=createLead(await readBody(request)); store.leads.push(lead); await writeStore(store); return sendJson(response,201,lead); }
-    const match=url.pathname.match(/^\/api\/leads\/([^/]+)$/);
-    if(request.method==='PATCH'&&match){const store=await readStore();const lead=store.leads.find(x=>x.id===match[1]);if(!lead)return sendJson(response,404,{error:'Lead not found.'});updateLead(lead,await readBody(request));await writeStore(store);return sendJson(response,200,lead);}
-    if(request.method==='GET'&&url.pathname==='/api/segments'){const {leads}=await readStore();return sendJson(response,200,{items:getSegments(leads)});}
     if (request.method === 'GET' && url.pathname === '/api/shipping/spx/track') {
       try {
         const tracking = await getSpxTracking(url.searchParams.get('trackingNumber'));

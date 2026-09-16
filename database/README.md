@@ -1,7 +1,5 @@
 # Cơ sở dữ liệu
 
-- `schema/`: định nghĩa mô hình dữ liệu.
-- `migrations/`: thay đổi schema có phiên bản.
-- `seeds/`: dữ liệu danh mục giả, tuyệt đối không chứa khách hàng thật.
-- `queries/`: truy vấn kiểm tra chất lượng và đối soát.
+- `seeds/dmhc.csv`: danh mục tỉnh/quận/phường chuẩn của kho (63 tỉnh, 3 cấp, có mã), dùng để tách địa chỉ.
 
+Dữ liệu vận hành là các file JSON trong `data/processed/`, không commit.

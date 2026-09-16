@@ -39,18 +39,16 @@ GraphCode and a portable Node.js runtime are installed locally under `tools/`; n
 
 - `app/`: backend Node (server, webhook Meta, chatbot, đơn hàng, `customers.mjs` gộp mọi luồng của một người thành danh sách Khách hàng). `app/processing/` là luồng xử lý của chatbot: danh mục → nhận diện → tính tiền → soạn tin.
 - `app/products.seed.json`, `app/gifts.seed.json`: danh mục sản phẩm và quà tặng khởi tạo; sau lần chạy đầu, dữ liệu sống ở `data/processed/`.
-- `web/`: giao diện (HTML/CSS/JS thuần, không build).
+- `web/`: giao diện (HTML/CSS/JS thuần, không build); `web/assets/` là icon, logo nhà mạng, avatar mà trang tải trực tiếp.
 - `data/processed/`: dữ liệu vận hành (hội thoại, đơn, sản phẩm, quà tặng, cấu hình chatbot) — không commit.
-- `database/seeds/`: dữ liệu demo cho lần chạy đầu, và `dmhc.csv` là danh mục tỉnh/quận/phường chuẩn của kho (63 tỉnh, 3 cấp, có mã).
-- `assets/templates/`: mẫu file xuất kho.
+- `database/seeds/dmhc.csv`: danh mục tỉnh/quận/phường chuẩn của kho (63 tỉnh, 3 cấp, có mã).
+- `assets/`: logo thương hiệu và mẫu file xuất kho.
 - `deploy/`: Caddyfile, systemd unit và hướng dẫn triển khai VPS.
 - `integrations/meta/`: hướng dẫn kết nối Messenger.
 - `docs/`: kiến trúc và nguyên tắc giao diện.
 - `tests/`: kiểm thử đơn vị (`npm test`) và tích hợp webhook (`npm run test:integration`).
-- `scripts/setup/`: script một lần để tạo shortcut, icon và mẫu xuất kho.
+- `scripts/setup/`: script một lần để tạo shortcut và mẫu xuất kho.
 - `logs/`: log cục bộ khi chạy bằng `Open Facebook CRM.cmd`; không commit.
-
-Thiết kế giao diện tuân theo `docs/design/ui-principles.md`: tối giản, tận dụng không gian, thoải mái và hiện đại.
 
 ## Nguyên tắc cấu hình
 

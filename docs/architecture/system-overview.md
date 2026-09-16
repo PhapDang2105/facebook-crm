@@ -1,45 +1,49 @@
-# MVP Architecture
+# Kiến trúc hệ thống
 
-## Components
+## Thành phần
 
-1. `web/`: single-page UI implemented with HTML, CSS, and JavaScript.
-2. `app/server.mjs`: Node.js HTTP server, REST API, and atomic JSON persistence.
-3. `app/domain.mjs`: pipeline, normalization, and segmentation rules used by both the API and tests.
-4. `app/config.mjs`: `.env` loading plus Meta and server configuration shared by every module.
-5. `app/channel-store.mjs`: connected Facebook Pages with AES-256-GCM encrypted Page access tokens.
-6. `app/meta-graph.mjs`: Graph API client, Send API calls, and pure normalizers for Graph payloads.
-7. `app/meta-webhook.mjs`: webhook signature checks and translation of Meta events into stored messages.
-8. `app/meta-sync.mjs`: thread import from Graph and outbound sending.
-9. `app/messaging-store.mjs`: conversation and message persistence with a serialized write queue.
-10. `app/message-events.mjs`: in-process pub/sub feeding the Server-Sent Events stream.
-11. `data/processed/crm-store.json`: runtime data created from the seed and excluded from Git.
-12. `data/processed/meta-channels.json` and `meta-conversations.json`: connected Pages and the Messenger inbox, both excluded from Git.
+Giao diện là một trang HTML/CSS/JS thuần (`web/`), không build. Server là một tiến trình Node (`app/server.mjs`) phục vụ tĩnh, REST API và Server-Sent Events; dữ liệu là các file JSON trong `data/processed/` ghi bằng hàng đợi tuần tự (atomic rename).
 
-## Available API
+| Module | Vai trò |
+| --- | --- |
+| `app/server.mjs` | HTTP server, định tuyến API, phục vụ `web/` và ảnh sản phẩm |
+| `app/config.mjs` | Đọc `.env`, cấu hình Meta, landing, server |
+| `app/channel-store.mjs`, `meta-graph.mjs`, `meta-webhook.mjs`, `meta-sync.mjs` | Kết nối Facebook Page: OAuth, Graph API, webhook (kiểm chữ ký), đồng bộ hội thoại, gửi tin |
+| `app/messaging-store.mjs`, `message-events.mjs` | Lưu hội thoại/tin nhắn, pub/sub cho SSE |
+| `app/chatbot-engine.mjs`, `chatbot-settings.mjs`, `chatbot-templates.mjs`, `vertex-auth.mjs` | Chatbot: system prompt, mẫu tin, gọi Vertex AI |
+| `app/processing/*` | Luồng xử lý chatbot: danh mục (`catalog`), nhận diện sản phẩm (`product-detect`), tính tiền (`pricing`), tách địa chỉ ba cấp (`locations`), gắn thẻ (`auto-label`), đơn dở (`pending-order`) |
+| `app/conversation-orders.mjs` | Đơn chatbot tạo từ hội thoại |
+| `app/landing-orders.mjs`, `pos-sync.mjs` | Đơn landing page (webhook Webcake) và đồng bộ đơn từ Pancake POS mỗi 5 phút, tự điền cho đơn bỏ dở |
+| `app/phone-warnings.mjs` | Tỷ lệ nhận hàng theo số điện thoại từ Pancake POS, có cache |
+| `app/order-notes.mjs` | Ghi chú xử lý cho từng đơn (thiếu gì, tự điền gì, tỷ lệ nhận hàng) |
+| `app/order-edits.mjs` | Nhân viên sửa đơn từ bảng Xử lý dữ liệu, ghi về kho đơn |
+| `app/order-export.mjs`, `xlsx-import.mjs` | Dựng file xuất kho theo mẫu Pancake, đọc file import |
+| `app/customers.mjs` | Gộp mọi luồng của một người thành danh sách Khách hàng, lọc remarketing, xuất CSV |
+| `app/products.mjs`, `inbox-settings.mjs`, `spx-tracking.mjs` | Danh mục sản phẩm/quà, cài đặt hộp thư, tra vận đơn SPX |
 
-- `GET /api/health`
-- `GET /api/dashboard`
-- `GET /api/leads?q=&status=`
-- `POST /api/leads`
-- `PATCH /api/leads/{id}`
-- `GET /api/segments`
-- `GET /api/channels`
-- `GET /api/channels/meta/connect`, `GET /api/channels/meta/callback`, `GET /api/channels/meta/pending`, `POST /api/channels/meta/confirm`
-- `POST /api/channels/facebook/{pageId}/refresh`, `DELETE /api/channels/facebook/{pageId}`
-- `GET /webhooks/facebook`, `POST /webhooks/facebook`
-- `GET /api/messaging/conversations?channelId=`
-- `GET /api/messaging/conversations/{id}/messages`, `POST /api/messaging/conversations/{id}/messages`
-- `POST /api/messaging/conversations/{id}/read`, `PATCH /api/messaging/conversations/{id}/flags`
-- `POST /api/messaging/sync`
-- `GET /api/messaging/stream` (Server-Sent Events)
+Dữ liệu vận hành (không commit): `meta-channels.json`, `meta-conversations.json`, `landing-orders.json`, `phone-warnings.json`, `pos-config.json`, `products.json`, `gifts.json`, `chatbot-settings.json`, `inbox-settings.json`, `product-images/`.
 
-## Messenger data flow
+## API
 
-Meta webhook → signature check → `messaging-store` → SSE → browser inbox.
-Reply in the browser → `POST /api/messaging/conversations/{id}/messages` → Send API → stored as outgoing → Meta echo confirms it.
+- Sức khỏe: `GET /api/health`
+- Kênh: `GET /api/channels`; `GET /api/channels/meta/connect`, `/callback`, `/pending`, `POST /api/channels/meta/confirm`; `POST /api/channels/facebook/{pageId}/refresh`, `/profiles`, `DELETE /api/channels/facebook/{pageId}`
+- Webhook: `GET|POST /webhooks/facebook` (Meta), `POST /webhooks/landing?token=` (Webcake)
+- Hộp thư: `GET /api/messaging/conversations?channelId=`; `GET|POST .../conversations/{id}/messages`; `POST .../read`; `PATCH .../flags`; `.../customer-panel`; `POST /api/messaging/sync`; `GET /api/messaging/stream` (SSE); `GET|PUT /api/inbox/settings`
+- Chatbot: `GET|PUT /api/chatbot/settings`; `POST /api/chatbot/test`; `GET /api/chatbot/pipeline`, `/api/chatbot/pipeline/{step}`
+- Danh mục: `GET|POST /api/products`, `PUT|DELETE /api/products/{id}`; `GET|PUT /api/gifts`
+- Đơn hàng: `GET /api/customer-orders` (chatbot + landing, kèm ghi chú xử lý); `PATCH|DELETE /api/customer-orders/{id}`; `POST /api/orders/import/xlsx`; `POST /api/orders/export/preview`; `POST /api/orders/export`
+- Landing/POS: `POST /api/landing/sync-pos`; `GET /api/landing/recent` (đối chiếu payload)
+- Cảnh báo số điện thoại: `POST /api/phone-warnings/check`; `GET|POST|DELETE /api/phone-warnings/pos`
+- Khách hàng: `GET /api/customers`, `/api/customers/export.csv`, `/api/customers/audience.csv`
+- Vận chuyển: `GET /api/shipping/spx/track`
 
-Setup and operational details live in `integrations/meta/README.md`.
+## Luồng dữ liệu chính
 
-## Upgrade path
+- Messenger: webhook Meta → kiểm chữ ký → `messaging-store` → SSE → hộp thư trong trình duyệt. Trả lời từ trình duyệt → Send API → lưu là tin đi → echo của Meta xác nhận.
+- Đơn: chatbot (`conversation-orders`) và landing (`landing-orders`, `pos-sync`) cùng vào `GET /api/customer-orders` → bảng Đơn hàng: Nhập dữ liệu → Xử lý dữ liệu (ghi chú, sửa tại chỗ, đánh dấu đã xử lý) → Xuất dữ liệu (file kho).
 
-Replace the JSON persistence functions in `server.mjs` and `messaging-store.mjs` with a PostgreSQL repository, then add authentication/RBAC, audit logging, and queue workers. Domain logic remains independent from the UI and persistence mechanism.
+Chi tiết kết nối Meta ở `integrations/meta/README.md`; luồng đơn, landing, POS ở `README.md` gốc.
+
+## Hướng nâng cấp
+
+Thay các hàm đọc/ghi JSON trong `messaging-store.mjs`, `landing-orders.mjs`, `phone-warnings.mjs` bằng một repository trên PostgreSQL, rồi thêm đăng nhập/phân quyền và nhật ký thao tác. Hiện giao diện được Caddy bảo vệ bằng Basic Auth (xem `deploy/`).

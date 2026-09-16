@@ -31,6 +31,7 @@ test('địa chỉ thiếu cấp, sản phẩm chưa khớp, địa chỉ trùng
 test('tách lời khách khỏi mẩu máy thêm; file xuất bỏ ghi chú xử lý', () => {
   assert.equal(customerNote({ note: 'Giao giờ hành chính · Nguồn: fb · Chiến dịch: 1202 · Tự điền, cần duyệt trước khi giao' }), 'Giao giờ hành chính');
   assert.equal(customerNote({ note: 'Đơn từ landing page.' }), '');
+  assert.equal(customerNote({ note: 'Tạo tự động từ xác nhận của chatbot.' }), '');
   assert.equal(customerNote({ note: 'select_1: 1 Túi Dùng Thử: 1 Túi 174k + 15k phí ship, · Giao chiều' }), 'Giao chiều', 'ô lựa chọn form không phải lời khách');
   // Note POS nhiều dòng (đơn đã đồng bộ trước khi lọc): bỏ address/select, giữ lời khách.
   assert.equal(customerNote({ note: 'address: 381/17 lò lu,\r\nselect_1: 1 Túi Dùng Thử: 1 Túi 174k + 15k phí ship,\r\nGọi trước khi giao' }), 'Gọi trước khi giao');

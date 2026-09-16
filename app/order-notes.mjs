@@ -13,7 +13,7 @@ export const NOTE_MARKERS = ['⚠', '⏳', '🤖', '☎', 'ℹ'];
 export const NOTE_SEPARATOR = ' · ';
 
 /** Các mẩu ghi chú máy tự thêm trước đây, không phải lời khách. */
-const SYSTEM_NOTE_FRAGMENTS = [/^Đơn từ landing page\.?$/i, /^Tự điền, cần duyệt trước khi giao$/i, /^Nguồn: /i, /^Chiến dịch: /i, /^utm_[a-z]+=/i,
+const SYSTEM_NOTE_FRAGMENTS = [/^Đơn từ landing page\.?$/i, /^Tự điền, cần duyệt trước khi giao$/i, /^Tạo tự động từ xác nhận của chatbot\.?$/i, /^Nguồn: /i, /^Chiến dịch: /i, /^utm_[a-z]+=/i,
   // Ô lựa chọn của form Webcake từng bị ghi vào ghi chú ("select_1: 1 Túi Dùng Thử…"),
   // và các dòng POS tự chèn vào note đơn ("address: …", "link: …", "IP: …", "Order ID: …").
   /^(select|single ?choice|multiple ?choice|radio|checkbox|option|singlechoice|multiplechoice)[ _-]?\d*\s*:/i,

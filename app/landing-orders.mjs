@@ -322,13 +322,11 @@ export function normalizeLandingPayload(payload = {}) {
   const address = parts.join(', ');
   let lines = extractLineItems(fields);
   // Không có ô sản phẩm nhưng có ô lựa chọn (singlechoice "Combo 2 túi"...):
-  // lựa chọn nào khớp danh mục thì là sản phẩm, còn lại ghi vào ghi chú.
+  // lựa chọn nào khớp danh mục thì là sản phẩm, còn lại bỏ qua (không phải lời khách).
   const choices = pickAll(fields, 'choice');
-  const choiceNotes = [];
   for (const choice of choices) {
     const split = splitProductText(choice.value);
     if (!lines.length && matchProduct(split.product)) lines = [{ product: split.product, sku: '', quantity: split.quantity || pick(fields, 'quantity'), price: '' }];
-    else choiceNotes.push(`${choice.path}: ${choice.value}`);
   }
   const total = money(pick(fields, 'total'));
   const coupon = pick(fields, 'coupon');

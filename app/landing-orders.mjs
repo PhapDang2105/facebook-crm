@@ -583,6 +583,15 @@ export async function recordLandingOrder(payload, context = {}) {
       absorbInto(sameCustomerFinal, order, { primary: false });
       return { order: sameCustomerFinal, created: false, absorbed: true, error: '' };
     }
+    // Cùng khách gửi lại cùng giỏ trong 6 giờ (bấm gửi hai lần, hoặc đơn webhook
+    // cũ chưa có mã form gặp lại chính nó khi đồng bộ POS): một đơn.
+    const sameCustomerRepeat = !sameForm && !sameCustomerDraft && !order.landing.incomplete && order.phone
+      ? store.orders.find(entry => !entry.landing?.incomplete && entry.phone === order.phone && signature(entry) === signature(order) && closeInTime(entry, order))
+      : null;
+    if (sameCustomerRepeat) {
+      absorbInto(sameCustomerRepeat, order);
+      return { order: sameCustomerRepeat, created: false, absorbed: true, error: '' };
+    }
     const existing = sameForm || sameCustomerDraft;
     if (existing) {
       // Bản khách gửi xong luôn thắng bản dở dang đã được máy tự điền.
@@ -644,12 +653,14 @@ function absorbInto(keeper, other, { primary = true } = {}) {
 }
 
 /**
- * Dọn đơn dở dang đã bị thay bằng đơn hoàn tất của cùng số điện thoại gửi
- * trong vòng 6 giờ (kể cả đơn đã lỡ tạo trước khi có quy tắc này). Trả về số đơn đã gộp.
+ * Dọn đơn trùng đã lỡ tạo (kể cả trước khi có quy tắc): đơn dở dang bị thay
+ * bằng đơn hoàn tất cùng số trong 6 giờ, và hai đơn hoàn tất cùng số cùng giỏ
+ * trong 6 giờ (giữ đơn tạo trước). Trả về số đơn đã gộp.
  */
-export function absorbSupersededDrafts() {
+export function absorbDuplicateOrders() {
   return updateLandingStore(store => {
     let absorbed = 0;
+    const byCreation = (first, second) => (Number(first.createdAt) || 0) - (Number(second.createdAt) || 0);
     store.orders = store.orders.filter(order => {
       if (!order.landing?.incomplete || !order.phone) return true;
       const final = store.orders.find(entry => entry !== order && !entry.landing?.incomplete && entry.phone === order.phone && closeInTime(entry, order));
@@ -658,6 +669,18 @@ export function absorbSupersededDrafts() {
       absorbed += 1;
       return false;
     });
+    const dropped = new Set();
+    for (const order of [...store.orders].sort(byCreation)) {
+      if (dropped.has(order) || order.landing?.incomplete || !order.phone) continue;
+      for (const other of store.orders) {
+        if (other === order || dropped.has(other) || other.landing?.incomplete || other.phone !== order.phone) continue;
+        if (signature(other) !== signature(order) || !closeInTime(other, order) || byCreation(other, order) < 0) continue;
+        absorbInto(order, other);
+        dropped.add(other);
+        absorbed += 1;
+      }
+    }
+    store.orders = store.orders.filter(order => !dropped.has(order));
     return absorbed;
   });
 }

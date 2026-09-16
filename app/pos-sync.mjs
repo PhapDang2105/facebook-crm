@@ -8,7 +8,7 @@
 // rồi đi qua recordLandingOrder: trùng webhook thì gộp, đơn dở thì tự điền,
 // số bom hàng thì cảnh báo — một luồng duy nhất.
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
-import { absorbSupersededDrafts, readLandingStore, recordLandingOrder } from './landing-orders.mjs';
+import { absorbDuplicateOrders, readLandingStore, recordLandingOrder } from './landing-orders.mjs';
 
 export const POS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const LANDING_SOURCES = /webcake|landing/i;
@@ -25,16 +25,17 @@ export function posTimeToWebcake(value) {
 }
 
 /**
- * Số nhà/đường khách gõ. Với đơn bỏ dở, Webcake chèn mã landing ("GXN ") vào
- * trước địa chỉ gửi sang POS nhưng ghi nguyên văn khách gõ trong note
- * ("address: …"); lấy bản trong note khi phần POS chỉ khác ở tiền tố đó.
+ * Số nhà/đường khách gõ. Với đơn bỏ dở, Webcake chèn mã "GXN " vào trước địa
+ * chỉ gửi sang POS (kể cả khi khách chưa gõ gì: địa chỉ chỉ còn "GXN") nhưng
+ * ghi nguyên văn khách gõ trong note ("address: …"); lấy bản trong note khi
+ * phần POS chỉ khác ở tiền tố đó, còn lại bỏ tiền tố.
  */
 export function posStreet(order) {
   const address = order.shipping_address || {};
   const street = String(address.address || '').trim();
   const typed = String((String(order.note || '').match(/^address:\s*(.*?)\s*,?\s*$/mi) || [])[1] || '').trim();
   if (typed && street !== typed && street.endsWith(typed)) return typed;
-  return street;
+  return street.replace(/^GXN\b[\s,.-]*/i, '').trim();
 }
 
 /** Một đơn POS → payload cùng dạng với webhook Webcake. */
@@ -113,7 +114,7 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
     else if (result.absorbed) summary.absorbed += 1;
     else summary.skipped += 1;
   }
-  summary.absorbed += await absorbSupersededDrafts();
+  summary.absorbed += await absorbDuplicateOrders();
   return summary;
 }
 

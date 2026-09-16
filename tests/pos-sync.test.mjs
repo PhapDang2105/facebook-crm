@@ -48,6 +48,8 @@ test('đơn POS → payload giống Webcake: chuỗi sản phẩm có phân lo�
   const prefixed = posOrderToPayload(posOrder({ is_abandoned_order: true, note: ['address: 73/37 bằng liệt bằng A,', 'link: https://granola.giotnang.vn/?x', 'IP: 1.2.3.4', 'Order ID: 48011'].join('\r\n'), shipping_address: { address: 'GXN 73/37 bằng liệt bằng A', commune_name: 'Phường Hoàng Liệt', district_name: 'Quận Hoàng Mai', province_name: 'Hà Nội', full_address: 'GXN 73/37 bằng liệt bằng A, Phường Hoàng Liệt, Quận Hoàng Mai, Hà Nội' } }));
   assert.equal(prefixed.address, '73/37 bằng liệt bằng A, Phường Hoàng Liệt, Quận Hoàng Mai, Hà Nội');
   assert.equal(prefixed.note, '');
+  const onlyPrefix = posOrderToPayload(posOrder({ is_abandoned_order: true, note: 'address: ,', shipping_address: { address: 'GXN', commune_name: 'Phường Tân Phong', district_name: 'Thành phố Biên Hòa', province_name: 'Đồng Nai', full_address: 'GXN, Phường Tân Phong, Thành phố Biên Hòa, Đồng Nai' } }));
+  assert.equal(onlyPrefix.address, 'Phường Tân Phong, Thành phố Biên Hòa, Đồng Nai', 'khách chưa gõ số nhà thì chỉ còn ba cấp');
   assert.equal(isLandingPosOrder(posOrder()), true);
   assert.equal(isLandingPosOrder({ order_sources_name: 'Facebook', link: '' }), false);
 });
@@ -83,4 +85,20 @@ test('đồng bộ: đơn webhook đã có thì gộp và ghi mã POS; đơn POS
   assert.equal(second.absorbed, 0);
   assert.equal(second.skipped, 3);
   assert.equal((await syncPosLandingOrders({ config: { apiKey: '', shopId: '' } })).disabled, true);
+});
+
+test('đơn webhook cũ không có mã form: đồng bộ POS gặp lại cùng khách cùng giỏ trong 6 giờ thì gộp, không tạo đơn thứ hai', async () => {
+  const old = await recordLandingOrder({ name: 'Phạm Dương', phone: '0984431880', address: 'Xóm 4, Xã Hưng Yên Bắc, Huyện Hưng Nguyên, Nghệ An', products: 'Granola Mới (Combo 2 Granola Xanh): 1 x 298.000 ₫', total: '298.000' }, { checkPhone: false });
+  assert.equal(old.created, true);
+  assert.equal(old.order.landing.externalId, '');
+  const nowUtc = new Date(Date.now() - 20 * 60 * 1000).toISOString().replace('Z', '000');
+  const fromPos = posOrder({ id: 51896, bill_full_name: 'Phạm dương', bill_phone_number: '0984431880', inserted_at: nowUtc, total_price: 298000, shipping_address: { full_address: 'Xóm 4, Xã Hưng Yên Bắc, Huyện Hưng Nguyên, Nghệ An', province_name: 'Nghệ An' }, items: [{ quantity: 1, variation_info: { name: 'Granola Mới', detail: 'Phân Loại: Combo 2 Granola Xanh', retail_price: 298000 } }] });
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ data: [fromPos], total_pages: 1 }) });
+  const summary = await syncPosLandingOrders({ config: { apiKey: 'k', shopId: '1', baseUrl: 'https://pos.example/api/v1' }, fetchImpl });
+  assert.equal(summary.created, 0);
+  assert.equal(summary.absorbed, 1);
+  const mine = (await listLandingOrders()).filter(order => order.phone === '0984431880');
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].id, old.order.id);
+  assert.equal(mine[0].landing.posId, '51896');
 });

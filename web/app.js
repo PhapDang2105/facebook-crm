@@ -934,7 +934,16 @@ function mergeChatbotOrdersIntoTable(orders) {
     rows.push(...fresh);
     added += 1;
   }
-  if (!added && !refreshed) return 0;
+  // Đơn hệ thống đã bị gộp hoặc xóa trên server thì dòng cũ trong bảng cũng
+  // đi, nếu không bảng giữ mãi bản trùng với ghi chú cũ.
+  let removed = 0;
+  if (idColumn !== undefined) {
+    const serverIds = new Set(orders.map(systemOrderRowId));
+    const before = rows.length;
+    rows = rows.filter(row => { const id = String(row[idColumn] || ''); return !isSystemOrderId(id) || serverIds.has(id); });
+    removed = before - rows.length;
+  }
+  if (!added && !refreshed && !removed) return 0;
   orderData = { headers, rows };
   localStorage.setItem('crm-orders', JSON.stringify(orderData));
   renderOrderData();
@@ -5027,7 +5036,10 @@ function isInvalidOrderAddress(value) {
 // Ô Ghi chú: nhãn màu cho ghi chú xử lý (bảng biết thêm: trùng đơn, trùng số,
 // cảnh báo), rồi đến lời khách/quà ở dạng chữ thường.
 function renderNoteCell(value, extraNotes = []) {
-  const segments = [...(Array.isArray(extraNotes) ? extraNotes : []), ...String(value || '').split(' · ')].map(segment => segment.trim()).filter(Boolean);
+  // Mẩu máy từng chèn vào ghi chú (quà, nguồn, chiến dịch, dòng POS/form) không
+  // phải lời khách: bỏ khi vẽ, kể cả ở dòng cũ đã lưu trong trình duyệt.
+  const machineFragment = /^(Quà|Nguồn|Chiến dịch|Đơn từ landing page|Tự điền, cần duyệt|Tạo tự động từ xác nhận|Kiểm tra sản phẩm|Thiếu địa chỉ|utm_[a-z]+=|address|link|IP|Order ID|select[ _-]?\d*|single ?choice[ _-]?\d*|multiple ?choice[ _-]?\d*)\s*[:=.]?\s*/i;
+  const segments = [...(Array.isArray(extraNotes) ? extraNotes : []), ...String(value || '').split(/\r?\n| · /)].map(segment => segment.trim()).filter(segment => segment && !machineFragment.test(segment));
   if (!segments.length) return '';
   const kind = segment => segment.startsWith('⚠') ? 'warn' : segment.startsWith('⏳') ? 'pending' : segment.startsWith('🤖') ? 'auto' : segment.startsWith('☎') ? 'phone' : segment.startsWith('ℹ') ? 'info' : '';
   const chips = segments.filter(segment => kind(segment)).map(segment => `<span class="note-chip note-chip-${kind(segment)}">${escapeHtml(segment)}</span>`).join('');

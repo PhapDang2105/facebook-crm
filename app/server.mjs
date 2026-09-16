@@ -18,6 +18,7 @@ import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, look
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
+import { recordExportedOrders } from './customer-file.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -1191,6 +1192,8 @@ const server = http.createServer(async (request, response) => {
         throw new Error('Dữ liệu đơn hàng xuất không hợp lệ. Vui lòng tải lại trang và thử lại.');
       }
       const rows = buildExportRows(payload.orderData);
+      // Khách của các đơn vừa xuất kho vào tệp khách hàng để màn Khách hàng chăm sóc lại.
+      await recordExportedOrders(payload.orderData);
       // Mẫu XLSX là file tĩnh: đọc một lần, lần xuất sau dùng lại buffer.
       exportTemplateBuffer ||= await readFile(exportTemplatePath);
       const workbook = new AdmZip(exportTemplateBuffer);

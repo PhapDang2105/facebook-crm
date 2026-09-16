@@ -548,7 +548,7 @@ const customersFilters = {
 };
 let customersRequestId = 0;
 let customersItems = [];
-const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo' };
+const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất' };
 
 function customersQueryString() {
   const params = new URLSearchParams();
@@ -639,7 +639,7 @@ function renderCustomers(items, total) {
         }${extra ? `<span class="customer-product-meta">${escapeHtml(extra)}</span>` : ''}</div>`
       : '';
     return `<tr data-customer-index="${index}"${customer.unread ? ' class="is-unread"' : ''}>
-      <td><div class="customer-cell">${avatar}<div><strong>${escapeHtml(customer.name || 'Khách Facebook')}</strong><small>${escapeHtml(customer.psid)}</small></div></div></td>
+      <td><div class="customer-cell">${avatar}<div><strong>${escapeHtml(customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng'))}</strong><small>${escapeHtml(customer.psid || (customer.sources || []).map(source => customerSourceNames[source] || source).join(' · '))}</small></div></div></td>
       <td>${gender}</td>
       <td>${escapeHtml(customer.phone)}</td>
       <td class="customer-address" title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</td>

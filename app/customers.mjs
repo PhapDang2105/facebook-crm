@@ -4,6 +4,7 @@
 // so it can never drift from what the inbox shows.
 import { readMessagingStore } from './messaging-store.mjs';
 import { readChannelStore } from './channel-store.mjs';
+import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
 
 const genderRank = { staff: 3, message: 2, name: 1 };
 
@@ -62,7 +63,7 @@ function collectPurchases(customer, orders) {
 }
 
 /** Merges every thread of one person into a single customer record. */
-export function buildCustomers(store, channels = []) {
+export function buildCustomers(store, channels = [], exported = []) {
   const channelNames = new Map(channels.map(channel => [String(channel.id), channel.name]));
   const customers = new Map();
   for (const conversation of store.conversations) {
@@ -102,7 +103,9 @@ export function buildCustomers(store, channels = []) {
       labels: [],
       botEnabled: false,
       unread: false,
-      conversations: []
+      conversations: [],
+      // Mã các đơn đã đếm từ hội thoại, để đơn xuất kho cùng mã không bị cộng lần hai.
+      orderIds: []
     };
     // Prefer the inbox thread's name and picture: Messenger's profile lookup
     // gives the real name; a comment only carries what the webhook sent.
@@ -130,6 +133,7 @@ export function buildCustomers(store, channels = []) {
     if (!existing.phone && conversation.pendingOrder?.phone) existing.phone = conversation.pendingOrder.phone;
     if (!existing.address && conversation.pendingOrder?.address) existing.address = conversation.pendingOrder.address;
     existing.orderCount += orders.length;
+    existing.orderIds.push(...orders.map(order => String(order?.id || '')).filter(Boolean));
     existing.orderTotal += orders.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
     collectPurchases(existing, orders);
     existing.noteCount += notes.length;
@@ -141,7 +145,77 @@ export function buildCustomers(store, channels = []) {
     existing.conversations.push({ id: conversation.id, source: conversation.source || 'inbox' });
     customers.set(key, existing);
   }
-  return [...customers.values()].sort((first, second) => (second.lastMessageAt || 0) - (first.lastMessageAt || 0));
+  mergeExportedCustomers(customers, exported);
+  // Mới tương tác hoặc mới mua đều lên đầu: khách landing không có tin nhắn vẫn xếp theo ngày mua.
+  const recency = customer => Math.max(customer.lastMessageAt || 0, customer.lastOrderAt || 0);
+  return [...customers.values()].sort((first, second) => recency(second) - recency(first));
+}
+
+/**
+ * Tệp khách hàng từ Xuất dữ liệu: khớp theo số điện thoại với khách Facebook đã
+ * có thì cộng đơn (bỏ đơn chatbot đã đếm từ hội thoại, nhận ra qua mã), còn không
+ * thì là một khách riêng (landing, import) để chăm sóc lại.
+ */
+function mergeExportedCustomers(customers, exported) {
+  if (!Array.isArray(exported) || !exported.length) return;
+  const byPhone = new Map();
+  for (const customer of customers.values()) {
+    const key = customerPhoneKey(customer.phone);
+    if (key && !byPhone.has(key)) byPhone.set(key, customer);
+  }
+  for (const person of exported) {
+    const key = customerPhoneKey(person.phone);
+    if (!key) continue;
+    let customer = byPhone.get(key);
+    if (!customer) {
+      customer = {
+        id: `export:${key}`,
+        channelId: 'export',
+        channelName: 'Đơn đã xuất',
+        psid: '',
+        name: '',
+        picture: '',
+        gender: '',
+        genderSource: '',
+        sources: [],
+        adTitle: '',
+        firstContactAt: 0,
+        lastCustomerMessageAt: 0,
+        lastMessageAt: 0,
+        lastMessagePreview: '',
+        phone: key,
+        address: '',
+        orderCount: 0,
+        orderTotal: 0,
+        firstOrderAt: 0,
+        lastOrderAt: 0,
+        lastOrderSeenAt: -1,
+        lastOrderProducts: [],
+        lastOrderCombo: 0,
+        products: [],
+        comboMax: 0,
+        noteCount: 0,
+        labels: [],
+        botEnabled: false,
+        unread: false,
+        conversations: [],
+        orderIds: []
+      };
+      customers.set(customer.id, customer);
+      byPhone.set(key, customer);
+    }
+    if (!customer.sources.includes('export')) customer.sources.push('export');
+    if (!customer.name) customer.name = person.name || '';
+    if (!customer.address) customer.address = person.address || '';
+    customer.lastExportedAt = Math.max(customer.lastExportedAt || 0, Number(person.lastExportedAt) || 0);
+    const known = new Set(customer.orderIds);
+    const fresh = (Array.isArray(person.orders) ? person.orders : []).filter(order => !known.has(String(order.id || '').replace(/^(?:LP|CB)-/, '')));
+    if (!fresh.length) continue;
+    customer.orderCount += fresh.length;
+    customer.orderTotal += fresh.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
+    collectPurchases(customer, fresh.map(order => ({ createdAt: Number(order.orderedAt) || Number(order.exportedAt) || 0, products: order.products })));
+    customer.orderIds.push(...fresh.map(order => String(order.id || '').replace(/^(?:LP|CB)-/, '')));
+  }
 }
 
 function foldText(value) {
@@ -187,14 +261,15 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
 }
 
 export async function listCustomers(filters = {}) {
-  const [store, channels] = await Promise.all([readMessagingStore(), readChannelStore()]);
+  const [store, channels, exported] = await Promise.all([readMessagingStore(), readChannelStore(), listExportedCustomers()]);
   // Màn Khách hàng là kho dữ liệu người ĐÃ MUA: người mới hỏi giá vẫn nằm trong
-  // Tin nhắn, đưa vào đây chỉ làm loãng danh sách remarketing.
-  const buyers = buildCustomers(store, channels.items || []).filter(customer => customer.orderCount > 0);
+  // Tin nhắn, đưa vào đây chỉ làm loãng danh sách remarketing. Khách của đơn đã
+  // xuất kho (tệp khách hàng) luôn có mặt, kể cả chưa từng nhắn tin.
+  const buyers = buildCustomers(store, channels.items || [], exported).filter(customer => customer.orderCount > 0);
   return { total: buyers.length, items: filterCustomers(buyers, filters) };
 }
 
-const sourceLabels = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo' };
+const sourceLabels = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất' };
 const labelNames = { new: 'Khách mới', consulting: 'Cần tư vấn', customer: 'Đã mua' };
 const genderNames = { male: 'Nam', female: 'Nữ' };
 

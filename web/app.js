@@ -943,9 +943,12 @@ function rowPhoneOf(rowIndex) {
 function isDuplicateOrderRow(rowIndex) {
   return getDuplicateOrderRowIndexes().has(rowIndex) || getDuplicatePhoneRowIndexes().has(rowIndex);
 }
-document.querySelector('[data-order-panel="process"]')?.addEventListener('click', event => {
+// Bắt ở cả màn Đơn hàng, không chỉ trong khung Xử lý dữ liệu: khung chỉ cao bằng
+// bảng, khoảng trống phía dưới bảng nằm ngoài khung.
+document.querySelector('#orders-view')?.addEventListener('click', event => {
   if (!orderGroupPhone) return;
-  if (event.target.closest('tr[data-order-row-index], thead, button, input, select, a, .order-day-tabs, .order-history-panel')) return;
+  if (orderPanels.get('process')?.classList.contains('hidden')) return;
+  if (event.target.closest('tr[data-order-row-index], thead, button, input, select, a, label, .order-day-tabs, .order-history-panel, [contenteditable]')) return;
   clearOrderGroup();
 });
 

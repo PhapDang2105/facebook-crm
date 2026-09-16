@@ -905,102 +905,33 @@ document.querySelector('#order-import-preview')?.addEventListener('click', async
   await deleteOrderAtRow(Number(button.dataset.orderRowDelete), button);
 });
 
-// ===== Bấm vào một đơn: xem mọi đơn cùng số điện thoại =====
+// ===== Bấm vào một đơn: bảng lọc ra mọi đơn cùng số điện thoại =====
 //
-// Khách điền nhiều form (bỏ dở rồi gửi lại, gửi hai lần, đổi landing) thì hệ
-// thống không tự gộp; hộp thoại này bày cả nhóm để nhân viên so và xóa bản thừa.
-const orderGroupDialog = document.querySelector('#order-group-dialog');
-let orderGroupPhone = '';
-let orderGroupCurrentId = '';
-
+// Khách điền nhiều form thì hệ thống không tự gộp; bấm vào dòng nào, bảng chỉ
+// còn các đơn cùng số điện thoại đó (ô tìm kiếm nhận số), bấm lại thì bỏ lọc.
 function normalizeRowPhone(value) {
   let phone = String(value ?? '').replace(/\D/g, '');
   if (phone.startsWith('84')) phone = `0${phone.slice(2)}`;
   return phone;
 }
 
-function orderRowsByPhone(phone) {
+function toggleOrderPhoneFilter(rowIndex) {
   const phoneIndex = orderData.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
-  if (phoneIndex < 0 || !phone) return [];
-  return orderData.rows.map((row, index) => ({ row, index })).filter(entry => normalizeRowPhone(entry.row[phoneIndex]) === phone);
-}
-
-function renderOrderGroupDialog() {
-  if (!orderGroupDialog) return;
-  const column = name => orderData.headers.findIndex(header => normalizeColumnName(header) === name);
-  const idIndex = column('ma don hang');
-  const entries = orderRowsByPhone(orderGroupPhone);
-  if (!entries.length) { closeOrderGroupDialog(); return; }
-  // Gom dòng theo mã đơn, giữ thứ tự trong bảng.
-  const groups = new Map();
-  entries.forEach(entry => {
-    const id = idIndex >= 0 ? String(entry.row[idIndex] || '').trim() : '';
-    const key = id || `row:${entry.index}`;
-    if (!groups.has(key)) groups.set(key, { id, entries: [] });
-    groups.get(key).entries.push(entry);
-  });
-  const cell = (row, name) => { const i = column(name); return i >= 0 ? String(row[i] || '').trim() : ''; };
-  const { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes } = orderGroupContext();
-  const rowNotes = getRowProcessingNotes(orderData, { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes });
-  const items = [...groups.values()].map(group => {
-    const first = group.entries[0].row;
-    const lines = group.entries.map(({ row }) => `<li><span>${escapeHtml(cell(row, 'san pham') || '(chưa có sản phẩm)')}</span><span>x${escapeHtml(cell(row, 'so luong') || '1')} · ${escapeHtml(cell(row, 'don gia'))} đ</span></li>`).join('');
-    // Ô Địa chỉ của đơn hệ thống đã là địa chỉ đầy đủ; ba cấp chuẩn hiện thành dòng phụ.
-    const levels = [cell(first, 'phuong xa'), cell(first, 'quan huyen'), cell(first, 'tinh thanh pho')].filter(Boolean).join(', ');
-    const street = cell(first, 'dia chi');
-    const notes = group.entries.flatMap(({ index }) => rowNotes.get(index) || []);
-    const noteHtml = renderNoteCell(cell(first, 'ghi chu'), [...new Set(notes)]);
-    const isCurrent = group.id && group.id === orderGroupCurrentId;
-    return `<article class="order-group-item${isCurrent ? ' is-current' : ''}">
-      <div class="order-group-item-head"><b>${escapeHtml(group.id || 'Dòng không mã')}</b><span class="order-group-source">${escapeHtml(cell(first, 'nguon don') || 'Import')}</span>${cell(first, 'ngay') ? `<span>${escapeHtml(cell(first, 'ngay'))}</span>` : ''}<span>${escapeHtml(cell(first, 'khach hang'))}</span>${isCurrent ? '<span class="order-group-source">đơn đang xem</span>' : ''}<button type="button" class="order-group-delete" data-order-group-delete="${group.entries[0].index}">Xóa đơn này</button></div>
-      <ul class="order-group-lines">${lines}</ul>
-      <p class="order-group-address">${street ? `${escapeHtml(street)}${levels ? `<br><small>${escapeHtml(levels)}</small>` : ''}` : 'Chưa có địa chỉ'}</p>
-      ${noteHtml}
-    </article>`;
-  }).join('');
-  orderGroupDialog.querySelector('#order-group-dialog-subtitle').textContent = `${orderGroupPhone} · ${groups.size} đơn trong bảng`;
-  orderGroupDialog.querySelector('#order-group-list').innerHTML = items;
-}
-
-function orderGroupContext() {
-  return {
-    duplicateRowIndexes: getDuplicateOrderRowIndexes(),
-    duplicatePhoneRowIndexes: getDuplicatePhoneRowIndexes(),
-    warningRowIndexes: getPhoneWarningRowIndexes()
-  };
-}
-
-function openOrderGroupDialog(rowIndex) {
-  if (!orderGroupDialog) return;
-  const phoneIndex = orderData.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
-  const idIndex = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
   const row = orderData.rows[rowIndex];
-  if (!row || phoneIndex < 0) return;
-  orderGroupPhone = normalizeRowPhone(row[phoneIndex]);
-  orderGroupCurrentId = idIndex >= 0 ? String(row[idIndex] || '').trim() : '';
-  if (!orderGroupPhone) { showToast('Dòng này chưa có số điện thoại.', 'error'); return; }
-  renderOrderGroupDialog();
-  orderGroupDialog.classList.remove('hidden');
+  if (!row || phoneIndex < 0 || !orderSearch) return;
+  const phone = normalizeRowPhone(row[phoneIndex]);
+  if (!phone) return;
+  const active = normalizeRowPhone(orderSearch.value) === phone && orderSearch.value.trim() !== '';
+  orderSearch.value = active ? '' : phone;
+  renderOrderData();
 }
-
-function closeOrderGroupDialog() {
-  orderGroupDialog?.classList.add('hidden');
-}
-
-orderGroupDialog?.addEventListener('click', async event => {
-  if (event.target.closest('[data-close-order-group-dialog]')) { closeOrderGroupDialog(); return; }
-  const button = event.target.closest('[data-order-group-delete]');
-  if (!button) return;
-  const deleted = await deleteOrderAtRow(Number(button.dataset.orderGroupDelete), button);
-  if (deleted) renderOrderGroupDialog();
-});
 
 ['#order-import-preview', '#order-preview'].forEach(selector => {
   document.querySelector(selector)?.addEventListener('click', event => {
     if (event.target.closest('button, a, input, select, textarea')) return;
     const row = event.target.closest('tr[data-order-row-index]');
     if (!row) return;
-    openOrderGroupDialog(Number(row.dataset.orderRowIndex));
+    toggleOrderPhoneFilter(Number(row.dataset.orderRowIndex));
   });
 });
 
@@ -5280,13 +5211,23 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const visibleIndexes = orderedColumns.map(column => column.index);
   // Ghi chú và địa chỉ là hai cột chữ dài, chia nhau phần rộng còn lại; ghi chú
   // rộng hơn vì gồm nhiều dòng việc cần làm.
-  const columnTemplate = orderedColumns.map(column => column.name === 'dia chi' ? 'minmax(240px, 1fr)' : column.name === 'san pham' ? 'minmax(180px, max-content)' : column.name === 'ghi chu' ? 'minmax(320px, 1.4fr)' : 'max-content').join(' ');
+  // Bảng phải vừa khung (khung cắt phần thừa): cột chữ dài có trần và được
+  // xuống dòng, phần rộng còn lại chia cho Ghi chú và Địa chỉ.
+  const templates = {
+    'dia chi': 'minmax(220px, 1fr)',
+    'ghi chu': 'minmax(220px, 1.2fr)',
+    'san pham': 'minmax(150px, 200px)',
+    'khach hang': 'minmax(110px, 170px)',
+    'so dien thoai': 'minmax(110px, 150px)'
+  };
+  const columnTemplate = orderedColumns.map(column => templates[column.name] || 'max-content').join(' ');
   const previewClassName = index => {
     const columnName = normalizeColumnName(headers[index]);
     return columnName === 'dia chi' ? 'preview-address'
       : columnName === 'so luong' ? 'preview-quantity'
         : columnName === 'ghi chu' ? 'preview-note'
-          : columnName === 'so dien thoai' ? 'preview-phone' : '';
+          : columnName === 'so dien thoai' ? 'preview-phone'
+            : ['khach hang', 'san pham'].includes(columnName) ? 'preview-wrap' : '';
   };
   const previewHeaderClassName = index => normalizeColumnName(headers[index]) === 'san pham'
     ? `${previewClassName(index)} preview-product-heading`.trim()
@@ -5348,7 +5289,8 @@ function renderOrderData() {
     { deletable: true, rowNotes }
   );
   renderOrderTable(
-    document.querySelector('#order-preview'), headers, processingRows,
+    // Ô tìm kiếm (và bấm vào dòng để lọc theo số) áp dụng cho cả bảng Xử lý dữ liệu.
+    document.querySelector('#order-preview'), headers, searchValue ? processingRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processingRows,
     'Không có đơn hàng cần xử lý', ({ index }) => warningRowIndexes.get(index) && warningRowIndexes.get(index) !== 'watch' ? 'order-row-phone-warning'
       : warningRowIndexes.get(index) === 'watch' ? 'order-row-phone-watch'
         : duplicateRowIndexes.has(index)

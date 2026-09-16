@@ -202,20 +202,20 @@ test('đơn chưa hoàn tất: giữ làm lead có trạng thái riêng, bản h
   assert.equal(draft2.updated, true);
   assert.equal(draft2.order.id, draft.order.id);
   assert.equal(draft2.order.district, 'Huyện Chợ Đồn');
-  // Khách gửi xong (Webcake tạo bản ghi mới, inserted_at khác): đè lên đơn dở của cùng số điện thoại.
+  // Khách gửi xong bằng một form mới (inserted_at khác): là đơn riêng, không tự
+  // gộp với bản dở; bảng hiện cả hai cùng số điện thoại để nhân viên quyết định.
   const done = await recordLandingOrder({ name: 'Nguyễn Tú Anh', phone: '0368419478', address: 'Tổ 5', ward: 'Phường Sông Cầu', district: 'Thành phố Bắc Kạn', province: 'Bắc Kạn', products: 'Granola Mới (Combo 2 Granola Xanh): 1 x 298.000 ₫', total: '298.000', status: 'Form hoàn tất', inserted_at: '2026-09-16 02:15:00' });
-  assert.equal(done.created, false);
-  assert.equal(done.updated, true);
-  assert.equal(done.order.id, draft.order.id);
+  assert.equal(done.created, true);
+  assert.notEqual(done.order.id, draft.order.id);
   assert.equal(done.order.status, 'Mới');
-  assert.equal(done.order.landing.incomplete, false);
   assert.deepEqual(done.order.products.map(item => [item.sku, item.quantity]), [['GRA-XANH-Z450', 2]]);
-  // Bản dở dang đến muộn sau bản hoàn tất thì không đè ngược.
-  const late = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00' }, { autoFill: false });
+  // Bản cập nhật của chính form dở (cùng inserted_at) vẫn chỉ đè lên đơn dở đó.
+  const late = await recordLandingOrder({ name: 'Nguyễn tú anh', phone: '0368419478', province: 'Bắc Kạn', district: 'Huyện Chợ Đồn', status: 'Form chưa hoàn tất', inserted_at: '2026-09-16 02:08:00' }, { autoFill: false });
   assert.equal(late.created, false);
-  assert.equal(late.order.status, 'Mới');
+  assert.equal(late.order.id, draft.order.id);
+  assert.equal(late.order.status, 'Chưa hoàn tất');
   const listed = await listLandingOrders();
-  assert.equal(listed.filter(order => order.phone === '0368419478').length, 1);
+  assert.equal(listed.filter(order => order.phone === '0368419478').length, 2, 'đơn dở và đơn hoàn tất là hai đơn');
 });
 
 test('tự điền cho đơn bỏ dở: sản phẩm mặc định theo chiến dịch, địa chỉ từ POS hoặc đơn trước, đưa vào Xử lý dữ liệu', async () => {
@@ -278,10 +278,15 @@ test('đơn dở được tự điền vẫn bị bản khách gửi xong đè l
   assert.equal(draft.created, true);
   assert.ok(draft.order.landing.autoFilled, 'đơn dở được tự điền');
   assert.equal(draft.order.status, 'Chưa hoàn tất');
-  const done = await recordLandingOrder({ name: 'Mai', phone: '0977123123', address: '12 Lê Lợi', ward: 'Phường Bến Nghé', district: 'Quận 1', province: 'Hồ Chí Minh', products: 'Granola Mới (Combo 3 Granola Xanh): 1 x 447.000 ₫', total: '447.000', status: 'Form hoàn tất', inserted_at: '2026-09-16 03:05:00' });
+  // Khách điền tiếp chính form đó (cùng inserted_at) rồi gửi: dữ liệu thật thay phần tự điền.
+  const done = await recordLandingOrder({ name: 'Mai', phone: '0977123123', address: '12 Lê Lợi', ward: 'Phường Bến Nghé', district: 'Quận 1', province: 'Hồ Chí Minh', products: 'Granola Mới (Combo 3 Granola Xanh): 1 x 447.000 ₫', total: '447.000', status: 'Form hoàn tất', inserted_at: '2026-09-16 03:00:00' });
   assert.equal(done.updated, true);
   assert.equal(done.order.id, draft.order.id);
   assert.equal(done.order.landing.autoFilled, undefined, 'dữ liệu thật thay hoàn toàn phần tự điền');
   assert.equal(done.order.ward, 'Phường Bến Nghé');
   assert.deepEqual(done.order.products.map(item => [item.sku, item.quantity]), [['GRA-XANH-Z450', 3]]);
+  // Khách gửi một form khác (inserted_at khác) thì là đơn riêng, không tự gộp.
+  const another = await recordLandingOrder({ name: 'Mai', phone: '0977123123', address: '12 Lê Lợi', ward: 'Phường Bến Nghé', district: 'Quận 1', province: 'Hồ Chí Minh', products: 'Granola Mới (Combo 3 Granola Xanh): 1 x 447.000 ₫', total: '447.000', status: 'Form hoàn tất', inserted_at: '2026-09-16 03:05:00' });
+  assert.equal(another.created, true);
+  assert.notEqual(another.order.id, draft.order.id);
 });

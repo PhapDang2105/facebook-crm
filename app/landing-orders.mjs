@@ -571,29 +571,10 @@ export async function recordLandingOrder(payload, context = {}) {
     const formIds = entry => [entry.landing?.externalId, ...(entry.landing?.formIds || [])].filter(Boolean);
     const sameForm = (order.landing.posId ? store.orders.find(entry => entry.landing?.posId === order.landing.posId) : null)
       || (order.landing.externalId ? store.orders.find(entry => formIds(entry).includes(order.landing.externalId)) : null);
-    // Cùng khách, bản trước còn dở dang: bản mới (đầy đủ hơn, hoặc đã hoàn tất) đè lên.
-    const sameCustomerDraft = !sameForm && order.phone
-      ? store.orders.find(entry => entry.landing?.incomplete && entry.phone === order.phone && closeInTime(entry, order))
-      : null;
-    // Bản dở dang đến sau (đồng bộ POS trả về đơn mới trước) trong khi khách đã
-    // gửi xong một đơn khác gần đó: gộp vào đơn đã hoàn tất, không tạo đơn dở.
-    const sameCustomerFinal = !sameForm && !sameCustomerDraft && order.landing.incomplete && order.phone
-      ? store.orders.find(entry => !entry.landing?.incomplete && entry.phone === order.phone && closeInTime(entry, order))
-      : null;
-    if (sameCustomerFinal) {
-      absorbInto(sameCustomerFinal, order, { primary: false });
-      return { order: sameCustomerFinal, created: false, absorbed: true, error: '' };
-    }
-    // Cùng khách gửi lại cùng giỏ trong 6 giờ (bấm gửi hai lần, hoặc đơn webhook
-    // cũ chưa có mã form gặp lại chính nó khi đồng bộ POS): một đơn.
-    const sameCustomerRepeat = !sameForm && !sameCustomerDraft && !order.landing.incomplete && order.phone
-      ? store.orders.find(entry => !entry.landing?.incomplete && entry.phone === order.phone && signature(entry) === signature(order) && closeInTime(entry, order))
-      : null;
-    if (sameCustomerRepeat) {
-      absorbInto(sameCustomerRepeat, order);
-      return { order: sameCustomerRepeat, created: false, absorbed: true, error: '' };
-    }
-    const existing = sameForm || sameCustomerDraft;
+    // Khách điền nhiều form (bỏ dở rồi gửi lại, gửi hai lần, đổi landing) thì
+    // mỗi form là một đơn riêng, không tự gộp: bảng Đơn hàng hiện cả nhóm cùng
+    // số điện thoại khi bấm vào đơn để nhân viên quyết định.
+    const existing = sameForm;
     if (existing) {
       // Bản khách gửi xong luôn thắng bản dở dang đã được máy tự điền.
       const realBeatsAutoFilled = Boolean(existing.landing?.autoFilled) && !order.landing.incomplete && !order.landing.autoFilled;
@@ -618,16 +599,18 @@ export async function recordLandingOrder(payload, context = {}) {
       absorbInto(existing, order);
       return { order: existing, created: false, error: '' };
     }
-    const duplicate = store.orders.find(entry => signature(entry) === signature(order) && receivedAt - (Number(entry.createdAt) || 0) < duplicateWindowMs);
+    // Form không có mã (không có inserted_at) gọi lại trong 10 phút với cùng giỏ
+    // là cùng một lần gửi (webhook thử lại). Có mã thì đã xét ở sameForm; bản
+    // máy tự điền không bao giờ bị coi là trùng với đơn khác.
+    const duplicate = !order.landing.externalId && !order.landing.autoFilled
+      ? store.orders.find(entry => signature(entry) === signature(order) && receivedAt - (Number(entry.createdAt) || 0) < duplicateWindowMs)
+      : null;
     if (duplicate) return { order: duplicate, created: false, error: '' };
     store.orders.unshift(order);
     store.orders = store.orders.slice(0, maximumOrders);
     return { order, created: true, error: '' };
   });
 }
-
-// Khách bỏ dở rồi quay lại điền tiếp trong vòng này thì vẫn là cùng một đơn.
-const incompleteUpgradeWindowMs = 6 * 60 * 60 * 1000;
 
 /** Thời điểm khách gửi form (giờ Việt Nam); thiếu thì lấy lúc CRM nhận. */
 export function submittedTime(order) {
@@ -640,50 +623,13 @@ export function submittedTime(order) {
   return Number(order.createdAt) || 0;
 }
 
-function closeInTime(first, second) {
-  return Math.abs(submittedTime(first) - submittedTime(second)) < incompleteUpgradeWindowMs;
-}
-
-/** Ghi mã form/POS của bản trùng vào đơn đang giữ để lần sau nhận ra ngay. */
+/** Ghi mã form/POS của bản cập nhật cùng form vào đơn đang giữ để lần sau nhận ra ngay. */
 /** `primary`: bản gộp là cùng form (đơn thật) nên mã POS của nó là mã chính; bản dở chỉ ghi vào danh sách. */
 function absorbInto(keeper, other, { primary = true } = {}) {
   const landing = keeper.landing || {};
   const formIds = [...new Set([...(landing.formIds || []), other.landing?.externalId].filter(id => id && id !== landing.externalId))];
   const posIds = [...new Set([...(landing.posIds || []), landing.posId, other.landing?.posId].filter(Boolean))];
   keeper.landing = { ...landing, posId: landing.posId || (primary ? other.landing?.posId : ''), ...(formIds.length ? { formIds } : {}), ...(posIds.length ? { posIds } : {}) };
-}
-
-/**
- * Dọn đơn trùng đã lỡ tạo (kể cả trước khi có quy tắc): đơn dở dang bị thay
- * bằng đơn hoàn tất cùng số trong 6 giờ, và hai đơn hoàn tất cùng số cùng giỏ
- * trong 6 giờ (giữ đơn tạo trước). Trả về số đơn đã gộp.
- */
-export function absorbDuplicateOrders() {
-  return updateLandingStore(store => {
-    let absorbed = 0;
-    const byCreation = (first, second) => (Number(first.createdAt) || 0) - (Number(second.createdAt) || 0);
-    store.orders = store.orders.filter(order => {
-      if (!order.landing?.incomplete || !order.phone) return true;
-      const final = store.orders.find(entry => entry !== order && !entry.landing?.incomplete && entry.phone === order.phone && closeInTime(entry, order));
-      if (!final) return true;
-      absorbInto(final, order, { primary: false });
-      absorbed += 1;
-      return false;
-    });
-    const dropped = new Set();
-    for (const order of [...store.orders].sort(byCreation)) {
-      if (dropped.has(order) || order.landing?.incomplete || !order.phone) continue;
-      for (const other of store.orders) {
-        if (other === order || dropped.has(other) || other.landing?.incomplete || other.phone !== order.phone) continue;
-        if (signature(other) !== signature(order) || !closeInTime(other, order) || byCreation(other, order) < 0) continue;
-        absorbInto(order, other);
-        dropped.add(other);
-        absorbed += 1;
-      }
-    }
-    store.orders = store.orders.filter(order => !dropped.has(order));
-    return absorbed;
-  });
 }
 
 /** Bản mới có ít thông tin hơn bản đang giữ (sự kiện đến muộn) thì không đè. */

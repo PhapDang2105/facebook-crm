@@ -8,7 +8,7 @@
 // rồi đi qua recordLandingOrder: trùng webhook thì gộp, đơn dở thì tự điền,
 // số bom hàng thì cảnh báo — một luồng duy nhất.
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
-import { absorbDuplicateOrders, readLandingStore, recordLandingOrder } from './landing-orders.mjs';
+import { readLandingStore, recordLandingOrder } from './landing-orders.mjs';
 
 export const POS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const LANDING_SOURCES = /webcake|landing/i;
@@ -79,11 +79,13 @@ export function isLandingPosOrder(order) {
 
 /**
  * Kéo đơn POS tạo trong `sinceHours` giờ gần nhất (mặc định 48) và ghi vào
- * CRM theo thứ tự khách gửi (cũ trước) để bản hoàn tất đè lên bản dở dang.
- * Trả về thống kê. Không ném lỗi mạng: log rồi thử lại ở lần sau.
+ * CRM theo thứ tự khách gửi (cũ trước). Mỗi form khách gửi là một đơn riêng
+ * (chỉ bản cập nhật của cùng một form mới đè lên nhau); bảng Đơn hàng hiện
+ * mọi đơn cùng số điện thoại để nhân viên quyết định. Trả về thống kê. Không
+ * ném lỗi mạng: log rồi thử lại ở lần sau.
  */
 export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig(), fetchImpl = fetch, maxPages = 10 } = {}) {
-  const summary = { checked: 0, landing: 0, created: 0, updated: 0, absorbed: 0, skipped: 0, rejected: 0, errors: [] };
+  const summary = { checked: 0, landing: 0, created: 0, updated: 0, skipped: 0, rejected: 0, errors: [] };
   if (!posConfigured(config)) return { ...summary, disabled: true };
   const store = await readLandingStore();
   const knownPosIds = new Set(store.orders.flatMap(order => [order.landing?.posId, ...(order.landing?.posIds || [])]).filter(Boolean).map(String));
@@ -113,10 +115,8 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
     if (result.error) summary.rejected += 1;
     else if (result.created) summary.created += 1;
     else if (result.updated) summary.updated += 1;
-    else if (result.absorbed) summary.absorbed += 1;
     else summary.skipped += 1;
   }
-  summary.absorbed += await absorbDuplicateOrders();
   return summary;
 }
 
@@ -128,8 +128,8 @@ export function startPosSync({ log = console.log } = {}) {
     try {
       const summary = await syncPosLandingOrders();
       if (summary.disabled) return;
-      if (summary.created || summary.updated || summary.absorbed || summary.errors.length) {
-        log(`Đồng bộ POS: ${summary.landing} đơn landing trong ${summary.checked} đơn, tạo ${summary.created}, cập nhật ${summary.updated}, gộp ${summary.absorbed}, bỏ qua ${summary.skipped}${summary.rejected ? `, từ chối ${summary.rejected}` : ''}${summary.errors.length ? `, lỗi: ${summary.errors.join('; ')}` : ''}`);
+      if (summary.created || summary.updated || summary.errors.length) {
+        log(`Đồng bộ POS: ${summary.landing} đơn landing trong ${summary.checked} đơn, tạo ${summary.created}, cập nhật ${summary.updated}, bỏ qua ${summary.skipped}${summary.rejected ? `, từ chối ${summary.rejected}` : ''}${summary.errors.length ? `, lỗi: ${summary.errors.join('; ')}` : ''}`);
       }
     } catch (error) {
       log(`Đồng bộ POS lỗi: ${error.message}`);

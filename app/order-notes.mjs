@@ -95,8 +95,7 @@ export function processingNotes(order) {
     notes.push(`☎ ${warning.label || 'Số điện thoại cần gọi xác nhận'}${detail}`);
   }
 
-  // formIds là các mã form gộp thêm (ngoài externalId); posIds gồm cả mã chính.
-  const times = Math.max((landing.formIds || []).length + 1, (landing.posIds || []).length);
-  if (times > 1) notes.push(`ℹ Khách gửi form ${times} lần, đã gộp thành một đơn`);
+  // Khách điền nhiều form thì mỗi form một đơn, không tự gộp; bảng Đơn hàng tự
+  // ghi "cùng số điện thoại với đơn …" và bấm vào đơn thì hiện cả nhóm.
   return notes;
 }

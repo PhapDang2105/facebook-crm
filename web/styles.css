@@ -2111,6 +2111,21 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 /* Cảnh báo số điện thoại hay bom hàng */
 .data-preview tbody tr.order-row-phone-warning td { background: #ffe3e3; }
 .data-preview tbody tr.order-row-phone-watch td { background: #fff1d6; }
+.data-preview tbody tr[data-order-row-index] { cursor: pointer; }
+.data-preview tbody tr[data-order-row-index]:hover td { background: rgba(26, 86, 219, .05); }
+.order-group-panel { width: min(860px, 100%); max-height: min(760px, 92vh); }
+.order-group-list { display: grid; gap: 10px; margin-top: 12px; }
+.order-group-item { padding: 10px 12px; border: 1px solid #e4e7ec; border-radius: 10px; background: #fcfcfd; }
+.order-group-item.is-current { border-color: #1a56db; box-shadow: 0 0 0 2px rgba(26, 86, 219, .12); }
+.order-group-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 6px; font-size: 12.5px; }
+.order-group-item-head b { font-size: 13px; }
+.order-group-item-head .order-group-source { padding: 1px 8px; border-radius: 999px; background: #f2f4f7; color: #475467; font-size: 11px; font-weight: 600; }
+.order-group-item-head .order-group-delete { margin-left: auto; padding: 3px 10px; border: 1px solid #fda29b; border-radius: 6px; background: #fff; color: #b42318; font: inherit; font-size: 12px; cursor: pointer; }
+.order-group-item-head .order-group-delete:disabled { opacity: .5; cursor: default; }
+.order-group-lines { margin: 0 0 6px; padding: 0; list-style: none; font-size: 12.5px; color: #1d2939; }
+.order-group-lines li { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; border-bottom: 1px dashed #eaecf0; }
+.order-group-address { margin: 0 0 6px; color: #344054; font-size: 12.5px; }
+.order-group-item .note-cell { max-width: none; }
 .data-preview td.preview-note { white-space: normal; }
 .note-cell { display: flex; flex-wrap: wrap; gap: 4px; max-width: 460px; }
 .note-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.5; color: #344054; background: #f2f4f7; }

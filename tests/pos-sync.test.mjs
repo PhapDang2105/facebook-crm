@@ -60,23 +60,23 @@ test('đồng bộ: đơn webhook đã có thì gộp và ghi mã POS; đơn POS
   // Webhook đã tạo đơn này trước (cùng SĐT + inserted_at giờ Việt Nam).
   const viaWebhook = await recordLandingOrder({ name: 'Nguyễn Thị Thu Hà', phone: '0904636274', address: 'Hateco Plaza - Lô 4A Huỳnh Thúc Kháng', ward: 'Phường Láng Hạ', district: 'Quận Đống Đa', province: 'Hà Nội', products: 'Granola Mới (Combo 3 Granola Xanh): 1 x 447.000 ₫', total: '447.000', status: 'Form hoàn tất', inserted_at: '2026-09-16 07:52:24' }, { checkPhone: false });
   assert.equal(viaWebhook.created, true);
-  // Thu Hà bỏ dở lúc 07:20 rồi gửi xong lúc 07:52: bản dở phải gộp vào đơn hoàn tất, không thành đơn riêng.
+  // Thu Hà bỏ dở lúc 07:20 rồi gửi xong lúc 07:52 bằng form khác: hai đơn riêng, không tự gộp.
   const pages = [posOrder(), posOrder({ id: 51940, is_abandoned_order: true, status: 0, inserted_at: '2026-09-16T00:20:00.000000', items: [], total_price: 0, shipping_address: { full_address: 'Hà Nội', province_name: 'Hà Nội' } }), posOrder({ id: 51938, bill_full_name: 'Nguyễn tú anh', bill_phone_number: '0368419478', is_abandoned_order: true, status: 0, inserted_at: '2026-09-15T19:08:42.000000', items: [], total_price: 0, shipping_address: { full_address: 'Bắc Kạn', province_name: 'Bắc Kạn' }, link: 'https://granola.giotnang.vn/?utm_campaign=camp1' }), { id: 1, order_sources_name: 'Facebook', link: '' }];
   const fetchImpl = async () => ({ ok: true, json: async () => ({ data: pages, total_pages: 1 }) });
   const config = { apiKey: 'k', shopId: '1', baseUrl: 'https://pos.example/api/v1' };
   const first = await syncPosLandingOrders({ config, fetchImpl });
   assert.equal(first.checked, 4);
   assert.equal(first.landing, 3);
-  assert.equal(first.created, 1, 'chỉ đơn bỏ dở của Nguyễn tú anh được tạo');
-  assert.equal(first.skipped, 1, 'đơn Thu Hà đã có từ webhook');
-  assert.equal(first.absorbed, 1, 'bản dở của Thu Hà gộp vào đơn hoàn tất');
+  assert.equal(first.created, 2, 'đơn bỏ dở của Nguyễn tú anh và bản dở của Thu Hà được tạo riêng');
+  assert.equal(first.skipped, 1, 'đơn hoàn tất của Thu Hà đã có từ webhook');
   const orders = await listLandingOrders();
-  assert.equal(orders.filter(order => order.phone === '0904636274').length, 1, 'Thu Hà chỉ có một đơn');
-  const thuHa = orders.find(order => order.phone === '0904636274');
+  const thuHaOrders = orders.filter(order => order.phone === '0904636274');
+  assert.equal(thuHaOrders.length, 2, 'Thu Hà có đơn dở và đơn hoàn tất, không tự gộp');
+  const thuHa = thuHaOrders.find(order => !order.landing.incomplete);
   assert.equal(thuHa.id, viaWebhook.order.id);
   assert.equal(thuHa.status, 'Mới');
   assert.equal(thuHa.landing.posId, '51946', 'ghi mã POS vào đơn webhook');
-  assert.deepEqual([...thuHa.landing.posIds].sort(), ['51940', '51946'], 'nhớ cả mã bản dở để lần sau bỏ qua');
+  assert.equal(thuHaOrders.find(order => order.landing.incomplete).landing.posId, '51940');
   const tuAnh = orders.find(order => order.phone === '0368419478');
   assert.equal(tuAnh.status, 'Chưa hoàn tất');
   assert.equal(tuAnh.landing.posId, '51938');
@@ -84,12 +84,11 @@ test('đồng bộ: đơn webhook đã có thì gộp và ghi mã POS; đơn POS
   assert.match(tuAnh.landing.autoFilled.product, /Granola Túi Xanh 450g x3/);
   const second = await syncPosLandingOrders({ config, fetchImpl });
   assert.equal(second.created, 0);
-  assert.equal(second.absorbed, 0);
   assert.equal(second.skipped, 3);
   assert.equal((await syncPosLandingOrders({ config: { apiKey: '', shopId: '' } })).disabled, true);
 });
 
-test('đơn webhook cũ không có mã form: đồng bộ POS gặp lại cùng khách cùng giỏ trong 6 giờ thì gộp, không tạo đơn thứ hai', async () => {
+test('đơn webhook cũ không có mã form: đồng bộ POS gặp lại cùng khách cùng giỏ thì vẫn là đơn riêng (không tự gộp), lần sau bỏ qua', async () => {
   const old = await recordLandingOrder({ name: 'Phạm Dương', phone: '0984431880', address: 'Xóm 4, Xã Hưng Yên Bắc, Huyện Hưng Nguyên, Nghệ An', products: 'Granola Mới (Combo 2 Granola Xanh): 1 x 298.000 ₫', total: '298.000' }, { checkPhone: false });
   assert.equal(old.created, true);
   assert.equal(old.order.landing.externalId, '');
@@ -97,10 +96,12 @@ test('đơn webhook cũ không có mã form: đồng bộ POS gặp lại cùng 
   const fromPos = posOrder({ id: 51896, bill_full_name: 'Phạm dương', bill_phone_number: '0984431880', inserted_at: nowUtc, total_price: 298000, shipping_address: { full_address: 'Xóm 4, Xã Hưng Yên Bắc, Huyện Hưng Nguyên, Nghệ An', province_name: 'Nghệ An' }, items: [{ quantity: 1, variation_info: { name: 'Granola Mới', detail: 'Phân Loại: Combo 2 Granola Xanh', retail_price: 298000 } }] });
   const fetchImpl = async () => ({ ok: true, json: async () => ({ data: [fromPos], total_pages: 1 }) });
   const summary = await syncPosLandingOrders({ config: { apiKey: 'k', shopId: '1', baseUrl: 'https://pos.example/api/v1' }, fetchImpl });
-  assert.equal(summary.created, 0);
-  assert.equal(summary.absorbed, 1);
+  assert.equal(summary.created, 1);
   const mine = (await listLandingOrders()).filter(order => order.phone === '0984431880');
-  assert.equal(mine.length, 1);
-  assert.equal(mine[0].id, old.order.id);
-  assert.equal(mine[0].landing.posId, '51896');
+  assert.equal(mine.length, 2, 'đơn webhook cũ và đơn POS là hai đơn, bảng hiện cùng số để nhân viên gộp tay');
+  assert.ok(mine.some(order => order.id === old.order.id));
+  assert.ok(mine.some(order => order.landing.posId === '51896'));
+  const again = await syncPosLandingOrders({ config: { apiKey: 'k', shopId: '1', baseUrl: 'https://pos.example/api/v1' }, fetchImpl });
+  assert.equal(again.created, 0);
+  assert.equal(again.skipped, 1);
 });

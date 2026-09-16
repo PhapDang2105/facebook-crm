@@ -855,34 +855,141 @@ function deleteOrderRows(indexes) {
   renderOrderData();
 }
 
-document.querySelector('#order-import-preview')?.addEventListener('click', async event => {
-  const button = event.target.closest('[data-order-row-delete]');
-  if (!button) return;
-  const rowIndex = Number(button.dataset.orderRowDelete);
+/**
+ * Xóa đơn ở dòng `rowIndex`. Đơn chatbot/landing là một bản ghi trong hệ
+ * thống chứ không phải một dòng: xóa dòng nào cũng là xóa đơn ở mọi nơi, sau
+ * khi hỏi. Trả về true nếu đã xóa.
+ */
+async function deleteOrderAtRow(rowIndex, button = null) {
   const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
   const orderId = idColumn >= 0 ? String(orderData.rows[rowIndex]?.[idColumn] || '') : '';
-  // A chatbot or landing-page order is one record in the system, not a table
-  // row: deleting any of its lines deletes the order everywhere, after asking.
   if (isSystemOrderId(orderId)) {
     const id = orderId.slice(3);
     const origin = orderId.startsWith('LP-') ? 'landing page' : 'chatbot';
-    if (!window.confirm(`Xóa đơn #${id} tạo từ ${origin} khỏi hệ thống? Đơn sẽ mất ở cả bảng này lẫn nơi tạo.`)) return;
-    button.disabled = true;
+    if (!window.confirm(`Xóa đơn #${id} tạo từ ${origin} khỏi hệ thống? Đơn sẽ mất ở cả bảng này lẫn nơi tạo.`)) return false;
+    if (button) button.disabled = true;
     try {
       const response = await fetch(`/api/customer-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
       // 404 means the order is already gone from the system; the row still goes.
       if (response.status !== 404) await readApiResponse(response);
     } catch (error) {
-      button.disabled = false;
+      if (button) button.disabled = false;
       showToast(error.message || 'Chưa xóa được đơn.', 'error');
-      return;
+      return false;
     }
     deleteOrderRows(orderData.rows.map((row, index) => String(row[idColumn] || '') === orderId ? index : -1).filter(index => index >= 0));
     showToast(`Đã xóa đơn #${id}.`, 'success');
-    return;
+    return true;
   }
   deleteOrderRows([rowIndex]);
   showToast('Đã xóa dòng khỏi bảng.', 'success');
+  return true;
+}
+
+document.querySelector('#order-import-preview')?.addEventListener('click', async event => {
+  const button = event.target.closest('[data-order-row-delete]');
+  if (!button) return;
+  event.stopPropagation();
+  await deleteOrderAtRow(Number(button.dataset.orderRowDelete), button);
+});
+
+// ===== Bấm vào một đơn: xem mọi đơn cùng số điện thoại =====
+//
+// Khách điền nhiều form (bỏ dở rồi gửi lại, gửi hai lần, đổi landing) thì hệ
+// thống không tự gộp; hộp thoại này bày cả nhóm để nhân viên so và xóa bản thừa.
+const orderGroupDialog = document.querySelector('#order-group-dialog');
+let orderGroupPhone = '';
+let orderGroupCurrentId = '';
+
+function normalizeRowPhone(value) {
+  let phone = String(value ?? '').replace(/\D/g, '');
+  if (phone.startsWith('84')) phone = `0${phone.slice(2)}`;
+  return phone;
+}
+
+function orderRowsByPhone(phone) {
+  const phoneIndex = orderData.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  if (phoneIndex < 0 || !phone) return [];
+  return orderData.rows.map((row, index) => ({ row, index })).filter(entry => normalizeRowPhone(entry.row[phoneIndex]) === phone);
+}
+
+function renderOrderGroupDialog() {
+  if (!orderGroupDialog) return;
+  const column = name => orderData.headers.findIndex(header => normalizeColumnName(header) === name);
+  const idIndex = column('ma don hang');
+  const entries = orderRowsByPhone(orderGroupPhone);
+  if (!entries.length) { closeOrderGroupDialog(); return; }
+  // Gom dòng theo mã đơn, giữ thứ tự trong bảng.
+  const groups = new Map();
+  entries.forEach(entry => {
+    const id = idIndex >= 0 ? String(entry.row[idIndex] || '').trim() : '';
+    const key = id || `row:${entry.index}`;
+    if (!groups.has(key)) groups.set(key, { id, entries: [] });
+    groups.get(key).entries.push(entry);
+  });
+  const cell = (row, name) => { const i = column(name); return i >= 0 ? String(row[i] || '').trim() : ''; };
+  const { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes } = orderGroupContext();
+  const rowNotes = getRowProcessingNotes(orderData, { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes });
+  const items = [...groups.values()].map(group => {
+    const first = group.entries[0].row;
+    const lines = group.entries.map(({ row }) => `<li><span>${escapeHtml(cell(row, 'san pham') || '(chưa có sản phẩm)')}</span><span>x${escapeHtml(cell(row, 'so luong') || '1')} · ${escapeHtml(cell(row, 'don gia'))} đ</span></li>`).join('');
+    // Ô Địa chỉ của đơn hệ thống đã là địa chỉ đầy đủ; ba cấp chuẩn hiện thành dòng phụ.
+    const levels = [cell(first, 'phuong xa'), cell(first, 'quan huyen'), cell(first, 'tinh thanh pho')].filter(Boolean).join(', ');
+    const street = cell(first, 'dia chi');
+    const notes = group.entries.flatMap(({ index }) => rowNotes.get(index) || []);
+    const noteHtml = renderNoteCell(cell(first, 'ghi chu'), [...new Set(notes)]);
+    const isCurrent = group.id && group.id === orderGroupCurrentId;
+    return `<article class="order-group-item${isCurrent ? ' is-current' : ''}">
+      <div class="order-group-item-head"><b>${escapeHtml(group.id || 'Dòng không mã')}</b><span class="order-group-source">${escapeHtml(cell(first, 'nguon don') || 'Import')}</span><span>${escapeHtml(cell(first, 'khach hang'))}</span>${isCurrent ? '<span class="order-group-source">đơn đang xem</span>' : ''}<button type="button" class="order-group-delete" data-order-group-delete="${group.entries[0].index}">Xóa đơn này</button></div>
+      <ul class="order-group-lines">${lines}</ul>
+      <p class="order-group-address">${street ? `${escapeHtml(street)}${levels ? `<br><small>${escapeHtml(levels)}</small>` : ''}` : 'Chưa có địa chỉ'}</p>
+      ${noteHtml}
+    </article>`;
+  }).join('');
+  orderGroupDialog.querySelector('#order-group-dialog-subtitle').textContent = `${orderGroupPhone} · ${groups.size} đơn trong bảng`;
+  orderGroupDialog.querySelector('#order-group-list').innerHTML = items;
+}
+
+function orderGroupContext() {
+  return {
+    duplicateRowIndexes: getDuplicateOrderRowIndexes(),
+    duplicatePhoneRowIndexes: getDuplicatePhoneRowIndexes(),
+    warningRowIndexes: getPhoneWarningRowIndexes()
+  };
+}
+
+function openOrderGroupDialog(rowIndex) {
+  if (!orderGroupDialog) return;
+  const phoneIndex = orderData.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  const idIndex = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  const row = orderData.rows[rowIndex];
+  if (!row || phoneIndex < 0) return;
+  orderGroupPhone = normalizeRowPhone(row[phoneIndex]);
+  orderGroupCurrentId = idIndex >= 0 ? String(row[idIndex] || '').trim() : '';
+  if (!orderGroupPhone) { showToast('Dòng này chưa có số điện thoại.', 'error'); return; }
+  renderOrderGroupDialog();
+  orderGroupDialog.classList.remove('hidden');
+}
+
+function closeOrderGroupDialog() {
+  orderGroupDialog?.classList.add('hidden');
+}
+
+orderGroupDialog?.addEventListener('click', async event => {
+  if (event.target.closest('[data-close-order-group-dialog]')) { closeOrderGroupDialog(); return; }
+  const button = event.target.closest('[data-order-group-delete]');
+  if (!button) return;
+  const deleted = await deleteOrderAtRow(Number(button.dataset.orderGroupDelete), button);
+  if (deleted) renderOrderGroupDialog();
+});
+
+['#order-import-preview', '#order-preview'].forEach(selector => {
+  document.querySelector(selector)?.addEventListener('click', event => {
+    if (event.target.closest('button, a, input, select, textarea')) return;
+    const row = event.target.closest('tr[data-order-row-index]');
+    if (!row) return;
+    openOrderGroupDialog(Number(row.dataset.orderRowIndex));
+  });
 });
 
 document.querySelector('#order-clear-table')?.addEventListener('click', () => {
@@ -4986,7 +5093,7 @@ function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicat
     if (duplicateRowIndexes?.has(index)) list.push('⚠ Trùng hoàn toàn với dòng khác (gửi hai lần), giữ một');
     if (duplicatePhoneRowIndexes?.has(index) && phoneIndex >= 0) {
       const others = [...(ordersByPhone.get(normalizeWarningPhone(row[phoneIndex])) || [])].filter(id => id !== (orderId || `dòng ${index + 1}`));
-      list.push(`⚠ Cùng số điện thoại với đơn ${others.join(', ')}: hỏi khách có đặt thêm không`);
+      list.push(`⚠ Cùng số điện thoại với đơn ${others.join(', ')}: bấm vào đơn để xem cả nhóm, hỏi khách có đặt thêm không`);
     }
     if (addressIndex >= 0 && isInvalidOrderAddress(row[addressIndex])) list.push('⚠ Địa chỉ bắt đầu bằng GXN, sửa lại trước khi xuất');
     if (!isSystemOrderId(orderId)) {

@@ -6,14 +6,13 @@ test('đơn bỏ dở thiếu địa chỉ, máy tự điền sản phẩm, số
   const notes = processingNotes({
     address: 'Chưa có địa chỉ', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }],
     phoneWarning: { level: 'high', label: 'Hay bom hàng, gọi xác nhận trước khi giao', sources: ['Hệ thống Pancake: bom 5/12 đơn (42%)'] },
-    landing: { incomplete: true, submittedAt: '2026-09-16 02:08:42', page: 'https://granola.giotnang.vn/', autoFilled: { product: 'Granola Túi Xanh 450g x2 (mặc định theo chiến dịch 1202, 18 đơn)' }, posId: '51938', formIds: ['0368419478@2026-09-16 01:50:00'], externalId: '0368419478@2026-09-16 02:08:42' }
+    landing: { incomplete: true, submittedAt: '2026-09-16 02:08:42', page: 'https://granola.giotnang.vn/', autoFilled: { product: 'Granola Túi Xanh 450g x2 (mặc định theo chiến dịch 1202, 18 đơn)' }, posId: '51938', externalId: '0368419478@2026-09-16 02:08:42' }
   });
   assert.deepEqual(notes, [
     '⏳ Khách bỏ dở form lúc 02:08 16/09, chưa bấm gửi: gọi xác nhận đơn',
     '⚠ Chưa có địa chỉ giao hàng',
     '🤖 Tự điền sản phẩm: Granola Túi Xanh 450g x2 (mặc định theo chiến dịch 1202, 18 đơn)',
-    '☎ Hay bom hàng, gọi xác nhận trước khi giao: Hệ thống Pancake: bom 5/12 đơn (42%)',
-    'ℹ Khách gửi form 2 lần, đã gộp thành một đơn'
+    '☎ Hay bom hàng, gọi xác nhận trước khi giao: Hệ thống Pancake: bom 5/12 đơn (42%)'
   ]);
 });
 

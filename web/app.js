@@ -407,6 +407,7 @@ function showView(name) {
   if (window.location.hash !== `#${name}`) window.location.hash = name;
   if (name === 'orders') syncChatbotOrdersIntoTable();
   if (name === 'customers') loadCustomers();
+  if (name === 'settings') loadPosChannel();
 }
 
 // ---------------------------------------------------------------------------

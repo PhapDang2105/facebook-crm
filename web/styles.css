@@ -477,6 +477,11 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-row-delete:hover { color: #b42318; background: #fff1f0; }
 .order-row-delete:disabled { opacity: .4; cursor: default; }
 .preview-actions { width: 44px; text-align: center; }
+.preview-actions--tail { width: auto; }
+.order-row-reviewed { padding: 4px 10px; color: #1d2939; background: #fff; border: 0.9px solid #d0d5dd; border-radius: 6px; font: inherit; font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.order-row-reviewed:hover { color: #fff; background: #111; border-color: #111; }
+/* Số điện thoại chỉ là con số: canh trái, không giãn. */
+.data-preview td.preview-phone { justify-content: flex-start; }
 /* Xử lý dữ liệu: bốn tab theo ngày đặt, chữ trần không nền, tab đang chọn gạch
    chân dải màu TikTok (xanh ngọc → đỏ) giống viền trên của bảng. */
 .order-day-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 9px 18px; margin: 0 0 12.6px; }
@@ -662,7 +667,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .data-preview .preview-address,
 .data-preview .preview-wrap { white-space: normal; overflow-wrap: anywhere; }
 .data-preview .preview-quantity,
-.data-preview .preview-phone { justify-content: center; text-align: center; }
+.data-preview .preview-phone { justify-content: flex-start; text-align: left; }
 .data-preview td.preview-phone { flex-wrap: wrap; white-space: normal; }
 .data-preview td.preview-phone .phone-warning-badge { margin-left: 0; }
 .data-preview th.preview-product-heading { justify-content: center; text-align: center; }

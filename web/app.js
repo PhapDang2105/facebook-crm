@@ -938,6 +938,12 @@ document.querySelector('#order-import-preview')?.addEventListener('click', event
 // Xử lý dữ liệu: bảng không có cột nút; bấm dòng mở chi tiết đơn (mọi đơn
 // cùng số điện thoại hiện chung) và nút "Đã xử lý" nằm trong đó.
 document.querySelector('#order-preview')?.addEventListener('click', event => {
+  const reviewedButton = event.target.closest('[data-order-row-reviewed]');
+  if (reviewedButton) {
+    event.stopPropagation();
+    markOrderRowReviewed(Number(reviewedButton.dataset.orderRowReviewed));
+    return;
+  }
   if (event.target.closest('button, a, input, select, textarea')) return;
   const row = event.target.closest('tr[data-order-row-index]');
   if (!row) return;
@@ -1026,8 +1032,9 @@ document.addEventListener('keydown', event => {
 
 // "Đã xử lý": đánh dấu cả đơn (mọi dòng cùng mã), đơn rời Xử lý dữ liệu và
 // được phép sang Xuất dữ liệu.
-document.querySelector('#order-dialog-reviewed')?.addEventListener('click', () => {
-  const row = orderData.rows[orderDialogRowIndex];
+/** Đánh dấu cả đơn của dòng này là đã xử lý, ghi Lịch sử, vẽ lại bảng. Dùng cho nút cuối dòng và nút trong hộp chi tiết. */
+function markOrderRowReviewed(rowIndex) {
+  const row = orderData.rows[rowIndex];
   if (!row) return;
   const { headers } = orderData;
   const cell = name => { const index = headers.findIndex(header => normalizeColumnName(header) === name); return index >= 0 ? String(row[index] || '').trim() : ''; };
@@ -1037,7 +1044,9 @@ document.querySelector('#order-dialog-reviewed')?.addEventListener('click', () =
   renderOrderData();
   renderProcessedHistory();
   showToast('Đã đánh dấu xử lý xong, đơn sẽ có ở Xuất dữ liệu.', 'success');
-});
+}
+
+document.querySelector('#order-dialog-reviewed')?.addEventListener('click', () => markOrderRowReviewed(orderDialogRowIndex));
 
 // ===== Lịch sử đã xử lý =====
 const processedHistoryButton = document.querySelector('#order-processed-history-button');
@@ -5453,7 +5462,7 @@ function renderEmptyState(container, message) {
   container.innerHTML = `<div class="order-empty">${emptyBoxIcon}<small>${escapeHtml(message)}</small></div>`;
 }
 
-function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, rowNotes = new Map() } = {}) {
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, rowNotes = new Map() } = {}) {
   preview.classList.remove('is-empty');
   if (!rowEntries.length) {
     renderEmptyState(preview, emptyMessage);
@@ -5486,12 +5495,14 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   // rộng hơn vì gồm nhiều dòng việc cần làm.
   // Bảng phải vừa khung (khung cắt phần thừa): cột chữ dài có trần và được
   // xuống dòng, phần rộng còn lại chia cho Ghi chú và Địa chỉ.
+  // Số điện thoại vừa đúng nội dung; Ghi chú có trần vì câu đã ngắn; phần rộng
+  // còn lại dồn cho Địa chỉ nên cột này bắt đầu sớm hơn và rộng hơn.
   const templates = {
-    'dia chi': 'minmax(200px, 1fr)',
-    'ghi chu': 'minmax(200px, 1.2fr)',
+    'dia chi': 'minmax(260px, 1fr)',
+    'ghi chu': 'minmax(170px, 340px)',
     'san pham': 'fit-content(170px)',
     'khach hang': 'minmax(100px, 170px)',
-    'so dien thoai': 'minmax(100px, 150px)'
+    'so dien thoai': 'max-content'
   };
   const columnTemplate = orderedColumns.map(column => templates[column.name] || 'max-content').join(' ');
   const previewClassName = index => {
@@ -5509,10 +5520,15 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const actionCell = entry => deletable
     ? `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa dòng" aria-label="Xóa dòng">×</button></td>`
     : '';
+  // Xử lý dữ liệu: nút "Đã xử lý" đứng cuối dòng để bấm thẳng, không cần mở chi tiết.
+  const tailCell = entry => reviewable
+    ? `<td class="preview-actions preview-actions--tail"><button type="button" class="order-row-reviewed" data-order-row-reviewed="${entry.index}" title="Đã xử lý xong, cho phép xuất kho">Đã xử lý</button></td>`
+    : '';
   const head = (deletable ? '<th class="preview-actions"></th>' : '')
-    + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('');
-  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(entry.row[index] || '', rowNotes.get(entry.index)) : renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}</tr>`).join('');
-  preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : ''}${columnTemplate}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('')
+    + (reviewable ? '<th class="preview-actions preview-actions--tail"></th>' : '');
+  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map(index => `<td class="${previewClassName(index)}">${normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(entry.row[index] || '', rowNotes.get(entry.index)) : renderPreviewCell(entry.row[index] || '', headers[index])}</td>`).join('')}${tailCell(entry)}</tr>`).join('');
+  preview.innerHTML = `<table style="--preview-template: ${deletable ? '40px ' : ''}${columnTemplate}${reviewable ? ' max-content' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function renderOrderData() {
@@ -5573,7 +5589,7 @@ function renderOrderData() {
   renderOrderTable(
     document.querySelector('#order-preview'), headers, searchValue ? dayRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : dayRows,
     processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',
-    { rowNotes }
+    { rowNotes, reviewable: true }
   );
 }
 

@@ -78,10 +78,6 @@ export function updateLandingStore(mutate) {
   return operation;
 }
 
-export function resetLandingStoreCache() {
-  cachedStore = null;
-}
-
 // ===== Xác thực =====
 
 /** Token so sánh theo thời gian hằng; token trống nghĩa là webhook chưa được bật. */
@@ -635,16 +631,6 @@ export async function recordLandingOrder(payload, context = {}) {
   });
 }
 
-/** Thời điểm khách gửi form (giờ Việt Nam); thiếu thì lấy lúc CRM nhận. */
-export function submittedTime(order) {
-  const text = String(order.landing?.submittedAt || '').trim();
-  if (text) {
-    const iso = text.replace(' ', 'T');
-    const date = new Date(/(Z|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}+07:00`);
-    if (!Number.isNaN(date.getTime())) return date.getTime();
-  }
-  return Number(order.createdAt) || 0;
-}
 
 /** Ghi mã form/POS của bản cập nhật cùng form vào đơn đang giữ để lần sau nhận ra ngay. */
 /** `primary`: bản gộp là cùng form (đơn thật) nên mã POS của nó là mã chính; bản dở chỉ ghi vào danh sách. */

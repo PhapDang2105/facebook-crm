@@ -238,9 +238,16 @@ export function buildExportRows(orderData = {}) {
   const headers = Array.isArray(orderData.headers) ? orderData.headers : [];
   const rows = Array.isArray(orderData.rows) ? orderData.rows : [];
   const sourceIndex = new Map(headers.map((header, index) => [normalizeColumnName(header), index]));
+  // Tên cột hỏi tới là hằng ('Địa chỉ', 'Số lượng'...): chuẩn hoá một lần mỗi tên,
+  // không lặp lại NFD + regex cho từng ô của hàng trăm dòng.
+  const columnByLabel = new Map();
   const value = (row, header) => {
-    const index = sourceIndex.get(normalizeColumnName(header));
-    return index === undefined ? '' : row[index] || '';
+    let index = columnByLabel.get(header);
+    if (index === undefined) {
+      index = sourceIndex.get(normalizeColumnName(header)) ?? -1;
+      columnByLabel.set(header, index);
+    }
+    return index < 0 ? '' : row[index] || '';
   };
   const exportableRows = rows.filter(row => !isInvalidOrderAddress(value(row, 'Địa chỉ')));
   const outputRows = [];

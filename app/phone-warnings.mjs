@@ -72,10 +72,6 @@ export function updateWarningStore(mutate) {
   return operation;
 }
 
-export function resetWarningStoreCache() {
-  cachedStore = null;
-}
-
 export function normalizeWarningPhone(value) {
   return toLocalPhone(value) || String(value ?? '').replace(/\D/g, '');
 }

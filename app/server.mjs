@@ -52,6 +52,7 @@ const productsPath = path.join(root, 'data', 'processed', 'products.json');
 const giftsPath = path.join(root, 'data', 'processed', 'gifts.json');
 const productImagesPath = path.join(root, 'data', 'processed', 'product-images');
 const exportTemplatePath = path.join(root, 'assets', 'templates', 'facebook-order-export.xlsx');
+let exportTemplateBuffer = null;
 const metaOauthStates = new Map();
 const metaPendingPages = new Map();
 
@@ -1190,8 +1191,9 @@ const server = http.createServer(async (request, response) => {
         throw new Error('Dữ liệu đơn hàng xuất không hợp lệ. Vui lòng tải lại trang và thử lại.');
       }
       const rows = buildExportRows(payload.orderData);
-      const template = await readFile(exportTemplatePath);
-      const workbook = new AdmZip(template);
+      // Mẫu XLSX là file tĩnh: đọc một lần, lần xuất sau dùng lại buffer.
+      exportTemplateBuffer ||= await readFile(exportTemplatePath);
+      const workbook = new AdmZip(exportTemplateBuffer);
       const worksheetPath = 'xl/worksheets/sheet1.xml';
       const cleanedWorkbook = removeDataRowBackgrounds(workbook, worksheetPath);
       let worksheetXml = cleanedWorkbook.worksheetXml;

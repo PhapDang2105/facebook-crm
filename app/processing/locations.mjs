@@ -208,7 +208,12 @@ export function buildLocationIndex(rows) {
       for (const ward of district.wards.values()) fullKeys.add(ward.key);
     }
   }
-  return { provinces: provinceList, districts: districtList, districtsByKey, fullKeys };
+  // Tỉnh theo alias, để chuẩn hoá tên cấp khi xuất không phải quét 63 tỉnh × alias mỗi ô.
+  const provinceByAlias = new Map();
+  for (const province of provinceList) {
+    for (const alias of province.aliases) if (!provinceByAlias.has(alias)) provinceByAlias.set(alias, province);
+  }
+  return { provinces: provinceList, districts: districtList, districtsByKey, provinceByAlias, fullKeys };
 }
 
 export function loadLocationIndex() {
@@ -216,15 +221,24 @@ export function loadLocationIndex() {
   return index;
 }
 
-export function resetLocationIndex(rows = null) {
-  index = rows ? buildLocationIndex(rows) : null;
-}
-
 // ===== Tìm khớp =====
 
 // Khoảng trắng trong tên khớp với một hoặc nhiều khoảng trắng của văn bản, vì
 // dấu gạch ngang trong "Phan Rang – Tháp Chàm" đã thành khoảng trắng.
-const boundary = key => new RegExp(`(?<![a-z0-9])${key.split(' ').map(escapeRegExp).join('\\s+')}(?![a-z0-9])`, 'g');
+// Mỗi alias một RegExp biên từ, biên dịch một lần rồi dùng lại: findBest quét
+// hàng nghìn alias cho mỗi địa chỉ, biên dịch lại mỗi lần là điểm nóng của
+// export, nhận đơn landing và mọi tin chatbot. Cờ `g` giữ lastIndex nên đặt lại
+// trước khi trao cho vòng exec.
+const boundaryCache = new Map();
+const boundary = key => {
+  let pattern = boundaryCache.get(key);
+  if (!pattern) {
+    pattern = new RegExp(`(?<![a-z0-9])${key.split(' ').map(escapeRegExp).join('\\s+')}(?![a-z0-9])`, 'g');
+    boundaryCache.set(key, pattern);
+  }
+  pattern.lastIndex = 0;
+  return pattern;
+};
 
 /** Tiền tố loại hình đứng ngay trước vị trí `start` trong chuỗi chuẩn hóa, nếu có. */
 function prefixBefore(norm, start) {
@@ -632,6 +646,22 @@ export function streetForDisplay(address, hints = {}, locationIndex = loadLocati
 }
 
 /** Địa chỉ đầy đủ theo tên chuẩn: "số nhà đường, Phường, Quận, Tỉnh". */
+/**
+ * Các trường ba cấp ghi lên một đơn từ địa chỉ khách gõ: dùng chung cho đơn
+ * chatbot lúc tạo và cho nhân viên sửa địa chỉ sau này, để hai nơi không lệch nhau.
+ */
+export function resolvedAddressFields(address, locationIndex = loadLocationIndex()) {
+  const location = resolveAddress(address, locationIndex);
+  return {
+    address,
+    street: location.street,
+    province: location.province?.name || '',
+    district: location.district?.name || '',
+    ward: location.ward?.name || '',
+    locationConfidence: location.confidence
+  };
+}
+
 export function formatResolvedAddress(resolved) {
   return [resolved.street, resolved.ward?.name, resolved.district?.name, resolved.province?.name].filter(Boolean).join(', ');
 }
@@ -665,11 +695,11 @@ export function normalizeExportLocation(value, locationIndex = loadLocationIndex
   const key = normalizeLocationKey(expandAddressAbbreviations(raw));
   // Tên đầy đủ của tỉnh trước, rồi tên đầy đủ của quận (chỉ khi duy nhất),
   // rồi mới đến tỉnh bỏ tiền tố: "Thành phố Thanh Hóa" là quận, không phải tỉnh.
-  const exactProvince = locationIndex.provinces.find(entry => entry.aliases.includes(key));
+  const exactProvince = locationIndex.provinceByAlias.get(key);
   if (exactProvince) return exactProvince.name;
   const districts = locationIndex.districtsByKey.get(key) || [];
   if (districts.length === 1) return districts[0].name;
-  const province = locationIndex.provinces.find(entry => entry.aliases.includes(stripPrefix(key, PROVINCE_PREFIXES)));
+  const province = locationIndex.provinceByAlias.get(stripPrefix(key, PROVINCE_PREFIXES));
   if (province) return province.name;
   return raw;
 }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { toLocalPhone } from './processing/customer-info.mjs';
 import { matchProduct, findProductBySku } from './processing/catalog.mjs';
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
-import { resolveAddress } from './processing/locations.mjs';
+import { resolveAddress, resolvedAddressFields } from './processing/locations.mjs';
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
@@ -41,17 +41,11 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
   const discount = money(input.discount);
   // Ba cấp hành chính chuẩn được đọc ngay từ địa chỉ khách nhắn, để bảng đơn
   // và file xuất kho dùng đúng tên trong danh mục mà không cần ai sửa tay.
-  const location = resolveAddress(address);
   return {
     id: text(input.id || id, 40).replace(/[^\w-]/g, ''),
     name,
     phone: localPhone,
-    address,
-    street: location.street,
-    province: location.province?.name || '',
-    district: location.district?.name || '',
-    ward: location.ward?.name || '',
-    locationConfidence: location.confidence,
+    ...resolvedAddressFields(address),
     products,
     status: text(input.status || 'Mới', 80),
     source: text(input.source || 'Facebook', 80),

@@ -162,7 +162,3 @@ export function labelsForEvents(labels, events = []) {
   return [...new Set(events.map(event => byEvent.get(event)).filter(Boolean))];
 }
 
-/** Name and colour for a label id, so the customer list can show what staff chose. */
-export function labelLookup(labels) {
-  return new Map((labels || []).map(label => [label.id, label]));
-}

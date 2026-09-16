@@ -3,7 +3,7 @@
 // (chatbot, landing) nên sửa phải ghi về đây, nếu không lần đồng bộ sau bảng
 // lại lấy bản cũ. Địa chỉ mới được tách ba cấp lại và ghi chú xử lý tự cập nhật
 // vì order-notes.mjs dựng ghi chú từ chính dữ liệu đơn.
-import { resolveAddress } from './processing/locations.mjs';
+import { resolvedAddressFields } from './processing/locations.mjs';
 import { findProductBySku } from './processing/catalog.mjs';
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -38,13 +38,7 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     const address = text(patch.address, 500);
     if (!address) throw new Error('Địa chỉ không được để trống.');
     if (address !== order.address) {
-      const location = resolveAddress(address);
-      order.address = address;
-      order.street = location.street;
-      order.province = location.province?.name || '';
-      order.district = location.district?.name || '';
-      order.ward = location.ward?.name || '';
-      order.locationConfidence = location.confidence;
+      Object.assign(order, resolvedAddressFields(address));
       // Nhân viên đã tự tay ghi địa chỉ: không còn là "máy tự điền" hay "thiếu địa chỉ".
       if (order.landing && typeof order.landing === 'object') {
         order.landing.needsAddress = false;

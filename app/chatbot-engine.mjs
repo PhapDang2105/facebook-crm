@@ -164,9 +164,6 @@ export async function requestDirectModelReply(options) {
   throw lastError;
 }
 
-// Bỏ dấu tiếng Việt: dùng chung với bước gắn thẻ tự động.
-export { foldVietnamese };
-
 export async function processChatbotChanges(changes, dependencies) {
   const { readSettings, listMessages, saveBotState, sendMessage, createOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
   const settings = await readSettings();

@@ -29,6 +29,12 @@ test('chấm mức cảnh báo: cờ warning của POS là chuẩn, hệ thống
   assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 81, success: 175, warning: 3 } } }).level, 'high', 'POS chấm mức 3');
   assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 7, success: 61, warning: 1 } } }).level, 'watch', 'POS chấm mức 1');
   assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 4, success: 5, warning: 0 } } }).level, 'high', '44% với 4 đơn bom');
+  // Cờ warning của POS là số đếm: khách mua nhiều, bom dưới 10% vẫn là khách tốt.
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 22, success: 317, warning: 11 } } }).level, 'none', '6% dù POS đếm 11');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 12, success: 134, warning: 4 } } }).level, 'none', '8% dù POS đếm 4');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 2, success: 0, warning: 0 } } }).level, 'high', 'bom 2/2');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 1, success: 1, warning: 0 } } }).level, 'watch', 'bom 1/2');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 1, success: 9, warning: 1 } } }).level, 'none', 'bom 1/10');
   // Shop mình: từng đơn một.
   assert.equal(assessPhone({ pos: { failed: 1, success: 5 } }).level, 'watch');
   assert.equal(assessPhone({ pos: { failed: 2, success: 5 } }).level, 'high');

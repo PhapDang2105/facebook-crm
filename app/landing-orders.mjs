@@ -571,9 +571,18 @@ export async function recordLandingOrder(payload, context = {}) {
     const sameForm = (order.landing.posId ? store.orders.find(entry => entry.landing?.posId === order.landing.posId) : null)
       || (order.landing.externalId ? store.orders.find(entry => formIds(entry).includes(order.landing.externalId)) : null);
     // Cùng khách, bản trước còn dở dang: bản mới (đầy đủ hơn, hoặc đã hoàn tất) đè lên.
-    const sameCustomerDraft = !sameForm
-      ? store.orders.find(entry => entry.landing?.incomplete && entry.phone === order.phone && receivedAt - (Number(entry.createdAt) || 0) < incompleteUpgradeWindowMs)
+    const sameCustomerDraft = !sameForm && order.phone
+      ? store.orders.find(entry => entry.landing?.incomplete && entry.phone === order.phone && closeInTime(entry, order))
       : null;
+    // Bản dở dang đến sau (đồng bộ POS trả về đơn mới trước) trong khi khách đã
+    // gửi xong một đơn khác gần đó: gộp vào đơn đã hoàn tất, không tạo đơn dở.
+    const sameCustomerFinal = !sameForm && !sameCustomerDraft && order.landing.incomplete && order.phone
+      ? store.orders.find(entry => !entry.landing?.incomplete && entry.phone === order.phone && closeInTime(entry, order))
+      : null;
+    if (sameCustomerFinal) {
+      absorbInto(sameCustomerFinal, order, { primary: false });
+      return { order: sameCustomerFinal, created: false, absorbed: true, error: '' };
+    }
     const existing = sameForm || sameCustomerDraft;
     if (existing) {
       // Bản khách gửi xong luôn thắng bản dở dang đã được máy tự điền.
@@ -585,13 +594,18 @@ export async function recordLandingOrder(payload, context = {}) {
           id: existing.id,
           createdAt: existing.createdAt,
           updatedAt: receivedAt,
-          landing: { ...order.landing, posId: order.landing.posId || existing.landing?.posId, formIds: [...new Set([...formIds(existing), order.landing.externalId].filter(Boolean))] }
+          landing: {
+            ...order.landing,
+            posId: order.landing.posId || existing.landing?.posId,
+            posIds: [...new Set([...(existing.landing?.posIds || []), existing.landing?.posId, order.landing.posId].filter(Boolean))],
+            formIds: [...new Set([...formIds(existing), order.landing.externalId].filter(Boolean))]
+          }
         };
         store.orders[index] = upgraded;
         return { order: upgraded, created: false, updated: true, error: '' };
       }
       // Đơn webhook chưa có mã POS: ghi mã POS vào để lần đồng bộ sau nhận ra ngay.
-      if (order.landing.posId && !existing.landing?.posId) existing.landing = { ...existing.landing, posId: order.landing.posId };
+      absorbInto(existing, order);
       return { order: existing, created: false, error: '' };
     }
     const duplicate = store.orders.find(entry => signature(entry) === signature(order) && receivedAt - (Number(entry.createdAt) || 0) < duplicateWindowMs);
@@ -604,6 +618,49 @@ export async function recordLandingOrder(payload, context = {}) {
 
 // Khách bỏ dở rồi quay lại điền tiếp trong vòng này thì vẫn là cùng một đơn.
 const incompleteUpgradeWindowMs = 6 * 60 * 60 * 1000;
+
+/** Thời điểm khách gửi form (giờ Việt Nam); thiếu thì lấy lúc CRM nhận. */
+export function submittedTime(order) {
+  const text = String(order.landing?.submittedAt || '').trim();
+  if (text) {
+    const iso = text.replace(' ', 'T');
+    const date = new Date(/(Z|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}+07:00`);
+    if (!Number.isNaN(date.getTime())) return date.getTime();
+  }
+  return Number(order.createdAt) || 0;
+}
+
+function closeInTime(first, second) {
+  return Math.abs(submittedTime(first) - submittedTime(second)) < incompleteUpgradeWindowMs;
+}
+
+/** Ghi mã form/POS của bản trùng vào đơn đang giữ để lần sau nhận ra ngay. */
+/** `primary`: bản gộp là cùng form (đơn thật) nên mã POS của nó là mã chính; bản dở chỉ ghi vào danh sách. */
+function absorbInto(keeper, other, { primary = true } = {}) {
+  const landing = keeper.landing || {};
+  const formIds = [...new Set([...(landing.formIds || []), other.landing?.externalId].filter(id => id && id !== landing.externalId))];
+  const posIds = [...new Set([...(landing.posIds || []), landing.posId, other.landing?.posId].filter(Boolean))];
+  keeper.landing = { ...landing, posId: landing.posId || (primary ? other.landing?.posId : ''), ...(formIds.length ? { formIds } : {}), ...(posIds.length ? { posIds } : {}) };
+}
+
+/**
+ * Dọn đơn dở dang đã bị thay bằng đơn hoàn tất của cùng số điện thoại gửi
+ * trong vòng 6 giờ (kể cả đơn đã lỡ tạo trước khi có quy tắc này). Trả về số đơn đã gộp.
+ */
+export function absorbSupersededDrafts() {
+  return updateLandingStore(store => {
+    let absorbed = 0;
+    store.orders = store.orders.filter(order => {
+      if (!order.landing?.incomplete || !order.phone) return true;
+      const final = store.orders.find(entry => entry !== order && !entry.landing?.incomplete && entry.phone === order.phone && closeInTime(entry, order));
+      if (!final) return true;
+      absorbInto(final, order, { primary: false });
+      absorbed += 1;
+      return false;
+    });
+    return absorbed;
+  });
+}
 
 /** Bản mới có ít thông tin hơn bản đang giữ (sự kiện đến muộn) thì không đè. */
 function isLessComplete(fresh, existing) {

@@ -259,10 +259,11 @@ export async function fetchPosPhoneReport(phone, { config = posConfig(), fetchIm
  * hệ thống Pancake nên xét theo tỷ lệ; đơn hoàn ở chính shop mình thì tính
  * từng đơn; cờ `warning` do POS chấm được lấy làm chuẩn.
  * - block: POS đã chặn khách.
- * - high: POS warning ≥ 2; hệ thống bom ≥ 3 đơn và ≥ 30%; shop mình hoàn ≥ 2
- *   đơn, hoặc hoàn 1 trong ≤ 2 đơn.
- * - watch: POS warning = 1; hệ thống bom ≥ 2 đơn và ≥ 15%; shop mình hoàn 1
- *   đơn; hoặc POS gắn thẻ hoàn.
+ * - high: hệ thống bom ≥ 3 đơn và ≥ 30%, hoặc bom ≥ 2 trong ≤ 4 đơn; shop
+ *   mình hoàn ≥ 2 đơn, hoặc hoàn 1 trong ≤ 2 đơn.
+ * - watch: hệ thống bom ≥ 2 đơn và ≥ 15%, hoặc bom 1 trong ≤ 2 đơn, hoặc POS
+ *   đếm cảnh báo và bom ≥ 2 đơn với ≥ 10%; shop mình hoàn 1 đơn; POS gắn thẻ hoàn.
+ *   Khách bom dưới 10% (dù POS có đếm) là bình thường.
  */
 export function assessPhone({ pos = null } = {}) {
   const sources = [];
@@ -281,11 +282,15 @@ export function assessPhone({ pos = null } = {}) {
   const percent = Math.round(netRate * 100);
   if (pos && !pos.error) {
     if (pos.customer?.isBlock) raise('block', 'POS đã chặn khách này');
+    // Cờ `warning` của POS là số đếm (có số lên 10–11) chứ không phải mức, và
+    // khách mua 300 đơn bom 20 đơn vẫn bị đếm; nên chỉ dùng nó khi tỷ lệ bom
+    // đáng kể, còn lại xét theo tỷ lệ và số đơn bom.
     const warning = Number(report?.warning) || 0;
-    if (warning >= 2) raise('high', `POS cảnh báo mức ${warning}: bom ${netFailed}/${netTotal} đơn trên hệ thống (${percent}%)`);
-    else if (warning === 1) raise('watch', `POS cảnh báo: bom ${netFailed}/${netTotal} đơn trên hệ thống (${percent}%)`);
     if (netFailed >= 3 && netRate >= 0.3) raise('high', `Hệ thống Pancake: bom ${netFailed}/${netTotal} đơn (${percent}%)`);
+    else if (netFailed >= 2 && netTotal <= 4) raise('high', `Hệ thống Pancake: bom ${netFailed}/${netTotal} đơn (${percent}%)`);
     else if (netFailed >= 2 && netRate >= 0.15) raise('watch', `Hệ thống Pancake: bom ${netFailed}/${netTotal} đơn (${percent}%)`);
+    else if (netFailed === 1 && netTotal <= 2) raise('watch', `Hệ thống Pancake: bom ${netFailed}/${netTotal} đơn (${percent}%)`);
+    else if (warning >= 1 && netFailed >= 2 && netRate >= 0.1) raise('watch', `POS cảnh báo: bom ${netFailed}/${netTotal} đơn trên hệ thống (${percent}%)`);
     if (shopFailed >= 2 || (shopFailed >= 1 && shopFailed + shopSuccess <= 2)) raise('high', `Shop mình: hoàn/huỷ ${shopFailed} đơn, giao thành công ${shopSuccess}`);
     else if (shopFailed === 1) raise('watch', `Shop mình: từng hoàn/huỷ 1 đơn, giao thành công ${shopSuccess}`);
     if ((pos.customer?.tags || []).some(tag => RETURN_TAG.test(foldText(tag)))) raise('watch', `POS gắn thẻ: ${pos.customer.tags.join(', ')}`);

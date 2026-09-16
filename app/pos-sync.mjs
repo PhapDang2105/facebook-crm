@@ -8,7 +8,7 @@
 // rồi đi qua recordLandingOrder: trùng webhook thì gộp, đơn dở thì tự điền,
 // số bom hàng thì cảnh báo — một luồng duy nhất.
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
-import { readLandingStore, recordLandingOrder } from './landing-orders.mjs';
+import { absorbSupersededDrafts, readLandingStore, recordLandingOrder } from './landing-orders.mjs';
 
 export const POS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const LANDING_SOURCES = /webcake|landing/i;
@@ -24,6 +24,19 @@ export function posTimeToWebcake(value) {
   return `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}`;
 }
 
+/**
+ * Số nhà/đường khách gõ. Với đơn bỏ dở, Webcake chèn mã landing ("GXN ") vào
+ * trước địa chỉ gửi sang POS nhưng ghi nguyên văn khách gõ trong note
+ * ("address: …"); lấy bản trong note khi phần POS chỉ khác ở tiền tố đó.
+ */
+export function posStreet(order) {
+  const address = order.shipping_address || {};
+  const street = String(address.address || '').trim();
+  const typed = String((String(order.note || '').match(/^address:\s*(.*?)\s*,?\s*$/mi) || [])[1] || '').trim();
+  if (typed && street !== typed && street.endsWith(typed)) return typed;
+  return street;
+}
+
 /** Một đơn POS → payload cùng dạng với webhook Webcake. */
 export function posOrderToPayload(order) {
   const address = order.shipping_address || {};
@@ -35,8 +48,10 @@ export function posOrderToPayload(order) {
     const price = Number(info.retail_price) || 0;
     return `${String(info.name || '').trim()}${variant ? ` (${variant})` : ''}: ${Math.max(1, Number(item.quantity) || 1)} x ${price.toLocaleString('vi-VN')} ₫`;
   }).join('\n');
-  const fullAddress = String(address.full_address || '').trim()
-    || [address.address, address.commune_name, address.district_name, address.province_name].filter(Boolean).join(', ');
+  const street = posStreet(order);
+  const fullAddress = street !== String(address.address || '').trim() || !address.full_address
+    ? [street, address.commune_name, address.district_name, address.province_name].filter(Boolean).join(', ')
+    : String(address.full_address).trim();
   return {
     name: String(order.bill_full_name || address.full_name || '').trim(),
     phone: String(order.bill_phone_number || address.phone_number || '').trim(),
@@ -51,7 +66,7 @@ export function posOrderToPayload(order) {
     utm_campaign: order.p_utm_campaign || '',
     utm_content: order.p_utm_content || '',
     utm_term: order.p_utm_term || '',
-    note: String(order.note || '').replace(/^link:.*$/m, '').replace(/^IP:.*$/m, '').replace(/^Order ID:.*$/m, '').trim()
+    note: String(order.note || '').split(/\r?\n/).filter(line => !/^(address|link|IP|Order ID):/i.test(line.trim())).join('\n').trim()
   };
 }
 
@@ -61,15 +76,17 @@ export function isLandingPosOrder(order) {
 
 /**
  * Kéo đơn POS tạo trong `sinceHours` giờ gần nhất (mặc định 48) và ghi vào
- * CRM. Trả về thống kê. Không ném lỗi mạng: log rồi thử lại ở lần sau.
+ * CRM theo thứ tự khách gửi (cũ trước) để bản hoàn tất đè lên bản dở dang.
+ * Trả về thống kê. Không ném lỗi mạng: log rồi thử lại ở lần sau.
  */
 export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig(), fetchImpl = fetch, maxPages = 10 } = {}) {
-  const summary = { checked: 0, landing: 0, created: 0, updated: 0, skipped: 0, rejected: 0, errors: [] };
+  const summary = { checked: 0, landing: 0, created: 0, updated: 0, absorbed: 0, skipped: 0, rejected: 0, errors: [] };
   if (!posConfigured(config)) return { ...summary, disabled: true };
   const store = await readLandingStore();
-  const knownPosIds = new Set(store.orders.map(order => order.landing?.posId).filter(Boolean));
+  const knownPosIds = new Set(store.orders.flatMap(order => [order.landing?.posId, ...(order.landing?.posIds || [])]).filter(Boolean).map(String));
   const start = Math.floor((Date.now() - sinceHours * 60 * 60 * 1000) / 1000);
   const end = Math.floor(Date.now() / 1000) + 60;
+  const fetched = [];
   for (let page = 1; page <= maxPages; page += 1) {
     let data;
     try {
@@ -79,20 +96,24 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
       break;
     }
     const orders = Array.isArray(data?.data) ? data.data : [];
-    for (const order of orders) {
-      summary.checked += 1;
-      if (!isLandingPosOrder(order)) continue;
-      summary.landing += 1;
-      if (knownPosIds.has(String(order.id))) { summary.skipped += 1; continue; }
-      const payload = posOrderToPayload(order);
-      const result = await recordLandingOrder(payload, { page: payload.location.split('?')[0], posId: order.id, fetchAddresses: undefined });
-      if (result.error) summary.rejected += 1;
-      else if (result.created) summary.created += 1;
-      else if (result.updated) summary.updated += 1;
-      else summary.skipped += 1;
-    }
+    fetched.push(...orders);
     if (orders.length < 100 || page >= Number(data?.total_pages || 1)) break;
   }
+  fetched.sort((first, second) => String(first.inserted_at || '').localeCompare(String(second.inserted_at || '')) || Number(first.id) - Number(second.id));
+  for (const order of fetched) {
+    summary.checked += 1;
+    if (!isLandingPosOrder(order)) continue;
+    summary.landing += 1;
+    if (knownPosIds.has(String(order.id))) { summary.skipped += 1; continue; }
+    const payload = posOrderToPayload(order);
+    const result = await recordLandingOrder(payload, { page: payload.location.split('?')[0], posId: order.id });
+    if (result.error) summary.rejected += 1;
+    else if (result.created) summary.created += 1;
+    else if (result.updated) summary.updated += 1;
+    else if (result.absorbed) summary.absorbed += 1;
+    else summary.skipped += 1;
+  }
+  summary.absorbed += await absorbSupersededDrafts();
   return summary;
 }
 
@@ -104,8 +125,8 @@ export function startPosSync({ log = console.log } = {}) {
     try {
       const summary = await syncPosLandingOrders();
       if (summary.disabled) return;
-      if (summary.created || summary.updated || summary.errors.length) {
-        log(`Đồng bộ POS: ${summary.landing} đơn landing trong ${summary.checked} đơn, tạo ${summary.created}, cập nhật ${summary.updated}, bỏ qua ${summary.skipped}${summary.rejected ? `, từ chối ${summary.rejected}` : ''}${summary.errors.length ? `, lỗi: ${summary.errors.join('; ')}` : ''}`);
+      if (summary.created || summary.updated || summary.absorbed || summary.errors.length) {
+        log(`Đồng bộ POS: ${summary.landing} đơn landing trong ${summary.checked} đơn, tạo ${summary.created}, cập nhật ${summary.updated}, gộp ${summary.absorbed}, bỏ qua ${summary.skipped}${summary.rejected ? `, từ chối ${summary.rejected}` : ''}${summary.errors.length ? `, lỗi: ${summary.errors.join('; ')}` : ''}`);
       }
     } catch (error) {
       log(`Đồng bộ POS lỗi: ${error.message}`);

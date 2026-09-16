@@ -2,6 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyCustomerOrderEdits } from '../app/order-edits.mjs';
 import { processingNotes } from '../app/order-notes.mjs';
+import { getCatalogProducts } from '../app/processing/catalog.mjs';
+
+await import('./helpers/seed-catalog.mjs');
+
+test('đổi sản phẩm sang mã khác trong danh mục: đổi SKU và tên, giữ giá, bỏ cờ cần chọn sản phẩm', () => {
+  const [first, second] = getCatalogProducts();
+  assert.ok(first && second, 'danh mục thử phải có ít nhất hai sản phẩm');
+  const order = sample();
+  order.products = [{ name: 'Chưa rõ sản phẩm (kiểm tra form landing)', sku: first.sku, quantity: 2, price: 149000 }];
+  order.landing.needsProduct = true;
+  order.landing.autoFilled.product = 'Granola Túi Xanh 450g x2 (mặc định theo chiến dịch)';
+  const changed = applyCustomerOrderEdits(order, { lines: [{ sku: first.sku, product: second.sku }] });
+  assert.deepEqual(changed, ['lines']);
+  assert.equal(order.products[0].sku, second.sku);
+  assert.equal(order.products[0].name, second.name);
+  assert.equal(order.products[0].price, 149000, 'giá giữ nguyên, nhân viên sửa riêng nếu cần');
+  assert.equal(order.landing.needsProduct, false);
+  assert.equal(order.landing.autoFilled.product, undefined);
+  assert.throws(() => applyCustomerOrderEdits(sample(), { lines: [{ sku: 'GRA-XANH-Z450', product: 'KHONG-CO' }] }), /danh mục/);
+});
 
 const sample = () => ({
   id: 'abc12345',

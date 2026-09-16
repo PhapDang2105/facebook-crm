@@ -499,12 +499,8 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 #order-preview tbody tr.order-row-editing td { background: #fffaeb; cursor: default; }
 .order-cell-input { width: 100%; min-width: 70px; padding: 4px 6px; color: #111; background: #fff; border: 0.9px solid #d0d5dd; border-radius: 5px; font: inherit; font-size: 11.7px; }
 .order-cell-input:focus { outline: none; border-color: #111; }
+.order-cell-select { max-width: 100%; padding-right: 4px; cursor: pointer; }
 .preview-editing { min-width: 0; }
-.order-row-edit-actions { display: inline-flex; gap: 5.4px; }
-.order-row-save { color: #fff; background: #111; border-color: #111; }
-.order-row-save:hover { background: #333; }
-.order-row-cancel { padding: 4px 10px; color: #475467; background: #fff; border: 0.9px solid #d0d5dd; border-radius: 6px; font: inherit; font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
-.order-row-cancel:hover { border-color: #111; color: #111; }
 .order-clear-button { color: #b42318; border-color: #f4c7c3; }
 .order-clear-button:hover { color: #fff; background: #b42318; border-color: #b42318; }
 .customer-orders-management p { margin: 0; color: #687080; font-size: 11.7px; }

@@ -4,6 +4,7 @@
 // lại lấy bản cũ. Địa chỉ mới được tách ba cấp lại và ghi chú xử lý tự cập nhật
 // vì order-notes.mjs dựng ghi chú từ chính dữ liệu đơn.
 import { resolveAddress } from './processing/locations.mjs';
+import { findProductBySku } from './processing/catalog.mjs';
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -62,6 +63,23 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
       const name = text(line?.name, 200);
       const product = products.find(item => (sku && String(item?.sku || '') === sku) || (!sku && name && String(item?.name || '') === name));
       if (!product) continue;
+      // Đổi sang sản phẩm khác trong danh mục đã cài: đổi SKU và tên, giữ giá
+      // đang có (nhân viên sửa giá riêng nếu cần); đơn không còn "cần chọn sản phẩm".
+      if (line.product !== undefined) {
+        const catalogProduct = findProductBySku(line.product);
+        if (!catalogProduct) throw new Error('Sản phẩm không có trong danh mục.');
+        if (catalogProduct.sku !== product.sku) {
+          product.sku = catalogProduct.sku;
+          product.name = catalogProduct.name;
+          product.matched = true;
+          linesChanged = true;
+          if (order.landing && typeof order.landing === 'object') {
+            order.landing.needsProduct = false;
+            if (order.landing.autoFilled?.product) delete order.landing.autoFilled.product;
+            if (order.landing.autoFilled && !Object.keys(order.landing.autoFilled).length) delete order.landing.autoFilled;
+          }
+        }
+      }
       if (line.quantity !== undefined) {
         const quantity = Math.max(1, Math.round(Number(line.quantity) || 0));
         if (quantity !== product.quantity) { product.quantity = quantity; linesChanged = true; }

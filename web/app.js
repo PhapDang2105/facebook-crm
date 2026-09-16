@@ -797,7 +797,14 @@ async function syncChatbotOrdersIntoTable() {
 // in the same pipeline as a Pancake export: check → process → export file.
 const orderSourceHeader = 'Nguồn đơn';
 const orderDateHeader = 'Ngày';
-const chatbotOrderHeaders = [orderSourceHeader, orderDateHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
+const orderCarrierHeader = 'Nhà mạng';
+const chatbotOrderHeaders = [orderSourceHeader, orderDateHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', orderCarrierHeader, 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
+
+/** Nhà mạng theo đầu số, ghi cùng nhãn với file Pancake để bảng vẽ đúng logo. */
+function carrierLabelFor(phone) {
+  const carrier = detectPhoneCarrier(phone);
+  return carrier === 'Itelecom' ? 'I Telecom' : carrier;
+}
 
 /** Ngày khách gửi form (giờ Việt Nam) hoặc lúc đơn được tạo: "16/09 07:52". */
 function formatOrderDate(order) {
@@ -834,7 +841,7 @@ function chatbotOrderToRows(order) {
   // nhận, ℹ thông tin thêm) đứng trước lời khách; bảng tô màu theo ký hiệu.
   const flags = (Array.isArray(order.processingNotes) ? order.processingNotes : []).join(' · ');
   return products.map(item => [
-    sourceLabel, formatOrderDate(order), systemOrderRowId(order), order.name || order.conversationName || '', order.phone || '', order.address || '',
+    sourceLabel, formatOrderDate(order), systemOrderRowId(order), order.name || order.conversationName || '', order.phone || '', carrierLabelFor(order.phone), order.address || '',
     province, district, ward,
     item.name || '', item.sku || '', String(Number(item.quantity) || 1),
     // Unit price as the customer paid it (combo price from 2 units), so the
@@ -957,6 +964,19 @@ function ensureOrderDateColumn(data) {
   };
 }
 
+/** Thêm cột Nhà mạng (ngay sau Số điện thoại) cho bảng chưa có, điền theo đầu số của từng dòng. */
+function ensureOrderCarrierColumn(data) {
+  if (!data.headers.length) return data;
+  if (data.headers.some(header => normalizeColumnName(header) === normalizeColumnName(orderCarrierHeader))) return data;
+  const phoneIndex = data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  if (phoneIndex < 0) return data;
+  const at = phoneIndex + 1;
+  return {
+    headers: [...data.headers.slice(0, at), orderCarrierHeader, ...data.headers.slice(at)],
+    rows: data.rows.map(row => [...row.slice(0, at), carrierLabelFor(row[phoneIndex]), ...row.slice(at)])
+  };
+}
+
 /** Adds the Nguồn đơn column to a table that lacks it, tagging existing rows as imported. */
 function ensureOrderSourceColumn(data) {
   if (!data.headers.length) return data;
@@ -965,7 +985,7 @@ function ensureOrderSourceColumn(data) {
 }
 
 function mergeChatbotOrdersIntoTable(orders) {
-  orderData = ensureOrderDateColumn(ensureOrderSourceColumn(orderData));
+  orderData = ensureOrderCarrierColumn(ensureOrderDateColumn(ensureOrderSourceColumn(orderData)));
   const headers = orderData.headers.length ? orderData.headers : chatbotOrderHeaders;
   const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
   const idColumn = index.get('ma don hang');

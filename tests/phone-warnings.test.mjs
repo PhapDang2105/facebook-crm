@@ -6,16 +6,7 @@ import path from 'node:path';
 
 process.env.PHONE_WARNINGS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'warnings-')), 'phone-warnings.json');
 
-const {
-  assessPhone,
-  fetchPosPhoneReport,
-  listManualWarnings,
-  lookupPhone,
-  lookupPhones,
-  removeManualWarning,
-  setManualWarning,
-  attachPhoneWarning
-} = await import('../app/phone-warnings.mjs');
+const { assessPhone, fetchPosPhoneReport, lookupPhone, lookupPhones, attachPhoneWarning } = await import('../app/phone-warnings.mjs');
 
 const posConfig = { apiKey: 'k', shopId: '1', baseUrl: 'https://pos.example/api/v1' };
 
@@ -30,16 +21,24 @@ function posFetch({ orders = [], customers = [] } = {}) {
   return fetchImpl;
 }
 
-test('đánh giá mức cảnh báo từ POS: 2 đơn hoàn → high, 1 đơn → watch, chặn → block', () => {
+test('chấm mức cảnh báo: cờ warning của POS là chuẩn, hệ thống xét tỷ lệ, shop mình xét từng đơn', () => {
   assert.equal(assessPhone().level, 'none');
+  // Số liệu toàn hệ thống Pancake (một shop granola không thể có 59 đơn của một khách).
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 3, success: 56, warning: 0 } } }).level, 'none', '5% hoàn là bình thường');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 6, success: 28, warning: 0 } } }).level, 'watch', '18%');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 81, success: 175, warning: 3 } } }).level, 'high', 'POS chấm mức 3');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 7, success: 61, warning: 1 } } }).level, 'watch', 'POS chấm mức 1');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 4, success: 5, warning: 0 } } }).level, 'high', '44% với 4 đơn bom');
+  // Shop mình: từng đơn một.
   assert.equal(assessPhone({ pos: { failed: 1, success: 5 } }).level, 'watch');
   assert.equal(assessPhone({ pos: { failed: 2, success: 5 } }).level, 'high');
-  assert.equal(assessPhone({ pos: { failed: 1, success: 1 } }).level, 'high', 'tỷ lệ hoàn 50%');
-  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 3, success: 1, warning: 1 } } }).level, 'high');
+  assert.equal(assessPhone({ pos: { failed: 1, success: 1 } }).level, 'high', 'hoàn 1 trong 2 đơn');
   assert.equal(assessPhone({ pos: { failed: 0, success: 3, customer: { isBlock: true } } }).level, 'block');
   assert.equal(assessPhone({ pos: { failed: 0, success: 3, customer: { tags: ['Thường xuyên hoàn'] } } }).level, 'watch');
   assert.equal(assessPhone({ pos: { error: 'mạng' } }).level, 'none');
-  assert.equal(assessPhone({ manual: { level: 'watch', incidents: 2 } }).level, 'high', 'nhân viên ghi bom 2 lần');
+  const scored = assessPhone({ pos: { failed: 0, success: 0, report: { fail: 81, success: 175, warning: 3 } } });
+  assert.equal(scored.rate, 32);
+  assert.match(scored.sources[0], /81\/256/);
 });
 
 test('tra POS: đếm đơn hoàn/huỷ và thành công của đúng số, đọc reports_by_phone và khách bị chặn', async () => {
@@ -60,7 +59,7 @@ test('tra POS: đếm đơn hoàn/huỷ và thành công của đúng số, đ�
   assert.deepEqual(report.customer.tags, ['Thường xuyên hoàn']);
   assert.match(fetchImpl.calls[0], /\/shops\/1\/orders\?api_key=k&search=0909123456&page_size=100&extra_fields%5B%5D=return_rate/);
   const assessed = assessPhone({ pos: report });
-  assert.equal(assessed.level, 'high');
+  assert.equal(assessed.level, 'high', 'shop mình hoàn 2 đơn');
   assert.equal(assessed.failed, 2);
   // Lỗi mạng: không ném, không chặn lên đơn.
   const failing = await fetchPosPhoneReport('0909123456', { config: posConfig, fetchImpl: async () => { throw new Error('timeout'); } });
@@ -69,43 +68,31 @@ test('tra POS: đếm đơn hoàn/huỷ và thành công của đúng số, đ�
   assert.equal(await fetchPosPhoneReport('0909123456', { config: { apiKey: '', shopId: '' } }), null);
 });
 
-test('danh sách thủ công và tra cứu gộp có cache', async () => {
-  await setManualWarning({ phone: '0912 345 678', level: 'high', reason: 'Bom 2 đơn tháng 8', by: 'Hằng' }, 1000);
-  const listed = await listManualWarnings();
-  assert.equal(listed.length, 1);
-  assert.equal(listed[0].phone, '0912345678');
-  assert.equal(listed[0].incidents, 1);
-  await assert.rejects(setManualWarning({ phone: 'abc' }), /không hợp lệ/);
-
-  const fetchImpl = posFetch({ orders: [{ status: 4, bill_phone_number: '0912345678' }], customers: [] });
+test('tra cứu có cache 24 giờ và tra nhiều số một lượt', async () => {
+  const fetchImpl = posFetch({ orders: [{ status: 4, bill_phone_number: '0912345678' }, { status: 5, bill_phone_number: '0912345678' }], customers: [] });
   const first = await lookupPhone('0912345678', { config: posConfig, fetchImpl, now: 2000 });
   assert.equal(first.level, 'high');
-  assert.equal(first.failed, 2, 'thủ công 1 + POS 1');
+  assert.equal(first.failed, 2);
   assert.equal(first.posChecked, true);
   assert.equal(fetchImpl.calls.length, 2);
-  // Lần hai trong 24 giờ dùng cache, không gọi POS.
   await lookupPhone('0912345678', { config: posConfig, fetchImpl, now: 3000 });
-  assert.equal(fetchImpl.calls.length, 2);
-  // Hết hạn cache thì gọi lại.
+  assert.equal(fetchImpl.calls.length, 2, 'trong 24 giờ dùng cache');
   await lookupPhone('0912345678', { config: posConfig, fetchImpl, now: 2000 + 25 * 60 * 60 * 1000 });
-  assert.equal(fetchImpl.calls.length, 4);
-
+  assert.equal(fetchImpl.calls.length, 4, 'hết hạn thì gọi lại');
   const batch = await lookupPhones(['0912345678', '0999000111', '0912345678'], { config: posConfig, fetchImpl: posFetch(), now: 2000 });
   assert.deepEqual(Object.keys(batch).sort(), ['0912345678', '0999000111']);
   assert.equal(batch['0999000111'].level, 'none');
-
-  await removeManualWarning('0912345678');
-  assert.equal((await listManualWarnings()).length, 0);
 });
 
 test('gắn cảnh báo vào đơn, không ném lỗi khi POS hỏng', async () => {
-  await setManualWarning({ phone: '0977000111', level: 'block', reason: 'Bom 3 lần' });
-  const order = await attachPhoneWarning({ phone: '0977000111' }, { config: { apiKey: '', shopId: '' } });
+  const fetchImpl = posFetch({ orders: [], customers: [{ id: 'c9', phone_numbers: ['0977000111'], is_block: true, tags: [] }] });
+  const order = await attachPhoneWarning({ phone: '0977000111' }, { config: posConfig, fetchImpl, now: 5000 });
   assert.equal(order.phoneWarning.level, 'block');
   assert.match(order.phoneWarning.label, /Chặn/);
   const clean = await attachPhoneWarning({ phone: '0977000222' }, { config: posConfig, fetchImpl: async () => { throw new Error('down'); } });
   assert.equal(clean.phoneWarning, undefined);
-  await removeManualWarning('0977000111');
+  const off = await attachPhoneWarning({ phone: '0977000333' }, { config: { apiKey: '', shopId: '' } });
+  assert.equal(off.phoneWarning, undefined, 'chưa kết nối POS thì không cảnh báo');
 });
 
 test('kết nối POS bằng khoá dán vào Cài đặt: kiểm tra qua /shops, tự lấy shop, che khoá khi hiển thị', async () => {

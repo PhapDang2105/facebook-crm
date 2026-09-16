@@ -47,7 +47,6 @@
         <button class="settings-subnav-item" type="button" data-settings-section="messages">Tin nhắn</button>
         <button class="settings-subnav-item" type="button" data-settings-section="products">Sản phẩm</button>
         <button class="settings-subnav-item" type="button" data-settings-section="gifts">Quà tặng</button>
-        <button class="settings-subnav-item" type="button" data-settings-section="phone-warnings">Cảnh báo SĐT</button>
       </div>
     </nav>
   </aside>
@@ -356,6 +355,11 @@
               <button class="channel-connect-button" id="zalo-connect-button" type="button">Kết nối Zalo</button>
             </div>
             <div class="channel-list" id="zalo-channel-list"><p class="channel-empty">Chưa có tài khoản Zalo OA nào được kết nối.</p></div>
+            <div class="channel-summary">
+              <div class="channel-summary-platform"><span class="channel-platform-logo pos-badge">POS</span><strong>Pancake POS</strong></div>
+              <form class="pos-connect-form" id="pos-connect-form"><input id="pos-api-key" name="apiKey" placeholder="Dán khoá API của Pancake POS" autocomplete="off" spellcheck="false"><button class="channel-connect-button" type="submit">Kết nối Pancake POS</button></form>
+            </div>
+            <div class="channel-list" id="pos-channel-list" aria-live="polite"><p class="channel-empty">Đang kiểm tra kết nối Pancake POS...</p></div>
           </section>
         </section>
         <section class="settings-section-content hidden" data-settings-panel="chatbot" aria-labelledby="chatbot-settings-title">
@@ -575,39 +579,6 @@
             <div class="gift-table">
               <div class="gift-table-head"><span>Áp dụng</span><span>Tên quà tặng</span><span>Tặng từ</span><span>SKU xuất kho</span><span>Khối lượng</span><span></span></div>
               <div class="gift-rows" id="gift-rows"></div>
-            </div>
-          </section>
-        </section>
-        <section class="settings-section-content hidden" data-settings-panel="phone-warnings" aria-label="Cảnh báo số điện thoại">
-          <section class="settings-card phone-warning-card" aria-label="Cảnh báo số điện thoại">
-            <header class="settings-card-head">
-              <div>
-                <h1 id="phone-warning-title">Cảnh báo số điện thoại</h1>
-                <p class="phone-warning-intro">Số hay bom hàng được gắn cờ trên bảng Đơn hàng, panel khách trong Tin nhắn và đơn chatbot/landing để gọi xác nhận trước khi giao. Nguồn: lịch sử đơn hoàn/huỷ và báo cáo theo số điện thoại của Pancake POS, cộng với danh sách nhân viên tự đánh dấu dưới đây.</p>
-                <p class="phone-warning-status" id="phone-warning-pos-status" role="status"></p>
-              </div>
-            </header>
-            <form class="phone-warning-form phone-warning-pos-form" id="phone-warning-pos-form">
-              <input id="phone-warning-pos-key" name="apiKey" placeholder="Dán khoá API của Pancake POS vào đây" autocomplete="off" spellcheck="false">
-              <button class="settings-save-button" type="submit">Kết nối Pancake POS</button>
-              <button class="price-master-add hidden" id="phone-warning-pos-disconnect" type="button">Ngắt kết nối</button>
-              <small class="phone-warning-pos-help">Lấy khoá trong POS: Cài đặt → Nâng cao → Kết nối bên thứ ba → Webhook/API → API KEY → Tạo. CRM tự tìm shop và lưu khoá trên máy chủ.</small>
-            </form>
-            <form class="phone-warning-form" id="phone-warning-form">
-              <input id="phone-warning-phone" name="phone" placeholder="Số điện thoại" inputmode="tel" required>
-              <select id="phone-warning-level" name="level" aria-label="Mức cảnh báo">
-                <option value="high">Hay bom hàng, gọi xác nhận</option>
-                <option value="watch">Từng không nhận, nên gọi</option>
-                <option value="block">Chặn, không giao</option>
-              </select>
-              <input id="phone-warning-reason" name="reason" placeholder="Lý do (ví dụ: bom đơn 15/9, không nghe máy)">
-              <button class="settings-save-button" type="submit">Thêm vào danh sách</button>
-              <button class="price-master-add" id="phone-warning-lookup" type="button">Tra cứu số này</button>
-            </form>
-            <p class="phone-warning-lookup-result" id="phone-warning-lookup-result" role="status"></p>
-            <div class="gift-table phone-warning-table">
-              <div class="gift-table-head phone-warning-head"><span>Số điện thoại</span><span>Mức</span><span>Lý do</span><span>Số lần</span><span>Cập nhật</span><span></span></div>
-              <div class="gift-rows" id="phone-warning-rows"></div>
             </div>
           </section>
         </section>

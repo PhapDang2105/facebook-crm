@@ -481,126 +481,64 @@ function renderCustomerPhoneWarning() {
     : '';
 }
 
-// ---- Cài đặt → Cảnh báo SĐT
-const phoneWarningForm = document.querySelector('#phone-warning-form');
-const phoneWarningRows = document.querySelector('#phone-warning-rows');
+// ---- Cài đặt → Kênh → Pancake POS
+// The POS key is pasted once here; the server checks it, picks the shop and
+// keeps it. Every phone in orders and the customer panel is then scored from
+// POS history automatically — there is nothing for staff to maintain.
+const posChannelList = document.querySelector('#pos-channel-list');
 
-const warningLevelNames = { block: 'Chặn', high: 'Hay bom hàng', watch: 'Từng không nhận' };
+function renderPosChannel(pos) {
+  if (!posChannelList) return;
+  phoneWarningsPosConfigured = Boolean(pos?.configured);
+  const keyInput = document.querySelector('#pos-api-key');
+  if (keyInput) keyInput.placeholder = pos?.configured ? 'Dán khoá mới nếu muốn đổi' : 'Dán khoá API của Pancake POS';
+  posChannelList.innerHTML = pos?.configured
+    ? `<article class="channel-item"><span class="channel-item-avatar pos-avatar">P</span>
+        <div class="channel-item-copy"><strong>${escapeHtml(pos.shopName || 'Shop Pancake POS')}</strong><small><span class="channel-connected-dot"></span>Shop ID ${escapeHtml(pos.shopId)} · khoá ${escapeHtml(pos.keyHint)} · tự cảnh báo số hay bom hàng trong Đơn hàng và Tin nhắn</small></div>
+        <div class="channel-item-actions">${pos.source === 'settings' ? '<button class="channel-remove-button" type="button" data-pos-action="disconnect">Ngắt kết nối</button>' : '<small>Khoá đặt trong .env</small>'}</div></article>`
+    : '<p class="channel-empty">Chưa kết nối. Lấy khoá trong POS: Cài đặt → Nâng cao → Tích hợp bên thứ 3 → Webhook/API → API Key → Thêm mới, rồi dán vào ô bên trên. Khi đã kết nối, số hay bom hàng được cảnh báo tự động trong Đơn hàng.</p>';
+}
 
-async function loadPhoneWarningSettings() {
-  if (!phoneWarningRows) return;
+async function loadPosChannel() {
+  if (!posChannelList) return;
   try {
-    const result = await readApiResponse(await fetch('/api/phone-warnings/manual'));
-    phoneWarningsPosConfigured = Boolean(result.posConfigured);
-    renderPosStatus(result.pos || { configured: result.posConfigured });
-    renderPhoneWarningRows(result.items || []);
+    renderPosChannel(await readApiResponse(await fetch('/api/phone-warnings/pos')));
   } catch (error) {
-    showToast(error.message || 'Chưa tải được danh sách cảnh báo.', 'error');
+    posChannelList.innerHTML = `<p class="channel-empty">${escapeHtml(error.message || 'Chưa kiểm tra được kết nối Pancake POS.')}</p>`;
   }
 }
 
-function renderPosStatus(pos) {
-  const status = document.querySelector('#phone-warning-pos-status');
-  const disconnect = document.querySelector('#phone-warning-pos-disconnect');
-  const keyInput = document.querySelector('#phone-warning-pos-key');
-  if (status) {
-    status.textContent = pos.configured
-      ? `Pancake POS: đã kết nối shop ${pos.shopName || ''} (ID ${pos.shopId}, khoá ${pos.keyHint}). Mỗi số được tra lịch sử đơn hoàn/huỷ và báo cáo bom hàng của POS, cache 24 giờ.`
-      : 'Pancake POS: chưa kết nối. Dán khoá API vào ô dưới để tra tự động; hiện chỉ dùng danh sách nhân viên đánh dấu.';
-  }
-  disconnect?.classList.toggle('hidden', !pos.configured || pos.source !== 'settings');
-  if (keyInput) keyInput.placeholder = pos.configured ? 'Dán khoá mới nếu muốn đổi' : 'Dán khoá API của Pancake POS vào đây';
-}
-
-document.querySelector('#phone-warning-pos-form')?.addEventListener('submit', async event => {
+document.querySelector('#pos-connect-form')?.addEventListener('submit', async event => {
   event.preventDefault();
-  const keyInput = document.querySelector('#phone-warning-pos-key');
+  const keyInput = document.querySelector('#pos-api-key');
   const apiKey = keyInput?.value.trim() || '';
-  if (!apiKey) { showToast('Dán khoá API trước đã.', 'error'); return; }
+  if (!apiKey) { showToast('Dán khoá API của Pancake POS trước đã.', 'error'); return; }
+  const button = event.currentTarget.querySelector('button');
+  if (button) button.disabled = true;
   try {
     const result = await readApiResponse(await fetch('/api/phone-warnings/pos', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey })
     }));
     keyInput.value = '';
     phoneWarnings.clear();
-    renderPosStatus(result);
+    renderPosChannel(result);
     showToast(`Đã kết nối Pancake POS: ${result.shopName || result.shopId}.`, 'success');
   } catch (error) {
     showToast(error.message || 'Chưa kết nối được Pancake POS.', 'error');
+  } finally {
+    if (button) button.disabled = false;
   }
 });
 
-document.querySelector('#phone-warning-pos-disconnect')?.addEventListener('click', async () => {
-  if (!window.confirm('Ngắt kết nối Pancake POS? Khoá đã lưu sẽ bị xóa khỏi máy chủ.')) return;
+posChannelList?.addEventListener('click', async event => {
+  if (!event.target.closest('[data-pos-action="disconnect"]')) return;
+  if (!window.confirm('Ngắt kết nối Pancake POS? Khoá đã lưu sẽ bị xóa khỏi máy chủ và cảnh báo bom hàng sẽ dừng.')) return;
   try {
     const result = await readApiResponse(await fetch('/api/phone-warnings/pos', { method: 'DELETE' }));
     phoneWarnings.clear();
-    renderPosStatus(result);
+    renderPosChannel(result);
   } catch (error) {
     showToast(error.message || 'Chưa ngắt được.', 'error');
-  }
-});
-
-function renderPhoneWarningRows(items) {
-  if (!items.length) {
-    phoneWarningRows.innerHTML = '<div class="phone-warning-empty">Chưa có số nào được đánh dấu. Thêm số ở trên, hoặc kết nối Pancake POS để tra tự động.</div>';
-    return;
-  }
-  phoneWarningRows.innerHTML = items.map(item => `<div class="phone-warning-row" data-phone="${escapeHtml(item.phone)}">
-    <strong>${escapeHtml(item.phone)}</strong>
-    <span>${phoneWarningBadge({ level: item.level, label: warningLevelNames[item.level] || item.level, failed: 0 })} ${escapeHtml(warningLevelNames[item.level] || item.level)}</span>
-    <span>${escapeHtml(item.reason || '')}${item.by ? ` <small>· ${escapeHtml(item.by)}</small>` : ''}</span>
-    <span>${Number(item.incidents) || 1}</span>
-    <span>${escapeHtml(formatShippingTime(item.updatedAt))}</span>
-    <button type="button" data-phone-warning-remove="${escapeHtml(item.phone)}" title="Bỏ khỏi danh sách" aria-label="Bỏ khỏi danh sách">×</button>
-  </div>`).join('');
-}
-
-phoneWarningForm?.addEventListener('submit', async event => {
-  event.preventDefault();
-  const phone = document.querySelector('#phone-warning-phone')?.value || '';
-  const level = document.querySelector('#phone-warning-level')?.value || 'high';
-  const reason = document.querySelector('#phone-warning-reason')?.value || '';
-  try {
-    await readApiResponse(await fetch('/api/phone-warnings/manual', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, level, reason, by: 'Nhân viên' })
-    }));
-    phoneWarnings.delete(normalizeWarningPhone(phone));
-    phoneWarningForm.reset();
-    showToast(`Đã đánh dấu ${normalizeWarningPhone(phone)}.`, 'success');
-    await loadPhoneWarningSettings();
-  } catch (error) {
-    showToast(error.message || 'Chưa lưu được.', 'error');
-  }
-});
-
-document.querySelector('#phone-warning-lookup')?.addEventListener('click', async () => {
-  const phone = normalizeWarningPhone(document.querySelector('#phone-warning-phone')?.value || '');
-  const output = document.querySelector('#phone-warning-lookup-result');
-  if (!phone || !output) return;
-  output.textContent = 'Đang tra cứu...';
-  try {
-    const result = await readApiResponse(await fetch(`/api/phone-warnings/lookup?phone=${encodeURIComponent(phone)}&force=1`));
-    phoneWarnings.set(phone, result);
-    output.innerHTML = result.level === 'none'
-      ? `${escapeHtml(phone)}: không có cảnh báo${result.posChecked ? ` (POS: hoàn/huỷ ${result.failed}, giao thành công ${result.success})` : result.posError ? ` — POS lỗi: ${escapeHtml(result.posError)}` : ' (chưa kết nối POS)'}.`
-      : `${escapeHtml(phone)}: ${phoneWarningBadge(result)} ${escapeHtml(result.label)} — ${escapeHtml(result.sources.join('; '))}`;
-  } catch (error) {
-    output.textContent = error.message || 'Chưa tra được.';
-  }
-});
-
-phoneWarningRows?.addEventListener('click', async event => {
-  const button = event.target.closest('[data-phone-warning-remove]');
-  if (!button) return;
-  const phone = button.dataset.phoneWarningRemove;
-  if (!window.confirm(`Bỏ ${phone} khỏi danh sách cảnh báo?`)) return;
-  try {
-    await readApiResponse(await fetch(`/api/phone-warnings/manual/${encodeURIComponent(phone)}`, { method: 'DELETE' }));
-    phoneWarnings.delete(phone);
-    await loadPhoneWarningSettings();
-  } catch (error) {
-    showToast(error.message || 'Chưa xóa được.', 'error');
   }
 });
 
@@ -3089,7 +3027,7 @@ function showSettingsSection(name = 'channels') {
   settingsPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== section));
   settingsSectionButtons.forEach(button => button.classList.toggle('active', button.dataset.settingsSection === section));
   if (section === 'chatbot') loadChatbotSettings();
-  if (section === 'phone-warnings') loadPhoneWarningSettings();
+  if (section === 'channels') loadPosChannel();
   if (section === 'products') loadProducts().catch(error => {
     renderProductLoadError();
     showToast(error.message || 'Chưa tải được danh mục sản phẩm.', 'error');

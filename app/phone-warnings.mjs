@@ -1,14 +1,11 @@
 // Cảnh báo số điện thoại hay bom hàng (không nhận hàng).
 //
-// Ba nguồn gộp thành một mức cảnh báo cho mỗi số:
-//   1. Pancake POS (khi có POS_API_KEY + POS_SHOP_ID): lịch sử đơn của số đó ở
-//      shop — đơn hoàn/huỷ so với đơn giao thành công — và báo cáo theo số
-//      điện thoại mà POS tự tính (`reports_by_phone`: order_fail,
-//      order_success, warning), khách bị chặn (`is_block`) hay gắn thẻ hoàn.
-//   2. Danh sách nhân viên tự đánh dấu trong Cài đặt → Cảnh báo SĐT (kèm lý do).
-//   3. Đơn ghi nhận ngay trong CRM (bom / hoàn) qua cùng danh sách đó.
-// Kết quả được ghim vào đơn chatbot và đơn landing lúc tạo, và bảng Đơn hàng
-// tra lại mỗi lần mở để nhân viên gọi xác nhận trước khi giao.
+// Nguồn duy nhất là Pancake POS (Cài đặt → Kênh): với mỗi số điện thoại, POS
+// trả về báo cáo toàn hệ thống Pancake (`reports_by_phone`: order_fail,
+// order_success và cờ `warning` do POS tự chấm), lịch sử đơn của số đó ở
+// chính shop mình, và trạng thái khách (chặn, thẻ "thường xuyên hoàn"). Kết
+// quả được ghim vào đơn chatbot/landing lúc tạo và bảng Đơn hàng tra lại khi
+// mở, để nhân viên gọi xác nhận trước khi giao — không có gì phải nhập tay.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -43,15 +40,12 @@ let cachedStore = null;
 let writeQueue = Promise.resolve();
 
 function emptyStore() {
-  return { manual: {}, cache: {} };
+  return { cache: {} };
 }
 
 function normalizeStore(value) {
   if (!value || typeof value !== 'object') return emptyStore();
-  return {
-    manual: value.manual && typeof value.manual === 'object' ? value.manual : {},
-    cache: value.cache && typeof value.cache === 'object' ? value.cache : {}
-  };
+  return { cache: value.cache && typeof value.cache === 'object' ? value.cache : {} };
 }
 
 export async function readWarningStore() {
@@ -88,43 +82,6 @@ export function normalizeWarningPhone(value) {
 
 function foldText(value) {
   return String(value ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
-}
-
-// ===== Danh sách thủ công =====
-
-export async function listManualWarnings() {
-  const store = await readWarningStore();
-  return Object.values(store.manual).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-}
-
-/** Thêm hoặc sửa một số: level 'block' | 'high' | 'watch'; lý do tự do. */
-export async function setManualWarning({ phone, level = 'high', reason = '', by = '' }, now = Date.now()) {
-  const key = normalizeWarningPhone(phone);
-  if (!key || key.length < 9) throw new Error('Số điện thoại không hợp lệ.');
-  const chosen = Object.hasOwn(LEVELS, level) && level !== 'none' ? level : 'high';
-  return updateWarningStore(store => {
-    const previous = store.manual[key] || {};
-    store.manual[key] = {
-      phone: key,
-      level: chosen,
-      reason: String(reason || '').trim().slice(0, 300),
-      by: String(by || '').trim().slice(0, 80),
-      createdAt: previous.createdAt || now,
-      updatedAt: now,
-      // Số lần nhân viên ghi nhận bom: mỗi lần lưu lại với lý do là một lần.
-      incidents: (Number(previous.incidents) || 0) + 1
-    };
-    return store.manual[key];
-  });
-}
-
-export async function removeManualWarning(phone) {
-  const key = normalizeWarningPhone(phone);
-  return updateWarningStore(store => {
-    const removed = store.manual[key] || null;
-    delete store.manual[key];
-    return removed;
-  });
 }
 
 // ===== Pancake POS =====
@@ -272,56 +229,58 @@ export async function fetchPosPhoneReport(phone, { config = posConfig(), fetchIm
 // ===== Gộp thành mức cảnh báo =====
 
 /**
- * Mức cảnh báo từ mọi nguồn của một số. Quy tắc:
- * - Chặn ở POS hoặc nhân viên đánh dấu "chặn" → block.
- * - Từ 2 đơn bom/hoàn, hoặc tỷ lệ hoàn ≥ 50% khi có ≥ 2 đơn, hoặc POS cảnh báo → high.
- * - 1 đơn bom/hoàn, hoặc thẻ "hoàn" ở POS → watch.
+ * Mức cảnh báo của một số từ dữ liệu POS. `reports_by_phone` là lịch sử toàn
+ * hệ thống Pancake nên xét theo tỷ lệ; đơn hoàn ở chính shop mình thì tính
+ * từng đơn; cờ `warning` do POS chấm được lấy làm chuẩn.
+ * - block: POS đã chặn khách.
+ * - high: POS warning ≥ 2; hệ thống bom ≥ 3 đơn và ≥ 30%; shop mình hoàn ≥ 2
+ *   đơn, hoặc hoàn 1 trong ≤ 2 đơn.
+ * - watch: POS warning = 1; hệ thống bom ≥ 2 đơn và ≥ 15%; shop mình hoàn 1
+ *   đơn; hoặc POS gắn thẻ hoàn.
  */
-export function assessPhone({ manual = null, pos = null } = {}) {
+export function assessPhone({ pos = null } = {}) {
   const sources = [];
   let level = 'none';
   const raise = (next, source) => {
     sources.push(source);
     if (LEVELS[next] > LEVELS[level]) level = next;
   };
-  let failed = 0;
-  let success = 0;
-  if (manual) {
-    failed += Number(manual.incidents) || 1;
-    raise(manual.level || 'high', `Nhân viên đánh dấu${manual.reason ? `: ${manual.reason}` : ''}`);
-  }
+  const shopFailed = Number(pos?.failed) || 0;
+  const shopSuccess = Number(pos?.success) || 0;
+  const report = pos?.report || null;
+  const netFailed = Number(report?.fail) || 0;
+  const netSuccess = Number(report?.success) || 0;
+  const netTotal = netFailed + netSuccess;
+  const netRate = netTotal ? netFailed / netTotal : 0;
+  const percent = Math.round(netRate * 100);
   if (pos && !pos.error) {
-    const posFailed = Math.max(pos.failed || 0, pos.report?.fail || 0);
-    const posSuccess = Math.max(pos.success || 0, pos.report?.success || 0, pos.customer?.succeedOrderCount || 0);
-    failed += posFailed;
-    success += posSuccess;
     if (pos.customer?.isBlock) raise('block', 'POS đã chặn khách này');
-    if (pos.report?.warning > 0) raise('high', `POS cảnh báo: bom ${pos.report.fail}/${pos.report.fail + pos.report.success} đơn`);
-    if (posFailed >= 2 || (posFailed >= 1 && posFailed + posSuccess >= 2 && posFailed / (posFailed + posSuccess) >= 0.5)) {
-      raise('high', `POS: hoàn/huỷ ${posFailed} đơn, giao thành công ${posSuccess}`);
-    } else if (posFailed === 1) {
-      raise('watch', `POS: từng hoàn/huỷ 1 đơn, giao thành công ${posSuccess}`);
-    }
+    const warning = Number(report?.warning) || 0;
+    if (warning >= 2) raise('high', `POS cảnh báo mức ${warning}: bom ${netFailed}/${netTotal} đơn trên hệ thống (${percent}%)`);
+    else if (warning === 1) raise('watch', `POS cảnh báo: bom ${netFailed}/${netTotal} đơn trên hệ thống (${percent}%)`);
+    if (netFailed >= 3 && netRate >= 0.3) raise('high', `Hệ thống Pancake: bom ${netFailed}/${netTotal} đơn (${percent}%)`);
+    else if (netFailed >= 2 && netRate >= 0.15) raise('watch', `Hệ thống Pancake: bom ${netFailed}/${netTotal} đơn (${percent}%)`);
+    if (shopFailed >= 2 || (shopFailed >= 1 && shopFailed + shopSuccess <= 2)) raise('high', `Shop mình: hoàn/huỷ ${shopFailed} đơn, giao thành công ${shopSuccess}`);
+    else if (shopFailed === 1) raise('watch', `Shop mình: từng hoàn/huỷ 1 đơn, giao thành công ${shopSuccess}`);
     if ((pos.customer?.tags || []).some(tag => RETURN_TAG.test(foldText(tag)))) raise('watch', `POS gắn thẻ: ${pos.customer.tags.join(', ')}`);
   }
-  if (manual && (Number(manual.incidents) || 1) >= 2 && LEVELS[level] < LEVELS.high) level = 'high';
   return {
     level,
     label: LEVEL_LABELS[level],
-    failed,
-    success,
+    failed: Math.max(shopFailed, netFailed),
+    success: Math.max(shopSuccess, netSuccess),
+    rate: percent,
     sources,
     posChecked: Boolean(pos && !pos.error),
     posError: pos?.error || ''
   };
 }
 
-/** Cảnh báo cho một số: danh sách thủ công + POS (có cache 24 giờ). */
+/** Cảnh báo cho một số từ POS, cache 24 giờ. */
 export async function lookupPhone(phone, { force = false, fetchImpl = fetch, config = posConfig(), now = Date.now() } = {}) {
   const key = normalizeWarningPhone(phone);
   if (!key) return { phone: '', ...assessPhone() };
   const store = await readWarningStore();
-  const manual = store.manual[key] || null;
   let pos = store.cache[key] || null;
   const stale = !pos || force || now - (Number(pos.fetchedAt) || 0) > cacheTtlMs || pos.error;
   if (stale && posConfigured(config)) {
@@ -331,7 +290,7 @@ export async function lookupPhone(phone, { force = false, fetchImpl = fetch, con
       await updateWarningStore(current => { current.cache[key] = pos; });
     }
   }
-  return { phone: key, ...assessPhone({ manual, pos }), pos: pos && !pos.error ? { failed: pos.failed, success: pos.success, report: pos.report, isBlock: pos.customer?.isBlock || false, tags: pos.customer?.tags || [] } : null };
+  return { phone: key, ...assessPhone({ pos }), pos: pos && !pos.error ? { failed: pos.failed, success: pos.success, report: pos.report, isBlock: pos.customer?.isBlock || false, tags: pos.customer?.tags || [] } : null };
 }
 
 /** Tra nhiều số một lượt, tối đa 5 yêu cầu POS song song. */
@@ -354,7 +313,7 @@ export async function attachPhoneWarning(order, options = {}) {
   try {
     const warning = await lookupPhone(order?.phone, options);
     if (warning.level !== 'none') {
-      order.phoneWarning = { level: warning.level, label: warning.label, failed: warning.failed, success: warning.success, sources: warning.sources, checkedAt: Date.now() };
+      order.phoneWarning = { level: warning.level, label: warning.label, failed: warning.failed, success: warning.success, rate: warning.rate, sources: warning.sources, checkedAt: Date.now() };
     }
   } catch {
     // Lỗi tra cứu không được chặn việc tạo đơn.

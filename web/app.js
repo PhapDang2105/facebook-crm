@@ -5061,7 +5061,7 @@ function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicat
     if (duplicateRowIndexes?.has(index)) list.push('⚠ Trùng dòng khác, giữ một');
     if (duplicatePhoneRowIndexes?.has(index) && phoneIndex >= 0) {
       const others = [...(ordersByPhone.get(normalizeWarningPhone(row[phoneIndex])) || [])].filter(id => id !== (orderId || `dòng ${index + 1}`));
-      list.push(`⚠ Cùng SĐT với ${others.join(', ')}, bấm để xem nhóm`);
+      list.push(`⚠ Cùng SĐT với ${others.join(', ')}`);
     }
     if (addressIndex >= 0 && isInvalidOrderAddress(row[addressIndex])) list.push('⚠ Địa chỉ GXN, sửa lại');
     if (!isSystemOrderId(orderId)) {

@@ -5,7 +5,6 @@ const navItems = [...document.querySelectorAll('.nav[data-view]')];
 const messageSearchInput = document.querySelector('#message-search-input');
 const conversationList = document.querySelector('.conversation-list');
 const conversationEmpty = document.querySelector('#conversation-empty');
-const conversationFilterButtons = [...document.querySelectorAll('[data-message-filter]')];
 const messageChannelTrigger = document.querySelector('#message-channel-trigger');
 const messageChannelLogo = document.querySelector('#message-channel-logo');
 const messageChannelName = document.querySelector('#message-channel-name');
@@ -110,12 +109,6 @@ const customerOrderReset = document.querySelector('#customer-order-reset');
 const customerOrderSubmit = document.querySelector('#customer-order-submit');
 const topbarUserAvatar = document.querySelector('#topbar-user-avatar');
 const topbarUserName = document.querySelector('#topbar-user-name');
-const settingsForm = document.querySelector('#settings-form');
-const settingsDisplayName = document.querySelector('#settings-display-name');
-const settingsSendEnter = document.querySelector('#settings-send-enter');
-const settingsShowContact = document.querySelector('#settings-show-contact');
-const settingsCollapseSidebar = document.querySelector('#settings-collapse-sidebar');
-const settingsStatus = document.querySelector('#settings-status');
 const productCreateButton = document.querySelector('#product-create-button');
 const productSearch = document.querySelector('#product-search');
 const productCount = document.querySelector('#product-count');
@@ -147,10 +140,8 @@ const chatbotAuthTypeField = document.querySelector('#chatbot-auth-type-field');
 const chatbotSettingsProtocol = document.querySelector('#chatbot-settings-protocol');
 const chatbotProtocolField = document.querySelector('#chatbot-protocol-field');
 const chatbotSettingsDirectEndpoint = document.querySelector('#chatbot-settings-direct-endpoint');
-const chatbotSettingsDirectKey = document.querySelector('#chatbot-settings-direct-key');
 const chatbotSettingsDirectModel = document.querySelector('#chatbot-settings-direct-model');
 const chatbotEndpointLabel = document.querySelector('#chatbot-endpoint-label');
-const chatbotApiKeyLabel = document.querySelector('#chatbot-api-key-label');
 const chatbotSettingsSystemPrompt = document.querySelector('#chatbot-settings-system-prompt');
 const chatbotSettingsSystemPromptCounter = document.querySelector('#chatbot-settings-system-prompt-counter');
 
@@ -206,7 +197,6 @@ const chatbotPreviewReset = document.querySelector('#chatbot-preview-reset');
 const chatbotPreviewInput = document.querySelector('#chatbot-preview-input');
 const chatbotPreviewResult = document.querySelector('#chatbot-preview-result');
 const chatbotPreviewDialog = document.querySelector('#chatbot-preview-dialog');
-const chatbotPreviewOpen = document.querySelector('#chatbot-preview-open');
 const chatbotPreviewClose = document.querySelector('#chatbot-preview-close');
 const chatbotPreviewDialogInput = document.querySelector('#chatbot-preview-dialog-input');
 const chatbotPreviewDialogSend = document.querySelector('#chatbot-preview-dialog-send');
@@ -418,14 +408,15 @@ const phoneWarnings = new Map();
 let phoneWarningsPosConfigured = null;
 let phoneWarningRefresh = null;
 
-function normalizeWarningPhone(value) {
+/** Số điện thoại về dạng 0xxxxxxxxx để so, tra cảnh báo và gom nhóm: một hàm cho mọi chỗ. */
+function normalizeRowPhone(value) {
   let phone = String(value ?? '').replace(/\D/g, '');
   if (phone.startsWith('84') && phone.length === 11) phone = `0${phone.slice(2)}`;
   return phone;
 }
 
 function phoneWarningFor(value) {
-  const warning = phoneWarnings.get(normalizeWarningPhone(value));
+  const warning = phoneWarnings.get(normalizeRowPhone(value));
   return warning && warning.level !== 'none' ? warning : null;
 }
 
@@ -435,7 +426,7 @@ const alertIconSvg = '<svg class="alert-icon" viewBox="0 0 24 24" width="11" hei
 
 /** Looks up phones the cache lacks, then re-renders the orders table once. */
 async function refreshPhoneWarnings(phones, { force = false } = {}) {
-  const wanted = [...new Set(phones.map(normalizeWarningPhone).filter(phone => phone.length >= 9 && (force || !phoneWarnings.has(phone))))];
+  const wanted = [...new Set(phones.map(normalizeRowPhone).filter(phone => phone.length >= 9 && (force || !phoneWarnings.has(phone))))];
   if (!wanted.length) return;
   if (phoneWarningRefresh) await phoneWarningRefresh;
   phoneWarningRefresh = (async () => {
@@ -457,7 +448,7 @@ async function refreshPhoneWarnings(phones, { force = false } = {}) {
 }
 
 function getPhoneWarningRowIndexes(data = orderData) {
-  const phoneIndex = data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  const phoneIndex = orderPhoneColumnIndex(data);
   if (phoneIndex < 0) return new Map();
   const flagged = new Map();
   data.rows.forEach((row, index) => {
@@ -856,7 +847,7 @@ function dismissChatbotOrders(ids) {
 function deleteOrderRows(indexes) {
   const removing = new Set(indexes);
   if (!removing.size) return;
-  const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  const idColumn = orderColumnIndex('ma don hang');
   if (idColumn >= 0) {
     dismissChatbotOrders(orderData.rows
       .filter((row, index) => removing.has(index) && isSystemOrderId(row[idColumn]))
@@ -864,7 +855,7 @@ function deleteOrderRows(indexes) {
   }
   orderData = { headers: orderData.headers, rows: orderData.rows.filter((row, index) => !removing.has(index)) };
   if (!orderData.rows.length) orderData = { headers: [], rows: [] };
-  localStorage.setItem('crm-orders', JSON.stringify(orderData));
+  commitOrderData();
   renderOrderData();
 }
 
@@ -874,7 +865,7 @@ function deleteOrderRows(indexes) {
  * khi hỏi. Trả về true nếu đã xóa.
  */
 async function deleteOrderAtRow(rowIndex, button = null) {
-  const idColumn = orderData.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  const idColumn = orderColumnIndex('ma don hang');
   const orderId = idColumn >= 0 ? String(orderData.rows[rowIndex]?.[idColumn] || '') : '';
   if (isSystemOrderId(orderId)) {
     const id = orderId.slice(3);
@@ -910,14 +901,9 @@ document.querySelector('#order-import-preview')?.addEventListener('click', async
 //
 // Khách điền nhiều form thì hệ thống không tự gộp; bấm vào dòng nào, bảng chỉ
 // còn các đơn cùng số điện thoại đó (ô tìm kiếm nhận số), bấm lại thì bỏ lọc.
-function normalizeRowPhone(value) {
-  let phone = String(value ?? '').replace(/\D/g, '');
-  if (phone.startsWith('84')) phone = `0${phone.slice(2)}`;
-  return phone;
-}
 
 function toggleOrderPhoneFilter(rowIndex) {
-  const phoneIndex = orderData.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  const phoneIndex = orderPhoneColumnIndex();
   const row = orderData.rows[rowIndex];
   if (!row || phoneIndex < 0 || !orderSearch) return;
   const phone = normalizeRowPhone(row[phoneIndex]);
@@ -1048,7 +1034,10 @@ function scheduleOrderRefresh(delay = 1500) {
     renderOrderData();
   }, delay);
 }
-function persistOrderData() {
+/** Chuẩn hoá từng ô rồi ghi bảng đơn vào trình duyệt: gọi ở mọi chỗ làm dữ liệu đổi, không gọi khi chỉ vẽ. */
+function commitOrderData() {
+  const { headers } = orderData;
+  if (orderData.rows.length) orderData.rows = orderData.rows.map(row => row.map((value, index) => normalizeImportedValue(value, headers[index])));
   try { localStorage.setItem('crm-orders', JSON.stringify(orderData)); } catch {}
 }
 /** Cập nhật lẻ vài ô của một dòng đang hiện trên bảng Xử lý dữ liệu, không vẽ lại bảng. */
@@ -1198,7 +1187,7 @@ async function saveOrderRowEdit(rowIndex) {
   editedTd?.classList.add('preview-edited');
   editedOrderCells.add(`${rowIndex}|${editedColumn}`);
   for (const target of touchedRows) refreshOrderCells(target, [...touchedColumns].filter(column => target !== rowIndex || column !== editedColumn), rowNotes);
-  persistOrderData();
+  commitOrderData();
   scheduleOrderRefresh();
   const serverId = serverOrderIdOf(row[orderColumnIndex('ma don hang')]);
   if (!serverId) { showToast('Đã lưu thay đổi.', 'success'); return; }
@@ -1397,7 +1386,7 @@ function ensureOrderDateColumn(data) {
 function ensureOrderCarrierColumn(data) {
   if (!data.headers.length) return data;
   if (data.headers.some(header => normalizeColumnName(header) === normalizeColumnName(orderCarrierHeader))) return data;
-  const phoneIndex = data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  const phoneIndex = orderPhoneColumnIndex(data);
   if (phoneIndex < 0) return data;
   const at = phoneIndex + 1;
   return {
@@ -1459,7 +1448,7 @@ function mergeChatbotOrdersIntoTable(orders) {
   }
   if (!added && !refreshed && !removed) return 0;
   orderData = { headers, rows };
-  localStorage.setItem('crm-orders', JSON.stringify(orderData));
+  commitOrderData();
   renderOrderData();
   return added;
 }
@@ -1642,10 +1631,6 @@ function applyAppSettings() {
   if (topbarUserName) topbarUserName.textContent = displayName;
   if (topbarUserAvatar) topbarUserAvatar.textContent = displayName.trim().charAt(0).toUpperCase() || 'H';
   document.body.classList.toggle('hide-contact-panel', !appSettings.showContactPanel);
-  if (settingsDisplayName) settingsDisplayName.value = displayName;
-  if (settingsSendEnter) settingsSendEnter.checked = appSettings.sendWithEnter;
-  if (settingsShowContact) settingsShowContact.checked = appSettings.showContactPanel;
-  if (settingsCollapseSidebar) settingsCollapseSidebar.checked = appSettings.collapseSidebar;
   updateContactInfoButton();
 }
 
@@ -3150,26 +3135,14 @@ function renderChatbotProvider(resetValues = false) {
   queueMicrotask(syncChatbotModelDisplay);
   const profile = getChatbotProviderProfile();
   const currentModel = chatbotSettingsDirectModel?.value || '';
-  const vertex = chatbotSettingsProvider?.value === 'vertex';
   const custom = chatbotSettingsProvider?.value === 'custom';
   chatbotAuthTypeField?.classList.toggle('hidden', true);
   chatbotAuthTypeField?.remove();
-  chatbotSettingsDirectKey?.closest('label')?.setAttribute('hidden', 'hidden');
-  chatbotSettingsDirectKey?.parentElement?.classList.add('hidden');
-  chatbotApiKeyLabel?.parentElement?.classList.add('hidden');
-  chatbotApiKeyLabel?.parentElement?.remove();
   chatbotProtocolField?.classList.toggle('hidden', !custom);
   if (chatbotEndpointLabel) chatbotEndpointLabel.textContent = profile.endpointLabel;
-  if (chatbotApiKeyLabel) chatbotApiKeyLabel.textContent = vertex && chatbotSettingsAuthType?.value === 'api_key' ? 'Google Cloud API key' : profile.keyLabel;
   if (chatbotSettingsDirectEndpoint) chatbotSettingsDirectEndpoint.placeholder = profile.endpoint;
   renderChatbotModelOptions(resetValues ? profile.model : currentModel || profile.model);
-  if (chatbotSettingsDirectKey && !chatbotSettingsDirectKey.value) {
-    chatbotSettingsDirectKey.placeholder = vertex && chatbotSettingsAuthType?.value === 'api_key' ? 'Nhập Google Cloud API key' : profile.keyPlaceholder;
-  }
-  if (resetValues) {
-    chatbotSettingsDirectEndpoint.value = profile.endpoint;
-    if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.value = '';
-  }
+  if (resetValues) chatbotSettingsDirectEndpoint.value = profile.endpoint;
 }
 
 chatbotSettingsProvider?.addEventListener('change', () => renderChatbotProvider(true));
@@ -3191,10 +3164,6 @@ async function loadChatbotSettings() {
     chatbotSettingsDirectEndpoint.value = (settings.directEndpoint || profile.endpoint).replace('gemini-2.5-flash', migratedModel);
     renderChatbotModelOptions(migratedModel);
     syncVertexEndpointModel();
-    if (chatbotSettingsDirectKey) {
-      chatbotSettingsDirectKey.value = '';
-      chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
-    }
     chatbotSettingsSystemPrompt.value = settings.systemPrompt || '';
     updateChatbotSystemPromptCounter();
     chatbotSettingsMemoryEnabled.checked = settings.memoryEnabled !== false;
@@ -4100,7 +4069,6 @@ function renderConversationHeader(conversation) {
   const avatarPhoto = conversation.dataset.avatar || '';
   const profile = conversationProfiles[name] || {};
   const channel = messageChannels.find(item => item.id === currentMessageChannelId);
-  const customerPlatform = channel?.platform === 'zalo' ? 'Khách hàng Zalo' : 'Khách hàng Facebook';
 
   if (chatHeadAvatar) chatHeadAvatar.textContent = initial;
   applyAvatarPhoto(chatHeadAvatar, avatarPhoto);
@@ -5444,16 +5412,15 @@ function getDuplicateOrderRowIndexes(data = orderData) {
 }
 
 function getDuplicatePhoneRowIndexes(data = orderData) {
-  const phoneIndex = data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  const phoneIndex = orderPhoneColumnIndex(data);
   if (phoneIndex < 0) return new Set();
-  const orderIdIndex = data.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  const orderIdIndex = orderColumnIndex('ma don hang', data);
   // Lines of one order share a phone by definition; only two DIFFERENT orders
   // on the same number are worth a second look. Rows without an order id are
   // each treated as their own order, which keeps the old behaviour for them.
   const rowsByPhone = new Map();
   data.rows.forEach((row, index) => {
-    let phone = String(row[phoneIndex] ?? '').replace(/\D/g, '');
-    if (phone.startsWith('84')) phone = `0${phone.slice(2)}`;
+    const phone = normalizeRowPhone(row[phoneIndex]);
     if (!phone) return;
     const orderId = orderIdIndex >= 0 ? String(row[orderIdIndex] ?? '').trim() : '';
     const entries = rowsByPhone.get(phone) || [];
@@ -5497,7 +5464,7 @@ function isProcessingNoteText(note) {
  */
 function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes } = {}) {
   const column = name => data.headers.findIndex(header => normalizeColumnName(header) === name);
-  const phoneIndex = data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  const phoneIndex = orderPhoneColumnIndex(data);
   const idIndex = column('ma don hang');
   const noteIndex = column('ghi chu');
   const addressIndex = column('dia chi');
@@ -5505,7 +5472,7 @@ function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicat
   const ordersByPhone = new Map();
   if (phoneIndex >= 0) {
     data.rows.forEach((row, index) => {
-      const phone = normalizeWarningPhone(row[phoneIndex]);
+      const phone = normalizeRowPhone(row[phoneIndex]);
       if (!phone) return;
       const orderId = idIndex >= 0 ? String(row[idIndex] || '').trim() : '';
       const ids = ordersByPhone.get(phone) || new Set();
@@ -5520,7 +5487,7 @@ function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicat
     const list = [];
     if (duplicateRowIndexes?.has(index)) list.push('⚠ Trùng đơn');
     if (duplicatePhoneRowIndexes?.has(index) && phoneIndex >= 0) {
-      const others = [...(ordersByPhone.get(normalizeWarningPhone(row[phoneIndex])) || [])].filter(id => id !== (orderId || `dòng ${index + 1}`));
+      const others = [...(ordersByPhone.get(normalizeRowPhone(row[phoneIndex])) || [])].filter(id => id !== (orderId || `dòng ${index + 1}`));
       // Mã các đơn kia không cần ghi ở đây: bấm dòng là thấy cả nhóm cùng số.
       if (others.length) list.push(`⚠ Trùng số điện thoại với ${others.length} đơn khác`);
     }
@@ -5556,8 +5523,11 @@ function getReviewRowIndexes(data = orderData) {
 // dữ liệu và KHÔNG được đưa sang Xuất dữ liệu cho tới khi nhân viên bấm "Đã xử
 // lý". Dấu này lưu cùng chỗ với bảng (trình duyệt), theo mã đơn.
 const reviewedOrdersKey = 'crm-orders-reviewed';
+// Gọi cho từng dòng trong các vòng lặp: nhớ chỉ số cột mã đơn theo bộ tiêu đề đang dùng.
+let orderIdColumnCache = { headers: null, index: -1 };
 function orderRowKey(row, data = orderData) {
-  const idIndex = data.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  if (orderIdColumnCache.headers !== data.headers) orderIdColumnCache = { headers: data.headers, index: orderColumnIndex('ma don hang', data) };
+  const idIndex = orderIdColumnCache.index;
   const id = idIndex >= 0 ? String(row[idIndex] || '').trim() : '';
   return id ? `id:${id}` : `row:${JSON.stringify(row)}`;
 }
@@ -5800,13 +5770,9 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
 const orderPanelsDirty = new Set();
 
 function renderOrderData() {
-  const { headers } = orderData;
-  let { rows } = orderData;
-  if (rows.length) {
-    orderData.rows = rows.map(row => row.map((value, index) => normalizeImportedValue(value, headers[index])));
-    rows = orderData.rows;
-    localStorage.setItem('crm-orders', JSON.stringify(orderData));
-  }
+  // Chỉ đọc và vẽ. Chuẩn hoá ô và ghi vào trình duyệt là việc của commitOrderData(),
+  // gọi đúng lúc dữ liệu đổi (import, đồng bộ, xoá dòng, sửa ô), không phải mỗi lần vẽ.
+  const { headers, rows } = orderData;
   const allRows = rows.map((row, index) => ({ row, index }));
   const invalidRows = getInvalidOrderRows();
   const invalidRowIndexes = new Set(invalidRows.map(entry => entry.index));
@@ -5831,7 +5797,7 @@ function renderOrderData() {
             : allRows;
   // Phones the cache has not seen yet are looked up in the background; the
   // table re-renders with badges once the answer arrives.
-  const phoneColumn = headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
+  const phoneColumn = orderPhoneColumnIndex();
   if (phoneColumn >= 0) refreshPhoneWarnings(rows.map(row => row[phoneColumn]));
   const searchValue = normalizeColumnName(orderSearch?.value || '');
   if (searchValue) {
@@ -5997,20 +5963,6 @@ shippingRecentList?.addEventListener('click', event => {
 shippingClearHistory?.addEventListener('click', () => {
   localStorage.removeItem(shippingHistoryKey);
   renderShippingHistory();
-});
-
-settingsForm?.addEventListener('submit', event => {
-  event.preventDefault();
-  appSettings = {
-    displayName: settingsDisplayName?.value.trim() || 'Huy Facebook',
-    sendWithEnter: Boolean(settingsSendEnter?.checked),
-    showContactPanel: Boolean(settingsShowContact?.checked),
-    collapseSidebar: Boolean(settingsCollapseSidebar?.checked)
-  };
-  saveAppSettings();
-  applyAppSettings();
-  setSidebarCollapsed(appSettings.collapseSidebar);
-  if (settingsStatus) settingsStatus.textContent = 'Đã lưu cài đặt.';
 });
 
 facebookConnectButton?.addEventListener('click', beginFacebookConnection);
@@ -6275,7 +6227,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         directAuthType: chatbotSettingsAuthType.value,
         directProtocol: chatbotSettingsProtocol.value,
         directEndpoint: chatbotSettingsDirectEndpoint.value,
-        directApiKey: chatbotSettingsDirectKey?.value || '',
+        directApiKey: '',
         directModel: chatbotSettingsDirectModel.value,
         systemPrompt: chatbotSettingsSystemPrompt.value,
         memoryEnabled: chatbotSettingsMemoryEnabled.checked,
@@ -6291,9 +6243,6 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
       })
     }));
     chatbotSettingsEnabled.checked = settings.enabled === true;
-    if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.value = '';
-    const profile = getChatbotProviderProfile();
-    if (chatbotSettingsDirectKey) chatbotSettingsDirectKey.placeholder = settings.directApiKeyConfigured ? 'Đã lưu – để trống nếu không thay đổi' : profile.keyPlaceholder;
     showToast('Đã lưu cấu hình AI thành công.', 'success');
   } catch (error) {
     showToast(error.message || 'Chưa lưu được thiết lập chatbot.', 'error');
@@ -6347,7 +6296,6 @@ chatbotPreviewInput?.addEventListener('keydown', event => {
   chatbotPreviewSend?.click();
 });
 
-chatbotPreviewOpen?.addEventListener('click', () => chatbotPreviewDialog?.showModal());
 chatbotPreviewClose?.addEventListener('click', () => chatbotPreviewDialog?.close());
 chatbotPreviewDialog?.addEventListener('click', event => { if (event.target === chatbotPreviewDialog) chatbotPreviewDialog.close(); });
 chatbotPreviewDialogSend?.addEventListener('click', async () => {
@@ -6372,7 +6320,7 @@ function applyImportedRecords(sourceHeaders, records) {
     headers,
     rows: nonEmptyRows.map(row => retainedIndexes.map(index => normalizeImportedValue(row[index] || '', sourceHeaders[index])))
   });
-  localStorage.setItem('crm-orders', JSON.stringify(orderData));
+  commitOrderData();
   renderOrderData();
   showOrderStage(getRecommendedOrderStage());
 }
@@ -6467,14 +6415,6 @@ messageSearchInput?.addEventListener('keydown', event => {
   messageSearchInput.value = '';
   filterConversations();
   messageSearchInput.blur();
-});
-
-conversationFilterButtons.forEach(button => {
-  button.addEventListener('click', () => {
-    currentConversationFilter = button.dataset.messageFilter || 'all';
-    conversationFilterButtons.forEach(item => item.classList.toggle('active', item === button));
-    filterConversations();
-  });
 });
 
 conversationList?.addEventListener('click', event => {

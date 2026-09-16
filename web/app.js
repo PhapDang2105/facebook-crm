@@ -5013,14 +5013,14 @@ function getDuplicatePhoneRowIndexes(data = orderData) {
 // Ghi chú xử lý bắt đầu bằng một ký hiệu (cùng bộ với app/order-notes.mjs).
 const processingNoteMarkers = ['⚠', '⏳', '🤖', '☎'];
 
-/** "Hay bom hàng: 5/12 đơn (42%), gọi xác nhận" (cùng cách rút gọn với server). */
+/** "Hay bom hàng: 5/12 đơn (42%)" (cùng cách rút gọn với server). */
 function shortPhoneWarning(warning) {
   const labels = { block: 'POS đã chặn số này', high: 'Hay bom hàng', watch: 'Từng không nhận hàng' };
   const source = Array.isArray(warning.sources) && warning.sources.length ? String(warning.sources[0]) : '';
   const bom = source.match(/bom (\d+\/\d+ đơn(?: \(\d+%\))?)/i);
   const shop = source.match(/hoàn\/huỷ (\d+) đơn/i);
   const detail = bom ? bom[1] : shop ? `hoàn ${shop[1]} đơn ở shop` : source.includes('thẻ') ? 'POS gắn thẻ hoàn' : '';
-  return `${labels[warning.level] || 'Số cần gọi xác nhận'}${detail ? `: ${detail}` : ''}, gọi xác nhận`;
+  return `${labels[warning.level] || 'Số cần kiểm tra'}${detail ? `: ${detail}` : ''}`;
 }
 function isProcessingNoteText(note) {
   return String(note || '').split(' · ').some(segment => processingNoteMarkers.some(marker => segment.trim().startsWith(marker)));

@@ -51,13 +51,13 @@ function shortAutoFill(text) {
 
 const WARNING_SHORT = Object.freeze({ block: 'POS đã chặn số này', high: 'Hay bom hàng', watch: 'Từng không nhận hàng' });
 
-/** "Hay bom hàng: 5/12 đơn (42%), gọi xác nhận". */
+/** "Hay bom hàng: 5/12 đơn (42%)". */
 export function shortWarning(warning) {
   const source = Array.isArray(warning.sources) && warning.sources.length ? String(warning.sources[0]) : '';
   const numbers = source.match(/bom (\d+\/\d+ đơn(?: \(\d+%\))?)/i) || source.match(/hoàn\/huỷ (\d+) đơn/i);
   const detail = numbers ? (numbers[0].startsWith('bom') ? numbers[1] : `hoàn ${numbers[1]} đơn ở shop`) : (source.includes('thẻ') ? 'POS gắn thẻ hoàn' : '');
-  const label = WARNING_SHORT[warning.level] || 'Số cần gọi xác nhận';
-  return `${label}${detail ? `: ${detail}` : ''}, gọi xác nhận`;
+  const label = WARNING_SHORT[warning.level] || 'Số cần kiểm tra';
+  return `${label}${detail ? `: ${detail}` : ''}`;
 }
 
 /** Cấp địa chỉ còn thiếu, theo thứ tự nhân viên hỏi khách. */
@@ -87,7 +87,7 @@ export function processingNotes(order) {
   // Câu ngắn, đọc lướt được trong một ô: việc gì, thiếu gì, lấy từ đâu.
   if (landing.incomplete) {
     const when = formatSubmittedAt(landing.submittedAt);
-    notes.push(`⏳ Bỏ dở form${when ? ` ${when}` : ''}, gọi xác nhận`);
+    notes.push(`⏳ Bỏ dở form${when ? ` ${when}` : ''}`);
   }
   if (noAddress) {
     notes.push('⚠ Chưa có địa chỉ');

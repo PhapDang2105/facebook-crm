@@ -9,10 +9,10 @@ test('đơn bỏ dở thiếu địa chỉ, máy tự điền sản phẩm, số
     landing: { incomplete: true, submittedAt: '2026-09-16 02:08:42', page: 'https://granola.giotnang.vn/', autoFilled: { product: 'Granola Túi Xanh 450g x2 (mặc định theo chiến dịch 1202, 18 đơn)' }, posId: '51938', externalId: '0368419478@2026-09-16 02:08:42' }
   });
   assert.deepEqual(notes, [
-    '⏳ Bỏ dở form 02:08 16/09, gọi xác nhận',
+    '⏳ Bỏ dở form 02:08 16/09',
     '⚠ Chưa có địa chỉ',
     '🤖 Tự điền SP: Granola Túi Xanh 450g x2 (theo chiến dịch)',
-    '☎ Hay bom hàng: 5/12 đơn (42%), gọi xác nhận'
+    '☎ Hay bom hàng: 5/12 đơn (42%)'
   ]);
 });
 
@@ -23,9 +23,9 @@ test('địa chỉ thiếu cấp, sản phẩm chưa khớp, địa chỉ trùng
   assert.deepEqual(ambiguous, ['⚠ Thiếu quận/huyện', '⚠ Địa chỉ trùng tên nhiều nơi, hỏi lại', '⚠ Sản phẩm lạ: Combo lạ']);
   const unreadable = processingNotes({ address: 'Thì địa chỉ trên rồi', street: '', ward: '', district: '', province: '', locationConfidence: 'none', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }] });
   assert.deepEqual(unreadable, ['⚠ Địa chỉ không rõ ba cấp: "Thì địa chỉ trên rồi"']);
-  assert.equal(shortWarning({ level: 'watch', sources: ['Hệ thống Pancake: bom 3/12 đơn (25%), POS có đếm cảnh báo'] }), 'Từng không nhận hàng: 3/12 đơn (25%), gọi xác nhận');
-  assert.equal(shortWarning({ level: 'high', sources: ['Shop mình: hoàn/huỷ 2 đơn, giao thành công 1'] }), 'Hay bom hàng: hoàn 2 đơn ở shop, gọi xác nhận');
-  assert.equal(shortWarning({ level: 'block', sources: ['POS đã chặn khách này'] }), 'POS đã chặn số này, gọi xác nhận');
+  assert.equal(shortWarning({ level: 'watch', sources: ['Hệ thống Pancake: bom 3/12 đơn (25%), POS có đếm cảnh báo'] }), 'Từng không nhận hàng: 3/12 đơn (25%)');
+  assert.equal(shortWarning({ level: 'high', sources: ['Shop mình: hoàn/huỷ 2 đơn, giao thành công 1'] }), 'Hay bom hàng: hoàn 2 đơn ở shop');
+  assert.equal(shortWarning({ level: 'block', sources: ['POS đã chặn khách này'] }), 'POS đã chặn số này');
   // Đơn đủ: không có gì để ghi.
   assert.deepEqual(processingNotes({ address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', street: '12 Lê Lợi', ward: 'Phường Bến Nghé', district: 'Quận 1', province: 'TP Hồ Chí Minh', locationConfidence: 'exact', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }] }), []);
 });

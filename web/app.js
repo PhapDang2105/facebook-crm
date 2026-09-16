@@ -433,14 +433,6 @@ function phoneWarningFor(value) {
 // các icon nút bấm trong ứng dụng; không dùng ký tự emoji.
 const alertIconSvg = '<svg class="alert-icon" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
 
-function phoneWarningBadge(warning) {
-  if (!warning) return '';
-  const text = warning.level === 'block' ? 'Chặn'
-    : warning.failed ? `Bom ${warning.failed}${warning.success ? `/${warning.failed + warning.success}` : ''} đơn`
-      : 'Cần gọi';
-  return `<span class="phone-warning-badge is-${warning.level}" title="${escapeHtml(warning.label || '')}${warning.sources?.length ? ` — ${escapeHtml(warning.sources.join('; '))}` : ''}">${alertIconSvg}${escapeHtml(text)}</span>`;
-}
-
 /** Looks up phones the cache lacks, then re-renders the orders table once. */
 async function refreshPhoneWarnings(phones, { force = false } = {}) {
   const wanted = [...new Set(phones.map(normalizeWarningPhone).filter(phone => phone.length >= 9 && (force || !phoneWarnings.has(phone))))];
@@ -5147,9 +5139,7 @@ function renderNoteCell(value, extraNotes = []) {
 function renderPreviewCell(value, header) {
   const previewValue = getPreviewValue(value, header);
   const column = normalizeColumnName(header);
-  if (['so dien thoai', 'sdt', 'dien thoai'].includes(column)) {
-    return `${escapeHtml(previewValue)}${phoneWarningBadge(phoneWarningFor(previewValue))}`;
-  }
+  // Số điện thoại chỉ là số: cảnh báo bom hàng đã nằm ở cột Ghi chú và màu dòng.
   if (column === 'don gia') {
     const price = String(previewValue ?? '').trim();
     return price && !/[đ₫]$/iu.test(price) ? `${escapeHtml(price)} đ` : escapeHtml(price);

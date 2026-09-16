@@ -328,6 +328,12 @@ function findBest(norm, raw, entries, { limit = norm.length, ownPrefixes, neutra
   return best;
 }
 
+/** Che một khoảng đã nhận ra bằng dấu phẩy (cả bản chuẩn hóa và bản gốc, hai bản thẳng hàng theo chỉ số). */
+function maskRange(norm, raw, range) {
+  const mask = text => text.slice(0, range.start) + ','.repeat(range.end - range.start) + text.slice(range.end);
+  return { norm: mask(norm), raw: mask(raw) };
+}
+
 /** Đoạn (giữa hai dấu phẩy) chứa vị trí [start, end). */
 function segmentAround(region, start, end) {
   const before = region.slice(0, start);
@@ -450,6 +456,10 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
   let districtHit = null;
   let district = null;
 
+  let wardHit = null;
+  let ward = null;
+  const wardSearchOptions = extra => ({ ownPrefixes: WARD_PREFIXES, foreignPrefixes: DISTRICT_PREFIXES.filter(p => !WARD_PREFIXES.includes(p)), fullKeys, ...extra });
+
   // 2. Không thấy tỉnh: quận/huyện có tên duy nhất trên cả nước cho biết tỉnh.
   if (!province) {
     const national = findBest(norm, expanded, locationIndex.districts, { ownPrefixes: DISTRICT_PREFIXES, foreignPrefixes: WARD_PREFIXES, fullKeys });
@@ -457,10 +467,17 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
       const alias = normalizeLocationKey(norm.slice(national.start, national.end));
       const sameName = locationIndex.districtsByKey.get(alias) || locationIndex.districtsByKey.get(stripPrefix(alias, DISTRICT_PREFIXES)) || [];
       const exactSegment = segments.some(segment => stripPrefix(segment.key, DISTRICT_PREFIXES) === national.entry.bare || segment.key === national.entry.key);
-      if (sameName.length === 1 && (national.prefixed || exactSegment)) {
+      // Không có chữ "huyện" và không đứng riêng đoạn ("ấp 2 xã Tân Hiệp Hóc Môn"):
+      // vẫn tin khi ngay trước đó khách ghi rõ "xã/phường …" thuộc đúng huyện ấy.
+      const confirming = sameName.length === 1 && !national.prefixed && !exactSegment
+        ? findBest(norm, expanded, [...national.entry.wards.values()], wardSearchOptions({ limit: national.start }))
+        : null;
+      const confirmed = Boolean(confirming && confirming.prefixed && !confirming.ambiguous);
+      if (sameName.length === 1 && (national.prefixed || exactSegment || confirmed)) {
         districtHit = national;
         district = national.entry;
         province = district.province;
+        if (confirmed) { wardHit = confirming; ward = confirming.entry; }
       }
     }
   }
@@ -475,10 +492,21 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
   // 3. Quận/huyện trong tỉnh, tìm ở phần đứng trước tỉnh.
   const districts = [...province.districts.values()];
   const districtLimit = provinceHit ? provinceHit.start : norm.length;
-  let wardHit = null;
-  let ward = null;
   if (!district) {
-    districtHit = findBest(norm, expanded, districts, { limit: districtLimit, ownPrefixes: DISTRICT_PREFIXES, foreignPrefixes: WARD_PREFIXES, fullKeys });
+    const districtOptions = { limit: districtLimit, ownPrefixes: DISTRICT_PREFIXES, foreignPrefixes: WARD_PREFIXES, fullKeys };
+    districtHit = findBest(norm, expanded, districts, districtOptions);
+    // Khách lặp tên tỉnh ("… Tam Điệp- Ninh Bình Đt: …, Ninh Bình"): lần lặp
+    // không có "thành phố" đứng trước bị hiểu thành thành phố trùng tên tỉnh.
+    // Che lần lặp rồi tìm lại: có huyện khác thì lấy huyện đó, không thì giữ
+    // nguyên để "Ninh Bình, Ninh Bình" vẫn là Thành phố Ninh Bình.
+    if (districtHit && !districtHit.ambiguous && !districtHit.prefixed && districtHit.entry.bare === province.bare) {
+      const masked = maskRange(norm, expanded, districtHit);
+      const retry = findBest(masked.norm, masked.raw, districts, districtOptions);
+      if (retry && !retry.ambiguous) {
+        consumed.push(districtHit);
+        districtHit = retry;
+      }
+    }
     if (districtHit?.ambiguous) {
       // "Thủ Đức" là Quận Thủ Đức hay Thành phố Thủ Đức, "Cai Lậy" là thị xã
       // hay huyện: phường/xã khách ghi nằm ở đúng một trong hai thì chọn nơi đó.

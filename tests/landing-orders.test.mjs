@@ -15,8 +15,7 @@ const {
   parseLandingBody,
   recordLandingOrder,
   listLandingOrders,
-  deleteLandingOrder
-} = await import('../app/landing-orders.mjs');
+  deleteLandingOrder, isFieldLabelAddress } = await import('../app/landing-orders.mjs');
 
 test('token: so sánh an toàn, token trống là tắt', () => {
   assert.equal(isLandingTokenValid('abc', 'abc'), true);
@@ -57,6 +56,13 @@ test('form_data dạng mảng {name, value} và danh sách sản phẩm', () => 
   assert.deepEqual(parsed.lines.map(line => line.product), ['Túi Xanh', 'Túi Nâu']);
   assert.equal(parsed.total, 293000);
   assert.equal(parsed.externalId, 'WC-1001');
+});
+
+test('ô trống gửi bằng nhãn cùng nghĩa ("ward": "commune", "province": "province") không thành địa chỉ', () => {
+  const parsed = normalizeLandingPayload({ full_name: 'Trần Ngọc Anh', phone_number: '0974262145', address: '', ward: 'commune', district: 'district', province: 'province', status: 'Draft form' });
+  assert.equal(parsed.address, '');
+  assert.equal(isFieldLabelAddress('commune'), true);
+  assert.equal(isFieldLabelAddress('12 Lê Lợi'), false);
 });
 
 test('payload đúng tên trường mặc định của Webcake', () => {

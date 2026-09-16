@@ -63,6 +63,23 @@ test('thiếu tỉnh: suy ra từ quận có tên duy nhất; thiếu quận: su
   assert.deepEqual(names(resolveAddress('Phường Đa Kao, Hồ Chí Minh')), ['TP Hồ Chí Minh', 'Quận 1', 'Phường Đa Kao']);
 });
 
+test('tên tỉnh lặp lại sau số điện thoại không thành thành phố trùng tên tỉnh', () => {
+  const echoed = resolveAddress('Đc sn 02- ngõ02- đường lý thường kiệt-tổ 18- phường Bắc Sơn- Tam Điệp- Ninh Bình Đt: 0382687268, Ninh Bình');
+  assert.deepEqual(names(echoed), ['Ninh Bình', 'Thành phố Tam Điệp', 'Phường Bắc Sơn']);
+  assert.equal(echoed.confidence, 'exact');
+  assert.equal(echoed.street, 'sn 02- ngõ02- đường lý thường kiệt-tổ 18');
+  // Không có huyện nào khác thì tên lặp vẫn là thành phố trùng tên tỉnh.
+  assert.deepEqual(names(resolveAddress('Phường Nam Bình, Ninh Bình, Ninh Bình')), ['Ninh Bình', 'Thành phố Ninh Bình', 'Phường Nam Bình']);
+});
+
+test('huyện tên duy nhất không có tiền tố, không dấu phẩy: tin khi có xã/phường ghi rõ đứng trước', () => {
+  const hocMon = resolveAddress('105/3 ấp Tân thới 2 xã Tân hiệp Hóc Môn');
+  assert.deepEqual(names(hocMon), ['TP Hồ Chí Minh', 'Huyện Hóc Môn', 'Xã Tân Hiệp']);
+  assert.equal(hocMon.street, '105/3 ấp Tân thới 2');
+  // Không có xã/phường xác nhận thì vẫn không đoán: "Hóc Môn" có thể là tên đường.
+  assert.equal(resolveAddress('105/3 đường Hóc Môn').province, null);
+});
+
 test('thành phố trực thuộc tỉnh trùng tên tỉnh', () => {
   const resolved = resolveAddress('Phường Đông Sơn, Thành phố Thanh Hoá, Thanh Hoá');
   assert.deepEqual(names(resolved), ['Thanh Hóa', 'Thành phố Thanh Hóa', 'Phường Đông Sơn']);

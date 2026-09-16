@@ -36,8 +36,15 @@ function emptyStore() {
 
 function normalizeStore(value) {
   if (!value || typeof value !== 'object') return emptyStore();
+  const orders = Array.isArray(value.orders) ? value.orders : [];
+  for (const order of orders) {
+    if (order && isFieldLabelAddress(order.address)) {
+      order.address = 'Chưa có địa chỉ';
+      order.street = '';
+    }
+  }
   return {
-    orders: Array.isArray(value.orders) ? value.orders : [],
+    orders,
     recent: Array.isArray(value.recent) ? value.recent : []
   };
 }
@@ -147,9 +154,11 @@ export function flattenPayload(value, prefix = '', out = []) {
   const key = keyOf(prefix.split('.').at(-1));
   const text = String(value).trim();
   // Webcake gửi chính tên trường làm giá trị khi ô đó trống ("utm_source":
-  // "utm_source", "email": "email", "payment_status": "payment_status."):
-  // đó là ô trống, không phải dữ liệu.
-  if (keyOf(text.replace(/[.:]+$/, '')) === key) return out;
+  // "utm_source", "email": "email", "payment_status": "payment_status."),
+  // có khi bằng một tên khác cùng nghĩa ("ward": "commune", "province":
+  // "city"): đó là ô trống, không phải dữ liệu.
+  const valueKey = keyOf(text.replace(/[.:]+$/, ''));
+  if (valueKey === key || isEmptyFieldLabel(key, valueKey)) return out;
   out.push({ path: prefix, key, fullKey: keyOf(prefix), value: text });
   return out;
 }
@@ -182,6 +191,20 @@ const FIELD_PATTERNS = {
   formStatus: [/^(status|form ?status|trang thai|order ?status)$/],
   ignored: [/^(date|time|upload|file|email|ip|user ?agent|referrer?|country ?code|captcha|updated ?at|payment ?status|transfer ?money|shipping ?fee|discount|currency|variation ?id|product ?id|id)$/]
 };
+/** Giá trị là một tên trường cùng loại với ô ("ward" ↔ "commune"): ô trống. */
+function isEmptyFieldLabel(key, valueKey) {
+  return ['address', 'province', 'district', 'ward', 'name', 'phone'].some(kind => {
+    const patterns = FIELD_PATTERNS[kind];
+    return patterns.some(pattern => pattern.test(key)) && patterns.some(pattern => pattern.test(valueKey));
+  });
+}
+
+/** Địa chỉ chỉ là nhãn ô form ('commune', 'district', 'address'…), lọt vào từ bản trước: coi như chưa có. */
+export function isFieldLabelAddress(value) {
+  const key = keyOf(String(value || '').replace(/[.:]+$/, ''));
+  return Boolean(key) && ['address', 'province', 'district', 'ward'].some(kind => FIELD_PATTERNS[kind].some(pattern => pattern.test(key)));
+}
+
 const INCOMPLETE_STATUS = /(chua hoan tat|chua hoan thanh|incomplete|unfinished|partial|draft|in ?progress|not ?complete|dang dien)/;
 export const INCOMPLETE_LABEL = 'Chưa hoàn tất';
 const COUNTRY_VALUES = /^(viet ?nam|vn|vietnam)$/;

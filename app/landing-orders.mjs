@@ -394,7 +394,7 @@ function catalogLines(lines, total) {
  * thoại hợp lệ — thiếu địa chỉ hay sản phẩm thì vẫn tạo đơn và gắn cờ để nhân
  * viên bổ sung, vì một lead có số điện thoại là thứ không được để rơi.
  */
-export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID().slice(0, 8), page = '' } = {}) {
+export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID().slice(0, 8), page = '', posId = '' } = {}) {
   const parsed = normalizeLandingPayload(payload);
   if (!parsed.phone) throw new Error('Không tìm thấy số điện thoại hợp lệ trong dữ liệu landing page.');
   const { items, priced, total } = catalogLines(parsed.lines, parsed.total);
@@ -431,7 +431,9 @@ export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID()
     rawProducts: parsed.rawProducts.slice(0, 1000),
     needsAddress: !parsed.address,
     needsProduct: !items.length || !items.every(item => item.matched),
-    unknownFields: parsed.unknown.slice(0, 40)
+    unknownFields: parsed.unknown.slice(0, 40),
+    // Đơn kéo từ Pancake POS (đồng bộ định kỳ) ghi lại mã đơn POS.
+    ...(posId ? { posId: String(posId) } : {})
   };
   order.automatic = true;
   return order;
@@ -540,7 +542,7 @@ export async function autoFillLandingOrder(order, payload, orders, context = {})
   const rebuilt = buildLandingOrder(patched, { now: order.createdAt, id: order.id, page: order.landing.page });
   rebuilt.status = order.status;
   rebuilt.phoneWarning = order.phoneWarning;
-  rebuilt.landing = { ...rebuilt.landing, incomplete: order.landing.incomplete, formStatus: order.landing.formStatus, externalId: order.landing.externalId, formIds: order.landing.formIds, autoFilled };
+  rebuilt.landing = { ...rebuilt.landing, incomplete: order.landing.incomplete, formStatus: order.landing.formStatus, externalId: order.landing.externalId, formIds: order.landing.formIds, posId: order.landing.posId, autoFilled };
   rebuilt.note = [rebuilt.note === 'Đơn từ landing page.' ? '' : rebuilt.note, 'Tự điền, cần duyệt trước khi giao'].filter(Boolean).join(' · ');
   return rebuilt;
 }
@@ -566,9 +568,8 @@ export async function recordLandingOrder(payload, context = {}) {
     // Một đơn có thể gom nhiều bản ghi form của Webcake (bản dở dang rồi bản
     // hoàn tất): mọi mã đã gộp đều nhận ra đơn đó.
     const formIds = entry => [entry.landing?.externalId, ...(entry.landing?.formIds || [])].filter(Boolean);
-    const sameForm = order.landing.externalId
-      ? store.orders.find(entry => formIds(entry).includes(order.landing.externalId))
-      : null;
+    const sameForm = (order.landing.posId ? store.orders.find(entry => entry.landing?.posId === order.landing.posId) : null)
+      || (order.landing.externalId ? store.orders.find(entry => formIds(entry).includes(order.landing.externalId)) : null);
     // Cùng khách, bản trước còn dở dang: bản mới (đầy đủ hơn, hoặc đã hoàn tất) đè lên.
     const sameCustomerDraft = !sameForm
       ? store.orders.find(entry => entry.landing?.incomplete && entry.phone === order.phone && receivedAt - (Number(entry.createdAt) || 0) < incompleteUpgradeWindowMs)
@@ -584,11 +585,13 @@ export async function recordLandingOrder(payload, context = {}) {
           id: existing.id,
           createdAt: existing.createdAt,
           updatedAt: receivedAt,
-          landing: { ...order.landing, formIds: [...new Set([...formIds(existing), order.landing.externalId].filter(Boolean))] }
+          landing: { ...order.landing, posId: order.landing.posId || existing.landing?.posId, formIds: [...new Set([...formIds(existing), order.landing.externalId].filter(Boolean))] }
         };
         store.orders[index] = upgraded;
         return { order: upgraded, created: false, updated: true, error: '' };
       }
+      // Đơn webhook chưa có mã POS: ghi mã POS vào để lần đồng bộ sau nhận ra ngay.
+      if (order.landing.posId && !existing.landing?.posId) existing.landing = { ...existing.landing, posId: order.landing.posId };
       return { order: existing, created: false, error: '' };
     }
     const duplicate = store.orders.find(entry => signature(entry) === signature(order) && receivedAt - (Number(entry.createdAt) || 0) < duplicateWindowMs);

@@ -17,6 +17,7 @@ import { composeSystemPrompt } from './chatbot-engine.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder } from './landing-orders.mjs';
 import { attachPhoneWarning, connectPos, disconnectPos, lookupPhone, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
+import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -806,6 +807,12 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'DELETE' && url.pathname === '/api/phone-warnings/pos') {
       return sendJson(response, 200, await disconnectPos());
     }
+    // Kéo đơn landing từ POS ngay (mặc định 48 giờ gần nhất); bình thường chạy tự động mỗi 5 phút.
+    if (request.method === 'POST' && url.pathname === '/api/landing/sync-pos') {
+      const payload = await readBody(request);
+      const summary = await syncPosLandingOrders({ sinceHours: Math.min(24 * 30, Math.max(1, Number(payload.sinceHours) || 48)) });
+      return sendJson(response, 200, summary);
+    }
     if (request.method === 'GET' && url.pathname === '/api/landing/recent') {
       return sendJson(response, 200, { webhookUrl: landingConfig.webhookUrl, configured: Boolean(landingConfig.token), items: await listRecentLandingPayloads() });
     }
@@ -1196,6 +1203,8 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`CRM running at http://${serverConfig.host}:${serverConfig.port}/`);
+  // Đơn landing từ mọi trang Webcake (kể cả đơn bỏ dở) được kéo từ POS mỗi 5 phút.
+  if (!process.env.POS_SYNC_DISABLED) startPosSync();
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);
   const missing = missingWebhookConfiguration();
   if (missing.length) console.log(`Webhook chưa sẵn sàng, còn thiếu: ${missing.join(', ')}`);

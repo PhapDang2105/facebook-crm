@@ -164,7 +164,7 @@ export async function disconnectPos() {
   return posStatus();
 }
 
-async function posRequest(pathname, params, config, fetchImpl) {
+export async function posRequest(pathname, params, config, fetchImpl) {
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}${pathname}`);
   url.searchParams.set('api_key', config.apiKey);
   for (const [key, value] of Object.entries(params)) {

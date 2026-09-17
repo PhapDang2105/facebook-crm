@@ -6011,7 +6011,9 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     'dia chi': 'minmax(260px, 1fr)',
     'ghi chu': 'minmax(170px, 340px)',
     'ghi chu xu ly': 'minmax(150px, 240px)',
-    'san pham': 'minmax(120px, fit-content(170px))',
+    // fit-content() không dùng được làm cận trên của minmax(): trình duyệt bỏ cả
+    // dòng grid-template-columns, bảng sập còn một cột. Dùng hai mốc dài cố định.
+    'san pham': 'minmax(120px, 170px)',
     'khach hang': 'minmax(100px, 170px)',
     'so dien thoai': 'max-content'
   };

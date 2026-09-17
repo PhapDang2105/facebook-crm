@@ -2241,3 +2241,13 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .customer-state--new { color: #667085; }
 .customer-state--returning { color: #b54708; }
 .customer-state--loyal { color: #027a48; }
+
+/* Màn Đơn hàng theo cùng một mực thước với các màn khác: nút cao bằng ô nhập,
+   bo góc bằng nhau, viền dùng chung hai sắc xám. Vạch màu TikTok trên đầu bảng
+   và dưới tab ngày giữ nguyên vì đó là nét nhận diện sẵn có. */
+.file-button, .export-button { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 10px; font-size: 13.2px; font-weight: 600; }
+.order-import-controls .file-button { height: 40px; }
+.data-preview { border: 1px solid var(--line-1); border-radius: 12px; }
+.data-preview th, .data-preview td { font-size: 12.4px; border-bottom: 1px solid var(--line-2); }
+.data-preview th { color: var(--text-2); font-weight: 600; }
+.order-day-tab { font-size: 13px; }

@@ -19,6 +19,7 @@ import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, look
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
+import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { recordExportedOrders } from './customer-file.mjs';
 import {
   isMetaConfigured,
@@ -208,7 +209,10 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
     return { order, created: true };
   });
   if (!result) throw new Error('Không tìm thấy hội thoại để tự tạo đơn.');
-  if (result.created) publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+  if (result.created) {
+    publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+    await appendOrderToArchive(result.order).catch(() => {});
+  }
   return result;
 }
 
@@ -1119,6 +1123,8 @@ const server = http.createServer(async (request, response) => {
       }
       if (failure) return sendJson(response, 400, { error: failure.message });
       if (!updated) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
+      // Bản vừa sửa vào kho lưu trữ: dòng sau cùng của một mã đơn là bản đúng.
+      await appendOrderToArchive(updated).catch(() => {});
       return sendJson(response, 200, { ...updated, processingNotes: processingNotes(updated) });
     }
     if (customerOrderDeleteMatch && request.method === 'DELETE') {
@@ -1137,7 +1143,16 @@ const server = http.createServer(async (request, response) => {
       });
       if (!removed) removed = await deleteLandingOrder(orderId);
       if (!removed) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
+      // Xóa khỏi hệ thống nhưng vẫn giữ một dòng trong kho để còn tra lại.
+      await appendOrderToArchive(removed, { status: 'deleted' }).catch(() => {});
       return sendJson(response, 200, removed);
+    }
+    // Kho lưu trữ đơn: tra lại khách, số điện thoại, sản phẩm, địa chỉ của mọi
+    // đơn từng có, kể cả đơn đã hủy hay đã xóa khỏi bảng.
+    if (request.method === 'GET' && url.pathname === '/api/orders/archive') {
+      const query = String(url.searchParams.get('q') || '');
+      const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || 200));
+      return sendJson(response, 200, await readOrderArchive({ query, limit }));
     }
     if (request.method === 'GET' && url.pathname === '/api/customer-orders') {
       const messagingStore = await readMessagingStore();

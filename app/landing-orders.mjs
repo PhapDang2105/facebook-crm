@@ -18,6 +18,7 @@ import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info
 import { attachPhoneWarning, fetchPosCustomerAddresses } from './phone-warnings.mjs';
 import { isUsableStreet, resolveAddress } from './processing/locations.mjs';
 import { inferAddress } from './processing/address-ai.mjs';
+import { appendOrderToArchive } from './order-archive.mjs';
 
 const landingOrdersPath = process.env.LANDING_ORDERS_PATH
   || path.join(projectRoot, 'data', 'processed', 'landing-orders.json');
@@ -592,7 +593,7 @@ export async function recordLandingOrder(payload, context = {}) {
   } catch (failure) {
     error = failure.message;
   }
-  return updateLandingStore(store => {
+  const result = await updateLandingStore(store => {
     store.recent.unshift({ at: receivedAt, page: String(context.page || ''), ok: !error, error, orderId: order?.id || '', payload });
     store.recent = store.recent.slice(0, maximumRecent);
     if (!order) return { order: null, created: false, error };
@@ -643,6 +644,9 @@ export async function recordLandingOrder(payload, context = {}) {
     store.orders = store.orders.slice(0, maximumOrders);
     return { order, created: true, error: '' };
   });
+  // Mọi đơn đều vào kho lưu trữ, kể cả đơn sau này bị hủy hay xóa.
+  if (result?.order) await appendOrderToArchive(result.order).catch(() => {});
+  return result;
 }
 
 

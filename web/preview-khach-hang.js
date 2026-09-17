@@ -154,6 +154,56 @@ function renderTabs(base) {
   }).join('');
 }
 
+/* ---------- Dashboard tóm tắt ----------
+   Sáu con số một người bán thực sự cần nhìn hằng ngày. Tất cả đều tính trên
+   ĐÚNG danh sách đang hiển thị, nên đổi bộ lọc hay đổi tab là số đổi theo —
+   nếu số đứng yên bất kể lọc gì thì nó chỉ là đồ trang trí. */
+const summaryBox = document.querySelector('#customers-summary');
+let summaryStyle = 'a';
+
+function shortMoney(value) {
+  const amount = Math.round(Number(value) || 0);
+  if (amount >= 1000000000) return `${(amount / 1000000000).toFixed(1).replace('.0', '')} tỷ`;
+  if (amount >= 1000000) return `${(amount / 1000000).toFixed(1).replace('.0', '')} triệu`;
+  return formatMoney(amount);
+}
+
+function summaryFigures(list) {
+  const now = Date.now();
+  const spend = list.reduce((sum, customer) => sum + (Number(customer.orderTotal) || 0), 0);
+  const orders = list.reduce((sum, customer) => sum + (Number(customer.orderCount) || 0), 0);
+  const fresh = list.filter(customer => customer.firstOrderAt && now - customer.firstOrderAt <= 30 * 86400000).length;
+  const again = list.filter(customer => (Number(customer.orderCount) || 0) >= 2).length;
+  const cold = list.filter(customer => matchesTab(customer, 'lapsed')).length;
+  return [
+    { label: 'Khách hàng', value: new Intl.NumberFormat('vi-VN').format(list.length), note: 'đang hiển thị' },
+    { label: 'Khách mới 30 ngày', value: new Intl.NumberFormat('vi-VN').format(fresh), note: 'lần đầu mua trong tháng' },
+    { label: 'Tỷ lệ mua lại', value: list.length ? `${Math.round(again / list.length * 100)}%` : '—', note: `${again} khách mua từ 2 lần` },
+    { label: 'Tổng đã chi', value: shortMoney(spend), note: `${orders} đơn` },
+    { label: 'Trung bình mỗi đơn', value: orders ? shortMoney(spend / orders) : '—', note: 'trên số đơn đã tính' },
+    { label: 'Cần gọi lại', value: new Intl.NumberFormat('vi-VN').format(cold), note: 'quá 90 ngày không mua' }
+  ];
+}
+
+function renderSummary(list) {
+  if (!summaryStyle) { summaryBox.innerHTML = ''; return; }
+  const figures = summaryFigures(list);
+  if (summaryStyle === 'a') {
+    summaryBox.innerHTML = `<div class="customers-sum--a">${figures.map(figure =>
+      `<span class="sum-item"><b class="sum-value">${escapeHtml(figure.value)}</b><span class="sum-label">${escapeHtml(figure.label.toLowerCase())}</span></span>`).join('')}</div>`;
+    return;
+  }
+  if (summaryStyle === 'b') {
+    summaryBox.innerHTML = `<div class="customers-sum--b">${figures.map(figure =>
+      `<div class="sum-item"><span class="sum-label">${escapeHtml(figure.label)}</span><span class="sum-value">${escapeHtml(figure.value)}</span><span class="sum-note">${escapeHtml(figure.note)}</span></div>`).join('')}</div>`;
+    return;
+  }
+  summaryBox.innerHTML = `<div class="customers-sum--c"><table>
+    <thead><tr>${figures.map(figure => `<th>${escapeHtml(figure.label)}</th>`).join('')}</tr></thead>
+    <tbody><tr>${figures.map(figure => `<td>${escapeHtml(figure.value)}<small>${escapeHtml(figure.note)}</small></td>`).join('')}</tr></tbody>
+  </table></div>`;
+}
+
 /** Đếm số ô lọc phụ đang có giá trị, để gắn con số lên nút "Lọc thêm". */
 function countMoreFilters() {
   return ['channel', 'gender', 'product', 'ordered', 'active', 'combo', 'minorders']
@@ -258,6 +308,7 @@ function render() {
   const to = Math.min(page * pageSize, shown.length);
   totalLine.textContent = `Hiển thị ${from}–${to} / ${shown.length} khách hàng${shown.length === ALL.length ? '' : ` (tổng ${ALL.length})`}`;
 
+  renderSummary(shown);
   renderPager(pageCount);
   renderBulk();
   const count = countMoreFilters();
@@ -385,6 +436,17 @@ Object.entries(filters).forEach(([key, input]) => {
   if (key === 'q') return;
   input.addEventListener('change', resetView);
 });
+/* Nút chuyển kiểu dashboard — chỉ phục vụ việc so sánh trong bản xem trước. */
+const switchBar = document.querySelector('.preview-switch');
+switchBar.addEventListener('click', event => {
+  const button = event.target.closest('[data-sum]');
+  if (!button) return;
+  summaryStyle = button.dataset.sum;
+  switchBar.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+  render();
+});
+switchBar.querySelector('[data-sum="a"]').classList.add('active');
+
 tabsBar.addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]');
   if (!tab) return;

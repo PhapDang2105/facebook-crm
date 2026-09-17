@@ -17,6 +17,7 @@ import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
 import { attachPhoneWarning, fetchPosCustomerAddresses } from './phone-warnings.mjs';
 import { isUsableStreet, resolveAddress } from './processing/locations.mjs';
+import { inferAddress } from './processing/address-ai.mjs';
 
 const landingOrdersPath = process.env.LANDING_ORDERS_PATH
   || path.join(projectRoot, 'data', 'processed', 'landing-orders.json');
@@ -557,6 +558,16 @@ export async function autoFillLandingOrder(order, payload, orders, context = {})
       for (const key of Object.keys(patched)) if (/^(address|short_address|location|province|district|ward|commune|country|city|state)$/i.test(key)) delete patched[key];
       patched.address = picked.address;
       autoFilled.address = `${picked.address} (từ ${picked.source})`;
+    } else if (order.address && order.address !== 'Chưa có địa chỉ' && ['none', 'partial'].includes(order.locationConfidence)) {
+      // Khách có gõ địa chỉ nhưng bộ đọc luật không tách đủ ba cấp: hỏi AI.
+      // Kết quả đã được đối chiếu danh mục kho; đơn vẫn vào Xử lý dữ liệu để duyệt.
+      const guess = await (context.inferAddress || inferAddress)(order.address);
+      if (guess?.canonical) {
+        for (const key of Object.keys(patched)) if (/^(address|short_address|location|province|district|ward|commune|country|city|state)$/i.test(key)) delete patched[key];
+        patched.address = guess.canonical;
+        autoFilled.address = `${guess.canonical} (AI suy ra từ "${order.address}"${guess.confidence === 'low' ? ', cần đối chiếu' : ''})`;
+        autoFilled.addressAi = { original: order.address, reason: guess.reason, sources: guess.sources || [] };
+      }
     }
   }
   if (!Object.keys(autoFilled).length) return order;

@@ -98,6 +98,8 @@ export function processingNotes(order) {
     notes.push('⚠ Chưa có địa chỉ');
   } else {
     const missing = missingAddressParts(order);
+    // Kho chỉ nhận ba cấp trước sáp nhập 2025; khách ghi phường mới thì không tự đổi, nhân viên hỏi lại.
+    if (order.postMerger) notes.push('⚠ Địa chỉ ghi theo đơn vị sau sáp nhập, hỏi lại khách');
     if (missing.length === 4) notes.push(`⚠ Địa chỉ không rõ: "${address.slice(0, 60)}"`);
     else if (missing.length) notes.push(`⚠ Thiếu ${missing.join(', ')}`);
     if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên, hỏi lại');

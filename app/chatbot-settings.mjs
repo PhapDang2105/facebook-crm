@@ -24,6 +24,10 @@ export const defaultChatbotSettings = Object.freeze({
   // Comments: like the customer's comment; hide it when it holds a phone number.
   commentLike: true,
   commentHide: 'phone',
+  // Địa chỉ bộ đọc luật không tách đủ ba cấp thì hỏi Gemini (kèm tra cứu
+  // Google Search); chỉ nhận câu trả lời khớp danh mục kho.
+  addressAi: true,
+  addressAiSearch: true,
   messageTemplates: {}
 });
 
@@ -102,6 +106,8 @@ export function normalizeChatbotSettings(value = {}) {
       : String(value.complaintKeywords).trim().slice(0, 2000),
     commentLike: value.commentLike !== false,
     commentHide: ['none', 'phone', 'all'].includes(value.commentHide) ? value.commentHide : defaultChatbotSettings.commentHide,
+    addressAi: value.addressAi !== false,
+    addressAiSearch: value.addressAiSearch !== false,
     messageTemplates,
     updatedAt: Number(value.updatedAt) || Date.now()
   };

@@ -1,9 +1,26 @@
 import { buildTemplatePrompt, pickVariant, renderChatbotReply } from './chatbot-templates.mjs';
+import { chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
+import { describeDeliveryAddress, mergeAddressFragment } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { autoLabelEventsFor, foldVietnamese } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
 import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
+
+/**
+ * Địa chỉ khách nhắn mà bộ đọc luật không tách đủ ba cấp thì hỏi AI trước khi
+ * bot hỏi lại khách; câu trả lời chỉ được dùng khi khớp danh mục kho. Đổi
+ * thẳng Customer_Address trong JSON của mô hình nên phần sau (ghép địa chỉ,
+ * hỏi lại, lên đơn) không cần biết địa chỉ đến từ đâu.
+ */
+export async function refineAddressWithAi(parsed, context = {}, settings = {}, fetchImpl) {
+  const fresh = String(parsed?.Customer_Address || '').trim();
+  const merged = mergeAddressFragment(fresh !== '0' ? fresh : '', context.pendingOrder?.address || '');
+  if (!merged || describeDeliveryAddress(merged).complete) return parsed;
+  const guess = await inferAddress(merged, { settings, fetchImpl, timeoutMs: chatTimeoutMs }).catch(() => null);
+  if (guess?.canonical) parsed.Customer_Address = guess.canonical;
+  return parsed;
+}
 
 export function parseModelAnswer(answer) {
   const raw = String(answer || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -155,6 +172,7 @@ export async function requestDirectModelReply(options) {
       if (!answer) throw new Error('Mô hình không trả về nội dung.');
       const parsedAnswer = parseModelAnswer(answer);
       if (rawResponse) return { raw: answer, parsed: parsedAnswer, conversationId: '' };
+      await refineAddressWithAi(parsedAnswer, options.context || {}, settings, fetchImpl);
       return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates, options.context || {}), conversationId: '' };
     } catch (error) {
       lastError = error;

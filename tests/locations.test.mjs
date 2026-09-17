@@ -10,6 +10,7 @@ import {
   mergeAddressFragment,
   normalizeExportLocation,
   mergedProvinceMembers,
+  cleanTelex,
   resolveAddress,
   streetForDisplay
 } from '../app/processing/locations.mjs';
@@ -258,4 +259,80 @@ test('normalizeExportLocation giữ hành vi cũ', () => {
   assert.equal(normalizeExportLocation('Thành phố Thanh Hoá'), 'Thành phố Thanh Hóa');
   assert.equal(normalizeExportLocation('Hà Nội'), 'Hà Nội');
   assert.equal(normalizeExportLocation('Xã Tân Phú'), 'Xã Tân Phú');
+});
+
+test('form nối ba cấp chuẩn sau phần khách gõ tay có lặp tỉnh: đọc đủ ba cấp, phần đường sạch', () => {
+  const repeated = resolveAddress('28 xóm 6 xã Bảo Lạc tỉnh Cao Bằng, Xã Bảo Lạc, Huyện Bảo Lạc, Cao Bằng');
+  assert.deepEqual(names(repeated), ['Cao Bằng', 'Huyện Bảo Lạc', 'Thị trấn Bảo Lạc']);
+  assert.equal(repeated.confidence, 'exact');
+  assert.equal(repeated.street, '28 xóm 6');
+  // Khách ghi "xã" cho một thị trấn: loại hình không chặn.
+  assert.deepEqual(names(resolveAddress('Tổ 3 xã sông mã tỉnh Sơn La, Thị trấn Sông Mã, Huyện Sông Mã, Sơn La')), ['Sơn La', 'Huyện Sông Mã', 'Thị trấn Sông Mã']);
+  // Tỉnh ghi giữa câu, form nối phường/quận phía sau (ở tỉnh cũ đã nhập vào): vẫn tìm thấy.
+  assert.deepEqual(names(resolveAddress('Số 1 đinh Tiên Hoàng Nam Vĩnh Yên phường Vĩnh Phúc tỉnh Phú Thọ, Phường Khai Quang, Thành phố Vĩnh Yên')), ['Vĩnh Phúc', 'Thành phố Vĩnh Yên', 'Phường Khai Quang']);
+  // Tên phường trùng tên đường trong cùng địa chỉ: tên đường giữ nguyên.
+  assert.equal(resolveAddress('12 Lê Lợi, Phường Lê Lợi, Quận Ngô Quyền, Hải Phòng').street, '12 Lê Lợi');
+  // Tỉnh lặp lại sớm không bị đọc thành thành phố cùng tên: hai quận cùng có Phường Đông Sơn thì mơ hồ.
+  const dongSon = resolveAddress('Tdp Đông hoàng phường đông sơn tỉnh Thanh Hoá, Phường Đông Sơn, Thanh Hóa');
+  assert.equal(dongSon.district, null);
+  assert.equal(dongSon.ambiguous.level, 'district');
+  // Có dấu ở tỉnh vẫn đủ để phân biệt Sa Pa với Sa Pả sau khi tỉnh đã được che.
+  assert.deepEqual(names(resolveAddress('Sa Pa, Sa Pa, Lào Cai')), ['Lào Cai', 'Huyện Sa Pa', 'Phường Sa Pa']);
+});
+
+test('số La Mã, huyện đảo không có cấp xã, viết tắt và chữ dính', () => {
+  assert.deepEqual(names(resolveAddress('84 nguyễn văn linh, Phường Hải Châu I, Quận Hải Châu, Đà Nẵng')), ['Đà Nẵng', 'Quận Hải Châu', 'Phường Hải Châu 1']);
+  assert.deepEqual(names(resolveAddress('Phường Hải Châu II, Quận Hải Châu, Đà Nẵng')), ['Đà Nẵng', 'Quận Hải Châu', 'Phường Hải Châu 2']);
+  // Huyện đảo chỉ có một đơn vị mang tên huyện: tỉnh + huyện là đủ, cột phường theo danh mục.
+  const island = resolveAddress('Đường Nguyễn Văn linh, Khu 7, Huyện Côn Đảo, Bà Rịa-Vũng Tàu');
+  assert.deepEqual(names(island), ['Bà Rịa-Vũng Tàu', 'Huyện Côn Đảo', 'Côn Đảo']);
+  assert.equal(island.confidence, 'exact');
+  assert.equal(describeDeliveryAddress('Khu 7, Côn Đảo, Bà Rịa Vũng Tàu').complete, true);
+  assert.deepEqual(names(resolveAddress('Đảo Cồn Cỏ, Quảng Trị')), ['Quảng Trị', 'Huyện Đảo Cồn Cỏ', 'Đảo Cồn Cỏ']);
+  assert.deepEqual(canonicalLocationColumns({ district: 'Huyện Côn Đảo', province: 'Bà Rịa - Vũng Tàu' }), { province: 'Bà Rịa-Vũng Tàu', district: 'Huyện Côn Đảo', ward: 'Côn Đảo' });
+  // dalat, tpth, hp, "PAn phú, Tp Thủ Đức."
+  assert.deepEqual(names(resolveAddress('17/18 trần phú phường 3 dalat')), ['Lâm Đồng', 'Thành phố Đà Lạt', 'Phường 3']);
+  const thuDuc = resolveAddress('Nhà 11 đường S khu đô thị Lakeview City, PAn phú, Tp Thủ Đức.');
+  assert.deepEqual(names(thuDuc), ['TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường An Phú']);
+  assert.equal(thuDuc.street, 'Nhà 11 đường S khu đô thị Lakeview');
+  assert.equal(resolveAddress('nhà số Quán Rẽ an khánh hp').province.name, 'Hải Phòng');
+  assert.equal(resolveAddress('Vinh tri 2 phường Nguyệt viên tpth').province.name, 'Thanh Hóa');
+  // "PXi" trong "Xã Đắk PXi" không phải "Phường Xi".
+  assert.deepEqual(names(resolveAddress('Xã Đắk PXi, Huyện Đắk Hà, Kon Tum')), ['Kon Tum', 'Huyện Đắk Hà', 'Xã Đắk PXi']);
+  assert.equal(expandAddressAbbreviations('QTân Bình, PAn Phú'), 'Quận Tân Bình, Phường An Phú');
+});
+
+test('gõ lỗi Telex trong đoạn không dấu phẩy được làm sạch rồi so khớp mờ', () => {
+  assert.equal(cleanTelex('diichj vong'), 'dich vong');
+  assert.equal(cleanTelex('hoaang'), 'hoang');
+  const telex = resolveAddress('Ngõ 199 trần quốc hoàn diichj vọng cầu giấy hà nội');
+  assert.deepEqual(names(telex), ['Hà Nội', 'Quận Cầu Giấy', 'Phường Dịch Vọng']);
+  assert.equal(telex.fuzzy, true);
+  assert.equal(telex.street, 'Ngõ 199 trần quốc hoàn');
+  // Không có dấu Telex thừa thì cụm từ trong tên đường không bị so mờ thành quận khác.
+  assert.equal(resolveAddress('146 trần bình trọng phường Thủ Dầu Một Tp.hcm').district, null);
+});
+
+test('địa chỉ ghi theo đơn vị sau sáp nhập 2025: không đoán, chỉ đánh dấu để hỏi lại', () => {
+  for (const text of [
+    '58 hoàng hoa thám, phường tây hồ, hà nội',
+    '146 trần bình trọng phường Thủ Dầu Một Tp.hcm',
+    '83 lê Đại phường hoà cường thành phố Đà Nẵng, Phường Hòa Cường, Đà Nẵng',
+    'Vinh tri 2 phường Nguyệt viên tpth'
+  ]) {
+    const resolved = resolveAddress(text);
+    assert.equal(resolved.ward, null, text);
+    assert.equal(resolved.postMerger, true, text);
+    assert.equal(describeDeliveryAddress(text).complete, false, text);
+  }
+  // Tỉnh mới ghi kèm phường của tỉnh cũ đã nhập vào vẫn đọc được, không phải sau sáp nhập.
+  const merged = resolveAddress('Phường Tân Đông Hiệp, Hồ Chí Minh');
+  assert.equal(merged.postMerger, false);
+  assert.equal(merged.confidence, 'exact');
+  // Đủ ba cấp, thiếu cấp không kèm "phường X", hay mơ hồ: không đánh dấu.
+  assert.equal(resolveAddress('12 Lê Lợi, Phường Bến Nghé, Quận 1, HCM').postMerger, false);
+  assert.equal(resolveAddress('Quận 3, Hồ Chí Minh').postMerger, false);
+  assert.equal(resolveAddress('Thôn 3, Xa Hoang Dong, Huyen Hoang Hoa, Thanh Hoa').postMerger, false);
+  // Sai chính tả nhẹ một phường có thật không bị coi là đơn vị mới.
+  assert.equal(resolveAddress('phường Nguyễn Trãi, Hà Nội').postMerger, false);
 });

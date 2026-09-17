@@ -19,6 +19,8 @@ test('đơn bỏ dở thiếu địa chỉ, máy tự điền sản phẩm, số
 test('địa chỉ thiếu cấp, sản phẩm chưa khớp, địa chỉ trùng tên: nêu đúng cấp thiếu', () => {
   const notes = processingNotes({ address: 'Bắc Kạn', street: '', ward: '', district: '', province: 'Bắc Kạn', products: [], locationConfidence: 'partial', landing: {} });
   assert.deepEqual(notes, ['⚠ Thiếu số nhà, phường/xã, quận/huyện', '⚠ Chưa chọn sản phẩm']);
+  const postMerger = processingNotes({ address: '58 hoàng hoa thám, phường tây hồ, hà nội', street: '58 hoàng hoa thám', ward: '', district: 'Quận Tây Hồ', province: 'Hà Nội', locationConfidence: 'partial', postMerger: true, products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450' }], landing: {} });
+  assert.deepEqual(postMerger, ['⚠ Địa chỉ ghi theo đơn vị sau sáp nhập, hỏi lại khách', '⚠ Thiếu phường/xã']);
   const ambiguous = processingNotes({ address: '12 Lê Lợi, Phường 1', street: '12 Lê Lợi', ward: 'Phường 1', district: '', province: 'TP Hồ Chí Minh', locationConfidence: 'ambiguous', products: [{ name: 'Combo lạ', sku: '', quantity: 1 }] });
   assert.deepEqual(ambiguous, ['⚠ Thiếu quận/huyện', '⚠ Địa chỉ trùng tên, hỏi lại', '⚠ Sản phẩm lạ: Combo lạ']);
   const unreadable = processingNotes({ address: 'Thì địa chỉ trên rồi', street: '', ward: '', district: '', province: '', locationConfidence: 'none', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }] });

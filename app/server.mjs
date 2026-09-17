@@ -9,6 +9,7 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
+import { configureAddressAi } from './processing/address-ai.mjs';
 import { defaultMessageTemplates, publicImageUrl } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
@@ -236,6 +237,8 @@ async function readChatbotSettings() {
   }
 }
 
+configureAddressAi({ readSettings: readChatbotSettings });
+
 async function writeChatbotSettings(settings) {
   const normalized = normalizeChatbotSettings(settings);
   const { directApiKey, ...safeSettings } = normalized;
@@ -437,7 +440,7 @@ async function serveFile(request, response, pathname) {
   const relative = pathname === '/' ? 'index.html' : pathname === '/privacy' ? 'privacy.html' : pathname.slice(1);
   const filePath = path.resolve(webRoot, relative);
   if (!filePath.startsWith(path.resolve(webRoot))) return sendJson(response, 400, { error:'Invalid path.' });
-  const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.webp':'image/webp' };
+  const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.webp':'image/webp', '.woff2':'font/woff2', '.ico':'image/x-icon' };
   try {
     const stats = await stat(filePath);
     const etag = `W/"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;

@@ -156,6 +156,8 @@ chatbotSettingsSystemPrompt?.addEventListener('input', updateChatbotSystemPrompt
 const chatbotSettingsMemoryEnabled = document.querySelector('#chatbot-settings-memory-enabled');
 const chatbotSettingsCommentLike = document.querySelector('#chatbot-settings-comment-like');
 const chatbotSettingsCommentHide = document.querySelector('#chatbot-settings-comment-hide');
+const chatbotSettingsAddressAi = document.querySelector('#chatbot-settings-address-ai');
+const chatbotSettingsAddressAiSearch = document.querySelector('#chatbot-settings-address-ai-search');
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
 const chatbotSettingsMemoryWindowRange = document.querySelector('#chatbot-settings-memory-window-range');
 const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
@@ -3172,6 +3174,8 @@ async function loadChatbotSettings() {
     chatbotSettingsMemoryEnabled.checked = settings.memoryEnabled !== false;
     if (chatbotSettingsCommentLike) chatbotSettingsCommentLike.checked = settings.commentLike !== false;
     if (chatbotSettingsCommentHide) chatbotSettingsCommentHide.value = settings.commentHide || 'phone';
+    if (chatbotSettingsAddressAi) chatbotSettingsAddressAi.checked = settings.addressAi !== false;
+    if (chatbotSettingsAddressAiSearch) chatbotSettingsAddressAiSearch.checked = settings.addressAiSearch !== false;
     chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
     syncChatbotMemoryWindow('number');
     chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;
@@ -6236,6 +6240,8 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         memoryEnabled: chatbotSettingsMemoryEnabled.checked,
         commentLike: chatbotSettingsCommentLike?.checked !== false,
         commentHide: chatbotSettingsCommentHide?.value || 'phone',
+        addressAi: chatbotSettingsAddressAi?.checked !== false,
+        addressAiSearch: chatbotSettingsAddressAiSearch?.checked !== false,
         memoryWindow: chatbotSettingsMemoryWindow.value,
         structuredOutput: chatbotSettingsStructuredOutput.checked,
         retryCount: chatbotSettingsRetryCount.value,

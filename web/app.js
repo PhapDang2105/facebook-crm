@@ -623,6 +623,8 @@ function customerState(customer) {
 let customersLoaded = [];
 let customersLoadedTotal = 0;
 
+// Bảng gom sáu cột, mỗi ô hai dòng: dòng trên là thứ cần đọc trước, dòng dưới
+// là thông tin phụ. Mười cột chữ nhỏ dồn ngang trước đây rất khó đọc.
 function renderCustomers(items, total) {
   if (!customersTable) return;
   customersLoaded = items;
@@ -635,6 +637,13 @@ function renderCustomers(items, total) {
       ? String(first.name || '').localeCompare(String(second.name || ''), 'vi')
       : (Number(second[sortKey]) || 0) - (Number(first[sortKey]) || 0));
   customersItems = shown;
+
+  const lead = document.querySelector('#customers-lead');
+  if (lead) {
+    const returning = items.filter(customer => customerState(customer).key === 'returning').length;
+    const loyal = items.filter(customer => customerState(customer).key === 'loyal').length;
+    lead.textContent = `${total} khách đã mua · ${returning} khách quay lại lần hai · ${loyal} khách trung thành`;
+  }
   if (customersTotal) {
     customersTotal.textContent = shown.length === total
       ? `Tổng: ${total} khách hàng`
@@ -645,39 +654,44 @@ function renderCustomers(items, total) {
     return;
   }
   customersTable.classList.remove('is-empty');
+
   const rows = shown.map((customer, index) => {
     const state = customerState(customer);
     const source = (customer.sources || []).map(name => customerSourceNames[name] || name).join(' · ');
-    // Cột này là ĐƠN GẦN NHẤT, không phải tổng cả đời — nhân viên gọi lại khách
-    // cần biết lần rồi họ lấy gì. Mỗi mặt hàng một dòng.
     const bought = customer.lastOrderProducts || [];
-    const boughtCell = bought.length
-      ? `<div class="customer-products" title="${escapeHtml(bought.map(item => `${item.name} ×${item.quantity}`).join(', '))}">${
-          bought.slice(0, 3).map(item => `<span class="customer-product">${escapeHtml(item.name)} ×${item.quantity}</span>`).join('')
-        }${bought.length > 3 ? `<span class="customer-product-meta">+${bought.length - 3} mặt hàng khác</span>` : ''}</div>`
-      : '<span class="customer-never">—</span>';
-    const boughtWhen = customer.lastOrderAt
-      ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}</small>`
-      : '<span class="customer-never">Chưa mua</span>';
+    const products = bought.length
+      ? bought.slice(0, 2).map(item => `${item.name} ×${item.quantity}`).join(', ') + (bought.length > 2 ? `, +${bought.length - 2}` : '')
+      : 'Không có mặt hàng';
     return `<tr data-customer-index="${index}"${customer.unread ? ' class="is-unread"' : ''}>
-      <td><strong>${escapeHtml(customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng'))}</strong></td>
-      <td class="customer-source">${source ? escapeHtml(source) : '<span class="customer-never">Không rõ</span>'}</td>
-      <td class="customer-state-cell"><span class="customer-state customer-state--${state.key}">${state.label}</span></td>
-      <td>${escapeHtml(customer.phone)}</td>
-      <td class="customer-area" title="${escapeHtml(customer.address || '')}">${customer.address
-        ? `<span class="customer-area-text">${escapeHtml(customer.address)}</span>`
-        : '<span class="customer-never">Chưa có địa chỉ</span>'}</td>
-      <td class="customer-order-count customer-mid">${customer.orderCount || ''}</td>
-      <td class="customer-money customer-mid">${escapeHtml(formatCustomerMoney(customer.orderTotal))}</td>
-      <td class="customer-money customer-mid">${escapeHtml(formatCustomerMoney(customer.lastOrderTotal))}</td>
-      <td class="customer-bought customer-mid">${boughtCell}</td>
-      <td class="customer-bought-when">${boughtWhen}</td>
+      <td>
+        <span class="customer-main">${escapeHtml(customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng'))}</span>
+        <span class="customer-sub">${escapeHtml(customer.phone || 'Chưa có số')}</span>
+      </td>
+      <td class="customer-area">
+        <span class="customer-area-text">${escapeHtml(customer.address || 'Chưa có địa chỉ')}</span>
+      </td>
+      <td>
+        <span class="customer-state customer-state--${state.key}">${state.label}</span>
+        <span class="customer-sub customer-sub--dim">${escapeHtml(source || 'Không rõ nguồn')}</span>
+      </td>
+      <td class="customer-right">
+        <span class="customer-strong">${Number(customer.orderCount) || 0} đơn</span>
+        <span class="customer-sub">${escapeHtml(formatCustomerMoney(customer.orderTotal))}</span>
+      </td>
+      <td>
+        <span class="customer-strong">${escapeHtml(formatCustomerMoney(customer.lastOrderTotal))}</span>
+        <span class="customer-sub">${escapeHtml(products)}</span>
+      </td>
+      <td>
+        <span class="customer-main">${escapeHtml(timeSince(customer.lastOrderAt) || 'Chưa mua')}</span>
+        <span class="customer-sub customer-sub--dim">${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</span>
+      </td>
     </tr>`;
   }).join('');
+
   customersTable.innerHTML = `<table><thead><tr>
-    <th>Khách hàng</th><th>Nguồn khách</th><th class="customer-mid">Trạng thái</th><th>Số điện thoại</th><th>Khu vực</th>
-    <th class="customer-mid">Tổng số đơn</th><th class="customer-mid">Đã chi</th><th class="customer-mid">Đơn gần nhất</th>
-    <th class="customer-mid customer-col-products">Sản phẩm</th><th>Mua lần cuối</th>
+    <th>Khách hàng</th><th>Khu vực</th><th>Trạng thái</th>
+    <th class="customer-right">Đơn đã mua</th><th>Đơn gần nhất</th><th>Mua lần cuối</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 

@@ -482,6 +482,7 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-status-select[data-tone="cancelled"] { color: #b42318; background: #fff1f0; border-color: #f7c9c4; }
 .preview-actions { width: 44px; text-align: center; }
 .preview-actions--tail { width: auto; }
+.data-preview th.preview-actions--tail { justify-content: center; text-align: center; }
 /* Số điện thoại chỉ là con số: canh trái, không giãn. */
 .data-preview td.preview-phone { justify-content: flex-start; }
 /* Xử lý dữ liệu: bốn tab theo ngày đặt, chữ trần không nền, tab đang chọn gạch

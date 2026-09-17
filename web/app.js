@@ -5885,21 +5885,18 @@ let exportRowsCache = { key: '', rows: [], streets: [], locationCheck: { checked
 const orderExportSkip = document.querySelector('#order-export-skip');
 const orderExportCheck = document.querySelector('#order-export-check');
 
-// Khung kiểm tra ba cấp: đơn nào tỉnh/quận/phường chưa đúng danh mục kho thì
-// liệt kê để sửa ở Xử lý dữ liệu; nút xuất chính bị khoá, chỉ còn nút xuất bỏ qua.
+// Khung kiểm tra ba cấp chỉ hiện khi có đơn tỉnh/quận/phường chưa đúng danh mục
+// kho: liệt kê để sửa ở Xử lý dữ liệu, khoá nút xuất chính, chỉ còn nút xuất bỏ
+// qua. Mọi đơn đều đạt thì không hiện gì — bảng xem trước là đủ.
 function renderExportLocationCheck(check, totalRows) {
   if (!orderExportCheck) return;
   const invalid = Array.isArray(check?.invalid) ? check.invalid : [];
   const checked = Number(check?.checked) || 0;
-  orderExportCheck.classList.toggle('hidden', !totalRows);
+  orderExportCheck.classList.toggle('hidden', !totalRows || invalid.length === 0);
   orderExportCheck.classList.toggle('is-invalid', invalid.length > 0);
   if (orderExportSkip) orderExportSkip.classList.toggle('hidden', invalid.length === 0);
   if (orderExport) orderExport.disabled = totalRows === 0 || invalid.length > 0;
-  if (!totalRows) { orderExportCheck.innerHTML = ''; return; }
-  if (!invalid.length) {
-    orderExportCheck.innerHTML = `<strong>✓ Đã kiểm tra ${checked} đơn: tỉnh, quận/huyện, phường/xã đều đúng danh mục kho.</strong>`;
-    return;
-  }
+  if (!totalRows || !invalid.length) { orderExportCheck.innerHTML = ''; return; }
   const items = invalid.slice(0, 30).map(item => `<li><b>${escapeHtml(item.customer || 'Khách')}</b> · ${escapeHtml(item.phone || '')} — ${escapeHtml([item.ward, item.district, item.province].filter(Boolean).join(', ') || item.address || '')}<br><small>${escapeHtml(item.issues.join('; '))}</small></li>`).join('');
   orderExportCheck.innerHTML = `<strong>⚠ ${invalid.length}/${checked} đơn có địa chỉ chưa đúng ba cấp của danh mục kho. Sửa ở Xử lý dữ liệu rồi quay lại, hoặc xuất bỏ qua các đơn này.</strong><ul>${items}</ul>${invalid.length > 30 ? `<small>… và ${invalid.length - 30} đơn nữa</small>` : ''}`;
 }

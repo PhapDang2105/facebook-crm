@@ -269,7 +269,11 @@
       </section>
 
       <section class="order-stage hidden" data-order-panel="export">
-        <button class="export-button" id="order-export" type="button" disabled hidden>Xuất XLSX</button>
+        <div class="export-toolbar">
+          <button class="export-button" id="order-export" type="button" disabled hidden>Xuất XLSX</button>
+          <button class="export-button export-button--skip hidden" id="order-export-skip" type="button">Xuất bỏ qua đơn chưa chuẩn</button>
+        </div>
+        <div class="export-check hidden" id="order-export-check" role="status" aria-live="polite"></div>
         <div class="export-preview" id="order-export-preview"></div>
       </section>
     </section>

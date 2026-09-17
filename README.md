@@ -76,6 +76,10 @@ GraphCode and a portable Node.js runtime are installed locally under `tools/`; n
 
 Chatbot chốt đơn → đơn tự xuất hiện trong **Đơn hàng → Nhập dữ liệu** (cột Nguồn đơn = Chatbot) cùng các file import → kiểm tra ở **Xử lý dữ liệu** → **Xuất dữ liệu** tạo file XLSX cho kho; preview và file dùng chung một hàm trên server.
 
+## Kiểm tra ba cấp trước khi xuất kho
+
+Kho nhận file theo ba cột Tỉnh thành / Quận huyện / Phường xã, nên trước khi xuất, `checkLocationColumns` (trong `app/processing/locations.mjs`) đối chiếu ba cột của từng đơn với `database/seeds/dmhc.csv`: tên phải trùng đúng tên danh mục (đúng dấu, đúng loại hình) và phường phải thuộc quận, quận thuộc tỉnh. `buildExportRows` chạy kiểm tra ở dòng đầu mỗi đơn và trả `rows.locationCheck` (số đơn đã kiểm, danh sách đơn chưa chuẩn kèm lý do). Màn **Xuất dữ liệu** hiện khung kết quả phía trên bảng xem trước: xanh khi mọi đơn đạt, đỏ liệt kê khách, số điện thoại, ba cấp đang có và lỗi; dòng đầu của đơn chưa chuẩn tô đỏ trong bảng. Khi còn đơn chưa chuẩn, nút **Xuất XLSX** bị khoá và `POST /api/orders/export` trả 409; nhân viên sửa ở Xử lý dữ liệu, hoặc bấm **Xuất bỏ qua đơn chưa chuẩn** (`skipInvalidLocations: true`) để xuất phần còn lại — đơn bị bỏ vẫn nằm trong bảng và không được ghi vào tệp khách hàng.
+
 ## Tệp khách hàng từ đơn đã xuất
 
 Mỗi lần bấm **Xuất XLSX** ở Xuất dữ liệu, khách của các đơn trong file được ghi vào `data/processed/customer-file.json` theo số điện thoại (`app/customer-file.mjs`): tên, địa chỉ ba cấp, nguồn đơn, từng đơn với sản phẩm, số lượng, đơn giá, ngày đặt và lần xuất đầu. Xuất lại cùng đơn không tạo bản thứ hai. Màn **Khách hàng** đọc tệp này cùng hội thoại Facebook: khách trùng số điện thoại với một khách Facebook thì cộng thêm đơn (đơn chatbot đã đếm từ hội thoại không cộng lại), khách landing hay import chưa từng nhắn tin thì là một dòng riêng với nguồn "Đơn đã xuất". Nhờ vậy mọi khách đã lên đơn đều nằm trong một danh sách để lọc remarketing (đã mua gì, combo mấy túi, mua lần cuối khi nào) và xuất CSV.

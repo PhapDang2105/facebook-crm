@@ -6,7 +6,8 @@ import {
   normalizeExportLocation,
   resolveProductRelation,
   splitSkuForExport,
-  exportPreviewStreets
+  exportPreviewStreets,
+  exportedOrderData
 } from '../app/order-export.mjs';
 
 assert.ok(PRODUCT_RELATIONS.every(relation => ['single', 'combo'].includes(relation.type)));
@@ -85,3 +86,26 @@ assert.equal(fullRows[0][35], '12 Nguyễn Huệ, Phường Bến Nghé, Quận 
 assert.deepEqual(exportPreviewStreets(fullRows), ['12 Nguyễn Huệ']);
 
 console.log('PASS: order export single/combo relations');
+
+// ===== Kiểm tra ba cấp trước khi xuất =====
+{
+  const headers3 = ['Mã đơn hàng', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Sản phẩm', 'Số điện thoại', 'Khách hàng', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã'];
+  const good = ['DH-A', 'GRA-XANH-Z450', '1', '189000', 'Granola Xanh', '0901234561', 'An', '12 Nguyễn Huệ', 'TP Hồ Chí Minh', 'Quận 1', 'Phường Bến Nghé'];
+  const wrongWard = ['DH-B', 'GRA-XANH-Z450', '2', '189000', 'Granola Xanh', '0901234562', 'Bình', '5 Lê Lợi', 'TP Hồ Chí Minh', 'Quận 1', 'Phường Không Có'];
+  const noWard = ['DH-C', 'GRA-XANH-Z450', '1', '189000', 'Granola Xanh', '0901234563', 'Cúc', 'Hà Nội', 'Hà Nội', '', ''];
+  const checked = buildExportRows({ headers: headers3, rows: [good, wrongWard, noWard] });
+  assert.equal(checked.locationCheck.checked, 3);
+  assert.deepEqual(checked.locationCheck.invalid.map(item => item.sourceOrderId), ['DH-B', 'DH-C'], 'đơn sai phường và đơn thiếu cấp bị báo');
+  assert.match(checked.locationCheck.invalid[0].issues.join(' '), /Phường\/xã "Phường Không Có" không thuộc Quận 1/);
+  assert.match(checked.locationCheck.invalid[1].issues.join(' '), /Thiếu quận\/huyện/);
+  assert.equal(checked.locationCheck.invalid[0].orderNumber, 2, 'số thứ tự trong file để tô dòng xem trước');
+  assert.equal(checked.filter(row => row[0]).length, 3, 'xem trước vẫn dựng đủ ba đơn');
+
+  const skipped = buildExportRows({ headers: headers3, rows: [good, wrongWard, noWard] }, { skipInvalidLocations: true });
+  assert.deepEqual(skipped.map(row => row[0]).filter(Boolean), [1], 'chỉ đơn chuẩn vào file, STT liền mạch');
+  assert.equal(skipped[0][36], 'TP Hồ Chí Minh');
+  assert.equal(skipped[0][38], 'Phường Bến Nghé');
+  assert.equal(skipped.locationCheck.invalid.length, 2);
+  const kept = exportedOrderData({ headers: headers3, rows: [good, wrongWard, noWard] }, skipped);
+  assert.deepEqual(kept.rows.map(row => row[0]), ['DH-A'], 'tệp khách hàng chỉ ghi đơn đã vào file');
+}

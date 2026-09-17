@@ -5881,7 +5881,28 @@ const exportPreviewWidths = [55,130,135,155,165,175,95,110,105,105,165,145,255,1
 // The export rows come from the server — the same function that writes the
 // XLSX — so the preview can never disagree with the file. The frontend used to
 // carry its own copy of the SKU mapping with hard-coded prices and weights.
-let exportRowsCache = { key: '', rows: [], streets: [] };
+let exportRowsCache = { key: '', rows: [], streets: [], locationCheck: { checked: 0, invalid: [] } };
+const orderExportSkip = document.querySelector('#order-export-skip');
+const orderExportCheck = document.querySelector('#order-export-check');
+
+// Khung kiểm tra ba cấp: đơn nào tỉnh/quận/phường chưa đúng danh mục kho thì
+// liệt kê để sửa ở Xử lý dữ liệu; nút xuất chính bị khoá, chỉ còn nút xuất bỏ qua.
+function renderExportLocationCheck(check, totalRows) {
+  if (!orderExportCheck) return;
+  const invalid = Array.isArray(check?.invalid) ? check.invalid : [];
+  const checked = Number(check?.checked) || 0;
+  orderExportCheck.classList.toggle('hidden', !totalRows);
+  orderExportCheck.classList.toggle('is-invalid', invalid.length > 0);
+  if (orderExportSkip) orderExportSkip.classList.toggle('hidden', invalid.length === 0);
+  if (orderExport) orderExport.disabled = totalRows === 0 || invalid.length > 0;
+  if (!totalRows) { orderExportCheck.innerHTML = ''; return; }
+  if (!invalid.length) {
+    orderExportCheck.innerHTML = `<strong>✓ Đã kiểm tra ${checked} đơn: tỉnh, quận/huyện, phường/xã đều đúng danh mục kho.</strong>`;
+    return;
+  }
+  const items = invalid.slice(0, 30).map(item => `<li><b>${escapeHtml(item.customer || 'Khách')}</b> · ${escapeHtml(item.phone || '')} — ${escapeHtml([item.ward, item.district, item.province].filter(Boolean).join(', ') || item.address || '')}<br><small>${escapeHtml(item.issues.join('; '))}</small></li>`).join('');
+  orderExportCheck.innerHTML = `<strong>⚠ ${invalid.length}/${checked} đơn có địa chỉ chưa đúng ba cấp của danh mục kho. Sửa ở Xử lý dữ liệu rồi quay lại, hoặc xuất bỏ qua các đơn này.</strong><ul>${items}</ul>${invalid.length > 30 ? `<small>… và ${invalid.length - 30} đơn nữa</small>` : ''}`;
+}
 
 async function fetchExportRows() {
   if (!orderData.rows.length) return { rows: [], streets: [] };
@@ -5894,7 +5915,7 @@ async function fetchExportRows() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orderData: exportable })
   }));
-  exportRowsCache = { key, rows: Array.isArray(result.rows) ? result.rows : [], streets: Array.isArray(result.streets) ? result.streets : [] };
+  exportRowsCache = { key, rows: Array.isArray(result.rows) ? result.rows : [], streets: Array.isArray(result.streets) ? result.streets : [], locationCheck: result.locationCheck || { checked: 0, invalid: [] } };
   return exportRowsCache;
 }
 
@@ -5903,22 +5924,27 @@ async function renderExportPreview() {
   if (!preview) return;
   let rows = [];
   let streets = [];
+  let locationCheck = { checked: 0, invalid: [] };
   preview.classList.remove('is-empty');
   try {
-    ({ rows, streets } = await fetchExportRows());
+    ({ rows, streets, locationCheck } = await fetchExportRows());
   } catch (error) {
     renderEmptyState(preview, error.message || 'Chưa dựng được dữ liệu xuất.');
     if (orderExport) orderExport.hidden = true;
+    renderExportLocationCheck(null, 0);
     return;
   }
   if (orderExport) {
     orderExport.disabled = rows.length === 0;
     orderExport.hidden = rows.length === 0;
   }
+  renderExportLocationCheck(locationCheck, rows.length);
   if (!rows.length) {
     renderEmptyState(preview, 'Chưa có dữ liệu xuất');
     return;
   }
+  // Dòng đầu của đơn chưa chuẩn được tô đỏ trong bảng xem trước.
+  const invalidOrderNumbers = new Set((locationCheck.invalid || []).map(item => String(item.orderNumber)));
   // Vạch ngăn giữa các nhóm cột (STT | đơn hàng | mua hàng | giao hàng) tô màu
   // TikTok để dò dòng dễ hơn: ô cuối của mỗi nhóm (trừ nhóm cuối) mang lớp riêng.
   const groupEndPositions = new Set();
@@ -5933,7 +5959,7 @@ async function renderExportPreview() {
   const columns = exportPreviewWidths.map(width => `<col style="width:${width}px">`).join('');
   // Cột Địa chỉ chỉ hiện số nhà/đường (ba cấp có cột riêng); file xuất vẫn đầy đủ.
   const cell = (row, rowIndex, index) => index === 35 ? (streets[rowIndex] ?? row[index]) : row[index];
-  const body = rows.map((row, rowIndex) => `<tr>${exportPreviewIndexes.map((index, position) => `<td class="${groupEndClass(position).trim()}">${escapeHtml(cell(row, rowIndex, index))}</td>`).join('')}</tr>`).join('');
+  const body = rows.map((row, rowIndex) => `<tr${invalidOrderNumbers.has(String(row[0])) ? ' class="export-row-invalid"' : ''}>${exportPreviewIndexes.map((index, position) => `<td class="${groupEndClass(position).trim()}">${escapeHtml(cell(row, rowIndex, index))}</td>`).join('')}</tr>`).join('');
   preview.innerHTML = `<table class="export-template-table" style="width:${tableWidth}px"><colgroup>${columns}</colgroup><thead><tr class="export-group-row">${groupHead}</tr><tr>${columnHead}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
@@ -6987,14 +7013,15 @@ document.addEventListener('keydown', event => {
   }
 });
 
-orderExport.onclick = async () => {
-  orderExport.disabled = true;
-  const originalLabel = orderExport.textContent;
-  orderExport.textContent = 'Đang xuất...';
+async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {}) {
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = 'Đang xuất...';
   try {
-    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportableOrderData() }) });
+    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportableOrderData(), skipInvalidLocations }) });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
+      if (detail.locationCheck) renderExportLocationCheck(detail.locationCheck, exportRowsCache.rows.length || 1);
       throw new Error(detail.error || 'Không thể tạo file Excel.');
     }
     const blob = await response.blob();
@@ -7007,14 +7034,17 @@ orderExport.onclick = async () => {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast(`Đã tải ${filename}.`, 'success');
+    showToast(skipInvalidLocations ? `Đã tải ${filename} (đã bỏ qua đơn chưa chuẩn địa chỉ).` : `Đã tải ${filename}.`, 'success');
   } catch (error) {
     showToast(error.message);
   } finally {
-    orderExport.textContent = originalLabel;
+    button.textContent = originalLabel;
     renderExportPreview();
   }
-};
+}
+
+orderExport.onclick = () => exportOrdersToXlsx(orderExport);
+orderExportSkip?.addEventListener('click', () => exportOrdersToXlsx(orderExportSkip, { skipInvalidLocations: true }));
 
 const initialView = viewNames.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'dashboard';
 const metaConnectionParams = new URLSearchParams(window.location.search);

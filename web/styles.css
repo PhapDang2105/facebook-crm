@@ -633,6 +633,22 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
   cursor: pointer;
 }
 
+.export-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.export-button--skip { color: #b42318; background: #fff; border: 0.9px solid #f0b4b4; }
+.export-button--skip:hover:not(:disabled) { background: #fef3f2; }
+
+/* Kết quả kiểm tra ba cấp trước khi xuất: xanh khi mọi đơn đúng danh mục kho,
+   đỏ kèm danh sách đơn cần sửa khi chưa đúng. */
+.export-check { margin-top: 12px; padding: 10px 14px; border: 0.9px solid #b7e3c5; border-radius: 9px; background: #f2fbf5; color: #14532d; font-size: 12.6px; }
+.export-check.is-invalid { border-color: #f0b4b4; background: #fff5f5; color: #7a1a1a; }
+.export-check strong { display: block; margin-bottom: 4px; font-size: 13.5px; }
+.export-check ul { margin: 6px 0 0; padding-left: 18px; }
+.export-check li { margin: 2px 0; }
+.export-check li b { font-weight: 700; }
+.export-check li small { color: #9a3d3d; }
+.export-preview tbody tr.export-row-invalid td { background: #fff1f1; }
+.export-preview tbody tr.export-row-invalid td:first-child { box-shadow: inset 3px 0 0 #d92d20; }
+
 .file-button input { position: absolute; width: 0.9px; height: 0.9px; overflow: hidden; opacity: 0; }
 .file-button:hover,
 .export-button:hover:not(:disabled) { background: #333; }

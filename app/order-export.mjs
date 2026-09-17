@@ -1,6 +1,6 @@
 import { comboKey, findProductBySku, giftsForKey } from './processing/catalog.mjs';
 import { shippingFeeForKey, unitPriceInBasket } from './processing/pricing.mjs';
-import { canonicalLocationColumns, normalizeExportLocation, streetForDisplay } from './processing/locations.mjs';
+import { canonicalLocationColumns, checkLocationColumns, normalizeExportLocation, streetForDisplay } from './processing/locations.mjs';
 
 export { normalizeExportLocation };
 
@@ -234,7 +234,14 @@ export function exportPreviewStreets(rows) {
   return rows.map(row => streetForDisplay(row[35], { province: row[36], district: row[37], ward: row[38] }));
 }
 
-export function buildExportRows(orderData = {}) {
+/**
+ * Dòng file xuất kho. `rows.locationCheck` kể lại kết quả kiểm tra ba cấp của
+ * từng đơn: `invalid` là các đơn có tỉnh/quận/phường chưa đúng danh mục (kèm
+ * lý do, số thứ tự đơn và chỉ số dòng nguồn). Với `skipInvalidLocations`, các
+ * đơn đó bị bỏ khỏi file — và khỏi `rows.sourceRowIndexes` để nơi gọi loại
+ * cùng những dòng nguồn ấy khi ghi tệp khách hàng.
+ */
+export function buildExportRows(orderData = {}, { skipInvalidLocations = false } = {}) {
   const headers = Array.isArray(orderData.headers) ? orderData.headers : [];
   const rows = Array.isArray(orderData.rows) ? orderData.rows : [];
   const sourceIndex = new Map(headers.map((header, index) => [normalizeColumnName(header), index]));
@@ -252,6 +259,9 @@ export function buildExportRows(orderData = {}) {
   const exportableRows = rows.filter(row => !isInvalidOrderAddress(value(row, 'Địa chỉ')));
   const outputRows = [];
   const seenOrders = new Set();
+  const skippedOrders = new Set();
+  const invalidLocations = [];
+  const exportedSourceRowIndexes = [];
   const bagQuantityByOrder = new Map();
   let orderNumber = 0;
 
@@ -277,7 +287,34 @@ export function buildExportRows(orderData = {}) {
     const phone = value(row, 'Số điện thoại');
     const sourceOrderId = value(row, 'Mã đơn hàng');
     const orderKey = sourceOrderId ? `id:${sourceOrderId}` : `row:${rowIndex}`;
+    if (skippedOrders.has(orderKey)) return;
     const isFirstOrderLine = !seenOrders.has(orderKey);
+    // Ba cấp được kiểm tra ở dòng đầu của đơn, trước khi đơn nhận số thứ tự,
+    // để đơn bị bỏ không để lại lỗ trong cột STT của file.
+    let location = null;
+    if (isFirstOrderLine) {
+      location = canonicalLocationColumns({
+        province: value(row, 'Tỉnh/Thành phố'),
+        district: value(row, 'Quận/Huyện'),
+        ward: value(row, 'Phường/Xã'),
+        address: value(row, 'Địa chỉ')
+      });
+      const check = checkLocationColumns(location);
+      if (!check.ok) {
+        invalidLocations.push({
+          orderNumber: skipInvalidLocations ? null : orderNumber + 1,
+          sourceOrderId,
+          sourceRowIndex: rows.indexOf(row),
+          customer: value(row, 'Khách hàng'),
+          phone,
+          address: value(row, 'Địa chỉ'),
+          ...location,
+          issues: check.issues
+        });
+        if (skipInvalidLocations) { skippedOrders.add(orderKey); return; }
+      }
+    }
+    exportedSourceRowIndexes.push(rows.indexOf(row));
     if (isFirstOrderLine) { seenOrders.add(orderKey); orderNumber += 1; }
     const catalogLines = catalogLinesByOrder.get(orderKey) || [];
     const catalogQuantity = catalogLines.reduce((sum, line) => sum + line.quantity, 0);
@@ -299,14 +336,7 @@ export function buildExportRows(orderData = {}) {
         output[0] = orderNumber; output[2] = 'Facebook'; output[4] = 'Có'; output[6] = 'Có';
         output[8] = 'Thanh toán COD'; output[30] = phone;
         output[33] = value(row, 'Khách hàng'); output[34] = phone; output[35] = value(row, 'Địa chỉ');
-        // Tên tỉnh/quận/phường đúng danh mục kho, đọc từ ba cột nếu có, còn
-        // không thì từ chính địa chỉ — cùng một hàm cho preview và file.
-        const location = canonicalLocationColumns({
-          province: value(row, 'Tỉnh/Thành phố'),
-          district: value(row, 'Quận/Huyện'),
-          ward: value(row, 'Phường/Xã'),
-          address: value(row, 'Địa chỉ')
-        });
+        // Tên tỉnh/quận/phường đúng danh mục kho (đã đọc và kiểm tra ở trên).
         output[36] = location.province;
         output[37] = location.district;
         output[38] = location.ward;
@@ -317,5 +347,13 @@ export function buildExportRows(orderData = {}) {
       outputRows.push(output);
     });
   });
+  outputRows.locationCheck = { checked: seenOrders.size + (skipInvalidLocations ? skippedOrders.size : 0), invalid: invalidLocations };
+  outputRows.sourceRowIndexes = exportedSourceRowIndexes;
   return outputRows;
+}
+
+/** Dữ liệu nguồn chỉ còn những dòng đã vào file, để tệp khách hàng không ghi đơn bị bỏ. */
+export function exportedOrderData(orderData = {}, rows) {
+  const keep = new Set(rows.sourceRowIndexes || []);
+  return { headers: orderData.headers, rows: (orderData.rows || []).filter((_, index) => keep.has(index)) };
 }

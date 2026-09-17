@@ -924,6 +924,29 @@ export function canonicalLocationColumns({ province = '', district = '', ward = 
   };
 }
 
+/**
+ * Kiểm tra ba cột tỉnh/quận/phường đã đúng danh mục kho chưa, dùng trước khi
+ * xuất file: mỗi tên phải trùng khớp tên trong danh mục (đúng dấu, đúng loại
+ * hình) và cấp dưới phải thuộc cấp trên. Trả về danh sách lỗi bằng tiếng Việt,
+ * rỗng là đạt. Huyện đảo chỉ có một đơn vị (Côn Đảo…) thì cột phường mang
+ * chính dòng đó của danh mục.
+ */
+export function checkLocationColumns({ province = '', district = '', ward = '' } = {}, locationIndex = loadLocationIndex()) {
+  const issues = [];
+  const given = { province: String(province ?? '').trim(), district: String(district ?? '').trim(), ward: String(ward ?? '').trim() };
+  const sameName = (a, b) => normalizeLocationKey(a) === normalizeLocationKey(b) && String(a).normalize('NFC') === String(b).normalize('NFC');
+  if (!given.province) issues.push('Thiếu tỉnh/thành');
+  const provinceEntry = given.province ? [...locationIndex.provinces].find(entry => sameName(entry.name, given.province)) : null;
+  if (given.province && !provinceEntry) issues.push(`Tỉnh/thành "${given.province}" không đúng tên trong danh mục`);
+  if (!given.district) issues.push('Thiếu quận/huyện');
+  const districtEntry = provinceEntry && given.district ? [...provinceEntry.districts.values()].find(entry => sameName(entry.name, given.district)) : null;
+  if (given.district && provinceEntry && !districtEntry) issues.push(`Quận/huyện "${given.district}" không thuộc ${provinceEntry.name} hoặc sai tên`);
+  if (!given.ward) issues.push('Thiếu phường/xã');
+  const wardEntry = districtEntry && given.ward ? [...districtEntry.wards.values()].find(entry => sameName(entry.name, given.ward)) : null;
+  if (given.ward && districtEntry && !wardEntry) issues.push(`Phường/xã "${given.ward}" không thuộc ${districtEntry.name} hoặc sai tên`);
+  return { ok: issues.length === 0, issues, province: provinceEntry?.name || '', district: districtEntry?.name || '', ward: wardEntry?.name || '' };
+}
+
 /** Một tên cấp bất kỳ về dạng chuẩn của danh mục nếu tên đó chỉ có một nơi. */
 export function normalizeExportLocation(value, locationIndex = loadLocationIndex()) {
   const raw = String(value ?? '').trim();

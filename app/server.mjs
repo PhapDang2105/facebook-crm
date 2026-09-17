@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
-import { buildExportRows, exportPreviewStreets } from './order-export.mjs';
+import { buildExportRows, exportPreviewStreets, exportedOrderData } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
@@ -1187,16 +1187,27 @@ const server = http.createServer(async (request, response) => {
       }
       const rows = buildExportRows(payload.orderData);
       // `streets`: phần đường phố cho cột Địa chỉ của bảng xem trước; file vẫn đủ.
-      return sendJson(response, 200, { rows, streets: exportPreviewStreets(rows) });
+      // `locationCheck`: đơn nào ba cấp chưa đúng danh mục kho, để chặn xuất.
+      return sendJson(response, 200, { rows, streets: exportPreviewStreets(rows), locationCheck: rows.locationCheck });
     }
     if (request.method === 'POST' && url.pathname === '/api/orders/export') {
       const payload = await readBody(request);
       if (!payload.orderData || !Array.isArray(payload.orderData.headers) || !Array.isArray(payload.orderData.rows)) {
         throw new Error('Dữ liệu đơn hàng xuất không hợp lệ. Vui lòng tải lại trang và thử lại.');
       }
-      const rows = buildExportRows(payload.orderData);
+      const skipInvalidLocations = payload.skipInvalidLocations === true;
+      const rows = buildExportRows(payload.orderData, { skipInvalidLocations });
+      // Kho nhận file theo ba cột tỉnh/quận/phường: đơn nào chưa đúng danh mục
+      // thì không xuất, trừ khi nhân viên chọn xuất bỏ qua các đơn đó.
+      if (!skipInvalidLocations && rows.locationCheck.invalid.length) {
+        return sendJson(response, 409, {
+          error: `${rows.locationCheck.invalid.length} đơn có tỉnh/quận/phường chưa đúng danh mục kho. Sửa ở Xử lý dữ liệu hoặc xuất bỏ qua các đơn này.`,
+          locationCheck: rows.locationCheck
+        });
+      }
+      if (!rows.length) return sendJson(response, 400, { error: 'Không còn đơn nào đủ điều kiện xuất.' });
       // Khách của các đơn vừa xuất kho vào tệp khách hàng để màn Khách hàng chăm sóc lại.
-      await recordExportedOrders(payload.orderData);
+      await recordExportedOrders(exportedOrderData(payload.orderData, rows));
       // Mẫu XLSX là file tĩnh: đọc một lần, lần xuất sau dùng lại buffer.
       exportTemplateBuffer ||= await readFile(exportTemplatePath);
       const workbook = new AdmZip(exportTemplateBuffer);

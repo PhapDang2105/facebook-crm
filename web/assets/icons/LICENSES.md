@@ -7,3 +7,5 @@ MIT License — Copyright (c) Microsoft Corporation. Permission is hereby grante
 - `gender/*.svg` — "Man", "Woman", "Bust in silhouette" từ bộ **Fluent Emoji Flat** của Microsoft (gói npm `@iconify-json/fluent-emoji-flat`), giấy phép MIT — nút Xưng hô trên đầu hội thoại.
 
 - `customers.png` — icon mục Khách hàng trên thanh điều hướng, do GONA tự tải về (cùng nguồn với các icon điều hướng khác: general-info, order-bag, transport, report, settings).
+
+- `customers/*.svg` — icon nút thao tác của màn Khách hàng (làm mới, xóa lọc, sắp xếp, chuyển trang, chép số, gắn thẻ, ghi chú, sửa, mở hội thoại), tải từ bộ **Fluent UI System Icons** của Microsoft (https://github.com/microsoft/fluentui-system-icons) qua `api.iconify.design`, giấy phép MIT. Cùng bộ và cùng màu `#5b6371` với các icon đơn sắc sẵn có như `search.svg`, `person.svg`.

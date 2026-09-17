@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Xem trước — Khách hàng | Nông Sản Giọt Nắng</title>
+  <link rel="icon" type="image/webp" href="/assets/giot-nang-logo.webp">
+  <link rel="stylesheet" href="/styles.css?v=20260914-inbox-15">
+  <style>
+  /* ====================================================================
+     BẢN XEM TRƯỚC — chỉ những rule THÊM MỚI cho màn Khách hàng.
+     Mọi khuôn, màu, bo góc, cỡ chữ đều lấy từ token có sẵn của styles.css
+     (--line-1, --line-2, --text-1, --text-2, --brand) và tái dùng các class
+     đang chạy: .settings-card, .settings-card-head, .customers-toolbar,
+     .order-search-control, .order-filter-control, .order-history-button,
+     .customers-table, .customers-total, .avatar, .conversation-label,
+     .channel-dialog. Không tạo hệ thống hình ảnh mới.
+     ==================================================================== */
+
+  /* --- Đầu thẻ: gom các nút hành động về một cụm --- */
+  .customers-head-actions { display: flex; align-items: center; gap: 8px; }
+  .customers-icon-button { display: inline-flex; align-items: center; gap: 7px; }
+  .customers-icon-button img { width: 16px; height: 16px; }
+  .customers-icon-button:hover img { filter: brightness(0) invert(1); }
+
+  /* --- Tab lọc nhanh: mượn nguyên kiểu tab gạch chân .customer-panel-tab
+         đang dùng ở panel Khách hàng màn Tin nhắn, đổi màu nhấn sang --brand
+         cho khớp màn này. Đây là thứ thay cho hàng ô thống kê ở đầu trang. --- */
+  .customers-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 20px; box-shadow: inset 0 -1px 0 var(--line-2); }
+  .customers-tab {
+    position: relative; padding: 11px 13px;
+    color: var(--text-2); background: transparent; border: 0;
+    font: inherit; font-size: 13.4px; cursor: pointer;
+  }
+  .customers-tab::after { position: absolute; right: 8px; bottom: 0; left: 8px; height: 2px; background: transparent; content: ''; }
+  .customers-tab:hover { color: var(--text-1); }
+  .customers-tab.active { color: var(--brand); font-weight: 600; }
+  .customers-tab.active::after { background: var(--brand); }
+  .customers-tab b { margin-left: 4px; color: #98a2b3; font-weight: 400; }
+  .customers-tab.active b { color: var(--brand); }
+
+  /* --- Hàng lọc phụ: cùng khuôn .customers-toolbar, chỉ thụt lề trên --- */
+  .customers-toolbar--more { margin-top: 9px; padding-bottom: 2px; }
+  .customers-more-toggle,
+  .customers-clear-filters {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 40px; padding: 0 13px;
+    color: var(--text-2); background: #fff;
+    border: 1px solid #dbe0e6; border-radius: 10px;
+    font: inherit; font-size: 13.2px; white-space: nowrap; cursor: pointer;
+  }
+  .customers-more-toggle:hover,
+  .customers-clear-filters:hover { border-color: #c3cad3; color: var(--text-1); }
+  .customers-more-toggle[aria-expanded="true"] { color: var(--brand); border-color: var(--brand); background: #f3faf6; }
+  .customers-more-toggle img,
+  .customers-clear-filters img { width: 15px; height: 15px; }
+  .customers-filter-count {
+    min-width: 18px; height: 18px; padding: 0 5px;
+    color: #fff; background: var(--brand); border-radius: 999px;
+    font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+  }
+
+  /* --- Tiêu đề cột bấm được để sắp xếp --- */
+  .customers-table th.is-sortable { cursor: pointer; user-select: none; }
+  .customers-table th.is-sortable:hover { color: var(--text-1); background: #f2f4f7; }
+  .customers-table th .customers-th { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
+  .customers-table th.customer-mid .customers-th { justify-content: center; }
+  .customers-table th .customers-sort-icon { width: 13px; height: 13px; opacity: .4; }
+  .customers-table th.is-sorted { color: var(--brand); }
+  .customers-table th.is-sorted .customers-sort-icon { opacity: 1; }
+
+  /* --- Cột chọn dòng --- */
+  .customers-table th.customer-pick,
+  .customers-table td.customer-pick { width: 40px; padding-right: 0; text-align: center; }
+  .customers-table input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; }
+  .customers-table tbody tr.is-picked td { background: #f3faf6; }
+  /* Khách có tin chưa đọc vẫn in đậm tên. Quy tắc cũ nhắm vào ô đầu tiên,
+     nay ô đầu là ô tích chọn nên phải nhắm thẳng vào ô Khách hàng. */
+  .customers-table tbody tr.is-unread td.customer-who strong { font-weight: 800; }
+
+  /* --- Ô khách hàng: ảnh đại diện + tên + nguồn khách (gộp 2 cột cũ) --- */
+  .customers-table td.customer-who { min-width: 210px; }
+  .customer-who-cell { display: flex; align-items: center; gap: 10px; }
+  .customer-who-cell .avatar { flex: 0 0 34px; width: 34px; height: 34px; min-width: 34px; min-height: 34px; font-size: 14px; }
+  .customer-who-text { min-width: 0; }
+  .customer-who-text strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .customer-who-text small { display: block; margin-top: 1px; color: var(--text-2); font-size: 11.8px; }
+  .customer-who-gender { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+
+  /* --- Số điện thoại: nút chép hiện khi rê chuột, không chiếm chỗ --- */
+  .customer-tel { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .customer-tel button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; background: transparent; border: 0; border-radius: 5px; opacity: 0; cursor: pointer; }
+  .customer-tel button img { width: 14px; height: 14px; }
+  tr:hover .customer-tel button { opacity: .75; }
+  .customer-tel button:hover { background: #eef1f4; opacity: 1; }
+
+  /* --- Khu vực: tỉnh đứng riêng dòng trên, địa chỉ chi tiết mờ bên dưới --- */
+  .customers-table td.customer-place { width: 16%; min-width: 160px; }
+  .customer-place b { display: block; color: var(--text-1); font-weight: 600; }
+  .customer-place small { display: block; margin-top: 1px; color: #98a2b3; font-size: 11.8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* --- Cột Thẻ: dùng đúng .conversation-label của màn Tin nhắn --- */
+  .customers-table td.customer-tags { min-width: 116px; }
+  .customer-tag-wrap { display: flex; flex-wrap: wrap; gap: 3px; }
+
+  /* --- Chân bảng: dòng tổng bên trái, phân trang bên phải --- */
+  .customers-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 0 20px 18px; }
+  .customers-foot .customers-total { margin: 12px 0 0; }
+  .customers-pager { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+  .customers-pager button {
+    display: grid; place-items: center; min-width: 32px; height: 32px; padding: 0 9px;
+    color: var(--text-2); background: #fff; border: 1px solid #dbe0e6; border-radius: 8px;
+    font: inherit; font-size: 12.8px; cursor: pointer;
+  }
+  .customers-pager button:hover:not(:disabled) { border-color: #c3cad3; color: var(--text-1); }
+  .customers-pager button.is-current { color: #fff; background: var(--brand); border-color: var(--brand); font-weight: 700; }
+  .customers-pager button:disabled { opacity: .4; cursor: not-allowed; }
+  .customers-pager img { width: 15px; height: 15px; }
+  .customers-page-size { height: 32px; padding: 0 8px; color: var(--text-2); background: #fff; border: 1px solid #dbe0e6; border-radius: 8px; font: inherit; font-size: 12.8px; }
+
+  /* --- Thanh thao tác hàng loạt: hiện ngay trên bảng khi có dòng được chọn --- */
+  .customers-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 20px 0; padding: 9px 12px; background: #f3faf6; border: 1px solid #cfe7da; border-radius: 10px; }
+  .customers-bulk strong { color: var(--brand); font-size: 13.2px; }
+  .customers-bulk button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; color: var(--text-1); background: #fff; border: 1px solid #cfe7da; border-radius: 8px; font: inherit; font-size: 12.8px; cursor: pointer; }
+  .customers-bulk button:hover { border-color: var(--brand); }
+  .customers-bulk button img { width: 15px; height: 15px; }
+  .customers-bulk .customers-bulk-clear { margin-left: auto; border: 0; color: var(--text-2); background: transparent; }
+
+  /* --- Hộp chi tiết: mở rộng bảng thuộc tính cũ thành 3 khối + lịch sử đơn --- */
+  .customer-dialog-panel { width: min(920px, 100%); max-height: 92vh; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .customer-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; border-bottom: 1px solid var(--line-2); }
+  .customer-sheet-id { display: flex; align-items: center; gap: 13px; }
+  .customer-sheet-id .avatar { flex: 0 0 48px; width: 48px; height: 48px; min-width: 48px; min-height: 48px; font-size: 19px; }
+  .customer-sheet-id h2 { margin: 0; color: var(--text-1); font-size: 19px; }
+  .customer-sheet-id small { display: block; margin-top: 3px; color: var(--text-2); font-size: 12.5px; }
+  .customer-sheet-close { width: 30px; height: 30px; padding: 0; background: #f0f2f5; border: 0; border-radius: 50%; font-size: 19px; line-height: 1; cursor: pointer; }
+  .customer-sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 22px; border-bottom: 1px solid var(--line-2); }
+  .customer-sheet-actions button { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; color: var(--text-1); background: #fff; border: 1px solid #dbe0e6; border-radius: 8px; font: inherit; font-size: 12.8px; cursor: pointer; }
+  .customer-sheet-actions button:hover { border-color: var(--brand); color: var(--brand); }
+  .customer-sheet-actions img { width: 16px; height: 16px; }
+  .customer-sheet-body { overflow: auto; padding: 4px 22px 22px; }
+  .customer-sheet-block { margin-top: 18px; }
+  .customer-sheet-block > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; color: var(--text-2); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  .customer-sheet-block > h3 img { width: 17px; height: 17px; }
+  .customer-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px; margin: 0; background: var(--line-2); border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; }
+  .customer-facts div { padding: 10px 12px; background: #fff; }
+  .customer-facts dt { color: var(--text-2); font-size: 11.8px; }
+  .customer-facts dd { margin: 3px 0 0; color: var(--text-1); font-size: 13.4px; font-weight: 500; overflow-wrap: anywhere; }
+  .customer-orders-table { width: 100%; border-collapse: collapse; border: 1px solid var(--line-1); border-radius: 10px; overflow: hidden; }
+  .customer-orders-table th { padding: 9px 11px; color: var(--text-2); background: #fafbfc; border-bottom: 1px solid var(--line-1); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-align: left; text-transform: uppercase; }
+  .customer-orders-table td { padding: 10px 11px; color: #344054; border-bottom: 1px solid var(--line-2); font-size: 13.2px; }
+  .customer-orders-table tr:last-child td { border-bottom: 0; }
+  .customer-orders-table td.num, .customer-orders-table th.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .customer-note-item { padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; margin-bottom: 7px; }
+  .customer-note-item p { margin: 0; color: #344054; font-size: 13.2px; }
+  .customer-note-item small { display: block; margin-top: 4px; color: #98a2b3; font-size: 11.8px; }
+
+  /* --- Băng ghi chú riêng của bản xem trước, không thuộc thiết kế --- */
+  .preview-note { margin: 0; padding: 9px 20px; color: #7a5b13; background: #fff8e6; border-bottom: 1px solid #f2e2b6; font-size: 12.8px; }
+  .preview-note b { color: #5c4409; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-brand"><img src="/assets/giot-nang-logo.webp" alt="Giọt Nắng"><strong>Nông Sản Giọt Nắng</strong></div>
+    <button class="search-trigger" type="button" aria-label="Tìm kiếm">Tìm kiếm <kbd>Ctrl K</kbd></button>
+    <div class="topbar-actions">
+      <button class="assistant-link" type="button">Trợ lý</button>
+      <div class="topbar-user"><span id="topbar-user-avatar">H</span><b id="topbar-user-name">Huy Facebook</b></div>
+    </div>
+  </div>
+  <aside class="sidebar">
+    <nav>
+      <button class="nav" type="button"><span><img class="nav-icon--dashboard" src="/assets/icons/general-info.png" alt=""></span>Tổng quan</button>
+      <button class="nav" type="button"><span><img class="nav-icon--messages" src="/assets/icons/message-logo-transparent.png?v=4" alt=""></span>Tin nhắn</button>
+      <button class="nav" type="button"><span><img class="nav-icon--campaigns" src="/assets/icons/strategy-logo-orange.png?v=4" alt=""></span>Quản lý chiến dịch</button>
+      <button class="nav" type="button"><span><img class="nav-icon--orders" src="/assets/icons/order-bag-logo.png?v=1" alt=""></span>Đơn hàng</button>
+      <button class="nav active" type="button"><span><img class="nav-icon--customers" src="/assets/icons/customers.png?v=1" alt=""></span>Khách hàng</button>
+      <button class="nav" type="button"><span><img class="nav-icon--shipping" src="/assets/icons/transport.png" alt=""></span>Vận chuyển</button>
+      <button class="nav" type="button"><span><img class="nav-icon--reports" src="/assets/icons/report-logo.png?v=1" alt=""></span>Báo cáo</button>
+      <button class="nav" type="button"><span><img class="nav-icon--settings" src="/assets/icons/settings.png?v=2" alt=""></span>Cài đặt</button>
+    </nav>
+  </aside>
+
+  <main>
+    <section class="view">
+      <section class="settings-card customer-settings-card">
+        <p class="preview-note"><b>Bản xem trước</b> — dữ liệu bên dưới là số liệu giả lập để xem giao diện, chưa nối vào máy chủ. Mọi thao tác lọc, sắp xếp, chọn dòng, phân trang và mở chi tiết đều bấm thử được.</p>
+
+        <header class="settings-card-head">
+          <div><h1>Khách hàng</h1></div>
+          <div class="customers-head-actions">
+            <button class="order-history-button customers-icon-button" id="customers-refresh" type="button" title="Tải lại danh sách"><img src="/assets/icons/customers/refresh.svg" alt="">Làm mới</button>
+            <div class="customers-export">
+              <button class="order-history-button" id="customers-export" type="button" aria-haspopup="menu" aria-expanded="false">Xuất danh sách<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+              <div class="customers-export-menu hidden" id="customers-export-menu" role="menu">
+                <button type="button" role="menuitem">Danh sách remarketing</button>
+                <button type="button" role="menuitem">Toàn bộ dữ liệu</button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div class="customers-tabs" id="customers-tabs"></div>
+
+        <div class="customers-toolbar">
+          <label class="order-search-control"><input id="f-q" type="search" aria-label="Tìm khách hàng" placeholder="Tên, số điện thoại, địa chỉ, sản phẩm..."></label>
+          <label class="order-filter-control"><select id="f-source" aria-label="Nguồn khách">
+            <option value="">Tất cả nguồn khách</option>
+            <option value="inbox">Tin nhắn</option>
+            <option value="comment">Bình luận</option>
+            <option value="ads">Quảng cáo</option>
+            <option value="export">Đơn đã xuất</option>
+            <option value="landing">Landing page</option>
+          </select></label>
+          <label class="order-filter-control"><select id="f-label" aria-label="Thẻ khách"><option value="">Mọi thẻ</option></select></label>
+          <button class="customers-more-toggle" id="more-toggle" type="button" aria-expanded="false"><img src="/assets/icons/tune.svg" alt="">Lọc thêm<span class="customers-filter-count hidden" id="more-count">0</span></button>
+        </div>
+
+        <div class="customers-toolbar customers-toolbar--more hidden" id="more-row">
+          <label class="order-filter-control"><select id="f-channel" aria-label="Trang">
+            <option value="">Mọi trang</option>
+            <option value="110068281327307">Nông Sản Giọt Nắng</option>
+            <option value="export">Đơn đã xuất</option>
+          </select></label>
+          <label class="order-filter-control"><select id="f-gender" aria-label="Giới tính">
+            <option value="">Mọi giới tính</option>
+            <option value="female">Nữ</option>
+            <option value="male">Nam</option>
+          </select></label>
+          <label class="order-filter-control"><select id="f-product" aria-label="Sản phẩm đã mua"><option value="">Mọi sản phẩm</option></select></label>
+          <label class="order-filter-control"><select id="f-ordered" aria-label="Thời điểm mua">
+            <option value="">Mọi thời điểm mua</option>
+            <option value="7">Mua trong 7 ngày</option>
+            <option value="14">Mua trong 14 ngày</option>
+            <option value="30">Mua trong 1 tháng</option>
+            <option value="90">Mua trong 3 tháng</option>
+          </select></label>
+          <label class="order-filter-control"><select id="f-active" aria-label="Tương tác gần đây">
+            <option value="">Mọi mức tương tác</option>
+            <option value="7">Có nhắn trong 7 ngày</option>
+            <option value="30">Có nhắn trong 1 tháng</option>
+            <option value="90">Có nhắn trong 3 tháng</option>
+          </select></label>
+          <label class="order-filter-control"><select id="f-combo" aria-label="Combo lớn nhất">
+            <option value="">Mọi combo</option>
+            <option value="2">Từ 2 túi/đơn</option>
+            <option value="3">Từ 3 túi/đơn</option>
+            <option value="5">Từ 5 túi/đơn</option>
+          </select></label>
+          <label class="order-filter-control"><select id="f-minorders" aria-label="Số đơn tối thiểu">
+            <option value="">Mọi số đơn</option>
+            <option value="2">Từ 2 đơn</option>
+            <option value="3">Từ 3 đơn</option>
+            <option value="5">Từ 5 đơn</option>
+            <option value="10">Từ 10 đơn</option>
+          </select></label>
+          <button class="customers-clear-filters" id="clear-filters" type="button"><img src="/assets/icons/customers/filter-dismiss.svg" alt="">Xóa lọc</button>
+        </div>
+
+        <div class="customers-bulk hidden" id="bulk-bar">
+          <strong id="bulk-count">Đã chọn 0 khách</strong>
+          <button type="button"><img src="/assets/icons/customers/tag.svg" alt="">Gắn thẻ</button>
+          <button type="button"><img src="/assets/icons/download.svg" alt="">Xuất nhóm đã chọn</button>
+          <button type="button"><img src="/assets/icons/send-message.svg" alt="">Gửi tin hàng loạt</button>
+          <button class="customers-bulk-clear" id="bulk-clear" type="button">Bỏ chọn</button>
+        </div>
+
+        <div class="customers-table" id="customers-table"></div>
+
+        <div class="customers-foot">
+          <p class="customers-total" id="customers-total"></p>
+          <div class="customers-pager" id="customers-pager"></div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div class="channel-dialog hidden" id="customer-dialog" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="channel-dialog-backdrop" data-close></div>
+    <section class="channel-dialog-panel customer-dialog-panel">
+      <div class="customer-sheet-head">
+        <div class="customer-sheet-id" id="sheet-id"></div>
+        <button class="customer-sheet-close" type="button" aria-label="Đóng" data-close>&times;</button>
+      </div>
+      <div class="customer-sheet-actions">
+        <button type="button"><img src="/assets/icons/customers/open-chat.svg" alt="">Mở hội thoại</button>
+        <button type="button"><img src="/assets/icons/call.svg" alt="">Gọi</button>
+        <button type="button"><img src="/assets/icons/customers/edit.svg" alt="">Sửa thông tin</button>
+        <button type="button"><img src="/assets/icons/customers/tag.svg" alt="">Gắn thẻ</button>
+        <button type="button"><img src="/assets/icons/customers/note.svg" alt="">Thêm ghi chú</button>
+      </div>
+      <div class="customer-sheet-body" id="sheet-body"></div>
+    </section>
+  </div>
+
+<script>
+/* ===================== DỮ LIỆU GIẢ LẬP =====================
+   Đúng hình dạng bản ghi thật mà /api/customers trả về, nhưng tên,
+   số điện thoại và địa chỉ đều là giả để không đưa dữ liệu khách
+   thật vào tệp xem trước. */
+const DAY = 86400000;
+const now = Date.now();
+
+const PRODUCTS = [
+  { sku: 'GRA-XANH-Z450', name: 'Granola Túi Xanh 450g', price: 149000 },
+  { sku: 'GRA-VANG-H350', name: 'Granola Túi Vàng 350g', price: 189000 },
+  { sku: 'GRA-NAU-Z350', name: 'Granola Túi Nâu vị cacao 350g', price: 169000 },
+  { sku: 'NGH-LANH-500', name: 'Bột ngũ cốc Nghệ Lành 500g', price: 215000 },
+  { sku: 'YEN-MACH-1KG', name: 'Yến mạch nguyên cám 1kg', price: 125000 },
+  { sku: 'MAT-TN-500', name: 'Mật thốt nốt 500ml', price: 159000 }
+];
+
+const LABELS = [
+  { id: 'vip', name: 'Khách sỉ', color: '#7c3aed', icon: 'crown' },
+  { id: 'care', name: 'Cần chăm sóc', color: '#b45309', icon: 'folded-hands' },
+  { id: 'cod-fail', name: 'Từng bom hàng', color: '#b42318', icon: 'no-entry' },
+  { id: 'repeat', name: 'Mua lại đều', color: '#15803d', icon: 'sparkles' },
+  { id: 'gift', name: 'Đã tặng quà', color: '#0b5fd0', icon: 'wrapped-gift' }
+];
+
+const PLACES = [
+  ['Hà Nội', 'Xã Văn Phú, Huyện Thường Tín'],
+  ['TP Hồ Chí Minh', 'Phường Bình Hưng Hòa, Quận Bình Tân'],
+  ['Đà Nẵng', 'Phường Thanh Khê Tây, Quận Thanh Khê'],
+  ['Ninh Thuận', 'Khu phố 6, Phường Đông Hải, TP Phan Rang'],
+  ['Nghệ An', 'Xã Quỳnh Hậu, Huyện Quỳnh Lưu'],
+  ['Đồng Nai', 'Xã Bình Sơn, Huyện Long Thành'],
+  ['Thanh Hóa', 'Xã Hoằng Tiến, Huyện Hoằng Hóa'],
+  ['Phú Thọ', 'Phường Tân Dân, TP Việt Trì'],
+  ['Long An', 'Thị trấn Cần Đước, Huyện Cần Đước'],
+  ['Đắk Lắk', 'Xã Ea Hồ, Huyện Krông Năng'],
+  ['Bình Định', 'Phường Bùi Thị Xuân, TP Quy Nhơn'],
+  ['Sơn La', 'Phường Tô Hiệu, TP Sơn La']
+];
+
+const HO = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Đặng', 'Bùi', 'Đỗ', 'Ngô'];
+const DEM_NU = ['Thị Thu', 'Thị Kim', 'Ngọc', 'Thanh', 'Thị Hồng', 'Thùy'];
+const DEM_NAM = ['Văn', 'Quang', 'Minh', 'Hữu', 'Đức', 'Thanh'];
+const TEN_NU = ['Hà', 'Lan', 'Trang', 'Hương', 'Nhung', 'Yến', 'Linh', 'Mai', 'Oanh', 'Thảo', 'Quyên', 'Hoa'];
+const TEN_NAM = ['Hùng', 'Nam', 'Tuấn', 'Phú', 'Sơn', 'Khoa', 'Long', 'Bình', 'Đạt', 'Kiên'];
+
+/* Bộ sinh số giả lập cố định hạt giống, để mỗi lần mở bản xem trước
+   đều ra đúng một danh sách, tiện so sánh qua lại. */
+let seed = 20260917;
+function rnd() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+function pick(list) { return list[Math.floor(rnd() * list.length)]; }
+function between(min, max) { return min + Math.floor(rnd() * (max - min + 1)); }
+
+function makeCustomer(index) {
+  const female = rnd() > 0.38;
+  const name = `${pick(HO)} ${female ? pick(DEM_NU) : pick(DEM_NAM)} ${female ? pick(TEN_NU) : pick(TEN_NAM)}`;
+  const [province, rest] = pick(PLACES);
+  const orderCount = rnd() > 0.72 ? between(3, 14) : (rnd() > 0.45 ? 2 : 1);
+  const lastOrderAt = now - between(0, 120) * DAY;
+  const firstOrderAt = lastOrderAt - between(0, 400) * DAY;
+  const lines = [];
+  const lineCount = between(1, 3);
+  for (let i = 0; i < lineCount; i += 1) {
+    const product = pick(PRODUCTS);
+    if (!lines.some(line => line.sku === product.sku)) lines.push({ sku: product.sku, name: product.name, quantity: between(1, 3), price: product.price });
+  }
+  const lastOrderTotal = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
+  const sourcePool = [['landing'], ['inbox'], ['inbox', 'comment'], ['comment'], ['ads', 'inbox'], ['export']];
+  const tags = [];
+  if (orderCount >= 5) tags.push(LABELS[0]);
+  if (orderCount >= 3 && rnd() > 0.5) tags.push(LABELS[3]);
+  if (now - lastOrderAt > 60 * DAY && rnd() > 0.5) tags.push(LABELS[1]);
+  if (rnd() > 0.9) tags.push(LABELS[2]);
+  if (rnd() > 0.88) tags.push(LABELS[4]);
+
+  const history = [];
+  for (let i = 0; i < orderCount; i += 1) {
+    const at = i === 0 ? lastOrderAt : lastOrderAt - between(5, 90) * (i) * DAY;
+    const product = pick(PRODUCTS);
+    const quantity = between(1, 3);
+    history.push({
+      id: Math.random().toString(16).slice(2, 10),
+      at,
+      products: i === 0 ? lines : [{ sku: product.sku, name: product.name, quantity, price: product.price }],
+      total: i === 0 ? lastOrderTotal : product.price * quantity,
+      status: pick(['Đã xác nhận', 'Đã xác nhận', 'Đã xác nhận', 'Khách hủy', 'Giữ đơn'])
+    });
+  }
+  history.sort((a, b) => b.at - a.at);
+  const orderTotal = history.filter(order => order.status !== 'Khách hủy').reduce((sum, order) => sum + order.total, 0);
+
+  return {
+    id: `110068281327307:${1000000 + index}`,
+    channelId: rnd() > 0.2 ? '110068281327307' : 'export',
+    channelName: 'Nông Sản Giọt Nắng',
+    psid: String(26754686970852121 + index),
+    name,
+    picture: '',
+    gender: female ? 'female' : 'male',
+    genderSource: pick(['staff', 'message', 'name']),
+    sources: pick(sourcePool),
+    adTitle: rnd() > 0.7 ? 'Granola ăn sáng — giảm 30%' : '',
+    firstContactAt: firstOrderAt - between(1, 30) * DAY,
+    lastCustomerMessageAt: lastOrderAt - between(0, 5) * DAY,
+    lastMessageAt: lastOrderAt + between(0, 3) * DAY,
+    lastMessagePreview: pick(['Đã gửi xác nhận đơn hàng', 'Chị lấy thêm 1 túi vàng nhé', 'Khi nào có hàng lại báo em', 'Em gửi mã vận đơn nhé']),
+    phone: `0${pick(['3', '7', '8', '9'])}${between(10000000, 99999999)}`,
+    province,
+    address: `${rest}, ${province}`,
+    orderCount,
+    orderTotal,
+    firstOrderAt,
+    lastOrderAt,
+    lastOrderProducts: lines,
+    lastOrderTotal,
+    lastOrderCombo: lines.reduce((sum, line) => sum + line.quantity, 0),
+    comboMax: Math.max(2, lines.reduce((sum, line) => sum + line.quantity, 0)),
+    products: lines,
+    noteCount: rnd() > 0.75 ? between(1, 3) : 0,
+    labels: tags,
+    botEnabled: rnd() > 0.25,
+    unread: rnd() > 0.85,
+    history,
+    notes: rnd() > 0.75 ? [
+      { text: pick(['Khách dặn giao giờ hành chính, gọi trước 15 phút.', 'Hẹn cuối tháng lấy thêm 2 túi xanh.', 'Khách hỏi hạn sử dụng, đã gửi ảnh date.']), by: 'Huy', at: lastOrderAt - between(1, 20) * DAY }
+    ] : []
+  };
+}
+
+const ALL = Array.from({ length: 63 }, (_, index) => makeCustomer(index));
+</script>
+<script src="/preview-khach-hang.js"></script>
+</body>
+</html>

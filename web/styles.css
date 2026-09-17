@@ -2231,7 +2231,8 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
    Dòng trên là thứ cần đọc trước, dòng dưới là thông tin phụ. Cách xếp này
    thay cho mười cột chữ nhỏ dồn ngang, đọc mỏi mắt và hay bị cắt chữ.
    ========================================================================== */
-.customers-page { max-width: 1240px; }
+/* Không khoá bề rộng: màn hình rộng thì bảng trải ra hết, như các màn khác. */
+.customers-page { width: 100%; }
 .customers-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
 .customers-head h1 { margin: 0 0 4px; color: var(--text-1); font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
 .customers-head p { margin: 0; color: var(--text-2); font-size: 13.5px; }
@@ -2263,7 +2264,14 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .customer-sub--dim { color: #98a2b3; }
 .customers-table th.customer-right, .customers-table td.customer-right { text-align: right; }
 
-.customers-table td.customer-area { max-width: 320px; }
+/* Chia bề ngang theo tỉ lệ: địa chỉ được phần rộng nhất vì chữ dài nhất. */
+.customers-table th:nth-child(1) { width: 19%; }
+.customers-table th:nth-child(2) { width: 27%; }
+.customers-table th:nth-child(3) { width: 17%; }
+.customers-table th:nth-child(4) { width: 11%; }
+.customers-table th:nth-child(5) { width: 15%; }
+.customers-table th:nth-child(6) { width: 11%; }
+.customers-table table { width: 100%; table-layout: fixed; }
 .customer-area-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: #344054; font-size: 13.6px; line-height: 1.45; }
 
 /* Trạng thái: một chấm tròn nhỏ cộng chữ, không khung, không nền. */

@@ -546,14 +546,14 @@ const customersTable = document.querySelector('#customers-table');
 const customersTotal = document.querySelector('#customers-total');
 const customersFilters = {
   q: document.querySelector('#customers-search'),
-  channelId: document.querySelector('#customers-channel'),
-  activeWithin: document.querySelector('#customers-active-within'),
-  // Remarketing
+  source: document.querySelector('#customers-source'),
+  // Remarketing: mua trong N ngày, mua sản phẩm nào.
   orderedWithin: document.querySelector('#customers-ordered-within'),
-  product: document.querySelector('#customers-product'),
-  combo: document.querySelector('#customers-combo'),
-  minOrders: document.querySelector('#customers-min-orders')
+  product: document.querySelector('#customers-product')
 };
+// Hai ô này lọc và sắp xếp ngay trên danh sách đã tải, không cần hỏi lại máy chủ.
+const customersStateSelect = document.querySelector('#customers-state');
+const customersSortSelect = document.querySelector('#customers-sort');
 let customersRequestId = 0;
 let customersItems = [];
 const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất' };
@@ -567,16 +567,6 @@ function customersQueryString() {
     params.set(key, value);
   }
   return params.toString();
-}
-
-function fillCustomersChannelOptions() {
-  const select = customersFilters.channelId;
-  if (!select) return;
-  const current = select.value;
-  select.innerHTML = '<option value="">Tất cả kênh</option>' + messageChannels
-    .filter(channel => channel.id !== 'local-facebook')
-    .map(channel => `<option value="${escapeHtml(channel.id)}">${escapeHtml(channel.name)}</option>`).join('');
-  select.value = current;
 }
 
 function formatCustomerTime(value) {
@@ -614,56 +604,86 @@ function formatCustomerDate(value) {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
+/** Tiền trong bảng Khách hàng, chưa phát sinh thì để dấu gạch cho đỡ rối mắt. */
+function formatCustomerMoney(value) {
+  const amount = Math.max(0, Math.round(Number(value) || 0));
+  return amount ? `${new Intl.NumberFormat('vi-VN').format(amount)}đ` : '—';
+}
+
+/** Trạng thái khách đếm theo số lần phát sinh đơn: lần đầu là khách mới, lần
+ *  thứ hai là khách cũ, từ lần thứ ba trở đi là khách trung thành. */
+function customerState(customer) {
+  const count = Number(customer.orderCount) || 0;
+  if (count >= 3) return { key: 'loyal', label: 'Khách hàng trung thành' };
+  if (count === 2) return { key: 'returning', label: 'Khách hàng cũ' };
+  return { key: 'new', label: 'Khách hàng mới' };
+}
+
+/** Danh sách đã tải về, giữ lại để lọc trạng thái và sắp xếp mà không gọi lại máy chủ. */
+let customersLoaded = [];
+let customersLoadedTotal = 0;
+
 function renderCustomers(items, total) {
   if (!customersTable) return;
-  customersItems = items;
-  if (customersTotal) customersTotal.textContent = items.length === total ? `Tổng: ${total} khách hàng` : `Hiển thị ${items.length}/${total} khách hàng`;
-  if (!items.length) {
+  customersLoaded = items;
+  customersLoadedTotal = total;
+  const wanted = customersStateSelect?.value || '';
+  const sortKey = customersSortSelect?.value || 'lastOrderAt';
+  const shown = items
+    .filter(customer => !wanted || customerState(customer).key === wanted)
+    .sort((first, second) => sortKey === 'name'
+      ? String(first.name || '').localeCompare(String(second.name || ''), 'vi')
+      : (Number(second[sortKey]) || 0) - (Number(first[sortKey]) || 0));
+  customersItems = shown;
+  if (customersTotal) {
+    customersTotal.textContent = shown.length === total
+      ? `Tổng: ${total} khách hàng`
+      : `Hiển thị ${shown.length}/${total} khách hàng`;
+  }
+  if (!shown.length) {
     renderEmptyState(customersTable, total ? 'Không có khách hàng nào khớp bộ lọc.' : 'Chưa có khách hàng nào. Khách xuất hiện ở đây sau khi chốt đơn đầu tiên.');
     return;
   }
   customersTable.classList.remove('is-empty');
-  const rows = items.map((customer, index) => {
-    const initial = String(customer.name || '').trim().charAt(0).toUpperCase() || 'K';
-    const avatar = customer.picture
-      ? `<span class="avatar has-photo"><img class="avatar-photo" src="${escapeHtml(customer.picture)}" alt="">${escapeHtml(initial)}</span>`
-      : `<span class="avatar">${escapeHtml(initial)}</span>`;
-    const gender = customer.gender === 'male' ? 'Nam' : customer.gender === 'female' ? 'Nữ' : '';
-    // Remarketing đọc theo "mua khi nào, cách đây bao lâu" — số tiền không giúp gì ở đây.
+  const rows = shown.map((customer, index) => {
+    const state = customerState(customer);
+    const source = (customer.sources || []).map(name => customerSourceNames[name] || name).join(' · ');
+    // Cột này là ĐƠN GẦN NHẤT, không phải tổng cả đời — nhân viên gọi lại khách
+    // cần biết lần rồi họ lấy gì. Mỗi mặt hàng một dòng.
+    const bought = customer.lastOrderProducts || [];
+    const boughtCell = bought.length
+      ? `<div class="customer-products" title="${escapeHtml(bought.map(item => `${item.name} ×${item.quantity}`).join(', '))}">${
+          bought.slice(0, 3).map(item => `<span class="customer-product">${escapeHtml(item.name)} ×${item.quantity}</span>`).join('')
+        }${bought.length > 3 ? `<span class="customer-product-meta">+${bought.length - 3} mặt hàng khác</span>` : ''}</div>`
+      : '<span class="customer-never">—</span>';
     const boughtWhen = customer.lastOrderAt
       ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}</small>`
       : '<span class="customer-never">Chưa mua</span>';
-    // Cột này là ĐƠN GẦN NHẤT, không phải tổng cả đời — nhân viên gọi lại khách
-    // cần biết lần rồi họ lấy gì, chứ không phải danh sách cộng dồn.
-    // Mỗi sản phẩm một dòng, phần phụ gộp xuống dòng cuối màu nhạt.
-    const bought = (customer.lastOrderProducts || []);
-    const extra = [
-      bought.length > 2 ? `+${bought.length - 2} sản phẩm khác` : '',
-      customer.lastOrderCombo > 1 ? `combo ${customer.lastOrderCombo}` : ''
-    ].filter(Boolean).join(' · ');
-    const boughtCell = bought.length
-      ? `<div class="customer-products" title="${escapeHtml(bought.map(item => `${item.name} ×${item.quantity}`).join(', '))}">${
-          bought.slice(0, 2).map(item => `<span class="customer-product">${escapeHtml(item.name)}<b>×${item.quantity}</b></span>`).join('')
-        }${extra ? `<span class="customer-product-meta">${escapeHtml(extra)}</span>` : ''}</div>`
-      : '';
     return `<tr data-customer-index="${index}"${customer.unread ? ' class="is-unread"' : ''}>
-      <td><div class="customer-cell">${avatar}<div><strong>${escapeHtml(customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng'))}</strong><small>${escapeHtml(customer.psid || (customer.sources || []).map(source => customerSourceNames[source] || source).join(' · '))}</small></div></div></td>
-      <td>${gender}</td>
+      <td><strong>${escapeHtml(customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng'))}</strong></td>
+      <td class="customer-source">${source ? escapeHtml(source) : '<span class="customer-never">Không rõ</span>'}</td>
+      <td class="customer-state-cell"><span class="customer-state customer-state--${state.key}">${state.label}</span></td>
       <td>${escapeHtml(customer.phone)}</td>
-      <td class="customer-address" title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</td>
-      <td class="customer-bought">${boughtCell}</td>
-      <td class="customer-order-count">${customer.orderCount || ''}</td>
+      <td class="customer-area" title="${escapeHtml(customer.address || '')}">${customer.address
+        ? `<span class="customer-area-text">${escapeHtml(customer.address)}</span>`
+        : '<span class="customer-never">Chưa có địa chỉ</span>'}</td>
+      <td class="customer-order-count customer-mid">${customer.orderCount || ''}</td>
+      <td class="customer-money customer-mid">${escapeHtml(formatCustomerMoney(customer.orderTotal))}</td>
+      <td class="customer-money customer-mid">${escapeHtml(formatCustomerMoney(customer.lastOrderTotal))}</td>
+      <td class="customer-bought customer-mid">${boughtCell}</td>
       <td class="customer-bought-when">${boughtWhen}</td>
     </tr>`;
   }).join('');
   customersTable.innerHTML = `<table><thead><tr>
-    <th>Khách hàng</th><th>Giới tính</th><th>Số điện thoại</th><th>Địa chỉ</th><th>Sản phẩm đã mua</th><th>Số đơn</th><th>Đã mua</th>
+    <th>Khách hàng</th><th>Nguồn khách</th><th class="customer-mid">Trạng thái</th><th>Số điện thoại</th><th>Khu vực</th>
+    <th class="customer-mid">Tổng số đơn</th><th class="customer-mid">Đã chi</th><th class="customer-mid">Đơn gần nhất</th>
+    <th class="customer-mid customer-col-products">Sản phẩm</th><th>Mua lần cuối</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+
 async function loadCustomers() {
   if (!customersTable) return;
-  fillCustomersChannelOptions();
   const requestId = ++customersRequestId;
   try {
     const result = await readApiResponse(await fetch(`/api/customers?${customersQueryString()}`));
@@ -732,8 +752,10 @@ customersFilters.q?.addEventListener('input', () => {
   clearTimeout(customersSearchTimer);
   customersSearchTimer = setTimeout(loadCustomers, 250);
 });
-['channelId', 'activeWithin', 'orderedWithin', 'product', 'combo', 'minOrders']
+['source', 'orderedWithin', 'product']
   .forEach(key => customersFilters[key]?.addEventListener('change', loadCustomers));
+customersStateSelect?.addEventListener('change', () => renderCustomers(customersLoaded, customersLoadedTotal));
+customersSortSelect?.addEventListener('change', () => renderCustomers(customersLoaded, customersLoadedTotal));
 // Một nút Xuất danh sách, chọn định dạng trong menu — cả hai đều xuất đúng
 // những gì bảng đang lọc.
 const customersExportButton = document.querySelector('#customers-export');
@@ -2332,7 +2354,6 @@ async function loadMessageChannels() {
     platform: 'facebook'
   }];
   if (!messageChannels.some(channel => channel.id === currentMessageChannelId)) currentMessageChannelId = messageChannels[0].id;
-  fillCustomersChannelOptions();
   if (usingRemoteConversations) {
     try {
       await loadRemoteConversations(currentMessageChannelId);

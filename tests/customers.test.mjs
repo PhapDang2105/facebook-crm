@@ -105,6 +105,16 @@ test('gộp sản phẩm đã mua, ngày mua và combo lớn nhất của từng
   assert.deepEqual(hoi.products, []);
 });
 
+test('cột Đã chi cộng mọi đơn, cột Đơn gần nhất chỉ lấy đơn mới nhất', () => {
+  const [mai, dung, hoi] = buildCustomers(remarketingStore, []);
+  assert.equal(mai.orderTotal, 398000);
+  assert.equal(mai.lastOrderTotal, 398000, 'khách một đơn thì hai cột bằng nhau');
+  assert.equal(dung.orderTotal, 199000 + 597000, 'Đã chi cộng cả hai đơn');
+  assert.equal(dung.lastOrderTotal, 199000, 'Đơn gần nhất lấy đơn mới nhất, không phải đơn to nhất');
+  assert.equal(hoi.orderTotal, 0);
+  assert.equal(hoi.lastOrderTotal, 0, 'khách chưa mua thì chưa có đồng nào');
+});
+
 test('lọc remarketing: mua trong N ngày, theo sản phẩm, theo combo, theo số lần mua', () => {
   const all = buildCustomers(remarketingStore, []);
   const names = filters => filterCustomers(all, filters, now).map(item => item.name);

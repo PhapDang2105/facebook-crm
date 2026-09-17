@@ -295,38 +295,33 @@
           </div>
         </header>
         <div class="customers-toolbar">
-          <label class="order-search-control"><input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tên, ID, số điện thoại, địa chỉ, sản phẩm..."></label>
-          <label class="order-filter-control"><select id="customers-channel" aria-label="Kênh"><option value="">Tất cả kênh</option></select></label>
-          <label class="order-filter-control"><select id="customers-active-within" aria-label="Tương tác gần đây">
-            <option value="">Mọi lần tương tác</option>
-            <option value="7">Tương tác 7 ngày</option>
-            <option value="10">Tương tác 10 ngày</option>
-            <option value="14">Tương tác 14 ngày</option>
-            <option value="30">Tương tác 1 tháng</option>
-            <option value="60">Tương tác 2 tháng</option>
-            <option value="90">Tương tác 3 tháng</option>
+          <label class="order-search-control"><input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tên, số điện thoại, địa chỉ, sản phẩm..."></label>
+          <label class="order-filter-control"><select id="customers-source" aria-label="Nguồn khách">
+            <option value="">Tất cả nguồn khách</option>
+            <option value="inbox">Tin nhắn</option>
+            <option value="comment">Bình luận</option>
+            <option value="ads">Quảng cáo</option>
+            <option value="export">Đơn đã xuất</option>
           </select></label>
+          <label class="order-filter-control"><select id="customers-state" aria-label="Trạng thái khách">
+            <option value="">Mọi trạng thái</option>
+            <option value="new">Khách hàng mới</option>
+            <option value="returning">Khách hàng cũ</option>
+            <option value="loyal">Khách hàng trung thành</option>
+          </select></label>
+          <label class="order-filter-control"><select id="customers-product" aria-label="Sản phẩm đã mua"><option value="">Mọi sản phẩm</option></select></label>
           <label class="order-filter-control"><select id="customers-ordered-within" aria-label="Đã chốt đơn trong">
             <option value="">Mọi thời điểm mua</option>
             <option value="7">Mua trong 7 ngày</option>
-            <option value="10">Mua trong 10 ngày</option>
             <option value="14">Mua trong 14 ngày</option>
             <option value="30">Mua trong 1 tháng</option>
-            <option value="60">Mua trong 2 tháng</option>
             <option value="90">Mua trong 3 tháng</option>
           </select></label>
-          <label class="order-filter-control"><select id="customers-product" aria-label="Sản phẩm đã mua"><option value="">Mọi sản phẩm</option></select></label>
-          <label class="order-filter-control"><select id="customers-combo" aria-label="Combo đã mua">
-            <option value="">Mọi combo</option>
-            <option value="2">Từ combo 2 túi</option>
-            <option value="3">Từ combo 3 túi</option>
-            <option value="4">Từ combo 4 túi</option>
-            <option value="5">Từ combo 5 túi trở lên</option>
-          </select></label>
-          <label class="order-filter-control"><select id="customers-min-orders" aria-label="Số lần mua">
-            <option value="">Mọi số lần mua</option>
-            <option value="2">Mua lại từ 2 lần</option>
-            <option value="3">Khách quen từ 3 lần</option>
+          <label class="order-filter-control"><select id="customers-sort" aria-label="Sắp xếp">
+            <option value="lastOrderAt">Mới mua gần đây</option>
+            <option value="orderCount">Mua nhiều lần nhất</option>
+            <option value="orderTotal">Chi nhiều tiền nhất</option>
+            <option value="name">Tên A → Z</option>
           </select></label>
         </div>
         <div class="customers-table" id="customers-table"></div>

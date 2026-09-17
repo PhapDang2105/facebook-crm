@@ -37,6 +37,7 @@ function collectPurchases(customer, orders) {
     if (createdAt >= customer.lastOrderSeenAt) {
       customer.lastOrderSeenAt = createdAt;
       customer.lastOrderCombo = basket;
+      customer.lastOrderTotal = Number(order?.total) || 0;
       customer.lastOrderProducts = items.map(item => ({
         sku: String(item?.sku || '').trim(),
         name: String(item?.name || '').trim() || String(item?.sku || '').trim(),
@@ -97,6 +98,7 @@ export function buildCustomers(store, channels = [], exported = []) {
       lastOrderSeenAt: -1,
       lastOrderProducts: [],
       lastOrderCombo: 0,
+      lastOrderTotal: 0,
       products: [],
       comboMax: 0,
       noteCount: 0,
@@ -192,6 +194,7 @@ function mergeExportedCustomers(customers, exported) {
         lastOrderSeenAt: -1,
         lastOrderProducts: [],
         lastOrderCombo: 0,
+        lastOrderTotal: 0,
         products: [],
         comboMax: 0,
         noteCount: 0,
@@ -213,7 +216,7 @@ function mergeExportedCustomers(customers, exported) {
     if (!fresh.length) continue;
     customer.orderCount += fresh.length;
     customer.orderTotal += fresh.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
-    collectPurchases(customer, fresh.map(order => ({ createdAt: Number(order.orderedAt) || Number(order.exportedAt) || 0, products: order.products })));
+    collectPurchases(customer, fresh.map(order => ({ createdAt: Number(order.orderedAt) || Number(order.exportedAt) || 0, total: order.total, products: order.products })));
     customer.orderIds.push(...fresh.map(order => String(order.id || '').replace(/^(?:LP|CB)-/, '')));
   }
 }

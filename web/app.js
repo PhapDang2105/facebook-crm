@@ -850,9 +850,43 @@ function dismissChatbotOrders(ids) {
   try { localStorage.setItem(dismissedChatbotOrdersKey, JSON.stringify([...dismissed])); } catch {}
 }
 
-function deleteOrderRows(indexes) {
+// ===== Hoàn tác (Ctrl+Z) =====
+//
+// Ngăn xếp việc vừa làm ở màn Đơn hàng: sửa ô, đổi trạng thái, xóa dòng. Giữ
+// trong phiên làm việc (tải lại trang là hết) và chỉ chạy khi con trỏ không nằm
+// trong một ô đang gõ — ở đó Ctrl+Z của trình duyệt lo phần chữ. Đơn chatbot,
+// landing đã xóa khỏi máy chủ thì không hoàn tác được nên không vào ngăn xếp.
+const undoStack = [];
+const undoStackLimit = 50;
+function pushUndo(label, undo) {
+  undoStack.push({ label, undo });
+  if (undoStack.length > undoStackLimit) undoStack.shift();
+}
+async function runUndo() {
+  const entry = undoStack.pop();
+  if (!entry) { showToast('Không còn thao tác nào để hoàn tác.'); return; }
+  try {
+    await entry.undo();
+    showToast(`Đã hoàn tác: ${entry.label}.`, 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa hoàn tác được thao tác này.');
+  }
+}
+document.addEventListener('keydown', event => {
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+  if (String(event.key).toLowerCase() !== 'z') return;
+  if (event.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (views.get('orders')?.classList.contains('hidden')) return;
+  event.preventDefault();
+  runUndo();
+});
+
+function deleteOrderRows(indexes, { undoable = true } = {}) {
   const removing = new Set(indexes);
   if (!removing.size) return;
+  // Dòng bị xóa và vị trí cũ, để Ctrl+Z chèn lại đúng chỗ.
+  const restore = [...removing].sort((a, b) => a - b).map(index => ({ index, row: orderData.rows[index] })).filter(entry => entry.row);
+  const headersBefore = orderData.headers;
   const idColumn = orderColumnIndex('ma don hang');
   if (idColumn >= 0) {
     dismissChatbotOrders(orderData.rows
@@ -863,6 +897,14 @@ function deleteOrderRows(indexes) {
   if (!orderData.rows.length) orderData = { headers: [], rows: [] };
   commitOrderData();
   renderOrderData();
+  if (!undoable || !restore.length) return;
+  pushUndo(restore.length > 1 ? `xóa ${restore.length} dòng` : 'xóa dòng', () => {
+    const rows = [...orderData.rows];
+    for (const entry of restore) rows.splice(entry.index, 0, entry.row);
+    orderData = { headers: orderData.headers.length ? orderData.headers : headersBefore, rows };
+    commitOrderData();
+    renderOrderData();
+  });
 }
 
 /**
@@ -876,7 +918,7 @@ async function deleteOrderAtRow(rowIndex, button = null) {
   if (isSystemOrderId(orderId)) {
     const id = orderId.slice(3);
     const origin = orderId.startsWith('LP-') ? 'landing page' : 'chatbot';
-    if (!window.confirm(`Xóa đơn #${id} tạo từ ${origin} khỏi hệ thống? Đơn sẽ mất ở cả bảng này lẫn nơi tạo.`)) return false;
+    if (!window.confirm(`Xóa đơn #${id} tạo từ ${origin} khỏi hệ thống? Đơn sẽ mất ở cả bảng này lẫn nơi tạo, không hoàn tác được.`)) return false;
     if (button) button.disabled = true;
     try {
       const response = await fetch(`/api/customer-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -887,12 +929,12 @@ async function deleteOrderAtRow(rowIndex, button = null) {
       showToast(error.message || 'Chưa xóa được đơn.', 'error');
       return false;
     }
-    deleteOrderRows(orderData.rows.map((row, index) => String(row[idColumn] || '') === orderId ? index : -1).filter(index => index >= 0));
+    deleteOrderRows(orderData.rows.map((row, index) => String(row[idColumn] || '') === orderId ? index : -1).filter(index => index >= 0), { undoable: false });
     showToast(`Đã xóa đơn #${id}.`, 'success');
     return true;
   }
   deleteOrderRows([rowIndex]);
-  showToast('Đã xóa dòng khỏi bảng.', 'success');
+  showToast('Đã xóa dòng khỏi bảng · Ctrl+Z để hoàn tác.', 'success');
   return true;
 }
 
@@ -1099,6 +1141,8 @@ async function saveOrderRowEdit(rowIndex) {
   const key = orderRowKey(row);
   // Tên, số điện thoại, địa chỉ là của cả đơn: áp cho mọi dòng cùng mã đơn.
   const sameOrder = orderData.rows.map((item, index) => ({ item, index })).filter(({ item }) => orderRowKey(item) === key).map(({ index }) => index);
+  // Ảnh chụp những dòng có thể đổi, để Ctrl+Z trả lại đúng như trước khi sửa.
+  const undoRows = new Map([...new Set([rowIndex, ...sameOrder])].map(index => [index, [...orderData.rows[index]]]));
   const sharedNames = new Set(['khach hang', 'so dien thoai', 'dia chi', 'ghi chu xu ly']);
   const patch = {};
   const line = {};
@@ -1168,8 +1212,29 @@ async function saveOrderRowEdit(rowIndex) {
   commitOrderData();
   scheduleOrderRefresh();
   const serverId = serverOrderIdOf(row[orderColumnIndex('ma don hang')]);
-  if (!serverId) { showToast('Đã lưu thay đổi.', 'success'); return; }
   if (Object.keys(line).length) patch.lines = [{ sku: originalSku, name: originalName, ...line }];
+  // Hoàn tác: trả các dòng về bản đã chụp, rồi gửi lại giá trị cũ cho máy chủ.
+  pushUndo('sửa đơn', async () => {
+    for (const [index, snapshot] of undoRows) if (orderData.rows[index]) orderData.rows[index] = [...snapshot];
+    commitOrderData();
+    renderOrderData();
+    if (!serverId) return;
+    const before = undoRows.get(rowIndex) || [];
+    const cellOf = name => { const column = orderColumnIndex(name); return column >= 0 ? String(before[column] ?? '') : ''; };
+    const back = {};
+    if (patch.name !== undefined) back.name = cellOf('khach hang');
+    if (patch.phone !== undefined) back.phone = cellOf('so dien thoai');
+    if (patch.address !== undefined) back.address = cellOf('dia chi');
+    if (patch.staffNote !== undefined) back.staffNote = cellOf('ghi chu xu ly');
+    if (patch.lines) back.lines = [{ sku: line.product || originalSku, name: originalName, quantity: cellOf('so luong'), price: cellOf('don gia'), ...(line.product ? { product: originalSku } : {}) }];
+    if (!Object.keys(back).length) return;
+    await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(serverId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(back)
+    }));
+  });
+  if (!serverId) { showToast('Đã lưu thay đổi.', 'success'); return; }
   try {
     await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(serverId)}`, {
       method: 'PATCH',
@@ -1248,12 +1313,19 @@ document.querySelector('#order-preview')?.addEventListener('keydown', event => {
  * khách hủy) đưa đơn ra khỏi bảng và ghi vào Lịch sử; trạng thái giữa chỉ đổi
  * màu ô chọn, đơn ở lại để gọi tiếp. Đơn hệ thống ghi thêm về server.
  */
-function setOrderRowStatus(rowIndex, status) {
+function setOrderRowStatus(rowIndex, status, { undoable = true } = {}) {
   const row = orderData.rows[rowIndex];
   if (!row) return;
   const cell = name => { const index = orderColumnIndex(name); return index >= 0 ? String(row[index] || '').trim() : ''; };
   const key = orderRowKey(row);
+  const previousStatus = orderStatusOf(row);
   const resolved = resolvedOrderStatuses.has(status);
+  if (undoable && previousStatus !== status) {
+    pushUndo(`đổi trạng thái sang "${orderStatusLabel(status)}"`, () => {
+      setOrderRowStatus(rowIndex, previousStatus, { undoable: false });
+      renderOrderData();
+    });
+  }
   setOrderStatuses([key], status, resolved ? [{ key, id: cell('ma don hang'), name: cell('khach hang'), phone: cell('so dien thoai') }] : []);
   const serverId = serverOrderIdOf(cell('ma don hang'));
   if (serverId) {

@@ -478,6 +478,7 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-status-select[data-tone="calling"] { color: #0b5fd0; background: #e9f2ff; border-color: #c7e0ff; }
 .order-status-select[data-tone="callback"] { color: #b45309; background: #fff7e8; border-color: #f9d9a3; }
 .order-status-select[data-tone="transfer"] { color: #6d28d9; background: #f4ecff; border-color: #ddc9ff; }
+.order-status-select[data-tone="hold"] { color: #0f766e; background: #e6fbf8; border-color: #a7e8df; }
 .order-status-select[data-tone="confirmed"] { color: #15803d; background: #e9fbef; border-color: #b7e3c5; }
 .order-status-select[data-tone="cancelled"] { color: #b42318; background: #fff1f0; border-color: #f7c9c4; }
 .preview-actions { width: 44px; text-align: center; }

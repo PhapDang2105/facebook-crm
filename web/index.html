@@ -252,12 +252,14 @@
 
       <section class="order-stage hidden" data-order-panel="process">
         <!-- Đơn cần xử lý chia theo ngày đặt: hôm nay chưa gọi được khách thì mai
-             đơn tự nằm ở tab kế, không ai phải chuyển tay. Tab cuối gom mọi đơn từ 2 ngày trở lên. -->
+             đơn tự nằm ở tab kế, không ai phải chuyển tay. Mỗi tab đúng một ngày; quá
+             hẹn (từ 3 ngày) đơn tự rời bảng, trừ đơn đang ở trạng thái "Giữ đơn". -->
         <div class="order-day-bar">
           <div class="order-day-tabs" role="tablist" aria-label="Đơn cần xử lý theo ngày">
             <button class="order-day-tab active" type="button" role="tab" aria-selected="true" data-order-day="0">Hôm nay</button>
             <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="1">Hôm qua</button>
-            <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="2">Từ 2 ngày trước</button>
+            <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="2">2 ngày trước</button>
+            <button class="order-day-tab order-day-tab--hold" type="button" role="tab" aria-selected="false" data-order-day="hold">Giữ đơn</button>
           </div>
           <!-- Lịch sử: những đơn đã chốt trạng thái (đã xác nhận / khách hủy), mới nhất đứng đầu. -->
           <button class="order-history-button" id="order-processed-history-button" type="button" aria-expanded="false" aria-controls="order-processed-history-panel">Lịch sử</button>

@@ -86,7 +86,11 @@ Kho nhận file theo ba cột Tỉnh thành / Quận huyện / Phường xã, n�
 
 ## Trạng thái xử lý đơn
 
-Cột **Trạng thái** ở **Xử lý dữ liệu** có sáu mức, chọn ngay trên dòng: *Chưa xử lý* (mặc định), *Đang gọi*, *Hẹn gọi lại*, *Chờ chuyển khoản* — đơn vẫn nằm lại bảng để gọi tiếp; *Đã xác nhận* — đơn rời bảng và sang **Xuất dữ liệu**; *Khách hủy* — đơn rời bảng và bị loại khỏi file xuất kho kể cả khi dữ liệu đã sạch. Hai mức cuối được ghi vào **Lịch sử** kèm tên trạng thái. Trạng thái lưu theo mã đơn trong trình duyệt (`crm-orders-status`, bản cũ chỉ có dấu "đã xử lý" được đọc thành *Đã xác nhận*); đơn chatbot/landing ghi thêm về server (`processingStatus`, qua `PATCH /api/customer-orders/:id`) nên máy nào mở cũng thấy như nhau và trạng thái theo đơn khi khách gửi lại form.
+Cột **Trạng thái** ở **Xử lý dữ liệu** có bảy mức, chọn ngay trên dòng: *Chưa xử lý* (mặc định), *Đang gọi*, *Hẹn gọi lại*, *Chờ chuyển khoản*, *Giữ đơn* — đơn vẫn nằm lại bảng để gọi tiếp; *Đã xác nhận* — đơn rời bảng và sang **Xuất dữ liệu**; *Khách hủy* — đơn rời bảng và bị loại khỏi file xuất kho kể cả khi dữ liệu đã sạch. Hai mức cuối được ghi vào **Lịch sử** kèm tên trạng thái. Trạng thái lưu theo mã đơn trong trình duyệt (`crm-orders-status`, bản cũ chỉ có dấu "đã xử lý" được đọc thành *Đã xác nhận*); đơn chatbot/landing ghi thêm về server (`processingStatus`, qua `PATCH /api/customer-orders/:id`) nên máy nào mở cũng thấy như nhau và trạng thái theo đơn khi khách gửi lại form.
+
+## Tab theo ngày và đơn quá hẹn
+
+**Xử lý dữ liệu** chia đơn theo đúng ngày đặt: *Hôm nay*, *Hôm qua*, *2 ngày trước* — mỗi tab chỉ một ngày, không tab nào gom. Đơn cũ hơn (từ 3 ngày) là quá hẹn: khi mở bảng, đơn quá hẹn tự rời khỏi bảng Đơn hàng (dòng bị gỡ và mã đơn hệ thống được ghi vào danh sách đã bỏ nên lần đồng bộ sau không quay lại; bản ghi đơn trên máy chủ thì vẫn còn). Có thông báo số đơn vừa bỏ và `Ctrl+Z` để lấy lại ngay trong phiên. Đơn cần giữ lâu hơn thì chọn trạng thái **Giữ đơn**: đơn không bao giờ bị tự bỏ và nằm ở tab *Giữ đơn*, bất kể đã bao nhiêu ngày.
 
 ## Tệp khách hàng từ đơn đã xuất
 

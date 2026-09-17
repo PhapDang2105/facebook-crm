@@ -844,6 +844,11 @@ const dismissedChatbotOrdersKey = 'crm-orders-dismissed';
 function readDismissedChatbotOrders() {
   try { return new Set(JSON.parse(localStorage.getItem(dismissedChatbotOrdersKey) || '[]')); } catch { return new Set(); }
 }
+function undismissChatbotOrders(ids) {
+  const dismissed = readDismissedChatbotOrders();
+  ids.forEach(id => dismissed.delete(id));
+  try { localStorage.setItem(dismissedChatbotOrdersKey, JSON.stringify([...dismissed])); } catch {}
+}
 function dismissChatbotOrders(ids) {
   const dismissed = readDismissedChatbotOrders();
   ids.forEach(id => dismissed.add(id));
@@ -881,27 +886,27 @@ document.addEventListener('keydown', event => {
   runUndo();
 });
 
-function deleteOrderRows(indexes, { undoable = true } = {}) {
+function deleteOrderRows(indexes, { undoable = true, label = '' } = {}) {
   const removing = new Set(indexes);
   if (!removing.size) return;
   // Dòng bị xóa và vị trí cũ, để Ctrl+Z chèn lại đúng chỗ.
   const restore = [...removing].sort((a, b) => a - b).map(index => ({ index, row: orderData.rows[index] })).filter(entry => entry.row);
   const headersBefore = orderData.headers;
   const idColumn = orderColumnIndex('ma don hang');
-  if (idColumn >= 0) {
-    dismissChatbotOrders(orderData.rows
-      .filter((row, index) => removing.has(index) && isSystemOrderId(row[idColumn]))
-      .map(row => String(row[idColumn])));
-  }
+  const dismissedIds = idColumn >= 0
+    ? orderData.rows.filter((row, index) => removing.has(index) && isSystemOrderId(row[idColumn])).map(row => String(row[idColumn]))
+    : [];
+  if (dismissedIds.length) dismissChatbotOrders(dismissedIds);
   orderData = { headers: orderData.headers, rows: orderData.rows.filter((row, index) => !removing.has(index)) };
   if (!orderData.rows.length) orderData = { headers: [], rows: [] };
   commitOrderData();
   renderOrderData();
   if (!undoable || !restore.length) return;
-  pushUndo(restore.length > 1 ? `xóa ${restore.length} dòng` : 'xóa dòng', () => {
+  pushUndo(label || (restore.length > 1 ? `xóa ${restore.length} dòng` : 'xóa dòng'), () => {
     const rows = [...orderData.rows];
     for (const entry of restore) rows.splice(entry.index, 0, entry.row);
     orderData = { headers: orderData.headers.length ? orderData.headers : headersBefore, rows };
+    if (dismissedIds.length) undismissChatbotOrders(dismissedIds);
     commitOrderData();
     renderOrderData();
   });
@@ -1384,8 +1389,14 @@ processedHistoryButton?.addEventListener('click', () => {
 // Một ngày không gọi hết khách thì không ai phải chuyển đơn: qua nửa đêm đơn
 // tự nằm ở tab kế theo ngày đặt (cột Ngày). Tab cuối gom mọi đơn từ 2 ngày trở lên.
 const orderDayTabs = [...document.querySelectorAll('[data-order-day]')];
+// Tab cuối theo ngày là 2 ngày trước; đơn cũ hơn là quá hẹn.
 const orderDayLastBucket = 2;
-const orderDayEmptyMessages = ['Không có đơn cần xử lý hôm nay', 'Không có đơn tồn từ hôm qua', 'Không có đơn tồn từ 2 ngày trở lên'];
+const orderDayEmptyMessages = {
+  0: 'Không có đơn cần xử lý hôm nay',
+  1: 'Không có đơn tồn từ hôm qua',
+  2: 'Không có đơn tồn từ 2 ngày trước',
+  hold: 'Không có đơn nào đang giữ'
+};
 let activeOrderDay = 0;
 
 /** Đọc cột Ngày "16/09 07:52" (có thể kèm năm) thành Date; không đọc được thì null. */
@@ -1401,14 +1412,14 @@ function parseOrderRowDate(row, data = orderData, today = new Date()) {
   return Number.isNaN(ordered.getTime()) ? null : ordered;
 }
 
-/** Tab của một dòng: số ngày từ ngày đặt tới hôm nay, chặn ở 2 (tab cuối gom đơn cũ hơn). Dòng không có ngày tính là hôm nay. */
+/** Tuổi của một dòng tính bằng ngày từ ngày đặt tới hôm nay. Dòng không có ngày tính là hôm nay. */
 function orderDayBucket(row, data = orderData, today = new Date()) {
   const ordered = parseOrderRowDate(row, data, today);
   if (!ordered) return 0;
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const startOfOrder = new Date(ordered.getFullYear(), ordered.getMonth(), ordered.getDate());
   const days = Math.round((startOfToday - startOfOrder) / 86400000);
-  return Math.max(0, Math.min(orderDayLastBucket, days));
+  return Math.max(0, days);
 }
 
 /** Bảng đọc theo thời gian: đơn mới nhất đứng đầu, dòng không có ngày xuống cuối theo thứ tự cũ. */
@@ -1419,9 +1430,9 @@ function sortOrderEntriesByTime(entries, data = orderData) {
 }
 
 function setActiveOrderDay(day) {
-  activeOrderDay = Math.max(0, Math.min(orderDayLastBucket, Number(day) || 0));
+  activeOrderDay = String(day) === 'hold' ? 'hold' : Math.max(0, Math.min(orderDayLastBucket, Number(day) || 0));
   orderDayTabs.forEach(tab => {
-    const active = Number(tab.dataset.orderDay) === activeOrderDay;
+    const active = String(tab.dataset.orderDay) === String(activeOrderDay);
     tab.classList.toggle('active', active);
     tab.setAttribute('aria-selected', String(active));
   });
@@ -5611,6 +5622,7 @@ const orderStatuses = [
   { value: 'calling', label: 'Đang gọi' },
   { value: 'callback', label: 'Hẹn gọi lại' },
   { value: 'transfer', label: 'Chờ chuyển khoản' },
+  { value: 'hold', label: 'Giữ đơn' },
   { value: 'confirmed', label: 'Đã xác nhận' },
   { value: 'cancelled', label: 'Khách hủy' }
 ];
@@ -5912,6 +5924,9 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   preview.innerHTML = `<table style="--preview-template: ${template}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
+// Đang tự xóa đơn quá hẹn: lượt vẽ lại ngay sau đó không xét quá hẹn lần nữa.
+let droppingOverdueOrders = false;
+
 // Bảng của màn chưa mở được đánh dấu "cần vẽ lại", vẽ khi mở màn đó.
 const orderPanelsDirty = new Set();
 
@@ -5975,7 +5990,25 @@ function renderOrderData() {
   // và xử lý ở Nhập dữ liệu; ở đây bấm ô nào là sửa ô đó, lý do còn lại đã ghi
   // ở cột Ghi chú. Đơn chia bốn tab theo ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.
   const dayOfRow = new Map(processingRows.map(entry => [entry.index, orderDayBucket(entry.row)]));
-  const processRows = sortOrderEntriesByTime(processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay));
+  // Quá hẹn (từ 3 ngày) mà nhân viên không chọn "Giữ đơn" thì đơn tự rời bảng,
+  // để hàng tồn không dồn mãi. Xóa xong bảng tự vẽ lại nên thoát khỏi lượt này.
+  if (!droppingOverdueOrders) {
+    const overdue = processingRows.filter(entry => dayOfRow.get(entry.index) > orderDayLastBucket
+      && orderStatusOf(entry.row, orderData, orderStatusMap) !== 'hold');
+    if (overdue.length) {
+      droppingOverdueOrders = true;
+      try {
+        deleteOrderRows(overdue.map(entry => entry.index), { label: `tự xóa ${overdue.length} đơn quá hẹn` });
+      } finally {
+        droppingOverdueOrders = false;
+      }
+      showToast(`Đã tự xóa ${overdue.length} đơn quá hẹn (từ 3 ngày) chưa xử lý · Ctrl+Z để hoàn tác.`, 'success', 6000);
+      return;
+    }
+  }
+  const processRows = sortOrderEntriesByTime(activeOrderDay === 'hold'
+    ? processingRows.filter(entry => orderStatusOf(entry.row, orderData, orderStatusMap) === 'hold')
+    : processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay));
   renderOrderTable(
     document.querySelector('#order-preview'), headers, searchValue ? processRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processRows,
     processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',

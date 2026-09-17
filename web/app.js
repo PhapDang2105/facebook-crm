@@ -1216,16 +1216,14 @@ document.querySelector('#order-preview')?.addEventListener('click', async event 
   await deleteOrderAtRow(Number(button.dataset.orderRowDelete), button);
 }, true);
 document.querySelector('#order-preview')?.addEventListener('change', event => {
+  if (event.target.matches('select[data-order-status]')) {
+    flushOrderRowEdit(event);
+    setOrderRowStatus(Number(event.target.dataset.orderStatus), event.target.value);
+    return;
+  }
   if (event.target.matches('select[data-edit-column]')) { clearTimeout(pendingBlurSave); saveOrderRowEdit(editingOrderRowIndex); }
 });
 document.querySelector('#order-preview')?.addEventListener('click', event => {
-  const reviewedButton = event.target.closest('[data-order-row-reviewed]');
-  if (reviewedButton) {
-    event.stopPropagation();
-    flushOrderRowEdit(event);
-    markOrderRowReviewed(Number(reviewedButton.dataset.orderRowReviewed));
-    return;
-  }
   if (event.target.closest('button, a, input, select, textarea')) return;
   const row = event.target.closest('tr[data-order-row-index]');
   if (!row) return;
@@ -1245,14 +1243,38 @@ document.querySelector('#order-preview')?.addEventListener('keydown', event => {
   if (event.key === 'Escape') { event.preventDefault(); clearTimeout(pendingBlurSave); cancelOrderRowEdit(); }
 });
 
-/** Đánh dấu cả đơn của dòng này là đã xử lý, ghi Lịch sử, vẽ lại bảng. */
-function markOrderRowReviewed(rowIndex) {
+/**
+ * Đặt trạng thái cho cả đơn của dòng này. Trạng thái kết thúc (đã xác nhận,
+ * khách hủy) đưa đơn ra khỏi bảng và ghi vào Lịch sử; trạng thái giữa chỉ đổi
+ * màu ô chọn, đơn ở lại để gọi tiếp. Đơn hệ thống ghi thêm về server.
+ */
+function setOrderRowStatus(rowIndex, status) {
   const row = orderData.rows[rowIndex];
   if (!row) return;
   const cell = name => { const index = orderColumnIndex(name); return index >= 0 ? String(row[index] || '').trim() : ''; };
   const key = orderRowKey(row);
-  markOrdersReviewed([key], [{ key, id: cell('ma don hang'), name: cell('khach hang'), phone: cell('so dien thoai') }]);
+  const resolved = resolvedOrderStatuses.has(status);
+  setOrderStatuses([key], status, resolved ? [{ key, id: cell('ma don hang'), name: cell('khach hang'), phone: cell('so dien thoai') }] : []);
+  const serverId = serverOrderIdOf(cell('ma don hang'));
+  if (serverId) {
+    fetch(`/api/customer-orders/${encodeURIComponent(serverId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ processingStatus: status })
+    }).then(response => { if (!response.ok) throw new Error('save failed'); })
+      .catch(() => showToast('Chưa lưu được trạng thái lên máy chủ, bảng đang giữ bản tạm.'));
+  }
   if (editingOrderRowIndex === rowIndex) exitCellEdit();
+  if (!resolved) {
+    // Đơn ở lại bảng: đổi màu ô chọn ở mọi dòng của đơn, không vẽ lại bảng.
+    for (const select of document.querySelectorAll('#order-preview select[data-order-status]')) {
+      const index = Number(select.dataset.orderStatus);
+      if (!orderData.rows[index] || orderRowKey(orderData.rows[index]) !== key) continue;
+      select.value = status;
+      select.dataset.tone = status || 'todo';
+    }
+    return;
+  }
   // Gỡ ngay các dòng của đơn khỏi bảng, không vẽ lại; vẽ lại toàn bộ hoãn tới khi rảnh.
   const tbody = document.querySelector('#order-preview tbody');
   for (const tr of document.querySelectorAll('#order-preview tr[data-order-row-index]')) {
@@ -1261,10 +1283,12 @@ function markOrderRowReviewed(rowIndex) {
   }
   if (!tbody || !tbody.children.length) renderOrderData(); else scheduleOrderRefresh(800);
   renderProcessedHistory();
-  showToast('Đã đánh dấu xử lý xong, đơn sẽ có ở Xuất dữ liệu.', 'success');
+  showToast(status === 'cancelled'
+    ? 'Đã đánh dấu khách hủy, đơn không đi vào file xuất kho.'
+    : 'Đã xác nhận, đơn sẽ có ở Xuất dữ liệu.', 'success');
 }
 
-// ===== Lịch sử đã xử lý =====
+// ===== Lịch sử chốt trạng thái =====
 const processedHistoryButton = document.querySelector('#order-processed-history-button');
 const processedHistoryPanel = document.querySelector('#order-processed-history-panel');
 
@@ -1272,14 +1296,15 @@ function renderProcessedHistory() {
   if (!processedHistoryPanel) return;
   const log = readReviewedOrdersLog();
   if (!log.length) {
-    processedHistoryPanel.innerHTML = '<p>Chưa có đơn nào được đánh dấu xử lý.</p>';
+    processedHistoryPanel.innerHTML = '<p>Chưa có đơn nào được chốt trạng thái.</p>';
     return;
   }
   processedHistoryPanel.innerHTML = log.map(entry => {
     const at = new Date(Number(entry.at));
     const timeLabel = Number.isNaN(at.getTime()) ? '' : at.toLocaleString('vi-VN');
     const title = [entry.name, entry.phone].filter(Boolean).join(' · ') || 'Đơn hàng';
-    return `<div class="order-history-item"><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(timeLabel)}</small></div><span>${escapeHtml(entry.id || '')}</span></div>`;
+    const status = orderStatusLabel(entry.status || 'confirmed');
+    return `<div class="order-history-item"><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml([status, timeLabel].filter(Boolean).join(' · '))}</small></div><span>${escapeHtml(entry.id || '')}</span></div>`;
   }).join('');
 }
 
@@ -1390,6 +1415,7 @@ function ensureOrderSourceColumn(data) {
 }
 
 function mergeChatbotOrdersIntoTable(orders) {
+  seedOrderStatusesFromServer(orders);
   orderData = ensureOrderStaffNoteColumn(ensureOrderCarrierColumn(ensureOrderDateColumn(ensureOrderSourceColumn(orderData))));
   const headers = orderData.headers.length ? orderData.headers : chatbotOrderHeaders;
   const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
@@ -5506,12 +5532,31 @@ function getReviewRowIndexes(data = orderData) {
   return flagged;
 }
 
-// ===== Đánh dấu "Đã xử lý" =====
+// ===== Trạng thái xử lý =====
 //
 // Dòng cần xử lý (thiếu thông tin, trùng số, bom hàng, tự điền...) nằm ở Xử lý
-// dữ liệu và KHÔNG được đưa sang Xuất dữ liệu cho tới khi nhân viên bấm "Đã xử
-// lý". Dấu này lưu cùng chỗ với bảng (trình duyệt), theo mã đơn.
+// dữ liệu cho tới khi nhân viên chọn một trạng thái kết thúc: "Đã xác nhận" thì
+// đơn sang Xuất dữ liệu, "Khách hủy" thì đơn bị loại hẳn, không vào file. Ba
+// trạng thái giữa chỉ ghi việc đang tới đâu, đơn vẫn nằm lại bảng để gọi tiếp.
+// Trạng thái lưu theo mã đơn ở trình duyệt; đơn chatbot/landing ghi thêm về
+// server (processingStatus) nên máy nào mở cũng thấy như nhau.
+const orderStatusesKey = 'crm-orders-status';
 const reviewedOrdersKey = 'crm-orders-reviewed';
+const orderStatuses = [
+  { value: '', label: 'Chưa xử lý' },
+  { value: 'calling', label: 'Đang gọi' },
+  { value: 'callback', label: 'Hẹn gọi lại' },
+  { value: 'transfer', label: 'Chờ chuyển khoản' },
+  { value: 'confirmed', label: 'Đã xác nhận' },
+  { value: 'cancelled', label: 'Khách hủy' }
+];
+const resolvedOrderStatuses = new Set(['confirmed', 'cancelled']);
+function orderStatusLabel(value) {
+  return (orderStatuses.find(status => status.value === value) || orderStatuses[0]).label;
+}
+function orderStatusOptionsHtml(current) {
+  return orderStatuses.map(status => `<option value="${status.value}"${status.value === current ? ' selected' : ''}>${escapeHtml(status.label)}</option>`).join('');
+}
 // Gọi cho từng dòng trong các vòng lặp: nhớ chỉ số cột mã đơn theo bộ tiêu đề đang dùng.
 let orderIdColumnCache = { headers: null, index: -1 };
 function orderRowKey(row, data = orderData) {
@@ -5523,33 +5568,67 @@ function orderRowKey(row, data = orderData) {
   const staffNoteIndex = orderColumnIndex('ghi chu xu ly', data);
   return `row:${JSON.stringify(staffNoteIndex >= 0 ? row.filter((_, index) => index !== staffNoteIndex) : row)}`;
 }
-function readReviewedOrders() {
-  try { return new Set(JSON.parse(localStorage.getItem(reviewedOrdersKey) || '[]')); } catch { return new Set(); }
+/** Trạng thái theo khoá đơn. Bảng cũ chỉ có dấu "đã xử lý" được đọc thành "Đã xác nhận". */
+function readOrderStatuses() {
+  let statuses = {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(orderStatusesKey) || '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) statuses = parsed;
+  } catch {}
+  try {
+    const legacy = JSON.parse(localStorage.getItem(reviewedOrdersKey) || '[]');
+    if (Array.isArray(legacy) && legacy.length) {
+      for (const key of legacy) if (!statuses[key]) statuses[key] = 'confirmed';
+      writeOrderStatuses(statuses);
+    }
+    if (Array.isArray(legacy)) localStorage.removeItem(reviewedOrdersKey);
+  } catch {}
+  return statuses;
+}
+function writeOrderStatuses(statuses) {
+  try { localStorage.setItem(orderStatusesKey, JSON.stringify(statuses)); } catch {}
+}
+function orderStatusOf(row, data = orderData, statuses = readOrderStatuses()) {
+  return statuses[orderRowKey(row, data)] || '';
+}
+function isRowResolved(row, data = orderData, statuses = readOrderStatuses()) {
+  return resolvedOrderStatuses.has(orderStatusOf(row, data, statuses));
+}
+/** Đơn hệ thống: trạng thái trên server là bản chung cho mọi máy. */
+function seedOrderStatusesFromServer(orders) {
+  const statuses = readOrderStatuses();
+  let changed = false;
+  for (const order of orders) {
+    const key = `id:${systemOrderRowId(order)}`;
+    const value = String(order.processingStatus || '');
+    if ((statuses[key] || '') === value) continue;
+    if (value) statuses[key] = value; else delete statuses[key];
+    changed = true;
+  }
+  if (changed) writeOrderStatuses(statuses);
 }
 const reviewedOrdersLogKey = 'crm-orders-reviewed-log';
 const reviewedOrdersLogLimit = 500;
-/** Nhật ký các lần bấm "Đã xử lý", mới nhất đứng đầu: { key, at, id, name, phone }. */
+/** Nhật ký các lần chốt trạng thái, mới nhất đứng đầu: { key, at, status, id, name, phone }. */
 function readReviewedOrdersLog() {
   try { const log = JSON.parse(localStorage.getItem(reviewedOrdersLogKey) || '[]'); return Array.isArray(log) ? log : []; } catch { return []; }
 }
-function markOrdersReviewed(keys, details = []) {
-  const reviewed = readReviewedOrders();
-  keys.forEach(key => reviewed.add(key));
-  try { localStorage.setItem(reviewedOrdersKey, JSON.stringify([...reviewed])); } catch {}
+function setOrderStatuses(keys, status, details = []) {
+  const statuses = readOrderStatuses();
+  for (const key of keys) { if (status) statuses[key] = status; else delete statuses[key]; }
+  writeOrderStatuses(statuses);
   if (!details.length) return;
   const at = Date.now();
-  const log = [...details.map(detail => ({ at, ...detail })), ...readReviewedOrdersLog()].slice(0, reviewedOrdersLogLimit);
+  const log = [...details.map(detail => ({ at, status, ...detail })), ...readReviewedOrdersLog()].slice(0, reviewedOrdersLogLimit);
   try { localStorage.setItem(reviewedOrdersLogKey, JSON.stringify(log)); } catch {}
 }
-function isRowReviewed(row, data = orderData, reviewed = readReviewedOrders()) {
-  return reviewed.has(orderRowKey(row, data));
-}
 
-/** Bảng chỉ gồm dòng sạch hoặc đã xử lý: đây là phần được xuất kho. */
+/** Bảng chỉ gồm dòng sạch hoặc đã xác nhận, trừ đơn khách hủy: đây là phần được xuất kho. */
 function exportableOrderData(data = orderData) {
   if (!data.rows.length) return data;
   const pending = new Set(getOrdersNeedingProcessing(data).map(entry => entry.index));
-  return { headers: data.headers, rows: data.rows.filter((row, index) => !pending.has(index)) };
+  const statuses = readOrderStatuses();
+  return { headers: data.headers, rows: data.rows.filter((row, index) => !pending.has(index) && orderStatusOf(row, data, statuses) !== 'cancelled') };
 }
 
 function getOrdersNeedingProcessing(data = orderData) {
@@ -5558,10 +5637,10 @@ function getOrdersNeedingProcessing(data = orderData) {
   const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes(data);
   const warningRowIndexes = getPhoneWarningRowIndexes(data);
   const reviewRowIndexes = getReviewRowIndexes(data);
-  const reviewed = readReviewedOrders();
+  const statuses = readOrderStatuses();
   return data.rows
     .map((row, index) => ({ row, index }))
-    .filter(({ row, index }) => !isRowReviewed(row, data, reviewed) && (invalidRowIndexes.has(index)
+    .filter(({ row, index }) => !isRowResolved(row, data, statuses) && (invalidRowIndexes.has(index)
       || duplicateRowIndexes.has(index)
       || duplicatePhoneRowIndexes.has(index)
       || warningRowIndexes.has(index)
@@ -5741,11 +5820,14 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const actionCell = entry => deletable
     ? `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa dòng" aria-label="Xóa dòng">×</button></td>`
     : '';
-  // Xử lý dữ liệu: nút "Đã xử lý" đứng cuối dòng, kể cả khi dòng đang sửa (sửa
+  // Xử lý dữ liệu: ô chọn trạng thái đứng cuối dòng, kể cả khi dòng đang sửa (sửa
   // tự lưu khi rời ô, như bảng tính, nên không cần nút Lưu/Huỷ).
-  const tailCell = entry => reviewable
-    ? `<td class="preview-actions preview-actions--tail"><button type="button" class="order-row-reviewed" data-order-row-reviewed="${entry.index}" title="Đã xử lý xong, cho phép xuất kho">Đã xử lý</button></td>`
-    : '';
+  const rowStatuses = reviewable ? readOrderStatuses() : null;
+  const tailCell = entry => {
+    if (!reviewable) return '';
+    const status = rowStatuses[orderRowKey(entry.row)] || '';
+    return `<td class="preview-actions preview-actions--tail"><select class="order-status-select" data-order-status="${entry.index}" data-tone="${status || 'todo'}" title="Trạng thái xử lý đơn" aria-label="Trạng thái xử lý">${orderStatusOptionsHtml(status)}</select></td>`;
+  };
   // Dòng đang sửa: các ô sửa được thành ô nhập, giữ nguyên bề rộng cột.
   const cellHtml = (entry, index) => {
     const name = normalizeColumnName(headers[index]);
@@ -5780,8 +5862,8 @@ function renderOrderData() {
   const duplicatePhoneRowIndexes = getDuplicatePhoneRowIndexes();
   const warningRowIndexes = getPhoneWarningRowIndexes();
   const reviewRowIndexes = getReviewRowIndexes();
-  const reviewed = readReviewedOrders();
-  const processingRows = allRows.filter(({ row, index }) => !isRowReviewed(row, orderData, reviewed) && (invalidRowIndexes.has(index)
+  const orderStatusMap = readOrderStatuses();
+  const processingRows = allRows.filter(({ row, index }) => !isRowResolved(row, orderData, orderStatusMap) && (invalidRowIndexes.has(index)
     || duplicateRowIndexes.has(index)
     || duplicatePhoneRowIndexes.has(index)
     || warningRowIndexes.has(index)

@@ -87,3 +87,14 @@ test('ghi chú xử lý của nhân viên: lưu, cắt 500 ký tự, xoá trốn
   assert.equal(order.staffNote.length, 500);
   assert.equal(order.name, 'Khách landing page');
 });
+
+test('trạng thái xử lý: lưu mã trạng thái, đổi về rỗng được, không đụng trường khác', () => {
+  const order = sample();
+  assert.deepEqual(applyCustomerOrderEdits(order, { processingStatus: 'calling' }), ['processingStatus']);
+  assert.equal(order.processingStatus, 'calling');
+  assert.deepEqual(applyCustomerOrderEdits(order, { processingStatus: 'calling' }), [], 'cùng trạng thái thì không tính là đổi');
+  assert.deepEqual(applyCustomerOrderEdits(order, { processingStatus: 'cancelled' }), ['processingStatus']);
+  assert.deepEqual(applyCustomerOrderEdits(order, { processingStatus: '' }), ['processingStatus']);
+  assert.equal(order.processingStatus, '');
+  assert.equal(order.name, 'Khách landing page');
+});

@@ -90,6 +90,13 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     }
   }
 
+  // Trạng thái xử lý nhân viên chọn ở cột Trạng thái (mã: calling, callback,
+  // transfer, confirmed, cancelled; rỗng là chưa xử lý).
+  if (patch.processingStatus !== undefined) {
+    const processingStatus = text(patch.processingStatus, 40);
+    if (processingStatus !== String(order.processingStatus || '')) { order.processingStatus = processingStatus; changed.push('processingStatus'); }
+  }
+
   // Ghi chú xử lý của nhân viên (cột "Ghi chú xử lý" ở Xử lý dữ liệu): chữ tự
   // do, được xoá trống, không đi vào file xuất kho.
   if (patch.staffNote !== undefined) {

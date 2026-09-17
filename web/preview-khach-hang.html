@@ -87,14 +87,12 @@
      nay ô đầu là ô tích chọn nên phải nhắm thẳng vào ô Khách hàng. */
   .customers-table tbody tr.is-unread td.customer-who strong { font-weight: 800; }
 
-  /* --- Ô khách hàng: ảnh đại diện + tên + nguồn khách (gộp 2 cột cũ) --- */
-  .customers-table td.customer-who { min-width: 210px; }
-  .customer-who-cell { display: flex; align-items: center; gap: 10px; }
-  .customer-who-cell .avatar { flex: 0 0 34px; width: 34px; height: 34px; min-width: 34px; min-height: 34px; font-size: 14px; }
-  .customer-who-text { min-width: 0; }
-  .customer-who-text strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .customer-who-text small { display: block; margin-top: 1px; color: var(--text-2); font-size: 11.8px; }
-  .customer-who-gender { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+  /* --- Ô khách hàng: tên + nguồn khách (gộp cột Nguồn khách vào đây).
+         Không có ảnh đại diện: dữ liệu ảnh từ Facebook chưa dùng tới nên nó
+         chỉ vẽ chữ cái đầu của cái tên đứng ngay cạnh, không thêm thông tin. */
+  .customers-table td.customer-who { min-width: 190px; }
+  .customers-table td.customer-who strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .customers-table td.customer-who small { display: block; margin-top: 1px; color: var(--text-2); font-size: 11.8px; }
 
   /* --- Số điện thoại: nút chép hiện khi rê chuột, không chiếm chỗ --- */
   .customer-tel { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
@@ -110,7 +108,7 @@
 
   /* --- Cột Thẻ: dùng đúng .conversation-label của màn Tin nhắn --- */
   .customers-table td.customer-tags { min-width: 116px; }
-  .customer-tag-wrap { display: flex; flex-wrap: wrap; gap: 3px; }
+  .customer-tag-wrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
 
   /* --- Chân bảng: dòng tổng bên trái, phân trang bên phải --- */
   .customers-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 0 20px 18px; }
@@ -138,8 +136,6 @@
   /* --- Hộp chi tiết: mở rộng bảng thuộc tính cũ thành 3 khối + lịch sử đơn --- */
   .customer-dialog-panel { width: min(920px, 100%); max-height: 92vh; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
   .customer-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; border-bottom: 1px solid var(--line-2); }
-  .customer-sheet-id { display: flex; align-items: center; gap: 13px; }
-  .customer-sheet-id .avatar { flex: 0 0 48px; width: 48px; height: 48px; min-width: 48px; min-height: 48px; font-size: 19px; }
   .customer-sheet-id h2 { margin: 0; color: var(--text-1); font-size: 19px; }
   .customer-sheet-id small { display: block; margin-top: 3px; color: var(--text-2); font-size: 12.5px; }
   .customer-sheet-close { width: 30px; height: 30px; padding: 0; background: #f0f2f5; border: 0; border-radius: 50%; font-size: 19px; line-height: 1; cursor: pointer; }
@@ -151,8 +147,9 @@
   .customer-sheet-block { margin-top: 18px; }
   .customer-sheet-block > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; color: var(--text-2); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
   .customer-sheet-block > h3 img { width: 17px; height: 17px; }
-  .customer-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px; margin: 0; background: var(--line-2); border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; }
-  .customer-facts div { padding: 10px 12px; background: #fff; }
+  /* Không đóng khung từng ô: lưới tự xếp hay thừa ra một ô trắng rỗng ở cuối
+     hàng, trông như một mục bị bỏ trống. Chỉ cần nhãn trên, giá trị dưới. */
+  .customer-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px 24px; margin: 0; }
   .customer-facts dt { color: var(--text-2); font-size: 11.8px; }
   .customer-facts dd { margin: 3px 0 0; color: var(--text-1); font-size: 13.4px; font-weight: 500; overflow-wrap: anywhere; }
   .customer-orders-table { width: 100%; border-collapse: collapse; border: 1px solid var(--line-1); border-radius: 10px; overflow: hidden; }

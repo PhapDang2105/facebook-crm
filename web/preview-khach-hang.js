@@ -207,10 +207,10 @@ const COLUMNS = [
   { key: 'phone', label: 'Số điện thoại', sortable: false },
   { key: 'province', label: 'Khu vực', sortable: true },
   { key: 'state', label: 'Trạng thái', sortable: true, mid: true },
-  { key: 'labels', label: 'Thẻ', sortable: false },
+  { key: 'labels', label: 'Thẻ', sortable: false, mid: true },
   { key: 'orderCount', label: 'Số đơn', sortable: true, mid: true },
   { key: 'orderTotal', label: 'Đã chi', sortable: true, mid: true },
-  { key: 'lastOrderProducts', label: 'Sản phẩm', sortable: false },
+  { key: 'lastOrderProducts', label: 'Sản phẩm', sortable: false, mid: true },
   { key: 'lastOrderAt', label: 'Mua lần cuối', sortable: true }
 ];
 
@@ -240,7 +240,6 @@ function headHtml() {
 
 function rowHtml(customer) {
   const state = customerState(customer);
-  const initial = String(customer.name || 'K').trim().charAt(0).toUpperCase();
   const source = (customer.sources || []).map(name => sourceNames[name] || name).join(' · ');
   const products = customer.lastOrderProducts || [];
   const productCell = products.length
@@ -255,20 +254,17 @@ function rowHtml(customer) {
 
   return `<tr data-id="${escapeHtml(customer.id)}" class="${picked.has(customer.id) ? 'is-picked' : ''}${customer.unread ? ' is-unread' : ''}">
     <td class="customer-pick"><input type="checkbox" data-pick="${escapeHtml(customer.id)}" aria-label="Chọn ${escapeHtml(customer.name)}"${picked.has(customer.id) ? ' checked' : ''}></td>
-    <td class="customer-who"><div class="customer-who-cell">
-      <span class="avatar">${escapeHtml(initial)}</span>
-      <span class="customer-who-text">
-        <strong>${escapeHtml(customer.name)}</strong>
-        <small>${escapeHtml(source || 'Không rõ nguồn')}</small>
-      </span>
-    </div></td>
+    <td class="customer-who">
+      <strong>${escapeHtml(customer.name)}</strong>
+      <small>${escapeHtml(source || 'Không rõ nguồn')}</small>
+    </td>
     <td><span class="customer-tel">${escapeHtml(customer.phone)}<button type="button" data-copy="${escapeHtml(customer.phone)}" title="Chép số điện thoại" aria-label="Chép số điện thoại"><img src="/assets/icons/customers/copy.svg" alt=""></button></span></td>
     <td class="customer-place"><b>${escapeHtml(customer.province)}</b><small title="${escapeHtml(customer.address)}">${escapeHtml(customer.address)}</small></td>
     <td class="customer-mid"><span class="customer-state customer-state--${state.key}">${state.label}</span></td>
-    <td class="customer-tags">${tags}</td>
+    <td class="customer-tags customer-mid">${tags}</td>
     <td class="customer-mid customer-order-count">${customer.orderCount}</td>
     <td class="customer-mid customer-money">${escapeHtml(formatMoney(customer.orderTotal))}</td>
-    <td class="customer-bought">${productCell}</td>
+    <td class="customer-bought customer-mid">${productCell}</td>
     <td class="customer-bought-when"><b>${escapeHtml(formatDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}</small></td>
   </tr>`;
 }
@@ -337,10 +333,8 @@ function fact(label, value) {
 }
 
 function openSheet(customer) {
-  const initial = String(customer.name || 'K').trim().charAt(0).toUpperCase();
   const state = customerState(customer);
   document.querySelector('#sheet-id').innerHTML = `
-    <span class="avatar">${escapeHtml(initial)}</span>
     <div>
       <h2 id="sheet-title">${escapeHtml(customer.name)}</h2>
       <small><span class="customer-state customer-state--${state.key}">${state.label}</span> · ${escapeHtml(customer.phone)} · ${escapeHtml(customer.province)}</small>

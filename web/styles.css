@@ -494,6 +494,9 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 /* Bảng Xử lý dữ liệu: bấm dòng mở chi tiết đơn, nên cả dòng là vùng bấm. */
 #order-preview tbody td { cursor: pointer; }
 #order-preview tbody tr:hover td { background: #f7f8fa; }
+/* Đơn trùng ở Xử lý dữ liệu giữ màu nền khi rê chuột, chỉ đậm hơn một chút. */
+#order-preview tbody tr.order-row-duplicate:hover td { background: #fadbe5; }
+#order-preview tbody tr.order-row-duplicate-phone:hover td { background: #ffeaa3; }
 /* Sửa tại chỗ trên bảng Xử lý dữ liệu: gõ thẳng lên chữ trong ô, không khung ô
    nhập, không đổi cỡ chữ hay cách xuống dòng; chỉ một gạch mảnh màu TikTok dưới
    ô đang sửa. Bề rộng cột được khoá bằng JS nên bảng đứng yên. */

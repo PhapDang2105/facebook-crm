@@ -5831,9 +5831,10 @@ function renderOrderData() {
   } else orderPanelsDirty.add('import');
   if (!panelVisible('process')) { orderPanelsDirty.add('process'); return; }
   orderPanelsDirty.delete('process');
-  // Xử lý dữ liệu: không tô màu dòng (lý do đã ghi ở cột Ghi chú), không có
-  // cột nút; bấm dòng mở chi tiết để đánh dấu "Đã xử lý". Đơn chia bốn tab theo
-  // ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.
+  // Xử lý dữ liệu: chỉ tô nền đơn trùng (trùng dữ liệu hồng, trùng số điện
+  // thoại vàng) để nhân viên thấy ngay cụm cần gộp; lý do khác đã ghi ở cột Ghi
+  // chú. Không có cột nút; bấm dòng mở chi tiết để đánh dấu "Đã xử lý". Đơn chia
+  // bốn tab theo ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.
   const dayOfRow = new Map(processingRows.map(entry => [entry.index, orderDayBucket(entry.row)]));
   // Đang lọc theo số điện thoại (bấm một đơn trùng): xem cả nhóm bất kể ngày,
   // vì các lần khách gửi có thể rơi vào ngày khác nhau. Không lọc thì theo tab ngày.
@@ -5849,7 +5850,8 @@ function renderOrderData() {
   }
   renderOrderTable(
     document.querySelector('#order-preview'), headers, searchValue && !groupPhone ? processRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processRows,
-    processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',
+    processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý',
+    ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate' : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
     {
       rowNotes,
       reviewable: true,

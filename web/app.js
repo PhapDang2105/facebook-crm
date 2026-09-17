@@ -1272,14 +1272,6 @@ document.querySelector('#order-preview')?.addEventListener('focusout', event => 
   if (event.target.closest('[data-edit-column]')) scheduleBlurSave();
 });
 // Chọn sản phẩm khác trong ô chọn là lưu ngay, không chờ rời ô.
-// Nút xóa ở Xử lý dữ liệu: bắt ở pha capture để không rơi vào xử lý bấm-dòng-để-sửa.
-document.querySelector('#order-preview')?.addEventListener('click', async event => {
-  const button = event.target.closest('[data-order-row-delete]');
-  if (!button) return;
-  event.stopImmediatePropagation();
-  flushOrderRowEdit(event);
-  await deleteOrderAtRow(Number(button.dataset.orderRowDelete), button);
-}, true);
 document.querySelector('#order-preview')?.addEventListener('change', event => {
   if (event.target.matches('select[data-order-status]')) {
     flushOrderRowEdit(event);
@@ -5989,7 +5981,6 @@ function renderOrderData() {
     processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',
     {
       rowNotes,
-      deletable: true,
       reviewable: true,
       editingCell: editingOrderRowIndex >= 0 ? { row: editingOrderRowIndex, column: editingOrderColumn } : null,
       templateOverride: editingOrderRowIndex >= 0 ? lockedOrderTemplate : ''

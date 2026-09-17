@@ -92,6 +92,14 @@ Cột **Trạng thái** ở **Xử lý dữ liệu** có bảy mức, chọn nga
 
 **Xử lý dữ liệu** chia đơn theo đúng ngày đặt: *Hôm nay*, *Hôm qua*, *2 ngày trước* — mỗi tab chỉ một ngày, không tab nào gom. Đơn cũ hơn (từ 3 ngày) là quá hẹn: khi mở bảng, đơn quá hẹn tự rời khỏi bảng Đơn hàng (dòng bị gỡ và mã đơn hệ thống được ghi vào danh sách đã bỏ nên lần đồng bộ sau không quay lại; bản ghi đơn trên máy chủ thì vẫn còn). Có thông báo số đơn vừa bỏ và `Ctrl+Z` để lấy lại ngay trong phiên. Đơn cần giữ lâu hơn thì chọn trạng thái **Giữ đơn**: đơn không bao giờ bị tự bỏ và nằm ở tab *Giữ đơn*, bất kể đã bao nhiêu ngày.
 
+## Kho lưu trữ đơn
+
+Mọi đơn đều được ghi lại, kể cả đơn khách hủy, đơn quá hẹn rời bảng hay đơn đã xóa khỏi hệ thống, để sau này còn tra được khách là ai, số nào, mua gì, mấy cái, giao đi đâu. `app/order-archive.mjs` giữ mỗi đơn **một dòng JSON** trong `data/processed/order-archive/YYYY-MM.ndjson` với đúng những gì cần (`id, at, src, st, name, phone, addr, items, total`) — khoảng 200 byte một đơn, nhẹ hơn bản đầy đủ trong `landing-orders.json` chừng mười lần. Ghi là nối thêm vào cuối file, không đọc-sửa-ghi cả kho, nên đơn sửa nhiều lần cũng chỉ tốn thêm một dòng; lúc đọc, dòng sau cùng của một mã đơn là bản đúng. Kho được ghi khi đơn được tạo (chatbot, landing), mỗi lần sửa hay đổi trạng thái, và khi đơn bị xóa (`st: "deleted"`).
+
+Tra cứu: nút **Lịch sử** ở **Xử lý dữ liệu** mở kho, có ô tìm theo tên, số điện thoại, địa chỉ hoặc SKU (không dấu cũng ra). Máy chủ trả qua `GET /api/orders/archive?q=&limit=`; file NDJSON cũng mở thẳng được bằng trình soạn thảo hay `grep` khi cần.
+
+Nút **Lịch sử** ở **Nhập dữ liệu** là việc khác: bản lưu tạm các lần nhập tệp (tên tệp, lúc nhập, thống kê sạch / cần xử lý / trùng, và chính các dòng đã nhập để xem lại), giữ trong trình duyệt và **tự xóa sau 7 ngày**. Hết chỗ lưu thì bỏ dần bản sao dòng của các lần nhập cũ, phần thống kê vẫn còn.
+
 ## Tệp khách hàng từ đơn đã xuất
 
 Mỗi lần bấm **Xuất XLSX** ở Xuất dữ liệu, khách của các đơn trong file được ghi vào `data/processed/customer-file.json` theo số điện thoại (`app/customer-file.mjs`): tên, địa chỉ ba cấp, nguồn đơn, từng đơn với sản phẩm, số lượng, đơn giá, ngày đặt và lần xuất đầu. Xuất lại cùng đơn không tạo bản thứ hai. Màn **Khách hàng** đọc tệp này cùng hội thoại Facebook: khách trùng số điện thoại với một khách Facebook thì cộng thêm đơn (đơn chatbot đã đếm từ hội thoại không cộng lại), khách landing hay import chưa từng nhắn tin thì là một dòng riêng với nguồn "Đơn đã xuất". Nhờ vậy mọi khách đã lên đơn đều nằm trong một danh sách để lọc remarketing (đã mua gì, combo mấy túi, mua lần cuối khi nào) và xuất CSV.

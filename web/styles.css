@@ -462,6 +462,28 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-history-button[aria-expanded="true"] { color: #fff; background: #111; }
 .order-history-panel { width: min(540px, 100%); margin-top: 10.8px; padding: 7.2px 12.6px; background: #fff; border: 0.9px solid #cfd7d1; border-radius: 9px; box-shadow: 0 7.2px 21.6px rgba(20, 40, 27, .08); }
 .order-history-panel > p { margin: 7.2px 0; color: #687080; font-size: 11.7px; }
+/* Kho lưu trữ đơn và lịch sử nhập tệp: mỗi mục một khối gọn, tìm ngay trong khung. */
+.order-archive-panel { width: min(680px, 100%); max-height: 420px; overflow: auto; }
+.order-archive-search { display: block; margin: 3.6px 0 7.2px; }
+.order-archive-search input { width: 100%; height: 32.4px; padding: 0 10.8px; border: 0.9px solid #d0d5dd; border-radius: 7.2px; font-size: 12.6px; }
+.order-archive-search input:focus { border-color: #111; outline: none; }
+#order-archive-results > p { margin: 7.2px 0; color: #687080; font-size: 11.7px; }
+.order-archive-count { font-weight: 700; }
+.order-archive-item { padding: 7.2px 0; border-top: 0.9px solid #eceff3; }
+.order-archive-item:first-of-type { border-top: 0; }
+.order-archive-head { display: flex; align-items: baseline; gap: 7.2px; font-size: 12.6px; }
+.order-archive-head span { color: #475467; }
+.order-archive-head b { margin-left: auto; white-space: nowrap; }
+.order-archive-item small { display: block; color: #687080; font-size: 11.7px; }
+.order-archive-meta { color: #98a2b2; }
+.import-chip { display: inline-block; margin: 3.6px 5.4px 0 0; padding: 1.8px 7.2px; border-radius: 999px; font-size: 10.8px; font-weight: 700; }
+.import-chip--clean { color: #15803d; background: #e9fbef; }
+.import-chip--invalid { color: #b45309; background: #fff7e8; }
+.import-chip--duplicate { color: #b42318; background: #fff1f0; }
+.import-history-view { margin-top: 5.4px; padding: 0; color: #1d4ed8; background: none; border: 0; font-size: 11.7px; font-weight: 700; cursor: pointer; }
+.import-history-rows { margin-top: 5.4px; max-height: 220px; overflow: auto; border-top: 0.9px solid #eceff3; }
+.import-history-row { display: grid; grid-template-columns: 1.1fr 0.9fr 1.2fr 2fr; gap: 7.2px; padding: 3.6px 0; border-bottom: 0.9px solid #f5f6f8; font-size: 11.7px; }
+.import-history-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .order-history-item { display: flex; align-items: center; justify-content: space-between; gap: 16.2px; padding: 8.1px 0; border-bottom: 0.9px solid #e5e9e6; }
 .order-history-item:last-child { border-bottom: 0; }
 .order-history-item div { display: flex; flex-direction: column; gap: 2.7px; min-width: 0; }

@@ -374,6 +374,12 @@ const orderHistoryButton = document.querySelector('#order-history-button');
 const orderHistoryPanel = document.querySelector('#order-history-panel');
 const orderExport = document.querySelector('#order-export');
 let orderData = { headers: [], rows: [] };
+// Lịch sử Import: lưu tạm các lần nhập tệp (tên tệp, lúc nhập, thống kê, và
+// chính các dòng đã nhập để xem lại), tự xóa sau 7 ngày.
+const importHistoryKey = 'crm-order-import-history';
+const importHistoryDays = 7;
+const importHistoryLimit = 20;
+const importHistoryRowLimit = 2000;
 let orderImportHistory = [];
 const hiddenPreviewColumns = new Set(['ma don hang', 'phuong xa', 'quan huyen', 'tinh thanh pho', 'ma mau ma']);
 
@@ -385,10 +391,10 @@ try {
 }
 
 try {
-  const savedImportHistory = JSON.parse(localStorage.getItem('crm-order-import-history') || '[]');
+  const savedImportHistory = JSON.parse(localStorage.getItem(importHistoryKey) || '[]');
   if (Array.isArray(savedImportHistory)) orderImportHistory = savedImportHistory;
 } catch {
-  localStorage.removeItem('crm-order-import-history');
+  localStorage.removeItem(importHistoryKey);
 }
 
 function showView(name) {
@@ -1357,25 +1363,59 @@ function setOrderRowStatus(rowIndex, status, { undoable = true } = {}) {
     : 'Đã xác nhận, đơn sẽ có ở Xuất dữ liệu.', 'success');
 }
 
-// ===== Lịch sử chốt trạng thái =====
+// ===== Lịch sử ở Xử lý dữ liệu: kho lưu trữ đơn =====
+//
+// Máy chủ giữ một dòng gọn cho mọi đơn từng có (kể cả đơn khách hủy, quá hẹn
+// hay đã xóa khỏi bảng), nên tra lại được khách là ai, số nào, mua gì, giao đâu.
 const processedHistoryButton = document.querySelector('#order-processed-history-button');
 const processedHistoryPanel = document.querySelector('#order-processed-history-panel');
+const orderArchiveSearch = document.querySelector('#order-archive-search');
+const orderArchiveResults = document.querySelector('#order-archive-results');
 
-function renderProcessedHistory() {
-  if (!processedHistoryPanel) return;
-  const log = readReviewedOrdersLog();
-  if (!log.length) {
-    processedHistoryPanel.innerHTML = '<p>Chưa có đơn nào được chốt trạng thái.</p>';
+function archiveStatusLabel(status) {
+  return status === 'deleted' ? 'Đã xóa khỏi hệ thống' : orderStatusLabel(status || '');
+}
+
+async function renderProcessedHistory() {
+  if (!orderArchiveResults) return;
+  const query = orderArchiveSearch?.value.trim() || '';
+  orderArchiveResults.innerHTML = '<p>Đang đọc kho lưu trữ...</p>';
+  let items = [];
+  let total = 0;
+  try {
+    const result = await readApiResponse(await fetch(`/api/orders/archive?limit=200&q=${encodeURIComponent(query)}`));
+    items = Array.isArray(result.items) ? result.items : [];
+    total = Number(result.total) || items.length;
+  } catch (error) {
+    orderArchiveResults.innerHTML = `<p>${escapeHtml(error.message || 'Chưa đọc được kho lưu trữ.')}</p>`;
     return;
   }
-  processedHistoryPanel.innerHTML = log.map(entry => {
-    const at = new Date(Number(entry.at));
-    const timeLabel = Number.isNaN(at.getTime()) ? '' : at.toLocaleString('vi-VN');
-    const title = [entry.name, entry.phone].filter(Boolean).join(' · ') || 'Đơn hàng';
-    const status = orderStatusLabel(entry.status || 'confirmed');
-    return `<div class="order-history-item"><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml([status, timeLabel].filter(Boolean).join(' · '))}</small></div><span>${escapeHtml(entry.id || '')}</span></div>`;
-  }).join('');
+  if (!items.length) {
+    orderArchiveResults.innerHTML = `<p>${query ? 'Không tìm thấy đơn nào khớp.' : 'Kho lưu trữ chưa có đơn nào.'}</p>`;
+    return;
+  }
+  const money = value => `${new Intl.NumberFormat('vi-VN').format(Number(value) || 0)}đ`;
+  orderArchiveResults.innerHTML = [
+    `<p class="order-archive-count">${items.length < total ? `${items.length} trong ${total}` : String(total)} đơn trong kho</p>`,
+    ...items.map(item => {
+      const at = new Date(Number(item.at));
+      const timeLabel = Number.isNaN(at.getTime()) ? '' : at.toLocaleString('vi-VN');
+      const products = (item.items || []).map(line => `${line[0]} ×${line[1]}`).join(', ');
+      return `<div class="order-archive-item">
+        <div class="order-archive-head"><strong>${escapeHtml(item.name || 'Khách')}</strong><span>${escapeHtml(item.phone || '')}</span><b>${escapeHtml(money(item.total))}</b></div>
+        <small>${escapeHtml(products)}</small>
+        <small>${escapeHtml(item.addr || 'Chưa có địa chỉ')}</small>
+        <small class="order-archive-meta">${escapeHtml([item.id, archiveStatusLabel(item.st), timeLabel].filter(Boolean).join(' · '))}</small>
+      </div>`;
+    })
+  ].join('');
 }
+
+let orderArchiveSearchTimer = 0;
+orderArchiveSearch?.addEventListener('input', () => {
+  clearTimeout(orderArchiveSearchTimer);
+  orderArchiveSearchTimer = setTimeout(renderProcessedHistory, 250);
+});
 
 processedHistoryButton?.addEventListener('click', () => {
   const willOpen = processedHistoryPanel.classList.contains('hidden');
@@ -1884,22 +1924,97 @@ async function confirmFacebookPages() {
   }
 }
 
-function renderOrderImportHistory() {
-  if (!orderImportHistory.length) {
-    orderHistoryPanel.innerHTML = '<p>Chưa có lịch sử Import.</p>';
-    return;
-  }
-  orderHistoryPanel.innerHTML = orderImportHistory.map(entry => {
-    const importedAt = new Date(entry.importedAt);
-    const timeLabel = Number.isNaN(importedAt.getTime()) ? '' : importedAt.toLocaleString('vi-VN');
-    return `<div class="order-history-item"><div><strong>${escapeHtml(entry.fileName || 'Tệp dữ liệu')}</strong><small>${escapeHtml(timeLabel)}</small></div><span>${Number(entry.rowCount) || 0} đơn</span></div>`;
-  }).join('');
+/** Bỏ các lần nhập đã quá 7 ngày; đây là bản lưu tạm, không phải kho lưu trữ đơn. */
+function pruneOrderImportHistory({ save = false } = {}) {
+  const oldest = Date.now() - importHistoryDays * 86400000;
+  const before = orderImportHistory.length;
+  orderImportHistory = orderImportHistory
+    .filter(entry => (Date.parse(entry.importedAt) || 0) >= oldest)
+    .slice(0, importHistoryLimit);
+  if (save && orderImportHistory.length !== before) saveOrderImportHistory();
+  return orderImportHistory;
 }
 
-function recordOrderImport(fileName) {
-  orderImportHistory.unshift({ fileName, rowCount: orderData.rows.length, importedAt: new Date().toISOString() });
-  orderImportHistory = orderImportHistory.slice(0, 10);
-  localStorage.setItem('crm-order-import-history', JSON.stringify(orderImportHistory));
+/** Ghi vào trình duyệt; hết chỗ thì bỏ dần bản sao dòng của lần nhập cũ, giữ phần thống kê. */
+function saveOrderImportHistory() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      localStorage.setItem(importHistoryKey, JSON.stringify(orderImportHistory));
+      return;
+    } catch {
+      const heaviest = [...orderImportHistory].reverse().find(entry => entry.rows?.length);
+      if (!heaviest) { orderImportHistory = orderImportHistory.slice(0, 3); continue; }
+      delete heaviest.rows;
+      heaviest.rowsDropped = true;
+    }
+  }
+}
+
+/** Thống kê một lần nhập, tính ngay trên các dòng vừa nhập. */
+function importStats(headers, rows) {
+  const data = { headers, rows };
+  const invalid = new Set(getInvalidOrderRows(data).map(entry => entry.index));
+  const duplicate = getDuplicateOrderRowIndexes(data);
+  const duplicatePhone = getDuplicatePhoneRowIndexes(data);
+  const flagged = new Set([...invalid, ...duplicate, ...duplicatePhone]);
+  return { rows: rows.length, invalid: invalid.size, duplicate: duplicate.size + duplicatePhone.size, clean: rows.length - flagged.size };
+}
+
+function renderOrderImportHistory() {
+  if (!orderHistoryPanel) return;
+  pruneOrderImportHistory({ save: true });
+  if (!orderImportHistory.length) {
+    orderHistoryPanel.innerHTML = '<p>Chưa có lần nhập tệp nào trong 7 ngày qua.</p>';
+    return;
+  }
+  const chip = (label, value, tone) => value ? `<span class="import-chip import-chip--${tone}">${escapeHtml(label)} ${value}</span>` : '';
+  orderHistoryPanel.innerHTML = [
+    '<p class="order-archive-count">Lịch sử nhập tệp 7 ngày gần nhất</p>',
+    ...orderImportHistory.map((entry, index) => {
+      const importedAt = new Date(entry.importedAt);
+      const timeLabel = Number.isNaN(importedAt.getTime()) ? '' : importedAt.toLocaleString('vi-VN');
+      const stats = entry.stats || {};
+      return `<div class="order-archive-item">
+        <div class="order-archive-head"><strong>${escapeHtml(entry.fileName || 'Tệp dữ liệu')}</strong><b>${Number(stats.rows) || Number(entry.rowCount) || 0} dòng</b></div>
+        <small>${chip('Sạch', stats.clean, 'clean')}${chip('Cần xử lý', stats.invalid, 'invalid')}${chip('Trùng', stats.duplicate, 'duplicate')}</small>
+        <small class="order-archive-meta">${escapeHtml(timeLabel)}${entry.rowsDropped ? ' · đã bỏ bản sao dòng cho nhẹ' : ''}</small>
+        ${entry.rows?.length ? `<button class="import-history-view" type="button" data-import-entry="${index}">Xem ${entry.rows.length} dòng đã nhập</button>` : ''}
+        <div class="import-history-rows hidden" data-import-rows="${index}"></div>
+      </div>`;
+    })
+  ].join('');
+}
+
+orderHistoryPanel?.addEventListener('click', event => {
+  const button = event.target.closest('[data-import-entry]');
+  if (!button) return;
+  const index = Number(button.dataset.importEntry);
+  const container = orderHistoryPanel.querySelector(`[data-import-rows="${index}"]`);
+  const entry = orderImportHistory[index];
+  if (!container || !entry?.rows?.length) return;
+  const open = container.classList.contains('hidden');
+  container.classList.toggle('hidden', !open);
+  button.textContent = open ? 'Ẩn dòng đã nhập' : `Xem ${entry.rows.length} dòng đã nhập`;
+  if (!open || container.dataset.filled) return;
+  const at = name => entry.headers.findIndex(header => normalizeColumnName(header) === name);
+  const columns = [at('khach hang'), at('so dien thoai'), at('san pham'), at('dia chi')].filter(index => index >= 0);
+  container.innerHTML = entry.rows.slice(0, 500)
+    .map(row => `<div class="import-history-row">${columns.map(index => `<span>${escapeHtml(row[index] || '')}</span>`).join('')}</div>`).join('');
+  container.dataset.filled = '1';
+});
+
+/** Nhớ một lần nhập tệp: tên tệp, lúc nhập, thống kê và chính các dòng đã nhập. */
+function recordOrderImport(fileName, headers = orderData.headers, rows = orderData.rows) {
+  orderImportHistory.unshift({
+    fileName,
+    importedAt: new Date().toISOString(),
+    rowCount: rows.length,
+    stats: importStats(headers, rows),
+    headers,
+    rows: rows.slice(0, importHistoryRowLimit)
+  });
+  pruneOrderImportHistory();
+  saveOrderImportHistory();
   renderOrderImportHistory();
 }
 
@@ -5875,7 +5990,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     'dia chi': 'minmax(260px, 1fr)',
     'ghi chu': 'minmax(170px, 340px)',
     'ghi chu xu ly': 'minmax(150px, 240px)',
-    'san pham': 'fit-content(170px)',
+    'san pham': 'minmax(120px, fit-content(170px))',
     'khach hang': 'minmax(100px, 170px)',
     'so dien thoai': 'max-content'
   };
@@ -6536,7 +6651,7 @@ orderImport.onchange = async () => {
       const records = parseCsv((await file.text()).replace(/^\uFEFF/, ''));
       applyImportedRecords(records.shift() || [], records);
     }
-    recordOrderImport(file.name);
+    recordOrderImport(file.name, orderData.headers, orderData.rows);
   } catch (error) {
     showToast(error.message);
   } finally {

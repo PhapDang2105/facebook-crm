@@ -246,7 +246,8 @@
           <button class="order-history-button" id="order-history-button" type="button" aria-expanded="false" aria-controls="order-history-panel">Lịch sử</button>
           <button class="order-history-button order-clear-button" id="order-clear-table" type="button">Xóa bảng</button>
         </div>
-        <div class="order-history-panel hidden" id="order-history-panel"></div>
+        <!-- Lịch sử Import: các lần nhập tệp gần đây kèm thống kê, giữ 7 ngày rồi tự xóa. -->
+        <div class="order-history-panel order-archive-panel hidden" id="order-history-panel"></div>
         <div class="data-preview" id="order-import-preview"></div>
       </section>
 
@@ -261,10 +262,14 @@
             <button class="order-day-tab" type="button" role="tab" aria-selected="false" data-order-day="2">2 ngày trước</button>
             <button class="order-day-tab order-day-tab--hold" type="button" role="tab" aria-selected="false" data-order-day="hold">Giữ đơn</button>
           </div>
-          <!-- Lịch sử: những đơn đã chốt trạng thái (đã xác nhận / khách hủy), mới nhất đứng đầu. -->
+          <!-- Lịch sử: kho lưu trữ đơn trên máy chủ — mọi đơn từng có, kể cả đơn đã
+               hủy, quá hẹn hay đã xóa; tìm theo tên, số điện thoại, địa chỉ, SKU. -->
           <button class="order-history-button" id="order-processed-history-button" type="button" aria-expanded="false" aria-controls="order-processed-history-panel">Lịch sử</button>
         </div>
-        <div class="order-history-panel hidden" id="order-processed-history-panel"></div>
+        <div class="order-history-panel order-archive-panel hidden" id="order-processed-history-panel">
+          <label class="order-archive-search"><input id="order-archive-search" type="search" placeholder="Tìm theo tên, số điện thoại, địa chỉ, SKU..." aria-label="Tìm trong kho lưu trữ đơn" autocomplete="off"></label>
+          <div id="order-archive-results"></div>
+        </div>
         <div class="data-preview" id="order-preview"></div>
       </section>
 

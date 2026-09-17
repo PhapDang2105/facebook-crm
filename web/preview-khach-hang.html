@@ -23,39 +23,14 @@
   .customers-icon-button img { width: 16px; height: 16px; }
   .customers-icon-button:hover img { filter: brightness(0) invert(1); }
 
-  /* ====================================================================
-     BA KIỂU DASHBOARD TÓM TẮT — để bấm so sánh rồi chọn một kiểu.
-     Điểm chung của cả ba: không nền màu, không gradient, không icon,
-     không bóng đổ. Chỉ chữ và một đường kẻ, đúng như các bảng còn lại.
-     Số liệu chạy theo bộ lọc và tab đang chọn, không phải số đứng yên.
-     ==================================================================== */
-
-  /* Kiểu A — một dòng chữ, không khung. Nhẹ nhất, chiếm ~40px. */
-  .customers-sum--a { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 20px; padding: 12px 20px; border-bottom: 1px solid var(--line-2); }
-  .customers-sum--a .sum-item { display: inline-flex; align-items: baseline; gap: 6px; font-size: 13.2px; }
-  .customers-sum--a .sum-item + .sum-item::before { margin-right: 14px; color: #d0d5dd; content: '·'; }
-  .customers-sum--a .sum-value { color: var(--text-1); font-size: 14.4px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .customers-sum--a .sum-label { color: var(--text-2); }
-
-  /* Kiểu B — ô viền mảnh, không màu nền. Giống MISA/Sapo. */
-  .customers-sum--b { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; margin: 16px 20px 2px; background: var(--line-1); border: 1px solid var(--line-1); border-radius: 12px; overflow: hidden; }
-  .customers-sum--b .sum-item { padding: 11px 14px; background: #fff; }
-  .customers-sum--b .sum-label { display: block; color: var(--text-2); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; }
-  .customers-sum--b .sum-value { display: block; margin-top: 4px; color: var(--text-1); font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
-  .customers-sum--b .sum-note { display: block; margin-top: 2px; color: #98a2b3; font-size: 11.8px; }
-
-  /* Kiểu C — bảng hai hàng, đúng khuôn .customers-table của chính app. */
-  .customers-sum--c { margin: 14px 20px 0; border: 1px solid var(--line-1); border-radius: 12px; overflow: hidden; }
-  .customers-sum--c table { width: 100%; border-collapse: collapse; }
-  .customers-sum--c th { padding: 9px 12px; color: var(--text-2); background: #fafbfc; border-bottom: 1px solid var(--line-1); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-align: left; text-transform: uppercase; white-space: nowrap; }
-  .customers-sum--c td { padding: 11px 12px; color: var(--text-1); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .customers-sum--c td small { display: block; margin-top: 1px; color: #98a2b3; font-size: 11.8px; font-weight: 400; }
-
-  /* Nút chuyển kiểu — chỉ có trong bản xem trước, không thuộc thiết kế. */
-  .preview-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 20px; background: #fffdf5; border-bottom: 1px solid #f2e2b6; }
-  .preview-switch span { margin-right: 4px; color: #7a5b13; font-size: 12.4px; }
-  .preview-switch button { height: 27px; padding: 0 11px; color: #5c4409; background: #fff; border: 1px solid #e8d49a; border-radius: 7px; font: inherit; font-size: 12.4px; cursor: pointer; }
-  .preview-switch button.active { color: #fff; background: #8a6a12; border-color: #8a6a12; font-weight: 600; }
+  /* --- Dashboard tóm tắt: bảng hai hàng, dùng lại đúng khuôn tiêu đề của
+         .customers-table bên dưới nên nhìn liền một mạch. Không nền màu,
+         không icon, không bóng đổ. Số liệu chạy theo bộ lọc và tab đang
+         chọn, không phải số đứng yên. --- */
+  .customers-summary { margin: 14px 20px 0; border: 1px solid var(--line-1); border-radius: 12px; overflow: hidden; }
+  .customers-summary table { width: 100%; border-collapse: collapse; }
+  .customers-summary th { padding: 9px 12px; color: var(--text-2); background: #fafbfc; border-bottom: 1px solid var(--line-1); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+  .customers-summary td { padding: 11px 12px; color: var(--text-1); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
   /* --- Tab lọc nhanh: mượn nguyên kiểu tab gạch chân .customer-panel-tab
          đang dùng ở panel Khách hàng màn Tin nhắn, đổi màu nhấn sang --brand
@@ -220,13 +195,6 @@
     <section class="view">
       <section class="settings-card customer-settings-card">
         <p class="preview-note"><b>Bản xem trước</b> — dữ liệu bên dưới là số liệu giả lập để xem giao diện, chưa nối vào máy chủ. Mọi thao tác lọc, sắp xếp, chọn dòng, phân trang và mở chi tiết đều bấm thử được.</p>
-        <div class="preview-switch">
-          <span>Kiểu dashboard tóm tắt:</span>
-          <button type="button" data-sum="a">A — Một dòng chữ</button>
-          <button type="button" data-sum="b">B — Ô viền mảnh</button>
-          <button type="button" data-sum="c">C — Bảng hai hàng</button>
-          <button type="button" data-sum="">Tắt hẳn</button>
-        </div>
         <header class="settings-card-head">
           <div><h1>Khách hàng</h1></div>
           <div class="customers-head-actions">

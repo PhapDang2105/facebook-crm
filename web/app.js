@@ -1382,10 +1382,10 @@ processedHistoryButton?.addEventListener('click', () => {
 // ===== Bốn tab theo ngày ở Xử lý dữ liệu =====
 //
 // Một ngày không gọi hết khách thì không ai phải chuyển đơn: qua nửa đêm đơn
-// tự nằm ở tab kế theo ngày đặt (cột Ngày). Tab cuối gom mọi đơn quá 3 ngày.
+// tự nằm ở tab kế theo ngày đặt (cột Ngày). Tab cuối gom mọi đơn từ 2 ngày trở lên.
 const orderDayTabs = [...document.querySelectorAll('[data-order-day]')];
-const orderDayLastBucket = 3;
-const orderDayEmptyMessages = ['Không có đơn cần xử lý hôm nay', 'Không có đơn tồn từ hôm qua', 'Không có đơn tồn từ 2 ngày trước', 'Không có đơn tồn quá 3 ngày'];
+const orderDayLastBucket = 2;
+const orderDayEmptyMessages = ['Không có đơn cần xử lý hôm nay', 'Không có đơn tồn từ hôm qua', 'Không có đơn tồn từ 2 ngày trở lên'];
 let activeOrderDay = 0;
 
 /** Đọc cột Ngày "16/09 07:52" (có thể kèm năm) thành Date; không đọc được thì null. */
@@ -1401,7 +1401,7 @@ function parseOrderRowDate(row, data = orderData, today = new Date()) {
   return Number.isNaN(ordered.getTime()) ? null : ordered;
 }
 
-/** Tab của một dòng: số ngày từ ngày đặt tới hôm nay, chặn ở 3. Dòng không có ngày tính là hôm nay. */
+/** Tab của một dòng: số ngày từ ngày đặt tới hôm nay, chặn ở 2 (tab cuối gom đơn cũ hơn). Dòng không có ngày tính là hôm nay. */
 function orderDayBucket(row, data = orderData, today = new Date()) {
   const ordered = parseOrderRowDate(row, data, today);
   if (!ordered) return 0;

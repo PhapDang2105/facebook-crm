@@ -541,21 +541,46 @@ posChannelList?.addEventListener('click', async event => {
 // ---------------------------------------------------------------------------
 // Khách hàng: one row per person per Page, built by the server from every
 // thread they have (Messenger, comments, ads). Filters are query parameters
-// so the CSV export gets exactly what the table shows.
+// so the CSV export gets exactly what the table shows. Tab lọc nhanh, sắp xếp
+// và phân trang chạy ngay trên danh sách máy chủ trả về, không hỏi lại.
 const customersTable = document.querySelector('#customers-table');
 const customersTotal = document.querySelector('#customers-total');
+const customersSummaryBox = document.querySelector('#customers-summary');
+const customersTabsBar = document.querySelector('#customers-tabs');
+const customersPager = document.querySelector('#customers-pager');
+const customersBulkBar = document.querySelector('#customers-bulk');
+const customersBulkCount = document.querySelector('#customers-bulk-count');
+const customersMoreRow = document.querySelector('#customers-more-row');
+const customersMoreToggle = document.querySelector('#customers-more-toggle');
+const customersMoreCount = document.querySelector('#customers-more-count');
+const customersRefreshButton = document.querySelector('#customers-refresh');
 const customersFilters = {
   q: document.querySelector('#customers-search'),
   source: document.querySelector('#customers-source'),
-  // Remarketing: mua trong N ngày, mua sản phẩm nào.
+  label: document.querySelector('#customers-label'),
+  channelId: document.querySelector('#customers-channel'),
+  gender: document.querySelector('#customers-gender'),
+  product: document.querySelector('#customers-product'),
   orderedWithin: document.querySelector('#customers-ordered-within'),
-  product: document.querySelector('#customers-product')
+  activeWithin: document.querySelector('#customers-active-within'),
+  combo: document.querySelector('#customers-combo'),
+  minOrders: document.querySelector('#customers-min-orders')
 };
-// Hai ô này lọc và sắp xếp ngay trên danh sách đã tải, không cần hỏi lại máy chủ.
-const customersStateSelect = document.querySelector('#customers-state');
-const customersSortSelect = document.querySelector('#customers-sort');
+// Các ô nằm sau nút "Lọc thêm", dùng để đếm số lọc phụ đang bật.
+const customersMoreKeys = ['channelId', 'gender', 'product', 'orderedWithin', 'activeWithin', 'combo', 'minOrders'];
+
 let customersRequestId = 0;
 let customersItems = [];
+let customersAll = [];
+let customersShown = [];
+const customersPicked = new Set();
+// Tab lọc nhanh tách khỏi customersFilters vì nó không phải ô select, và nút
+// "Xóa lọc" không được đụng tới nó — người dùng vẫn đang đứng ở tab đó.
+let customersTab = '';
+let customersSortKey = 'lastOrderAt';
+let customersSortDir = -1;
+let customersPage = 1;
+let customersPageSize = 25;
 const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất' };
 
 function customersQueryString() {
@@ -567,6 +592,26 @@ function customersQueryString() {
     params.set(key, value);
   }
   return params.toString();
+}
+
+function fillCustomersChannelOptions() {
+  const select = customersFilters.channelId;
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">Mọi trang</option>'
+    + messageChannels.filter(channel => channel.id !== 'local-facebook')
+      .map(channel => `<option value="${escapeHtml(channel.id)}">${escapeHtml(channel.name)}</option>`).join('')
+    + '<option value="export">Đơn đã xuất</option>';
+  select.value = current;
+}
+
+function fillCustomersLabelOptions() {
+  const select = customersFilters.label;
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">Mọi thẻ</option>'
+    + inboxLabels.map(label => `<option value="${escapeHtml(label.id)}">${escapeHtml(label.name)}</option>`).join('');
+  select.value = current;
 }
 
 function formatCustomerTime(value) {
@@ -604,10 +649,15 @@ function formatCustomerDate(value) {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
-/** Tiền trong bảng Khách hàng, chưa phát sinh thì để dấu gạch cho đỡ rối mắt. */
 function formatCustomerMoney(value) {
   const amount = Math.max(0, Math.round(Number(value) || 0));
   return amount ? `${new Intl.NumberFormat('vi-VN').format(amount)}đ` : '—';
+}
+
+/** Tỉnh thành lấy từ mảnh cuối của địa chỉ, phần còn lại là địa chỉ chi tiết. */
+function customerProvince(customer) {
+  const parts = String(customer.address || '').split(',').map(part => part.trim()).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
 }
 
 /** Trạng thái khách đếm theo số lần phát sinh đơn: lần đầu là khách mới, lần
@@ -619,85 +669,217 @@ function customerState(customer) {
   return { key: 'new', label: 'Khách hàng mới' };
 }
 
-/** Danh sách đã tải về, giữ lại để lọc trạng thái và sắp xếp mà không gọi lại máy chủ. */
-let customersLoaded = [];
-let customersLoadedTotal = 0;
+/* Tab lọc nhanh. "Ngừng mua" không suy từ số đơn mà từ khoảng lặng: quá 90 ngày
+   không phát sinh đơn nào thì cần gọi lại, dù trước đó mua nhiều tới đâu. */
+const customersTabList = [
+  { key: '', label: 'Tất cả' },
+  { key: 'new', label: 'Khách mới' },
+  { key: 'returning', label: 'Khách quay lại' },
+  { key: 'loyal', label: 'Khách trung thành' },
+  { key: 'lapsed', label: 'Ngừng mua' }
+];
 
-// Bảng gom sáu cột, mỗi ô hai dòng: dòng trên là thứ cần đọc trước, dòng dưới
-// là thông tin phụ. Mười cột chữ nhỏ dồn ngang trước đây rất khó đọc.
-function renderCustomers(items, total) {
-  if (!customersTable) return;
-  customersLoaded = items;
-  customersLoadedTotal = total;
-  const wanted = customersStateSelect?.value || '';
-  const sortKey = customersSortSelect?.value || 'lastOrderAt';
-  const shown = items
-    .filter(customer => !wanted || customerState(customer).key === wanted)
-    .sort((first, second) => sortKey === 'name'
-      ? String(first.name || '').localeCompare(String(second.name || ''), 'vi')
-      : (Number(second[sortKey]) || 0) - (Number(first[sortKey]) || 0));
-  customersItems = shown;
-
-  const lead = document.querySelector('#customers-lead');
-  if (lead) {
-    const returning = items.filter(customer => customerState(customer).key === 'returning').length;
-    const loyal = items.filter(customer => customerState(customer).key === 'loyal').length;
-    lead.textContent = `${total} khách đã mua · ${returning} khách quay lại lần hai · ${loyal} khách trung thành`;
-  }
-  if (customersTotal) {
-    customersTotal.textContent = shown.length === total
-      ? `Tổng: ${total} khách hàng`
-      : `Hiển thị ${shown.length}/${total} khách hàng`;
-  }
-  if (!shown.length) {
-    renderEmptyState(customersTable, total ? 'Không có khách hàng nào khớp bộ lọc.' : 'Chưa có khách hàng nào. Khách xuất hiện ở đây sau khi chốt đơn đầu tiên.');
-    return;
-  }
-  customersTable.classList.remove('is-empty');
-
-  const rows = shown.map((customer, index) => {
-    const state = customerState(customer);
-    const source = (customer.sources || []).map(name => customerSourceNames[name] || name).join(' · ');
-    const bought = customer.lastOrderProducts || [];
-    const products = bought.length
-      ? bought.slice(0, 2).map(item => `${item.name} ×${item.quantity}`).join(', ') + (bought.length > 2 ? `, +${bought.length - 2}` : '')
-      : 'Không có mặt hàng';
-    return `<tr data-customer-index="${index}"${customer.unread ? ' class="is-unread"' : ''}>
-      <td>
-        <span class="customer-main">${escapeHtml(customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng'))}</span>
-        <span class="customer-sub">${escapeHtml(customer.phone || 'Chưa có số')}</span>
-      </td>
-      <td class="customer-area">
-        <span class="customer-area-text">${escapeHtml(customer.address || 'Chưa có địa chỉ')}</span>
-      </td>
-      <td>
-        <span class="customer-state customer-state--${state.key}">${state.label}</span>
-        <span class="customer-sub customer-sub--dim">${escapeHtml(source || 'Không rõ nguồn')}</span>
-      </td>
-      <td class="customer-right">
-        <span class="customer-strong">${Number(customer.orderCount) || 0} đơn</span>
-        <span class="customer-sub">${escapeHtml(formatCustomerMoney(customer.orderTotal))}</span>
-      </td>
-      <td>
-        <span class="customer-strong">${escapeHtml(formatCustomerMoney(customer.lastOrderTotal))}</span>
-        <span class="customer-sub">${escapeHtml(products)}</span>
-      </td>
-      <td>
-        <span class="customer-main">${escapeHtml(timeSince(customer.lastOrderAt) || 'Chưa mua')}</span>
-        <span class="customer-sub customer-sub--dim">${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</span>
-      </td>
-    </tr>`;
-  }).join('');
-
-  customersTable.innerHTML = `<table><thead><tr>
-    <th>Khách hàng</th><th>Khu vực</th><th>Trạng thái</th>
-    <th class="customer-right">Đơn đã mua</th><th>Đơn gần nhất</th><th>Mua lần cuối</th>
-  </tr></thead><tbody>${rows}</tbody></table>`;
+function customerMatchesTab(customer, key) {
+  if (!key) return true;
+  // Khách thiếu mốc mua phải bị loại hẳn: phép trừ với giá trị rỗng ra NaN, mà
+  // mọi so sánh với NaN đều sai nên điều kiện "quá hạn" không bao giờ đúng.
+  if (key === 'lapsed') return Boolean(customer.lastOrderAt) && Date.now() - customer.lastOrderAt > 90 * 86400000;
+  return customerState(customer).key === key;
 }
 
+function renderCustomersTabs(base) {
+  if (!customersTabsBar) return;
+  customersTabsBar.innerHTML = customersTabList.map(tab => {
+    const count = base.filter(customer => customerMatchesTab(customer, tab.key)).length;
+    return `<button class="customers-tab${tab.key === customersTab ? ' active' : ''}" type="button" data-tab="${tab.key}">${tab.label}<b>${count}</b></button>`;
+  }).join('');
+}
+
+/* Sáu con số một người bán thực sự cần nhìn hằng ngày. Tất cả đều tính trên
+   ĐÚNG danh sách đang hiển thị, nên đổi bộ lọc hay đổi tab là số đổi theo —
+   nếu số đứng yên bất kể lọc gì thì nó chỉ là đồ trang trí. */
+function shortCustomerMoney(value) {
+  const amount = Math.round(Number(value) || 0);
+  if (amount >= 1000000000) return `${(amount / 1000000000).toFixed(1).replace('.0', '')} tỷ`;
+  if (amount >= 1000000) return `${(amount / 1000000).toFixed(1).replace('.0', '')} triệu`;
+  return formatCustomerMoney(amount);
+}
+
+function customersSummaryFigures(list) {
+  const now = Date.now();
+  const spend = list.reduce((sum, customer) => sum + (Number(customer.orderTotal) || 0), 0);
+  const orders = list.reduce((sum, customer) => sum + (Number(customer.orderCount) || 0), 0);
+  const fresh = list.filter(customer => customer.firstOrderAt && now - customer.firstOrderAt <= 30 * 86400000).length;
+  const again = list.filter(customer => (Number(customer.orderCount) || 0) >= 2).length;
+  const cold = list.filter(customer => customerMatchesTab(customer, 'lapsed')).length;
+  const number = value => new Intl.NumberFormat('vi-VN').format(value);
+  // `hint` không hiện trên màn hình, chỉ nằm trong tooltip khi rê chuột vào
+  // tiêu đề cột — giữ được cách tính mà không làm bảng rậm thêm một dòng chữ.
+  return [
+    { label: 'Khách hàng', value: number(list.length), hint: 'Số khách đang hiển thị theo bộ lọc hiện tại' },
+    { label: 'Khách mới 30 ngày', value: number(fresh), hint: 'Khách có đơn đầu tiên trong vòng 30 ngày' },
+    { label: 'Tỷ lệ mua lại', value: list.length ? `${Math.round(again / list.length * 100)}%` : '—', hint: `${again} khách đã mua từ 2 lần trở lên` },
+    { label: 'Tổng đã chi', value: shortCustomerMoney(spend), hint: `Cộng từ ${orders} đơn` },
+    { label: 'Trung bình mỗi đơn', value: orders ? shortCustomerMoney(spend / orders) : '—', hint: 'Tổng đã chi chia cho số đơn' },
+    { label: 'Cần gọi lại', value: number(cold), hint: 'Khách quá 90 ngày không phát sinh đơn nào' }
+  ];
+}
+
+function renderCustomersSummary(list) {
+  if (!customersSummaryBox) return;
+  const figures = customersSummaryFigures(list);
+  customersSummaryBox.className = 'customers-summary';
+  customersSummaryBox.innerHTML = `<table>
+    <thead><tr>${figures.map(figure => `<th title="${escapeHtml(figure.hint)}">${escapeHtml(figure.label)}</th>`).join('')}</tr></thead>
+    <tbody><tr>${figures.map(figure => `<td>${escapeHtml(figure.value)}</td>`).join('')}</tr></tbody>
+  </table>`;
+}
+
+const customersColumns = [
+  { key: 'name', label: 'Khách hàng', sortable: true },
+  { key: 'phone', label: 'Số điện thoại', sortable: false },
+  { key: 'province', label: 'Khu vực', sortable: true },
+  { key: 'state', label: 'Trạng thái', sortable: true, mid: true },
+  { key: 'labels', label: 'Thẻ', sortable: false, mid: true },
+  { key: 'orderCount', label: 'Số đơn', sortable: true, mid: true },
+  { key: 'orderTotal', label: 'Đã chi', sortable: true, mid: true },
+  { key: 'lastOrderProducts', label: 'Sản phẩm', sortable: false, mid: true },
+  { key: 'lastOrderAt', label: 'Mua lần cuối', sortable: true }
+];
+
+/** Chip thẻ khách. Màu và tên icon là dữ liệu nhân viên tự đặt trong Cài đặt,
+ *  nên phải lọc trước khi ghép vào thuộc tính HTML: màu chỉ nhận mã hex, tên
+ *  icon chỉ nhận chữ–số–gạch nối. */
+function customerLabelChip(label) {
+  const color = /^#[0-9a-f]{3,8}$/i.test(String(label.color || '')) ? label.color : '#6b7280';
+  const icon = /^[a-z0-9-]+$/i.test(String(label.icon || '')) ? label.icon : 'label';
+  return `<span class="conversation-label" style="--label-color:${color}"><img class="label-icon" src="/assets/icons/labels/${icon}.svg" alt="">${escapeHtml(label.name)}</span>`;
+}
+
+function customersSortIcon(column) {
+  if (customersSortKey !== column.key) return '/assets/icons/customers/sort.svg';
+  return customersSortDir < 0 ? '/assets/icons/customers/sort-down.svg' : '/assets/icons/customers/sort-up.svg';
+}
+
+function customersHeadHtml() {
+  const slice = customersShown.slice((customersPage - 1) * customersPageSize, customersPage * customersPageSize);
+  const allPicked = slice.length > 0 && slice.every(customer => customersPicked.has(customer.id));
+  const cells = customersColumns.map(column => {
+    const classes = [column.mid ? 'customer-mid' : '', column.sortable ? 'is-sortable' : '', customersSortKey === column.key ? 'is-sorted' : ''].filter(Boolean).join(' ');
+    const icon = column.sortable ? `<img class="customers-sort-icon" src="${customersSortIcon(column)}" alt="">` : '';
+    return `<th class="${classes}"${column.sortable ? ` data-sort="${column.key}" title="Bấm để sắp xếp"` : ''}><span class="customers-th">${column.label}${icon}</span></th>`;
+  }).join('');
+  return `<th class="customer-pick"><input type="checkbox" id="customers-pick-all" aria-label="Chọn tất cả trên trang"${allPicked ? ' checked' : ''}></th>${cells}`;
+}
+
+function customerRowHtml(customer, index) {
+  const state = customerState(customer);
+  const source = (customer.sources || []).map(name => customerSourceNames[name] || name).join(' · ');
+  const products = customer.lastOrderProducts || [];
+  const productCell = products.length
+    ? `<div class="customer-products" title="${escapeHtml(products.map(item => `${item.name} ×${item.quantity}`).join(', '))}">${
+        products.slice(0, 2).map(item => `<span class="customer-product">${escapeHtml(item.name)} ×${item.quantity}</span>`).join('')
+      }${products.length > 2 ? `<span class="customer-product-meta">+${products.length - 2} mặt hàng khác</span>` : ''}</div>`
+    : '<span class="customer-never">—</span>';
+  const labels = (customer.labels || []).map(labelById).filter(Boolean);
+  const tags = labels.length
+    ? `<div class="customer-tag-wrap">${labels.slice(0, 2).map(customerLabelChip).join('')}${
+        labels.length > 2 ? `<span class="customer-product-meta">+${labels.length - 2}</span>` : ''}</div>`
+    : '<span class="customer-never">—</span>';
+  const province = customerProvince(customer);
+  const name = customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng');
+
+  return `<tr data-customer-index="${index}" data-id="${escapeHtml(customer.id)}" class="${customersPicked.has(customer.id) ? 'is-picked' : ''}${customer.unread ? ' is-unread' : ''}">
+    <td class="customer-pick"><input type="checkbox" data-pick="${escapeHtml(customer.id)}" aria-label="Chọn ${escapeHtml(name)}"${customersPicked.has(customer.id) ? ' checked' : ''}></td>
+    <td class="customer-who">
+      <strong>${escapeHtml(name)}</strong>
+      <small>${escapeHtml(source || 'Không rõ nguồn')}</small>
+    </td>
+    <td><span class="customer-tel">${escapeHtml(customer.phone)}${customer.phone
+      ? `<button type="button" data-copy="${escapeHtml(customer.phone)}" title="Chép số điện thoại" aria-label="Chép số điện thoại"><img src="/assets/icons/customers/copy.svg" alt=""></button>`
+      : ''}</span></td>
+    <td class="customer-place"><b>${escapeHtml(province || '—')}</b><small title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</small></td>
+    <td class="customer-mid"><span class="customer-state customer-state--${state.key}">${state.label}</span></td>
+    <td class="customer-tags customer-mid">${tags}</td>
+    <td class="customer-mid customer-order-count">${Number(customer.orderCount) || 0}</td>
+    <td class="customer-mid customer-money">${escapeHtml(formatCustomerMoney(customer.orderTotal))}</td>
+    <td class="customer-bought customer-mid">${productCell}</td>
+    <td class="customer-bought-when">${customer.lastOrderAt
+      ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}</small>`
+      : '<span class="customer-never">Chưa mua</span>'}</td>
+  </tr>`;
+}
+
+function renderCustomers(items, total) {
+  if (!customersTable) return;
+  customersAll = Array.isArray(items) ? items : [];
+  renderCustomersTabs(customersAll);
+
+  customersShown = customersAll.filter(customer => customerMatchesTab(customer, customersTab)).sort((first, second) => {
+    if (customersSortKey === 'name') return customersSortDir * String(first.name || '').localeCompare(String(second.name || ''), 'vi');
+    if (customersSortKey === 'province') return customersSortDir * customerProvince(first).localeCompare(customerProvince(second), 'vi');
+    if (customersSortKey === 'state') return customersSortDir * ((first.orderCount || 0) - (second.orderCount || 0));
+    return customersSortDir * ((Number(first[customersSortKey]) || 0) - (Number(second[customersSortKey]) || 0));
+  });
+  customersItems = customersShown;
+
+  const pageCount = Math.max(1, Math.ceil(customersShown.length / customersPageSize));
+  if (customersPage > pageCount) customersPage = pageCount;
+  const slice = customersShown.slice((customersPage - 1) * customersPageSize, customersPage * customersPageSize);
+
+  if (!customersShown.length) {
+    renderEmptyState(customersTable, total ? 'Không có khách hàng nào khớp bộ lọc.' : 'Chưa có khách hàng nào. Khách xuất hiện ở đây sau khi chốt đơn đầu tiên.');
+  } else {
+    customersTable.classList.remove('is-empty');
+    const offset = (customersPage - 1) * customersPageSize;
+    customersTable.innerHTML = `<table><thead><tr>${customersHeadHtml()}</tr></thead><tbody>${
+      slice.map((customer, index) => customerRowHtml(customer, offset + index)).join('')}</tbody></table>`;
+  }
+
+  if (customersTotal) {
+    const from = customersShown.length ? (customersPage - 1) * customersPageSize + 1 : 0;
+    const to = Math.min(customersPage * customersPageSize, customersShown.length);
+    customersTotal.textContent = `Hiển thị ${from}–${to} / ${customersShown.length} khách hàng${customersShown.length === total ? '' : ` (tổng ${total})`}`;
+  }
+
+  renderCustomersSummary(customersShown);
+  renderCustomersPager(pageCount);
+  renderCustomersBulk();
+  if (customersMoreCount) {
+    const count = customersMoreKeys.filter(key => customersFilters[key]?.value).length;
+    customersMoreCount.textContent = String(count);
+    customersMoreCount.classList.toggle('hidden', count === 0);
+  }
+}
+
+function renderCustomersPager(pageCount) {
+  if (!customersPager) return;
+  const numbers = [];
+  for (let index = 1; index <= pageCount; index += 1) {
+    if (index === 1 || index === pageCount || Math.abs(index - customersPage) <= 1) numbers.push(index);
+    else if (numbers[numbers.length - 1] !== '…') numbers.push('…');
+  }
+  customersPager.innerHTML = `
+    <select class="customers-page-size" id="customers-page-size" aria-label="Số dòng mỗi trang">
+      ${[25, 50, 100].map(size => `<option value="${size}"${size === customersPageSize ? ' selected' : ''}>${size} dòng/trang</option>`).join('')}
+    </select>
+    <button type="button" data-page="${customersPage - 1}"${customersPage === 1 ? ' disabled' : ''} aria-label="Trang trước"><img src="/assets/icons/customers/chevron-left.svg" alt=""></button>
+    ${numbers.map(number => number === '…'
+      ? '<button type="button" disabled>…</button>'
+      : `<button type="button" data-page="${number}" class="${number === customersPage ? 'is-current' : ''}">${number}</button>`).join('')}
+    <button type="button" data-page="${customersPage + 1}"${customersPage === pageCount ? ' disabled' : ''} aria-label="Trang sau"><img src="/assets/icons/customers/chevron-right.svg" alt=""></button>`;
+}
+
+function renderCustomersBulk() {
+  if (!customersBulkBar) return;
+  customersBulkBar.classList.toggle('hidden', customersPicked.size === 0);
+  if (customersBulkCount) customersBulkCount.textContent = `Đã chọn ${customersPicked.size} khách`;
+}
 
 async function loadCustomers() {
   if (!customersTable) return;
+  fillCustomersChannelOptions();
+  fillCustomersLabelOptions();
   const requestId = ++customersRequestId;
   try {
     const result = await readApiResponse(await fetch(`/api/customers?${customersQueryString()}`));
@@ -708,6 +890,16 @@ async function loadCustomers() {
     renderEmptyState(customersTable, error.message || 'Chưa tải được danh sách khách hàng.');
   }
 }
+
+/** Đổi bộ lọc là đổi danh sách, nên phải bỏ luôn những dòng đã tích: nếu giữ
+ *  lại, thanh thao tác hàng loạt vẫn đếm và vẫn tác động lên những khách không
+ *  còn nhìn thấy trên bảng. */
+function resetCustomersView() {
+  customersPicked.clear();
+  customersPage = 1;
+  loadCustomers();
+}
+
 
 // Attribute sheet: everything the CRM knows about one person, with links
 // into their threads. Mirrors the contact card staff used in Smax.
@@ -764,12 +956,99 @@ customerDialog?.addEventListener('click', event => {
 let customersSearchTimer = 0;
 customersFilters.q?.addEventListener('input', () => {
   clearTimeout(customersSearchTimer);
-  customersSearchTimer = setTimeout(loadCustomers, 250);
+  customersSearchTimer = setTimeout(resetCustomersView, 250);
 });
-['source', 'orderedWithin', 'product']
-  .forEach(key => customersFilters[key]?.addEventListener('change', loadCustomers));
-customersStateSelect?.addEventListener('change', () => renderCustomers(customersLoaded, customersLoadedTotal));
-customersSortSelect?.addEventListener('change', () => renderCustomers(customersLoaded, customersLoadedTotal));
+for (const [key, input] of Object.entries(customersFilters)) {
+  if (key === 'q') continue;
+  input?.addEventListener('change', resetCustomersView);
+}
+
+customersTabsBar?.addEventListener('click', event => {
+  const tab = event.target.closest('[data-tab]');
+  if (!tab) return;
+  customersTab = tab.dataset.tab;
+  customersPicked.clear();
+  customersPage = 1;
+  renderCustomers(customersAll, customersAll.length);
+});
+
+customersMoreToggle?.addEventListener('click', () => {
+  const open = customersMoreToggle.getAttribute('aria-expanded') === 'true';
+  customersMoreToggle.setAttribute('aria-expanded', String(!open));
+  customersMoreRow?.classList.toggle('hidden', open);
+});
+
+document.querySelector('#customers-clear-filters')?.addEventListener('click', () => {
+  for (const input of Object.values(customersFilters)) if (input) input.value = '';
+  resetCustomersView();
+});
+
+customersBulkBar?.addEventListener('click', event => {
+  if (event.target.closest('#customers-bulk-clear')) {
+    customersPicked.clear();
+    renderCustomers(customersAll, customersAll.length);
+    return;
+  }
+  if (event.target.closest('button')) showToast('Chức năng này chưa được nối.');
+});
+
+customersRefreshButton?.addEventListener('click', () => {
+  loadCustomers();
+  showToast('Đã tải lại danh sách khách hàng.', 'success');
+});
+
+customersTable?.addEventListener('change', event => {
+  const all = event.target.closest('#customers-pick-all');
+  const slice = customersShown.slice((customersPage - 1) * customersPageSize, customersPage * customersPageSize);
+  if (all) {
+    for (const customer of slice) {
+      if (all.checked) customersPicked.add(customer.id);
+      else customersPicked.delete(customer.id);
+    }
+    renderCustomers(customersAll, customersAll.length);
+    return;
+  }
+  const one = event.target.closest('[data-pick]');
+  if (one) {
+    if (one.checked) customersPicked.add(one.dataset.pick);
+    else customersPicked.delete(one.dataset.pick);
+    renderCustomers(customersAll, customersAll.length);
+  }
+});
+
+customersTable?.addEventListener('click', event => {
+  const sorter = event.target.closest('th[data-sort]');
+  if (sorter) {
+    const key = sorter.dataset.sort;
+    if (customersSortKey === key) customersSortDir = -customersSortDir;
+    else {
+      customersSortKey = key;
+      customersSortDir = key === 'name' || key === 'province' ? 1 : -1;
+    }
+    renderCustomers(customersAll, customersAll.length);
+    return;
+  }
+  const copy = event.target.closest('[data-copy]');
+  if (copy) {
+    event.stopPropagation();
+    navigator.clipboard?.writeText(copy.dataset.copy);
+    showToast(`Đã chép số ${copy.dataset.copy}`, 'success', 2000);
+  }
+});
+
+customersPager?.addEventListener('click', event => {
+  const button = event.target.closest('button[data-page]');
+  if (!button || button.disabled) return;
+  customersPage = Number(button.dataset.page);
+  renderCustomers(customersAll, customersAll.length);
+});
+customersPager?.addEventListener('change', event => {
+  if (!event.target.closest('#customers-page-size')) return;
+  customersPageSize = Number(event.target.value);
+  customersPage = 1;
+  renderCustomers(customersAll, customersAll.length);
+});
+
 // Một nút Xuất danh sách, chọn định dạng trong menu — cả hai đều xuất đúng
 // những gì bảng đang lọc.
 const customersExportButton = document.querySelector('#customers-export');
@@ -799,6 +1078,8 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeCustomersExportMenu();
 });
 customersTable?.addEventListener('click', event => {
+  // Bấm vào ô tích chọn, nút chép số hay tiêu đề cột thì không mở hồ sơ khách.
+  if (event.target.closest('.customer-pick') || event.target.closest('[data-copy]') || event.target.closest('th')) return;
   const row = event.target.closest('tr[data-customer-index]');
   if (!row) return;
   const customer = customersItems[Number(row.dataset.customerIndex)];

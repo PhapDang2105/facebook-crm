@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260917-ui-3">
+  <link rel="stylesheet" href="styles.css?v=20260917-ui-4">
 </head>
 <body>
   <div class="topbar">
@@ -283,53 +283,94 @@
       </section>
     </section>
     <section id="customers-view" class="view hidden">
-      <div class="customers-page">
-        <div class="customers-head">
-          <div>
-            <h1 id="customer-settings-title">Khách hàng</h1>
-            <p id="customers-lead"></p>
-          </div>
-          <div class="customers-export">
-            <button class="order-history-button" id="customers-export" type="button" aria-haspopup="menu" aria-expanded="false">Xuất danh sách<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
-            <div class="customers-export-menu hidden" id="customers-export-menu" role="menu">
-              <button type="button" role="menuitem" data-export="audience" title="Số điện thoại dạng 84… để tải lên Facebook Custom Audience">Danh sách remarketing</button>
-              <button type="button" role="menuitem" data-export="full" title="Toàn bộ cột: liên hệ, sản phẩm, thời gian mua">Toàn bộ dữ liệu</button>
+      <section class="settings-card customer-settings-card">
+        <header class="settings-card-head">
+          <div><h1 id="customer-settings-title">Khách hàng</h1></div>
+          <div class="customers-head-actions">
+            <button class="order-history-button customers-icon-button" id="customers-refresh" type="button" title="Tải lại danh sách"><img src="/assets/icons/customers/refresh.svg" alt="">Làm mới</button>
+            <div class="customers-export">
+              <button class="order-history-button" id="customers-export" type="button" aria-haspopup="menu" aria-expanded="false">Xuất danh sách<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+              <div class="customers-export-menu hidden" id="customers-export-menu" role="menu">
+                <button type="button" role="menuitem" data-export="audience" title="Số điện thoại dạng 84… để tải lên Facebook Custom Audience">Danh sách remarketing</button>
+                <button type="button" role="menuitem" data-export="full" title="Toàn bộ cột: liên hệ, sản phẩm, thời gian mua">Toàn bộ dữ liệu</button>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="customers-bar">
-          <input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tìm tên, số điện thoại, địa chỉ, sản phẩm...">
-          <select id="customers-state" aria-label="Trạng thái khách">
-            <option value="">Mọi trạng thái</option>
-            <option value="new">Khách hàng mới</option>
-            <option value="returning">Khách hàng cũ</option>
-            <option value="loyal">Khách hàng trung thành</option>
-          </select>
-          <select id="customers-source" aria-label="Nguồn khách">
-            <option value="">Mọi nguồn khách</option>
+        </header>
+
+        <div id="customers-summary"></div>
+
+        <div class="customers-tabs" id="customers-tabs"></div>
+
+        <div class="customers-toolbar">
+          <label class="order-search-control"><input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tên, số điện thoại, địa chỉ, sản phẩm..."></label>
+          <label class="order-filter-control"><select id="customers-source" aria-label="Nguồn khách">
+            <option value="">Tất cả nguồn khách</option>
             <option value="inbox">Tin nhắn</option>
             <option value="comment">Bình luận</option>
             <option value="ads">Quảng cáo</option>
             <option value="export">Đơn đã xuất</option>
-          </select>
-          <select id="customers-product" aria-label="Sản phẩm đã mua"><option value="">Mọi sản phẩm</option></select>
-          <select id="customers-ordered-within" aria-label="Đã chốt đơn trong">
+            <option value="landing">Landing page</option>
+          </select></label>
+          <label class="order-filter-control"><select id="customers-label" aria-label="Thẻ khách"><option value="">Mọi thẻ</option></select></label>
+          <button class="customers-more-toggle" id="customers-more-toggle" type="button" aria-expanded="false"><img src="/assets/icons/tune.svg" alt="">Lọc thêm<span class="customers-filter-count hidden" id="customers-more-count">0</span></button>
+        </div>
+
+        <div class="customers-toolbar customers-toolbar--more hidden" id="customers-more-row">
+          <label class="order-filter-control"><select id="customers-channel" aria-label="Trang">
+            <option value="">Mọi trang</option>
+            </select></label>
+          <label class="order-filter-control"><select id="customers-gender" aria-label="Giới tính">
+            <option value="">Mọi giới tính</option>
+            <option value="female">Nữ</option>
+            <option value="male">Nam</option>
+          </select></label>
+          <label class="order-filter-control"><select id="customers-product" aria-label="Sản phẩm đã mua"><option value="">Mọi sản phẩm</option></select></label>
+          <label class="order-filter-control"><select id="customers-ordered-within" aria-label="Thời điểm mua">
             <option value="">Mọi thời điểm mua</option>
             <option value="7">Mua trong 7 ngày</option>
             <option value="14">Mua trong 14 ngày</option>
             <option value="30">Mua trong 1 tháng</option>
             <option value="90">Mua trong 3 tháng</option>
-          </select>
-          <select id="customers-sort" aria-label="Sắp xếp">
-            <option value="lastOrderAt">Mới mua gần đây</option>
-            <option value="orderCount">Mua nhiều lần nhất</option>
-            <option value="orderTotal">Chi nhiều tiền nhất</option>
-            <option value="name">Tên A → Z</option>
-          </select>
+          </select></label>
+          <label class="order-filter-control"><select id="customers-active-within" aria-label="Tương tác gần đây">
+            <option value="">Mọi mức tương tác</option>
+            <option value="7">Có nhắn trong 7 ngày</option>
+            <option value="30">Có nhắn trong 1 tháng</option>
+            <option value="90">Có nhắn trong 3 tháng</option>
+          </select></label>
+          <label class="order-filter-control"><select id="customers-combo" aria-label="Combo lớn nhất">
+            <option value="">Mọi combo</option>
+            <option value="2">Từ 2 túi/đơn</option>
+            <option value="3">Từ 3 túi/đơn</option>
+            <option value="5">Từ 5 túi/đơn</option>
+          </select></label>
+          <label class="order-filter-control"><select id="customers-min-orders" aria-label="Số đơn tối thiểu">
+            <option value="">Mọi số đơn</option>
+            <option value="2">Từ 2 đơn</option>
+            <option value="3">Từ 3 đơn</option>
+            <option value="5">Từ 5 đơn</option>
+            <option value="10">Từ 10 đơn</option>
+          </select></label>
+          <button class="customers-clear-filters" id="customers-clear-filters" type="button"><img src="/assets/icons/customers/filter-dismiss.svg" alt="">Xóa lọc</button>
         </div>
+
+        <div class="customers-bulk hidden" id="customers-bulk">
+          <strong id="customers-bulk-count">Đã chọn 0 khách</strong>
+          <button type="button"><img src="/assets/icons/customers/tag.svg" alt="">Gắn thẻ</button>
+          <button type="button"><img src="/assets/icons/download.svg" alt="">Xuất nhóm đã chọn</button>
+          <button type="button"><img src="/assets/icons/send-message.svg" alt="">Gửi tin hàng loạt</button>
+          <button class="customers-bulk-clear" id="customers-bulk-clear" type="button">Bỏ chọn</button>
+        </div>
+
         <div class="customers-table" id="customers-table"></div>
-        <p class="customers-total" id="customers-total"></p>
-      </div>
+
+        <div class="customers-foot">
+          <p class="customers-total" id="customers-total"></p>
+          <div class="customers-pager" id="customers-pager"></div>
+        </div>
+      </section>
+    </section>
     </section>
     <section id="shipping-view" class="view hidden">
       <div class="shipping-page">
@@ -695,6 +736,6 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260917-ui-3"></script>
+  <script src="app.js?v=20260917-ui-4"></script>
 </body>
 </html>

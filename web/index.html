@@ -237,7 +237,8 @@
             <option value="all">Tất cả đơn hàng</option>
             <option value="valid">Đơn hợp lệ</option>
             <option value="invalid">Cần xử lý</option>
-            <option value="duplicate">Trùng dữ liệu</option>
+            <option value="duplicate-any">Dữ liệu trùng</option>
+            <option value="duplicate">Trùng cả dòng</option>
             <option value="duplicate-phone">Trùng số điện thoại</option>
             <option value="phone-warning">Cảnh báo bom hàng</option>
           </select></label>
@@ -263,8 +264,6 @@
           <button class="order-history-button" id="order-processed-history-button" type="button" aria-expanded="false" aria-controls="order-processed-history-panel">Lịch sử</button>
         </div>
         <div class="order-history-panel hidden" id="order-processed-history-panel"></div>
-        <!-- Đang xem nhóm đơn trùng số: bấm vùng trống để quay lại danh sách theo ngày. -->
-        <div class="order-group-notice hidden" id="order-group-notice" role="status"></div>
         <div class="data-preview" id="order-preview"></div>
       </section>
 

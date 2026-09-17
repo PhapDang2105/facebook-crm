@@ -117,6 +117,6 @@ export function processingNotes(order) {
   if (warning && warning.level && warning.level !== 'none') notes.push(`☎ ${shortWarning(warning)}`);
 
   // Khách điền nhiều form thì mỗi form một đơn, không tự gộp; bảng Đơn hàng tự
-  // ghi "cùng số điện thoại với đơn …" và bấm vào đơn thì hiện cả nhóm.
+  // ghi "cùng số điện thoại với đơn …"; nhóm được so và xử lý ở Nhập dữ liệu.
   return notes;
 }

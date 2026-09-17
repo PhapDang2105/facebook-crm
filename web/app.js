@@ -919,45 +919,11 @@ function toggleOrderPhoneFilter(rowIndex) {
   renderOrderData();
 }
 
-// ===== Xử lý dữ liệu: nhóm đơn trùng số =====
-//
-// Bấm một đơn trùng (trùng đơn hay trùng số điện thoại) thì bảng chỉ còn các
-// đơn cùng số, bất kể ngày, để so rồi sửa hoặc đánh dấu; bấm vùng trống thì
-// về danh sách theo ngày. Trạng thái này riêng cho Xử lý dữ liệu, không đụng ô
-// tìm kiếm của Nhập dữ liệu.
-let orderGroupPhone = '';
-function orderGroupPhoneFilter() {
-  return orderGroupPhone;
-}
-function showOrderGroup(phone) {
-  orderGroupPhone = phone;
-  renderOrderData();
-}
-function clearOrderGroup() {
-  if (!orderGroupPhone) return;
-  orderGroupPhone = '';
-  renderOrderData();
-}
+// Đơn trùng được so và xử lý ở Nhập dữ liệu (bộ lọc "Dữ liệu trùng", bấm một
+// dòng để xem mọi đơn cùng số). Ở Xử lý dữ liệu, bấm ô nào là sửa ô đó.
 function orderPhoneColumnIndex(data = orderData) {
   return data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
 }
-function rowPhoneOf(rowIndex) {
-  const phoneIndex = orderPhoneColumnIndex();
-  const row = orderData.rows[rowIndex];
-  return row && phoneIndex >= 0 ? normalizeRowPhone(row[phoneIndex]) : '';
-}
-function isDuplicateOrderRow(rowIndex) {
-  return getDuplicateOrderRowIndexes().has(rowIndex) || getDuplicatePhoneRowIndexes().has(rowIndex);
-}
-// Bắt ở cả màn Đơn hàng, không chỉ trong khung Xử lý dữ liệu: khung chỉ cao bằng
-// bảng, khoảng trống phía dưới bảng nằm ngoài khung.
-document.querySelector('#orders-view')?.addEventListener('click', event => {
-  if (!orderGroupPhone) return;
-  if (orderPanels.get('process')?.classList.contains('hidden')) return;
-  if (event.target.closest('tr[data-order-row-index], thead, button, input, select, a, label, .order-day-tabs, .order-history-panel, [contenteditable]')) return;
-  clearOrderGroup();
-});
-
 // Nhập dữ liệu: bấm dòng thì lọc bảng theo số điện thoại của dòng đó.
 document.querySelector('#order-import-preview')?.addEventListener('click', event => {
   if (event.target.closest('button, a, input, select, textarea')) return;
@@ -1268,12 +1234,6 @@ document.querySelector('#order-preview')?.addEventListener('click', event => {
   const columnIndex = cell ? Number(cell.dataset.columnIndex) : -1;
   if (rowIndex === editingOrderRowIndex && columnIndex === editingOrderColumn) return;
   flushOrderRowEdit(event);
-  // Đơn trùng bấm lần đầu thì mở nhóm cùng số để so; trong nhóm rồi (hay đơn
-  // không trùng) thì bấm vào ô nào sửa đúng ô đó.
-  if (!orderGroupPhone && isDuplicateOrderRow(rowIndex)) {
-    const phone = rowPhoneOf(rowIndex);
-    if (phone) { showOrderGroup(phone); return; }
-  }
   const columnName = columnIndex >= 0 ? normalizeColumnName(orderData.headers[columnIndex]) : '';
   if (columnName !== 'san pham' && !editableOrderColumns.has(columnName)) return;
   startOrderRowEdit(rowIndex, columnIndex);
@@ -1381,7 +1341,7 @@ function setActiveOrderDay(day) {
 
 orderDayTabs.forEach(tab => {
   // Chuyển tab ngày thì thoát nhóm đơn trùng đang xem.
-  tab.onclick = () => { orderGroupPhone = ''; setActiveOrderDay(tab.dataset.orderDay); renderOrderData(); };
+  tab.onclick = () => { setActiveOrderDay(tab.dataset.orderDay); renderOrderData(); };
 });
 
 document.querySelector('#order-clear-table')?.addEventListener('click', () => {
@@ -5831,7 +5791,8 @@ function renderOrderData() {
   const filterValue = orderFilter?.value || 'all';
   let importRows = filterValue === 'valid' ? allRows.filter(entry => !processingRowIndexes.has(entry.index))
     : filterValue === 'invalid' ? processingRows
-      : filterValue === 'duplicate' ? allRows.filter(entry => duplicateRowIndexes.has(entry.index))
+      : filterValue === 'duplicate-any' ? allRows.filter(entry => duplicateRowIndexes.has(entry.index) || duplicatePhoneRowIndexes.has(entry.index))
+        : filterValue === 'duplicate' ? allRows.filter(entry => duplicateRowIndexes.has(entry.index))
         : filterValue === 'duplicate-phone' ? allRows.filter(entry => duplicatePhoneRowIndexes.has(entry.index))
           : filterValue === 'phone-warning' ? allRows.filter(entry => warningRowIndexes.has(entry.index))
             : allRows;
@@ -5864,27 +5825,14 @@ function renderOrderData() {
   } else orderPanelsDirty.add('import');
   if (!panelVisible('process')) { orderPanelsDirty.add('process'); return; }
   orderPanelsDirty.delete('process');
-  // Xử lý dữ liệu: chỉ tô nền đơn trùng (trùng dữ liệu hồng, trùng số điện
-  // thoại vàng) để nhân viên thấy ngay cụm cần gộp; lý do khác đã ghi ở cột Ghi
-  // chú. Không có cột nút; bấm dòng mở chi tiết để đánh dấu "Đã xử lý". Đơn chia
-  // bốn tab theo ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.
+  // Xử lý dữ liệu: không tô màu dòng và không gom nhóm — đơn trùng đã được so
+  // và xử lý ở Nhập dữ liệu; ở đây bấm ô nào là sửa ô đó, lý do còn lại đã ghi
+  // ở cột Ghi chú. Đơn chia bốn tab theo ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.
   const dayOfRow = new Map(processingRows.map(entry => [entry.index, orderDayBucket(entry.row)]));
-  // Đang lọc theo số điện thoại (bấm một đơn trùng): xem cả nhóm bất kể ngày,
-  // vì các lần khách gửi có thể rơi vào ngày khác nhau. Không lọc thì theo tab ngày.
-  const groupPhone = orderGroupPhoneFilter();
-  const processRows = groupPhone
-    ? sortOrderEntriesByTime(processingRows.filter(entry => phoneColumn >= 0 && normalizeRowPhone(entry.row[phoneColumn]) === groupPhone))
-    : sortOrderEntriesByTime(processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay));
-  const groupNotice = document.querySelector('#order-group-notice');
-  if (groupNotice) {
-    groupNotice.hidden = !groupPhone;
-    groupNotice.classList.toggle('hidden', !groupPhone);
-    if (groupPhone) groupNotice.innerHTML = `<strong>${processRows.length} đơn cùng số ${escapeHtml(groupPhone)}</strong><small>Bấm vào một đơn để sửa · bấm vùng trống để quay lại danh sách</small>`;
-  }
+  const processRows = sortOrderEntriesByTime(processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay));
   renderOrderTable(
-    document.querySelector('#order-preview'), headers, searchValue && !groupPhone ? processRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processRows,
-    processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý',
-    ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate' : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
+    document.querySelector('#order-preview'), headers, searchValue ? processRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processRows,
+    processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',
     {
       rowNotes,
       deletable: true,

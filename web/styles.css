@@ -487,16 +487,9 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-day-tab.active { color: #111; }
 .order-day-tab.active::after { opacity: 1; }
 .order-day-bar + .order-history-panel { margin: 0 0 12.6px; }
-/* Đang xem nhóm đơn trùng số điện thoại: một dòng nhắc mảnh, bấm vào đâu ngoài dòng đơn cũng quay lại. */
-.order-group-notice { display: flex; align-items: center; gap: 9px; margin: 0 0 12.6px; padding: 8.1px 12.6px; color: #1d2939; background: #fff7e8; border: 0.9px solid #f9d9a3; border-radius: 8.1px; font-size: 12.6px; cursor: pointer; }
-.order-group-notice strong { font-weight: 700; }
-.order-group-notice small { color: #687080; font-size: 11.7px; }
 /* Bảng Xử lý dữ liệu: bấm dòng mở chi tiết đơn, nên cả dòng là vùng bấm. */
 #order-preview tbody td { cursor: pointer; }
 #order-preview tbody tr:hover td { background: #f7f8fa; }
-/* Đơn trùng ở Xử lý dữ liệu giữ màu nền khi rê chuột, chỉ đậm hơn một chút. */
-#order-preview tbody tr.order-row-duplicate:hover td { background: #fadbe5; }
-#order-preview tbody tr.order-row-duplicate-phone:hover td { background: #ffeaa3; }
 /* Sửa tại chỗ trên bảng Xử lý dữ liệu: gõ thẳng lên chữ trong ô, không khung ô
    nhập, không đổi cỡ chữ hay cách xuống dòng; chỉ một gạch mảnh màu TikTok dưới
    ô đang sửa. Bề rộng cột được khoá bằng JS nên bảng đứng yên. */

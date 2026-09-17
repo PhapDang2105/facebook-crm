@@ -615,6 +615,8 @@ export async function recordLandingOrder(payload, context = {}) {
           id: existing.id,
           createdAt: existing.createdAt,
           updatedAt: receivedAt,
+          // Ghi chú nhân viên đã gõ cho bản dở dang đi theo bản khách gửi xong.
+          staffNote: existing.staffNote || order.staffNote || '',
           landing: {
             ...order.landing,
             posId: order.landing.posId || existing.landing?.posId,

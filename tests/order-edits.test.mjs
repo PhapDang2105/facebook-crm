@@ -75,3 +75,15 @@ test('từ chối tên trống, số điện thoại ngắn, địa chỉ trốn
   assert.throws(() => applyCustomerOrderEdits(sample(), { phone: '12345' }), /Số điện thoại/);
   assert.throws(() => applyCustomerOrderEdits(sample(), { address: '' }), /Địa chỉ/);
 });
+
+test('ghi chú xử lý của nhân viên: lưu, cắt 500 ký tự, xoá trống được, không đổi gì khác', () => {
+  const order = sample();
+  assert.deepEqual(applyCustomerOrderEdits(order, { staffNote: '  Gọi lại sau 17h  ' }), ['staffNote']);
+  assert.equal(order.staffNote, 'Gọi lại sau 17h');
+  assert.deepEqual(applyCustomerOrderEdits(order, { staffNote: 'Gọi lại sau 17h' }), [], 'cùng nội dung thì không tính là đổi');
+  assert.deepEqual(applyCustomerOrderEdits(order, { staffNote: '' }), ['staffNote']);
+  assert.equal(order.staffNote, '');
+  assert.equal(applyCustomerOrderEdits(order, { staffNote: 'x'.repeat(600) }).length, 1);
+  assert.equal(order.staffNote.length, 500);
+  assert.equal(order.name, 'Khách landing page');
+});

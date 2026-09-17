@@ -90,6 +90,13 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     }
   }
 
+  // Ghi chú xử lý của nhân viên (cột "Ghi chú xử lý" ở Xử lý dữ liệu): chữ tự
+  // do, được xoá trống, không đi vào file xuất kho.
+  if (patch.staffNote !== undefined) {
+    const staffNote = text(patch.staffNote, 500);
+    if (staffNote !== String(order.staffNote || '')) { order.staffNote = staffNote; changed.push('staffNote'); }
+  }
+
   if (changed.length) {
     order.updatedAt = now;
     order.editedByStaffAt = now;

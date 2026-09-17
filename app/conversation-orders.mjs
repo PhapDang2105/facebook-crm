@@ -55,6 +55,8 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
     discount,
     total: Math.max(0, subtotal + shippingFee - discount),
     note: text(input.note, 1000),
+    // Ghi chú xử lý nhân viên gõ ở bảng Đơn hàng, giữ qua các lần dựng lại đơn.
+    staffNote: text(input.staffNote, 500),
     employee: text(input.employee || 'Bạn', 120),
     createdAt: Number(input.createdAt) || now,
     updatedAt: now

@@ -379,7 +379,7 @@ const hiddenPreviewColumns = new Set(['ma don hang', 'phuong xa', 'quan huyen', 
 
 try {
   const savedOrderData = JSON.parse(localStorage.getItem('crm-orders') || 'null');
-  if (savedOrderData && Array.isArray(savedOrderData.headers) && Array.isArray(savedOrderData.rows)) orderData = savedOrderData;
+  if (savedOrderData && Array.isArray(savedOrderData.headers) && Array.isArray(savedOrderData.rows)) orderData = ensureOrderStaffNoteColumn(savedOrderData);
 } catch {
   localStorage.removeItem('crm-orders');
 }
@@ -781,7 +781,10 @@ async function syncChatbotOrdersIntoTable() {
 const orderSourceHeader = 'Nguồn đơn';
 const orderDateHeader = 'Ngày';
 const orderCarrierHeader = 'Nhà mạng';
-const chatbotOrderHeaders = [orderSourceHeader, orderDateHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', orderCarrierHeader, 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
+// "Ghi chú xử lý": nhân viên gõ tự do ở Xử lý dữ liệu (khác cột Ghi chú do máy
+// dựng), lưu về server cho đơn hệ thống, không vào file xuất kho.
+const orderStaffNoteHeader = 'Ghi chú xử lý';
+const chatbotOrderHeaders = [orderSourceHeader, orderDateHeader, 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', orderCarrierHeader, 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú', orderStaffNoteHeader];
 
 /** Nhà mạng theo đầu số, ghi cùng nhãn với file Pancake để bảng vẽ đúng logo. */
 function carrierLabelFor(phone) {
@@ -830,7 +833,8 @@ function chatbotOrderToRows(order) {
     // Unit price as the customer paid it (combo price from 2 units), so the
     // table's totals match the confirmation the customer received.
     String(Number(item.paidPrice) || Number(item.price) || 0),
-    [flags, order.note ? `Khách ghi: ${order.note}` : ''].filter(Boolean).join(' · ')
+    [flags, order.note ? `Khách ghi: ${order.note}` : ''].filter(Boolean).join(' · '),
+    String(order.staffNote || '')
   ]);
 }
 
@@ -973,7 +977,7 @@ let editingOrderRowIndex = -1;
 let editingOrderColumn = -1;
 // Bề rộng cột đo ngay trước khi vào chế độ sửa, giữ nguyên suốt lúc sửa.
 let lockedOrderTemplate = '';
-const editableOrderColumns = new Set(['khach hang', 'so dien thoai', 'dia chi', 'so luong', 'don gia']);
+const editableOrderColumns = new Set(['khach hang', 'so dien thoai', 'dia chi', 'so luong', 'don gia', 'ghi chu xu ly']);
 
 function measureOrderTemplate() {
   const heads = [...document.querySelectorAll('#order-preview thead th')];
@@ -1000,7 +1004,9 @@ function isEditableOrderColumn(name) {
 /** Nội dung một ô bình thường của bảng đơn (dùng khi vẽ cả bảng và khi cập nhật lẻ một ô). */
 function orderCellInner(row, index, headers, notes = []) {
   const raw = row[index] || '';
-  return normalizeColumnName(headers[index]) === 'ghi chu' ? renderNoteCell(raw, notes) : renderPreviewCell(raw, headers[index]);
+  const name = normalizeColumnName(headers[index]);
+  if (name === 'ghi chu xu ly') return raw ? escapeHtml(raw) : '<span class="preview-placeholder">Bấm để ghi chú…</span>';
+  return name === 'ghi chu' ? renderNoteCell(raw, notes) : renderPreviewCell(raw, headers[index]);
 }
 
 /** Nội dung ô đang sửa: ô chọn sản phẩm theo danh mục, hoặc vùng gõ thẳng lên chữ. */
@@ -1127,7 +1133,7 @@ async function saveOrderRowEdit(rowIndex) {
   const key = orderRowKey(row);
   // Tên, số điện thoại, địa chỉ là của cả đơn: áp cho mọi dòng cùng mã đơn.
   const sameOrder = orderData.rows.map((item, index) => ({ item, index })).filter(({ item }) => orderRowKey(item) === key).map(({ index }) => index);
-  const sharedNames = new Set(['khach hang', 'so dien thoai', 'dia chi']);
+  const sharedNames = new Set(['khach hang', 'so dien thoai', 'dia chi', 'ghi chu xu ly']);
   const patch = {};
   const line = {};
   // Dòng sản phẩm trên server được tìm theo SKU/tên TRƯỚC khi sửa.
@@ -1181,6 +1187,7 @@ async function saveOrderRowEdit(rowIndex) {
     }
     if (name === 'so luong') line.quantity = value;
     if (name === 'don gia') line.price = value.replace(/[^\d]/g, '');
+    if (name === 'ghi chu xu ly') patch.staffNote = value;
   }
   if (!changed) { exitCellEdit(); return; }
   // Trả ô về dạng thường với giá trị mới, cập nhật các ô liên quan đang hiện,
@@ -1234,6 +1241,14 @@ document.querySelector('#order-preview')?.addEventListener('focusout', event => 
   if (event.target.closest('[data-edit-column]')) scheduleBlurSave();
 });
 // Chọn sản phẩm khác trong ô chọn là lưu ngay, không chờ rời ô.
+// Nút xóa ở Xử lý dữ liệu: bắt ở pha capture để không rơi vào xử lý bấm-dòng-để-sửa.
+document.querySelector('#order-preview')?.addEventListener('click', async event => {
+  const button = event.target.closest('[data-order-row-delete]');
+  if (!button) return;
+  event.stopImmediatePropagation();
+  flushOrderRowEdit(event);
+  await deleteOrderAtRow(Number(button.dataset.orderRowDelete), button);
+}, true);
 document.querySelector('#order-preview')?.addEventListener('change', event => {
   if (event.target.matches('select[data-edit-column]')) { clearTimeout(pendingBlurSave); saveOrderRowEdit(editingOrderRowIndex); }
 });
@@ -1400,6 +1415,13 @@ function ensureOrderCarrierColumn(data) {
   };
 }
 
+/** Thêm cột Ghi chú xử lý (cuối bảng) cho bảng đã lưu từ trước khi có cột này. */
+function ensureOrderStaffNoteColumn(data) {
+  if (!data.headers.length) return data;
+  if (data.headers.some(header => normalizeColumnName(header) === normalizeColumnName(orderStaffNoteHeader))) return data;
+  return { headers: [...data.headers, orderStaffNoteHeader], rows: data.rows.map(row => [...row, '']) };
+}
+
 /** Adds the Nguồn đơn column to a table that lacks it, tagging existing rows as imported. */
 function ensureOrderSourceColumn(data) {
   if (!data.headers.length) return data;
@@ -1408,7 +1430,7 @@ function ensureOrderSourceColumn(data) {
 }
 
 function mergeChatbotOrdersIntoTable(orders) {
-  orderData = ensureOrderCarrierColumn(ensureOrderDateColumn(ensureOrderSourceColumn(orderData)));
+  orderData = ensureOrderStaffNoteColumn(ensureOrderCarrierColumn(ensureOrderDateColumn(ensureOrderSourceColumn(orderData))));
   const headers = orderData.headers.length ? orderData.headers : chatbotOrderHeaders;
   const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
   const idColumn = index.get('ma don hang');
@@ -5400,7 +5422,7 @@ function getRecommendedOrderStage(data = orderData) {
 }
 
 function getDuplicateOrderRowIndexes(data = orderData) {
-  const ignoredColumns = new Set(['stt', 'ma don hang']);
+  const ignoredColumns = new Set(['stt', 'ma don hang', 'ghi chu xu ly']);
   const comparableIndexes = data.headers
     .map((header, index) => ({ index, name: normalizeColumnName(header) }))
     .filter(column => !ignoredColumns.has(column.name))
@@ -5536,7 +5558,10 @@ function orderRowKey(row, data = orderData) {
   if (orderIdColumnCache.headers !== data.headers) orderIdColumnCache = { headers: data.headers, index: orderColumnIndex('ma don hang', data) };
   const idIndex = orderIdColumnCache.index;
   const id = idIndex >= 0 ? String(row[idIndex] || '').trim() : '';
-  return id ? `id:${id}` : `row:${JSON.stringify(row)}`;
+  if (id) return `id:${id}`;
+  // Dòng nhập không có mã: khoá theo nội dung, trừ ghi chú nhân viên để gõ ghi chú không làm mất trạng thái đã xử lý.
+  const staffNoteIndex = orderColumnIndex('ghi chu xu ly', data);
+  return `row:${JSON.stringify(staffNoteIndex >= 0 ? row.filter((_, index) => index !== staffNoteIndex) : row)}`;
 }
 function readReviewedOrders() {
   try { return new Set(JSON.parse(localStorage.getItem(reviewedOrdersKey) || '[]')); } catch { return new Set(); }
@@ -5718,6 +5743,12 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   orderedColumns.splice(productPosition >= 0 ? productPosition + 1 : orderedColumns.length, 0, ...afterProduct);
   const addressColumn = orderedColumns.find(column => column.name === 'dia chi');
   if (addressColumn) orderedColumns = orderedColumns.filter(column => column !== addressColumn).concat(addressColumn);
+  // Ghi chú xử lý đứng sau Địa chỉ, chỉ ở bảng Xử lý dữ liệu (bảng Nhập không cần).
+  const staffNoteColumn = orderedColumns.find(column => column.name === 'ghi chu xu ly');
+  if (staffNoteColumn) {
+    orderedColumns = orderedColumns.filter(column => column !== staffNoteColumn);
+    if (reviewable) orderedColumns.push(staffNoteColumn);
+  }
   const visibleIndexes = orderedColumns.map(column => column.index);
   // Ghi chú và địa chỉ là hai cột chữ dài, chia nhau phần rộng còn lại; ghi chú
   // rộng hơn vì gồm nhiều dòng việc cần làm.
@@ -5728,6 +5759,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   const templates = {
     'dia chi': 'minmax(260px, 1fr)',
     'ghi chu': 'minmax(170px, 340px)',
+    'ghi chu xu ly': 'minmax(150px, 240px)',
     'san pham': 'fit-content(170px)',
     'khach hang': 'minmax(100px, 170px)',
     'so dien thoai': 'max-content'
@@ -5738,6 +5770,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     return columnName === 'dia chi' ? 'preview-address'
       : columnName === 'so luong' ? 'preview-quantity'
         : columnName === 'ghi chu' ? 'preview-note'
+          : columnName === 'ghi chu xu ly' ? 'preview-staff-note'
           : columnName === 'so dien thoai' ? 'preview-phone'
             : ['khach hang', 'san pham'].includes(columnName) ? 'preview-wrap' : '';
   };
@@ -5854,6 +5887,7 @@ function renderOrderData() {
     ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate' : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
     {
       rowNotes,
+      deletable: true,
       reviewable: true,
       editingCell: editingOrderRowIndex >= 0 ? { row: editingOrderRowIndex, column: editingOrderColumn } : null,
       templateOverride: editingOrderRowIndex >= 0 ? lockedOrderTemplate : ''

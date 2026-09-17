@@ -98,6 +98,8 @@ Bộ đọc luật (`app/processing/locations.mjs`) tách được gần như m�
 
 ## Ghi chú xử lý trên bảng Đơn hàng
 
+Bảng **Xử lý dữ liệu** có thêm cột **Ghi chú xử lý** (sau Địa chỉ, trước Trạng thái) để nhân viên gõ tự do: bấm vào ô để gõ, rời ô là lưu; đơn chatbot/landing ghi về server (`staffNote`, qua `PATCH /api/customer-orders/:id`) nên mọi máy cùng thấy, dòng import chỉ lưu trong trình duyệt. Cột này không đi vào file xuất kho, không tính khi so đơn trùng. Bảng này cũng có nút xóa dòng ở đầu dòng như Nhập dữ liệu (đơn hệ thống hỏi trước khi xóa khỏi cả server).
+
 `app/order-notes.mjs` dựng cho mỗi đơn chatbot/landing danh sách việc cần biết khi xử lý, trả về qua `/api/customer-orders` (`processingNotes`) và hiện thành nhãn màu ở cột **Ghi chú**: ⚠ thiếu địa chỉ (nêu đúng cấp thiếu), địa chỉ trùng tên nhiều nơi, chưa chọn/không khớp sản phẩm; ⏳ khách bỏ dở form (kèm giờ gửi); 🤖 máy đã tự điền gì từ đâu; ☎ số hay bom hàng (tính lại từ cache theo ngưỡng hiện hành, không dùng mức ghim lúc tạo đơn); ℹ địa chỉ đã sửa chính tả. Bảng tự thêm lý do chỉ bảng biết: trùng dòng, cùng số điện thoại với đơn nào (bấm vào đơn để xem cả nhóm), địa chỉ GXN, ô trống ở đơn nhập từ Pancake. Ô Ghi chú chỉ còn lời khách ("Khách ghi: …", không gồm ô lựa chọn của form hay quà tặng); cột này không đi vào file xuất kho.
 
 ## Đồng bộ đơn landing từ Pancake POS

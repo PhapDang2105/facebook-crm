@@ -2131,6 +2131,10 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .data-preview tbody tr[data-order-row-index] { cursor: pointer; }
 .data-preview tbody tr[data-order-row-index]:hover td { background: rgba(26, 86, 219, .05); }
 .data-preview td.preview-note { white-space: normal; }
+/* Ghi chú xử lý: chữ tự do của nhân viên, trống thì gợi ý mờ; ô sửa có bề rộng tối thiểu để bấm vào gõ được. */
+.data-preview td.preview-staff-note { white-space: normal; overflow-wrap: anywhere; color: #1d4ed8; }
+.data-preview td.preview-staff-note .preview-placeholder { color: #a0a6b3; font-style: italic; }
+.data-preview td.preview-staff-note .order-cell-edit { display: inline-block; min-width: 120px; min-height: 1.3em; }
 .note-cell { display: grid; gap: 1px; width: 100%; }
 .note-line { color: #344054; font-size: 11.7px; line-height: 1.45; overflow-wrap: anywhere; }
 .note-line-act { color: #1d2939; font-weight: 600; }

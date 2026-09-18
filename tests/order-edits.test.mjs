@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+// Phải nạp danh mục thử TRƯỚC mọi thứ dưới app/: catalog.mjs chốt đường dẫn
+// ngay lúc nạp, mà `import` tĩnh luôn chạy trước `await import` phía dưới —
+// đặt sau thì bài test đọc danh mục sản phẩm thật của máy đang chạy.
+import './helpers/seed-catalog.mjs';
 import { applyCustomerOrderEdits } from '../app/order-edits.mjs';
 import { processingNotes } from '../app/order-notes.mjs';
 import { getCatalogProducts } from '../app/processing/catalog.mjs';
-
-await import('./helpers/seed-catalog.mjs');
 
 test('đổi sản phẩm sang mã khác trong danh mục: đổi SKU và tên, giữ giá, bỏ cờ cần chọn sản phẩm', () => {
   const [first, second] = getCatalogProducts();

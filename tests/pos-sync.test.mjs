@@ -8,6 +8,10 @@ const directory = mkdtempSync(path.join(tmpdir(), 'possync-'));
 process.env.LANDING_ORDERS_PATH = path.join(directory, 'landing-orders.json');
 process.env.PHONE_WARNINGS_PATH = path.join(directory, 'phone-warnings.json');
 process.env.POS_CONFIG_PATH = path.join(directory, 'pos-config.json');
+// recordLandingOrder ghi tiếp vào kho lưu trữ đơn và cache địa chỉ AI; không
+// trỏ đi thì test ghi thẳng vào dữ liệu thật.
+process.env.ORDER_ARCHIVE_PATH = path.join(directory, 'order-archive');
+process.env.ADDRESS_AI_CACHE_PATH = path.join(directory, 'address-ai-cache.json');
 
 await import('./helpers/seed-catalog.mjs');
 const { posOrderToPayload, posTimeToWebcake, isLandingPosOrder, syncPosLandingOrders } = await import('../app/pos-sync.mjs');

@@ -1395,7 +1395,36 @@ const server = http.createServer(async (request, response) => {
     }
     if(request.method==='GET') return serveFile(request,response,url.pathname);
     sendJson(response,404,{error:'Route not found.'});
-  } catch(error) { sendJson(response,400,{error:error.message}); }
+  } catch (error) {
+    // Header đã gửi rồi (route CSV, SSE) thì không đổi sang JSON lỗi được nữa:
+    // gọi writeHead lần hai ném ERR_HTTP_HEADERS_SENT NGAY TRONG khối catch
+    // này, thành promise bị reject mà không ai bắt, và Node 22 kết thúc cả
+    // tiến trình. Đóng kết nối là đường thoát duy nhất còn lại.
+    if (response.headersSent) return response.destroy();
+    // Lỗi hệ thống (hết đĩa, EACCES, ENOENT, mạng đứt) không phải lỗi người
+    // dùng: trả 400 kèm nguyên văn thông báo vừa nói sai vừa lộ đường dẫn nội
+    // bộ ra ngoài, mà giám sát thì không bao giờ thấy 5xx để báo động.
+    if (error?.code && typeof error.code === 'string') {
+      console.error(`Lỗi hệ thống khi xử lý ${request.method} ${request.url}:`, error);
+      return sendJson(response, 500, { error: 'Máy chủ gặp lỗi khi xử lý yêu cầu.' });
+    }
+    sendJson(response, 400, { error: error.message });
+  }
+});
+
+// Một socket khách đứt giữa chừng (hay gặp nhất ở luồng SSE) làm response phát
+// 'error' bất đồng bộ; không ai nghe thì Node 22 giết cả tiến trình, tức mất
+// CRM của mọi người vì một trình duyệt đóng tab. Ghi log rồi chạy tiếp.
+process.on('unhandledRejection', error => console.error('Promise bị bỏ rơi:', error));
+// Lỗi không ai bắt thì trạng thái tiến trình không còn tin được nữa: ghi lại
+// cho có dấu vết rồi thoát để systemd dựng lại bản sạch (unit đặt Restart).
+process.on('uncaughtException', error => {
+  console.error('Lỗi không ai bắt, thoát để khởi động lại:', error);
+  process.exit(1);
+});
+server.on('clientError', (error, socket) => {
+  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  else socket.destroy();
 });
 
 server.listen(serverConfig.port, serverConfig.host, () => {

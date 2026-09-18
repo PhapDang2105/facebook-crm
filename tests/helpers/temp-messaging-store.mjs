@@ -8,6 +8,12 @@ import path from 'node:path';
 const directory = mkdtempSync(path.join(os.tmpdir(), 'crm-messaging-test-'));
 export const storePath = path.join(directory, 'conversations.json');
 process.env.META_CONVERSATIONS_PATH = storePath;
+// listCustomers đọc BỐN kho, không phải một. Không trỏ nốt hai kho này đi chỗ
+// khác thì bài kiểm thử đọc tệp khách hàng và kho ghi đè THẬT của máy đang
+// chạy: trên máy sạch thì xanh, trên máy vận hành thì đỏ vì dữ liệu chứ không
+// vì mã — cùng một commit cho hai kết quả khác nhau.
+process.env.CUSTOMER_FILE_PATH = path.join(directory, 'customer-file.json');
+process.env.CUSTOMER_EDITS_PATH = path.join(directory, 'customer-edits.json');
 writeFileSync(storePath, JSON.stringify({ conversations: [], messages: {} }));
 process.on('exit', () => rmSync(directory, { recursive: true, force: true }));
 

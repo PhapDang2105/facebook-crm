@@ -4,7 +4,15 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-process.env.LANDING_ORDERS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'landing-')), 'landing-orders.json');
+// Mọi kho mà recordLandingOrder có thể chạm tới đều phải trỏ vào thư mục tạm.
+// Thiếu ORDER_ARCHIVE_PATH là mỗi lần chạy test lại nối thêm đơn giả vào kho
+// lưu trữ THẬT ở data/processed — không ai dọn, không ai biết.
+const landingDirectory = mkdtempSync(path.join(tmpdir(), 'landing-'));
+process.env.LANDING_ORDERS_PATH = path.join(landingDirectory, 'landing-orders.json');
+process.env.ORDER_ARCHIVE_PATH = path.join(landingDirectory, 'order-archive');
+process.env.PHONE_WARNINGS_PATH = path.join(landingDirectory, 'phone-warnings.json');
+process.env.POS_CONFIG_PATH = path.join(landingDirectory, 'pos-config.json');
+process.env.ADDRESS_AI_CACHE_PATH = path.join(landingDirectory, 'address-ai-cache.json');
 
 await import('./helpers/seed-catalog.mjs');
 const {

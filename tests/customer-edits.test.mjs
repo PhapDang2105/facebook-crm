@@ -94,8 +94,10 @@ test('thẻ gốc được ghi lại để route biết đâu là thêm, đâu l
 
 test('ghi chú chỉ thêm, đếm riêng phần thêm từ hộp chi tiết', async () => {
   const key = customerEditKey(buyer());
-  await addCustomerNote(key, { text: 'Giao sau 18h' });
-  await addCustomerNote(key, { text: 'Gọi trước khi tới', by: 'Hà' });
+  // Mốc thời gian đóng cứng: hai ghi chú rơi vào cùng một mili giây thì thứ tự
+  // "mới nhất lên đầu" không còn xác định, bài sẽ đỏ lúc có lúc không.
+  await addCustomerNote(key, { text: 'Giao sau 18h' }, 1_700_000_000_000);
+  await addCustomerNote(key, { text: 'Gọi trước khi tới', by: 'Hà' }, 1_700_000_060_000);
 
   const notes = await listCustomerNotes(key);
   assert.equal(notes.length, 2);

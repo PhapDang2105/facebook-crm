@@ -210,7 +210,7 @@ export async function addCustomerNote(key, note = {}, now = Date.now()) {
   if (!body) throw new Error('Ghi chú không được để trống.');
   const by = text(note.by, 80) || 'Nhân viên';
   return updateStore(store => {
-    const entry = entryFor(store, id);
+    const entry = entryFor(store, key);
     const saved = { id: `note-${now.toString(36)}-${entry.notes.length}`, text: body, by, at: now };
     entry.notes.push(saved);
     entry.updatedAt = now;

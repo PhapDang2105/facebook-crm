@@ -10,7 +10,7 @@ import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChat
 import { assertUsableAiEndpoint, defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
-import { defaultMessageTemplates, publicImageUrl } from './chatbot-templates.mjs';
+import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin } from './chatbot-templates.mjs';
 import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
@@ -261,18 +261,34 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
  *    mấy lần liền bị nhắn dồn.
  *  - Đặt QR_GREETING_TEXT rỗng trong .env là tắt hẳn, không phải sửa mã.
  */
-const qrGreetingText = process.env.QR_GREETING_TEXT ?? 'Xin chào quý khách';
 const qrGreetingDelayMs = Number(process.env.QR_GREETING_DELAY_MS) || 10_000;
 const qrGreetingCooldownMs = Number(process.env.QR_GREETING_COOLDOWN_MS) || 6 * 60 * 60 * 1000;
 const qrGreetedAt = new Map();
 
+/** Khách đến từ phiếu cảm ơn (link m.me), phân biệt với khách bấm quảng cáo. */
+function isCardScan(change) {
+  return change?.referral?.source === 'SHORTLINK';
+}
+
+/**
+ * Nội dung ưu đãi lấy từ kho mẫu tin, KHÔNG viết cứng trong mã — cùng nguyên
+ * tắc với mọi lời thoại khác của bot, để nhân viên sửa được ở Cài đặt → Tin
+ * nhắn mà không phải triển khai lại.
+ */
+async function qrOfferMessage(conversation) {
+  const settings = await readChatbotSettings();
+  const template = settings.messageTemplates?.QR_OFFER || defaultMessageTemplates().QR_OFFER || '';
+  if (!template.trim()) return '';
+  // spin: chọn ngẫu nhiên trong {a|b}. applyHonorific: thay anh/chị theo giới tính.
+  return applyHonorific(spin(template), conversation.gender || '').replace(/\{title\}/g, honorific(conversation.gender || ''));
+}
+
 function scheduleQrGreetings(changes) {
-  if (!qrGreetingText) return;
   for (const change of changes) {
     // Không lọc theo `change.type`: khách cũ quét thì ra change kiểu `referral`,
     // khách mới bấm "Bắt đầu" thì ra kiểu `message` mang theo referral. Cái
     // quyết định là referral đến từ link m.me, không phải từ quảng cáo.
-    if (change.referral?.source !== 'SHORTLINK') continue;
+    if (!isCardScan(change)) continue;
     const conversation = change.conversation;
     if (!conversation?.psid) continue;
     const last = qrGreetedAt.get(conversation.id) || 0;
@@ -285,11 +301,17 @@ function scheduleQrGreetings(changes) {
     // unref: hẹn giờ này không được giữ tiến trình sống khi tắt dịch vụ.
     setTimeout(async () => {
       try {
-        await sendConversationMessage(conversation, { text: qrGreetingText });
-        console.log(`QR: đã gửi lời chào cho ${conversation.name || conversation.id}`);
+        const text = await qrOfferMessage(conversation);
+        if (!text) {
+          console.log('QR: mẫu tin QR_OFFER để trống nên không gửi gì.');
+          qrGreetedAt.delete(conversation.id);
+          return;
+        }
+        await sendConversationMessage(conversation, { text });
+        console.log(`QR: đã gửi ưu đãi cho ${conversation.name || conversation.id}`);
       } catch (error) {
         // Ngoài cửa sổ 24h Meta trả lỗi ở đây — đó cũng là kết quả đáng ghi lại.
-        console.error(`QR: KHÔNG gửi được lời chào cho ${conversation.name || conversation.id}: ${error.message}`);
+        console.error(`QR: KHÔNG gửi được ưu đãi cho ${conversation.name || conversation.id}: ${error.message}`);
         qrGreetedAt.delete(conversation.id);
       }
     }, qrGreetingDelayMs).unref?.();
@@ -966,7 +988,10 @@ const server = http.createServer(async (request, response) => {
       try {
         const changes = await processWebhookPayload(JSON.parse(rawBody.toString('utf8')));
         scheduleQrGreetings(changes);
-        await processChatbotChanges(changes, {
+        // Khách quét phiếu đã có tin ưu đãi riêng; để bot chào thêm câu chung
+        // nữa là khách nhận hai tin trong mười giây. Những tin sau của họ vẫn
+        // đi qua bot bình thường — chỉ bỏ qua đúng sự kiện mở hội thoại.
+        await processChatbotChanges(changes.filter(change => !isCardScan(change)), {
           readSettings: readChatbotSettings,
           listMessages,
           sendMessage: sendConversationMessage,

@@ -423,8 +423,20 @@ function isCrossSiteWrite(request) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return false;
   const origin = request.headers.origin;
   if (!origin || origin === 'null') return false;
+  let originHost = '';
   try {
-    return new URL(origin).host !== String(request.headers.host || '');
+    originHost = new URL(origin).host;
+  } catch {
+    return true;
+  }
+  if (!originHost) return true;
+  // Khớp với Host của request là đủ cho mọi cách chạy hiện tại. Nhận thêm địa
+  // chỉ công khai đã cấu hình để phòng trường hợp reverse proxy được sửa thành
+  // ghi đè Host — nếu không, một dòng cấu hình Caddy đổi đi là chặn sạch mọi
+  // thao tác ghi của nhân viên mà chẳng ai đoán ra vì sao.
+  if (originHost === String(request.headers.host || '')) return false;
+  try {
+    return originHost !== new URL(metaConfig.publicBaseUrl).host;
   } catch {
     return true;
   }

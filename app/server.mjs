@@ -20,7 +20,7 @@ import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
-import { recordExportedOrders } from './customer-file.mjs';
+import { customerPhoneKey, recordExportedOrders } from './customer-file.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -34,7 +34,8 @@ import {
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
-import { customersToCsv, customersToAudienceCsv, listCustomers } from './customers.mjs';
+import { customersToCsv, customersToAudienceCsv, findCustomerById, listCustomers } from './customers.mjs';
+import { addCustomerNote, listCustomerNotes, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
 import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
@@ -880,6 +881,72 @@ const server = http.createServer(async (request, response) => {
         return response.end(customersToCsv(result.items, labels));
       }
       return sendJson(response, 200, result);
+    }
+    // Hộp chi tiết khách hàng: sửa thông tin, gắn thẻ, ghi chú, lịch sử đơn.
+    // Mã khách có dấu hai chấm ("export:0903…") nên luôn đi qua encodeURIComponent.
+    const customerRoute = url.pathname.startsWith('/api/customers/')
+      ? url.pathname.slice('/api/customers/'.length).split('/')
+      : [];
+    if (customerRoute.length === 1 && request.method === 'PATCH') {
+      const customer = await findCustomerById(decodeURIComponent(customerRoute[0]));
+      if (!customer) return sendJson(response, 404, { error: 'Không tìm thấy khách hàng.' });
+      try {
+        await updateCustomerProfile(customer.id, await readBody(request));
+        return sendJson(response, 200, await findCustomerById(customer.id));
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
+    }
+    if (customerRoute.length === 2) {
+      const customerId = decodeURIComponent(customerRoute[0]);
+      const customer = await findCustomerById(customerId);
+      if (!customer) return sendJson(response, 404, { error: 'Không tìm thấy khách hàng.' });
+
+      if (customerRoute[1] === 'labels' && request.method === 'PUT') {
+        try {
+          const payload = await readBody(request);
+          await setCustomerLabels(customer.id, payload.labels || []);
+          return sendJson(response, 200, await findCustomerById(customer.id));
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message });
+        }
+      }
+
+      if (customerRoute[1] === 'notes') {
+        if (request.method === 'GET') return sendJson(response, 200, { items: await listCustomerNotes(customer.id) });
+        if (request.method === 'POST') {
+          try {
+            const note = await addCustomerNote(customer.id, await readBody(request));
+            return sendJson(response, 200, { note, noteCount: (await findCustomerById(customer.id))?.noteCount || 0 });
+          } catch (error) {
+            return sendJson(response, 400, { error: error.message });
+          }
+        }
+      }
+
+      // Lịch sử đơn lấy từ kho lưu trữ đơn, khớp ĐÚNG số điện thoại. Tìm kiếm
+      // chung của kho còn dò cả tên và địa chỉ nên dễ kéo nhầm đơn người khác.
+      if (customerRoute[1] === 'orders' && request.method === 'GET') {
+        const key = customerPhoneKey(customer.phone);
+        if (!key) return sendJson(response, 200, { items: [] });
+        const { items } = await readOrderArchive({ limit: 0 });
+        const names = new Map(getCatalogProducts().map(product => [product.sku, product.name]));
+        // Tên sản phẩm của chính khách này là bản dự phòng khi SKU đã rời danh mục.
+        for (const product of customer.products || []) if (product?.sku) names.set(product.sku, product.name);
+        const orders = items
+          .filter(record => customerPhoneKey(record.phone) === key)
+          .map(record => ({
+            id: record.id,
+            at: Number(record.at) || 0,
+            status: record.st || '',
+            source: record.src || '',
+            total: Number(record.total) || 0,
+            products: (Array.isArray(record.items) ? record.items : []).map(([sku, quantity]) => ({
+              sku: String(sku || ''), name: names.get(String(sku || '')) || String(sku || ''), quantity: Number(quantity) || 0
+            }))
+          }));
+        return sendJson(response, 200, { items: orders });
+      }
     }
     // Cài đặt → Tin nhắn: conversation labels and staff quick replies.
     if (url.pathname === '/api/inbox/settings') {

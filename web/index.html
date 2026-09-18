@@ -654,8 +654,19 @@
   <div class="channel-dialog hidden" id="customer-dialog" role="dialog" aria-modal="true" aria-labelledby="customer-dialog-title">
     <div class="channel-dialog-backdrop" data-close-customer-dialog></div>
     <section class="channel-dialog-panel customer-dialog-panel">
-      <div class="channel-dialog-head"><div class="customer-dialog-identity" id="customer-dialog-identity"><h2 id="customer-dialog-title">Khách hàng</h2></div><button type="button" aria-label="Đóng" data-close-customer-dialog>×</button></div>
-      <table class="customer-attributes" id="customer-attributes"></table>
+      <div class="customer-sheet-head">
+        <div class="customer-sheet-id" id="customer-sheet-id"><h2 id="customer-dialog-title">Khách hàng</h2></div>
+        <button class="customer-sheet-close" type="button" aria-label="Đóng" data-close-customer-dialog>&times;</button>
+      </div>
+      <div class="customer-sheet-actions">
+        <button type="button" data-customer-action="chat"><img src="/assets/icons/customers/open-chat.svg" alt="">Mở hội thoại</button>
+        <button type="button" data-customer-action="call"><img src="/assets/icons/call.svg" alt="">Gọi</button>
+        <button type="button" data-customer-action="edit"><img src="/assets/icons/customers/edit.svg" alt="">Sửa thông tin</button>
+        <button type="button" data-customer-action="tag"><img src="/assets/icons/customers/tag.svg" alt="">Gắn thẻ</button>
+        <button type="button" data-customer-action="note"><img src="/assets/icons/customers/note.svg" alt="">Thêm ghi chú</button>
+      </div>
+      <div class="customer-sheet-form hidden" id="customer-sheet-form"></div>
+      <div class="customer-sheet-body" id="customer-sheet-body"></div>
     </section>
   </div>
   <div class="channel-dialog hidden" id="facebook-page-dialog" role="dialog" aria-modal="true" aria-labelledby="facebook-page-dialog-title">

@@ -5,6 +5,7 @@
 import { readMessagingStore } from './messaging-store.mjs';
 import { readChannelStore } from './channel-store.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
+import { applyCustomerEdits, readCustomerEdits } from './customer-edits.mjs';
 
 const genderRank = { staff: 3, message: 2, name: 1 };
 
@@ -263,13 +264,34 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
   });
 }
 
-export async function listCustomers(filters = {}) {
-  const [store, channels, exported] = await Promise.all([readMessagingStore(), readChannelStore(), listExportedCustomers()]);
+/**
+ * Mọi khách đã mua, đã phủ phần nhân viên tự sửa. Tách riêng khỏi listCustomers
+ * để các API sửa thông tin, gắn thẻ, ghi chú và lịch sử đơn tra được một khách
+ * theo mã mà không phải đi qua bộ lọc của màn hình.
+ */
+export async function listBuyers() {
+  const [store, channels, exported, edits] = await Promise.all([
+    readMessagingStore(), readChannelStore(), listExportedCustomers(), readCustomerEdits()
+  ]);
   // Màn Khách hàng là kho dữ liệu người ĐÃ MUA: người mới hỏi giá vẫn nằm trong
   // Tin nhắn, đưa vào đây chỉ làm loãng danh sách remarketing. Khách của đơn đã
   // xuất kho (tệp khách hàng) luôn có mặt, kể cả chưa từng nhắn tin.
   const buyers = buildCustomers(store, channels.items || [], exported).filter(customer => customer.orderCount > 0);
+  // Phủ trước khi lọc: nhân viên sửa số điện thoại hay tên xong thì tìm kiếm và
+  // bộ lọc phải thấy bản mới, không phải bản suy ra cũ.
+  return applyCustomerEdits(buyers, edits);
+}
+
+export async function listCustomers(filters = {}) {
+  const buyers = await listBuyers();
   return { total: buyers.length, items: filterCustomers(buyers, filters) };
+}
+
+/** Một khách theo mã, hoặc null nếu mã không còn ứng với ai. */
+export async function findCustomerById(id) {
+  const key = String(id || '');
+  if (!key) return null;
+  return (await listBuyers()).find(customer => customer.id === key) || null;
 }
 
 const sourceLabels = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất' };

@@ -911,46 +911,238 @@ function customerGenderText(customer) {
   return gender ? `${gender}${source ? ` (${source})` : ''}` : '';
 }
 
-function openCustomerDialog(customer) {
-  if (!customerDialog) return;
-  const initial = String(customer.name || '').trim().charAt(0).toUpperCase() || 'K';
-  const identity = customerDialog.querySelector('#customer-dialog-identity');
+/* Hộp chi tiết khách hàng: bốn khối — liên hệ, mua hàng, lịch sử đơn, ghi chú
+   và hoạt động — thay cho bảng phẳng mười chín dòng trước đây. Lịch sử đơn tra
+   kho lưu trữ nên nạp sau, hộp mở ra ngay chứ không đợi mạng. */
+let customerSheet = null;
+
+function customerFact(label, value) {
+  return `<div><dt>${escapeHtml(label)}</dt><dd>${value || '—'}</dd></div>`;
+}
+
+function customerSheetOrdersHtml(orders) {
+  if (!Array.isArray(orders)) return '<p class="customer-never">Đang tra kho đơn…</p>';
+  if (!orders.length) return '<p class="customer-never">Kho lưu trữ chưa có đơn nào của số này.</p>';
+  return `<table class="customer-orders-table">
+    <thead><tr><th>Ngày</th><th>Sản phẩm</th><th>Trạng thái</th><th class="num">Tiền</th></tr></thead>
+    <tbody>${orders.map(order => `<tr>
+      <td>${escapeHtml(formatCustomerDate(order.at))}</td>
+      <td>${order.products.map(item => `${escapeHtml(item.name)} ×${item.quantity}`).join('<br>') || '—'}</td>
+      <td>${escapeHtml(order.status || 'Đã xuất')}</td>
+      <td class="num">${escapeHtml(formatCustomerMoney(order.total))}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function renderCustomerSheet(customer, orders) {
+  const body = customerDialog?.querySelector('#customer-sheet-body');
+  if (!body) return;
+  const state = customerState(customer);
+  const labels = (customer.labels || []).map(labelById).filter(Boolean);
+  const cancelled = Array.isArray(orders) ? orders.filter(order => /hủy/i.test(order.status || '')).length : null;
+
+  const identity = customerDialog.querySelector('#customer-sheet-id');
   if (identity) {
-    identity.innerHTML = `${customer.picture ? `<span class="avatar has-photo"><img class="avatar-photo" src="${escapeHtml(customer.picture)}" alt="">${escapeHtml(initial)}</span>` : `<span class="avatar">${escapeHtml(initial)}</span>`}<div><h2 id="customer-dialog-title">${escapeHtml(customer.name || 'Khách Facebook')}</h2><small>${escapeHtml(customer.psid)}</small></div>`;
+    const name = customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng');
+    identity.innerHTML = `<div>
+      <h2 id="customer-dialog-title">${escapeHtml(name)}</h2>
+      <small><span class="customer-state customer-state--${state.key}">${state.label}</span>${customer.phone ? ` · ${escapeHtml(customer.phone)}` : ''}${customerProvince(customer) ? ` · ${escapeHtml(customerProvince(customer))}` : ''}</small>
+    </div>`;
   }
-  const rows = [
-    ['Kênh', customer.channelName || customer.channelId],
-    ['Nguồn', customer.sources.map(source => customerSourceNames[source] || source).join(', ')],
-    ['Quảng cáo', customer.adTitle],
-    ['Giới tính', customerGenderText(customer)],
-    ['Liên hệ lần đầu', formatCustomerTime(customer.firstContactAt)],
-    ['Khách nhắn cuối', formatCustomerTime(customer.lastCustomerMessageAt)],
-    ['Tương tác cuối', formatCustomerTime(customer.lastMessageAt)],
-    ['Tin cuối', customer.lastMessagePreview],
-    ['Số điện thoại', customer.phone],
-    ['Địa chỉ', customer.address],
-    ['Đơn hàng', customer.orderCount ? `${customer.orderCount} đơn · ${formatOrderMoney(customer.orderTotal)}` : '0'],
-    ['Đơn gần nhất gồm', (customer.lastOrderProducts || []).map(item => `${item.name} ×${item.quantity}`).join(', ')],
-    ['Đã mua từ trước tới nay', (customer.products || []).map(item => `${item.name} ×${item.quantity}`).join(', ')],
-    ['Mua lần đầu', customer.firstOrderAt ? `${formatCustomerDate(customer.firstOrderAt)} (${timeSince(customer.firstOrderAt)})` : ''],
-    ['Mua lần cuối', customer.lastOrderAt ? `${formatCustomerDate(customer.lastOrderAt)} (${timeSince(customer.lastOrderAt)})` : ''],
-    ['Ghi chú', String(customer.noteCount || 0)],
-    // Thẻ nhân viên đã xóa trong Cài đặt thì không hiện lại ở đây dưới dạng mã.
-    ['Thẻ', customer.labels.map(labelById).filter(Boolean).map(label => label.name).join(', ')],
-    ['Bot', customer.botEnabled ? 'Đang bật' : 'Tắt'],
-    ['Hội thoại', customer.conversations.map(item => item.source === 'comment' ? 'Bình luận' : 'Messenger').join(', ')]
-  ];
-  const table = customerDialog.querySelector('#customer-attributes');
-  if (table) table.innerHTML = rows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value || '—')}</td></tr>`).join('');
+
+  body.innerHTML = `
+    <section class="customer-sheet-block">
+      <h3><img src="/assets/icons/customer-panel/user.png" alt="">Thông tin liên hệ</h3>
+      <dl class="customer-facts">
+        ${customerFact('Số điện thoại', escapeHtml(customer.phone))}
+        ${customerFact('Giới tính', escapeHtml(customerGenderText(customer)))}
+        ${customerFact('Khu vực', escapeHtml(customerProvince(customer)))}
+        ${customerFact('Địa chỉ giao hàng', escapeHtml(customer.address))}
+        ${customerFact('Nguồn khách', escapeHtml((customer.sources || []).map(source => customerSourceNames[source] || source).join(', ')))}
+        ${customerFact('Quảng cáo dẫn vào', escapeHtml(customer.adTitle))}
+        ${customerFact('Trang', escapeHtml(customer.channelName || customer.channelId))}
+        ${customerFact('Thẻ', labels.map(customerLabelChip).join(' '))}
+      </dl>
+    </section>
+
+    <section class="customer-sheet-block">
+      <h3><img src="/assets/icons/customer-panel/wallet.png" alt="">Mua hàng</h3>
+      <dl class="customer-facts">
+        ${customerFact('Tổng số đơn', `${Number(customer.orderCount) || 0} đơn`)}
+        ${customerFact('Tổng đã chi', escapeHtml(formatCustomerMoney(customer.orderTotal)))}
+        ${customerFact('Combo lớn nhất', customer.comboMax ? `${customer.comboMax} túi/đơn` : '')}
+        ${customerFact('Mua lần đầu', customer.firstOrderAt ? `${escapeHtml(formatCustomerDate(customer.firstOrderAt))} (${escapeHtml(timeSince(customer.firstOrderAt))})` : '')}
+        ${customerFact('Mua lần cuối', customer.lastOrderAt ? `${escapeHtml(formatCustomerDate(customer.lastOrderAt))} (${escapeHtml(timeSince(customer.lastOrderAt))})` : '')}
+        ${customerFact('Giá trị đơn trung bình', escapeHtml(formatCustomerMoney((Number(customer.orderTotal) || 0) / Math.max(1, Number(customer.orderCount) || 0))))}
+        ${customerFact('Đơn khách hủy', cancelled === null ? '' : `${cancelled} đơn`)}
+      </dl>
+    </section>
+
+    <section class="customer-sheet-block">
+      <h3><img src="/assets/icons/customer-panel/list.png" alt="">Lịch sử đơn${Array.isArray(orders) ? ` (${orders.length})` : ''}</h3>
+      ${customerSheetOrdersHtml(orders)}
+    </section>
+
+    <section class="customer-sheet-block">
+      <h3><img src="/assets/icons/customer-panel/note.png" alt="">Ghi chú &amp; hoạt động</h3>
+      <dl class="customer-facts">
+        ${customerFact('Ghi chú đã lưu', `${Number(customer.noteCount) || 0} ghi chú`)}
+        ${customerFact('Khách nhắn lần cuối', customer.lastCustomerMessageAt ? `${escapeHtml(formatCustomerDate(customer.lastCustomerMessageAt))} (${escapeHtml(timeSince(customer.lastCustomerMessageAt))})` : '')}
+        ${customerFact('Tin nhắn cuối', escapeHtml(customer.lastMessagePreview))}
+        ${customerFact('Chatbot', customer.botEnabled ? 'Đang bật' : 'Đã tắt')}
+      </dl>
+    </section>`;
+}
+
+async function openCustomerDialog(customer) {
+  if (!customerDialog) return;
+  customerSheet = { customer, orders: null };
+  closeCustomerSheetForm();
+  // "Gọi" chỉ bấm được khi có số; nút chết mà vẫn sáng thì gây hiểu nhầm.
+  customerDialog.querySelector('[data-customer-action="call"]')?.toggleAttribute('disabled', !customer.phone);
+  customerDialog.querySelector('[data-customer-action="chat"]')?.toggleAttribute('disabled', !(customer.conversations || []).length);
+  renderCustomerSheet(customer, null);
   customerDialog.classList.remove('hidden');
+
+  try {
+    const result = await readApiResponse(await fetch(`/api/customers/${encodeURIComponent(customer.id)}/orders`));
+    // Nhân viên đã đóng hộp hoặc mở khách khác trong lúc chờ thì bỏ kết quả.
+    if (customerSheet?.customer.id !== customer.id) return;
+    customerSheet.orders = Array.isArray(result.items) ? result.items : [];
+    renderCustomerSheet(customer, customerSheet.orders);
+  } catch {
+    if (customerSheet?.customer.id !== customer.id) return;
+    customerSheet.orders = [];
+    renderCustomerSheet(customer, []);
+  }
+}
+
+function closeCustomerSheetForm() {
+  const form = customerDialog?.querySelector('#customer-sheet-form');
+  if (!form) return;
+  form.innerHTML = '';
+  form.classList.add('hidden');
 }
 
 function closeCustomerDialog() {
+  customerSheet = null;
+  closeCustomerSheetForm();
   customerDialog?.classList.add('hidden');
 }
 
+/* ---- Năm nút hành động trên đầu hộp ---- */
+
+/** Mở hội thoại của khách bên màn Tin nhắn. */
+function openCustomerConversation(customer) {
+  const target = (customer.conversations || [])[0];
+  if (!target) return showToast('Khách này chưa có hội thoại nào.', 'error');
+  closeCustomerDialog();
+  showView('messages');
+  const element = getConversationItems().find(item => item.dataset.conversationId === target.id);
+  if (element) selectConversation(element);
+  else showToast('Hội thoại không còn trong danh sách đang hiển thị.', 'error');
+}
+
+function customerSheetForm(html) {
+  const form = customerDialog?.querySelector('#customer-sheet-form');
+  if (!form) return null;
+  form.innerHTML = html;
+  form.classList.remove('hidden');
+  form.querySelector('input, select, textarea')?.focus();
+  return form;
+}
+
+function openCustomerEditForm(customer) {
+  customerSheetForm(`
+    <h4>Sửa thông tin</h4>
+    <div class="customer-sheet-fields">
+      <label>Tên khách<input type="text" data-edit="name" value="${escapeHtml(customer.name || '')}" maxlength="120"></label>
+      <label>Số điện thoại<input type="text" data-edit="phone" value="${escapeHtml(customer.phone || '')}" maxlength="20"></label>
+      <label>Giới tính<select data-edit="gender">
+        <option value=""${customer.gender ? '' : ' selected'}>Chưa rõ</option>
+        <option value="female"${customer.gender === 'female' ? ' selected' : ''}>Nữ</option>
+        <option value="male"${customer.gender === 'male' ? ' selected' : ''}>Nam</option>
+      </select></label>
+      <label class="customer-sheet-field--wide">Địa chỉ giao hàng<input type="text" data-edit="address" value="${escapeHtml(customer.address || '')}" maxlength="500"></label>
+    </div>
+    <div class="customer-sheet-form-actions">
+      <button type="button" class="customer-sheet-save" data-customer-save="profile">Lưu</button>
+      <button type="button" data-customer-cancel>Hủy</button>
+    </div>`);
+}
+
+function openCustomerTagForm(customer) {
+  if (!inboxLabels.length) return showToast('Chưa có thẻ nào. Thêm thẻ ở Cài đặt → Tin nhắn.', 'error');
+  const picked = new Set(customer.labels || []);
+  customerSheetForm(`
+    <h4>Gắn thẻ</h4>
+    <div class="customer-sheet-tags">
+      ${inboxLabels.map(label => `<label class="customer-sheet-tag"><input type="checkbox" data-label="${escapeHtml(label.id)}"${picked.has(label.id) ? ' checked' : ''}>${customerLabelChip(label)}</label>`).join('')}
+    </div>
+    <div class="customer-sheet-form-actions">
+      <button type="button" class="customer-sheet-save" data-customer-save="labels">Lưu</button>
+      <button type="button" data-customer-cancel>Hủy</button>
+    </div>`);
+}
+
+function openCustomerNoteForm() {
+  customerSheetForm(`
+    <h4>Thêm ghi chú</h4>
+    <textarea data-edit="note" rows="3" maxlength="1000" placeholder="Khách dặn giao sau 18h, gọi trước khi tới..."></textarea>
+    <div class="customer-sheet-form-actions">
+      <button type="button" class="customer-sheet-save" data-customer-save="note">Lưu ghi chú</button>
+      <button type="button" data-customer-cancel>Hủy</button>
+    </div>`);
+}
+
+/** Lưu xong thì lấy lại bản khách từ server: bảng và hộp cùng nhìn một bản. */
+async function saveCustomerSheet(kind) {
+  const form = customerDialog?.querySelector('#customer-sheet-form');
+  const customer = customerSheet?.customer;
+  if (!form || !customer) return;
+  const value = key => form.querySelector(`[data-edit="${key}"]`)?.value ?? '';
+  const request = kind === 'profile'
+    ? { url: `/api/customers/${encodeURIComponent(customer.id)}`, method: 'PATCH', body: { name: value('name'), phone: value('phone'), address: value('address'), gender: value('gender') } }
+    : kind === 'labels'
+      ? { url: `/api/customers/${encodeURIComponent(customer.id)}/labels`, method: 'PUT', body: { labels: [...form.querySelectorAll('[data-label]:checked')].map(box => box.dataset.label) } }
+      : { url: `/api/customers/${encodeURIComponent(customer.id)}/notes`, method: 'POST', body: { text: value('note') } };
+
+  const button = form.querySelector('[data-customer-save]');
+  if (button) button.disabled = true;
+  try {
+    await readApiResponse(await fetch(request.url, {
+      method: request.method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request.body)
+    }));
+    closeCustomerSheetForm();
+    showToast(kind === 'note' ? 'Đã lưu ghi chú.' : 'Đã lưu thay đổi.', 'success');
+    // Bảng dựng lại từ server, rồi mở lại hộp đúng khách vừa sửa.
+    await loadCustomers();
+    const refreshed = customersAll.find(item => item.id === customer.id);
+    if (refreshed) openCustomerDialog(refreshed);
+    else closeCustomerDialog();
+  } catch (error) {
+    if (button) button.disabled = false;
+    showToast(error.message || 'Chưa lưu được.', 'error');
+  }
+}
+
 customerDialog?.addEventListener('click', event => {
-  if (event.target.closest('[data-close-customer-dialog]')) closeCustomerDialog();
+  if (event.target.closest('[data-close-customer-dialog]')) return closeCustomerDialog();
+  if (event.target.closest('[data-customer-cancel]')) return closeCustomerSheetForm();
+
+  const save = event.target.closest('[data-customer-save]');
+  if (save) return void saveCustomerSheet(save.dataset.customerSave);
+
+  const action = event.target.closest('[data-customer-action]')?.dataset.customerAction;
+  const customer = customerSheet?.customer;
+  if (!action || !customer) return;
+  if (action === 'chat') return openCustomerConversation(customer);
+  if (action === 'call') return void (window.location.href = `tel:${String(customer.phone || '').replace(/[^\d+]/g, '')}`);
+  if (action === 'edit') return openCustomerEditForm(customer);
+  if (action === 'tag') return openCustomerTagForm(customer);
+  if (action === 'note') return openCustomerNoteForm();
 });
 
 let customersSearchTimer = 0;

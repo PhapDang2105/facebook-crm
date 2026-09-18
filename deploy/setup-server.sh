@@ -124,11 +124,27 @@ systemctl enable facebook-crm
 echo "==> Cấu hình Caddy"
 read -rp "Tên đăng nhập cho trang quản trị: " ADMIN_USER
 CADDY_HASH="$(caddy hash-password)"
+# Dựng ra tệp tạm và kiểm TRƯỚC, chỉ khi đạt mới thay tệp thật. Ghi thẳng rồi
+# mới validate là khi hỏng để lại một /etc/caddy/Caddyfile sai: Caddy vẫn chạy
+# bằng cấu hình cũ trong bộ nhớ nhưng chết ở lần reload hoặc reboot kế tiếp.
+CADDY_NEW="$(mktemp)"
 sed -e "s#<DOMAIN>#$DOMAIN#" \
     -e "s#<USERNAME>#$ADMIN_USER#" \
     -e "s#<BCRYPT_HASH>#$CADDY_HASH#" \
-    "$APP_DIR/deploy/Caddyfile" > /etc/caddy/Caddyfile
-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+    "$APP_DIR/deploy/Caddyfile" > "$CADDY_NEW"
+if ! caddy validate --config "$CADDY_NEW" --adapter caddyfile; then
+  echo "Cấu hình Caddy vừa dựng không hợp lệ. KHÔNG đụng tới /etc/caddy/Caddyfile đang chạy." >&2
+  rm -f "$CADDY_NEW"
+  exit 1
+fi
+# Máy có thể đang phục vụ site khác: giữ lại bản cũ trước khi thay.
+if [[ -s /etc/caddy/Caddyfile ]]; then
+  CADDY_BACKUP="/etc/caddy/Caddyfile.truoc-facebook-crm.$(date +%Y%m%d-%H%M%S)"
+  cp /etc/caddy/Caddyfile "$CADDY_BACKUP"
+  echo "    Đã lưu cấu hình Caddy cũ ở $CADDY_BACKUP"
+fi
+install -m 644 "$CADDY_NEW" /etc/caddy/Caddyfile
+rm -f "$CADDY_NEW"
 systemctl restart caddy
 sleep 2
 if ! systemctl is-active --quiet caddy; then
@@ -145,7 +161,9 @@ Còn phải làm bằng tay:
      META_GRAPH_VERSION, META_VERIFY_TOKEN.
   2. Khởi động dịch vụ:  systemctl start facebook-crm
   3. Kiểm tra:           systemctl status facebook-crm
-                         curl -s https://$DOMAIN/api/health
+                         curl -s http://127.0.0.1:8080/api/health
+     (gọi qua https://$DOMAIN sẽ ra 401 vì Basic Auth chắn mọi đường
+      trừ /privacy, /webhooks/facebook, /webhooks/landing, /product-images)
   4. Dán vào Meta App:
      Callback URL       https://$DOMAIN/webhooks/facebook
      OAuth Redirect URI https://$DOMAIN/api/channels/meta/callback

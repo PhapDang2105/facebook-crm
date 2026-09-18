@@ -53,7 +53,15 @@
 	# Không ghi ra tệp riêng: unit systemd của gói Caddy giới hạn thư mục được
 	# phép ghi, nên "output file" làm dịch vụ chết ngay khi khởi động dù thư
 	# mục đã chown đúng chủ.
+	# Webcake gọi /webhooks/landing kèm ?token=… — ghi nguyên URI là token nằm
+	# rõ trong journald, ai đọc được log hoặc hệ thống gom log đều lấy được.
+	# Xoá riêng tham số đó khỏi log; phần còn lại giữ nguyên để còn lần vết.
 	log {
-		format json
+		format filter {
+			wrap json
+			request>uri query {
+				delete token
+			}
+		}
 	}
 }

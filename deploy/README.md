@@ -37,7 +37,7 @@ Sau khi script chạy xong:
 
 1. Sửa `/opt/facebook-crm/.env`, điền `META_APP_ID`, `META_APP_SECRET`, `META_GRAPH_VERSION`, `META_VERIFY_TOKEN`.
 2. `systemctl start facebook-crm`
-3. Kiểm tra: `curl -s https://<domain>/api/health`
+3. Kiểm tra: `curl -s http://127.0.0.1:8080/api/health` — gọi qua tên miền sẽ ra 401 vì Basic Auth chắn mọi đường trừ `/privacy`, `/webhooks/facebook`, `/webhooks/landing`, `/product-images`
 
 Điều kiện để Caddy xin được chứng chỉ: DNS của tên miền đã trỏ đúng về máy chủ, và cổng 80/443 mở trên tường lửa.
 

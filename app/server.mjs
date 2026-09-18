@@ -269,7 +269,10 @@ const qrGreetedAt = new Map();
 function scheduleQrGreetings(changes) {
   if (!qrGreetingText) return;
   for (const change of changes) {
-    if (change.type !== 'referral' || change.referral?.source !== 'SHORTLINK') continue;
+    // Không lọc theo `change.type`: khách cũ quét thì ra change kiểu `referral`,
+    // khách mới bấm "Bắt đầu" thì ra kiểu `message` mang theo referral. Cái
+    // quyết định là referral đến từ link m.me, không phải từ quảng cáo.
+    if (change.referral?.source !== 'SHORTLINK') continue;
     const conversation = change.conversation;
     if (!conversation?.psid) continue;
     const last = qrGreetedAt.get(conversation.id) || 0;

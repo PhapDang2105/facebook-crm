@@ -261,7 +261,10 @@ export function applyWebhookEvents(store, events) {
         if (commentThread?.picture && !conversation.picture) conversation.picture = commentThread.picture;
       }
       if (inserted && message.direction === 'incoming') applyGenderGuess(conversation, genderFromMessage(message.text), 'message');
-      if (inserted) changes.push({ type: 'message', conversation, message });
+      // Kèm referral vào change: khách MỚI bấm "Bắt đầu" thì Meta gửi postback,
+      // và postback được chuẩn hoá thành sự kiện kiểu `message` — nên nếu chỉ
+      // nghe nhánh `referral` sẽ bỏ sót đúng nhóm khách mới.
+      if (inserted) changes.push({ type: 'message', conversation, message, ...(event.referral ? { referral: event.referral } : {}) });
       continue;
     }
     if (event.type === 'referral' && event.referral) {

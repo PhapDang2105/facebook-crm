@@ -407,8 +407,24 @@ async function resolveMissingProfiles(changes) {
 function describeWebhookPayload(payload, events) {
   const fields = (payload?.entry || []).flatMap(entry => (entry.changes || []).map(change => `${change.field}:${change.value?.item || '?'}/${change.value?.verb || '?'}`));
   const messaging = (payload?.entry || []).reduce((count, entry) => count + (entry.messaging || []).length, 0);
+  // Chẩn đoán bật bằng WEBHOOK_DEBUG_KEYS=1: ghi TÊN TRƯỜNG Meta gửi tới, không
+  // ghi nội dung tin nhắn. Dùng để biết CRM đang bỏ sót sự kiện nào — ví dụ
+  // referral có về mà bị chuẩn hoá nhầm thì dòng tóm tắt bên trên không lộ ra.
+  const shape = process.env.WEBHOOK_DEBUG_KEYS
+    ? (payload?.entry || []).flatMap(entry => (entry.messaging || []).map(item => {
+      const keys = Object.keys(item).filter(key => key !== 'sender' && key !== 'recipient' && key !== 'timestamp');
+      const chiTiet = [];
+      if (item.referral) chiTiet.push(`referral{ref=${item.referral.ref || '-'},source=${item.referral.source || '-'},type=${item.referral.type || '-'}}`);
+      if (item.postback) chiTiet.push(`postback{payload=${item.postback.payload ? 'có' : '-'},referral=${item.postback.referral ? 'CÓ' : '-'}}`);
+      if (item.message) chiTiet.push(`message{referral=${item.message.referral ? 'CÓ' : '-'},echo=${item.message.is_echo ? 'có' : '-'}}`);
+      if (item.optin) chiTiet.push(`optin{ref=${item.optin.ref || '-'},login_id=${item.optin.login_id || '-'}}`);
+      return `[${keys.join('+') || 'rỗng'}] ${chiTiet.join(' ')}`;
+    })).join(' || ')
+    : '';
+
   return `Webhook Meta: ${events.length} sự kiện xử lý (${events.map(event => event.type).join(', ') || 'không'})` +
-    (messaging ? `, messaging=${messaging}` : '') + (fields.length ? `, changes=${fields.join(' ')}` : '');
+    (messaging ? `, messaging=${messaging}` : '') + (fields.length ? `, changes=${fields.join(' ')}` : '') +
+    (shape ? `\n    └─ Meta gửi: ${shape}` : '');
 }
 
 export async function processWebhookPayload(payload) {

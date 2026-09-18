@@ -269,7 +269,31 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
  * để các API sửa thông tin, gắn thẻ, ghi chú và lịch sử đơn tra được một khách
  * theo mã mà không phải đi qua bộ lọc của màn hình.
  */
-export async function listBuyers() {
+/**
+ * Dựng lại danh sách khách là việc nặng: đọc bốn kho rồi duyệt mọi hội thoại,
+ * mọi đơn. Một cú bấm vào hộp chi tiết gọi tới hai, ba lần (tra khách, rồi tra
+ * lại sau khi ghi), nên nhớ tạm vài giây để gộp chúng thành một lần. Ngắn thôi:
+ * webhook vẫn liên tục thêm đơn mới, giữ lâu là màn hình nói dối.
+ */
+let buyersCache = { at: 0, promise: null };
+const buyersCacheMs = 2000;
+
+/** Gọi sau mỗi lần ghi vào kho ghi đè, để lần tra ngay sau đó thấy bản mới. */
+export function invalidateBuyersCache() {
+  buyersCache = { at: 0, promise: null };
+}
+
+export async function listBuyers({ fresh = false } = {}) {
+  const now = Date.now();
+  if (!fresh && buyersCache.promise && now - buyersCache.at < buyersCacheMs) return buyersCache.promise;
+  const promise = buildBuyerList();
+  // Hỏng thì đừng để bản hỏng nằm lại trong bộ nhớ tạm.
+  promise.catch(() => invalidateBuyersCache());
+  buyersCache = { at: now, promise };
+  return promise;
+}
+
+async function buildBuyerList() {
   const [store, channels, exported, edits] = await Promise.all([
     readMessagingStore(), readChannelStore(), listExportedCustomers(), readCustomerEdits()
   ]);

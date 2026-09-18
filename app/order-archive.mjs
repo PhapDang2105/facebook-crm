@@ -53,7 +53,25 @@ export async function appendOrderToArchive(order, options = {}) {
   if (!record.id || !record.phone) return null;
   await mkdir(archiveDirectory, { recursive: true });
   await appendFile(path.join(archiveDirectory, `${archiveMonth(record.at)}.ndjson`), `${JSON.stringify(record)}\n`, 'utf8');
+  archiveCache = { at: 0, promise: null };
   return record;
+}
+
+/**
+ * Đọc cả kho là đọc và phân tích MỌI dòng của MỌI tháng. Hộp chi tiết khách gọi
+ * tới nó mỗi lần bấm vào một dòng, nên nhớ tạm vài giây; kho chỉ ghi nối nên
+ * lần ghi nào cũng tự xoá bộ nhớ tạm, không có chuyện đọc phải bản cũ.
+ */
+let archiveCache = { at: 0, promise: null };
+const archiveCacheMs = 5000;
+
+function readAllRecords() {
+  const now = Date.now();
+  if (archiveCache.promise && now - archiveCache.at < archiveCacheMs) return archiveCache.promise;
+  const promise = loadArchiveRecords();
+  promise.catch(() => { archiveCache = { at: 0, promise: null }; });
+  archiveCache = { at: now, promise };
+  return promise;
 }
 
 function recordMatches(record, needle) {
@@ -65,14 +83,14 @@ function recordMatches(record, needle) {
  * Đọc kho, mới nhất đứng đầu. `query` tìm trong mã đơn, tên, số điện thoại,
  * địa chỉ và SKU; `months` giới hạn số file tháng gần nhất phải đọc.
  */
-export async function readOrderArchive({ query = '', limit = 200, months = 0 } = {}) {
+/** Đọc mọi tệp tháng, khử trùng theo mã đơn, mới nhất đứng đầu. */
+async function loadArchiveRecords() {
   let files = [];
   try {
     files = (await readdir(archiveDirectory)).filter(name => name.endsWith('.ndjson')).sort();
   } catch {
-    return { items: [], total: 0 };
+    return [];
   }
-  if (months > 0) files = files.slice(-months);
   // Dòng sau cùng của một mã đơn là bản đúng; Map giữ đúng thứ tự ghi.
   const byId = new Map();
   for (const file of files) {
@@ -82,13 +100,30 @@ export async function readOrderArchive({ query = '', limit = 200, months = 0 } =
       if (!line.trim()) continue;
       try {
         const record = JSON.parse(line);
-        if (record && record.id) byId.set(record.id, record);
+        if (record && record.id) byId.set(record.id, { ...record, file });
       } catch { /* dòng hỏng thì bỏ qua, phần còn lại vẫn đọc được */ }
     }
   }
+  return [...byId.values()].sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+}
+
+export async function readOrderArchive({ query = '', limit = 200, months = 0 } = {}) {
+  let records = await readAllRecords();
+  if (months > 0) {
+    // Giới hạn theo tệp tháng như trước: mỗi bản ghi mang tên tệp nó nằm trong.
+    let files = [];
+    try {
+      files = (await readdir(archiveDirectory)).filter(name => name.endsWith('.ndjson')).sort().slice(-months);
+    } catch {
+      return { items: [], total: 0 };
+    }
+    const wanted = new Set(files);
+    records = records.filter(record => wanted.has(record.file));
+  }
   const needle = foldVietnamese(text(query, 120));
-  const items = [...byId.values()]
+  // Bỏ `file` đi: nó chỉ dùng để lọc theo tháng, không phải dữ liệu của đơn.
+  const items = records
     .filter(record => !needle || recordMatches(record, needle))
-    .sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+    .map(({ file, ...record }) => record);
   return { items: limit > 0 ? items.slice(0, limit) : items, total: items.length };
 }

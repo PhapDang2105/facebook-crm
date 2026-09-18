@@ -34,7 +34,7 @@ import {
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
-import { customersToCsv, customersToAudienceCsv, findCustomerById, listCustomers } from './customers.mjs';
+import { customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listCustomers } from './customers.mjs';
 import { addCustomerNote, listCustomerNotes, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
 import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
@@ -73,6 +73,36 @@ async function readProductStore() {
   } catch {
     return { items: [], updatedAt: 0 };
   }
+}
+
+// Kho sản phẩm và kho quà là hai chỗ duy nhất còn đọc–sửa–ghi mà không xếp
+// hàng: hai tab bấm gần nhau thì cả hai cùng đọc một bản, bên ghi sau xoá mất
+// thay đổi của bên ghi trước. Mọi kho khác (messaging, landing, customer-file,
+// customer-edits) đều đã đi qua một hàng đợi như thế này.
+let productWriteQueue = Promise.resolve();
+
+/** Đọc kho, sửa, ghi lại — trọn gói một lượt, không ai chen vào giữa. */
+function updateProductStore(mutate) {
+  const operation = productWriteQueue.then(async () => {
+    const store = await readProductStore();
+    const result = await mutate(store);
+    // Mutator trả về `undefined` là "không đổi gì" (ví dụ không tìm thấy sản
+    // phẩm): ghi lại cả kho khi chẳng có gì đổi chỉ tốn công và tạo cơ hội
+    // hỏng tệp vô cớ.
+    if (result !== undefined) await writeProductStore(store);
+    return result;
+  });
+  productWriteQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+let giftWriteQueue = Promise.resolve();
+
+/** Như trên, cho kho quà: `mutate` nhận kho hiện tại và trả về kho mới. */
+function updateGiftStore(mutate) {
+  const operation = giftWriteQueue.then(async () => writeGiftStore(await mutate(await readGiftStore())));
+  giftWriteQueue = operation.then(() => undefined, () => undefined);
+  return operation;
 }
 
 async function writeProductStore(store) {
@@ -524,33 +554,33 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'POST' && url.pathname === '/api/products') {
       const payload = await readBody(request, 8 * 1024 * 1024);
-      const store = await readProductStore();
       const id = randomUUID();
-      const product = normalizeProduct(payload, { id, createdAt: Date.now(), image: '' });
-      assertUniqueSku(store.items, product.sku);
-      if (payload.imageData) product.image = await saveProductImage(payload.imageData, id);
-      store.items.unshift(product);
-      await writeProductStore(store);
+      const product = await updateProductStore(async store => {
+        const created = normalizeProduct(payload, { id, createdAt: Date.now(), image: '' });
+        assertUniqueSku(store.items, created.sku);
+        if (payload.imageData) created.image = await saveProductImage(payload.imageData, id);
+        store.items.unshift(created);
+        return created;
+      });
       return sendJson(response, 201, product);
     }
     const productMatch = url.pathname.match(/^\/api\/products\/([^/]+)$/);
     if (productMatch && ['PUT', 'DELETE'].includes(request.method)) {
-      const store = await readProductStore();
-      const index = store.items.findIndex(product => product.id === productMatch[1]);
-      if (index < 0) return sendJson(response, 404, { error: 'Không tìm thấy sản phẩm.' });
-      if (request.method === 'DELETE') {
-        const [removed] = store.items.splice(index, 1);
-        await writeProductStore(store);
-        return sendJson(response, 200, removed);
-      }
-      const payload = await readBody(request, 8 * 1024 * 1024);
-      const product = normalizeProduct(payload, store.items[index]);
-      assertUniqueSku(store.items, product.sku, product.id);
-      if (payload.removeImage === true) product.image = '';
-      if (payload.imageData) product.image = await saveProductImage(payload.imageData, product.id);
-      store.items[index] = product;
-      await writeProductStore(store);
-      return sendJson(response, 200, product);
+      const payload = request.method === 'PUT' ? await readBody(request, 8 * 1024 * 1024) : null;
+      let missing = false;
+      const result = await updateProductStore(async store => {
+        const index = store.items.findIndex(product => product.id === productMatch[1]);
+        if (index < 0) { missing = true; return undefined; }
+        if (request.method === 'DELETE') return store.items.splice(index, 1)[0];
+        const product = normalizeProduct(payload, store.items[index]);
+        assertUniqueSku(store.items, product.sku, product.id);
+        if (payload.removeImage === true) product.image = '';
+        if (payload.imageData) product.image = await saveProductImage(payload.imageData, product.id);
+        store.items[index] = product;
+        return product;
+      });
+      if (missing) return sendJson(response, 404, { error: 'Không tìm thấy sản phẩm.' });
+      return sendJson(response, 200, result);
     }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
       const settings = await readChatbotSettings();
@@ -957,6 +987,7 @@ const server = http.createServer(async (request, response) => {
       if (!customer) return sendJson(response, 404, { error: 'Không tìm thấy khách hàng.' });
       try {
         await updateCustomerProfile(customer.editKey, await readBody(request));
+        invalidateBuyersCache();
         return sendJson(response, 200, await findCustomerById(customer.id));
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
@@ -971,6 +1002,7 @@ const server = http.createServer(async (request, response) => {
         try {
           const payload = await readBody(request);
           await setCustomerLabels(customer.editKey, payload.labels || [], customer.derivedLabels);
+          invalidateBuyersCache();
           return sendJson(response, 200, await findCustomerById(customer.id));
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
@@ -982,6 +1014,7 @@ const server = http.createServer(async (request, response) => {
         if (request.method === 'POST') {
           try {
             const note = await addCustomerNote(customer.editKey, await readBody(request));
+            invalidateBuyersCache();
             return sendJson(response, 200, { note, noteCount: (await findCustomerById(customer.id))?.noteCount || 0 });
           } catch (error) {
             return sendJson(response, 400, { error: error.message });
@@ -1163,11 +1196,10 @@ const server = http.createServer(async (request, response) => {
         }
         const shippingFee = Number(payload.shippingFee);
         if (payload.shippingFee !== undefined && (!Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });
-        const current = await readGiftStore();
-        await writeGiftStore({
+        await updateGiftStore(current => ({
           items,
           shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee
-        });
+        }));
         return sendJson(response, 200, giftResponse());
       }
     }

@@ -9,7 +9,12 @@ function text(value, maximum) {
 }
 
 function money(value) {
-  return Math.max(0, Math.round(Number(value) || 0));
+  // Số thì dùng thẳng. Chuỗi tiền VND hay mang dấu chấm ngăn nghìn ("149.000")
+  // mà Number("149.000") ra 149 chứ không phải NaN — sai âm thầm, đơn giá tụt
+  // từ 149.000đ xuống 149đ và tổng đơn sai theo. Bỏ ký tự không phải chữ số
+  // trước khi đọc, cùng cách với order-edits.mjs và landing-orders.mjs.
+  const number = typeof value === 'number' ? value : Number(String(value ?? '').replace(/\D/g, ''));
+  return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
 }
 
 export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = randomUUID().slice(0, 8) } = {}) {

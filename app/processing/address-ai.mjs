@@ -165,7 +165,10 @@ export function validateAddressGuess(guess, raw, hint = addressHint(raw)) {
   const canonical = [finalStreet, resolved.ward.name, resolved.district.name, resolved.province.name].filter(Boolean).join(', ');
   // Khách không gõ đường/số nhà mà mô hình tra ra một số nhà (ví dụ địa chỉ
   // một cửa hàng): vẫn nhận nhưng đánh dấu để nhân viên đối chiếu trước khi giao.
-  const streetInvented = !isUsableStreet(known.street) && /d/.test(finalStreet) && !normalizeLocationKey(raw).includes(normalizeLocationKey(finalStreet).slice(0, 12));
+  // `\d` chứ không phải `d`: đang hỏi "phần đường có SỐ NHÀ không". Viết thiếu
+  // dấu gạch chéo là đi tìm chữ cái "d" thường, nên gần như không đơn nào bị
+  // đánh dấu và nhân viên không bao giờ được nhắc đối chiếu.
+  const streetInvented = !isUsableStreet(known.street) && /\d/.test(finalStreet) && !normalizeLocationKey(raw).includes(normalizeLocationKey(finalStreet).slice(0, 12));
   return { ok: true, canonical, street: finalStreet, ward: resolved.ward.name, district: resolved.district.name, province: resolved.province.name, streetInvented };
 }
 

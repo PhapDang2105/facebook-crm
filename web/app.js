@@ -928,7 +928,7 @@ function customerSheetOrdersHtml(orders) {
     <tbody>${orders.map(order => `<tr>
       <td>${escapeHtml(formatCustomerDate(order.at))}</td>
       <td>${order.products.map(item => `${escapeHtml(item.name)} ×${item.quantity}`).join('<br>') || '—'}</td>
-      <td>${escapeHtml(order.status || 'Đã xuất')}</td>
+      <td>${escapeHtml(order.status) || '—'}</td>
       <td class="num">${escapeHtml(formatCustomerMoney(order.total))}</td>
     </tr>`).join('')}</tbody>
   </table>`;

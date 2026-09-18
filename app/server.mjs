@@ -20,7 +20,7 @@ import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
-import { customerPhoneKey, recordExportedOrders } from './customer-file.mjs';
+import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -924,28 +924,50 @@ const server = http.createServer(async (request, response) => {
         }
       }
 
-      // Lịch sử đơn lấy từ kho lưu trữ đơn, khớp ĐÚNG số điện thoại. Tìm kiếm
-      // chung của kho còn dò cả tên và địa chỉ nên dễ kéo nhầm đơn người khác.
+      // Lịch sử đơn của một khách nằm ở hai chỗ: tệp khách hàng giữ đơn đã xuất
+      // kho, kho lưu trữ đơn giữ đơn landing và đơn chatbot. Phải gộp cả hai vì
+      // khách đến từ file xuất kho không có mặt trong kho lưu trữ và ngược lại.
+      // Khớp ĐÚNG số điện thoại: tìm kiếm chung của kho còn dò cả tên và địa chỉ
+      // nên dễ kéo nhầm đơn người khác.
       if (customerRoute[1] === 'orders' && request.method === 'GET') {
         const key = customerPhoneKey(customer.phone);
         if (!key) return sendJson(response, 200, { items: [] });
-        const { items } = await readOrderArchive({ limit: 0 });
         const names = new Map(getCatalogProducts().map(product => [product.sku, product.name]));
         // Tên sản phẩm của chính khách này là bản dự phòng khi SKU đã rời danh mục.
         for (const product of customer.products || []) if (product?.sku) names.set(product.sku, product.name);
-        const orders = items
-          .filter(record => customerPhoneKey(record.phone) === key)
-          .map(record => ({
-            id: record.id,
+        const productName = (sku, name) => name || names.get(String(sku || '')) || String(sku || '');
+
+        const byId = new Map();
+        const exported = (await listExportedCustomers()).find(person => customerPhoneKey(person.phone) === key);
+        for (const order of exported?.orders || []) {
+          byId.set(String(order.id), {
+            id: String(order.id),
+            at: Number(order.orderedAt) || Number(order.exportedAt) || 0,
+            status: 'Đã xuất kho',
+            source: order.source || '',
+            total: Number(order.total) || 0,
+            products: (order.products || []).map(item => ({
+              sku: String(item.sku || ''), name: productName(item.sku, item.name), quantity: Number(item.quantity) || 0
+            }))
+          });
+        }
+        // Một đơn có thể vừa nằm trong kho lưu trữ vừa đã xuất kho; bản ở tệp
+        // khách hàng chi tiết hơn nên giữ, bản kho chỉ bù phần còn thiếu.
+        const { items } = await readOrderArchive({ limit: 0 });
+        for (const record of items) {
+          if (customerPhoneKey(record.phone) !== key || byId.has(String(record.id))) continue;
+          byId.set(String(record.id), {
+            id: String(record.id),
             at: Number(record.at) || 0,
-            status: record.st || '',
+            status: record.st || 'Đã ghi kho',
             source: record.src || '',
             total: Number(record.total) || 0,
             products: (Array.isArray(record.items) ? record.items : []).map(([sku, quantity]) => ({
-              sku: String(sku || ''), name: names.get(String(sku || '')) || String(sku || ''), quantity: Number(quantity) || 0
+              sku: String(sku || ''), name: productName(sku, ''), quantity: Number(quantity) || 0
             }))
-          }));
-        return sendJson(response, 200, { items: orders });
+          });
+        }
+        return sendJson(response, 200, { items: [...byId.values()].sort((first, second) => second.at - first.at) });
       }
     }
     // Cài đặt → Tin nhắn: conversation labels and staff quick replies.

@@ -6409,11 +6409,10 @@ function renderOrderData() {
     renderOrderTable(
       document.querySelector('#order-import-preview'), headers, sortOrderEntriesByTime(importRows),
       rows.length ? 'Không tìm thấy đơn hàng phù hợp' : 'Chưa có dữ liệu',
-      ({ index }) => warningRowIndexes.get(index) && warningRowIndexes.get(index) !== 'watch' ? 'order-row-phone-warning'
-        : warningRowIndexes.get(index) === 'watch' ? 'order-row-phone-watch'
-          : duplicateRowIndexes.has(index)
-            ? 'order-row-duplicate'
-            : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
+      // Nhập dữ liệu chỉ tô nền đơn trùng (trùng dữ liệu, trùng số điện thoại);
+      // cảnh báo bom hàng và các vấn đề khác để bên Xử lý dữ liệu lo.
+      ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate'
+        : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
       { deletable: true, rowNotes }
     );
   } else orderPanelsDirty.add('import');

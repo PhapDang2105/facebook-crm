@@ -538,7 +538,6 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customer-orders-management-row { display: grid; grid-template-columns: 90px minmax(150px, 1fr) 130px 125px 100px 32px; align-items: center; gap: 10.8px; padding: 9px 10.8px; background: #fff; border: .9px solid #e2e8e4; border-radius: 7.2px; font-size: 11.7px; }
 .customer-orders-management-row > strong:last-child { color: #27643a; text-align: right; }
 .customer-orders-management-status { color: #27643a; font-weight: 700; }
-.data-preview tbody tr.order-row-invalid td { background: #fff7e8; }
 .data-preview tbody tr.order-row-duplicate td { background: #fde8ef; }
 .data-preview tbody tr.order-row-duplicate-phone td { background: #fff3bf; }
 
@@ -2149,9 +2148,6 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .message-link:hover { text-decoration-thickness: 2px; }
 .outgoing .bubble .message-link { color: #fff; }
 
-/* Cảnh báo số điện thoại hay bom hàng */
-.data-preview tbody tr.order-row-phone-warning td { background: #ffe3e3; }
-.data-preview tbody tr.order-row-phone-watch td { background: #fff1d6; }
 .data-preview tbody tr[data-order-row-index] { cursor: pointer; }
 .data-preview tbody tr[data-order-row-index]:hover td { background: rgba(26, 86, 219, .05); }
 .data-preview td.preview-note { white-space: normal; }

@@ -243,9 +243,13 @@ export function applyWebhookEvents(store, events) {
         message: event.message,
         markUnread: event.message.direction === 'incoming'
       });
-      // Kept on the conversation, not the message: the ad is context for the
-      // whole thread and only ever arrives on the first event.
-      if (event.referral && !conversation.referral) conversation.referral = event.referral;
+      // Gắn vào hội thoại chứ không vào tin nhắn: đây là bối cảnh của cả luồng.
+      // Quảng cáo chỉ đến một lần, nhưng mã QR thì khách quét lại nhiều lần —
+      // nên giữ bản mới nhất và một ít lịch sử, thay vì chỉ giữ lần đầu.
+      if (event.referral) {
+        conversation.referrals = [...(conversation.referrals || []), { ...event.referral, at: Date.now() }].slice(-20);
+        conversation.referral = event.referral;
+      }
       // A customer who commented first and then writes in Messenger (after the
       // bot's private reply) is still asking about that post's product.
       if (inserted && message.direction === 'incoming' && (!conversation.post || !conversation.picture)) {
@@ -262,7 +266,14 @@ export function applyWebhookEvents(store, events) {
     }
     if (event.type === 'referral' && event.referral) {
       const conversation = ensureConversation(store, { pageId: event.pageId, psid: event.psid });
-      if (!conversation.referral) conversation.referral = event.referral;
+      // Quảng cáo thì chỉ đến một lần nên giữ lần đầu là đúng. Mã QR trên bao bì
+      // thì ngược lại: khách mua lô mới lại quét, và chính lần quét SAU mới nói
+      // cho ta biết họ quay lại. Giữ bản mới nhất, kèm vài lần gần đây.
+      conversation.referrals = [...(conversation.referrals || []), { ...event.referral, at: Date.now() }].slice(-20);
+      conversation.referral = event.referral;
+      // Trước đây nhánh này lặng lẽ `continue`, nên không ai dưới hạ nguồn biết
+      // khách vừa quét. Đẩy một thay đổi ra để còn chào lại được.
+      changes.push({ type: 'referral', conversation, referral: event.referral });
       continue;
     }
     if (event.type === 'delivery' || event.type === 'read') {

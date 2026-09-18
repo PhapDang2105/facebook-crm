@@ -247,6 +247,52 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
   return result;
 }
 
+/* ---- Thử nghiệm: chào khách vừa quét mã QR ----
+ *
+ * Khách quét QR trên bao bì -> mở m.me?ref=... -> Meta bắn `messaging_referrals`.
+ * Với hội thoại đã có sẵn, sự kiện này RESET cửa sổ 24 giờ, nên Page nhắn được
+ * ngay mà khách không phải gõ gì. Đây là chỗ tận dụng điều đó.
+ *
+ * Giới hạn có chủ ý:
+ *  - Chỉ phản hồi referral `source: SHORTLINK` (tức link m.me). Referral từ
+ *    quảng cáo mang `source: ADS` và đã có luồng chào riêng — đụng vào là khách
+ *    bấm quảng cáo nhận nhầm lời chào này.
+ *  - Mỗi hội thoại chỉ chào lại sau QR_GREETING_COOLDOWN_MS, tránh khách quét
+ *    mấy lần liền bị nhắn dồn.
+ *  - Đặt QR_GREETING_TEXT rỗng trong .env là tắt hẳn, không phải sửa mã.
+ */
+const qrGreetingText = process.env.QR_GREETING_TEXT ?? 'Xin chào quý khách';
+const qrGreetingDelayMs = Number(process.env.QR_GREETING_DELAY_MS) || 10_000;
+const qrGreetingCooldownMs = Number(process.env.QR_GREETING_COOLDOWN_MS) || 6 * 60 * 60 * 1000;
+const qrGreetedAt = new Map();
+
+function scheduleQrGreetings(changes) {
+  if (!qrGreetingText) return;
+  for (const change of changes) {
+    if (change.type !== 'referral' || change.referral?.source !== 'SHORTLINK') continue;
+    const conversation = change.conversation;
+    if (!conversation?.psid) continue;
+    const last = qrGreetedAt.get(conversation.id) || 0;
+    if (Date.now() - last < qrGreetingCooldownMs) {
+      console.log(`QR: bỏ qua chào ${conversation.id} (vừa chào cách đây ${Math.round((Date.now() - last) / 1000)}s)`);
+      continue;
+    }
+    qrGreetedAt.set(conversation.id, Date.now());
+    console.log(`QR: khách quét ref="${change.referral.ref || '-'}", sẽ chào sau ${qrGreetingDelayMs / 1000}s — ${conversation.name || conversation.id}`);
+    // unref: hẹn giờ này không được giữ tiến trình sống khi tắt dịch vụ.
+    setTimeout(async () => {
+      try {
+        await sendConversationMessage(conversation, { text: qrGreetingText });
+        console.log(`QR: đã gửi lời chào cho ${conversation.name || conversation.id}`);
+      } catch (error) {
+        // Ngoài cửa sổ 24h Meta trả lỗi ở đây — đó cũng là kết quả đáng ghi lại.
+        console.error(`QR: KHÔNG gửi được lời chào cho ${conversation.name || conversation.id}: ${error.message}`);
+        qrGreetedAt.delete(conversation.id);
+      }
+    }, qrGreetingDelayMs).unref?.();
+  }
+}
+
 /** Sends the tappable Messenger receipt. Kept separate from creating the order so
  *  the chatbot can persist the order first and still close with the receipt. */
 async function sendChatbotOrderReceipt(conversation, order) {
@@ -916,6 +962,7 @@ const server = http.createServer(async (request, response) => {
       response.end('EVENT_RECEIVED');
       try {
         const changes = await processWebhookPayload(JSON.parse(rawBody.toString('utf8')));
+        scheduleQrGreetings(changes);
         await processChatbotChanges(changes, {
           readSettings: readChatbotSettings,
           listMessages,

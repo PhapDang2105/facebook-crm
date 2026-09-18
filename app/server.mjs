@@ -944,7 +944,7 @@ const server = http.createServer(async (request, response) => {
       const customer = await findCustomerById(decodeURIComponent(customerRoute[0]));
       if (!customer) return sendJson(response, 404, { error: 'Không tìm thấy khách hàng.' });
       try {
-        await updateCustomerProfile(customer.id, await readBody(request));
+        await updateCustomerProfile(customer.editKey, await readBody(request));
         return sendJson(response, 200, await findCustomerById(customer.id));
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
@@ -958,7 +958,7 @@ const server = http.createServer(async (request, response) => {
       if (customerRoute[1] === 'labels' && request.method === 'PUT') {
         try {
           const payload = await readBody(request);
-          await setCustomerLabels(customer.id, payload.labels || []);
+          await setCustomerLabels(customer.editKey, payload.labels || [], customer.derivedLabels);
           return sendJson(response, 200, await findCustomerById(customer.id));
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
@@ -966,10 +966,10 @@ const server = http.createServer(async (request, response) => {
       }
 
       if (customerRoute[1] === 'notes') {
-        if (request.method === 'GET') return sendJson(response, 200, { items: await listCustomerNotes(customer.id) });
+        if (request.method === 'GET') return sendJson(response, 200, { items: await listCustomerNotes(customer.editKey) });
         if (request.method === 'POST') {
           try {
-            const note = await addCustomerNote(customer.id, await readBody(request));
+            const note = await addCustomerNote(customer.editKey, await readBody(request));
             return sendJson(response, 200, { note, noteCount: (await findCustomerById(customer.id))?.noteCount || 0 });
           } catch (error) {
             return sendJson(response, 400, { error: error.message });

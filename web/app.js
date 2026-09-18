@@ -813,6 +813,14 @@ function customerRowHtml(customer, index) {
 function renderCustomers(items, total) {
   if (!customersTable) return;
   customersAll = Array.isArray(items) ? items : [];
+  // Bỏ tích những khách không còn trong danh sách vừa nạp. Chỉ resetCustomersView
+  // mới xoá tích, còn nút "Tải lại" và lần mở lại màn thì gọi loadCustomers()
+  // trần — thanh thao tác hàng loạt sẽ đếm cả khách đã biến mất và chạy lên
+  // những mã không ai nhìn thấy.
+  if (customersPicked.size) {
+    const present = new Set(customersAll.map(customer => customer.id));
+    for (const id of [...customersPicked]) if (!present.has(id)) customersPicked.delete(id);
+  }
   renderCustomersTabs(customersAll);
 
   customersShown = customersAll.filter(customer => customerMatchesTab(customer, customersTab)).sort((first, second) => {
@@ -915,9 +923,19 @@ function customerGenderText(customer) {
    và hoạt động — thay cho bảng phẳng mười chín dòng trước đây. Lịch sử đơn tra
    kho lưu trữ nên nạp sau, hộp mở ra ngay chứ không đợi mạng. */
 let customerSheet = null;
+let customerSheetToken = 0;
 
 function customerFact(label, value) {
   return `<div><dt>${escapeHtml(label)}</dt><dd>${value || '—'}</dd></div>`;
+}
+
+/** Ghi chú đếm từ hai nguồn: bên hội thoại và phần thêm ngay trong hộp này.
+ *  Gộp thành một con số trơn thì nhân viên không hiểu vì sao lại lệch. */
+function customerNoteCountText(customer) {
+  const total = Number(customer.noteCount) || 0;
+  const staff = Number(customer.staffNoteCount) || 0;
+  if (!total) return '';
+  return staff && staff !== total ? `${total} ghi chú (${staff} thêm ở đây)` : `${total} ghi chú`;
 }
 
 function customerSheetOrdersHtml(orders) {
@@ -986,7 +1004,7 @@ function renderCustomerSheet(customer, orders) {
     <section class="customer-sheet-block">
       <h3><img src="/assets/icons/customer-panel/note.png" alt="">Ghi chú &amp; hoạt động</h3>
       <dl class="customer-facts">
-        ${customerFact('Ghi chú đã lưu', `${Number(customer.noteCount) || 0} ghi chú`)}
+        ${customerFact('Ghi chú đã lưu', customerNoteCountText(customer))}
         ${customerFact('Khách nhắn lần cuối', customer.lastCustomerMessageAt ? `${escapeHtml(formatCustomerDate(customer.lastCustomerMessageAt))} (${escapeHtml(timeSince(customer.lastCustomerMessageAt))})` : '')}
         ${customerFact('Tin nhắn cuối', escapeHtml(customer.lastMessagePreview))}
         ${customerFact('Chatbot', customer.botEnabled ? 'Đang bật' : 'Đã tắt')}
@@ -996,7 +1014,11 @@ function renderCustomerSheet(customer, orders) {
 
 async function openCustomerDialog(customer) {
   if (!customerDialog) return;
-  customerSheet = { customer, orders: null };
+  // Số thứ tự chứ không phải mã khách: mở lại CÙNG một khách sau khi sửa cũng
+  // phải huỷ kết quả của lần mở trước, nếu không bản cũ về sau sẽ vẽ đè lên và
+  // xoá mất thay đổi vừa lưu.
+  const token = ++customerSheetToken;
+  customerSheet = { customer, orders: null, token };
   closeCustomerSheetForm();
   // "Gọi" chỉ bấm được khi có số; nút chết mà vẫn sáng thì gây hiểu nhầm.
   customerDialog.querySelector('[data-customer-action="call"]')?.toggleAttribute('disabled', !customer.phone);
@@ -1007,11 +1029,11 @@ async function openCustomerDialog(customer) {
   try {
     const result = await readApiResponse(await fetch(`/api/customers/${encodeURIComponent(customer.id)}/orders`));
     // Nhân viên đã đóng hộp hoặc mở khách khác trong lúc chờ thì bỏ kết quả.
-    if (customerSheet?.customer.id !== customer.id) return;
+    if (customerSheetToken !== token) return;
     customerSheet.orders = Array.isArray(result.items) ? result.items : [];
     renderCustomerSheet(customer, customerSheet.orders);
   } catch {
-    if (customerSheet?.customer.id !== customer.id) return;
+    if (customerSheetToken !== token) return;
     customerSheet.orders = [];
     renderCustomerSheet(customer, []);
   }
@@ -1033,11 +1055,17 @@ function closeCustomerDialog() {
 /* ---- Năm nút hành động trên đầu hộp ---- */
 
 /** Mở hội thoại của khách bên màn Tin nhắn. */
-function openCustomerConversation(customer) {
+async function openCustomerConversation(customer) {
   const target = (customer.conversations || [])[0];
   if (!target) return showToast('Khách này chưa có hội thoại nào.', 'error');
   closeCustomerDialog();
   showView('messages');
+  // Danh sách hội thoại chỉ dựng cho ĐÚNG một trang, còn màn Khách hàng gộp
+  // mọi trang. Không chuyển trang trước thì khách của trang khác luôn báo
+  // "không tìm thấy" dù hội thoại vẫn còn.
+  if (customer.channelId && customer.channelId !== currentMessageChannelId) {
+    await switchMessageChannel(customer.channelId);
+  }
   const element = getConversationItems().find(item => item.dataset.conversationId === target.id);
   if (element) selectConversation(element);
   else showToast('Hội thoại không còn trong danh sách đang hiển thị.', 'error');
@@ -1055,6 +1083,7 @@ function customerSheetForm(html) {
 function openCustomerEditForm(customer) {
   customerSheetForm(`
     <h4>Sửa thông tin</h4>
+    <p class="customer-sheet-hint">Để trống một ô là gỡ phần đã sửa, trả ô đó về dữ liệu gốc.</p>
     <div class="customer-sheet-fields">
       <label>Tên khách<input type="text" data-edit="name" value="${escapeHtml(customer.name || '')}" maxlength="120"></label>
       <label>Số điện thoại<input type="text" data-edit="phone" value="${escapeHtml(customer.phone || '')}" maxlength="20"></label>
@@ -1110,18 +1139,24 @@ async function saveCustomerSheet(kind) {
   const button = form.querySelector('[data-customer-save]');
   if (button) button.disabled = true;
   try {
-    await readApiResponse(await fetch(request.url, {
+    const result = await readApiResponse(await fetch(request.url, {
       method: request.method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request.body)
     }));
     closeCustomerSheetForm();
     showToast(kind === 'note' ? 'Đã lưu ghi chú.' : 'Đã lưu thay đổi.', 'success');
-    // Bảng dựng lại từ server, rồi mở lại hộp đúng khách vừa sửa.
-    await loadCustomers();
-    const refreshed = customersAll.find(item => item.id === customer.id);
-    if (refreshed) openCustomerDialog(refreshed);
+    // Vẽ lại hộp bằng chính bản server vừa trả về, KHÔNG đợi loadCustomers rồi
+    // tra lại: loadCustomers nuốt lỗi mạng và cũng thoát sớm khi có lượt tải
+    // mới hơn, nên tra sau nó có thể ra đúng bản cũ và hộp hiện lại giá trị
+    // trước khi sửa dù vừa báo "Đã lưu".
+    const refreshed = kind === 'note'
+      ? { ...customer, noteCount: Number(result?.noteCount) || customer.noteCount, staffNoteCount: (Number(customer.staffNoteCount) || 0) + 1 }
+      : result;
+    if (refreshed?.id) openCustomerDialog(refreshed);
     else closeCustomerDialog();
+    // Bảng phía sau làm mới sau, hỏng thì cũng không ảnh hưởng hộp đang mở.
+    loadCustomers();
   } catch (error) {
     if (button) button.disabled = false;
     showToast(error.message || 'Chưa lưu được.', 'error');
@@ -1138,7 +1173,7 @@ customerDialog?.addEventListener('click', event => {
   const action = event.target.closest('[data-customer-action]')?.dataset.customerAction;
   const customer = customerSheet?.customer;
   if (!action || !customer) return;
-  if (action === 'chat') return openCustomerConversation(customer);
+  if (action === 'chat') return void openCustomerConversation(customer);
   if (action === 'call') return void (window.location.href = `tel:${String(customer.phone || '').replace(/[^\d+]/g, '')}`);
   if (action === 'edit') return openCustomerEditForm(customer);
   if (action === 'tag') return openCustomerTagForm(customer);
@@ -1267,7 +1302,16 @@ document.addEventListener('click', event => {
   if (!event.target.closest('.customers-export')) closeCustomersExportMenu();
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') closeCustomersExportMenu();
+  if (event.key !== 'Escape') return;
+  closeCustomersExportMenu();
+  // Mọi hộp thoại khác đều đóng được bằng Esc; hộp chi tiết khách thiếu mất.
+  // Đang mở khung sửa/gắn thẻ/ghi chú thì Esc đóng khung đó trước, bấm lần
+  // nữa mới đóng cả hộp — để không mất phần đang gõ dở vì lỡ tay.
+  if (customerDialog && !customerDialog.classList.contains('hidden')) {
+    const form = customerDialog.querySelector('#customer-sheet-form');
+    if (form && !form.classList.contains('hidden')) closeCustomerSheetForm();
+    else closeCustomerDialog();
+  }
 });
 customersTable?.addEventListener('click', event => {
   // Bấm vào ô tích chọn, nút chép số hay tiêu đề cột thì không mở hồ sơ khách.
@@ -5759,9 +5803,14 @@ async function sendRemoteMessage(conversation, text, attachment, imageUrls = [])
     }
     showComposerStatus(error.message, 6000);
   }
-  renderConversation(conversation);
   sortConversationsByRecentActivity();
   filterConversations();
+  // Chỉ vẽ lại khi hội thoại này VẪN đang mở. Mạng chậm mà nhân viên đã bấm
+  // sang khách khác thì vẽ ở đây sẽ thay nội dung khung chat bằng hội thoại cũ
+  // trong khi danh sách bên trái vẫn sáng ở khách mới — gõ tiếp là gửi nhầm
+  // người. Các hàm nạp tin khác đều có chốt này, riêng chỗ gửi thì thiếu.
+  if (getActiveConversation() !== conversation) return;
+  renderConversation(conversation);
   if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
 }
 
@@ -7543,6 +7592,11 @@ customerOrderForm?.addEventListener('submit', async event => {
     saveCustomerPanelStore();
     renderCustomerOrders(conversation);
     await ensureRemoteMessages(conversation, { force: true });
+    // Dọn form ngay sau khi đơn đã tạo. Không dọn thì `finally` bên dưới gọi
+    // updateCustomerOrderTotals() và nút Gửi sáng lại vì form vẫn còn đủ tên,
+    // số, địa chỉ, sản phẩm — bấm thêm lần nữa là ra đơn thứ hai với mã khác
+    // và khách nhận hai tin xác nhận.
+    resetCustomerOrderForm(conversation);
     setCustomerPanelTab('info');
     showToast(`Đã gửi xác nhận cho khách và tạo đơn ${order.id}.`, 'success');
   } catch (error) {
@@ -7822,6 +7876,10 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
     showToast(error.message);
   } finally {
     button.textContent = originalLabel;
+    // Phải tự mở khoá ở đây. renderExportPreview() chỉ bật lại nút "Xuất XLSX";
+    // nút "Xuất bỏ qua đơn chưa chuẩn" không chỗ nào đụng tới .disabled nên
+    // sau một lần bấm là xám vĩnh viễn, phải F5 mới xuất lại được.
+    button.disabled = false;
     renderExportPreview();
   }
 }

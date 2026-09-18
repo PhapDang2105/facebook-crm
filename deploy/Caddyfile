@@ -38,6 +38,14 @@
 		reverse_proxy 127.0.0.1:8080
 	}
 
+	# Mã QR trên phiếu cảm ơn trỏ vào đây. Khách quét là người ngoài, chưa đăng
+	# nhập gì, nên phải đi thẳng. Ứng dụng chỉ nhận mã dạng chữ-số-gạch nối và
+	# tự dựng địa chỉ đích, nên đường này không mở ra chuyển hướng tuỳ ý.
+	@qr path /q/*
+	handle @qr {
+		reverse_proxy 127.0.0.1:8080
+	}
+
 	# Toàn bộ giao diện và API quản trị nằm sau mật khẩu.
 	handle {
 		basic_auth {

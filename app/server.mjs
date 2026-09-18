@@ -21,6 +21,7 @@ import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
+import { isValidQrCode, listQrScans, recordQrScan } from './qr-scans.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -264,6 +265,20 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
 const qrGreetingDelayMs = Number(process.env.QR_GREETING_DELAY_MS) || 10_000;
 const qrGreetingCooldownMs = Number(process.env.QR_GREETING_COOLDOWN_MS) || 6 * 60 * 60 * 1000;
 const qrGreetedAt = new Map();
+
+/**
+ * Page mà /q/<mã> chuyển hướng tới. Lấy từ Page đang kết nối trong CRM; đặt
+ * QR_PAGE_ID trong .env để ghim cứng nếu sau này nối thêm Page thứ hai.
+ * Nhớ lại kết quả để mỗi lượt quét không phải đọc đĩa.
+ */
+let cachedQrPageId = '';
+async function resolveQrPageId() {
+  if (cachedQrPageId) return cachedQrPageId;
+  if (process.env.QR_PAGE_ID) return (cachedQrPageId = process.env.QR_PAGE_ID);
+  const channels = await readChannelStore();
+  cachedQrPageId = String(channels.items?.[0]?.id || '');
+  return cachedQrPageId;
+}
 
 /** Khách đến từ phiếu cảm ơn (link m.me), phân biệt với khách bấm quảng cáo. */
 function isCardScan(change) {
@@ -615,6 +630,39 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 403, { error: 'Yêu cầu đến từ trang khác nên bị từ chối.' });
     }
     if (request.method === 'GET' && url.pathname === '/api/health') return sendJson(response, 200, { status:'ok', time:new Date().toISOString() });
+    // Lớp trung gian của mã QR trên phiếu cảm ơn. Công khai (Caddy cho đi thẳng)
+    // vì khách quét chưa đăng nhập gì cả. Đích đến do MÁY CHỦ quyết định, mã chỉ
+    // đi vào tham số `ref` — người ngoài không thể biến nó thành chuyển hướng
+    // tới địa chỉ khác.
+    const qrMatch = url.pathname.match(/^\/q\/([^/]+)\/?$/);
+    if (qrMatch && request.method === 'GET') {
+      const code = decodeURIComponent(qrMatch[1]).toLowerCase();
+      if (!isValidQrCode(code)) return sendJson(response, 404, { error: 'Mã QR không hợp lệ.' });
+      // Đếm trước, nhưng không để việc ghi đĩa làm khách phải chờ.
+      recordQrScan(code, { userAgent: String(request.headers['user-agent'] || '') })
+        .catch(error => console.error(`QR: không ghi được lượt quét ${code}: ${error.message}`));
+      const pageId = await resolveQrPageId();
+      if (!pageId) {
+        console.error('QR: chưa có Page nào kết nối nên không biết chuyển hướng đi đâu.');
+        return sendJson(response, 503, { error: 'Chưa cấu hình Page Facebook.' });
+      }
+      const destination = `https://m.me/${encodeURIComponent(pageId)}?ref=${encodeURIComponent(code)}`;
+      console.log(`QR: lượt quét ${code} -> chuyển hướng Messenger`);
+      response.writeHead(302, { Location: destination, 'Cache-Control': 'no-store' });
+      return response.end();
+    }
+    // Đối chiếu lượt quét với số referral Messenger thật sự nhận được.
+    if (request.method === 'GET' && url.pathname === '/api/qr/stats') {
+      const store = await readMessagingStore();
+      const referralCounts = {};
+      for (const conversation of store.conversations || []) {
+        for (const referral of conversation.referrals || []) {
+          if (referral?.source !== 'SHORTLINK' || !referral.ref) continue;
+          referralCounts[referral.ref] = (referralCounts[referral.ref] || 0) + 1;
+        }
+      }
+      return sendJson(response, 200, await listQrScans(referralCounts));
+    }
     if (request.method === 'GET' && url.pathname === '/api/products') {
       const store = await readProductStore();
       const query = String(url.searchParams.get('q') || '').trim().toLocaleLowerCase('vi');

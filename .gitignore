@@ -5,9 +5,19 @@
 *.pem
 *.key
 
-# Customer data
+# Customer data. Mọi thư mục chứa dữ liệu thật đều phải nằm ngoài Git: một tệp
+# CSV/XLSX khách thả nhầm vào đây mà lọt lên repo công khai thì không gỡ lại
+# được. Chỉ samples/ (dữ liệu bịa để chạy thử) mới được commit.
 data/processed/**
 !data/processed/.gitkeep
+data/raw/**
+!data/raw/.gitkeep
+data/incoming/**
+!data/incoming/.gitkeep
+data/quarantine/**
+!data/quarantine/.gitkeep
+data/exports/**
+!data/exports/.gitkeep
 
 # Logs and temporary files
 logs/**

@@ -36,6 +36,51 @@ function cleanText(value, fallback, maximumLength) {
   return (text || fallback).slice(0, maximumLength);
 }
 
+/**
+ * Host không được phép làm endpoint AI: máy chủ sẽ tự gọi tới đó kèm giấy tờ
+ * tuỳ thân, nên trỏ vào mạng nội bộ là biến máy chủ thành cái loa gọi hộ
+ * (dịch vụ metadata của VM, cổng quản trị chỉ mở trong LAN...).
+ * Chỉ chặn theo TÊN, không tra DNS — một tên miền công khai trỏ về IP nội bộ
+ * vẫn lọt. Chốt chặn thật cho token Google nằm ở luật vertex bên dưới.
+ */
+function isInternalHost(host) {
+  if (['localhost', '[::1]', '0.0.0.0'].includes(host)) return true;
+  if (/(^|\.)(localhost|internal|local|home\.arpa)$/.test(host)) return true;
+  if (/^\[/.test(host)) return /^\[(::1|fc|fd)/i.test(host);
+  const parts = host.split('.');
+  if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part))) return false;
+  const [a, b] = parts.map(Number);
+  return a === 127 || a === 10 || a === 0
+    || (a === 192 && b === 168)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 169 && b === 254);
+}
+
+/**
+ * Kiểm endpoint AI trước khi máy chủ gọi tới đó. Ném lỗi có lời tiếng Việt để
+ * route trả thẳng cho người dùng.
+ *
+ * Luật quan trọng nhất: với Vertex dùng access token, thứ gửi kèm là giấy tờ
+ * của CẢ dự án Google Cloud chứ không phải khoá riêng của endpoint — nên chỉ
+ * được gửi về chính Google. Các provider khác gửi khoá do nhân viên tự nhập
+ * cho endpoint của họ, nên chỉ cần chặn mạng nội bộ.
+ */
+export function assertUsableAiEndpoint(endpoint, { provider = '', authType = '' } = {}) {
+  let parsed;
+  try {
+    parsed = new URL(String(endpoint || '').trim());
+  } catch {
+    throw new Error('Endpoint AI không hợp lệ.');
+  }
+  if (parsed.protocol !== 'https:') throw new Error('Endpoint AI phải bắt đầu bằng https://.');
+  const host = parsed.hostname.toLowerCase();
+  if (isInternalHost(host)) throw new Error('Endpoint AI không được trỏ vào địa chỉ nội bộ.');
+  if (provider === 'vertex' && authType !== 'api_key' && !/(^|\.)googleapis\.com$/.test(host)) {
+    throw new Error('Vertex dùng access token thì endpoint phải thuộc googleapis.com.');
+  }
+  return parsed.toString();
+}
+
 export function normalizeChatbotSettings(value = {}) {
   const responseMode = 'automatic';
   const requestedProvider = value.provider === 'openai_compatible' ? 'custom' : value.provider;

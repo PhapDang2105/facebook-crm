@@ -7,7 +7,7 @@ import { buildExportRows, exportPreviewStreets, exportedOrderData } from './orde
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
-import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
+import { assertUsableAiEndpoint, defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
 import { defaultMessageTemplates, publicImageUrl } from './chatbot-templates.mjs';
@@ -387,6 +387,16 @@ function removeDataRowBackgrounds(workbook, worksheetPath) {
   return { stylesXml, worksheetXml };
 }
 
+/**
+ * Thân request dạng JSON.
+ *
+ * Bắt buộc `Content-Type: application/json` khi có thân: trình duyệt chỉ gửi
+ * được kiểu này từ một trang khác sau khi hỏi trước (preflight), mà máy chủ
+ * không trả header CORS nào nên preflight luôn hỏng. Nếu nhận bừa mọi kiểu thì
+ * một trang web bất kỳ gửi được lệnh ghi dưới danh nghĩa nhân viên đang đăng
+ * nhập — Basic Auth không cản được vì trình duyệt tự đính kèm lại.
+ * Request không có thân (ví dụ POST .../read) vẫn đi qua như cũ.
+ */
 async function readBody(request, maximumBytes = 32 * 1024 * 1024) {
   const chunks = [];
   let totalBytes = 0;
@@ -395,7 +405,29 @@ async function readBody(request, maximumBytes = 32 * 1024 * 1024) {
     if (totalBytes > maximumBytes) throw new Error('Nội dung gửi lên vượt quá giới hạn cho phép.');
     chunks.push(chunk);
   }
-  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+  if (!chunks.length) return {};
+  const contentType = String(request.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (contentType !== 'application/json') throw new Error('Nội dung gửi lên phải là application/json.');
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+/**
+ * Chặn lệnh ghi phát đi từ một trang web khác (CSRF).
+ *
+ * Trình duyệt luôn gửi `Origin` cho request ghi, kể cả cùng nguồn; thiếu hẳn
+ * `Origin` là máy gọi máy (Meta, Webcake, curl) nên vẫn cho qua — hai webhook
+ * đã tự xác thực bằng chữ ký và token riêng. Chỉ chặn khi có `Origin` mà khác
+ * host đang phục vụ.
+ */
+function isCrossSiteWrite(request) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return false;
+  const origin = request.headers.origin;
+  if (!origin || origin === 'null') return false;
+  try {
+    return new URL(origin).host !== String(request.headers.host || '');
+  } catch {
+    return true;
+  }
 }
 
 /** Meta signs the exact bytes it sent, so the webhook body must stay unparsed. */
@@ -464,6 +496,11 @@ await initializeStore();
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+    // Hai webhook do máy ngoài gọi và tự xác thực lấy, nên không áp luật Origin.
+    const isWebhook = url.pathname === metaConfig.webhookPath || url.pathname === landingConfig.path;
+    if (!isWebhook && isCrossSiteWrite(request)) {
+      return sendJson(response, 403, { error: 'Yêu cầu đến từ trang khác nên bị từ chối.' });
+    }
     if (request.method === 'GET' && url.pathname === '/api/health') return sendJson(response, 200, { status:'ok', time:new Date().toISOString() });
     if (request.method === 'GET' && url.pathname === '/api/products') {
       const store = await readProductStore();
@@ -516,7 +553,14 @@ const server = http.createServer(async (request, response) => {
       const current = await readChatbotSettings();
       const payload = await readBody(request);
       const directEndpoint = String(payload.directEndpoint || current.directEndpoint || '');
-      if (!directEndpoint.startsWith('https://')) return sendJson(response, 400, { error: 'Endpoint AI phải bắt đầu bằng https://.' });
+      try {
+        assertUsableAiEndpoint(directEndpoint, {
+          provider: payload.provider || current.provider,
+          authType: payload.directAuthType || current.directAuthType
+        });
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
       const providerChanged = payload.provider && payload.provider !== current.provider;
       const settings = await writeChatbotSettings({
         ...current,
@@ -545,6 +589,15 @@ const server = http.createServer(async (request, response) => {
         })).filter(item => item.text.trim())
         : [];
       const settings = normalizeChatbotSettings({ ...current, ...payload, enabled: true, directApiKey: '' });
+      // Route này nhận endpoint do người gọi đặt (để thử trước khi lưu), nên
+      // phải kiểm y như lúc lưu — nếu không, máy chủ sẽ mang access token
+      // Google gửi tới bất cứ địa chỉ nào được chỉ định rồi trả nguyên văn
+      // phản hồi về (`rawResponse: true` bên dưới).
+      try {
+        assertUsableAiEndpoint(settings.directEndpoint, { provider: settings.provider, authType: settings.directAuthType });
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
       const reply = await requestDirectModelReply({
         settings,
         conversation: { id: 'preview', name: 'Khách xem trước', botEnabled: true },
@@ -1194,7 +1247,21 @@ const server = http.createServer(async (request, response) => {
       const patch = await readBody(request);
       let updated = null;
       let failure = null;
-      const apply = order => { try { applyCustomerOrderEdits(order, patch); updated = order; } catch (error) { failure = error; } };
+      // Kiểm trên bản sao rồi mới chép đè. applyCustomerOrderEdits sửa TẠI CHỖ
+      // từng trường một rồi mới ném lỗi ở trường sau, mà lỗi lại bị bắt ngay
+      // trong mutator nên kho vẫn được ghi xuống đĩa — sửa thẳng thì một patch
+      // bị từ chối vẫn kịp để lại nửa thay đổi, API trả 400 mà dữ liệu đã đổi.
+      const apply = order => {
+        const draft = structuredClone(order);
+        try {
+          applyCustomerOrderEdits(draft, patch);
+        } catch (error) {
+          failure = error;
+          return;
+        }
+        Object.assign(order, draft);
+        updated = order;
+      };
       await updateMessagingStore(store => {
         for (const conversation of store.conversations) {
           const order = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(item => item.id === orderId);

@@ -85,7 +85,6 @@ const fullRows = buildExportRows({ headers: [...headers, 'Địa chỉ'], rows: 
 assert.equal(fullRows[0][35], '12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM');
 assert.deepEqual(exportPreviewStreets(fullRows), ['12 Nguyễn Huệ']);
 
-console.log('PASS: order export single/combo relations');
 
 // ===== Kiểm tra ba cấp trước khi xuất =====
 {

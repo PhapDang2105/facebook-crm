@@ -22,4 +22,3 @@ assert.equal(parsed.sheetName, 'Đơn hàng');
 assert.deepEqual(parsed.headers, ['Mã mẫu mã', 'Số lượng', 'Sản phẩm']);
 assert.deepEqual(parsed.rows, [['CB2-HT-YM-T500', '3', 'Yến Mạch Cán Dẹt']]);
 
-console.log('PASS: XLSX import parser');

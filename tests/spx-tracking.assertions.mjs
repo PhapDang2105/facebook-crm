@@ -29,4 +29,3 @@ assert.equal(normalized.records[0].status, 'Đang giao hàng');
 assert.match(normalized.records[0].time, /^2026-/);
 assert.throws(() => normalizeSpxPayload({ retcode: 2 }, 'SPXVN404'), /Không tìm thấy/);
 
-console.log('PASS: SPX tracking normalization');

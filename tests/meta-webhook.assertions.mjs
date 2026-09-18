@@ -126,4 +126,3 @@ assert.equal(thread.messages[0].direction, 'outgoing', 'Page messages import as 
 assert.equal(thread.messages[1].direction, 'incoming', 'Customer messages import as incoming');
 assert.equal(normalizeGraphConversation({ participants: { data: [{ id: pageId }] } }, pageId), null, 'Skip threads without a customer');
 
-console.log('PASS: 45 Meta messaging assertions');

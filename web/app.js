@@ -7520,7 +7520,7 @@ orderSearch.addEventListener('input', () => {
   window.clearTimeout(orderSearchTimer);
   orderSearchTimer = window.setTimeout(renderOrderData, 120);
 });
-orderFilter.addEventListener('change', renderOrderData);
+orderFilter?.addEventListener('change', renderOrderData);
 orderSourceFilter?.addEventListener('change', renderOrderData);
 orderDayFilter?.addEventListener('change', renderOrderData);
 loadExportedCustomerPhones();

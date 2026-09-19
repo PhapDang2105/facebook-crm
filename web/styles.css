@@ -454,6 +454,9 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-search-control input:focus,
 .order-filter-control select:focus { border-color: #72ad80; box-shadow: 0 0 0 2.7px rgba(114, 173, 128, .16); }
 .order-import-controls .file-button { display: flex; align-items: center; box-sizing: border-box; height: 37.8px; }
+/* Import cùng kiểu với Lịch sử: nền trắng viền đen, không nền đen. */
+.order-import-controls .file-button { color: #111; background: #fff; border: 0.9px solid #111; }
+.order-import-controls .file-button:hover { color: #fff; background: #111; }
 .order-history-button { height: 37.8px; padding: 0 15.3px; color: #111; background: #fff; border: 0.9px solid #111; border-radius: 8.1px; font-size: 12.6px; font-weight: 700; cursor: pointer; }
 .order-history-button:hover,
 .order-history-button[aria-expanded="true"] { color: #fff; background: #111; }

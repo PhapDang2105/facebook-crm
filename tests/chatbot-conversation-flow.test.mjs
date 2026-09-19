@@ -129,3 +129,10 @@ test('PRODUCT_PHOTOS: gửi ảnh sản phẩm khách nêu; chưa sản phẩm n
     reloadCatalog();
   }
 });
+
+test('"C đặt nhé" sau khi được báo giá: nêu loại mà không nói số thì tính là 1, hỏi tiếp SĐT và địa chỉ', () => {
+  const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Xanh 450g', No_A: '0', Phone_Number: '0', Customer_Address: '0' }, templates, {});
+  assert.equal(reply.templateId, 'ORDER_ADDRESS');
+  assert.deepEqual(reply.pendingOrder.items.map(item => [item.product, item.quantity]), [['Granola Túi Xanh 450g', 1]]);
+  assert.match(reply.messages[0], /số điện thoại và địa chỉ/);
+});

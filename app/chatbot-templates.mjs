@@ -166,10 +166,12 @@ function renderOrder(value, templates, context = {}) {
   const templateId = String(value.template_id || '').trim();
   const products = [value.Product_N1, value.Product_N2, value.Product_N3];
   const quantities = [value.No_A, value.No_B, value.No_C];
+  // Khách nêu loại mà không nói số ("C đặt nhé" sau khi được báo giá): tính
+  // là 1; khách muốn nhiều hơn sẽ nói ngay khi thấy xác nhận.
   const freshItems = toPricedItems(products.map((product, index) => ({
     product: String(product || '').trim(),
-    quantity: Number(String(quantities[index] || '').replace(/\D/g, '')) || 0
-  })).filter(item => item.product && item.product !== '0' && item.quantity > 0));
+    quantity: Number(String(quantities[index] || '').replace(/\D/g, '')) || 1
+  })).filter(item => item.product && item.product !== '0'));
 
   // The price comes from the basket itself, never from a key the model
   // declared: an order_key the model invented used to price three bags as one.

@@ -102,7 +102,7 @@ test('khách đến từ quảng cáo: referral nguồn ADS, tên quảng cáo t
   const result = await handlePancakeWebhook(inbox({ conversation: adConversation, message: { id: 'm_902_1', conversation_id: '110_902', message: 'Còn hàng không', from: { id: '902', name: 'Chị Hoa' } } }), { processChatbotChanges: async () => {}, chatbotDependencies: {}, config, fetchImpl: fetchMock });
   assert.equal(result.stored, 1);
   const conversation = await getConversation('110:902');
-  assert.deepEqual(conversation.referral, { ref: '', source: 'ADS', adId: 'ad-1', adTitle: 'Túi Vàng - Video 01', postId: '110_888', photoUrl: 'https://cdn/ad.jpg' });
+  assert.deepEqual(conversation.referral, { ref: '', source: 'ADS', adId: 'ad-1', adTitle: 'Túi Vàng - Video 01 · Granola T9', postId: '110_888', photoUrl: 'https://cdn/ad.jpg' });
   assert.equal(conversation.referrals.length, 1);
   const post = await findPancakePost('110_888', { months: 1 }, config, fetchMock);
   assert.equal(post.message, 'Bài quảng cáo Granola Túi Vàng 350g');

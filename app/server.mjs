@@ -626,6 +626,9 @@ await initializeStore();
 const chatbotDependencies = {
   readSettings: readChatbotSettings,
   listMessages,
+  // Bot đọc lại hội thoại trước khi trả lời: tin trước trong hàng đợi có thể
+  // vừa lưu giỏ hàng, hay nhân viên vừa tắt bot.
+  getConversation,
   sendMessage: sendConversationMessage,
   moderateComment,
   createOrder: createChatbotCustomerOrder,

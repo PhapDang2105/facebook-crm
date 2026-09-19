@@ -1,0 +1,131 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import './helpers/seed-catalog.mjs';
+import { hasNewerCustomerMessage, processChatbotChanges, unansweredCustomerMessages } from '../app/chatbot-engine.mjs';
+import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
+import { reloadCatalog } from '../app/processing/catalog.mjs';
+
+const templates = Object.fromEntries(Object.entries(defaultMessageTemplates()).map(([id, text]) => [id, text.trim()]));
+const settings = { enabled: true, responseMode: 'automatic', provider: 'vertex', directApiKey: 'secret', handoffKeywords: '', complaintKeywords: '', messageTemplates: templates };
+const conversation = { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true };
+const incoming = (id, text, createdAt) => ({ id, mid: id, direction: 'incoming', type: 'text', text, createdAt });
+const change = message => ({ type: 'message', conversation, message });
+
+test('tin khách chưa được trả lời gộp lại; tin mới hơn tin đang xử lý thì tin này nhường', () => {
+  const a = incoming('a', 'C đặt 2 gói', 1000);
+  const b = incoming('b', 'Giảm ko e', 3000);
+  const reply = { id: 'r', direction: 'outgoing', type: 'text', text: 'Dạ', createdAt: 500 };
+  assert.deepEqual(unansweredCustomerMessages([reply, a, b], b).map(item => item.id), ['a', 'b']);
+  assert.deepEqual(unansweredCustomerMessages([a, reply, b], b).map(item => item.id), ['b'], 'tin trước câu trả lời gần nhất không gộp');
+  assert.deepEqual(unansweredCustomerMessages([], b).map(item => item.id), ['b'], 'kho chưa có tin thì vẫn có tin đang xử lý');
+  const old = incoming('o', 'hôm qua', 3000 - 11 * 60 * 1000);
+  assert.deepEqual(unansweredCustomerMessages([old, a, b], b).map(item => item.id), ['a', 'b'], 'tin quá 10 phút không gộp');
+  assert.equal(hasNewerCustomerMessage([a, b], a), true);
+  assert.equal(hasNewerCustomerMessage([a, b], b), false);
+  assert.equal(hasNewerCustomerMessage([a, b, reply], b), false, 'câu trả lời của Page không tính là tin khách');
+});
+
+test('hai tin liền nhau của khách: bot trả lời một lần cho cả hai, mô hình đọc cả hai câu', async () => {
+  const a = incoming('a', 'C đặt 2 gói', 1000);
+  const b = incoming('b', 'Giảm ko e', 3000);
+  const asked = [];
+  const sent = [];
+  const results = await processChatbotChanges([change(a), change(b)], {
+    readSettings: async () => settings,
+    listMessages: async () => [a, b],
+    sendMessage: async (_conversation, message) => sent.push(message.text),
+    saveBotState: async () => {},
+    requestReply: async ({ message, recentMessages }) => {
+      asked.push({ text: message.text, history: recentMessages.map(item => item.id) });
+      return { templateId: 'GENERAL_INFO', messages: ['Dạ nhà em có 3 vị ạ'], conversationId: '', handoff: false };
+    }
+  });
+  assert.deepEqual(results.map(item => item.skipped || item.templateId), ['gộp với tin sau', 'GENERAL_INFO']);
+  assert.equal(results[1].bundled, 2);
+  assert.deepEqual(asked, [{ text: 'C đặt 2 gói\nGiảm ko e', history: [] }], 'hai tin gộp thành một câu hỏi, không lặp lại trong lịch sử');
+  assert.deepEqual(sent, ['Dạ nhà em có 3 vị ạ']);
+});
+
+test('khách nhắn thêm trong lúc mô hình đang trả lời: câu trả lời đó bị bỏ, không gửi', async () => {
+  const a = incoming('a', 'C đặt 2 gói', 1000);
+  const b = incoming('b', 'Giảm ko e', 3000);
+  let reads = 0;
+  const sent = [];
+  const results = await processChatbotChanges([change(a)], {
+    readSettings: async () => settings,
+    // Lần đọc đầu chỉ có tin A; sau khi mô hình trả lời, tin B đã vào kho.
+    listMessages: async () => (reads++ === 0 ? [a] : [a, b]),
+    sendMessage: async (_conversation, message) => sent.push(message.text),
+    saveBotState: async () => {},
+    requestReply: async () => ({ templateId: 'GENERAL_INFO', messages: ['Dạ nhà em có 3 vị ạ'], conversationId: '', handoff: false })
+  });
+  assert.deepEqual(results, [{ conversationId: 'page:user', skipped: 'gộp với tin sau' }]);
+  assert.deepEqual(sent, []);
+});
+
+test('bot đọc lại hội thoại trước khi trả lời: nhân viên vừa tắt bot thì tin đang chờ không được trả lời', async () => {
+  const sent = [];
+  const results = await processChatbotChanges([change(incoming('a', 'xin chào', 1000))], {
+    readSettings: async () => settings,
+    getConversation: async () => ({ ...conversation, botEnabled: false }),
+    listMessages: async () => [],
+    sendMessage: async (_conversation, message) => sent.push(message.text),
+    saveBotState: async () => {},
+    requestReply: async () => ({ templateId: 'WELCOME', messages: ['Xin chào'], conversationId: '', handoff: false })
+  });
+  assert.deepEqual([results, sent], [[], []]);
+});
+
+test('muốn mua nhưng chưa nêu sản phẩm: bot giới thiệu sản phẩm, không xin số điện thoại và địa chỉ', () => {
+  const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: '0', No_A: '2', Phone_Number: '0', Customer_Address: '0' }, templates, {});
+  assert.equal(reply.templateId, 'ASK_PRODUCT');
+  assert.match(reply.messages[0], /sản phẩm/);
+  assert.doesNotMatch(reply.messages.join(' '), /số điện thoại/);
+  assert.equal(reply.pendingOrder, null);
+  // SĐT khách lỡ đưa kèm được giữ lại cho lần chốt sau.
+  const withPhone = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: '0', Phone_Number: '0909123456', Customer_Address: '0' }, templates, {});
+  assert.equal(withPhone.templateId, 'ASK_PRODUCT');
+  assert.equal(withPhone.pendingOrder.phone, '0909123456');
+});
+
+test('lời xin địa chỉ là một câu liền, không còn mảnh câu đứng riêng', () => {
+  const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Phone_Number: '0', Customer_Address: '0' }, templates, {});
+  assert.equal(reply.templateId, 'ORDER_ADDRESS');
+  assert.equal(reply.messages.length, 1);
+  assert.match(reply.messages[0], /^Dạ để lên đơn đúng tuyến cho đơn vị vận chuyển, anh\/chị cho em xin số điện thoại và địa chỉ nhận hàng đầy đủ/);
+});
+
+test('DISCOUNT_POLICY: giá lẻ không bớt, ưu đãi là combo đọc từ danh mục', () => {
+  const reply = renderChatbotReply({ template_id: 'DISCOUNT_POLICY', Product_N1: 'Granola Túi Xanh 450g' }, templates, {});
+  assert.equal(reply.templateId, 'DISCOUNT_POLICY');
+  assert.match(reply.messages[0], /giá lẻ bên em đang là giá tốt nhất/);
+  assert.match(reply.messages[0], /2 Túi Granola Túi Xanh 450g: 298\.000đ/);
+  assert.match(reply.messages[0], /giá gốc/);
+  const all = renderChatbotReply({ template_id: 'DISCOUNT_POLICY' }, templates, {});
+  assert.match(all.messages[0], /Granola Túi Xanh 450g[\s\S]*Granola Túi Vàng 350g/, 'chưa nêu loại thì liệt kê combo của mọi sản phẩm có giá combo');
+});
+
+test('PRODUCT_PHOTOS: gửi ảnh sản phẩm khách nêu; chưa sản phẩm nào có ảnh thì chuyển người thật', () => {
+  const productsPath = process.env.PRODUCTS_PATH;
+  const original = readFileSync(productsPath, 'utf8');
+  try {
+    const none = renderChatbotReply({ template_id: 'PRODUCT_PHOTOS', Product_N1: 'Granola Túi Xanh 450g' }, templates, {});
+    assert.deepEqual([none.templateId, none.handoff], ['CSKH_HANDOFF', true]);
+    const store = JSON.parse(original);
+    store.items.find(item => item.id === 'seed-granola-xanh').image = '/product-images/xanh.png';
+    writeFileSync(productsPath, JSON.stringify(store));
+    reloadCatalog();
+    const one = renderChatbotReply({ template_id: 'PRODUCT_PHOTOS', Product_N1: 'túi xanh' }, templates, {});
+    assert.equal(one.templateId, 'PRODUCT_PHOTOS');
+    assert.match(one.messages[0], /hình ảnh Granola Túi Xanh 450g nhà Giọt Nắng/);
+    assert.equal(one.images.length, 1);
+    assert.match(one.images[0], /\/product-images\/xanh\.png\?v=\d+$/);
+    assert.equal(one.messages.length, 2, 'câu mở, ảnh, câu chốt: ảnh tách riêng khỏi chữ');
+    const any = renderChatbotReply({ template_id: 'PRODUCT_PHOTOS' }, templates, {});
+    assert.equal(any.images.length, 1, 'chưa nêu loại thì gửi ảnh của mọi sản phẩm có ảnh');
+  } finally {
+    writeFileSync(productsPath, original);
+    reloadCatalog();
+  }
+});

@@ -232,6 +232,14 @@ function renderOrder(value, templates, context = {}) {
     // No text configured for the question: fall through and accept the address as is.
   }
 
+  // Muốn mua nhưng chưa nêu sản phẩm (và cũng chưa có giỏ hàng chờ): hỏi
+  // sản phẩm trước, không xin SĐT/địa chỉ cho một đơn chưa biết bán gì.
+  // SĐT/địa chỉ khách lỡ đưa vẫn được giữ cho lần chốt sau.
+  if (!items.length) {
+    const text = templates.GENERAL_INFO ? renderGeneralInfo(templates) : fill(templates.ASK_PRODUCT, commonValues());
+    return { templateId: 'ASK_PRODUCT', ...splitMessages(text), handoff: false, pendingOrder: nextPending };
+  }
+
   if (!confirmed && !(isOrderStep(templateId) && Boolean(price) && hasPhone && hasAddress)) {
     // Only a request to close the order is escalated. While still collecting
     // details the bot keeps asking rather than dropping the customer on a human.
@@ -375,11 +383,50 @@ function renderPriceQuote(templateId, value, templates) {
   return fill(template, values);
 }
 
+/**
+ * PRODUCT_PHOTOS: khách xin ảnh/mẫu. Ảnh lấy từ Cài đặt → Sản phẩm: khách nêu
+ * loại nào thì gửi ảnh loại đó, chưa nêu thì gửi ảnh các sản phẩm đang bán
+ * (tối đa 3). Chưa sản phẩm nào có ảnh thì trả về '' để người thật gửi ảnh.
+ */
+function renderProductPhotos(value, templates) {
+  const named = matchProduct(value.Product_N1 || value.product || '');
+  const products = (named ? [named] : getCatalogProducts()).filter(product => product.active && publicImageUrl(product.image)).slice(0, 3);
+  if (!products.length) return '';
+  return fill(templates.PRODUCT_PHOTOS, {
+    ...commonValues(),
+    products: products.map(product => product.name).join(', '),
+    images: products.map(product => `![${product.name}](${publicImageUrl(product.image)})`).join(' ')
+  });
+}
+
+/**
+ * DISCOUNT_POLICY: khách hỏi giảm giá. Túi lẻ không bớt; ưu đãi nằm ở combo,
+ * đọc từ bảng giá: từng bậc 2, 3… đơn vị của sản phẩm khách nêu (hoặc của
+ * mọi sản phẩm có giá combo khi chưa nêu), kèm miễn ship và quà của bậc đó.
+ */
+function renderDiscountPolicy(value, templates) {
+  const named = matchProduct(value.Product_N1 || value.product || '');
+  const products = (named ? [named] : getCatalogProducts()).filter(product => product.active && product.comboPrice > 0);
+  const combos = products.flatMap(product => (quoteTiers(product.sku)?.tiers || [])
+    .filter(tier => tier.quantity >= 2 && (tier.price < tier.listPrice || tier.freeShipping || tier.gifts.length))
+    .map(tier => ({
+      label: `${tier.quantity} ${product.unit || 'sản phẩm'} ${product.name}`,
+      price: formatMoney(tier.price),
+      list_price: tier.price < tier.listPrice ? strike(formatMoney(tier.listPrice)) : '',
+      free_ship: tier.freeShipping ? 'miễn phí vận chuyển' : '',
+      gift: tier.gifts.join(' + ')
+    })));
+  if (!combos.length) return renderGeneralInfo(templates);
+  return fill(templates.DISCOUNT_POLICY, commonValues(), { combos });
+}
+
 const catalogRenderers = {
   GENERAL_INFO: (value, templates) => renderGeneralInfo(templates),
   GIFT_POLICY: (value, templates) => renderGiftPolicy(templates),
   PRICE_MIX_TUI_LON: (value, templates) => renderMixPricing(templates),
-  PRICE_QUOTE: (value, templates) => renderPriceQuote('PRICE_QUOTE', value, templates)
+  PRICE_QUOTE: (value, templates) => renderPriceQuote('PRICE_QUOTE', value, templates),
+  PRODUCT_PHOTOS: (value, templates) => renderProductPhotos(value, templates),
+  DISCOUNT_POLICY: (value, templates) => renderDiscountPolicy(value, templates)
 };
 
 /**
@@ -435,6 +482,8 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   const catalogId = catalogRenderers[templateId] ? templateId : isProductQuoteId(templateId) ? 'PRICE_QUOTE' : '';
   if (catalogId && templates[catalogId]) {
     const text = catalogId === 'PRICE_QUOTE' ? renderPriceQuote(templateId, value, templates) : catalogRenderers[catalogId](value, templates);
+    // Không soạn được (chưa sản phẩm nào có ảnh…): người thật tiếp.
+    if (!text) return { templateId: 'CSKH_HANDOFF', ...splitMessages(fill(templates.CSKH_HANDOFF, commonValues())), handoff: true };
     return { templateId, ...splitMessages(text), handoff: false };
   }
   const raw = (!catalogId && templates[templateId]) || value.reply || value.message || value.text || templates.CSKH_HANDOFF;

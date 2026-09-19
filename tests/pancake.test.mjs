@@ -34,7 +34,17 @@ test('tin inbox của khách → sự kiện cùng dạng webhook Meta: chữ s�
   assert.equal(event.message.type, 'text');
   assert.equal(event.message.id, 'm_abc');
   assert.equal(event.message.createdAt, Date.UTC(2026, 8, 19, 2, 30));
-  assert.deepEqual(event.pancake, { conversationId: '110_555', customerName: 'Chị Mai', pageCustomerId: 'pc-1', assigned: false });
+  assert.deepEqual(event.pancake, { conversationId: '110_555', customerName: 'Chị Mai', pageCustomerId: 'pc-1', assigned: false, staff: false, staffName: '' });
+});
+
+test('ảnh khách gửi hiện thẳng bằng URL CDN; tin Page gõ trong Pancake là của nhân viên, tin qua Public API là của CRM', () => {
+  const [photo] = normalizePancakeWebhook(incoming({ message: { id: 'm_p', message: '', original_message: '', attachments: [{ type: 'photo', url: 'https://content.pancake.vn/a.jpg', image_data: { width: 10, height: 10 } }] } }), config);
+  assert.equal(photo.message.type, 'image');
+  assert.equal(photo.message.dataUrl, 'https://content.pancake.vn/a.jpg');
+  const [staff] = normalizePancakeWebhook(incoming({ message: { id: 'm_s', message: 'Dạ em gửi ảnh ạ', from: { id: '110', name: 'Test', admin_name: 'Nguyễn Hồng Vy' } } }), config);
+  assert.deepEqual([staff.message.direction, staff.pancake.staff, staff.pancake.staffName], ['outgoing', true, 'Nguyễn Hồng Vy']);
+  const [api] = normalizePancakeWebhook(incoming({ message: { id: 'm_a', message: 'Dạ còn ạ', from: { id: '110', name: 'Test', admin_name: 'Public API' } } }), config);
+  assert.deepEqual([api.message.direction, api.pancake.staff], ['outgoing', false]);
 });
 
 test('tin do Page gửi (nhân viên trả lời trong Pancake) là tin đi; bình luận, Page khác, sự kiện khác bị bỏ', () => {
@@ -126,4 +136,57 @@ test('đồng bộ lịch sử: kéo hội thoại inbox rồi tin của từng 
   const stored = await listMessages('110:901');
   assert.deepEqual(stored.map(item => [item.direction, item.text]), [['incoming', 'Còn túi xanh không?'], ['outgoing', 'Dạ còn ạ']], 'tin cũ đứng trước tin mới');
   assert.deepEqual(await syncPancakeConversations({}, { ...config, pageAccessToken: '' }, fetchMock), { conversations: 0, messages: 0, skipped: 'chưa cấu hình' });
+});
+
+test('nhân viên trả lời trong Pancake thì bot tắt cho hội thoại đó; tin CRM gửi và lịch sử kéo về không tắt', async () => {
+  const { storePancakeEvents } = await import('../app/pancake.mjs');
+  const { getConversation } = await import('../app/messaging-store.mjs');
+  const staffConversation = { id: '110_777', type: 'INBOX', from: { id: '777', name: 'Anh Ba' }, assignee_ids: [] };
+  const processChatbotChanges = async () => {};
+  await handlePancakeWebhook(incoming({ conversation: staffConversation, message: { id: 'm_777_1', conversation_id: '110_777', message: 'Cho em hỏi giá', from: { id: '777', name: 'Anh Ba' } } }), { processChatbotChanges, chatbotDependencies: {}, config });
+  await handlePancakeWebhook(incoming({ conversation: staffConversation, message: { id: 'm_777_2', conversation_id: '110_777', message: 'Dạ em gửi ảnh ạ', from: { id: '110', name: 'Test', admin_name: 'Nguyễn Hồng Vy' } } }), { processChatbotChanges, chatbotDependencies: {}, config });
+  const paused = await getConversation('110:777');
+  assert.deepEqual([paused.botEnabled, paused.botPausedBy], [false, 'Nguyễn Hồng Vy']);
+  // Tin dội lại của CRM (Public API) ở hội thoại khác: bot vẫn bật.
+  const apiConversation = { id: '110_778', type: 'INBOX', from: { id: '778', name: 'Chị Tư' }, assignee_ids: [] };
+  await handlePancakeWebhook(incoming({ conversation: apiConversation, message: { id: 'm_778_1', conversation_id: '110_778', message: 'Dạ còn ạ', from: { id: '110', name: 'Test', admin_name: 'Public API' } } }), { processChatbotChanges, chatbotDependencies: {}, config });
+  assert.notEqual((await getConversation('110:778')).botEnabled, false);
+  // Lịch sử kéo về (không phải webhook) có tin nhân viên: không tắt.
+  const historyConversation = { id: '110_779', type: 'INBOX', from: { id: '779', name: 'Cô Năm' }, assignee_ids: [] };
+  const [old] = normalizePancakeWebhook(incoming({ conversation: historyConversation, message: { id: 'm_779_1', conversation_id: '110_779', message: 'Dạ em gửi rồi ạ', from: { id: '110', name: 'Test', admin_name: 'Nguyễn Hồng Vy' } } }), config);
+  await storePancakeEvents([old]);
+  assert.notEqual((await getConversation('110:779')).botEnabled, false);
+});
+
+test('gửi ảnh qua Pancake: tải lên upload_contents rồi gửi content_ids; ảnh sản phẩm nhớ mã, tệp đính kèm gửi chữ sau', async () => {
+  const { sendConversationMessageViaPancake } = await import('../app/pancake.mjs');
+  const calls = [];
+  const fetchMock = async (url, options = {}) => {
+    const address = String(url);
+    if (address.startsWith('https://cdn.example/')) {
+      return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer, headers: new Headers({ 'content-type': 'image/png' }) };
+    }
+    if (address.includes('/upload_contents')) {
+      assert.ok(options.body instanceof FormData, 'tải lên dạng multipart');
+      assert.ok(options.body.get('file') instanceof Blob);
+      calls.push('upload');
+      return { ok: true, status: 200, json: async () => ({ success: true, id: `c${calls.length}`, attachment_type: 'PHOTO' }) };
+    }
+    if (address.includes('/conversations/110_555/messages')) {
+      const body = JSON.parse(options.body);
+      calls.push(body.content_ids ? `send:${body.content_ids.join(',')}` : `text:${body.message}`);
+      assert.ok(!(body.content_ids && body.message), 'không gửi message cùng content_ids');
+      return { ok: true, status: 200, json: async () => ({ success: true, id: `m_${calls.length}` }) };
+    }
+    throw new Error(`gọi lạ: ${address}`);
+  };
+  const conversation = { pageId: '110', psid: '555', pancakeConversationId: '110_555' };
+  const image = await sendConversationMessageViaPancake(conversation, { imageUrl: 'https://cdn.example/xanh.png?v=1' }, config, fetchMock);
+  assert.deepEqual([image.message.type, image.message.dataUrl], ['image', 'https://cdn.example/xanh.png?v=1']);
+  await sendConversationMessageViaPancake(conversation, { imageUrl: 'https://cdn.example/xanh.png?v=2' }, config, fetchMock);
+  assert.deepEqual(calls, ['upload', 'send:c1', 'send:c1'], 'cùng ảnh (khác ?v=) không tải lại');
+  calls.length = 0;
+  const file = await sendConversationMessageViaPancake(conversation, { text: 'Ảnh đây ạ', attachment: { dataUrl: 'data:image/jpeg;base64,/9j/4AAQ', name: 'mau.jpg', type: 'image' } }, config, fetchMock);
+  assert.deepEqual(calls, ['upload', 'send:c1', 'text:Ảnh đây ạ']);
+  assert.deepEqual([file.message.type, file.message.name, file.message.dataUrl], ['image', 'mau.jpg', '']);
 });

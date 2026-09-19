@@ -4,7 +4,9 @@
 // bot gửi ngược qua Public API của Pancake nên hiện ngay trong Pancake cho
 // nhân viên thấy. Tài liệu: integrations/pancake/README.md.
 import { timingSafeEqual } from 'node:crypto';
-import { pancakeConfig as defaultConfig } from './config.mjs';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
 import { applyWebhookEvents } from './meta-webhook.mjs';
 import { publicConversation, saveMessage, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
@@ -73,8 +75,17 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   const outgoing = fromId === pageId || fromId !== customerId;
   const text = pancakeMessageText(message);
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  // Ảnh/video Pancake đưa kèm URL trên CDN của họ: hộp thư hiện thẳng. Loại
+  // khác (tệp, âm thanh) chỉ ghi là có đính kèm.
+  const kindOf = item => String(item?.type || '').toLowerCase();
+  const photo = attachments.find(item => ['photo', 'image', 'sticker'].includes(kindOf(item)) && item?.url);
+  const video = !photo && attachments.find(item => kindOf(item) === 'video' && item?.url);
+  const media = photo ? { type: 'image', dataUrl: String(photo.url) } : video ? { type: 'video', dataUrl: String(video.url) } : null;
   const identifier = String(message.id || `pancake-${now}`);
   const at = pancakeTime(message.inserted_at, now);
+  // Tin của Page: gửi từ CRM thì Pancake ghi người gửi là "Public API"; tên
+  // khác là nhân viên gõ trong Pancake.
+  const adminName = outgoing ? String(message.from?.admin_name || '').trim() : '';
   return {
     pageId,
     psid: customerId,
@@ -84,8 +95,9 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       id: identifier,
       mid: identifier,
       direction: outgoing ? 'outgoing' : 'incoming',
-      type: text || !attachments.length ? 'text' : 'attachment',
-      text: text || (attachments.length ? '[Tệp đính kèm]' : ''),
+      type: media ? media.type : text || !attachments.length ? 'text' : 'attachment',
+      text: text || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
+      ...(media ? { dataUrl: media.dataUrl, name: '' } : {}),
       createdAt: at,
       status: outgoing ? 'sent' : 'received'
     },
@@ -94,7 +106,9 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       customerName: String(conversation.from?.name || (outgoing ? '' : message.from?.name) || '').trim(),
       pageCustomerId: String(message.from?.page_customer_id || ''),
       // Hội thoại đã có nhân viên nhận thì bot đứng ngoài (trừ khi cấu hình cho phép).
-      assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0
+      assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
+      staff: Boolean(adminName) && adminName !== 'Public API',
+      staffName: adminName
     }
   };
 }
@@ -193,7 +207,7 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.lo
  * Ghi tin vào hộp thư và trả về các thay đổi cho bot. Ghi thêm mã hội thoại
  * Pancake và tên khách lên hội thoại CRM để còn gửi trả lời đúng chỗ.
  */
-export async function storePancakeEvents(events) {
+export async function storePancakeEvents(events, { fromWebhook = false } = {}) {
   if (!events.length) return [];
   const changes = await updateMessagingStore(store => {
     const applied = applyWebhookEvents(store, events);
@@ -202,6 +216,21 @@ export async function storePancakeEvents(events) {
       if (!conversation) continue;
       if (event.pancake.conversationId) conversation.pancakeConversationId = event.pancake.conversationId;
       if (event.pancake.pageCustomerId) conversation.pancakePageCustomerId = event.pancake.pageCustomerId;
+      const inserted = applied.some(change => change.message?.id === event.message.id && !change.updated);
+      // Ảnh CRM gửi đi được ghi trước khi Pancake dội lại; bản dội mang URL ảnh
+      // trên CDN (đã gộp vào tin cùng mã), báo cho hộp thư vẽ lại.
+      if (!inserted && event.message.dataUrl) {
+        const stored = (store.messages[conversation.id] || []).find(item => item.id === event.message.id);
+        if (stored) applied.push({ type: 'message', conversation, message: stored, updated: true });
+      }
+      // Nhân viên trả lời trong Pancake (tin mới, không phải tin dội lại của
+      // CRM, không phải lịch sử kéo về): bot đứng ngoài hội thoại này cho tới
+      // khi bật lại trong CRM, để không nói chen vào người thật.
+      if (fromWebhook && inserted && event.pancake.staff && conversation.botEnabled !== false) {
+        conversation.botEnabled = false;
+        conversation.botPausedBy = event.pancake.staffName;
+        conversation.botPausedAt = Date.now();
+      }
       // Ảnh khách: Pancake có đường công khai chuyển hướng tới ảnh trên CDN, không cần token.
       if (!conversation.picture) {
         conversation.picture = pancakeAvatarUrl(event.pageId, event.psid);
@@ -219,18 +248,24 @@ export async function storePancakeEvents(events) {
   return changes;
 }
 
-/** Gửi một tin chữ vào hội thoại Pancake bằng Public API v1. */
-export async function sendPancakeMessage({ pageId, conversationId, text }, config = defaultConfig, fetchImpl = fetch) {
+const apiRoot = config => config.apiBase.replace(/\/+$/, '');
+
+/**
+ * Gửi một tin vào hội thoại Pancake bằng Public API v1: chữ (`message`) hoặc
+ * tệp đã tải lên (`content_ids`); Pancake không cho gửi cả hai trong một tin.
+ */
+export async function sendPancakeMessage({ pageId, conversationId, text = '', contentIds = [] }, config = defaultConfig, fetchImpl = fetch) {
   if (!config.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
   if (!conversationId) throw new Error('Hội thoại này chưa có mã Pancake để gửi.');
-  const url = `${config.apiBase.replace(/\/+$/, '')}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(conversationId)}/messages?page_access_token=${encodeURIComponent(config.pageAccessToken)}`;
+  if (!text && !contentIds.length) throw new Error('Tin nhắn trống.');
+  const url = `${apiRoot(config)}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(conversationId)}/messages?page_access_token=${encodeURIComponent(config.pageAccessToken)}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetchImpl(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'reply_inbox', message: text }),
+      body: JSON.stringify(contentIds.length ? { action: 'reply_inbox', content_ids: contentIds } : { action: 'reply_inbox', message: text }),
       signal: controller.signal
     });
     let body = {};
@@ -244,16 +279,114 @@ export async function sendPancakeMessage({ pageId, conversationId, text }, confi
   }
 }
 
+/** Tải một tệp (ảnh, video…) lên Page trong Pancake; mã trả về dùng để gửi kèm tin. */
+export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg', mime = 'application/octet-stream' }, config = defaultConfig, fetchImpl = fetch) {
+  if (!config.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
+  if (!buffer?.length) throw new Error('Tệp trống.');
+  const url = `${apiRoot(config)}/v1/pages/${encodeURIComponent(pageId)}/upload_contents?page_access_token=${encodeURIComponent(config.pageAccessToken)}`;
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type: mime }), filename);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetchImpl(url, { method: 'POST', body: form, signal: controller.signal });
+    let body = {};
+    try { body = await response.json(); } catch {}
+    if (!response.ok || body.success === false || !body.id) {
+      throw new Error(`Pancake không nhận tệp (${response.status}): ${body.message || body.error || 'không rõ lý do'}`);
+    }
+    return { id: String(body.id), attachmentType: String(body.attachment_type || '') };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const productImagesPath = path.join(projectRoot, 'data', 'processed', 'product-images');
+const imageMimeTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+const maxUploadBytes = 5 * 1024 * 1024;
+
+/** Ảnh gửi đi: ảnh sản phẩm của CRM đọc thẳng từ đĩa, ảnh ngoài thì tải về. */
+async function readImageForUpload(imageUrl, fetchImpl) {
+  const parsed = new URL(imageUrl);
+  const local = parsed.origin === new URL(metaConfig.publicBaseUrl).origin && parsed.pathname.match(/^\/product-images\/([A-Za-z0-9-]+\.(?:png|jpe?g|webp))$/);
+  if (local) {
+    const filename = local[1];
+    return { buffer: await readFile(path.join(productImagesPath, filename)), filename, mime: imageMimeTypes[path.extname(filename).toLowerCase()] };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetchImpl(parsed, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Không tải được ảnh (${response.status}).`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > maxUploadBytes) throw new Error('Ảnh lớn hơn 5 MB.');
+    const mime = String(response.headers?.get?.('content-type') || 'image/jpeg').split(';')[0].trim();
+    return { buffer, filename: path.basename(parsed.pathname) || 'anh.jpg', mime };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Mã nội dung Pancake của ảnh đã tải lên, để mỗi lần báo giá không tải lại
+// cùng một ảnh sản phẩm. Khoá là URL bỏ phần truy vấn (?v= đổi mỗi lần).
+const contentIdCache = new Map();
+const contentIdTtlMs = 12 * 60 * 60 * 1000;
+const contentCacheKey = imageUrl => String(imageUrl).replace(/[?#].*$/, '');
+
+async function pancakeContentIdForImage(pageId, imageUrl, config, fetchImpl) {
+  const key = contentCacheKey(imageUrl);
+  const cached = contentIdCache.get(key);
+  if (cached && Date.now() - cached.at < contentIdTtlMs) return { id: cached.id, cached: true };
+  const file = await readImageForUpload(imageUrl, fetchImpl);
+  const { id } = await uploadPancakeContent({ pageId, ...file }, config, fetchImpl);
+  contentIdCache.set(key, { id, at: Date.now() });
+  return { id, cached: false };
+}
+
+function decodeDataUrl(dataUrl) {
+  const match = String(dataUrl || '').match(/^data:([^;,]+)(?:;[^,]*)?;base64,([A-Za-z0-9+/=\s]+)$/);
+  if (!match) throw Object.assign(new Error('Tệp đính kèm không đọc được.'), { statusCode: 400 });
+  const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
+  if (!buffer.length) throw Object.assign(new Error('Tệp đính kèm trống.'), { statusCode: 400 });
+  if (buffer.length > maxUploadBytes) throw Object.assign(new Error('Tệp đính kèm lớn hơn 5 MB.'), { statusCode: 400 });
+  return { mime: match[1], buffer };
+}
+
 /**
- * Gửi tin của CRM/bot qua Pancake và ghi vào hộp thư như một tin đi. Chỉ gửi
- * được chữ: receipt/template dùng bản chữ, ảnh/tệp bị từ chối rõ ràng.
+ * Gửi tin của CRM/bot qua Pancake và ghi vào hộp thư như một tin đi. Chữ gửi
+ * thẳng; ảnh sản phẩm của mẫu tin (imageUrl) và tệp nhân viên đính kèm
+ * (attachment) tải lên Pancake trước rồi gửi bằng mã nội dung. Receipt/template
+ * dùng bản chữ. Chữ đi kèm tệp được gửi thành tin riêng sau tệp.
  */
 export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '' }, config = defaultConfig, fetchImpl = fetch) {
   const body = String(templateText || text || '').trim();
-  if (attachment || imageUrl) throw Object.assign(new Error('Qua Pancake chỉ gửi được tin chữ từ CRM.'), { statusCode: 400 });
-  if (!body) throw Object.assign(new Error('Tin nhắn trống.'), { statusCode: 400 });
-  const sent = await sendPancakeMessage({ pageId: conversation.pageId, conversationId: conversation.pancakeConversationId, text: body }, config, fetchImpl);
-  const message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text: body, createdAt: Date.now(), status: 'sent' };
+  const target = { pageId: conversation.pageId, conversationId: conversation.pancakeConversationId };
+  if (!body && !attachment && !imageUrl) throw Object.assign(new Error('Tin nhắn trống.'), { statusCode: 400 });
+  let message;
+  if (imageUrl) {
+    const first = await pancakeContentIdForImage(target.pageId, imageUrl, config, fetchImpl);
+    let sent;
+    try {
+      sent = await sendPancakeMessage({ ...target, contentIds: [first.id] }, config, fetchImpl);
+    } catch (error) {
+      // Mã cũ trong bộ nhớ có thể đã hết hạn phía Pancake: tải lại một lần.
+      if (!first.cached) throw error;
+      contentIdCache.delete(contentCacheKey(imageUrl));
+      const fresh = await pancakeContentIdForImage(target.pageId, imageUrl, config, fetchImpl);
+      sent = await sendPancakeMessage({ ...target, contentIds: [fresh.id] }, config, fetchImpl);
+    }
+    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'image', text: '', name: 'anh-san-pham', dataUrl: imageUrl, createdAt: Date.now(), status: 'sent' };
+  } else if (attachment) {
+    const { mime, buffer } = decodeDataUrl(attachment.dataUrl);
+    const { id } = await uploadPancakeContent({ pageId: target.pageId, buffer, filename: attachment.name || 'tep-dinh-kem', mime }, config, fetchImpl);
+    const sent = await sendPancakeMessage({ ...target, contentIds: [id] }, config, fetchImpl);
+    // Nội dung tệp không lưu vào kho; bản dội lại từ Pancake mang URL ảnh trên CDN.
+    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: attachment.type || 'document', text: '', name: attachment.name || '', dataUrl: '', createdAt: Date.now(), status: 'sent' };
+    if (body) await sendPancakeMessage({ ...target, text: body }, config, fetchImpl);
+  } else {
+    const sent = await sendPancakeMessage({ ...target, text: body }, config, fetchImpl);
+    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text: body, createdAt: Date.now(), status: 'sent' };
+  }
   const saved = await updateMessagingStore(store => {
     const outcome = saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, message });
     outcome.conversation.unread = false;
@@ -270,7 +403,7 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
  */
 export async function handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies, config = defaultConfig, now = Date.now() }) {
   const events = normalizePancakeWebhook(payload, config, now);
-  const changes = await storePancakeEvents(events);
+  const changes = await storePancakeEvents(events, { fromWebhook: true });
   const assigned = new Set(events.filter(event => event.pancake.assigned).map(event => `${event.pageId}:${event.psid}`));
   const forBot = config.botWhenAssigned
     ? changes

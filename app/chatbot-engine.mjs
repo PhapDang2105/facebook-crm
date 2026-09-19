@@ -182,107 +182,170 @@ export async function requestDirectModelReply(options) {
   throw lastError;
 }
 
+// Mỗi hội thoại một hàng đợi: tin thứ hai của cùng một khách chờ tin thứ nhất
+// được trả lời xong. Pancake bắn mỗi tin một webhook (Meta cũng có lúc tách),
+// nên không có hàng này thì hai lần gọi mô hình chạy song song, không thấy
+// nhau, và khách nhận hai câu mâu thuẫn ("chị quan tâm loại nào?" rồi ngay
+// sau đó "cho em xin địa chỉ").
+const conversationQueues = new Map();
+function queueForConversation(id, task) {
+  const previous = conversationQueues.get(id) || Promise.resolve();
+  const run = previous.then(task, task);
+  const tracked = run.catch(() => {}).then(() => { if (conversationQueues.get(id) === tracked) conversationQueues.delete(id); });
+  conversationQueues.set(id, tracked);
+  return run;
+}
+
+// Tin liền nhau của khách ("C đặt 2 gói" / "Giảm ko e") gộp thành một câu hỏi
+// cho mô hình: chỉ tin chữ, gửi sau câu trả lời gần nhất của Page, trong vòng
+// mười phút, nhiều nhất năm tin.
+const bundleWindowMs = 10 * 60 * 1000;
+const bundleLimit = 5;
+
+/** Tin khách chưa được trả lời, tính cả tin đang xử lý; tin cũ đứng trước. */
+export function unansweredCustomerMessages(recentMessages, current) {
+  const list = Array.isArray(recentMessages) ? recentMessages : [];
+  const lastReply = list.findLastIndex(item => item?.direction === 'outgoing');
+  const now = Number(current?.createdAt) || Date.now();
+  const since = list.slice(lastReply + 1).filter(item => item?.direction === 'incoming' && (item.type || 'text') === 'text'
+    && String(item.text || '').trim() && now - (Number(item.createdAt) || now) <= bundleWindowMs);
+  const bundle = since.some(item => item.id && item.id === current?.id) ? since : [...since, current];
+  return bundle.slice(-bundleLimit);
+}
+
+/** Đã có tin khách mới hơn tin đang xử lý: tin này nhường, tin sau trả lời gộp cả hai. */
+export function hasNewerCustomerMessage(recentMessages, current) {
+  const list = Array.isArray(recentMessages) ? recentMessages : [];
+  const index = list.findIndex(item => item?.id && item.id === current?.id);
+  const after = index >= 0 ? list.slice(index + 1) : list.filter(item => (Number(item?.createdAt) || 0) > (Number(current?.createdAt) || Infinity));
+  return after.some(item => item?.direction === 'incoming');
+}
+
 export async function processChatbotChanges(changes, dependencies) {
-  const { readSettings, listMessages, saveBotState, sendMessage, createOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
+  const { readSettings } = dependencies;
   const settings = await readSettings();
   if (!settings.enabled) return [];
   const results = [];
   for (const change of changes) {
-    // Every thread is answered unless staff switched the bot off for it.
-    if (change.type !== 'message' || change.message?.direction !== 'incoming' || change.conversation?.botEnabled === false) continue;
-    const conversation = change.conversation;
-    try {
-      const keywords = settings.handoffKeywords.split(',').map(item => foldVietnamese(item.trim())).filter(Boolean);
-      const incomingText = foldVietnamese(change.message.text);
-      const asksForHuman = keywords.some(keyword => incomingText.includes(keyword));
-      // The basket the customer named earlier travels with the request so a later
-      // "0385805790" alone is still enough to close the same order.
-      const replyContext = { pendingOrder: conversation.pendingOrder, now: Date.now(), customer: { gender: conversation.gender || '', name: conversation.name || '' } };
-      const reply = asksForHuman || change.message.type !== 'text'
-        ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
-        : await requestReply({ settings, conversation, message: change.message, recentMessages: await listMessages(conversation.id), context: replyContext });
-      // The order is persisted BEFORE anything is sent. Sending first meant a
-      // failed order left the customer holding a confirmation for an order that
-      // did not exist, and a retried webhook sent the whole reply a second time.
-      const isComment = conversation.source === 'comment';
-      const outcome = settings.responseMode === 'automatic' && reply.order && createOrder && !isComment
-        ? await createOrder(conversation, reply.order, {
-            sourceMessageId: String(change.message.mid || change.message.id || '')
-          })
-        : null;
-      const order = outcome?.order || null;
-      const alreadyHandled = Boolean(outcome) && outcome.created === false;
-      let privateError = '';
-      if (settings.responseMode === 'automatic' && isComment) {
-        // Under a comment: the full answer goes to the person's Messenger as a
-        // private reply (Facebook allows one per comment, so the messages are
-        // joined), and one short public reply tells them to check their inbox.
-        // Orders are never created from a comment — the customer is asked to
-        // continue in Messenger, where the address exchange is private.
-        const intro = renderChatbotReply({ template_id: 'COMMENT_PRIVATE_REPLY' }, settings.messageTemplates, replyContext);
-        const privateText = [...(intro.templateId === 'COMMENT_PRIVATE_REPLY' ? intro.messages : []), ...reply.messages].join('\n\n');
-        // Messenger can refuse the private reply — most often error #10, another
-        // app holding the thread (Handover Protocol). Telling the customer to
-        // check an inbox that stays empty loses the lead, so the public reply
-        // then asks them to message the Page instead, and the error is kept
-        // for the customer panel.
-        if (privateText) {
-          try {
-            await sendMessage(conversation, { text: privateText, privateReply: true });
-          } catch (error) {
-            privateError = error.message;
-          }
-        }
-        const publicReply = renderChatbotReply({ template_id: privateError ? 'COMMENT_PUBLIC_FALLBACK' : 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
-        for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
-        // Like the comment so the customer sees it was noticed; hide it when it
-        // carries a phone number (or always, per settings) so competitors
-        // cannot lift the lead from the post.
-        if (moderateComment) {
-          const hide = settings.commentHide === 'all' || (settings.commentHide === 'phone' && Boolean(extractVietnamesePhone(change.message.text)));
-          await moderateComment(conversation, change.message, { like: settings.commentLike !== false, hide }).catch(() => {});
-        }
-      } else if (settings.responseMode === 'automatic' && !alreadyHandled) {
-        for (const text of reply.messages) await sendMessage(conversation, { text });
-        // Pictures a template carries (![tên](url)) follow the text.
-        for (const imageUrl of reply.images || []) await sendMessage(conversation, { imageUrl });
-        // The receipt closes the exchange, so it is sent after the reply text and
-        // never before it — the order itself was already persisted above.
-        if (order && sendReceipt) await sendReceipt(conversation, order);
-      }
-      const labelEvents = autoLabelEventsFor({
-        order,
-        handoff: reply.handoff,
-        text: change.message.text,
-        templateId: reply.templateId,
-        keywords: settings.complaintKeywords
-      });
-      await saveBotState(conversation.id, {
-        botConversationId: reply.conversationId || conversation.botConversationId || '',
-        botLastTemplateId: reply.templateId,
-        botLastReplyAt: Date.now(),
-        botDraft: settings.responseMode === 'draft' ? reply.messages.join('\n\n') : '',
-        botLastError: privateError ? `Không nhắn riêng được: ${privateError}` : '',
-        botLastErrorAt: privateError ? Date.now() : 0,
-        // undefined leaves the stored basket alone; null clears it once ordered.
-        ...(reply.pendingOrder !== undefined && !isComment ? { pendingOrder: reply.pendingOrder } : {}),
-        ...(reply.handoff ? { botEnabled: false } : {}),
-        // Thẻ tự động: bot chỉ nói chuyện gì vừa xảy ra (chốt đơn / chuyển nhân
-        // viên / khách khiếu nại); thẻ nào được gắn là do Cài đặt → Tin nhắn.
-        // Thẻ được cộng thêm, không bao giờ xoá thẻ nhân viên đã gắn.
-        ...(labelEvents.length ? { addLabelEvents: labelEvents } : {})
-      });
-      results.push({
-        conversationId: conversation.id,
-        mode: settings.responseMode,
-        templateId: reply.templateId,
-        ...(order ? { orderId: order.id } : {}),
-        ...(alreadyHandled ? { duplicate: true } : {})
-      });
-    } catch (error) {
-      await saveBotState(conversation.id, { botLastError: error.message, botLastErrorAt: Date.now() });
-      results.push({ conversationId: conversation.id, error: error.message });
-    }
+    if (change.type !== 'message' || change.message?.direction !== 'incoming' || !change.conversation) continue;
+    await queueForConversation(change.conversation.id, () => answerChange(change, settings, results, dependencies));
   }
   return results;
+}
+
+async function answerChange(change, settings, results, dependencies) {
+  const { listMessages, getConversation, saveBotState, sendMessage, createOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
+  // Bản mới nhất của hội thoại: tin đứng trước trong hàng có thể vừa lưu giỏ
+  // hàng, hay nhân viên vừa tắt bot. Every thread is answered unless staff
+  // switched the bot off for it.
+  const conversation = (getConversation ? await getConversation(change.conversation.id).catch(() => null) : null) || change.conversation;
+  if (conversation.botEnabled === false) return;
+  try {
+    const recent = await listMessages(conversation.id);
+    if (hasNewerCustomerMessage(recent, change.message)) {
+      results.push({ conversationId: conversation.id, skipped: 'gộp với tin sau' });
+      return;
+    }
+    const bundle = change.message.type === 'text' ? unansweredCustomerMessages(recent, change.message) : [change.message];
+    const bundled = new Set(bundle.map(item => item?.id).filter(Boolean));
+    const message = bundle.length > 1
+      ? { ...change.message, text: bundle.map(item => String(item.text || '').trim()).join('\n') }
+      : change.message;
+    const keywords = settings.handoffKeywords.split(',').map(item => foldVietnamese(item.trim())).filter(Boolean);
+    const incomingText = foldVietnamese(message.text);
+    const asksForHuman = keywords.some(keyword => incomingText.includes(keyword));
+    // The basket the customer named earlier travels with the request so a later
+    // "0385805790" alone is still enough to close the same order.
+    const replyContext = { pendingOrder: conversation.pendingOrder, now: Date.now(), customer: { gender: conversation.gender || '', name: conversation.name || '' } };
+    const reply = asksForHuman || message.type !== 'text'
+      ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
+      : await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
+    // Trong lúc chờ mô hình khách nhắn thêm: bỏ câu này, tin sau trả lời gộp.
+    if (message.type === 'text' && hasNewerCustomerMessage(await listMessages(conversation.id), change.message)) {
+      results.push({ conversationId: conversation.id, skipped: 'gộp với tin sau' });
+      return;
+    }
+    // The order is persisted BEFORE anything is sent. Sending first meant a
+    // failed order left the customer holding a confirmation for an order that
+    // did not exist, and a retried webhook sent the whole reply a second time.
+    const isComment = conversation.source === 'comment';
+    const outcome = settings.responseMode === 'automatic' && reply.order && createOrder && !isComment
+      ? await createOrder(conversation, reply.order, {
+          sourceMessageId: String(change.message.mid || change.message.id || '')
+        })
+      : null;
+    const order = outcome?.order || null;
+    const alreadyHandled = Boolean(outcome) && outcome.created === false;
+    let privateError = '';
+    if (settings.responseMode === 'automatic' && isComment) {
+      // Under a comment: the full answer goes to the person's Messenger as a
+      // private reply (Facebook allows one per comment, so the messages are
+      // joined), and one short public reply tells them to check their inbox.
+      // Orders are never created from a comment — the customer is asked to
+      // continue in Messenger, where the address exchange is private.
+      const intro = renderChatbotReply({ template_id: 'COMMENT_PRIVATE_REPLY' }, settings.messageTemplates, replyContext);
+      const privateText = [...(intro.templateId === 'COMMENT_PRIVATE_REPLY' ? intro.messages : []), ...reply.messages].join('\n\n');
+      // Messenger can refuse the private reply — most often error #10, another
+      // app holding the thread (Handover Protocol). Telling the customer to
+      // check an inbox that stays empty loses the lead, so the public reply
+      // then asks them to message the Page instead, and the error is kept
+      // for the customer panel.
+      if (privateText) {
+        try {
+          await sendMessage(conversation, { text: privateText, privateReply: true });
+        } catch (error) {
+          privateError = error.message;
+        }
+      }
+      const publicReply = renderChatbotReply({ template_id: privateError ? 'COMMENT_PUBLIC_FALLBACK' : 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
+      for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
+      // Like the comment so the customer sees it was noticed; hide it when it
+      // carries a phone number (or always, per settings) so competitors
+      // cannot lift the lead from the post.
+      if (moderateComment) {
+        const hide = settings.commentHide === 'all' || (settings.commentHide === 'phone' && Boolean(extractVietnamesePhone(message.text)));
+        await moderateComment(conversation, change.message, { like: settings.commentLike !== false, hide }).catch(() => {});
+      }
+    } else if (settings.responseMode === 'automatic' && !alreadyHandled) {
+      for (const text of reply.messages) await sendMessage(conversation, { text });
+      // Pictures a template carries (![tên](url)) follow the text.
+      for (const imageUrl of reply.images || []) await sendMessage(conversation, { imageUrl });
+      // The receipt closes the exchange, so it is sent after the reply text and
+      // never before it — the order itself was already persisted above.
+      if (order && sendReceipt) await sendReceipt(conversation, order);
+    }
+    const labelEvents = autoLabelEventsFor({
+      order,
+      handoff: reply.handoff,
+      text: message.text,
+      templateId: reply.templateId,
+      keywords: settings.complaintKeywords
+    });
+    await saveBotState(conversation.id, {
+      botConversationId: reply.conversationId || conversation.botConversationId || '',
+      botLastTemplateId: reply.templateId,
+      botLastReplyAt: Date.now(),
+      botDraft: settings.responseMode === 'draft' ? reply.messages.join('\n\n') : '',
+      botLastError: privateError ? `Không nhắn riêng được: ${privateError}` : '',
+      botLastErrorAt: privateError ? Date.now() : 0,
+      // undefined leaves the stored basket alone; null clears it once ordered.
+      ...(reply.pendingOrder !== undefined && !isComment ? { pendingOrder: reply.pendingOrder } : {}),
+      ...(reply.handoff ? { botEnabled: false } : {}),
+      // Thẻ tự động: bot chỉ nói chuyện gì vừa xảy ra (chốt đơn / chuyển nhân
+      // viên / khách khiếu nại); thẻ nào được gắn là do Cài đặt → Tin nhắn.
+      // Thẻ được cộng thêm, không bao giờ xoá thẻ nhân viên đã gắn.
+      ...(labelEvents.length ? { addLabelEvents: labelEvents } : {})
+    });
+    results.push({
+      conversationId: conversation.id,
+      mode: settings.responseMode,
+      templateId: reply.templateId,
+      ...(bundle.length > 1 ? { bundled: bundle.length } : {}),
+      ...(order ? { orderId: order.id } : {}),
+      ...(alreadyHandled ? { duplicate: true } : {})
+    });
+  } catch (error) {
+    await saveBotState(conversation.id, { botLastError: error.message, botLastErrorAt: Date.now() });
+    results.push({ conversationId: conversation.id, error: error.message });
+  }
 }

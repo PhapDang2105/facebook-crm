@@ -1541,6 +1541,20 @@ function dismissChatbotOrders(ids) {
   ids.forEach(id => dismissed.add(id));
   try { localStorage.setItem(dismissedChatbotOrdersKey, JSON.stringify([...dismissed])); } catch {}
 }
+/**
+ * Dấu "đã bỏ khỏi bảng" ghi lên máy chủ (bản trong trình duyệt chỉ là tạm):
+ * máy khác mở CRM, hay trình duyệt xóa dữ liệu, cũng không kéo lại đơn đã xóa.
+ */
+function saveTableVisibilityToServer(rowIds, hidden) {
+  const ids = rowIds.map(serverOrderIdOf).filter(Boolean);
+  if (!ids.length) return Promise.resolve();
+  return fetch('/api/customer-orders/table-visibility', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, hidden })
+  }).then(response => { if (!response.ok) throw new Error('save failed'); })
+    .catch(() => showToast(hidden ? 'Chưa ghi được việc xóa đơn lên máy chủ, máy khác có thể còn thấy đơn.' : 'Chưa ghi được việc khôi phục đơn lên máy chủ.'));
+}
 
 // ===== Hoàn tác (Ctrl+Z) =====
 //
@@ -1583,7 +1597,7 @@ function deleteOrderRows(indexes, { undoable = true, label = '' } = {}) {
   const dismissedIds = idColumn >= 0
     ? orderData.rows.filter((row, index) => removing.has(index) && isSystemOrderId(row[idColumn])).map(row => String(row[idColumn]))
     : [];
-  if (dismissedIds.length) dismissChatbotOrders(dismissedIds);
+  if (dismissedIds.length) { dismissChatbotOrders(dismissedIds); saveTableVisibilityToServer(dismissedIds, true); }
   // Xóa một đơn trùng: đơn còn lại cùng số điện thoại được ghi "Đơn trùng" ở
   // Ghi chú xử lý, để Xử lý dữ liệu biết khách đã gửi nhiều lần.
   const removedPhones = new Set(orderData.rows.filter((row, index) => removing.has(index)).map(row => normalizeRowPhone(row[orderPhoneColumnIndex()])).filter(Boolean));
@@ -1598,7 +1612,7 @@ function deleteOrderRows(indexes, { undoable = true, label = '' } = {}) {
     const rows = [...orderData.rows];
     for (const entry of restore) rows.splice(entry.index, 0, entry.row);
     orderData = { headers: orderData.headers.length ? orderData.headers : headersBefore, rows };
-    if (dismissedIds.length) undismissChatbotOrders(dismissedIds);
+    if (dismissedIds.length) { undismissChatbotOrders(dismissedIds); saveTableVisibilityToServer(dismissedIds, false); }
     commitOrderData();
     renderOrderData();
   });
@@ -2291,12 +2305,16 @@ function mergeChatbotOrdersIntoTable(orders) {
   const idColumn = index.get('ma don hang');
   const existingIds = new Set(idColumn === undefined ? [] : orderData.rows.map(row => String(row[idColumn] || '')));
   const dismissed = readDismissedChatbotOrders();
+  // Đơn từng xóa ở trình duyệt này nhưng máy chủ chưa biết (bản cũ): ghi lên một lần.
+  const unsyncedDismissals = orders.filter(order => dismissed.has(systemOrderRowId(order)) && !order.hiddenFromTable).map(systemOrderRowId);
+  if (unsyncedDismissals.length) saveTableVisibilityToServer(unsyncedDismissals, true);
+  const hiddenOnServer = new Set(orders.filter(order => order.hiddenFromTable).map(systemOrderRowId));
   let added = 0;
   let refreshed = 0;
   let rows = [...orderData.rows];
   for (const order of orders) {
     const rowId = systemOrderRowId(order);
-    if (dismissed.has(rowId)) continue;
+    if (dismissed.has(rowId) || hiddenOnServer.has(rowId)) continue;
     const fresh = chatbotOrderToRows(order).map(source => {
       const row = Array(headers.length).fill('');
       chatbotOrderHeaders.forEach((header, position) => {
@@ -2319,11 +2337,11 @@ function mergeChatbotOrdersIntoTable(orders) {
     rows.push(...fresh);
     added += 1;
   }
-  // Đơn hệ thống đã bị gộp hoặc xóa trên server thì dòng cũ trong bảng cũng
-  // đi, nếu không bảng giữ mãi bản trùng với ghi chú cũ.
+  // Đơn hệ thống đã bị gộp, xóa trên server, hay đã bị máy khác bỏ khỏi bảng
+  // thì dòng cũ trong bảng cũng đi, nếu không bảng giữ mãi bản trùng với ghi chú cũ.
   let removed = 0;
   if (idColumn !== undefined) {
-    const serverIds = new Set(orders.map(systemOrderRowId));
+    const serverIds = new Set(orders.filter(order => !order.hiddenFromTable).map(systemOrderRowId));
     const before = rows.length;
     rows = rows.filter(row => { const id = String(row[idColumn] || ''); return !isSystemOrderId(id) || serverIds.has(id); });
     removed = before - rows.length;

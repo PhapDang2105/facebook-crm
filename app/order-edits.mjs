@@ -97,6 +97,17 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     if (processingStatus !== String(order.processingStatus || '')) { order.processingStatus = processingStatus; changed.push('processingStatus'); }
   }
 
+  // Đã bỏ khỏi bảng Đơn hàng (nhân viên xóa dòng / Xóa bảng). Ghi trên máy chủ
+  // để máy nào mở CRM cũng không kéo lại đơn này; hoàn tác xóa thì bỏ dấu.
+  if (patch.hiddenFromTable !== undefined) {
+    const hidden = patch.hiddenFromTable === true;
+    if (hidden !== Boolean(order.hiddenFromTable)) {
+      if (hidden) { order.hiddenFromTable = true; order.hiddenFromTableAt = now; }
+      else { delete order.hiddenFromTable; delete order.hiddenFromTableAt; }
+      changed.push('hiddenFromTable');
+    }
+  }
+
   // Ghi chú xử lý của nhân viên (cột "Ghi chú xử lý" ở Xử lý dữ liệu): chữ tự
   // do, được xoá trống, không đi vào file xuất kho.
   if (patch.staffNote !== undefined) {

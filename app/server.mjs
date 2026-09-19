@@ -1488,6 +1488,24 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 200, panel);
       }
     }
+    // Bỏ (hay đưa lại) nhiều đơn hệ thống khỏi bảng Đơn hàng một lượt: nhân viên
+    // xóa dòng hoặc Xóa bảng. Dấu nằm trên máy chủ nên máy khác mở CRM cũng không
+    // kéo lại đơn đã xóa; hoàn tác gửi hidden:false.
+    if (request.method === 'POST' && url.pathname === '/api/customer-orders/table-visibility') {
+      const payload = await readBody(request);
+      const ids = new Set((Array.isArray(payload.ids) ? payload.ids : []).map(String).filter(Boolean).slice(0, 5000));
+      const hidden = payload.hidden !== false;
+      if (!ids.size) return sendJson(response, 400, { error: 'Thiếu danh sách mã đơn.' });
+      let changed = 0;
+      const apply = order => { if (applyCustomerOrderEdits(order, { hiddenFromTable: hidden }).length) changed += 1; };
+      await updateMessagingStore(store => {
+        for (const conversation of store.conversations) {
+          for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) if (ids.has(String(order.id))) apply(order);
+        }
+      });
+      await updateLandingStore(store => { for (const order of store.orders) if (ids.has(String(order.id))) apply(order); });
+      return sendJson(response, 200, { changed, hidden });
+    }
     const customerOrderDeleteMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)$/);
     // Sửa đơn từ bảng Xử lý dữ liệu: tên, số điện thoại, địa chỉ (tách lại ba
     // cấp), số lượng/đơn giá từng dòng. Server là sự thật cho đơn hệ thống nên

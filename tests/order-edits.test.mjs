@@ -100,3 +100,15 @@ test('trạng thái xử lý: lưu mã trạng thái, đổi về rỗng đượ
   assert.equal(order.processingStatus, '');
   assert.equal(order.name, 'Khách landing page');
 });
+
+test('bỏ khỏi bảng: ghi dấu hiddenFromTable trên đơn, hoàn tác thì gỡ dấu, không đụng trường khác', () => {
+  const order = sample();
+  assert.deepEqual(applyCustomerOrderEdits(order, { hiddenFromTable: true }, 1000), ['hiddenFromTable']);
+  assert.equal(order.hiddenFromTable, true);
+  assert.equal(order.hiddenFromTableAt, 1000);
+  assert.deepEqual(applyCustomerOrderEdits(order, { hiddenFromTable: true }), [], 'đã ẩn thì không tính là đổi');
+  assert.deepEqual(applyCustomerOrderEdits(order, { hiddenFromTable: false }), ['hiddenFromTable']);
+  assert.equal(order.hiddenFromTable, undefined);
+  assert.equal(order.hiddenFromTableAt, undefined);
+  assert.equal(order.name, 'Khách landing page');
+});

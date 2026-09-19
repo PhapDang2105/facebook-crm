@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import './helpers/seed-catalog.mjs';
 import { receiptContent, renderOrderReceiptImage } from '../app/order-receipt-image.mjs';
 
 const order = {
@@ -16,26 +17,28 @@ const order = {
   payment: 'COD'
 };
 
-test('nội dung phiếu giống thẻ xác nhận trong hộp thư: sản phẩm, giờ đặt, SĐT, thanh toán, giao đến, giá trị đơn', () => {
+test('nội dung phiếu y thẻ xác nhận trong hộp thư: sản phẩm, giờ đặt, SĐT, thanh toán, giao đến, giá trị đơn', () => {
   const content = receiptContent(order, { merchantName: 'Giọt Nắng Healthy' });
   assert.equal(content.merchantName, 'Giọt Nắng Healthy');
   assert.deepEqual(content.products, [{ name: 'Granola Túi Nâu vị cacao 350g', variant: 'Sản phẩm', quantity: 2, unitPrice: '164.000 đ', image: '/product-images/khong-co.png' }]);
-  assert.deepEqual(content.sections.map(section => [section.label, section.value]), [
-    ['Đã đặt hàng vào', '11:41 19-09'],
-    ['Số điện thoại', '0385805700'],
-    ['Đã thanh toán bằng', 'Thanh toán khi giao hàng (COD)'],
-    ['Giao hàng đến', 'Pháp Đặng\nKhu phố 6, Phường Đông Hải, Thành phố Phan Rang – Tháp Chàm, Ninh Thuận'],
-    ['Quà tặng', 'Miễn phí vận chuyển'],
-    ['Giá trị ĐH', '288.000 đ']
+  assert.deepEqual(content.sections.map(section => [section.label, section.lines.map(line => `${line.bold ? '*' : ''}${line.text}`)]), [
+    ['Đã đặt hàng vào', ['*11:41 19-09']],
+    ['Số điện thoại', ['0385805700']],
+    ['Đã thanh toán bằng', ['Thanh toán khi giao hàng (COD)']],
+    ['Giao hàng đến', ['*Pháp Đặng', 'Khu phố 6, Phường Đông Hải, Thành phố Phan Rang – Tháp Chàm, Ninh Thuận']],
+    ['Giá trị ĐH', ['*288.000 đ']]
   ]);
+  // Sản phẩm không mang ảnh thì lấy ảnh trong danh mục theo SKU/tên.
+  const fromCatalog = receiptContent({ ...order, products: [{ name: 'túi xanh', code: 'GRA-XANH-Z450', quantity: 1, price: 174000 }] });
+  assert.equal(fromCatalog.products[0].image, '');
 });
 
-test('vẽ phiếu thành PNG rộng 642px (kể cả viền), nhẹ hơn 500 KB, ảnh sản phẩm không có thì vẫn vẽ', async () => {
+test('vẽ phiếu thành PNG 750px (thẻ 250px × 3), nhẹ hơn 500 KB, ký tự đặc biệt và ảnh thiếu không làm hỏng', async () => {
   const { default: sharp } = await import('sharp');
   const image = await renderOrderReceiptImage({ ...order, name: 'Anh <Ba> & Chị Tư' }, { merchantName: 'Giọt Nắng Healthy' });
   const meta = await sharp(image).metadata();
   assert.equal(meta.format, 'png');
-  assert.equal(meta.width, 642);
-  assert.ok(meta.height > 500 && meta.height < 1600, `cao ${meta.height}px`);
+  assert.equal(meta.width, 750);
+  assert.ok(meta.height > 900 && meta.height < 2400, `cao ${meta.height}px`);
   assert.ok(image.length < 500 * 1024, `${image.length} bytes`);
 });

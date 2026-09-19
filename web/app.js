@@ -534,18 +534,22 @@ function orderRowStatuses(entries, data = orderData) {
     // Tệp khách hàng lưu mã đơn kèm tiền tố (LP-/CB-) như cột Mã đơn hàng; so sau khi bỏ tiền tố cả hai bên.
     const exportedOrders = (customer?.orders || []).filter(order => order.id && rawOrderIdOf(order.id) !== ownId);
     const recentExported = exportedOrders.filter(order => order.orderedAt >= windowStart);
-    const recentCount = new Set([...inTable.map(item => item.orderId), ...recentExported.map(order => order.id)]).size;
-    statuses.set(entry.index, { recentCount, oldCustomer: exportedOrders.length > 0 });
+    // Ngày của các đơn trùng (mỗi đơn một lần), mới nhất trước, để ghi rõ "Trùng đơn ngày …".
+    const recentDates = new Map();
+    for (const item of inTable) recentDates.set(item.orderId, item.at);
+    for (const order of recentExported) if (!recentDates.has(rawOrderIdOf(order.id))) recentDates.set(rawOrderIdOf(order.id), order.orderedAt);
+    const recentDays = [...new Set([...recentDates.values()].sort((first, second) => second - first).map(at => new Date(at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })))];
+    statuses.set(entry.index, { recentDays, oldCustomer: exportedOrders.length > 0 });
   }
   return statuses;
 }
 
 function orderRowStatusHtml(status) {
-  if (!status || (!status.recentCount && !status.oldCustomer)) return '';
-  const badges = [];
-  if (status.recentCount) badges.push(`<span class="order-status-badge order-status-badge--recent" title="Cùng số điện thoại với ${status.recentCount} đơn khác trong ${recentOrderWindowDays} ngày gần đây">Trùng ${status.recentCount} đơn · 7 ngày</span>`);
-  if (status.oldCustomer) badges.push('<span class="order-status-badge order-status-badge--old" title="Số điện thoại đã có trong tệp khách hàng (từng mua và xuất kho)"><img src="/assets/icons/customers.svg" alt="">Khách hàng cũ</span>');
-  return badges.join('');
+  if (!status || (!status.recentDays?.length && !status.oldCustomer)) return '';
+  const lines = [];
+  if (status.recentDays?.length) lines.push(`<span class="order-status-line order-status-line--recent">Trùng đơn ngày ${escapeHtml(status.recentDays.join(', '))}</span>`);
+  if (status.oldCustomer) lines.push('<span class="order-status-line order-status-line--old"><img src="/assets/icons/customers.svg" alt="">Khách hàng cũ</span>');
+  return lines.join('');
 }
 
 function phoneWarningFor(value) {

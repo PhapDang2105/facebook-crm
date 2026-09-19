@@ -536,10 +536,10 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customer-orders-management-row > strong:last-child { color: #27643a; text-align: right; }
 .customer-orders-management-status { color: #27643a; font-weight: 700; }
 .data-preview .preview-status { white-space: nowrap; }
-.order-status-badge { display: inline-flex; align-items: center; gap: 4px; margin: 2px 6px 2px 0; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; line-height: 16px; white-space: nowrap; }
-.order-status-badge--recent { color: #9a3412; background: #ffedd5; }
-.order-status-badge--old { color: #1b5e20; background: #e6f4ea; }
-.order-status-badge img { width: 13px; height: 13px; }
+.order-status-line { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; line-height: 18px; white-space: nowrap; }
+.order-status-line--recent { color: #b42318; }
+.order-status-line--old { color: #1b5e20; }
+.order-status-line img { width: 13px; height: 13px; }
 .data-preview tbody tr.order-row-duplicate td { background: #fde8ef; }
 .data-preview tbody tr.order-row-duplicate-phone td { background: #fff3bf; }
 

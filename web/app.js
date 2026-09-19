@@ -375,6 +375,26 @@ const orderImport = document.querySelector('#order-import');
 const orderSearch = document.querySelector('#order-search');
 const orderFilter = document.querySelector('#order-filter');
 const orderSourceFilter = document.querySelector('#order-source-filter');
+// Ngày đơn ở Nhập dữ liệu: mở lên chỉ thấy đơn hôm nay; đổi sang hôm qua, 2 ngày trước, mọi ngày hay một ngày bất kỳ.
+const orderDayFilter = document.querySelector('#order-day-filter');
+const orderDayDate = document.querySelector('#order-day-date');
+const orderDayDateControl = document.querySelector('#order-day-date-control');
+
+/** Ngày đang chọn ở bộ lọc Nhập dữ liệu (0h giờ máy); null = mọi ngày, hoặc "Chọn ngày…" chưa có ngày. */
+function selectedImportDate() {
+  const choice = orderDayFilter?.value || '0';
+  if (choice === 'all') return null;
+  if (choice === 'custom') {
+    const value = orderDayDate?.value || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - Number(choice));
+  return date;
+}
 const orderHistoryButton = document.querySelector('#order-history-button');
 const orderHistoryPanel = document.querySelector('#order-history-panel');
 const orderExport = document.querySelector('#order-export');
@@ -6739,6 +6759,15 @@ function renderOrderData() {
   // table re-renders with badges once the answer arrives.
   const phoneColumn = orderPhoneColumnIndex();
   if (phoneColumn >= 0) refreshPhoneWarnings(rows.map(row => row[phoneColumn]));
+  // Ngày đơn: mặc định chỉ hôm nay. Dòng không có ngày (import cũ) tính là hôm nay.
+  const importDay = selectedImportDate();
+  if (importDay) {
+    const now = new Date();
+    importRows = importRows.filter(entry => {
+      const ordered = parseOrderRowDate(entry.row, orderData, now) || now;
+      return ordered.getFullYear() === importDay.getFullYear() && ordered.getMonth() === importDay.getMonth() && ordered.getDate() === importDay.getDate();
+    });
+  }
   // Nguồn đơn (cột "Nguồn đơn": Chatbot, Landing page, Import) lọc chồng lên bộ lọc trạng thái.
   const sourceValue = orderSourceFilter?.value || 'all';
   const sourceColumn = orderColumnIndex(normalizeColumnName(orderSourceHeader));
@@ -7372,6 +7401,12 @@ orderSearch.addEventListener('input', () => {
 });
 orderFilter.addEventListener('change', renderOrderData);
 orderSourceFilter?.addEventListener('change', renderOrderData);
+orderDayFilter?.addEventListener('change', () => {
+  orderDayDateControl?.classList.toggle('hidden', orderDayFilter.value !== 'custom');
+  if (orderDayFilter.value === 'custom' && orderDayDate && !orderDayDate.value) orderDayDate.value = new Date().toISOString().slice(0, 10);
+  renderOrderData();
+});
+orderDayDate?.addEventListener('change', renderOrderData);
 // Đổi ngày xuất: bảng xuất dựng lại (khoá cache theo dữ liệu nên tự làm mới).
 orderExportDay?.addEventListener('change', () => {
   orderExportDateControl?.classList.toggle('hidden', orderExportDay.value !== 'custom');

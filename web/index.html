@@ -242,6 +242,14 @@
             <option value="duplicate-phone">Trùng số điện thoại</option>
             <option value="phone-warning">Cảnh báo bom hàng</option>
           </select></label>
+          <label class="order-filter-control"><select id="order-day-filter" aria-label="Ngày đơn">
+            <option value="0">Hôm nay</option>
+            <option value="1">Hôm qua</option>
+            <option value="2">2 ngày trước</option>
+            <option value="all">Tất cả ngày</option>
+            <option value="custom">Chọn ngày…</option>
+          </select></label>
+          <label class="order-filter-control hidden" id="order-day-date-control"><input id="order-day-date" type="date" aria-label="Ngày đơn"></label>
           <label class="order-filter-control"><select id="order-source-filter" aria-label="Nguồn đơn">
             <option value="all">Mọi nguồn đơn</option>
             <option value="Chatbot">Chatbot</option>
@@ -290,7 +298,7 @@
           <label class="order-filter-control hidden" id="order-export-date-control"><input id="order-export-date" type="date" aria-label="Ngày đơn cần xuất"></label>
           <button class="export-button" id="order-export" type="button" disabled hidden>Xuất XLSX</button>
           <button class="export-button export-button--skip hidden" id="order-export-skip" type="button">Xuất bỏ qua đơn chưa chuẩn</button>
-          <button class="order-history-button" id="order-export-history-button" type="button" aria-expanded="false" aria-controls="order-export-history-panel">Lịch sử xuất</button>
+          <button class="order-history-button" id="order-export-history-button" type="button" aria-expanded="false" aria-controls="order-export-history-panel">Lịch sử xuất</button>
         </div>
         <div class="order-history-panel order-archive-panel hidden" id="order-export-history-panel"></div>
         <div class="export-check hidden" id="order-export-check" role="status" aria-live="polite"></div>

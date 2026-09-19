@@ -33,7 +33,7 @@ Hai loại token, đều truyền bằng tham số truy vấn, không có header
 
 - Endpoint nhận: `POST ${PUBLIC_BASE_URL}/webhooks/pancake?token=<PANCAKE_WEBHOOK_TOKEN>`; sai token trả 401, chưa cấu hình trả 503, hợp lệ trả 200 ngay rồi mới xử lý.
 - Chỉ nhận sự kiện `messaging` loại INBOX của đúng `PANCAKE_PAGE_ID`; bình luận và Page khác bỏ qua. Tin trùng mã (Pancake gửi lại khi cập nhật) không ghi hai lần, không gọi bot lần hai.
-- Tin được ghi vào hộp thư như tin từ Meta; hội thoại giữ thêm mã hội thoại Pancake để gửi trả lời đúng chỗ. Kênh ảo `PANCAKE_PAGE_NAME` xuất hiện ở hộp thư và Cài đặt → Kênh.
+- Tin được ghi vào hộp thư như tin từ Meta; hội thoại giữ thêm mã hội thoại Pancake để gửi trả lời đúng chỗ. Ảnh khách lấy qua đường công khai `https://pancake.vn/api/v1/pages/{page_id}/avatar/{psid}` (không cần token, 301 tới ảnh trên CDN) nên hộp thư dùng thẳng làm `src`. Kênh ảo `PANCAKE_PAGE_NAME` xuất hiện ở hộp thư và Cài đặt → Kênh.
 - Bot chạy qua cùng bộ xử lý với Meta; hội thoại có `assignee_ids` (nhân viên đã nhận trong Pancake) thì bot không trả lời trừ khi `PANCAKE_BOT_WHEN_ASSIGNED=1`. Tin gửi đi (bot hoặc nhân viên gửi từ CRM) chỉ là chữ; receipt dùng bản chữ.
 - Cấu hình trong `.env`: `PANCAKE_PAGE_ID`, `PANCAKE_PAGE_ACCESS_TOKEN`, `PANCAKE_WEBHOOK_TOKEN`, tuỳ chọn `PANCAKE_PAGE_NAME`, `PANCAKE_BOT_WHEN_ASSIGNED`. Caddy có khối `@pancake` cho đường này đi thẳng.
 - Lịch sử: webhook chỉ mang tin mới, nên CRM còn kéo hội thoại inbox và tin gần đây bằng API liệt kê (`GET /v2/.../conversations`, `GET /v1/.../messages`) khi mở kênh lần đầu (`POST /api/messaging/sync`), lúc khởi động và mỗi 10 phút. Tin cùng mã không ghi trùng; tin kéo về không đưa bot.

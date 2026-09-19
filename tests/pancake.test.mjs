@@ -81,6 +81,7 @@ test('webhook đầu tới cuối: ghi hộp thư, đưa bot; hội thoại đã
   assert.deepEqual(first, { stored: 1, bot: 1 });
   assert.equal(botCalls[0][0].conversation.pancakeConversationId, '110_555');
   assert.equal(botCalls[0][0].conversation.name, 'Chị Mai');
+  assert.equal(botCalls[0][0].conversation.picture, 'https://pancake.vn/api/v1/pages/110/avatar/555', 'ảnh khách lấy qua đường công khai của Pancake');
   assert.equal(botCalls[0][0].message.text, 'Shop còn Granola Xanh không?');
   // Pancake gửi lại cùng tin (cập nhật): không ghi thêm, không gọi bot lần nữa.
   const again = await handlePancakeWebhook(incoming(), { processChatbotChanges, chatbotDependencies: {}, config });

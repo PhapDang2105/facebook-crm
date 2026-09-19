@@ -58,6 +58,9 @@ export function normalizePancakeWebhook(payload, config = defaultConfig, now = D
   return event ? [event] : [];
 }
 
+/** Ảnh đại diện khách: đường công khai của Pancake (301 → ảnh trên content.pancake.vn), dùng thẳng làm src. */
+export const pancakeAvatarUrl = (pageId, psid) => `https://pancake.vn/api/v1/pages/${encodeURIComponent(pageId)}/avatar/${encodeURIComponent(psid)}`;
+
 /**
  * Một tin của Pancake (từ webhook hay từ API liệt kê tin) → sự kiện cùng dạng
  * với webhook Meta. Chỉ tin inbox; null khi không xếp được về khách nào.
@@ -199,6 +202,11 @@ export async function storePancakeEvents(events) {
       if (!conversation) continue;
       if (event.pancake.conversationId) conversation.pancakeConversationId = event.pancake.conversationId;
       if (event.pancake.pageCustomerId) conversation.pancakePageCustomerId = event.pancake.pageCustomerId;
+      // Ảnh khách: Pancake có đường công khai chuyển hướng tới ảnh trên CDN, không cần token.
+      if (!conversation.picture) {
+        conversation.picture = pancakeAvatarUrl(event.pageId, event.psid);
+        conversation.profileResolvedAt = conversation.profileResolvedAt || Date.now();
+      }
       // Tên mặc định của hộp thư ("Khách Facebook 1234") thay bằng tên Pancake biết.
       if (event.pancake.customerName && (!conversation.name || /^Khách Facebook \d*$/.test(conversation.name))) conversation.name = event.pancake.customerName;
       conversation.pancakeAssigned = event.pancake.assigned;

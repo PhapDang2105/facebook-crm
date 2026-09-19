@@ -1388,7 +1388,6 @@ customersTable?.addEventListener('click', event => {
   if (copy) {
     event.stopPropagation();
     navigator.clipboard?.writeText(copy.dataset.copy);
-    showToast(`Đã chép số ${copy.dataset.copy}`, 'success', 2000);
   }
 });
 
@@ -1716,7 +1715,6 @@ document.querySelector('#order-import-preview')?.addEventListener('click', async
     if (!phone) return;
     try {
       await navigator.clipboard.writeText(phone);
-      showToast(`Đã chép ${phone}`, 'success', 1800);
     } catch {
       showToast('Trình duyệt không cho chép số. Bôi đen số rồi Ctrl+C giúp nhé.');
     }
@@ -2828,7 +2826,7 @@ function showEmptyChannelConversation() {
   if (chatBody) chatBody.innerHTML = `<div class="chat-empty-state">Chưa có tin nhắn trong ${escapeHtml(channelName)}.</div>`;
   renderCustomerPanel(null);
   renderConversationLabelBar(null);
-  if (messageComposerInput) { messageComposerInput.value = ''; messageComposerInput.disabled = true; }
+  if (messageComposerInput) { messageComposerInput.value = ''; messageComposerInput.disabled = true; autosizeComposer(); }
   if (messageSendButton) messageSendButton.disabled = true;
 }
 
@@ -6065,6 +6063,8 @@ function sendCurrentMessage() {
     const attachment = pendingAttachment && pendingAttachment.type !== 'sticker' && pendingAttachment.type !== 'images' ? pendingAttachment : null;
     const outgoingText = pendingAttachment?.type === 'sticker' ? [text, pendingAttachment.sticker].filter(Boolean).join(' ') : text;
     messageComposerInput.value = '';
+  autosizeComposer();
+    autosizeComposer();
     clearMessageReply();
     clearPendingAttachment();
     updateMessageSendState();
@@ -6150,7 +6150,6 @@ async function copyMessageText(row) {
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
-    showComposerStatus('Đã sao chép tin nhắn.');
   } catch {
     // The Clipboard API needs a secure context; fall back for plain HTTP.
     const carrier = document.createElement('textarea');
@@ -6162,7 +6161,7 @@ async function copyMessageText(row) {
     carrier.select();
     const copied = document.execCommand('copy');
     carrier.remove();
-    showComposerStatus(copied ? 'Đã sao chép tin nhắn.' : 'Trình duyệt không cho phép sao chép.');
+    if (!copied) showComposerStatus('Trình duyệt không cho phép sao chép.');
   }
 }
 
@@ -8547,6 +8546,7 @@ function applyQuickReply(reply) {
     const end = messageComposerInput.selectionEnd ?? start;
     const separator = start > 0 && !/\s$/.test(current.slice(0, start)) ? ' ' : '';
     messageComposerInput.setRangeText(separator + filled, start, end, 'end');
+    autosizeComposer();
   }
   if (reply.images?.length) {
     if (conversation?.dataset.source === 'comment' && currentComposerReplyMode !== 'private') {

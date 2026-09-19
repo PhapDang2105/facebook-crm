@@ -1,4 +1,35 @@
-# Pancake POS Open API
+# Pancake
+
+Pancake có hai hệ thống với hai API riêng, cùng công ty:
+
+| Hệ thống | Việc | Tài liệu | Spec đã tải |
+| --- | --- | --- | --- |
+| **Pancake** (pages.fm, quản lý hội thoại đa kênh) | Nhận tin khách qua webhook, gửi tin trả lời, hội thoại, khách của Page | https://developer.pancake.biz/ và `/webhook` | `pancake-api.yaml`, `pancake-webhook.yaml` |
+| **Pancake POS** (pos.pages.fm, bán hàng và kho) | Đơn, khách, sản phẩm, mã giảm giá, khuyến mãi | https://docs.pancake.biz/pos/api/ | `openapi.json` |
+
+## Pancake (hội thoại): dùng bot của CRM trả lời khách qua Pancake
+
+### Token
+
+Hai loại token, đều truyền bằng tham số truy vấn, không có header:
+
+- `access_token` (User Access Token): cấp tài khoản, lấy ở pages.fm → Tài khoản → Cài đặt cá nhân → API Access Token. Chỉ dùng cho `GET https://pages.fm/api/v1/pages` (liệt kê Page) và `POST /pages/{page_id}/generate_page_access_token` (sinh token cho Page). Hết hạn khi đăng xuất hoặc sau 90 ngày không dùng.
+- `page_access_token` (Page Access Token): cấp Page, dùng cho mọi API dưới `https://pages.fm/api/public_api/v1` và `/v2`. Sinh bằng token trên, hoặc trong Pancake: Cài đặt → Tích hợp → Public API.
+
+### Endpoint cần cho luồng bot
+
+- `GET /public_api/v2/pages/{page_id}/conversations?page_access_token=` — 60 hội thoại mới nhất, lọc `type` (INBOX, COMMENT...), `since/until`, `unread_first`, phân trang bằng `last_conversation_id`.
+- `GET /public_api/v1/pages/{page_id}/conversations/{conversation_id}/messages` — 30 tin gần nhất, lùi bằng `current_count`; trả kèm thông tin khách và hội thoại.
+- `POST /public_api/v1/pages/{page_id}/conversations/{conversation_id}/messages` — gửi tin. Body tin nhắn inbox: `{ "action": "reply_inbox", "message": "..." }`; ảnh/tệp dùng `content_ids` (không gửi cùng `message`). Có thêm dạng trả lời bình luận và private reply.
+- Khách của Page: `GET|PUT /pages/{page_id}/page_customers`, ghi chú khách, thẻ hội thoại (`POST .../tags`), gán nhân viên (`.../assign`), đánh dấu đã đọc.
+
+### Webhook (nhận tin mới)
+
+- Pancake POST JSON tới URL đã đăng ký; endpoint phải trả HTTP 200. Sự kiện: `messaging` (tin mới hoặc tin sửa, cả inbox lẫn bình luận), `conversation` (gán, thẻ, đã đọc...), `post`, `subscription`, `connect_status`.
+- Payload `messaging`: `page_id`, `event_type`, `data.conversation` (id, type, from, tags, snippet, seen...), `data.message` (id, conversation_id, message, from {id, name, page_customer_id}, attachments, has_phone, phone_info, inserted_at), `data.post` với bình luận.
+- Điều kiện: Pancake phải bật tính năng Webhook cho Page (liên hệ hỗ trợ Pancake, tốn 1 slot kết nối của gói), rồi đặt URL trong cài đặt công cụ của Page (cần quyền admin). Webhook bị tạm ngưng nếu trong 30 phút lỗi trên 80% và từ 300 lần, nên endpoint phải trả 200 nhanh và xử lý idempotent (một sự kiện có thể gửi hơn một lần).
+
+## Pancake POS Open API
 
 Nguồn: https://docs.pancake.biz/pos/api/ (spec OpenAPI 3.1 tải về ở `openapi.json`, lấy từ `https://docs.pancake.biz/pos/api/openapi.json?lang=vi`).
 

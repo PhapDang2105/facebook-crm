@@ -145,6 +145,8 @@ async function sendCommentReply(conversation, { text, imageUrl, privateReply }) 
 export async function moderateComment(conversation, message, { like = false, hide = false } = {}) {
   const commentId = message?.commentId || conversation.lastCommentId;
   if (!commentId || (!like && !hide)) return;
+  // Public API của Pancake không có thích/ẩn bình luận; Page đó cũng không có token Meta trong CRM.
+  if (conversation.pancakeConversationId) return;
   const pageAccessToken = await getPageAccessToken(conversation.pageId);
   if (like) await likeComment({ commentId, pageAccessToken }).catch(() => {});
   if (hide) await hideComment({ commentId, pageAccessToken }).catch(() => {});

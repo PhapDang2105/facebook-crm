@@ -34,7 +34,7 @@ test('tin inbox của khách → sự kiện cùng dạng webhook Meta: chữ s�
   assert.equal(event.message.type, 'text');
   assert.equal(event.message.id, 'm_abc');
   assert.equal(event.message.createdAt, Date.UTC(2026, 8, 19, 2, 30));
-  assert.deepEqual(event.pancake, { conversationId: '110_555', customerName: 'Chị Mai', pageCustomerId: 'pc-1', assigned: false, staff: false, staffName: '' });
+  assert.deepEqual(event.pancake, { conversationId: '110_555', customerName: 'Chị Mai', pageCustomerId: 'pc-1', assigned: false, staff: false, staffName: '', ad: null });
 });
 
 test('ảnh khách gửi hiện thẳng bằng URL CDN; tin Page gõ trong Pancake là của nhân viên, tin qua Public API là của CRM', () => {
@@ -128,9 +128,9 @@ test('đồng bộ lịch sử: kéo hội thoại inbox rồi tin của từng 
   const conversations = await fetchPancakeConversations({ limit: 60 }, config, fetchMock);
   assert.deepEqual(conversations.map(item => item.id), ['110_901'], 'bình luận bị bỏ, chỉ giữ inbox');
   assert.ok(calls[0].includes('page_access_token=pat-1') && calls[0].includes('type=INBOX'));
-  const first = await syncPancakeConversations({ limit: 60, messagePages: 1 }, config, fetchMock);
+  const first = await syncPancakeConversations({ limit: 60, messagePages: 1, commentLimit: 0 }, config, fetchMock);
   assert.deepEqual(first, { conversations: 1, messages: 2 });
-  const again = await syncPancakeConversations({ limit: 60, messagePages: 1 }, config, fetchMock);
+  const again = await syncPancakeConversations({ limit: 60, messagePages: 1, commentLimit: 0 }, config, fetchMock);
   assert.deepEqual(again, { conversations: 1, messages: 0 }, 'chạy lại không ghi trùng');
   const { listMessages } = await import('../app/messaging-store.mjs');
   const stored = await listMessages('110:901');

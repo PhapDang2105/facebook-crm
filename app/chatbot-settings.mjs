@@ -153,6 +153,10 @@ export function normalizeChatbotSettings(value = {}) {
 // nhận một lần; nhân viên đã tắt bot hay khách đã có đơn thì không bám.
 export const followUpTriggers = ['comment-no-reply', 'inbox-no-reply'];
 
+// Lời tin của kịch bản nằm trong Thiết lập tin nhắn (mẫu mã FOLLOW_UP_…), nhóm
+// "Bám đuổi"; kịch bản chỉ trỏ tới mã mẫu. Mẫu bị tắt thì kịch bản không gửi.
+export const followUpTemplatePrefix = 'FOLLOW_UP_';
+
 export function defaultFollowUpScenarios() {
   return [{
     id: 'comment-freeship',
@@ -160,7 +164,7 @@ export function defaultFollowUpScenarios() {
     enabled: true,
     trigger: 'comment-no-reply',
     delayHours: 12,
-    message: 'Dạ {title} ơi, Giọt Nắng gửi tặng {title} ưu đãi MIỄN PHÍ VẬN CHUYỂN để dùng thử granola ạ 🎁 {Title} chỉ cần nhắn em loại túi muốn dùng và địa chỉ nhận, em lên đơn ngay nhé.',
+    templateId: 'FOLLOW_UP_COMMENT_FREESHIP',
     publicFallback: true
   }];
 }
@@ -171,17 +175,19 @@ export function normalizeFollowUps(value) {
   const seen = new Set();
   const scenarios = rawScenarios.slice(0, 20).map((item, index) => {
     const id = cleanText(item?.id, '', 60).replace(/[^\w-]/g, '') || `scenario-${index + 1}`;
-    const message = String(item?.message ?? '').trim().slice(0, 2000);
+    const templateId = cleanText(item?.templateId, '', 100).replace(/[^\w-]/g, '').toUpperCase();
     return {
       id,
       name: cleanText(item?.name, `Kịch bản ${index + 1}`, 120),
       enabled: item?.enabled !== false,
       trigger: followUpTriggers.includes(item?.trigger) ? item.trigger : 'comment-no-reply',
       delayHours: Math.max(1, Math.min(24 * 14, Number(item?.delayHours) || 12)),
-      message,
+      // Kịch bản cũ còn ghi lời trực tiếp: giữ để không mất, ưu tiên mẫu tin khi có.
+      templateId: templateId.startsWith(followUpTemplatePrefix) ? templateId : '',
+      message: String(item?.message ?? '').trim().slice(0, 2000),
       publicFallback: item?.publicFallback !== false
     };
-  }).filter(item => item.message && !seen.has(item.id) && seen.add(item.id));
+  }).filter(item => (item.templateId || item.message) && !seen.has(item.id) && seen.add(item.id));
   return { enabled: source.enabled === true, scenarios };
 }
 

@@ -169,6 +169,14 @@ const chatbotFollowUpStatus = document.querySelector('#chatbot-follow-up-status'
 let chatbotFollowUpScenarios = [];
 const followUpTriggerLabels = { 'comment-no-reply': 'Khách bình luận, Page đã trả lời, khách im lặng', 'inbox-no-reply': 'Khách nhắn hộp thư, Page đã trả lời, khách im lặng' };
 
+/** Các mẫu FOLLOW_UP_… trong Thiết lập tin nhắn (đang có chữ) để kịch bản chọn; mẫu đã tắt ghi rõ. */
+function followUpTemplateOptions(selected) {
+  const ids = Object.keys(chatbotTemplatesState).filter(id => id.startsWith('FOLLOW_UP_'));
+  if (selected && !ids.includes(selected)) ids.push(selected);
+  const options = ids.map(id => `<option value="${escapeHtml(id)}"${id === selected ? ' selected' : ''}>${escapeHtml(chatbotTemplateLabel(id))}${chatbotTemplatesState[id] ? '' : ' (đã tắt)'}</option>`);
+  return `<option value=""${selected ? '' : ' selected'}>— Chọn mẫu tin —</option>${options.join('')}`;
+}
+
 function renderChatbotFollowUps() {
   if (!chatbotFollowUpList) return;
   chatbotFollowUpList.innerHTML = chatbotFollowUpScenarios.map((scenario, index) => `<div class="follow-up-row${scenario.enabled === false ? ' is-off' : ''}" data-follow-up-index="${index}">
@@ -181,7 +189,8 @@ function renderChatbotFollowUps() {
       <label class="llm-field"><span>Mốc bám đuổi</span><select data-follow-up-field="trigger">${Object.entries(followUpTriggerLabels).map(([value, label]) => `<option value="${value}"${scenario.trigger === value ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select></label>
       <label class="llm-field"><span>Sau (giờ)</span><input class="llm-num" type="number" min="1" max="336" data-follow-up-field="delayHours" value="${Math.max(1, Number(scenario.delayHours) || 12)}"></label>
     </div>
-    <label class="llm-field"><span>Tin gửi khách ({title} = anh/chị theo giới tính, {name} = tên khách)</span><textarea data-follow-up-field="message" maxlength="2000" placeholder="Dạ {title} ơi, Giọt Nắng tặng {title} miễn phí vận chuyển để dùng thử…">${escapeHtml(scenario.message || '')}</textarea></label>
+    <label class="llm-field"><span>Mẫu tin gửi khách (soạn ở Thiết lập tin nhắn → nhóm Bám đuổi; {title} = anh/chị, {name} = tên khách)</span><select data-follow-up-field="templateId">${followUpTemplateOptions(scenario.templateId)}</select></label>
+    ${!scenario.templateId && scenario.message ? `<small class="follow-up-legacy">Lời đang ghi thẳng trên kịch bản: ${escapeHtml(scenario.message.slice(0, 120))}${scenario.message.length > 120 ? '…' : ''} — chọn một mẫu để chuyển sang Thiết lập tin nhắn.</small>` : ''}
     <label class="llm-toggle-line"${scenario.trigger === 'inbox-no-reply' ? ' hidden' : ''}><span>Không nhắn riêng được (khách chưa từng inbox) thì trả lời công khai dưới bình luận</span><span class="llm-switch"><input type="checkbox" data-follow-up-field="publicFallback" ${scenario.publicFallback === false ? '' : 'checked'}><span></span></span></label>
   </div>`).join('');
 }
@@ -195,7 +204,7 @@ chatbotFollowUpList?.addEventListener('input', event => {
   else if (field === 'delayHours') scenario.delayHours = Math.max(1, Math.round(Number(event.target.value) || 12));
   else scenario[field] = event.target.value;
   if (field === 'enabled') row.classList.toggle('is-off', !event.target.checked);
-  if (field === 'trigger') renderChatbotFollowUps();
+  if (field === 'trigger' || field === 'templateId') renderChatbotFollowUps();
 });
 chatbotFollowUpList?.addEventListener('click', event => {
   const remove = event.target.closest('[data-follow-up-remove]');
@@ -204,7 +213,8 @@ chatbotFollowUpList?.addEventListener('click', event => {
   renderChatbotFollowUps();
 });
 chatbotFollowUpAdd?.addEventListener('click', () => {
-  chatbotFollowUpScenarios.push({ id: `scenario-${Date.now().toString(36)}`, name: `Kịch bản ${chatbotFollowUpScenarios.length + 1}`, enabled: true, trigger: 'inbox-no-reply', delayHours: 24, message: '', publicFallback: true });
+  const firstTemplate = Object.keys(chatbotTemplatesState).find(id => id.startsWith('FOLLOW_UP_')) || '';
+  chatbotFollowUpScenarios.push({ id: `scenario-${Date.now().toString(36)}`, name: `Kịch bản ${chatbotFollowUpScenarios.length + 1}`, enabled: true, trigger: 'inbox-no-reply', delayHours: 24, templateId: firstTemplate, message: '', publicFallback: true });
   renderChatbotFollowUps();
   chatbotFollowUpList?.querySelector('.follow-up-row:last-child input[type="text"]')?.focus();
 });
@@ -4264,7 +4274,7 @@ async function loadChatbotSettings() {
     if (chatbotSettingsAddressAiSearch) chatbotSettingsAddressAiSearch.checked = settings.addressAiSearch !== false;
     if (chatbotFollowUpsEnabled) chatbotFollowUpsEnabled.checked = settings.followUps?.enabled === true;
     chatbotFollowUpScenarios = Array.isArray(settings.followUps?.scenarios) ? settings.followUps.scenarios.map(item => ({ ...item })) : [];
-    renderChatbotFollowUps();
+    // Danh sách kịch bản vẽ sau khi mẫu tin nạp xong (renderChatbotTemplateList gọi renderChatbotFollowUps).
     renderChatbotFollowUpStatus();
     chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
     syncChatbotMemoryWindow('number');
@@ -4297,9 +4307,10 @@ function chatbotTemplateLabel(id) {
     ASK_PRODUCT: 'Hỏi lại sản phẩm quan tâm', GIFT_POLICY: 'Chương trình quà tặng', GIFT_POLICY_EMPTY: 'Chưa có quà tặng', PRICE_QUOTE: 'Báo giá sản phẩm',
     PRICE_MIX_TUI_LON: 'Bảng giá mix túi lớn', PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_COMBO: 'Báo giá sản phẩm (đơn vị Combo)',
     ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',
-    BANK_TRANSFER: 'Thông tin chuyển khoản', THANK_YOU: 'Cảm ơn khách hàng'
+    BANK_TRANSFER: 'Thông tin chuyển khoản', THANK_YOU: 'Cảm ơn khách hàng',
+    FOLLOW_UP_COMMENT_FREESHIP: 'Bám đuổi: tặng miễn ship dùng thử'
   };
-  return labels[id] || id.replace(/^PRICE_/, 'Bảng giá · ').replaceAll('_', ' ').toLowerCase().replace(/^./, value => value.toUpperCase());
+  return labels[id] || id.replace(/^PRICE_/, 'Bảng giá · ').replace(/^FOLLOW_UP_/, 'Bám đuổi · ').replaceAll('_', ' ').toLowerCase().replace(/^./, value => value.toUpperCase());
 }
 
 function renderChatbotTemplateList() {
@@ -4312,12 +4323,16 @@ function renderChatbotTemplateList() {
   // Comment replies first under their own heading; everything else is Messenger.
   const groups = [
     ['Bình luận', entries.filter(entry => entry.id.startsWith('COMMENT_'))],
-    ['Tin nhắn', entries.filter(entry => !entry.id.startsWith('COMMENT_'))]
+    // Lời của kịch bản bám đuổi (Cấu hình chung → Bám đuổi trỏ tới các mẫu này).
+    ['Bám đuổi', entries.filter(entry => entry.id.startsWith('FOLLOW_UP_'))],
+    ['Tin nhắn', entries.filter(entry => !entry.id.startsWith('COMMENT_') && !entry.id.startsWith('FOLLOW_UP_'))]
   ].filter(([, items]) => items.length);
   chatbotTemplateList.innerHTML = groups.map(([title, items]) => `<p class="chatbot-template-group">${title}</p>` + items.map(({ id, content }) => `
     <button class="chatbot-template-item ${id === selectedChatbotTemplate ? 'active' : ''}" type="button" data-chatbot-template-id="${escapeHtml(id)}">
       <strong>${escapeHtml(chatbotTemplateLabel(id))}</strong><small>${escapeHtml(String(content).replaceAll('###', ' · '))}</small>
     </button>`).join('')).join('') || '<p class="channel-empty">Không tìm thấy mẫu phù hợp.</p>';
+  // Ô chọn mẫu của kịch bản bám đuổi đọc từ cùng danh sách mẫu: vẽ lại cho khớp.
+  renderChatbotFollowUps();
 }
 
 function renderChatbotTemplateEditor() {

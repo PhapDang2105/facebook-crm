@@ -2462,3 +2462,4 @@ tr:hover .customer-tel button { opacity: .75; }
 .follow-up-row textarea { width: 100%; min-height: 64px; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 6px; font: inherit; font-size: 13px; line-height: 1.4; resize: vertical; }
 .follow-up-status { margin: 0; color: #8a8d91; font-size: 12px; line-height: 1.5; }
 .follow-up-status b { color: #354052; font-weight: 600; }
+.follow-up-legacy { color: #ad6800; font-size: 12px; line-height: 1.4; }

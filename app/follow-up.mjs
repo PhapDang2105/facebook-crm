@@ -56,10 +56,18 @@ function updateFollowUpState(mutate) {
 
 const honorificOf = gender => (gender === 'male' ? 'anh' : gender === 'female' ? 'chị' : 'anh/chị');
 
-/** {title}/{Title}/{name} trong lời kịch bản, rồi sửa "anh/chị" theo giới tính đã biết. */
-export function renderFollowUpMessage(template, conversation = {}) {
+/** Lời của kịch bản: mẫu FOLLOW_UP_… trong Thiết lập tin nhắn (rỗng = mẫu đã tắt), không có thì lời ghi thẳng trên kịch bản. */
+export function followUpScenarioText(scenario, messageTemplates = {}) {
+  if (scenario.templateId) return String(messageTemplates[scenario.templateId] || '').trim();
+  return String(scenario.message || '').trim();
+}
+
+/** {title}/{Title}/{name} trong lời kịch bản, chọn ngẫu nhiên một biến thể "###", rồi sửa "anh/chị" theo giới tính đã biết. */
+export function renderFollowUpMessage(template, conversation = {}, random = Math.random) {
   const title = honorificOf(conversation.gender);
-  const text = String(template || '')
+  const variants = String(template || '').split('###').map(part => part.trim()).filter(Boolean);
+  const chosen = variants.length ? variants[Math.min(variants.length - 1, Math.floor(random() * variants.length))] : '';
+  const text = chosen
     .replace(/\{Title\}/g, title.charAt(0).toUpperCase() + title.slice(1))
     .replace(/\{title\}/g, title)
     .replace(/\{name\}/g, String(conversation.name || '').trim() || title);
@@ -125,10 +133,13 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
   const activatedAt = state.activatedAt || now;
   const store = await readMessagingStore();
   for (const scenario of settings.followUps.scenarios.filter(item => item.enabled)) {
+    const template = followUpScenarioText(scenario, settings.messageTemplates);
+    // Mẫu tin bị tắt trong Thiết lập tin nhắn: kịch bản đứng yên.
+    if (!template) continue;
     for (const candidate of findFollowUpCandidates(store, scenario, { now, activatedAt })) {
       summary.checked += 1;
       if (state.sent[candidate.key]) { summary.skipped += 1; continue; }
-      const text = renderFollowUpMessage(scenario.message, candidate.conversation);
+      const text = renderFollowUpMessage(template, candidate.conversation);
       let outcome = null;
       let error = '';
       // Nhắn riêng vào hộp thư trước; không có hộp thư hay gửi riêng lỗi thì trả lời công khai dưới bình luận (nếu cho).

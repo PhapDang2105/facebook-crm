@@ -105,3 +105,25 @@ test('bám đuổi tắt (hoặc chatbot tắt) thì không gửi gì', async ()
   const botOff = normalizeChatbotSettings({ enabled: false, followUps: { enabled: true } });
   assert.equal((await runFollowUps({ readSettings: async () => botOff, sendMessage: async () => { throw new Error('không được gọi'); }, now })).disabled, true);
 });
+
+test('lời kịch bản lấy từ mẫu FOLLOW_UP_… trong Thiết lập tin nhắn; mẫu tắt thì kịch bản không gửi; nhiều biến thể ### chọn một', async () => {
+  const { followUpScenarioText } = await import('../app/follow-up.mjs');
+  const base = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true } });
+  const scenario = base.followUps.scenarios[0];
+  assert.equal(scenario.templateId, 'FOLLOW_UP_COMMENT_FREESHIP');
+  assert.match(followUpScenarioText(scenario, base.messageTemplates), /MIỄN PHÍ VẬN CHUYỂN/);
+  const off = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true }, messageTemplates: { FOLLOW_UP_COMMENT_FREESHIP: '' } });
+  assert.equal(followUpScenarioText(off.followUps.scenarios[0], off.messageTemplates), '');
+  const sent = [];
+  const write = (await import('node:fs')).writeFileSync;
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: {} }));
+  const fresh = await import(`../app/follow-up.mjs?off=${Date.now()}`);
+  const summary = await fresh.runFollowUps({ readSettings: async () => off, sendMessage: async (c, p) => { sent.push(p); return { message: { mid: 'x' } }; }, now, log: () => {} });
+  assert.equal(summary.sent, 0, 'mẫu tắt: không gửi');
+  assert.equal(sent.length, 0);
+  assert.equal(renderFollowUpMessage('A {title}###B {title}', { gender: 'male' }, () => 0.9), 'B anh');
+  assert.equal(renderFollowUpMessage('A {title}###B {title}', { gender: 'male' }, () => 0), 'A anh');
+  // Mẫu bám đuổi không nằm trong danh sách mẫu đưa cho mô hình.
+  const { buildTemplatePrompt } = await import('../app/chatbot-templates.mjs');
+  assert.doesNotMatch(buildTemplatePrompt(base.messageTemplates), /FOLLOW_UP_/);
+});

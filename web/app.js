@@ -2042,13 +2042,28 @@ processedHistoryButton?.addEventListener('click', () => {
 const orderDayTabs = [...document.querySelectorAll('[data-order-day]')];
 // Tab cuối theo ngày là 2 ngày trước; đơn cũ hơn là quá hẹn.
 const orderDayLastBucket = 2;
-const orderDayEmptyMessages = {
-  0: 'Không có đơn cần xử lý hôm nay',
-  1: 'Không có đơn tồn từ hôm qua',
-  2: 'Không có đơn tồn từ 2 ngày trước',
-  hold: 'Không có đơn nào đang giữ'
-};
 let activeOrderDay = 0;
+
+/** Ngày của tab số `bucket` (0 = hôm nay) ghi rõ "19/09/2026". */
+function orderDayTabDate(bucket) {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - Number(bucket));
+  return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+/** Tab theo ngày ghi rõ ngày ("Ngày 19/09/2026"); gọi mỗi lần vẽ để qua nửa đêm nhãn tự đổi. */
+function labelOrderDayTabs() {
+  for (const tab of orderDayTabs) {
+    if (tab.dataset.orderDay === 'hold') continue;
+    const label = `Ngày ${orderDayTabDate(tab.dataset.orderDay)}`;
+    if (tab.textContent !== label) tab.textContent = label;
+  }
+}
+
+function orderDayEmptyMessage(day) {
+  return String(day) === 'hold' ? 'Không có đơn nào đang giữ' : `Không có đơn cần xử lý ngày ${orderDayTabDate(day)}`;
+}
 
 /** Đọc cột Ngày "16/09 07:52" (có thể kèm năm) thành Date; không đọc được thì null. */
 function parseOrderRowDate(row, data = orderData, today = new Date()) {
@@ -6779,7 +6794,8 @@ function renderOrderData() {
   // table re-renders with badges once the answer arrives.
   const phoneColumn = orderPhoneColumnIndex();
   if (phoneColumn >= 0) refreshPhoneWarnings(rows.map(row => row[phoneColumn]));
-  // Ô chọn ngày của hai màn liệt kê đúng các ngày có đơn trong bảng.
+  // Ô chọn ngày của hai màn liệt kê đúng các ngày có đơn trong bảng; tab Xử lý dữ liệu ghi rõ ngày.
+  labelOrderDayTabs();
   const dateKeys = orderDateKeys(orderData);
   fillOrderDayOptions(orderDayFilter, dateKeys, { allOption: true });
   fillOrderDayOptions(orderExportDay, dateKeys);
@@ -6848,7 +6864,7 @@ function renderOrderData() {
     : processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay));
   renderOrderTable(
     document.querySelector('#order-preview'), headers, searchValue ? processRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processRows,
-    processingRows.length ? orderDayEmptyMessages[activeOrderDay] : 'Không có đơn hàng cần xử lý', () => '',
+    processingRows.length ? orderDayEmptyMessage(activeOrderDay) : 'Không có đơn hàng cần xử lý', () => '',
     {
       rowNotes,
       reviewable: true,

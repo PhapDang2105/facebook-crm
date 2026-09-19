@@ -7,6 +7,7 @@ import { buildExportRows, exportPreviewStreets, exportedOrderData } from './orde
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
+import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { assertUsableAiEndpoint, defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
@@ -346,10 +347,16 @@ function scheduleQrGreetings(changes) {
 /** Sends the tappable Messenger receipt. Kept separate from creating the order so
  *  the chatbot can persist the order first and still close with the receipt. */
 async function sendChatbotOrderReceipt(conversation, order) {
-  // Qua Pancake không gửi được thẻ receipt của Messenger, bản chữ thay thế chỉ
-  // lặp lại tin ORDER_CONFIRMATION khách vừa nhận, nên không gửi gì thêm.
-  if (conversation.pancakeConversationId) return;
   try {
+    // Qua Pancake không gửi được thẻ receipt của Messenger: phiếu được vẽ
+    // thành ảnh và gửi như ảnh đính kèm (bản chữ chỉ lặp lại ORDER_CONFIRMATION).
+    if (conversation.pancakeConversationId) {
+      const image = await renderOrderReceiptImage(order, { merchantName: pancakeConfig.pageName.replace(/\s*\(Pancake\)\s*$/i, '') || 'Giọt Nắng' });
+      await sendConversationMessage(conversation, {
+        attachment: { dataUrl: `data:image/png;base64,${image.toString('base64')}`, name: `phieu-don-${order.id}.png`, type: 'image' }
+      });
+      return;
+    }
     const confirmationText = buildCustomerOrderConfirmation(order);
     await sendConversationMessage(conversation, {
       text: confirmationText,

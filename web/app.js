@@ -6402,7 +6402,6 @@ function setOrderStatuses(keys, status, details = []) {
 const orderExportDay = document.querySelector('#order-export-day');
 const orderExportDate = document.querySelector('#order-export-date');
 const orderExportDateControl = document.querySelector('#order-export-date-control');
-const orderExportSummary = document.querySelector('#order-export-summary');
 
 /** Ngày đơn đang chọn để xuất, lúc 0h theo giờ máy; null khi "Chọn ngày…" chưa có ngày. */
 function selectedExportDate() {
@@ -6450,15 +6449,6 @@ function exportableOrderData(data = orderData) {
   };
 }
 
-/** "Đơn ngày 19/09/2026: 27 đơn · 60 dòng" phía trên bảng xuất. */
-function renderExportSummary(rows) {
-  if (!orderExportSummary) return;
-  const { label } = exportDayLabels();
-  if (!label) { orderExportSummary.textContent = 'Chọn ngày đơn cần xuất.'; return; }
-  const orders = new Set(rows.map(row => String(row[0] || '')).filter(Boolean)).size;
-  orderExportSummary.textContent = rows.length ? `Đơn ngày ${label}: ${orders} đơn · ${rows.length} dòng` : `Đơn ngày ${label}: chưa có đơn đủ điều kiện xuất`;
-}
-
 // ===== Lịch sử xuất kho (server giữ 14 ngày, kèm tệp để tải lại) =====
 const orderExportHistoryButton = document.querySelector('#order-export-history-button');
 const orderExportHistoryPanel = document.querySelector('#order-export-history-panel');
@@ -6472,8 +6462,11 @@ async function renderExportHistory() {
     orderExportHistoryPanel.innerHTML = `<p>${escapeHtml(error.message || 'Chưa đọc được lịch sử xuất.')}</p>`;
     return;
   }
+  // Chưa xuất lần nào thì không mở khung trống.
   if (!items.length) {
-    orderExportHistoryPanel.innerHTML = '<p class="order-archive-count">Chưa có lần xuất nào trong 14 ngày.</p>';
+    orderExportHistoryPanel.innerHTML = '';
+    orderExportHistoryPanel.classList.add('hidden');
+    orderExportHistoryButton?.setAttribute('aria-expanded', 'false');
     return;
   }
   const dayLabel = key => {
@@ -6888,7 +6881,6 @@ async function renderExportPreview() {
     orderExport.disabled = rows.length === 0;
     orderExport.hidden = rows.length === 0;
   }
-  renderExportSummary(rows);
   renderExportLocationCheck(locationCheck, rows.length);
   if (!rows.length) {
     renderEmptyState(preview, 'Chưa có dữ liệu xuất');

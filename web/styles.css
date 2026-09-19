@@ -442,7 +442,7 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customers-table td.customer-time { color: #4b4f56; white-space: nowrap; }
 .customers-table td.customer-money { text-align: right; white-space: nowrap; }
 .order-stage[data-order-panel="import"] .data-preview { margin-top: 14.4px; }
-.order-import-controls { display: grid; grid-template-columns: minmax(252px, 468px) minmax(162px, 207px) max-content max-content max-content; align-items: center; gap: 10.8px; max-width: 990px; }
+.order-import-controls { display: grid; grid-template-columns: minmax(252px, 468px) minmax(162px, 207px) minmax(140px, 172px) max-content max-content max-content; align-items: center; gap: 10.8px; max-width: 1200px; }
 .order-search-control,
 .order-filter-control { display: block; }
 .order-search-control input,
@@ -655,7 +655,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .export-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
 .export-toolbar .order-filter-control { display: inline-block; }
 .export-toolbar .order-filter-control input[type="date"] { box-sizing: border-box; height: 37.8px; padding: 0 10px; color: #17251c; background: #f6fbf7; border: 0.9px solid #b9d6c0; border-radius: 8.1px; font: inherit; font-size: 12.6px; }
-.export-summary { color: #4b5563; font-size: 12.6px; font-weight: 500; }
 .export-history-download { color: #1677ff; font-weight: 600; text-decoration: none; }
 .export-history-download:hover { text-decoration: underline; }
 .export-button--skip { color: #b42318; background: #fff; border: 0.9px solid #f0b4b4; }

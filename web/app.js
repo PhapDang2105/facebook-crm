@@ -6098,11 +6098,32 @@ function sendCurrentMessage() {
   messageComposerInput.focus();
 }
 
+/**
+ * Chữ để sao chép: bỏ dấu định dạng của Messenger (*đậm*, _nghiêng_, `mã`),
+ * vì tin gửi qua API không được Messenger vẽ lại các dấu này, dán vào ô soạn
+ * rồi gửi sẽ thành ký tự lạ. ~gạch~ đổi thành chữ gạch ngang (ký tự kết hợp),
+ * đúng cách bot đang ghi giá gốc nên khách vẫn thấy gạch.
+ */
+function stripMessengerMarkers(value) {
+  const strike = text => [...text].map(char => `${char}̶`).join('');
+  let text = String(value ?? '');
+  for (let pass = 0; pass < 3; pass += 1) {
+    const before = text;
+    text = text
+      .replace(/(?<![\p{L}\p{N}~])~(\S|\S[^~\n]*?\S)~(?![\p{L}\p{N}~])/gu, (_, inner) => strike(inner))
+      .replace(/(?<![\p{L}\p{N}*])\*(\S|\S[^*\n]*?\S)\*(?![\p{L}\p{N}*])/gu, '$1')
+      .replace(/(?<![\p{L}\p{N}_])_(\S|\S[^_\n]*?\S)_(?![\p{L}\p{N}_])/gu, '$1')
+      .replace(/(?<![\p{L}\p{N}`])`(\S|\S[^`\n]*?\S)`(?![\p{L}\p{N}`])/gu, '$1');
+    if (text === before) break;
+  }
+  return text;
+}
+
 /** Message text as shown, without the pin and reaction badges layered on top. */
 function getMessageRowText(row) {
   const bubble = row?.querySelector('.bubble');
   if (!bubble || bubble.classList.contains('bubble-recalled')) return '';
-  if (row?.dataset.copyText !== undefined) return row.dataset.copyText.trim();
+  if (row?.dataset.copyText !== undefined) return stripMessengerMarkers(row.dataset.copyText).trim();
   const copy = bubble.cloneNode(true);
   copy.querySelectorAll('.message-pin-badge, .message-reaction').forEach(badge => badge.remove());
   return copy.textContent.trim();

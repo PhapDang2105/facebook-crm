@@ -304,6 +304,15 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.lo
 export async function storePancakeEvents(events, { fromWebhook = false } = {}) {
   if (!events.length) return [];
   const changes = await updateMessagingStore(store => {
+    // Tin ảnh đã có URL từ trước thì bản dội lại không có gì mới để báo hộp thư.
+    const lackedPicture = new Set(events
+      .filter(event => event.type === 'message' && event.message.dataUrl)
+      .filter(event => {
+        const id = `${event.pageId}:${event.psid}`;
+        const stored = (store.messages[id] || []).find(item => item.id === event.message.id);
+        return stored && !stored.dataUrl;
+      })
+      .map(event => event.message.id));
     const applied = applyWebhookEvents(store, events);
     for (const event of events) {
       const isComment = event.type === 'comment';
@@ -325,7 +334,7 @@ export async function storePancakeEvents(events, { fromWebhook = false } = {}) {
       } else {
         // Ảnh CRM gửi đi được ghi trước khi Pancake dội lại; bản dội mang URL ảnh
         // trên CDN (đã gộp vào tin cùng mã), báo cho hộp thư vẽ lại.
-        if (!inserted && event.message.dataUrl) {
+        if (!inserted && lackedPicture.has(messageId)) {
           const stored = (store.messages[conversation.id] || []).find(item => item.id === messageId);
           if (stored) applied.push({ type: 'message', conversation, message: stored, updated: true });
         }

@@ -1585,12 +1585,17 @@ function deleteOrderRows(indexes, { undoable = true, label = '' } = {}) {
     ? orderData.rows.filter((row, index) => removing.has(index) && isSystemOrderId(row[idColumn])).map(row => String(row[idColumn]))
     : [];
   if (dismissedIds.length) dismissChatbotOrders(dismissedIds);
+  // Xóa một đơn trùng: đơn còn lại cùng số điện thoại được ghi "Đơn trùng" ở
+  // Ghi chú xử lý, để Xử lý dữ liệu biết khách đã gửi nhiều lần.
+  const removedPhones = new Set(orderData.rows.filter((row, index) => removing.has(index)).map(row => normalizeRowPhone(row[orderPhoneColumnIndex()])).filter(Boolean));
   orderData = { headers: orderData.headers, rows: orderData.rows.filter((row, index) => !removing.has(index)) };
   if (!orderData.rows.length) orderData = { headers: [], rows: [] };
+  const marked = markDuplicateSurvivors(removedPhones);
   commitOrderData();
   renderOrderData();
   if (!undoable || !restore.length) return;
   pushUndo(label || (restore.length > 1 ? `xóa ${restore.length} dòng` : 'xóa dòng'), () => {
+    unmarkDuplicateSurvivors(marked);
     const rows = [...orderData.rows];
     for (const entry of restore) rows.splice(entry.index, 0, entry.row);
     orderData = { headers: orderData.headers.length ? orderData.headers : headersBefore, rows };
@@ -1598,6 +1603,46 @@ function deleteOrderRows(indexes, { undoable = true, label = '' } = {}) {
     commitOrderData();
     renderOrderData();
   });
+}
+
+const duplicateSurvivorNote = 'Đơn trùng';
+/**
+ * Sau khi xóa đơn có số điện thoại trong `phones`: các dòng còn lại cùng số
+ * nhận ghi chú "Đơn trùng" (không ghi hai lần); đơn hệ thống ghi luôn về máy
+ * chủ. Trả về danh sách dòng đã ghi để hoàn tác.
+ */
+function markDuplicateSurvivors(phones) {
+  const phoneIndex = orderPhoneColumnIndex();
+  const noteIndex = orderColumnIndex('ghi chu xu ly');
+  const idIndex = orderColumnIndex('ma don hang');
+  if (!phones.size || phoneIndex < 0 || noteIndex < 0) return [];
+  const marked = [];
+  orderData.rows.forEach((row, index) => {
+    if (!phones.has(normalizeRowPhone(row[phoneIndex]))) return;
+    const previous = String(row[noteIndex] || '');
+    if (previous.split(/\s*[·;,]\s*/).some(part => part.trim().toLowerCase() === duplicateSurvivorNote.toLowerCase())) return;
+    row[noteIndex] = previous ? `${duplicateSurvivorNote} · ${previous}` : duplicateSurvivorNote;
+    marked.push({ row, previous, serverId: idIndex >= 0 ? serverOrderIdOf(row[idIndex]) : '' });
+  });
+  for (const entry of marked) if (entry.serverId) saveStaffNoteToServer(entry.serverId, entry.row[noteIndex]);
+  return marked;
+}
+
+function unmarkDuplicateSurvivors(marked) {
+  const noteIndex = orderColumnIndex('ghi chu xu ly');
+  if (noteIndex < 0) return;
+  for (const entry of marked) {
+    entry.row[noteIndex] = entry.previous;
+    if (entry.serverId) saveStaffNoteToServer(entry.serverId, entry.previous);
+  }
+}
+
+function saveStaffNoteToServer(serverId, staffNote) {
+  fetch(`/api/customer-orders/${encodeURIComponent(serverId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ staffNote })
+  }).catch(() => {});
 }
 
 /**

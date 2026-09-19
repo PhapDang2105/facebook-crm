@@ -300,6 +300,20 @@ async function answerChange(change, settings, results, dependencies) {
           privateError = error.message;
         }
       }
+      // Ảnh của mẫu (ảnh sản phẩm) đi sau tin nhắn riêng như tin Messenger
+      // thường vào hộp thư của khách. Facebook chỉ cho một tin nhắn riêng mỗi
+      // bình luận nên tin đó phải là bảng giá; ảnh gửi thêm được thì tốt, bị
+      // chặn (khách chưa nhắn lại) thì bỏ qua, không báo lỗi.
+      if (!privateError && reply.images?.length && getConversation) {
+        const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
+        for (const imageUrl of inbox ? reply.images : []) {
+          try {
+            await sendMessage(inbox, { imageUrl });
+          } catch {
+            break;
+          }
+        }
+      }
       const publicReply = renderChatbotReply({ template_id: privateError ? 'COMMENT_PUBLIC_FALLBACK' : 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
       for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
       // Like the comment so the customer sees it was noticed; hide it when it

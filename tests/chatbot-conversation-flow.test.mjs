@@ -209,3 +209,33 @@ test('ảnh không gửi được thì bỏ ảnh, chữ vẫn tới khách, l�
   assert.equal(results[0].templateId, 'PRICE_QUOTE');
   assert.match(saved[0].botLastError, /ảnh không gửi được/);
 });
+
+test('bình luận: nhắn riêng bảng giá (một tin), rồi ảnh sản phẩm gửi vào hộp thư như tin thường; ảnh bị chặn thì bỏ qua', async () => {
+  const sent = [];
+  const commentThread = { id: 'page:comment:user:post1', pageId: 'page', psid: 'user', source: 'comment', name: 'Khách', botEnabled: true, lastCommentId: 'c1' };
+  const inboxThread = { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách' };
+  const run = (failImages) => processChatbotChanges([{ type: 'message', conversation: commentThread, message: { id: 'c1', direction: 'incoming', type: 'text', text: 'túi xanh giá sao', createdAt: 1000, commentId: 'c1' } }], {
+    readSettings: async () => settings,
+    listMessages: async () => [],
+    getConversation: async id => (id === 'page:user' ? inboxThread : commentThread),
+    sendMessage: async (conversation, message) => {
+      if (message.imageUrl && failImages) throw new Error('(#10) ngoài cửa sổ nhắn tin');
+      sent.push(`${conversation.id}|${message.privateReply ? 'riêng' : message.imageUrl ? 'ảnh' : 'công khai'}|${(message.text || message.imageUrl).slice(0, 12)}`);
+    },
+    saveBotState: async () => {},
+    moderateComment: async () => {},
+    requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá'], images: ['https://x/1.png', 'https://x/2.png'], conversationId: '', handoff: false })
+  });
+  await run(false);
+  // Câu công khai chọn ngẫu nhiên một biến thể nên chỉ so nơi gửi và loại tin.
+  assert.deepEqual(sent.map(item => item.split('|').slice(0, 2).join('|')), [
+    'page:comment:user:post1|riêng',
+    'page:user|ảnh',
+    'page:user|ảnh',
+    'page:comment:user:post1|công khai'
+  ]);
+  assert.match(sent[0], /Dạ em thấy a/);
+  sent.length = 0;
+  await run(true);
+  assert.deepEqual(sent.map(item => item.split('|')[1]), ['riêng', 'công khai'], 'ảnh bị chặn thì bỏ qua, vẫn trả lời công khai');
+});

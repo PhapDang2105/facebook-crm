@@ -395,7 +395,7 @@ const apiRoot = config => config.apiBase.replace(/\/+$/, '');
  * luận `commentId`), private_replies (nhắn riêng cho người bình luận: cần
  * `postId`, `commentId`, `fromId`).
  */
-export async function sendPancakeMessage({ pageId, conversationId, text = '', contentIds = [], action = 'reply_inbox', commentId = '', postId = '', fromId = '' }, config = defaultConfig, fetchImpl = fetch) {
+export async function sendPancakeMessage({ pageId, conversationId, text = '', contentIds = [], action = 'reply_inbox', commentId = '', postId = '', fromId = '' }, config = defaultConfig, fetchImpl = fetch, attempt = 0) {
   if (!config.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
   if (!conversationId) throw new Error('Hội thoại này chưa có mã Pancake để gửi.');
   if (!text && !contentIds.length) throw new Error('Tin nhắn trống.');
@@ -418,6 +418,12 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
     });
     let body = {};
     try { body = await response.json(); } catch {}
+    // Quá 5 lần gọi/giây: nghỉ rồi gửi lại (tối đa 3 lần).
+    if (response.status === 429 && attempt < 3) {
+      clearTimeout(timer);
+      await pause(1500 * (attempt + 1));
+      return sendPancakeMessage({ pageId, conversationId, text, contentIds, action, commentId, postId, fromId }, config, fetchImpl, attempt + 1);
+    }
     if (!response.ok || body.success === false) {
       // Pancake hay trả 200 + success:false, lý do nằm trong original_error.
       const reason = body.message || body.error
@@ -432,7 +438,7 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
 }
 
 /** Tải một tệp (ảnh, video…) lên Page trong Pancake; mã trả về dùng để gửi kèm tin. */
-export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg', mime = 'application/octet-stream' }, config = defaultConfig, fetchImpl = fetch) {
+export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg', mime = 'application/octet-stream' }, config = defaultConfig, fetchImpl = fetch, attempt = 0) {
   if (!config.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
   if (!buffer?.length) throw new Error('Tệp trống.');
   const url = `${apiRoot(config)}/v1/pages/${encodeURIComponent(pageId)}/upload_contents?page_access_token=${encodeURIComponent(config.pageAccessToken)}`;
@@ -444,6 +450,12 @@ export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg
     const response = await fetchImpl(url, { method: 'POST', body: form, signal: controller.signal });
     let body = {};
     try { body = await response.json(); } catch {}
+    // Quá 5 lần gọi/giây: nghỉ rồi tải lại (tối đa 3 lần).
+    if (response.status === 429 && attempt < 3) {
+      clearTimeout(timer);
+      await pause(1500 * (attempt + 1));
+      return uploadPancakeContent({ pageId, buffer, filename, mime }, config, fetchImpl, attempt + 1);
+    }
     if (!response.ok || body.success === false || !body.id) {
       throw new Error(`Pancake không nhận tệp (${response.status}): ${body.message || body.error || 'không rõ lý do'}`);
     }
@@ -540,7 +552,15 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   let message;
   const extraMessages = [];
   if (pictures.length) {
-    const upload = () => Promise.all(pictures.map(url => pancakeContentIdForImage(target.pageId, url, config, fetchImpl).then(item => item.id)));
+    // Tải tuần tự, nghỉ giữa các ảnh: Pancake giới hạn 5 lần gọi mỗi giây mỗi Page.
+    const upload = async () => {
+      const ids = [];
+      for (const [index, url] of pictures.entries()) {
+        if (index) await pause(250);
+        ids.push((await pancakeContentIdForImage(target.pageId, url, config, fetchImpl)).id);
+      }
+      return ids;
+    };
     let sent;
     try {
       sent = await sendPancakeMessage({ ...target, contentIds: await upload() }, config, fetchImpl);

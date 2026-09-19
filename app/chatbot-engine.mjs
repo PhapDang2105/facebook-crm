@@ -306,7 +306,7 @@ async function answerChange(change, settings, results, dependencies) {
       // chặn (khách chưa nhắn lại) thì bỏ qua, không báo lỗi.
       if (!privateError && reply.images?.length && getConversation) {
         const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
-        if (inbox) await sendMessage(inbox, { imageUrls: reply.images }).catch(() => {});
+        if (inbox) await sendMessage(inbox, { imageUrls: reply.images }).catch(error => console.error(`Ảnh sau tin nhắn riêng không gửi được (${conversation.id}): ${error.message}`));
       }
       const publicReply = renderChatbotReply({ template_id: privateError ? 'COMMENT_PUBLIC_FALLBACK' : 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
       for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });

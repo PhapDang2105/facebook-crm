@@ -158,6 +158,8 @@ export function buildCustomerOrderConfirmation(order) {
     `📍 Giao đến: ${order.name} — ${order.address}`,
     `💳 Thanh toán: ${payment}`,
     ...(order.gift ? [`🎁 Quà tặng: ${order.gift}`] : []),
+    // Đơn bot ghi giá niêm yết từng dòng và giảm combo thành một dòng riêng: nói rõ để khách cộng lại được.
+    ...(Number(order.discount) > 0 ? [`🏷️ Giảm giá: -${formatOrderMoney(order.discount)}`] : []),
     `💰 Tổng đơn: ${formatOrderMoney(order.total)}`,
     'Giọt Nắng đã nhận đơn. Bạn vui lòng kiểm tra lại thông tin và phản hồi ngay nếu cần điều chỉnh. Cảm ơn bạn!'
   ].join('\n\n');

@@ -160,6 +160,69 @@ const chatbotSettingsCommentLike = document.querySelector('#chatbot-settings-com
 const chatbotSettingsCommentHide = document.querySelector('#chatbot-settings-comment-hide');
 const chatbotSettingsAddressAi = document.querySelector('#chatbot-settings-address-ai');
 const chatbotSettingsAddressAiSearch = document.querySelector('#chatbot-settings-address-ai-search');
+
+// ===== Bám đuổi: kịch bản chạy nền (Cấu hình chung) =====
+const chatbotFollowUpsEnabled = document.querySelector('#chatbot-settings-follow-ups-enabled');
+const chatbotFollowUpList = document.querySelector('#chatbot-follow-up-list');
+const chatbotFollowUpAdd = document.querySelector('#chatbot-follow-up-add');
+const chatbotFollowUpStatus = document.querySelector('#chatbot-follow-up-status');
+let chatbotFollowUpScenarios = [];
+const followUpTriggerLabels = { 'comment-no-reply': 'Khách bình luận, Page đã trả lời, khách im lặng', 'inbox-no-reply': 'Khách nhắn hộp thư, Page đã trả lời, khách im lặng' };
+
+function renderChatbotFollowUps() {
+  if (!chatbotFollowUpList) return;
+  chatbotFollowUpList.innerHTML = chatbotFollowUpScenarios.map((scenario, index) => `<div class="follow-up-row${scenario.enabled === false ? ' is-off' : ''}" data-follow-up-index="${index}">
+    <div class="follow-up-row-head">
+      <input type="text" data-follow-up-field="name" value="${escapeHtml(scenario.name || '')}" maxlength="120" placeholder="Tên kịch bản">
+      <label class="llm-switch" title="Bật kịch bản"><input type="checkbox" data-follow-up-field="enabled" ${scenario.enabled === false ? '' : 'checked'}><span></span></label>
+      <button class="follow-up-remove" type="button" data-follow-up-remove="${index}" title="Xóa kịch bản" aria-label="Xóa kịch bản">×</button>
+    </div>
+    <div class="follow-up-grid">
+      <label class="llm-field"><span>Mốc bám đuổi</span><select data-follow-up-field="trigger">${Object.entries(followUpTriggerLabels).map(([value, label]) => `<option value="${value}"${scenario.trigger === value ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select></label>
+      <label class="llm-field"><span>Sau (giờ)</span><input class="llm-num" type="number" min="1" max="336" data-follow-up-field="delayHours" value="${Math.max(1, Number(scenario.delayHours) || 12)}"></label>
+    </div>
+    <label class="llm-field"><span>Tin gửi khách ({title} = anh/chị theo giới tính, {name} = tên khách)</span><textarea data-follow-up-field="message" maxlength="2000" placeholder="Dạ {title} ơi, Giọt Nắng tặng {title} miễn phí vận chuyển để dùng thử…">${escapeHtml(scenario.message || '')}</textarea></label>
+    <label class="llm-toggle-line"${scenario.trigger === 'inbox-no-reply' ? ' hidden' : ''}><span>Không nhắn riêng được (khách chưa từng inbox) thì trả lời công khai dưới bình luận</span><span class="llm-switch"><input type="checkbox" data-follow-up-field="publicFallback" ${scenario.publicFallback === false ? '' : 'checked'}><span></span></span></label>
+  </div>`).join('');
+}
+
+chatbotFollowUpList?.addEventListener('input', event => {
+  const field = event.target.dataset.followUpField;
+  const row = event.target.closest('[data-follow-up-index]');
+  const scenario = chatbotFollowUpScenarios[Number(row?.dataset.followUpIndex)];
+  if (!field || !scenario) return;
+  if (field === 'enabled' || field === 'publicFallback') scenario[field] = event.target.checked;
+  else if (field === 'delayHours') scenario.delayHours = Math.max(1, Math.round(Number(event.target.value) || 12));
+  else scenario[field] = event.target.value;
+  if (field === 'enabled') row.classList.toggle('is-off', !event.target.checked);
+  if (field === 'trigger') renderChatbotFollowUps();
+});
+chatbotFollowUpList?.addEventListener('click', event => {
+  const remove = event.target.closest('[data-follow-up-remove]');
+  if (!remove) return;
+  chatbotFollowUpScenarios.splice(Number(remove.dataset.followUpRemove), 1);
+  renderChatbotFollowUps();
+});
+chatbotFollowUpAdd?.addEventListener('click', () => {
+  chatbotFollowUpScenarios.push({ id: `scenario-${Date.now().toString(36)}`, name: `Kịch bản ${chatbotFollowUpScenarios.length + 1}`, enabled: true, trigger: 'inbox-no-reply', delayHours: 24, message: '', publicFallback: true });
+  renderChatbotFollowUps();
+  chatbotFollowUpList?.querySelector('.follow-up-row:last-child input[type="text"]')?.focus();
+});
+
+async function renderChatbotFollowUpStatus() {
+  if (!chatbotFollowUpStatus) return;
+  try {
+    const status = await readApiResponse(await fetch('/api/chatbot/follow-ups'));
+    const parts = [];
+    if (status.activatedAt) parts.push(`Bật từ <b>${escapeHtml(formatCustomerPanelTime(status.activatedAt))}</b>`);
+    if (status.lastRunAt) parts.push(`lần xét cuối <b>${escapeHtml(formatCustomerPanelTime(status.lastRunAt))}</b> (xét ${status.lastRun?.checked || 0}, gửi ${status.lastRun?.sent || 0})`);
+    parts.push(`đã gửi tổng <b>${status.sentTotal || 0}</b> tin`);
+    const recent = (status.recent || []).filter(item => !item.error).slice(0, 3).map(item => `${escapeHtml(item.name || item.conversationId)} (${escapeHtml(formatCustomerPanelTime(item.at))})`);
+    chatbotFollowUpStatus.innerHTML = `${parts.join(' · ')}${recent.length ? `<br>Gần nhất: ${recent.join(', ')}` : ''}`;
+  } catch {
+    chatbotFollowUpStatus.textContent = '';
+  }
+}
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
 const chatbotSettingsMemoryWindowRange = document.querySelector('#chatbot-settings-memory-window-range');
 const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
@@ -4199,6 +4262,10 @@ async function loadChatbotSettings() {
     if (chatbotSettingsCommentHide) chatbotSettingsCommentHide.value = settings.commentHide || 'phone';
     if (chatbotSettingsAddressAi) chatbotSettingsAddressAi.checked = settings.addressAi !== false;
     if (chatbotSettingsAddressAiSearch) chatbotSettingsAddressAiSearch.checked = settings.addressAiSearch !== false;
+    if (chatbotFollowUpsEnabled) chatbotFollowUpsEnabled.checked = settings.followUps?.enabled === true;
+    chatbotFollowUpScenarios = Array.isArray(settings.followUps?.scenarios) ? settings.followUps.scenarios.map(item => ({ ...item })) : [];
+    renderChatbotFollowUps();
+    renderChatbotFollowUpStatus();
     chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
     syncChatbotMemoryWindow('number');
     chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;
@@ -7650,6 +7717,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         commentHide: chatbotSettingsCommentHide?.value || 'phone',
         addressAi: chatbotSettingsAddressAi?.checked !== false,
         addressAiSearch: chatbotSettingsAddressAiSearch?.checked !== false,
+        followUps: { enabled: chatbotFollowUpsEnabled?.checked === true, scenarios: chatbotFollowUpScenarios },
         memoryWindow: chatbotSettingsMemoryWindow.value,
         structuredOutput: chatbotSettingsStructuredOutput.checked,
         retryCount: chatbotSettingsRetryCount.value,

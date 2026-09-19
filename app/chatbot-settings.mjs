@@ -28,6 +28,8 @@ export const defaultChatbotSettings = Object.freeze({
   // Địa chỉ bộ đọc luật không tách đủ ba cấp thì hỏi Gemini (kèm tra cứu
   // Google Search); chỉ nhận câu trả lời khớp danh mục kho.
   addressAi: true,
+  // Bám đuổi (kịch bản nền): tắt cho tới khi chủ shop bật ở Cấu hình chung.
+  followUps: { enabled: false, scenarios: [] },
   addressAiSearch: true,
   messageTemplates: {}
 });
@@ -137,9 +139,50 @@ export function normalizeChatbotSettings(value = {}) {
     commentHide: ['none', 'phone', 'all'].includes(value.commentHide) ? value.commentHide : defaultChatbotSettings.commentHide,
     addressAi: value.addressAi !== false,
     addressAiSearch: value.addressAiSearch !== false,
+    followUps: normalizeFollowUps(value.followUps),
     messageTemplates,
     updatedAt: Number(value.updatedAt) || Date.now()
   };
+}
+
+// ===== Bám đuổi =====
+//
+// Kịch bản chạy nền: khách im lặng sau khi Page trả lời thì sau N giờ gửi một
+// tin (ưu đãi dùng thử…). Hai loại mốc: khách bình luận rồi im (comment-no-reply)
+// và khách nhắn hộp thư rồi im (inbox-no-reply). Mỗi khách mỗi kịch bản chỉ
+// nhận một lần; nhân viên đã tắt bot hay khách đã có đơn thì không bám.
+export const followUpTriggers = ['comment-no-reply', 'inbox-no-reply'];
+
+export function defaultFollowUpScenarios() {
+  return [{
+    id: 'comment-freeship',
+    name: 'Bình luận không phản hồi: tặng miễn ship dùng thử',
+    enabled: true,
+    trigger: 'comment-no-reply',
+    delayHours: 12,
+    message: 'Dạ {title} ơi, Giọt Nắng gửi tặng {title} ưu đãi MIỄN PHÍ VẬN CHUYỂN để dùng thử granola ạ 🎁 {Title} chỉ cần nhắn em loại túi muốn dùng và địa chỉ nhận, em lên đơn ngay nhé.',
+    publicFallback: true
+  }];
+}
+
+export function normalizeFollowUps(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const rawScenarios = Array.isArray(source.scenarios) ? source.scenarios : defaultFollowUpScenarios();
+  const seen = new Set();
+  const scenarios = rawScenarios.slice(0, 20).map((item, index) => {
+    const id = cleanText(item?.id, '', 60).replace(/[^\w-]/g, '') || `scenario-${index + 1}`;
+    const message = String(item?.message ?? '').trim().slice(0, 2000);
+    return {
+      id,
+      name: cleanText(item?.name, `Kịch bản ${index + 1}`, 120),
+      enabled: item?.enabled !== false,
+      trigger: followUpTriggers.includes(item?.trigger) ? item.trigger : 'comment-no-reply',
+      delayHours: Math.max(1, Math.min(24 * 14, Number(item?.delayHours) || 12)),
+      message,
+      publicFallback: item?.publicFallback !== false
+    };
+  }).filter(item => item.message && !seen.has(item.id) && seen.add(item.id));
+  return { enabled: source.enabled === true, scenarios };
 }
 
 export function publicChatbotSettings(value = {}) {

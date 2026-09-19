@@ -535,6 +535,14 @@
                         <label class="llm-field"><span>Ẩn bình luận của khách</span><select id="chatbot-settings-comment-hide"><option value="phone">Chỉ khi có số điện thoại</option><option value="all">Luôn ẩn</option><option value="none">Không ẩn</option></select></label>
                       </section>
 
+                      <section class="llm-block" id="chatbot-follow-ups">
+                        <div class="llm-block-head"><span class="llm-label">BÁM ĐUỔI</span><label class="llm-switch"><input id="chatbot-settings-follow-ups-enabled" type="checkbox"><span></span></label></div>
+                        <label class="llm-toggle-line"><span>Khách im lặng sau khi Page trả lời thì sau số giờ đã đặt gửi một tin theo kịch bản. Mỗi khách mỗi kịch bản một lần; nhân viên đã tắt bot hay khách đã có đơn thì không bám. Chỉ xét lần trả lời sau khi bật.</span></label>
+                        <div class="follow-up-list" id="chatbot-follow-up-list"></div>
+                        <button class="llm-add-message" id="chatbot-follow-up-add" type="button"><span class="llm-plus">+</span> Thêm kịch bản</button>
+                        <p class="follow-up-status" id="chatbot-follow-up-status"></p>
+                      </section>
+
                       <section class="llm-block">
                         <div class="llm-block-head"><span class="llm-label">TẦM NHÌN<svg class="llm-info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11.2v5"></path><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"></circle></svg></span><label class="llm-switch"><input id="chatbot-settings-vision" type="checkbox"><span></span></label></div>
                       </section>

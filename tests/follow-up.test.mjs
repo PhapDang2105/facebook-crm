@@ -1,0 +1,107 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+const directory = mkdtempSync(path.join(tmpdir(), 'followup-'));
+process.env.META_CONVERSATIONS_PATH = path.join(directory, 'meta-conversations.json');
+process.env.FOLLOW_UPS_PATH = path.join(directory, 'follow-ups.json');
+
+const HOUR = 60 * 60 * 1000;
+const now = Date.parse('2026-09-19T12:00:00Z');
+const page = '110';
+const message = (direction, createdAt, extra = {}) => ({ id: `m${createdAt}${direction}`, mid: '', direction, type: 'text', text: 'x', createdAt, status: 'sent', ...extra });
+
+// Kho: bốn khách bình luận với các tình huống khác nhau, một khách hộp thư.
+writeFileSync(process.env.META_CONVERSATIONS_PATH, JSON.stringify({
+  conversations: [
+    // A: bình luận, Page nhắn riêng 13 giờ trước, khách im → bám (riêng).
+    { id: `${page}:comment:a:p1`, pageId: page, psid: 'a', name: 'Nhung Vũ', source: 'comment', gender: 'female', genderSource: 'name' },
+    { id: `${page}:a`, pageId: page, psid: 'a', name: 'Nhung Vũ', source: 'inbox', gender: 'female', genderSource: 'name', pancakeConversationId: '110_a' },
+    // B: bình luận, Page trả lời công khai 14 giờ trước, khách chưa từng inbox → bám công khai.
+    { id: `${page}:comment:b:p1`, pageId: page, psid: 'b', name: 'Tuấn Lê', source: 'comment' },
+    // C: bình luận, Page trả lời 13 giờ trước nhưng khách đã nhắn lại 2 giờ trước → không bám.
+    { id: `${page}:comment:c:p1`, pageId: page, psid: 'c', name: 'Cẩm Loan', source: 'comment' },
+    { id: `${page}:c`, pageId: page, psid: 'c', name: 'Cẩm Loan', source: 'inbox' },
+    // D: bình luận, Page trả lời 5 giờ trước → chưa tới 12 giờ.
+    { id: `${page}:comment:d:p1`, pageId: page, psid: 'd', name: 'Sơn', source: 'comment' },
+    // E: bình luận, Page trả lời 13 giờ trước nhưng nhân viên đã tắt bot ở hộp thư → không bám.
+    { id: `${page}:comment:e:p1`, pageId: page, psid: 'e', name: 'Hương', source: 'comment' },
+    { id: `${page}:e`, pageId: page, psid: 'e', name: 'Hương', source: 'inbox', botEnabled: false },
+    // F: khách hộp thư hỏi, Page trả lời 30 giờ trước, khách im → kịch bản inbox 24 giờ.
+    { id: `${page}:f`, pageId: page, psid: 'f', name: 'Hùng Phạm', source: 'inbox', gender: 'male', genderSource: 'name' }
+  ],
+  messages: {
+    [`${page}:comment:a:p1`]: [message('incoming', now - 14 * HOUR)],
+    [`${page}:a`]: [message('outgoing', now - 13 * HOUR, { privateReply: true })],
+    [`${page}:comment:b:p1`]: [message('incoming', now - 15 * HOUR), message('outgoing', now - 14 * HOUR)],
+    [`${page}:comment:c:p1`]: [message('incoming', now - 14 * HOUR), message('outgoing', now - 13 * HOUR)],
+    [`${page}:c`]: [message('incoming', now - 2 * HOUR)],
+    [`${page}:comment:d:p1`]: [message('incoming', now - 6 * HOUR), message('outgoing', now - 5 * HOUR)],
+    [`${page}:comment:e:p1`]: [message('incoming', now - 14 * HOUR), message('outgoing', now - 13 * HOUR)],
+    [`${page}:f`]: [message('incoming', now - 31 * HOUR), message('outgoing', now - 30 * HOUR)]
+  },
+  commentIndex: {}
+}));
+
+const { runFollowUps, findFollowUpCandidates, renderFollowUpMessage, followUpStatus } = await import('../app/follow-up.mjs');
+const { normalizeChatbotSettings, defaultFollowUpScenarios } = await import('../app/chatbot-settings.mjs');
+const { readMessagingStore } = await import('../app/messaging-store.mjs');
+
+const settings = normalizeChatbotSettings({
+  enabled: true,
+  followUps: { enabled: true, scenarios: [...defaultFollowUpScenarios(), { id: 'inbox-24h', name: 'Hộp thư im 24 giờ', trigger: 'inbox-no-reply', delayHours: 24, message: 'Dạ {title} còn cần em tư vấn thêm gì không ạ?' }] }
+});
+
+test('cài đặt bám đuổi: mặc định tắt, kịch bản mẫu tặng miễn ship sau 12 giờ; kịch bản không có lời thì bỏ', () => {
+  assert.equal(normalizeChatbotSettings({}).followUps.enabled, false);
+  assert.equal(normalizeChatbotSettings({}).followUps.scenarios[0].trigger, 'comment-no-reply');
+  assert.equal(normalizeChatbotSettings({}).followUps.scenarios[0].delayHours, 12);
+  assert.deepEqual(normalizeChatbotSettings({ followUps: { enabled: true, scenarios: [{ name: 'trống', message: '' }] } }).followUps.scenarios, []);
+  assert.equal(renderFollowUpMessage('Dạ {title} ơi, {Title} nhé {name}', { gender: 'female', name: 'Lan' }), 'Dạ chị ơi, Chị nhé Lan');
+  assert.equal(renderFollowUpMessage('Dạ {title} ơi', {}), 'Dạ anh/chị ơi');
+});
+
+test('ứng viên: chỉ khách im lặng đủ giờ, Page đã trả lời sau khi bật; khách trả lời lại, chưa đủ giờ, bot tắt thì không', async () => {
+  const store = await readMessagingStore();
+  const [comment, inbox] = settings.followUps.scenarios;
+  const commentCandidates = findFollowUpCandidates(store, comment, { now, activatedAt: now - 48 * HOUR });
+  assert.deepEqual(commentCandidates.map(item => item.conversation.psid).sort(), ['a', 'b']);
+  assert.equal(findFollowUpCandidates(store, comment, { now, activatedAt: now - 13.5 * HOUR }).map(item => item.conversation.psid).join(), 'a', 'B trả lời trước khi bật thì không xét');
+  assert.deepEqual(findFollowUpCandidates(store, inbox, { now, activatedAt: now - 48 * HOUR }).map(item => item.conversation.psid), ['f']);
+});
+
+test('runFollowUps: nhắn riêng vào hộp thư, không có hộp thư thì công khai dưới bình luận; mỗi khách một lần; ghi trạng thái', async () => {
+  const sent = [];
+  const sendMessage = async (conversation, payload) => { sent.push({ id: conversation.id, ...payload }); return { message: { mid: `mid-${sent.length}` } }; };
+  const first = await runFollowUps({ readSettings: async () => settings, sendMessage, now, log: () => {} });
+  // activatedAt được ghi = now ở lượt đầu → không có ai đủ điều kiện (chỉ xét trả lời sau khi bật).
+  assert.deepEqual(first, { checked: 0, sent: 0, failed: 0, skipped: 0, disabled: false });
+  // Giả lập đã bật từ 2 ngày trước.
+  const { writeFileSync: write } = await import('node:fs');
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: {} }));
+  const fresh = await import(`../app/follow-up.mjs?reload=${Date.now()}`).catch(() => null);
+  const run = fresh?.runFollowUps || runFollowUps;
+  const second = await run({ readSettings: async () => settings, sendMessage, now, log: () => {} });
+  assert.equal(second.sent, 3, `A riêng, B công khai, F riêng: ${JSON.stringify(sent)}`);
+  const byId = Object.fromEntries(sent.map(item => [item.id, item]));
+  assert.match(byId[`${page}:a`].text, /^Dạ chị ơi/, 'giới tính nữ → chị');
+  assert.equal(byId[`${page}:a`].privateReply, undefined);
+  assert.equal(byId[`${page}:comment:b:p1`].privateReply, false, 'khách chưa từng inbox: trả lời công khai');
+  assert.match(byId[`${page}:f`].text, /anh còn cần em/);
+  const third = await run({ readSettings: async () => settings, sendMessage, now: now + HOUR, log: () => {} });
+  assert.equal(third.sent, 0);
+  assert.equal(third.skipped, 3, 'đã gửi thì không gửi lại');
+  const status = await (fresh?.followUpStatus || followUpStatus)();
+  assert.equal(status.sentTotal, 3);
+  const store = await readMessagingStore();
+  assert.equal(store.conversations.find(item => item.id === `${page}:a`).followUps[0].via, 'private');
+});
+
+test('bám đuổi tắt (hoặc chatbot tắt) thì không gửi gì', async () => {
+  const off = normalizeChatbotSettings({ enabled: true, followUps: { enabled: false } });
+  assert.equal((await runFollowUps({ readSettings: async () => off, sendMessage: async () => { throw new Error('không được gọi'); }, now })).disabled, true);
+  const botOff = normalizeChatbotSettings({ enabled: false, followUps: { enabled: true } });
+  assert.equal((await runFollowUps({ readSettings: async () => botOff, sendMessage: async () => { throw new Error('không được gọi'); }, now })).disabled, true);
+});

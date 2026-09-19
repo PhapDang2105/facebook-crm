@@ -21,6 +21,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { syncOrderToPos, updatePosOrder } from './pos-orders.mjs';
+import { followUpStatus, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
@@ -779,6 +780,14 @@ const server = http.createServer(async (request, response) => {
       });
       if (missing) return sendJson(response, 404, { error: 'Không tìm thấy sản phẩm.' });
       return sendJson(response, 200, result);
+    }
+    // Bám đuổi: trạng thái (bật từ khi nào, lần chạy cuối, các lần gửi gần nhất) và chạy tay một lượt.
+    if (request.method === 'GET' && url.pathname === '/api/chatbot/follow-ups') {
+      return sendJson(response, 200, await followUpStatus());
+    }
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/run') {
+      const summary = await runFollowUps({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage });
+      return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
       const settings = await readChatbotSettings();
@@ -1836,6 +1845,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   if (!process.env.POS_SYNC_DISABLED) startPosSync();
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   startPancakeSync();
+  // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.
+  startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage });
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);
   const missing = missingWebhookConfiguration();
   if (missing.length) console.log(`Webhook chưa sẵn sàng, còn thiếu: ${missing.join(', ')}`);

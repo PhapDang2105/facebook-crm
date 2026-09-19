@@ -2447,3 +2447,18 @@ tr:hover .customer-tel button { opacity: .75; }
 .data-preview th, .data-preview td { font-size: 12.4px; border-bottom: 1px solid var(--line-2); }
 .data-preview th { color: var(--text-2); font-weight: 600; }
 .order-day-tab { font-size: 13px; }
+
+/* Bám đuổi (Cài đặt → Chatbot → Cấu hình chung) */
+.follow-up-list { display: flex; flex-direction: column; gap: 10px; }
+.follow-up-row { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: #fafbfc; border: 1px solid #e4e7ec; border-radius: 8px; }
+.follow-up-row.is-off { opacity: .6; }
+.follow-up-row-head { display: flex; align-items: center; gap: 8px; }
+.follow-up-row-head input[type="text"] { flex: 1; min-width: 0; }
+.follow-up-row-head .llm-switch { margin-left: auto; }
+.follow-up-remove { width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: #8c8c8c; font-size: 16px; line-height: 1; cursor: pointer; }
+.follow-up-remove:hover { background: #fff1f0; color: #cf1322; }
+.follow-up-grid { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 8px; }
+.follow-up-grid .llm-num { width: 100%; }
+.follow-up-row textarea { width: 100%; min-height: 64px; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 6px; font: inherit; font-size: 13px; line-height: 1.4; resize: vertical; }
+.follow-up-status { margin: 0; color: #8a8d91; font-size: 12px; line-height: 1.5; }
+.follow-up-status b { color: #354052; font-weight: 600; }

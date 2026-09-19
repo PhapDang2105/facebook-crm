@@ -136,3 +136,8 @@ test('đồng bộ lịch sử kéo cả luồng bình luận kèm bài viết, 
   assert.deepEqual((await listMessages(thread.id)).map(item => [item.direction, item.text]), [['incoming', 'Còn túi nâu không'], ['outgoing', 'Dạ còn ạ']]);
   assert.notEqual(thread.botEnabled, false, 'lịch sử kéo về không tạm dừng bot');
 });
+
+test('thông báo hệ thống của Facebook khi nhắn riêng từ bình luận không vào hộp thư', () => {
+  const notice = inbox({ message: { id: 'm_sys', message: 'Bạn đang phản hồi bình luận của người dùng về bài viết trên Trang của bạn.', from: { id: '110', name: 'Test' } } });
+  assert.deepEqual(normalizePancakeWebhook(notice, config), []);
+});

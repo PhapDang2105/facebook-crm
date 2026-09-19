@@ -313,7 +313,18 @@ async function answerChange(change, settings, results, dependencies) {
       // Theo đúng thứ tự của mẫu: ảnh đặt đầu mẫu đi trước bảng giá, ảnh đặt
       // cuối đi sau chữ. Mẫu không có dãy gửi thì chữ trước, ảnh sau.
       const parts = reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
-      for (const part of parts) await sendMessage(conversation, part.type === 'image' ? { imageUrl: part.url } : { text: part.text });
+      // Ảnh không gửi được (Pancake/Facebook từ chối tệp) thì bỏ ảnh đó, chữ
+      // vẫn phải tới khách; lỗi ảnh ghi lại cho panel khách thay vì chặn cả câu.
+      const imageErrors = [];
+      for (const part of parts) {
+        if (part.type !== 'image') { await sendMessage(conversation, { text: part.text }); continue; }
+        try {
+          await sendMessage(conversation, { imageUrl: part.url });
+        } catch (error) {
+          imageErrors.push(error.message);
+        }
+      }
+      if (imageErrors.length) privateError = privateError || `ảnh không gửi được: ${imageErrors[0]}`;
       // The receipt closes the exchange, so it is sent after the reply text and
       // never before it — the order itself was already persisted above.
       if (order && sendReceipt) await sendReceipt(conversation, order);

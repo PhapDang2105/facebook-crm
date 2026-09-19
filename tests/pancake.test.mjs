@@ -184,7 +184,7 @@ test('gửi ảnh qua Pancake: tải lên upload_contents rồi gửi content_id
   const image = await sendConversationMessageViaPancake(conversation, { imageUrl: 'https://cdn.example/xanh.png?v=1' }, config, fetchMock);
   assert.deepEqual([image.message.type, image.message.dataUrl], ['image', 'https://cdn.example/xanh.png?v=1']);
   await sendConversationMessageViaPancake(conversation, { imageUrl: 'https://cdn.example/xanh.png?v=2' }, config, fetchMock);
-  assert.deepEqual(calls, ['upload', 'send:c1', 'send:c1'], 'cùng ảnh (khác ?v=) không tải lại');
+  assert.deepEqual(calls, ['upload', 'send:c1', 'upload', 'send:c3'], 'mỗi lần gửi tải ảnh mới: mã dùng lại bị Facebook từ chối');
   calls.length = 0;
   const file = await sendConversationMessageViaPancake(conversation, { text: 'Ảnh đây ạ', attachment: { dataUrl: 'data:image/jpeg;base64,/9j/4AAQ', name: 'mau.jpg', type: 'image' } }, config, fetchMock);
   assert.deepEqual(calls, ['upload', 'send:c1', 'text:Ảnh đây ạ']);

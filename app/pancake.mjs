@@ -147,6 +147,9 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   if (!fromId || !customerId) return null;
   const outgoing = fromId === pageId || fromId !== customerId;
   const text = pancakeMessageText(message);
+  // Thông báo hệ thống của Facebook khi nhắn riêng từ bình luận ("Bạn đang
+  // phản hồi bình luận của người dùng…") không phải tin của ai, bỏ qua.
+  if (outgoing && /^Bạn đang phản hồi bình luận của người dùng/i.test(text)) return null;
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
   // Ảnh/video Pancake đưa kèm URL trên CDN của họ: hộp thư hiện thẳng. Loại
   // khác (tệp, âm thanh) chỉ ghi là có đính kèm.
@@ -501,20 +504,13 @@ export async function fitImageForPancake(file, limit = pancakeUploadLimit) {
   throw new Error('Không nén được ảnh xuống dưới 500 KB để gửi qua Pancake.');
 }
 
-// Mã nội dung Pancake của ảnh đã tải lên, để mỗi lần báo giá không tải lại
-// cùng một ảnh sản phẩm. Khoá là URL bỏ phần truy vấn (?v= đổi mỗi lần).
-const contentIdCache = new Map();
-const contentIdTtlMs = 12 * 60 * 60 * 1000;
-const contentCacheKey = imageUrl => String(imageUrl).replace(/[?#].*$/, '');
-
+// Mỗi lần gửi tải ảnh lên mới: mã nội dung dùng lại bị Facebook từ chối
+// ("invalid_upload_fb_attachments_result"), nên không giữ mã trong bộ nhớ.
+// Ảnh sản phẩm đã nén còn ~130 KB, tải lên mất dưới một giây.
 async function pancakeContentIdForImage(pageId, imageUrl, config, fetchImpl) {
-  const key = contentCacheKey(imageUrl);
-  const cached = contentIdCache.get(key);
-  if (cached && Date.now() - cached.at < contentIdTtlMs) return { id: cached.id, cached: true };
   const file = await fitImageForPancake(await readImageForUpload(imageUrl, fetchImpl));
   const { id } = await uploadPancakeContent({ pageId, ...file }, config, fetchImpl);
-  contentIdCache.set(key, { id, at: Date.now() });
-  return { id, cached: false };
+  return { id };
 }
 
 function decodeDataUrl(dataUrl) {
@@ -539,16 +535,15 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply }, config, fetchImpl);
   let message;
   if (imageUrl) {
-    const first = await pancakeContentIdForImage(target.pageId, imageUrl, config, fetchImpl);
     let sent;
     try {
-      sent = await sendPancakeMessage({ ...target, contentIds: [first.id] }, config, fetchImpl);
+      const { id } = await pancakeContentIdForImage(target.pageId, imageUrl, config, fetchImpl);
+      sent = await sendPancakeMessage({ ...target, contentIds: [id] }, config, fetchImpl);
     } catch (error) {
-      // Mã cũ trong bộ nhớ có thể đã hết hạn phía Pancake: tải lại một lần.
-      if (!first.cached) throw error;
-      contentIdCache.delete(contentCacheKey(imageUrl));
-      const fresh = await pancakeContentIdForImage(target.pageId, imageUrl, config, fetchImpl);
-      sent = await sendPancakeMessage({ ...target, contentIds: [fresh.id] }, config, fetchImpl);
+      // Facebook thỉnh thoảng từ chối tệp vừa tải (invalid_upload_fb_attachments_result): tải lại và gửi thêm một lần.
+      if (!/invalid_upload|không nhận tin/.test(error.message)) throw error;
+      const { id } = await pancakeContentIdForImage(target.pageId, imageUrl, config, fetchImpl);
+      sent = await sendPancakeMessage({ ...target, contentIds: [id] }, config, fetchImpl);
     }
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'image', text: '', name: 'anh-san-pham', dataUrl: imageUrl, createdAt: Date.now(), status: 'sent' };
   } else if (attachment) {

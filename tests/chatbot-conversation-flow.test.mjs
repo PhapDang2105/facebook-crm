@@ -194,3 +194,18 @@ test('"lấy thêm 2 túi vàng" ngay sau khi chốt đơn túi xanh: đơn mớ
   const old = renderChatbotReply(value, templates, { now, recentOrder: { ...recentOrder, createdAt: now - 3 * 60 * 60 * 1000 } });
   assert.equal(old.templateId, 'CSKH_HANDOFF');
 });
+
+test('ảnh không gửi được thì bỏ ảnh, chữ vẫn tới khách, lỗi ảnh ghi lại cho panel khách', async () => {
+  const sent = [];
+  const saved = [];
+  const results = await processChatbotChanges([change(incoming('a', 'túi xanh giá sao', 1000))], {
+    readSettings: async () => settings,
+    listMessages: async () => [],
+    sendMessage: async (_conversation, message) => { if (message.imageUrl) throw new Error('Pancake không nhận tin (200): invalid_upload_fb_attachments_result'); sent.push(message.text); },
+    saveBotState: async (_id, state) => saved.push(state),
+    requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá'], images: ['https://x/1.png'], parts: [{ type: 'image', url: 'https://x/1.png' }, { type: 'text', text: 'Bảng giá' }], conversationId: '', handoff: false })
+  });
+  assert.deepEqual(sent, ['Bảng giá']);
+  assert.equal(results[0].templateId, 'PRICE_QUOTE');
+  assert.match(saved[0].botLastError, /ảnh không gửi được/);
+});

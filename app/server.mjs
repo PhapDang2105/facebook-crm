@@ -6,7 +6,7 @@ import AdmZip from 'adm-zip';
 import { buildExportRows, exportPreviewStreets, exportedOrderData } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
-import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
+import { buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { assertUsableAiEndpoint, defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost } from './network-guard.mjs';
@@ -360,23 +360,30 @@ async function sendChatbotOrderReceipt(conversation, order) {
     // Qua Pancake không gửi được thẻ receipt của Messenger: phiếu được vẽ
     // thành ảnh và gửi như ảnh đính kèm (bản chữ chỉ lặp lại ORDER_CONFIRMATION).
     // Đơn đã sang Pancake POS thì POS đã gửi khách thẻ xác nhận, không gửi phiếu thứ hai.
+    // Bản chữ "XÁC NHẬN ĐƠN ĐẶT HÀNG…" KHÔNG BAO GIỜ gửi cho khách (yêu cầu của
+    // chủ shop): phiếu chỉ là thẻ receipt của Messenger, thẻ của POS, hoặc ảnh phiếu.
     if (conversation.pancakeConversationId) {
       if (order.pos?.id) return;
-      const image = await renderOrderReceiptImage(order, { merchantName: pancakeConfig.pageName.replace(/\s*\(Pancake\)\s*$/i, '') || 'Giọt Nắng' });
-      await sendConversationMessage(conversation, {
-        attachment: { dataUrl: `data:image/png;base64,${image.toString('base64')}`, name: `phieu-don-${order.id}.png`, type: 'image' }
-      });
+      await sendReceiptImage(conversation, order);
       return;
     }
-    const confirmationText = buildCustomerOrderConfirmation(order);
-    await sendConversationMessage(conversation, {
-      text: confirmationText,
-      templateText: confirmationText,
-      template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl })
-    });
+    try {
+      await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }) });
+    } catch (error) {
+      // Messenger từ chối thẻ receipt: gửi ảnh phiếu thay vì bản chữ.
+      console.error(`Messenger từ chối thẻ receipt của đơn ${order.id}, gửi ảnh phiếu: ${error.message}`);
+      await sendReceiptImage(conversation, order);
+    }
   } catch (error) {
     console.error(`Không gửi được hoá đơn cho đơn ${order.id}: ${error.message}`);
   }
+}
+
+async function sendReceiptImage(conversation, order) {
+  const image = await renderOrderReceiptImage(order, { merchantName: pancakeConfig.pageName.replace(/\s*\(Pancake\)\s*$/i, '') || 'Giọt Nắng' });
+  return sendConversationMessage(conversation, {
+    attachment: { dataUrl: `data:image/png;base64,${image.toString('base64')}`, name: `phieu-don-${order.id}.png`, type: 'image' }
+  });
 }
 
 async function readChatbotSettings() {
@@ -1458,14 +1465,15 @@ const server = http.createServer(async (request, response) => {
           }
           const viaPancake = Boolean(conversation.pancakeConversationId);
           if (!viaPancake) {
-            // Messenger trực tiếp: thẻ receipt kèm bản chữ dự phòng, như trước.
+            // Messenger trực tiếp: thẻ receipt; bị từ chối thì ảnh phiếu. Không bao giờ gửi bản chữ.
             try {
-              const confirmationText = buildCustomerOrderConfirmation(order);
-              const sent = await sendConversationMessage(conversation, {
-                text: confirmationText,
-                templateText: confirmationText,
-                template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl })
-              });
+              let sent;
+              try {
+                sent = await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }) });
+              } catch (error) {
+                console.error(`Messenger từ chối thẻ receipt của đơn ${order.id}, gửi ảnh phiếu: ${error.message}`);
+                sent = await sendReceiptImage(conversation, order);
+              }
               order.delivery = { status: 'sent', messageId: String(sent?.message?.mid || sent?.message?.id || ''), sentAt: Date.now() };
             } catch (error) {
               return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });

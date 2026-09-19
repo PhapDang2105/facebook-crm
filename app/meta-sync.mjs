@@ -179,9 +179,10 @@ export async function sendConversationMessage(conversation, { text = '', attachm
     try {
       result = await sendPageTemplate({ ...target, payload: template });
     } catch (error) {
-      // Messenger rejects a template for reasons the operator cannot fix mid-send
-      // (unsupported field, image not publicly reachable). Falling back to the plain
-      // text keeps the customer informed instead of failing the whole order.
+      // Messenger từ chối thẻ receipt (trường không hỗ trợ, ảnh không công khai):
+      // chỉ lùi về bản chữ khi người gọi đưa chữ; phiếu đơn KHÔNG có bản chữ
+      // (chủ shop không muốn khách nhận bản chữ), người gọi tự gửi ảnh phiếu thay.
+      if (!text) throw error;
       console.error(`Không gửi được receipt template, chuyển sang tin nhắn chữ: ${error.message}`);
       usedTemplate = false;
       result = await sendPageMessage({ ...target, text });

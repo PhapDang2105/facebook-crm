@@ -84,3 +84,11 @@ test('quà tặng của giỏ đi theo đơn và vào tin xác nhận (form tạ
   assert.equal(normalizeCustomerOrder(input).gift, '');
   assert.doesNotMatch(buildCustomerOrderConfirmation(normalizeCustomerOrder(input)), /Quà tặng/);
 });
+
+test('bản chữ "XÁC NHẬN ĐƠN ĐẶT HÀNG…" không còn đường nào gửi cho khách (chủ shop yêu cầu)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(server, /buildCustomerOrderConfirmation/, 'server không dựng bản chữ xác nhận để gửi');
+  const metaSync = await readFile(new URL('../app/meta-sync.mjs', import.meta.url), 'utf8');
+  assert.match(metaSync, /if \(!text\) throw error;/, 'thẻ receipt bị từ chối thì không lùi về bản chữ khi không có chữ');
+});

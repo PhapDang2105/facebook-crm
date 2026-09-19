@@ -125,3 +125,22 @@ test('đơn POS do CRM đẩy sang (custom_id CRM-…) được nhận ra để 
   assert.equal(isCrmPushedPosOrder({ custom_id: 'Ma0001' }), false);
   assert.equal(isCrmPushedPosOrder({}), false);
 });
+
+test('updatePosOrder: PUT lên đúng đơn POS với sản phẩm/địa chỉ/phí mới, không gửi lại custom_id/shop_id', async () => {
+  const { updatePosOrder } = await import('../app/pos-orders.mjs');
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    const address = String(url);
+    if (options.method === 'PUT') { calls.push({ address, body: JSON.parse(options.body) }); return { ok: true, status: 200, json: async () => ({ id: 'CRM-ab12cd34' }) }; }
+    return posFetch([])(url, options);
+  };
+  const edited = { ...order, pos: { id: 'CRM-ab12cd34' }, products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 3, price: 149000 }], discount: 0, total: 447000 };
+  assert.deepEqual(await updatePosOrder(edited, { config, fetchImpl }), { id: 'CRM-ab12cd34' });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].address, /\/shops\/714334721\/orders\/CRM-ab12cd34\?api_key=k$/);
+  assert.equal(calls[0].body.custom_id, undefined);
+  assert.equal(calls[0].body.shop_id, undefined);
+  assert.deepEqual(calls[0].body.items.map(item => [item.variation_id, item.quantity, item.is_bonus_product]), [['GRA-XANH-Z450', 3, false], ['BGD', 1, true], ['MUONG', 1, true]]);
+  assert.equal(calls[0].body.shipping_address.commune_id, '7050127');
+  await assert.rejects(updatePosOrder({ ...order }, { config, fetchImpl }), /chưa có trên POS/);
+});

@@ -4853,7 +4853,8 @@ function renderCustomerOrders(conversation = getActiveConversation()) {
         <div class="customer-order-meta">
           ${customerOrderMetaRow('clock', 'Tạo lúc', escapeHtml(formatCustomerPanelTime(order.createdAt)))}
           ${updated}
-          ${order.note ? customerOrderMetaRow('document', 'Ghi chú', escapeHtml(order.note)) : customerOrderMetaRow('document', 'Ghi chú', 'Chưa có', true)}
+          <div class="customer-order-detail">${customerPanelIcon('document')}<span>Ghi chú</span><span class="value${order.staffNote ? '' : ' link'}" data-order-staff-note="${escapeHtml(String(order.id))}">${order.staffNote ? escapeHtml(order.staffNote) : 'Chưa có'}</span></div>
+          ${order.note ? customerOrderMetaRow('document', 'Khách ghi', escapeHtml(order.note)) : ''}
           ${customerOrderMetaRow('printer', 'Ghi chú in', 'Chưa có', true)}
           ${customerOrderPosRow(order)}
           ${customerOrderMetaRow('user', 'NV sửa cuối', customerOrderStaff(order.employee, avatar))}
@@ -5078,6 +5079,8 @@ function renderCustomerSavedAddresses(conversation = getActiveConversation()) {
 function resetCustomerOrderForm(conversation = getActiveConversation()) {
   const profile = getCustomerPanelProfile(conversation);
   customerDraftProducts = [];
+  editingCustomerOrderId = '';
+  setCustomerOrderFormMode();
   if (customerOrderName) customerOrderName.value = profile.name;
   if (customerOrderPhone) customerOrderPhone.value = profile.phone;
   if (customerOrderAddress) customerOrderAddress.value = profile.address;
@@ -5102,7 +5105,8 @@ function setCustomerPanelTab(name) {
     tab.setAttribute('aria-selected', String(active));
   });
   customerPanelViews.forEach(view => view.classList.toggle('hidden', view.dataset.customerPanel !== name));
-  if (name === 'create') resetCustomerOrderForm();
+  // Mở tab Tạo đơn thì form trống; đang sửa đơn (beginCustomerOrderEdit đã đổ dữ liệu) thì giữ.
+  if (name === 'create' && !editingCustomerOrderId) resetCustomerOrderForm();
 }
 
 /** Dòng "Từ quảng cáo" trong panel khách đã bỏ theo yêu cầu; nguồn quảng cáo vẫn xem được ở thẻ QC và bộ lọc. */
@@ -8071,9 +8075,136 @@ customerOrderList?.addEventListener('click', event => {
       .catch(error => { showToast(error.message || 'Chưa đẩy được đơn sang Pancake POS.'); loadCustomerPanelFromServer(getActiveConversation()); });
     return;
   }
-  const labels = { note: 'Ghi chú đơn', share: 'Gửi lại xác nhận cho khách', edit: 'Sửa đơn' };
-  showToast(`${labels[action.dataset.orderAction] || 'Thao tác'} — đơn ${action.dataset.orderId}. Chức năng này chưa được nối.`);
+  const orderId = action.dataset.orderId;
+  const order = getCustomerOrders().find(item => String(item.id) === String(orderId));
+  if (!order) return;
+  if (action.dataset.orderAction === 'note') { editCustomerOrderStaffNote(orderId); return; }
+  if (action.dataset.orderAction === 'share') { resendCustomerOrderReceipt(action, orderId); return; }
+  if (action.dataset.orderAction === 'edit') { beginCustomerOrderEdit(order); return; }
 });
+
+// ===== Ba nút trên thẻ đơn: Ghi chú đơn, Gửi lại cho khách, Sửa đơn =====
+
+/** Ghi chú đơn: sửa tại chỗ ô "Ghi chú" (ghi chú xử lý của nhân viên, cũng hiện ở bảng Đơn hàng). */
+function editCustomerOrderStaffNote(orderId) {
+  const cell = customerOrderList?.querySelector(`[data-order-staff-note="${CSS.escape(String(orderId))}"]`);
+  if (!cell || cell.querySelector('input')) return;
+  const order = getCustomerOrders().find(item => String(item.id) === String(orderId));
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'customer-order-note-input';
+  input.maxLength = 500;
+  input.value = order?.staffNote || '';
+  input.placeholder = 'Ghi chú cho đơn này';
+  cell.textContent = '';
+  cell.classList.remove('link');
+  cell.appendChild(input);
+  input.focus();
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    const value = input.value.trim();
+    if (!save || value === String(order?.staffNote || '')) { loadCustomerPanelFromServer(getActiveConversation()); return; }
+    try {
+      await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(orderId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staffNote: value }) }));
+    } catch (error) {
+      showToast(error.message || 'Chưa lưu được ghi chú.');
+    }
+    loadCustomerPanelFromServer(getActiveConversation());
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+    if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+/** Gửi lại phiếu xác nhận cho khách (ảnh phiếu qua Pancake, thẻ receipt qua Messenger). */
+async function resendCustomerOrderReceipt(button, orderId) {
+  button.disabled = true;
+  try {
+    await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(orderId)}/resend`, { method: 'POST' }));
+    await ensureRemoteMessages(getActiveConversation(), { force: true });
+  } catch (error) {
+    showToast(error.message || 'Chưa gửi lại được phiếu cho khách.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/**
+ * Sửa đơn: mở form Tạo đơn với dữ liệu của đơn; Lưu thì PATCH lên máy chủ (và
+ * sửa theo trên Pancake POS nếu đơn đã sang đó), không tạo đơn mới, không gửi
+ * lại phiếu (nhân viên bấm "Gửi lại cho khách" khi cần).
+ */
+let editingCustomerOrderId = '';
+async function beginCustomerOrderEdit(order) {
+  const conversation = getActiveConversation();
+  resetCustomerOrderForm(conversation);
+  editingCustomerOrderId = String(order.id);
+  if (customerOrderName) customerOrderName.value = order.name || '';
+  if (customerOrderPhone) customerOrderPhone.value = order.phone || '';
+  if (customerOrderAddress) customerOrderAddress.value = order.address || '';
+  if (customerOrderNote) customerOrderNote.value = order.note || '';
+  if (customerBankTransfer) customerBankTransfer.checked = order.payment === 'Chuyển khoản';
+  if (customerOrderSource && order.source) customerOrderSource.value = order.source;
+  const products = (Array.isArray(order.products) ? order.products : []).map(item => {
+    const matched = findSharedProduct(item.sku || item.name);
+    return {
+      name: item.name || matched?.name || '', sku: item.sku || matched?.sku || '', variant: item.variant || matched?.variant || matched?.category || '',
+      image: item.image || matched?.image || '', weight: Number(item.weight) || Number(matched?.weight) || 0,
+      quantity: Math.max(1, Number(item.quantity) || 1), price: Math.max(0, Number(item.price) || 0),
+      listPrice: Math.max(0, Number(matched?.salePrice ?? matched?.originalPrice) || Number(item.price) || 0), manualPrice: true
+    };
+  });
+  // Đơn bot ghi giá niêm yết + dòng giảm combo; form tính bằng giá combo từng dòng.
+  // Giỏ tính được và ra đúng tổng của đơn thì đưa về cách của form (giá combo,
+  // giảm 0, để đổi số lượng vẫn tự tính lại); còn lại giữ nguyên giá/giảm đã ghi.
+  let priced = null;
+  try {
+    priced = await readApiResponse(await fetch('/api/orders/price', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: products.map(item => ({ sku: item.sku, name: item.name, quantity: item.quantity })) }) }));
+  } catch { priced = null; }
+  const standard = priced?.priceable && Number(priced.total) === Number(order.total);
+  if (standard) {
+    const bySku = new Map(priced.lines.map(line => [line.sku, line]));
+    for (const item of products) { const line = bySku.get(item.sku); if (line) { item.price = line.basketUnitPrice; item.manualPrice = false; } }
+  }
+  customerDraftProducts = products;
+  if (customerOrderDiscount) customerOrderDiscount.value = String(standard ? 0 : (Number(order.discount) || 0));
+  if (customerFreeShipping) customerFreeShipping.checked = Boolean(order.freeShipping) || Number(order.shippingFee) === 0;
+  customerFreeShippingManual = !standard;
+  if (customerShippingFee) customerShippingFee.value = String(Number(order.shippingFee) || 0);
+  customerDraftGift = String(order.gift || '');
+  renderCustomerDraftGift();
+  renderCustomerDraftProducts();
+  setCustomerOrderFormMode();
+  setCustomerPanelTab('create');
+  customerOrderName?.focus();
+}
+
+function setCustomerOrderFormMode() {
+  if (customerOrderSubmit) customerOrderSubmit.textContent = editingCustomerOrderId ? `Lưu đơn ${editingCustomerOrderId}` : 'Tạo đơn';
+  if (customerOrderReset) customerOrderReset.textContent = editingCustomerOrderId ? 'Hủy sửa' : 'Thiết lập lại';
+}
+
+async function saveCustomerOrderEdit(orderId) {
+  const totals = updateCustomerOrderTotals();
+  const patch = {
+    name: customerOrderName.value.trim(),
+    phone: customerOrderPhone.value.trim(),
+    address: customerOrderAddress.value.trim(),
+    products: customerDraftProducts.map(item => ({ name: item.name, sku: item.sku, variant: item.variant, image: item.image, weight: getProductUnitWeight(item), quantity: item.quantity, price: item.price })),
+    freeShipping: Boolean(customerFreeShipping?.checked),
+    shippingFee: totals.shipping,
+    discount: totals.discount,
+    payment: customerBankTransfer?.checked ? 'Chuyển khoản' : 'COD',
+    gift: customerDraftGift,
+    note: customerOrderNote?.value.trim() || ''
+  };
+  const updated = await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(orderId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }));
+  return updated;
+}
 
 [customerOrderName, customerOrderPhone, customerOrderAddress, customerShippingFee, customerOrderDiscount]
   .filter(Boolean)
@@ -8090,6 +8221,26 @@ customerOrderForm?.addEventListener('submit', async event => {
   const totals = updateCustomerOrderTotals();
   if (!key || customerOrderSubmit?.disabled) {
     showToast('Điền đủ thông tin khách hàng và thêm ít nhất một sản phẩm.');
+    return;
+  }
+  if (editingCustomerOrderId) {
+    // Đang sửa đơn có sẵn: ghi đè lên đơn đó, không tạo đơn mới, không gửi lại phiếu.
+    const editingId = editingCustomerOrderId;
+    customerOrderSubmit.disabled = true;
+    const originalLabel = customerOrderSubmit.textContent;
+    customerOrderSubmit.textContent = 'Đang lưu...';
+    try {
+      const updated = await saveCustomerOrderEdit(editingId);
+      resetCustomerOrderForm(conversation);
+      await loadCustomerPanelFromServer(conversation);
+      setCustomerPanelTab('info');
+      if (updated?.pos?.error) showToast(updated.pos.error);
+    } catch (error) {
+      showToast(error.message || 'Chưa lưu được đơn.');
+    } finally {
+      customerOrderSubmit.textContent = editingCustomerOrderId ? originalLabel : 'Tạo đơn';
+      updateCustomerOrderTotals();
+    }
     return;
   }
   const now = Date.now();

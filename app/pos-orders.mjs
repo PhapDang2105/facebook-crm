@@ -235,6 +235,33 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
 }
 
 /**
+ * Cập nhật đơn đã có trên POS (`PUT /shops/{SHOP_ID}/orders/{ORDER_ID}`) sau khi
+ * nhân viên sửa đơn trong CRM: sản phẩm, địa chỉ, phí, ghi chú. Trả về mã đơn.
+ */
+export async function updatePosOrder(order, { conversation = {}, config = posConfig(), fetchImpl = fetch } = {}) {
+  if (!posOrderPushEnabled(config)) throw new Error('Chưa kết nối Pancake POS.');
+  if (!order.pos?.id) throw new Error('Đơn chưa có trên POS.');
+  const posSkus = await posVariationSkus(config, fetchImpl);
+  const missing = (Array.isArray(order.products) ? order.products : []).filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
+  if (missing.length) throw new Error(`POS không có mẫu mã: ${missing.join(', ')}.`);
+  const geo = await resolvePosGeo(order, config, fetchImpl).catch(() => ({}));
+  const { shop_id, custom_id, status, received_at_shop, warehouse_id, page_id, conversation_id, ...payload } = buildPosOrderPayload(order, { conversation, posSkus, geo });
+  const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(order.pos.id)}`);
+  url.searchParams.set('api_key', config.apiKey);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetchImpl(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
+    let body = {};
+    try { body = await response.json(); } catch {}
+    if (!response.ok || body?.success === false) throw new Error(`Pancake POS không nhận sửa đơn (${response.status}): ${body?.message || body?.error || 'không rõ lý do'}`);
+    return { id: String(order.pos.id) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Đẩy một đơn trong hội thoại sang POS rồi ghi kết quả lên đơn (`order.pos`):
  * { id, systemId, at } khi được, { error, at } khi lỗi (nhân viên bấm đẩy lại
  * trong thẻ đơn). Đã có `pos.id` thì không đẩy lần hai.

@@ -90,6 +90,53 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     }
   }
 
+  // Sửa đơn từ form Tạo đơn trong hộp thư: thay cả danh sách sản phẩm (thêm/bớt
+  // dòng), phí ship, giảm giá, thanh toán, quà, ghi chú khách; tổng tính lại.
+  let moneyChanged = false;
+  if (Array.isArray(patch.products)) {
+    const products = patch.products.slice(0, 100).map(item => ({
+      name: text(item?.name, 200),
+      sku: text(item?.sku, 80),
+      variant: text(item?.variant, 120),
+      image: text(item?.image, 500),
+      weight: Math.max(0, Math.round(Number(item?.weight) || 0)),
+      quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)),
+      price: money(item?.price) ?? 0,
+      paidPrice: money(item?.price) ?? 0
+    })).filter(item => item.name);
+    if (!products.length) throw new Error('Đơn cần ít nhất một sản phẩm.');
+    if (JSON.stringify(products) !== JSON.stringify(order.products)) { order.products = products; changed.push('products'); moneyChanged = true; }
+  }
+  if (patch.freeShipping !== undefined) {
+    const freeShipping = patch.freeShipping === true;
+    if (freeShipping !== Boolean(order.freeShipping)) { order.freeShipping = freeShipping; changed.push('freeShipping'); moneyChanged = true; }
+  }
+  if (patch.shippingFee !== undefined) {
+    const shippingFee = order.freeShipping ? 0 : (money(patch.shippingFee) ?? 0);
+    if (shippingFee !== (Number(order.shippingFee) || 0)) { order.shippingFee = shippingFee; changed.push('shippingFee'); moneyChanged = true; }
+  }
+  if (patch.discount !== undefined) {
+    const discount = money(patch.discount) ?? 0;
+    if (discount !== (Number(order.discount) || 0)) { order.discount = discount; changed.push('discount'); moneyChanged = true; }
+  }
+  if (patch.payment !== undefined) {
+    const payment = text(patch.payment, 80) || 'COD';
+    if (payment !== String(order.payment || '')) { order.payment = payment; changed.push('payment'); }
+  }
+  if (patch.gift !== undefined) {
+    const gift = text(patch.gift, 300);
+    if (gift !== String(order.gift || '')) { order.gift = gift; changed.push('gift'); }
+  }
+  if (patch.note !== undefined) {
+    const note = text(patch.note, 1000);
+    if (note !== String(order.note || '')) { order.note = note; changed.push('note'); }
+  }
+  if (moneyChanged) {
+    const subtotal = (Array.isArray(order.products) ? order.products : []).reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0);
+    if (order.freeShipping) order.shippingFee = 0;
+    order.total = Math.max(0, subtotal + (Number(order.shippingFee) || 0) - (Number(order.discount) || 0));
+  }
+
   // Trạng thái xử lý nhân viên chọn ở cột Trạng thái (mã: calling, callback,
   // transfer, confirmed, cancelled; rỗng là chưa xử lý).
   if (patch.processingStatus !== undefined) {

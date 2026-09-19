@@ -112,3 +112,23 @@ test('bỏ khỏi bảng: ghi dấu hiddenFromTable trên đơn, hoàn tác thì
   assert.equal(order.hiddenFromTableAt, undefined);
   assert.equal(order.name, 'Khách landing page');
 });
+
+test('sửa đơn từ form: thay danh sách sản phẩm, phí ship, giảm giá, thanh toán, quà, ghi chú và tính lại tổng', () => {
+  const order = sample();
+  const changed = applyCustomerOrderEdits(order, {
+    products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2, price: 149000, weight: 450 }, { name: 'Granola Túi Nâu vị cacao 350g', sku: 'GRA-NAU-Z350', quantity: 1, price: 144000 }],
+    freeShipping: true, shippingFee: 15000, discount: 0, payment: 'Chuyển khoản', gift: 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa', note: 'Giao sáng'
+  });
+  assert.ok(changed.includes('products'));
+  assert.equal(order.products.length, 2);
+  assert.equal(order.products[0].paidPrice, 149000);
+  assert.equal(order.freeShipping, true);
+  assert.equal(order.shippingFee, 0, 'miễn ship thì phí ship về 0 dù gửi 15.000');
+  assert.equal(order.total, 442000);
+  assert.equal(order.payment, 'Chuyển khoản');
+  assert.equal(order.gift, 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa');
+  assert.equal(order.note, 'Giao sáng');
+  assert.throws(() => applyCustomerOrderEdits(order, { products: [] }), /ít nhất một sản phẩm/);
+  assert.deepEqual(applyCustomerOrderEdits(order, { freeShipping: false, shippingFee: 15000 }).sort(), ['freeShipping', 'shippingFee']);
+  assert.equal(order.total, 457000);
+});

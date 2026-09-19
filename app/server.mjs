@@ -20,7 +20,7 @@ import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
-import { syncOrderToPos } from './pos-orders.mjs';
+import { syncOrderToPos, updatePosOrder } from './pos-orders.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
@@ -355,7 +355,8 @@ function scheduleQrGreetings(changes) {
 
 /** Sends the tappable Messenger receipt. Kept separate from creating the order so
  *  the chatbot can persist the order first and still close with the receipt. */
-async function sendChatbotOrderReceipt(conversation, order) {
+/** `force`: nhân viên bấm "Gửi lại cho khách" — gửi cả khi POS đã gửi thẻ, và ném lỗi thay vì chỉ ghi log. */
+async function sendChatbotOrderReceipt(conversation, order, { force = false } = {}) {
   try {
     // Qua Pancake không gửi được thẻ receipt của Messenger: phiếu được vẽ
     // thành ảnh và gửi như ảnh đính kèm (bản chữ chỉ lặp lại ORDER_CONFIRMATION).
@@ -363,7 +364,7 @@ async function sendChatbotOrderReceipt(conversation, order) {
     // Bản chữ "XÁC NHẬN ĐƠN ĐẶT HÀNG…" KHÔNG BAO GIỜ gửi cho khách (yêu cầu của
     // chủ shop): phiếu chỉ là thẻ receipt của Messenger, thẻ của POS, hoặc ảnh phiếu.
     if (conversation.pancakeConversationId) {
-      if (order.pos?.id) return;
+      if (order.pos?.id && !force) return;
       await sendReceiptImage(conversation, order);
       return;
     }
@@ -375,6 +376,7 @@ async function sendChatbotOrderReceipt(conversation, order) {
       await sendReceiptImage(conversation, order);
     }
   } catch (error) {
+    if (force) throw error;
     console.error(`Không gửi được hoá đơn cho đơn ${order.id}: ${error.message}`);
   }
 }
@@ -1611,7 +1613,45 @@ const server = http.createServer(async (request, response) => {
       if (!updated) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
       // Bản vừa sửa vào kho lưu trữ: dòng sau cùng của một mã đơn là bản đúng.
       await appendOrderToArchive(updated).catch(() => {});
+      // Đơn đã có trên Pancake POS: sửa bên đó theo (sản phẩm, địa chỉ, phí, ghi chú); lỗi ghi lên đơn.
+      if (updated.pos?.id && ['name', 'phone', 'address', 'lines', 'products', 'freeShipping', 'shippingFee', 'discount', 'note', 'gift'].some(field => patch[field] !== undefined)) {
+        const owner = (await readMessagingStore()).conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));
+        const posOutcome = await updatePosOrder(updated, { conversation: owner || {} })
+          .then(() => ({ ...updated.pos, updatedAt: Date.now(), error: undefined }))
+          .catch(error => ({ ...updated.pos, updatedAt: Date.now(), error: `Sửa trên POS lỗi: ${error.message}` }));
+        await updateMessagingStore(store => {
+          for (const conversation of store.conversations) {
+            const target = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(order => order.id === orderId);
+            if (target) { target.pos = posOutcome; publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id }); }
+          }
+          return null;
+        });
+        await updateLandingStore(store => { const target = store.orders.find(order => order.id === orderId); if (target) target.pos = posOutcome; });
+        updated.pos = posOutcome;
+      }
       return sendJson(response, 200, { ...updated, processingNotes: processingNotes(updated) });
+    }
+    // Gửi lại phiếu xác nhận đơn cho khách (ảnh phiếu qua Pancake, thẻ receipt qua Messenger).
+    const customerOrderResendMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)\/resend$/);
+    if (customerOrderResendMatch && request.method === 'POST') {
+      const orderId = decodeURIComponent(customerOrderResendMatch[1]);
+      const store = await readMessagingStore();
+      const owner = store.conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));
+      const order = owner?.customerOrders.find(item => item.id === orderId);
+      if (!owner || !order) return sendJson(response, 404, { error: 'Không tìm thấy đơn này trong hội thoại nào.' });
+      try {
+        await sendChatbotOrderReceipt(owner, order, { force: true });
+      } catch (error) {
+        return sendJson(response, 502, { error: `Chưa gửi lại được phiếu: ${error.message}` });
+      }
+      await updateMessagingStore(current => {
+        const item = current.conversations.find(entry => entry.id === owner.id);
+        const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === orderId);
+        if (target) target.delivery = { ...(target.delivery || {}), status: 'sent', resentAt: Date.now() };
+        return null;
+      });
+      publishMessagingEvent({ type: 'customer-panel', conversationId: owner.id });
+      return sendJson(response, 200, { ok: true });
     }
     if (customerOrderDeleteMatch && request.method === 'DELETE') {
       const orderId = decodeURIComponent(customerOrderDeleteMatch[1]);

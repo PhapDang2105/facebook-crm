@@ -1343,6 +1343,7 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .customer-order-pos-retry { margin-left: 6px; padding: 0 8px; height: 22px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; color: #1677ff; font-size: 12px; cursor: pointer; }
 .customer-order-pos-retry:disabled { color: #8c8c8c; cursor: default; }
 .customer-order-pos-error { color: #cf1322; }
+.customer-order-note-input { width: 100%; min-width: 0; padding: 2px 6px; border: 1px solid #91caff; border-radius: 4px; font: inherit; font-size: 13px; line-height: 18px; }
 .customer-order-detail a { color: #1677ff; text-decoration: none; }
 .customer-panel-icon { width: 18px; height: 18px; flex: 0 0 18px; margin-top: 2px; color: #8c8c8c; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
 .customer-order-tag-carrier { padding: 0 7px; color: #d46b08; background: #ffe7ba; border-radius: 2px; font-size: 12px; line-height: 20px; }

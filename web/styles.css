@@ -535,6 +535,11 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customer-orders-management-row { display: grid; grid-template-columns: 90px minmax(150px, 1fr) 130px 125px 100px 32px; align-items: center; gap: 10.8px; padding: 9px 10.8px; background: #fff; border: .9px solid #e2e8e4; border-radius: 7.2px; font-size: 11.7px; }
 .customer-orders-management-row > strong:last-child { color: #27643a; text-align: right; }
 .customer-orders-management-status { color: #27643a; font-weight: 700; }
+.data-preview .preview-status { white-space: nowrap; }
+.order-status-badge { display: inline-flex; align-items: center; gap: 4px; margin: 2px 6px 2px 0; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; line-height: 16px; white-space: nowrap; }
+.order-status-badge--recent { color: #9a3412; background: #ffedd5; }
+.order-status-badge--old { color: #1b5e20; background: #e6f4ea; }
+.order-status-badge img { width: 13px; height: 13px; }
 .data-preview tbody tr.order-row-duplicate td { background: #fde8ef; }
 .data-preview tbody tr.order-row-duplicate-phone td { background: #fff3bf; }
 

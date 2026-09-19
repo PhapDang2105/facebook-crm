@@ -1629,6 +1629,20 @@ const server = http.createServer(async (request, response) => {
       }).catch(error => console.error(`Không ghi được lịch sử xuất: ${error.message}`));
       return sendBinary(response, 200, output, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName);
     }
+    // Số điện thoại đã có trong tệp khách hàng (đơn đã xuất kho) kèm mã và ngày
+    // các đơn: bảng Nhập dữ liệu dùng để gắn "Khách hàng cũ" và trùng đơn 7 ngày.
+    if (request.method === 'GET' && url.pathname === '/api/customer-file/phones') {
+      const phones = {};
+      for (const person of await listExportedCustomers()) {
+        const key = customerPhoneKey(person.phone);
+        if (!key) continue;
+        phones[key] = {
+          lastExportedAt: Number(person.lastExportedAt) || 0,
+          orders: person.orders.map(order => ({ id: String(order.id || ''), orderedAt: Number(order.orderedAt) || Number(order.exportedAt) || 0 }))
+        };
+      }
+      return sendJson(response, 200, { phones });
+    }
     if (request.method === 'GET' && url.pathname === '/api/orders/export/history') {
       return sendJson(response, 200, { items: await listExports() });
     }

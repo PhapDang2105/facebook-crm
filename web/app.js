@@ -481,6 +481,72 @@ function normalizeRowPhone(value) {
   return phone;
 }
 
+// Tệp khách hàng (đơn đã xuất kho) theo số điện thoại: bảng Nhập dữ liệu gắn
+// "Khách hàng cũ" và "Trùng đơn 7 ngày" cho từng dòng. Tải một lần khi mở,
+// tải lại sau mỗi lần xuất kho.
+const exportedCustomerPhones = new Map();
+async function loadExportedCustomerPhones() {
+  try {
+    const { phones = {} } = await readApiResponse(await fetch('/api/customer-file/phones'));
+    exportedCustomerPhones.clear();
+    for (const [phone, info] of Object.entries(phones)) exportedCustomerPhones.set(normalizeRowPhone(phone), info);
+    if (orderData.rows.length) renderOrderData();
+  } catch {
+    // Không có tệp khách hàng thì cột trạng thái chỉ dựa vào bảng.
+  }
+}
+
+/** Mã đơn của dòng bỏ tiền tố CB-/LP- để so với mã trong tệp khách hàng. */
+function rawOrderIdOf(value) {
+  return String(value ?? '').trim().replace(/^(CB|LP)-/i, '');
+}
+
+const recentOrderWindowDays = 7;
+/**
+ * Trạng thái từng dòng ở Nhập dữ liệu: cùng số điện thoại với một ĐƠN KHÁC trong
+ * 7 ngày gần đây (trong bảng hoặc trong tệp khách hàng), và khách đã mua trước
+ * đây (số có trong tệp khách hàng với đơn khác đơn này).
+ */
+function orderRowStatuses(entries, data = orderData) {
+  const phoneIndex = orderPhoneColumnIndex(data);
+  const orderIdIndex = orderColumnIndex('ma don hang', data);
+  const statuses = new Map();
+  if (phoneIndex < 0) return statuses;
+  const now = new Date();
+  const windowStart = now.getTime() - recentOrderWindowDays * 86400000;
+  // Mọi đơn trong bảng theo số: mã đơn + ngày đặt.
+  const ordersByPhone = new Map();
+  data.rows.forEach((row, index) => {
+    const phone = normalizeRowPhone(row[phoneIndex]);
+    if (!phone) return;
+    const orderId = orderIdIndex >= 0 ? rawOrderIdOf(row[orderIdIndex]) : '';
+    const list = ordersByPhone.get(phone) || [];
+    list.push({ orderId: orderId || `row:${index}`, at: parseOrderRowDate(row, data, now)?.getTime() || now.getTime() });
+    ordersByPhone.set(phone, list);
+  });
+  for (const entry of entries) {
+    const phone = normalizeRowPhone(entry.row[phoneIndex]);
+    if (!phone) continue;
+    const ownId = orderIdIndex >= 0 ? rawOrderIdOf(entry.row[orderIdIndex]) : '';
+    const self = ownId || `row:${entry.index}`;
+    const inTable = (ordersByPhone.get(phone) || []).filter(item => item.orderId !== self && item.at >= windowStart);
+    const customer = exportedCustomerPhones.get(phone);
+    const exportedOrders = (customer?.orders || []).filter(order => order.id && order.id !== ownId);
+    const recentExported = exportedOrders.filter(order => order.orderedAt >= windowStart);
+    const recentCount = new Set([...inTable.map(item => item.orderId), ...recentExported.map(order => order.id)]).size;
+    statuses.set(entry.index, { recentCount, oldCustomer: exportedOrders.length > 0 });
+  }
+  return statuses;
+}
+
+function orderRowStatusHtml(status) {
+  if (!status || (!status.recentCount && !status.oldCustomer)) return '';
+  const badges = [];
+  if (status.recentCount) badges.push(`<span class="order-status-badge order-status-badge--recent" title="Cùng số điện thoại với ${status.recentCount} đơn khác trong ${recentOrderWindowDays} ngày gần đây">Trùng ${status.recentCount} đơn · 7 ngày</span>`);
+  if (status.oldCustomer) badges.push('<span class="order-status-badge order-status-badge--old" title="Số điện thoại đã có trong tệp khách hàng (từng mua và xuất kho)"><img src="/assets/icons/customers.svg" alt="">Khách hàng cũ</span>');
+  return badges.join('');
+}
+
 function phoneWarningFor(value) {
   const warning = phoneWarnings.get(normalizeRowPhone(value));
   return warning && warning.level !== 'none' ? warning : null;
@@ -6661,7 +6727,7 @@ function renderEmptyState(container, message) {
   container.innerHTML = `<div class="order-empty">${emptyBoxIcon}<small>${escapeHtml(message)}</small></div>`;
 }
 
-function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, editingCell = null, templateOverride = '', rowNotes = new Map() } = {}) {
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, editingCell = null, templateOverride = '', rowNotes = new Map(), statusCells = null } = {}) {
   preview.classList.remove('is-empty');
   if (!rowEntries.length) {
     renderEmptyState(preview, emptyMessage);
@@ -6748,12 +6814,21 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     const edited = reviewable && editedOrderCells.has(`${entry.index}|${index}`) ? ' preview-edited' : '';
     return `<td class="${previewClassName(index)}${edited}" data-column-index="${index}">${orderCellInner(entry.row, index, headers, rowNotes.get(entry.index))}</td>`;
   };
+  // Cột Trạng thái (Nhập dữ liệu): trùng đơn 7 ngày, khách hàng cũ — đứng ngay trước Địa chỉ.
+  const statusPosition = statusCells ? Math.max(0, orderedColumns.findIndex(column => column.name === 'dia chi')) : -1;
+  const statusAt = position => statusCells && position === statusPosition;
+  const headCells = visibleIndexes.map((index, position) => `${statusAt(position) ? '<th class="preview-status">Trạng thái</th>' : ''}<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`);
   const head = (deletable ? '<th class="preview-actions"></th>' : '')
-    + visibleIndexes.map(index => `<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`).join('')
+    + headCells.join('')
+    + (statusCells && statusPosition === visibleIndexes.length ? '<th class="preview-status">Trạng thái</th>' : '')
     + (reviewable ? '<th class="preview-actions preview-actions--tail">Trạng thái</th>' : '');
-  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map(index => cellHtml(entry, index)).join('')}${tailCell(entry)}</tr>`).join('');
+  const statusCell = entry => `<td class="preview-status">${statusCells.get(entry.index) || ''}</td>`;
+  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry) : ''}${cellHtml(entry, index)}`).join('')}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry) : ''}${tailCell(entry)}</tr>`).join('');
   // Đang sửa một dòng: giữ đúng bề rộng cột đã đo trước đó để bảng không xê dịch.
-  const template = templateOverride || `${deletable ? '40px ' : ''}${columnTemplate}${reviewable ? ' max-content' : ''}`;
+  const columnTemplateWithStatus = statusCells
+    ? orderedColumns.map((column, position) => `${position === statusPosition ? 'max-content ' : ''}${templates[column.name] || 'max-content'}`).join(' ') + (statusPosition === orderedColumns.length ? ' max-content' : '')
+    : columnTemplate;
+  const template = templateOverride || `${deletable ? '40px ' : ''}${columnTemplateWithStatus}${reviewable ? ' max-content' : ''}`;
   preview.innerHTML = `<table style="--preview-template: ${template}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
@@ -6834,7 +6909,7 @@ function renderOrderData() {
       // cảnh báo bom hàng và các vấn đề khác để bên Xử lý dữ liệu lo.
       ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate'
         : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
-      { deletable: true, rowNotes }
+      { deletable: true, rowNotes, statusCells: new Map([...orderRowStatuses(importRows).entries()].map(([index, status]) => [index, orderRowStatusHtml(status)])) }
     );
   } else orderPanelsDirty.add('import');
   if (!panelVisible('process')) { orderPanelsDirty.add('process'); return; }
@@ -7442,6 +7517,7 @@ orderSearch.addEventListener('input', () => {
 orderFilter.addEventListener('change', renderOrderData);
 orderSourceFilter?.addEventListener('change', renderOrderData);
 orderDayFilter?.addEventListener('change', renderOrderData);
+loadExportedCustomerPhones();
 // Đổi ngày xuất: bảng xuất dựng lại (khoá cache theo dữ liệu nên tự làm mới).
 orderExportDay?.addEventListener('change', () => { orderPanelsDirty.add('export'); renderOrderData(); });
 orderExportHistoryButton?.addEventListener('click', () => {
@@ -8094,6 +8170,8 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast(skipInvalidLocations ? `Đã tải ${filename} (đã bỏ qua đơn chưa chuẩn địa chỉ).` : `Đã tải ${filename}.`, 'success');
     if (!orderExportHistoryPanel?.classList.contains('hidden')) renderExportHistory();
+    // Khách vừa xuất kho thành khách hàng cũ ở các đơn sau.
+    loadExportedCustomerPhones();
   } catch (error) {
     showToast(error.message);
   } finally {

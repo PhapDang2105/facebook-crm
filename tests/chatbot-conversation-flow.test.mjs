@@ -173,7 +173,7 @@ test('bot gửi theo dãy parts: ảnh trước rồi mới tới chữ khi mẫ
   await processChatbotChanges([change(incoming('a', 'túi xanh giá sao', 1000))], {
     readSettings: async () => settings,
     listMessages: async () => [],
-    sendMessage: async (_conversation, message) => sent.push(message.imageUrl ? `ảnh:${message.imageUrl}` : `chữ:${message.text}`),
+    sendMessage: async (_conversation, message) => sent.push(message.imageUrls ? `ảnh:${message.imageUrls.join('+')}` : message.imageUrl ? `ảnh:${message.imageUrl}` : `chữ:${message.text}`),
     saveBotState: async () => {},
     requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá'], images: ['https://x/1.png'], parts: [{ type: 'image', url: 'https://x/1.png' }, { type: 'text', text: 'Bảng giá' }], conversationId: '', handoff: false })
   });
@@ -201,7 +201,7 @@ test('ảnh không gửi được thì bỏ ảnh, chữ vẫn tới khách, l�
   const results = await processChatbotChanges([change(incoming('a', 'túi xanh giá sao', 1000))], {
     readSettings: async () => settings,
     listMessages: async () => [],
-    sendMessage: async (_conversation, message) => { if (message.imageUrl) throw new Error('Pancake không nhận tin (200): invalid_upload_fb_attachments_result'); sent.push(message.text); },
+    sendMessage: async (_conversation, message) => { if (message.imageUrl || message.imageUrls) throw new Error('Pancake không nhận tin (200): invalid_upload_fb_attachments_result'); sent.push(message.text); },
     saveBotState: async (_id, state) => saved.push(state),
     requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá'], images: ['https://x/1.png'], parts: [{ type: 'image', url: 'https://x/1.png' }, { type: 'text', text: 'Bảng giá' }], conversationId: '', handoff: false })
   });
@@ -219,8 +219,8 @@ test('bình luận: nhắn riêng bảng giá (một tin), rồi ảnh sản ph�
     listMessages: async () => [],
     getConversation: async id => (id === 'page:user' ? inboxThread : commentThread),
     sendMessage: async (conversation, message) => {
-      if (message.imageUrl && failImages) throw new Error('(#10) ngoài cửa sổ nhắn tin');
-      sent.push(`${conversation.id}|${message.privateReply ? 'riêng' : message.imageUrl ? 'ảnh' : 'công khai'}|${(message.text || message.imageUrl).slice(0, 12)}`);
+      if ((message.imageUrl || message.imageUrls) && failImages) throw new Error('(#10) ngoài cửa sổ nhắn tin');
+      sent.push(`${conversation.id}|${message.privateReply ? 'riêng' : message.imageUrls || message.imageUrl ? 'ảnh' : 'công khai'}|${(message.text || (message.imageUrls || [message.imageUrl]).join('+')).slice(0, 12)}`);
     },
     saveBotState: async () => {},
     moderateComment: async () => {},
@@ -231,9 +231,8 @@ test('bình luận: nhắn riêng bảng giá (một tin), rồi ảnh sản ph�
   assert.deepEqual(sent.map(item => item.split('|').slice(0, 2).join('|')), [
     'page:comment:user:post1|riêng',
     'page:user|ảnh',
-    'page:user|ảnh',
     'page:comment:user:post1|công khai'
-  ]);
+  ], 'hai ảnh đi chung một tin');
   assert.match(sent[0], /Dạ em thấy a/);
   sent.length = 0;
   await run(true);

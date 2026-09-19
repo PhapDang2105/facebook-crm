@@ -141,3 +141,21 @@ test('thông báo hệ thống của Facebook khi nhắn riêng từ bình luậ
   const notice = inbox({ message: { id: 'm_sys', message: 'Bạn đang phản hồi bình luận của người dùng về bài viết trên Trang của bạn.', from: { id: '110', name: 'Test' } } });
   assert.deepEqual(normalizePancakeWebhook(notice, config), []);
 });
+
+test('nhiều ảnh gửi chung một tin Pancake (content_ids nhiều mã), hộp thư ghi mỗi ảnh một bong bóng', async () => {
+  const calls = [];
+  const fetchMock = async (url, options = {}) => {
+    const address = String(url);
+    if (address.startsWith('https://cdn.example/')) return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer, headers: new Headers({ 'content-type': 'image/png' }) };
+    if (address.includes('/upload_contents')) { const n = calls.push('upload'); return { ok: true, status: 200, json: async () => ({ success: true, id: `c${n}`, attachment_type: 'PHOTO' }) }; }
+    if (address.includes('/conversations/110_905/messages')) { const body = JSON.parse(options.body); calls.push(`send:${(body.content_ids || []).join(',')}`); return { ok: true, status: 200, json: async () => ({ success: true, id: 'm_album' }) }; }
+    return notFound();
+  };
+  const conversation = { pageId: '110', psid: '905', pancakeConversationId: '110_905' };
+  const saved = await sendConversationMessageViaPancake(conversation, { imageUrls: ['https://cdn.example/1.png', 'https://cdn.example/2.png', 'https://cdn.example/3.png'] }, config, fetchMock);
+  assert.deepEqual(calls.filter(call => call.startsWith('send')), ['send:c1,c2,c3'], 'một lần gửi mang cả ba mã');
+  assert.equal(calls.filter(call => call === 'upload').length, 3);
+  assert.equal(saved.message.id, 'm_album');
+  assert.deepEqual(saved.extras.map(item => item.id), ['m_album#1', 'm_album#2']);
+  assert.deepEqual((await listMessages('110:905')).map(item => item.dataUrl), ['https://cdn.example/1.png', 'https://cdn.example/2.png', 'https://cdn.example/3.png']);
+});

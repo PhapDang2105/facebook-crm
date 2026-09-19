@@ -153,13 +153,19 @@ export async function moderateComment(conversation, message, { like = false, hid
 }
 
 /** Sends a reply through the Send API and records it in the local conversation. */
-export async function sendConversationMessage(conversation, { text = '', attachment = null, imageUrl = '', template = null, templateText = '', privateReply = false }) {
+export async function sendConversationMessage(conversation, { text = '', attachment = null, imageUrl = '', imageUrls = [], template = null, templateText = '', privateReply = false }) {
   // Hội thoại đến từ Pancake (Page vận hành trong Pancake, CRM không có token
   // Meta của Page đó): gửi ngược qua Public API của Pancake.
   if (conversation.pancakeConversationId) {
     // privateReply phải đi theo: thiếu nó, tin nhắn riêng cho người bình luận
     // bị đăng thành bình luận công khai (đã xảy ra với bảng giá).
-    return sendConversationMessageViaPancake(conversation, { text, templateText, attachment, imageUrl, privateReply });
+    return sendConversationMessageViaPancake(conversation, { text, templateText, attachment, imageUrl, imageUrls, privateReply });
+  }
+  // Messenger Send API chỉ nhận một ảnh mỗi tin: nhiều ảnh thì gửi lần lượt.
+  if (Array.isArray(imageUrls) && imageUrls.length) {
+    let last = null;
+    for (const url of [imageUrl, ...imageUrls].filter(Boolean)) last = await sendConversationMessage(conversation, { imageUrl: url, privateReply });
+    return last;
   }
   if (conversation.source === 'comment') {
     if (attachment || template) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });

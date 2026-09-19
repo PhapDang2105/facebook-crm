@@ -1326,9 +1326,15 @@ const server = http.createServer(async (request, response) => {
           const imageTarget = conversation.source === 'comment' && privateReply
             ? await getConversation(sent?.conversation?.id || `${conversation.pageId}:${conversation.psid}`)
             : conversation;
-          for (const imageUrl of imageTarget ? imageUrls : []) {
-            last = await sendConversationMessage(imageTarget, { imageUrl: publicImageUrl(imageUrl) });
-            messages.push(last.message);
+          // Qua Pancake nhiều ảnh đi chung một tin (một cụm ảnh); Meta gửi từng ảnh.
+          if (imageTarget && imageUrls.length && imageTarget.pancakeConversationId) {
+            last = await sendConversationMessage(imageTarget, { imageUrls: imageUrls.map(publicImageUrl) });
+            messages.push(last.message, ...(last.extras || []));
+          } else {
+            for (const imageUrl of imageTarget ? imageUrls : []) {
+              last = await sendConversationMessage(imageTarget, { imageUrl: publicImageUrl(imageUrl) });
+              messages.push(last.message);
+            }
           }
           if (!last) return sendJson(response, 400, { error: 'Khách chưa có hội thoại Messenger để nhận ảnh.' });
           return sendJson(response, 200, { ...last, message: (sent || last).message, messages });

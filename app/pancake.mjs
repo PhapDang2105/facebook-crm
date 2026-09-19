@@ -533,24 +533,32 @@ function decodeDataUrl(dataUrl) {
  * (attachment) tải lên Pancake trước rồi gửi bằng mã nội dung. Receipt/template
  * dùng bản chữ. Chữ đi kèm tệp được gửi thành tin riêng sau tệp.
  */
-export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '', privateReply = false }, config = defaultConfig, fetchImpl = fetch) {
+export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '', imageUrls = [], privateReply = false }, config = defaultConfig, fetchImpl = fetch) {
   const body = String(templateText || text || '').trim();
   const target = { pageId: conversation.pageId, conversationId: conversation.pancakeConversationId };
-  if (!body && !attachment && !imageUrl) throw Object.assign(new Error('Tin nhắn trống.'), { statusCode: 400 });
+  // Nhiều ảnh đi chung một tin (Facebook nhận tới 30 mã một lần), khách thấy một cụm ảnh thay vì từng ảnh lắc nhắc.
+  const pictures = [...new Set([imageUrl, ...(Array.isArray(imageUrls) ? imageUrls : [])].map(item => String(item || '').trim()).filter(Boolean))].slice(0, 30);
+  if (!body && !attachment && !pictures.length) throw Object.assign(new Error('Tin nhắn trống.'), { statusCode: 400 });
   if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply }, config, fetchImpl);
   let message;
-  if (imageUrl) {
+  const extraMessages = [];
+  if (pictures.length) {
+    const upload = () => Promise.all(pictures.map(url => pancakeContentIdForImage(target.pageId, url, config, fetchImpl).then(item => item.id)));
     let sent;
     try {
-      const { id } = await pancakeContentIdForImage(target.pageId, imageUrl, config, fetchImpl);
-      sent = await sendPancakeMessage({ ...target, contentIds: [id] }, config, fetchImpl);
+      sent = await sendPancakeMessage({ ...target, contentIds: await upload() }, config, fetchImpl);
     } catch (error) {
       // Facebook thỉnh thoảng từ chối tệp vừa tải (invalid_upload_fb_attachments_result): tải lại và gửi thêm một lần.
       if (!/invalid_upload|không nhận tin/.test(error.message)) throw error;
-      const { id } = await pancakeContentIdForImage(target.pageId, imageUrl, config, fetchImpl);
-      sent = await sendPancakeMessage({ ...target, contentIds: [id] }, config, fetchImpl);
+      sent = await sendPancakeMessage({ ...target, contentIds: await upload() }, config, fetchImpl);
     }
-    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'image', text: '', name: 'anh-san-pham', dataUrl: imageUrl, createdAt: Date.now(), status: 'sent' };
+    const at = Date.now();
+    // Mỗi ảnh một bong bóng trong hộp thư; ảnh đầu mang mã tin của Pancake để bản dội lại gộp vào.
+    pictures.forEach((url, index) => {
+      const id = index ? `${sent.id}#${index}` : sent.id;
+      const record = { id, mid: id, direction: 'outgoing', type: 'image', text: '', name: 'anh-san-pham', dataUrl: url, createdAt: at + index, status: 'sent' };
+      if (index) extraMessages.push(record); else message = record;
+    });
   } else if (attachment) {
     const { mime, buffer } = decodeDataUrl(attachment.dataUrl);
     const file = await fitImageForPancake({ buffer, filename: attachment.name || 'tep-dinh-kem', mime });
@@ -566,10 +574,12 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   }
   const saved = await updateMessagingStore(store => {
     const outcome = saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, message });
+    const extras = extraMessages.map(extra => saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, message: extra }).message);
     outcome.conversation.unread = false;
-    return { message: outcome.message, conversation: publicConversation(outcome.conversation) };
+    return { message: outcome.message, extras, conversation: publicConversation(outcome.conversation) };
   });
   publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: saved.message });
+  for (const extra of saved.extras) publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: extra });
   return saved;
 }
 

@@ -306,13 +306,7 @@ async function answerChange(change, settings, results, dependencies) {
       // chặn (khách chưa nhắn lại) thì bỏ qua, không báo lỗi.
       if (!privateError && reply.images?.length && getConversation) {
         const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
-        for (const imageUrl of inbox ? reply.images : []) {
-          try {
-            await sendMessage(inbox, { imageUrl });
-          } catch {
-            break;
-          }
-        }
+        if (inbox) await sendMessage(inbox, { imageUrls: reply.images }).catch(() => {});
       }
       const publicReply = renderChatbotReply({ template_id: privateError ? 'COMMENT_PUBLIC_FALLBACK' : 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
       for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
@@ -329,11 +323,15 @@ async function answerChange(change, settings, results, dependencies) {
       const parts = reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
       // Ảnh không gửi được (Pancake/Facebook từ chối tệp) thì bỏ ảnh đó, chữ
       // vẫn phải tới khách; lỗi ảnh ghi lại cho panel khách thay vì chặn cả câu.
+      // Ảnh liền nhau gộp thành một tin nhiều ảnh (Pancake gửi một cụm; Meta tự tách từng ảnh).
       const imageErrors = [];
-      for (const part of parts) {
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index];
         if (part.type !== 'image') { await sendMessage(conversation, { text: part.text }); continue; }
+        const urls = [part.url];
+        while (parts[index + 1]?.type === 'image') urls.push(parts[++index].url);
         try {
-          await sendMessage(conversation, { imageUrl: part.url });
+          await sendMessage(conversation, { imageUrls: urls });
         } catch (error) {
           imageErrors.push(error.message);
         }

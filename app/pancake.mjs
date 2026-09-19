@@ -194,7 +194,11 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
 // lúc server đang khởi động lại, được kéo về bằng API liệt kê hội thoại và tin
 // nhắn: khi mở kênh lần đầu, lúc khởi động, và định kỳ. Chỉ ghi hộp thư, không
 // đưa bot (tin cũ không phải để trả lời).
-async function pancakeGet(pathname, params, config, fetchImpl) {
+const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+// Pancake giới hạn 5 lần gọi mỗi giây cho mỗi Page; quá thì trả 429 "Too many
+// requests". Gặp 429 thì nghỉ rồi gọi lại (tối đa 3 lần).
+async function pancakeGet(pathname, params, config, fetchImpl, attempt = 0) {
   const url = new URL(`${config.apiBase.replace(/\/+$/, '')}${pathname}`);
   url.searchParams.set('page_access_token', config.pageAccessToken);
   for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
@@ -204,6 +208,11 @@ async function pancakeGet(pathname, params, config, fetchImpl) {
     const response = await fetchImpl(url, { signal: controller.signal });
     let body = {};
     try { body = await response.json(); } catch {}
+    if (response.status === 429 && attempt < 3) {
+      clearTimeout(timer);
+      await pause(1500 * (attempt + 1));
+      return pancakeGet(pathname, params, config, fetchImpl, attempt + 1);
+    }
     if (!response.ok || body.success === false) throw new Error(`Pancake trả về ${response.status}: ${body.message || body.error || 'không rõ lý do'}`);
     return body;
   } finally {
@@ -643,6 +652,8 @@ export async function findPancakePost(postId, { months = 12 } = {}, config = def
   for (let month = 0; month < months && !found; month += 1) {
     const since = until - monthSeconds;
     for (let pageNumber = 1; pageNumber <= 3 && !found; pageNumber += 1) {
+      // Quét lùi nhiều trang: giãn ra để không chạm giới hạn 5 lần/giây của Pancake.
+      if (month || pageNumber > 1) await pause(350);
       const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/posts`, { since, until, page_number: pageNumber, page_size: 30 }, config, fetchImpl);
       const posts = Array.isArray(body.data) ? body.data : Array.isArray(body.posts) ? body.posts : [];
       found = posts.find(post => String(post?.id) === id) || null;

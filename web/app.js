@@ -4788,13 +4788,12 @@ function setCustomerPanelTab(name) {
   if (name === 'create') resetCustomerOrderForm();
 }
 
-/** Which ad the customer came from, when Messenger reported one. */
-function renderCustomerSourceLine(conversation) {
+/** Dòng "Từ quảng cáo" trong panel khách đã bỏ theo yêu cầu; nguồn quảng cáo vẫn xem được ở thẻ QC và bộ lọc. */
+function renderCustomerSourceLine() {
   const line = document.querySelector('#customer-source-line');
   if (!line) return;
-  const adTitle = conversation?.dataset.adTitle || '';
-  line.classList.toggle('hidden', !adTitle);
-  line.textContent = adTitle ? `Từ quảng cáo: ${adTitle}` : '';
+  line.classList.add('hidden');
+  line.textContent = '';
 }
 
 /**

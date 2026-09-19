@@ -165,7 +165,11 @@ test('giới tính đoán từ tên và cách khách tự xưng; nhân viên đ�
   const { applyGenderGuess } = await import('../app/messaging-store.mjs');
   assert.equal(genderFromName('Nguyễn Thị Lan Anh'), 'female');
   assert.equal(genderFromName('Trần Văn Hoàng'), 'male');
-  assert.equal(genderFromName('Lan Anh'), '', 'no middle name, no guess');
+  assert.equal(genderFromName('Lan Anh'), 'female', 'tên riêng ghép "Lan Anh" là nữ');
+  // Bảng tên riêng: tên gần như luôn một giới; Facebook ghi ngược (tên trước, họ sau) vẫn đọc được; không dấu chỉ so khi cả tên không dấu.
+  for (const [name, gender] of [['Trần Hải Yến', 'female'], ['Cẩm Loan', 'female'], ['Nguyễn Lệ', 'female'], ['Nhung Vũ', 'female'], ['Vy Nguyen', 'female'], ['Pháp Đặng', 'male'], ['Lê Minh Tuấn', 'male'], ['Nguyễn Hữu Phước', 'male'], ['Ân Ân', ''], ['Nguyễn Thuyên', ''], ['Phạm Ngọc Anh', ''], ['Huy Facebook', ''], ['Trần Khánh', '']]) {
+    assert.equal(genderFromName(name), gender, name);
+  }
   assert.equal(genderFromName('Thị'), '');
   assert.equal(genderFromMessage('chị muốn đặt 2 túi xanh'), 'female');
   assert.equal(genderFromMessage('Anh cần giao về Q12'), 'male');

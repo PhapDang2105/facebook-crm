@@ -226,7 +226,7 @@ function applyCommentEvent(store, event) {
   });
   conversation.lastCommentId = event.commentId;
   store.commentIndex[event.commentId] = conversation.id;
-  if (inserted) applyGenderGuess(conversation, genderFromMessage(event.text), 'message');
+  if (inserted && applyGenderGuess(conversation, genderFromMessage(event.text), 'message')) reconcileCustomerGender(store, conversation);
   return inserted ? { type: 'message', conversation, message: saved } : null;
 }
 
@@ -263,7 +263,7 @@ export function applyWebhookEvents(store, events) {
         // The comment webhook carries the person's picture; Messenger's profile lookup often does not.
         if (commentThread?.picture && !conversation.picture) conversation.picture = commentThread.picture;
       }
-      if (inserted && message.direction === 'incoming') applyGenderGuess(conversation, genderFromMessage(message.text), 'message');
+      if (inserted && message.direction === 'incoming' && applyGenderGuess(conversation, genderFromMessage(message.text), 'message')) reconcileCustomerGender(store, conversation);
       // Kèm referral vào change: khách MỚI bấm "Bắt đầu" thì Meta gửi postback,
       // và postback được chuẩn hoá thành sự kiện kiểu `message` — nên nếu chỉ
       // nghe nhánh `referral` sẽ bỏ sót đúng nhóm khách mới.

@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { genderFromName } from './processing/customer-info.mjs';
 
 // META_CONVERSATIONS_PATH lets the integration test run without touching real customer data.
 const messagingStorePath = process.env.META_CONVERSATIONS_PATH
@@ -52,7 +53,28 @@ function normalizeStore(value) {
     // with only a parent id) and later edits find their thread.
     commentIndex: value.commentIndex && typeof value.commentIndex === 'object' ? value.commentIndex : {}
   });
-  return pruneCommentIndex(store);
+  pruneCommentIndex(store);
+  // Hội thoại chưa có giới tính: đoán theo tên (bảng tên riêng mới rộng hơn
+  // "Thị/Văn"), rồi dồn giới tính tốt nhất của cùng một khách cho mọi luồng.
+  for (const conversation of store.conversations) {
+    if (conversation && !conversation.gender) applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
+  }
+  for (const conversation of store.conversations) reconcileCustomerGender(store, conversation);
+  return store;
+}
+
+/**
+ * Một khách có nhiều luồng (hộp thư + từng bài bình luận): giới tính tin cậy
+ * nhất trong các luồng đó (nhân viên chọn > Pancake > xưng hô > tên) áp cho
+ * mọi luồng còn lại. Trả về các hội thoại vừa đổi.
+ */
+export function reconcileCustomerGender(store, conversation) {
+  if (!conversation?.psid) return [];
+  const siblings = store.conversations.filter(item => item.pageId === conversation.pageId && item.psid === conversation.psid);
+  if (siblings.length < 2) return [];
+  const best = siblings.filter(item => item.gender).sort((first, second) => (genderRank[second.genderSource] || 0) - (genderRank[first.genderSource] || 0))[0];
+  if (!best) return [];
+  return siblings.filter(item => item !== best && applyGenderGuess(item, best.gender, best.genderSource));
 }
 
 // Chỉ số bình luận chỉ có ghi thêm; bỏ mục trỏ tới luồng không còn hay bình luận

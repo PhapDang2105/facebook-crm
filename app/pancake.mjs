@@ -8,7 +8,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
 import { applyWebhookEvents } from './meta-webhook.mjs';
-import { applyGenderGuess, publicConversation, readMessagingStore, saveMessage, updateMessagingStore } from './messaging-store.mjs';
+import { applyGenderGuess, publicConversation, readMessagingStore, reconcileCustomerGender, saveMessage, updateMessagingStore } from './messaging-store.mjs';
+import { genderFromName } from './processing/customer-info.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import { assertPublicHost } from './network-guard.mjs';
 
@@ -303,7 +304,7 @@ async function runPancakeSync({ limit = 60, messagePages = 1, commentLimit = 30 
         .map(message => pancakeMessageEvent(pageId, conversation, message))
         .filter(Boolean)
         .sort((first, second) => first.timestamp - second.timestamp);
-      stored += (await storePancakeEvents(events)).length;
+      stored += (await storePancakeEvents(events)).filter(change => change.type === 'message').length;
     } catch (error) {
       failures.push(`${conversation.id}: ${error.message}`);
     }
@@ -323,7 +324,7 @@ async function runPancakeSync({ limit = 60, messagePages = 1, commentLimit = 30 
         .map(comment => pancakeCommentEvent(pageId, thread, comment, post))
         .filter(Boolean)
         .sort((first, second) => (first.parentId ? 1 : 0) - (second.parentId ? 1 : 0) || first.timestamp - second.timestamp);
-      stored += (await storePancakeEvents(events)).length;
+      stored += (await storePancakeEvents(events)).filter(change => change.type === 'message').length;
     } catch (error) {
       failures.push(`${thread.id}: ${error.message}`);
     }
@@ -427,8 +428,12 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false }
       // Tên mặc định của hộp thư ("Khách Facebook 1234") thay bằng tên Pancake biết.
       if (event.pancake.customerName && (!conversation.name || /^Khách Facebook \d*$/.test(conversation.name))) conversation.name = event.pancake.customerName;
       // Giới tính trong hồ sơ Pancake: hơn bản đoán theo tên/xưng hô, kém nhân viên chọn tay; đổi thì báo hộp thư.
-      if (event.pancake.gender && applyGenderGuess(conversation, event.pancake.gender, 'pancake') && !applied.some(change => change.conversation?.id === conversation.id)) {
-        applied.push({ type: 'conversation', conversation });
+      // Không có trong hồ sơ thì đoán theo tên; rồi dồn cho mọi luồng của cùng khách.
+      const genderChanged = (event.pancake.gender && applyGenderGuess(conversation, event.pancake.gender, 'pancake'))
+        || applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
+      const reconciled = reconcileCustomerGender(store, conversation);
+      for (const changed of [...(genderChanged ? [conversation] : []), ...reconciled]) {
+        if (!applied.some(change => change.type === 'conversation' && change.conversation?.id === changed.id)) applied.push({ type: 'conversation', conversation: changed });
       }
       conversation.pancakeAssigned = event.pancake.assigned;
     }
@@ -859,5 +864,7 @@ export async function handlePancakeWebhook(payload, { processChatbotChanges, cha
     ? changes
     : changes.filter(change => !change.conversation || !assigned.has(`${change.conversation.pageId}:${change.conversation.psid}`));
   if (forBot.length && processChatbotChanges) await processChatbotChanges(forBot, chatbotDependencies);
-  return { stored: changes.length, bot: forBot.length };
+  // Đếm tin đã ghi; thay đổi hội thoại (giới tính, tên) không tính là tin.
+  const messagesOnly = list => list.filter(change => change.type === 'message').length;
+  return { stored: messagesOnly(changes), bot: messagesOnly(forBot) };
 }

@@ -713,6 +713,8 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .data-preview .preview-quantity { justify-content: center; text-align: center; }
 .data-preview .preview-phone { justify-content: flex-start; text-align: left; }
 .data-preview td.preview-phone { flex-wrap: wrap; white-space: normal; }
+#order-import-preview td.preview-phone { cursor: copy; }
+#order-import-preview td.preview-phone:hover { text-decoration: underline dotted; }
 .data-preview td.preview-phone .phone-warning-badge { margin-left: 0; }
 .data-preview th.preview-product-heading { justify-content: center; text-align: center; }
 .product-with-image { position: relative; display: flex; align-items: center; width: 100%; min-height: 41.4px; padding-right: 50.4px; text-align: left; }

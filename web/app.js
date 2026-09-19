@@ -1659,11 +1659,24 @@ function toggleOrderPhoneFilter(rowIndex) {
 function orderPhoneColumnIndex(data = orderData) {
   return data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
 }
-// Nhập dữ liệu: bấm dòng thì lọc bảng theo số điện thoại của dòng đó.
-document.querySelector('#order-import-preview')?.addEventListener('click', event => {
+// Nhập dữ liệu: bấm ô số điện thoại thì chép số vào bộ nhớ đệm; bấm chỗ khác
+// của dòng thì lọc bảng theo số điện thoại của dòng đó.
+document.querySelector('#order-import-preview')?.addEventListener('click', async event => {
   if (event.target.closest('button, a, input, select, textarea')) return;
   const row = event.target.closest('tr[data-order-row-index]');
   if (!row) return;
+  const phoneCell = event.target.closest('td.preview-phone');
+  if (phoneCell) {
+    const phone = normalizeRowPhone(orderData.rows[Number(row.dataset.orderRowIndex)]?.[orderPhoneColumnIndex()]);
+    if (!phone) return;
+    try {
+      await navigator.clipboard.writeText(phone);
+      showToast(`Đã chép ${phone}`, 'success', 1800);
+    } catch {
+      showToast('Trình duyệt không cho chép số. Bôi đen số rồi Ctrl+C giúp nhé.');
+    }
+    return;
+  }
   toggleOrderPhoneFilter(Number(row.dataset.orderRowIndex));
 });
 

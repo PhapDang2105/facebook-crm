@@ -3649,6 +3649,38 @@ function updateConversationTimeLabels() {
   });
 }
 
+const commentReplyNoticePattern = /^Bạn đang phản hồi bình luận của người dùng/u;
+function isCommentReplyNotice(item) {
+  return item?.type === 'text' && commentReplyNoticePattern.test(String(item.text || '').trim());
+}
+
+/** "Bạn đang phản hồi bình luận … Xem bình luận.(link)" → dòng mờ giữa khung, "Xem bình luận" là link. */
+function appendCommentReplyNotice(item) {
+  if (!chatBody) return;
+  const raw = String(item.text || '').trim();
+  const link = raw.match(/\((https?:\/\/[^\s)]+)\)/)?.[1] || '';
+  const body = raw.replace(/\s*Xem bình luận\.?\s*(\([^)]*\))?\s*$/u, '').trim();
+  const notice = document.createElement('div');
+  notice.className = 'chat-system-notice chat-comment-notice';
+  const icon = document.createElement('img');
+  icon.src = '/assets/icons/labels/person-raising-hand.svg';
+  icon.alt = '';
+  const text = document.createElement('span');
+  text.textContent = body;
+  notice.append(icon, text);
+  if (link) {
+    const anchor = document.createElement('a');
+    anchor.href = link;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener';
+    anchor.textContent = 'Xem bình luận';
+    notice.appendChild(anchor);
+  }
+  const sentAt = getChatTimestamp(item.createdAt);
+  if (sentAt) notice.title = formatMessageHoverTime(sentAt);
+  chatBody.appendChild(notice);
+}
+
 function appendChatSystemNotice(item) {
   if (!chatBody) return;
   const notice = document.createElement('div');
@@ -3667,6 +3699,13 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   const item = typeof message === 'string' ? { type: 'text', text: message } : { type: 'text', text: '', ...message };
   if (item.type === 'system') {
     appendChatSystemNotice(item);
+    return;
+  }
+  // Dòng Facebook tự chèn khi Page nhắn riêng từ một bình luận ("Bạn đang phản
+  // hồi bình luận…"): không phải tin của mình, vẽ thành dòng hệ thống mờ ở
+  // giữa, có link mở bình luận, để không lẫn với bong bóng tin đã gửi.
+  if (isCommentReplyNotice(item)) {
+    appendCommentReplyNotice(item);
     return;
   }
   // The receipt sent to the customer is already drawn as an order card by

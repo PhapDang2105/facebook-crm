@@ -6286,12 +6286,12 @@ function openChatMessageMenu(row) {
   const actions = isRecalled
     ? [['deleted', 'Xóa']]
     : [
-        ...(isOutgoing ? [['recalled', 'Thu hồi']] : []),
+        // Facebook không cho Page thu hồi tin đã gửi, nên không bày nút "Thu hồi" cho hội thoại Facebook.
+        ...(isOutgoing && !isFacebookConversation(conversation) ? [['recalled', 'Thu hồi']] : []),
         ['forward', 'Chuyển tiếp'],
         // Only offer copying when there is text to copy.
         ...(getMessageRowText(row) ? [['copy', 'Sao chép']] : []),
-        ['pin', isPinned ? 'Bỏ ghim' : 'Ghim'],
-        ['report', 'Báo cáo']
+        ['pin', isPinned ? 'Bỏ ghim' : 'Ghim']
       ];
   actions.forEach(([action, label]) => {
     const button = document.createElement('button');
@@ -6324,19 +6324,10 @@ function openChatMessageMenu(row) {
         copyMessageText(row);
         return;
       }
-      if (action === 'report') {
-        closeChatMessageMenu();
-        showComposerStatus('Đã ghi nhận báo cáo cho tin nhắn này.');
-        return;
-      }
       saveChatMessageAction(name, messageId, action);
       closeChatMessageMenu();
       renderConversation(conversation);
       syncConversationPreview(conversation);
-      // Meta gives Pages no way to unsend, so this only hides the bubble here.
-      if (action === 'recalled' && isFacebookConversation(conversation)) {
-        showComposerStatus('Đã ẩn tin nhắn trong CRM. Facebook không cho Page thu hồi nên khách vẫn thấy tin gốc.', 6000);
-      }
     });
     menu.appendChild(button);
   });

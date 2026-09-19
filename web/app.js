@@ -8146,8 +8146,11 @@ audioRecordingCancel?.addEventListener('click', () => stopAudioRecording(true));
 /** Ô soạn tự cao theo số dòng (tối đa theo CSS), về một dòng khi trống. */
 function autosizeComposer() {
   if (!messageComposerInput) return;
+  // height là phần nội dung (content-box), scrollHeight gồm cả đệm trên dưới: trừ đệm ra.
+  const style = getComputedStyle(messageComposerInput);
+  const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
   messageComposerInput.style.height = '22px';
-  messageComposerInput.style.height = `${Math.max(22, messageComposerInput.scrollHeight)}px`;
+  messageComposerInput.style.height = `${Math.max(22, messageComposerInput.scrollHeight - padding)}px`;
 }
 messageComposerInput?.addEventListener('input', () => { autosizeComposer(); updateMessageSendState(); });
 messageComposerInput?.addEventListener('keydown', event => {

@@ -169,6 +169,9 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   const media = photos.length
     ? { type: 'image', dataUrl: photos[0], ...(photos.length > 1 ? { images: photos } : {}) }
     : video ? { type: 'video', dataUrl: String(video.url) } : null;
+  // Thẻ xác nhận đơn (receipt) do Pancake POS gửi khách khi CRM đẩy đơn sang:
+  // hộp thư đã vẽ đơn đó thành thẻ đơn, tin này chỉ ghi dấu như receipt của Meta.
+  const receipt = !media && attachments.some(item => kindOf(item) === 'template' && String(item?.payload?.template_type || '').toLowerCase() === 'receipt');
   const identifier = String(message.id || `pancake-${now}`);
   const at = pancakeTime(message.inserted_at, now);
   // Tin của Page: gửi từ CRM thì Pancake ghi người gửi là "Public API"; tên
@@ -183,8 +186,8 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       id: identifier,
       mid: identifier,
       direction: outgoing ? 'outgoing' : 'incoming',
-      type: media ? media.type : text || !attachments.length ? 'text' : 'attachment',
-      text: text || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
+      type: media ? media.type : receipt ? 'order-receipt' : text || !attachments.length ? 'text' : 'attachment',
+      text: receipt ? 'Đã gửi xác nhận đơn hàng' : text || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
       ...(media ? { dataUrl: media.dataUrl, name: '', ...(media.images ? { images: media.images } : {}) } : {}),
       createdAt: at,
       status: outgoing ? 'sent' : 'received'

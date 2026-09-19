@@ -259,8 +259,11 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
   if (result.created) {
     publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
     await appendOrderToArchive(result.order).catch(() => {});
-    // Đẩy sang Pancake POS ở nền: khách đã có xác nhận, POS chậm không giữ bot lại.
-    syncOrderToPos(conversation.id, result.order.id).catch(error => console.error(`Đẩy đơn ${result.order.id} sang POS lỗi: ${error.message}`));
+    // Đẩy sang Pancake POS trước khi gửi phiếu: POS tự gửi khách thẻ xác nhận
+    // đơn (receipt) trong hội thoại Pancake, nên đẩy được thì CRM không gửi thêm
+    // phiếu ảnh của mình (khách nhận một phiếu). Lỗi POS ghi lên đơn, không chặn bot.
+    const pos = await syncOrderToPos(conversation.id, result.order.id).catch(error => ({ error: error.message, at: Date.now() }));
+    if (pos) result.order.pos = pos;
   }
   return result;
 }
@@ -356,7 +359,9 @@ async function sendChatbotOrderReceipt(conversation, order) {
   try {
     // Qua Pancake không gửi được thẻ receipt của Messenger: phiếu được vẽ
     // thành ảnh và gửi như ảnh đính kèm (bản chữ chỉ lặp lại ORDER_CONFIRMATION).
+    // Đơn đã sang Pancake POS thì POS đã gửi khách thẻ xác nhận, không gửi phiếu thứ hai.
     if (conversation.pancakeConversationId) {
+      if (order.pos?.id) return;
       const image = await renderOrderReceiptImage(order, { merchantName: pancakeConfig.pageName.replace(/\s*\(Pancake\)\s*$/i, '') || 'Giọt Nắng' });
       await sendConversationMessage(conversation, {
         attachment: { dataUrl: `data:image/png;base64,${image.toString('base64')}`, name: `phieu-don-${order.id}.png`, type: 'image' }
@@ -1451,32 +1456,45 @@ const server = http.createServer(async (request, response) => {
           } catch (error) {
             return sendJson(response, 400, { error: error.message });
           }
-          try {
-            const confirmationText = buildCustomerOrderConfirmation(order);
-            const sent = await sendConversationMessage(conversation, {
-              text: confirmationText,
-              templateText: confirmationText,
-              template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl })
-            });
-            order.delivery = {
-              status: 'sent',
-              messageId: String(sent?.message?.mid || sent?.message?.id || ''),
-              sentAt: Date.now()
-            };
-          } catch (error) {
-            return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });
+          const viaPancake = Boolean(conversation.pancakeConversationId);
+          if (!viaPancake) {
+            // Messenger trực tiếp: thẻ receipt kèm bản chữ dự phòng, như trước.
+            try {
+              const confirmationText = buildCustomerOrderConfirmation(order);
+              const sent = await sendConversationMessage(conversation, {
+                text: confirmationText,
+                templateText: confirmationText,
+                template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl })
+              });
+              order.delivery = { status: 'sent', messageId: String(sent?.message?.mid || sent?.message?.id || ''), sentAt: Date.now() };
+            } catch (error) {
+              return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });
+            }
           }
-          const panel = await updateMessagingStore(store => {
+          const stored = await updateMessagingStore(store => {
             const item = store.conversations.find(entry => entry.id === id);
             if (!item) return null;
             if (!Array.isArray(item.customerOrders)) item.customerOrders = [];
             item.customerOrders.unshift(order);
             item.customerOrders = item.customerOrders.slice(0, 200);
-            return publicCustomerPanel(item);
+            return item;
           });
-          if (!panel) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
-          // Đơn nhân viên tạo cũng sang Pancake POS (nền); kết quả hiện trên thẻ đơn.
-          syncOrderToPos(id, order.id).catch(error => console.error(`Đẩy đơn ${order.id} sang POS lỗi: ${error.message}`));
+          if (!stored) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+          if (viaPancake) {
+            // Hội thoại Pancake: không gửi bản chữ. Đẩy đơn sang Pancake POS, POS
+            // gửi khách thẻ xác nhận đơn; POS lỗi thì CRM gửi phiếu ảnh của mình.
+            const pos = await syncOrderToPos(id, order.id).catch(error => ({ error: error.message, at: Date.now() }));
+            if (pos) order.pos = pos;
+            if (!pos?.id) await sendChatbotOrderReceipt(conversation, order);
+            order.delivery = { status: 'sent', messageId: '', sentAt: Date.now(), via: pos?.id ? 'pos' : 'receipt-image' };
+            await updateMessagingStore(store => {
+              const item = store.conversations.find(entry => entry.id === id);
+              const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === order.id);
+              if (target) Object.assign(target, { delivery: order.delivery, ...(order.pos ? { pos: order.pos } : {}) });
+              return null;
+            });
+          }
+          const panel = await readMessagingStore().then(store => publicCustomerPanel(store.conversations.find(entry => entry.id === id)));
           return sendJson(response, 201, panel);
         }
         const panel = await updateMessagingStore(store => {

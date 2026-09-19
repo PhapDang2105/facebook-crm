@@ -16,7 +16,7 @@ const { updateMessagingStore, ensureConversation, readMessagingStore } = await i
 const config = { apiKey: 'k', shopId: '714334721', baseUrl: 'https://pos.example/api/v1' };
 const order = {
   id: 'ab12cd34', name: 'Pháp Đặng', phone: '0385805700', address: 'Khu phố 6, Phường Đông Hải, Thành phố Phan Rang – Tháp Chàm, Ninh Thuận',
-  province: 'Ninh Thuận', district: 'Thành phố Phan Rang – Tháp Chàm', ward: 'Phường Đông Hải',
+  street: 'Khu phố 6', province: 'Ninh Thuận', district: 'Thành phố Phan Rang – Tháp Chàm', ward: 'Phường Đông Hải',
   products: [
     { name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2, price: 174000, paidPrice: 149000, weight: 450 },
     { name: 'Granola Túi Nâu vị cacao 350g', sku: 'GRA-NAU-Z350', quantity: 1, price: 164000, paidPrice: 144000, weight: 350 }
@@ -56,6 +56,10 @@ function posFetch(calls, { variations = ['GRA-XANH-Z450', 'GRA-NAU-Z350', 'BGD',
     calls.push({ address, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null });
     if (address.includes('/products/variations')) return { ok: true, status: 200, json: async () => ({ data: variations.map(sku => ({ id: `v-${sku}`, display_id: sku })) }) };
     if (address.includes('/warehouses')) return { ok: true, status: 200, json: async () => ({ data: [{ id: 'wh-default', name: 'Kho mặc định', allow_create_order: true }, { id: 'wh-gn', name: 'Kho Giọt Nắng', province_id: '701', allow_create_order: true }] }) };
+    // Danh mục địa lý của POS: tên quận viết "Phan Rang-Tháp Chàm" (không khoảng trắng quanh gạch) khác CRM "Phan Rang – Tháp Chàm".
+    if (address.includes('/geo/provinces')) return { ok: true, status: 200, json: async () => ({ data: [{ id: '701', name: 'Hồ Chí Minh' }, { id: '705', name: 'Ninh Thuận' }] }) };
+    if (address.includes('/geo/districts')) return { ok: true, status: 200, json: async () => ({ data: [{ id: '70504', name: 'Huyện Bác Ái', province_id: '705' }, { id: '70501', name: 'Thành phố Phan Rang-Tháp Chàm', province_id: '705' }] }) };
+    if (address.includes('/geo/communes')) return { ok: true, status: 200, json: async () => ({ data: [{ id: '7050127', name: 'Phường Đông Hải', district_id: '70501' }, { id: '7050101', name: 'Phường Đô Vinh', district_id: '70501' }] }) };
     if (address.endsWith('/orders?api_key=k') && options.method === 'POST') return { ok: createStatus < 400, status: createStatus, json: async () => createBody };
     throw new Error(`gọi lạ: ${address}`);
   };
@@ -69,6 +73,22 @@ test('pushOrderToPos: kiểm SKU có trong POS, chọn kho có địa chỉ, POS
   assert.ok(post, 'có lời gọi POST /orders');
   assert.equal(post.body.warehouse_id, 'wh-gn');
   assert.equal(post.body.items.length, 4, 'hai sản phẩm + hai quà (cả hai có trong POS)');
+  // Mã ba cấp của POS đi kèm để thẻ xác nhận và giao vận có địa chỉ; số nhà/đường gửi riêng.
+  assert.equal(post.body.shipping_address.province_id, '705');
+  assert.equal(post.body.shipping_address.district_id, '70501');
+  assert.equal(post.body.shipping_address.commune_id, '7050127');
+  assert.equal(post.body.shipping_address.address, 'Khu phố 6');
+  assert.equal(post.body.shipping_address.full_address, order.address);
+});
+
+test('resolvePosGeo: khớp tên bỏ dấu và gạch nối; thiếu cấp nào thì dừng ở cấp đó', async () => {
+  const { resolvePosGeo, geoNameKey } = await import('../app/pos-orders.mjs');
+  assert.equal(geoNameKey('Thành phố Phan Rang – Tháp Chàm'), geoNameKey('Thành phố Phan Rang-Tháp Chàm'));
+  const geo = await resolvePosGeo({ province: 'Ninh Thuận', district: 'Thành phố Phan Rang – Tháp Chàm', ward: 'Phường Đông Hải' }, config, posFetch([]));
+  assert.deepEqual(geo, { provinceId: '705', districtId: '70501', communeId: '7050127' });
+  const partial = await resolvePosGeo({ province: 'Ninh Thuận', district: 'Huyện Không Có', ward: 'Phường Đông Hải' }, config, posFetch([]));
+  assert.deepEqual(partial, { provinceId: '705' });
+  assert.deepEqual(await resolvePosGeo({ province: '' }, config, posFetch([])), {});
 });
 
 test('pushOrderToPos: sản phẩm không có mẫu mã trong POS thì báo lỗi rõ, không tạo đơn; POS từ chối thì ném lỗi', async () => {
@@ -101,6 +121,7 @@ test('syncOrderToPos ghi kết quả lên đơn trong hội thoại (mã POS hay
 
 test('đơn POS do CRM đẩy sang (custom_id CRM-…) được nhận ra để đồng bộ POS không kéo ngược', () => {
   assert.equal(isCrmPushedPosOrder({ custom_id: 'CRM-ab12cd34' }), true);
+  assert.equal(isCrmPushedPosOrder({ id: 'CRM-03873', system_id: 52682 }), true, 'POS lấy custom_id làm id và không trả custom_id');
   assert.equal(isCrmPushedPosOrder({ custom_id: 'Ma0001' }), false);
   assert.equal(isCrmPushedPosOrder({}), false);
 });

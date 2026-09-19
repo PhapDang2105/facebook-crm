@@ -59,11 +59,84 @@ function money(value) {
   return Math.max(0, Math.round(Number(value) || 0));
 }
 
+// ===== Mã tỉnh/quận/phường của POS =====
+//
+// POS chỉ hiện địa chỉ trên thẻ xác nhận gửi khách (và giao vận) khi có mã ba
+// cấp của POS; gửi địa chỉ chữ không thì POS để trống (đã gặp: thẻ receipt ghi
+// city "-"). CRM đã tách ba cấp theo tên chuẩn, nên tra mã trong danh mục địa
+// lý của POS (`/geo/provinces|districts|communes`), nhớ 24 giờ.
+const geoCache = { provinces: { at: 0, list: [] }, districts: new Map(), communes: new Map() };
+
+async function posGeoRequest(pathname, params, config, fetchImpl) {
+  const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}${pathname}`);
+  url.searchParams.set('api_key', config.apiKey);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetchImpl(url, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error(`Pancake POS trả về HTTP ${response.status}`);
+    const body = await response.json();
+    return Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** "Thành phố Phan Rang – Tháp Chàm" và "Thành phố Phan Rang-Tháp Chàm" là một. */
+export function geoNameKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[–—]/g, '-')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/[^a-z0-9-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const geoPrefixes = /^(thanh pho|tinh|quan|huyen|thi xa|thi tran|phuong|xa)\s+/;
+function findGeo(list, name) {
+  const key = geoNameKey(name);
+  if (!key) return null;
+  const exact = list.find(item => geoNameKey(item.name) === key);
+  if (exact) return exact;
+  const loose = key.replace(geoPrefixes, '');
+  return list.find(item => geoNameKey(item.name).replace(geoPrefixes, '') === loose) || null;
+}
+
+async function geoList(kind, params, cacheEntry, config, fetchImpl) {
+  if (cacheEntry.list.length && Date.now() - cacheEntry.at < warehouseCacheTtlMs) return cacheEntry.list;
+  cacheEntry.list = await posGeoRequest(`/geo/${kind}`, params, config, fetchImpl);
+  cacheEntry.at = Date.now();
+  return cacheEntry.list;
+}
+
+/** Mã POS của tỉnh/quận/phường trên đơn (thiếu cấp nào thì bỏ cấp đó và các cấp dưới). */
+export async function resolvePosGeo(order, config = posConfig(), fetchImpl = fetch) {
+  const result = {};
+  if (!order?.province) return result;
+  const province = findGeo(await geoList('provinces', {}, geoCache.provinces, config, fetchImpl), order.province);
+  if (!province) return result;
+  result.provinceId = String(province.id);
+  if (!order.district) return result;
+  if (!geoCache.districts.has(result.provinceId)) geoCache.districts.set(result.provinceId, { at: 0, list: [] });
+  const district = findGeo(await geoList('districts', { province_id: result.provinceId }, geoCache.districts.get(result.provinceId), config, fetchImpl), order.district);
+  if (!district) return result;
+  result.districtId = String(district.id);
+  if (!order.ward) return result;
+  if (!geoCache.communes.has(result.districtId)) geoCache.communes.set(result.districtId, { at: 0, list: [] });
+  const commune = findGeo(await geoList('communes', { district_id: result.districtId }, geoCache.communes.get(result.districtId), config, fetchImpl), order.ward);
+  if (commune) result.communeId = String(commune.id);
+  return result;
+}
+
 /**
  * Body tạo đơn POS từ đơn CRM. `posSkus` (nếu có) lọc quà: quà không có mẫu mã
  * trong POS thì bỏ qua thay vì làm POS từ chối cả đơn.
  */
-export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '', shopId = '', posSkus = null } = {}) {
+export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '', shopId = '', posSkus = null, geo = {} } = {}) {
   const products = Array.isArray(order.products) ? order.products : [];
   const items = products.filter(item => item.sku).map(item => ({
     variation_id: String(item.sku).trim().toUpperCase(),
@@ -104,8 +177,12 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
     shipping_address: {
       full_name: String(order.name || ''),
       phone_number: String(order.phone || ''),
-      address,
+      // Số nhà/đường riêng khi đã có mã ba cấp (POS ghép lại), không thì cả địa chỉ chữ để POS tự tách.
+      address: geo.communeId && order.street ? String(order.street) : address,
       full_address: address,
+      ...(geo.provinceId ? { province_id: geo.provinceId } : {}),
+      ...(geo.districtId ? { district_id: geo.districtId } : {}),
+      ...(geo.communeId ? { commune_id: geo.communeId } : {}),
       ...(order.province ? { province_name: String(order.province) } : {}),
       ...(order.district ? { district_name: String(order.district) } : {}),
       ...(order.ward ? { commnue_name: String(order.ward) } : {})
@@ -132,7 +209,8 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
   const missing = products.filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
   if (missing.length) throw new Error(`POS không có mẫu mã: ${missing.join(', ')}.`);
   const warehouseId = await posWarehouseId(config, fetchImpl).catch(() => '');
-  const payload = buildPosOrderPayload(order, { conversation, warehouseId, shopId: config.shopId, posSkus });
+  const geo = await resolvePosGeo(order, config, fetchImpl).catch(() => ({}));
+  const payload = buildPosOrderPayload(order, { conversation, warehouseId, shopId: config.shopId, posSkus, geo });
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders`);
   url.searchParams.set('api_key', config.apiKey);
   const controller = new AbortController();
@@ -189,5 +267,6 @@ export async function syncOrderToPos(conversationId, orderId, { config = posConf
 
 /** Đơn POS do CRM đẩy sang (custom_id "CRM-…"): đồng bộ POS → CRM bỏ qua. */
 export function isCrmPushedPosOrder(posOrder) {
-  return String(posOrder?.custom_id || '').startsWith(POS_ORDER_CUSTOM_PREFIX);
+  // POS lấy custom_id làm mã đơn (id) và không trả custom_id lại: kiểm cả hai.
+  return [posOrder?.custom_id, posOrder?.id].some(value => String(value || '').startsWith(POS_ORDER_CUSTOM_PREFIX));
 }

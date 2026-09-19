@@ -31,6 +31,11 @@ test('gom dòng xuất thành khách theo số điện thoại, mỗi đơn nhi�
   assert.equal(mai.orders[0].total, 447000);
   assert.equal(mai.orders[0].orderedAt, new Date(2026, 8, 16, 7, 52).getTime(), 'ngày đặt đọc từ cột Ngày, năm suy ra từ lúc xuất');
   assert.equal(orderedAtFromLabel('', exportedAt), exportedAt);
+  // Đơn 13:08 hôm nay (giờ Việt Nam) xuất lúc 05:34 UTC cùng ngày: vẫn là năm nay, không lùi một năm.
+  const exportedEarlyUtc = new Date(2026, 8, 19, 5, 34).getTime();
+  assert.equal(orderedAtFromLabel('19/09 13:08', exportedEarlyUtc), new Date(2026, 8, 19, 13, 8).getTime());
+  // Qua Tết dương: cột ghi 30/12 mà xuất ngày 02/01 thì là năm trước.
+  assert.equal(orderedAtFromLabel('30/12 10:00', new Date(2027, 0, 2).getTime()), new Date(2026, 11, 30, 10, 0).getTime());
 });
 
 test('ghi tệp: xuất lại cùng đơn không nhân đôi, giữ mốc xuất lần đầu', async () => {

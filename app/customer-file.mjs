@@ -70,7 +70,10 @@ export function orderedAtFromLabel(label, exportedAt) {
   const now = new Date(exportedAt);
   const build = year => new Date(year, Number(match[2]) - 1, Number(match[1]), Number(match[4]) || 0, Number(match[5]) || 0).getTime();
   let at = build(match[3] ? Number(match[3]) : now.getFullYear());
-  if (!match[3] && at > exportedAt) at = build(now.getFullYear() - 1);
+  // Không có năm mà rơi vào "sau hôm nay" thì là năm trước (qua Tết dương). Cho
+  // dư một ngày: giờ trong cột là giờ Việt Nam, máy chủ chạy UTC nên đơn 13:08
+  // hôm nay có thể "muộn hơn" lúc xuất tính theo UTC mà vẫn là hôm nay.
+  if (!match[3] && at > exportedAt + 24 * 60 * 60 * 1000) at = build(now.getFullYear() - 1);
   return Number.isNaN(at) ? exportedAt : at;
 }
 

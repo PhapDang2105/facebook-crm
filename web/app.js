@@ -531,7 +531,8 @@ function orderRowStatuses(entries, data = orderData) {
     const self = ownId || `row:${entry.index}`;
     const inTable = (ordersByPhone.get(phone) || []).filter(item => item.orderId !== self && item.at >= windowStart);
     const customer = exportedCustomerPhones.get(phone);
-    const exportedOrders = (customer?.orders || []).filter(order => order.id && order.id !== ownId);
+    // Tệp khách hàng lưu mã đơn kèm tiền tố (LP-/CB-) như cột Mã đơn hàng; so sau khi bỏ tiền tố cả hai bên.
+    const exportedOrders = (customer?.orders || []).filter(order => order.id && rawOrderIdOf(order.id) !== ownId);
     const recentExported = exportedOrders.filter(order => order.orderedAt >= windowStart);
     const recentCount = new Set([...inTable.map(item => item.orderId), ...recentExported.map(order => order.id)]).size;
     statuses.set(entry.index, { recentCount, oldCustomer: exportedOrders.length > 0 });
@@ -2140,7 +2141,8 @@ function parseOrderRowDate(row, data = orderData, today = new Date()) {
   const build = fullYear => new Date(fullYear, Number(month) - 1, Number(day), Number(hour) || 0, Number(minute) || 0);
   let ordered = build(year ? Number(year) : today.getFullYear());
   // Không ghi năm mà rơi vào "sau hôm nay" thì là đơn của năm trước (qua Tết dương).
-  if (!year && ordered > today) ordered = build(today.getFullYear() - 1);
+  // Cho dư một ngày vì giờ trong cột là giờ Việt Nam, máy người xem có thể lệch múi giờ.
+  if (!year && ordered.getTime() > today.getTime() + 24 * 60 * 60 * 1000) ordered = build(today.getFullYear() - 1);
   return Number.isNaN(ordered.getTime()) ? null : ordered;
 }
 

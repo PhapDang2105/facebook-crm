@@ -21,7 +21,7 @@ import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
-import { handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid } from './pancake.mjs';
+import { handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { isValidQrCode, listQrScans, recordQrScan } from './qr-scans.mjs';
 import {
   isMetaConfigured,
@@ -1246,7 +1246,10 @@ const server = http.createServer(async (request, response) => {
       const payload = await readBody(request);
       const pageId = String(payload.channelId || '');
       if (!pageId) return sendJson(response, 400, { error: 'Thiếu channelId của Facebook Page cần đồng bộ.' });
-      const summary = await syncPageConversations(pageId, { limit: Number(payload.limit) || 25 });
+      // Kênh Pancake: kéo lịch sử bằng API Pancake thay vì Graph của Meta.
+      const summary = isPancakeConfigured() && pageId === pancakeConfig.pageId
+        ? await syncPancakeConversations({ limit: Number(payload.limit) || 60, messagePages: 2 })
+        : await syncPageConversations(pageId, { limit: Number(payload.limit) || 25 });
       return sendJson(response, 200, { ...summary, items: await listConversations(pageId) });
     }
     if (request.method === 'GET' && url.pathname === '/api/messaging/stream') {
@@ -1628,6 +1631,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`CRM running at http://${serverConfig.host}:${serverConfig.port}/`);
   // Đơn landing từ mọi trang Webcake (kể cả đơn bỏ dở) được kéo từ POS mỗi 5 phút.
   if (!process.env.POS_SYNC_DISABLED) startPosSync();
+  // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
+  startPancakeSync();
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);
   const missing = missingWebhookConfiguration();
   if (missing.length) console.log(`Webhook chưa sẵn sàng, còn thiếu: ${missing.join(', ')}`);

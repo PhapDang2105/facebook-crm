@@ -93,3 +93,36 @@ test('webhook đầu tới cuối: ghi hộp thư, đưa bot; hội thoại đã
   const allowed = await handlePancakeWebhook(incoming({ message: { id: 'm_4', message: 'Còn không ạ' }, conversation: { assignee_ids: ['staff-1'] } }), { processChatbotChanges, chatbotDependencies: {}, config: { ...config, botWhenAssigned: true } });
   assert.deepEqual(allowed, { stored: 1, bot: 1 });
 });
+
+test('đồng bộ lịch sử: kéo hội thoại inbox rồi tin của từng hội thoại, ghi theo thứ tự thời gian, chạy lại không ghi trùng, không đưa bot', async () => {
+  const { syncPancakeConversations, fetchPancakeConversations } = await import('../app/pancake.mjs');
+  const calls = [];
+  const fetchMock = async url => {
+    const address = String(url);
+    calls.push(address);
+    if (address.includes('/v2/pages/110/conversations')) {
+      return { ok: true, status: 200, json: async () => ({ success: true, conversations: [
+        { id: '110_901', type: 'INBOX', from: { id: '901', name: 'Anh Long' }, assignee_ids: [], updated_at: '2026-09-18T10:00:00' },
+        { id: '110_post_1', type: 'COMMENT', from: { id: '902', name: 'Người bình luận' } }
+      ] }) };
+    }
+    if (address.includes('/conversations/110_901/messages')) {
+      return { ok: true, status: 200, json: async () => ({ success: true, messages: [
+        { id: 'm_h2', type: 'INBOX', message: '<div>Dạ còn ạ</div>', inserted_at: '2026-09-18T10:00:00', from: { id: '110', name: 'Giọt Nắng Healthy' } },
+        { id: 'm_h1', type: 'INBOX', message: 'Còn túi xanh không?', inserted_at: '2026-09-18T09:59:00', from: { id: '901', name: 'Anh Long' } }
+      ] }) };
+    }
+    return { ok: false, status: 404, json: async () => ({ success: false, message: 'không có' }) };
+  };
+  const conversations = await fetchPancakeConversations({ limit: 60 }, config, fetchMock);
+  assert.deepEqual(conversations.map(item => item.id), ['110_901'], 'bình luận bị bỏ, chỉ giữ inbox');
+  assert.ok(calls[0].includes('page_access_token=pat-1') && calls[0].includes('type=INBOX'));
+  const first = await syncPancakeConversations({ limit: 60, messagePages: 1 }, config, fetchMock);
+  assert.deepEqual(first, { conversations: 1, messages: 2 });
+  const again = await syncPancakeConversations({ limit: 60, messagePages: 1 }, config, fetchMock);
+  assert.deepEqual(again, { conversations: 1, messages: 0 }, 'chạy lại không ghi trùng');
+  const { listMessages } = await import('../app/messaging-store.mjs');
+  const stored = await listMessages('110:901');
+  assert.deepEqual(stored.map(item => [item.direction, item.text]), [['incoming', 'Còn túi xanh không?'], ['outgoing', 'Dạ còn ạ']], 'tin cũ đứng trước tin mới');
+  assert.deepEqual(await syncPancakeConversations({}, { ...config, pageAccessToken: '' }, fetchMock), { conversations: 0, messages: 0, skipped: 'chưa cấu hình' });
+});

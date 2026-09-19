@@ -36,6 +36,8 @@ Hai loại token, đều truyền bằng tham số truy vấn, không có header
 - Tin được ghi vào hộp thư như tin từ Meta; hội thoại giữ thêm mã hội thoại Pancake để gửi trả lời đúng chỗ. Kênh ảo `PANCAKE_PAGE_NAME` xuất hiện ở hộp thư và Cài đặt → Kênh.
 - Bot chạy qua cùng bộ xử lý với Meta; hội thoại có `assignee_ids` (nhân viên đã nhận trong Pancake) thì bot không trả lời trừ khi `PANCAKE_BOT_WHEN_ASSIGNED=1`. Tin gửi đi (bot hoặc nhân viên gửi từ CRM) chỉ là chữ; receipt dùng bản chữ.
 - Cấu hình trong `.env`: `PANCAKE_PAGE_ID`, `PANCAKE_PAGE_ACCESS_TOKEN`, `PANCAKE_WEBHOOK_TOKEN`, tuỳ chọn `PANCAKE_PAGE_NAME`, `PANCAKE_BOT_WHEN_ASSIGNED`. Caddy có khối `@pancake` cho đường này đi thẳng.
+- Lịch sử: webhook chỉ mang tin mới, nên CRM còn kéo hội thoại inbox và tin gần đây bằng API liệt kê (`GET /v2/.../conversations`, `GET /v1/.../messages`) khi mở kênh lần đầu (`POST /api/messaging/sync`), lúc khởi động và mỗi 10 phút. Tin cùng mã không ghi trùng; tin kéo về không đưa bot.
+- Lưu ý: nếu Facebook bật **Meta AI** cho Page (thanh dưới hội thoại trong Pancake ghi "Meta AI đang phản hồi"), Facebook tự gửi "Tác nhân AI sẽ phản hồi." và có thể trả lời song song với bot CRM. Tắt trong Meta Business Suite → Hộp thư → Tự động hoá.
 
 ## Pancake POS Open API
 

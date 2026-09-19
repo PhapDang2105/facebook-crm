@@ -346,6 +346,9 @@ function scheduleQrGreetings(changes) {
 /** Sends the tappable Messenger receipt. Kept separate from creating the order so
  *  the chatbot can persist the order first and still close with the receipt. */
 async function sendChatbotOrderReceipt(conversation, order) {
+  // Qua Pancake không gửi được thẻ receipt của Messenger, bản chữ thay thế chỉ
+  // lặp lại tin ORDER_CONFIRMATION khách vừa nhận, nên không gửi gì thêm.
+  if (conversation.pancakeConversationId) return;
   try {
     const confirmationText = buildCustomerOrderConfirmation(order);
     await sendConversationMessage(conversation, {

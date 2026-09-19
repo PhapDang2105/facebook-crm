@@ -242,14 +242,7 @@
             <option value="duplicate-phone">Trùng số điện thoại</option>
             <option value="phone-warning">Cảnh báo bom hàng</option>
           </select></label>
-          <label class="order-filter-control"><select id="order-day-filter" aria-label="Ngày đơn" autocomplete="off">
-            <option value="0">Hôm nay</option>
-            <option value="1">Hôm qua</option>
-            <option value="2">2 ngày trước</option>
-            <option value="all">Tất cả ngày</option>
-            <option value="custom">Chọn ngày…</option>
-          </select></label>
-          <label class="order-filter-control hidden" id="order-day-date-control"><input id="order-day-date" type="date" aria-label="Ngày đơn"></label>
+          <label class="order-filter-control"><select id="order-day-filter" aria-label="Ngày đơn" autocomplete="off"></select></label>
           <label class="order-filter-control"><select id="order-source-filter" aria-label="Nguồn đơn" autocomplete="off">
             <option value="all">Mọi nguồn đơn</option>
             <option value="Chatbot">Chatbot</option>
@@ -289,13 +282,7 @@
 
       <section class="order-stage hidden" data-order-panel="export">
         <div class="export-toolbar">
-          <label class="order-filter-control"><select id="order-export-day" aria-label="Ngày đơn cần xuất" autocomplete="off">
-            <option value="0">Đơn hôm nay</option>
-            <option value="1">Đơn hôm qua</option>
-            <option value="2">Đơn 2 ngày trước</option>
-            <option value="custom">Chọn ngày…</option>
-          </select></label>
-          <label class="order-filter-control hidden" id="order-export-date-control"><input id="order-export-date" type="date" aria-label="Ngày đơn cần xuất"></label>
+          <label class="order-filter-control"><select id="order-export-day" aria-label="Ngày đơn cần xuất" autocomplete="off"></select></label>
           <button class="export-button" id="order-export" type="button" disabled hidden>Xuất XLSX</button>
           <button class="export-button export-button--skip hidden" id="order-export-skip" type="button">Xuất bỏ qua đơn chưa chuẩn</button>
           <button class="order-history-button" id="order-export-history-button" type="button" aria-expanded="false" aria-controls="order-export-history-panel">Lịch sử xuất</button>

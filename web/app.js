@@ -375,29 +375,58 @@ const orderImport = document.querySelector('#order-import');
 const orderSearch = document.querySelector('#order-search');
 const orderFilter = document.querySelector('#order-filter');
 const orderSourceFilter = document.querySelector('#order-source-filter');
-// Ngày đơn ở Nhập dữ liệu: mở lên chỉ thấy đơn hôm nay; đổi sang hôm qua, 2 ngày trước, mọi ngày hay một ngày bất kỳ.
+// Ngày đơn ở Nhập dữ liệu: ô chọn liệt kê rõ từng ngày có đơn ("Ngày 19/09/2026"),
+// mở lên là hôm nay; cuối danh sách có "Tất cả ngày".
 const orderDayFilter = document.querySelector('#order-day-filter');
-const orderDayDate = document.querySelector('#order-day-date');
-const orderDayDateControl = document.querySelector('#order-day-date-control');
-// Trình duyệt khôi phục lựa chọn cũ của ô chọn khi tải lại trang; mở lên phải là hôm nay.
-if (orderDayFilter) orderDayFilter.value = '0';
-if (orderDayDate) orderDayDate.value = '';
 if (orderSourceFilter) orderSourceFilter.value = 'all';
 
-/** Ngày đang chọn ở bộ lọc Nhập dữ liệu (0h giờ máy); null = mọi ngày, hoặc "Chọn ngày…" chưa có ngày. */
-function selectedImportDate() {
-  const choice = orderDayFilter?.value || '0';
-  if (choice === 'all') return null;
-  if (choice === 'custom') {
-    const value = orderDayDate?.value || '';
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-    const [year, month, day] = value.split('-').map(Number);
-    return new Date(year, month - 1, day);
+const dateKeyOf = date => {
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+/** Hôm nay dạng YYYY-MM-DD theo giờ máy. */
+function todayDateKey() {
+  return dateKeyOf(new Date());
+}
+
+/** YYYY-MM-DD → ngày lúc 0h giờ máy; null khi không phải ngày. */
+function dateFromInput(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+/** Các ngày có đơn trong bảng (YYYY-MM-DD), mới nhất trước; hôm nay luôn đứng đầu. */
+function orderDateKeys(data = orderData) {
+  const now = new Date();
+  const keys = new Set([todayDateKey()]);
+  for (const row of data.rows) {
+    const ordered = parseOrderRowDate(row, data, now);
+    if (ordered) keys.add(dateKeyOf(ordered));
   }
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() - Number(choice));
-  return date;
+  return [...keys].sort((first, second) => second.localeCompare(first));
+}
+
+/**
+ * Điền ô chọn ngày: "Ngày 19/09/2026", "Ngày 18/09/2026"… rồi "Tất cả ngày"
+ * (nếu cho phép). Giữ lựa chọn đang có nếu ngày đó vẫn còn, không thì về hôm nay.
+ */
+function fillOrderDayOptions(select, keys, { allOption = false } = {}) {
+  if (!select) return;
+  const current = select.value;
+  const label = key => { const date = dateFromInput(key); return date ? `Ngày ${date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })}` : key; };
+  const options = [...keys.map(key => `<option value="${key}">${escapeHtml(label(key))}</option>`), ...(allOption ? ['<option value="all">Tất cả ngày</option>'] : [])];
+  const html = options.join('');
+  if (select.dataset.options !== html) {
+    select.innerHTML = html;
+    select.dataset.options = html;
+  }
+  select.value = [...select.options].some(option => option.value === current) ? current : todayDateKey();
+}
+
+/** Ngày đang chọn ở bộ lọc Nhập dữ liệu; null = tất cả ngày. */
+function selectedImportDate() {
+  return orderDayFilter?.value === 'all' ? null : (dateFromInput(orderDayFilter?.value) || dateFromInput(todayDateKey()));
 }
 const orderHistoryButton = document.querySelector('#order-history-button');
 const orderHistoryPanel = document.querySelector('#order-history-panel');
@@ -6421,25 +6450,12 @@ function setOrderStatuses(keys, status, details = []) {
   try { localStorage.setItem(reviewedOrdersLogKey, JSON.stringify(log)); } catch {}
 }
 
-// Xuất dữ liệu xuất đơn của MỘT ngày do nhân viên chọn (hôm nay, hôm qua,
-// 2 ngày trước, hay một ngày bất kỳ); mặc định hôm nay.
+// Xuất dữ liệu xuất đơn của MỘT ngày ghi rõ trong ô chọn; mặc định hôm nay.
 const orderExportDay = document.querySelector('#order-export-day');
-const orderExportDate = document.querySelector('#order-export-date');
-const orderExportDateControl = document.querySelector('#order-export-date-control');
 
-/** Ngày đơn đang chọn để xuất, lúc 0h theo giờ máy; null khi "Chọn ngày…" chưa có ngày. */
+/** Ngày đơn đang chọn để xuất (0h giờ máy); chưa chọn thì hôm nay. */
 function selectedExportDate() {
-  const choice = orderExportDay?.value || '0';
-  if (choice === 'custom') {
-    const value = orderExportDate?.value || '';
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-    const [year, month, day] = value.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  }
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() - Number(choice));
-  return date;
+  return dateFromInput(orderExportDay?.value) || dateFromInput(todayDateKey());
 }
 
 /** Ngày đang chọn dạng YYYY-MM-DD (ghi vào lịch sử xuất) và dạng hiện cho người đọc. */
@@ -6763,6 +6779,10 @@ function renderOrderData() {
   // table re-renders with badges once the answer arrives.
   const phoneColumn = orderPhoneColumnIndex();
   if (phoneColumn >= 0) refreshPhoneWarnings(rows.map(row => row[phoneColumn]));
+  // Ô chọn ngày của hai màn liệt kê đúng các ngày có đơn trong bảng.
+  const dateKeys = orderDateKeys(orderData);
+  fillOrderDayOptions(orderDayFilter, dateKeys, { allOption: true });
+  fillOrderDayOptions(orderExportDay, dateKeys);
   // Ngày đơn: mặc định chỉ hôm nay. Dòng không có ngày (import cũ) tính là hôm nay.
   const importDay = selectedImportDate();
   if (importDay) {
@@ -7405,20 +7425,9 @@ orderSearch.addEventListener('input', () => {
 });
 orderFilter.addEventListener('change', renderOrderData);
 orderSourceFilter?.addEventListener('change', renderOrderData);
-orderDayFilter?.addEventListener('change', () => {
-  orderDayDateControl?.classList.toggle('hidden', orderDayFilter.value !== 'custom');
-  if (orderDayFilter.value === 'custom' && orderDayDate && !orderDayDate.value) orderDayDate.value = new Date().toISOString().slice(0, 10);
-  renderOrderData();
-});
-orderDayDate?.addEventListener('change', renderOrderData);
+orderDayFilter?.addEventListener('change', renderOrderData);
 // Đổi ngày xuất: bảng xuất dựng lại (khoá cache theo dữ liệu nên tự làm mới).
-orderExportDay?.addEventListener('change', () => {
-  orderExportDateControl?.classList.toggle('hidden', orderExportDay.value !== 'custom');
-  if (orderExportDay.value === 'custom' && orderExportDate && !orderExportDate.value) orderExportDate.value = exportDayLabels().key || new Date().toISOString().slice(0, 10);
-  orderPanelsDirty.add('export');
-  renderOrderData();
-});
-orderExportDate?.addEventListener('change', () => { orderPanelsDirty.add('export'); renderOrderData(); });
+orderExportDay?.addEventListener('change', () => { orderPanelsDirty.add('export'); renderOrderData(); });
 orderExportHistoryButton?.addEventListener('click', () => {
   const willOpen = orderExportHistoryPanel.classList.contains('hidden');
   orderExportHistoryPanel.classList.toggle('hidden', !willOpen);

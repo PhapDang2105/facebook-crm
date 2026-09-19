@@ -446,7 +446,7 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-import-controls .order-search-control { flex: 1 1 252px; max-width: 468px; }
 .order-import-controls .order-filter-control { flex: 0 0 auto; min-width: 130px; }
 .order-import-controls .order-filter-control.hidden { display: none; }
-.order-import-controls .order-filter-control input[type="date"] { box-sizing: border-box; height: 37.8px; padding: 0 10px; color: #17251c; background: #f6fbf7; border: 0.9px solid #b9d6c0; border-radius: 8.1px; font: inherit; font-size: 12.6px; }
+.order-date-control input[type="date"] { box-sizing: border-box; height: 37.8px; padding: 0 10px; color: #17251c; background: #f6fbf7; border: 0.9px solid #b9d6c0; border-radius: 8.1px; font: inherit; font-size: 12.6px; }
 .order-search-control,
 .order-filter-control { display: block; }
 .order-search-control input,

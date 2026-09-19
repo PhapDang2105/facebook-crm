@@ -3378,7 +3378,6 @@ function saveChatMessage(name, message) {
     writeStoredJson(savedChatMessagesKey, saved);
     return true;
   } catch {
-    showComposerStatus('Nội dung đã gửi trong phiên này nhưng tệp quá lớn để lưu lâu dài trên trình duyệt.');
     return false;
   }
 }
@@ -6250,7 +6249,6 @@ function prepareForwardMessage(row) {
   messageComposerInput.value = row?.dataset.preview || '';
   messageComposerInput.dispatchEvent(new Event('input', { bubbles: true }));
   messageComposerInput.focus();
-  showComposerStatus('Đã đưa nội dung vào ô soạn để chuyển tiếp.');
 }
 
 function syncConversationPreview(conversation = getActiveConversation()) {

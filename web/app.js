@@ -379,6 +379,10 @@ const orderSourceFilter = document.querySelector('#order-source-filter');
 const orderDayFilter = document.querySelector('#order-day-filter');
 const orderDayDate = document.querySelector('#order-day-date');
 const orderDayDateControl = document.querySelector('#order-day-date-control');
+// Trình duyệt khôi phục lựa chọn cũ của ô chọn khi tải lại trang; mở lên phải là hôm nay.
+if (orderDayFilter) orderDayFilter.value = '0';
+if (orderDayDate) orderDayDate.value = '';
+if (orderSourceFilter) orderSourceFilter.value = 'all';
 
 /** Ngày đang chọn ở bộ lọc Nhập dữ liệu (0h giờ máy); null = mọi ngày, hoặc "Chọn ngày…" chưa có ngày. */
 function selectedImportDate() {

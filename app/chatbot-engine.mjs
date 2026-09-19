@@ -227,8 +227,14 @@ export async function processChatbotChanges(changes, dependencies) {
   if (!settings.enabled) return [];
   const results = [];
   for (const change of changes) {
-    if (change.type !== 'message' || change.message?.direction !== 'incoming' || !change.conversation) continue;
-    await queueForConversation(change.conversation.id, () => answerChange(change, settings, results, dependencies));
+    // `updated`: tin cũ vừa có thêm dữ liệu (ảnh có URL) — hộp thư vẽ lại, bot không trả lời lần hai.
+    if (change.type !== 'message' || change.message?.direction !== 'incoming' || !change.conversation || change.updated) continue;
+    try {
+      await queueForConversation(change.conversation.id, () => answerChange(change, settings, results, dependencies));
+    } catch (error) {
+      // Một hội thoại hỏng (kho tin không ghi được…) không làm rơi các tin còn lại trong lô.
+      results.push({ conversationId: change.conversation.id, error: error.message });
+    }
   }
   return results;
 }
@@ -376,7 +382,7 @@ async function answerChange(change, settings, results, dependencies) {
       ...(alreadyHandled ? { duplicate: true } : {})
     });
   } catch (error) {
-    await saveBotState(conversation.id, { botLastError: error.message, botLastErrorAt: Date.now() });
+    await saveBotState(conversation.id, { botLastError: error.message, botLastErrorAt: Date.now() }).catch(() => {});
     results.push({ conversationId: conversation.id, error: error.message });
   }
 }

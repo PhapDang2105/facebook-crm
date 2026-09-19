@@ -124,7 +124,11 @@ let timer = null;
 
 /** Chạy ngay một lần rồi lặp mỗi 5 phút; chỉ khi POS đã kết nối. */
 export function startPosSync({ log = console.log } = {}) {
+  // Lượt trước chưa xong (POS chậm) thì lượt sau bỏ qua, không chạy chồng.
+  let running = false;
   const run = async () => {
+    if (running) return;
+    running = true;
     try {
       const summary = await syncPosLandingOrders();
       if (summary.disabled) return;
@@ -133,6 +137,8 @@ export function startPosSync({ log = console.log } = {}) {
       }
     } catch (error) {
       log(`Đồng bộ POS lỗi: ${error.message}`);
+    } finally {
+      running = false;
     }
   };
   run();

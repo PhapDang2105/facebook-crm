@@ -6,6 +6,9 @@ import { metaConfig, projectRoot } from './config.mjs';
 const channelStorePath = path.join(projectRoot, 'data', 'processed', 'meta-channels.json');
 
 function tokenKey() {
+  // Khoá mã hoá token Page dẫn xuất từ App Secret; thiếu secret thì mọi máy dùng
+  // chung một khoá đoán được, coi như lưu token trần — từ chối thay vì giả vờ mã hoá.
+  if (!metaConfig.appSecret) throw new Error('Thiếu META_APP_SECRET nên không mã hoá/giải mã được token của Page.');
   return createHash('sha256').update(metaConfig.appSecret).digest();
 }
 

@@ -9,6 +9,7 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildCustomerOrderConfirmation, buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { assertUsableAiEndpoint, defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
+import { assertPublicHost } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin } from './chatbot-templates.mjs';
@@ -559,7 +560,9 @@ async function readBody(request, maximumBytes = 32 * 1024 * 1024) {
 function isCrossSiteWrite(request) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return false;
   const origin = request.headers.origin;
-  if (!origin || origin === 'null') return false;
+  if (!origin) return false;
+  // "null" là trang trong iframe cách ly hay tài liệu data: — không có người gọi hợp lệ nào như vậy.
+  if (origin === 'null') return true;
   let originHost = '';
   try {
     originHost = new URL(origin).host;
@@ -625,7 +628,7 @@ async function serveFile(request, response, pathname) {
   // Meta requires a public privacy policy URL; Caddy lets /privacy through without a password.
   const relative = pathname === '/' ? 'index.html' : pathname === '/privacy' ? 'privacy.html' : pathname.slice(1);
   const filePath = path.resolve(webRoot, relative);
-  if (!filePath.startsWith(path.resolve(webRoot))) return sendJson(response, 400, { error:'Invalid path.' });
+  if (!filePath.startsWith(path.resolve(webRoot) + path.sep)) return sendJson(response, 400, { error:'Invalid path.' });
   const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.webp':'image/webp', '.woff2':'font/woff2', '.ico':'image/x-icon' };
   try {
     const stats = await stat(filePath);
@@ -681,7 +684,7 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
     // Hai webhook do máy ngoài gọi và tự xác thực lấy, nên không áp luật Origin.
-    const isWebhook = url.pathname === metaConfig.webhookPath || url.pathname === landingConfig.path;
+    const isWebhook = url.pathname === metaConfig.webhookPath || url.pathname === landingConfig.path || url.pathname === pancakeConfig.path;
     if (!isWebhook && isCrossSiteWrite(request)) {
       return sendJson(response, 403, { error: 'Yêu cầu đến từ trang khác nên bị từ chối.' });
     }
@@ -777,6 +780,7 @@ const server = http.createServer(async (request, response) => {
           provider: payload.provider || current.provider,
           authType: payload.directAuthType || current.directAuthType
         });
+        await assertPublicHost(new URL(directEndpoint).hostname);
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
       }
@@ -814,6 +818,7 @@ const server = http.createServer(async (request, response) => {
       // phản hồi về (`rawResponse: true` bên dưới).
       try {
         assertUsableAiEndpoint(settings.directEndpoint, { provider: settings.provider, authType: settings.directAuthType });
+        await assertPublicHost(new URL(settings.directEndpoint).hostname);
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
       }
@@ -1096,9 +1101,16 @@ const server = http.createServer(async (request, response) => {
         response.writeHead(isPancakeConfigured() ? 401 : 503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
         return response.end(isPancakeConfigured() ? 'Invalid token' : 'Pancake webhook is not configured');
       }
-      const payload = await readBody(request);
+      // Luôn trả 200 (Pancake tạm ngưng webhook khi >80% lần gọi lỗi); thân hỏng chỉ ghi log.
+      let payload = null;
+      try {
+        payload = await readBody(request);
+      } catch (error) {
+        console.error('Webhook Pancake thân không đọc được:', error.message);
+      }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end('{"received":true}');
+      if (!payload) return undefined;
       try {
         const summary = await handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies });
         if (summary.stored) console.log(`Webhook Pancake: ghi ${summary.stored} tin, đưa bot ${summary.bot}`);
@@ -1313,7 +1325,7 @@ const server = http.createServer(async (request, response) => {
         const privateReply = payload.privateReply === true;
         // Pictures a quick reply carries: stored paths only, sent by URL after the text.
         const imageUrls = (Array.isArray(payload.imageUrls) ? payload.imageUrls : [])
-          .filter(item => /^\/product-images\/[A-Za-z0-9-]+\.(?:png|jpg|webp)$/.test(String(item)))
+          .filter(item => /^\/product-images\/[A-Za-z0-9-]+\.(?:png|jpe?g|webp)$/.test(String(item)))
           .filter(() => conversation.source !== 'comment' || privateReply)
           .slice(0, 6);
         if (!text && !attachment && !imageUrls.length) return sendJson(response, 400, { error: 'Nội dung tin nhắn không được để trống.' });

@@ -10,6 +10,7 @@ import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './confi
 import { applyWebhookEvents } from './meta-webhook.mjs';
 import { applyGenderGuess, publicConversation, readMessagingStore, saveMessage, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
+import { assertPublicHost } from './network-guard.mjs';
 
 export function isPancakeConfigured(config = defaultConfig) {
   return Boolean(config.pageId && config.pageAccessToken && config.webhookToken);
@@ -150,7 +151,11 @@ export const pancakeAvatarUrl = (pageId, psid) => `https://pancake.vn/api/v1/pag
 export function pancakeMessageEvent(pageId, conversation, message, now = Date.now()) {
   if (String(message.type || conversation.type || 'INBOX').toUpperCase() !== 'INBOX') return null;
   const fromId = String(message.from?.id || '');
-  const customerId = String(conversation.from?.id || (fromId !== pageId ? fromId : ''));
+  // Khách của hội thoại: `from` của hội thoại, không có thì đọc từ mã hội thoại
+  // Pancake ("{page}_{psid}") — để tin do Page/nhân viên gửi vẫn xếp đúng khách.
+  const conversationKey = String(conversation.id || '');
+  const psidFromKey = conversationKey.startsWith(`${pageId}_`) ? conversationKey.slice(String(pageId).length + 1) : '';
+  const customerId = String(conversation.from?.id || psidFromKey || (fromId !== pageId ? fromId : ''));
   if (!fromId || !customerId) return null;
   const outgoing = fromId === pageId || fromId !== customerId;
   const text = pancakeMessageText(message);
@@ -237,13 +242,15 @@ export async function fetchPancakeConversations({ limit = 60, type = 'INBOX' } =
   let lastConversationId = '';
   while (conversations.length < limit) {
     const body = await pancakeGet(`/v2/pages/${encodeURIComponent(config.pageId)}/conversations`, { type, order_by: 'updated_at', last_conversation_id: lastConversationId }, config, fetchImpl);
-    const batch = (Array.isArray(body.conversations) ? body.conversations : []).filter(item => String(item?.type || 'INBOX').toUpperCase() === type);
-    if (!batch.length) break;
+    const page = Array.isArray(body.conversations) ? body.conversations : [];
+    const batch = page.filter(item => String(item?.type || 'INBOX').toUpperCase() === type);
+    if (!page.length) break;
     conversations.push(...batch);
-    const last = batch.at(-1)?.id;
+    // Lật trang theo dòng cuối của TRANG (kể cả dòng khác loại), hết trang khi trang ngắn.
+    const last = page.at(-1)?.id;
     if (!last || last === lastConversationId) break;
     lastConversationId = last;
-    if (batch.length < 30) break;
+    if (page.length < 30) break;
   }
   return conversations.slice(0, limit);
 }
@@ -269,18 +276,34 @@ export async function fetchPancakeMessages(conversationId, { pages = 1 } = {}, c
  * luận (kèm bài viết). Tin đã có (cùng mã) không ghi lại, nên chạy nhiều lần
  * vô hại. Trả về số hội thoại đã duyệt và số tin mới ghi.
  */
-export async function syncPancakeConversations({ limit = 60, messagePages = 1, commentLimit = 30 } = {}, config = defaultConfig, fetchImpl = fetch) {
+let activeSync = null;
+export function syncPancakeConversations(options = {}, config = defaultConfig, fetchImpl = fetch) {
+  // Vòng 10 phút và nút Đồng bộ trong CRM dùng chung một lượt đang chạy, không
+  // chạy chồng (mỗi lượt là hàng trăm lần gọi Pancake trong hạn 5 lần/giây).
+  if (activeSync) return activeSync;
+  activeSync = runPancakeSync(options, config, fetchImpl).finally(() => { activeSync = null; });
+  return activeSync;
+}
+
+async function runPancakeSync({ limit = 60, messagePages = 1, commentLimit = 30 } = {}, config = defaultConfig, fetchImpl = fetch) {
   if (!isPancakeConfigured(config)) return { conversations: 0, messages: 0, skipped: 'chưa cấu hình' };
   const pageId = String(config.pageId);
   const conversations = await fetchPancakeConversations({ limit }, config, fetchImpl);
   let stored = 0;
-  for (const conversation of conversations) {
-    const messages = await fetchPancakeMessages(conversation.id, { pages: messagePages }, config, fetchImpl);
-    const events = messages
-      .map(message => pancakeMessageEvent(pageId, conversation, message))
-      .filter(Boolean)
-      .sort((first, second) => first.timestamp - second.timestamp);
-    stored += (await storePancakeEvents(events)).length;
+  const failures = [];
+  // Một hội thoại lỗi mạng không làm hỏng cả lượt; giãn 200 ms giữa các lần gọi để không chạm 5 lần/giây.
+  for (const [index, conversation] of conversations.entries()) {
+    if (index) await pause(200);
+    try {
+      const messages = await fetchPancakeMessages(conversation.id, { pages: messagePages }, config, fetchImpl);
+      const events = messages
+        .map(message => pancakeMessageEvent(pageId, conversation, message))
+        .filter(Boolean)
+        .sort((first, second) => first.timestamp - second.timestamp);
+      stored += (await storePancakeEvents(events)).length;
+    } catch (error) {
+      failures.push(`${conversation.id}: ${error.message}`);
+    }
   }
   // Hội thoại từ quảng cáo còn thiếu tên/bài quảng cáo (kể cả không có tin mới): tra bổ sung.
   const store = await readMessagingStore();
@@ -288,28 +311,40 @@ export async function syncPancakeConversations({ limit = 60, messagePages = 1, c
   if (pendingAds.length) await enrichPancakeAdContext(pendingAds, config, fetchImpl);
   const threads = commentLimit > 0 ? await fetchPancakeConversations({ limit: commentLimit, type: 'COMMENT' }, config, fetchImpl) : [];
   for (const thread of threads) {
-    const comments = await fetchPancakeMessages(thread.id, { pages: 1 }, config, fetchImpl);
-    const post = comments.post || { id: thread.post_id };
-    // Bình luận gốc trước, trả lời sau, để trả lời của Page tìm được luồng cha.
-    const events = comments
-      .map(comment => pancakeCommentEvent(pageId, thread, comment, post))
-      .filter(Boolean)
-      .sort((first, second) => (first.parentId ? 1 : 0) - (second.parentId ? 1 : 0) || first.timestamp - second.timestamp);
-    stored += (await storePancakeEvents(events)).length;
+    await pause(200);
+    try {
+      const comments = await fetchPancakeMessages(thread.id, { pages: 1 }, config, fetchImpl);
+      const post = comments.post || { id: thread.post_id };
+      // Bình luận gốc trước, trả lời sau, để trả lời của Page tìm được luồng cha.
+      const events = comments
+        .map(comment => pancakeCommentEvent(pageId, thread, comment, post))
+        .filter(Boolean)
+        .sort((first, second) => (first.parentId ? 1 : 0) - (second.parentId ? 1 : 0) || first.timestamp - second.timestamp);
+      stored += (await storePancakeEvents(events)).length;
+    } catch (error) {
+      failures.push(`${thread.id}: ${error.message}`);
+    }
   }
-  return { conversations: conversations.length + threads.length, messages: stored };
+  return { conversations: conversations.length + threads.length, messages: stored, ...(failures.length ? { failures } : {}) };
 }
 
 let pancakeSyncTimer = null;
 /** Đồng bộ lúc khởi động rồi mỗi 10 phút, để không lọt tin trong lúc webhook gián đoạn. */
 export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.log, config = defaultConfig } = {}) {
   if (!isPancakeConfigured(config) || pancakeSyncTimer) return null;
+  // Lượt trước chưa xong (mạng chậm, bị chặn 429) thì lượt sau bỏ qua, không chạy chồng.
+  let running = false;
   const run = async () => {
+    if (running) return;
+    running = true;
     try {
       const summary = await syncPancakeConversations({ limit: 60, messagePages: 1 }, config);
       if (summary.messages) log(`Đồng bộ Pancake: ${summary.conversations} hội thoại, ghi ${summary.messages} tin mới`);
+      if (summary.failures?.length) log(`Đồng bộ Pancake: ${summary.failures.length} hội thoại lỗi, ví dụ ${summary.failures[0]}`);
     } catch (error) {
       log(`Đồng bộ Pancake lỗi: ${error.message}`);
+    } finally {
+      running = false;
     }
   };
   setTimeout(run, 5000);
@@ -361,6 +396,7 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false }
         // trên CDN (đã gộp vào tin cùng mã), báo cho hộp thư vẽ lại.
         if (!inserted && lackedPicture.has(messageId)) {
           const stored = (store.messages[conversation.id] || []).find(item => item.id === messageId);
+          // `updated`: hộp thư vẽ lại; bot bỏ qua (tin cũ, đã trả lời) để không trả lời lần hai.
           if (stored) applied.push({ type: 'message', conversation, message: stored, updated: true });
         }
         // Khách đến từ quảng cáo: ghi referral như Meta (nguồn 'ADS', tên quảng
@@ -492,18 +528,46 @@ async function readImageForUpload(imageUrl, fetchImpl) {
     const filename = local[1];
     return { buffer: await readFile(path.join(productImagesPath, filename)), filename, mime: imageMimeTypes[path.extname(filename).toLowerCase()] };
   }
+  // Ảnh ngoài: máy chủ tải hộ, nên đích phải là máy công khai (không phải
+  // 127.0.0.1 hay metadata của VM), không theo chuyển hướng, phải là ảnh thật
+  // và đọc theo dòng để dừng ngay khi quá 5 MB thay vì nuốt cả tệp vào bộ nhớ.
+  if (!/^https?:$/.test(parsed.protocol)) throw new Error('Chỉ tải được ảnh qua http/https.');
+  await assertPublicHost(parsed.hostname, { resolve: fetchImpl === fetch });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetchImpl(parsed, { signal: controller.signal });
+    const response = await fetchImpl(parsed, { signal: controller.signal, redirect: 'manual' });
     if (!response.ok) throw new Error(`Không tải được ảnh (${response.status}).`);
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > maxUploadBytes) throw new Error('Ảnh lớn hơn 5 MB.');
-    const mime = String(response.headers?.get?.('content-type') || 'image/jpeg').split(';')[0].trim();
+    const mime = String(response.headers?.get?.('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!mime.startsWith('image/')) throw new Error('Địa chỉ không phải ảnh.');
+    if (Number(response.headers?.get?.('content-length') || 0) > maxUploadBytes) throw new Error('Ảnh lớn hơn 5 MB.');
+    const buffer = await readBodyUpTo(response, maxUploadBytes, controller);
     return { buffer, filename: path.basename(parsed.pathname) || 'anh.jpg', mime };
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function readBodyUpTo(response, limit, controller) {
+  if (!response.body?.getReader) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > limit) throw new Error('Ảnh lớn hơn 5 MB.');
+    return buffer;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      controller.abort();
+      throw new Error('Ảnh lớn hơn 5 MB.');
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
 }
 
 // Pancake chỉ nhận tệp tải lên tới 500 KB ("File size should not exceed
@@ -581,7 +645,9 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
       sent = await sendPancakeMessage({ ...target, contentIds: await upload() }, config, fetchImpl);
     } catch (error) {
       // Facebook thỉnh thoảng từ chối tệp vừa tải (invalid_upload_fb_attachments_result): tải lại và gửi thêm một lần.
-      if (!/invalid_upload|không nhận tin/.test(error.message)) throw error;
+      // Chỉ gửi lại khi Pancake báo mã ảnh hết hạn; lỗi mạng/cổng (502, 429 hết
+      // lượt) có thể đã tới khách rồi, gửi lại là khách nhận cụm ảnh hai lần.
+      if (!/invalid_upload/.test(error.message)) throw error;
       sent = await sendPancakeMessage({ ...target, contentIds: await upload() }, config, fetchImpl);
     }
     // Một tin, nhiều ảnh: hộp thư vẽ lưới ảnh; bản dội lại của Pancake (cùng mã) gộp vào.
@@ -638,6 +704,8 @@ async function sendCommentReplyViaPancake(conversation, { text, privateReply }, 
       : saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, id: conversation.id, source: 'comment', message });
     if (privateReply) {
       if (!outcome.conversation.post && conversation.post) outcome.conversation.post = { ...conversation.post, inheritedFrom: conversation.id };
+      // Giới tính đã biết ở luồng bình luận đi theo sang hộp thư (như đường Meta).
+      if (conversation.gender) applyGenderGuess(outcome.conversation, conversation.gender, conversation.genderSource || 'message');
       if (!outcome.conversation.pancakeConversationId) outcome.conversation.pancakeConversationId = `${conversation.pageId}_${conversation.psid}`;
     } else {
       outcome.conversation.unread = false;
@@ -663,16 +731,27 @@ const postMissTtlMs = 6 * 60 * 60 * 1000;
 
 /** Tên/ảnh/chiến dịch của các quảng cáo (tối đa 20 mã một lần), nhớ 24 giờ. */
 export async function fetchPancakeAds(adIds, config = defaultConfig, fetchImpl = fetch) {
-  const wanted = [...new Set(adIds.map(String).filter(Boolean))].slice(0, 20);
+  const wanted = [...new Set(adIds.map(String).filter(Boolean))];
   const missing = wanted.filter(id => !(adCache.has(id) && Date.now() - adCache.get(id).at < adCacheTtlMs));
-  if (missing.length) {
-    const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/ads`, { ad_ids: missing.join(','), type: 'ads' }, config, fetchImpl);
+  // Pancake nhận tối đa 20 mã một lần: chia lô, không cắt bỏ phần sau.
+  for (let start = 0; start < missing.length; start += 20) {
+    const chunk = missing.slice(start, start + 20);
+    if (start) await pause(250);
+    const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/ads`, { ad_ids: chunk.join(','), type: 'ads' }, config, fetchImpl);
     for (const item of Array.isArray(body.data) ? body.data : []) {
       adCache.set(String(item.id), { at: Date.now(), name: String(item.name || '').trim(), imageUrl: String(item.image_url || ''), campaignName: String(item.campaign_name || '').trim() });
     }
-    for (const id of missing) if (!adCache.has(id)) adCache.set(id, { at: Date.now(), name: '', imageUrl: '', campaignName: '' });
+    for (const id of chunk) if (!adCache.has(id)) adCache.set(id, { at: Date.now(), name: '', imageUrl: '', campaignName: '' });
   }
   return Object.fromEntries(wanted.map(id => [id, adCache.get(id)]));
+}
+
+const maximumPostCacheEntries = 2000;
+function rememberPost(id, entry) {
+  postCache.delete(id);
+  postCache.set(id, entry);
+  // Bộ nhớ bài viết có hạn: bỏ mục cũ nhất khi đầy.
+  while (postCache.size > maximumPostCacheEntries) postCache.delete(postCache.keys().next().value);
 }
 
 /** Bài viết theo id: quét danh sách bài lùi dần từng tháng (tối đa `months`), nhớ kết quả kể cả không thấy. */
@@ -692,12 +771,12 @@ export async function findPancakePost(postId, { months = 12 } = {}, config = def
       const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/posts`, { since, until, page_number: pageNumber, page_size: 30 }, config, fetchImpl);
       const posts = Array.isArray(body.data) ? body.data : Array.isArray(body.posts) ? body.posts : [];
       found = posts.find(post => String(post?.id) === id) || null;
-      for (const post of posts) if (post?.id && !postCache.get(String(post.id))?.post) postCache.set(String(post.id), { at: Date.now(), post: pancakePostContext(post) });
+      for (const post of posts) if (post?.id && !postCache.get(String(post.id))?.post) rememberPost(String(post.id), { at: Date.now(), post: pancakePostContext(post) });
       if (posts.length < 30) break;
     }
     until = since;
   }
-  postCache.set(id, { at: Date.now(), post: found ? pancakePostContext(found) : null });
+  rememberPost(id, { at: Date.now(), post: found ? pancakePostContext(found) : null });
   return postCache.get(id).post;
 }
 
@@ -706,8 +785,13 @@ export async function findPancakePost(postId, { months = 12 } = {}, config = def
  * referral từ Pancake. Tên quảng cáo tra ngay (một lần gọi, nhanh); bài viết
  * tìm nền (có thể nhiều lần gọi), tin sau của khách sẽ có. Lỗi bỏ qua.
  */
+// Bài quảng cáo tìm không ra (quá 12 tháng) thì ghi mốc đã tìm, một ngày sau mới tìm lại,
+// để vòng đồng bộ không quét lại từng tháng cho cùng hội thoại mãi.
+const postLookupRetryMs = 24 * 60 * 60 * 1000;
+const needsPostLookup = conversation => Boolean(conversation.referral?.postId) && !conversation.post?.message
+  && !(conversation.adPostLookupAt && Date.now() - conversation.adPostLookupAt < postLookupRetryMs);
 const needsAdContext = conversation => Boolean(conversation?.referral?.adId)
-  && (!conversation.referral.adTitle || (Boolean(conversation.referral.postId) && !conversation.post?.message));
+  && (!conversation.referral.adTitle || needsPostLookup(conversation));
 
 export async function enrichPancakeAdContext(changes, config = defaultConfig, fetchImpl = fetch) {
   const pending = [...new Map(changes
@@ -733,19 +817,29 @@ export async function enrichPancakeAdContext(changes, config = defaultConfig, fe
     }
     return null;
   });
-  for (const item of pending) {
-    if (!item.referral?.postId || item.post?.message) continue;
-    findPancakePost(item.referral.postId, {}, config, fetchImpl).then(post => post && updateMessagingStore(store => {
-      const conversation = store.conversations.find(entry => entry.id === item.id);
-      if (conversation && !conversation.post?.message) {
-        conversation.post = { ...(conversation.post || {}), ...post };
-        publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
-      }
-      return null;
-    })).catch(() => {});
+  // Tìm bài quảng cáo nền, từng hội thoại một và tối đa 5 mỗi lượt (mỗi lần
+  // tìm có thể tới 36 lần gọi API); mốc đã tìm ghi lại dù thấy hay không.
+  for (const item of pending.filter(needsPostLookup).slice(0, 5)) {
+    postLookupQueue = postLookupQueue.then(async () => {
+      const post = await findPancakePost(item.referral.postId, {}, config, fetchImpl).catch(error => {
+        console.error(`Không tìm được bài quảng cáo ${item.referral.postId}: ${error.message}`);
+        return null;
+      });
+      await updateMessagingStore(store => {
+        const conversation = store.conversations.find(entry => entry.id === item.id);
+        if (!conversation) return null;
+        conversation.adPostLookupAt = Date.now();
+        if (post && !conversation.post?.message) {
+          conversation.post = { ...(conversation.post || {}), ...post };
+          publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
+        }
+        return null;
+      });
+    }).catch(error => console.error(`Không ghi được bài quảng cáo ${item.referral.postId}: ${error.message}`));
   }
   return pending.length;
 }
+let postLookupQueue = Promise.resolve();
 
 /**
  * Một webhook Pancake từ đầu tới cuối: chuẩn hoá, ghi hộp thư, điền bối cảnh

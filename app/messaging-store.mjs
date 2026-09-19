@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 
@@ -45,13 +45,28 @@ function migrateLegacyReceipts(store) {
 
 function normalizeStore(value) {
   if (!value || typeof value !== 'object') return emptyStore();
-  return migrateLegacyReceipts({
+  const store = migrateLegacyReceipts({
     conversations: Array.isArray(value.conversations) ? value.conversations : [],
     messages: value.messages && typeof value.messages === 'object' && !Array.isArray(value.messages) ? value.messages : {},
     // comment id → conversation id, so the Page's own replies (which arrive
     // with only a parent id) and later edits find their thread.
     commentIndex: value.commentIndex && typeof value.commentIndex === 'object' ? value.commentIndex : {}
   });
+  return pruneCommentIndex(store);
+}
+
+// Chỉ số bình luận chỉ có ghi thêm; bỏ mục trỏ tới luồng không còn hay bình luận
+// đã bị cắt khỏi 500 tin cuối, để tệp kho không phình mãi.
+function pruneCommentIndex(store) {
+  const keptIds = new Map();
+  for (const [id, list] of Object.entries(store.messages)) {
+    if (Array.isArray(list)) keptIds.set(id, new Set(list.map(item => item?.commentId || item?.id)));
+  }
+  for (const [commentId, conversationId] of Object.entries(store.commentIndex)) {
+    const ids = keptIds.get(conversationId);
+    if (!ids || !ids.has(commentId)) delete store.commentIndex[commentId];
+  }
+  return store;
 }
 
 export function conversationId(pageId, psid) {
@@ -67,14 +82,37 @@ export function commentConversationId(pageId, userId, postId) {
   return `${pageId}:comment:${userId}:${postId}`;
 }
 
-export async function readMessagingStore() {
-  if (cachedStore) return cachedStore;
+// Mốc sửa của tệp lúc đọc/ghi gần nhất: tệp bị tiến trình khác ghi (script
+// bảo trì, tiến trình thứ hai) thì đọc lại thay vì ghi đè bằng bản cũ trong bộ nhớ.
+let cachedStoreMtimeMs = 0;
+async function storeMtimeMs() {
   try {
-    cachedStore = normalizeStore(JSON.parse(await readFile(messagingStorePath, 'utf8')));
+    return (await stat(messagingStorePath)).mtimeMs;
   } catch {
-    cachedStore = emptyStore();
+    return 0;
   }
-  return cachedStore;
+}
+
+let loadingStore = null;
+export async function readMessagingStore() {
+  if (cachedStore && (await storeMtimeMs()) !== cachedStoreMtimeMs) cachedStore = null;
+  if (cachedStore) return cachedStore;
+  // Nhiều lượt đọc cùng lúc lúc khởi động dùng chung một lần nạp, để không có
+  // hai bản kho song song (bản ghi sau đè bản ghi trước).
+  if (!loadingStore) {
+    loadingStore = (async () => {
+      let store;
+      try {
+        store = normalizeStore(JSON.parse(await readFile(messagingStorePath, 'utf8')));
+      } catch {
+        store = emptyStore();
+      }
+      cachedStoreMtimeMs = await storeMtimeMs();
+      cachedStore = store;
+      return store;
+    })().finally(() => { loadingStore = null; });
+  }
+  return loadingStore;
 }
 
 async function persistStore(store) {
@@ -82,13 +120,21 @@ async function persistStore(store) {
   const temporaryPath = `${messagingStorePath}.tmp`;
   await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
   await rename(temporaryPath, messagingStorePath);
+  cachedStoreMtimeMs = await storeMtimeMs();
 }
 
 /** Serializes writes so bursts of webhook events cannot overwrite each other. */
 export function updateMessagingStore(mutate) {
   const operation = writeQueue.then(async () => {
     const store = await readMessagingStore();
-    const result = await mutate(store);
+    let result;
+    try {
+      result = await mutate(store);
+    } catch (error) {
+      // Sửa dở giữa chừng thì bỏ bản trong bộ nhớ, lần sau đọc lại từ tệp đã ghi tốt.
+      cachedStore = null;
+      throw error;
+    }
     await persistStore(store);
     return result;
   });

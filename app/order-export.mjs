@@ -256,6 +256,7 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
     }
     return index < 0 ? '' : row[index] || '';
   };
+  const rowIndexes = new Map(rows.map((row, index) => [row, index]));
   const exportableRows = rows.filter(row => !isInvalidOrderAddress(value(row, 'Địa chỉ')));
   const outputRows = [];
   const seenOrders = new Set();
@@ -304,7 +305,7 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
         invalidLocations.push({
           orderNumber: skipInvalidLocations ? null : orderNumber + 1,
           sourceOrderId,
-          sourceRowIndex: rows.indexOf(row),
+          sourceRowIndex: rowIndexes.get(row),
           customer: value(row, 'Khách hàng'),
           phone,
           address: value(row, 'Địa chỉ'),
@@ -314,7 +315,7 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
         if (skipInvalidLocations) { skippedOrders.add(orderKey); return; }
       }
     }
-    exportedSourceRowIndexes.push(rows.indexOf(row));
+    exportedSourceRowIndexes.push(rowIndexes.get(row));
     if (isFirstOrderLine) { seenOrders.add(orderKey); orderNumber += 1; }
     const catalogLines = catalogLinesByOrder.get(orderKey) || [];
     const catalogQuantity = catalogLines.reduce((sum, line) => sum + line.quantity, 0);

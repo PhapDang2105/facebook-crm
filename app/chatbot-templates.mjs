@@ -554,7 +554,9 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
     if (!text) return { templateId: 'CSKH_HANDOFF', ...splitMessages(fill(templates.CSKH_HANDOFF, commonValues())), handoff: true };
     return { templateId, ...splitMessages(text), handoff: false };
   }
-  const raw = (!catalogId && templates[templateId]) || value.reply || value.message || value.text || templates.CSKH_HANDOFF;
+  // Chữ gửi khách chỉ lấy từ mẫu trong Cài đặt; mã mẫu lạ (hay chữ tự soạn
+  // của mô hình, mà khách có thể lái) đi về CSKH_HANDOFF thay vì phát nguyên văn.
+  const raw = (!catalogId && templates[templateId]) || templates.CSKH_HANDOFF;
   return {
     templateId: !catalogId && templates[templateId] ? templateId : 'CSKH_HANDOFF',
     ...splitMessages(fill(raw, commonValues())),

@@ -5651,6 +5651,22 @@ function updateConversationSearch() {
   selectConversationSearchMatch(0);
 }
 
+// Chữ đang soạn dở của từng hội thoại: đổi hội thoại thì cất đi, quay lại thì
+// lấy ra — không để chữ soạn cho khách A còn nằm trong ô khi đang mở khách B.
+const composerDrafts = new WeakMap();
+function stashComposerDraft(conversation) {
+  if (!conversation || !messageComposerInput) return;
+  const text = messageComposerInput.value;
+  if (text.trim()) composerDrafts.set(conversation, text);
+  else composerDrafts.delete(conversation);
+}
+function restoreComposerDraft(conversation) {
+  if (!messageComposerInput) return;
+  messageComposerInput.value = composerDrafts.get(conversation) || '';
+  autosizeComposer();
+  updateMessageSendState();
+}
+
 function selectConversation(conversation) {
   if (!conversation) return;
   closeConversationMenu();
@@ -5660,6 +5676,11 @@ function selectConversation(conversation) {
   closeComposerPopovers();
   clearMessageReply();
   ensureConversationMetadata(conversation);
+  const previous = getActiveConversation();
+  if (previous !== conversation) {
+    stashComposerDraft(previous);
+    restoreComposerDraft(conversation);
+  }
   getConversationItems().forEach(item => item.classList.toggle('active', item === conversation));
   const wasUnread = conversation.classList.contains('unread');
   conversation.classList.remove('unread');
@@ -7096,6 +7117,7 @@ async function fetchExportRows() {
   return exportRowsCache;
 }
 
+let exportPreviewRequest = 0;
 async function renderExportPreview() {
   const preview = document.querySelector('#order-export-preview');
   if (!preview) return;
@@ -7103,9 +7125,13 @@ async function renderExportPreview() {
   let streets = [];
   let locationCheck = { checked: 0, invalid: [] };
   preview.classList.remove('is-empty');
+  // Đổi ngày xuất liên tiếp: chỉ lượt gọi mới nhất được vẽ, lượt cũ về muộn bị bỏ.
+  const request = ++exportPreviewRequest;
   try {
     ({ rows, streets, locationCheck } = await fetchExportRows());
+    if (request !== exportPreviewRequest) return;
   } catch (error) {
+    if (request !== exportPreviewRequest) return;
     renderEmptyState(preview, error.message || 'Chưa dựng được dữ liệu xuất.');
     if (orderExport) orderExport.hidden = true;
     renderExportLocationCheck(null, 0);
@@ -7600,7 +7626,7 @@ orderHistoryButton.addEventListener('click', () => {
 });
 
 let orderSearchTimer;
-orderSearch.addEventListener('input', () => {
+orderSearch?.addEventListener('input', () => {
   window.clearTimeout(orderSearchTimer);
   orderSearchTimer = window.setTimeout(renderOrderData, 120);
 });

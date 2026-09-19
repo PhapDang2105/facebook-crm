@@ -1,4 +1,5 @@
 import { defaultMessageTemplates, isProductQuoteId } from './chatbot-templates.mjs';
+import { isInternalHost } from './network-guard.mjs';
 import { defaultComplaintKeywords } from './processing/auto-label.mjs';
 
 export const defaultChatbotSettings = Object.freeze({
@@ -37,28 +38,11 @@ function cleanText(value, fallback, maximumLength) {
 }
 
 /**
- * Host không được phép làm endpoint AI: máy chủ sẽ tự gọi tới đó kèm giấy tờ
- * tuỳ thân, nên trỏ vào mạng nội bộ là biến máy chủ thành cái loa gọi hộ
- * (dịch vụ metadata của VM, cổng quản trị chỉ mở trong LAN...).
- * Chỉ chặn theo TÊN, không tra DNS — một tên miền công khai trỏ về IP nội bộ
- * vẫn lọt. Chốt chặn thật cho token Google nằm ở luật vertex bên dưới.
- */
-function isInternalHost(host) {
-  if (['localhost', '[::1]', '0.0.0.0'].includes(host)) return true;
-  if (/(^|\.)(localhost|internal|local|home\.arpa)$/.test(host)) return true;
-  if (/^\[/.test(host)) return /^\[(::1|fc|fd)/i.test(host);
-  const parts = host.split('.');
-  if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part))) return false;
-  const [a, b] = parts.map(Number);
-  return a === 127 || a === 10 || a === 0
-    || (a === 192 && b === 168)
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 169 && b === 254);
-}
-
-/**
  * Kiểm endpoint AI trước khi máy chủ gọi tới đó. Ném lỗi có lời tiếng Việt để
- * route trả thẳng cho người dùng.
+ * route trả thẳng cho người dùng. Host không được là mạng nội bộ: máy chủ sẽ
+ * tự gọi tới đó kèm giấy tờ tuỳ thân (dịch vụ metadata của VM, cổng quản trị
+ * chỉ mở trong LAN...). Hàm này chặn theo TÊN; route gọi thêm `assertPublicHost`
+ * (tra DNS) trước khi gọi thật, để tên miền công khai trỏ về IP nội bộ cũng bị chặn.
  *
  * Luật quan trọng nhất: với Vertex dùng access token, thứ gửi kèm là giấy tờ
  * của CẢ dự án Google Cloud chứ không phải khoá riêng của endpoint — nên chỉ

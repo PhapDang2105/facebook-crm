@@ -5,6 +5,7 @@
     "test:integration": "node tests/integration/meta-webhook.integration.mjs"
   },
   "dependencies": {
-    "adm-zip": "^0.6.0"
+    "adm-zip": "^0.6.0",
+    "sharp": "^0.35.4"
   }
 }

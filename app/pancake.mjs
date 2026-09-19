@@ -327,6 +327,33 @@ async function readImageForUpload(imageUrl, fetchImpl) {
   }
 }
 
+// Pancake chỉ nhận tệp tải lên tới 500 KB ("File size should not exceed
+// 500KB"); ảnh sản phẩm trong Cài đặt thường 1–2 MB, nên ảnh được thu nhỏ
+// và nén sang JPEG trước khi tải (sharp). Tệp không phải ảnh thì phải tự nhỏ.
+export const pancakeUploadLimit = 500 * 1024;
+
+/** Ảnh lớn hơn giới hạn của Pancake → JPEG nhỏ dần (cạnh dài 1080px, chất lượng giảm) cho tới khi lọt. */
+export async function fitImageForPancake(file, limit = pancakeUploadLimit) {
+  if (!file?.buffer || file.buffer.length <= limit || !/^image\/(png|jpe?g|webp)$/i.test(file.mime || '')) return file;
+  let sharp;
+  try {
+    ({ default: sharp } = await import('sharp'));
+  } catch {
+    throw new Error('Ảnh lớn hơn 500 KB mà thiếu thư viện sharp để nén (chạy npm install).');
+  }
+  let width = 1080;
+  let quality = 82;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const buffer = await sharp(file.buffer).rotate().resize({ width, height: width, fit: 'inside', withoutEnlargement: true }).jpeg({ quality, mozjpeg: true }).toBuffer();
+    if (buffer.length <= limit) {
+      return { buffer, filename: String(file.filename || 'anh').replace(/\.[^.]*$/, '') + '.jpg', mime: 'image/jpeg' };
+    }
+    width = Math.round(width * 0.8);
+    quality = Math.max(40, quality - 12);
+  }
+  throw new Error('Không nén được ảnh xuống dưới 500 KB để gửi qua Pancake.');
+}
+
 // Mã nội dung Pancake của ảnh đã tải lên, để mỗi lần báo giá không tải lại
 // cùng một ảnh sản phẩm. Khoá là URL bỏ phần truy vấn (?v= đổi mỗi lần).
 const contentIdCache = new Map();
@@ -337,7 +364,7 @@ async function pancakeContentIdForImage(pageId, imageUrl, config, fetchImpl) {
   const key = contentCacheKey(imageUrl);
   const cached = contentIdCache.get(key);
   if (cached && Date.now() - cached.at < contentIdTtlMs) return { id: cached.id, cached: true };
-  const file = await readImageForUpload(imageUrl, fetchImpl);
+  const file = await fitImageForPancake(await readImageForUpload(imageUrl, fetchImpl));
   const { id } = await uploadPancakeContent({ pageId, ...file }, config, fetchImpl);
   contentIdCache.set(key, { id, at: Date.now() });
   return { id, cached: false };
@@ -378,7 +405,9 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'image', text: '', name: 'anh-san-pham', dataUrl: imageUrl, createdAt: Date.now(), status: 'sent' };
   } else if (attachment) {
     const { mime, buffer } = decodeDataUrl(attachment.dataUrl);
-    const { id } = await uploadPancakeContent({ pageId: target.pageId, buffer, filename: attachment.name || 'tep-dinh-kem', mime }, config, fetchImpl);
+    const file = await fitImageForPancake({ buffer, filename: attachment.name || 'tep-dinh-kem', mime });
+    if (file.buffer.length > pancakeUploadLimit) throw Object.assign(new Error('Pancake chỉ nhận tệp tới 500 KB; ảnh được nén tự động, tệp khác cần nhỏ hơn.'), { statusCode: 400 });
+    const { id } = await uploadPancakeContent({ pageId: target.pageId, ...file }, config, fetchImpl);
     const sent = await sendPancakeMessage({ ...target, contentIds: [id] }, config, fetchImpl);
     // Nội dung tệp không lưu vào kho; bản dội lại từ Pancake mang URL ảnh trên CDN.
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: attachment.type || 'document', text: '', name: attachment.name || '', dataUrl: '', createdAt: Date.now(), status: 'sent' };

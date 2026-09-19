@@ -190,3 +190,19 @@ test('gửi ảnh qua Pancake: tải lên upload_contents rồi gửi content_id
   assert.deepEqual(calls, ['upload', 'send:c1', 'text:Ảnh đây ạ']);
   assert.deepEqual([file.message.type, file.message.name, file.message.dataUrl], ['image', 'mau.jpg', '']);
 });
+
+test('ảnh lớn hơn 500 KB được thu nhỏ và nén sang JPEG trước khi tải lên Pancake; ảnh nhỏ giữ nguyên', async () => {
+  const { fitImageForPancake, pancakeUploadLimit } = await import('../app/pancake.mjs');
+  const { default: sharp } = await import('sharp');
+  const small = { buffer: Buffer.alloc(1000, 1), filename: 'nho.png', mime: 'image/png' };
+  assert.equal(await fitImageForPancake(small), small);
+  // Ảnh nhiễu 1600×1600 nén PNG vẫn vài MB, giống ảnh sản phẩm chụp thật.
+  const noise = Buffer.from(Array.from({ length: 1600 * 1600 * 3 }, () => Math.floor(Math.random() * 256)));
+  const bigPng = await sharp(noise, { raw: { width: 1600, height: 1600, channels: 3 } }).png().toBuffer();
+  assert.ok(bigPng.length > pancakeUploadLimit, `ảnh thử phải lớn hơn giới hạn (${bigPng.length})`);
+  const fitted = await fitImageForPancake({ buffer: bigPng, filename: 'xanh.png', mime: 'image/png' });
+  assert.ok(fitted.buffer.length <= pancakeUploadLimit, `sau nén ${fitted.buffer.length} bytes`);
+  assert.deepEqual([fitted.filename, fitted.mime], ['xanh.jpg', 'image/jpeg']);
+  const meta = await sharp(fitted.buffer).metadata();
+  assert.ok(meta.width <= 1080 && meta.height <= 1080);
+});

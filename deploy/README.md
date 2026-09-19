@@ -18,6 +18,7 @@ Thư mục này chứa mọi thứ cần để đưa CRM lên một máy chủ D
 - `/webhooks/facebook` đi thẳng, không hỏi mật khẩu. Meta gọi bằng máy nên không đăng nhập được; bản thân endpoint này đã tự xác thực bằng chữ ký `X-Hub-Signature-256`.
 - `/product-images/*` cũng đi thẳng: Messenger tải ảnh sản phẩm từ đây để hiện trên receipt và sau bảng giá.
 - `/webhooks/landing` đi thẳng: nền tảng landing page (Webcake) gọi bằng máy; endpoint tự xác thực bằng `LANDING_WEBHOOK_TOKEN` trong `.env`. Máy chủ dựng trước khi có khối này thì thêm khối `@landing` từ `Caddyfile` vào `/etc/caddy/Caddyfile` rồi `systemctl reload caddy`.
+- `/webhooks/pancake` đi thẳng: Pancake (pages.fm) gọi bằng máy khi khách nhắn tin; endpoint tự xác thực bằng `PANCAKE_WEBHOOK_TOKEN` trong `.env`. Máy chủ dựng trước khi có khối này thì thêm khối `@pancake` từ `Caddyfile` vào `/etc/caddy/Caddyfile` rồi `systemctl reload caddy`.
 - Mọi đường dẫn còn lại yêu cầu tên đăng nhập và mật khẩu.
 
 Khi nào CRM có đăng nhập riêng thì có thể bỏ lớp này.

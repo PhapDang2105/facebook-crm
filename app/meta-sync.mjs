@@ -13,6 +13,7 @@ import {
   likeComment
 } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
+import { sendConversationMessageViaPancake } from './pancake.mjs';
 import {
   applyGenderGuess,
   conversationId,
@@ -151,6 +152,11 @@ export async function moderateComment(conversation, message, { like = false, hid
 
 /** Sends a reply through the Send API and records it in the local conversation. */
 export async function sendConversationMessage(conversation, { text = '', attachment = null, imageUrl = '', template = null, templateText = '', privateReply = false }) {
+  // Hội thoại đến từ Pancake (Page vận hành trong Pancake, CRM không có token
+  // Meta của Page đó): gửi ngược qua Public API của Pancake.
+  if (conversation.pancakeConversationId) {
+    return sendConversationMessageViaPancake(conversation, { text, templateText, attachment, imageUrl });
+  }
   if (conversation.source === 'comment') {
     if (attachment || template) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });
     return sendCommentReply(conversation, { text, imageUrl, privateReply });

@@ -78,6 +78,22 @@ export const landingConfig = {
   webhookUrl: `${publicBaseUrl}${process.env.LANDING_WEBHOOK_PATH || '/webhooks/landing'}`
 };
 
+// Pancake (pages.fm): Page vận hành trong Pancake, bot của CRM trả lời khách
+// qua Pancake. Token và ID Page lấy ở Pancake → Cài đặt → Công cụ (Public API
+// access token, Webhook). Để trống là tắt.
+const pancakePath = process.env.PANCAKE_WEBHOOK_PATH || '/webhooks/pancake';
+export const pancakeConfig = {
+  pageId: process.env.PANCAKE_PAGE_ID || '',
+  pageName: process.env.PANCAKE_PAGE_NAME || 'Giọt Nắng Healthy (Pancake)',
+  pageAccessToken: process.env.PANCAKE_PAGE_ACCESS_TOKEN || '',
+  webhookToken: process.env.PANCAKE_WEBHOOK_TOKEN || '',
+  path: pancakePath,
+  webhookUrl: `${publicBaseUrl}${pancakePath}`,
+  apiBase: process.env.PANCAKE_API_BASE || 'https://pages.fm/api/public_api',
+  // Mặc định bot im khi hội thoại đã có nhân viên nhận trong Pancake.
+  botWhenAssigned: process.env.PANCAKE_BOT_WHEN_ASSIGNED === '1'
+};
+
 // Pancake POS Open API: tra lịch sử giao hàng theo số điện thoại để cảnh báo
 // khách hay bom hàng. Tạo khoá ở POS: Cài đặt → Nâng cao → Kết nối bên thứ ba
 // → Webhook/API → API KEY → Tạo. Để trống là chỉ dùng danh sách thủ công.

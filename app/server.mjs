@@ -21,6 +21,7 @@ import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
+import { handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid } from './pancake.mjs';
 import { isValidQrCode, listQrScans, recordQrScan } from './qr-scans.mjs';
 import {
   isMetaConfigured,
@@ -30,8 +31,7 @@ import {
   missingMetaConfiguration,
   missingWebhookConfiguration,
   projectRoot,
-  serverConfig
-} from './config.mjs';
+  serverConfig, pancakeConfig } from './config.mjs';
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
@@ -621,6 +621,38 @@ async function serveFile(request, response, pathname) {
 }
 
 await initializeStore();
+// Những gì bot cần để trả lời: dùng chung cho webhook Meta và webhook Pancake,
+// khác nhau chỉ ở đường gửi tin (sendConversationMessage tự chọn Meta hay Pancake).
+const chatbotDependencies = {
+  readSettings: readChatbotSettings,
+  listMessages,
+  sendMessage: sendConversationMessage,
+  moderateComment,
+  createOrder: createChatbotCustomerOrder,
+  sendReceipt: sendChatbotOrderReceipt,
+  // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
+  // nhận sự kiện là do nhân viên chọn trong Cài đặt → Tin nhắn.
+  saveBotState: async (id, { addLabelEvents = [], ...botState }) => {
+    const addLabels = addLabelEvents.length
+      ? labelsForEvents((await readInboxSettings()).labels, addLabelEvents)
+      : [];
+    return updateMessagingStore(store => {
+      const conversation = store.conversations.find(item => item.id === id);
+      if (!conversation) return null;
+      Object.assign(conversation, botState);
+      if (addLabels.length) {
+        const before = Array.isArray(conversation.labels) ? conversation.labels : [];
+        const merged = [...new Set([...before, ...addLabels])];
+        if (merged.length !== before.length) {
+          conversation.labels = merged;
+          publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
+        }
+      }
+      return conversation;
+    });
+  }
+};
+
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
@@ -776,7 +808,13 @@ const server = http.createServer(async (request, response) => {
         webhookConfigured: isWebhookConfigured(),
         missingWebhookConfiguration: missingWebhookConfiguration(),
         webhookUrl: metaConfig.webhookUrl,
-        items: store.items.map(publicChannel)
+        items: [
+          ...store.items.map(publicChannel),
+          // Page vận hành trong Pancake: không có token Meta, hiện như một kênh để
+          // hộp thư xem được hội thoại bot đang trả lời qua Pancake.
+          ...(isPancakeConfigured() ? [{ id: pancakeConfig.pageId, name: pancakeConfig.pageName, picture: '', platform: 'facebook', via: 'pancake', status: 'connected', subscribed: true, subscribedFields: [], subscriptionError: '', connectedAt: 0, checkedAt: 0, syncedAt: '' }] : [])
+        ],
+        pancake: { configured: isPancakeConfigured(), webhookUrl: pancakeConfig.webhookUrl, pageId: pancakeConfig.pageId }
       });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels/meta/connect') {
@@ -1023,6 +1061,26 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/landing/recent') {
       return sendJson(response, 200, { webhookUrl: landingConfig.webhookUrl, configured: Boolean(landingConfig.token), items: await listRecentLandingPayloads() });
     }
+    // Webhook Pancake (pages.fm): khách nhắn qua Page vận hành trong Pancake →
+    // ghi hộp thư để theo dõi, bot trả lời ngược qua Public API của Pancake.
+    // Pancake không ký payload nên xác thực bằng token trong URL; trả 200 ngay
+    // vì Pancake tạm ngưng webhook khi lỗi hay chậm nhiều.
+    if (request.method === 'POST' && url.pathname === pancakeConfig.path) {
+      if (!isPancakeConfigured() || !isPancakeWebhookTokenValid(url.searchParams.get('token'), pancakeConfig.webhookToken)) {
+        response.writeHead(isPancakeConfigured() ? 401 : 503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return response.end(isPancakeConfigured() ? 'Invalid token' : 'Pancake webhook is not configured');
+      }
+      const payload = await readBody(request);
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end('{"received":true}');
+      try {
+        const summary = await handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies });
+        if (summary.stored) console.log(`Webhook Pancake: ghi ${summary.stored} tin, đưa bot ${summary.bot}`);
+      } catch (error) {
+        console.error('Webhook Pancake xử lý lỗi:', error.message);
+      }
+      return undefined;
+    }
     if (request.method === 'POST' && url.pathname === metaConfig.webhookPath) {
       const rawBody = await readRawBody(request);
       if (!verifyWebhookSignature(rawBody, request.headers['x-hub-signature-256'], metaConfig.appSecret)) {
@@ -1039,35 +1097,7 @@ const server = http.createServer(async (request, response) => {
         // Khách quét phiếu đã có tin ưu đãi riêng; để bot chào thêm câu chung
         // nữa là khách nhận hai tin trong mười giây. Những tin sau của họ vẫn
         // đi qua bot bình thường — chỉ bỏ qua đúng sự kiện mở hội thoại.
-        await processChatbotChanges(changes.filter(change => !isCardScan(change)), {
-          readSettings: readChatbotSettings,
-          listMessages,
-          sendMessage: sendConversationMessage,
-          moderateComment,
-          createOrder: createChatbotCustomerOrder,
-          sendReceipt: sendChatbotOrderReceipt,
-          // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
-          // nhận sự kiện là do nhân viên chọn trong Cài đặt → Tin nhắn.
-          saveBotState: async (id, { addLabelEvents = [], ...botState }) => {
-            const addLabels = addLabelEvents.length
-              ? labelsForEvents((await readInboxSettings()).labels, addLabelEvents)
-              : [];
-            return updateMessagingStore(store => {
-              const conversation = store.conversations.find(item => item.id === id);
-              if (!conversation) return null;
-              Object.assign(conversation, botState);
-              if (addLabels.length) {
-                const before = Array.isArray(conversation.labels) ? conversation.labels : [];
-                const merged = [...new Set([...before, ...addLabels])];
-                if (merged.length !== before.length) {
-                  conversation.labels = merged;
-                  publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
-                }
-              }
-              return conversation;
-            });
-          }
-        });
+        await processChatbotChanges(changes.filter(change => !isCardScan(change)), chatbotDependencies);
       } catch (error) {
         console.error('Webhook processing failed:', error.message);
       }

@@ -19,6 +19,7 @@ Giao diện là một trang HTML/CSS/JS thuần (`web/`), không build. Server l
 | `app/conversation-orders.mjs` | Đơn chatbot tạo từ hội thoại |
 | `app/landing-orders.mjs`, `pos-sync.mjs` | Đơn landing page (webhook Webcake) và đồng bộ đơn từ Pancake POS mỗi 5 phút, tự điền cho đơn bỏ dở |
 | `app/phone-warnings.mjs` | Tỷ lệ nhận hàng theo số điện thoại từ Pancake POS, có cache |
+| `app/pancake.mjs` | Page vận hành trong Pancake: nhận webhook tin nhắn, ghi hộp thư, bot trả lời ngược qua Public API của Pancake |
 | `app/order-notes.mjs` | Ghi chú xử lý cho từng đơn (thiếu gì, tự điền gì, tỷ lệ nhận hàng) |
 | `app/order-edits.mjs` | Nhân viên sửa đơn từ bảng Xử lý dữ liệu, ghi về kho đơn |
 | `app/order-export.mjs`, `xlsx-import.mjs` | Dựng file xuất kho theo mẫu Pancake, đọc file import |
@@ -37,7 +38,7 @@ Dữ liệu vận hành (không commit): `meta-channels.json`, `meta-conversatio
 
 - Sức khỏe: `GET /api/health`
 - Kênh: `GET /api/channels`; `GET /api/channels/meta/connect`, `/callback`, `/pending`, `POST /api/channels/meta/confirm`; `POST /api/channels/facebook/{pageId}/refresh`, `/profiles`, `DELETE /api/channels/facebook/{pageId}`
-- Webhook: `GET|POST /webhooks/facebook` (Meta), `POST /webhooks/landing?token=` (Webcake)
+- Webhook: `GET|POST /webhooks/facebook` (Meta), `POST /webhooks/landing?token=` (Webcake), `POST /webhooks/pancake?token=` (tin nhắn từ Pancake)
 - Hộp thư: `GET /api/messaging/conversations?channelId=`; `GET|POST .../conversations/{id}/messages`; `POST .../read`; `PATCH .../flags`; `.../customer-panel`; `POST /api/messaging/sync`; `GET /api/messaging/stream` (SSE); `GET|PUT /api/inbox/settings`
 - Chatbot: `GET|PUT /api/chatbot/settings`; `POST /api/chatbot/test`; `GET /api/chatbot/pipeline`, `/api/chatbot/pipeline/{step}`
 - Danh mục: `GET|POST /api/products`, `PUT|DELETE /api/products/{id}`; `GET|PUT /api/gifts`

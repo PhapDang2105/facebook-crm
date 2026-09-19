@@ -100,6 +100,10 @@ Tra cứu: nút **Lịch sử** ở **Xử lý dữ liệu** mở kho, có ô t�
 
 Nút **Lịch sử** ở **Nhập dữ liệu** là việc khác: bản lưu tạm các lần nhập tệp (tên tệp, lúc nhập, thống kê sạch / cần xử lý / trùng, và chính các dòng đã nhập để xem lại), giữ trong trình duyệt và **tự xóa sau 7 ngày**. Hết chỗ lưu thì bỏ dần bản sao dòng của các lần nhập cũ, phần thống kê vẫn còn.
 
+## Bot trả lời khách qua Pancake
+
+Page vận hành trong Pancake (pages.fm): nhân viên xem và trả lời ở đó, CRM chỉ theo dõi. Pancake bắn webhook `POST /webhooks/pancake?token=<PANCAKE_WEBHOOK_TOKEN>` khi khách nhắn (`app/pancake.mjs`): tin được ghi vào hộp thư CRM dưới một kênh ảo mang tên `PANCAKE_PAGE_NAME`, rồi đưa cho bot như tin từ Meta. Câu trả lời của bot (và tin nhân viên gửi từ CRM) đi ngược qua Public API của Pancake (`POST /public_api/v1/pages/{page}/conversations/{id}/messages`) nên hiện ngay trong Pancake. Mặc định bot đứng ngoài hội thoại đã có nhân viên nhận trong Pancake (`PANCAKE_BOT_WHEN_ASSIGNED=1` để đổi). Chỉ tin inbox chữ được xử lý; bình luận và tệp đính kèm chưa hỗ trợ qua đường này. Cấu hình ba biến trong `.env` (xem `.env.example`), Caddy cho `/webhooks/pancake` đi thẳng; token và ID Page lấy ở Pancake → Cài đặt → Công cụ. Tài liệu API: `integrations/pancake/`.
+
 ## Tệp khách hàng từ đơn đã xuất
 
 Mỗi lần bấm **Xuất XLSX** ở Xuất dữ liệu, khách của các đơn trong file được ghi vào `data/processed/customer-file.json` theo số điện thoại (`app/customer-file.mjs`): tên, địa chỉ ba cấp, nguồn đơn, từng đơn với sản phẩm, số lượng, đơn giá, ngày đặt và lần xuất đầu. Xuất lại cùng đơn không tạo bản thứ hai. Màn **Khách hàng** đọc tệp này cùng hội thoại Facebook: khách trùng số điện thoại với một khách Facebook thì cộng thêm đơn (đơn chatbot đã đếm từ hội thoại không cộng lại), khách landing hay import chưa từng nhắn tin thì là một dòng riêng với nguồn "Đơn đã xuất". Nhờ vậy mọi khách đã lên đơn đều nằm trong một danh sách để lọc remarketing (đã mua gì, combo mấy túi, mua lần cuối khi nào) và xuất CSV.

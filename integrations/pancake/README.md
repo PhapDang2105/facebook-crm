@@ -29,6 +29,14 @@ Hai loại token, đều truyền bằng tham số truy vấn, không có header
 - Payload `messaging`: `page_id`, `event_type`, `data.conversation` (id, type, from, tags, snippet, seen...), `data.message` (id, conversation_id, message, from {id, name, page_customer_id}, attachments, has_phone, phone_info, inserted_at), `data.post` với bình luận.
 - Điều kiện: Pancake phải bật tính năng Webhook cho Page (liên hệ hỗ trợ Pancake, tốn 1 slot kết nối của gói), rồi đặt URL trong cài đặt công cụ của Page (cần quyền admin). Webhook bị tạm ngưng nếu trong 30 phút lỗi trên 80% và từ 300 lần, nên endpoint phải trả 200 nhanh và xử lý idempotent (một sự kiện có thể gửi hơn một lần).
 
+### Phía CRM (`app/pancake.mjs`)
+
+- Endpoint nhận: `POST ${PUBLIC_BASE_URL}/webhooks/pancake?token=<PANCAKE_WEBHOOK_TOKEN>`; sai token trả 401, chưa cấu hình trả 503, hợp lệ trả 200 ngay rồi mới xử lý.
+- Chỉ nhận sự kiện `messaging` loại INBOX của đúng `PANCAKE_PAGE_ID`; bình luận và Page khác bỏ qua. Tin trùng mã (Pancake gửi lại khi cập nhật) không ghi hai lần, không gọi bot lần hai.
+- Tin được ghi vào hộp thư như tin từ Meta; hội thoại giữ thêm mã hội thoại Pancake để gửi trả lời đúng chỗ. Kênh ảo `PANCAKE_PAGE_NAME` xuất hiện ở hộp thư và Cài đặt → Kênh.
+- Bot chạy qua cùng bộ xử lý với Meta; hội thoại có `assignee_ids` (nhân viên đã nhận trong Pancake) thì bot không trả lời trừ khi `PANCAKE_BOT_WHEN_ASSIGNED=1`. Tin gửi đi (bot hoặc nhân viên gửi từ CRM) chỉ là chữ; receipt dùng bản chữ.
+- Cấu hình trong `.env`: `PANCAKE_PAGE_ID`, `PANCAKE_PAGE_ACCESS_TOKEN`, `PANCAKE_WEBHOOK_TOKEN`, tuỳ chọn `PANCAKE_PAGE_NAME`, `PANCAKE_BOT_WHEN_ASSIGNED`. Caddy có khối `@pancake` cho đường này đi thẳng.
+
 ## Pancake POS Open API
 
 Nguồn: https://docs.pancake.biz/pos/api/ (spec OpenAPI 3.1 tải về ở `openapi.json`, lấy từ `https://docs.pancake.biz/pos/api/openapi.json?lang=vi`).

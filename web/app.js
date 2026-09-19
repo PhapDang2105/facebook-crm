@@ -6397,23 +6397,97 @@ function setOrderStatuses(keys, status, details = []) {
   try { localStorage.setItem(reviewedOrdersLogKey, JSON.stringify(log)); } catch {}
 }
 
+// Xuất dữ liệu xuất đơn của MỘT ngày do nhân viên chọn (hôm nay, hôm qua,
+// 2 ngày trước, hay một ngày bất kỳ); mặc định hôm nay.
+const orderExportDay = document.querySelector('#order-export-day');
+const orderExportDate = document.querySelector('#order-export-date');
+const orderExportDateControl = document.querySelector('#order-export-date-control');
+const orderExportSummary = document.querySelector('#order-export-summary');
+
+/** Ngày đơn đang chọn để xuất, lúc 0h theo giờ máy; null khi "Chọn ngày…" chưa có ngày. */
+function selectedExportDate() {
+  const choice = orderExportDay?.value || '0';
+  if (choice === 'custom') {
+    const value = orderExportDate?.value || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - Number(choice));
+  return date;
+}
+
+/** Ngày đang chọn dạng YYYY-MM-DD (ghi vào lịch sử xuất) và dạng hiện cho người đọc. */
+function exportDayLabels() {
+  const date = selectedExportDate();
+  if (!date) return { key: '', label: '' };
+  const pad = value => String(value).padStart(2, '0');
+  return { key: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`, label: date.toLocaleDateString('vi-VN') };
+}
+
 /**
  * Bảng chỉ gồm dòng sạch hoặc đã xác nhận, trừ đơn khách hủy, và chỉ đơn đặt
- * trong ba ngày gần nhất (hôm nay, hôm qua, 2 ngày trước — cùng ba tab đầu
- * của Xử lý dữ liệu): đây là phần được xuất kho, cả bảng xem trước lẫn XLSX.
+ * đúng ngày đang chọn: đây là phần được xuất kho, cả bảng xem trước lẫn XLSX.
  */
-const exportDayLimit = 2;
 function exportableOrderData(data = orderData) {
   if (!data.rows.length) return data;
+  const day = selectedExportDate();
+  if (!day) return { headers: data.headers, rows: [] };
   const pending = new Set(getOrdersNeedingProcessing(data).map(entry => entry.index));
   const statuses = readOrderStatuses();
-  const today = new Date();
+  const now = new Date();
+  const sameDay = row => {
+    const ordered = parseOrderRowDate(row, data, now);
+    return ordered && ordered.getFullYear() === day.getFullYear() && ordered.getMonth() === day.getMonth() && ordered.getDate() === day.getDate();
+  };
   return {
     headers: data.headers,
     rows: data.rows.filter((row, index) => !pending.has(index)
       && orderStatusOf(row, data, statuses) !== 'cancelled'
-      && orderDayBucket(row, data, today) <= exportDayLimit)
+      && sameDay(row))
   };
+}
+
+/** "Đơn ngày 19/09/2026: 27 đơn · 60 dòng" phía trên bảng xuất. */
+function renderExportSummary(rows) {
+  if (!orderExportSummary) return;
+  const { label } = exportDayLabels();
+  if (!label) { orderExportSummary.textContent = 'Chọn ngày đơn cần xuất.'; return; }
+  const orders = new Set(rows.map(row => String(row[0] || '')).filter(Boolean)).size;
+  orderExportSummary.textContent = rows.length ? `Đơn ngày ${label}: ${orders} đơn · ${rows.length} dòng` : `Đơn ngày ${label}: chưa có đơn đủ điều kiện xuất`;
+}
+
+// ===== Lịch sử xuất kho (server giữ 14 ngày, kèm tệp để tải lại) =====
+const orderExportHistoryButton = document.querySelector('#order-export-history-button');
+const orderExportHistoryPanel = document.querySelector('#order-export-history-panel');
+
+async function renderExportHistory() {
+  if (!orderExportHistoryPanel) return;
+  let items = [];
+  try {
+    ({ items = [] } = await readApiResponse(await fetch('/api/orders/export/history')));
+  } catch (error) {
+    orderExportHistoryPanel.innerHTML = `<p>${escapeHtml(error.message || 'Chưa đọc được lịch sử xuất.')}</p>`;
+    return;
+  }
+  if (!items.length) {
+    orderExportHistoryPanel.innerHTML = '<p class="order-archive-count">Chưa có lần xuất nào trong 14 ngày.</p>';
+    return;
+  }
+  const dayLabel = key => {
+    const [year, month, day] = String(key || '').split('-').map(Number);
+    return year && month && day ? new Date(year, month - 1, day).toLocaleDateString('vi-VN') : 'không rõ ngày';
+  };
+  orderExportHistoryPanel.innerHTML = [
+    '<p class="order-archive-count">Lịch sử xuất kho 14 ngày gần nhất</p>',
+    ...items.map(entry => `<div class="order-archive-item">
+      <div class="order-archive-head"><strong>Đơn ngày ${escapeHtml(dayLabel(entry.day))}</strong><b>${Number(entry.orders) || 0} đơn · ${Number(entry.rows) || 0} dòng</b></div>
+      <small class="order-archive-meta">Xuất lúc ${escapeHtml(new Date(entry.at).toLocaleString('vi-VN'))}${entry.skippedInvalid ? ` · đã bỏ ${entry.skippedInvalid} đơn chưa chuẩn địa chỉ` : ''}</small>
+      ${entry.hasFile ? `<a class="export-history-download" href="/api/orders/export/history/${encodeURIComponent(entry.id)}/file" download="${escapeHtml(entry.fileName || 'don-hang.xlsx')}">Tải lại ${escapeHtml(entry.fileName || 'tệp')}</a>` : ''}
+    </div>`)
+  ].join('');
 }
 
 function getOrdersNeedingProcessing(data = orderData) {
@@ -6814,6 +6888,7 @@ async function renderExportPreview() {
     orderExport.disabled = rows.length === 0;
     orderExport.hidden = rows.length === 0;
   }
+  renderExportSummary(rows);
   renderExportLocationCheck(locationCheck, rows.length);
   if (!rows.length) {
     renderEmptyState(preview, 'Chưa có dữ liệu xuất');
@@ -7305,6 +7380,20 @@ orderSearch.addEventListener('input', () => {
 });
 orderFilter.addEventListener('change', renderOrderData);
 orderSourceFilter?.addEventListener('change', renderOrderData);
+// Đổi ngày xuất: bảng xuất dựng lại (khoá cache theo dữ liệu nên tự làm mới).
+orderExportDay?.addEventListener('change', () => {
+  orderExportDateControl?.classList.toggle('hidden', orderExportDay.value !== 'custom');
+  if (orderExportDay.value === 'custom' && orderExportDate && !orderExportDate.value) orderExportDate.value = exportDayLabels().key || new Date().toISOString().slice(0, 10);
+  orderPanelsDirty.add('export');
+  renderOrderData();
+});
+orderExportDate?.addEventListener('change', () => { orderPanelsDirty.add('export'); renderOrderData(); });
+orderExportHistoryButton?.addEventListener('click', () => {
+  const willOpen = orderExportHistoryPanel.classList.contains('hidden');
+  orderExportHistoryPanel.classList.toggle('hidden', !willOpen);
+  orderExportHistoryButton.setAttribute('aria-expanded', String(willOpen));
+  if (willOpen) renderExportHistory();
+});
 
 messageChannelTrigger?.addEventListener('click', event => {
   event.stopPropagation();
@@ -7931,7 +8020,8 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
   const originalLabel = button.textContent;
   button.textContent = 'Đang xuất...';
   try {
-    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportableOrderData(), skipInvalidLocations }) });
+    const filename = createExportFilename();
+    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportableOrderData(), skipInvalidLocations, exportDay: exportDayLabels().key, fileName: filename }) });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       if (detail.locationCheck) renderExportLocationCheck(detail.locationCheck, exportRowsCache.rows.length || 1);
@@ -7940,7 +8030,6 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const filename = createExportFilename();
     link.href = url;
     link.download = filename;
     document.body.appendChild(link);
@@ -7948,6 +8037,7 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast(skipInvalidLocations ? `Đã tải ${filename} (đã bỏ qua đơn chưa chuẩn địa chỉ).` : `Đã tải ${filename}.`, 'success');
+    if (!orderExportHistoryPanel?.classList.contains('hidden')) renderExportHistory();
   } catch (error) {
     showToast(error.message);
   } finally {

@@ -22,6 +22,7 @@ import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
+import { listExports, readExportFile, recordExport } from './export-history.mjs';
 import { handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { isValidQrCode, listQrScans, recordQrScan } from './qr-scans.mjs';
 import {
@@ -1616,7 +1617,26 @@ const server = http.createServer(async (request, response) => {
       workbook.updateFile('xl/styles.xml', Buffer.from(cleanedWorkbook.stylesXml, 'utf8'));
       workbook.updateFile(worksheetPath, Buffer.from(worksheetXml, 'utf8'));
       const output = workbook.toBuffer();
-      return sendBinary(response, 200, output, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', `don-hang-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      const fileName = String(payload.fileName || '').replace(/[^A-Za-z0-9._-]/g, '') || `don-hang-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      // Lịch sử xuất (14 ngày): ngày đơn đã chọn, số đơn (dòng có STT), số dòng, tệp để tải lại.
+      await recordExport({
+        day: String(payload.exportDay || ''),
+        orders: new Set(rows.map(row => String(row[0] || '')).filter(Boolean)).size,
+        rows: rows.length,
+        skippedInvalid: skipInvalidLocations ? rows.locationCheck.invalid.length : 0,
+        fileName,
+        buffer: output
+      }).catch(error => console.error(`Không ghi được lịch sử xuất: ${error.message}`));
+      return sendBinary(response, 200, output, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName);
+    }
+    if (request.method === 'GET' && url.pathname === '/api/orders/export/history') {
+      return sendJson(response, 200, { items: await listExports() });
+    }
+    const exportFileMatch = url.pathname.match(/^\/api\/orders\/export\/history\/([A-Za-z0-9-]+)\/file$/);
+    if (request.method === 'GET' && exportFileMatch) {
+      const file = await readExportFile(exportFileMatch[1]);
+      if (!file) return sendJson(response, 404, { error: 'Tệp xuất này không còn (lịch sử giữ 14 ngày).' });
+      return sendBinary(response, 200, file.buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', file.fileName);
     }
     if(request.method==='GET') return serveFile(request,response,url.pathname);
     sendJson(response,404,{error:'Route not found.'});

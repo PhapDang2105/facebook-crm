@@ -271,7 +271,11 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
     let body = {};
     try { body = await response.json(); } catch {}
     if (!response.ok || body.success === false) {
-      throw new Error(`Pancake không nhận tin (${response.status}): ${body.message || body.error || 'không rõ lý do'}`);
+      // Pancake hay trả 200 + success:false, lý do nằm trong original_error.
+      const reason = body.message || body.error
+        || (body.original_error && (typeof body.original_error === 'string' ? body.original_error : JSON.stringify(body.original_error).slice(0, 300)))
+        || `phản hồi: ${JSON.stringify(body).slice(0, 300)}`;
+      throw new Error(`Pancake không nhận tin (${response.status}): ${reason}`);
     }
     return { id: String(body.id || body.message_id || `pancake-sent-${Date.now()}`) };
   } finally {

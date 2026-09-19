@@ -207,6 +207,20 @@ function basketValues(key) {
   };
 }
 
+// Khách vừa chốt một đơn rồi mua tiếp ("lấy thêm 2 túi vàng"): mô hình hay
+// gộp cả sản phẩm của đơn đã chốt vào giỏ mới, giỏ thành tổ hợp không có giá
+// và bot chuyển nhân viên. Trong hai giờ sau đơn gần nhất, món trùng đơn đó
+// bị bỏ khi khách có nêu món mới; chỉ toàn món cũ thì giữ (khách nhắc lại).
+const recentOrderWindowMs = 2 * 60 * 60 * 1000;
+function dropRecentlyOrdered(items, recentOrder, now) {
+  const at = Number(recentOrder?.createdAt) || 0;
+  if (!at || now - at > recentOrderWindowMs) return items;
+  const ordered = new Set((recentOrder.products || []).map(item => String(item.sku || item.code || '')).filter(Boolean));
+  if (!ordered.size) return items;
+  const additions = items.filter(item => !ordered.has(item.code));
+  return additions.length && additions.length < items.length ? additions : items;
+}
+
 function renderOrder(value, templates, context = {}) {
   const now = Number(context.now) || Date.now();
   const templateId = String(value.template_id || '').trim();
@@ -214,10 +228,11 @@ function renderOrder(value, templates, context = {}) {
   const quantities = [value.No_A, value.No_B, value.No_C];
   // Khách nêu loại mà không nói số ("C đặt nhé" sau khi được báo giá): tính
   // là 1; khách muốn nhiều hơn sẽ nói ngay khi thấy xác nhận.
-  const freshItems = toPricedItems(products.map((product, index) => ({
+  const namedItems = toPricedItems(products.map((product, index) => ({
     product: String(product || '').trim(),
     quantity: Number(String(quantities[index] || '').replace(/\D/g, '')) || 1
   })).filter(item => item.product && item.product !== '0'));
+  const freshItems = dropRecentlyOrdered(namedItems, context.recentOrder, now);
 
   // The price comes from the basket itself, never from a key the model
   // declared: an order_key the model invented used to price three bags as one.

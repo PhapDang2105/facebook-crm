@@ -179,3 +179,18 @@ test('bot gửi theo dãy parts: ảnh trước rồi mới tới chữ khi mẫ
   });
   assert.deepEqual(sent, ['ảnh:https://x/1.png', 'chữ:Bảng giá']);
 });
+
+test('"lấy thêm 2 túi vàng" ngay sau khi chốt đơn túi xanh: đơn mới chỉ có túi vàng, không gộp món đã đặt', () => {
+  const now = Date.now();
+  const recentOrder = { id: 'o1', createdAt: now - 60 * 1000, products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2, price: 149000 }] };
+  const value = { template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Product_N2: 'Granola Túi Vàng 350g', No_B: '2', Phone_Number: '0385805700', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' };
+  const reply = renderChatbotReply(value, templates, { now, recentOrder });
+  assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
+  assert.deepEqual(reply.order.items.map(item => [item.product, item.quantity]), [['Granola Túi Vàng 350g', 2]]);
+  // Chỉ nhắc lại đúng món đã đặt thì giữ nguyên (đơn trùng do createOrder xử lý).
+  const repeat = renderChatbotReply({ ...value, Product_N2: '0', No_B: '0' }, templates, { now, recentOrder });
+  assert.deepEqual(repeat.order.items.map(item => item.product), ['Granola Túi Xanh 450g']);
+  // Đơn đã lâu (hơn 2 giờ) thì không lọc: giỏ 4 túi gộp không có giá combo nên bot chuyển người (chính là lỗi trước đây).
+  const old = renderChatbotReply(value, templates, { now, recentOrder: { ...recentOrder, createdAt: now - 3 * 60 * 60 * 1000 } });
+  assert.equal(old.templateId, 'CSKH_HANDOFF');
+});

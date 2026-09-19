@@ -256,7 +256,10 @@ async function answerChange(change, settings, results, dependencies) {
     const asksForHuman = keywords.some(keyword => incomingText.includes(keyword));
     // The basket the customer named earlier travels with the request so a later
     // "0385805790" alone is still enough to close the same order.
-    const replyContext = { pendingOrder: conversation.pendingOrder, now: Date.now(), customer: { gender: conversation.gender || '', name: conversation.name || '' } };
+    // Đơn gần nhất của khách: để "lấy thêm…" ngay sau khi chốt không gộp lại món đã đặt.
+    const recentOrder = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [])
+      .reduce((latest, order) => ((Number(order?.createdAt) || 0) > (Number(latest?.createdAt) || 0) ? order : latest), null);
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, now: Date.now(), customer: { gender: conversation.gender || '', name: conversation.name || '' } };
     const reply = asksForHuman || message.type !== 'text'
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });

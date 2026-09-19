@@ -238,3 +238,21 @@ test('bình luận: nhắn riêng bảng giá (một tin), rồi ảnh sản ph�
   await run(true);
   assert.deepEqual(sent.map(item => item.split('|')[1]), ['riêng', 'công khai'], 'ảnh bị chặn thì bỏ qua, vẫn trả lời công khai');
 });
+
+test('bình luận: luồng chưa biết xưng hô thì bot mượn giới tính của hộp thư cùng khách (nhân viên đã chọn Anh)', async () => {
+  const sent = [];
+  const commentThread = { id: 'page:comment:u9:post1', pageId: 'page', psid: 'u9', source: 'comment', name: 'Khách', botEnabled: true, lastCommentId: 'c9' };
+  const inboxThread = { id: 'page:u9', pageId: 'page', psid: 'u9', name: 'Khách', gender: 'male', genderSource: 'staff' };
+  await processChatbotChanges([{ type: 'message', conversation: commentThread, message: { id: 'c9', direction: 'incoming', type: 'text', text: 'giá sao', createdAt: 1000, commentId: 'c9' } }], {
+    readSettings: async () => settings,
+    listMessages: async () => [],
+    getConversation: async id => (id === 'page:u9' ? inboxThread : commentThread),
+    sendMessage: async (_conversation, message) => sent.push(message.text || ''),
+    saveBotState: async () => {},
+    moderateComment: async () => {},
+    requestReply: async ({ context }) => ({ templateId: 'WELCOME', messages: [`Dạ ${context.customer.gender === 'male' ? 'anh' : 'anh/chị'} ơi`], conversationId: '', handoff: false })
+  });
+  assert.match(sent[0], /^Dạ em thấy anh để lại bình luận/, 'lời chào nhắn riêng xưng "anh"');
+  assert.match(sent[0], /Dạ anh ơi/);
+  assert.doesNotMatch(sent.join(' '), /anh\/chị/);
+});

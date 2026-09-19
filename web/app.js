@@ -6054,7 +6054,8 @@ async function sendRemoteMessage(conversation, text, attachment, imageUrls = [])
 }
 
 function sendCurrentMessage() {
-  const text = messageComposerInput?.value.trim();
+  // Xuống dòng dán từ Windows là CRLF: gửi đi chỉ giữ LF.
+  const text = (messageComposerInput?.value || '').replace(/\r\n?/g, '\n').trim();
   if (!text && !pendingAttachment) return;
   const activeConversation = getActiveConversation();
   const conversationName = getConversationName(activeConversation);
@@ -8143,10 +8144,18 @@ audioRecordButton?.addEventListener('click', () => {
 audioRecordingStop?.addEventListener('click', () => stopAudioRecording(false));
 audioRecordingCancel?.addEventListener('click', () => stopAudioRecording(true));
 
-messageComposerInput?.addEventListener('input', updateMessageSendState);
+/** Ô soạn tự cao theo số dòng (tối đa theo CSS), về một dòng khi trống. */
+function autosizeComposer() {
+  if (!messageComposerInput) return;
+  messageComposerInput.style.height = '22px';
+  messageComposerInput.style.height = `${Math.max(22, messageComposerInput.scrollHeight)}px`;
+}
+messageComposerInput?.addEventListener('input', () => { autosizeComposer(); updateMessageSendState(); });
 messageComposerInput?.addEventListener('keydown', event => {
   if (handleQuickReplyPickerKeydown(event)) return;
   if (!appSettings.sendWithEnter || event.key !== 'Enter' || event.isComposing) return;
+  // Shift/Ctrl/Alt + Enter xuống dòng; Enter gửi.
+  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
   event.preventDefault();
   sendCurrentMessage();
 });

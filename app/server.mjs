@@ -1458,9 +1458,15 @@ const server = http.createServer(async (request, response) => {
             item.botLastErrorAt = 0;
           } else if (payload.type === 'gender') {
             // Staff's choice beats every guess; clearing it lets guesses back in.
+            // Một người có nhiều hội thoại (hộp thư + từng bài bình luận): xưng hô
+            // là của người đó, không của luồng, nên ghi cho mọi bản ghi cùng khách.
             const gender = ['male', 'female'].includes(payload.gender) ? payload.gender : '';
-            item.gender = gender;
-            item.genderSource = gender ? 'staff' : '';
+            for (const entry of store.conversations) {
+              if (entry.pageId !== item.pageId || entry.psid !== item.psid) continue;
+              entry.gender = gender;
+              entry.genderSource = gender ? 'staff' : '';
+              if (entry !== item) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(entry) });
+            }
           } else {
             throw new Error('Loại cập nhật thông tin khách hàng không hợp lệ.');
           }

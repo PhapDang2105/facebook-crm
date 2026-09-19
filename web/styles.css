@@ -1896,9 +1896,12 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .post-context-text { margin: 0; color: #1d2b22; font-size: 13.5px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
 .post-context-text.is-clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .post-context-more { padding: 0; margin-top: 2px; color: #0a66c2; background: none; border: 0; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-.composer-input-wrap { display: flex; align-items: center; flex: 1; min-width: 0; background: #f0f2f5; border: 1.125px solid transparent; border-radius: 22.5px; box-shadow: none; transition: background-color .16s ease, border-color .16s ease; }
+.composer-input-wrap { display: flex; align-items: flex-end; flex: 1; min-width: 0; background: #f0f2f5; border: 1.125px solid transparent; border-radius: 22.5px; box-shadow: none; transition: background-color .16s ease, border-color .16s ease; }
 .composer-input-wrap:focus-within { background: #fff; border-color: #cfd4dc; box-shadow: 0 1px 2px rgba(16, 24, 40, .06); }
-.composer-input-wrap input { flex: 1; min-width: 0; padding: 10.125px 4.5px 10.125px 15.75px; background: transparent; border: 0; outline: 0; font-size: 16.875px; }
+.composer-input-wrap input,
+.composer-input-wrap textarea { flex: 1; min-width: 0; padding: 10.125px 4.5px 10.125px 15.75px; background: transparent; border: 0; outline: 0; font: inherit; font-size: 16.875px; }
+/* Ô soạn nhiều dòng: giữ xuống dòng khi dán, tự cao theo nội dung, tối đa ~6 dòng rồi cuộn. */
+.composer-input-wrap textarea { box-sizing: content-box; height: 22px; max-height: 150px; margin: 0; overflow-y: auto; resize: none; line-height: 22px; }
 .composer-icon { display: grid; place-items: center; flex: 0 0 34.875px; width: 34.875px; height: 34.875px; padding: 5.625px; border-radius: 50%; }
 .composer-icon:hover { background: var(--messenger-blue-soft); }
 .composer-icon svg { display: block; width: 23.625px; height: 23.625px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }

@@ -151,9 +151,12 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   // Ảnh/video Pancake đưa kèm URL trên CDN của họ: hộp thư hiện thẳng. Loại
   // khác (tệp, âm thanh) chỉ ghi là có đính kèm.
   const kindOf = item => String(item?.type || '').toLowerCase();
-  const photo = attachments.find(item => ['photo', 'image', 'sticker'].includes(kindOf(item)) && item?.url);
-  const video = !photo && attachments.find(item => kindOf(item) === 'video' && item?.url);
-  const media = photo ? { type: 'image', dataUrl: String(photo.url) } : video ? { type: 'video', dataUrl: String(video.url) } : null;
+  // Khách gửi một lúc nhiều ảnh: giữ đủ danh sách (`images`) để hộp thư vẽ lưới ảnh.
+  const photos = attachments.filter(item => ['photo', 'image', 'sticker'].includes(kindOf(item)) && item?.url).map(item => String(item.url));
+  const video = !photos.length && attachments.find(item => kindOf(item) === 'video' && item?.url);
+  const media = photos.length
+    ? { type: 'image', dataUrl: photos[0], ...(photos.length > 1 ? { images: photos } : {}) }
+    : video ? { type: 'video', dataUrl: String(video.url) } : null;
   const identifier = String(message.id || `pancake-${now}`);
   const at = pancakeTime(message.inserted_at, now);
   // Tin của Page: gửi từ CRM thì Pancake ghi người gửi là "Public API"; tên
@@ -170,7 +173,7 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       direction: outgoing ? 'outgoing' : 'incoming',
       type: media ? media.type : text || !attachments.length ? 'text' : 'attachment',
       text: text || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
-      ...(media ? { dataUrl: media.dataUrl, name: '' } : {}),
+      ...(media ? { dataUrl: media.dataUrl, name: '', ...(media.images ? { images: media.images } : {}) } : {}),
       createdAt: at,
       status: outgoing ? 'sent' : 'received'
     },
@@ -551,7 +554,6 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   if (!body && !attachment && !pictures.length) throw Object.assign(new Error('Tin nhắn trống.'), { statusCode: 400 });
   if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply }, config, fetchImpl);
   let message;
-  const extraMessages = [];
   if (pictures.length) {
     // Tải tuần tự, nghỉ giữa các ảnh: Pancake giới hạn 5 lần gọi mỗi giây mỗi Page.
     const upload = async () => {
@@ -570,13 +572,8 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
       if (!/invalid_upload|không nhận tin/.test(error.message)) throw error;
       sent = await sendPancakeMessage({ ...target, contentIds: await upload() }, config, fetchImpl);
     }
-    const at = Date.now();
-    // Mỗi ảnh một bong bóng trong hộp thư; ảnh đầu mang mã tin của Pancake để bản dội lại gộp vào.
-    pictures.forEach((url, index) => {
-      const id = index ? `${sent.id}#${index}` : sent.id;
-      const record = { id, mid: id, direction: 'outgoing', type: 'image', text: '', name: 'anh-san-pham', dataUrl: url, createdAt: at + index, status: 'sent' };
-      if (index) extraMessages.push(record); else message = record;
-    });
+    // Một tin, nhiều ảnh: hộp thư vẽ lưới ảnh; bản dội lại của Pancake (cùng mã) gộp vào.
+    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'image', text: '', name: 'anh-san-pham', dataUrl: pictures[0], ...(pictures.length > 1 ? { images: pictures } : {}), createdAt: Date.now(), status: 'sent' };
   } else if (attachment) {
     const { mime, buffer } = decodeDataUrl(attachment.dataUrl);
     const file = await fitImageForPancake({ buffer, filename: attachment.name || 'tep-dinh-kem', mime });
@@ -592,12 +589,10 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   }
   const saved = await updateMessagingStore(store => {
     const outcome = saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, message });
-    const extras = extraMessages.map(extra => saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, message: extra }).message);
     outcome.conversation.unread = false;
-    return { message: outcome.message, extras, conversation: publicConversation(outcome.conversation) };
+    return { message: outcome.message, conversation: publicConversation(outcome.conversation) };
   });
   publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: saved.message });
-  for (const extra of saved.extras) publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: extra });
   return saved;
 }
 

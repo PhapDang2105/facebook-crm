@@ -138,7 +138,7 @@ test('đồng bộ lịch sử kéo cả luồng bình luận kèm bài viết, 
 });
 
 
-test('nhiều ảnh gửi chung một tin Pancake (content_ids nhiều mã), hộp thư ghi mỗi ảnh một bong bóng', async () => {
+test('nhiều ảnh gửi chung một tin Pancake (content_ids nhiều mã), hộp thư ghi một tin mang đủ ảnh', async () => {
   const calls = [];
   const fetchMock = async (url, options = {}) => {
     const address = String(url);
@@ -152,6 +152,8 @@ test('nhiều ảnh gửi chung một tin Pancake (content_ids nhiều mã), h�
   assert.deepEqual(calls.filter(call => call.startsWith('send')), ['send:c1,c2,c3'], 'một lần gửi mang cả ba mã');
   assert.equal(calls.filter(call => call === 'upload').length, 3);
   assert.equal(saved.message.id, 'm_album');
-  assert.deepEqual(saved.extras.map(item => item.id), ['m_album#1', 'm_album#2']);
-  assert.deepEqual((await listMessages('110:905')).map(item => item.dataUrl), ['https://cdn.example/1.png', 'https://cdn.example/2.png', 'https://cdn.example/3.png']);
+  const stored = await listMessages('110:905');
+  assert.equal(stored.length, 1, 'một tin cho cả cụm');
+  assert.deepEqual(stored[0].images, ['https://cdn.example/1.png', 'https://cdn.example/2.png', 'https://cdn.example/3.png']);
+  assert.equal(stored[0].dataUrl, 'https://cdn.example/1.png');
 });

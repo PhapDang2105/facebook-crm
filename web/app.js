@@ -3505,7 +3505,7 @@ function appendMessageText(target, value) {
 function getMessagePreview(message) {
   const item = typeof message === 'string' ? { type: 'text', text: message } : message;
   if (item?.type === 'order-receipt') return 'Đã gửi xác nhận đơn hàng';
-  if (item?.type === 'image') return item.text ? `Ảnh · ${item.text}` : 'Đã gửi một ảnh';
+  if (item?.type === 'image') return item.text ? `Ảnh · ${item.text}` : (Array.isArray(item.images) && item.images.length > 1 ? `Đã gửi ${item.images.length} ảnh` : 'Đã gửi một ảnh');
   if (item?.type === 'video') return item.text ? `Video · ${item.text}` : 'Đã gửi một video';
   if (item?.type === 'document') return item.name ? `Tài liệu · ${item.name}` : 'Đã gửi một tài liệu';
   if (item?.type === 'audio') return 'Đã gửi một tin nhắn thoại';
@@ -3696,11 +3696,27 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   if (action === 'recalled') {
     bubble.textContent = 'Bạn đã thu hồi một tin nhắn';
   } else if (item.type === 'image') {
-    const image = document.createElement('img');
-    image.className = 'chat-image';
-    image.src = item.dataUrl;
-    image.alt = item.name ? `Ảnh đính kèm: ${item.name}` : 'Ảnh đính kèm';
-    bubble.appendChild(image);
+    // Một tin nhiều ảnh (khách gửi cụm ảnh, bot gửi thư viện) vẽ thành lưới
+    // ảnh nhỏ như Messenger; bấm ảnh nào mở ảnh đó trong trình xem.
+    const urls = Array.isArray(item.images) && item.images.length > 1 ? item.images : [item.dataUrl];
+    if (urls.length > 1) {
+      const gallery = document.createElement('div');
+      gallery.className = `chat-gallery chat-gallery--${urls.length === 2 || urls.length === 4 ? 2 : 3}`;
+      urls.forEach((url, index) => {
+        const image = document.createElement('img');
+        image.className = 'chat-image chat-gallery-image';
+        image.src = url;
+        image.alt = `Ảnh ${index + 1} trong ${urls.length}`;
+        gallery.appendChild(image);
+      });
+      bubble.appendChild(gallery);
+    } else {
+      const image = document.createElement('img');
+      image.className = 'chat-image';
+      image.src = item.dataUrl;
+      image.alt = item.name ? `Ảnh đính kèm: ${item.name}` : 'Ảnh đính kèm';
+      bubble.appendChild(image);
+    }
     if (item.text) {
       const caption = document.createElement('span');
       caption.className = 'bubble-caption';

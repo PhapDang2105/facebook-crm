@@ -69,7 +69,10 @@ export function normalizeWebhookMessage(messagingEvent) {
   const isEcho = Boolean(message.is_echo);
   const identifier = String(message.mid || `webhook-${messagingEvent?.timestamp || Date.now()}`);
   const attachment = (message.attachments || []).map(normalizeWebhookAttachment).find(Boolean);
+  // Khách gửi nhiều ảnh trong một tin: giữ đủ danh sách để hộp thư vẽ lưới ảnh.
+  const images = (message.attachments || []).filter(item => item?.type === 'image' && item.payload?.url).map(item => String(item.payload.url));
   const base = {
+    ...(images.length > 1 ? { images } : {}),
     id: identifier,
     mid: identifier,
     direction: isEcho ? 'outgoing' : 'incoming',

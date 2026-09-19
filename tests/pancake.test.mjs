@@ -41,6 +41,8 @@ test('ảnh khách gửi hiện thẳng bằng URL CDN; tin Page gõ trong Panca
   const [photo] = normalizePancakeWebhook(incoming({ message: { id: 'm_p', message: '', original_message: '', attachments: [{ type: 'photo', url: 'https://content.pancake.vn/a.jpg', image_data: { width: 10, height: 10 } }] } }), config);
   assert.equal(photo.message.type, 'image');
   assert.equal(photo.message.dataUrl, 'https://content.pancake.vn/a.jpg');
+  const [album] = normalizePancakeWebhook(incoming({ message: { id: 'm_p3', message: '', original_message: '', attachments: [{ type: 'photo', url: 'https://content.pancake.vn/1.jpg' }, { type: 'photo', url: 'https://content.pancake.vn/2.jpg' }, { type: 'photo', url: 'https://content.pancake.vn/3.jpg' }] } }), config);
+  assert.deepEqual(album.message.images, ['https://content.pancake.vn/1.jpg', 'https://content.pancake.vn/2.jpg', 'https://content.pancake.vn/3.jpg'], 'khách gửi ba ảnh thì giữ đủ ba');
   const [staff] = normalizePancakeWebhook(incoming({ message: { id: 'm_s', message: 'Dạ em gửi ảnh ạ', from: { id: '110', name: 'Test', admin_name: 'Nguyễn Hồng Vy' } } }), config);
   assert.deepEqual([staff.message.direction, staff.pancake.staff, staff.pancake.staffName], ['outgoing', true, 'Nguyễn Hồng Vy']);
   const [api] = normalizePancakeWebhook(incoming({ message: { id: 'm_a', message: 'Dạ còn ạ', from: { id: '110', name: 'Test', admin_name: 'Public API' } } }), config);

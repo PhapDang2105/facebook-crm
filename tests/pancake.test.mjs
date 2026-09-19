@@ -206,3 +206,17 @@ test('ảnh lớn hơn 500 KB được thu nhỏ và nén sang JPEG trước khi
   const meta = await sharp(fitted.buffer).metadata();
   assert.ok(meta.width <= 1080 && meta.height <= 1080);
 });
+
+test('ảnh PNG nền trong suốt nén sang JPEG thì nền thành trắng, không đen', async () => {
+  const { fitImageForPancake } = await import('../app/pancake.mjs');
+  const { default: sharp } = await import('sharp');
+  // Ảnh trong suốt lớn (nhiễu ở kênh màu, alpha = 0) để chắc chắn phải nén.
+  const size = 1400;
+  const raw = Buffer.alloc(size * size * 4);
+  for (let i = 0; i < raw.length; i += 4) { raw[i] = Math.random() * 255; raw[i + 1] = Math.random() * 255; raw[i + 2] = Math.random() * 255; raw[i + 3] = 0; }
+  const png = await sharp(raw, { raw: { width: size, height: size, channels: 4 } }).png().toBuffer();
+  const fitted = await fitImageForPancake({ buffer: png, filename: 'trong.png', mime: 'image/png' });
+  const { data, info } = await sharp(fitted.buffer).raw().toBuffer({ resolveWithObject: true });
+  const center = (Math.floor(info.height / 2) * info.width + Math.floor(info.width / 2)) * info.channels;
+  assert.ok(data[center] > 240 && data[center + 1] > 240 && data[center + 2] > 240, `điểm giữa phải trắng, được ${data[center]},${data[center + 1]},${data[center + 2]}`);
+});

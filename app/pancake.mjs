@@ -508,7 +508,8 @@ export async function fitImageForPancake(file, limit = pancakeUploadLimit) {
   let width = 1080;
   let quality = 82;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const buffer = await sharp(file.buffer).rotate().resize({ width, height: width, fit: 'inside', withoutEnlargement: true }).jpeg({ quality, mozjpeg: true }).toBuffer();
+    // JPEG không có lớp trong suốt: PNG nền trong phải trải lên nền trắng trước, nếu không nền thành đen.
+    const buffer = await sharp(file.buffer).rotate().resize({ width, height: width, fit: 'inside', withoutEnlargement: true }).flatten({ background: '#ffffff' }).jpeg({ quality, mozjpeg: true }).toBuffer();
     if (buffer.length <= limit) {
       return { buffer, filename: String(file.filename || 'anh').replace(/\.[^.]*$/, '') + '.jpg', mime: 'image/jpeg' };
     }

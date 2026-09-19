@@ -84,7 +84,7 @@ export const landingConfig = {
 const pancakePath = process.env.PANCAKE_WEBHOOK_PATH || '/webhooks/pancake';
 export const pancakeConfig = {
   pageId: process.env.PANCAKE_PAGE_ID || '',
-  pageName: process.env.PANCAKE_PAGE_NAME || 'Giọt Nắng Healthy (Pancake)',
+  pageName: process.env.PANCAKE_PAGE_NAME || 'Giọt Nắng Healthy',
   pageAccessToken: process.env.PANCAKE_PAGE_ACCESS_TOKEN || '',
   webhookToken: process.env.PANCAKE_WEBHOOK_TOKEN || '',
   path: pancakePath,

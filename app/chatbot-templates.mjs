@@ -96,14 +96,60 @@ export function applyHonorific(text, gender = activeCustomer.gender) {
   return String(text ?? '').replace(literalHonorific, match => (match.charAt(0) === 'A' ? title.charAt(0).toUpperCase() + title.slice(1) : title));
 }
 
+// Thứ tự gửi giữ đúng như trong mẫu: đoạn mở đầu bằng ảnh ({images}###Dạ…)
+// thì ảnh đi trước chữ, ảnh đứng sau chữ thì gửi sau. `parts` là dãy gửi;
+// `messages`/`images` giữ cho chỗ nào chỉ cần chữ (trả lời riêng bình luận…).
+const maximumImagesPerReply = 6;
 function splitMessages(text) {
-  const images = [];
-  const content = applyHonorific(String(text ?? '')).replace(imagePattern, (_match, url) => {
-    images.push(url.trim());
-    return '';
-  });
-  const messages = content.split('###').map(item => item.trim()).filter(Boolean).slice(0, 3);
-  return { messages, images };
+  const parts = [];
+  for (const segment of applyHonorific(String(text ?? '')).split('###')) {
+    const found = [];
+    const content = segment.replace(imagePattern, (_match, url) => { found.push(url.trim()); return ''; }).trim();
+    const imagesFirst = found.length > 0 && segment.search(imagePattern) === segment.search(/\S/);
+    const imageParts = found.map(url => ({ type: 'image', url }));
+    const textParts = content ? [{ type: 'text', text: content }] : [];
+    parts.push(...(imagesFirst ? [...imageParts, ...textParts] : [...textParts, ...imageParts]));
+  }
+  let texts = 0;
+  let pictures = 0;
+  const kept = parts.filter(part => (part.type === 'text' ? ++texts <= 3 : ++pictures <= maximumImagesPerReply));
+  return {
+    messages: kept.filter(part => part.type === 'text').map(part => part.text),
+    images: kept.filter(part => part.type === 'image').map(part => part.url),
+    parts: kept
+  };
+}
+
+/** Ảnh của một sản phẩm: thư viện gửi khách cộng ảnh chính, không trùng. */
+function galleryOf(product) {
+  return [...new Set([...(product?.images || []), product?.image].map(publicImageUrl).filter(Boolean))];
+}
+
+/** Rút `count` ảnh ngẫu nhiên từ một danh sách, không lặp. */
+function sampleImages(pool, count, random) {
+  const items = [...pool];
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(random() * (index + 1));
+    [items[index], items[swap]] = [items[swap], items[index]];
+  }
+  return items.slice(0, count);
+}
+
+/**
+ * Ảnh gửi kèm một lần tư vấn: 2 hoặc 3 ảnh ngẫu nhiên trong thư viện (ít hơn
+ * thì gửi hết), viết dạng ![tên](url) để splitMessages tách thành tin ảnh.
+ */
+export function pickGalleryImages(product, random = activeCustomer.random || Math.random) {
+  const pool = galleryOf(product);
+  const count = pool.length >= 3 ? 2 + Math.floor(random() * 2) : pool.length;
+  return sampleImages(pool, count, random).map(url => `![${product.name}](${url})`).join(' ');
+}
+
+/** 2–3 ảnh ngẫu nhiên trong thư viện của mọi sản phẩm đang bán (khi khách chưa nêu loại). */
+function pickCatalogImages(random = activeCustomer.random || Math.random) {
+  const pool = getCatalogProducts().filter(product => product.active).flatMap(product => galleryOf(product).map(url => `![${product.name}](${url})`));
+  const count = pool.length >= 3 ? 2 + Math.floor(random() * 2) : pool.length;
+  return sampleImages(pool, count, random).join(' ');
 }
 
 /** Absolute URL for a picture the catalogue stores, so Messenger can fetch it. */
@@ -302,7 +348,7 @@ function renderOrder(value, templates, context = {}) {
 function renderGeneralInfo(templates) {
   const products = getCatalogProducts().filter(product => product.active && product.unitPrice > 0);
   if (!products.length) return fill(templates.ASK_PRODUCT, commonValues());
-  return fill(templates.GENERAL_INFO, { ...commonValues(), count: products.length }, {
+  return fill(templates.GENERAL_INFO, { ...commonValues(), count: products.length, images: pickCatalogImages() }, {
     products: products.map(product => ({ product: product.name, price: formatMoney(product.unitPrice) }))
   });
 }
@@ -371,7 +417,9 @@ function renderPriceQuote(templateId, value, templates) {
   const slug = unitSlug(product.unit);
   const template = (slug && templates[`PRICE_QUOTE_${slug}`]) || templates.PRICE_QUOTE;
   const image = publicImageUrl(product.image);
-  const values = { ...commonValues(), product: product.name, unit: product.unit, image: image ? `![${product.name}](${image})` : '' };
+  // {images}: 2–3 ảnh ngẫu nhiên trong thư viện (đặt đầu mẫu để ảnh đi trước
+  // bảng giá); {image}: ảnh chính, giữ cho mẫu cũ.
+  const values = { ...commonValues(), product: product.name, unit: product.unit, image: image ? `![${product.name}](${image})` : '', images: pickGalleryImages(product) };
   for (const tier of quote.tiers) {
     const n = tier.quantity;
     const key = comboKey([{ sku: product.sku, quantity: n }]);
@@ -392,13 +440,14 @@ function renderPriceQuote(templateId, value, templates) {
  */
 function renderProductPhotos(value, templates) {
   const named = matchProduct(value.Product_N1 || value.product || '');
-  const products = (named ? [named] : getCatalogProducts()).filter(product => product.active && publicImageUrl(product.image)).slice(0, 3);
+  const random = activeCustomer.random || Math.random;
+  const products = (named ? [named] : getCatalogProducts()).filter(product => product.active && galleryOf(product).length).slice(0, 3);
   if (!products.length) return '';
-  return fill(templates.PRODUCT_PHOTOS, {
-    ...commonValues(),
-    products: products.map(product => product.name).join(', '),
-    images: products.map(product => `![${product.name}](${publicImageUrl(product.image)})`).join(' ')
-  });
+  // Nêu loại: 2–3 ảnh ngẫu nhiên của loại đó; chưa nêu: mỗi loại một ảnh ngẫu nhiên.
+  const images = named
+    ? pickGalleryImages(named, random)
+    : products.map(product => `![${product.name}](${sampleImages(galleryOf(product), 1, random)[0]})`).join(' ');
+  return fill(templates.PRODUCT_PHOTOS, { ...commonValues(), products: products.map(product => product.name).join(', '), images });
 }
 
 /**
@@ -454,8 +503,10 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_ADDRESS_PARTIAL', 'OR
  */
 export function buildTemplatePrompt(templates = {}) {
   // The opening words of the template, syntax stripped: enough for the model to tell the ids apart.
-  const gist = text => String(text)
-    .replace(/###[\s\S]*$/, '').replace(/\[\[[^\]]*\]\]|\[\?[a-z_0-9]+\]|\[\/\?\]/gi, '').replace(/\{[a-z_0-9]+\}/gi, '…')
+  // Đoạn đầu có chữ (bỏ qua đoạn chỉ có {images}), gọn syntax.
+  const gist = text => (String(text).split('###')
+    .map(segment => segment.replace(/\[\[[^\]]*\]\]|\[\?[a-z_0-9]+\]|\[\/\?\]/gi, '').replace(/\{[a-z_0-9]+\}/gi, '…').trim())
+    .find(segment => /\p{L}/u.test(segment)) || '')
     .replace(/^Dạ,? ?(em |mình )?/i, '').replace(/\s+/g, ' ').trim().match(/^.{0,47}(?=\s|$)/u)?.[0] || '';
   const lines = Object.entries(templates)
     .filter(([id, text]) => text && !internalTemplateIds.has(id) && !isProductQuoteId(id))

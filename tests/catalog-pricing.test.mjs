@@ -140,7 +140,14 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   assert.deepEqual(quote.images, []);
   // Ảnh viết kiểu ![tên](url) trong mẫu được tách ra gửi riêng.
   const withImage = renderChatbotReply({ template_id: 'STORE_ADDRESS' }, { ...templates, STORE_ADDRESS: 'Địa chỉ ạ###![Bản đồ](https://example.com/map.png)' });
-  assert.deepEqual(withImage, { templateId: 'STORE_ADDRESS', messages: ['Địa chỉ ạ'], images: ['https://example.com/map.png'], handoff: false });
+  assert.deepEqual(withImage, {
+    templateId: 'STORE_ADDRESS',
+    messages: ['Địa chỉ ạ'],
+    images: ['https://example.com/map.png'],
+    // Dãy gửi giữ thứ tự của mẫu: chữ trước, ảnh sau.
+    parts: [{ type: 'text', text: 'Địa chỉ ạ' }, { type: 'image', url: 'https://example.com/map.png' }],
+    handoff: false
+  });
   // Bảng mix: từng cặp túi ghép và trọn bộ, giá + ship + quà theo bảng tổ hợp.
   const mix = renderChatbotReply({ template_id: 'PRICE_MIX_TUI_LON' }, templates).messages[0];
   assert.match(mix, /• Granola Túi Xanh 450g \+ Granola Túi Vàng 350g: 298\.000đ \(Miễn phí vận chuyển\)/);

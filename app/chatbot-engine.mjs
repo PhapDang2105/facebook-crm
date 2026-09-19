@@ -307,9 +307,10 @@ async function answerChange(change, settings, results, dependencies) {
         await moderateComment(conversation, change.message, { like: settings.commentLike !== false, hide }).catch(() => {});
       }
     } else if (settings.responseMode === 'automatic' && !alreadyHandled) {
-      for (const text of reply.messages) await sendMessage(conversation, { text });
-      // Pictures a template carries (![tên](url)) follow the text.
-      for (const imageUrl of reply.images || []) await sendMessage(conversation, { imageUrl });
+      // Theo đúng thứ tự của mẫu: ảnh đặt đầu mẫu đi trước bảng giá, ảnh đặt
+      // cuối đi sau chữ. Mẫu không có dãy gửi thì chữ trước, ảnh sau.
+      const parts = reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
+      for (const part of parts) await sendMessage(conversation, part.type === 'image' ? { imageUrl: part.url } : { text: part.text });
       // The receipt closes the exchange, so it is sent after the reply text and
       // never before it — the order itself was already persisted above.
       if (order && sendReceipt) await sendReceipt(conversation, order);

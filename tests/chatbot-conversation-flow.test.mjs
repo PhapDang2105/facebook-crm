@@ -136,3 +136,46 @@ test('"C đặt nhé" sau khi được báo giá: nêu loại mà không nói s�
   assert.deepEqual(reply.pendingOrder.items.map(item => [item.product, item.quantity]), [['Granola Túi Xanh 450g', 1]]);
   assert.match(reply.messages[0], /số điện thoại và địa chỉ/);
 });
+
+test('thư viện ảnh: khách hỏi một sản phẩm thì 2–3 ảnh ngẫu nhiên đi TRƯỚC bảng giá, theo đúng thứ tự gửi', () => {
+  const productsPath = process.env.PRODUCTS_PATH;
+  const original = readFileSync(productsPath, 'utf8');
+  try {
+    const store = JSON.parse(original);
+    const xanh = store.items.find(item => item.id === 'seed-granola-xanh');
+    xanh.image = '/product-images/xanh-main.png';
+    xanh.images = ['/product-images/xanh-1.png', '/product-images/xanh-2.png', '/product-images/xanh-3.png', '/product-images/xanh-4.png'];
+    writeFileSync(productsPath, JSON.stringify(store));
+    reloadCatalog();
+    const two = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates, { customer: { random: () => 0.1 } });
+    assert.equal(two.images.length, 2, 'random < 0.5 → 2 ảnh');
+    const three = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates, { customer: { random: () => 0.9 } });
+    assert.equal(three.images.length, 3, 'random ≥ 0.5 → 3 ảnh');
+    assert.equal(new Set(three.images).size, 3, 'không lặp ảnh');
+    assert.deepEqual(three.parts.map(part => part.type), ['image', 'image', 'image', 'text', 'text'], 'ảnh trước, bảng giá và câu chốt sau');
+    assert.match(three.parts[3].text, /Bảng giá Granola Túi Xanh 450g/);
+    // Chưa nêu loại: giới thiệu chung cũng mở đầu bằng ảnh trong thư viện.
+    const general = renderChatbotReply({ template_id: 'GENERAL_INFO' }, templates, { customer: { random: () => 0.1 } });
+    assert.equal(general.parts[0].type, 'image');
+    assert.equal(general.images.length, 2);
+    // Xin ảnh: 2–3 ảnh của loại khách nêu.
+    const photos = renderChatbotReply({ template_id: 'PRODUCT_PHOTOS', Product_N1: 'túi xanh' }, templates, { customer: { random: () => 0.9 } });
+    assert.equal(photos.images.length, 3);
+    assert.deepEqual(photos.parts.map(part => part.type), ['text', 'image', 'image', 'image', 'text']);
+  } finally {
+    writeFileSync(productsPath, original);
+    reloadCatalog();
+  }
+});
+
+test('bot gửi theo dãy parts: ảnh trước rồi mới tới chữ khi mẫu đặt ảnh ở đầu', async () => {
+  const sent = [];
+  await processChatbotChanges([change(incoming('a', 'túi xanh giá sao', 1000))], {
+    readSettings: async () => settings,
+    listMessages: async () => [],
+    sendMessage: async (_conversation, message) => sent.push(message.imageUrl ? `ảnh:${message.imageUrl}` : `chữ:${message.text}`),
+    saveBotState: async () => {},
+    requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá'], images: ['https://x/1.png'], parts: [{ type: 'image', url: 'https://x/1.png' }, { type: 'text', text: 'Bảng giá' }], conversationId: '', handoff: false })
+  });
+  assert.deepEqual(sent, ['ảnh:https://x/1.png', 'chữ:Bảng giá']);
+});

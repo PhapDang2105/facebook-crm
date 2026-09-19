@@ -28,3 +28,11 @@ test('loại bỏ bản ghi sản phẩm không hợp lệ khi đọc kho dữ l
   ] });
   assert.equal(store.items.length, 1);
 });
+
+test('thư viện ảnh gửi khách: chỉ giữ đường dẫn đã lưu, không trùng, tối đa 12', () => {
+  const product = normalizeProduct({ name: 'Granola', sku: 'GN', images: ['/product-images/a-1.png', '/product-images/a-1.png', 'data:image/png;base64,AAAA', 'https://evil.example/x.png', { url: '/product-images/b-2.jpg' }] });
+  assert.deepEqual(product.images, ['/product-images/a-1.png', '/product-images/b-2.jpg']);
+  const many = normalizeProduct({ name: 'Granola', sku: 'GN', images: Array.from({ length: 15 }, (_, index) => `/product-images/p-${index}.png`) });
+  assert.equal(many.images.length, 12);
+  assert.deepEqual(normalizeProduct({ name: 'Granola', sku: 'GN' }, { images: ['/product-images/keep-1.png'] }).images, ['/product-images/keep-1.png'], 'không gửi images thì giữ thư viện cũ');
+});

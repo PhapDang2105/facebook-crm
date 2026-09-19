@@ -11,7 +11,7 @@ import { assertUsableAiEndpoint, defaultChatbotSettings, normalizeChatbotSetting
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin } from './chatbot-templates.mjs';
-import { assertUniqueSku, normalizeProduct, normalizeProductStore } from './products.mjs';
+import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
@@ -181,6 +181,16 @@ async function saveProductImage(dataUrl, productId) {
   await mkdir(productImagesPath, { recursive: true });
   await writeFile(path.join(productImagesPath, filename), image);
   return `/product-images/${filename}`;
+}
+
+/** Thư viện ảnh của sản phẩm: ảnh mới (data:) lưu thành tệp, đường dẫn đã lưu giữ nguyên, tối đa 12. */
+async function storeGalleryImages(images, productId) {
+  const stored = [];
+  for (const [index, image] of images.slice(0, maximumGalleryImages).entries()) {
+    const source = typeof image === 'string' ? image : String(image?.dataUrl || image?.url || '');
+    stored.push(source.startsWith('data:') ? await saveProductImage(source, `${productId}-g${index}`) : source);
+  }
+  return normalizeGallery(stored);
 }
 
 function cleanExpiredMetaSessions() {
@@ -713,6 +723,7 @@ const server = http.createServer(async (request, response) => {
         const created = normalizeProduct(payload, { id, createdAt: Date.now(), image: '' });
         assertUniqueSku(store.items, created.sku);
         if (payload.imageData) created.image = await saveProductImage(payload.imageData, id);
+        if (Array.isArray(payload.images)) created.images = await storeGalleryImages(payload.images, id);
         store.items.unshift(created);
         return created;
       });
@@ -730,6 +741,7 @@ const server = http.createServer(async (request, response) => {
         assertUniqueSku(store.items, product.sku, product.id);
         if (payload.removeImage === true) product.image = '';
         if (payload.imageData) product.image = await saveProductImage(payload.imageData, product.id);
+        if (Array.isArray(payload.images)) product.images = await storeGalleryImages(payload.images, product.id);
         store.items[index] = product;
         return product;
       });

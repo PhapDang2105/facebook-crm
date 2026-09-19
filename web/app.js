@@ -119,6 +119,8 @@ const productDialogTitle = document.querySelector('#product-dialog-title');
 const productImageInput = document.querySelector('#product-image-input');
 const productImagePreview = document.querySelector('#product-image-preview');
 const productImageRemove = document.querySelector('#product-image-remove');
+const productGalleryList = document.querySelector('#product-gallery-list');
+const productGalleryInput = document.querySelector('#product-gallery-input');
 const productName = document.querySelector('#product-name');
 const productSku = document.querySelector('#product-sku');
 const productOriginalPrice = document.querySelector('#product-original-price');
@@ -232,6 +234,8 @@ let sharedProducts = [];
 let selectedProductId = '';
 let pendingProductImage = '';
 let removeCurrentProductImage = false;
+// Thư viện ảnh gửi khách của sản phẩm đang sửa: đường dẫn đã lưu và ảnh mới (data:).
+let productGalleryDraft = [];
 const facebookConnectButton = document.querySelector('#facebook-connect-button');
 const zaloConnectButton = document.querySelector('#zalo-connect-button');
 const facebookChannelList = document.querySelector('#facebook-channel-list');
@@ -4174,6 +4178,24 @@ function renderProductImagePreview(source = '') {
   productImageRemove?.classList.toggle('hidden', !source);
 }
 
+function renderProductGallery() {
+  if (!productGalleryList) return;
+  productGalleryList.replaceChildren(...productGalleryDraft.map((source, index) => {
+    const item = document.createElement('span');
+    item.className = 'quick-reply-image-item';
+    const image = document.createElement('img');
+    image.src = source;
+    image.alt = '';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.dataset.productGalleryRemove = String(index);
+    remove.setAttribute('aria-label', 'Bỏ ảnh');
+    remove.textContent = '×';
+    item.append(image, remove);
+    return item;
+  }));
+}
+
 /** Lọc "đã mua sản phẩm nào" lấy thẳng từ danh mục, không gõ tay tên sản phẩm. */
 function fillCustomersProductOptions() {
   const select = customersFilters.product;
@@ -4207,7 +4229,7 @@ function renderProducts() {
     const initial = escapeHtml(String(product.name || 'S').trim().charAt(0).toUpperCase());
     const image = product.image ? `<img src="${escapeHtml(product.image)}" alt="">` : initial;
     return `<article class="product-row${product.active === false ? ' is-off' : ''}" data-product-id="${escapeHtml(product.id)}">
-      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}</small></span></div>
+      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}${Array.isArray(product.images) && product.images.length ? ` · ${product.images.length} ảnh gửi khách` : ''}</small></span></div>
       <code class="product-row-sku">${escapeHtml(product.sku)}</code>
       <strong class="product-row-price product-row-sale">${escapeHtml(formatOrderMoney(product.salePrice))}</strong>
       <span class="product-row-combo">${Number(product.comboPrice) > 0 ? `<b>${escapeHtml(formatOrderMoney(product.comboPrice))}</b>` : '<em>Không giảm</em>'}</span>
@@ -4248,8 +4270,11 @@ function openProductDialog(product = null) {
   if (productMixable) productMixable.checked = product ? product.mixable === true : false;
   if (productAliases) productAliases.value = Array.isArray(product?.aliases) ? product.aliases.join('\n') : '';
   if (productImageInput) productImageInput.value = '';
+  if (productGalleryInput) productGalleryInput.value = '';
   if (productFormStatus) productFormStatus.textContent = '';
   renderProductImagePreview(product?.image || '');
+  productGalleryDraft = Array.isArray(product?.images) ? [...product.images] : [];
+  renderProductGallery();
   productDialog?.classList.remove('hidden');
   window.setTimeout(() => productName?.focus(), 0);
 }
@@ -4260,6 +4285,7 @@ function closeProductDialog() {
   selectedProductId = '';
   pendingProductImage = '';
   removeCurrentProductImage = false;
+  productGalleryDraft = [];
 }
 
 function readImageFile(file) {
@@ -6911,6 +6937,36 @@ productImageRemove?.addEventListener('click', event => {
   if (productImageInput) productImageInput.value = '';
   renderProductImagePreview();
 });
+productGalleryInput?.addEventListener('change', async () => {
+  const files = [...(productGalleryInput.files || [])];
+  productGalleryInput.value = '';
+  for (const file of files) {
+    if (productGalleryDraft.length >= 12) {
+      if (productFormStatus) productFormStatus.textContent = 'Thư viện tối đa 12 ảnh.';
+      break;
+    }
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      if (productFormStatus) productFormStatus.textContent = `Ảnh ${file.name}: chỉ hỗ trợ PNG, JPG hoặc WebP.`;
+      continue;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      if (productFormStatus) productFormStatus.textContent = `Ảnh ${file.name} lớn hơn 5 MB.`;
+      continue;
+    }
+    try {
+      productGalleryDraft.push(await readImageFile(file));
+    } catch (error) {
+      if (productFormStatus) productFormStatus.textContent = error.message;
+    }
+  }
+  renderProductGallery();
+});
+productGalleryList?.addEventListener('click', event => {
+  const remove = event.target.closest('[data-product-gallery-remove]');
+  if (!remove) return;
+  productGalleryDraft.splice(Number(remove.dataset.productGalleryRemove), 1);
+  renderProductGallery();
+});
 productForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const payload = {
@@ -6925,7 +6981,8 @@ productForm?.addEventListener('submit', async event => {
     mixable: productMixable ? productMixable.checked : false,
     aliases: productAliases?.value || '',
     imageData: pendingProductImage,
-    removeImage: removeCurrentProductImage
+    removeImage: removeCurrentProductImage,
+    images: productGalleryDraft
   };
   productSubmit.disabled = true;
   productFormStatus.textContent = '';

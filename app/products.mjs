@@ -19,6 +19,21 @@ export function normalizeSku(value) {
   return normalizeSkuText(cleanText(value, maximumSkuLength));
 }
 
+// Thư viện ảnh gửi khách: bot chọn ngẫu nhiên 2–3 ảnh mỗi lần tư vấn.
+export const maximumGalleryImages = 12;
+const storedImagePattern = /^\/product-images\/[A-Za-z0-9-]+\.(?:png|jpg|webp)$/;
+
+/** Chỉ giữ đường dẫn ảnh đã lưu (`/product-images/…`), không trùng, tối đa 12. Ảnh mới (data:) do route lưu trước. */
+export function normalizeGallery(value) {
+  const images = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    const source = typeof item === 'string' ? item.trim() : String(item?.url || item?.path || '').trim();
+    if (storedImagePattern.test(source) && !images.includes(source)) images.push(source);
+    if (images.length >= maximumGalleryImages) break;
+  }
+  return images;
+}
+
 export function normalizeProduct(input = {}, existing = {}) {
   const name = cleanText(input.name ?? existing.name, maximumNameLength);
   const sku = normalizeSku(input.sku ?? existing.sku);
@@ -49,6 +64,7 @@ export function normalizeProduct(input = {}, existing = {}) {
     mixable: (input.mixable ?? existing.mixable) === true,
     active: (input.active ?? existing.active) !== false,
     image: cleanText(input.image ?? existing.image, 500),
+    images: normalizeGallery(input.images ?? existing.images ?? []),
     updatedAt: Date.now()
   };
 }

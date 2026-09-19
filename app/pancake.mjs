@@ -147,9 +147,6 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   if (!fromId || !customerId) return null;
   const outgoing = fromId === pageId || fromId !== customerId;
   const text = pancakeMessageText(message);
-  // Thông báo hệ thống của Facebook khi nhắn riêng từ bình luận ("Bạn đang
-  // phản hồi bình luận của người dùng…") không phải tin của ai, bỏ qua.
-  if (outgoing && /^Bạn đang phản hồi bình luận của người dùng/i.test(text)) return null;
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
   // Ảnh/video Pancake đưa kèm URL trên CDN của họ: hộp thư hiện thẳng. Loại
   // khác (tệp, âm thanh) chỉ ghi là có đính kèm.

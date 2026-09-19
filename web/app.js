@@ -4928,6 +4928,78 @@ function getCustomerDraftWeight() {
   return customerDraftProducts.reduce((sum, item) => sum + getProductUnitWeight(item) * (Number(item.quantity) || 0), 0);
 }
 
+// ===== Giá combo và quà tặng cho form Tạo đơn =====
+//
+// Máy chủ tính giỏ hàng bằng đúng bộ giá của bot (POST /api/orders/price): từ
+// 2 sản phẩm mỗi dòng về giá combo, miễn ship và quà theo bảng quà tặng. Dòng
+// nhân viên đã sửa tay đơn giá thì giữ nguyên; ô Miễn phí giao hàng nhân viên
+// tự bấm thì không bị máy đổi lại.
+const customerOrderGiftRow = document.querySelector('#customer-order-gift-row');
+const customerOrderGiftText = document.querySelector('#customer-order-gift');
+let customerDraftGift = '';
+let customerDraftPricingTimer = 0;
+let customerDraftPricingRequest = 0;
+let customerFreeShippingManual = false;
+
+function renderCustomerDraftGift() {
+  if (!customerOrderGiftRow || !customerOrderGiftText) return;
+  customerOrderGiftRow.hidden = !customerDraftGift;
+  customerOrderGiftText.textContent = customerDraftGift;
+}
+
+/** Ghi đơn giá mới lên dòng đang hiện (không vẽ lại bảng, không mất con trỏ khi đang gõ số lượng). */
+function applyCustomerDraftPrices() {
+  for (const [index, item] of customerDraftProducts.entries()) {
+    const row = customerProductList?.querySelector(`[data-customer-price="${index}"]`)?.closest('.customer-product-row');
+    if (!row) continue;
+    const priceInput = row.querySelector('[data-customer-price]');
+    if (priceInput && document.activeElement !== priceInput) priceInput.value = String(Math.max(0, Number(item.price) || 0));
+    const totalCell = row.querySelector('.cell-total');
+    if (totalCell) totalCell.textContent = formatOrderMoney(item.quantity * item.price);
+  }
+}
+
+function scheduleCustomerDraftPricing() {
+  window.clearTimeout(customerDraftPricingTimer);
+  customerDraftPricingTimer = window.setTimeout(refreshCustomerDraftPricing, 150);
+}
+
+async function refreshCustomerDraftPricing() {
+  const request = ++customerDraftPricingRequest;
+  const items = customerDraftProducts.map(item => ({ sku: item.sku || '', name: item.name, quantity: item.quantity }));
+  let priced = null;
+  if (items.length) {
+    try {
+      priced = await readApiResponse(await fetch('/api/orders/price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items })
+      }));
+    } catch {
+      priced = null;
+    }
+  }
+  if (request !== customerDraftPricingRequest) return;
+  const pricedBySku = new Map((priced?.priceable ? priced.lines : []).map(line => [line.sku, line]));
+  for (const item of customerDraftProducts) {
+    if (item.manualPrice) continue;
+    const line = item.sku ? pricedBySku.get(item.sku) : null;
+    // Giỏ tính được: giá theo giỏ (combo từ 2 sản phẩm). Không tính được: về giá niêm yết.
+    const price = line ? line.basketUnitPrice : (Number(item.listPrice) || item.price);
+    if (price > 0) item.price = price;
+  }
+  customerDraftGift = priced?.priceable ? String(priced.gift || '') : '';
+  if (!customerFreeShippingManual && customerFreeShipping) {
+    customerFreeShipping.checked = Boolean(priced?.priceable && priced.shippingFee === 0);
+  }
+  if (customerShippingFee && priced && !customerFreeShipping?.checked && !(Number(customerShippingFee.value) > 0)) {
+    customerShippingFee.value = String(priced.shippingFee || 0);
+  }
+  applyCustomerDraftPrices();
+  renderCustomerDraftGift();
+  updateCustomerOrderTotals();
+}
+
 function updateCustomerOrderTotals() {
   const subtotal = customerDraftProducts.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const quantity = customerDraftProducts.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
@@ -4961,6 +5033,7 @@ function renderCustomerDraftProducts() {
     </div>`;
   }).join('');
   updateCustomerOrderTotals();
+  scheduleCustomerDraftPricing();
 }
 
 function renderCustomerOrderChip(conversation = getActiveConversation()) {
@@ -4999,6 +5072,9 @@ function resetCustomerOrderForm(conversation = getActiveConversation()) {
   if (customerOrderAddress) customerOrderAddress.value = profile.address;
   if (customerProductName) customerProductName.value = '';
   if (customerFreeShipping) customerFreeShipping.checked = false;
+  customerFreeShippingManual = false;
+  customerDraftGift = '';
+  renderCustomerDraftGift();
   if (customerBankTransfer) customerBankTransfer.checked = false;
   if (customerShippingFee) customerShippingFee.value = '0';
   if (customerOrderDiscount) customerOrderDiscount.value = '0';
@@ -7908,7 +7984,10 @@ function addCustomerDraftProduct(query) {
       image: matched?.image || getCustomerOrderProductImage(matched?.name || raw) || '',
       weight: Number(matched?.weight) || 0,
       quantity: 1,
-      price: Math.max(0, Number(matched?.salePrice ?? matched?.originalPrice) || 0)
+      price: Math.max(0, Number(matched?.salePrice ?? matched?.originalPrice) || 0),
+      // Giá niêm yết để quay về khi giỏ không còn đủ điều kiện combo.
+      listPrice: Math.max(0, Number(matched?.salePrice ?? matched?.originalPrice) || 0),
+      manualPrice: false
     });
   }
   if (customerProductName) customerProductName.value = '';
@@ -7949,11 +8028,13 @@ customerProductList?.addEventListener('input', event => {
   const item = customerDraftProducts[index];
   if (!item) return;
   if (isQuantity) item.quantity = Math.max(1, Math.round(Number(field.value) || 1));
-  else item.price = Math.max(0, Math.round(Number(field.value) || 0));
+  else { item.price = Math.max(0, Math.round(Number(field.value) || 0)); item.manualPrice = true; }
   const row = field.closest('.customer-product-row');
   const totalCell = row?.querySelector('.cell-total');
   if (totalCell) totalCell.textContent = formatOrderMoney(item.quantity * item.price);
   updateCustomerOrderTotals();
+  // Đổi số lượng: tính lại giá combo, quà tặng và miễn ship cho cả giỏ.
+  if (isQuantity) scheduleCustomerDraftPricing();
 });
 
 customerOrderSavedAddress?.addEventListener('change', () => {
@@ -7979,7 +8060,7 @@ customerOrderList?.addEventListener('click', event => {
   .forEach(input => input.addEventListener('input', updateCustomerOrderTotals));
 [customerOrderName, customerOrderPhone].filter(Boolean)
   .forEach(input => input.addEventListener('input', () => renderCustomerOrderChip()));
-customerFreeShipping?.addEventListener('change', updateCustomerOrderTotals);
+customerFreeShipping?.addEventListener('change', () => { customerFreeShippingManual = true; updateCustomerOrderTotals(); });
 customerOrderReset?.addEventListener('click', () => resetCustomerOrderForm());
 
 customerOrderForm?.addEventListener('submit', async event => {
@@ -7998,6 +8079,7 @@ customerOrderForm?.addEventListener('submit', async event => {
     phone: customerOrderPhone.value.trim(),
     address: customerOrderAddress.value.trim(),
     products: customerDraftProducts.map(item => ({ ...item, weight: getProductUnitWeight(item) })),
+    gift: customerDraftGift,
     status: 'Mới',
     source: customerOrderSource?.value || 'Facebook',
     payment: customerBankTransfer?.checked ? 'Chuyển khoản' : 'COD',

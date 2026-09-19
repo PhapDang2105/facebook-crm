@@ -60,6 +60,8 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
     discount,
     total: Math.max(0, subtotal + shippingFee - discount),
     note: text(input.note, 1000),
+    // Quà tặng theo bảng quà (miễn ship, bát gáo dừa…): bot và form tạo đơn đều ghi cùng chỗ.
+    gift: text(input.gift, 300),
     // Ghi chú và trạng thái nhân viên đặt ở bảng Đơn hàng, giữ qua các lần dựng lại đơn.
     staffNote: text(input.staffNote, 500),
     processingStatus: text(input.processingStatus, 40),
@@ -155,6 +157,7 @@ export function buildCustomerOrderConfirmation(order) {
     `📞 Số điện thoại: ${order.phone}`,
     `📍 Giao đến: ${order.name} — ${order.address}`,
     `💳 Thanh toán: ${payment}`,
+    ...(order.gift ? [`🎁 Quà tặng: ${order.gift}`] : []),
     `💰 Tổng đơn: ${formatOrderMoney(order.total)}`,
     'Giọt Nắng đã nhận đơn. Bạn vui lòng kiểm tra lại thông tin và phản hồi ngay nếu cần điều chỉnh. Cảm ơn bạn!'
   ].join('\n\n');

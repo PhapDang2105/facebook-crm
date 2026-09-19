@@ -15,6 +15,7 @@ import { configureAddressAi } from './processing/address-ai.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin } from './chatbot-templates.mjs';
 import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
+import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
@@ -1378,6 +1379,25 @@ const server = http.createServer(async (request, response) => {
       const conversation = await updateMessagingStore(store => setConversationFlags(store, id, payload));
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
       return sendJson(response, 200, publicConversation(conversation));
+    }
+    // Tính giỏ hàng cho form Tạo đơn của nhân viên bằng đúng bộ giá của bot:
+    // từ 2 sản phẩm giá combo, quà tặng và miễn ship theo bảng quà.
+    if (request.method === 'POST' && url.pathname === '/api/orders/price') {
+      const payload = await readBody(request);
+      const items = (Array.isArray(payload.items) ? payload.items : []).slice(0, 50)
+        .map(item => ({ sku: String(item?.sku || ''), name: String(item?.name || ''), quantity: Math.round(Number(item?.quantity) || 0) }));
+      const priced = priceBasket(items);
+      return sendJson(response, 200, {
+        priceable: priced.priceable,
+        reason: priced.reason || '',
+        totalQuantity: priced.totalQuantity || 0,
+        subtotal: priced.subtotal || 0,
+        shippingFee: priced.priceable ? priced.shippingFee : getShippingFee(),
+        total: priced.total || 0,
+        gift: priced.gift || '',
+        gifts: (priced.gifts || []).map(gift => ({ name: gift.name, sku: gift.sku || '', weight: Number(gift.weight) || 0 })),
+        lines: (priced.lines || []).map(line => ({ sku: line.sku, name: line.name, quantity: line.quantity, unitPrice: line.unitPrice, basketUnitPrice: line.basketUnitPrice, lineTotal: line.lineTotal }))
+      });
     }
     if (url.pathname === '/api/gifts') {
       // The product list rides along so the screen can offer "không áp dụng cho" choices.

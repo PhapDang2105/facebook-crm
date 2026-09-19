@@ -76,3 +76,11 @@ test('đơn ghi ba cấp hành chính chuẩn đọc từ địa chỉ khách nh
   assert.equal(order.ward, 'Phường Bến Nghé');
   assert.equal(order.locationConfidence, 'exact');
 });
+
+test('quà tặng của giỏ đi theo đơn và vào tin xác nhận (form tạo đơn dùng chung bộ giá với bot)', () => {
+  const order = normalizeCustomerOrder({ ...input, gift: '  Miễn phí vận chuyển + Bộ bát gáo dừa  ' });
+  assert.equal(order.gift, 'Miễn phí vận chuyển + Bộ bát gáo dừa');
+  assert.match(buildCustomerOrderConfirmation(order), /🎁 Quà tặng: Miễn phí vận chuyển \+ Bộ bát gáo dừa/);
+  assert.equal(normalizeCustomerOrder(input).gift, '');
+  assert.doesNotMatch(buildCustomerOrderConfirmation(normalizeCustomerOrder(input)), /Quà tặng/);
+});

@@ -313,9 +313,14 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.lo
  * Ghi tin vào hộp thư và trả về các thay đổi cho bot. Ghi thêm mã hội thoại
  * Pancake và tên khách lên hội thoại CRM để còn gửi trả lời đúng chỗ.
  */
-export async function storePancakeEvents(events, { fromWebhook = false } = {}) {
-  if (!events.length) return [];
+export async function storePancakeEvents(incomingEvents, { fromWebhook = false } = {}) {
+  if (!incomingEvents.length) return [];
   const changes = await updateMessagingStore(store => {
+    // Tin nhắn riêng CRM gửi từ bình luận đã nằm ở hộp thư của khách; Pancake
+    // dội lại bản đó trong luồng bình luận thì không ghi thành bình luận của Page.
+    const events = incomingEvents.filter(event => !(event.type === 'comment' && event.fromPage
+      && (store.messages[`${event.pageId}:${event.psid}`] || []).some(item => item.id === event.commentId && item.privateReply)));
+    if (!events.length) return [];
     // Tin ảnh đã có URL từ trước thì bản dội lại không có gì mới để báo hộp thư.
     const lackedPicture = new Set(events
       .filter(event => event.type === 'message' && event.message.dataUrl)

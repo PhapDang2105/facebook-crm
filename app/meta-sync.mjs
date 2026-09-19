@@ -157,7 +157,9 @@ export async function sendConversationMessage(conversation, { text = '', attachm
   // Hội thoại đến từ Pancake (Page vận hành trong Pancake, CRM không có token
   // Meta của Page đó): gửi ngược qua Public API của Pancake.
   if (conversation.pancakeConversationId) {
-    return sendConversationMessageViaPancake(conversation, { text, templateText, attachment, imageUrl });
+    // privateReply phải đi theo: thiếu nó, tin nhắn riêng cho người bình luận
+    // bị đăng thành bình luận công khai (đã xảy ra với bảng giá).
+    return sendConversationMessageViaPancake(conversation, { text, templateText, attachment, imageUrl, privateReply });
   }
   if (conversation.source === 'comment') {
     if (attachment || template) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });

@@ -1456,8 +1456,8 @@ customersTable?.addEventListener('click', event => {
 async function syncChatbotOrdersIntoTable() {
   try {
     const result = await readApiResponse(await fetch('/api/customer-orders'));
-    const added = mergeChatbotOrdersIntoTable(Array.isArray(result.items) ? result.items : []);
-    if (added) showToast(`Đã đưa ${added} đơn mới từ chatbot vào bảng.`, 'success');
+    // Đơn mới tự vào bảng lặng lẽ, không báo số lượng (thông báo thừa với nhân viên).
+    mergeChatbotOrdersIntoTable(Array.isArray(result.items) ? result.items : []);
   } catch (error) {
     showToast(error.message || 'Chưa lấy được đơn từ chatbot.', 'error');
   }

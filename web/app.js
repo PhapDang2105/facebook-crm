@@ -374,6 +374,7 @@ const orderPanels = new Map([...document.querySelectorAll('[data-order-panel]')]
 const orderImport = document.querySelector('#order-import');
 const orderSearch = document.querySelector('#order-search');
 const orderFilter = document.querySelector('#order-filter');
+const orderSourceFilter = document.querySelector('#order-source-filter');
 const orderHistoryButton = document.querySelector('#order-history-button');
 const orderHistoryPanel = document.querySelector('#order-history-panel');
 const orderExport = document.querySelector('#order-export');
@@ -6660,6 +6661,13 @@ function renderOrderData() {
   // table re-renders with badges once the answer arrives.
   const phoneColumn = orderPhoneColumnIndex();
   if (phoneColumn >= 0) refreshPhoneWarnings(rows.map(row => row[phoneColumn]));
+  // Nguồn đơn (cột "Nguồn đơn": Chatbot, Landing page, Import) lọc chồng lên bộ lọc trạng thái.
+  const sourceValue = orderSourceFilter?.value || 'all';
+  const sourceColumn = orderColumnIndex(normalizeColumnName(orderSourceHeader));
+  if (sourceValue !== 'all' && sourceColumn >= 0) {
+    const wanted = normalizeColumnName(sourceValue);
+    importRows = importRows.filter(entry => normalizeColumnName(entry.row[sourceColumn] || '') === wanted);
+  }
   const searchValue = normalizeColumnName(orderSearch?.value || '');
   if (searchValue) {
     importRows = importRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue));
@@ -7285,6 +7293,7 @@ orderSearch.addEventListener('input', () => {
   orderSearchTimer = window.setTimeout(renderOrderData, 120);
 });
 orderFilter.addEventListener('change', renderOrderData);
+orderSourceFilter?.addEventListener('change', renderOrderData);
 
 messageChannelTrigger?.addEventListener('click', event => {
   event.stopPropagation();

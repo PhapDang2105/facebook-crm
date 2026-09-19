@@ -157,3 +157,16 @@ test('nhiều ảnh gửi chung một tin Pancake (content_ids nhiều mã), h�
   assert.deepEqual(stored[0].images, ['https://cdn.example/1.png', 'https://cdn.example/2.png', 'https://cdn.example/3.png']);
   assert.equal(stored[0].dataUrl, 'https://cdn.example/1.png');
 });
+
+test('giới tính từ hồ sơ Pancake vào hội thoại: hơn bản đoán theo xưng hô, kém nhân viên chọn tay', async () => {
+  const { applyGenderGuess } = await import('../app/messaging-store.mjs');
+  const withGender = { id: '110_906', type: 'INBOX', from: { id: '906', name: 'Khách Sáu' }, assignee_ids: [], page_customer: { gender: 'female', psid: '906' } };
+  await handlePancakeWebhook(inbox({ conversation: withGender, message: { id: 'm_906_1', conversation_id: '110_906', message: 'anh ơi còn hàng không', from: { id: '906', name: 'Khách Sáu' } } }), { processChatbotChanges: async () => {}, chatbotDependencies: {}, config, fetchImpl: notFound });
+  const conversation = await getConversation('110:906');
+  assert.deepEqual([conversation.gender, conversation.genderSource], ['female', 'pancake'], 'hồ sơ Pancake thắng bản đoán từ câu chữ');
+  assert.equal(applyGenderGuess(conversation, 'male', 'message'), false, 'đoán theo xưng hô không ghi đè hồ sơ Pancake');
+  assert.equal(applyGenderGuess(conversation, 'male', 'staff'), true, 'nhân viên chọn tay vẫn thắng');
+  const unknown = { id: '110_907', type: 'INBOX', from: { id: '907', name: 'Khách Bảy' }, assignee_ids: [], page_customer: { gender: null } };
+  await handlePancakeWebhook(inbox({ conversation: unknown, message: { id: 'm_907_1', conversation_id: '110_907', message: 'xin chào', from: { id: '907', name: 'Khách Bảy' } } }), { processChatbotChanges: async () => {}, chatbotDependencies: {}, config, fetchImpl: notFound });
+  assert.notEqual((await getConversation('110:907')).genderSource, 'pancake', 'Pancake không biết thì không ghi');
+});

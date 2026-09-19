@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
 import { applyWebhookEvents } from './meta-webhook.mjs';
-import { publicConversation, readMessagingStore, saveMessage, updateMessagingStore } from './messaging-store.mjs';
+import { applyGenderGuess, publicConversation, readMessagingStore, saveMessage, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 
 export function isPancakeConfigured(config = defaultConfig) {
@@ -64,6 +64,12 @@ export function normalizePancakeWebhook(payload, config = defaultConfig, now = D
     ? pancakeCommentEvent(pageId, conversation, message, data.post || {}, now)
     : pancakeMessageEvent(pageId, conversation, message, now);
   return event ? [event] : [];
+}
+
+/** Giới tính khách trong hồ sơ Pancake (`page_customer.gender`, Facebook khai): male/female, khác thì bỏ. */
+export function pancakeGenderOf(conversation) {
+  const value = String(conversation?.page_customer?.gender || conversation?.gender || '').trim().toLowerCase();
+  return value === 'male' || value === 'nam' ? 'male' : value === 'female' || value === 'nữ' || value === 'nu' ? 'female' : '';
 }
 
 /** Quảng cáo đưa khách tới hội thoại: Pancake chỉ cho ad_id và post_id của bài quảng cáo (tên tra riêng qua GET /ads). */
@@ -128,7 +134,8 @@ export function pancakeCommentEvent(pageId, conversation, comment, post = {}, no
       staff: Boolean(adminName) && adminName !== 'Public API',
       staffName: adminName,
       post: pancakePostContext(post) || { id: postId, message: '', permalink: `https://www.facebook.com/${postId}`, picture: '' },
-      ad: null
+      ad: null,
+      gender: pancakeGenderOf(conversation)
     }
   };
 }
@@ -186,7 +193,8 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       staff: Boolean(adminName) && adminName !== 'Public API',
       staffName: adminName,
       // Khách đến từ quảng cáo: ghi như referral của Meta để bot biết sản phẩm.
-      ad: pancakeAdOf(conversation)
+      ad: pancakeAdOf(conversation),
+      gender: pancakeGenderOf(conversation)
     }
   };
 }
@@ -379,6 +387,10 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false }
       }
       // Tên mặc định của hộp thư ("Khách Facebook 1234") thay bằng tên Pancake biết.
       if (event.pancake.customerName && (!conversation.name || /^Khách Facebook \d*$/.test(conversation.name))) conversation.name = event.pancake.customerName;
+      // Giới tính trong hồ sơ Pancake: hơn bản đoán theo tên/xưng hô, kém nhân viên chọn tay; đổi thì báo hộp thư.
+      if (event.pancake.gender && applyGenderGuess(conversation, event.pancake.gender, 'pancake') && !applied.some(change => change.conversation?.id === conversation.id)) {
+        applied.push({ type: 'conversation', conversation });
+      }
       conversation.pancakeAssigned = event.pancake.assigned;
     }
     return applied;

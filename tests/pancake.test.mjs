@@ -34,7 +34,7 @@ test('tin inbox của khách → sự kiện cùng dạng webhook Meta: chữ s�
   assert.equal(event.message.type, 'text');
   assert.equal(event.message.id, 'm_abc');
   assert.equal(event.message.createdAt, Date.UTC(2026, 8, 19, 2, 30));
-  assert.deepEqual(event.pancake, { conversationId: '110_555', customerName: 'Chị Mai', pageCustomerId: 'pc-1', assigned: false, staff: false, staffName: '', ad: null });
+  assert.deepEqual(event.pancake, { conversationId: '110_555', customerName: 'Chị Mai', pageCustomerId: 'pc-1', assigned: false, staff: false, staffName: '', ad: null, gender: '' });
 });
 
 test('ảnh khách gửi hiện thẳng bằng URL CDN; tin Page gõ trong Pancake là của nhân viên, tin qua Public API là của CRM', () => {

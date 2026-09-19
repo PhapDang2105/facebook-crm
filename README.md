@@ -74,7 +74,7 @@ GraphCode and a portable Node.js runtime are installed locally under `tools/`; n
 
 ## Luồng đơn hàng
 
-Chatbot chốt đơn → đơn tự xuất hiện trong **Đơn hàng → Nhập dữ liệu** (cột Nguồn đơn = Chatbot) cùng các file import → kiểm tra ở **Xử lý dữ liệu** → **Xuất dữ liệu** tạo file XLSX cho kho; preview và file dùng chung một hàm trên server.
+Chatbot chốt đơn → đơn tự xuất hiện trong **Đơn hàng → Nhập dữ liệu** (cột Nguồn đơn = Chatbot) cùng các file import → kiểm tra ở **Xử lý dữ liệu** → **Xuất dữ liệu** tạo file XLSX cho kho; preview và file dùng chung một hàm trên server, và chỉ gồm đơn đặt trong ba ngày gần nhất (hôm nay, hôm qua, 2 ngày trước — `exportableOrderData`), đơn cũ hơn không đi vào file. **Nhập dữ liệu** có bộ lọc nguồn đơn (Chatbot, Landing page, Import) cạnh bộ lọc trạng thái.
 
 ## Kiểm tra ba cấp trước khi xuất kho
 

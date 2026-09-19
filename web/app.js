@@ -6397,12 +6397,23 @@ function setOrderStatuses(keys, status, details = []) {
   try { localStorage.setItem(reviewedOrdersLogKey, JSON.stringify(log)); } catch {}
 }
 
-/** Bảng chỉ gồm dòng sạch hoặc đã xác nhận, trừ đơn khách hủy: đây là phần được xuất kho. */
+/**
+ * Bảng chỉ gồm dòng sạch hoặc đã xác nhận, trừ đơn khách hủy, và chỉ đơn đặt
+ * trong ba ngày gần nhất (hôm nay, hôm qua, 2 ngày trước — cùng ba tab đầu
+ * của Xử lý dữ liệu): đây là phần được xuất kho, cả bảng xem trước lẫn XLSX.
+ */
+const exportDayLimit = 2;
 function exportableOrderData(data = orderData) {
   if (!data.rows.length) return data;
   const pending = new Set(getOrdersNeedingProcessing(data).map(entry => entry.index));
   const statuses = readOrderStatuses();
-  return { headers: data.headers, rows: data.rows.filter((row, index) => !pending.has(index) && orderStatusOf(row, data, statuses) !== 'cancelled') };
+  const today = new Date();
+  return {
+    headers: data.headers,
+    rows: data.rows.filter((row, index) => !pending.has(index)
+      && orderStatusOf(row, data, statuses) !== 'cancelled'
+      && orderDayBucket(row, data, today) <= exportDayLimit)
+  };
 }
 
 function getOrdersNeedingProcessing(data = orderData) {

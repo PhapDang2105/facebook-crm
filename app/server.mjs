@@ -20,6 +20,7 @@ import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
+import { syncOrderToPos } from './pos-orders.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
@@ -258,6 +259,8 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
   if (result.created) {
     publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
     await appendOrderToArchive(result.order).catch(() => {});
+    // Đẩy sang Pancake POS ở nền: khách đã có xác nhận, POS chậm không giữ bot lại.
+    syncOrderToPos(conversation.id, result.order.id).catch(error => console.error(`Đẩy đơn ${result.order.id} sang POS lỗi: ${error.message}`));
   }
   return result;
 }
@@ -1472,6 +1475,8 @@ const server = http.createServer(async (request, response) => {
             return publicCustomerPanel(item);
           });
           if (!panel) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+          // Đơn nhân viên tạo cũng sang Pancake POS (nền); kết quả hiện trên thẻ đơn.
+          syncOrderToPos(id, order.id).catch(error => console.error(`Đẩy đơn ${order.id} sang POS lỗi: ${error.message}`));
           return sendJson(response, 201, panel);
         }
         const panel = await updateMessagingStore(store => {
@@ -1525,6 +1530,17 @@ const server = http.createServer(async (request, response) => {
       });
       await updateLandingStore(store => { for (const order of store.orders) if (ids.has(String(order.id))) apply(order); });
       return sendJson(response, 200, { changed, hidden });
+    }
+    // Đẩy lại một đơn sang Pancake POS (khi lần đầu lỗi: mạng, POS thiếu mẫu mã…).
+    const customerOrderPosMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)\/pos$/);
+    if (customerOrderPosMatch && request.method === 'POST') {
+      const orderId = decodeURIComponent(customerOrderPosMatch[1]);
+      const store = await readMessagingStore();
+      const owner = store.conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));
+      if (!owner) return sendJson(response, 404, { error: 'Không tìm thấy đơn này trong hội thoại nào.' });
+      if (!posConfigured()) return sendJson(response, 400, { error: 'Chưa kết nối Pancake POS (Cài đặt → Kênh).' });
+      const outcome = await syncOrderToPos(owner.id, orderId);
+      return sendJson(response, outcome?.error ? 502 : 200, { pos: outcome, error: outcome?.error || '' });
     }
     const customerOrderDeleteMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)$/);
     // Sửa đơn từ bảng Xử lý dữ liệu: tên, số điện thoại, địa chỉ (tách lại ba

@@ -9,6 +9,7 @@
 // số bom hàng thì cảnh báo — một luồng duy nhất.
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { readLandingStore, recordLandingOrder } from './landing-orders.mjs';
+import { isCrmPushedPosOrder } from './pos-orders.mjs';
 
 export const POS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const LANDING_SOURCES = /webcake|landing/i;
@@ -74,6 +75,8 @@ export function posOrderToPayload(order) {
 }
 
 export function isLandingPosOrder(order) {
+  // Đơn CRM đã đẩy sang POS (custom_id "CRM-…") không phải đơn landing, không kéo ngược về.
+  if (isCrmPushedPosOrder(order)) return false;
   return LANDING_SOURCES.test(String(order.order_sources_name || '')) || /giotnang\.vn/i.test(String(order.link || ''));
 }
 

@@ -4784,6 +4784,16 @@ function customerOrderStaff(name, avatar) {
   return `<span class="customer-order-staff"><img src="${escapeHtml(avatar || customerAvatarPlaceholder)}" alt="">${label}</span>`;
 }
 
+/** Dòng "Pancake POS" trên thẻ đơn: mã đơn POS khi đã đẩy, lỗi kèm nút đẩy lại khi chưa. */
+function customerOrderPosRow(order) {
+  const pos = order.pos;
+  if (!pos && order.source === 'Landing page') return '';
+  if (pos?.id) return customerOrderMetaRow('cart', 'Pancake POS', `#${escapeHtml(String(pos.id))}`);
+  const retry = `<button type="button" class="customer-order-pos-retry" data-order-action="pos" data-order-id="${escapeHtml(String(order.id))}">Đẩy sang POS</button>`;
+  if (pos?.error) return customerOrderMetaRow('cart', 'Pancake POS', `<span class="customer-order-pos-error" title="${escapeHtml(pos.error)}">Chưa đẩy được</span> ${retry}`);
+  return customerOrderMetaRow('cart', 'Pancake POS', `Chưa đẩy ${retry}`);
+}
+
 function customerOrderMetaRow(icon, label, valueMarkup, link = false) {
   return `<div class="customer-order-detail">${customerPanelIcon(icon)}<span>${escapeHtml(label)}</span><span class="value${link ? ' link' : ''}">${valueMarkup}</span></div>`;
 }
@@ -4845,6 +4855,7 @@ function renderCustomerOrders(conversation = getActiveConversation()) {
           ${updated}
           ${order.note ? customerOrderMetaRow('document', 'Ghi chú', escapeHtml(order.note)) : customerOrderMetaRow('document', 'Ghi chú', 'Chưa có', true)}
           ${customerOrderMetaRow('printer', 'Ghi chú in', 'Chưa có', true)}
+          ${customerOrderPosRow(order)}
           ${customerOrderMetaRow('user', 'NV sửa cuối', customerOrderStaff(order.employee, avatar))}
           ${customerOrderMetaRow('user', 'NV tạo đơn', customerOrderStaff(order.employee, avatar))}
           ${customerOrderMetaRow('delivery', 'Dự kiến nhận hàng', 'Chưa có', true)}
@@ -8051,6 +8062,15 @@ customerOrderList?.addEventListener('click', event => {
   const action = event.target.closest('[data-order-action]');
   if (!action) return;
   event.preventDefault();
+  if (action.dataset.orderAction === 'pos') {
+    action.disabled = true;
+    action.textContent = 'Đang đẩy...';
+    fetch(`/api/customer-orders/${encodeURIComponent(action.dataset.orderId)}/pos`, { method: 'POST' })
+      .then(readApiResponse)
+      .then(() => loadCustomerPanelFromServer(getActiveConversation()))
+      .catch(error => { showToast(error.message || 'Chưa đẩy được đơn sang Pancake POS.'); loadCustomerPanelFromServer(getActiveConversation()); });
+    return;
+  }
   const labels = { note: 'Ghi chú đơn', share: 'Gửi lại xác nhận cho khách', edit: 'Sửa đơn' };
   showToast(`${labels[action.dataset.orderAction] || 'Thao tác'} — đơn ${action.dataset.orderId}. Chức năng này chưa được nối.`);
 });

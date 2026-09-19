@@ -58,6 +58,7 @@ Nguồn: https://docs.pancake.biz/pos/api/ (spec OpenAPI 3.1 tải về ở `ope
 
 - `GET /shops/{SHOP_ID}/orders` với `filter_status`, lọc theo số điện thoại: tỷ lệ nhận hàng (`phone-warnings.mjs`).
 - `GET /shops/{SHOP_ID}/orders`, đơn landing/bỏ dở: đồng bộ 5 phút một lần vào bảng Đơn hàng (`pos-sync.mjs`).
+- `POST /shops/{SHOP_ID}/orders`: đẩy đơn CRM (bot chốt, nhân viên tạo) sang POS (`pos-orders.mjs`). `items[].variation_id` nhận SKU (display_id) của mẫu mã; `shipping_address.address` không kèm `province_id` thì POS tự tách địa chỉ; `custom_id` = `CRM-<mã đơn>`; `page_id` + `conversation_id` gắn đơn vào hội thoại Pancake; quà là dòng `is_bonus_product: true` giá 0. Phản hồi có `id`, `system_id`, `status_name`. Kho tạo đơn: `GET /shops/{SHOP_ID}/warehouses` (chọn kho `allow_create_order` có địa chỉ, hoặc `POS_WAREHOUSE_ID`).
 
 ## Mã giảm giá (`vouchers`)
 

@@ -4229,7 +4229,7 @@ function renderProducts() {
     const initial = escapeHtml(String(product.name || 'S').trim().charAt(0).toUpperCase());
     const image = product.image ? `<img src="${escapeHtml(product.image)}" alt="">` : initial;
     return `<article class="product-row${product.active === false ? ' is-off' : ''}" data-product-id="${escapeHtml(product.id)}">
-      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}${Array.isArray(product.images) && product.images.length ? ` · ${product.images.length} ảnh gửi khách` : ''}</small></span></div>
+      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}</small></span></div>
       <code class="product-row-sku">${escapeHtml(product.sku)}</code>
       <strong class="product-row-price product-row-sale">${escapeHtml(formatOrderMoney(product.salePrice))}</strong>
       <span class="product-row-combo">${Number(product.comboPrice) > 0 ? `<b>${escapeHtml(formatOrderMoney(product.comboPrice))}</b>` : '<em>Không giảm</em>'}</span>

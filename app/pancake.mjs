@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
 import { applyWebhookEvents } from './meta-webhook.mjs';
-import { publicConversation, saveMessage, updateMessagingStore } from './messaging-store.mjs';
+import { publicConversation, readMessagingStore, saveMessage, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 
 export function isPancakeConfigured(config = defaultConfig) {
@@ -262,6 +262,10 @@ export async function syncPancakeConversations({ limit = 60, messagePages = 1, c
       .sort((first, second) => first.timestamp - second.timestamp);
     stored += (await storePancakeEvents(events)).length;
   }
+  // Hội thoại từ quảng cáo còn thiếu tên/bài quảng cáo (kể cả không có tin mới): tra bổ sung.
+  const store = await readMessagingStore();
+  const pendingAds = store.conversations.filter(item => item.pageId === pageId && needsAdContext(item));
+  if (pendingAds.length) await enrichPancakeAdContext(pendingAds, config, fetchImpl);
   const threads = commentLimit > 0 ? await fetchPancakeConversations({ limit: commentLimit, type: 'COMMENT' }, config, fetchImpl) : [];
   for (const thread of threads) {
     const comments = await fetchPancakeMessages(thread.id, { pages: 1 }, config, fetchImpl);
@@ -647,10 +651,14 @@ export async function findPancakePost(postId, { months = 12 } = {}, config = def
  * referral từ Pancake. Tên quảng cáo tra ngay (một lần gọi, nhanh); bài viết
  * tìm nền (có thể nhiều lần gọi), tin sau của khách sẽ có. Lỗi bỏ qua.
  */
+const needsAdContext = conversation => Boolean(conversation?.referral?.adId)
+  && (!conversation.referral.adTitle || (Boolean(conversation.referral.postId) && !conversation.post?.message));
+
 export async function enrichPancakeAdContext(changes, config = defaultConfig, fetchImpl = fetch) {
   const pending = [...new Map(changes
-    .filter(change => change.conversation?.referral?.adId && (!change.conversation.referral.adTitle || (change.conversation.referral.postId && !change.conversation.post?.message)))
-    .map(change => [change.conversation.id, change.conversation])).values()];
+    .map(change => change.conversation || change)
+    .filter(needsAdContext)
+    .map(conversation => [conversation.id, conversation])).values()];
   if (!pending.length) return 0;
   let ads = {};
   try {
@@ -663,7 +671,9 @@ export async function enrichPancakeAdContext(changes, config = defaultConfig, fe
       const conversation = store.conversations.find(entry => entry.id === item.id);
       const ad = ads[item.referral?.adId];
       if (!conversation?.referral || !ad?.name || conversation.referral.adTitle) continue;
-      conversation.referral = { ...conversation.referral, adTitle: ad.name, photoUrl: conversation.referral.photoUrl || ad.imageUrl };
+      // Tên quảng cáo hay là mã nội bộ ("gn ht 2705"); tên chiến dịch ("mess Xanh") nói rõ sản phẩm hơn, ghép vào để bot đọc.
+      const adTitle = ad.campaignName && !ad.name.includes(ad.campaignName) ? `${ad.name} · ${ad.campaignName}` : ad.name;
+      conversation.referral = { ...conversation.referral, adTitle, photoUrl: conversation.referral.photoUrl || ad.imageUrl };
       publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
     }
     return null;

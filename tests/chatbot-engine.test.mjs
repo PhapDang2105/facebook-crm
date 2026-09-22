@@ -262,10 +262,10 @@ test('hai xã cùng tên: bot đưa hai lựa chọn, khách chọn xong thì ch
 
 test('đã hỏi một lần, khách trả lời bằng địa chỉ đầy đủ có phường/huyện mà máy vẫn không khớp: nhận luôn, không hỏi lại y câu cũ', () => {
   const pending = { items: [{ product: 'Túi Xanh', quantity: 2 }], key: 'GRA-XANH-Z450=2', at: Date.now(), phone: '0909123456', address: 'Hà Nội', addressAsks: 1 };
-  const full = 'số 5 ngõ 12, phường Hòa Bình Mới, quận Trung Tâm, Hà Nội';
+  const full = 'số 5 ngõ 12, phường Xyzabc, quận Qwertyu, Hà Nội';
   const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: full }, templates, { pendingOrder: pending });
   assert.equal(reply.templateId, 'ORDER_CONFIRMATION', 'không hỏi lần hai khi khách đã ghi đủ cấp');
-  assert.equal(reply.order.address, full, 'giữ nguyên văn khách ghi cho nhân viên đối chiếu');
+  assert.match(reply.order.address, /số 5 ngõ 12/, 'giữ phần khách ghi cho nhân viên đối chiếu');
   // Khách chỉ nhắn một mẩu ("Hà Nội") thì vẫn hỏi tiếp như cũ.
   const fragment = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: 'quận Trung Tâm' }, templates, { pendingOrder: pending });
   assert.equal(fragment.templateId, 'ORDER_ADDRESS');

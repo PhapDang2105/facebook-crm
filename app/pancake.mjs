@@ -188,6 +188,17 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   const kindOf = item => String(item?.type || '').toLowerCase();
   // Khách gửi một lúc nhiều ảnh: giữ đủ danh sách (`images`) để hộp thư vẽ lưới ảnh.
   const photos = attachments.filter(item => ['photo', 'image', 'sticker'].includes(kindOf(item)) && item?.url).map(item => String(item.url));
+  // Khách "Trả lời" một tin cụ thể (Messenger reply): Pancake kèm attachment
+  // replied_message (mã, chữ, người gửi của tin gốc). Ghi thành replyTo để hộp
+  // thư vẽ phần trích dẫn và bot hiểu "." hay "Ok" đang nói về tin nào.
+  const quoted = attachments.find(item => kindOf(item) === 'replied_message');
+  const replyTo = quoted
+    ? {
+        id: String(quoted.id || ''),
+        name: String(quoted.from?.id || '') === String(pageId) ? 'Bạn' : String(quoted.from?.name || conversation.from?.name || 'khách').trim(),
+        text: pancakeMessageText({ message: quoted.message }) || (Array.isArray(quoted.attachments) && quoted.attachments.length ? '[Ảnh/tệp]' : 'tin nhắn')
+      }
+    : null;
   const video = !photos.length && attachments.find(item => kindOf(item) === 'video' && item?.url);
   const media = photos.length
     ? { type: 'image', dataUrl: photos[0], ...(photos.length > 1 ? { images: photos } : {}) }
@@ -246,6 +257,7 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       text: receipt ? 'Đã gửi xác nhận đơn hàng' : adClick ? adText : text || cartText || addressText || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
       ...(media ? { dataUrl: media.dataUrl, name: '', ...(media.images ? { images: media.images } : {}) } : {}),
       ...(cart.length ? { cart } : {}),
+      ...(replyTo ? { replyTo } : {}),
       createdAt: at,
       status: outgoing ? 'sent' : 'received'
     },

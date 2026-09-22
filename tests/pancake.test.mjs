@@ -281,3 +281,13 @@ test('Facebook từ chối tệp vừa tải (invalid_upload_fb_attachments_resu
     /Facebook từ chối ảnh vừa tải lên/
   );
 });
+
+test('khách "Trả lời" một tin (replied_message): ghi replyTo để hộp thư vẽ trích dẫn; trả lời tin của Page thì tên là "Bạn"', () => {
+  const quoted = { id: 'm_addr', message: '<div>Thư, 55 Hùng Vương, tp Trà Vinh. 0939434123</div>', from: { id: '555', name: 'Chị Mai' }, attachments: [], type: 'replied_message' };
+  const [own] = normalizePancakeWebhook(incoming({ message: { id: 'm_dot', message: '<div>.</div>', original_message: '', attachments: [quoted] } }), config);
+  assert.equal(own.message.type, 'text');
+  assert.equal(own.message.text, '.');
+  assert.deepEqual(own.message.replyTo, { id: 'm_addr', name: 'Chị Mai', text: 'Thư, 55 Hùng Vương, tp Trà Vinh. 0939434123' });
+  const [page] = normalizePancakeWebhook(incoming({ message: { id: 'm_ok', message: '<div>Ok</div>', original_message: '', attachments: [{ ...quoted, id: 'm_bot', from: { id: '110', name: 'Test' }, message: '<div>Dạ em xác nhận đơn ạ</div>' }] } }), config);
+  assert.deepEqual(page.message.replyTo, { id: 'm_bot', name: 'Bạn', text: 'Dạ em xác nhận đơn ạ' });
+});

@@ -4031,9 +4031,13 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
     stack.className = 'message-content-stack';
     const attribution = document.createElement('span');
     attribution.className = 'message-reply-attribution';
-    attribution.textContent = item.replyTo.name === 'Bạn'
-      ? '↩ Bạn đã trả lời chính mình'
-      : `↩ Bạn đã trả lời ${item.replyTo.name}`;
+    // Khách trả lời một tin (Messenger reply): "Mai Thư đã trả lời bạn / chính mình".
+    const incoming = item.direction === 'incoming';
+    const who = incoming ? (document.querySelector('.chat-head-copy strong')?.textContent?.trim() || 'Khách') : 'Bạn';
+    const target = incoming
+      ? (item.replyTo.name === 'Bạn' ? 'bạn' : 'chính mình')
+      : (item.replyTo.name === 'Bạn' ? 'chính mình' : item.replyTo.name);
+    attribution.textContent = `↩ ${who} đã trả lời ${target}`;
     const source = document.createElement('span');
     source.className = 'message-reply-source';
     source.textContent = item.replyTo.text || 'tin nhắn';

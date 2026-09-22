@@ -93,6 +93,32 @@ function mergeAnthropicTurns(turns) {
   return merged;
 }
 
+// Ảnh khách gửi (ảnh quảng cáo, bao bì, bill chuyển khoản…) đưa thẳng cho
+// Gemini xem cùng câu hỏi: model nhận ra sản phẩm trong ảnh thay vì bot chỉ
+// đáp "đã nhận hình". Tối đa 3 ảnh, mỗi ảnh nén dưới 500 KB; ảnh không tải
+// được thì bỏ qua, chữ vẫn gửi.
+export async function collectImageParts(message, fetchImpl = fetch) {
+  const urls = [...new Set([message?.dataUrl, ...(Array.isArray(message?.images) ? message.images : [])].map(item => String(item || '').trim()).filter(Boolean))].slice(0, 3);
+  if (!urls.length) return [];
+  const parts = [];
+  for (const url of urls) {
+    try {
+      let file;
+      const inline = url.match(/^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/i);
+      if (inline) file = { buffer: Buffer.from(inline[2].replace(/\s+/g, ''), 'base64'), mime: inline[1].toLowerCase() };
+      else {
+        const { readImageForUpload, fitImageForPancake } = await import('./pancake.mjs');
+        file = await fitImageForPancake(await readImageForUpload(url, fetchImpl));
+      }
+      if (!file?.buffer?.length || !/^image\//.test(file.mime || '')) continue;
+      parts.push({ inlineData: { mimeType: file.mime, data: file.buffer.toString('base64') } });
+    } catch (error) {
+      console.warn(`Không đọc được ảnh khách gửi để đưa cho model: ${error.message}`);
+    }
+  }
+  return parts;
+}
+
 function wait(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
@@ -128,11 +154,12 @@ export async function requestDirectModelReply(options) {
         : settings.directApiKey;
       const memoryTurns = buildMemoryTurns({ recentMessages, message, settings });
       const query = buildChatbotQuery({ conversation, message, recentMessages, settings, includeHistory: false });
+      const imageParts = vertex && message?.type === 'image' ? await collectImageParts(message, fetchImpl) : [];
       const body = vertex ? {
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [
           ...memoryTurns.map(turn => ({ role: turn.role, parts: [{ text: turn.text }] })),
-          { role: 'user', parts: [{ text: query }] }
+          { role: 'user', parts: [...imageParts, { text: query }] }
         ],
         generationConfig: {
           ...(settings.structuredOutput !== false ? { responseMimeType: 'application/json' } : {})
@@ -359,11 +386,17 @@ async function answerChange(change, settings, results, dependencies) {
       results.push({ conversationId: conversation.id, skipped: 'ảnh liền nhau' });
       return;
     }
+    // Ảnh khách gửi: Gemini (Vertex) xem ảnh cùng lịch sử — ảnh quảng cáo/bao bì
+    // thì nhận ra sản phẩm và đi tiếp (báo giá, lên đơn); model không rõ ảnh
+    // là gì thì trả IMAGE_RECEIVED và bot gắn thẻ cho nhân viên xem.
+    const seesImage = nonText && message.type === 'image' && settings.provider === 'vertex' && settings.visionEnabled !== false && (message.dataUrl || message.images?.length);
+    const imageFallback = () => ({ ...renderChatbotReply({ template_id: settings.messageTemplates?.IMAGE_RECEIVED ? 'IMAGE_RECEIVED' : 'CSKH_HANDOFF' }, settings.messageTemplates || {}, replyContext), attention: true });
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : nonText
-        ? { ...renderChatbotReply({ template_id: settings.messageTemplates?.IMAGE_RECEIVED ? 'IMAGE_RECEIVED' : 'CSKH_HANDOFF' }, settings.messageTemplates || {}, replyContext), attention: true }
+        ? (seesImage ? await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext }) : imageFallback())
         : quickQuote || await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
+    if (seesImage && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
     // Dưới bình luận không bao giờ chuyển người (khách chưa vào hộp thư): trả
     // bảng giá chung và mời nhắn tin.
     if (reply.templateId === 'CSKH_HANDOFF' && !asksForHuman && conversation.source === 'comment' && settings.messageTemplates?.GENERAL_INFO) {

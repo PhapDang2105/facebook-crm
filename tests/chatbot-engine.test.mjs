@@ -555,3 +555,55 @@ test('ảnh sau tin nhắn riêng từ bình luận bị Facebook chặn: nhớ 
   rememberPendingImages('page', 'khac', ['a.jpg', 'a.jpg']);
   assert.deepEqual(takePendingImages('page', 'khac'), ['a.jpg']);
 });
+
+test('khách gửi ảnh: Gemini nhận ảnh (inlineData) cùng câu hỏi; ảnh không đọc được thì vẫn gửi chữ', async () => {
+  const { collectImageParts } = await import('../app/chatbot-engine.mjs');
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  let body;
+  const reply = await requestDirectModelReply({
+    settings: {
+      provider: 'vertex', directApiKey: 'google-token', directModel: 'gemini-2.5-flash', systemPrompt: 'Chỉ trả JSON', structuredOutput: true, retryCount: 0, messageTemplates: templates,
+      directEndpoint: 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/publishers/google/models/gemini-2.5-flash:generateContent'
+    },
+    conversation: { psid: '1', name: 'Khách' },
+    message: { type: 'image', text: '', dataUrl: `data:image/png;base64,${png}` },
+    fetchImpl: async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"template_id":"PRICE_QUOTE","Product_N1":"Granola Túi Xanh 450g"}' }] } }] }) };
+    }
+  });
+  const userParts = body.contents.at(-1).parts;
+  assert.deepEqual(userParts[0], { inlineData: { mimeType: 'image/png', data: png } });
+  assert.match(userParts[1].text, /TIN NHẮN CẦN TRẢ LỜI: \[Khách gửi image\]/);
+  assert.equal(reply.templateId, 'PRICE_QUOTE');
+  assert.deepEqual(await collectImageParts({ type: 'image', dataUrl: 'data:text/plain;base64,aGk=' }), [], 'không phải ảnh thì bỏ');
+});
+
+test('ảnh khách gửi qua Vertex: model nhận ra sản phẩm thì trả lời tiếp; không rõ thì báo đã nhận hình và gắn thẻ', async () => {
+  const log = [];
+  const run = async answer => {
+    log.length = 0;
+    return processChatbotChanges([{
+      type: 'message',
+      conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true },
+      message: { id: `img-${answer}`, mid: `img-${answer}`, direction: 'incoming', type: 'image', text: '', dataUrl: 'https://content.pancake.vn/ad.jpg', createdAt: 5 }
+    }], {
+      readSettings: async () => ({ enabled: true, responseMode: 'automatic', provider: 'vertex', handoffKeywords: '', messageTemplates: { ...templates, IMAGE_RECEIVED: 'Dạ em đã nhận được hình ạ' } }),
+      listMessages: async () => [{ id: 't1', direction: 'incoming', type: 'text', text: 'cho 2 túi', createdAt: 1 }],
+      saveBotState: async (_id, state) => { if (state.labels) log.push(`labels:${state.labels.join(',')}`); },
+      sendMessage: async (_conversation, message) => { log.push(`text:${message.text}`); return { message: { mid: 'm' } }; },
+      requestReply: async ({ message }) => {
+        log.push(`model:${message.type}`);
+        return answer === 'known'
+          ? { templateId: 'ORDER_ADDRESS', messages: ['Dạ chị cho em xin SĐT và địa chỉ ạ'], handoff: false }
+          : { templateId: 'IMAGE_RECEIVED', messages: ['(bị thay)'], handoff: false };
+      }
+    });
+  };
+  const known = await run('known');
+  assert.deepEqual(log, ['model:image', 'text:Dạ chị cho em xin SĐT và địa chỉ ạ']);
+  assert.equal(known[0].handoff, undefined);
+  const unknown = await run('unknown');
+  assert.deepEqual(log.slice(0, 2), ['model:image', 'text:Dạ em đã nhận được hình ạ']);
+  assert.equal(unknown[0].templateId, 'IMAGE_RECEIVED');
+});

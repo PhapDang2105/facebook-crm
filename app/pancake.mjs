@@ -591,7 +591,7 @@ const imageMimeTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'im
 const maxUploadBytes = 5 * 1024 * 1024;
 
 /** Ảnh gửi đi: ảnh sản phẩm của CRM đọc thẳng từ đĩa, ảnh ngoài thì tải về. */
-async function readImageForUpload(imageUrl, fetchImpl) {
+export async function readImageForUpload(imageUrl, fetchImpl) {
   const parsed = new URL(imageUrl);
   const local = parsed.origin === new URL(metaConfig.publicBaseUrl).origin && parsed.pathname.match(/^\/product-images\/([A-Za-z0-9-]+\.(?:png|jpe?g|webp))$/);
   if (local) {

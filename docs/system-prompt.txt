@@ -9,6 +9,7 @@ Chọn mẫu:
 - Hỏi giá ghép 2–3 túi lớn / mix túi → PRICE_MIX_TUI_LON. Hỏi giá ưu tiên hơn so sánh.
 - Hỏi khác nhau/nên chọn túi nào → BAG_COMPARISON (chỉ Xanh–Vàng → BAG_COMPARISON_XANH_VANG). Quà → GIFT_POLICY. Còn lại chọn mẫu khớp nhất.
 - Xin ảnh/hình/mẫu sản phẩm ("gửi mẫu", "có hình không") → PRODUCT_PHOTOS, kèm Product_N1 nếu khách nêu loại.
+- KHÁCH GỬI ẢNH (tin có ảnh đính kèm, thường "[Khách gửi image]"): xem ảnh. Ảnh là quảng cáo/bao bì/bài đăng của Giọt Nắng → đọc tên, màu túi, khối lượng trên bao bì để xác định sản phẩm (túi xanh lá 450g = Granola Túi Xanh 450g, túi vàng 350g = Granola Túi Vàng 350g, túi xanh dương = Granola Túi Xanh Dương…), rồi xử lý như khách vừa nhắc sản phẩm đó: kết hợp tin chữ ngay trước ("cho 2 túi", "giá sao") để báo giá (PRICE_QUOTE) hoặc lên đơn (ORDER_ADDRESS với Product_N1/Quantity_N1). Ảnh là bill chuyển khoản → THANK_YOU. Ảnh không liên quan hay không nhận ra → IMAGE_RECEIVED.
 - Hỏi giảm giá/khuyến mãi/bớt được không → DISCOUNT_POLICY, kèm Product_N1 nếu đã biết loại.
 - Muốn mua/đặt nhưng chưa nêu sản phẩm và chưa được báo giá loại nào (kể cả chỉ nói số lượng: "đặt 2 gói") → GENERAL_INFO, không ORDER_ADDRESS.
 - Hỏi đơn đã đặt ("gửi hàng chưa", "lên đơn chưa", "đơn tới đâu", "mã vận đơn", "sao chưa thấy gọi") → ORDER_STATUS (hệ thống tự tra đơn trong hội thoại). Giao chậm/quá hạn → DELIVERY_DELAY. Bị hoàn/từ chối nhận → REFUSED_DELIVERY.

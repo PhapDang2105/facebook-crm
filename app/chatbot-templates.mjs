@@ -238,7 +238,8 @@ function upsellTwoBags(price, templates) {
     two_total: formatMoney(two.total),
     one_total: formatMoney(price.total),
     free_ship: two.shippingFee === 0 ? 'miễn phí vận chuyển' : '',
-    gift: two.gift || ''
+    // Miễn ship đã ghi ở {free_ship}; {gift} chỉ còn quà thật, không lặp lại.
+    gift: (two.gifts || []).filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + ')
   });
 }
 
@@ -284,7 +285,8 @@ function renderOrder(value, templates, context = {}) {
   // Đã hỏi một lần mà khách trả lời bằng một địa chỉ đầy đủ (có ghi phường/xã,
   // quận/huyện) nhưng máy vẫn không khớp được danh mục: không hỏi lại y câu cũ,
   // nhận địa chỉ khách ghi và để nhân viên đối chiếu ở Xử lý dữ liệu.
-  const answeredInFull = addressAsks >= 1 && /\b(huyện|quận|thị xã|thành phố|tp|phường|xã|thị trấn|tt)\b/iu.test(freshAddress) && freshAddress.split(/[,\n]/).filter(part => part.trim()).length >= 2;
+  // \b chỉ biết chữ ASCII nên "xã"/"thị xã" (kết thúc bằng chữ có dấu) không bao giờ khớp; dùng biên chữ Unicode.
+  const answeredInFull = addressAsks >= 1 && /(?<![\p{L}\p{N}])(huyện|quận|thị xã|thành phố|tp|phường|xã|thị trấn|tt)(?![\p{L}\p{N}])/iu.test(freshAddress) && freshAddress.split(/[,\n]/).filter(part => part.trim()).length >= 2;
   const addressAccepted = Boolean(delivery) && (delivery.complete || addressAsks >= maxAddressAsks || answeredInFull);
 
   // Remember a priceable basket, plus whatever contact detail has arrived so
@@ -297,7 +299,9 @@ function renderOrder(value, templates, context = {}) {
         at: freshPriceable ? now : (pending?.at || now),
         phone,
         address,
-        addressAsks
+        addressAsks,
+        // Cờ "đã gợi ý 2 túi" đi theo giỏ: giỏ mới (khác giỏ đang giữ) thì bỏ.
+        ...(pending?.upsold && (!freshPriceable || freshKey === pending.key) ? { upsold: true } : {})
       }
     : null;
 
@@ -335,9 +339,11 @@ function renderOrder(value, templates, context = {}) {
   if (!confirmed && !(isOrderStep(templateId) && Boolean(price) && hasPhone && hasAddress)) {
     // Only a request to close the order is escalated. While still collecting
     // details the bot keeps asking rather than dropping the customer on a human.
-    if (templateId === 'ORDER_CONFIRMATION' && items.length && !price) {
+    if (items.length && !price) {
       // Giỏ chưa tính được giá ("combo 3 túi" chưa nói vị, hơn 3 túi…): hỏi vị
-      // và số lượng thay vì chuyển người; SĐT/địa chỉ đã có vẫn được giữ.
+      // và số lượng thay vì chuyển người; SĐT/địa chỉ đã có vẫn được giữ. Cả
+      // khi đang xin SĐT/địa chỉ: khách vừa đổi sang giỏ không tính được giá
+      // mà vẫn hỏi tiếp thì đơn chốt sau đó là giỏ cũ, sai ý khách.
       const text = templates.ASK_FLAVOR ? fill(templates.ASK_FLAVOR, commonValues()) : renderGeneralInfo(templates);
       return { templateId: templates.ASK_FLAVOR ? 'ASK_FLAVOR' : 'GENERAL_INFO', ...splitMessages(text), handoff: false, pendingOrder: nextPending };
     }

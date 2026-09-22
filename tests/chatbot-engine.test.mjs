@@ -662,3 +662,14 @@ test('bình luận dưới phiên livestream nhiều sản phẩm: hỏi giá ch
   });
   assert.deepEqual(log, ['query:live', 'Dạ em thấy anh/chị để lại bình luận ạ\n\nDạ phiên live nhà em có đủ 3 vị ạ, anh/chị quan tâm loại nào ạ?', 'Dạ em vừa ib ạ']);
 });
+
+test('khách "Trả lời" một tin rồi gõ ".": câu hỏi gửi model nêu tin gốc', () => {
+  const query = buildChatbotQuery({
+    conversation: { name: 'Mai Thư' },
+    message: { text: '.', replyTo: { id: 'm1', name: 'Mai Thư', text: 'Thư, 55 Hùng Vương, tp Trà Vinh. 0939434123' } },
+    settings: {}
+  });
+  assert.match(query, /TIN NHẮN CẦN TRẢ LỜI: \.\n\n\(Khách đang trả lời tin của chính khách: "Thư, 55 Hùng Vương, tp Trà Vinh. 0939434123"\)$/);
+  const page = buildChatbotQuery({ conversation: { name: 'Mai Thư' }, message: { text: 'Ok', replyTo: { id: 'm2', name: 'Bạn', text: 'Dạ em xác nhận đơn ạ' } }, settings: {} });
+  assert.match(page, /trả lời tin của Giọt Nắng: "Dạ em xác nhận đơn ạ"/);
+});

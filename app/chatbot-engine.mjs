@@ -5,6 +5,7 @@ import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { autoLabelEventsFor, foldVietnamese } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
 import { buildCatalogPrompt } from './processing/pricing.mjs';
+import { isOrderStep } from './processing/pending-order.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
 
 /**
@@ -30,8 +31,12 @@ export function isLivestreamPost(conversation) {
 
 export function parseModelAnswer(answer) {
   const raw = String(answer || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  // Mô hình trả JSON hỏng: gửi bảng giá chung thay vì chuyển người và tắt bot.
-  try { return JSON.parse(raw); } catch { return { template_id: 'GENERAL_INFO' }; }
+  // Mô hình trả JSON hỏng (hay JSON hợp lệ nhưng không phải object: null, mảng,
+  // chuỗi): gửi bảng giá chung thay vì chuyển người và tắt bot.
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { template_id: 'GENERAL_INFO' };
+  } catch { return { template_id: 'GENERAL_INFO' }; }
 }
 
 export function buildChatbotQuery({ conversation, message, recentMessages = [], settings, includeHistory = true }) {
@@ -63,7 +68,9 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
     !hint && isLivestreamPost(conversation) ? 'BÀI VIẾT: phiên livestream giới thiệu nhiều sản phẩm (không có sản phẩm cụ thể); khách hỏi giá chung thì GENERAL_INFO, hỏi "hộp"/"gói nhỏ" là hộp 10 gói nhỏ (PACKAGING_INFO).' : '',
     remembered ? `DỮ LIỆU ĐÃ LƯU:\n${remembered}` : '',
     includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
-    `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`
+    `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`,
+    // Khách bấm "Trả lời" một tin cụ thể rồi gõ "." hay "Ok": nêu tin gốc để model biết đang nói về gì.
+    message.replyTo?.text ? `(Khách đang trả lời tin ${message.replyTo.name === 'Bạn' ? 'của Giọt Nắng' : 'của chính khách'}: "${String(message.replyTo.text).slice(0, 300)}")` : ''
   ].filter(Boolean).join('\n\n');
 }
 
@@ -373,7 +380,9 @@ async function answerChange(change, settings, results, dependencies) {
     // Khách chỉ để ".", "ib", "bn", "xin giá"… dưới bài/quảng cáo có sản phẩm cụ
     // thể: gửi thẳng bảng giá sản phẩm đó, không đưa danh sách chung để khách phải chọn.
     const folded = foldVietnamese(String(message.text || '').trim()).replace(/\s+/g, ' ');
-    const terse = message.type === 'text' && /^(\.+|…|ib|inbox|in box|bn|gia|xin gia|gia bao nhieu|bao nhieu|bao gia|cho hoi gia|gia sao|gia the nao|gia ntn|\?|\+1|1|\.ib|ib\.)$/i.test(folded);
+    // Bot vừa hỏi số lượng/vị/SĐT/địa chỉ thì "1", "?"… là câu trả lời, không phải xin giá.
+    const collectingOrder = isOrderStep(conversation.botLastTemplateId) || conversation.botLastTemplateId === 'ASK_FLAVOR';
+    const terse = message.type === 'text' && !collectingOrder && /^(\.+|…|ib|inbox|in box|bn|gia|xin gia|gia bao nhieu|bao nhieu|bao gia|cho hoi gia|gia sao|gia the nao|gia ntn|\?|\+1|1|\.ib|ib\.)$/i.test(folded);
     const contextProduct = terse ? resolveConversationProduct({ adTitle: conversation.referral?.adTitle, referralRef: conversation.referral?.ref, postText: conversation.post?.message }).product : '';
     const quickQuote = terse && productHint(contextProduct) && settings.messageTemplates?.PRICE_QUOTE
       ? renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: contextProduct }, settings.messageTemplates, replyContext)
@@ -468,7 +477,7 @@ async function answerChange(change, settings, results, dependencies) {
         const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
         const sentBefore = inbox ? await listMessages(inbox.id).catch(() => []) : [];
         const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-        const normalize = value => String(value || '').replace(/s+/g, ' ').trim();
+        const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
         privateSkipped = sentBefore.some(item => item?.direction === 'outgoing' && (Number(item?.createdAt) || 0) > dayAgo && normalize(item.text) === normalize(privateText));
       }
       if (privateText && !privateSkipped) {
@@ -576,11 +585,16 @@ async function answerChange(change, settings, results, dependencies) {
     await saveBotState(conversation.id, { botLastError: error.message, botLastErrorAt: Date.now() }).catch(() => {});
     // Hết hạn mức/quá tải sau mọi lần thử: hẹn chạy lại tin này sau một phút
     // (một lần). Lúc chạy lại, tin đã được trả lời (nhân viên, hay tin sau của
-    // khách gộp vào) thì bỏ qua.
+    // khách gộp vào) thì bỏ qua. Cài đặt đọc lại lúc chạy: nhân viên đã tắt bot
+    // trong lúc chờ thì không trả lời nữa.
     const retryDelay = Number(settings.capacityRetryDelayMs ?? 60000);
     if (isCapacityError(error) && !change.delayedRetry && retryDelay > 0) {
       const timer = setTimeout(() => {
-        queueForConversation(conversation.id, () => answerChange({ ...change, delayedRetry: true }, settings, [], dependencies)).catch(() => {});
+        queueForConversation(conversation.id, async () => {
+          const latest = dependencies.readSettings ? await dependencies.readSettings().catch(() => settings) : settings;
+          if (!latest?.enabled) return;
+          await answerChange({ ...change, delayedRetry: true }, latest, [], dependencies);
+        }).catch(() => {});
       }, retryDelay);
       timer.unref?.();
       results.push({ conversationId: conversation.id, error: error.message, retryLater: true });

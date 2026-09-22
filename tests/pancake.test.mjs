@@ -56,9 +56,12 @@ test('tin do Page gửi (nhân viên trả lời trong Pancake) là tin đi; bì
   assert.deepEqual(normalizePancakeWebhook(incoming({ message: { type: 'COMMENT' } }), config), []);
   assert.deepEqual(normalizePancakeWebhook({ ...incoming(), page_id: '999' }, config), []);
   assert.deepEqual(normalizePancakeWebhook({ ...incoming(), event_type: 'conversation' }, config), []);
-  const [attachmentOnly] = normalizePancakeWebhook(incoming({ message: { message: '', original_message: '', attachments: [{ type: 'photo' }] } }), config);
+  const [attachmentOnly] = normalizePancakeWebhook(incoming({ message: { message: '', original_message: '', attachments: [{ type: 'file', url: 'https://content.pancake.vn/a.pdf' }] } }), config);
   assert.equal(attachmentOnly.message.type, 'attachment');
   assert.equal(attachmentOnly.message.text, '[Tệp đính kèm]');
+  // Rác của Facebook Shop: tin trống của khách và tin "Gửi tin nhắn" của Page không ghi.
+  assert.deepEqual(normalizePancakeWebhook(incoming({ message: { id: 'm_empty', message: '<div></div>', original_message: '', attachments: [] } }), config), []);
+  assert.deepEqual(normalizePancakeWebhook(incoming({ message: { id: 'm_cta', message: '<div></div>', original_message: '', from: { id: '110', name: 'Test' }, attachments: [{ id: 'm_cta', name: 'Gửi tin nhắn', type: 'attachment' }] } }), config), []);
 });
 
 test('khách bấm Mua ở Facebook Shop (cart_order): ghi thành chữ có tên, SKU, giá để hộp thư và bot đọc được', () => {

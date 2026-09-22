@@ -2254,10 +2254,10 @@ processedHistoryButton?.addEventListener('click', () => {
 // ===== Bốn tab theo ngày ở Xử lý dữ liệu =====
 //
 // Một ngày không gọi hết khách thì không ai phải chuyển đơn: qua nửa đêm đơn
-// tự nằm ở tab kế theo ngày đặt (cột Ngày). Tab cuối gom mọi đơn từ 2 ngày trở lên.
+// tự nằm ở tab kế theo ngày đặt (cột Ngày). Bảy tab cho bảy ngày liên tiếp.
 const orderDayTabs = [...document.querySelectorAll('[data-order-day]')];
-// Tab cuối theo ngày là 2 ngày trước; đơn cũ hơn là quá hẹn.
-const orderDayLastBucket = 2;
+// Tab cuối theo ngày là 6 ngày trước (đủ 7 ngày liên tiếp); đơn cũ hơn là quá hẹn.
+const orderDayLastBucket = 6;
 let activeOrderDay = 0;
 
 /** Ngày của tab số `bucket` (0 = hôm nay) ghi rõ "19/09/2026". */
@@ -7368,9 +7368,9 @@ function renderOrderData() {
   orderPanelsDirty.delete('process');
   // Xử lý dữ liệu: không tô màu dòng và không gom nhóm — đơn trùng đã được so
   // và xử lý ở Nhập dữ liệu; ở đây bấm ô nào là sửa ô đó, lý do còn lại đã ghi
-  // ở cột Ghi chú. Đơn chia bốn tab theo ngày đặt; ô tìm kiếm áp dụng cho cả bảng này.
+  // ở cột Ghi chú. Đơn chia bảy tab theo ngày đặt (+ Giữ đơn); ô tìm kiếm áp dụng cho cả bảng này.
   const dayOfRow = new Map(processingRows.map(entry => [entry.index, orderDayBucket(entry.row)]));
-  // Quá hẹn (từ 3 ngày) mà nhân viên không chọn "Giữ đơn" thì đơn tự rời bảng,
+  // Quá hẹn (từ 7 ngày) mà nhân viên không chọn "Giữ đơn" thì đơn tự rời bảng,
   // để hàng tồn không dồn mãi. Xóa xong bảng tự vẽ lại nên thoát khỏi lượt này.
   if (!droppingOverdueOrders) {
     const overdue = processingRows.filter(entry => dayOfRow.get(entry.index) > orderDayLastBucket
@@ -7382,7 +7382,7 @@ function renderOrderData() {
       } finally {
         droppingOverdueOrders = false;
       }
-      showToast(`Đã tự xóa ${overdue.length} đơn quá hẹn (từ 3 ngày) chưa xử lý · Ctrl+Z để hoàn tác.`, 'success', 6000);
+      showToast(`Đã tự xóa ${overdue.length} đơn quá hẹn (từ ${orderDayLastBucket + 1} ngày) chưa xử lý · Ctrl+Z để hoàn tác.`, 'success', 6000);
       return;
     }
   }

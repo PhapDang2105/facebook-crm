@@ -1147,14 +1147,16 @@ const server = http.createServer(async (request, response) => {
           ...(pancakeConfig.pages || []).map(p => p.webhookToken)
         ].filter(Boolean);
         const tokenValid = tokenCandidates.some(tok => configuredTokens.some(cfg => isPancakeWebhookTokenValid(tok, cfg)));
-        // Token có thể nằm ở URL, header hoặc thân tin, nhưng bắt buộc phải khớp:
-        // Pancake không ký payload, nên không có token thì ai biết page_id cũng
-        // chèn được tin giả vào hộp thư và kích bot trả lời.
-        if (!isPancakeConfigured() || !tokenValid) {
+        // Pancake gọi webhook không kèm token (22/09/2026: mọi lần gọi thật đều
+        // không có), nên ngoài token khớp còn nhận khi page_id là Page đã cấu
+        // hình. Ghi log khi chỉ khớp page để còn dấu vết nếu có kẻ giả mạo.
+        const pageValid = Boolean(pageId) && (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]).some(p => String(p.pageId) === pageId);
+        if (!isPancakeConfigured() || (!tokenValid && !pageValid)) {
           if (isPancakeConfigured()) console.warn('Webhook Pancake token không khớp, bỏ qua (page', pageId || '?', ')');
           response.writeHead(isPancakeConfigured() ? 401 : 503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
           return response.end(isPancakeConfigured() ? 'Invalid token' : 'Pancake webhook is not configured');
         }
+        if (!tokenValid && payload?.event_type && payload.event_type !== 'verify') console.warn('Webhook Pancake không có token, nhận theo page_id', pageId);
         // Luôn trả 200 (Pancake tạm ngưng webhook khi >80% lần gọi lỗi); thân hỏng chỉ ghi log.
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         response.end('{"received":true}');

@@ -209,6 +209,19 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   const cartText = cart.length
     ? `Khách chọn mua từ Facebook Shop: ${cart.map(item => `${item.name || item.sku}${item.sku && item.name ? ` (${item.sku})` : ''}${item.quantity ? ` × ${item.quantity}` : ''}${item.price ? ` — ${item.price.toLocaleString('vi-VN')}đ` : ''}`).join('; ')}`
     : '';
+  // Khách bấm vào quảng cáo: Pancake ghi một "tin" ad_click không chữ, kèm mã
+  // quảng cáo, nội dung và ảnh bài. Hộp thư vẽ thành dòng hệ thống; referral
+  // lấy luôn tên và ảnh bài để bot biết khách đang quan tâm sản phẩm nào.
+  const adClick = attachments.find(item => kindOf(item) === 'ad_click');
+  const adPost = adClick?.post_attachments?.[0] || {};
+  const adTitle = String(adPost.description || adPost.title || '').split('\n')[0].trim().slice(0, 120);
+  const adInfo = adClick
+    ? { adId: String(adClick.ad_id || ''), postId: String(adClick.url || '').split('/').filter(Boolean).pop() || '', adTitle, photoUrl: String(adPost.url || '') }
+    : null;
+  const adText = adClick ? `Khách bấm vào quảng cáo${adTitle ? `: «${adTitle}»` : ''}` : '';
+  // Khách chia sẻ thẻ địa chỉ của Messenger (không gõ chữ): lấy địa chỉ đầy đủ làm nội dung.
+  const addressCard = attachments.find(item => kindOf(item) === 'address');
+  const addressText = addressCard ? String(addressCard.full_address || addressCard.address || '').trim() : '';
   const identifier = String(message.id || `pancake-${now}`);
   const at = pancakeTime(message.inserted_at, now);
   // Tin của Page: gửi từ CRM thì Pancake ghi người gửi là "Public API"; tên
@@ -223,8 +236,8 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       id: identifier,
       mid: identifier,
       direction: outgoing ? 'outgoing' : 'incoming',
-      type: media ? media.type : receipt ? 'order-receipt' : text || cartText || !attachments.length ? 'text' : 'attachment',
-      text: receipt ? 'Đã gửi xác nhận đơn hàng' : text || cartText || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
+      type: media ? media.type : receipt ? 'order-receipt' : adClick ? 'ad' : text || cartText || addressText || !attachments.length ? 'text' : 'attachment',
+      text: receipt ? 'Đã gửi xác nhận đơn hàng' : adClick ? adText : text || cartText || addressText || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
       ...(media ? { dataUrl: media.dataUrl, name: '', ...(media.images ? { images: media.images } : {}) } : {}),
       ...(cart.length ? { cart } : {}),
       createdAt: at,
@@ -239,7 +252,7 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       staff: Boolean(adminName) && adminName !== 'Public API',
       staffName: adminName,
       // Khách đến từ quảng cáo: ghi như referral của Meta để bot biết sản phẩm.
-      ad: pancakeAdOf(conversation),
+      ad: adInfo || pancakeAdOf(conversation),
       gender: pancakeGenderOf(conversation)
     }
   };
@@ -450,8 +463,8 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false }
         // Khách đến từ quảng cáo: ghi referral như Meta (nguồn 'ADS', tên quảng
         // cáo tra sau bằng enrichPancakeAdContext). Chỉ ghi khi quảng cáo đổi.
         const ad = event.pancake.ad;
-        if (ad && conversation.referral?.adId !== ad.adId) {
-          const referral = { ref: '', source: 'ADS', adId: ad.adId, adTitle: '', postId: ad.postId, photoUrl: '' };
+        if (ad && (conversation.referral?.adId !== ad.adId || (ad.adTitle && !conversation.referral?.adTitle))) {
+          const referral = { ref: '', source: 'ADS', adId: ad.adId, adTitle: ad.adTitle || '', postId: ad.postId, photoUrl: ad.photoUrl || '' };
           conversation.referrals = [...(conversation.referrals || []), { ...referral, at: Date.now() }].slice(-20);
           conversation.referral = referral;
         }
@@ -530,8 +543,11 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
     }
     if (!response.ok || body.success === false) {
       // Pancake hay trả 200 + success:false, lý do nằm trong original_error.
+      // Mã lỗi hay gặp dịch sang tiếng Việt để panel khách đọc được thay vì JSON thô.
+      const known = { invalid_upload_fb_attachments_result: 'Facebook từ chối ảnh vừa tải lên (invalid_upload_fb_attachments_result)' };
       const reason = body.message || body.error
         || (body.original_error && (typeof body.original_error === 'string' ? body.original_error : JSON.stringify(body.original_error).slice(0, 300)))
+        || known[body.message_code]
         || `phản hồi: ${JSON.stringify(body).slice(0, 300)}`;
       throw new Error(`Pancake không nhận tin (${response.status}): ${reason}`);
     }
@@ -710,8 +726,19 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
     const { mime, buffer } = decodeDataUrl(attachment.dataUrl);
     const file = await fitImageForPancake({ buffer, filename: attachment.name || 'tep-dinh-kem', mime });
     if (file.buffer.length > pancakeUploadLimit) throw Object.assign(new Error('Pancake chỉ nhận tệp tới 500 KB; ảnh được nén tự động, tệp khác cần nhỏ hơn.'), { statusCode: 400 });
-    const { id } = await uploadPancakeContent({ pageId: target.pageId, ...file }, config, fetchImpl);
-    const sent = await sendPancakeMessage({ ...target, contentIds: [id] }, config, fetchImpl);
+    const uploadAndSend = async () => {
+      const { id } = await uploadPancakeContent({ pageId: target.pageId, ...file }, config, fetchImpl);
+      return sendPancakeMessage({ ...target, contentIds: [id] }, config, fetchImpl);
+    };
+    let sent;
+    try {
+      sent = await uploadAndSend();
+    } catch (error) {
+      // Như với ảnh sản phẩm: Facebook từ chối tệp vừa tải thì tải lại, gửi thêm một lần.
+      if (!/invalid_upload/.test(error.message)) throw error;
+      await pause(1000);
+      sent = await uploadAndSend();
+    }
     // Nội dung tệp không lưu vào kho; bản dội lại từ Pancake mang URL ảnh trên CDN.
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: attachment.type || 'document', text: '', name: attachment.name || '', dataUrl: '', createdAt: Date.now(), status: 'sent' };
     if (body) await sendPancakeMessage({ ...target, text: body }, config, fetchImpl);

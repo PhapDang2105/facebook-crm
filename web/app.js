@@ -3690,6 +3690,7 @@ function appendMessageText(target, value) {
 function getMessagePreview(message) {
   const item = typeof message === 'string' ? { type: 'text', text: message } : message;
   if (item?.type === 'order-receipt') return 'Đã gửi xác nhận đơn hàng';
+  if (item?.type === 'ad') return item.text || 'Khách bấm vào quảng cáo';
   if (item?.type === 'image') return item.text ? `Ảnh · ${item.text}` : (Array.isArray(item.images) && item.images.length > 1 ? `Đã gửi ${item.images.length} ảnh` : 'Đã gửi một ảnh');
   if (item?.type === 'video') return item.text ? `Video · ${item.text}` : 'Đã gửi một video';
   if (item?.type === 'document') return item.name ? `Tài liệu · ${item.name}` : 'Đã gửi một tài liệu';
@@ -3881,6 +3882,17 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   // renderConversationOrderCards, so its message record must not also appear
   // as a text bubble repeating the same order.
   if (item.type === 'order-receipt') return;
+  // Khách bấm vào quảng cáo: dòng hệ thống mờ ở giữa, không phải bong bóng tin.
+  if (item.type === 'ad') {
+    if (!chatBody) return;
+    const notice = document.createElement('div');
+    notice.className = 'chat-system-notice chat-ad-notice';
+    const text = document.createElement('span');
+    text.textContent = item.text || 'Khách bấm vào quảng cáo';
+    notice.append(text);
+    chatBody.appendChild(notice);
+    return;
+  }
   const sentAt = getChatTimestamp(item.createdAt);
   let previousRow = chatBody?.lastElementChild || null;
   while (previousRow && !previousRow.classList.contains('message-row')) previousRow = previousRow.previousElementSibling;

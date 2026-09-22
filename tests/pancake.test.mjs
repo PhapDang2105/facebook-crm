@@ -232,3 +232,47 @@ test('ảnh PNG nền trong suốt nén sang JPEG thì nền thành trắng, kh�
   const center = (Math.floor(info.height / 2) * info.width + Math.floor(info.width / 2)) * info.channels;
   assert.ok(data[center] > 240 && data[center + 1] > 240 && data[center + 2] > 240, `điểm giữa phải trắng, được ${data[center]},${data[center + 1]},${data[center + 2]}`);
 });
+
+test('khách bấm quảng cáo (ad_click) và thẻ địa chỉ: không còn "[Tệp đính kèm]"', () => {
+  const [ad] = normalizePancakeWebhook(incoming({ message: {
+    id: 'ad-2569343113366', message: '<div></div>', original_message: '',
+    attachments: [{ type: 'ad_click', ad_id: '120248317644700132', click_from: 'facebook', url: 'https://www.facebook.com/1757513331967555', post_attachments: [{ description: 'Săn deal hời\nGiảm sâu hôm nay', type: 'video_direct_response', url: 'https://content.pancake.vn/ad.jpg' }] }]
+  } }), config);
+  assert.equal(ad.message.type, 'ad');
+  assert.equal(ad.message.text, 'Khách bấm vào quảng cáo: «Săn deal hời»');
+  assert.deepEqual(ad.pancake.ad, { adId: '120248317644700132', postId: '1757513331967555', adTitle: 'Săn deal hời', photoUrl: 'https://content.pancake.vn/ad.jpg' });
+  const [address] = normalizePancakeWebhook(incoming({ message: {
+    id: 'm_addr', message: '', original_message: '',
+    attachments: [{ type: 'address', address: '161 Bình tiến', full_address: '161 Bình tiến, Xã Bắc Bình, Lâm Đồng' }]
+  } }), config);
+  assert.equal(address.message.type, 'text');
+  assert.equal(address.message.text, '161 Bình tiến, Xã Bắc Bình, Lâm Đồng');
+});
+
+test('Facebook từ chối tệp vừa tải (invalid_upload_fb_attachments_result): tải lại, gửi thêm một lần; lỗi nêu bằng tiếng Việt', async () => {
+  const { sendConversationMessageViaPancake } = await import('../app/pancake.mjs');
+  const calls = [];
+  let rejectSends = 1;
+  const fetchMock = async (url, options = {}) => {
+    const address = String(url);
+    if (address.includes('/upload_contents')) {
+      calls.push('upload');
+      return { ok: true, status: 200, json: async () => ({ success: true, id: `c${calls.length}` }) };
+    }
+    if (address.includes('/messages')) {
+      calls.push(`send:${JSON.parse(options.body).content_ids.join(',')}`);
+      if (rejectSends-- > 0) return { ok: true, status: 200, json: async () => ({ success: false, message_code: 'invalid_upload_fb_attachments_result' }) };
+      return { ok: true, status: 200, json: async () => ({ success: true, id: 'm_ok' }) };
+    }
+    throw new Error(`gọi lạ: ${address}`);
+  };
+  const conversation = { pageId: '110', psid: '555', pancakeConversationId: '110_555' };
+  const sent = await sendConversationMessageViaPancake(conversation, { attachment: { dataUrl: 'data:image/png;base64,iVBORw0KGgo=', name: 'phieu-don-1.png', type: 'image' } }, config, fetchMock);
+  assert.equal(sent.message.mid, 'm_ok');
+  assert.deepEqual(calls, ['upload', 'send:c1', 'upload', 'send:c3'], 'lần hai tải tệp mới rồi gửi lại');
+  rejectSends = 5;
+  await assert.rejects(
+    sendConversationMessageViaPancake(conversation, { attachment: { dataUrl: 'data:image/png;base64,iVBORw0KGgo=', name: 'phieu.png', type: 'image' } }, config, fetchMock),
+    /Facebook từ chối ảnh vừa tải lên/
+  );
+});

@@ -292,8 +292,9 @@ async function answerChange(change, settings, results, dependencies) {
       ? renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: contextProduct }, settings.messageTemplates, replyContext)
       : null;
     // Sticker/biểu tượng: không cần trả lời, càng không cần chuyển người.
-    if (message.type === 'sticker') {
-      results.push({ conversationId: conversation.id, skipped: 'sticker' });
+    // Dòng ghi "khách bấm quảng cáo" cũng không phải tin để trả lời.
+    if (message.type === 'sticker' || message.type === 'ad') {
+      results.push({ conversationId: conversation.id, skipped: message.type });
       return;
     }
     // Ảnh, video, tệp: trước đây mọi tin không phải chữ đều chuyển nhân viên và

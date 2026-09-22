@@ -238,7 +238,19 @@ export function saveMessage(store, { pageId, psid, name, picture, message, markU
   const messages = store.messages[conversation.id];
   const { message: saved, inserted } = insertMessage(messages, message);
   applyLatestMessage(conversation, messages);
-  if (markUnread && inserted) conversation.unread = true;
+  if (inserted) {
+    const at = Number(saved.createdAt) || 0;
+    if (saved.direction === 'outgoing') {
+      // Page (bot hay nhân viên) vừa trả lời và đó là tin mới nhất: không còn gì chờ đọc.
+      const newerCustomer = messages.some(item => item !== saved && item.direction !== 'outgoing' && (Number(item.createdAt) || 0) > at);
+      if (!newerCustomer) conversation.unread = false;
+    } else if (markUnread) {
+      // Tin khách kéo về muộn (đồng bộ lịch sử) mà Page đã trả lời sau đó rồi
+      // thì không đánh dấu chưa đọc; chỉ tin khách đứng sau lời Page mới cần.
+      const answered = messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) > at);
+      if (!answered) conversation.unread = true;
+    }
+  }
   return { conversation, message: saved, inserted };
 }
 

@@ -254,6 +254,22 @@ export function hasNewerCustomerMessage(recentMessages, current) {
   return after.some(item => item?.direction === 'incoming');
 }
 
+// Ảnh sản phẩm chưa gửi được sau tin nhắn riêng từ bình luận (Facebook chặn
+// tới khi khách nhắn vào Messenger): giữ theo khách, gửi ngay khi khách nhắn lại.
+const pendingInboxImages = new Map();
+const pendingImagesTtl = 3 * 24 * 60 * 60 * 1000;
+export function rememberPendingImages(pageId, psid, images) {
+  if (!pageId || !psid || !images?.length) return;
+  pendingInboxImages.set(`${pageId}:${psid}`, { images: [...new Set(images)], at: Date.now() });
+}
+export function takePendingImages(pageId, psid) {
+  const key = `${pageId}:${psid}`;
+  const entry = pendingInboxImages.get(key);
+  if (!entry) return [];
+  pendingInboxImages.delete(key);
+  return Date.now() - entry.at > pendingImagesTtl ? [] : entry.images;
+}
+
 export async function processChatbotChanges(changes, dependencies) {
   const { readSettings } = dependencies;
   const settings = await readSettings();
@@ -411,7 +427,11 @@ async function answerChange(change, settings, results, dependencies) {
       // chặn (khách chưa nhắn lại) thì bỏ qua, không báo lỗi.
       if (!privateError && reply.images?.length && getConversation) {
         const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
-        if (inbox) await sendMessage(inbox, { imageUrls: reply.images }).catch(error => console.error(`Ảnh sau tin nhắn riêng không gửi được (${conversation.id}): ${error.message}`));
+        const sentImages = inbox
+          ? await sendMessage(inbox, { imageUrls: reply.images }).then(() => true).catch(error => { console.error(`Ảnh sau tin nhắn riêng không gửi được (${conversation.id}): ${error.message}`); return false; })
+          : false;
+        // Chưa gửi được (khách chưa mở Messenger với Page): giữ lại, gửi khi khách nhắn.
+        if (!sentImages) rememberPendingImages(conversation.pageId, conversation.psid, reply.images);
       }
       const publicReply = renderChatbotReply({ template_id: privateError ? 'COMMENT_PUBLIC_FALLBACK' : 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
       for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
@@ -425,13 +445,24 @@ async function answerChange(change, settings, results, dependencies) {
     } else if (settings.responseMode === 'automatic' && !alreadyHandled) {
       // Theo đúng thứ tự của mẫu: ảnh đặt đầu mẫu đi trước bảng giá, ảnh đặt
       // cuối đi sau chữ. Mẫu không có dãy gửi thì chữ trước, ảnh sau.
-      const parts = reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
+      let parts = reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
+      // Ảnh còn nợ từ tin nhắn riêng sau bình luận: gửi trước câu trả lời, bỏ
+      // ảnh trùng trong câu trả lời để khách không nhận hai lần.
+      const owed = conversation.source === 'comment' ? [] : takePendingImages(conversation.pageId, conversation.psid);
+      if (owed.length) {
+        const owedSet = new Set(owed);
+        parts = [{ type: 'owed', urls: owed }, ...parts.filter(part => part.type !== 'image' || !owedSet.has(part.url))];
+      }
       // Ảnh không gửi được (Pancake/Facebook từ chối tệp) thì bỏ ảnh đó, chữ
       // vẫn phải tới khách; lỗi ảnh ghi lại cho panel khách thay vì chặn cả câu.
       // Ảnh liền nhau gộp thành một tin nhiều ảnh (Pancake gửi một cụm; Meta tự tách từng ảnh).
       const imageErrors = [];
       for (let index = 0; index < parts.length; index += 1) {
         const part = parts[index];
+        if (part.type === 'owed') {
+          await sendMessage(conversation, { imageUrls: part.urls }).catch(error => imageErrors.push(error.message));
+          continue;
+        }
         if (part.type !== 'image') { await sendMessage(conversation, { text: part.text }); continue; }
         const urls = [part.url];
         while (parts[index + 1]?.type === 'image') urls.push(parts[++index].url);

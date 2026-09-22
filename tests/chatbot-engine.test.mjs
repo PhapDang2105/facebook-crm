@@ -519,3 +519,39 @@ test('hết hạn mức sau mọi lần thử: hẹn chạy lại sau; lúc đó
   await wait(120);
   assert.deepEqual(log, ['error:Resource exhausted. Please try again later.']);
 });
+
+test('ảnh sau tin nhắn riêng từ bình luận bị Facebook chặn: nhớ lại, gửi ngay khi khách nhắn vào Messenger (không gửi trùng)', async () => {
+  const { rememberPendingImages, takePendingImages } = await import('../app/chatbot-engine.mjs');
+  const log = [];
+  const base = {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '' }),
+    listMessages: async () => [],
+    saveBotState: async () => {},
+    getConversation: async id => (id === 'page:user' ? { id: 'page:user', pageId: 'page', psid: 'user', botEnabled: true } : null),
+    sendMessage: async (conversation, message) => {
+      if (message.imageUrls && conversation.id === 'page:user' && !log.includes('inbox-open')) throw new Error('Pancake không nhận tin (200): (#551) Người này hiện không có mặt.');
+      log.push(message.imageUrls ? `img:${conversation.id}:${message.imageUrls.join(',')}` : `text:${conversation.id}:${message.text}`);
+      return { message: { mid: `m${log.length}` } };
+    },
+    requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá ạ'], images: ['https://cdn/xanh.jpg'], handoff: false })
+  };
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:comment:c1:p1', pageId: 'page', psid: 'user', source: 'comment', name: 'Khách', botEnabled: true },
+    message: { id: 'c1', mid: 'c1', direction: 'incoming', type: 'text', text: 'giá sao', createdAt: 1 }
+  }], base);
+  assert.ok(log.some(item => item.startsWith('text:page:comment:c1:p1:')), 'tin nhắn riêng bằng chữ vẫn đi');
+  assert.ok(!log.some(item => item.startsWith('img:')), 'ảnh bị chặn');
+  // Khách nhắn vào Messenger: ảnh nợ đi trước, ảnh trùng trong câu trả lời bị bỏ.
+  log.length = 0;
+  log.push('inbox-open');
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true },
+    message: { id: 'm1', mid: 'm1', direction: 'incoming', type: 'text', text: '1 túi miễn ship ha', createdAt: 2 }
+  }], base);
+  assert.deepEqual(log.slice(1), ['img:page:user:https://cdn/xanh.jpg', 'text:page:user:Bảng giá ạ']);
+  assert.deepEqual(takePendingImages('page', 'user'), [], 'đã gửi thì không còn nợ');
+  rememberPendingImages('page', 'khac', ['a.jpg', 'a.jpg']);
+  assert.deepEqual(takePendingImages('page', 'khac'), ['a.jpg']);
+});

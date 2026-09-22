@@ -24,7 +24,8 @@ export async function refineAddressWithAi(parsed, context = {}, settings = {}, f
 
 export function parseModelAnswer(answer) {
   const raw = String(answer || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  try { return JSON.parse(raw); } catch { return { template_id: 'CSKH_HANDOFF' }; }
+  // Mô hình trả JSON hỏng: gửi bảng giá chung thay vì chuyển người và tắt bot.
+  try { return JSON.parse(raw); } catch { return { template_id: 'GENERAL_INFO' }; }
 }
 
 export function buildChatbotQuery({ conversation, message, recentMessages = [], settings, includeHistory = true }) {
@@ -269,7 +270,27 @@ async function answerChange(change, settings, results, dependencies) {
     const inboxThread = !conversation.gender && conversation.source === 'comment' && getConversation
       ? await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null)
       : null;
-    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, now: Date.now(), messageText: String(message.text || ''), customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
+    // Vài tin chữ gần nhất của khách: SĐT/địa chỉ khách gửi ở tin riêng trước đó
+    // được đọc lại thay vì hỏi lần nữa.
+    const recentCustomerTexts = recent.filter(item => item?.direction === 'incoming' && item.type === 'text' && item.text).slice(-5).map(item => String(item.text));
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, now: Date.now(), messageText: String(message.text || ''), recentCustomerTexts, customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
+    // Tin mảnh (chỉ SĐT, "đó a", tên người…) khi đang lấy thông tin đơn: đợi vài
+    // giây cho tin kế tiếp của khách tới để gộp, tránh xin lại thứ khách vừa gửi.
+    if (message.type === 'text' && conversation.pendingOrder && String(message.text || '').trim().length < 40) {
+      await new Promise(resolve => setTimeout(resolve, Number(settings.fragmentWaitMs ?? 4000)));
+      if (hasNewerCustomerMessage(await listMessages(conversation.id), change.message)) {
+        results.push({ conversationId: conversation.id, skipped: 'gộp với tin sau' });
+        return;
+      }
+    }
+    // Khách chỉ để ".", "ib", "bn", "xin giá"… dưới bài/quảng cáo có sản phẩm cụ
+    // thể: gửi thẳng bảng giá sản phẩm đó, không đưa danh sách chung để khách phải chọn.
+    const folded = foldVietnamese(String(message.text || '').trim()).replace(/\s+/g, ' ');
+    const terse = message.type === 'text' && /^(\.+|…|ib|inbox|in box|bn|gia|xin gia|gia bao nhieu|bao nhieu|bao gia|cho hoi gia|gia sao|gia the nao|gia ntn|\?|\+1|1|\.ib|ib\.)$/i.test(folded);
+    const contextProduct = terse ? resolveConversationProduct({ adTitle: conversation.referral?.adTitle, referralRef: conversation.referral?.ref, postText: conversation.post?.message }).product : '';
+    const quickQuote = terse && productHint(contextProduct) && settings.messageTemplates?.PRICE_QUOTE
+      ? renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: contextProduct }, settings.messageTemplates, replyContext)
+      : null;
     // Sticker/biểu tượng: không cần trả lời, càng không cần chuyển người.
     if (message.type === 'sticker') {
       results.push({ conversationId: conversation.id, skipped: 'sticker' });
@@ -284,11 +305,27 @@ async function answerChange(change, settings, results, dependencies) {
       results.push({ conversationId: conversation.id, skipped: 'ảnh liền nhau' });
       return;
     }
-    const reply = asksForHuman
+    let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : nonText
         ? { ...renderChatbotReply({ template_id: settings.messageTemplates?.IMAGE_RECEIVED ? 'IMAGE_RECEIVED' : 'CSKH_HANDOFF' }, settings.messageTemplates || {}, replyContext), attention: true }
-        : await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
+        : quickQuote || await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
+    // Dưới bình luận không bao giờ chuyển người (khách chưa vào hộp thư): trả
+    // bảng giá chung và mời nhắn tin.
+    if (reply.templateId === 'CSKH_HANDOFF' && !asksForHuman && conversation.source === 'comment' && settings.messageTemplates?.GENERAL_INFO) {
+      reply = renderChatbotReply({ template_id: 'GENERAL_INFO' }, settings.messageTemplates, replyContext);
+    }
+    // Không gửi lại y nguyên tin bot vừa gửi trong 10 phút (hỏi SĐT lần ba, cảm ơn
+    // hai lần), và không chuyển người lần hai trong 24 giờ.
+    const lastOutgoing = [...recent].reverse().find(item => item?.direction === 'outgoing');
+    const repeatsLast = Boolean(lastOutgoing) && reply.messages?.length === 1 && reply.messages[0] === String(lastOutgoing.text || '')
+      && Date.now() - (Number(lastOutgoing.createdAt) || 0) < 10 * 60 * 1000;
+    const repeatsHandoff = reply.templateId === 'CSKH_HANDOFF' && conversation.botLastTemplateId === 'CSKH_HANDOFF'
+      && Date.now() - (Number(conversation.botLastReplyAt) || 0) < 24 * 60 * 60 * 1000;
+    if (repeatsLast || repeatsHandoff) {
+      results.push({ conversationId: conversation.id, skipped: repeatsLast ? 'lặp tin vừa gửi' : 'đã chuyển người trong 24 giờ' });
+      return;
+    }
     // Trong lúc chờ mô hình khách nhắn thêm: bỏ câu này, tin sau trả lời gộp.
     if (message.type === 'text' && hasNewerCustomerMessage(await listMessages(conversation.id), change.message)) {
       results.push({ conversationId: conversation.id, skipped: 'gộp với tin sau' });
@@ -315,7 +352,9 @@ async function answerChange(change, settings, results, dependencies) {
       // Orders are never created from a comment — the customer is asked to
       // continue in Messenger, where the address exchange is private.
       const intro = renderChatbotReply({ template_id: 'COMMENT_PRIVATE_REPLY' }, settings.messageTemplates, replyContext);
-      const privateText = [...(intro.templateId === 'COMMENT_PRIVATE_REPLY' ? intro.messages : []), ...reply.messages].join('\n\n');
+      const privateText = [...(intro.templateId === 'COMMENT_PRIVATE_REPLY' ? intro.messages : []), ...reply.messages].join('\n\n')
+        // Mẫu mở đầu kết bằng "Dạ," rồi mẫu sau lại "Dạ": chỉ giữ một.
+        .replace(/Dạ,?\s*\n\n\s*Dạ,?/g, 'Dạ,');
       // Messenger can refuse the private reply — most often error #10, another
       // app holding the thread (Handover Protocol). Telling the customer to
       // check an inbox that stays empty loses the lead, so the public reply

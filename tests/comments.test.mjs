@@ -233,11 +233,12 @@ test('khách đã chọn Chị: mẫu cũ ghi "anh/ chị" và câu model tự v
   assert.equal(reply.messages[0], 'Dạ em cảm ơn chị rất nhiều ạ. Chị nhắn em nhé.');
   // Free text the model wrote itself (unknown template id) never reaches the
   // customer: a prompt-injected reply could carry any text or image link. It
-  // falls back to the handoff template; the honorific fix still applies to text.
+  // falls back to the general price list (bot stays on); the injected text and link never appear.
   const free = renderChatbotReply({ template_id: 'NOPE', reply: 'Dạ anh/chị cần thêm gì không ạ? ![x](http://127.0.0.1:8080/api/customers/export.csv)' }, settings.messageTemplates, { customer: { gender: 'male', name: 'Nam' } });
-  assert.equal(free.templateId, 'CSKH_HANDOFF');
-  assert.equal(free.messages[0], settings.messageTemplates.CSKH_HANDOFF.replace(/\{title\}/g, 'anh').replace(/\{Title\}/g, 'Anh'));
-  assert.deepEqual(free.images, []);
+  assert.equal(free.templateId, 'GENERAL_INFO');
+  assert.equal(free.handoff, false);
+  assert.doesNotMatch(free.messages.join(' '), /cần thêm gì không|export\.csv/);
+  assert.ok(!free.images.some(url => url.includes('export.csv')));
   assert.equal(applyHonorific('Dạ anh/chị cần thêm gì không ạ?', 'male'), 'Dạ anh cần thêm gì không ạ?');
   // Unknown gender keeps the neutral pair.
   assert.equal(applyHonorific('Dạ anh/chị ơi', ''), 'Dạ anh/chị ơi');

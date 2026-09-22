@@ -192,7 +192,9 @@ test('"lấy thêm 2 túi vàng" ngay sau khi chốt đơn túi xanh: đơn mớ
   assert.deepEqual(repeat.order.items.map(item => item.product), ['Granola Túi Xanh 450g']);
   // Đơn đã lâu (hơn 2 giờ) thì không lọc: giỏ 4 túi gộp không có giá combo nên bot chuyển người (chính là lỗi trước đây).
   const old = renderChatbotReply(value, templates, { now, recentOrder: { ...recentOrder, createdAt: now - 3 * 60 * 60 * 1000 } });
-  assert.equal(old.templateId, 'CSKH_HANDOFF');
+  // 4 túi vượt tổ hợp tự tính: hỏi lại vị/số lượng, không chuyển người.
+  assert.equal(old.templateId, 'ASK_FLAVOR');
+  assert.equal(old.handoff, false);
 });
 
 test('ảnh không gửi được thì bỏ ảnh, chữ vẫn tới khách, lỗi ảnh ghi lại cho panel khách', async () => {

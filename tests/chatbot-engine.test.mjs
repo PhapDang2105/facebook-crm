@@ -13,7 +13,7 @@ const neutral = text => text.replaceAll('{Title}', 'Anh/chị').replaceAll('{tit
 
 test('đọc JSON có hàng rào markdown từ mô hình', () => {
   assert.equal(parseModelAnswer('```json\n{"template_id":"WELCOME"}\n```').template_id, 'WELCOME');
-  assert.equal(parseModelAnswer('không hợp lệ').template_id, 'CSKH_HANDOFF');
+  assert.equal(parseModelAnswer('không hợp lệ').template_id, 'GENERAL_INFO', 'JSON hỏng thì gửi bảng giá chung, không chuyển người');
 });
 
 test('ngữ cảnh gửi mô hình có lịch sử và tin nhắn hiện tại', () => {
@@ -312,12 +312,16 @@ test('lời bot nói đọc từ Thiết lập tin nhắn, không có bản mặ
 
 test('mẫu tin bị xóa hoặc bỏ tick không còn được chatbot sử dụng', () => {
   const { WELCOME, ...withoutWelcome } = templates;
+  // Mẫu không còn: trả bảng giá chung (không chuyển người, không tắt bot).
   const reply = renderChatbotReply({ template_id: 'WELCOME' }, withoutWelcome);
-  assert.equal(reply.templateId, 'CSKH_HANDOFF');
-  assert.deepEqual(reply.messages, [templates.CSKH_HANDOFF]);
-  assert.deepEqual(reply.images, []);
+  assert.equal(reply.templateId, 'GENERAL_INFO');
+  assert.equal(reply.handoff, false);
+  assert.doesNotMatch(reply.messages.join(' '), /Giọt Nắng xin chào/);
   const off = renderChatbotReply({ template_id: 'WELCOME' }, { ...templates, WELCOME: '' });
-  assert.equal(off.templateId, 'CSKH_HANDOFF');
+  assert.equal(off.templateId, 'GENERAL_INFO');
+  // Không có cả GENERAL_INFO thì mới chuyển người.
+  const bare = renderChatbotReply({ template_id: 'WELCOME' }, { CSKH_HANDOFF: templates.CSKH_HANDOFF });
+  assert.equal(bare.templateId, 'CSKH_HANDOFF');
 });
 
 test('tin xác nhận đơn và lời xin địa chỉ điền chỗ trống của mẫu trong thiết lập', () => {
@@ -329,7 +333,8 @@ test('tin xác nhận đơn và lời xin địa chỉ điền chỗ trống c�
   ]);
   assert.deepEqual(reply.images, []);
   const partial = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0909123456' }, custom);
-  assert.deepEqual(partial.messages, ['Có số điện thoại, thiếu địa chỉ nhận hàng đầy đủ.']);
+  assert.equal(partial.messages[0], 'Có số điện thoại, thiếu địa chỉ nhận hàng đầy đủ.');
+  assert.match(partial.messages[1], /lấy 2 túi/, 'giỏ 1 túi kèm gợi ý lên 2 túi');
 });
 
 test('khách gửi ảnh: bot báo đã nhận hình, gắn thẻ cần người xử lý nhưng KHÔNG tắt bot; sticker thì im', async () => {
@@ -385,4 +390,73 @@ test('SĐT nằm chung dòng với tên và địa chỉ mà mô hình bỏ sót
   }, templates, { messageText: 'ĐỊA CHỈ GỬI HÀNG Vũ Thanh Hải - 0912345678 3a2/109/52 đường Miếu Hai Xã, phường Dư Hàng Kênh, quận Lê Chân, Hải Phòng' });
   assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
   assert.equal(reply.order.phone, '0912345678');
+});
+
+test('khách để "." hay "ib" dưới bài về một sản phẩm: gửi thẳng bảng giá sản phẩm đó, không hỏi mô hình', async () => {
+  const log = [];
+  const result = await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:dot', psid: 'dot', name: 'Khách', botEnabled: true, post: { message: 'GRANOLA TÚI XANH 450g giòn rụm, ưu đãi hôm nay' } },
+    message: { id: 'mid.dot.1', mid: 'mid.dot.1', direction: 'incoming', type: 'text', text: '.' }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templates }),
+    listMessages: async () => [],
+    sendMessage: async (_conversation, message) => { log.push(message.text || '[ảnh]'); return { message: { mid: 'mid.bot.d' } }; },
+    saveBotState: async () => {},
+    requestReply: async () => { throw new Error('không được gọi mô hình'); }
+  });
+  assert.equal(result[0].templateId, 'PRICE_QUOTE');
+  assert.ok(log.some(text => /Bảng giá Granola Túi Xanh 450g/.test(text)), 'bảng giá đúng sản phẩm của bài viết');
+});
+
+test('mã mẫu lạ từ mô hình và giỏ không tính được giá: không chuyển người, không tắt bot', () => {
+  const unknown = renderChatbotReply({ template_id: 'MAU_KHONG_TON_TAI' }, templates, { customer: { gender: 'female' } });
+  assert.equal(unknown.templateId, 'GENERAL_INFO');
+  assert.equal(unknown.handoff, false);
+  const flavor = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '5', Phone_Number: '0909123456', Customer_Address: fullAddress }, templates, { customer: { gender: 'female' } });
+  assert.equal(flavor.templateId, 'ASK_FLAVOR', '5 túi vượt combo: hỏi vị/số lượng thay vì chuyển người');
+  assert.equal(flavor.handoff, false);
+  assert.equal(flavor.pendingOrder.phone, '0909123456', 'SĐT đã có vẫn được giữ');
+});
+
+test('khách lấy 1 túi: lúc xin SĐT/địa chỉ có gợi ý lên 2 túi với số liệu từ bộ giá, chỉ một lần', () => {
+  const first = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1' }, templates, { customer: { gender: 'female' } });
+  assert.equal(first.templateId, 'ORDER_ADDRESS');
+  assert.equal(first.messages.length, 2);
+  assert.match(first.messages[1], /lấy 2 túi thì giá chỉ còn 149\.000đ\/túi/);
+  assert.match(first.messages[1], /miễn phí vận chuyển/);
+  assert.match(first.messages[1], /tổng 298\.000đ thay vì 189\.000đ/);
+  assert.equal(first.pendingOrder.upsold, true);
+  // Đã gợi ý rồi thì lần hỏi tiếp không nhắc lại.
+  const second = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Phone_Number: '0909123456' }, templates, { customer: { gender: 'female' }, pendingOrder: first.pendingOrder });
+  assert.equal(second.templateId, 'ORDER_ADDRESS');
+  assert.equal(second.messages.length, 1);
+  // Khách lấy 2 túi thì không có gợi ý.
+  const two = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '2' }, templates, { customer: { gender: 'female' } });
+  assert.equal(two.messages.length, 1);
+});
+
+test('không gửi lại y nguyên tin bot vừa gửi trong 10 phút; SĐT ở tin khách trước đó được đọc lại', async () => {
+  const log = [];
+  const sameText = 'Dạ em đã nhận được địa chỉ của mình rồi ạ. Chị cho em xin số điện thoại để em lên đơn gửi mình nha ạ.';
+  const result = await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:rep', psid: 'rep', name: 'Khách', botEnabled: true, gender: 'female' },
+    message: { id: 'mid.rep.2', mid: 'mid.rep.2', direction: 'incoming', type: 'text', text: 'Gửi rồi mà em' }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templates }),
+    listMessages: async () => [
+      { id: 'mid.rep.0', direction: 'incoming', type: 'text', text: '0909123456', createdAt: Date.now() - 120000 },
+      { id: 'mid.bot.r', direction: 'outgoing', type: 'text', text: sameText, createdAt: Date.now() - 60000 },
+      { id: 'mid.rep.2', direction: 'incoming', type: 'text', text: 'Gửi rồi mà em', createdAt: Date.now() }
+    ],
+    sendMessage: async (_conversation, message) => { log.push(message.text); return { message: { mid: 'mid.bot.r2' } }; },
+    saveBotState: async () => {},
+    requestReply: async () => ({ templateId: 'ORDER_ADDRESS', messages: [sameText], handoff: false })
+  });
+  assert.deepEqual(log, [], 'câu hỏi y hệt vừa gửi thì không gửi lại');
+  assert.equal(result[0].skipped, 'lặp tin vừa gửi');
+  const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '2', Phone_Number: '0', Customer_Address: fullAddress }, templates, { customer: { gender: 'female' }, recentCustomerTexts: ['176/1A KP1', '0909123456', 'Gửi rồi mà em'] });
+  assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
+  assert.equal(reply.order.phone, '0909123456');
 });

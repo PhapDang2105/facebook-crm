@@ -30,6 +30,8 @@ export function normalizePendingOrder(value) {
     phone,
     address,
     addressAsks,
+    // Đã gợi ý lên 2 túi cho giỏ này rồi thì không gợi ý lại.
+    ...(value?.upsold ? { upsold: true } : {}),
     items: items.map(item => ({
       product: String(item?.product || '').trim(),
       code: String(item?.code || '').trim(),

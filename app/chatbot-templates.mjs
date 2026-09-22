@@ -223,6 +223,25 @@ function dropRecentlyOrdered(items, recentOrder, now) {
   return additions.length && additions.length < items.length ? additions : items;
 }
 
+/** Lời gợi ý 2 túi cho giỏ 1 túi: số liệu lấy từ bộ giá, không tự ghi. */
+function upsellTwoBags(price, templates) {
+  const line = price.lines?.[0];
+  if (!line) return '';
+  const two = priceBasket([{ sku: line.sku, quantity: 2 }]);
+  if (!two.priceable || !two.lines?.[0]) return '';
+  const saving = Math.max(0, (Number(line.unitPrice) || 0) - (Number(two.lines[0].basketUnitPrice) || 0));
+  return fill(templates.UPSELL_TWO_BAGS, {
+    ...commonValues(),
+    product: line.name,
+    two_unit: formatMoney(two.lines[0].basketUnitPrice),
+    saving: saving ? formatMoney(saving) : '',
+    two_total: formatMoney(two.total),
+    one_total: formatMoney(price.total),
+    free_ship: two.shippingFee === 0 ? 'miễn phí vận chuyển' : '',
+    gift: two.gift || ''
+  });
+}
+
 function renderOrder(value, templates, context = {}) {
   const now = Number(context.now) || Date.now();
   const templateId = String(value.template_id || '').trim();
@@ -248,7 +267,9 @@ function renderOrder(value, templates, context = {}) {
 
   // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):
   // đọc thẳng từ tin khách vừa nhắn thay vì hỏi lại thứ khách đã đưa.
-  const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number) || extractVietnamesePhone(context.messageText || '');
+  const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number) || extractVietnamesePhone(context.messageText || '')
+    // SĐT khách gửi ở một tin riêng trước đó (hay tin bị mô hình bỏ qua): đọc lại, không hỏi nữa.
+    || (Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.map(text => extractVietnamesePhone(text)).find(Boolean) || '' : '');
   const freshAddress = String(value.Customer_Address || '').trim();
   const phone = freshPhone || pending?.phone || '';
   // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
@@ -315,7 +336,10 @@ function renderOrder(value, templates, context = {}) {
     // Only a request to close the order is escalated. While still collecting
     // details the bot keeps asking rather than dropping the customer on a human.
     if (templateId === 'ORDER_CONFIRMATION' && items.length && !price) {
-      return { templateId: 'CSKH_HANDOFF', ...splitMessages(fill(templates.CSKH_HANDOFF, commonValues())), handoff: true, pendingOrder: null };
+      // Giỏ chưa tính được giá ("combo 3 túi" chưa nói vị, hơn 3 túi…): hỏi vị
+      // và số lượng thay vì chuyển người; SĐT/địa chỉ đã có vẫn được giữ.
+      const text = templates.ASK_FLAVOR ? fill(templates.ASK_FLAVOR, commonValues()) : renderGeneralInfo(templates);
+      return { templateId: templates.ASK_FLAVOR ? 'ASK_FLAVOR' : 'GENERAL_INFO', ...splitMessages(text), handoff: false, pendingOrder: nextPending };
     }
     const missing = hasPhone && !hasAddress ? 'địa chỉ nhận hàng đầy đủ'
       : !hasPhone && hasAddress ? 'số điện thoại'
@@ -323,11 +347,16 @@ function renderOrder(value, templates, context = {}) {
     const known = hasPhone ? 'số điện thoại' : hasAddress ? 'địa chỉ' : '';
     // One wording when nothing has arrived yet, another once part of it has.
     const template = known ? templates.ORDER_ADDRESS_PARTIAL : templates.ORDER_ADDRESS;
+    const ask = splitMessages(fill(template, { ...commonValues(), missing, known }));
+    // Khách lấy 1 túi: nhân lúc xin thông tin, gợi ý lên 2 túi (giá combo, miễn
+    // ship, quà) đúng một lần cho mỗi giỏ; khách vẫn lấy 1 túi thì đơn đi tiếp.
+    const upsell = price?.totalQuantity === 1 && templates.UPSELL_TWO_BAGS && !pending?.upsold ? upsellTwoBags(price, templates) : '';
     return {
       templateId: 'ORDER_ADDRESS',
-      ...splitMessages(fill(template, { ...commonValues(), missing, known })),
+      ...ask,
+      ...(upsell ? { messages: [...ask.messages, ...splitMessages(upsell).messages] } : {}),
       handoff: false,
-      pendingOrder: nextPending
+      pendingOrder: upsell && nextPending ? { ...nextPending, upsold: true } : nextPending
     };
   }
 
@@ -536,7 +565,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_STATUS_NONE', 'IMAGE_RECEIVED']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_STATUS_NONE', 'IMAGE_RECEIVED', 'UPSELL_TWO_BAGS']);
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -586,6 +615,10 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   }
   // Chữ gửi khách chỉ lấy từ mẫu trong Cài đặt; mã mẫu lạ (hay chữ tự soạn
   // của mô hình, mà khách có thể lái) đi về CSKH_HANDOFF thay vì phát nguyên văn.
+  // Mã mẫu lạ (mô hình bịa): trả bảng giá chung, không chuyển người và tắt bot.
+  if (!catalogId && !templates[templateId] && templateId !== 'CSKH_HANDOFF' && templates.GENERAL_INFO) {
+    return { templateId: 'GENERAL_INFO', ...splitMessages(renderGeneralInfo(templates)), handoff: false };
+  }
   const raw = (!catalogId && templates[templateId]) || templates.CSKH_HANDOFF;
   const resolvedId = !catalogId && templates[templateId] ? templateId : 'CSKH_HANDOFF';
   return {

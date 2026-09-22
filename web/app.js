@@ -3249,6 +3249,16 @@ async function switchMessageChannel(channelId) {
   activateCurrentMessageChannel();
 }
 
+/** Kênh mở mặc định: kênh đã chọn lần trước, không thì Page "Giọt Nắng", không thì kênh đầu. */
+function getDefaultChannelId(channels) {
+  let saved = '';
+  try { saved = localStorage.getItem('crm-selected-channel-id') || ''; } catch {}
+  if (saved && channels.some(channel => channel.id === saved)) return saved;
+  const giotNang = channels.find(channel => channel.name === 'Giọt Nắng' || channel.id === '103549382215599');
+  if (giotNang) return giotNang.id;
+  return channels[0]?.id || '';
+}
+
 async function loadMessageChannels() {
   let connected = [];
   try {

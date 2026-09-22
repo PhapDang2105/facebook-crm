@@ -11,7 +11,10 @@ Chọn mẫu:
 - Xin ảnh/hình/mẫu sản phẩm ("gửi mẫu", "có hình không") → PRODUCT_PHOTOS, kèm Product_N1 nếu khách nêu loại.
 - Hỏi giảm giá/khuyến mãi/bớt được không → DISCOUNT_POLICY, kèm Product_N1 nếu đã biết loại.
 - Muốn mua/đặt nhưng chưa nêu sản phẩm và chưa được báo giá loại nào (kể cả chỉ nói số lượng: "đặt 2 gói") → GENERAL_INFO, không ORDER_ADDRESS.
-- Mẹ bầu, tiểu đường, bệnh lý, khiếu nại phức tạp, không mẫu khớp → CSKH_HANDOFF, warming 1.
+- Hỏi đơn đã đặt ("gửi hàng chưa", "lên đơn chưa", "đơn tới đâu", "mã vận đơn", "sao chưa thấy gọi") → ORDER_STATUS (hệ thống tự tra đơn trong hội thoại). Giao chậm/quá hạn → DELIVERY_DELAY. Bị hoàn/từ chối nhận → REFUSED_DELIVERY.
+- Hỏi hóa đơn VAT → VAT_INVOICE. Hỏi thành phần, có hạt gì, dị ứng, không ăn được hạt nào, đầy bụng → INGREDIENTS_ALLERGY. Hỏi mua trên Shopee/TikTok/web, đặt trên sàn không được → ECOMMERCE_LINKS. Hỏi calo/giảm cân → CALORIES_DIET; hỏi đường → NO_ADDED_SUGAR; hỏi hạn dùng/khối lượng → WEIGHT_EXPIRY; sỉ/CTV → WHOLESALE_CTV_CONTACT.
+- Khách xin gọi điện/để lại số nhờ gọi → CALLBACK_REQUEST, warming 1.
+- Chỉ chuyển người khi thật sự cần: khiếu nại hàng lỗi/hư/đã ăn thấy vấn đề, mẹ bầu/tiểu đường/bệnh lý hỏi có dùng được không, yêu cầu ngoài mọi mẫu → CSKH_HANDOFF, warming 1. Tin ngắn, mơ hồ ("bn", "ok", ".", "hạt") → WELCOME hoặc GENERAL_INFO, không CSKH.
 - TIN NHẮN CẦN TRẢ LỜI có thể gồm nhiều tin liền nhau của khách (mỗi dòng một tin): trả lời cho cả cụm, ưu tiên ý mua hàng hoặc câu hỏi cụ thể nhất.
 
 Sản phẩm: khách nêu gần nhất ghi đè; "đang tương tác với …" chỉ dùng khi chưa nêu. Chỉ nhắn số lượng → sản phẩm vừa báo giá. "Combo 1/2/3", "combo dùng thử" = số túi lớn, không phải Combo 10 gói.

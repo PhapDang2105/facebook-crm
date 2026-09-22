@@ -269,10 +269,26 @@ async function answerChange(change, settings, results, dependencies) {
     const inboxThread = !conversation.gender && conversation.source === 'comment' && getConversation
       ? await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null)
       : null;
-    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, now: Date.now(), customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
-    const reply = asksForHuman || message.type !== 'text'
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, now: Date.now(), messageText: String(message.text || ''), customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
+    // Sticker/biểu tượng: không cần trả lời, càng không cần chuyển người.
+    if (message.type === 'sticker') {
+      results.push({ conversationId: conversation.id, skipped: 'sticker' });
+      return;
+    }
+    // Ảnh, video, tệp: trước đây mọi tin không phải chữ đều chuyển nhân viên và
+    // tắt bot (nguồn chuyển CSKH lớn nhất). Giờ bot báo đã nhận hình, gắn thẻ
+    // để nhân viên xem, nhưng vẫn bật để trả lời tin chữ tiếp theo; nhiều ảnh
+    // liền nhau chỉ báo một lần.
+    const nonText = message.type !== 'text';
+    if (nonText && conversation.botLastTemplateId === 'IMAGE_RECEIVED') {
+      results.push({ conversationId: conversation.id, skipped: 'ảnh liền nhau' });
+      return;
+    }
+    const reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
-      : await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
+      : nonText
+        ? { ...renderChatbotReply({ template_id: settings.messageTemplates?.IMAGE_RECEIVED ? 'IMAGE_RECEIVED' : 'CSKH_HANDOFF' }, settings.messageTemplates || {}, replyContext), attention: true }
+        : await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
     // Trong lúc chờ mô hình khách nhắn thêm: bỏ câu này, tin sau trả lời gộp.
     if (message.type === 'text' && hasNewerCustomerMessage(await listMessages(conversation.id), change.message)) {
       results.push({ conversationId: conversation.id, skipped: 'gộp với tin sau' });
@@ -355,7 +371,8 @@ async function answerChange(change, settings, results, dependencies) {
     }
     const labelEvents = autoLabelEventsFor({
       order,
-      handoff: reply.handoff,
+      // Ảnh khách gửi: thẻ "Cần người xử lý" để nhân viên xem, bot vẫn bật.
+      handoff: reply.handoff || Boolean(reply.attention),
       text: message.text,
       templateId: reply.templateId,
       keywords: settings.complaintKeywords

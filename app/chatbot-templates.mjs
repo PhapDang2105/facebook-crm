@@ -174,6 +174,8 @@ function formatWeight(grams) {
 // The customer the reply is for, set by renderChatbotReply for the duration
 // of one render so every template can address them correctly.
 let activeCustomer = {};
+// Đơn gần nhất của khách trong hội thoại, để trả lời "đơn của em tới đâu rồi".
+let activeRecentOrder = null;
 
 /** anh / chị from the Messenger profile; the neutral form when unknown. */
 export function honorific(gender) {
@@ -244,7 +246,9 @@ function renderOrder(value, templates, context = {}) {
   const priced = items.length ? priceBasket(items) : null;
   const price = priced?.priceable ? priced : null;
 
-  const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number);
+  // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):
+  // đọc thẳng từ tin khách vừa nhắn thay vì hỏi lại thứ khách đã đưa.
+  const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number) || extractVietnamesePhone(context.messageText || '');
   const freshAddress = String(value.Customer_Address || '').trim();
   const phone = freshPhone || pending?.phone || '';
   // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
@@ -490,7 +494,28 @@ function renderDiscountPolicy(value, templates) {
   return fill(templates.DISCOUNT_POLICY, commonValues(), { combos });
 }
 
+/**
+ * "Đơn em tới đâu rồi?": kể lại đơn gần nhất trong hội thoại (món, giờ đặt,
+ * đã chuyển kho hay chưa) và mốc giao dự kiến; không có đơn thì xin SĐT để tra.
+ * Trước đây câu này bị chuyển nhân viên dù hệ thống đã có đủ dữ liệu.
+ */
+function renderOrderStatus(templates) {
+  const order = activeRecentOrder;
+  if (!order) return templates.ORDER_STATUS_NONE ? fill(templates.ORDER_STATUS_NONE, commonValues()) : '';
+  const items = (Array.isArray(order.products) ? order.products : [])
+    .map(item => `${item.name || item.product || item.sku || 'sản phẩm'} x${Number(item.quantity) || 1}`)
+    .join(', ') || 'sản phẩm đã đặt';
+  const at = new Date(Number(order.createdAt) || Date.now());
+  const parts = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }).formatToParts(at);
+  const part = type => parts.find(item => item.type === type)?.value || '';
+  const orderedAt = `${part('hour')}:${part('minute')} ngày ${part('day')}/${part('month')}`;
+  const shipped = Boolean(order.pos?.id || order.posOrderId || /đã giao|đang giao|đã gửi/i.test(String(order.status || '')));
+  const state = shipped ? 'đã chuyển sang kho để đóng gói và bàn giao vận chuyển' : 'đã được ghi nhận, kho đang chuẩn bị hàng';
+  return fill(templates.ORDER_STATUS, { ...commonValues(), items, ordered_at: orderedAt, state, total: formatMoney(Number(order.total) || 0) });
+}
+
 const catalogRenderers = {
+  ORDER_STATUS: (value, templates) => renderOrderStatus(templates),
   GENERAL_INFO: (value, templates) => renderGeneralInfo(templates),
   GIFT_POLICY: (value, templates) => renderGiftPolicy(templates),
   PRICE_MIX_TUI_LON: (value, templates) => renderMixPricing(templates),
@@ -511,7 +536,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_STATUS_NONE', 'IMAGE_RECEIVED']);
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -549,6 +574,7 @@ export function buildTemplatePrompt(templates = {}) {
  */
 export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   activeCustomer = context.customer || {};
+  activeRecentOrder = context.recentOrder || null;
   const templateId = String(value.template_id || '').trim();
   if (isOrderStep(templateId)) return renderOrder(value, templates, context);
   const catalogId = catalogRenderers[templateId] ? templateId : isProductQuoteId(templateId) ? 'PRICE_QUOTE' : '';
@@ -561,9 +587,11 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   // Chữ gửi khách chỉ lấy từ mẫu trong Cài đặt; mã mẫu lạ (hay chữ tự soạn
   // của mô hình, mà khách có thể lái) đi về CSKH_HANDOFF thay vì phát nguyên văn.
   const raw = (!catalogId && templates[templateId]) || templates.CSKH_HANDOFF;
+  const resolvedId = !catalogId && templates[templateId] ? templateId : 'CSKH_HANDOFF';
   return {
-    templateId: !catalogId && templates[templateId] ? templateId : 'CSKH_HANDOFF',
+    templateId: resolvedId,
     ...splitMessages(fill(raw, commonValues())),
-    handoff: templateId === 'CSKH_HANDOFF'
+    // Khách xin gọi điện: nhân viên phải gọi thật, nên vẫn chuyển người (kèm lời hẹn rõ).
+    handoff: resolvedId === 'CSKH_HANDOFF' || resolvedId === 'CALLBACK_REQUEST'
   };
 }

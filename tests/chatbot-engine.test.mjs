@@ -331,3 +331,58 @@ test('tin xác nhận đơn và lời xin địa chỉ điền chỗ trống c�
   const partial = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0909123456' }, custom);
   assert.deepEqual(partial.messages, ['Có số điện thoại, thiếu địa chỉ nhận hàng đầy đủ.']);
 });
+
+test('khách gửi ảnh: bot báo đã nhận hình, gắn thẻ cần người xử lý nhưng KHÔNG tắt bot; sticker thì im', async () => {
+  const log = [];
+  let savedState = null;
+  const templatesWithImage = { ...templates, IMAGE_RECEIVED: 'Dạ em đã nhận được hình của mình ạ.' };
+  const deps = {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templatesWithImage }),
+    listMessages: async () => [],
+    sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); return { message: { mid: 'mid.bot.9' } }; },
+    saveBotState: async (_id, state) => { savedState = state; },
+    requestReply: async () => { throw new Error('không được gọi mô hình cho ảnh'); }
+  };
+  await processChatbotChanges([{ type: 'message', conversation: { id: 'page:u9', psid: 'u9', name: 'Khách', botEnabled: true }, message: { id: 'mid.img.1', mid: 'mid.img.1', direction: 'incoming', type: 'image', text: '' } }], deps);
+  assert.deepEqual(log, ['send:Dạ em đã nhận được hình của mình ạ.']);
+  assert.equal(savedState.botEnabled, undefined, 'bot vẫn bật');
+  assert.ok((savedState.addLabelEvents || []).includes('handoff'), 'gắn thẻ cần người xử lý cho nhân viên xem');
+  // Ảnh thứ hai liền sau: không nhắn lại lần nữa.
+  log.length = 0;
+  await processChatbotChanges([{ type: 'message', conversation: { id: 'page:u9', psid: 'u9', botEnabled: true, botLastTemplateId: 'IMAGE_RECEIVED' }, message: { id: 'mid.img.2', mid: 'mid.img.2', direction: 'incoming', type: 'image', text: '' } }], deps);
+  assert.deepEqual(log, []);
+  // Sticker: im lặng, không chuyển người.
+  savedState = null;
+  const stickerResult = await processChatbotChanges([{ type: 'message', conversation: { id: 'page:u9', psid: 'u9', botEnabled: true }, message: { id: 'mid.st.1', mid: 'mid.st.1', direction: 'incoming', type: 'sticker', text: '' } }], deps);
+  assert.deepEqual(log, []);
+  assert.equal(savedState, null);
+  assert.equal(stickerResult[0].skipped, 'sticker');
+});
+
+test('ORDER_STATUS: kể lại đơn gần nhất trong hội thoại; không có đơn thì xin SĐT để tra', () => {
+  const withOrder = renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, {
+    recentOrder: { id: 'A1', createdAt: Date.UTC(2026, 8, 21, 15, 9), total: 298000, products: [{ name: 'Granola Túi Xanh 450g', quantity: 1 }, { name: 'Granola Túi Vàng 350g', quantity: 1 }] },
+    customer: { gender: 'female' }
+  });
+  assert.equal(withOrder.templateId, 'ORDER_STATUS');
+  assert.equal(withOrder.handoff, false);
+  assert.match(withOrder.messages[0], /Granola Túi Xanh 450g x1, Granola Túi Vàng 350g x1/);
+  assert.match(withOrder.messages[0], /22:09 ngày 21\/09/);
+  assert.match(withOrder.messages[0], /đã được ghi nhận/);
+  const noOrder = renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, { customer: { gender: 'female' } });
+  assert.equal(noOrder.templateId, 'ORDER_STATUS');
+  assert.match(noOrder.messages[0], /chưa thấy đơn nào/);
+  // Xin gọi điện: vẫn chuyển người nhưng có lời hẹn rõ.
+  const callback = renderChatbotReply({ template_id: 'CALLBACK_REQUEST' }, templates, { customer: { gender: 'male' } });
+  assert.equal(callback.handoff, true);
+  assert.match(callback.messages[0], /gọi lại cho mình/);
+});
+
+test('SĐT nằm chung dòng với tên và địa chỉ mà mô hình bỏ sót: đọc từ tin khách, không hỏi lại', () => {
+  const reply = renderChatbotReply({
+    template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0',
+    Customer_Address: '3a2/109/52 đường Miếu Hai Xã, phường Dư Hàng Kênh, quận Lê Chân, Hải Phòng'
+  }, templates, { messageText: 'ĐỊA CHỈ GỬI HÀNG Vũ Thanh Hải - 0912345678 3a2/109/52 đường Miếu Hai Xã, phường Dư Hàng Kênh, quận Lê Chân, Hải Phòng' });
+  assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
+  assert.equal(reply.order.phone, '0912345678');
+});

@@ -62,6 +62,8 @@ test('tin do Page gửi (nhân viên trả lời trong Pancake) là tin đi; bì
   // Rác của Facebook Shop: tin trống của khách và tin "Gửi tin nhắn" của Page không ghi.
   assert.deepEqual(normalizePancakeWebhook(incoming({ message: { id: 'm_empty', message: '<div></div>', original_message: '', attachments: [] } }), config), []);
   assert.deepEqual(normalizePancakeWebhook(incoming({ message: { id: 'm_cta', message: '<div></div>', original_message: '', from: { id: '110', name: 'Test' }, attachments: [{ id: 'm_cta', name: 'Gửi tin nhắn', type: 'attachment' }] } }), config), []);
+  assert.deepEqual(normalizePancakeWebhook(incoming({ message: { id: 'm_tpl', message: '<div></div>', original_message: '', attachments: [{ type: 'template' }] } }), config), [], 'thẻ template trống');
+  assert.deepEqual(normalizePancakeWebhook(incoming({ message: { id: 'm_react', message: '', original_message: '', from: { id: '110', name: 'Test' }, attachments: [{ emoji: '❤', reaction: 'other', type: 'reaction' }] } }), config), [], 'cảm xúc không kèm chữ');
 });
 
 test('khách bấm Mua ở Facebook Shop (cart_order): ghi thành chữ có tên, SKU, giá để hộp thư và bot đọc được', () => {

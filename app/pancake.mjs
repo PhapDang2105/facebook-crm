@@ -179,9 +179,10 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
   // Rác của Facebook Shop khi khách bấm "Gửi tin nhắn"/"Mua": một tin trống của
   // khách (không chữ, không đính kèm) và một tin của Page chỉ có đính kèm
-  // {type:'attachment', name:'Gửi tin nhắn'} không URL. Bỏ, không ghi hộp thư.
+  // {type:'attachment', name:'Gửi tin nhắn'} không URL; thẻ template trống
+  // (khách chia sẻ thẻ Shop) và cảm xúc (reaction) không kèm chữ. Bỏ, không ghi hộp thư.
   const hasContent = item => item?.url || item?.payload || item?.order || item?.post_attachments || item?.full_address || item?.address;
-  if (!text && (!attachments.length || attachments.every(item => ['attachment', 'fallback'].includes(String(item?.type || '').toLowerCase()) && !hasContent(item)))) return null;
+  if (!text && (!attachments.length || attachments.every(item => ['attachment', 'fallback', 'template', 'reaction'].includes(String(item?.type || '').toLowerCase()) && !hasContent(item)))) return null;
   // Ảnh/video Pancake đưa kèm URL trên CDN của họ: hộp thư hiện thẳng. Loại
   // khác (tệp, âm thanh) chỉ ghi là có đính kèm.
   const kindOf = item => String(item?.type || '').toLowerCase();

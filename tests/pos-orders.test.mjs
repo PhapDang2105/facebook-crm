@@ -37,7 +37,8 @@ test('body tạo đơn POS: SKU làm mã mẫu mã, giá niêm yết + giảm co
     ['GRA-NAU-Z350', 1, 164000, false],
     ['BGD', 1, 0, true]
   ], 'MUONG không có trong POS thì bỏ qua, không làm POS từ chối đơn');
-  assert.equal(payload.total_discount, 70000);
+  assert.equal(payload.discount, 70000);
+  assert.equal('total_discount' in payload, false, 'POS tự tính tổng giảm giá từ discount');
   assert.equal(payload.shipping_fee, 0);
   assert.equal(payload.is_free_shipping, true);
   assert.equal(payload.warehouse_id, 'wh-1');
@@ -47,7 +48,22 @@ test('body tạo đơn POS: SKU làm mã mẫu mã, giá niêm yết + giảm co
   assert.match(payload.note, /Khách ghi: Giao giờ hành chính/);
   // Tổng POS = niêm yết − giảm + ship = tổng CRM.
   const subtotal = payload.items.reduce((sum, item) => sum + item.quantity * item.variation_info.retail_price, 0);
-  assert.equal(subtotal - payload.total_discount + payload.shipping_fee, order.total);
+  assert.equal(subtotal - payload.discount + payload.shipping_fee, order.total);
+});
+
+test('hai túi lẻ giá 174.000đ gửi giảm combo 50.000đ ở trường POS áp dụng', () => {
+  const payload = buildPosOrderPayload({
+    ...order,
+    id: '840c5ef5',
+    products: [
+      { name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1, price: 174000 },
+      { name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 1, price: 174000 }
+    ],
+    discount: 50000,
+    total: 298000
+  });
+  assert.equal(payload.discount, 50000);
+  assert.equal(payload.items.reduce((sum, item) => sum + item.quantity * item.variation_info.retail_price, 0) - payload.discount, 298000);
 });
 
 function posFetch(calls, { variations = ['GRA-XANH-Z450', 'GRA-NAU-Z350', 'BGD', 'MUONG'], createStatus = 200, createBody = { id: 99001, system_id: 1234, status_name: 'new' } } = {}) {

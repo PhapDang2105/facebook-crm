@@ -4,6 +4,9 @@ import { defaultComplaintKeywords } from './processing/auto-label.mjs';
 
 export const defaultChatbotSettings = Object.freeze({
   enabled: false,
+  // Tắt thì bot vẫn tư vấn, báo giá và xác nhận, nhưng không tự tạo đơn: giỏ khách
+  // chốt được giữ ở pendingOrder để nhân viên lên đơn tay.
+  autoOrder: true,
   name: 'Trợ lý Giọt Nắng',
   responseMode: 'automatic',
   provider: 'vertex',
@@ -115,6 +118,7 @@ export function normalizeChatbotSettings(value = {}) {
   // The processing pipeline is code in app/processing, not editable settings.
   return {
     enabled: value.enabled === true,
+    autoOrder: value.autoOrder !== false,
     name: cleanText(value.name, defaultChatbotSettings.name, 100),
     responseMode,
     provider,

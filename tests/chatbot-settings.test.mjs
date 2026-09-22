@@ -6,6 +6,7 @@ import { defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings
 test('chatbot mặc định gọi Vertex AI trực tiếp và chưa hoạt động', () => {
   const settings = normalizeChatbotSettings();
   assert.equal(settings.enabled, false);
+  assert.equal(settings.autoOrder, true);
   assert.equal(settings.responseMode, 'automatic');
   assert.equal(settings.name, defaultChatbotSettings.name);
   assert.equal(settings.provider, 'vertex');

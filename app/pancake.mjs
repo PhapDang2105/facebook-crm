@@ -14,7 +14,22 @@ import { publishMessagingEvent } from './message-events.mjs';
 import { assertPublicHost } from './network-guard.mjs';
 
 export function isPancakeConfigured(config = defaultConfig) {
-  return Boolean(config.pageId && config.pageAccessToken && config.webhookToken);
+  const pages = config.pages?.length ? config.pages : (config.pageId && config.pageAccessToken ? [config] : []);
+  return pages.length > 0 && Boolean(config.webhookToken);
+}
+
+export function getPancakePageConfig(pageId, config = defaultConfig) {
+  const pages = config.pages || [];
+  const found = pages.find(p => String(p.pageId) === String(pageId));
+  if (found) {
+    return {
+      ...config,
+      pageId: found.pageId,
+      pageName: found.pageName,
+      pageAccessToken: found.pageAccessToken
+    };
+  }
+  return config;
 }
 
 /** Token trong URL webhook: so sánh theo thời gian hằng; token trống nghĩa là chưa bật. */
@@ -56,7 +71,8 @@ export function pancakeTime(value, fallback = Date.now()) {
 export function normalizePancakeWebhook(payload, config = defaultConfig, now = Date.now()) {
   if (!payload || payload.event_type !== 'messaging') return [];
   const pageId = String(payload.page_id || '');
-  if (!pageId || (config.pageId && pageId !== String(config.pageId))) return [];
+  const pages = config.pages?.length ? config.pages : (config.pageId ? [config] : []);
+  if (!pageId || (pages.length && !pages.some(p => String(p.pageId) === pageId))) return [];
   const data = payload.data || {};
   const conversation = data.conversation || {};
   const message = data.message || {};
@@ -289,47 +305,54 @@ export function syncPancakeConversations(options = {}, config = defaultConfig, f
   return activeSync;
 }
 
-async function runPancakeSync({ limit = 60, messagePages = 1, commentLimit = 30 } = {}, config = defaultConfig, fetchImpl = fetch) {
+async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLimit = 30 } = {}, config = defaultConfig, fetchImpl = fetch) {
   if (!isPancakeConfigured(config)) return { conversations: 0, messages: 0, skipped: 'chưa cấu hình' };
-  const pageId = String(config.pageId);
-  const conversations = await fetchPancakeConversations({ limit }, config, fetchImpl);
-  let stored = 0;
-  const failures = [];
-  // Một hội thoại lỗi mạng không làm hỏng cả lượt; giãn 200 ms giữa các lần gọi để không chạm 5 lần/giây.
-  for (const [index, conversation] of conversations.entries()) {
-    if (index) await pause(200);
-    try {
-      const messages = await fetchPancakeMessages(conversation.id, { pages: messagePages }, config, fetchImpl);
-      const events = messages
-        .map(message => pancakeMessageEvent(pageId, conversation, message))
-        .filter(Boolean)
-        .sort((first, second) => first.timestamp - second.timestamp);
-      stored += (await storePancakeEvents(events)).filter(change => change.type === 'message').length;
-    } catch (error) {
-      failures.push(`${conversation.id}: ${error.message}`);
+  const pages = pageId
+    ? [getPancakePageConfig(pageId, config)]
+    : (config.pages?.length ? config.pages.map(p => getPancakePageConfig(p.pageId, config)) : [config]);
+  
+  let totalConversations = 0;
+  let totalStored = 0;
+  const allFailures = [];
+
+  for (const page of pages) {
+    const pId = String(page.pageId);
+    if (!pId || !page.pageAccessToken) continue;
+    const conversations = await fetchPancakeConversations({ limit }, page, fetchImpl);
+    for (const [index, conversation] of conversations.entries()) {
+      if (index) await pause(200);
+      try {
+        const messages = await fetchPancakeMessages(conversation.id, { pages: messagePages }, page, fetchImpl);
+        const events = messages
+          .map(message => pancakeMessageEvent(pId, conversation, message))
+          .filter(Boolean)
+          .sort((first, second) => first.timestamp - second.timestamp);
+        totalStored += (await storePancakeEvents(events)).filter(change => change.type === 'message').length;
+      } catch (error) {
+        allFailures.push(`${conversation.id}: ${error.message}`);
+      }
     }
-  }
-  // Hội thoại từ quảng cáo còn thiếu tên/bài quảng cáo (kể cả không có tin mới): tra bổ sung.
-  const store = await readMessagingStore();
-  const pendingAds = store.conversations.filter(item => item.pageId === pageId && needsAdContext(item));
-  if (pendingAds.length) await enrichPancakeAdContext(pendingAds, config, fetchImpl);
-  const threads = commentLimit > 0 ? await fetchPancakeConversations({ limit: commentLimit, type: 'COMMENT' }, config, fetchImpl) : [];
-  for (const thread of threads) {
-    await pause(200);
-    try {
-      const comments = await fetchPancakeMessages(thread.id, { pages: 1 }, config, fetchImpl);
-      const post = comments.post || { id: thread.post_id };
-      // Bình luận gốc trước, trả lời sau, để trả lời của Page tìm được luồng cha.
-      const events = comments
-        .map(comment => pancakeCommentEvent(pageId, thread, comment, post))
-        .filter(Boolean)
-        .sort((first, second) => (first.parentId ? 1 : 0) - (second.parentId ? 1 : 0) || first.timestamp - second.timestamp);
-      stored += (await storePancakeEvents(events)).filter(change => change.type === 'message').length;
-    } catch (error) {
-      failures.push(`${thread.id}: ${error.message}`);
+    const store = await readMessagingStore();
+    const pendingAds = store.conversations.filter(item => item.pageId === pId && needsAdContext(item));
+    if (pendingAds.length) await enrichPancakeAdContext(pendingAds, page, fetchImpl);
+    const threads = commentLimit > 0 ? await fetchPancakeConversations({ limit: commentLimit, type: 'COMMENT' }, page, fetchImpl) : [];
+    for (const thread of threads) {
+      await pause(200);
+      try {
+        const comments = await fetchPancakeMessages(thread.id, { pages: 1 }, page, fetchImpl);
+        const post = comments.post || { id: thread.post_id };
+        const events = comments
+          .map(comment => pancakeCommentEvent(pId, thread, comment, post))
+          .filter(Boolean)
+          .sort((first, second) => (first.parentId ? 1 : 0) - (second.parentId ? 1 : 0) || first.timestamp - second.timestamp);
+        totalStored += (await storePancakeEvents(events)).filter(change => change.type === 'message').length;
+      } catch (error) {
+        allFailures.push(`${thread.id}: ${error.message}`);
+      }
     }
+    totalConversations += conversations.length + threads.length;
   }
-  return { conversations: conversations.length + threads.length, messages: stored, ...(failures.length ? { failures } : {}) };
+  return { conversations: totalConversations, messages: totalStored, ...(allFailures.length ? { failures: allFailures } : {}) };
 }
 
 let pancakeSyncTimer = null;
@@ -455,11 +478,12 @@ const apiRoot = config => config.apiBase.replace(/\/+$/, '');
  * `postId`, `commentId`, `fromId`).
  */
 export async function sendPancakeMessage({ pageId, conversationId, text = '', contentIds = [], action = 'reply_inbox', commentId = '', postId = '', fromId = '' }, config = defaultConfig, fetchImpl = fetch, attempt = 0) {
-  if (!config.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
+  const pageConfig = getPancakePageConfig(pageId, config);
+  if (!pageConfig.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
   if (!conversationId) throw new Error('Hội thoại này chưa có mã Pancake để gửi.');
   if (!text && !contentIds.length) throw new Error('Tin nhắn trống.');
   if (action !== 'reply_inbox' && !commentId) throw new Error('Chưa có bình luận nào của khách để trả lời.');
-  const url = `${apiRoot(config)}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(conversationId)}/messages?page_access_token=${encodeURIComponent(config.pageAccessToken)}`;
+  const url = `${apiRoot(config)}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(conversationId)}/messages?page_access_token=${encodeURIComponent(pageConfig.pageAccessToken)}`;
   const content = contentIds.length ? { content_ids: contentIds } : { message: text };
   const payload = action === 'reply_comment'
     ? { action, message_id: commentId, ...content }
@@ -498,9 +522,10 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
 
 /** Tải một tệp (ảnh, video…) lên Page trong Pancake; mã trả về dùng để gửi kèm tin. */
 export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg', mime = 'application/octet-stream' }, config = defaultConfig, fetchImpl = fetch, attempt = 0) {
-  if (!config.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
+  const pageConfig = getPancakePageConfig(pageId, config);
+  if (!pageConfig.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
   if (!buffer?.length) throw new Error('Tệp trống.');
-  const url = `${apiRoot(config)}/v1/pages/${encodeURIComponent(pageId)}/upload_contents?page_access_token=${encodeURIComponent(config.pageAccessToken)}`;
+  const url = `${apiRoot(config)}/v1/pages/${encodeURIComponent(pageId)}/upload_contents?page_access_token=${encodeURIComponent(pageConfig.pageAccessToken)}`;
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mime }), filename);
   const controller = new AbortController();

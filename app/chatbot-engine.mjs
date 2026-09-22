@@ -282,7 +282,9 @@ async function answerChange(change, settings, results, dependencies) {
     // failed order left the customer holding a confirmation for an order that
     // did not exist, and a retried webhook sent the whole reply a second time.
     const isComment = conversation.source === 'comment';
-    const outcome = settings.responseMode === 'automatic' && reply.order && createOrder && !isComment
+    // "Tự động lên đơn" tắt (settings.autoOrder === false): bot vẫn xác nhận với
+    // khách nhưng không tạo đơn; giỏ được giữ ở pendingOrder cho nhân viên.
+    const outcome = settings.responseMode === 'automatic' && settings.autoOrder !== false && reply.order && createOrder && !isComment
       ? await createOrder(conversation, reply.order, {
           sourceMessageId: String(change.message.mid || change.message.id || '')
         })
@@ -366,7 +368,11 @@ async function answerChange(change, settings, results, dependencies) {
       botLastError: privateError ? `Không nhắn riêng được: ${privateError}` : '',
       botLastErrorAt: privateError ? Date.now() : 0,
       // undefined leaves the stored basket alone; null clears it once ordered.
-      ...(reply.pendingOrder !== undefined && !isComment ? { pendingOrder: reply.pendingOrder } : {}),
+      // undefined để nguyên giỏ đang giữ; null xóa khi đã lên đơn. Tắt tự động
+      // lên đơn thì giỏ khách vừa chốt được giữ lại thay vì xóa.
+      ...(!isComment && !order && reply.order && settings.autoOrder === false
+        ? { pendingOrder: { ...(conversation.pendingOrder || {}), ...reply.order, at: Date.now() } }
+        : reply.pendingOrder !== undefined && !isComment ? { pendingOrder: reply.pendingOrder } : {}),
       ...(reply.handoff ? { botEnabled: false } : {}),
       // Thẻ tự động: bot chỉ nói chuyện gì vừa xảy ra (chốt đơn / chuyển nhân
       // viên / khách khiếu nại); thẻ nào được gắn là do Cài đặt → Tin nhắn.

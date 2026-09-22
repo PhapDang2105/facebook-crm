@@ -82,10 +82,45 @@ export const landingConfig = {
 // qua Pancake. Token và ID Page lấy ở Pancake → Cài đặt → Công cụ (Public API
 // access token, Webhook). Để trống là tắt.
 const pancakePath = process.env.PANCAKE_WEBHOOK_PATH || '/webhooks/pancake';
+
+function parsePancakePages() {
+  const pages = [];
+  if (process.env.PANCAKE_PAGES) {
+    try {
+      const parsed = JSON.parse(process.env.PANCAKE_PAGES);
+      if (Array.isArray(parsed)) {
+        for (const p of parsed) {
+          if (p.pageId && p.pageAccessToken) {
+            pages.push({
+              pageId: String(p.pageId),
+              pageName: String(p.pageName || 'Pancake Page'),
+              pageAccessToken: String(p.pageAccessToken)
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+  if (process.env.PANCAKE_PAGE_ID && process.env.PANCAKE_PAGE_ACCESS_TOKEN) {
+    const id = String(process.env.PANCAKE_PAGE_ID);
+    if (!pages.some(p => p.pageId === id)) {
+      pages.push({
+        pageId: id,
+        pageName: String(process.env.PANCAKE_PAGE_NAME || 'Giọt Nắng Healthy'),
+        pageAccessToken: String(process.env.PANCAKE_PAGE_ACCESS_TOKEN)
+      });
+    }
+  }
+  return pages;
+}
+
+const parsedPages = parsePancakePages();
+
 export const pancakeConfig = {
-  pageId: process.env.PANCAKE_PAGE_ID || '',
-  pageName: process.env.PANCAKE_PAGE_NAME || 'Giọt Nắng Healthy',
-  pageAccessToken: process.env.PANCAKE_PAGE_ACCESS_TOKEN || '',
+  pages: parsedPages,
+  pageId: parsedPages[0]?.pageId || process.env.PANCAKE_PAGE_ID || '',
+  pageName: parsedPages[0]?.pageName || process.env.PANCAKE_PAGE_NAME || 'Giọt Nắng Healthy',
+  pageAccessToken: parsedPages[0]?.pageAccessToken || process.env.PANCAKE_PAGE_ACCESS_TOKEN || '',
   webhookToken: process.env.PANCAKE_WEBHOOK_TOKEN || '',
   path: pancakePath,
   webhookUrl: `${publicBaseUrl}${pancakePath}`,

@@ -4,7 +4,7 @@
 // - Mỗi dòng gửi `variation_id` = SKU của CRM (POS nhận SKU làm mã mẫu mã); quà
 //   có SKU trong bảng quà (bát gáo dừa, muỗng dừa) đi kèm là sản phẩm tặng.
 // - Giá gửi là giá niêm yết từng dòng, giảm combo và phí ship gửi riêng
-//   (`total_discount`, `shipping_fee`, `is_free_shipping`) nên tổng POS bằng tổng CRM.
+//   (`discount`, `shipping_fee`, `is_free_shipping`) nên tổng POS bằng tổng CRM.
 // - Địa chỉ gửi nguyên văn: POS tự tách tỉnh/quận/phường khi không có mã.
 // - `custom_id` = "CRM-<mã đơn>" để đồng bộ POS → CRM (pos-sync) không kéo đơn
 //   này về thành đơn landing lần nữa, và để tra chéo hai bên.
@@ -190,7 +190,9 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
     items,
     shipping_fee: money(order.shippingFee),
     is_free_shipping: Boolean(order.freeShipping) || money(order.shippingFee) === 0,
-    total_discount: money(order.discount),
+    // POS tính lại total_discount từ `discount`; chỉ gửi total_discount khiến
+    // đơn tạo qua API giữ giảm giá 0 dù CRM đã tính đúng giá combo.
+    discount: money(order.discount),
     note: noteParts.join(' · '),
     received_at_shop: false,
     status: 0,

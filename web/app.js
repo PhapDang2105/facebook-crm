@@ -136,6 +136,7 @@ const productSubmit = document.querySelector('#product-submit');
 const sharedProductOptions = document.querySelector('#shared-product-options');
 const chatbotSettingsForm = document.querySelector('#chatbot-settings-form');
 const chatbotSettingsEnabled = document.querySelector('#chatbot-settings-enabled');
+const chatbotSettingsAutoOrder = document.querySelector('#chatbot-settings-auto-order');
 const chatbotSettingsProvider = document.querySelector('#chatbot-settings-provider');
 const chatbotSettingsAuthType = document.querySelector('#chatbot-settings-auth-type');
 const chatbotAuthTypeField = document.querySelector('#chatbot-auth-type-field');
@@ -2656,7 +2657,91 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
 
+// ===== Chuông thông báo =====
+//
+// Mọi thông báo (toast) đều được ghi lại ở bảng dưới chuông trên thanh đầu
+// trang, giữ 50 mục gần nhất trong trình duyệt; lỗi thì mở bảng ngay để không
+// trôi mất, thành công chỉ đếm số chưa đọc.
+const notificationButton = document.querySelector('.notification-button');
+const notificationPanel = document.querySelector('#notification-panel');
+const notificationList = notificationPanel?.querySelector('.notification-list');
+const notificationCount = notificationButton?.querySelector('.notification-count');
+const notificationClear = notificationPanel?.querySelector('.notification-clear');
+const notificationAnnouncement = document.querySelector('.notification-announcement');
+const notificationsKey = 'crm-notifications-v1';
+let notifications = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(notificationsKey) || '[]');
+    return Array.isArray(saved) ? saved.filter(item => item && typeof item.message === 'string' && Number.isFinite(item.at)).slice(0, 50) : [];
+  } catch { return []; }
+})();
+
+function saveNotifications() {
+  try { localStorage.setItem(notificationsKey, JSON.stringify(notifications)); } catch {}
+}
+
+function renderNotifications() {
+  if (!notificationList) return;
+  notificationList.replaceChildren();
+  if (!notifications.length) {
+    const empty = document.createElement('p');
+    empty.className = 'notification-empty';
+    empty.textContent = 'Chưa có thông báo nào.';
+    notificationList.appendChild(empty);
+  }
+  for (const item of notifications) {
+    const row = document.createElement('div');
+    row.className = `notification-item notification-item--${item.type === 'success' ? 'success' : 'error'}${item.read ? '' : ' notification-item--unread'}`;
+    const message = document.createElement('span');
+    message.textContent = item.message;
+    const time = document.createElement('time');
+    time.dateTime = new Date(item.at).toISOString();
+    time.textContent = new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }).format(item.at);
+    row.append(message, time);
+    notificationList.appendChild(row);
+  }
+  const unread = notifications.filter(item => !item.read).length;
+  notificationCount?.classList.toggle('hidden', unread === 0);
+  if (notificationCount) notificationCount.textContent = unread > 99 ? '99+' : String(unread);
+  notificationButton?.setAttribute('aria-label', unread ? `Thông báo, ${unread} chưa đọc` : 'Thông báo');
+  notificationClear?.classList.toggle('hidden', notifications.length === 0);
+}
+
+function setNotificationsOpen(open) {
+  notificationPanel?.classList.toggle('hidden', !open);
+  notificationButton?.setAttribute('aria-expanded', String(open));
+  if (open && notifications.some(item => !item.read)) {
+    notifications = notifications.map(item => ({ ...item, read: true }));
+    saveNotifications();
+    renderNotifications();
+  }
+}
+
+function addNotification(message, type) {
+  notifications.unshift({ message: String(message), type, at: Date.now(), read: false });
+  notifications = notifications.slice(0, 50);
+  saveNotifications();
+  renderNotifications();
+  if (notificationAnnouncement) notificationAnnouncement.textContent = String(message);
+  if (type !== 'success') setNotificationsOpen(true);
+}
+
+notificationButton?.addEventListener('click', () => setNotificationsOpen(notificationPanel?.classList.contains('hidden')));
+notificationClear?.addEventListener('click', () => {
+  notifications = [];
+  saveNotifications();
+  renderNotifications();
+});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.notification-button, .notification-panel')) setNotificationsOpen(false);
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') setNotificationsOpen(false);
+});
+renderNotifications();
+
 function showToast(message, type = 'error', duration = 3500) {
+  addNotification(message, type);
   document.querySelector('.app-toast')?.remove();
   const toast = document.createElement('div');
   toast.className = `app-toast app-toast--${type}`;
@@ -3153,6 +3238,7 @@ function connectMessagingStream() {
 
 async function switchMessageChannel(channelId) {
   currentMessageChannelId = channelId;
+  try { localStorage.setItem('crm-selected-channel-id', channelId); } catch {}
   if (usingRemoteConversations) {
     try {
       await loadRemoteConversations(channelId);
@@ -3176,7 +3262,7 @@ async function loadMessageChannels() {
     picture: '/assets/giot-nang-logo.webp',
     platform: 'facebook'
   }];
-  if (!messageChannels.some(channel => channel.id === currentMessageChannelId)) currentMessageChannelId = messageChannels[0].id;
+  if (!messageChannels.some(channel => channel.id === currentMessageChannelId)) currentMessageChannelId = getDefaultChannelId(messageChannels);
   if (usingRemoteConversations) {
     try {
       await loadRemoteConversations(currentMessageChannelId);
@@ -4256,6 +4342,7 @@ async function loadChatbotSettings() {
   try {
     const settings = await readApiResponse(await fetch('/api/chatbot/settings'));
     chatbotSettingsEnabled.checked = settings.enabled === true;
+    if (chatbotSettingsAutoOrder) chatbotSettingsAutoOrder.checked = settings.autoOrder !== false;
     chatbotSettingsProvider.value = settings.provider || 'vertex';
     chatbotSettingsAuthType.value = settings.directAuthType === 'api_key' ? 'api_key' : 'access_token';
     chatbotSettingsProtocol.value = settings.directProtocol === 'anthropic' ? 'anthropic' : 'openai';
@@ -7719,6 +7806,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enabled: chatbotSettingsEnabled.checked,
+        autoOrder: chatbotSettingsAutoOrder ? chatbotSettingsAutoOrder.checked : true,
         responseMode: 'automatic',
         provider: chatbotSettingsProvider.value,
         directAuthType: chatbotSettingsAuthType.value,
@@ -7743,6 +7831,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
       })
     }));
     chatbotSettingsEnabled.checked = settings.enabled === true;
+    if (chatbotSettingsAutoOrder) chatbotSettingsAutoOrder.checked = settings.autoOrder !== false;
     showToast('Đã lưu cấu hình AI thành công.', 'success');
   } catch (error) {
     showToast(error.message || 'Chưa lưu được thiết lập chatbot.', 'error');
@@ -9454,3 +9543,43 @@ if (metaConnectionParams.has('meta_error')) {
 if (metaConnectionParams.has('meta_ticket')) {
   openPendingFacebookPages(metaConnectionParams.get('meta_ticket')).catch(error => showToast(error.message));
 }
+
+// Hai công tắc đầu trang Thiết lập chatbot lưu ngay khi gạt, không cần bấm
+// "Lưu cấu hình AI" (gạt nhầm thì gạt lại là xong).
+chatbotSettingsAutoOrder?.addEventListener('change', async () => {
+  const desired = chatbotSettingsAutoOrder.checked;
+  chatbotSettingsAutoOrder.disabled = true;
+  try {
+    const updated = await readApiResponse(await fetch('/api/chatbot/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoOrder: desired })
+    }));
+    chatbotSettingsAutoOrder.checked = updated.autoOrder !== false;
+    showToast(updated.autoOrder !== false ? 'Đã bật tự động lên đơn.' : 'Đã tắt tự động lên đơn: bot vẫn xác nhận, nhân viên lên đơn tay.', 'success');
+  } catch (error) {
+    chatbotSettingsAutoOrder.checked = !desired;
+    showToast(error.message || 'Chưa lưu được thiết lập tự động lên đơn.', 'error');
+  } finally {
+    chatbotSettingsAutoOrder.disabled = false;
+  }
+});
+
+chatbotSettingsEnabled?.addEventListener('change', async () => {
+  const desired = chatbotSettingsEnabled.checked;
+  chatbotSettingsEnabled.disabled = true;
+  try {
+    const updated = await readApiResponse(await fetch('/api/chatbot/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: desired })
+    }));
+    chatbotSettingsEnabled.checked = updated.enabled === true;
+    showToast(updated.enabled ? 'Đã bật chatbot hoạt động.' : 'Đã tạm tắt chatbot hoạt động.', 'success');
+  } catch (error) {
+    chatbotSettingsEnabled.checked = !desired;
+    showToast(error.message || 'Chưa lưu được trạng thái chatbot.', 'error');
+  } finally {
+    chatbotSettingsEnabled.disabled = false;
+  }
+});

@@ -177,6 +177,34 @@ test('khách xác nhận lần hai không tạo đơn trùng và không gửi l�
   assert.deepEqual(log, []);
 });
 
+test('tắt tự động lên đơn: bot vẫn trả lời nhưng không gọi createOrder và không gửi receipt', async () => {
+  const log = [];
+  let savedState = null;
+  const result = await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true },
+    message: { id: 'mid.customer.1', mid: 'mid.customer.1', direction: 'incoming', type: 'text', text: 'chốt đơn' }
+  }], {
+    readSettings: async () => ({ enabled: true, autoOrder: false, responseMode: 'automatic', handoffKeywords: '' }),
+    listMessages: async () => [],
+    sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); return { message: { mid: 'mid.bot.1' } }; },
+    sendReceipt: async (_conversation, order) => { log.push(`receipt:${order.id}`); },
+    saveBotState: async (_id, state) => { savedState = state; },
+    requestReply: async () => ({
+      templateId: 'ORDER_CONFIRMATION', messages: ['Xác nhận đơn'], handoff: false,
+      order: { items: [{ product: 'Túi Xanh', code: 'GRA-XANH-Z450', quantity: 2 }], phone: '0909123456', address: 'Quận 12', total: 298000, shippingFee: 0 }
+    }),
+    createOrder: async (_conversation, _order, context) => {
+      log.push(`create:${context.sourceMessageId}`);
+      return { order: { id: 'AUTO-01' }, created: true };
+    }
+  });
+  assert.deepEqual(log, ['send:Xác nhận đơn']);
+  assert.equal(result[0].orderId, undefined);
+  assert.equal(savedState.pendingOrder.phone, '0909123456');
+  assert.equal(savedState.pendingOrder.address, 'Quận 12');
+});
+
 const fullAddress = '176/1A KP1, An Phú Đông, Quận 12, TP.HCM';
 
 test('xác nhận đơn tính giá từ danh mục: 2 túi giá combo, miễn ship', () => {

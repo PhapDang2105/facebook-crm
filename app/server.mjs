@@ -860,6 +860,8 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const store = await readChannelStore();
+      const nongSanPage = store.items.find(item => item.name?.includes('Giọt Nắng') && item.picture);
+      const defaultPicture = nongSanPage?.picture || '/assets/giot-nang-logo.webp';
       return sendJson(response, 200, {
         metaConfigured: isMetaConfigured(),
         missingConfiguration: missingMetaConfiguration(),
@@ -870,7 +872,7 @@ const server = http.createServer(async (request, response) => {
           ...store.items.map(publicChannel),
           // Page vận hành trong Pancake: không có token Meta, hiện như một kênh để
           // hộp thư xem được hội thoại bot đang trả lời qua Pancake.
-          ...(isPancakeConfigured() ? [{ id: pancakeConfig.pageId, name: pancakeConfig.pageName, picture: '', platform: 'facebook', via: 'pancake', status: 'connected', subscribed: true, subscribedFields: [], subscriptionError: '', connectedAt: 0, checkedAt: 0, syncedAt: '' }] : [])
+          ...(isPancakeConfigured() ? (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]).map(p => ({ id: p.pageId, name: p.pageName, picture: p.picture || defaultPicture, platform: 'facebook', via: 'pancake', status: 'connected', subscribed: true, subscribedFields: [], subscriptionError: '', connectedAt: 0, checkedAt: 0, syncedAt: '' })) : [])
         ],
         pancake: { configured: isPancakeConfigured(), webhookUrl: pancakeConfig.webhookUrl, pageId: pancakeConfig.pageId }
       });
@@ -1123,28 +1125,48 @@ const server = http.createServer(async (request, response) => {
     // ghi hộp thư để theo dõi, bot trả lời ngược qua Public API của Pancake.
     // Pancake không ký payload nên xác thực bằng token trong URL; trả 200 ngay
     // vì Pancake tạm ngưng webhook khi lỗi hay chậm nhiều.
-    if (request.method === 'POST' && url.pathname === pancakeConfig.path) {
-      if (!isPancakeConfigured() || !isPancakeWebhookTokenValid(url.searchParams.get('token'), pancakeConfig.webhookToken)) {
-        response.writeHead(isPancakeConfigured() ? 401 : 503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-        return response.end(isPancakeConfigured() ? 'Invalid token' : 'Pancake webhook is not configured');
+    if (url.pathname === pancakeConfig.path) {
+      if (request.method === 'GET' || request.method === 'HEAD') {
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        return response.end('{"status":"ok"}');
       }
-      // Luôn trả 200 (Pancake tạm ngưng webhook khi >80% lần gọi lỗi); thân hỏng chỉ ghi log.
-      let payload = null;
-      try {
-        payload = await readBody(request);
-      } catch (error) {
-        console.error('Webhook Pancake thân không đọc được:', error.message);
+      if (request.method === 'POST') {
+        let payload = null;
+        try {
+          payload = await readBody(request);
+        } catch (error) {
+          console.error('Webhook Pancake thân không đọc được:', error.message);
+        }
+        const queryToken = url.searchParams.get('token');
+        const headerToken = request.headers['x-pancake-token'] || request.headers['x-webhook-token'];
+        const bodyToken = payload?.token || payload?.verify_token;
+        const pageId = String(payload?.page_id || '');
+        const tokenCandidates = [queryToken, headerToken, bodyToken].filter(Boolean);
+        const configuredTokens = [
+          pancakeConfig.webhookToken,
+          ...(pancakeConfig.pages || []).map(p => p.webhookToken)
+        ].filter(Boolean);
+        const tokenValid = tokenCandidates.some(tok => configuredTokens.some(cfg => isPancakeWebhookTokenValid(tok, cfg)));
+        // Token có thể nằm ở URL, header hoặc thân tin, nhưng bắt buộc phải khớp:
+        // Pancake không ký payload, nên không có token thì ai biết page_id cũng
+        // chèn được tin giả vào hộp thư và kích bot trả lời.
+        if (!isPancakeConfigured() || !tokenValid) {
+          if (isPancakeConfigured()) console.warn('Webhook Pancake token không khớp, bỏ qua (page', pageId || '?', ')');
+          response.writeHead(isPancakeConfigured() ? 401 : 503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+          return response.end(isPancakeConfigured() ? 'Invalid token' : 'Pancake webhook is not configured');
+        }
+        // Luôn trả 200 (Pancake tạm ngưng webhook khi >80% lần gọi lỗi); thân hỏng chỉ ghi log.
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end('{"received":true}');
+        if (!payload || !payload.event_type || payload.event_type === 'verify') return undefined;
+        try {
+          const summary = await handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies });
+          if (summary.stored) console.log(`Webhook Pancake: ghi ${summary.stored} tin, đưa bot ${summary.bot}`);
+        } catch (error) {
+          console.error('Webhook Pancake xử lý lỗi:', error.message);
+        }
+        return undefined;
       }
-      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-      response.end('{"received":true}');
-      if (!payload) return undefined;
-      try {
-        const summary = await handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies });
-        if (summary.stored) console.log(`Webhook Pancake: ghi ${summary.stored} tin, đưa bot ${summary.bot}`);
-      } catch (error) {
-        console.error('Webhook Pancake xử lý lỗi:', error.message);
-      }
-      return undefined;
     }
     if (request.method === 'POST' && url.pathname === metaConfig.webhookPath) {
       const rawBody = await readRawBody(request);
@@ -1312,8 +1334,9 @@ const server = http.createServer(async (request, response) => {
       const pageId = String(payload.channelId || '');
       if (!pageId) return sendJson(response, 400, { error: 'Thiếu channelId của Facebook Page cần đồng bộ.' });
       // Kênh Pancake: kéo lịch sử bằng API Pancake thay vì Graph của Meta.
-      const summary = isPancakeConfigured() && pageId === pancakeConfig.pageId
-        ? await syncPancakeConversations({ limit: Number(payload.limit) || 60, messagePages: 2 })
+      const isPancake = isPancakeConfigured() && (pancakeConfig.pages?.length ? pancakeConfig.pages.some(p => String(p.pageId) === pageId) : pageId === pancakeConfig.pageId);
+      const summary = isPancake
+        ? await syncPancakeConversations({ pageId, limit: Number(payload.limit) || 60, messagePages: 2 })
         : await syncPageConversations(pageId, { limit: Number(payload.limit) || 25 });
       return sendJson(response, 200, { ...summary, items: await listConversations(pageId) });
     }

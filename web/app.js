@@ -268,6 +268,7 @@ chatbotModelParamsButton?.addEventListener('click', () => {
 const chatbotSettingsStructuredOutput = document.querySelector('#chatbot-settings-structured-output');
 const chatbotSettingsRetryCount = document.querySelector('#chatbot-settings-retry-count');
 const chatbotSettingsRetryInterval = document.querySelector('#chatbot-settings-retry-interval');
+const chatbotSettingsFallbackModel = document.querySelector('#chatbot-settings-fallback-model');
 const chatbotSettingsWelcome = document.querySelector('#chatbot-settings-welcome');
 const labelComplaintKeywords = document.querySelector('#label-complaint-keywords');
 const chatbotPreviewSend = document.querySelector('#chatbot-preview-send');
@@ -4390,6 +4391,7 @@ async function loadChatbotSettings() {
     chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;
     chatbotSettingsRetryCount.value = settings.retryCount ?? 1;
     chatbotSettingsRetryInterval.value = settings.retryIntervalMs || 1000;
+    if (chatbotSettingsFallbackModel) chatbotSettingsFallbackModel.value = settings.fallbackModel ?? '';
     chatbotSettingsWelcome.value = settings.welcomeMessage || '';
     chatbotTemplatesState = { ...(settings.templates || {}) };
     chatbotOriginalTemplates = { ...(settings.templates || {}) };
@@ -7847,6 +7849,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         structuredOutput: chatbotSettingsStructuredOutput.checked,
         retryCount: chatbotSettingsRetryCount.value,
         retryIntervalMs: chatbotSettingsRetryInterval.value,
+        ...(chatbotSettingsFallbackModel ? { fallbackModel: chatbotSettingsFallbackModel.value.trim() } : {}),
         welcomeMessage: chatbotSettingsWelcome.value,
         handoffKeywords: '',
         messageTemplates: chatbotTemplatesState

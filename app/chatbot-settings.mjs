@@ -21,6 +21,8 @@ export const defaultChatbotSettings = Object.freeze({
   structuredOutput: true,
   retryCount: 1,
   retryIntervalMs: 1000,
+  // Model dự phòng khi model chính hết hạn mức (429); trống = không dùng.
+  fallbackModel: 'gemini-2.5-flash',
   welcomeMessage: '',
   handoffKeywords: '',
   // Lời khách có những từ này thì hội thoại được gắn thẻ khiếu nại.
@@ -132,6 +134,7 @@ export function normalizeChatbotSettings(value = {}) {
     memoryWindow: Math.max(1, Math.min(100, Number(value.memoryWindow) || defaultChatbotSettings.memoryWindow)),
     structuredOutput: value.structuredOutput !== false,
     retryCount: Math.max(0, Math.min(5, value.retryCount === undefined ? defaultChatbotSettings.retryCount : Number(value.retryCount) || 0)),
+    fallbackModel: cleanText(value.fallbackModel ?? defaultChatbotSettings.fallbackModel, '', 200),
     retryIntervalMs: Math.max(100, Math.min(10000, Number(value.retryIntervalMs) || defaultChatbotSettings.retryIntervalMs)),
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),

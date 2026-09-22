@@ -106,11 +106,16 @@ export async function requestDirectModelReply(options) {
   // prompt: a product added in settings is known to the model on its next reply.
   const systemPrompt = composeSystemPrompt(settings.systemPrompt, settings.messageTemplates);
   const attempts = 1 + Math.max(0, Number(settings.retryCount) || 0);
-  let lastError;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
+  const primaryModel = settings.directModel || (vertex ? 'gemini-2.5-flash' : 'deepseek-v4-flash');
+  // Model xem trước (gemini-3-flash-preview) dùng hạn mức chia sẻ, giờ cao điểm
+  // Vertex trả 429 "Resource exhausted" hàng loạt. Khi đó: thử lại ít nhất 3 lần,
+  // nghỉ lùi dần (2s → 4s → 8s), vẫn hỏng thì gọi model dự phòng (GA, hạn mức riêng).
+  const fallbackModel = String(settings.fallbackModel ?? (vertex ? 'gemini-2.5-flash' : '')).trim();
+  const capacityAttempts = Math.max(attempts, 3);
+  const baseWait = Math.max(100, Number(settings.retryIntervalMs) || 1000);
+  const capacityWait = Math.max(10, Number(settings.capacityWaitMs) || 2000);
+  const callModel = async model => {
       const anthropic = settings.directProtocol === 'anthropic';
-      const model = settings.directModel || (vertex ? 'gemini-2.5-flash' : 'deepseek-v4-flash');
       const configuredEndpoint = String(settings.directEndpoint || '');
       const endpoint = vertex
         ? (configuredEndpoint.includes('PROJECT_ID')
@@ -175,12 +180,39 @@ export async function requestDirectModelReply(options) {
       if (rawResponse) return { raw: answer, parsed: parsedAnswer, conversationId: '' };
       await refineAddressWithAi(parsedAnswer, options.context || {}, settings, fetchImpl);
       return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates, options.context || {}), conversationId: '' };
+  };
+  let model = primaryModel;
+  let usingFallback = false;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await callModel(model);
     } catch (error) {
-      lastError = error;
-      if (attempt + 1 < attempts) await wait(Math.max(100, Number(settings.retryIntervalMs) || 1000));
+      const capacity = isCapacityError(error);
+      attempt += 1;
+      const limit = capacity ? (usingFallback ? 2 : capacityAttempts) : attempts;
+      if (attempt < limit) {
+        const delay = capacity ? Math.min(10000, capacityWait * 2 ** (attempt - 1)) : baseWait;
+        if (capacity) console.warn(`Model ${model} hết hạn mức/quá tải (${String(error.message).slice(0, 60)}), thử lại sau ${delay}ms (lần ${attempt}).`);
+        await wait(delay);
+        continue;
+      }
+      if (capacity && !usingFallback && fallbackModel && fallbackModel !== primaryModel) {
+        console.warn(`Model ${model} vẫn hết hạn mức sau ${attempt} lần, chuyển sang model dự phòng ${fallbackModel}.`);
+        usingFallback = true;
+        model = fallbackModel;
+        attempt = 0;
+        continue;
+      }
+      throw error;
     }
   }
-  throw lastError;
+}
+
+/** 429 (hết hạn mức) hay 503 (quá tải): lỗi tạm, đáng thử lại; lỗi khác (401, prompt sai…) thì không. */
+export function isCapacityError(error) {
+  const status = Number(error?.status) || 0;
+  return status === 429 || status === 503 || /resource exhausted|rate limit|quota|overloaded|currently unavailable/i.test(String(error?.message || ''));
 }
 
 // Mỗi hội thoại một hàng đợi: tin thứ hai của cùng một khách chờ tin thứ nhất
@@ -249,6 +281,11 @@ async function answerChange(change, settings, results, dependencies) {
   if (conversation.botEnabled === false) return;
   try {
     const recent = await listMessages(conversation.id);
+    const askedAt = Number(change.message?.createdAt) || 0;
+    if (change.delayedRetry && recent.some(item => item?.direction === 'outgoing' && (Number(item?.createdAt) || 0) >= askedAt)) {
+      results.push({ conversationId: conversation.id, skipped: 'đã có người trả lời' });
+      return;
+    }
     if (hasNewerCustomerMessage(recent, change.message)) {
       results.push({ conversationId: conversation.id, skipped: 'gộp với tin sau' });
       return;
@@ -445,7 +482,20 @@ async function answerChange(change, settings, results, dependencies) {
       ...(alreadyHandled ? { duplicate: true } : {})
     });
   } catch (error) {
+    console.error(`Bot không trả lời được (${conversation.id}): ${error.message}`);
     await saveBotState(conversation.id, { botLastError: error.message, botLastErrorAt: Date.now() }).catch(() => {});
+    // Hết hạn mức/quá tải sau mọi lần thử: hẹn chạy lại tin này sau một phút
+    // (một lần). Lúc chạy lại, tin đã được trả lời (nhân viên, hay tin sau của
+    // khách gộp vào) thì bỏ qua.
+    const retryDelay = Number(settings.capacityRetryDelayMs ?? 60000);
+    if (isCapacityError(error) && !change.delayedRetry && retryDelay > 0) {
+      const timer = setTimeout(() => {
+        queueForConversation(conversation.id, () => answerChange({ ...change, delayedRetry: true }, settings, [], dependencies)).catch(() => {});
+      }, retryDelay);
+      timer.unref?.();
+      results.push({ conversationId: conversation.id, error: error.message, retryLater: true });
+      return;
+    }
     results.push({ conversationId: conversation.id, error: error.message });
   }
 }

@@ -460,3 +460,62 @@ test('không gửi lại y nguyên tin bot vừa gửi trong 10 phút; SĐT ở 
   assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
   assert.equal(reply.order.phone, '0909123456');
 });
+
+test('Vertex hết hạn mức (429): thử lại lùi dần, vẫn hỏng thì chuyển model dự phòng; lỗi khác không đổi model', async () => {
+  const urls = [];
+  const settings = (overrides = {}) => ({
+    provider: 'vertex', directApiKey: 'google-token', systemPrompt: 'Chỉ trả JSON', structuredOutput: true,
+    directEndpoint: 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent',
+    directModel: 'gemini-3-flash-preview', retryCount: 1, retryIntervalMs: 100, capacityWaitMs: 10, messageTemplates: templates, ...overrides
+  });
+  const exhausted = { ok: false, status: 429, json: async () => ({ error: { code: 429, message: 'Resource exhausted. Please try again later.' } }) };
+  const fine = { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"template_id":"WELCOME"}' }] } }] }) };
+  // Lần 3 mới được: vẫn model chính.
+  let calls = 0;
+  const reply = await requestDirectModelReply({ settings: settings(), conversation: { psid: '1' }, message: { type: 'text', text: 'hi' }, fetchImpl: async url => { urls.push(url); calls += 1; return calls < 3 ? exhausted : fine; } });
+  assert.equal(reply.templateId, 'WELCOME');
+  assert.equal(urls.length, 3);
+  assert.ok(urls.every(url => url.includes('gemini-3-flash-preview')));
+  // Model chính hết hạn mức cả 3 lần: sang gemini-2.5-flash.
+  urls.length = 0;
+  const fallback = await requestDirectModelReply({ settings: settings(), conversation: { psid: '1' }, message: { type: 'text', text: 'hi' }, fetchImpl: async url => { urls.push(url); return url.includes('gemini-2.5-flash') ? fine : exhausted; } });
+  assert.equal(fallback.templateId, 'WELCOME');
+  assert.deepEqual(urls.map(url => url.includes('gemini-2.5-flash') ? 'dự phòng' : 'chính'), ['chính', 'chính', 'chính', 'dự phòng']);
+  // Không đặt model dự phòng: ném lỗi 429 sau 3 lần.
+  urls.length = 0;
+  await assert.rejects(requestDirectModelReply({ settings: settings({ fallbackModel: '' }), conversation: { psid: '1' }, message: { type: 'text', text: 'hi' }, fetchImpl: async url => { urls.push(url); return exhausted; } }), /Resource exhausted/);
+  assert.equal(urls.length, 3);
+  // Lỗi 401 không phải hết hạn mức: theo retryCount (2 lần), không đổi model.
+  urls.length = 0;
+  await assert.rejects(requestDirectModelReply({ settings: settings(), conversation: { psid: '1' }, message: { type: 'text', text: 'hi' }, fetchImpl: async url => { urls.push(url); return { ok: false, status: 401, json: async () => ({ error: { message: 'Unauthenticated' } }) }; } }), /Unauthenticated/);
+  assert.equal(urls.length, 2);
+  assert.ok(urls.every(url => url.includes('gemini-3-flash-preview')));
+});
+
+test('hết hạn mức sau mọi lần thử: hẹn chạy lại sau; lúc đó đã có người trả lời thì thôi', async () => {
+  const log = [];
+  let failures = 1;
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const deps = (recent = []) => ({
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', capacityRetryDelayMs: 30 }),
+    listMessages: async () => recent,
+    sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); return { message: { mid: 'mid.bot' } }; },
+    saveBotState: async (_id, state) => { if (state.botLastError) log.push(`error:${state.botLastError}`); },
+    requestReply: async () => {
+      if (failures-- > 0) throw Object.assign(new Error('Resource exhausted. Please try again later.'), { status: 429 });
+      return { templateId: 'WELCOME', messages: ['Dạ em đây ạ'], handoff: false };
+    }
+  });
+  const change = { type: 'message', conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true }, message: { id: 'mid.c1', mid: 'mid.c1', direction: 'incoming', type: 'text', text: 'giá sao', createdAt: 1000 } };
+  const result = await processChatbotChanges([change], deps());
+  assert.equal(result[0].retryLater, true);
+  assert.deepEqual(log, ['error:Resource exhausted. Please try again later.']);
+  await wait(120);
+  assert.deepEqual(log, ['error:Resource exhausted. Please try again later.', 'send:Dạ em đây ạ'], 'chạy lại sau và trả lời được');
+  // Nhân viên đã trả lời trong lúc chờ: lần chạy lại bỏ qua.
+  log.length = 0;
+  failures = 1;
+  await processChatbotChanges([change], deps([change.message, { id: 'mid.staff', direction: 'outgoing', type: 'text', text: 'Dạ 174k ạ', createdAt: 2000 }]));
+  await wait(120);
+  assert.deepEqual(log, ['error:Resource exhausted. Please try again later.']);
+});

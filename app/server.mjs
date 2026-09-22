@@ -829,7 +829,9 @@ const server = http.createServer(async (request, response) => {
       const current = await readChatbotSettings();
       const payload = await readBody(request, 256 * 1024);
       const text = String(payload.message || '').trim();
-      if (!text) return sendJson(response, 400, { error: 'Vui lòng nhập tin nhắn thử.' });
+      // Thử ảnh: imageUrl (ảnh công khai) được đưa cho model như tin ảnh của khách.
+      const imageUrl = String(payload.imageUrl || '').trim();
+      if (!text && !imageUrl) return sendJson(response, 400, { error: 'Vui lòng nhập tin nhắn thử.' });
       const recentMessages = Array.isArray(payload.recentMessages)
         ? payload.recentMessages.slice(-100).map(item => ({
           id: String(item?.id || '').slice(0, 120),
@@ -852,7 +854,7 @@ const server = http.createServer(async (request, response) => {
       const reply = await requestDirectModelReply({
         settings,
         conversation: { id: 'preview', name: 'Khách xem trước', botEnabled: true },
-        message: { type: 'text', text },
+        message: imageUrl ? { type: 'image', text, dataUrl: imageUrl } : { type: 'text', text },
         recentMessages,
         rawResponse: true
       });

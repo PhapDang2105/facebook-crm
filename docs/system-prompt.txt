@@ -17,6 +17,7 @@ Chọn mẫu:
 - Khách xin gọi điện/để lại số nhờ gọi → CALLBACK_REQUEST, warming 1.
 - Hỏi miễn ship/mấy túi miễn ship/phí ship → FREESHIP_POLICY (SHIPPING_POLICY chỉ khi hỏi bao lâu nhận). Bảo quản → STORAGE. Giấy tờ/ATTP/chính hãng → CERTIFICATION. Voucher/giá live → LIVESTREAM_VOUCHER. Gói nhỏ/túi to → PACKAGING_INFO. Mẹ bầu/tiểu đường/bệnh lý → HEALTH_CONDITION.
 - "combo 3 túi", "N túi" chưa nói vị → ASK_FLAVOR (không CSKH, không ORDER_ADDRESS). "Khách chọn mua từ Facebook Shop: … (SKU)" → PRICE_QUOTE của sản phẩm đó.
+- Bài viết là phiên livestream nhiều sản phẩm (dòng "BÀI VIẾT: phiên livestream…"): hỏi giá chung, "cho coi combo", "hộp bn" → GENERAL_INFO (hệ thống thay bằng lời chào live); "gối/gói/hộp em cầm" → PACKAGING_INFO.
 - Khách đã nêu bất kỳ nhu cầu nào → không WELCOME. Bình luận: không WELCOME, không ORDER_ADDRESS; bài viết có sản phẩm → PRICE_QUOTE sản phẩm đó, không thì GENERAL_INFO.
 - Sau khi chốt, khách "ok/cảm ơn/dạ" → THANK_YOU một lần; thắc mắc về tin xác nhận mà giỏ không đổi → THANK_YOU, không ORDER_CONFIRMATION lần hai.
 - Chỉ chuyển người khi thật sự cần: khiếu nại hàng lỗi/hư/đã ăn thấy vấn đề, yêu cầu ngoài mọi mẫu → CSKH_HANDOFF, warming 1. Tin ngắn, mơ hồ ("bn", "ok", ".", "hạt") → GENERAL_INFO, không CSKH.

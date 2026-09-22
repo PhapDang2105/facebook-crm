@@ -638,3 +638,27 @@ test('khách bình luận nhiều lần dưới cùng bài: tin riêng y hệt �
   await processChatbotChanges([comment('c3', 'còn combo không em')], deps);
   assert.equal(log.filter(item => item.startsWith('riêng:')).length, 1);
 });
+
+test('bình luận dưới phiên livestream nhiều sản phẩm: hỏi giá chung thì nhắn riêng lời chào live thay cho bảng 3 vị', async () => {
+  const { isLivestreamPost } = await import('../app/chatbot-engine.mjs');
+  assert.equal(isLivestreamPost({ post: { message: 'Săn deal hời' } }), true);
+  assert.equal(isLivestreamPost({ referral: { adTitle: 'Live tối nay 20h' } }), true);
+  assert.equal(isLivestreamPost({ post: { message: 'Granola Túi Xanh 450g giảm 20%' } }), false);
+  const log = [];
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:comment:c9:p9', pageId: 'page', psid: 'u9', source: 'comment', name: 'Khách', botEnabled: true, post: { id: 'p9', message: 'Săn deal hời' } },
+    message: { id: 'c9', mid: 'c9', direction: 'incoming', type: 'text', text: 'Hộp bn', createdAt: 1 }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib ạ', LIVESTREAM_COMMENT: 'Dạ phiên live nhà em có đủ 3 vị ạ, {title} quan tâm loại nào ạ?' } }),
+    listMessages: async () => [],
+    getConversation: async () => null,
+    saveBotState: async () => {},
+    sendMessage: async (_conversation, message) => { log.push(message.text); return { message: { mid: 'm' } }; },
+    requestReply: async ({ message, conversation }) => {
+      log.push(`query:${buildChatbotQuery({ conversation, message, settings: {} }).includes('BÀI VIẾT: phiên livestream') ? 'live' : 'thường'}`);
+      return { templateId: 'GENERAL_INFO', messages: ['Dạ nhà em có 3 vị ạ'], handoff: false };
+    }
+  });
+  assert.deepEqual(log, ['query:live', 'Dạ em thấy anh/chị để lại bình luận ạ\n\nDạ phiên live nhà em có đủ 3 vị ạ, anh/chị quan tâm loại nào ạ?', 'Dạ em vừa ib ạ']);
+});

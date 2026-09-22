@@ -22,6 +22,12 @@ export async function refineAddressWithAi(parsed, context = {}, settings = {}, f
   return parsed;
 }
 
+/** Bài đăng/quảng cáo là phiên livestream nhiều sản phẩm ("Săn deal hời", "live tối nay"): không có sản phẩm cụ thể để báo giá. */
+export function isLivestreamPost(conversation) {
+  const text = [conversation?.post?.message, conversation?.referral?.adTitle].filter(Boolean).join(' ');
+  return /\b(live|livestream|phien live|san deal)\b/i.test(foldVietnamese(text));
+}
+
 export function parseModelAnswer(answer) {
   const raw = String(answer || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   // Mô hình trả JSON hỏng: gửi bảng giá chung thay vì chuyển người và tắt bot.
@@ -54,6 +60,7 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
     `KÊNH: ${conversation.source === 'comment' ? 'Bình luận Facebook' : 'Facebook Messenger'}`,
     `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
     hint,
+    !hint && isLivestreamPost(conversation) ? 'BÀI VIẾT: phiên livestream giới thiệu nhiều sản phẩm (không có sản phẩm cụ thể); khách hỏi giá chung thì GENERAL_INFO, hỏi "hộp"/"gói nhỏ" là hộp 10 gói nhỏ (PACKAGING_INFO).' : '',
     remembered ? `DỮ LIỆU ĐÃ LƯU:\n${remembered}` : '',
     includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
     `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`
@@ -401,6 +408,12 @@ async function answerChange(change, settings, results, dependencies) {
     // bảng giá chung và mời nhắn tin.
     if (reply.templateId === 'CSKH_HANDOFF' && !asksForHuman && conversation.source === 'comment' && settings.messageTemplates?.GENERAL_INFO) {
       reply = renderChatbotReply({ template_id: 'GENERAL_INFO' }, settings.messageTemplates, replyContext);
+    }
+    // Dưới phiên livestream nhiều sản phẩm, "hỏi giá chung" không nên là bảng
+    // 3 vị khô khan: dùng lời chào live (nêu các vị có trên live, ưu đãi live,
+    // hỏi khách quan tâm loại nào) nếu chủ shop có soạn mẫu LIVESTREAM_COMMENT.
+    if (reply.templateId === 'GENERAL_INFO' && settings.messageTemplates?.LIVESTREAM_COMMENT && isLivestreamPost(conversation)) {
+      reply = renderChatbotReply({ template_id: 'LIVESTREAM_COMMENT' }, settings.messageTemplates, replyContext);
     }
     // Không gửi lại y nguyên tin bot vừa gửi trong 10 phút (hỏi SĐT lần ba, cảm ơn
     // hai lần), và không chuyển người lần hai trong 24 giờ.

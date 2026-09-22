@@ -189,6 +189,26 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   // Thẻ xác nhận đơn (receipt) do Pancake POS gửi khách khi CRM đẩy đơn sang:
   // hộp thư đã vẽ đơn đó thành thẻ đơn, tin này chỉ ghi dấu như receipt của Meta.
   const receipt = !media && attachments.some(item => kindOf(item) === 'template' && String(item?.payload?.template_type || '').toLowerCase() === 'receipt');
+  // Khách bấm "Mua"/"Gửi giỏ hàng" ở Facebook Shop của Page: Pancake gửi tin
+  // `m_send_cart:…` với attachment `cart_order` (tên, mã SKU, giá, số lượng có
+  // thể bằng 0). Ghi thành chữ để hộp thư đọc được và bot biết khách chọn gì.
+  const cart = attachments
+    .filter(item => kindOf(item) === 'cart_order')
+    .flatMap(item => Array.isArray(item?.order?.items) ? item.order.items : [])
+    .map(item => {
+      const info = item?.variation_info || {};
+      return {
+        name: String(info.name || '').trim(),
+        sku: String(info.retailer_id || info.sku || '').trim(),
+        quantity: Number(item?.quantity) || 0,
+        price: Number(info.retail_price) || 0,
+        image: Array.isArray(info.images) && info.images[0] ? String(info.images[0]) : ''
+      };
+    })
+    .filter(item => item.name || item.sku);
+  const cartText = cart.length
+    ? `Khách chọn mua từ Facebook Shop: ${cart.map(item => `${item.name || item.sku}${item.sku && item.name ? ` (${item.sku})` : ''}${item.quantity ? ` × ${item.quantity}` : ''}${item.price ? ` — ${item.price.toLocaleString('vi-VN')}đ` : ''}`).join('; ')}`
+    : '';
   const identifier = String(message.id || `pancake-${now}`);
   const at = pancakeTime(message.inserted_at, now);
   // Tin của Page: gửi từ CRM thì Pancake ghi người gửi là "Public API"; tên
@@ -203,9 +223,10 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       id: identifier,
       mid: identifier,
       direction: outgoing ? 'outgoing' : 'incoming',
-      type: media ? media.type : receipt ? 'order-receipt' : text || !attachments.length ? 'text' : 'attachment',
-      text: receipt ? 'Đã gửi xác nhận đơn hàng' : text || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
+      type: media ? media.type : receipt ? 'order-receipt' : text || cartText || !attachments.length ? 'text' : 'attachment',
+      text: receipt ? 'Đã gửi xác nhận đơn hàng' : text || cartText || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
       ...(media ? { dataUrl: media.dataUrl, name: '', ...(media.images ? { images: media.images } : {}) } : {}),
+      ...(cart.length ? { cart } : {}),
       createdAt: at,
       status: outgoing ? 'sent' : 'received'
     },

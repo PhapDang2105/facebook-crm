@@ -61,6 +61,16 @@ test('tin do Page gửi (nhân viên trả lời trong Pancake) là tin đi; bì
   assert.equal(attachmentOnly.message.text, '[Tệp đính kèm]');
 });
 
+test('khách bấm Mua ở Facebook Shop (cart_order): ghi thành chữ có tên, SKU, giá để hộp thư và bot đọc được', () => {
+  const [cart] = normalizePancakeWebhook(incoming({ message: {
+    id: 'm_send_cart:e0d5a31e', message: '<div></div>', original_message: '',
+    attachments: [{ type: 'cart_order', order: { items: [{ quantity: 0, variation_info: { id: '2535', name: 'Granola Mới Ngũ Cốc Ăn Sáng', retail_price: 189000, retailer_id: 'GRA-XANH-Z450', images: ['https://content.pancake.vn/a.jpg'] } }] } }]
+  } }), config);
+  assert.equal(cart.message.type, 'text');
+  assert.equal(cart.message.text, 'Khách chọn mua từ Facebook Shop: Granola Mới Ngũ Cốc Ăn Sáng (GRA-XANH-Z450) — 189.000đ');
+  assert.deepEqual(cart.message.cart, [{ name: 'Granola Mới Ngũ Cốc Ăn Sáng', sku: 'GRA-XANH-Z450', quantity: 0, price: 189000, image: 'https://content.pancake.vn/a.jpg' }]);
+});
+
 test('chữ và giờ: bỏ thẻ HTML, giữ xuống dòng; giờ không múi giờ đọc là UTC', () => {
   assert.equal(pancakeMessageText({ message: '<div>Dòng 1</div><div>Dòng 2&nbsp;&amp; 3</div>' }), 'Dòng 1\nDòng 2 & 3');
   assert.equal(pancakeTime('2024-12-25T11:06:07.000000', 0), Date.UTC(2024, 11, 25, 11, 6, 7));

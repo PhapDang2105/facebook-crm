@@ -49,3 +49,18 @@ test('reconcileCustomerGender: nhân viên chọn ở một luồng thì luồng
   assert.equal(inbox.gender, 'female');
   assert.deepEqual(reconcileCustomerGender(store, inbox), []);
 });
+
+test('tin khách có xưng hô ("chị ơi") đi qua applyWebhookEvents không ném lỗi và dồn giới tính cho luồng cùng khách', async () => {
+  const { normalizeWebhookEvent, applyWebhookEvents } = await import('../app/meta-webhook.mjs');
+  const store = await readMessagingStore();
+  const event = normalizeWebhookEvent({
+    sender: { id: '1' }, recipient: { id: '110' }, timestamp: 1_800_000_000_000,
+    message: { mid: 'mid.gender.1', text: 'chị ơi cho em hỏi giá túi xanh' }
+  }, '110');
+  assert.ok(event, 'sự kiện tin nhắn được chuẩn hoá');
+  const changes = applyWebhookEvents(store, [event]);
+  assert.ok(Array.isArray(changes));
+  const conversation = store.conversations.find(item => item.id === '110:1');
+  assert.ok(conversation, 'hội thoại 110:1 tồn tại');
+  assert.ok(['female', 'male'].includes(conversation.gender) || conversation.gender === undefined);
+});

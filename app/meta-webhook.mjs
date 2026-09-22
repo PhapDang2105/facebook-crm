@@ -5,6 +5,7 @@ import { publishMessagingEvent } from './message-events.mjs';
 import { genderFromMessage, genderFromName } from './processing/customer-info.mjs';
 import {
   applyGenderGuess,
+  reconcileCustomerGender,
   commentConversationId,
   ensureConversation,
   conversationId,

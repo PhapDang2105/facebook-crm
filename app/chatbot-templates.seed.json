@@ -16,6 +16,7 @@
   "LIVESTREAM_VOUCHER": "Dạ voucher giảm giá trên phiên live là voucher của sàn, chỉ áp dụng khi mình đặt ngay trên gian hàng đó ạ. Đặt qua Facebook thì bên em áp giá combo và quà tặng cho đơn từ 2–3 túi ạ; mình muốn dùng voucher live thì em gửi link gian hàng nha ạ.",
   "HEALTH_CONDITION": "Dạ granola bên em không thêm đường, thành phần yến mạch, hạt và trái cây sấy; 100g khoảng 445 kcal ạ. Với mẹ bầu hay người tiểu đường, {title} nên hỏi thêm bác sĩ về khẩu phần phù hợp; nếu cần, em chuyển bạn tư vấn của bên em trao đổi kỹ hơn với mình ạ.",
   "IMAGE_RECEIVED": "Dạ em đã nhận được hình của mình ạ. {Title} cho em biết mình cần hỗ trợ gì về hình này để em xem giúp nha ạ.",
+  "COMMENT_PUBLIC_REPEAT": "Dạ {title} ơi, em đã gửi thông tin chi tiết trong tin nhắn rồi ạ, mình xem giúp em nha 🥰",
   "COMMENT_PRIVATE_REPLY": "Dạ em thấy {title} để lại bình luận dưới bài viết của Giọt Nắng ạ 💛",
   "COMMENT_PUBLIC_FALLBACK": "Dạ {title} nhắn tin cho Giọt Nắng qua Messenger giúp em nha, em gửi bảng giá và ưu đãi chi tiết cho mình ngay ạ 💛###Dạ {name} ơi, mình ib cho Page giúp em với ạ, em tư vấn chi tiết cho mình bên tin nhắn nè 🌾",
   "COMMENT_PUBLIC_REPLY": "Dạ em đã ib cho {title} rồi ạ, {title} kiểm tra tin nhắn giúp em nha.###Dạ {name} ơi, em vừa ib chi tiết cho mình rồi ạ, mình kiểm tra tin nhắn giúp em nha 🥰###{Dạ|Hi} {name} check hộp tin nhắn giúp em với ạ, em đã gửi thông tin cho mình rồi nè 🌾",

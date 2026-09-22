@@ -607,3 +607,34 @@ test('ảnh khách gửi qua Vertex: model nhận ra sản phẩm thì trả l�
   assert.deepEqual(log.slice(0, 2), ['model:image', 'text:Dạ em đã nhận được hình ạ']);
   assert.equal(unknown[0].templateId, 'IMAGE_RECEIVED');
 });
+
+test('khách bình luận nhiều lần dưới cùng bài: tin riêng y hệt đã gửi trong 24 giờ thì không gửi lại, chỉ trả lời công khai ngắn', async () => {
+  const log = [];
+  const inboxMessages = [];
+  const deps = {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib cho mình rồi ạ', COMMENT_PUBLIC_REPEAT: 'Dạ em đã gửi trong tin nhắn rồi ạ' } }),
+    listMessages: async id => (id === 'page:user' ? inboxMessages : []),
+    getConversation: async id => (id === 'page:user' ? { id: 'page:user', pageId: 'page', psid: 'user', botEnabled: true } : null),
+    saveBotState: async () => {},
+    sendMessage: async (conversation, message) => {
+      log.push(`${message.privateReply ? 'riêng' : 'công khai'}:${message.text}`);
+      if (message.privateReply) inboxMessages.push({ id: `p${log.length}`, direction: 'outgoing', type: 'text', text: message.text, createdAt: Date.now() });
+      return { message: { mid: `m${log.length}` } };
+    },
+    requestReply: async () => ({ templateId: 'GENERAL_INFO', messages: ['Dạ nhà em có 3 vị ạ'], handoff: false })
+  };
+  const comment = (id, text) => ({ type: 'message', conversation: { id: 'page:comment:c1:p1', pageId: 'page', psid: 'user', source: 'comment', name: 'Tiên', botEnabled: true }, message: { id, mid: id, direction: 'incoming', type: 'text', text, createdAt: Date.now() } });
+  await processChatbotChanges([comment('c1', 'cho chị coi combo')], deps);
+  const second = await processChatbotChanges([comment('c2', 'combo đó mấy gói em')], deps);
+  assert.deepEqual(log, [
+    'riêng:Dạ em thấy anh/chị để lại bình luận ạ\n\nDạ nhà em có 3 vị ạ',
+    'công khai:Dạ em vừa ib cho mình rồi ạ',
+    'công khai:Dạ em đã gửi trong tin nhắn rồi ạ'
+  ]);
+  assert.equal(second[0].privateSkipped, true);
+  // Tin riêng cũ hơn 24 giờ thì gửi lại được.
+  inboxMessages[0].createdAt = Date.now() - 25 * 60 * 60 * 1000;
+  log.length = 0;
+  await processChatbotChanges([comment('c3', 'còn combo không em')], deps);
+  assert.equal(log.filter(item => item.startsWith('riêng:')).length, 1);
+});

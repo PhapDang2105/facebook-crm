@@ -432,6 +432,7 @@ async function answerChange(change, settings, results, dependencies) {
     const order = outcome?.order || null;
     const alreadyHandled = Boolean(outcome) && outcome.created === false;
     let privateError = '';
+    let privateSkipped = false;
     if (settings.responseMode === 'automatic' && isComment) {
       // Under a comment: the full answer goes to the person's Messenger as a
       // private reply (Facebook allows one per comment, so the messages are
@@ -447,7 +448,17 @@ async function answerChange(change, settings, results, dependencies) {
       // check an inbox that stays empty loses the lead, so the public reply
       // then asks them to message the Page instead, and the error is kept
       // for the customer panel.
-      if (privateText) {
+      // Khách bình luận nhiều lần dưới cùng bài ("cho coi combo", "combo đó mấy
+      // gói"): cùng một tin riêng đã gửi trong 24 giờ thì không gửi lại — khách
+      // nhận ba lần bảng giá y hệt là spam. Chỉ trả lời công khai ngắn.
+      if (privateText && getConversation && listMessages) {
+        const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
+        const sentBefore = inbox ? await listMessages(inbox.id).catch(() => []) : [];
+        const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+        const normalize = value => String(value || '').replace(/s+/g, ' ').trim();
+        privateSkipped = sentBefore.some(item => item?.direction === 'outgoing' && (Number(item?.createdAt) || 0) > dayAgo && normalize(item.text) === normalize(privateText));
+      }
+      if (privateText && !privateSkipped) {
         try {
           await sendMessage(conversation, { text: privateText, privateReply: true });
         } catch (error) {
@@ -458,7 +469,7 @@ async function answerChange(change, settings, results, dependencies) {
       // thường vào hộp thư của khách. Facebook chỉ cho một tin nhắn riêng mỗi
       // bình luận nên tin đó phải là bảng giá; ảnh gửi thêm được thì tốt, bị
       // chặn (khách chưa nhắn lại) thì bỏ qua, không báo lỗi.
-      if (!privateError && reply.images?.length && getConversation) {
+      if (!privateError && !privateSkipped && reply.images?.length && getConversation) {
         const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
         const sentImages = inbox
           ? await sendMessage(inbox, { imageUrls: reply.images }).then(() => true).catch(error => { console.error(`Ảnh sau tin nhắn riêng không gửi được (${conversation.id}): ${error.message}`); return false; })
@@ -466,7 +477,8 @@ async function answerChange(change, settings, results, dependencies) {
         // Chưa gửi được (khách chưa mở Messenger với Page): giữ lại, gửi khi khách nhắn.
         if (!sentImages) rememberPendingImages(conversation.pageId, conversation.psid, reply.images);
       }
-      const publicReply = renderChatbotReply({ template_id: privateError ? 'COMMENT_PUBLIC_FALLBACK' : 'COMMENT_PUBLIC_REPLY' }, settings.messageTemplates, replyContext);
+      const publicId = privateError ? 'COMMENT_PUBLIC_FALLBACK' : privateSkipped && settings.messageTemplates?.COMMENT_PUBLIC_REPEAT ? 'COMMENT_PUBLIC_REPEAT' : 'COMMENT_PUBLIC_REPLY';
+      const publicReply = renderChatbotReply({ template_id: publicId }, settings.messageTemplates, replyContext);
       for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
       // Like the comment so the customer sees it was noticed; hide it when it
       // carries a phone number (or always, per settings) so competitors
@@ -542,6 +554,7 @@ async function answerChange(change, settings, results, dependencies) {
       mode: settings.responseMode,
       templateId: reply.templateId,
       ...(bundle.length > 1 ? { bundled: bundle.length } : {}),
+      ...(privateSkipped ? { privateSkipped: true } : {}),
       ...(order ? { orderId: order.id } : {}),
       ...(alreadyHandled ? { duplicate: true } : {})
     });

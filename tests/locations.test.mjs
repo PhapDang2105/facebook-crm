@@ -177,6 +177,18 @@ test('quận cũ và thành phố mới trùng tên: phường quyết định, 
   assert.deepEqual(unsure.missing, ['ward', 'street']);
 });
 
+test('khách gọi cả tỉnh bằng tên thành phố ("thành phố Huế"): huyện khác ghi phía trước mới là nơi giao', () => {
+  const hue = resolveAddress('kiệt 9, nhà số 7, đường lê tư thành , thị trấn sịa, huyện quảng điền, thành phố huế');
+  assert.deepEqual(names(hue), ['Thừa Thiên Huế', 'Huyện Quảng Điền', 'Thị trấn Sịa']);
+  assert.equal(hue.street, 'kiệt 9, nhà số 7, đường lê tư thành');
+  assert.equal(hue.confidence, 'exact');
+  assert.deepEqual(names(resolveAddress('thị trấn sịa, quảng điền, huế')), ['Thừa Thiên Huế', 'Huyện Quảng Điền', 'Thị trấn Sịa']);
+  assert.deepEqual(names(resolveAddress('xã phong hiền, huyện phong điền, tp huế')), ['Thừa Thiên Huế', 'Huyện Phong Điền', 'Xã Phong Hiền']);
+  // Không có huyện khác thì "thành phố Huế" vẫn là Thành phố Huế.
+  assert.deepEqual(names(resolveAddress('phường thuận hòa, thành phố huế')), ['Thừa Thiên Huế', 'Thành phố Huế', 'Phường Thuận Hòa']);
+  assert.deepEqual(names(resolveAddress('12 Lê Lợi, Vĩnh Ninh, thành phố Huế')), ['Thừa Thiên Huế', 'Thành phố Huế', 'Phường Vĩnh Ninh']);
+});
+
 test('hai tên chỉ khác dấu: có dấu thì phân biệt, không dấu thì mơ hồ và đưa lựa chọn', () => {
   assert.deepEqual(names(resolveAddress('Thị trấn Sa Pa, Sa Pa, Lào Cai')), ['Lào Cai', 'Huyện Sa Pa', 'Phường Sa Pa']);
   assert.deepEqual(names(resolveAddress('Phường Sa Pả, Sa Pa, Lào Cai')), ['Lào Cai', 'Huyện Sa Pa', 'Phường Sa Pả']);

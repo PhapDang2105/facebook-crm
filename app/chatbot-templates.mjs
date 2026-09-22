@@ -256,7 +256,11 @@ function renderOrder(value, templates, context = {}) {
   // street. What is missing or ambiguous is asked back, up to maxAddressAsks.
   const delivery = hasAddress ? describeDeliveryAddress(address) : null;
   const addressAsks = pending?.addressAsks || 0;
-  const addressAccepted = Boolean(delivery) && (delivery.complete || addressAsks >= maxAddressAsks);
+  // Đã hỏi một lần mà khách trả lời bằng một địa chỉ đầy đủ (có ghi phường/xã,
+  // quận/huyện) nhưng máy vẫn không khớp được danh mục: không hỏi lại y câu cũ,
+  // nhận địa chỉ khách ghi và để nhân viên đối chiếu ở Xử lý dữ liệu.
+  const answeredInFull = addressAsks >= 1 && /\b(huyện|quận|thị xã|thành phố|tp|phường|xã|thị trấn|tt)\b/iu.test(freshAddress) && freshAddress.split(/[,\n]/).filter(part => part.trim()).length >= 2;
+  const addressAccepted = Boolean(delivery) && (delivery.complete || addressAsks >= maxAddressAsks || answeredInFull);
 
   // Remember a priceable basket, plus whatever contact detail has arrived so
   // far, so the customer never has to repeat something already given.

@@ -660,6 +660,21 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
         district = national.entry;
         province = district.province;
         if (confirmed) { wardHit = confirming; ward = confirming.entry; }
+        // "…, thị trấn Sịa, huyện Quảng Điền, thành phố Huế": khách gọi cả tỉnh
+        // bằng tên thành phố (Thừa Thiên Huế là "Thành phố Huế" từ 2025, cũng như
+        // "Vũng Tàu", "Bà Rịa"). Một huyện khác của tỉnh ghi rõ phía trước thì đó
+        // mới là nơi giao; tên thành phố chỉ còn vai trò chỉ tỉnh.
+        if (!confirmed) {
+          const others = [...province.districts.values()].filter(entry => entry !== district);
+          const other = findBest(norm, expanded, others, { limit: national.start, ownPrefixes: DISTRICT_PREFIXES, foreignPrefixes: WARD_PREFIXES, fullKeys });
+          const otherExact = other && segments.some(segment => stripPrefix(segment.key, DISTRICT_PREFIXES) === other.entry.bare || segment.key === other.entry.key);
+          if (other && !other.ambiguous && (other.prefixed || otherExact)) {
+            consumed.push(national);
+            provinceHit = national;
+            districtHit = other;
+            district = other.entry;
+          }
+        }
       }
     }
   }

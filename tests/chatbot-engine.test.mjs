@@ -260,6 +260,17 @@ test('hai xã cùng tên: bot đưa hai lựa chọn, khách chọn xong thì ch
   assert.equal(done.order.address, 'Thôn 3, Xã Hoằng Đồng, Huyện Hoằng Hóa, Thanh Hóa');
 });
 
+test('đã hỏi một lần, khách trả lời bằng địa chỉ đầy đủ có phường/huyện mà máy vẫn không khớp: nhận luôn, không hỏi lại y câu cũ', () => {
+  const pending = { items: [{ product: 'Túi Xanh', quantity: 2 }], key: 'GRA-XANH-Z450=2', at: Date.now(), phone: '0909123456', address: 'Hà Nội', addressAsks: 1 };
+  const full = 'số 5 ngõ 12, phường Hòa Bình Mới, quận Trung Tâm, Hà Nội';
+  const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: full }, templates, { pendingOrder: pending });
+  assert.equal(reply.templateId, 'ORDER_CONFIRMATION', 'không hỏi lần hai khi khách đã ghi đủ cấp');
+  assert.equal(reply.order.address, full, 'giữ nguyên văn khách ghi cho nhân viên đối chiếu');
+  // Khách chỉ nhắn một mẩu ("Hà Nội") thì vẫn hỏi tiếp như cũ.
+  const fragment = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: 'quận Trung Tâm' }, templates, { pendingOrder: pending });
+  assert.equal(fragment.templateId, 'ORDER_ADDRESS');
+});
+
 test('hỏi tối đa hai lần rồi vẫn lên đơn với địa chỉ khách đưa', () => {
   const pending = { items: [{ product: 'Túi Xanh', quantity: 2 }], key: 'GRA-XANH-Z450=2', at: Date.now(), phone: '0909123456', address: 'gần chợ Bà Chiểu', addressAsks: 2 };
   const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '2', Phone_Number: '0909123456', Customer_Address: 'gần chợ Bà Chiểu' }, templates, { pendingOrder: pending });

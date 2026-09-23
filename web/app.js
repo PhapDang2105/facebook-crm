@@ -7393,7 +7393,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   // Dòng đang sửa: các ô sửa được thành ô nhập, giữ nguyên bề rộng cột.
   // Một đơn nhiều dòng sản phẩm (Nhập dữ liệu): dòng thứ hai trở đi để trống
   // nguồn đơn, ngày, khách hàng, SĐT, nhà mạng — đọc là một đơn, không phải hai.
-  const collapsedNames = new Set(['nguon don', 'ngay', 'khach hang', 'so dien thoai', 'nha mang']);
+  const collapsedNames = new Set(['nguon don', 'ngay', 'khach hang', 'so dien thoai', 'nha mang', 'ghi chu', 'dia chi']);
   const orderIdIndex = headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
   const cellHtml = (entry, index, continued = false) => {
     const name = normalizeColumnName(headers[index]);

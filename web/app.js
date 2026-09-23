@@ -1832,9 +1832,11 @@ let editingOrderColumn = -1;
 // Bề rộng cột đo ngay trước khi vào chế độ sửa, giữ nguyên suốt lúc sửa.
 let lockedOrderTemplate = '';
 const editableOrderColumns = new Set(['khach hang', 'so dien thoai', 'dia chi', 'so luong', 'don gia', 'ghi chu xu ly']);
+// Bảng đang có ô sửa (Xử lý dữ liệu hay Nhập dữ liệu): mọi thao tác sửa nhìn vào bảng này.
+let editingPreviewSelector = '#order-preview';
 
 function measureOrderTemplate() {
-  const heads = [...document.querySelectorAll('#order-preview thead th')];
+  const heads = [...document.querySelectorAll(`${editingPreviewSelector} thead th`)];
   return heads.length ? heads.map(th => `${th.getBoundingClientRect().width.toFixed(2)}px`).join(' ') : '';
 }
 function stopOrderRowEdit() {
@@ -1907,7 +1909,7 @@ function commitOrderData() {
 }
 /** Cập nhật lẻ vài ô của một dòng đang hiện trên bảng Xử lý dữ liệu, không vẽ lại bảng. */
 function refreshOrderCells(rowIndex, columnIndexes, rowNotes) {
-  const tr = document.querySelector(`#order-preview tr[data-order-row-index="${rowIndex}"]`);
+  const tr = document.querySelector(`${editingPreviewSelector} tr[data-order-row-index="${rowIndex}"]`);
   const row = orderData.rows[rowIndex];
   if (!tr || !row) return;
   for (const columnIndex of columnIndexes) {
@@ -1917,8 +1919,8 @@ function refreshOrderCells(rowIndex, columnIndexes, rowNotes) {
 }
 /** Rời chế độ sửa: trả ô về nội dung thường (bản mới nếu có), mở khoá bề rộng cột. */
 function exitCellEdit(innerHtml = editingCellBackup) {
-  const table = document.querySelector('#order-preview table');
-  const td = document.querySelector('#order-preview td.preview-editing');
+  const table = document.querySelector(`${editingPreviewSelector} table`);
+  const td = document.querySelector(`${editingPreviewSelector} td.preview-editing`);
   if (td) {
     td.classList.remove('preview-editing');
     td.innerHTML = innerHtml;
@@ -1933,8 +1935,8 @@ function exitCellEdit(innerHtml = editingCellBackup) {
 }
 
 function startOrderRowEdit(rowIndex, columnIndex) {
-  const table = document.querySelector('#order-preview table');
-  const td = document.querySelector(`#order-preview tr[data-order-row-index="${rowIndex}"] td[data-column-index="${columnIndex}"]`);
+  const table = document.querySelector(`${editingPreviewSelector} table`);
+  const td = document.querySelector(`${editingPreviewSelector} tr[data-order-row-index="${rowIndex}"] td[data-column-index="${columnIndex}"]`);
   const row = orderData.rows[rowIndex];
   if (!table || !td || !row) return;
   // Khoá bề rộng cột đúng như đang thấy rồi mới đổi nội dung ô.
@@ -1980,7 +1982,7 @@ function serverOrderIdOf(rowId) {
 }
 
 async function saveOrderRowEdit(rowIndex) {
-  const tr = document.querySelector(`#order-preview tr[data-order-row-index="${rowIndex}"]`);
+  const tr = document.querySelector(`${editingPreviewSelector} tr[data-order-row-index="${rowIndex}"]`);
   const row = orderData.rows[rowIndex];
   if (!tr || !row) { cancelOrderRowEdit(); return; }
   const { headers } = orderData;
@@ -2050,7 +2052,7 @@ async function saveOrderRowEdit(rowIndex) {
   // ghi vào trình duyệt, rồi hoãn việc vẽ lại toàn bộ tới khi ngừng sửa.
   const editedColumn = editingOrderColumn;
   const rowNotes = getRowProcessingNotes(orderData, { duplicateRowIndexes: getDuplicateOrderRowIndexes(), duplicatePhoneRowIndexes: getDuplicatePhoneRowIndexes(), warningRowIndexes: getPhoneWarningRowIndexes() });
-  const editedTd = document.querySelector('#order-preview td.preview-editing');
+  const editedTd = document.querySelector(`${editingPreviewSelector} td.preview-editing`);
   exitCellEdit(orderCellInner(row, editedColumn, headers, rowNotes.get(rowIndex)));
   editedTd?.classList.add('preview-edited');
   editedOrderCells.add(`${rowIndex}|${editedColumn}`);
@@ -2101,7 +2103,7 @@ function scheduleBlurSave() {
   clearTimeout(pendingBlurSave);
   pendingBlurSave = setTimeout(() => {
     if (editingOrderRowIndex < 0) return;
-    const editingCell = document.querySelector('#order-preview td.preview-editing');
+    const editingCell = document.querySelector(`${editingPreviewSelector} td.preview-editing`);
     if (editingCell && editingCell.contains(document.activeElement)) return;
     saveOrderRowEdit(editingOrderRowIndex);
   }, 150);
@@ -2114,41 +2116,46 @@ function flushOrderRowEdit(event) {
   saveOrderRowEdit(editingOrderRowIndex);
 }
 
-document.querySelector('#order-preview')?.addEventListener('focusout', event => {
-  if (event.target.closest('[data-edit-column]')) scheduleBlurSave();
-});
-// Chọn sản phẩm khác trong ô chọn là lưu ngay, không chờ rời ô.
-document.querySelector('#order-preview')?.addEventListener('change', event => {
-  if (event.target.matches('select[data-order-status]')) {
+// Sửa tại chỗ (bấm ô để sửa, rời ô là lưu) ở cả Xử lý dữ liệu lẫn Nhập dữ liệu;
+// ô chọn trạng thái cũng dùng chung.
+for (const selector of ['#order-preview', '#order-import-preview']) {
+  const preview = document.querySelector(selector);
+  if (!preview) continue;
+  preview.addEventListener('focusout', event => {
+    if (event.target.closest('[data-edit-column]')) scheduleBlurSave();
+  });
+  // Chọn sản phẩm khác trong ô chọn là lưu ngay, không chờ rời ô.
+  preview.addEventListener('change', event => {
+    if (event.target.matches('select[data-order-status]')) {
+      flushOrderRowEdit(event);
+      setOrderRowStatus(Number(event.target.dataset.orderStatus), event.target.value);
+      return;
+    }
+    if (event.target.matches('select[data-edit-column]')) { clearTimeout(pendingBlurSave); saveOrderRowEdit(editingOrderRowIndex); }
+  });
+  preview.addEventListener('click', event => {
+    if (event.target.closest('button, a, input, select, textarea')) return;
+    const row = event.target.closest('tr[data-order-row-index]');
+    if (!row) return;
+    const rowIndex = Number(row.dataset.orderRowIndex);
+    const cell = event.target.closest('td[data-column-index]');
+    // Dòng sau của đơn nhiều dòng để trống nguồn/ngày/khách/SĐT: sửa ở dòng đầu.
+    if (cell?.classList.contains('preview-continued')) return;
+    const columnIndex = cell ? Number(cell.dataset.columnIndex) : -1;
+    if (editingPreviewSelector === selector && rowIndex === editingOrderRowIndex && columnIndex === editingOrderColumn) return;
     flushOrderRowEdit(event);
-    setOrderRowStatus(Number(event.target.dataset.orderStatus), event.target.value);
-    return;
-  }
-  if (event.target.matches('select[data-edit-column]')) { clearTimeout(pendingBlurSave); saveOrderRowEdit(editingOrderRowIndex); }
-});
-// Nhập dữ liệu dùng chung ô chọn trạng thái với Xử lý dữ liệu.
-document.querySelector('#order-import-preview')?.addEventListener('change', event => {
-  if (event.target.matches('select[data-order-status]')) setOrderRowStatus(Number(event.target.dataset.orderStatus), event.target.value);
-});
-document.querySelector('#order-preview')?.addEventListener('click', event => {
-  if (event.target.closest('button, a, input, select, textarea')) return;
-  const row = event.target.closest('tr[data-order-row-index]');
-  if (!row) return;
-  const rowIndex = Number(row.dataset.orderRowIndex);
-  const cell = event.target.closest('td[data-column-index]');
-  const columnIndex = cell ? Number(cell.dataset.columnIndex) : -1;
-  if (rowIndex === editingOrderRowIndex && columnIndex === editingOrderColumn) return;
-  flushOrderRowEdit(event);
-  const columnName = columnIndex >= 0 ? normalizeColumnName(orderData.headers[columnIndex]) : '';
-  if (columnName !== 'san pham' && !editableOrderColumns.has(columnName)) return;
-  startOrderRowEdit(rowIndex, columnIndex);
-});
-document.querySelector('#order-preview')?.addEventListener('keydown', event => {
-  if (!event.target.closest('[data-edit-column]')) return;
-  if (event.key === 'Enter') { event.preventDefault(); clearTimeout(pendingBlurSave); saveOrderRowEdit(editingOrderRowIndex); }
-  // Esc: bỏ những gì vừa gõ ở dòng này, quay về giá trị đang lưu.
-  if (event.key === 'Escape') { event.preventDefault(); clearTimeout(pendingBlurSave); cancelOrderRowEdit(); }
-});
+    const columnName = columnIndex >= 0 ? normalizeColumnName(orderData.headers[columnIndex]) : '';
+    if (columnName !== 'san pham' && !editableOrderColumns.has(columnName)) return;
+    editingPreviewSelector = selector;
+    startOrderRowEdit(rowIndex, columnIndex);
+  });
+  preview.addEventListener('keydown', event => {
+    if (!event.target.closest('[data-edit-column]')) return;
+    if (event.key === 'Enter') { event.preventDefault(); clearTimeout(pendingBlurSave); saveOrderRowEdit(editingOrderRowIndex); }
+    // Esc: bỏ những gì vừa gõ ở dòng này, quay về giá trị đang lưu.
+    if (event.key === 'Escape') { event.preventDefault(); clearTimeout(pendingBlurSave); cancelOrderRowEdit(); }
+  });
+}
 
 /**
  * Đặt trạng thái cho cả đơn của dòng này. Trạng thái kết thúc (đã xác nhận,
@@ -7557,7 +7564,7 @@ function renderOrderData() {
       // cảnh báo bom hàng và các vấn đề khác để bên Xử lý dữ liệu lo.
       ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate'
         : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
-      { deletable: true, groupOrderLines: true, totalColumn: true, rowNotes: importNotes, statusCells: importStatusCells }
+      { deletable: true, groupOrderLines: true, totalColumn: true, rowNotes: importNotes, statusCells: importStatusCells, editingCell: editingPreviewSelector === '#order-import-preview' && editingOrderRowIndex >= 0 ? { row: editingOrderRowIndex, column: editingOrderColumn } : null }
     );
   } else orderPanelsDirty.add('import');
   if (!panelVisible('process')) { orderPanelsDirty.add('process'); return; }
@@ -7592,7 +7599,7 @@ function renderOrderData() {
       rowNotes,
       reviewable: true,
       totalColumn: true,
-      editingCell: editingOrderRowIndex >= 0 ? { row: editingOrderRowIndex, column: editingOrderColumn } : null,
+      editingCell: editingPreviewSelector === '#order-preview' && editingOrderRowIndex >= 0 ? { row: editingOrderRowIndex, column: editingOrderColumn } : null,
       templateOverride: editingOrderRowIndex >= 0 ? lockedOrderTemplate : ''
     }
   );

@@ -122,3 +122,13 @@ test('kết nối POS bằng khoá dán vào Cài đặt: kiểm tra qua /shops,
   await disconnectPos();
   assert.equal(posStatus().configured, false);
 });
+
+test('dưới ngưỡng cảnh báo nhưng POS có ghi bom/cảnh báo: mức none kèm gợi ý cho ghi chú; số sạch thì không có gợi ý', async () => {
+  const { processingNotes } = await import('../app/order-notes.mjs');
+  const scored = assessPhone({ pos: { failed: 0, success: 0, report: { fail: 14, success: 305, warning: 1 } } });
+  assert.equal(scored.level, 'none');
+  assert.equal(scored.hint, 'Từng bom 14/319 đơn (4%), POS cảnh báo 1');
+  assert.equal(assessPhone({ pos: { failed: 0, success: 0, report: { fail: 0, success: 20, warning: 0 } } }).hint, undefined);
+  const notes = processingNotes({ phone: '0983228638', address: '1 Lê Lợi, Phường 5, Quận 1, Hồ Chí Minh', products: [{ name: 'Granola Túi Xanh 450g', quantity: 2 }], phoneWarning: { level: 'none', hint: scored.hint } });
+  assert.ok(notes.includes('☎ Từng bom 14/319 đơn (4%), POS cảnh báo 1'), JSON.stringify(notes));
+});

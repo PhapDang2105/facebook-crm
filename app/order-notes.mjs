@@ -115,6 +115,8 @@ export function processingNotes(order) {
 
   const warning = order.phoneWarning;
   if (warning && warning.level && warning.level !== 'none') notes.push(`☎ ${shortWarning(warning)}`);
+  // Dưới ngưỡng cảnh báo nhưng POS có ghi bom/cảnh báo: vẫn cho nhân viên thấy.
+  else if (warning?.hint) notes.push(`☎ ${warning.hint}`);
 
   // Khách điền nhiều form thì mỗi form một đơn, không tự gộp; bảng Đơn hàng tự
   // ghi "cùng số điện thoại với đơn …"; nhóm được so và xử lý ở Nhập dữ liệu.

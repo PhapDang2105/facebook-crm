@@ -1774,7 +1774,7 @@ const server = http.createServer(async (request, response) => {
       const withNotes = [];
       for (const order of items) {
         const fresh = await cachedPhoneWarning(order.phone);
-        const phoneWarning = fresh ? (fresh.level === 'none' ? undefined : fresh) : order.phoneWarning;
+        const phoneWarning = fresh ? (fresh.level === 'none' && !fresh.hint ? undefined : fresh) : order.phoneWarning;
         // Ghi chú trả về chỉ còn lời khách; các mẩu máy từng chèn (nguồn, chiến dịch) bị bỏ.
         const refreshed = { ...order, phoneWarning, note: customerNote(order) };
         withNotes.push({ ...refreshed, processingNotes: processingNotes(refreshed) });

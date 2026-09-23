@@ -292,9 +292,16 @@ export function assessPhone({ pos = null } = {}) {
     else if (shopFailed === 1) raise('watch', `Shop mình: từng hoàn/huỷ 1 đơn, giao thành công ${shopSuccess}`);
     if ((pos.customer?.tags || []).some(tag => RETURN_TAG.test(foldText(tag)))) raise('watch', `POS gắn thẻ: ${pos.customer.tags.join(', ')}`);
   }
+  // Dưới ngưỡng cảnh báo nhưng POS có ghi bom/cảnh báo: ghi chú cho nhân viên
+  // biết (không gắn cờ, không chuyển bot/đưa vào Xử lý dữ liệu).
+  const posWarning = Number(report?.warning) || 0;
+  const hint = level === 'none' && pos && !pos.error && (netFailed > 0 || posWarning > 0)
+    ? `Từng bom ${netFailed}/${netTotal} đơn (${percent}%)${posWarning ? `, POS cảnh báo ${posWarning}` : ''}`
+    : '';
   return {
     level,
     label: LEVEL_LABELS[level],
+    ...(hint ? { hint } : {}),
     failed: Math.max(shopFailed, netFailed),
     success: Math.max(shopSuccess, netSuccess),
     rate: percent,
@@ -333,7 +340,7 @@ export async function cachedPhoneWarning(phone) {
   const pos = store.cache[key];
   if (!pos || pos.error) return null;
   const scored = assessPhone({ pos });
-  return { level: scored.level, label: scored.label, failed: scored.failed, success: scored.success, rate: scored.rate, sources: scored.sources, checkedAt: Number(pos.fetchedAt) || 0 };
+  return { level: scored.level, label: scored.label, ...(scored.hint ? { hint: scored.hint } : {}), failed: scored.failed, success: scored.success, rate: scored.rate, sources: scored.sources, checkedAt: Number(pos.fetchedAt) || 0 };
 }
 
 /** Tra nhiều số một lượt, tối đa 5 yêu cầu POS song song. */
@@ -356,7 +363,7 @@ export async function attachPhoneWarning(order, options = {}) {
   try {
     const warning = await lookupPhone(order?.phone, options);
     if (warning.level !== 'none') {
-      order.phoneWarning = { level: warning.level, label: warning.label, failed: warning.failed, success: warning.success, rate: warning.rate, sources: warning.sources, checkedAt: Date.now() };
+      order.phoneWarning = { level: warning.level, label: warning.label, ...(warning.hint ? { hint: warning.hint } : {}), failed: warning.failed, success: warning.success, rate: warning.rate, sources: warning.sources, checkedAt: Date.now() };
     }
   } catch {
     // Lỗi tra cứu không được chặn việc tạo đơn.

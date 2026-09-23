@@ -6932,6 +6932,10 @@ function getRowProcessingNotes(data = orderData, { duplicateRowIndexes, duplicat
     if (warningRowIndexes?.has(index) && !existing.includes('☎')) {
       const warning = phoneWarningFor(row[phoneIndex]);
       if (warning?.level) list.push(`☎ ${shortPhoneWarning(warning)}`);
+    } else if (phoneIndex >= 0 && !existing.includes('☎')) {
+      // Dưới ngưỡng cảnh báo nhưng POS có ghi bom/cảnh báo: ghi chú, không gắn cờ.
+      const raw = phoneWarnings.get(normalizeRowPhone(row[phoneIndex]));
+      if (raw?.hint) list.push(`☎ ${raw.hint}`);
     }
     if (list.length) notes.set(index, list);
   });

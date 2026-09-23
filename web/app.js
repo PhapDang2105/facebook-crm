@@ -7265,7 +7265,9 @@ function renderNoteCell(value, extraNotes = []) {
   // Cờ `u`: 🤖 là cặp ký tự đôi, thiếu cờ này regex chỉ bỏ nửa đầu và để lại "�".
   const kind = segment => /^[⚠☎]/u.test(segment) ? 'act' : /^[⏳🤖ℹ]/u.test(segment) ? 'note' : 'plain';
   const strip = segment => segment.replace(/^[⚠⏳🤖☎ℹ]\s*/u, '');
-  return `<div class="note-cell">${segments.map(segment => `<div class="note-line note-line-${kind(segment)}">${escapeHtml(shortenLegacyNote(strip(segment)))}</div>`).join('')}</div>`;
+  // "POS cảnh báo N" (POS đã đánh dấu số này) nổi bật: to hơn một chút, màu đỏ.
+  const emphasize = html => html.replace(/POS cảnh báo \d+/g, match => `<strong class="note-pos-warning">${match}</strong>`);
+  return `<div class="note-cell">${segments.map(segment => `<div class="note-line note-line-${kind(segment)}">${emphasize(escapeHtml(shortenLegacyNote(strip(segment))))}</div>`).join('')}</div>`;
 }
 
 function renderPreviewCell(value, header) {

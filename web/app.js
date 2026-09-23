@@ -7374,12 +7374,12 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   // Số điện thoại vừa đúng nội dung; Ghi chú có trần vì câu đã ngắn; phần rộng
   // còn lại dồn cho Địa chỉ nên cột này bắt đầu sớm hơn và rộng hơn.
   const templates = {
-    'dia chi': 'minmax(260px, 1fr)',
-    'ghi chu': 'minmax(170px, 340px)',
-    'ghi chu xu ly': 'minmax(150px, 240px)',
+    'dia chi': 'minmax(220px, 1fr)',
+    'ghi chu': 'minmax(150px, 300px)',
+    'ghi chu xu ly': 'minmax(110px, 180px)',
     // fit-content() không dùng được làm cận trên của minmax(): trình duyệt bỏ cả
     // dòng grid-template-columns, bảng sập còn một cột. Dùng hai mốc dài cố định.
-    'san pham': 'minmax(64px, 170px)',
+    'san pham': 'minmax(56px, 96px)',
     'khach hang': 'minmax(100px, 170px)',
     'so dien thoai': 'max-content'
   };

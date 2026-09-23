@@ -2,6 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 
 let cachedToken = null;
+// Lời xin token đang chờ: nhiều hội thoại được bot xử lý song song thì dùng
+// chung một yêu cầu tới Google thay vì mỗi luồng tự xin một token.
+let pendingToken = null;
 
 function base64Url(value) {
   return Buffer.from(value).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -21,6 +24,13 @@ export function vertexProjectId() {
 export async function getVertexAccessToken({ fetchImpl = fetch } = {}) {
   if (process.env.VERTEX_ACCESS_TOKEN) return process.env.VERTEX_ACCESS_TOKEN;
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
+  if (!pendingToken) {
+    pendingToken = requestAccessToken(fetchImpl).finally(() => { pendingToken = null; });
+  }
+  return pendingToken;
+}
+
+async function requestAccessToken(fetchImpl) {
   const credentials = readServiceAccount();
   const now = Math.floor(Date.now() / 1000);
   const header = base64Url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));

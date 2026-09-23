@@ -52,7 +52,16 @@ export const serverConfig = {
 };
 
 const publicBaseUrl = (process.env.PUBLIC_BASE_URL || `http://localhost:${serverConfig.port}`).replace(/\/+$/, '');
-const webhookPath = process.env.META_WEBHOOK_PATH || '/webhooks/facebook';
+
+// Server so khớp `url.pathname` (luôn bắt đầu bằng "/"): đường dẫn cấu hình thiếu
+// "/" đầu sẽ không bao giờ khớp và URL webhook bị dính vào tên miền.
+function webhookPathFrom(value, fallback) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return fallback;
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+const webhookPath = webhookPathFrom(process.env.META_WEBHOOK_PATH, '/webhooks/facebook');
 
 export const metaConfig = {
   appId: process.env.META_APP_ID || '',
@@ -72,16 +81,17 @@ export const metaConfig = {
 
 // Webhook nhận đơn từ landing page (Webcake...). Token tự đặt, đưa vào URL
 // hoặc header khi cấu hình bên nền tảng landing; để trống là tắt webhook.
+const landingPath = webhookPathFrom(process.env.LANDING_WEBHOOK_PATH, '/webhooks/landing');
 export const landingConfig = {
   token: process.env.LANDING_WEBHOOK_TOKEN || '',
-  path: process.env.LANDING_WEBHOOK_PATH || '/webhooks/landing',
-  webhookUrl: `${publicBaseUrl}${process.env.LANDING_WEBHOOK_PATH || '/webhooks/landing'}`
+  path: landingPath,
+  webhookUrl: `${publicBaseUrl}${landingPath}`
 };
 
 // Pancake (pages.fm): Page vận hành trong Pancake, bot của CRM trả lời khách
 // qua Pancake. Token và ID Page lấy ở Pancake → Cài đặt → Công cụ (Public API
 // access token, Webhook). Để trống là tắt.
-const pancakePath = process.env.PANCAKE_WEBHOOK_PATH || '/webhooks/pancake';
+const pancakePath = webhookPathFrom(process.env.PANCAKE_WEBHOOK_PATH, '/webhooks/pancake');
 
 function parsePancakePages() {
   const pages = [];
@@ -89,14 +99,18 @@ function parsePancakePages() {
     try {
       const parsed = JSON.parse(process.env.PANCAKE_PAGES);
       if (Array.isArray(parsed)) {
+        // Một phần tử hỏng (null, thiếu id/token, chỉ toàn khoảng trắng) bị bỏ qua,
+        // không làm rớt các Page hợp lệ đứng sau nó.
         for (const p of parsed) {
-          if (p.pageId && p.pageAccessToken) {
-            pages.push({
-              pageId: String(p.pageId),
-              pageName: String(p.pageName || 'Pancake Page'),
-              pageAccessToken: String(p.pageAccessToken)
-            });
-          }
+          if (!p || typeof p !== 'object') continue;
+          const pageId = String(p.pageId ?? '').trim();
+          const pageAccessToken = String(p.pageAccessToken ?? '').trim();
+          if (!pageId || !pageAccessToken) continue;
+          pages.push({
+            pageId,
+            pageName: String(p.pageName || 'Pancake Page'),
+            pageAccessToken
+          });
         }
       }
     } catch {}

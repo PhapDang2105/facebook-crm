@@ -124,7 +124,10 @@ export function normalizeWebhookEvent(messagingEvent, pageId) {
     };
   }
   if (messagingEvent.delivery) {
-    return { ...shared, type: 'delivery', watermark: Number(messagingEvent.delivery.watermark) || shared.timestamp };
+    // Meta kèm danh sách mid đã giao: tin CRM gửi ghi createdAt theo giờ máy
+    // (sau khi Send API trả về) nên có thể muộn hơn watermark — mid mới chắc chắn.
+    const mids = (Array.isArray(messagingEvent.delivery.mids) ? messagingEvent.delivery.mids : []).map(String).filter(Boolean);
+    return { ...shared, type: 'delivery', watermark: Number(messagingEvent.delivery.watermark) || shared.timestamp, ...(mids.length ? { mids } : {}) };
   }
   if (messagingEvent.read) {
     return { ...shared, type: 'read', watermark: Number(messagingEvent.read.watermark) || shared.timestamp };
@@ -285,7 +288,7 @@ export function applyWebhookEvents(store, events) {
     }
     if (event.type === 'delivery' || event.type === 'read') {
       const status = event.type === 'delivery' ? 'delivered' : 'read';
-      const updated = markOutgoingStatusUntil(store, { conversationId: id, until: event.watermark, status });
+      const updated = markOutgoingStatusUntil(store, { conversationId: id, until: event.watermark, status, mids: event.mids });
       if (updated) changes.push({ type: 'status', conversationId: id, pageId: event.pageId, status });
       continue;
     }

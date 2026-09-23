@@ -126,7 +126,11 @@ export async function readMessagingStore() {
       let store;
       try {
         store = normalizeStore(JSON.parse(await readFile(messagingStorePath, 'utf8')));
-      } catch {
+      } catch (error) {
+        // Chưa có tệp (lần chạy đầu) thì kho rỗng là đúng. Tệp có mà không đọc
+        // được (JSON cắt dở, EACCES...) thì phải cất bản đó sang tên khác trước:
+        // nếu không, lượt ghi kế tiếp ghi đè tệp thật bằng kho rỗng và mất hết.
+        if (error?.code !== 'ENOENT') await quarantineStoreFile(error);
         store = emptyStore();
       }
       cachedStoreMtimeMs = await storeMtimeMs();
@@ -137,11 +141,24 @@ export async function readMessagingStore() {
   return loadingStore;
 }
 
+async function quarantineStoreFile(error) {
+  const backupPath = `${messagingStorePath}.corrupt-${Date.now()}`;
+  try {
+    await rename(messagingStorePath, backupPath);
+    console.error(`Không đọc được kho hội thoại (${error?.message || error}); bản hỏng đã cất tại ${backupPath}, bắt đầu với kho rỗng.`);
+  } catch {
+    // Không cất được (ví dụ tệp vừa biến mất) thì cũng không còn gì để ghi đè.
+  }
+}
+
 async function persistStore(store) {
   await mkdir(path.dirname(messagingStorePath), { recursive: true });
   const temporaryPath = `${messagingStorePath}.tmp`;
   await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
   await rename(temporaryPath, messagingStorePath);
+  // Trong lúc mutate còn chờ, một lượt đọc thường có thể đã nạp lại tệp (mốc sửa
+  // đổi bên ngoài) vào cache; bản vừa ghi mới là sự thật, kẻo lượt ghi sau đè mất.
+  cachedStore = store;
   cachedStoreMtimeMs = await storeMtimeMs();
 }
 
@@ -178,6 +195,10 @@ function findConversation(store, id) {
   return store.conversations.find(item => item.id === id) || null;
 }
 
+function isPlaceholderName(name) {
+  return /^Khách Facebook \d*$/.test(String(name || ''));
+}
+
 export function ensureConversation(store, { pageId, psid, name, picture, id: explicitId, source = 'inbox', post }) {
   const id = explicitId || conversationId(pageId, psid);
   let conversation = findConversation(store, id);
@@ -202,34 +223,55 @@ export function ensureConversation(store, { pageId, psid, name, picture, id: exp
     store.conversations.push(conversation);
     store.messages[id] = [];
   }
-  if (name && conversation.name !== name) conversation.name = name;
+  // Tên giữ chỗ ("Khách Facebook 1234", do Graph không trả tên) không được đè
+  // lên tên thật đã tra được hay Pancake đã biết.
+  if (name && conversation.name !== name && !(isPlaceholderName(name) && conversation.name && !isPlaceholderName(conversation.name))) conversation.name = name;
   if (picture) conversation.picture = picture;
   if (!Array.isArray(store.messages[id])) store.messages[id] = [];
   return conversation;
 }
 
-function applyLatestMessage(conversation, messages) {
+function applyLatestMessage(conversation, messages, saved) {
   const latest = messages.at(-1);
   if (!latest) return;
   conversation.lastMessageAt = latest.createdAt;
   conversation.lastMessagePreview = messagePreview(latest);
   conversation.lastMessageDirection = latest.direction;
-  if (latest.direction === 'incoming') {
-    conversation.lastCustomerMessageAt = Math.max(conversation.lastCustomerMessageAt || 0, latest.createdAt);
+  // Tin khách tới muộn (webhook lệch thứ tự, đồng bộ lịch sử) vẫn mở cửa sổ
+  // trả lời 24h, dù tin mới nhất trong luồng là của Page.
+  for (const item of [latest, saved]) {
+    if (item?.direction === 'incoming') conversation.lastCustomerMessageAt = Math.max(conversation.lastCustomerMessageAt || 0, Number(item.createdAt) || 0);
   }
+}
+
+const statusRank = { sent: 0, received: 0, delivered: 1, read: 2 };
+
+function placeSorted(messages, message) {
+  const position = messages.findIndex(item => item.createdAt > message.createdAt);
+  if (position < 0) messages.push(message);
+  else messages.splice(position, 0, message);
 }
 
 function insertMessage(messages, message) {
   const existingIndex = messages.findIndex(item => (message.mid && item.mid === message.mid) || item.id === message.id);
   if (existingIndex >= 0) {
-    messages[existingIndex] = { ...messages[existingIndex], ...message };
-    return { message: messages[existingIndex], inserted: false };
+    const existing = messages[existingIndex];
+    const merged = { ...existing, ...message };
+    // Bản dội về (echo) không hạ trạng thái đã giao/đã đọc xuống "sent".
+    if ((statusRank[existing.status] ?? 0) > (statusRank[merged.status] ?? 0)) merged.status = existing.status;
+    if (merged.createdAt === existing.createdAt) {
+      messages[existingIndex] = merged;
+    } else {
+      // Mốc giờ đổi (giờ máy → giờ Meta): đặt lại đúng chỗ để tin cuối vẫn là tin mới nhất.
+      messages.splice(existingIndex, 1);
+      placeSorted(messages, merged);
+    }
+    return { message: merged, inserted: false };
   }
-  const position = messages.findIndex(item => item.createdAt > message.createdAt);
-  if (position < 0) messages.push(message);
-  else messages.splice(position, 0, message);
+  placeSorted(messages, message);
   if (messages.length > maximumMessagesPerConversation) messages.splice(0, messages.length - maximumMessagesPerConversation);
-  return { message, inserted: true };
+  // Tin cũ hơn cả cửa sổ đang giữ thì bị cắt ngay: không coi là đã chèn.
+  return { message, inserted: messages.includes(message) };
 }
 
 /** Adds a message and returns the updated conversation plus whether it was new. */
@@ -237,7 +279,7 @@ export function saveMessage(store, { pageId, psid, name, picture, message, markU
   const conversation = ensureConversation(store, { pageId, psid, name, picture, id, source, post });
   const messages = store.messages[conversation.id];
   const { message: saved, inserted } = insertMessage(messages, message);
-  applyLatestMessage(conversation, messages);
+  applyLatestMessage(conversation, messages, inserted ? saved : null);
   if (inserted) {
     const at = Number(saved.createdAt) || 0;
     if (saved.direction === 'outgoing') {
@@ -265,14 +307,16 @@ export function updateMessageStatus(store, { conversationId: id, mid, status, er
   return message;
 }
 
-/** Marks every outgoing message up to `until` as delivered or read. */
-export function markOutgoingStatusUntil(store, { conversationId: id, until, status }) {
+/** Marks every outgoing message up to `until` (and any listed in `mids`) as delivered or read. */
+export function markOutgoingStatusUntil(store, { conversationId: id, until, status, mids = [] }) {
   const messages = store.messages[id];
   if (!Array.isArray(messages)) return 0;
   const ranking = { sent: 0, delivered: 1, read: 2 };
+  const listed = new Set(Array.isArray(mids) ? mids : []);
   let changed = 0;
   for (const message of messages) {
-    if (message.direction !== 'outgoing' || message.createdAt > until) continue;
+    if (message.direction !== 'outgoing') continue;
+    if (message.createdAt > until && !listed.has(message.mid) && !listed.has(message.id)) continue;
     if ((ranking[message.status] ?? 0) >= ranking[status]) continue;
     message.status = status;
     changed += 1;

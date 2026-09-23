@@ -1800,14 +1800,23 @@ function toggleOrderPhoneFilter(rowIndex) {
 function orderPhoneColumnIndex(data = orderData) {
   return data.headers.findIndex(header => ['so dien thoai', 'sdt', 'dien thoai'].includes(normalizeColumnName(header)));
 }
-// Nhập dữ liệu: bấm ô số điện thoại thì chép số vào bộ nhớ đệm; bấm chỗ khác
-// của dòng thì lọc bảng theo số điện thoại của dòng đó.
+// Nhập dữ liệu: chỉ dòng ĐƠN TRÙNG (nền vàng/xanh) mới lọc bảng theo số điện
+// thoại khi bấm vào ô không sửa được (nguồn, ngày, nhà mạng, tổng tiền, ghi chú);
+// bấm ô sửa được ở bất kỳ dòng nào là sửa tại chỗ như thường. Ô số điện thoại
+// của dòng trùng thì chép số vào bộ nhớ đệm.
 document.querySelector('#order-import-preview')?.addEventListener('click', async event => {
   if (event.target.closest('button, a, input, select, textarea')) return;
   const row = event.target.closest('tr[data-order-row-index]');
   if (!row) return;
+  const duplicateRow = row.classList.contains('order-row-duplicate') || row.classList.contains('order-row-duplicate-phone');
+  if (!duplicateRow) return;
+  const cell = event.target.closest('td[data-column-index]');
+  const columnName = cell ? normalizeColumnName(orderData.headers[Number(cell.dataset.columnIndex)]) : '';
+  if (cell && (columnName === 'san pham' || editableOrderColumns.has(columnName)) && !cell.classList.contains('preview-continued') && columnName !== 'so dien thoai') return;
   const phoneCell = event.target.closest('td.preview-phone');
   if (phoneCell) {
+    // Dòng trùng: ô số điện thoại chỉ chép số, không mở sửa.
+    event.stopImmediatePropagation();
     const phone = normalizeRowPhone(orderData.rows[Number(row.dataset.orderRowIndex)]?.[orderPhoneColumnIndex()]);
     if (!phone) return;
     try {

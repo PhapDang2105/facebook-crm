@@ -2508,7 +2508,7 @@ function rememberShippingLookup(tracking) {
     status: shippingVietnameseStatus(tracking),
     checkedAt: new Date().toISOString()
   });
-  localStorage.setItem(shippingHistoryKey, JSON.stringify(history.slice(0, 8)));
+  try { localStorage.setItem(shippingHistoryKey, JSON.stringify(history.slice(0, 8))); } catch {}
   renderShippingHistory();
 }
 
@@ -2598,7 +2598,7 @@ function loadAppSettings() {
 }
 
 function saveAppSettings() {
-  localStorage.setItem(appSettingsKey, JSON.stringify(appSettings));
+  try { localStorage.setItem(appSettingsKey, JSON.stringify(appSettings)); } catch {}
 }
 
 function applyAppSettings() {
@@ -3507,7 +3507,7 @@ function readStoredJson(key, fallback, normalize = value => value) {
 
 function writeStoredJson(key, value, serialize = item => item) {
   storedJsonCache.set(key, value);
-  localStorage.setItem(key, JSON.stringify(serialize(value)));
+  try { localStorage.setItem(key, JSON.stringify(serialize(value))); } catch {}
 }
 
 function getSavedChatMessageMap() {
@@ -4221,7 +4221,7 @@ function getCustomerPanelKey(conversation = getActiveConversation()) {
 }
 
 function saveCustomerPanelStore() {
-  localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore));
+  try { localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore)); } catch {}
 }
 
 const chatbotProviderProfiles = {
@@ -7516,7 +7516,7 @@ function setSidebarCollapsed(collapsed) {
   sidebarToggle.textContent = collapsed ? '›' : '‹';
   sidebarToggle.title = collapsed ? 'Mở rộng' : 'Thu gọn';
   sidebarToggle.setAttribute('aria-label', sidebarToggle.title);
-  localStorage.setItem('crm-sidebar-collapsed', String(collapsed));
+  try { localStorage.setItem('crm-sidebar-collapsed', String(collapsed)); } catch {}
 }
 
 sidebarToggle.onclick = () => {

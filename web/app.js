@@ -1790,18 +1790,14 @@ function toggleOrderPhoneFilter(rowIndex) {
   if (!row || phoneIndex < 0 || !orderSearch) return;
   const phone = normalizeRowPhone(row[phoneIndex]);
   if (!phone) return;
+  // Đang xem nhóm này rồi thì bấm thêm không tắt lọc (đang sửa mà bảng nhảy về
+  // toàn bộ rất khó chịu); muốn tắt thì xóa ô tìm kiếm (nút × trong ô).
   const active = normalizeRowPhone(orderSearch.value) === phone && orderSearch.value.trim() !== '';
-  orderSearch.value = active ? '' : phone;
+  if (active) return;
+  orderSearch.value = phone;
   // Xem đơn trùng là xem mọi ngày (đơn trùng thường ở ngày khác): tạm bỏ lọc
-  // ngày khi bật, trả lại ngày đang chọn khi tắt.
-  if (orderDayFilter) {
-    if (!active) {
-      if (orderDayFilter.value !== 'all') { orderDayFilter.dataset.beforePhoneFilter = orderDayFilter.value; orderDayFilter.value = 'all'; }
-    } else if (orderDayFilter.dataset.beforePhoneFilter) {
-      orderDayFilter.value = orderDayFilter.dataset.beforePhoneFilter;
-      delete orderDayFilter.dataset.beforePhoneFilter;
-    }
-  }
+  // ngày khi bật; xóa ô tìm kiếm thì trả lại ngày đang chọn.
+  if (orderDayFilter && orderDayFilter.value !== 'all') { orderDayFilter.dataset.beforePhoneFilter = orderDayFilter.value; orderDayFilter.value = 'all'; }
   renderOrderData();
 }
 
@@ -8199,6 +8195,11 @@ orderHistoryButton.addEventListener('click', () => {
 
 let orderSearchTimer;
 orderSearch?.addEventListener('input', () => {
+  // Xóa ô tìm kiếm sau khi xem nhóm đơn trùng: trả lại ngày đang chọn trước đó.
+  if (!orderSearch.value.trim() && orderDayFilter?.dataset.beforePhoneFilter) {
+    orderDayFilter.value = orderDayFilter.dataset.beforePhoneFilter;
+    delete orderDayFilter.dataset.beforePhoneFilter;
+  }
   window.clearTimeout(orderSearchTimer);
   orderSearchTimer = window.setTimeout(renderOrderData, 120);
 });

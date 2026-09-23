@@ -7266,7 +7266,8 @@ function renderNoteCell(value, extraNotes = []) {
   const kind = segment => /^[⚠☎]/u.test(segment) ? 'act' : /^[⏳🤖ℹ]/u.test(segment) ? 'note' : 'plain';
   const strip = segment => segment.replace(/^[⚠⏳🤖☎ℹ]\s*/u, '');
   // "POS cảnh báo N" (POS đã đánh dấu số này) nổi bật: to hơn một chút, màu đỏ.
-  const emphasize = html => html.replace(/POS cảnh báo \d+/g, match => `<strong class="note-pos-warning">${match}</strong>`);
+  // Luôn xuống dòng riêng và không bị ngắt giữa chừng ("POS" một dòng, "cảnh báo 3" dòng khác).
+  const emphasize = html => html.replace(/,?\s*(POS cảnh báo \d+)/g, (_, match) => `<br><strong class="note-pos-warning">${match}</strong>`);
   return `<div class="note-cell">${segments.map(segment => `<div class="note-line note-line-${kind(segment)}">${emphasize(escapeHtml(shortenLegacyNote(strip(segment))))}</div>`).join('')}</div>`;
 }
 

@@ -2250,7 +2250,7 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .note-cell { display: grid; gap: 1px; width: 100%; }
 .note-line { color: #344054; font-size: 11.7px; line-height: 1.45; overflow-wrap: anywhere; }
 .note-line-act { color: #1d2939; font-weight: 600; }
-.note-pos-warning { color: #d92d20; font-size: 1.12em; font-weight: 700; }
+.note-pos-warning { display: inline-block; color: #d92d20; font-size: 1.12em; font-weight: 700; white-space: nowrap; }
 .note-line-note { color: #475467; }
 .note-line-plain { color: #1d2939; }
 .alert-icon { display: inline-block; margin-right: 4px; vertical-align: -1px; }

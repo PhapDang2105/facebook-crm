@@ -1759,8 +1759,12 @@ async function deleteOrderAtRow(rowIndex, button = null) {
     showToast(`Đã xóa đơn #${id}.`, 'success');
     return true;
   }
-  deleteOrderRows([rowIndex]);
-  showToast('Đã xóa dòng khỏi bảng · Ctrl+Z để hoàn tác.', 'success');
+  // Đơn import có mã: xóa mọi dòng sản phẩm của đơn đó (bảng chỉ hiện một nút xóa cho cả đơn).
+  const lineIndexes = orderId
+    ? orderData.rows.map((row, index) => String(row[idColumn] || '') === orderId ? index : -1).filter(index => index >= 0)
+    : [rowIndex];
+  deleteOrderRows(lineIndexes);
+  showToast(lineIndexes.length > 1 ? `Đã xóa đơn (${lineIndexes.length} dòng) khỏi bảng · Ctrl+Z để hoàn tác.` : 'Đã xóa dòng khỏi bảng · Ctrl+Z để hoàn tác.', 'success');
   return true;
 }
 
@@ -7295,8 +7299,9 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     ? `${previewClassName(index)} preview-product-heading`.trim()
     : previewClassName(index);
   // The delete control leads the row so it stays visible when the wide table scrolls sideways.
-  const actionCell = entry => deletable
-    ? `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa dòng" aria-label="Xóa dòng">×</button></td>`
+  // Đơn nhiều dòng: một nút xóa ở dòng đầu (xóa cả đơn), dòng sau không lặp nút.
+  const actionCell = (entry, continued = false) => deletable
+    ? (continued ? '<td class="preview-actions"></td>' : `<td class="preview-actions"><button type="button" class="order-row-delete" data-order-row-delete="${entry.index}" title="Xóa đơn" aria-label="Xóa đơn">×</button></td>`)
     : '';
   // Xử lý dữ liệu: ô chọn trạng thái đứng cuối dòng, kể cả khi dòng đang sửa (sửa
   // tự lưu khi rời ô, như bảng tính, nên không cần nút Lưu/Huỷ).
@@ -7336,7 +7341,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     const orderId = groupOrderLines && orderIdIndex >= 0 ? String(entry.row[orderIdIndex] ?? '').trim() : '';
     const continued = Boolean(orderId) && orderId === previousOrderId;
     previousOrderId = orderId;
-    return `<tr class="${rowClassName(entry)}${continued ? ' order-row-continued' : ''}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry) : ''}${cellHtml(entry, index, continued)}`).join('')}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry) : ''}${tailCell(entry)}</tr>`;
+    return `<tr class="${rowClassName(entry)}${continued ? ' order-row-continued' : ''}" data-order-row-index="${entry.index}">${actionCell(entry, continued)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry) : ''}${cellHtml(entry, index, continued)}`).join('')}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry) : ''}${tailCell(entry)}</tr>`;
   }).join('');
   // Đang sửa một dòng: giữ đúng bề rộng cột đã đo trước đó để bảng không xê dịch.
   const columnTemplateWithStatus = statusCells

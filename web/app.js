@@ -536,7 +536,11 @@ function showView(name) {
   orderNav.setAttribute('aria-expanded', String(name === 'orders'));
   settingsNav?.setAttribute('aria-expanded', String(name === 'settings'));
   if (window.location.hash !== `#${name}`) window.location.hash = name;
-  if (name === 'orders') syncChatbotOrdersIntoTable();
+  if (name === 'orders') {
+    syncChatbotOrdersIntoTable();
+    // Ảnh sản phẩm ở cột Sản phẩm lấy từ danh mục: tải danh mục lần đầu mở bảng.
+    if (!sharedProducts.length) loadProducts().then(() => renderOrderData()).catch(() => {});
+  }
   if (name === 'customers') loadCustomers();
   if (name === 'settings') loadPosChannel();
 }
@@ -7197,14 +7201,18 @@ function renderPreviewCell(value, header) {
   }
   if (column === 'san pham') {
     const productName = normalizeColumnName(previewValue);
-    const isSingleBag = productName.includes('1 tui');
+    // Ảnh sản phẩm tải trong Cài đặt → Sản phẩm (khớp đúng tên danh mục) đi trước;
+    // không có thì ảnh mẫu theo màu túi. Tên nay là "Granola Túi Xanh 450g" (không
+    // còn "1 Túi") nên không đòi chữ "1 túi" nữa.
+    const catalogImage = (Array.isArray(sharedProducts) ? sharedProducts : []).find(product => product.image && normalizeColumnName(product.name) === productName)?.image || '';
+    if (catalogImage) return `<span class="product-with-image">${escapeHtml(previewValue)}<img src="${escapeHtml(catalogImage)}" alt=""></span>`;
     const imageName = productName.includes('combo 2') && productName.includes('xanh') ? 'combo2_green'
       : productName.includes('combo 2') && productName.includes('vang') ? 'combo2_yellow'
       : productName.includes('combo 3') && productName.includes('xanh') ? 'combo3_green'
         : productName.includes('combo 3') && productName.includes('vang') ? 'combo3_yellow'
-          : isSingleBag && productName.includes('xanh') ? 'product_green'
-            : isSingleBag && productName.includes('vang') ? 'product_yellow'
-              : isSingleBag && productName.includes('nau') ? 'product_brown' : '';
+          : /\btui xanh\b|\bgranola xanh\b/.test(productName) ? 'product_green'
+            : /\btui vang\b|\bgranola vang\b/.test(productName) ? 'product_yellow'
+              : /\btui nau\b|\bgranola nau\b|cacao/.test(productName) ? 'product_brown' : '';
     if (imageName) {
       const imageAlt = ({
         combo2_green: 'Combo 2 Túi Xanh',

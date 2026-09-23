@@ -755,6 +755,10 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .data-preview th,
 .data-preview td { padding: 9px 10.8px; border-bottom: 0.9px solid #dedede; font-size: 11.7px; text-align: left; white-space: nowrap; vertical-align: top; }
 .data-preview td { display: flex; align-items: center; padding-top: 6.3px; padding-bottom: 6.3px; }
+/* Một đơn nhiều dòng sản phẩm (Nhập dữ liệu): các dòng của cùng đơn dính liền
+   nhau (không kẻ giữa), dòng sau để trống nguồn/ngày/khách/SĐT/nhà mạng. */
+.data-preview tr:has(+ tr.order-row-continued) td { border-bottom-color: transparent; }
+.data-preview tr.order-row-continued td { padding-top: 0; }
 .data-preview td:has(> .network-logo) { justify-content: center; }
 .data-preview .preview-address,
 .data-preview .preview-wrap { white-space: normal; overflow-wrap: anywhere; }

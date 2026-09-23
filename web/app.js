@@ -7230,7 +7230,7 @@ function renderEmptyState(container, message) {
   container.innerHTML = `<div class="order-empty">${emptyBoxIcon}<small>${escapeHtml(message)}</small></div>`;
 }
 
-function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, editingCell = null, templateOverride = '', rowNotes = new Map(), statusCells = null } = {}) {
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, editingCell = null, templateOverride = '', rowNotes = new Map(), statusCells = null, groupOrderLines = false } = {}) {
   preview.classList.remove('is-empty');
   if (!rowEntries.length) {
     renderEmptyState(preview, emptyMessage);
@@ -7307,8 +7307,13 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     return `<td class="preview-actions preview-actions--tail"><select class="order-status-select" data-order-status="${entry.index}" data-tone="${status || 'todo'}" title="Trạng thái xử lý đơn" aria-label="Trạng thái xử lý">${orderStatusOptionsHtml(status)}</select></td>`;
   };
   // Dòng đang sửa: các ô sửa được thành ô nhập, giữ nguyên bề rộng cột.
-  const cellHtml = (entry, index) => {
+  // Một đơn nhiều dòng sản phẩm (Nhập dữ liệu): dòng thứ hai trở đi để trống
+  // nguồn đơn, ngày, khách hàng, SĐT, nhà mạng — đọc là một đơn, không phải hai.
+  const collapsedNames = new Set(['nguon don', 'ngay', 'khach hang', 'so dien thoai', 'nha mang']);
+  const orderIdIndex = headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
+  const cellHtml = (entry, index, continued = false) => {
     const name = normalizeColumnName(headers[index]);
+    if (continued && collapsedNames.has(name)) return `<td class="${previewClassName(index)} preview-continued" data-column-index="${index}"></td>`;
     const raw = entry.row[index] || '';
     const isEditingCell = Boolean(editingCell) && entry.index === editingCell.row && index === editingCell.column;
     if (isEditingCell && isEditableOrderColumn(name)) {
@@ -7326,7 +7331,13 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     + (statusCells && statusPosition === visibleIndexes.length ? '<th class="preview-status">Trạng thái</th>' : '')
     + (reviewable ? '<th class="preview-actions preview-actions--tail">Trạng thái</th>' : '');
   const statusCell = entry => `<td class="preview-status">${statusCells.get(entry.index) || ''}</td>`;
-  const body = rowEntries.map(entry => `<tr class="${rowClassName(entry)}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry) : ''}${cellHtml(entry, index)}`).join('')}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry) : ''}${tailCell(entry)}</tr>`).join('');
+  let previousOrderId = '';
+  const body = rowEntries.map(entry => {
+    const orderId = groupOrderLines && orderIdIndex >= 0 ? String(entry.row[orderIdIndex] ?? '').trim() : '';
+    const continued = Boolean(orderId) && orderId === previousOrderId;
+    previousOrderId = orderId;
+    return `<tr class="${rowClassName(entry)}${continued ? ' order-row-continued' : ''}" data-order-row-index="${entry.index}">${actionCell(entry)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry) : ''}${cellHtml(entry, index, continued)}`).join('')}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry) : ''}${tailCell(entry)}</tr>`;
+  }).join('');
   // Đang sửa một dòng: giữ đúng bề rộng cột đã đo trước đó để bảng không xê dịch.
   const columnTemplateWithStatus = statusCells
     ? orderedColumns.map((column, position) => `${position === statusPosition ? 'max-content ' : ''}${templates[column.name] || 'max-content'}`).join(' ') + (statusPosition === orderedColumns.length ? ' max-content' : '')
@@ -7436,7 +7447,7 @@ function renderOrderData() {
       // cảnh báo bom hàng và các vấn đề khác để bên Xử lý dữ liệu lo.
       ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate'
         : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
-      { deletable: true, rowNotes, statusCells: new Map([...orderRowStatuses(importRows).entries()].map(([index, status]) => [index, orderRowStatusHtml(status)])) }
+      { deletable: true, groupOrderLines: true, rowNotes, statusCells: new Map([...orderRowStatuses(importRows).entries()].map(([index, status]) => [index, orderRowStatusHtml(status)])) }
     );
   } else orderPanelsDirty.add('import');
   if (!panelVisible('process')) { orderPanelsDirty.add('process'); return; }

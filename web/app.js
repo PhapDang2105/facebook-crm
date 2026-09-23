@@ -2122,6 +2122,10 @@ document.querySelector('#order-preview')?.addEventListener('change', event => {
   }
   if (event.target.matches('select[data-edit-column]')) { clearTimeout(pendingBlurSave); saveOrderRowEdit(editingOrderRowIndex); }
 });
+// Nhập dữ liệu dùng chung ô chọn trạng thái với Xử lý dữ liệu.
+document.querySelector('#order-import-preview')?.addEventListener('change', event => {
+  if (event.target.matches('select[data-order-status]')) setOrderRowStatus(Number(event.target.dataset.orderStatus), event.target.value);
+});
 document.querySelector('#order-preview')?.addEventListener('click', event => {
   if (event.target.closest('button, a, input, select, textarea')) return;
   const row = event.target.closest('tr[data-order-row-index]');
@@ -2173,7 +2177,7 @@ function setOrderRowStatus(rowIndex, status, { undoable = true } = {}) {
   if (editingOrderRowIndex === rowIndex) exitCellEdit();
   if (!resolved) {
     // Đơn ở lại bảng: đổi màu ô chọn ở mọi dòng của đơn, không vẽ lại bảng.
-    for (const select of document.querySelectorAll('#order-preview select[data-order-status]')) {
+    for (const select of document.querySelectorAll('#order-preview select[data-order-status], #order-import-preview select[data-order-status]')) {
       const index = Number(select.dataset.orderStatus);
       if (!orderData.rows[index] || orderRowKey(orderData.rows[index]) !== key) continue;
       select.value = status;
@@ -7335,13 +7339,14 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     + headCells.join('')
     + (statusCells && statusPosition === visibleIndexes.length ? '<th class="preview-status">Trạng thái</th>' : '')
     + (reviewable ? '<th class="preview-actions preview-actions--tail">Trạng thái</th>' : '');
-  const statusCell = entry => `<td class="preview-status">${statusCells.get(entry.index) || ''}</td>`;
+  // Ô Trạng thái: dòng sau của cùng đơn để trống (một ô chọn cho cả đơn).
+  const statusCell = (entry, continued = false) => `<td class="preview-status">${continued ? '' : statusCells.get(entry.index) || ''}</td>`;
   let previousOrderId = '';
   const body = rowEntries.map(entry => {
     const orderId = groupOrderLines && orderIdIndex >= 0 ? String(entry.row[orderIdIndex] ?? '').trim() : '';
     const continued = Boolean(orderId) && orderId === previousOrderId;
     previousOrderId = orderId;
-    return `<tr class="${rowClassName(entry)}${continued ? ' order-row-continued' : ''}" data-order-row-index="${entry.index}">${actionCell(entry, continued)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry) : ''}${cellHtml(entry, index, continued)}`).join('')}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry) : ''}${tailCell(entry)}</tr>`;
+    return `<tr class="${rowClassName(entry)}${continued ? ' order-row-continued' : ''}" data-order-row-index="${entry.index}">${actionCell(entry, continued)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry, continued) : ''}${cellHtml(entry, index, continued)}`).join('')}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry, continued) : ''}${tailCell(entry)}</tr>`;
   }).join('');
   // Đang sửa một dòng: giữ đúng bề rộng cột đã đo trước đó để bảng không xê dịch.
   const columnTemplateWithStatus = statusCells
@@ -7443,6 +7448,20 @@ function renderOrderData() {
 
   // Nút Export của Nhập dữ liệu xuất đúng những dòng đang hiển thị này.
   importTableEntries = sortOrderEntriesByTime(importRows);
+  // Nhập dữ liệu: "Trùng đơn ngày…", "Khách hàng cũ" ghi vào Ghi chú; cột Trạng
+  // thái là ô chọn trạng thái xử lý, cùng kho với Xử lý dữ liệu (đổi bên nào
+  // bên kia cũng thấy).
+  const importNotes = new Map(rowNotes);
+  for (const [index, status] of orderRowStatuses(importRows).entries()) {
+    const extra = [];
+    if (status.recentDays?.length) extra.push(`⚠ Trùng đơn ngày ${status.recentDays.join(', ')}`);
+    if (status.oldCustomer) extra.push('ℹ Khách hàng cũ');
+    if (extra.length) importNotes.set(index, [...(importNotes.get(index) || []), ...extra]);
+  }
+  const importStatusCells = new Map(importRows.map(entry => {
+    const status = orderStatusMap[orderRowKey(entry.row)] || '';
+    return [entry.index, `<select class="order-status-select" data-order-status="${entry.index}" data-tone="${status || 'todo'}" title="Trạng thái xử lý đơn" aria-label="Trạng thái xử lý">${orderStatusOptionsHtml(status)}</select>`];
+  }));
   if (panelVisible('import')) {
     orderPanelsDirty.delete('import');
     renderOrderTable(
@@ -7452,7 +7471,7 @@ function renderOrderData() {
       // cảnh báo bom hàng và các vấn đề khác để bên Xử lý dữ liệu lo.
       ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate'
         : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
-      { deletable: true, groupOrderLines: true, rowNotes, statusCells: new Map([...orderRowStatuses(importRows).entries()].map(([index, status]) => [index, orderRowStatusHtml(status)])) }
+      { deletable: true, groupOrderLines: true, rowNotes: importNotes, statusCells: importStatusCells }
     );
   } else orderPanelsDirty.add('import');
   if (!panelVisible('process')) { orderPanelsDirty.add('process'); return; }

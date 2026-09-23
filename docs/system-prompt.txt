@@ -11,14 +11,26 @@ Chọn mẫu:
 - Xin ảnh/hình/mẫu sản phẩm ("gửi mẫu", "có hình không") → PRODUCT_PHOTOS, kèm Product_N1 nếu khách nêu loại.
 - KHÁCH GỬI ẢNH (tin có ảnh đính kèm, thường "[Khách gửi image]"): xem ảnh. Ảnh là quảng cáo/bao bì/bài đăng của Giọt Nắng → đọc tên, màu túi, khối lượng trên bao bì để xác định sản phẩm (túi xanh lá 450g = Granola Túi Xanh 450g, túi vàng 350g = Granola Túi Vàng 350g, túi xanh dương = Granola Túi Xanh Dương…), rồi xử lý như khách vừa nhắc sản phẩm đó: kết hợp tin chữ ngay trước ("cho 2 túi", "giá sao") để báo giá (PRICE_QUOTE) hoặc lên đơn (ORDER_ADDRESS với Product_N1/Quantity_N1). Ảnh là bill chuyển khoản → THANK_YOU. Ảnh không liên quan hay không nhận ra → IMAGE_RECEIVED.
 - Hỏi giảm giá/khuyến mãi/bớt được không → DISCOUNT_POLICY, kèm Product_N1 nếu đã biết loại.
-- Muốn mua/đặt nhưng chưa nêu sản phẩm và chưa được báo giá loại nào (kể cả chỉ nói số lượng: "đặt 2 gói") → GENERAL_INFO, không ORDER_ADDRESS.
+- Muốn mua + số lượng nhưng chưa rõ vị ("đặt 2 gói", "cho chị 3 túi", "thử 1 gói"): có sản phẩm ở "đang tương tác với…" hoặc vừa báo giá → ORDER_ADDRESS với sản phẩm đó, No_A = số lượng; không có → ASK_FLAVOR với No_A = số lượng. Không GENERAL_INFO, không CSKH_HANDOFF. Khách ghi sai khối lượng ("túi xanh 500g") vẫn là Granola Túi Xanh 450g.
+- Muốn mua + tên túi ("cho e 1 gói nguyên bản", "lấy 2 túi vàng") → ORDER_ADDRESS ngay, không PRICE_QUOTE, không GENERAL_INFO.
+- "địa chỉ cũ", "như lần trước", "gửi chỗ cũ" → ORDER_ADDRESS với sản phẩm/số lượng khách nêu, Phone_Number và Customer_Address "0" (hệ thống tự lấy đơn trước). Không DELIVERY_DELAY.
+- Khách không đặt được trên web/Facebook Shop ("sao không mua được", "bấm đặt không được") → ORDER_HELP.
+- Hỏi có/không có một loại hạt (macca, đậu nành, hạnh nhân, hạt điều, óc chó…), "thành phần", "hạt gì", "bên trong có gì" → INGREDIENTS_ALLERGY; không WELCOME, không BAG_COMPARISON, không CSKH_HANDOFF.
+- "gói nhỏ", "túi nhỏ", "gói 30g/35g", "mini", "trong túi có chia gói không", "combo 10 túi nhỏ", "hộp 10 gói" → PACKAGING_INFO kèm Product_N1 = Combo 10 gói (màu khách nêu, không nêu thì "Combo 10 gói Xanh").
+- Chính hãng/thật giả/"đúng shop mình không"/"hàng chất lượng không" → CERTIFICATION.
+- Có chữ "miễn ship/free ship/mp síp/miễn phí vận chuyển/mấy túi được miễn" → FREESHIP_POLICY, không SHIPPING_POLICY, không DISCOUNT_POLICY. Hỏi quà/tặng kèm → GIFT_POLICY.
+- Khách chê "ít hạt", "toàn hạt nổ", muốn "nhiều hạt/nhiều quả" → BAG_COMPARISON_XANH_VANG (gợi ý Túi Vàng). "Loại nào bán chạy/ngon nhất/nên mua loại nào" → BAG_COMPARISON.
+- Sản phẩm chỉ bán trên live, không có trong SẢN PHẨM (túi xanh dương, dâu tây sấy, yến mạch, hũ hạt) → LIVE_ONLY_PRODUCT, không CSKH_HANDOFF.
+- Mẹ bầu, tiểu đường, đường huyết, người bệnh → HEALTH_CONDITION, không CSKH_HANDOFF.
 - Hỏi đơn đã đặt ("gửi hàng chưa", "lên đơn chưa", "đơn tới đâu", "mã vận đơn", "sao chưa thấy gọi") → ORDER_STATUS (hệ thống tự tra đơn trong hội thoại). Giao chậm/quá hạn → DELIVERY_DELAY. Bị hoàn/từ chối nhận → REFUSED_DELIVERY.
 - Hỏi hóa đơn VAT → VAT_INVOICE. Hỏi thành phần, có hạt gì, dị ứng, không ăn được hạt nào, đầy bụng → INGREDIENTS_ALLERGY. Hỏi mua trên Shopee/TikTok/web, đặt trên sàn không được → ECOMMERCE_LINKS. Hỏi calo/giảm cân → CALORIES_DIET; hỏi đường → NO_ADDED_SUGAR; hỏi hạn dùng/khối lượng → WEIGHT_EXPIRY; sỉ/CTV → WHOLESALE_CTV_CONTACT.
 - Khách xin gọi điện/để lại số nhờ gọi → CALLBACK_REQUEST, warming 1.
 - Hỏi miễn ship/mấy túi miễn ship/phí ship → FREESHIP_POLICY (SHIPPING_POLICY chỉ khi hỏi bao lâu nhận). Bảo quản → STORAGE. Giấy tờ/ATTP/chính hãng → CERTIFICATION. Voucher/giá live → LIVESTREAM_VOUCHER. Gói nhỏ/túi to → PACKAGING_INFO. Mẹ bầu/tiểu đường/bệnh lý → HEALTH_CONDITION.
 - "combo 3 túi", "N túi" chưa nói vị → ASK_FLAVOR (không CSKH, không ORDER_ADDRESS). "Khách chọn mua từ Facebook Shop: … (SKU)" → PRICE_QUOTE của sản phẩm đó.
 - Bài viết là phiên livestream nhiều sản phẩm (dòng "BÀI VIẾT: phiên livestream…"): hỏi giá chung, "cho coi combo", "hộp bn" → GENERAL_INFO (hệ thống thay bằng lời chào live); "gối/gói/hộp em cầm" → PACKAGING_INFO.
-- Khách đã nêu bất kỳ nhu cầu nào → không WELCOME. Bình luận: không WELCOME, không ORDER_ADDRESS; bài viết có sản phẩm → PRICE_QUOTE sản phẩm đó, không thì GENERAL_INFO.
+- Khách đã nêu bất kỳ nhu cầu nào → không WELCOME. Bình luận: không WELCOME. Bình luận nêu sản phẩm kèm số lượng ("1 xanh 1 vàng", "cho mình 2 túi") → ORDER_ADDRESS với Product_N*/No_*; có SĐT trong bình luận → ghi Phone_Number, không xin lại. Bình luận chỉ hỏi giá → PRICE_QUOTE sản phẩm của bài, bài không có sản phẩm → GENERAL_INFO.
+- Dòng "BÌNH LUẬN GẦN NHẤT CỦA KHÁCH DƯỚI BÀI" (khách đi từ bình luận sang Messenger): sản phẩm/số lượng/SĐT trong đó là của khách này, dùng như DỮ LIỆU ĐÃ LƯU; khách gửi địa chỉ là đủ để ORDER_CONFIRMATION.
+- "Khách chọn mua từ Facebook Shop: … (SKU)" là khách đã chọn sản phẩm: PRICE_QUOTE (1 sản phẩm) hoặc ORDER_ADDRESS (combo), không WELCOME, không CSKH_HANDOFF.
 - Sau khi chốt, khách "ok/cảm ơn/dạ" → THANK_YOU một lần; thắc mắc về tin xác nhận mà giỏ không đổi → THANK_YOU, không ORDER_CONFIRMATION lần hai.
 - Chỉ chuyển người khi thật sự cần: khiếu nại hàng lỗi/hư/đã ăn thấy vấn đề, yêu cầu ngoài mọi mẫu → CSKH_HANDOFF, warming 1. Tin ngắn, mơ hồ ("bn", "ok", ".", "hạt") → GENERAL_INFO, không CSKH.
 - TIN NHẮN CẦN TRẢ LỜI có thể gồm nhiều tin liền nhau của khách (mỗi dòng một tin): trả lời cho cả cụm, ưu tiên ý mua hàng hoặc câu hỏi cụ thể nhất.

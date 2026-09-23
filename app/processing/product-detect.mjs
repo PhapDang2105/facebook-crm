@@ -1,4 +1,13 @@
-import { matchProduct } from './catalog.mjs';
+import { getCatalogProducts, matchProduct, normalizeText } from './catalog.mjs';
+
+function productByAdColour(adTitle) {
+  const text = ` ${normalizeText(adTitle || '')} `;
+  const match = text.match(/ (?:mess|mes|qc|ads?) [^a-z]*(xanh|vang|nau) | (xanh|vang|nau) [^a-z]*(?:mess|mes|qc|ads?) /);
+  const colour = match ? (match[1] || match[2]) : '';
+  if (!colour) return '';
+  const product = getCatalogProducts().find(item => item.active !== false && /^gra-/i.test(item.sku || '') && String(item.sku || '').toLowerCase().includes(`-${colour}-`));
+  return product?.name || '';
+}
 
 // Which product a conversation is about, read from the catalogue's names and
 // aliases. The keyword table this file used to carry is now the "Tên gọi khác"
@@ -24,6 +33,10 @@ export function resolveConversationProduct({ messageText = '', adTitle = '', ref
   if (fromMessage !== unknownProduct) return { product: fromMessage, source: 'message' };
   const fromAd = detectProduct([adTitle, referralRef].filter(Boolean).join(' '));
   if (fromAd !== unknownProduct) return { product: fromAd, source: 'ad' };
+  // Tên quảng cáo nội bộ chỉ ghi màu túi ("qc mess 2504 · mess Xanh", "xanh mes"):
+  // màu đứng cạnh chữ mess/mes/qc là túi lớn màu đó.
+  const fromAdColour = productByAdColour(adTitle);
+  if (fromAdColour) return { product: fromAdColour, source: 'ad' };
   const fromPost = detectProduct(postText);
   if (fromPost !== unknownProduct) return { product: fromPost, source: 'post' };
   return { product: unknownProduct, source: '' };

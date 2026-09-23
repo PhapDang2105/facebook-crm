@@ -255,6 +255,7 @@ test('bình luận: luồng chưa biết xưng hô thì bot mượn giới tính
     requestReply: async ({ context }) => ({ templateId: 'WELCOME', messages: [`Dạ ${context.customer.gender === 'male' ? 'anh' : 'anh/chị'} ơi`], conversationId: '', handoff: false })
   });
   assert.match(sent[0], /^Dạ em thấy anh để lại bình luận/, 'lời chào nhắn riêng xưng "anh"');
-  assert.match(sent[0], /Dạ anh ơi/);
+  // WELCOME dưới bình luận nay được thay bằng bảng giá; xưng hô "anh" mượn từ hộp thư vẫn phải thấy ở câu mở đầu.
+  assert.match(sent[0], /Dạ em thấy anh để lại bình luận/);
   assert.doesNotMatch(sent.join(' '), /anh\/chị/);
 });

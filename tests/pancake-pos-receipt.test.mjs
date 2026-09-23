@@ -12,7 +12,9 @@ test('thẻ xác nhận đơn (receipt template) do Pancake POS gửi khách đ�
   assert.equal(event.message.direction, 'outgoing');
   assert.equal(event.message.type, 'order-receipt');
   assert.equal(event.message.text, 'Đã gửi xác nhận đơn hàng');
-  assert.equal(event.pancake.staff, true, 'POS gửi, không phải Public API: vẫn coi là người của Page');
+  // Thẻ do POS tự gửi không phải nhân viên gõ: bot không được tắt sau mỗi đơn
+  // đẩy POS (khách hỏi tiếp sau khi chốt mà không ai trả lời hàng giờ).
+  assert.equal(event.pancake.staff, false, 'POS là máy, không phải nhân viên: bot vẫn bật');
 });
 
 test('tệp đính kèm khác (không phải ảnh/video/receipt) vẫn ghi là tệp đính kèm', () => {

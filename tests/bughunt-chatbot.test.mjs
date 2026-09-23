@@ -116,3 +116,78 @@ test('hẹn chạy lại sau khi hết hạn mức: lúc chạy lại bot đã b
   await wait(120);
   assert.deepEqual(log, [], 'bot đã tắt thì lần chạy lại không gửi gì');
 });
+
+// ===== Cải tiến sau đánh giá hội thoại 23/09 =====
+import { cartQuickReply, processChatbotChanges as runChanges } from '../app/chatbot-engine.mjs';
+import { resolveConversationProduct } from '../app/processing/product-detect.mjs';
+import { splitLongText } from '../app/pancake.mjs';
+
+test('giỏ Facebook Shop: 1 SKU → bảng giá; SKU combo CB2-XANH / CB-VANGG+NAU → xin SĐT/địa chỉ với đúng giỏ; SKU lạ → để model', () => {
+  const t = templates;
+  const one = cartQuickReply([{ sku: 'GRA-VANG-H350', quantity: 0 }], t, {});
+  assert.equal(one.templateId, 'PRICE_QUOTE');
+  assert.match(one.messages.join(' '), /Túi Vàng 350g/);
+  const two = cartQuickReply([{ sku: 'CB2-XANH-Z450', quantity: 0 }], t, {});
+  assert.equal(two.templateId, 'ORDER_ADDRESS');
+  assert.deepEqual(two.pendingOrder.items.map(i => `${i.product} x${i.quantity}`), ['Granola Túi Xanh 450g x2']);
+  const mix = cartQuickReply([{ sku: 'CB-VANGG+NAU', quantity: 0 }], t, {});
+  assert.deepEqual(mix.pendingOrder.items.map(i => `${i.product} x${i.quantity}`).sort(), ['Granola Túi Nâu vị cacao 350g x1', 'Granola Túi Vàng 350g x1']);
+  assert.equal(cartQuickReply([{ sku: 'XYZ-123', quantity: 1 }], t, {}), null);
+});
+
+test('tên quảng cáo nội bộ "qc mess 2504 · mess Xanh" / "xanh mes" nhận ra Túi Xanh', () => {
+  assert.equal(resolveConversationProduct({ adTitle: 'qc mess 2504 · mess Xanh' }).product, 'Granola Túi Xanh 450g');
+  assert.equal(resolveConversationProduct({ adTitle: 'Quảng cáo 5,6,11/12 · xanh mes' }).product, 'Granola Túi Xanh 450g');
+  assert.equal(resolveConversationProduct({ adTitle: 'Săn deal hời' }).product, 'Không xác định');
+});
+
+test('chữ dài hơn 1900 ký tự cắt theo đoạn, mỗi tin không quá giới hạn', () => {
+  const paragraph = 'Dạ em gửi bảng giá chi tiết cho mình ạ. '.repeat(30).trim();
+  const text = [paragraph, paragraph, paragraph].join('\n\n');
+  const chunks = splitLongText(text, 1900);
+  assert.ok(chunks.length >= 2);
+  assert.ok(chunks.every(chunk => chunk.length <= 1900 && chunk.trim()));
+  assert.equal(chunks.join(' ').replace(/\s+/g, ' '), text.replace(/\s+/g, ' '));
+  assert.deepEqual(splitLongText('ngắn'), ['ngắn']);
+});
+
+test('bình luận "1 xanh 1 vàng": giỏ đi theo khách sang hộp thư; model lỗi hạn mức dưới bình luận thì trả lời theo luật; công khai không lặp trong 10 phút', async () => {
+  const saved = {};
+  const log = [];
+  const post = { id: 'p1', message: 'Granola túi xanh giảm giá' };
+  const deps = (requestReply, recent = []) => ({
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 5, messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib ạ', COMMENT_PUBLIC_REPEAT: 'Dạ em đã gửi rồi ạ' } }),
+    listMessages: async id => (id === 'page:comment:c1:p1' ? recent : []),
+    getConversation: async id => (id === 'page:user' ? { id: 'page:user', pageId: 'page', psid: 'user', botEnabled: true } : null),
+    saveBotState: async (id, state) => { saved[id] = { ...(saved[id] || {}), ...state }; },
+    sendMessage: async (_c, message) => { log.push(`${message.privateReply ? 'riêng' : 'công khai'}:${String(message.text).slice(0, 40)}`); return { message: { mid: 'm' } }; },
+    requestReply
+  });
+  const comment = (id, text, createdAt) => ({ type: 'message', conversation: { id: 'page:comment:c1:p1', pageId: 'page', psid: 'user', source: 'comment', name: 'Khách', botEnabled: true, post }, message: { id, mid: id, direction: 'incoming', type: 'text', text, createdAt } });
+  // 1. Giỏ từ bình luận được lưu sang hộp thư page:user.
+  await runChanges([comment('c1', '1 xanh 1 vàng', Date.now())], deps(async () => renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Xanh 450g', No_A: '1', Product_N2: 'Granola Túi Vàng 350g', No_B: '1' }, templates, {})));
+  assert.ok(log[0].startsWith('riêng:'));
+  assert.deepEqual(saved['page:user']?.pendingOrder?.items?.map(i => `${i.product} x${i.quantity}`), ['Granola Túi Xanh 450g x1', 'Granola Túi Vàng 350g x1']);
+  // 2. Model hết hạn mức dưới bình luận: bảng giá sản phẩm của bài, không rơi.
+  log.length = 0;
+  await runChanges([comment('c2', 'giá sao', Date.now())], deps(async () => { throw Object.assign(new Error('Resource exhausted'), { status: 429 }); }));
+  assert.equal(log.length, 2, JSON.stringify(log));
+  assert.ok(log[0].startsWith('riêng:') && log[1].startsWith('công khai:'), 'tin riêng theo luật vẫn đi, rồi công khai');
+  // 3. Tin riêng trùng + đã trả lời công khai 1 phút trước: im, không đăng thêm.
+  log.length = 0;
+  const recent = [{ id: 'c2', direction: 'incoming', type: 'text', text: 'giá sao', createdAt: Date.now() - 60000 }, { id: 'pub', direction: 'outgoing', type: 'text', text: 'Dạ em vừa ib ạ', createdAt: Date.now() - 50000 }];
+  const inboxMessages = [{ id: 'priv', direction: 'outgoing', type: 'text', text: 'Dạ em thấy anh/chị để lại bình luận ạ\n\nBảng giá ạ', createdAt: Date.now() - 50000 }];
+  const d = deps(async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá ạ'], handoff: false }), recent);
+  d.listMessages = async id => (id === 'page:user' ? inboxMessages : recent);
+  await runChanges([comment('c3', 'giá bn', Date.now())], d);
+  assert.deepEqual(log, []);
+});
+
+test('khách quen "gửi về địa chỉ cũ": SĐT và địa chỉ lấy từ đơn gần nhất, chốt luôn', () => {
+  const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Vàng 350g', No_A: '1' }, templates, {
+    messageText: 'Gửi mình 1 túi vàng địa chỉ cũ nhé shop', now: Date.now(),
+    recentOrder: { phone: '0909123456', address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, Hồ Chí Minh', createdAt: Date.now() - 86400000 }
+  });
+  assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
+  assert.match(reply.messages.join(' '), /0909123456/);
+});

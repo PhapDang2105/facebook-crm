@@ -149,7 +149,7 @@ export function pancakeCommentEvent(pageId, conversation, comment, post = {}, no
       customerName: String(conversation.from?.name || (fromPage ? '' : comment.from?.name) || '').trim(),
       pageCustomerId: String(comment.from?.page_customer_id || ''),
       assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
-      staff: Boolean(adminName) && adminName !== 'Public API',
+      staff: Boolean(adminName) && adminName !== 'Public API' && !/^pos$/i.test(adminName),
       staffName: adminName,
       post: pancakePostContext(post) || { id: postId, message: '', permalink: `https://www.facebook.com/${postId}`, picture: '' },
       ad: null,
@@ -244,6 +244,8 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   // Tin của Page: gửi từ CRM thì Pancake ghi người gửi là "Public API"; tên
   // khác là nhân viên gõ trong Pancake.
   const adminName = outgoing ? String(message.from?.admin_name || '').trim() : '';
+  // "POS" là thẻ xác nhận đơn do Pancake POS tự gửi, không phải người gõ: không
+  // được coi là nhân viên (trước đây bot bị tắt ngay sau mỗi đơn đẩy POS).
   return {
     pageId,
     psid: customerId,
@@ -267,7 +269,7 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       pageCustomerId: String(message.from?.page_customer_id || ''),
       // Hội thoại đã có nhân viên nhận thì bot đứng ngoài (trừ khi cấu hình cho phép).
       assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
-      staff: Boolean(adminName) && adminName !== 'Public API',
+      staff: Boolean(adminName) && adminName !== 'Public API' && !/^pos$/i.test(adminName),
       staffName: adminName,
       // Khách đến từ quảng cáo: ghi như referral của Meta để bot biết sản phẩm.
       ad: adInfo || pancakeAdOf(conversation),
@@ -658,6 +660,26 @@ async function readBodyUpTo(response, limit, controller) {
   return Buffer.concat(chunks);
 }
 
+/** Chữ dài hơn giới hạn Messenger (2000 ký tự) cắt thành nhiều tin theo đoạn/câu, mỗi tin ≤ limit. */
+export function splitLongText(text, limit = 1900) {
+  const body = String(text || '');
+  if (body.length <= limit) return [body];
+  const chunks = [];
+  let rest = body;
+  while (rest.length > limit) {
+    const window = rest.slice(0, limit);
+    let cut = window.lastIndexOf('\n\n');
+    if (cut < limit / 2) cut = window.lastIndexOf('\n');
+    if (cut < limit / 2) cut = window.lastIndexOf('. ');
+    if (cut < limit / 2) cut = window.lastIndexOf(' ');
+    if (cut < 1) cut = limit;
+    chunks.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) chunks.push(rest);
+  return chunks.filter(Boolean);
+}
+
 // Pancake chỉ nhận tệp tải lên tới 500 KB ("File size should not exceed
 // 500KB"); ảnh sản phẩm trong Cài đặt thường 1–2 MB, nên ảnh được thu nhỏ
 // và nén sang JPEG trước khi tải (sharp). Tệp không phải ảnh thì phải tự nhỏ.
@@ -759,9 +781,11 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
     }
     // Nội dung tệp không lưu vào kho; bản dội lại từ Pancake mang URL ảnh trên CDN.
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: attachment.type || 'document', text: '', name: attachment.name || '', dataUrl: '', createdAt: Date.now(), status: 'sent' };
-    if (body) await sendPancakeMessage({ ...target, text: body }, config, fetchImpl);
+    if (body) for (const chunk of splitLongText(body)) await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
   } else {
-    const sent = await sendPancakeMessage({ ...target, text: body }, config, fetchImpl);
+    // Facebook từ chối tin dài quá 2000 ký tự: cắt theo đoạn, gửi lần lượt.
+    let sent = null;
+    for (const chunk of splitLongText(body)) sent = await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text: body, createdAt: Date.now(), status: 'sent' };
   }
   const saved = await updateMessagingStore(store => {

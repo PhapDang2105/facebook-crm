@@ -6,6 +6,36 @@ import { autoLabelEventsFor, foldVietnamese } from './processing/auto-label.mjs'
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
 import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { isOrderStep } from './processing/pending-order.mjs';
+import { findProductBySku, getCatalogProducts } from './processing/catalog.mjs';
+
+// Giỏ Facebook Shop (attachment cart_order) mang SKU: một SKU sản phẩm → bảng
+// giá sản phẩm đó; SKU combo của Shop ("CB2-XANH-Z450" = 2 Túi Xanh,
+// "CB-VANGG+NAU" = Vàng + Nâu) → xin SĐT/địa chỉ với đúng giỏ. SKU lạ → để model.
+export function cartQuickReply(cart, templates = {}, context = {}) {
+  const items = [];
+  for (const line of Array.isArray(cart) ? cart : []) {
+    const sku = String(line?.sku || '').toUpperCase();
+    const quantity = Math.max(1, Number(line?.quantity) || 1);
+    const product = findProductBySku(sku);
+    if (product) { items.push({ product: product.name, quantity }); continue; }
+    const combo = sku.match(/^CB(\d*)-([A-Z0-9+]+?)(?:-Z\d+|-H\d+)?$/);
+    if (!combo) return null;
+    const each = Math.max(1, Number(combo[1]) || 1);
+    for (const token of combo[2].split('+')) {
+      const colour = token.replace(/G$/, '').toLowerCase();
+      const found = getCatalogProducts().find(item => item.active !== false && /^gra-/i.test(item.sku || '') && String(item.sku || '').toLowerCase().includes(`-${colour}-`));
+      if (!found) return null;
+      items.push({ product: found.name, quantity: each * quantity });
+    }
+  }
+  if (!items.length || !templates.PRICE_QUOTE) return null;
+  const quoted = items.length === 1 && items[0].quantity === 1 && !/^cb/i.test(String(cart[0]?.sku || ''));
+  if (quoted) return renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: items[0].product }, templates, context);
+  const slots = ['Product_N1', 'No_A', 'Product_N2', 'No_B', 'Product_N3', 'No_C'];
+  const value = { template_id: 'ORDER_ADDRESS' };
+  items.slice(0, 3).forEach((item, index) => { value[slots[index * 2]] = item.product; value[slots[index * 2 + 1]] = String(item.quantity); });
+  return renderChatbotReply(value, templates, context);
+}
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
 
 /**
@@ -65,6 +95,7 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
     `KÊNH: ${conversation.source === 'comment' ? 'Bình luận Facebook' : 'Facebook Messenger'}`,
     `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
     hint,
+    Array.isArray(conversation.recentComments) && conversation.recentComments.length ? `BÌNH LUẬN GẦN NHẤT CỦA KHÁCH DƯỚI BÀI: ${conversation.recentComments.map(text => `"${text}"`).join(' · ')}` : '',
     !hint && isLivestreamPost(conversation) ? 'BÀI VIẾT: phiên livestream giới thiệu nhiều sản phẩm (không có sản phẩm cụ thể); khách hỏi giá chung thì GENERAL_INFO, hỏi "hộp"/"gói nhỏ" là hộp 10 gói nhỏ (PACKAGING_INFO).' : '',
     remembered ? `DỮ LIỆU ĐÃ LƯU:\n${remembered}` : '',
     includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
@@ -320,7 +351,10 @@ export async function processChatbotChanges(changes, dependencies) {
     // `updated`: tin cũ vừa có thêm dữ liệu (ảnh có URL) — hộp thư vẽ lại, bot không trả lời lần hai.
     if (change.type !== 'message' || change.message?.direction !== 'incoming' || !change.conversation || change.updated) continue;
     try {
-      await queueForConversation(change.conversation.id, () => answerChange(change, settings, results, dependencies));
+      // Hàng đợi theo KHÁCH (pageId:psid): bình luận và hộp thư của cùng một
+      // người nối tiếp nhau, hai bình luận liền nhau không chạy song song.
+      const queueKey = change.conversation.pageId && change.conversation.psid ? `${change.conversation.pageId}:${change.conversation.psid}` : change.conversation.id;
+      await queueForConversation(queueKey, () => answerChange(change, settings, results, dependencies));
     } catch (error) {
       // Một hội thoại hỏng (kho tin không ghi được…) không làm rơi các tin còn lại trong lô.
       results.push({ conversationId: change.conversation.id, error: error.message });
@@ -367,10 +401,26 @@ async function answerChange(change, settings, results, dependencies) {
     // Vài tin chữ gần nhất của khách: SĐT/địa chỉ khách gửi ở tin riêng trước đó
     // được đọc lại thay vì hỏi lần nữa.
     const recentCustomerTexts = recent.filter(item => item?.direction === 'incoming' && item.type === 'text' && item.text).slice(-5).map(item => String(item.text));
-    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, now: Date.now(), messageText: String(message.text || ''), recentCustomerTexts, customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
-    // Tin mảnh (chỉ SĐT, "đó a", tên người…) khi đang lấy thông tin đơn: đợi vài
-    // giây cho tin kế tiếp của khách tới để gộp, tránh xin lại thứ khách vừa gửi.
-    if (message.type === 'text' && conversation.pendingOrder && String(message.text || '').trim().length < 40) {
+    // Khách đi từ bình luận sang Messenger: bình luận gần nhất của khách dưới
+    // bài ("1 xanh 1 vàng", "cho mình 2 túi") là ngữ cảnh model cần thấy — hộp
+    // thư không chứa bình luận.
+    const commentThreadId = conversation.source !== 'comment' && String(conversation.post?.inheritedFrom || '').includes(':comment:') ? conversation.post.inheritedFrom : '';
+    const recentComments = commentThreadId && listMessages
+      ? (await listMessages(commentThreadId).catch(() => [])).filter(item => item?.direction === 'incoming' && item.text).slice(-2).map(item => String(item.text).replace(/\s+/g, ' ').trim().slice(0, 200))
+      : [];
+    const conversationForModel = recentComments.length ? { ...conversation, recentComments } : conversation;
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, now: Date.now(), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
+    // Tin mảnh (chỉ SĐT, "đó a", tên người…) khi đang lấy thông tin đơn, hoặc bot
+    // vừa hỏi ở bước lên đơn, hoặc tin chỉ toàn số: đợi vài giây cho tin kế tiếp
+    // của khách tới để gộp, tránh xin lại thứ khách vừa gửi. Bình luận liên tiếp
+    // ("1 vàng 1 xanh" rồi "1 xanh 1 vàng") cũng gộp thành một câu trả lời.
+    const shortText = String(message.text || '').trim();
+    const digitsOnly = /^\+?\d[\d .-]{7,}$/.test(shortText);
+    const waitForFragments = message.type === 'text' && (
+      conversation.source === 'comment'
+      || ((conversation.pendingOrder || isOrderStep(conversation.botLastTemplateId) || digitsOnly) && shortText.length < 40)
+    );
+    if (waitForFragments) {
       await new Promise(resolve => setTimeout(resolve, Number(settings.fragmentWaitMs ?? 4000)));
       if (hasNewerCustomerMessage(await listMessages(conversation.id), change.message)) {
         results.push({ conversationId: conversation.id, skipped: 'gộp với tin sau' });
@@ -407,16 +457,44 @@ async function answerChange(change, settings, results, dependencies) {
     // là gì thì trả IMAGE_RECEIVED và bot gắn thẻ cho nhân viên xem.
     const seesImage = nonText && message.type === 'image' && settings.provider === 'vertex' && settings.visionEnabled !== false && (message.dataUrl || message.images?.length);
     const imageFallback = () => ({ ...renderChatbotReply({ template_id: settings.messageTemplates?.IMAGE_RECEIVED ? 'IMAGE_RECEIVED' : 'CSKH_HANDOFF' }, settings.messageTemplates || {}, replyContext), attention: true });
+    // Khách bấm "Mua"/"Gửi giỏ hàng" ở Facebook Shop: SKU đã rõ, không cần model.
+    const cartReply = message.cart?.length ? cartQuickReply(message.cart, settings.messageTemplates, replyContext) : null;
+    // Dưới bình luận, câu trả lời theo luật khi không có model: bảng giá sản
+    // phẩm của bài, lời chào live, hay bảng giá chung.
+    const postProduct = conversation.source === 'comment'
+      ? resolveConversationProduct({ adTitle: conversation.referral?.adTitle, referralRef: conversation.referral?.ref, postText: conversation.post?.message }).product
+      : '';
+    const commentRuleReply = () => renderChatbotReply(
+      productHint(postProduct) && settings.messageTemplates?.PRICE_QUOTE ? { template_id: 'PRICE_QUOTE', Product_N1: postProduct } : { template_id: 'GENERAL_INFO' },
+      settings.messageTemplates, replyContext
+    );
+    const askModel = async () => {
+      try {
+        return await requestReply({ settings, conversation: conversationForModel, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
+      } catch (error) {
+        // Model hết hạn mức/quá tải dưới bình luận: không để bình luận rơi —
+        // trả lời theo luật (bảng giá bài viết / lời chào live / bảng giá chung).
+        if (conversation.source === 'comment' && isCapacityError(error) && settings.messageTemplates?.GENERAL_INFO) {
+          console.warn(`Model lỗi dưới bình luận (${conversation.id}): ${error.message} — trả lời theo luật.`);
+          return commentRuleReply();
+        }
+        throw error;
+      }
+    };
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
-      : nonText
-        ? (seesImage ? await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext }) : imageFallback())
-        : quickQuote || await requestReply({ settings, conversation, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
+      : cartReply
+        ? cartReply
+        : nonText
+          ? (seesImage ? await askModel() : imageFallback())
+          : quickQuote || await askModel();
     if (seesImage && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
     // Dưới bình luận không bao giờ chuyển người (khách chưa vào hộp thư): trả
-    // bảng giá chung và mời nhắn tin.
-    if (reply.templateId === 'CSKH_HANDOFF' && !asksForHuman && conversation.source === 'comment' && settings.messageTemplates?.GENERAL_INFO) {
-      reply = renderChatbotReply({ template_id: 'GENERAL_INFO' }, settings.messageTemplates, replyContext);
+    // bảng giá chung và mời nhắn tin. WELCOME/xác nhận đơn/"đã nhận hình" dưới
+    // bình luận cũng vô nghĩa (khách đã hỏi giá rồi) → bảng giá sản phẩm của bài.
+    const commentBlocked = new Set(['CSKH_HANDOFF', 'WELCOME', 'ASK_PRODUCT', 'IMAGE_RECEIVED']);
+    if (commentBlocked.has(reply.templateId) && !asksForHuman && conversation.source === 'comment' && settings.messageTemplates?.GENERAL_INFO) {
+      reply = commentRuleReply();
     }
     // Dưới phiên livestream nhiều sản phẩm, "hỏi giá chung" không nên là bảng
     // 3 vị khô khan: dùng lời chào live (nêu các vị có trên live, ưu đãi live,
@@ -426,9 +504,15 @@ async function answerChange(change, settings, results, dependencies) {
     }
     // Không gửi lại y nguyên tin bot vừa gửi trong 10 phút (hỏi SĐT lần ba, cảm ơn
     // hai lần), và không chuyển người lần hai trong 24 giờ.
-    const lastOutgoing = [...recent].reverse().find(item => item?.direction === 'outgoing');
-    const repeatsLast = Boolean(lastOutgoing) && reply.messages?.length === 1 && reply.messages[0] === String(lastOutgoing.text || '')
-      && Date.now() - (Number(lastOutgoing.createdAt) || 0) < 10 * 60 * 1000;
+    // Cùng lời (câu đầu của mẫu) đã gửi trong 10 phút, hay cùng một mẫu "không
+    // nên lặp" (chào, cảm ơn, xin SĐT, xác nhận đơn…) vừa gửi chưa đầy 60 giây
+    // (hai tin của khách tới cùng lô webhook): không gửi lần hai.
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+    const firstLine = String(reply.messages?.[0] || '').trim();
+    const repeatsText = Boolean(firstLine) && recent.some(item => item?.direction === 'outgoing' && (Number(item.createdAt) || 0) > tenMinutesAgo && String(item.text || '').trim() === firstLine);
+    const noRepeatTemplates = new Set(['WELCOME', 'THANK_YOU', 'CSKH_HANDOFF', 'ORDER_CONFIRMATION', 'ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'GENERAL_INFO', 'LIVESTREAM_COMMENT']);
+    const repeatsTemplate = noRepeatTemplates.has(reply.templateId) && conversation.botLastTemplateId === reply.templateId && Date.now() - (Number(conversation.botLastReplyAt) || 0) < 60 * 1000;
+    const repeatsLast = repeatsText || repeatsTemplate;
     const repeatsHandoff = reply.templateId === 'CSKH_HANDOFF' && conversation.botLastTemplateId === 'CSKH_HANDOFF'
       && Date.now() - (Number(conversation.botLastReplyAt) || 0) < 24 * 60 * 60 * 1000;
     if (repeatsLast || repeatsHandoff) {
@@ -484,8 +568,26 @@ async function answerChange(change, settings, results, dependencies) {
         try {
           await sendMessage(conversation, { text: privateText, privateReply: true });
         } catch (error) {
-          privateError = error.message;
+          // Lỗi tạm (aborted, #0, #1, mạng): thử lại một lần sau 3 giây. Khách
+          // chặn tin (#10903), đã trả lời (#10900), ngoài cửa sổ (#10/#551): không.
+          const permanent = /#10903|#10900|#551|\(#10\)|chưa có mã Pancake/i.test(error.message || '');
+          if (permanent) privateError = error.message;
+          else {
+            await wait(3000);
+            try {
+              await sendMessage(conversation, { text: privateText, privateReply: true });
+            } catch (again) {
+              privateError = again.message;
+            }
+          }
         }
+      }
+      // Giỏ hàng khách nêu trong bình luận ("1 xanh 1 vàng", SĐT kèm theo) đi
+      // theo khách sang hộp thư: khi khách nhắn địa chỉ vào Messenger, bot đã
+      // có sẵn sản phẩm để chốt thay vì hỏi lại từ đầu.
+      const carried = reply.pendingOrder && (reply.pendingOrder.items?.length || reply.pendingOrder.phone) ? reply.pendingOrder : null;
+      if (carried && !privateError && saveBotState) {
+        await saveBotState(`${conversation.pageId}:${conversation.psid}`, { pendingOrder: carried }).catch(() => {});
       }
       // Ảnh của mẫu (ảnh sản phẩm) đi sau tin nhắn riêng như tin Messenger
       // thường vào hộp thư của khách. Facebook chỉ cho một tin nhắn riêng mỗi
@@ -500,7 +602,10 @@ async function answerChange(change, settings, results, dependencies) {
         if (!sentImages) rememberPendingImages(conversation.pageId, conversation.psid, reply.images);
       }
       const publicId = privateError ? 'COMMENT_PUBLIC_FALLBACK' : privateSkipped && settings.messageTemplates?.COMMENT_PUBLIC_REPEAT ? 'COMMENT_PUBLIC_REPEAT' : 'COMMENT_PUBLIC_REPLY';
-      const publicReply = renderChatbotReply({ template_id: publicId }, settings.messageTemplates, replyContext);
+      // Tin riêng đã bỏ vì trùng mà 10 phút trước đã trả lời công khai rồi:
+      // không đăng thêm "em đã ib" lần nữa dưới bài.
+      const publicRecently = privateSkipped && recent.some(item => item?.direction === 'outgoing' && (Number(item.createdAt) || 0) > tenMinutesAgo);
+      const publicReply = publicRecently ? { messages: [] } : renderChatbotReply({ template_id: publicId }, settings.messageTemplates, replyContext);
       for (const text of pickVariant(publicReply)) await sendMessage(conversation, { text });
       // Like the comment so the customer sees it was noticed; hide it when it
       // carries a phone number (or always, per settings) so competitors

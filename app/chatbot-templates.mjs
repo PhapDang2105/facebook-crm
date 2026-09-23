@@ -271,8 +271,12 @@ function renderOrder(value, templates, context = {}) {
   const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number) || extractVietnamesePhone(context.messageText || '')
     // SĐT khách gửi ở một tin riêng trước đó (hay tin bị mô hình bỏ qua): đọc lại, không hỏi nữa.
     || (Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.map(text => extractVietnamesePhone(text)).find(Boolean) || '' : '');
-  const freshAddress = String(value.Customer_Address || '').trim();
-  const phone = freshPhone || pending?.phone || '';
+  // Khách quen "gửi về địa chỉ cũ / như lần trước": SĐT và địa chỉ lấy từ đơn
+  // gần nhất của khách thay vì hỏi lại.
+  const wantsPrevious = /(dia chi|d\/c|dc) (cu|truoc|nhu cu|lan truoc)|nhu (lan )?truoc|cho cu|giong lan truoc|nhu cu/.test(normalizeText(String(context.messageText || '')));
+  const previous = wantsPrevious && context.recentOrder ? context.recentOrder : null;
+  const freshAddress = String(value.Customer_Address || '').trim() || (previous?.address ? String(previous.address) : '');
+  const phone = freshPhone || pending?.phone || (previous?.phone ? toLocalPhone(previous.phone) || String(previous.phone) : '');
   // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
   // Lợi") is merged into the saved address; a whole new address replaces it.
   const address = mergeAddressFragment(freshAddress !== '0' ? freshAddress : '', pending?.address || '');

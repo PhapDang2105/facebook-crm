@@ -155,9 +155,12 @@ test('thư viện ảnh: khách hỏi một sản phẩm thì 2–3 ảnh ngẫu
     assert.deepEqual(three.parts.map(part => part.type), ['image', 'image', 'image', 'text', 'text'], 'ảnh trước, bảng giá và câu chốt sau');
     assert.match(three.parts[3].text, /Bảng giá Granola Túi Xanh 450g/);
     // Chưa nêu loại: giới thiệu chung cũng mở đầu bằng ảnh trong thư viện.
+    // Ảnh của bảng giá chung là ảnh đại diện các túi chính (ghép combo được), không
+    // lấy ngẫu nhiên trong thư viện mọi sản phẩm; ở kho thử chỉ Túi Xanh có ảnh.
     const general = renderChatbotReply({ template_id: 'GENERAL_INFO' }, templates, { customer: { random: () => 0.1 } });
     assert.equal(general.parts[0].type, 'image');
-    assert.equal(general.images.length, 2);
+    assert.equal(general.images.length, 1);
+    assert.match(general.images[0], /xanh-main\.png/);
     // Xin ảnh: 2–3 ảnh của loại khách nêu.
     const photos = renderChatbotReply({ template_id: 'PRODUCT_PHOTOS', Product_N1: 'túi xanh' }, templates, { customer: { random: () => 0.9 } });
     assert.equal(photos.images.length, 3);

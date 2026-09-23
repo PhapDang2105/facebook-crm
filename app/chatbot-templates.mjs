@@ -147,6 +147,11 @@ export function pickGalleryImages(product, random = activeCustomer.random || Mat
 
 /** 2–3 ảnh ngẫu nhiên trong thư viện của mọi sản phẩm đang bán (khi khách chưa nêu loại). */
 function pickCatalogImages(random = activeCustomer.random || Math.random) {
+  // Bảng giá chung nói về các túi chính (sản phẩm ghép combo được: Xanh, Vàng,
+  // Nâu): ảnh đi kèm là ảnh đại diện của đúng các túi đó, không lấy ngẫu nhiên
+  // trong thư viện mọi sản phẩm (từng gửi hũ Siêu hạt trong khi chữ nói 3 vị).
+  const main = getCatalogProducts().filter(product => product.active && product.mixable && product.image).map(product => `![${product.name}](${publicImageUrl(product.image)})`);
+  if (main.length) return main.slice(0, 3).join(' ');
   const pool = getCatalogProducts().filter(product => product.active).flatMap(product => galleryOf(product).map(url => `![${product.name}](${url})`));
   const count = pool.length >= 3 ? 2 + Math.floor(random() * 2) : pool.length;
   return sampleImages(pool, count, random).join(' ');

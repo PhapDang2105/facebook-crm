@@ -191,3 +191,36 @@ test('khách quen "gửi về địa chỉ cũ": SĐT và địa chỉ lấy t�
   assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
   assert.match(reply.messages.join(' '), /0909123456/);
 });
+
+test('khách sửa đơn vừa chốt (ORDER_UPDATE): giỏ mới thay giỏ cũ, SĐT/địa chỉ lấy từ đơn cũ, không tạo đơn mới, không gửi lại phiếu; đoạn chính sách y hệt trong 24h không gửi lại', async () => {
+  const recentOrder = { id: 'e0c3eba0', automatic: true, createdAt: Date.now() - 10 * 60 * 1000, phone: '0978480043', address: '13 ngách 3/114 Trần Hưng Đạo, Phường Quỳnh Lâm, Thành phố Hòa Bình, Hòa Bình', products: [{ sku: 'GRA-XANH-Z450', quantity: 3 }] };
+  const rendered = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Xanh 450g', No_A: '1', Product_N2: 'Granola Túi Vàng 350g', No_B: '1', Product_N3: 'Granola Túi Nâu vị cacao 350g', No_C: '1' }, templates, { recentOrder, now: Date.now(), messageText: 'Mình lấy 3 gói nhưng khác vị' });
+  assert.equal(rendered.templateId, 'ORDER_UPDATE');
+  assert.equal(rendered.order.updateOrderId, 'e0c3eba0');
+  assert.deepEqual(rendered.order.items.map(i => `${i.product} x${i.quantity}`), ['Granola Túi Xanh 450g x1', 'Granola Túi Vàng 350g x1', 'Granola Túi Nâu vị cacao 350g x1']);
+  assert.equal(rendered.order.phone, '0978480043');
+  assert.equal(rendered.messages.length, 1, 'chỉ một tin sửa đơn, không kèm chính sách giao/đổi trả');
+  assert.match(rendered.messages[0], /đã sửa lại đơn/);
+  // Đơn cũ quá 60 phút hay "ko phải" không nêu giỏ → ORDER_WRONG (hỏi lại), không bịa giỏ.
+  const wrong = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: '0' }, templates, { recentOrder, now: Date.now(), messageText: 'Ko phải' });
+  assert.equal(wrong.templateId, 'ORDER_WRONG');
+  assert.equal(wrong.order, undefined);
+  // Engine: gọi updateOrder, không createOrder, không sendReceipt; đoạn chính sách đã gửi hôm nay bị bỏ.
+  const log = [];
+  const policy = 'Dạ thời gian giao dự kiến: TP.HCM và tỉnh lân cận 1–3 ngày ạ.';
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true, customerOrders: [recentOrder] },
+    message: { id: 'm9', mid: 'm9', direction: 'incoming', type: 'text', text: 'Mình lấy 3 gói nhưng khác vị', createdAt: Date.now() }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 5 }),
+    listMessages: async () => [{ id: 'old', direction: 'outgoing', type: 'text', text: policy, createdAt: Date.now() - 5 * 60 * 1000 }],
+    saveBotState: async () => {},
+    sendMessage: async (_c, message) => { log.push(`text:${String(message.text).slice(0, 30)}`); return { message: { mid: 'x' } }; },
+    sendReceipt: async () => { log.push('receipt'); },
+    createOrder: async () => { log.push('create'); return { order: { id: 'new' }, created: true }; },
+    updateOrder: async (_c, id, order) => { log.push(`update:${id}:${order.items.length}`); return { order: { ...recentOrder, ...order }, updated: true, created: false }; },
+    requestReply: async () => ({ templateId: 'ORDER_UPDATE', messages: ['Dạ em đã sửa lại đơn ạ', policy], handoff: false, order: { ...rendered.order } })
+  });
+  assert.deepEqual(log, ['update:e0c3eba0:3', 'text:Dạ em đã sửa lại đơn ạ']);
+});

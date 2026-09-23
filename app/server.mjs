@@ -270,6 +270,42 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
   return result;
 }
 
+/**
+ * Khách sửa đơn vừa chốt ("ko phải", "3 gói 3 vị"): thay giỏ, SĐT, địa chỉ trên
+ * chính đơn đó thay vì tạo đơn thứ hai; đơn đã sang POS thì sửa bên đó theo.
+ */
+async function updateChatbotCustomerOrder(conversation, orderId, input) {
+  const fresh = normalizeChatbotOrder(input, conversation);
+  await attachPhoneWarning(fresh);
+  const keep = new Set(['id', 'createdAt', 'pos', 'chatbotSourceMessageId', 'delivery', 'processingStatus', 'hiddenFromTable', 'staffNote', 'employee', 'automatic']);
+  const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const result = await updateMessagingStore(store => {
+    const item = store.conversations.find(entry => entry.id === conversation.id);
+    const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
+    if (!existing) return null;
+    for (const [key, value] of Object.entries(fresh)) if (!keep.has(key)) existing[key] = value;
+    existing.note = `Tạo tự động từ xác nhận của chatbot. Khách sửa đơn lúc ${stamp}.`;
+    existing.updatedAt = Date.now();
+    return { order: existing };
+  });
+  if (!result) throw new Error('Không tìm thấy đơn để sửa.');
+  publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+  await appendOrderToArchive(result.order).catch(() => {});
+  if (result.order.pos?.id) {
+    const posOutcome = await updatePosOrder(result.order, { conversation })
+      .then(() => ({ ...result.order.pos, updatedAt: Date.now(), error: undefined }))
+      .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Sửa trên POS lỗi: ${error.message}` }));
+    await updateMessagingStore(store => {
+      const item = store.conversations.find(entry => entry.id === conversation.id);
+      const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
+      if (target) target.pos = posOutcome;
+      return null;
+    });
+    result.order.pos = posOutcome;
+  }
+  return { ...result, updated: true, created: false };
+}
+
 /* ---- Thử nghiệm: chào khách vừa quét mã QR ----
  *
  * Khách quét QR trên bao bì -> mở m.me?ref=... -> Meta bắn `messaging_referrals`.
@@ -676,6 +712,7 @@ const chatbotDependencies = {
   sendMessage: sendConversationMessage,
   moderateComment,
   createOrder: createChatbotCustomerOrder,
+  updateOrder: updateChatbotCustomerOrder,
   sendReceipt: sendChatbotOrderReceipt,
   // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
   // nhận sự kiện là do nhân viên chọn trong Cài đặt → Tin nhắn.

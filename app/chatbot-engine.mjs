@@ -364,7 +364,7 @@ export async function processChatbotChanges(changes, dependencies) {
 }
 
 async function answerChange(change, settings, results, dependencies) {
-  const { listMessages, getConversation, saveBotState, sendMessage, createOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
+  const { listMessages, getConversation, saveBotState, sendMessage, createOrder, updateOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
   // Bản mới nhất của hội thoại: tin đứng trước trong hàng có thể vừa lưu giỏ
   // hàng, hay nhân viên vừa tắt bot. Every thread is answered unless staff
   // switched the bot off for it.
@@ -418,7 +418,7 @@ async function answerChange(change, settings, results, dependencies) {
     const digitsOnly = /^\+?\d[\d .-]{7,}$/.test(shortText);
     const waitForFragments = message.type === 'text' && (
       conversation.source === 'comment'
-      || ((conversation.pendingOrder || isOrderStep(conversation.botLastTemplateId) || digitsOnly) && shortText.length < 40)
+      || ((conversation.pendingOrder || isOrderStep(conversation.botLastTemplateId) || conversation.botLastTemplateId === 'ASK_FLAVOR' || digitsOnly) && shortText.length < 40)
     );
     if (waitForFragments) {
       await new Promise(resolve => setTimeout(resolve, Number(settings.fragmentWaitMs ?? 4000)));
@@ -530,13 +530,15 @@ async function answerChange(change, settings, results, dependencies) {
     const isComment = conversation.source === 'comment';
     // "Tự động lên đơn" tắt (settings.autoOrder === false): bot vẫn xác nhận với
     // khách nhưng không tạo đơn; giỏ được giữ ở pendingOrder cho nhân viên.
-    const outcome = settings.responseMode === 'automatic' && settings.autoOrder !== false && reply.order && createOrder && !isComment
-      ? await createOrder(conversation, reply.order, {
-          sourceMessageId: String(change.message.mid || change.message.id || '')
-        })
+    // Khách sửa đơn vừa chốt: cập nhật đúng đơn đó (updateOrder), không tạo đơn mới.
+    const wantsUpdate = Boolean(reply.order?.updateOrderId) && typeof updateOrder === 'function';
+    const outcome = settings.responseMode === 'automatic' && settings.autoOrder !== false && reply.order && (wantsUpdate || createOrder) && !isComment
+      ? (wantsUpdate
+        ? await updateOrder(conversation, reply.order.updateOrderId, reply.order)
+        : await createOrder(conversation, reply.order, { sourceMessageId: String(change.message.mid || change.message.id || '') }))
       : null;
     const order = outcome?.order || null;
-    const alreadyHandled = Boolean(outcome) && outcome.created === false;
+    const alreadyHandled = Boolean(outcome) && outcome.created === false && !outcome.updated;
     let privateError = '';
     let privateSkipped = false;
     if (settings.responseMode === 'automatic' && isComment) {
@@ -628,6 +630,12 @@ async function answerChange(change, settings, results, dependencies) {
       // Ảnh không gửi được (Pancake/Facebook từ chối tệp) thì bỏ ảnh đó, chữ
       // vẫn phải tới khách; lỗi ảnh ghi lại cho panel khách thay vì chặn cả câu.
       // Ảnh liền nhau gộp thành một tin nhiều ảnh (Pancake gửi một cụm; Meta tự tách từng ảnh).
+      // Đoạn phụ (chính sách giao, đổi trả…) y hệt đã gửi trong 24 giờ thì bỏ:
+      // chốt hai đơn liền nhau không lặp lại cả chuỗi "luyên thuyên". Đoạn đầu
+      // (câu trả lời chính) luôn gửi.
+      const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const sentTexts = new Set(recent.filter(item => item?.direction === 'outgoing' && (Number(item.createdAt) || 0) > dayAgo).map(item => String(item.text || '').replace(/\s+/g, ' ').trim()));
+      parts = parts.filter((part, index) => index === 0 || part.type !== 'text' || !sentTexts.has(String(part.text || '').replace(/\s+/g, ' ').trim()));
       const imageErrors = [];
       for (let index = 0; index < parts.length; index += 1) {
         const part = parts[index];
@@ -647,7 +655,8 @@ async function answerChange(change, settings, results, dependencies) {
       if (imageErrors.length) privateError = privateError || `ảnh không gửi được: ${imageErrors[0]}`;
       // The receipt closes the exchange, so it is sent after the reply text and
       // never before it — the order itself was already persisted above.
-      if (order && sendReceipt) await sendReceipt(conversation, order);
+      // Sửa đơn: không gửi lại phiếu (POS/khách đã có), chỉ tin sửa đơn ở trên.
+      if (order && sendReceipt && !outcome?.updated) await sendReceipt(conversation, order);
     }
     const labelEvents = autoLabelEventsFor({
       order,

@@ -4,7 +4,7 @@
 // restart and stays scoped to one customer.
 
 export const pendingOrderTtlMs = 2 * 60 * 60 * 1000;
-export const orderStepTemplateIds = ['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION'];
+export const orderStepTemplateIds = ['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION', 'ORDER_UPDATE'];
 
 export function isOrderStep(templateId) {
   return orderStepTemplateIds.includes(String(templateId || '').trim());

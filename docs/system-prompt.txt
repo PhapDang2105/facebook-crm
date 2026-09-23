@@ -32,6 +32,7 @@ Chọn mẫu:
 - Dòng "BÌNH LUẬN GẦN NHẤT CỦA KHÁCH DƯỚI BÀI" (khách đi từ bình luận sang Messenger): sản phẩm/số lượng/SĐT trong đó là của khách này, dùng như DỮ LIỆU ĐÃ LƯU; khách gửi địa chỉ là đủ để ORDER_CONFIRMATION.
 - "Khách chọn mua từ Facebook Shop: … (SKU)" là khách đã chọn sản phẩm: PRICE_QUOTE (1 sản phẩm) hoặc ORDER_ADDRESS (combo), không WELCOME, không CSKH_HANDOFF.
 - Sau khi chốt, khách "ok/cảm ơn/dạ" → THANK_YOU một lần; thắc mắc về tin xác nhận mà giỏ không đổi → THANK_YOU, không ORDER_CONFIRMATION lần hai.
+- Đơn vừa xác nhận (tin xác nhận đơn trong lịch sử, dưới 60 phút) mà khách nói sai/đổi/sửa ("ko phải", "sai rồi", "muốn 3 vị khác nhau", "đổi sang túi vàng") → ORDER_UPDATE với giỏ ĐẦY ĐỦ mới (Product_N1..3/No_*), không tạo đơn mới, không ORDER_CONFIRMATION. Chưa rõ giỏ mới ("ko phải" trống) → ORDER_WRONG. "Lấy thêm" mới là đơn mới.
 - Chỉ chuyển người khi thật sự cần: khiếu nại hàng lỗi/hư/đã ăn thấy vấn đề, yêu cầu ngoài mọi mẫu → CSKH_HANDOFF, warming 1. Tin ngắn, mơ hồ ("bn", "ok", ".", "hạt") → GENERAL_INFO, không CSKH.
 - TIN NHẮN CẦN TRẢ LỜI có thể gồm nhiều tin liền nhau của khách (mỗi dòng một tin): trả lời cho cả cụm, ưu tiên ý mua hàng hoặc câu hỏi cụ thể nhất.
 

@@ -492,6 +492,8 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-import-controls { position: sticky; top: 57.6px; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 10.8px; margin: -21.6px -21.6px 0; padding: 12px 21.6px; background: #fff; }
 .order-stage[data-order-panel="import"] .data-preview th { top: calc(57.6px + var(--import-toolbar-height, 61.8px)); }
 .order-import-controls .order-search-control { flex: 1 1 252px; max-width: 468px; }
+.order-import-summary { display: flex; gap: 18px; margin-left: auto; padding: 0 4px; color: #475467; font-size: 13px; white-space: nowrap; }
+.order-import-summary strong { color: #111; font-weight: 700; }
 .order-import-controls .order-filter-control { flex: 0 0 auto; min-width: 130px; }
 .order-import-controls .order-filter-control.hidden { display: none; }
 .order-date-control input[type="date"] { box-sizing: border-box; height: 37.8px; padding: 0 10px; color: #17251c; background: #f6fbf7; border: 0.9px solid #b9d6c0; border-radius: 8.1px; font: inherit; font-size: 12.6px; }

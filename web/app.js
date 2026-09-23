@@ -2350,6 +2350,29 @@ orderDayTabs.forEach(tab => {
   apply();
 })();
 
+// Góc phải thanh công cụ Nhập dữ liệu: số đơn và tổng COD của đúng các dòng
+// đang hiển thị (đơn nhiều dòng đếm một, tiền cộng mọi dòng).
+function renderImportSummary(entries) {
+  const box = document.querySelector('#order-import-summary');
+  if (!box) return;
+  const column = name => orderData.headers.findIndex(header => normalizeColumnName(header) === name);
+  const idIndex = column('ma don hang');
+  const quantityIndex = column('so luong');
+  const priceIndex = column('don gia');
+  const orders = new Set();
+  let cod = 0;
+  for (const entry of entries) {
+    const id = idIndex >= 0 ? String(entry.row[idIndex] ?? '').trim() : '';
+    orders.add(id || `row:${entry.index}`);
+    if (quantityIndex >= 0 && priceIndex >= 0) {
+      cod += (Number(String(entry.row[quantityIndex] ?? '').replace(/\D/g, '')) || 0) * (Number(String(entry.row[priceIndex] ?? '').replace(/\D/g, '')) || 0);
+    }
+  }
+  box.innerHTML = entries.length
+    ? `<span>Tổng đơn: <strong>${orders.size}</strong></span><span>COD: <strong>${cod.toLocaleString('vi-VN')} đ</strong></span>`
+    : '';
+}
+
 // Export ở Nhập dữ liệu: tải đúng bảng đang hiển thị (sau lọc ngày/nguồn/tìm
 // kiếm) thành XLSX thuần; không phải xuất kho nên không đụng lịch sử xuất.
 let importTableEntries = [];
@@ -7482,6 +7505,7 @@ function renderOrderData() {
 
   // Nút Export của Nhập dữ liệu xuất đúng những dòng đang hiển thị này.
   importTableEntries = sortOrderEntriesByTime(importRows);
+  renderImportSummary(importTableEntries);
   // Nhập dữ liệu: "Trùng đơn ngày…", "Khách hàng cũ" ghi vào Ghi chú; cột Trạng
   // thái là ô chọn trạng thái xử lý, cùng kho với Xử lý dữ liệu (đổi bên nào
   // bên kia cũng thấy).

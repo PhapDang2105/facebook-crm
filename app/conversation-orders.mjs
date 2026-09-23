@@ -3,6 +3,13 @@ import { toLocalPhone } from './processing/customer-info.mjs';
 import { matchProduct, findProductBySku } from './processing/catalog.mjs';
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { resolveAddress, resolvedAddressFields } from './processing/locations.mjs';
+import { normalizeText } from './processing/catalog.mjs';
+
+/** Hội thoại đến từ phiên livestream: bài viết hay tên quảng cáo có "live", "săn deal". */
+export function isLivestreamConversation(conversation = {}) {
+  const source = [conversation?.post?.message, conversation?.referral?.adTitle].filter(Boolean).join(' ');
+  return /\b(live|livestream|phien live|san deal)\b/i.test(normalizeText(source));
+}
 
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
@@ -132,6 +139,14 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   }, { now, id });
   if (total) order.total = total;
   order.gift = text(input.gift ?? (priced.priceable ? priced.gift : ''), 300);
+  // Đơn chốt từ phiên livestream (bài/quảng cáo "Săn deal hời", "live tối nay"):
+  // địa chỉ mang đầu "(Live) " như nhân viên vẫn ghi tay, để kho và POS biết
+  // đơn live (quà live, giá live). Ba cấp tỉnh/huyện/xã đã tách xong trước đó.
+  if (isLivestreamConversation(conversation) && order.address && !/^\(live\)/i.test(order.address)) {
+    order.address = `(Live) ${order.address}`;
+    if (order.street) order.street = `(Live) ${order.street}`;
+    order.liveOrder = true;
+  }
   // What the customer actually typed, next to the standardised address they confirmed.
   order.rawAddress = text(input.rawAddress, 500);
   order.chatbotSourceMessageId = text(sourceMessageId, 200);

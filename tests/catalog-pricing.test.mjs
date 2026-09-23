@@ -228,3 +228,20 @@ test('giá combo cao hơn giá lẻ bị từ chối; SKU và tên gọi khác �
   assert.equal(product.unit, 'Hũ');
   assert.deepEqual(product.aliases, ['a', 'b']);
 });
+
+test('đơn chốt từ phiên livestream: địa chỉ mang đầu "(Live) ", ba cấp vẫn tách đúng; hội thoại thường không đổi', async () => {
+  const { isLivestreamConversation } = await import('../app/conversation-orders.mjs');
+  const input = { phone: '0385805790', address: 'khu phố 6, phường Đông Hải, Phan Rang-Tháp Chàm, Ninh Thuận', items: [{ name: 'Túi Xanh', quantity: 2 }], total: 298000 };
+  const live = normalizeChatbotOrder(input, { name: 'A', post: { message: 'Săn deal hời' } });
+  assert.equal(live.address, '(Live) khu phố 6, phường Đông Hải, Phan Rang-Tháp Chàm, Ninh Thuận');
+  assert.match(live.street, /^\(Live\) /);
+  assert.equal(live.province, 'Ninh Thuận');
+  assert.equal(live.ward, 'Phường Đông Hải');
+  assert.equal(live.liveOrder, true);
+  const ad = normalizeChatbotOrder(input, { name: 'A', referral: { adTitle: 'Live tối nay 20h' } });
+  assert.match(ad.address, /^\(Live\) /);
+  const normal = normalizeChatbotOrder(input, { name: 'A', post: { message: 'Granola túi xanh giảm giá' } });
+  assert.equal(normal.address, input.address);
+  assert.equal(normal.liveOrder, undefined);
+  assert.equal(isLivestreamConversation({ referral: { adTitle: 'qc mess Xanh' } }), false);
+});

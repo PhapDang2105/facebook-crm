@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
@@ -688,13 +688,24 @@ async function serveFile(request, response, pathname) {
   const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.webp':'image/webp', '.woff2':'font/woff2', '.ico':'image/x-icon' };
   try {
     const stats = await stat(filePath);
-    const etag = `W/"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
+    let etag = `W/"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
+    let body = null;
+    if (relative === 'index.html') {
+      // Phiên bản app.js/styles.css gắn theo mốc sửa tệp: mỗi lần deploy trình duyệt
+      // tự tải bản mới, không phụ thuộc chuỗi ?v= ghi tay trong index.html.
+      const stamp = async name => { try { return Math.trunc((await stat(path.join(webRoot, name))).mtimeMs).toString(36); } catch { return ''; } };
+      const [appStamp, cssStamp] = await Promise.all([stamp('app.js'), stamp('styles.css')]);
+      body = Buffer.from(String(await readFile(filePath, 'utf8'))
+        .replace(/app\.js\?v=[^"']*/g, `app.js?v=${appStamp}`)
+        .replace(/styles\.css\?v=[^"']*/g, `styles.css?v=${cssStamp}`), 'utf8');
+      etag = `W/"${createHash('sha1').update(body).digest('hex').slice(0, 16)}"`;
+    }
     const headers = { 'Content-Type':types[path.extname(filePath)] || 'application/octet-stream', 'Cache-Control':'no-cache', 'ETag':etag };
     if (request.headers['if-none-match'] === etag) {
       response.writeHead(304, headers);
       return response.end();
     }
-    const body = await readFile(filePath);
+    if (!body) body = await readFile(filePath);
     response.writeHead(200, headers);
     response.end(body);
   } catch { sendJson(response, 404, { error:'Resource not found.' }); }

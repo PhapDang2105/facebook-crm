@@ -6,7 +6,7 @@
   "ORDER_STATUS_NONE": "Dạ em chưa thấy đơn nào được đặt trong hội thoại này ạ. {Title} cho em xin số điện thoại đã đặt hàng để em tra giúp mình nha ạ.",
   "VAT_INVOICE": "Dạ bên em có hỗ trợ xuất hóa đơn VAT ạ. {Title} cho em xin tên công ty, mã số thuế, địa chỉ và email nhận hóa đơn, em ghi kèm đơn để kế toán xuất cho mình nha ạ.",
   "INGREDIENTS_ALLERGY": "Dạ granola bên em làm từ yến mạch, viên ngũ cốc gạo lứt, các loại hạt và trái cây sấy, không thêm đường ạ. Hiện bên em chưa làm riêng loại bỏ từng hạt theo yêu cầu. Nếu mình dị ứng hay khó tiêu với hạt nào, {title} nhắn em tên hạt để em kiểm tra thành phần chi tiết từng túi và tư vấn loại phù hợp cho mình nha ạ.",
-  "CALLBACK_REQUEST": "Dạ em đã ghi nhận ạ, nhân viên bên em sẽ gọi lại cho mình trong giờ hành chính (8h–21h) nha ạ. {Title} để lại số điện thoại tiện gọi giúp em ạ.",
+  "CALLBACK_REQUEST": "Dạ em đã ghi nhận ạ, nhân viên bên em sẽ gọi lại cho mình trong giờ hành chính (8:00–17:00) nha ạ. {Title} để lại số điện thoại tiện gọi giúp em ạ.",
   "ASK_FLAVOR": "Dạ bên em có 3 vị: Túi Xanh nguyên bản 450g, Túi Vàng nhiều hạt 350g và Túi Nâu cacao 350g; mix vị nào cũng được giá combo, từ 2 túi miễn phí vận chuyển ạ. {Title} muốn lấy vị nào và mỗi vị mấy túi để em lên đơn nha ạ?",
   "UPSELL_TWO_BAGS": "Dạ nếu {title} lấy 2 túi thì giá chỉ còn {two_unit}/túi[?saving] (bớt {saving}/túi)[/?][?free_ship], {free_ship}[/?][?gift], tặng {gift}[/?]: tổng {two_total} thay vì {one_total} cho 1 túi ạ 🌾 {Title} muốn lấy 2 túi không ạ? Nếu vẫn lấy 1 túi thì em lên đơn 1 túi cho mình nha.",
   "FREESHIP_POLICY": "Dạ đơn từ 2 túi bên em miễn phí vận chuyển và áp giá combo ạ; đơn 1 túi phí ship là {shipping_fee} ạ. {Title} lấy 2 túi vị nào để em lên đơn miễn ship cho mình nha 🌾",

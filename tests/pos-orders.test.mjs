@@ -160,3 +160,12 @@ test('updatePosOrder: PUT lên đúng đơn POS với sản phẩm/địa chỉ/
   assert.equal(calls[0].body.shipping_address.commune_id, '7050127');
   await assert.rejects(updatePosOrder({ ...order }, { config, fetchImpl }), /chưa có trên POS/);
 });
+
+test('đơn cũ còn SKU đã đổi trong danh mục (CB10-XANH): đẩy POS bằng SKU hiện tại tra theo tên', async () => {
+  const { posSkuFor, buildPosOrderPayload } = await import('../app/pos-orders.mjs');
+  assert.equal(posSkuFor({ sku: 'CB10-XANH', name: 'Combo 10 gói Xanh' }), 'CB10-XANH-G35');
+  assert.equal(posSkuFor({ sku: 'GRA-XANH-Z450', name: 'Granola Túi Xanh 450g' }), 'GRA-XANH-Z450');
+  assert.equal(posSkuFor({ sku: 'LA-LUNG', name: 'Sản phẩm lạ' }), 'LA-LUNG');
+  const payload = buildPosOrderPayload({ id: 'x1', name: 'A', phone: '0909123456', address: 'Q1', products: [{ sku: 'CB10-XANH', name: 'Combo 10 gói Xanh', quantity: 2, price: 189000 }], total: 378000 });
+  assert.deepEqual(payload.items.map(item => item.variation_id), ['CB10-XANH-G35']);
+});

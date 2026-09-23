@@ -12,7 +12,24 @@
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
-import { comboKey, giftsForKey } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, giftsForKey, matchProduct } from './processing/catalog.mjs';
+
+/**
+ * SKU gửi POS cho một dòng đơn. Đơn cũ còn ghi SKU đã đổi trong danh mục
+ * (CB10-XANH → CB10-XANH-G35): tra sản phẩm theo tên trong danh mục hiện tại
+ * và gửi SKU mới, không để POS từ chối cả đơn.
+ */
+export function posSkuFor(item) {
+  const sku = String(item?.sku || '').trim().toUpperCase();
+  if (sku && findProductBySku(sku)) return sku;
+  const byName = matchProduct(String(item?.name || ''));
+  return String(byName?.sku || sku || '').trim().toUpperCase();
+}
+
+/** Bản sao các dòng đơn với SKU đã đối chiếu danh mục hiện tại. */
+function withCurrentSkus(products) {
+  return (Array.isArray(products) ? products : []).map(item => ({ ...item, sku: posSkuFor(item) }));
+}
 
 export const POS_ORDER_CUSTOM_PREFIX = 'CRM-';
 const requestTimeoutMs = 20000;
@@ -137,7 +154,7 @@ export async function resolvePosGeo(order, config = posConfig(), fetchImpl = fet
  * trong POS thì bỏ qua thay vì làm POS từ chối cả đơn.
  */
 export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '', shopId = '', posSkus = null, geo = {} } = {}) {
-  const products = Array.isArray(order.products) ? order.products : [];
+  const products = withCurrentSkus(order.products);
   const items = products.filter(item => item.sku).map(item => ({
     variation_id: String(item.sku).trim().toUpperCase(),
     quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
@@ -205,7 +222,7 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
 /** Gọi POS tạo đơn. Trả về { id, systemId, status } hoặc ném lỗi có lời tiếng Việt. */
 export async function pushOrderToPos(order, { conversation = {}, config = posConfig(), fetchImpl = fetch } = {}) {
   if (!posOrderPushEnabled(config)) throw new Error('Chưa kết nối Pancake POS.');
-  const products = Array.isArray(order.products) ? order.products : [];
+  const products = withCurrentSkus(order.products);
   if (!products.length) throw new Error('Đơn chưa có sản phẩm.');
   const posSkus = await posVariationSkus(config, fetchImpl);
   const missing = products.filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
@@ -244,7 +261,7 @@ export async function updatePosOrder(order, { conversation = {}, config = posCon
   if (!posOrderPushEnabled(config)) throw new Error('Chưa kết nối Pancake POS.');
   if (!order.pos?.id) throw new Error('Đơn chưa có trên POS.');
   const posSkus = await posVariationSkus(config, fetchImpl);
-  const missing = (Array.isArray(order.products) ? order.products : []).filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
+  const missing = withCurrentSkus(order.products).filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
   if (missing.length) throw new Error(`POS không có mẫu mã: ${missing.join(', ')}.`);
   const geo = await resolvePosGeo(order, config, fetchImpl).catch(() => ({}));
   const { shop_id, custom_id, status, received_at_shop, warehouse_id, page_id, conversation_id, ...payload } = buildPosOrderPayload(order, { conversation, posSkus, geo });

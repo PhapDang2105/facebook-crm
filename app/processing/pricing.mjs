@@ -100,7 +100,11 @@ export function buildCatalogPrompt() {
   if (!products.length) return '';
   return [
     'SẢN PHẨM (tên chuẩn → cách khách gọi):',
-    ...products.map(product => `- ${product.name}${product.aliases.length ? `: ${product.aliases.join(', ')}` : ''}`),
+    // Tối đa 6 tên gọi khác, bỏ hashtag: đủ để model khớp, bớt token mỗi lần gọi.
+    ...products.map(product => {
+      const aliases = product.aliases.filter(alias => !alias.startsWith('#')).slice(0, 6);
+      return `- ${product.name}${aliases.length ? `: ${aliases.join(', ')}` : ''}`;
+    }),
     `Tối đa ${maxComboQuantity} sản phẩm/đơn.`
   ].join('\n');
 }

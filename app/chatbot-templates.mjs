@@ -660,26 +660,32 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP'
  * model may answer with — nothing about templates has to be typed into the
  * prompt itself.
  */
-export function buildTemplatePrompt(templates = {}) {
+export function buildTemplatePrompt(templates = {}, basePrompt = '') {
   // The opening words of the template, syntax stripped: enough for the model to tell the ids apart.
   // Đoạn đầu có chữ (bỏ qua đoạn chỉ có {images}), gọn syntax.
   const gist = text => (String(text).split('###')
     .map(segment => segment.replace(/\[\[[^\]]*\]\]|\[\?[a-z_0-9]+\]|\[\/\?\]/gi, '').replace(/\{[a-z_0-9]+\}/gi, '…').trim())
     .find(segment => /\p{L}/u.test(segment)) || '')
     .replace(/^Dạ,? ?(em |mình )?/i, '').replace(/\s+/g, ' ').trim().match(/^.{0,47}(?=\s|$)/u)?.[0] || '';
-  const lines = Object.entries(templates)
-    .filter(([id, text]) => text && !internalTemplateIds.has(id) && !id.startsWith('FOLLOW_UP_') && !isProductQuoteId(id))
-    .map(([id, text]) => `- ${id}: ${gist(text)}`);
-  if (!lines.length) return '';
+  // Tiết kiệm token: mẫu mà prompt đã nêu cách dùng thì chỉ liệt kê mã; mẫu
+  // prompt chưa nhắc (chủ shop tự thêm) mới kèm vài chữ đầu để model hiểu.
+  const mentioned = id => new RegExp(`\\b${id}\\b`).test(String(basePrompt || ''));
+  const usable = Object.entries(templates)
+    .filter(([id, text]) => text && !internalTemplateIds.has(id) && !id.startsWith('FOLLOW_UP_') && !isProductQuoteId(id));
+  if (!usable.length) return '';
+  const orderSteps = [
+    ['ORDER_ADDRESS', 'muốn mua, thiếu SĐT/địa chỉ'],
+    ['ORDER_CONFIRMATION', 'muốn mua, đủ sản phẩm+số lượng+SĐT+địa chỉ'],
+    ['ORDER_UPDATE', 'khách sửa đơn vừa xác nhận: giỏ ĐẦY ĐỦ mới, không tạo đơn mới'],
+    ['ORDER_CANCEL', 'khách muốn hủy đơn vừa đặt'],
+    ['CSKH_HANDOFF', 'cần người thật']
+  ];
+  const known = [...usable.map(([id]) => id), ...orderSteps.map(([id]) => id)].filter(mentioned);
   return [
-    'MẪU TIN (template_id → ý nghĩa):',
-    ...lines,
-    '- ORDER_ADDRESS: muốn mua, thiếu SĐT/địa chỉ',
-    '- ORDER_CONFIRMATION: muốn mua, đủ sản phẩm+số lượng+SĐT+địa chỉ',
-    '- ORDER_UPDATE: khách sửa đơn vừa xác nhận (đổi vị, đổi số lượng, "ko phải", "3 gói 3 vị"): điền giỏ ĐẦY ĐỦ mới, không tạo đơn mới',
-    '- ORDER_CANCEL: khách muốn hủy đơn vừa đặt ("hủy đơn", "không lấy nữa", "thôi không mua", "đừng gửi")',
-    '- CSKH_HANDOFF: cần người thật',
-    'PRICE_QUOTE dùng cho mọi sản phẩm (kèm Product_N1); không có mẫu giá riêng từng sản phẩm.'
+    ...(known.length ? [`MẪU TIN: ${known.join(', ')}`] : ['MẪU TIN (template_id → ý nghĩa):']),
+    ...usable.filter(([id]) => !mentioned(id)).map(([id, text]) => `- ${id}: ${gist(text)}`),
+    ...orderSteps.filter(([id]) => !mentioned(id)).map(([id, meaning]) => `- ${id}: ${meaning}`),
+    'PRICE_QUOTE dùng cho mọi sản phẩm (kèm Product_N1).'
   ].join('\n');
 }
 

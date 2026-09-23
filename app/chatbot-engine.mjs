@@ -113,7 +113,7 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
  * appended from Cài đặt and Thiết lập tin nhắn on every request.
  */
 export function composeSystemPrompt(basePrompt, templates = {}) {
-  return [String(basePrompt || '').trim(), buildCatalogPrompt(), buildTemplatePrompt(templates)].filter(Boolean).join('\n\n');
+  return [String(basePrompt || '').trim(), buildCatalogPrompt(), buildTemplatePrompt(templates, basePrompt)].filter(Boolean).join('\n\n');
 }
 
 function buildMemoryTurns({ recentMessages = [], message, settings }) {
@@ -122,10 +122,13 @@ function buildMemoryTurns({ recentMessages = [], message, settings }) {
   return recentMessages
     .filter(item => item && item.id !== message?.id && String(item.text || '').trim())
     .slice(-limit)
-    .map(item => ({
-      role: item.direction === 'incoming' ? 'user' : 'model',
-      text: String(item.text).trim()
-    }));
+    // Tiết kiệm token: tin của Page (bảng giá, xác nhận đơn dài vài trăm chữ) chỉ
+    // giữ đoạn đầu — model chỉ cần biết đã gửi gì; tin khách giữ tối đa 300 ký tự.
+    .map(item => {
+      const text = String(item.text).replace(/\s+/g, ' ').trim();
+      const limit = item.direction === 'incoming' ? 300 : 160;
+      return { role: item.direction === 'incoming' ? 'user' : 'model', text: text.length > limit ? `${text.slice(0, limit)}…` : text };
+    });
 }
 
 function mergeAnthropicTurns(turns) {

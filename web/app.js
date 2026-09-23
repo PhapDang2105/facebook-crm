@@ -7205,7 +7205,8 @@ function renderPreviewCell(value, header) {
     // không có thì ảnh mẫu theo màu túi. Tên nay là "Granola Túi Xanh 450g" (không
     // còn "1 Túi") nên không đòi chữ "1 túi" nữa.
     const catalogImage = (Array.isArray(sharedProducts) ? sharedProducts : []).find(product => product.image && normalizeColumnName(product.name) === productName)?.image || '';
-    if (catalogImage) return `<span class="product-with-image">${escapeHtml(previewValue)}<img src="${escapeHtml(catalogImage)}" alt=""></span>`;
+    // Có ảnh thì chỉ hiện ảnh; tên nằm ở tooltip (và vẫn ở dữ liệu/tệp xuất).
+    if (catalogImage) return `<span class="product-with-image product-image-only" title="${escapeHtml(previewValue)}"><img src="${escapeHtml(catalogImage)}" alt="${escapeHtml(previewValue)}"></span>`;
     const imageName = productName.includes('combo 2') && productName.includes('xanh') ? 'combo2_green'
       : productName.includes('combo 2') && productName.includes('vang') ? 'combo2_yellow'
       : productName.includes('combo 3') && productName.includes('xanh') ? 'combo3_green'
@@ -7224,7 +7225,7 @@ function renderPreviewCell(value, header) {
         product_brown: '1 Túi Nâu'
       })[imageName];
       const imageClass = imageName.startsWith('combo2_') ? ' product-image--combo2' : imageName.startsWith('combo3_') ? ' product-image--combo3' : '';
-      return `<span class="product-with-image">${escapeHtml(previewValue)}<img class="${imageClass.trim()}" src="/assets/logos/${imageName}.png" alt="${imageAlt}"></span>`;
+      return `<span class="product-with-image product-image-only" title="${escapeHtml(previewValue)}"><img class="${imageClass.trim()}" src="/assets/logos/${imageName}.png" alt="${escapeHtml(previewValue || imageAlt)}"></span>`;
     }
   }
   const network = normalizeColumnName(previewValue);
@@ -7301,7 +7302,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     'ghi chu xu ly': 'minmax(150px, 240px)',
     // fit-content() không dùng được làm cận trên của minmax(): trình duyệt bỏ cả
     // dòng grid-template-columns, bảng sập còn một cột. Dùng hai mốc dài cố định.
-    'san pham': 'minmax(120px, 170px)',
+    'san pham': 'minmax(64px, 170px)',
     'khach hang': 'minmax(100px, 170px)',
     'so dien thoai': 'max-content'
   };

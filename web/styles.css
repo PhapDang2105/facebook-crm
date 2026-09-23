@@ -776,6 +776,9 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .product-with-image img { position: absolute; top: 50%; right: 0; display: block; width: 39.6px; height: 39.6px; object-fit: contain; transform: translateY(-50%); }
 .product-with-image img.product-image--combo2 { width: 41.4px; height: 41.4px; }
 .product-with-image img.product-image--combo3 { width: 41.4px; height: 41.4px; }
+/* Có ảnh thì chỉ hiện ảnh, tên ở tooltip: ô gọn, ảnh đứng giữa. */
+.product-with-image.product-image-only { justify-content: center; padding-right: 0; }
+.product-with-image.product-image-only img { position: static; transform: none; width: 44px; height: 44px; }
 .network-logo { display: block; width: 68.4px; height: 13.5px; margin-inline: auto; object-fit: contain; object-position: center; }
 .network-logo--itel { width: 62.1px; height: 35.1px; }
 .network-logo--viettel { position: relative; width: 39.6px; height: 16.2px; overflow: hidden; }

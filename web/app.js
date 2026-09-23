@@ -2368,8 +2368,36 @@ function renderImportSummary(entries) {
       cod += (Number(String(entry.row[quantityIndex] ?? '').replace(/\D/g, '')) || 0) * (Number(String(entry.row[priceIndex] ?? '').replace(/\D/g, '')) || 0);
     }
   }
+  // Đơn hợp lệ: cùng số điện thoại chỉ tính một đơn (giữ đơn mới nhất), tiền
+  // là tổng của đơn được giữ; dòng không có số thì mỗi đơn tính riêng.
+  const phoneIndex = orderPhoneColumnIndex();
+  const now = new Date();
+  const lineTotal = row => (quantityIndex >= 0 && priceIndex >= 0)
+    ? (Number(String(row[quantityIndex] ?? '').replace(/\D/g, '')) || 0) * (Number(String(row[priceIndex] ?? '').replace(/\D/g, '')) || 0)
+    : 0;
+  const orderTotals = new Map();
+  const orderTime = new Map();
+  const orderPhone = new Map();
+  for (const entry of entries) {
+    const id = idIndex >= 0 ? String(entry.row[idIndex] ?? '').trim() : '';
+    const key = id || `row:${entry.index}`;
+    orderTotals.set(key, (orderTotals.get(key) || 0) + lineTotal(entry.row));
+    if (!orderTime.has(key)) orderTime.set(key, parseOrderRowDate(entry.row, orderData, now)?.getTime() || 0);
+    if (!orderPhone.has(key)) orderPhone.set(key, phoneIndex >= 0 ? normalizeRowPhone(entry.row[phoneIndex]) : '');
+  }
+  const keptByPhone = new Map();
+  let validOrders = 0;
+  let validCod = 0;
+  for (const [key, total] of orderTotals.entries()) {
+    const phone = orderPhone.get(key);
+    if (!phone) { validOrders += 1; validCod += total; continue; }
+    const current = keptByPhone.get(phone);
+    if (!current || orderTime.get(key) > current.at) keptByPhone.set(phone, { key, at: orderTime.get(key), total });
+  }
+  for (const kept of keptByPhone.values()) { validOrders += 1; validCod += kept.total; }
   box.innerHTML = entries.length
     ? `<span>Tổng đơn: <strong>${orders.size}</strong></span><span>COD: <strong>${cod.toLocaleString('vi-VN')} đ</strong></span>`
+      + `<span class="order-import-summary-valid">Đơn hợp lệ: <strong>${validOrders}</strong></span><span class="order-import-summary-valid">COD hợp lệ: <strong>${validCod.toLocaleString('vi-VN')} đ</strong></span>`
     : '';
 }
 

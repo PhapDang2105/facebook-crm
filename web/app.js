@@ -7368,7 +7368,9 @@ function renderOrderData() {
   fillOrderDayOptions(orderExportDay, dateKeys);
   // Ngày đơn: mặc định chỉ hôm nay. Dòng không có ngày (import cũ) tính là hôm nay.
   const importDay = selectedImportDate();
-  if (importDay) {
+  // Bộ lọc "Landing page trùng Chatbot" bỏ qua ngày: đơn landing hôm qua và đơn
+  // chatbot hôm nay của cùng một số phải hiện cạnh nhau để nhân viên gộp.
+  if (importDay && (orderSourceFilter?.value || 'all') !== 'landing-chatbot') {
     const now = new Date();
     importRows = importRows.filter(entry => {
       const ordered = parseOrderRowDate(entry.row, orderData, now) || now;
@@ -7378,7 +7380,27 @@ function renderOrderData() {
   // Nguồn đơn (cột "Nguồn đơn": Chatbot, Landing page, Import) lọc chồng lên bộ lọc trạng thái.
   const sourceValue = orderSourceFilter?.value || 'all';
   const sourceColumn = orderColumnIndex(normalizeColumnName(orderSourceHeader));
-  if (sourceValue !== 'all' && sourceColumn >= 0) {
+  if (sourceValue === 'landing-chatbot' && sourceColumn >= 0) {
+    // "Landing page trùng Chatbot": cùng số điện thoại vừa có đơn landing page
+    // vừa có đơn chatbot (xét cả bảng, không chỉ ngày đang chọn) — khách điền
+    // form rồi nhắn bot đặt thêm lần nữa, nhân viên gộp trước khi gọi.
+    const phoneColumn = orderPhoneColumnIndex();
+    const sourcesByPhone = new Map();
+    if (phoneColumn >= 0) {
+      for (const row of rows) {
+        const phone = normalizeRowPhone(row[phoneColumn]);
+        if (!phone) continue;
+        const set = sourcesByPhone.get(phone) || new Set();
+        set.add(normalizeColumnName(row[sourceColumn] || ''));
+        sourcesByPhone.set(phone, set);
+      }
+    }
+    const both = new Set([...sourcesByPhone.entries()].filter(([, set]) => set.has(normalizeColumnName('Landing page')) && set.has(normalizeColumnName('Chatbot'))).map(([phone]) => phone));
+    importRows = importRows.filter(entry => {
+      const source = normalizeColumnName(entry.row[sourceColumn] || '');
+      return both.has(normalizeRowPhone(entry.row[phoneColumn])) && (source === normalizeColumnName('Landing page') || source === normalizeColumnName('Chatbot'));
+    });
+  } else if (sourceValue !== 'all' && sourceColumn >= 0) {
     const wanted = normalizeColumnName(sourceValue);
     importRows = importRows.filter(entry => normalizeColumnName(entry.row[sourceColumn] || '') === wanted);
   }

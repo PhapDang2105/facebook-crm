@@ -590,6 +590,7 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customer-orders-management-row > strong:last-child { color: #27643a; text-align: right; }
 .customer-orders-management-status { color: #27643a; font-weight: 700; }
 .data-preview .preview-status { white-space: nowrap; }
+.data-preview .preview-total { white-space: nowrap; font-weight: 600; }
 .order-status-line { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; line-height: 18px; white-space: nowrap; }
 .order-status-line--recent { color: #b42318; }
 .order-status-line--old { color: #1b5e20; }

@@ -7255,7 +7255,7 @@ function renderEmptyState(container, message) {
   container.innerHTML = `<div class="order-empty">${emptyBoxIcon}<small>${escapeHtml(message)}</small></div>`;
 }
 
-function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, editingCell = null, templateOverride = '', rowNotes = new Map(), statusCells = null, groupOrderLines = false } = {}) {
+function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassName = () => '', { deletable = false, reviewable = false, editingCell = null, templateOverride = '', rowNotes = new Map(), statusCells = null, groupOrderLines = false, totalColumn = false } = {}) {
   preview.classList.remove('is-empty');
   if (!rowEntries.length) {
     renderEmptyState(preview, emptyMessage);
@@ -7351,9 +7351,24 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
   // Cột Trạng thái (Nhập dữ liệu): trùng đơn 7 ngày, khách hàng cũ — đứng ngay trước Địa chỉ.
   const statusPosition = statusCells ? Math.max(0, orderedColumns.findIndex(column => column.name === 'dia chi')) : -1;
   const statusAt = position => statusCells && position === statusPosition;
-  const headCells = visibleIndexes.map((index, position) => `${statusAt(position) ? '<th class="preview-status">Trạng thái</th>' : ''}<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`);
+  // Cột Tổng tiền (tính, không lưu): ngay sau Đơn giá; đơn nhiều dòng ghi tổng cả đơn ở dòng đầu.
+  const unitPricePosition = orderedColumns.findIndex(column => column.name === 'don gia');
+  const totalPosition = totalColumn && unitPricePosition >= 0 ? unitPricePosition + 1 : -1;
+  const totalAt = position => totalPosition >= 0 && position === totalPosition;
+  const quantityIndex = headers.findIndex(header => normalizeColumnName(header) === 'so luong');
+  const priceIndex = headers.findIndex(header => normalizeColumnName(header) === 'don gia');
+  const lineTotal = row => (Number(String(row[quantityIndex] ?? '').replace(/\D/g, '')) || 0) * (Number(String(row[priceIndex] ?? '').replace(/\D/g, '')) || 0);
+  const orderTotalFor = entry => {
+    if (quantityIndex < 0 || priceIndex < 0) return '';
+    const orderId = orderIdIndex >= 0 ? String(entry.row[orderIdIndex] ?? '').trim() : '';
+    const total = orderId ? orderData.rows.filter(row => String(row[orderIdIndex] ?? '').trim() === orderId).reduce((sum, row) => sum + lineTotal(row), 0) : lineTotal(entry.row);
+    return total ? `${total.toLocaleString('vi-VN')} đ` : '';
+  };
+  const totalCell = (entry, continued = false) => `<td class="preview-total">${continued ? '' : escapeHtml(orderTotalFor(entry))}</td>`;
+  const headCells = visibleIndexes.map((index, position) => `${statusAt(position) ? '<th class="preview-status">Trạng thái</th>' : ''}${totalAt(position) ? '<th class="preview-total">Tổng tiền</th>' : ''}<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`);
   const head = (deletable ? '<th class="preview-actions"></th>' : '')
     + headCells.join('')
+    + (totalPosition === visibleIndexes.length ? '<th class="preview-total">Tổng tiền</th>' : '')
     + (statusCells && statusPosition === visibleIndexes.length ? '<th class="preview-status">Trạng thái</th>' : '')
     + (reviewable ? '<th class="preview-actions preview-actions--tail">Trạng thái</th>' : '');
   // Ô Trạng thái: dòng sau của cùng đơn để trống (một ô chọn cho cả đơn).
@@ -7363,12 +7378,14 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     const orderId = groupOrderLines && orderIdIndex >= 0 ? String(entry.row[orderIdIndex] ?? '').trim() : '';
     const continued = Boolean(orderId) && orderId === previousOrderId;
     previousOrderId = orderId;
-    return `<tr class="${rowClassName(entry)}${continued ? ' order-row-continued' : ''}" data-order-row-index="${entry.index}">${actionCell(entry, continued)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry, continued) : ''}${cellHtml(entry, index, continued)}`).join('')}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry, continued) : ''}${tailCell(entry)}</tr>`;
+    return `<tr class="${rowClassName(entry)}${continued ? ' order-row-continued' : ''}" data-order-row-index="${entry.index}">${actionCell(entry, continued)}${visibleIndexes.map((index, position) => `${statusAt(position) ? statusCell(entry, continued) : ''}${totalAt(position) ? totalCell(entry, continued) : ''}${cellHtml(entry, index, continued)}`).join('')}${totalPosition === visibleIndexes.length ? totalCell(entry, continued) : ''}${statusCells && statusPosition === visibleIndexes.length ? statusCell(entry, continued) : ''}${tailCell(entry)}</tr>`;
   }).join('');
   // Đang sửa một dòng: giữ đúng bề rộng cột đã đo trước đó để bảng không xê dịch.
-  const columnTemplateWithStatus = statusCells
-    ? orderedColumns.map((column, position) => `${position === statusPosition ? 'max-content ' : ''}${templates[column.name] || 'max-content'}`).join(' ') + (statusPosition === orderedColumns.length ? ' max-content' : '')
-    : columnTemplate;
+  const columnTemplateWithStatus = orderedColumns
+    .map((column, position) => `${statusAt(position) ? 'max-content ' : ''}${totalAt(position) ? 'max-content ' : ''}${templates[column.name] || 'max-content'}`)
+    .join(' ')
+    + (totalPosition === orderedColumns.length ? ' max-content' : '')
+    + (statusCells && statusPosition === orderedColumns.length ? ' max-content' : '');
   const template = templateOverride || `${deletable ? '40px ' : ''}${columnTemplateWithStatus}${reviewable ? ' max-content' : ''}`;
   preview.innerHTML = `<table style="--preview-template: ${template}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
@@ -7488,7 +7505,7 @@ function renderOrderData() {
       // cảnh báo bom hàng và các vấn đề khác để bên Xử lý dữ liệu lo.
       ({ index }) => duplicateRowIndexes.has(index) ? 'order-row-duplicate'
         : duplicatePhoneRowIndexes.has(index) ? 'order-row-duplicate-phone' : '',
-      { deletable: true, groupOrderLines: true, rowNotes: importNotes, statusCells: importStatusCells }
+      { deletable: true, groupOrderLines: true, totalColumn: true, rowNotes: importNotes, statusCells: importStatusCells }
     );
   } else orderPanelsDirty.add('import');
   if (!panelVisible('process')) { orderPanelsDirty.add('process'); return; }
@@ -7522,6 +7539,7 @@ function renderOrderData() {
     {
       rowNotes,
       reviewable: true,
+      totalColumn: true,
       editingCell: editingOrderRowIndex >= 0 ? { row: editingOrderRowIndex, column: editingOrderColumn } : null,
       templateOverride: editingOrderRowIndex >= 0 ? lockedOrderTemplate : ''
     }

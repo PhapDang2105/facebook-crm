@@ -2327,6 +2327,42 @@ orderDayTabs.forEach(tab => {
   tab.onclick = () => { setActiveOrderDay(tab.dataset.orderDay); renderOrderData(); };
 });
 
+// Export ở Nhập dữ liệu: tải đúng bảng đang hiển thị (sau lọc ngày/nguồn/tìm
+// kiếm) thành XLSX thuần; không phải xuất kho nên không đụng lịch sử xuất.
+let importTableEntries = [];
+document.querySelector('#order-import-export')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  if (!importTableEntries.length) { showToast('Bảng đang trống, không có gì để xuất.'); return; }
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = 'Đang xuất...';
+  try {
+    const fileName = createExportFilename().replace(/^don-hang-facebook-/, 'nhap-du-lieu-');
+    const response = await fetch('/api/orders/export-table', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headers: orderData.headers, rows: importTableEntries.map(entry => entry.row.map(value => (value === null || value === undefined ? '' : value))), fileName })
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.error || 'Không thể tạo file Excel.');
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`Đã tải ${fileName} (${importTableEntries.length} dòng).`, 'success');
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+});
+
 document.querySelector('#order-clear-table')?.addEventListener('click', () => {
   if (!orderData.rows.length) return;
   if (!window.confirm(`Xóa toàn bộ ${orderData.rows.length} dòng trong bảng đơn hàng? Đơn tạo từ hội thoại vẫn còn trong danh sách phía trên.`)) return;
@@ -7356,10 +7392,12 @@ function renderOrderData() {
   const panelVisible = name => !orderPanels.get(name)?.classList.contains('hidden');
   if (panelVisible('export')) { orderPanelsDirty.delete('export'); renderExportPreview(); } else orderPanelsDirty.add('export');
 
+  // Nút Export của Nhập dữ liệu xuất đúng những dòng đang hiển thị này.
+  importTableEntries = sortOrderEntriesByTime(importRows);
   if (panelVisible('import')) {
     orderPanelsDirty.delete('import');
     renderOrderTable(
-      document.querySelector('#order-import-preview'), headers, sortOrderEntriesByTime(importRows),
+      document.querySelector('#order-import-preview'), headers, importTableEntries,
       rows.length ? 'Không tìm thấy đơn hàng phù hợp' : 'Chưa có dữ liệu',
       // Nhập dữ liệu chỉ tô nền đơn trùng (trùng dữ liệu, trùng số điện thoại);
       // cảnh báo bom hàng và các vấn đề khác để bên Xử lý dữ liệu lo.

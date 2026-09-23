@@ -5,6 +5,7 @@ import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { buildExportRows, exportPreviewStreets, exportedOrderData } from './order-export.mjs';
 import { parseXlsx } from './xlsx-import.mjs';
+import { buildPlainXlsx } from './xlsx-export.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
@@ -1766,6 +1767,16 @@ const server = http.createServer(async (request, response) => {
       // `streets`: phần đường phố cho cột Địa chỉ của bảng xem trước; file vẫn đủ.
       // `locationCheck`: đơn nào ba cấp chưa đúng danh mục kho, để chặn xuất.
       return sendJson(response, 200, { rows, streets: exportPreviewStreets(rows), locationCheck: rows.locationCheck });
+    }
+    // Nút Export ở Nhập dữ liệu: tải đúng các cột/dòng đang hiển thị thành XLSX
+    // thuần — không qua mẫu kho, không kiểm địa chỉ, không ghi lịch sử xuất kho.
+    if (request.method === 'POST' && url.pathname === '/api/orders/export-table') {
+      const payload = await readBody(request, 16 * 1024 * 1024);
+      const headers = Array.isArray(payload.headers) ? payload.headers.map(item => String(item ?? '')) : [];
+      const rows = Array.isArray(payload.rows) ? payload.rows.filter(Array.isArray).slice(0, 20000) : [];
+      if (!headers.length || !rows.length) return sendJson(response, 400, { error: 'Bảng đang trống, không có gì để xuất.' });
+      const fileName = String(payload.fileName || '').replace(/[^A-Za-z0-9._-]/g, '') || `nhap-du-lieu-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      return sendBinary(response, 200, buildPlainXlsx(headers, rows, { sheetName: 'Nhập dữ liệu' }), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName);
     }
     if (request.method === 'POST' && url.pathname === '/api/orders/export') {
       const payload = await readBody(request);

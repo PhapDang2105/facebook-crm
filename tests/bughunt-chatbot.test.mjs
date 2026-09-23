@@ -124,9 +124,10 @@ import { splitLongText } from '../app/pancake.mjs';
 
 test('giỏ Facebook Shop: 1 SKU → bảng giá; SKU combo CB2-XANH / CB-VANGG+NAU → xin SĐT/địa chỉ với đúng giỏ; SKU lạ → để model', () => {
   const t = templates;
+  // Bấm "Mua" 1 sản phẩm: đi thẳng bước xin SĐT/địa chỉ, giỏ 1 túi được giữ (kèm gợi ý 2 túi).
   const one = cartQuickReply([{ sku: 'GRA-VANG-H350', quantity: 0 }], t, {});
-  assert.equal(one.templateId, 'PRICE_QUOTE');
-  assert.match(one.messages.join(' '), /Túi Vàng 350g/);
+  assert.equal(one.templateId, 'ORDER_ADDRESS');
+  assert.deepEqual(one.pendingOrder.items.map(i => `${i.product} x${i.quantity}`), ['Granola Túi Vàng 350g x1']);
   const two = cartQuickReply([{ sku: 'CB2-XANH-Z450', quantity: 0 }], t, {});
   assert.equal(two.templateId, 'ORDER_ADDRESS');
   assert.deepEqual(two.pendingOrder.items.map(i => `${i.product} x${i.quantity}`), ['Granola Túi Xanh 450g x2']);
@@ -249,4 +250,48 @@ test('khách hủy đơn vừa đặt (ORDER_CANCEL): hủy đúng đơn đó qu
     requestReply: async () => rendered
   });
   assert.deepEqual(log.filter(item => !item.startsWith('labels:')), ['cancel:abc12345', 'text:Dạ em đã hủy đơn Gra']);
+});
+
+test('lời gợi ý lấy 2 túi nằm trong parts (engine gửi theo parts) chứ không chỉ trong messages', () => {
+  const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Túi Xanh', No_A: '1' }, templates, {});
+  assert.equal(reply.pendingOrder.upsold, true);
+  const texts = reply.parts.filter(part => part.type === 'text').map(part => part.text);
+  assert.ok(texts.some(text => /2 túi/.test(text)), JSON.stringify(texts));
+  assert.equal(texts.length, reply.messages.length);
+});
+
+test('vòng 2: #10900 không đăng "ib cho Page"; bình luận hủy/khiếu nại → nhắn nhân viên kiểm tra; hộp thư biết mẫu vừa gửi riêng; hỏi tiếp mà sắp lặp bảng giá → nhắc ngắn', async () => {
+  const tpl = { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận dưới bài viết của Giọt Nắng ạ 💛', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib ạ', COMMENT_PUBLIC_REPEAT: 'Dạ em đã gửi trong tin nhắn rồi ạ', COMMENT_PUBLIC_FALLBACK: 'Dạ mình ib cho Page giúp em ạ' };
+  const comment = (id, text) => ({ type: 'message', conversation: { id: 'page:comment:c1:p1', pageId: 'page', psid: 'user', source: 'comment', name: 'Khách', botEnabled: true, post: { message: 'Granola túi xanh' } }, message: { id, mid: id, direction: 'incoming', type: 'text', text, createdAt: Date.now() } });
+  const saved = {};
+  const base = (sendMessage, requestReply, inbox = { id: 'page:user', pageId: 'page', psid: 'user', botEnabled: true }) => ({
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 1, messageTemplates: tpl }),
+    listMessages: async () => [],
+    getConversation: async id => (id === 'page:user' ? inbox : null),
+    saveBotState: async (id, state) => { saved[id] = { ...(saved[id] || {}), ...state }; },
+    sendMessage, requestReply
+  });
+  // 1. #10900: không có câu "ib cho Page".
+  const log1 = [];
+  await processChatbotChanges([comment('c1', 'giá sao')], base(async (_c, m) => { if (m.privateReply) throw new Error('Pancake không nhận tin (200): (#10900) Activity already replied to'); log1.push(m.text); return { message: { mid: 'x' } }; }, async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá ạ'], handoff: false })));
+  assert.deepEqual(log1, ['Dạ em đã gửi trong tin nhắn rồi ạ']);
+  // 2. Bình luận "hủy đơn" → tin riêng nhân viên kiểm tra, không chào hàng.
+  const log2 = [];
+  await processChatbotChanges([comment('c2', 'C hủy đơn 2 gói nhá')], base(async (_c, m) => { log2.push(`${m.privateReply ? 'riêng' : 'cc'}:${m.text}`); return { message: { mid: 'x' } }; }, async () => ({ templateId: 'CSKH_HANDOFF', messages: ['x'], handoff: true })));
+  assert.match(log2[0], /^riêng:.*chuyển bạn phụ trách đơn hàng kiểm tra/s);
+  // 3. Sau tin riêng thành công, hộp thư ghi mẫu vừa gửi.
+  await processChatbotChanges([comment('c3', 'giá bn')], base(async () => ({ message: { mid: 'x' } }), async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá ạ'], handoff: false })));
+  assert.equal(saved['page:user'].botLastTemplateId, 'PRICE_QUOTE');
+  // 4. Hộp thư: khách hỏi câu mới mà model sắp gửi lại đúng bảng giá vừa gửi riêng → nhắc ngắn thay vì im lặng.
+  const price = 'Dạ, em gửi anh/chị Bảng giá Granola Túi Xanh 450g để mình dễ tham khảo ạ: 1 túi 174.000đ';
+  const log4 = [];
+  await processChatbotChanges([{ type: 'message', conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true }, message: { id: 'm9', mid: 'm9', direction: 'incoming', type: 'text', text: '150 mà e', createdAt: Date.now() } }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 1, messageTemplates: tpl }),
+    listMessages: async () => [{ id: 'p', direction: 'outgoing', type: 'text', text: `Dạ em thấy anh/chị để lại bình luận dưới bài viết của Giọt Nắng ạ 💛\n\n${price}`, createdAt: Date.now() - 60000 }],
+    saveBotState: async () => {},
+    sendMessage: async (_c, m) => { log4.push(m.text); return { message: { mid: 'x' } }; },
+    requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: [price], handoff: false })
+  });
+  assert.equal(log4.length, 1);
+  assert.match(log4[0], /thông tin em gửi ngay tin phía trên/);
 });

@@ -183,21 +183,28 @@ test('bot gửi theo dãy parts: ảnh trước rồi mới tới chữ khi mẫ
   assert.deepEqual(sent, ['ảnh:https://x/1.png', 'chữ:Bảng giá']);
 });
 
-test('"lấy thêm 2 túi vàng" ngay sau khi chốt đơn túi xanh: đơn mới chỉ có túi vàng, không gộp món đã đặt', () => {
+test('ngay sau khi bot chốt đơn (dưới 60 phút): "thêm/nữa" gộp vào đơn cũ, đổi giỏ thì sửa đơn cũ, "đơn khác" mới là đơn mới', () => {
   const now = Date.now();
-  const recentOrder = { id: 'o1', createdAt: now - 60 * 1000, products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2, price: 149000 }] };
-  const value = { template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Product_N2: 'Granola Túi Vàng 350g', No_B: '2', Phone_Number: '0385805700', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' };
-  const reply = renderChatbotReply(value, templates, { now, recentOrder });
-  assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
-  assert.deepEqual(reply.order.items.map(item => [item.product, item.quantity]), [['Granola Túi Vàng 350g', 2]]);
-  // Chỉ nhắc lại đúng món đã đặt thì giữ nguyên (đơn trùng do createOrder xử lý).
-  const repeat = renderChatbotReply({ ...value, Product_N2: '0', No_B: '0' }, templates, { now, recentOrder });
-  assert.deepEqual(repeat.order.items.map(item => item.product), ['Granola Túi Xanh 450g']);
-  // Đơn đã lâu (hơn 2 giờ) thì không lọc: giỏ 4 túi gộp không có giá combo nên bot chuyển người (chính là lỗi trước đây).
-  const old = renderChatbotReply(value, templates, { now, recentOrder: { ...recentOrder, createdAt: now - 3 * 60 * 60 * 1000 } });
-  // 4 túi vượt tổ hợp tự tính: hỏi lại vị/số lượng, không chuyển người.
-  assert.equal(old.templateId, 'ASK_FLAVOR');
-  assert.equal(old.handoff, false);
+  const recentOrder = { id: 'o1', automatic: true, createdAt: now - 60 * 1000, phone: '0385805700', address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2, price: 149000 }] };
+  const value = { template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Vàng 350g', No_A: '1', Phone_Number: '0', Customer_Address: '0' };
+  // "lấy thêm 1 túi vàng nữa": gộp vào đơn cũ → Xanh 2 + Vàng 1, sửa đúng đơn o1.
+  const added = renderChatbotReply(value, templates, { now, recentOrder, messageText: 'lấy thêm 1 túi vàng nữa nhé' });
+  assert.equal(added.templateId, 'ORDER_UPDATE');
+  assert.equal(added.order.updateOrderId, 'o1');
+  assert.deepEqual(added.order.items.map(item => [item.product, item.quantity]).sort(), [['Granola Túi Vàng 350g', 1], ['Granola Túi Xanh 450g', 2]]);
+  assert.equal(added.order.phone, '0385805700', 'SĐT/địa chỉ lấy từ đơn cũ');
+  // Đổi ý ("ko phải, lấy 2 túi vàng"): thay giỏ của đơn cũ, không tạo đơn thứ hai.
+  const changed = renderChatbotReply({ ...value, No_A: '2' }, templates, { now, recentOrder, messageText: 'ko phải, mình lấy 2 túi vàng' });
+  assert.equal(changed.templateId, 'ORDER_UPDATE');
+  assert.deepEqual(changed.order.items.map(item => [item.product, item.quantity]), [['Granola Túi Vàng 350g', 2]]);
+  // Khách nói rõ đơn khác: đơn mới chỉ gồm món vừa nêu.
+  const separate = renderChatbotReply({ ...value, Phone_Number: '0909123456', Customer_Address: '5 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM' }, templates, { now, recentOrder, messageText: 'lên đơn khác giúp mình 1 túi vàng gửi người khác' });
+  assert.equal(separate.templateId, 'ORDER_CONFIRMATION');
+  assert.deepEqual(separate.order.items.map(item => item.product), ['Granola Túi Vàng 350g']);
+  // Quá 60 phút: không sửa đơn cũ.
+  const late = renderChatbotReply({ ...value, Phone_Number: '0909123456', Customer_Address: '5 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM' }, templates, { now, recentOrder: { ...recentOrder, createdAt: now - 3 * 60 * 60 * 1000 }, messageText: 'lấy thêm 1 túi vàng' });
+  assert.equal(late.templateId, 'ORDER_CONFIRMATION');
+  assert.equal(late.order.updateOrderId, undefined);
 });
 
 test('ảnh không gửi được thì bỏ ảnh, chữ vẫn tới khách, lỗi ảnh ghi lại cho panel khách', async () => {

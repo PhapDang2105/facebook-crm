@@ -266,11 +266,30 @@ function renderOrder(value, templates, context = {}) {
   // Khách sửa đơn vừa chốt ("ko phải", "3 gói 3 vị khác nhau"): giỏ mới thay
   // cho giỏ cũ của đúng đơn đó, không tạo đơn thứ hai, không bỏ món "đã đặt".
   const recentOrder = context.recentOrder || null;
-  const updating = templateId === 'ORDER_UPDATE' && Boolean(recentOrder?.id) && now - (Number(recentOrder.createdAt) || 0) < orderUpdateWindowMs;
+  const recentOpen = Boolean(recentOrder?.id) && now - (Number(recentOrder.createdAt) || 0) < orderUpdateWindowMs
+    && String(recentOrder.processingStatus || '') !== 'cancelled';
+  // Mô hình vẫn chọn ORDER_CONFIRMATION/ORDER_ADDRESS khi khách sửa hay thêm vào
+  // đơn bot vừa chốt (dưới 60 phút) → trước đây tạo đơn thứ hai, thứ ba. Nay: khách
+  // nói rõ "đơn khác / người khác / địa chỉ khác" mới là đơn mới; "thêm / nữa /
+  // luôn / gộp" là cộng vào đơn cũ; còn lại là sửa giỏ của đơn cũ.
+  const messageWords = normalizeText(String(context.messageText || ''));
+  const separateOrder = /\b(don khac|don moi|nguoi khac|dia chi khac|gui cho (ban|me|chi|em|anh)|tach don)\b/.test(messageWords);
+  const addsToOrder = /\b(them|nua|luon|gop|cong them)\b/.test(messageWords);
+  const implicitUpdate = !separateOrder && recentOpen && recentOrder.automatic !== false && namedItems.length > 0
+    && ['ORDER_CONFIRMATION', 'ORDER_ADDRESS'].includes(templateId);
+  const updating = (templateId === 'ORDER_UPDATE' && recentOpen) || implicitUpdate;
   if (templateId === 'ORDER_UPDATE' && !updating && !namedItems.length && templates.ORDER_WRONG) {
     return { templateId: 'ORDER_WRONG', ...splitMessages(fill(templates.ORDER_WRONG, commonValues())), handoff: false };
   }
-  const freshItems = updating ? namedItems : dropRecentlyOrdered(namedItems, recentOrder, now);
+  // Cộng thêm vào đơn cũ: giỏ = món đã đặt + món vừa nêu (cùng món thì cộng số lượng).
+  const mergedItems = () => {
+    const byName = new Map();
+    const add = (product, quantity) => { const key = normalizeText(product); const current = byName.get(key); byName.set(key, { product, quantity: (current?.quantity || 0) + quantity }); };
+    for (const item of Array.isArray(recentOrder?.products) ? recentOrder.products : []) add(String(item.name || item.product || ''), Number(item.quantity) || 1);
+    for (const item of namedItems) add(item.product, Number(item.quantity) || 1);
+    return toPricedItems([...byName.values()].filter(item => item.product));
+  };
+  const freshItems = updating ? (implicitUpdate && addsToOrder ? mergedItems() : namedItems) : dropRecentlyOrdered(namedItems, recentOrder, now);
   if (updating && !freshItems.length && templates.ORDER_WRONG) {
     return { templateId: 'ORDER_WRONG', ...splitMessages(fill(templates.ORDER_WRONG, commonValues())), handoff: false };
   }
@@ -294,7 +313,9 @@ function renderOrder(value, templates, context = {}) {
   // gần nhất của khách thay vì hỏi lại.
   const wantsPrevious = /(dia chi|d\/c|dc) (cu|truoc|nhu cu|lan truoc)|nhu (lan )?truoc|cho cu|giong lan truoc|nhu cu/.test(normalizeText(String(context.messageText || '')));
   const previous = (wantsPrevious || updating) && context.recentOrder ? context.recentOrder : null;
-  const freshAddress = String(value.Customer_Address || '').trim() || (previous?.address ? String(previous.address) : '');
+  // Mô hình ghi "0" khi khách không đưa địa chỉ: coi như trống để lấy địa chỉ đơn trước.
+  const givenAddress = String(value.Customer_Address || '').trim();
+  const freshAddress = (givenAddress && givenAddress !== '0' ? givenAddress : '') || (previous?.address ? String(previous.address) : '');
   const phone = freshPhone || pending?.phone || (previous?.phone ? toLocalPhone(previous.phone) || String(previous.phone) : '');
   // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
   // Lợi") is merged into the saved address; a whole new address replaces it.
@@ -383,7 +404,9 @@ function renderOrder(value, templates, context = {}) {
     return {
       templateId: 'ORDER_ADDRESS',
       ...ask,
-      ...(upsell ? { messages: [...ask.messages, ...splitMessages(upsell).messages] } : {}),
+      // Engine gửi theo `parts`: lời gợi ý 2 túi phải vào cả `parts`, không thì
+      // cờ upsold được bật mà khách chưa từng nhận lời gợi ý.
+      ...(upsell ? { messages: [...ask.messages, ...splitMessages(upsell).messages], parts: [...(ask.parts || []), ...(splitMessages(upsell).parts || [])] } : {}),
       handoff: false,
       pendingOrder: upsell && nextPending ? { ...nextPending, upsold: true } : nextPending
     };
@@ -615,7 +638,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP']);
 
 /**
  * The template inventory as text for the model, appended to the system

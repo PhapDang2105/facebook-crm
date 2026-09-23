@@ -21,7 +21,7 @@ import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
-import { syncOrderToPos, updatePosOrder } from './pos-orders.mjs';
+import { cancelPosOrder, syncOrderToPos, updatePosOrder } from './pos-orders.mjs';
 import { followUpStatus, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
@@ -304,6 +304,37 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
     result.order.pos = posOutcome;
   }
   return { ...result, updated: true, created: false };
+}
+
+/** Khách nhắn hủy đơn vừa đặt: đánh dấu hủy trên chính đơn đó, hủy bên POS nếu đã đẩy. */
+async function cancelChatbotCustomerOrder(conversation, orderId) {
+  const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const result = await updateMessagingStore(store => {
+    const item = store.conversations.find(entry => entry.id === conversation.id);
+    const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
+    if (!existing) return null;
+    existing.processingStatus = 'cancelled';
+    existing.status = 'Hủy';
+    existing.note = `${String(existing.note || '').trim()} Khách hủy đơn qua chatbot lúc ${stamp}.`.trim();
+    existing.updatedAt = Date.now();
+    return { order: existing };
+  });
+  if (!result) throw new Error('Không tìm thấy đơn để hủy.');
+  publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+  await appendOrderToArchive(result.order).catch(() => {});
+  if (result.order.pos?.id) {
+    const posOutcome = await cancelPosOrder(result.order)
+      .then(() => ({ ...result.order.pos, updatedAt: Date.now(), cancelled: true, error: undefined }))
+      .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Hủy trên POS lỗi: ${error.message}` }));
+    await updateMessagingStore(store => {
+      const item = store.conversations.find(entry => entry.id === conversation.id);
+      const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
+      if (target) target.pos = posOutcome;
+      return null;
+    });
+    result.order.pos = posOutcome;
+  }
+  return { ...result, cancelled: true, created: false };
 }
 
 /* ---- Thử nghiệm: chào khách vừa quét mã QR ----
@@ -724,6 +755,7 @@ const chatbotDependencies = {
   moderateComment,
   createOrder: createChatbotCustomerOrder,
   updateOrder: updateChatbotCustomerOrder,
+  cancelOrder: cancelChatbotCustomerOrder,
   sendReceipt: sendChatbotOrderReceipt,
   // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
   // nhận sự kiện là do nhân viên chọn trong Cài đặt → Tin nhắn.
@@ -1698,6 +1730,21 @@ const server = http.createServer(async (request, response) => {
       if (!updated) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
       // Bản vừa sửa vào kho lưu trữ: dòng sau cùng của một mã đơn là bản đúng.
       await appendOrderToArchive(updated).catch(() => {});
+      // Nhân viên chọn "Khách hủy"/bấm Hủy trên thẻ đơn: đơn đã sang POS thì hủy bên đó theo.
+      if (patch.processingStatus === 'cancelled' && updated.pos?.id) {
+        const posOutcome = await cancelPosOrder(updated)
+          .then(() => ({ ...updated.pos, updatedAt: Date.now(), cancelled: true, error: undefined }))
+          .catch(error => ({ ...updated.pos, updatedAt: Date.now(), error: `Hủy trên POS lỗi: ${error.message}` }));
+        await updateMessagingStore(store => {
+          for (const conversation of store.conversations) {
+            const target = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(order => order.id === orderId);
+            if (target) { target.pos = posOutcome; publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id }); }
+          }
+          return null;
+        });
+        await updateLandingStore(store => { const target = store.orders.find(order => order.id === orderId); if (target) target.pos = posOutcome; });
+        updated.pos = posOutcome;
+      }
       // Đơn đã có trên Pancake POS: sửa bên đó theo (sản phẩm, địa chỉ, phí, ghi chú); lỗi ghi lên đơn.
       if (updated.pos?.id && ['name', 'phone', 'address', 'lines', 'products', 'freeShipping', 'shippingFee', 'discount', 'note', 'gift'].some(field => patch[field] !== undefined)) {
         const owner = (await readMessagingStore()).conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));

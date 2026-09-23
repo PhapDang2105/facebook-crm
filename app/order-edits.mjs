@@ -141,7 +141,14 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
   // transfer, confirmed, cancelled; rỗng là chưa xử lý).
   if (patch.processingStatus !== undefined) {
     const processingStatus = text(patch.processingStatus, 40);
-    if (processingStatus !== String(order.processingStatus || '')) { order.processingStatus = processingStatus; changed.push('processingStatus'); }
+    if (processingStatus !== String(order.processingStatus || '')) {
+      order.processingStatus = processingStatus;
+      changed.push('processingStatus');
+      // Trạng thái hiển thị trên thẻ đơn đi theo: hủy → "Hủy", xác nhận → "Đã xác nhận", bỏ chọn → "Mới".
+      if (processingStatus === 'cancelled') order.status = 'Hủy';
+      else if (processingStatus === 'confirmed') order.status = 'Đã xác nhận';
+      else if (['Hủy', 'Đã xác nhận'].includes(String(order.status || ''))) order.status = 'Mới';
+    }
   }
 
   // Đã bỏ khỏi bảng Đơn hàng (nhân viên xóa dòng / Xóa bảng). Ghi trên máy chủ

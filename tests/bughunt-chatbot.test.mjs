@@ -224,3 +224,29 @@ test('khách sửa đơn vừa chốt (ORDER_UPDATE): giỏ mới thay giỏ cũ
   });
   assert.deepEqual(log, ['update:e0c3eba0:3', 'text:Dạ em đã sửa lại đơn ạ']);
 });
+
+test('khách hủy đơn vừa đặt (ORDER_CANCEL): hủy đúng đơn đó qua cancelOrder, không tạo đơn, không phiếu; đơn quá 24h → chuyển nhân viên', async () => {
+  const recentOrder = { id: 'abc12345', automatic: true, createdAt: Date.now() - 30 * 60 * 1000, phone: '0909123456', address: 'Q1', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }] };
+  const rendered = renderChatbotReply({ template_id: 'ORDER_CANCEL' }, templates, { recentOrder, now: Date.now() });
+  assert.equal(rendered.templateId, 'ORDER_CANCEL');
+  assert.equal(rendered.order.cancelOrderId, 'abc12345');
+  assert.match(rendered.messages[0], /đã hủy đơn Granola Túi Xanh 450g x2/);
+  const old = renderChatbotReply({ template_id: 'ORDER_CANCEL' }, templates, { recentOrder: { ...recentOrder, createdAt: Date.now() - 2 * 24 * 60 * 60 * 1000 }, now: Date.now() });
+  assert.equal(old.templateId, 'CSKH_HANDOFF');
+  const log = [];
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true, customerOrders: [recentOrder] },
+    message: { id: 'm1', mid: 'm1', direction: 'incoming', type: 'text', text: 'Cho mình hủy đơn nhé', createdAt: Date.now() }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 5 }),
+    listMessages: async () => [],
+    saveBotState: async (_id, state) => { if (state.labels) log.push(`labels:${state.labels.join(',')}`); },
+    sendMessage: async (_c, message) => { log.push(`text:${String(message.text).slice(0, 20)}`); return { message: { mid: 'x' } }; },
+    sendReceipt: async () => { log.push('receipt'); },
+    createOrder: async () => { log.push('create'); return { order: { id: 'new' }, created: true }; },
+    cancelOrder: async (_c, id) => { log.push(`cancel:${id}`); return { order: { ...recentOrder, processingStatus: 'cancelled' }, cancelled: true, created: false }; },
+    requestReply: async () => rendered
+  });
+  assert.deepEqual(log.filter(item => !item.startsWith('labels:')), ['cancel:abc12345', 'text:Dạ em đã hủy đơn Gra']);
+});

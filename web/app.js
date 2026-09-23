@@ -5207,8 +5207,8 @@ function renderCustomerOrders(conversation = getActiveConversation()) {
           <button type="button" data-order-action="edit" data-order-id="${escapeHtml(String(order.id))}" title="Sửa đơn" aria-label="Sửa đơn"><svg viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16Z"></path><path d="m14 6 4 4"></path></svg></button>
         </span>
       </summary>
-      <div class="customer-order-statuses">
-        <span>${customerPanelIcon('star')}${escapeHtml(order.status || 'Mới')}</span><i>&rsaquo;</i><b>${customerPanelIcon('shield')}Đã xác nhận</b><i>&rsaquo;</i><span>${customerPanelIcon('cancel')}Hủy</span>
+      <div class="customer-order-statuses" data-order-status-row="${escapeHtml(String(order.id))}">
+        <span class="${!['confirmed', 'cancelled'].includes(String(order.processingStatus || '')) ? 'is-current' : ''}">${customerPanelIcon('star')}${escapeHtml(['confirmed', 'cancelled'].includes(String(order.processingStatus || '')) ? 'Mới' : (order.status || 'Mới'))}</span><i>&rsaquo;</i><button type="button" class="customer-order-step${String(order.processingStatus || '') === 'confirmed' ? ' is-current' : ''}" data-order-action="confirm" data-order-id="${escapeHtml(String(order.id))}" title="Đánh dấu đã xác nhận với khách">${customerPanelIcon('shield')}Đã xác nhận</button><i>&rsaquo;</i><button type="button" class="customer-order-step customer-order-step--cancel${String(order.processingStatus || '') === 'cancelled' ? ' is-current' : ''}" data-order-action="cancel" data-order-id="${escapeHtml(String(order.id))}" title="Hủy đơn (hủy cả trên Pancake POS nếu đã đẩy)">${customerPanelIcon('cancel')}Hủy</button>
       </div>
       <div class="customer-order-details">
         <div class="customer-order-customer">
@@ -8545,6 +8545,25 @@ customerOrderList?.addEventListener('click', event => {
   if (action.dataset.orderAction === 'note') { editCustomerOrderStaffNote(orderId); return; }
   if (action.dataset.orderAction === 'share') { resendCustomerOrderReceipt(action, orderId); return; }
   if (action.dataset.orderAction === 'edit') { beginCustomerOrderEdit(order); return; }
+  // Hai bước trên thẻ đơn: Đã xác nhận / Hủy — cùng trạng thái xử lý với bảng
+  // Đơn hàng; Hủy thì hủy luôn trên Pancake POS nếu đơn đã đẩy. Bấm lại bước
+  // đang chọn thì bỏ chọn (về Mới).
+  if (action.dataset.orderAction === 'confirm' || action.dataset.orderAction === 'cancel') {
+    const wanted = action.dataset.orderAction === 'confirm' ? 'confirmed' : 'cancelled';
+    const current = String(order.processingStatus || '');
+    const next = current === wanted ? '' : wanted;
+    if (next === 'cancelled' && !window.confirm(`Hủy đơn #${orderId}? Đơn sẽ không đi vào file xuất kho${order.pos?.id ? ' và được hủy trên Pancake POS' : ''}.`)) return;
+    action.disabled = true;
+    fetch(`/api/customer-orders/${encodeURIComponent(orderId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ processingStatus: next }) })
+      .then(readApiResponse)
+      .then(() => {
+        showToast(next === 'cancelled' ? `Đã hủy đơn #${orderId}.` : next === 'confirmed' ? `Đã xác nhận đơn #${orderId}.` : `Đơn #${orderId} về trạng thái Mới.`, 'success');
+        return loadCustomerPanelFromServer(getActiveConversation());
+      })
+      .then(() => syncChatbotOrdersIntoTable())
+      .catch(error => { showToast(error.message || 'Chưa đổi được trạng thái đơn.'); loadCustomerPanelFromServer(getActiveConversation()); });
+    return;
+  }
 });
 
 // ===== Ba nút trên thẻ đơn: Ghi chú đơn, Gửi lại cho khách, Sửa đơn =====

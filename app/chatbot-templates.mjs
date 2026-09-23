@@ -221,6 +221,8 @@ function basketValues(key) {
 const recentOrderWindowMs = 2 * 60 * 60 * 1000;
 // Đơn vừa chốt trong khoảng này còn sửa được ngay trong hội thoại (ORDER_UPDATE).
 export const orderUpdateWindowMs = 60 * 60 * 1000;
+// Khách tự hủy qua bot được trong khoảng này (chưa giao); lâu hơn thì nhân viên lo.
+export const orderCancelWindowMs = 24 * 60 * 60 * 1000;
 function dropRecentlyOrdered(items, recentOrder, now) {
   const at = Number(recentOrder?.createdAt) || 0;
   if (!at || now - at > recentOrderWindowMs) return items;
@@ -613,7 +615,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS']);
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -639,6 +641,7 @@ export function buildTemplatePrompt(templates = {}) {
     '- ORDER_ADDRESS: muốn mua, thiếu SĐT/địa chỉ',
     '- ORDER_CONFIRMATION: muốn mua, đủ sản phẩm+số lượng+SĐT+địa chỉ',
     '- ORDER_UPDATE: khách sửa đơn vừa xác nhận (đổi vị, đổi số lượng, "ko phải", "3 gói 3 vị"): điền giỏ ĐẦY ĐỦ mới, không tạo đơn mới',
+    '- ORDER_CANCEL: khách muốn hủy đơn vừa đặt ("hủy đơn", "không lấy nữa", "thôi không mua", "đừng gửi")',
     '- CSKH_HANDOFF: cần người thật',
     'PRICE_QUOTE dùng cho mọi sản phẩm (kèm Product_N1); không có mẫu giá riêng từng sản phẩm.'
   ].join('\n');
@@ -654,6 +657,22 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   activeCustomer = context.customer || {};
   activeRecentOrder = context.recentOrder || null;
   const templateId = String(value.template_id || '').trim();
+  // Khách hủy đơn vừa đặt (dưới 24 giờ, chưa giao): hủy đúng đơn đó; đơn cũ hơn
+  // hay đã giao thì nhân viên xử lý (CSKH_HANDOFF).
+  if (templateId === 'ORDER_CANCEL') {
+    const recent = context.recentOrder || null;
+    const now = Number(context.now) || Date.now();
+    const shipped = /đã giao|đang giao|đã gửi/i.test(String(recent?.status || ''));
+    const cancellable = Boolean(recent?.id) && now - (Number(recent.createdAt) || 0) < orderCancelWindowMs && !shipped && String(recent.processingStatus || '') !== 'cancelled';
+    if (cancellable && templates.ORDER_CANCELLED) {
+      const items = (Array.isArray(recent.products) ? recent.products : []).map(item => `${item.name || item.product || 'sản phẩm'} x${Number(item.quantity) || 1}`).join(', ') || 'đơn vừa đặt';
+      return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items })), handoff: false, pendingOrder: null, order: { cancelOrderId: String(recent.id) } };
+    }
+    if (recent && String(recent.processingStatus || '') === 'cancelled' && templates.ORDER_CANCELLED) {
+      return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items: 'đơn vừa đặt' })), handoff: false };
+    }
+    return renderChatbotReply({ template_id: recent ? 'CSKH_HANDOFF' : 'ORDER_STATUS', warming: recent ? '1' : '0' }, templates, context);
+  }
   if (isOrderStep(templateId)) return renderOrder(value, templates, context);
   const catalogId = catalogRenderers[templateId] ? templateId : isProductQuoteId(templateId) ? 'PRICE_QUOTE' : '';
   if (catalogId && templates[catalogId]) {

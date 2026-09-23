@@ -364,7 +364,7 @@ export async function processChatbotChanges(changes, dependencies) {
 }
 
 async function answerChange(change, settings, results, dependencies) {
-  const { listMessages, getConversation, saveBotState, sendMessage, createOrder, updateOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
+  const { listMessages, getConversation, saveBotState, sendMessage, createOrder, updateOrder, cancelOrder, sendReceipt, moderateComment, requestReply = requestDirectModelReply } = dependencies;
   // Bản mới nhất của hội thoại: tin đứng trước trong hàng có thể vừa lưu giỏ
   // hàng, hay nhân viên vừa tắt bot. Every thread is answered unless staff
   // switched the bot off for it.
@@ -532,13 +532,18 @@ async function answerChange(change, settings, results, dependencies) {
     // khách nhưng không tạo đơn; giỏ được giữ ở pendingOrder cho nhân viên.
     // Khách sửa đơn vừa chốt: cập nhật đúng đơn đó (updateOrder), không tạo đơn mới.
     const wantsUpdate = Boolean(reply.order?.updateOrderId) && typeof updateOrder === 'function';
-    const outcome = settings.responseMode === 'automatic' && settings.autoOrder !== false && reply.order && (wantsUpdate || createOrder) && !isComment
-      ? (wantsUpdate
-        ? await updateOrder(conversation, reply.order.updateOrderId, reply.order)
-        : await createOrder(conversation, reply.order, { sourceMessageId: String(change.message.mid || change.message.id || '') }))
+    // Khách hủy đơn vừa đặt: đánh dấu hủy đúng đơn đó (không tạo, không sửa).
+    const wantsCancel = Boolean(reply.order?.cancelOrderId) && typeof cancelOrder === 'function';
+    const outcome = settings.responseMode === 'automatic' && settings.autoOrder !== false && reply.order && (wantsCancel || wantsUpdate || createOrder) && !isComment
+      ? (wantsCancel
+        ? await cancelOrder(conversation, reply.order.cancelOrderId)
+        : wantsUpdate
+          ? await updateOrder(conversation, reply.order.updateOrderId, reply.order)
+          : await createOrder(conversation, reply.order, { sourceMessageId: String(change.message.mid || change.message.id || '') }))
       : null;
-    const order = outcome?.order || null;
-    const alreadyHandled = Boolean(outcome) && outcome.created === false && !outcome.updated;
+    // Đơn vừa hủy không phải "đơn mới" cho nhãn/phiếu.
+    const order = outcome?.cancelled ? null : outcome?.order || null;
+    const alreadyHandled = Boolean(outcome) && outcome.created === false && !outcome.updated && !outcome.cancelled;
     let privateError = '';
     let privateSkipped = false;
     if (settings.responseMode === 'automatic' && isComment) {

@@ -280,6 +280,25 @@ export async function updatePosOrder(order, { conversation = {}, config = posCon
   }
 }
 
+/** Hủy đơn trên POS (status 6 = đã hủy) khi khách hủy trong CRM/bot. Trả về mã đơn hoặc ném lỗi. */
+export async function cancelPosOrder(order, { config = posConfig(), fetchImpl = fetch } = {}) {
+  if (!posOrderPushEnabled(config)) throw new Error('Chưa kết nối Pancake POS.');
+  if (!order.pos?.id) throw new Error('Đơn chưa có trên POS.');
+  const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(order.pos.id)}`);
+  url.searchParams.set('api_key', config.apiKey);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetchImpl(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ status: 6, note: `Đơn CRM #${order.id} · khách hủy` }), signal: controller.signal });
+    let body = {};
+    try { body = await response.json(); } catch {}
+    if (!response.ok || body?.success === false) throw new Error(`Pancake POS không nhận hủy đơn (${response.status}): ${body?.message || body?.error || 'không rõ lý do'}`);
+    return { id: String(order.pos.id) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Đẩy một đơn trong hội thoại sang POS rồi ghi kết quả lên đơn (`order.pos`):
  * { id, systemId, at } khi được, { error, at } khi lỗi (nhân viên bấm đẩy lại

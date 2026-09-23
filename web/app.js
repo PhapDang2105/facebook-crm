@@ -2327,6 +2327,17 @@ orderDayTabs.forEach(tab => {
   tab.onclick = () => { setActiveOrderDay(tab.dataset.orderDay); renderOrderData(); };
 });
 
+// Thanh công cụ Nhập dữ liệu dính khi cuộn: đo chiều cao thật (có thể xuống
+// dòng ở màn hẹp) để hàng tiêu đề bảng dính ngay dưới nó, không chui xuống dưới.
+(() => {
+  const controls = document.querySelector('.order-import-controls');
+  const stage = controls?.closest('.order-stage');
+  if (!controls || !stage || typeof ResizeObserver === 'undefined') return;
+  const apply = () => stage.style.setProperty('--import-toolbar-height', `${controls.offsetHeight}px`);
+  new ResizeObserver(apply).observe(controls);
+  apply();
+})();
+
 // Export ở Nhập dữ liệu: tải đúng bảng đang hiển thị (sau lọc ngày/nguồn/tìm
 // kiếm) thành XLSX thuần; không phải xuất kho nên không đụng lịch sử xuất.
 let importTableEntries = [];

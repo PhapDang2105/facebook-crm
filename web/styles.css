@@ -486,7 +486,11 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customers-table td.customer-time { color: #4b4f56; white-space: nowrap; }
 .customers-table td.customer-money { text-align: right; white-space: nowrap; }
 .order-stage[data-order-panel="import"] .data-preview { margin-top: 14.4px; }
-.order-import-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10.8px; max-width: 1400px; }
+/* Thanh tìm kiếm/lọc/Import/Export của Nhập dữ liệu dính theo khi cuộn, nằm ngay
+   dưới thanh trên cùng (57.6px); hàng tiêu đề bảng dính ngay dưới thanh này
+   (chiều cao đo bằng JS vào --import-toolbar-height vì có thể xuống dòng). */
+.order-import-controls { position: sticky; top: 57.6px; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 10.8px; margin: -21.6px -21.6px 0; padding: 12px 21.6px; background: #fff; }
+.order-stage[data-order-panel="import"] .data-preview th { top: calc(57.6px + var(--import-toolbar-height, 61.8px)); }
 .order-import-controls .order-search-control { flex: 1 1 252px; max-width: 468px; }
 .order-import-controls .order-filter-control { flex: 0 0 auto; min-width: 130px; }
 .order-import-controls .order-filter-control.hidden { display: none; }

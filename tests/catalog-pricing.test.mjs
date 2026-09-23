@@ -28,7 +28,7 @@ test('giá lẻ + ship cho 1 sản phẩm, giá combo và miễn ship từ 2 —
     [[['GRA-XANH-Z450', 1], ['GRA-NAU-Z350', 2]], 437000, gift3],
     [[['GRA-XANH-Z450', 1], ['GRA-VANG-H350', 1], ['GRA-NAU-Z350', 1]], 442000, gift3],
     [[['CB10-MIX', 1]], 204000, ''], [[['CB10-MIX', 2]], 358000, 'Miễn phí vận chuyển'], [[['CB10-MIX', 3]], 537000, gift3],
-    [[['GRA-TROPICAL-300', 1]], 219000, ''], [[['GRA-TROPICAL-300', 3]], 522000, gift3]
+    [[['GRA-MINT-Z300', 1]], 219000, ''], [[['GRA-MINT-Z300', 3]], 522000, gift3]
   ];
   for (const [items, total, gift] of rows) {
     const priced = basket(...items.map(([sku, quantity]) => ({ sku, quantity })));
@@ -50,7 +50,7 @@ test('chỉ tổ hợp có trong bảng quà mới được tự tính; túi gh�
   assert.equal(combos.length, 7 * 3 + 19);
   assert.equal(new Set(combos.map(combo => combo.key)).size, combos.length);
   // Quy tắc quà: từ 2 sản phẩm miễn ship; từ 3 thêm bát + muỗng, trừ Nghệ Lành và Hạt An Lành.
-  assert.deepEqual(catalog.giftsForKey('HAL-HU=3').map(gift => gift.name), ['Miễn phí vận chuyển']);
+  assert.deepEqual(catalog.giftsForKey('MIX5-H420=3').map(gift => gift.name), ['Miễn phí vận chuyển']);
   assert.deepEqual(catalog.giftsForKey('GRA-NAU-Z350=1|GRA-XANH-Z450=2').map(gift => gift.name), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa']);
   assert.deepEqual(catalog.giftsForKey('GRA-XANH-Z450=1'), []);
   assert.equal(orderKey([{ product: 'Túi Nâu', quantity: 1 }, { product: 'Túi Xanh', quantity: 2 }]), 'GRA-NAU-Z350=1|GRA-XANH-Z450=2');

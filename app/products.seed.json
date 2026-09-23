@@ -80,7 +80,7 @@
     {
       "id": "seed-cacao-300",
       "name": "Granola Tropical Cacao 300g",
-      "sku": "GRA-TROPICAL-300",
+      "sku": "GRA-MINT-Z300",
       "originalPrice": 204000,
       "salePrice": 204000,
       "comboPrice": 174000,
@@ -99,7 +99,7 @@
     {
       "id": "seed-combo10-xanh",
       "name": "Combo 10 gói Xanh",
-      "sku": "CB10-XANH",
+      "sku": "CB10-XANH-G35",
       "originalPrice": 189000,
       "salePrice": 189000,
       "comboPrice": 179000,
@@ -126,7 +126,7 @@
     {
       "id": "seed-combo10-nau",
       "name": "Combo 10 gói Nâu",
-      "sku": "CB10-NAU",
+      "sku": "CB10-NAU-G35",
       "originalPrice": 189000,
       "salePrice": 189000,
       "comboPrice": 179000,
@@ -145,7 +145,7 @@
     {
       "id": "seed-combo10-cam",
       "name": "Combo 10 gói Cam",
-      "sku": "CB10-CAM",
+      "sku": "CB10-CAM-G30",
       "originalPrice": 189000,
       "salePrice": 189000,
       "comboPrice": 179000,
@@ -190,7 +190,7 @@
     {
       "id": "seed-nghe-lanh",
       "name": "Bột ngũ cốc Nghệ Lành hộp 14 gói",
-      "sku": "NGHE-LANH-H14",
+      "sku": "NGHE-H350",
       "originalPrice": 174000,
       "salePrice": 174000,
       "comboPrice": 149000,
@@ -209,7 +209,7 @@
     {
       "id": "seed-hat-an-lanh",
       "name": "Hạt An Lành dạng hũ",
-      "sku": "HAL-HU",
+      "sku": "MIX5-H420",
       "originalPrice": 269000,
       "salePrice": 269000,
       "comboPrice": 264000,

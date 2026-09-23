@@ -109,7 +109,7 @@ test('resolvePosGeo: khớp tên bỏ dấu và gạch nối; thiếu cấp nào
 
 test('pushOrderToPos: sản phẩm không có mẫu mã trong POS thì báo lỗi rõ, không tạo đơn; POS từ chối thì ném lỗi', async () => {
   const calls = [];
-  await assert.rejects(pushOrderToPos({ ...order, products: [{ name: 'Hạt An Lành', sku: 'HAL-HU', quantity: 1, price: 269000 }] }, { config, fetchImpl: posFetch(calls) }), /POS không có mẫu mã: HAL-HU/);
+  await assert.rejects(pushOrderToPos({ ...order, products: [{ name: 'Hạt An Lành', sku: 'MIX5-H420', quantity: 1, price: 269000 }] }, { config, fetchImpl: posFetch(calls) }), /POS không có mẫu mã: MIX5-H420/);
   assert.ok(!calls.some(call => call.method === 'POST'));
   await assert.rejects(pushOrderToPos(order, { config, fetchImpl: posFetch([], { createStatus: 422, createBody: { success: false, message: 'invalid phone' } }) }), /không nhận đơn \(422\): invalid phone/);
 });

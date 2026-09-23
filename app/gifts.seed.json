@@ -15,8 +15,8 @@
       "active": true,
       "minQuantity": 3,
       "excludedSkus": [
-        "NGHE-LANH-H14",
-        "HAL-HU"
+        "NGHE-H350",
+        "MIX5-H420"
       ],
       "sku": "BGD",
       "weight": 10
@@ -27,8 +27,8 @@
       "active": true,
       "minQuantity": 3,
       "excludedSkus": [
-        "NGHE-LANH-H14",
-        "HAL-HU"
+        "NGHE-H350",
+        "MIX5-H420"
       ],
       "sku": "MUONG",
       "weight": 10

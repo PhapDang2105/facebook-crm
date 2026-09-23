@@ -268,7 +268,19 @@ export async function updatePosOrder(order, { conversation = {}, config = posCon
  * { id, systemId, at } khi được, { error, at } khi lỗi (nhân viên bấm đẩy lại
  * trong thẻ đơn). Đã có `pos.id` thì không đẩy lần hai.
  */
-export async function syncOrderToPos(conversationId, orderId, { config = posConfig(), fetchImpl = fetch, log = console.log } = {}) {
+// Đang đẩy dở một đơn thì lệnh đẩy thứ hai (bot chốt xong và nhân viên bấm
+// "đẩy lại" cùng lúc) dùng chung kết quả, không tạo hai đơn POS cho một đơn CRM.
+const inFlight = new Map();
+
+export function syncOrderToPos(conversationId, orderId, options = {}) {
+  const key = `${conversationId}|${orderId}`;
+  if (inFlight.has(key)) return inFlight.get(key);
+  const pending = syncOrderToPosOnce(conversationId, orderId, options).finally(() => inFlight.delete(key));
+  inFlight.set(key, pending);
+  return pending;
+}
+
+async function syncOrderToPosOnce(conversationId, orderId, { config = posConfig(), fetchImpl = fetch, log = console.log } = {}) {
   if (!posOrderPushEnabled(config)) return null;
   const store = await readMessagingStore();
   const conversation = store.conversations.find(item => item.id === conversationId);

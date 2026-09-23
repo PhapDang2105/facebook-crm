@@ -370,16 +370,27 @@ function findBest(norm, raw, entries, { limit = norm.length, ownPrefixes, neutra
         // Cả đoạn là tên đầy đủ của một đơn vị khác ("xã tả thanh oai" khi đang
         // tìm huyện Thanh Oai, "xã hòa quang nam" khi đang tìm tỉnh Quảng Nam):
         // phần đuôi trùng tên chỉ là trùng hợp.
+        // Đoạn chỉ là "loại hình + tên" của chính mục này ("xã tân thạnh" với
+        // Thị trấn Tân Thạnh) thì khách chỉ ghi sai loại hình, vẫn là ứng viên;
+        // điểm loại hình và dấu sẽ phân định với Xã Tân Thành cùng huyện.
         if (fullKeys) {
           const segmentKey = normalizeLocationKey(segmentAround(region, start, end));
-          if (fullKeys.has(segmentKey) && !entry.aliases.includes(segmentKey)) continue;
+          const ownForm = hasPrefix && segmentKey === `${prefix} ${alias}`;
+          if (fullKeys.has(segmentKey) && !entry.aliases.includes(segmentKey) && !ownForm) continue;
         }
-        const prefixScore = selfPrefixed || (hasPrefix && prefix === entry.prefix) ? 2 : (hasPrefix ? 1 : 0);
         const rawSlice = raw.slice(start, end);
         const expectedRaw = entry.rawByAlias.get(alias) || '';
         const diacritics = expectedRaw && typedWithDiacritics ? (rawKey(rawSlice) === expectedRaw ? 1 : 0) : 0;
-        const score = [prefixScore, end, alias.length, diacritics];
-        const candidate = { entry, start: (hasPrefix || neutral) ? prefixed.start : start, end, score, prefixed: hasPrefix || selfPrefixed };
+        // Có loại hình đứng trước là bằng chứng mạnh nhất; đúng loại hình chỉ
+        // phân định sau cùng, sau cả dấu: "Xã Tân Thạnh" (có dấu) là Thị trấn
+        // Tân Thạnh chứ không phải Xã Tân Thành cùng huyện — khách hay gọi thị
+        // trấn là xã, nhưng không gõ nhầm dấu thành một tên khác.
+        // Độ dài tính cả loại hình đứng trước, để alias tự có tiền tố ("xa tan
+        // thanh") không dài hơn "xã" + alias trần ("tan thanh") của mục khác.
+        const exactType = selfPrefixed || (hasPrefix && prefix === entry.prefix) ? 1 : 0;
+        const candidateStart = (hasPrefix || neutral) ? prefixed.start : start;
+        const score = [selfPrefixed || hasPrefix ? 1 : 0, end, end - candidateStart, diacritics, exactType];
+        const candidate = { entry, start: candidateStart, end, score, prefixed: hasPrefix || selfPrefixed, neutral };
         const order = best ? compareScores(score, best.score) : 1;
         if (order > 0) { best = candidate; ties = []; }
         else if (order === 0 && best.entry !== entry && !ties.some(tie => tie.entry === entry)) ties.push(candidate);
@@ -673,6 +684,19 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
             provinceHit = national;
             districtHit = other;
             district = other.entry;
+          } else if (!findBest(norm, expanded, [...district.wards.values()], wardSearchOptions({ limit: national.start }))) {
+            // "xã Phong Hiền, Huế": thành phố không có phường/xã đó, nhưng khách
+            // ghi rõ loại hình và tên đó chỉ có ở một huyện khác của tỉnh → giao
+            // về huyện ấy. Không ghi loại hình ("Sịa, Huế") thì không suy đoán.
+            const elsewhere = findBest(norm, expanded, others.flatMap(entry => [...entry.wards.values()]), wardSearchOptions({ limit: national.start }));
+            if (elsewhere && !elsewhere.ambiguous && elsewhere.prefixed) {
+              consumed.push(national);
+              provinceHit = national;
+              districtHit = null;
+              district = elsewhere.entry.district;
+              ward = elsewhere.entry;
+              wardHit = elsewhere;
+            }
           }
         }
       }
@@ -692,6 +716,10 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
   const districts = [...province.districts.values()];
   const tailHasText = provinceHit ? /[a-z]/.test(norm.slice(provinceHit.end).replace(COUNTRY_TOKENS, '')) : false;
   const districtLimit = provinceHit && !tailHasText ? provinceHit.start : norm.length;
+  // "Phường 2, TP Trà Vinh": "TP Trà Vinh" vừa được đọc là tỉnh, vừa là Thành
+  // phố Trà Vinh của chính tỉnh đó. Không thấy quận nào khác thì thành phố cùng
+  // tên là quận, thay vì hỏi lại khách hay để mơ hồ giữa các phường trùng số.
+  const sameNameCity = provinceHit?.neutral ? districts.find(entry => entry.bare === province.bare && entry.prefix === 'thanh pho') || null : null;
   if (!district) {
     const districtOptions = { limit: districtLimit, ownPrefixes: DISTRICT_PREFIXES, foreignPrefixes: WARD_PREFIXES, fullKeys };
     districtHit = findBest(norm, expanded, districts, districtOptions);
@@ -752,9 +780,15 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
       const owners = new Set((hit.ambiguous || [hit.entry]).map(entry => entry.district));
       if (owners.size === 1 && !hit.ambiguous) { wardHit = hit; ward = hit.entry; district = ward.district; }
       else if (owners.size === 1) { district = [...owners][0]; markAmbiguous('ward', hit); }
+      else if (sameNameCity && owners.has(sameNameCity)) {
+        district = sameNameCity;
+        ward = hit.ambiguous.find(entry => entry.district === sameNameCity);
+        wardHit = { ...hit, entry: ward, ambiguous: undefined };
+      }
       else markAmbiguous('district', { ambiguous: [...owners] });
     }
   }
+  if (!district && !result.ambiguous && sameNameCity) district = sameNameCity;
   // 4b. Tỉnh mới sau sáp nhập ("Phường Tân Đông Hiệp, Hồ Chí Minh"): quận hay
   // phường không có trong tỉnh ghi trên địa chỉ nhưng có ở đúng một tỉnh cũ đã
   // nhập vào → chuyển sang tỉnh cũ, đúng tên ba cấp mà kho đang dùng.

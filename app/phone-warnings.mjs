@@ -217,13 +217,16 @@ export async function fetchPosPhoneReport(phone, { config = posConfig(), fetchIm
       posRequest('/orders', { search: key, page_size: 100, extra_fields: ['return_rate'] }, config, fetchImpl),
       posRequest('/customers', { search: key, page_size: 5 }, config, fetchImpl)
     ]);
-    const rows = (Array.isArray(orders?.data) ? orders.data : [])
+    const matching = (Array.isArray(orders?.data) ? orders.data : [])
       .filter(order => [order.bill_phone_number, order.shipping_address?.phone_number].some(value => normalizeWarningPhone(value) === key));
+    // Form landing bỏ dở (Webcake đẩy sang POS với is_abandoned_order) chưa bao
+    // giờ được giao: bị huỷ dọn dẹp cũng không phải bom hàng, không tính vào đơn.
+    const rows = matching.filter(order => !order.is_abandoned_order);
     const failed = rows.filter(order => FAILED_STATUSES.has(Number(order.status)) || order.partner?.first_undeliverable_at).length;
     const success = rows.filter(order => SUCCESS_STATUSES.has(Number(order.status))).length;
     // Báo cáo theo số điện thoại mà POS đính kèm đơn: order_fail/order_success/warning.
     let report = null;
-    for (const order of rows) {
+    for (const order of matching) {
       const entry = order.reports_by_phone && Object.entries(order.reports_by_phone).find(([reportPhone]) => normalizeWarningPhone(reportPhone) === key);
       if (entry) { report = entry[1]; break; }
     }

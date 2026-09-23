@@ -355,8 +355,13 @@ export function normalizeLandingPayload(payload = {}) {
   // "1 Túi Dùng Thử"...) là dữ liệu sản phẩm, không phải lời nhắn.
   const note = [...pickAll(fields, 'note').map(field => field.value), coupon ? `Mã giảm giá: ${coupon}` : ''].filter(Boolean).join(' · ');
   // Không có mã đơn thì SĐT + thời điểm gửi form là khóa chống trùng khi Webcake gọi lại.
-  const insertedAt = pick(fields, 'insertedAt');
-  const externalId = pick(fields, 'id') || (insertedAt && phone ? `${phone}@${insertedAt}` : '');
+  // Mã đơn và thời điểm gửi chỉ lấy ở cấp gốc: "id"/"created_at" nằm trong một
+  // dòng sản phẩm (variations[0].id) là mã mẫu mã, giống nhau ở mọi đơn cùng
+  // sản phẩm — lấy làm mã form thì đơn của khách sau bị gộp vào đơn khách trước.
+  const insideLineItem = field => /(^|\.)(products?|items?|line ?items?|cart|san pham|order ?items?|variations?)(\.\d+)?\.[^.]+$/.test(field.path.split('.').map(keyOf).join('.'));
+  const topLevel = fields.filter(field => !insideLineItem(field));
+  const insertedAt = pick(topLevel, 'insertedAt');
+  const externalId = pick(topLevel, 'id') || (insertedAt && phone ? `${phone}@${insertedAt}` : '');
   const utm = { ...(locationIsUrl ? utmFromUrl(location) : {}) };
   for (const field of pickAll(fields, 'campaign')) if (!/^(url|link|page ?url|location)$/.test(field.key)) utm[field.path.split('.').at(-1)] = field.value;
   const pageUrl = locationIsUrl ? location.split('?')[0] : (pickAll(fields, 'campaign').find(field => /^(url|link|page ?url)$/.test(field.key))?.value || '');
@@ -369,7 +374,6 @@ export function normalizeLandingPayload(payload = {}) {
   const formStatus = pick(fields, 'formStatus');
   const incomplete = INCOMPLETE_STATUS.test(keyOf(formStatus));
   const recognized = Object.keys(FIELD_PATTERNS);
-  const insideLineItem = field => /(^|\.)(products?|items?|line ?items?|cart|san pham|order ?items?|variations?)(\.\d+)?\.[^.]+$/.test(field.path.split('.').map(keyOf).join('.'));
   const unknown = fields
     .filter(field => field.value && !recognized.some(kind => FIELD_PATTERNS[kind].some(pattern => pattern.test(field.key))))
     .filter(field => !/^(\d+|name|title|label)$/.test(field.key) && !insideLineItem(field))

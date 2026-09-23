@@ -91,7 +91,11 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
   const summary = { checked: 0, landing: 0, created: 0, updated: 0, skipped: 0, rejected: 0, errors: [] };
   if (!posConfigured(config)) return { ...summary, disabled: true };
   const store = await readLandingStore();
-  const knownPosIds = new Set(store.orders.flatMap(order => [order.landing?.posId, ...(order.landing?.posIds || [])]).filter(Boolean).map(String));
+  // Đơn CRM đang giữ mỗi mã POS (mã chính và các mã đã gộp).
+  const knownByPosId = new Map();
+  for (const order of store.orders) {
+    for (const posId of [order.landing?.posId, ...(order.landing?.posIds || [])].filter(Boolean)) knownByPosId.set(String(posId), order);
+  }
   const start = Math.floor((Date.now() - sinceHours * 60 * 60 * 1000) / 1000);
   const end = Math.floor(Date.now() / 1000) + 60;
   const fetched = [];
@@ -112,7 +116,11 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
     summary.checked += 1;
     if (!isLandingPosOrder(order)) continue;
     summary.landing += 1;
-    if (knownPosIds.has(String(order.id))) { summary.skipped += 1; continue; }
+    // Đã kéo về rồi thì bỏ qua — trừ khi đơn CRM còn là bản bỏ dở mà POS nay đã
+    // hoàn tất (khách gửi xong, Webcake cập nhật chính đơn POS đó): xử lý lại để
+    // bản hoàn tất đè lên bản dở, như webhook làm với cùng một form.
+    const known = knownByPosId.get(String(order.id));
+    if (known && (known.landing?.incomplete !== true || order.is_abandoned_order)) { summary.skipped += 1; continue; }
     const payload = posOrderToPayload(order);
     const result = await recordLandingOrder(payload, { page: payload.location.split('?')[0], posId: order.id });
     if (result.error) summary.rejected += 1;

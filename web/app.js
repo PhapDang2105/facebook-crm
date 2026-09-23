@@ -1792,6 +1792,16 @@ function toggleOrderPhoneFilter(rowIndex) {
   if (!phone) return;
   const active = normalizeRowPhone(orderSearch.value) === phone && orderSearch.value.trim() !== '';
   orderSearch.value = active ? '' : phone;
+  // Xem đơn trùng là xem mọi ngày (đơn trùng thường ở ngày khác): tạm bỏ lọc
+  // ngày khi bật, trả lại ngày đang chọn khi tắt.
+  if (orderDayFilter) {
+    if (!active) {
+      if (orderDayFilter.value !== 'all') { orderDayFilter.dataset.beforePhoneFilter = orderDayFilter.value; orderDayFilter.value = 'all'; }
+    } else if (orderDayFilter.dataset.beforePhoneFilter) {
+      orderDayFilter.value = orderDayFilter.dataset.beforePhoneFilter;
+      delete orderDayFilter.dataset.beforePhoneFilter;
+    }
+  }
   renderOrderData();
 }
 

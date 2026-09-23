@@ -6966,7 +6966,9 @@ const orderStatusesKey = 'crm-orders-status';
 const reviewedOrdersKey = 'crm-orders-reviewed';
 const orderStatuses = [
   { value: '', label: 'Chưa xử lý' },
-  { value: 'calling', label: 'Đang gọi' },
+  { value: 'call1', label: 'Gọi lần 1' },
+  { value: 'call2', label: 'Gọi lần 2' },
+  { value: 'call3', label: 'Gọi lần 3' },
   { value: 'callback', label: 'Hẹn gọi lại' },
   { value: 'transfer', label: 'Chờ chuyển khoản' },
   { value: 'hold', label: 'Giữ đơn' },
@@ -7006,6 +7008,8 @@ function readOrderStatuses() {
     }
     if (Array.isArray(legacy)) localStorage.removeItem(reviewedOrdersKey);
   } catch {}
+  // "Đang gọi" cũ đọc thành "Gọi lần 1".
+  for (const key of Object.keys(statuses)) if (statuses[key] === 'calling') statuses[key] = 'call1';
   return statuses;
 }
 function writeOrderStatuses(statuses) {
@@ -7023,7 +7027,7 @@ function seedOrderStatusesFromServer(orders) {
   let changed = false;
   for (const order of orders) {
     const key = `id:${systemOrderRowId(order)}`;
-    const value = String(order.processingStatus || '');
+    const value = String(order.processingStatus || '') === 'calling' ? 'call1' : String(order.processingStatus || '');
     if ((statuses[key] || '') === value) continue;
     if (value) statuses[key] = value; else delete statuses[key];
     changed = true;

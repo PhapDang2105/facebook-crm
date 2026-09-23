@@ -582,6 +582,19 @@ function renderProductPhotos(value, templates) {
  */
 function renderDiscountPolicy(value, templates) {
   const named = matchProduct(value.Product_N1 || value.product || '');
+  // Chưa nêu loại: chỉ 3 túi chủ lực (sản phẩm ghép combo được: Xanh, Vàng, Nâu),
+  // mỗi túi MỘT dòng gọn "2 túi … · 3 túi …" — không liệt kê combo của mọi sản
+  // phẩm trong danh mục (tin dài cả màn hình, khách khó đọc).
+  if (!named) {
+    const main = getCatalogProducts().filter(product => product.active && product.mixable && product.comboPrice > 0);
+    const lines = main.map(product => {
+      const tiers = (quoteTiers(product.sku)?.tiers || []).filter(tier => tier.quantity >= 2 && tier.quantity <= 3);
+      if (!tiers.length) return null;
+      const price = tiers.map(tier => `${tier.quantity} ${String(product.unit || 'túi').toLowerCase()} ${formatMoney(tier.price)}${tier.gifts.length ? ` (tặng ${tier.gifts.join(' + ')})` : ''}`).join(' · ');
+      return { label: product.name, price, list_price: '', free_ship: tiers.every(tier => tier.freeShipping) ? 'miễn phí vận chuyển' : '', gift: '' };
+    }).filter(Boolean);
+    if (lines.length) return fill(templates.DISCOUNT_POLICY, commonValues(), { combos: lines });
+  }
   const products = (named ? [named] : getCatalogProducts()).filter(product => product.active && product.comboPrice > 0);
   const combos = products.flatMap(product => (quoteTiers(product.sku)?.tiers || [])
     .filter(tier => tier.quantity >= 2 && (tier.price < tier.listPrice || tier.freeShipping || tier.gifts.length))

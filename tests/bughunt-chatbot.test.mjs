@@ -295,3 +295,11 @@ test('vòng 2: #10900 không đăng "ib cho Page"; bình luận hủy/khiếu n�
   assert.equal(log4.length, 1);
   assert.match(log4[0], /thông tin em gửi ngay tin phía trên/);
 });
+
+test('hỏi giảm giá chưa nêu loại: chỉ 3 túi chủ lực, mỗi túi một dòng; không liệt kê Tropical, Combo 10 gói…', () => {
+  const reply = renderChatbotReply({ template_id: 'DISCOUNT_POLICY' }, templates, {});
+  const text = reply.messages.join('\n');
+  assert.equal((text.match(/🔥/g) || []).length, 3);
+  assert.match(text, /Túi Xanh 450g: 2 túi 298\.000đ · 3 túi 447\.000đ/);
+  assert.doesNotMatch(text, /Tropical|Combo 10 gói|Nghệ Lành|An Lành/);
+});

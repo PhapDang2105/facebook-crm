@@ -15,7 +15,16 @@ export function foldVietnamese(value) {
     .toLowerCase();
 }
 
-export const autoLabelEvents = Object.freeze(['order', 'handoff', 'complaint']);
+// order: chốt đơn · handoff: chuyển nhân viên · complaint: khiếu nại · update: khách
+// đổi sản phẩm/số lượng · cancel: khách hủy đơn · warranty: hỏi bảo hành/đổi trả ·
+// livestream: khách đến từ phiên live · wholesale: hỏi sỉ/CTV · bad: số hay bom hàng.
+export const autoLabelEvents = Object.freeze(['order', 'handoff', 'complaint', 'update', 'cancel', 'warranty', 'livestream', 'wholesale', 'bad']);
+
+// Mẫu tin bot chọn khi khách hỏi bảo hành/đổi trả hay muốn mua sỉ.
+export const warrantyTemplateIds = Object.freeze(['OIL_SMELL_WARRANTY', 'INSPECTION_RETURN_POLICY']);
+export const wholesaleTemplateIds = Object.freeze(['WHOLESALE_CTV_CONTACT']);
+const warrantyKeywords = 'bảo hành, đổi trả, trả hàng, đổi mới, hàng lỗi, sản phẩm lỗi, bị hỏng, bị hư, hôi dầu, có mùi, mốc, bị ẩm, bị ỉu';
+const wholesaleKeywords = 'mua sỉ, giá sỉ, lấy sỉ, bỏ sỉ, sỉ lẻ, ctv, cộng tác viên, đại lý, nhập hàng, chiết khấu';
 
 // Mẫu tin bot chọn khi đang xử lý một lời phàn nàn: chọn đúng mẫu này nghĩa là
 // khách đang khiếu nại, không cần đợi trùng từ khoá.
@@ -67,12 +76,21 @@ export function isComplaint({ text = '', templateId = '', keywords = defaultComp
 /**
  * Sự kiện gắn thẻ của một lượt trả lời. Trả về mảng rỗng khi không có gì để gắn.
  */
-export function autoLabelEventsFor({ order = null, handoff = false, text = '', templateId = '', keywords } = {}) {
+export function autoLabelEventsFor({ order = null, handoff = false, text = '', templateId = '', keywords, updated = false, cancelled = false, livestream = false, phoneWarningLevel = '' } = {}) {
   const events = [];
   if (handoff) events.push('handoff');
   if (order) events.push('order');
   // Số điện thoại từng bom hàng: thẻ "Cần người xử lý" để nhân viên gọi xác nhận trước khi giao.
   if (order?.phoneWarning && order.phoneWarning.level !== 'watch') events.push('handoff');
   if (isComplaint({ text, templateId, keywords })) events.push('complaint');
-  return events;
+  if (updated) events.push('update');
+  if (cancelled) events.push('cancel');
+  if (livestream) events.push('livestream');
+  const words = toWords(text);
+  if (warrantyTemplateIds.includes(templateId) || parseKeywords(warrantyKeywords).some(keyword => hasWordSequence(words, keyword))) events.push('warranty');
+  if (wholesaleTemplateIds.includes(templateId) || parseKeywords(wholesaleKeywords).some(keyword => hasWordSequence(words, keyword))) events.push('wholesale');
+  // Số bị POS chặn hay bom nhiều: thẻ "Khách xấu" để nhân viên cân nhắc trước khi giao.
+  const level = String(phoneWarningLevel || order?.phoneWarning?.level || '');
+  if (level === 'high' || level === 'block') events.push('bad');
+  return [...new Set(events)];
 }

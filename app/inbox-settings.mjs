@@ -16,14 +16,39 @@ const inboxSettingsPath = process.env.INBOX_SETTINGS_PATH
 // shows unread and first-contact.
 export const defaultConversationLabels = Object.freeze([
   { id: 'consulting', name: 'Cần người xử lý', color: '#8f7ad0', icon: 'person-raising-hand', auto: 'handoff' },
-  { id: 'warranty', name: 'Bảo hành', color: '#d9866f', icon: 'hammer-and-wrench', auto: '' },
+  { id: 'warranty', name: 'Bảo hành', color: '#d9866f', icon: 'hammer-and-wrench', auto: 'warranty' },
   { id: 'complaint', name: 'Khiếu nại', color: '#c85f5b', icon: 'warning', auto: 'complaint' },
   { id: 'customer', name: 'Đã mua hàng', color: '#5fa871', icon: 'shopping-bags', auto: 'order' },
-  { id: 'livestream', name: 'Livestream', color: '#c26a9a', icon: 'video-camera', auto: '' },
-  { id: 'wholesale', name: 'Khách sỉ', color: '#c79a2c', icon: 'package', auto: '' },
-  { id: 'bad', name: 'Khách xấu', color: '#6b7280', icon: 'prohibited', auto: '' },
+  { id: 'exchange', name: 'Đổi sản phẩm', color: '#3b82f6', icon: 'handshake', auto: 'update' },
+  { id: 'cancelled', name: 'Hủy đơn', color: '#9ca3af', icon: 'no-entry', auto: 'cancel' },
+  { id: 'livestream', name: 'Livestream', color: '#c26a9a', icon: 'video-camera', auto: 'livestream' },
+  { id: 'wholesale', name: 'Khách sỉ', color: '#c79a2c', icon: 'package', auto: 'wholesale' },
+  { id: 'bad', name: 'Khách xấu', color: '#6b7280', icon: 'prohibited', auto: 'bad' },
   { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck', auto: '' }
 ]);
+
+/**
+ * Thẻ mặc định mới (Đổi sản phẩm, Hủy đơn) và sự kiện tự động mới (bảo hành,
+ * live, sỉ, khách xấu) được bổ sung vào bộ thẻ nhân viên đang dùng: thẻ chưa có
+ * thì thêm vào cuối, thẻ có sẵn mà chưa gắn sự kiện nào thì gắn sự kiện mặc
+ * định (không đè lựa chọn nhân viên đã đặt).
+ */
+export function mergeDefaultLabels(labels) {
+  const list = (Array.isArray(labels) ? labels : []).map(label => ({ ...label }));
+  const usedEvents = new Set(list.map(label => label.auto).filter(Boolean));
+  for (const preset of defaultConversationLabels) {
+    const existing = list.find(label => label.id === preset.id);
+    if (!existing) {
+      if (preset.auto && usedEvents.has(preset.auto)) continue;
+      list.push({ ...preset });
+      if (preset.auto) usedEvents.add(preset.auto);
+    } else if (!existing.auto && preset.auto && !usedEvents.has(preset.auto)) {
+      existing.auto = preset.auto;
+      usedEvents.add(preset.auto);
+    }
+  }
+  return list;
+}
 
 export const defaultInboxSettings = Object.freeze({
   labels: defaultConversationLabels,
@@ -113,7 +138,7 @@ export async function normalizeQuickReplies(value, storeImage = async () => '') 
 export async function normalizeInboxSettings(value = {}, storeImage) {
   const labels = normalizeConversationLabels(value.labels);
   return {
-    labels: labels.length ? labels : [...defaultConversationLabels],
+    labels: labels.length ? mergeDefaultLabels(labels) : [...defaultConversationLabels],
     quickReplies: await normalizeQuickReplies(value.quickReplies, storeImage),
     updatedAt: Number(value.updatedAt) || Date.now()
   };

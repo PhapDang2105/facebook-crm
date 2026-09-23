@@ -404,7 +404,13 @@ const labelAutoChoices = [
   { value: '', label: 'Không tự động' },
   { value: 'order', label: 'Khi chốt đơn' },
   { value: 'handoff', label: 'Khi chuyển nhân viên' },
-  { value: 'complaint', label: 'Khi khách khiếu nại' }
+  { value: 'complaint', label: 'Khi khách khiếu nại' },
+  { value: 'update', label: 'Khi khách đổi sản phẩm/số lượng' },
+  { value: 'cancel', label: 'Khi khách hủy đơn' },
+  { value: 'warranty', label: 'Khi hỏi bảo hành/đổi trả' },
+  { value: 'livestream', label: 'Khi khách đến từ phiên live' },
+  { value: 'wholesale', label: 'Khi hỏi mua sỉ/CTV' },
+  { value: 'bad', label: 'Khi số hay bom hàng (POS chặn/bom nhiều)' }
 ];
 let quickReplyDraft = null;
 let quickReplyPickerMatches = [];

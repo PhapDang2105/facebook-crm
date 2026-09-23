@@ -17,7 +17,7 @@ test('thẻ mặc định là bộ thẻ của Pancake, giữ id customer/consul
   assert.ok(ids.includes('customer') && ids.includes('consulting'));
   assert.ok(!ids.includes('new'));
   assert.equal(defaultConversationLabels.find(label => label.id === 'customer').name, 'Đã mua hàng');
-  assert.equal(defaultConversationLabels.length, 8);
+  assert.equal(defaultConversationLabels.length, 10, "8 thẻ Pancake + Đổi sản phẩm + Hủy đơn");
 });
 
 test('tên thẻ tiếng Việt thành id ổn định, trùng tên thì tự thêm hậu tố', () => {
@@ -55,7 +55,7 @@ test('mẫu trả lời nhanh: ký tự tắt không dấu cách, ảnh tải l�
 
 test('xóa hết thẻ thì quay về bộ mặc định', async () => {
   const settings = await normalizeInboxSettings({ labels: [], quickReplies: null });
-  assert.equal(settings.labels.length, 8);
+  assert.equal(settings.labels.length, 10);
   assert.deepEqual(settings.quickReplies, []);
 });
 
@@ -105,4 +105,29 @@ test('nhận diện khiếu nại theo cụm từ, không bắt nhầm câu hỏ
   ]) assert.equal(isComplaint({ text }), false, text);
   assert.equal(isComplaint({ text: 'ok shop', templateId: 'OIL_SMELL_WARRANTY' }), true);
   assert.equal(isComplaint({ text: 'hàng lỗi', keywords: '' }), false);
+});
+
+test('thẻ mặc định mới và sự kiện tự động mới được bổ sung vào bộ thẻ nhân viên đang dùng, không đè lựa chọn cũ', async () => {
+  const { mergeDefaultLabels } = await import('../app/inbox-settings.mjs');
+  const { autoLabelEventsFor } = await import('../app/processing/auto-label.mjs');
+  const merged = mergeDefaultLabels([
+    { id: 'consulting', name: 'Cần người xử lý', color: '#8f7ad0', icon: 'person-raising-hand', auto: 'handoff' },
+    { id: 'warranty', name: 'Bảo hành', color: '#d9866f', icon: 'hammer-and-wrench', auto: '' },
+    { id: 'customer', name: 'Đã mua hàng', color: '#5fa871', icon: 'shopping-bags', auto: 'order' },
+    { id: 'vip', name: 'VIP', color: '#c79a2c', icon: 'crown', auto: 'livestream' }
+  ]);
+  const byId = Object.fromEntries(merged.map(label => [label.id, label]));
+  assert.equal(byId.exchange?.auto, 'update', 'thẻ Đổi sản phẩm thêm mới');
+  assert.equal(byId.cancelled?.auto, 'cancel', 'thẻ Hủy đơn thêm mới');
+  assert.equal(byId.warranty.auto, 'warranty', 'thẻ Bảo hành có sẵn được gắn sự kiện');
+  assert.equal(byId.vip.auto, 'livestream', 'nhân viên đã gắn livestream cho VIP thì giữ');
+  assert.equal(byId.livestream, undefined, 'không thêm thẻ Livestream mặc định vì sự kiện đã có thẻ khác');
+  // Sự kiện phát ra từ ngữ cảnh.
+  assert.deepEqual(autoLabelEventsFor({ updated: true, livestream: true }), ['update', 'livestream']);
+  assert.deepEqual(autoLabelEventsFor({ cancelled: true }), ['cancel']);
+  assert.deepEqual(autoLabelEventsFor({ text: 'Bên mình có bảo hành không, túi bị mốc' }), ['complaint', 'warranty']);
+  assert.deepEqual(autoLabelEventsFor({ text: 'Em muốn lấy sỉ về bán' }), ['wholesale']);
+  assert.deepEqual(autoLabelEventsFor({ templateId: 'WHOLESALE_CTV_CONTACT' }), ['wholesale']);
+  assert.deepEqual(autoLabelEventsFor({ order: { id: 'x', phoneWarning: { level: 'high' } } }), ['order', 'handoff', 'bad']);
+  assert.deepEqual(autoLabelEventsFor({ order: { id: 'x', phoneWarning: { level: 'watch' } } }), ['order']);
 });

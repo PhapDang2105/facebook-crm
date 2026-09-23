@@ -669,7 +669,12 @@ async function answerChange(change, settings, results, dependencies) {
       handoff: reply.handoff || Boolean(reply.attention),
       text: message.text,
       templateId: reply.templateId,
-      keywords: settings.complaintKeywords
+      keywords: settings.complaintKeywords,
+      // Khách đổi/hủy đơn, đến từ phiên live, số hay bom hàng: thẻ tương ứng.
+      updated: Boolean(outcome?.updated),
+      cancelled: Boolean(outcome?.cancelled),
+      livestream: isLivestreamPost(conversation),
+      phoneWarningLevel: outcome?.order?.phoneWarning?.level || ''
     });
     await saveBotState(conversation.id, {
       botConversationId: reply.conversationId || conversation.botConversationId || '',

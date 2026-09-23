@@ -7608,9 +7608,10 @@ function renderOrderData() {
       return;
     }
   }
+  // Không còn tab "Giữ đơn": đơn giữ quá 7 ngày (không tự xóa) nằm ở tab cuối cùng.
   const processRows = sortOrderEntriesByTime(activeOrderDay === 'hold'
     ? processingRows.filter(entry => orderStatusOf(entry.row, orderData, orderStatusMap) === 'hold')
-    : processingRows.filter(entry => dayOfRow.get(entry.index) === activeOrderDay));
+    : processingRows.filter(entry => Math.min(dayOfRow.get(entry.index), orderDayLastBucket) === activeOrderDay));
   renderOrderTable(
     document.querySelector('#order-preview'), headers, searchValue ? processRows.filter(entry => normalizeColumnName(entry.row.join(' ')).includes(searchValue)) : processRows,
     processingRows.length ? orderDayEmptyMessage(activeOrderDay) : 'Không có đơn hàng cần xử lý', () => '',

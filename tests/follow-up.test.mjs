@@ -234,3 +234,14 @@ test('khách được bám đuổi chốt đơn trong 14 ngày: thẻ "Bám đu�
   assert.equal(status.wonTotal, 1);
   assert.equal(status.wonAmount, 174000);
 });
+
+test('kết quả trạm gửi: ưu đãi miễn ship lấy theo kịch bản trong cài đặt (tin xếp hàng từ bản cũ không ghi số ngày)', async () => {
+  const write = (await import('node:fs')).writeFileSync;
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: { 'inbox-trial-freeship:110:c': { scenarioId: 'inbox-trial-freeship', conversationId: `${page}:c`, name: 'Cẩm Loan', at: now, repliedAt: now - 30 * HOUR, queued: true, text: 'Dạ chị ơi ưu đãi', pageId: page, psid: 'c' } } }));
+  const fresh = await import(`../app/follow-up.mjs?legacy=${Date.now()}`);
+  const readSettings = async () => normalizeChatbotSettings({ enabled: true, followUps: { enabled: true, scenarios: [{ id: 'inbox-trial-freeship', name: 'Dùng thử', trigger: 'inbox-no-reply', delayHours: 24, templateId: 'FOLLOW_UP_TRIAL_FREESHIP', outsideWindow: true, freeShipDays: 7 }] } });
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'inbox-trial-freeship:110:c', ok: true }], { now, readSettings }), { sent: 1, failed: 0, dropped: 0 });
+  const conversation = (await readMessagingStore()).conversations.find(entry => entry.id === `${page}:c`);
+  assert.equal(conversation.promo.freeShipping, true);
+  assert.equal(conversation.promo.until, now + 7 * 24 * HOUR);
+});

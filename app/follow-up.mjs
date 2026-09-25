@@ -142,7 +142,7 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
   if (!state.activatedAt) await updateFollowUpState(current => { current.activatedAt = now; return null; });
   const activatedAt = state.activatedAt || now;
   // Tin trong hàng chờ mà nhân viên / trạm gửi Pancake đã gửi: xác nhận trước khi xét lượt mới.
-  await reconcileFollowUpQueue(now);
+  await reconcileFollowUpQueue(now, { readSettings });
   const store = await readMessagingStore();
   const maxPerRun = Math.max(1, Number(settings.followUps.maxPerRun) || 15);
   for (const scenario of settings.followUps.scenarios.filter(item => item.enabled)) {
@@ -301,7 +301,8 @@ export async function resolveFollowUpQueueItem(key, action, { readSettings, now 
   if (!item) return false;
   if (action === 'sent') {
     const settings = readSettings ? await readSettings() : null;
-    const scenario = settings?.followUps?.scenarios?.find(entry => entry.id === item.scenarioId) || { id: item.scenarioId, freeShipDays: item.freeShipDays || 0 };
+    const configured = settings?.followUps?.scenarios?.find(entry => entry.id === item.scenarioId);
+    const scenario = { id: item.scenarioId, freeShipDays: configured?.freeShipDays || item.freeShipDays || 0 };
     await markConversationFollowedUp(item.conversationId, scenario, via, now);
   }
   return true;
@@ -312,7 +313,7 @@ export async function resolveFollowUpQueueItem(key, action, { readSettings, now 
  * trong Pancake, hay trạm gửi chưa kịp báo): Pancake đồng bộ tin của Page về
  * CRM, thấy tin gửi đi sau lúc xếp hàng thì xác nhận luôn.
  */
-export async function reconcileFollowUpQueue(now = Date.now()) {
+export async function reconcileFollowUpQueue(now = Date.now(), { readSettings } = {}) {
   const state = await readFollowUpState();
   const queued = Object.entries(state.sent).filter(([, item]) => item.queued);
   if (!queued.length) return 0;
@@ -323,7 +324,7 @@ export async function reconcileFollowUpQueue(now = Date.now()) {
     // Chỉ tính đúng lời bám đuổi (so phần đầu), không tính tin khác nhân viên nhắn.
     const head = compactText(item.text).slice(0, 40);
     const sentAfter = head && outgoingOf(messages).some(message => Number(message.createdAt) > item.at && compactText(message.text).startsWith(head));
-    if (sentAfter && await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake' })) confirmed += 1;
+    if (sentAfter && await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake', readSettings })) confirmed += 1;
   }
   return confirmed;
 }
@@ -333,8 +334,8 @@ export async function reconcileFollowUpQueue(now = Date.now()) {
  * extension Pancake). Mỗi khách hỏi lại Pancake ngay lúc này: khách đã có đơn
  * trên Pancake/POS thì bỏ khỏi hàng; lấy ID Facebook toàn cục mà extension cần.
  */
-export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = Date.now() } = {}) {
-  await reconcileFollowUpQueue(now);
+export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = Date.now(), readSettings } = {}) {
+  await reconcileFollowUpQueue(now, { readSettings });
   const size = Math.max(1, Math.min(maxBatchSize, Math.round(Number(limit) || 30)));
   const queue = (await followUpQueue({ now })).filter(item => !item.leased && !item.noGlobalId);
   const items = [];
@@ -383,13 +384,13 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
  * Kết quả trạm gửi báo về: tin gửi được thì xác nhận (thẻ + ưu đãi); lỗi thì trả
  * lại hàng chờ, lỗi quá 2 lần thì thôi (ghi lỗi để nhân viên xem).
  */
-export async function recordFollowUpBatchResults(results = [], { now = Date.now() } = {}) {
+export async function recordFollowUpBatchResults(results = [], { now = Date.now(), readSettings } = {}) {
   const summary = { sent: 0, failed: 0, dropped: 0 };
   for (const result of Array.isArray(results) ? results : []) {
     const key = String(result?.key || '');
     if (!key) continue;
     if (result.ok) {
-      if (await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake-relay' })) summary.sent += 1;
+      if (await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake-relay', readSettings })) summary.sent += 1;
       continue;
     }
     const error = String(result.error || 'không rõ lỗi').slice(0, 200);

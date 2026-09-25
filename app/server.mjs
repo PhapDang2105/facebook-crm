@@ -1066,12 +1066,12 @@ const server = http.createServer(async (request, response) => {
     // và kết quả dấu trang "Gửi bám đuổi" báo về sau khi extension Pancake gửi xong.
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch') {
       const payload = await readBody(request);
-      const batch = await buildFollowUpBatch({ limit: payload.limit, conversationInfo: (pageId, conversationId) => fetchPancakeConversationInfo(pageId, conversationId) });
+      const batch = await buildFollowUpBatch({ limit: payload.limit, readSettings: readChatbotSettings, conversationInfo: (pageId, conversationId) => fetchPancakeConversationInfo(pageId, conversationId) });
       return sendJson(response, 200, batch);
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch-results') {
       const payload = await readBody(request);
-      const summary = await recordFollowUpBatchResults(payload.results);
+      const summary = await recordFollowUpBatchResults(payload.results, { readSettings: readChatbotSettings });
       console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped})`);
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }

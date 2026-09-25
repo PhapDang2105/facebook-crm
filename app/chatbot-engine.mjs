@@ -10,6 +10,7 @@ import { findProductBySku, getCatalogProducts, matchProduct } from './processing
 import { isLivestreamConversation } from './conversation-orders.mjs';
 import { ruleIntent } from './processing/rule-intent.mjs';
 import { activeTrial, filterTrialReply, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
+import { intentSafeTemplates, predictIntent } from './processing/intent-model.mjs';
 
 // Giỏ Facebook Shop (attachment cart_order) mang SKU: một SKU sản phẩm → bảng
 // giá sản phẩm đó; SKU combo của Shop ("CB2-XANH-Z450" = 2 Túi Xanh,
@@ -789,6 +790,15 @@ async function answerChange(change, settings, results, dependencies) {
       ? (ruled.commentRule ? commentRuleReply() : { ...renderChatbotReply(ruled.value, settings.messageTemplates, replyContext), ...(ruled.attention ? { attention: true } : {}) })
       : null;
     // Luật thử nghiệm: chỉ dùng khi settings.experimentalRules = 'on'; còn lại ghi log so với mô hình.
+    // Mô hình ra quyết định (nhỏ, học từ hội thoại shop): đoán mẫu + xác suất trước khi hỏi LLM.
+    // Chế độ 'shadow' (mặc định) chỉ ghi log so với câu trả lời thật ở cuối lượt.
+    const intentMode = settings.intentModel || 'shadow';
+    const intent = intentMode !== 'off' && message.type === 'text' && !asksForHuman && !cartReply && !trialActive
+      ? predictIntent({ text: message.text, source: conversation.source, lastTemplate: conversation.botLastTemplateId || '', lastWasOrderStep: isOrderStep(conversation.botLastTemplateId), hasBasket: Boolean(conversation.pendingOrder?.items?.length), livestream: isLivestreamPost(conversation) })
+      : null;
+    const intentUsable = Boolean(intent) && intentMode === 'on' && intent.confidence >= (Number(settings.intentThreshold) || 0.9) && intentSafeTemplates.has(intent.templateId) && settings.messageTemplates?.[intent.templateId] !== undefined
+      && !phoneInText && conversation.source !== 'comment';
+    const intentReply = intentUsable ? renderChatbotReply({ template_id: intent.templateId, ...(intent.templateId === 'PRICE_QUOTE' && productHint(ruleProduct) ? { Product_N1: ruleProduct } : {}) }, settings.messageTemplates, replyContext) : null;
     const ruleUsable = Boolean(ruled) && !ruled.shadowOnly;
     const ruleShadow = Boolean(ruled) && (ruleMode === 'shadow' || !ruleUsable);
     if (ruled) console.log(`Luật ${ruled.rule}${ruleShadow ? ' (thử)' : ''} → ${ruleReply.templateId} (${conversation.id})`);
@@ -808,7 +818,7 @@ async function answerChange(change, settings, results, dependencies) {
               : await askModel({ trialHint: trialModelHint(trialState) }))
             : nonText
               ? (seesImage ? await askModel() : imageFallback())
-              : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || await askModel();
+              : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || await askModel();
     // Mô hình trả lời khách đang giữ ưu đãi bằng mẫu của luồng chung (bảng giá, combo,
     // mời 2 túi, "từ 2 túi miễn ship"): đổi sang mẫu dùng thử.
     if (trialActive && !trialOutcome.value) {
@@ -1192,6 +1202,8 @@ async function answerChange(change, settings, results, dependencies) {
       // Sửa đơn: không gửi lại phiếu (POS/khách đã có), chỉ tin sửa đơn ở trên.
       if (order && sendReceipt && !outcome?.updated) await sendReceipt(conversation, order);
     }
+    // Mô hình nhỏ so với câu trả lời thật (luật / LLM): đọc log để quyết định bật.
+    if (intent) console.log(`Mô hình nhỏ${intentUsable && reply === intentReply ? '' : ' (thử)'}: ${intent.templateId} (${intent.confidence.toFixed(2)}) / thật ${reply.templateId}${intent.templateId === reply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
     const labelEvents = autoLabelEventsFor({
       order,
       // Ảnh khách gửi: thẻ "Cần người xử lý" để nhân viên xem, bot vẫn bật.

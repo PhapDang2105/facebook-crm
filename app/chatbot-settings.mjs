@@ -137,6 +137,10 @@ export function normalizeChatbotSettings(value = {}) {
     ruleIntent: ['on', 'shadow', 'off'].includes(value.ruleIntent) ? value.ruleIntent : 'on',
     // Luật thử nghiệm (TRIAL_ASK, ORDER_ASK, TERSE_HOW, ADDRESS_COMPLETE): 'shadow' chỉ ghi log so với mô hình.
     experimentalRules: value.experimentalRules === 'on' ? 'on' : 'shadow',
+    // Mô hình ra quyết định trước LLM (processing/intent-model.mjs): 'shadow' chỉ ghi log so với
+    // câu trả lời thật; 'on' đủ tin cậy (≥ intentThreshold) và mẫu an toàn thì trả lời thẳng.
+    intentModel: ['on', 'shadow', 'off'].includes(value.intentModel) ? value.intentModel : 'shadow',
+    intentThreshold: Math.min(0.99, Math.max(0.5, Number(value.intentThreshold) || 0.9)),
     // Các phần rút gọn ngữ cảnh gửi mô hình (mặc định tắt cả; bật từng phần sau khi A/B đạt).
     contextTrim: Object.fromEntries(['memory', 'query', 'catalog', 'templates'].map(key => [key, value.contextTrim?.[key] === true])),
     // Mức suy nghĩ của model ('' = mặc định của model; minimal | low | medium | high).

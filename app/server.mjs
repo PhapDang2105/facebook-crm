@@ -1015,6 +1015,32 @@ const server = http.createServer(async (request, response) => {
         builtInTemplateIds: Object.keys(defaultMessageTemplates())
       });
     }
+    // Nút "Cho phép chatbot hoạt động": không chỉ bật/tắt cài đặt chung mà đặt lại
+    // trạng thái bot của MỌI hội thoại — bật thì mọi hội thoại đang bị tắt riêng
+    // (nhân viên nhắn, POS, chuyển CSKH) được bật lại và xóa lỗi cũ; tắt thì tắt hết.
+    // Giữ nguyên giỏ đang chờ, đơn, thẻ, ghi chú và lịch sử tin nhắn.
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/master-switch') {
+      const payload = await readBody(request);
+      const enabled = payload.enabled === true;
+      const current = await readChatbotSettings();
+      const settings = await writeChatbotSettings({ ...current, enabled, updatedAt: Date.now() });
+      const summary = await updateMessagingStore(store => {
+        let changed = 0;
+        for (const conversation of store.conversations) {
+          const before = `${conversation.botEnabled}|${conversation.botPausedBy || ''}|${conversation.botLastError || ''}|${conversation.botDraft || ''}`;
+          conversation.botEnabled = enabled;
+          delete conversation.botPausedBy;
+          delete conversation.botPausedAt;
+          conversation.botLastError = '';
+          conversation.botLastErrorAt = 0;
+          conversation.botDraft = '';
+          if (before !== `${conversation.botEnabled}||||`) changed += 1;
+        }
+        return { total: store.conversations.length, changed };
+      });
+      console.log(`Chatbot ${enabled ? 'BẬT' : 'TẮT'} cho mọi hội thoại: ${summary.changed}/${summary.total} hội thoại được đặt lại.`);
+      return sendJson(response, 200, { enabled: settings.enabled === true, conversations: summary.total, changed: summary.changed });
+    }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/test') {
       const current = await readChatbotSettings();
       const payload = await readBody(request, 256 * 1024);

@@ -8,6 +8,7 @@ import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { isOrderStep } from './processing/pending-order.mjs';
 import { findProductBySku, getCatalogProducts, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamConversation } from './conversation-orders.mjs';
+import { ruleIntent } from './processing/rule-intent.mjs';
 
 // Giỏ Facebook Shop (attachment cart_order) mang SKU: một SKU sản phẩm → bảng
 // giá sản phẩm đó; SKU combo của Shop ("CB2-XANH-Z450" = 2 Túi Xanh,
@@ -132,12 +133,23 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
     pending.phone ? `Số điện thoại đã có: ${pending.phone}` : '',
     pending.address ? `Địa chỉ đã có: ${pending.address}${pending.addressAsks ? ' (đang hỏi khách bổ sung phần còn thiếu; khách nhắn phần nào thì ghi phần đó vào Customer_Address)' : ''}` : ''
   ].filter(Boolean).join('\n');
+  // Bản gọn (settings.contextTrim.query, mặc định TẮT — A/B 25/09 cho thấy gộp
+  // các khối gọn lại làm mô hình kém ổn định hơn mức lệch tự nhiên): chỉ ghi kênh
+  // khi là bình luận, không gửi tên khách, thêm MẪU VỪA GỬI.
+  const compactQuery = settings?.contextTrim?.query === true;
+  const lastTemplate = compactQuery && conversation.botLastTemplateId && Date.now() - (Number(conversation.botLastReplyAt) || 0) < 24 * 60 * 60 * 1000
+    ? conversation.botLastTemplateId : '';
   return [
-    `KÊNH: ${conversation.source === 'comment' ? 'Bình luận Facebook' : 'Facebook Messenger'}`,
-    `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
-    hint,
-    Array.isArray(conversation.recentComments) && conversation.recentComments.length ? `BÌNH LUẬN GẦN NHẤT CỦA KHÁCH DƯỚI BÀI: ${conversation.recentComments.map(text => `"${text}"`).join(' · ')}` : '',
-    !hint && isLivestreamPost(conversation) ? 'BÀI VIẾT: phiên livestream giới thiệu nhiều sản phẩm (không có sản phẩm cụ thể); khách hỏi giá chung thì GENERAL_INFO, hỏi "hộp"/"gói nhỏ" là hộp 10 gói nhỏ (PACKAGING_INFO).' : '',
+    compactQuery ? (conversation.source === 'comment' ? 'KÊNH: Bình luận Facebook' : '') : `KÊNH: ${conversation.source === 'comment' ? 'Bình luận Facebook' : 'Facebook Messenger'}`,
+    compactQuery ? '' : `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
+    compactQuery ? hint : productHint(product, { legacy: true }),
+    lastTemplate ? `MẪU VỪA GỬI: ${lastTemplate}` : '',
+    Array.isArray(conversation.recentComments) && conversation.recentComments.length
+      ? (compactQuery ? `GIỎ/SĐT KHÁCH GHI Ở BÌNH LUẬN (coi như DỮ LIỆU ĐÃ LƯU): ` : 'BÌNH LUẬN GẦN NHẤT CỦA KHÁCH DƯỚI BÀI: ') + conversation.recentComments.map(text => `"${text}"`).join(' · ')
+      : '',
+    !hint && isLivestreamPost(conversation)
+      ? (compactQuery ? 'BÀI VIẾT: livestream nhiều sản phẩm, không có sản phẩm cụ thể; "hộp"/"gói nhỏ" là hộp 10 gói (PACKAGING_INFO).' : 'BÀI VIẾT: phiên livestream giới thiệu nhiều sản phẩm (không có sản phẩm cụ thể); khách hỏi giá chung thì GENERAL_INFO, hỏi "hộp"/"gói nhỏ" là hộp 10 gói nhỏ (PACKAGING_INFO).')
+      : '',
     remembered ? `DỮ LIỆU ĐÃ LƯU:\n${remembered}` : '',
     includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
     `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`,
@@ -152,23 +164,64 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
  * prompt holds only the rules; products, prices, gifts and template ids are
  * appended from Cài đặt and Thiết lập tin nhắn on every request.
  */
-export function composeSystemPrompt(basePrompt, templates = {}) {
-  return [String(basePrompt || '').trim(), buildCatalogPrompt(), buildTemplatePrompt(templates, basePrompt)].filter(Boolean).join('\n\n');
+export function composeSystemPrompt(basePrompt, templates = {}, contextTrim = {}) {
+  return [
+    String(basePrompt || '').trim(),
+    buildCatalogPrompt({ compact: contextTrim?.catalog === true }),
+    buildTemplatePrompt(templates, basePrompt, { compact: contextTrim?.templates === true })
+  ].filter(Boolean).join('\n\n');
+}
+
+// Tin hệ thống/nhiễu trong lịch sử: không giúp chọn mẫu (17% ký tự lịch sử).
+const memoryNoise = /^(Bạn đang phản hồi bình luận|Dạ em đã (ib|nhắn tin nhờ)|Đã gửi xác nhận đơn hàng|Khách bấm vào quảng cáo|\[Tệp đính kèm\]|.{0,60} đã trả lời một quảng cáo\.?$)/u;
+
+/**
+ * Một lượt của Page, gọn: đầu tin (đang nói về gì: "Bảng giá Túi Xanh…") + câu
+ * hỏi cuối (bot vừa hỏi gì: "…lấy 2 túi không ạ?"). Cắt 160 ký tự đầu như trước
+ * làm mất câu hỏi ở 18% tin dài — khách đáp "ok" mà model không biết ok với gì.
+ */
+export function compressPageTurn(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').replace(/^Dạ,?\s*/u, '').trim();
+  if (clean.length <= 160) return clean;
+  const head = clean.slice(0, 70).replace(/\s+\S*$/, '');
+  const mark = clean.lastIndexOf('?');
+  if (mark < 70) return `${head}…`;
+  const start = Math.max(70, mark - 80, clean.lastIndexOf('. ', mark - 1) + 2, clean.lastIndexOf('! ', mark - 1) + 2);
+  return `${head}… ${clean.slice(start, mark + 1).trim()}`;
 }
 
 function buildMemoryTurns({ recentMessages = [], message, settings }) {
   if (settings?.memoryEnabled === false) return [];
   const limit = Math.max(1, Number(settings?.memoryWindow) || 12);
-  return recentMessages
-    .filter(item => item && item.id !== message?.id && String(item.text || '').trim())
-    .slice(-limit)
-    // Tiết kiệm token: tin của Page (bảng giá, xác nhận đơn dài vài trăm chữ) chỉ
-    // giữ đoạn đầu — model chỉ cần biết đã gửi gì; tin khách giữ tối đa 300 ký tự.
-    .map(item => {
-      const text = String(item.text).replace(/\s+/g, ' ').trim();
-      const limit = item.direction === 'incoming' ? 300 : 160;
-      return { role: item.direction === 'incoming' ? 'user' : 'model', text: text.length > limit ? `${text.slice(0, limit)}…` : text };
-    });
+  // Bản cũ (mặc định): từng tin, tin Page cắt 160 ký tự, tin khách 300. Bản gọn
+  // (settings.contextTrim.memory) chưa bật: A/B 25/09 chưa chứng minh giữ độ chính xác.
+  if (settings?.contextTrim?.memory !== true) {
+    return recentMessages
+      .filter(item => item && item.id !== message?.id && String(item.text || '').trim())
+      .slice(-limit)
+      .map(item => {
+        const text = String(item.text).replace(/\s+/g, ' ').trim();
+        const cut = item.direction === 'incoming' ? 300 : 160;
+        return { role: item.direction === 'incoming' ? 'user' : 'model', text: text.length > cut ? `${text.slice(0, cut)}…` : text };
+      });
+  }
+  // Bỏ tin hệ thống, gộp các tin liền nhau của cùng một bên thành một lượt (bảng
+  // giá + lời mời, xác nhận + chính sách giao/đổi trả), rồi nén lượt của Page;
+  // cửa sổ đếm theo lượt đã gộp. Tin khách giữ tối đa 300 ký tự.
+  const turns = [];
+  for (const item of recentMessages) {
+    const text = String(item?.text || '').replace(/\s+/g, ' ').trim();
+    if (!item || item.id === message?.id || !text || ['ad', 'order-receipt', 'attachment'].includes(item.type) || memoryNoise.test(text)) continue;
+    const role = item.direction === 'incoming' ? 'user' : 'model';
+    const previous = turns.at(-1);
+    if (previous?.role === role) previous.parts.push(text);
+    else turns.push({ role, parts: [text] });
+  }
+  return turns.slice(-limit).map(turn => {
+    const text = turn.parts.join(' ');
+    if (turn.role === 'model') return { role: 'model', text: compressPageTurn(text) };
+    return { role: 'user', text: text.length > 300 ? `${text.slice(0, 300)}…` : text };
+  });
 }
 
 function mergeAnthropicTurns(turns) {
@@ -208,6 +261,16 @@ export async function collectImageParts(message, fetchImpl = fetch) {
   return parts;
 }
 
+/** thinkingConfig theo đời model: Gemini 3 nhận thinkingLevel, 2.5 nhận thinkingBudget (số token). */
+export function thinkingConfigFor(model, level) {
+  const wanted = String(level || '').trim().toLowerCase();
+  if (!['minimal', 'low', 'medium', 'high'].includes(wanted)) return null;
+  if (/gemini-2\.5/i.test(String(model || ''))) {
+    return { thinkingBudget: { minimal: 0, low: 512, medium: 2048, high: 8192 }[wanted] };
+  }
+  return { thinkingLevel: wanted };
+}
+
 function wait(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
@@ -219,7 +282,7 @@ export async function requestDirectModelReply(options) {
   if (!settings.systemPrompt) throw new Error('Chatbot chưa có system prompt.');
   // The catalogue is appended on every request, never baked into the saved
   // prompt: a product added in settings is known to the model on its next reply.
-  const systemPrompt = composeSystemPrompt(settings.systemPrompt, settings.messageTemplates);
+  const systemPrompt = composeSystemPrompt(settings.systemPrompt, settings.messageTemplates, settings.contextTrim);
   const attempts = 1 + Math.max(0, Number(settings.retryCount) || 0);
   const primaryModel = settings.directModel || (vertex ? 'gemini-2.5-flash' : 'deepseek-v4-flash');
   // Model xem trước (gemini-3-flash-preview) dùng hạn mức chia sẻ, giờ cao điểm
@@ -251,7 +314,10 @@ export async function requestDirectModelReply(options) {
           { role: 'user', parts: [...imageParts, { text: query }] }
         ],
         generationConfig: {
-          ...(settings.structuredOutput !== false ? { responseMimeType: 'application/json' } : {})
+          ...(settings.structuredOutput !== false ? { responseMimeType: 'application/json' } : {}),
+          // Mức "suy nghĩ" (token suy nghĩ tính giá như đầu ra, đắt gấp 6 lần đầu vào).
+          // Gemini 3 dùng thinkingLevel; 2.5 dùng thinkingBudget. Để trống = mặc định của model.
+          ...(thinkingConfigFor(model, settings.thinkingLevel) ? { thinkingConfig: thinkingConfigFor(model, settings.thinkingLevel) } : {})
         }
       } : anthropic ? {
         model,
@@ -292,8 +358,14 @@ export async function requestDirectModelReply(options) {
           ? payload?.content?.map(part => part.type === 'text' ? part.text || '' : '').join('').trim()
         : payload?.choices?.[0]?.message?.content;
       if (!answer) throw new Error('Mô hình không trả về nội dung.');
+      // Số token thật mỗi lượt (đầu vào, phần được cache, đầu ra, "suy nghĩ"): để đo
+      // tối ưu prompt bằng số liệu thật thay vì ước lượng. Xem bằng journalctl | grep "Token".
+      const usage = payload?.usageMetadata || null;
+      if (usage && !rawResponse) {
+        console.log(`Token ${model}: vào ${usage.promptTokenCount ?? '?'} (cache ${usage.cachedContentTokenCount ?? 0}) · ra ${usage.candidatesTokenCount ?? '?'} · suy nghĩ ${usage.thoughtsTokenCount ?? 0}`);
+      }
       const parsedAnswer = parseModelAnswer(answer);
-      if (rawResponse) return { raw: answer, parsed: parsedAnswer, conversationId: '' };
+      if (rawResponse) return { raw: answer, parsed: parsedAnswer, usage, conversationId: '' };
       await refineAddressWithAi(parsedAnswer, options.context || {}, settings, fetchImpl);
       return { ...renderChatbotReply(parsedAnswer, settings.messageTemplates, options.context || {}), conversationId: '' };
   };
@@ -648,13 +720,42 @@ async function answerChange(change, settings, results, dependencies) {
       && /\b(hang moi|date moi|han (su dung |dung )?(dai|xa|moi|lau)|moi san xuat|giao (gio hanh chinh|buoi|sang|chieu|toi|cuoi tuan|truoc|sau|nhanh|som)|goi (truoc|dien truoc|cho (minh|em|chi|anh|c|e) truoc)|de (o|tai|cho) (bao ve|le tan|cong|nha ben|hang xom)|gui (som|nhanh|gap)|dong goi (can than|ky)|(ngoai )?gio hanh chinh)\b/.test(folded)
       && !/\?|\b(huy|doi|them|nua|bot|sua|lay|dat|mua|dia chi|sdt|so dien thoai|khong lay|chua nhan|bi loi|bi hu|khi nao|bao gio|duoc khong|dc khong|ko|khong)\b/.test(folded);
     const noteReply = deliveryNote ? renderChatbotReply({ template_id: 'ORDER_NOTE' }, settings.messageTemplates, replyContext) : null;
+    // Luật nhận ý bằng code (processing/rule-intent.mjs): tin ngắn, rõ ý (hỏi giá
+    // cụt, ".", chào, giỏ ghi rõ, SĐT trơn, câu hỏi thông tin ngắn) trả thẳng mẫu,
+    // không gọi mô hình. settings.ruleIntent: 'on' (mặc định) | 'shadow' (chỉ ghi
+    // log so với mô hình) | 'off'.
+    const ruleMode = settings.ruleIntent || 'off';
+    const lastOutgoingAt = Math.max(0, ...recent.filter(item => item?.direction === 'outgoing').map(item => Number(item.createdAt) || 0));
+    const ruleProduct = conversation.source === 'comment' ? '' : resolveConversationProduct({ adTitle: conversation.referral?.adTitle, referralRef: conversation.referral?.ref, postText: conversation.post?.message }).product;
+    const ruled = message.type === 'text' && !asksForHuman && !cartReply && ruleMode !== 'off'
+      ? ruleIntent(message.text, {
+          source: conversation.source,
+          botLastTemplateId: conversation.botLastTemplateId || '',
+          staffRepliedAfterBot: lastOutgoingAt > (Number(conversation.botLastReplyAt) || 0) + 5000,
+          botLastAgeMin: conversation.botLastReplyAt ? (Date.now() - Number(conversation.botLastReplyAt)) / 60000 : Infinity,
+          hasBasket: Boolean(conversation.pendingOrder?.items?.length),
+          lastWasOrderStep: isOrderStep(conversation.botLastTemplateId) || ['ASK_FLAVOR', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET'].includes(conversation.botLastTemplateId),
+          hasRecentOrder: Boolean(recentOrder?.id),
+          orderAgeMin: recentOrder?.id && String(recentOrder.processingStatus || '') !== 'cancelled' ? (Date.now() - (Number(recentOrder.createdAt) || 0)) / 60000 : Infinity,
+          livestream: isLivestreamPost(conversation),
+          contextProduct: productHint(ruleProduct) ? ruleProduct : '',
+          bundleSize: bundle.length,
+          complaint: isComplaint({ text: message.text, keywords: settings.complaintKeywords }),
+          commentBasket
+        })
+      : null;
+    const ruleReply = ruled
+      ? (ruled.commentRule ? commentRuleReply() : { ...renderChatbotReply(ruled.value, settings.messageTemplates, replyContext), ...(ruled.attention ? { attention: true } : {}) })
+      : null;
+    if (ruled) console.log(`Luật ${ruled.rule}${ruleMode === 'shadow' ? ' (thử)' : ''} → ${ruleReply.templateId} (${conversation.id})`);
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : cartReply
         ? (shopOrder ? shopOrderReply(shopOrder) : cartReply)
         : nonText
           ? (seesImage ? await askModel() : imageFallback())
-          : ackReply || noteReply || lookupReply || choiceReply || quickQuote || await askModel();
+          : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' ? ruleReply : null) || await askModel();
+    if (ruled && ruleMode === 'shadow') console.log(`Luật ${ruled.rule} (thử): luật ${ruleReply.templateId} / mô hình ${reply.templateId}${ruleReply.templateId === reply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
     if (seesImage && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
     // "Cảm ơn" mà khách chưa có đơn: ảnh (thường là ảnh sản phẩm, không phải
     // bill) → xử lý như ảnh; "đã đặt rồi" → tra đơn. Không cảm ơn suông rồi thôi.

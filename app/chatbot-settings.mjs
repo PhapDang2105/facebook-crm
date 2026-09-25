@@ -133,6 +133,12 @@ export function normalizeChatbotSettings(value = {}) {
     memoryEnabled: value.memoryEnabled !== false,
     memoryWindow: Math.max(1, Math.min(100, Number(value.memoryWindow) || defaultChatbotSettings.memoryWindow)),
     structuredOutput: value.structuredOutput !== false,
+    // Luật nhận ý bằng code trước mô hình: 'on' | 'shadow' (chỉ ghi log so sánh) | 'off'.
+    ruleIntent: ['on', 'shadow', 'off'].includes(value.ruleIntent) ? value.ruleIntent : 'on',
+    // Các phần rút gọn ngữ cảnh gửi mô hình (mặc định tắt cả; bật từng phần sau khi A/B đạt).
+    contextTrim: Object.fromEntries(['memory', 'query', 'catalog', 'templates'].map(key => [key, value.contextTrim?.[key] === true])),
+    // Mức suy nghĩ của model ('' = mặc định của model; minimal | low | medium | high).
+    thinkingLevel: ['minimal', 'low', 'medium', 'high'].includes(value.thinkingLevel) ? value.thinkingLevel : '',
     retryCount: Math.max(0, Math.min(5, value.retryCount === undefined ? defaultChatbotSettings.retryCount : Number(value.retryCount) || 0)),
     fallbackModel: cleanText(value.fallbackModel ?? defaultChatbotSettings.fallbackModel, '', 200),
     retryIntervalMs: Math.max(100, Math.min(10000, Number(value.retryIntervalMs) || defaultChatbotSettings.retryIntervalMs)),

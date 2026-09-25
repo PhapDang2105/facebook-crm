@@ -43,8 +43,9 @@ export function resolveConversationProduct({ messageText = '', adTitle = '', ref
 }
 
 /** The one-line hint handed to the model. */
-export function productHint(product) {
+export function productHint(product, { legacy = false } = {}) {
   const name = String(product || '').trim();
   if (!name || name === unknownProduct) return '';
-  return `Hệ thống chú ý khách hàng đang tương tác với ${name}`;
+  // Bản cũ khớp chữ "đang tương tác với…" trong prompt đang chạy; bản gọn khớp "Khách đang xem".
+  return legacy ? `Hệ thống chú ý khách hàng đang tương tác với ${name}` : `Khách đang xem: ${name}`;
 }

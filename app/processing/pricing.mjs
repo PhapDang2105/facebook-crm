@@ -1,4 +1,4 @@
-import { comboKey, findProductBySku, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity } from './catalog.mjs';
+import { comboKey, findProductBySku, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity, normalizeText } from './catalog.mjs';
 
 // The rule, as the business states it: one unit sells at the single price;
 // from two units — of the same product or mixed with other mixable products —
@@ -95,17 +95,45 @@ export function priceBasket(items = []) {
  * template; every figure is computed and written by the server. Kept this
  * short on purpose, because it is paid for on every single reply.
  */
-export function buildCatalogPrompt() {
+export function buildCatalogPrompt({ compact = false } = {}) {
   const products = getCatalogProducts().filter(product => product.active);
   if (!products.length) return '';
+  // Bản cũ (mặc định): tối đa 6 tên gọi khác, bỏ hashtag, kèm dòng tối đa sản phẩm/đơn.
+  if (!compact) {
+    return [
+      'SẢN PHẨM (tên chuẩn → cách khách gọi):',
+      ...products.map(product => {
+        const aliases = product.aliases.filter(alias => !alias.startsWith('#')).slice(0, 6);
+        return `- ${product.name}${aliases.length ? `: ${aliases.join(', ')}` : ''}`;
+      }),
+      `Tối đa ${maxComboQuantity} sản phẩm/đơn.`
+    ].join('\n');
+  }
+  // Chỉ giữ cách gọi MANG THÊM thông tin so với tên chuẩn ("nguyên bản", "nhiều
+  // hạt", "gói nhỏ"): cách gọi mà mọi chữ đã có trong tên (+ granola/vị/túi) hay
+  // chứa trọn một cách gọi đã giữ thì bỏ; tối đa 4, bỏ hashtag. Không ghi "tối đa
+  // N sản phẩm/đơn": giỏ lớn code tự xử lý (ORDER_CUSTOM_BASKET), dòng này chỉ
+  // khiến mô hình tự bớt số túi khách đặt.
+  const words = value => normalizeText(value).replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
   return [
-    'SẢN PHẨM (tên chuẩn → cách khách gọi):',
-    // Tối đa 6 tên gọi khác, bỏ hashtag: đủ để model khớp, bớt token mỗi lần gọi.
+    'SẢN PHẨM (tên chuẩn: cách gọi khác):',
     ...products.map(product => {
-      const aliases = product.aliases.filter(alias => !alias.startsWith('#')).slice(0, 6);
-      return `- ${product.name}${aliases.length ? `: ${aliases.join(', ')}` : ''}`;
-    }),
-    `Tối đa ${maxComboQuantity} sản phẩm/đơn.`
+      const filler = new Set(['granola', 'vi', 'tui']);
+      const nameWords = new Set([...words(product.name), ...filler]);
+      // So cả dạng viết liền: "ca cao" trong tên "cacao" là cùng một chữ.
+      const compact = value => words(value).filter(word => !filler.has(word)).join('');
+      const nameCompact = words(product.name).join('');
+      const kept = [];
+      for (const alias of product.aliases.filter(item => !String(item).startsWith('#'))) {
+        const aliasWords = words(alias);
+        const aliasCompact = compact(alias);
+        if (!aliasWords.length || !aliasCompact || aliasWords.every(word => nameWords.has(word)) || nameCompact.includes(aliasCompact)) continue;
+        if (kept.some(previous => aliasCompact.includes(compact(previous)) || compact(previous).includes(aliasCompact))) continue;
+        kept.push(alias);
+        if (kept.length >= 4) break;
+      }
+      return `- ${product.name}${kept.length ? `: ${kept.join(', ')}` : ''}`;
+    })
   ].join('\n');
 }
 

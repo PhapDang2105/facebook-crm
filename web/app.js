@@ -9843,17 +9843,29 @@ chatbotSettingsAutoOrder?.addEventListener('change', async () => {
   }
 });
 
+// Công tắc tổng: bật/tắt chatbot cho MỌI hội thoại và đặt lại trạng thái bot của
+// từng hội thoại (hội thoại bị tắt riêng vì nhân viên nhắn, POS, chuyển CSKH đều
+// bật lại; lỗi cũ bị xóa). Giỏ đang chờ, đơn, thẻ, ghi chú giữ nguyên.
 chatbotSettingsEnabled?.addEventListener('change', async () => {
   const desired = chatbotSettingsEnabled.checked;
+  const question = desired
+    ? 'Bật chatbot cho TẤT CẢ hội thoại? Mọi hội thoại đang tắt bot riêng (nhân viên đã nhắn, chuyển CSKH…) sẽ được bật lại và xóa trạng thái cũ. Giỏ hàng, đơn, thẻ, ghi chú giữ nguyên.'
+    : 'Tắt chatbot cho TẤT CẢ hội thoại? Bot sẽ ngừng trả lời mọi khách cho tới khi bật lại.';
+  if (!window.confirm(question)) {
+    chatbotSettingsEnabled.checked = !desired;
+    return;
+  }
   chatbotSettingsEnabled.disabled = true;
   try {
-    const updated = await readApiResponse(await fetch('/api/chatbot/settings', {
-      method: 'PUT',
+    const updated = await readApiResponse(await fetch('/api/chatbot/master-switch', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: desired })
     }));
     chatbotSettingsEnabled.checked = updated.enabled === true;
-    showToast(updated.enabled ? 'Đã bật chatbot hoạt động.' : 'Đã tạm tắt chatbot hoạt động.', 'success');
+    showToast(updated.enabled
+      ? `Đã bật chatbot cho toàn bộ ${updated.conversations} hội thoại (đặt lại ${updated.changed} hội thoại).`
+      : `Đã tắt chatbot cho toàn bộ ${updated.conversations} hội thoại.`, 'success');
   } catch (error) {
     chatbotSettingsEnabled.checked = !desired;
     showToast(error.message || 'Chưa lưu được trạng thái chatbot.', 'error');

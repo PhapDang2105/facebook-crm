@@ -764,7 +764,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG']);
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -773,7 +773,7 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP'
  * model may answer with — nothing about templates has to be typed into the
  * prompt itself.
  */
-export function buildTemplatePrompt(templates = {}, basePrompt = '') {
+export function buildTemplatePrompt(templates = {}, basePrompt = '', { compact = false } = {}) {
   // The opening words of the template, syntax stripped: enough for the model to tell the ids apart.
   // Đoạn đầu có chữ (bỏ qua đoạn chỉ có {images}), gọn syntax.
   const gist = text => (String(text).split('###')
@@ -793,12 +793,26 @@ export function buildTemplatePrompt(templates = {}, basePrompt = '') {
     ['ORDER_CANCEL', 'khách muốn hủy đơn vừa đặt'],
     ['CSKH_HANDOFF', 'cần người thật']
   ];
-  const known = [...usable.map(([id]) => id), ...orderSteps.map(([id]) => id)].filter(mentioned);
-  return [
-    ...(known.length ? [`MẪU TIN: ${known.join(', ')}`] : ['MẪU TIN (template_id → ý nghĩa):']),
+  // Bản cũ (mặc định): liệt kê lại mọi mã (A/B 25/09: bỏ danh sách này cùng các
+  // phần gọn khác làm mô hình "suy nghĩ" nhiều hơn — chưa bật).
+  if (!compact) {
+    const known = [...usable.map(([id]) => id), ...orderSteps.map(([id]) => id)].filter(mentioned);
+    return [
+      ...(known.length ? [`MẪU TIN: ${known.join(', ')}`] : ['MẪU TIN (template_id → ý nghĩa):']),
+      ...usable.filter(([id]) => !mentioned(id)).map(([id, text]) => `- ${id}: ${gist(text)}`),
+      ...orderSteps.filter(([id]) => !mentioned(id)).map(([id, meaning]) => `- ${id}: ${meaning}`),
+      'PRICE_QUOTE dùng cho mọi sản phẩm (kèm Product_N1).'
+    ].join('\n');
+  }
+  // Mẫu prompt đã nêu cách dùng thì không liệt kê lại (danh sách mã lặp ~640 ký
+  // tự mỗi lượt gọi); chỉ mô tả mẫu chủ shop tự thêm mà prompt chưa nhắc.
+  const unmentioned = [
     ...usable.filter(([id]) => !mentioned(id)).map(([id, text]) => `- ${id}: ${gist(text)}`),
-    ...orderSteps.filter(([id]) => !mentioned(id)).map(([id, meaning]) => `- ${id}: ${meaning}`),
-    'PRICE_QUOTE dùng cho mọi sản phẩm (kèm Product_N1).'
+    ...orderSteps.filter(([id]) => !mentioned(id)).map(([id, meaning]) => `- ${id}: ${meaning}`)
+  ];
+  return [
+    ...(unmentioned.length ? ['MẪU TIN (template_id → ý nghĩa):', ...unmentioned] : []),
+    ...(mentioned('PRICE_QUOTE') ? [] : ['PRICE_QUOTE dùng cho mọi sản phẩm (kèm Product_N1).'])
   ].join('\n');
 }
 

@@ -85,11 +85,16 @@ test('bot trả lời bình luận: nhắn riêng nội dung, công khai một c
       order: { items: [], phone: '0909123456', address: '12 Lê Lợi', total: 0, shippingFee: 0 }, pendingOrder: null
     })
   });
-  assert.equal(result[0].templateId, 'ORDER_CONFIRMATION');
+  // Không lên đơn được từ bình luận: tin riêng KHÔNG được "xác nhận đơn" (khách
+  // tưởng đã đặt mà không có đơn) — báo nhân viên kiểm tra, gắn thẻ.
+  assert.equal(result[0].templateId, 'COMMENT_STAFF_FOLLOWUP');
   assert.equal(result[0].orderId, undefined);
   assert.equal(sent.length, 2);
-  // The private message opens with the COMMENT_PRIVATE_REPLY intro, then the answer the model chose.
-  assert.deepEqual(sent[0], { text: `${templates.COMMENT_PRIVATE_REPLY.replaceAll('{title}', 'anh/chị')}\n\nXác nhận đơn\n\nCảm ơn mình`, privateReply: true });
+  // The private message opens with the COMMENT_PRIVATE_REPLY intro, then the staff follow-up.
+  assert.equal(sent[0].privateReply, true);
+  assert.ok(sent[0].text.startsWith(templates.COMMENT_PRIVATE_REPLY.replaceAll('{title}', 'anh/chị')));
+  assert.match(sent[0].text, /nhận được tin/);
+  assert.doesNotMatch(sent[0].text, /Xác nhận đơn/);
   // The public line is one of the ### variants, addressed by name.
   assert.equal(sent[1].privateReply, undefined);
   assert.equal(templates.COMMENT_PUBLIC_REPLY.split('###').length, 3);

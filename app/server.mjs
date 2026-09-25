@@ -21,7 +21,7 @@ import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
-import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder } from './pos-orders.mjs';
+import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { followUpStatus, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
@@ -284,7 +284,9 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
     const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
     if (!existing) return null;
     for (const [key, value] of Object.entries(fresh)) if (!keep.has(key)) existing[key] = value;
-    existing.note = `Tạo tự động từ xác nhận của chatbot. Khách sửa đơn lúc ${stamp}.`;
+    // Giữ lại lời khách dặn trước đó ("Khách dặn: gửi hàng mới.") khi sửa giỏ.
+    const requests = String(existing.note || '').match(/Khách dặn: [^.]*\./g) || [];
+    existing.note = [`Tạo tự động từ xác nhận của chatbot. Khách sửa đơn lúc ${stamp}.`, ...requests].join(' ');
     existing.updatedAt = Date.now();
     return { order: existing };
   });
@@ -311,7 +313,8 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
  * ghi chú đơn (hiện ở Xử lý dữ liệu và đi sang POS trong ghi chú "Khách ghi").
  */
 async function addChatbotOrderNote(conversation, orderId, note) {
-  const text = String(note || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  // Không để dấu chấm trong lời dặn: ghi chú tách từng lời dặn theo "Khách dặn: …."
+  const text = String(note || '').replace(/\s+/g, ' ').replace(/\.+/g, ',').replace(/[,\s]+$/, '').trim().slice(0, 200);
   const result = await updateMessagingStore(store => {
     const item = store.conversations.find(entry => entry.id === conversation.id);
     const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
@@ -324,7 +327,7 @@ async function addChatbotOrderNote(conversation, orderId, note) {
   publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
   await appendOrderToArchive(result.order).catch(() => {});
   if (result.order.pos?.id) {
-    const posOutcome = await updatePosOrder(result.order, { conversation })
+    const posOutcome = await updatePosOrderNote(result.order)
       .then(() => ({ ...result.order.pos, updatedAt: Date.now(), error: undefined }))
       .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Ghi chú lên POS lỗi: ${error.message}` }));
     await updateMessagingStore(store => {
@@ -381,14 +384,15 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
     order.status = 'Hủy';
     order.note = `${String(order.note || '').trim()} Đã hủy trên POS (đồng bộ lúc ${stamp}).`.trim();
     order.updatedAt = Date.now();
-    if (order.pos) order.pos = { ...order.pos, cancelled: true, error: undefined };
+    // Chỉ đồng bộ hủy MỘT lần: nhân viên mở lại đơn trong CRM thì lượt sau không hủy lại.
+    order.pos = { ...(order.pos || {}), cancelled: true, cancelSyncedAt: Date.now(), error: undefined };
   };
   const changed = [];
   const touched = new Set();
   await updateMessagingStore(store => {
     for (const conversation of store.conversations) {
       for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) {
-        if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled') continue;
+        if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled' || order.pos?.cancelSyncedAt || /Đã hủy trên POS/.test(String(order.note || ''))) continue;
         markCancelled(order);
         changed.push({ ...order });
         touched.add(conversation.id);
@@ -398,7 +402,7 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
   });
   await updateLandingStore(store => {
     for (const order of store.orders) {
-      if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled') continue;
+      if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled' || order.pos?.cancelSyncedAt || /Đã hủy trên POS/.test(String(order.note || ''))) continue;
       markCancelled(order);
       if (!changed.some(item => item.id === order.id)) changed.push({ ...order });
     }
@@ -836,7 +840,9 @@ const chatbotDependencies = {
     const store = await readMessagingStore();
     return store.conversations
       .flatMap(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []))
-      .filter(order => String(order?.phone || '').replace(/\D/g, '').replace(/^84/, '0') === wanted && String(order.processingStatus || '') !== 'cancelled')
+      // Đơn quá 14 ngày (đã giao từ lâu) không phải đơn khách đang hỏi.
+      .filter(order => String(order?.phone || '').replace(/\D/g, '').replace(/^84/, '0') === wanted && String(order.processingStatus || '') !== 'cancelled'
+        && Date.now() - (Number(order.createdAt) || 0) < 14 * 24 * 60 * 60 * 1000)
       .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
       .slice(0, 3);
   },
@@ -855,6 +861,7 @@ const chatbotDependencies = {
     return {
       id: String(found.system_id || found.id),
       total: Number(found.cod ?? found.total_price) || 0,
+      phone: String(found.bill_phone_number || found.shipping_address?.phone_number || ''),
       items: (found.items || []).filter(item => !item.is_bonus_product).map(item => ({ name: String(item.variation_info?.name || '').trim(), sku: String(item.variation_info?.display_id || ''), quantity: Number(item.quantity) || 1 }))
     };
   },

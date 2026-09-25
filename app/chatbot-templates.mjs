@@ -260,14 +260,26 @@ function unchangedOrder(recentOrder, orderItems, phone, address) {
 // người nhận khách ghi kèm. Phải có phần đường/thôn đứng ngay sau, để tên đường
 // như "Nguyễn Trãi, P.5" không bị cắt nhầm.
 const surnames = 'nguyễn|trần|lê|phạm|hoàng|huỳnh|phan|vũ|võ|đặng|bùi|đỗ|hồ|ngô|dương|lý|chu|đinh|mai|trương|lương|lâm|tạ|đào|cao|hà|tô|trịnh|đoàn|lưu|châu|quách|kiều|thái|la|văn|triệu|tăng|từ|hứa';
-// Số nhà chỉ tính khi có dấu ngăn trước nó ("Lê Văn A, 12 Lê Lợi"); "Nguyễn Trãi 123" là tên đường.
-const addressStart = '(?:thôn|ấp|số|tổ|xóm|khu|khóm|đường|ngõ|ngách|hẻm|kiệt|bản|làng)(?![\\p{L}])';
-const receiverNamePattern = new RegExp(`^((?:${surnames})(?:\\s+[\\p{L}]+){1,3})(?:\\s*[,.\\-–:]\\s*(?=\\d|${addressStart})|\\s+(?=${addressStart}))`, 'iu');
+// Tên đường cũng mang họ người ("Nguyễn Văn Linh số 12", "Trần Phú, khu 4",
+// "Hoàng Diệu tổ 3"), tên tỉnh cũng vậy ("Hà Nội, số 5…"): chỉ cắt khi chắc là
+// tên người — có tên đệm thị/văn, hoặc ngay sau là thôn/ấp/xóm/bản/làng (nông
+// thôn không có tên đường) — và không bao giờ cắt khi sau đó là số/tổ/khu/đường.
+const ruralStart = '(?:thôn|ấp|xóm|bản|làng)(?![\\p{L}])';
+// Chữ của tên không được là từ chỉ địa điểm (thôn/ấp/số/tổ…), không thì "Nguyễn
+// thị hằng Thôn 4" bị đọc thành tên "… hằng Thôn".
+const nameWord = '(?!(?:thôn|ấp|xóm|bản|làng|số|tổ|khu|đường)(?![\\p{L}]))[\\p{L}]+';
+const receiverNamePattern = new RegExp(`^((?:${surnames})(?:\\s+${nameWord}){1,3})(?:\\s*[,.\\-–:]\\s*|\\s+)(?=${ruralStart}|\\d)`, 'iu');
 export function stripReceiverName(address) {
   const text = String(address || '');
   const match = text.match(receiverNamePattern);
   if (!match || /(?<![\p{L}])(phường|xã|quận|huyện|tỉnh|thành phố|thị trấn|thôn|ấp|số|đường)(?![\p{L}])/iu.test(match[1])) return text;
-  return text.slice(match[0].length).trim();
+  const words = match[1].trim().split(/\s+/);
+  const middleName = /^(thị|văn)$/iu.test(words[1] || '');
+  const rest = text.slice(match[0].length);
+  // Trước số nhà: chỉ cắt khi có tên đệm (Nguyễn Thị Hồng, 12 Lê Lợi) và có dấu ngăn.
+  if (/^\d/.test(rest) && !(middleName && /[,.\-–:]\s*$/.test(match[0]))) return text;
+  if (!/^\d/.test(rest) && words.length < 3 && !middleName) return text;
+  return rest.trim();
 }
 
 /** Lời gợi ý 2 túi cho giỏ 1 túi: số liệu lấy từ bộ giá, không tự ghi. */
@@ -389,8 +401,10 @@ function renderOrder(value, templates, context = {}) {
   // Hà Nội") không có trong danh mục cũ: khách đã ghi rõ phường/xã, tỉnh khớp, có
   // số nhà/đường → nhận luôn (nhân viên đối chiếu ở Xử lý dữ liệu), không hỏi lại
   // đúng cấp khách vừa ghi — khách từng gắt "Mới cũ đcj mà".
+  // Phải là một đoạn riêng (sau dấu phẩy) mở bằng phường/xã/thị trấn, không số
+  // nhà: "12 Xã Đàn" là tên đường, "thị xã X" là cấp huyện.
   const postMergerWard = Boolean(delivery?.resolved?.province) && !delivery?.resolved?.ward && !delivery?.missing?.includes('street')
-    && /(?<![\p{L}\p{N}])(phường|xã|thị trấn|p\.|x\.)\s*\p{L}{2,}/iu.test(address);
+    && address.split(/[,\n;]/).slice(1).some(part => /^\s*(phường|xã|thị trấn|p\.|x\.)\s*\p{L}{2,}/iu.test(part) && !/\d/.test(part) && !/thị xã/iu.test(part));
   const addressAccepted = Boolean(delivery) && (delivery.complete || addressAsks >= maxAddressAsks || answeredInFull || postMergerWard);
 
   // Remember a priceable basket, plus whatever contact detail has arrived so
@@ -809,6 +823,10 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   if (!templates[also] && !catalogRenderers[also] && !isProductQuoteId(also)) return main;
   const extra = renderSingleReply({ template_id: also, Product_N1: value.Product_N1 }, templates, context);
   if (extra.handoff || extra.templateId !== also && !isProductQuoteId(also)) return main;
+  // Ý phụ vừa gửi trong 30 phút (bảng giá vừa gửi…): không gửi lại cả bảng/ảnh.
+  const squash = text => String(text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const opening = squash(extra.messages[0]);
+  if (opening && (context.recentOutgoing || []).some(text => squash(text).startsWith(opening.slice(0, 40)) || String(text).replace(/\s+/g, ' ').includes(opening))) return main;
   const partsOf = reply => reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
   const first = isOrderStep(main.templateId) || main.templateId === 'ORDER_CUSTOM_BASKET' ? [extra, main] : [main, extra];
   return {

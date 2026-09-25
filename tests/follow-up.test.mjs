@@ -166,3 +166,44 @@ test('ngoài 24 giờ: không gọi API mà xếp hàng chờ gửi qua Pancake;
   assert.equal(conversation.promo.freeShipping, true);
   assert.equal(conversation.promo.until, now + HOUR + 7 * 24 * HOUR);
 });
+
+test('trạm gửi Pancake: lô hỏi lại Pancake (bỏ khách đã có đơn / không có ID), giữ chỗ, kết quả lỗi 2 lần thì bỏ; tin đồng bộ về thì tự xác nhận', async () => {
+  const write = (await import('node:fs')).writeFileSync;
+  const entry = (psid, repliedAt) => ({ scenarioId: 'trial', conversationId: `${page}:${psid}`, name: psid.toUpperCase(), at: now, repliedAt, queued: true, text: 'Dạ chị ơi, Giọt Nắng gửi chị ưu đãi riêng: 1 túi miễn ship', pageId: page, psid, freeShipDays: 7 });
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: { 'trial:110:g': entry('g', now - 30 * HOUR), 'trial:110:f': entry('f', now - 4 * HOUR), 'trial:110:a': entry('a', now - 13 * HOUR) } }));
+  const fresh = await import(`../app/follow-up.mjs?relay=${Date.now()}`);
+  const info = { g: { globalId: '1000123', recentOrders: 0, canInbox: true }, f: { globalId: '1000456', recentOrders: 1, canInbox: true }, a: { globalId: '', recentOrders: 0, canInbox: true } };
+  const conversationInfo = async (pageId, conversationId) => info[conversationId.split('_')[1]];
+  const batch = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now });
+  assert.equal(batch.kind, 'GIOTNANG_FOLLOWUP');
+  assert.deepEqual(batch.items.map(item => [item.key, item.convId, item.globalUserId]), [['trial:110:g', '110_g', '1000123']]);
+  assert.deepEqual(batch.skipped.map(item => item.reason).sort(), ['không có ID Facebook', 'đã có đơn trên Pancake']);
+  // Khách đã có đơn / không có ID: rời hàng chờ; khách trong lô: giữ chỗ, lô sau không lấy lại.
+  const queue = await fresh.followUpQueue({ now });
+  assert.deepEqual(queue.map(item => [item.key, item.leased]), [['trial:110:g', true]]);
+  assert.equal((await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: now + 60000 })).items.length, 0);
+  // Lỗi lần 1: trả lại hàng chờ; lỗi lần 2: bỏ, ghi lỗi.
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now }), { sent: 0, failed: 1, dropped: 0 });
+  const [again] = await fresh.followUpQueue({ now });
+  assert.equal(again.leased, false);
+  assert.equal(again.lastError, 'CAN NOT SEND');
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now }), { sent: 0, failed: 1, dropped: 1 });
+  assert.equal((await fresh.followUpQueue({ now })).length, 0);
+});
+
+test('hàng chờ tự xác nhận khi lời bám đuổi (gửi tay trong Pancake) đồng bộ về CRM; tin khác của nhân viên thì không tính', async () => {
+  const write = (await import('node:fs')).writeFileSync;
+  const text = 'Dạ anh ơi, Giọt Nắng gửi anh ưu đãi riêng: lấy 1 túi granola dùng thử vẫn được MIỄN PHÍ VẬN CHUYỂN ạ';
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: { 'trial:110:f': { scenarioId: 'trial', conversationId: `${page}:f`, name: 'Hùng', at: now, repliedAt: now - 4 * HOUR, queued: true, text, pageId: page, psid: 'f', freeShipDays: 7 } } }));
+  const fresh = await import(`../app/follow-up.mjs?reconcile=${Date.now()}`);
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  const push = (message) => updateMessagingStore(current => { current.messages[`${page}:f`] = [...(current.messages[`${page}:f`] || []), message]; return null; });
+  await push(message('outgoing', now + 60000, { text: 'Dạ em gửi anh bảng giá ạ' }));
+  assert.equal(await fresh.reconcileFollowUpQueue(now + 120000), 0, 'tin khác không phải lời bám đuổi');
+  await push(message('outgoing', now + 180000, { text: `${text} 🎁 Ưu đãi dành cho anh trong 7 ngày` }));
+  assert.equal(await fresh.reconcileFollowUpQueue(now + 240000), 1);
+  assert.equal((await fresh.followUpQueue({ now: now + 240000 })).length, 0);
+  const conversation = (await readMessagingStore()).conversations.find(entry => entry.id === `${page}:f`);
+  assert.ok(conversation.labels.includes('followup'));
+  assert.equal(conversation.promo.freeShipping, true, 'ưu đãi lấy theo freeShipDays ghi lúc xếp hàng');
+});

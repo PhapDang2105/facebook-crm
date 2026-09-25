@@ -329,6 +329,23 @@ export async function fetchPancakeConversations({ limit = 60, type = 'INBOX' } =
   return conversations.slice(0, limit);
 }
 
+/**
+ * Thông tin khách của một hội thoại hộp thư: ID Facebook toàn cục (extension
+ * Pancake cần nó để gửi tin ngoài 24 giờ), số đơn Pancake/POS gần đây và khách
+ * còn nhận tin được không.
+ */
+export async function fetchPancakeConversationInfo(pageId, conversationId, config = defaultConfig, fetchImpl = fetch) {
+  const pageConfig = getPancakePageConfig(pageId, config);
+  const body = await pancakeGet(`/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(conversationId)}/messages`, {}, pageConfig, fetchImpl);
+  const customer = Array.isArray(body.customers) ? body.customers[0] : null;
+  return {
+    globalId: String(body.global_id || customer?.global_id || ''),
+    recentOrders: Array.isArray(body.recent_orders) ? body.recent_orders.length : 0,
+    canInbox: body.can_inbox !== false && customer?.can_inbox !== false,
+    name: String(customer?.name || '')
+  };
+}
+
 /** Tin của một hội thoại, mới nhất trước; mỗi trang 30 tin, `pages` trang. Kèm bài viết (`post`) với luồng bình luận. */
 export async function fetchPancakeMessages(conversationId, { pages = 1 } = {}, config = defaultConfig, fetchImpl = fetch) {
   const messages = [];

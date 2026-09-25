@@ -79,6 +79,7 @@ export function renderFollowUpMessage(template, conversation = {}, random = Math
 
 const lastAt = (messages, predicate) => messages.reduce((latest, message) => (predicate(message) && Number(message.createdAt) > latest ? Number(message.createdAt) : latest), 0);
 const incomingOf = messages => messages.filter(message => message.direction === 'incoming');
+const compactText = text => String(text || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
 const outgoingOf = messages => messages.filter(message => message.direction === 'outgoing');
 
 /**
@@ -138,6 +139,8 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
   const state = await readFollowUpState();
   if (!state.activatedAt) await updateFollowUpState(current => { current.activatedAt = now; return null; });
   const activatedAt = state.activatedAt || now;
+  // Tin trong hàng chờ mà nhân viên / trạm gửi Pancake đã gửi: xác nhận trước khi xét lượt mới.
+  await reconcileFollowUpQueue(now);
   const store = await readMessagingStore();
   const maxPerRun = Math.max(1, Number(settings.followUps.maxPerRun) || 15);
   for (const scenario of settings.followUps.scenarios.filter(item => item.enabled)) {
@@ -156,7 +159,7 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
       // nhân viên gửi trong Pancake (extension Pancake gửi được ngoài 24 giờ).
       if (candidate.outsideWindow) {
         await updateFollowUpState(current => {
-          current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, queued: true, text, pageId: candidate.inbox.pageId, psid: candidate.inbox.psid };
+          current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, queued: true, text, pageId: candidate.inbox.pageId, psid: candidate.inbox.psid, freeShipDays: scenario.freeShipDays || 0 };
           return null;
         });
         summary.queued = (summary.queued || 0) + 1;
@@ -223,46 +226,150 @@ async function markConversationFollowedUp(conversationId, scenario, via, now) {
 
 const pancakeConversationUrl = (pageId, psid) => `https://pancake.vn/${encodeURIComponent(pageId)}?c=${encodeURIComponent(`${pageId}_${psid}`)}`;
 
+// Một lô đã giao cho trạm gửi Pancake thì giữ chỗ 45 phút: lô sau không lấy lại
+// cùng khách (gửi trùng) khi lô trước còn đang chạy hay chưa báo kết quả.
+const batchLeaseMs = 45 * 60 * 1000;
+const maxBatchSize = 50;
+const maxRelayAttempts = 2;
+
+function stillWanted(item, byId, store) {
+  const conversation = byId.get(item.conversationId);
+  if (!conversation || conversation.botEnabled === false || (Array.isArray(conversation.customerOrders) && conversation.customerOrders.length)) return false;
+  const messages = Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : [];
+  return !incomingOf(messages).some(message => Number(message.createdAt) > item.at);
+}
+
 /**
  * Hàng chờ gửi qua Pancake: tin bám đuổi ngoài 24 giờ chưa gửi. Khách đã lên
  * tiếng lại, đã có đơn hay nhân viên tắt bot sau lúc xếp hàng thì tự rơi khỏi
- * hàng (không cần nhắn nữa).
+ * hàng (không cần nhắn nữa). `leased` = đang nằm trong một lô chưa báo kết quả.
  */
-export async function followUpQueue() {
+export async function followUpQueue({ now = Date.now() } = {}) {
   const state = await readFollowUpState();
   const store = await readMessagingStore();
   const byId = new Map((store.conversations || []).map(item => [item.id, item]));
   return Object.entries(state.sent)
-    .filter(([, item]) => item.queued)
-    .filter(([, item]) => {
-      const conversation = byId.get(item.conversationId);
-      if (!conversation || conversation.botEnabled === false || (Array.isArray(conversation.customerOrders) && conversation.customerOrders.length)) return false;
-      const messages = Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : [];
-      return !incomingOf(messages).some(message => Number(message.createdAt) > item.at);
-    })
-    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
+    .filter(([, item]) => item.queued && stillWanted(item, byId, store))
+    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, attempts: item.attempts || 0, lastError: item.lastError || '', leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
     .sort((first, second) => first.repliedAt - second.repliedAt);
 }
 
 /**
- * Nhân viên xử lý một tin trong hàng chờ: `sent` (đã gửi trong Pancake → gắn
- * thẻ, ghi ưu đãi) hay `skip` (bỏ qua khách này). Trả về false khi không còn trong hàng.
+ * Xử lý một tin trong hàng chờ: `sent` (đã gửi → gắn thẻ, ghi ưu đãi) hay
+ * `skip` (bỏ qua khách này, kèm lý do). Trả về false khi không còn trong hàng.
  */
-export async function resolveFollowUpQueueItem(key, action, { readSettings, now = Date.now() } = {}) {
+export async function resolveFollowUpQueueItem(key, action, { readSettings, now = Date.now(), reason = 'nhân viên bỏ qua', via = 'pancake' } = {}) {
   const item = await updateFollowUpState(current => {
     const entry = current.sent[key];
     if (!entry?.queued) return null;
     delete entry.queued;
-    if (action === 'sent') { entry.via = 'pancake'; entry.sentAt = now; } else entry.error = 'nhân viên bỏ qua';
+    delete entry.leasedUntil;
+    if (action === 'sent') { entry.via = via; entry.sentAt = now; delete entry.lastError; } else entry.error = reason;
     return { ...entry };
   });
   if (!item) return false;
   if (action === 'sent') {
     const settings = readSettings ? await readSettings() : null;
-    const scenario = settings?.followUps?.scenarios?.find(entry => entry.id === item.scenarioId) || { id: item.scenarioId };
-    await markConversationFollowedUp(item.conversationId, scenario, 'pancake', now);
+    const scenario = settings?.followUps?.scenarios?.find(entry => entry.id === item.scenarioId) || { id: item.scenarioId, freeShipDays: item.freeShipDays || 0 };
+    await markConversationFollowedUp(item.conversationId, scenario, via, now);
   }
   return true;
+}
+
+/**
+ * Tin trong hàng chờ đã tới khách mà chưa ai bấm "Đã gửi" (nhân viên gửi tay
+ * trong Pancake, hay trạm gửi chưa kịp báo): Pancake đồng bộ tin của Page về
+ * CRM, thấy tin gửi đi sau lúc xếp hàng thì xác nhận luôn.
+ */
+export async function reconcileFollowUpQueue(now = Date.now()) {
+  const state = await readFollowUpState();
+  const queued = Object.entries(state.sent).filter(([, item]) => item.queued);
+  if (!queued.length) return 0;
+  const store = await readMessagingStore();
+  let confirmed = 0;
+  for (const [key, item] of queued) {
+    const messages = Array.isArray(store.messages?.[item.conversationId]) ? store.messages[item.conversationId] : [];
+    // Chỉ tính đúng lời bám đuổi (so phần đầu), không tính tin khác nhân viên nhắn.
+    const head = compactText(item.text).slice(0, 40);
+    const sentAfter = head && outgoingOf(messages).some(message => Number(message.createdAt) > item.at && compactText(message.text).startsWith(head));
+    if (sentAfter && await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake' })) confirmed += 1;
+  }
+  return confirmed;
+}
+
+/**
+ * Lô gửi cho trạm gửi Pancake (dấu trang chạy trên pancake.vn, đưa từng tin cho
+ * extension Pancake). Mỗi khách hỏi lại Pancake ngay lúc này: khách đã có đơn
+ * trên Pancake/POS thì bỏ khỏi hàng; lấy ID Facebook toàn cục mà extension cần.
+ */
+export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = Date.now() } = {}) {
+  await reconcileFollowUpQueue(now);
+  const size = Math.max(1, Math.min(maxBatchSize, Math.round(Number(limit) || 30)));
+  const queue = (await followUpQueue({ now })).filter(item => !item.leased);
+  const items = [];
+  const skipped = [];
+  for (const item of queue) {
+    if (items.length >= size) break;
+    const conversationId = `${item.pageId}_${item.psid}`;
+    let info;
+    try {
+      info = await conversationInfo(item.pageId, conversationId);
+    } catch (error) {
+      skipped.push({ key: item.key, name: item.name, reason: `Pancake lỗi: ${error.message}` });
+      continue;
+    }
+    if (info.recentOrders > 0) {
+      await resolveFollowUpQueueItem(item.key, 'skip', { now, reason: 'khách đã có đơn trên Pancake' });
+      skipped.push({ key: item.key, name: item.name, reason: 'đã có đơn trên Pancake' });
+      continue;
+    }
+    if (!info.canInbox || !info.globalId) {
+      await resolveFollowUpQueueItem(item.key, 'skip', { now, reason: info.canInbox ? 'Pancake không có ID Facebook của khách' : 'khách không nhận tin (chặn Page)' });
+      skipped.push({ key: item.key, name: item.name, reason: info.canInbox ? 'không có ID Facebook' : 'khách chặn tin' });
+      continue;
+    }
+    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: info.globalId, name: item.name, text: item.text });
+  }
+  const keys = new Set(items.map(item => item.key));
+  if (keys.size) {
+    await updateFollowUpState(current => {
+      for (const key of keys) if (current.sent[key]) current.sent[key].leasedUntil = now + batchLeaseMs;
+      return null;
+    });
+  }
+  return { kind: 'GIOTNANG_FOLLOWUP', version: 1, createdAt: now, delayMs: [15000, 30000], items, skipped, remaining: Math.max(0, queue.length - items.length - skipped.length) };
+}
+
+/**
+ * Kết quả trạm gửi báo về: tin gửi được thì xác nhận (thẻ + ưu đãi); lỗi thì trả
+ * lại hàng chờ, lỗi quá 2 lần thì thôi (ghi lỗi để nhân viên xem).
+ */
+export async function recordFollowUpBatchResults(results = [], { now = Date.now() } = {}) {
+  const summary = { sent: 0, failed: 0, dropped: 0 };
+  for (const result of Array.isArray(results) ? results : []) {
+    const key = String(result?.key || '');
+    if (!key) continue;
+    if (result.ok) {
+      if (await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake-relay' })) summary.sent += 1;
+      continue;
+    }
+    const error = String(result.error || 'không rõ lỗi').slice(0, 200);
+    const dropped = await updateFollowUpState(current => {
+      const entry = current.sent[key];
+      if (!entry?.queued) return null;
+      delete entry.leasedUntil;
+      entry.attempts = (entry.attempts || 0) + 1;
+      entry.lastError = error;
+      if (entry.attempts < maxRelayAttempts) return false;
+      delete entry.queued;
+      entry.error = `trạm gửi Pancake lỗi ${entry.attempts} lần: ${error}`;
+      return true;
+    });
+    if (dropped === null) continue;
+    summary.failed += 1;
+    if (dropped) summary.dropped += 1;
+  }
+  return summary;
 }
 
 /**

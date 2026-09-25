@@ -22,13 +22,13 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
-import { followUpStatus, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { buildFollowUpBatch, followUpStatus, recordFollowUpBatchResults, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
-import { handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
+import { fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { isValidQrCode, listQrScans, recordQrScan } from './qr-scans.mjs';
 import {
   isMetaConfigured,
@@ -1058,6 +1058,19 @@ const server = http.createServer(async (request, response) => {
       const done = await resolveFollowUpQueueItem(String(payload.key || ''), action, { readSettings: readChatbotSettings });
       if (!done) return sendJson(response, 404, { error: 'Tin này không còn trong hàng chờ.' });
       return sendJson(response, 200, await followUpStatus());
+    }
+    // Trạm gửi Pancake: lô gửi (ID Facebook lấy lại từ Pancake, khách đã có đơn thì bỏ)
+    // và kết quả dấu trang "Gửi bám đuổi" báo về sau khi extension Pancake gửi xong.
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch') {
+      const payload = await readBody(request);
+      const batch = await buildFollowUpBatch({ limit: payload.limit, conversationInfo: (pageId, conversationId) => fetchPancakeConversationInfo(pageId, conversationId) });
+      return sendJson(response, 200, batch);
+    }
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch-results') {
+      const payload = await readBody(request);
+      const summary = await recordFollowUpBatchResults(payload.results);
+      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped})`);
+      return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
       const settings = await readChatbotSettings();

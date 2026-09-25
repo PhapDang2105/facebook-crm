@@ -1594,7 +1594,8 @@ function chatbotOrderToRows(order) {
   const district = resolved ? (order.district || '') : (parts.length > 2 ? parts.at(-2) : '');
   const ward = resolved ? (order.ward || '') : (parts.length > 3 ? parts.at(-3) : '');
   const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
-  const sourceLabel = order.source === 'Landing page' ? 'Landing page' : 'Chatbot';
+  // Đơn nhân viên/Facebook Shop tạo trên POS (đồng bộ về) ghi nguồn "Pancake".
+  const sourceLabel = order.source === 'Landing page' ? 'Landing page' : order.source === 'POS' ? 'Pancake' : 'Chatbot';
   // Ghi chú xử lý do server dựng (⚠ thiếu gì, ⏳ bỏ dở, 🤖 tự điền, ☎ gọi xác
   // nhận, ℹ thông tin thêm) đứng trước lời khách; bảng tô màu theo ký hiệu.
   const flags = (Array.isArray(order.processingNotes) ? order.processingNotes : []).join(' · ');

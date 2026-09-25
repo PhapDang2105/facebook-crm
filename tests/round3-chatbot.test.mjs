@@ -341,3 +341,12 @@ test('soát lỗi vòng 4: "also" không gửi lại mẫu vừa gửi trong 30 
   const street = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Phone_Number: '0909123456', Customer_Address: '12 Xã Đàn, Hà Nội' }, templates, {});
   assert.equal(street.templateId, 'ORDER_ADDRESS');
 });
+
+test('đơn nhân viên/Facebook Shop tạo trên POS (source POS): bot không tự sửa hay hủy — chuyển nhân viên', () => {
+  const posOrder = { id: 'pos53462', source: 'POS', automatic: false, createdAt: Date.now() - 20 * 60 * 1000, phone: '0909123456', address: 'Q1', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }] };
+  const cancel = renderChatbotReply({ template_id: 'ORDER_CANCEL' }, templates, { recentOrder: posOrder, now: Date.now() });
+  assert.equal(cancel.templateId, 'CSKH_HANDOFF');
+  assert.equal(cancel.order, undefined);
+  const update = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Vàng 350g', No_A: '2' }, templates, { recentOrder: posOrder, now: Date.now(), messageText: 'đổi sang 2 túi vàng' });
+  assert.equal(update.order?.updateOrderId, undefined);
+});

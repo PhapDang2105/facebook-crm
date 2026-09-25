@@ -323,7 +323,8 @@ function renderOrder(value, templates, context = {}) {
   // (trong 24 giờ, chưa giao) thay vì tạo đơn riêng tính thêm phí ship.
   const mergeRequest = /\b(ghep (don|chung|vao)|gop (don|chung|vao)|them vao don)\b/.test(messageWords);
   const shipped = /đã giao|đang giao|đã gửi/i.test(String(recentOrder?.status || ''));
-  const recentOpen = Boolean(recentOrder?.id) && !shipped
+  // Đơn nhân viên/Facebook Shop tạo trên POS (source 'POS'): bot không tự sửa — nhân viên lo.
+  const recentOpen = Boolean(recentOrder?.id) && !shipped && recentOrder.source !== 'POS'
     && now - (Number(recentOrder.createdAt) || 0) < (mergeRequest ? orderCancelWindowMs : orderUpdateWindowMs)
     && String(recentOrder.processingStatus || '') !== 'cancelled';
   // Mô hình vẫn chọn ORDER_CONFIRMATION/ORDER_ADDRESS khi khách sửa hay thêm vào
@@ -879,7 +880,7 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
     const recent = context.recentOrder || null;
     const now = Number(context.now) || Date.now();
     const shipped = /đã giao|đang giao|đã gửi/i.test(String(recent?.status || ''));
-    const cancellable = Boolean(recent?.id) && now - (Number(recent.createdAt) || 0) < orderCancelWindowMs && !shipped && String(recent.processingStatus || '') !== 'cancelled';
+    const cancellable = Boolean(recent?.id) && recent.source !== 'POS' && now - (Number(recent.createdAt) || 0) < orderCancelWindowMs && !shipped && String(recent.processingStatus || '') !== 'cancelled';
     if (cancellable && templates.ORDER_CANCELLED) {
       const items = (Array.isArray(recent.products) ? recent.products : []).map(item => `${item.name || item.product || 'sản phẩm'} x${Number(item.quantity) || 1}`).join(', ') || 'đơn vừa đặt';
       return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items })), handoff: false, pendingOrder: null, order: { cancelOrderId: String(recent.id) } };

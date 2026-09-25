@@ -326,7 +326,8 @@ async function addChatbotOrderNote(conversation, orderId, note) {
   if (!result) throw new Error('Không tìm thấy đơn để ghi chú.');
   publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
   await appendOrderToArchive(result.order).catch(() => {});
-  if (result.order.pos?.id) {
+  // Đơn nhân viên/Shop tạo trên POS: không ghi đè ghi chú của nhân viên trên POS (lời dặn nằm ở CRM).
+  if (result.order.pos?.id && result.order.source !== 'POS') {
     const posOutcome = await updatePosOrderNote(result.order)
       .then(() => ({ ...result.order.pos, updatedAt: Date.now(), error: undefined }))
       .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Ghi chú lên POS lỗi: ${error.message}` }));
@@ -369,6 +370,77 @@ async function cancelChatbotCustomerOrder(conversation, orderId) {
     result.order.pos = posOutcome;
   }
   return { ...result, cancelled: true, created: false };
+}
+
+/**
+ * Đơn POS của một hội thoại Facebook mà CRM không tạo (khách thanh toán qua
+ * Facebook Shop, nhân viên lên đơn trong Pancake): ghi vào đúng hội thoại, nguồn
+ * "POS", để bảng Đơn hàng đủ đơn và bot biết khách đã có đơn. Mã đơn cố định
+ * `pos<mã POS>` nên đồng bộ lại chỉ cập nhật (hủy trên POS thì hủy theo), không
+ * nhân đôi. Trả về số đơn mới ghi.
+ */
+async function importPosConversationOrders(posOrders) {
+  const drafts = [];
+  for (const posOrder of Array.isArray(posOrders) ? posOrders : []) {
+    const address = posOrder.shipping_address || {};
+    const lines = (posOrder.items || []).filter(item => !item.is_bonus_product);
+    try {
+      const order = normalizeCustomerOrder({
+        id: `pos${posOrder.system_id || posOrder.id}`,
+        name: posOrder.bill_full_name || address.full_name || 'Khách Facebook',
+        phone: posOrder.bill_phone_number || address.phone_number || '',
+        address: address.full_address || [address.address, address.commune_name, address.district_name, address.province_name].filter(Boolean).join(', '),
+        products: lines.map(item => ({ name: item.variation_info?.name || item.variation_info?.display_id || 'Sản phẩm', sku: item.variation_info?.display_id || '', quantity: item.quantity, price: item.variation_info?.retail_price })),
+        shippingFee: posOrder.shipping_fee,
+        freeShipping: Boolean(posOrder.is_free_shipping) || !Number(posOrder.shipping_fee),
+        discount: posOrder.total_discount,
+        gift: (posOrder.items || []).filter(item => item.is_bonus_product).map(item => item.variation_info?.name || item.variation_info?.display_id).filter(Boolean).join(' + '),
+        source: 'POS',
+        status: Number(posOrder.status) === 6 ? 'Hủy' : 'Mới',
+        note: String(posOrder.note || '').slice(0, 500)
+      }, { now: Date.parse(`${String(posOrder.inserted_at || '').replace(/Z?$/, 'Z')}`) || Date.now() });
+      drafts.push({
+        conversationKey: String(posOrder.conversation_id),
+        order: {
+          ...order,
+          createdAt: Date.parse(`${String(posOrder.inserted_at || '').replace(/Z?$/, 'Z')}`) || Date.now(),
+          automatic: false,
+          employee: posOrder.creator?.name || posOrder.assigning_seller?.name || posOrder.account_name || '',
+          pos: { id: String(posOrder.id), systemId: String(posOrder.system_id || ''), status: String(posOrder.status_name || ''), importedAt: Date.now() },
+          ...(Number(posOrder.status) === 6 ? { processingStatus: 'cancelled' } : {})
+        }
+      });
+    } catch {
+      // Đơn thiếu SĐT/địa chỉ/sản phẩm (đơn nháp trên POS): bỏ qua.
+    }
+  }
+  if (!drafts.length) return 0;
+  let created = 0;
+  const touched = new Set();
+  await updateMessagingStore(store => {
+    const byPancakeId = new Map(store.conversations.filter(item => item.pancakeConversationId && item.source !== 'comment').map(item => [String(item.pancakeConversationId), item]));
+    for (const { conversationKey, order } of drafts) {
+      const conversation = byPancakeId.get(conversationKey);
+      if (!conversation) continue;
+      if (!Array.isArray(conversation.customerOrders)) conversation.customerOrders = [];
+      const existing = conversation.customerOrders.find(entry => entry.id === order.id || (entry.pos?.systemId && entry.pos.systemId === order.pos.systemId));
+      if (existing) {
+        // Đã kéo về: chỉ theo trạng thái hủy của POS; sửa của nhân viên trong CRM giữ nguyên.
+        if (order.processingStatus === 'cancelled' && existing.processingStatus !== 'cancelled') {
+          Object.assign(existing, { processingStatus: 'cancelled', status: 'Hủy', updatedAt: Date.now() });
+          touched.add(conversation.id);
+        }
+        continue;
+      }
+      conversation.customerOrders.unshift(order);
+      conversation.customerOrders = conversation.customerOrders.slice(0, 200);
+      created += 1;
+      touched.add(conversation.id);
+    }
+    return null;
+  });
+  for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
+  return created;
 }
 
 /**
@@ -2110,7 +2182,7 @@ server.on('clientError', (error, socket) => {
 server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`CRM running at http://${serverConfig.host}:${serverConfig.port}/`);
   // Đơn landing từ mọi trang Webcake (kể cả đơn bỏ dở) được kéo từ POS mỗi 5 phút.
-  if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos });
+  if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders });
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   startPancakeSync();
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.

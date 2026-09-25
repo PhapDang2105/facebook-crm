@@ -192,3 +192,18 @@ test('đồng bộ POS: đơn CRM đã đẩy sang mà nhân viên hủy trên P
   assert.equal(summary.cancelled, 1);
   assert.equal(summary.created, 0, 'đơn CRM không bị kéo ngược thành đơn landing');
 });
+
+test('đồng bộ POS: đơn nguồn Facebook có hội thoại mà không do CRM tạo (Shop / nhân viên) được đưa về CRM; đơn CRM và landing thì không', async () => {
+  const shop = { id: 53462, system_id: 53462, status: 1, status_name: 'submitted', inserted_at: '2026-09-23T03:07:00.000000', order_sources_name: 'Facebook', conversation_id: 'pc-1', items: [], shipping_address: {} };
+  const draftWithoutConversation = { id: 53463, system_id: 53463, status: 0, inserted_at: '2026-09-23T03:08:00.000000', order_sources_name: 'Facebook', items: [], shipping_address: {} };
+  const crm = { id: 'CRM-abc12345', system_id: 53464, status: 1, inserted_at: '2026-09-23T03:09:00.000000', order_sources_name: 'Facebook', conversation_id: 'pc-2', items: [], shipping_address: {} };
+  const seen = [];
+  const summary = await syncPosLandingOrders({
+    config: posConfig,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: [shop, draftWithoutConversation, crm], total_pages: 1 }) }),
+    onPosConversationOrders: async orders => { seen.push(...orders.map(order => order.system_id)); return orders.length; }
+  });
+  assert.deepEqual(seen, [53462]);
+  assert.equal(summary.conversationOrders, 1);
+  assert.equal(summary.created, 0);
+});

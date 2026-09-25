@@ -19,6 +19,8 @@ import { applyHonorific } from './chatbot-templates.mjs';
 const statePath = process.env.FOLLOW_UPS_PATH || path.join(projectRoot, 'data', 'processed', 'follow-ups.json');
 export const FOLLOW_UP_INTERVAL_MS = 15 * 60 * 1000;
 const maxReplyAgeMs = 7 * 24 * 60 * 60 * 1000;
+// Chừa 1 giờ trước hạn 24 giờ của Messenger (lượt bám đuổi chạy 15 phút một lần).
+export const messengerWindowMs = 23 * 60 * 60 * 1000;
 const maxSentRecords = 5000;
 
 let cachedState = null;
@@ -112,6 +114,9 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
       if (!customerAt) continue;
       const repliedAt = lastAt(outgoingOf(messages), message => message.privateReply !== true);
       if (!repliedAt || repliedAt < customerAt || repliedAt < activatedAt || now - repliedAt > maxReplyAgeMs || now - repliedAt < delayMs) continue;
+      // Messenger chỉ cho Page nhắn trong 24 giờ kể từ tin cuối của khách: quá mốc
+      // thì gửi chắc chắn bị từ chối — bỏ qua (không ghi là đã gửi).
+      if (now - customerAt > messengerWindowMs) continue;
       candidates.push({ key: `${scenario.id}:${inbox.pageId}:${inbox.psid}`, conversation: inbox, inbox, thread: null, repliedAt });
     }
   }
@@ -183,6 +188,14 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
   }
   await updateFollowUpState(current => { current.lastRunAt = now; current.lastRun = summary; return null; });
   return summary;
+}
+
+/**
+ * Bật lại bám đuổi (tắt → bật): mốc tính lại từ lúc này, để không gửi dồn cho
+ * mọi khách cũ đã im lặng trong 7 ngày lúc tính năng còn tắt.
+ */
+export async function resetFollowUpActivation(now = Date.now()) {
+  await updateFollowUpState(state => { state.activatedAt = now; return null; });
 }
 
 /** Tóm tắt cho màn cài đặt: đã bật từ khi nào, lần chạy cuối, các lần gửi gần nhất. */

@@ -29,8 +29,10 @@ writeFileSync(process.env.META_CONVERSATIONS_PATH, JSON.stringify({
     // E: bình luận, Page trả lời 13 giờ trước nhưng nhân viên đã tắt bot ở hộp thư → không bám.
     { id: `${page}:comment:e:p1`, pageId: page, psid: 'e', name: 'Hương', source: 'comment' },
     { id: `${page}:e`, pageId: page, psid: 'e', name: 'Hương', source: 'inbox', botEnabled: false },
-    // F: khách hộp thư hỏi, Page trả lời 30 giờ trước, khách im → kịch bản inbox 24 giờ.
-    { id: `${page}:f`, pageId: page, psid: 'f', name: 'Hùng Phạm', source: 'inbox', gender: 'male', genderSource: 'name' }
+    // F: khách hộp thư hỏi, Page trả lời 4 giờ trước, khách im → kịch bản hộp thư 3 giờ.
+    { id: `${page}:f`, pageId: page, psid: 'f', name: 'Hùng Phạm', source: 'inbox', gender: 'male', genderSource: 'name' },
+    // G: khách nhắn 31 giờ trước (quá hạn 24 giờ của Messenger) → gửi chắc chắn bị từ chối, không xét.
+    { id: `${page}:g`, pageId: page, psid: 'g', name: 'Minh', source: 'inbox' }
   ],
   messages: {
     [`${page}:comment:a:p1`]: [message('incoming', now - 14 * HOUR)],
@@ -40,7 +42,8 @@ writeFileSync(process.env.META_CONVERSATIONS_PATH, JSON.stringify({
     [`${page}:c`]: [message('incoming', now - 2 * HOUR)],
     [`${page}:comment:d:p1`]: [message('incoming', now - 6 * HOUR), message('outgoing', now - 5 * HOUR)],
     [`${page}:comment:e:p1`]: [message('incoming', now - 14 * HOUR), message('outgoing', now - 13 * HOUR)],
-    [`${page}:f`]: [message('incoming', now - 31 * HOUR), message('outgoing', now - 30 * HOUR)]
+    [`${page}:f`]: [message('incoming', now - 5 * HOUR), message('outgoing', now - 4 * HOUR)],
+    [`${page}:g`]: [message('incoming', now - 31 * HOUR), message('outgoing', now - 30 * HOUR)]
   },
   commentIndex: {}
 }));
@@ -51,7 +54,7 @@ const { readMessagingStore } = await import('../app/messaging-store.mjs');
 
 const settings = normalizeChatbotSettings({
   enabled: true,
-  followUps: { enabled: true, scenarios: [...defaultFollowUpScenarios(), { id: 'inbox-24h', name: 'Hộp thư im 24 giờ', trigger: 'inbox-no-reply', delayHours: 24, message: 'Dạ {title} còn cần em tư vấn thêm gì không ạ?' }] }
+  followUps: { enabled: true, scenarios: [...defaultFollowUpScenarios(), { id: 'inbox-3h', name: 'Hộp thư im 3 giờ', trigger: 'inbox-no-reply', delayHours: 3, message: 'Dạ {title} còn cần em tư vấn thêm gì không ạ?' }] }
 });
 
 test('cài đặt bám đuổi: mặc định tắt, kịch bản mẫu tặng miễn ship sau 12 giờ; kịch bản không có lời thì bỏ', () => {

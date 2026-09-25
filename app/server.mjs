@@ -22,7 +22,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
-import { followUpStatus, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { followUpStatus, resetFollowUpActivation, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
@@ -1081,6 +1081,8 @@ const server = http.createServer(async (request, response) => {
         directApiKey: String(payload.directApiKey || '').trim() || (providerChanged ? '' : current.directApiKey),
         updatedAt: Date.now()
       });
+      // Bám đuổi vừa bật lại: tính từ bây giờ, không gửi dồn cho khách cũ.
+      if (settings.followUps?.enabled && !current.followUps?.enabled) await resetFollowUpActivation();
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
         templates: settings.messageTemplates,

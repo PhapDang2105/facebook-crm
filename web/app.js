@@ -215,7 +215,7 @@ chatbotFollowUpList?.addEventListener('click', event => {
 });
 chatbotFollowUpAdd?.addEventListener('click', () => {
   const firstTemplate = Object.keys(chatbotTemplatesState).find(id => id.startsWith('FOLLOW_UP_')) || '';
-  chatbotFollowUpScenarios.push({ id: `scenario-${Date.now().toString(36)}`, name: `Kịch bản ${chatbotFollowUpScenarios.length + 1}`, enabled: true, trigger: 'inbox-no-reply', delayHours: 24, templateId: firstTemplate, message: '', publicFallback: true });
+  chatbotFollowUpScenarios.push({ id: `scenario-${Date.now().toString(36)}`, name: `Kịch bản ${chatbotFollowUpScenarios.length + 1}`, enabled: true, trigger: 'inbox-no-reply', delayHours: 3, templateId: firstTemplate, message: '', publicFallback: true });
   renderChatbotFollowUps();
   chatbotFollowUpList?.querySelector('.follow-up-row:last-child input[type="text"]')?.focus();
 });

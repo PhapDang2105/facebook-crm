@@ -250,7 +250,7 @@ export async function followUpQueue({ now = Date.now() } = {}) {
   const byId = new Map((store.conversations || []).map(item => [item.id, item]));
   return Object.entries(state.sent)
     .filter(([, item]) => item.queued && stillWanted(item, byId, store))
-    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, attempts: item.attempts || 0, lastError: item.lastError || '', leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
+    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, attempts: item.attempts || 0, lastError: item.lastError || (item.noGlobalId ? 'Pancake chưa có ID Facebook của khách — gửi tay bằng nút Mở Pancake' : ''), noGlobalId: item.noGlobalId === true, leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
     .sort((first, second) => first.repliedAt - second.repliedAt);
 }
 
@@ -305,7 +305,7 @@ export async function reconcileFollowUpQueue(now = Date.now()) {
 export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = Date.now() } = {}) {
   await reconcileFollowUpQueue(now);
   const size = Math.max(1, Math.min(maxBatchSize, Math.round(Number(limit) || 30)));
-  const queue = (await followUpQueue({ now })).filter(item => !item.leased);
+  const queue = (await followUpQueue({ now })).filter(item => !item.leased && !item.noGlobalId);
   const items = [];
   const skipped = [];
   for (const item of queue) {
@@ -323,9 +323,17 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
       skipped.push({ key: item.key, name: item.name, reason: 'đã có đơn trên Pancake' });
       continue;
     }
-    if (!info.canInbox || !info.globalId) {
-      await resolveFollowUpQueueItem(item.key, 'skip', { now, reason: info.canInbox ? 'Pancake không có ID Facebook của khách' : 'khách không nhận tin (chặn Page)' });
-      skipped.push({ key: item.key, name: item.name, reason: info.canInbox ? 'không có ID Facebook' : 'khách chặn tin' });
+    if (!info.canInbox) {
+      await resolveFollowUpQueueItem(item.key, 'skip', { now, reason: 'khách không nhận tin (chặn Page)' });
+      skipped.push({ key: item.key, name: item.name, reason: 'khách chặn tin' });
+      continue;
+    }
+    if (!info.globalId) {
+      // Pancake chưa lưu ID Facebook của khách (extension cần nó): khách vẫn ở hàng
+      // chờ để nhân viên gửi tay trong Pancake (giao diện Pancake tự tìm ID), chỉ
+      // không vào lô tự động nữa.
+      await updateFollowUpState(current => { if (current.sent[item.key]) current.sent[item.key].noGlobalId = true; return null; });
+      skipped.push({ key: item.key, name: item.name, reason: 'chưa có ID Facebook (gửi tay trong Pancake)' });
       continue;
     }
     items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: info.globalId, name: item.name, text: item.text });

@@ -177,10 +177,11 @@ test('trạm gửi Pancake: lô hỏi lại Pancake (bỏ khách đã có đơn 
   const batch = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now });
   assert.equal(batch.kind, 'GIOTNANG_FOLLOWUP');
   assert.deepEqual(batch.items.map(item => [item.key, item.convId, item.globalUserId]), [['trial:110:g', '110_g', '1000123']]);
-  assert.deepEqual(batch.skipped.map(item => item.reason).sort(), ['không có ID Facebook', 'đã có đơn trên Pancake']);
-  // Khách đã có đơn / không có ID: rời hàng chờ; khách trong lô: giữ chỗ, lô sau không lấy lại.
+  assert.deepEqual(batch.skipped.map(item => item.reason).sort(), ['chưa có ID Facebook (gửi tay trong Pancake)', 'đã có đơn trên Pancake']);
+  // Khách đã có đơn: rời hàng chờ. Chưa có ID Facebook: vẫn chờ (gửi tay), không vào lô.
+  // Khách trong lô: giữ chỗ, lô sau không lấy lại.
   const queue = await fresh.followUpQueue({ now });
-  assert.deepEqual(queue.map(item => [item.key, item.leased]), [['trial:110:g', true]]);
+  assert.deepEqual(queue.map(item => [item.key, item.leased, item.noGlobalId]), [['trial:110:g', true, false], ['trial:110:a', false, true]]);
   assert.equal((await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: now + 60000 })).items.length, 0);
   // Lỗi lần 1: trả lại hàng chờ; lỗi lần 2: bỏ, ghi lỗi.
   assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now }), { sent: 0, failed: 1, dropped: 0 });
@@ -188,7 +189,7 @@ test('trạm gửi Pancake: lô hỏi lại Pancake (bỏ khách đã có đơn 
   assert.equal(again.leased, false);
   assert.equal(again.lastError, 'CAN NOT SEND');
   assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now }), { sent: 0, failed: 1, dropped: 1 });
-  assert.equal((await fresh.followUpQueue({ now })).length, 0);
+  assert.deepEqual((await fresh.followUpQueue({ now })).map(item => item.key), ['trial:110:a']);
 });
 
 test('hàng chờ tự xác nhận khi lời bám đuổi (gửi tay trong Pancake) đồng bộ về CRM; tin khác của nhân viên thì không tính', async () => {

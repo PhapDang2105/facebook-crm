@@ -432,8 +432,14 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
   const texts = new Map();
   const items = [];
   const skipped = [];
+  // Chưa im đủ số giờ của kịch bản HIỆN TẠI (đổi 24 → 36 giờ sau lúc xếp hàng): chờ tiếp.
+  const due = item => {
+    const scenario = settings?.followUps?.scenarios?.find(entry => entry.id === item.scenarioId);
+    return !scenario || now - Number(item.repliedAt) >= scenario.delayHours * 60 * 60 * 1000;
+  };
   for (const item of queue) {
     if (items.length >= size) break;
+    if (!due(item)) continue;
     const conversationId = `${item.pageId}_${item.psid}`;
     let info;
     try {

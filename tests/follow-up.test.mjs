@@ -288,3 +288,16 @@ test('chỉ bám khách MỚI: khách đã từng mua (hồ sơ Pancake/POS, SĐ
   assert.equal(state.sent['trial:110:a'].checkedAt, now);
   assert.deepEqual(await pruner.pruneReturningFromQueue({ conversationInfo: async () => ({ orderCount: 9 }), now }), { checked: 0, removed: 0 }, 'đã xét thì không tra lại');
 });
+
+test('lô gửi chỉ lấy khách đã im đủ số giờ của kịch bản hiện tại (đổi 24 → 36 giờ sau lúc xếp hàng)', async () => {
+  const write = (await import('node:fs')).writeFileSync;
+  const entry = (psid, silentHours) => ({ scenarioId: 'inbox-trial-freeship', conversationId: `${page}:${psid}`, name: psid, at: now, repliedAt: now - silentHours * HOUR, queued: true, text: 'x', pageId: page, psid, checkedAt: now });
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: { 'inbox-trial-freeship:110:g': entry('g', 30), 'inbox-trial-freeship:110:a': entry('a', 40) } }));
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  await updateMessagingStore(current => { for (const id of [`${page}:g`, `${page}:a`]) { const c = current.conversations.find(item => item.id === id); c.labels = []; c.customerOrders = []; c.botEnabled = true; } return null; });
+  const fresh = await import(`../app/follow-up.mjs?due=${Date.now()}`);
+  const readSettings = async () => normalizeChatbotSettings({ enabled: true, followUps: { enabled: true, scenarios: [{ id: 'inbox-trial-freeship', name: 'Dùng thử', trigger: 'inbox-no-reply', delayHours: 36, templateId: 'FOLLOW_UP_TRIAL_FREESHIP', outsideWindow: true, freeShipDays: 7 }] } });
+  const batch = await fresh.buildFollowUpBatch({ limit: 10, now, readSettings, conversationInfo: async () => ({ globalId: '1000999', canInbox: true }) });
+  assert.deepEqual(batch.items.map(item => item.key), ['inbox-trial-freeship:110:a'], 'im 30 giờ: chưa tới lượt; im 40 giờ: gửi');
+  assert.match(batch.items[0].text, /ưu đãi riêng trong 7 ngày/, 'lời dựng theo mẫu hiện tại');
+});

@@ -8,7 +8,7 @@ import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { isOrderStep } from './processing/pending-order.mjs';
 import { findProductBySku, getCatalogProducts, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamConversation } from './conversation-orders.mjs';
-import { ruleIntent } from './processing/rule-intent.mjs';
+import { ruleIntent, trialBagOptions } from './processing/rule-intent.mjs';
 
 // Giỏ Facebook Shop (attachment cart_order) mang SKU: một SKU sản phẩm → bảng
 // giá sản phẩm đó; SKU combo của Shop ("CB2-XANH-Z450" = 2 Túi Xanh,
@@ -727,6 +727,13 @@ async function answerChange(change, settings, results, dependencies) {
     const ruleMode = settings.ruleIntent || 'off';
     const lastOutgoingAt = Math.max(0, ...recent.filter(item => item?.direction === 'outgoing').map(item => Number(item.createdAt) || 0));
     const ruleProduct = conversation.source === 'comment' ? '' : resolveConversationProduct({ adTitle: conversation.referral?.adTitle, referralRef: conversation.referral?.ref, postText: conversation.post?.message }).product;
+    // Khách đang giữ ưu đãi bám đuổi "1 túi dùng thử miễn ship" (còn hạn, chưa đặt đơn
+    // sau khi nhận), và tin vừa nhận là trả lời lời mời đó (bot chưa trả lời gì khác
+    // sau lời mời, hay vừa mời chọn túi): đồng ý / chọn túi thì hỏi SĐT + địa chỉ.
+    const promo = conversation.promo || null;
+    const trialOffer = conversation.source !== 'comment' && Boolean(promo?.freeShipping) && Number(promo.until) > Date.now()
+      && !(recentOrder?.id && Number(recentOrder.createdAt) > Number(promo.at))
+      && (Number(promo.at) > (Number(conversation.botLastReplyAt) || 0) || conversation.botLastTemplateId === 'TRIAL_ACCEPT');
     const ruled = message.type === 'text' && !asksForHuman && !cartReply && ruleMode !== 'off'
       ? ruleIntent(message.text, {
           source: conversation.source,
@@ -741,7 +748,8 @@ async function answerChange(change, settings, results, dependencies) {
           contextProduct: productHint(ruleProduct) ? ruleProduct : '',
           bundleSize: bundle.length,
           complaint: isComplaint({ text: message.text, keywords: settings.complaintKeywords }),
-          commentBasket
+          commentBasket,
+          trialOffer
         })
       : null;
     const ruleReply = ruled
@@ -754,7 +762,12 @@ async function answerChange(change, settings, results, dependencies) {
         ? (shopOrder ? shopOrderReply(shopOrder) : cartReply)
         : nonText
           ? (seesImage ? await askModel() : imageFallback())
-          : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' ? ruleReply : null) || await askModel();
+          : (ruleMode === 'on' && ruled?.rule?.startsWith('TRIAL') ? ruleReply : null) || ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' ? ruleReply : null) || await askModel();
+    // Khách đã nhận ưu đãi dùng thử mà mô hình định gửi lại bảng giá chung: mời chọn
+    // túi + xin SĐT, địa chỉ thay vì gửi lại cả bảng giá.
+    if (trialOffer && reply.templateId === 'GENERAL_INFO' && settings.messageTemplates?.TRIAL_ACCEPT) {
+      reply = renderChatbotReply({ template_id: 'TRIAL_ACCEPT', values: { bags: trialBagOptions() } }, settings.messageTemplates, replyContext);
+    }
     if (ruled && ruleMode === 'shadow') console.log(`Luật ${ruled.rule} (thử): luật ${ruleReply.templateId} / mô hình ${reply.templateId}${ruleReply.templateId === reply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
     if (seesImage && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
     // "Cảm ơn" mà khách chưa có đơn: ảnh (thường là ảnh sản phẩm, không phải

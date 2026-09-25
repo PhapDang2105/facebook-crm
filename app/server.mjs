@@ -22,7 +22,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
-import { buildFollowUpBatch, followUpStatus, recordFollowUpBatchResults, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { buildFollowUpBatch, followUpStatus, markFollowUpWins, recordFollowUpBatchResults, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
@@ -260,6 +260,8 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
   if (!result) throw new Error('Không tìm thấy hội thoại để tự tạo đơn.');
   if (result.created) {
     publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+    // Khách được bám đuổi vừa chốt: thẻ Bám đuổi thành công.
+    markFollowUpWins().catch(() => {});
     await appendOrderToArchive(result.order).catch(() => {});
     // Đẩy sang Pancake POS trước khi gửi phiếu: POS tự gửi khách thẻ xác nhận
     // đơn (receipt) trong hội thoại Pancake, nên đẩy được thì CRM không gửi thêm
@@ -440,6 +442,7 @@ async function importPosConversationOrders(posOrders) {
     return null;
   });
   for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
+  if (created) markFollowUpWins().catch(() => {});
   return created;
 }
 
@@ -1837,6 +1840,7 @@ const server = http.createServer(async (request, response) => {
             return item;
           });
           if (!stored) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+          markFollowUpWins().catch(() => {});
           if (viaPancake) {
             // Hội thoại Pancake: không gửi bản chữ. Đẩy đơn sang Pancake POS, POS
             // gửi khách thẻ xác nhận đơn; POS lỗi thì CRM gửi phiếu ảnh của mình.

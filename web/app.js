@@ -229,6 +229,7 @@ async function renderChatbotFollowUpStatus() {
     if (status.activatedAt) parts.push(`Bật từ <b>${escapeHtml(formatCustomerPanelTime(status.activatedAt))}</b>`);
     if (status.lastRunAt) parts.push(`lần xét cuối <b>${escapeHtml(formatCustomerPanelTime(status.lastRunAt))}</b> (xét ${status.lastRun?.checked || 0}, gửi ${status.lastRun?.sent || 0})`);
     parts.push(`đã gửi tổng <b>${status.sentTotal || 0}</b> tin`);
+    parts.push(`chốt được <b>${status.wonTotal || 0}</b> đơn${status.wonAmount ? ` (${escapeHtml(new Intl.NumberFormat('vi-VN').format(status.wonAmount))}đ)` : ''} — lọc thẻ "Bám đuổi thành công"`);
     const recent = (status.recent || []).filter(item => !item.error).slice(0, 3).map(item => `${escapeHtml(item.name || item.conversationId)} (${escapeHtml(formatCustomerPanelTime(item.at))})`);
     chatbotFollowUpStatus.innerHTML = `${parts.join(' · ')}${recent.length ? `<br>Gần nhất: ${recent.join(', ')}` : ''}`;
     renderChatbotFollowUpQueue(status.queue || []);
@@ -667,7 +668,8 @@ const labelAutoChoices = [
   { value: 'livestream', label: 'Khi khách đến từ phiên live' },
   { value: 'wholesale', label: 'Khi hỏi mua sỉ/CTV' },
   { value: 'bad', label: 'Khi số hay bom hàng (POS chặn/bom nhiều)' },
-  { value: 'followup', label: 'Khi hệ thống gửi tin bám đuổi' }
+  { value: 'followup', label: 'Khi hệ thống gửi tin bám đuổi' },
+  { value: 'followup-won', label: 'Khi khách được bám đuổi chốt đơn' }
 ];
 let quickReplyDraft = null;
 let quickReplyPickerMatches = [];

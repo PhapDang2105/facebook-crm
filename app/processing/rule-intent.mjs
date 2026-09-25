@@ -78,6 +78,57 @@ function basketAmbiguous(raw) {
     || /\d\s*combo\b/.test(x);
 }
 
+// Khách vừa nhận tin bám đuổi "1 túi dùng thử miễn ship" trả lời: đồng ý / chọn túi
+// thì hỏi SĐT + địa chỉ để lên đơn luôn, không gửi lại bảng giá. Từ chối, khiếu nại,
+// hay tin có cả SĐT/địa chỉ (cần đọc kỹ) thì để luồng thường / mô hình.
+const TRIAL_DECLINE = /\b(khong|ko|k|kh|chua) (can|lay|mua|an|thich|quan tam)\b|\b(thoi|de sau|khi khac|lan sau|het tien|khong nhe|ko nhe)\b/;
+const TRIAL_ACCEPT = /\b(ok|oke|okie|oki|okay|dong y|lay|thu|dat|mua|chot|len don|gui|ship|duoc|dc|co|u|uh|um|vang|da|nhan|muon)\b/;
+const TRIAL_COLOURS = { xanh: 'XANH', vang: 'VANG', nau: 'NAU', cacao: 'NAU' };
+const money = value => `${Math.round(Number(value) || 0).toLocaleString('vi-VN')}đ`;
+
+/** "Túi Xanh 450g 174.000đ, Túi Vàng 350g 174.000đ hay Túi Nâu vị cacao 350g 164.000đ" từ danh mục. */
+export function trialBagOptions() {
+  const bags = ['XANH', 'VANG', 'NAU']
+    .map(colour => getCatalogProducts().find(item => item.active !== false && new RegExp(`^GRA-${colour}-`, 'i').test(item.sku || '')))
+    .filter(Boolean)
+    .map(item => `${String(item.name).replace(/^Granola\s+/i, '')} ${money(item.unitPrice || item.salePrice || item.originalPrice)}`);
+  return bags.length > 1 ? `${bags.slice(0, -1).join(', ')} hay ${bags.at(-1)}` : bags.join('');
+}
+
+function trialIntent(raw, s, phone) {
+  if (TRIAL_DECLINE.test(s)) return null;
+  // Câu hỏi (ngọt không, bao nhiêu gam, giao mấy ngày…): trả lời câu hỏi trước, không coi là đồng ý.
+  if (!PRICE.test(s) && (raw.includes('?') || INFO_RULES.some(([, pattern]) => pattern.test(s)))) return null;
+  const folded = foldVietnamese(prep(raw)).replace(/xanh (duong|la cay)|dau xanh/g, ' ');
+  const picks = new Map();
+  for (const match of folded.matchAll(/(?:\b(\d{1,2})\s*(?:tui|goi|bich|x)?\s*)?\b(xanh|vang|nau|cacao)\b(?:\s*(?:x\s*)?(\d{1,2})\b)?/g)) {
+    const colour = TRIAL_COLOURS[match[2]];
+    const quantity = Math.max(1, Math.min(10, Number(match[1] || match[3]) || 1));
+    picks.set(colour, Math.max(picks.get(colour) || 0, quantity));
+  }
+  if (picks.size) {
+    // Có SĐT hay địa chỉ đi kèm: mô hình đọc đủ giỏ + SĐT + địa chỉ (giá vẫn miễn ship).
+    if (phone || s.length > 60) return null;
+    const slots = ['Product_N1', 'No_A', 'Product_N2', 'No_B', 'Product_N3', 'No_C'];
+    const value = { template_id: 'ORDER_ADDRESS' };
+    let index = 0;
+    for (const [colour, quantity] of picks) {
+      const product = colourSku(colour.toLowerCase());
+      if (!product || index >= 3) continue;
+      value[slots[index * 2]] = product.name;
+      value[slots[index * 2 + 1]] = String(quantity);
+      index += 1;
+    }
+    return index ? { rule: 'TRIAL_BASKET', value } : null;
+  }
+  if (phone || s.length > 60) return null;
+  // Đồng ý suông ("ok", "lấy nha", "muốn thử") hay hỏi giá: mời chọn túi (kèm giá từng túi) + SĐT + địa chỉ.
+  if (TRIAL_ACCEPT.test(s) || PRICE.test(s) || /^[\s.…!👍❤️🥰😍]+$/u.test(raw)) {
+    return { rule: 'TRIAL_ACCEPT', value: { template_id: 'TRIAL_ACCEPT', values: { bags: trialBagOptions() } } };
+  }
+  return null;
+}
+
 // Sau khi bỏ mọi chữ nói về giỏ, còn chữ nào thì tin có ý khác: để mô hình.
 const BASKET_WORDS = new Set(['xanh', 'vang', 'nau', 'cacao', 'la', 'cay', 'tui', 'tuy', 'goi', 'bich', 'bit', 'hop', 'combo', 'lay', 'dat', 'mua', 'chot', 'gui', 'ship', 'cho', 'muon', 'can', 'em', 'e', 'minh', 'mk', 'm', 'chi', 'c', 'toi', 'tui', 'anh', 'a', 'to', 'ban', 'b', 'shop', 'va', 'voi', 'them', 'moi', 'loai', 'nha', 'nhe', 'ha', 'luon', 'di', 'thu', 'dung', 'nguyen', 'nhieu', 'hat', 'x', 'vi', 'granola', 'sdt', 'dt', 'nhe', 'ak', 'ah', 'oi']);
 
@@ -111,6 +162,11 @@ export function ruleIntent(text, ctx = {}) {
   const basket = !complaint && orderAgeMin >= 60 && !PRICE.test(s) && !raw.includes('?') && !basketAmbiguous(raw) && typeof ctx.commentBasket === 'function'
     ? basketFrom(raw, ctx.commentBasket) : [];
 
+  // Khách đang giữ ưu đãi bám đuổi "1 túi dùng thử miễn ship" (hộp thư, chưa có đơn sau ưu đãi).
+  if (ctx.trialOffer && !isComment && !complaint && !ctx.complaint) {
+    const trial = trialIntent(raw, s, phone);
+    if (trial) return trial;
+  }
   if (ctx.livestream && !ctx.hasRecentOrder && !basket.length && !complaint && LIVE_DEAL.test(s) && !/\b(chua (nhan|thay|giao)|huy|khieu nai)\b/.test(s)) {
     return { rule: 'LIVE_DEAL', value: { template_id: 'LIVE_DEAL_CLAIMED' }, attention: true };
   }

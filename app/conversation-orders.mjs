@@ -152,6 +152,12 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     order.address = `(Live) ${order.address}`;
     if (order.street) order.street = `(Live) ${order.street}`;
     order.liveOrder = true;
+  } else if (totalQuantityForPricing === 1 && shippingFee === 0 && order.address && !/^\(freeship\)/i.test(order.address)) {
+    // Đơn 1 túi được miễn ship (ưu đãi dùng thử của tin bám đuổi): 1 túi bình
+    // thường phải cộng ship, nên đầu địa chỉ ghi "(Freeship) " để kho và POS biết.
+    order.address = `(Freeship) ${order.address}`;
+    if (order.street) order.street = `(Freeship) ${order.street}`;
+    order.trialFreeShip = true;
   }
   // What the customer actually typed, next to the standardised address they confirmed.
   order.rawAddress = text(input.rawAddress, 500);

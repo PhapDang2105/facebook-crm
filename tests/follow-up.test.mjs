@@ -208,3 +208,29 @@ test('hàng chờ tự xác nhận khi lời bám đuổi (gửi tay trong Panca
   assert.ok(conversation.labels.includes('followup'));
   assert.equal(conversation.promo.freeShipping, true, 'ưu đãi lấy theo freeShipDays ghi lúc xếp hàng');
 });
+
+test('khách được bám đuổi chốt đơn trong 14 ngày: thẻ "Bám đuổi thành công", đếm đơn; đơn hủy hay trước tin bám đuổi thì không', async () => {
+  const fresh = await import(`../app/follow-up.mjs?won=${Date.now()}`);
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  await updateMessagingStore(current => {
+    const add = (id, followUpAt, orders) => {
+      const conversation = current.conversations.find(entry => entry.id === id);
+      conversation.followUps = [{ scenarioId: 'trial', at: followUpAt, via: 'pancake' }];
+      conversation.customerOrders = orders;
+      delete conversation.followUpWon;
+    };
+    add(`${page}:f`, now, [{ id: 'won1', createdAt: now + 2 * HOUR, total: 174000 }]);
+    add(`${page}:c`, now, [{ id: 'old', createdAt: now - HOUR, total: 298000 }, { id: 'cx', createdAt: now + HOUR, total: 174000, processingStatus: 'cancelled' }]);
+    return null;
+  });
+  assert.equal(await fresh.markFollowUpWins(now + 3 * HOUR), 1);
+  assert.equal(await fresh.markFollowUpWins(now + 4 * HOUR), 0, 'ghi một lần');
+  const store = await readMessagingStore();
+  const won = store.conversations.find(entry => entry.id === `${page}:f`);
+  assert.ok(won.labels.includes('followup-won'));
+  assert.equal(won.followUpWon.orderId, 'won1');
+  assert.ok(!(store.conversations.find(entry => entry.id === `${page}:c`).labels || []).includes('followup-won'));
+  const status = await fresh.followUpStatus();
+  assert.equal(status.wonTotal, 1);
+  assert.equal(status.wonAmount, 174000);
+});

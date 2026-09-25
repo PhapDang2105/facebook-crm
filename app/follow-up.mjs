@@ -135,6 +135,8 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
 export async function runFollowUps({ readSettings, sendMessage, now = Date.now(), log = console.log } = {}) {
   const settings = await readSettings();
   const summary = { checked: 0, sent: 0, failed: 0, skipped: 0, disabled: false };
+  // Khách được bám đuổi đã chốt đơn: ghi nhận cả khi bám đuổi đang tắt.
+  await markFollowUpWins(now).catch(error => log(`Bám đuổi: lỗi ghi nhận đơn chốt: ${error.message}`));
   if (!settings?.enabled || !settings.followUps?.enabled) return { ...summary, disabled: true };
   const state = await readFollowUpState();
   if (!state.activatedAt) await updateFollowUpState(current => { current.activatedAt = now; return null; });
@@ -224,7 +226,36 @@ async function markConversationFollowedUp(conversationId, scenario, via, now) {
   publishMessagingEvent({ type: 'customer-panel', conversationId });
 }
 
-const pancakeConversationUrl = (pageId, psid) => `https://pancake.vn/${encodeURIComponent(pageId)}?c=${encodeURIComponent(`${pageId}_${psid}`)}`;
+const followUpWinWindowMs = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * Đơn chốt sau tin bám đuổi (bot, nhân viên hay Facebook Shop, trong 14 ngày
+ * kể từ tin bám đuổi đầu tiên, đơn chưa hủy): gắn thẻ "Bám đuổi thành công" và
+ * ghi followUpWon lên hội thoại để đếm. Trả về số hội thoại vừa ghi nhận.
+ */
+export async function markFollowUpWins(now = Date.now()) {
+  const wonLabels = labelsForEvents((await readInboxSettings().catch(() => ({ labels: [] }))).labels, ['followup-won']);
+  const won = await updateMessagingStore(store => {
+    const changed = [];
+    for (const conversation of store.conversations || []) {
+      if (conversation.followUpWon || !Array.isArray(conversation.followUps) || !conversation.followUps.length) continue;
+      const firstAt = Math.min(...conversation.followUps.map(item => Number(item.at) || Infinity));
+      const order = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [])
+        .filter(item => String(item.processingStatus || '') !== 'cancelled' && item.status !== 'Hủy')
+        .filter(item => Number(item.createdAt) > firstAt && Number(item.createdAt) - firstAt <= followUpWinWindowMs)
+        .sort((first, second) => Number(first.createdAt) - Number(second.createdAt))[0];
+      if (!order) continue;
+      conversation.followUpWon = { orderId: String(order.id), at: Number(order.createdAt), total: Number(order.total) || 0, markedAt: now };
+      if (wonLabels.length) conversation.labels = [...new Set([...(Array.isArray(conversation.labels) ? conversation.labels : []), ...wonLabels])];
+      changed.push(conversation.id);
+    }
+    return changed;
+  });
+  for (const conversationId of won || []) publishMessagingEvent({ type: 'customer-panel', conversationId });
+  return (won || []).length;
+}
+
+const pancakeConversationUrl =(pageId, psid) => `https://pancake.vn/${encodeURIComponent(pageId)}?c=${encodeURIComponent(`${pageId}_${psid}`)}`;
 
 // Một lô đã giao cho trạm gửi Pancake thì giữ chỗ 45 phút: lô sau không lấy lại
 // cùng khách (gửi trùng) khi lô trước còn đang chạy hay chưa báo kết quả.
@@ -393,7 +424,10 @@ export async function followUpStatus() {
   const state = await readFollowUpState();
   const recent = Object.values(state.sent).sort((first, second) => second.at - first.at).slice(0, 20);
   const done = Object.values(state.sent).filter(item => !item.error && !item.queued);
-  return { activatedAt: state.activatedAt || 0, lastRunAt: state.lastRunAt || 0, lastRun: state.lastRun, sentTotal: done.length, recent: recent.filter(item => !item.queued), queue: await followUpQueue() };
+  const won = ((await readMessagingStore()).conversations || []).filter(item => item.followUpWon);
+  return {
+    wonTotal: won.length,
+    wonAmount: won.reduce((sum, item) => sum + (Number(item.followUpWon.total) || 0), 0), activatedAt: state.activatedAt || 0, lastRunAt: state.lastRunAt || 0, lastRun: state.lastRun, sentTotal: done.length, recent: recent.filter(item => !item.queued), queue: await followUpQueue() };
 }
 
 let timer = null;

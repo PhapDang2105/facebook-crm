@@ -26,6 +26,8 @@ export const defaultConversationLabels = Object.freeze([
   { id: 'bad', name: 'Khách xấu', color: '#6b7280', icon: 'prohibited', auto: 'bad' },
   // Hệ thống đã gửi tin bám đuổi cho khách (lọc để kiểm tra tin nào đã đi, khách nào đã quay lại).
   { id: 'followup', name: 'Bám đuổi', color: '#0ea5e9', icon: 'alarm-clock', auto: 'followup' },
+  // Khách đã nhận tin bám đuổi rồi chốt đơn (bot, nhân viên hay Facebook Shop) trong 14 ngày.
+  { id: 'followup-won', name: 'Bám đuổi thành công', color: '#16a34a', icon: 'trophy', auto: 'followup-won' },
   { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck', auto: '' }
 ]);
 

@@ -256,6 +256,20 @@ function unchangedOrder(recentOrder, orderItems, phone, address) {
   return phoneOf(recentOrder.phone) === phoneOf(phone) && sameAddressText(recentOrder.address, address);
 }
 
+// Họ phổ biến: đầu địa chỉ là "Họ + tên" (2–4 chữ) rồi tới thôn/ấp/số nhà… là tên
+// người nhận khách ghi kèm. Phải có phần đường/thôn đứng ngay sau, để tên đường
+// như "Nguyễn Trãi, P.5" không bị cắt nhầm.
+const surnames = 'nguyễn|trần|lê|phạm|hoàng|huỳnh|phan|vũ|võ|đặng|bùi|đỗ|hồ|ngô|dương|lý|chu|đinh|mai|trương|lương|lâm|tạ|đào|cao|hà|tô|trịnh|đoàn|lưu|châu|quách|kiều|thái|la|văn|triệu|tăng|từ|hứa';
+// Số nhà chỉ tính khi có dấu ngăn trước nó ("Lê Văn A, 12 Lê Lợi"); "Nguyễn Trãi 123" là tên đường.
+const addressStart = '(?:thôn|ấp|số|tổ|xóm|khu|khóm|đường|ngõ|ngách|hẻm|kiệt|bản|làng)(?![\\p{L}])';
+const receiverNamePattern = new RegExp(`^((?:${surnames})(?:\\s+[\\p{L}]+){1,3})(?:\\s*[,.\\-–:]\\s*(?=\\d|${addressStart})|\\s+(?=${addressStart}))`, 'iu');
+export function stripReceiverName(address) {
+  const text = String(address || '');
+  const match = text.match(receiverNamePattern);
+  if (!match || /(?<![\p{L}])(phường|xã|quận|huyện|tỉnh|thành phố|thị trấn|thôn|ấp|số|đường)(?![\p{L}])/iu.test(match[1])) return text;
+  return text.slice(match[0].length).trim();
+}
+
 /** Lời gợi ý 2 túi cho giỏ 1 túi: số liệu lấy từ bộ giá, không tự ghi. */
 function upsellTwoBags(price, templates) {
   const line = price.lines?.[0];
@@ -353,7 +367,8 @@ function renderOrder(value, templates, context = {}) {
   const wantsPrevious = /(dia chi|d\/c|dc) (cu|truoc|nhu cu|lan truoc)|nhu (lan )?truoc|cho cu|giong lan truoc|nhu cu/.test(normalizeText(String(context.messageText || '')));
   const previous = (wantsPrevious || updating) && context.recentOrder ? context.recentOrder : null;
   // Mô hình ghi "0" khi khách không đưa địa chỉ: coi như trống để lấy địa chỉ đơn trước.
-  const givenAddress = String(value.Customer_Address || '').trim();
+  // Tên người nhận khách ghi đầu địa chỉ ("Nguyễn thị Hằng Thôn 4, …") không lên phiếu giao.
+  const givenAddress = stripReceiverName(String(value.Customer_Address || '').trim());
   const freshAddress = (givenAddress && givenAddress !== '0' ? givenAddress : '') || (previous?.address ? String(previous.address) : '');
   const phone = freshPhone || pending?.phone || (previous?.phone ? toLocalPhone(previous.phone) || String(previous.phone) : '');
   // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
@@ -370,7 +385,13 @@ function renderOrder(value, templates, context = {}) {
   // nhận địa chỉ khách ghi và để nhân viên đối chiếu ở Xử lý dữ liệu.
   // \b chỉ biết chữ ASCII nên "xã"/"thị xã" (kết thúc bằng chữ có dấu) không bao giờ khớp; dùng biên chữ Unicode.
   const answeredInFull = addressAsks >= 1 && /(?<![\p{L}\p{N}])(huyện|quận|thị xã|thành phố|tp|phường|xã|thị trấn|tt)(?![\p{L}\p{N}])/iu.test(freshAddress) && freshAddress.split(/[,\n]/).filter(part => part.trim()).length >= 2;
-  const addressAccepted = Boolean(delivery) && (delivery.complete || addressAsks >= maxAddressAsks || answeredInFull);
+  // Tên phường/xã MỚI sau sáp nhập ("phường Hạc Thành, Thanh Hóa", "xã Tây Phương,
+  // Hà Nội") không có trong danh mục cũ: khách đã ghi rõ phường/xã, tỉnh khớp, có
+  // số nhà/đường → nhận luôn (nhân viên đối chiếu ở Xử lý dữ liệu), không hỏi lại
+  // đúng cấp khách vừa ghi — khách từng gắt "Mới cũ đcj mà".
+  const postMergerWard = Boolean(delivery?.resolved?.province) && !delivery?.resolved?.ward && !delivery?.missing?.includes('street')
+    && /(?<![\p{L}\p{N}])(phường|xã|thị trấn|p\.|x\.)\s*\p{L}{2,}/iu.test(address);
+  const addressAccepted = Boolean(delivery) && (delivery.complete || addressAsks >= maxAddressAsks || answeredInFull || postMergerWard);
 
   // Remember a priceable basket, plus whatever contact detail has arrived so
   // far, so the customer never has to repeat something already given.
@@ -729,7 +750,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED']);
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -837,7 +858,8 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
   const resolvedId = !catalogId && templates[templateId] ? templateId : 'CSKH_HANDOFF';
   return {
     templateId: resolvedId,
-    ...splitMessages(fill(raw, commonValues())),
+    // `values`: số liệu engine đã có sẵn (giỏ Shop, tổng đơn POS…) cho mẫu tự do.
+    ...splitMessages(fill(raw, { ...commonValues(), ...(value.values && typeof value.values === 'object' ? value.values : {}) })),
     // Khách xin gọi điện: nhân viên phải gọi thật, nên vẫn chuyển người (kèm lời hẹn rõ).
     handoff: resolvedId === 'CSKH_HANDOFF' || resolvedId === 'CALLBACK_REQUEST'
   };

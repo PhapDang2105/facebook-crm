@@ -19,9 +19,9 @@ import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloa
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
-import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfigured, posStatus } from './phone-warnings.mjs';
+import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
-import { cancelPosOrder, syncOrderToPos, updatePosOrder } from './pos-orders.mjs';
+import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder } from './pos-orders.mjs';
 import { followUpStatus, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
@@ -335,6 +335,46 @@ async function cancelChatbotCustomerOrder(conversation, orderId) {
     result.order.pos = posOutcome;
   }
   return { ...result, cancelled: true, created: false };
+}
+
+/**
+ * Nhân viên hủy trên POS một đơn CRM đã đẩy sang (đơn trùng, khách đổi ý):
+ * đồng bộ POS gọi hàm này để CRM hủy theo — không gọi lại POS. Trả về số đơn đã hủy.
+ */
+async function cancelCrmOrdersCancelledOnPos(ids) {
+  const wanted = new Set((Array.isArray(ids) ? ids : []).map(String));
+  if (!wanted.size) return 0;
+  const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
+  const markCancelled = order => {
+    order.processingStatus = 'cancelled';
+    order.status = 'Hủy';
+    order.note = `${String(order.note || '').trim()} Đã hủy trên POS (đồng bộ lúc ${stamp}).`.trim();
+    order.updatedAt = Date.now();
+    if (order.pos) order.pos = { ...order.pos, cancelled: true, error: undefined };
+  };
+  const changed = [];
+  const touched = new Set();
+  await updateMessagingStore(store => {
+    for (const conversation of store.conversations) {
+      for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) {
+        if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled') continue;
+        markCancelled(order);
+        changed.push({ ...order });
+        touched.add(conversation.id);
+      }
+    }
+    return null;
+  });
+  await updateLandingStore(store => {
+    for (const order of store.orders) {
+      if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled') continue;
+      markCancelled(order);
+      if (!changed.some(item => item.id === order.id)) changed.push({ ...order });
+    }
+  });
+  for (const order of changed) await appendOrderToArchive(order).catch(() => {});
+  for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
+  return changed.length;
 }
 
 /* ---- Thử nghiệm: chào khách vừa quét mã QR ----
@@ -767,6 +807,24 @@ const chatbotDependencies = {
       .filter(order => String(order?.phone || '').replace(/\D/g, '').replace(/^84/, '0') === wanted && String(order.processingStatus || '') !== 'cancelled')
       .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
       .slice(0, 3);
+  },
+  // Khách đặt qua Facebook Shop: Pancake tạo đơn POS (có SĐT, địa chỉ khách điền
+  // lúc thanh toán) vài chục giây sau tin giỏ hàng. Tìm đơn POS của đúng hội thoại
+  // này từ `since` để bot không xin lại thông tin và không lên đơn trùng.
+  findShopOrder: async (conversation, { since = Date.now() - 30 * 60 * 1000 } = {}) => {
+    if (!conversation?.pancakeConversationId || !posConfigured(posConfig())) return null;
+    const data = await posRequest('/orders', {
+      page_size: 50, page_number: 1, updateStatus: 'inserted_at', option_sort: 'inserted_at_desc',
+      startDateTime: Math.floor(since / 1000), endDateTime: Math.floor(Date.now() / 1000) + 60
+    }, posConfig(), fetch);
+    const found = (Array.isArray(data?.data) ? data.data : []).find(order => String(order.conversation_id || '') === String(conversation.pancakeConversationId)
+      && !isCrmPushedPosOrder(order) && Number(order.status) !== 6);
+    if (!found) return null;
+    return {
+      id: String(found.system_id || found.id),
+      total: Number(found.cod ?? found.total_price) || 0,
+      items: (found.items || []).filter(item => !item.is_bonus_product).map(item => ({ name: String(item.variation_info?.name || '').trim(), sku: String(item.variation_info?.display_id || ''), quantity: Number(item.quantity) || 1 }))
+    };
   },
   sendReceipt: sendChatbotOrderReceipt,
   // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
@@ -1987,7 +2045,7 @@ server.on('clientError', (error, socket) => {
 server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`CRM running at http://${serverConfig.host}:${serverConfig.port}/`);
   // Đơn landing từ mọi trang Webcake (kể cả đơn bỏ dở) được kéo từ POS mỗi 5 phút.
-  if (!process.env.POS_SYNC_DISABLED) startPosSync();
+  if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos });
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   startPancakeSync();
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.

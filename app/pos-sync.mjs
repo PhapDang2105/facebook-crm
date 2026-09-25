@@ -87,8 +87,8 @@ export function isLandingPosOrder(order) {
  * mọi đơn cùng số điện thoại để nhân viên quyết định. Trả về thống kê. Không
  * ném lỗi mạng: log rồi thử lại ở lần sau.
  */
-export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig(), fetchImpl = fetch, maxPages = 10 } = {}) {
-  const summary = { checked: 0, landing: 0, created: 0, updated: 0, skipped: 0, rejected: 0, errors: [] };
+export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig(), fetchImpl = fetch, maxPages = 10, onCrmOrdersCancelled = null } = {}) {
+  const summary = { checked: 0, landing: 0, created: 0, updated: 0, skipped: 0, rejected: 0, cancelled: 0, errors: [] };
   if (!posConfigured(config)) return { ...summary, disabled: true };
   const store = await readLandingStore();
   // Đơn CRM đang giữ mỗi mã POS (mã chính và các mã đã gộp).
@@ -112,8 +112,17 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
     if (orders.length < 100 || page >= Number(data?.total_pages || 1)) break;
   }
   fetched.sort((first, second) => String(first.inserted_at || '').localeCompare(String(second.inserted_at || '')) || Number(first.id) - Number(second.id));
+  // Đơn CRM đẩy sang POS mà nhân viên hủy ngay trên POS: CRM trước đây vẫn
+  // ghi "Mới" (đơn trùng vẫn bị đếm, vẫn hiện chờ xử lý). Gom lại để CRM hủy theo.
+  const cancelledCrmIds = [];
   for (const order of fetched) {
     summary.checked += 1;
+    if (isCrmPushedPosOrder(order)) {
+      if (Number(order.status) === 6 || /cancel/i.test(String(order.status_name || ''))) {
+        cancelledCrmIds.push(String(order.custom_id || order.id).replace(/^CRM-/, ''));
+      }
+      continue;
+    }
     if (!isLandingPosOrder(order)) continue;
     summary.landing += 1;
     // Đã kéo về rồi thì bỏ qua — trừ khi đơn CRM còn là bản bỏ dở mà POS nay đã
@@ -128,23 +137,30 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
     else if (result.updated) summary.updated += 1;
     else summary.skipped += 1;
   }
+  if (cancelledCrmIds.length && typeof onCrmOrdersCancelled === 'function') {
+    try {
+      summary.cancelled = Number(await onCrmOrdersCancelled(cancelledCrmIds)) || 0;
+    } catch (error) {
+      summary.errors.push(`hủy đơn CRM theo POS: ${error.message}`);
+    }
+  }
   return summary;
 }
 
 let timer = null;
 
 /** Chạy ngay một lần rồi lặp mỗi 5 phút; chỉ khi POS đã kết nối. */
-export function startPosSync({ log = console.log } = {}) {
+export function startPosSync({ log = console.log, onCrmOrdersCancelled = null } = {}) {
   // Lượt trước chưa xong (POS chậm) thì lượt sau bỏ qua, không chạy chồng.
   let running = false;
   const run = async () => {
     if (running) return;
     running = true;
     try {
-      const summary = await syncPosLandingOrders();
+      const summary = await syncPosLandingOrders({ onCrmOrdersCancelled });
       if (summary.disabled) return;
-      if (summary.created || summary.updated || summary.errors.length) {
-        log(`Đồng bộ POS: ${summary.landing} đơn landing trong ${summary.checked} đơn, tạo ${summary.created}, cập nhật ${summary.updated}, bỏ qua ${summary.skipped}${summary.rejected ? `, từ chối ${summary.rejected}` : ''}${summary.errors.length ? `, lỗi: ${summary.errors.join('; ')}` : ''}`);
+      if (summary.created || summary.updated || summary.cancelled || summary.errors.length) {
+        log(`Đồng bộ POS: ${summary.landing} đơn landing trong ${summary.checked} đơn, tạo ${summary.created}, cập nhật ${summary.updated}, bỏ qua ${summary.skipped}${summary.cancelled ? `, hủy theo POS ${summary.cancelled} đơn CRM` : ''}${summary.rejected ? `, từ chối ${summary.rejected}` : ''}${summary.errors.length ? `, lỗi: ${summary.errors.join('; ')}` : ''}`);
       }
     } catch (error) {
       log(`Đồng bộ POS lỗi: ${error.message}`);

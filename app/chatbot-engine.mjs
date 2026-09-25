@@ -510,6 +510,28 @@ async function answerChange(change, settings, results, dependencies) {
     const imageFallback = () => ({ ...(adQuote() || renderChatbotReply({ template_id: settings.messageTemplates?.IMAGE_RECEIVED ? 'IMAGE_RECEIVED' : 'CSKH_HANDOFF' }, settings.messageTemplates || {}, replyContext)), attention: true });
     // Khách bấm "Mua"/"Gửi giỏ hàng" ở Facebook Shop: SKU đã rõ, không cần model.
     const cartReply = message.cart?.length ? cartQuickReply(message.cart, settings.messageTemplates, replyContext) : null;
+    // Khách thanh toán luôn trong Facebook Shop: Pancake tạo đơn POS (có SĐT, địa
+    // chỉ) vài chục giây sau tin giỏ. Có đơn đó thì báo đã nhận, không xin lại
+    // thông tin khách vừa điền (trước đây khách phải nhắn "chị đặt trên web rồi").
+    const shopOrderReply = found => ({
+      ...renderChatbotReply({
+        template_id: 'SHOP_ORDER_RECEIVED',
+        values: {
+          cart: (cartReply?.pendingOrder?.items?.length ? cartReply.pendingOrder.items.map(item => `${item.quantity} ${item.product}`) : found.items.map(item => `${item.quantity} ${findProductBySku(item.sku)?.name || item.name}`)).join(' + '),
+          total: found.total ? `${found.total.toLocaleString('vi-VN')}đ` : ''
+        }
+      }, settings.messageTemplates, replyContext),
+      pendingOrder: null
+    });
+    let shopOrder = null;
+    if (cartReply && dependencies.findShopOrder && settings.messageTemplates?.SHOP_ORDER_RECEIVED) {
+      const since = (Number(change.message?.createdAt) || Date.now()) - 5 * 60 * 1000;
+      const polls = Math.max(1, Number(settings.shopOrderPolls ?? 4));
+      for (let poll = 0; poll < polls && !shopOrder; poll += 1) {
+        if (poll) await wait(Number(settings.shopOrderPollMs ?? 20000));
+        shopOrder = await dependencies.findShopOrder(conversation, { since }).catch(() => null);
+      }
+    }
     // Dưới bình luận, câu trả lời theo luật khi không có model: bảng giá sản
     // phẩm của bài, lời chào live, hay bảng giá chung.
     const postProduct = conversation.source === 'comment'
@@ -573,7 +595,7 @@ async function answerChange(change, settings, results, dependencies) {
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : cartReply
-        ? cartReply
+        ? (shopOrder ? shopOrderReply(shopOrder) : cartReply)
         : nonText
           ? (seesImage ? await askModel() : imageFallback())
           : ackReply || lookupReply || choiceReply || quickQuote || await askModel();
@@ -705,6 +727,12 @@ async function answerChange(change, settings, results, dependencies) {
         results.push({ conversationId: conversation.id, skipped: 'nhân viên đã nhận khách' });
         return;
       }
+    }
+    // Sắp tự lên đơn mới mà hội thoại đã có đơn POS trong giờ qua (khách đặt qua
+    // Facebook Shop, hay nhân viên vừa lên): không tạo đơn trùng, báo đã nhận đơn.
+    if (reply.order && !reply.order.updateOrderId && !reply.order.cancelOrderId && !isComment && dependencies.findShopOrder && settings.messageTemplates?.SHOP_ORDER_RECEIVED) {
+      const existing = await dependencies.findShopOrder(conversation, { since: Date.now() - 60 * 60 * 1000 }).catch(() => null);
+      if (existing) reply = shopOrderReply(existing);
     }
     // The order is persisted BEFORE anything is sent. Sending first meant a
     // failed order left the customer holding a confirmation for an order that

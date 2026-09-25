@@ -178,3 +178,17 @@ test('syncOrderToPos: hai lệnh đẩy cùng lúc (bot chốt + nhân viên b�
   const saved = (await readMessagingStore()).conversations.find(item => item.id === conversationId).customerOrders[0];
   assert.equal(saved.pos.id, '99001');
 });
+
+test('đồng bộ POS: đơn CRM đã đẩy sang mà nhân viên hủy trên POS thì báo CRM hủy theo (không kéo về thành đơn landing)', async () => {
+  const cancelledOnPos = { id: 'CRM-5de68b8e', system_id: 53469, status: 6, status_name: 'canceled', inserted_at: '2026-09-23T03:53:00.000000', order_sources_name: 'Facebook', items: [], shipping_address: {} };
+  const stillOpen = { id: 'CRM-031d71ea', system_id: 53470, status: 1, status_name: 'submitted', inserted_at: '2026-09-23T03:55:00.000000', order_sources_name: 'Facebook', items: [], shipping_address: {} };
+  const seen = [];
+  const summary = await syncPosLandingOrders({
+    config: posConfig,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: [cancelledOnPos, stillOpen], total_pages: 1 }) }),
+    onCrmOrdersCancelled: async ids => { seen.push(...ids); return ids.length; }
+  });
+  assert.deepEqual(seen, ['5de68b8e']);
+  assert.equal(summary.cancelled, 1);
+  assert.equal(summary.created, 0, 'đơn CRM không bị kéo ngược thành đơn landing');
+});

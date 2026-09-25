@@ -159,3 +159,58 @@ test('ảnh khách gửi từ quảng cáo một sản phẩm, model không đ�
   assert.match(out.sent.join(' '), /Bảng giá Granola Túi Xanh 450g/);
   assert.ok(out.saved.at(-1).addLabelEvents.includes('handoff'));
 });
+
+test('giỏ Facebook Shop mà khách đã thanh toán (POS có đơn của hội thoại): báo đã nhận, không xin lại SĐT/địa chỉ, không giữ giỏ', async () => {
+  const sent = [];
+  let saved = null;
+  let calls = 0;
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true, pancakeConversationId: 'pc1' },
+    message: { id: 'cart1', mid: 'cart1', direction: 'incoming', type: 'text', text: 'Khách chọn mua từ Facebook Shop', cart: [{ sku: 'CB-VANGG+XANH', quantity: 1 }], createdAt: Date.now() }
+  }], {
+    readSettings: settings({ shopOrderPolls: 3, shopOrderPollMs: 1 }),
+    listMessages: async () => [],
+    saveBotState: async (_id, state) => { saved = state; },
+    sendMessage: async (_c, message) => { sent.push(message.text); return { message: { mid: 'x' } }; },
+    requestReply: async () => { throw new Error('không gọi mô hình'); },
+    findShopOrder: async () => { calls += 1; return calls < 2 ? null : { id: '53462', total: 298000, items: [] }; }
+  });
+  assert.equal(calls, 2, 'chờ tới khi POS có đơn');
+  assert.match(sent[0], /đã nhận đơn 1 Granola Túi Vàng 350g \+ 1 Granola Túi Xanh 450g – tổng 298\.000đ/);
+  assert.doesNotMatch(sent.join(' '), /xin số điện thoại/);
+  assert.equal(saved.pendingOrder, null);
+});
+
+test('sắp tự lên đơn mà hội thoại đã có đơn POS trong giờ qua (Shop / nhân viên vừa lên): không tạo đơn trùng', async () => {
+  const created = [];
+  const confirmation = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Phone_Number: '0909123456', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' }, templates, {});
+  assert.equal(confirmation.templateId, 'ORDER_CONFIRMATION');
+  const out = await run({ pancakeConversationId: 'pc2' }, '0909123456 12 Lê Lợi Q1', {
+    reply: confirmation,
+    extraDeps: {
+      createOrder: async (_c, order) => { created.push(order); return { order: { id: 'dup', ...order }, created: true }; },
+      findShopOrder: async () => ({ id: '53570', total: 298000, items: [{ name: 'Granola Túi Xanh', sku: 'GRA-XANH-Z450', quantity: 2 }] })
+    }
+  });
+  assert.deepEqual(created, []);
+  assert.equal(out.results[0].templateId, 'SHOP_ORDER_RECEIVED');
+});
+
+test('địa chỉ ghi phường/xã MỚI sau sáp nhập, tỉnh khớp, có số nhà: nhận luôn, không hỏi lại cấp khách đã ghi', () => {
+  const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Phone_Number: '0909123456', Customer_Address: '16/44 Lê Hoàn, phường Hạc Thành, Thanh Hóa' }, templates, {});
+  assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
+  assert.match(reply.order.address, /Hạc Thành/);
+  // Không ghi phường/xã thì vẫn hỏi như cũ.
+  const vague = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Phone_Number: '0909123456', Customer_Address: '16/44 Lê Hoàn, Thanh Hóa' }, templates, {});
+  assert.equal(vague.templateId, 'ORDER_ADDRESS');
+});
+
+test('tên người nhận ghi đầu địa chỉ được tách ra; tên đường mang tên người thì giữ nguyên', async () => {
+  const { stripReceiverName } = await import('../app/chatbot-templates.mjs');
+  assert.equal(stripReceiverName('Nguyễn thị hằng Thôn 4, xã Đông Hòa, Đông Sơn, Thanh Hóa'), 'Thôn 4, xã Đông Hòa, Đông Sơn, Thanh Hóa');
+  assert.equal(stripReceiverName('Nguyễn Thị Hồng, 12 Lê Lợi, Quận 1'), '12 Lê Lợi, Quận 1');
+  assert.equal(stripReceiverName('Nguyễn Trãi 123, Phường 5, Quận 5'), 'Nguyễn Trãi 123, Phường 5, Quận 5');
+  assert.equal(stripReceiverName('Lê Lợi, Phường Bến Nghé, Quận 1'), 'Lê Lợi, Phường Bến Nghé, Quận 1');
+  assert.equal(stripReceiverName('12 Lê Lợi, Quận 1'), '12 Lê Lợi, Quận 1');
+});

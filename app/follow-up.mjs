@@ -87,12 +87,16 @@ const outgoingOf = messages => messages.filter(message => message.direction === 
  * `inbox` là hộp thư của khách (có thể thiếu với khách chỉ bình luận),
  * `thread` là luồng bình luận (chỉ với comment-no-reply).
  */
-export function findFollowUpCandidates(store, scenario, { now = Date.now(), activatedAt = 0 } = {}) {
+export function findFollowUpCandidates(store, scenario, { now = Date.now(), activatedAt = 0, boughtLabelIds = ['customer'] } = {}) {
   const delayMs = scenario.delayHours * 60 * 60 * 1000;
   const conversations = store.conversations || [];
   const messagesOf = conversation => (Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : []);
   const inboxOf = (pageId, psid) => conversations.find(item => item.pageId === pageId && item.psid === psid && item.source !== 'comment') || null;
-  const blocked = inbox => inbox && (inbox.botEnabled === false || (Array.isArray(inbox.customerOrders) && inbox.customerOrders.length > 0));
+  // Nhân viên tắt bot, khách đã có đơn trong CRM hay mang thẻ Đã mua hàng: không bám (chỉ bám khách mới).
+  const bought = conversation => (Array.isArray(conversation?.labels) ? conversation.labels : []).some(label => boughtLabelIds.includes(label));
+  // Đã chốt đơn trong chat mà đơn không gắn vào hội thoại (nhân viên lên tay, đơn Shop/POS).
+  const closedInChat = conversation => messagesOf(conversation).some(message => message.direction === 'outgoing' && /(xác nhận lại thông tin đặt hàng|đã gửi xác nhận đơn hàng|đơn của .{1,20} đã được (tạo|lên)|mã vận đơn)/i.test(String(message.text || '')));
+  const blocked = inbox => inbox && (inbox.botEnabled === false || (Array.isArray(inbox.customerOrders) && inbox.customerOrders.length > 0) || bought(inbox) || closedInChat(inbox));
   const candidates = [];
   if (scenario.trigger === 'comment-no-reply') {
     for (const thread of conversations.filter(item => item.source === 'comment' && item.psid)) {
@@ -132,7 +136,7 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
  * Một lượt bám đuổi: duyệt mọi kịch bản đang bật, gửi cho khách đủ điều kiện,
  * ghi lại. Trả về { checked, sent, failed, skipped }.
  */
-export async function runFollowUps({ readSettings, sendMessage, now = Date.now(), log = console.log } = {}) {
+export async function runFollowUps({ readSettings, sendMessage, conversationInfo = null, now = Date.now(), log = console.log } = {}) {
   const settings = await readSettings();
   const summary = { checked: 0, sent: 0, failed: 0, skipped: 0, disabled: false };
   // Khách được bám đuổi đã chốt đơn: ghi nhận cả khi bám đuổi đang tắt.
@@ -143,6 +147,8 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
   const activatedAt = state.activatedAt || now;
   // Tin trong hàng chờ mà nhân viên / trạm gửi Pancake đã gửi: xác nhận trước khi xét lượt mới.
   await reconcileFollowUpQueue(now, { readSettings });
+  const pruned = await pruneReturningFromQueue({ conversationInfo, now }).catch(() => ({ removed: 0 }));
+  if (pruned.removed) log(`Bám đuổi: bỏ ${pruned.removed} khách cũ khỏi hàng chờ`);
   const store = await readMessagingStore();
   const maxPerRun = Math.max(1, Number(settings.followUps.maxPerRun) || 15);
   for (const scenario of settings.followUps.scenarios.filter(item => item.enabled)) {
@@ -152,16 +158,37 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
     // Kịch bản xét lùi N ngày (bám lại khách đã im từ trước lúc bật).
     const since = scenario.backlogDays ? Math.min(activatedAt, now - scenario.backlogDays * 24 * 60 * 60 * 1000) : activatedAt;
     // Khách im lâu nhất được gửi trước (sắp quá 7 ngày).
-    const candidates = findFollowUpCandidates(store, scenario, { now, activatedAt: since }).sort((a, b) => a.repliedAt - b.repliedAt);
+    const boughtLabelIds = labelsForEvents((await readInboxSettings().catch(() => ({ labels: [] }))).labels, ['order', 'handoff', 'complaint', 'warranty', 'cancel', 'bad', 'followup-won']);
+    const candidates = findFollowUpCandidates(store, scenario, { now, activatedAt: since, boughtLabelIds: boughtLabelIds.length ? boughtLabelIds : ['customer', 'consulting', 'complaint'] }).sort((a, b) => a.repliedAt - b.repliedAt);
     for (const candidate of candidates) {
       summary.checked += 1;
       if (state.sent[candidate.key]) { summary.skipped += 1; continue; }
+      // Chỉ bám khách mới: tra Pancake/POS xem khách đã từng mua chưa (khách chỉ bình luận,
+      // chưa có hộp thư thì không tra được). Tra lỗi thì để lượt sau, không gửi mù.
+      if (conversationInfo && candidate.inbox) {
+        let info;
+        try {
+          info = await conversationInfo(candidate.inbox.pageId, `${candidate.inbox.pageId}_${candidate.inbox.psid}`);
+        } catch (error) {
+          summary.deferred = (summary.deferred || 0) + 1;
+          continue;
+        }
+        const returning = returningCustomerReason(info);
+        if (returning) {
+          await updateFollowUpState(current => {
+            current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, error: returning, returning: true };
+            return null;
+          });
+          summary.returning = (summary.returning || 0) + 1;
+          continue;
+        }
+      }
       const text = renderFollowUpMessage(template, candidate.conversation);
       // Ngoài 24 giờ API Pancake/Meta từ chối (#10): không gọi, xếp hàng chờ để
       // nhân viên gửi trong Pancake (extension Pancake gửi được ngoài 24 giờ).
       if (candidate.outsideWindow) {
         await updateFollowUpState(current => {
-          current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, queued: true, text, pageId: candidate.inbox.pageId, psid: candidate.inbox.psid, freeShipDays: scenario.freeShipDays || 0 };
+          current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, queued: true, text, pageId: candidate.inbox.pageId, psid: candidate.inbox.psid, freeShipDays: scenario.freeShipDays || 0, ...(conversationInfo ? { checkedAt: now } : {}) };
           return null;
         });
         summary.queued = (summary.queued || 0) + 1;
@@ -226,6 +253,22 @@ async function markConversationFollowedUp(conversationId, scenario, via, now) {
   publishMessagingEvent({ type: 'customer-panel', conversationId });
 }
 
+const foldText = text => String(text || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+
+/**
+ * Bám đuổi chỉ dành cho khách MỚI. Lý do coi là khách cũ (rỗng = khách mới), từ
+ * thông tin hội thoại tra lúc gửi: hồ sơ khách Pancake/POS (số đơn, tiền đã mua,
+ * ngày mua cuối, thẻ), đơn gần đây của Pancake, lịch sử POS và bảng đơn CRM theo SĐT.
+ */
+export function returningCustomerReason(info = {}) {
+  if (Number(info.orderCount) > 0 || Number(info.purchasedAmount) > 0 || info.lastOrderAt) return 'khách cũ: đã có đơn trên Pancake/POS';
+  if (Number(info.recentOrders) > 0) return 'khách cũ: có đơn gần đây trên Pancake';
+  if (Number(info.posOrders) > 0) return 'khách cũ: SĐT đã có đơn trên POS';
+  if (Number(info.crmOrders) > 0) return 'khách cũ: SĐT đã có đơn trong CRM';
+  if ((info.tags || []).some(tag => /(da mua|khach cu|khach quen|than thiet|\bvip\b|da gui)/.test(foldText(tag)))) return 'khách cũ: thẻ khách đã mua';
+  return '';
+}
+
 const followUpWinWindowMs = 14 * 24 * 60 * 60 * 1000;
 
 /**
@@ -263,10 +306,16 @@ const batchLeaseMs = 45 * 60 * 1000;
 const maxBatchSize = 50;
 const maxRelayAttempts = 2;
 
+// Thẻ mặc định không bám: Đã mua hàng, Cần người xử lý, Khiếu nại, Bảo hành, Hủy đơn, Khách xấu, Bám đuổi thành công.
+const skipLabelIds = new Set(['customer', 'consulting', 'complaint', 'warranty', 'cancelled', 'bad', 'followup-won']);
+const closedOrderText = /(xác nhận lại thông tin đặt hàng|đã gửi xác nhận đơn hàng|đơn của .{1,20} đã được (tạo|lên)|mã vận đơn)/i;
+
 function stillWanted(item, byId, store) {
   const conversation = byId.get(item.conversationId);
   if (!conversation || conversation.botEnabled === false || (Array.isArray(conversation.customerOrders) && conversation.customerOrders.length)) return false;
+  if ((Array.isArray(conversation.labels) ? conversation.labels : []).some(label => skipLabelIds.has(label))) return false;
   const messages = Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : [];
+  if (outgoingOf(messages).some(message => closedOrderText.test(String(message.text || '')))) return false;
   return !incomingOf(messages).some(message => Number(message.createdAt) > item.at);
 }
 
@@ -330,6 +379,34 @@ export async function reconcileFollowUpQueue(now = Date.now(), { readSettings } 
 }
 
 /**
+ * Dọn hàng chờ: tra lại khách chưa được xét (xếp hàng từ bản cũ, chưa lọc khách
+ * cũ), khách đã từng mua thì bỏ khỏi hàng. Mỗi lần tối đa `limit` khách.
+ */
+export async function pruneReturningFromQueue({ conversationInfo, limit = 40, now = Date.now() } = {}) {
+  if (!conversationInfo) return { checked: 0, removed: 0 };
+  const state = await readFollowUpState();
+  const pending = Object.entries(state.sent).filter(([, item]) => item.queued && !item.checkedAt && item.pageId && item.psid).slice(0, limit);
+  let removed = 0;
+  let checked = 0;
+  for (const [key, item] of pending) {
+    let info;
+    try {
+      info = await conversationInfo(item.pageId, `${item.pageId}_${item.psid}`);
+    } catch {
+      continue;
+    }
+    checked += 1;
+    const returning = returningCustomerReason(info);
+    if (returning) {
+      if (await resolveFollowUpQueueItem(key, 'skip', { now, reason: returning })) removed += 1;
+      continue;
+    }
+    await updateFollowUpState(current => { if (current.sent[key]) current.sent[key].checkedAt = now; return null; });
+  }
+  return { checked, removed };
+}
+
+/**
  * Lô gửi cho trạm gửi Pancake (dấu trang chạy trên pancake.vn, đưa từng tin cho
  * extension Pancake). Mỗi khách hỏi lại Pancake ngay lúc này: khách đã có đơn
  * trên Pancake/POS thì bỏ khỏi hàng; lấy ID Facebook toàn cục mà extension cần.
@@ -350,9 +427,10 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
       skipped.push({ key: item.key, name: item.name, reason: `Pancake lỗi: ${error.message}` });
       continue;
     }
-    if (info.recentOrders > 0) {
-      await resolveFollowUpQueueItem(item.key, 'skip', { now, reason: 'khách đã có đơn trên Pancake' });
-      skipped.push({ key: item.key, name: item.name, reason: 'đã có đơn trên Pancake' });
+    const returning = returningCustomerReason(info);
+    if (returning) {
+      await resolveFollowUpQueueItem(item.key, 'skip', { now, reason: returning });
+      skipped.push({ key: item.key, name: item.name, reason: 'khách cũ đã từng mua' });
       continue;
     }
     if (!info.canInbox) {

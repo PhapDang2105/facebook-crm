@@ -19,10 +19,10 @@ import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloa
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
-import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
+import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
-import { buildFollowUpBatch, followUpStatus, markFollowUpWins, recordFollowUpBatchResults, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
@@ -381,6 +381,28 @@ async function cancelChatbotCustomerOrder(conversation, orderId) {
  * `pos<mã POS>` nên đồng bộ lại chỉ cập nhật (hủy trên POS thì hủy theo), không
  * nhân đôi. Trả về số đơn mới ghi.
  */
+/**
+ * Thông tin khách cho bám đuổi (chỉ bám khách mới): hồ sơ khách Pancake/POS của
+ * hội thoại, cộng lịch sử POS và bảng đơn CRM theo các SĐT khách từng để lại.
+ */
+async function followUpConversationInfo(pageId, conversationId) {
+  const info = await fetchPancakeConversationInfo(pageId, conversationId);
+  const phones = info.phones.map(phone => normalizeWarningPhone(phone)).filter(Boolean).slice(0, 3);
+  let posOrders = 0;
+  for (const phone of phones) {
+    const report = await fetchPosPhoneReport(phone).catch(() => null);
+    posOrders = Math.max(posOrders, Number(report?.orders) || 0, Number(report?.customer?.orderCount) || 0);
+  }
+  let crmOrders = 0;
+  if (phones.length) {
+    const store = await readMessagingStore();
+    for (const conversation of store.conversations || []) {
+      for (const order of conversation.customerOrders || []) if (phones.includes(normalizeWarningPhone(order.phone))) crmOrders += 1;
+    }
+  }
+  return { ...info, posOrders, crmOrders };
+}
+
 async function importPosConversationOrders(posOrders) {
   const drafts = [];
   for (const posOrder of Array.isArray(posOrders) ? posOrders : []) {
@@ -1051,7 +1073,7 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, await followUpStatus());
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/run') {
-      const summary = await runFollowUps({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage });
+      const summary = await runFollowUps({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }
     // Hàng chờ ngoài 24 giờ: nhân viên gửi trong Pancake rồi bấm "Đã gửi" (hay "Bỏ qua").
@@ -1066,8 +1088,15 @@ const server = http.createServer(async (request, response) => {
     // và kết quả dấu trang "Gửi bám đuổi" báo về sau khi extension Pancake gửi xong.
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch') {
       const payload = await readBody(request);
-      const batch = await buildFollowUpBatch({ limit: payload.limit, readSettings: readChatbotSettings, conversationInfo: (pageId, conversationId) => fetchPancakeConversationInfo(pageId, conversationId) });
+      const batch = await buildFollowUpBatch({ limit: payload.limit, readSettings: readChatbotSettings, conversationInfo: followUpConversationInfo });
       return sendJson(response, 200, batch);
+    }
+    // Dọn hàng chờ ngay: tra lại khách chưa xét, khách cũ (đã từng mua) bỏ khỏi hàng.
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/prune') {
+      const payload = await readBody(request);
+      const result = await pruneReturningFromQueue({ conversationInfo: followUpConversationInfo, limit: Math.max(1, Math.min(300, Number(payload.limit) || 100)) });
+      console.log(`Bám đuổi: dọn hàng chờ, xét ${result.checked}, bỏ ${result.removed} khách cũ`);
+      return sendJson(response, 200, { ...result, status: await followUpStatus() });
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch-results') {
       const payload = await readBody(request);
@@ -2213,7 +2242,7 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   startPancakeSync();
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.
-  startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage });
+  startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);
   const missing = missingWebhookConfiguration();
   if (missing.length) console.log(`Webhook chưa sẵn sàng, còn thiếu: ${missing.join(', ')}`);

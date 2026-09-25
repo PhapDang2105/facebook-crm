@@ -337,12 +337,20 @@ export async function fetchPancakeConversations({ limit = 60, type = 'INBOX' } =
 export async function fetchPancakeConversationInfo(pageId, conversationId, config = defaultConfig, fetchImpl = fetch) {
   const pageConfig = getPancakePageConfig(pageId, config);
   const body = await pancakeGet(`/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(conversationId)}/messages`, {}, pageConfig, fetchImpl);
-  const customer = Array.isArray(body.customers) ? body.customers[0] : null;
+  const customers = Array.isArray(body.customers) ? body.customers : [];
+  const customer = customers[0] || null;
+  const phoneOf = value => String(typeof value === 'string' ? value : value?.phone_number || value?.captured || '').replace(/\D/g, '');
   return {
     globalId: String(body.global_id || customer?.global_id || ''),
     recentOrders: Array.isArray(body.recent_orders) ? body.recent_orders.length : 0,
     canInbox: body.can_inbox !== false && customer?.can_inbox !== false,
-    name: String(customer?.name || '')
+    name: String(customer?.name || ''),
+    // Hồ sơ khách Pancake (liên kết POS): khách cũ nhận ra được cả khi chưa để lại SĐT.
+    orderCount: Math.max(0, ...customers.map(item => Math.max(Number(item.order_count) || 0, Number(item.succeed_order_count) || 0))),
+    purchasedAmount: Math.max(0, ...customers.map(item => Number(item.purchased_amount) || 0)),
+    lastOrderAt: customers.map(item => String(item.last_order_at || '')).find(Boolean) || '',
+    tags: customers.flatMap(item => (Array.isArray(item.tags) ? item.tags : []).map(tag => String(tag?.name ?? tag))),
+    phones: [...new Set([...(body.recent_phone_numbers || []), ...(body.conv_phone_numbers || []), ...customers.flatMap(item => item.recent_phone_numbers || [])].map(phoneOf).filter(phone => phone.length >= 9))]
   };
 }
 

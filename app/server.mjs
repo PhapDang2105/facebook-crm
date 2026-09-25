@@ -306,6 +306,37 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
   return { ...result, updated: true, created: false };
 }
 
+/**
+ * Khách dặn thêm cho đơn vừa đặt ("gửi hàng mới", "gọi trước khi giao"): ghi vào
+ * ghi chú đơn (hiện ở Xử lý dữ liệu và đi sang POS trong ghi chú "Khách ghi").
+ */
+async function addChatbotOrderNote(conversation, orderId, note) {
+  const text = String(note || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  const result = await updateMessagingStore(store => {
+    const item = store.conversations.find(entry => entry.id === conversation.id);
+    const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
+    if (!existing) return null;
+    if (text && !String(existing.note || '').includes(text)) existing.note = `${String(existing.note || '').trim()} Khách dặn: ${text}.`.trim();
+    existing.updatedAt = Date.now();
+    return { order: { ...existing } };
+  });
+  if (!result) throw new Error('Không tìm thấy đơn để ghi chú.');
+  publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+  await appendOrderToArchive(result.order).catch(() => {});
+  if (result.order.pos?.id) {
+    const posOutcome = await updatePosOrder(result.order, { conversation })
+      .then(() => ({ ...result.order.pos, updatedAt: Date.now(), error: undefined }))
+      .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Ghi chú lên POS lỗi: ${error.message}` }));
+    await updateMessagingStore(store => {
+      const item = store.conversations.find(entry => entry.id === conversation.id);
+      const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
+      if (target) target.pos = posOutcome;
+      return null;
+    });
+  }
+  return { ...result, noted: true, created: false };
+}
+
 /** Khách nhắn hủy đơn vừa đặt: đánh dấu hủy trên chính đơn đó, hủy bên POS nếu đã đẩy. */
 async function cancelChatbotCustomerOrder(conversation, orderId) {
   const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
@@ -796,6 +827,7 @@ const chatbotDependencies = {
   createOrder: createChatbotCustomerOrder,
   updateOrder: updateChatbotCustomerOrder,
   cancelOrder: cancelChatbotCustomerOrder,
+  addOrderNote: addChatbotOrderNote,
   // Khách hỏi đơn đã đặt và gửi SĐT: tìm đơn theo SĐT ở mọi hội thoại (đặt ở
   // trang kia, qua bình luận, đơn landing đồng bộ từ POS), mới nhất trước.
   findOrdersByPhone: async phone => {

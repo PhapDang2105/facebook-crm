@@ -73,5 +73,6 @@
   "ORDER_STATUS_CHECKING": "Dạ em đã nhận số điện thoại của {title} ạ. Em chuyển bạn phụ trách đơn hàng tra ngay và nhắn lại {title} trong tin này nha, {title} chờ em ít phút ạ 💛",
   "LIVE_DEAL_CLAIMED": "Dạ em ghi nhận {title} đã săn deal trên live rồi ạ 💛 {Title} nhắn giúp em loại túi (Xanh/Vàng/Nâu), số lượng, SĐT và địa chỉ nhận hàng, em giữ đúng giá deal và lên đơn cho mình ngay nha ạ 🌾",
   "COMMENT_PUBLIC_SORRY": "Dạ Giọt Nắng xin lỗi vì trải nghiệm chưa tốt ạ, em đã nhắn riêng để bạn phụ trách kiểm tra và hỗ trợ {title} ngay nha 💛",
-  "SHOP_ORDER_RECEIVED": "Dạ em đã nhận đơn {cart}[?total] – tổng {total}[/?] {title} đặt trên Facebook Shop rồi ạ 💛 {Title} không cần gửi lại SĐT, địa chỉ nữa đâu ạ; bên em kiểm tra và gửi xác nhận đơn cho mình ngay nha 🌾"
+  "SHOP_ORDER_RECEIVED": "Dạ em đã nhận đơn {cart}[?total] – tổng {total}[/?] {title} đặt trên Facebook Shop rồi ạ 💛 {Title} không cần gửi lại SĐT, địa chỉ nữa đâu ạ; bên em kiểm tra và gửi xác nhận đơn cho mình ngay nha 🌾",
+  "ORDER_NOTE_ADDED": "Dạ vâng ạ, em đã ghi chú yêu cầu của {title} vào đơn và báo kho rồi ạ 💛[?fresh] Kho sẽ ưu tiên chọn hàng có hạn dùng mới nhất cho mình nha.[/?]"
 }

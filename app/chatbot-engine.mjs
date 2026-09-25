@@ -558,7 +558,7 @@ async function answerChange(change, settings, results, dependencies) {
     const shortAck = message.type === 'text' && /^(ok|oke|okie|okay|okela|da|vang|u|uh|um|a|c|e|nhe|nha|shop|cam ?on|thanks?|tks|\.|👍|❤️)+$/i.test(folded.replace(/\s+/g, ''));
     // "ok" ngay sau tin xác nhận/sửa đơn: cảm ơn luôn, không hỏi mô hình — mô hình
     // từng đọc lịch sử cũ và trả lời "ok" bằng tư vấn mẹ bầu/tiểu đường.
-    const orderJustClosed = ['ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_UNCHANGED'].includes(conversation.botLastTemplateId);
+    const orderJustClosed = ['ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_UNCHANGED', 'ORDER_NOTE', 'SHOP_ORDER_RECEIVED'].includes(conversation.botLastTemplateId);
     const ackReply = shortAck && orderJustClosed && settings.messageTemplates?.THANK_YOU
       ? renderChatbotReply({ template_id: 'THANK_YOU' }, settings.messageTemplates, replyContext)
       : null;
@@ -592,13 +592,20 @@ async function answerChange(change, settings, results, dependencies) {
           ? { ...renderChatbotReply({ template_id: 'ORDER_STATUS_CHECKING' }, settings.messageTemplates, replyContext), attention: true }
           : null;
     }
+    // Khách vừa đặt dặn thêm về giao hàng ("gửi hàng mới cho mình", "giao giờ hành
+    // chính", "gọi trước khi giao"): ghi chú vào đơn, trả lời ngắn — mô hình từng
+    // chọn ORDER_STATUS và gửi lại cả đoạn trạng thái đơn khách vừa đọc xong.
+    const deliveryNote = !nonText && hasOrder && settings.messageTemplates?.ORDER_NOTE_ADDED
+      && /\b(hang moi|date moi|han (su dung |dung )?(dai|xa|moi|lau)|moi san xuat|giao (gio hanh chinh|buoi|sang|chieu|toi|cuoi tuan|truoc|sau|nhanh|som)|goi (truoc|dien truoc|cho (minh|em|chi|anh|c|e) truoc)|de (o|tai|cho) (bao ve|le tan|cong|nha ben|hang xom)|gui (som|nhanh|gap)|dong goi (can than|ky)|(ngoai )?gio hanh chinh)\b/.test(folded)
+      && !/\b(huy|doi|them|khong lay|chua nhan|bi loi|bi hu)\b/.test(folded);
+    const noteReply = deliveryNote ? renderChatbotReply({ template_id: 'ORDER_NOTE' }, settings.messageTemplates, replyContext) : null;
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : cartReply
         ? (shopOrder ? shopOrderReply(shopOrder) : cartReply)
         : nonText
           ? (seesImage ? await askModel() : imageFallback())
-          : ackReply || lookupReply || choiceReply || quickQuote || await askModel();
+          : ackReply || noteReply || lookupReply || choiceReply || quickQuote || await askModel();
     if (seesImage && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
     // "Cảm ơn" mà khách chưa có đơn: ảnh (thường là ảnh sản phẩm, không phải
     // bill) → xử lý như ảnh; "đã đặt rồi" → tra đơn. Không cảm ơn suông rồi thôi.
@@ -730,7 +737,7 @@ async function answerChange(change, settings, results, dependencies) {
     }
     // Sắp tự lên đơn mới mà hội thoại đã có đơn POS trong giờ qua (khách đặt qua
     // Facebook Shop, hay nhân viên vừa lên): không tạo đơn trùng, báo đã nhận đơn.
-    if (reply.order && !reply.order.updateOrderId && !reply.order.cancelOrderId && !isComment && dependencies.findShopOrder && settings.messageTemplates?.SHOP_ORDER_RECEIVED) {
+    if (reply.order && !reply.order.updateOrderId && !reply.order.cancelOrderId && !reply.order.noteOrderId && !isComment && dependencies.findShopOrder && settings.messageTemplates?.SHOP_ORDER_RECEIVED) {
       const existing = await dependencies.findShopOrder(conversation, { since: Date.now() - 60 * 60 * 1000 }).catch(() => null);
       if (existing) reply = shopOrderReply(existing);
     }
@@ -743,16 +750,20 @@ async function answerChange(change, settings, results, dependencies) {
     const wantsUpdate = Boolean(reply.order?.updateOrderId) && typeof updateOrder === 'function';
     // Khách hủy đơn vừa đặt: đánh dấu hủy đúng đơn đó (không tạo, không sửa).
     const wantsCancel = Boolean(reply.order?.cancelOrderId) && typeof cancelOrder === 'function';
-    const outcome = settings.responseMode === 'automatic' && settings.autoOrder !== false && reply.order && (wantsCancel || wantsUpdate || createOrder) && !isComment
-      ? (wantsCancel
-        ? await cancelOrder(conversation, reply.order.cancelOrderId)
-        : wantsUpdate
-          ? await updateOrder(conversation, reply.order.updateOrderId, reply.order)
-          : await createOrder(conversation, reply.order, { sourceMessageId: String(change.message.mid || change.message.id || '') }))
+    // Khách dặn thêm cho đơn vừa đặt ("gửi hàng mới", "gọi trước khi giao"): ghi vào đơn.
+    const wantsNote = Boolean(reply.order?.noteOrderId) && typeof dependencies.addOrderNote === 'function';
+    const outcome = settings.responseMode === 'automatic' && settings.autoOrder !== false && reply.order && (wantsNote || wantsCancel || wantsUpdate || createOrder) && !isComment
+      ? (wantsNote
+        ? await dependencies.addOrderNote(conversation, reply.order.noteOrderId, reply.order.note)
+        : wantsCancel
+          ? await cancelOrder(conversation, reply.order.cancelOrderId)
+          : wantsUpdate
+            ? await updateOrder(conversation, reply.order.updateOrderId, reply.order)
+            : await createOrder(conversation, reply.order, { sourceMessageId: String(change.message.mid || change.message.id || '') }))
       : null;
-    // Đơn vừa hủy không phải "đơn mới" cho nhãn/phiếu.
-    const order = outcome?.cancelled ? null : outcome?.order || null;
-    const alreadyHandled = Boolean(outcome) && outcome.created === false && !outcome.updated && !outcome.cancelled;
+    // Đơn vừa hủy hay chỉ thêm ghi chú không phải "đơn mới" cho nhãn/phiếu.
+    const order = outcome?.cancelled || outcome?.noted ? null : outcome?.order || null;
+    const alreadyHandled = Boolean(outcome) && outcome.created === false && !outcome.updated && !outcome.cancelled && !outcome.noted;
     let privateError = '';
     let privateSkipped = false;
     if (settings.responseMode === 'automatic' && isComment) {

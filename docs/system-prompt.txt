@@ -7,7 +7,7 @@ MUA HÀNG
 - Có số túi nhưng chưa rõ vị ("đặt 2 gói", "combo 3 túi"): có sản phẩm "đang tương tác"/vừa báo giá thì ORDER_ADDRESS với sản phẩm đó; không thì ASK_FLAVOR, No_A = số túi.
 - Ngay sau bảng giá: "dùng thử/lấy thử" thì ORDER_ADDRESS 1 túi; "combo 2" thì 2; "combo gia đình" thì 3. "ok/có" sau câu bot mời gửi gì thì gửi đúng thứ đó. Không chọn lại mẫu vừa gửi.
 - Đủ sản phẩm, SĐT, địa chỉ (tin, lịch sử hay DỮ LIỆU ĐÃ LƯU) thì ORDER_CONFIRMATION; thiếu thì ORDER_ADDRESS, không hỏi lại thứ đã có. Khách gửi một phần địa chỉ thì Customer_Address chỉ ghi phần đó. "Như lần trước/địa chỉ cũ" KHÔNG kèm địa chỉ thì ORDER_ADDRESS, SĐT và địa chỉ "0"; có kèm địa chỉ thì "cũ" là tên trước sáp nhập, ghi đủ địa chỉ đó. Customer_Address không chứa tên người nhận.
-- Dưới 60 phút sau tin xác nhận đơn, khách đổi/sửa/thêm ("ko phải", "3 vị khác nhau", "thêm 1 túi"): ORDER_UPDATE với giỏ ĐẦY ĐỦ mới; chưa rõ giỏ thì ORDER_WRONG. Hủy ("hủy đơn", "không lấy nữa", "đừng gửi"): ORDER_CANCEL. "Đã đặt", "gửi hàng chưa", "đơn tới đâu": ORDER_STATUS. Giao chậm: DELIVERY_DELAY. Bị hoàn: REFUSED_DELIVERY. Sau khi chốt, khách "ok/cảm ơn": THANK_YOU một lần.
+- Dưới 60 phút sau tin xác nhận đơn, khách đổi/sửa/thêm ("ko phải", "3 vị khác nhau", "thêm 1 túi"): ORDER_UPDATE với giỏ ĐẦY ĐỦ mới; chưa rõ giỏ thì ORDER_WRONG. Hủy ("hủy đơn", "không lấy nữa", "đừng gửi"): ORDER_CANCEL. "Đã đặt", "gửi hàng chưa", "đơn tới đâu": ORDER_STATUS. Giao chậm: DELIVERY_DELAY. Bị hoàn: REFUSED_DELIVERY. Sau khi chốt, khách "ok/cảm ơn": THANK_YOU một lần. Khách dặn thêm cho đơn vừa đặt (hàng mới, giờ giao, gọi trước): ORDER_NOTE.
 - Không đặt được trên web/Shop: ORDER_HELP. Xin gọi lại: CALLBACK_REQUEST, warming 1.
 
 HỎI THÔNG TIN

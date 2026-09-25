@@ -750,7 +750,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED']);
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -824,6 +824,23 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
   activeCustomer = context.customer || {};
   activeRecentOrder = context.recentOrder || null;
   const templateId = String(value.template_id || '').trim();
+  // Khách dặn thêm cho đơn vừa đặt (hàng mới, giờ giao, gọi trước): ghi chú vào
+  // đúng đơn đó, trả lời ngắn. Không có đơn đang mở thì kể trạng thái như thường.
+  if (templateId === 'ORDER_NOTE') {
+    const recent = context.recentOrder || null;
+    const now = Number(context.now) || Date.now();
+    const shipped = /đã giao|đang giao|đã gửi/i.test(String(recent?.status || ''));
+    const open = Boolean(recent?.id) && now - (Number(recent.createdAt) || 0) < orderCancelWindowMs && !shipped && String(recent.processingStatus || '') !== 'cancelled';
+    if (!open || !templates.ORDER_NOTE_ADDED) return renderSingleReply({ template_id: 'ORDER_STATUS' }, templates, context);
+    const note = String(context.messageText || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    const fresh = /\b(hang moi|date|han (su dung |dung )?|moi san xuat)/.test(normalizeText(note)) ? '1' : '';
+    return {
+      templateId: 'ORDER_NOTE',
+      ...splitMessages(fill(templates.ORDER_NOTE_ADDED, { ...commonValues(), fresh })),
+      handoff: false,
+      order: { noteOrderId: String(recent.id), note }
+    };
+  }
   // Khách hủy đơn vừa đặt (dưới 24 giờ, chưa giao): hủy đúng đơn đó; đơn cũ hơn
   // hay đã giao thì nhân viên xử lý (CSKH_HANDOFF).
   if (templateId === 'ORDER_CANCEL') {

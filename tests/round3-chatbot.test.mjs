@@ -214,3 +214,21 @@ test('tên người nhận ghi đầu địa chỉ được tách ra; tên đư�
   assert.equal(stripReceiverName('Lê Lợi, Phường Bến Nghé, Quận 1'), 'Lê Lợi, Phường Bến Nghé, Quận 1');
   assert.equal(stripReceiverName('12 Lê Lợi, Quận 1'), '12 Lê Lợi, Quận 1');
 });
+
+test('vừa chốt đơn, khách dặn "Gửi hàng mới cho mình nhé shop": ghi chú vào đơn, trả lời ngắn — không gửi lại trạng thái đơn', async () => {
+  const recentOrder = { id: 'tb1', automatic: true, createdAt: Date.now() - 4 * 60 * 1000, phone: '0969000970', address: 'Cần Thơ', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }] };
+  const notes = [];
+  const out = await run({ customerOrders: [recentOrder], botLastTemplateId: 'ORDER_CONFIRMATION', botLastReplyAt: Date.now() - 4 * 60 * 1000 }, 'Gửi hàng mới cho mình nhé shop', {
+    reply: { templateId: 'ORDER_STATUS', messages: ['Dạ em kiểm tra thấy đơn của mình gồm…'], handoff: false },
+    extraDeps: { addOrderNote: async (_c, id, note) => { notes.push([id, note]); return { order: recentOrder, noted: true, created: false }; } }
+  });
+  assert.equal(out.asked, false, 'không cần hỏi mô hình');
+  assert.deepEqual(notes, [['tb1', 'Gửi hàng mới cho mình nhé shop']]);
+  assert.equal(out.sent.length, 1);
+  assert.match(out.sent[0], /ghi chú yêu cầu của anh\/chị vào đơn/);
+  assert.match(out.sent[0], /hạn dùng mới nhất/);
+  assert.doesNotMatch(out.sent[0], /đặt lúc/);
+  // Chưa có đơn: không ghi chú gì, để mô hình trả lời như thường.
+  const none = await run({}, 'Gửi hàng mới cho mình nhé shop', { reply: { templateId: 'GENERAL_INFO', messages: ['bảng giá'], handoff: false } });
+  assert.equal(none.asked, true);
+});

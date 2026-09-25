@@ -22,6 +22,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
+import { goldenLabeled, goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
@@ -1071,6 +1072,24 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, result);
     }
     // Bám đuổi: trạng thái (bật từ khi nào, lần chạy cuối, các lần gửi gần nhất) và chạy tay một lượt.
+    // Bộ test vàng: lô tin cần chấm, nạp thêm tin, ghi nhãn nhân viên chấm.
+    if (request.method === 'GET' && url.pathname === '/api/chatbot/golden') {
+      return sendJson(response, 200, { ...(await goldenSetOverview({ batch: Math.max(1, Math.min(50, Number(url.searchParams.get('batch')) || 10)) })), templateIds: Object.keys((await readChatbotSettings()).messageTemplates || {}) });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/golden/import') {
+      const payload = await readBody(request);
+      return sendJson(response, 200, await importGoldenItems(payload.items));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/golden/label') {
+      const payload = await readBody(request);
+      try {
+        const item = await labelGoldenItem(String(payload.id || ''), String(payload.label || ''));
+        if (!item) return sendJson(response, 404, { error: 'Không thấy tin này trong bộ test.' });
+        return sendJson(response, 200, { item, ...(await goldenSetOverview({ batch: 10 })) });
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/follow-ups') {
       return sendJson(response, 200, await followUpStatus());
     }

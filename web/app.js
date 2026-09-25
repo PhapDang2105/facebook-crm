@@ -508,6 +508,51 @@ chatbotFollowUpQueue?.addEventListener('click', async event => {
     alert(error.message);
   }
 });
+// ---------------------------------------------------------------------------
+// Chấm mẫu (bộ test vàng): nhân viên chọn mẫu bot NÊN trả lời cho tin khách thật.
+const chatbotGoldenPanel = document.querySelector('#chatbot-golden-panel');
+let goldenBatch = [];
+let goldenTemplateIds = [];
+async function renderChatbotGolden() {
+  if (!chatbotGoldenPanel) return;
+  try {
+    const data = await readApiResponse(await fetch('/api/chatbot/golden?batch=5'));
+    goldenBatch = data.pending || [];
+    goldenTemplateIds = data.templateIds || [];
+    const agreement = data.judged ? ` · gợi ý đúng ${data.agreeWithSuggestion}/${data.judged} (${Math.round(100 * data.agreeWithSuggestion / data.judged)}%)` : '';
+    const progress = `Đã chấm <b>${data.labeled}</b>/${data.total}${agreement}${data.skipped ? ` · bỏ qua ${data.skipped}` : ''}`;
+    if (!data.total) { chatbotGoldenPanel.innerHTML = '<div class="golden-progress">Chưa có tin nào để chấm (bộ test được nạp từ hội thoại thật).</div>'; return; }
+    if (!goldenBatch.length) { chatbotGoldenPanel.innerHTML = `<div class="golden-progress">${progress} — đã chấm hết, cảm ơn 💛</div>`; return; }
+    const options = selected => goldenTemplateIds.map(id => `<option value="${id}"${id === selected ? ' selected' : ''}>${escapeHtml(id)} — ${escapeHtml(String(chatbotTemplatesState[id] || '').replace(/\s+/g, ' ').slice(0, 60))}</option>`).join('');
+    chatbotGoldenPanel.innerHTML = `<div class="golden-progress">${progress}. Phím Enter trong ô chọn = xác nhận.</div>` + goldenBatch.map((item, index) => `<div class="golden-item" data-golden-index="${index}">
+      <div class="golden-context">${item.source === 'comment' ? '<b>Bình luận</b>' : '<b>Hộp thư</b>'}${item.prevCustomer ? ` · Khách trước: “${escapeHtml(item.prevCustomer)}”` : ''}${item.prevBot ? `<br>Bot vừa trả lời (${escapeHtml(item.lastTemplate || '?')}): “${escapeHtml(item.prevBot)}”` : ''}</div>
+      <div class="golden-text">${escapeHtml(item.text)}</div>
+      <div class="golden-actions"><select data-golden-select="${index}">${options(item.suggested)}<option value="OTHER"${item.suggested === 'OTHER' ? ' selected' : ''}>OTHER — không mã nào hợp / cần người</option></select><button type="button" class="is-primary" data-golden-ok="${index}">Đúng mẫu này</button><button type="button" data-golden-skip="${index}">Không rõ, bỏ qua</button></div>
+    </div>`).join('');
+  } catch (error) {
+    chatbotGoldenPanel.textContent = `Không tải được bộ test: ${error.message}`;
+  }
+}
+async function submitGolden(index, label) {
+  const item = goldenBatch[index];
+  if (!item) return;
+  try {
+    await readApiResponse(await fetch('/api/chatbot/golden/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id, label }) }));
+    renderChatbotGolden();
+  } catch (error) { alert(error.message); }
+}
+chatbotGoldenPanel?.addEventListener('click', event => {
+  const ok = event.target.closest('[data-golden-ok]');
+  const skip = event.target.closest('[data-golden-skip]');
+  if (ok) { const index = Number(ok.dataset.goldenOk); submitGolden(index, chatbotGoldenPanel.querySelector(`[data-golden-select="${index}"]`)?.value || ''); }
+  else if (skip) submitGolden(Number(skip.dataset.goldenSkip), 'SKIP');
+});
+chatbotGoldenPanel?.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  const select = event.target.closest('[data-golden-select]');
+  if (select) { event.preventDefault(); submitGolden(Number(select.dataset.goldenSelect), select.value); }
+});
+
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
 const chatbotSettingsMemoryWindowRange = document.querySelector('#chatbot-settings-memory-window-range');
 const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
@@ -4805,6 +4850,7 @@ async function loadChatbotSettings() {
     chatbotFollowUpScenarios = Array.isArray(settings.followUps?.scenarios) ? settings.followUps.scenarios.map(item => ({ ...item })) : [];
     // Danh sách kịch bản vẽ sau khi mẫu tin nạp xong (renderChatbotTemplateList gọi renderChatbotFollowUps).
     renderChatbotFollowUpStatus();
+    renderChatbotGolden();
     chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
     syncChatbotMemoryWindow('number');
     chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;

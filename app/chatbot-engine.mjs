@@ -762,6 +762,10 @@ async function answerChange(change, settings, results, dependencies) {
           bundleSize: bundle.length,
           complaint: isComplaint({ text: message.text, keywords: settings.complaintKeywords }),
           commentBasket,
+          trialOffer: Boolean(trialState),
+          quotedProduct: quotedName || '',
+          addressComplete: Boolean(message.type === 'text' && conversation.pendingOrder?.items?.length && describeDeliveryAddress(String(message.text || '').replace(/\+?\d[\d .-]{8,13}/g, ' ').trim()).complete),
+          addressText: String(message.text || '').replace(/\+?\d[\d .-]{8,13}/g, ' ').replace(/\s+/g, ' ').trim(),
           smallPackContext: conversation.botLastTemplateId === 'PACKAGING_INFO'
             || (conversation.pendingOrder?.items || []).some(item => /^CB10|combo 10/i.test(String(item.code || item.product || '')))
             || replyContext.recentOutgoing.some(text => /gói nhỏ|combo 10 gói/i.test(text))
@@ -770,7 +774,10 @@ async function answerChange(change, settings, results, dependencies) {
     const ruleReply = ruled
       ? (ruled.commentRule ? commentRuleReply() : { ...renderChatbotReply(ruled.value, settings.messageTemplates, replyContext), ...(ruled.attention ? { attention: true } : {}) })
       : null;
-    if (ruled) console.log(`Luật ${ruled.rule}${ruleMode === 'shadow' ? ' (thử)' : ''} → ${ruleReply.templateId} (${conversation.id})`);
+    // Luật thử nghiệm: chỉ dùng khi settings.experimentalRules = 'on'; còn lại ghi log so với mô hình.
+    const ruleUsable = Boolean(ruled) && !(ruled.experimental && settings.experimentalRules !== 'on');
+    const ruleShadow = Boolean(ruled) && (ruleMode === 'shadow' || !ruleUsable);
+    if (ruled) console.log(`Luật ${ruled.rule}${ruleShadow ? ' (thử)' : ''} → ${ruleReply.templateId} (${conversation.id})`);
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : cartReply
@@ -785,7 +792,7 @@ async function answerChange(change, settings, results, dependencies) {
               : await askModel({ trialHint: trialModelHint(trialState) }))
             : nonText
               ? (seesImage ? await askModel() : imageFallback())
-              : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' ? ruleReply : null) || await askModel();
+              : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || await askModel();
     // Mô hình trả lời khách đang giữ ưu đãi bằng mẫu của luồng chung (bảng giá, combo,
     // mời 2 túi, "từ 2 túi miễn ship"): đổi sang mẫu dùng thử.
     if (trialActive && !trialOutcome.value) {
@@ -814,7 +821,7 @@ async function answerChange(change, settings, results, dependencies) {
       && conversation.botLastTemplateId === reply.templateId && settings.messageTemplates?.TRIAL_REMIND) {
       reply = renderChatbotReply({ template_id: 'TRIAL_REMIND', values: { bags: trialBagOptions() } }, settings.messageTemplates, replyContext);
     }
-    if (ruled && ruleMode === 'shadow') console.log(`Luật ${ruled.rule} (thử): luật ${ruleReply.templateId} / mô hình ${reply.templateId}${ruleReply.templateId === reply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
+    if (ruleShadow) console.log(`Luật ${ruled.rule} (thử): luật ${ruleReply.templateId} / mô hình ${reply.templateId}${ruleReply.templateId === reply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
     if (seesImage && !trialActive && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
     // "Cảm ơn" mà khách chưa có đơn: ảnh (thường là ảnh sản phẩm, không phải
     // bill) → xử lý như ảnh; "đã đặt rồi" → tra đơn. Không cảm ơn suông rồi thôi.

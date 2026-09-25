@@ -135,6 +135,8 @@ export function normalizeChatbotSettings(value = {}) {
     structuredOutput: value.structuredOutput !== false,
     // Luật nhận ý bằng code trước mô hình: 'on' | 'shadow' (chỉ ghi log so sánh) | 'off'.
     ruleIntent: ['on', 'shadow', 'off'].includes(value.ruleIntent) ? value.ruleIntent : 'on',
+    // Luật thử nghiệm (TRIAL_ASK, ORDER_ASK, TERSE_HOW, ADDRESS_COMPLETE): 'shadow' chỉ ghi log so với mô hình.
+    experimentalRules: value.experimentalRules === 'on' ? 'on' : 'shadow',
     // Các phần rút gọn ngữ cảnh gửi mô hình (mặc định tắt cả; bật từng phần sau khi A/B đạt).
     contextTrim: Object.fromEntries(['memory', 'query', 'catalog', 'templates'].map(key => [key, value.contextTrim?.[key] === true])),
     // Mức suy nghĩ của model ('' = mặc định của model; minimal | low | medium | high).

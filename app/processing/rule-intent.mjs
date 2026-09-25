@@ -34,6 +34,14 @@ const GREETING = /^(hi|hello|helo|alo|a lo|chao|xin chao|chao (shop|em|ban|chi|a
 const WANT_BUY = /^(?:(?:minh|em|e|chi|c|toi|m|mk|to|tui) (?:muon |can |dinh )?|(?:muon|can) )(?:mua|dat hang|mua hang|dat mua|order|mua sp|mua san pham|tham khao)$/;
 const LIVE_DEAL = /\b(da (san|mua|chot|dat)|san (duoc|deal|the nao|tn|sao|ntn)|len ma|ma gi|cach (san|chot|tham gia|dat|mua))\b/;
 const PHONE_ONLY = /^(?:(?:sdt|dt|so dt|so dien thoai)\s*:?\s*)?\+?[0-9][0-9 .-]{8,13}$/;
+// ===== Luật thử nghiệm (vòng 6, đếm trên 1.678 tin 22–25/09): chạy ẩn so với mô hình cho tới khi
+// settings.experimentalRules = 'on'. Kết quả trả về mang `experimental: true`.
+// "Lấy c 1 túi dùng thử", "Mình lấy một túi xanh dung thử đã", "C.mua 1 túi ăn thử được không shop".
+const TRIAL_ASK = /^(?:(?:cho|lay|mua|dat|gui)\s)?(?:(?:em|e|minh|m|mk|chi|c|toi|a|anh|to)\s)?(?:(?:mua|lay)\s)?(?:(?:1|mot)\s)?(?:(?:tui|goi|bich)\s)?(?:(xanh|vang|nau|cacao)\s)?(?:(?:nguyen ban|la)\s)?(?:dung|an|mua|lay) thu(?:\s(?:truoc|da|xem|duoc khong|dc ko|dc k|nha|nhe|coi|xem sao))?$/;
+// "Mình chưa nhận được hàng ạ", "Bữa e đặt hàng sao chưa thấy đơn về" (không SĐT, không nêu sản phẩm).
+const ORDER_ASK = /\b(da dat|dat roi|da mua|da chot|chua (thay|nhan)( duoc)? (hang|don)|don (toi|den) dau|gui hang chua|kiem tra don|tra don|sao chua thay|bao gio (nhan|toi|giao))\b/;
+// "Mua sao e", "Đặt ở đâu e", "Gannola bán sao ạ", "Bán ntn vậy shop nhỉ".
+const TERSE_HOW = /^(?:(?:granola|gannola|gran) )?(?:ban|mua|dat) (?:sao|ntn|nhu the nao|the nao|o dau|kieu gi|lam sao|ra sao)$/;
 
 // Câu hỏi thông tin: [luật, regex trên core, mẫu, điều kiện loại trừ thêm].
 const INFO_RULES = [
@@ -66,6 +74,8 @@ const ICEBREAKERS = [
   [/^get started$/, 'WELCOME']
 ];
 
+const productHintName = value => (value && typeof value === 'string' ? value : '');
+const quotedProductName = value => (value && typeof value === 'string' ? value : '');
 const colourSku = colour => getCatalogProducts().find(item => item.active !== false && /^gra-/i.test(item.sku || '') && String(item.sku || '').toLowerCase().includes(`-${colour}-`));
 
 /** Giỏ ghi mơ hồ ("combo xanh", "2 gói xanh vàng", "vàng 2 túi", "1 combo vàng"): để mô hình. */
@@ -121,6 +131,25 @@ export function ruleIntent(text, ctx = {}) {
 
   if (ctx.livestream && !ctx.hasRecentOrder && !basket.length && !complaint && LIVE_DEAL.test(s) && !/\b(chua (nhan|thay|giao)|huy|khieu nai)\b/.test(s)) {
     return { rule: 'LIVE_DEAL', value: { template_id: 'LIVE_DEAL_CLAIMED' }, attention: true };
+  }
+  // --- Luật thử nghiệm (ẩn cho tới khi bật) ---
+  if (!isComment && !complaint && !ctx.complaint && !phone && !ctx.trialOffer) {
+    if (TERSE_HOW.test(s)) return { ...priceGeneral('TERSE_HOW'), experimental: true };
+    const trialAsk = orderAgeMin >= 60 && !ctx.hasBasket && s.length <= 60 && s.match(TRIAL_ASK);
+    if (trialAsk) {
+      const colour = trialAsk[1] ? (trialAsk[1] === 'cacao' ? 'nau' : trialAsk[1]) : '';
+      const product = colour ? colourSku(colour)?.name || '' : (productHintName(ctx.contextProduct) || quotedProductName(ctx.quotedProduct));
+      return { rule: 'TRIAL_ASK', experimental: true, value: product ? { template_id: 'ORDER_ADDRESS', Product_N1: product, No_A: '1' } : { template_id: 'ASK_FLAVOR' } };
+    }
+  }
+  // Hỏi đơn không SĐT ("chưa nhận được hàng" cũng là câu than → kèm thẻ cần người xem).
+  if (!isComment && !phone && !ctx.trialOffer && s.length <= 70 && !ORDER_VERB.test(s) && ORDER_ASK.test(s) && !/\b(xanh|vang|nau|cacao|combo|tui|goi)\b/.test(s)) {
+    return { rule: 'ORDER_ASK', experimental: true, value: { template_id: 'ORDER_STATUS' }, ...(complaint || ctx.complaint ? { attention: true } : {}) };
+  }
+  // Địa chỉ đủ 3 cấp (± SĐT) ngay sau câu xin SĐT/địa chỉ: bộ soạn đơn tự đọc, không cần mô hình.
+  if (ctx.hasBasket && ctx.lastWasOrderStep && ctx.addressComplete && !isComment && !complaint
+    && !/\b(tui|goi|bich|xanh|vang|nau|cacao|combo|huy|doi|them|bot|khong lay)\b/.test(s.replace(/\bxa\b|\bhuyen\b|\bquan\b|\bphuong\b/g, ' '))) {
+    return { rule: 'ADDRESS_COMPLETE', experimental: true, value: { template_id: 'ORDER_ADDRESS', Customer_Address: ctx.addressText } };
   }
   for (const [pattern, target] of ICEBREAKERS) {
     if (!pattern.test(s)) continue;

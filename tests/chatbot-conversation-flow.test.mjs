@@ -296,3 +296,28 @@ test('bình luận: luồng chưa biết xưng hô thì bot mượn giới tính
   assert.match(sent[0], /Dạ em thấy anh để lại bình luận/);
   assert.doesNotMatch(sent.join(' '), /anh\/chị/);
 });
+
+test('luật thử nghiệm mặc định chỉ chạy ẩn: "Mua sao e" vẫn hỏi mô hình, log so sánh; bật experimentalRules=on thì luật trả lời', async () => {
+  const run = async extra => {
+    const sent = [];
+    let asked = false;
+    const logs = [];
+    const original = console.log;
+    console.log = (...args) => { logs.push(args.join(' ')); };
+    try {
+      await processChatbotChanges([{ type: 'message', conversation: { id: 'p:u2', pageId: 'p', psid: 'u2', name: 'Khách', botEnabled: true }, message: { id: 'm9', mid: 'm9', direction: 'incoming', type: 'text', text: 'Mua sao e', createdAt: Date.now() } }], {
+        readSettings: async () => ({ ...settings, ruleIntent: 'on', ...extra }),
+        listMessages: async () => [], saveBotState: async () => {},
+        sendMessage: async (_c, message) => { sent.push(message.text || '[ảnh]'); return { message: { mid: 'x' } }; },
+        requestReply: async () => { asked = true; return { templateId: 'GENERAL_INFO', messages: ['Bảng giá từ mô hình'], handoff: false }; }
+      });
+    } finally { console.log = original; }
+    return { sent, asked, logs };
+  };
+  const shadow = await run({});
+  assert.equal(shadow.asked, true);
+  assert.ok(shadow.logs.some(line => /Luật TERSE_HOW \(thử\): luật GENERAL_INFO \/ mô hình GENERAL_INFO ✓/.test(line)), shadow.logs.join('\n'));
+  const on = await run({ experimentalRules: 'on' });
+  assert.equal(on.asked, false);
+  assert.match(on.sent[0], /nhà em đang có/);
+});

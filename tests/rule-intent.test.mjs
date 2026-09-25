@@ -116,3 +116,20 @@ test('rút gọn ngữ cảnh: mặc định giữ bản cũ; bật từng phầ
   assert.deepEqual(thinkingConfigFor('gemini-2.5-flash', 'low'), { thinkingBudget: 512 });
   assert.equal(thinkingConfigFor('gemini-3-flash-preview', ''), null);
 });
+
+test('luật thử nghiệm (vòng 6) mang experimental: TRIAL_ASK / ORDER_ASK / TERSE_HOW / ADDRESS_COMPLETE', () => {
+  const ctx = { commentBasket };
+  const trial = ruleIntent('Lấy c 1 túi dùng thử', ctx);
+  assert.deepEqual([trial.rule, trial.experimental, trial.value.template_id], ['TRIAL_ASK', true, 'ASK_FLAVOR']);
+  const xanh = ruleIntent('Mình lấy một túi xanh dung thử đã', ctx);
+  assert.deepEqual([xanh.value.template_id, xanh.value.Product_N1, xanh.value.No_A], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g', '1']);
+  assert.equal(ruleIntent('C.mua 1 túi ăn thử được không shop', { ...ctx, contextProduct: 'Granola Túi Vàng 350g' }).value.Product_N1, 'Granola Túi Vàng 350g');
+  assert.equal(ruleIntent('Lấy c 1 túi dùng thử', { ...ctx, trialOffer: true }), null, 'khách đang giữ ưu đãi: luồng dùng thử lo');
+  const status = ruleIntent('Minh chưa nhận được hàng ạ', ctx);
+  assert.deepEqual([status.rule, status.value.template_id], ['ORDER_ASK', 'ORDER_STATUS']);
+  assert.equal(ruleIntent('Mua sao e', ctx).rule, 'TERSE_HOW');
+  assert.equal(ruleIntent('Gannola bán sao ạ', ctx).value.template_id, 'GENERAL_INFO');
+  const address = ruleIntent('Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai 0909123456', { ...ctx, hasBasket: true, lastWasOrderStep: true, addressComplete: true, addressText: 'Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai' });
+  assert.deepEqual([address.rule, address.value.template_id, address.value.Customer_Address], ['ADDRESS_COMPLETE', 'ORDER_ADDRESS', 'Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai']);
+  assert.notEqual(ruleIntent('đổi sang 2 túi vàng, gửi về Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai', { ...ctx, hasBasket: true, lastWasOrderStep: true, addressComplete: true, addressText: 'x' })?.rule, 'ADDRESS_COMPLETE', 'kèm đổi giỏ: để mô hình');
+});

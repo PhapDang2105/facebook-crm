@@ -21,15 +21,26 @@ export function featuresOf(row) {
     set.add(`w:${words[i]}`);
     if (i + 1 < words.length) set.add(`w2:${words[i]} ${words[i + 1]}`);
   }
-  set.add(`len:${words.length <= 2 ? 'xs' : words.length <= 5 ? 's' : words.length <= 12 ? 'm' : 'l'}`);
-  set.add(`src:${row.source === 'comment' ? 'comment' : 'inbox'}`);
-  set.add(`last:${row.lastTemplate || 'none'}`);
+  const length = words.length <= 2 ? 'xs' : words.length <= 5 ? 's' : words.length <= 12 ? 'm' : 'l';
+  const source = row.source === 'comment' ? 'comment' : 'inbox';
+  const last = row.lastTemplate || 'none';
+  set.add(`len:${length}`);
+  set.add(`src:${source}`);
+  set.add(`last:${last}`);
   if (row.lastWasOrderStep) set.add('ctx:orderstep');
   if (row.hasBasket) set.add('ctx:basket');
   if (row.livestream) set.add('ctx:live');
-  if (text.includes('<sdt>')) set.add('has:sdt');
-  if (/\b\d{1,2}\b/.test(text)) set.add('has:num');
-  if (/\b(xanh|vang|nau|cacao)\b/.test(text)) set.add('has:colour');
+  const hasPhone = text.includes('<sdt>');
+  const hasNumber = /\b\d{1,2}\b/.test(text);
+  const hasColour = /\b(xanh|vang|nau|cacao)\b/.test(text);
+  if (hasPhone) set.add('has:sdt');
+  if (hasNumber) set.add('has:num');
+  if (hasColour) set.add('has:colour');
   if (/\?/.test(String(row.text || ''))) set.add('has:q');
+  // Giao đặc trưng (kiểu Vowpal Wabbit): cùng chữ "1" / "xanh" / "ok" nhưng ý khác nhau tuỳ mẫu
+  // bot vừa gửi và bước đơn — chỉ giao với từ đơn để không phình từ vựng.
+  for (const word of words.slice(0, 8)) set.add(`x:${last}|${word}`);
+  if (row.lastWasOrderStep) { if (hasNumber) set.add('x:orderstep|num'); if (hasColour) set.add('x:orderstep|colour'); if (hasPhone) set.add('x:orderstep|sdt'); set.add(`x:orderstep|len:${length}`); }
+  set.add(`x:${source}|len:${length}`);
   return set;
 }

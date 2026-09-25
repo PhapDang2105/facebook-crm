@@ -796,7 +796,7 @@ async function answerChange(change, settings, results, dependencies) {
     const intent = intentMode !== 'off' && message.type === 'text' && !asksForHuman && !cartReply && !trialActive
       ? predictIntent({ text: message.text, source: conversation.source, lastTemplate: conversation.botLastTemplateId || '', lastWasOrderStep: isOrderStep(conversation.botLastTemplateId), hasBasket: Boolean(conversation.pendingOrder?.items?.length), livestream: isLivestreamPost(conversation) })
       : null;
-    const intentUsable = Boolean(intent) && intentMode === 'on' && intent.confidence >= (Number(settings.intentThreshold) || 0.9) && intentSafeTemplates.has(intent.templateId) && settings.messageTemplates?.[intent.templateId] !== undefined
+    const intentUsable = Boolean(intent) && intentMode === 'on' && intent.confidence >= (Number(settings.intentThreshold) || 0.9) && intent.margin >= 0.25 && intentSafeTemplates.has(intent.templateId) && settings.messageTemplates?.[intent.templateId] !== undefined
       && !phoneInText && conversation.source !== 'comment';
     const intentReply = intentUsable ? renderChatbotReply({ template_id: intent.templateId, ...(intent.templateId === 'PRICE_QUOTE' && productHint(ruleProduct) ? { Product_N1: ruleProduct } : {}) }, settings.messageTemplates, replyContext) : null;
     const ruleUsable = Boolean(ruled) && !ruled.shadowOnly;
@@ -1203,7 +1203,7 @@ async function answerChange(change, settings, results, dependencies) {
       if (order && sendReceipt && !outcome?.updated) await sendReceipt(conversation, order);
     }
     // Mô hình nhỏ so với câu trả lời thật (luật / LLM): đọc log để quyết định bật.
-    if (intent) console.log(`Mô hình nhỏ${intentUsable && reply === intentReply ? '' : ' (thử)'}: ${intent.templateId} (${intent.confidence.toFixed(2)}) / thật ${reply.templateId}${intent.templateId === reply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
+    if (intent) console.log(`Mô hình nhỏ${intentUsable && reply === intentReply ? '' : ' (thử)'}: ${intent.templateId} (${intent.confidence.toFixed(2)}, biên ${intent.margin.toFixed(2)}) / thật ${reply.templateId}${intent.templateId === reply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
     const labelEvents = autoLabelEventsFor({
       order,
       // Ảnh khách gửi: thẻ "Cần người xử lý" để nhân viên xem, bot vẫn bật.

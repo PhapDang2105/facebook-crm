@@ -28,6 +28,8 @@ export function loadIntentModel() {
       labels: raw.labels,
       idf: raw.idf,
       classes: raw.classes.map(item => ({ label: item.label, bias: item.bias, weights: item.weights })),
+      // Nhiệt độ hiệu chuẩn (temperature scaling): chia điểm trước softmax để xác suất phản ánh đúng tỷ lệ đúng.
+      temperature: Number(raw.temperature) > 0 ? Number(raw.temperature) : 1,
       trainedAt: raw.trainedAt,
       rows: raw.rows
     };
@@ -61,8 +63,9 @@ export function predictIntent(row) {
     for (const [feature, value] of entries) { const weight = item.weights[feature]; if (weight !== undefined) sum += weight * (value / norm); }
     return sum;
   });
-  const max = Math.max(...scores);
-  const exps = scores.map(value => Math.exp(value - max));
+  const scaled = scores.map(value => value / model.temperature);
+  const max = Math.max(...scaled);
+  const exps = scaled.map(value => Math.exp(value - max));
   const total = exps.reduce((sum, value) => sum + value, 0);
   const probabilities = exps.map(value => value / total);
   let best = 0;
@@ -70,5 +73,7 @@ export function predictIntent(row) {
   for (let k = 1; k < probabilities.length; k += 1) {
     if (probabilities[k] > probabilities[best]) { second = best; best = k; } else if (second < 0 || probabilities[k] > probabilities[second]) second = k;
   }
-  return { templateId: model.labels[best], confidence: probabilities[best], second: second >= 0 ? model.labels[second] : undefined };
+  const secondConfidence = second >= 0 ? probabilities[second] : 0;
+  // margin = p1 − p2: hai mẫu gần nhau (PRICE_QUOTE / PRICE_MIX) thì không đủ chắc dù p1 cao.
+  return { templateId: model.labels[best], confidence: probabilities[best], margin: probabilities[best] - secondConfidence, second: second >= 0 ? model.labels[second] : undefined };
 }

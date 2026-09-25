@@ -420,6 +420,16 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
   await reconcileFollowUpQueue(now, { readSettings });
   const size = Math.max(1, Math.min(maxBatchSize, Math.round(Number(limit) || 30)));
   const queue = (await followUpQueue({ now })).filter(item => !item.leased && !item.noGlobalId);
+  // Lời gửi dựng lại theo mẫu HIỆN TẠI (mẫu đổi sau lúc xếp hàng thì khách nhận lời mới).
+  const settings = readSettings ? await readSettings().catch(() => null) : null;
+  const store = await readMessagingStore();
+  const currentText = item => {
+    const scenario = settings?.followUps?.scenarios?.find(entry => entry.id === item.scenarioId);
+    const template = scenario ? followUpScenarioText(scenario, settings.messageTemplates) : '';
+    const conversation = (store.conversations || []).find(entry => entry.id === item.conversationId) || { name: item.name };
+    return template ? renderFollowUpMessage(template, conversation) : item.text;
+  };
+  const texts = new Map();
   const items = [];
   const skipped = [];
   for (const item of queue) {
@@ -451,12 +461,15 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
       skipped.push({ key: item.key, name: item.name, reason: 'chưa có ID Facebook (gửi tay trong Pancake)' });
       continue;
     }
-    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: info.globalId, name: item.name, text: item.text });
+    const text = currentText(item);
+    texts.set(item.key, text);
+    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: info.globalId, name: item.name, text });
   }
   const keys = new Set(items.map(item => item.key));
   if (keys.size) {
     await updateFollowUpState(current => {
-      for (const key of keys) if (current.sent[key]) current.sent[key].leasedUntil = now + batchLeaseMs;
+      // Ghi lại lời sẽ gửi: tự xác nhận (so đầu tin đồng bộ về) khớp đúng lời mới.
+      for (const key of keys) if (current.sent[key]) Object.assign(current.sent[key], { leasedUntil: now + batchLeaseMs, text: texts.get(key) || current.sent[key].text });
       return null;
     });
   }

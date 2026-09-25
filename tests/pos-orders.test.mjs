@@ -89,6 +89,9 @@ test('pushOrderToPos: kiểm SKU có trong POS, chọn kho có địa chỉ, POS
   assert.ok(post, 'có lời gọi POST /orders');
   assert.equal(post.body.warehouse_id, 'wh-gn');
   assert.equal(post.body.items.length, 4, 'hai sản phẩm + hai quà (cả hai có trong POS)');
+  // Tạo đơn cũng gửi mã mẫu mã nội bộ (UUID): gửi SKU chữ thì POS bỏ âm thầm dòng tặng.
+  assert.deepEqual(post.body.items.filter(item => item.is_bonus_product).map(item => item.variation_id), ['v-BGD', 'v-MUONG']);
+  assert.ok(post.body.items.every(item => item.variation_id.startsWith('v-')));
   // Mã ba cấp của POS đi kèm để thẻ xác nhận và giao vận có địa chỉ; số nhà/đường gửi riêng.
   assert.equal(post.body.shipping_address.province_id, '705');
   assert.equal(post.body.shipping_address.district_id, '70501');

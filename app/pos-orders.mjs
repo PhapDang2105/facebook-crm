@@ -67,6 +67,14 @@ export async function posVariationSkus(config = posConfig(), fetchImpl = fetch) 
   return (await loadVariations(config, fetchImpl)).skus;
 }
 
+/** Dòng đơn gửi POS: SKU chữ → mã mẫu mã nội bộ (UUID) + mã sản phẩm; SKU POS không biết thì giữ nguyên. */
+export function withPosVariationIds(items, ids) {
+  return (Array.isArray(items) ? items : []).map(item => {
+    const known = ids?.get(String(item.variation_id).toUpperCase());
+    return known ? { ...item, variation_id: known.id, ...(known.productId ? { product_id: known.productId } : {}) } : item;
+  });
+}
+
 /** SKU → mã mẫu mã nội bộ của POS (UUID) và mã sản phẩm, nhớ cùng bộ đệm SKU. */
 export async function posVariationIds(config = posConfig(), fetchImpl = fetch) {
   return (await loadVariations(config, fetchImpl)).ids;
@@ -242,6 +250,10 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
   const warehouseId = await posWarehouseId(config, fetchImpl).catch(() => '');
   const geo = await resolvePosGeo(order, config, fetchImpl).catch(() => ({}));
   const payload = buildPosOrderPayload(order, { conversation, warehouseId, shopId: config.shopId, posSkus, geo });
+  // Tạo đơn bằng SKU chữ: POS nhận dòng hàng thường nhưng BỎ ÂM THẦM dòng tặng
+  // (bát gáo dừa, muỗng dừa) — mọi đơn combo 3 của bot lên POS thiếu quà. Gửi mã
+  // mẫu mã nội bộ (UUID) như khi sửa đơn thì dòng tặng được giữ.
+  payload.items = withPosVariationIds(payload.items, await posVariationIds(config, fetchImpl));
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders`);
   url.searchParams.set('api_key', config.apiKey);
   const controller = new AbortController();
@@ -280,11 +292,7 @@ export async function updatePosOrder(order, { conversation = {}, config = posCon
   // Tạo đơn thì POS nhận SKU (display_id) làm variation_id, nhưng sửa đơn thì
   // không: gửi SKU chữ khiến POS trả 400 "Server internal error" và đơn trên POS
   // giữ nguyên giỏ, phí ship cũ. Sửa đơn gửi mã mẫu mã nội bộ (UUID) của POS.
-  const ids = await posVariationIds(config, fetchImpl);
-  payload.items = payload.items.map(item => {
-    const known = ids.get(String(item.variation_id).toUpperCase());
-    return known ? { ...item, variation_id: known.id, ...(known.productId ? { product_id: known.productId } : {}) } : item;
-  });
+  payload.items = withPosVariationIds(payload.items, await posVariationIds(config, fetchImpl));
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(order.pos.id)}`);
   url.searchParams.set('api_key', config.apiKey);
   const controller = new AbortController();

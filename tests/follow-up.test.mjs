@@ -313,3 +313,32 @@ test('lô gửi chỉ lấy khách đã im đủ số giờ của kịch bản h
   assert.deepEqual(batch.items.map(item => item.key), ['inbox-trial-freeship:110:a'], 'im 30 giờ: chưa tới lượt; im 40 giờ: gửi');
   assert.match(batch.items[0].text, /ưu đãi riêng trong 7 ngày/, 'lời dựng theo mẫu hiện tại');
 });
+
+test('vòng 7: giờ yên tĩnh 22h–7h VN; release([]) không thả gì; kết quả không mã lô bị từ chối', async () => {
+  const { isQuietHourVN, releaseFollowUpLeases, recordFollowUpBatchResults } = await import('../app/follow-up.mjs');
+  const vn = (h, m = 0) => Date.UTC(2026, 8, 25, (h - 7 + 24) % 24, m);
+  assert.equal(isQuietHourVN(vn(21, 59)), false);
+  assert.equal(isQuietHourVN(vn(22)), true);
+  assert.equal(isQuietHourVN(vn(6, 59)), true);
+  assert.equal(isQuietHourVN(vn(7)), false);
+  assert.equal(await releaseFollowUpLeases([]), 0);
+  assert.deepEqual(await recordFollowUpBatchResults([{ key: 'khong:co:that', ok: true }], { token: '' }), { sent: 0, failed: 0, dropped: 0, rejected: 1 });
+});
+
+test('vòng 7: khách nói "đã nhận hàng rồi" / Page gửi phiếu đơn (order-receipt) → coi là đã mua, không bám đuổi', async () => {
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  await updateMessagingStore(current => {
+    const g = current.conversations.find(entry => entry.id === `${page}:g`);
+    g.customerOrders = []; g.labels = []; g.botEnabled = true; delete g.promo; delete g.followUps;
+    current.messages[`${page}:g`] = [message('incoming', now - 40 * HOUR, { text: 'shop ơi mình đã nhận hàng rồi nha, ngon lắm' }), message('outgoing', now - 39 * HOUR, { text: 'Dạ em cảm ơn chị ạ' })];
+    const a = current.conversations.find(entry => entry.id === `${page}:a`);
+    a.customerOrders = []; a.labels = []; delete a.promo; delete a.followUps;
+    current.messages[`${page}:a`] = [message('incoming', now - 40 * HOUR, { text: 'ok' }), message('outgoing', now - 39 * HOUR, { type: 'order-receipt', text: 'Đã gửi xác nhận đơn hàng' })];
+    return null;
+  });
+  const store = await readMessagingStore();
+  const scenario = { id: 'trial', trigger: 'inbox-no-reply', delayHours: 36, outsideWindow: true, freeShipDays: 7 };
+  const psids = findFollowUpCandidates(store, scenario, { now, activatedAt: now - 7 * 24 * HOUR }).map(item => item.conversation.psid);
+  assert.ok(!psids.includes('g'), 'khách nói đã nhận hàng');
+  assert.ok(!psids.includes('a'), 'Page đã gửi phiếu đơn');
+});

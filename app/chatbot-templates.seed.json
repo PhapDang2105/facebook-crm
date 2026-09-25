@@ -83,5 +83,6 @@
   "TRIAL_FREESHIP_INFO": "Dạ đúng rồi ạ, 1 túi dùng thử của {title} được MIỄN PHÍ VẬN CHUYỂN, không cộng thêm phí nào ạ 🚚 {Title} chọn túi và gửi em SĐT + địa chỉ là em lên đơn liền nha.",
   "TRIAL_NEXT_STEP": "{Title} chọn 1 túi muốn thử và gửi em SĐT + địa chỉ là em lên đơn dùng thử miễn ship liền nha 🌾",
   "TRIAL_DECLINED": "Dạ vâng ạ, không sao đâu {title} 💛 Khi nào cần {title} cứ nhắn em nha, Giọt Nắng luôn sẵn sàng ạ.",
-  "PAYMENT_METHODS": "Dạ bên em giao hàng thu tiền tận nơi (COD): {title} nhận hàng, kiểm tra xong mới thanh toán cho shipper ạ 🚚 Mình muốn chuyển khoản trước cũng được, {title} nhắn em để em gửi số tài khoản nha."
+  "PAYMENT_METHODS": "Dạ bên em giao hàng thu tiền tận nơi (COD): {title} nhận hàng, kiểm tra xong mới thanh toán cho shipper ạ 🚚 Mình muốn chuyển khoản trước cũng được, {title} nhắn em để em gửi số tài khoản nha.",
+  "FRESHNESS": "Dạ hàng bên em sản xuất theo từng lô mới liên tục, kho luôn ưu tiên gửi túi có hạn dùng mới nhất cho {title} ạ 🌿 Hạn sử dụng 6 tháng kể từ ngày sản xuất, in rõ trên bao bì ạ."
 }

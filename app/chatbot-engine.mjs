@@ -510,6 +510,8 @@ export async function processChatbotChanges(changes, dependencies) {
       results.push({ conversationId: change.conversation.id, error: error.message });
     }
   }
+  // Bot im (nhân viên vừa trả lời, gộp tin, lặp…): ghi một dòng để rà được về sau.
+  for (const item of results) if (item.skipped && item.skipped !== 'gộp với tin sau') console.log(`Bot bỏ qua: ${item.skipped} (${item.conversationId})`);
   return results;
 }
 
@@ -568,7 +570,16 @@ async function answerChange(change, settings, results, dependencies) {
     // Ưu đãi bám đuổi 1 túi dùng thử (processing/trial-flow.mjs): chỉ hộp thư, còn hạn,
     // chưa đặt đơn sau khi nhận. Chỉ luồng dùng thử đặt context.trial (miễn ship 1 túi).
     let trialState = activeTrial(conversation);
-    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, trial: trialState, trialBags: trialState ? trialBagOptions() : '', now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
+    // "Gửi về địa chỉ cũ" mà đơn không gắn vào hội thoại (nhân viên lên tay, đơn cũ): đọc SĐT +
+    // địa chỉ từ tin xác nhận đơn gần nhất trong lịch sử thay vì hỏi lại khách.
+    const previousDelivery = (() => {
+      const confirmation = [...recent].reverse().find(item => item?.direction === 'outgoing' && /Số điện thoại:\s*\S+/u.test(String(item.text || '')) && /Địa chỉ nhận hàng:/u.test(String(item.text || '')));
+      if (!confirmation) return null;
+      const phone = String(confirmation.text).match(/Số điện thoại:\s*([\d .+-]{9,16})/u)?.[1]?.replace(/[^\d+]/g, '') || '';
+      const address = String(confirmation.text).match(/Địa chỉ nhận hàng:\s*([^\n]+)/u)?.[1]?.trim() || '';
+      return phone && address ? { phone, address, at: Number(confirmation.createdAt) || 0 } : null;
+    })();
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, previousDelivery, trial: trialState, trialBags: trialState ? trialBagOptions() : '', now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
     // Tin mảnh (chỉ SĐT, "đó a", tên người…) khi đang lấy thông tin đơn, hoặc bot
     // vừa hỏi ở bước lên đơn, hoặc tin chỉ toàn số: đợi vài giây cho tin kế tiếp
     // của khách tới để gộp, tránh xin lại thứ khách vừa gửi. Bình luận liên tiếp
@@ -675,7 +686,9 @@ async function answerChange(change, settings, results, dependencies) {
       }
     };
     // Lời đáp ngắn ("ok", "dạ", "cảm ơn") của khách.
-    const shortAck = message.type === 'text' && /^(ok|oke|okie|okay|okela|da|vang|u|uh|um|a|c|e|nhe|nha|shop|cam ?on|thanks?|tks|\.|👍|❤️)+$/i.test(folded.replace(/\s+/g, ''));
+    // Lời đáp ngắn, hay chỉ emoji/sticker chữ ("💕", "🥰🥰") sau đơn: cảm ơn, không hỏi mô hình.
+    const shortAck = message.type === 'text' && (/^(ok|oke|okie|okay|okela|da|vang|u|uh|um|a|c|e|nhe|nha|shop|cam ?on|thanks?|tks|\.|👍|❤️)+$/i.test(folded.replace(/\s+/g, ''))
+      || (/^[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️\s.!]+$/u.test(String(message.text || '')) && /\p{Extended_Pictographic}/u.test(String(message.text || ''))));
     // "ok" ngay sau tin xác nhận/sửa đơn: cảm ơn luôn, không hỏi mô hình — mô hình
     // từng đọc lịch sử cũ và trả lời "ok" bằng tư vấn mẹ bầu/tiểu đường.
     const orderJustClosed = ['ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_UNCHANGED', 'ORDER_NOTE', 'SHOP_ORDER_RECEIVED'].includes(conversation.botLastTemplateId);
@@ -763,6 +776,7 @@ async function answerChange(change, settings, results, dependencies) {
           complaint: isComplaint({ text: message.text, keywords: settings.complaintKeywords }),
           commentBasket,
           trialOffer: Boolean(trialState),
+          experimentalRules: settings.experimentalRules || 'shadow',
           quotedProduct: quotedName || '',
           addressComplete: Boolean(message.type === 'text' && conversation.pendingOrder?.items?.length && describeDeliveryAddress(String(message.text || '').replace(/\+?\d[\d .-]{8,13}/g, ' ').trim()).complete),
           addressText: String(message.text || '').replace(/\+?\d[\d .-]{8,13}/g, ' ').replace(/\s+/g, ' ').trim(),
@@ -775,9 +789,11 @@ async function answerChange(change, settings, results, dependencies) {
       ? (ruled.commentRule ? commentRuleReply() : { ...renderChatbotReply(ruled.value, settings.messageTemplates, replyContext), ...(ruled.attention ? { attention: true } : {}) })
       : null;
     // Luật thử nghiệm: chỉ dùng khi settings.experimentalRules = 'on'; còn lại ghi log so với mô hình.
-    const ruleUsable = Boolean(ruled) && !(ruled.experimental && settings.experimentalRules !== 'on');
+    const ruleUsable = Boolean(ruled) && !ruled.shadowOnly;
     const ruleShadow = Boolean(ruled) && (ruleMode === 'shadow' || !ruleUsable);
     if (ruled) console.log(`Luật ${ruled.rule}${ruleShadow ? ' (thử)' : ''} → ${ruleReply.templateId} (${conversation.id})`);
+    // Luật thử nghiệm đính kèm một luật ổn định: ghi log so với luật ổn định, không đổi câu trả lời.
+    if (ruled?.shadow) console.log(`Luật ${ruled.shadow.rule} (thử): luật ${ruled.shadow.value?.template_id || ruled.shadow.rule} / luật ổn định ${ruleReply.templateId}${(ruled.shadow.value?.template_id || '') === ruleReply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : cartReply
@@ -809,7 +825,10 @@ async function answerChange(change, settings, results, dependencies) {
       const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: defaultQuoteProduct }, settings.messageTemplates, replyContext);
       const opening = String(quote.messages?.[0] || '').replace(/\s+/g, ' ').trim().slice(0, 40);
       const justSent = opening && replyContext.recentOutgoing.some(text => String(text).replace(/\s+/g, ' ').includes(opening));
-      const priceListSent = replyContext.recentOutgoing.some(text => /174.000đ/.test(text) && /Túi Vàng/i.test(text) && !/Bảng giá Granola/i.test(text));
+      // Pancake tự chào khách bấm quảng cáo bằng bảng 3 giá (có khi cùng phút, chưa kịp vào kho tin):
+      // khách đến từ quảng cáo mà bot chưa trả lời gì cũng coi như đã có bảng 3 giá.
+      const adGreeted = Boolean(conversation.referral?.adTitle || conversation.referral?.ref) && !conversation.botLastTemplateId;
+      const priceListSent = adGreeted || replyContext.recentOutgoing.some(text => /174\.000đ/.test(text) && /Túi Vàng/i.test(text) && !/Bảng giá Granola/i.test(text));
       if (quote.templateId === 'PRICE_QUOTE' && !justSent && priceListSent) reply = { ...quote, ...(reply.attention ? { attention: true } : {}) };
       else if (quote.templateId === 'PRICE_QUOTE' && !justSent) {
         const partsOf = item => item.parts || [...item.messages.map(text => ({ type: 'text', text })), ...(item.images || []).map(url => ({ type: 'image', url }))];
@@ -893,6 +912,13 @@ async function answerChange(change, settings, results, dependencies) {
       ].find(([pattern, id]) => pattern.test(folded) && settings.messageTemplates?.[id]);
       reply = renderChatbotReply({ template_id: routed ? routed[1] : 'LIVESTREAM_COMMENT' }, settings.messageTemplates, replyContext);
     }
+    // Mô hình chọn mẫu live cho khách không đến từ live: đổi về mẫu thường.
+    if (!isLivestreamPost(conversation) && conversation.source !== 'comment') {
+      if (reply.templateId === 'LIVESTREAM_COMMENT' && settings.messageTemplates?.GENERAL_INFO) reply = renderChatbotReply({ template_id: 'GENERAL_INFO' }, settings.messageTemplates, replyContext);
+      else if (reply.templateId === 'LIVESTREAM_VOUCHER' && settings.messageTemplates?.DISCOUNT_POLICY) reply = renderChatbotReply({ template_id: 'DISCOUNT_POLICY' }, settings.messageTemplates, replyContext);
+      // Sản phẩm ngoài danh mục bot (hạt bí xanh, bơ hạt điều…) trong hộp thư: không nói "chỉ bán trên live" — nhân viên báo giá.
+      else if (reply.templateId === 'LIVE_ONLY_PRODUCT') reply = { ...renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext), attention: true };
+    }
     // Bình luận có SĐT: nhân viên cần thấy để gọi chốt.
     if (conversation.source === 'comment' && extractVietnamesePhone(message.text || '')) reply = { ...reply, attention: true };
     // Không gửi lại y nguyên tin bot vừa gửi trong 10 phút (hỏi SĐT lần ba, cảm ơn
@@ -940,7 +966,7 @@ async function answerChange(change, settings, results, dependencies) {
       // Nhắc 'đã gửi ở trên' chỉ khi CHÍNH KHÁCH lặp lại câu vừa hỏi (đọc 361 hội thoại 24–25/09:
       // 11/11 lần nhắc đều sai — khách hỏi ý mới, đưa SĐT tra đơn… mà bị bảo 'xem ở trên').
       const previousIncoming = [...recent].reverse().find(item => item?.direction === 'incoming' && item.id !== message.id && (!message.mid || item.mid !== message.mid));
-      const squashText = value => foldVietnamese(String(value || '')).replace(/[^a-z0-9 ]+/g, ' ').replace(/s+/g, ' ').trim();
+      const squashText = value => foldVietnamese(String(value || '')).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
       const customerRepeats = Boolean(previousIncoming) && (() => { const before = squashText(previousIncoming.text); const current = squashText(message.text); return Boolean(before) && (before === current || (current.length >= 12 && before.startsWith(current.slice(0, 20)))); })();
       // Khách hỏi ý khác chủ đề vừa trả lời (có SĐT, nêu sản phẩm, hỏi đơn, hay luật nhận ra một
       // mẫu khác): không nhắc "ở trên" — im và gắn thẻ để nhân viên trả lời.
@@ -1127,7 +1153,7 @@ async function answerChange(change, settings, results, dependencies) {
       let parts = reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
       // Cùng một đoạn chữ / ảnh xuất hiện hai lần trong một lượt: gửi một lần.
       const seenParts = new Set();
-      parts = parts.filter(part => { const key = `${part.type}:${String(part.text || part.url || '').replace(/s+/g, ' ').trim()}`; if (seenParts.has(key)) return false; seenParts.add(key); return true; });
+      parts = parts.filter(part => { const key = `${part.type}:${String(part.text || part.url || '').replace(/\s+/g, ' ').trim()}`; if (seenParts.has(key)) return false; seenParts.add(key); return true; });
       // Ảnh còn nợ từ tin nhắn riêng sau bình luận: gửi trước câu trả lời, bỏ
       // ảnh trùng trong câu trả lời để khách không nhận hai lần.
       const owed = conversation.source === 'comment' ? [] : takePendingImages(conversation.pageId, conversation.psid);

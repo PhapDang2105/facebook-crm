@@ -133,3 +133,26 @@ test('luật thử nghiệm (vòng 6) mang experimental: TRIAL_ASK / ORDER_ASK /
   assert.deepEqual([address.rule, address.value.template_id, address.value.Customer_Address], ['ADDRESS_COMPLETE', 'ORDER_ADDRESS', 'Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai']);
   assert.notEqual(ruleIntent('đổi sang 2 túi vàng, gửi về Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai', { ...ctx, hasBasket: true, lastWasOrderStep: true, addressComplete: true, addressText: 'x' })?.rule, 'ADDRESS_COMPLETE', 'kèm đổi giỏ: để mô hình');
 });
+
+test('vòng 7: luật thử nghiệm không che luật ổn định (shadow đính kèm); ORDER_ASK bắt "đã đặt rồi sao chưa thấy"; "combo 2 túi" không vị → hỏi vị', () => {
+  const ctx = { commentBasket };
+  const basket = ruleIntent('Lấy 1 túi xanh dùng thử', ctx);
+  assert.deepEqual([basket.rule, basket.value.Product_N1, basket.shadow?.rule], ['BASKET', 'Granola Túi Xanh 450g', 'TRIAL_ASK']);
+  assert.equal(ruleIntent('Lấy 1 túi xanh dùng thử', { ...ctx, experimentalRules: 'on' }).rule, 'TRIAL_ASK');
+  const only = ruleIntent('Mua sao e', ctx);
+  assert.deepEqual([only.rule, only.shadowOnly], ['TERSE_HOW', true]);
+  for (const text of ['Bữa e đặt hàng sao chưa thấy đơn về', 'gửi hàng chưa shop', 'đã đặt rồi sao chưa thấy']) {
+    assert.equal(ruleIntent(text, ctx)?.value?.template_id, 'ORDER_STATUS', text);
+  }
+  assert.equal(ruleIntent('lấy combo 2 túi', ctx).value.template_id, 'ASK_FLAVOR');
+  assert.equal(ruleIntent('2 túi', ctx).value.template_id, 'ASK_FLAVOR');
+});
+
+test('vòng 7: "hàng mới không em" → FRESHNESS; freeship khi đang giữ giỏ mà khách đổi "1 túi ăn thử" → để mô hình; "ship mình 2 gói" → hỏi vị', () => {
+  const ctx = { commentBasket };
+  assert.equal(ruleIntent('Hàng mới không em', ctx)?.value?.template_id, 'FRESHNESS');
+  assert.equal(ruleIntent('date mới ko shop', ctx)?.value?.template_id, 'FRESHNESS');
+  assert.equal(ruleIntent('Có miễn ship không', { ...ctx, hasBasket: true, lastWasOrderStep: true }).value.template_id, 'ORDER_ADDRESS');
+  assert.equal(ruleIntent('1túi miễn ship nha ăn thử', { ...ctx, hasBasket: true, lastWasOrderStep: true }), null, 'đổi số túi: không giữ giỏ cũ');
+  assert.equal(ruleIntent('Ship mình 2 gói', ctx)?.value?.template_id, 'ASK_FLAVOR');
+});

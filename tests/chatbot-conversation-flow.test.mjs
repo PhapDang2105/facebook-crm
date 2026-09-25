@@ -321,3 +321,24 @@ test('luật thử nghiệm mặc định chỉ chạy ẩn: "Mua sao e" vẫn h
   assert.equal(on.asked, false);
   assert.match(on.sent[0], /nhà em đang có/);
 });
+
+test('vòng 7: khách lặp câu chỉ khác khoảng trắng → nhắc "ở trên"; mẫu live cho khách không live → mẫu thường; xưng hô không đổi vì "cho anh nhà mình"', async () => {
+  const { genderFromMessage } = await import('../app/processing/customer-info.mjs');
+  assert.equal(genderFromMessage('mình lấy cho anh nhà mình 1 túi'), '');
+  assert.equal(genderFromMessage('chị lấy 2 túi'), 'female');
+  const run = async (text, recent, reply) => {
+    const sent = [];
+    const results = await processChatbotChanges([{ type: 'message', conversation: { id: 'p:u7', pageId: 'p', psid: 'u7', name: 'Khách', botEnabled: true, botLastTemplateId: 'GENERAL_INFO', botLastReplyAt: Date.now() - 2 * 60 * 1000 }, message: { id: 'm7', mid: 'm7', direction: 'incoming', type: 'text', text, createdAt: Date.now() } }], {
+      readSettings: async () => ({ ...settings, ruleIntent: 'off' }),
+      listMessages: async () => recent, saveBotState: async () => {},
+      sendMessage: async (_c, message) => { sent.push(message.text || '[ảnh]'); return { message: { mid: 'x' } }; },
+      requestReply: async () => reply
+    });
+    return { sent, results };
+  };
+  const general = { templateId: 'GENERAL_INFO', messages: [templates.GENERAL_INFO ? 'Dạ, hiện tại nhà em đang có 10 sản phẩm ạ' : 'x'], handoff: false };
+  const repeat = await run('Shop ơi  giá sao', [{ id: 'i', direction: 'incoming', type: 'text', text: 'shop oi gia sao', createdAt: Date.now() - 3 * 60 * 1000 }, { id: 'o', direction: 'outgoing', type: 'text', text: 'Dạ, hiện tại nhà em đang có 10 sản phẩm ạ', createdAt: Date.now() - 2 * 60 * 1000 }], general);
+  assert.match(repeat.sent.join('\n'), /ngay trên|ở trên|phía trên/);
+  const live = await run('có gì đặc biệt không', [], { templateId: 'LIVESTREAM_VOUCHER', messages: ['voucher live'], handoff: false });
+  assert.equal(live.results[0].templateId, 'DISCOUNT_POLICY');
+});

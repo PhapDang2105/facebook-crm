@@ -393,7 +393,7 @@ function renderOrder(value, templates, context = {}) {
   // Khách quen "gửi về địa chỉ cũ / như lần trước": SĐT và địa chỉ lấy từ đơn
   // gần nhất của khách thay vì hỏi lại.
   const wantsPrevious = /(dia chi|d\/c|dc) (cu|truoc|nhu cu|lan truoc)|nhu (lan )?truoc|cho cu|giong lan truoc|nhu cu/.test(normalizeText(String(context.messageText || '')));
-  const previous = (wantsPrevious || updating) && context.recentOrder ? context.recentOrder : null;
+  const previous = (wantsPrevious || updating) && context.recentOrder ? context.recentOrder : (wantsPrevious && context.previousDelivery ? context.previousDelivery : null);
   // Mô hình ghi "0" khi khách không đưa địa chỉ: coi như trống để lấy địa chỉ đơn trước.
   // Tên người nhận khách ghi đầu địa chỉ ("Nguyễn thị Hằng Thôn 4, …") không lên phiếu giao.
   const givenAddress = stripReceiverName(String(value.Customer_Address || '').trim());
@@ -469,6 +469,10 @@ function renderOrder(value, templates, context = {}) {
     // Khách đang giữ ưu đãi dùng thử: mời chọn 1 túi, không gửi bảng giá chung.
     if (trial && templates.TRIAL_ACCEPT) {
       return { templateId: 'TRIAL_ACCEPT', ...splitMessages(fill(templates.TRIAL_ACCEPT, { ...commonValues(), bags: context.trialBags || '' })), handoff: false, pendingOrder: nextPending };
+    }
+    // Khách nêu số lượng mà chưa nói vị ("M lấy 1 túi", "ship mình 2 gói"): hỏi vị, không gửi bảng giá chung.
+    if (templates.ASK_FLAVOR && /\b(\d{1,2}|mot|hai|ba)\s*(tui|goi|bich|bit)\b/.test(normalizeText(String(context.messageText || '')))) {
+      return { templateId: 'ASK_FLAVOR', ...splitMessages(fill(templates.ASK_FLAVOR, commonValues())), handoff: false, pendingOrder: nextPending };
     }
     const text = templates.GENERAL_INFO ? renderGeneralInfo(templates) : fill(templates.ASK_PRODUCT, commonValues());
     return { templateId: 'ASK_PRODUCT', ...splitMessages(text), handoff: false, pendingOrder: nextPending };

@@ -25,7 +25,7 @@ const DECLINE = /^(khong|ko|k|kh|hong|hok|khong can|ko can|khong lay|ko lay|khon
 const DECLINE_THOI = /\bthoi\b/;
 const ACCEPT = /\b(ok|oke|okie|oki|okay|dong y|lay|thu|dat|mua|chot|len don|gui|ship|duoc|dc|co|u|uh|um|vang|da|nhan|muon)\b/;
 // Khách nói đã mua / hủy / khiếu nại: không phải trả lời lời mời — nhờ mô hình đọc.
-const NOT_OFFER = /\b(da (dat|mua|nhan|lay)|mua roi|dat roi|huy|chua nhan|bi (moc|hoi|hu|loi)|khieu nai|tra hang|hoan)\b/;
+const NOT_OFFER = /\b(mua roi|dat roi|lay roi|huy|chua nhan|bi (moc|hoi|hu|loi)|khieu nai|tra hang|hoan)\b/;
 const COMPARE = /(khac (nhau|gi|sao|ntn)|nao ngon|ngon hon|nen (chon|mua|lay) (loai|tui|vi)? ?nao|phan biet|so sanh)/;
 const PRICE = /\b(gia|bn|bao nhieu|bnhiu|bao tien|nhieu tien|tong|het bao nhieu)\b/;
 const FREESHIP = /(mien|free) ?(phi )?(ship|sip|van chuyen)|freeship|phi ship|tien ship|ship (bao nhieu|bn|nhieu|may)/;
@@ -100,13 +100,17 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   const chosen = trial?.stage === 'chosen' && trial.bag;
   const orderStep = chosen ? { template_id: 'ORDER_ADDRESS', Product_N1: trial.bag, No_A: '1' } : null;
   // Đã mua / hủy / khiếu nại: không phải trả lời lời mời — mô hình đọc (kèm gợi ý).
-  if (NOT_OFFER.test(s)) return { delegate: true };
+  // "đã lấy/đặt" so trên chữ CÒN DẤU: bỏ dấu thì "Dạ lấy túi xanh" (đồng ý) thành "da lay".
+  if (NOT_OFFER.test(s) || /đã\s+(đặt|mua|nhận|lấy|chốt)/iu.test(raw)) return { delegate: true };
+  // Khất ("để mình hỏi chồng đã", "để em xem lại", "suy nghĩ thêm"): không phải đồng ý, không đóng ưu đãi — mô hình đáp mềm.
+  if (/\b(de (minh|em|e|chi|c|toi|m|mk) (hoi|xem|tinh|suy nghi|coi|nghi|can nhac)|hoi (chong|vo|ba xa|ong xa|nha|me|bo)|suy nghi (da|them|lai)|(xem|tinh|coi) (da|them|lai))\b/.test(s)) return { delegate: true };
   // Từ chối. "thôi" chỉ là từ chối khi không kèm túi/số lượng/lời đồng ý ("lấy 1 túi thôi" là chọn).
   const declines = DECLINE.test(s) || (DECLINE_THOI.test(s) && !picks.size && !looseQuantity && !ACCEPT.test(s.replace(/\bthoi\b/g, '')));
   if (declines && !phone) return { value: { template_id: 'TRIAL_DECLINED' }, patch: { stage: 'declined', endedAt: now } };
   // Câu hỏi (so sánh, ngọt không, bao nhiêu gam…) trả lời trước; nêu màu trong câu hỏi
   // chưa phải chọn. Câu hỏi giá / ship / khuyến mãi thì luồng này tự trả lời.
-  const asks = raw.includes('?') || COMPARE.test(s);
+  // Câu hỏi: dấu "?", so sánh, hay kết bằng "không/ko/k" ("ship về Đà Nẵng bao lâu vậy" cũng là hỏi → mô hình).
+  const asks = raw.includes('?') || COMPARE.test(s) || /\b(khong|ko|k|hong|hok|vay|ha)$/.test(s) || /\b(bao lau|may ngay|khi nao|o dau|the nao|ntn|lam sao|co (giao|ship) (duoc|dc))\b/.test(s);
   const info = s.length <= 90 && infoRules.find(([rule, pattern]) => !PRICE_RULES.has(rule) && pattern.test(s));
   if (info && !phone) return { value: { template_id: info[2], also: 'TRIAL_NEXT_STEP', values: { bags } } };
   if (asks && picks.size >= 2 && !phone) return { value: { template_id: 'BAG_COMPARISON', also: 'TRIAL_NEXT_STEP', values: { bags } } };
@@ -128,7 +132,8 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   if (phone || (chosen && longText)) return { delegate: true };
   // Đồng ý / lời đáp ngắn ("ok", "dạ", emoji, "1"): mời chọn túi, hay bước đơn nếu đã chọn.
   const shortAck = /^[\s.…!?1👍❤️🥰😍]*$/u.test(raw) || /^(da|vang|ok|oke|oki|okie|okay|u|uh|um|ua|uk|ukm)( (a|ah|em|e|shop|chi|c|nha|nhe))*$/.test(s);
-  if (!asks && !longText && (ACCEPT.test(s) || shortAck || looseQuantity === 1)) {
+  // Đồng ý chỉ với câu ngắn (≤ 25 ký tự): "để mình hỏi chồng đã" (có "đã") không phải đồng ý.
+  if (!asks && (shortAck || (s.length <= 25 && (ACCEPT.test(s) || looseQuantity === 1)))) {
     if (orderStep) return { value: orderStep };
     return { value: { template_id: trial?.accepted ? 'TRIAL_REMIND' : 'TRIAL_ACCEPT', values: { bags } }, patch: { accepted: true } };
   }

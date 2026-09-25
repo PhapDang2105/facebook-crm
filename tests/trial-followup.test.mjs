@@ -176,3 +176,15 @@ test('rà soát 25/09: "không"/"ko"/khiếu nại không phải đồng ý; "l�
   assert.equal(filterTrialReply({ templateId: 'NO_ADDED_SUGAR', alsoTemplateId: 'PRICE_QUOTE' }, trial, id => id.startsWith('PRICE_'))?.template_id, 'NO_ADDED_SUGAR');
   assert.equal(filterTrialReply({ templateId: 'NO_ADDED_SUGAR', alsoTemplateId: 'PRICE_QUOTE' }, trial, id => id.startsWith('PRICE_'))?.also, 'TRIAL_NEXT_STEP');
 });
+
+test('rà soát vòng 7: "Dạ lấy túi xanh" là chọn (không nhầm "đã lấy"); câu hỏi dài có "được/có" không phải đồng ý', () => {
+  const trial = offer();
+  const xanh = trialStep({ text: 'Dạ lấy túi xanh', trial, now });
+  assert.deepEqual([xanh.value?.template_id, xanh.patch?.stage], ['ORDER_ADDRESS', 'chosen']);
+  assert.equal(trialStep({ text: 'Dạ nhận', trial }).value?.template_id, 'TRIAL_ACCEPT');
+  assert.equal(trialStep({ text: 'dạ mua 1 túi vàng', trial }).value?.Product_N1, 'Granola Túi Vàng 350g');
+  assert.equal(trialStep({ text: 'đã lấy rồi em', trial }).delegate, true);
+  for (const text of ['Mình đang ở Hà Nội có giao được không', 'em ở Cần Thơ ship lâu ko', 'ship về Đà Nẵng bao lâu vậy', 'để mình hỏi chồng đã', 'thôi để mình xem đã']) {
+    assert.notEqual(trialStep({ text, trial }).value?.template_id, 'TRIAL_ACCEPT', text);
+  }
+});

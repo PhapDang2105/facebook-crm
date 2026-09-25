@@ -384,7 +384,9 @@ function sendThroughBridge(item) {
   return new Promise(resolve => {
     const requestId = `gn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // Cầu nối tự chờ extension Pancake tối đa 90 giây; thêm biên cho việc mở tab Pancake.
-    const timer = setTimeout(() => { followUpBridgeWaiters.delete(requestId); resolve({ ok: false, error: 'cầu nối không trả lời sau 2 phút' }); }, 120000);
+    // Cầu nối: mở tab Pancake (≤35 s) + tìm ID Facebook (≤90 s) + gửi (≤90 s): chờ đủ để không báo lỗi trong khi extension vẫn gửi (gửi trùng).
+    const waitMs = item.needsGlobalId ? 240000 : 150000;
+    const timer = setTimeout(() => { followUpBridgeWaiters.delete(requestId); resolve({ ok: false, error: `cầu nối không trả lời sau ${Math.round(waitMs / 60000)} phút` }); }, waitMs);
     followUpBridgeWaiters.set(requestId, result => { clearTimeout(timer); resolve({ ok: Boolean(result.ok), error: result.error || '', globalId: result.globalId || '' }); });
     window.postMessage({ type: 'GN_BRIDGE_SEND', requestId, item: { pageId: item.pageId, convId: item.convId, globalUserId: item.globalUserId || '', needsGlobalId: item.needsGlobalId === true, updatedTime: item.updatedTime || 0, text: item.text, name: item.name } }, window.location.origin);
   });

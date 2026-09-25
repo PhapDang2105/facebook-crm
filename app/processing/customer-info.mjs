@@ -105,7 +105,8 @@ const objectForm = new RegExp(`${edgeBefore}(?:lấy|gửi|gởi|ship|giao|bán|
 const vocative = new RegExp(`${edgeBefore}${selfPronoun}\\s+(?:ơi|oi|ei|êi)`, 'iu');
 
 export function genderFromMessage(text) {
-  const message = String(text || '');
+  // "lấy cho anh nhà mình", "tặng chị của em", "gửi cho anh ấy": nói về người khác, không phải khách.
+  const message = String(text || '').replace(/(?:cho|tặng|gửi|gởi|của|với)\s+(?:anh|chị|cô|chú|a|c)\s+(?:nhà|xã|mình|ấy|em|tôi|con|bạn)(?![\p{L}])/giu, ' ');
   const match = message.match(subjectForm) || message.match(objectForm);
   if (!match) return '';
   const word = match[1].toLowerCase();

@@ -103,7 +103,7 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
   // Nhân viên tắt bot, khách đã có đơn trong CRM hay mang thẻ Đã mua hàng: không bám (chỉ bám khách mới).
   const bought = conversation => (Array.isArray(conversation?.labels) ? conversation.labels : []).some(label => boughtLabelIds.includes(label));
   // Đã chốt đơn trong chat mà đơn không gắn vào hội thoại (nhân viên lên tay, đơn Shop/POS).
-  const closedInChat = conversation => messagesOf(conversation).some(message => message.direction === 'outgoing' && /(xác nhận lại thông tin đặt hàng|đã gửi xác nhận đơn hàng|đơn của .{1,20} đã được (tạo|lên)|mã vận đơn)/i.test(String(message.text || '')));
+  const closedInChat = conversation => boughtInChat(messagesOf(conversation));
   const blocked = inbox => inbox && (inbox.botEnabled === false || liveOrders(inbox).length > 0 || bought(inbox) || closedInChat(inbox));
   // Tin bám đuổi trước đó (đúng lúc ghi followUps[].at) không tính là "Page trả lời":
   // kịch bản 36 giờ tính từ lần Page trả lời thật, không phải từ tin nhắc 3 giờ.
@@ -337,14 +337,17 @@ const maxRelayAttempts = 2;
 
 // Thẻ mặc định không bám: Đã mua hàng, Cần người xử lý, Khiếu nại, Bảo hành, Hủy đơn, Khách xấu, Bám đuổi thành công.
 const skipLabelIds = new Set(['customer', 'consulting', 'complaint', 'warranty', 'cancelled', 'bad', 'followup-won']);
-const closedOrderText = /(xác nhận lại thông tin đặt hàng|đã gửi xác nhận đơn hàng|đơn của .{1,20} đã được (tạo|lên)|mã vận đơn)/i;
+// Đã mua theo lịch sử chat: tin xác nhận đơn / phiếu đơn của Page, hay chính khách nói đã mua / đã nhận hàng.
+const boughtInChat = messages => (Array.isArray(messages) ? messages : []).some(message => (message.direction === 'outgoing' && (message.type === 'order-receipt' || closedOrderText.test(String(message.text || '')))) || (message.direction === 'incoming' && customerBoughtText.test(String(message.text || ''))));
+const customerBoughtText = /(đã mua|mua rồi|đã nhận|vừa nhận|nhận được hàng rồi|đã đặt rồi|đặt rồi)/i;
+const closedOrderText = /(xác nhận lại thông tin đặt hàng|đã gửi xác nhận đơn hàng|đơn của .{1,20} đã được (tạo|lên)|mã vận đơn|quét mã QR|sau khi nhận hàng mình giúp em kiểm tra|đã nhận được hàng)/i;
 
 function stillWanted(item, byId, store) {
   const conversation = byId.get(item.conversationId);
   if (!conversation || conversation.botEnabled === false || (Array.isArray(conversation.customerOrders) && conversation.customerOrders.length)) return false;
   if ((Array.isArray(conversation.labels) ? conversation.labels : []).some(label => skipLabelIds.has(label))) return false;
   const messages = Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : [];
-  if (outgoingOf(messages).some(message => closedOrderText.test(String(message.text || '')))) return false;
+  if (boughtInChat(messages)) return false;
   return !incomingOf(messages).some(message => Number(message.createdAt) > item.at);
 }
 
@@ -492,7 +495,7 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
     if (!globalId) {
       // Pancake chưa lưu ID Facebook: ghi dấu, đưa vào lô (có hạn) để extension tự tìm ID.
       if (!item.noGlobalId) await updateFollowUpState(current => { if (current.sent[item.key]) current.sent[item.key].noGlobalId = true; return null; });
-      if (lookups >= maxLookups) continue;
+      if (lookups >= maxLookups) { skipped.push({ key: item.key, name: item.name, reason: 'chờ lô sau (tìm ID Facebook tối đa 10 khách/lô)' }); continue; }
       lookups += 1;
     }
     const text = currentText(item);
@@ -501,6 +504,8 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
     const updatedTime = Math.max(Number(conversation?.lastMessageAt) || 0, ...((store.messages?.[item.conversationId] || []).map(message => Number(message.createdAt) || 0)));
     items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: globalId, needsGlobalId: !globalId, updatedTime, name: item.name, text });
   }
+  // Khách phải tìm ID xếp cuối lô: không làm lô dừng sớm vì 3 lần tìm ID lỗi liền.
+  items.sort((first, second) => Number(first.needsGlobalId) - Number(second.needsGlobalId));
   const keys = new Set(items.map(item => item.key));
   if (keys.size) {
     await updateFollowUpState(current => {
@@ -515,6 +520,7 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
 
 /** Bỏ giữ chỗ (nhân viên bấm Dừng / đóng trang giữa lô): khách chưa gửi về lại hàng chờ ngay. */
 export async function releaseFollowUpLeases(keys = null) {
+  if (Array.isArray(keys) && !keys.length) return 0;
   return updateFollowUpState(current => {
     let released = 0;
     for (const [key, entry] of Object.entries(current.sent)) {
@@ -538,7 +544,7 @@ export async function recordFollowUpBatchResults(results = [], { now = Date.now(
     if (!key) continue;
     // Kết quả phải mang đúng mã lô đã cấp (chống link #followup-results giả).
     const entry = state.sent[key];
-    if (entry?.batchToken && entry.batchToken !== String(token || '')) { summary.rejected = (summary.rejected || 0) + 1; continue; }
+    if (!entry?.queued || (entry.batchToken ? entry.batchToken !== String(token || '') : Boolean(token))) { summary.rejected = (summary.rejected || 0) + 1; continue; }
     // Extension vừa tìm được ID Facebook: ghi lại để lần sau khỏi tìm.
     if (/^\d{5,25}$/.test(String(result.globalId || ''))) await updateFollowUpState(current => { const target = current.sent[key]; if (target) { target.globalId = String(result.globalId); delete target.noGlobalId; } return null; });
     if (result.ok) {

@@ -22,7 +22,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
-import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
@@ -391,13 +391,14 @@ async function followUpConversationInfo(pageId, conversationId) {
   let posOrders = 0;
   for (const phone of phones) {
     const report = await fetchPosPhoneReport(phone).catch(() => null);
-    posOrders = Math.max(posOrders, Number(report?.orders) || 0, Number(report?.customer?.orderCount) || 0);
+    // Không tính đơn hoàn/hủy/bỏ dở: khách chỉ điền form dở chưa phải khách cũ.
+    posOrders = Math.max(posOrders, (Number(report?.orders) || 0) - (Number(report?.failed) || 0), Number(report?.customer?.succeedOrderCount) || 0);
   }
   let crmOrders = 0;
   if (phones.length) {
     const store = await readMessagingStore();
     for (const conversation of store.conversations || []) {
-      for (const order of conversation.customerOrders || []) if (phones.includes(normalizeWarningPhone(order.phone))) crmOrders += 1;
+      for (const order of conversation.customerOrders || []) if (phones.includes(normalizeWarningPhone(order.phone)) && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy') crmOrders += 1;
     }
   }
   return { ...info, posOrders, crmOrders };
@@ -986,6 +987,7 @@ const chatbotDependencies = {
   }
 };
 
+let pancakeNoTokenWarnedAt = 0;
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
@@ -1100,9 +1102,15 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch-results') {
       const payload = await readBody(request);
-      const summary = await recordFollowUpBatchResults(payload.results, { readSettings: readChatbotSettings });
-      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped})`);
+      const summary = await recordFollowUpBatchResults(payload.results, { readSettings: readChatbotSettings, token: String(payload.token || '') });
+      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''})`);
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
+    }
+    // Nhân viên bấm Dừng / đóng trang giữa lô: bỏ giữ chỗ để lô sau lấy lại ngay.
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/release') {
+      const payload = await readBody(request);
+      const released = await releaseFollowUpLeases(Array.isArray(payload.keys) ? payload.keys.map(String) : null);
+      return sendJson(response, 200, { released });
     }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
       const settings = await readChatbotSettings();
@@ -1501,7 +1509,11 @@ const server = http.createServer(async (request, response) => {
           response.writeHead(isPancakeConfigured() ? 401 : 503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
           return response.end(isPancakeConfigured() ? 'Invalid token' : 'Pancake webhook is not configured');
         }
-        if (!tokenValid && payload?.event_type && payload.event_type !== 'verify') console.warn('Webhook Pancake không có token, nhận theo page_id', pageId);
+        // Pancake không gửi token (hành vi đã biết): ghi 1 dòng/giờ, không phủ đầy log.
+        if (!tokenValid && payload?.event_type && payload.event_type !== 'verify' && Date.now() - pancakeNoTokenWarnedAt > 60 * 60 * 1000) {
+          pancakeNoTokenWarnedAt = Date.now();
+          console.warn('Webhook Pancake không có token, nhận theo page_id', pageId);
+        }
         // Luôn trả 200 (Pancake tạm ngưng webhook khi >80% lần gọi lỗi); thân hỏng chỉ ghi log.
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         response.end('{"received":true}');

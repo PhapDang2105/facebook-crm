@@ -16,6 +16,14 @@ import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs'
 import { publishMessagingEvent } from './message-events.mjs';
 import { applyHonorific } from './chatbot-templates.mjs';
 import { labelsForEvents, readInboxSettings } from './inbox-settings.mjs';
+import { activeTrial } from './processing/trial-flow.mjs';
+import { randomUUID } from 'node:crypto';
+
+// Đơn còn hiệu lực (chưa hủy): dùng chung cho "khách đã có đơn" ở mọi chỗ.
+const liveOrders = conversation => (Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [])
+  .filter(order => String(order?.processingStatus || '') !== 'cancelled' && order?.status !== 'Hủy');
+// Giờ yên tĩnh (giờ VN): không gửi tin bám đuổi 22h–7h.
+export const isQuietHourVN = (now = Date.now()) => { const hour = (new Date(now).getUTCHours() + 7) % 24; return hour >= 22 || hour < 7; };
 
 const statePath = process.env.FOLLOW_UPS_PATH || path.join(projectRoot, 'data', 'processed', 'follow-ups.json');
 export const FOLLOW_UP_INTERVAL_MS = 15 * 60 * 1000;
@@ -96,10 +104,13 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
   const bought = conversation => (Array.isArray(conversation?.labels) ? conversation.labels : []).some(label => boughtLabelIds.includes(label));
   // Đã chốt đơn trong chat mà đơn không gắn vào hội thoại (nhân viên lên tay, đơn Shop/POS).
   const closedInChat = conversation => messagesOf(conversation).some(message => message.direction === 'outgoing' && /(xác nhận lại thông tin đặt hàng|đã gửi xác nhận đơn hàng|đơn của .{1,20} đã được (tạo|lên)|mã vận đơn)/i.test(String(message.text || '')));
-  const blocked = inbox => inbox && (inbox.botEnabled === false || (Array.isArray(inbox.customerOrders) && inbox.customerOrders.length > 0) || bought(inbox) || closedInChat(inbox));
+  const blocked = inbox => inbox && (inbox.botEnabled === false || liveOrders(inbox).length > 0 || bought(inbox) || closedInChat(inbox));
+  // Tin bám đuổi trước đó (đúng lúc ghi followUps[].at) không tính là "Page trả lời":
+  // kịch bản 36 giờ tính từ lần Page trả lời thật, không phải từ tin nhắc 3 giờ.
+  const isFollowUpSend = (conversation, message) => (Array.isArray(conversation?.followUps) ? conversation.followUps : []).some(item => Math.abs(Number(message.createdAt) - Number(item.at)) < 2 * 60 * 1000);
   const candidates = [];
   if (scenario.trigger === 'comment-no-reply') {
-    for (const thread of conversations.filter(item => item.source === 'comment' && item.psid)) {
+    for (const thread of conversations.filter(item => item.source === 'comment' && item.psid && item.botEnabled !== false)) {
       const inbox = inboxOf(thread.pageId, thread.psid);
       if (blocked(inbox)) continue;
       const threadMessages = messagesOf(thread);
@@ -115,10 +126,12 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
   } else {
     for (const inbox of conversations.filter(item => item.source !== 'comment' && item.psid)) {
       if (blocked(inbox)) continue;
+      // Khách đang giữ ưu đãi dùng thử (luồng riêng): kịch bản khác (nhắc combo 3 giờ) không chen vào.
+      if (!scenario.freeShipDays && activeTrial(inbox, { now })) continue;
       const messages = messagesOf(inbox);
       const customerAt = lastAt(incomingOf(messages), () => true);
       if (!customerAt) continue;
-      const repliedAt = lastAt(outgoingOf(messages), message => message.privateReply !== true);
+      const repliedAt = lastAt(outgoingOf(messages), message => message.privateReply !== true && !isFollowUpSend(inbox, message));
       if (!repliedAt || repliedAt < customerAt || repliedAt < activatedAt || now - repliedAt > maxReplyAgeMs || now - repliedAt < delayMs) continue;
       // Messenger chỉ cho Page nhắn trong 24 giờ kể từ tin cuối của khách: quá mốc
       // thì bỏ qua — trừ kịch bản "ngoài 24 giờ" (xếp hàng chờ gửi qua extension Pancake).
@@ -136,12 +149,14 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
  * Một lượt bám đuổi: duyệt mọi kịch bản đang bật, gửi cho khách đủ điều kiện,
  * ghi lại. Trả về { checked, sent, failed, skipped }.
  */
-export async function runFollowUps({ readSettings, sendMessage, conversationInfo = null, now = Date.now(), log = console.log } = {}) {
+export async function runFollowUps({ readSettings, sendMessage, conversationInfo = null, now = Date.now(), log = console.log, quietHours = true } = {}) {
   const settings = await readSettings();
   const summary = { checked: 0, sent: 0, failed: 0, skipped: 0, disabled: false };
   // Khách được bám đuổi đã chốt đơn: ghi nhận cả khi bám đuổi đang tắt.
   await markFollowUpWins(now).catch(error => log(`Bám đuổi: lỗi ghi nhận đơn chốt: ${error.message}`));
   if (!settings?.enabled || !settings.followUps?.enabled) return { ...summary, disabled: true };
+  // 22h–7h giờ VN: không nhắn khách (tin 3 giờ sau lời Page lúc 22h sẽ đi lúc 7h).
+  if (quietHours && isQuietHourVN(now)) return { ...summary, quiet: true };
   const state = await readFollowUpState();
   if (!state.activatedAt) await updateFollowUpState(current => { current.activatedAt = now; return null; });
   const activatedAt = state.activatedAt || now;
@@ -249,7 +264,9 @@ async function markConversationFollowedUp(conversationId, scenario, via, now) {
     target.followUps = [...(Array.isArray(target.followUps) ? target.followUps : []), { scenarioId: scenario.id, at: now, via }].slice(-20);
     // Ưu đãi dùng thử mở luồng riêng (processing/trial-flow.mjs) từ bước 'offered'; giỏ cũ
     // bỏ đi để không trộn với ưu đãi 1 túi.
-    if (scenario.freeShipDays) {
+    // Khách đã chọn túi trong ưu đãi còn hạn (đang ở giữa bước đơn): giữ nguyên, không đặt lại.
+    const midway = target.promo?.stage === 'chosen' && Math.max(Number(target.promo.until) || 0, Number(target.promo.lockedUntil) || 0) > now;
+    if (scenario.freeShipDays && !midway) {
       target.promo = { freeShipping: true, until: now + scenario.freeShipDays * 24 * 60 * 60 * 1000, scenarioId: scenario.id, at: now, stage: 'offered' };
       target.pendingOrder = null;
     }
@@ -266,7 +283,8 @@ const foldText = text => String(text || '').normalize('NFD').replace(/[̀-ͯ]/g,
  * ngày mua cuối, thẻ), đơn gần đây của Pancake, lịch sử POS và bảng đơn CRM theo SĐT.
  */
 export function returningCustomerReason(info = {}) {
-  if (Number(info.orderCount) > 0 || Number(info.purchasedAmount) > 0 || info.lastOrderAt) return 'khách cũ: đã có đơn trên Pancake/POS';
+  // order_count của Pancake gồm cả đơn landing bỏ dở / hủy: chỉ tin đơn thành công, tiền đã mua, ngày mua cuối.
+  if (Number(info.succeedOrderCount) > 0 || Number(info.purchasedAmount) > 0 || info.lastOrderAt) return 'khách cũ: đã có đơn trên Pancake/POS';
   if (Number(info.recentOrders) > 0) return 'khách cũ: có đơn gần đây trên Pancake';
   if (Number(info.posOrders) > 0) return 'khách cũ: SĐT đã có đơn trên POS';
   if (Number(info.crmOrders) > 0) return 'khách cũ: SĐT đã có đơn trong CRM';
@@ -281,17 +299,23 @@ const followUpWinWindowMs = 14 * 24 * 60 * 60 * 1000;
  * kể từ tin bám đuổi đầu tiên, đơn chưa hủy): gắn thẻ "Bám đuổi thành công" và
  * ghi followUpWon lên hội thoại để đếm. Trả về số hội thoại vừa ghi nhận.
  */
+const wonOrderOf = conversation => {
+  if (conversation.followUpWon || !Array.isArray(conversation.followUps) || !conversation.followUps.length) return null;
+  const firstAt = Math.min(...conversation.followUps.map(item => Number(item.at) || Infinity));
+  return liveOrders(conversation)
+    .filter(item => Number(item.createdAt) > firstAt && Number(item.createdAt) - firstAt <= followUpWinWindowMs)
+    .sort((first, second) => Number(first.createdAt) - Number(second.createdAt))[0] || null;
+};
+
 export async function markFollowUpWins(now = Date.now()) {
+  // Đọc trước, chỉ ghi kho khi có khách vừa chốt (chạy mỗi 15 phút, không ghi thừa).
+  const snapshot = await readMessagingStore();
+  if (!(snapshot.conversations || []).some(wonOrderOf)) return 0;
   const wonLabels = labelsForEvents((await readInboxSettings().catch(() => ({ labels: [] }))).labels, ['followup-won']);
   const won = await updateMessagingStore(store => {
     const changed = [];
     for (const conversation of store.conversations || []) {
-      if (conversation.followUpWon || !Array.isArray(conversation.followUps) || !conversation.followUps.length) continue;
-      const firstAt = Math.min(...conversation.followUps.map(item => Number(item.at) || Infinity));
-      const order = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [])
-        .filter(item => String(item.processingStatus || '') !== 'cancelled' && item.status !== 'Hủy')
-        .filter(item => Number(item.createdAt) > firstAt && Number(item.createdAt) - firstAt <= followUpWinWindowMs)
-        .sort((first, second) => Number(first.createdAt) - Number(second.createdAt))[0];
+      const order = wonOrderOf(conversation);
       if (!order) continue;
       conversation.followUpWon = { orderId: String(order.id), at: Number(order.createdAt), total: Number(order.total) || 0, markedAt: now };
       if (wonLabels.length) conversation.labels = [...new Set([...(Array.isArray(conversation.labels) ? conversation.labels : []), ...wonLabels])];
@@ -419,7 +443,12 @@ export async function pruneReturningFromQueue({ conversationInfo, limit = 40, no
 export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = Date.now(), readSettings } = {}) {
   await reconcileFollowUpQueue(now, { readSettings });
   const size = Math.max(1, Math.min(maxBatchSize, Math.round(Number(limit) || 30)));
-  const queue = (await followUpQueue({ now })).filter(item => !item.leased && !item.noGlobalId);
+  // Khách Pancake chưa lưu ID Facebook: vẫn vào lô (tối đa 10/lô), cầu nối nhờ extension
+  // Pancake tìm ID theo tên + thời điểm hội thoại trước khi gửi.
+  const maxLookups = 10;
+  let lookups = 0;
+  const queue = (await followUpQueue({ now })).filter(item => !item.leased);
+  const token = randomUUID();
   // Lời gửi dựng lại theo mẫu HIỆN TẠI (mẫu đổi sau lúc xếp hàng thì khách nhận lời mới).
   const settings = readSettings ? await readSettings().catch(() => null) : null;
   const store = await readMessagingStore();
@@ -459,38 +488,59 @@ export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = D
       skipped.push({ key: item.key, name: item.name, reason: 'khách chặn tin' });
       continue;
     }
-    if (!info.globalId) {
-      // Pancake chưa lưu ID Facebook của khách (extension cần nó): khách vẫn ở hàng
-      // chờ để nhân viên gửi tay trong Pancake (giao diện Pancake tự tìm ID), chỉ
-      // không vào lô tự động nữa.
-      await updateFollowUpState(current => { if (current.sent[item.key]) current.sent[item.key].noGlobalId = true; return null; });
-      skipped.push({ key: item.key, name: item.name, reason: 'chưa có ID Facebook (gửi tay trong Pancake)' });
-      continue;
+    const globalId = info.globalId || item.globalId || '';
+    if (!globalId) {
+      // Pancake chưa lưu ID Facebook: ghi dấu, đưa vào lô (có hạn) để extension tự tìm ID.
+      if (!item.noGlobalId) await updateFollowUpState(current => { if (current.sent[item.key]) current.sent[item.key].noGlobalId = true; return null; });
+      if (lookups >= maxLookups) continue;
+      lookups += 1;
     }
     const text = currentText(item);
     texts.set(item.key, text);
-    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: info.globalId, name: item.name, text });
+    const conversation = (store.conversations || []).find(entry => entry.id === item.conversationId);
+    const updatedTime = Math.max(Number(conversation?.lastMessageAt) || 0, ...((store.messages?.[item.conversationId] || []).map(message => Number(message.createdAt) || 0)));
+    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: globalId, needsGlobalId: !globalId, updatedTime, name: item.name, text });
   }
   const keys = new Set(items.map(item => item.key));
   if (keys.size) {
     await updateFollowUpState(current => {
-      // Ghi lại lời sẽ gửi: tự xác nhận (so đầu tin đồng bộ về) khớp đúng lời mới.
-      for (const key of keys) if (current.sent[key]) Object.assign(current.sent[key], { leasedUntil: now + batchLeaseMs, text: texts.get(key) || current.sent[key].text });
+      // Ghi lại lời sẽ gửi (tự xác nhận so đầu tin đồng bộ về khớp lời mới) và mã lô (kết quả
+      // báo về phải mang đúng mã này).
+      for (const key of keys) if (current.sent[key]) Object.assign(current.sent[key], { leasedUntil: now + batchLeaseMs, batchToken: token, text: texts.get(key) || current.sent[key].text });
       return null;
     });
   }
-  return { kind: 'GIOTNANG_FOLLOWUP', version: 1, createdAt: now, delayMs: [15000, 30000], items, skipped, remaining: Math.max(0, queue.length - items.length - skipped.length) };
+  return { kind: 'GIOTNANG_FOLLOWUP', version: 2, token, createdAt: now, delayMs: [15000, 30000], items, skipped, remaining: Math.max(0, queue.length - items.length - skipped.length) };
+}
+
+/** Bỏ giữ chỗ (nhân viên bấm Dừng / đóng trang giữa lô): khách chưa gửi về lại hàng chờ ngay. */
+export async function releaseFollowUpLeases(keys = null) {
+  return updateFollowUpState(current => {
+    let released = 0;
+    for (const [key, entry] of Object.entries(current.sent)) {
+      if (!entry.queued || !entry.leasedUntil || (Array.isArray(keys) && keys.length && !keys.includes(key))) continue;
+      delete entry.leasedUntil;
+      released += 1;
+    }
+    return released;
+  });
 }
 
 /**
  * Kết quả trạm gửi báo về: tin gửi được thì xác nhận (thẻ + ưu đãi); lỗi thì trả
  * lại hàng chờ, lỗi quá 2 lần thì thôi (ghi lỗi để nhân viên xem).
  */
-export async function recordFollowUpBatchResults(results = [], { now = Date.now(), readSettings } = {}) {
+export async function recordFollowUpBatchResults(results = [], { now = Date.now(), readSettings, token = '' } = {}) {
   const summary = { sent: 0, failed: 0, dropped: 0 };
+  const state = await readFollowUpState();
   for (const result of Array.isArray(results) ? results : []) {
     const key = String(result?.key || '');
     if (!key) continue;
+    // Kết quả phải mang đúng mã lô đã cấp (chống link #followup-results giả).
+    const entry = state.sent[key];
+    if (entry?.batchToken && entry.batchToken !== String(token || '')) { summary.rejected = (summary.rejected || 0) + 1; continue; }
+    // Extension vừa tìm được ID Facebook: ghi lại để lần sau khỏi tìm.
+    if (/^\d{5,25}$/.test(String(result.globalId || ''))) await updateFollowUpState(current => { const target = current.sent[key]; if (target) { target.globalId = String(result.globalId); delete target.noGlobalId; } return null; });
     if (result.ok) {
       if (await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake-relay', readSettings })) summary.sent += 1;
       continue;

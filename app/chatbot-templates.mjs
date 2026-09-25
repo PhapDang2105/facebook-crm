@@ -371,7 +371,8 @@ function renderOrder(value, templates, context = {}) {
   const freshKey = buildOrderKey(freshItems);
   const freshPrice = freshKey ? priceBasket(freshItems) : null;
   const pending = usablePendingOrder(context.pendingOrder, { now, templateId });
-  const items = freshItems.length ? freshItems : (pending?.items || []);
+  const trialBagItem = context.trial?.stage === 'chosen' && context.trial.bag && !freshItems.length && !pending?.items?.length ? [{ product: context.trial.bag, quantity: 1 }] : [];
+  const items = freshItems.length ? freshItems : (pending?.items?.length ? pending.items : trialBagItem);
   const key = freshKey || pending?.key || '';
   const priced = items.length ? priceBasket(items) : null;
   // Khách đã nhận ưu đãi miễn phí vận chuyển (tin bám đuổi "1 túi dùng thử vẫn
@@ -776,9 +777,13 @@ const catalogRenderers = {
  * by PRICE_QUOTE for that product; a text stored under it (the old
  * "Dạ Túi Xanh 450g: 1 túi 174.000đ…") is stale by definition and dropped.
  */
+// Mã mẫu trong seed, đọc một lần (isProductQuoteId được gọi cho từng mẫu ở mỗi lượt).
+let cachedSeedIds = null;
+const seedTemplateIds = () => (cachedSeedIds ||= Object.fromEntries(Object.keys(defaultMessageTemplates()).map(id => [id, true])));
+
 export function isProductQuoteId(templateId) {
   const id = String(templateId || '').trim();
-  if (!id.startsWith('PRICE_') || catalogRenderers[id] || Object.hasOwn(defaultMessageTemplates(), id)) return false;
+  if (!id.startsWith('PRICE_') || catalogRenderers[id] || Object.hasOwn(seedTemplateIds(), id)) return false;
   return Boolean(matchProduct(id.replace(/^PRICE_/, '').replace(/_/g, ' ')));
 }
 

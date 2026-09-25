@@ -80,7 +80,7 @@ test('filterTrialReply: mẫu luồng chung (bảng giá, combo, freeship chung)
   assert.equal(filterTrialReply({ templateId: 'GENERAL_INFO' }, trial).template_id, 'TRIAL_PRICE');
   assert.equal(filterTrialReply({ templateId: 'DISCOUNT_POLICY' }, trial).template_id, 'TRIAL_PRICE');
   assert.equal(filterTrialReply({ templateId: 'FREESHIP_POLICY' }, trial).template_id, 'TRIAL_FREESHIP_INFO');
-  assert.equal(filterTrialReply({ templateId: 'SHIPPING_POLICY', alsoTemplateId: 'FREESHIP_POLICY' }, trial).template_id, 'TRIAL_FREESHIP_INFO');
+  assert.deepEqual([filterTrialReply({ templateId: 'SHIPPING_POLICY', alsoTemplateId: 'FREESHIP_POLICY' }, trial).template_id, filterTrialReply({ templateId: 'SHIPPING_POLICY', alsoTemplateId: 'FREESHIP_POLICY' }, trial).also], ['SHIPPING_POLICY', 'TRIAL_NEXT_STEP'], 'câu chính giữ, ý phụ đổi');
   assert.equal(filterTrialReply({ templateId: 'PRICE_XANH' }, trial, id => id.startsWith('PRICE_')).template_id, 'TRIAL_PRICE');
   assert.equal(filterTrialReply({ templateId: 'ASK_FLAVOR' }, { ...trial, stage: 'chosen', bag: 'Granola Túi Xanh 450g' }).template_id, 'ORDER_ADDRESS');
   assert.equal(filterTrialReply({ templateId: 'SHIPPING_POLICY' }, trial), null);
@@ -158,4 +158,21 @@ test('lỗi thật 25/09 (Voc Nguyen): khách hỏi gói nhỏ → rời luồng
   const other = renderChatbotReply(value, templates, { now, trial });
   assert.ok(other.order.shippingFee > 0);
   assert.equal(other.order.trial, undefined);
+});
+
+test('rà soát 25/09: "không"/"ko"/khiếu nại không phải đồng ý; "lấy 1 túi thôi" là chọn; câu hỏi có màu không phải chọn; so sánh 2 túi trả lời chứ không thoát; ý phụ bị cấm chỉ đổi ý phụ', async () => {
+  const trial = offer();
+  for (const text of ['không', 'ko', 'k', 'không nhé', 'thôi để sau']) assert.equal(trialStep({ text, trial }).value?.template_id, 'TRIAL_DECLINED', text);
+  for (const text of ['hàng bị mốc', 'chưa nhận được hàng', 'mua rồi', 'đã đặt rồi', 'hủy đơn']) assert.equal(trialStep({ text, trial }).delegate, true, text);
+  const one = trialStep({ text: 'lấy 1 túi xanh thôi em', trial, now });
+  assert.deepEqual([one.value?.template_id, one.patch?.stage], ['ORDER_ADDRESS', 'chosen']);
+  assert.equal(trialStep({ text: '1 túi thôi', trial }).value?.template_id, 'TRIAL_ACCEPT', 'chưa nêu màu: mời chọn túi');
+  assert.equal(trialStep({ text: 'túi xanh có ngọt không?', trial }).value?.template_id, 'NO_ADDED_SUGAR');
+  assert.equal(trialStep({ text: 'túi xanh bao nhiêu gam', trial }).value?.template_id, 'WEIGHT_EXPIRY');
+  const compare = trialStep({ text: 'xanh với vàng khác nhau gì', trial });
+  assert.deepEqual([compare.value?.template_id, compare.value?.also, compare.exit], ['BAG_COMPARISON', 'TRIAL_NEXT_STEP', undefined]);
+  assert.equal(trialStep({ text: '0909123456', trial }).delegate, true, 'SĐT trước khi chọn túi: mô hình đọc');
+  assert.equal(trialStep({ text: 'ok\n0909123456', trial }).delegate, true);
+  assert.equal(filterTrialReply({ templateId: 'NO_ADDED_SUGAR', alsoTemplateId: 'PRICE_QUOTE' }, trial, id => id.startsWith('PRICE_'))?.template_id, 'NO_ADDED_SUGAR');
+  assert.equal(filterTrialReply({ templateId: 'NO_ADDED_SUGAR', alsoTemplateId: 'PRICE_QUOTE' }, trial, id => id.startsWith('PRICE_'))?.also, 'TRIAL_NEXT_STEP');
 });

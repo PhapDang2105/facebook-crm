@@ -55,7 +55,8 @@ const INFO_RULES = [
   ['SHIP_TIME', /((bao lau|may ngay|bao nhieu ngay|bn ngay|khi nao|chung nao) (thi )?(nhan|giao|toi|den|co)|(giao|ship|nhan)( hang)? (mat )?(bao lau|may ngay|bn ngay)|may ngay giao|khoang chung nao)/, 'SHIPPING_POLICY'],
   ['LINKS', /((xin|gui|cho) .*(link|linh gian hang|gian hang)|(co|vo|ban) (tren|o) (shopee|tiktok|lazada))/, 'ECOMMERCE_LINKS'],
   ['WHOLESALE', /(\bsi\b|\bctv\b|cong tac vien|dai ly|lay buon)/, 'WHOLESALE_CTV_CONTACT', s => /(bac|tien|y|ca|nghe|thac) si/.test(s)],
-  ['VAT', /\b(vat|xuat hoa don|hoa don (do|vat|gtgt|dien tu))\b/, 'VAT_INVOICE']
+  ['VAT', /\b(vat|xuat hoa don|hoa don (do|vat|gtgt|dien tu))\b/, 'VAT_INVOICE'],
+  ['PAYMENT', /\b(cod|thanh toan|chuyen khoan|ck truoc|tra tien|thu tien|tra truoc|tra sau|nhan hang roi tra)\b/, 'PAYMENT_METHODS', s => PRICE.test(s) && !/\b(cod|chuyen khoan|ck)\b/.test(s)]
 ];
 
 const ICEBREAKERS = [
@@ -81,12 +82,17 @@ function basketAmbiguous(raw) {
 // Sau khi bỏ mọi chữ nói về giỏ, còn chữ nào thì tin có ý khác: để mô hình.
 const BASKET_WORDS = new Set(['xanh', 'vang', 'nau', 'cacao', 'la', 'cay', 'tui', 'tuy', 'goi', 'bich', 'bit', 'hop', 'combo', 'lay', 'dat', 'mua', 'chot', 'gui', 'ship', 'cho', 'muon', 'can', 'em', 'e', 'minh', 'mk', 'm', 'chi', 'c', 'toi', 'tui', 'anh', 'a', 'to', 'ban', 'b', 'shop', 'va', 'voi', 'them', 'moi', 'loai', 'nha', 'nhe', 'ha', 'luon', 'di', 'thu', 'dung', 'nguyen', 'nhieu', 'hat', 'x', 'vi', 'granola', 'sdt', 'dt', 'nhe', 'ak', 'ah', 'oi']);
 
-function basketFrom(raw, commentBasket) {
+function basketParts(raw, commentBasket) {
   const items = commentBasket(prep(raw));
-  if (!items.length) return [];
+  if (!items.length) return { items: [], leftover: '' };
   const words = core(prep(raw)).replace(/\+?\d{9,11}/g, ' ').split(/\s+/).filter(Boolean);
   const leftover = words.filter(word => !BASKET_WORDS.has(word) && !/^\d{1,2}$/.test(word) && !/^x\d{1,2}$/.test(word));
-  return leftover.length ? [] : items;
+  return { items, leftover: leftover.join(' ') };
+}
+
+function basketFrom(raw, commentBasket) {
+  const { items, leftover } = basketParts(raw, commentBasket);
+  return leftover ? [] : items;
 }
 
 /**
@@ -129,11 +135,20 @@ export function ruleIntent(text, ctx = {}) {
   if (ctx.hasBasket && ctx.lastWasOrderStep && phone && PHONE_ONLY.test(foldVietnamese(raw).toLowerCase())) {
     return { rule: 'PHONE_ONLY', value: { template_id: 'ORDER_ADDRESS' } };
   }
-  if (basket.length) {
+  const basketValue = items => {
     const slots = ['Product_N1', 'No_A', 'Product_N2', 'No_B', 'Product_N3', 'No_C'];
     const value = { template_id: 'ORDER_ADDRESS' };
-    basket.slice(0, 3).forEach((item, index) => { value[slots[index * 2]] = item.product; value[slots[index * 2 + 1]] = String(item.quantity); });
-    return { rule: 'BASKET', value };
+    items.slice(0, 3).forEach((item, index) => { value[slots[index * 2]] = item.product; value[slots[index * 2 + 1]] = String(item.quantity); });
+    return value;
+  };
+  if (basket.length) return { rule: 'BASKET', value: basketValue(basket) };
+  // Giỏ rõ + một câu hỏi thông tin ("Cho chị 1 bịch vàng. Bịch này ko có yến mạch?"): giữ giỏ,
+  // xin SĐT/địa chỉ và trả lời câu hỏi bằng ý phụ — trước đây giỏ bị rơi, chỉ trả lời câu hỏi.
+  if (!complaint && orderAgeMin >= 60 && !PRICE.test(s) && !ctx.smallPackContext && !basketAmbiguous(raw) && typeof ctx.commentBasket === 'function'
+    && (ORDER_VERB.test(s) || /\b\d{1,2}\b/.test(s))) {
+    const { items, leftover } = basketParts(raw, ctx.commentBasket);
+    const info = items.length && leftover ? INFO_RULES.find(([rule, pattern, , exclude]) => !['FREESHIP', 'DISCOUNT', 'VOUCHER', 'GIFT', 'COMPARE', 'PAYMENT'].includes(rule) && pattern.test(leftover) && !(exclude && exclude(leftover, ctx))) : null;
+    if (info) return { rule: 'BASKET_INFO', value: { ...basketValue(items), also: info[2] } };
   }
   // Chỉ nêu một túi, không số, không động từ đặt ("Túi xanh", "túi vàng giá sao"): báo giá túi đó.
   const colours = [...new Set(s.match(/\b(xanh|vang|nau|cacao)\b/g) || [])].map(colour => (colour === 'cacao' ? 'nau' : colour));

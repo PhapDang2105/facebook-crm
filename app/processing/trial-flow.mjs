@@ -20,8 +20,13 @@ import { core, infoRules } from './rule-intent.mjs';
 const HOUR = 60 * 60 * 1000;
 export const TRIAL_SCENARIO_NOTE = 'Ưu đãi dùng thử bám đuổi (1 túi miễn phí vận chuyển)';
 
-const DECLINE = /\b(khong|ko|k|kh|chua) (can|lay|mua|an|thich|quan tam|co nhu cau)\b|\b(thoi|de sau|khi khac|lan sau|het tien|khong nhe|ko nhe|dung nhan|khoi)\b/;
+// Từ chối: "không", "ko cần", "thôi để sau"… — "thôi" chỉ là từ chối khi câu không nêu túi/số lượng ("lấy 1 túi thôi" là chọn).
+const DECLINE = /^(khong|ko|k|kh|hong|hok|khong can|ko can|khong lay|ko lay|khong mua|ko mua|khong dau|ko dau|khong nhe|ko nhe)$|\b(khong|ko|k|kh|chua) (can|lay|mua|thich|quan tam|co nhu cau)\b|\b(de sau|khi khac|lan sau|het tien|dung nhan|dung gui|khoi)\b/;
+const DECLINE_THOI = /\bthoi\b/;
 const ACCEPT = /\b(ok|oke|okie|oki|okay|dong y|lay|thu|dat|mua|chot|len don|gui|ship|duoc|dc|co|u|uh|um|vang|da|nhan|muon)\b/;
+// Khách nói đã mua / hủy / khiếu nại: không phải trả lời lời mời — nhờ mô hình đọc.
+const NOT_OFFER = /\b(da (dat|mua|nhan|lay)|mua roi|dat roi|huy|chua nhan|bi (moc|hoi|hu|loi)|khieu nai|tra hang|hoan)\b/;
+const COMPARE = /(khac (nhau|gi|sao|ntn)|nao ngon|ngon hon|nen (chon|mua|lay) (loai|tui|vi)? ?nao|phan biet|so sanh)/;
 const PRICE = /\b(gia|bn|bao nhieu|bnhiu|bao tien|nhieu tien|tong|het bao nhieu)\b/;
 const FREESHIP = /(mien|free) ?(phi )?(ship|sip|van chuyen)|freeship|phi ship|tien ship|ship (bao nhieu|bn|nhieu|may)/;
 const DISCOUNT = /(giam gia|khuyen mai|\bkm\b|uu dai|combo|\bsale\b|voucher|ma giam|qua tang|tang (gi|j))/;
@@ -90,11 +95,26 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   const phone = extractVietnamesePhone(raw);
   const longText = s.length > 60;
   const bags = trialBagOptions();
-  if (DECLINE.test(s) && !phone) return { value: { template_id: 'TRIAL_DECLINED' }, patch: { stage: 'declined', endedAt: now } };
   const { picks, looseQuantity } = bagPicks(raw);
   const quantity = [...picks.values()].reduce((sum, value) => sum + value, 0);
+  const chosen = trial?.stage === 'chosen' && trial.bag;
+  const orderStep = chosen ? { template_id: 'ORDER_ADDRESS', Product_N1: trial.bag, No_A: '1' } : null;
+  // Đã mua / hủy / khiếu nại: không phải trả lời lời mời — mô hình đọc (kèm gợi ý).
+  if (NOT_OFFER.test(s)) return { delegate: true };
+  // Từ chối. "thôi" chỉ là từ chối khi không kèm túi/số lượng/lời đồng ý ("lấy 1 túi thôi" là chọn).
+  const declines = DECLINE.test(s) || (DECLINE_THOI.test(s) && !picks.size && !looseQuantity && !ACCEPT.test(s.replace(/\bthoi\b/g, '')));
+  if (declines && !phone) return { value: { template_id: 'TRIAL_DECLINED' }, patch: { stage: 'declined', endedAt: now } };
+  // Câu hỏi (so sánh, ngọt không, bao nhiêu gam…) trả lời trước; nêu màu trong câu hỏi
+  // chưa phải chọn. Câu hỏi giá / ship / khuyến mãi thì luồng này tự trả lời.
+  const asks = raw.includes('?') || COMPARE.test(s);
+  const info = s.length <= 90 && infoRules.find(([rule, pattern]) => !PRICE_RULES.has(rule) && pattern.test(s));
+  if (info && !phone) return { value: { template_id: info[2], also: 'TRIAL_NEXT_STEP', values: { bags } } };
+  if (asks && picks.size >= 2 && !phone) return { value: { template_id: 'BAG_COMPARISON', also: 'TRIAL_NEXT_STEP', values: { bags } } };
+  if (FREESHIP.test(s)) return { value: { template_id: 'TRIAL_FREESHIP_INFO', values: { bags } } };
+  if (DISCOUNT.test(s) || PRICE.test(s)) return { value: { template_id: 'TRIAL_PRICE', values: { bags } } };
+  // Xin ≥ 2 túi / 2 màu (không phải câu hỏi): đơn thường giá combo.
   if (picks.size >= 2 || quantity >= 2 || looseQuantity >= 2) return { exit: 'converted', patch: { stage: 'converted', endedAt: now } };
-  if (picks.size === 1) {
+  if (picks.size === 1 && !asks) {
     const product = bagProduct([...picks.keys()][0]);
     if (!product) return { delegate: true };
     const patch = { stage: 'chosen', bag: product.name, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) };
@@ -102,21 +122,16 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
     if (phone || longText) return { delegate: true, patch };
     return { value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: '1' }, patch };
   }
-  const chosen = trial?.stage === 'chosen' && trial.bag;
-  const orderStep = chosen ? { template_id: 'ORDER_ADDRESS', Product_N1: trial.bag, No_A: '1' } : null;
-  // Đã chọn túi, khách gửi SĐT (và/hoặc địa chỉ): bước đơn. SĐT trơn thì bộ soạn đơn tự đọc.
-  if (chosen && phone && raw.replace(/[\s.+()-]/g, '').replace(/^\D*/, '').length <= 13) return { value: orderStep };
-  if (chosen && (phone || longText)) return { delegate: true };
-  if (FREESHIP.test(s)) return { value: { template_id: 'TRIAL_FREESHIP_INFO', values: { bags } } };
-  if (DISCOUNT.test(s) || PRICE.test(s)) return { value: { template_id: 'TRIAL_PRICE', values: { bags } } };
-  const asks = raw.includes('?') || s.length > 25;
-  const info = s.length <= 70 && infoRules.find(([rule, pattern]) => !PRICE_RULES.has(rule) && pattern.test(s));
-  if (info) return { value: { template_id: info[2], also: 'TRIAL_NEXT_STEP', values: { bags } } };
-  if (!asks && (ACCEPT.test(s) || /^[\s.…!?1👍❤️🥰😍]*$/u.test(raw) || s.length <= 12)) {
+  // SĐT (± địa chỉ) khi đã chọn túi: bước đơn (SĐT trơn thì bộ soạn đơn tự đọc); chưa
+  // chọn túi mà đã gửi SĐT/địa chỉ: mô hình đọc, giữ SĐT cho bước sau.
+  if (phone && chosen && raw.replace(/[\s.+()-]/g, '').replace(/^\D*/, '').length <= 13) return { value: orderStep };
+  if (phone || (chosen && longText)) return { delegate: true };
+  // Đồng ý / lời đáp ngắn ("ok", "dạ", emoji, "1"): mời chọn túi, hay bước đơn nếu đã chọn.
+  const shortAck = /^[\s.…!?1👍❤️🥰😍]*$/u.test(raw) || /^(da|vang|ok|oke|oki|okie|okay|u|uh|um|ua|uk|ukm)( (a|ah|em|e|shop|chi|c|nha|nhe))*$/.test(s);
+  if (!asks && !longText && (ACCEPT.test(s) || shortAck || looseQuantity === 1)) {
     if (orderStep) return { value: orderStep };
     return { value: { template_id: trial?.accepted ? 'TRIAL_REMIND' : 'TRIAL_ACCEPT', values: { bags } }, patch: { accepted: true } };
   }
-  if (phone && !chosen) return { delegate: true };
   return { delegate: true };
 }
 
@@ -129,8 +144,10 @@ export function filterTrialReply(reply = {}, trial = {}, isProductQuoteId = () =
   const id = String(reply.templateId || '');
   const also = String(reply.alsoTemplateId || '');
   const banned = value => BANNED.has(value) || isProductQuoteId(value);
-  if (id === 'FREESHIP_POLICY' || also === 'FREESHIP_POLICY') return { template_id: 'TRIAL_FREESHIP_INFO', values: { bags: trialBagOptions() } };
-  if (!banned(id) && !banned(also)) return null;
+  if (id === 'FREESHIP_POLICY') return { template_id: 'TRIAL_FREESHIP_INFO', values: { bags: trialBagOptions() } };
+  if (!banned(id) && !banned(also) && also !== 'FREESHIP_POLICY') return null;
+  // Câu trả lời chính dùng được, chỉ ý phụ bị cấm (bảng giá, combo…): giữ câu chính, đổi ý phụ.
+  if (!banned(id) && id) return { template_id: id, also: 'TRIAL_NEXT_STEP', values: { bags: trialBagOptions() } };
   if (trial?.stage === 'chosen' && trial.bag) return { template_id: 'ORDER_ADDRESS', Product_N1: trial.bag, No_A: '1' };
   return { template_id: 'TRIAL_PRICE', values: { bags: trialBagOptions() } };
 }

@@ -176,20 +176,31 @@ test('trạm gửi Pancake: lô hỏi lại Pancake (bỏ khách đã có đơn 
   const conversationInfo = async (pageId, conversationId) => info[conversationId.split('_')[1]];
   const batch = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now });
   assert.equal(batch.kind, 'GIOTNANG_FOLLOWUP');
-  assert.deepEqual(batch.items.map(item => [item.key, item.convId, item.globalUserId]), [['trial:110:g', '110_g', '1000123']]);
-  assert.deepEqual(batch.skipped.map(item => item.reason).sort(), ['chưa có ID Facebook (gửi tay trong Pancake)', 'khách cũ đã từng mua']);
-  // Khách đã có đơn: rời hàng chờ. Chưa có ID Facebook: vẫn chờ (gửi tay), không vào lô.
-  // Khách trong lô: giữ chỗ, lô sau không lấy lại.
+  // Khách chưa có ID Facebook vẫn vào lô (needsGlobalId): cầu nối nhờ extension tìm ID.
+  assert.deepEqual(batch.items.map(item => [item.key, item.convId, item.globalUserId, item.needsGlobalId]), [['trial:110:g', '110_g', '1000123', false], ['trial:110:a', '110_a', '', true]]);
+  assert.ok(batch.token);
+  assert.deepEqual(batch.skipped.map(item => item.reason), ['khách cũ đã từng mua']);
+  // Khách đã có đơn: rời hàng chờ. Khách trong lô: giữ chỗ, lô sau không lấy lại.
   const queue = await fresh.followUpQueue({ now });
-  assert.deepEqual(queue.map(item => [item.key, item.leased, item.noGlobalId]), [['trial:110:g', true, false], ['trial:110:a', false, true]]);
-  assert.equal((await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: now + 60000 })).items.length, 0);
+  assert.deepEqual(queue.map(item => [item.key, item.leased, item.noGlobalId]), [['trial:110:g', true, false], ['trial:110:a', true, true]]);
+  assert.equal((await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: now + 60000 })).items.length, 0, 'đang giữ chỗ: lô sau không lấy lại');
+  assert.equal(await fresh.releaseFollowUpLeases(['trial:110:a']), 1, 'Dừng giữa lô: trả chỗ');
+  assert.equal((await fresh.followUpQueue({ now })).find(item => item.key === 'trial:110:a').leased, false);
+  const third = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: now + 120000 });
   // Lỗi lần 1: trả lại hàng chờ; lỗi lần 2: bỏ, ghi lỗi.
-  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now }), { sent: 0, failed: 1, dropped: 0 });
+  // Kết quả không mang mã lô: bị từ chối. Đúng mã: ghi nhận.
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now }), { sent: 0, failed: 0, dropped: 0, rejected: 1 });
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now, token: batch.token }), { sent: 0, failed: 1, dropped: 0 });
   const [again] = await fresh.followUpQueue({ now });
   assert.equal(again.leased, false);
   assert.equal(again.lastError, 'CAN NOT SEND');
-  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now }), { sent: 0, failed: 1, dropped: 1 });
-  assert.deepEqual((await fresh.followUpQueue({ now })).map(item => item.key), ['trial:110:a']);
+  const second = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: now + 60000 });
+  assert.deepEqual(second.items.map(item => item.key), ['trial:110:g'], 'lỗi lần 1 → trả lại hàng, lô sau lấy lại');
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'CAN NOT SEND' }], { now, token: second.token }), { sent: 0, failed: 1, dropped: 1 });
+  // Extension tìm được ID cho a rồi gửi: ghi ID lại, khách rời hàng chờ.
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:a', ok: true, globalId: '1000777' }], { now, token: third.token }), { sent: 1, failed: 0, dropped: 0 });
+  assert.equal((await fresh.readFollowUpState()).sent['trial:110:a'].globalId, '1000777');
+  assert.deepEqual((await fresh.followUpQueue({ now })).map(item => item.key), []);
 });
 
 test('hàng chờ tự xác nhận khi lời bám đuổi (gửi tay trong Pancake) đồng bộ về CRM; tin khác của nhân viên thì không tính', async () => {
@@ -249,7 +260,8 @@ test('kết quả trạm gửi: ưu đãi miễn ship lấy theo kịch bản tr
 test('chỉ bám khách MỚI: khách đã từng mua (hồ sơ Pancake/POS, SĐT có đơn, thẻ) không được gửi / bị gỡ khỏi hàng chờ', async () => {
   const { returningCustomerReason } = await import('../app/follow-up.mjs');
   assert.equal(returningCustomerReason({ orderCount: 0, recentOrders: 0, tags: [] }), '');
-  assert.match(returningCustomerReason({ orderCount: 2 }), /khách cũ/);
+  assert.equal(returningCustomerReason({ orderCount: 2 }), '', 'order_count gồm cả đơn bỏ dở: không tin');
+  assert.match(returningCustomerReason({ succeedOrderCount: 1 }), /khách cũ/);
   assert.match(returningCustomerReason({ purchasedAmount: 174000 }), /khách cũ/);
   assert.match(returningCustomerReason({ lastOrderAt: '2026-05-01T00:00:00' }), /khách cũ/);
   assert.match(returningCustomerReason({ posOrders: 1 }), /SĐT đã có đơn trên POS/);
@@ -258,13 +270,13 @@ test('chỉ bám khách MỚI: khách đã từng mua (hồ sơ Pancake/POS, SĐ
 
   // Vòng bám đuổi: khách F (hộp thư im 4 giờ) là khách cũ trên POS → không gửi, ghi lý do.
   const { updateMessagingStore } = await import('../app/messaging-store.mjs');
-  await updateMessagingStore(current => { const f = current.conversations.find(entry => entry.id === `${page}:f`); f.customerOrders = []; f.labels = []; return null; });
+  await updateMessagingStore(current => { const f = current.conversations.find(entry => entry.id === `${page}:f`); f.customerOrders = []; f.labels = []; delete f.promo; delete f.followUps; return null; });
   const write = (await import('node:fs')).writeFileSync;
   write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: {} }));
   const fresh = await import(`../app/follow-up.mjs?returning=${Date.now()}`);
   const inboxOnly = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true, scenarios: [{ id: 'inbox-3h', name: 'Hộp thư 3 giờ', trigger: 'inbox-no-reply', delayHours: 3, message: 'Dạ {title} còn cần em tư vấn thêm gì không ạ?' }] } });
   const sent = [];
-  const summary = await fresh.runFollowUps({ readSettings: async () => inboxOnly, sendMessage: async (c, p) => { sent.push(c.id); return { message: { mid: 'x' } }; }, conversationInfo: async () => ({ orderCount: 1 }), now: now + 5 * HOUR, log: () => {} });
+  const summary = await fresh.runFollowUps({ readSettings: async () => inboxOnly, sendMessage: async (c, p) => { sent.push(c.id); return { message: { mid: 'x' } }; }, conversationInfo: async () => ({ succeedOrderCount: 1 }), now: now + 5 * HOUR, quietHours: false, log: () => {} });
   assert.equal(summary.sent, 0);
   assert.equal(summary.returning, 1);
   assert.deepEqual(sent, []);
@@ -281,12 +293,12 @@ test('chỉ bám khách MỚI: khách đã từng mua (hồ sơ Pancake/POS, SĐ
     'trial:110:a': { scenarioId: 'trial', conversationId: `${page}:a`, name: 'A', at: now, repliedAt: now - 13 * HOUR, queued: true, text: 'x', pageId: page, psid: 'a' }
   } }));
   const pruner = await import(`../app/follow-up.mjs?prune=${Date.now()}`);
-  const info = { g: { orderCount: 3 }, a: { orderCount: 0 } };
+  const info = { g: { succeedOrderCount: 3 }, a: { orderCount: 3 } };
   assert.deepEqual(await pruner.pruneReturningFromQueue({ conversationInfo: async (pageId, id) => info[id.split('_')[1]], now }), { checked: 2, removed: 1 });
   const state = await pruner.readFollowUpState();
   assert.equal(state.sent['trial:110:g'].queued, undefined);
   assert.equal(state.sent['trial:110:a'].checkedAt, now);
-  assert.deepEqual(await pruner.pruneReturningFromQueue({ conversationInfo: async () => ({ orderCount: 9 }), now }), { checked: 0, removed: 0 }, 'đã xét thì không tra lại');
+  assert.deepEqual(await pruner.pruneReturningFromQueue({ conversationInfo: async () => ({ succeedOrderCount: 9 }), now }), { checked: 0, removed: 0 }, 'đã xét thì không tra lại');
 });
 
 test('lô gửi chỉ lấy khách đã im đủ số giờ của kịch bản hiện tại (đổi 24 → 36 giờ sau lúc xếp hàng)', async () => {

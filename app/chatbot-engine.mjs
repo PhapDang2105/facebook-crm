@@ -686,7 +686,7 @@ async function answerChange(change, settings, results, dependencies) {
     // chọn: lên bước xin SĐT/địa chỉ với đúng sản phẩm vừa báo giá. Mô hình hay
     // gửi lại bảng giá vì chữ "dùng thử" có sẵn trong bảng (khách bỏ đi).
     const quoteAge = Date.now() - (Number(conversation.botLastReplyAt) || 0);
-    const quotedName = !nonText && conversation.botLastTemplateId === 'PRICE_QUOTE' && quoteAge < 30 * 60 * 1000
+    const quotedName = !nonText && (conversation.botLastTemplateId === 'PRICE_QUOTE' || (conversation.botLastTemplateId === 'GENERAL_INFO' && recent.some(item => item?.direction === 'outgoing' && /Bảng giá (.+?) để/u.test(String(item.text || '')) && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000))) && quoteAge < 30 * 60 * 1000
       ? [...recent].reverse().filter(item => item?.direction === 'outgoing').map(item => String(item.text || '').match(/Bảng giá (.+?) để/u)?.[1]).find(Boolean) || ''
       : '';
     const quoted = quotedName ? matchProduct(quotedName) : null;
@@ -802,7 +802,9 @@ async function answerChange(change, settings, results, dependencies) {
       const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: defaultQuoteProduct }, settings.messageTemplates, replyContext);
       const opening = String(quote.messages?.[0] || '').replace(/\s+/g, ' ').trim().slice(0, 40);
       const justSent = opening && replyContext.recentOutgoing.some(text => String(text).replace(/\s+/g, ' ').includes(opening));
-      if (quote.templateId === 'PRICE_QUOTE' && !justSent) {
+      const priceListSent = replyContext.recentOutgoing.some(text => /174.000đ/.test(text) && /Túi Vàng/i.test(text) && !/Bảng giá Granola/i.test(text));
+      if (quote.templateId === 'PRICE_QUOTE' && !justSent && priceListSent) reply = { ...quote, ...(reply.attention ? { attention: true } : {}) };
+      else if (quote.templateId === 'PRICE_QUOTE' && !justSent) {
         const partsOf = item => item.parts || [...item.messages.map(text => ({ type: 'text', text })), ...(item.images || []).map(url => ({ type: 'image', url }))];
         reply = { ...reply, messages: [...reply.messages, ...quote.messages], parts: [...partsOf(reply), ...partsOf(quote)], images: [...(reply.images || []), ...(quote.images || [])], alsoTemplateId: 'PRICE_QUOTE' };
       }
@@ -823,6 +825,8 @@ async function answerChange(change, settings, results, dependencies) {
     // "Chưa nhận được hàng" mà hội thoại không có đơn (đơn ở trang kia, nhân viên
     // lên tay…): bot chỉ xin SĐT được — gắn thẻ để nhân viên tra ngay.
     if (reply.templateId === 'ORDER_STATUS' && !recentOrder?.id && !lookupReply && !reply.attention) reply = { ...reply, attention: true };
+    // Khách than giao chậm / chưa nhận: luôn gắn thẻ để nhân viên tra vận đơn.
+    if (reply.templateId === 'DELIVERY_DELAY' && !reply.attention) reply = { ...reply, attention: true };
     // Dưới bình luận không bao giờ chuyển người (khách chưa vào hộp thư): trả
     // bảng giá chung và mời nhắn tin. WELCOME/xác nhận đơn/"đã nhận hình" dưới
     // bình luận cũng vô nghĩa (khách đã hỏi giá rồi) → bảng giá sản phẩm của bài.
@@ -926,7 +930,16 @@ async function answerChange(change, settings, results, dependencies) {
       const answerAgain = repeatsLast && !repeatsHandoff && informational && substantive && hasOrder
         && conversation.botLastTemplateId !== reply.templateId && !isComment;
       const nudgeId = priceFamily.has(reply.templateId) && !hasOrder ? 'REPLY_ALREADY_SENT' : 'REPLY_ALREADY_SENT_INFO';
-      const canNudge = repeatsLast && !answerAgain && !remindOrder && informational && substantive && settings.messageTemplates?.[nudgeId]
+      // Nhắc 'đã gửi ở trên' chỉ khi CHÍNH KHÁCH lặp lại câu vừa hỏi (đọc 361 hội thoại 24–25/09:
+      // 11/11 lần nhắc đều sai — khách hỏi ý mới, đưa SĐT tra đơn… mà bị bảo 'xem ở trên').
+      const previousIncoming = [...recent].reverse().find(item => item?.direction === 'incoming' && item.id !== message.id && (!message.mid || item.mid !== message.mid));
+      const squashText = value => foldVietnamese(String(value || '')).replace(/[^a-z0-9 ]+/g, ' ').replace(/s+/g, ' ').trim();
+      const customerRepeats = Boolean(previousIncoming) && (() => { const before = squashText(previousIncoming.text); const current = squashText(message.text); return Boolean(before) && (before === current || (current.length >= 12 && before.startsWith(current.slice(0, 20)))); })();
+      // Khách hỏi ý khác chủ đề vừa trả lời (có SĐT, nêu sản phẩm, hỏi đơn, hay luật nhận ra một
+      // mẫu khác): không nhắc "ở trên" — im và gắn thẻ để nhân viên trả lời.
+      const sameTopic = !phoneInText && !namesProducts && !asksAboutOrder
+        && (!ruled?.value?.template_id || ruled.value.template_id === reply.templateId || ruled.value.also === reply.templateId || (ruled.value.template_id === 'GENERAL_INFO' && priceFamily.has(reply.templateId)));
+      const canNudge = repeatsLast && !answerAgain && !remindOrder && informational && substantive && (customerRepeats || sameTopic) && settings.messageTemplates?.[nudgeId]
         && !['REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO'].includes(conversation.botLastTemplateId) && !isComment;
       if (!canNudge && !answerAgain && !remindOrder) {
         // Im lặng nhưng không bỏ rơi: giỏ mới vẫn được lưu; khách nhắn có nội
@@ -966,7 +979,10 @@ async function answerChange(change, settings, results, dependencies) {
       const separate = /\b(don khac|don moi|nguoi khac|dia chi khac|gui (cho )?(me|ba|bo|chi|em|ban|anh|nguoi)|tach don|them|nua)\b/.test(folded);
       const digits = value => String(value || '').replace(/\D/g, '').slice(-9);
       const samePhone = existing && digits(existing.phone) && digits(existing.phone) === digits(reply.order.phone);
-      if (existing && samePhone && !separate) reply = shopOrderReply(existing);
+      const skuOf = value => String(value || '').trim().toUpperCase();
+      const basketOf = list => (Array.isArray(list) ? list : []).map(item => `${skuOf(item.sku || item.code)}=${Number(item.quantity) || 1}`).sort().join(',');
+      const sameBasket = existing && (!Array.isArray(existing.items) || !existing.items.length || basketOf(existing.items) === basketOf(reply.order.items));
+      if (existing && samePhone && !separate && sameBasket) reply = shopOrderReply(existing);
       else if (existing) reply = { ...reply, attention: true };
     }
     // The order is persisted BEFORE anything is sent. Sending first meant a
@@ -1102,6 +1118,9 @@ async function answerChange(change, settings, results, dependencies) {
       // Theo đúng thứ tự của mẫu: ảnh đặt đầu mẫu đi trước bảng giá, ảnh đặt
       // cuối đi sau chữ. Mẫu không có dãy gửi thì chữ trước, ảnh sau.
       let parts = reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
+      // Cùng một đoạn chữ / ảnh xuất hiện hai lần trong một lượt: gửi một lần.
+      const seenParts = new Set();
+      parts = parts.filter(part => { const key = `${part.type}:${String(part.text || part.url || '').replace(/s+/g, ' ').trim()}`; if (seenParts.has(key)) return false; seenParts.add(key); return true; });
       // Ảnh còn nợ từ tin nhắn riêng sau bình luận: gửi trước câu trả lời, bỏ
       // ảnh trùng trong câu trả lời để khách không nhận hai lần.
       const owed = conversation.source === 'comment' ? [] : takePendingImages(conversation.pageId, conversation.psid);
@@ -1203,7 +1222,7 @@ async function answerChange(change, settings, results, dependencies) {
     const retryDelay = Number(settings.capacityRetryDelayMs ?? 60000);
     if (isCapacityError(error) && !change.delayedRetry && retryDelay > 0) {
       const timer = setTimeout(() => {
-        queueForConversation(conversation.id, async () => {
+        queueForConversation(conversation.pageId && conversation.psid ? `${conversation.pageId}:${conversation.psid}` : conversation.id, async () => {
           const latest = dependencies.readSettings ? await dependencies.readSettings().catch(() => settings) : settings;
           if (!latest?.enabled) return;
           await answerChange({ ...change, delayedRetry: true }, latest, [], dependencies);

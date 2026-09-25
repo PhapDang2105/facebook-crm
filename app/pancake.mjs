@@ -346,7 +346,8 @@ export async function fetchPancakeConversationInfo(pageId, conversationId, confi
     canInbox: body.can_inbox !== false && customer?.can_inbox !== false,
     name: String(customer?.name || ''),
     // Hồ sơ khách Pancake (liên kết POS): khách cũ nhận ra được cả khi chưa để lại SĐT.
-    orderCount: Math.max(0, ...customers.map(item => Math.max(Number(item.order_count) || 0, Number(item.succeed_order_count) || 0))),
+    orderCount: Math.max(0, ...customers.map(item => Number(item.order_count) || 0)),
+    succeedOrderCount: Math.max(0, ...customers.map(item => Number(item.succeed_order_count) || 0)),
     purchasedAmount: Math.max(0, ...customers.map(item => Number(item.purchased_amount) || 0)),
     lastOrderAt: customers.map(item => String(item.last_order_at || '')).find(Boolean) || '',
     tags: customers.flatMap(item => (Array.isArray(item.tags) ? item.tags : []).map(tag => String(tag?.name ?? tag))),

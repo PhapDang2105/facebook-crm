@@ -10,8 +10,38 @@ function validItem(item) {
   return item
     && /^\d{5,20}$/.test(String(item.pageId))
     && new RegExp(`^${item.pageId}_\\d{5,25}$`).test(String(item.convId))
-    && /^\d{5,25}$/.test(String(item.globalUserId))
+    && (/^\d{5,25}$/.test(String(item.globalUserId)) || (item.needsGlobalId === true && !item.globalUserId))
     && typeof item.text === 'string' && item.text.trim().length > 0 && item.text.length <= 2000;
+}
+
+// Chạy trong trang pancake.vn: nhờ extension Pancake tìm ID Facebook của khách
+// (lệnh GET_GLOBAL_ID_FOR_CONV — Pancake chưa lưu ID thì extension dò hộp thư
+// Page theo tên khách + thời điểm hội thoại).
+function lookupGlobalIdThroughPancake(item) {
+  return new Promise(resolve => {
+    const taskId = `giotnang-id-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const finish = result => { clearTimeout(timer); window.removeEventListener('message', onMessage); resolve(result); };
+    const timer = setTimeout(() => finish({ ok: false, error: 'extension Pancake không tìm được ID Facebook sau 90 giây' }), 90000);
+    function onMessage(event) {
+      const data = event.data;
+      if (event.source !== window || !data || data.taskId !== taskId) return;
+      if (data.type === 'GET_GLOBAL_ID_FOR_CONV_SUCCESS' && /^\d{5,25}$/.test(String(data.globalId || ''))) finish({ ok: true, globalId: String(data.globalId) });
+      else if (data.type === 'GET_GLOBAL_ID_FOR_CONV_SUCCESS' || data.type === 'GET_GLOBAL_ID_FOR_CONV_FAILURE') finish({ ok: false, error: 'extension Pancake không tìm được ID Facebook của khách' });
+    }
+    window.addEventListener('message', onMessage);
+    window.postMessage({
+      type: 'GET_GLOBAL_ID_FOR_CONV',
+      taskId,
+      pageId: item.pageId,
+      convId: item.convId,
+      convType: 'INBOX',
+      threadId: item.convId.split('_')[1],
+      customerName: item.name || '',
+      conversationUpdatedTime: item.updatedTime || Date.now(),
+      isBusiness: true,
+      allowSearchByName: true
+    }, '*');
+  });
 }
 
 async function waitForLoad(tabId, timeoutMs = 30000) {
@@ -71,13 +101,26 @@ function sendThroughPancake(item) {
 async function send(item) {
   if (!validItem(item)) return { ok: false, error: 'lệnh gửi không hợp lệ' };
   const tabId = await pancakeTab();
+  let globalUserId = String(item.globalUserId || '');
+  let foundId = '';
+  if (!globalUserId) {
+    const [lookup] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: lookupGlobalIdThroughPancake,
+      args: [{ pageId: String(item.pageId), convId: String(item.convId), name: String(item.name || ''), updatedTime: Number(item.updatedTime) || Date.now() }]
+    });
+    if (!lookup?.result?.ok) return { ok: false, error: lookup?.result?.error || 'không tìm được ID Facebook của khách' };
+    globalUserId = foundId = lookup.result.globalId;
+  }
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId },
     world: 'MAIN',
     func: sendThroughPancake,
-    args: [{ pageId: String(item.pageId), convId: String(item.convId), globalUserId: String(item.globalUserId), text: item.text, name: String(item.name || '') }]
+    args: [{ pageId: String(item.pageId), convId: String(item.convId), globalUserId, text: item.text, name: String(item.name || '') }]
   });
-  return injection?.result || { ok: false, error: 'không chạy được trong tab Pancake' };
+  const result = injection?.result || { ok: false, error: 'không chạy được trong tab Pancake' };
+  return foundId ? { ...result, globalId: foundId } : result;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {

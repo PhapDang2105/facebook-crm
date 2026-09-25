@@ -385,10 +385,20 @@ function sendThroughBridge(item) {
     const requestId = `gn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // Cầu nối tự chờ extension Pancake tối đa 90 giây; thêm biên cho việc mở tab Pancake.
     const timer = setTimeout(() => { followUpBridgeWaiters.delete(requestId); resolve({ ok: false, error: 'cầu nối không trả lời sau 2 phút' }); }, 120000);
-    followUpBridgeWaiters.set(requestId, result => { clearTimeout(timer); resolve({ ok: Boolean(result.ok), error: result.error || '' }); });
-    window.postMessage({ type: 'GN_BRIDGE_SEND', requestId, item: { pageId: item.pageId, convId: item.convId, globalUserId: item.globalUserId, text: item.text, name: item.name } }, window.location.origin);
+    followUpBridgeWaiters.set(requestId, result => { clearTimeout(timer); resolve({ ok: Boolean(result.ok), error: result.error || '', globalId: result.globalId || '' }); });
+    window.postMessage({ type: 'GN_BRIDGE_SEND', requestId, item: { pageId: item.pageId, convId: item.convId, globalUserId: item.globalUserId || '', needsGlobalId: item.needsGlobalId === true, updatedTime: item.updatedTime || 0, text: item.text, name: item.name } }, window.location.origin);
   });
 }
+
+// Khách trong lô chưa gửi tới: bỏ giữ chỗ (bấm Dừng, lô xong sớm, hay đóng trang).
+function releaseFollowUpLeases(run, { beacon = false } = {}) {
+  const keys = (run?.batch?.items || []).map(item => item.key).filter(key => !run.done?.has(key));
+  if (!keys.length) return Promise.resolve();
+  const body = JSON.stringify({ keys });
+  if (beacon && navigator.sendBeacon) { navigator.sendBeacon('/api/chatbot/follow-ups/release', new Blob([body], { type: 'application/json' })); return Promise.resolve(); }
+  return fetch('/api/chatbot/follow-ups/release', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+}
+window.addEventListener('beforeunload', () => { if (followUpBridgeRun?.active) releaseFollowUpLeases(followUpBridgeRun, { beacon: true }); });
 
 async function runFollowUpBridge() {
   const limit = Math.max(1, Math.min(50, Number(document.querySelector('#follow-up-batch-size')?.value) || 30));
@@ -399,6 +409,8 @@ async function runFollowUpBridge() {
   redraw();
   try {
     const batch = await readApiResponse(await fetch('/api/chatbot/follow-ups/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit }) }));
+    run.batch = batch;
+    run.done = new Set();
     const skipped = batch.skipped?.length ? ` Bỏ qua ${batch.skipped.length} khách (${[...new Set(batch.skipped.map(item => item.reason))].join(', ')}).` : '';
     let failedInRow = 0;
     for (const [index, item] of batch.items.entries()) {
@@ -406,8 +418,9 @@ async function runFollowUpBridge() {
       run.status = `Đang gửi ${index + 1}/${batch.items.length}: ${item.name || ''} (đã gửi ${run.sent}, lỗi ${run.failed})`;
       redraw();
       const result = await sendThroughBridge(item);
+      run.done.add(item.key);
       // Báo từng tin ngay: tải lại trang giữa chừng cũng không mất kết quả.
-      await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ results: [{ key: item.key, ok: result.ok, error: result.error }] }) }).catch(() => {});
+      await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: batch.token || '', results: [{ key: item.key, ok: result.ok, error: result.error, globalId: result.globalId || '' }] }) }).catch(() => {});
       if (result.ok) { run.sent += 1; failedInRow = 0; } else { run.failed += 1; failedInRow += 1; run.lastError = result.error; }
       if (failedInRow >= 3) { run.stop = true; run.halted = `Dừng vì 3 tin liền lỗi: ${result.error}`; break; }
       if (index < batch.items.length - 1 && !run.stop) {
@@ -418,6 +431,8 @@ async function runFollowUpBridge() {
         while (Date.now() < until && !run.stop) await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
+    // Dừng giữa lô: trả chỗ cho khách chưa gửi để lô sau lấy lại ngay.
+    await releaseFollowUpLeases(run);
     run.status = run.halted || (batch.items.length ? `Xong: đã gửi ${run.sent} tin, lỗi ${run.failed}${run.lastError ? ` (${run.lastError})` : ''}.${skipped}` : `Không còn khách nào gửi được tự động.${skipped}`);
   } catch (error) {
     run.status = `Lỗi: ${error.message}`;

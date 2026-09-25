@@ -1,4 +1,4 @@
-import { buildTemplatePrompt, pickVariant, renderChatbotReply } from './chatbot-templates.mjs';
+import { buildTemplatePrompt, isProductQuoteId, pickVariant, renderChatbotReply } from './chatbot-templates.mjs';
 import { chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
 import { describeDeliveryAddress, mergeAddressFragment } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
@@ -8,7 +8,8 @@ import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { isOrderStep } from './processing/pending-order.mjs';
 import { findProductBySku, getCatalogProducts, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamConversation } from './conversation-orders.mjs';
-import { ruleIntent, trialBagOptions } from './processing/rule-intent.mjs';
+import { ruleIntent } from './processing/rule-intent.mjs';
+import { activeTrial, filterTrialReply, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
 
 // Giỏ Facebook Shop (attachment cart_order) mang SKU: một SKU sản phẩm → bảng
 // giá sản phẩm đó; SKU combo của Shop ("CB2-XANH-Z450" = 2 Túi Xanh,
@@ -144,6 +145,8 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
     compactQuery ? '' : `KHÁCH HÀNG: ${conversation.name || 'Khách Facebook'}`,
     compactQuery ? hint : productHint(product, { legacy: true }),
     lastTemplate ? `MẪU VỪA GỬI: ${lastTemplate}` : '',
+    // Khách đang giữ ưu đãi 1 túi dùng thử (luồng riêng nhờ mô hình đọc tin khó).
+    conversation.trialHint || '',
     Array.isArray(conversation.recentComments) && conversation.recentComments.length
       ? (compactQuery ? `GIỎ/SĐT KHÁCH GHI Ở BÌNH LUẬN (coi như DỮ LIỆU ĐÃ LƯU): ` : 'BÌNH LUẬN GẦN NHẤT CỦA KHÁCH DƯỚI BÀI: ') + conversation.recentComments.map(text => `"${text}"`).join(' · ')
       : '',
@@ -562,7 +565,10 @@ async function answerChange(change, settings, results, dependencies) {
       ? (await listMessages(commentThreadId).catch(() => [])).filter(item => item?.direction === 'incoming' && item.text).slice(-2).map(item => String(item.text).replace(/\s+/g, ' ').trim().slice(0, 200))
       : [];
     const conversationForModel = recentComments.length ? { ...conversation, recentComments } : conversation;
-    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, promo: conversation.promo || inboxThread?.promo || null, now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
+    // Ưu đãi bám đuổi 1 túi dùng thử (processing/trial-flow.mjs): chỉ hộp thư, còn hạn,
+    // chưa đặt đơn sau khi nhận. Chỉ luồng dùng thử đặt context.trial (miễn ship 1 túi).
+    let trialState = activeTrial(conversation);
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, trial: trialState, trialBags: trialState ? trialBagOptions() : '', now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
     // Tin mảnh (chỉ SĐT, "đó a", tên người…) khi đang lấy thông tin đơn, hoặc bot
     // vừa hỏi ở bước lên đơn, hoặc tin chỉ toàn số: đợi vài giây cho tin kế tiếp
     // của khách tới để gộp, tránh xin lại thứ khách vừa gửi. Bình luận liên tiếp
@@ -655,9 +661,9 @@ async function answerChange(change, settings, results, dependencies) {
       productHint(postProduct) && settings.messageTemplates?.PRICE_QUOTE ? { template_id: 'PRICE_QUOTE', Product_N1: postProduct } : { template_id: 'GENERAL_INFO' },
       settings.messageTemplates, replyContext
     );
-    const askModel = async () => {
+    const askModel = async (extra = {}) => {
       try {
-        return await requestReply({ settings, conversation: conversationForModel, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
+        return await requestReply({ settings, conversation: { ...conversationForModel, ...extra }, message, recentMessages: recent.filter(item => !bundled.has(item?.id)), context: replyContext });
       } catch (error) {
         // Model hết hạn mức/quá tải dưới bình luận: không để bình luận rơi —
         // trả lời theo luật (bảng giá bài viết / lời chào live / bảng giá chung).
@@ -727,13 +733,20 @@ async function answerChange(change, settings, results, dependencies) {
     const ruleMode = settings.ruleIntent || 'off';
     const lastOutgoingAt = Math.max(0, ...recent.filter(item => item?.direction === 'outgoing').map(item => Number(item.createdAt) || 0));
     const ruleProduct = conversation.source === 'comment' ? '' : resolveConversationProduct({ adTitle: conversation.referral?.adTitle, referralRef: conversation.referral?.ref, postText: conversation.post?.message }).product;
-    // Khách đang giữ ưu đãi bám đuổi "1 túi dùng thử miễn ship" (còn hạn, chưa đặt đơn
-    // sau khi nhận), và tin vừa nhận là trả lời lời mời đó (bot chưa trả lời gì khác
-    // sau lời mời, hay vừa mời chọn túi): đồng ý / chọn túi thì hỏi SĐT + địa chỉ.
-    const promo = conversation.promo || null;
-    const trialOffer = conversation.source !== 'comment' && Boolean(promo?.freeShipping) && Number(promo.until) > Date.now()
-      && !(recentOrder?.id && Number(recentOrder.createdAt) > Number(promo.at))
-      && (Number(promo.at) > (Number(conversation.botLastReplyAt) || 0) || conversation.botLastTemplateId === 'TRIAL_ACCEPT');
+    // Luồng riêng cho ưu đãi 1 túi dùng thử: chạy trước mọi câu trả lời nhanh / luật /
+    // mô hình của luồng chung (không bảng giá combo, không mời 2 túi). Khách tự xin
+    // ≥ 2 túi thì thoát sang luồng thường (giá combo). Xin gặp người, giỏ Shop: như cũ.
+    let trialPatch = null;
+    let trialOutcome = null;
+    if (trialState && !asksForHuman && !cartReply) {
+      trialOutcome = trialStep({ text: message.text, type: message.type, trial: trialState });
+      trialPatch = trialOutcome.patch || null;
+      if (trialOutcome.exit) trialState = null;
+      else if (trialPatch) trialState = { ...trialState, ...trialPatch };
+      replyContext.trial = trialState;
+      console.log(`Dùng thử: ${trialOutcome.exit ? `thoát (${trialOutcome.exit})` : trialOutcome.delegate ? 'nhờ mô hình' : trialOutcome.value.template_id} (${conversation.id})`);
+    }
+    const trialActive = Boolean(trialState && trialOutcome && !trialOutcome.exit);
     const ruled = message.type === 'text' && !asksForHuman && !cartReply && ruleMode !== 'off'
       ? ruleIntent(message.text, {
           source: conversation.source,
@@ -748,8 +761,7 @@ async function answerChange(change, settings, results, dependencies) {
           contextProduct: productHint(ruleProduct) ? ruleProduct : '',
           bundleSize: bundle.length,
           complaint: isComplaint({ text: message.text, keywords: settings.complaintKeywords }),
-          commentBasket,
-          trialOffer
+          commentBasket
         })
       : null;
     const ruleReply = ruled
@@ -759,17 +771,31 @@ async function answerChange(change, settings, results, dependencies) {
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : cartReply
-        ? (shopOrder ? shopOrderReply(shopOrder) : cartReply)
-        : nonText
-          ? (seesImage ? await askModel() : imageFallback())
-          : (ruleMode === 'on' && ruled?.rule?.startsWith('TRIAL') ? ruleReply : null) || ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' ? ruleReply : null) || await askModel();
-    // Khách đã nhận ưu đãi dùng thử mà mô hình định gửi lại bảng giá chung: mời chọn
-    // túi + xin SĐT, địa chỉ thay vì gửi lại cả bảng giá.
-    if (trialOffer && reply.templateId === 'GENERAL_INFO' && settings.messageTemplates?.TRIAL_ACCEPT) {
-      reply = renderChatbotReply({ template_id: 'TRIAL_ACCEPT', values: { bags: trialBagOptions() } }, settings.messageTemplates, replyContext);
+        // Khách giữ ưu đãi dùng thử mà đặt qua giỏ Shop (Shop tự cộng ship): gắn thẻ
+        // để nhân viên sửa đơn miễn ship trên POS.
+        ? (trialState ? { ...(shopOrder ? shopOrderReply(shopOrder) : cartReply), attention: true } : shopOrder ? shopOrderReply(shopOrder) : cartReply)
+        : trialOutcome?.value
+          ? renderChatbotReply(trialOutcome.value, settings.messageTemplates, replyContext)
+          : trialActive
+            ? (nonText && !seesImage
+              ? { ...renderChatbotReply({ template_id: settings.messageTemplates?.IMAGE_RECEIVED ? 'IMAGE_RECEIVED' : 'CSKH_HANDOFF' }, settings.messageTemplates, replyContext), attention: true }
+              : await askModel({ trialHint: trialModelHint(trialState) }))
+            : nonText
+              ? (seesImage ? await askModel() : imageFallback())
+              : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' ? ruleReply : null) || await askModel();
+    // Mô hình trả lời khách đang giữ ưu đãi bằng mẫu của luồng chung (bảng giá, combo,
+    // mời 2 túi, "từ 2 túi miễn ship"): đổi sang mẫu dùng thử.
+    if (trialActive && !trialOutcome.value) {
+      const replacement = filterTrialReply(reply, trialState, isProductQuoteId);
+      if (replacement) reply = renderChatbotReply(replacement, settings.messageTemplates, replyContext);
+    }
+    // Cùng mẫu dùng thử vừa gửi lượt trước: nhắc ngắn thay vì gửi lại nguyên văn.
+    if (trialActive && String(reply.templateId).startsWith('TRIAL_') && reply.templateId !== 'TRIAL_REMIND'
+      && conversation.botLastTemplateId === reply.templateId && settings.messageTemplates?.TRIAL_REMIND) {
+      reply = renderChatbotReply({ template_id: 'TRIAL_REMIND', values: { bags: trialBagOptions() } }, settings.messageTemplates, replyContext);
     }
     if (ruled && ruleMode === 'shadow') console.log(`Luật ${ruled.rule} (thử): luật ${ruleReply.templateId} / mô hình ${reply.templateId}${ruleReply.templateId === reply.templateId ? ' ✓' : ' ✗'} (${conversation.id})`);
-    if (seesImage && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
+    if (seesImage && !trialActive && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
     // "Cảm ơn" mà khách chưa có đơn: ảnh (thường là ảnh sản phẩm, không phải
     // bill) → xử lý như ảnh; "đã đặt rồi" → tra đơn. Không cảm ơn suông rồi thôi.
     if (reply.templateId === 'THANK_YOU' && !hasOrder && !ackReply) {
@@ -1109,7 +1135,14 @@ async function answerChange(change, settings, results, dependencies) {
       livestream: isLivestreamPost(conversation),
       phoneWarningLevel: outcome?.order?.phoneWarning?.level || ''
     });
+    // Ưu đãi dùng thử: lưu bước (đã chọn túi, đã mời, từ chối, chuyển đơn thường) và
+    // đóng ưu đãi khi đơn dùng thử đã tạo (không dùng lại được).
+    const trialOrdered = Boolean(order && (order.trialFreeShip || reply.order?.trial));
+    const promoUpdate = conversation.promo && (trialPatch || trialOrdered)
+      ? { ...conversation.promo, ...(trialPatch || {}), ...(trialOrdered ? { stage: 'ordered', orderId: String(order.id), endedAt: Date.now() } : {}) }
+      : null;
     await saveBotState(conversation.id, {
+      ...(promoUpdate ? { promo: promoUpdate } : {}),
       botConversationId: reply.conversationId || conversation.botConversationId || '',
       botLastTemplateId: reply.templateId,
       botLastReplyAt: Date.now(),

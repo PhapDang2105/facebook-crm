@@ -1,101 +1,146 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import './helpers/seed-catalog.mjs';
-import { commentBasket, processChatbotChanges } from '../app/chatbot-engine.mjs';
-import { defaultMessageTemplates } from '../app/chatbot-templates.mjs';
-import { ruleIntent } from '../app/processing/rule-intent.mjs';
+import { processChatbotChanges } from '../app/chatbot-engine.mjs';
+import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
 import { normalizeChatbotOrder } from '../app/conversation-orders.mjs';
+import { activeTrial, filterTrialReply, trialStep } from '../app/processing/trial-flow.mjs';
 
-// Khách nhận tin bám đuổi "1 túi dùng thử miễn ship" rồi trả lời.
+// Luồng riêng cho khách nhận tin bám đuổi "1 túi dùng thử miễn ship" (processing/trial-flow.mjs).
 const templates = Object.fromEntries(Object.entries(defaultMessageTemplates()).map(([id, text]) => [id, text.trim()]));
 const now = Date.now();
+const DAY = 24 * 60 * 60 * 1000;
+const offer = extra => ({ freeShipping: true, until: now + 7 * DAY, scenarioId: 'inbox-trial-freeship', at: now - 60 * 60 * 1000, stage: 'offered', ...extra });
 const offerConversation = extra => ({
   id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true, gender: 'female',
-  botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: now - 3 * 24 * 60 * 60 * 1000,
-  promo: { freeShipping: true, until: now + 7 * 24 * 60 * 60 * 1000, scenarioId: 'inbox-trial-freeship', at: now - 60 * 60 * 1000 },
+  botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: now - 3 * DAY,
+  promo: offer(),
   ...extra
 });
 
-async function run(conversation, text, { reply } = {}) {
+async function run(conversation, text, { reply, ruleIntent = 'on', type = 'text' } = {}) {
   const sent = [];
   const saved = [];
+  const created = [];
   let asked = false;
   const results = await processChatbotChanges([{
     type: 'message',
     conversation,
-    message: { id: 'm-new', mid: 'm-new', direction: 'incoming', type: 'text', text, createdAt: Date.now() }
+    message: { id: 'm-new', mid: 'm-new', direction: 'incoming', type, text, createdAt: Date.now() }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 1, ruleIntent: 'on', messageTemplates: templates }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 1, ruleIntent, messageTemplates: templates }),
     listMessages: async () => [{ id: 'offer', direction: 'outgoing', type: 'text', text: templates.FOLLOW_UP_TRIAL_FREESHIP, createdAt: now - 60 * 60 * 1000 }],
     saveBotState: async (_id, state) => { saved.push(state); },
     sendMessage: async (_c, message) => { sent.push(message.text || '[ảnh]'); return { message: { mid: 'x' } }; },
-    createOrder: async (_c, order) => ({ order: { id: 'new', ...order }, created: true }),
-    requestReply: async () => { asked = true; return reply || { templateId: 'GENERAL_INFO', messages: ['Bảng giá chung'], handoff: false }; }
+    createOrder: async (_c, order) => { created.push(order); return { order: { id: 'new', ...normalizeChatbotOrder(order, conversation) }, created: true }; },
+    // Mô hình thật dựng câu trả lời bằng ngữ cảnh của engine (context.trial…): làm y như vậy.
+    requestReply: async ({ context }) => { asked = true; const value = reply || { template_id: 'GENERAL_INFO' }; return renderChatbotReply(value, templates, context); }
   });
-  return { sent, saved, asked, results };
+  const promo = saved.map(state => state.promo).filter(Boolean).at(-1) || null;
+  return { sent, saved, asked, results, created, promo, text: sent.join('\n') };
 }
 
-test('luật dùng thử: đồng ý / chọn túi / hỏi giá → hỏi SĐT, địa chỉ; từ chối, hỏi thông tin, tin có SĐT → để luồng thường', () => {
-  const ctx = { trialOffer: true, commentBasket };
-  assert.equal(ruleIntent('ok shop', ctx).rule, 'TRIAL_ACCEPT');
-  assert.equal(ruleIntent('Lấy nha em', ctx).rule, 'TRIAL_ACCEPT');
-  assert.equal(ruleIntent('muốn thử', ctx).rule, 'TRIAL_ACCEPT');
-  assert.equal(ruleIntent('giá sao em', ctx).rule, 'TRIAL_ACCEPT');
-  assert.match(ruleIntent('ok', ctx).value.values.bags, /Túi Xanh 450g 174\.000đ, Túi Vàng 350g .+ hay Túi Nâu/);
-  const xanh = ruleIntent('xanh', ctx);
-  assert.equal(xanh.rule, 'TRIAL_BASKET');
-  assert.deepEqual([xanh.value.template_id, xanh.value.Product_N1, xanh.value.No_A], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g', '1']);
-  const two = ruleIntent('lấy 2 túi vàng', ctx);
-  assert.deepEqual([two.value.Product_N1, two.value.No_A], ['Granola Túi Vàng 350g', '2']);
-  assert.equal(ruleIntent('túi nâu cacao nha', ctx).value.Product_N1, 'Granola Túi Nâu vị cacao 350g');
-  assert.equal(ruleIntent('thôi em ạ, để sau', ctx), null);
-  assert.equal(ruleIntent('không cần đâu', ctx), null);
-  assert.equal(ruleIntent('túi xanh có ngọt không?', ctx).rule, 'SUGAR', 'câu hỏi: trả lời câu hỏi, không coi là đồng ý');
-  assert.equal(ruleIntent('xanh 0909123456 12 Lê Lợi Q1', ctx), null, 'có SĐT + địa chỉ: mô hình đọc đủ');
-  // Không có ưu đãi: "xanh" vẫn là báo giá túi đó như cũ.
-  assert.equal(ruleIntent('xanh', { commentBasket }).rule, 'PRICE_ONE');
+test('activeTrial: chỉ hộp thư, còn hạn (hay giữ thêm 24 giờ khi đã chọn túi), chưa đặt đơn sau ưu đãi', () => {
+  assert.ok(activeTrial(offerConversation()));
+  assert.equal(activeTrial(offerConversation({ source: 'comment' })), null);
+  assert.equal(activeTrial(offerConversation({ promo: offer({ until: now - 1 }) })), null);
+  assert.ok(activeTrial(offerConversation({ promo: offer({ until: now - 1, stage: 'chosen', lockedUntil: now + 60000 }) })), 'đã chọn túi: giữ thêm');
+  assert.equal(activeTrial(offerConversation({ promo: offer({ stage: 'ordered' }) })), null);
+  assert.equal(activeTrial(offerConversation({ customerOrders: [{ id: 'o', createdAt: now - 1000 }] })), null);
 });
 
-test('khách nhận ưu đãi trả lời "ok": mời chọn túi + xin SĐT, địa chỉ, không gửi lại bảng giá, không hỏi mô hình', async () => {
-  const out = await run(offerConversation(), 'ok em');
-  assert.equal(out.asked, false);
-  assert.equal(out.results[0].templateId, 'TRIAL_ACCEPT');
-  assert.match(out.sent.join('\n'), /MIỄN PHÍ VẬN CHUYỂN em vẫn giữ cho chị/);
-  assert.match(out.sent.join('\n'), /SĐT và địa chỉ/);
+test('trialStep: đồng ý / chọn 1 túi / hỏi giá, freeship / từ chối / ≥2 túi → luồng thường', () => {
+  const trial = offer();
+  assert.equal(trialStep({ text: 'ok em', trial }).value.template_id, 'TRIAL_ACCEPT');
+  assert.equal(trialStep({ text: 'ok em', trial: { ...trial, accepted: true } }).value.template_id, 'TRIAL_REMIND');
+  const xanh = trialStep({ text: 'Vàng nha', trial, now });
+  assert.deepEqual([xanh.value.template_id, xanh.value.Product_N1, xanh.value.No_A], ['ORDER_ADDRESS', 'Granola Túi Vàng 350g', '1']);
+  assert.equal(xanh.patch.stage, 'chosen');
+  assert.equal(xanh.patch.lockedUntil, Math.max(trial.until, now + DAY));
+  assert.equal(trialStep({ text: 'Vàng nhiều hạt', trial }).value.Product_N1, 'Granola Túi Vàng 350g');
+  assert.equal(trialStep({ text: 'freeship không em', trial }).value.template_id, 'TRIAL_FREESHIP_INFO');
+  assert.equal(trialStep({ text: 'có giảm giá không', trial }).value.template_id, 'TRIAL_PRICE');
+  assert.equal(trialStep({ text: 'giá sao em', trial }).value.template_id, 'TRIAL_PRICE');
+  const declined = trialStep({ text: 'thôi em ạ, để sau', trial });
+  assert.equal(declined.value.template_id, 'TRIAL_DECLINED');
+  assert.equal(declined.patch.stage, 'declined');
+  assert.equal(trialStep({ text: 'lấy 2 túi vàng', trial }).exit, 'converted');
+  assert.equal(trialStep({ text: '1 xanh 1 vàng', trial }).exit, 'converted');
+  // Câu hỏi thông tin: trả lời + mời bước tiếp (không bảng giá).
+  const sugar = trialStep({ text: 'có ngọt không em', trial }).value;
+  assert.deepEqual([sugar.template_id, sugar.also], ['NO_ADDED_SUGAR', 'TRIAL_NEXT_STEP']);
+  // Đã chọn túi, gửi SĐT: bước đơn với đúng túi đã chọn.
+  const chosen = { ...trial, stage: 'chosen', bag: 'Granola Túi Xanh 450g' };
+  assert.deepEqual([trialStep({ text: '0909123456', trial: chosen }).value.template_id, trialStep({ text: '0909123456', trial: chosen }).value.Product_N1], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g']);
+  assert.equal(trialStep({ text: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh nha em', trial: chosen }).delegate, true, 'địa chỉ: mô hình đọc');
 });
 
-test('khách chọn "xanh": giỏ 1 túi Xanh miễn ship (không cộng ship, không mời mua 2 túi), xin SĐT + địa chỉ', async () => {
-  const out = await run(offerConversation(), 'Xanh nhé');
+test('filterTrialReply: mẫu luồng chung (bảng giá, combo, freeship chung) đổi sang mẫu dùng thử', () => {
+  const trial = offer();
+  assert.equal(filterTrialReply({ templateId: 'GENERAL_INFO' }, trial).template_id, 'TRIAL_PRICE');
+  assert.equal(filterTrialReply({ templateId: 'DISCOUNT_POLICY' }, trial).template_id, 'TRIAL_PRICE');
+  assert.equal(filterTrialReply({ templateId: 'FREESHIP_POLICY' }, trial).template_id, 'TRIAL_FREESHIP_INFO');
+  assert.equal(filterTrialReply({ templateId: 'SHIPPING_POLICY', alsoTemplateId: 'FREESHIP_POLICY' }, trial).template_id, 'TRIAL_FREESHIP_INFO');
+  assert.equal(filterTrialReply({ templateId: 'PRICE_XANH' }, trial, id => id.startsWith('PRICE_')).template_id, 'TRIAL_PRICE');
+  assert.equal(filterTrialReply({ templateId: 'ASK_FLAVOR' }, { ...trial, stage: 'chosen', bag: 'Granola Túi Xanh 450g' }).template_id, 'ORDER_ADDRESS');
+  assert.equal(filterTrialReply({ templateId: 'SHIPPING_POLICY' }, trial), null);
+});
+
+test('khách trả lời "Vàng nha" (lỗi thật 25/09: bot gửi bảng giá có ship 15k): giỏ 1 túi miễn ship, không mời 2 túi, không hỏi mô hình', async () => {
+  const out = await run(offerConversation(), 'Vàng nha');
   assert.equal(out.asked, false);
   assert.equal(out.results[0].templateId, 'ORDER_ADDRESS');
-  const text = out.sent.join('\n');
-  assert.match(text, /1 Granola Túi Xanh 450g, tổng 174\.000đ \(Miễn phí vận chuyển – ưu đãi dùng thử\)/);
-  assert.doesNotMatch(text, /lấy 2 túi/, 'không mời mua 2 túi');
-  assert.equal(out.saved.at(-1).pendingOrder.items[0].quantity, 1);
+  assert.match(out.text, /1 Granola Túi Vàng 350g, tổng 174\.000đ \(Miễn phí vận chuyển – ưu đãi dùng thử\)/);
+  assert.doesNotMatch(out.text, /15\.000|lấy 2|Combo/);
+  assert.equal(out.promo.stage, 'chosen');
+  assert.equal(out.promo.bag, 'Granola Túi Vàng 350g');
 });
 
-test('sau lời mời chọn túi, khách trả lời tên túi vẫn vào luồng dùng thử; hết hạn / đã đặt đơn thì thôi', async () => {
-  const afterAccept = await run(offerConversation({ botLastTemplateId: 'TRIAL_ACCEPT', botLastReplyAt: now - 60 * 1000 }), 'vàng');
-  assert.equal(afterAccept.results[0].templateId, 'ORDER_ADDRESS');
-  assert.match(afterAccept.sent.join('\n'), /Túi Vàng 350g, tổng 174\.000đ \(Miễn phí vận chuyển/);
-  const expired = await run(offerConversation({ promo: { freeShipping: true, until: now - 1000, at: now - 8 * 24 * 60 * 60 * 1000 } }), 'ok em');
+test('"ok" → mời chọn túi (kèm giá từng túi); chạy cả khi luật nhận ý đang tắt', async () => {
+  for (const mode of ['on', 'off']) {
+    const out = await run(offerConversation(), 'ok em', { ruleIntent: mode });
+    assert.equal(out.results[0].templateId, 'TRIAL_ACCEPT', mode);
+    assert.match(out.text, /Túi Xanh 450g 174\.000đ/);
+    assert.equal(out.asked, false);
+  }
+});
+
+test('đã chọn túi, gửi SĐT + địa chỉ (mô hình đọc): xác nhận đơn 1 túi 174.000đ miễn ship; đơn ghi (Freeship), ưu đãi đóng lại', async () => {
+  const conversation = offerConversation({ promo: offer({ stage: 'chosen', bag: 'Granola Túi Xanh 450g', lockedUntil: now + DAY }), botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: now - 60000, pendingOrder: { items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }], key: 'GRA-XANH-Z450=1', at: now - 60000 } });
+  const out = await run(conversation, '0909123456, 12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', {
+    reply: { template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '1', Phone_Number: '0909123456', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh' }
+  });
+  assert.equal(out.asked, true);
+  assert.equal(out.results[0].templateId, 'ORDER_CONFIRMATION');
+  assert.match(out.text, /Tổng tiền: 174\.000đ/);
+  assert.doesNotMatch(out.text, /Phí vận chuyển: 15/);
+  assert.equal(out.created.length, 1);
+  assert.equal(out.created[0].trial, true);
+  assert.equal(out.created[0].shippingFee, 0);
+  assert.equal(out.promo.stage, 'ordered');
+  const order = normalizeChatbotOrder(out.created[0], conversation);
+  assert.match(order.address, /^\(Freeship\) /);
+  assert.match(order.note, /Ưu đãi dùng thử bám đuổi/);
+});
+
+test('mô hình định gửi bảng giá / combo cho khách đang giữ ưu đãi: đổi thành mẫu dùng thử', async () => {
+  const out = await run(offerConversation(), 'chị đang cân nhắc mua cho cả nhà cùng dùng, em tư vấn thêm giúp chị với', { reply: { template_id: 'DISCOUNT_POLICY' } });
+  assert.equal(out.asked, true);
+  assert.equal(out.results[0].templateId, 'TRIAL_PRICE');
+  assert.doesNotMatch(out.text, /Combo/);
+});
+
+test('khách tự xin 2 túi: rời luồng dùng thử, đơn thường giá combo (không ghi Freeship)', async () => {
+  const out = await run(offerConversation(), 'lấy 2 túi vàng nha', { reply: { template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Vàng 350g', No_A: '2' } });
+  assert.equal(out.promo.stage, 'converted');
+  assert.match(out.text, /tổng 298\.000đ/);
+  assert.doesNotMatch(out.text, /ưu đãi dùng thử/);
+});
+
+test('hết hạn (chưa chọn túi) hay đã đặt đơn sau ưu đãi: về luồng thường; đơn 1 túi thường không ghi (Freeship)', async () => {
+  const expired = await run(offerConversation({ promo: offer({ until: now - 1000 }) }), 'ok em');
   assert.notEqual(expired.results[0].templateId, 'TRIAL_ACCEPT');
-  const ordered = await run(offerConversation({ customerOrders: [{ id: 'o1', createdAt: now - 10 * 60 * 1000, phone: '0909123456', products: [{ name: 'Granola Túi Xanh 450g', quantity: 1 }] }] }), 'ok em');
-  assert.notEqual(ordered.results[0].templateId, 'TRIAL_ACCEPT');
-});
-
-test('mô hình định gửi lại bảng giá chung cho khách đang giữ ưu đãi: đổi thành lời mời chọn túi', async () => {
-  const out = await run(offerConversation(), 'mình ở Hà Nội ship được không em', { reply: { template_id: 'GENERAL_INFO' } });
-  assert.equal(out.results[0].templateId, 'TRIAL_ACCEPT');
-});
-
-test('đơn 1 túi miễn ship: địa chỉ mang đầu "(Freeship) "; đơn 1 túi thường thì không', () => {
   const conversation = { id: 'page:user', name: 'Khách' };
-  const free = normalizeChatbotOrder({ items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }], phone: '0909123456', address: '12 Lê Lợi, Quận 1, TP Hồ Chí Minh', total: 174000, shippingFee: 0 }, conversation);
-  assert.match(free.address, /^\(Freeship\) 12 Lê Lợi/);
-  assert.equal(free.freeShipping, true);
-  const paid = normalizeChatbotOrder({ items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }], phone: '0909123456', address: '12 Lê Lợi, Quận 1, TP Hồ Chí Minh', total: 189000, shippingFee: 15000 }, conversation);
-  assert.doesNotMatch(paid.address, /Freeship/);
-  const combo = normalizeChatbotOrder({ items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 2 }], phone: '0909123456', address: '12 Lê Lợi, Quận 1, TP Hồ Chí Minh', total: 298000, shippingFee: 0 }, conversation);
-  assert.doesNotMatch(combo.address, /Freeship/, 'combo 2 túi vốn miễn ship: không ghi');
+  const paid = normalizeChatbotOrder({ items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }], phone: '0909123456', address: '12 Lê Lợi, Quận 1, TP Hồ Chí Minh', total: 174000, shippingFee: 0 }, conversation);
+  assert.doesNotMatch(paid.address, /Freeship/, 'không có cờ dùng thử thì không suy đoán');
 });

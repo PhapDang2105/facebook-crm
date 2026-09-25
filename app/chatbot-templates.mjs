@@ -376,8 +376,11 @@ function renderOrder(value, templates, context = {}) {
   const priced = items.length ? priceBasket(items) : null;
   // Khách đã nhận ưu đãi miễn phí vận chuyển (tin bám đuổi "1 túi dùng thử vẫn
   // miễn ship", còn hạn): đơn không cộng phí ship, ghi rõ quà để kho và khách thấy.
-  const promo = context.promo?.freeShipping && Number(context.promo.until) > now ? context.promo : null;
-  const price = priced?.priceable && promo && priced.shippingFee > 0 ? withPromoFreeShipping(priced) : priced?.priceable ? priced : null;
+  // Chỉ luồng dùng thử (processing/trial-flow.mjs) đặt context.trial; ưu đãi áp đúng
+  // 1 túi. Khách tự xin nhiều túi là đơn thường (giá combo, vốn đã miễn ship).
+  const trial = context.trial || null;
+  const trialPriced = Boolean(priced?.priceable && trial && priced.totalQuantity === 1 && priced.shippingFee > 0);
+  const price = trialPriced ? withPromoFreeShipping(priced) : priced?.priceable ? priced : null;
 
   // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):
   // đọc thẳng từ tin khách vừa nhắn thay vì hỏi lại thứ khách đã đưa.
@@ -460,6 +463,10 @@ function renderOrder(value, templates, context = {}) {
   // sản phẩm trước, không xin SĐT/địa chỉ cho một đơn chưa biết bán gì.
   // SĐT/địa chỉ khách lỡ đưa vẫn được giữ cho lần chốt sau.
   if (!items.length) {
+    // Khách đang giữ ưu đãi dùng thử: mời chọn 1 túi, không gửi bảng giá chung.
+    if (trial && templates.TRIAL_ACCEPT) {
+      return { templateId: 'TRIAL_ACCEPT', ...splitMessages(fill(templates.TRIAL_ACCEPT, { ...commonValues(), bags: context.trialBags || '' })), handoff: false, pendingOrder: nextPending };
+    }
     const text = templates.GENERAL_INFO ? renderGeneralInfo(templates) : fill(templates.ASK_PRODUCT, commonValues());
     return { templateId: 'ASK_PRODUCT', ...splitMessages(text), handoff: false, pendingOrder: nextPending };
   }
@@ -491,7 +498,7 @@ function renderOrder(value, templates, context = {}) {
     const template = known ? templates.ORDER_ADDRESS_PARTIAL : templates.ORDER_ADDRESS;
     // Khách lấy 1 túi: nhân lúc xin thông tin, gợi ý lên 2 túi (giá combo, miễn
     // ship, quà) đúng một lần cho mỗi giỏ; khách vẫn lấy 1 túi thì đơn đi tiếp.
-    const upsell = price?.totalQuantity === 1 && !promo && templates.UPSELL_TWO_BAGS && !pending?.upsold ? upsellTwoBags(price, templates) : '';
+    const upsell = price?.totalQuantity === 1 && !trial && templates.UPSELL_TWO_BAGS && !pending?.upsold ? upsellTwoBags(price, templates) : '';
     // Nêu lại giỏ và tổng tiền trước câu xin SĐT/địa chỉ: nhân viên từng phải gõ
     // tay "Dạ đơn của mình gồm…" và khách hỏi "tổng bao nhiêu" thì không có số.
     // Lời gợi ý 2 túi đã có số tiền thì thôi, không lặp.
@@ -569,7 +576,7 @@ function renderOrder(value, templates, context = {}) {
       images: [],
       handoff: false,
       pendingOrder: null,
-      order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, updateOrderId: String(recentOrder.id) }
+      order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, updateOrderId: String(recentOrder.id), ...(trialPriced ? { trial: true } : {}) }
     };
   }
   return {
@@ -581,7 +588,7 @@ function renderOrder(value, templates, context = {}) {
     handoff: false,
     // Cleared: the basket has become a real order.
     pendingOrder: null,
-    order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift }
+    order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, ...(trialPriced ? { trial: true } : {}) }
   };
 }
 
@@ -774,7 +781,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'TRIAL_ACCEPT']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'TRIAL_ACCEPT', 'TRIAL_REMIND', 'TRIAL_PRICE', 'TRIAL_FREESHIP_INFO', 'TRIAL_NEXT_STEP', 'TRIAL_DECLINED']);
 
 /**
  * The template inventory as text for the model, appended to the system

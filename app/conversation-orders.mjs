@@ -152,12 +152,13 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     order.address = `(Live) ${order.address}`;
     if (order.street) order.street = `(Live) ${order.street}`;
     order.liveOrder = true;
-  } else if (totalQuantityForPricing === 1 && shippingFee === 0 && order.address && !/^\(freeship\)/i.test(order.address)) {
-    // Đơn 1 túi được miễn ship (ưu đãi dùng thử của tin bám đuổi): 1 túi bình
-    // thường phải cộng ship, nên đầu địa chỉ ghi "(Freeship) " để kho và POS biết.
+  } else if (input.trial && order.address && !/^\(freeship\)/i.test(order.address)) {
+    // Đơn ưu đãi dùng thử của tin bám đuổi (1 túi miễn ship, do luồng dùng thử
+    // đánh dấu): đầu địa chỉ ghi "(Freeship) " để kho và POS biết, kèm ghi chú.
     order.address = `(Freeship) ${order.address}`;
     if (order.street) order.street = `(Freeship) ${order.street}`;
     order.trialFreeShip = true;
+    order.note = 'Tạo tự động từ xác nhận của chatbot · Ưu đãi dùng thử bám đuổi (1 túi miễn phí vận chuyển).';
   }
   // What the customer actually typed, next to the standardised address they confirmed.
   order.rawAddress = text(input.rawAddress, 500);

@@ -247,7 +247,12 @@ async function markConversationFollowedUp(conversationId, scenario, via, now) {
     if (!target) return null;
     if (followUpLabels.length) target.labels = [...new Set([...(Array.isArray(target.labels) ? target.labels : []), ...followUpLabels])];
     target.followUps = [...(Array.isArray(target.followUps) ? target.followUps : []), { scenarioId: scenario.id, at: now, via }].slice(-20);
-    if (scenario.freeShipDays) target.promo = { freeShipping: true, until: now + scenario.freeShipDays * 24 * 60 * 60 * 1000, scenarioId: scenario.id, at: now };
+    // Ưu đãi dùng thử mở luồng riêng (processing/trial-flow.mjs) từ bước 'offered'; giỏ cũ
+    // bỏ đi để không trộn với ưu đãi 1 túi.
+    if (scenario.freeShipDays) {
+      target.promo = { freeShipping: true, until: now + scenario.freeShipDays * 24 * 60 * 60 * 1000, scenarioId: scenario.id, at: now, stage: 'offered' };
+      target.pendingOrder = null;
+    }
     return null;
   });
   publishMessagingEvent({ type: 'customer-panel', conversationId });

@@ -77,5 +77,10 @@
   "ORDER_NOTE_ADDED": "Dạ vâng ạ, em đã ghi chú yêu cầu của {title} vào đơn và báo kho rồi ạ 💛[?fresh] Kho sẽ ưu tiên chọn hàng có hạn dùng mới nhất cho mình nha.[/?]",
   "FOLLOW_UP_INBOX_REMIND": "Dạ {title} ơi, em thấy mình đang quan tâm granola nhà Giọt Nắng ạ 💛 {Title} còn phân vân loại nào thì nhắn em tư vấn thêm nha; lấy từ 2 túi (mix vị thoải mái) là được giá combo và miễn phí vận chuyển ạ 🌾",
   "FOLLOW_UP_TRIAL_FREESHIP": "Dạ {title} ơi, Giọt Nắng gửi {title} ưu đãi riêng: lấy 1 túi granola dùng thử vẫn được MIỄN PHÍ VẬN CHUYỂN ạ 🎁 Ưu đãi dành cho {title} trong 7 ngày, {title} nhắn em loại túi muốn thử (Xanh nguyên bản, Vàng nhiều hạt hay Nâu cacao) kèm SĐT và địa chỉ là em lên đơn liền nha 🌾",
-  "TRIAL_ACCEPT": "Dạ vâng ạ 🌾 Ưu đãi 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN em vẫn giữ cho {title} ạ. {Title} chọn giúp em 1 túi: {bags}, rồi gửi em SĐT và địa chỉ nhận hàng là em lên đơn liền cho mình nha 💛"
+  "TRIAL_ACCEPT": "Dạ vâng ạ 🌾 Ưu đãi 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN em vẫn giữ cho {title} ạ. {Title} chọn giúp em 1 túi: {bags}, rồi gửi em SĐT và địa chỉ nhận hàng là em lên đơn liền cho mình nha 💛",
+  "TRIAL_REMIND": "Dạ ưu đãi 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN em vẫn giữ cho {title} ạ 🌾 {Title} chọn Xanh, Vàng hay Nâu rồi gửi em SĐT + địa chỉ là em lên đơn liền nha.",
+  "TRIAL_PRICE": "Dạ ưu đãi dùng thử dành riêng cho {title}: {bags}. {Title} chỉ trả đúng giá túi, bên em MIỄN PHÍ VẬN CHUYỂN ạ 🎁 {Title} chọn túi nào để em lên đơn cho mình nha?",
+  "TRIAL_FREESHIP_INFO": "Dạ đúng rồi ạ, 1 túi dùng thử của {title} được MIỄN PHÍ VẬN CHUYỂN, không cộng thêm phí nào ạ 🚚 {Title} chọn túi và gửi em SĐT + địa chỉ là em lên đơn liền nha.",
+  "TRIAL_NEXT_STEP": "{Title} chọn 1 túi muốn thử và gửi em SĐT + địa chỉ là em lên đơn dùng thử miễn ship liền nha 🌾",
+  "TRIAL_DECLINED": "Dạ vâng ạ, không sao đâu {title} 💛 Khi nào cần {title} cứ nhắn em nha, Giọt Nắng luôn sẵn sàng ạ."
 }

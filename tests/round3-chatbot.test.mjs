@@ -232,3 +232,27 @@ test('vừa chốt đơn, khách dặn "Gửi hàng mới cho mình nhé shop": 
   const none = await run({}, 'Gửi hàng mới cho mình nhé shop', { reply: { templateId: 'GENERAL_INFO', messages: ['bảng giá'], handoff: false } });
   assert.equal(none.asked, true);
 });
+
+test('lời chào live (kèm quà live) chỉ dưới bài livestream: khách từng bấm quảng cáo "Săn deal hời" mà bình luận bài thường thì không', async () => {
+  const { isLivestreamPost } = await import('../app/chatbot-engine.mjs');
+  const normalPost = { source: 'comment', post: { message: '🌳 GRANOLA NHÀ LÀM GIÒN RỤM, CÀNG NHAI CÀNG CUỐN 🔥' }, referral: { adTitle: 'Săn deal hời' } };
+  assert.equal(isLivestreamPost(normalPost), false);
+  assert.equal(isLivestreamPost({ source: 'comment', post: { message: 'Săn deal hời' } }), true);
+  assert.equal(isLivestreamPost({ post: { message: 'Phát trực tiếp của Nông Sản Giọt Nắng' } }), true);
+  assert.equal(isLivestreamPost({ referral: { adTitle: 'Săn deal hời' } }), true, 'không có bài viết: dựa vào quảng cáo');
+  assert.equal(isLivestreamPost({ referral: { adTitle: 'Quảng cáo video trực tiếp - 08:46 21/9/26' } }), true);
+  const sent = [];
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:comment:c9:p9', pageId: 'page', psid: 'user', name: 'Lan', botEnabled: true, ...normalPost },
+    message: { id: 'c9', mid: 'c9', direction: 'incoming', type: 'text', text: 'giá sao shop', createdAt: Date.now() }
+  }], {
+    readSettings: settings(),
+    listMessages: async () => [],
+    getConversation: async () => null,
+    saveBotState: async () => {},
+    sendMessage: async (_c, message) => { if (message.privateReply) sent.push(message.text); return { message: { mid: 'x' } }; },
+    requestReply: async () => ({ templateId: 'GENERAL_INFO', messages: ['Dạ hiện tại nhà em có 3 vị chính ạ'], handoff: false })
+  });
+  assert.doesNotMatch(sent.join(' '), /phiên live|quà live/);
+});

@@ -7,6 +7,7 @@ import { productHint, resolveConversationProduct } from './processing/product-de
 import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { isOrderStep } from './processing/pending-order.mjs';
 import { findProductBySku, getCatalogProducts, matchProduct } from './processing/catalog.mjs';
+import { isLivestreamConversation } from './conversation-orders.mjs';
 
 // Giỏ Facebook Shop (attachment cart_order) mang SKU: một SKU sản phẩm → bảng
 // giá sản phẩm đó; SKU combo của Shop ("CB2-XANH-Z450" = 2 Túi Xanh,
@@ -81,8 +82,7 @@ export async function refineAddressWithAi(parsed, context = {}, settings = {}, f
 
 /** Bài đăng/quảng cáo là phiên livestream nhiều sản phẩm ("Săn deal hời", "live tối nay"): không có sản phẩm cụ thể để báo giá. */
 export function isLivestreamPost(conversation) {
-  const text = [conversation?.post?.message, conversation?.referral?.adTitle].filter(Boolean).join(' ');
-  return /\b(live|livestream|phien live|san deal|phat truc tiep)\b/i.test(foldVietnamese(text));
+  return isLivestreamConversation(conversation);
 }
 
 export function parseModelAnswer(answer) {

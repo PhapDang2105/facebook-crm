@@ -6,9 +6,15 @@ import { resolveAddress, resolvedAddressFields } from './processing/locations.mj
 import { normalizeText } from './processing/catalog.mjs';
 
 /** Hội thoại đến từ phiên livestream: bài viết hay tên quảng cáo có "live", "săn deal". */
+// Có bài viết thì chỉ xét BÀI VIẾT đó: tên quảng cáo là quảng cáo khách bấm lần
+// nào đó trước (hay mang sang từ hộp thư), không phải bài khách đang bình luận —
+// ghép cả hai khiến khách từng bấm quảng cáo "Săn deal hời" rồi bình luận dưới
+// bài thường vẫn nhận lời chào live kèm "quà live" (quà chỉ áp dụng cho live).
+// Không có bài viết (khách vào thẳng từ quảng cáo) thì mới dùng tên quảng cáo.
 export function isLivestreamConversation(conversation = {}) {
-  const source = [conversation?.post?.message, conversation?.referral?.adTitle].filter(Boolean).join(' ');
-  return /\b(live|livestream|phien live|san deal)\b/i.test(normalizeText(source));
+  const postText = String(conversation?.post?.message || '').trim();
+  const source = postText || String(conversation?.referral?.adTitle || '');
+  return /\b(live|livestream|phien live|san deal|phat truc tiep|video truc tiep)\b/i.test(normalizeText(source));
 }
 
 function text(value, maximum) {

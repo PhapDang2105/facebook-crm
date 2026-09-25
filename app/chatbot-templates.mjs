@@ -379,7 +379,9 @@ function renderOrder(value, templates, context = {}) {
   // Chỉ luồng dùng thử (processing/trial-flow.mjs) đặt context.trial; ưu đãi áp đúng
   // 1 túi. Khách tự xin nhiều túi là đơn thường (giá combo, vốn đã miễn ship).
   const trial = context.trial || null;
-  const trialPriced = Boolean(priced?.priceable && trial && priced.totalQuantity === 1 && priced.shippingFee > 0);
+  // Ưu đãi chỉ cho 1 túi lớn Xanh / Vàng / Nâu (không cho combo gói nhỏ hay sản phẩm khác).
+  const trialBag = items.length === 1 && /^GRA-(XANH|VANG|NAU)-/i.test(String(items[0]?.code || items[0]?.sku || priced?.lines?.[0]?.sku || ''));
+  const trialPriced = Boolean(priced?.priceable && trial && trialBag && priced.totalQuantity === 1 && priced.shippingFee > 0);
   const price = trialPriced ? withPromoFreeShipping(priced) : priced?.priceable ? priced : null;
 
   // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):

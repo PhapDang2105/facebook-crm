@@ -739,7 +739,7 @@ async function answerChange(change, settings, results, dependencies) {
     let trialPatch = null;
     let trialOutcome = null;
     if (trialState && !asksForHuman && !cartReply) {
-      trialOutcome = trialStep({ text: message.text, type: message.type, trial: trialState });
+      trialOutcome = trialStep({ text: message.text, type: message.type, trial: trialState, lastTemplateId: conversation.botLastTemplateId || '' });
       trialPatch = trialOutcome.patch || null;
       if (trialOutcome.exit) trialState = null;
       else if (trialPatch) trialState = { ...trialState, ...trialPatch };
@@ -761,7 +761,10 @@ async function answerChange(change, settings, results, dependencies) {
           contextProduct: productHint(ruleProduct) ? ruleProduct : '',
           bundleSize: bundle.length,
           complaint: isComplaint({ text: message.text, keywords: settings.complaintKeywords }),
-          commentBasket
+          commentBasket,
+          smallPackContext: conversation.botLastTemplateId === 'PACKAGING_INFO'
+            || (conversation.pendingOrder?.items || []).some(item => /^CB10|combo 10/i.test(String(item.code || item.product || '')))
+            || replyContext.recentOutgoing.some(text => /gói nhỏ|combo 10 gói/i.test(text))
         })
       : null;
     const ruleReply = ruled

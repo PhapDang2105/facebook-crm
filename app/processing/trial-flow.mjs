@@ -78,10 +78,15 @@ function bagPicks(raw) {
  * - { delegate: true, patch }: tin khó, nhờ mô hình (câu trả lời lọc bằng filterTrialReply)
  * - { exit: 'converted', patch }: khách tự xin ≥ 2 túi → luồng thường, giá combo
  */
-export function trialStep({ text = '', type = 'text', trial, now = Date.now() } = {}) {
+export function trialStep({ text = '', type = 'text', trial, now = Date.now(), lastTemplateId = '' } = {}) {
   if (type !== 'text') return { delegate: true };
   const raw = String(text || '').trim();
   const s = core(raw);
+  // Khách quan tâm gói nhỏ / combo 10 gói / sản phẩm khác (ưu đãi chỉ cho túi lớn),
+  // hay đang trả lời câu hỏi về gói nhỏ bot vừa hỏi: sang luồng thường.
+  if (/\b(goi nho|chia goi|combo 10|hop 10|10 goi|tung bua|tropical|bot nghe|nghe lanh|hat an lanh|hu hat)\b/.test(s) || lastTemplateId === 'PACKAGING_INFO') {
+    return { exit: 'converted', patch: { stage: 'converted', endedAt: now, reason: 'khách quan tâm sản phẩm khác' } };
+  }
   const phone = extractVietnamesePhone(raw);
   const longText = s.length > 60;
   const bags = trialBagOptions();

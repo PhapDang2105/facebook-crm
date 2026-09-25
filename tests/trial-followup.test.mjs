@@ -144,3 +144,18 @@ test('hết hạn (chưa chọn túi) hay đã đặt đơn sau ưu đãi: về 
   const paid = normalizeChatbotOrder({ items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }], phone: '0909123456', address: '12 Lê Lợi, Quận 1, TP Hồ Chí Minh', total: 174000, shippingFee: 0 }, conversation);
   assert.doesNotMatch(paid.address, /Freeship/, 'không có cờ dùng thử thì không suy đoán');
 });
+
+test('lỗi thật 25/09 (Voc Nguyen): khách hỏi gói nhỏ → rời luồng dùng thử; "2 túi xanh" lúc đang nói gói nhỏ không tự hiểu là túi lớn; ưu đãi chỉ cho túi lớn', async () => {
+  const trial = offer();
+  assert.equal(trialStep({ text: 'Có loại chia gói nhỏ ăn tung bữa ko', trial }).exit, 'converted');
+  assert.equal(trialStep({ text: 'Có a', trial, lastTemplateId: 'PACKAGING_INFO' }).exit, 'converted');
+  const { ruleIntent } = await import('../app/processing/rule-intent.mjs');
+  const { commentBasket } = await import('../app/chatbot-engine.mjs');
+  assert.equal(ruleIntent('Cho m 2 túi xanh', { commentBasket })?.rule, 'BASKET', 'bình thường: giỏ túi lớn');
+  assert.notEqual(ruleIntent('Cho m 2 túi xanh', { commentBasket, smallPackContext: true })?.rule, 'BASKET', 'đang nói gói nhỏ: để mô hình');
+  // Ưu đãi không áp cho sản phẩm khác túi Xanh/Vàng/Nâu (Tropical 300g vẫn cộng ship).
+  const value = { template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Tropical Cacao 300g', No_A: '1', Phone_Number: '0909123456', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' };
+  const other = renderChatbotReply(value, templates, { now, trial });
+  assert.ok(other.order.shippingFee > 0);
+  assert.equal(other.order.trial, undefined);
+});

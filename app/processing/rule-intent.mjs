@@ -108,7 +108,9 @@ export function ruleIntent(text, ctx = {}) {
   // Hỏi giá chung: bình luận → bảng giá của bài (luật bình luận); inbox → bảng giá sản phẩm ngữ cảnh / chung.
   const priceGeneral = rule => (isComment ? { rule, commentRule: true }
     : { rule, value: ctx.contextProduct ? { template_id: 'PRICE_QUOTE', Product_N1: ctx.contextProduct } : { template_id: 'GENERAL_INFO' } });
-  const basket = !complaint && orderAgeMin >= 60 && !PRICE.test(s) && !raw.includes('?') && !basketAmbiguous(raw) && typeof ctx.commentBasket === 'function'
+  // Đang nói về gói nhỏ (combo 10 gói) mà khách ghi "2 túi xanh": túi lớn hay combo gói nhỏ
+  // chưa chắc, để mô hình đọc cả ngữ cảnh.
+  const basket = !complaint && !ctx.smallPackContext && orderAgeMin >= 60 && !PRICE.test(s) && !raw.includes('?') && !basketAmbiguous(raw) && typeof ctx.commentBasket === 'function'
     ? basketFrom(raw, ctx.commentBasket) : [];
 
   if (ctx.livestream && !ctx.hasRecentOrder && !basket.length && !complaint && LIVE_DEAL.test(s) && !/\b(chua (nhan|thay|giao)|huy|khieu nai)\b/.test(s)) {

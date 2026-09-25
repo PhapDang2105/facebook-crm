@@ -384,7 +384,8 @@ export async function requestDirectModelReply(options) {
       attempt += 1;
       const limit = capacity ? (usingFallback ? 2 : capacityAttempts) : attempts;
       if (attempt < limit) {
-        const delay = capacity ? Math.min(10000, capacityWait * 2 ** (attempt - 1)) : baseWait;
+        // Backoff mũ kèm jitter (khuyến nghị Vertex khi 429): nhiều hội thoại cùng lúc không thử lại đúng một nhịp.
+        const delay = capacity ? Math.min(10000, capacityWait * 2 ** (attempt - 1)) * (0.5 + Math.random()) : baseWait;
         if (capacity) console.warn(`Model ${model} hết hạn mức/quá tải (${String(error.message).slice(0, 60)}), thử lại sau ${delay}ms (lần ${attempt}).`);
         await wait(delay);
         continue;

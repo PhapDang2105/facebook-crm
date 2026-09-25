@@ -178,6 +178,14 @@ export async function runFollowUps({ readSettings, sendMessage, conversationInfo
     for (const candidate of candidates) {
       summary.checked += 1;
       if (state.sent[candidate.key]) { summary.skipped += 1; continue; }
+      // Nhóm đối chứng 10% (theo psid, cố định): KHÔNG gửi, để đo bám đuổi có thêm đơn thật không
+      // (so tỷ lệ đơn 14 ngày giữa nhóm gửi và nhóm không gửi).
+      if (isFollowUpHoldout(candidate.conversation.psid)) {
+        await updateFollowUpState(current => { current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, error: 'nhóm đối chứng (không gửi để đo hiệu quả)', holdout: true }; return null; });
+        await updateMessagingStore(current => { const target = current.conversations.find(item => item.id === candidate.conversation.id); if (target && !target.followUpHoldout) target.followUpHoldout = { scenarioId: scenario.id, at: now }; return null; });
+        summary.holdout = (summary.holdout || 0) + 1;
+        continue;
+      }
       // Chỉ bám khách mới: tra Pancake/POS xem khách đã từng mua chưa (khách chỉ bình luận,
       // chưa có hộp thư thì không tra được). Tra lỗi thì để lượt sau, không gửi mù.
       if (conversationInfo && candidate.inbox) {
@@ -293,6 +301,17 @@ export function returningCustomerReason(info = {}) {
 }
 
 const followUpWinWindowMs = 14 * 24 * 60 * 60 * 1000;
+
+/** Khách thuộc nhóm đối chứng 10% (băm psid, cố định theo khách). */
+export function isFollowUpHoldout(psid) {
+  const text = String(psid || '');
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  return text.length > 0 && hash % 10 === 0;
+}
+
+/** Đơn chốt trong 14 ngày sau mốc `at` (dùng cho cả nhóm gửi và nhóm đối chứng). */
+const wonAfter = (conversation, at) => liveOrders(conversation).some(order => Number(order.createdAt) > at && Number(order.createdAt) - at <= followUpWinWindowMs);
 
 /**
  * Đơn chốt sau tin bám đuổi (bot, nhân viên hay Facebook Shop, trong 14 ngày
@@ -583,8 +602,16 @@ export async function followUpStatus() {
   const state = await readFollowUpState();
   const recent = Object.values(state.sent).sort((first, second) => second.at - first.at).slice(0, 20);
   const done = Object.values(state.sent).filter(item => !item.error && !item.queued);
-  const won = ((await readMessagingStore()).conversations || []).filter(item => item.followUpWon);
+  const conversations = (await readMessagingStore()).conversations || [];
+  const won = conversations.filter(item => item.followUpWon);
+  const followed = conversations.filter(item => Array.isArray(item.followUps) && item.followUps.length);
+  const holdout = conversations.filter(item => item.followUpHoldout);
   return {
+    // Hiệu quả: tỷ lệ chốt đơn 14 ngày của nhóm được gửi so với nhóm đối chứng không gửi.
+    lift: {
+      sent: { n: followed.length, won: won.length },
+      holdout: { n: holdout.length, won: holdout.filter(item => wonAfter(item, Number(item.followUpHoldout.at) || 0)).length }
+    },
     wonTotal: won.length,
     wonAmount: won.reduce((sum, item) => sum + (Number(item.followUpWon.total) || 0), 0), activatedAt: state.activatedAt || 0, lastRunAt: state.lastRunAt || 0, lastRun: state.lastRun, sentTotal: done.length, recent: recent.filter(item => !item.queued), queue: await followUpQueue() };
 }

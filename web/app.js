@@ -10092,6 +10092,12 @@ window.setInterval(updateConversationTimeLabels, 30000);
 renderOrderData();
 if (initialView === 'orders') showOrderStage(getRecommendedOrderStage());
 else showView(initialView);
+// Nút Back/Forward và gõ #hash tay: đổi màn theo hash (showView chỉ đặt hash khi khác).
+window.addEventListener('hashchange', () => {
+  const name = window.location.hash.slice(1);
+  if (!viewNames.includes(name) || name.startsWith('followup-results')) return;
+  if (name === 'orders') showOrderStage(getRecommendedOrderStage()); else showView(name);
+});
 if (relayResultsPending) receiveFollowUpRelayResults(relayResultsHash).then(() => renderChatbotFollowUpStatus());
 loadFacebookChannels().catch(() => {});
 loadMessageChannels().catch(() => {});

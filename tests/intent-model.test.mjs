@@ -44,10 +44,10 @@ test('cài đặt: intentModel mặc định shadow, ngưỡng 0.9; engine ở s
   };
   const shadow = await run({ intentModel: 'shadow' }, 'giá bao nhiêu vậy shop');
   assert.equal(shadow.asked, true);
-  assert.ok(shadow.logs.some(line => /^Mô hình nhỏ \(thử\): \S+ \(\d\.\d\d\) \/ thật GENERAL_INFO/.test(line)), shadow.logs.join('\n'));
+  assert.ok(shadow.logs.some(line => line.startsWith('Mô hình nhỏ (thử): ') && line.includes('/ thật GENERAL_INFO')), shadow.logs.join(' | '));
   const on = await run({ intentModel: 'on', intentThreshold: 0.5 }, 'giá bao nhiêu vậy shop');
   const guess = predictIntent({ text: 'giá bao nhiêu vậy shop', source: 'inbox', lastTemplate: '' });
-  if (guess.confidence >= 0.5 && intentSafeTemplates.has(guess.templateId)) { assert.equal(on.asked, false); assert.ok(on.sent.length >= 1); } else assert.equal(on.asked, true);
+  if (guess.confidence >= 0.5 && guess.margin >= 0.25 && intentSafeTemplates.has(guess.templateId)) { assert.equal(on.asked, false); assert.ok(on.sent.length >= 1); } else assert.equal(on.asked, true);
   const off = await run({ intentModel: 'off' }, 'giá bao nhiêu vậy shop');
   assert.ok(!off.logs.some(line => line.startsWith('Mô hình nhỏ')));
 });

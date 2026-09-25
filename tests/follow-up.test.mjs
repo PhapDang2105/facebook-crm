@@ -342,3 +342,13 @@ test('vòng 7: khách nói "đã nhận hàng rồi" / Page gửi phiếu đơn 
   assert.ok(!psids.includes('g'), 'khách nói đã nhận hàng');
   assert.ok(!psids.includes('a'), 'Page đã gửi phiếu đơn');
 });
+
+test('nhóm đối chứng 10%: băm psid cố định, ~10% khách không được gửi, trạng thái báo lift', async () => {
+  const { isFollowUpHoldout } = await import('../app/follow-up.mjs');
+  const psids = Array.from({ length: 2000 }, (_, i) => String(28000000000000000 + i * 7919));
+  const share = psids.filter(isFollowUpHoldout).length / psids.length;
+  assert.ok(share > 0.07 && share < 0.13, `tỷ lệ đối chứng ${share}`);
+  assert.equal(isFollowUpHoldout('x'), isFollowUpHoldout('x'), 'cố định theo khách');
+  const status = await followUpStatus();
+  assert.ok(status.lift && typeof status.lift.sent.n === 'number' && typeof status.lift.holdout.n === 'number');
+});

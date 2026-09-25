@@ -2115,6 +2115,10 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .order-row:last-child { border-bottom: 0; }
 .order-row strong { max-width: 58%; font-weight: 600; text-align: right; }
 
+/* Laptop 1366–1700px: ba cột co lại thay vì cắt mất panel khách bên phải (kiểm thử 25/09). */
+@media (max-width: 1700px) {
+  .messenger-shell { grid-template-columns: 330px minmax(0, 1fr) 390px; gap: 8px; }
+}
 @media (max-width: 1313px) {
   .messenger-shell { grid-template-columns: 315px minmax(427.5px, 1fr); }
   .contact-panel { display: none; }

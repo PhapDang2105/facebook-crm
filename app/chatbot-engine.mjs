@@ -792,6 +792,21 @@ async function answerChange(change, settings, results, dependencies) {
       const replacement = filterTrialReply(reply, trialState, isProductQuoteId);
       if (replacement) reply = renderChatbotReply(replacement, settings.messageTemplates, replyContext);
     }
+    // Bảng giá chung (3 vị, giá lẻ chưa ship) một mình làm khách rối và thấy đắt: trong
+    // hộp thư gửi kèm luôn bảng giá chi tiết Túi Xanh (1 túi / combo 2 / combo 3 + quà,
+    // kèm ảnh). Không áp cho bình luận, phiên live, khách đang giữ ưu đãi dùng thử; bảng
+    // Túi Xanh vừa gửi trong 30 phút thì cơ chế ý phụ tự bỏ, không gửi lại.
+    const defaultQuoteProduct = findProductBySku('GRA-XANH-Z450')?.name || '';
+    if (reply.templateId === 'GENERAL_INFO' && !reply.alsoTemplateId && !trialActive && defaultQuoteProduct
+      && conversation.source !== 'comment' && !isLivestreamPost(conversation) && settings.messageTemplates?.PRICE_QUOTE) {
+      const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: defaultQuoteProduct }, settings.messageTemplates, replyContext);
+      const opening = String(quote.messages?.[0] || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      const justSent = opening && replyContext.recentOutgoing.some(text => String(text).replace(/\s+/g, ' ').includes(opening));
+      if (quote.templateId === 'PRICE_QUOTE' && !justSent) {
+        const partsOf = item => item.parts || [...item.messages.map(text => ({ type: 'text', text })), ...(item.images || []).map(url => ({ type: 'image', url }))];
+        reply = { ...reply, messages: [...reply.messages, ...quote.messages], parts: [...partsOf(reply), ...partsOf(quote)], images: [...(reply.images || []), ...(quote.images || [])], alsoTemplateId: 'PRICE_QUOTE' };
+      }
+    }
     // Cùng mẫu dùng thử vừa gửi lượt trước: nhắc ngắn thay vì gửi lại nguyên văn.
     if (trialActive && String(reply.templateId).startsWith('TRIAL_') && reply.templateId !== 'TRIAL_REMIND'
       && conversation.botLastTemplateId === reply.templateId && settings.messageTemplates?.TRIAL_REMIND) {

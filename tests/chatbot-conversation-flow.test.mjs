@@ -44,7 +44,31 @@ test('hai tin liền nhau của khách: bot trả lời một lần cho cả hai
   assert.deepEqual(results.map(item => item.skipped || item.templateId), ['gộp với tin sau', 'GENERAL_INFO']);
   assert.equal(results[1].bundled, 2);
   assert.deepEqual(asked, [{ text: 'C đặt 2 gói\nGiảm ko e', history: [] }], 'hai tin gộp thành một câu hỏi, không lặp lại trong lịch sử');
-  assert.deepEqual(sent, ['Dạ nhà em có 3 vị ạ']);
+  // Bảng giá chung trong hộp thư luôn kèm bảng giá chi tiết Túi Xanh (1 túi / combo 2 / combo 3).
+  assert.equal(sent[0], 'Dạ nhà em có 3 vị ạ');
+  assert.match(sent.slice(1).join('\n'), /Bảng giá Granola Túi Xanh 450g/);
+});
+
+test('bảng giá chung (GENERAL_INFO) trong hộp thư: gửi kèm bảng giá Túi Xanh; đã gửi bảng Túi Xanh trong 30 phút, bình luận, hay khách đang giữ ưu đãi dùng thử thì không', async () => {
+  const price = { templateId: 'GENERAL_INFO', messages: ['Dạ nhà em có 3 vị ạ'], handoff: false };
+  const run = async (conversation, recent = []) => {
+    const sent = [];
+    const results = await processChatbotChanges([{ type: 'message', conversation: { id: 'p:u', pageId: 'p', psid: 'u', name: 'Khách', botEnabled: true, ...conversation }, message: { id: 'm1', mid: 'm1', direction: 'incoming', type: 'text', text: 'cho mình hỏi giá với ạ, mình đang phân vân', createdAt: Date.now() } }], {
+      readSettings: async () => settings,
+      listMessages: async () => recent,
+      saveBotState: async () => {},
+      sendMessage: async (_c, message) => { sent.push(message.text || '[ảnh]'); return { message: { mid: 'x' } }; },
+      requestReply: async () => price
+    });
+    return { sent, results };
+  };
+  const inbox = await run({});
+  assert.equal(inbox.results[0].templateId, 'GENERAL_INFO');
+  assert.match(inbox.sent.join('\n'), /Bảng giá Granola Túi Xanh 450g/);
+  const justSent = await run({}, [{ id: 'q', direction: 'outgoing', type: 'text', text: 'Dạ, em gửi anh/chị Bảng giá Granola Túi Xanh 450g để mình dễ tham khảo ạ: …', createdAt: Date.now() - 5 * 60 * 1000 }]);
+  assert.doesNotMatch(justSent.sent.join('\n'), /Bảng giá Granola Túi Xanh/, 'vừa gửi trong 30 phút: không gửi lại');
+  const trial = await run({ promo: { freeShipping: true, until: Date.now() + 86400000, at: Date.now() - 3600000, stage: 'offered' } });
+  assert.doesNotMatch(trial.sent.join('\n'), /Combo 2 Túi/, 'khách giữ ưu đãi dùng thử: luồng riêng, không bảng giá combo');
 });
 
 test('khách nhắn thêm trong lúc mô hình đang trả lời: câu trả lời đó bị bỏ, không gửi', async () => {

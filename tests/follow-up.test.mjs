@@ -7,6 +7,7 @@ import path from 'node:path';
 const directory = mkdtempSync(path.join(tmpdir(), 'followup-'));
 process.env.META_CONVERSATIONS_PATH = path.join(directory, 'meta-conversations.json');
 process.env.FOLLOW_UPS_PATH = path.join(directory, 'follow-ups.json');
+process.env.INBOX_SETTINGS_PATH = path.join(directory, 'inbox-settings.json');
 
 const HOUR = 60 * 60 * 1000;
 const now = Date.parse('2026-09-19T12:00:00Z');
@@ -129,4 +130,39 @@ test('lời kịch bản lấy từ mẫu FOLLOW_UP_… trong Thiết lập tin 
   // Mẫu bám đuổi không nằm trong danh sách mẫu đưa cho mô hình.
   const { buildTemplatePrompt } = await import('../app/chatbot-templates.mjs');
   assert.doesNotMatch(buildTemplatePrompt(base.messageTemplates), /FOLLOW_UP_/);
+});
+
+test('ngoài 24 giờ: không gọi API mà xếp hàng chờ gửi qua Pancake; "Đã gửi" gắn thẻ Bám đuổi và bật ưu đãi miễn ship', async () => {
+  const trial = normalizeChatbotSettings({
+    enabled: true,
+    followUps: { enabled: true, scenarios: [{ id: 'trial', name: 'Dùng thử miễn ship', trigger: 'inbox-no-reply', delayHours: 24, templateId: 'FOLLOW_UP_TRIAL_FREESHIP', outsideWindow: true, freeShipDays: 7, backlogDays: 7 }] }
+  });
+  const scenario = trial.followUps.scenarios[0];
+  assert.equal(scenario.outsideWindow, true);
+  assert.equal(scenario.freeShipDays, 7);
+  const write = (await import('node:fs')).writeFileSync;
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now, sent: {} }));
+  const fresh = await import(`../app/follow-up.mjs?trial=${Date.now()}`);
+  const summary = await fresh.runFollowUps({ readSettings: async () => trial, sendMessage: async () => { throw new Error('ngoài 24 giờ không được gọi API'); }, now, log: () => {} });
+  // G im 30 giờ (quá 24 giờ), backlogDays cho xét lùi dù bật từ bây giờ.
+  assert.equal(summary.queued, 1);
+  assert.equal(summary.sent, 0);
+  const status = await fresh.followUpStatus();
+  assert.equal(status.sentTotal, 0, 'tin còn trong hàng chờ chưa tính là đã gửi');
+  assert.equal(status.queue.length, 1);
+  const [item] = status.queue;
+  assert.equal(item.conversationId, `${page}:g`);
+  assert.equal(item.pancakeUrl, 'https://pancake.vn/110?c=110_g');
+  assert.match(item.text, /MIỄN PHÍ VẬN CHUYỂN/);
+  // Lượt sau không xếp lại.
+  assert.equal((await fresh.runFollowUps({ readSettings: async () => trial, sendMessage: async () => { throw new Error('x'); }, now: now + HOUR, log: () => {} })).queued, undefined);
+  assert.equal(await fresh.resolveFollowUpQueueItem(item.key, 'sent', { readSettings: async () => trial, now: now + HOUR }), true);
+  assert.equal(await fresh.resolveFollowUpQueueItem(item.key, 'sent', { readSettings: async () => trial }), false, 'đã xử lý thì không còn trong hàng');
+  const after = await fresh.followUpStatus();
+  assert.equal(after.queue.length, 0);
+  assert.equal(after.sentTotal, 1);
+  const conversation = (await readMessagingStore()).conversations.find(entry => entry.id === `${page}:g`);
+  assert.ok(conversation.labels.includes('followup'), 'gắn thẻ Bám đuổi');
+  assert.equal(conversation.promo.freeShipping, true);
+  assert.equal(conversation.promo.until, now + HOUR + 7 * 24 * HOUR);
 });

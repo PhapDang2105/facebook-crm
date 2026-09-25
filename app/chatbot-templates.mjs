@@ -282,6 +282,12 @@ export function stripReceiverName(address) {
   return rest.trim();
 }
 
+/** Bộ giá đã bỏ phí ship theo ưu đãi dùng thử (quà "Miễn phí vận chuyển" đứng đầu danh sách quà). */
+function withPromoFreeShipping(price) {
+  const gifts = [{ name: 'Miễn phí vận chuyển – ưu đãi dùng thử', sku: '', minQuantity: 1, active: true }, ...price.gifts.filter(gift => !isFreeShippingGift(gift))];
+  return { ...price, total: price.total - price.shippingFee, shippingFee: 0, gifts, gift: gifts.map(gift => gift.name).join(' + ') };
+}
+
 /** Lời gợi ý 2 túi cho giỏ 1 túi: số liệu lấy từ bộ giá, không tự ghi. */
 function upsellTwoBags(price, templates) {
   const line = price.lines?.[0];
@@ -368,7 +374,10 @@ function renderOrder(value, templates, context = {}) {
   const items = freshItems.length ? freshItems : (pending?.items || []);
   const key = freshKey || pending?.key || '';
   const priced = items.length ? priceBasket(items) : null;
-  const price = priced?.priceable ? priced : null;
+  // Khách đã nhận ưu đãi miễn phí vận chuyển (tin bám đuổi "1 túi dùng thử vẫn
+  // miễn ship", còn hạn): đơn không cộng phí ship, ghi rõ quà để kho và khách thấy.
+  const promo = context.promo?.freeShipping && Number(context.promo.until) > now ? context.promo : null;
+  const price = priced?.priceable && promo && priced.shippingFee > 0 ? withPromoFreeShipping(priced) : priced?.priceable ? priced : null;
 
   // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):
   // đọc thẳng từ tin khách vừa nhắn thay vì hỏi lại thứ khách đã đưa.

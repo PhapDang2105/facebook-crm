@@ -15,6 +15,7 @@ import { projectRoot } from './config.mjs';
 import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import { applyHonorific } from './chatbot-templates.mjs';
+import { labelsForEvents, readInboxSettings } from './inbox-settings.mjs';
 
 const statePath = process.env.FOLLOW_UPS_PATH || path.join(projectRoot, 'data', 'processed', 'follow-ups.json');
 export const FOLLOW_UP_INTERVAL_MS = 15 * 60 * 1000;
@@ -115,9 +116,10 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
       const repliedAt = lastAt(outgoingOf(messages), message => message.privateReply !== true);
       if (!repliedAt || repliedAt < customerAt || repliedAt < activatedAt || now - repliedAt > maxReplyAgeMs || now - repliedAt < delayMs) continue;
       // Messenger chỉ cho Page nhắn trong 24 giờ kể từ tin cuối của khách: quá mốc
-      // thì gửi chắc chắn bị từ chối — bỏ qua (không ghi là đã gửi).
-      if (now - customerAt > messengerWindowMs) continue;
-      candidates.push({ key: `${scenario.id}:${inbox.pageId}:${inbox.psid}`, conversation: inbox, inbox, thread: null, repliedAt });
+      // thì bỏ qua — trừ kịch bản "ngoài 24 giờ" (xếp hàng chờ gửi qua extension Pancake).
+      const outside = now - customerAt > messengerWindowMs;
+      if (outside && !scenario.outsideWindow) continue;
+      candidates.push({ key: `${scenario.id}:${inbox.pageId}:${inbox.psid}`, conversation: inbox, inbox, thread: null, repliedAt, outsideWindow: outside });
     }
   }
   // Một khách có nhiều luồng bình luận: một lần thôi.
@@ -137,14 +139,30 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
   if (!state.activatedAt) await updateFollowUpState(current => { current.activatedAt = now; return null; });
   const activatedAt = state.activatedAt || now;
   const store = await readMessagingStore();
+  const maxPerRun = Math.max(1, Number(settings.followUps.maxPerRun) || 15);
   for (const scenario of settings.followUps.scenarios.filter(item => item.enabled)) {
     const template = followUpScenarioText(scenario, settings.messageTemplates);
     // Mẫu tin bị tắt trong Thiết lập tin nhắn: kịch bản đứng yên.
     if (!template) continue;
-    for (const candidate of findFollowUpCandidates(store, scenario, { now, activatedAt })) {
+    // Kịch bản xét lùi N ngày (bám lại khách đã im từ trước lúc bật).
+    const since = scenario.backlogDays ? Math.min(activatedAt, now - scenario.backlogDays * 24 * 60 * 60 * 1000) : activatedAt;
+    // Khách im lâu nhất được gửi trước (sắp quá 7 ngày).
+    const candidates = findFollowUpCandidates(store, scenario, { now, activatedAt: since }).sort((a, b) => a.repliedAt - b.repliedAt);
+    for (const candidate of candidates) {
       summary.checked += 1;
       if (state.sent[candidate.key]) { summary.skipped += 1; continue; }
       const text = renderFollowUpMessage(template, candidate.conversation);
+      // Ngoài 24 giờ API Pancake/Meta từ chối (#10): không gọi, xếp hàng chờ để
+      // nhân viên gửi trong Pancake (extension Pancake gửi được ngoài 24 giờ).
+      if (candidate.outsideWindow) {
+        await updateFollowUpState(current => {
+          current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, queued: true, text, pageId: candidate.inbox.pageId, psid: candidate.inbox.psid };
+          return null;
+        });
+        summary.queued = (summary.queued || 0) + 1;
+        continue;
+      }
+      if (summary.sent + summary.failed >= maxPerRun) { summary.deferred = (summary.deferred || 0) + 1; continue; }
       let outcome = null;
       let error = '';
       // Nhắn riêng vào hộp thư trước; không có hộp thư hay gửi riêng lỗi thì trả lời công khai dưới bình luận (nếu cho).
@@ -173,13 +191,7 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
       if (outcome) {
         summary.sent += 1;
         log(`Bám đuổi "${scenario.name}": đã gửi ${outcome.via === 'public' ? 'công khai' : 'riêng'} cho ${candidate.conversation.name || candidate.conversation.id}`);
-        await updateMessagingStore(current => {
-          const target = current.conversations.find(item => item.id === candidate.conversation.id);
-          if (!target) return null;
-          target.followUps = [...(Array.isArray(target.followUps) ? target.followUps : []), { scenarioId: scenario.id, at: now, via: outcome.via }].slice(-20);
-          return null;
-        });
-        publishMessagingEvent({ type: 'customer-panel', conversationId: candidate.conversation.id });
+        await markConversationFollowedUp(candidate.conversation.id, scenario, outcome.via, now);
       } else {
         summary.failed += 1;
         log(`Bám đuổi "${scenario.name}": không gửi được cho ${candidate.conversation.name || candidate.conversation.id}: ${error || 'không có kênh gửi'}`);
@@ -188,6 +200,69 @@ export async function runFollowUps({ readSettings, sendMessage, now = Date.now()
   }
   await updateFollowUpState(current => { current.lastRunAt = now; current.lastRun = summary; return null; });
   return summary;
+}
+
+/**
+ * Tin bám đuổi đã tới khách: gắn thẻ "Bám đuổi" (thẻ nào nhận sự kiện followup
+ * do Cài đặt → Tin nhắn quyết định), ghi lịch sử, và với kịch bản tặng miễn ship
+ * thì ghi ưu đãi lên hội thoại để bot tính đúng khi khách đặt — không thì lời
+ * mời miễn ship mà đơn vẫn cộng ship.
+ */
+async function markConversationFollowedUp(conversationId, scenario, via, now) {
+  const followUpLabels = labelsForEvents((await readInboxSettings().catch(() => ({ labels: [] }))).labels, ['followup']);
+  await updateMessagingStore(current => {
+    const target = current.conversations.find(item => item.id === conversationId);
+    if (!target) return null;
+    if (followUpLabels.length) target.labels = [...new Set([...(Array.isArray(target.labels) ? target.labels : []), ...followUpLabels])];
+    target.followUps = [...(Array.isArray(target.followUps) ? target.followUps : []), { scenarioId: scenario.id, at: now, via }].slice(-20);
+    if (scenario.freeShipDays) target.promo = { freeShipping: true, until: now + scenario.freeShipDays * 24 * 60 * 60 * 1000, scenarioId: scenario.id, at: now };
+    return null;
+  });
+  publishMessagingEvent({ type: 'customer-panel', conversationId });
+}
+
+const pancakeConversationUrl = (pageId, psid) => `https://pancake.vn/${encodeURIComponent(pageId)}?c=${encodeURIComponent(`${pageId}_${psid}`)}`;
+
+/**
+ * Hàng chờ gửi qua Pancake: tin bám đuổi ngoài 24 giờ chưa gửi. Khách đã lên
+ * tiếng lại, đã có đơn hay nhân viên tắt bot sau lúc xếp hàng thì tự rơi khỏi
+ * hàng (không cần nhắn nữa).
+ */
+export async function followUpQueue() {
+  const state = await readFollowUpState();
+  const store = await readMessagingStore();
+  const byId = new Map((store.conversations || []).map(item => [item.id, item]));
+  return Object.entries(state.sent)
+    .filter(([, item]) => item.queued)
+    .filter(([, item]) => {
+      const conversation = byId.get(item.conversationId);
+      if (!conversation || conversation.botEnabled === false || (Array.isArray(conversation.customerOrders) && conversation.customerOrders.length)) return false;
+      const messages = Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : [];
+      return !incomingOf(messages).some(message => Number(message.createdAt) > item.at);
+    })
+    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
+    .sort((first, second) => first.repliedAt - second.repliedAt);
+}
+
+/**
+ * Nhân viên xử lý một tin trong hàng chờ: `sent` (đã gửi trong Pancake → gắn
+ * thẻ, ghi ưu đãi) hay `skip` (bỏ qua khách này). Trả về false khi không còn trong hàng.
+ */
+export async function resolveFollowUpQueueItem(key, action, { readSettings, now = Date.now() } = {}) {
+  const item = await updateFollowUpState(current => {
+    const entry = current.sent[key];
+    if (!entry?.queued) return null;
+    delete entry.queued;
+    if (action === 'sent') { entry.via = 'pancake'; entry.sentAt = now; } else entry.error = 'nhân viên bỏ qua';
+    return { ...entry };
+  });
+  if (!item) return false;
+  if (action === 'sent') {
+    const settings = readSettings ? await readSettings() : null;
+    const scenario = settings?.followUps?.scenarios?.find(entry => entry.id === item.scenarioId) || { id: item.scenarioId };
+    await markConversationFollowedUp(item.conversationId, scenario, 'pancake', now);
+  }
+  return true;
 }
 
 /**
@@ -202,7 +277,8 @@ export async function resetFollowUpActivation(now = Date.now()) {
 export async function followUpStatus() {
   const state = await readFollowUpState();
   const recent = Object.values(state.sent).sort((first, second) => second.at - first.at).slice(0, 20);
-  return { activatedAt: state.activatedAt || 0, lastRunAt: state.lastRunAt || 0, lastRun: state.lastRun, sentTotal: Object.values(state.sent).filter(item => !item.error).length, recent };
+  const done = Object.values(state.sent).filter(item => !item.error && !item.queued);
+  return { activatedAt: state.activatedAt || 0, lastRunAt: state.lastRunAt || 0, lastRun: state.lastRun, sentTotal: done.length, recent: recent.filter(item => !item.queued), queue: await followUpQueue() };
 }
 
 let timer = null;

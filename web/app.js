@@ -192,6 +192,7 @@ function renderChatbotFollowUps() {
     </div>
     <label class="llm-field"><span>Mẫu tin gửi khách (soạn ở Thiết lập tin nhắn → nhóm Bám đuổi; {title} = anh/chị, {name} = tên khách)</span><select data-follow-up-field="templateId">${followUpTemplateOptions(scenario.templateId)}</select></label>
     ${!scenario.templateId && scenario.message ? `<small class="follow-up-legacy">Lời đang ghi thẳng trên kịch bản: ${escapeHtml(scenario.message.slice(0, 120))}${scenario.message.length > 120 ? '…' : ''} — chọn một mẫu để chuyển sang Thiết lập tin nhắn.</small>` : ''}
+    <label class="llm-toggle-line"${scenario.trigger === 'inbox-no-reply' ? '' : ' hidden'}><span>Gửi cả khách đã quá 24 giờ (Messenger không cho API gửi: xếp vào hàng chờ để gửi bằng Pancake)</span><span class="llm-switch"><input type="checkbox" data-follow-up-field="outsideWindow" ${scenario.outsideWindow ? 'checked' : ''}><span></span></span></label>
     <label class="llm-toggle-line"${scenario.trigger === 'inbox-no-reply' ? ' hidden' : ''}><span>Không nhắn riêng được (khách chưa từng inbox) thì trả lời công khai dưới bình luận</span><span class="llm-switch"><input type="checkbox" data-follow-up-field="publicFallback" ${scenario.publicFallback === false ? '' : 'checked'}><span></span></span></label>
   </div>`).join('');
 }
@@ -201,7 +202,7 @@ chatbotFollowUpList?.addEventListener('input', event => {
   const row = event.target.closest('[data-follow-up-index]');
   const scenario = chatbotFollowUpScenarios[Number(row?.dataset.followUpIndex)];
   if (!field || !scenario) return;
-  if (field === 'enabled' || field === 'publicFallback') scenario[field] = event.target.checked;
+  if (field === 'enabled' || field === 'publicFallback' || field === 'outsideWindow') scenario[field] = event.target.checked;
   else if (field === 'delayHours') scenario.delayHours = Math.max(1, Math.round(Number(event.target.value) || 12));
   else scenario[field] = event.target.value;
   if (field === 'enabled') row.classList.toggle('is-off', !event.target.checked);
@@ -230,10 +231,49 @@ async function renderChatbotFollowUpStatus() {
     parts.push(`đã gửi tổng <b>${status.sentTotal || 0}</b> tin`);
     const recent = (status.recent || []).filter(item => !item.error).slice(0, 3).map(item => `${escapeHtml(item.name || item.conversationId)} (${escapeHtml(formatCustomerPanelTime(item.at))})`);
     chatbotFollowUpStatus.innerHTML = `${parts.join(' · ')}${recent.length ? `<br>Gần nhất: ${recent.join(', ')}` : ''}`;
+    renderChatbotFollowUpQueue(status.queue || []);
   } catch {
     chatbotFollowUpStatus.textContent = '';
   }
 }
+
+// Hàng chờ ngoài 24 giờ: API không gửi được, nhân viên mở hội thoại trong Pancake
+// (extension Pancake gửi được ngoài 24 giờ), dán lời, gửi rồi bấm "Đã gửi".
+const chatbotFollowUpQueue = document.querySelector('#chatbot-follow-up-queue');
+let chatbotFollowUpQueueItems = [];
+function renderChatbotFollowUpQueue(queue) {
+  if (!chatbotFollowUpQueue) return;
+  chatbotFollowUpQueueItems = queue;
+  chatbotFollowUpQueue.innerHTML = queue.length ? `<div class="follow-up-queue-head">Chờ gửi qua Pancake: ${queue.length} khách đã quá 24 giờ<small>Bấm "Mở Pancake" (lời đã được sao chép sẵn), dán vào ô chat và gửi, rồi bấm "Đã gửi" để gắn thẻ Bám đuổi và bật ưu đãi cho khách.</small></div>${queue.map((item, index) => `<div class="follow-up-queue-item">
+    <b>${escapeHtml(item.name || item.conversationId)}</b>
+    <p>${escapeHtml(item.text || '')}</p>
+    <div class="follow-up-queue-actions">
+      <a href="${escapeHtml(item.pancakeUrl)}" target="_blank" rel="noopener" data-follow-up-open="${index}">Mở Pancake</a>
+      <button type="button" data-follow-up-copy="${index}">Sao chép lời</button>
+      <button type="button" class="is-primary" data-follow-up-done="${index}">Đã gửi</button>
+      <button type="button" data-follow-up-skip="${index}">Bỏ qua</button>
+    </div>
+  </div>`).join('')}` : '';
+}
+chatbotFollowUpQueue?.addEventListener('click', async event => {
+  const target = event.target.closest('[data-follow-up-open],[data-follow-up-copy],[data-follow-up-done],[data-follow-up-skip]');
+  if (!target) return;
+  const index = Number(target.dataset.followUpOpen ?? target.dataset.followUpCopy ?? target.dataset.followUpDone ?? target.dataset.followUpSkip);
+  const item = chatbotFollowUpQueueItems[index];
+  if (!item) return;
+  if (target.dataset.followUpOpen !== undefined || target.dataset.followUpCopy !== undefined) {
+    try { await navigator.clipboard.writeText(item.text || ''); if (target.dataset.followUpCopy !== undefined) target.textContent = 'Đã sao chép'; } catch { /* trình duyệt chặn clipboard: nhân viên tự chép */ }
+    return;
+  }
+  target.disabled = true;
+  try {
+    const status = await readApiResponse(await fetch('/api/chatbot/follow-ups/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: item.key, action: target.dataset.followUpSkip !== undefined ? 'skip' : 'sent' }) }));
+    renderChatbotFollowUpQueue(status.queue || []);
+  } catch (error) {
+    target.disabled = false;
+    alert(error.message);
+  }
+});
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
 const chatbotSettingsMemoryWindowRange = document.querySelector('#chatbot-settings-memory-window-range');
 const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
@@ -410,7 +450,8 @@ const labelAutoChoices = [
   { value: 'warranty', label: 'Khi hỏi bảo hành/đổi trả' },
   { value: 'livestream', label: 'Khi khách đến từ phiên live' },
   { value: 'wholesale', label: 'Khi hỏi mua sỉ/CTV' },
-  { value: 'bad', label: 'Khi số hay bom hàng (POS chặn/bom nhiều)' }
+  { value: 'bad', label: 'Khi số hay bom hàng (POS chặn/bom nhiều)' },
+  { value: 'followup', label: 'Khi hệ thống gửi tin bám đuổi' }
 ];
 let quickReplyDraft = null;
 let quickReplyPickerMatches = [];

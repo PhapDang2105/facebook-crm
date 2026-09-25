@@ -22,7 +22,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, lookupPhones, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
-import { followUpStatus, resetFollowUpActivation, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { followUpStatus, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
@@ -1050,6 +1050,14 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/run') {
       const summary = await runFollowUps({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage });
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
+    }
+    // Hàng chờ ngoài 24 giờ: nhân viên gửi trong Pancake rồi bấm "Đã gửi" (hay "Bỏ qua").
+    if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/queue') {
+      const payload = await readBody(request);
+      const action = payload.action === 'skip' ? 'skip' : 'sent';
+      const done = await resolveFollowUpQueueItem(String(payload.key || ''), action, { readSettings: readChatbotSettings });
+      if (!done) return sendJson(response, 404, { error: 'Tin này không còn trong hàng chờ.' });
+      return sendJson(response, 200, await followUpStatus());
     }
     if (request.method === 'GET' && url.pathname === '/api/chatbot/settings') {
       const settings = await readChatbotSettings();

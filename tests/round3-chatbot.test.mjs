@@ -350,3 +350,17 @@ test('đơn nhân viên/Facebook Shop tạo trên POS (source POS): bot không t
   const update = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Vàng 350g', No_A: '2' }, templates, { recentOrder: posOrder, now: Date.now(), messageText: 'đổi sang 2 túi vàng' });
   assert.equal(update.order?.updateOrderId, undefined);
 });
+
+test('khách nhận ưu đãi bám đuổi "1 túi dùng thử miễn ship" (còn hạn): đơn 1 túi không cộng ship; hết hạn thì cộng lại', () => {
+  const value = { template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '1', Phone_Number: '0909123456', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' };
+  const now = Date.now();
+  const plain = renderChatbotReply(value, templates, { now });
+  assert.ok(plain.order.shippingFee > 0);
+  const promo = renderChatbotReply(value, templates, { now, promo: { freeShipping: true, until: now + 60000 } });
+  assert.equal(promo.order.shippingFee, 0);
+  assert.equal(promo.order.total, plain.order.total - plain.order.shippingFee);
+  assert.match(promo.messages[0], /Miễn phí vận chuyển – ưu đãi dùng thử/);
+  assert.doesNotMatch(promo.messages[0], /Phí vận chuyển:/);
+  const expired = renderChatbotReply(value, templates, { now, promo: { freeShipping: true, until: now - 1 } });
+  assert.equal(expired.order.shippingFee, plain.order.shippingFee);
+});

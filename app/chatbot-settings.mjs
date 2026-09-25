@@ -198,10 +198,17 @@ export function normalizeFollowUps(value) {
       // Kịch bản cũ còn ghi lời trực tiếp: giữ để không mất, ưu tiên mẫu tin khi có.
       templateId: templateId.startsWith(followUpTemplatePrefix) ? templateId : '',
       message: String(item?.message ?? '').trim().slice(0, 2000),
-      publicFallback: item?.publicFallback !== false
+      publicFallback: item?.publicFallback !== false,
+      // Gửi cả khi đã quá 24 giờ kể từ tin cuối của khách (Pancake tự gắn thẻ tin nhắn).
+      outsideWindow: item?.outsideWindow === true,
+      // Tặng miễn phí vận chuyển cho đơn của khách trong N ngày sau khi nhận tin (0 = không tặng).
+      freeShipDays: Math.max(0, Math.min(30, Math.round(Number(item?.freeShipDays) || 0))),
+      // Xét cả khách im lặng trong N ngày trước lúc bật (0 = chỉ tính từ lúc bật).
+      backlogDays: Math.max(0, Math.min(7, Math.round(Number(item?.backlogDays) || 0)))
     };
   }).filter(item => (item.templateId || item.message) && !seen.has(item.id) && seen.add(item.id));
-  return { enabled: source.enabled === true, scenarios };
+  // Mỗi lượt (15 phút) gửi tối đa N tin: chia đều, tránh gửi dồn hàng trăm tin một lúc.
+  return { enabled: source.enabled === true, maxPerRun: Math.max(1, Math.min(100, Math.round(Number(source.maxPerRun) || 15))), scenarios };
 }
 
 export function publicChatbotSettings(value = {}) {

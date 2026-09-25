@@ -17,7 +17,7 @@ test('thẻ mặc định là bộ thẻ của Pancake, giữ id customer/consul
   assert.ok(ids.includes('customer') && ids.includes('consulting'));
   assert.ok(!ids.includes('new'));
   assert.equal(defaultConversationLabels.find(label => label.id === 'customer').name, 'Đã mua hàng');
-  assert.equal(defaultConversationLabels.length, 10, "8 thẻ Pancake + Đổi sản phẩm + Hủy đơn");
+  assert.equal(defaultConversationLabels.length, 11, "8 thẻ Pancake + Đổi sản phẩm + Hủy đơn + Bám đuổi");
 });
 
 test('tên thẻ tiếng Việt thành id ổn định, trùng tên thì tự thêm hậu tố', () => {
@@ -55,7 +55,7 @@ test('mẫu trả lời nhanh: ký tự tắt không dấu cách, ảnh tải l�
 
 test('xóa hết thẻ thì quay về bộ mặc định', async () => {
   const settings = await normalizeInboxSettings({ labels: [], quickReplies: null });
-  assert.equal(settings.labels.length, 10);
+  assert.equal(settings.labels.length, 11);
   assert.deepEqual(settings.quickReplies, []);
 });
 

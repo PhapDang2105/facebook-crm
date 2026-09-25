@@ -2534,3 +2534,12 @@ tr:hover .customer-tel button { opacity: .75; }
 .follow-up-status { margin: 0; color: #8a8d91; font-size: 12px; line-height: 1.5; }
 .follow-up-status b { color: #354052; font-weight: 600; }
 .follow-up-legacy { color: #ad6800; font-size: 12px; line-height: 1.4; }
+.follow-up-queue:empty { display: none; }
+.follow-up-queue { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px solid #bae0ff; border-radius: 8px; background: #f0f9ff; font-size: 12px; }
+.follow-up-queue-head { color: #0c4a6e; font-weight: 600; line-height: 1.4; }
+.follow-up-queue-head small { display: block; color: #52606d; font-weight: 400; }
+.follow-up-queue-item { display: grid; gap: 4px; padding: 8px; border-radius: 6px; background: #fff; }
+.follow-up-queue-item p { margin: 0; color: #52606d; line-height: 1.4; white-space: pre-wrap; }
+.follow-up-queue-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.follow-up-queue-actions a, .follow-up-queue-actions button { padding: 3px 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; color: #354052; font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; }
+.follow-up-queue-actions .is-primary { border-color: #0ea5e9; background: #0ea5e9; color: #fff; }

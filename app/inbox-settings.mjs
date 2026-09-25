@@ -24,6 +24,8 @@ export const defaultConversationLabels = Object.freeze([
   { id: 'livestream', name: 'Livestream', color: '#c26a9a', icon: 'video-camera', auto: 'livestream' },
   { id: 'wholesale', name: 'Khách sỉ', color: '#c79a2c', icon: 'package', auto: 'wholesale' },
   { id: 'bad', name: 'Khách xấu', color: '#6b7280', icon: 'prohibited', auto: 'bad' },
+  // Hệ thống đã gửi tin bám đuổi cho khách (lọc để kiểm tra tin nào đã đi, khách nào đã quay lại).
+  { id: 'followup', name: 'Bám đuổi', color: '#0ea5e9', icon: 'alarm-clock', auto: 'followup' },
   { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck', auto: '' }
 ]);
 

@@ -18,7 +18,7 @@ export function foldVietnamese(value) {
 // order: chốt đơn · handoff: chuyển nhân viên · complaint: khiếu nại · update: khách
 // đổi sản phẩm/số lượng · cancel: khách hủy đơn · warranty: hỏi bảo hành/đổi trả ·
 // livestream: khách đến từ phiên live · wholesale: hỏi sỉ/CTV · bad: số hay bom hàng.
-export const autoLabelEvents = Object.freeze(['order', 'handoff', 'complaint', 'update', 'cancel', 'warranty', 'livestream', 'wholesale', 'bad']);
+export const autoLabelEvents = Object.freeze(['order', 'handoff', 'complaint', 'update', 'cancel', 'warranty', 'livestream', 'wholesale', 'bad', 'followup']);
 
 // Mẫu tin bot chọn khi khách hỏi bảo hành/đổi trả hay muốn mua sỉ.
 export const warrantyTemplateIds = Object.freeze(['OIL_SMELL_WARRANTY', 'INSPECTION_RETURN_POLICY']);

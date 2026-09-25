@@ -40,10 +40,14 @@ test('đã hỏi một lần, khách trả lời địa chỉ có "xã" (chữ c
   assert.match(reply.order.address, /xã Abcxyz/);
 });
 
-test('đang xin SĐT/địa chỉ mà khách đổi sang số lượng không tính được giá: hỏi vị/số lượng, không chốt giỏ cũ', () => {
+test('đang xin SĐT/địa chỉ mà khách đổi sang số lượng không tính được giá: giữ giỏ mới, xin phần còn thiếu, gắn thẻ cho nhân viên tính giá; không chốt giỏ cũ', () => {
   const pending = { items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }], key: 'GRA-XANH-Z450=1', at: Date.now(), phone: '', address: '', addressAsks: 0 };
   const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Túi Xanh', No_A: '5', Phone_Number: '0909123456' }, templates, { pendingOrder: pending });
-  assert.equal(reply.templateId, 'ASK_FLAVOR');
+  // Khách đã nói rõ loại và số lượng: không hỏi lại vị (bot từng im vì hỏi lặp).
+  assert.equal(reply.templateId, 'ORDER_CUSTOM_BASKET');
+  assert.equal(reply.attention, true);
+  assert.match(reply.messages[0], /5 Granola Túi Xanh 450g/);
+  assert.match(reply.messages[0], /địa chỉ nhận hàng/);
   assert.equal(reply.order, undefined);
   assert.equal(reply.pendingOrder.phone, '0909123456', 'SĐT vừa gửi vẫn được giữ');
   // Khách trả lời xong số lượng hợp lệ thì tiếp tục xin địa chỉ với giỏ mới.
@@ -303,7 +307,9 @@ test('khách đã đặt đơn hỏi lại thời gian giao (vừa kèm trong ti
   // Chưa có đơn: vẫn nhắc ngắn "thông tin em gửi ở trên" như cũ.
   const noOrder = await run({});
   assert.equal(noOrder.length, 1);
-  assert.match(noOrder[0], /tin phía trên/);
+  // Câu hỏi thông tin (không phải bảng giá): không chào hàng, chỉ nói đã gửi ở trên.
+  assert.match(noOrder[0], /ngay trên/);
+  assert.doesNotMatch(noOrder[0], /ưng loại nào/);
 });
 
 test('khách hủy đơn vừa đặt (ORDER_CANCEL): hủy đúng đơn đó qua cancelOrder, không tạo đơn, không phiếu; đơn quá 24h → chuyển nhân viên', async () => {

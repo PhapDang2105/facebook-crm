@@ -756,6 +756,18 @@ const chatbotDependencies = {
   createOrder: createChatbotCustomerOrder,
   updateOrder: updateChatbotCustomerOrder,
   cancelOrder: cancelChatbotCustomerOrder,
+  // Khách hỏi đơn đã đặt và gửi SĐT: tìm đơn theo SĐT ở mọi hội thoại (đặt ở
+  // trang kia, qua bình luận, đơn landing đồng bộ từ POS), mới nhất trước.
+  findOrdersByPhone: async phone => {
+    const wanted = String(phone || '').replace(/\D/g, '').replace(/^84/, '0');
+    if (wanted.length < 9) return [];
+    const store = await readMessagingStore();
+    return store.conversations
+      .flatMap(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []))
+      .filter(order => String(order?.phone || '').replace(/\D/g, '').replace(/^84/, '0') === wanted && String(order.processingStatus || '') !== 'cancelled')
+      .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
+      .slice(0, 3);
+  },
   sendReceipt: sendChatbotOrderReceipt,
   // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
   // nhận sự kiện là do nhân viên chọn trong Cài đặt → Tin nhắn.

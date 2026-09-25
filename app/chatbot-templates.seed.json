@@ -8,7 +8,7 @@
   "INGREDIENTS_ALLERGY": "Dạ granola bên em làm từ yến mạch, viên ngũ cốc gạo lứt, các loại hạt và trái cây sấy, không thêm đường ạ. Hiện bên em chưa làm riêng loại bỏ từng hạt theo yêu cầu. Nếu mình dị ứng hay khó tiêu với hạt nào, {title} nhắn em tên hạt để em kiểm tra thành phần chi tiết từng túi và tư vấn loại phù hợp cho mình nha ạ.",
   "CALLBACK_REQUEST": "Dạ em đã ghi nhận ạ, nhân viên bên em sẽ gọi lại cho mình trong giờ hành chính (8:00–17:00) nha ạ. {Title} để lại số điện thoại tiện gọi giúp em ạ.",
   "ASK_FLAVOR": "Dạ bên em có 3 vị: Túi Xanh nguyên bản 450g, Túi Vàng nhiều hạt 350g và Túi Nâu cacao 350g; mix vị nào cũng được giá combo, từ 2 túi miễn phí vận chuyển ạ. {Title} muốn lấy vị nào và mỗi vị mấy túi để em lên đơn nha ạ?",
-  "UPSELL_TWO_BAGS": "Dạ nếu {title} lấy 2 túi thì giá chỉ còn {two_unit}/túi[?saving] (bớt {saving}/túi)[/?][?free_ship], {free_ship}[/?][?gift], tặng {gift}[/?]: tổng {two_total} thay vì {one_total} cho 1 túi ạ 🌾 {Title} muốn lấy 2 túi không ạ? Nếu vẫn lấy 1 túi thì em lên đơn 1 túi cho mình nha.",
+  "UPSELL_TWO_BAGS": "Dạ nếu {title} lấy 2 {unit} thì giá chỉ còn {two_unit}/{unit}[?saving] (bớt {saving}/{unit})[/?][?free_ship], {free_ship}[/?][?gift], tặng {gift}[/?]: tổng {two_total} thay vì {one_total} (đã gồm ship) cho 1 {unit} ạ 🌾 {Title} muốn lấy 2 {unit} không ạ? Nếu vẫn lấy 1 {unit} thì em lên đơn 1 {unit} cho mình nha.",
   "FREESHIP_POLICY": "Dạ đơn từ 2 túi bên em miễn phí vận chuyển và áp giá combo ạ; đơn 1 túi phí ship là {shipping_fee} ạ. {Title} lấy 2 túi vị nào để em lên đơn miễn ship cho mình nha 🌾",
   "STORAGE": "Dạ granola mình để nơi khô ráo, thoáng mát, tránh nắng là được ạ; mở túi rồi mình kéo kín zip hoặc cho vào hũ đậy nắp, dùng trong 3–4 tuần để hạt giữ độ giòn. Để ngăn mát cũng được nhưng lấy ra ăn ngay để hạt không hút ẩm ạ.",
   "PACKAGING_INFO": "Dạ túi lớn (350–450g) là một túi zip, không chia gói nhỏ bên trong ạ. Mình muốn từng gói ăn một bữa, tiện mang đi thì có Combo 10 gói nhỏ ạ, {title} cần em gửi bảng giá combo gói nhỏ không ạ?",
@@ -60,10 +60,17 @@
   "CRUNCHY_CEREAL_INFO": "Dạ hạt tròn là viên ngũ cốc giòn, làm từ yến mạch, gạo lứt, mật thốt nốt, bột chuối xanh và muối hồng Himalaya ạ. Quy trình kết hợp sấy và nướng, hoàn toàn không chiên qua dầu.",
   "NO_ADDED_SUGAR": "Dạ trong quá trình sản xuất tụi em không thêm đường, nhưng sản phẩm có trái cây sấy và trong trái cây sấy vốn đã có đường tự nhiên ạ.",
   "OIL_SMELL_WARRANTY": "Dạ các loại hạt chứa nhiều dầu tự nhiên nên đôi khi có thể ỉu hoặc hôi dầu do đặc tính hạt, bảo quản hay vận chuyển. Bên em có chính sách bảo hành để đảm bảo trải nghiệm; mong mình cho bên em cơ hội hỗ trợ ạ.",
-  "WEIGHT_EXPIRY": "Dạ khối lượng 1 túi Granola Nguyên Bản là 450g. Hạn sử dụng 6 tháng kể từ ngày sản xuất và được in đầy đủ trên bao bì ạ.",
+  "WEIGHT_EXPIRY": "Dạ Túi Xanh nặng 450g, Túi Vàng và Túi Nâu cacao nặng 350g ạ. Hạn sử dụng 6 tháng kể từ ngày sản xuất và được in đầy đủ trên bao bì ạ.",
   "DELIVERY_DELAY": "Dạ em xin lỗi mình vì đơn giao chậm ạ. Đợt này đơn vị vận chuyển quá tải nên thời gian giao có thể chậm hơn dự kiến; bên em đang theo dõi và thúc đẩy giao sớm nhất cho mình ạ.",
   "INSPECTION_RETURN_POLICY": "Dạ khi nhận hàng mình hỗ trợ đồng kiểm cùng shipper về mẫu mã sản phẩm. Bên em chưa hỗ trợ dùng thử hoặc khui hàng khi nhận. Sau khi trải nghiệm, nếu chưa hài lòng bên em hỗ trợ đổi/trả hoặc hoàn tiền theo chính sách bảo hành ạ.",
   "REFUSED_DELIVERY": "Dạ em kiểm tra hệ thống ghi nhận đơn bị khách hàng từ chối nhận nên đang hoàn về ạ. {Title} cho em xin phép hỏi mình có nhận được cuộc gọi từ shipper không để bên em có cơ sở làm việc và khiếu nại với đơn vị vận chuyển, đảm bảo quyền lợi cho mình ạ.",
   "THANK_YOU": "Dạ em cảm ơn {title} rất nhiều ạ. Chúc mình một ngày mới thật nhiều năng lượng, luôn rạng rỡ và tươi tắn ạ.",
-  "FOLLOW_UP_COMMENT_FREESHIP": "Dạ {title} ơi, Giọt Nắng gửi tặng {title} ưu đãi MIỄN PHÍ VẬN CHUYỂN để dùng thử granola ạ 🎁 {Title} chỉ cần nhắn em loại túi muốn dùng và địa chỉ nhận, em lên đơn ngay nhé."
+  "FOLLOW_UP_COMMENT_FREESHIP": "Dạ {title} ơi, Giọt Nắng gửi tặng {title} ưu đãi MIỄN PHÍ VẬN CHUYỂN để dùng thử granola ạ 🎁 {Title} chỉ cần nhắn em loại túi muốn dùng và địa chỉ nhận, em lên đơn ngay nhé.",
+  "ORDER_CART_LINE": "Dạ đơn của {title} gồm {cart}, tổng {total}[?free_ship] ({free_ship})[/?][?ship_fee] (đã gồm {ship_fee} phí ship)[/?][?gift], tặng {gift}[/?] ạ 🌾",
+  "ORDER_ADDRESS_REMIND": "Dạ em vẫn đang giữ đơn {cart} – tổng {total} cho {title} ạ 🌾 {Title} gửi giúp em {missing} là em lên đơn liền nha.",
+  "ORDER_CUSTOM_BASKET": "Dạ em ghi nhận đơn {cart} của {title} rồi ạ 🌾 Đơn này bạn phụ trách sẽ tính ưu đãi tốt nhất và báo lại mình ngay[?missing]; {title} gửi giúp em {missing} để em lên đơn luôn[/?] nha ạ.",
+  "REPLY_ALREADY_SENT_INFO": "Dạ em vừa gửi ở tin ngay trên ạ 💛 Chỗ nào chưa rõ {title} nói em biết, em nhờ bạn phụ trách giải thích kỹ hơn cho mình nha ạ.",
+  "ORDER_STATUS_CHECKING": "Dạ em đã nhận số điện thoại của {title} ạ. Em chuyển bạn phụ trách đơn hàng tra ngay và nhắn lại {title} trong tin này nha, {title} chờ em ít phút ạ 💛",
+  "LIVE_DEAL_CLAIMED": "Dạ em ghi nhận {title} đã săn deal trên live rồi ạ 💛 {Title} nhắn giúp em loại túi (Xanh/Vàng/Nâu), số lượng, SĐT và địa chỉ nhận hàng, em giữ đúng giá deal và lên đơn cho mình ngay nha ạ 🌾",
+  "COMMENT_PUBLIC_SORRY": "Dạ Giọt Nắng xin lỗi vì trải nghiệm chưa tốt ạ, em đã nhắn riêng để bạn phụ trách kiểm tra và hỗ trợ {title} ngay nha 💛"
 }

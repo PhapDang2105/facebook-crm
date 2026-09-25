@@ -93,7 +93,10 @@ test('lời xin địa chỉ là một câu liền, không còn mảnh câu đ�
   const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Phone_Number: '0', Customer_Address: '0' }, templates, {});
   assert.equal(reply.templateId, 'ORDER_ADDRESS');
   assert.equal(reply.messages.length, 1);
-  assert.match(reply.messages[0], /^Dạ để lên đơn đúng tuyến cho đơn vị vận chuyển, anh\/chị cho em xin số điện thoại và địa chỉ nhận hàng đầy đủ/);
+  // Dòng đầu nêu lại giỏ và tổng tiền, rồi mới xin SĐT/địa chỉ (bỏ chữ "Dạ" thứ hai).
+  const [cartLine, ask] = reply.messages[0].split('\n');
+  assert.match(cartLine, /^Dạ đơn của anh\/chị gồm 2 Granola Túi Xanh 450g, tổng 298\.000đ/);
+  assert.match(ask, /^Để lên đơn đúng tuyến cho đơn vị vận chuyển, anh\/chị cho em xin số điện thoại và địa chỉ nhận hàng đầy đủ/);
 });
 
 test('DISCOUNT_POLICY: giá lẻ không bớt, ưu đãi là combo đọc từ danh mục', () => {

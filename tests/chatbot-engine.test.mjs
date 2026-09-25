@@ -414,8 +414,10 @@ test('mã mẫu lạ từ mô hình và giỏ không tính được giá: không
   assert.equal(unknown.templateId, 'GENERAL_INFO');
   assert.equal(unknown.handoff, false);
   const flavor = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '5', Phone_Number: '0909123456', Customer_Address: fullAddress }, templates, { customer: { gender: 'female' } });
-  assert.equal(flavor.templateId, 'ASK_FLAVOR', '5 túi vượt combo: hỏi vị/số lượng thay vì chuyển người');
+  assert.equal(flavor.templateId, 'ORDER_CUSTOM_BASKET', '5 túi vượt combo: ghi nhận, nhân viên tính giá, không chuyển người');
   assert.equal(flavor.handoff, false);
+  assert.equal(flavor.attention, true);
+  assert.equal(flavor.order, undefined, 'không tự lên đơn giỏ chưa có giá');
   assert.equal(flavor.pendingOrder.phone, '0909123456', 'SĐT đã có vẫn được giữ');
 });
 

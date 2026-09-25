@@ -140,6 +140,8 @@ export function normalizeChatbotSettings(value = {}) {
     // Mô hình ra quyết định trước LLM (processing/intent-model.mjs): 'shadow' chỉ ghi log so với
     // câu trả lời thật; 'on' đủ tin cậy (≥ intentThreshold) và mẫu an toàn thì trả lời thẳng.
     intentModel: ['on', 'shadow', 'off'].includes(value.intentModel) ? value.intentModel : 'shadow',
+    // Cache phần tĩnh của prompt trên Vertex (explicit context cache): 'on' mặc định (thăm dò 25/09 chạy tốt).
+    promptCache: value.promptCache === 'off' ? 'off' : 'on',
     intentThreshold: Math.min(0.99, Math.max(0.5, Number(value.intentThreshold) || 0.9)),
     // Các phần rút gọn ngữ cảnh gửi mô hình (mặc định tắt cả; bật từng phần sau khi A/B đạt).
     contextTrim: Object.fromEntries(['memory', 'query', 'catalog', 'templates'].map(key => [key, value.contextTrim?.[key] === true])),

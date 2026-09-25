@@ -279,6 +279,44 @@ function wait(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
+// ===== Cache phần tĩnh của prompt trên Vertex (explicit context cache) =====
+// Prompt hệ thống (luật + danh mục + danh sách mẫu ≈ 2.300 token, 79% mỗi lượt) giống hệt
+// giữa các lượt nhưng implicit cache của Gemini 3 Flash chỉ ăn từ 4.096 token. Thăm dò 25/09:
+// cachedContents chạy với gemini-3-flash-preview, token cache tính giá 1/10. Cache theo băm
+// (model + prompt), TTL 1 giờ, tạo lại khi hết hạn / đổi mẫu; Vertex báo cache hỏng thì bỏ và
+// gửi như thường. settings.promptCache: 'on' (mặc định) | 'off'.
+const promptCaches = new Map();
+const promptCacheTtlSeconds = 3600;
+
+function hashText(text) {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) { hash ^= text.charCodeAt(i); hash = Math.imul(hash, 16777619) >>> 0; }
+  return hash.toString(16);
+}
+
+export function clearPromptCaches() {
+  promptCaches.clear();
+}
+
+async function promptCacheFor({ endpoint, model, systemPrompt, accessToken, fetchImpl }) {
+  const key = `${model}:${hashText(systemPrompt)}`;
+  const entry = promptCaches.get(key);
+  if (entry && entry.expiresAt > Date.now() + 60000) return entry.name;
+  const root = endpoint.replace(/\/publishers\/google\/models\/.*$/, '');
+  const project = root.match(/\/projects\/([^/]+)\/locations\/([^/]+)/);
+  if (!project) return '';
+  const response = await fetchImpl(`${root}/cachedContents`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: `projects/${project[1]}/locations/${project[2]}/publishers/google/models/${model}`, displayName: `giotnang-${key.slice(-12)}`, systemInstruction: { parts: [{ text: systemPrompt }] }, ttl: `${promptCacheTtlSeconds}s` })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.name) throw new Error(payload?.error?.message || `cachedContents ${response.status}`);
+  promptCaches.set(key, { name: payload.name, expiresAt: Date.now() + promptCacheTtlSeconds * 1000 });
+  console.log(`Cache prompt: tạo mới cho ${model} (${payload.usageMetadata?.totalTokenCount || '?'} token, 1 giờ)`);
+  return payload.name;
+}
+
 export async function requestDirectModelReply(options) {
   const { settings, conversation, message, recentMessages = [], fetchImpl = fetch, rawResponse = false } = options;
   const vertex = settings.provider === 'vertex';
@@ -296,7 +334,7 @@ export async function requestDirectModelReply(options) {
   const capacityAttempts = Math.max(attempts, 3);
   const baseWait = Math.max(100, Number(settings.retryIntervalMs) || 1000);
   const capacityWait = Math.max(10, Number(settings.capacityWaitMs) || 2000);
-  const callModel = async model => {
+  const callModel = async (model, noCache = false) => {
       const anthropic = settings.directProtocol === 'anthropic';
       const configuredEndpoint = String(settings.directEndpoint || '');
       const endpoint = vertex
@@ -311,8 +349,13 @@ export async function requestDirectModelReply(options) {
       const memoryTurns = buildMemoryTurns({ recentMessages, message, settings });
       const query = buildChatbotQuery({ conversation, message, recentMessages, settings, includeHistory: false });
       const imageParts = vertex && message?.type === 'image' ? await collectImageParts(message, fetchImpl) : [];
+      // Cache prompt: chỉ Vertex + Gemini 3/2.5 (không phải khi dùng khóa API); lỗi tạo cache thì gửi như thường.
+      let cachedContent = '';
+      if (vertex && settings.promptCache === 'on' && settings.directAuthType !== 'api_key' && /gemini-(3|2\.5)/i.test(model) && !options.noPromptCache && !noCache) {
+        try { cachedContent = await promptCacheFor({ endpoint, model, systemPrompt, accessToken, fetchImpl }); } catch (error) { console.warn(`Cache prompt: không tạo được (${String(error.message).slice(0, 80)}), gửi không cache.`); }
+      }
       const body = vertex ? {
-        systemInstruction: { parts: [{ text: systemPrompt }] },
+        ...(cachedContent ? { cachedContent } : { systemInstruction: { parts: [{ text: systemPrompt }] } }),
         contents: [
           ...memoryTurns.map(turn => ({ role: turn.role, parts: [{ text: turn.text }] })),
           { role: 'user', parts: [...imageParts, { text: query }] }
@@ -352,6 +395,12 @@ export async function requestDirectModelReply(options) {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
+        // Cache hết hạn/hỏng phía Vertex (400/403/404): bỏ cache, gửi lại một lần với prompt đầy đủ.
+        if (cachedContent && [400, 403, 404].includes(response.status)) {
+          promptCaches.clear();
+          console.warn(`Cache prompt: Vertex từ chối (${response.status}), gửi lại không cache.`);
+          return callModel(model, true);
+        }
         const error = new Error(payload?.error?.message || payload.message || `Nhà cung cấp model trả về lỗi ${response.status}.`);
         error.status = response.status;
         throw error;

@@ -675,3 +675,35 @@ test('khách "Trả lời" một tin rồi gõ ".": câu hỏi gửi model nêu 
   const page = buildChatbotQuery({ conversation: { name: 'Mai Thư' }, message: { text: 'Ok', replyTo: { id: 'm2', name: 'Bạn', text: 'Dạ em xác nhận đơn ạ' } }, settings: {} });
   assert.match(page, /trả lời tin của Giọt Nắng: "Dạ em xác nhận đơn ạ"/);
 });
+
+test('cache prompt Vertex: tạo cachedContents một lần theo băm prompt, lượt sau dùng lại; Vertex từ chối cache thì gửi lại đầy đủ', async () => {
+  const { clearPromptCaches } = await import('../app/chatbot-engine.mjs');
+  clearPromptCaches();
+  const calls = [];
+  let rejectCacheOnce = false;
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url: String(url), body });
+    if (String(url).endsWith('/cachedContents')) return { ok: true, status: 200, json: async () => ({ name: 'projects/p/locations/global/cachedContents/abc', usageMetadata: { totalTokenCount: 2300 } }) };
+    if (body.cachedContent && rejectCacheOnce) { rejectCacheOnce = false; return { ok: false, status: 400, json: async () => ({ error: { message: 'cachedContent not found' } }) }; }
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"template_id":"GENERAL_INFO"}' }] } }], usageMetadata: { promptTokenCount: 2360, cachedContentTokenCount: body.cachedContent ? 2300 : 0 } }) };
+  };
+  const settings = { provider: 'vertex', directAuthType: 'access_token', directApiKey: 'token', directEndpoint: 'https://aiplatform.googleapis.com/v1/projects/p/locations/global/publishers/google/models/gemini-3-flash-preview:generateContent', directModel: 'gemini-3-flash-preview', systemPrompt: 'Chỉ trả JSON', promptCache: 'on', retryCount: 0, messageTemplates: {} };
+  const ask = () => requestDirectModelReply({ settings, conversation: { psid: '1' }, message: { type: 'text', text: 'giá' }, fetchImpl, rawResponse: true });
+  await ask();
+  await ask();
+  const creates = calls.filter(call => call.url.endsWith('/cachedContents'));
+  const generates = calls.filter(call => call.url.includes(':generateContent'));
+  assert.equal(creates.length, 1, 'tạo cache một lần');
+  assert.equal(generates.length, 2);
+  assert.ok(generates.every(call => call.body.cachedContent === 'projects/p/locations/global/cachedContents/abc' && !call.body.systemInstruction), 'gửi bằng cachedContent, không kèm systemInstruction');
+  rejectCacheOnce = true;
+  await ask();
+  const last = calls.at(-1);
+  assert.ok(!last.body.cachedContent && last.body.systemInstruction, 'bị từ chối: gửi lại với prompt đầy đủ');
+  // Tắt cache: không gọi cachedContents.
+  clearPromptCaches();
+  calls.length = 0;
+  await requestDirectModelReply({ settings: { ...settings, promptCache: 'off' }, conversation: { psid: '1' }, message: { type: 'text', text: 'giá' }, fetchImpl, rawResponse: true });
+  assert.equal(calls.filter(call => call.url.endsWith('/cachedContents')).length, 0);
+});

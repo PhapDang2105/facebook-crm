@@ -226,6 +226,86 @@ test('khách sửa đơn vừa chốt (ORDER_UPDATE): giỏ mới thay giỏ cũ
   assert.deepEqual(log, ['update:e0c3eba0:3', 'text:Dạ em đã sửa lại đơn ạ']);
 });
 
+test('khách nhắc lại đúng giỏ vừa chốt ("lên đơn sớm nhé", "1 xanh 1 nâu thì sao"): không sửa đơn, không báo "đã sửa lại", không gắn thẻ Đổi sản phẩm', async () => {
+  const recentOrder = { id: '7dfae2bd', automatic: true, createdAt: Date.now() - 8 * 60 * 1000, phone: '0941234927', address: 'Cổng sau bệnh viện, qua cầu Ông Trịnh, ấp Minh An, Thị trấn Minh Lương, Huyện Châu Thành, Kiên Giang', products: [{ name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 1, price: 174000 }] };
+  // Mô hình chép lại địa chỉ thiếu chữ "ấp": vẫn là cùng đơn.
+  const same = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Vàng 350g', No_A: '1', Phone_Number: '0941234927', Customer_Address: 'Cổng sau bệnh viện, qua cầu Ông Trịnh, Minh An, Minh Lương, Châu Thành, Kiên Giang' }, templates, { recentOrder, now: Date.now(), messageText: 'dạ chị lên đơn em sớm ạ' });
+  assert.equal(same.templateId, 'ORDER_UNCHANGED');
+  assert.equal(same.order, undefined, 'không gọi sửa đơn');
+  assert.match(same.messages[0], /đã lên rồi/);
+  assert.doesNotMatch(same.messages.join(' '), /sửa lại đơn/);
+  // Đổi số lượng hay đổi SĐT là sửa thật.
+  const more = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Vàng 350g', No_A: '2' }, templates, { recentOrder, now: Date.now(), messageText: 'lấy 2 túi nhé' });
+  assert.equal(more.templateId, 'ORDER_UPDATE');
+  assert.equal(more.order.updateOrderId, '7dfae2bd');
+  const phone = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Vàng 350g', No_A: '1', Phone_Number: '0909123456' }, templates, { recentOrder, now: Date.now(), messageText: 'đổi sđt 0909123456' });
+  assert.equal(phone.templateId, 'ORDER_UPDATE');
+  // Engine: không updateOrder, không nhãn "update".
+  const log = [];
+  let labels = null;
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true, customerOrders: [recentOrder], botLastTemplateId: 'SHIPPING_POLICY' },
+    message: { id: 'm1', mid: 'm1', direction: 'incoming', type: 'text', text: 'dạ chị lên đơn em sớm ạ', createdAt: Date.now() }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 5 }),
+    listMessages: async () => [],
+    saveBotState: async (_id, state) => { if (state.addLabelEvents) labels = state.addLabelEvents; },
+    sendMessage: async (_c, message) => { log.push(`text:${String(message.text).slice(0, 28)}`); return { message: { mid: 'x' } }; },
+    createOrder: async () => { log.push('create'); return { order: { id: 'new' }, created: true }; },
+    updateOrder: async () => { log.push('update'); return { order: recentOrder, updated: true, created: false }; },
+    requestReply: async () => same
+  });
+  assert.equal(log.length, 1, 'một tin, không gọi updateOrder/createOrder');
+  assert.match(log[0], /^text:Dạ đơn của anh\/chị em đã lên/);
+  assert.ok(!(labels || []).includes('update'));
+});
+
+test('"ok" ngay sau tin xác nhận đơn: cảm ơn, không hỏi mô hình (mô hình từng trả lời bằng tư vấn mẹ bầu)', async () => {
+  const sent = [];
+  let asked = false;
+  await processChatbotChanges([{
+    type: 'message',
+    conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true, botLastTemplateId: 'ORDER_CONFIRMATION', botLastReplyAt: Date.now() - 60 * 1000 },
+    message: { id: 'm2', mid: 'm2', direction: 'incoming', type: 'text', text: 'ok ạ', createdAt: Date.now() }
+  }], {
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 5, messageTemplates: templates }),
+    listMessages: async () => [],
+    saveBotState: async () => {},
+    sendMessage: async (_c, message) => { sent.push(String(message.text)); return { message: { mid: 'x' } }; },
+    requestReply: async () => { asked = true; return { templateId: 'HEALTH_CONDITION', messages: ['Dạ granola bên em không thêm đường…'], handoff: false }; }
+  });
+  assert.equal(asked, false);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /cảm ơn/);
+});
+
+test('khách đã đặt đơn hỏi lại thời gian giao (vừa kèm trong tin xác nhận): trả lời lại, không mời "ưng loại nào nhắn em lên đơn"', async () => {
+  const policy = 'Dạ thời gian giao dự kiến: TP.HCM và tỉnh lân cận 1–3 ngày, các tỉnh khác 4–6 ngày ạ. Bên em sẽ gửi mã vận đơn để mình theo dõi nha ạ.';
+  const recentOrder = { id: 'f5202b59', automatic: true, createdAt: Date.now() - 2 * 60 * 1000, phone: '0981234551', address: 'Hà Nội', products: [{ sku: 'GRA-XANH-Z450', quantity: 1 }, { sku: 'GRA-VANG-H350', quantity: 1 }] };
+  const run = async conversationExtra => {
+    const sent = [];
+    await processChatbotChanges([{
+      type: 'message',
+      conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true, botLastTemplateId: 'ORDER_UPDATE', botLastReplyAt: Date.now() - 60 * 1000, ...conversationExtra },
+      message: { id: 'm3', mid: 'm3', direction: 'incoming', type: 'text', text: 'Mình ở hà nội mấy ngày giao đến', createdAt: Date.now() }
+    }], {
+      readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 5, messageTemplates: templates }),
+      listMessages: async () => [{ id: 'p', direction: 'outgoing', type: 'text', text: policy, createdAt: Date.now() - 90 * 1000 }],
+      saveBotState: async () => {},
+      sendMessage: async (_c, message) => { sent.push(String(message.text)); return { message: { mid: 'x' } }; },
+      requestReply: async () => ({ templateId: 'SHIPPING_POLICY', messages: [policy], handoff: false })
+    });
+    return sent;
+  };
+  const withOrder = await run({ customerOrders: [recentOrder] });
+  assert.deepEqual(withOrder, [policy]);
+  // Chưa có đơn: vẫn nhắc ngắn "thông tin em gửi ở trên" như cũ.
+  const noOrder = await run({});
+  assert.equal(noOrder.length, 1);
+  assert.match(noOrder[0], /tin phía trên/);
+});
+
 test('khách hủy đơn vừa đặt (ORDER_CANCEL): hủy đúng đơn đó qua cancelOrder, không tạo đơn, không phiếu; đơn quá 24h → chuyển nhân viên', async () => {
   const recentOrder = { id: 'abc12345', automatic: true, createdAt: Date.now() - 30 * 60 * 1000, phone: '0909123456', address: 'Q1', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }] };
   const rendered = renderChatbotReply({ template_id: 'ORDER_CANCEL' }, templates, { recentOrder, now: Date.now() });

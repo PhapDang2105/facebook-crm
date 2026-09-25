@@ -36,28 +36,40 @@ const requestTimeoutMs = 20000;
 const skuCacheTtlMs = 60 * 60 * 1000;
 const warehouseCacheTtlMs = 24 * 60 * 60 * 1000;
 
-let skuCache = { at: 0, skus: new Set() };
+let skuCache = { at: 0, skus: new Set(), ids: new Map() };
 let warehouseCache = { at: 0, id: '' };
 
 export function posOrderPushEnabled(config = posConfig()) {
   return posConfigured(config) && process.env.POS_PUSH_ORDERS !== '0';
 }
 
-/** Mọi SKU (display_id) đang có trong POS, nhớ một giờ. */
-export async function posVariationSkus(config = posConfig(), fetchImpl = fetch) {
-  if (skuCache.skus.size && Date.now() - skuCache.at < skuCacheTtlMs) return skuCache.skus;
+async function loadVariations(config, fetchImpl) {
+  if (skuCache.skus.size && Date.now() - skuCache.at < skuCacheTtlMs) return skuCache;
   const skus = new Set();
+  const ids = new Map();
   for (let page = 1; page <= 20; page += 1) {
     const data = await posRequest('/products/variations', { page_size: 100, page_number: page }, config, fetchImpl);
     const list = Array.isArray(data?.data) ? data.data : [];
     for (const item of list) {
       const sku = String(item?.display_id || '').trim().toUpperCase();
-      if (sku && item?.is_removed !== true) skus.add(sku);
+      if (!sku || item?.is_removed === true) continue;
+      skus.add(sku);
+      if (item.id) ids.set(sku, { id: String(item.id), productId: item.product_id ? String(item.product_id) : '' });
     }
     if (list.length < 100) break;
   }
-  skuCache = { at: Date.now(), skus };
-  return skus;
+  skuCache = { at: Date.now(), skus, ids };
+  return skuCache;
+}
+
+/** Mọi SKU (display_id) đang có trong POS, nhớ một giờ. */
+export async function posVariationSkus(config = posConfig(), fetchImpl = fetch) {
+  return (await loadVariations(config, fetchImpl)).skus;
+}
+
+/** SKU → mã mẫu mã nội bộ của POS (UUID) và mã sản phẩm, nhớ cùng bộ đệm SKU. */
+export async function posVariationIds(config = posConfig(), fetchImpl = fetch) {
+  return (await loadVariations(config, fetchImpl)).ids;
 }
 
 /** Kho để tạo đơn: POS_WAREHOUSE_ID nếu đặt, không thì kho đầu tiên cho phép tạo đơn và có địa chỉ. */
@@ -265,6 +277,14 @@ export async function updatePosOrder(order, { conversation = {}, config = posCon
   if (missing.length) throw new Error(`POS không có mẫu mã: ${missing.join(', ')}.`);
   const geo = await resolvePosGeo(order, config, fetchImpl).catch(() => ({}));
   const { shop_id, custom_id, status, received_at_shop, warehouse_id, page_id, conversation_id, ...payload } = buildPosOrderPayload(order, { conversation, posSkus, geo });
+  // Tạo đơn thì POS nhận SKU (display_id) làm variation_id, nhưng sửa đơn thì
+  // không: gửi SKU chữ khiến POS trả 400 "Server internal error" và đơn trên POS
+  // giữ nguyên giỏ, phí ship cũ. Sửa đơn gửi mã mẫu mã nội bộ (UUID) của POS.
+  const ids = await posVariationIds(config, fetchImpl);
+  payload.items = payload.items.map(item => {
+    const known = ids.get(String(item.variation_id).toUpperCase());
+    return known ? { ...item, variation_id: known.id, ...(known.productId ? { product_id: known.productId } : {}) } : item;
+  });
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(order.pos.id)}`);
   url.searchParams.set('api_key', config.apiKey);
   const controller = new AbortController();

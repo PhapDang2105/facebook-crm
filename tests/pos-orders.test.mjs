@@ -156,7 +156,9 @@ test('updatePosOrder: PUT lên đúng đơn POS với sản phẩm/địa chỉ/
   assert.match(calls[0].address, /\/shops\/714334721\/orders\/CRM-ab12cd34\?api_key=k$/);
   assert.equal(calls[0].body.custom_id, undefined);
   assert.equal(calls[0].body.shop_id, undefined);
-  assert.deepEqual(calls[0].body.items.map(item => [item.variation_id, item.quantity, item.is_bonus_product]), [['GRA-XANH-Z450', 3, false], ['BGD', 1, true], ['MUONG', 1, true]]);
+  // Sửa đơn gửi mã mẫu mã nội bộ của POS (UUID), không gửi SKU chữ: POS trả 400
+  // "Server internal error" với SKU chữ khi sửa (dù lúc tạo đơn thì nhận).
+  assert.deepEqual(calls[0].body.items.map(item => [item.variation_id, item.quantity, item.is_bonus_product]), [['v-GRA-XANH-Z450', 3, false], ['v-BGD', 1, true], ['v-MUONG', 1, true]]);
   assert.equal(calls[0].body.shipping_address.commune_id, '7050127');
   await assert.rejects(updatePosOrder({ ...order }, { config, fetchImpl }), /chưa có trên POS/);
 });

@@ -491,13 +491,21 @@ async function answerChange(change, settings, results, dependencies) {
         throw error;
       }
     };
+    // Lời đáp ngắn ("ok", "dạ", "cảm ơn") của khách.
+    const shortAck = message.type === 'text' && /^(ok|oke|okie|okay|okela|da|vang|u|uh|um|a|c|e|nhe|nha|shop|cam ?on|thanks?|tks|\.|👍|❤️)+$/i.test(folded.replace(/\s+/g, ''));
+    // "ok" ngay sau tin xác nhận/sửa đơn: cảm ơn luôn, không hỏi mô hình — mô hình
+    // từng đọc lịch sử cũ và trả lời "ok" bằng tư vấn mẹ bầu/tiểu đường.
+    const orderJustClosed = ['ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_UNCHANGED'].includes(conversation.botLastTemplateId);
+    const ackReply = shortAck && orderJustClosed && settings.messageTemplates?.THANK_YOU
+      ? renderChatbotReply({ template_id: 'THANK_YOU' }, settings.messageTemplates, replyContext)
+      : null;
     let reply = asksForHuman
       ? renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, settings.messageTemplates, replyContext)
       : cartReply
         ? cartReply
         : nonText
           ? (seesImage ? await askModel() : imageFallback())
-          : quickQuote || await askModel();
+          : ackReply || quickQuote || await askModel();
     if (seesImage && (reply.templateId === 'IMAGE_RECEIVED' || reply.templateId === 'CSKH_HANDOFF')) reply = imageFallback();
     // Dưới bình luận không bao giờ chuyển người (khách chưa vào hộp thư): trả
     // bảng giá chung và mời nhắn tin. WELCOME/xác nhận đơn/"đã nhận hình" dưới
@@ -543,16 +551,22 @@ async function answerChange(change, settings, results, dependencies) {
       // Chỉ im lặng với lời đáp ngắn ("ok", "dạ") hay khi đã chuyển người; khách
       // hỏi tiếp mà bot sắp lặp lại tin vừa gửi thì nhắc ngắn thông tin đã ở trên
       // và mời chốt — không để khách chờ không ai trả lời.
-      const shortAck = /^(ok|oke|okie|okay|da|vang|u|uh|um|\.|👍|❤️)+$/i.test(folded.replace(/\s+/g, ''));
       // Chỉ nhắc khi thứ sắp lặp là THÔNG TIN (bảng giá, lời chào live, tư vấn);
       // câu hỏi bước đơn (xin SĐT/địa chỉ, hỏi vị) lặp lại thì vẫn im như cũ.
-      const informational = !isOrderStep(reply.templateId) && !['ASK_FLAVOR', 'ASK_PRODUCT', 'THANK_YOU', 'WELCOME', 'CSKH_HANDOFF'].includes(reply.templateId);
-      const canNudge = repeatsLast && informational && !shortAck && settings.messageTemplates?.REPLY_ALREADY_SENT && conversation.botLastTemplateId !== 'REPLY_ALREADY_SENT' && conversation.source !== 'comment';
-      if (!canNudge) {
+      const informational = !isOrderStep(reply.templateId) && !['ASK_FLAVOR', 'ASK_PRODUCT', 'THANK_YOU', 'WELCOME', 'CSKH_HANDOFF', 'ORDER_UNCHANGED'].includes(reply.templateId);
+      // Khách đã đặt đơn (24 giờ, chưa hủy) mà hỏi lại điều vừa kèm trong tin xác
+      // nhận ("Hà Nội mấy ngày tới?"): lời mời "ưng loại nào nhắn em lên đơn" là
+      // sai — trả lời lại đúng thông tin đó, trừ khi chính nó là tin bot vừa gửi.
+      const hasOrder = Boolean(recentOrder?.id) && Date.now() - (Number(recentOrder.createdAt) || 0) < 24 * 60 * 60 * 1000
+        && String(recentOrder.processingStatus || '') !== 'cancelled';
+      const answerAgain = repeatsLast && !repeatsHandoff && informational && !shortAck && hasOrder
+        && conversation.botLastTemplateId !== reply.templateId && conversation.source !== 'comment';
+      const canNudge = repeatsLast && informational && !shortAck && !hasOrder && settings.messageTemplates?.REPLY_ALREADY_SENT && conversation.botLastTemplateId !== 'REPLY_ALREADY_SENT' && conversation.source !== 'comment';
+      if (!canNudge && !answerAgain) {
         results.push({ conversationId: conversation.id, skipped: repeatsLast ? 'lặp tin vừa gửi' : 'đã chuyển người trong 24 giờ' });
         return;
       }
-      reply = { ...renderChatbotReply({ template_id: 'REPLY_ALREADY_SENT' }, settings.messageTemplates, replyContext), pendingOrder: reply.pendingOrder };
+      if (canNudge) reply = { ...renderChatbotReply({ template_id: 'REPLY_ALREADY_SENT' }, settings.messageTemplates, replyContext), pendingOrder: reply.pendingOrder };
     }
     // Trong lúc chờ mô hình khách nhắn thêm: bỏ câu này, tin sau trả lời gộp.
     if (message.type === 'text' && hasNewerCustomerMessage(await listMessages(conversation.id), change.message)) {

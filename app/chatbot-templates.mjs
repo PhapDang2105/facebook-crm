@@ -232,6 +232,30 @@ function dropRecentlyOrdered(items, recentOrder, now) {
   return additions.length && additions.length < items.length ? additions : items;
 }
 
+// Khách nhắn lại đúng giỏ vừa chốt ("lên đơn sớm nhé", gửi ảnh túi, hỏi "1 xanh
+// 1 nâu thì sao"): mô hình vẫn chọn ORDER_UPDATE và bot báo "đã sửa lại đơn",
+// gắn thẻ Đổi sản phẩm dù không có gì đổi. Cùng sản phẩm, cùng số lượng, cùng
+// SĐT và địa chỉ (bỏ qua chữ thừa như "ấp") thì không phải sửa đơn.
+function basketSignature(items) {
+  return (Array.isArray(items) ? items : [])
+    .map(item => `${String(item.sku || item.code || item.name || item.product || '').trim().toUpperCase()}x${Number(item.quantity) || 1}`)
+    .sort()
+    .join('+');
+}
+function sameAddressText(left, right) {
+  const words = value => new Set(normalizeText(value).split(/[^a-z0-9]+/).filter(Boolean));
+  const a = words(left);
+  const b = words(right);
+  if (!a.size || !b.size) return a.size === b.size;
+  const within = (x, y) => [...x].every(word => y.has(word));
+  return within(a, b) || within(b, a);
+}
+function unchangedOrder(recentOrder, orderItems, phone, address) {
+  if (!recentOrder || basketSignature(recentOrder.products) !== basketSignature(orderItems)) return false;
+  const phoneOf = value => toLocalPhone(value) || String(value || '').replace(/\D/g, '');
+  return phoneOf(recentOrder.phone) === phoneOf(phone) && sameAddressText(recentOrder.address, address);
+}
+
 /** Lời gợi ý 2 túi cho giỏ 1 túi: số liệu lấy từ bộ giá, không tự ghi. */
 function upsellTwoBags(price, templates) {
   const line = price.lines?.[0];
@@ -431,6 +455,18 @@ function renderOrder(value, templates, context = {}) {
     free_ship: price.gifts.find(isFreeShippingGift)?.name || '',
     gift: price.gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + ')
   }, { items: orderItems.map(item => ({ product: item.product, quantity: item.quantity })) });
+  if (updating && templates.ORDER_UNCHANGED && unchangedOrder(recentOrder, orderItems, phone, deliveryAddress)) {
+    // Không có gì để sửa: nhắc lại đơn đã lên, không gọi sửa đơn, không gắn thẻ.
+    const unchanged = fill(templates.ORDER_UNCHANGED, {
+      ...commonValues(),
+      phone,
+      address: deliveryAddress,
+      total: formatMoney(total),
+      free_ship: price.gifts.find(isFreeShippingGift)?.name || '',
+      gift: price.gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + ')
+    }, { items: orderItems.map(item => ({ product: item.product, quantity: item.quantity })) });
+    return { templateId: 'ORDER_UNCHANGED', ...splitMessages(unchanged), images: [], handoff: false, pendingOrder: null };
+  }
   if (updating) {
     // Sửa đơn: một tin ngắn nêu giỏ mới, không lặp lại chính sách giao/đổi trả.
     const updated = fill(templates.ORDER_UPDATED || templates.ORDER_CONFIRMATION, {
@@ -651,7 +687,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP']);
 
 /**
  * The template inventory as text for the model, appended to the system

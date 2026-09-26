@@ -51,6 +51,11 @@ for (let n = sorted.length; n >= 1; n -= 1) {
 }
 console.log(best ? `Ngưỡng gợi ý (sai ≤ 3%): ${best.threshold.toFixed(2)} → phủ ${best.coverage}/${results.length}, sai ${best.wrong}` : 'Không có ngưỡng nào đạt sai ≤ 3%.');
 
+const ruleMiss = ruledRows.filter(row => row.ruleTemplate !== row.item.truth);
+if (ruleMiss.length) {
+  console.log('\nLuật ổn định sai (đang chạy thật, cần xem):');
+  for (const row of ruleMiss) console.log(`  "${row.item.text.slice(0, 70)}" → luật ${row.ruleTemplate} · đúng ${row.item.truth}${row.item.lastTemplate ? ` · bot trước ${row.item.lastTemplate}` : ''}`);
+}
 const confident = withIntent.filter(row => row.intent.confidence >= 0.85 && row.intent.templateId !== row.item.truth).slice(0, 15);
 if (confident.length) {
   console.log('\nSai ở mức chắc (p ≥ 0,85):');

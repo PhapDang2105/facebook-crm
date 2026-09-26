@@ -156,3 +156,11 @@ test('vòng 7: "hàng mới không em" → FRESHNESS; freeship khi đang giữ g
   assert.equal(ruleIntent('1túi miễn ship nha ăn thử', { ...ctx, hasBasket: true, lastWasOrderStep: true }), null, 'đổi số túi: không giữ giỏ cũ');
   assert.equal(ruleIntent('Ship mình 2 gói', ctx)?.value?.template_id, 'ASK_FLAVOR');
 });
+
+test('bộ chấm mẫu 26/09: "2 túi 298k miễn ship" là đặt hàng, không hỏi chính sách; "đúng hàng mới nhận" không phải hỏi độ mới', () => {
+  const ctx = { commentBasket };
+  assert.notEqual(ruleIntent('2 túi 298 k miễn sip', ctx)?.value?.template_id, 'FREESHIP_POLICY');
+  assert.equal(ruleIntent('2 túi có miễn ship không', ctx)?.value?.template_id, 'FREESHIP_POLICY');
+  assert.notEqual(ruleIntent('Đúng hàng mới nhận nha shop', ctx)?.value?.template_id, 'FRESHNESS');
+  assert.equal(ruleIntent('Hàng mới không em', ctx)?.value?.template_id, 'FRESHNESS');
+});

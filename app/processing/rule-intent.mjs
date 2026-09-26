@@ -52,12 +52,14 @@ const INFO_RULES = [
   ['CRUNCHY', /((hat|vien) (gion|tron)\b.*\b(la|lam tu|lam bang) (hat |gi|j)|hat tron nho la|co (chien|ngay)|(chien|dau an) (khong|ko|k)\b)/, 'CRUNCHY_CEREAL_INFO'],
   ['INGREDIENTS', /(thanh phan|gom (nhung |cac )?(gi|hat|loai)|(co|la) (nhung |cac )?(loai )?hat (gi|j|nao)|hat (gi|j)\b|di ung|(co|khong|ko) .*dau nanh|gluten)/, 'INGREDIENTS_ALLERGY', s => PRICE.test(s)],
   // "Hàng mới không em", "date mới không": hỏi độ mới, không phải trọng lượng/hạn dùng.
-  ['FRESH', /\b(hang moi|date moi|han (dai|moi|xa)|moi san xuat|con han)\b|\bmoi (khong|ko|k|o|hong)\b/, 'FRESHNESS'],
+  // "Đúng hàng mới nhận" là điều kiện nhận hàng (đồng kiểm), không hỏi độ mới.
+  ['FRESH', /\b(hang moi|date moi|han (dai|moi|xa)|moi san xuat|con han)\b|\bmoi (khong|ko|k|o|hong)\b/, 'FRESHNESS', s => /\bdung hang\b/.test(s)],
   ['WEIGHT_EXPIRY', /((bao nhieu|bn|may|nhieu) ?(gam|gram|gr|g)\b|han (su dung|dung|sd)|hsd|an (duoc|dc) (bao )?lau|an (duoc|dc) may bua|dung (duoc|dc) may bua|trong luong)/, 'WEIGHT_EXPIRY', s => /\bgia\b|date moi|hang moi/.test(s)],
   ['COMPARE', /(khac nhau|khac (gi|sao|ntn|nhu nao|the nao)|nao ngon|ngon hon|nen (chon|mua|dung|lay) (loai|tui|vi)? ?nao|phan biet|giai thich|nguyen ban la (sao|gi)|loai nao nhieu hat)/, 'BAG_COMPARISON', s => PRICE.test(s) || /\bbi\b|can|beo|kieng|\bbe\b/.test(s)],
   // Đang giữ giỏ: vẫn khớp, ruleIntent giữ bước đơn (dòng giỏ có tổng + miễn ship) và trả lời kèm.
   // Đang giữ giỏ mà khách đổi số túi / xin "1 túi ăn thử miễn ship": không giữ giỏ cũ, để mô hình đọc.
-  ['FREESHIP', /(mien|free) ?(phi )?(ship|sip|van chuyen)|freeship/, 'FREESHIP_POLICY', (s, ctx) => PRICE.test(s) || (ctx.hasBasket && /\b(\d{1,2} ?(tui|goi|bich)|mot tui|an thu|dung thu|thu)\b/.test(s))],
+  // "2 túi 298k miễn ship": khách nhắc lại giá vừa báo để đặt, không hỏi chính sách → để mô hình lên đơn.
+  ['FREESHIP', /(mien|free) ?(phi )?(ship|sip|van chuyen)|freeship/, 'FREESHIP_POLICY', (s, ctx) => PRICE.test(s) || (ctx.hasBasket && /\b(\d{1,2} ?(tui|goi|bich)|mot tui|an thu|dung thu|thu)\b/.test(s)) || (/\b\d{1,2} ?(tui|goi|bich)\b/.test(s) && /\b\d{2,3} ?(k|nghin|ngan)\b|\d{3}\.000/.test(s))],
   ['DISCOUNT', /(giam gia|khuyen mai|\bkm\b|uu dai|chuong trinh|\bct\b|\bsale\b)/, 'DISCOUNT_POLICY', (s, ctx) => ctx.livestream || /(voucher|qua|tang|gau|live)/.test(s)],
   ['VOUCHER', /(voucher|vocher|vochur|ma giam)/, 'LIVESTREAM_VOUCHER', s => PRICE.test(s)],
   ['GIFT', /((qua|tang) (gi|j)\b|co (duoc )?(qua|tang)|duoc tang|qua tang)/, 'GIFT_POLICY', s => PRICE.test(s) || /\b(xanh|vang|nau|cacao)\b|gau|dau tay|doi qua|thay qua|khac/.test(s)],

@@ -307,7 +307,8 @@ export async function ensurePosGiftLines(posOrderId, payload, config = posConfig
   const have = new Set((existing?.items || []).map(item => String(item.variation_id || item.variation_info?.id || '')));
   const missing = gifts.filter(item => !have.has(String(item.variation_id)));
   if (!missing.length) return 0;
-  const { shop_id, custom_id, status, received_at_shop, warehouse_id, page_id, conversation_id, ...update } = payload;
+  // Chỉ gửi giỏ + giá: gửi cả đơn (địa chỉ, ghi chú) có thể đè phần nhân viên vừa sửa trên POS và POS gửi lại phiếu.
+  const update = { items: payload.items, discount: payload.discount, shipping_fee: payload.shipping_fee, is_free_shipping: payload.is_free_shipping };
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(posOrderId)}`);
   url.searchParams.set('api_key', config.apiKey);
   const controller = new AbortController();

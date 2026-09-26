@@ -431,6 +431,25 @@ export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 
   });
 }
 
+/**
+ * Lúc khởi động: tin khách đã nằm trong kho (đồng bộ ghi lúc webhook im) mà chưa ai trả lời trong
+ * `windowMs` → đưa bot một lần. Chỉ tin cuối của mỗi hội thoại, bot còn bật.
+ */
+export function backlogBotChanges(store, { now = Date.now(), windowMs = 60 * 60 * 1000 } = {}) {
+  const changes = [];
+  for (const conversation of store?.conversations || []) {
+    if (conversation.botEnabled === false) continue;
+    const messages = store.messages?.[conversation.id] || [];
+    const last = messages[messages.length - 1];
+    if (!last || last.direction !== 'incoming' || !['text', 'image'].includes(last.type)) continue;
+    const at = Number(last.createdAt) || 0;
+    if (now - at > windowMs || at > now + 5 * 60 * 1000) continue;
+    if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) continue;
+    changes.push({ type: 'message', conversation, message: last });
+  }
+  return changes;
+}
+
 async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLimit = 30, processChatbotChanges = null, chatbotDependencies = null, botWindowMs = 30 * 60 * 1000 } = {}, config = defaultConfig, fetchImpl = fetch) {
   if (!isPancakeConfigured(config)) return { conversations: 0, messages: 0, skipped: 'chưa cấu hình' };
   const pages = pageId
@@ -501,12 +520,22 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.lo
   if (!isPancakeConfigured(config) || pancakeSyncTimer) return null;
   // Lượt trước chưa xong (mạng chậm, bị chặn 429) thì lượt sau bỏ qua, không chạy chồng.
   let running = false;
+  let first = true;
   const run = async () => {
     if (running) return;
     running = true;
     try {
       const summary = await syncPancakeConversations({ limit: 60, messagePages: 1, processChatbotChanges, chatbotDependencies }, config);
       if (summary.messages) log(`Đồng bộ Pancake: ${summary.conversations} hội thoại, ghi ${summary.messages} tin mới${summary.bot ? `, đưa bot ${summary.bot} tin webhook bỏ sót` : ''}`);
+      // Lượt đầu sau khởi động: tin khách còn treo trong 60 phút (webhook im lúc dịch vụ dừng) đưa bot.
+      if (first && processChatbotChanges) {
+        first = false;
+        const backlog = backlogBotChanges(await readMessagingStore());
+        if (backlog.length) {
+          log(`Đồng bộ Pancake: đưa bot ${backlog.length} tin khách còn treo sau khởi động`);
+          await processChatbotChanges(backlog, chatbotDependencies);
+        }
+      }
       if (summary.failures?.length) log(`Đồng bộ Pancake: ${summary.failures.length} hội thoại lỗi, ví dụ ${summary.failures[0]}`);
     } catch (error) {
       log(`Đồng bộ Pancake lỗi: ${error.message}`);

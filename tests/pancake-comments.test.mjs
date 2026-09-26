@@ -7,7 +7,7 @@ import path from 'node:path';
 // Hộp thư thử riêng: storePancakeEvents ghi vào messaging-store.
 process.env.META_CONVERSATIONS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-comments-')), 'meta-conversations.json');
 const {
-  enrichPancakeAdContext, findPancakePost, handlePancakeWebhook, missedBotChanges, normalizePancakeWebhook, sendConversationMessageViaPancake, syncPancakeConversations
+  backlogBotChanges, enrichPancakeAdContext, findPancakePost, handlePancakeWebhook, missedBotChanges, normalizePancakeWebhook, sendConversationMessageViaPancake, syncPancakeConversations
 } = await import('../app/pancake.mjs');
 const { getConversation, listMessages } = await import('../app/messaging-store.mjs');
 
@@ -207,4 +207,19 @@ test('đồng bộ định kỳ đưa bot tin khách mới chưa ai trả lời 
   const store = { messages: { 'c1': [] } };
   assert.deepEqual(missedBotChanges([{ type: 'message', conversation: { id: 'c1', botEnabled: false }, message: { id: 'x', direction: 'incoming', createdAt: Date.now() } }], store), []);
   assert.equal(missedBotChanges([{ type: 'message', conversation: { id: 'c1' }, message: { id: 'x', direction: 'incoming', createdAt: Date.now() } }], store).length, 1);
+});
+
+test('sau khởi động: tin khách còn treo trong 60 phút (chưa ai trả lời, bot bật) đưa bot; tin cũ / đã trả lời / bot tắt thì không', () => {
+  const now = Date.now();
+  const store = {
+    conversations: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd', botEnabled: false }, { id: 'e' }],
+    messages: {
+      a: [{ id: 'a1', direction: 'incoming', type: 'text', text: 'Giá sao em', createdAt: now - 20 * 60000 }],
+      b: [{ id: 'b1', direction: 'incoming', type: 'text', text: 'Giá sao em', createdAt: now - 3 * 3600000 }],
+      c: [{ id: 'c1', direction: 'incoming', type: 'text', text: 'Giá sao em', createdAt: now - 20 * 60000 }, { id: 'c2', direction: 'outgoing', type: 'text', text: 'Dạ…', createdAt: now - 19 * 60000 }],
+      d: [{ id: 'd1', direction: 'incoming', type: 'text', text: 'Giá sao em', createdAt: now - 20 * 60000 }],
+      e: [{ id: 'e1', direction: 'incoming', type: 'order-receipt', text: 'x', createdAt: now - 20 * 60000 }]
+    }
+  };
+  assert.deepEqual(backlogBotChanges(store, { now }).map(change => change.conversation.id), ['a']);
 });

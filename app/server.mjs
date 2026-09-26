@@ -29,7 +29,7 @@ import { applyCustomerOrderEdits } from './order-edits.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
-import { fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
+import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { isValidQrCode, listQrScans, recordQrOpen, recordQrScan } from './qr-scans.mjs';
 import { classifyUserAgent, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
@@ -1620,6 +1620,7 @@ const server = http.createServer(async (request, response) => {
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         response.end('{"received":true}');
         if (!payload || !payload.event_type || payload.event_type === 'verify') return undefined;
+        if (process.env.PANCAKE_DEBUG_KEYS) console.log(describePancakePayload(payload));
         try {
           const summary = await handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies });
           if (summary.stored) console.log(`Webhook Pancake: ghi ${summary.stored} tin, đưa bot ${summary.bot}`);

@@ -68,6 +68,31 @@ export function pancakeTime(value, fallback = Date.now()) {
  * của đúng Page đã cấu hình; bình luận và các loại khác bỏ qua (chưa hỗ trợ).
  * Trả về [] khi không có gì để ghi.
  */
+/**
+ * Chẩn đoán (bật bằng PANCAKE_DEBUG_KEYS=1): mô tả CẤU TRÚC gói tin Pancake gửi
+ * tới — đường dẫn khoá tới độ sâu 4, và giá trị (cắt ngắn) của khoá nào có tên
+ * gợi nguồn vào (ref, referral, source, utm, link…). Không ghi nội dung tin
+ * nhắn hay tên khách. Dùng để trả lời câu "Pancake có chuyển ref của m.me không".
+ */
+export function describePancakePayload(payload, { maxDepth = 4 } = {}) {
+  const paths = [];
+  const hints = [];
+  const interesting = /ref|referral|source|origin|utm|link|entry|start|postback|payload/i;
+  const walk = (value, path, depth) => {
+    if (depth > maxDepth || value === null || typeof value !== 'object') return;
+    for (const [key, child] of Object.entries(value)) {
+      const here = path ? `${path}.${key}` : key;
+      paths.push(here);
+      if (interesting.test(key) && (child === null || typeof child !== 'object')) hints.push(`${here}=${String(child).slice(0, 80)}`);
+      if (Array.isArray(child)) {
+        if (child.length && typeof child[0] === 'object') walk(child[0], `${here}[0]`, depth + 1);
+      } else walk(child, here, depth + 1);
+    }
+  };
+  walk(payload, '', 0);
+  return `Webhook Pancake (chẩn đoán): event=${payload?.event_type || '-'} khoá=[${paths.join(', ')}]${hints.length ? ` gợi nguồn: ${hints.join(' | ')}` : ' (không có khoá nào tên ref/referral/source)'}`;
+}
+
 export function normalizePancakeWebhook(payload, config = defaultConfig, now = Date.now()) {
   if (!payload || payload.event_type !== 'messaging') return [];
   const pageId = String(payload.page_id || '');

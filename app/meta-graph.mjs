@@ -137,6 +137,22 @@ export async function fetchPostSummary(postId, pageAccessToken) {
   }
 }
 
+/**
+ * Messenger Profile của Page: nút "Bắt đầu" (get_started) và lời chào trên màn
+ * hình đầu. Không có nút Bắt đầu thì khách MỚI mở m.me?ref chỉ thấy ô soạn tin
+ * và Meta không gửi ref về (ref của khách mới chỉ đi kèm postback Bắt đầu).
+ * Graph nhận từng trường dạng chuỗi JSON trong form.
+ */
+export function setMessengerProfile({ pageId, pageAccessToken, profile }) {
+  const body = { access_token: pageAccessToken };
+  for (const [key, value] of Object.entries(profile || {})) body[key] = JSON.stringify(value);
+  return metaRequest(`${pageId}/messenger_profile`, { method: 'POST', body });
+}
+
+export function fetchMessengerProfile({ pageId, pageAccessToken, fields = 'get_started,greeting,ice_breakers,persistent_menu' }) {
+  return metaRequest(`${pageId}/messenger_profile`, { query: { fields, access_token: pageAccessToken } });
+}
+
 export function sendPageMessage({ pageId, psid, text, pageAccessToken, messagingType = 'RESPONSE' }) {
   return metaRequest(`${pageId}/messages`, {
     method: 'POST',

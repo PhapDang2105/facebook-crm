@@ -9,7 +9,7 @@ import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs'
 import { findProductBySku, getCatalogProducts, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamConversation } from './conversation-orders.mjs';
 import { ruleIntent } from './processing/rule-intent.mjs';
-import { activeTrial, filterTrialReply, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
+import { activeTrial, filterTrialReply, promoBowlActive, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
 import { intentSafeTemplates, predictIntent } from './processing/intent-model.mjs';
 import { formatExamples, loadExampleBank, nearestExamples } from './processing/example-bank.mjs';
 
@@ -675,7 +675,7 @@ async function answerChange(change, settings, results, dependencies) {
       const address = String(confirmation.text).match(/Địa chỉ nhận hàng:\s*([^\n]+)/u)?.[1]?.trim() || '';
       return phone && address ? { phone, address, at: Number(confirmation.createdAt) || 0 } : null;
     })();
-    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, previousDelivery, trial: trialState, trialBags: trialState ? trialBagOptions() : '', now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, previousDelivery, trial: trialState, trialBags: trialState ? trialBagOptions() : '', promoBowl: promoBowlActive(conversation), now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
     // Tin mảnh (chỉ SĐT, "đó a", tên người…) khi đang lấy thông tin đơn, hoặc bot
     // vừa hỏi ở bước lên đơn, hoặc tin chỉ toàn số: đợi vài giây cho tin kế tiếp
     // của khách tới để gộp, tránh xin lại thứ khách vừa gửi. Bình luận liên tiếp
@@ -872,6 +872,8 @@ async function answerChange(change, settings, results, dependencies) {
       if (trialOutcome.exit) trialState = null;
       else if (trialPatch) trialState = { ...trialState, ...trialPatch };
       replyContext.trial = trialState;
+      // Khách chọn combo 2 túi ngay trong lượt này: quà bát gáo dừa áp từ lượt này.
+      if (trialOutcome.exit === 'combo2') replyContext.promoBowl = true;
       console.log(`Dùng thử: ${trialOutcome.exit ? `thoát (${trialOutcome.exit})` : trialOutcome.delegate ? 'nhờ mô hình' : trialOutcome.value.template_id} (${conversation.id})`);
     }
     const trialActive = Boolean(trialState && trialOutcome && !trialOutcome.exit);

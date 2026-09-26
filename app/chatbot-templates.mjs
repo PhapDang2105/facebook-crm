@@ -1,5 +1,6 @@
 import { describeGiftTable, priceBasket, quoteTiers, shippingFeeForKey } from './processing/pricing.mjs';
 import { comboKey, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity, normalizeText } from './processing/catalog.mjs';
+import { PROMO_BOWL_GIFT } from './processing/trial-flow.mjs';
 import { metaConfig } from './config.mjs';
 import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
@@ -285,6 +286,13 @@ export function stripReceiverName(address) {
 }
 
 /** Bộ giá đã bỏ phí ship theo ưu đãi dùng thử (quà "Miễn phí vận chuyển" đứng đầu danh sách quà). */
+/** Ưu đãi bám đuổi combo 2: thêm bát gáo dừa vào quà của giỏ 2 túi lớn (miễn ship đã có theo bảng quà). */
+function withPromoBowl(price) {
+  if (price.gifts.some(gift => /g[aá]o d[uừ]a/i.test(String(gift.name || '')))) return price;
+  const gifts = [...price.gifts, { ...PROMO_BOWL_GIFT }];
+  return { ...price, gifts, gift: gifts.map(gift => gift.name).join(' + ') };
+}
+
 function withPromoFreeShipping(price) {
   const gifts = [{ name: 'Miễn phí vận chuyển – ưu đãi dùng thử', sku: '', minQuantity: 1, active: true }, ...price.gifts.filter(gift => !isFreeShippingGift(gift))];
   return { ...price, total: price.total - price.shippingFee, shippingFee: 0, gifts, gift: gifts.map(gift => gift.name).join(' + ') };
@@ -385,7 +393,9 @@ function renderOrder(value, templates, context = {}) {
   // Ưu đãi chỉ cho 1 túi lớn Xanh / Vàng / Nâu (không cho combo gói nhỏ hay sản phẩm khác).
   const trialBag = items.length === 1 && /^GRA-(XANH|VANG|NAU)-/i.test(String(items[0]?.code || items[0]?.sku || priced?.lines?.[0]?.sku || ''));
   const trialPriced = Boolean(priced?.priceable && trial && trialBag && priced.totalQuantity === 1 && priced.shippingFee > 0);
-  const price = trialPriced ? withPromoFreeShipping(priced) : priced?.priceable ? priced : null;
+  // Combo 2 túi lớn trong cửa sổ ưu đãi bám đuổi (context.promoBowl): tặng bát gáo dừa.
+  const promoBowl = Boolean(context.promoBowl && priced?.priceable && priced.totalQuantity === 2 && (priced.lines || []).length && priced.lines.every(line => /^GRA-(XANH|VANG|NAU)-/i.test(String(line.sku || ''))));
+  const price = trialPriced ? withPromoFreeShipping(priced) : promoBowl ? withPromoBowl(priced) : priced?.priceable ? priced : null;
 
   // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):
   // đọc thẳng từ tin khách vừa nhắn thay vì hỏi lại thứ khách đã đưa.
@@ -586,7 +596,7 @@ function renderOrder(value, templates, context = {}) {
       images: [],
       handoff: false,
       pendingOrder: null,
-      order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, updateOrderId: String(recentOrder.id), ...(trialPriced ? { trial: true } : {}) }
+      order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, updateOrderId: String(recentOrder.id), ...(trialPriced ? { trial: true } : {}), ...(promoBowl ? { promoGift: PROMO_BOWL_GIFT.name } : {}) }
     };
   }
   return {
@@ -598,7 +608,7 @@ function renderOrder(value, templates, context = {}) {
     handoff: false,
     // Cleared: the basket has become a real order.
     pendingOrder: null,
-    order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, ...(trialPriced ? { trial: true } : {}) }
+    order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, ...(trialPriced ? { trial: true } : {}), ...(promoBowl ? { promoGift: PROMO_BOWL_GIFT.name } : {}) }
   };
 }
 

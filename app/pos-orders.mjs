@@ -12,7 +12,7 @@
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
-import { comboKey, findProductBySku, giftsForKey, matchProduct } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, getGifts, giftsForKey, matchProduct } from './processing/catalog.mjs';
 
 /**
  * SKU gửi POS cho một dòng đơn. Đơn cũ còn ghi SKU đã đổi trong danh mục
@@ -203,6 +203,14 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
       is_wholesale: false,
       variation_info: { name: String(gift.name || ''), retail_price: 0, weight: money(gift.weight) }
     });
+  }
+  // Quà ưu đãi bám đuổi (bát gáo dừa cho combo 2): không nằm trong bảng quà theo giỏ, đẩy thêm một dòng quà.
+  if (order.promoGift) {
+    const sku = 'BGD';
+    const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === sku);
+    if (!items.some(item => item.variation_id === sku) && (!posSkus || posSkus.has(sku))) {
+      items.push({ variation_id: sku, quantity: 1, discount_each_product: 0, is_bonus_product: true, is_discount_percent: false, is_wholesale: false, variation_info: { name: String(order.promoGift), retail_price: 0, weight: money(bowl?.weight || 10) } });
+    }
   }
   const address = String(order.address || '').trim();
   const noteParts = [`Đơn CRM #${order.id}`, order.employee ? `tạo bởi ${order.employee}` : '', order.gift ? `Quà: ${order.gift}` : '', order.note ? `Khách ghi: ${order.note}` : ''].filter(Boolean);

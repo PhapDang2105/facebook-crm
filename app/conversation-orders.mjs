@@ -160,6 +160,11 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     order.trialFreeShip = true;
     order.note = 'Tạo tự động từ xác nhận của chatbot · Ưu đãi dùng thử bám đuổi (1 túi miễn phí vận chuyển).';
   }
+  // Combo 2 túi trong cửa sổ bám đuổi: quà bát gáo dừa ghi rõ để kho/POS đóng kèm.
+  if (input.promoGift) {
+    order.promoGift = text(input.promoGift, 100);
+    order.note = `${order.note ? `${order.note} · ` : 'Tạo tự động từ xác nhận của chatbot · '}Ưu đãi bám đuổi combo 2 túi: tặng ${order.promoGift}.`;
+  }
   // What the customer actually typed, next to the standardised address they confirmed.
   order.rawAddress = text(input.rawAddress, 500);
   order.chatbotSourceMessageId = text(sourceMessageId, 200);

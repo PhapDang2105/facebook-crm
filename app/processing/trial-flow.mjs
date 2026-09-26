@@ -19,6 +19,9 @@ import { core, infoRules } from './rule-intent.mjs';
 
 const HOUR = 60 * 60 * 1000;
 export const TRIAL_SCENARIO_NOTE = 'Ưu đãi dùng thử bám đuổi (1 túi miễn phí vận chuyển)';
+// Chính sách bám đuổi 36 giờ (chủ shop 26/09): ngoài 1 túi miễn ship, khách lấy combo 2 túi lớn được tặng
+// thêm 1 bát gáo dừa (bảng quà chung chỉ tặng bộ bát + muỗng từ 3 túi). Quà này chỉ áp trong cửa sổ ưu đãi.
+export const PROMO_BOWL_GIFT = { name: 'Bát gáo dừa – ưu đãi bám đuổi', sku: 'BGD', minQuantity: 2, active: true, weight: 10 };
 
 // Từ chối: "không", "ko cần", "thôi để sau"… — "thôi" chỉ là từ chối khi câu không nêu túi/số lượng ("lấy 1 túi thôi" là chọn).
 const DECLINE = /^(khong|ko|k|kh|hong|hok|khong can|ko can|khong lay|ko lay|khong mua|ko mua|khong dau|ko dau|khong nhe|ko nhe)$|\b(khong|ko|k|kh|chua) (can|lay|mua|thich|quan tam|co nhu cau)\b|\b(de sau|khi khac|lan sau|het tien|dung nhan|dung gui|khoi)\b/;
@@ -60,6 +63,22 @@ export function activeTrial(conversation = {}, { now = Date.now() } = {}) {
   const orders = Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [];
   if (orders.some(order => Number(order.createdAt) > Number(promo.at) && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy')) return null;
   return { ...promo, stage };
+}
+
+/**
+ * Ưu đãi bám đuổi còn trong cửa sổ (kể cả khi khách đã chuyển sang combo 2 → stage 'converted' + combo2):
+ * đơn 2 túi lớn được tặng bát gáo dừa. Hết cửa sổ, đã đặt đơn sau ưu đãi, hay đã từ chối thì không.
+ */
+export function promoBowlActive(conversation = {}, { now = Date.now() } = {}) {
+  const promo = conversation.promo;
+  if (conversation.source === 'comment' || !promo?.freeShipping) return false;
+  const stage = promo.stage || 'offered';
+  if (!['offered', 'chosen', 'converted'].includes(stage)) return false;
+  if (stage === 'converted' && !promo.combo2) return false;
+  const until = Math.max(Number(promo.until) || 0, Number(promo.lockedUntil) || 0);
+  if (now > until) return false;
+  const orders = Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [];
+  return !orders.some(order => Number(order.createdAt) > Number(promo.at) && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy');
 }
 
 /** Túi khách nêu trong tin: Map màu → số lượng ("xanh", "2 túi vàng", "vàng x2"). */
@@ -117,7 +136,10 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   if (asks && picks.size >= 2 && !phone) return { value: { template_id: 'BAG_COMPARISON', also: 'TRIAL_NEXT_STEP', values: { bags } } };
   if (FREESHIP.test(s)) return { value: { template_id: 'TRIAL_FREESHIP_INFO', values: { bags } } };
   if (DISCOUNT.test(s) || PRICE.test(s)) return { value: { template_id: 'TRIAL_PRICE', values: { bags } } };
-  // Xin ≥ 2 túi / 2 màu (không phải câu hỏi): đơn thường giá combo.
+  // Đúng 2 túi lớn ("1 xanh 1 vàng", "2 túi xanh", "combo 2"): rời luồng 1 túi nhưng giữ ưu đãi combo 2 → tặng
+  // bát gáo dừa (renderOrder đọc context.promoBowl). Từ 3 túi: đơn thường (bảng quà chung đã có bộ bát + muỗng).
+  const total = quantity || looseQuantity;
+  if (!asks && (total === 2 || (picks.size === 2 && quantity === 2))) return { exit: 'combo2', patch: { stage: 'converted', combo2: true, endedAt: now, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) } };
   if (picks.size >= 2 || quantity >= 2 || looseQuantity >= 2) return { exit: 'converted', patch: { stage: 'converted', endedAt: now } };
   if (picks.size === 1 && !asks) {
     const product = bagProduct([...picks.keys()][0]);
@@ -160,5 +182,5 @@ export function filterTrialReply(reply = {}, trial = {}, isProductQuoteId = () =
 
 /** Gợi ý cho mô hình khi phải nhờ mô hình (tin có địa chỉ, ảnh…). */
 export function trialModelHint(trial = {}) {
-  return `KHÁCH ĐANG GIỮ ƯU ĐÃI 1 TÚI DÙNG THỬ MIỄN PHÍ VẬN CHUYỂN${trial.bag ? ` (đã chọn ${trial.bag})` : ''}: chỉ 1 túi, giá túi không cộng ship; không báo giá combo, không mời lấy 2 túi.`;
+  return `KHÁCH ĐANG GIỮ ƯU ĐÃI BÁM ĐUỔI${trial.bag ? ` (đã chọn ${trial.bag})` : ''}: 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN (giá túi, không cộng ship), hoặc combo 2 túi lớn được tặng thêm bát gáo dừa. Không báo giá combo 3, không mời thêm sản phẩm khác.`;
 }

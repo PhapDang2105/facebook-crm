@@ -12,17 +12,22 @@ const load = file => import(pathToFileURL(path.join(root, file)).href);
 const args = process.argv.slice(2);
 const goldenPath = args.find(arg => !arg.startsWith('--')) || path.join(root, 'data', 'processed', 'golden-set.json');
 const limit = args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1]) : Infinity;
+// --fewshot: chèn 3 ví dụ đã chấm gần nhất (bỏ chính tin đang đo = leave-one-out).
+const fewShot = args.includes('--fewshot');
 const engine = await load('app/chatbot-engine.mjs');
 const { normalizeChatbotSettings } = await load('app/chatbot-settings.mjs');
 const { ruleIntent } = await load('app/processing/rule-intent.mjs');
 const { renderChatbotReply } = await load('app/chatbot-templates.mjs');
+const { buildExampleBank, nearestExamples } = await load('app/processing/example-bank.mjs');
 (await load('app/processing/catalog.mjs')).reloadCatalog();
 const stored = JSON.parse(readFileSync(path.join(root, 'data', 'processed', 'chatbot-settings.json'), 'utf8'));
 const settings = normalizeChatbotSettings({ ...stored, enabled: true });
 
-const items = (JSON.parse(readFileSync(goldenPath, 'utf8')).items || []).filter(item => item.source !== 'comment' && item.label && item.label !== 'SKIP').slice(0, limit);
+const allItems = JSON.parse(readFileSync(goldenPath, 'utf8')).items || [];
+const items = allItems.filter(item => item.source !== 'comment' && item.label && item.label !== 'SKIP').slice(0, limit);
+const bank = fewShot ? buildExampleBank(allItems.filter(item => item.label && item.label !== 'SKIP')) : null;
 if (!items.length) { console.log('Chưa có tin hộp thư nào được chấm.'); process.exit(0); }
-console.log(`${items.length} tin hộp thư đã chấm · model ${settings.directModel} · thinking ${settings.thinkingLevel || 'mặc định'}`);
+console.log(`${items.length} tin hộp thư đã chấm · model ${settings.directModel} · thinking ${settings.thinkingLevel || 'mặc định'} · few-shot ${fewShot ? 'BẬT (leave-one-out)' : 'tắt'}`);
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const out = [];
@@ -39,7 +44,8 @@ for (const [index, item] of items.entries()) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const started = Date.now();
     try {
-      const reply = await engine.requestDirectModelReply({ settings, conversation, message: { type: 'text', text: item.text, createdAt: at }, recentMessages, rawResponse: true, context: {} });
+      const examples = bank ? nearestExamples(bank, { text: item.text, lastTemplate: item.lastTemplate || '', excludeId: item.id }) : [];
+      const reply = await engine.requestDirectModelReply({ settings, conversation, message: { type: 'text', text: item.text, createdAt: at }, recentMessages, rawResponse: true, context: {}, examples });
       raw = String(reply.parsed?.template_id || '');
       // So mẫu SAU khi dựng câu (renderChatbotReply): "2 túi" mà chưa rõ vị thì ORDER_ADDRESS thành ASK_FLAVOR…
       try { llm = renderChatbotReply(reply.parsed || {}, settings.messageTemplates, { messageText: item.text }).templateId || raw; } catch { llm = raw; }
@@ -56,7 +62,7 @@ for (const [index, item] of items.entries()) {
   if ((index + 1) % 20 === 0) { console.log(`${index + 1}/${items.length}`); writeFileSync(path.join(path.dirname(goldenPath), 'replay-llm-out.json'), JSON.stringify(out)); }
   await wait(150);
 }
-writeFileSync(path.join(path.dirname(goldenPath), 'replay-llm-out.json'), JSON.stringify(out));
+writeFileSync(path.join(path.dirname(goldenPath), `replay-llm-out${fewShot ? '-fewshot' : ''}.json`), JSON.stringify(out));
 
 const pct = (num, den) => (den ? `${(100 * num / den).toFixed(1)}%` : '–');
 const ok = out.filter(row => !row.llm.startsWith('LỖI'));

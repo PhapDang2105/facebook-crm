@@ -133,6 +133,8 @@ export function normalizeChatbotSettings(value = {}) {
     memoryEnabled: value.memoryEnabled !== false,
     memoryWindow: Math.max(1, Math.min(100, Number(value.memoryWindow) || defaultChatbotSettings.memoryWindow)),
     structuredOutput: value.structuredOutput !== false,
+    // Few-shot động: chèn 3 tin đã chấm gần nhất (bộ chấm mẫu) vào câu hỏi gửi LLM. Mặc định tắt (A/B trước).
+    fewShot: value.fewShot === 'on' ? 'on' : 'off',
     // Luật nhận ý bằng code trước mô hình: 'on' | 'shadow' (chỉ ghi log so sánh) | 'off'.
     ruleIntent: ['on', 'shadow', 'off'].includes(value.ruleIntent) ? value.ruleIntent : 'on',
     // Luật thử nghiệm (TRIAL_ASK, ORDER_ASK, TERSE_HOW, ADDRESS_COMPLETE): 'shadow' chỉ ghi log so với mô hình.

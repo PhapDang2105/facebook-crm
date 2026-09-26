@@ -11,6 +11,7 @@ import { isLivestreamConversation } from './conversation-orders.mjs';
 import { ruleIntent } from './processing/rule-intent.mjs';
 import { activeTrial, filterTrialReply, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
 import { intentSafeTemplates, predictIntent } from './processing/intent-model.mjs';
+import { formatExamples, loadExampleBank, nearestExamples } from './processing/example-bank.mjs';
 
 // Giỏ Facebook Shop (attachment cart_order) mang SKU: một SKU sản phẩm → bảng
 // giá sản phẩm đó; SKU combo của Shop ("CB2-XANH-Z450" = 2 Túi Xanh,
@@ -113,7 +114,7 @@ export function parseModelAnswer(answer) {
   } catch { return { template_id: 'GENERAL_INFO' }; }
 }
 
-export function buildChatbotQuery({ conversation, message, recentMessages = [], settings, includeHistory = true }) {
+export function buildChatbotQuery({ conversation, message, recentMessages = [], settings, includeHistory = true, examples = [] }) {
   const historyLimit = settings?.memoryEnabled === false ? 0 : Math.max(1, Number(settings?.memoryWindow) || 12);
   const history = historyLimit
     ? recentMessages.slice(-historyLimit).map(item => `${item.direction === 'incoming' ? 'Khách' : 'Giọt Nắng'}: ${item.text || `[${item.type}]`}`).join('\n')
@@ -156,6 +157,8 @@ export function buildChatbotQuery({ conversation, message, recentMessages = [], 
       : '',
     remembered ? `DỮ LIỆU ĐÃ LƯU:\n${remembered}` : '',
     includeHistory && history ? `LỊCH SỬ GẦN NHẤT:\n${history}` : '',
+    // Few-shot động (settings.fewShot = 'on'): ví dụ đã duyệt gần với tin này nhất.
+    formatExamples(examples),
     `TIN NHẮN CẦN TRẢ LỜI: ${message.text || `[Khách gửi ${message.type || 'tệp'}]`}`,
     // Khách bấm "Trả lời" một tin cụ thể rồi gõ "." hay "Ok": nêu tin gốc để model biết đang nói về gì.
     message.replyTo?.text ? `(Khách đang trả lời tin ${message.replyTo.name === 'Bạn' ? 'của Giọt Nắng' : 'của chính khách'}: "${String(message.replyTo.text).slice(0, 300)}")` : ''
@@ -347,7 +350,12 @@ export async function requestDirectModelReply(options) {
         ? (settings.directApiKey || await getVertexAccessToken({ fetchImpl }))
         : settings.directApiKey;
       const memoryTurns = buildMemoryTurns({ recentMessages, message, settings });
-      const query = buildChatbotQuery({ conversation, message, recentMessages, settings, includeHistory: false });
+      // Ví dụ đã duyệt: replay đưa sẵn (bỏ chính tin đang đo); chạy thật lấy từ bộ chấm mẫu khi bật.
+      const examples = Array.isArray(options.examples) ? options.examples
+        : settings.fewShot === 'on' && message?.type === 'text' && message.text
+          ? nearestExamples(await loadExampleBank(), { text: message.text, lastTemplate: conversation.botLastTemplateId || '' })
+          : [];
+      const query = buildChatbotQuery({ conversation, message, recentMessages, settings, includeHistory: false, examples });
       const imageParts = vertex && message?.type === 'image' ? await collectImageParts(message, fetchImpl) : [];
       // Cache prompt: chỉ Vertex + Gemini 3/2.5 (không phải khi dùng khóa API); lỗi tạo cache thì gửi như thường.
       let cachedContent = '';

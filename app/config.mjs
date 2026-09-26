@@ -76,8 +76,23 @@ export const metaConfig = {
   // Meta names the reaction field message_reactions, not messaging_reactions;
   // sending the wrong name makes the whole subscribed_apps call fail.
   // `feed` delivers comments on the Page's posts and ads; the rest is Messenger.
-  subscribedFields: 'messages,message_echoes,messaging_postbacks,messaging_optins,message_reactions,message_deliveries,message_reads,messaging_referrals,feed'
+  subscribedFields: 'messages,message_echoes,messaging_postbacks,messaging_optins,message_reactions,message_deliveries,message_reads,messaging_referrals,feed',
+  // Page vận hành trong Pancake (tin nhắn đã về CRM qua webhook Pancake) nhưng
+  // QR thẻ cảm ơn trỏ về đó: Pancake không chuyển ref của m.me, nên Page phải
+  // nối thêm app Meta của CRM — và chỉ đăng ký hai trường này, kẻo mỗi tin khách
+  // về hộp thư hai lần (Meta lẫn Pancake) và bot trả lời hai lần.
+  referralOnlyPageIds: String(process.env.META_REFERRAL_ONLY_PAGES || '').split(',').map(value => value.trim()).filter(Boolean),
+  referralOnlyFields: 'messaging_postbacks,messaging_referrals'
 };
+
+export function isReferralOnlyPage(pageId) {
+  return metaConfig.referralOnlyPageIds.includes(String(pageId));
+}
+
+/** Trường webhook đăng ký cho một Page: đủ bộ, hoặc chỉ referral với Page vận hành ở Pancake. */
+export function subscriptionFieldsFor(pageId) {
+  return isReferralOnlyPage(pageId) ? metaConfig.referralOnlyFields : metaConfig.subscribedFields;
+}
 
 // Webhook nhận đơn từ landing page (Webcake...). Token tự đặt, đưa vào URL
 // hoặc header khi cấu hình bên nền tảng landing; để trống là tắt webhook.

@@ -42,10 +42,11 @@ export function shortenMetaError(message) {
   return text.replace(/\{[^{}]{80,}\}/g, '{...}');
 }
 
-export function subscribePageToApp(pageId, pageAccessToken) {
+/** Đăng ký Page với app; `fields` mặc định là đủ bộ, Page vận hành ở Pancake chỉ đăng ký referral (xem config). */
+export function subscribePageToApp(pageId, pageAccessToken, fields = metaConfig.subscribedFields) {
   return metaRequest(`${pageId}/subscribed_apps`, {
     method: 'POST',
-    body: { subscribed_fields: metaConfig.subscribedFields, access_token: pageAccessToken }
+    body: { subscribed_fields: fields, access_token: pageAccessToken }
   });
 }
 

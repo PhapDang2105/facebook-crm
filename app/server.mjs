@@ -42,7 +42,7 @@ import {
   missingMetaConfiguration,
   missingWebhookConfiguration,
   projectRoot,
-  serverConfig, pancakeConfig } from './config.mjs';
+  serverConfig, pancakeConfig, isReferralOnlyPage, subscriptionFieldsFor } from './config.mjs';
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
@@ -1409,7 +1409,7 @@ const server = http.createServer(async (request, response) => {
         let subscribed = false;
         let subscriptionError = '';
         try {
-          await subscribePageToApp(page.id, page.accessToken);
+          await subscribePageToApp(page.id, page.accessToken, subscriptionFieldsFor(page.id));
           subscribed = true;
         } catch (error) {
           subscriptionError = error.message;
@@ -1478,11 +1478,14 @@ const server = http.createServer(async (request, response) => {
         // the UI instead of forcing the Page to be disconnected and re-added —
         // also when a field this build needs (feed, messaging_referrals…) is
         // missing because the Page was subscribed by an older build.
-        const requiredFields = metaConfig.subscribedFields.split(',').map(field => field.trim()).filter(Boolean);
+        const requiredFields = subscriptionFieldsFor(pageId).split(',').map(field => field.trim()).filter(Boolean);
         const missingFields = requiredFields.filter(field => !subscription.fields.includes(field));
-        if (!subscription.subscribed || missingFields.length) {
+        // Page chỉ nhận referral (vận hành ở Pancake) mà đang đăng ký thừa trường
+        // `messages`… thì thu lại, kẻo hộp thư nhận tin hai lần.
+        const extraFields = isReferralOnlyPage(pageId) ? subscription.fields.filter(field => !requiredFields.includes(field)) : [];
+        if (!subscription.subscribed || missingFields.length || extraFields.length) {
           try {
-            await subscribePageToApp(pageId, pageAccessToken);
+            await subscribePageToApp(pageId, pageAccessToken, subscriptionFieldsFor(pageId));
             subscription = await fetchPageSubscription(pageId, pageAccessToken);
             channel.subscriptionError = '';
           } catch (subscribeError) {

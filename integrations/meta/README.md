@@ -90,6 +90,8 @@ Mở **Cài đặt → Kênh → Kết nối Facebook**, đăng nhập rồi ch�
 
 Nút **Làm mới** kiểm tra lại tên Page, ảnh đại diện và trạng thái đăng ký webhook.
 
+**Page vận hành trong Pancake nhưng cần nhận referral** (QR thẻ cảm ơn trỏ về Page đó): Pancake không chuyển `ref` của link m.me về CRM, nên Page phải nối thêm vào app Meta của CRM. Liệt kê ID Page ở `META_REFERRAL_ONLY_PAGES` trong `.env` **trước khi** bấm Kết nối Facebook: CRM sẽ chỉ đăng ký `messaging_referrals` và `messaging_postbacks` cho Page đó (bấm Làm mới cũng thu về hai trường này nếu đang thừa), nhờ vậy ref và nút Bắt đầu về CRM còn tin nhắn vẫn chỉ đi một đường qua Pancake. Token của Page có trong CRM nên chạy được `scripts/set-messenger-profile.mjs` để đặt nút Bắt đầu.
+
 ## 5. Nhận và gửi tin nhắn
 
 - Tin nhắn đến đi qua webhook, được lưu vào `data/processed/meta-conversations.json` và đẩy tới trình duyệt qua Server-Sent Events (`GET /api/messaging/stream`), nên hộp thư cập nhật ngay mà không cần tải lại trang.

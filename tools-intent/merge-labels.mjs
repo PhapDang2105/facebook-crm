@@ -8,10 +8,12 @@ const [datasetPath, labelsPath, outPath, goldenPath] = process.argv.slice(2);
 const rows = readFileSync(datasetPath, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
 const labels = new Map(readFileSync(labelsPath, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(item => item.label && !item.error).map(item => [item.id, item]));
 const golden = new Set(goldenPath ? (JSON.parse(readFileSync(goldenPath, 'utf8')).items || []).map(item => item.id) : []);
-const stats = { total: rows.length, llmHigh: 0, agree: 0, dropped: 0, noLabel: 0, changed: 0, golden: 0 };
+const stats = { total: rows.length, llmHigh: 0, agree: 0, dropped: 0, noLabel: 0, changed: 0, golden: 0, staff: 0 };
 const out = [];
 for (const row of rows) {
   if (golden.has(row.id)) { stats.golden += 1; continue; }
+  // Nhãn từ câu nhân viên tự viết (build-dataset --llm) mạnh hơn nhãn đoán từ tin khách: giữ nguyên.
+  if (row.labelSource === 'staff') { stats.staff += 1; out.push(row); continue; }
   const llm = labels.get(row.id);
   if (!llm) { stats.noLabel += 1; out.push(row); continue; }
   if (llm.confidence >= 0.8) { stats.llmHigh += 1; if (llm.label !== row.label) stats.changed += 1; out.push({ ...row, label: llm.label, labelSource: 'llm' }); continue; }

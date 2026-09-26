@@ -5,7 +5,7 @@ import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { autoLabelEventsFor, foldVietnamese, isComplaint } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
 import { buildCatalogPrompt } from './processing/pricing.mjs';
-import { isOrderStep } from './processing/pending-order.mjs';
+import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { findProductBySku, getCatalogProducts, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamConversation } from './conversation-orders.mjs';
 import { ruleIntent } from './processing/rule-intent.mjs';
@@ -817,7 +817,8 @@ async function answerChange(change, settings, results, dependencies) {
           botLastTemplateId: conversation.botLastTemplateId || '',
           staffRepliedAfterBot: lastOutgoingAt > (Number(conversation.botLastReplyAt) || 0) + 5000,
           botLastAgeMin: conversation.botLastReplyAt ? (Date.now() - Number(conversation.botLastReplyAt)) / 60000 : Infinity,
-          hasBasket: Boolean(conversation.pendingOrder?.items?.length),
+          // Giỏ đang giữ chỉ tính khi còn hạn (2 giờ) — giỏ cũ quá hạn làm luật ADDRESS_COMPLETE dựng ASK_PRODUCT.
+          hasBasket: Boolean(usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items?.length),
           lastWasOrderStep: isOrderStep(conversation.botLastTemplateId) || ['ASK_FLAVOR', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET'].includes(conversation.botLastTemplateId),
           hasRecentOrder: Boolean(recentOrder?.id),
           orderAgeMin: recentOrder?.id && String(recentOrder.processingStatus || '') !== 'cancelled' ? (Date.now() - (Number(recentOrder.createdAt) || 0)) / 60000 : Infinity,
@@ -844,7 +845,7 @@ async function answerChange(change, settings, results, dependencies) {
     // Chế độ 'shadow' (mặc định) chỉ ghi log so với câu trả lời thật ở cuối lượt.
     const intentMode = settings.intentModel || 'shadow';
     const intent = intentMode !== 'off' && message.type === 'text' && !asksForHuman && !cartReply && !trialActive
-      ? predictIntent({ text: message.text, source: conversation.source, lastTemplate: conversation.botLastTemplateId || '', lastWasOrderStep: isOrderStep(conversation.botLastTemplateId), hasBasket: Boolean(conversation.pendingOrder?.items?.length), livestream: isLivestreamPost(conversation) })
+      ? predictIntent({ text: message.text, source: conversation.source, lastTemplate: conversation.botLastTemplateId || '', lastWasOrderStep: isOrderStep(conversation.botLastTemplateId), hasBasket: Boolean(usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items?.length), livestream: isLivestreamPost(conversation) })
       : null;
     const intentUsable = Boolean(intent) && intentMode === 'on' && intent.confidence >= (Number(settings.intentThreshold) || 0.9) && intent.margin >= 0.25 && intentSafeTemplates.has(intent.templateId) && settings.messageTemplates?.[intent.templateId] !== undefined
       && !phoneInText && conversation.source !== 'comment';

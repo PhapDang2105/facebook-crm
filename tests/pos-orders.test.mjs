@@ -77,6 +77,9 @@ function posFetch(calls, { variations = ['GRA-XANH-Z450', 'GRA-NAU-Z350', 'BGD',
     if (address.includes('/geo/districts')) return { ok: true, status: 200, json: async () => ({ data: [{ id: '70504', name: 'Huyện Bác Ái', province_id: '705' }, { id: '70501', name: 'Thành phố Phan Rang-Tháp Chàm', province_id: '705' }] }) };
     if (address.includes('/geo/communes')) return { ok: true, status: 200, json: async () => ({ data: [{ id: '7050127', name: 'Phường Đông Hải', district_id: '70501' }, { id: '7050101', name: 'Phường Đô Vinh', district_id: '70501' }] }) };
     if (address.endsWith('/orders?api_key=k') && options.method === 'POST') return { ok: createStatus < 400, status: createStatus, json: async () => createBody };
+    // Đơn vừa tạo đọc lại: POS bỏ dòng tặng (hành vi thật 26/09) → CRM PUT bổ sung.
+    if (/\/orders\/99001\?api_key=k$/.test(address) && (!options.method || options.method === 'GET')) return { ok: true, status: 200, json: async () => ({ data: { id: 99001, items: [{ variation_id: 'v-GRA-XANH-Z450', quantity: 2 }, { variation_id: 'v-GRA-NAU-Z350', quantity: 1 }] } }) };
+    if (/\/orders\/99001\?api_key=k$/.test(address) && options.method === 'PUT') return { ok: true, status: 200, json: async () => ({ success: true }) };
     throw new Error(`gọi lạ: ${address}`);
   };
 }
@@ -98,6 +101,12 @@ test('pushOrderToPos: kiểm SKU có trong POS, chọn kho có địa chỉ, POS
   assert.equal(post.body.shipping_address.commune_id, '7050127');
   assert.equal(post.body.shipping_address.address, 'Khu phố 6');
   assert.equal(post.body.shipping_address.full_address, order.address);
+  // POS bỏ dòng tặng lúc tạo: CRM đọc lại đơn, thấy thiếu BGD/MUONG thì PUT bổ sung cùng giỏ (không gửi trường chỉ-tạo).
+  const put = calls.find(call => call.method === 'PUT');
+  assert.ok(put, 'có PUT bổ sung quà');
+  assert.deepEqual(put.body.items.filter(item => item.is_bonus_product).map(item => item.variation_id), ['v-BGD', 'v-MUONG']);
+  assert.equal('custom_id' in put.body, false);
+  assert.equal('warehouse_id' in put.body, false);
 });
 
 test('resolvePosGeo: khớp tên bỏ dấu và gạch nối; thiếu cấp nào thì dừng ở cấp đó', async () => {

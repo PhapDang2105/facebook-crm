@@ -279,7 +279,45 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
     if (!response.ok || body?.success === false || !data?.id) {
       throw new Error(`Pancake POS không nhận đơn (${response.status}): ${body?.message || body?.error || body?.errors?.[0]?.message || 'không rõ lý do'}`);
     }
-    return { id: String(data.id), systemId: data.system_id ? String(data.system_id) : '', status: String(data.status_name || '') };
+    const created = { id: String(data.id), systemId: data.system_id ? String(data.system_id) : '', status: String(data.status_name || '') };
+    // 26/09: POS vẫn BỎ dòng tặng lúc tạo đơn (đủ UUID, is_bonus_product) — đơn combo 3 của bot lên POS không
+    // có bát/muỗng dừa dù CRM ghi quà. Sửa đơn (PUT) thì POS giữ dòng tặng: đọc lại đơn vừa tạo, thiếu quà thì
+    // gửi PUT cùng giỏ để bổ sung. Lỗi ở bước này không làm hỏng việc tạo đơn (chỉ ghi log).
+    try {
+      const added = await ensurePosGiftLines(created.id, payload, config, fetchImpl);
+      if (added) console.log(`POS: bổ sung ${added} dòng quà cho đơn ${created.id} (POS bỏ dòng tặng lúc tạo).`);
+    } catch (error) {
+      console.warn(`POS: không bổ sung được dòng quà cho đơn ${created.id}: ${error.message}`);
+    }
+    return created;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Đọc đơn vừa tạo trên POS; nếu thiếu dòng tặng (is_bonus_product) có trong body thì PUT lại giỏ.
+ * Trả về số dòng quà đã bổ sung (0 = đã đủ / không có quà).
+ */
+export async function ensurePosGiftLines(posOrderId, payload, config = posConfig(), fetchImpl = fetch) {
+  const gifts = (payload.items || []).filter(item => item.is_bonus_product);
+  if (!gifts.length) return 0;
+  const fetched = await posRequest(`/orders/${encodeURIComponent(posOrderId)}`, {}, config, fetchImpl);
+  const existing = fetched?.data && typeof fetched.data === 'object' ? fetched.data : fetched;
+  const have = new Set((existing?.items || []).map(item => String(item.variation_id || item.variation_info?.id || '')));
+  const missing = gifts.filter(item => !have.has(String(item.variation_id)));
+  if (!missing.length) return 0;
+  const { shop_id, custom_id, status, received_at_shop, warehouse_id, page_id, conversation_id, ...update } = payload;
+  const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(posOrderId)}`);
+  url.searchParams.set('api_key', config.apiKey);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetchImpl(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(update), signal: controller.signal });
+    let body = {};
+    try { body = await response.json(); } catch {}
+    if (!response.ok || body?.success === false) throw new Error(`POS không nhận bổ sung quà (${response.status}): ${body?.message || body?.error || 'không rõ lý do'}`);
+    return missing.length;
   } finally {
     clearTimeout(timer);
   }

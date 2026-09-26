@@ -844,7 +844,8 @@ async function answerChange(change, settings, results, dependencies) {
     // Mô hình ra quyết định (nhỏ, học từ hội thoại shop): đoán mẫu + xác suất trước khi hỏi LLM.
     // Chế độ 'shadow' (mặc định) chỉ ghi log so với câu trả lời thật ở cuối lượt.
     const intentMode = settings.intentModel || 'shadow';
-    const intent = intentMode !== 'off' && message.type === 'text' && !asksForHuman && !cartReply && !trialActive
+    // Chỉ hộp thư: bình luận đi luồng riêng (mẫu COMMENT_*), so sánh không có nghĩa.
+    const intent = intentMode !== 'off' && message.type === 'text' && conversation.source !== 'comment' && !asksForHuman && !cartReply && !trialActive
       ? predictIntent({ text: message.text, source: conversation.source, lastTemplate: conversation.botLastTemplateId || '', lastWasOrderStep: isOrderStep(conversation.botLastTemplateId), hasBasket: Boolean(usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items?.length), livestream: isLivestreamPost(conversation) })
       : null;
     const intentUsable = Boolean(intent) && intentMode === 'on' && intent.confidence >= (Number(settings.intentThreshold) || 0.9) && intent.margin >= 0.25 && intentSafeTemplates.has(intent.templateId) && settings.messageTemplates?.[intent.templateId] !== undefined

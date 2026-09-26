@@ -646,28 +646,46 @@ async function sendReceiptImage(conversation, order) {
 }
 
 async function readChatbotSettings() {
+  let raw = '';
   try {
-    const stored = JSON.parse(await readFile(chatbotSettingsPath, 'utf8'));
+    raw = await readFile(chatbotSettingsPath, 'utf8');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') console.error('Cài đặt chatbot: không đọc được tệp:', error.message);
+    return normalizeChatbotSettings(defaultChatbotSettings);
+  }
+  try {
+    const stored = JSON.parse(raw);
     const directApiKey = stored.directApiKeyEncrypted ? decryptToken(stored.directApiKeyEncrypted) : stored.directApiKey;
     return normalizeChatbotSettings({ ...stored, directApiKey });
-  } catch {
+  } catch (error) {
+    // Tệp hỏng (ghi dở, đè nhau): cách ly để còn cứu, báo to thay vì âm thầm chạy với cài đặt trống (mất prompt, mẫu, endpoint).
+    const quarantined = `${chatbotSettingsPath}.corrupt-${Date.now()}`;
+    await rename(chatbotSettingsPath, quarantined).catch(() => {});
+    console.error(`Cài đặt chatbot: tệp hỏng (${error.message}), đã cất sang ${path.basename(quarantined)}; tạm dùng cài đặt mặc định.`);
     return normalizeChatbotSettings(defaultChatbotSettings);
   }
 }
 
 configureAddressAi({ readSettings: readChatbotSettings });
 
-async function writeChatbotSettings(settings) {
-  const normalized = normalizeChatbotSettings(settings);
-  const { directApiKey, ...safeSettings } = normalized;
-  const stored = {
-    ...safeSettings,
-    ...(directApiKey ? { directApiKeyEncrypted: encryptToken(directApiKey) } : {})
-  };
-  const temporaryPath = `${chatbotSettingsPath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(stored, null, 2), 'utf8');
-  await rename(temporaryPath, chatbotSettingsPath);
-  return normalized;
+// Ghi tuần tự, tên tệp tạm duy nhất: hai yêu cầu ghi gần nhau (PUT settings + master-switch) không đè lên
+// cùng một .tmp rồi rename giữa chừng thành JSON cụt.
+let chatbotSettingsWriteQueue = Promise.resolve();
+function writeChatbotSettings(settings) {
+  const operation = chatbotSettingsWriteQueue.then(async () => {
+    const normalized = normalizeChatbotSettings(settings);
+    const { directApiKey, ...safeSettings } = normalized;
+    const stored = {
+      ...safeSettings,
+      ...(directApiKey ? { directApiKeyEncrypted: encryptToken(directApiKey) } : {})
+    };
+    const temporaryPath = `${chatbotSettingsPath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temporaryPath, JSON.stringify(stored, null, 2), 'utf8');
+    await rename(temporaryPath, chatbotSettingsPath);
+    return normalized;
+  });
+  chatbotSettingsWriteQueue = operation.then(() => undefined, () => undefined);
+  return operation;
 }
 
 function sendBinary(response, statusCode, body, contentType, filename) {
@@ -810,7 +828,7 @@ function removeDataRowBackgrounds(workbook, worksheetPath) {
  * nhập — Basic Auth không cản được vì trình duyệt tự đính kèm lại.
  * Request không có thân (ví dụ POST .../read) vẫn đi qua như cũ.
  */
-async function readBody(request, maximumBytes = 32 * 1024 * 1024) {
+async function readBody(request, maximumBytes = 1024 * 1024) {
   const chunks = [];
   let totalBytes = 0;
   for await (const chunk of request) {
@@ -821,7 +839,10 @@ async function readBody(request, maximumBytes = 32 * 1024 * 1024) {
   if (!chunks.length) return {};
   const contentType = String(request.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (contentType !== 'application/json') throw new Error('Nội dung gửi lên phải là application/json.');
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  // null / mảng / chuỗi qua được JSON.parse nhưng route truy `payload.x` sẽ ném TypeError lộ chuỗi nội bộ.
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Thân yêu cầu phải là một object JSON.');
+  return parsed;
 }
 
 /**
@@ -896,7 +917,7 @@ async function serveFile(request, response, pathname) {
     const types = { '.png':'image/png', '.jpg':'image/jpeg', '.webp':'image/webp' };
     try {
       const body = await readFile(imagePath);
-      response.writeHead(200, { 'Content-Type':types[path.extname(filename)], 'Cache-Control':'public, max-age=86400' });
+      response.writeHead(200, { 'Content-Type':types[path.extname(filename)], 'Cache-Control':'private, max-age=86400' });
       return response.end(body);
     } catch { return sendJson(response, 404, { error:'Resource not found.' }); }
   }
@@ -1375,8 +1396,9 @@ const server = http.createServer(async (request, response) => {
       cleanExpiredMetaSessions();
       const state = url.searchParams.get('state') || '';
       const code = url.searchParams.get('code') || '';
-      const metaError = url.searchParams.get('error_description') || '';
-      if (metaError) return redirect(response, `/?meta_error=${encodeURIComponent(metaError)}#settings`);
+      const metaError = String(url.searchParams.get('error_description') || '').slice(0, 200);
+      // Chỉ hiện lỗi Meta khi state hợp lệ: link giả `?error_description=...` không đưa được thông điệp lạ vào giao diện.
+      if (metaError && state && metaOauthStates.has(state)) { metaOauthStates.delete(state); return redirect(response, `/?meta_error=${encodeURIComponent(metaError)}#settings`); }
       if (!code || !state || !metaOauthStates.has(state)) return redirect(response, '/?meta_error=Phi%C3%AAn%20k%E1%BA%BFt%20n%E1%BB%91i%20Facebook%20kh%C3%B4ng%20h%E1%BB%A3p%20l%E1%BB%87%20ho%E1%BA%B7c%20%C4%91%C3%A3%20h%E1%BA%BFt%20h%E1%BA%A1n.#settings');
       metaOauthStates.delete(state);
       try {
@@ -1563,7 +1585,7 @@ const server = http.createServer(async (request, response) => {
         console.error(`Webhook landing: không tạo được đơn — ${result.error}`);
         return sendJson(response, 202, { accepted: false, error: result.error });
       }
-      console.log(`Webhook landing: ${result.created ? 'tạo đơn' : 'đơn trùng, bỏ qua'} #${result.order.id} (${result.order.phone})`);
+      console.log(`Webhook landing: ${result.created ? 'tạo đơn' : 'đơn trùng, bỏ qua'} #${result.order.id} (${String(result.order.phone || '').replace(/\d(?=\d{3})/g, '*')})`);
       publishMessagingEvent({ type: 'landing-order', orderId: result.order.id });
       return sendJson(response, result.created ? 201 : 200, { accepted: true, created: result.created, orderId: result.order.id });
     }
@@ -1612,7 +1634,8 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'POST') {
         let payload = null;
         try {
-          payload = await readBody(request);
+          // Đường công khai, đọc thân TRƯỚC khi xác thực: giới hạn 256 KB để không bị dồn bộ nhớ.
+          payload = await readBody(request, 256 * 1024);
         } catch (error) {
           console.error('Webhook Pancake thân không đọc được:', error.message);
         }

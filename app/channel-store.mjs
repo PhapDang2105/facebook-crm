@@ -38,11 +38,17 @@ export async function readChannelStore() {
   }
 }
 
-export async function writeChannelStore(store) {
-  await mkdir(path.dirname(channelStorePath), { recursive: true });
-  const temporaryPath = `${channelStorePath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-  await rename(temporaryPath, channelStorePath);
+let writeQueue = Promise.resolve();
+export function writeChannelStore(store) {
+  // Ghi tuần tự, tệp tạm duy nhất (confirm/refresh Page có thể ghi gần nhau).
+  const operation = writeQueue.then(async () => {
+    await mkdir(path.dirname(channelStorePath), { recursive: true });
+    const temporaryPath = `${channelStorePath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
+    await rename(temporaryPath, channelStorePath);
+  });
+  writeQueue = operation.then(() => undefined, () => undefined);
+  return operation;
 }
 
 export async function findChannel(pageId) {

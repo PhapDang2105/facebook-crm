@@ -160,14 +160,20 @@ export async function readInboxSettings() {
   return cached;
 }
 
-export async function writeInboxSettings(value, storeImage) {
-  const settings = await normalizeInboxSettings({ ...value, updatedAt: Date.now() }, storeImage);
-  await mkdir(path.dirname(inboxSettingsPath), { recursive: true });
-  const temporaryPath = `${inboxSettingsPath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(settings, null, 2), 'utf8');
-  await rename(temporaryPath, inboxSettingsPath);
-  cached = settings;
-  return settings;
+let writeQueue = Promise.resolve();
+export function writeInboxSettings(value, storeImage) {
+  // Ghi tuần tự, tệp tạm duy nhất: hai lần lưu gần nhau không đè cùng một .tmp.
+  const operation = writeQueue.then(async () => {
+    const settings = await normalizeInboxSettings({ ...value, updatedAt: Date.now() }, storeImage);
+    await mkdir(path.dirname(inboxSettingsPath), { recursive: true });
+    const temporaryPath = `${inboxSettingsPath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temporaryPath, JSON.stringify(settings, null, 2), 'utf8');
+    await rename(temporaryPath, inboxSettingsPath);
+    cached = settings;
+    return settings;
+  });
+  writeQueue = operation.then(() => undefined, () => undefined);
+  return operation;
 }
 
 const labelIconsPath = path.join(projectRoot, 'web', 'assets', 'icons', 'labels');

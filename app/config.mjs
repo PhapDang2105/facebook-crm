@@ -124,7 +124,9 @@ function parsePancakePages() {
           pages.push({
             pageId,
             pageName: String(p.pageName || 'Pancake Page'),
-            pageAccessToken
+            pageAccessToken,
+            // Token webhook riêng từng Page (server so cùng PANCAKE_WEBHOOK_TOKEN chung).
+            ...(String(p.webhookToken ?? '').trim() ? { webhookToken: String(p.webhookToken).trim() } : {})
           });
         }
       }

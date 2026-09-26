@@ -83,6 +83,18 @@ export function commentBasket(text) {
 }
 
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
+import { assertPublicHost } from './network-guard.mjs';
+
+const endpointHostChecks = new Map();
+/** Kiểm host endpoint AI tuỳ chỉnh không trỏ vào mạng nội bộ; nhớ kết quả 60 giây. */
+async function assertEndpointHost(endpoint) {
+  let hostname = '';
+  try { hostname = new URL(endpoint).hostname; } catch { throw new Error('Endpoint AI không hợp lệ.'); }
+  const checkedAt = endpointHostChecks.get(hostname) || 0;
+  if (Date.now() - checkedAt < 60 * 1000) return;
+  await assertPublicHost(hostname);
+  endpointHostChecks.set(hostname, Date.now());
+}
 
 /**
  * Địa chỉ khách nhắn mà bộ đọc luật không tách đủ ba cấp thì hỏi AI trước khi
@@ -390,8 +402,12 @@ export async function requestDirectModelReply(options) {
         temperature: 0.1,
         ...(settings.structuredOutput !== false ? { response_format: { type: 'json_object' } } : {})
       };
+      // Endpoint tuỳ chỉnh chỉ được kiểm SSRF lúc lưu cài đặt; DNS có thể đổi sau đó → kiểm lại (cache 60 s)
+      // và không đi theo redirect để khoá/ngữ cảnh khách không bị chuyển sang máy khác.
+      if (!vertex) await assertEndpointHost(endpoint);
       const response = await fetchImpl(endpoint, {
         method: 'POST',
+        redirect: 'manual',
         headers: {
           ...(anthropic
             ? { 'x-api-key': settings.directApiKey, 'anthropic-version': '2023-06-01' }
@@ -402,6 +418,7 @@ export async function requestDirectModelReply(options) {
         },
         body: JSON.stringify(body)
       });
+      if (response.status >= 300 && response.status < 400) throw new Error(`Endpoint AI chuyển hướng (${response.status}) — không theo để tránh lộ khóa.`);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         // Cache hết hạn/hỏng phía Vertex (400/403/404): bỏ cache, gửi lại một lần với prompt đầy đủ.

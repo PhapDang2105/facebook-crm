@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Giọt Nắng CRM – Cầu nối Pancake",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Cho CRM fb.giotnang.vn gửi tin bám đuổi qua extension Pancake (gửi được ngoài 24 giờ) mà không phải chuyển sang tab Pancake.",
   "permissions": [
     "scripting",
@@ -17,7 +17,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://fb.giotnang.vn/*"
+        "https://fb.giotnang.vn/",
+        "https://fb.giotnang.vn/index.html"
       ],
       "js": [
         "crm-bridge.js"

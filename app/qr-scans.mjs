@@ -68,7 +68,11 @@ function updateStore(mutate) {
   return operation;
 }
 
+// Đường /q/<mã> công khai: mã lạ chỉ được tạo mục đếm tới giới hạn này, tránh ai đó gõ mã ngẫu nhiên làm kho phình vô hạn.
+export const maximumTrackedCodes = 500;
+
 function entryFor(store, code, at) {
+  if (!store.codes[code] && Object.keys(store.codes).length >= maximumTrackedCodes) return null;
   const entry = store.codes[code] || { code, scans: 0, opens: 0, firstAt: at, lastAt: at, platforms: {}, browsers: {}, modes: {} };
   // Kho ghi từ bản trước chưa có các ô này.
   entry.opens = Number(entry.opens) || 0;
@@ -96,6 +100,7 @@ export async function recordQrScan(code, { at = Date.now(), userAgent = '', mode
   const served = mode === 'redirect' ? 'redirect' : 'page';
   return updateStore(store => {
     const entry = entryFor(store, code, at);
+    if (!entry) return null;
     entry.scans += 1;
     entry.lastAt = at;
     entry.platforms[platform] = (entry.platforms[platform] || 0) + 1;
@@ -116,6 +121,7 @@ export async function recordQrOpen(code, { at = Date.now(), target = 'messenger'
   const zalo = target === 'zalo';
   return updateStore(store => {
     const entry = entryFor(store, code, at);
+    if (!entry) return null;
     if (zalo) entry.zaloOpens = (Number(entry.zaloOpens) || 0) + 1;
     else entry.opens += 1;
     pushRecent(store, { code, at, event: zalo ? 'open-zalo' : 'open' });

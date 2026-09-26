@@ -47,8 +47,16 @@ Sau khi script chạy xong:
 ```bash
 cd /opt/facebook-crm
 sudo -u crm git pull --ff-only
-sudo -u crm npm install --omit=dev
+sudo -u crm npm ci --omit=dev
 sudo systemctl restart facebook-crm
+```
+
+Dùng `npm ci`, không dùng `npm install`: `npm install` trên máy chủ ghi lại `package-lock.json` theo phiên bản npm ở đó, và lần `git pull` sau bị từ chối vì "local changes would be overwritten". Nếu đã lỡ (pull báo lỗi ở `package-lock.json`), khôi phục tệp khóa rồi kéo lại:
+
+```bash
+sudo -u crm git checkout -- package-lock.json
+sudo -u crm git pull --ff-only
+sudo -u crm npm ci --omit=dev
 ```
 
 Dữ liệu chạy thật nằm trong `/opt/facebook-crm/data/processed/` và không bị `git pull` đụng tới vì đã nằm trong `.gitignore`. Vẫn nên sao lưu thư mục đó trước khi cập nhật lớn.

@@ -8,6 +8,8 @@ import { extractVietnamesePhone } from './customer-info.mjs';
 import { getCatalogProducts } from './catalog.mjs';
 
 /** Chuỗi chuẩn để so luật: bỏ dấu, bỏ dấu câu, bỏ lời gọi đầu câu và từ đệm cuối câu. */
+import { orderFlowStep } from './order-flow.mjs';
+
 export function core(text) {
   let s = foldVietnamese(text).toLowerCase().replace(/[^a-z0-9+/% ]+/g, ' ').replace(/\s+/g, ' ').trim();
   s = s.replace(/^(?:(?:shop|sop|em|e|chi|c|ban|b|ad|anh|a) (?:oi|oei|ui) )+/, '');
@@ -163,10 +165,11 @@ export function ruleIntent(text, ctx = {}) {
     if (!isComment && !phone && !ctx.trialOffer && s.length <= 70 && ORDER_ASK.test(s) && !/\b(lay|chot|cho (minh|em|e|chi|c) \d)\b/.test(s) && !/\b(xanh|vang|nau|cacao|combo|tui|goi)\b/.test(s)) {
       return { rule: 'ORDER_ASK', experimental: true, value: { template_id: 'ORDER_STATUS' }, ...(complaint || ctx.complaint ? { attention: true } : {}) };
     }
-    // Địa chỉ đủ 3 cấp (± SĐT) ngay sau câu xin SĐT/địa chỉ: bộ soạn đơn tự đọc, không cần mô hình.
-    if (ctx.hasBasket && ctx.lastWasOrderStep && ctx.addressComplete && !isComment && !complaint
-      && !/\b(tui|goi|bich|xanh|vang|nau|cacao|combo|huy|doi|them|bot|khong lay)\b/.test(s.replace(/\bxa\b|\bhuyen\b|\bquan\b|\bphuong\b/g, ' '))) {
-      return { rule: 'ADDRESS_COMPLETE', experimental: true, value: { template_id: 'ORDER_ADDRESS', Customer_Address: ctx.addressText } };
+    // Luồng đơn tất định: chỉ SĐT / địa chỉ đủ / "địa chỉ cũ" khi bot đang xin thông tin và giỏ đã có
+    // (order-flow.mjs) — bộ soạn đơn tự quyết bước tiếp, không cần mô hình.
+    if (!complaint) {
+      const flow = orderFlowStep(raw, { ...ctx, complaint: Boolean(ctx.complaint) });
+      if (flow) return { ...flow, experimental: true };
     }
     return null;
   })();

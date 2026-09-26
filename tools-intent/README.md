@@ -39,3 +39,11 @@ Shop" → SHOP_ORDER_RECEIVED; bình luận hỏi giá/"ib" → COMMENT_PUBLIC_R
 
 Sau ≥ 1 tuần chạy `shadow`, đếm trong log: `journalctl -u facebook-crm | grep "Mô hình nhỏ"` →
 dòng "X (p, biên m) / thật Y ✓/✗". Mẫu nào ở p ≥ ngưỡng đạt ≥ 97% ✓ thì đặt `intentModel: 'on'`.
+
+## Luồng đơn tất định (`app/processing/order-flow.mjs`)
+
+Khi bot đang xin SĐT/địa chỉ và giỏ còn hạn, tin chỉ có SĐT / địa chỉ đủ / cả hai / "địa chỉ cũ" được
+quyết bằng code (giá trị ORDER_ADDRESS + slot), bộ soạn đơn tự ghép giỏ và chọn bước tiếp. Chạy như
+luật thử nghiệm: `experimentalRules` = `shadow` (mặc định, chỉ ghi log "Luật PHONE_ONLY (thử)…") hay
+`on`. Đo trên bộ chấm mẫu: `replay-golden.mjs` in dòng "Luật thử nghiệm (luồng đơn)". Bật khi log
+chạy ẩn ≥ 1 tuần không có ✗.

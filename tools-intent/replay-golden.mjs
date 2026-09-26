@@ -14,6 +14,7 @@ const useAll = args.includes('--all');
 const goldenPath = args.find(arg => !arg.startsWith('--')) || path.join(root, 'data', 'processed', 'golden-set.json');
 const { predictIntent, intentSafeTemplates } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'intent-model.mjs')).href);
 const { ruleIntent } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'rule-intent.mjs')).href);
+const { describeDeliveryAddress } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'locations.mjs')).href);
 
 const items = (JSON.parse(readFileSync(goldenPath, 'utf8')).items || []).filter(item => item.source !== 'comment');
 const graded = items.filter(item => item.label && item.label !== 'SKIP').map(item => ({ ...item, truth: item.label }));
@@ -51,6 +52,21 @@ for (let n = sorted.length; n >= 1; n -= 1) {
 }
 console.log(best ? `Ngưỡng gợi ý (sai ≤ 3%): ${best.threshold.toFixed(2)} → phủ ${best.coverage}/${results.length}, sai ${best.wrong}` : 'Không có ngưỡng nào đạt sai ≤ 3%.');
 
+// Luật thử nghiệm / luồng đơn (order-flow): giả định có giỏ khi bot vừa ở bước đơn; giá trị ORDER_ADDRESS
+// do bộ soạn đơn quyết tiếp nên "đúng" = nhãn chấm là một bước đơn (xin phần thiếu / chốt).
+const ORDER_TRUTHS = new Set(['ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_CONFIRMATION']);
+const flowRows = rows.map(item => {
+  const stripped = String(item.text || '').replace(/\+?\d[\d .-]{8,13}/g, ' ').replace(/<sdt>/g, ' ').trim();
+  const lastWasOrderStep = ORDER_STEPS.has(item.lastTemplate) || ['ASK_FLAVOR', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET'].includes(item.lastTemplate);
+  const ruled = ruleIntent(item.text, { source: item.source, botLastTemplateId: item.lastTemplate || '', hasBasket: lastWasOrderStep, lastWasOrderStep, addressComplete: lastWasOrderStep && Boolean(stripped) && describeDeliveryAddress(stripped).complete, addressText: stripped, experimentalRules: 'on', commentBasket: () => [] });
+  return { item, ruled };
+}).filter(row => row.ruled?.experimental);
+if (flowRows.length) {
+  const hit = flowRows.filter(row => (row.ruled.value?.template_id === 'ORDER_ADDRESS' ? ORDER_TRUTHS.has(row.item.truth) : row.ruled.value?.template_id === row.item.truth));
+  console.log(`
+Luật thử nghiệm (luồng đơn, giả định có giỏ khi bot vừa ở bước đơn): bắt ${flowRows.length}/${results.length} · hợp nhãn ${pct(hit.length, flowRows.length)}`);
+  for (const row of flowRows.filter(row => !hit.includes(row)).slice(0, 10)) console.log(`  "${row.item.text.slice(0, 60)}" → ${row.ruled.rule} ${row.ruled.value?.template_id} · đúng ${row.item.truth} · bot trước ${row.item.lastTemplate || '-'}`);
+}
 const ruleMiss = ruledRows.filter(row => row.ruleTemplate !== row.item.truth);
 if (ruleMiss.length) {
   console.log('\nLuật ổn định sai (đang chạy thật, cần xem):');

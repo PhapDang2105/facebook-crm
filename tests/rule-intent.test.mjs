@@ -130,7 +130,7 @@ test('luật thử nghiệm (vòng 6) mang experimental: TRIAL_ASK / ORDER_ASK /
   assert.equal(ruleIntent('Mua sao e', ctx).rule, 'TERSE_HOW');
   assert.equal(ruleIntent('Gannola bán sao ạ', ctx).value.template_id, 'GENERAL_INFO');
   const address = ruleIntent('Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai 0909123456', { ...ctx, hasBasket: true, lastWasOrderStep: true, addressComplete: true, addressText: 'Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai' });
-  assert.deepEqual([address.rule, address.value.template_id, address.value.Customer_Address], ['ADDRESS_COMPLETE', 'ORDER_ADDRESS', 'Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai']);
+  assert.deepEqual([address.rule, address.value.template_id, address.value.Customer_Address, address.value.Phone_Number], ['PHONE_ADDRESS', 'ORDER_ADDRESS', 'Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai', '0909123456']);
   assert.notEqual(ruleIntent('đổi sang 2 túi vàng, gửi về Tổ 13 khu phố 2 phường Long Bình, Biên Hòa, Đồng Nai', { ...ctx, hasBasket: true, lastWasOrderStep: true, addressComplete: true, addressText: 'x' })?.rule, 'ADDRESS_COMPLETE', 'kèm đổi giỏ: để mô hình');
 });
 

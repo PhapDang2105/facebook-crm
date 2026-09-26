@@ -115,7 +115,7 @@ test('lời kịch bản lấy từ mẫu FOLLOW_UP_… trong Thiết lập tin 
   const base = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true } });
   const scenario = base.followUps.scenarios[0];
   assert.equal(scenario.templateId, 'FOLLOW_UP_COMMENT_FREESHIP');
-  assert.match(followUpScenarioText(scenario, base.messageTemplates), /MIỄN PHÍ VẬN CHUYỂN/);
+  assert.match(followUpScenarioText(scenario, base.messageTemplates), /Miễn phí vận chuyển/i);
   const off = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true }, messageTemplates: { FOLLOW_UP_COMMENT_FREESHIP: '' } });
   assert.equal(followUpScenarioText(off.followUps.scenarios[0], off.messageTemplates), '');
   const sent = [];
@@ -153,7 +153,7 @@ test('ngoài 24 giờ: không gọi API mà xếp hàng chờ gửi qua Pancake;
   const [item] = status.queue;
   assert.equal(item.conversationId, `${page}:g`);
   assert.equal(item.pancakeUrl, 'https://pancake.vn/110?c=110_g');
-  assert.match(item.text, /MIỄN PHÍ VẬN CHUYỂN/);
+  assert.match(item.text, /Miễn phí vận chuyển/i);
   // Lượt sau không xếp lại.
   assert.equal((await fresh.runFollowUps({ readSettings: async () => trial, sendMessage: async () => { throw new Error('x'); }, now: now + HOUR, log: () => {} })).queued, undefined);
   assert.equal(await fresh.resolveFollowUpQueueItem(item.key, 'sent', { readSettings: async () => trial, now: now + HOUR }), true);

@@ -128,7 +128,7 @@ test('mô hình định gửi bảng giá / combo cho khách đang giữ ưu đ�
   const out = await run(offerConversation(), 'chị đang cân nhắc mua cho cả nhà cùng dùng, em tư vấn thêm giúp chị với', { reply: { template_id: 'DISCOUNT_POLICY' } });
   assert.equal(out.asked, true);
   assert.equal(out.results[0].templateId, 'TRIAL_PRICE');
-  assert.doesNotMatch(out.text, /Combo/);
+  assert.doesNotMatch(out.text, /Combo 3|Gia Đình|Giá gốc/);
 });
 
 test('chính sách 36 giờ (26/09): khách lấy combo 2 túi → rời luồng 1 túi, giá combo miễn ship + tặng bát gáo dừa; đơn ghi quà và ghi chú, không ghi (Freeship)', async () => {

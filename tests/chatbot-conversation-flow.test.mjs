@@ -68,7 +68,7 @@ test('bảng giá chung (GENERAL_INFO) trong hộp thư: gửi kèm bảng giá 
   const justSent = await run({}, [{ id: 'q', direction: 'outgoing', type: 'text', text: 'Dạ, em gửi anh/chị Bảng giá Granola Túi Xanh 450g để mình dễ tham khảo ạ: …', createdAt: Date.now() - 5 * 60 * 1000 }]);
   assert.doesNotMatch(justSent.sent.join('\n'), /Bảng giá Granola Túi Xanh/, 'vừa gửi trong 30 phút: không gửi lại');
   const trial = await run({ promo: { freeShipping: true, until: Date.now() + 86400000, at: Date.now() - 3600000, stage: 'offered' } });
-  assert.doesNotMatch(trial.sent.join('\n'), /Combo 2 Túi/, 'khách giữ ưu đãi dùng thử: luồng riêng, không bảng giá combo');
+  assert.doesNotMatch(trial.sent.join('\n'), /Combo 3|Gia Đình|Giá gốc/, "khách giữ ưu đãi dùng thử: luồng riêng, không bảng giá combo 3 của luồng chung (combo 2 tặng bát là ưu đãi riêng)");
 });
 
 test('khách nhắn thêm trong lúc mô hình đang trả lời: câu trả lời đó bị bỏ, không gửi', async () => {

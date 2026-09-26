@@ -766,8 +766,32 @@ function renderOrderStatus(templates) {
   return fill(templates.ORDER_STATUS, { ...commonValues(), items, ordered_at: orderedAt, state, total: formatMoney(Number(order.total) || 0) });
 }
 
+/**
+ * Khách đang có đơn trong 7 ngày mà lại đặt tiếp: kể đơn đang có và hỏi khách xác nhận đặt THÊM
+ * (value.cart = giỏ mới), chưa lên đơn — chủ shop 26/09: không tự tạo đơn thứ hai khi chưa hỏi.
+ */
+function renderExistingOrderConfirm(value, templates) {
+  const order = activeRecentOrder;
+  if (!order || !templates.ORDER_EXISTING_CONFIRM) return '';
+  const items = (Array.isArray(order.products) ? order.products : Array.isArray(order.items) ? order.items : [])
+    .map(item => `${item.name || item.product || item.sku || 'sản phẩm'} x${Number(item.quantity) || 1}`)
+    .join(', ') || 'sản phẩm đã đặt';
+  const at = new Date(Number(order.createdAt) || Date.now());
+  const parts = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }).formatToParts(at);
+  const part = type => parts.find(item => item.type === type)?.value || '';
+  const shipped = Boolean(order.pos?.id || order.posOrderId || /đã giao|đang giao|đã gửi/i.test(String(order.status || '')));
+  return fill(templates.ORDER_EXISTING_CONFIRM, {
+    ...commonValues(),
+    existing_items: items,
+    existing_at: `${part('hour')}:${part('minute')} ngày ${part('day')}/${part('month')}`,
+    existing_state: shipped ? 'đã chuyển sang kho / vận chuyển' : 'đã được ghi nhận, kho đang chuẩn bị hàng',
+    cart: String(value.cart || 'giỏ vừa chọn')
+  });
+}
+
 const catalogRenderers = {
   ORDER_STATUS: (value, templates) => renderOrderStatus(templates),
+  ORDER_EXISTING_CONFIRM: (value, templates) => renderExistingOrderConfirm(value, templates),
   GENERAL_INFO: (value, templates) => renderGeneralInfo(templates),
   GIFT_POLICY: (value, templates) => renderGiftPolicy(templates),
   PRICE_MIX_TUI_LON: (value, templates) => renderMixPricing(templates),
@@ -792,7 +816,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'TRIAL_ACCEPT', 'TRIAL_REMIND', 'TRIAL_PRICE', 'TRIAL_FREESHIP_INFO', 'TRIAL_NEXT_STEP', 'TRIAL_DECLINED']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'TRIAL_ACCEPT', 'TRIAL_REMIND', 'TRIAL_PRICE', 'TRIAL_FREESHIP_INFO', 'TRIAL_NEXT_STEP', 'TRIAL_DECLINED']);
 
 /**
  * The template inventory as text for the model, appended to the system

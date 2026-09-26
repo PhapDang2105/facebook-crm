@@ -755,6 +755,14 @@ async function answerChange(change, settings, results, dependencies) {
     const ackReply = shortAck && orderJustClosed && settings.messageTemplates?.THANK_YOU
       ? renderChatbotReply({ template_id: 'THANK_YOU' }, settings.messageTemplates, replyContext)
       : null;
+    // Đang chờ khách xác nhận đặt THÊM đơn (đã có đơn trong 7 ngày, xem ORDER_EXISTING_CONFIRM bên dưới):
+    // "đúng/ok/lên đơn" → chốt giỏ đang giữ; "không/đơn cũ/kiểm tra" → kể đơn cũ, gắn thẻ cho nhân viên.
+    const awaitingPending = conversation.pendingOrder?.awaitingConfirm ? usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' }) : null;
+    const awaitingNo = Boolean(awaitingPending) && message.type === 'text' && /\b(khong|ko|k|kg|hong|huy|don cu|don do|don kia|don truoc|khong phai|nham|kiem tra|check|xem lai)\b/.test(folded);
+    const awaitingYes = Boolean(awaitingPending) && !awaitingNo && message.type === 'text' && /^(da|vang|dung|dung roi|dung a|ok|oke|okie|okay|co|u|uh|len don|dat|dat them|them|chot|lay|yes|gui)\b/.test(folded.trim());
+    const existingConfirmReply = awaitingYes
+      ? renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Phone_Number: awaitingPending.phone || '0', Customer_Address: awaitingPending.address || '0' }, settings.messageTemplates, replyContext)
+      : awaitingNo ? { ...renderChatbotReply({ template_id: 'ORDER_STATUS' }, settings.messageTemplates, replyContext), attention: true, pendingOrder: null } : null;
     // Ngay sau bảng giá một sản phẩm, "dùng thử" / "combo 2" / "3 túi" là khách đã
     // chọn: lên bước xin SĐT/địa chỉ với đúng sản phẩm vừa báo giá. Mô hình hay
     // gửi lại bảng giá vì chữ "dùng thử" có sẵn trong bảng (khách bỏ đi).
@@ -879,7 +887,7 @@ async function answerChange(change, settings, results, dependencies) {
               : await askModel({ trialHint: trialModelHint(trialState) }))
             : nonText
               ? (seesImage ? await askModel() : imageFallback())
-              : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || await askModel();
+              : existingConfirmReply || ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || await askModel();
     // Mô hình trả lời khách đang giữ ưu đãi bằng mẫu của luồng chung (bảng giá, combo,
     // mời 2 túi, "từ 2 túi miễn ship"): đổi sang mẫu dùng thử.
     if (trialActive && !trialOutcome.value) {
@@ -1072,6 +1080,18 @@ async function answerChange(change, settings, results, dependencies) {
       if (latest?.botEnabled === false) {
         results.push({ conversationId: conversation.id, skipped: 'nhân viên đã nhận khách' });
         return;
+      }
+    }
+    // Khách đang có đơn trong 7 ngày (chưa hủy) mà sắp lên đơn MỚI: chưa tạo — kể đơn đang có và hỏi
+    // khách xác nhận đặt thêm; khách "đúng" thì lượt sau chốt giỏ đang giữ (chủ shop 26/09: Mai Tran bị
+    // tạo đơn thứ hai trong khi đơn 24/09 còn đang giao).
+    const existingRecent = recentOrder?.id && Date.now() - (Number(recentOrder.createdAt) || 0) < 7 * 24 * 60 * 60 * 1000 && String(recentOrder.processingStatus || '') !== 'cancelled' ? recentOrder : null;
+    if (reply.order && !reply.order.updateOrderId && !reply.order.cancelOrderId && !reply.order.noteOrderId && !isComment && existingRecent && !conversation.pendingOrder?.awaitingConfirm && settings.messageTemplates?.ORDER_EXISTING_CONFIRM) {
+      const cart = `${(reply.order.items || []).map(item => `${Number(item.quantity) || 1} ${item.product || item.name}`).join(' + ')}${reply.order.total ? ` – tổng ${Number(reply.order.total).toLocaleString('vi-VN')}đ` : ''}`;
+      const ask = renderChatbotReply({ template_id: 'ORDER_EXISTING_CONFIRM', cart }, settings.messageTemplates, replyContext);
+      if (ask.templateId === 'ORDER_EXISTING_CONFIRM') {
+        console.log(`Đơn mới khi đang có đơn ${existingRecent.id}: hỏi khách xác nhận trước (${conversation.id})`);
+        reply = { ...ask, order: undefined, attention: false, pendingOrder: { items: (reply.order.items || []).map(item => ({ product: item.product || item.name, code: item.code || item.sku || '', quantity: Number(item.quantity) || 1 })), key: reply.order.orderKey || '', at: Date.now(), phone: reply.order.phone || '', address: reply.order.rawAddress || reply.order.address || '', addressAsks: 0, awaitingConfirm: true } };
       }
     }
     // Sắp tự lên đơn mới mà hội thoại đã có đơn POS trong giờ qua (khách đặt qua

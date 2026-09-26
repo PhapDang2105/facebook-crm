@@ -32,6 +32,8 @@ export function normalizePendingOrder(value) {
     addressAsks,
     // Đã gợi ý lên 2 túi cho giỏ này rồi thì không gợi ý lại.
     ...(value?.upsold ? { upsold: true } : {}),
+    // Đang chờ khách xác nhận đặt THÊM đơn (khách đã có đơn trong 7 ngày).
+    ...(value?.awaitingConfirm ? { awaitingConfirm: true } : {}),
     items: items.map(item => ({
       product: String(item?.product || '').trim(),
       code: String(item?.code || '').trim(),

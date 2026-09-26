@@ -2414,7 +2414,11 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders });
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   // Đồng bộ định kỳ cũng đưa bot tin khách mới chưa ai trả lời (webhook Pancake bỏ sót / tạm ngưng).
-  startPancakeSync({ processChatbotChanges, chatbotDependencies });
+  startPancakeSync({
+    chatbotDependencies,
+    // Cùng móc như webhook: chào khách quét QR và bỏ tin quét thẻ khỏi bot.
+    processChatbotChanges: (changes, deps) => { scheduleQrGreetings(changes); return processChatbotChanges(changes.filter(change => !isCardScan(change)), deps); }
+  });
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);

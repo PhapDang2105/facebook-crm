@@ -7,7 +7,7 @@ import { readChannelStore } from './channel-store.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
 import { applyCustomerEdits, readCustomerEdits } from './customer-edits.mjs';
 
-const genderRank = { staff: 3, message: 2, name: 1 };
+const genderRank = { staff: 3, pancake: 2.5, message: 2, name: 1 };
 
 function customerKey(conversation) {
   return `${conversation.pageId}:${conversation.psid}`;
@@ -322,11 +322,14 @@ const sourceLabels = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quả
 const labelNames = { new: 'Khách mới', consulting: 'Cần tư vấn', customer: 'Đã mua' };
 const genderNames = { male: 'Nam', female: 'Nữ' };
 
+const vnTime = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric', hour12: false });
 function formatTime(value) {
   if (!value) return '';
   const date = new Date(value);
-  const pad = number => String(number).padStart(2, '0');
-  return `${pad(date.getHours())}:${pad(date.getMinutes())} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+  if (Number.isNaN(date.getTime())) return '';
+  // Giờ Việt Nam bất kể múi giờ máy chủ (VM chạy UTC): "HH:mm dd/MM/yyyy".
+  const part = type => vnTime.formatToParts(date).find(item => item.type === type)?.value || '';
+  return `${part('hour')}:${part('minute')} ${part('day')}/${part('month')}/${part('year')}`;
 }
 
 /** CSV for Excel: UTF-8 with BOM, semicolon-free, quotes escaped. */

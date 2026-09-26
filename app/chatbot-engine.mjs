@@ -569,6 +569,9 @@ export function takePendingImages(pageId, psid) {
   return Date.now() - entry.at > pendingImagesTtl ? [] : entry.images;
 }
 
+// Tin đang được bot xử lý (khóa theo hội thoại:tin) — chặn cùng một tin vào hai lần qua hai đường.
+const inFlightMessages = new Set();
+
 export async function processChatbotChanges(changes, dependencies) {
   const { readSettings } = dependencies;
   const settings = await readSettings();
@@ -577,6 +580,10 @@ export async function processChatbotChanges(changes, dependencies) {
   for (const change of changes) {
     // `updated`: tin cũ vừa có thêm dữ liệu (ảnh có URL) — hộp thư vẽ lại, bot không trả lời lần hai.
     if (change.type !== 'message' || change.message?.direction !== 'incoming' || !change.conversation || change.updated) continue;
+    // Cùng một tin về qua hai đường (webhook + đồng bộ/backlog) trong lúc lượt đầu còn đang chạy: bỏ.
+    const inFlightKey = `${change.conversation.id}:${change.message.id || change.message.mid || change.message.createdAt}`;
+    if (inFlightMessages.has(inFlightKey)) { results.push({ conversationId: change.conversation.id, skipped: 'đang xử lý tin này' }); continue; }
+    inFlightMessages.add(inFlightKey);
     try {
       // Hàng đợi theo KHÁCH (pageId:psid): bình luận và hộp thư của cùng một
       // người nối tiếp nhau, hai bình luận liền nhau không chạy song song.
@@ -585,6 +592,8 @@ export async function processChatbotChanges(changes, dependencies) {
     } catch (error) {
       // Một hội thoại hỏng (kho tin không ghi được…) không làm rơi các tin còn lại trong lô.
       results.push({ conversationId: change.conversation.id, error: error.message });
+    } finally {
+      inFlightMessages.delete(inFlightKey);
     }
   }
   // Bot im (nhân viên vừa trả lời, gộp tin, lặp…): ghi một dòng để rà được về sau.
@@ -602,7 +611,8 @@ async function answerChange(change, settings, results, dependencies) {
   try {
     const recent = await listMessages(conversation.id);
     const askedAt = Number(change.message?.createdAt) || 0;
-    if (change.delayedRetry && recent.some(item => item?.direction === 'outgoing' && (Number(item?.createdAt) || 0) >= askedAt)) {
+    // Tin chạy lại (hết hạn mức) hay tin đến muộn (đồng bộ/backlog): có thể đã được trả lời trong lúc chờ.
+    if ((change.delayedRetry || change.late) && recent.some(item => item?.direction === 'outgoing' && (Number(item?.createdAt) || 0) >= askedAt)) {
       results.push({ conversationId: conversation.id, skipped: 'đã có người trả lời' });
       return;
     }
@@ -1114,7 +1124,10 @@ async function answerChange(change, settings, results, dependencies) {
     // Sắp tự lên đơn mới mà hội thoại đã có đơn POS trong giờ qua (khách đặt qua
     // Facebook Shop, hay nhân viên vừa lên): không tạo đơn trùng, báo đã nhận đơn.
     if (reply.order && !reply.order.updateOrderId && !reply.order.cancelOrderId && !reply.order.noteOrderId && !isComment && dependencies.findShopOrder && settings.messageTemplates?.SHOP_ORDER_RECEIVED) {
-      const existing = await dependencies.findShopOrder(conversation, { since: Date.now() - 60 * 60 * 1000 }).catch(() => null);
+      const lookedUp = await dependencies.findShopOrder(conversation, { since: Date.now() - 60 * 60 * 1000 }).then(found => ({ found }), error => ({ error }));
+      // POS lỗi (429/5xx/hết giờ) ≠ không có đơn Shop: vẫn lên đơn nhưng gắn thẻ để nhân viên soát trùng.
+      if (lookedUp.error) { console.warn(`Tra đơn Shop lỗi (${String(lookedUp.error?.message || lookedUp.error).slice(0, 80)}) — gắn thẻ soát trùng (${conversation.id})`); reply = { ...reply, attention: true }; }
+      const existing = lookedUp.found || null;
       // Chỉ coi là trùng khi CÙNG SĐT và khách không nói tách/thêm đơn ("đơn khác",
       // "gửi mẹ", "thêm", "nữa"); khác thì vẫn lên đơn nhưng gắn thẻ cho nhân viên soát.
       const separate = /\b(don khac|don moi|nguoi khac|dia chi khac|gui (cho )?(me|ba|bo|chi|em|ban|anh|nguoi)|tach don|them|nua)\b/.test(folded);

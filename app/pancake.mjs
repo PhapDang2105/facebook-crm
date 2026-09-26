@@ -295,6 +295,8 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       ...(media ? { dataUrl: media.dataUrl, name: '', ...(media.images ? { images: media.images } : {}) } : {}),
       ...(cart.length ? { cart } : {}),
       ...(replyTo ? { replyTo } : {}),
+      // Nhân viên gõ trong Pancake: dấu trên tin để đường đồng bộ (không qua webhook) cũng biết mà nhường.
+      ...(outgoing && adminName && adminName !== 'Public API' && !/^pos$/i.test(adminName) ? { staff: true, staffName: adminName } : {}),
       createdAt: at,
       status: outgoing ? 'sent' : 'received'
     },
@@ -425,37 +427,48 @@ export function syncPancakeConversations(options = {}, config = defaultConfig, f
  * liên tiếp, dịch vụ khởi động lại…): tin đến trong `windowMs`, bot còn bật, Page chưa trả lời
  * sau tin đó → đưa bot như một webhook muộn. Tin cũ hơn hay đã có người trả lời thì thôi.
  */
-export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 30 * 60 * 1000 } = {}) {
+/** Nhân viên vừa nhắn trong hội thoại (60 phút): bot đứng ngoài, kể cả khi tin nhân viên về qua đồng bộ. */
+export function staffRepliedRecently(messages, now = Date.now()) {
+  return (messages || []).some(item => item?.direction === 'outgoing' && item.staff && now - (Number(item.createdAt) || 0) < 60 * 60 * 1000);
+}
+
+export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 30 * 60 * 1000, botWhenAssigned = false } = {}) {
   const seen = new Set();
   return changes.filter(change => {
     if (change.type !== 'message' || change.updated || change.message?.direction !== 'incoming' || !change.conversation) return false;
     const at = Number(change.message.createdAt) || 0;
     if (now - at > windowMs || at > now + 5 * 60 * 1000) return false;
     if (change.conversation.botEnabled === false) return false;
+    // Hội thoại đã có nhân viên nhận trong Pancake: như đường webhook, bot không chen.
+    if (!botWhenAssigned && change.conversation.pancakeAssigned) return false;
     const messages = store?.messages?.[change.conversation.id] || [];
     if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) return false;
+    if (staffRepliedRecently(messages, now)) return false;
     const key = `${change.conversation.id}:${change.message.id}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
+  // `late`: tin đến muộn so với lúc phát sinh — bot kiểm lại "đã có người trả lời" ngay trước khi trả lời.
+  }).map(change => ({ ...change, late: true }));
 }
 
 /**
  * Lúc khởi động: tin khách đã nằm trong kho (đồng bộ ghi lúc webhook im) mà chưa ai trả lời trong
  * `windowMs` → đưa bot một lần. Chỉ tin cuối của mỗi hội thoại, bot còn bật.
  */
-export function backlogBotChanges(store, { now = Date.now(), windowMs = 60 * 60 * 1000 } = {}) {
+export function backlogBotChanges(store, { now = Date.now(), windowMs = 60 * 60 * 1000, botWhenAssigned = false } = {}) {
   const changes = [];
   for (const conversation of store?.conversations || []) {
     if (conversation.botEnabled === false) continue;
+    if (!botWhenAssigned && conversation.pancakeAssigned) continue;
     const messages = store.messages?.[conversation.id] || [];
     const last = messages[messages.length - 1];
     if (!last || last.direction !== 'incoming' || !['text', 'image'].includes(last.type)) continue;
     const at = Number(last.createdAt) || 0;
     if (now - at > windowMs || at > now + 5 * 60 * 1000) continue;
     if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) continue;
-    changes.push({ type: 'message', conversation, message: last });
+    if (staffRepliedRecently(messages, now)) continue;
+    changes.push({ type: 'message', conversation, message: last, late: true });
   }
   return changes;
 }
@@ -515,7 +528,7 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
   // Webhook không tới (Pancake tạm ngưng, dịch vụ khởi động lại): tin mới chưa ai trả lời vẫn được bot xử lý.
   let bot = 0;
   if (processChatbotChanges && collected.length) {
-    const missed = missedBotChanges(collected, await readMessagingStore(), { windowMs: botWindowMs });
+    const missed = missedBotChanges(collected, await readMessagingStore(), { windowMs: botWindowMs, botWhenAssigned: Boolean(config.botWhenAssigned) });
     if (missed.length) {
       bot = missed.length;
       try { await processChatbotChanges(missed, chatbotDependencies); } catch (error) { allFailures.push(`bot: ${error.message}`); }
@@ -564,7 +577,7 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, quickMs = 2 * 60
       // Lượt đầu sau khởi động: tin khách còn treo trong 60 phút (webhook im lúc dịch vụ dừng) đưa bot.
       if (first && processChatbotChanges) {
         first = false;
-        const backlog = backlogBotChanges(await readMessagingStore());
+        const backlog = backlogBotChanges(await readMessagingStore(), { botWhenAssigned: Boolean(config.botWhenAssigned) });
         if (backlog.length) {
           log(`Đồng bộ Pancake: đưa bot ${backlog.length} tin khách còn treo sau khởi động`);
           await processChatbotChanges(backlog, chatbotDependencies);
@@ -650,7 +663,8 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false }
       // Nhân viên trả lời trong Pancake (tin mới, không phải tin dội lại của
       // CRM, không phải lịch sử kéo về): bot đứng ngoài hội thoại này cho tới
       // khi bật lại trong CRM, để không nói chen vào người thật.
-      if (fromWebhook && inserted && event.pancake.staff && conversation.botEnabled !== false) {
+      const recentStaff = event.pancake.staff && Date.now() - (Number(event.message?.createdAt || event.timestamp) || 0) < 60 * 60 * 1000;
+      if ((fromWebhook || recentStaff) && inserted && event.pancake.staff && conversation.botEnabled !== false) {
         conversation.botEnabled = false;
         conversation.botPausedBy = event.pancake.staffName;
         conversation.botPausedAt = Date.now();
@@ -1132,7 +1146,12 @@ export async function handlePancakeWebhook(payload, { processChatbotChanges, cha
   const events = normalizePancakeWebhook(payload, config, now);
   if (payload?.event_type && payload.event_type !== 'verify') notePancakeWebhook(now);
   const changes = await storePancakeEvents(events, { fromWebhook: true });
-  if (changes.length) await enrichPancakeAdContext(changes, config, fetchImpl);
+  // Tra tên quảng cáo ở nền: gọi Pancake (tới 20 s, retry 429) không được làm khách chờ bot.
+  // Chờ tối đa 1,5 s cho tên quảng cáo (thường về ngay); lâu hơn thì để chạy nền, bot đọc adTitle ở lượt sau.
+  if (changes.length) {
+    const enrich = enrichPancakeAdContext(changes, config, fetchImpl).catch(error => console.warn(`Pancake: không tra được quảng cáo: ${error.message}`));
+    await Promise.race([enrich, pause(1500)]);
+  }
   // Móc trước bot (server dùng để chào khách quét QR và bỏ tin đó khỏi bot):
   // nhận MỌI thay đổi, kể cả hội thoại đã có nhân viên nhận, trả về phần bot xử lý.
   const candidates = typeof beforeBot === 'function' ? (await beforeBot(changes)) || [] : changes;

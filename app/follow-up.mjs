@@ -149,7 +149,15 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
  * Một lượt bám đuổi: duyệt mọi kịch bản đang bật, gửi cho khách đủ điều kiện,
  * ghi lại. Trả về { checked, sent, failed, skipped }.
  */
-export async function runFollowUps({ readSettings, sendMessage, conversationInfo = null, now = Date.now(), log = console.log, quietHours = true } = {}) {
+// Vòng 15 phút và nút "Chạy ngay" không chạy chồng: sent[key] chỉ ghi sau khi gửi, hai lượt song song sẽ gửi trùng.
+let activeFollowUpRun = null;
+export function runFollowUps(options = {}) {
+  if (activeFollowUpRun) return activeFollowUpRun;
+  activeFollowUpRun = runFollowUpsOnce(options).finally(() => { activeFollowUpRun = null; });
+  return activeFollowUpRun;
+}
+
+async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = null, now = Date.now(), log = console.log, quietHours = true } = {}) {
   const settings = await readSettings();
   const summary = { checked: 0, sent: 0, failed: 0, skipped: 0, disabled: false };
   // Khách được bám đuổi đã chốt đơn: ghi nhận cả khi bám đuổi đang tắt.
@@ -462,7 +470,15 @@ export async function pruneReturningFromQueue({ conversationInfo, limit = 40, no
  * extension Pancake). Mỗi khách hỏi lại Pancake ngay lúc này: khách đã có đơn
  * trên Pancake/POS thì bỏ khỏi hàng; lấy ID Facebook toàn cục mà extension cần.
  */
-export async function buildFollowUpBatch({ limit = 30, conversationInfo, now = Date.now(), readSettings } = {}) {
+// Hai nhân viên/tab tạo lô gần nhau: lô sau chờ lô trước ghi lease xong mới chọn khách, không trùng.
+let activeBatchBuild = Promise.resolve();
+export function buildFollowUpBatch(options = {}) {
+  const operation = activeBatchBuild.then(() => buildFollowUpBatchOnce(options));
+  activeBatchBuild = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+async function buildFollowUpBatchOnce({ limit = 30, conversationInfo, now = Date.now(), readSettings } = {}) {
   await reconcileFollowUpQueue(now, { readSettings });
   const size = Math.max(1, Math.min(maxBatchSize, Math.round(Number(limit) || 30)));
   // Khách Pancake chưa lưu ID Facebook: vẫn vào lô (tối đa 10/lô), cầu nối nhờ extension

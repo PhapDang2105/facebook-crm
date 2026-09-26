@@ -72,11 +72,15 @@ const inAppHints = {
  * riêng khi đang ở trong app, và đường lùi về trang Facebook của Page.
  * Không có tài nguyên ngoài, không tự chuyển hướng, không cookie.
  */
-export function renderBridgePage({ code, destination, pageName, fallbackUrl = '', classification = {} }) {
+export function renderBridgePage({ code, destination, pageName, fallbackUrl = '', zaloUrl = '', classification = {} }) {
   const name = escapeHtml(pageName || 'Giọt Nắng');
   const href = escapeHtml(destination);
   const safeCode = escapeHtml(code);
   const hint = classification.inApp ? (inAppHints[classification.browser] ?? inAppHints.webview) : '';
+  // Khách quét bằng Zalo hay quen Zalo thì có đường đi thẳng, không phải rời app.
+  const zalo = zaloUrl
+    ? `<p class="or">hoặc</p><a class="btn btn-zalo" id="zalo" href="${escapeHtml(zaloUrl)}" rel="noopener">Nhắn qua Zalo</a>`
+    : '';
   const fallback = fallbackUrl
     ? `<p class="fallback">Không mở được? Vào trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a> và nhắn tin cho chúng tôi.</p>`
     : '';
@@ -96,6 +100,9 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   p { margin: 0 0 18px; color: #4b5057; }
   .btn { display: block; padding: 16px 20px; margin: 4px 0 18px; background: #1f7a45; color: #fff; font-size: 19px; font-weight: 700; text-decoration: none; border-radius: 999px; }
   .btn:active { background: #17603a; }
+  .btn-zalo { background: #0068ff; }
+  .btn-zalo:active { background: #0052cc; }
+  .or { margin: -6px 0 12px; color: #9aa0a6; font-size: 14px; }
   .hint { margin: 0 0 16px; padding: 12px 14px; background: #fff7e0; border-radius: 10px; color: #5b4a12; font-size: 15px; text-align: left; }
   .copy { display: inline-block; margin: 0 0 14px; padding: 8px 14px; background: none; border: 1px solid #c9d3cd; border-radius: 999px; color: #1f7a45; font: inherit; font-size: 15px; }
   .fallback { margin: 0; font-size: 14px; color: #65676b; }
@@ -109,6 +116,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   <h1>Cảm ơn bạn đã mua hàng 💛</h1>
   <p>Bấm nút bên dưới để mở Messenger và nhận hướng dẫn sử dụng cùng quà cảm ơn từ ${name}.</p>
   <a class="btn" id="open" href="${href}" rel="noopener">Mở Messenger</a>
+  ${zalo}
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <button class="copy" type="button" id="copy" hidden>Sao chép liên kết</button>
   ${fallback}
@@ -119,9 +127,24 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   var open = document.getElementById('open');
   var copy = document.getElementById('copy');
   var beacon = '/q/${safeCode}/open';
-  open.addEventListener('click', function () {
-    try { navigator.sendBeacon(beacon); } catch (e) {}
-  });
+  // Đếm ngay khi ngón tay chạm nút (pointerdown/touchstart), không đợi click:
+  // trên iPhone, bấm liên kết mở app là Safari nhảy sang Messenger trước khi
+  // sự kiện click kịp chạy, nên đếm ở click là mất lượt.
+  function send(to) {
+    var url = beacon + '?to=' + to;
+    try { if (navigator.sendBeacon && navigator.sendBeacon(url)) return; } catch (e) {}
+    try { fetch(url, { method: 'POST', keepalive: true }); } catch (e) {}
+  }
+  function arm(element, to) {
+    if (!element) return;
+    var sent = false;
+    var fire = function () { if (sent) return; sent = true; send(to); };
+    element.addEventListener('pointerdown', fire);
+    element.addEventListener('touchstart', fire, { passive: true });
+    element.addEventListener('click', fire);
+  }
+  arm(open, 'messenger');
+  arm(document.getElementById('zalo'), 'zalo');
   if (navigator.clipboard && navigator.clipboard.writeText) {
     copy.hidden = false;
     copy.addEventListener('click', function () {

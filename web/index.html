@@ -690,6 +690,10 @@
                 <label class="qr-make-field"><span>Mã lô in</span><input id="qr-code-input" name="code" placeholder="vd: tmdt-01" autocomplete="off" spellcheck="false" maxlength="40" pattern="[a-z0-9][a-z0-9-]{0,39}" title="Chữ thường, số và gạch nối, tối đa 40 ký tự"></label>
                 <button class="settings-save-button" type="submit">Tạo mã QR</button>
               </form>
+              <form class="qr-make" id="qr-zalo-form">
+                <label class="qr-make-field qr-make-field-wide"><span>Liên kết Zalo trên trang đệm (để trống là không hiện nút Zalo)</span><input id="qr-zalo-url" name="zaloUrl" placeholder="https://zalo.me/… hoặc https://zalo.me/g/…" autocomplete="off" spellcheck="false" inputmode="url"></label>
+                <button class="settings-save-button" type="submit">Lưu liên kết Zalo</button>
+              </form>
               <div class="qr-preview hidden" id="qr-preview">
                 <img class="qr-preview-image" id="qr-preview-image" alt="Mã QR">
                 <div class="qr-preview-info">

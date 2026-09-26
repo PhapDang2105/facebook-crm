@@ -10265,7 +10265,7 @@ function renderQrStats({ codes = [], baseUrl = '' } = {}) {
       <td>${entry.scans || 0}</td>
       <td>${qrCountList(entry.platforms, qrPlatformNames)}</td>
       <td>${qrCountList(entry.browsers, qrBrowserNames)}</td>
-      <td>${entry.opens || 0}${entry.openRate === null || entry.openRate === undefined ? '' : ` <small>(${entry.openRate}% lượt xem trang)</small>`}</td>
+      <td>Messenger ${entry.opens || 0}${entry.openRate === null || entry.openRate === undefined ? '' : ` <small>(${entry.openRate}% lượt xem trang)</small>`}${entry.zaloOpens ? `<br>Zalo ${entry.zaloOpens}` : ''}</td>
       <td>${entry.referrals || 0}${entry.arrivalRate === null || entry.arrivalRate === undefined ? '' : ` <small>(${entry.arrivalRate}%)</small>`}</td>
       <td>${formatQrTime(entry.lastAt)}</td>
       <td><button type="button" class="qr-stats-show" data-qr-code="${escapeHtml(entry.code)}">Xem QR</button></td>
@@ -10277,12 +10277,38 @@ async function loadQrSettings() {
   const container = document.querySelector('#qr-stats');
   if (!container) return;
   try {
-    renderQrStats(await readApiResponse(await fetch('/api/qr/stats')));
+    const [stats, settings] = await Promise.all([
+      readApiResponse(await fetch('/api/qr/stats')),
+      readApiResponse(await fetch('/api/qr/settings'))
+    ]);
+    const zaloInput = document.querySelector('#qr-zalo-url');
+    if (zaloInput && document.activeElement !== zaloInput) zaloInput.value = settings.zaloUrl || '';
+    renderQrStats(stats);
   } catch (error) {
     container.innerHTML = '<p class="channel-empty">Chưa tải được thống kê.</p>';
     showToast(error.message || 'Chưa tải được thống kê mã QR.', 'error');
   }
 }
+
+document.querySelector('#qr-zalo-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = document.querySelector('#qr-zalo-url');
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  if (button) button.disabled = true;
+  try {
+    const saved = await readApiResponse(await fetch('/api/qr/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zaloUrl: String(input?.value || '').trim() })
+    }));
+    if (input) input.value = saved.zaloUrl || '';
+    showToast(saved.zaloUrl ? 'Đã lưu. Trang đệm sẽ hiện thêm nút "Nhắn qua Zalo".' : 'Đã bỏ nút Zalo khỏi trang đệm.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được liên kết Zalo.', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+});
 
 document.querySelector('#qr-make-form')?.addEventListener('submit', event => {
   event.preventDefault();

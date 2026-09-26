@@ -33,6 +33,7 @@ import { fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured
 import { isValidQrCode, listQrScans, recordQrOpen, recordQrScan } from './qr-scans.mjs';
 import { classifyUserAgent, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
+import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -1021,7 +1022,9 @@ const server = http.createServer(async (request, response) => {
       if (isOpenBeacon) {
         // Beacon từ trang đệm khi khách bấm nút. Chỉ đếm, không cần thân tin.
         if (request.method !== 'POST') return sendJson(response, 405, { error: 'Chỉ nhận POST.' });
-        recordQrOpen(code).catch(error => console.error(`QR: không ghi được lượt bấm ${code}: ${error.message}`));
+        const target = url.searchParams.get('to') === 'zalo' ? 'zalo' : 'messenger';
+        console.log(`QR: bấm nút ${target} cho mã ${code}`);
+        recordQrOpen(code, { target }).catch(error => console.error(`QR: không ghi được lượt bấm ${code}: ${error.message}`));
         response.writeHead(204, { 'Cache-Control': 'no-store' });
         return response.end();
       }
@@ -1044,11 +1047,13 @@ const server = http.createServer(async (request, response) => {
         return response.end();
       }
       console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}${classification.inApp ? ', trong app' : ''}) -> trang đệm`);
+      const { zaloUrl } = await readQrSettings();
       const html = renderBridgePage({
         code,
         destination,
         pageName: page.name,
         fallbackUrl: `https://www.facebook.com/${encodeURIComponent(page.id)}`,
+        zaloUrl,
         classification
       });
       response.writeHead(200, {
@@ -1075,6 +1080,18 @@ const server = http.createServer(async (request, response) => {
         codes: stats.codes.map(entry => ({ ...entry, url: qrTargetUrl(metaConfig.publicBaseUrl, entry.code) })),
         recent: stats.recent
       });
+    }
+    // Cấu hình trang đệm (liên kết Zalo) — Cài đặt → Mã QR.
+    if (url.pathname === '/api/qr/settings') {
+      if (request.method === 'GET') return sendJson(response, 200, await readQrSettings());
+      if (request.method === 'PUT') {
+        try {
+          const payload = await readBody(request);
+          return sendJson(response, 200, await writeQrSettings({ zaloUrl: payload?.zaloUrl }));
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message });
+        }
+      }
     }
     // Ảnh mã QR để in lên thẻ: mã hoá /q/<mã>. Sau mật khẩu (Caddy chỉ mở /q/*),
     // vì đây là công cụ của nhân viên, không phải của khách. SVG cho nhà in,

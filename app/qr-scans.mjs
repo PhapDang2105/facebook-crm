@@ -107,16 +107,18 @@ export async function recordQrScan(code, { at = Date.now(), userAgent = '', mode
 }
 
 /**
- * Khách bấm nút "Mở Messenger" trên trang đệm (beacon từ trang). Lượt quét
- * chuyển hướng thẳng không có bước này, nên tỷ lệ bấm chỉ so với số lượt
- * được phục vụ bằng trang.
+ * Khách bấm nút trên trang đệm (beacon từ trang): "Mở Messenger" đếm vào
+ * `opens`, "Nhắn qua Zalo" đếm vào `zaloOpens`. Lượt quét chuyển hướng thẳng
+ * không có bước này, nên tỷ lệ bấm chỉ so với số lượt được phục vụ bằng trang.
  */
-export async function recordQrOpen(code, { at = Date.now() } = {}) {
+export async function recordQrOpen(code, { at = Date.now(), target = 'messenger' } = {}) {
   if (!isValidQrCode(code)) throw new Error('Mã QR không hợp lệ.');
+  const zalo = target === 'zalo';
   return updateStore(store => {
     const entry = entryFor(store, code, at);
-    entry.opens += 1;
-    pushRecent(store, { code, at, event: 'open' });
+    if (zalo) entry.zaloOpens = (Number(entry.zaloOpens) || 0) + 1;
+    else entry.opens += 1;
+    pushRecent(store, { code, at, event: zalo ? 'open-zalo' : 'open' });
     return entry;
   });
 }
@@ -135,6 +137,7 @@ export async function listQrScans(referralCounts = {}) {
     return {
       ...entry,
       opens,
+      zaloOpens: Number(entry.zaloOpens) || 0,
       referrals,
       // Chưa có lượt quét nào thì tỷ lệ là null, không phải 0 — tránh đọc nhầm
       // "0%" thành "hỏng" khi thật ra là "chưa ai quét".

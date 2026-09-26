@@ -83,6 +83,16 @@ test('trang đệm: trong app thì có hướng dẫn đúng app', () => {
   assert.doesNotMatch(render('Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Mobile/15E148 [MessengerForiOS;FBAV/470]'), /class="hint"/);
 });
 
+test('trang đệm: nút Zalo chỉ hiện khi có liên kết; lượt bấm đếm từ lúc chạm, tách Messenger/Zalo', () => {
+  const without = render(agents.iosSafari);
+  assert.doesNotMatch(without, /id="zalo"|Nhắn qua Zalo/);
+  const withZalo = render(agents.zaloIos, { zaloUrl: 'https://zalo.me/g/abcdef' });
+  assert.match(withZalo, /<a class="btn btn-zalo" id="zalo" href="https:\/\/zalo\.me\/g\/abcdef"/);
+  assert.match(withZalo, /pointerdown/, 'đếm từ lúc chạm, không đợi click (iPhone nhảy app trước click)');
+  assert.match(withZalo, /arm\(open, 'messenger'\)/);
+  assert.match(withZalo, /'\?to=' \+ to/);
+});
+
 test('trang đệm: tên Page và mã được escape', () => {
   const html = render(agents.iosSafari, { pageName: 'A <b>"x"</b>', code: 'tmdt-01' });
   assert.match(html, /A &lt;b&gt;&quot;x&quot;&lt;\/b&gt;/);
@@ -96,11 +106,15 @@ test('kho lượt quét: đếm theo máy, trình duyệt, cách phục vụ và
   await recordQrScan('tmdt-01', { userAgent: agents.zaloAndroid, mode: 'page', at: 2 });
   await recordQrScan('tmdt-01', { userAgent: agents.iosSafari, mode: 'page', at: 3 });
   await recordQrOpen('tmdt-01', { at: 4 });
+  await recordQrOpen('tmdt-01', { at: 5, target: 'zalo' });
   const { codes, recent } = await listQrScans({ 'tmdt-01': 2 });
   assert.equal(codes.length, 1);
   const entry = codes[0];
   assert.equal(entry.scans, 3);
-  assert.equal(entry.opens, 1);
+  assert.equal(entry.opens, 1, 'bấm Zalo không tính vào lượt mở Messenger');
+  assert.equal(entry.zaloOpens, 1);
+  assert.equal(recent[0].event, 'open-zalo');
+  recent.shift();
   assert.deepEqual(entry.platforms, { android: 2, ios: 1 });
   assert.deepEqual(entry.browsers, { chrome: 1, zalo: 1, safari: 1 });
   assert.deepEqual(entry.modes, { redirect: 1, page: 2 });

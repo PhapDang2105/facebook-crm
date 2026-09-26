@@ -30,7 +30,8 @@ import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
 import { fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
-import { isValidQrCode, listQrScans, recordQrScan } from './qr-scans.mjs';
+import { isValidQrCode, listQrScans, recordQrOpen, recordQrScan } from './qr-scans.mjs';
+import { classifyUserAgent, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -530,17 +531,21 @@ const qrGreetingCooldownMs = Number(process.env.QR_GREETING_COOLDOWN_MS) || 6 * 
 const qrGreetedAt = new Map();
 
 /**
- * Page mà /q/<mã> chuyển hướng tới. Lấy từ Page đang kết nối trong CRM; đặt
- * QR_PAGE_ID trong .env để ghim cứng nếu sau này nối thêm Page thứ hai.
- * Nhớ lại kết quả để mỗi lượt quét không phải đọc đĩa.
+ * Page mà /q/<mã> đưa khách tới. Lấy từ Page đang kết nối trong CRM; đặt
+ * QR_PAGE_ID (và QR_PAGE_NAME cho tên hiện trên trang đệm) trong .env để ghim
+ * cứng nếu sau này nối thêm Page thứ hai. Nhớ lại kết quả để mỗi lượt quét
+ * không phải đọc đĩa.
  */
-let cachedQrPageId = '';
-async function resolveQrPageId() {
-  if (cachedQrPageId) return cachedQrPageId;
-  if (process.env.QR_PAGE_ID) return (cachedQrPageId = process.env.QR_PAGE_ID);
+let cachedQrPage = null;
+async function resolveQrPage() {
+  if (cachedQrPage) return cachedQrPage;
   const channels = await readChannelStore();
-  cachedQrPageId = String(channels.items?.[0]?.id || '');
-  return cachedQrPageId;
+  const first = channels.items?.[0] || {};
+  const id = String(process.env.QR_PAGE_ID || first.id || '');
+  const name = String(process.env.QR_PAGE_NAME || (String(first.id) === id ? first.name : '') || process.env.PANCAKE_PAGE_NAME || '').trim();
+  if (!id) return { id: '', name };
+  cachedQrPage = { id, name };
+  return cachedQrPage;
 }
 
 /** Khách đến từ phiếu cảm ơn (link m.me), phân biệt với khách bấm quảng cáo. */
@@ -1002,22 +1007,56 @@ const server = http.createServer(async (request, response) => {
     // vì khách quét chưa đăng nhập gì cả. Đích đến do MÁY CHỦ quyết định, mã chỉ
     // đi vào tham số `ref` — người ngoài không thể biến nó thành chuyển hướng
     // tới địa chỉ khác.
-    const qrMatch = url.pathname.match(/^\/q\/([^/]+)\/?$/);
-    if (qrMatch && request.method === 'GET') {
+    //
+    // Chỉ Chrome hệ thống trên Android được chuyển hướng 302 thẳng sang m.me;
+    // iPhone và mọi trình duyệt trong app (Zalo, Facebook…) nhận trang đệm có
+    // nút "Mở Messenger", vì Safari không mở app khi tới m.me qua chuyển hướng
+    // và trang web m.me nay bắt đăng nhập. Lý do đầy đủ ở app/qr-bridge.mjs.
+    const qrMatch = url.pathname.match(/^\/q\/([^/]+)(\/open)?\/?$/);
+    if (qrMatch && (request.method === 'GET' || request.method === 'POST')) {
       const code = decodeURIComponent(qrMatch[1]).toLowerCase();
+      const isOpenBeacon = Boolean(qrMatch[2]);
       if (!isValidQrCode(code)) return sendJson(response, 404, { error: 'Mã QR không hợp lệ.' });
+      if (isOpenBeacon) {
+        // Beacon từ trang đệm khi khách bấm nút. Chỉ đếm, không cần thân tin.
+        if (request.method !== 'POST') return sendJson(response, 405, { error: 'Chỉ nhận POST.' });
+        recordQrOpen(code).catch(error => console.error(`QR: không ghi được lượt bấm ${code}: ${error.message}`));
+        response.writeHead(204, { 'Cache-Control': 'no-store' });
+        return response.end();
+      }
+      if (request.method !== 'GET') return sendJson(response, 405, { error: 'Chỉ nhận GET.' });
+      const userAgent = String(request.headers['user-agent'] || '');
+      const classification = classifyUserAgent(userAgent);
+      const redirect = shouldRedirectDirectly(classification);
       // Đếm trước, nhưng không để việc ghi đĩa làm khách phải chờ.
-      recordQrScan(code, { userAgent: String(request.headers['user-agent'] || '') })
+      recordQrScan(code, { userAgent, mode: redirect ? 'redirect' : 'page' })
         .catch(error => console.error(`QR: không ghi được lượt quét ${code}: ${error.message}`));
-      const pageId = await resolveQrPageId();
-      if (!pageId) {
-        console.error('QR: chưa có Page nào kết nối nên không biết chuyển hướng đi đâu.');
+      const page = await resolveQrPage();
+      if (!page.id) {
+        console.error('QR: chưa có Page nào kết nối nên không biết đưa khách đi đâu.');
         return sendJson(response, 503, { error: 'Chưa cấu hình Page Facebook.' });
       }
-      const destination = `https://m.me/${encodeURIComponent(pageId)}?ref=${encodeURIComponent(code)}`;
-      console.log(`QR: lượt quét ${code} -> chuyển hướng Messenger`);
-      response.writeHead(302, { Location: destination, 'Cache-Control': 'no-store' });
-      return response.end();
+      const destination = `https://m.me/${encodeURIComponent(page.id)}?ref=${encodeURIComponent(code)}`;
+      if (redirect) {
+        console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}) -> chuyển hướng Messenger`);
+        response.writeHead(302, { Location: destination, 'Cache-Control': 'no-store' });
+        return response.end();
+      }
+      console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}${classification.inApp ? ', trong app' : ''}) -> trang đệm`);
+      const html = renderBridgePage({
+        code,
+        destination,
+        pageName: page.name,
+        fallbackUrl: `https://www.facebook.com/${encodeURIComponent(page.id)}`,
+        classification
+      });
+      response.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex',
+        'Referrer-Policy': 'no-referrer'
+      });
+      return response.end(html);
     }
     // Đối chiếu lượt quét với số referral Messenger thật sự nhận được.
     if (request.method === 'GET' && url.pathname === '/api/qr/stats') {

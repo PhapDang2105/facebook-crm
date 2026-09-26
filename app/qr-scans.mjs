@@ -1,5 +1,6 @@
 // Lớp trung gian cho mã QR in trên phiếu cảm ơn: QR trỏ về /q/<mã> của CRM,
-// CRM đếm rồi mới chuyển hướng sang Messenger.
+// CRM đếm rồi mới đưa khách sang Messenger (chuyển hướng thẳng hoặc trang đệm,
+// xem qr-bridge.mjs).
 //
 // Vì sao không in thẳng link m.me lên phiếu:
 //  - Phiếu in rồi là không sửa được. Qua đây thì đổi đích lúc nào cũng được.
@@ -10,6 +11,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { classifyUserAgent } from './qr-bridge.mjs';
 
 const scansPath = process.env.QR_SCANS_PATH
   || path.join(projectRoot, 'data', 'processed', 'qr-scans.json');
@@ -66,23 +68,55 @@ function updateStore(mutate) {
   return operation;
 }
 
+function entryFor(store, code, at) {
+  const entry = store.codes[code] || { code, scans: 0, opens: 0, firstAt: at, lastAt: at, platforms: {}, browsers: {}, modes: {} };
+  // Kho ghi từ bản trước chưa có các ô này.
+  entry.opens = Number(entry.opens) || 0;
+  entry.browsers = entry.browsers && typeof entry.browsers === 'object' ? entry.browsers : {};
+  entry.modes = entry.modes && typeof entry.modes === 'object' ? entry.modes : {};
+  store.codes[code] = entry;
+  return entry;
+}
+
+function pushRecent(store, item) {
+  store.recent.push(item);
+  if (store.recent.length > recentLimit) store.recent = store.recent.slice(-recentLimit);
+}
+
 /**
- * Ghi một lượt quét. KHÔNG lưu địa chỉ IP: để đếm thì không cần, mà lưu vào là
- * thành dữ liệu cá nhân phải bảo vệ. Chỉ giữ loại máy để biết iPhone hay Android.
+ * Ghi một lượt quét. KHÔNG lưu địa chỉ IP hay chuỗi User-Agent: để đếm thì
+ * không cần, mà lưu vào là thành dữ liệu cá nhân phải bảo vệ. Chỉ giữ loại máy
+ * (iPhone/Android), loại trình duyệt (Zalo, Chrome, Safari…) và cách phục vụ
+ * (`redirect`: 302 thẳng sang m.me; `page`: trang đệm có nút bấm) — đủ để biết
+ * khách rớt ở nhánh nào.
  */
-export async function recordQrScan(code, { at = Date.now(), userAgent = '' } = {}) {
+export async function recordQrScan(code, { at = Date.now(), userAgent = '', mode = 'page' } = {}) {
   if (!isValidQrCode(code)) throw new Error('Mã QR không hợp lệ.');
-  const platform = /iphone|ipad|ios/i.test(userAgent) ? 'ios'
-    : /android/i.test(userAgent) ? 'android'
-      : /windows|macintosh|linux/i.test(userAgent) ? 'may tinh' : 'khac';
+  const { platform, browser } = classifyUserAgent(userAgent);
+  const served = mode === 'redirect' ? 'redirect' : 'page';
   return updateStore(store => {
-    const entry = store.codes[code] || { code, scans: 0, firstAt: at, lastAt: at, platforms: {} };
+    const entry = entryFor(store, code, at);
     entry.scans += 1;
     entry.lastAt = at;
     entry.platforms[platform] = (entry.platforms[platform] || 0) + 1;
-    store.codes[code] = entry;
-    store.recent.push({ code, at, platform });
-    if (store.recent.length > recentLimit) store.recent = store.recent.slice(-recentLimit);
+    entry.browsers[browser] = (entry.browsers[browser] || 0) + 1;
+    entry.modes[served] = (entry.modes[served] || 0) + 1;
+    pushRecent(store, { code, at, platform, browser, mode: served });
+    return entry;
+  });
+}
+
+/**
+ * Khách bấm nút "Mở Messenger" trên trang đệm (beacon từ trang). Lượt quét
+ * chuyển hướng thẳng không có bước này, nên tỷ lệ bấm chỉ so với số lượt
+ * được phục vụ bằng trang.
+ */
+export async function recordQrOpen(code, { at = Date.now() } = {}) {
+  if (!isValidQrCode(code)) throw new Error('Mã QR không hợp lệ.');
+  return updateStore(store => {
+    const entry = entryFor(store, code, at);
+    entry.opens += 1;
+    pushRecent(store, { code, at, event: 'open' });
     return entry;
   });
 }
@@ -96,12 +130,16 @@ export async function listQrScans(referralCounts = {}) {
   const store = await readStore();
   const codes = Object.values(store.codes).map(entry => {
     const referrals = Number(referralCounts[entry.code]) || 0;
+    const pageServed = Number(entry.modes?.page) || 0;
+    const opens = Number(entry.opens) || 0;
     return {
       ...entry,
+      opens,
       referrals,
       // Chưa có lượt quét nào thì tỷ lệ là null, không phải 0 — tránh đọc nhầm
       // "0%" thành "hỏng" khi thật ra là "chưa ai quét".
-      arrivalRate: entry.scans ? Math.round((referrals / entry.scans) * 100) : null
+      arrivalRate: entry.scans ? Math.round((referrals / entry.scans) * 100) : null,
+      openRate: pageServed ? Math.round((opens / pageServed) * 100) : null
     };
   }).sort((first, second) => second.scans - first.scans);
   return { codes, recent: [...store.recent].slice(-100).reverse() };

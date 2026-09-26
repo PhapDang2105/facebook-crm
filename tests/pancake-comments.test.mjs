@@ -7,7 +7,7 @@ import path from 'node:path';
 // Hộp thư thử riêng: storePancakeEvents ghi vào messaging-store.
 process.env.META_CONVERSATIONS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-comments-')), 'meta-conversations.json');
 const {
-  backlogBotChanges, enrichPancakeAdContext, findPancakePost, handlePancakeWebhook, missedBotChanges, normalizePancakeWebhook, sendConversationMessageViaPancake, syncPancakeConversations
+  backlogBotChanges, enrichPancakeAdContext, findPancakePost, handlePancakeWebhook, missedBotChanges, normalizePancakeWebhook, pancakeSyncPlan, sendConversationMessageViaPancake, syncPancakeConversations
 } = await import('../app/pancake.mjs');
 const { getConversation, listMessages } = await import('../app/messaging-store.mjs');
 
@@ -222,4 +222,15 @@ test('sau khởi động: tin khách còn treo trong 60 phút (chưa ai trả l�
     }
   };
   assert.deepEqual(backlogBotChanges(store, { now }).map(change => change.conversation.id), ['a']);
+});
+
+test('lịch đồng bộ thích ứng: đủ mỗi 10 phút; webhook im quá 15 phút thì thêm lượt nhanh mỗi 2 phút; webhook còn sống thì không', () => {
+  const m = 60 * 1000;
+  const t0 = 1_000_000_000_000;
+  assert.equal(pancakeSyncPlan({ now: t0, startedAt: t0, lastFullAt: 0 }), 'full', 'chưa chạy lần nào → đủ');
+  assert.equal(pancakeSyncPlan({ now: t0 + 5 * m, startedAt: t0, lastFullAt: t0, lastQuickAt: t0 }), null, 'mới khởi động 5 phút: chưa coi là im');
+  assert.equal(pancakeSyncPlan({ now: t0 + 16 * m, startedAt: t0, lastFullAt: t0 + 10 * m, lastQuickAt: t0 + 10 * m, lastWebhookAt: 0 }), 'quick', 'im 16 phút, lượt nhanh cách 6 phút');
+  assert.equal(pancakeSyncPlan({ now: t0 + 17 * m, startedAt: t0, lastFullAt: t0 + 10 * m, lastQuickAt: t0 + 16 * m, lastWebhookAt: 0 }), null, 'lượt nhanh vừa chạy 1 phút trước');
+  assert.equal(pancakeSyncPlan({ now: t0 + 16 * m, startedAt: t0, lastFullAt: t0 + 10 * m, lastQuickAt: t0 + 10 * m, lastWebhookAt: t0 + 14 * m }), null, 'webhook vừa gọi 2 phút trước: không cần nhanh');
+  assert.equal(pancakeSyncPlan({ now: t0 + 21 * m, startedAt: t0, lastFullAt: t0 + 10 * m, lastQuickAt: t0 + 20 * m, lastWebhookAt: t0 + 20 * m }), 'full', 'đến kỳ 10 phút thì đủ');
 });

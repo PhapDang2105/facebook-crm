@@ -515,18 +515,42 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
 }
 
 let pancakeSyncTimer = null;
-/** Đồng bộ lúc khởi động rồi mỗi 10 phút, để không lọt tin trong lúc webhook gián đoạn. */
-export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.log, config = defaultConfig, processChatbotChanges = null, chatbotDependencies = null } = {}) {
+let lastPancakeWebhookAt = 0;
+/** Webhook Pancake vừa gọi tới (gói hợp lệ): mốc để biết webhook còn sống. */
+export function notePancakeWebhook(now = Date.now()) { lastPancakeWebhookAt = now; }
+
+/**
+ * Lịch đồng bộ thích ứng: đủ (60 hội thoại) mỗi `intervalMs`; khi webhook im quá `silentMs` (Pancake
+ * tạm ngưng webhook, như 26/09) thì thêm lượt nhanh (20 hội thoại + 10 luồng bình luận) mỗi `quickMs`
+ * để bot trả lời trong ~2 phút thay vì 10. Trả về 'full' | 'quick' | null.
+ */
+export function pancakeSyncPlan({ now = Date.now(), startedAt = 0, lastWebhookAt = 0, lastFullAt = 0, lastQuickAt = 0, intervalMs = 10 * 60 * 1000, quickMs = 2 * 60 * 1000, silentMs = 15 * 60 * 1000 } = {}) {
+  if (now - lastFullAt >= intervalMs) return 'full';
+  const silent = now - Math.max(lastWebhookAt, startedAt) > silentMs;
+  if (silent && now - lastQuickAt >= quickMs) return 'quick';
+  return null;
+}
+
+/** Đồng bộ lúc khởi động rồi mỗi 10 phút (nhanh hơn khi webhook im), để không lọt tin trong lúc webhook gián đoạn. */
+export function startPancakeSync({ intervalMs = 10 * 60 * 1000, quickMs = 2 * 60 * 1000, silentMs = 15 * 60 * 1000, log = console.log, config = defaultConfig, processChatbotChanges = null, chatbotDependencies = null } = {}) {
   if (!isPancakeConfigured(config) || pancakeSyncTimer) return null;
   // Lượt trước chưa xong (mạng chậm, bị chặn 429) thì lượt sau bỏ qua, không chạy chồng.
   let running = false;
   let first = true;
-  const run = async () => {
+  const startedAt = Date.now();
+  let lastFullAt = 0;
+  let lastQuickAt = 0;
+  let silentWarnedAt = 0;
+  const run = async mode => {
     if (running) return;
     running = true;
     try {
-      const summary = await syncPancakeConversations({ limit: 60, messagePages: 1, processChatbotChanges, chatbotDependencies }, config);
-      if (summary.messages) log(`Đồng bộ Pancake: ${summary.conversations} hội thoại, ghi ${summary.messages} tin mới${summary.bot ? `, đưa bot ${summary.bot} tin webhook bỏ sót` : ''}`);
+      const quick = mode === 'quick';
+      if (quick) lastQuickAt = Date.now(); else { lastFullAt = Date.now(); lastQuickAt = lastFullAt; }
+      const summary = await syncPancakeConversations(quick
+        ? { limit: 20, messagePages: 1, commentLimit: 10, processChatbotChanges, chatbotDependencies }
+        : { limit: 60, messagePages: 1, processChatbotChanges, chatbotDependencies }, config);
+      if (summary.messages) log(`Đồng bộ Pancake${quick ? ' (nhanh, webhook im)' : ''}: ${summary.conversations} hội thoại, ghi ${summary.messages} tin mới${summary.bot ? `, đưa bot ${summary.bot} tin webhook bỏ sót` : ''}`);
       // Lượt đầu sau khởi động: tin khách còn treo trong 60 phút (webhook im lúc dịch vụ dừng) đưa bot.
       if (first && processChatbotChanges) {
         first = false;
@@ -543,8 +567,17 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.lo
       running = false;
     }
   };
-  setTimeout(run, 5000);
-  pancakeSyncTimer = setInterval(run, intervalMs);
+  const tick = () => {
+    const now = Date.now();
+    const mode = pancakeSyncPlan({ now, startedAt, lastWebhookAt: lastPancakeWebhookAt, lastFullAt, lastQuickAt, intervalMs, quickMs, silentMs });
+    if (mode === 'quick' && now - silentWarnedAt > 60 * 60 * 1000) {
+      silentWarnedAt = now;
+      log(`Webhook Pancake im ${Math.round((now - Math.max(lastPancakeWebhookAt, startedAt)) / 60000)} phút: đồng bộ nhanh mỗi ${Math.round(quickMs / 60000)} phút (kiểm tra Pancake → Cài đặt → Webhook).`);
+    }
+    if (mode) run(mode);
+  };
+  setTimeout(() => run('full'), 5000);
+  pancakeSyncTimer = setInterval(tick, 30 * 1000);
   return pancakeSyncTimer;
 }
 
@@ -1087,6 +1120,7 @@ let postLookupQueue = Promise.resolve();
  */
 export async function handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies, config = defaultConfig, now = Date.now(), fetchImpl = fetch }) {
   const events = normalizePancakeWebhook(payload, config, now);
+  if (payload?.event_type && payload.event_type !== 'verify') notePancakeWebhook(now);
   const changes = await storePancakeEvents(events, { fromWebhook: true });
   if (changes.length) await enrichPancakeAdContext(changes, config, fetchImpl);
   const assigned = new Set(events.filter(event => event.pancake.assigned).map(event => `${event.pageId}:${event.psid}`));

@@ -2,9 +2,12 @@
 
 Mô hình nhỏ (`app/processing/intent-model.mjs`, trọng số `intent-model.json`) đoán mã mẫu trả lời
 cho tin khách trước khi hỏi LLM. Cài đặt `intentModel`: `shadow` (chỉ ghi log so với câu trả lời
-thật), `on` (tự trả lời khi chắc ≥ `intentThreshold` và mẫu thuộc `intentSafeTemplates`), `off`.
+thật), `on` (tự trả lời khi chắc ≥ `intentThreshold` và mẫu thuộc danh sách an toàn `intentSafeTemplates`
+— hằng số trong `app/processing/intent-model.mjs`, không chỉnh trong Cài đặt), `off`.
 
-Tất cả công cụ chạy trên máy chủ, trong `/opt/facebook-crm`, bằng `sudo -u crm node --env-file=.env …`.
+Tất cả công cụ chạy trên máy chủ, trong `/opt/facebook-crm`, bằng `sudo -u crm node --env-file=.env …`
+(`build-dataset` đọc kho ở `data/processed`; đặt `CRM_DATA_DIR` chỉ khi chạy trên bản sao dữ liệu ở máy khác).
+Dataset huấn luyện (`*.jsonl`) chứa chữ khách: để ở `/tmp` hoặc scratch, đã nằm trong .gitignore.
 Không công cụ nào gửi tin cho khách. Tệp dữ liệu chứa chữ khách (đã che SĐT) chỉ để ở `/tmp` hoặc
 `data/processed`, không đưa vào git.
 

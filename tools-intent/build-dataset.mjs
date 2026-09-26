@@ -14,10 +14,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const load = file => import(pathToFileURL(path.join(root, file)).href);
 const { templateSignatures, matchTemplate, isSystemNotice } = await load('app/processing/template-match.mjs');
 const args = process.argv.slice(2);
-const outPath = args.find(arg => !arg.startsWith('--'));
+const outPath = args.filter((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--since')[0];
 if (!outPath) { console.log('Dùng: node tools-intent/build-dataset.mjs <out.jsonl> [--since YYYY-MM-DD] [--llm]'); process.exit(1); }
 const since = Date.parse(args.includes('--since') ? args[args.indexOf('--since') + 1] : '2026-09-18T00:00:00Z');
 const useLlm = args.includes('--llm');
+// CRM_DATA_DIR: chỉ để chạy trên bản sao dữ liệu ở máy khác; mặc định là kho thật của app.
 const dataDir = process.env.CRM_DATA_DIR || path.join(root, 'data', 'processed');
 const store = JSON.parse(readFileSync(path.join(dataDir, 'meta-conversations.json'), 'utf8'));
 const settings = JSON.parse(readFileSync(path.join(dataDir, 'chatbot-settings.json'), 'utf8'));
@@ -110,7 +111,8 @@ for (const conversation of store.conversations) {
       source: conversation.source === 'comment' ? 'comment' : 'inbox',
       lastTemplate,
       lastWasOrderStep: isOrderStep(lastTemplate),
-      hasBasket: false,
+      // Lúc chạy thật engine truyền giỏ đang giữ; ở đây suy từ bước đơn của bot trước để đặc trưng ctx:basket được học.
+      hasBasket: isOrderStep(lastTemplate),
       livestream: Boolean((conversation.labels || []).includes('livestream')),
       at: message.createdAt
     });

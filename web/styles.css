@@ -2115,9 +2115,12 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .order-row:last-child { border-bottom: 0; }
 .order-row strong { max-width: 58%; font-weight: 600; text-align: right; }
 
-/* Laptop 1366–1700px: ba cột co lại thay vì cắt mất panel khách bên phải (kiểm thử 25/09). */
-@media (max-width: 1700px) {
+/* Laptop 1366–1780px: ba cột co lại thay vì cắt mất panel khách bên phải (kiểm thử 25/09).
+   Lưới gốc cần 427.5 + 517.5 + 472.5 + 2×11.25 gap + 2×18 đệm = 1.476px, cộng sidebar
+   219.6 + đệm main 75.6 → viewport ≥ 1.772px; mốc 1700 để hở khoảng 1701–1771px. */
+@media (max-width: 1780px) {
   .messenger-shell { grid-template-columns: 330px minmax(0, 1fr) 390px; gap: 8px; }
+  .conversation-panel, .chat-panel, .contact-panel { min-width: 0; }
 }
 @media (max-width: 1313px) {
   .messenger-shell { grid-template-columns: 315px minmax(427.5px, 1fr); }

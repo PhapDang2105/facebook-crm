@@ -10,7 +10,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(root);
 const load = file => import(pathToFileURL(path.join(root, file)).href);
 const args = process.argv.slice(2);
-const goldenPath = args.find(arg => !arg.startsWith('--')) || path.join(root, 'data', 'processed', 'golden-set.json');
+const positional = args.filter((arg, index) => !arg.startsWith('--') && !['--limit'].includes(args[index - 1]));
+const goldenPath = positional[0] || path.join(root, 'data', 'processed', 'golden-set.json');
 const limit = args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1]) : Infinity;
 // --fewshot: chèn 3 ví dụ đã chấm gần nhất (bỏ chính tin đang đo = leave-one-out).
 const fewShot = args.includes('--fewshot');

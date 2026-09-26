@@ -44,3 +44,8 @@ __pycache__/
 .tmp-ui-profile/
 Claude outputs/
 references/
+
+# Dataset huấn luyện mô hình nhỏ và kết quả replay: chứa chữ khách
+*.jsonl
+scratch/
+replay-llm-out*.json

@@ -54,7 +54,15 @@ const server = spawn(nodePath, [path.join(projectRoot, 'app', 'server.mjs'), Str
     META_GRAPH_VERSION: 'v21.0',
     META_VERIFY_TOKEN: verifyToken,
     PUBLIC_BASE_URL: 'https://crm.example.com',
-    META_CONVERSATIONS_PATH: storePath
+    META_CONVERSATIONS_PATH: storePath,
+    // Không để server thử chạm POS/Pancake/landing thật hay ghi vào kho thật khi máy có .env thật.
+    POS_SYNC_DISABLED: '1',
+    POS_API_KEY: '',
+    POS_SHOP_ID: '',
+    PANCAKE_PAGE_ID: '',
+    PANCAKE_PAGES: '',
+    PANCAKE_PAGE_ACCESS_TOKEN: '',
+    LANDING_WEBHOOK_TOKEN: ''
   },
   stdio: ['ignore', 'ignore', 'inherit']
 });

@@ -24,7 +24,7 @@ console.log(`${rows.length} tin hộp thư ${graded.length ? 'đã chấm' : 'th
 
 const ORDER_STEPS = new Set(['ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_CONFIRMATION', 'ORDER_CART_LINE']);
 const results = rows.map(item => {
-  const intent = predictIntent({ text: item.text, source: item.source, lastTemplate: item.lastTemplate || '', lastWasOrderStep: ORDER_STEPS.has(item.lastTemplate), hasBasket: false, livestream: false });
+  const intent = predictIntent({ text: item.text, source: item.source, lastTemplate: item.lastTemplate || '', lastWasOrderStep: ORDER_STEPS.has(item.lastTemplate), hasBasket: ORDER_STEPS.has(item.lastTemplate), livestream: false });
   const ruled = ruleIntent(item.text, { source: item.source, botLastTemplateId: item.lastTemplate || '' });
   const ruleTemplate = ruled?.value?.template_id || (ruled?.commentRule ? 'COMMENT_RULE' : '');
   return { item, intent, ruleTemplate };

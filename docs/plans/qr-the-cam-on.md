@@ -41,7 +41,8 @@ Kỳ vọng thực tế: 2–8% đơn có quét (benchmark bao bì thực phẩm
 ### Giai đoạn 0. Quyết định và kiểm chứng
 
 - [ ] Lời trên thẻ mới: cảm ơn và "quét để nhận hướng dẫn dùng, công thức, quà cảm ơn"; không in ưu đãi cụ thể, không nhắc kênh khác. Ưu đãi chỉ xuất hiện trong Messenger sau khi khách đồng ý.
-- [ ] Đặt nút Bắt đầu cho Page (`POST /me/messenger_profile` với `get_started`). Không đặt Ice Breakers (sẽ che nút Bắt đầu; tài liệu không xác nhận referral kèm trong ice breaker).
+- [ ] **Kết nối lại Page Nông Sản Giọt Nắng ở Cài đặt → Kênh → Kết nối Facebook.** Phát hiện 26/09 khi quét thử: token Meta của Page bị từ chối ("The user has not authorized application 1062928993200268", mã 190/458), tức tài khoản Facebook đã kết nối Page hôm 09/09 không còn cấp quyền cho app của CRM; log máy chủ từ 24/09 không nhận sự kiện Meta nào. Hệ quả: khách quét QR vào được Messenger nhưng CRM không nhận referral và không gửi được QR_OFFER. Chỉ chủ tài khoản Facebook làm được bước này (đăng nhập OAuth).
+- [ ] Đặt nút Bắt đầu cho Page: sau khi kết nối lại, chạy `node scripts/set-messenger-profile.mjs 110068281327307` trên VPS (script đã có, chưa chạy được vì token hỏng). Không đặt Ice Breakers (sẽ che nút Bắt đầu; tài liệu không xác nhận referral kèm trong ice breaker).
 - [ ] Xem Conversation Routing của Page (đã thay Handover Protocol): không đặt app mặc định, hoặc đặt CRM làm mặc định. Đặt Pancake làm mặc định thì CRM bị lỗi 2534037 khi hội thoại ngủ quá 24 giờ.
 - [ ] Quyết định tắt "Đồng bộ sự kiện mua hàng" bên Pancake POS hay chấp nhận đếm đôi, trước khi CRM gửi Conversions API. Không khử trùng được bằng `event_id` vì không biết POS gửi gì.
 

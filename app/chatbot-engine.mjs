@@ -355,6 +355,7 @@ export async function requestDirectModelReply(options) {
         : settings.fewShot === 'on' && message?.type === 'text' && message.text
           ? nearestExamples(await loadExampleBank(), { text: message.text, lastTemplate: conversation.botLastTemplateId || '' })
           : [];
+      if (examples.length && !Array.isArray(options.examples)) console.log(`Few-shot: ${examples.length} ví dụ (${examples.map(item => item.label).join(', ')}) (${conversation.id})`);
       const query = buildChatbotQuery({ conversation, message, recentMessages, settings, includeHistory: false, examples });
       const imageParts = vertex && message?.type === 'image' ? await collectImageParts(message, fetchImpl) : [];
       // Cache prompt: chỉ Vertex + Gemini 3/2.5 (không phải khi dùng khóa API); lỗi tạo cache thì gửi như thường.

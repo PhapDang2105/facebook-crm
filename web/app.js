@@ -10241,6 +10241,13 @@ function showQrPreview(code) {
   const url = `${qrBaseUrl || window.location.origin}/q/${code}`;
   link.textContent = url;
   link.href = url;
+  const known = qrStatsCodes.find(entry => entry.code === code);
+  const messengerNote = document.querySelector('#qr-preview-messenger');
+  if (messengerNote) {
+    messengerNote.textContent = known?.prefillText
+      ? `Khách quét sẽ mở Messenger của ${qrPageName || 'Page'} với tin soạn sẵn: “${known.prefillText}”. Khách bấm Gửi là CRM ghi nhận và chào bằng QR_OFFER.`
+      : `Khách quét sẽ mở Messenger của ${qrPageName || 'Page'} với tin soạn sẵn mang #${code}; khách bấm Gửi là CRM ghi nhận và chào bằng QR_OFFER.`;
+  }
   document.querySelector('#qr-download-svg').href = `/api/qr/image/${safe}.svg?download=1`;
   document.querySelector('#qr-download-png').href = `/api/qr/image/${safe}.png?download=1`;
   const input = document.querySelector('#qr-code-input');
@@ -10249,11 +10256,15 @@ function showQrPreview(code) {
 }
 
 let qrBaseUrl = '';
+let qrPageName = '';
+let qrStatsCodes = [];
 
-function renderQrStats({ codes = [], baseUrl = '' } = {}) {
+function renderQrStats({ codes = [], baseUrl = '', pageName = '' } = {}) {
   const container = document.querySelector('#qr-stats');
   if (!container) return;
   qrBaseUrl = baseUrl || '';
+  qrPageName = pageName || '';
+  qrStatsCodes = codes;
   if (!codes.length) {
     container.innerHTML = '<p class="channel-empty">Chưa có lượt quét nào. Tạo mã QR ở trên, in thử rồi quét bằng điện thoại để thấy số liệu tại đây.</p>';
     return;
@@ -10283,12 +10294,35 @@ async function loadQrSettings() {
     ]);
     const zaloInput = document.querySelector('#qr-zalo-url');
     if (zaloInput && document.activeElement !== zaloInput) zaloInput.value = settings.zaloUrl || '';
+    const prefillInput = document.querySelector('#qr-prefill-text');
+    if (prefillInput && document.activeElement !== prefillInput) prefillInput.value = settings.prefillText || '';
     renderQrStats(stats);
   } catch (error) {
     container.innerHTML = '<p class="channel-empty">Chưa tải được thống kê.</p>';
     showToast(error.message || 'Chưa tải được thống kê mã QR.', 'error');
   }
 }
+
+document.querySelector('#qr-prefill-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = document.querySelector('#qr-prefill-text');
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  if (button) button.disabled = true;
+  try {
+    const saved = await readApiResponse(await fetch('/api/qr/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefillText: String(input?.value || '').trim() })
+    }));
+    if (input) input.value = saved.prefillText || '';
+    showToast(saved.prefillText ? 'Đã lưu tin soạn sẵn.' : 'Đã về tin soạn sẵn mặc định.', 'success');
+    loadQrSettings();
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được tin soạn sẵn.', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+});
 
 document.querySelector('#qr-zalo-form')?.addEventListener('submit', async event => {
   event.preventDefault();

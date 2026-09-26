@@ -690,6 +690,10 @@
                 <label class="qr-make-field"><span>Mã lô in</span><input id="qr-code-input" name="code" placeholder="vd: tmdt-01" autocomplete="off" spellcheck="false" maxlength="40" pattern="[a-z0-9][a-z0-9-]{0,39}" title="Chữ thường, số và gạch nối, tối đa 40 ký tự"></label>
                 <button class="settings-save-button" type="submit">Tạo mã QR</button>
               </form>
+              <form class="qr-make" id="qr-prefill-form">
+                <label class="qr-make-field qr-make-field-wide"><span>Tin soạn sẵn khách gửi khi mở Messenger từ thẻ ({page} = tên Page, {code} = mã lô; tối đa 140 ký tự)</span><input id="qr-prefill-text" name="prefillText" placeholder="Mình vừa quét thẻ cảm ơn {page}, cho mình nhận hướng dẫn và quà nhé 💛 #{code}" autocomplete="off" maxlength="140"></label>
+                <button class="settings-save-button" type="submit">Lưu tin soạn sẵn</button>
+              </form>
               <form class="qr-make" id="qr-zalo-form">
                 <label class="qr-make-field qr-make-field-wide"><span>Liên kết Zalo trên trang đệm (để trống là không hiện nút Zalo)</span><input id="qr-zalo-url" name="zaloUrl" placeholder="https://zalo.me/… hoặc https://zalo.me/g/…" autocomplete="off" spellcheck="false" inputmode="url"></label>
                 <button class="settings-save-button" type="submit">Lưu liên kết Zalo</button>
@@ -699,6 +703,7 @@
                 <div class="qr-preview-info">
                   <p class="qr-preview-code" id="qr-preview-code"></p>
                   <p class="qr-preview-url"><a id="qr-preview-url" target="_blank" rel="noopener"></a></p>
+                  <p class="qr-preview-note" id="qr-preview-messenger"></p>
                   <p class="qr-preview-note">In cạnh QR từ 2,2 cm, chừa viền trắng quanh mã, in kèm dòng địa chỉ bên trên cho người không quét được. Tệp SVG đưa nhà in; PNG để xem nhanh.</p>
                   <div class="qr-preview-actions">
                     <a class="qr-download" id="qr-download-svg" download>Tải SVG (để in)</a>

@@ -31,7 +31,7 @@ import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from '.
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
 import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { isValidQrCode, listQrScans, recordQrOpen, recordQrScan } from './qr-scans.mjs';
-import { classifyUserAgent, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
+import { classifyUserAgent, messengerDestination, prefillMessageFor, qrCodeFromRef, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
@@ -1040,14 +1040,16 @@ const server = http.createServer(async (request, response) => {
         console.error('QR: chưa có Page nào kết nối nên không biết đưa khách đi đâu.');
         return sendJson(response, 503, { error: 'Chưa cấu hình Page Facebook.' });
       }
-      const destination = `https://m.me/${encodeURIComponent(page.id)}?ref=${encodeURIComponent(code)}`;
+      const { zaloUrl, prefillText } = await readQrSettings();
+      // ref kiểu Pancake + tin soạn sẵn mang #mã: Pancake ghi nguồn truy cập, và
+      // tin khách gửi về CRM qua webhook Pancake mang theo mã lô.
+      const destination = messengerDestination({ pageId: page.id, code, pageName: page.name, prefillText: prefillText || undefined });
       if (redirect) {
         console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}) -> chuyển hướng Messenger`);
         response.writeHead(302, { Location: destination, 'Cache-Control': 'no-store' });
         return response.end();
       }
       console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}${classification.inApp ? ', trong app' : ''}) -> trang đệm`);
-      const { zaloUrl } = await readQrSettings();
       const html = renderBridgePage({
         code,
         destination,
@@ -1070,14 +1072,26 @@ const server = http.createServer(async (request, response) => {
       const referralCounts = {};
       for (const conversation of store.conversations || []) {
         for (const referral of conversation.referrals || []) {
-          if (referral?.source !== 'SHORTLINK' || !referral.ref) continue;
-          referralCounts[referral.ref] = (referralCounts[referral.ref] || 0) + 1;
+          if (referral?.source !== 'SHORTLINK') continue;
+          // ref thô (app Meta), ref mã hoá kiểu Pancake, hay mã đọc từ tin soạn sẵn: đều về một mã lô.
+          const code = qrCodeFromRef(referral.ref);
+          if (!code) continue;
+          referralCounts[code] = (referralCounts[code] || 0) + 1;
         }
       }
       const stats = await listQrScans(referralCounts);
+      const page = await resolveQrPage();
+      const qrSettings = await readQrSettings();
       return sendJson(response, 200, {
         baseUrl: metaConfig.publicBaseUrl,
-        codes: stats.codes.map(entry => ({ ...entry, url: qrTargetUrl(metaConfig.publicBaseUrl, entry.code) })),
+        pageId: page.id,
+        pageName: page.name,
+        codes: stats.codes.map(entry => ({
+          ...entry,
+          url: qrTargetUrl(metaConfig.publicBaseUrl, entry.code),
+          messengerUrl: page.id ? messengerDestination({ pageId: page.id, code: entry.code, pageName: page.name, prefillText: qrSettings.prefillText || undefined }) : '',
+          prefillText: prefillMessageFor({ code: entry.code, pageName: page.name, template: qrSettings.prefillText || undefined })
+        })),
         recent: stats.recent
       });
     }
@@ -1087,7 +1101,10 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'PUT') {
         try {
           const payload = await readBody(request);
-          return sendJson(response, 200, await writeQrSettings({ zaloUrl: payload?.zaloUrl }));
+          return sendJson(response, 200, await writeQrSettings({
+            ...(payload?.zaloUrl !== undefined ? { zaloUrl: payload.zaloUrl } : {}),
+            ...(payload?.prefillText !== undefined ? { prefillText: payload.prefillText } : {})
+          }));
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }
@@ -1624,7 +1641,16 @@ const server = http.createServer(async (request, response) => {
         if (!payload || !payload.event_type || payload.event_type === 'verify') return undefined;
         if (process.env.PANCAKE_DEBUG_KEYS) console.log(describePancakePayload(payload));
         try {
-          const summary = await handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies });
+          const summary = await handlePancakeWebhook(payload, {
+            processChatbotChanges,
+            chatbotDependencies,
+            // Khách quét QR gửi tin soạn sẵn mang #mã: chào bằng QR_OFFER như
+            // luồng Meta, và không đưa chính tin đó cho bot (kẻo khách nhận hai tin).
+            beforeBot: changes => {
+              scheduleQrGreetings(changes);
+              return changes.filter(change => !isCardScan(change));
+            }
+          });
           if (summary.stored) console.log(`Webhook Pancake: ghi ${summary.stored} tin, đưa bot ${summary.bot}`);
         } catch (error) {
           console.error('Webhook Pancake xử lý lỗi:', error.message);

@@ -51,6 +51,61 @@ export function classifyUserAgent(userAgent = '') {
   return { platform, browser, inApp };
 }
 
+const codePattern = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+/**
+ * Tham số `ref` theo đúng cách Pancake tạo "đường dẫn với nguồn truy cập"
+ * (Cài đặt → Công cụ): base64url của `pancake_utm_source=<mã>`. Nhờ vậy Pancake
+ * tự ghi nguồn truy cập cho hội thoại, còn CRM nhận ra mã theo cả hai chiều.
+ */
+export function pancakeRef(code) {
+  return Buffer.from(`pancake_utm_source=${code}`).toString('base64url');
+}
+
+/** Mã lô từ tham số ref: dạng thô (`tmdt-01`) hoặc dạng Pancake mã hoá; không phải hai dạng đó thì rỗng. */
+export function qrCodeFromRef(ref) {
+  const raw = String(ref || '').trim();
+  if (!raw) return '';
+  if (codePattern.test(raw)) return raw;
+  try {
+    const decoded = Buffer.from(raw, 'base64url').toString('utf8');
+    const match = decoded.match(/^pancake_utm_source=([a-z0-9][a-z0-9-]{0,39})$/);
+    return match ? match[1] : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Mã lô ghi trong tin soạn sẵn mà khách gửi: `#tmdt-01`. Đây là cách CRM nhận
+ * ra khách quét thẻ khi Page vận hành ở Pancake — Pancake không chuyển `ref`
+ * về webhook, nhưng tin khách gửi thì có, và tin soạn sẵn mang mã ở cuối.
+ */
+export function qrCodeFromText(text) {
+  const match = String(text || '').match(/#([a-z0-9][a-z0-9-]{0,39})(?![a-z0-9-])/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+export const defaultPrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận hướng dẫn và quà nhé 💛 #{code}';
+
+/** Tin soạn sẵn cho một mã: điền {page}/{code}; thiếu `#mã` thì tự nối vào cuối để CRM còn nhận ra. */
+export function prefillMessageFor({ code, pageName = '', template = defaultPrefillText }) {
+  const source = String(template || defaultPrefillText);
+  let text = source.replace(/\{page\}/g, pageName || 'shop').replace(/\{code\}/g, code).replace(/\s+/g, ' ').trim();
+  if (qrCodeFromText(text) !== code) text = `${text} #${code}`.trim();
+  return text.slice(0, 140);
+}
+
+/**
+ * Đích Messenger của một mã: m.me của Page, `ref` kiểu Pancake và `text` là tin
+ * soạn sẵn. Khách chỉ việc bấm Gửi: một tin thật (vào tệp quảng cáo "đã nhắn
+ * tin", mở cửa sổ 24 giờ, về CRM qua Pancake) mang theo mã lô.
+ */
+export function messengerDestination({ pageId, code, pageName = '', prefillText = defaultPrefillText }) {
+  const text = prefillMessageFor({ code, pageName, template: prefillText });
+  return `https://m.me/${encodeURIComponent(pageId)}?ref=${pancakeRef(code)}&text=${encodeURIComponent(text)}`;
+}
+
 /** Chỉ Chrome hệ thống trên Android mở được app Messenger sau một chuyển hướng 302. */
 export function shouldRedirectDirectly(classification) {
   return classification?.platform === 'android' && classification?.browser === 'chrome' && !classification?.inApp;

@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
 import { applyWebhookEvents } from './meta-webhook.mjs';
+import { qrCodeFromText } from './qr-bridge.mjs';
 import { applyGenderGuess, publicConversation, readMessagingStore, reconcileCustomerGender, saveMessage, updateMessagingStore } from './messaging-store.mjs';
 import { genderFromName } from './processing/customer-info.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
@@ -269,6 +270,11 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   // Tin của Page: gửi từ CRM thì Pancake ghi người gửi là "Public API"; tên
   // khác là nhân viên gõ trong Pancake.
   const adminName = outgoing ? String(message.from?.admin_name || '').trim() : '';
+  // Khách quét QR thẻ cảm ơn: trang đệm mở Messenger với tin soạn sẵn mang
+  // `#<mã lô>`; khách bấm Gửi là tin này về đây. Ghi như referral SHORTLINK của
+  // Meta để thống kê QR, lượt chào QR_OFFER và nhãn nguồn dùng chung một đường.
+  const qrCode = !outgoing ? qrCodeFromText(text) : '';
+  const referral = qrCode ? { ref: qrCode, source: 'SHORTLINK', type: 'PREFILL_TEXT' } : null;
   // "POS" là thẻ xác nhận đơn do Pancake POS tự gửi, không phải người gõ: không
   // được coi là nhân viên (trước đây bot bị tắt ngay sau mỗi đơn đẩy POS).
   return {
@@ -276,6 +282,7 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
     psid: customerId,
     timestamp: at,
     type: 'message',
+    ...(referral ? { referral } : {}),
     message: {
       id: identifier,
       mid: identifier,
@@ -1118,15 +1125,18 @@ let postLookupQueue = Promise.resolve();
  * đưa bot (trừ khi cấu hình PANCAKE_BOT_WHEN_ASSIGNED=1). Trả về số tin đã
  * ghi và số tin đưa bot.
  */
-export async function handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies, config = defaultConfig, now = Date.now(), fetchImpl = fetch }) {
+export async function handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies, beforeBot = null, config = defaultConfig, now = Date.now(), fetchImpl = fetch }) {
   const events = normalizePancakeWebhook(payload, config, now);
   if (payload?.event_type && payload.event_type !== 'verify') notePancakeWebhook(now);
   const changes = await storePancakeEvents(events, { fromWebhook: true });
   if (changes.length) await enrichPancakeAdContext(changes, config, fetchImpl);
+  // Móc trước bot (server dùng để chào khách quét QR và bỏ tin đó khỏi bot):
+  // nhận MỌI thay đổi, kể cả hội thoại đã có nhân viên nhận, trả về phần bot xử lý.
+  const candidates = typeof beforeBot === 'function' ? (await beforeBot(changes)) || [] : changes;
   const assigned = new Set(events.filter(event => event.pancake.assigned).map(event => `${event.pageId}:${event.psid}`));
   const forBot = config.botWhenAssigned
-    ? changes
-    : changes.filter(change => !change.conversation || !assigned.has(`${change.conversation.pageId}:${change.conversation.psid}`));
+    ? candidates
+    : candidates.filter(change => !change.conversation || !assigned.has(`${change.conversation.pageId}:${change.conversation.psid}`));
   if (forBot.length && processChatbotChanges) await processChatbotChanges(forBot, chatbotDependencies);
   // Đếm tin đã ghi; thay đổi hội thoại (giới tính, tên) không tính là tin.
   const messagesOnly = list => list.filter(change => change.type === 'message').length;

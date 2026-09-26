@@ -225,7 +225,9 @@ export const orderUpdateWindowMs = 60 * 60 * 1000;
 export const orderCancelWindowMs = 24 * 60 * 60 * 1000;
 function dropRecentlyOrdered(items, recentOrder, now) {
   const at = Number(recentOrder?.createdAt) || 0;
-  if (!at || now - at > recentOrderWindowMs) return items;
+  // Đơn đã hủy không "giữ" món nào: khách hủy 1 Xanh rồi đặt "1 xanh 1 vàng" phải ra đủ hai túi.
+  const cancelled = String(recentOrder?.processingStatus || '') === 'cancelled' || recentOrder?.status === 'Hủy';
+  if (!at || cancelled || now - at > recentOrderWindowMs) return items;
   const ordered = new Set((recentOrder.products || []).map(item => String(item.sku || item.code || '')).filter(Boolean));
   if (!ordered.size) return items;
   const additions = items.filter(item => !ordered.has(item.code));
@@ -392,7 +394,8 @@ function renderOrder(value, templates, context = {}) {
     || (Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.map(text => extractVietnamesePhone(text)).find(Boolean) || '' : '');
   // Khách quen "gửi về địa chỉ cũ / như lần trước": SĐT và địa chỉ lấy từ đơn
   // gần nhất của khách thay vì hỏi lại.
-  const wantsPrevious = /(dia chi|d\/c|dc) (cu|truoc|nhu cu|lan truoc)|nhu (lan )?truoc|cho cu|giong lan truoc|nhu cu/.test(normalizeText(String(context.messageText || '')));
+  // Cùng bộ từ với OLD_ADDRESS của order-flow.mjs ("như/giống lần/hôm trước", "chỗ cũ").
+  const wantsPrevious = /(dia chi|d\/c|dc) (cu|truoc|nhu cu|lan truoc|hom truoc)|(nhu|giong) (lan |hom )?truoc|cho cu|nhu cu/.test(normalizeText(String(context.messageText || '')));
   const previous = (wantsPrevious || updating) && context.recentOrder ? context.recentOrder : (wantsPrevious && context.previousDelivery ? context.previousDelivery : null);
   // Mô hình ghi "0" khi khách không đưa địa chỉ: coi như trống để lấy địa chỉ đơn trước.
   // Tên người nhận khách ghi đầu địa chỉ ("Nguyễn thị Hằng Thôn 4, …") không lên phiếu giao.
@@ -762,7 +765,9 @@ function renderOrderStatus(templates) {
   const part = type => parts.find(item => item.type === type)?.value || '';
   const orderedAt = `${part('hour')}:${part('minute')} ngày ${part('day')}/${part('month')}`;
   const shipped = Boolean(order.pos?.id || order.posOrderId || /đã giao|đang giao|đã gửi/i.test(String(order.status || '')));
-  const state = shipped ? 'đã chuyển sang kho để đóng gói và bàn giao vận chuyển' : 'đã được ghi nhận, kho đang chuẩn bị hàng';
+  // Đơn đã hủy (qua bot, nhân viên hay POS) không được kể là "kho đang chuẩn bị hàng".
+  const cancelled = String(order.processingStatus || '') === 'cancelled' || order.status === 'Hủy';
+  const state = cancelled ? 'đã hủy' : shipped ? 'đã chuyển sang kho để đóng gói và bàn giao vận chuyển' : 'đã được ghi nhận, kho đang chuẩn bị hàng';
   return fill(templates.ORDER_STATUS, { ...commonValues(), items, ordered_at: orderedAt, state, total: formatMoney(Number(order.total) || 0) });
 }
 

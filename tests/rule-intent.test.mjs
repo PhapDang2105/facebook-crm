@@ -173,6 +173,10 @@ test('khiếu nại rõ (gọi không được, không ai gọi, bot luyên thuy
     assert.equal(ruled.attention, true);
   }
   assert.notEqual(ruleIntent('Có đổi trả không shop', ctx)?.value?.template_id, 'CSKH_HANDOFF');
+  // "gói" bỏ dấu trùng "gọi", "phần anh" trùng "phản ánh": không phải khiếu nại.
+  for (const text of ['gói này mua lẻ không được hả shop', 'Gói nhỏ ship không được à', 'goi nho mua le khong duoc ha', 'gửi phần anh 1 túi']) {
+    assert.notEqual(ruleIntent(text, ctx)?.value?.template_id, 'CSKH_HANDOFF', text);
+  }
   assert.notEqual(ruleIntent('Đc kiểm hàng ko', ctx)?.value?.template_id, 'CSKH_HANDOFF');
   assert.equal(ruleIntent('Có thấy ai gọi đâu', { ...ctx, source: 'comment' })?.value?.template_id, undefined, 'bình luận đi luồng riêng');
 });

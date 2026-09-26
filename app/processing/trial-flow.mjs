@@ -111,7 +111,8 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   // chưa phải chọn. Câu hỏi giá / ship / khuyến mãi thì luồng này tự trả lời.
   // Câu hỏi: dấu "?", so sánh, hay kết bằng "không/ko/k" ("ship về Đà Nẵng bao lâu vậy" cũng là hỏi → mô hình).
   const asks = raw.includes('?') || COMPARE.test(s) || /\b(khong|ko|k|hong|hok|vay|ha)$/.test(s) || /\b(bao lau|may ngay|khi nao|o dau|the nao|ntn|lam sao|co (giao|ship) (duoc|dc))\b/.test(s);
-  const info = s.length <= 90 && infoRules.find(([rule, pattern]) => !PRICE_RULES.has(rule) && pattern.test(s));
+  // Tôn trọng điều kiện loại trừ của từng luật (WEIGHT_EXPIRY bỏ khi có hỏi giá…) như rule-intent.
+  const info = s.length <= 90 && infoRules.find(([rule, pattern, , exclude]) => !PRICE_RULES.has(rule) && pattern.test(s) && !(exclude && exclude(s, {})));
   if (info && !phone) return { value: { template_id: info[2], also: 'TRIAL_NEXT_STEP', values: { bags } } };
   if (asks && picks.size >= 2 && !phone) return { value: { template_id: 'BAG_COMPARISON', also: 'TRIAL_NEXT_STEP', values: { bags } } };
   if (FREESHIP.test(s)) return { value: { template_id: 'TRIAL_FREESHIP_INFO', values: { bags } } };

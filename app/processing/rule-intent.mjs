@@ -145,7 +145,13 @@ export function ruleIntent(text, ctx = {}) {
   // Khiếu nại rõ (gọi không được, không ai gọi, bot "luyên thuyên", ăn phải sợ, thất vọng…): chuyển
   // người ngay, không để mô hình tra đơn hay giải thích sản phẩm (bộ chấm mẫu 26/09: 5 ca LLM chọn sai).
   // Câu hỏi chính sách ("có đổi trả không?") không phải khiếu nại.
-  if (!isComment && STRONG_COMPLAINT.test(s) && !POLICY_QUESTION.test(s)) {
+  // Bỏ dấu thì "gói" (túi/gói hàng) trùng "gọi" (gọi điện) và "phần anh" trùng "phản ánh": đổi
+  // "gói" trước gói nhỏ/lẻ/này/màu/số thành "túi", "gửi/cho/tặng phần anh" thành chữ khác, rồi mới so.
+  const sComplaint = core(raw
+    .replace(/gói/giu, 'tui')
+    .replace(/\bgoi(?=\s+(?:nho|le|nay|xanh|vang|nau|mix|nhieu|\d))/giu, 'tui')
+    .replace(/(g[ửu]i|cho|t[ặa]ng)\s+ph[ầa]n\s+anh/giu, '$1 anhphan'));
+  if (!isComment && STRONG_COMPLAINT.test(sComplaint) && !POLICY_QUESTION.test(s)) {
     return { rule: 'COMPLAINT_HANDOFF', value: { template_id: 'CSKH_HANDOFF', warming: '1' }, attention: true };
   }
   // --- Luật thử nghiệm: chỉ trả về khi ctx.experimentalRules === 'on'; còn lại các luật ổn định

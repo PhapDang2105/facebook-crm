@@ -286,7 +286,7 @@ export function stripReceiverName(address) {
 }
 
 /** Bộ giá đã bỏ phí ship theo ưu đãi dùng thử (quà "Miễn phí vận chuyển" đứng đầu danh sách quà). */
-/** Ưu đãi bám đuổi combo 2: thêm bát gáo dừa vào quà của giỏ 2 túi lớn (miễn ship đã có theo bảng quà). */
+/** Ưu đãi bám đuổi combo 2: thêm bộ bát gáo dừa vào quà của giỏ 2 túi lớn (miễn ship đã có theo bảng quà). */
 function withPromoBowl(price) {
   if (price.gifts.some(gift => /g[aá]o d[uừ]a/i.test(String(gift.name || '')))) return price;
   const gifts = [...price.gifts, { ...PROMO_BOWL_GIFT }];
@@ -393,7 +393,7 @@ function renderOrder(value, templates, context = {}) {
   // Ưu đãi chỉ cho 1 túi lớn Xanh / Vàng / Nâu (không cho combo gói nhỏ hay sản phẩm khác).
   const trialBag = items.length === 1 && /^GRA-(XANH|VANG|NAU)-/i.test(String(items[0]?.code || items[0]?.sku || priced?.lines?.[0]?.sku || ''));
   const trialPriced = Boolean(priced?.priceable && trial && trialBag && priced.totalQuantity === 1 && priced.shippingFee > 0);
-  // Combo 2 túi lớn trong cửa sổ ưu đãi bám đuổi (context.promoBowl): tặng bát gáo dừa.
+  // Combo 2 túi lớn trong cửa sổ ưu đãi bám đuổi (context.promoBowl): tặng bộ bát gáo dừa.
   const promoBowl = Boolean(context.promoBowl && priced?.priceable && priced.totalQuantity === 2 && (priced.lines || []).length && priced.lines.every(line => /^GRA-(XANH|VANG|NAU)-/i.test(String(line.sku || ''))));
   const price = trialPriced ? withPromoFreeShipping(priced) : promoBowl ? withPromoBowl(priced) : priced?.priceable ? priced : null;
 

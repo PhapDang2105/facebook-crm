@@ -204,7 +204,7 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
       variation_info: { name: String(gift.name || ''), retail_price: 0, weight: money(gift.weight) }
     });
   }
-  // Quà ưu đãi bám đuổi (bát gáo dừa cho combo 2): không nằm trong bảng quà theo giỏ, đẩy thêm một dòng quà.
+  // Quà ưu đãi bám đuổi (bộ bát gáo dừa cho combo 2): không nằm trong bảng quà theo giỏ, đẩy thêm một dòng quà.
   if (order.promoGift) {
     const sku = 'BGD';
     const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === sku);

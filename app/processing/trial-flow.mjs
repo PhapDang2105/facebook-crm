@@ -20,8 +20,8 @@ import { core, infoRules } from './rule-intent.mjs';
 const HOUR = 60 * 60 * 1000;
 export const TRIAL_SCENARIO_NOTE = 'Ưu đãi dùng thử bám đuổi (1 túi miễn phí vận chuyển)';
 // Chính sách bám đuổi 36 giờ (chủ shop 26/09): ngoài 1 túi miễn ship, khách lấy combo 2 túi lớn được tặng
-// thêm 1 bát gáo dừa (bảng quà chung chỉ tặng bộ bát + muỗng từ 3 túi). Quà này chỉ áp trong cửa sổ ưu đãi.
-export const PROMO_BOWL_GIFT = { name: 'Bát gáo dừa – ưu đãi bám đuổi', sku: 'BGD', minQuantity: 2, active: true, weight: 10 };
+// thêm 1 bộ bát gáo dừa (bảng quà chung chỉ tặng bộ bát + muỗng từ 3 túi). Quà này chỉ áp trong cửa sổ ưu đãi.
+export const PROMO_BOWL_GIFT = { name: 'Bộ bát gáo dừa – ưu đãi bám đuổi', sku: 'BGD', minQuantity: 2, active: true, weight: 10 };
 
 // Từ chối: "không", "ko cần", "thôi để sau"… — "thôi" chỉ là từ chối khi câu không nêu túi/số lượng ("lấy 1 túi thôi" là chọn).
 const DECLINE = /^(khong|ko|k|kh|hong|hok|khong can|ko can|khong lay|ko lay|khong mua|ko mua|khong dau|ko dau|khong nhe|ko nhe)$|\b(khong|ko|k|kh|chua) (can|lay|mua|thich|quan tam|co nhu cau)\b|\b(de sau|khi khac|lan sau|het tien|dung nhan|dung gui|khoi)\b/;
@@ -67,7 +67,7 @@ export function activeTrial(conversation = {}, { now = Date.now() } = {}) {
 
 /**
  * Ưu đãi bám đuổi còn trong cửa sổ (kể cả khi khách đã chuyển sang combo 2 → stage 'converted' + combo2):
- * đơn 2 túi lớn được tặng bát gáo dừa. Hết cửa sổ, đã đặt đơn sau ưu đãi, hay đã từ chối thì không.
+ * đơn 2 túi lớn được tặng bộ bát gáo dừa. Hết cửa sổ, đã đặt đơn sau ưu đãi, hay đã từ chối thì không.
  */
 export function promoBowlActive(conversation = {}, { now = Date.now() } = {}) {
   const promo = conversation.promo;
@@ -182,5 +182,5 @@ export function filterTrialReply(reply = {}, trial = {}, isProductQuoteId = () =
 
 /** Gợi ý cho mô hình khi phải nhờ mô hình (tin có địa chỉ, ảnh…). */
 export function trialModelHint(trial = {}) {
-  return `KHÁCH ĐANG GIỮ ƯU ĐÃI BÁM ĐUỔI${trial.bag ? ` (đã chọn ${trial.bag})` : ''}: 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN (giá túi, không cộng ship), hoặc combo 2 túi lớn được tặng thêm bát gáo dừa. Không báo giá combo 3, không mời thêm sản phẩm khác.`;
+  return `KHÁCH ĐANG GIỮ ƯU ĐÃI BÁM ĐUỔI${trial.bag ? ` (đã chọn ${trial.bag})` : ''}: 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN (giá túi, không cộng ship), hoặc combo 2 túi lớn được tặng thêm bộ bát gáo dừa. Không báo giá combo 3, không mời thêm sản phẩm khác.`;
 }

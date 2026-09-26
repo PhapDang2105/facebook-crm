@@ -410,15 +410,37 @@ export function syncPancakeConversations(options = {}, config = defaultConfig, f
   return activeSync;
 }
 
-async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLimit = 30 } = {}, config = defaultConfig, fetchImpl = fetch) {
+/**
+ * Tin khách vừa ghi qua đồng bộ mà webhook không đưa tới (Pancake tạm ngưng webhook khi gặp lỗi
+ * liên tiếp, dịch vụ khởi động lại…): tin đến trong `windowMs`, bot còn bật, Page chưa trả lời
+ * sau tin đó → đưa bot như một webhook muộn. Tin cũ hơn hay đã có người trả lời thì thôi.
+ */
+export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 30 * 60 * 1000 } = {}) {
+  const seen = new Set();
+  return changes.filter(change => {
+    if (change.type !== 'message' || change.updated || change.message?.direction !== 'incoming' || !change.conversation) return false;
+    const at = Number(change.message.createdAt) || 0;
+    if (now - at > windowMs || at > now + 5 * 60 * 1000) return false;
+    if (change.conversation.botEnabled === false) return false;
+    const messages = store?.messages?.[change.conversation.id] || [];
+    if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) return false;
+    const key = `${change.conversation.id}:${change.message.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLimit = 30, processChatbotChanges = null, chatbotDependencies = null, botWindowMs = 30 * 60 * 1000 } = {}, config = defaultConfig, fetchImpl = fetch) {
   if (!isPancakeConfigured(config)) return { conversations: 0, messages: 0, skipped: 'chưa cấu hình' };
   const pages = pageId
     ? [getPancakePageConfig(pageId, config)]
     : (config.pages?.length ? config.pages.map(p => getPancakePageConfig(p.pageId, config)) : [config]);
-  
+
   let totalConversations = 0;
   let totalStored = 0;
   const allFailures = [];
+  const collected = [];
 
   for (const page of pages) {
     const pId = String(page.pageId);
@@ -432,7 +454,9 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
           .map(message => pancakeMessageEvent(pId, conversation, message))
           .filter(Boolean)
           .sort((first, second) => first.timestamp - second.timestamp);
-        totalStored += (await storePancakeEvents(events)).filter(change => change.type === 'message').length;
+        const changes = await storePancakeEvents(events);
+        collected.push(...changes);
+        totalStored += changes.filter(change => change.type === 'message').length;
       } catch (error) {
         allFailures.push(`${conversation.id}: ${error.message}`);
       }
@@ -450,19 +474,30 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
           .map(comment => pancakeCommentEvent(pId, thread, comment, post))
           .filter(Boolean)
           .sort((first, second) => (first.parentId ? 1 : 0) - (second.parentId ? 1 : 0) || first.timestamp - second.timestamp);
-        totalStored += (await storePancakeEvents(events)).filter(change => change.type === 'message').length;
+        const changes = await storePancakeEvents(events);
+        collected.push(...changes);
+        totalStored += changes.filter(change => change.type === 'message').length;
       } catch (error) {
         allFailures.push(`${thread.id}: ${error.message}`);
       }
     }
     totalConversations += conversations.length + threads.length;
   }
-  return { conversations: totalConversations, messages: totalStored, ...(allFailures.length ? { failures: allFailures } : {}) };
+  // Webhook không tới (Pancake tạm ngưng, dịch vụ khởi động lại): tin mới chưa ai trả lời vẫn được bot xử lý.
+  let bot = 0;
+  if (processChatbotChanges && collected.length) {
+    const missed = missedBotChanges(collected, await readMessagingStore(), { windowMs: botWindowMs });
+    if (missed.length) {
+      bot = missed.length;
+      try { await processChatbotChanges(missed, chatbotDependencies); } catch (error) { allFailures.push(`bot: ${error.message}`); }
+    }
+  }
+  return { conversations: totalConversations, messages: totalStored, ...(bot ? { bot } : {}), ...(allFailures.length ? { failures: allFailures } : {}) };
 }
 
 let pancakeSyncTimer = null;
 /** Đồng bộ lúc khởi động rồi mỗi 10 phút, để không lọt tin trong lúc webhook gián đoạn. */
-export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.log, config = defaultConfig } = {}) {
+export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.log, config = defaultConfig, processChatbotChanges = null, chatbotDependencies = null } = {}) {
   if (!isPancakeConfigured(config) || pancakeSyncTimer) return null;
   // Lượt trước chưa xong (mạng chậm, bị chặn 429) thì lượt sau bỏ qua, không chạy chồng.
   let running = false;
@@ -470,8 +505,8 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, log = console.lo
     if (running) return;
     running = true;
     try {
-      const summary = await syncPancakeConversations({ limit: 60, messagePages: 1 }, config);
-      if (summary.messages) log(`Đồng bộ Pancake: ${summary.conversations} hội thoại, ghi ${summary.messages} tin mới`);
+      const summary = await syncPancakeConversations({ limit: 60, messagePages: 1, processChatbotChanges, chatbotDependencies }, config);
+      if (summary.messages) log(`Đồng bộ Pancake: ${summary.conversations} hội thoại, ghi ${summary.messages} tin mới${summary.bot ? `, đưa bot ${summary.bot} tin webhook bỏ sót` : ''}`);
       if (summary.failures?.length) log(`Đồng bộ Pancake: ${summary.failures.length} hội thoại lỗi, ví dụ ${summary.failures[0]}`);
     } catch (error) {
       log(`Đồng bộ Pancake lỗi: ${error.message}`);

@@ -7,7 +7,7 @@ import path from 'node:path';
 // Hộp thư thử riêng: storePancakeEvents ghi vào messaging-store.
 process.env.META_CONVERSATIONS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-comments-')), 'meta-conversations.json');
 const {
-  enrichPancakeAdContext, findPancakePost, handlePancakeWebhook, normalizePancakeWebhook, sendConversationMessageViaPancake, syncPancakeConversations
+  enrichPancakeAdContext, findPancakePost, handlePancakeWebhook, missedBotChanges, normalizePancakeWebhook, sendConversationMessageViaPancake, syncPancakeConversations
 } = await import('../app/pancake.mjs');
 const { getConversation, listMessages } = await import('../app/messaging-store.mjs');
 
@@ -169,4 +169,42 @@ test('giới tính từ hồ sơ Pancake vào hội thoại: hơn bản đoán t
   const unknown = { id: '110_907', type: 'INBOX', from: { id: '907', name: 'Khách Bảy' }, assignee_ids: [], page_customer: { gender: null } };
   await handlePancakeWebhook(inbox({ conversation: unknown, message: { id: 'm_907_1', conversation_id: '110_907', message: 'xin chào', from: { id: '907', name: 'Khách Bảy' } } }), { processChatbotChanges: async () => {}, chatbotDependencies: {}, config, fetchImpl: notFound });
   assert.notEqual((await getConversation('110:907')).genderSource, 'pancake', 'Pancake không biết thì không ghi');
+});
+
+test('đồng bộ định kỳ đưa bot tin khách mới chưa ai trả lời (webhook bỏ sót); tin cũ, tin Page đã trả lời, bot đã tắt thì không', async () => {
+  const recent = new Date(Date.now() - 2 * 60 * 1000).toISOString().slice(0, 19);
+  const answered = new Date(Date.now() - 3 * 60 * 1000).toISOString().slice(0, 19);
+  const reply = new Date(Date.now() - 2 * 60 * 1000 + 30000).toISOString().slice(0, 19);
+  const old = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 19);
+  const fetchMock = async url => {
+    const address = String(url);
+    if (address.includes('/v2/pages/110/conversations') && address.includes('type=COMMENT')) return { ok: true, status: 200, json: async () => ({ success: true, conversations: [] }) };
+    if (address.includes('/v2/pages/110/conversations')) {
+      return { ok: true, status: 200, json: async () => ({ success: true, conversations: [
+        { id: '110_7001', type: 'INBOX', from: { id: '7001', name: 'Khách Mới' }, assignee_ids: [] },
+        { id: '110_7002', type: 'INBOX', from: { id: '7002', name: 'Khách Cũ' }, assignee_ids: [] },
+        { id: '110_7003', type: 'INBOX', from: { id: '7003', name: 'Khách Đã Trả Lời' }, assignee_ids: [] }
+      ] }) };
+    }
+    if (address.includes('/conversations/110_7001/messages')) return { ok: true, status: 200, json: async () => ({ success: true, messages: [{ id: 'm_7001_1', conversation_id: '110_7001', message: 'Giá sao em', from: { id: '7001', name: 'Khách Mới' }, inserted_at: recent }] }) };
+    if (address.includes('/conversations/110_7002/messages')) return { ok: true, status: 200, json: async () => ({ success: true, messages: [{ id: 'm_7002_1', conversation_id: '110_7002', message: 'Giá sao em', from: { id: '7002', name: 'Khách Cũ' }, inserted_at: old }] }) };
+    if (address.includes('/conversations/110_7003/messages')) return { ok: true, status: 200, json: async () => ({ success: true, messages: [
+      { id: 'm_7003_1', conversation_id: '110_7003', message: 'Giá sao em', from: { id: '7003', name: 'Khách Đã Trả Lời' }, inserted_at: answered },
+      { id: 'm_7003_2', conversation_id: '110_7003', message: 'Dạ 174k ạ', from: { id: '110', name: 'Test', admin_name: 'Nhân viên' }, inserted_at: reply }
+    ] }) };
+    return { ok: false, status: 404, json: async () => ({ success: false }) };
+  };
+  const received = [];
+  const summary = await syncPancakeConversations({ limit: 60, messagePages: 1, commentLimit: 0, processChatbotChanges: async changes => { received.push(...changes); }, chatbotDependencies: {} }, config, fetchMock);
+  assert.equal(summary.messages, 4);
+  assert.equal(summary.bot, 1);
+  assert.deepEqual(received.map(change => [change.conversation.id, change.message.text]), [['110:7001', 'Giá sao em']]);
+  // Chạy lại: tin đã có, không ghi lại, không đưa bot lần hai.
+  const again = await syncPancakeConversations({ limit: 60, messagePages: 1, commentLimit: 0, processChatbotChanges: async changes => { received.push(...changes); }, chatbotDependencies: {} }, config, fetchMock);
+  assert.equal(again.bot, undefined);
+  assert.equal(received.length, 1);
+  // Bot đã tắt trong hội thoại: không đưa.
+  const store = { messages: { 'c1': [] } };
+  assert.deepEqual(missedBotChanges([{ type: 'message', conversation: { id: 'c1', botEnabled: false }, message: { id: 'x', direction: 'incoming', createdAt: Date.now() } }], store), []);
+  assert.equal(missedBotChanges([{ type: 'message', conversation: { id: 'c1' }, message: { id: 'x', direction: 'incoming', createdAt: Date.now() } }], store).length, 1);
 });

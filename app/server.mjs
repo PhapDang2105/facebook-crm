@@ -1608,8 +1608,10 @@ const server = http.createServer(async (request, response) => {
         const pageValid = Boolean(pageId) && (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]).some(p => String(p.pageId) === pageId);
         if (!isPancakeConfigured() || (!tokenValid && !pageValid)) {
           if (isPancakeConfigured()) console.warn('Webhook Pancake token không khớp, bỏ qua (page', pageId || '?', ')');
-          response.writeHead(isPancakeConfigured() ? 401 : 503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-          return response.end(isPancakeConfigured() ? 'Invalid token' : 'Pancake webhook is not configured');
+          // Pancake tạm ngưng webhook khi gặp mã lỗi liên tiếp (26/09: hai lần 401 lúc khởi động lại
+          // → webhook im 35 phút). Gói lạ vẫn trả 200 và bỏ qua; chỉ báo 503 khi chưa cấu hình Pancake.
+          response.writeHead(isPancakeConfigured() ? 200 : 503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+          return response.end(isPancakeConfigured() ? '{"received":false}' : '{"error":"Pancake webhook is not configured"}');
         }
         // Pancake không gửi token (hành vi đã biết): ghi 1 dòng/giờ, không phủ đầy log.
         if (!tokenValid && payload?.event_type && payload.event_type !== 'verify' && Date.now() - pancakeNoTokenWarnedAt > 60 * 60 * 1000) {
@@ -2355,7 +2357,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   // Đơn landing từ mọi trang Webcake (kể cả đơn bỏ dở) được kéo từ POS mỗi 5 phút.
   if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders });
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
-  startPancakeSync();
+  // Đồng bộ định kỳ cũng đưa bot tin khách mới chưa ai trả lời (webhook Pancake bỏ sót / tạm ngưng).
+  startPancakeSync({ processChatbotChanges, chatbotDependencies });
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);

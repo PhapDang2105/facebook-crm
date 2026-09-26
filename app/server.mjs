@@ -32,6 +32,7 @@ import { listExports, readExportFile, recordExport } from './export-history.mjs'
 import { fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { isValidQrCode, listQrScans, recordQrOpen, recordQrScan } from './qr-scans.mjs';
 import { classifyUserAgent, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
+import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -1068,7 +1069,30 @@ const server = http.createServer(async (request, response) => {
           referralCounts[referral.ref] = (referralCounts[referral.ref] || 0) + 1;
         }
       }
-      return sendJson(response, 200, await listQrScans(referralCounts));
+      const stats = await listQrScans(referralCounts);
+      return sendJson(response, 200, {
+        baseUrl: metaConfig.publicBaseUrl,
+        codes: stats.codes.map(entry => ({ ...entry, url: qrTargetUrl(metaConfig.publicBaseUrl, entry.code) })),
+        recent: stats.recent
+      });
+    }
+    // Ảnh mã QR để in lên thẻ: mã hoá /q/<mã>. Sau mật khẩu (Caddy chỉ mở /q/*),
+    // vì đây là công cụ của nhân viên, không phải của khách. SVG cho nhà in,
+    // PNG (?size=, mặc định 1024) để xem nhanh hay dán vào thiết kế.
+    const qrImageMatch = url.pathname.match(/^\/api\/qr\/image\/([^/]+)\.(svg|png)$/);
+    if (qrImageMatch && request.method === 'GET') {
+      const code = decodeURIComponent(qrImageMatch[1]).toLowerCase();
+      if (!isValidQrCode(code)) return sendJson(response, 400, { error: 'Mã QR chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự.' });
+      const target = qrTargetUrl(metaConfig.publicBaseUrl, code);
+      const download = url.searchParams.get('download') === '1';
+      const disposition = `${download ? 'attachment' : 'inline'}; filename="qr-${code}.${qrImageMatch[2]}"`;
+      if (qrImageMatch[2] === 'svg') {
+        response.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Content-Disposition': disposition, 'Cache-Control': 'private, max-age=3600' });
+        return response.end(renderQrSvg(target));
+      }
+      const png = await renderQrPng(target, { size: Number(url.searchParams.get('size')) || 1024 });
+      response.writeHead(200, { 'Content-Type': 'image/png', 'Content-Disposition': disposition, 'Cache-Control': 'private, max-age=3600' });
+      return response.end(png);
     }
     if (request.method === 'GET' && url.pathname === '/api/products') {
       const store = await readProductStore();

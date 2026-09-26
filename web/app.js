@@ -5237,6 +5237,7 @@ function showSettingsSection(name = 'channels') {
   });
   if (section === 'gifts') loadGifts();
   if (section === 'messages') loadMessageSettings();
+  if (section === 'qr') loadQrSettings();
 }
 
 function renderChatbotToggle(conversation = getActiveConversation()) {
@@ -10206,4 +10207,97 @@ chatbotSettingsEnabled?.addEventListener('change', async () => {
   } finally {
     chatbotSettingsEnabled.disabled = false;
   }
+});
+
+// ===== Mã QR trên thẻ cảm ơn (Cài đặt → Mã QR) =====
+//
+// Ảnh QR do máy chủ vẽ (/api/qr/image/<mã>.svg|png) và luôn mã hoá /q/<mã>,
+// nên nhân viên chỉ cần gõ mã lô; thống kê đọc từ /api/qr/stats mỗi lần mở.
+const qrPlatformNames = { ios: 'iPhone', android: 'Android', 'may tinh': 'Máy tính', khac: 'Khác' };
+const qrBrowserNames = {
+  zalo: 'Zalo', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok', messenger: 'Messenger',
+  chrome: 'Chrome', safari: 'Safari', samsung: 'Samsung', firefox: 'Firefox', edge: 'Edge', opera: 'Opera',
+  webview: 'Trong app', 'app khac': 'App khác', khac: 'Khác'
+};
+
+function qrCountList(counts, names) {
+  const entries = Object.entries(counts || {}).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
+  return entries.length ? entries.map(([key, count]) => `${escapeHtml(names[key] || key)} ${count}`).join(', ') : '—';
+}
+
+function formatQrTime(value) {
+  const time = Number(value) || 0;
+  if (!time) return '—';
+  return new Date(time).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function showQrPreview(code) {
+  const preview = document.querySelector('#qr-preview');
+  if (!preview) return;
+  const safe = encodeURIComponent(code);
+  document.querySelector('#qr-preview-image').src = `/api/qr/image/${safe}.png?size=512`;
+  document.querySelector('#qr-preview-code').textContent = `Mã ${code}`;
+  const link = document.querySelector('#qr-preview-url');
+  const url = `${qrBaseUrl || window.location.origin}/q/${code}`;
+  link.textContent = url;
+  link.href = url;
+  document.querySelector('#qr-download-svg').href = `/api/qr/image/${safe}.svg?download=1`;
+  document.querySelector('#qr-download-png').href = `/api/qr/image/${safe}.png?download=1`;
+  const input = document.querySelector('#qr-code-input');
+  if (input && input.value !== code) input.value = code;
+  preview.classList.remove('hidden');
+}
+
+let qrBaseUrl = '';
+
+function renderQrStats({ codes = [], baseUrl = '' } = {}) {
+  const container = document.querySelector('#qr-stats');
+  if (!container) return;
+  qrBaseUrl = baseUrl || '';
+  if (!codes.length) {
+    container.innerHTML = '<p class="channel-empty">Chưa có lượt quét nào. Tạo mã QR ở trên, in thử rồi quét bằng điện thoại để thấy số liệu tại đây.</p>';
+    return;
+  }
+  container.innerHTML = `<table class="qr-stats-table"><thead><tr>
+      <th>Mã</th><th>Lượt quét</th><th>Máy</th><th>Trình duyệt</th><th>Bấm nút</th><th>Vào Messenger</th><th>Lần cuối</th><th></th>
+    </tr></thead><tbody>${codes.map(entry => `<tr>
+      <td><b>${escapeHtml(entry.code)}</b></td>
+      <td>${entry.scans || 0}</td>
+      <td>${qrCountList(entry.platforms, qrPlatformNames)}</td>
+      <td>${qrCountList(entry.browsers, qrBrowserNames)}</td>
+      <td>${entry.opens || 0}${entry.openRate === null || entry.openRate === undefined ? '' : ` <small>(${entry.openRate}% lượt xem trang)</small>`}</td>
+      <td>${entry.referrals || 0}${entry.arrivalRate === null || entry.arrivalRate === undefined ? '' : ` <small>(${entry.arrivalRate}%)</small>`}</td>
+      <td>${formatQrTime(entry.lastAt)}</td>
+      <td><button type="button" class="qr-stats-show" data-qr-code="${escapeHtml(entry.code)}">Xem QR</button></td>
+    </tr>`).join('')}</tbody></table>
+    <p class="qr-stats-note">Bấm nút chỉ đếm với lượt được phục vụ bằng trang đệm (iPhone, Zalo, trình duyệt trong app); Android Chrome được chuyển thẳng sang Messenger nên không có bước này. Vào Messenger là số referral Meta thật sự gửi về, Meta không cam kết gửi đủ.</p>`;
+}
+
+async function loadQrSettings() {
+  const container = document.querySelector('#qr-stats');
+  if (!container) return;
+  try {
+    renderQrStats(await readApiResponse(await fetch('/api/qr/stats')));
+  } catch (error) {
+    container.innerHTML = '<p class="channel-empty">Chưa tải được thống kê.</p>';
+    showToast(error.message || 'Chưa tải được thống kê mã QR.', 'error');
+  }
+}
+
+document.querySelector('#qr-make-form')?.addEventListener('submit', event => {
+  event.preventDefault();
+  const input = document.querySelector('#qr-code-input');
+  const code = String(input?.value || '').trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(code)) {
+    showToast('Mã chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự. Ví dụ: tmdt-01.', 'error');
+    input?.focus();
+    return;
+  }
+  input.value = code;
+  showQrPreview(code);
+});
+
+document.querySelector('#qr-stats')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-qr-code]');
+  if (button) showQrPreview(button.dataset.qrCode);
 });

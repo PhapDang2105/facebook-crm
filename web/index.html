@@ -53,6 +53,7 @@
         <button class="settings-subnav-item" type="button" data-settings-section="messages">Tin nhắn</button>
         <button class="settings-subnav-item" type="button" data-settings-section="products">Sản phẩm</button>
         <button class="settings-subnav-item" type="button" data-settings-section="gifts">Quà tặng</button>
+        <button class="settings-subnav-item" type="button" data-settings-section="qr">Mã QR</button>
       </div>
     </nav>
   </aside>
@@ -673,6 +674,35 @@
             <div class="gift-table">
               <div class="gift-table-head"><span>Áp dụng</span><span>Tên quà tặng</span><span>Tặng từ</span><span>SKU xuất kho</span><span>Khối lượng</span><span></span></div>
               <div class="gift-rows" id="gift-rows"></div>
+            </div>
+          </section>
+        </section>
+        <section class="settings-section-content hidden" data-settings-panel="qr" aria-labelledby="qr-settings-title">
+          <section class="settings-card qr-settings-card">
+            <header class="settings-card-head">
+              <div>
+                <h1 id="qr-settings-title">Mã QR trên thẻ cảm ơn</h1>
+                <p>Mỗi lô in một mã. Khách quét sẽ vào Messenger của Page, bot chào bằng mẫu QR_OFFER. Thống kê so lượt quét với số khách thật sự vào được Messenger.</p>
+              </div>
+            </header>
+            <div class="qr-settings-body">
+              <form class="qr-make" id="qr-make-form">
+                <label class="qr-make-field"><span>Mã lô in</span><input id="qr-code-input" name="code" placeholder="vd: tmdt-01" autocomplete="off" spellcheck="false" maxlength="40" pattern="[a-z0-9][a-z0-9-]{0,39}" title="Chữ thường, số và gạch nối, tối đa 40 ký tự"></label>
+                <button class="settings-save-button" type="submit">Tạo mã QR</button>
+              </form>
+              <div class="qr-preview hidden" id="qr-preview">
+                <img class="qr-preview-image" id="qr-preview-image" alt="Mã QR">
+                <div class="qr-preview-info">
+                  <p class="qr-preview-code" id="qr-preview-code"></p>
+                  <p class="qr-preview-url"><a id="qr-preview-url" target="_blank" rel="noopener"></a></p>
+                  <p class="qr-preview-note">In cạnh QR từ 2,2 cm, chừa viền trắng quanh mã, in kèm dòng địa chỉ bên trên cho người không quét được. Tệp SVG đưa nhà in; PNG để xem nhanh.</p>
+                  <div class="qr-preview-actions">
+                    <a class="qr-download" id="qr-download-svg" download>Tải SVG (để in)</a>
+                    <a class="qr-download" id="qr-download-png" download>Tải PNG</a>
+                  </div>
+                </div>
+              </div>
+              <div class="qr-stats" id="qr-stats"><p class="channel-empty">Đang tải thống kê...</p></div>
             </div>
           </section>
         </section>

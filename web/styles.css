@@ -2569,3 +2569,27 @@ tr:hover .customer-tel button { opacity: .75; }
 .golden-actions select { flex: 1 1 260px; min-width: 200px; padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 6px; font: inherit; font-size: 12px; }
 .golden-actions button { padding: 4px 12px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 .golden-actions button.is-primary { border-color: #16a34a; background: #16a34a; color: #fff; }
+
+/* Cài đặt → Mã QR trên thẻ cảm ơn */
+.qr-settings-body { display: grid; gap: 18px; padding: 18px 20px 22px; }
+.qr-make { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.qr-make-field { display: grid; gap: 6px; color: #475467; font-size: 12.5px; font-weight: 600; }
+.qr-make-field input { width: 220px; height: 36px; padding: 0 12px; color: #101828; border: 1px solid #e0e3ea; border-radius: 8px; outline: none; font: inherit; font-size: 14px; }
+.qr-make-field input:focus { border-color: #84adff; box-shadow: 0 0 0 2px rgba(21, 94, 239, .12); }
+.qr-preview { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px; padding: 16px; border: 1px solid #e9ebf0; border-radius: 12px; background: #fafbfc; }
+.qr-preview-image { width: 220px; height: 220px; border: 1px solid #e9ebf0; border-radius: 8px; background: #fff; image-rendering: pixelated; }
+.qr-preview-info { flex: 1 1 260px; min-width: 0; }
+.qr-preview-code { margin: 0 0 4px; color: #101828; font-size: 16px; font-weight: 700; }
+.qr-preview-url { margin: 0 0 10px; overflow-wrap: anywhere; font-size: 13.5px; }
+.qr-preview-url a { color: var(--brand, #1f7a45); }
+.qr-preview-note { margin: 0 0 12px; color: #667085; font-size: 13px; line-height: 1.5; }
+.qr-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.qr-download { display: inline-block; padding: 8px 14px; color: #fff; background: #111; border-radius: 8px; font-size: 12.6px; font-weight: 700; text-decoration: none; }
+.qr-download:last-child { color: #111; background: #fff; border: 1px solid #d9d9d9; }
+.qr-stats { overflow-x: auto; }
+.qr-stats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.qr-stats-table th { padding: 9px 10px; color: #475467; background: #f7f8fa; border-bottom: 1px solid #e9ebf0; font-size: 12px; font-weight: 600; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.qr-stats-table td { padding: 9px 10px; border-bottom: 1px solid #f2f4f7; vertical-align: top; }
+.qr-stats-table td small { color: #98a2b3; }
+.qr-stats-show { padding: 5px 10px; color: #111; background: #fff; border: 1px solid #d9d9d9; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.qr-stats-note { margin: 10px 0 0; color: #667085; font-size: 12.5px; line-height: 1.5; }

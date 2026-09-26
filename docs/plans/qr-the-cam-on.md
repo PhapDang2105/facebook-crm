@@ -49,7 +49,7 @@ Kỳ vọng thực tế: 2–8% đơn có quét (benchmark bao bì thực phẩm
 
 - [x] `/q/<mã>`: chỉ 302 với Chrome Android hệ thống; còn lại trả trang HTML nhẹ có một nút "Mở Messenger" trỏ `m.me/<page>?ref=<mã>`. Nhận diện Zalo, Facebook, Instagram, TikTok, WebView để hiện hướng dẫn "Mở bằng trình duyệt". Ghi loại máy, loại trình duyệt, cách phục vụ (chuyển hướng hay trang) và lượt bấm nút. `Cache-Control: no-store`. Xem `app/qr-bridge.mjs`. (26/09/2026)
 - [ ] In 50 thẻ: mức sửa lỗi Q, cạnh QR từ 2,2 cm, vùng trắng 4 module, in kèm dòng chữ `fb.giotnang.vn/q/<mã>`. Quét thử trên iPhone (Camera), Android (Camera, Google Lens), Zalo, app Facebook, một app ngân hàng. Đối chiếu lượt quét, lượt bấm, referral nhận về.
-- [ ] Bảng thống kê QR ở Cài đặt, đọc từ `GET /api/qr/stats` (chưa có giao diện).
+- [x] Cài đặt → Mã QR: tạo ảnh QR (SVG để in, PNG) cho mã lô bất kỳ qua `GET /api/qr/image/<mã>.svg|.png`, và bảng thống kê đọc từ `GET /api/qr/stats`. Xem `app/qr-image.mjs`. (26/09/2026)
 - [ ] Chỉ in 60.000 thẻ khi tỷ lệ đến Messenger chấp nhận được.
 
 ### Giai đoạn 2. Lượt chào và bản ghi khách

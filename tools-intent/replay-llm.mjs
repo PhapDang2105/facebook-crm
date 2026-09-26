@@ -15,6 +15,7 @@ const limit = args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1
 const engine = await load('app/chatbot-engine.mjs');
 const { normalizeChatbotSettings } = await load('app/chatbot-settings.mjs');
 const { ruleIntent } = await load('app/processing/rule-intent.mjs');
+const { renderChatbotReply } = await load('app/chatbot-templates.mjs');
 (await load('app/processing/catalog.mjs')).reloadCatalog();
 const stored = JSON.parse(readFileSync(path.join(root, 'data', 'processed', 'chatbot-settings.json'), 'utf8'));
 const settings = normalizeChatbotSettings({ ...stored, enabled: true });
@@ -33,12 +34,15 @@ for (const [index, item] of items.entries()) {
   ];
   const conversation = { id: 'replay', name: 'Khách', source: 'inbox', botEnabled: true, botLastTemplateId: item.lastTemplate || '', botLastReplyAt: item.prevBot ? at - 60000 : 0 };
   let llm = 'LỖI';
+  let raw = '';
   let ms = 0;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const started = Date.now();
     try {
       const reply = await engine.requestDirectModelReply({ settings, conversation, message: { type: 'text', text: item.text, createdAt: at }, recentMessages, rawResponse: true, context: {} });
-      llm = String(reply.parsed?.template_id || '');
+      raw = String(reply.parsed?.template_id || '');
+      // So mẫu SAU khi dựng câu (renderChatbotReply): "2 túi" mà chưa rõ vị thì ORDER_ADDRESS thành ASK_FLAVOR…
+      try { llm = renderChatbotReply(reply.parsed || {}, settings.messageTemplates, { messageText: item.text }).templateId || raw; } catch { llm = raw; }
       ms = Date.now() - started;
       break;
     } catch (error) {
@@ -48,7 +52,7 @@ for (const [index, item] of items.entries()) {
   }
   const ruled = ruleIntent(item.text, { source: 'inbox', botLastTemplateId: item.lastTemplate || '' });
   const rule = ruled?.value?.template_id || '';
-  out.push({ id: item.id, text: item.text.slice(0, 80), lastTemplate: item.lastTemplate || '', truth: item.label, llm, rule, pipeline: rule || llm, ms });
+  out.push({ id: item.id, text: item.text.slice(0, 80), lastTemplate: item.lastTemplate || '', truth: item.label, raw, llm, rule, pipeline: rule || llm, ms });
   if ((index + 1) % 20 === 0) { console.log(`${index + 1}/${items.length}`); writeFileSync(path.join(path.dirname(goldenPath), 'replay-llm-out.json'), JSON.stringify(out)); }
   await wait(150);
 }
@@ -58,7 +62,13 @@ const pct = (num, den) => (den ? `${(100 * num / den).toFixed(1)}%` : '–');
 const ok = out.filter(row => !row.llm.startsWith('LỖI'));
 const isOrder = id => /^ORDER_|^ASK_FLAVOR|^SHOP_ORDER/.test(id);
 const group = (rows, name) => `${name}: LLM ${pct(rows.filter(r => r.llm === r.truth).length, rows.length)} · luật+LLM ${pct(rows.filter(r => r.pipeline === r.truth).length, rows.length)} (${rows.length} tin)`;
+// Ca engine quyết trước LLM (giỏ Shop, luồng dùng thử) hoặc LLM thiếu ngữ cảnh giỏ/đơn đã lưu trong replay
+// (chốt đơn, địa chỉ từng phần): tách ra để nhìn đúng phần LLM thật sự quyết.
+const beforeLlm = id => /^SHOP_ORDER|^TRIAL_/.test(id);
+const needsBasket = id => ['ORDER_CONFIRMATION', 'ORDER_ADDRESS_PARTIAL', 'ORDER_UPDATED'].includes(id);
+const decidable = ok.filter(r => !beforeLlm(r.truth) && !needsBasket(r.truth));
 console.log(group(ok, 'Tổng'));
+console.log(group(decidable, 'Phần LLM thật sự quyết (bỏ giỏ Shop/dùng thử/chốt đơn thiếu ngữ cảnh)'));
 console.log(group(ok.filter(r => isOrder(r.truth)), 'Nhóm lên đơn'));
 console.log(group(ok.filter(r => !isOrder(r.truth)), 'Nhóm thông tin/khác'));
 console.log(`Lỗi gọi model: ${out.length - ok.length} · độ trễ trung bình ${Math.round(ok.reduce((sum, r) => sum + r.ms, 0) / Math.max(1, ok.length))} ms`);

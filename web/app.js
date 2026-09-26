@@ -10245,8 +10245,8 @@ function showQrPreview(code) {
   const messengerNote = document.querySelector('#qr-preview-messenger');
   if (messengerNote) {
     messengerNote.textContent = known?.prefillText
-      ? `Khách quét sẽ mở Messenger của ${qrPageName || 'Page'} với tin soạn sẵn: “${known.prefillText}”. Khách bấm Gửi là CRM ghi nhận và chào bằng QR_OFFER.`
-      : `Khách quét sẽ mở Messenger của ${qrPageName || 'Page'} với tin soạn sẵn mang #${code}; khách bấm Gửi là CRM ghi nhận và chào bằng QR_OFFER.`;
+      ? `Khách quét sẽ mở Messenger của ${qrPageName || 'Page'} với ref "${code}" (Botcake tự chào nếu có công cụ Messenger Ref URL với Custom Ref = ${code}) và tin soạn sẵn: “${known.prefillText}”.`
+      : `Khách quét sẽ mở Messenger của ${qrPageName || 'Page'} với ref "${code}". Botcake tự gửi tin ưu đãi ngay khi mở hội thoại nếu có công cụ Messenger Ref URL với Custom Ref Parameter = ${code}; tin đó kết thúc bằng "Mã thẻ: #${code}" để CRM ghi nhận.`;
   }
   document.querySelector('#qr-download-svg').href = `/api/qr/image/${safe}.svg?download=1`;
   document.querySelector('#qr-download-png').href = `/api/qr/image/${safe}.png?download=1`;

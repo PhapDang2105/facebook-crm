@@ -576,6 +576,13 @@ function scheduleQrGreetings(changes) {
     if (!isCardScan(change)) continue;
     const conversation = change.conversation;
     if (!conversation?.psid) continue;
+    // Botcake đã chào (tin của Page mang "Mã thẻ: #mã" về qua Pancake): chỉ ghi
+    // dấu để CRM không chào chồng nếu khách gửi thêm tin soạn sẵn ngay sau đó.
+    if (change.referral?.type === 'BOTCAKE_OPTIN') {
+      qrGreetedAt.set(conversation.id, Date.now());
+      console.log(`QR: Botcake đã chào khách quét ref="${change.referral.ref}" — ${conversation.name || conversation.id}`);
+      continue;
+    }
     const last = qrGreetedAt.get(conversation.id) || 0;
     if (Date.now() - last < qrGreetingCooldownMs) {
       console.log(`QR: bỏ qua chào ${conversation.id} (vừa chào cách đây ${Math.round((Date.now() - last) / 1000)}s)`);
@@ -1043,7 +1050,7 @@ const server = http.createServer(async (request, response) => {
       const { zaloUrl, prefillText } = await readQrSettings();
       // ref kiểu Pancake + tin soạn sẵn mang #mã: Pancake ghi nguồn truy cập, và
       // tin khách gửi về CRM qua webhook Pancake mang theo mã lô.
-      const destination = messengerDestination({ pageId: page.id, code, pageName: page.name, prefillText: prefillText || undefined });
+      const destination = messengerDestination({ pageId: page.id, code, pageName: page.name, prefillText });
       if (redirect) {
         console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}) -> chuyển hướng Messenger`);
         response.writeHead(302, { Location: destination, 'Cache-Control': 'no-store' });
@@ -1089,8 +1096,8 @@ const server = http.createServer(async (request, response) => {
         codes: stats.codes.map(entry => ({
           ...entry,
           url: qrTargetUrl(metaConfig.publicBaseUrl, entry.code),
-          messengerUrl: page.id ? messengerDestination({ pageId: page.id, code: entry.code, pageName: page.name, prefillText: qrSettings.prefillText || undefined }) : '',
-          prefillText: prefillMessageFor({ code: entry.code, pageName: page.name, template: qrSettings.prefillText || undefined })
+          messengerUrl: page.id ? messengerDestination({ pageId: page.id, code: entry.code, pageName: page.name, prefillText: qrSettings.prefillText }) : '',
+          prefillText: prefillMessageFor({ code: entry.code, pageName: page.name, template: qrSettings.prefillText })
         })),
         recent: stats.recent
       });

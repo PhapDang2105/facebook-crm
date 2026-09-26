@@ -270,11 +270,14 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   // Tin của Page: gửi từ CRM thì Pancake ghi người gửi là "Public API"; tên
   // khác là nhân viên gõ trong Pancake.
   const adminName = outgoing ? String(message.from?.admin_name || '').trim() : '';
-  // Khách quét QR thẻ cảm ơn: trang đệm mở Messenger với tin soạn sẵn mang
-  // `#<mã lô>`; khách bấm Gửi là tin này về đây. Ghi như referral SHORTLINK của
-  // Meta để thống kê QR, lượt chào QR_OFFER và nhãn nguồn dùng chung một đường.
-  const qrCode = !outgoing ? qrCodeFromText(text) : '';
-  const referral = qrCode ? { ref: qrCode, source: 'SHORTLINK', type: 'PREFILL_TEXT' } : null;
+  // Khách quét QR thẻ cảm ơn, hai dấu hiệu về cùng qua webhook Pancake:
+  //  - tin của Page do Botcake tự gửi khi khách mở m.me?ref=<mã> (kết thúc
+  //    bằng "Mã thẻ: #<mã>") → khách đã được chào, CRM chỉ ghi nhận;
+  //  - tin khách gửi từ tin soạn sẵn mang `#<mã>` (đường dự phòng).
+  // Cả hai ghi như referral SHORTLINK của Meta để thống kê QR, nhãn nguồn và
+  // lượt chào dùng chung một đường; `type` cho biết ai đã chào.
+  const qrCode = qrCodeFromText(text);
+  const referral = qrCode ? { ref: qrCode, source: 'SHORTLINK', type: outgoing ? 'BOTCAKE_OPTIN' : 'PREFILL_TEXT' } : null;
   // "POS" là thẻ xác nhận đơn do Pancake POS tự gửi, không phải người gõ: không
   // được coi là nhân viên (trước đây bot bị tắt ngay sau mỗi đơn đẩy POS).
   return {

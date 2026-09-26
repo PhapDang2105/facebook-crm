@@ -86,24 +86,28 @@ export function qrCodeFromText(text) {
   return match ? match[1].toLowerCase() : '';
 }
 
-export const defaultPrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận hướng dẫn và quà nhé 💛 #{code}';
+export const samplePrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận hướng dẫn và quà nhé 💛 #{code}';
 
-/** Tin soạn sẵn cho một mã: điền {page}/{code}; thiếu `#mã` thì tự nối vào cuối để CRM còn nhận ra. */
-export function prefillMessageFor({ code, pageName = '', template = defaultPrefillText }) {
-  const source = String(template || defaultPrefillText);
+/** Tin soạn sẵn cho một mã: điền {page}/{code}; thiếu `#mã` thì tự nối vào cuối để CRM còn nhận ra. Mẫu rỗng → không có tin. */
+export function prefillMessageFor({ code, pageName = '', template = '' }) {
+  const source = String(template || '').trim();
+  if (!source) return '';
   let text = source.replace(/\{page\}/g, pageName || 'shop').replace(/\{code\}/g, code).replace(/\s+/g, ' ').trim();
   if (qrCodeFromText(text) !== code) text = `${text} #${code}`.trim();
   return text.slice(0, 140);
 }
 
 /**
- * Đích Messenger của một mã: m.me của Page, `ref` kiểu Pancake và `text` là tin
- * soạn sẵn. Khách chỉ việc bấm Gửi: một tin thật (vào tệp quảng cáo "đã nhắn
- * tin", mở cửa sổ 24 giờ, về CRM qua Pancake) mang theo mã lô.
+ * Đích Messenger của một mã: m.me của Page với `ref` = chính mã lô. Botcake
+ * (bot của Pancake, Công cụ → Messenger Ref URL, Custom Ref Parameter = mã) nhận
+ * referral này qua app Meta của Pancake và tự gửi tin ưu đãi ngay khi khách mở
+ * hội thoại — không cần khách gõ gì; app Meta của CRM (nếu Page nối) cũng nhận
+ * được cùng ref. Tin soạn sẵn (`text`) chỉ thêm khi chủ shop đặt ở Cài đặt →
+ * Mã QR: đường dự phòng để CRM nhận ra khách khi không có bot nào chào.
  */
-export function messengerDestination({ pageId, code, pageName = '', prefillText = defaultPrefillText }) {
+export function messengerDestination({ pageId, code, pageName = '', prefillText = '' }) {
   const text = prefillMessageFor({ code, pageName, template: prefillText });
-  return `https://m.me/${encodeURIComponent(pageId)}?ref=${pancakeRef(code)}&text=${encodeURIComponent(text)}`;
+  return `https://m.me/${encodeURIComponent(pageId)}?ref=${encodeURIComponent(code)}${text ? `&text=${encodeURIComponent(text)}` : ''}`;
 }
 
 /** Chỉ Chrome hệ thống trên Android mở được app Messenger sau một chuyển hướng 302. */

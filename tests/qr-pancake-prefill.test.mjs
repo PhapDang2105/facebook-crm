@@ -12,7 +12,7 @@ process.env.PANCAKE_PAGE_NAME = 'Giọt Nắng';
 process.env.PANCAKE_PAGE_ACCESS_TOKEN = 't';
 process.env.PANCAKE_WEBHOOK_TOKEN = 'w';
 
-const { pancakeRef, qrCodeFromRef, qrCodeFromText, prefillMessageFor, messengerDestination } = await import('../app/qr-bridge.mjs');
+const { pancakeRef, qrCodeFromRef, qrCodeFromText, prefillMessageFor, messengerDestination, samplePrefillText } = await import('../app/qr-bridge.mjs');
 const { normalizePancakeWebhook, handlePancakeWebhook } = await import('../app/pancake.mjs');
 const { writeQrSettings, readQrSettings } = await import('../app/qr-settings.mjs');
 
@@ -32,13 +32,18 @@ test('mã lô trong tin soạn sẵn: #tmdt-01 ở bất kỳ đâu, không dín
   assert.equal(qrCodeFromText(''), '');
 });
 
-test('tin soạn sẵn điền {page}/{code}, thiếu #mã thì tự nối, cắt 140 ký tự; đích m.me có ref Pancake và text', () => {
-  assert.equal(prefillMessageFor({ code: 'tmdt-01', pageName: 'Giọt Nắng' }), 'Mình vừa quét thẻ cảm ơn Giọt Nắng, cho mình nhận hướng dẫn và quà nhé 💛 #tmdt-01');
+test('tin soạn sẵn: mẫu rỗng → không có; điền {page}/{code}, thiếu #mã thì tự nối, cắt 140 ký tự', () => {
+  assert.equal(prefillMessageFor({ code: 'tmdt-01', pageName: 'Giọt Nắng' }), '', 'mặc định không có tin soạn sẵn: Botcake tự chào theo ref');
+  assert.equal(prefillMessageFor({ code: 'tmdt-01', pageName: 'Giọt Nắng', template: samplePrefillText }), 'Mình vừa quét thẻ cảm ơn Giọt Nắng, cho mình nhận hướng dẫn và quà nhé 💛 #tmdt-01');
   assert.equal(prefillMessageFor({ code: 'tmdt-02', pageName: 'Giọt Nắng', template: 'Em ơi cho mình nhận quà' }), 'Em ơi cho mình nhận quà #tmdt-02');
   assert.ok(prefillMessageFor({ code: 'x', template: 'a'.repeat(200) }).length <= 140);
-  const destination = messengerDestination({ pageId: '103549382215599', code: 'tmdt-01', pageName: 'Giọt Nắng' });
-  assert.match(destination, /^https:\/\/m\.me\/103549382215599\?ref=cGFuY2FrZV91dG1fc291cmNlPXRtZHQtMDE&text=/);
-  assert.match(decodeURIComponent(destination.split('&text=')[1]), /#tmdt-01$/);
+});
+
+test('đích m.me: ref = chính mã lô (Botcake Custom Ref Parameter); text chỉ khi có tin soạn sẵn', () => {
+  assert.equal(messengerDestination({ pageId: '103549382215599', code: 'tmdt-01', pageName: 'Giọt Nắng' }), 'https://m.me/103549382215599?ref=tmdt-01');
+  const withText = messengerDestination({ pageId: '103549382215599', code: 'tmdt-01', pageName: 'Giọt Nắng', prefillText: 'Cho mình nhận quà' });
+  assert.match(withText, /^https:\/\/m\.me\/103549382215599\?ref=tmdt-01&text=/);
+  assert.match(decodeURIComponent(withText.split('&text=')[1]), /#tmdt-01$/);
 });
 
 const webhook = (text, { fromPage = false } = {}) => ({
@@ -56,13 +61,14 @@ const webhook = (text, { fromPage = false } = {}) => ({
   }
 });
 
-test('webhook Pancake: tin khách mang #mã thành referral SHORTLINK; tin của Page thì không', () => {
+test('webhook Pancake: tin khách mang #mã → PREFILL_TEXT; tin Page (Botcake chào) mang "Mã thẻ: #mã" → BOTCAKE_OPTIN; tin thường không có', () => {
   const [event] = normalizePancakeWebhook(webhook('Mình vừa quét thẻ cảm ơn Giọt Nắng 💛 #tmdt-01'));
   assert.deepEqual(event.referral, { ref: 'tmdt-01', source: 'SHORTLINK', type: 'PREFILL_TEXT' });
   const [plain] = normalizePancakeWebhook(webhook('Cho mình hỏi giá'));
   assert.equal(plain.referral, undefined);
-  const [echo] = normalizePancakeWebhook(webhook('Dạ em gửi ưu đãi #tmdt-01', { fromPage: true }));
-  assert.equal(echo.referral, undefined, 'Page nhắc lại mã không phải khách quét');
+  const [botcake] = normalizePancakeWebhook(webhook('Dạ Giọt Nắng cảm ơn anh/chị… \nMã thẻ: #tmdt-01', { fromPage: true }));
+  assert.deepEqual(botcake.referral, { ref: 'tmdt-01', source: 'SHORTLINK', type: 'BOTCAKE_OPTIN' });
+  assert.equal(botcake.message.direction, 'outgoing');
 });
 
 test('handlePancakeWebhook: móc beforeBot nhận thay đổi mang referral và quyết định bot bỏ qua tin đó', async () => {

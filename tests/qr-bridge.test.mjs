@@ -6,8 +6,8 @@ import path from 'node:path';
 
 process.env.QR_SCANS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'qr-')), 'qr-scans.json');
 
-const { classifyUserAgent, renderBridgePage, shouldRedirectDirectly } = await import('../app/qr-bridge.mjs');
-const { recordQrScan, recordQrOpen, listQrScans, isValidQrCode } = await import('../app/qr-scans.mjs');
+const { classifyUserAgent, isLinkPreviewBot, renderBridgePage, shouldRedirectDirectly } = await import('../app/qr-bridge.mjs');
+const { recordQrScan, recordQrOpen, listQrScans, isValidQrCode, isKnownQrCode, registerQrCode, deleteQrCode, countQrReferrals } = await import('../app/qr-scans.mjs');
 
 const agents = {
   iosSafari: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
@@ -102,6 +102,9 @@ test('trang đệm: tên Page và mã được escape', () => {
 test('kho lượt quét: đếm theo máy, trình duyệt, cách phục vụ và lượt bấm nút', async () => {
   assert.equal(isValidQrCode('tmdt-01'), true);
   assert.equal(isValidQrCode('../x'), false);
+  // Mã phải được nhân viên tạo ở Cài đặt trước; quét mã chưa tạo không đếm (xem test bên dưới).
+  const { registerQrCode } = await import('../app/qr-scans.mjs');
+  await registerQrCode('tmdt-01', { at: 0 });
   await recordQrScan('tmdt-01', { userAgent: agents.androidChrome, mode: 'redirect', at: 1 });
   await recordQrScan('tmdt-01', { userAgent: agents.zaloAndroid, mode: 'page', at: 2 });
   await recordQrScan('tmdt-01', { userAgent: agents.iosSafari, mode: 'page', at: 3 });
@@ -124,4 +127,66 @@ test('kho lượt quét: đếm theo máy, trình duyệt, cách phục vụ và
   assert.equal(recent[0].event, 'open');
   assert.equal(recent[1].browser, 'safari');
   await assert.rejects(recordQrOpen('KHÔNG-HỢP-LỆ'), /không hợp lệ/);
+});
+
+test('đường /q/ và beacon /open công khai: mã chưa tạo ở Cài đặt không tạo mục mới (không đếm, không phình kho); kho đủ 500 mã thì tạo thêm bị từ chối, xoá mã rồi mới tạo được', async () => {
+  const { maximumTrackedCodes, registerQrCode, deleteQrCode } = await import('../app/qr-scans.mjs');
+  assert.equal(maximumTrackedCodes, 500);
+  // Mã lạ ai đó gõ vào URL: không có mục, không ghi gì.
+  assert.equal(await recordQrScan('ma-la-x', { userAgent: agents.iosSafari, mode: 'page', at: 999 }), null);
+  assert.equal(await recordQrOpen('ma-la-x', { at: 1000 }), null);
+  assert.ok(!(await listQrScans()).codes.some(entry => entry.code === 'ma-la-x'));
+  assert.ok(!(await listQrScans()).recent.some(item => item.code === 'ma-la-x'), 'không ghi vào danh sách lượt gần đây');
+  // Nhân viên tạo mã: từ đó mới đếm. Tạo lại mã đã có thì giữ nguyên số liệu.
+  const created = await registerQrCode('lo-a', { at: 5 });
+  assert.equal(created.scans, 0);
+  assert.equal(await registerQrCode('lo-a', { at: 6 }), null, 'đã có: không ghi lại');
+  assert.equal((await recordQrScan('lo-a', { userAgent: agents.androidChrome, mode: 'redirect', at: 7 })).scans, 1);
+  // Kho đủ 500 mã: mã thứ 501 bị từ chối rõ ràng; xoá một mã thì tạo được.
+  const before = (await listQrScans()).codes.length;
+  for (let index = before; index < maximumTrackedCodes; index += 1) await registerQrCode(`lo-${index}`, { at: 100 + index });
+  assert.equal((await listQrScans()).codes.length, maximumTrackedCodes);
+  await assert.rejects(registerQrCode('lo-thu-501', { at: 2000 }), /đã đủ 500 mã/);
+  assert.equal(await recordQrScan('lo-thu-501', { userAgent: agents.iosSafari, at: 2001 }), null, 'chưa tạo được thì quét cũng không đếm');
+  assert.equal(await deleteQrCode('lo-a'), true);
+  assert.equal(await deleteQrCode('lo-a'), false, 'xoá lần hai: không còn');
+  assert.ok(!(await listQrScans()).recent.some(item => item.code === 'lo-a'), 'xoá mã thì lượt gần đây của mã đó cũng bỏ');
+  assert.equal((await registerQrCode('lo-thu-501', { at: 2002 })).code, 'lo-thu-501');
+  assert.equal((await listQrScans()).codes.length, maximumTrackedCodes);
+  await assert.rejects(registerQrCode('KHÔNG-HỢP-LỆ'), /không hợp lệ/);
+});
+
+test('máy xem trước liên kết / máy quét không phải lượt quét; điện thoại thật và trình duyệt trong app thì là', () => {
+  for (const key of Object.keys(agents)) assert.equal(isLinkPreviewBot(agents[key]), false, `${key} là người thật`);
+  assert.equal(isLinkPreviewBot('facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)'), true);
+  assert.equal(isLinkPreviewBot('Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'), true);
+  assert.equal(isLinkPreviewBot('TelegramBot (like TwitterBot)'), true);
+  assert.equal(isLinkPreviewBot('WhatsApp/2.23.20.0 A'), true);
+  assert.equal(isLinkPreviewBot('curl/8.4.0'), true);
+  assert.equal(isLinkPreviewBot(''), true, 'UA rỗng là script, điện thoại nào cũng gửi UA');
+});
+
+test('thống kê "vào Messenger": một lượt quét về CRM ba đường (Meta, Botcake, tin soạn sẵn) vẫn đếm một; ngày khác đếm riêng; đọc cả referrals cũ', () => {
+  const day = 86_400_000;
+  const conversations = [
+    {
+      id: '1:a',
+      // Kho mới: referral Meta + tin Botcake + tin soạn sẵn cùng ngày cho cùng mã.
+      qrReferrals: [
+        { ref: 'tmdt-01', source: 'SHORTLINK', at: 10 * day + 100 },
+        { ref: 'tmdt-01', source: 'SHORTLINK', type: 'BOTCAKE_OPTIN', at: 10 * day + 2_000 },
+        { ref: 'cGFuY2FrZV91dG1fc291cmNlPXRtZHQtMDE', source: 'SHORTLINK', type: 'PREFILL_TEXT', at: 10 * day + 30_000 },
+        // Quét lại hôm sau: lượt mới.
+        { ref: 'tmdt-01', source: 'SHORTLINK', at: 11 * day + 5 }
+      ],
+      // Referral quảng cáo không dính vào.
+      referrals: [{ ref: '', source: 'ADS', adId: '9', at: 10 * day }]
+    },
+    // Bản ghi từ trước khi tách ô: SHORTLINK nằm trong referrals.
+    { id: '1:b', referrals: [{ ref: 'tmdt-01', source: 'SHORTLINK', at: 10 * day }, { ref: 'tmdt-02', source: 'SHORTLINK', at: 10 * day }] },
+    // ref rác không ra mã → bỏ.
+    { id: '1:c', qrReferrals: [{ ref: 'ZXZpbA', source: 'SHORTLINK', at: 10 * day }] }
+  ];
+  assert.deepEqual(countQrReferrals(conversations), { 'tmdt-01': 3, 'tmdt-02': 1 });
+  assert.deepEqual(countQrReferrals([]), {});
 });

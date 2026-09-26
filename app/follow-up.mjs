@@ -586,6 +586,21 @@ export async function recordFollowUpBatchResults(results = [], { now = Date.now(
       if (await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake-relay', readSettings })) summary.sent += 1;
       continue;
     }
+    if (result.unknown === true) {
+      // Cầu nối hết giờ chờ mà extension có thể đã gửi: KHÔNG trả về hàng chờ ngay
+      // (lô sau gửi trùng), không tính lần lỗi. Giữ chỗ thêm 45 phút; đồng bộ
+      // Pancake kéo tin về thì reconcileFollowUpQueue xác nhận, không thấy thì
+      // hết giữ chỗ tự về hàng chờ. Kết quả ok:true đến trễ vẫn ghi được.
+      const held = await updateFollowUpState(current => {
+        const target = current.sent[key];
+        if (!target?.queued) return null;
+        target.leasedUntil = now + batchLeaseMs;
+        target.lastError = 'trạm gửi không trả lời — chờ đồng bộ Pancake xác nhận';
+        return true;
+      });
+      if (held) summary.unknown = (summary.unknown || 0) + 1;
+      continue;
+    }
     const error = String(result.error || 'không rõ lỗi').slice(0, 200);
     const dropped = await updateFollowUpState(current => {
       const entry = current.sent[key];

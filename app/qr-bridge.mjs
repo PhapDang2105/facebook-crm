@@ -51,6 +51,18 @@ export function classifyUserAgent(userAgent = '') {
   return { platform, browser, inApp };
 }
 
+/**
+ * Máy xem trước liên kết và máy quét tự động: khi khách dán link /q/… vào
+ * Zalo, Messenger, Telegram… thì máy của họ tải trang để dựng thẻ xem trước —
+ * không phải lượt quét. UA rỗng cũng là máy (curl, script), điện thoại nào cũng
+ * gửi UA. Vẫn phục vụ trang bình thường, chỉ không đếm.
+ */
+export function isLinkPreviewBot(userAgent = '') {
+  const ua = String(userAgent || '').trim();
+  if (!ua) return true;
+  return /\bbot\b|bot\/|crawler|spider|preview|facebookexternalhit|facebookcatalog|Facebot|WhatsApp|TelegramBot|Twitterbot|Slackbot|Discordbot|LinkedInBot|Zalo(?:PC)?Bot|ZaloCrawler|curl\/|wget\/|python-requests|python-urllib|Go-http-client|okhttp\/|HeadlessChrome|Lighthouse|PhantomJS/i.test(ua);
+}
+
 const codePattern = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 /**
@@ -81,8 +93,11 @@ export function qrCodeFromRef(ref) {
  * ra khách quét thẻ khi Page vận hành ở Pancake — Pancake không chuyển `ref`
  * về webhook, nhưng tin khách gửi thì có, và tin soạn sẵn mang mã ở cuối.
  */
-export function qrCodeFromText(text) {
-  const match = String(text || '').match(/#([a-z0-9][a-z0-9-]{0,39})(?![a-z0-9-])/i);
+export function qrCodeFromText(text, { outgoing = false } = {}) {
+  // Mã chỉ được nhận khi đứng CUỐI tin (tin soạn sẵn kết bằng "#mã"; Botcake kết bằng "Mã thẻ: #mã").
+  // "đơn #123456 của em đâu", "giá #1 thị trường" không phải mã thẻ.
+  const pattern = outgoing ? /Mã thẻ:\s*#([a-z0-9][a-z0-9-]{0,39})\s*$/iu : /(?:^|\s)#([a-z0-9][a-z0-9-]{0,39})\s*$/iu;
+  const match = String(text || '').trim().match(pattern);
   return match ? match[1].toLowerCase() : '';
 }
 

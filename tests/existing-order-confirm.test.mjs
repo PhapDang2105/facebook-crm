@@ -148,3 +148,59 @@ test('đơn cũ đã hủy hoặc quá 7 ngày: lên đơn mới như thường'
   assert.equal(old.results[0].templateId, 'ORDER_CONFIRMATION');
   assert.equal(old.created.length, 1);
 });
+
+test('vòng 8: "đúng" có dấu phẩy / "đúng r" / "đúng, đơn mới" vẫn là đồng ý → chốt giỏ đang giữ, không hỏi mô hình', async () => {
+  for (const text of ['Đúng rồi, lên đơn giúp chị', 'đúng r', 'Dạ đúng, đơn mới ạ', 'đúng rồi nha em, chị đặt thêm']) {
+    const out = await run(asked, text, { reply: { templateId: 'GENERAL_INFO', messages: ['không được hỏi mô hình'], handoff: false } });
+    assert.equal(out.results[0].templateId, 'ORDER_CONFIRMATION', text);
+    assert.equal(out.created.length, 1, text);
+    assert.equal(out.saved.at(-1).pendingOrder, null, text);
+  }
+  // Câu có ý khác (giao sớm, số lượng, màu túi) vẫn để mô hình/luật đọc, không chốt ngầm.
+  for (const text of ['Đúng rồi em, giao sớm nha', 'đúng, 2 túi vàng', 'dạ xanh nhé']) {
+    const out = await run(asked, text, { reply: { templateId: 'THANK_YOU', messages: ['x'], handoff: false } });
+    assert.deepEqual(out.created, [], text);
+  }
+});
+
+test('khách giữ ưu đãi dùng thử mà có đơn cũ trong 7 ngày: "đúng rồi" sau câu hỏi đặt thêm → chốt luôn, không nhờ mô hình', async () => {
+  const promo = { freeShipping: true, until: Date.now() + 7 * 24 * 60 * 60 * 1000, scenarioId: 'inbox-trial-freeship', at: Date.now() - 60 * 60 * 1000, stage: 'chosen', bag: 'Granola Túi Xanh 450g', lockedUntil: Date.now() + 24 * 60 * 60 * 1000 };
+  const pending = { ...waiting, items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }], key: 'GRA-XANH-Z450=1' };
+  const out = await run({ ...asked, promo, pendingOrder: pending }, 'Đúng rồi e', { reply: { templateId: 'THANK_YOU', messages: ['không được hỏi mô hình'], handoff: false } });
+  assert.equal(out.results[0].templateId, 'ORDER_CONFIRMATION');
+  assert.equal(out.created.length, 1);
+  assert.equal(out.created[0].trial, true, '1 túi dùng thử vẫn miễn ship');
+  const no = await run({ ...asked, promo, pendingOrder: pending }, 'không, đơn cũ', { reply: { templateId: 'THANK_YOU', messages: ['x'], handoff: false } });
+  assert.equal(no.results[0].templateId, 'ORDER_STATUS');
+  assert.deepEqual(no.created, []);
+});
+
+test('"hủy đơn" lần hai ngay sau khi vừa hủy: không hủy tiếp đơn cũ hơn còn giao; đáp "đã hủy" đúng đơn vừa hủy, không "đơn đơn"', async () => {
+  const older = { id: 'B', createdAt: Date.now() - 2 * 60 * 60 * 1000, status: 'Mới', automatic: true, products: [{ sku: 'GRA-XANH-Z450', name: 'Granola Túi Xanh 450g', quantity: 2 }], total: 298000 };
+  const cancelledA = { id: 'A', createdAt: Date.now() - 10 * 60 * 1000, status: 'Hủy', processingStatus: 'cancelled', products: [{ sku: 'GRA-VANG-H350', name: 'Granola Túi Vàng 350g', quantity: 1 }], total: 189000 };
+  const cancelled = [];
+  const deps = {
+    cancelOrder: async (_c, id) => { cancelled.push(id); return { cancelled: true, created: false }; },
+    requestReply: async ({ context }) => renderChatbotReply({ template_id: 'ORDER_CANCEL' }, templates, context)
+  };
+  const again = await run({ customerOrders: [cancelledA, older], botLastTemplateId: 'ORDER_CANCEL', botLastReplyAt: Date.now() - 60000 }, 'hủy đơn giúp chị', { extraDeps: deps, extraSettings: { ruleIntent: 'off' } });
+  assert.equal(again.results[0].templateId, 'ORDER_CANCEL');
+  assert.deepEqual(cancelled, [], 'đơn B còn giao không bị hủy theo');
+  assert.match(again.sent.join(' '), /đã hủy đơn Granola Túi Vàng 350g x1/);
+  const only = await run({ customerOrders: [cancelledA], botLastTemplateId: 'THANK_YOU', botLastReplyAt: Date.now() - 60000 }, 'hủy đơn giúp chị', { extraDeps: deps, extraSettings: { ruleIntent: 'off' } });
+  assert.deepEqual(cancelled, []);
+  assert.doesNotMatch(only.sent.join(' '), /đơn đơn/);
+  // Đơn hủy đã lâu (3 giờ), bot không vừa hủy: "hủy đơn" là hủy đơn B đang mở.
+  const later = await run({ customerOrders: [{ ...cancelledA, createdAt: Date.now() - 3 * 60 * 60 * 1000 }, { ...older, createdAt: Date.now() - 60 * 60 * 1000 }], botLastTemplateId: 'THANK_YOU', botLastReplyAt: Date.now() - 60000 }, 'hủy đơn giúp chị', { extraDeps: deps, extraSettings: { ruleIntent: 'off' } });
+  assert.equal(later.results[0].templateId, 'ORDER_CANCEL');
+  assert.deepEqual(cancelled, ['B']);
+});
+
+test('ORDER_STATUS với đơn đã hủy: chỉ nêu "đã hủy", không nối đoạn thời gian giao / mã vận đơn', () => {
+  const cancelled = { id: 'c1', createdAt: Date.now() - 30 * 60 * 1000, status: 'Hủy', processingStatus: 'cancelled', products: [{ sku: 'GRA-XANH-Z450', name: 'Granola Túi Xanh 450g', quantity: 1 }], total: 189000 };
+  const status = renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, { recentOrder: cancelled });
+  assert.match(status.messages.join(' '), /hiện đã hủy ạ/);
+  assert.doesNotMatch(status.messages.join(' '), /Thời gian giao dự kiến|mã vận đơn/);
+  const open = renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, { recentOrder: { ...cancelled, status: 'Mới', processingStatus: '' } });
+  assert.match(open.messages.join(' '), /Thời gian giao dự kiến/);
+});

@@ -234,6 +234,27 @@ function applyCommentEvent(store, event) {
   return inserted ? { type: 'message', conversation, message: saved } : null;
 }
 
+/**
+ * Gắn referral vào hội thoại chứ không vào tin nhắn: đây là bối cảnh của cả luồng.
+ *  - Quảng cáo (`source: ADS`) chỉ đến một lần: `conversation.referral` là bối
+ *    cảnh sản phẩm cho bot (adTitle) và nguồn khách ("ads"). Giữ bản mới nhất
+ *    kèm vài lần gần đây trong `referrals`.
+ *  - Mã QR thẻ cảm ơn (`source: SHORTLINK`) đi ô RIÊNG `qrReferrals`: khách quét
+ *    lại nhiều lần và tin Botcake/tin soạn sẵn cũng về đây — nếu đè lên
+ *    `conversation.referral` thì bot mất tên quảng cáo, nguồn khách đổi từ
+ *    "ads" thành "inbox", và `adGreeted` tưởng đã chào quảng cáo vì `ref` có giá trị.
+ */
+export function attachReferral(conversation, referral) {
+  if (!referral) return;
+  const stamped = { ...referral, at: Date.now() };
+  if (referral.source === 'SHORTLINK') {
+    conversation.qrReferrals = [...(conversation.qrReferrals || []), stamped].slice(-20);
+    return;
+  }
+  conversation.referrals = [...(conversation.referrals || []), stamped].slice(-20);
+  conversation.referral = referral;
+}
+
 export function applyWebhookEvents(store, events) {
   const changes = [];
   for (const event of events) {
@@ -253,10 +274,7 @@ export function applyWebhookEvents(store, events) {
       // Gắn vào hội thoại chứ không vào tin nhắn: đây là bối cảnh của cả luồng.
       // Quảng cáo chỉ đến một lần, nhưng mã QR thì khách quét lại nhiều lần —
       // nên giữ bản mới nhất và một ít lịch sử, thay vì chỉ giữ lần đầu.
-      if (event.referral) {
-        conversation.referrals = [...(conversation.referrals || []), { ...event.referral, at: Date.now() }].slice(-20);
-        conversation.referral = event.referral;
-      }
+      if (event.referral) attachReferral(conversation, event.referral);
       // A customer who commented first and then writes in Messenger (after the
       // bot's private reply) is still asking about that post's product.
       if (inserted && message.direction === 'incoming' && (!conversation.post || !conversation.picture)) {
@@ -276,11 +294,7 @@ export function applyWebhookEvents(store, events) {
     }
     if (event.type === 'referral' && event.referral) {
       const conversation = ensureConversation(store, { pageId: event.pageId, psid: event.psid });
-      // Quảng cáo thì chỉ đến một lần nên giữ lần đầu là đúng. Mã QR trên bao bì
-      // thì ngược lại: khách mua lô mới lại quét, và chính lần quét SAU mới nói
-      // cho ta biết họ quay lại. Giữ bản mới nhất, kèm vài lần gần đây.
-      conversation.referrals = [...(conversation.referrals || []), { ...event.referral, at: Date.now() }].slice(-20);
-      conversation.referral = event.referral;
+      attachReferral(conversation, event.referral);
       // Trước đây nhánh này lặng lẽ `continue`, nên không ai dưới hạ nguồn biết
       // khách vừa quét. Đẩy một thay đổi ra để còn chào lại được.
       changes.push({ type: 'referral', conversation, referral: event.referral });

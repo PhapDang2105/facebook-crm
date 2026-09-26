@@ -2,6 +2,8 @@
 // chuyển lệnh gửi của CRM sang nền của extension (nền mới được mở tab Pancake).
 // Chỉ nhận tin từ chính trang CRM, chỉ một loại lệnh: GN_BRIDGE_SEND.
 const version = chrome.runtime.getManifest().version;
+// Chỉ chạy ở trang CRM gốc (kể cả khi có ?meta_ticket=… hay #settings); không chạy ở /q/* (trang công khai cho khách) hay /privacy.
+if (!/^\/(index\.html)?$/.test(location.pathname)) throw new Error('crm-bridge: không chạy ở ' + location.pathname);
 
 function announce() {
   document.documentElement.dataset.gnBridge = version;

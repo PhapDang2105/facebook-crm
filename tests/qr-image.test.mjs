@@ -29,3 +29,16 @@ test('PNG: đúng cạnh yêu cầu, chặn kích thước vô lý', async () =>
   const tiny = await renderQrPng('x', { size: 1 });
   assert.equal(tiny.readUInt32BE(16), 128, 'nhỏ nhất 128 px để camera còn đọc được');
 });
+
+test('PNG: cỡ tối đa 4096 (và quá thì kẹp về 4096) phải ra ảnh, không trả lỗi giới hạn điểm ảnh của sharp', async () => {
+  const { QR_PNG_MAX } = await import('../app/qr-image.mjs');
+  assert.equal(QR_PNG_MAX, 4096);
+  const largest = await renderQrPng('https://fb.giotnang.vn/q/tmdt-01', { size: 4096 });
+  assert.equal(largest.subarray(1, 4).toString(), 'PNG');
+  assert.equal(largest.readUInt32BE(16), 4096);
+  assert.equal(largest.readUInt32BE(20), 4096);
+  const clamped = await renderQrPng('https://fb.giotnang.vn/q/tmdt-01', { size: 99_999 });
+  assert.equal(clamped.readUInt32BE(16), 4096, 'lớn hơn tối đa thì kẹp, không lỗi');
+  const notANumber = await renderQrPng('https://fb.giotnang.vn/q/tmdt-01', { size: 'abc' });
+  assert.equal(notANumber.readUInt32BE(16), 1024, 'không phải số thì về mặc định');
+});

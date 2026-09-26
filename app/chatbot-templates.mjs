@@ -394,7 +394,8 @@ function renderOrder(value, templates, context = {}) {
   const trialBag = items.length === 1 && /^GRA-(XANH|VANG|NAU)-/i.test(String(items[0]?.code || items[0]?.sku || priced?.lines?.[0]?.sku || ''));
   const trialPriced = Boolean(priced?.priceable && trial && trialBag && priced.totalQuantity === 1 && priced.shippingFee > 0);
   // Combo 2 túi lớn trong cửa sổ ưu đãi bám đuổi (context.promoBowl): tặng bộ bát gáo dừa.
-  const promoBowl = Boolean(context.promoBowl && priced?.priceable && priced.totalQuantity === 2 && (priced.lines || []).length && priced.lines.every(line => /^GRA-(XANH|VANG|NAU)-/i.test(String(line.sku || ''))));
+  // Sửa đơn đã có quà bám đuổi (khách đổi vị, vẫn 2 túi): giữ quà; đổi số túi thì quà theo giỏ mới.
+  const promoBowl = Boolean((context.promoBowl || (updating && recentOrder?.promoGift)) && priced?.priceable && priced.totalQuantity === 2 && (priced.lines || []).length && priced.lines.every(line => /^GRA-(XANH|VANG|NAU)-/i.test(String(line.sku || ''))));
   const price = trialPriced ? withPromoFreeShipping(priced) : promoBowl ? withPromoBowl(priced) : priced?.priceable ? priced : null;
 
   // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):
@@ -778,7 +779,9 @@ function renderOrderStatus(templates) {
   // Đơn đã hủy (qua bot, nhân viên hay POS) không được kể là "kho đang chuẩn bị hàng".
   const cancelled = String(order.processingStatus || '') === 'cancelled' || order.status === 'Hủy';
   const state = cancelled ? 'đã hủy' : shipped ? 'đã chuyển sang kho để đóng gói và bàn giao vận chuyển' : 'đã được ghi nhận, kho đang chuẩn bị hàng';
-  return fill(templates.ORDER_STATUS, { ...commonValues(), items, ordered_at: orderedAt, state, total: formatMoney(Number(order.total) || 0) });
+  const text = fill(templates.ORDER_STATUS, { ...commonValues(), items, ordered_at: orderedAt, state, total: formatMoney(Number(order.total) || 0) });
+  // Đơn đã hủy: không nối đoạn "thời gian giao dự kiến… gửi mã vận đơn" (chỉ giữ câu đầu nêu trạng thái).
+  return cancelled ? text.split(/(?<=ạ\.)\s+/u)[0] : text;
 }
 
 /**
@@ -945,6 +948,15 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
   if (templateId === 'ORDER_CANCEL') {
     const recent = context.recentOrder || null;
     const now = Number(context.now) || Date.now();
+    // "Hủy đơn" lần hai ngay sau khi bot vừa hủy (đơn mới nhất đã hủy trong 30 phút, hay mẫu vừa gửi là
+    // ORDER_CANCEL): đáp "đã hủy rồi", không hủy tiếp đơn cũ hơn còn giao (recentOrder ưu tiên đơn chưa hủy).
+    const latest = context.latestOrder || null;
+    const latestCancelled = Boolean(latest?.id) && (String(latest.processingStatus || '') === 'cancelled' || latest.status === 'Hủy')
+      && (now - (Number(latest.cancelledAt) || Number(latest.updatedAt) || Number(latest.createdAt) || 0) < 30 * 60 * 1000 || context.lastTemplateId === 'ORDER_CANCEL');
+    if (latestCancelled && templates.ORDER_CANCELLED) {
+      const items = (Array.isArray(latest.products) ? latest.products : []).map(item => `${item.name || item.product || 'sản phẩm'} x${Number(item.quantity) || 1}`).join(', ') || 'vừa đặt';
+      return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items })), handoff: false };
+    }
     const shipped = /đã giao|đang giao|đã gửi/i.test(String(recent?.status || ''));
     const cancellable = Boolean(recent?.id) && recent.source !== 'POS' && now - (Number(recent.createdAt) || 0) < orderCancelWindowMs && !shipped && String(recent.processingStatus || '') !== 'cancelled';
     if (cancellable && templates.ORDER_CANCELLED) {
@@ -952,7 +964,7 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
       return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items })), handoff: false, pendingOrder: null, order: { cancelOrderId: String(recent.id) } };
     }
     if (recent && String(recent.processingStatus || '') === 'cancelled' && templates.ORDER_CANCELLED) {
-      return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items: 'đơn vừa đặt' })), handoff: false };
+      return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items: 'vừa đặt' })), handoff: false };
     }
     return renderChatbotReply({ template_id: recent ? 'CSKH_HANDOFF' : 'ORDER_STATUS', warming: recent ? '1' : '0' }, templates, context);
   }

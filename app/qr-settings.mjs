@@ -38,11 +38,25 @@ function normalizeSettings(value) {
   return { zaloUrl: isAllowedZaloUrl(zaloUrl) ? zaloUrl : '', prefillText, updatedAt: Number(value?.updatedAt) || 0 };
 }
 
+/** Tệp chưa có → mặc định. Tệp hỏng → cất sang `.corrupt-<mốc>` thay vì để lượt lưu sau đè mất. Lỗi đọc khác thì ném ra. */
 export async function readQrSettings() {
   if (cachedSettings) return cachedSettings;
+  let raw;
   try {
-    cachedSettings = normalizeSettings(JSON.parse(await readFile(settingsPath, 'utf8')));
-  } catch {
+    raw = await readFile(settingsPath, 'utf8');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    cachedSettings = normalizeSettings({});
+    return cachedSettings;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('không phải object JSON');
+    cachedSettings = normalizeSettings(parsed);
+  } catch (error) {
+    const quarantined = `${settingsPath}.corrupt-${Date.now()}`;
+    await rename(settingsPath, quarantined).catch(() => {});
+    console.error(`Cài đặt mã QR hỏng (${error.message}), đã cất sang ${path.basename(quarantined)}; dùng mặc định.`);
     cachedSettings = normalizeSettings({});
   }
   return cachedSettings;

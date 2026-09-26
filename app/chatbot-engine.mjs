@@ -646,7 +646,8 @@ async function answerChange(change, settings, results, dependencies) {
     // Không còn đơn nào chưa hủy thì lấy đơn hủy gần nhất (để "hủy đơn" lần hai được đáp "đã hủy rồi").
     const allOrders = [...(Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []), ...(Array.isArray(inboxThread?.customerOrders) ? inboxThread.customerOrders : [])];
     const latestOf = list => list.reduce((latest, order) => ((Number(order?.createdAt) || 0) > (Number(latest?.createdAt) || 0) ? order : latest), null);
-    const recentOrder = latestOf(allOrders.filter(isActiveOrder)) || latestOf(allOrders);
+    const latestOrder = latestOf(allOrders);
+    const recentOrder = latestOf(allOrders.filter(isActiveOrder)) || latestOrder;
     // Tin hệ thống của Messenger ("Bạn đã bỏ lỡ cuộc gọi…") không phải lời khách.
     if (/bỏ lỡ cuộc gọi|có thể gọi cho .* trong 7 ngày|đã gọi cho bạn|cuộc gọi (thoại|video) đã kết thúc|missed (a )?call/i.test(String(change.message?.text || ''))) {
       results.push({ conversationId: conversation.id, skipped: 'tin hệ thống cuộc gọi' });
@@ -675,7 +676,7 @@ async function answerChange(change, settings, results, dependencies) {
       const address = String(confirmation.text).match(/Địa chỉ nhận hàng:\s*([^\n]+)/u)?.[1]?.trim() || '';
       return phone && address ? { phone, address, at: Number(confirmation.createdAt) || 0 } : null;
     })();
-    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, previousDelivery, trial: trialState, trialBags: trialState ? trialBagOptions() : '', promoBowl: promoBowlActive(conversation), now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, latestOrder, lastTemplateId: conversation.botLastTemplateId || '', previousDelivery, trial: trialState, trialBags: trialState ? trialBagOptions() : '', promoBowl: promoBowlActive(conversation), now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], customer: { gender: conversation.gender || inboxThread?.gender || '', name: conversation.name || '' } };
     // Tin mảnh (chỉ SĐT, "đó a", tên người…) khi đang lấy thông tin đơn, hoặc bot
     // vừa hỏi ở bước lên đơn, hoặc tin chỉ toàn số: đợi vài giây cho tin kế tiếp
     // của khách tới để gộp, tránh xin lại thứ khách vừa gửi. Bình luận liên tiếp
@@ -801,12 +802,13 @@ async function answerChange(change, settings, results, dependencies) {
     // (giỏ mới sẽ được hỏi lại ở ORDER_EXISTING_CONFIRM bên dưới).
     const awaitingAsked = conversation.botLastTemplateId === 'ORDER_EXISTING_CONFIRM' && Boolean(conversation.pendingOrder?.awaitingConfirm);
     const awaitingPending = awaitingAsked ? usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' }) : null;
-    const awaitingText = folded.trim().replace(/[.!…]+$/, '').trim();
-    const awaitingOther = /\d|\?/.test(awaitingText) || /\b(don moi|tui|goi|bich|xanh|vang|nau|cacao|combo|doi|sua|dia chi)\b/.test(awaitingText);
+    // Dấu câu bỏ hết ("Đúng rồi, lên đơn giúp chị" cũng là đồng ý); "đơn mới" không số/không màu chính là đồng ý.
+    const awaitingText = folded.trim().replace(/[,;:.!…]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const awaitingOther = /\d|\?/.test(awaitingText) || /\b(tui|goi|bich|xanh|vang|nau|cacao|combo|doi|sua|dia chi)\b/.test(awaitingText);
     const awaitingNo = Boolean(awaitingPending) && message.type === 'text' && !awaitingOther
       && /\b(khong|ko|kg|hong phai|huy|don cu|don do|don kia|don truoc|nham|kiem tra|check|xem lai)\b/.test(awaitingText);
     const awaitingYes = Boolean(awaitingPending) && !awaitingNo && message.type === 'text' && !awaitingOther && awaitingText.length <= 40
-      && /^(?:da|vang|dung|ok|oke|okie|okay|co|u|uh|len don|chot|yes|dat|dat them|dat luon)(?: (?:a|roi|nha|nhe|em|e|shop|c|chi|anh|di|luon|nhe shop|nha shop|len don|dat them|dat|chot|dung|ok|da|vang|roi|cho (?:em|minh|chi|anh|c|e)|giup (?:em|minh|chi|c|e)))*$/.test(awaitingText);
+      && /^(?:da|vang|dung|ok|oke|okie|okay|co|u|uh|len don|chot|yes|dat|dat them|dat luon)(?: (?:a|roi|r|nha|nhe|em|e|shop|c|chi|anh|di|luon|nhe shop|nha shop|len don|dat them|dat|chot|dung|ok|da|vang|don moi|cho (?:em|minh|chi|anh|c|e)|giup (?:em|minh|chi|c|e)))*$/.test(awaitingText);
     const existingConfirmReply = awaitingYes
       ? renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Phone_Number: awaitingPending.phone || '0', Customer_Address: awaitingPending.address || '0' }, settings.messageTemplates, replyContext)
       : awaitingNo ? { ...renderChatbotReply({ template_id: 'ORDER_STATUS' }, settings.messageTemplates, replyContext), attention: true, pendingOrder: null } : null;
@@ -928,7 +930,8 @@ async function answerChange(change, settings, results, dependencies) {
         // Khách giữ ưu đãi dùng thử mà đặt qua giỏ Shop (Shop tự cộng ship): gắn thẻ
         // để nhân viên sửa đơn miễn ship trên POS.
         ? (trialState ? { ...(shopOrder ? shopOrderReply(shopOrder) : cartReply), attention: true } : shopOrder ? shopOrderReply(shopOrder) : cartReply)
-        : trialOutcome?.value
+        // Khách vừa được hỏi "đặt thêm đơn?" mà đáp đúng/không: xử lý trước cả luồng dùng thử.
+        : existingConfirmReply || (trialOutcome?.value
           ? renderChatbotReply(trialOutcome.value, settings.messageTemplates, replyContext)
           : trialActive
             ? (nonText && !seesImage
@@ -936,7 +939,7 @@ async function answerChange(change, settings, results, dependencies) {
               : await askModel({ trialHint: trialModelHint(trialState) }))
             : nonText
               ? (seesImage ? await askModel() : imageFallback())
-              : existingConfirmReply || ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || await askModel();
+              : ackReply || noteReply || lookupReply || choiceReply || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || await askModel());
     // Mô hình trả lời khách đang giữ ưu đãi bằng mẫu của luồng chung (bảng giá, combo,
     // mời 2 túi, "từ 2 túi miễn ship"): đổi sang mẫu dùng thử.
     if (trialActive && !trialOutcome.value) {

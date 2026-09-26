@@ -370,17 +370,33 @@ function renderChatbotFollowUpQueue(queue) {
 // Pancake gửi trong một tab pancake.vn chạy nền.
 let followUpBridgeRun = null;
 const followUpBridgeWaiters = new Map();
+// Yêu cầu đã hết giờ chờ (đã báo "chưa rõ" lên máy chủ): nhớ khách + mã lô để kết
+// quả extension trả về trễ vẫn ghi được "đã gửi" (không thì máy chủ chờ tới hết giữ chỗ).
+const followUpBridgeLateResults = new Map();
+let followUpBridgeReadyAt = 0;
 window.addEventListener('message', event => {
   const data = event.data;
   if (event.source !== window || event.origin !== window.location.origin || !data) return;
+  if (data.type === 'GN_BRIDGE_READY') followUpBridgeReadyAt = Date.now();
   if (data.type === 'GN_BRIDGE_READY' && chatbotFollowUpQueueItems.length && !chatbotFollowUpQueue?.querySelector('#follow-up-bridge-send, #follow-up-bridge-stop')) renderChatbotFollowUpQueue(chatbotFollowUpQueueItems);
-  if (data.type === 'GN_BRIDGE_RESULT' && followUpBridgeWaiters.has(data.requestId)) {
+  if (data.type !== 'GN_BRIDGE_RESULT') return;
+  if (followUpBridgeWaiters.has(data.requestId)) {
     followUpBridgeWaiters.get(data.requestId)(data);
     followUpBridgeWaiters.delete(data.requestId);
+    return;
   }
+  const late = followUpBridgeLateResults.get(data.requestId);
+  if (!late) return;
+  followUpBridgeLateResults.delete(data.requestId);
+  // Chỉ kết quả gửi ĐƯỢC mới sửa lại "chưa rõ" thành "đã gửi"; lỗi thì để máy chủ
+  // tự trả khách về hàng chờ khi hết giữ chỗ (extension có thể đã gửi ở lần thử khác).
+  if (!data.ok) return;
+  fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: late.token, results: [{ key: late.key, ok: true, error: '', globalId: data.globalId || '' }] }) })
+    .then(() => { const run = followUpBridgeRun; if (run) { run.sent += 1; run.unknown = Math.max(0, (run.unknown || 0) - 1); renderChatbotFollowUpQueue(chatbotFollowUpQueueItems); } })
+    .catch(() => {});
 });
 
-function sendThroughBridge(item) {
+function sendThroughBridge(item, token = '') {
   return new Promise(resolve => {
     const requestId = `gn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // Cầu nối tự chờ extension Pancake tối đa 90 giây; thêm biên cho việc mở tab Pancake.
@@ -388,7 +404,13 @@ function sendThroughBridge(item) {
     const waitMs = item.needsGlobalId ? 240000 : 150000;
     // Hết giờ chờ: extension vẫn có thể đã gửi, nên báo "chưa rõ" (unknown) chứ
     // không báo lỗi thường — server không nên đưa khách này lại hàng chờ ngay.
-    const timer = setTimeout(() => { followUpBridgeWaiters.delete(requestId); resolve({ ok: false, error: 'timeout', unknown: true, detail: `cầu nối không trả lời sau ${Math.round(waitMs / 60000)} phút (chưa rõ đã gửi hay chưa)` }); }, waitMs);
+    // Kết quả tới trễ vẫn được nhận (followUpBridgeLateResults) trong vòng 1 giờ.
+    const timer = setTimeout(() => {
+      followUpBridgeWaiters.delete(requestId);
+      followUpBridgeLateResults.set(requestId, { key: item.key, token });
+      setTimeout(() => followUpBridgeLateResults.delete(requestId), 60 * 60 * 1000);
+      resolve({ ok: false, error: 'timeout', unknown: true, detail: `cầu nối không trả lời sau ${Math.round(waitMs / 60000)} phút (chưa rõ đã gửi hay chưa)` });
+    }, waitMs);
     followUpBridgeWaiters.set(requestId, result => { clearTimeout(timer); resolve({ ok: Boolean(result.ok), error: result.error || '', globalId: result.globalId || '' }); });
     window.postMessage({ type: 'GN_BRIDGE_SEND', requestId, item: { pageId: item.pageId, convId: item.convId, globalUserId: item.globalUserId || '', needsGlobalId: item.needsGlobalId === true, updatedTime: item.updatedTime || 0, text: item.text, name: item.name } }, window.location.origin);
   });
@@ -409,7 +431,7 @@ async function runFollowUpBridge() {
   const limit = Math.max(1, Math.min(50, Number(document.querySelector('#follow-up-batch-size')?.value) || 30));
   followUpBatchSize = limit;
   if (!confirm(`Gửi tin bám đuổi "1 túi dùng thử miễn ship" cho tối đa ${limit} khách chưa có đơn?\nMỗi tin cách nhau 15–30 giây, để trang CRM mở tới khi xong.`)) return;
-  const run = followUpBridgeRun = { active: true, stop: false, sent: 0, failed: 0, status: 'Đang kiểm tra khách trên Pancake…' };
+  const run = followUpBridgeRun = { active: true, stop: false, sent: 0, failed: 0, unknown: 0, status: 'Đang kiểm tra khách trên Pancake…' };
   const redraw = () => renderChatbotFollowUpQueue(chatbotFollowUpQueueItems);
   redraw();
   try {
@@ -420,19 +442,27 @@ async function runFollowUpBridge() {
     let failedInRow = 0;
     for (const [index, item] of batch.items.entries()) {
       if (run.stop) break;
-      run.status = `Đang gửi ${index + 1}/${batch.items.length}: ${item.name || ''} (đã gửi ${run.sent}, lỗi ${run.failed})`;
+      const counts = () => `đã gửi ${run.sent}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}`;
+      run.status = `Đang gửi ${index + 1}/${batch.items.length}: ${item.name || ''} (${counts()})`;
       redraw();
       run.inFlight = item.key;
-      const result = await sendThroughBridge(item);
+      const result = await sendThroughBridge(item, batch.token || '');
       run.inFlight = '';
       run.done.add(item.key);
       // Báo từng tin ngay: tải lại trang giữa chừng cũng không mất kết quả.
       await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: batch.token || '', results: [{ key: item.key, ok: result.ok, error: result.error, ...(result.unknown ? { unknown: true } : {}), globalId: result.globalId || '' }] }) }).catch(() => {});
-      if (result.ok) { run.sent += 1; failedInRow = 0; } else { run.failed += 1; failedInRow += 1; run.lastError = result.detail || result.error; }
-      if (failedInRow >= 3) { run.stop = true; run.halted = `Dừng vì 3 tin liền lỗi: ${result.detail || result.error}`; break; }
+      if (result.ok) { run.sent += 1; failedInRow = 0; }
+      else if (result.unknown) {
+        // Hết giờ chờ mà extension vẫn đang chạy (báo sẵn sàng trong 5 phút gần đây):
+        // là "chưa rõ", không phải lỗi — không tính vào 3 lần lỗi liền.
+        run.unknown += 1;
+        run.lastError = result.detail;
+        if (Date.now() - followUpBridgeReadyAt > 5 * 60 * 1000) failedInRow += 1;
+      } else { run.failed += 1; failedInRow += 1; run.lastError = result.detail || result.error; }
+      if (failedInRow >= 3) { run.stop = true; run.halted = `Dừng vì 3 tin liền ${result.unknown ? 'không rõ kết quả (cầu nối không trả lời)' : 'lỗi'}: ${result.detail || result.error}`; break; }
       if (index < batch.items.length - 1 && !run.stop) {
         const pause = 15000 + Math.random() * 15000;
-        run.status = `Đã gửi ${run.sent}/${batch.items.length}, lỗi ${run.failed}. Tin sau sau ${Math.round(pause / 1000)} giây…`;
+        run.status = `Đã gửi ${run.sent}/${batch.items.length}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}. Tin sau sau ${Math.round(pause / 1000)} giây…`;
         redraw();
         const until = Date.now() + pause;
         while (Date.now() < until && !run.stop) await new Promise(resolve => setTimeout(resolve, 500));
@@ -440,7 +470,7 @@ async function runFollowUpBridge() {
     }
     // Dừng giữa lô: trả chỗ cho khách chưa gửi để lô sau lấy lại ngay.
     await releaseFollowUpLeases(run);
-    run.status = run.halted || (batch.items.length ? `Xong: đã gửi ${run.sent} tin, lỗi ${run.failed}${run.lastError ? ` (${run.lastError})` : ''}.${skipped}` : `Không còn khách nào gửi được tự động.${skipped}`);
+    run.status = run.halted || (batch.items.length ? `Xong: đã gửi ${run.sent} tin, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown} (cầu nối không trả lời; CRM giữ chỗ 45 phút, đồng bộ Pancake sẽ xác nhận)` : ''}${run.lastError ? ` (${run.lastError})` : ''}.${skipped}` : `Không còn khách nào gửi được tự động.${skipped}`);
   } catch (error) {
     run.status = `Lỗi: ${error.message}`;
   } finally {
@@ -540,13 +570,18 @@ async function renderChatbotGolden() {
 }
 async function submitGolden(index, label) {
   const item = goldenBatch[index];
-  if (!item) return;
+  if (!item || item.labeled) return;
   // Khóa ô chọn và hai nút của mục này trong lúc gửi: bấm nhanh hai lần không gửi hai nhãn.
   const controls = [...(chatbotGoldenPanel?.querySelectorAll(`[data-golden-index="${index}"] select, [data-golden-index="${index}"] button`) || [])];
   if (controls.some(control => control.disabled)) return;
   controls.forEach(control => { control.disabled = true; });
   try {
     await readApiResponse(await fetch('/api/chatbot/golden/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id, label }) }));
+    // Nhãn đã ghi: đánh dấu mục xong và bỏ khỏi màn ngay, để nếu vẽ lại lỗi (mạng)
+    // thì bấm lại cũng không gửi nhãn lần hai cho cùng tin (không splice: chỉ số
+    // data-golden-index của các mục còn lại phải khớp goldenBatch).
+    item.labeled = true;
+    chatbotGoldenPanel?.querySelector(`[data-golden-index="${index}"]`)?.remove();
     await renderChatbotGolden();
   } catch (error) {
     alert(error.message);
@@ -3493,10 +3528,36 @@ function activateCurrentMessageChannel() {
     updateMarkUnreadButton();
     return;
   }
+  // Hội thoại đang mở bị bộ lọc ẩn nhưng form Tạo đơn đang gõ dở (cùng kênh):
+  // giữ nguyên hội thoại mở, chỉ ẩn khỏi danh sách — về màn trống là mất giỏ/địa chỉ.
+  if (active && active.dataset.channelId === currentMessageChannelId && customerOrderFormDirty()) {
+    updateMarkUnreadButton();
+    return;
+  }
   if (active) stashComposerDraft(active);
   getConversationItems().forEach(item => item.classList.remove('active'));
   showEmptyChannelConversation();
   updateMarkUnreadButton();
+}
+
+// Hội thoại mở cuối (theo kênh): lúc tải trang không tự mở hội thoại đầu danh
+// sách nữa, nhưng mở lại đúng hội thoại lần trước nếu nó còn hiện sau bộ lọc.
+const lastOpenConversationKey = 'crm-last-open-conversation';
+function rememberOpenConversation(conversation) {
+  const id = conversation?.dataset.conversationId || '';
+  if (!id) return;
+  try { localStorage.setItem(lastOpenConversationKey, JSON.stringify({ channelId: conversation.dataset.channelId || '', id })); } catch {}
+}
+function reopenLastConversation() {
+  if (getActiveConversation()) return false;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(lastOpenConversationKey) || 'null'); } catch {}
+  if (!saved?.id || saved.channelId !== currentMessageChannelId) return false;
+  const element = findConversationElement(saved.id);
+  // Có tin mới chưa đọc từ lúc rời trang: không tự mở (mở là bị coi đã đọc), để nhân viên bấm.
+  if (!element || element.classList.contains('hidden') || element.classList.contains('unread')) return false;
+  selectConversation(element);
+  return true;
 }
 
 function conversationPreviewText(conversation) {
@@ -3725,6 +3786,7 @@ async function switchMessageChannel(channelId) {
     }
   }
   activateCurrentMessageChannel();
+  reopenLastConversation();
 }
 
 /** Kênh mở mặc định: kênh đã chọn lần trước, không thì Page "Giọt Nắng", không thì kênh đầu. */
@@ -3767,6 +3829,7 @@ async function loadMessageChannels() {
     });
   }
   activateCurrentMessageChannel();
+  reopenLastConversation();
 }
 
 function filterConversations() {
@@ -5827,8 +5890,9 @@ function setCustomerPanelTab(name) {
     tab.setAttribute('aria-selected', String(active));
   });
   customerPanelViews.forEach(view => view.classList.toggle('hidden', view.dataset.customerPanel !== name));
-  // Mở tab Tạo đơn thì form trống; đang sửa đơn (beginCustomerOrderEdit đã đổ dữ liệu) thì giữ.
-  if (name === 'create' && !editingCustomerOrderId) resetCustomerOrderForm();
+  // Mở tab Tạo đơn thì form trống; đang sửa đơn (beginCustomerOrderEdit đã đổ dữ liệu)
+  // hay đã có nháp gõ dở (kể cả nháp vừa lấy lại khi quay về khách cũ) thì giữ.
+  if (name === 'create' && !editingCustomerOrderId && !customerOrderFormDirty()) resetCustomerOrderForm();
 }
 
 /** Dòng "Từ quảng cáo" trong panel khách đã bỏ theo yêu cầu; nguồn quảng cáo vẫn xem được ở thẻ QC và bộ lọc. */
@@ -5880,7 +5944,15 @@ function renderCustomerPanel(conversation = getActiveConversation()) {
   // Chỉ nạp tên/SĐT/địa chỉ vào form khi đổi hội thoại hoặc form chưa ai đụng:
   // vẽ lại vì tin khách đến mà ghi đè là mất địa chỉ nhân viên đang gõ.
   const key = getCustomerPanelKey(conversation) || '';
-  if (customerPanelLoadedProfile.key !== key || !customerOrderFormDirty()) {
+  const previousKey = customerPanelLoadedProfile.key;
+  if (previousKey !== key) {
+    // Đổi hội thoại: cất nháp đang gõ của khách cũ (sản phẩm, ghi chú, đang sửa
+    // đơn…) theo khách đó, dọn sạch form rồi lấy lại nháp của khách mới nếu có —
+    // không để giỏ của khách A nằm dưới tên khách B, không mất địa chỉ đã gõ.
+    stashCustomerOrderDraft(previousKey);
+    resetCustomerOrderForm(conversation);
+    restoreCustomerOrderDraft(key);
+  } else if (!customerOrderFormDirty()) {
     if (customerOrderName) customerOrderName.value = profile.name;
     if (customerOrderPhone) customerOrderPhone.value = profile.phone;
     if (customerOrderAddress) customerOrderAddress.value = profile.address;
@@ -5902,6 +5974,53 @@ function customerOrderFormDirty() {
   return (customerOrderName?.value ?? '') !== loaded.name
     || (customerOrderPhone?.value ?? '') !== loaded.phone
     || (customerOrderAddress?.value ?? '') !== loaded.address;
+}
+
+// Nháp form Tạo đơn của từng hội thoại (theo key panel), như composerDrafts cho
+// ô soạn tin: đổi khách thì cất, quay lại thì lấy ra; đơn đã tạo/thiết lập lại
+// thì bỏ nháp.
+const customerOrderDrafts = new Map();
+function stashCustomerOrderDraft(key) {
+  if (!key) return;
+  if (!customerOrderFormDirty()) { customerOrderDrafts.delete(key); return; }
+  customerOrderDrafts.set(key, {
+    name: customerOrderName?.value ?? '',
+    phone: customerOrderPhone?.value ?? '',
+    address: customerOrderAddress?.value ?? '',
+    products: customerDraftProducts.map(item => ({ ...item })),
+    gift: customerDraftGift,
+    freeShipping: Boolean(customerFreeShipping?.checked),
+    freeShippingManual: customerFreeShippingManual,
+    bankTransfer: Boolean(customerBankTransfer?.checked),
+    shippingFee: customerShippingFee?.value ?? '0',
+    discount: customerOrderDiscount?.value ?? '0',
+    source: customerOrderSource?.value ?? '',
+    note: customerOrderNote?.value ?? '',
+    editingId: editingCustomerOrderId
+  });
+}
+/** Lấy lại nháp đã cất cho hội thoại `key` (gọi ngay sau resetCustomerOrderForm). Trả về true nếu có nháp. */
+function restoreCustomerOrderDraft(key) {
+  const draft = key ? customerOrderDrafts.get(key) : null;
+  if (!draft) return false;
+  customerOrderDrafts.delete(key);
+  editingCustomerOrderId = draft.editingId || '';
+  setCustomerOrderFormMode();
+  if (customerOrderName) customerOrderName.value = draft.name;
+  if (customerOrderPhone) customerOrderPhone.value = draft.phone;
+  if (customerOrderAddress) customerOrderAddress.value = draft.address;
+  customerDraftProducts = draft.products.map(item => ({ ...item }));
+  customerDraftGift = draft.gift || '';
+  customerFreeShippingManual = draft.freeShippingManual === true;
+  if (customerFreeShipping) customerFreeShipping.checked = draft.freeShipping;
+  if (customerBankTransfer) customerBankTransfer.checked = draft.bankTransfer;
+  if (customerShippingFee) customerShippingFee.value = draft.shippingFee;
+  if (customerOrderDiscount) customerOrderDiscount.value = draft.discount;
+  if (customerOrderSource && draft.source) customerOrderSource.value = draft.source;
+  if (customerOrderNote) customerOrderNote.value = draft.note;
+  renderCustomerDraftGift();
+  renderCustomerDraftProducts();
+  return true;
 }
 
 function renderConversationHeader(conversation) {
@@ -6541,6 +6660,7 @@ function selectConversation(conversation) {
     restoreComposerDraft(conversation);
   }
   getConversationItems().forEach(item => item.classList.toggle('active', item === conversation));
+  rememberOpenConversation(conversation);
   const wasUnread = conversation.classList.contains('unread');
   conversation.classList.remove('unread');
   currentChatHeadView = 'chat';
@@ -9085,20 +9205,21 @@ customerOrderForm?.addEventListener('submit', async event => {
   const conversation = getActiveConversation();
   const key = getCustomerPanelKey(conversation);
   // Đang gửi đơn trước (Enter/bấm nhanh lần hai): bỏ qua, không tạo đơn thứ hai.
-  if (creatingCustomerOrder) return;
+  if (creatingCustomerOrder || !customerOrderSubmit) return;
   const totals = updateCustomerOrderTotals();
-  if (!key || customerOrderSubmit?.disabled) {
+  if (!key || customerOrderSubmit.disabled) {
     showToast('Điền đủ thông tin khách hàng và thêm ít nhất một sản phẩm.');
     return;
   }
   if (editingCustomerOrderId) {
     // Đang sửa đơn có sẵn: ghi đè lên đơn đó, không tạo đơn mới, không gửi lại phiếu.
     const editingId = editingCustomerOrderId;
-    creatingCustomerOrder = true;
-    customerOrderSubmit.disabled = true;
     const originalLabel = customerOrderSubmit.textContent;
-    customerOrderSubmit.textContent = 'Đang lưu...';
     try {
+      // Cờ đặt trong try: có lỗi ném ở bất kỳ đâu thì finally vẫn mở khóa, không kẹt.
+      creatingCustomerOrder = true;
+      customerOrderSubmit.disabled = true;
+      customerOrderSubmit.textContent = 'Đang lưu...';
       const updated = await saveCustomerOrderEdit(editingId);
       resetCustomerOrderForm(conversation);
       await loadCustomerPanelFromServer(conversation);
@@ -9133,11 +9254,12 @@ customerOrderForm?.addEventListener('submit', async event => {
     updatedAt: now,
     employee: appSettings.displayName || topbarUserName?.textContent || 'Bạn'
   };
-  creatingCustomerOrder = true;
-  customerOrderSubmit.disabled = true;
   const originalLabel = customerOrderSubmit.textContent;
-  customerOrderSubmit.textContent = 'Đang gửi...';
   try {
+    // Cờ đặt trong try: có lỗi ném ở bất kỳ đâu thì finally vẫn mở khóa, không kẹt.
+    creatingCustomerOrder = true;
+    customerOrderSubmit.disabled = true;
+    customerOrderSubmit.textContent = 'Đang gửi...';
     const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversation.dataset.conversationId)}/customer-panel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

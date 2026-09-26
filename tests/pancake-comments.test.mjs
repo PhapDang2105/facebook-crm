@@ -234,3 +234,43 @@ test('lịch đồng bộ thích ứng: đủ mỗi 10 phút; webhook im quá 15
   assert.equal(pancakeSyncPlan({ now: t0 + 16 * m, startedAt: t0, lastFullAt: t0 + 10 * m, lastQuickAt: t0 + 10 * m, lastWebhookAt: t0 + 14 * m }), null, 'webhook vừa gọi 2 phút trước: không cần nhanh');
   assert.equal(pancakeSyncPlan({ now: t0 + 21 * m, startedAt: t0, lastFullAt: t0 + 10 * m, lastQuickAt: t0 + 20 * m, lastWebhookAt: t0 + 20 * m }), 'full', 'đến kỳ 10 phút thì đủ');
 });
+
+test('đồng bộ kéo tin nhân viên gõ trong Pancake (admin_name) về qua /messages: tin mang dấu staff, bot tắt cho hội thoại đó, tin khách sau đó không đưa bot; tin Page do "Public API" (CRM/bot) không phải nhân viên', async () => {
+  const iso = offsetMs => new Date(Date.now() - offsetMs).toISOString().slice(0, 19);
+  const fetchMock = async url => {
+    const address = String(url);
+    if (address.includes('/v2/pages/110/conversations') && address.includes('type=COMMENT')) return { ok: true, status: 200, json: async () => ({ success: true, conversations: [] }) };
+    if (address.includes('/v2/pages/110/conversations')) {
+      return { ok: true, status: 200, json: async () => ({ success: true, conversations: [
+        { id: '110_8001', type: 'INBOX', from: { id: '8001', name: 'Khách Có Nhân Viên' }, assignee_ids: [] },
+        { id: '110_8002', type: 'INBOX', from: { id: '8002', name: 'Khách Bot' }, assignee_ids: [] }
+      ] }) };
+    }
+    if (address.includes('/conversations/110_8001/messages')) return { ok: true, status: 200, json: async () => ({ success: true, messages: [
+      { id: 'm_8001_1', conversation_id: '110_8001', message: 'Giá sao em', from: { id: '8001', name: 'Khách Có Nhân Viên' }, inserted_at: iso(5 * 60 * 1000) },
+      { id: 'm_8001_2', conversation_id: '110_8001', message: 'Dạ chị ơi em Hằng đây, để em tư vấn mình ạ', from: { id: '110', name: 'Test', admin_name: 'Thúy Hằng' }, inserted_at: iso(4 * 60 * 1000) },
+      { id: 'm_8001_3', conversation_id: '110_8001', message: 'Cho chị 2 túi', from: { id: '8001', name: 'Khách Có Nhân Viên' }, inserted_at: iso(2 * 60 * 1000) }
+    ] }) };
+    if (address.includes('/conversations/110_8002/messages')) return { ok: true, status: 200, json: async () => ({ success: true, messages: [
+      { id: 'm_8002_1', conversation_id: '110_8002', message: 'Giá sao em', from: { id: '8002', name: 'Khách Bot' }, inserted_at: iso(5 * 60 * 1000) },
+      { id: 'm_8002_2', conversation_id: '110_8002', message: 'Dạ bảng giá ạ', from: { id: '110', name: 'Test', admin_name: 'Public API' }, inserted_at: iso(4 * 60 * 1000) },
+      { id: 'm_8002_3', conversation_id: '110_8002', message: 'Cho chị 2 túi', from: { id: '8002', name: 'Khách Bot' }, inserted_at: iso(2 * 60 * 1000) }
+    ] }) };
+    return { ok: false, status: 404, json: async () => ({ success: false }) };
+  };
+  const received = [];
+  const summary = await syncPancakeConversations({ limit: 60, messagePages: 1, commentLimit: 0, processChatbotChanges: async changes => { received.push(...changes); }, chatbotDependencies: {} }, config, fetchMock);
+  assert.equal(summary.messages, 6);
+  const staffMessage = (await listMessages('110:8001')).find(item => item.id === 'm_8001_2');
+  assert.equal(staffMessage.direction, 'outgoing');
+  assert.equal(staffMessage.staff, true);
+  assert.equal(staffMessage.staffName, 'Thúy Hằng');
+  const withStaff = await getConversation('110:8001');
+  assert.equal(withStaff.botEnabled, false, 'nhân viên vừa nhắn trong Pancake: bot đứng ngoài dù tin về qua đồng bộ');
+  assert.equal(withStaff.botPausedBy, 'Thúy Hằng');
+  const botEcho = (await listMessages('110:8002')).find(item => item.id === 'm_8002_2');
+  assert.notEqual(botEcho.staff, true, '"Public API" là tin CRM/bot gửi, không phải nhân viên');
+  assert.notEqual((await getConversation('110:8002')).botEnabled, false);
+  assert.deepEqual(received.map(change => [change.conversation.id, change.message.id, change.late]), [['110:8002', 'm_8002_3', true]], 'chỉ khách chưa có nhân viên mới được đưa bot');
+  assert.equal(summary.bot, 1);
+});

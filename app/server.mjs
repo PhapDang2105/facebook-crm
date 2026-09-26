@@ -30,8 +30,9 @@ import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
 import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
-import { isValidQrCode, listQrScans, recordQrOpen, recordQrScan } from './qr-scans.mjs';
-import { classifyUserAgent, messengerDestination, prefillMessageFor, qrCodeFromRef, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
+import { countQrReferrals, deleteQrCode, isValidQrCode, listQrScans, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
+import { classifyUserAgent, isLinkPreviewBot, messengerDestination, prefillMessageFor, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
+import { createQrGreeter, isCardScan } from './qr-greeting.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
@@ -290,6 +291,8 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
     const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
     if (!existing) return null;
     for (const [key, value] of Object.entries(fresh)) if (!keep.has(key)) existing[key] = value;
+    // Giỏ mới không còn quà bám đuổi / không còn là 1 túi dùng thử: bỏ cờ cũ (không thì đơn 1 túi vẫn mang quà BGD sang POS).
+    for (const key of ['promoGift', 'trialFreeShip']) if (!(key in fresh)) delete existing[key];
     // Giữ lại lời khách dặn trước đó ("Khách dặn: gửi hàng mới.") khi sửa giỏ.
     const requests = String(existing.note || '').match(/Khách dặn: [^.]*\./g) || [];
     existing.note = [`Tạo tự động từ xác nhận của chatbot. Khách sửa đơn lúc ${stamp}.`, ...requests].join(' ');
@@ -530,7 +533,6 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
  */
 const qrGreetingDelayMs = Number(process.env.QR_GREETING_DELAY_MS) || 10_000;
 const qrGreetingCooldownMs = Number(process.env.QR_GREETING_COOLDOWN_MS) || 6 * 60 * 60 * 1000;
-const qrGreetedAt = new Map();
 
 /**
  * Page mà /q/<mã> đưa khách tới. Lấy từ Page đang kết nối trong CRM; đặt
@@ -550,9 +552,10 @@ async function resolveQrPage() {
   return cachedQrPage;
 }
 
-/** Khách đến từ phiếu cảm ơn (link m.me), phân biệt với khách bấm quảng cáo. */
-function isCardScan(change) {
-  return change?.referral?.source === 'SHORTLINK';
+/** Đồng bộ Pancake (định kỳ và nút Đồng bộ) đưa bot qua cùng móc như webhook. */
+function syncBotHook(changes, deps) {
+  scheduleQrGreetings(changes);
+  return processChatbotChanges(changes.filter(change => !isCardScan(change)), deps);
 }
 
 /**
@@ -568,47 +571,15 @@ async function qrOfferMessage(conversation) {
   return applyHonorific(spin(template), conversation.gender || '').replace(/\{title\}/g, honorific(conversation.gender || ''));
 }
 
-function scheduleQrGreetings(changes) {
-  for (const change of changes) {
-    // Không lọc theo `change.type`: khách cũ quét thì ra change kiểu `referral`,
-    // khách mới bấm "Bắt đầu" thì ra kiểu `message` mang theo referral. Cái
-    // quyết định là referral đến từ link m.me, không phải từ quảng cáo.
-    if (!isCardScan(change)) continue;
-    const conversation = change.conversation;
-    if (!conversation?.psid) continue;
-    // Botcake đã chào (tin của Page mang "Mã thẻ: #mã" về qua Pancake): chỉ ghi
-    // dấu để CRM không chào chồng nếu khách gửi thêm tin soạn sẵn ngay sau đó.
-    if (change.referral?.type === 'BOTCAKE_OPTIN') {
-      qrGreetedAt.set(conversation.id, Date.now());
-      console.log(`QR: Botcake đã chào khách quét ref="${change.referral.ref}" — ${conversation.name || conversation.id}`);
-      continue;
-    }
-    const last = qrGreetedAt.get(conversation.id) || 0;
-    if (Date.now() - last < qrGreetingCooldownMs) {
-      console.log(`QR: bỏ qua chào ${conversation.id} (vừa chào cách đây ${Math.round((Date.now() - last) / 1000)}s)`);
-      continue;
-    }
-    qrGreetedAt.set(conversation.id, Date.now());
-    console.log(`QR: khách quét ref="${change.referral.ref || '-'}", sẽ chào sau ${qrGreetingDelayMs / 1000}s — ${conversation.name || conversation.id}`);
-    // unref: hẹn giờ này không được giữ tiến trình sống khi tắt dịch vụ.
-    setTimeout(async () => {
-      try {
-        const text = await qrOfferMessage(conversation);
-        if (!text) {
-          console.log('QR: mẫu tin QR_OFFER để trống nên không gửi gì.');
-          qrGreetedAt.delete(conversation.id);
-          return;
-        }
-        await sendConversationMessage(conversation, { text });
-        console.log(`QR: đã gửi ưu đãi cho ${conversation.name || conversation.id}`);
-      } catch (error) {
-        // Ngoài cửa sổ 24h Meta trả lỗi ở đây — đó cũng là kết quả đáng ghi lại.
-        console.error(`QR: KHÔNG gửi được ưu đãi cho ${conversation.name || conversation.id}: ${error.message}`);
-        qrGreetedAt.delete(conversation.id);
-      }
-    }, qrGreetingDelayMs).unref?.();
-  }
-}
+// Bộ chào (app/qr-greeting.mjs): hẹn giờ, hủy khi Botcake đã chào, né bot tắt /
+// nhân viên đang nhận, cooldown theo hội thoại.
+const qrGreeter = createQrGreeter({
+  offerMessage: qrOfferMessage,
+  send: (conversation, payload) => sendConversationMessage(conversation, payload),
+  delayMs: qrGreetingDelayMs,
+  cooldownMs: qrGreetingCooldownMs
+});
+const scheduleQrGreetings = changes => qrGreeter.schedule(changes);
 
 /** Sends the tappable Messenger receipt. Kept separate from creating the order so
  *  the chatbot can persist the order first and still close with the receipt. */
@@ -653,10 +624,10 @@ async function readChatbotSettings() {
     if (error?.code !== 'ENOENT') console.error('Cài đặt chatbot: không đọc được tệp:', error.message);
     return normalizeChatbotSettings(defaultChatbotSettings);
   }
+  let stored;
   try {
-    const stored = JSON.parse(raw);
-    const directApiKey = stored.directApiKeyEncrypted ? decryptToken(stored.directApiKeyEncrypted) : stored.directApiKey;
-    return normalizeChatbotSettings({ ...stored, directApiKey });
+    stored = JSON.parse(raw);
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) throw new Error('không phải object JSON');
   } catch (error) {
     // Tệp hỏng (ghi dở, đè nhau): cách ly để còn cứu, báo to thay vì âm thầm chạy với cài đặt trống (mất prompt, mẫu, endpoint).
     const quarantined = `${chatbotSettingsPath}.corrupt-${Date.now()}`;
@@ -664,6 +635,15 @@ async function readChatbotSettings() {
     console.error(`Cài đặt chatbot: tệp hỏng (${error.message}), đã cất sang ${path.basename(quarantined)}; tạm dùng cài đặt mặc định.`);
     return normalizeChatbotSettings(defaultChatbotSettings);
   }
+  // Khoá API không giải mã được (META_APP_SECRET đổi/thiếu): giữ nguyên tệp và mọi cài đặt khác, chỉ bỏ khoá.
+  let directApiKey = stored.directApiKey;
+  if (stored.directApiKeyEncrypted) {
+    try { directApiKey = decryptToken(stored.directApiKeyEncrypted); } catch (error) {
+      console.error(`Cài đặt chatbot: không giải mã được khoá API (${error.message}); giữ cài đặt, bỏ khoá — nhập lại khoá trong Cài đặt.`);
+      directApiKey = '';
+    }
+  }
+  return normalizeChatbotSettings({ ...stored, directApiKey });
 }
 
 configureAddressAi({ readSettings: readChatbotSettings });
@@ -1047,6 +1027,8 @@ const server = http.createServer(async (request, response) => {
       const code = decodeURIComponent(qrMatch[1]).toLowerCase();
       const isOpenBeacon = Boolean(qrMatch[2]);
       if (!isValidQrCode(code)) return sendJson(response, 404, { error: 'Mã QR không hợp lệ.' });
+      // Mã chưa tạo ở Cài đặt → Mã QR: vẫn phục vụ (thẻ in rồi là không sửa được),
+      // nhưng recordQrScan/recordQrOpen bỏ qua — kho chỉ đếm mã nhân viên đã tạo.
       if (isOpenBeacon) {
         // Beacon từ trang đệm khi khách bấm nút. Chỉ đếm, không cần thân tin.
         if (request.method !== 'POST') return sendJson(response, 405, { error: 'Chỉ nhận POST.' });
@@ -1060,9 +1042,14 @@ const server = http.createServer(async (request, response) => {
       const userAgent = String(request.headers['user-agent'] || '');
       const classification = classifyUserAgent(userAgent);
       const redirect = shouldRedirectDirectly(classification);
-      // Đếm trước, nhưng không để việc ghi đĩa làm khách phải chờ.
-      recordQrScan(code, { userAgent, mode: redirect ? 'redirect' : 'page' })
-        .catch(error => console.error(`QR: không ghi được lượt quét ${code}: ${error.message}`));
+      // Đếm trước, nhưng không để việc ghi đĩa làm khách phải chờ. Máy xem trước
+      // liên kết (khách dán link vào Zalo/Messenger) không phải lượt quét.
+      if (isLinkPreviewBot(userAgent)) {
+        console.log(`QR: bỏ qua đếm ${code}: máy xem trước / máy quét (${userAgent.slice(0, 60) || 'UA rỗng'})`);
+      } else {
+        recordQrScan(code, { userAgent, mode: redirect ? 'redirect' : 'page' })
+          .catch(error => console.error(`QR: không ghi được lượt quét ${code}: ${error.message}`));
+      }
       const page = await resolveQrPage();
       if (!page.id) {
         console.error('QR: chưa có Page nào kết nối nên không biết đưa khách đi đâu.');
@@ -1097,17 +1084,8 @@ const server = http.createServer(async (request, response) => {
     // Đối chiếu lượt quét với số referral Messenger thật sự nhận được.
     if (request.method === 'GET' && url.pathname === '/api/qr/stats') {
       const store = await readMessagingStore();
-      const referralCounts = {};
-      for (const conversation of store.conversations || []) {
-        for (const referral of conversation.referrals || []) {
-          if (referral?.source !== 'SHORTLINK') continue;
-          // ref thô (app Meta), ref mã hoá kiểu Pancake, hay mã đọc từ tin soạn sẵn: đều về một mã lô.
-          const code = qrCodeFromRef(referral.ref);
-          if (!code) continue;
-          referralCounts[code] = (referralCounts[code] || 0) + 1;
-        }
-      }
-      const stats = await listQrScans(referralCounts);
+      // Một lượt quét = một referral, dù về CRM qua mấy đường (Meta, Botcake, tin soạn sẵn).
+      const stats = await listQrScans(countQrReferrals(store.conversations || []));
       const page = await resolveQrPage();
       const qrSettings = await readQrSettings();
       return sendJson(response, 200, {
@@ -1141,10 +1119,20 @@ const server = http.createServer(async (request, response) => {
     // Ảnh mã QR để in lên thẻ: mã hoá /q/<mã>. Sau mật khẩu (Caddy chỉ mở /q/*),
     // vì đây là công cụ của nhân viên, không phải của khách. SVG cho nhà in,
     // PNG (?size=, mặc định 1024) để xem nhanh hay dán vào thiết kế.
+    // Xoá mã gõ nhầm / lô không in (mất số liệu của mã đó).
+    const qrDeleteMatch = url.pathname.match(/^\/api\/qr\/codes\/([^/]+)$/);
+    if (qrDeleteMatch && request.method === 'DELETE') {
+      const code = decodeURIComponent(qrDeleteMatch[1]).toLowerCase();
+      if (!isValidQrCode(code)) return sendJson(response, 400, { error: 'Mã QR chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự.' });
+      const deleted = await deleteQrCode(code);
+      return sendJson(response, deleted ? 200 : 404, deleted ? { deleted: code } : { error: 'Không có mã này trong kho.' });
+    }
     const qrImageMatch = url.pathname.match(/^\/api\/qr\/image\/([^/]+)\.(svg|png)$/);
     if (qrImageMatch && request.method === 'GET') {
       const code = decodeURIComponent(qrImageMatch[1]).toLowerCase();
       if (!isValidQrCode(code)) return sendJson(response, 400, { error: 'Mã QR chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự.' });
+      // Nhân viên lấy ảnh = tạo mã: từ đây /q/<mã> được đếm và "#mã" trong tin được nhận là mã thẻ.
+      await registerQrCode(code);
       const target = qrTargetUrl(metaConfig.publicBaseUrl, code);
       const download = url.searchParams.get('download') === '1';
       const disposition = `${download ? 'attachment' : 'inline'}; filename="qr-${code}.${qrImageMatch[2]}"`;
@@ -1634,10 +1622,10 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'POST') {
         let payload = null;
         try {
-          // Đường công khai, đọc thân TRƯỚC khi xác thực: giới hạn 256 KB để không bị dồn bộ nhớ.
-          payload = await readBody(request, 256 * 1024);
+          // Đường công khai, đọc thân TRƯỚC khi xác thực: giới hạn 1 MB để không bị dồn bộ nhớ (gói Pancake thường vài KB).
+          payload = await readBody(request, 1024 * 1024);
         } catch (error) {
-          console.error('Webhook Pancake thân không đọc được:', error.message);
+          console.error(`Webhook Pancake thân không đọc được (content-length ${request.headers['content-length'] || '?'}):`, error.message);
         }
         const queryToken = url.searchParams.get('token');
         const headerToken = request.headers['x-pancake-token'] || request.headers['x-webhook-token'];
@@ -1704,7 +1692,13 @@ const server = http.createServer(async (request, response) => {
         // Khách quét phiếu đã có tin ưu đãi riêng; để bot chào thêm câu chung
         // nữa là khách nhận hai tin trong mười giây. Những tin sau của họ vẫn
         // đi qua bot bình thường — chỉ bỏ qua đúng sự kiện mở hội thoại.
-        await processChatbotChanges(changes.filter(change => !isCardScan(change)), chatbotDependencies);
+        // Page chỉ nghe referral (vận hành ở Pancake, META_REFERRAL_ONLY_PAGES):
+        // tin khách về qua Pancake rồi; postback "Bắt đầu" từ Meta mà đưa bot
+        // là trả lời chồng lên Botcake và mở hội thoại Meta song song.
+        await processChatbotChanges(
+          changes.filter(change => !isCardScan(change) && !isReferralOnlyPage(change.conversation?.pageId)),
+          chatbotDependencies
+        );
       } catch (error) {
         console.error('Webhook processing failed:', error.message);
       }
@@ -1833,7 +1827,8 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'GET') return sendJson(response, 200, { ...(await readInboxSettings()), defaultLabels: defaultConversationLabels, icons: await listLabelIcons() });
       if (request.method === 'PUT') {
         const current = await readInboxSettings();
-        const payload = await readBody(request);
+        // Mẫu trả lời nhanh có thể kèm ảnh base64 tới 5 MB.
+        const payload = await readBody(request, 16 * 1024 * 1024);
         try {
           const settings = await writeInboxSettings({
             labels: payload.labels ?? current.labels,
@@ -1855,8 +1850,9 @@ const server = http.createServer(async (request, response) => {
       if (!pageId) return sendJson(response, 400, { error: 'Thiếu channelId của Facebook Page cần đồng bộ.' });
       // Kênh Pancake: kéo lịch sử bằng API Pancake thay vì Graph của Meta.
       const isPancake = isPancakeConfigured() && (pancakeConfig.pages?.length ? pancakeConfig.pages.some(p => String(p.pageId) === pageId) : pageId === pancakeConfig.pageId);
+      // Đồng bộ thủ công cũng đưa bot tin khách mới chưa ai trả lời (như lượt định kỳ).
       const summary = isPancake
-        ? await syncPancakeConversations({ pageId, limit: Number(payload.limit) || 60, messagePages: 2 })
+        ? await syncPancakeConversations({ pageId, limit: Number(payload.limit) || 60, messagePages: 2, processChatbotChanges: syncBotHook, chatbotDependencies })
         : await syncPageConversations(pageId, { limit: Number(payload.limit) || 25 });
       return sendJson(response, 200, { ...summary, items: await listConversations(pageId) });
     }
@@ -1889,7 +1885,8 @@ const server = http.createServer(async (request, response) => {
         });
       }
       if (request.method === 'POST') {
-        const payload = await readBody(request);
+        // Ảnh/tài liệu/ghi âm ≤ 2 MB, video ≤ 20 MB gửi dạng base64 trong attachment.dataUrl (×1,37).
+        const payload = await readBody(request, 32 * 1024 * 1024);
         const text = String(payload.text || '').trim();
         const attachment = payload.attachment?.dataUrl ? payload.attachment : null;
         const privateReply = payload.privateReply === true;
@@ -2414,11 +2411,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders });
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   // Đồng bộ định kỳ cũng đưa bot tin khách mới chưa ai trả lời (webhook Pancake bỏ sót / tạm ngưng).
-  startPancakeSync({
-    chatbotDependencies,
-    // Cùng móc như webhook: chào khách quét QR và bỏ tin quét thẻ khỏi bot.
-    processChatbotChanges: (changes, deps) => { scheduleQrGreetings(changes); return processChatbotChanges(changes.filter(change => !isCardScan(change)), deps); }
-  });
+  // Cùng móc như webhook: chào khách quét QR và bỏ tin quét thẻ khỏi bot.
+  startPancakeSync({ chatbotDependencies, processChatbotChanges: syncBotHook });
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);

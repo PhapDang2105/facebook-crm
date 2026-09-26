@@ -56,9 +56,17 @@ export function renderQrSvg(text, { size = 512, errorCorrection = 'Q', quietZone
     + '</svg>';
 }
 
-/** PNG từ chính SVG trên, cạnh `size` điểm ảnh (300 DPI cho 2,5 cm ≈ 300 px; để dư 1024). */
+export const QR_PNG_MIN = 128;
+export const QR_PNG_MAX = 4096;
+
+/**
+ * PNG từ chính SVG trên, cạnh `size` điểm ảnh (300 DPI cho 2,5 cm ≈ 300 px; để dư 1024).
+ * SVG đã mang width/height = số điểm ảnh nên render ở mật độ mặc định là ra
+ * đúng cỡ; KHÔNG đặt `density` cao hơn — 300 DPI với 4096 px là 17.067 px mỗi
+ * cạnh, vượt giới hạn điểm ảnh của sharp và trả lỗi thay vì ảnh.
+ */
 export async function renderQrPng(text, { size = 1024, errorCorrection = 'Q' } = {}) {
-  const pixels = Math.max(128, Math.min(4096, Math.round(Number(size) || 1024)));
+  const pixels = Math.max(QR_PNG_MIN, Math.min(QR_PNG_MAX, Math.round(Number(size) || 1024)));
   const svg = renderQrSvg(text, { size: pixels, errorCorrection });
-  return sharp(Buffer.from(svg), { density: 300 }).resize(pixels, pixels, { kernel: 'nearest' }).png().toBuffer();
+  return sharp(Buffer.from(svg)).resize(pixels, pixels, { kernel: 'nearest' }).png().toBuffer();
 }

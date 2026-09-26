@@ -26,7 +26,12 @@ const ORDER_VERB = /\b(lay|dat|mua|chot|gui|ship cho|cho (minh|em|e|chi|c|toi|tu
 const LIVE_ONLY = /(sua hat|hat dieu|hat bi|xoai|dau say|xanh duong|hu hat)/;
 const COMPLAINT = /\b(bi hoi|hoi dau|co mui|mui la|moc|qua cung|bi cung|di vat|bi hu|bi loi|hang loi|that vong|te qua|khong ngon|chua nhan|giao cham|nhan (dc|duoc) hang roi)\b/;
 // Khiếu nại rõ ràng cần người thật (khác COMPLAINT ở trên chỉ dùng để chặn luật giỏ/thông tin).
-const STRONG_COMPLAINT = /\b(goi .{0,14}(khong|ko|k|hong) (duoc|dc)|goi .{0,12}suot|(khong|ko|k|co) (thay )?ai goi|luyen thuyen|(qua cung|bi cung|cung qua).{0,30}\bso\b|an phai .{0,12}\bso\b|rat so|that vong|te qua|lua dao|thai do|vo ly|khieu nai|phan anh|bao cao shop|lam an .{0,10}(vay|the))\b/;
+const STRONG_COMPLAINT = /\b(goi .{0,14}(khong|ko|k|hong) (duoc|dc)|goi .{0,12}suot|(khong|ko|k|co) (thay )?ai goi|luyen thuyen|(qua cung|bi cung|cung qua).{0,30}\bso\b|an phai .{0,12}\bso\b|rat so (qua|luon|that|roi)|that vong|te qua|lua dao|thai do|vo ly|khieu nai|bao cao shop|lam an .{0,10}(vay|the))\b/;
+// "phản ánh" chỉ so trên chữ CÒN DẤU: bỏ dấu thì trùng "phần anh" ("phần anh 2 túi vàng, phần chị 1 túi xanh").
+const COMPLAINT_REPORT = /phản ánh/iu;
+// Câu nêu giỏ (số + túi/gói, hay màu túi) mà không có từ khiếu nại rõ: là đặt hàng, không chuyển người.
+const BASKET_MENTION = /\b(\d{1,2} ?(tui|goi|bich)|xanh|vang|nau|cacao|combo)\b/;
+const COMPLAINT_WORDS = /\b(khieu nai|that vong|te qua|lua dao|thai do|vo ly|luyen thuyen|bao cao shop|goi .{0,14}(khong|ko|k|hong) (duoc|dc)|(khong|ko|k) (thay )?ai goi)\b/;
 const POLICY_QUESTION = /\b(co|duoc|dc)\b.{0,40}\b(khong|ko|k|kg|hong)\s*(a|ạ|shop|e|em|b|ban|nhi)?\s*\??$|\?$/;
 // Mẫu an toàn: sau những mẫu này "." / "giá" / "hi" là câu hỏi mới, không phải câu trả lời cho bước đơn.
 const SAFE_LAST = new Set(['', 'WELCOME', 'GENERAL_INFO', 'LIVESTREAM_COMMENT', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'THANK_YOU', 'COMMENT_PRIVATE_REPLY']);
@@ -149,9 +154,11 @@ export function ruleIntent(text, ctx = {}) {
   // "gói" trước gói nhỏ/lẻ/này/màu/số thành "túi", "gửi/cho/tặng phần anh" thành chữ khác, rồi mới so.
   const sComplaint = core(raw
     .replace(/gói/giu, 'tui')
-    .replace(/\bgoi(?=\s+(?:nho|le|nay|xanh|vang|nau|mix|nhieu|\d))/giu, 'tui')
-    .replace(/(g[ửu]i|cho|t[ặa]ng)\s+ph[ầa]n\s+anh/giu, '$1 anhphan'));
-  if (!isComment && STRONG_COMPLAINT.test(sComplaint) && !POLICY_QUESTION.test(s)) {
+    .replace(/\bgoi(?=\s+(?:nho|le|nay|xanh|vang|nau|mix|nhieu|\d))/giu, 'tui'));
+  const strongComplaint = STRONG_COMPLAINT.test(sComplaint) || COMPLAINT_REPORT.test(raw);
+  // "phần anh xanh phần chị vàng", "mình rất sợ béo": có giỏ / không có từ khiếu nại rõ thì không phải khiếu nại.
+  const basketNotComplaint = BASKET_MENTION.test(sComplaint) && !COMPLAINT_WORDS.test(sComplaint) && !COMPLAINT_REPORT.test(raw);
+  if (!isComment && strongComplaint && !basketNotComplaint && !POLICY_QUESTION.test(s)) {
     return { rule: 'COMPLAINT_HANDOFF', value: { template_id: 'CSKH_HANDOFF', warming: '1' }, attention: true };
   }
   // --- Luật thử nghiệm: chỉ trả về khi ctx.experimentalRules === 'on'; còn lại các luật ổn định

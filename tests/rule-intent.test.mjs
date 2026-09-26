@@ -180,3 +180,15 @@ test('khiếu nại rõ (gọi không được, không ai gọi, bot luyên thuy
   assert.notEqual(ruleIntent('Đc kiểm hàng ko', ctx)?.value?.template_id, 'CSKH_HANDOFF');
   assert.equal(ruleIntent('Có thấy ai gọi đâu', { ...ctx, source: 'comment' })?.value?.template_id, undefined, 'bình luận đi luồng riêng');
 });
+
+test('vòng 8: câu đặt hàng có "phần anh" / "rất sợ béo" không phải khiếu nại; "phản ánh" (có dấu) và khiếu nại kèm giỏ vẫn bắt', () => {
+  const ctx = { commentBasket };
+  for (const text of ['phần anh 2 túi vàng, phần chị 1 túi xanh', 'ship cho anh 2 túi, phần anh xanh phần chị vàng', 'gửi anh phần anh', 'mình rất sợ béo nên đang cân nhắc', 'gói kỹ giúp mình nhé, gọi trước khi giao']) {
+    assert.notEqual(ruleIntent(text, ctx)?.value?.template_id, 'CSKH_HANDOFF', text);
+  }
+  for (const text of ['phản ánh với shop là hàng bị mốc', 'gọi hoài không được', 'e goi hoai ko dc', 'thái độ nhân viên tệ quá', 'ăn phải sợ luôn', 'không thấy ai gọi cho mình', 'túi xanh bị mốc, thất vọng quá']) {
+    const ruled = ruleIntent(text, ctx);
+    assert.equal(ruled?.value?.template_id, 'CSKH_HANDOFF', text);
+    assert.equal(ruled.attention, true, text);
+  }
+});

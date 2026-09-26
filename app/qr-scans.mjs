@@ -11,7 +11,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
-import { classifyUserAgent } from './qr-bridge.mjs';
+import { classifyUserAgent, qrCodeFromRef } from './qr-bridge.mjs';
 
 const scansPath = process.env.QR_SCANS_PATH
   || path.join(projectRoot, 'data', 'processed', 'qr-scans.json');
@@ -34,16 +34,42 @@ function emptyStore() {
 }
 
 function normalizeStore(value) {
-  const codes = value && typeof value === 'object' && value.codes && typeof value.codes === 'object' ? value.codes : {};
-  const recent = Array.isArray(value?.recent) ? value.recent.slice(-recentLimit) : [];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('không phải object JSON');
+  const codes = value.codes && typeof value.codes === 'object' && !Array.isArray(value.codes) ? value.codes : {};
+  const recent = Array.isArray(value.recent) ? value.recent.slice(-recentLimit) : [];
   return { codes: Object.assign(Object.create(null), codes), recent };
 }
 
+/**
+ * Mã đã tạo ở Cài đặt → Mã QR (có mục trong kho): dùng đồng bộ để nhận ra khách quét thẻ thật, phân biệt với
+ * tin khách gõ "#123456" (số đơn, giá…). Kho chưa nạp thì coi là chưa biết → bot trả lời như tin thường.
+ */
+export function isKnownQrCode(code) {
+  const key = String(code || '').toLowerCase();
+  return Boolean(key && cachedStore?.codes?.[key]);
+}
+
+/**
+ * Tệp chưa có → kho rỗng. Tệp hỏng (ghi dở, không phải JSON object) → cất sang
+ * `.corrupt-<mốc>` để còn cứu số liệu, KHÔNG âm thầm đè bằng kho rỗng ở lượt
+ * quét kế tiếp. Lỗi đọc khác (quyền, đĩa) thì ném ra, không nhớ kho rỗng.
+ */
 async function readStore() {
   if (cachedStore) return cachedStore;
+  let raw;
   try {
-    cachedStore = normalizeStore(JSON.parse(await readFile(scansPath, 'utf8')));
-  } catch {
+    raw = await readFile(scansPath, 'utf8');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    cachedStore = emptyStore();
+    return cachedStore;
+  }
+  try {
+    cachedStore = normalizeStore(JSON.parse(raw));
+  } catch (error) {
+    const quarantined = `${scansPath}.corrupt-${Date.now()}`;
+    await rename(scansPath, quarantined).catch(() => {});
+    console.error(`Kho lượt quét QR hỏng (${error.message}), đã cất sang ${path.basename(quarantined)}; bắt đầu kho mới.`);
     cachedStore = emptyStore();
   }
   return cachedStore;
@@ -56,30 +82,55 @@ async function persistStore(store) {
   await rename(temporaryPath, scansPath);
 }
 
-/** Ghi tuần tự như các kho khác: nhiều người quét cùng lúc không đè mất nhau. */
+/** Ghi tuần tự như các kho khác: nhiều người quét cùng lúc không đè mất nhau. Mutate trả `null` = không có gì đổi, không ghi đĩa. */
 function updateStore(mutate) {
   const operation = writeQueue.then(async () => {
     const store = await readStore();
     const result = await mutate(store);
-    await persistStore(store);
+    if (result !== null) await persistStore(store);
     return result;
   });
   writeQueue = operation.catch(() => {});
   return operation;
 }
 
-// Đường /q/<mã> công khai: mã lạ chỉ được tạo mục đếm tới giới hạn này, tránh ai đó gõ mã ngẫu nhiên làm kho phình vô hạn.
+// Số mã tối đa nhân viên tạo được: kho đếm không phình vô hạn.
 export const maximumTrackedCodes = 500;
 
-function entryFor(store, code, at) {
-  if (!store.codes[code] && Object.keys(store.codes).length >= maximumTrackedCodes) return null;
-  const entry = store.codes[code] || { code, scans: 0, opens: 0, firstAt: at, lastAt: at, platforms: {}, browsers: {}, modes: {} };
+/**
+ * Mục đếm của một mã. Chỉ mã đã tạo ở Cài đặt → Mã QR mới có mục: đường
+ * /q/<mã> và beacon /open là công khai, ai gõ mã lạ cũng không tạo được mục
+ * mới (trước đây tạo tới 500 rồi lô in sau không còn chỗ, và không có cách dọn).
+ */
+function entryFor(store, code, at, { create = false } = {}) {
+  if (!store.codes[code]) {
+    if (!create) return null;
+    if (Object.keys(store.codes).length >= maximumTrackedCodes) throw new Error(`Kho mã QR đã đủ ${maximumTrackedCodes} mã; xoá mã không dùng trước khi tạo thêm.`);
+    store.codes[code] = { code, scans: 0, opens: 0, firstAt: at, lastAt: at, platforms: {}, browsers: {}, modes: {} };
+  }
+  const entry = store.codes[code];
   // Kho ghi từ bản trước chưa có các ô này.
   entry.opens = Number(entry.opens) || 0;
   entry.browsers = entry.browsers && typeof entry.browsers === 'object' ? entry.browsers : {};
   entry.modes = entry.modes && typeof entry.modes === 'object' ? entry.modes : {};
-  store.codes[code] = entry;
   return entry;
+}
+
+/** Nhân viên tạo mã (bấm "Tạo QR" / tải ảnh): từ đây mã được đếm và được coi là mã thẻ thật. Đã có thì giữ nguyên. */
+export async function registerQrCode(code, { at = Date.now() } = {}) {
+  if (!isValidQrCode(code)) throw new Error('Mã QR không hợp lệ.');
+  return updateStore(store => (store.codes[code] ? null : entryFor(store, code, at, { create: true })));
+}
+
+/** Xoá mã (gõ nhầm, lô không in): mất luôn số liệu của mã đó. Không có thì trả false. */
+export async function deleteQrCode(code) {
+  if (!isValidQrCode(code)) throw new Error('Mã QR không hợp lệ.');
+  return updateStore(store => {
+    if (!store.codes[code]) return null;
+    delete store.codes[code];
+    store.recent = store.recent.filter(item => item?.code !== code);
+    return true;
+  }).then(result => result === true);
 }
 
 function pushRecent(store, item) {
@@ -92,7 +143,7 @@ function pushRecent(store, item) {
  * không cần, mà lưu vào là thành dữ liệu cá nhân phải bảo vệ. Chỉ giữ loại máy
  * (iPhone/Android), loại trình duyệt (Zalo, Chrome, Safari…) và cách phục vụ
  * (`redirect`: 302 thẳng sang m.me; `page`: trang đệm có nút bấm) — đủ để biết
- * khách rớt ở nhánh nào.
+ * khách rớt ở nhánh nào. Mã chưa tạo → trả null, không ghi gì.
  */
 export async function recordQrScan(code, { at = Date.now(), userAgent = '', mode = 'page' } = {}) {
   if (!isValidQrCode(code)) throw new Error('Mã QR không hợp lệ.');
@@ -130,6 +181,34 @@ export async function recordQrOpen(code, { at = Date.now(), target = 'messenger'
 }
 
 /**
+ * Số referral Messenger nhận được cho từng mã, đọc từ hội thoại trong hộp thư.
+ * Một lượt quét có thể về CRM tới ba lần (referral Meta, tin Botcake "Mã thẻ:
+ * #mã", tin soạn sẵn của khách) — khử trùng theo hội thoại | mã | ngày để một
+ * lượt quét đếm đúng một, không thì tỷ lệ "vào Messenger" vượt 100%.
+ * Đọc `qrReferrals` (kho mới) lẫn `referrals` SHORTLINK (bản ghi từ trước khi tách ô).
+ */
+export function countQrReferrals(conversations = []) {
+  const counts = {};
+  const seen = new Set();
+  for (const conversation of conversations || []) {
+    const list = [
+      ...(Array.isArray(conversation?.qrReferrals) ? conversation.qrReferrals : []),
+      ...(Array.isArray(conversation?.referrals) ? conversation.referrals : []).filter(item => item?.source === 'SHORTLINK')
+    ];
+    for (const referral of list) {
+      const code = qrCodeFromRef(referral?.ref);
+      if (!code) continue;
+      const day = Math.floor((Number(referral?.at) || 0) / 86_400_000);
+      const key = `${conversation.id || `${conversation.pageId}:${conversation.psid}`}|${code}|${day}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      counts[code] = (counts[code] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+/**
  * Số lượt quét, kèm số referral Messenger thật sự nhận được cho từng mã.
  * Hai con số này đặt cạnh nhau chính là thứ cần đo: quét mười lần mà chỉ bảy
  * lần Meta gửi `ref` thì tỷ lệ rớt là 30%, và ta biết điều đó bằng dữ liệu.
@@ -153,3 +232,6 @@ export async function listQrScans(referralCounts = {}) {
   }).sort((first, second) => second.scans - first.scans);
   return { codes, recent: [...store.recent].slice(-100).reverse() };
 }
+
+// Nạp kho lúc khởi động để isKnownQrCode (đồng bộ) có dữ liệu ngay.
+readStore().catch(() => {});

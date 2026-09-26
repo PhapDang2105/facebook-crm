@@ -9,6 +9,7 @@ import path from 'node:path';
 import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
 import { applyWebhookEvents } from './meta-webhook.mjs';
 import { qrCodeFromText } from './qr-bridge.mjs';
+import { isKnownQrCode } from './qr-scans.mjs';
 import { applyGenderGuess, publicConversation, readMessagingStore, reconcileCustomerGender, saveMessage, updateMessagingStore } from './messaging-store.mjs';
 import { genderFromName } from './processing/customer-info.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
@@ -276,7 +277,9 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
   //  - tin khách gửi từ tin soạn sẵn mang `#<mã>` (đường dự phòng).
   // Cả hai ghi như referral SHORTLINK của Meta để thống kê QR, nhãn nguồn và
   // lượt chào dùng chung một đường; `type` cho biết ai đã chào.
-  const qrCode = qrCodeFromText(text);
+  // Chỉ mã đã tạo ở Cài đặt → Mã QR: "#123456" cuối tin khách (số đơn) không phải mã thẻ.
+  const foundCode = qrCodeFromText(text, { outgoing });
+  const qrCode = foundCode && isKnownQrCode(foundCode) ? foundCode : '';
   const referral = qrCode ? { ref: qrCode, source: 'SHORTLINK', type: outgoing ? 'BOTCAKE_OPTIN' : 'PREFILL_TEXT' } : null;
   // "POS" là thẻ xác nhận đơn do Pancake POS tự gửi, không phải người gõ: không
   // được coi là nhân viên (trước đây bot bị tắt ngay sau mỗi đơn đẩy POS).
@@ -427,6 +430,13 @@ export function syncPancakeConversations(options = {}, config = defaultConfig, f
  * liên tiếp, dịch vụ khởi động lại…): tin đến trong `windowMs`, bot còn bật, Page chưa trả lời
  * sau tin đó → đưa bot như một webhook muộn. Tin cũ hơn hay đã có người trả lời thì thôi.
  */
+/** Tin Page gần nhất đứng trước mốc `at`. */
+function lastOutgoingBefore(messages, at) {
+  let found = null;
+  for (const item of messages || []) if (item?.direction === 'outgoing' && (Number(item.createdAt) || 0) < at) found = item;
+  return found;
+}
+
 /** Nhân viên vừa nhắn trong hội thoại (60 phút): bot đứng ngoài, kể cả khi tin nhân viên về qua đồng bộ. */
 export function staffRepliedRecently(messages, now = Date.now()) {
   return (messages || []).some(item => item?.direction === 'outgoing' && item.staff && now - (Number(item.createdAt) || 0) < 60 * 60 * 1000);
@@ -444,6 +454,8 @@ export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 
     const messages = store?.messages?.[change.conversation.id] || [];
     if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) return false;
     if (staffRepliedRecently(messages, now)) return false;
+    // Tin Page gần nhất trước tin khách là của nhân viên (dù đã lâu): khách đang nói chuyện với người thật.
+    if (lastOutgoingBefore(messages, at)?.staff) return false;
     const key = `${change.conversation.id}:${change.message.id}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -468,6 +480,7 @@ export function backlogBotChanges(store, { now = Date.now(), windowMs = 60 * 60 
     if (now - at > windowMs || at > now + 5 * 60 * 1000) continue;
     if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) continue;
     if (staffRepliedRecently(messages, now)) continue;
+    if (lastOutgoingBefore(messages, at)?.staff) continue;
     changes.push({ type: 'message', conversation, message: last, late: true });
   }
   return changes;

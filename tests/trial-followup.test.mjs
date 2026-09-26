@@ -217,3 +217,59 @@ test('rà soát vòng 7: "Dạ lấy túi xanh" là chọn (không nhầm "đã 
     assert.notEqual(trialStep({ text, trial }).value?.template_id, 'TRIAL_ACCEPT', text);
   }
 });
+
+test('vòng 8: "combo 2…" đúng chữ trong lời mời là chọn combo 2 (không phải hỏi giá); hỏi giá / khuyến mãi combo 2 vẫn TRIAL_PRICE', async () => {
+  const trial = offer();
+  for (const text of ['combo 2', 'lấy combo 2', 'combo 2 túi', 'lấy combo 2 túi xanh', 'cho chị combo 2 túi vàng', 'combo 2 túi bất kỳ', 'lấy combo 2 túi 1 xanh 1 nâu']) {
+    assert.equal(trialStep({ text, trial, now }).exit, 'combo2', text);
+  }
+  assert.equal(trialStep({ text: 'combo 2 túi bao nhiêu', trial }).value?.template_id, 'TRIAL_PRICE');
+  assert.equal(trialStep({ text: 'combo 2 có giảm giá không', trial }).value?.template_id, 'TRIAL_PRICE');
+  const out = await run(offerConversation(), 'lấy combo 2 túi xanh');
+  assert.equal(out.results[0].templateId, 'ORDER_ADDRESS');
+  assert.equal(out.asked, false);
+  assert.match(out.text, /2 Granola Túi Xanh 450g, tổng 298\.000đ/);
+  assert.match(out.text, /Bộ bát gáo dừa/);
+  assert.equal(out.promo.combo2, true);
+});
+
+test('chính sách 26/09: đã chọn combo 2 mà đổi ý lấy 1 túi trong cửa sổ → vẫn 1 túi miễn ship; nêu 1 màu không số sau combo 2 → mô hình đọc (vị cho combo)', async () => {
+  const combo2 = offerConversation({ promo: { ...offer(), stage: 'converted', combo2: true, lockedUntil: now + DAY }, pendingOrder: { items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }, { product: 'Granola Túi Vàng 350g', code: 'GRA-VANG-H350', quantity: 1 }], key: 'GRA-VANG-H350=1|GRA-XANH-Z450=1', at: now - 60000 }, botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: now });
+  const active = activeTrial(combo2);
+  assert.deepEqual([active?.stage, active?.bag, active?.combo2], ['offered', '', true]);
+  assert.equal(activeTrial(offerConversation({ promo: { ...offer(), stage: 'converted' } })), null, 'từ 3 túi (không combo2): đơn thường');
+  assert.equal(activeTrial(offerConversation({ promo: { ...offer(), stage: 'converted', combo2: true, until: now - 1, lockedUntil: now - 1 } })), null, 'hết cửa sổ');
+  const one = await run(combo2, 'thôi chị lấy 1 túi xanh thôi');
+  assert.equal(one.results[0].templateId, 'ORDER_ADDRESS');
+  assert.equal(one.asked, false);
+  assert.match(one.text, /1 Granola Túi Xanh 450g, tổng 174\.000đ \(Miễn phí vận chuyển – ưu đãi dùng thử\)/);
+  assert.doesNotMatch(one.text, /lấy 2 túi thì giá/);
+  assert.equal(one.promo.stage, 'chosen');
+  const kept = { ...offer(), stage: 'offered', combo2: true, bag: '' };
+  assert.equal(trialStep({ text: 'xanh nha', trial: kept }).delegate, true, '"xanh" sau "lấy 2 túi" là vị cho combo');
+  assert.equal(trialStep({ text: '1 túi xanh thôi', trial: kept, now }).value?.template_id, 'ORDER_ADDRESS');
+  assert.equal(filterTrialReply({ templateId: 'ASK_FLAVOR' }, kept), null, 'hỏi vị cho combo 2 là hợp lệ');
+  // SĐT + địa chỉ cho 2 túi khi ưu đãi còn giữ: đơn combo có quà, không phải đơn dùng thử (Freeship).
+  const done = await run(combo2, '0909123456, 12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM', { reply: { template_id: 'ORDER_CONFIRMATION', Phone_Number: '0909123456', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' } });
+  assert.equal(done.created.length, 1);
+  assert.equal(done.created[0].promoGift, 'Bộ bát gáo dừa – ưu đãi bám đuổi');
+  assert.equal(done.created[0].total, 298000);
+  assert.equal(done.created[0].trial, undefined);
+});
+
+test('sửa đơn có quà bám đuổi trong 60 phút: đổi vị vẫn 2 túi → giữ quà; đổi còn 1 túi → không quà (server bỏ promoGift cũ)', () => {
+  const recent = { id: 'o1', createdAt: now - 10 * 60 * 1000, status: 'Mới', automatic: true, phone: '0909123456', address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM', products: [{ sku: 'GRA-XANH-Z450', name: 'Granola Túi Xanh 450g', quantity: 1 }, { sku: 'GRA-VANG-H350', name: 'Granola Túi Vàng 350g', quantity: 1 }], total: 298000, promoGift: 'Bộ bát gáo dừa – ưu đãi bám đuổi' };
+  // Đơn đã tạo sau ưu đãi → promoBowlActive = false; quà chỉ còn theo đơn đang sửa.
+  const ctx = { recentOrder: recent, now, promoBowl: false, messageText: 'đổi thành 2 túi vàng nhé' };
+  const swap = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Vàng 350g', No_A: '2' }, templates, ctx);
+  assert.equal(swap.templateId, 'ORDER_UPDATE');
+  assert.equal(swap.order.updateOrderId, 'o1');
+  assert.equal(swap.order.promoGift, 'Bộ bát gáo dừa – ưu đãi bám đuổi');
+  assert.match(swap.order.gift, /Bộ bát gáo dừa/);
+  const one = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Xanh 450g', No_A: '1' }, templates, { ...ctx, messageText: 'đổi lại 1 túi xanh thôi' });
+  assert.equal(one.templateId, 'ORDER_UPDATE');
+  assert.equal(one.order.promoGift, undefined);
+  assert.doesNotMatch(String(one.order.gift || ''), /gáo dừa/);
+  const three = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Xanh 450g', No_A: '3' }, templates, { ...ctx, messageText: 'lên 3 túi xanh' });
+  assert.equal(three.order.promoGift, undefined, '3 túi: quà theo bảng chung, không ghi quà bám đuổi');
+});

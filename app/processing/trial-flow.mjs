@@ -55,14 +55,18 @@ export function trialBagOptions() {
 export function activeTrial(conversation = {}, { now = Date.now() } = {}) {
   const promo = conversation.promo;
   if (conversation.source === 'comment' || !promo?.freeShipping) return null;
-  const stage = promo.stage || 'offered';
+  const rawStage = promo.stage || 'offered';
+  // Khách đã chọn combo 2 túi (stage 'converted' + combo2) mà còn trong cửa sổ ưu đãi: vẫn giữ ưu đãi
+  // (chủ shop 26/09) — đổi ý lấy 1 túi thì 1 túi đó vẫn miễn ship; coi như 'offered' chưa chọn túi.
+  const combo2 = rawStage === 'converted' && Boolean(promo.combo2);
+  const stage = combo2 ? 'offered' : rawStage;
   if (stage !== 'offered' && stage !== 'chosen') return null;
-  const until = Math.max(Number(promo.until) || 0, stage === 'chosen' ? Number(promo.lockedUntil) || 0 : 0);
+  const until = Math.max(Number(promo.until) || 0, stage === 'chosen' || combo2 ? Number(promo.lockedUntil) || 0 : 0);
   if (now > until) return null;
   // Đã đặt đơn (chưa hủy) sau khi nhận ưu đãi: ưu đãi đã dùng.
   const orders = Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [];
   if (orders.some(order => Number(order.createdAt) > Number(promo.at) && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy')) return null;
-  return { ...promo, stage };
+  return { ...promo, stage, ...(combo2 ? { bag: '' } : {}) };
 }
 
 /**
@@ -86,14 +90,16 @@ function bagPicks(raw) {
   const folded = foldVietnamese(String(raw || '').replace(/n[âa]u\s+(v[ịi]\s+)?ca\s*cao/giu, 'nâu').replace(/ca\s+cao/giu, 'cacao'))
     .replace(/xanh (duong|la cay)|dau xanh/g, ' ').replace(/\+?\d{9,11}/g, ' ');
   const picks = new Map();
+  let explicitQuantity = false;
   for (const match of folded.matchAll(/(?:\b(\d{1,2})\s*(?:tui|goi|bich|x)?\s*)?\b(xanh|vang|nau|cacao)\b(?:\s*(?:x\s*)?(\d{1,2})\b)?/g)) {
     const colour = COLOURS[match[2]];
+    if (match[1] || match[3]) explicitQuantity = true;
     const quantity = Math.max(1, Math.min(20, Number(match[1] || match[3]) || 1));
     picks.set(colour, Math.max(picks.get(colour) || 0, quantity));
   }
   // "lấy 2 túi" không nêu màu: vẫn là xin nhiều túi.
   const loose = folded.match(/\b(\d{1,2})\s*(tui|goi|bich)\b/);
-  return { picks, looseQuantity: loose ? Number(loose[1]) : 0 };
+  return { picks, looseQuantity: loose ? Number(loose[1]) : 0, explicitQuantity: explicitQuantity || Boolean(loose) };
 }
 
 /**
@@ -114,7 +120,7 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   const phone = extractVietnamesePhone(raw);
   const longText = s.length > 60;
   const bags = trialBagOptions();
-  const { picks, looseQuantity } = bagPicks(raw);
+  const { picks, looseQuantity, explicitQuantity } = bagPicks(raw);
   const quantity = [...picks.values()].reduce((sum, value) => sum + value, 0);
   const chosen = trial?.stage === 'chosen' && trial.bag;
   const orderStep = chosen ? { template_id: 'ORDER_ADDRESS', Product_N1: trial.bag, No_A: '1' } : null;
@@ -135,15 +141,20 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   if (info && !phone) return { value: { template_id: info[2], also: 'TRIAL_NEXT_STEP', values: { bags } } };
   if (asks && picks.size >= 2 && !phone) return { value: { template_id: 'BAG_COMPARISON', also: 'TRIAL_NEXT_STEP', values: { bags } } };
   if (FREESHIP.test(s)) return { value: { template_id: 'TRIAL_FREESHIP_INFO', values: { bags } } };
+  // Đúng 2 túi lớn ("1 xanh 1 vàng", "2 túi xanh", "combo 2", "lấy combo 2 túi xanh"): rời luồng 1 túi nhưng giữ
+  // ưu đãi combo 2 → tặng bát gáo dừa (renderOrder đọc context.promoBowl). Xét TRƯỚC câu hỏi giá/khuyến mãi:
+  // chữ "combo" nằm trong DISCOUNT, mà mẫu mời ghi "Combo 2 Túi bất kỳ" nên khách trả lời đúng chữ đó là chọn,
+  // không phải hỏi. "combo 2" không nêu màu vẫn là 2 túi. Từ 3 túi: đơn thường (bảng quà chung đã có bộ bát + muỗng).
+  const total = quantity || looseQuantity || (/\bcombo\s*2\b/.test(s) ? 2 : 0);
+  if (!asks && !PRICE.test(s) && (total === 2 || (picks.size === 2 && quantity === 2))) return { exit: 'combo2', patch: { stage: 'converted', combo2: true, endedAt: now, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) } };
   if (DISCOUNT.test(s) || PRICE.test(s)) return { value: { template_id: 'TRIAL_PRICE', values: { bags } } };
-  // Đúng 2 túi lớn ("1 xanh 1 vàng", "2 túi xanh", "combo 2"): rời luồng 1 túi nhưng giữ ưu đãi combo 2 → tặng
-  // bát gáo dừa (renderOrder đọc context.promoBowl). Từ 3 túi: đơn thường (bảng quà chung đã có bộ bát + muỗng).
-  const total = quantity || looseQuantity;
-  if (!asks && (total === 2 || (picks.size === 2 && quantity === 2))) return { exit: 'combo2', patch: { stage: 'converted', combo2: true, endedAt: now, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) } };
   if (picks.size >= 2 || quantity >= 2 || looseQuantity >= 2) return { exit: 'converted', patch: { stage: 'converted', endedAt: now } };
   if (picks.size === 1 && !asks) {
     const product = bagProduct([...picks.keys()][0]);
     if (!product) return { delegate: true };
+    // Khách đã chọn combo 2 túi ("lấy 2 túi", "combo 2") rồi nêu một màu không kèm số ("xanh nha"): là vị
+    // cho combo, không phải đổi về 1 túi — mô hình đọc giỏ/lịch sử. Nói rõ "1 túi xanh" mới là 1 túi.
+    if (trial?.combo2 && !explicitQuantity) return { delegate: true };
     const patch = { stage: 'chosen', bag: product.name, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) };
     // Kèm SĐT / địa chỉ: mô hình đọc địa chỉ; giá vẫn là 1 túi miễn ship.
     if (phone || longText) return { delegate: true, patch };
@@ -173,6 +184,8 @@ export function filterTrialReply(reply = {}, trial = {}, isProductQuoteId = () =
   const also = String(reply.alsoTemplateId || '');
   const banned = value => BANNED.has(value) || isProductQuoteId(value);
   if (id === 'FREESHIP_POLICY') return { template_id: 'TRIAL_FREESHIP_INFO', values: { bags: trialBagOptions() } };
+  // Đã chọn combo 2 túi: hỏi vị cho combo (ASK_FLAVOR) là hợp lệ.
+  if (trial?.combo2 && id === 'ASK_FLAVOR') return null;
   if (!banned(id) && !banned(also) && also !== 'FREESHIP_POLICY') return null;
   // Câu trả lời chính dùng được, chỉ ý phụ bị cấm (bảng giá, combo…): giữ câu chính, đổi ý phụ.
   if (!banned(id) && id) return { template_id: id, also: 'TRIAL_NEXT_STEP', values: { bags: trialBagOptions() } };
@@ -182,5 +195,5 @@ export function filterTrialReply(reply = {}, trial = {}, isProductQuoteId = () =
 
 /** Gợi ý cho mô hình khi phải nhờ mô hình (tin có địa chỉ, ảnh…). */
 export function trialModelHint(trial = {}) {
-  return `KHÁCH ĐANG GIỮ ƯU ĐÃI BÁM ĐUỔI${trial.bag ? ` (đã chọn ${trial.bag})` : ''}: 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN (giá túi, không cộng ship), hoặc combo 2 túi lớn được tặng thêm bộ bát gáo dừa. Không báo giá combo 3, không mời thêm sản phẩm khác.`;
+  return `KHÁCH ĐANG GIỮ ƯU ĐÃI BÁM ĐUỔI${trial.bag ? ` (đã chọn ${trial.bag})` : trial.combo2 ? ' (đã chọn combo 2 túi, đang xin vị/SĐT/địa chỉ)' : ''}: 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN (giá túi, không cộng ship), hoặc combo 2 túi lớn được tặng thêm bộ bát gáo dừa. Không báo giá combo 3, không mời thêm sản phẩm khác.`;
 }

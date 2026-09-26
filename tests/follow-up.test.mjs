@@ -203,6 +203,41 @@ test('trạm gửi Pancake: lô hỏi lại Pancake (bỏ khách đã có đơn 
   assert.deepEqual((await fresh.followUpQueue({ now })).map(item => item.key), []);
 });
 
+test('trạm gửi hết giờ chờ (unknown): giữ chỗ 45 phút, không tính lần lỗi; hết giữ chỗ thì về hàng chờ; tin đồng bộ về thì xác nhận; kết quả trễ sau đó bị từ chối', async () => {
+  const write = (await import('node:fs')).writeFileSync;
+  const text = 'Dạ chị ơi, Giọt Nắng gửi chị ưu đãi riêng: lấy 1 túi granola dùng thử vẫn được MIỄN PHÍ VẬN CHUYỂN ạ';
+  const MIN = 60 * 1000;
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: { 'trial:110:g': { scenarioId: 'trial', conversationId: `${page}:g`, name: 'Minh', at: now, repliedAt: now - 30 * HOUR, queued: true, text, pageId: page, psid: 'g', freeShipDays: 7 } } }));
+  const fresh = await import(`../app/follow-up.mjs?unknown=${Date.now()}`);
+  const conversationInfo = async () => ({ globalId: '1000123', recentOrders: 0, canInbox: true });
+  const batch = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now });
+  assert.deepEqual(batch.items.map(item => item.key), ['trial:110:g']);
+  // Cầu nối hết giờ: client báo unknown:true → không trả về hàng chờ ngay, không tăng attempts.
+  const reported = now + 150 * 1000;
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'timeout', unknown: true }], { now: reported, token: batch.token }), { sent: 0, failed: 0, dropped: 0, unknown: 1 });
+  const [held] = await fresh.followUpQueue({ now: reported + MIN });
+  assert.equal(held.leased, true, 'vẫn giữ chỗ');
+  assert.equal(held.attempts, 0, 'không tính là lần lỗi');
+  assert.match(held.lastError, /chờ đồng bộ Pancake xác nhận/);
+  assert.equal((await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: reported + 44 * MIN })).items.length, 0, 'trong 45 phút: lô sau không lấy lại (không gửi trùng)');
+  // Hết giữ chỗ mà không thấy tin đồng bộ về: khách về hàng chờ, lô sau lấy lại.
+  const second = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: reported + 46 * MIN });
+  assert.deepEqual(second.items.map(item => item.key), ['trial:110:g']);
+  assert.equal((await fresh.readFollowUpState()).sent['trial:110:g'].attempts || 0, 0);
+  // Lần này cũng hết giờ; sau đó Pancake đồng bộ lời bám đuổi về → tự xác nhận đã gửi.
+  const reported2 = reported + 47 * MIN;
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, error: 'timeout', unknown: true }], { now: reported2, token: second.token }), { sent: 0, failed: 0, dropped: 0, unknown: 1 });
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  await updateMessagingStore(current => { current.messages[`${page}:g`] = [...(current.messages[`${page}:g`] || []), message('outgoing', reported2 - 2 * MIN, { text: `${text} 🎁` })]; return null; });
+  assert.equal(await fresh.reconcileFollowUpQueue(reported2 + MIN), 1);
+  assert.equal((await fresh.followUpQueue({ now: reported2 + MIN })).length, 0);
+  assert.ok((await readMessagingStore()).conversations.find(entry => entry.id === `${page}:g`).labels.includes('followup'));
+  // Kết quả ok:true đến trễ sau khi đã xác nhận: không còn trong hàng → từ chối, không gửi/ghi gì thêm.
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: true }], { now: reported2 + 2 * MIN, token: second.token }), { sent: 0, failed: 0, dropped: 0, rejected: 1 });
+  // unknown cho khách không trong lô (sai mã lô): từ chối như mọi kết quả khác.
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:g', ok: false, unknown: true }], { now, token: 'sai' }), { sent: 0, failed: 0, dropped: 0, rejected: 1 });
+});
+
 test('hàng chờ tự xác nhận khi lời bám đuổi (gửi tay trong Pancake) đồng bộ về CRM; tin khác của nhân viên thì không tính', async () => {
   const write = (await import('node:fs')).writeFileSync;
   const text = 'Dạ anh ơi, Giọt Nắng gửi anh ưu đãi riêng: lấy 1 túi granola dùng thử vẫn được MIỄN PHÍ VẬN CHUYỂN ạ';

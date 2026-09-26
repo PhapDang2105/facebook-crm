@@ -164,3 +164,15 @@ test('bộ chấm mẫu 26/09: "2 túi 298k miễn ship" là đặt hàng, khôn
   assert.notEqual(ruleIntent('Đúng hàng mới nhận nha shop', ctx)?.value?.template_id, 'FRESHNESS');
   assert.equal(ruleIntent('Hàng mới không em', ctx)?.value?.template_id, 'FRESHNESS');
 });
+
+test('khiếu nại rõ (gọi không được, không ai gọi, bot luyên thuyên, ăn phải sợ) → CSKH_HANDOFF ngay; câu hỏi chính sách thì không', () => {
+  const ctx = { commentBasket };
+  for (const text of ['Cháu xem lại hàng cô đặt. cô gọi zalo suốt cho cháu k được', 'Có thấy ai gọi đâu', 'Ô sao lên đơn cứ luyên thuyên vậy shop', 'Nhưng có 1 thành phần quá cứng, ăn phải rất sợ luôn í', 'Thất vọng quá shop ơi']) {
+    const ruled = ruleIntent(text, ctx);
+    assert.equal(ruled?.value?.template_id, 'CSKH_HANDOFF', text);
+    assert.equal(ruled.attention, true);
+  }
+  assert.notEqual(ruleIntent('Có đổi trả không shop', ctx)?.value?.template_id, 'CSKH_HANDOFF');
+  assert.notEqual(ruleIntent('Đc kiểm hàng ko', ctx)?.value?.template_id, 'CSKH_HANDOFF');
+  assert.equal(ruleIntent('Có thấy ai gọi đâu', { ...ctx, source: 'comment' })?.value?.template_id, undefined, 'bình luận đi luồng riêng');
+});

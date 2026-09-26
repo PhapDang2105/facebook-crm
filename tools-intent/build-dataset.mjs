@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const load = file => import(pathToFileURL(path.join(root, file)).href);
-const { templateSignatures, matchTemplate } = await load('app/processing/template-match.mjs');
+const { templateSignatures, matchTemplate, isSystemNotice } = await load('app/processing/template-match.mjs');
 const args = process.argv.slice(2);
 const outPath = args.find(arg => !arg.startsWith('--'));
 if (!outPath) { console.log('Dùng: node tools-intent/build-dataset.mjs <out.jsonl> [--since YYYY-MM-DD] [--llm]'); process.exit(1); }
@@ -70,14 +70,16 @@ for (const conversation of store.conversations) {
     const replies = [];
     for (let j = i + 1; j < messages.length; j += 1) {
       if (messages[j].direction === 'incoming') break;
-      if (messages[j].text && messages[j].type === 'text') replies.push(messages[j]);
+      if (messages[j].text && messages[j].type === 'text' && !isSystemNotice(messages[j].text)) replies.push(messages[j]);
     }
     if (!replies.length) continue;
     const first = replies[0];
     const firstLabel = matchTemplate(first.text, signatures);
     // Bot trả lời xong, nhân viên viết thêm câu không khớp mẫu trong 10 phút: coi là nhân viên sửa bot.
-    const staffAfterBot = firstLabel ? replies.slice(1).find(reply => !matchTemplate(reply.text, signatures) && reply.createdAt - first.createdAt <= 10 * 60000) : null;
-    const staffReply = !firstLabel && first.createdAt - message.createdAt <= 24 * 3600000 ? first : staffAfterBot;
+    // Câu nhân viên phải có nội dung (≥ 20 ký tự): "Dạ vâng ạ", "Dạ em chào chị ạ" không nói lên mẫu nào.
+    const isStaffText = reply => !matchTemplate(reply.text, signatures) && String(reply.text).trim().length >= 20;
+    const staffAfterBot = firstLabel ? replies.slice(1).find(reply => isStaffText(reply) && reply.createdAt - first.createdAt <= 10 * 60000) : null;
+    const staffReply = !firstLabel ? (isStaffText(first) && first.createdAt - message.createdAt <= 24 * 3600000 ? first : null) : staffAfterBot;
     let label = firstLabel;
     let labelSource = firstLabel ? 'template' : '';
     let corrected = false;
@@ -85,10 +87,12 @@ for (const conversation of store.conversations) {
       const key = `${conversation.id}:${staffReply.createdAt}`;
       if (!(key in cache) && labelStaff) { cache[key] = await labelStaff(maskPhone(message.text).slice(0, 300), maskPhone(staffReply.text).slice(0, 400)); stats.llmCalls += 1; }
       const mapped = cache[key];
-      if (mapped?.label && mapped.confidence >= 0.7) {
-        if (firstLabel && mapped.label !== firstLabel) { corrected = true; stats.corrected += 1; }
-        label = mapped.label; labelSource = 'staff'; stats.staff += 1;
-      } else if (!firstLabel) { stats.staffUnlabeled += 1; continue; }
+      // Bot đã trả lời: chỉ coi là "sửa" khi nhân viên đưa ra câu có mẫu tương đương khác mẫu bot
+      // (WELCOME/OTHER = không có mẫu tương đương → giữ nhãn bot).
+      const substantive = mapped?.label && mapped.confidence >= 0.7 && !['WELCOME', 'OTHER'].includes(mapped.label);
+      if (firstLabel && substantive && mapped.label !== firstLabel) { corrected = true; stats.corrected += 1; label = mapped.label; labelSource = 'staff'; stats.staff += 1; }
+      else if (!firstLabel && mapped?.label && mapped.confidence >= 0.7) { label = mapped.label; labelSource = 'staff'; stats.staff += 1; }
+      else if (!firstLabel) { stats.staffUnlabeled += 1; continue; }
     }
     if (!label) continue;
     if (labelSource === 'template') stats.template += 1;

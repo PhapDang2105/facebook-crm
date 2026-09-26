@@ -15,3 +15,13 @@ test('nhận diện mẫu: tin bot đã gửi khớp mẫu theo đầu câu (b�
   assert.equal(matchTemplate('Dạ có ạ, túi xanh 450g nha chị, mai kho gửi liền', signatures), '');
   assert.equal(matchTemplate('', signatures), '');
 });
+
+test('câu đuôi của mẫu (mở đầu bằng placeholder) vẫn nhận là mẫu; thông báo hệ thống không phải câu trả lời', async () => {
+  const { isSystemNotice } = await import('../app/processing/template-match.mjs');
+  assert.equal(matchTemplate('Dạ chị đang cần thêm thông tin nào về sản phẩm thì nhắn cho em để em hỗ trợ cho mình nha ạ', signatures) !== '', true);
+  assert.equal(matchTemplate('Chị cần em tư vấn thêm hay lên đơn giúp mình thì nhắn em nha ạ.', signatures), 'PRODUCT_PHOTOS');
+  assert.equal(isSystemNotice('Bạn đang phản hồi bình luận của người dùng về bài viết trên Trang của mình.'), true);
+  assert.equal(isSystemNotice('Chào Hoà! Chúng tôi có thể giúp gì cho bạn?'), true);
+  assert.equal(isSystemNotice('[Tệp đính kèm]'), true);
+  assert.equal(isSystemNotice('Dạ có ạ, túi xanh 450g nha chị'), false);
+});

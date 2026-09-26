@@ -40,8 +40,11 @@ export function templateSignatures(templates = {}) {
     if (!text.trim()) continue;
     for (const variant of text.split('###')) {
       const plain = variant.replace(/\[\?[^\]]*\]|\[\/\?\]|\[\[[^\]]*\]\]/g, ' ').replace(/\{[^}]+\}/g, ' | ');
-      const key = normalize(plain.split('|')[0]);
-      if (key.length >= 12) signatures.push({ id, key: key.slice(0, 60) });
+      const pieces = plain.split('|').map(normalize);
+      // Đầu câu: so bằng startsWith. Đoạn mở đầu bằng placeholder ("{Title} cần em tư vấn thêm…", câu đuôi
+      // của bảng giá) lấy mảnh đủ dài đầu tiên, so bằng includes để không bị nhận nhầm là nhân viên viết.
+      if (pieces[0].length >= 12) signatures.push({ id, key: pieces[0].slice(0, 60), anywhere: false });
+      else { const piece = pieces.find(item => item.length >= 20); if (piece) signatures.push({ id, key: piece.slice(0, 60), anywhere: true }); }
     }
   }
   return signatures.sort((first, second) => second.key.length - first.key.length);
@@ -52,6 +55,11 @@ export function matchTemplate(text, signatures) {
   const norm = normalize(text);
   if (!norm) return '';
   for (const [id, pattern] of SPECIAL) if (pattern.test(norm)) return id;
-  for (const { id, key } of signatures) if (norm.startsWith(key)) return id;
+  for (const { id, key, anywhere } of signatures) if (anywhere ? norm.includes(key) : norm.startsWith(key)) return id;
   return '';
+}
+
+/** Tin Page không phải câu trả lời: thông báo hệ thống (bình luận, quảng cáo, tệp) hay lời chào tự động. */
+export function isSystemNotice(text) {
+  return /^Bạn đang phản hồi bình luận|^Khách bấm vào quảng cáo|đã trả lời (một quảng cáo|về một bài viết)|^\[Tệp đính kèm\]|^Chào .{1,40}! Chúng tôi có thể giúp gì/u.test(String(text || '').trim());
 }

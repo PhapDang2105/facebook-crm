@@ -199,7 +199,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .logo { display: block; width: clamp(128px, 40vw, 150px); height: auto; margin: 0 auto 14px; }
   .letter { margin: 0 0 16px; padding: 16px 16px 12px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
   .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
-  .letter-body { margin: 0 0 10px; color: #4a3f33; font-size: 15.5px; line-height: 1.5; }
+  .letter-body { margin: 0 0 8px; color: #4a3f33; font-size: 15.5px; line-height: 1.5; }
+  .letter-body:last-of-type { margin-bottom: 10px; }
   .offers { display: grid; gap: 8px; margin: 0 0 10px; padding: 0; list-style: none; }
   .offers li { display: flex; align-items: center; gap: 12px; color: #3a2e22; font-size: 15px; line-height: 1.4; }
   .offers li b { color: #2e6b3f; font-weight: 700; }
@@ -268,7 +269,9 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   <img class="logo" src="/q/brand/logo.webp" alt="${name}" width="150" height="83">
   <div class="letter">
     <h1 class="greet">Thân gửi anh chị,</h1>
-    <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Em gửi anh chị ưu đãi:</p>
+    <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</p>
+    <p class="letter-body">Em luôn nghĩ, sức khoẻ bắt đầu từ những điều nhỏ và sạch mỗi ngày. Vì vậy từng mẻ hạt ở nhà Nắng đều được nướng chứ không chiên qua dầu, không phẩm màu, không hương liệu, và đóng gói tại xưởng đạt chuẩn HACCP, ISO&nbsp;22000. Mong mỗi bữa sáng của anh chị và gia đình đều lành, đủ chất và thật an tâm.</p>
+    <p class="letter-body">Em gửi anh chị chút ưu đãi cho lần sau:</p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>

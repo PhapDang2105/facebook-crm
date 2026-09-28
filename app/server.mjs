@@ -7,7 +7,7 @@ import { buildExportRows, exportPreviewStreets, exportedOrderData } from './orde
 import { parseXlsx } from './xlsx-import.mjs';
 import { buildPlainXlsx } from './xlsx-export.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
-import { buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder } from './conversation-orders.mjs';
+import { buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { assertUsableAiEndpoint, defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost } from './network-guard.mjs';
@@ -449,6 +449,9 @@ async function importPosConversationOrders(posOrders) {
   if (!drafts.length) return 0;
   let created = 0;
   const touched = new Set();
+  // Thẻ "Đã mua hàng" cho hội thoại có đơn POS chưa hủy (đơn mới, và đơn đã kéo về trước đây mà chưa gắn).
+  const orderLabels = labelsForEvents((await readInboxSettings().catch(() => ({ labels: [] }))).labels, ['order']);
+  const relabeled = [];
   await updateMessagingStore(store => {
     const byPancakeId = new Map(store.conversations.filter(item => item.pancakeConversationId && item.source !== 'comment').map(item => [String(item.pancakeConversationId), item]));
     for (const { conversationKey, order } of drafts) {
@@ -462,16 +465,20 @@ async function importPosConversationOrders(posOrders) {
           Object.assign(existing, { processingStatus: 'cancelled', status: 'Hủy', updatedAt: Date.now() });
           touched.add(conversation.id);
         }
+        if (applyPurchaseLabels(conversation, existing, orderLabels)) relabeled.push(publicConversation(conversation));
         continue;
       }
       conversation.customerOrders.unshift(order);
       conversation.customerOrders = conversation.customerOrders.slice(0, 200);
+      if (applyPurchaseLabels(conversation, order, orderLabels)) relabeled.push(publicConversation(conversation));
       created += 1;
       touched.add(conversation.id);
     }
     return null;
   });
   for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
+  for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
+  if (relabeled.length) console.log(`Đồng bộ POS: gắn thẻ Đã mua hàng cho ${relabeled.length} hội thoại có đơn POS.`);
   if (created) markFollowUpWins().catch(() => {});
   return created;
 }
@@ -2064,15 +2071,20 @@ const server = http.createServer(async (request, response) => {
               return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });
             }
           }
+          const orderLabels = labelsForEvents((await readInboxSettings().catch(() => ({ labels: [] }))).labels, ['order']);
+          let relabeledConversation = null;
           const stored = await updateMessagingStore(store => {
             const item = store.conversations.find(entry => entry.id === id);
             if (!item) return null;
             if (!Array.isArray(item.customerOrders)) item.customerOrders = [];
             item.customerOrders.unshift(order);
             item.customerOrders = item.customerOrders.slice(0, 200);
+            // Nhân viên tạo đơn trong CRM: gắn thẻ "Đã mua hàng" như đơn bot chốt.
+            if (applyPurchaseLabels(item, order, orderLabels)) relabeledConversation = publicConversation(item);
             return item;
           });
           if (!stored) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+          if (relabeledConversation) publishMessagingEvent({ type: 'conversation', conversation: relabeledConversation });
           markFollowUpWins().catch(() => {});
           if (viaPancake) {
             // Hội thoại Pancake: không gửi bản chữ. Đẩy đơn sang Pancake POS, POS

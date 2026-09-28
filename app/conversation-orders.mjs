@@ -39,6 +39,25 @@ export function isLivestreamCustomer(conversation = {}) {
  * cờ order.livestream (đơn bot tạo từ 28/09), cờ liveOrder cũ, hoặc địa chỉ
  * nhân viên ghi tay mở đầu "(Live) ".
  */
+/**
+ * Gắn thẻ "Đã mua hàng" (thẻ nhận sự kiện 'order' trong Cài đặt → Tin nhắn) cho hội thoại có đơn chưa hủy.
+ * 28/09: trước đây chỉ đơn bot chốt mới gắn; đơn nhân viên lên trong Pancake/POS kéo về CRM và đơn tạo tay
+ * trong CRM thì không (78 hội thoại/7 ngày thiếu thẻ). Mỗi đơn chỉ gắn MỘT lần (cờ `purchaseLabeled`) để
+ * nhân viên gỡ thẻ thì đồng bộ POS 5 phút/lần không gắn lại. Trả về true nếu danh sách thẻ đổi.
+ */
+export function applyPurchaseLabels(conversation, order, labelIds = []) {
+  if (!conversation || !order || order.purchaseLabeled) return false;
+  if (order.processingStatus === 'cancelled' || order.status === 'Hủy') return false;
+  order.purchaseLabeled = true;
+  const wanted = (Array.isArray(labelIds) ? labelIds : []).filter(Boolean);
+  if (!wanted.length) return false;
+  const before = Array.isArray(conversation.labels) ? conversation.labels : [];
+  const merged = [...new Set([...before, ...wanted])];
+  if (merged.length === before.length) return false;
+  conversation.labels = merged;
+  return true;
+}
+
 export function isLivestreamOrder(order = {}) {
   if (!order || typeof order !== 'object') return false;
   return order.livestream === true || order.liveOrder === true || /^\s*\(live\)/i.test(String(order.address || ''));

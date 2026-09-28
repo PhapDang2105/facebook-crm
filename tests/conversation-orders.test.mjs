@@ -125,3 +125,31 @@ test('bản chữ "XÁC NHẬN ĐƠN ĐẶT HÀNG…" không còn đường nào
   const metaSync = await readFile(new URL('../app/meta-sync.mjs', import.meta.url), 'utf8');
   assert.match(metaSync, /if \(!text\) throw error;/, 'thẻ receipt bị từ chối thì không lùi về bản chữ khi không có chữ');
 });
+
+test('thẻ "Đã mua hàng" cho đơn POS/CRM tay (28/09): đơn chưa hủy gắn một lần, đơn hủy không gắn, nhân viên gỡ thẻ thì không gắn lại', async () => {
+  const { applyPurchaseLabels } = await import('../app/conversation-orders.mjs');
+  const conversation = { id: 'c1', labels: ['followup'] };
+  const order = { id: 'pos1', status: 'Mới' };
+  assert.equal(applyPurchaseLabels(conversation, order, ['customer']), true);
+  assert.deepEqual(conversation.labels, ['followup', 'customer']);
+  assert.equal(order.purchaseLabeled, true);
+  // Nhân viên gỡ thẻ: đồng bộ POS lần sau không gắn lại cho cùng đơn.
+  conversation.labels = ['followup'];
+  assert.equal(applyPurchaseLabels(conversation, order, ['customer']), false);
+  assert.deepEqual(conversation.labels, ['followup']);
+  // Đơn mới khác của cùng khách thì gắn lại.
+  assert.equal(applyPurchaseLabels(conversation, { id: 'pos2' }, ['customer']), true);
+  // Đơn hủy không gắn, và không đánh dấu (nếu sau này... vẫn hủy thì thôi).
+  const other = { id: 'c2', labels: [] };
+  const cancelled = { id: 'pos3', processingStatus: 'cancelled', status: 'Hủy' };
+  assert.equal(applyPurchaseLabels(other, cancelled, ['customer']), false);
+  assert.deepEqual(other.labels, []);
+  assert.equal(cancelled.purchaseLabeled, undefined);
+  // Đã có thẻ: không đổi danh sách nhưng vẫn đánh dấu đơn.
+  const has = { id: 'c3', labels: ['customer'] };
+  const o4 = { id: 'pos4' };
+  assert.equal(applyPurchaseLabels(has, o4, ['customer']), false);
+  assert.equal(o4.purchaseLabeled, true);
+  // Chưa cấu hình thẻ nào nhận sự kiện đơn: không lỗi.
+  assert.equal(applyPurchaseLabels({ id: 'c4' }, { id: 'pos5' }, []), false);
+});

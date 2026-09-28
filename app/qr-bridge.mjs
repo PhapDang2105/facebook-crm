@@ -193,6 +193,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
   main { width: 100%; max-width: 400px; padding: clamp(20px, 6vw, 28px) clamp(16px, 5.5vw, 26px) 22px; background: #fff; border: 1px solid #e3d8bf; border-radius: 20px; box-shadow: 0 1px 2px rgba(58,46,34,.04), 0 8px 24px rgba(58,46,34,.06); text-align: center; }
+  .nowrap { white-space: nowrap; }
   .wordmark { white-space: nowrap; font-weight: 700; }
   .w-giot { color: #7cc254; }
   .w-nang { color: #f9b122; }
@@ -205,7 +206,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .ic svg { width: 22px; height: 22px; display: block; }
   .channels { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 3vw, 12px); margin: 0 0 14px; }
   /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
-  @media (max-width: 340px) { body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .btn span { font-size: 15.5px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
+  @media (max-width: 340px) { h1 { font-size: 19.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .btn span { font-size: 15.5px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
@@ -234,7 +235,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <body>
 <main>
   <img class="logo" src="/q/brand/logo.webp" alt="${name}" width="170" height="106">
-  <h1>Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span></h1>
+  <h1><span class="nowrap">Cảm ơn anh chị đã tin tưởng</span><br><span class="nowrap">và ủng hộ</span> <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span></h1>
   <p class="lead">Anh chị nhắn cho chúng em qua Messenger hoặc Zalo để nhận:</p>
   <ul class="gift">
     <li><span class="ic">${icons.guide}</span><span>Hướng dẫn dùng ngon nhất</span></li>

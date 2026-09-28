@@ -146,6 +146,26 @@ const inAppHints = {
  * riêng khi đang ở trong app, và đường lùi về trang Facebook của Page.
  * Không có tài nguyên ngoài, không tự chuyển hướng, không cookie.
  */
+// Heartline in trên thẻ bảo hành: đường lùi cho khách không mở được Messenger.
+export const heartline = { display: '0899 677 899', tel: '0899677899' };
+
+// Mặt trời cười của logo, vẽ tay bằng SVG nội tuyến: trang không được tải ảnh
+// ngoài (mọi thứ dưới /assets nằm sau mật khẩu, và trang phải nhẹ).
+const sunMark = `<svg class="sun" viewBox="0 0 96 96" aria-hidden="true">
+  <g stroke="#f2b134" stroke-width="5" stroke-linecap="round"><path d="M48 6v10M48 80v10M6 48h10M80 48h10M18 18l7 7M71 71l7 7M18 78l7-7M71 25l7-7"/></g>
+  <circle cx="48" cy="48" r="22" fill="#f8c74d"/>
+  <circle cx="40" cy="45" r="2.6" fill="#7a4b1c"/><circle cx="56" cy="45" r="2.6" fill="#7a4b1c"/>
+  <path d="M39 53q9 8 18 0" fill="none" stroke="#7a4b1c" stroke-width="3" stroke-linecap="round"/>
+</svg>`;
+
+/**
+ * Trang khách thấy sau khi quét thẻ cảm ơn (iPhone, Zalo, trình duyệt trong
+ * app, máy tính; Android Chrome được chuyển thẳng). Một việc duy nhất: bấm nút
+ * mở Messenger. Nút là thẻ <a> trỏ thẳng m.me?ref (lượt bấm thật của khách mới
+ * kích hoạt Universal Link / App Link), có hướng dẫn riêng khi đang ở trong app,
+ * và đường lùi là Heartline + trang Facebook của Page. Không tài nguyên ngoài,
+ * không tự chuyển hướng, không cookie. Giọng thẻ bảo hành: "chúng em" / "anh chị".
+ */
 export function renderBridgePage({ code, destination, pageName, fallbackUrl = '', zaloUrl = '', classification = {} }) {
   const name = escapeHtml(pageName || 'Giọt Nắng');
   const href = escapeHtml(destination);
@@ -153,48 +173,59 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   const hint = classification.inApp ? (inAppHints[classification.browser] ?? inAppHints.webview) : '';
   // Khách quét bằng Zalo hay quen Zalo thì có đường đi thẳng, không phải rời app.
   const zalo = zaloUrl
-    ? `<p class="or">hoặc</p><a class="btn btn-zalo" id="zalo" href="${escapeHtml(zaloUrl)}" rel="noopener">Nhắn qua Zalo</a>`
+    ? `<a class="btn btn-zalo" id="zalo" href="${escapeHtml(zaloUrl)}" rel="noopener">Nhắn qua Zalo</a>`
     : '';
-  const fallback = fallbackUrl
-    ? `<p class="fallback">Không mở được? Vào trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a> và nhắn tin cho chúng tôi.</p>`
-    : '';
+  const facebook = fallbackUrl ? ` hoặc nhắn qua trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a>` : '';
   return `<!doctype html>
 <html lang="vi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<title>${name} · Mở Messenger</title>
+<meta name="theme-color" content="#fbf5e6">
+<title>${name} · Cảm ơn anh chị</title>
 <style>
   :root { color-scheme: light; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; box-sizing: border-box; background: #f3faf6; color: #1f2329; font: 17px/1.55 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-  main { width: 100%; max-width: 420px; padding: 32px 24px 28px; background: #fff; border-radius: 16px; box-shadow: 0 2px 12px rgba(31,122,69,.10); text-align: center; }
-  .brand { margin: 0 0 18px; color: #1f7a45; font-weight: 800; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; }
-  h1 { margin: 0 0 10px; font-size: 24px; line-height: 1.25; }
-  p { margin: 0 0 18px; color: #4b5057; }
-  .btn { display: block; padding: 16px 20px; margin: 4px 0 18px; background: #1f7a45; color: #fff; font-size: 19px; font-weight: 700; text-decoration: none; border-radius: 999px; }
-  .btn:active { background: #17603a; }
-  .btn-zalo { background: #0068ff; }
-  .btn-zalo:active { background: #0052cc; }
-  .or { margin: -6px 0 12px; color: #9aa0a6; font-size: 14px; }
-  .hint { margin: 0 0 16px; padding: 12px 14px; background: #fff7e0; border-radius: 10px; color: #5b4a12; font-size: 15px; text-align: left; }
-  .copy { display: inline-block; margin: 0 0 14px; padding: 8px 14px; background: none; border: 1px solid #c9d3cd; border-radius: 999px; color: #1f7a45; font: inherit; font-size: 15px; }
-  .fallback { margin: 0; font-size: 14px; color: #65676b; }
-  .fallback a, .code { color: #1f7a45; }
-  .code { display: block; margin-top: 16px; font-size: 12px; color: #9aa0a6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); background: #fbf5e6; background-image: radial-gradient(circle at 50% -10%, #fde9b0 0, rgba(253,233,176,0) 55%); color: #3d3226; font: 17px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
+  main { width: 100%; max-width: 400px; text-align: center; }
+  .sun { width: 84px; height: 84px; display: block; margin: 0 auto 6px; }
+  .brand { margin: 0 0 22px; color: #7a4b1c; font-size: 15px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { margin: 0 0 10px; color: #3d3226; font-size: 27px; line-height: 1.2; letter-spacing: -.01em; }
+  .lead { margin: 0 auto 24px; max-width: 320px; color: #5f5344; }
+  .gift { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 0 0 22px; padding: 0; list-style: none; }
+  .gift li { padding: 12px 6px; background: #fff; border: 1px solid #efe4c9; border-radius: 14px; color: #3d3226; font-size: 14px; line-height: 1.3; }
+  .gift b { display: block; margin-bottom: 4px; color: #2f8f4e; font-size: 20px; font-weight: 700; }
+  .btn { display: block; width: 100%; padding: 17px 20px; margin: 0 0 12px; background: #2f8f4e; color: #fff; font-size: 19px; font-weight: 700; text-decoration: none; border-radius: 16px; box-shadow: 0 6px 18px rgba(47,143,78,.25); }
+  .btn:active { background: #257540; transform: translateY(1px); }
+  .btn-zalo { background: #fff; color: #0068ff; border: 1.5px solid #cfe0ff; box-shadow: none; }
+  .btn-zalo:active { background: #eef4ff; }
+  .hint { margin: 4px 0 14px; padding: 12px 14px; background: #fff7dc; border: 1px solid #f3e2a3; border-radius: 12px; color: #5b4a12; font-size: 15px; line-height: 1.45; text-align: left; }
+  .copy { display: inline-block; margin: 2px 0 16px; padding: 8px 14px; background: none; border: 1px solid #d9cfb6; border-radius: 999px; color: #7a4b1c; font: inherit; font-size: 15px; }
+  .fallback { margin: 6px 0 0; padding-top: 16px; border-top: 1px solid #efe4c9; color: #6f6353; font-size: 14px; line-height: 1.5; }
+  .fallback a { color: #2f8f4e; font-weight: 600; text-decoration: none; }
+  .tel { white-space: nowrap; }
+  .foot { margin: 18px 0 0; color: #9a8d78; font-size: 13px; }
+  .code { display: block; margin-top: 4px; font-size: 12px; color: #b5a98f; }
 </style>
 </head>
 <body>
 <main>
+  ${sunMark}
   <p class="brand">${name}</p>
-  <h1>Cảm ơn bạn đã mua hàng 💛</h1>
-  <p>Bấm nút bên dưới để mở Messenger và nhận hướng dẫn sử dụng cùng quà cảm ơn từ ${name}.</p>
-  <a class="btn" id="open" href="${href}" rel="noopener">Mở Messenger</a>
+  <h1>Cảm ơn anh chị đã chọn Giọt Nắng</h1>
+  <p class="lead">Nhắn cho chúng em một tin qua Messenger, chúng em gửi ngay:</p>
+  <ul class="gift">
+    <li><b>1</b>Hướng dẫn dùng ngon nhất</li>
+    <li><b>2</b>Quà cảm ơn từ Ngôi nhà của Nắng</li>
+    <li><b>3</b>Đổi ngay nếu hạt mềm, thiếu hàng</li>
+  </ul>
+  <a class="btn" id="open" href="${href}" rel="noopener">Nhận quà qua Messenger</a>
   ${zalo}
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <button class="copy" type="button" id="copy" hidden>Sao chép liên kết</button>
-  ${fallback}
-  <span class="code">Mã thẻ: ${safeCode}</span>
+  <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${heartline.display}</a>${facebook}.</p>
+  <p class="foot">ăn sạch · sống lành cùng Giọt Nắng<span class="code">Mã thẻ: ${safeCode}</span></p>
 </main>
 <script>
 (function () {

@@ -63,6 +63,8 @@ test('trang đệm: nút Mở Messenger là thẻ <a> trỏ thẳng m.me?ref, kh
   assert.match(html, /<a class="btn" id="open" href="https:\/\/m\.me\/123456\?ref=tmdt-01"/);
   assert.match(html, /Nông Sản Giọt Nắng/);
   assert.match(html, /href="https:\/\/www\.facebook\.com\/123456"/);
+  assert.match(html, /href="tel:0899677899"/, 'đường lùi Heartline như thẻ bảo hành');
+  assert.match(html, /anh chị/, 'giọng thẻ bảo hành: anh chị / chúng em');
   assert.match(html, /\/q\/tmdt-01\/open/);
   assert.doesNotMatch(html, /src=|<link|@import|url\(/, 'không được tải tài nguyên ngoài: /assets nằm sau mật khẩu');
   assert.doesNotMatch(html, /http-equiv="refresh"|location\.(href|replace|assign)/, 'không tự chuyển hướng: iOS chỉ mở app khi khách tự bấm');

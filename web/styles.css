@@ -2650,11 +2650,14 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-recent { display: grid; gap: 0; padding: 4px 0; border: 1px solid var(--line-1); border-radius: 12px; }
 .qr-recent h2 { margin: 0; padding: 12px 16px 8px; color: var(--text-1); font-size: 16px; font-weight: 700; }
 .qr-recent-list { max-height: 360px; margin: 0; padding: 0 8px 8px; overflow-y: auto; list-style: none; }
-.qr-recent-list li { display: grid; grid-template-columns: 96px 1fr; gap: 10px; padding: 8px; border-radius: 8px; font-size: 14px; }
+.qr-recent-list li { display: grid; grid-template-columns: 88px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "time code device" "time outcome outcome"; gap: 2px 10px; align-items: center; padding: 8px; border-radius: 8px; font-size: 14px; }
 .qr-recent-list li:hover { background: #fafbfc; }
-.qr-recent-time { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.qr-recent-text b { color: var(--text-1); font-weight: 600; }
-.qr-recent-text.is-open b { color: var(--brand); }
+.qr-recent-time { grid-area: time; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.qr-recent-code { grid-area: code; color: var(--text-1); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qr-recent-device { grid-area: device; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qr-recent-outcome { grid-area: outcome; justify-self: start; padding: 2px 9px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.qr-recent-outcome.is-ok { color: var(--brand); background: #e8f4ed; }
+.qr-recent-outcome.is-muted { color: var(--text-2); background: #f2f4f7; }
 .qr-recent .channel-empty { padding: 16px; }
 
 /* Tuỳ chọn trang đệm: gấp lại vì hiếm khi đổi */

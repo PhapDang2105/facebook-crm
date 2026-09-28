@@ -10536,7 +10536,7 @@ function renderQrTable(codes, keys) {
     .sort((a, b) => b.totals.scans - a.totals.scans || (b.entry.lastAt || 0) - (a.entry.lastAt || 0));
   const cell = (value, whole) => `<td class="is-num">${value}${whole ? `<small>${qrPercent(value, whole)}</small>` : ''}</td>`;
   container.innerHTML = `<table class="qr-stats-table"><thead><tr>
-      <th>Mã</th><th class="is-num">Quét</th><th class="is-num">Trang đệm</th><th class="is-num">Bấm mở</th><th class="is-num">Vào Messenger</th><th>Lần cuối</th><th></th>
+      <th>Mã</th><th class="is-num">Quét</th><th class="is-num">Xem trang đệm</th><th class="is-num">Bấm Mở Messenger</th><th class="is-num">Vào Messenger</th><th>Quét cuối</th><th></th>
     </tr></thead><tbody>${rows.map(({ entry, totals }) => `<tr data-qr-row="${escapeHtml(entry.code)}"${entry.code === qrState.selected ? ' class="is-selected"' : ''}>
       <td class="is-code"><b>${escapeHtml(entry.code)}</b></td>
       ${cell(totals.scans)}
@@ -10577,16 +10577,51 @@ function renderQrDetail(codes) {
   container.classList.remove('hidden');
 }
 
+// Lượt gần đây: mỗi dòng là một lượt quét và kết cục của nó. Lượt bấm nút trên
+// trang đệm được ghép vào lượt quét cùng mã ngay trước đó (trong 15 phút) thay
+// vì hiện thành dòng riêng, nên đọc là "quét → rồi sao".
+const qrOutcomeNames = {
+  redirect: { label: 'Sang Messenger', tone: 'ok' },
+  open: { label: 'Bấm Mở Messenger', tone: 'ok' },
+  zalo: { label: 'Bấm Zalo', tone: 'ok' },
+  page: { label: 'Chỉ xem trang, chưa bấm', tone: 'muted' }
+};
+
+function qrDeviceText(item) {
+  const platform = item.platform && item.platform !== 'khac' ? qrPlatformNames[item.platform] || item.platform : '';
+  const browser = item.browser && item.browser !== 'khac' ? qrBrowserNames[item.browser] || item.browser : '';
+  if (!platform && !browser) return 'Máy không rõ';
+  return [platform, browser].filter(Boolean).join(' · ');
+}
+
+function qrMergeRecent(recent) {
+  const rows = [];
+  const window = 15 * 60_000;
+  for (const item of [...(recent || [])].reverse()) {
+    if (!item.event) {
+      rows.push({ at: item.at, code: item.code, platform: item.platform, browser: item.browser, outcome: item.mode === 'redirect' ? 'redirect' : 'page' });
+      continue;
+    }
+    const outcome = item.event === 'open-zalo' ? 'zalo' : 'open';
+    const scan = [...rows].reverse().find(row => row.code === item.code && row.outcome === 'page' && item.at - row.at <= window && item.at >= row.at);
+    if (scan) scan.outcome = outcome;
+    else rows.push({ at: item.at, code: item.code, outcome });
+  }
+  return rows.reverse();
+}
+
 function renderQrRecent(recent) {
   const container = document.querySelector('#qr-recent');
   if (!container) return;
-  const items = (recent || []).slice(0, 40);
-  container.innerHTML = `<h2>Lượt gần đây</h2>${items.length ? `<ul class="qr-recent-list">${items.map(item => {
-    const open = item.event === 'open' || item.event === 'open-zalo';
-    const text = item.event === 'open-zalo' ? 'Bấm “Nhắn qua Zalo”'
-      : item.event === 'open' ? 'Bấm “Mở Messenger”'
-        : `Quét · ${qrPlatformNames[item.platform] || item.platform || '—'} · ${qrBrowserNames[item.browser] || item.browser || '—'} · ${qrModeNames[item.mode] || item.mode || ''}`;
-    return `<li><span class="qr-recent-time">${formatQrShortTime(item.at)}</span><span class="qr-recent-text${open ? ' is-open' : ''}"><b>${escapeHtml(item.code)}</b> · ${escapeHtml(text)}</span></li>`;
+  const rows = qrMergeRecent(recent).slice(0, 40);
+  container.innerHTML = `<h2>Lượt quét gần đây</h2>${rows.length ? `<ul class="qr-recent-list">${rows.map(row => {
+    const outcome = qrOutcomeNames[row.outcome] || qrOutcomeNames.page;
+    return `<li>
+      <span class="qr-recent-time">${formatQrShortTime(row.at)}</span>
+      <span class="qr-recent-code">${escapeHtml(row.code)}</span>
+      <span class="qr-recent-device">${escapeHtml(qrDeviceText(row))}</span>
+      <span class="qr-recent-outcome is-${outcome.tone}">${escapeHtml(outcome.label)}</span>
+    </li>`;
   }).join('')}</ul>` : '<p class="channel-empty">Chưa có lượt quét nào.</p>'}`;
 }
 

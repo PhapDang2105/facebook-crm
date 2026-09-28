@@ -209,6 +209,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .letter { margin: 0 0 12px; padding: 12px 14px 10px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
   .greet { margin: 0 0 6px; color: #3a2e22; font-weight: 700; font-size: 18px; line-height: 1.3; }
   .letter-body { margin: 0 0 6px; color: #4a3f33; font-size: 15px; line-height: 1.45; }
+  .heart { display: inline-block; width: 1em; height: 1em; margin-left: 4px; vertical-align: -.14em; }
   .letter-body:last-of-type { margin-bottom: 10px; }
   .offers { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
   .offers li { display: flex; align-items: center; gap: 12px; color: #3a2e22; font-size: 15px; line-height: 1.4; }
@@ -276,7 +277,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <main>
   <div class="letter">
     <div class="letter-top"><h1 class="greet">Thân gửi Anh/Chị,</h1><img class="logo" src="/q/brand/logo.webp" alt="${name}" width="96" height="53"></div>
-    <p class="letter-body">Cảm ơn Anh/Chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày, mong cả nhà mình luôn khoẻ, ăn ngon và thật bình an. Em gửi chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng nhau thật&nbsp;lâu:</p>
+    <p class="letter-body">Cảm ơn Anh/Chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</p>
+    <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày, mong cả nhà mình luôn khoẻ, ăn ngon và thật bình an. Em gửi chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng nhau thật&nbsp;lâu<svg class="heart" viewBox="0 0 24 24" aria-hidden="true"><path fill="#e2574c" d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.1 0 3.6 1.2 4.3 2.4.8-1.2 2.3-2.4 4.4-2.4 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21z"/></svg></p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b class="free-ship">MIỄN PHÍ VẬN CHUYỂN</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>

@@ -28,8 +28,6 @@ export async function metaRequest(pathname, options = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.error) {
     const error = new Error(shortenMetaError(payload.error?.message) || `Meta trả về lỗi ${response.status}.`);
-    error.metaCode = payload.error?.code;
-    error.metaSubcode = payload.error?.error_subcode;
     error.statusCode = response.status;
     throw error;
   }

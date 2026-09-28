@@ -655,12 +655,11 @@ export async function recordLandingOrder(payload, context = {}) {
 
 
 /** Ghi mã form/POS của bản cập nhật cùng form vào đơn đang giữ để lần sau nhận ra ngay. */
-/** `primary`: bản gộp là cùng form (đơn thật) nên mã POS của nó là mã chính; bản dở chỉ ghi vào danh sách. */
-function absorbInto(keeper, other, { primary = true } = {}) {
+function absorbInto(keeper, other) {
   const landing = keeper.landing || {};
   const formIds = [...new Set([...(landing.formIds || []), other.landing?.externalId].filter(id => id && id !== landing.externalId))];
   const posIds = [...new Set([...(landing.posIds || []), landing.posId, other.landing?.posId].filter(Boolean))];
-  keeper.landing = { ...landing, posId: landing.posId || (primary ? other.landing?.posId : ''), ...(formIds.length ? { formIds } : {}), ...(posIds.length ? { posIds } : {}) };
+  keeper.landing = { ...landing, posId: landing.posId || other.landing?.posId, ...(formIds.length ? { formIds } : {}), ...(posIds.length ? { posIds } : {}) };
 }
 
 /** Bản mới có ít thông tin hơn bản đang giữ (sự kiện đến muộn) thì không đè. */

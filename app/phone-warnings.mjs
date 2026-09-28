@@ -87,24 +87,22 @@ export function posConfigured(config = posConfig()) {
 }
 
 // Khoá POS: ưu tiên bản nhân viên dán trong Cài đặt → Cảnh báo SĐT (lưu ở
-// data/processed/pos-config.json, quyền 600), rồi mới đến biến môi trường.
+// data/processed/pos-config.json, quyền 600), rồi mới đến biến môi trường
+// POS_API_KEY / POS_SHOP_ID. Tạo khoá ở POS: Cài đặt → Nâng cao → Kết nối bên
+// thứ ba → Webhook/API → API KEY → Tạo.
 const posConfigPath = process.env.POS_CONFIG_PATH || path.join(projectRoot, 'data', 'processed', 'pos-config.json');
 let savedPosConfig = null;
 
 function loadSavedPosConfig() {
   if (savedPosConfig) return savedPosConfig;
   try {
-    const parsed = JSON.parse(readFileSyncSafe(posConfigPath));
+    // Tệp khoá rất nhỏ, đọc đồng bộ một lần rồi giữ trong bộ nhớ.
+    const parsed = JSON.parse(readFileSync(posConfigPath, 'utf8'));
     savedPosConfig = parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     savedPosConfig = {};
   }
   return savedPosConfig;
-}
-
-function readFileSyncSafe(filePath) {
-  // fs/promises is used elsewhere; the config is tiny and read on demand.
-  return readFileSync(filePath, 'utf8');
 }
 
 export function posConfig() {

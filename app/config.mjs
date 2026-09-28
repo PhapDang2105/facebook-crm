@@ -160,14 +160,6 @@ export const pancakeConfig = {
   botWhenAssigned: process.env.PANCAKE_BOT_WHEN_ASSIGNED === '1'
 };
 
-// Pancake POS Open API: tra lịch sử giao hàng theo số điện thoại để cảnh báo
-// khách hay bom hàng. Tạo khoá ở POS: Cài đặt → Nâng cao → Kết nối bên thứ ba
-// → Webhook/API → API KEY → Tạo. Để trống là chỉ dùng danh sách thủ công.
-export const posConfig = {
-  apiKey: process.env.POS_API_KEY || '',
-  shopId: process.env.POS_SHOP_ID || ''
-};
-
 export function missingMetaConfiguration() {
   return [
     !metaConfig.appId && 'META_APP_ID',

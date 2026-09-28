@@ -1044,7 +1044,8 @@ const server = http.createServer(async (request, response) => {
       '/q/brand/messenger.webp': 'logos/messenger-icon.webp',
       '/q/brand/offer-combo3-mini.webp': 'offers/combo3-mini.webp',
       '/q/brand/offer-tam-lanh.webp': 'offers/tam-lanh.webp',
-      '/q/brand/offer-yen-mach.webp': 'offers/yen-mach.webp'
+      '/q/brand/offer-yen-mach.webp': 'offers/yen-mach.webp',
+      '/q/brand/offer-free-ship.webp': 'offers/free-ship.webp'
     };
     if (request.method === 'GET' && qrBrandFiles[url.pathname]) {
       try {

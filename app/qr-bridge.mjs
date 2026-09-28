@@ -156,7 +156,6 @@ const icons = {
   // Logo Zalo chính thức (tệp webp), phục vụ qua đường công khai /q/brand/ như logo thương hiệu.
   zalo: `<img src="/q/brand/zalo.webp" alt="" width="30" height="30">`,
   chevron: `<svg class="chev" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
-  truck: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 5.5h12v10h-12z"/><path d="M13.5 9h4.2l3.3 3.6v2.9h-7.5"/><circle cx="6" cy="17.5" r="2"/><circle cx="17.5" cy="17.5" r="2"/></svg>`,
   phone: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg>`
 };
 
@@ -206,8 +205,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .offers li b { color: #2e6b3f; font-weight: 700; }
   .thumb { flex: 0 0 56px; display: grid; place-items: center; width: 56px; height: 56px; overflow: hidden; background: #f6f1e4; border-radius: 12px; }
   .thumb img { max-width: 52px; max-height: 50px; width: auto; height: auto; display: block; }
-  .thumb-icon { background: #e9f5e1; color: #3f8f2c; }
-  .thumb-icon svg { width: 30px; height: 30px; }
   .sign { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
   .sign b { color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-size: 17px; }
   .stamp { display: grid; place-items: center; width: 44px; height: 44px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-weight: 700; font-size: 12px; line-height: 1.05; text-align: center; transform: rotate(-8deg); opacity: .9; }
@@ -240,7 +237,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
   /* Máy 360-400px: lá thư nằm trong thẻ nên lề bị cộng hai lần; thu lề để mỗi dòng dấu tích nằm trên một hàng. */
   @media (max-width: 400px) { main { padding-left: 14px; padding-right: 14px; } .letter { padding-left: 12px; padding-right: 12px; } .offers li { font-size: 14.5px; gap: 10px; } }
-  @media (max-width: 340px) { .letter { padding: 12px 9px 8px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .offers li { font-size: 14px; gap: 9px; } .thumb { flex-basis: 48px; width: 48px; height: 48px; } .thumb img { max-width: 44px; max-height: 42px; } .thumb-icon svg { width: 26px; height: 26px; } .fallback { font-size: 13px; } }
+  @media (max-width: 340px) { .letter { padding: 12px 9px 8px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .offers li { font-size: 14px; gap: 9px; } .thumb { flex-basis: 48px; width: 48px; height: 48px; } .thumb img { max-width: 44px; max-height: 42px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
@@ -270,7 +267,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <h1 class="greet">Thân gửi anh chị,</h1>
     <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Em gửi anh chị ưu đãi:</p>
     <ul class="offers">
-      <li><span class="thumb thumb-icon">${icons.truck}</span><span><b>Miễn phí vận chuyển</b> cho toàn bộ đơn hàng tiếp theo</span></li>
+      <li><span class="thumb"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="44" height="44"></span><span><b>Miễn phí vận chuyển</b> cho toàn bộ đơn hàng tiếp theo</span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>
       <li><span class="thumb"><img src="/q/brand/offer-yen-mach.webp" alt="Hai túi Yến mạch 500g" width="54" height="48"></span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-tam-lanh.webp" alt="Hộp Bột Ngũ Cốc Tâm Lành" width="37" height="48"></span><span>Đặc biệt mua Combo&nbsp;3 tặng <b>1&nbsp;hộp Bột Ngũ Cốc Tâm&nbsp;Lành</b></span></li>

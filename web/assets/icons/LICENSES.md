@@ -9,3 +9,5 @@ MIT License — Copyright (c) Microsoft Corporation. Permission is hereby grante
 - `customers.png` — icon mục Khách hàng trên thanh điều hướng, do GONA tự tải về (cùng nguồn với các icon điều hướng khác: general-info, order-bag, transport, report, settings).
 
 - `customers/*.svg` — icon nút thao tác của màn Khách hàng (làm mới, xóa lọc, sắp xếp, chuyển trang, chép số, gắn thẻ, ghi chú, sửa, mở hội thoại), tải từ bộ **Fluent UI System Icons** của Microsoft (https://github.com/microsoft/fluentui-system-icons) qua `api.iconify.design`, giấy phép MIT. Cùng bộ và cùng màu `#5b6371` với các icon đơn sắc sẵn có như `search.svg`, `person.svg`.
+
+- `assets/branding/offers/free-ship.webp` — "Delivery truck" từ bộ **Fluent Emoji Flat** của Microsoft (cùng tệp `web/assets/icons/labels/delivery-truck.svg`), giấy phép MIT, chuyển sang webp 144px cho ưu đãi Miễn phí vận chuyển trên trang khách quét QR.

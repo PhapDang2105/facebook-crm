@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import './helpers/seed-catalog.mjs';
-import { bagCountInText, buildDecisionRecord, composeSystemPrompt, intentTopK, modelTemplateChoices, prevBotAsks, processChatbotChanges, requestDirectModelReply, responseSchemaFor, withFallbackTemplates } from '../app/chatbot-engine.mjs';
+import { bagCountInText, buildDecisionRecord, canaryBucket, cascadeMatchMark, cascadeTrace, composeSystemPrompt, gateCheckWithCascade, intentTopK, modelTemplateChoices, prevBotAsks, processChatbotChanges, requestDirectModelReply, responseSchemaFor, withFallbackTemplates } from '../app/chatbot-engine.mjs';
 import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
 import { normalizeChatbotSettings } from '../app/chatbot-settings.mjs';
 import { gateCheck, sameTemplateGroup, templateGroup } from '../app/processing/llm-router.mjs';
@@ -104,7 +104,7 @@ test('1a. hộp thư: ghi đúng schema sau khi quyết định (luật/mô hìn
   });
   assert.equal(flow.records.length, 1);
   const row = flow.records[0];
-  assert.deepEqual(Object.keys(row), ['v', 'at', 'conversationId', 'source', 'mid', 'text', 'type', 'prevBot', 'lastTemplate', 'prevBotAgeMin', 'prevBotAsks', 'ctx', 'rule', 'shadow', 'intent', 'llm', 'fewShot', 'chosen', 'final', 'also', 'skipped', 'guards', 'attention', 'handoff', 'ms']);
+  assert.deepEqual(Object.keys(row), ['v', 'at', 'conversationId', 'source', 'mid', 'text', 'type', 'prevBot', 'lastTemplate', 'prevBotAgeMin', 'prevBotAsks', 'ctx', 'rule', 'shadow', 'intent', 'cascade', 'llm', 'fewShot', 'chosen', 'final', 'also', 'skipped', 'guards', 'attention', 'handoff', 'ms']);
   assert.equal(row.v, 1);
   assert.equal(row.source, 'inbox');
   assert.equal(row.mid, 'm-new');
@@ -262,4 +262,185 @@ test('4b. engine ghi guards.gate sau khi có LLM (so với top-K mô hình nhỏ
   assert.equal(noLlm.asked.length, 0);
   assert.equal(noLlm.records[0].guards.gate, null, 'không gọi LLM thì không có gate');
   assert.equal(noLlm.records[0].chosen, 'THANK_YOU');
+});
+
+// ===== 5. Mô hình tầng (intentCascade: shadow | on | off) — dependencies.predictCascade giả =====
+const groupOfFake = id => (/^(PRICE_|GENERAL_INFO|DISCOUNT_POLICY|FREESHIP_POLICY)/.test(id) ? 'PRICE' : /^ORDER_/.test(id) ? 'ORDER' : /^(THANK_YOU|WELCOME)$/.test(id) ? 'SOCIAL' : 'INFO');
+const cascadeOf = (group, templateId, extra = {}) => ({ group, pGroup: 0.97, groupTopK: [{ group, p: 0.97 }], templateId, p: 0.93, margin: 0.6, topK: [{ templateId, p: 0.93 }, { templateId: 'GENERAL_INFO', p: 0.33 }], path: `${group}>${templateId}`, ...extra });
+const captureLogs = async fn => {
+  const logs = [];
+  const original = console.log;
+  console.log = (...args) => { logs.push(args.join(' ')); };
+  try { return { out: await fn(), logs }; } finally { console.log = original; }
+};
+
+test('5a. cài đặt intentCascade mặc định shadow; shadow: nhật ký ghi cascade sau intent + log "Mô hình tầng (thử)", vẫn gọi LLM, không đổi trả lời', async () => {
+  assert.equal(normalizeChatbotSettings({ enabled: true }).intentCascade, 'shadow');
+  assert.equal(normalizeChatbotSettings({ enabled: true, intentCascade: 'on' }).intentCascade, 'on');
+  assert.equal(normalizeChatbotSettings({ enabled: true, intentCascade: 'lạ' }).intentCascade, 'shadow');
+  const seen = [];
+  const { out: flow, logs } = await captureLogs(() => run({ botLastTemplateId: 'WELCOME', botLastReplyAt: now() - 60000 }, 'cho mình hỏi túi xanh với túi vàng khác gì nhau vậy shop', {
+    reply: llmReply('BAG_COMPARISON_XANH_VANG'),
+    extraSettings: { intentModel: 'off', preGuard: 'off', ruleIntent: 'off' },
+    extraDeps: { predictCascade: row => { seen.push(row); return cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG'); }, cascadeGroupOf: groupOfFake }
+  }));
+  assert.equal(seen.length, 1, 'gọi mô hình tầng đúng một lần');
+  assert.deepEqual(Object.keys(seen[0]), ['text', 'source', 'lastTemplate', 'lastWasOrderStep', 'hasBasket', 'livestream', 'hasOrder', 'hasRecentOrder', 'orderAgeMin', 'prevBotAsks', 'phoneInText', 'addressInText', 'bagCount', 'staffRepliedAfterBot'], 'cùng row với predictIntent, kèm các trường của decisionContext');
+  assert.deepEqual([seen[0].hasOrder, seen[0].hasRecentOrder, seen[0].orderAgeMin, seen[0].prevBotAsks, seen[0].phoneInText, seen[0].addressInText, seen[0].bagCount, seen[0].staffRepliedAfterBot], [false, false, null, '', false, false, 0, false]);
+  assert.equal(flow.asked.length, 1, 'shadow vẫn hỏi LLM');
+  assert.equal(flow.results[0].templateId, 'BAG_COMPARISON_XANH_VANG');
+  const row = flow.records[0];
+  const keys = Object.keys(row);
+  assert.equal(keys[keys.indexOf('intent') + 1], 'cascade', 'cascade ngay sau intent');
+  assert.equal(row.intent, null, 'intentModel off → không có mô hình phẳng');
+  assert.deepEqual(row.cascade, { group: 'INFO', subGroup: null, pGroup: 0.97, templateId: 'BAG_COMPARISON_XANH_VANG', p: 0.93, margin: 0.6, pWithin: null, marginWithin: null, topK: [{ templateId: 'BAG_COMPARISON_XANH_VANG', p: 0.93 }, { templateId: 'GENERAL_INFO', p: 0.33 }], path: 'INFO>BAG_COMPARISON_XANH_VANG', canary: null }, 'shadow: canary null; mô-đun cũ không có pWithin/subGroup → null');
+  assert.deepEqual(row.guards.gate, { agree: true, reason: 'cascade-top1' }, 'người gác lấy top-K tầng làm tham chiếu khi không có luật/mô hình phẳng');
+  const line = logs.find(item => item.startsWith('Mô hình tầng (thử):'));
+  assert.equal(line, 'Mô hình tầng (thử): INFO 0.97 / BAG_COMPARISON_XANH_VANG 0.93 (biên 0.60) / thật BAG_COMPARISON_XANH_VANG ✓ (page:user)');
+  // Chỉ đúng nhóm: dấu "nhóm✓"; khác nhóm: ✗; "đã gửi ở trên": ~.
+  assert.equal(cascadeMatchMark(cascadeOf('PRICE', 'PRICE_QUOTE'), 'DISCOUNT_POLICY', groupOfFake), 'nhóm✓');
+  assert.equal(cascadeMatchMark(cascadeOf('PRICE', 'PRICE_QUOTE'), 'ORDER_ADDRESS', groupOfFake), '✗');
+  assert.equal(cascadeMatchMark(cascadeOf('PRICE', 'PRICE_QUOTE'), 'DISCOUNT_POLICY'), '✗', 'không có groupOf thì không kết luận được nhóm');
+  assert.equal(cascadeMatchMark(cascadeOf('PRICE', 'PRICE_QUOTE'), 'REPLY_ALREADY_SENT', groupOfFake), '~');
+  assert.equal(cascadeMatchMark(cascadeOf('ORDER', 'ORDER_ADDRESS'), 'ORDER_ADDRESS_REMIND', groupOfFake), '✓');
+  // Tắt: không gọi mô hình tầng, cascade null.
+  const off = await run({ botLastTemplateId: 'WELCOME', botLastReplyAt: now() - 60000 }, 'túi xanh với túi vàng khác gì nhau', {
+    reply: llmReply('BAG_COMPARISON_XANH_VANG'), extraSettings: { intentCascade: 'off', intentModel: 'off', preGuard: 'off', ruleIntent: 'off' },
+    extraDeps: { predictCascade: () => { throw new Error('không được gọi'); } }
+  });
+  assert.equal(off.records[0].cascade, null);
+});
+
+test('5b. on + chắc + nhóm INFO/PRICE + mẫu an toàn → trả mẫu tầng, KHÔNG gọi LLM; log không có "(thử)"; PRICE_QUOTE lấy sản phẩm ngữ cảnh', async () => {
+  const { out: flow, logs } = await captureLogs(() => run({ botLastTemplateId: 'WELCOME', botLastReplyAt: now() - 60000 }, 'cho mình hỏi túi xanh với túi vàng khác gì nhau vậy shop', {
+    reply: () => { throw new Error('không được gọi LLM'); },
+    extraSettings: { intentCascade: 'on', intentModel: 'off', preGuard: 'off', ruleIntent: 'off' },
+    extraDeps: { predictCascade: () => cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG'), cascadeGroupOf: groupOfFake }
+  }));
+  assert.equal(flow.asked.length, 0);
+  assert.equal(flow.results[0].templateId, 'BAG_COMPARISON_XANH_VANG');
+  assert.equal(flow.sent[0], render('BAG_COMPARISON_XANH_VANG').messages[0]);
+  assert.equal(flow.records[0].llm, null);
+  assert.equal(flow.records[0].chosen, 'BAG_COMPARISON_XANH_VANG');
+  assert.ok(logs.some(item => item.startsWith('Mô hình tầng: INFO 0.97 / BAG_COMPARISON_XANH_VANG 0.93')), logs.join(' | '));
+  const price = await run({ botLastTemplateId: 'WELCOME', botLastReplyAt: now() - 60000, referral: { adTitle: 'Granola Túi Xanh 450g' } }, 'giá sao shop', {
+    reply: () => { throw new Error('không được gọi LLM'); },
+    extraSettings: { intentCascade: 'on', intentModel: 'off', preGuard: 'off', ruleIntent: 'off' },
+    extraDeps: { predictCascade: () => cascadeOf('PRICE', 'PRICE_QUOTE') }
+  });
+  assert.equal(price.asked.length, 0);
+  assert.equal(price.results[0].templateId, 'PRICE_QUOTE');
+  assert.equal(price.sent[0], render('PRICE_QUOTE', { Product_N1: 'Granola Túi Xanh 450g' }).messages[0], 'PRICE_QUOTE điền sản phẩm từ quảng cáo như mô hình phẳng');
+});
+
+test('5c. on nhưng nhóm ORDER / SUPPORT chắc, hay p thấp / biên mỏng / mẫu không an toàn / có SĐT → rơi về mô hình phẳng rồi LLM', async () => {
+  const llmOnly = async (cascade, text = 'cho mình hỏi túi xanh với túi vàng khác gì nhau vậy shop', extra = {}) => run({ botLastTemplateId: 'WELCOME', botLastReplyAt: now() - 60000 }, text, {
+    reply: llmReply('BAG_COMPARISON_XANH_VANG'),
+    extraSettings: { intentCascade: 'on', intentModel: 'off', preGuard: 'off', ruleIntent: 'off', ...extra },
+    extraDeps: { predictCascade: () => cascade, cascadeGroupOf: groupOfFake }
+  });
+  for (const [label, cascade, text] of [
+    ['nhóm ORDER', cascadeOf('ORDER', 'ORDER_ADDRESS')],
+    ['nhóm SUPPORT', cascadeOf('SUPPORT', 'CSKH_HANDOFF')],
+    ['nhóm OTHER', cascadeOf('OTHER', 'THANK_YOU')],
+    ['p thấp (dưới cascadeThreshold 0,8)', cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG', { p: 0.79 })],
+    ['pWithin thấp dù p cao', cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG', { pWithin: 0.7, marginWithin: 0.5 })],
+    ['pGroup dưới 0,85', cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG', { pGroup: 0.84 })],
+    ['biên mỏng', cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG', { margin: 0.2 })],
+    ['marginWithin mỏng dù margin dày', cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG', { pWithin: 0.95, marginWithin: 0.2 })],
+    ['mẫu không an toàn', cascadeOf('INFO', 'ORDER_CONFIRMATION')],
+    ['có SĐT', cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG'), 'túi xanh với túi vàng khác gì nhau 0909123456'],
+    ['mô-đun trả null', null]
+  ]) {
+    const flow = await llmOnly(cascade, text);
+    assert.equal(flow.asked.length, 1, `${label}: phải gọi LLM`);
+    assert.equal(flow.results[0].templateId, 'BAG_COMPARISON_XANH_VANG', label);
+    if (cascade) assert.equal(flow.records[0].cascade.group, cascade.group, label);
+    else assert.equal(flow.records[0].cascade, null, label);
+  }
+  // Chắc mà nhóm ORDER: người gác vẫn ghi lệch tầng (không có luật/mô hình phẳng để so).
+  const order = await llmOnly(cascadeOf('ORDER', 'ORDER_ADDRESS'));
+  assert.deepEqual(order.records[0].guards.gate, { agree: false, reason: 'cascade-mismatch' });
+  // Không đủ chắc ở tầng → mô hình phẳng 'on' vẫn được dùng như trước (ngưỡng hạ để mô hình thật chắc chắn).
+  const flat = await run({ botLastTemplateId: 'WELCOME', botLastReplyAt: now() - 60000 }, 'giá bao nhiêu vậy shop', {
+    reply: () => { throw new Error('không được gọi LLM'); },
+    extraSettings: { intentCascade: 'on', intentModel: 'on', intentThreshold: 0.5, preGuard: 'off', ruleIntent: 'off' },
+    extraDeps: { predictCascade: () => cascadeOf('ORDER', 'ORDER_ADDRESS') }
+  });
+  assert.equal(flat.asked.length, 0);
+  assert.ok(['GENERAL_INFO', 'PRICE_QUOTE'].includes(flat.results[0].templateId), flat.results[0].templateId);
+  assert.equal(flat.records[0].cascade.group, 'ORDER');
+});
+
+test('5d. mô-đun tầng lỗi / thiếu → engine không lỗi; gateCheckWithCascade; cascadeTrace làm tròn và bỏ phần tử rỗng', async () => {
+  const thrown = await run({ botLastTemplateId: 'WELCOME', botLastReplyAt: now() - 60000 }, 'túi xanh với túi vàng khác gì nhau', {
+    reply: llmReply('BAG_COMPARISON_XANH_VANG'), extraSettings: { intentCascade: 'on', intentModel: 'off', preGuard: 'off', ruleIntent: 'off' },
+    extraDeps: { predictCascade: () => { throw new Error('mô hình hỏng'); } }
+  });
+  assert.equal(thrown.results[0].templateId, 'BAG_COMPARISON_XANH_VANG');
+  assert.equal(thrown.records[0].cascade, null);
+  // Không đưa predictCascade: engine tự nạp app/processing/intent-cascade.mjs; thiếu tệp / lỗi nạp → như không có.
+  const real = await run({ botLastTemplateId: 'WELCOME', botLastReplyAt: now() - 60000 }, 'túi xanh với túi vàng khác gì nhau', {
+    reply: llmReply('BAG_COMPARISON_XANH_VANG'), extraSettings: { intentCascade: 'shadow', intentModel: 'off', preGuard: 'off', ruleIntent: 'off' }
+  });
+  assert.equal(real.results[0].templateId, 'BAG_COMPARISON_XANH_VANG');
+  assert.ok(real.records[0].cascade === null || typeof real.records[0].cascade.group === 'string');
+  // Người gác gộp: luật / mô hình phẳng thắng trước; tầng bổ sung reason cascade-*; chỉ tầng mà lệch → cascade-mismatch.
+  assert.deepEqual(gateCheckWithCascade({ llmTemplateId: 'PRICE_QUOTE', intentTopK: [{ templateId: 'GENERAL_INFO', p: 0.9 }], cascadeTopK: [{ templateId: 'THANK_YOU', p: 0.9 }] }), { agree: true, reason: 'intent-top1' });
+  assert.deepEqual(gateCheckWithCascade({ llmTemplateId: 'PRICE_QUOTE', intentTopK: [{ templateId: 'THANK_YOU', p: 0.9 }], cascadeTopK: [{ templateId: 'GENERAL_INFO', p: 0.9 }] }), { agree: true, reason: 'cascade-top1' });
+  assert.deepEqual(gateCheckWithCascade({ llmTemplateId: 'PRICE_QUOTE', cascadeTopK: [{ templateId: 'THANK_YOU', p: 0.6 }, { templateId: 'PRICE_MIX_TUI_LON', p: 0.3 }] }), { agree: true, reason: 'cascade-topk' });
+  assert.deepEqual(gateCheckWithCascade({ llmTemplateId: 'PRICE_QUOTE', cascadeTopK: [{ templateId: 'THANK_YOU', p: 0.9 }] }), { agree: false, reason: 'cascade-mismatch' });
+  assert.deepEqual(gateCheckWithCascade({ llmTemplateId: 'PRICE_QUOTE', intentTopK: [{ templateId: 'THANK_YOU', p: 0.9 }], cascadeTopK: [{ templateId: 'WELCOME', p: 0.9 }] }), { agree: false, reason: 'intent-mismatch' });
+  assert.deepEqual(gateCheckWithCascade({ llmTemplateId: 'PRICE_QUOTE', ruleTemplateId: 'GENERAL_INFO', cascadeTopK: [{ templateId: 'THANK_YOU', p: 0.9 }] }), { agree: true, reason: 'rule' });
+  assert.deepEqual(gateCheckWithCascade({ llmTemplateId: '', cascadeTopK: [{ templateId: 'THANK_YOU', p: 0.9 }] }), { agree: null, reason: 'no-llm' });
+  assert.deepEqual(cascadeTrace({ group: 'PRICE', pGroup: 0.987, templateId: 'PRICE_QUOTE', p: 0.9123, margin: 0.456, topK: [{ templateId: 'PRICE_QUOTE', p: 0.9123 }, { templateId: '' }], path: ['PRICE', 'PRICE_QUOTE'] }),
+    { group: 'PRICE', subGroup: null, pGroup: 0.99, templateId: 'PRICE_QUOTE', p: 0.91, margin: 0.46, pWithin: null, marginWithin: null, topK: [{ templateId: 'PRICE_QUOTE', p: 0.91 }], path: ['PRICE', 'PRICE_QUOTE'] });
+  assert.equal(cascadeTrace(null), null);
+});
+
+test('5e. rào cứng khi on (màu/số túi, khiếu nại, đơn gần đây + SHIPPING_POLICY/WELCOME/DELIVERY_DELAY, WELCOME loại hẳn), pWithin/subGroup/ANSWER, cascadeThreshold, canary', async () => {
+  assert.deepEqual([normalizeChatbotSettings({ enabled: true }).cascadeThreshold, normalizeChatbotSettings({ enabled: true }).cascadeCanary], [0.8, 100]);
+  assert.deepEqual([normalizeChatbotSettings({ enabled: true, cascadeThreshold: 0.3, cascadeCanary: 250 }).cascadeThreshold, normalizeChatbotSettings({ enabled: true, cascadeThreshold: 0.3, cascadeCanary: 250 }).cascadeCanary], [0.5, 100]);
+  assert.equal(normalizeChatbotSettings({ enabled: true, cascadeCanary: 0 }).cascadeCanary, 0);
+  const on = (conversation, text, cascade, extra = {}, reply = llmReply('BAG_COMPARISON_XANH_VANG')) => run({ botLastTemplateId: 'GENERAL_INFO', botLastReplyAt: now() - 60000, ...conversation }, text, {
+    reply, extraSettings: { intentCascade: 'on', intentModel: 'off', preGuard: 'off', ruleIntent: 'off', ...extra },
+    extraDeps: { predictCascade: () => cascade, cascadeGroupOf: groupOfFake }
+  });
+  const answer = (templateId, extra = {}) => cascadeOf('ANSWER', templateId, { subGroup: 'INFO', pWithin: 0.9, marginWithin: 0.5, ...extra });
+  // Nhóm ANSWER (tầng 1 bản mới) + subGroup: tự trả lời, nhật ký ghi subGroup/pWithin/canary true.
+  const ok = await on({}, 'túi xanh với túi vàng khác gì nhau vậy shop', answer('BAG_COMPARISON_XANH_VANG'), {}, () => { throw new Error('không được gọi LLM'); });
+  assert.equal(ok.results[0].templateId, 'BAG_COMPARISON_XANH_VANG');
+  assert.deepEqual([ok.records[0].cascade.subGroup, ok.records[0].cascade.pWithin, ok.records[0].cascade.marginWithin, ok.records[0].cascade.canary], ['INFO', 0.9, 0.5, true]);
+  // pWithin đủ nhưng p (tích) thấp: vẫn trả lời — ngưỡng KHÔNG áp lên tích.
+  const product = await on({}, 'túi xanh với túi vàng khác gì nhau vậy shop', answer('BAG_COMPARISON_XANH_VANG', { p: 0.6, margin: 0.1 }), {}, () => { throw new Error('không được gọi LLM'); });
+  assert.equal(product.asked.length, 0);
+  // cascadeThreshold cài đặt: nâng lên 0,95 thì pWithin 0,9 không đủ → LLM.
+  const strict = await on({}, 'túi xanh với túi vàng khác gì nhau vậy shop', answer('BAG_COMPARISON_XANH_VANG'), { cascadeThreshold: 0.95 });
+  assert.equal(strict.asked.length, 1);
+  // Rào cứng: có số túi / màu + số / khiếu nại (chữ hay nhãn) / đơn gần đây + mẫu chung / WELCOME.
+  const recentOrder = { id: 'o1', createdAt: now() - 2 * 60 * 60 * 1000, phone: '0909123456', address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }] };
+  for (const [label, conversation, text, cascade, extra] of [
+    ['có số túi', {}, '2 túi xanh với túi vàng khác gì nhau', answer('BAG_COMPARISON_XANH_VANG')],
+    ['màu + số', {}, 'xanh 3 nhé khác gì vàng', answer('BAG_COMPARISON_XANH_VANG')],
+    ['khiếu nại trong chữ', {}, 'túi bị hư mốc rồi shop ơi khác gì nhau', answer('BAG_COMPARISON_XANH_VANG'), { complaintKeywords: 'bị hư' }],
+    ['nhãn khiếu nại', { labels: ['complaint'] }, 'túi xanh với túi vàng khác gì nhau vậy shop', answer('BAG_COMPARISON_XANH_VANG')],
+    ['đơn gần đây + SHIPPING_POLICY', { customerOrders: [recentOrder] }, 'ship mất bao lâu vậy shop', answer('SHIPPING_POLICY')],
+    ['WELCOME loại hẳn', {}, 'chào shop', answer('WELCOME', { subGroup: 'SOCIAL' })]
+  ]) {
+    const flow = await on(conversation, text, cascade, extra);
+    assert.equal(flow.asked.length, 1, `${label}: phải gọi LLM`);
+    assert.equal(flow.records[0].cascade.templateId, cascade.templateId, `${label}: vẫn ghi nhật ký`);
+  }
+  // Không có đơn gần đây thì SHIPPING_POLICY vẫn tự trả lời được.
+  const ship = await on({}, 'ship mất bao lâu vậy shop', answer('SHIPPING_POLICY'), {}, () => { throw new Error('không được gọi LLM'); });
+  assert.equal(ship.results[0].templateId, 'SHIPPING_POLICY');
+  // Canary 0: mọi hội thoại ngoài canary → chạy như shadow (gọi LLM), nhật ký cascade.canary false; canary 100 → true.
+  const outside = await on({}, 'túi xanh với túi vàng khác gì nhau vậy shop', answer('BAG_COMPARISON_XANH_VANG'), { cascadeCanary: 0 });
+  assert.equal(outside.asked.length, 1);
+  assert.equal(outside.records[0].cascade.canary, false);
+  assert.ok(canaryBucket('page:user') >= 0 && canaryBucket('page:user') < 100 && canaryBucket('page:user') === canaryBucket('page:user'));
+  const inside = await on({}, 'túi xanh với túi vàng khác gì nhau vậy shop', answer('BAG_COMPARISON_XANH_VANG'), { cascadeCanary: canaryBucket('page:user') + 1 }, () => { throw new Error('không được gọi LLM'); });
+  assert.equal(inside.records[0].cascade.canary, true);
+  const edge = await on({}, 'túi xanh với túi vàng khác gì nhau vậy shop', answer('BAG_COMPARISON_XANH_VANG'), { cascadeCanary: canaryBucket('page:user') });
+  assert.equal(edge.asked.length, 1, 'hash == canary → ngoài (điều kiện <)');
 });

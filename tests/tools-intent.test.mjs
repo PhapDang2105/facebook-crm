@@ -321,3 +321,54 @@ test('shadow-report --journal: đọc log journalctl cũ', () => {
   const d26 = days['2026-09-26'];
   assert.deepEqual([d26.llm, d26.thinkingTurns], [1, 1]);
 });
+
+test('shadow-report: cột mô hình tầng từ trường `cascade` (nhóm ✓, mẫu ✓ theo ngưỡng, theo nhóm; chỉ lượt LLM) + journal "Mô hình tầng (thử)"', () => {
+  const groupOf = id => (/^(PRICE_|GENERAL_INFO|DISCOUNT_POLICY)/.test(id) ? 'PRICE' : /^ORDER_/.test(id) ? 'ORDER' : 'INFO');
+  const items = [
+    // Lượt luật: có cascade nhưng không đo (như mô hình nhỏ).
+    { day: '2026-09-26', entry: { rule: { name: 'BASKET', templateId: 'ORDER_ADDRESS' }, shadow: [], intent: null, cascade: { group: 'ORDER', pGroup: 0.99, templateId: 'ORDER_ADDRESS', p: 0.95, margin: 0.7, topK: [], path: 'ORDER>ORDER_ADDRESS' }, llm: null, chosen: 'ORDER_ADDRESS', final: 'ORDER_ADDRESS' } },
+    // Lượt LLM, mẫu đúng (chosen = GENERAL_INFO, final đổi sang PRICE_QUOTE ở hậu xử lý) → ✓ ở 0,7/0,8, không tới 0,9.
+    { day: '2026-09-26', entry: { rule: null, shadow: [], intent: null, cascade: { group: 'PRICE', pGroup: 0.96, templateId: 'GENERAL_INFO', p: 0.85, margin: 0.5, topK: [], path: 'PRICE>GENERAL_INFO' }, llm: { templateId: 'GENERAL_INFO', usage: { input: 1000, cached: 0, output: 50, thinking: 0 } }, chosen: 'GENERAL_INFO', final: 'PRICE_QUOTE' } },
+    // Lượt LLM, chỉ đúng nhóm (PRICE_QUOTE dự đoán, thật DISCOUNT_POLICY) → nhóm ✓, mẫu ✗ ở 0,7/0,8/0,9.
+    { day: '2026-09-26', entry: { rule: null, shadow: [], intent: null, cascade: { group: 'PRICE', pGroup: 0.9, templateId: 'PRICE_QUOTE', p: 0.92, margin: 0.4, topK: [], path: 'PRICE>PRICE_QUOTE' }, llm: { templateId: 'DISCOUNT_POLICY', usage: { input: 1000, cached: 0, output: 50, thinking: 0 } }, chosen: 'DISCOUNT_POLICY', final: 'DISCOUNT_POLICY' } },
+    // Lượt LLM, sai cả nhóm (INFO dự đoán, thật ORDER_ADDRESS) → nhóm ✗, mẫu ✗ ở 0,7 (p 0,75).
+    { day: '2026-09-26', entry: { rule: null, shadow: [], intent: null, cascade: { group: 'INFO', pGroup: 0.6, templateId: 'PACKAGING_INFO', p: 0.75, margin: 0.3, topK: [], path: 'INFO>PACKAGING_INFO' }, llm: { templateId: 'ORDER_ADDRESS', usage: { input: 1000, cached: 0, output: 50, thinking: 0 } }, chosen: 'ORDER_ADDRESS', final: 'ORDER_ADDRESS' } }
+  ];
+  const day = summarize(items, undefined, { groupOf })['2026-09-26'];
+  assert.deepEqual([day.turns, day.llm], [4, 3]);
+  assert.deepEqual(day.cascade.group, { n: 3, ok: 2, bad: 1, danger: 1 }, 'nhóm ✓ khi mẫu tương đương hay chỉ đúng nhóm; ✗ vào ORDER là nguy hiểm');
+  assert.deepEqual(day.cascade.tpl['0.7'], { n: 3, ok: 1, bad: 2 });
+  assert.deepEqual(day.cascade.tpl['0.8'], { n: 2, ok: 1, bad: 1 });
+  assert.deepEqual(day.cascade.tpl['0.9'], { n: 1, ok: 0, bad: 1 });
+  assert.deepEqual(day.cascade.byGroup, { PRICE: { n: 2, groupOk: 2, tplOk: 1, tplBad: 1, danger: 0 }, INFO: { n: 1, groupOk: 0, tplOk: 0, tplBad: 1, danger: 1 } });
+  const report = formatReport({ '2026-09-26': day });
+  assert.match(report, /\| Tầng nhóm \| Tầng≥0,7 \| Tầng≥0,8 \| Tầng≥0,9$/m);
+  assert.match(report, /^2026-09-26 \| 4 \| 3 \|.*\| 2✓\/1✗ ⚠1 \| 1✓\/2✗ \| 1✓\/1✗ \| 0✓\/1✗$/m);
+  assert.match(report, /Mô hình tầng theo nhóm \(lượt LLM\): PRICE 2 \(nhóm 100%, mẫu 1✓\/1✗\) · INFO 1 \(nhóm 0%, mẫu 0✓\/1✗, ⚠1 vào ORDER\/SUPPORT\)/);
+  assert.match(report, /Mô hình tầng ✗ nguy hiểm \(thật là ORDER\/SUPPORT mà tầng đoán nhóm khác\): 1/);
+  // Không có groupOf (thiếu mô-đun tầng): vẫn đếm mẫu ✓; nhóm chỉ ✓ khi mẫu tương đương; không kết luận được ✗ nguy hiểm.
+  const blind = summarize(items, undefined, { groupOf: () => '' })['2026-09-26'];
+  assert.deepEqual(blind.cascade.group, { n: 3, ok: 1, bad: 2, danger: 0 });
+  // Journal: dòng "Mô hình tầng (thử)" đi sau dòng "Mô hình nhỏ" cùng hội thoại dùng chung kết luận lượt luật/LLM; dấu lấy từ dòng log.
+  const journal = [
+    '2026-09-26T09:00:00+07:00 crm node[1]: Luật BASKET → ORDER_ADDRESS (c1)',
+    '2026-09-26T09:00:01+07:00 crm node[1]: Mô hình nhỏ (thử): ORDER_ADDRESS (0.93, biên 0.50) / thật ORDER_ADDRESS ✓ (c1)',
+    '2026-09-26T09:00:01+07:00 crm node[1]: Mô hình tầng (thử): ORDER 0.99 / ORDER_ADDRESS 0.95 (biên 0.70) / thật ORDER_ADDRESS ✓ (c1)',
+    '2026-09-26T09:01:00+07:00 crm node[1]: Token gemini-3-flash-preview: vào 1200 (cache 900) · ra 40 · suy nghĩ 0',
+    '2026-09-26T09:01:01+07:00 crm node[1]: Mô hình tầng (thử): PRICE 0.90 / PRICE_QUOTE 0.92 (biên 0.40) / thật DISCOUNT_POLICY nhóm✓ (c2)',
+    '2026-09-26T09:02:00+07:00 crm node[1]: Token gemini-3-flash-preview: vào 1200 (cache 900) · ra 40 · suy nghĩ 0',
+    '2026-09-26T09:02:01+07:00 crm node[1]: Mô hình tầng: INFO 0.96 / BAG_COMPARISON 0.93 (biên 0.60) / thật BAG_COMPARISON → CSKH_HANDOFF ✓ (c3)',
+    '2026-09-26T09:03:01+07:00 crm node[1]: Mô hình tầng (thử): INFO 0.60 / PACKAGING_INFO 0.75 (biên 0.30) / thật ORDER_ADDRESS ✗ (c4)'
+  ].join('\n');
+  const parsed = parseJournal(journal, { year: 2026 });
+  assert.equal(parsed.length, 8);
+  assert.deepEqual(parsed[2].entry.cascade, { group: 'ORDER', pGroup: 0.99, templateId: 'ORDER_ADDRESS', p: 0.95, margin: 0.7 });
+  assert.equal(parsed[2].entry.llm, null, 'c1 là lượt luật');
+  assert.deepEqual([parsed[4].entry.mark, parsed[4].entry.chosen, parsed[6].entry.final], ['nhóm✓', 'DISCOUNT_POLICY', 'CSKH_HANDOFF']);
+  const d = summarizeJournal(parsed)['2026-09-26'];
+  assert.deepEqual([d.turns, d.llm, d.ruleStable], [3, 2, 1], 'lượt = 1 luật + 2 dòng Token');
+  assert.deepEqual([d.cascade.group.n, d.cascade.group.ok, d.cascade.group.bad], [3, 2, 1], 'lượt luật c1 không tính');
+  assert.ok(d.cascade.group.danger === 0 || d.cascade.group.danger === 1, 'journal: ✗ nguy hiểm chỉ đếm được khi có mô-đun tầng (c4 thật ORDER_ADDRESS)');
+  assert.deepEqual(d.cascade.tpl['0.9'], { n: 2, ok: 1, bad: 1 });
+  assert.deepEqual(d.cascade.tpl['0.7'], { n: 3, ok: 1, bad: 2 });
+});

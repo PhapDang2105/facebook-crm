@@ -15,6 +15,29 @@ import { formatExamples, loadExampleBank, nearestExamples } from './processing/e
 import { appendDecisionLog } from './processing/decision-log.mjs';
 import { gateCheck } from './processing/llm-router.mjs';
 
+// Mô hình tầng (processing/intent-cascade.mjs, đang viết): nạp động MỘT lần, thiếu tệp / lỗi nạp → null
+// (engine chạy như không có). Test đưa mô hình giả qua dependencies.predictCascade (+ cascadeGroupOf).
+let cascadeModulePromise = null;
+function loadCascadeModule() {
+  return (cascadeModulePromise ||= import('./processing/intent-cascade.mjs').catch(() => null));
+}
+// Nhóm ý định mà mô hình tầng được tự trả lời khi 'on': ANSWER (tầng 1 bản mới) hay PRICE/INFO/SOCIAL (bản cũ);
+// ORDER do máy trạng thái slot của engine, SUPPORT/OTHER về LLM — không bao giờ tự trả lời.
+export const cascadeAutoGroups = new Set(['ANSWER', 'PRICE', 'INFO', 'SOCIAL']);
+// Ngưỡng nhóm (tầng 1) cố định; ngưỡng mẫu trong nhóm lấy từ settings.cascadeThreshold.
+export const CASCADE_GROUP_THRESHOLD = 0.85;
+// Mẫu tầng KHÔNG được tự trả lời khi khách đã có đơn gần đây (câu trả lời chung chung sai ngữ cảnh đơn).
+const cascadeNoRecentOrderTemplates = new Set(['SHIPPING_POLICY', 'WELCOME', 'DELIVERY_DELAY']);
+// Mẫu loại hẳn khỏi tự trả lời của tầng (WELCOME hay bị chọn cho tin có màu/số túi).
+const cascadeExcludedTemplates = new Set(['WELCOME']);
+
+/** Hash ổn định (FNV-1a 32 bit) của mã hội thoại → 0..99, để chia canary. */
+export function canaryBucket(id) {
+  let hash = 0x811c9dc5;
+  for (const char of String(id || '')) { hash ^= char.codePointAt(0); hash = Math.imul(hash, 0x01000193) >>> 0; }
+  return hash % 100;
+}
+
 // Mẫu mới vòng 8 (26–28/09): agent luật đang thêm vào seed; cài đặt chưa có thì
 // dùng lời dự phòng này để bot không chuyển người / im vì "mẫu lạ". Mẫu bị chủ
 // shop để trống ('') trong Cài đặt vẫn là tắt (không thay bằng dự phòng).
@@ -834,6 +857,30 @@ export function intentMatchMark(predicted, chosen) {
   return same(predicted) === same(chosen) ? '✓' : '✗';
 }
 
+/**
+ * Dấu so mô hình tầng với mẫu CHỌN: ✓ khi mẫu tương đương (cùng quy ước intentMatchMark, nhóm khi đó
+ * cũng đúng), ~ khi "đã gửi ở trên", "nhóm✓" khi chỉ nhóm đúng (cần groupOf của mô-đun tầng), còn lại ✗.
+ */
+export function cascadeMatchMark(cascade, chosen, groupOf = null) {
+  const mark = intentMatchMark(cascade?.templateId, chosen);
+  if (mark !== '✗') return mark;
+  const chosenGroup = typeof groupOf === 'function' ? (() => { try { return groupOf(chosen); } catch { return ''; } })() : '';
+  return chosenGroup && chosenGroup === cascade?.group ? 'nhóm✓' : '✗';
+}
+
+/**
+ * Người gác có thêm top-K của mô hình tầng làm tham chiếu: so luật / mô hình phẳng như cũ (gateCheck),
+ * chưa đồng thuận thì so với top-K tầng → reason 'cascade-top1' / 'cascade-topk'; chỉ có tầng mà lệch → 'cascade-mismatch'.
+ */
+export function gateCheckWithCascade({ llmTemplateId = '', intentTopK = [], cascadeTopK = [], ruleTemplateId = '' } = {}) {
+  const base = gateCheck({ llmTemplateId, intentTopK, ruleTemplateId });
+  const topK = Array.isArray(cascadeTopK) ? cascadeTopK : [];
+  if (base.agree || base.reason === 'no-llm' || !topK.length) return base;
+  const viaCascade = gateCheck({ llmTemplateId, intentTopK: topK });
+  if (viaCascade.agree) return { agree: true, reason: viaCascade.reason.replace('intent-', 'cascade-') };
+  return base.agree === null ? { agree: false, reason: 'cascade-mismatch' } : base;
+}
+
 /** Đơn còn hiệu lực (chưa hủy qua bot, nhân viên hay POS). */
 export function isActiveOrder(order) {
   return Boolean(order) && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy';
@@ -877,6 +924,11 @@ async function answerChange(incomingChange, settings, results, dependencies) {
   const templates = withFallbackTemplates(settings.messageTemplates);
   // Luật nhận ý: test có thể đưa luật giả qua dependencies.ruleIntent (kiểm clearBasket/values).
   const ruleIntentFn = typeof dependencies.ruleIntent === 'function' ? dependencies.ruleIntent : ruleIntent;
+  // Mô hình tầng: test đưa dependencies.predictCascade (+ cascadeGroupOf) giả; chạy thật nạp mô-đun động (thiếu → null).
+  const cascadeMode = ['on', 'shadow', 'off'].includes(settings.intentCascade) ? settings.intentCascade : 'shadow';
+  const cascadeModule = cascadeMode !== 'off' && typeof dependencies.predictCascade !== 'function' ? await loadCascadeModule() : null;
+  const predictCascadeFn = typeof dependencies.predictCascade === 'function' ? dependencies.predictCascade : typeof cascadeModule?.predictCascade === 'function' ? cascadeModule.predictCascade : null;
+  const cascadeGroupOf = typeof dependencies.cascadeGroupOf === 'function' ? dependencies.cascadeGroupOf : typeof cascadeModule?.groupOf === 'function' ? cascadeModule.groupOf : null;
   // Bản mới nhất của hội thoại: tin đứng trước trong hàng có thể vừa lưu giỏ
   // hàng, hay nhân viên vừa tắt bot. Every thread is answered unless staff
   // switched the bot off for it.
@@ -886,7 +938,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
   // ghi ở `finally` (kể cả khi bỏ qua hay lỗi). Xem buildDecisionRecord về schema.
   const startedAt = Date.now();
   const resultsBefore = results.length;
-  const trace = { text: String(change.message?.text || ''), type: String(change.message?.type || 'text'), ctx: null, rule: null, shadow: [], intent: null, llm: null, fewShot: [], chosen: null, final: null, also: null, preGuard: null, gate: null, attention: false, handoff: false };
+  const trace = { text: String(change.message?.text || ''), type: String(change.message?.type || 'text'), ctx: null, rule: null, shadow: [], intent: null, cascade: null, llm: null, fewShot: [], chosen: null, final: null, also: null, preGuard: null, gate: null, attention: false, handoff: false };
   try {
     const recent = await listMessages(conversation.id);
     const askedAt = Number(change.message?.createdAt) || 0;
@@ -1305,12 +1357,47 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // Chế độ 'shadow' (mặc định) chỉ ghi log so với câu trả lời thật ở cuối lượt.
     const intentMode = settings.intentModel || 'shadow';
     // Chỉ hộp thư: bình luận đi luồng riêng (mẫu COMMENT_*), so sánh không có nghĩa.
-    const intent = intentMode !== 'off' && message.type === 'text' && conversation.source !== 'comment' && !asksForHuman && !cartReply && !trialActive
-      ? predictIntent({ text: message.text, source: conversation.source, lastTemplate: conversation.botLastTemplateId || '', lastWasOrderStep: isOrderStep(conversation.botLastTemplateId), hasBasket: Boolean(usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items?.length), livestream: isLivestreamPost(conversation) })
-      : null;
-    const intentUsable = Boolean(intent) && intentMode === 'on' && intent.confidence >= (Number(settings.intentThreshold) || 0.9) && intent.margin >= 0.25 && intentSafeTemplates.has(intent.templateId) && templates?.[intent.templateId] !== undefined
+    const intentEligible = message.type === 'text' && conversation.source !== 'comment' && !asksForHuman && !cartReply && !trialActive;
+    // Row chung cho mô hình phẳng và mô hình tầng: ngữ cảnh v2 + các trường của decisionContext (mô hình v5 bỏ
+    // qua đặc trưng lạ; tầng và v6 dùng hasOrder/orderAgeMin/prevBotAsks/phoneInText/addressInText/bagCount…).
+    const intentRow = intentEligible ? {
+      text: message.text, source: conversation.source, lastTemplate: conversation.botLastTemplateId || '',
+      lastWasOrderStep: isOrderStep(conversation.botLastTemplateId),
+      hasBasket: Boolean(usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items?.length),
+      livestream: isLivestreamPost(conversation),
+      hasOrder: Boolean(hasOrder), hasRecentOrder: Boolean(trace.ctx?.hasRecentOrder), orderAgeMin: trace.ctx?.orderAgeMin ?? null,
+      prevBotAsks: prevBotAsks(conversation.botLastTemplateId, conversation.pendingOrder),
+      phoneInText: Boolean(phoneInText), addressInText: Boolean(trace.ctx?.addressInText), bagCount: Number(trace.ctx?.bagCount) || 0,
+      staffRepliedAfterBot: Boolean(staffRepliedAfterBot)
+    } : null;
+    const intent = intentMode !== 'off' && intentRow ? predictIntent(intentRow) : null;
+    const intentThreshold = Number(settings.intentThreshold) || 0.9;
+    const intentUsable = Boolean(intent) && intentMode === 'on' && intent.confidence >= intentThreshold && intent.margin >= 0.25 && intentSafeTemplates.has(intent.templateId) && templates?.[intent.templateId] !== undefined
       && !phoneInText && conversation.source !== 'comment';
     const intentReply = intentUsable ? renderChatbotReply({ template_id: intent.templateId, ...(intent.templateId === 'PRICE_QUOTE' && productHint(ruleProduct) ? { Product_N1: ruleProduct } : {}) }, templates, replyContext) : null;
+    // Mô hình tầng: cùng `row`, cùng điều kiện với mô hình phẳng; lỗi mô-đun → như không có. 'on' chỉ tự trả
+    // lời nhóm ANSWER (hay PRICE/INFO/SOCIAL) với mẫu an toàn, pGroup ≥ 0,85, pWithin ≥ cascadeThreshold, biên trong
+    // nhóm ≥ 0,25, cùng rào của mô hình phẳng (không SĐT, không bình luận, không dùng thử/giỏ Shop qua intentEligible)
+    // và rào cứng: không màu/số túi trong tin, không khiếu nại, có đơn gần đây thì không SHIPPING_POLICY/WELCOME/
+    // DELIVERY_DELAY, loại hẳn WELCOME; ORDER/SUPPORT/OTHER không bao giờ. Canary: ngoài phần hash → chạy như shadow.
+    const cascade = cascadeMode !== 'off' && intentRow && predictCascadeFn
+      ? (() => { try { const out = predictCascadeFn(intentRow); return out && typeof out === 'object' && out.group ? out : null; } catch (error) { console.warn(`Mô hình tầng lỗi: ${String(error?.message || error).slice(0, 120)}`); return null; } })()
+      : null;
+    // pWithin/marginWithin (xác suất mẫu trong nhóm) là chuẩn; mô-đun cũ chưa trả thì dùng p/margin (ghi log một lần mỗi tiến trình).
+    const cascadeWithin = cascade ? { p: Number(cascade.pWithin ?? cascade.p) || 0, margin: Number(cascade.marginWithin ?? cascade.margin) || 0, fallback: cascade.pWithin === undefined || cascade.marginWithin === undefined } : null;
+    if (cascadeWithin?.fallback && !cascadeWithinWarned) { cascadeWithinWarned = true; console.log('Mô hình tầng: kết quả chưa có pWithin/marginWithin — dùng p/margin thay (mô-đun cũ)'); }
+    const cascadeCanary = cascadeMode === 'on' ? canaryBucket(conversation.id) < (settings.cascadeCanary === undefined ? 100 : Number(settings.cascadeCanary) || 0) : null;
+    const cascadeColourNumber = /\b(xanh|vang|nau|cacao)\b/.test(folded) && /\d/.test(folded.replace(/\+?\d[\d .-]{8,13}/g, ' '));
+    const cascadeComplaint = isComplaint({ text: message.text, keywords: settings.complaintKeywords }) || conversationLabels.some(label => /^(complaint|warranty)$/.test(label));
+    const cascadeHardBlock = Boolean(cascade) && (
+      (Number(trace.ctx?.bagCount) || 0) > 0 || cascadeColourNumber || cascadeComplaint
+      || (Boolean(trace.ctx?.hasRecentOrder) && cascadeNoRecentOrderTemplates.has(cascade.templateId))
+      || cascadeExcludedTemplates.has(cascade.templateId)
+    );
+    const cascadeUsable = Boolean(cascade) && cascadeMode === 'on' && cascadeCanary === true && cascadeAutoGroups.has(String(cascade.group))
+      && Number(cascade.pGroup) >= CASCADE_GROUP_THRESHOLD && cascadeWithin.p >= (Number(settings.cascadeThreshold) || 0.8) && cascadeWithin.margin >= 0.25
+      && intentSafeTemplates.has(cascade.templateId) && templates?.[cascade.templateId] !== undefined && !phoneInText && conversation.source !== 'comment' && !cascadeHardBlock;
+    const cascadeReply = cascadeUsable ? renderChatbotReply({ template_id: cascade.templateId, ...(cascade.templateId === 'PRICE_QUOTE' && productHint(ruleProduct) ? { Product_N1: ruleProduct } : {}) }, templates, replyContext) : null;
     const ruleUsable = Boolean(ruled) && !ruled.shadowOnly;
     const ruleShadow = Boolean(ruled) && (ruleMode === 'shadow' || !ruleUsable);
     if (ruled) console.log(`Luật ${ruled.rule}${ruleShadow ? ' (thử)' : ''} → ${ruleReply.templateId} (${conversation.id})`);
@@ -1325,6 +1412,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       ...(ruled?.shadow ? [{ name: ruled.shadow.rule, templateId: ruled.shadow.commentRule ? ruleReply.templateId : ruled.shadow.value ? renderChatbotReply(ruled.shadow.value, templates, replyContext)?.templateId || '' : '' }] : [])
     ];
     trace.intent = intent ? { templateId: intent.templateId, p: round2(intent.confidence), margin: round2(intent.margin), topK: intentTopK(intent) } : null;
+    trace.cascade = cascade ? { ...cascadeTrace(cascade), canary: cascadeCanary } : null;
     // Sau ASK_PRODUCT/ASK_FLAVOR, khách chỉ nêu MỘT màu mà trước đó đang hỏi giá ("2 túi giá bao nhiêu"
     // → "xanh"): báo giá màu đó, không lên đơn 1 túi (ca Đào Bia). Không hỏi giá trước → để luật/mô hình.
     const priceAsk = /\b(gia|bao nhieu|bao nhiu|bn|bnhiu|nhieu tien|nhiu tien|bao tien|bao gia)\b/;
@@ -1380,12 +1468,13 @@ async function answerChange(incomingChange, settings, results, dependencies) {
               : await askModel({ trialHint: trialModelHint(trialState) }))
             : nonText
               ? (seesImage ? await askModel() : imageFallback())
-              : ackReply || comboQuote || remindAck || noteReply || lookupReply || choiceReply || colourQuote || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || (preGuardMode === 'on' && preGuard ? preGuard.reply : null) || await askModel());
+              : ackReply || comboQuote || remindAck || noteReply || lookupReply || choiceReply || colourQuote || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (cascadeReply?.templateId === cascade?.templateId ? cascadeReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || (preGuardMode === 'on' && preGuard ? preGuard.reply : null) || await askModel());
     // Mẫu mô hình/luật CHỌN, trước mọi hậu xử lý (để log so mô hình nhỏ không bị ✗ giả).
     const chosenTemplateId = reply.templateId;
     trace.chosen = chosenTemplateId;
     // Người gác (processing/llm-router.mjs): LLM có cùng nhóm với mô hình nhỏ (top-K) / luật ổn định không — chỉ ghi.
-    trace.gate = trace.llm ? gateCheck({ llmTemplateId: trace.llm.templateId, intentTopK: trace.intent?.topK || [], ruleTemplateId: trace.rule?.templateId || '' }) : null;
+    // Tham chiếu gộp: top-K mô hình phẳng + top-K mô hình tầng (reason 'cascade-top1'/'cascade-topk').
+    trace.gate = trace.llm ? gateCheckWithCascade({ llmTemplateId: trace.llm.templateId, intentTopK: trace.intent?.topK || [], cascadeTopK: trace.cascade?.topK || [], ruleTemplateId: trace.rule?.templateId || '' }) : null;
     // Mô hình trả lời khách đang giữ ưu đãi bằng mẫu của luồng chung (bảng giá, combo,
     // mời 2 túi, "từ 2 túi miễn ship"): đổi sang mẫu dùng thử.
     if (trialActive && !trialOutcome.value) {
@@ -1939,6 +2028,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // Mô hình nhỏ so với câu trả lời thật (luật / LLM): đọc log để quyết định bật.
     // So với mẫu mô hình/luật CHỌN (chosenTemplateId, trước hậu xử lý ORDER_ADDRESS→REMIND, GENERAL_INFO→PRICE_QUOTE…).
     if (intent) console.log(`Mô hình nhỏ${intentUsable && reply === intentReply ? '' : ' (thử)'}: ${intent.templateId} (${intent.confidence.toFixed(2)}, biên ${intent.margin.toFixed(2)}) / thật ${chosenTemplateId}${reply.templateId !== chosenTemplateId ? ` → ${reply.templateId}` : ''} ${intentMatchMark(intent.templateId, chosenTemplateId)} (${conversation.id})`);
+    // Mô hình tầng: "NHÓM p / MẪU p (biên) / thật Y ✓|✗|~|nhóm✓" — cùng quy ước, thêm "nhóm✓" khi chỉ đúng nhóm.
+    if (cascade) console.log(`Mô hình tầng${cascadeUsable && reply === cascadeReply ? '' : ' (thử)'}: ${cascade.group} ${(Number(cascade.pGroup) || 0).toFixed(2)} / ${cascade.templateId} ${(Number(cascade.p) || 0).toFixed(2)} (biên ${(Number(cascade.margin) || 0).toFixed(2)}) / thật ${chosenTemplateId}${reply.templateId !== chosenTemplateId ? ` → ${reply.templateId}` : ''} ${cascadeMatchMark(cascade, chosenTemplateId, cascadeGroupOf)} (${conversation.id})`);
     const labelEvents = autoLabelEventsFor({
       order,
       // Ảnh khách gửi: thẻ "Cần người xử lý" để nhân viên xem, bot vẫn bật.
@@ -2062,6 +2153,24 @@ export function intentTopK(intent) {
   return intent.second ? [best, { templateId: intent.second, p: round2(intent.confidence - intent.margin) }] : [best];
 }
 
+// Đã nhắc "thiếu pWithin/marginWithin" chưa (một lần mỗi tiến trình).
+let cascadeWithinWarned = false;
+
+/**
+ * Phần `cascade` của nhật ký từ kết quả predictCascade: { group, subGroup, pGroup, templateId, p, margin,
+ * pWithin, marginWithin, topK, path } — subGroup (PRICE/INFO/SOCIAL dưới ANSWER) và pWithin/marginWithin null khi mô-đun không trả.
+ */
+export function cascadeTrace(cascade) {
+  if (!cascade || typeof cascade !== 'object') return null;
+  const topK = (Array.isArray(cascade.topK) ? cascade.topK : []).map(item => ({ templateId: typeof item === 'string' ? item : String(item?.templateId || ''), p: round2(item?.p) })).filter(item => item.templateId);
+  const optional = value => (value === undefined || value === null ? null : round2(value));
+  return {
+    group: String(cascade.group || ''), subGroup: cascade.subGroup ? String(cascade.subGroup) : null, pGroup: round2(cascade.pGroup),
+    templateId: String(cascade.templateId || ''), p: round2(cascade.p), margin: round2(cascade.margin),
+    pWithin: optional(cascade.pWithin), marginWithin: optional(cascade.marginWithin), topK, path: cascade.path ?? null
+  };
+}
+
 /** Bot vừa hỏi gì (suy từ mẫu bot trước + giỏ đang giữ còn thiếu gì). */
 export function prevBotAsks(templateId, pending = null) {
   const id = String(templateId || '');
@@ -2114,7 +2223,9 @@ export function decisionContext({ conversation, message, recentOrder = null, sta
 /**
  * Bản ghi nhật ký quyết định (schema v1) — xem docs trong báo cáo vòng 9:
  * { v, at, conversationId, source, mid, text, type, prevBot, prevBotAgeMin, prevBotAsks, ctx, rule, shadow,
- *   intent, llm, fewShot, chosen, final, also, skipped, guards: { preGuard, gate }, attention, handoff, ms }.
+ *   intent, cascade, llm, fewShot, chosen, final, also, skipped, guards: { preGuard, gate }, attention, handoff, ms }.
+ * `cascade` (mô hình tầng, null khi không gọi / thiếu mô-đun): { group, subGroup, pGroup, templateId, p, margin,
+ *   pWithin, marginWithin, topK, path, canary } — canary true/false khi intentCascade 'on' (ngoài canary chạy như shadow), null khi shadow.
  */
 export function buildDecisionRecord({ conversation, change, trace, result = null, final = null, startedAt = Date.now() }) {
   const source = conversation.source === 'comment' ? 'comment' : 'inbox';
@@ -2134,6 +2245,7 @@ export function buildDecisionRecord({ conversation, change, trace, result = null
     rule: trace.rule || null,
     shadow: Array.isArray(trace.shadow) ? trace.shadow : [],
     intent: trace.intent || null,
+    cascade: trace.cascade || null,
     llm: trace.llm ? { templateId: trace.llm.templateId, retried: trace.llm.retried, hint: trace.llm.hint, usage: trace.llm.usage, model: trace.llm.model, calls: trace.llm.calls } : null,
     fewShot: Array.isArray(trace.fewShot) ? trace.fewShot : [],
     chosen: trace.chosen || null,

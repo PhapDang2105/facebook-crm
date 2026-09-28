@@ -21,7 +21,29 @@ test('luồng đơn: để LLM đọc khi khách nhắc sản phẩm/số lượ
   assert.equal(orderFlowStep('0912345678', { ...ctx, lastWasOrderStep: false }), null);
   assert.equal(orderFlowStep('0912345678', { ...ctx, source: 'comment' }), null);
   assert.equal(orderFlowStep('0912345678', { ...ctx, complaint: true }), null);
-  assert.equal(orderFlowStep('Xã Vô Tranh, Phú Lương, Thái Nguyên', ctx), null, 'địa chỉ chưa xác định đủ (addressComplete=false) thì không tự quyết');
+  // Vòng 10: địa chỉ chưa đủ cấp vẫn đưa vào bộ soạn đơn (nó hỏi cấp còn thiếu) — xem test bên dưới.
+  assert.equal(orderFlowStep('để mình xem lại đã', ctx), null, 'chữ không giống địa chỉ: không tự quyết');
+  assert.equal(orderFlowStep('giao về Hà Nội mấy ngày', ctx), null, 'câu hỏi thời gian giao: để mô hình');
+  assert.equal(orderFlowStep('ship về Cà Mau được không', ctx), null, 'hỏi có giao tới không: để mô hình');
+});
+
+test('vòng 10: địa chỉ CHƯA đủ cấp (SĐT hay không) khi bot đang xin → ORDER_ADDRESS + Customer_Address, bộ soạn đơn hỏi cấp thiếu (CLARIFY)', () => {
+  for (const text of ['Xã Vô Tranh, Phú Lương, Thái Nguyên', '270 nguyễn văn cừ thành phố vinh nghệ an phường hưng phúc nhé', 'Huyện Sơn Tịnh', 'Số 17, đường 38, P. Thảo Điền', 'Tổ 10 thị trấn Na Hang', 'Đc 19/1 thanh vị, Sơn Lộc, Sơn Tây, Hà Nội']) {
+    const ruled = orderFlowStep(text, ctx);
+    assert.equal(ruled?.rule, 'ADDRESS_PARTIAL', text);
+    assert.equal(ruled?.value?.template_id, 'ORDER_ADDRESS', text);
+    assert.ok(ruled?.value?.Customer_Address && !/^đc\b/i.test(ruled.value.Customer_Address), text);
+  }
+  const both = orderFlowStep('0912345678 Xóm thống nhất 3 xã vô tranh huyện Phú lương', ctx);
+  assert.deepEqual([both?.rule, both?.value?.Phone_Number, both?.value?.Customer_Address], ['PHONE_ADDRESS_PARTIAL', '0912345678', 'Xóm thống nhất 3 xã vô tranh huyện Phú lương']);
+  assert.equal(orderFlowStep('Sđt: 0912345678, đ/c: 12 Lê Lợi phường 5', ctx)?.value?.Customer_Address, '12 Lê Lợi phường 5', 'bỏ nhãn "sđt"/"đ/c"');
+  // Kèm đổi giỏ / câu hỏi / chưa có giỏ thì vẫn để mô hình.
+  assert.equal(orderFlowStep('Huyện Sơn Tịnh, đổi sang 2 túi vàng', ctx), null);
+  assert.equal(orderFlowStep('Huyện Sơn Tịnh có giao không?', ctx), null);
+  assert.equal(orderFlowStep('Huyện Sơn Tịnh', { ...ctx, hasBasket: false }), null);
+  // Qua ruleIntent (luật thử nghiệm bật): giá trị đi thẳng, không cần mô hình.
+  const on = ruleIntent('Huyện Sơn Tịnh', { ...ctx, commentBasket: () => [], botLastTemplateId: 'ORDER_ADDRESS', botLastAgeMin: 3, experimentalRules: 'on' });
+  assert.deepEqual([on?.rule, on?.value?.template_id, on?.value?.Customer_Address], ['ADDRESS_PARTIAL', 'ORDER_ADDRESS', 'Huyện Sơn Tịnh']);
 });
 
 test('luồng đơn đi qua ruleIntent như luật thử nghiệm: shadow mặc định (đính kèm), bật thì trả về', () => {

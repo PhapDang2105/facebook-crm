@@ -143,6 +143,17 @@ export function normalizeChatbotSettings(value = {}) {
     // Mô hình ra quyết định trước LLM (processing/intent-model.mjs): 'shadow' chỉ ghi log so với
     // câu trả lời thật; 'on' đủ tin cậy (≥ intentThreshold) và mẫu an toàn thì trả lời thẳng.
     intentModel: ['on', 'shadow', 'off'].includes(value.intentModel) ? value.intentModel : 'shadow',
+    // Mô hình tầng (processing/intent-cascade.mjs: tầng 1 nhóm ý định ORDER/SUPPORT/OTHER/ANSWER, tầng 2 mẫu trong
+    // nhóm): 'shadow' (mặc định) chỉ ghi nhật ký + log so với câu trả lời thật; 'on' tự trả lời khi nhóm ANSWER
+    // (hay PRICE/INFO/SOCIAL bản cũ), mẫu an toàn, pGroup ≥ 0,85, pWithin ≥ cascadeThreshold, biên trong nhóm ≥ 0,25
+    // và qua các rào cứng của engine (không màu/số túi, không khiếu nại, không SĐT…); 'off' không gọi.
+    // Khi cả intentModel 'on' và intentCascade 'on' thì tầng thắng — nên chỉ bật MỘT cái để so được kết quả.
+    intentCascade: ['on', 'shadow', 'off'].includes(value.intentCascade) ? value.intentCascade : 'shadow',
+    // Ngưỡng xác suất mẫu TRONG NHÓM (pWithin) để mô hình tầng tự trả lời; ngưỡng nhóm (pGroup ≥ 0,85) là hằng trong engine.
+    cascadeThreshold: Math.min(0.99, Math.max(0.5, Number(value.cascadeThreshold) || 0.8)),
+    // Canary: khi 'on' chỉ áp cho hội thoại có hash(id) % 100 < cascadeCanary (0–100, mặc định 100 = tất cả);
+    // hội thoại ngoài canary chạy như shadow (nhật ký ghi cascade.canary: false).
+    cascadeCanary: Math.min(100, Math.max(0, value.cascadeCanary === undefined ? 100 : Math.round(Number(value.cascadeCanary)) || 0)),
     // Cache phần tĩnh của prompt trên Vertex (explicit context cache): 'on' mặc định (thăm dò 25/09 chạy tốt).
     promptCache: value.promptCache === 'off' ? 'off' : 'on',
     intentThreshold: Math.min(0.99, Math.max(0.5, Number(value.intentThreshold) || 0.9)),

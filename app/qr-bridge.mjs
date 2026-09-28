@@ -211,7 +211,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .fallback { margin: 4px 0 0; padding-top: 14px; border-top: 1px dashed #d9cba9; color: #6b5d4b; font-size: 14px; line-height: 1.5; }
   .fallback a { color: #2e6b3f; font-weight: 600; text-decoration: none; }
   .fallback svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 2px; }
-  .tel { white-space: nowrap; }
+  .fallback .tel { color: #d0312d; white-space: nowrap; }
 </style>
 </head>
 <body>

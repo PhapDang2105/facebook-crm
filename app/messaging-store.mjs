@@ -377,7 +377,7 @@ export async function listMessages(id, limit = 100) {
 
 // Trust order of gender sources; a guess never overwrites a stronger one.
 // Nhân viên chọn tay > hồ sơ Pancake (Facebook khai) > đoán theo cách xưng hô > đoán theo tên.
-const genderRank = { staff: 3, pancake: 2.5, message: 2, name: 1 };
+export const genderRank = { staff: 3, pancake: 2.5, message: 2, name: 1 };
 
 /** Records a guessed gender unless a more trusted source already set one. */
 export function applyGenderGuess(conversation, gender, source) {

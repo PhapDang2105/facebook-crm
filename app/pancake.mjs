@@ -3,7 +3,6 @@
 // tin được ghi vào hộp thư CRM (để theo dõi) rồi đưa cho bot; câu trả lời của
 // bot gửi ngược qua Public API của Pancake nên hiện ngay trong Pancake cho
 // nhân viên thấy. Tài liệu: integrations/pancake/README.md.
-import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
@@ -37,13 +36,8 @@ export function getPancakePageConfig(pageId, config = defaultConfig) {
   return config;
 }
 
-/** Token trong URL webhook: so sánh theo thời gian hằng; token trống nghĩa là chưa bật. */
-export function isPancakeWebhookTokenValid(provided, expected) {
-  const given = Buffer.from(String(provided || ''));
-  const wanted = Buffer.from(String(expected || ''));
-  if (!wanted.length || given.length !== wanted.length) return false;
-  return timingSafeEqual(given, wanted);
-}
+/** Token trong URL webhook: so sánh theo thời gian hằng; token trống nghĩa là chưa bật (dùng chung với webhook landing). */
+export { isLandingTokenValid as isPancakeWebhookTokenValid } from './landing-orders.mjs';
 
 /** Pancake bọc nội dung trong HTML ("<div>Xin chào</div>"): về chữ thường, giữ xuống dòng. */
 export function pancakeMessageText(message) {
@@ -647,15 +641,14 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, quickMs = 2 * 60
  * Ghi tin vào hộp thư và trả về các thay đổi cho bot. Ghi thêm mã hội thoại
  * Pancake và tên khách lên hội thoại CRM để còn gửi trả lời đúng chỗ.
  */
-export async function storePancakeEvents(incomingEvents, { fromWebhook = false, followUpTexts = null } = {}) {
+export async function storePancakeEvents(incomingEvents, { fromWebhook = false } = {}) {
   if (!incomingEvents.length) return [];
   // Tin bám đuổi do trạm gửi (extension Pancake) gửi: Pancake ghi admin_name là nhân viên đang mở
   // trình duyệt (28/09: 6 tin "Dạ chị ơi, Giọt Nắng gửi chị ưu đãi riêng…" mang tên một nhân viên)
   // → trước đây bị coi là nhân viên nhắn: bot tắt, khách trả lời bám đuổi thì bot im. Tin Page mang
   // cờ staff mà trùng lời bám đuổi đã xếp/gửi trong 24 giờ cho đúng hội thoại → gỡ staff, gắn followUp.
   const staffOutgoing = incomingEvents.filter(event => event.type === 'message' && event.message?.direction === 'outgoing' && (event.message.staff || event.pancake?.staff));
-  let echoes = followUpTexts;
-  if (staffOutgoing.length && !echoes) echoes = await recentFollowUpTexts().catch(() => new Map());
+  const echoes = staffOutgoing.length ? await recentFollowUpTexts().catch(() => new Map()) : null;
   for (const event of staffOutgoing) {
     const entries = echoes?.get?.(crmConversationId(event.pageId, event.psid));
     if (!matchesFollowUpText(entries, event.message)) continue;

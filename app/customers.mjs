@@ -2,12 +2,10 @@
 // with that Page — Messenger inbox, comments under posts, ads. Nothing is
 // stored separately: the customer list is a view over the conversation store,
 // so it can never drift from what the inbox shows.
-import { readMessagingStore } from './messaging-store.mjs';
+import { genderRank, readMessagingStore } from './messaging-store.mjs';
 import { readChannelStore } from './channel-store.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
 import { applyCustomerEdits, readCustomerEdits } from './customer-edits.mjs';
-
-const genderRank = { staff: 3, pancake: 2.5, message: 2, name: 1 };
 
 function customerKey(conversation) {
   return `${conversation.pageId}:${conversation.psid}`;

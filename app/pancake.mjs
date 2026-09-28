@@ -917,7 +917,7 @@ function decodeDataUrl(dataUrl) {
  * (attachment) tải lên Pancake trước rồi gửi bằng mã nội dung. Receipt/template
  * dùng bản chữ. Chữ đi kèm tệp được gửi thành tin riêng sau tệp.
  */
-export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '', imageUrls = [], privateReply = false }, config = defaultConfig, fetchImpl = fetch) {
+export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '', imageUrls = [], privateReply = false, staff = false }, config = defaultConfig, fetchImpl = fetch) {
   const body = String(templateText || text || '').trim();
   const target = { pageId: conversation.pageId, conversationId: conversation.pancakeConversationId };
   // Nhiều ảnh đi chung một tin (Facebook nhận tới 30 mã một lần), khách thấy một cụm ảnh thay vì từng ảnh lắc nhắc.
@@ -974,6 +974,8 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text: body, createdAt: Date.now(), status: 'sent' };
   }
   const saved = await updateMessagingStore(store => {
+    // Nhân viên gửi từ CRM: gắn cờ staff như tin admin gửi trong Pancake (bot dùng để im khi nhân viên đang xử lý).
+    if (staff) Object.assign(message, { staff: true, staffName: 'CRM' });
     const outcome = saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, message });
     outcome.conversation.unread = false;
     return { message: outcome.message, conversation: publicConversation(outcome.conversation) };

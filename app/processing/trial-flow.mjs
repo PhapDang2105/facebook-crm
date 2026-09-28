@@ -87,8 +87,12 @@ export function promoBowlActive(conversation = {}, { now = Date.now() } = {}) {
 
 /** Túi khách nêu trong tin: Map màu → số lượng ("xanh", "2 túi vàng", "vàng x2"). */
 function bagPicks(raw) {
-  const folded = foldVietnamese(String(raw || '').replace(/n[âa]u\s+(v[ịi]\s+)?ca\s*cao/giu, 'nâu').replace(/ca\s+cao/giu, 'cacao'))
-    .replace(/xanh (duong|la cay)|dau xanh/g, ' ').replace(/\+?\d{9,11}/g, ' ');
+  // "socola"/"chocolate"/"sô cô la" là Túi Nâu cacao; "xanh mint"/"xanh bạc hà" là túi Tropical (hàng live),
+  // bỏ trước khi đếm màu như "xanh dương".
+  const folded = foldVietnamese(String(raw || '')
+    .replace(/n[âa]u\s+(v[ịi]\s+)?ca\s*cao/giu, 'nâu').replace(/ca\s+cao/giu, 'cacao')
+    .replace(/s[ôo]\s*-?\s*c[ôo]\s*-?\s*la|socola|chocolate|choco\b/giu, 'nâu'))
+    .replace(/xanh (duong|la cay|mint|bac ha)|dau xanh/g, ' ').replace(/\+?\d{9,11}/g, ' ');
   const picks = new Map();
   let explicitQuantity = false;
   for (const match of folded.matchAll(/(?:\b(\d{1,2})\s*(?:tui|goi|bich|x)?\s*)?\b(xanh|vang|nau|cacao)\b(?:\s*(?:x\s*)?(\d{1,2})\b)?/g)) {
@@ -114,7 +118,7 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   const s = core(raw);
   // Khách quan tâm gói nhỏ / combo 10 gói / sản phẩm khác (ưu đãi chỉ cho túi lớn),
   // hay đang trả lời câu hỏi về gói nhỏ bot vừa hỏi: sang luồng thường.
-  if (/\b(goi nho|chia goi|combo 10|hop 10|10 goi|tung bua|tropical|bot nghe|nghe lanh|hat an lanh|hu hat)\b/.test(s) || lastTemplateId === 'PACKAGING_INFO') {
+  if (/\b(goi nho|chia goi|combo 10|hop 10|10 goi|tung bua|tropical|xanh mint|xanh bac ha|bot nghe|nghe lanh|hat an lanh|hu hat)\b/.test(s) || lastTemplateId === 'PACKAGING_INFO') {
     return { exit: 'converted', patch: { stage: 'converted', endedAt: now, reason: 'khách quan tâm sản phẩm khác' } };
   }
   const phone = extractVietnamesePhone(raw);

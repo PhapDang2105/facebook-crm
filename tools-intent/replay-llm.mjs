@@ -45,7 +45,7 @@ for (const [index, item] of items.entries()) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const started = Date.now();
     try {
-      const examples = bank ? nearestExamples(bank, { text: item.text, lastTemplate: item.lastTemplate || '', excludeId: item.id }) : [];
+      const examples = bank ? nearestExamples(bank, { text: item.text, lastTemplate: item.lastTemplate || '', excludeId: item.id, source: item.source || 'inbox' }) : [];
       const reply = await engine.requestDirectModelReply({ settings, conversation, message: { type: 'text', text: item.text, createdAt: at }, recentMessages, rawResponse: true, context: {}, examples });
       raw = String(reply.parsed?.template_id || '');
       // So mẫu SAU khi dựng câu (renderChatbotReply): "2 túi" mà chưa rõ vị thì ORDER_ADDRESS thành ASK_FLAVOR…

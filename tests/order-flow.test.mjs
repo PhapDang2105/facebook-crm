@@ -37,3 +37,17 @@ test('luồng đơn đi qua ruleIntent như luật thử nghiệm: shadow mặc 
   const on = ruleIntent('Sđt của em 0912345678 nhé shop', { ...base, experimentalRules: 'on' });
   assert.deepEqual(on?.value, { template_id: 'ORDER_ADDRESS', Phone_Number: '0912345678' });
 });
+
+test('vòng 9: "địa chỉ cũ" viết nhiều kiểu (đ/c như cũ, dc đã gửi, địa chỉ vẫn thế, gọi địa chỉ cũ…) → OLD_ADDRESS; không có đơn cũ (hasPreviousDelivery=false) → xin SĐT đã đặt + thẻ', () => {
+  for (const text of ['gửi về địa chỉ cũ nhé', 'đ/c như cũ', 'địa chỉ vẫn thế', 'gửi dc cũ', 'đã gửi địa chỉ rồi', 'gọi địa chỉ cũ', 'dc đã gửi', 'địa chỉ nhận như đơn trước', 'gửi địa chỉ trước nha']) {
+    assert.equal(orderFlowStep(text, ctx)?.rule, 'OLD_ADDRESS', text);
+    assert.deepEqual(orderFlowStep(text, { ...ctx, hasPreviousDelivery: false }), { rule: 'OLD_ADDRESS_ASK', value: { template_id: 'ORDER_ADDRESS_OLD_ASK_PHONE' }, attention: true }, text);
+    assert.equal(orderFlowStep(text, { ...ctx, hasPreviousDelivery: true })?.rule, 'OLD_ADDRESS', text);
+  }
+  // "dc" cũng là "được": "giao dc trước thứ 7" không phải địa chỉ cũ.
+  assert.equal(orderFlowStep('giao dc trước thứ 7', ctx), null);
+  assert.equal(orderFlowStep('gửi địa chỉ cũ, thêm 1 túi vàng', ctx), null, 'kèm đổi giỏ: để mô hình');
+  // Qua ruleIntent (luật thử nghiệm, bật): giá trị + thẻ đi cùng.
+  const on = ruleIntent('đ/c như cũ', { ...ctx, commentBasket: () => [], botLastTemplateId: 'ORDER_ADDRESS', experimentalRules: 'on', hasPreviousDelivery: false });
+  assert.deepEqual([on?.rule, on?.value?.template_id, on?.attention], ['OLD_ADDRESS_ASK', 'ORDER_ADDRESS_OLD_ASK_PHONE', true]);
+});

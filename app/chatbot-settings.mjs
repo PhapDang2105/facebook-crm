@@ -113,8 +113,9 @@ export function normalizeChatbotSettings(value = {}) {
   const placeholderHonorific = text => String(text ?? '')
     .replace(/(?<![\p{L}\p{N}])Anh\s*\/\s*[Cc]hị(?![\p{L}\p{N}])/gu, '{Title}')
     .replace(/(?<![\p{L}\p{N}])anh\s*\/\s*[Cc]hị(?![\p{L}\p{N}])/gu, '{title}');
+  // 28/09: seed đã có 99 mẫu, cộng mẫu nhân viên tự tạo thì trần 100 sẽ âm thầm bỏ mẫu mới → nâng lên 200.
   const messageTemplates = Object.fromEntries(Object.entries(submitted)
-    .slice(0, 100)
+    .slice(0, 200)
     .map(([key, text]) => [String(key).trim().slice(0, 100), placeholderHonorific(text).trim().slice(0, 12000)])
     .filter(([key]) => key && !isProductQuoteId(key)));
   // The processing pipeline is code in app/processing, not editable settings.

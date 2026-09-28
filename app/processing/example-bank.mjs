@@ -27,16 +27,22 @@ export function buildExampleBank(items = []) {
     for (const [key, value] of vector) vector.set(key, value / norm);
     return vector;
   };
-  return { items: rows.map((item, index) => ({ id: item.id, text: item.text, lastTemplate: item.lastTemplate || '', label: item.label, vector: vectorOf(bags[index]) })), vectorOf, size: rows.length };
+  return { items: rows.map((item, index) => ({ id: item.id, text: item.text, lastTemplate: item.lastTemplate || '', label: item.label, source: item.source === 'comment' ? 'comment' : 'inbox', vector: vectorOf(bags[index]) })), vectorOf, size: rows.length };
 }
 
-/** k ví dụ gần nhất (cosine n-gram ≥ minScore), ưu tiên nhẹ ví dụ cùng mẫu bot vừa gửi; bỏ chính tin đang đo. */
-export function nearestExamples(bank, { text, lastTemplate = '', k = 3, minScore = 0.2, excludeId = '' } = {}) {
+/**
+ * k ví dụ gần nhất (cosine n-gram ≥ minScore), ưu tiên nhẹ ví dụ cùng mẫu bot vừa gửi; bỏ chính tin đang đo.
+ * 28/09 (log r8): ví dụ bình luận (COMMENT_*) chiếm chỗ ở ~20% lượt hộp thư và 3 ví dụ cùng nhãn kéo mô hình
+ * → truyền `source` để chỉ lấy ví dụ cùng kênh, và mỗi nhãn tối đa `perLabel` ví dụ (còn thiếu mới lấp thêm).
+ */
+export function nearestExamples(bank, { text, lastTemplate = '', k = 3, minScore = 0.2, excludeId = '', source = '', perLabel = 2 } = {}) {
   if (!bank?.items?.length || !text) return [];
   const query = bank.vectorOf(grams(text));
+  const wantSource = source === 'comment' ? 'comment' : source ? 'inbox' : '';
   const scored = [];
   for (const item of bank.items) {
     if (excludeId && item.id === excludeId) continue;
+    if (wantSource && item.source !== wantSource) continue;
     let dot = 0;
     for (const [key, value] of query) { const other = item.vector.get(key); if (other) dot += value * other; }
     const score = dot + (lastTemplate && item.lastTemplate === lastTemplate ? 0.05 : 0);
@@ -45,7 +51,19 @@ export function nearestExamples(bank, { text, lastTemplate = '', k = 3, minScore
   scored.sort((a, b) => b.score - a.score);
   // Không lặp cùng một câu (bộ chấm có nhiều "Xin giá"): giữ câu đầu của mỗi nội dung.
   const seen = new Set();
-  return scored.filter(item => { const key = normalizeIntentText(item.text); if (seen.has(key)) return false; seen.add(key); return true; }).slice(0, k);
+  const unique = scored.filter(item => { const key = normalizeIntentText(item.text); if (seen.has(key)) return false; seen.add(key); return true; });
+  // Đa dạng nhãn: mỗi nhãn tối đa perLabel ví dụ; nếu vẫn chưa đủ k thì lấp bằng các ví dụ còn lại theo điểm.
+  const picked = [];
+  const perLabelCount = new Map();
+  for (const item of unique) {
+    if (picked.length >= k) break;
+    const count = perLabelCount.get(item.label) || 0;
+    if (perLabel > 0 && count >= perLabel) continue;
+    perLabelCount.set(item.label, count + 1);
+    picked.push(item);
+  }
+  for (const item of unique) { if (picked.length >= k) break; if (!picked.includes(item)) picked.push(item); }
+  return picked;
 }
 
 /** Khối chữ chèn vào câu hỏi gửi LLM. */

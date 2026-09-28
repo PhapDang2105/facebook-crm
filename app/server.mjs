@@ -1912,7 +1912,8 @@ const server = http.createServer(async (request, response) => {
         if (!text && !attachment && !imageUrls.length) return sendJson(response, 400, { error: 'Nội dung tin nhắn không được để trống.' });
         try {
           // Comment threads: reply under the comment, or privately to Messenger.
-          const sent = text || attachment ? await sendConversationMessage(conversation, { text, attachment, privateReply }) : null;
+          // Tuyến này chỉ nhân viên dùng (giao diện CRM): gắn cờ staff để bot biết nhân viên đang xử lý hội thoại.
+          const sent = text || attachment ? await sendConversationMessage(conversation, { text, attachment, privateReply, staff: true }) : null;
           const messages = sent ? [sent.message] : [];
           let last = sent;
           // A private reply lands in the person's Messenger thread; pictures follow it there.
@@ -1921,11 +1922,11 @@ const server = http.createServer(async (request, response) => {
             : conversation;
           // Qua Pancake nhiều ảnh đi chung một tin (một cụm ảnh); Meta gửi từng ảnh.
           if (imageTarget && imageUrls.length && imageTarget.pancakeConversationId) {
-            last = await sendConversationMessage(imageTarget, { imageUrls: imageUrls.map(publicImageUrl) });
+            last = await sendConversationMessage(imageTarget, { imageUrls: imageUrls.map(publicImageUrl), staff: true });
             messages.push(last.message, ...(last.extras || []));
           } else {
             for (const imageUrl of imageTarget ? imageUrls : []) {
-              last = await sendConversationMessage(imageTarget, { imageUrl: publicImageUrl(imageUrl) });
+              last = await sendConversationMessage(imageTarget, { imageUrl: publicImageUrl(imageUrl), staff: true });
               messages.push(last.message);
             }
           }
@@ -1993,6 +1994,11 @@ const server = http.createServer(async (request, response) => {
         if (items.length > 50) return sendJson(response, 400, { error: 'Tối đa 50 quà tặng.' });
         for (const item of items) {
           if (!String(item?.name || '').trim()) return sendJson(response, 400, { error: 'Mỗi quà tặng phải có tên.' });
+          // Tối đa (túi): bỏ trống/0 = không giới hạn; có đặt thì phải là số nguyên ≥ "Tặng từ".
+          const minQuantity = Math.max(1, Math.round(Number(item?.minQuantity) || 1));
+          const maxQuantity = item?.maxQuantity === undefined || item?.maxQuantity === null || item?.maxQuantity === '' ? 0 : Number(item.maxQuantity);
+          if (!Number.isInteger(maxQuantity) || maxQuantity < 0 || maxQuantity > 99) return sendJson(response, 400, { error: `Quà "${String(item.name).trim()}": Tối đa (túi) phải là số nguyên từ 0 đến 99 (0 = không giới hạn).` });
+          if (maxQuantity > 0 && maxQuantity < minQuantity) return sendJson(response, 400, { error: `Quà "${String(item.name).trim()}": Tối đa (túi) phải lớn hơn hoặc bằng Tặng từ (${minQuantity}).` });
         }
         const shippingFee = Number(payload.shippingFee);
         if (payload.shippingFee !== undefined && (!Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });

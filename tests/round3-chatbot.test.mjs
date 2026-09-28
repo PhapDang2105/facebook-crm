@@ -64,9 +64,11 @@ test('khách nhắn có nội dung mà bot sắp gửi lại y câu xin SĐT/đ�
   const again = await run({ botLastTemplateId: 'ORDER_ADDRESS_REMIND', botLastReplyAt: Date.now() - 30 * 1000, pendingOrder: same.pendingOrder }, 'sao em không trả lời', { recent, reply: same });
   assert.deepEqual(again.sent, []);
   assert.deepEqual(again.saved.at(-1).addLabelEvents, ['handoff']);
-  // "ok" thì vẫn im, không gắn thẻ.
+  // "ok" khi giỏ còn thiếu SĐT/địa chỉ (vòng 8, mục 3b): nhắc ngắn giỏ + phần thiếu, không cảm ơn, không hỏi mô hình.
   const ack = await run({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 30 * 1000, pendingOrder: same.pendingOrder }, 'ok', { recent, reply: same });
-  assert.deepEqual(ack.sent, []);
+  assert.equal(ack.asked, false);
+  assert.equal(ack.results[0].templateId, 'ORDER_ADDRESS_REMIND');
+  assert.match(ack.sent.join('\n'), /vẫn đang giữ đơn 2 Granola Túi Xanh 450g/);
   assert.equal(ack.saved.at(-1)?.addLabelEvents, undefined);
 });
 
@@ -365,7 +367,7 @@ test('luồng dùng thử đặt context.trial: đơn 1 túi không cộng ship;
   assert.equal(expired.order.shippingFee, plain.order.shippingFee);
 });
 
-test('vòng 7: "gửi về địa chỉ cũ" khi đơn không gắn hội thoại → lấy SĐT/địa chỉ từ tin xác nhận cũ; "M lấy 1 túi" → hỏi vị; emoji sau đơn → cảm ơn', async () => {
+test('vòng 7: "gửi về địa chỉ cũ" khi đơn không gắn hội thoại → lấy SĐT/địa chỉ từ tin xác nhận cũ; "M lấy 1 túi" → hỏi vị; emoji sau đơn → im (vòng 8)', async () => {
   const confirmation = 'Dạ, em xin phép xác nhận lại thông tin đặt hàng của mình nha:\n\n🌾 Granola Túi Xanh 450g – Số lượng: 2\n━━━━━━━━━━━━\n📞 Số điện thoại: 0912345678\n━━━━━━━━━━━━\n🏡 Địa chỉ nhận hàng: 12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh\n━━━━━━━━━━━━\n💰 Tổng tiền: 298.000đ';
   const old = await run({}, 'C 2 túi vàng về địa chỉ cũ nha', {
     recent: [{ id: 'c0', direction: 'outgoing', type: 'text', text: confirmation, createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000 }],
@@ -377,6 +379,8 @@ test('vòng 7: "gửi về địa chỉ cũ" khi đơn không gắn hội thoạ
   const quantityOnly = await run({}, 'M lấy 1 túi', { reply: ({ context }) => renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, { ...context, messageText: 'M lấy 1 túi' }) });
   assert.equal(quantityOnly.results[0].templateId, 'ASK_FLAVOR');
   const emoji = await run({ customerOrders: [{ id: 'o9', createdAt: Date.now() - 5 * 60 * 1000, phone: '0912345678', products: [{ name: 'Granola Túi Xanh 450g', quantity: 1 }] }], botLastTemplateId: 'ORDER_CONFIRMATION', botLastReplyAt: Date.now() - 4 * 60 * 1000 }, '💕', { reply: ({ context }) => renderChatbotReply({ template_id: 'WELCOME' }, templates, context) });
+  // Vòng 8 (mục 3c): chỉ emoji ngay sau tin đơn hàng / lời cảm ơn → không trả lời gì.
   assert.equal(emoji.asked, false);
-  assert.equal(emoji.results[0].templateId, 'THANK_YOU');
+  assert.equal(emoji.results[0].skipped, 'chỉ emoji');
+  assert.deepEqual(emoji.sent, []);
 });

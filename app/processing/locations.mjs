@@ -221,20 +221,52 @@ const PROVINCE_ALIASES = {
   'dak nong': ['daknong']
 };
 
+// Quận/huyện đã sáp nhập (28/09, theo chủ shop): Quận 2, Quận 9 và Quận Thủ Đức
+// đều là Thành phố Thủ Đức. Danh mục vẫn còn cả dòng cũ lẫn dòng mới, nên khi
+// dựng chỉ mục các dòng cũ được gộp vào đơn vị mới và tên cũ thành alias của nó:
+// khách ghi "Quận 9" vẫn đọc được, còn địa chỉ xuất/đẩy POS ghi "Thành phố Thủ Đức".
+const MERGED_DISTRICTS = {
+  'ho chi minh': { 'thanh pho thu duc': ['quan 2', 'quan 9', 'quan thu duc'] }
+};
+
+function mergedDistrictTarget(provinceBare, districtKey) {
+  const groups = MERGED_DISTRICTS[provinceBare];
+  if (!groups) return null;
+  for (const [target, members] of Object.entries(groups)) if (members.includes(districtKey)) return target;
+  return null;
+}
+
 export function buildLocationIndex(rows) {
   const provinces = new Map();
+  // Mã của đơn vị đích trong từng tỉnh (để dòng cũ gộp đúng vào dòng mới của danh mục).
+  const mergedCodes = new Map();
+  for (const row of rows) {
+    const provinceBare = stripPrefix(normalizeLocationKey(row.province), PROVINCE_PREFIXES);
+    const groups = MERGED_DISTRICTS[provinceBare];
+    if (groups && groups[normalizeLocationKey(row.district)]) mergedCodes.set(`${provinceBare}|${normalizeLocationKey(row.district)}`, row.district_code);
+  }
   for (const row of rows) {
     let province = provinces.get(row.province_code);
     if (!province) {
       province = { ...makeEntry(row.province_code, row.province, PROVINCE_PREFIXES, PROVINCE_ALIASES[stripPrefix(normalizeLocationKey(row.province), PROVINCE_PREFIXES)] || []), districts: new Map() };
       provinces.set(row.province_code, province);
     }
-    let district = province.districts.get(row.district_code);
+    const districtKey = normalizeLocationKey(row.district);
+    const target = mergedDistrictTarget(province.bare, districtKey);
+    const districtCode = target ? (mergedCodes.get(`${province.bare}|${target}`) || `merged:${target}`) : row.district_code;
+    let district = province.districts.get(districtCode);
     if (!district) {
-      district = { ...makeEntry(row.district_code, row.district, DISTRICT_PREFIXES), province, wards: new Map() };
-      province.districts.set(row.district_code, district);
+      const name = target ? rows.find(other => normalizeLocationKey(other.district) === target && other.province_code === row.province_code)?.district || row.district : row.district;
+      const extraAliases = Object.entries(MERGED_DISTRICTS[province.bare] || {}).find(([key]) => key === (target || districtKey))?.[1] || [];
+      district = { ...makeEntry(districtCode, name, DISTRICT_PREFIXES, extraAliases), province, wards: new Map() };
+      province.districts.set(districtCode, district);
     }
-    if (!district.wards.has(row.ward_code)) {
+    // Phường của quận cũ trùng tên phường của đơn vị mới (hoặc ngược lại, tùy thứ tự
+    // dòng trong danh mục) thì không thêm lần hai, kẻo "Phường An Phú" thành nhập nhằng.
+    const wardKey = normalizeLocationKey(row.ward);
+    const inMergedGroup = Boolean(target) || Boolean(MERGED_DISTRICTS[province.bare]?.[districtKey]);
+    const duplicate = inMergedGroup && [...district.wards.values()].some(ward => ward.key === wardKey);
+    if (!district.wards.has(row.ward_code) && !duplicate) {
       district.wards.set(row.ward_code, { ...makeEntry(row.ward_code, row.ward, WARD_PREFIXES), district });
     }
   }
@@ -934,14 +966,31 @@ export function streetForDisplay(address, hints = {}, locationIndex = loadLocati
  * Các trường ba cấp ghi lên một đơn từ địa chỉ khách gõ: dùng chung cho đơn
  * chatbot lúc tạo và cho nhân viên sửa địa chỉ sau này, để hai nơi không lệch nhau.
  */
+/**
+ * Khách có tự ghi quận/huyện này trong địa chỉ không (khác với quận/huyện máy suy
+ * ra từ tên phường). Dùng để tôn trọng địa chỉ ghi theo đơn vị sau sáp nhập 2025
+ * (chỉ phường/xã + tỉnh): không tự chèn quận/huyện cũ vào.
+ */
+export function districtMentioned(text, district) {
+  if (!district?.name) return false;
+  const norm = normalizeLocationKey(expandAddressAbbreviations(String(text || '')));
+  const key = normalizeLocationKey(district.name);
+  const bare = stripPrefix(key, DISTRICT_PREFIXES);
+  const candidates = [key, ...(bare && !/^\d+$/.test(bare) ? [bare] : [])];
+  return candidates.some(alias => new RegExp(`(?<![a-z0-9])${escapeRegExp(alias)}(?![a-z0-9])`).test(norm));
+}
+
 export function resolvedAddressFields(address, locationIndex = loadLocationIndex()) {
   const location = resolveAddress(address, locationIndex);
+  // Địa chỉ ghi theo đơn vị mới sau sáp nhập (phường/xã không có trong danh mục cũ):
+  // giữ nguyên như khách ghi, không suy ngược về phường/quận cũ (28/09, chủ shop).
+  const postMerger = location.postMerger === true;
   return {
     address,
     street: location.street,
     province: location.province?.name || '',
-    district: location.district?.name || '',
-    ward: location.ward?.name || '',
+    district: !postMerger || districtMentioned(address, location.district) ? (location.district?.name || '') : '',
+    ward: postMerger ? '' : (location.ward?.name || ''),
     locationConfidence: location.confidence,
     postMerger: location.postMerger === true
   };
@@ -1046,9 +1095,15 @@ export function describeDeliveryAddress(text, locationIndex = loadLocationIndex(
   // phường/xã thì tự phân định được.
   const sameNameDistricts = resolved.ambiguous?.level === 'district'
     && new Set(resolved.ambiguous.options.map(name => stripPrefix(normalizeLocationKey(name), DISTRICT_PREFIXES))).size === 1;
+  // Địa chỉ ghi theo đơn vị sau sáp nhập 2025 (phường/xã mới + tỉnh, không quận/huyện):
+  // khách đã ghi đủ theo cách mới → không đòi quận/huyện, không đòi lại phường, và giữ
+  // nguyên chữ khách ghi làm địa chỉ giao (không ép về đơn vị cũ). Cũng giữ nguyên chữ
+  // khách khi họ không ghi quận/huyện mà máy chỉ suy ra từ tên phường.
+  const postMerger = resolved.postMerger === true && Boolean(resolved.province);
+  const keepAsTyped = postMerger || (Boolean(resolved.province) && Boolean(resolved.ward) && !districtMentioned(text, resolved.district));
   if (!resolved.province) missing.push('province');
-  if (!resolved.district && !sameNameDistricts) missing.push('district');
-  if (!resolved.ward) missing.push('ward');
+  if (!resolved.district && !sameNameDistricts && !postMerger) missing.push('district');
+  if (!resolved.ward && !postMerger) missing.push('ward');
   const usableStreet = isUsableStreet(resolved.street);
   if (!usableStreet) missing.push('street');
   const known = [resolved.ward?.name, resolved.district?.name, resolved.province?.name].filter(Boolean).join(', ');
@@ -1062,7 +1117,8 @@ export function describeDeliveryAddress(text, locationIndex = loadLocationIndex(
     missingLabel: listInVietnamese(missing.map(level => LEVEL_LABELS[level])),
     known,
     choices,
-    canonical: missing.length === 0 ? formatResolvedAddress(resolved) : ''
+    keepAsTyped,
+    canonical: missing.length === 0 ? (keepAsTyped ? String(text || '').replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim() : formatResolvedAddress(resolved)) : ''
   };
 }
 

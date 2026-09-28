@@ -74,14 +74,21 @@ test('đang chờ xác nhận: "Dạ cảm ơn shop" / "Đã đặt rồi mà" k
   assert.deepEqual(stale.created, []);
 });
 
-test('đang chờ xác nhận mà khách nêu giỏ mới ("2 túi vàng nhé"): hỏi lại với giỏ 2 Vàng, không tạo', async () => {
+test('đang chờ xác nhận mà khách nêu giỏ mới ("2 túi vàng nhé"): giỏ đổi thành 2 Vàng, không tạo; vừa hỏi < 30 phút thì không hỏi lại lần hai', async () => {
+  // Vòng 8 (mục 18): đã hỏi "đặt thêm?" 5 phút trước → không gửi lại mẫu xác nhận (log: hỏi 2 lần trong 4 phút);
+  // giỏ mới giữ với cờ chờ, gắn thẻ để nhân viên thấy.
   const yellow = await run(asked, '2 túi vàng nhé', { reply: { templateId: 'GENERAL_INFO', messages: ['không được hỏi mô hình'], handoff: false }, extraSettings: { ruleIntent: 'on' } });
   assert.deepEqual(yellow.created, []);
-  assert.equal(yellow.results[0].templateId, 'ORDER_EXISTING_CONFIRM');
-  assert.match(yellow.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Vàng 350g/);
+  assert.deepEqual(yellow.sent, [], 'không hỏi lại trong 30 phút');
+  assert.equal(yellow.results[0].skipped, 'đang chờ xác nhận đặt thêm');
   const pending = yellow.saved.at(-1).pendingOrder;
   assert.equal(pending.awaitingConfirm, true);
   assert.deepEqual(pending.items.map(item => [item.product, item.quantity]), [['Granola Túi Vàng 350g', 2]]);
+  assert.ok(yellow.saved.at(-1).addLabelEvents.includes('handoff'));
+  // Hỏi đã lâu (35 phút): hỏi lại với giỏ mới như cũ.
+  const later = await run({ ...asked, pendingOrder: { ...waiting, at: Date.now() - 35 * 60 * 1000 } }, '2 túi vàng nhé', { reply: { templateId: 'GENERAL_INFO', messages: ['không được hỏi mô hình'], handoff: false }, extraSettings: { ruleIntent: 'on' } });
+  assert.equal(later.results[0].templateId, 'ORDER_EXISTING_CONFIRM');
+  assert.match(later.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Vàng 350g/);
   // Khách "đúng" sau đó: chốt giỏ 2 Vàng, không hỏi lại phường/xã.
   const yes = await run({ ...asked, pendingOrder: pending }, 'Đúng rồi', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false } });
   assert.equal(yes.results[0].templateId, 'ORDER_CONFIRMATION');

@@ -257,6 +257,8 @@ function insertMessage(messages, message) {
   if (existingIndex >= 0) {
     const existing = messages[existingIndex];
     const merged = { ...existing, ...message };
+    // Cờ nhân viên gửi (từ CRM) không bị bản dội về của Pancake/Meta (không biết ai gửi) xóa mất.
+    if (existing.staff && !message.staff) { merged.staff = true; if (existing.staffName && !message.staffName) merged.staffName = existing.staffName; }
     // Bản dội về (echo) không hạ trạng thái đã giao/đã đọc xuống "sent".
     if ((statusRank[existing.status] ?? 0) > (statusRank[merged.status] ?? 0)) merged.status = existing.status;
     if (merged.createdAt === existing.createdAt) {

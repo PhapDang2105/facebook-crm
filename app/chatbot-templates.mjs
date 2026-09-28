@@ -406,7 +406,8 @@ function renderOrder(value, templates, context = {}) {
   // Khách quen "gửi về địa chỉ cũ / như lần trước": SĐT và địa chỉ lấy từ đơn
   // gần nhất của khách thay vì hỏi lại.
   // Cùng bộ từ với OLD_ADDRESS của order-flow.mjs ("như/giống lần/hôm trước", "chỗ cũ").
-  const wantsPrevious = /(dia chi|d\/c|dc) (cu|truoc|nhu cu|lan truoc|hom truoc)|(nhu|giong) (lan |hom )?truoc|cho cu|nhu cu/.test(normalizeText(String(context.messageText || '')));
+  // Cũng nhận "gởi địa chỉ củ", "dc cũ", "đc cũ", "gửi dc trước rồi", "như đơn trước", "đơn cũ / lần trước / hôm trước".
+  const wantsPrevious = /(dia chi|d\/c|dc|d c) (cu|truoc|nhu cu|lan truoc|hom truoc|do|day|kia|hom bua)|(dia chi|dc) (nhu|giong) (cu|truoc)|(nhu|giong|theo|y) (don |lan |hom |dot |bua |ky )?(truoc|cu)|cho cu|nhu cu|(don|dot|ky|bua) (cu|truoc)\b|(gui|ship|giao) (dc|dia chi|d\/c) (truoc|cu) (roi|r|do|day)|(ve|toi|den) (dc|dia chi) (cu|truoc)/.test(normalizeText(String(context.messageText || '')));
   const previous = (wantsPrevious || updating) && context.recentOrder ? context.recentOrder : (wantsPrevious && context.previousDelivery ? context.previousDelivery : null);
   // Mô hình ghi "0" khi khách không đưa địa chỉ: coi như trống để lấy địa chỉ đơn trước.
   // Tên người nhận khách ghi đầu địa chỉ ("Nguyễn thị Hằng Thôn 4, …") không lên phiếu giao.
@@ -519,7 +520,11 @@ function renderOrder(value, templates, context = {}) {
     const template = known ? templates.ORDER_ADDRESS_PARTIAL : templates.ORDER_ADDRESS;
     // Khách lấy 1 túi: nhân lúc xin thông tin, gợi ý lên 2 túi (giá combo, miễn
     // ship, quà) đúng một lần cho mỗi giỏ; khách vẫn lấy 1 túi thì đơn đi tiếp.
-    const upsell = price?.totalQuantity === 1 && !trial && templates.UPSELL_TWO_BAGS && !pending?.upsold ? upsellTwoBags(price, templates) : '';
+    // Không mời khi khách đã nói rõ chỉ lấy 1 ("1 túi thôi", "chỉ lấy 1", "dùng thử đã"), khi engine
+    // báo không mời (context.noUpsell: hội thoại có khiếu nại/cần người xử lý, vừa nói sỉ/CTV, đã mời
+    // một lần trong hội thoại), hay giỏ này đã được mời (pending.upsold).
+    const declinesUpsell = /\b(thoi|chi (lay|mua|can|lay thu)|(1|mot) (tui|goi|hop|bich) (thoi|la du|da|truoc)|(dung|an|lay|mua) thu (thoi|da|truoc))\b/.test(messageWords);
+    const upsell = price?.totalQuantity === 1 && !trial && templates.UPSELL_TWO_BAGS && !pending?.upsold && !context.noUpsell && !declinesUpsell ? upsellTwoBags(price, templates) : '';
     // Nêu lại giỏ và tổng tiền trước câu xin SĐT/địa chỉ: nhân viên từng phải gõ
     // tay "Dạ đơn của mình gồm…" và khách hỏi "tổng bao nhiêu" thì không có số.
     // Lời gợi ý 2 túi đã có số tiền thì thôi, không lặp.
@@ -712,6 +717,10 @@ function renderPriceQuote(templateId, value, templates) {
  * (tối đa 3). Chưa sản phẩm nào có ảnh thì trả về '' để người thật gửi ảnh.
  */
 function renderProductPhotos(value, templates) {
+  // Engine đưa sẵn ảnh (ảnh quà bát gáo dừa…) qua values.images: điền thẳng, không tra danh mục.
+  if (value.values && typeof value.values === 'object' && value.values.images) {
+    return fill(templates.PRODUCT_PHOTOS, { ...commonValues(), products: String(value.values.products || ''), images: String(value.values.images) });
+  }
   const named = matchProduct(value.Product_N1 || value.product || '');
   const random = activeCustomer.random || Math.random;
   const products = (named ? [named] : getCatalogProducts()).filter(product => product.active && galleryOf(product).length).slice(0, 3);

@@ -304,12 +304,10 @@ test('khách đã đặt đơn hỏi lại thời gian giao (vừa kèm trong ti
   };
   const withOrder = await run({ customerOrders: [recentOrder] });
   assert.deepEqual(withOrder, [policy]);
-  // Chưa có đơn: vẫn nhắc ngắn "thông tin em gửi ở trên" như cũ.
+  // Chưa có đơn, tin có ý mới ("mấy ngày giao đến") mà sắp lặp: vòng 8 không nhắc "em gửi ở trên" nữa
+  // (7 ca 26–28/09 nhắc sai) — im và gắn thẻ để nhân viên trả lời; chỉ khách lặp câu / giục mới được nhắc.
   const noOrder = await run({});
-  assert.equal(noOrder.length, 1);
-  // Câu hỏi thông tin (không phải bảng giá): không chào hàng, chỉ nói đã gửi ở trên.
-  assert.match(noOrder[0], /ngay trên/);
-  assert.doesNotMatch(noOrder[0], /ưng loại nào/);
+  assert.deepEqual(noOrder, []);
 });
 
 test('khách hủy đơn vừa đặt (ORDER_CANCEL): hủy đúng đơn đó qua cancelOrder, không tạo đơn, không phiếu; đơn quá 24h → chuyển nhân viên', async () => {
@@ -368,18 +366,29 @@ test('vòng 2: #10900 không đăng "ib cho Page"; bình luận hủy/khiếu n�
   // 3. Sau tin riêng thành công, hộp thư ghi mẫu vừa gửi.
   await processChatbotChanges([comment('c3', 'giá bn')], base(async () => ({ message: { mid: 'x' } }), async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá ạ'], handoff: false })));
   assert.equal(saved['page:user'].botLastTemplateId, 'PRICE_QUOTE');
-  // 4. Hộp thư: khách hỏi câu mới mà model sắp gửi lại đúng bảng giá vừa gửi riêng → nhắc ngắn thay vì im lặng.
+  // 4. Hộp thư: khách nói ý MỚI ("150 mà e") mà model sắp gửi lại đúng bảng giá vừa gửi riêng → vòng 8:
+  // không nhắc "gửi ở trên" (ý mới, không phải lặp/giục) — im, gắn thẻ cho nhân viên; khách lặp lại
+  // đúng câu hỏi cũ ("giá sao" → "gia sao") thì mới nhắc.
   const price = 'Dạ, em gửi anh/chị Bảng giá Granola Túi Xanh 450g để mình dễ tham khảo ạ: 1 túi 174.000đ';
-  const log4 = [];
-  await processChatbotChanges([{ type: 'message', conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true }, message: { id: 'm9', mid: 'm9', direction: 'incoming', type: 'text', text: '150 mà e', createdAt: Date.now() } }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 1, messageTemplates: tpl }),
-    listMessages: async () => [{ id: 'p', direction: 'outgoing', type: 'text', text: `Dạ em thấy anh/chị để lại bình luận dưới bài viết của Giọt Nắng ạ 💛\n\n${price}`, createdAt: Date.now() - 60000 }],
-    saveBotState: async () => {},
-    sendMessage: async (_c, m) => { log4.push(m.text); return { message: { mid: 'x' } }; },
-    requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: [price], handoff: false })
-  });
-  assert.equal(log4.length, 1);
-  assert.match(log4[0], /thông tin em gửi ngay tin phía trên/);
+  const inboxRun = async (text, recentExtra = []) => {
+    const log = [];
+    const state = [];
+    const results = await processChatbotChanges([{ type: 'message', conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true }, message: { id: 'm9', mid: 'm9', direction: 'incoming', type: 'text', text, createdAt: Date.now() } }], {
+      readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 1, messageTemplates: tpl }),
+      listMessages: async () => [...recentExtra, { id: 'p', direction: 'outgoing', type: 'text', text: `Dạ em thấy anh/chị để lại bình luận dưới bài viết của Giọt Nắng ạ 💛\n\n${price}`, createdAt: Date.now() - 60000 }],
+      saveBotState: async (_id, saved) => { state.push(saved); },
+      sendMessage: async (_c, m) => { log.push(m.text); return { message: { mid: 'x' } }; },
+      requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: [price], handoff: false })
+    });
+    return { log, state, results };
+  };
+  const newIdea = await inboxRun('150 mà e');
+  assert.deepEqual(newIdea.log, []);
+  assert.equal(newIdea.results[0].skipped, 'lặp tin vừa gửi');
+  assert.ok(newIdea.state.at(-1).addLabelEvents.includes('handoff'));
+  const repeated = await inboxRun('giá sao', [{ id: 'i0', direction: 'incoming', type: 'text', text: 'gia sao', createdAt: Date.now() - 120000 }]);
+  assert.equal(repeated.log.length, 1);
+  assert.match(repeated.log[0], /thông tin em gửi ngay tin phía trên/);
 });
 
 test('hỏi giảm giá chưa nêu loại: chỉ 3 túi chủ lực, mỗi túi một dòng; không liệt kê Tropical, Combo 10 gói…', () => {

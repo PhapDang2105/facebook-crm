@@ -9,6 +9,7 @@ import {
   loadLocationIndex,
   mergeAddressFragment,
   normalizeExportLocation,
+  resolvedAddressFields,
   mergedProvinceMembers,
   cleanTelex,
   resolveAddress,
@@ -30,6 +31,40 @@ test('địa chỉ đầy đủ có dấu phẩy: ba cấp và phần đường 
   assert.equal(resolved.street, '12 Nguyễn Huệ');
   assert.equal(resolved.confidence, 'exact');
   assert.equal(formatResolvedAddress(resolved), '12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh');
+});
+
+test('sáp nhập 28/09: Quận 2, Quận 9, Quận Thủ Đức đều là Thành phố Thủ Đức (đọc tên cũ, xuất tên mới, phường không nhập nhằng)', () => {
+  const index = loadLocationIndex();
+  const hcm = index.provinces.find(province => province.bare === 'ho chi minh');
+  assert.ok(![...hcm.districts.values()].some(district => ['quan 2', 'quan 9', 'quan thu duc'].includes(district.key)), 'không còn quận cũ riêng');
+  const thuDuc = [...hcm.districts.values()].find(district => district.key === 'thanh pho thu duc');
+  assert.ok(thuDuc.aliases.includes('quan 9') && thuDuc.aliases.includes('quan 2') && thuDuc.aliases.includes('quan thu duc'));
+  assert.equal([...thuDuc.wards.values()].filter(ward => ward.key === 'phuong an phu').length, 1, 'phường trùng tên chỉ giữ một');
+  assert.deepEqual(names(resolveAddress('Phường Thảo Điền, Quận 2, TP.HCM')), ['TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường Thảo Điền']);
+  assert.deepEqual(names(resolveAddress('12 Lê Văn Việt, phường Hiệp Phú, quận 9, tp hcm')), ['TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường Hiệp Phú']);
+  assert.deepEqual(names(resolveAddress('131/10B đường 6 linh Xuân thủ Đức tphcm')), ['TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường Linh Xuân']);
+  assert.deepEqual(names(resolveAddress('P. An Phú, TP Thủ Đức, HCM')), ['TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường An Phú']);
+  assert.equal(formatResolvedAddress(resolveAddress('12 Lê Văn Việt, phường Hiệp Phú, Q9, HCM')), '12 Lê Văn Việt, Phường Hiệp Phú, Thành phố Thủ Đức, TP Hồ Chí Minh');
+  assert.equal(canonicalLocationColumns({ province: 'TP Hồ Chí Minh', district: 'Quận 9', ward: 'Phường Hiệp Phú' }).district, 'Thành phố Thủ Đức');
+});
+
+test('địa chỉ sau sáp nhập 2025: giữ nguyên như khách ghi, không đòi quận/huyện, không suy ngược về đơn vị cũ', () => {
+  const merged = describeDeliveryAddress('Số 5 ngõ 3, phường Hạc Thành, Thanh Hóa');
+  assert.equal(merged.resolved.postMerger, true);
+  assert.equal(merged.complete, true, 'phường mới + tỉnh + số nhà/ngõ là đủ');
+  assert.deepEqual(merged.missing, []);
+  assert.equal(merged.canonical, 'Số 5 ngõ 3, phường Hạc Thành, Thanh Hóa');
+  const fields = resolvedAddressFields('Số 5 ngõ 3, phường Hạc Thành, Thanh Hóa');
+  assert.equal(fields.province, 'Thanh Hóa');
+  assert.equal(fields.ward, '', 'không gán phường cũ gần giống');
+  assert.equal(fields.postMerger, true);
+  // Khách không ghi quận/huyện, máy chỉ suy ra từ phường: địa chỉ giao vẫn là chữ khách ghi.
+  const inferred = describeDeliveryAddress('12 Lê Văn Việt, Phường Hiệp Phú, TP.HCM');
+  assert.equal(inferred.resolved.district?.name, 'Thành phố Thủ Đức');
+  assert.equal(inferred.complete, true);
+  assert.equal(inferred.canonical, '12 Lê Văn Việt, Phường Hiệp Phú, TP.HCM');
+  // Khách ghi rõ quận thì địa chỉ giao vẫn chuẩn hóa theo danh mục như trước.
+  assert.equal(describeDeliveryAddress('12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM').canonical, '12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh');
 });
 
 test('viết tắt phổ biến: P., Q1, HCM, HN, Sg, TT', () => {
@@ -171,8 +206,10 @@ test('quận cũ và thành phố mới trùng tên: phường quyết định, 
   assert.deepEqual(names(resolveAddress('Phường Hiệp Bình Chánh, Thủ Đức, HCM')), ['TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường Hiệp Bình Chánh']);
   assert.deepEqual(names(resolveAddress('Phường Sông Trí, Kỳ Anh, Hà Tĩnh')), ['Hà Tĩnh', 'Thị xã Kỳ Anh', 'Phường Sông Trí']);
   assert.deepEqual(names(resolveAddress('Xã Kỳ Tân, Kỳ Anh, Hà Tĩnh')), ['Hà Tĩnh', 'Huyện Kỳ Anh', 'Xã Kỳ Tân']);
+  // 28/09: Quận Thủ Đức đã gộp vào Thành phố Thủ Đức nên "Thủ Đức" không còn nhập nhằng, chỉ thiếu phường và đường.
   const unsure = describeDeliveryAddress('Thủ Đức, HCM');
-  assert.equal(unsure.resolved.ambiguous.level, 'district');
+  assert.equal(unsure.resolved.district?.name, 'Thành phố Thủ Đức');
+  assert.equal(unsure.resolved.ambiguous, null);
   assert.equal(unsure.choices, null, 'không hỏi "Quận hay Thành phố"');
   assert.deepEqual(unsure.missing, ['ward', 'street']);
 });
@@ -325,7 +362,7 @@ test('gõ lỗi Telex trong đoạn không dấu phẩy được làm sạch r�
   assert.equal(resolveAddress('146 trần bình trọng phường Thủ Dầu Một Tp.hcm').district, null);
 });
 
-test('địa chỉ ghi theo đơn vị sau sáp nhập 2025: không đoán, chỉ đánh dấu để hỏi lại', () => {
+test('địa chỉ ghi theo đơn vị sau sáp nhập 2025: không đoán phường cũ, đánh dấu postMerger và nhận nguyên văn (28/09)', () => {
   for (const text of [
     '58 hoàng hoa thám, phường tây hồ, hà nội',
     '146 trần bình trọng phường Thủ Dầu Một Tp.hcm',
@@ -335,7 +372,9 @@ test('địa chỉ ghi theo đơn vị sau sáp nhập 2025: không đoán, ch�
     const resolved = resolveAddress(text);
     assert.equal(resolved.ward, null, text);
     assert.equal(resolved.postMerger, true, text);
-    assert.equal(describeDeliveryAddress(text).complete, false, text);
+    const described = describeDeliveryAddress(text);
+    assert.equal(described.complete, true, text);
+    assert.equal(described.canonical, text.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim(), text);
   }
   // Tỉnh mới ghi kèm phường của tỉnh cũ đã nhập vào vẫn đọc được, không phải sau sáp nhập.
   const merged = resolveAddress('Phường Tân Đông Hiệp, Hồ Chí Minh');

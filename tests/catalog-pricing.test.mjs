@@ -56,6 +56,39 @@ test('chỉ tổ hợp có trong bảng quà mới được tự tính; túi gh�
   assert.equal(orderKey([{ product: 'Túi Nâu', quantity: 1 }, { product: 'Túi Xanh', quantity: 2 }]), 'GRA-NAU-Z350=1|GRA-XANH-Z450=2');
 });
 
+test('quà có "Tối đa (túi)": Quà Tặng LIVE tặng đơn đúng 2 túi — 2 túi có, 3 túi không (chỉ bát + muỗng), 1 túi không; dữ liệu cũ không có trường vẫn đọc được', () => {
+  // normalizeGift: thiếu maxQuantity (dữ liệu cũ) = 0 = không giới hạn; chuỗi/số âm được chuẩn hoá.
+  assert.equal(catalog.normalizeGift({ name: 'Cũ', minQuantity: 2 }).maxQuantity, 0);
+  assert.equal(catalog.normalizeGift({ name: 'Live', minQuantity: 2, maxQuantity: '2' }).maxQuantity, 2);
+  assert.equal(catalog.normalizeGift({ name: 'Âm', minQuantity: 2, maxQuantity: -3 }).maxQuantity, 0);
+  const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
+  const gifts = JSON.parse(original);
+  // Đúng bản quà chủ shop sẽ thêm qua API: nhân viên gắn "Quà Tặng LIVE" cho đơn chat đúng 2 túi.
+  gifts.items.push({ id: 'qua-tang-live', name: 'Quà Tặng LIVE', active: true, minQuantity: 2, maxQuantity: 2, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 });
+  writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
+  catalog.reloadCatalog();
+  try {
+    assert.deepEqual(catalog.giftsForKey('GRA-XANH-Z450=2').map(gift => gift.name), ['Miễn phí vận chuyển', 'Quà Tặng LIVE']);
+    assert.deepEqual(catalog.giftsForKey('GRA-VANG-H350=1|GRA-XANH-Z450=1').map(gift => gift.name), ['Miễn phí vận chuyển', 'Quà Tặng LIVE']);
+    assert.deepEqual(catalog.giftsForKey('GRA-NAU-Z350=1|GRA-XANH-Z450=2').map(gift => gift.name), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa']);
+    assert.deepEqual(catalog.giftsForKey('GRA-XANH-Z450=1'), []);
+    // Chuỗi quà của bộ giá (price.gift): 2 túi kèm Live, 3 túi kèm bát + muỗng; tiền không đổi vì quà giá 0.
+    const two = basket({ sku: 'GRA-XANH-Z450', quantity: 2 });
+    assert.equal(two.gift, 'Miễn phí vận chuyển + Quà Tặng LIVE');
+    assert.equal(two.total, 298000);
+    assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 3 }).gift, gift3);
+    assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 1 }).gift, '');
+    // Bảng giá gửi khách: bậc 2 túi ghi tặng Quà Tặng LIVE, bậc 3 túi ghi bát + muỗng.
+    const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates).messages[0];
+    assert.match(quote, /298\.000đ \(Miễn phí vận chuyển\)\n🎁 Tặng kèm: Quà Tặng LIVE ạ\./);
+    assert.match(quote, /447\.000đ \(Miễn phí vận chuyển\)\n🎁 Tặng kèm: Bộ bát gáo dừa \+ Muỗng dừa ạ\./);
+  } finally {
+    // Trả lại bảng quà gốc cho các test sau.
+    writeFileSync(process.env.GIFTS_PATH, original);
+    catalog.reloadCatalog();
+  }
+});
+
 test('nhận diện theo tên và tên gọi khác, không nhận màu đơn lẻ', () => {
   assert.equal(detectProduct('cho em 2 túi xanh'), 'Granola Túi Xanh 450g');
   assert.equal(detectProduct('granola cacao'), 'Granola Túi Nâu vị cacao 350g');

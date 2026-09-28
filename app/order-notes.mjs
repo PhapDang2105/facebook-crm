@@ -97,9 +97,10 @@ export function processingNotes(order) {
   if (noAddress) {
     notes.push('⚠ Chưa có địa chỉ');
   } else {
-    const missing = missingAddressParts(order);
-    // Kho chỉ nhận ba cấp trước sáp nhập 2025; khách ghi phường mới thì không tự đổi, nhân viên hỏi lại.
-    if (order.postMerger) notes.push('⚠ Địa chỉ ghi theo đơn vị sau sáp nhập, hỏi lại khách');
+    // Khách ghi theo đơn vị sau sáp nhập 2025: giữ nguyên như khách ghi, không hỏi lại, không suy về đơn vị cũ (28/09);
+    // phường/quận theo danh mục cũ không có nên không tính là thiếu.
+    const missing = missingAddressParts(order).filter(part => !order.postMerger || !/phường|quận/.test(part));
+    if (order.postMerger) notes.push('ℹ Địa chỉ theo đơn vị sau sáp nhập, giữ nguyên như khách ghi');
     if (missing.length === 4) notes.push(`⚠ Địa chỉ không rõ: "${address.slice(0, 60)}"`);
     else if (missing.length) notes.push(`⚠ Thiếu ${missing.join(', ')}`);
     if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên, hỏi lại');

@@ -5092,6 +5092,7 @@ function renderGifts() {
       <label class="gift-active"><input type="checkbox" data-gift-field="active" data-gift-index="${index}" ${gift.active !== false ? 'checked' : ''} aria-label="Đang dùng"></label>
       <input type="text" data-gift-field="name" data-gift-index="${index}" value="${escapeHtml(gift.name || '')}" maxlength="200" placeholder="Ví dụ: Miễn phí vận chuyển">
       <span class="gift-quantity"><input type="number" data-gift-field="minQuantity" data-gift-index="${index}" value="${Math.max(1, Number(gift.minQuantity) || 1)}" min="1" max="99"><span>sản phẩm</span></span>
+      <span class="gift-quantity gift-max"><input type="number" data-gift-field="maxQuantity" data-gift-index="${index}" value="${Math.max(0, Number(gift.maxQuantity) || 0) || ''}" min="0" max="99" placeholder="∞" title="Để trống = không giới hạn. Đặt 2 để chỉ tặng đơn đúng 2 túi (như Quà Tặng LIVE)."><span>túi</span></span>
       <input type="text" class="gift-sku" data-gift-field="sku" data-gift-index="${index}" value="${escapeHtml(gift.sku || '')}" maxlength="80" placeholder="Không xuất kho" spellcheck="false">
       <span class="gift-weight"><input type="number" data-gift-field="weight" data-gift-index="${index}" value="${Number(gift.weight) || 0}" min="0" step="10"><span>g</span></span>
       <button class="price-master-remove" type="button" data-gift-remove="${index}" aria-label="Xóa quà tặng" title="Xóa quà tặng">×</button>
@@ -5122,6 +5123,8 @@ giftRowsElement?.addEventListener('input', event => {
   else if (field === 'sku') gift.sku = event.target.value.trim().toUpperCase();
   else if (field === 'weight') gift.weight = Math.max(0, Math.round(Number(event.target.value) || 0));
   else if (field === 'minQuantity') gift.minQuantity = Math.max(1, Math.round(Number(event.target.value) || 1));
+  // Tối đa (túi): trống/0 = không giới hạn; chỉ nhận số nguyên không âm.
+  else if (field === 'maxQuantity') gift.maxQuantity = Math.max(0, Math.round(Number(event.target.value) || 0));
 });
 
 giftRowsElement?.addEventListener('change', event => {
@@ -5147,12 +5150,18 @@ giftRowsElement?.addEventListener('click', event => {
 });
 
 giftAddButton?.addEventListener('click', () => {
-  giftItems.push({ id: '', name: '', active: true, minQuantity: 2, excludedSkus: [], sku: '', weight: 0 });
+  giftItems.push({ id: '', name: '', active: true, minQuantity: 2, maxQuantity: 0, excludedSkus: [], sku: '', weight: 0 });
   renderGifts();
   giftRowsElement?.querySelector('.gift-row:last-child input[data-gift-field="name"]')?.focus();
 });
 
 giftSaveButton?.addEventListener('click', async () => {
+  // Tối đa (túi) nhỏ hơn Tặng từ thì quà không bao giờ áp dụng: chặn trước khi gửi.
+  const invalidMax = giftItems.find(gift => Number(gift.maxQuantity) > 0 && Number(gift.maxQuantity) < Math.max(1, Number(gift.minQuantity) || 1));
+  if (invalidMax) {
+    showToast(`Quà "${invalidMax.name || '(chưa đặt tên)'}": Tối đa (túi) phải lớn hơn hoặc bằng Tặng từ.`, 'error');
+    return;
+  }
   const blank = giftItems.find(gift => !String(gift.name || '').trim());
   if (blank) {
     showToast('Có quà tặng chưa đặt tên.', 'error');

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+// Danh mục sản phẩm tạm (giá giỏ cho lời nhắc ORDER_ADDRESS_REMIND), không đụng data/processed.
+import './helpers/seed-catalog.mjs';
 
 const directory = mkdtempSync(path.join(tmpdir(), 'followup-'));
 process.env.META_CONVERSATIONS_PATH = path.join(directory, 'meta-conversations.json');
@@ -71,8 +73,9 @@ test('ứng viên: chỉ khách im lặng đủ giờ, Page đã trả lời sau
   const store = await readMessagingStore();
   const [comment, inbox] = settings.followUps.scenarios;
   const commentCandidates = findFollowUpCandidates(store, comment, { now, activatedAt: now - 48 * HOUR });
-  assert.deepEqual(commentCandidates.map(item => item.conversation.psid).sort(), ['a', 'b']);
-  assert.equal(findFollowUpCandidates(store, comment, { now, activatedAt: now - 13.5 * HOUR }).map(item => item.conversation.psid).join(), 'a', 'B trả lời trước khi bật thì không xét');
+  // E (nhân viên tắt bot ở hộp thư) vẫn là ứng viên: vòng gửi bỏ qua và đếm lý do botOff.
+  assert.deepEqual(commentCandidates.map(item => item.conversation.psid).sort(), ['a', 'b', 'e']);
+  assert.equal(findFollowUpCandidates(store, comment, { now, activatedAt: now - 13.5 * HOUR }).map(item => item.conversation.psid).join(), 'a,e', 'B trả lời trước khi bật thì không xét');
   assert.deepEqual(findFollowUpCandidates(store, inbox, { now, activatedAt: now - 48 * HOUR }).map(item => item.conversation.psid), ['f']);
 });
 
@@ -81,7 +84,7 @@ test('runFollowUps: nhắn riêng vào hộp thư, không có hộp thư thì c�
   const sendMessage = async (conversation, payload) => { sent.push({ id: conversation.id, ...payload }); return { message: { mid: `mid-${sent.length}` } }; };
   const first = await runFollowUps({ readSettings: async () => settings, sendMessage, now, log: () => {} });
   // activatedAt được ghi = now ở lượt đầu → không có ai đủ điều kiện (chỉ xét trả lời sau khi bật).
-  assert.deepEqual(first, { checked: 0, sent: 0, failed: 0, skipped: 0, disabled: false });
+  assert.deepEqual(first, { checked: 0, sent: 0, failed: 0, skipped: 0, skipReasons: {}, disabled: false });
   // Giả lập đã bật từ 2 ngày trước.
   const { writeFileSync: write } = await import('node:fs');
   write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: {} }));
@@ -89,6 +92,7 @@ test('runFollowUps: nhắn riêng vào hộp thư, không có hộp thư thì c�
   const run = fresh?.runFollowUps || runFollowUps;
   const second = await run({ readSettings: async () => settings, sendMessage, now, log: () => {} });
   assert.equal(second.sent, 3, `A riêng, B công khai, F riêng: ${JSON.stringify(sent)}`);
+  assert.deepEqual(second.skipReasons, { botOff: 1 }, 'E: nhân viên tắt bot ở hộp thư');
   const byId = Object.fromEntries(sent.map(item => [item.id, item]));
   assert.match(byId[`${page}:a`].text, /^Dạ chị ơi/, 'giới tính nữ → chị');
   assert.equal(byId[`${page}:a`].privateReply, undefined);
@@ -96,7 +100,8 @@ test('runFollowUps: nhắn riêng vào hộp thư, không có hộp thư thì c�
   assert.match(byId[`${page}:f`].text, /anh còn cần em/);
   const third = await run({ readSettings: async () => settings, sendMessage, now: now + HOUR, log: () => {} });
   assert.equal(third.sent, 0);
-  assert.equal(third.skipped, 3, 'đã gửi thì không gửi lại');
+  assert.equal(third.skipped, 4, 'đã gửi thì không gửi lại (+ E bot tắt)');
+  assert.deepEqual(third.skipReasons, { alreadySent: 3, botOff: 1 });
   const status = await (fresh?.followUpStatus || followUpStatus)();
   assert.equal(status.sentTotal, 3);
   const store = await readMessagingStore();
@@ -386,4 +391,156 @@ test('nhóm đối chứng 10%: băm psid cố định, ~10% khách không đư�
   assert.equal(isFollowUpHoldout('x'), isFollowUpHoldout('x'), 'cố định theo khách');
   const status = await followUpStatus();
   assert.ok(status.lift && typeof status.lift.sent.n === 'number' && typeof status.lift.holdout.n === 'number');
+});
+
+// Kịch bản hộp thư 3 giờ đang chạy thật (inbox-remind, mẫu FOLLOW_UP_INBOX_REMIND).
+const remindSettings = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true, scenarios: [{ id: 'inbox-remind', name: 'Hộp thư im 3 giờ', trigger: 'inbox-no-reply', delayHours: 3, templateId: 'FOLLOW_UP_INBOX_REMIND' }] } });
+const resetState = () => writeFileSync(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: {} }));
+const silentSince = (conversationId, current, extra = {}) => { current.messages[conversationId] = [message('incoming', now - 5 * HOUR, extra), message('outgoing', now - 4 * HOUR)]; };
+
+test('mục 1: khách đã chọn túi (pendingOrder < 24 giờ) → nhắc giỏ bằng ORDER_ADDRESS_REMIND; bot mới hỏi vị (ASK_FLAVOR) hay giỏ quá 24 giờ → lời kịch bản như cũ', async () => {
+  const { orderRemindText } = await import('../app/follow-up.mjs');
+  const templates = remindSettings.messageTemplates;
+  const pending = { items: [{ product: 'Granola Túi Vàng 350g', code: 'GRA-VANG-H350', quantity: 2 }], key: 'GRA-VANG-H350=2', at: now - 5 * HOUR, phone: '', address: '' };
+  const text = orderRemindText({ gender: 'male', name: 'Huy Hoang', pendingOrder: pending, botLastTemplateId: 'ORDER_ADDRESS' }, templates, { now });
+  assert.match(text, /đang giữ đơn 2 Granola Túi Vàng 350g – tổng 298\.000đ cho anh/, text);
+  assert.match(text, /Anh gửi giúp em số điện thoại và địa chỉ nhận hàng đầy đủ/);
+  assert.doesNotMatch(text, /phân vân/);
+  // Đã có SĐT: chỉ xin địa chỉ; giới tính nữ → chị.
+  assert.match(orderRemindText({ gender: 'female', pendingOrder: { ...pending, phone: '0909123456' } }, templates, { now }), /cho chị ạ .* Chị gửi giúp em địa chỉ nhận hàng đầy đủ/);
+  // Giỏ quá hạn 2 giờ của bot (5 giờ) vẫn nhắc; quá 24 giờ, không giỏ, mẫu tắt thì không.
+  assert.equal(orderRemindText({ pendingOrder: { ...pending, at: now - 25 * HOUR } }, templates, { now }), '', 'giỏ quá 24 giờ');
+  assert.equal(orderRemindText({ pendingOrder: { ...pending, items: [] } }, templates, { now }), '', 'không có giỏ');
+  assert.equal(orderRemindText({ pendingOrder: pending }, { ...templates, ORDER_ADDRESS_REMIND: '' }, { now }), '', 'mẫu tắt');
+  assert.equal(orderRemindText({ pendingOrder: null }, templates, { now }), '');
+
+  // Vòng gửi: H đã chọn 2 túi vàng, im 4 giờ → nhắc giỏ; K bot vừa hỏi vị (ASK_FLAVOR), không giỏ → lời kịch bản.
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  await updateMessagingStore(current => {
+    current.conversations.push(
+      { id: `${page}:h`, pageId: page, psid: 'h', name: 'Huy Hoang', source: 'inbox', gender: 'male', genderSource: 'name', botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: now - 4 * HOUR, pendingOrder: pending },
+      { id: `${page}:k`, pageId: page, psid: 'k', name: 'Kim Anh', source: 'inbox', gender: 'female', genderSource: 'name', botLastTemplateId: 'ASK_FLAVOR', botLastReplyAt: now - 4 * HOUR, pendingOrder: null }
+    );
+    silentSince(`${page}:h`, current, { text: 'lấy 2 túi vàng' });
+    silentSince(`${page}:k`, current, { text: 'cho mình 1 túi' });
+    return null;
+  });
+  resetState();
+  const fresh = await import(`../app/follow-up.mjs?remind=${Date.now()}`);
+  const sent = [];
+  const summary = await fresh.runFollowUps({ readSettings: async () => remindSettings, sendMessage: async (c, p) => { sent.push({ id: c.id, text: p.text }); return { message: { mid: 'x' } }; }, now, quietHours: false, log: () => {} });
+  const byId = Object.fromEntries(sent.map(item => [item.id, item.text]));
+  assert.match(byId[`${page}:h`], /^Dạ em vẫn đang giữ đơn 2 Granola Túi Vàng 350g – tổng 298\.000đ cho anh/, JSON.stringify(sent));
+  assert.doesNotMatch(byId[`${page}:h`], /phân vân/);
+  assert.match(byId[`${page}:k`], /^Dạ chị ơi, em thấy mình đang quan tâm granola/);
+  assert.ok(summary.sent >= 2);
+  const state = await fresh.readFollowUpState();
+  assert.equal(state.sent[`inbox-remind:110:h`].templateId, 'ORDER_ADDRESS_REMIND', 'ghi lại đã nhắc bằng mẫu giỏ');
+  assert.equal(state.sent[`inbox-remind:110:k`].templateId, undefined);
+});
+
+test('mục 2: bỏ qua khách khiếu nại / bảo hành / cần người xử lý, attention mở, bot vừa chuyển người, nhân viên đã nhắn sau tin khách, bot tắt — đếm theo lý do trong summary.skipReasons', async () => {
+  const { followUpSkipReason } = await import('../app/follow-up.mjs');
+  const inbox = extra => ({ id: 'p:q', pageId: 'p', psid: 'q', source: 'inbox', ...extra });
+  const storeOf = (messages = []) => ({ conversations: [], messages: { 'p:q': messages } });
+  const candidate = extra => ({ conversation: inbox(extra), inbox: inbox(extra), thread: null });
+  assert.equal(followUpSkipReason(candidate({}), storeOf()), '');
+  assert.equal(followUpSkipReason(candidate({ botEnabled: false }), storeOf()), 'botOff');
+  for (const label of ['complaint', 'warranty', 'consulting', 'handoff']) assert.equal(followUpSkipReason(candidate({ labels: [label] }), storeOf()), 'label', label);
+  assert.equal(followUpSkipReason(candidate({ labels: ['khieu-nai-rieng'] }), storeOf(), { skipLabelIds: ['khieu-nai-rieng'] }), 'label', 'thẻ theo cài đặt');
+  assert.equal(followUpSkipReason(candidate({ labels: ['followup'] }), storeOf()), '');
+  assert.equal(followUpSkipReason(candidate({ attention: true }), storeOf()), 'attention');
+  assert.equal(followUpSkipReason(candidate({ attention: { open: true, at: now } }), storeOf()), 'attention');
+  assert.equal(followUpSkipReason(candidate({ attention: { at: now - HOUR, closedAt: now } }), storeOf()), '', 'attention đã đóng');
+  for (const id of ['CSKH_HANDOFF', 'ORDER_STATUS_CHECKING', 'COMMENT_STAFF_FOLLOWUP']) assert.equal(followUpSkipReason(candidate({ botLastTemplateId: id }), storeOf()), 'handoffTemplate', id);
+  assert.equal(followUpSkipReason(candidate({ botLastTemplateId: 'PRICE_QUOTE' }), storeOf()), '');
+  assert.equal(followUpSkipReason(candidate({}), storeOf([message('incoming', now - 5 * HOUR), message('outgoing', now - 4 * HOUR, { staff: true, staffName: 'Lan' })])), 'staffReplied');
+  assert.equal(followUpSkipReason(candidate({}), storeOf([message('outgoing', now - 6 * HOUR, { staff: true }), message('incoming', now - 5 * HOUR), message('outgoing', now - 4 * HOUR)])), '', 'nhân viên nhắn TRƯỚC tin khách, bot trả lời sau: vẫn bám');
+  // Luồng bình luận: thẻ / bot tắt ở luồng bình luận cũng tính.
+  assert.equal(followUpSkipReason({ conversation: inbox({}), inbox: inbox({}), thread: { id: 't', labels: ['complaint'] } }, storeOf()), 'label');
+  assert.equal(followUpSkipReason({ conversation: { id: 't', botEnabled: false }, inbox: null, thread: { id: 't', botEnabled: false } }, storeOf()), 'botOff');
+
+  // Vòng gửi: sáu hộp thư im 4 giờ, mỗi hộp một lý do → không gửi, đếm đúng loại.
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  const cases = { p: { labels: ['complaint'] }, q: { labels: ['consulting'] }, r: { attention: true }, s: { botLastTemplateId: 'CSKH_HANDOFF' }, t: {}, u: { botEnabled: false } };
+  await updateMessagingStore(current => {
+    for (const [psid, extra] of Object.entries(cases)) {
+      current.conversations.push({ id: `${page}:${psid}`, pageId: page, psid, name: `Khách ${psid.toUpperCase()}`, source: 'inbox', gender: 'female', ...extra });
+      silentSince(`${page}:${psid}`, current);
+    }
+    current.messages[`${page}:t`] = [message('incoming', now - 5 * HOUR), message('outgoing', now - 4 * HOUR, { staff: true, staffName: 'Lan', text: 'Dạ em gọi chị nha' })];
+    return null;
+  });
+  resetState();
+  const fresh = await import(`../app/follow-up.mjs?skip=${Date.now()}`);
+  const sent = [];
+  const summary = await fresh.runFollowUps({ readSettings: async () => remindSettings, sendMessage: async c => { sent.push(c.id); return { message: { mid: 'x' } }; }, now, quietHours: false, log: () => {} });
+  for (const psid of Object.keys(cases)) assert.ok(!sent.includes(`${page}:${psid}`), `không gửi cho ${psid}`);
+  assert.deepEqual(summary.skipReasons, { label: 2, attention: 1, handoffTemplate: 1, staffReplied: 1, botOff: 1 });
+  assert.equal(summary.skipped, 6);
+});
+
+test('mục 3: xưng hô theo conversation.gender — nam "anh", nữ "chị", chưa rõ "anh/chị"; "anh/chị" viết sẵn trong mẫu cũng đổi (ca Huy Hoang: gender male → anh)', () => {
+  const template = 'Dạ {title} ơi, {Title} còn phân vân không ạ? Em gửi anh/chị bảng giá, Anh/chị xem nha.';
+  assert.equal(renderFollowUpMessage(template, { gender: 'male', genderSource: 'name', name: 'Huy Hoang' }), 'Dạ anh ơi, Anh còn phân vân không ạ? Em gửi anh bảng giá, Anh xem nha.');
+  assert.equal(renderFollowUpMessage(template, { gender: 'female', genderSource: 'pancake', name: 'Huy Hoang' }), 'Dạ chị ơi, Chị còn phân vân không ạ? Em gửi chị bảng giá, Chị xem nha.');
+  // gender undefined: KHÔNG được lấy giới tính khách trước còn trong trạng thái module chatbot-templates (lỗi từng ra "chị").
+  for (const gender of ['', undefined, 'other']) assert.equal(renderFollowUpMessage(template, { gender }), 'Dạ anh/chị ơi, Anh/chị còn phân vân không ạ? Em gửi anh/chị bảng giá, Anh/chị xem nha.', `gender=${gender}`);
+  // Mẫu FOLLOW_UP_INBOX_REMIND thật với khách nam.
+  const live = remindSettings.messageTemplates.FOLLOW_UP_INBOX_REMIND;
+  assert.match(renderFollowUpMessage(live, { gender: 'male' }), /^Dạ anh ơi, .* Anh còn phân vân/);
+  assert.doesNotMatch(renderFollowUpMessage(live, { gender: 'male' }), /chị/);
+});
+
+test('mục 4: ưu đãi 36 giờ gửi thẳng: không tra được Pancake/POS → hoãn; tra lỗi → hoãn (không coi là chưa có đơn); đơn 14 ngày ở hội thoại chị em hay trùng tên → không gửi', async () => {
+  const { recentOrderElsewhere } = await import('../app/follow-up.mjs');
+  const DAY = 24 * HOUR;
+  // Đơn ở luồng bình luận cùng khách (cùng Page + psid), đơn trùng tên (≥ 2 chữ), đơn hủy / quá 14 ngày / tên 1 chữ thì không.
+  const me = { id: 'x:1', pageId: 'x', psid: '1', name: 'Phan Kim' };
+  const storeWith = (...others) => ({ conversations: [me, ...others] });
+  assert.match(recentOrderElsewhere(storeWith({ id: 'x:comment:1', pageId: 'x', psid: '1', customerOrders: [{ id: 'o', createdAt: now - 2 * DAY }] }), me, now), /hội thoại khác/);
+  assert.equal(recentOrderElsewhere(storeWith({ id: 'x:comment:1', pageId: 'x', psid: '1', customerOrders: [{ id: 'o', createdAt: now - 2 * DAY, processingStatus: 'cancelled' }] }), me, now), '', 'đơn hủy');
+  assert.equal(recentOrderElsewhere(storeWith({ id: 'x:comment:1', pageId: 'x', psid: '1', customerOrders: [{ id: 'o', createdAt: now - 20 * DAY }] }), me, now), '', 'quá 14 ngày');
+  assert.match(recentOrderElsewhere(storeWith({ id: 'x:9', pageId: 'x', psid: '9', name: 'Ai đó', customerOrders: [{ id: 'o', name: 'phan  kim', createdAt: now - 3 * DAY }] }), me, now), /trùng tên/);
+  assert.equal(recentOrderElsewhere(storeWith({ id: 'x:9', pageId: 'x', psid: '9', customerOrders: [{ id: 'o', name: 'Kim', createdAt: now - 3 * DAY }] }), { ...me, name: 'Kim' }, now), '', 'tên 1 chữ không so');
+  assert.equal(recentOrderElsewhere(storeWith(), me, now), '');
+
+  const trial = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true, scenarios: [{ id: 'inbox-trial-freeship', name: 'Dùng thử', trigger: 'inbox-no-reply', delayHours: 3, templateId: 'FOLLOW_UP_TRIAL_FREESHIP', freeShipDays: 7 }] } });
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  await updateMessagingStore(current => {
+    // V: vừa mua 3 túi ở POS, đơn gắn vào luồng bình luận (không nằm trong hộp thư). W: đơn trùng tên ở hội thoại khác. Y: khách mới thật.
+    current.conversations.push(
+      { id: `${page}:v`, pageId: page, psid: 'v', name: 'Phan Kim', source: 'inbox', gender: 'female' },
+      { id: `${page}:comment:v:p1`, pageId: page, psid: 'v', name: 'Phan Kim', source: 'comment', customerOrders: [{ id: 'pos1', name: 'Phan Kim', createdAt: now - 2 * DAY, total: 447000, source: 'POS' }] },
+      { id: `${page}:w`, pageId: page, psid: 'w', name: 'Trần Thu Hà', source: 'inbox', gender: 'female' },
+      { id: `${page}:z`, pageId: page, psid: 'z', name: 'Hà Trần', source: 'inbox', customerOrders: [{ id: 'ld1', name: 'Trần Thu Hà', createdAt: now - 3 * DAY, total: 298000 }] },
+      { id: `${page}:y`, pageId: page, psid: 'y', name: 'Lê Văn Yên', source: 'inbox', gender: 'male' }
+    );
+    for (const psid of ['v', 'w', 'y']) silentSince(`${page}:${psid}`, current);
+    return null;
+  });
+  resetState();
+  const fresh = await import(`../app/follow-up.mjs?trial14=${Date.now()}`);
+  const sent = [];
+  const run = options => fresh.runFollowUps({ readSettings: async () => trial, sendMessage: async c => { sent.push(c.id); return { message: { mid: 'x' } }; }, now, quietHours: false, log: () => {}, ...options });
+  // 1) Không có conversationInfo: khách vừa mua bị loại theo kho CRM; khách mới bị hoãn, KHÔNG gửi mù.
+  const first = await run({});
+  assert.equal(first.sent, 0);
+  assert.ok(first.deferred >= 1, `hoãn khi không tra được: ${JSON.stringify(first)}`);
+  assert.equal(first.returning, 2);
+  let state = await fresh.readFollowUpState();
+  assert.match(state.sent['inbox-trial-freeship:110:v'].error, /hội thoại khác/);
+  assert.match(state.sent['inbox-trial-freeship:110:w'].error, /trùng tên/);
+  assert.equal(state.sent['inbox-trial-freeship:110:y'], undefined);
+  // 2) Tra Pancake/POS lỗi: hoãn, không gửi.
+  const second = await run({ conversationInfo: async () => { throw new Error('Pancake 500'); } });
+  assert.equal(second.sent, 0);
+  assert.ok(second.deferred >= 1);
+  assert.deepEqual(sent, []);
+  // 3) Tra được, không có đơn: gửi ưu đãi cho khách mới.
+  const third = await run({ conversationInfo: async () => ({ succeedOrderCount: 0, recentOrders: 0, posOrders: 0, crmOrders: 0 }) });
+  assert.ok(sent.includes(`${page}:y`), JSON.stringify({ third, sent }));
+  assert.ok(!sent.includes(`${page}:v`) && !sent.includes(`${page}:w`));
+  state = await fresh.readFollowUpState();
+  assert.equal(state.sent['inbox-trial-freeship:110:y'].via, 'private');
 });

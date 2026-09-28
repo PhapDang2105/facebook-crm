@@ -97,6 +97,9 @@ export function normalizeGift(item) {
     // The rule: earned once the order holds at least this many units of
     // anything, unless one of the excluded products is in the basket.
     minQuantity: Math.max(1, Math.round(Number(item?.minQuantity) || 1)),
+    // Tối đa (túi): 0 = không giới hạn (dữ liệu cũ không có trường này). Quà Tặng
+    // LIVE chỉ tặng đơn ĐÚNG 2 túi (min 2, max 2); đơn 3 túi nhận bát + muỗng.
+    maxQuantity: Math.max(0, Math.round(Number(item?.maxQuantity) || 0)),
     excludedSkus: [...new Set((Array.isArray(item?.excludedSkus) ? item.excludedSkus : []).map(normalizeSkuText).filter(Boolean))].slice(0, 100),
     // Warehouse SKU and weight so the export can list the gift as a shipped line.
     sku: normalizeSkuText(item?.sku).slice(0, 80),
@@ -189,7 +192,8 @@ export function parseComboKey(key) {
 
 /**
  * Active gifts a basket earns under the rules in Cài đặt → Quà tặng: enough
- * units in total, and none of the gift's excluded products in the basket.
+ * units in total (and not more than maxQuantity when one is set), and none of
+ * the gift's excluded products in the basket.
  */
 export function giftsForKey(key) {
   const lines = parseComboKey(key);
@@ -197,6 +201,8 @@ export function giftsForKey(key) {
   const total = lines.reduce((sum, line) => sum + line.quantity, 0);
   return readGiftStoreSync().items.filter(gift => gift.active
     && total >= gift.minQuantity
+    // maxQuantity > 0 là "tặng tới N túi": tổng túi vượt N thì không tặng nữa.
+    && (!gift.maxQuantity || total <= gift.maxQuantity)
     && !lines.some(line => gift.excludedSkus.includes(line.sku)));
 }
 

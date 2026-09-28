@@ -273,3 +273,17 @@ test('sửa đơn có quà bám đuổi trong 60 phút: đổi vị vẫn 2 túi
   const three = renderChatbotReply({ template_id: 'ORDER_UPDATE', Product_N1: 'Granola Túi Xanh 450g', No_A: '3' }, templates, { ...ctx, messageText: 'lên 3 túi xanh' });
   assert.equal(three.order.promoGift, undefined, '3 túi: quà theo bảng chung, không ghi quà bám đuổi');
 });
+
+test('vòng 9: khách giữ ưu đãi hỏi giá 2 túi / combo 2 → TRIAL_PRICE; "Có a" sau PACKAGING_INFO → rời luồng; socola là Túi Nâu; xanh mint (hàng live) không phải Túi Xanh', () => {
+  const trial = offer();
+  for (const text of ['2 túi giá bao nhiêu', 'combo 2 túi bn', '2 gói bao nhiêu tiền', 'combo 2 giá sao']) {
+    assert.equal(trialStep({ text, trial }).value?.template_id, 'TRIAL_PRICE', text);
+  }
+  assert.equal(trialStep({ text: 'Có a', trial, lastTemplateId: 'PACKAGING_INFO' }).exit, 'converted');
+  assert.equal(trialStep({ text: 'có', trial, lastTemplateId: 'PACKAGING_INFO' }).exit, 'converted');
+  assert.equal(trialStep({ text: 'lấy 1 túi socola', trial, now }).value?.Product_N1, 'Granola Túi Nâu vị cacao 350g');
+  assert.equal(trialStep({ text: 'chocolate nha', trial, now }).value?.Product_N1, 'Granola Túi Nâu vị cacao 350g');
+  assert.equal(trialStep({ text: '1 xanh 1 sô cô la', trial, now }).exit, 'combo2');
+  assert.equal(trialStep({ text: 'lấy 1 túi xanh mint', trial, now }).exit, 'converted', 'túi Tropical: đơn thường, nhân viên/mô hình lo');
+  assert.notEqual(trialStep({ text: 'xanh bạc hà nha', trial, now }).value?.Product_N1, 'Granola Túi Xanh 450g');
+});

@@ -151,7 +151,8 @@ export const heartline = { display: '0899 677 899', tel: '0899677899' };
 
 // Biểu tượng nội tuyến (không tải ngoài). Nét 2px, màu theo currentColor.
 const icons = {
-  messenger: `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="32" fill="#0084ff"/><path fill="#fff" d="M32 14c-10.5 0-19 7.9-19 17.7 0 5.6 2.8 10.6 7.1 13.8V52l6.6-3.6c1.7.5 3.5.7 5.3.7 10.5 0 19-7.9 19-17.7S42.5 14 32 14zm1.9 23.8-4.8-5.2-9.5 5.2 10.4-11 5 5.2 9.3-5.2-10.4 11z"/></svg>`,
+  // Logo Messenger chính thức (tệp webp 256px), phục vụ qua đường công khai /q/brand/.
+  messenger: `<img src="/q/brand/messenger.webp" alt="" width="56" height="56">`,
   // Logo Zalo chính thức (tệp webp), phục vụ qua đường công khai /q/brand/ như logo thương hiệu.
   zalo: `<img src="/q/brand/zalo.webp" alt="" width="56" height="56">`,
   guide: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,

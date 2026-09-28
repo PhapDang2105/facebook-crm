@@ -387,3 +387,28 @@ test('địa chỉ ghi theo đơn vị sau sáp nhập 2025: không đoán phư�
   // Sai chính tả nhẹ một phường có thật không bị coi là đơn vị mới.
   assert.equal(resolveAddress('phường Nguyễn Trãi, Hà Nội').postMerger, false);
 });
+
+test('nhẹ (d): "Quận 9"/"Quận 2" là tên cũ của Thành phố Thủ Đức — khách đã ghi quận, chuẩn hóa về Thành phố Thủ Đức (không giữ nguyên chữ)', async () => {
+  const { districtMentioned } = await import('../app/processing/locations.mjs');
+  const hiepPhu = describeDeliveryAddress('12 Lê Văn Việt, Phường Hiệp Phú, Quận 9, TP Hồ Chí Minh');
+  assert.equal(hiepPhu.keepAsTyped, false);
+  assert.equal(hiepPhu.canonical, '12 Lê Văn Việt, Phường Hiệp Phú, Thành phố Thủ Đức, TP Hồ Chí Minh');
+  assert.equal(describeDeliveryAddress('12 Lê Văn Việt, Hiệp Phú, Q9, HCM').keepAsTyped, false);
+  assert.equal(describeDeliveryAddress('5 Nguyễn Duy Trinh, Phường Bình Trưng Tây, Quận 2, TP HCM').keepAsTyped, false);
+  // Không ghi quận: máy chỉ suy từ phường → vẫn giữ nguyên chữ khách ghi.
+  assert.equal(describeDeliveryAddress('12 Lê Văn Việt, Phường Hiệp Phú, TP Hồ Chí Minh').keepAsTyped, true);
+  const thuDuc = resolveAddress('Phường Hiệp Phú, Quận 9, TP Hồ Chí Minh').district;
+  assert.equal(districtMentioned('Phường Hiệp Phú, Quận 9', thuDuc), true);
+  assert.equal(districtMentioned('Phường Hiệp Phú', thuDuc), false);
+  assert.equal(districtMentioned('số 9, Phường Hiệp Phú', thuDuc), false, 'số nhà "9" không phải Quận 9');
+});
+
+test('khách chỉ gửi thêm tên tỉnh cho địa chỉ đã gửi: ghép, không thay cả địa chỉ (28/09)', () => {
+  const merged = mergeAddressFragment('thái nguyên', 'Xóm 3 Vô Tranh Phú Lương');
+  assert.equal(merged, 'Xóm 3 Vô Tranh Phú Lương, thái nguyên');
+  assert.deepEqual(names(resolveAddress(merged)), ['Thái Nguyên', 'Huyện Phú Lương', 'Xã Vô Tranh']);
+  // Địa chỉ mới đầy đủ có tỉnh vẫn thay địa chỉ cũ như trước.
+  assert.equal(mergeAddressFragment('12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM', 'Xóm 3 Vô Tranh Phú Lương'), '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM');
+  // Địa chỉ cũ đã có tỉnh: tên tỉnh khác gửi sau là địa chỉ mới.
+  assert.equal(mergeAddressFragment('hà nội', 'Xóm 3, Vô Tranh, Phú Lương, Thái Nguyên'), 'hà nội');
+});

@@ -39,6 +39,20 @@ export function posStreet(order) {
   return street.replace(/^GXN\b[\s,.-]*/i, '').trim();
 }
 
+/**
+ * Số tiền khách trả của đơn POS: `cod` nếu POS có, không thì tiền hàng
+ * (total_price) − giảm giá + phí ship. total_price là tiền hàng trước giảm giá,
+ * lấy thẳng thì đơn landing combo ghi cao hơn số khách thật trả.
+ */
+export function posOrderTotal(order = {}) {
+  const cod = Number(order.cod);
+  if (order.cod !== undefined && order.cod !== null && order.cod !== '' && Number.isFinite(cod) && cod > 0) return Math.round(cod);
+  const goods = Number(order.total_price) || 0;
+  const discount = Number(order.total_discount) || 0;
+  const shipping = order.is_free_shipping ? 0 : Number(order.shipping_fee) || 0;
+  return Math.max(0, Math.round(goods - discount + shipping));
+}
+
 /** Một đơn POS → payload cùng dạng với webhook Webcake. */
 export function posOrderToPayload(order) {
   const address = order.shipping_address || {};
@@ -59,7 +73,7 @@ export function posOrderToPayload(order) {
     phone: String(order.bill_phone_number || address.phone_number || '').trim(),
     address: fullAddress,
     products,
-    total: Number(order.total_price) || 0,
+    total: posOrderTotal(order),
     status: order.is_abandoned_order ? 'Form chưa hoàn tất' : 'Form hoàn tất',
     inserted_at: posTimeToWebcake(order.inserted_at),
     location: String(order.link || ''),

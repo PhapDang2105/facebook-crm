@@ -103,7 +103,7 @@ export async function syncPageConversations(pageId, { limit = 25 } = {}) {
  * (opened here if they never wrote in) — the comment thread keeps only
  * comments, the way Facebook itself separates the two.
  */
-async function sendCommentReply(conversation, { text, imageUrl, privateReply }) {
+async function sendCommentReply(conversation, { text, imageUrl, privateReply, staff = false, followUp = false }) {
   const body = String(text || imageUrl || '').trim();
   if (!body) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });
   if (!conversation.lastCommentId) throw Object.assign(new Error('Chưa có bình luận nào của khách để trả lời.'), { statusCode: 400 });
@@ -121,7 +121,10 @@ async function sendCommentReply(conversation, { text, imageUrl, privateReply }) 
     text: body,
     createdAt: Date.now(),
     status: 'sent',
-    ...(privateReply ? { privateReply: true } : { commentId: id, parentId: conversation.lastCommentId })
+    ...(privateReply ? { privateReply: true } : { commentId: id, parentId: conversation.lastCommentId }),
+    // Nhân viên trả lời bình luận từ CRM (công khai hay nhắn riêng): cờ staff như tin hộp thư.
+    ...(staff ? { staff: true, staffName: 'CRM' } : {}),
+    ...(followUp ? { followUp: true } : {})
   };
   const saved = await updateMessagingStore(store => {
     const outcome = privateReply
@@ -155,23 +158,24 @@ export async function moderateComment(conversation, message, { like = false, hid
 /** Sends a reply through the Send API and records it in the local conversation. */
 // `staff: true` = nhân viên gửi từ giao diện CRM (không phải bot/bám đuổi): tin lưu kèm cờ staff để bot
 // biết nhân viên đang xử lý hội thoại (cùng cách Pancake gắn cờ cho tin admin gửi trong Pancake).
-export async function sendConversationMessage(conversation, { text = '', attachment = null, imageUrl = '', imageUrls = [], template = null, templateText = '', privateReply = false, staff = false }) {
+// `followUp: true` = tin bám đuổi (follow-up.mjs): lưu cờ followUp để bám đuổi không coi là "Page trả lời".
+export async function sendConversationMessage(conversation, { text = '', attachment = null, imageUrl = '', imageUrls = [], template = null, templateText = '', privateReply = false, staff = false, followUp = false }) {
   // Hội thoại đến từ Pancake (Page vận hành trong Pancake, CRM không có token
   // Meta của Page đó): gửi ngược qua Public API của Pancake.
   if (conversation.pancakeConversationId) {
     // privateReply phải đi theo: thiếu nó, tin nhắn riêng cho người bình luận
     // bị đăng thành bình luận công khai (đã xảy ra với bảng giá).
-    return sendConversationMessageViaPancake(conversation, { text, templateText, attachment, imageUrl, imageUrls, privateReply, staff });
+    return sendConversationMessageViaPancake(conversation, { text, templateText, attachment, imageUrl, imageUrls, privateReply, staff, followUp });
   }
   // Messenger Send API chỉ nhận một ảnh mỗi tin: nhiều ảnh thì gửi lần lượt.
   if (Array.isArray(imageUrls) && imageUrls.length) {
     let last = null;
-    for (const url of [imageUrl, ...imageUrls].filter(Boolean)) last = await sendConversationMessage(conversation, { imageUrl: url, privateReply, staff });
+    for (const url of [imageUrl, ...imageUrls].filter(Boolean)) last = await sendConversationMessage(conversation, { imageUrl: url, privateReply, staff, followUp });
     return last;
   }
   if (conversation.source === 'comment') {
     if (attachment || template) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });
-    return sendCommentReply(conversation, { text, imageUrl, privateReply });
+    return sendCommentReply(conversation, { text, imageUrl, privateReply, staff, followUp });
   }
   const pageAccessToken = await getPageAccessToken(conversation.pageId);
   const target = { pageId: conversation.pageId, psid: conversation.psid, pageAccessToken };
@@ -212,7 +216,8 @@ export async function sendConversationMessage(conversation, { text = '', attachm
     // The uploaded bytes stay out of the store; the echo webhook supplies Meta's hosted URL.
     ...(attachment ? { name: attachment.name || '', dataUrl: '' } : {}),
     ...(imageUrl ? { name: 'anh-san-pham', dataUrl: imageUrl } : {}),
-    ...(staff ? { staff: true, staffName: 'CRM' } : {})
+    ...(staff ? { staff: true, staffName: 'CRM' } : {}),
+    ...(followUp ? { followUp: true } : {})
   };
   const saved = await updateMessagingStore(store => {
     const outcome = saveMessage(store, {

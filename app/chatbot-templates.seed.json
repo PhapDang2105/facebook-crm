@@ -11,6 +11,7 @@
   "CALLBACK_REQUEST": "Dạ em đã ghi nhận ạ, nhân viên bên em sẽ gọi lại cho mình trong giờ hành chính (8:00–17:00) nha ạ. {Title} để lại số điện thoại tiện gọi giúp em ạ.",
   "ASK_FLAVOR": "Dạ bên em có 3 vị: Túi Xanh nguyên bản 450g, Túi Vàng nhiều hạt 350g và Túi Nâu cacao 350g; mix vị nào cũng được giá combo, từ 2 túi miễn phí vận chuyển ạ. {Title} muốn lấy vị nào và mỗi vị mấy túi để em lên đơn nha ạ?",
   "ORDER_INFO_ASK_FLAVOR": "Dạ em đã nhận SĐT và địa chỉ của {title} rồi ạ 💛 {Title} lấy Túi Xanh nguyên bản 450g, Túi Vàng nhiều hạt 350g hay Túi Nâu cacao 350g, mỗi loại mấy túi để em lên đơn liền cho mình nha 🌾",
+  "ORDER_PHONE_ASK_FLAVOR": "Dạ em đã nhận SĐT của {title} rồi ạ 💛 {Title} lấy Túi Xanh nguyên bản 450g, Túi Vàng nhiều hạt 350g hay Túi Nâu cacao 350g, mỗi loại mấy túi, kèm địa chỉ nhận hàng đầy đủ để em lên đơn liền cho mình nha 🌾",
   "ASK_FLAVOR_NGUYENBAN": "Dạ vị nguyên bản nhà em có Túi Xanh 450g (dễ ăn, cân bằng) và Túi Vàng 350g (nhiều hạt hơn) ạ 💛 {Title} lấy loại nào và mấy túi để em lên đơn nha 🌾",
   "RECOMMEND_BEGINNER": "Dạ mới ăn lần đầu thì {title} chọn Túi Xanh nguyên bản 450g ạ: vị cân bằng, dễ ăn, bán chạy nhất nhà Nắng 💛 Thích nhiều hạt hơn thì Túi Vàng, thích vị cacao thì Túi Nâu. {Title} lấy 1 túi thử hay combo 2 túi miễn ship để em lên đơn nha 🌾",
   "COMBO3_FLAVOR": "Dạ combo 3 túi mình chọn vị thoải mái ạ: 3 túi cùng vị hay mix Xanh + Vàng + Nâu đều được, miễn phí vận chuyển và tặng bộ bát muỗng dừa 🎁 {Title} lấy vị nào để em lên đơn nha 🌾",

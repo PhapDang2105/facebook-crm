@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ADDRESS_WORDS, askedSlotOf, countBags, countColours, featuresOf, normalizeIntentText } from '../app/processing/intent-features.mjs';
+import { ADDRESS_WORDS, askedSlotOf, canonicalTemplateId, countBags, countColours, featuresOf, intentRowFromRecord, intentRowOf, isOrderStepContext, labelTemplateId, normalizeIntentText, orderContextOf, prevBotAsksOf } from '../app/processing/intent-features.mjs';
 
 test('askedSlotOf: mã mẫu nói rõ thì theo mã; mẫu điền {missing} thì đọc câu bot; không có gì → rỗng', () => {
   assert.equal(askedSlotOf('Dạ để lên đơn đúng tuyến, chị cho em xin số điện thoại và địa chỉ trước sáp nhập', 'ORDER_ADDRESS'), 'phone_address');
@@ -53,4 +53,61 @@ test('featuresOf: không có ctx v2 → chỉ đặc trưng cũ + đặc trưng 
   assert.ok(oldOrder.has('ctx:order') && !oldOrder.has('ctx:order<60m'));
   assert.ok(!featuresOf({ text: 'đơn em sao rồi', hasOrder: true, orderAgeMin: 600 }).has('ctx:order<60m'));
   assert.ok(!featuresOf({ text: 'đơn em sao rồi', hasOrder: false, orderAgeMin: 5 }).has('ctx:order'));
+});
+
+test('normalizeIntentText: che như nhật ký (maskPersonal) — SĐT/email/dãy số dài; giá "1.250.000" KHÔNG là <sdt>', () => {
+  assert.equal(normalizeIntentText('tổng 1.250.000đ nha'), 'tong 1 250 000d nha');
+  assert.ok(!normalizeIntentText('giá 174.000đ, 2 túi 348k').includes('<sdt>'));
+  assert.equal(normalizeIntentText('gọi 0912 345 678 nhé'), 'goi <sdt> nhe');
+  assert.equal(normalizeIntentText('mail a.b@gmail.com stk 123456789012'), 'mail <email> stk <so>');
+  assert.equal(normalizeIntentText('<sdt>'), '<sdt>', 'chữ đã che giữ nguyên token');
+  assert.equal(countBags('túi xanh x2 túi vàng x 1'), 3, 'số sau túi (như engine bagCountInText)');
+  assert.equal(countBags('lấy combo 3'), 3);
+  assert.equal(countBags('combo 3 túi'), 3, 'không đếm đôi');
+});
+
+test('canonicalTemplateId / isOrderStepContext / labelTemplateId: mã con → mã engine lưu; bước đơn như engine', () => {
+  for (const id of ['ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_CART_LINE', 'UPSELL_TWO_BAGS', 'ORDER_ADDRESS_REMIND']) assert.equal(canonicalTemplateId(id), 'ORDER_ADDRESS', id);
+  assert.deepEqual([canonicalTemplateId('ORDER_UPDATED'), canonicalTemplateId('ORDER_CANCELLED'), canonicalTemplateId('PRICE_QUOTE'), canonicalTemplateId('')], ['ORDER_UPDATE', 'ORDER_CANCEL', 'PRICE_QUOTE', '']);
+  for (const id of ['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_UPDATED', 'ASK_FLAVOR', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'ORDER_CART_LINE']) assert.ok(isOrderStepContext(id), id);
+  for (const id of ['PRICE_QUOTE', 'GENERAL_INFO', 'ORDER_INFO_ASK_FLAVOR', 'ASK_PRODUCT', '']) assert.ok(!isOrderStepContext(id), id);
+  assert.deepEqual([labelTemplateId('ORDER_UPDATE'), labelTemplateId('ORDER_CANCEL'), labelTemplateId('ORDER_NOTE'), labelTemplateId('GENERAL_INFO')], ['ORDER_UPDATED', 'ORDER_CANCELLED', 'ORDER_NOTE_ADDED', 'GENERAL_INFO']);
+});
+
+test('prevBotAsksOf: mã + giỏ như engine.prevBotAsks, không biết giỏ thì đọc chữ câu bot', () => {
+  const pending = extra => ({ key: 'k', at: Date.now(), items: [{ product: 'Granola Túi Xanh 450g', quantity: 2 }], ...extra });
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_ADDRESS', pendingOrder: pending() }), 'phone_address');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_ADDRESS', pendingOrder: pending({ phone: '0912345678' }) }), 'address');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_ADDRESS', pendingOrder: pending({ address: '12 Lê Lợi' }) }), 'phone');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_ADDRESS', pendingOrder: null }), 'phone_address', 'biết là không có giỏ → như engine');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_ADDRESS_PARTIAL', prevBotText: 'Dạ em đã nhận SĐT rồi ạ, chị cho em xin địa chỉ để lên đơn' }), 'address', 'ngoại tuyến: đọc {missing}');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_ADDRESS' }), 'phone_address');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_INFO_ASK_FLAVOR' }), 'flavor');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_ADDRESS_OLD_ASK_PHONE' }), 'phone');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'ORDER_CONFIRMATION' }), 'confirm', 'engine rỗng → askedSlotOf theo mã');
+  assert.equal(prevBotAsksOf({ lastTemplateId: '', prevBotText: 'Chị lấy mấy túi ạ' }), 'quantity', 'câu nhân viên: đọc chữ');
+  assert.equal(prevBotAsksOf({ lastTemplateId: 'GENERAL_INFO', prevBotText: 'Dạ bảng giá bên em ạ' }), '');
+});
+
+test('orderContextOf / intentRowOf: MỘT định nghĩa row (đơn chưa hủy < 24 giờ, giỏ còn hạn, mã con quy về mã engine)', () => {
+  const now = 1_800_000_000_000;
+  const minute = 60_000;
+  assert.deepEqual(orderContextOf([{ createdAt: now - 30 * minute }], now), { hasOrder: true, orderAgeMin: 30 });
+  assert.deepEqual(orderContextOf([{ createdAt: now - 30 * minute, processingStatus: 'cancelled' }], now), { hasOrder: false, orderAgeMin: null }, 'đơn hủy không tính');
+  assert.deepEqual(orderContextOf([{ createdAt: now - 25 * 60 * minute }], now), { hasOrder: false, orderAgeMin: 1500 }, 'quá 24 giờ: không hasOrder (vẫn biết tuổi)');
+  assert.deepEqual(orderContextOf([{ createdAt: now + minute }], now), { hasOrder: false, orderAgeMin: null }, 'đơn đặt SAU tin không tính');
+  // Engine: có pendingOrder + orders thật.
+  const engineRow = intentRowOf({ text: '0912 345 678 12 Nguyễn Trãi phường 5 quận 3', lastTemplateId: 'ORDER_ADDRESS', pendingOrder: { key: 'k', at: now - 10 * minute, items: [{ product: 'Granola Túi Xanh 450g', quantity: 2 }] }, orders: [{ createdAt: now - 3 * 24 * 60 * minute }], now, source: 'inbox', phoneInText: '0912345678' });
+  assert.deepEqual(engineRow, { text: '0912 345 678 12 Nguyễn Trãi phường 5 quận 3', source: 'inbox', lastTemplate: 'ORDER_ADDRESS', lastWasOrderStep: true, hasBasket: true, livestream: false, hasOrder: false, orderAgeMin: 4320, prevBotAsks: 'phone_address', phoneInText: true, addressInText: true, bagCount: 0 });
+  assert.equal(intentRowOf({ text: 'ok', lastTemplateId: 'ORDER_ADDRESS', pendingOrder: { key: 'k', at: now - 3 * 60 * minute, items: [{ product: 'X', quantity: 1 }] }, now }).hasBasket, false, 'giỏ quá 2 giờ hết hạn');
+  // Ngoại tuyến: mã con, hasBasket/hasOrder đưa vào; hasOrder chỉ khi < 24 giờ.
+  const offline = intentRowOf({ text: '<sdt>', lastTemplateId: 'ORDER_CART_LINE', prevBotText: 'Dạ đơn của chị gồm 2 túi xanh, chị cho em xin số điện thoại và địa chỉ', hasBasket: true, hasOrder: true, orderAgeMin: 2000, now });
+  assert.deepEqual([offline.lastTemplate, offline.lastWasOrderStep, offline.hasBasket, offline.hasOrder, offline.prevBotAsks, offline.phoneInText], ['ORDER_ADDRESS', true, true, false, 'phone_address', true]);
+  assert.equal(intentRowOf({ text: 'x', prevBotAsks: 'address', lastTemplateId: 'ORDER_ADDRESS' }).prevBotAsks, 'address', 'giá trị engine đã tính (nhật ký) được giữ');
+  // Dòng dataset v1 (mã con, lastWasOrderStep cũ sai, không prevBotAsks) → như lúc chạy; idempotent.
+  const record = { id: 'r', label: 'ORDER_CONFIRMATION', labelSource: 'llm', weak: true, text: '<sdt>', prevBot: 'Dạ em đã nhận địa chỉ, chị cho em xin số điện thoại nha', lastTemplate: 'ORDER_ADDRESS_PARTIAL', lastWasOrderStep: false, hasBasket: true, hasOrder: true, orderAgeMin: 5000, at: now };
+  const fixed = intentRowFromRecord(record);
+  assert.deepEqual([fixed.label, fixed.weak, fixed.lastTemplate, fixed.lastWasOrderStep, fixed.prevBotAsks, fixed.hasOrder, fixed.orderAgeMin], ['ORDER_CONFIRMATION', true, 'ORDER_ADDRESS', true, 'phone', false, 5000]);
+  assert.deepEqual(intentRowFromRecord(fixed), fixed, 'idempotent');
+  assert.deepEqual([...featuresOf(fixed)].sort(), [...featuresOf(intentRowOf({ text: '<sdt>', lastTemplateId: 'ORDER_ADDRESS', prevBotText: record.prevBot, hasBasket: true, hasOrder: true, orderAgeMin: 5000, now }))].sort(), 'đặc trưng dữ liệu = đặc trưng lúc chạy');
 });

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { syntheticDataset } from './helpers/intent-synthetic.mjs';
-import { ANSWER_SUBGROUPS, CASCADE_FINE_GROUPS, CASCADE_GROUPS, GROUP_OF_TEMPLATE, SUBGROUP_OF_TEMPLATE, cascadeFromRaw, cascadeSafeTemplates, fineGroupOf, groupOf, loadCascadeFrom, predictCascade, predictCascadeWith, probabilitiesOf, subGroupOf, sumByGroup } from '../app/processing/intent-cascade.mjs';
+import { ANSWER_SUBGROUPS, CASCADE_FINE_GROUPS, CASCADE_GROUPS, GROUP_OF_TEMPLATE, SUBGROUP_OF_TEMPLATE, cascadeFromRaw, cascadeSafeTemplates, fineGroupOf, groupOf, isIntentionalOther, loadCascadeFrom, predictCascade, predictCascadeWith, probabilitiesOf, subGroupOf, sumByGroup } from '../app/processing/intent-cascade.mjs';
 import { intentSafeTemplates, loadIntentModelFrom, predictIntentWith } from '../app/processing/intent-model.mjs';
 import { trainClassifier } from '../tools-intent/train-intent.mjs';
 import { prepareCascadeRows, trainCascade, trainCascadeModels } from '../tools-intent/train-cascade.mjs';
@@ -36,7 +36,8 @@ test('groupOf 4 nhóm tầng 1 (ANSWER = PRICE ∪ INFO ∪ SOCIAL), subGroupOf 
   assert.equal(groupOf('TRIAL_PRICE'), 'OTHER', 'trial-flow quyết, không nằm trong bảng');
   assert.equal(groupOf('COMMENT_PUBLIC_REPLY'), 'OTHER');
   assert.equal(groupOf('OTHER'), 'OTHER');
-  assert.equal(groupOf('SHOP_ORDER_RECEIVED'), 'OTHER', 'mã không có trong bảng');
+  assert.equal(groupOf('XYZ_KHONG_CO'), 'OTHER', 'mã không có trong bảng');
+  assert.equal(groupOf('SHOP_ORDER_RECEIVED'), 'ORDER', 'giỏ Facebook Shop là bước đơn (vòng 12)');
   assert.equal(groupOf(''), 'OTHER');
   assert.equal(groupOf(undefined), 'OTHER');
   assert.equal(subGroupOf('PRICE_QUOTE'), 'PRICE');
@@ -49,8 +50,8 @@ test('groupOf 4 nhóm tầng 1 (ANSWER = PRICE ∪ INFO ∪ SOCIAL), subGroupOf 
   assert.equal(fineGroupOf('ORDER_ADDRESS'), 'ORDER');
   assert.equal(fineGroupOf('WEIGHT_EXPIRY'), 'INFO');
   assert.equal(fineGroupOf('XYZ'), 'OTHER');
-  assert.equal(Object.keys(GROUP_OF_TEMPLATE).length, 52);
-  assert.equal(Object.keys(SUBGROUP_OF_TEMPLATE).length, 52);
+  assert.equal(Object.keys(GROUP_OF_TEMPLATE).length, 82);
+  assert.equal(Object.keys(SUBGROUP_OF_TEMPLATE).length, 82);
   assert.ok(Object.values(GROUP_OF_TEMPLATE).every(group => ['ORDER', 'SUPPORT', 'ANSWER'].includes(group)));
   assert.ok(Object.isFrozen(GROUP_OF_TEMPLATE) && Object.isFrozen(SUBGROUP_OF_TEMPLATE));
   assert.ok(cascadeSafeTemplates.has('PRICE_QUOTE') && cascadeSafeTemplates.has('THANK_YOU') && cascadeSafeTemplates.has('WEIGHT_EXPIRY'));
@@ -178,6 +179,22 @@ test('loadCascadeFrom / predictCascade / reloadCascadeModel: thiếu tệp → n
   }
 });
 
+test('bảng nhóm phủ mọi mẫu seed: mẫu nào cũng có nhóm, trừ mẫu OTHER CÓ CHỦ Ý (bình luận, bám đuổi, dùng thử, QR, săn deal, hậu xử lý)', () => {
+  const seed = JSON.parse(readFileSync(path.join(root, 'app', 'chatbot-templates.seed.json'), 'utf8'));
+  const unmapped = Object.keys(seed).filter(templateId => groupOf(templateId) === 'OTHER' && !isIntentionalOther(templateId));
+  assert.deepEqual(unmapped, [], 'mẫu seed rơi OTHER ngoài ý muốn');
+  for (const templateId of Object.keys(seed)) {
+    const group = groupOf(templateId);
+    assert.ok(CASCADE_GROUPS.includes(group), templateId);
+    if (isIntentionalOther(templateId)) assert.equal(group, 'OTHER', `${templateId} cố ý OTHER`);
+    else assert.ok(['ORDER', 'SUPPORT', 'ANSWER'].includes(group), templateId);
+  }
+  for (const templateId of ['KIDS_FAMILY', 'CALORIES_DIET', 'STORAGE', 'HOW_TO_USE_GRANOLA', 'STORE_ADDRESS', 'CERTIFICATION']) assert.deepEqual([groupOf(templateId), subGroupOf(templateId)], ['ANSWER', 'INFO'], templateId);
+  for (const templateId of ['ORDER_UPDATED', 'ORDER_ADDRESS_REMIND', 'ORDER_CART_LINE', 'UPSELL_TWO_BAGS', 'SHOP_ORDER_RECEIVED', 'ORDER_UPDATE', 'ORDER_CANCEL']) assert.equal(groupOf(templateId), 'ORDER', templateId);
+  assert.equal(groupOf('LIVE_ONLY_PRODUCT'), 'SUPPORT');
+  for (const templateId of ['COMMENT_PUBLIC_REPLY', 'FOLLOW_UP_INBOX_REMIND', 'TRIAL_PRICE', 'QR_OFFER', 'REPLY_ALREADY_SENT', 'LIVE_DEAL_CLAIMED']) assert.equal(groupOf(templateId), 'OTHER', templateId);
+});
+
 test('train-cascade CLI: dữ liệu tổng hợp → JSON đúng cấu trúc (cascade-2, answerMode, groupModel, 6 mô hình con, report), báo cáo giữ-out tầng (2 cách) vs phẳng', () => {
   const rows = syntheticDataset(20);
   const datasetPath = path.join(directory, 'dataset-cascade.jsonl');
@@ -232,15 +249,22 @@ test('train-cascade CLI: dữ liệu tổng hợp → JSON đúng cấu trúc (c
   // Nạp bằng loader thật và dự đoán.
   const cascade = loadCascadeFrom(outPath);
   assert.equal(predictCascadeWith(cascade, ADDRESS_ROW).templateId, 'ORDER_ADDRESS');
-  // --quiet bỏ nhật ký mô hình con nhưng giữ bảng.
+  assert.deepEqual([saved.meta.sawGolden, saved.meta.goldenExcluded, saved.meta.trainIds.hash, saved.meta.trainIds.ids.length], [null, null, 'fnv1a32', 145], 'không có --golden → không rõ; băm id dataset');
+  // --quiet im thật: chỉ dòng saved.
   const quiet = run('train-cascade.mjs', [datasetPath, outPath, '--quiet']);
   assert.equal(quiet.status, 0);
-  assert.doesNotMatch(quiet.stdout, /\[ORDER\] Dòng/);
-  assert.match(quiet.stdout, /Giữ-out end-to-end: 29 dòng/);
-  // Thiếu đối số → hướng dẫn, mã 1.
+  assert.deepEqual(quiet.stdout.trim().split('\n').length, 1, quiet.stdout);
+  assert.match(quiet.stdout, /^saved /);
+  // Thiếu đối số → hướng dẫn, mã 1; --golden không tồn tại → lỗi TRƯỚC khi huấn luyện (không ghi tệp).
   const usage = run('train-cascade.mjs', [datasetPath]);
   assert.equal(usage.status, 1);
-  assert.match(usage.stdout, /Dùng: node tools-intent\/train-cascade\.mjs/);
+  assert.match(usage.stderr, /Dùng: node tools-intent\/train-cascade\.mjs/);
+  const noGoldenOut = path.join(directory, 'cascade-no-golden.json');
+  const missingGolden = run('train-cascade.mjs', [datasetPath, noGoldenOut, '--golden', path.join(directory, 'khong-co.json')]);
+  assert.equal(missingGolden.status, 1);
+  assert.match(missingGolden.stderr, /Không thấy bộ chấm --golden/);
+  assert.ok(!existsSync(noGoldenOut), 'không huấn luyện khi --golden hỏng');
+  assert.equal(run('train-cascade.mjs', [datasetPath, outPath, '--holdout']).status, 1, 'cờ thiếu giá trị');
 });
 
 test('trainCascade (hàm): bình luận / COMMENT_* bị bỏ, nhãn ngoài bảng nhóm → OTHER kèm cảnh báo, dataset không có ruleTemplate → "không đo"', () => {
@@ -251,13 +275,13 @@ test('trainCascade (hàm): bình luận / COMMENT_* bị bỏ, nhãn ngoài bả
   rows.push({ id: 'x4', text: 'giá dùng thử', label: 'TRIAL_PRICE', labelSource: 'llm', source: 'inbox', lastTemplate: '', at: 4 });
   const lines = [];
   const { model } = trainCascade(rows, { log: line => lines.push(line), compareFlat: false });
-  assert.match(lines[0], /bỏ bình luận 1 · COMMENT_\* 1 · giữ OTHER 5 \(trong đó nhãn ngoài bảng nhóm → OTHER: 2\) → còn 147/);
-  assert.match(lines[1], /CẢNH BÁO nhãn không có trong bảng nhóm \(coi là OTHER\): (CERTIFICATION \(1\), TRIAL_PRICE \(1\)|TRIAL_PRICE \(1\), CERTIFICATION \(1\))/);
+  assert.match(lines[0], /bỏ bình luận 1 · COMMENT_\* 1 · giữ OTHER 4 \(trong đó nhãn ngoài bảng nhóm → OTHER: 1\) → còn 147/);
+  assert.match(lines[1], /CẢNH BÁO nhãn không có trong bảng nhóm \(coi là OTHER\): TRIAL_PRICE \(1\)/);
   assert.ok(lines.some(line => /tập rule-miss: không đo \(dataset không có trường ruleTemplate\)/.test(line)));
   assert.equal(model.report.heldOut.flat, null, 'compareFlat=false không huấn luyện phẳng');
   assert.equal(model.report.heldOut.ruleMiss, null);
-  assert.deepEqual(model.report.dataset.remapped, { CERTIFICATION: 1, TRIAL_PRICE: 1 });
-  assert.equal(model.report.dataset.other, 5);
+  assert.deepEqual(model.report.dataset.remapped, { TRIAL_PRICE: 1 }, 'CERTIFICATION nay thuộc INFO');
+  assert.equal(model.report.dataset.other, 4);
 });
 
 test('replay-golden --cascade: bảng phẳng vs tầng (toàn bộ, rule-miss, an toàn ANSWER), OTHER là nhóm từ chối, risk–coverage, theo 6 lớp; tệp tầng hỏng → mã 1', () => {
@@ -276,7 +300,7 @@ test('replay-golden --cascade: bảng phẳng vs tầng (toàn bộ, rule-miss, 
     { id: `p:b:${at + 3}`, text: 'đơn em tới đâu rồi', source: 'inbox', lastTemplate: '', prevBot: '', label: 'ORDER_STATUS', at: at + 3 },
     { id: `p:b:${at + 4}`, text: 'hủy đơn giúp em', source: 'inbox', lastTemplate: '', prevBot: '', label: 'ORDER_CANCELLED', at: at + 4 },
     { id: `p:c:${at + 5}`, text: 'cảm ơn shop', source: 'inbox', lastTemplate: '', prevBot: '', label: 'THANK_YOU', at: at + 5 },
-    { id: `p:c:${at + 8}`, text: 'Khách chọn mua từ Facebook Shop', source: 'inbox', lastTemplate: '', prevBot: '', label: 'SHOP_ORDER_RECEIVED', at: at + 8 },
+    { id: `p:c:${at + 8}`, text: '.', source: 'inbox', lastTemplate: '', prevBot: '', label: 'OTHER', at: at + 8 },
     { id: `p:c:${at + 6}`, text: 'ib', source: 'comment', label: 'COMMENT_PUBLIC_REPLY', at: at + 6 },
     { id: `p:c:${at + 7}`, text: 'có vị gì', source: 'inbox', label: 'SKIP', at: at + 7 }
   ] }));
@@ -306,7 +330,14 @@ test('replay-golden --cascade: bảng phẳng vs tầng (toàn bộ, rule-miss, 
   const plain = run('replay-golden.mjs', [goldenPath, '--model', flatPath]);
   assert.equal(plain.status, 0);
   assert.doesNotMatch(plain.stdout, /--cascade/);
-  const broken = run('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', path.join(directory, 'missing.json')]);
+  const missing = run('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', path.join(directory, 'missing.json')]);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /Không thấy tệp --cascade/);
+  writeFileSync(path.join(directory, 'broken.json'), '{ hỏng');
+  const broken = run('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', path.join(directory, 'broken.json')]);
   assert.equal(broken.status, 1);
-  assert.match(broken.stdout, /Không đọc được mô hình tầng/);
+  assert.match(broken.stderr, /Không đọc được mô hình tầng/);
+  // Mô hình đo có meta.trainIds → in trạng thái rò golden (bộ chấm này không nằm trong dataset tổng hợp → sạch).
+  assert.match(out, /^mô hình: .*flat-replay\.json .* · sạch golden \(0\/8 id\)/m);
+  assert.match(out, /^mô hình tầng: .* · sạch golden \(0\/8 id\)/m);
 });

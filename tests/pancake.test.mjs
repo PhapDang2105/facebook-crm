@@ -6,6 +6,8 @@ import path from 'node:path';
 
 // Hộp thư thử riêng: storePancakeEvents ghi vào messaging-store.
 process.env.META_CONVERSATIONS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-')), 'meta-conversations.json');
+// Trạng thái bám đuổi tạm (storePancakeEvents đối chiếu tin nhân viên với lời bám đuổi): không đọc tệp thật.
+process.env.FOLLOW_UPS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-fu-')), 'follow-ups.json');
 const {
   handlePancakeWebhook, isPancakeWebhookTokenValid, normalizePancakeWebhook, pancakeMessageText, pancakeTime, sendPancakeMessage
 } = await import('../app/pancake.mjs');

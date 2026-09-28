@@ -6,10 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import './helpers/seed-catalog.mjs';
-import { buildRowsFromStore, readDecisionLog, rowsFromDecisionLog } from '../tools-intent/build-dataset.mjs';
-import { customerTurns, hasBasketOf, basketItemsOf, maskPhone, POLICY_DRIFT } from '../tools-intent/dataset-context.mjs';
-import { loadSeedTemplates, relabelRows } from '../tools-intent/relabel-policy.mjs';
-import { mergeRows, trustByClass } from '../tools-intent/merge-labels.mjs';
+import { buildRowsFromStore, decisionLabelOf, parseSinceDate, readDecisionLog, rowsFromDecisionLog } from '../tools-intent/build-dataset.mjs';
+import { customerTurns, hasBasketOf, basketItemsOf, maskPhone, POLICY_DRIFT, readJsonl } from '../tools-intent/dataset-context.mjs';
+import { basketContextKnown, loadSeedTemplates, relabelRows, templatesFromSettings } from '../tools-intent/relabel-policy.mjs';
+import { goldenIndex, goldenMatch, mergeRows, trustByClass } from '../tools-intent/merge-labels.mjs';
 import { labelRows, loadCache, needsLlmLabel } from '../tools-intent/label-dataset.mjs';
 import { formatReport, parseJournal, summarize, summarizeJournal } from '../tools-intent/shadow-report.mjs';
 
@@ -297,8 +297,49 @@ test('shadow-report: bảng theo ngày từ nhật ký quyết định giả', (
   assert.equal(day.thinkingTurns, 1);
   assert.ok(Math.abs(day.cost - 0.00165) < 1e-9, `chi phí ${day.cost}`);
   const report = formatReport(days);
-  assert.match(report, /2026-09-25 \| 3 \| 2 \| 1 \| 1 \| 1✓\/0✗ \| 1✓\/1✗ \| 1✓\/0✗ \| – \| 1✓\/0✗ \| 1\/1 \| 1500\/400\/75\/10 \| 1500\/75 \| 50% \| 0\.002/);
+  assert.match(report, /\| Luật ổn \| Luật ổn định \(ẩn\) \| Luật thử \|/);
+  assert.match(report, /2026-09-25 \| 3 \| 2 \| 1 \| 1 \| – \| 1✓\/0✗ \| 1✓\/1✗ \| 1✓\/0✗ \| – \| 1✓\/0✗ \| 1\/1 \| 1500\/400\/75\/10 \| 1500\/75 \| 50% \| 0\.002/);
   assert.match(report, /Bỏ qua theo lý do: nhân viên đang xử lý ×1/);
+});
+
+test('shadow-report (vòng 12): "~" loại khỏi n cho mô hình nhỏ và tầng; tầng đoán OTHER vẫn đếm nhóm; tách luật ổn định ẩn / luật thử', () => {
+  const groupOf = id => (/^ORDER_/.test(id) ? 'ORDER' : /^(PRICE_|GENERAL_INFO)/.test(id) ? 'ANSWER' : 'OTHER');
+  const llm = { templateId: 'X', usage: { input: 10, cached: 0, output: 1, thinking: 0 } };
+  const items = [
+    // "đã gửi ở trên" (trung tính): không vào n của mô hình nhỏ lẫn tầng.
+    { day: '2026-09-27', entry: { rule: null, shadow: [], intent: { templateId: 'PRICE_QUOTE', p: 0.95, margin: 0.5 }, cascade: { group: 'ANSWER', templateId: 'PRICE_QUOTE', p: 0.95 }, llm, chosen: 'REPLY_ALREADY_SENT_INFO', final: 'REPLY_ALREADY_SENT_INFO' } },
+    { day: '2026-09-27', entry: { rule: null, shadow: [], intent: { templateId: 'PRICE_QUOTE', p: 0.95, margin: 0.5 }, cascade: { group: 'ANSWER', templateId: 'PRICE_QUOTE', p: 0.95 }, llm, chosen: 'REPLY_ALREADY_SENT', final: 'REPLY_ALREADY_SENT' } },
+    // Tầng đoán OTHER (không mẫu), thật là mẫu ngoài bảng → nhóm ✓, không vào cột mẫu.
+    { day: '2026-09-27', entry: { rule: null, shadow: [], intent: null, cascade: { group: 'OTHER', templateId: null, p: 0.9 }, llm, chosen: 'TRIAL_PRICE', final: 'TRIAL_PRICE' } },
+    // Luật ổn định chạy ẩn (không dùng thật) + luật thử đính kèm.
+    { day: '2026-09-27', entry: { rule: null, shadow: [{ name: 'TERSE_PRICE', templateId: 'GENERAL_INFO' }, { name: 'PHONE_ONLY', templateId: 'ORDER_ADDRESS' }], intent: null, llm, chosen: 'GENERAL_INFO', final: 'GENERAL_INFO' } },
+    // Có luật thật: mục shadow là luật thử, so với luật thật.
+    { day: '2026-09-27', entry: { rule: { name: 'BASKET', templateId: 'ORDER_ADDRESS' }, shadow: [{ name: 'X', templateId: 'ORDER_CONFIRMATION' }], intent: null, llm: null, chosen: 'ORDER_ADDRESS', final: 'ORDER_ADDRESS' } }
+  ];
+  const day = summarize(items, undefined, { groupOf })['2026-09-27'];
+  assert.deepEqual(day.intent['0.9'], { n: 0, ok: 0, bad: 0 }, '"~" không vào n của mô hình nhỏ');
+  assert.deepEqual(day.cascade.tpl['0.9'], { n: 0, ok: 0, bad: 0 }, '"~" và tầng không mẫu không vào cột mẫu');
+  assert.deepEqual(day.cascade.group, { n: 1, ok: 1, bad: 0, danger: 0 }, 'tầng đoán OTHER vẫn đếm nhóm');
+  assert.equal(day.cascade.byGroup.OTHER.refused, 1);
+  assert.deepEqual(day.ruleHidden, { n: 1, ok: 1, bad: 0 }, 'luật ổn định ẩn so với mẫu đã chọn');
+  assert.deepEqual(day.ruleShadow, { n: 2, ok: 0, bad: 2 }, 'luật thử so với luật ổn định (ẩn hay thật)');
+  const report = formatReport({ '2026-09-27': day });
+  assert.match(report, /^2026-09-27 \| 5 \| 4 \| 0 \| 1 \| 1✓\/0✗ \| 0✓\/2✗ \|/m);
+  assert.match(report, /OTHER 1 \(nhóm 100%, mẫu 0✓\/0✗, không mẫu 1\)/);
+});
+
+test('shadow-report CLI: giá không phải số / --journal không tồn tại / --since sai → lỗi gọn, mã 1', () => {
+  const script = path.join(root, 'tools-intent', 'shadow-report.mjs');
+  const runIt = extra => spawnSync(process.execPath, [script, ...extra], { cwd: root, encoding: 'utf8' });
+  const price = runIt(['--price-in', 'abc']);
+  assert.equal(price.status, 1);
+  assert.match(price.stderr, /--price-in phải là số/);
+  const journal = runIt(['--journal', path.join(os.tmpdir(), 'khong-co-journal.txt')]);
+  assert.equal(journal.status, 1);
+  assert.match(journal.stderr, /Không thấy tệp journal/);
+  assert.doesNotMatch(journal.stderr, /at .*node:internal/, 'không in stack');
+  assert.equal(runIt(['--since', '28/09/2026']).status, 1);
+  assert.equal(runIt(['--dir']).status, 1, 'cờ thiếu giá trị');
 });
 
 test('shadow-report --journal: đọc log journalctl cũ', () => {
@@ -371,4 +412,140 @@ test('shadow-report: cột mô hình tầng từ trường `cascade` (nhóm ✓,
   assert.ok(d.cascade.group.danger === 0 || d.cascade.group.danger === 1, 'journal: ✗ nguy hiểm chỉ đếm được khi có mô-đun tầng (c4 thật ORDER_ADDRESS)');
   assert.deepEqual(d.cascade.tpl['0.9'], { n: 2, ok: 1, bad: 1 });
   assert.deepEqual(d.cascade.tpl['0.7'], { n: 3, ok: 1, bad: 2 });
+});
+
+// ---- Vòng 12: T1/T3/T4/V2/V3/V4 + CLI ----
+
+test('build-dataset --from-decision-log (vòng 12): prevBot là MÃ MẪU → lastTemplate; prevBotText/basket; nhãn chosen sau gác; khử trùng; đếm hỏng/trước since', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'crm-dlog12-'));
+  try {
+    const base = { v: 1, conversationId: 'c7', source: 'inbox', type: 'text', ctx: { hasBasket: true, hasRecentOrder: false, orderAgeMin: null, lastWasOrderStep: true, livestream: false, phoneInText: true, addressInText: false, bagCount: 0 } };
+    const entries = [
+      { ...base, at: t0, mid: 'm1', text: '0912 345 678', prevBot: 'ORDER_CART_LINE', prevBotText: 'Dạ đơn của chị gồm 2 Granola Túi Xanh 450g, chị cho em xin <sdt> và địa chỉ', basket: [{ sku: 'GRA-XANH-Z450', quantity: 2 }], prevBotAsks: 'phone_address', chosen: 'ORDER_ADDRESS', final: 'ORDER_ADDRESS' },
+      { ...base, at: t0 + MIN, mid: 'm2', text: 'giá sao', prevBot: 'PRICE_QUOTE', chosen: 'PRICE_QUOTE', final: 'REPLY_ALREADY_SENT', ctx: {} },
+      { ...base, at: t0 + 2 * MIN, mid: 'm2', text: 'giá sao', prevBot: 'PRICE_QUOTE', chosen: 'PRICE_QUOTE', final: 'REPLY_ALREADY_SENT', ctx: {} },
+      { ...base, at: t0 + 3 * MIN, mid: 'm3', text: 'sửa lại 3 túi', prevBot: 'ORDER_CONFIRMATION', chosen: 'ORDER_UPDATE', final: 'ORDER_UPDATE', ctx: {} },
+      { ...base, at: t0 - 5 * 24 * 60 * MIN, mid: 'm0', text: 'cũ', prevBot: '', final: 'GENERAL_INFO', ctx: {} }
+    ];
+    mkdirSync(path.join(dir, 'log'));
+    writeFileSync(path.join(dir, 'log', '2026-09-25.jsonl'), entries.map(item => JSON.stringify(item)).join('\n') + '\n{"v":1,"at":');
+    const readStats = {};
+    const logged = readDecisionLog(path.join(dir, 'log'), { stats: readStats });
+    assert.deepEqual([logged.length, readStats.bad, readStats.files], [5, 1, 1], 'dòng ghi dở bỏ và đếm');
+    const stats = {};
+    const rows = rowsFromDecisionLog(logged, { templates, stats, since: t0 - 60 * MIN });
+    assert.deepEqual([rows.length, stats.duplicates, stats.beforeSince], [3, 1, 1]);
+    const [cart, already, update] = rows;
+    assert.deepEqual([cart.lastTemplate, cart.prevBot.startsWith('Dạ đơn của chị gồm'), cart.prevBotAsks, cart.hasBasket, cart.basketItems, cart.lastWasOrderStep], ['ORDER_ADDRESS', true, 'phone_address', true, 2, true], 'mã con quy về mã engine; câu bot từ prevBotText');
+    assert.deepEqual(cart.basket, [{ sku: 'GRA-XANH-Z450', quantity: 2 }]);
+    assert.equal(cart.text, '<sdt>');
+    assert.deepEqual([already.label, already.prevBot, already.lastTemplate, already.final], ['PRICE_QUOTE', '', 'PRICE_QUOTE', 'REPLY_ALREADY_SENT'], 'nhãn = chosen khi final là mẫu gác; không đưa mã mẫu làm câu bot');
+    assert.equal(update.label, 'ORDER_UPDATED', 'mã engine ORDER_UPDATE → mã mẫu');
+    assert.equal(decisionLabelOf({ final: 'ORDER_ADDRESS_REMIND', chosen: 'SHIPPING_POLICY' }), 'SHIPPING_POLICY');
+    assert.equal(decisionLabelOf({ final: 'GENERAL_INFO', chosen: 'PRICE_QUOTE' }), 'GENERAL_INFO', 'hậu xử lý thường: nhãn = final');
+    assert.ok(Number.isNaN(parseSinceDate('28/09/2026')) && Number.isNaN(parseSinceDate('2026-02-30')));
+    assert.equal(parseSinceDate('2026-09-28'), Date.parse('2026-09-28T00:00:00+07:00'));
+    // CLI: --since sai / thiếu thư mục → lỗi rõ, mã 1; --since mặc định in ra.
+    writeFileSync(path.join(dir, 'chatbot-settings.json'), JSON.stringify({ messageTemplates: {} }));
+    const cli = extra => spawnSync(process.execPath, ['tools-intent/build-dataset.mjs', path.join(dir, 'out.jsonl'), ...extra], { cwd: root, env: { ...process.env, CRM_DATA_DIR: dir }, encoding: 'utf8' });
+    const badSince = cli(['--from-decision-log', path.join(dir, 'log'), '--since', 'hôm qua']);
+    assert.equal(badSince.status, 1);
+    assert.match(badSince.stderr, /--since sai định dạng/);
+    const noDir = cli(['--from-decision-log']);
+    assert.equal(noDir.status, 1);
+    assert.match(noDir.stderr, /Thiếu giá trị cho --from-decision-log/);
+    assert.equal(cli(['--from-decision-log', path.join(dir, 'khong-co')]).status, 1);
+    const ok = cli(['--from-decision-log', path.join(dir, 'log')]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, /Từ ngày 2026-09-18 \(giờ Việt Nam\) — mặc định/);
+    assert.match(ok.stdout, /hỏng \(bỏ\) 1 · trước 2026-09-18 0 · trùng id 1/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('relabel-policy (vòng 12): --templates gộp seed như engine (T1); giỏ không dựng được → giữ nhãn gốc, weak, không `rule` (T4); dòng nhật ký bước đơn giữ nguyên; giỏ từ basket[sku]', () => {
+  // T1: settings chỉ lưu vài mẫu → vẫn đủ mẫu seed (không rơi GENERAL_INFO/CSKH_HANDOFF).
+  const partial = templatesFromSettings({ messageTemplates: { GENERAL_INFO: 'Dạ bảng giá {x}' } });
+  assert.ok(partial.ASK_FLAVOR && partial.ORDER_INFO_ASK_FLAVOR && partial.PRICE_QUOTE, 'mẫu seed gộp vào');
+  assert.equal(partial.GENERAL_INFO, 'Dạ bảng giá {x}', 'mẫu đã lưu thắng seed');
+  const at = Date.now();
+  const v1 = extra => ({ id: 'v', text: 'Cho mình 2 túi', prevBot: '', lastTemplate: '', label: 'ORDER_ADDRESS', labelSource: 'llm', source: 'inbox', hasBasket: false, lastWasOrderStep: false, at, ...extra });
+  const rows = [
+    v1({ id: 'v1' }), // v1 (không prevBotAgeMin): BAGS_NO_FLAVOR → ASK_FLAVOR phụ thuộc giỏ không biết → giữ ORDER_ADDRESS, weak
+    v1({ id: 'v2', text: 'Gửi chung nguyễn xóm 7 thôn độ chàng xã Đại Thành quốc oai Hà Nội <sdt>', label: 'ORDER_CONFIRMATION', lastTemplate: 'ORDER_ADDRESS', prevBot: 'Dạ để lên đơn đúng tuyến, chị cho em xin số điện thoại và địa chỉ' }),
+    v1({ id: 'v3', prevBotAgeMin: null }), // v2 biết chắc không có giỏ → luật thắng (ASK_FLAVOR)
+    v1({ id: 'p1', text: '<sdt>', label: 'ORDER_CONFIRMATION', labelSource: 'pipeline', lastTemplate: 'ORDER_ADDRESS', hasBasket: true, prevBotAgeMin: 2 }), // nhật ký, có giỏ mà không dựng được → giữ nhãn engine
+    v1({ id: 'b1', text: '<sdt>', label: 'ORDER_ADDRESS', labelSource: 'pipeline', lastTemplate: 'ORDER_ADDRESS', hasBasket: true, prevBotAgeMin: 2, basket: [{ sku: 'GRA-XANH-Z450', quantity: 2 }] })
+  ];
+  const { rows: out, stats } = relabelRows(rows, { templates });
+  const byId = Object.fromEntries(out.map(row => [row.id, row]));
+  assert.deepEqual([byId.v1.label, byId.v1.labelSource, byId.v1.weak, byId.v1.ruleUncertain], ['ORDER_ADDRESS', 'llm', true, true]);
+  assert.deepEqual([byId.v2.label, byId.v2.labelSource, byId.v2.weak], ['ORDER_CONFIRMATION', 'llm', true], 'ORDER_CONFIRMATION → ORDER_INFO_ASK_FLAVOR không còn');
+  assert.deepEqual([byId.v3.label, byId.v3.labelSource], ['ASK_FLAVOR', 'rule']);
+  assert.deepEqual([byId.p1.label, byId.p1.labelSource, byId.p1.weak], ['ORDER_CONFIRMATION', 'pipeline', undefined], 'nhật ký bước đơn: giữ nhãn engine, không weak');
+  assert.deepEqual([byId.b1.labelSource, byId.b1.ruleUncertain], ['rule', undefined], 'giỏ dựng từ basket[sku] → luật gắn được');
+  assert.ok(stats.basketUnknown >= 3 && stats.pipelineKept === 1);
+  assert.ok(basketContextKnown({ prevBotAgeMin: null }) && !basketContextKnown({}) && basketContextKnown({ basket: [] }));
+  // Mẫu luật ra không có trong bộ mẫu → không gắn rule, ghi lý do.
+  const noTemplates = relabelRows([{ id: 'x', text: 'Xin giá', label: 'PRICE_QUOTE', labelSource: 'template', source: 'inbox', at }], { templates: { ASK_FLAVOR: 'x' } });
+  assert.deepEqual([noTemplates.rows[0].labelSource, noTemplates.rows[0].ruleMissingTemplate, noTemplates.stats.missingTemplate], ['template', 'GENERAL_INFO', 1]);
+});
+
+test('merge-labels (vòng 12): loại golden theo id / cùng hội thoại ±10 phút / chữ trùng; giữ OTHER nhân viên; --trust bỏ LỖI; CLI --trust {} không crash', () => {
+  const at = 1_800_000_000_000;
+  const golden = goldenIndex([{ id: `p:u1:${at}`, text: 'cho mình hỏi túi xanh với túi vàng khác nhau chỗ nào', at }, { id: 'p:u9:1', text: 'ok', at: 1 }]);
+  assert.equal(goldenMatch({ id: `p:u1:${at}` }, golden), 'id');
+  assert.equal(goldenMatch({ id: 'p:u1:mid_abc', at: at + 5 * MIN, text: 'khác' }, golden), 'near', 'cùng hội thoại, lệch 5 phút');
+  assert.equal(goldenMatch({ id: 'p:u1:mid_abc', at: at + 30 * MIN, text: 'khác' }, golden), '');
+  assert.equal(goldenMatch({ id: 'p:u2:1', at: 5, text: 'Cho mình hỏi túi Xanh với túi Vàng khác nhau chỗ nào?' }, golden), 'text');
+  assert.equal(goldenMatch({ id: 'p:u3:1', at: 5, text: 'ok' }, golden), '', 'chữ ngắn chung chung không tính');
+  const rows = [
+    { id: 'a', text: 'không có mẫu', label: 'OTHER', labelSource: 'staff' },
+    { id: 'b', text: 'x', label: 'OTHER', labelSource: 'template' },
+    { id: 'c', text: 'y', label: 'GENERAL_INFO', labelSource: 'template' }
+  ];
+  const kept = mergeRows(rows, [], {});
+  assert.deepEqual(kept.rows.map(row => row.id), ['a', 'c'], 'OTHER nhân viên giữ, OTHER khác bỏ');
+  assert.deepEqual(mergeRows(rows, [], { keepOther: true }).rows.map(row => row.id), ['a', 'b', 'c'], '--keep-other');
+  const trust = trustByClass([...Array.from({ length: 16 }, () => ({ truth: 'GENERAL_INFO', pipeline: 'GENERAL_INFO' })), ...Array.from({ length: 10 }, () => ({ truth: 'GENERAL_INFO', pipeline: 'LỖI fetch failed' }))]);
+  assert.deepEqual([trust.get('GENERAL_INFO').n, trust.get('GENERAL_INFO').errors, trust.get('GENERAL_INFO').weak], [16, 10, false], 'LỖI không tính là sai');
+  assert.equal(trustByClass({}).size, 0, 'không phải mảng → rỗng');
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'crm-merge12-'));
+  try {
+    writeFileSync(path.join(dir, 'd.jsonl'), rows.map(row => JSON.stringify(row)).join('\n') + '\n{"id":"hỏng');
+    writeFileSync(path.join(dir, 'l.jsonl'), '');
+    writeFileSync(path.join(dir, 'trust.json'), '{}');
+    const cli = extra => spawnSync(process.execPath, ['tools-intent/merge-labels.mjs', path.join(dir, 'd.jsonl'), path.join(dir, 'l.jsonl'), path.join(dir, 'o.jsonl'), ...extra], { cwd: root, encoding: 'utf8' });
+    const ok = cli(['--trust', path.join(dir, 'trust.json')]);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stderr, /không phải mảng kết quả replay-llm: bỏ qua --trust/);
+    assert.match(ok.stderr, /Bỏ 1 dòng hỏng/);
+    const missing = cli(['--trust']);
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /Thiếu giá trị cho --trust/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('readJsonl: dòng ghi dở bỏ qua và đếm; label-dataset / replay-llm: --limit/--concurrency không phải số → lỗi (không gọi mạng)', () => {
+  const stats = {};
+  assert.deepEqual(readJsonl('{"a":1}\n\n{"b":\n{"c":3}', stats), [{ a: 1 }, { c: 3 }]);
+  assert.deepEqual([stats.bad, stats.badLines], [1, [3]]);
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'crm-cli12-'));
+  try {
+    writeFileSync(path.join(dir, 'in.jsonl'), '');
+    const label = spawnSync(process.execPath, ['tools-intent/label-dataset.mjs', path.join(dir, 'in.jsonl'), path.join(dir, 'out.jsonl'), '--limit', 'mười'], { cwd: root, encoding: 'utf8' });
+    assert.equal(label.status, 1);
+    assert.match(label.stderr, /--limit phải là số nguyên dương/);
+    const concurrency = spawnSync(process.execPath, ['tools-intent/label-dataset.mjs', path.join(dir, 'in.jsonl'), path.join(dir, 'out.jsonl'), '--concurrency', '0'], { cwd: root, encoding: 'utf8' });
+    assert.equal(concurrency.status, 1);
+    writeFileSync(path.join(dir, 'golden.json'), JSON.stringify({ items: [] }));
+    const replay = spawnSync(process.execPath, ['tools-intent/replay-llm.mjs', path.join(dir, 'golden.json'), '--limit', 'abc'], { cwd: root, encoding: 'utf8' });
+    assert.equal(replay.status, 1);
+    assert.match(replay.stderr, /--limit phải là số nguyên dương/);
+    const relabel = spawnSync(process.execPath, ['tools-intent/relabel-policy.mjs', path.join(dir, 'in.jsonl'), path.join(dir, 'o.jsonl'), '--templates'], { cwd: root, encoding: 'utf8' });
+    assert.equal(relabel.status, 1);
+    assert.match(relabel.stderr, /Thiếu giá trị cho --templates/);
+    const golden = spawnSync(process.execPath, ['tools-intent/replay-golden.mjs', path.join(dir, 'golden.json'), '--model'], { cwd: root, encoding: 'utf8' });
+    assert.equal(golden.status, 1);
+    assert.match(golden.stderr, /Thiếu giá trị cho --model/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

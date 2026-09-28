@@ -7,21 +7,21 @@ import { buildExportRows, exportPreviewStreets, exportedOrderData } from './orde
 import { parseXlsx } from './xlsx-import.mjs';
 import { buildPlainXlsx } from './xlsx-export.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
-import { buildOrderReceiptPayload, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
+import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
-import { assertUsableAiEndpoint, defaultChatbotSettings, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
+import { assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin } from './chatbot-templates.mjs';
 import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProduct, normalizeProductStore } from './products.mjs';
-import { getCatalogProducts, getGifts, getShippingFee, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
+import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
-import { cancelPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
+import { cancelPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenLabeled, goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
@@ -239,6 +239,11 @@ function publicCustomerPanel(conversation) {
 // replies with different message ids, so the source-message guard alone still let
 // the warehouse pack the same basket twice.
 const duplicateChatbotOrderWindowMs = 10 * 60 * 1000;
+// Khóa giỏ của đơn để chống trùng: comboKey (SKU=số lượng), dòng không SKU thì theo tên.
+function basketKeyOf(order) {
+  const products = Array.isArray(order?.products) ? order.products : [];
+  return comboKey(products.map(item => ({ sku: item.sku || item.name, quantity: item.quantity }))) || '';
+}
 
 async function createChatbotCustomerOrder(conversation, input, context = {}) {
   const sourceMessageId = String(context.sourceMessageId || '').trim();
@@ -256,6 +261,8 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
       || item.customerOrders.find(entry => entry.automatic
         && entry.phone === order.phone
         && Number(entry.total) === Number(order.total)
+        // Cùng giỏ (SKU + số lượng): 2 Xanh và Xanh + Vàng cùng 298k là hai đơn khác nhau.
+        && basketKeyOf(entry) === basketKeyOf(order)
         && order.createdAt - (Number(entry.createdAt) || 0) < duplicateChatbotOrderWindowMs);
     if (existing) return { order: existing, created: false };
     item.customerOrders.unshift(order);
@@ -1296,19 +1303,28 @@ const server = http.createServer(async (request, response) => {
       const current = await readChatbotSettings();
       const payload = await readBody(request);
       const directEndpoint = String(payload.directEndpoint || current.directEndpoint || '');
-      try {
-        assertUsableAiEndpoint(directEndpoint, {
-          provider: payload.provider || current.provider,
-          authType: payload.directAuthType || current.directAuthType
-        });
-        await assertPublicHost(new URL(directEndpoint).hostname);
-      } catch (error) {
-        return sendJson(response, 400, { error: error.message });
-      }
       const providerChanged = payload.provider && payload.provider !== current.provider;
+      // Chỉ kiểm/tra DNS endpoint AI khi phần kết nối AI thật sự đổi: lưu từ khóa khiếu nại
+      // hay bám đuổi không được hỏng vì DNS chập chờn.
+      const connectionChanged = Boolean(providerChanged)
+        || (payload.directEndpoint && String(payload.directEndpoint) !== String(current.directEndpoint || ''))
+        || (payload.directModel && String(payload.directModel) !== String(current.directModel || ''))
+        || (payload.directAuthType && String(payload.directAuthType) !== String(current.directAuthType || ''));
+      if (connectionChanged) {
+        try {
+          assertUsableAiEndpoint(directEndpoint, {
+            provider: payload.provider || current.provider,
+            authType: payload.directAuthType || current.directAuthType
+          });
+          await assertPublicHost(new URL(directEndpoint).hostname);
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message });
+        }
+      }
+      // Gộp sâu bản vá (followUps, contextTrim; khóa không gửi/null giữ giá trị cũ —
+      // handoffKeywords không bị xóa khi form không gửi).
       const settings = await writeChatbotSettings({
-        ...current,
-        ...payload,
+        ...mergeChatbotSettingsPatch(current, payload),
         messageTemplates: payload.messageTemplates ?? current.messageTemplates,
         directApiKey: String(payload.directApiKey || '').trim() || (providerChanged ? '' : current.directApiKey),
         updatedAt: Date.now()
@@ -1992,7 +2008,17 @@ const server = http.createServer(async (request, response) => {
       const payload = await readBody(request);
       const items = (Array.isArray(payload.items) ? payload.items : []).slice(0, 50)
         .map(item => ({ sku: String(item?.sku || ''), name: String(item?.name || ''), quantity: Math.round(Number(item?.quantity) || 0) }));
-      const priced = priceBasket(items);
+      // Quà "chỉ khách livestream" (Quà Tặng LIVE): cờ `livestream` gửi thẳng (form sửa đơn
+      // live) được ưu tiên; không có thì suy từ hội thoại (bài live, thẻ Livestream) như bot.
+      let livestream = typeof payload.livestream === 'boolean' ? payload.livestream : false;
+      if (typeof payload.livestream !== 'boolean' && payload.conversationId) {
+        const conversations = (await readMessagingStore()).conversations;
+        const conversation = conversations.find(item => item.id === String(payload.conversationId));
+        // Luồng bình luận: thẻ Livestream có thể nằm ở hộp thư cùng khách (như chatbot-engine).
+        const inbox = conversation?.source === 'comment' ? conversations.find(item => item.id === `${conversation.pageId}:${conversation.psid}`) : null;
+        livestream = Boolean(conversation) && (isLivestreamCustomer(conversation) || isLivestreamCustomer({ labels: inbox?.labels || [] }));
+      }
+      const priced = priceBasket(items, { livestream });
       return sendJson(response, 200, {
         priceable: priced.priceable,
         reason: priced.reason || '',
@@ -2001,6 +2027,7 @@ const server = http.createServer(async (request, response) => {
         shippingFee: priced.priceable ? priced.shippingFee : getShippingFee(),
         total: priced.total || 0,
         gift: priced.gift || '',
+        livestream,
         gifts: (priced.gifts || []).map(gift => ({ name: gift.name, sku: gift.sku || '', weight: Number(gift.weight) || 0 })),
         lines: (priced.lines || []).map(line => ({ sku: line.sku, name: line.name, quantity: line.quantity, unitPrice: line.unitPrice, basketUnitPrice: line.basketUnitPrice, lineTotal: line.lineTotal }))
       });
@@ -2015,10 +2042,19 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'GET') return sendJson(response, 200, giftResponse());
       if (request.method === 'PUT') {
         const payload = await readBody(request);
-        const items = Array.isArray(payload.items) ? payload.items : [];
-        if (items.length > 50) return sendJson(response, 400, { error: 'Tối đa 50 quà tặng.' });
-        for (const item of items) {
+        // Không gửi `items` = chỉ đổi phí ship, giữ nguyên danh sách quà (trước đây xóa sạch quà).
+        const hasItems = payload.items !== undefined;
+        if (hasItems && !Array.isArray(payload.items)) return sendJson(response, 400, { error: 'Danh sách quà tặng không hợp lệ.' });
+        const items = hasItems ? payload.items : null;
+        if (items && items.length > 50) return sendJson(response, 400, { error: 'Tối đa 50 quà tặng.' });
+        const giftIds = new Set();
+        for (const item of items || []) {
+          if (typeof item?.name !== 'string') return sendJson(response, 400, { error: 'Tên quà tặng phải là chữ.' });
           if (!String(item?.name || '').trim()) return sendJson(response, 400, { error: 'Mỗi quà tặng phải có tên.' });
+          // Hai quà ra cùng mã (cùng tên, hay cùng id gửi lên): bản lưu sẽ lặng lẽ bỏ một quà.
+          const giftId = normalizeGift(item)?.id || '';
+          if (giftIds.has(giftId)) return sendJson(response, 400, { error: `Tên quà trùng: "${String(item.name).trim()}".` });
+          giftIds.add(giftId);
           // Tối đa (túi): bỏ trống/0 = không giới hạn; có đặt thì phải là số nguyên ≥ "Tặng từ".
           const minQuantity = Math.max(1, Math.round(Number(item?.minQuantity) || 1));
           const maxQuantity = item?.maxQuantity === undefined || item?.maxQuantity === null || item?.maxQuantity === '' ? 0 : Number(item.maxQuantity);
@@ -2028,9 +2064,11 @@ const server = http.createServer(async (request, response) => {
           if (item?.livestreamOnly !== undefined && item?.livestreamOnly !== null && typeof item.livestreamOnly !== 'boolean') return sendJson(response, 400, { error: `Quà "${String(item.name).trim()}": "Chỉ khách livestream" phải là true hoặc false.` });
         }
         const shippingFee = Number(payload.shippingFee);
-        if (payload.shippingFee !== undefined && (!Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });
+        // null / "" không phải 0: Number(null) = 0 từng lặng lẽ đặt phí ship về 0.
+        const shippingFeeInvalid = payload.shippingFee === null || (typeof payload.shippingFee === 'string' && !payload.shippingFee.trim()) || typeof payload.shippingFee === 'boolean';
+        if (payload.shippingFee !== undefined && (shippingFeeInvalid || !Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });
         await updateGiftStore(current => ({
-          items,
+          items: items || current.items,
           shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee
         }));
         return sendJson(response, 200, giftResponse());
@@ -2231,7 +2269,9 @@ const server = http.createServer(async (request, response) => {
         updated.pos = posOutcome;
       }
       // Đơn đã có trên Pancake POS: sửa bên đó theo (sản phẩm, địa chỉ, phí, ghi chú); lỗi ghi lên đơn.
-      if (updated.pos?.id && ['name', 'phone', 'address', 'lines', 'products', 'freeShipping', 'shippingFee', 'discount', 'note', 'gift'].some(field => patch[field] !== undefined)) {
+      // Chỉ đơn CRM tạo rồi đẩy sang (isCrmOwnedPosOrder): đơn nhân viên/Shop lên trên POS
+      // rồi kéo về (source 'POS') thì POS là bản gốc — PUT từ CRM sẽ đè giỏ/quà/ghi chú trên POS.
+      if (updated.pos?.id && isCrmOwnedPosOrder(updated) && ['name', 'phone', 'address', 'lines', 'products', 'freeShipping', 'shippingFee', 'discount', 'note', 'gift'].some(field => patch[field] !== undefined)) {
         const owner = (await readMessagingStore()).conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));
         const posOutcome = await updatePosOrder(updated, { conversation: owner || {} })
           .then(() => ({ ...updated.pos, updatedAt: Date.now(), error: undefined }))

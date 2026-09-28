@@ -8,7 +8,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
-import { ADDRESS_WORDS, askedSlotOf, countBags, normalizeIntentText } from './processing/intent-features.mjs';
+import { intentRowOf, orderContextOf } from './processing/intent-features.mjs';
 
 const goldenPath = process.env.GOLDEN_SET_PATH || path.join(projectRoot, 'data', 'processed', 'golden-set.json');
 let cached = null;
@@ -113,19 +113,19 @@ export const basketStepTemplates = new Set(['ORDER_ADDRESS', 'ORDER_PHONE', 'ORD
 // Chữ ký câu bot đang giữ giỏ (có dấu hoặc bỏ dấu): "em vẫn đang giữ đơn…", "đơn của chị gồm…", "em ghi nhận đơn…".
 const BASKET_SIGNATURE = /đang giữ đơn|dang giu don|đơn của .{0,40}?gồm|don cua .{0,40}?gom|ghi nhận đơn|ghi nhan don|xác nhận lại thông tin đặt hàng|xac nhan lai thong tin dat hang/i;
 const BASKET_TTL_MIN = 120;
-const PHONE_RE = /\+?\d[\d .-]{8,13}|<sdt>/;
 const BASKET_ITEM_RE = /(\d{1,2})\s*(túi|gói|hộp|set|combo)\s*(xanh|vàng|nâu|cacao|vang|nau)?/giu;
 
-const isCancelled = order => String(order?.processingStatus || '') === 'cancelled' || String(order?.status || '') === 'Hủy';
 const conversationIdOf = id => { const at = String(id || '').lastIndexOf(':'); return at > 0 ? String(id).slice(0, at) : ''; };
 
 /**
  * Dựng các trường ngữ cảnh v2 còn thiếu cho từng mục golden. Không ghi đè trường đã có.
+ * Các trường mô hình dùng (hasOrder/orderAgeMin, prevBotAsks, phoneInText, addressInText, bagCount) tính bằng
+ * intentRowOf / orderContextOf của intent-features — MỘT định nghĩa với dữ liệu huấn luyện và engine.
  * - `store` = kho hội thoại ({ conversations, messages } như meta-conversations.json) hay null (không kho):
- *   hasOrder/orderAgeMin từ customerOrders (createdAt/status so với item.at); tuổi câu bot trước lấy từ
- *   tin outgoing gần nhất trước item.at. Không có kho → không có đơn; câu bot trước coi như vừa gửi.
+ *   hasOrder = có đơn CHƯA hủy đặt trước item.at trong 24 giờ (như engine), orderAgeMin = tuổi đơn chưa hủy gần nhất;
+ *   tuổi câu bot trước lấy từ tin outgoing gần nhất trước item.at. Không có kho → không có đơn; câu bot trước coi như vừa gửi.
  * - pendingOrder không lưu lịch sử → hasBasket suy từ lastTemplate ∈ bước đơn hoặc prevBot khớp chữ ký giỏ,
- *   và câu bot trước chưa quá 120 phút (hạn giỏ).
+ *   và câu bot trước chưa quá 120 phút (hạn giỏ); prevBotAsks đọc {missing} trong câu bot (không biết giỏ).
  * Trả về mảng mục mới (không sửa mảng vào).
  */
 export function enrichGoldenContext(items = [], store = null) {
@@ -141,18 +141,19 @@ export function enrichGoldenContext(items = [], store = null) {
     const prevBotAgeMin = previousOut ? (at - Number(previousOut.createdAt)) / 60000 : 0;
     const prevBot = String(item.prevBot || previousOut?.text || '');
     const lastTemplate = String(item.lastTemplate || '');
-    if (out.prevBotAsks === undefined) out.prevBotAsks = askedSlotOf(prevBot, lastTemplate);
     if (out.hasBasket === undefined) out.hasBasket = prevBotAgeMin < BASKET_TTL_MIN && (basketStepTemplates.has(lastTemplate) || BASKET_SIGNATURE.test(prevBot));
     if (out.basketItems === undefined) out.basketItems = out.hasBasket ? [...prevBot.matchAll(BASKET_ITEM_RE)].map(match => `${match[1]} ${match[2]}${match[3] ? ` ${match[3]}` : ''}`.toLowerCase()).slice(0, 12) : [];
+    const orders = (Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : []);
+    const row = intentRowOf({ text: item.text, lastTemplateId: lastTemplate, prevBotText: prevBot, hasBasket: out.hasBasket, orders, now: at || Date.now() });
+    if (out.prevBotAsks === undefined) out.prevBotAsks = row.prevBotAsks;
     if (out.hasOrder === undefined || out.orderAgeMin === undefined) {
-      const orders = (Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : []).filter(order => Number(order?.createdAt) > 0 && (!at || Number(order.createdAt) <= at));
-      const newestActive = orders.filter(order => !isCancelled(order)).sort((a, b) => b.createdAt - a.createdAt)[0];
-      if (out.hasOrder === undefined) out.hasOrder = orders.length > 0;
-      if (out.orderAgeMin === undefined) out.orderAgeMin = newestActive && at ? Math.max(0, Math.round((at - Number(newestActive.createdAt)) / 60000)) : null;
+      const order = at ? orderContextOf(orders, at) : { hasOrder: false, orderAgeMin: null };
+      if (out.hasOrder === undefined) out.hasOrder = order.hasOrder;
+      if (out.orderAgeMin === undefined) out.orderAgeMin = order.orderAgeMin;
     }
-    if (out.phoneInText === undefined) out.phoneInText = PHONE_RE.test(String(item.text || ''));
-    if (out.addressInText === undefined) out.addressInText = ADDRESS_WORDS.test(normalizeIntentText(item.text));
-    if (out.bagCount === undefined) out.bagCount = countBags(item.text);
+    if (out.phoneInText === undefined) out.phoneInText = row.phoneInText;
+    if (out.addressInText === undefined) out.addressInText = row.addressInText;
+    if (out.bagCount === undefined) out.bagCount = row.bagCount;
     return out;
   });
 }

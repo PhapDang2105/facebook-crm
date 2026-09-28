@@ -1,4 +1,4 @@
-import { comboKey, findProductBySku, giftsForKey } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, getGifts, giftsForKey, matchProduct } from './processing/catalog.mjs';
 import { shippingFeeForKey, unitPriceInBasket } from './processing/pricing.mjs';
 import { canonicalLocationColumns, checkLocationColumns, normalizeExportLocation, streetForDisplay } from './processing/locations.mjs';
 
@@ -154,7 +154,10 @@ export function skuWeight(sku) {
  * price, with the weight staff entered. The legacy Pancake symbols below stay
  * untouched.
  */
-function splitCatalogSku(product, quantity, useComboPricing, shippingFee = 0) {
+function splitCatalogSku(product, quantity, useComboPricing, shippingFee = 0, paidPrice = 0) {
+  // Đơn có giá khách trả (ô Đơn giá của bảng = paidPrice, đã gộp phần ship của
+  // dòng đầu và giá nhân viên gõ tay): kho nhận đúng số đó, file khớp tổng đơn.
+  if (paidPrice > 0) return [{ sku: product.sku, quantity, price: Math.round(paidPrice), catalog: true }];
   const unit = unitPriceInBasket(product, useComboPricing ? 2 : 1);
   // Shipping is folded into the price of the shipped units: one bag leaves
   // at 189.000đ (174.000đ + 15.000đ), which is what the order must show.
@@ -162,14 +165,31 @@ function splitCatalogSku(product, quantity, useComboPricing, shippingFee = 0) {
   return [{ sku: product.sku, quantity, price: unit + shipPerUnit, catalog: true }];
 }
 
-export function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPricing = false, productLabel = '', shippingFee = 0) {
+/**
+ * Sản phẩm danh mục của một dòng: theo SKU, hoặc SKU cũ đã đổi trong danh mục
+ * (CB10-XANH → CB10-XANH-G35, như posSkuFor của POS) tra theo tên — chỉ nhận khi
+ * SKU mới nối tiếp SKU cũ, để ký hiệu Pancake "CB2-XANH" (2 túi) không bị đọc
+ * thành 1 túi GRA-XANH-Z450.
+ */
+function catalogProductFor(symbol, productLabel = '') {
+  const direct = findProductBySku(symbol);
+  if (direct) return direct;
+  const sku = normalizeSkuToken(symbol);
+  if (!sku || !productLabel) return null;
+  const byName = matchProduct(String(productLabel));
+  if (!byName?.sku) return null;
+  const current = String(byName.sku).toUpperCase();
+  return current.startsWith(`${sku}-`) ? byName : null;
+}
+
+export function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPricing = false, productLabel = '', shippingFee = 0, { paidPrice = false } = {}) {
   const raw = String(symbol || productLabel || '').trim();
   const quantity = Math.max(1, Number(orderQuantity) || 1);
   const price = Number(orderPrice) || 0;
   if (!raw) return [{ sku: '', quantity, price }];
 
-  const catalogProduct = findProductBySku(symbol);
-  if (catalogProduct) return splitCatalogSku(catalogProduct, quantity, useComboPricing, shippingFee);
+  const catalogProduct = catalogProductFor(symbol, productLabel);
+  if (catalogProduct) return splitCatalogSku(catalogProduct, quantity, useComboPricing, shippingFee, paidPrice ? price : 0);
 
   const relation = resolveProductRelation(symbol, productLabel);
   if (relation) return expandRelation(relation, quantity);
@@ -275,8 +295,9 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
     const orderKey = sourceOrderId ? `id:${sourceOrderId}` : `row:${rowIndex}`;
     lastRowIndexByOrder.set(orderKey, rowIndex);
     const symbol = value(row, 'Mã mẫu mã');
-    if (findProductBySku(symbol)) {
-      catalogLinesByOrder.set(orderKey, [...(catalogLinesByOrder.get(orderKey) || []), { sku: symbol, quantity: Number(value(row, 'Số lượng')) || 1 }]);
+    const catalogProduct = catalogProductFor(symbol, value(row, 'Sản phẩm'));
+    if (catalogProduct) {
+      catalogLinesByOrder.set(orderKey, [...(catalogLinesByOrder.get(orderKey) || []), { sku: catalogProduct.sku, quantity: Number(value(row, 'Số lượng')) || 1 }]);
       return;
     }
     const items = splitSkuForExport(symbol, value(row, 'Số lượng'), value(row, 'Đơn giá'), false, value(row, 'Sản phẩm'));
@@ -327,12 +348,25 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
     // hoặc cột "Livestream" = Có/true/1 — mới kèm quà chỉ khách live.
     const livestream = /^\s*\(live\)/i.test(String(value(row, 'Địa chỉ') || ''))
       || /^(co|true|1|x|yes)$/i.test(normalizeColumnName(value(row, 'Livestream')));
-    const shippingFee = basketKey && isFirstOrderLine ? shippingFeeForKey(basketKey, { livestream }) : 0;
-    const items = splitSkuForExport(value(row, 'Mã mẫu mã'), value(row, 'Số lượng'), value(row, 'Đơn giá'), useComboPricing, value(row, 'Sản phẩm'), shippingFee);
+    // Miễn ship theo cờ đơn: đơn dùng thử bám đuổi ghi "(Freeship) " đầu địa chỉ
+    // (hay cột "Miễn ship" = Có) thì không cộng phí ship dù giỏ 1 túi.
+    const freeShipFlag = /^\s*(\(live\)\s*)?\(freeship\)/i.test(String(value(row, 'Địa chỉ') || ''))
+      || /^(co|true|1|x|yes)$/i.test(normalizeColumnName(value(row, 'Miễn ship')));
+    const shippingFee = basketKey && isFirstOrderLine && !freeShipFlag ? shippingFeeForKey(basketKey, { livestream }) : 0;
+    // Ô Đơn giá của đơn hệ thống là giá khách trả (paidPrice, đã gồm ship nhân
+    // viên thu và giá gõ tay): dùng thẳng; ô trống/0 thì tính theo bộ giá như cũ.
+    const items = splitSkuForExport(value(row, 'Mã mẫu mã'), value(row, 'Số lượng'), value(row, 'Đơn giá'), useComboPricing, value(row, 'Sản phẩm'), shippingFee, { paidPrice: true });
     // Gifts ticked for this combination in Cài đặt → Quà tặng, once per order, after its last product line.
     if (basketKey && lastRowIndexByOrder.get(orderKey) === rowIndex) {
       for (const gift of giftsForKey(basketKey, { livestream })) {
         if (gift.sku && !items.some(item => item.sku === gift.sku)) items.push({ sku: gift.sku, quantity: 1, price: 0, weight: gift.weight });
+      }
+      // Quà ưu đãi bám đuổi (bộ bát gáo dừa cho combo đúng 2 túi): ghi trong ghi chú
+      // đơn ("Ưu đãi bám đuổi combo 2 túi: tặng …") hay cột "Quà ưu đãi" → dòng BGD.
+      const promo = String(value(row, 'Quà ưu đãi') || '').trim() || /ưu đãi bám đuổi combo 2 túi: tặng/i.test(String(value(row, 'Ghi chú') || ''));
+      if (promo && catalogQuantity === 2 && !items.some(item => item.sku === 'BGD')) {
+        const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === 'BGD');
+        items.push({ sku: 'BGD', quantity: 1, price: 0, weight: bowl?.weight || SKU_WEIGHTS.BGD });
       }
     }
     items.forEach((item, itemIndex) => {

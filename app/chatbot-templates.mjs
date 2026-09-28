@@ -6,6 +6,7 @@ import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
 import { describeDeliveryAddress, mergeAddressFragment } from './processing/locations.mjs';
+import { mentionsOldAddress } from './processing/order-flow.mjs';
 
 // The bot asks for a missing or ambiguous part of the address at most this
 // many times, then lets the order through with what it has (flagged on the
@@ -376,16 +377,39 @@ function renderOrder(value, templates, context = {}) {
     const old = Array.isArray(recentOrder?.products) ? recentOrder.products : [];
     return old.length > 0 && old.every(item => (named.get(String(item.sku || item.code || '').toUpperCase()) || 0) >= (Number(item.quantity) || 1));
   };
-  const freshItems = updating ? (implicitUpdate && addsToOrder && !coversOldOrder() ? mergedItems() : namedItems) : dropRecentlyOrdered(namedItems, recentOrder, now);
-  if (updating && !freshItems.length && templates.ORDER_WRONG) {
+  const baseItems = updating ? (implicitUpdate && addsToOrder && !coversOldOrder() ? mergedItems() : namedItems) : dropRecentlyOrdered(namedItems, recentOrder, now);
+  if (updating && !baseItems.length && templates.ORDER_WRONG) {
     return { templateId: 'ORDER_WRONG', ...splitMessages(fill(templates.ORDER_WRONG, commonValues())), handoff: false };
   }
+  const pending = usablePendingOrder(context.pendingOrder, { now, templateId });
+  // Vòng 11 (P7): đang giữ giỏ (chưa có đơn để sửa) mà khách "lấy thêm 1 túi nâu": cộng món vừa nêu vào giỏ đang
+  // giữ, không thay giỏ (giỏ 2 Xanh → 2 Xanh + 1 Nâu). Luật giỏ đánh dấu add_to_basket (món vừa nêu chắc chắn là
+  // phần thêm); mô hình thì chỉ cộng khi tin có "thêm/nữa" và giỏ trả về chưa phủ giỏ đang giữ (mô hình đã trả giỏ
+  // đầy đủ thì không cộng lần hai). "đổi/thay/chỉ lấy/bớt/không lấy" là giỏ mới.
+  const heldItems = !updating && pending?.items?.length ? pending.items : [];
+  const itemKey = item => String(item.code || '').toUpperCase() || normalizeText(item.product);
+  const coversHeld = () => {
+    const named = new Map(baseItems.map(item => [itemKey(item), Number(item.quantity) || 1]));
+    return heldItems.every(item => (named.get(itemKey(item)) || 0) >= (Number(item.quantity) || 1));
+  };
+  const replacesHeld = /\b(doi|thay|chi (lay|can|mua)|bot|khong lay|ko lay|k lay)\b/.test(messageWords);
+  const addsToHeld = heldItems.length > 0 && baseItems.length > 0 && isOrderStep(templateId) && !replacesHeld
+    && (String(value.add_to_basket || '') === '1' || (/\b(them|nua|cong them)\b/.test(messageWords) && !coversHeld()));
+  const mergeHeld = () => {
+    const byKey = new Map();
+    for (const item of [...heldItems, ...baseItems]) {
+      const key = itemKey(item);
+      const current = byKey.get(key);
+      byKey.set(key, { product: current?.product || item.product, quantity: (current?.quantity || 0) + (Number(item.quantity) || 1) });
+    }
+    return toPricedItems([...byKey.values()]);
+  };
+  const freshItems = addsToHeld ? mergeHeld() : baseItems;
 
   // The price comes from the basket itself, never from a key the model
   // declared: an order_key the model invented used to price three bags as one.
   const freshKey = buildOrderKey(freshItems);
   const freshPrice = freshKey ? priceBasket(freshItems, giftContext()) : null;
-  const pending = usablePendingOrder(context.pendingOrder, { now, templateId });
   const trialBagItem = context.trial?.stage === 'chosen' && context.trial.bag && !freshItems.length && !pending?.items?.length ? [{ product: context.trial.bag, quantity: 1 }] : [];
   const items = freshItems.length ? freshItems : (pending?.items?.length ? pending.items : trialBagItem);
   const key = freshKey || pending?.key || '';
@@ -412,7 +436,13 @@ function renderOrder(value, templates, context = {}) {
   // gần nhất của khách thay vì hỏi lại.
   // Cùng bộ từ với OLD_ADDRESS của order-flow.mjs ("như/giống lần/hôm trước", "chỗ cũ").
   // Cũng nhận "gởi địa chỉ củ", "dc cũ", "đc cũ", "gửi dc trước rồi", "như đơn trước", "đơn cũ / lần trước / hôm trước".
-  const wantsPrevious = /(dia chi|d\/c|dc|d c) (cu|truoc|nhu cu|lan truoc|hom truoc|do|day|kia|hom bua)|(dia chi|dc) (nhu|giong) (cu|truoc)|(nhu|giong|theo|y) (don |lan |hom |dot |bua |ky )?(truoc|cu)|cho cu|nhu cu|(don|dot|ky|bua) (cu|truoc)\b|(gui|ship|giao) (dc|dia chi|d\/c) (truoc|cu) (roi|r|do|day)|(ve|toi|den) (dc|dia chi) (cu|truoc)/.test(normalizeText(String(context.messageText || '')));
+  // Vòng 11 (P8): "bữa trước ăn ngon, lấy thêm 2 túi xanh" từng bị hiểu là địa chỉ cũ (tự chốt về địa chỉ đơn trước).
+  // Nay: bộ từ OLD_ADDRESS của order-flow.mjs, hoặc vế cũ nhưng chỉ khi tin có từ giao hàng/địa chỉ (gửi/ship/giao/về/đc).
+  // Bỏ "cho cu" (trùng "gửi cho cụ").
+  const previousWords = normalizeText(String(context.messageText || ''));
+  const wantsPrevious = mentionsOldAddress(context.messageText || '')
+    || (/(dia chi|d\/c|dc|d c) (cu|truoc|nhu cu|lan truoc|hom truoc|do|day|kia|hom bua)|(dia chi|dc) (nhu|giong) (cu|truoc)|(nhu|giong|theo|y) (don |lan |hom |dot |bua |ky )?(truoc|cu)|nhu cu|(don|dot|ky|bua) (cu|truoc)\b|(gui|ship|giao) (dc|dia chi|d\/c) (truoc|cu) (roi|r|do|day)|(ve|toi|den) (dc|dia chi) (cu|truoc)/.test(previousWords)
+      && /\b(gui|goi|ship|giao|ve|dia chi|dc|d c|d\/c|dchi)\b/.test(previousWords));
   const previous = (wantsPrevious || updating) && context.recentOrder ? context.recentOrder : (wantsPrevious && context.previousDelivery ? context.previousDelivery : null);
   // Mô hình ghi "0" khi khách không đưa địa chỉ: coi như trống để lấy địa chỉ đơn trước.
   // Tên người nhận khách ghi đầu địa chỉ ("Nguyễn thị Hằng Thôn 4, …") không lên phiếu giao.
@@ -477,7 +507,19 @@ function renderOrder(value, templates, context = {}) {
       options: delivery.choices ? delivery.choices.options.join(' hay ') : ''
     };
     if (template) {
-      return { templateId: 'ORDER_ADDRESS', ...splitMessages(fill(template, values)), handoff: false, pendingOrder: asked };
+      // Vòng 11 (P1): câu nhắc ngắn cho lượt khách hỏi chuyện khác khi địa chỉ còn thiếu cấp — nêu đúng phần
+      // địa chỉ còn thiếu (engine gửi kèm câu trả lời, không lưu lại giỏ nên addressAsks không tăng).
+      const remindMissing = choose ? `${delivery.choices.label || 'địa chỉ'} (${delivery.choices.options.join(' hay ')})` : (delivery.missingLabel || 'địa chỉ nhận hàng đầy đủ');
+      const remind = templates.ORDER_ADDRESS_REMIND ? fill(templates.ORDER_ADDRESS_REMIND, {
+        ...commonValues(),
+        cart: price.lines.map(line => `${line.quantity} ${line.name}`).join(' + '),
+        total: formatMoney(price.total),
+        free_ship: price.gifts.find(isFreeShippingGift)?.name || '',
+        ship_fee: price.shippingFee ? formatMoney(price.shippingFee) : '',
+        gift: price.gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + '),
+        missing: remindMissing
+      }) : '';
+      return { templateId: 'ORDER_ADDRESS', ...splitMessages(fill(template, values)), remind, handoff: false, pendingOrder: asked };
     }
     // No text configured for the question: fall through and accept the address as is.
   }
@@ -848,7 +890,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'TRIAL_ACCEPT', 'TRIAL_REMIND', 'TRIAL_PRICE', 'TRIAL_FREESHIP_INFO', 'TRIAL_NEXT_STEP', 'TRIAL_DECLINED']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'ORDER_PHONE_ASK_FLAVOR', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'TRIAL_ACCEPT', 'TRIAL_REMIND', 'TRIAL_PRICE', 'TRIAL_FREESHIP_INFO', 'TRIAL_NEXT_STEP', 'TRIAL_DECLINED']);
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -924,7 +966,10 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   // Ý phụ vừa gửi trong 30 phút (bảng giá vừa gửi…): không gửi lại cả bảng/ảnh.
   const squash = text => String(text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   const opening = squash(extra.messages[0]);
-  if (opening && (context.recentOutgoing || []).some(text => squash(text).startsWith(opening.slice(0, 40)) || String(text).replace(/\s+/g, ' ').includes(opening))) return main;
+  // Vòng 11 (E3): đang giữ giỏ mà khách hỏi lại (ý phụ là câu trả lời chính của lượt, bước đơn chỉ còn là câu
+  // nhắc): không bỏ câu trả lời vì "vừa gửi < 30 phút" — khách hỏi lại tức là cần nghe lại.
+  const heldBasket = isOrderStep(main.templateId) && Boolean(usablePendingOrder(context.pendingOrder, { now: Number(context.now) || Date.now(), templateId: 'ORDER_ADDRESS' })?.items?.length);
+  if (!heldBasket && opening && (context.recentOutgoing || []).some(text => squash(text).startsWith(opening.slice(0, 40)) || String(text).replace(/\s+/g, ' ').includes(opening))) return main;
   const partsOf = reply => reply.parts || [...reply.messages.map(text => ({ type: 'text', text })), ...(reply.images || []).map(url => ({ type: 'image', url }))];
   const first = isOrderStep(main.templateId) || main.templateId === 'ORDER_CUSTOM_BASKET' ? [extra, main] : [main, extra];
   return {
@@ -932,7 +977,9 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
     messages: [...first[0].messages, ...first[1].messages],
     parts: [...partsOf(first[0]), ...partsOf(first[1])],
     images: [...(first[0].images || []), ...(first[1].images || [])],
-    alsoTemplateId: extra.templateId
+    alsoTemplateId: extra.templateId,
+    // Hai phần riêng: engine (giữ giỏ + khách hỏi) gửi câu trả lời + câu nhắc ngắn thay cho cả đoạn xin SĐT/địa chỉ.
+    alsoPart: { templateId: extra.templateId, messages: extra.messages, images: extra.images || [], parts: partsOf(extra) }
   };
 }
 
@@ -984,6 +1031,16 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
     return renderChatbotReply({ template_id: recent ? 'CSKH_HANDOFF' : 'ORDER_STATUS', warming: recent ? '1' : '0' }, templates, context);
   }
   if (isOrderStep(templateId)) return renderOrder(value, templates, context);
+  // Vòng 11 (P3): PRICE_QUOTE_COMBO là mẫu con của bảng giá (đơn vị "Combo"), chỉ điền được qua renderPriceQuote:
+  // gọi thẳng kèm Product_N1 (luật cũ, mô hình) → soạn như PRICE_QUOTE, không gửi bảng giá trống.
+  if (templateId === 'PRICE_QUOTE_COMBO' && String(value.Product_N1 || '').trim() && templates.PRICE_QUOTE) {
+    return renderSingleReply({ ...value, template_id: 'PRICE_QUOTE' }, templates, context);
+  }
+  // Vòng 11 (V8/B21): khách chỉ gửi SĐT (chưa địa chỉ) → không nói "đã nhận SĐT và địa chỉ": mẫu riêng
+  // ORDER_PHONE_ASK_FLAVOR (không có thì mẫu cũ), mã mẫu vẫn là ORDER_INFO_ASK_FLAVOR cho các bước sau.
+  if (templateId === 'ORDER_INFO_ASK_FLAVOR' && String(value.Phone_Number || '').trim() && !String(value.Customer_Address || '').trim() && templates.ORDER_PHONE_ASK_FLAVOR) {
+    return { templateId, ...splitMessages(fill(templates.ORDER_PHONE_ASK_FLAVOR, commonValues())), handoff: false };
+  }
   const catalogId = catalogRenderers[templateId] ? templateId : isProductQuoteId(templateId) ? 'PRICE_QUOTE' : '';
   if (catalogId && templates[catalogId]) {
     const text = catalogId === 'PRICE_QUOTE' ? renderPriceQuote(templateId, value, templates) : catalogRenderers[catalogId](value, templates);

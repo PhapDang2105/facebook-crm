@@ -10,14 +10,17 @@ import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './confi
 import { applyWebhookEvents } from './meta-webhook.mjs';
 import { qrCodeFromText } from './qr-bridge.mjs';
 import { isKnownQrCode } from './qr-scans.mjs';
-import { applyGenderGuess, publicConversation, readMessagingStore, reconcileCustomerGender, saveMessage, updateMessagingStore } from './messaging-store.mjs';
+import { applyGenderGuess, conversationId as crmConversationId, publicConversation, readMessagingStore, reconcileCustomerGender, saveMessage, updateMessagingStore } from './messaging-store.mjs';
+import { matchesFollowUpText, recentFollowUpTexts } from './follow-up.mjs';
 import { genderFromName } from './processing/customer-info.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import { assertPublicHost } from './network-guard.mjs';
 
+// Đủ cấu hình khi có ít nhất một Page (mã + token API) và một token webhook: token chung
+// PANCAKE_WEBHOOK_TOKEN HAY token riêng của từng Page trong PANCAKE_PAGES (webhookToken).
 export function isPancakeConfigured(config = defaultConfig) {
   const pages = config.pages?.length ? config.pages : (config.pageId && config.pageAccessToken ? [config] : []);
-  return pages.length > 0 && Boolean(config.webhookToken);
+  return pages.length > 0 && (Boolean(config.webhookToken) || pages.some(page => Boolean(String(page?.webhookToken || '').trim())));
 }
 
 export function getPancakePageConfig(pageId, config = defaultConfig) {
@@ -111,6 +114,19 @@ export function normalizePancakeWebhook(payload, config = defaultConfig, now = D
   return event ? [event] : [];
 }
 
+// Tên admin Pancake ghi cho tin do máy gửi (không phải người gõ): CRM qua Public API, thẻ đơn của
+// POS, Botcake / bot Pancake (lời chào QR "Mã thẻ: #…"), chatbot. So không phân biệt hoa thường.
+const automatedAdminNames = new Set(['public api', 'pos', 'botcake', 'pancake bot', 'chatbot']);
+// Lời chào QR do Botcake gửi (kết thúc bằng "Mã thẻ: #<mã>"): máy gửi, dù Pancake ghi tên ai.
+const qrGreetingPattern = /Mã thẻ:\s*#\S+/iu;
+
+/** Tin của Page có admin_name là nhân viên thật (không phải máy gửi, không phải lời chào QR)? */
+export function isStaffAdmin(adminName, text = '') {
+  const name = String(adminName || '').trim();
+  if (!name || automatedAdminNames.has(name.toLowerCase())) return false;
+  return !qrGreetingPattern.test(String(text || ''));
+}
+
 /** Giới tính khách trong hồ sơ Pancake (`page_customer.gender`, Facebook khai): male/female, khác thì bỏ. */
 export function pancakeGenderOf(conversation) {
   const value = String(conversation?.page_customer?.gender || conversation?.gender || '').trim().toLowerCase();
@@ -176,7 +192,7 @@ export function pancakeCommentEvent(pageId, conversation, comment, post = {}, no
       customerName: String(conversation.from?.name || (fromPage ? '' : comment.from?.name) || '').trim(),
       pageCustomerId: String(comment.from?.page_customer_id || ''),
       assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
-      staff: Boolean(adminName) && adminName !== 'Public API' && !/^pos$/i.test(adminName),
+      staff: isStaffAdmin(adminName, pancakeMessageText(comment)),
       staffName: adminName,
       post: pancakePostContext(post) || { id: postId, message: '', permalink: `https://www.facebook.com/${postId}`, picture: '' },
       ad: null,
@@ -299,7 +315,8 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       ...(cart.length ? { cart } : {}),
       ...(replyTo ? { replyTo } : {}),
       // Nhân viên gõ trong Pancake: dấu trên tin để đường đồng bộ (không qua webhook) cũng biết mà nhường.
-      ...(outgoing && adminName && adminName !== 'Public API' && !/^pos$/i.test(adminName) ? { staff: true, staffName: adminName } : {}),
+      // (Tin trùng lời bám đuổi trạm gửi đã gửi dưới tên nhân viên: storePancakeEvents gỡ cờ này, gắn followUp.)
+      ...(outgoing && isStaffAdmin(adminName, text) ? { staff: true, staffName: adminName } : {}),
       createdAt: at,
       status: outgoing ? 'sent' : 'received'
     },
@@ -309,7 +326,7 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       pageCustomerId: String(message.from?.page_customer_id || ''),
       // Hội thoại đã có nhân viên nhận thì bot đứng ngoài (trừ khi cấu hình cho phép).
       assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
-      staff: Boolean(adminName) && adminName !== 'Public API' && !/^pos$/i.test(adminName),
+      staff: outgoing && isStaffAdmin(adminName, text),
       staffName: adminName,
       // Khách đến từ quảng cáo: ghi như referral của Meta để bot biết sản phẩm.
       ad: adInfo || pancakeAdOf(conversation),
@@ -437,6 +454,15 @@ function lastOutgoingBefore(messages, at) {
   return found;
 }
 
+// Tin Page gần nhất trước tin khách là của nhân viên: chỉ chặn bot khi tin đó trong 2 giờ (cùng quy
+// tắc đường webhook — chatbot-engine staffAfterBot). Nhân viên nhắn từ hôm qua thì khách nhắn lại
+// hôm nay vẫn được bot trả lời, không chặn vĩnh viễn.
+const staffBlockMs = 2 * 60 * 60 * 1000;
+const recentStaffBefore = (messages, at, now) => {
+  const last = lastOutgoingBefore(messages, at);
+  return Boolean(last?.staff) && now - (Number(last.createdAt) || 0) < staffBlockMs;
+};
+
 /** Nhân viên vừa nhắn trong hội thoại (60 phút): bot đứng ngoài, kể cả khi tin nhân viên về qua đồng bộ. */
 export function staffRepliedRecently(messages, now = Date.now()) {
   return (messages || []).some(item => item?.direction === 'outgoing' && item.staff && now - (Number(item.createdAt) || 0) < 60 * 60 * 1000);
@@ -454,8 +480,8 @@ export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 
     const messages = store?.messages?.[change.conversation.id] || [];
     if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) return false;
     if (staffRepliedRecently(messages, now)) return false;
-    // Tin Page gần nhất trước tin khách là của nhân viên (dù đã lâu): khách đang nói chuyện với người thật.
-    if (lastOutgoingBefore(messages, at)?.staff) return false;
+    // Tin Page gần nhất trước tin khách là của nhân viên (trong 2 giờ): khách đang nói chuyện với người thật.
+    if (recentStaffBefore(messages, at, now)) return false;
     const key = `${change.conversation.id}:${change.message.id}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -480,7 +506,7 @@ export function backlogBotChanges(store, { now = Date.now(), windowMs = 60 * 60 
     if (now - at > windowMs || at > now + 5 * 60 * 1000) continue;
     if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) continue;
     if (staffRepliedRecently(messages, now)) continue;
-    if (lastOutgoingBefore(messages, at)?.staff) continue;
+    if (recentStaffBefore(messages, at, now)) continue;
     changes.push({ type: 'message', conversation, message: last, late: true });
   }
   return changes;
@@ -621,8 +647,23 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, quickMs = 2 * 60
  * Ghi tin vào hộp thư và trả về các thay đổi cho bot. Ghi thêm mã hội thoại
  * Pancake và tên khách lên hội thoại CRM để còn gửi trả lời đúng chỗ.
  */
-export async function storePancakeEvents(incomingEvents, { fromWebhook = false } = {}) {
+export async function storePancakeEvents(incomingEvents, { fromWebhook = false, followUpTexts = null } = {}) {
   if (!incomingEvents.length) return [];
+  // Tin bám đuổi do trạm gửi (extension Pancake) gửi: Pancake ghi admin_name là nhân viên đang mở
+  // trình duyệt (28/09: 6 tin "Dạ chị ơi, Giọt Nắng gửi chị ưu đãi riêng…" mang tên một nhân viên)
+  // → trước đây bị coi là nhân viên nhắn: bot tắt, khách trả lời bám đuổi thì bot im. Tin Page mang
+  // cờ staff mà trùng lời bám đuổi đã xếp/gửi trong 24 giờ cho đúng hội thoại → gỡ staff, gắn followUp.
+  const staffOutgoing = incomingEvents.filter(event => event.type === 'message' && event.message?.direction === 'outgoing' && (event.message.staff || event.pancake?.staff));
+  let echoes = followUpTexts;
+  if (staffOutgoing.length && !echoes) echoes = await recentFollowUpTexts().catch(() => new Map());
+  for (const event of staffOutgoing) {
+    const entries = echoes?.get?.(crmConversationId(event.pageId, event.psid));
+    if (!matchesFollowUpText(entries, event.message)) continue;
+    delete event.message.staff;
+    delete event.message.staffName;
+    event.message.followUp = true;
+    event.pancake = { ...event.pancake, staff: false, followUp: true };
+  }
   const changes = await updateMessagingStore(store => {
     // Tin nhắn riêng CRM gửi từ bình luận đã nằm ở hộp thư của khách; Pancake
     // dội lại bản đó trong luồng bình luận thì không ghi thành bình luận của Page.
@@ -917,13 +958,15 @@ function decodeDataUrl(dataUrl) {
  * (attachment) tải lên Pancake trước rồi gửi bằng mã nội dung. Receipt/template
  * dùng bản chữ. Chữ đi kèm tệp được gửi thành tin riêng sau tệp.
  */
-export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '', imageUrls = [], privateReply = false, staff = false }, config = defaultConfig, fetchImpl = fetch) {
+// `staff: true` = nhân viên gửi từ CRM; `followUp: true` = tin bám đuổi (follow-up.mjs) — hai cờ ghi lên tin lưu.
+export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '', imageUrls = [], privateReply = false, staff = false, followUp = false }, config = defaultConfig, fetchImpl = fetch) {
   const body = String(templateText || text || '').trim();
   const target = { pageId: conversation.pageId, conversationId: conversation.pancakeConversationId };
   // Nhiều ảnh đi chung một tin (Facebook nhận tới 30 mã một lần), khách thấy một cụm ảnh thay vì từng ảnh lắc nhắc.
   const pictures = [...new Set([imageUrl, ...(Array.isArray(imageUrls) ? imageUrls : [])].map(item => String(item || '').trim()).filter(Boolean))].slice(0, 30);
   if (!body && !attachment && !pictures.length) throw Object.assign(new Error('Tin nhắn trống.'), { statusCode: 400 });
-  if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply }, config, fetchImpl);
+  // Trả lời bình luận (công khai hay nhắn riêng) cũng mang cờ nhân viên / bám đuổi như tin hộp thư.
+  if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply, staff, followUp }, config, fetchImpl);
   let message;
   if (pictures.length) {
     // Tải tuần tự, nghỉ giữa các ảnh: Pancake giới hạn 5 lần gọi mỗi giây mỗi Page.
@@ -976,6 +1019,7 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   const saved = await updateMessagingStore(store => {
     // Nhân viên gửi từ CRM: gắn cờ staff như tin admin gửi trong Pancake (bot dùng để im khi nhân viên đang xử lý).
     if (staff) Object.assign(message, { staff: true, staffName: 'CRM' });
+    if (followUp) message.followUp = true;
     const outcome = saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, message });
     outcome.conversation.unread = false;
     return { message: outcome.message, conversation: publicConversation(outcome.conversation) };
@@ -992,7 +1036,7 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
  * thừa bài viết và mang mã hội thoại inbox của Pancake ({page}_{psid}) để
  * các tin sau đi thẳng. Chỉ gửi được chữ (như Meta).
  */
-async function sendCommentReplyViaPancake(conversation, { text, privateReply }, config, fetchImpl) {
+async function sendCommentReplyViaPancake(conversation, { text, privateReply, staff = false, followUp = false }, config, fetchImpl) {
   if (!text) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });
   if (!conversation.lastCommentId) throw Object.assign(new Error('Chưa có bình luận nào của khách để trả lời.'), { statusCode: 400 });
   const sent = await sendPancakeMessage({
@@ -1006,7 +1050,10 @@ async function sendCommentReplyViaPancake(conversation, { text, privateReply }, 
   }, config, fetchImpl);
   const message = {
     id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text, createdAt: Date.now(), status: 'sent',
-    ...(privateReply ? { privateReply: true } : { commentId: sent.id, parentId: conversation.lastCommentId })
+    ...(privateReply ? { privateReply: true } : { commentId: sent.id, parentId: conversation.lastCommentId }),
+    // Nhân viên trả lời bình luận từ CRM: cờ staff như tin hộp thư (bot im khi nhân viên đang xử lý).
+    ...(staff ? { staff: true, staffName: 'CRM' } : {}),
+    ...(followUp ? { followUp: true } : {})
   };
   const saved = await updateMessagingStore(store => {
     const outcome = privateReply

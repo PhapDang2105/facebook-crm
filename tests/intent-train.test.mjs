@@ -85,3 +85,57 @@ test('replay-golden: --model/--compare in hai cột, tập rule-miss, --gate pre
   assert.match(single.stdout, /^mô hình: .*model-v6\.json/m);
   assert.match(single.stdout, /--gate: không thấy/);
 });
+
+test('train-intent (vòng 12): --golden ghi meta.sawGolden/goldenExcluded, meta.trainIds; bỏ bình luận; --quiet im; replay-golden cảnh báo rò golden và không lấy mốc hỏng', () => {
+  const rows = syntheticDataset(20);
+  rows.push({ id: 'cm:1:1', text: 'giá sao ib', label: 'COMMENT_PUBLIC_REPLY', labelSource: 'template', source: 'comment', lastTemplate: '', at: 5 });
+  rows.push({ id: 'cm:1:2', text: 'ib em', label: 'COMMENT_PUBLIC_REPLY', labelSource: 'template', source: 'inbox', lastTemplate: '', at: 6 });
+  rows.push({ id: 'solo:1:777', text: 'shop có bán trên tiki không vậy', label: 'ECOMMERCE_LINKS', labelSource: 'template', source: 'inbox', lastTemplate: '', at: 7 });
+  const leakDataset = path.join(directory, 'dataset-leak.jsonl');
+  writeFileSync(leakDataset, rows.map(row => JSON.stringify(row)).join('\n') + '\n{"id":"ghi dở');
+  const leaked = rows.at(-1);
+  const goldenPath = path.join(directory, 'golden-leak.json');
+  writeFileSync(goldenPath, JSON.stringify({ items: [
+    { id: leaked.id, text: leaked.text, source: 'inbox', lastTemplate: leaked.lastTemplate, prevBot: '', label: leaked.label, at: leaked.at },
+    { id: 'z:9:1', text: 'mình ở nước ngoài có ship không', source: 'inbox', lastTemplate: '', prevBot: '', label: 'SHIPPING_POLICY', at: 1_800_000_000_000 }
+  ] }));
+  const leakModel = path.join(directory, 'model-leak.json');
+  const trained = run('train-intent.mjs', [leakDataset, leakModel, '--golden', goldenPath]);
+  assert.equal(trained.status, 0, trained.stderr);
+  assert.match(trained.stdout, /bỏ bình luận\/COMMENT_\* 2/);
+  assert.match(trained.stderr, /Bỏ 1 dòng hỏng/);
+  assert.match(trained.stderr, /CẢNH BÁO dataset CHỨA 1 dòng thuộc bộ chấm/);
+  const saved = JSON.parse(readFileSync(leakModel, 'utf8'));
+  assert.equal(saved.meta.sawGolden, true);
+  assert.deepEqual([saved.meta.goldenExcluded.goldenIds, saved.meta.goldenExcluded.matchedIds, saved.meta.goldenExcluded.excluded, saved.meta.goldenExcluded.source], [2, 1, 1, goldenPath]);
+  assert.equal(saved.meta.trainIds.hash, 'fnv1a32');
+  assert.equal(saved.meta.dataset.comments, 2);
+  assert.ok(!saved.labels.includes('COMMENT_PUBLIC_REPLY'), 'bình luận không vào mô hình hộp thư');
+  // Bản "m" sạch golden: dataset bỏ dòng golden.
+  const cleanDataset = path.join(directory, 'dataset-clean.jsonl');
+  writeFileSync(cleanDataset, rows.filter(row => row.id !== leaked.id).map(row => JSON.stringify(row)).join('\n'));
+  const cleanModel = path.join(directory, 'model-clean.json');
+  const quiet = run('train-intent.mjs', [cleanDataset, cleanModel, '--golden', goldenPath, '--quiet']);
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.equal(quiet.stdout.trim().split('\n').length, 1, '--quiet: chỉ dòng saved');
+  assert.match(quiet.stdout, /^saved .*sawGolden false/);
+  assert.equal(JSON.parse(readFileSync(cleanModel, 'utf8')).meta.sawGolden, false);
+  // replay-golden: mốc "m" sạch → tính chênh; mốc đã thấy golden → không tính.
+  const valid = run('replay-golden.mjs', [goldenPath, '--model', cleanModel, '--compare', leakModel]);
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.match(valid.stdout, /^mô hình 1: .*model-clean\.json .* · sạch golden \(0\/2 id\)/m);
+  assert.match(valid.stdout, /^mô hình 2: .*model-leak\.json .* · ĐÃ THẤY golden \(1\/2 id trong dataset huấn luyện\)/m);
+  assert.match(valid.stdout, /CẢNH BÁO mô hình 2 đã học mục của bộ chấm/);
+  assert.match(valid.stdout, /MỐC SO KHÔNG HỢP LỆ: mô hình 2/);
+  assert.match(valid.stdout, /Chênh \(mô hình 2 − mô hình 1\): KHÔNG tính/);
+  const deployed = run('replay-golden.mjs', [goldenPath, '--model', path.join(root, 'app', 'processing', 'intent-model.json'), '--compare', cleanModel]);
+  assert.equal(deployed.status, 0, deployed.stderr);
+  assert.match(deployed.stdout, /không rõ đã thấy golden chưa .* — mô hình ĐANG CHẠY/);
+  assert.match(deployed.stdout, /MỐC SO KHÔNG HỢP LỆ: mô hình 1/);
+  const fair = run('replay-golden.mjs', [goldenPath, '--model', cleanModel, '--compare', cleanModel]);
+  assert.match(fair.stdout, /Chênh \(mô hình 2 − mốc mô hình 1\): rule-miss \+0\.0 điểm/);
+  // --golden không tồn tại → lỗi trước khi huấn luyện.
+  const missing = run('train-intent.mjs', [cleanDataset, path.join(directory, 'x.json'), '--golden', path.join(directory, 'khong-co.json')]);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /Không thấy bộ chấm --golden/);
+});

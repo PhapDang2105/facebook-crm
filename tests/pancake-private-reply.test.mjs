@@ -7,6 +7,8 @@ import path from 'node:path';
 // Hộp thư thử riêng. Đi qua sendConversationMessage của meta-sync (đường bot
 // và nhân viên dùng) để chắc cờ privateReply tới được Pancake.
 process.env.META_CONVERSATIONS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-private-')), 'meta-conversations.json');
+// Trạng thái bám đuổi tạm (storePancakeEvents đối chiếu tin nhân viên với lời bám đuổi): không đọc tệp thật.
+process.env.FOLLOW_UPS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-private-fu-')), 'follow-ups.json');
 process.env.PANCAKE_PAGE_ID = '110';
 process.env.PANCAKE_PAGE_ACCESS_TOKEN = 'pat-1';
 process.env.PANCAKE_WEBHOOK_TOKEN = 'hook-1';

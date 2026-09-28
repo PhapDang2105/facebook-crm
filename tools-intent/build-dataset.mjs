@@ -6,16 +6,23 @@
 //     nối "\n"); trả lời khớp mẫu → nhãn theo chữ ký mẫu (labelSource 'template'); câu nhân viên tự viết
 //     → với --llm, Gemini quy về mã mẫu (labelSource 'staff', cache data/processed/staff-labels.json);
 //     nhân viên viết lại trong 10 phút sau bot → nhãn nhân viên thay nhãn bot, đánh dấu corrected.
-//   - Từ NHẬT KÝ QUYẾT ĐỊNH (ưu tiên khi có): mỗi dòng là một lượt engine thật, nhãn = final,
-//     labelSource 'pipeline', ngữ cảnh lấy nguyên từ ctx của engine (không phải suy ngoại tuyến).
+//   - Từ NHẬT KÝ QUYẾT ĐỊNH (ưu tiên khi có): mỗi dòng là một lượt engine thật, labelSource 'pipeline'.
+//     Nhãn = `chosen` khi final là mẫu hậu xử lý / gác (REPLY_ALREADY_SENT*, ORDER_ADDRESS_REMIND) và có chosen,
+//     còn lại = final (mã engine ORDER_UPDATE/CANCEL/NOTE quy về mã mẫu ORDER_UPDATED/CANCELLED/NOTE_ADDED).
+//     Trường `prevBot` của nhật ký là MÃ MẪU bot trước (botLastTemplateId) → lastTemplate; câu bot trước (đã che)
+//     đọc từ `prevBotText` nếu engine ghi; giỏ đang giữ đọc từ `basket` [{ sku, quantity }] nếu có.
+//     Ngữ cảnh mô hình dựng bằng intentRowOf (một định nghĩa với engine) từ ctx/chữ của nhật ký.
+//     Khử trùng id (conversationId:mid); đếm dòng hỏng / trước --since / trùng và in ra.
+//   - --since YYYY-MM-DD (giờ Việt Nam; mặc định 2026-09-18, in ra khi chạy). Sai định dạng → lỗi.
 //   - Bình luận mặc định bỏ (--include-comments để giữ).
 // Chỉ ghi chữ khách đã che SĐT; không ghi tên; không gửi gì cho khách.
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isSystemNotice, matchTemplate, templateSignatures } from '../app/processing/template-match.mjs';
 import { isLivestreamConversation } from '../app/conversation-orders.mjs';
-import { addressInTextOf, bagCountOf, customerTurns, lastWasOrderStepOf, maskPhone, orderContextAt, prevBotAsksOf, readJsonl, textContext, toJsonl, turnContext } from './dataset-context.mjs';
+import { canonicalTemplateId, intentRowOf, labelTemplateId } from '../app/processing/intent-features.mjs';
+import { basketItemsOf, cliFail, customerTurns, looksLikeTemplateId, maskPhone, parseCliArgs, phoneInTextOf, readJsonl, toJsonl, turnContext } from './dataset-context.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP_IDS = new Set(['COMMENT_PRIVATE_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_UNCHANGED', 'ORDER_NOTE_ADDED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'UPSELL_TWO_BAGS', 'TRIAL_REMIND', 'TRIAL_NEXT_STEP', 'QR_OFFER', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_STATUS_CHECKING', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'ORDER_UPDATED']);
@@ -75,15 +82,19 @@ export async function buildRowsFromStore(store, { templates = {}, since = 0, inc
       if (!label) continue;
       if (labelSource === 'template') stats.template += 1;
       const context = turnContext({ before: turn.before, at, matchTemplateFn: match });
+      // Trường mô hình: intentRowOf (một định nghĩa với engine) — đơn chưa hủy < 24 giờ trước tin, SĐT/địa chỉ/túi từ chữ.
+      const modelRow = intentRowOf({
+        text: turn.text, source, lastTemplateId: context.lastTemplateMatched || context.lastTemplate, prevBotText: context.prevBot,
+        hasBasket: context.hasBasket, orders: Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [], now: at - 1,
+        livestream, phoneInText: phoneInTextOf(turn.text), prevBotAsks: context.prevBotAsks
+      });
       rows.push(v2Row({
         id: `${conversation.id}:${at}`,
-        text,
         ...context,
+        ...modelRow,
+        text,
         label, labelSource, corrected,
         source,
-        ...orderContextAt(conversation.customerOrders, at),
-        livestream,
-        ...textContext(turn.text),
         ruleTemplate: '',
         at,
         bundleSize: turn.bundle.length
@@ -93,62 +104,97 @@ export async function buildRowsFromStore(store, { templates = {}, since = 0, inc
   return rows;
 }
 
-/** Đọc mọi tệp YYYY-MM-DD.jsonl trong thư mục nhật ký (lọc theo ngày trong tên tệp). */
-export function readDecisionLog(dir, { since = 0 } = {}) {
+/** Ngày YYYY-MM-DD theo giờ Việt Nam → mốc ms lúc 00:00 (+07:00); sai định dạng → NaN. */
+export function parseSinceDate(value) {
+  const text = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return NaN;
+  const at = Date.parse(`${text}T00:00:00+07:00`);
+  return Number.isFinite(at) && new Date(at + 7 * 3600000).toISOString().slice(0, 10) === text ? at : NaN;
+}
+export const DEFAULT_SINCE = '2026-09-18';
+
+/**
+ * Đọc mọi tệp YYYY-MM-DD.jsonl trong thư mục nhật ký (tệp có ngày < since bỏ cả tệp). Dòng hỏng (ghi dở) bỏ qua và
+ * đếm vào `stats.bad`; `stats.files` = số tệp đã đọc.
+ */
+export function readDecisionLog(dir, { since = 0, stats = {} } = {}) {
+  Object.assign(stats, { bad: 0, files: 0, ...stats });
   if (!existsSync(dir)) return [];
   const files = readdirSync(dir).filter(name => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(name)).sort();
   const entries = [];
   for (const name of files) {
-    if (since && Date.parse(`${name.slice(0, 10)}T23:59:59Z`) < since) continue;
-    for (const line of readFileSync(path.join(dir, name), 'utf8').split('\n')) {
-      if (!line.trim()) continue;
-      try { entries.push(JSON.parse(line)); } catch { /* dòng hỏng (ghi dở) bỏ qua */ }
-    }
+    // Tên tệp là ngày giờ Việt Nam: bỏ cả tệp khi ngày đó kết thúc trước since.
+    if (since && Date.parse(`${name.slice(0, 10)}T23:59:59.999+07:00`) < since) continue;
+    stats.files += 1;
+    const fileStats = {};
+    entries.push(...readJsonl(readFileSync(path.join(dir, name), 'utf8'), fileStats));
+    stats.bad += fileStats.bad || 0;
   }
   return entries;
 }
 
-/** Dòng v2 từ nhật ký quyết định: nhãn = final (câu engine đã chọn), ctx lấy nguyên. */
+// Mẫu hậu xử lý / gác: câu engine GỬI không phải câu trả lời nội dung → nhãn là mẫu đã chọn trước gác (`chosen`).
+const POST_GUARD_FINALS = new Set(['REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'ORDER_ADDRESS_REMIND']);
+
+/** Nhãn của một bản ghi nhật ký: chosen khi final là mẫu hậu xử lý/gác (và có chosen), còn lại final; mã engine → mã mẫu. */
+export function decisionLabelOf(entry) {
+  const final = String(entry?.final || '');
+  const chosen = String(entry?.chosen || '');
+  return labelTemplateId(POST_GUARD_FINALS.has(final) && chosen ? chosen : final);
+}
+
+/**
+ * Dòng v2 từ nhật ký quyết định (labelSource 'pipeline'). `prevBot` của nhật ký là MÃ MẪU (botLastTemplateId) →
+ * lastTemplate; câu bot trước = `prevBotText` (đã che) nếu engine ghi (nhật ký cũ ghi chữ ở `prevBot` vẫn đọc được).
+ * Giỏ: `basket` [{ sku, quantity }] giữ nguyên trên dòng (relabel dựng lại pendingOrder). Trường mô hình: intentRowOf.
+ * `stats`: pipeline, skipped, comments, beforeSince, duplicates.
+ */
 export function rowsFromDecisionLog(entries, { templates = {}, includeComments = false, since = 0, stats = {} } = {}) {
   const signatures = templateSignatures(templates);
-  Object.assign(stats, { pipeline: 0, skipped: 0, comments: 0, ...stats });
+  Object.assign(stats, { pipeline: 0, skipped: 0, comments: 0, beforeSince: 0, duplicates: 0, ...stats });
   const rows = [];
+  const seen = new Set();
   for (const entry of entries) {
     if (!entry || entry.skipped || (entry.type || 'text') !== 'text' || !entry.final || !String(entry.text || '').trim()) { stats.skipped += 1; continue; }
     const at = Number(entry.at) || Date.parse(entry.at) || 0;
-    if (at < since) continue;
+    if (at < since) { stats.beforeSince += 1; continue; }
     const source = entry.source === 'comment' ? 'comment' : 'inbox';
     if (source === 'comment' && !includeComments) { stats.comments += 1; continue; }
+    const id = `${entry.conversationId}:${entry.mid || at}`;
+    if (seen.has(id)) { stats.duplicates += 1; continue; }
+    seen.add(id);
     const ctx = entry.ctx || {};
-    const prevBot = maskPhone(entry.prevBot || '').slice(0, 240);
-    const lastTemplate = String(entry.lastTemplate || ctx.lastTemplate || (prevBot ? matchTemplate(prevBot, signatures) : '') || '');
+    const loggedId = looksLikeTemplateId(entry.prevBot) ? String(entry.prevBot) : '';
+    const prevBotRaw = entry.prevBotText ?? (loggedId ? '' : entry.prevBot);
+    const prevBot = maskPhone(prevBotRaw || '').slice(0, 240);
+    const lastTemplate = canonicalTemplateId(entry.lastTemplate || loggedId || ctx.lastTemplate || (prevBot ? matchTemplate(prevBot, signatures) : '') || '');
     const text = maskPhone(entry.text).slice(0, 300);
+    const basket = Array.isArray(entry.basket) ? entry.basket.filter(item => item && (item.sku || item.code)).map(item => ({ sku: String(item.sku || item.code), quantity: Math.max(1, Number(item.quantity) || 1) })) : null;
+    const modelRow = intentRowOf({
+      text, source, lastTemplateId: lastTemplate, prevBotText: prevBot, hasBasket: basket ? basket.length > 0 || Boolean(ctx.hasBasket) : ctx.hasBasket,
+      hasOrder: ctx.hasOrder ?? ctx.hasRecentOrder, orderAgeMin: ctx.orderAgeMin, prevBotAsks: entry.prevBotAsks, livestream: ctx.livestream,
+      phoneInText: ctx.phoneInText, staffRepliedAfterBot: ctx.staffRepliedAfterBot, now: at
+    });
+    const label = decisionLabelOf(entry);
     stats.pipeline += 1;
     rows.push(v2Row({
-      id: `${entry.conversationId}:${entry.mid || at}`,
+      id,
+      ...modelRow,
       text,
       prevBot,
       prevCustomer: String(entry.prevCustomer || ''),
-      label: entry.final,
+      label,
       labelSource: 'pipeline',
       source,
-      lastTemplate,
-      lastWasOrderStep: ctx.lastWasOrderStep ?? lastWasOrderStepOf(lastTemplate),
-      hasBasket: ctx.hasBasket,
-      basketItems: Array.isArray(ctx.basketItems) ? ctx.basketItems.reduce((sum, item) => sum + (Number(item?.quantity) || 1), 0) : ctx.basketItems,
-      hasOrder: ctx.hasRecentOrder,
-      orderAgeMin: Number.isFinite(Number(ctx.orderAgeMin)) && ctx.orderAgeMin !== null ? ctx.orderAgeMin : null,
-      livestream: ctx.livestream,
-      prevBotAsks: entry.prevBotAsks || prevBotAsksOf(prevBot, lastTemplate),
-      phoneInText: ctx.phoneInText ?? text.includes('<sdt>'),
-      addressInText: ctx.addressInText ?? addressInTextOf(text),
-      bagCount: ctx.bagCount ?? bagCountOf(text),
-      ruleTemplate: entry.rule?.templateId || '',
+      basketItems: basket ? basket.reduce((sum, item) => sum + item.quantity, 0) : Array.isArray(ctx.basketItems) ? ctx.basketItems.reduce((sum, item) => sum + (Number(item?.quantity) || 1), 0) : Number(ctx.basketItems) || basketItemsOf({ lastTemplate, prevBot }),
+      ruleTemplate: labelTemplateId(entry.rule?.templateId || ''),
       at,
       prevBotAgeMin: Number.isFinite(Number(entry.prevBotAgeMin)) && entry.prevBotAgeMin !== null ? entry.prevBotAgeMin : null,
       staffRepliedAfterBot: Boolean(ctx.staffRepliedAfterBot),
+      ...(basket ? { basket } : {}),
       ...(entry.rule?.name ? { ruleName: entry.rule.name } : {}),
-      ...(entry.chosen && entry.chosen !== entry.final ? { chosen: entry.chosen } : {}),
+      ...(entry.chosen && labelTemplateId(entry.chosen) !== label ? { chosen: entry.chosen } : {}),
+      ...(String(entry.final) !== label ? { final: entry.final } : {}),
       ...(entry.llm?.templateId ? { llmTemplate: entry.llm.templateId } : {})
     }));
   }
@@ -183,22 +229,30 @@ async function makeStaffLabeller(templates) {
 
 async function main() {
   const args = process.argv.slice(2);
-  const valueFlags = new Set(['--since', '--from-decision-log']);
-  const outPath = args.filter((arg, index) => !arg.startsWith('--') && !valueFlags.has(args[index - 1]))[0];
-  if (!outPath) { console.log('Dùng: node tools-intent/build-dataset.mjs <out.jsonl> [--since YYYY-MM-DD] [--llm] [--include-comments] [--from-decision-log <dir>]'); process.exit(1); }
-  const since = Date.parse(args.includes('--since') ? args[args.indexOf('--since') + 1] : '2026-09-18T00:00:00Z');
-  const includeComments = args.includes('--include-comments');
+  const usage = 'Dùng: node tools-intent/build-dataset.mjs <out.jsonl> [--since YYYY-MM-DD] [--llm] [--include-comments] [--from-decision-log <dir>]';
+  const cli = parseCliArgs(args, ['--since', '--from-decision-log']);
+  const outPath = cli.positional[0];
+  if (!outPath) cliFail(usage);
+  const sinceText = cli.value('--since', DEFAULT_SINCE);
+  const since = parseSinceDate(sinceText);
+  if (!Number.isFinite(since)) cliFail(`--since sai định dạng "${sinceText}" (cần YYYY-MM-DD, ví dụ 2026-09-28).`);
+  console.log(`Từ ngày ${sinceText} (giờ Việt Nam)${cli.has('--since') ? '' : ' — mặc định, đổi bằng --since'}`);
+  const includeComments = cli.has('--include-comments');
   // CRM_DATA_DIR: chỉ để chạy trên bản sao dữ liệu ở máy khác; mặc định là kho thật của app.
   const dataDir = process.env.CRM_DATA_DIR || path.join(root, 'data', 'processed');
-  const settings = JSON.parse(readFileSync(path.join(dataDir, 'chatbot-settings.json'), 'utf8'));
+  const { normalizeChatbotSettings } = await import(pathToFileURL(path.join(root, 'app', 'chatbot-settings.mjs')).href);
+  // Mẫu gộp seed (như engine đọc): chữ ký mẫu nào cũng có, kể cả mẫu Cài đặt chưa lưu.
+  const settings = normalizeChatbotSettings(JSON.parse(readFileSync(path.join(dataDir, 'chatbot-settings.json'), 'utf8')));
   const templates = settings.messageTemplates || {};
   const stats = {};
   let rows;
-  if (args.includes('--from-decision-log')) {
-    const dir = args[args.indexOf('--from-decision-log') + 1];
-    const entries = readDecisionLog(dir, { since });
+  if (cli.has('--from-decision-log')) {
+    const dir = cli.value('--from-decision-log');
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) cliFail(`Không thấy thư mục nhật ký quyết định: ${dir}`);
+    const readStats = {};
+    const entries = readDecisionLog(dir, { since, stats: readStats });
     rows = rowsFromDecisionLog(entries, { templates, includeComments, since, stats });
-    console.log(`Nhật ký quyết định ${dir}: ${entries.length} dòng`);
+    console.log(`Nhật ký quyết định ${dir}: ${readStats.files} tệp · ${entries.length} dòng · hỏng (bỏ) ${readStats.bad} · trước ${sinceText} ${stats.beforeSince} · trùng id ${stats.duplicates}`);
   } else {
     const store = JSON.parse(readFileSync(path.join(dataDir, 'meta-conversations.json'), 'utf8'));
     const cachePath = path.join(dataDir, 'staff-labels.json');

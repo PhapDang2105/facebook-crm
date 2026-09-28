@@ -12,14 +12,35 @@ const ADMIN = /\b(xa|huyen|quan|phuong|thi tran|thi xa|tinh|tp|thanh pho|ap|thon
 // "địa chỉ cũ", "đ/c như cũ", "địa chỉ vẫn thế", "dc đã gửi", "gửi dc cũ", "đã gửi địa chỉ", "gọi địa chỉ cũ"…
 // "dc" cũng là "được" nên với "dc"/"d c" chỉ nhận vế rõ (cũ / như cũ / đã gửi / gửi rồi / lần trước / đơn trước),
 // không nhận "dc trước" ("giao dc trước thứ 7") hay "dc vẫn thế".
-const OLD_ADDRESS = /\b(dia chi cu|dia chi (nhu|giong) (lan|hom) truoc|nhu lan truoc|cho cu|gui cho cu|ve cho cu|dia chi lan truoc|nhu cu)\b|\b(dia chi|dia chi nhan)\s*(cu|nhu cu|van the|da gui|gui roi|truoc|lan truoc|don truoc|nhu (lan|don|hom) truoc)\b|\b(dc|d c)\s*(cu|nhu cu|da gui|gui roi|lan truoc|don truoc)\b|\bgui (dc|dia chi) (cu|truoc)\b|\bda gui (dc|dia chi)\b|\bgoi dia chi cu\b/;
+// Vòng 11 (N14): bỏ vế "cho cu" / "gui cho cu" — bỏ dấu trùng "gửi cho cụ" (người già nhận hàng), không phải "chỗ cũ".
+// Dùng chung với renderOrder (chatbot-templates.mjs, wantsPrevious) qua mentionsOldAddress().
+export const OLD_ADDRESS = /\b(dia chi cu|dia chi (nhu|giong) (lan|hom) truoc|nhu (lan|don) truoc|ve cho cu|dia chi lan truoc|nhu cu)\b|\b(dia chi|dia chi nhan)\s*(cu|nhu cu|van the|da gui|gui roi|truoc|lan truoc|don truoc|nhu (lan|don|hom) truoc)\b|\b(dc|d c)\s*(cu|nhu cu|da gui|gui roi|lan truoc|don truoc)\b|\bgui (dc|dia chi) (cu|truoc)\b|\bda gui (dc|dia chi)\b|\bgoi dia chi cu\b/;
 const FILLER = new Set(['sdt', 'so', 'dien', 'thoai', 'dt', 'cua', 'minh', 'em', 'e', 'chi', 'c', 'anh', 'a', 'toi', 'day', 'la', 'nhe', 'nha', 'nghen', 'ok', 'oke', 'da', 'va', 'dc', 'duoc', 'roi', 'ne', 'shop', 'sop', 'gui', 'ship', 'giao', 've', 'cho', 'thi', 'ạ', 'nhen', 'nhá', 'sđt', 'zalo', 'lien', 'he', 'goi']);
 // Vòng 10: địa chỉ CHƯA đủ ba cấp ("270 Nguyễn Văn Cừ tp Vinh Nghệ An", "Na Hang", "Huyện Sơn Tịnh", "Số 17, đường 38,
 // P. Thảo Điền") khi bot đang xin địa chỉ: vẫn đưa vào bộ soạn đơn — nó tự hỏi đúng cấp còn thiếu
 // (ORDER_ADDRESS_CLARIFY), như mô hình vẫn làm. Không nhận câu hỏi/chính sách ("giao Hà Nội mấy ngày", "ship về
 // Cà Mau được không", "có giao tận nơi không") hay chữ không giống địa chỉ ("để mình xem lại").
 const NOT_ADDRESS = /\b(bao lau|may ngay|bn ngay|bao nhieu|bnhiu|bn|khi nao|chung nao|gia|phi|mien|free|tan noi|tan nha|co (giao|ship|toi|den|ve)|(giao|ship|toi|den|gui|van chuyen) (duoc|dc|ko|khong|k|toi|den|ve)|(duoc|dc) (khong|ko|k|kg|hong)|(xa|gan) (khong|ko|k|qua|lam)|the nao|ntn|ra sao|lam sao|o dau|noi khong|noi ko)\b/;
-const looksLikeAddress = (raw, normalized) => Boolean(raw) && raw.length <= 200 && !NOT_ADDRESS.test(normalized)
+/**
+ * Bỏ SĐT khỏi tin, giữ số đứng trước/sau nó: "quận 1 0912345678" (mẫu SĐT chung nuốt cả "1 "), "0912345678 12 Lê
+ * Lợi…" (mẫu chung nuốt cả số nhà "12"). SĐT 10 số (0… / +84…, có thể cách bằng dấu cách/chấm/gạch) bỏ chính xác;
+ * không thấy dạng đó thì dùng mẫu chung như cũ.
+ */
+export function stripPhone(raw) {
+  const text = String(raw || '');
+  const precise = text.replace(/(?<![\d])(?:\+?84[ .-]?|0)\d(?:[ .-]?\d){8}(?![\d])/g, ' ');
+  if (precise !== text) return precise;
+  return text.replace(/\+?\d[\d .-]{8,13}/g, match => {
+    const lead = match.match(/^(\d{1,2})\s+(?=\d)/);
+    return lead && /^(0|84)\d{8,9}$/.test(match.slice(lead[0].length).replace(/\D/g, '')) ? `${lead[1]} ` : ' ';
+  });
+}
+
+/** Tin khách có nói "gửi về địa chỉ cũ / như lần trước / dc cũ…" không (cùng bộ từ với luồng đơn tất định). */
+export function mentionsOldAddress(text) {
+  return OLD_ADDRESS.test(normalizeIntentText(String(text || '')));
+}
+const looksLikeAddress =(raw, normalized) => Boolean(raw) && raw.length <= 200 && !NOT_ADDRESS.test(normalized)
   && (ADDRESS_WORDS.test(normalized) || Boolean(describeDeliveryAddress(raw).resolved?.province));
 
 /**
@@ -43,7 +64,7 @@ export function orderFlowStep(text, ctx = {}) {
     return { rule: 'OLD_ADDRESS', value: { template_id: 'ORDER_ADDRESS', Phone_Number: '0', Customer_Address: '0' } };
   }
   const phone = extractVietnamesePhone(raw);
-  const address = String(ctx.addressText || raw.replace(/\+?\d[\d .-]{8,13}/g, ' ')).replace(/\s+/g, ' ').trim();
+  const address = String(ctx.addressText || stripPhone(raw)).replace(/\s+/g, ' ').trim();
   if (phone && ctx.addressComplete) return { rule: 'PHONE_ADDRESS', value: { template_id: 'ORDER_ADDRESS', Phone_Number: phone, Customer_Address: address } };
   if (phone) {
     const leftover = s.replace(/<sdt>/g, ' ').split(' ').filter(Boolean);

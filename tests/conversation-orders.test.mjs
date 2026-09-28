@@ -153,3 +153,12 @@ test('thẻ "Đã mua hàng" cho đơn POS/CRM tay (28/09): đơn chưa hủy g�
   // Chưa cấu hình thẻ nào nhận sự kiện đơn: không lỗi.
   assert.equal(applyPurchaseLabels({ id: 'c4' }, { id: 'pos5' }, []), false);
 });
+
+test('V7: đơn nhân viên tạo giữ cờ livestream nếu form gửi (POS/kho kèm quà chỉ khách live); không gửi thì không có cờ', () => {
+  const base = { name: 'A', phone: '0909123456', address: '12 Lê Lợi, Quận 1, TP.HCM', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2, price: 149000 }], freeShipping: true };
+  assert.equal(normalizeCustomerOrder({ ...base, livestream: true }).livestream, true);
+  assert.equal(isLivestreamOrder(normalizeCustomerOrder({ ...base, livestream: true })), true);
+  assert.equal(normalizeCustomerOrder({ ...base, livestream: false }).livestream, false);
+  assert.equal('livestream' in normalizeCustomerOrder(base), false);
+  assert.equal('livestream' in normalizeCustomerOrder({ ...base, livestream: 'có' }), false, 'chỉ nhận true/false');
+});

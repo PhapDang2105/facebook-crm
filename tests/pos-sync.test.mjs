@@ -109,3 +109,13 @@ test('đơn webhook cũ không có mã form: đồng bộ POS gặp lại cùng 
   assert.equal(again.created, 0);
   assert.equal(again.skipped, 1);
 });
+
+test('nhẹ (e): tổng đơn landing từ POS = cod nếu có, không thì tiền hàng − giảm giá + ship (total_price là trước giảm)', async () => {
+  const { posOrderTotal } = await import('../app/pos-sync.mjs');
+  assert.equal(posOrderTotal({ total_price: 348000, total_discount: 50000, shipping_fee: 0, cod: 298000 }), 298000);
+  assert.equal(posOrderTotal({ total_price: 348000, total_discount: 50000, shipping_fee: 0 }), 298000);
+  assert.equal(posOrderTotal({ total_price: 174000, total_discount: 0, shipping_fee: 15000 }), 189000);
+  assert.equal(posOrderTotal({ total_price: 174000, shipping_fee: 15000, is_free_shipping: true }), 174000);
+  assert.equal(posOrderToPayload(posOrder({ total_price: 522000, total_discount: 75000, shipping_fee: 0, cod: 447000 })).total, 447000);
+  assert.equal(posOrderToPayload(posOrder({ total_price: 522000, total_discount: 75000, shipping_fee: 0 })).total, 447000);
+});

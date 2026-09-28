@@ -126,7 +126,10 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
     processingStatus: text(input.processingStatus, 40),
     employee: text(input.employee || 'Bạn', 120),
     createdAt: Number(input.createdAt) || now,
-    updatedAt: now
+    updatedAt: now,
+    // Cờ đơn khách livestream (form nhân viên gửi khi khách từ phiên live): POS/xuất kho
+    // và tính lại giá (order-edits) dựa vào đây để giữ quà chỉ khách live.
+    ...(typeof input.livestream === 'boolean' ? { livestream: input.livestream } : {})
   };
 }
 

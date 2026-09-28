@@ -11,6 +11,11 @@
 //     0,6–0,95 với mẫu an toàn = ANSWER ∩ intentSafeTemplates, và đường risk–coverage cùng độ phủ.
 // Mục golden thiếu ngữ cảnh v2 (hasBasket, hasOrder, prevBotAsks…) được dựng lại bằng enrichGoldenContext
 // từ kho hội thoại data/processed/meta-conversations.json nếu có (không có kho vẫn chạy, suy từ chính mục).
+// Row đưa vào mô hình dựng bằng intentRowFromRecord (intent-features.intentRowOf — MỘT định nghĩa với engine).
+// Rò golden (vòng 12): mô hình có meta.trainIds → đếm mục golden nằm trong dataset huấn luyện; có meta.sawGolden → in;
+//   không có meta (v5 đang chạy) → "không rõ". Mô hình ĐÃ THẤY golden (hay mô hình đang chạy không rõ) KHÔNG được dùng
+//   làm mốc so: cột của nó chỉ tham khảo, không in chênh lệch. Mốc đúng là bản "m" (cùng công thức, dataset không
+//   chứa golden — train-intent … --golden, xem README "Tiêu chí thay mô hình").
 // In ra: độ đúng tổng, đường risk–coverage theo ngưỡng (để chọn intentThreshold), tập rule-miss, tin sai ở mức chắc.
 // Không gọi LLM, không gửi gì cho khách.
 import { existsSync, readFileSync } from 'node:fs';
@@ -19,34 +24,71 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-const option = name => (args.includes(name) ? args[args.indexOf(name) + 1] : '');
-const useAll = args.includes('--all');
-const useGate = args.includes('--gate');
-const goldenPath = args.find((arg, index) => !arg.startsWith('--') && !['--model', '--compare', '--cascade'].includes(args[index - 1])) || path.join(root, 'data', 'processed', 'golden-set.json');
-const modelPath = option('--model') || process.env.INTENT_MODEL_PATH || path.join(root, 'app', 'processing', 'intent-model.json');
+const { cliFail, parseCliArgs } = await import(pathToFileURL(path.join(root, 'tools-intent', 'dataset-context.mjs')).href);
+const cli = parseCliArgs(args, ['--model', '--compare', '--cascade']);
+const option = name => cli.value(name);
+const useAll = cli.has('--all');
+const useGate = cli.has('--gate');
+const goldenPath = cli.positional[0] || path.join(root, 'data', 'processed', 'golden-set.json');
+const deployedPath = path.join(root, 'app', 'processing', 'intent-model.json');
+const modelPath = option('--model') || process.env.INTENT_MODEL_PATH || deployedPath;
 const comparePath = option('--compare');
 const cascadePath = option('--cascade');
+if (!existsSync(goldenPath)) cliFail(`Không thấy bộ chấm: ${goldenPath}`);
+for (const [flag, file] of [['--model', modelPath], ['--compare', comparePath], ['--cascade', cascadePath]]) if (file && !existsSync(file)) cliFail(`Không thấy tệp ${flag}: ${file}`);
 const { loadIntentModelFrom, predictIntentWith, intentSafeTemplates } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'intent-model.mjs')).href);
 const { loadCascadeFrom, predictCascadeWith, groupOf, fineGroupOf, cascadeSafeTemplates, CASCADE_FINE_GROUPS, probabilitiesOf, sumByGroup } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'intent-cascade.mjs')).href);
+const { intentRowFromRecord, isOrderStepContext, canonicalTemplateId } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'intent-features.mjs')).href);
 const { ruleIntent } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'rule-intent.mjs')).href);
 const { describeDeliveryAddress } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'locations.mjs')).href);
 const { enrichGoldenContext, goldenContextFields } = await import(pathToFileURL(path.join(root, 'app', 'golden-set.mjs')).href);
+const { hashId } = await import(pathToFileURL(path.join(root, 'tools-intent', 'train-intent.mjs')).href);
+
+let goldenParsed;
+try { goldenParsed = JSON.parse(readFileSync(goldenPath, 'utf8')); } catch (error) { cliFail(`Bộ chấm ${goldenPath} không đọc được: ${String(error.message).slice(0, 80)}`); }
+const goldenAll = Array.isArray(goldenParsed?.items) ? goldenParsed.items : [];
+
+/**
+ * Mô hình đã thấy bộ chấm chưa: meta.trainIds (băm id dataset) → đếm id golden trong đó; meta.sawGolden → theo meta;
+ * không có gì → 'unknown'. Mô hình đang chạy (app/processing/intent-model.json) không rõ thì coi như KHÔNG hợp lệ làm mốc.
+ */
+function leakOf(meta, file) {
+  const ids = Array.isArray(meta?.trainIds?.ids) ? new Set(meta.trainIds.ids) : null;
+  const golden = goldenAll.filter(item => item?.id);
+  const seen = ids ? golden.filter(item => ids.has(hashId(item.id))).length : null;
+  const status = seen ? 'seen' : meta?.sawGolden === true ? 'seen' : ids || meta?.sawGolden === false ? 'clean' : 'unknown';
+  const deployed = path.resolve(String(file || '')) === path.resolve(deployedPath);
+  return { status, seen, total: golden.length, deployed, invalidBaseline: status === 'seen' || (status === 'unknown' && deployed) };
+}
+const leakText = leak => (leak.status === 'seen' ? `ĐÃ THẤY golden${leak.seen !== null ? ` (${leak.seen}/${leak.total} id trong dataset huấn luyện)` : ' (meta.sawGolden)'}` : leak.status === 'clean' ? `sạch golden (0/${leak.total} id)` : `không rõ đã thấy golden chưa (không có meta.trainIds/sawGolden)${leak.deployed ? ' — mô hình ĐANG CHẠY' : ''}`);
 
 const models = [{ name: comparePath ? 'mô hình 1' : 'mô hình', file: modelPath, model: loadIntentModelFrom(modelPath) }];
 if (comparePath) models.push({ name: 'mô hình 2', file: comparePath, model: loadIntentModelFrom(comparePath) });
 for (const entry of models) {
-  if (!entry.model) { console.log(`Không đọc được ${entry.file}`); process.exit(1); }
-  console.log(`${entry.name}: ${entry.file} · ${entry.model.labels.length} nhãn · ${entry.model.rows || '?'} dòng · nhiệt độ ${entry.model.temperature}${entry.model.trainedAt ? ` · huấn luyện ${entry.model.trainedAt}` : ''}`);
+  if (!entry.model) cliFail(`Không đọc được ${entry.file}`);
+  entry.leak = leakOf(entry.model.meta, entry.file);
+  console.log(`${entry.name}: ${entry.file} · ${entry.model.labels.length} nhãn · ${entry.model.rows || '?'} dòng · nhiệt độ ${entry.model.temperature}${entry.model.trainedAt ? ` · huấn luyện ${entry.model.trainedAt}` : ''} · ${leakText(entry.leak)}`);
+  if (entry.leak.status === 'seen') console.log(`  CẢNH BÁO ${entry.name} đã học mục của bộ chấm → số đo trên bộ chấm bị THỔI PHỒNG, không dùng để quyết thay mô hình.`);
 }
 let cascade = null;
 if (cascadePath) {
   cascade = loadCascadeFrom(cascadePath);
-  if (!cascade) { console.log(`Không đọc được mô hình tầng ${cascadePath}`); process.exit(1); }
+  if (!cascade) cliFail(`Không đọc được mô hình tầng ${cascadePath}`);
   const specialists = Object.entries(cascade.specialists).map(([key, model]) => `${key} ${model ? model.labels.length : 'null'}`).join(' · ');
-  console.log(`mô hình tầng: ${cascadePath} · nhóm ${cascade.groups.join('/')} · answerMode ${cascade.answerMode} · mô hình con (số mẫu): ${specialists} · ${cascade.rows || '?'} dòng${cascade.trainedAt ? ` · huấn luyện ${cascade.trainedAt}` : ''}`);
+  cascade.leak = leakOf(cascade.meta, cascadePath);
+  console.log(`mô hình tầng: ${cascadePath} · nhóm ${cascade.groups.join('/')} · answerMode ${cascade.answerMode} · mô hình con (số mẫu): ${specialists} · ${cascade.rows || '?'} dòng${cascade.trainedAt ? ` · huấn luyện ${cascade.trainedAt}` : ''} · ${leakText(cascade.leak)}`);
+  if (cascade.leak.status === 'seen') console.log('  CẢNH BÁO mô hình tầng đã học mục của bộ chấm → số đo bị thổi phồng.');
+}
+// --compare: chênh lệch (mô hình 2 − mô hình 1) chỉ tính khi CẢ HAI không phải mốc hỏng (đã thấy golden, hay là mô hình
+// đang chạy không rõ nguồn dữ liệu).
+const invalidModels = comparePath ? models.filter(entry => entry.leak.invalidBaseline) : [];
+const compareValid = Boolean(comparePath) && !invalidModels.length;
+if (comparePath && invalidModels.length) {
+  for (const entry of invalidModels) console.log(`MỐC SO KHÔNG HỢP LỆ: ${entry.name} (${entry.file}) ${leakText(entry.leak)} — cột của nó chỉ tham khảo, KHÔNG tính chênh lệch.`);
+  console.log('  So mô hình mới với bản "m" (cùng công thức, dataset KHÔNG chứa golden): merge-labels … <bộ chấm> → train-intent <merged> m.json --golden <bộ chấm> → replay-golden --model m.json --compare <mới>.');
 }
 
-const rawItems = (JSON.parse(readFileSync(goldenPath, 'utf8')).items || []).filter(item => item.source !== 'comment');
+const rawItems = goldenAll.filter(item => item && item.source !== 'comment');
 const graded = rawItems.filter(item => item.label && item.label !== 'SKIP').map(item => ({ ...item, truth: item.label }));
 const picked = graded.length || !useAll ? graded : rawItems.filter(item => item.suggested).map(item => ({ ...item, truth: item.suggested }));
 if (!picked.length) { console.log('Chưa có tin nào được chấm (Cài đặt → Thiết lập chatbot → Chấm mẫu). Thêm --all để xem sơ bộ theo nhãn gợi ý.'); process.exit(0); }
@@ -61,15 +103,15 @@ if (missing && storePath && existsSync(storePath)) { try { store = JSON.parse(re
 const rows = missing ? enrichGoldenContext(picked, store) : picked;
 if (missing) console.log(`Dựng ngữ cảnh v2 cho ${missing} tin thiếu trường${store ? ` (kho ${storePath})` : ' (không có kho hội thoại: không có đơn, giỏ suy từ mẫu/câu bot trước)'}`);
 
-const ORDER_STEPS = new Set(['ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_CONFIRMATION', 'ORDER_CART_LINE']);
-const contextOf = item => ({
+// Row cho mô hình: intentRowFromRecord (một định nghĩa với engine/dữ liệu huấn luyện); hasBasket thiếu → suy theo bước đơn.
+const contextOf = item => intentRowFromRecord({
   text: item.text, prevBot: item.prevBot || '', prevCustomer: item.prevCustomer || '', source: item.source, lastTemplate: item.lastTemplate || '',
-  lastWasOrderStep: ORDER_STEPS.has(item.lastTemplate), hasBasket: item.hasBasket ?? ORDER_STEPS.has(item.lastTemplate), basketItems: item.basketItems || [],
-  hasOrder: item.hasOrder, orderAgeMin: item.orderAgeMin, livestream: false, prevBotAsks: item.prevBotAsks, phoneInText: item.phoneInText, addressInText: item.addressInText, bagCount: item.bagCount
+  hasBasket: item.hasBasket ?? isOrderStepContext(item.lastTemplate), basketItems: item.basketItems || [],
+  hasOrder: item.hasOrder, orderAgeMin: item.orderAgeMin, livestream: false, prevBotAsks: item.prevBotAsks, phoneInText: item.phoneInText, at: item.at
 });
 const results = rows.map(item => {
   const intents = models.map(entry => predictIntentWith(entry.model, contextOf(item)));
-  const ruled = ruleIntent(item.text, { source: item.source, botLastTemplateId: item.lastTemplate || '' });
+  const ruled = ruleIntent(item.text, { source: item.source, botLastTemplateId: canonicalTemplateId(item.lastTemplate) });
   const ruleTemplate = ruled?.value?.template_id || (ruled?.commentRule ? 'COMMENT_RULE' : '');
   const tiered = cascade ? predictCascadeWith(cascade, contextOf(item)) : null;
   return { item, intent: intents[0], intents, ruleTemplate, cascade: tiered };
@@ -116,10 +158,21 @@ function perLabel(subset, m, title) {
   for (const [label, entry] of Object.entries(table).sort((a, b) => b[1].n - a[1].n)) console.log(`  ${label.padEnd(28)} ${String(entry.n).padStart(4)} ${String(entry.hit).padStart(5)}   ${(entry.pSum / entry.n).toFixed(2)}`);
 }
 
-report(results, 'Toàn bộ tin đã chấm');
+const allColumns = report(results, 'Toàn bộ tin đã chấm');
 // Tập rule-miss: luật ổn định không bắt → phần mô hình nhỏ (hay LLM) thật sự phải quyết.
 const ruleMissRows = results.filter(row => !row.ruleTemplate || row.ruleTemplate === 'COMMENT_RULE');
-report(ruleMissRows, 'Tập rule-miss (luật ổn định không bắt)');
+const missColumns = report(ruleMissRows, 'Tập rule-miss (luật ổn định không bắt)');
+// Tiêu chí thay mô hình (README): rule-miss của mô hình 2 so với mốc "m" (mô hình 1) — chỉ khi mốc hợp lệ.
+if (comparePath) {
+  const orderRows = results.filter(row => /^(ORDER_|ASK_FLAVOR)/.test(row.item.truth));
+  const acc = (columns, m) => (columns[m].n ? columns[m].hit / columns[m].n : 0);
+  const orderAcc = m => { const withIntent = orderRows.filter(row => row.intents[m]); return withIntent.length ? withIntent.filter(row => row.intents[m].templateId === row.item.truth).length / withIntent.length : 0; };
+  if (compareValid) {
+    const delta = 100 * (acc(missColumns, 1) - acc(missColumns, 0));
+    const orderDelta = 100 * (orderAcc(1) - orderAcc(0));
+    console.log(`\nChênh (mô hình 2 − mốc mô hình 1): rule-miss ${delta >= 0 ? '+' : ''}${delta.toFixed(1)} điểm · toàn bộ ${(100 * (acc(allColumns, 1) - acc(allColumns, 0))).toFixed(1)} điểm · nhóm lên đơn (${orderRows.length} tin) ${orderDelta >= 0 ? '+' : ''}${orderDelta.toFixed(1)} điểm → tiêu chí 1 (rule-miss ≥ +8, lên đơn không giảm): ${delta >= 8 && orderDelta >= 0 ? 'ĐẠT' : 'CHƯA ĐẠT'}`);
+  } else console.log('\nChênh (mô hình 2 − mô hình 1): KHÔNG tính — mốc so không hợp lệ (xem cảnh báo đầu báo cáo).');
+}
 models.forEach((entry, m) => perLabel(ruleMissRows, m, `Rule-miss · ${entry.name}`));
 
 // Ngưỡng bảo toàn (conformal): ngưỡng nhỏ nhất sao cho phần giữ lại (mẫu an toàn) sai ≤ 3%.
@@ -241,8 +294,8 @@ if (cascade) {
 const ORDER_TRUTHS = new Set(['ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_CONFIRMATION']);
 const flowRows = rows.map(item => {
   const stripped = String(item.text || '').replace(/\+?\d[\d .-]{8,13}/g, ' ').replace(/<sdt>/g, ' ').trim();
-  const lastWasOrderStep = ORDER_STEPS.has(item.lastTemplate) || ['ASK_FLAVOR', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET'].includes(item.lastTemplate);
-  const ruled = ruleIntent(item.text, { source: item.source, botLastTemplateId: item.lastTemplate || '', hasBasket: lastWasOrderStep, lastWasOrderStep, addressComplete: lastWasOrderStep && Boolean(stripped) && describeDeliveryAddress(stripped).complete, addressText: stripped, experimentalRules: 'on', commentBasket: () => [] });
+  const lastWasOrderStep = isOrderStepContext(item.lastTemplate);
+  const ruled = ruleIntent(item.text, { source: item.source, botLastTemplateId: canonicalTemplateId(item.lastTemplate), hasBasket: lastWasOrderStep, lastWasOrderStep, addressComplete: lastWasOrderStep && Boolean(stripped) && describeDeliveryAddress(stripped).complete, addressText: stripped, experimentalRules: 'on', commentBasket: () => [] });
   return { item, ruled };
 }).filter(row => row.ruled?.experimental);
 if (flowRows.length) {

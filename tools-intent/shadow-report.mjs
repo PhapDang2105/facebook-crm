@@ -3,6 +3,9 @@
 // ✓/✗ theo ngưỡng 0,7/0,8/0,9 trên lượt LLM, gác trước ✓/✗, người gác agree/ngoài theo mẫu, token TB/median,
 // % lượt có suy nghĩ, ước chi phí; mô hình tầng (trường `cascade` / dòng "Mô hình tầng (thử)"): nhóm ✓/✗ và
 // mẫu ✓/✗ theo ngưỡng p trên lượt LLM, kèm dòng tổng theo nhóm dự đoán (cột cuối bảng).
+// Vòng 12 (28/09): quy ước "~" (REPLY_ALREADY_SENT* — trung tính) LOẠI khỏi n cho CẢ mô hình nhỏ và mô hình tầng; tầng đoán
+// OTHER (templateId rỗng) vẫn đếm cột nhóm (không vào cột mẫu theo ngưỡng); tách cột "Luật ổn định (ẩn)" (luật ổn định
+// chạy ẩn, so với mẫu đã chọn) và "Luật thử" (luật thử nghiệm, so với luật ổn định / mẫu đã chọn).
 // Dùng: node tools-intent/shadow-report.mjs [--since YYYY-MM-DD] [--dir data/processed/decision-log] [--journal <file>]
 //         [--price-in 0.5] [--price-cache 0.05] [--price-out 3.0] [--json]
 // Journal: journalctl -u facebook-crm -o short-iso --since "7 days ago" > /tmp/journal.txt (dòng không có năm thì --year).
@@ -52,6 +55,7 @@ const emptyCascade = () => ({
  */
 function addCascadeMark(stats, cascade, mark, chosenGroup = '') {
   if (mark === '~') return;
+  const hasTemplate = Boolean(cascade.templateId);
   const groupOk = mark === '✓' || mark === 'nhóm✓';
   const danger = !groupOk && DANGER_GROUPS.has(String(chosenGroup || '')) && String(cascade.group || '') !== String(chosenGroup);
   stats.group.n += 1;
@@ -61,6 +65,8 @@ function addCascadeMark(stats, cascade, mark, chosenGroup = '') {
   slot.n += 1;
   if (groupOk) slot.groupOk += 1;
   if (danger) slot.danger += 1;
+  // Tầng đoán OTHER (không mẫu): chỉ đếm nhóm; cột mẫu theo ngưỡng chỉ tính lượt có mẫu.
+  if (!hasTemplate) { slot.refused = (slot.refused || 0) + 1; return; }
   if (mark === '✓') slot.tplOk += 1; else slot.tplBad += 1;
   for (const t of THRESHOLDS) {
     if (!(Number(cascade.p) >= t)) continue;
@@ -70,8 +76,19 @@ function addCascadeMark(stats, cascade, mark, chosenGroup = '') {
   }
 }
 
+/** Cộng dấu mô hình nhỏ theo ngưỡng; "~" (trung tính) loại khỏi n — cùng quy ước với mô hình tầng. */
+function addIntentMark(day, intent, mark) {
+  if (mark === '~') return;
+  for (const t of THRESHOLDS) {
+    if (!(Number(intent.p) >= t)) continue;
+    const bucket = day.intent[String(t)];
+    bucket.n += 1;
+    if (mark === '✓') bucket.ok += 1; else bucket.bad += 1;
+  }
+}
+
 const emptyDay = () => ({
-  turns: 0, llm: 0, skipped: {}, ruleStable: 0, ruleShadow: { n: 0, ok: 0, bad: 0 },
+  turns: 0, llm: 0, skipped: {}, ruleStable: 0, ruleHidden: { n: 0, ok: 0, bad: 0 }, ruleShadow: { n: 0, ok: 0, bad: 0 },
   intent: Object.fromEntries(THRESHOLDS.map(t => [String(t), { n: 0, ok: 0, bad: 0 }])),
   cascade: emptyCascade(),
   preGuard: { n: 0, ok: 0, bad: 0, decisions: {} }, gate: { agree: 0, outside: 0, byTemplate: {}, reasons: {} },
@@ -84,11 +101,20 @@ export function addEntry(day, entry, prices = DEFAULT_PRICES, options = {}) {
   if (entry.skipped) { day.skipped[entry.skipped] = (day.skipped[entry.skipped] || 0) + 1; return; }
   day.turns += 1;
   if (entry.rule) day.ruleStable += 1;
-  const reference = entry.rule?.templateId || entry.chosen || entry.final;
-  for (const shadow of entry.shadow || []) {
+  // shadow của nhật ký: [luật ổn định chạy ẩn (khi không dùng thật), luật thử đính kèm]. Có cờ experimental/kind thì theo cờ;
+  // không có: có luật dùng thật → mọi mục là luật thử; không có luật thật và ≥ 2 mục → mục đầu là luật ổn định ẩn.
+  const shadows = (entry.shadow || []).filter(Boolean);
+  const flagged = shadows.some(item => typeof item.experimental === 'boolean' || item.kind);
+  const isHidden = (item, index) => (flagged ? item.experimental === false || item.kind === 'stable' : !entry.rule && shadows.length >= 2 && index === 0);
+  const hidden = shadows.filter(isHidden);
+  const chosen = entry.chosen || entry.final;
+  for (const item of hidden) { day.ruleHidden.n += 1; if (item.templateId === chosen) day.ruleHidden.ok += 1; else day.ruleHidden.bad += 1; }
+  const reference = entry.rule?.templateId || hidden[0]?.templateId || chosen;
+  shadows.forEach((item, index) => {
+    if (isHidden(item, index)) return;
     day.ruleShadow.n += 1;
-    if (shadow?.templateId === reference) day.ruleShadow.ok += 1; else day.ruleShadow.bad += 1;
-  }
+    if (item.templateId === reference) day.ruleShadow.ok += 1; else day.ruleShadow.bad += 1;
+  });
   if (entry.llm) {
     day.llm += 1;
     const usage = entry.llm.usage || {};
@@ -99,17 +125,9 @@ export function addEntry(day, entry, prices = DEFAULT_PRICES, options = {}) {
       day.cost += (Math.max(0, input - cached) * prices.input + cached * prices.cache + (output + thinking) * prices.output) / 1e6;
     }
     // Mô hình nhỏ chỉ đo trên lượt LLM (lượt luật đã có luật, mô hình nhỏ không thay gì).
-    if (entry.intent?.templateId) {
-      const mark = intentMatchMark(entry.intent.templateId, entry.chosen || entry.final);
-      for (const t of THRESHOLDS) {
-        if (!(Number(entry.intent.p) >= t)) continue;
-        const bucket = day.intent[String(t)];
-        bucket.n += 1;
-        if (mark === '✓') bucket.ok += 1; else if (mark === '✗') bucket.bad += 1;
-      }
-    }
-    // Mô hình tầng (trường `cascade` của nhật ký): cũng chỉ đo trên lượt LLM.
-    if (entry.cascade?.templateId) {
+    if (entry.intent?.templateId) addIntentMark(day, entry.intent, intentMatchMark(entry.intent.templateId, entry.chosen || entry.final));
+    // Mô hình tầng (trường `cascade` của nhật ký): cũng chỉ đo trên lượt LLM; đoán OTHER (không mẫu) vẫn đếm nhóm.
+    if (entry.cascade && (entry.cascade.templateId || entry.cascade.group)) {
       const chosen = entry.chosen || entry.final;
       let chosenGroup = ''; try { chosenGroup = groupOf(chosen) || ''; } catch { chosenGroup = ''; }
       addCascadeMark(day.cascade, entry.cascade, cascadeMatchMark(entry.cascade, chosen, groupOf), chosenGroup);
@@ -237,19 +255,17 @@ export function summarizeJournal(items, prices = DEFAULT_PRICES) {
     }
     if (entry.journalIntentOnly) {
       if (!entry.llm) continue;
-      const mark = intentMatchMark(entry.intent.templateId, entry.chosen);
-      for (const t of THRESHOLDS) {
-        if (!(entry.intent.p >= t)) continue;
-        const bucket = stats.intent[String(t)];
-        bucket.n += 1;
-        if (mark === '✓') bucket.ok += 1; else if (mark === '✗') bucket.bad += 1;
-      }
+      addIntentMark(stats, entry.intent, intentMatchMark(entry.intent.templateId, entry.chosen));
       continue;
     }
     if (entry.journalRuleOnly || entry.journalShadowOnly) {
       // Lượt = luật ổn định bắt (dòng "Luật X → T") hay lượt LLM (dòng "Token"); dòng luật thử / so luật thử không phải lượt riêng.
       if (entry.rule && !entry.journalShadowOnly) { stats.turns += 1; stats.ruleStable += 1; }
-      for (const shadow of entry.shadow || []) { stats.ruleShadow.n += 1; if (entry.journalShadowOnly) { if (shadow.templateId === entry.rule.templateId) stats.ruleShadow.ok += 1; else stats.ruleShadow.bad += 1; } }
+      // "Luật X (thử): luật A / luật ổn định B ✓" = luật thử so luật ổn định; "Luật X (thử) → T" = luật chạy ẩn (không so được).
+      for (const shadow of entry.shadow || []) {
+        if (entry.journalShadowOnly) { stats.ruleShadow.n += 1; if (shadow.templateId === entry.rule.templateId) stats.ruleShadow.ok += 1; else stats.ruleShadow.bad += 1; }
+        else stats.ruleHidden.n += 1;
+      }
       continue;
     }
     addEntry(stats, entry, prices);
@@ -260,23 +276,23 @@ export function summarizeJournal(items, prices = DEFAULT_PRICES) {
 const mean = list => (list.length ? list.reduce((sum, value) => sum + value, 0) / list.length : 0);
 const median = list => { if (!list.length) return 0; const sorted = [...list].sort((a, b) => a - b); const mid = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2; };
 const pct = (num, den) => (den ? `${Math.round(100 * num / den)}%` : '–');
-const okBad = bucket => (bucket.n ? `${bucket.ok}✓/${bucket.bad}✗` : '–');
+const okBad = bucket => (bucket.n ? (bucket.ok + bucket.bad ? `${bucket.ok}✓/${bucket.bad}✗` : `${bucket.n} (không so được)`) : '–');
 
 export function formatReport(days) {
   const lines = [];
   // Cột mô hình tầng để cuối (nhóm ✓/✗ trên lượt LLM; mẫu ✓/✗ theo ngưỡng p) — các cột cũ giữ nguyên vị trí.
-  const header = ['Ngày', 'Lượt', 'LLM', 'Bỏ qua', 'Luật ổn', 'Luật thử', 'Nhỏ≥0,7', 'Nhỏ≥0,8', 'Nhỏ≥0,9', 'Gác trước', 'Gác agree/ngoài', 'Token TB vào/cache/ra/nghĩ', 'Median vào/ra', '%nghĩ', 'USD', 'Tầng nhóm', 'Tầng≥0,7', 'Tầng≥0,8', 'Tầng≥0,9'];
+  const header = ['Ngày', 'Lượt', 'LLM', 'Bỏ qua', 'Luật ổn', 'Luật ổn định (ẩn)', 'Luật thử', 'Nhỏ≥0,7', 'Nhỏ≥0,8', 'Nhỏ≥0,9', 'Gác trước', 'Gác agree/ngoài', 'Token TB vào/cache/ra/nghĩ', 'Median vào/ra', '%nghĩ', 'USD', 'Tầng nhóm', 'Tầng≥0,7', 'Tầng≥0,8', 'Tầng≥0,9'];
   lines.push(header.join(' | '));
   const total = emptyDay();
   for (const [day, stats] of Object.entries(days).sort()) {
     lines.push(rowOf(day, stats));
     total.turns += stats.turns; total.llm += stats.llm; total.ruleStable += stats.ruleStable; total.cost += stats.cost; total.thinkingTurns += stats.thinkingTurns; total.handoff += stats.handoff; total.attention += stats.attention;
     for (const key of Object.keys(stats.skipped)) total.skipped[key] = (total.skipped[key] || 0) + stats.skipped[key];
-    for (const key of ['n', 'ok', 'bad']) { total.ruleShadow[key] += stats.ruleShadow[key]; total.preGuard[key] += stats.preGuard[key]; }
+    for (const key of ['n', 'ok', 'bad']) { total.ruleHidden[key] += stats.ruleHidden[key]; total.ruleShadow[key] += stats.ruleShadow[key]; total.preGuard[key] += stats.preGuard[key]; }
     for (const t of THRESHOLDS) for (const key of ['n', 'ok', 'bad']) total.intent[String(t)][key] += stats.intent[String(t)][key];
     for (const key of ['n', 'ok', 'bad', 'danger']) total.cascade.group[key] += stats.cascade.group[key];
     for (const t of THRESHOLDS) for (const key of ['n', 'ok', 'bad']) total.cascade.tpl[String(t)][key] += stats.cascade.tpl[String(t)][key];
-    for (const [group, slot] of Object.entries(stats.cascade.byGroup)) { const target = total.cascade.byGroup[group] || (total.cascade.byGroup[group] = { n: 0, groupOk: 0, tplOk: 0, tplBad: 0, danger: 0 }); for (const key of ['n', 'groupOk', 'tplOk', 'tplBad', 'danger']) target[key] += slot[key]; }
+    for (const [group, slot] of Object.entries(stats.cascade.byGroup)) { const target = total.cascade.byGroup[group] || (total.cascade.byGroup[group] = { n: 0, groupOk: 0, tplOk: 0, tplBad: 0, danger: 0 }); for (const key of ['n', 'groupOk', 'tplOk', 'tplBad', 'danger', 'refused']) if (slot[key]) target[key] = (target[key] || 0) + slot[key]; }
     total.gate.agree += stats.gate.agree; total.gate.outside += stats.gate.outside;
     for (const key of Object.keys(stats.tokens)) total.tokens[key].push(...stats.tokens[key]);
     for (const [template, slot] of Object.entries(stats.gate.byTemplate)) { const target = total.gate.byTemplate[template] || (total.gate.byTemplate[template] = { agree: 0, outside: 0 }); target.agree += slot.agree; target.outside += slot.outside; }
@@ -291,28 +307,37 @@ export function formatReport(days) {
   if (reasons.length) lines.push(`Người gác "ngoài" theo lý do: ${reasons.map(([reason, n]) => `${reason} ×${n}`).join(' · ')}`);
   if (total.handoff || total.attention) lines.push(`Chuyển người: ${total.handoff} · thẻ cần người xem: ${total.attention}`);
   const cascadeGroups = Object.entries(total.cascade.byGroup).sort((a, b) => b[1].n - a[1].n);
-  if (cascadeGroups.length) lines.push(`Mô hình tầng theo nhóm (lượt LLM): ${cascadeGroups.map(([group, slot]) => `${group} ${slot.n} (nhóm ${pct(slot.groupOk, slot.n)}, mẫu ${slot.tplOk}✓/${slot.tplBad}✗${slot.danger ? `, ⚠${slot.danger} vào ORDER/SUPPORT` : ''})`).join(' · ')}`);
+  if (cascadeGroups.length) lines.push(`Mô hình tầng theo nhóm (lượt LLM): ${cascadeGroups.map(([group, slot]) => `${group} ${slot.n} (nhóm ${pct(slot.groupOk, slot.n)}, mẫu ${slot.tplOk}✓/${slot.tplBad}✗${slot.refused ? `, không mẫu ${slot.refused}` : ''}${slot.danger ? `, ⚠${slot.danger} vào ORDER/SUPPORT` : ''})`).join(' · ')}`);
   if (total.cascade.group.danger) lines.push(`Mô hình tầng ✗ nguy hiểm (thật là ORDER/SUPPORT mà tầng đoán nhóm khác): ${total.cascade.group.danger}`);
   return lines.join('\n');
   function rowOf(day, stats) {
     const skippedTotal = Object.values(stats.skipped).reduce((sum, n) => sum + n, 0);
     const tokens = `${Math.round(mean(stats.tokens.input))}/${Math.round(mean(stats.tokens.cached))}/${Math.round(mean(stats.tokens.output))}/${Math.round(mean(stats.tokens.thinking))}`;
     const medians = `${Math.round(median(stats.tokens.input))}/${Math.round(median(stats.tokens.output))}`;
-    return [day, stats.turns, stats.llm, skippedTotal, stats.ruleStable, okBad(stats.ruleShadow), ...THRESHOLDS.map(t => okBad(stats.intent[String(t)])), okBad(stats.preGuard), `${stats.gate.agree}/${stats.gate.outside}`, tokens, medians, pct(stats.thinkingTurns, stats.tokens.input.length), stats.cost.toFixed(3),
+    return [day, stats.turns, stats.llm, skippedTotal, stats.ruleStable, okBad(stats.ruleHidden), okBad(stats.ruleShadow), ...THRESHOLDS.map(t => okBad(stats.intent[String(t)])), okBad(stats.preGuard), `${stats.gate.agree}/${stats.gate.outside}`, tokens, medians, pct(stats.thinkingTurns, stats.tokens.input.length), stats.cost.toFixed(3),
       // Cột nhóm: "2✓/1✗ ⚠1" — ⚠ là số ✗ rơi vào ORDER/SUPPORT (nguy hiểm nếu bật tự trả lời).
       `${okBad(stats.cascade.group)}${stats.cascade.group.danger ? ` ⚠${stats.cascade.group.danger}` : ''}`, ...THRESHOLDS.map(t => okBad(stats.cascade.tpl[String(t)]))].join(' | ');
   }
 }
 
+/** Lỗi CLI: in gọn, thoát 1 (không stack). */
+function fail(message) { console.error(message); process.exit(1); }
+
 function main() {
   const args = process.argv.slice(2);
+  const valueFlags = ['--since', '--dir', '--journal', '--year', '--price-in', '--price-cache', '--price-out'];
+  for (let i = 0; i < args.length; i += 1) if (valueFlags.includes(args[i]) && (args[i + 1] === undefined || args[i + 1] === '' || args[i + 1].startsWith('--'))) fail(`Thiếu giá trị cho ${args[i]}.`);
   const value = (flag, fallback) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : fallback);
-  const prices = { input: Number(value('--price-in', DEFAULT_PRICES.input)), cache: Number(value('--price-cache', DEFAULT_PRICES.cache)), output: Number(value('--price-out', DEFAULT_PRICES.output)) };
+  const number = (flag, fallback) => { const raw = value(flag, String(fallback)); const parsed = Number(raw); if (raw === '' || !Number.isFinite(parsed) || parsed < 0) fail(`${flag} phải là số không âm (nhận "${raw}").`); return parsed; };
+  const prices = { input: number('--price-in', DEFAULT_PRICES.input), cache: number('--price-cache', DEFAULT_PRICES.cache), output: number('--price-out', DEFAULT_PRICES.output) };
   const since = value('--since', '');
+  if (since && !/^\d{4}-\d{2}-\d{2}$/.test(since)) fail(`--since sai định dạng "${since}" (cần YYYY-MM-DD).`);
   const journal = value('--journal', '');
   let days;
   if (journal) {
-    const items = parseJournal(readFileSync(journal, 'utf8'), { year: Number(value('--year', new Date().getFullYear())) });
+    if (!existsSync(journal)) fail(`Không thấy tệp journal: ${journal}`);
+    const year = number('--year', new Date().getFullYear());
+    const items = parseJournal(readFileSync(journal, 'utf8'), { year });
     days = summarizeJournal(items.filter(item => !since || item.day >= since), prices);
     console.log(`Journal ${journal}: ${items.length} dòng nhận ra (lượt LLM đếm theo dòng "Token"; mô hình nhỏ ghép theo hội thoại).`);
   } else {

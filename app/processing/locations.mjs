@@ -977,6 +977,16 @@ export function districtMentioned(text, district) {
   const key = normalizeLocationKey(district.name);
   const bare = stripPrefix(key, DISTRICT_PREFIXES);
   const candidates = [key, ...(bare && !/^\d+$/.test(bare) ? [bare] : [])];
+  // Tên cũ đã gộp là alias của quận (Quận 2/Quận 9/Quận Thủ Đức → Thành phố Thủ
+  // Đức): khách ghi "Quận 9" là đã ghi quận, không phải máy tự suy từ phường.
+  let aliases = Array.isArray(district.aliases) ? district.aliases : null;
+  if (!aliases) {
+    try {
+      const entry = loadLocationIndex().districts.find(item => (district.code && item.code === district.code) || item.key === key);
+      aliases = entry?.aliases || [];
+    } catch { aliases = []; }
+  }
+  for (const alias of aliases) if (alias && !/^\d+$/.test(alias) && !candidates.includes(alias)) candidates.push(alias);
   return candidates.some(alias => new RegExp(`(?<![a-z0-9])${escapeRegExp(alias)}(?![a-z0-9])`).test(norm));
 }
 
@@ -1133,8 +1143,15 @@ export function mergeAddressFragment(fresh, saved, locationIndex = loadLocationI
   if (!next) return previous;
   if (!previous || next === previous) return next;
   const own = resolveAddress(next, locationIndex);
-  if (own.province) return next;
   const old = resolveAddress(previous, locationIndex);
+  // Khách chỉ bổ sung tên tỉnh ("thái nguyên") cho địa chỉ đã gửi mà chưa có tỉnh: ghép vào sau phần cũ,
+  // không thay cả địa chỉ (28/09: "Xóm 3 Vô Tranh Phú Lương" + "thái nguyên" từng thành "thái nguyên").
+  if (own.province && !own.district && !own.ward && !isUsableStreet(own.street) && !old.province) {
+    const combined = `${previous}, ${next}`;
+    const merged = resolveAddress(combined, locationIndex);
+    if (merged.province && (merged.district || merged.ward || isUsableStreet(merged.street))) return combined;
+  }
+  if (own.province) return next;
   // Phần khách đã viết mà chưa nhận ra được (ví dụ "Xa Hoang Dong" không dấu
   // khi có hai xã cùng tên) không được giữ lại, nếu không nó lại gây mơ hồ
   // ngay cả khi khách vừa chọn xong.

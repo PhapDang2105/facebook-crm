@@ -12,11 +12,21 @@
 // Vòng 7 (28/09, mô hình tầng): phần huấn luyện tách thành `trainClassifier(rows, options)` dùng chung với
 //   tools-intent/train-cascade.mjs (mỗi mô hình con của tầng là một mô hình định dạng intent-model.json);
 //   CLI giữ nguyên đầu ra.
-// Dùng: node tools-intent/train-intent.mjs <dataset.jsonl> [out-model.json] [--holdout 0.2] [--quiet]
-import { readFileSync, writeFileSync } from 'node:fs';
+// Vòng 12 (28/09):
+//   - mỗi dòng đi qua intentRowFromRecord (intent-features.intentRowOf — MỘT định nghĩa row với engine) trước khi lấy
+//     đặc trưng: mã con → mã engine lưu, lastWasOrderStep/prevBotAsks/hasOrder (< 24 giờ) như lúc chạy;
+//   - bỏ dòng bình luận (source comment) và nhãn COMMENT_* / LIVESTREAM_COMMENT khỏi mô hình hộp thư (--include-comments để giữ);
+//   - meta.trainIds (băm FNV-1a id các dòng dataset) để replay-golden biết mô hình đã thấy mục golden nào;
+//     --golden <golden.json>: meta.goldenExcluded { source, goldenIds, matchedRows, matchedIds, byKind } và meta.sawGolden
+//     (true = dataset CHỨA mục golden → mô hình không dùng để đo); không có --golden → sawGolden null (không rõ).
+// Dùng: node tools-intent/train-intent.mjs <dataset.jsonl> [out-model.json] [--holdout 0.2] [--golden golden.json] [--include-comments] [--quiet]
+//   --quiet: không in nhật ký/bảng, chỉ một dòng "saved …" (hay lỗi).
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { featuresOf } from '../app/processing/intent-features.mjs';
+import { featuresOf, intentRowFromRecord } from '../app/processing/intent-features.mjs';
+import { cliFail, parseCliArgs, readJsonl } from './dataset-context.mjs';
+import { goldenIndex, goldenMatch } from './merge-labels.mjs';
 
 export const MIN_CLASS = 4;
 const EPOCHS = 25;
@@ -32,12 +42,46 @@ export function sampleWeight(row) {
 }
 export const isStaffRow = row => Boolean(row.corrected) || row.labelSource === 'staff';
 export const isRuleMiss = row => !row.ruleTemplate;
+/** Dòng bình luận (nguồn comment hay nhãn luồng bình luận): không thuộc mô hình hộp thư. */
+export const isCommentRow = row => row?.source === 'comment' || /^COMMENT_/.test(String(row?.label || '')) || row?.label === 'LIVESTREAM_COMMENT';
+
+/** Băm FNV-1a 32 bit (hex) của một id dòng — meta.trainIds gọn mà vẫn so được với id golden. */
+export function hashId(id) {
+  let hash = 2166136261;
+  const value = String(id || '');
+  for (let i = 0; i < value.length; i += 1) { hash ^= value.charCodeAt(i); hash = Math.imul(hash, 16777619) >>> 0; }
+  return hash.toString(16).padStart(8, '0');
+}
+/** meta.trainIds: băm id mọi dòng dataset đem huấn luyện (kể cả dòng bị lọc sau đó — mô hình đã "thấy" dataset). */
+export const trainIdsOf = rows => ({ hash: 'fnv1a32', n: rows.length, ids: [...new Set(rows.filter(row => row?.id).map(row => hashId(row.id)))].sort() });
+
+/**
+ * Dataset có chứa mục golden không (goldenMatch của merge-labels: id / cùng hội thoại ±10 phút / trùng chữ).
+ * @returns {{ source: string, goldenIds: number, matchedRows: number, matchedIds: number, byKind: Record<string, number> }}
+ */
+export function goldenOverlap(rows, goldenItems, source = '') {
+  const index = goldenIndex(goldenItems);
+  const byKind = {};
+  const matchedIds = new Set();
+  let matchedRows = 0;
+  for (const row of rows) {
+    const kind = goldenMatch(row, index);
+    if (!kind) continue;
+    matchedRows += 1;
+    byKind[kind] = (byKind[kind] || 0) + 1;
+    if (kind === 'id') matchedIds.add(row.id);
+  }
+  return { source, goldenIds: index.size, matchedRows, matchedIds: matchedIds.size, byKind };
+}
+
+/** meta.goldenExcluded / meta.sawGolden từ goldenOverlap (null = không có bộ chấm để so → không rõ). */
+export const goldenMetaOf = overlap => (overlap ? { goldenExcluded: { ...overlap, excluded: Math.max(0, overlap.goldenIds - overlap.matchedIds) }, sawGolden: overlap.matchedRows > 0 } : { goldenExcluded: null, sawGolden: null });
 
 const softmax = raw => { const max = Math.max(...raw); const exps = raw.map(value => Math.exp(value - max)); const total = exps.reduce((sum, value) => sum + value, 0); return exps.map(value => value / total); };
 
-/** Đọc dataset JSONL: bỏ dòng thiếu text/label, sắp theo thời gian. */
-export function readDataset(file) {
-  return readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(row => row && row.text && row.label).sort((a, b) => (a.at || 0) - (b.at || 0));
+/** Đọc dataset JSONL: bỏ dòng thiếu text/label và dòng hỏng (ghi dở — đếm vào stats.bad), sắp theo thời gian. */
+export function readDataset(file, stats = {}) {
+  return readJsonl(readFileSync(file, 'utf8'), stats).filter(row => row && row.text && row.label).sort((a, b) => (a.at || 0) - (b.at || 0));
 }
 
 /** ECE 10 ngăn + bảng p-dự-đoán / đúng-thật theo ngăn. */
@@ -60,7 +104,9 @@ export function calibrationTable(results, bins = 10) {
  * `log` nhận các dòng nhật ký giống CLI train-intent (mặc định im lặng). `dropOther: false` giữ nhãn OTHER làm
  * một lớp thường (mô hình nhóm của tầng cần lớp "từ chối").
  * @param {object[]} inputRows
- * @param {{ holdout?: number, minClass?: number, log?: (...parts: string[]) => void, full?: boolean, dropOther?: boolean }} [options]
+ * Dòng bình luận / COMMENT_* bị bỏ (includeComments: true để giữ); mọi dòng đi qua intentRowFromRecord.
+ * `recordIds` (mặc định true): ghi meta.trainIds; `meta` (object) được gộp vào meta của mô hình.
+ * @param {{ holdout?: number, minClass?: number, log?: (...parts: string[]) => void, full?: boolean, dropOther?: boolean, includeComments?: boolean, recordIds?: boolean, meta?: object }} [options]
  * @returns {{ model: object | null, report: object }} model = JSON định dạng intent-model.json (null khi full=false)
  * @throws {Error} khi còn < 10 dòng sau khi lọc ('Quá ít dòng để huấn luyện.')
  */
@@ -71,15 +117,18 @@ export function trainClassifier(inputRows, options = {}) {
   const full = options.full ?? true;
   const dropOther = options.dropOther ?? true;
 
-  // ---- 0. Bỏ OTHER và lớp quá nhỏ, gán trọng số mẫu.
-  const loaded = inputRows.filter(row => row && row.text && row.label).slice().sort((a, b) => (a.at || 0) - (b.at || 0));
+  const includeComments = options.includeComments ?? false;
+  // ---- 0. Bỏ bình luận, OTHER và lớp quá nhỏ, gán trọng số mẫu; ngữ cảnh dựng lại như lúc chạy (intentRowOf).
+  const valid = inputRows.filter(row => row && row.text && row.label);
+  const commentRows = includeComments ? [] : valid.filter(isCommentRow);
+  const loaded = (includeComments ? valid : valid.filter(row => !isCommentRow(row))).map(intentRowFromRecord).sort((a, b) => (a.at || 0) - (b.at || 0));
   const otherRows = dropOther ? loaded.filter(row => row.label === 'OTHER') : [];
   const kept = dropOther ? loaded.filter(row => row.label !== 'OTHER') : loaded;
   const labelCounts = kept.reduce((acc, row) => { acc[row.label] = (acc[row.label] || 0) + 1; return acc; }, {});
   const droppedClasses = Object.entries(labelCounts).filter(([, count]) => count < minClass).map(([label, count]) => ({ label, count })).sort((a, b) => a.label.localeCompare(b.label));
   const droppedSet = new Set(droppedClasses.map(item => item.label));
   const all = kept.filter(row => !droppedSet.has(row.label));
-  log(`Dòng: ${loaded.length} · bỏ OTHER ${otherRows.length} · bỏ lớp < ${minClass} mẫu: ${droppedClasses.length ? droppedClasses.map(item => `${item.label} (${item.count})`).join(', ') : 'không'} → còn ${all.length}`);
+  log(`Dòng: ${loaded.length + commentRows.length}${commentRows.length ? ` · bỏ bình luận/COMMENT_* ${commentRows.length}` : ''} · bỏ OTHER ${otherRows.length} · bỏ lớp < ${minClass} mẫu: ${droppedClasses.length ? droppedClasses.map(item => `${item.label} (${item.count})`).join(', ') : 'không'} → còn ${all.length}`);
   if (all.length < 10) throw new Error('Quá ít dòng để huấn luyện.');
   const labels = [...new Set(all.map(row => row.label))].sort();
   const labelIndex = new Map(labels.map((label, index) => [label, index]));
@@ -198,7 +247,7 @@ export function trainClassifier(inputRows, options = {}) {
   const report = {
     holdout: HOLDOUT, rows: rows.length, train: train.length, test: test.length, labels, K, vocab: model.D, temperature,
     nll: Number(nll(temperature).toFixed(4)), nllRaw: Number(nll(1).toFixed(4)), weights: weightSummary,
-    dataset: { loaded: loaded.length, other: otherRows.length, droppedClasses, noisy: noisy.length, staffExempt: exempt, weights: weightSummary },
+    dataset: { loaded: loaded.length, comments: commentRows.length, other: otherRows.length, droppedClasses, noisy: noisy.length, staffExempt: exempt, weights: weightSummary },
     held, heldRaw, calibration, calibrationRaw, ruleMiss, staffHeld, noisy
   };
   if (!full) return { model: null, report };
@@ -218,7 +267,9 @@ export function trainClassifier(inputRows, options = {}) {
     calibration: { method: 'temperature', temperature, heldOut: held.n, nll: report.nll, nllRaw: report.nllRaw, ece: calibration.ece, eceRaw: calibrationRaw.ece, bins: calibration.bins },
     heldOut: strip(held),
     ruleMiss: strip(ruleMiss),
-    staffHeldOut: { n: staffHeld.n, accuracy: staffHeld.accuracy }
+    staffHeldOut: { n: staffHeld.n, accuracy: staffHeld.accuracy },
+    ...(options.recordIds === false ? {} : { trainIds: trainIdsOf(valid) }),
+    ...(options.meta || {})
   };
   const out = {
     version: 3, trainedAt, rows: rows.length, dropped: noisy.length, temperature, labels,
@@ -256,22 +307,39 @@ export function printTrainingReport(report, log = console.log) {
 const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 if (isMain) {
   const args = process.argv.slice(2);
-  const positional = args.filter((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--holdout');
-  const [datasetPath, outPath] = positional;
-  if (!datasetPath) { console.log('Dùng: node tools-intent/train-intent.mjs <dataset.jsonl> [out-model.json] [--holdout 0.2]'); process.exit(1); }
-  const HOLDOUT = args.includes('--holdout') ? Math.min(0.5, Math.max(0.05, Number(args[args.indexOf('--holdout') + 1]) || 0.2)) : 0.2;
-  const log = (...parts) => console.log(...parts);
+  const cli = parseCliArgs(args, ['--holdout', '--golden']);
+  const [datasetPath, outPath] = cli.positional;
+  if (!datasetPath) cliFail('Dùng: node tools-intent/train-intent.mjs <dataset.jsonl> [out-model.json] [--holdout 0.2] [--golden golden.json] [--include-comments] [--quiet]');
+  if (!existsSync(datasetPath)) cliFail(`Không thấy dataset: ${datasetPath}`);
+  const holdoutRaw = cli.value('--holdout');
+  if (holdoutRaw && !(Number(holdoutRaw) > 0 && Number(holdoutRaw) < 1)) cliFail(`--holdout phải là số trong (0, 1) (nhận "${holdoutRaw}").`);
+  const HOLDOUT = holdoutRaw ? Math.min(0.5, Math.max(0.05, Number(holdoutRaw))) : 0.2;
+  const goldenPath = cli.value('--golden');
+  if (goldenPath && !existsSync(goldenPath)) cliFail(`Không thấy bộ chấm --golden: ${goldenPath}`);
+  const quiet = cli.has('--quiet');
+  const log = quiet ? () => {} : (...parts) => console.log(...parts);
+  const readStats = {};
+  const dataset = readDataset(datasetPath, readStats);
+  if (readStats.bad) console.warn(`Bỏ ${readStats.bad} dòng hỏng trong ${datasetPath}`);
+  let goldenMeta = goldenMetaOf(null);
+  if (goldenPath) {
+    let items;
+    try { items = JSON.parse(readFileSync(goldenPath, 'utf8')).items; } catch (error) { cliFail(`Bộ chấm ${goldenPath} không đọc được: ${String(error.message).slice(0, 80)}`); }
+    goldenMeta = goldenMetaOf(goldenOverlap(dataset, Array.isArray(items) ? items : [], goldenPath));
+    const overlap = goldenMeta.goldenExcluded;
+    if (goldenMeta.sawGolden) console.warn(`CẢNH BÁO dataset CHỨA ${overlap.matchedRows} dòng thuộc bộ chấm (${JSON.stringify(overlap.byKind)}): mô hình này KHÔNG dùng để đo trên ${goldenPath} (meta.sawGolden = true).`);
+    else log(`Bộ chấm ${goldenPath}: ${overlap.goldenIds} mục, dataset không chứa mục nào (meta.sawGolden = false).`);
+  }
   let trained;
   try {
-    trained = trainClassifier(readDataset(datasetPath), { holdout: HOLDOUT, log, full: Boolean(outPath) });
+    trained = trainClassifier(dataset, { holdout: HOLDOUT, log, full: Boolean(outPath), includeComments: cli.has('--include-comments'), meta: goldenMeta });
   } catch (error) {
     if (error.message !== 'Quá ít dòng để huấn luyện.') throw error;
-    log(error.message);
-    process.exit(1);
+    cliFail(error.message);
   }
   printTrainingReport(trained.report, log);
   if (outPath) {
     writeFileSync(outPath, JSON.stringify(trained.model));
-    log('saved', outPath, `${Math.round(Buffer.byteLength(JSON.stringify(trained.model)) / 1024)} KB`);
+    console.log('saved', outPath, `${Math.round(Buffer.byteLength(JSON.stringify(trained.model)) / 1024)} KB`, `· sawGolden ${goldenMeta.sawGolden === null ? 'không rõ (không có --golden)' : goldenMeta.sawGolden}`);
   }
 }

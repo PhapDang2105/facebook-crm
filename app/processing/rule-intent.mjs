@@ -9,7 +9,7 @@ import { getCatalogProducts } from './catalog.mjs';
 import { describeDeliveryAddress } from './locations.mjs';
 
 /** Chuỗi chuẩn để so luật: bỏ dấu, bỏ dấu câu, bỏ lời gọi đầu câu và từ đệm cuối câu. */
-import { orderFlowStep } from './order-flow.mjs';
+import { orderFlowStep, stripPhone } from './order-flow.mjs';
 
 export function core(text) {
   let s = foldVietnamese(text).toLowerCase().replace(/[^a-z0-9+/% ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -196,11 +196,7 @@ const isBasketWord = word => BASKET_WORDS.has(word) || BASKET_FILLER.has(word) |
 // "màu" chỉ là chữ đệm khi có số hay động từ đặt ("1 bịch màu vàng", "lấy màu xanh"); "Màu nâu và vàng" trơn sau bảng giá
 // là hỏi giá mix (PRICE_MIX_TUI_LON, bộ chấm) → để mô hình.
 const colourWordOk = text => ORDER_VERB.test(text) || /\b\d{1,2}\b/.test(text) || /\b(tui|goi|bich|bit)\b/.test(text);
-// Bỏ SĐT khỏi tin nhưng giữ số đứng trước nó ("quận 1 0912345678": mẫu SĐT chung nuốt cả "1 ").
-const stripPhone = raw => String(raw || '').replace(/\+?\d[\d .-]{8,13}/g, match => {
-  const lead = match.match(/^(\d{1,2})\s+(?=\d)/);
-  return lead && /^(0|84)\d{8,9}$/.test(match.slice(lead[0].length).replace(/\D/g, '')) ? `${lead[1]} ` : ' ';
-});
+// Bỏ SĐT khỏi tin nhưng giữ số đứng trước/sau nó (stripPhone của order-flow.mjs).
 // Khi tách "giỏ + địa chỉ": số 3 chữ số trơn ("450 Lê Lợi") thuộc địa chỉ, không phải giá.
 const isBasketPrefixWord = word => isBasketWord(word) && !/^\d{3}$/.test(word);
 // Câu xin tư vấn ("tư vấn c 1 túi nữa", "nên lấy loại nào") không phải giỏ: số túi trong câu là số hỏi.
@@ -309,7 +305,9 @@ export function ruleIntent(text, ctx = {}) {
   // engine xóa giỏ chờ (clearBasket). Đặt TRƯỚC ORDER_ASK (thử nghiệm) và trước luồng dùng thử của luật.
   // Đã có đơn thật thì "hủy" là hủy đơn → để mô hình / ORDER_CANCEL.
   // Vòng 10: rút giỏ đang giữ ("không lấy nữa", "xóa hết đó đi", "hủy giúp mình") khi chưa có đơn thật: cùng cách đáp.
-  if (!isComment && !ctx.hasRecentOrder && !ctx.trialOffer && !phone && (POSTPONED.test(s) || (ctx.hasBasket && s.length <= 60 && CANCEL_BASKET.test(s)))) {
+  // Vòng 11 (P6): tin rút giỏ mà có nhắc màu/số túi ("xóa hết đi lấy 1 nâu thôi", "hủy túi xanh còn túi vàng",
+  // "thôi không lấy vàng nữa") là ĐỔI giỏ, không xóa cả giỏ → để luật giỏ / mô hình.
+  if (!isComment && !ctx.hasRecentOrder && !ctx.trialOffer && !phone && (POSTPONED.test(s) || (ctx.hasBasket && s.length <= 60 && CANCEL_BASKET.test(s) && !BASKET_MENTION.test(s)))) {
     return { rule: POSTPONED.test(s) ? 'ORDER_POSTPONED' : 'CANCEL_BASKET', value: { template_id: 'ORDER_POSTPONED' }, clearBasket: true };
   }
   // --- Luật thử nghiệm: chỉ trả về khi ctx.experimentalRules === 'on'; còn lại các luật ổn định
@@ -351,7 +349,8 @@ export function ruleIntent(text, ctx = {}) {
   // (ORDER_INFO_ASK_FLAVOR). Ví dụ thật: "131/10B đường 6 linh Xuân thủ Đức tphcm <sdt>" sau ASK_FLAVOR
   // từng ra GENERAL_INFO. Ngoại lệ: sau WHOLESALE_CTV_CONTACT khách gửi số Zalo → WHOLESALE_RECEIVED + thẻ.
   if (!isComment && phone && !ctx.hasBasket && !ctx.trialOffer && !complaint && !ctx.complaint) {
-    const withoutPhone = raw.replace(/\+?\d[\d .-]{8,13}/g, ' ');
+    // Vòng 11: stripPhone giữ số nhà ngay sau SĐT ("0912345678 12 Lê Lợi…" không mất "12").
+    const withoutPhone = stripPhone(raw);
     const phoneOnly = PHONE_ONLY.test(foldVietnamese(raw).toLowerCase())
       || core(withoutPhone).split(' ').filter(Boolean).every(word => /^(sdt|so|dt|dien|thoai|zalo|cua|minh|em|e|chi|c|anh|a|toi|day|la|ne|nay|nhe|nha|so zalo|lien|he|goi)$/.test(word));
     if (last === 'WHOLESALE_CTV_CONTACT' && phoneOnly) return { rule: 'WHOLESALE_RECEIVED', value: { template_id: 'WHOLESALE_RECEIVED' }, attention: true };
@@ -374,7 +373,9 @@ export function ruleIntent(text, ctx = {}) {
   if (!isComment && !phone && !ctx.hasBasket && (smallPackFollowUp || (/\b(combo|hop|set) 10( goi)?\b/.test(s) && PRICE.test(s)))) {
     const colour = /\b(nau|cacao)\b/.test(s) ? 'Nâu' : /\bcam\b/.test(s) ? 'Cam' : /\bmix\b/.test(s) ? 'Mix' : /\bxanh\b/.test(s) ? 'Xanh'
       : /nâu|cacao/i.test(String(ctx.contextProduct || '')) ? 'Nâu' : 'Xanh';
-    return { rule: 'SMALL_PACK_PRICE', value: { template_id: 'PRICE_QUOTE_COMBO', Product_N1: `Combo 10 gói ${colour}` } };
+    // Vòng 11 (P3): PRICE_QUOTE + Product_N1 (như comboQuote của engine) — bộ soạn bảng giá tự chọn mẫu
+    // PRICE_QUOTE_COMBO theo đơn vị "Combo" và điền giá; trả thẳng PRICE_QUOTE_COMBO thì bảng giá trống.
+    return { rule: 'SMALL_PACK_PRICE', value: { template_id: 'PRICE_QUOTE', Product_N1: `Combo 10 gói ${colour}` } };
   }
   // "vị nguyên bản" / "truyền thống" khi đang chọn vị (sau ASK_FLAVOR, bước đơn, hay đang giữ giỏ): nguyên bản
   // có 2 túi (Xanh, Vàng) → hỏi tiếp, không gửi bảng giá.
@@ -438,7 +439,12 @@ export function ruleIntent(text, ctx = {}) {
     items.slice(0, 3).forEach((item, index) => { value[slots[index * 2]] = item.product; value[slots[index * 2 + 1]] = String(item.quantity); });
     return value;
   };
-  if (basket.length) return { rule: 'BASKET', value: basketValue(basket) };
+  // Vòng 11 (P7): đang giữ giỏ mà khách "lấy thêm 1 túi nâu": món vừa nêu CỘNG vào giỏ đang giữ (add_to_basket,
+  // bộ soạn đơn cộng dồn một lần), không thay giỏ. "đổi/thay/chỉ lấy/bớt" thì vẫn là giỏ mới.
+  if (basket.length) {
+    const adds = ctx.hasBasket && /\b(them|cong them)\b/.test(s) && !/\b(doi|thay|chi lay|chi can|bot)\b/.test(s);
+    return { rule: 'BASKET', value: { ...basketValue(basket), ...(adds ? { add_to_basket: '1' } : {}) } };
+  }
   // Vòng 10: giỏ + địa chỉ (± SĐT) trong một tin ("1 túi xanh, 1 túi vàng Võ Thị Ngân tổ 13 ấp…", "Ship cho c 1 túi
   // xanh và 1 túi vàng. Hường- <sđt> HA02-17 Vinhomes…") → ORDER_ADDRESS đủ slot, bộ soạn đơn chốt hay hỏi phần thiếu.
   // Giỏ + "gửi địa chỉ cũ" → SĐT/địa chỉ lấy từ đơn trước ('0'); không có đơn trước thì để mô hình.
@@ -496,7 +502,12 @@ export function ruleIntent(text, ctx = {}) {
   // Hàng chỉ bán trên live (sữa hạt, hũ hạt, túi Xanh dương/Xanh mint/Tropical, túi dâu): mẫu LIVE_ONLY_PRODUCT
   // + thẻ (engine đổi thành CSKH_HANDOFF cho khách hộp thư không từ live). Câu hỏi thành phần
   // ("có xoài không", "thành phần có hạt điều") thì để mô hình.
-  if (!isComment && !phone && LIVE_ONLY.test(s) && !(LIVE_INGREDIENT.test(s) && (POLICY_QUESTION.test(s) || /\b(thanh phan|di ung|gom)\b/.test(s)))) {
+  // Vòng 11 (V10): câu hỏi thành phần có đuôi hỏi đã bị core() cắt ("túi xanh có xoài sấy hả", "trong túi vàng
+  // có xoài à") hay dạng "có xoài / có hạt điều / có vị dâu" ("granola có xoài sấy", "có vị dâu không") → mô hình,
+  // không phải hỏi mua hàng live (inbox thường sẽ bị chuyển người + tắt bot). "bên em có túi dâu không" vẫn là LIVE_ONLY.
+  const ingredientAsk = (LIVE_INGREDIENT.test(s) || /\bvi dau\b/.test(s))
+    && (POLICY_QUESTION.test(s) || QUESTION_TAIL.test(sFull) || /\b(a|ah|ha)$/.test(sFull) || /\b(thanh phan|di ung|gom)\b/.test(s) || /\bco (?:vi )?(xoai|hat dieu|dau say|dau)\b/.test(s));
+  if (!isComment && !phone && LIVE_ONLY.test(s) && !ingredientAsk) {
     return { rule: 'LIVE_ONLY', value: { template_id: 'LIVE_ONLY_PRODUCT' }, attention: true };
   }
   // Đang giữ giỏ, khách tóm tắt xin xác nhận ("2 túi xanh 298k miễn ship đúng không"): CONFIRM_YES,
@@ -509,14 +520,21 @@ export function ruleIntent(text, ctx = {}) {
     && !/\b(2|3|4|5|6|7|8|9)\b|\d{2}/.test(s) && !s.replace(FLAVOR_ANSWER_WORDS, ' ').trim()) {
     const chosen = [...new Set(s.match(/\b(xanh|vang|nau|cacao)\b/g) || [])].map(colour => (colour === 'cacao' ? 'nau' : colour));
     const product = chosen.length === 1 ? colourSku(chosen[0]) : null;
-    if (product) return { rule: 'FLAVOR_ANSWER', value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: '1' } };
+    // Vòng 11 (P5): số túi khách nêu trước khi bot hỏi vị ("cho chị 2 túi" → ASK_FLAVOR → "vàng" = 2 túi vàng):
+    // engine truyền ctx.askedBagCount; khách ghi rõ "1" trong câu trả lời thì theo khách. Khách đã nói nhiều vị
+    // ("2 túi 2 vị") mà chỉ trả một màu: chưa rõ → mô hình.
+    const asked = Math.round(Number(ctx.askedBagCount) || 0);
+    const count = /\b1\b/.test(s) ? 1 : asked >= 1 && asked <= 9 ? asked : 1;
+    if (product && !(ctx.askedMixedFlavours && !/\b1\b/.test(s))) return { rule: 'FLAVOR_ANSWER', value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: String(count) } };
   }
   // Vòng 10: "C đặt nhé" / "mình mua" / "Gửi cho mình" (chưa nêu vị, số) → hỏi vị; đang giữ giỏ và bot đang xin thông tin
   // ("ok chốt", "chị đặt nhé") → nhắc lại phần còn thiếu (bộ soạn đơn giữ giỏ). Đã có đơn thật thì để mô hình.
   if (!isComment && !phone && !ctx.hasRecentOrder && !ctx.trialOffer && !complaint && !ctx.complaint) {
     const holding = ctx.hasBasket && ctx.lastWasOrderStep && !['ORDER_CONFIRMATION', 'ORDER_UPDATE'].includes(last);
-    if (holding && (OK_STEP.test(s) || DECIDE_BUY.test(s))) return { rule: 'OK_STEP', value: { template_id: 'ORDER_ADDRESS' } };
-    if (!ctx.hasBasket && DECIDE_BUY.test(s)) return { rule: 'DECIDE_BUY', value: { template_id: 'ASK_FLAVOR' } };
+    // Vòng 11 (V9): bỏ dấu thì "vàng" (Túi Vàng) trùng "vâng": tin có chữ "vàng" CÒN DẤU là chọn màu → mô hình.
+    const saysVang = /vàng/iu.test(raw.normalize('NFC'));
+    if (holding && !saysVang && (OK_STEP.test(s) || DECIDE_BUY.test(s))) return { rule: 'OK_STEP', value: { template_id: 'ORDER_ADDRESS' } };
+    if (!ctx.hasBasket && !saysVang && DECIDE_BUY.test(s)) return { rule: 'DECIDE_BUY', value: { template_id: 'ASK_FLAVOR' } };
     // Bộ chấm: "có mấy loại", "xem các vị" → bảng giá chung (liệt kê 3 vị kèm giá), không phải ASK_FLAVOR.
     if (!ctx.hasBasket && FLAVOR_LIST.test(s)) return { rule: 'FLAVOR_LIST', value: { template_id: 'GENERAL_INFO' } };
   }
@@ -543,7 +561,9 @@ export function ruleIntent(text, ctx = {}) {
     const value = { template_id: target, ...(target === 'PRODUCT_PHOTOS' && ctx.contextProduct ? { Product_N1: ctx.contextProduct } : {}) };
     // Đang ở bước lên đơn: giữ bước đơn, trả lời câu hỏi bằng ý phụ. Xin gợi ý ("tư vấn c 1 túi nữa")
     // thì trả lời thẳng: mẫu đã mời chọn 1 túi / combo 2, không tự cộng túi vào giỏ.
-    if (ctx.hasBasket && ctx.lastWasOrderStep && rule !== 'RECOMMEND') return { rule, value: { template_id: 'ORDER_ADDRESS', also: target } };
+    // Vòng 11 (P1): sau CONFIRM_YES ("Dạ đúng rồi ạ, gửi em SĐT + địa chỉ") giỏ vẫn đang giữ → cùng cách
+    // (engine trả lời câu hỏi + nhắc ngắn giỏ, không lưu lại giỏ).
+    if (ctx.hasBasket && (ctx.lastWasOrderStep || last === 'CONFIRM_YES') && rule !== 'RECOMMEND') return { rule, value: { template_id: 'ORDER_ADDRESS', also: target } };
     return { rule, value };
   }
   return null;

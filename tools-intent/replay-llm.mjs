@@ -2,19 +2,25 @@
 // cho từng tin hộp thư đã chấm, so mã mẫu LLM chọn (và luật ổn định nếu bắt) với mã nhân viên chấm.
 // Chạy trên máy chủ: node --env-file=.env tools-intent/replay-llm.mjs [golden-set.json] [--limit N]
 // Không gửi gì cho khách. Kết quả chi tiết ghi ra replay-llm-out.json cạnh tệp bộ chấm.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-process.chdir(root);
 const load = file => import(pathToFileURL(path.join(root, file)).href);
+const { botTextOf, cliFail, lastTemplateOf, parseCliArgs, positiveIntArg } = await load('tools-intent/dataset-context.mjs');
+const { canonicalTemplateId } = await load('app/processing/intent-features.mjs');
 const args = process.argv.slice(2);
-const positional = args.filter((arg, index) => !arg.startsWith('--') && !['--limit'].includes(args[index - 1]));
-const goldenPath = positional[0] || path.join(root, 'data', 'processed', 'golden-set.json');
-const limit = args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1]) : Infinity;
+const cli = parseCliArgs(args, ['--limit']);
+// Đường dẫn tương đối tính theo thư mục gọi lệnh (rồi mới chdir về gốc dự án để nạp engine).
+const goldenPath = path.resolve(cli.positional[0] || path.join(root, 'data', 'processed', 'golden-set.json'));
+const limit = cli.has('--limit') ? positiveIntArg(cli.value('--limit'), '--limit') : Infinity;
+if (!existsSync(goldenPath)) cliFail(`Không thấy bộ chấm: ${goldenPath}`);
+process.chdir(root);
 // --fewshot: chèn 3 ví dụ đã chấm gần nhất (bỏ chính tin đang đo = leave-one-out).
-const fewShot = args.includes('--fewshot');
+const fewShot = cli.has('--fewshot');
+// Ghi tạm và ghi cuối vào CÙNG tệp đích: --fewshot không được đè replay-llm-out.json (tệp --trust / --gate đang dùng).
+const outPath = path.join(path.dirname(goldenPath), `replay-llm-out${fewShot ? '-fewshot' : ''}.json`);
 const engine = await load('app/chatbot-engine.mjs');
 const { normalizeChatbotSettings } = await load('app/chatbot-settings.mjs');
 const { ruleIntent } = await load('app/processing/rule-intent.mjs');
@@ -34,11 +40,14 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const out = [];
 for (const [index, item] of items.entries()) {
   const at = Number(item.at) || Date.now();
+  // Câu bot trước là CHỮ; mã mẫu (mục dựng từ nhật ký cũ) chỉ làm botLastTemplateId, không đưa làm câu bot.
+  const prevBotText = botTextOf(item);
+  const lastTemplate = canonicalTemplateId(lastTemplateOf(item));
   const recentMessages = [
     ...(item.prevCustomer ? [{ direction: 'incoming', type: 'text', text: item.prevCustomer, createdAt: at - 120000 }] : []),
-    ...(item.prevBot ? [{ direction: 'outgoing', type: 'text', text: item.prevBot, createdAt: at - 60000 }] : [])
+    ...(prevBotText ? [{ direction: 'outgoing', type: 'text', text: prevBotText, createdAt: at - 60000 }] : [])
   ];
-  const conversation = { id: 'replay', name: 'Khách', source: 'inbox', botEnabled: true, botLastTemplateId: item.lastTemplate || '', botLastReplyAt: item.prevBot ? at - 60000 : 0 };
+  const conversation = { id: 'replay', name: 'Khách', source: 'inbox', botEnabled: true, botLastTemplateId: lastTemplate, botLastReplyAt: prevBotText || lastTemplate ? at - 60000 : 0 };
   let llm = 'LỖI';
   let raw = '';
   let ms = 0;
@@ -57,13 +66,14 @@ for (const [index, item] of items.entries()) {
       else await wait(4000);
     }
   }
-  const ruled = ruleIntent(item.text, { source: 'inbox', botLastTemplateId: item.lastTemplate || '' });
+  const ruled = ruleIntent(item.text, { source: 'inbox', botLastTemplateId: lastTemplate });
   const rule = ruled?.value?.template_id || '';
-  out.push({ id: item.id, text: item.text.slice(0, 80), lastTemplate: item.lastTemplate || '', truth: item.label, raw, llm, rule, pipeline: rule || llm, ms });
-  if ((index + 1) % 20 === 0) { console.log(`${index + 1}/${items.length}`); writeFileSync(path.join(path.dirname(goldenPath), 'replay-llm-out.json'), JSON.stringify(out)); }
+  out.push({ id: item.id, text: item.text.slice(0, 80), lastTemplate, truth: item.label, raw, llm, rule, pipeline: rule || llm, ms, ...(llm.startsWith('LỖI') ? { llmError: true } : {}) });
+  if ((index + 1) % 20 === 0) { console.log(`${index + 1}/${items.length}`); writeFileSync(outPath, JSON.stringify(out)); }
   await wait(150);
 }
-writeFileSync(path.join(path.dirname(goldenPath), `replay-llm-out${fewShot ? '-fewshot' : ''}.json`), JSON.stringify(out));
+writeFileSync(outPath, JSON.stringify(out));
+console.log(`Ghi ${outPath}`);
 
 const pct = (num, den) => (den ? `${(100 * num / den).toFixed(1)}%` : '–');
 const ok = out.filter(row => !row.llm.startsWith('LỖI'));

@@ -10,13 +10,23 @@
 // "phẳng cộng p theo nhóm", đúng nhóm con, đúng mẫu, từ chối đúng/oan, bảng ngưỡng, đường risk–coverage cùng độ phủ,
 // ECE của tích và từng tầng; tập con dòng nhân viên, tập con mẫu an toàn ANSWER, tập rule-miss (chỉ khi dataset có
 // trường ruleTemplate). Bản triển khai được huấn luyện lại trên toàn bộ dữ liệu sau khi đo.
-// Dùng: node tools-intent/train-cascade.mjs <dataset.jsonl> <out.json> [--holdout 0.2] [--golden golden.json] [--quiet]
+// Dùng: node tools-intent/train-cascade.mjs <dataset.jsonl> <out.json> [--holdout 0.2] [--golden golden.json] [--flat m.json]
+//         [--flat-out m.json] [--include-comments] [--quiet]
+// Vòng 12 (28/09):
+//   - dòng đi qua intentRowFromRecord (một định nghĩa row với engine); bình luận / COMMENT_* bỏ (--include-comments giữ);
+//   - model.meta: trainIds (băm id dataset), goldenExcluded / sawGolden (khi có --golden, như train-intent);
+//   - --golden: kiểm tệp TRƯỚC khi huấn luyện; đo trên bộ chấm so với bản PHẲNG "m" huấn luyện CÙNG dataset, cùng
+//     công thức (trainClassifier, bỏ OTHER) — không so với mô hình đang chạy (đã thấy golden). --flat <m.json> dùng bản m
+//     có sẵn thay vì tự huấn luyện; --flat-out ghi bản m tự huấn luyện ra tệp (để replay-golden --model dùng lại);
+//   - --quiet: không in nhật ký/bảng huấn luyện, chỉ dòng "saved …" (và bảng bộ chấm nếu có --golden).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MIN_CLASS, calibrationTable, isRuleMiss, isStaffRow, readDataset, trainClassifier } from './train-intent.mjs';
+import { MIN_CLASS, calibrationTable, goldenMetaOf, goldenOverlap, isCommentRow, isRuleMiss, isStaffRow, readDataset, trainClassifier, trainIdsOf } from './train-intent.mjs';
 import { ANSWER_SUBGROUPS, CASCADE_FINE_GROUPS, CASCADE_GROUPS, cascadeFromRaw, cascadeSafeTemplates, fineGroupOf, groupOf, predictCascadeWith, probabilitiesOf, subModelFrom, sumByGroup } from '../app/processing/intent-cascade.mjs';
+import { intentRowFromRecord } from '../app/processing/intent-features.mjs';
 import { loadIntentModelFrom, predictIntentWith } from '../app/processing/intent-model.mjs';
+import { cliFail, parseCliArgs } from './dataset-context.mjs';
 
 /** Nhóm dưới ngưỡng này (hay < 2 lớp đủ mẫu) không có mô hình con: dự đoán chỉ trả nhóm, templateId null. */
 export const MIN_GROUP_ROWS = 30;
@@ -31,14 +41,15 @@ const pct = (num, den) => (den ? `${(100 * num / den).toFixed(1)}%` : '–');
  * (TRIAL_PRICE, CERTIFICATION…) → đổi thành OTHER (cảnh báo) để tầng 1 học lớp từ chối.
  * @returns {{ rows: object[], dropped: { comment: number, commentLabel: number }, remapped: Record<string, number>, other: number }}
  */
-export function prepareCascadeRows(inputRows, log = () => {}) {
+export function prepareCascadeRows(inputRows, log = () => {}, { includeComments = false } = {}) {
   const dropped = { comment: 0, commentLabel: 0 };
   const remapped = {};
   let other = 0;
   const rows = [];
-  for (const row of inputRows.filter(row => row && row.text && row.label).slice().sort((a, b) => (a.at || 0) - (b.at || 0))) {
-    if (row.source === 'comment') { dropped.comment += 1; continue; }
-    if (String(row.label).startsWith('COMMENT_')) { dropped.commentLabel += 1; continue; }
+  for (const input of inputRows.filter(row => row && row.text && row.label).slice().sort((a, b) => (a.at || 0) - (b.at || 0))) {
+    if (!includeComments && input.source === 'comment') { dropped.comment += 1; continue; }
+    if (!includeComments && isCommentRow(input)) { dropped.commentLabel += 1; continue; }
+    const row = intentRowFromRecord(input);
     if (row.label === 'OTHER') { other += 1; rows.push(row); continue; }
     if (groupOf(row.label) === 'OTHER') { remapped[row.label] = (remapped[row.label] || 0) + 1; other += 1; rows.push({ ...row, label: 'OTHER', labelBefore: row.label }); continue; }
     rows.push(row);
@@ -60,7 +71,7 @@ function summarize(report) {
 export function trainCascadeModels(rows, { holdout = 0.2, log = () => {}, minGroupRows = MIN_GROUP_ROWS } = {}) {
   const prefixed = tag => (...parts) => log(`  [${tag}] ${parts.join(' ')}`);
   const groupRows = rows.map(row => ({ ...row, label: groupOf(row.label) }));
-  const groupTrained = trainClassifier(groupRows, { holdout, log: prefixed('nhóm'), dropOther: false });
+  const groupTrained = trainClassifier(groupRows, { holdout, log: prefixed('nhóm'), dropOther: false, includeComments: true, recordIds: false });
   const specialists = {};
   const reports = { group: summarize(groupTrained.report), specialists: {} };
   const keys = [['ORDER', groupOf], ['SUPPORT', groupOf], ['ANSWER', groupOf], ...ANSWER_SUBGROUPS.map(subgroup => [subgroup, fineGroupOf])];
@@ -74,7 +85,7 @@ export function trainCascadeModels(rows, { holdout = 0.2, log = () => {}, minGro
       log(`  [${key}] ${subset.length} dòng · ${Object.keys(counts).length} nhãn → không huấn luyện mô hình con (${reports.specialists[key].skipped})`);
       continue;
     }
-    const trained = trainClassifier(subset, { holdout, log: prefixed(key) });
+    const trained = trainClassifier(subset, { holdout, log: prefixed(key), includeComments: true, recordIds: false });
     specialists[key] = trained.model;
     reports.specialists[key] = { rows: subset.length, ...summarize(trained.report) };
   }
@@ -219,8 +230,8 @@ const stripSection = section => section && { n: section.flat.n, known: section.f
  * Huấn luyện tầng đầy đủ: đo giữ-out end-to-end (tầng vs phẳng cùng dữ liệu) rồi huấn luyện bản triển khai trên
  * toàn bộ dòng. Trả JSON mô hình { version: 'cascade-2', trainedAt, rows, groups, answerMode, groupModel, specialists, report }.
  */
-export function trainCascade(inputRows, { holdout = 0.2, log = () => {}, minGroupRows = MIN_GROUP_ROWS, compareFlat = true } = {}) {
-  const { rows, dropped, remapped, other } = prepareCascadeRows(inputRows, log);
+export function trainCascade(inputRows, { holdout = 0.2, log = () => {}, minGroupRows = MIN_GROUP_ROWS, compareFlat = true, includeComments = false, goldenItems = null, goldenSource = '', trainFlatFull = false } = {}) {
+  const { rows, dropped, remapped, other } = prepareCascadeRows(inputRows, log, { includeComments });
   if (rows.length < 10) throw new Error('Quá ít dòng để huấn luyện.');
   const groupCounts = rows.reduce((acc, row) => { const group = groupOf(row.label); acc[group] = (acc[group] || 0) + 1; return acc; }, {});
   const fineCounts = rows.reduce((acc, row) => { const fine = fineGroupOf(row.label); acc[fine] = (acc[fine] || 0) + 1; return acc; }, {});
@@ -237,7 +248,7 @@ export function trainCascade(inputRows, { holdout = 0.2, log = () => {}, minGrou
   let flatSummary = null;
   if (compareFlat) {
     log('— Phẳng (trên cùng phần huấn luyện, cùng trainClassifier, bỏ OTHER như train-intent):');
-    const flatTrained = trainClassifier(train, { holdout, log: (...parts) => log(`  [phẳng] ${parts.join(' ')}`) });
+    const flatTrained = trainClassifier(train, { holdout, log: (...parts) => log(`  [phẳng] ${parts.join(' ')}`), includeComments: true, recordIds: false });
     flatModel = subModelFrom(flatTrained.model);
     flatSummary = summarize(flatTrained.report);
   }
@@ -247,9 +258,16 @@ export function trainCascade(inputRows, { holdout = 0.2, log = () => {}, minGrou
   // ---- 2. Bản triển khai: huấn luyện lại trên toàn bộ dòng.
   log(`\nHuấn luyện bản triển khai trên toàn bộ ${rows.length} dòng:`);
   const finalPass = trainCascadeModels(rows, { holdout, log, minGroupRows });
+  // Bản phẳng "m": CÙNG dataset, cùng công thức (trainClassifier, bỏ OTHER) — mốc so công bằng trên bộ chấm.
+  let flatFull = null;
+  if (trainFlatFull) {
+    log('\nHuấn luyện bản phẳng "m" trên cùng dataset (mốc so trên bộ chấm):');
+    flatFull = trainClassifier(rows, { holdout, log: (...parts) => log(`  [phẳng m] ${parts.join(' ')}`), includeComments: true, meta: { ...goldenMetaOf(goldenItems ? goldenOverlap(inputRows, goldenItems, goldenSource) : null), trainIds: trainIdsOf(inputRows.filter(row => row && row.text && row.label)) } }).model;
+  }
   const model = {
     version: 'cascade-2',
     trainedAt: new Date().toISOString(),
+    meta: { trainIds: trainIdsOf(inputRows.filter(row => row && row.text && row.label)), ...goldenMetaOf(goldenItems ? goldenOverlap(inputRows, goldenItems, goldenSource) : null) },
     rows: rows.length,
     groups: finalPass.raw.groups,
     answerMode: evaluation.bestMode,
@@ -261,49 +279,71 @@ export function trainCascade(inputRows, { holdout = 0.2, log = () => {}, minGrou
       subModels: finalPass.reports
     }
   };
-  return { model, report: model.report, evaluation };
+  return { model, report: model.report, evaluation, flatFull };
 }
 
 // ---- CLI
 const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 if (isMain) {
   const args = process.argv.slice(2);
-  const valued = new Set(['--holdout', '--golden']);
-  const positional = args.filter((arg, index) => !arg.startsWith('--') && !valued.has(args[index - 1]));
-  const [datasetPath, outPath] = positional;
-  if (!datasetPath || !outPath) { console.log('Dùng: node tools-intent/train-cascade.mjs <dataset.jsonl> <out.json> [--holdout 0.2] [--golden golden.json] [--quiet]'); process.exit(1); }
-  const holdout = args.includes('--holdout') ? Math.min(0.5, Math.max(0.05, Number(args[args.indexOf('--holdout') + 1]) || 0.2)) : 0.2;
-  const goldenPath = args.includes('--golden') ? args[args.indexOf('--golden') + 1] : '';
-  const quiet = args.includes('--quiet');
-  // --quiet: bỏ nhật ký từng mô hình con ("  [PRICE] …"), giữ tổng quan và bảng so sánh.
-  const log = (...parts) => { if (!quiet || !/^\s+\[/.test(String(parts[0] || ''))) console.log(...parts); };
+  const usage = 'Dùng: node tools-intent/train-cascade.mjs <dataset.jsonl> <out.json> [--holdout 0.2] [--golden golden.json] [--flat m.json] [--flat-out m.json] [--include-comments] [--quiet]';
+  const cli = parseCliArgs(args, ['--holdout', '--golden', '--flat', '--flat-out']);
+  const [datasetPath, outPath] = cli.positional;
+  if (!datasetPath || !outPath) cliFail(usage);
+  if (!existsSync(datasetPath)) cliFail(`Không thấy dataset: ${datasetPath}`);
+  const holdoutRaw = cli.value('--holdout');
+  if (holdoutRaw && !(Number(holdoutRaw) > 0 && Number(holdoutRaw) < 1)) cliFail(`--holdout phải là số trong (0, 1) (nhận "${holdoutRaw}").`);
+  const holdout = holdoutRaw ? Math.min(0.5, Math.max(0.05, Number(holdoutRaw))) : 0.2;
+  const goldenPath = cli.value('--golden');
+  const flatPathArg = cli.value('--flat');
+  // Kiểm đầu vào TRƯỚC khi huấn luyện (huấn luyện mất vài phút).
+  let goldenItems = null;
+  if (goldenPath) {
+    if (!existsSync(goldenPath)) cliFail(`Không thấy bộ chấm --golden: ${goldenPath}`);
+    try { goldenItems = JSON.parse(readFileSync(goldenPath, 'utf8')).items; } catch (error) { cliFail(`Bộ chấm ${goldenPath} không đọc được: ${String(error.message).slice(0, 80)}`); }
+    if (!Array.isArray(goldenItems)) cliFail(`Bộ chấm ${goldenPath} không có mảng items.`);
+  }
+  let flatGiven = null;
+  if (flatPathArg) {
+    if (!existsSync(flatPathArg)) cliFail(`Không thấy mô hình phẳng --flat: ${flatPathArg}`);
+    flatGiven = loadIntentModelFrom(flatPathArg);
+    if (!flatGiven) cliFail(`Không đọc được mô hình phẳng --flat: ${flatPathArg}`);
+  }
+  const quiet = cli.has('--quiet');
+  // --quiet: im thật — không nhật ký/bảng huấn luyện; chỉ dòng "saved …" (và bảng bộ chấm nếu có --golden).
+  const log = quiet ? () => {} : (...parts) => console.log(...parts);
+  const readStats = {};
+  const dataset = readDataset(datasetPath, readStats);
+  if (readStats.bad) console.warn(`Bỏ ${readStats.bad} dòng hỏng trong ${datasetPath}`);
   let trained;
   try {
-    trained = trainCascade(readDataset(datasetPath), { holdout, log });
+    trained = trainCascade(dataset, { holdout, log, includeComments: cli.has('--include-comments'), goldenItems, goldenSource: goldenPath, trainFlatFull: Boolean(goldenPath && !flatGiven) || cli.has('--flat-out') });
   } catch (error) {
     if (error.message !== 'Quá ít dòng để huấn luyện.') throw error;
-    console.log(error.message);
-    process.exit(1);
+    cliFail(error.message);
   }
   writeFileSync(outPath, JSON.stringify(trained.model));
   const specialistsLine = Object.entries(trained.model.specialists).map(([key, model]) => `${key} ${model ? `${model.labels.length} mẫu` : 'null'}`).join(' · ');
-  console.log(`saved ${outPath} ${Math.round(Buffer.byteLength(JSON.stringify(trained.model)) / 1024)} KB · nhóm ${trained.model.groups.join('/')} · answerMode ${trained.model.answerMode} · mô hình con: ${specialistsLine}`);
+  const saw = trained.model.meta.sawGolden;
+  console.log(`saved ${outPath} ${Math.round(Buffer.byteLength(JSON.stringify(trained.model)) / 1024)} KB · nhóm ${trained.model.groups.join('/')} · answerMode ${trained.model.answerMode} · mô hình con: ${specialistsLine} · sawGolden ${saw === null ? 'không rõ (không có --golden)' : saw}`);
+  if (cli.value('--flat-out') && trained.flatFull) { writeFileSync(cli.value('--flat-out'), JSON.stringify(trained.flatFull)); console.log(`saved bản phẳng m ${cli.value('--flat-out')}`); }
+  if (saw) console.warn(`CẢNH BÁO dataset CHỨA ${trained.model.meta.goldenExcluded.matchedRows} dòng thuộc bộ chấm (${JSON.stringify(trained.model.meta.goldenExcluded.byKind)}): số đo trên ${goldenPath} bị thổi phồng.`);
 
-  // --golden: đo nhanh bản triển khai trên bộ chấm (tin hộp thư đã chấm; ngữ cảnh v2 dựng từ kho nếu có).
-  // Phẳng ở đây là mô hình ĐANG CHẠY (không cùng dữ liệu) — so công bằng dùng replay-golden --cascade với mô hình phẳng
-  // huấn luyện cùng dataset không chứa golden.
+  // --golden: đo bản triển khai trên bộ chấm (tin hộp thư đã chấm; ngữ cảnh v2 dựng từ kho nếu có) so với bản PHẲNG "m"
+  // cùng dataset, cùng công thức (hay --flat) — không so với mô hình đang chạy (đã thấy golden).
   if (goldenPath) {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const { enrichGoldenContext, goldenContextFields } = await import(pathToFileURL(path.join(root, 'app', 'golden-set.mjs')).href);
-    const items = (JSON.parse(readFileSync(goldenPath, 'utf8')).items || []).filter(item => item.source !== 'comment' && item.label && item.label !== 'SKIP');
+    const items = goldenItems.filter(item => item && item.source !== 'comment' && item.label && item.label !== 'SKIP');
     const storePath = [path.join(path.dirname(goldenPath), 'meta-conversations.json'), path.join(root, 'data', 'processed', 'meta-conversations.json')].find(file => existsSync(file));
     let store = null;
     if (items.some(item => goldenContextFields.some(field => item[field] === undefined)) && storePath) { try { store = JSON.parse(readFileSync(storePath, 'utf8')); } catch { store = null; } }
     const rows = enrichGoldenContext(items, store).map(item => (groupOf(item.label) === 'OTHER' ? { ...item, label: 'OTHER' } : item));
-    const flatPath = process.env.INTENT_MODEL_PATH || path.join(root, 'app', 'processing', 'intent-model.json');
-    const flat = loadIntentModelFrom(flatPath);
+    const flat = flatGiven || subModelFrom(trained.flatFull);
+    const flatName = flatGiven ? `phẳng ${path.basename(flatPathArg)}` : 'phẳng m (cùng dataset)';
     const evaluation = evaluateCascade(trained.model, flat, rows);
-    console.log(`\nBộ chấm ${goldenPath}: ${rows.length} tin hộp thư đã chấm (nhãn ngoài bảng → OTHER) · phẳng = ${flat ? flatPath : 'không có'} (mô hình đang chạy, KHÔNG cùng dữ liệu)`);
-    printComparison(evaluation, console.log, { title: 'Bộ chấm', flatName: 'phẳng đang chạy' });
+    const flatSaw = flatGiven ? flatGiven.meta?.sawGolden : trained.flatFull?.meta?.sawGolden;
+    console.log(`\nBộ chấm ${goldenPath}: ${rows.length} tin hộp thư đã chấm (nhãn ngoài bảng → OTHER) · ${flatName}${flatSaw ? ' — CẢNH BÁO: bản phẳng đã thấy golden' : flatSaw === undefined || flatSaw === null ? ' (không rõ đã thấy golden chưa)' : ''}`);
+    printComparison(evaluation, console.log, { title: 'Bộ chấm', flatName });
   }
 }

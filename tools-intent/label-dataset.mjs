@@ -8,7 +8,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { POLICY_DRIFT, readJsonl, toJsonl } from './dataset-context.mjs';
+import { POLICY_DRIFT, botTextOf, cliFail, lastTemplateOf, parseCliArgs, positiveIntArg, readJsonl, toJsonl } from './dataset-context.mjs';
+import { canonicalTemplateId } from '../app/processing/intent-features.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -75,13 +76,14 @@ export async function labelRows(rows, { cache, callModel, concurrency = 2, retri
 
 async function main() {
   const args = process.argv.slice(2);
-  const valueFlags = new Set(['--limit', '--concurrency']);
-  const positional = args.filter((arg, index) => !arg.startsWith('--') && !valueFlags.has(args[index - 1]));
-  const [inPath, labelsPath] = positional;
-  if (!inPath || !labelsPath) { console.log('Dùng: node --env-file=.env tools-intent/label-dataset.mjs <in.jsonl> <labels.jsonl> [--only-drift] [--limit N] [--concurrency 2]'); process.exit(1); }
-  const limit = args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1]) : Infinity;
-  const concurrency = args.includes('--concurrency') ? Number(args[args.indexOf('--concurrency') + 1]) : 2;
-  const onlyDrift = args.includes('--only-drift');
+  const cli = parseCliArgs(args, ['--limit', '--concurrency']);
+  // Đường dẫn tương đối tính theo thư mục gọi lệnh (main chdir về gốc dự án để nạp engine).
+  const [inPath, labelsPath] = cli.positional.map(file => path.resolve(file));
+  if (!inPath || !labelsPath) cliFail('Dùng: node --env-file=.env tools-intent/label-dataset.mjs <in.jsonl> <labels.jsonl> [--only-drift] [--limit N] [--concurrency 2]');
+  if (!existsSync(inPath)) cliFail(`Không thấy tệp vào: ${inPath}`);
+  const limit = cli.has('--limit') ? positiveIntArg(cli.value('--limit'), '--limit') : Infinity;
+  const concurrency = cli.has('--concurrency') ? positiveIntArg(cli.value('--concurrency'), '--concurrency') : 2;
+  const onlyDrift = cli.has('--only-drift');
   process.chdir(root);
   const load = file => import(pathToFileURL(path.join(root, file)).href);
   const engine = await load('app/chatbot-engine.mjs');
@@ -95,16 +97,21 @@ async function main() {
   const cachePath = path.join(dataDir, 'llm-labels.json');
   const cache = loadCache(cachePath, promptVersion);
   if (cache.stale) console.log(`Cache cũ (prompt ${cache.stale.promptVersion}, ${cache.stale.count} dòng) bị bỏ: prompt hiện tại ${promptVersion}.`);
-  const all = readJsonl(readFileSync(inPath, 'utf8'));
+  const readStats = {};
+  const all = readJsonl(readFileSync(inPath, 'utf8'), readStats);
+  if (readStats.bad) console.warn(`Bỏ ${readStats.bad} dòng hỏng trong ${inPath}`);
   const rows = all.filter(row => needsLlmLabel(row, { onlyDrift })).slice(0, limit);
   console.log(`${rows.length}/${all.length} dòng cần LLM${onlyDrift ? ' (chỉ nhãn lệch chính sách)' : ''} · model ${settings.directModel} · thinking ${settings.thinkingLevel || 'mặc định'} · đã có cache ${rows.filter(row => cache.items[row.id]?.label).length}`);
   const callModel = async row => {
     const at = Number(row.at) || Date.now();
+    // Câu bot trước là CHỮ; dòng dựng từ nhật ký cũ ghi mã mẫu vào prevBot → không đưa mã làm câu bot (chỉ làm botLastTemplateId).
+    const prevBotText = botTextOf(row);
     const recentMessages = [
       ...(row.prevCustomer ? [{ direction: 'incoming', type: 'text', text: row.prevCustomer, createdAt: at - 120000 }] : []),
-      ...(row.prevBot ? [{ direction: 'outgoing', type: 'text', text: row.prevBot, createdAt: at - 60000 }] : [])
+      ...(prevBotText ? [{ direction: 'outgoing', type: 'text', text: prevBotText, createdAt: at - 60000 }] : [])
     ];
-    const conversation = { id: 'label', name: 'Khách', source: row.source || 'inbox', botEnabled: true, botLastTemplateId: row.lastTemplate || '', botLastReplyAt: row.prevBot ? at - 60000 : 0 };
+    const lastTemplate = canonicalTemplateId(lastTemplateOf(row));
+    const conversation = { id: 'label', name: 'Khách', source: row.source || 'inbox', botEnabled: true, botLastTemplateId: lastTemplate, botLastReplyAt: prevBotText || lastTemplate ? at - 60000 : 0 };
     const reply = await engine.requestDirectModelReply({ settings, conversation, message: { type: 'text', text: row.text, createdAt: at }, recentMessages, rawResponse: true, context: {}, examples: [] });
     const raw = String(reply.parsed?.template_id || '');
     let label = raw;

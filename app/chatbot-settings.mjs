@@ -72,7 +72,54 @@ export function assertUsableAiEndpoint(endpoint, { provider = '', authType = '' 
   return parsed.toString();
 }
 
-export function normalizeChatbotSettings(value = {}) {
+// Trần số mẫu tin lưu được (seed + mẫu tự tạo).
+export const maxMessageTemplates = 200;
+
+// Giá trị "không gửi": undefined, null hay chuỗi trống (ô số để trống trên màn hình).
+const isBlank = item => item === undefined || item === null || (typeof item === 'string' && !item.trim());
+// Khóa số: null/"" trong bản vá = không gửi (giữ giá trị cũ), không phải "đặt về 0/mặc định".
+const numericSettingKeys = new Set(['cascadeCanary', 'cascadeThreshold', 'intentThreshold', 'memoryWindow', 'retryCount', 'retryIntervalMs']);
+
+/**
+ * Gộp bản vá cấu hình (payload POST từ màn hình) vào cấu hình hiện tại, TRƯỚC khi chuẩn hóa:
+ * - khóa undefined / null = không gửi → giữ giá trị cũ (handoffKeywords, messageTemplates…);
+ * - khóa số (cascadeCanary, cascadeThreshold…) mang "" cũng coi là không gửi;
+ * - followUps gộp sâu: bản vá chỉ có { enabled } không xóa kịch bản / maxPerRun; kịch bản cùng id
+ *   gộp trường (bản vá chỉ có { id, enabled } giữ templateId, delayHours…), danh sách theo bản vá;
+ * - contextTrim gộp từng phần.
+ */
+export function mergeChatbotSettingsPatch(current = {}, patch = {}) {
+  const base = current && typeof current === 'object' ? current : {};
+  const merged = { ...base };
+  for (const [key, item] of Object.entries(patch && typeof patch === 'object' ? patch : {})) {
+    if (item === undefined || item === null) continue;
+    if (numericSettingKeys.has(key) && isBlank(item)) continue;
+    if (key === 'followUps' && typeof item === 'object' && !Array.isArray(item)) {
+      const before = base.followUps && typeof base.followUps === 'object' ? base.followUps : {};
+      const next = { ...before };
+      for (const [name, part] of Object.entries(item)) if (part !== undefined && part !== null && !(name === 'maxPerRun' && isBlank(part))) next[name] = part;
+      if (Array.isArray(item.scenarios)) {
+        const previous = new Map((Array.isArray(before.scenarios) ? before.scenarios : []).filter(entry => entry?.id).map(entry => [String(entry.id), entry]));
+        next.scenarios = item.scenarios.map(entry => (entry && typeof entry === 'object' && previous.has(String(entry.id)) ? { ...previous.get(String(entry.id)), ...entry } : entry));
+      } else if (Array.isArray(before.scenarios)) next.scenarios = before.scenarios;
+      merged.followUps = next;
+      continue;
+    }
+    if (key === 'contextTrim' && typeof item === 'object' && !Array.isArray(item)) {
+      merged.contextTrim = { ...(base.contextTrim && typeof base.contextTrim === 'object' ? base.contextTrim : {}), ...item };
+      continue;
+    }
+    merged[key] = item;
+  }
+  return merged;
+}
+
+/**
+ * Chuẩn hóa cấu hình. `current` (tùy chọn): cấu hình đang lưu — khi có, `value` được coi là bản vá
+ * và gộp sâu vào `current` trước (mergeChatbotSettingsPatch).
+ */
+export function normalizeChatbotSettings(input = {}, current = null) {
+  const value = current && typeof current === 'object' ? mergeChatbotSettingsPatch(current, input) : (input || {});
   const responseMode = 'automatic';
   const requestedProvider = value.provider === 'openai_compatible' ? 'custom' : value.provider;
   const supportedProviders = ['vertex', 'openai', 'anthropic', 'deepseek', 'xai', 'groq', 'mistral', 'openrouter', 'custom'];
@@ -114,10 +161,17 @@ export function normalizeChatbotSettings(value = {}) {
     .replace(/(?<![\p{L}\p{N}])Anh\s*\/\s*[Cc]hị(?![\p{L}\p{N}])/gu, '{Title}')
     .replace(/(?<![\p{L}\p{N}])anh\s*\/\s*[Cc]hị(?![\p{L}\p{N}])/gu, '{title}');
   // 28/09: seed đã có 99 mẫu, cộng mẫu nhân viên tự tạo thì trần 100 sẽ âm thầm bỏ mẫu mới → nâng lên 200.
-  const messageTemplates = Object.fromEntries(Object.entries(submitted)
-    .slice(0, 200)
+  // Bỏ giá cũ PRICE_<sản phẩm> và mã trống TRƯỚC khi cắt trần (không để mã rác chiếm chỗ); vượt trần thì
+  // giữ đủ mẫu seed, cắt mẫu tự tạo ở cuối và cảnh báo (không bao giờ bỏ im lặng một mẫu seed).
+  const cleaned = Object.entries(submitted)
     .map(([key, text]) => [String(key).trim().slice(0, 100), placeholderHonorific(text).trim().slice(0, 12000)])
-    .filter(([key]) => key && !isProductQuoteId(key)));
+    .filter(([key]) => key && !isProductQuoteId(key));
+  const seedIds = new Set(Object.keys(defaultMessageTemplates()));
+  const customEntries = cleaned.filter(([key]) => !seedIds.has(key));
+  const customRoom = Math.max(0, maxMessageTemplates - (cleaned.length - customEntries.length));
+  const droppedCustom = new Set(customEntries.slice(customRoom).map(([key]) => key));
+  if (droppedCustom.size) console.warn(`Thiết lập tin nhắn: vượt trần ${maxMessageTemplates} mẫu, bỏ ${droppedCustom.size} mẫu tự tạo: ${[...droppedCustom].slice(0, 10).join(', ')}`);
+  const messageTemplates = Object.fromEntries(cleaned.filter(([key]) => !droppedCustom.has(key)));
   // The processing pipeline is code in app/processing, not editable settings.
   return {
     enabled: value.enabled === true,
@@ -153,7 +207,8 @@ export function normalizeChatbotSettings(value = {}) {
     cascadeThreshold: Math.min(0.99, Math.max(0.5, Number(value.cascadeThreshold) || 0.8)),
     // Canary: khi 'on' chỉ áp cho hội thoại có hash(id) % 100 < cascadeCanary (0–100, mặc định 100 = tất cả);
     // hội thoại ngoài canary chạy như shadow (nhật ký ghi cascade.canary: false).
-    cascadeCanary: Math.min(100, Math.max(0, value.cascadeCanary === undefined ? 100 : Math.round(Number(value.cascadeCanary)) || 0)),
+    // null / "" (ô để trống) = không gửi → mặc định 100 (gộp với cấu hình cũ thì giữ giá trị cũ, xem mergeChatbotSettingsPatch).
+    cascadeCanary: Math.min(100, Math.max(0, isBlank(value.cascadeCanary) ? 100 : Math.round(Number(value.cascadeCanary)) || 0)),
     // Cache phần tĩnh của prompt trên Vertex (explicit context cache): 'on' mặc định (thăm dò 25/09 chạy tốt).
     promptCache: value.promptCache === 'off' ? 'off' : 'on',
     intentThreshold: Math.min(0.99, Math.max(0.5, Number(value.intentThreshold) || 0.9)),

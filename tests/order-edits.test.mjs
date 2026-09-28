@@ -8,7 +8,7 @@ import { applyCustomerOrderEdits } from '../app/order-edits.mjs';
 import { processingNotes } from '../app/order-notes.mjs';
 import { getCatalogProducts } from '../app/processing/catalog.mjs';
 
-test('đổi sản phẩm sang mã khác trong danh mục: đổi SKU và tên, giữ giá, bỏ cờ cần chọn sản phẩm', () => {
+test('đổi sản phẩm sang mã khác trong danh mục: đổi SKU và tên, giá tính lại theo bộ giá, bỏ cờ cần chọn sản phẩm', () => {
   const [first, second] = getCatalogProducts();
   assert.ok(first && second, 'danh mục thử phải có ít nhất hai sản phẩm');
   const order = sample();
@@ -19,7 +19,10 @@ test('đổi sản phẩm sang mã khác trong danh mục: đổi SKU và tên, 
   assert.deepEqual(changed, ['lines']);
   assert.equal(order.products[0].sku, second.sku);
   assert.equal(order.products[0].name, second.name);
-  assert.equal(order.products[0].price, 149000, 'giá giữ nguyên, nhân viên sửa riêng nếu cần');
+  // Giỏ đổi (sản phẩm khác) → tính lại cả đơn theo bộ giá: niêm yết từng dòng, giá combo là giá khách trả.
+  assert.equal(order.products[0].price, second.unitPrice);
+  assert.equal(order.products[0].paidPrice, second.comboPrice || second.unitPrice);
+  assert.equal(order.total, 2 * (second.comboPrice || second.unitPrice) + order.shippingFee);
   assert.equal(order.landing.needsProduct, false);
   assert.equal(order.landing.autoFilled.product, undefined);
   assert.throws(() => applyCustomerOrderEdits(sample(), { lines: [{ sku: 'GRA-XANH-Z450', product: 'KHONG-CO' }] }), /danh mục/);

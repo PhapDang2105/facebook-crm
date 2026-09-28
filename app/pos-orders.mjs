@@ -137,8 +137,9 @@ export function geoNameKey(value) {
     .trim();
 }
 
-const geoPrefixes = /^(thanh pho|tinh|quan|huyen|thi xa|thi tran|phuong|xa)\s+/;
-function findGeo(list, name) {
+// "TP Hồ Chí Minh" (tên CRM) ↔ "Hồ Chí Minh" / "Thành phố Hồ Chí Minh" (POS): "tp" cũng là tiền tố.
+const geoPrefixes = /^(thanh pho|tp|tinh|quan|huyen|thi xa|thi tran|phuong|xa)\s+/;
+export function findGeo(list, name) {
   const key = geoNameKey(name);
   if (!key) return null;
   const exact = list.find(item => geoNameKey(item.name) === key);
@@ -223,17 +224,32 @@ export function posComboFor(products, posSkus = null) {
 }
 
 /**
+ * Có đẩy giỏ bằng một dòng combo POS không, và giá của nó. Giỏ khớp combo POS →
+ * một dòng combo (như nhân viên), giá hàng = tổng CRM trừ phí ship; POS niêm yết
+ * cao hơn thì phần chênh thành giảm giá để COD đúng bằng CRM. Không dùng combo khi
+ * tổng hàng 0 (đơn lỗi/chưa có giá) hay khi giá hàng CRM CAO HƠN giá niêm yết
+ * combo POS (POS không nhận giảm giá âm → COD thiếu): quay về đẩy từng túi + giảm giá.
+ */
+export function posComboPlan(order, { posSkus = null, posPrices = null, products = withCurrentSkus(order?.products), warn = true } = {}) {
+  const goods = Math.max(0, money(order?.total) - (order?.freeShipping || money(order?.shippingFee) === 0 ? 0 : money(order?.shippingFee)));
+  const combo = posComboFor(products, posSkus);
+  if (!combo || goods <= 0) return { combo: null, goods, comboRetail: 0 };
+  const listed = money(posPrices?.get?.(combo.sku)?.retailPrice ?? posPrices?.get?.(combo.sku));
+  if (listed && goods > listed) {
+    if (warn) console.warn(`POS: đơn ${order?.id || ''} giá hàng CRM ${goods} cao hơn giá niêm yết combo ${combo.sku} trên POS (${listed}) — đẩy từng túi thay vì mã combo.`);
+    return { combo: null, goods, comboRetail: 0 };
+  }
+  return { combo, goods, comboRetail: listed || goods };
+}
+
+/**
  * Body tạo đơn POS từ đơn CRM. `posSkus` (nếu có) lọc quà: quà không có mẫu mã
  * trong POS thì bỏ qua thay vì làm POS từ chối cả đơn. `posPrices` (Map mã → giá
  * niêm yết POS) để tính giảm giá khi đẩy dòng combo.
  */
 export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '', shopId = '', posSkus = null, posPrices = null, geo = {} } = {}) {
   const products = withCurrentSkus(order.products);
-  // Giỏ khớp một combo POS → một dòng combo (như nhân viên), giá = giá hàng CRM (tổng trừ phí ship);
-  // POS niêm yết cao hơn thì phần chênh thành giảm giá để COD đúng bằng CRM.
-  const combo = posComboFor(products, posSkus);
-  const goods = Math.max(0, money(order.total) - (order.freeShipping || money(order.shippingFee) === 0 ? 0 : money(order.shippingFee)));
-  const comboRetail = combo ? (money(posPrices?.get?.(combo.sku)?.retailPrice ?? posPrices?.get?.(combo.sku)) || goods) : 0;
+  const { combo, goods, comboRetail } = posComboPlan(order, { posSkus, posPrices, products });
   const comboItems = combo ? [{
     variation_id: combo.sku,
     quantity: 1,
@@ -280,7 +296,9 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
     });
   }
   // Quà ưu đãi bám đuổi (bộ bát gáo dừa cho combo 2): không nằm trong bảng quà theo giỏ, đẩy thêm một dòng quà.
-  if (order.promoGift) {
+  // Chỉ khi giỏ đúng 2 túi (đơn sửa sang 1/3 túi mà cờ còn sót thì bỏ) và combo POS chưa gồm bát trong mã.
+  const bagCount = products.reduce((sum, item) => sum + Math.max(0, Math.round(Number(item.quantity) || 0)), 0);
+  if (order.promoGift && bagCount === 2 && !combo?.includesGifts) {
     const sku = 'BGD';
     const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === sku);
     if (!items.some(item => item.variation_id === sku) && (!posSkus || posSkus.has(sku))) {
@@ -322,17 +340,40 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   };
 }
 
+/**
+ * Mẫu mã POS còn thiếu để đẩy đơn: giỏ đi bằng mã combo thì chỉ cần mã combo có
+ * trên POS (posComboFor đã kiểm), không đòi từng túi lẻ; không thì mọi SKU dòng.
+ */
+function missingPosSkus(order, products, posSkus, posPrices) {
+  if (posComboPlan(order, { posSkus, posPrices, products, warn: false }).combo) return [];
+  return products.filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
+}
+
+/**
+ * Đơn CRM tự tạo rồi đẩy sang POS (bot chốt, nhân viên tạo trong hộp thư) — sửa
+ * trong CRM thì mới PUT sang POS. Đơn nhân viên/Shop lên trên POS rồi kéo về CRM
+ * (source 'POS', mã "pos…", pos.importedAt) thì POS là bản gốc: PUT từ CRM sẽ đè
+ * giỏ/quà/ghi chú nhân viên trên POS.
+ */
+export function isCrmOwnedPosOrder(order) {
+  if (!order?.pos?.id) return false;
+  if (String(order.pos.id).startsWith(POS_ORDER_CUSTOM_PREFIX)) return true;
+  if (String(order.source || '') === 'POS' || order.pos.importedAt) return false;
+  return !/^pos/i.test(String(order.id || ''));
+}
+
 /** Gọi POS tạo đơn. Trả về { id, systemId, status } hoặc ném lỗi có lời tiếng Việt. */
 export async function pushOrderToPos(order, { conversation = {}, config = posConfig(), fetchImpl = fetch } = {}) {
   if (!posOrderPushEnabled(config)) throw new Error('Chưa kết nối Pancake POS.');
   const products = withCurrentSkus(order.products);
   if (!products.length) throw new Error('Đơn chưa có sản phẩm.');
   const posSkus = await posVariationSkus(config, fetchImpl);
-  const missing = products.filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
+  const posPrices = await posVariationIds(config, fetchImpl);
+  const missing = missingPosSkus(order, products, posSkus, posPrices);
   if (missing.length) throw new Error(`POS không có mẫu mã: ${missing.join(', ')}.`);
   const warehouseId = await posWarehouseId(config, fetchImpl).catch(() => '');
   const geo = await resolvePosGeo(order, config, fetchImpl).catch(() => ({}));
-  const payload = buildPosOrderPayload(order, { conversation, warehouseId, shopId: config.shopId, posSkus, posPrices: await posVariationIds(config, fetchImpl), geo });
+  const payload = buildPosOrderPayload(order, { conversation, warehouseId, shopId: config.shopId, posSkus, posPrices, geo });
   // Tạo đơn bằng SKU chữ: POS nhận dòng hàng thường nhưng BỎ ÂM THẦM dòng tặng
   // (bát gáo dừa, muỗng dừa) — mọi đơn combo 3 của bot lên POS thiếu quà. Gửi mã
   // mẫu mã nội bộ (UUID) như khi sửa đơn thì dòng tặng được giữ.
@@ -407,14 +448,16 @@ export async function updatePosOrder(order, { conversation = {}, config = posCon
   if (!posOrderPushEnabled(config)) throw new Error('Chưa kết nối Pancake POS.');
   if (!order.pos?.id) throw new Error('Đơn chưa có trên POS.');
   const posSkus = await posVariationSkus(config, fetchImpl);
-  const missing = withCurrentSkus(order.products).filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
+  // Cùng giá niêm yết POS như lúc tạo đơn: sửa và tạo ra cùng một công thức combo/giảm giá.
+  const posPrices = await posVariationIds(config, fetchImpl);
+  const missing = missingPosSkus(order, withCurrentSkus(order.products), posSkus, posPrices);
   if (missing.length) throw new Error(`POS không có mẫu mã: ${missing.join(', ')}.`);
   const geo = await resolvePosGeo(order, config, fetchImpl).catch(() => ({}));
-  const { shop_id, custom_id, status, received_at_shop, warehouse_id, page_id, conversation_id, ...payload } = buildPosOrderPayload(order, { conversation, posSkus, geo });
+  const { shop_id, custom_id, status, received_at_shop, warehouse_id, page_id, conversation_id, ...payload } = buildPosOrderPayload(order, { conversation, posSkus, posPrices, geo });
   // Tạo đơn thì POS nhận SKU (display_id) làm variation_id, nhưng sửa đơn thì
   // không: gửi SKU chữ khiến POS trả 400 "Server internal error" và đơn trên POS
   // giữ nguyên giỏ, phí ship cũ. Sửa đơn gửi mã mẫu mã nội bộ (UUID) của POS.
-  payload.items = withPosVariationIds(payload.items, await posVariationIds(config, fetchImpl));
+  payload.items = withPosVariationIds(payload.items, posPrices);
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(order.pos.id)}`);
   url.searchParams.set('api_key', config.apiKey);
   const controller = new AbortController();
@@ -457,12 +500,21 @@ export async function updatePosOrderNote(order, { config = posConfig(), fetchImp
 export async function cancelPosOrder(order, { config = posConfig(), fetchImpl = fetch } = {}) {
   if (!posOrderPushEnabled(config)) throw new Error('Chưa kết nối Pancake POS.');
   if (!order.pos?.id) throw new Error('Đơn chưa có trên POS.');
+  // Nối lời hủy vào ghi chú đang có trên POS (ghi chú nhân viên, "Quà: …"), không ghi đè.
+  // Đọc đơn POS lỗi thì ghi như cũ.
+  const cancelText = `Đơn CRM #${order.id} · khách hủy`;
+  let note = cancelText;
+  try {
+    const fetched = await posRequest(`/orders/${encodeURIComponent(order.pos.id)}`, {}, config, fetchImpl);
+    const current = String((fetched?.data && typeof fetched.data === 'object' ? fetched.data : fetched)?.note || '').trim();
+    if (current) note = current.includes('khách hủy') ? current : `${current} · khách hủy (CRM)`;
+  } catch {}
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(order.pos.id)}`);
   url.searchParams.set('api_key', config.apiKey);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    const response = await fetchImpl(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ status: 6, note: `Đơn CRM #${order.id} · khách hủy` }), signal: controller.signal });
+    const response = await fetchImpl(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ status: 6, note }), signal: controller.signal });
     let body = {};
     try { body = await response.json(); } catch {}
     if (!response.ok || body?.success === false) throw new Error(`Pancake POS không nhận hủy đơn (${response.status}): ${body?.message || body?.error || 'không rõ lý do'}`);

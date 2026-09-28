@@ -69,7 +69,7 @@ test('những tin phải để mô hình (luật trả null)', () => {
 test('ngữ cảnh: "." hay "xin giá" ngay sau bước đơn, hay khi nhân viên vừa nhắn, không phải hỏi giá mới', () => {
   assert.equal(pick('.', inbox({ botLastTemplateId: 'ORDER_ADDRESS', botLastAgeMin: 3 })), null);
   // Sau PACKAGING_INFO ("cần em gửi bảng giá combo gói nhỏ không?") "xin giá" là xin giá gói nhỏ (vòng 9), không phải bảng giá chung.
-  assert.equal(pick('xin giá', inbox({ botLastTemplateId: 'PACKAGING_INFO', botLastAgeMin: 3 })), 'PRICE_QUOTE_COMBO Combo 10 gói Xanh');
+  assert.equal(pick('xin giá', inbox({ botLastTemplateId: 'PACKAGING_INFO', botLastAgeMin: 3 })), 'PRICE_QUOTE Combo 10 gói Xanh');
   assert.equal(pick('xin giá', inbox({ botLastTemplateId: 'PACKAGING_INFO', botLastAgeMin: 3, staffRepliedAfterBot: true })), null, 'nhân viên vừa nhắn: để mô hình');
   assert.equal(pick('xin giá', inbox({ botLastTemplateId: 'GENERAL_INFO', botLastAgeMin: 3, staffRepliedAfterBot: true })), null);
   assert.equal(pick('Cho mình 1 xanh 1 vàng', inbox({ orderAgeMin: 20 })), null, 'vừa chốt đơn: để luật sửa đơn/mô hình');
@@ -332,7 +332,7 @@ test('vòng 9.10: "mua ở đâu / thế nào" → ORDER_HELP (không ECOMMERCE_
   assert.equal(ruleIntent('2 túi bao nhiêu', ctx)?.value?.template_id, undefined, '2 túi: bảng combo, để luật/mô hình cũ');
 });
 
-test('vòng 9.11: gói nhỏ hỏi cách khác → PACKAGING_INFO; sau PACKAGING_INFO xin giá / "có" / hỏi combo 10 → PRICE_QUOTE_COMBO theo màu ngữ cảnh', () => {
+test('vòng 9.11: gói nhỏ hỏi cách khác → PACKAGING_INFO; sau PACKAGING_INFO xin giá / "có" / hỏi combo 10 → PRICE_QUOTE (Combo 10 gói, vòng 11: không gọi thẳng PRICE_QUOTE_COMBO) theo màu ngữ cảnh', () => {
   const ctx = { commentBasket };
   for (const text of ['có set nhiều gói nhỏ không', 'gói nhỏ mix vị có không', 'combo gói nhỏ có không', 'có hộp gói nhỏ không em']) {
     assert.equal(ruleIntent(text, ctx)?.value?.template_id, 'PACKAGING_INFO', text);
@@ -340,13 +340,13 @@ test('vòng 9.11: gói nhỏ hỏi cách khác → PACKAGING_INFO; sau PACKAGING
   assert.equal(ruleIntent('Set mix 10 gói nhiều vị nhiêu e', ctx), null, 'kèm hỏi giá gói nhỏ chưa rõ loại: mô hình');
   const after = { ...ctx, botLastTemplateId: 'PACKAGING_INFO', botLastAgeMin: 3 };
   for (const text of ['xin giá', 'có', 'Có a', 'gửi em bảng giá', 'combo 10 gói bao nhiêu', 'giá gói nhỏ sao']) {
-    assert.deepEqual([ruleIntent(text, after)?.value?.template_id, ruleIntent(text, after)?.value?.Product_N1], ['PRICE_QUOTE_COMBO', 'Combo 10 gói Xanh'], text);
+    assert.deepEqual([ruleIntent(text, after)?.value?.template_id, ruleIntent(text, after)?.value?.Product_N1], ['PRICE_QUOTE', 'Combo 10 gói Xanh'], text);
   }
   assert.equal(ruleIntent('combo 10 gói nâu bao nhiêu', after)?.value?.Product_N1, 'Combo 10 gói Nâu');
   assert.equal(ruleIntent('xin giá', { ...after, contextProduct: 'Granola Túi Nâu vị cacao 350g' })?.value?.Product_N1, 'Combo 10 gói Nâu');
   assert.equal(ruleIntent('không cần', after), null);
-  assert.notEqual(ruleIntent('2 hộp xanh', { ...after, smallPackContext: true })?.value?.template_id, 'PRICE_QUOTE_COMBO', 'giỏ gói nhỏ: mô hình');
-  assert.equal(ruleIntent('hộp 10 gói giá bn', ctx)?.value?.template_id, 'PRICE_QUOTE_COMBO', 'không cần ngữ cảnh khi nêu rõ combo 10');
+  assert.notEqual(ruleIntent('2 hộp xanh', { ...after, smallPackContext: true })?.value?.Product_N1, 'Combo 10 gói Xanh', 'giỏ gói nhỏ: mô hình');
+  assert.equal(ruleIntent('hộp 10 gói giá bn', ctx)?.value?.Product_N1, 'Combo 10 gói Xanh', 'không cần ngữ cảnh khi nêu rõ combo 10');
 });
 
 // ===== Vòng 10: đo độ phủ nhóm MUA (tools-intent/order-coverage.mjs) trên bộ chấm + dòng nhân viên, bịt các mẫu lặp.

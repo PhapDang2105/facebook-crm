@@ -59,3 +59,48 @@ test('maskPhones / sanitizeRecord: che 0xxx và +84, Infinity → null, undefine
   assert.equal(maskPhones('giá 174.000đ, 2 túi 348k'), 'giá 174.000đ, 2 túi 348k', 'số tiền không bị che');
   assert.deepEqual(sanitizeRecord({ a: Infinity, b: undefined, list: ['0912345678'] }), { a: null, b: null, list: ['<sdt>'] });
 });
+
+test('khóa định danh giữ nguyên (conversationId, mid, mã mẫu, tên luật); chuỗi tự do che SĐT +84 có dấu cách, email, dãy ≥ 9 số', () => {
+  const clean = sanitizeRecord({
+    v: 1,
+    at: '2026-09-28T10:00:00.000Z',
+    conversationId: '103549382215599:25084123456789012',
+    mid: 'm_1045678901234567',
+    source: 'inbox',
+    type: 'text',
+    prevBot: 'PRICE_QUOTE',
+    lastTemplate: 'PRICE_QUOTE',
+    text: 'sdt +84 912 345 678, 84912345678, 0912.345.678, stk 19036681234012 Techcombank, email chi.lan@gmail.com, giá 298.000 hay 298k, 12 ngõ 5',
+    ctx: { orderAgeMin: 1234567890, note: 'psid 7012345678901234' },
+    rule: { name: 'ORDER_ASK', templateId: 'ORDER_ADDRESS' },
+    shadow: [{ name: 'TRIAL_ASK', templateId: 'TRIAL_OFFER' }],
+    cascade: { group: 'ANSWER', subGroup: 'PRICE', templateId: 'PRICE_QUOTE', path: 'ANSWER>PRICE', topK: [{ templateId: 'PRICE_QUOTE', p: 0.9 }] },
+    fewShot: ['ORDER_ADDRESS'],
+    chosen: 'ORDER_ADDRESS', final: 'ORDER_ADDRESS'
+  });
+  assert.equal(clean.conversationId, '103549382215599:25084123456789012', 'conversationId không bị che');
+  assert.equal(clean.mid, 'm_1045678901234567');
+  assert.equal(clean.at, '2026-09-28T10:00:00.000Z');
+  assert.deepEqual(clean.rule, { name: 'ORDER_ASK', templateId: 'ORDER_ADDRESS' });
+  assert.equal(clean.cascade.path, 'ANSWER>PRICE');
+  assert.equal(clean.ctx.orderAgeMin, 1234567890, 'số (không phải chuỗi) giữ nguyên');
+  assert.equal(clean.ctx.note, 'psid <so>');
+  assert.equal(clean.text, 'sdt <sdt>, <sdt>, <sdt>, stk <so> Techcombank, email <email>, giá 298.000 hay 298k, 12 ngõ 5');
+});
+
+test('maskPhones: (+84) có ngoặc, nhiều dấu cách liền, nhóm 2 số; không che số tiền 1.250.000 / 298k / đuôi số tiền lớn', () => {
+  assert.equal(maskPhones('gọi (+84) 912-345-678 nhé'), 'gọi <sdt> nhé');
+  assert.equal(maskPhones('sdt 0912  345  678'), 'sdt <sdt>');
+  assert.equal(maskPhones('sdt 0912 34 56 78 ạ'), 'sdt <sdt> ạ', 'không cắt dở thành "<sdt>8"');
+  assert.equal(maskPhones('Lan,0912345678'), 'Lan,<sdt>');
+  assert.equal(maskPhones('tổng 1.250.000đ, 298k, 12.090.000.000đ'), 'tổng 1.250.000đ, 298k, 12.090.000.000đ');
+  assert.equal(maskPhones('psid 25084123456789012'), 'psid 25084123456789012', 'không che giữa dãy số dài (việc của maskPersonal)');
+});
+
+test('che SĐT không nuốt số lượng ngay sau SĐT (28/09)', async () => {
+  const { maskPersonal, maskPhones } = await import('../app/processing/decision-log.mjs');
+  assert.equal(maskPhones('0912 345 678 1 túi xanh'), '<sdt> 1 túi xanh');
+  assert.equal(maskPhones('Lan,0912345678 2 túi'), 'Lan,<sdt> 2 túi');
+  assert.equal(maskPhones('024 3826 1234 gọi'), '<sdt> gọi');
+  assert.equal(maskPersonal('giá 1.250.000'), 'giá 1.250.000');
+});

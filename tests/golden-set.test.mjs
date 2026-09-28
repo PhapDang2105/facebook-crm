@@ -70,7 +70,7 @@ test('enrichGoldenContext: dựng ctx v2 từ kho giả (đơn theo createdAt/st
   assert.notEqual(out[0], items[0], 'không sửa mục vào');
   const [khach1, khach2, khach3Old, khach3Fixed, unknown] = out;
   assert.deepEqual([khach1.hasOrder, khach1.orderAgeMin, khach1.hasBasket, khach1.basketItems, khach1.prevBotAsks, khach1.phoneInText, khach1.addressInText, khach1.bagCount], [true, 30, true, ['2 túi xanh'], '', true, true, 0], 'đơn 30 phút (đơn hủy và đơn sau item.at không tính), giỏ theo chữ ký');
-  assert.deepEqual([khach2.hasOrder, khach2.orderAgeMin, khach2.hasBasket], [true, null, false], 'chỉ có đơn hủy: hasOrder nhưng không có tuổi đơn đang chạy');
+  assert.deepEqual([khach2.hasOrder, khach2.orderAgeMin, khach2.hasBasket], [false, null, false], 'chỉ có đơn hủy: không có đơn (như engine: đơn CHƯA hủy < 24 giờ)');
   assert.equal(khach3Old.hasBasket, false, 'câu bot trước quá 120 phút → giỏ hết hạn');
   assert.deepEqual([khach3Fixed.hasBasket, khach3Fixed.bagCount, khach3Fixed.prevBotAsks, khach3Fixed.hasOrder], [false, 9, 'phone', false], 'trường đã có giữ nguyên, trường thiếu dựng thêm');
   assert.deepEqual([unknown.hasOrder, unknown.orderAgeMin, unknown.hasBasket, unknown.prevBotAsks], [false, null, false, 'flavor'], 'không có trong kho: không đơn');

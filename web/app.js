@@ -1956,6 +1956,29 @@ function systemOrderRowId(order) {
   return `${order.source === 'Landing page' ? 'LP' : 'CB'}-${order.id}`;
 }
 
+/**
+ * Giá khách trả một đơn vị cho ô Đơn giá (file xuất kho dùng thẳng số này):
+ * đơn có paidPrice cộng lại đúng tổng thì dùng paidPrice; không (đơn nhân viên
+ * tạo, đơn POS kéo về: giá niêm yết + giảm giá + ship riêng) thì chia giảm giá
+ * theo tỷ lệ giá dòng và gộp phí ship (kể cả ship nhân viên thu thêm) vào dòng
+ * đầu, để Σ đơn giá × số lượng = tổng đơn.
+ */
+function paidUnitPrices(order, products) {
+  const quantityOf = item => Math.max(1, Number(item?.quantity) || 1);
+  const total = Math.max(0, Number(order?.total) || 0);
+  const paid = products.map(item => Number(item?.paidPrice) || 0);
+  if (paid.every(value => value > 0) && (!total || paid.reduce((sum, value, index) => sum + value * quantityOf(products[index]), 0) === total)) return paid;
+  const list = products.map(item => Math.max(0, Number(item?.price) || 0));
+  const listSum = list.reduce((sum, value, index) => sum + value * quantityOf(products[index]), 0);
+  if (!total || !listSum) return products.map((item, index) => paid[index] || list[index]);
+  const discount = Math.max(0, Number(order?.discount) || 0);
+  const units = list.map(value => Math.max(0, Math.round(value - (discount * value) / listSum)));
+  // Dòng đầu nhận phí ship (tổng đã gồm) và phần làm tròn còn lại.
+  const rest = units.reduce((sum, value, index) => (index ? sum + value * quantityOf(products[index]) : sum), 0);
+  units[0] = Math.max(0, Math.round((total - rest) / quantityOf(products[0])));
+  return units;
+}
+
 function chatbotOrderToRows(order) {
   // The server resolves the three levels against the warehouse list when the
   // order is created; the comma split only covers orders made before that.
@@ -1965,18 +1988,19 @@ function chatbotOrderToRows(order) {
   const district = resolved ? (order.district || '') : (parts.length > 2 ? parts.at(-2) : '');
   const ward = resolved ? (order.ward || '') : (parts.length > 3 ? parts.at(-3) : '');
   const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
+  const paidUnits = paidUnitPrices(order, products);
   // Đơn nhân viên/Facebook Shop tạo trên POS (đồng bộ về) ghi nguồn "Pancake".
   const sourceLabel = order.source === 'Landing page' ? 'Landing page' : order.source === 'POS' ? 'Pancake' : 'Chatbot';
   // Ghi chú xử lý do server dựng (⚠ thiếu gì, ⏳ bỏ dở, 🤖 tự điền, ☎ gọi xác
   // nhận, ℹ thông tin thêm) đứng trước lời khách; bảng tô màu theo ký hiệu.
   const flags = (Array.isArray(order.processingNotes) ? order.processingNotes : []).join(' · ');
-  return products.map(item => [
+  return products.map((item, index) => [
     sourceLabel, formatOrderDate(order), systemOrderRowId(order), order.name || order.conversationName || '', order.phone || '', carrierLabelFor(order.phone), order.address || '',
     province, district, ward,
     item.name || '', item.sku || '', String(Number(item.quantity) || 1),
     // Unit price as the customer paid it (combo price from 2 units), so the
     // table's totals match the confirmation the customer received.
-    String(Number(item.paidPrice) || Number(item.price) || 0),
+    String(paidUnits[index]),
     [flags, order.note ? `Khách ghi: ${order.note}` : ''].filter(Boolean).join(' · '),
     String(order.staffNote || '')
   ]);
@@ -2467,7 +2491,14 @@ async function saveOrderRowEdit(rowIndex) {
     if (patch.phone !== undefined) back.phone = cellOf('so dien thoai');
     if (patch.address !== undefined) back.address = cellOf('dia chi');
     if (patch.staffNote !== undefined) back.staffNote = cellOf('ghi chu xu ly');
-    if (patch.lines) back.lines = [{ sku: line.product || originalSku, name: originalName, quantity: cellOf('so luong'), price: cellOf('don gia'), ...(line.product ? { product: originalSku } : {}) }];
+    // Chỉ gửi lại đúng ô vừa sửa: gửi kèm ô Đơn giá cũ (giá khách trả) khi chỉ sửa
+    // số lượng thì máy chủ coi là giá gõ tay → mất giảm combo, tổng sai.
+    if (patch.lines) back.lines = [{
+      sku: line.product || originalSku, name: originalName,
+      ...(line.quantity !== undefined ? { quantity: cellOf('so luong') } : {}),
+      ...(line.price !== undefined ? { price: cellOf('don gia') } : {}),
+      ...(line.product ? { product: originalSku } : {})
+    }];
     if (!Object.keys(back).length) return;
     await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(serverId)}`, {
       method: 'PATCH',
@@ -5769,6 +5800,15 @@ function applyCustomerDraftPrices() {
   }
 }
 
+// Quà "chỉ khách livestream": máy chủ suy từ hội thoại đang mở (bài live, thẻ
+// Livestream); đơn live đang sửa gửi thẳng cờ. Kết quả đi theo đơn tạo mới.
+let customerDraftLivestream = null;
+let customerDraftPricedLivestream = false;
+function customerDraftPricingBody(items) {
+  const conversationId = getActiveConversation()?.id || '';
+  return { items, ...(conversationId ? { conversationId } : {}), ...(customerDraftLivestream === true ? { livestream: true } : {}) };
+}
+
 function scheduleCustomerDraftPricing() {
   window.clearTimeout(customerDraftPricingTimer);
   customerDraftPricingTimer = window.setTimeout(refreshCustomerDraftPricing, 150);
@@ -5783,13 +5823,14 @@ async function refreshCustomerDraftPricing() {
       priced = await readApiResponse(await fetch('/api/orders/price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items })
+        body: JSON.stringify(customerDraftPricingBody(items))
       }));
     } catch {
       priced = null;
     }
   }
   if (request !== customerDraftPricingRequest) return;
+  customerDraftPricedLivestream = priced?.livestream === true;
   const pricedBySku = new Map((priced?.priceable ? priced.lines : []).map(line => [line.sku, line]));
   for (const item of customerDraftProducts) {
     if (item.manualPrice) continue;
@@ -5878,6 +5919,8 @@ function resetCustomerOrderForm(conversation = getActiveConversation()) {
   const profile = getCustomerPanelProfile(conversation);
   customerDraftProducts = [];
   editingCustomerOrderId = '';
+  customerDraftLivestream = null;
+  customerDraftPricedLivestream = false;
   setCustomerOrderFormMode();
   if (customerOrderName) customerOrderName.value = profile.name;
   if (customerOrderPhone) customerOrderPhone.value = profile.phone;
@@ -6645,16 +6688,22 @@ function updateConversationSearch() {
 
 // Chữ đang soạn dở của từng hội thoại: đổi hội thoại thì cất đi, quay lại thì
 // lấy ra — không để chữ soạn cho khách A còn nằm trong ô khi đang mở khách B.
-const composerDrafts = new WeakMap();
+// Giữ theo mã hội thoại (không theo phần tử DOM): danh sách hội thoại dựng lại phần
+// tử mỗi lần đồng bộ/SSE nối lại, giữ theo phần tử thì nháp mất theo.
+const composerDrafts = new Map();
+const composerDraftKey = conversation => String(conversation?.dataset?.conversationId || (conversation ? `name:${getConversationName(conversation)}` : ''));
 function stashComposerDraft(conversation) {
   if (!conversation || !messageComposerInput) return;
+  const key = composerDraftKey(conversation);
+  if (!key) return;
   const text = messageComposerInput.value;
-  if (text.trim()) composerDrafts.set(conversation, text);
-  else composerDrafts.delete(conversation);
+  if (text.trim()) composerDrafts.set(key, text);
+  else composerDrafts.delete(key);
 }
 function restoreComposerDraft(conversation) {
   if (!messageComposerInput) return;
-  messageComposerInput.value = composerDrafts.get(conversation) || '';
+  const key = composerDraftKey(conversation);
+  messageComposerInput.value = (key && composerDrafts.get(key)) || '';
   autosizeComposer();
   updateMessageSendState();
 }
@@ -7078,7 +7127,6 @@ function sendCurrentMessage() {
     const attachment = pendingAttachment && pendingAttachment.type !== 'sticker' && pendingAttachment.type !== 'images' ? pendingAttachment : null;
     const outgoingText = pendingAttachment?.type === 'sticker' ? [text, pendingAttachment.sticker].filter(Boolean).join(' ') : text;
     messageComposerInput.value = '';
-  autosizeComposer();
     autosizeComposer();
     clearMessageReply();
     clearPendingAttachment();
@@ -8591,7 +8639,8 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         retryIntervalMs: chatbotSettingsRetryInterval.value,
         ...(chatbotSettingsFallbackModel ? { fallbackModel: chatbotSettingsFallbackModel.value.trim() } : {}),
         welcomeMessage: chatbotSettingsWelcome.value,
-        handoffKeywords: '',
+        // Không gửi handoffKeywords (form này không có ô đó): gửi '' từng xóa từ khóa chuyển nhân viên.
+        // followUps chỉ gửi enabled + kịch bản; máy chủ gộp sâu nên maxPerRun đang lưu được giữ.
         messageTemplates: chatbotTemplatesState
       })
     }));
@@ -9143,6 +9192,8 @@ async function beginCustomerOrderEdit(order) {
   const conversation = getActiveConversation();
   resetCustomerOrderForm(conversation);
   editingCustomerOrderId = String(order.id);
+  // Đơn khách live (cờ đơn / "(Live) " đầu địa chỉ): tính lại giữ Quà Tặng LIVE.
+  customerDraftLivestream = order.livestream === true || order.liveOrder === true || /^\s*\(live\)/i.test(String(order.address || '')) ? true : null;
   if (customerOrderName) customerOrderName.value = order.name || '';
   if (customerOrderPhone) customerOrderPhone.value = order.phone || '';
   if (customerOrderAddress) customerOrderAddress.value = order.address || '';
@@ -9163,7 +9214,7 @@ async function beginCustomerOrderEdit(order) {
   // giảm 0, để đổi số lượng vẫn tự tính lại); còn lại giữ nguyên giá/giảm đã ghi.
   let priced = null;
   try {
-    priced = await readApiResponse(await fetch('/api/orders/price', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: products.map(item => ({ sku: item.sku, name: item.name, quantity: item.quantity })) }) }));
+    priced = await readApiResponse(await fetch('/api/orders/price', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(customerDraftPricingBody(products.map(item => ({ sku: item.sku, name: item.name, quantity: item.quantity })))) }));
   } catch { priced = null; }
   const standard = priced?.priceable && Number(priced.total) === Number(order.total);
   if (standard) {
@@ -9264,6 +9315,8 @@ customerOrderForm?.addEventListener('submit', async event => {
     discount: totals.discount,
     total: totals.total,
     note: customerOrderNote?.value.trim() || '',
+    // Khách live (máy chủ suy từ hội thoại khi tính giỏ): cờ đơn để POS/kho kèm quà live.
+    ...(customerDraftPricedLivestream ? { livestream: true } : {}),
     createdAt: now,
     updatedAt: now,
     employee: appSettings.displayName || topbarUserName?.textContent || 'Bạn'

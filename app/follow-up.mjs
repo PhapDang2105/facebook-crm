@@ -71,6 +71,15 @@ function updateFollowUpState(mutate) {
 
 const honorificOf = gender => (gender === 'male' ? 'anh' : gender === 'female' ? 'chị' : 'anh/chị');
 
+/**
+ * Giới tính dùng để xưng hô trong tin bám đuổi: như bot (chatbot-engine lockedGender) — nhân viên
+ * đặt tay thắng, rồi giới đã khóa của bot (botGender, khách đã nghe "chị" suốt hội thoại), rồi giới đoán.
+ */
+export function followUpGender(conversation = {}) {
+  if (conversation?.genderSource === 'staff' && conversation.gender) return conversation.gender;
+  return conversation?.botGender || conversation?.gender || '';
+}
+
 /** Lời của kịch bản: mẫu FOLLOW_UP_… trong Thiết lập tin nhắn (rỗng = mẫu đã tắt), không có thì lời ghi thẳng trên kịch bản. */
 export function followUpScenarioText(scenario, messageTemplates = {}) {
   if (scenario.templateId) return String(messageTemplates[scenario.templateId] || '').trim();
@@ -79,7 +88,8 @@ export function followUpScenarioText(scenario, messageTemplates = {}) {
 
 /** {title}/{Title}/{name} trong lời kịch bản, chọn ngẫu nhiên một biến thể "###", rồi sửa "anh/chị" theo giới tính đã biết. */
 export function renderFollowUpMessage(template, conversation = {}, random = Math.random) {
-  const title = honorificOf(conversation.gender);
+  const gender = followUpGender(conversation);
+  const title = honorificOf(gender);
   const variants = String(template || '').split('###').map(part => part.trim()).filter(Boolean);
   const chosen = variants.length ? variants[Math.min(variants.length - 1, Math.floor(random() * variants.length))] : '';
   const text = chosen
@@ -88,7 +98,7 @@ export function renderFollowUpMessage(template, conversation = {}, random = Math
     .replace(/\{name\}/g, String(conversation.name || '').trim() || title);
   // Truyền '' chứ không undefined: applyHonorific(text, gender = activeCustomer.gender) sẽ lấy
   // giới tính của khách TRƯỚC ĐÓ còn trong trạng thái module (khách chưa rõ giới tính bị gọi "chị").
-  return applyHonorific(text, conversation.gender || '').trim();
+  return applyHonorific(text, gender).trim();
 }
 
 const lastAt = (messages, predicate) => messages.reduce((latest, message) => (predicate(message) && Number(message.createdAt) > latest ? Number(message.createdAt) : latest), 0);
@@ -146,10 +156,10 @@ export function orderRemindText(conversation, templates = {}, { now = Date.now()
       pendingOrder: { ...pending, items, at: now },
       now,
       lastTemplateId: 'ORDER_ADDRESS',
-      customer: { gender: conversation.gender || '', name: conversation.name || '' }
+      customer: { gender: followUpGender(conversation), name: conversation.name || '' }
     });
     if (reply.templateId !== 'ORDER_ADDRESS' || !reply.remind) return '';
-    return applyHonorific(String(reply.remind), conversation.gender || '').trim();
+    return applyHonorific(String(reply.remind), followUpGender(conversation)).trim();
   } catch {
     return '';
   }
@@ -191,9 +201,11 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
   // Đã chốt đơn trong chat mà đơn không gắn vào hội thoại (nhân viên lên tay, đơn Shop/POS).
   const closedInChat = conversation => boughtInChat(messagesOf(conversation));
   const blocked = inbox => inbox && (liveOrders(inbox).length > 0 || bought(inbox) || closedInChat(inbox));
-  // Tin bám đuổi trước đó (đúng lúc ghi followUps[].at) không tính là "Page trả lời":
-  // kịch bản 36 giờ tính từ lần Page trả lời thật, không phải từ tin nhắc 3 giờ.
-  const isFollowUpSend = (conversation, message) => (Array.isArray(conversation?.followUps) ? conversation.followUps : []).some(item => Math.abs(Number(message.createdAt) - Number(item.at)) < 2 * 60 * 1000);
+  // Tin bám đuổi trước đó không tính là "Page trả lời": kịch bản 36 giờ tính từ lần Page trả lời
+  // thật, không phải từ tin nhắc 3 giờ. Nhận bằng cờ `followUp: true` trên chính tin (gắn khi gửi
+  // thẳng, và khi đồng bộ Pancake khớp lời bám đuổi trạm gửi đã gửi); dự phòng: khớp giờ followUps[].at.
+  const isFollowUpSend = (conversation, message) => message?.followUp === true
+    || (Array.isArray(conversation?.followUps) ? conversation.followUps : []).some(item => Math.abs(Number(message.createdAt) - Number(item.at)) < 2 * 60 * 1000);
   const candidates = [];
   if (scenario.trigger === 'comment-no-reply') {
     for (const thread of conversations.filter(item => item.source === 'comment' && item.psid)) {
@@ -245,7 +257,7 @@ export function runFollowUps(options = {}) {
 
 async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = null, now = Date.now(), log = console.log, quietHours = true } = {}) {
   const settings = await readSettings();
-  // skipped = tổng bỏ qua; skipReasons đếm theo loại (alreadySent, botOff, label, attention, handoffTemplate, staffReplied).
+  // skipped = tổng bỏ qua; skipReasons đếm theo loại (alreadySent, botOff, label, attention, handoffTemplate, staffReplied, noInbox).
   const summary = { checked: 0, sent: 0, failed: 0, skipped: 0, skipReasons: {}, disabled: false };
   const skip = reason => { summary.skipped += 1; summary.skipReasons[reason] = (summary.skipReasons[reason] || 0) + 1; };
   // Khách được bám đuổi đã chốt đơn: ghi nhận cả khi bám đuổi đang tắt.
@@ -293,7 +305,17 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       }
       // Kịch bản ưu đãi (miễn ship dùng thử) gửi thẳng: phải tra được Pancake/POS trước, không tra được thì hoãn
       // (khách vừa mua 3 túi ở POS mà đơn không gắn vào hội thoại từng nhận ưu đãi). Hàng chờ ngoài 24 giờ tra lúc lập lô.
-      if (scenario.freeShipDays && !candidate.outsideWindow && !(conversationInfo && candidate.inbox)) { summary.deferred = (summary.deferred || 0) + 1; continue; }
+      // Khách chỉ bình luận, chưa có hộp thư: không bao giờ tra được → không hoãn mãi (mỗi 15 phút đếm "hoãn"),
+      // ghi bỏ qua 'noInbox' MỘT lần (lượt sau tính alreadySent).
+      if (scenario.freeShipDays && !candidate.outsideWindow && !candidate.inbox) {
+        await updateFollowUpState(current => {
+          current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, error: 'khách chỉ bình luận, chưa có hộp thư để tra Pancake/POS', skipped: 'noInbox' };
+          return null;
+        });
+        skip('noInbox');
+        continue;
+      }
+      if (scenario.freeShipDays && !candidate.outsideWindow && !conversationInfo) { summary.deferred = (summary.deferred || 0) + 1; continue; }
       // Nhóm đối chứng 10% (theo psid, cố định): KHÔNG gửi, để đo bám đuổi có thêm đơn thật không
       // (so tỷ lệ đơn 14 ngày giữa nhóm gửi và nhóm không gửi).
       if (isFollowUpHoldout(candidate.conversation.psid)) {
@@ -302,6 +324,9 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
         summary.holdout = (summary.holdout || 0) + 1;
         continue;
       }
+      // Đủ số tin mỗi lượt: hoãn TRƯỚC khi tra Pancake/POS (không tốn lượt gọi API cho khách sẽ không gửi).
+      // Tin ngoài 24 giờ chỉ xếp hàng chờ, không tính vào trần.
+      if (!candidate.outsideWindow && summary.sent + summary.failed >= maxPerRun) { summary.deferred = (summary.deferred || 0) + 1; continue; }
       // Chỉ bám khách mới: tra Pancake/POS xem khách đã từng mua chưa (khách chỉ bình luận,
       // chưa có hộp thư thì không tra được). Tra lỗi thì để lượt sau, không gửi mù.
       if (conversationInfo && candidate.inbox) {
@@ -337,22 +362,22 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
         summary.queued = (summary.queued || 0) + 1;
         continue;
       }
-      if (summary.sent + summary.failed >= maxPerRun) { summary.deferred = (summary.deferred || 0) + 1; continue; }
       let outcome = null;
       let error = '';
       // Nhắn riêng vào hộp thư trước; không có hộp thư hay gửi riêng lỗi thì trả lời công khai dưới bình luận (nếu cho).
+      // `followUp: true`: tin lưu mang cờ bám đuổi (không tính là "Page trả lời", không phải nhân viên).
       if (candidate.inbox) {
         try {
-          const sent = await sendMessage(candidate.inbox, { text: remind || text });
-          outcome = { via: 'private', messageId: String(sent?.message?.mid || sent?.message?.id || ''), ...(remind ? { templateId: 'ORDER_ADDRESS_REMIND' } : {}) };
+          const sent = await sendMessage(candidate.inbox, { text: remind || text, followUp: true });
+          outcome = { via: 'private', messageId: String(sent?.message?.mid || sent?.message?.id || ''), text: remind || text, ...(remind ? { templateId: 'ORDER_ADDRESS_REMIND' } : {}) };
         } catch (failure) {
           error = failure.message;
         }
       }
       if (!outcome && candidate.thread && scenario.publicFallback) {
         try {
-          const sent = await sendMessage(candidate.thread, { text, privateReply: false });
-          outcome = { via: 'public', messageId: String(sent?.message?.mid || sent?.message?.id || '') };
+          const sent = await sendMessage(candidate.thread, { text, privateReply: false, followUp: true });
+          outcome = { via: 'public', messageId: String(sent?.message?.mid || sent?.message?.id || ''), text };
         } catch (failure) {
           error = failure.message;
         }
@@ -549,6 +574,41 @@ export async function reconcileFollowUpQueue(now = Date.now(), { readSettings } 
   return confirmed;
 }
 
+const followUpEchoWindowMs = 24 * 60 * 60 * 1000;
+
+/**
+ * Lời bám đuổi đã xếp hàng / đã gửi gần đây, theo hội thoại CRM: Map<conversationId, [{ text, at, queued }]>
+ * (text đã chuẩn hóa khoảng trắng). Dùng khi đồng bộ Pancake: trạm gửi (extension Pancake) gửi tin bám
+ * đuổi dưới tên nhân viên đang mở trình duyệt, Pancake ghi admin_name là tên người đó — tin khớp lời
+ * bám đuổi thì không phải nhân viên nhắn (không tắt bot, không đếm staffReplied).
+ * Giữ: mục còn trong hàng chờ, hay mục có mốc xếp/lập lô/gửi trong 24 giờ trước `now`.
+ */
+export async function recentFollowUpTexts({ now = Date.now() } = {}) {
+  const state = await readFollowUpState();
+  const byConversation = new Map();
+  for (const item of Object.values(state.sent || {})) {
+    const text = compactText(item?.text);
+    if (!text || !item.conversationId) continue;
+    const at = Math.max(Number(item.at) || 0, Number(item.batchedAt) || 0, Number(item.sentAt) || 0);
+    if (!item.queued && now - at > followUpEchoWindowMs) continue;
+    const list = byConversation.get(item.conversationId) || [];
+    list.push({ text, at, queued: item.queued === true });
+    byConversation.set(item.conversationId, list);
+  }
+  return byConversation;
+}
+
+/**
+ * Tin Page `message` (của hội thoại `conversationId`) là lời bám đuổi đã xếp/gửi? So nguyên văn sau khi
+ * chuẩn hóa khoảng trắng; mục đã gửi chỉ khớp tin trong 24 giờ quanh mốc gửi.
+ */
+export function matchesFollowUpText(entries, message) {
+  const text = compactText(message?.text);
+  if (!text || !Array.isArray(entries)) return false;
+  const at = Number(message?.createdAt) || 0;
+  return entries.some(entry => entry.text === text && (entry.queued || !at || Math.abs(at - entry.at) <= followUpEchoWindowMs));
+}
+
 /**
  * Dọn hàng chờ: tra lại khách chưa được xét (xếp hàng từ bản cũ, chưa lọc khách
  * cũ), khách đã từng mua thì bỏ khỏi hàng. Mỗi lần tối đa `limit` khách.
@@ -658,7 +718,7 @@ async function buildFollowUpBatchOnce({ limit = 30, conversationInfo, now = Date
     await updateFollowUpState(current => {
       // Ghi lại lời sẽ gửi (tự xác nhận so đầu tin đồng bộ về khớp lời mới) và mã lô (kết quả
       // báo về phải mang đúng mã này).
-      for (const key of keys) if (current.sent[key]) Object.assign(current.sent[key], { leasedUntil: now + batchLeaseMs, batchToken: token, text: texts.get(key) || current.sent[key].text });
+      for (const key of keys) if (current.sent[key]) Object.assign(current.sent[key], { leasedUntil: now + batchLeaseMs, batchToken: token, batchedAt: now, text: texts.get(key) || current.sent[key].text });
       return null;
     });
   }

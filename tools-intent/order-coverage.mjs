@@ -7,13 +7,17 @@
 //   - golden.json: bộ chấm (items[].label, bỏ trống/SKIP); dataset.jsonl: hợp đồng dòng v2 (tools-intent/README.md).
 //   - Mặc định chỉ tính dòng TIN CẬY: golden đã chấm + dataset labelSource staff/corrected. --all: thêm dòng llm/khác
 //     (in riêng, chỉ để tham khảo — nhãn LLM có thể sai).
-//   - --show N: số dòng lỗ in ra (mặc định 60). --json: in JSON thay bảng chữ.
+//   - --show N: số dòng lỗ in ra (mặc định 60, 0 = không in). --json: in JSON thay bảng chữ.
+//   - --templates <settings.json>: mẫu GỘP SEED như engine đọc (normalizeChatbotSettings — relabel-policy.loadTemplatesArg),
+//     không phải messageTemplates thô (thiếu mẫu → renderChatbotReply rơi GENERAL_INFO, đo sai).
+//   - Mã bot trước quy về mã engine lưu bằng canonicalTemplateId (intent-features) — một bảng với dữ liệu huấn luyện.
 // Không gọi LLM, không ghi gì ngoài stdout.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadSeedTemplates, offlineRuleContext, pendingOrderFromPrevBot } from './relabel-policy.mjs';
-import { lastWasOrderStepOf, readJsonl } from './dataset-context.mjs';
+import { loadSeedTemplates, loadTemplatesArg, offlineRuleContext, pendingOrderFromPrevBot } from './relabel-policy.mjs';
+import { botTextOf, cliFail, lastWasOrderStepOf, parseCliArgs, positiveIntArg, readJsonl } from './dataset-context.mjs';
+import { canonicalTemplateId, isOrderStepContext, labelTemplateId } from '../app/processing/intent-features.mjs';
 import { ruleIntent } from '../app/processing/rule-intent.mjs';
 import { renderChatbotReply } from '../app/chatbot-templates.mjs';
 
@@ -29,13 +33,12 @@ const canon = id => SAME[id] || id;
 // Nhãn mà bước "ORDER_ADDRESS + slot" của luật là đúng: bộ soạn đơn (giỏ thật, địa chỉ thật) mới quyết mẫu cuối —
 // ngoại tuyến không dựng được giỏ từ câu bot (bị cắt 240 ký tự, câu xin địa chỉ không nêu giỏ) nên render ra ASK_PRODUCT.
 const SLOT_STEP_LABELS = new Set(['ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_REMIND', 'ORDER_CONFIRMATION']);
-// Engine ghi botLastTemplateId = ORDER_ADDRESS cho các câu này (dòng giỏ, gợi ý 2 túi, xin thêm cấp địa chỉ… đều là
-// một lượt ORDER_ADDRESS); khớp chữ ngoại tuyến (matchTemplate) lại ra mã con → dựng ctx như engine.
-const ENGINE_ORDER_ADDRESS = new Set(['ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_CART_LINE', 'UPSELL_TWO_BAGS', 'ORDER_ADDRESS_REMIND']);
 /** Giỏ Facebook Shop ("Khách chọn mua từ Facebook Shop: …"): engine trả lời theo SKU (cartReply) TRƯỚC luật — không tính vào luật. */
 const isShopCart = row => /^Khách chọn mua từ Facebook Shop/i.test(String(row.text || ''));
 
-export const engineLikeRow = row => (ENGINE_ORDER_ADDRESS.has(String(row.lastTemplate || '')) ? { ...row, lastTemplate: 'ORDER_ADDRESS', lastWasOrderStep: true } : row);
+// Engine ghi botLastTemplateId = ORDER_ADDRESS cho dòng giỏ, gợi ý 2 túi, xin thêm cấp địa chỉ, nhắc giỏ… (một lượt
+// ORDER_ADDRESS); khớp chữ ngoại tuyến ra mã con → quy mã bằng canonicalTemplateId của intent-features (một bảng với engine / dữ liệu huấn luyện).
+export const engineLikeRow = row => (canonicalTemplateId(row.lastTemplate) !== String(row.lastTemplate || '') ? { ...row, lastTemplate: canonicalTemplateId(row.lastTemplate), lastWasOrderStep: isOrderStepContext(row.lastTemplate) } : row);
 
 /** Chạy luật (thử nghiệm 'on') + render như relabel-policy.ruleLabelOf, nhưng giữ cả giá trị thô của luật. */
 export function ruleOutcome(row, { templates } = {}) {
@@ -45,12 +48,13 @@ export function ruleOutcome(row, { templates } = {}) {
   if (ruled.commentRule) return { ruleName: ruled.rule, ruleTemplate: 'COMMENT_RULE', rawTemplate: 'COMMENT_RULE', value: null };
   const replyContext = {
     pendingOrder: pendingOrderFromPrevBot(row), recentOrder: null, latestOrder: null, lastTemplateId: ctx.botLastTemplateId, previousDelivery: null, trial: null,
-    now: Number(row.at) || Date.now(), recentOutgoing: row.prevBot ? [String(row.prevBot)] : [], recentCustomerTexts: [row.prevCustomer, text].filter(Boolean),
+    now: Number(row.at) || Date.now(), recentOutgoing: botTextOf(row) ? [botTextOf(row)] : [], recentCustomerTexts: [row.prevCustomer, text].filter(Boolean),
     messageText: text, noUpsell: false, customer: { gender: '', name: '' }
   };
   const rawTemplate = ruled.value?.template_id || '';
   let ruleTemplate = rawTemplate;
   try { ruleTemplate = renderChatbotReply(ruled.value, templates, replyContext).templateId || rawTemplate; } catch { /* mẫu thiếu: giữ template_id thô */ }
+  ruleTemplate = labelTemplateId(ruleTemplate);
   return { ruleName: ruled.rule, ruleTemplate, rawTemplate, value: ruled.value, attention: Boolean(ruled.attention) };
 }
 
@@ -131,19 +135,22 @@ function printReport(title, result, show) {
 
 async function main() {
   const args = process.argv.slice(2);
-  const valueFlags = new Set(['--show', '--templates']);
-  const positional = args.filter((arg, index) => !arg.startsWith('--') && !valueFlags.has(args[index - 1]));
-  const goldenPath = positional[0] || path.join(root, 'data', 'processed', 'golden-set.json');
-  const datasetPath = positional[1] || '';
-  const show = Number(args.includes('--show') ? args[args.indexOf('--show') + 1] : 60) || 60;
-  const templatesArg = args.includes('--templates') ? args[args.indexOf('--templates') + 1] : '';
-  const templates = templatesArg ? (JSON.parse(readFileSync(templatesArg, 'utf8')).messageTemplates || JSON.parse(readFileSync(templatesArg, 'utf8'))) : loadSeedTemplates();
+  const cli = parseCliArgs(args, ['--show', '--templates']);
+  const goldenPath = cli.positional[0] || path.join(root, 'data', 'processed', 'golden-set.json');
+  const datasetPath = cli.positional[1] || '';
+  if (datasetPath && !existsSync(datasetPath)) cliFail(`Không thấy dataset: ${datasetPath}`);
+  const showRaw = cli.value('--show', '60');
+  const show = showRaw === '0' ? 0 : positiveIntArg(showRaw, '--show');
+  const templatesArg = cli.value('--templates');
+  if (templatesArg && !existsSync(templatesArg)) cliFail(`Không thấy tệp mẫu: ${templatesArg}`);
+  // Mẫu gộp seed như engine đọc (normalizeChatbotSettings) — không phải messageTemplates thô (thiếu mẫu → rơi GENERAL_INFO).
+  const templates = templatesArg ? loadTemplatesArg(templatesArg) : loadSeedTemplates();
   (await import(pathToFileURL(path.join(root, 'app/processing/catalog.mjs')).href)).reloadCatalog();
 
   const rows = [];
   if (existsSync(goldenPath)) rows.push(...await goldenRows(goldenPath));
   else console.log(`Không có bộ chấm ${goldenPath} (bỏ qua).`);
-  if (datasetPath) rows.push(...readJsonl(readFileSync(datasetPath, 'utf8')).filter(row => row.source !== 'comment'));
+  if (datasetPath) { const readStats = {}; rows.push(...readJsonl(readFileSync(datasetPath, 'utf8'), readStats).filter(row => row.source !== 'comment')); if (readStats.bad) console.warn(`Bỏ ${readStats.bad} dòng hỏng trong ${datasetPath}`); }
   if (!rows.length) { console.log('Không có dòng nào để đo. Dùng: node tools-intent/order-coverage.mjs [golden.json] [dataset.jsonl] [--all]'); process.exit(1); }
 
   const trusted = rows.filter(isTrusted);

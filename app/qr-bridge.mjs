@@ -203,8 +203,10 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .channels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; }
   .btn { display: grid; justify-items: center; gap: 2px; padding: 16px 10px 14px; background: #fff; color: #3a2e22; border: 1px solid #d9cba9; border-radius: 12px; text-decoration: none; }
   .btn svg, .btn img { width: 56px; height: 56px; display: block; margin-bottom: 8px; }
-  .btn b { font-size: 16px; font-weight: 700; }
-  .btn span { color: #6b5d4b; font-size: 13px; }
+  .btn b { font-size: 15px; font-weight: 600; color: #6b5d4b; }
+  .btn span { display: inline-block; margin-top: 8px; padding: 9px 14px; background: #e8891d; color: #fff; border-radius: 999px; font-size: 15.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .btn span::after { content: " ›"; font-weight: 700; }
+  .btn:active span { background: #cf7712; }
   .btn:active { background: #f3ede0; }
   .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
   .copy { display: inline-block; margin: 4px 0 16px; padding: 0; background: none; border: 0; color: #6b5d4b; font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }

@@ -10,7 +10,8 @@ process.env.META_CONVERSATIONS_PATH = path.join(directory, 'meta-conversations.j
 process.env.POS_PUSH_ORDERS = '1';
 
 await import('./helpers/seed-catalog.mjs');
-const { buildPosOrderPayload, pushOrderToPos, isCrmPushedPosOrder, syncOrderToPos } = await import('../app/pos-orders.mjs');
+const posModule = await import('../app/pos-orders.mjs');
+const { buildPosOrderPayload, pushOrderToPos, isCrmPushedPosOrder, syncOrderToPos } = posModule;
 const { updateMessagingStore, ensureConversation, readMessagingStore } = await import('../app/messaging-store.mjs');
 
 const config = { apiKey: 'k', shopId: '714334721', baseUrl: 'https://pos.example/api/v1' };
@@ -51,19 +52,38 @@ test('body tạo đơn POS: SKU làm mã mẫu mã, giá niêm yết + giảm co
   assert.equal(subtotal - payload.discount + payload.shipping_fee, order.total);
 });
 
-test('hai túi lẻ giá 174.000đ gửi giảm combo 50.000đ ở trường POS áp dụng', () => {
-  const payload = buildPosOrderPayload({
-    ...order,
-    id: '840c5ef5',
-    products: [
-      { name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1, price: 174000 },
-      { name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 1, price: 174000 }
-    ],
-    discount: 50000,
-    total: 298000
-  });
-  assert.equal(payload.discount, 50000);
+test('giỏ khớp combo POS → một dòng mã combo như nhân viên (28/09); POS niêm yết cao hơn thì chênh thành giảm giá; POS thiếu mã combo thì túi lẻ + giảm như cũ', () => {
+  const { posComboFor } = posModule;
+  const twoBags = { ...order, id: '840c5ef5', products: [
+    { name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1, price: 174000, weight: 450 },
+    { name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 1, price: 174000, weight: 350 }
+  ], discount: 50000, total: 298000 };
+  const payload = buildPosOrderPayload(twoBags);
+  assert.deepEqual(payload.items.filter(item => !item.is_bonus_product).map(item => [item.variation_id, item.quantity, item.variation_info.retail_price]), [['CB-VANGG+XANH', 1, 298000]]);
+  assert.equal(payload.discount, 0);
   assert.equal(payload.items.reduce((sum, item) => sum + item.quantity * item.variation_info.retail_price, 0) - payload.discount, 298000);
+  assert.match(payload.items[0].variation_info.name, /1 Granola Túi Xanh 450g \+ 1 Granola Túi Vàng 350g/);
+  // Giá niêm yết POS của combo cao hơn giá CRM: phần chênh là giảm giá để COD = CRM.
+  const priced = buildPosOrderPayload(twoBags, { posPrices: new Map([['CB-VANGG+XANH', { id: 'u1', productId: 'p1', retailPrice: 308000 }]]) });
+  assert.equal(priced.items[0].variation_info.retail_price, 308000);
+  assert.equal(priced.discount, 10000);
+  // POS không có mã combo (posSkus không chứa) → giữ từng túi + giảm 50.000đ như cũ.
+  const noCombo = buildPosOrderPayload(twoBags, { posSkus: new Set(['GRA-XANH-Z450', 'GRA-VANG-H350']) });
+  assert.deepEqual(noCombo.items.map(item => item.variation_id), ['GRA-XANH-Z450', 'GRA-VANG-H350']);
+  assert.equal(noCombo.discount, 50000);
+  // Combo 3 cùng vị: mã đã gồm bát + muỗng → không thêm dòng quà BGD/MUONG; combo 3 vị thì vẫn có dòng quà.
+  const three = buildPosOrderPayload({ ...order, id: 'c3', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 3, price: 174000 }], discount: 75000, total: 447000 }, { posSkus: new Set(['GRA-XANH-Z450', 'CB3-XANH-Z450+BGD+M', 'BGD', 'MUONG']) });
+  assert.deepEqual(three.items.map(item => item.variation_id), ['CB3-XANH-Z450+BGD+M']);
+  assert.equal(three.discount, 0);
+  const mix = buildPosOrderPayload({ ...order, id: 'c3m', products: [
+    { name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1, price: 174000 },
+    { name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 1, price: 174000 },
+    { name: 'Granola Túi Nâu vị cacao 350g', sku: 'GRA-NAU-Z350', quantity: 1, price: 164000 }
+  ], discount: 70000, total: 442000 }, { posSkus: new Set(['GRA-XANH-Z450', 'GRA-VANG-H350', 'GRA-NAU-Z350', 'CB-VANGG+XANH+NAU', 'BGD', 'MUONG']) });
+  assert.deepEqual(mix.items.map(item => item.variation_id), ['CB-VANGG+XANH+NAU', 'BGD', 'MUONG']);
+  // Giỏ không có combo POS (2 Xanh + 1 Vàng) → túi lẻ như cũ.
+  assert.equal(posComboFor([{ sku: 'GRA-XANH-Z450', quantity: 2 }, { sku: 'GRA-VANG-H350', quantity: 1 }]), null);
+  assert.equal(posComboFor([{ sku: 'GRA-XANH-Z450', quantity: 2 }]).sku, 'CB2-XANH-Z450');
 });
 
 function posFetch(calls, { variations = ['GRA-XANH-Z450', 'GRA-NAU-Z350', 'BGD', 'MUONG'], createStatus = 200, createBody = { id: 99001, system_id: 1234, status_name: 'new' } } = {}) {

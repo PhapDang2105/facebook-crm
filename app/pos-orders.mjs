@@ -9,6 +9,9 @@
 // - `custom_id` = "CRM-<mã đơn>" để đồng bộ POS → CRM (pos-sync) không kéo đơn
 //   này về thành đơn landing lần nữa, và để tra chéo hai bên.
 // - `page_id` + `conversation_id` của Pancake gắn đơn vào đúng hội thoại khách.
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { projectRoot } from './config.mjs';
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
@@ -55,7 +58,7 @@ async function loadVariations(config, fetchImpl) {
       const sku = String(item?.display_id || '').trim().toUpperCase();
       if (!sku || item?.is_removed === true) continue;
       skus.add(sku);
-      if (item.id) ids.set(sku, { id: String(item.id), productId: item.product_id ? String(item.product_id) : '' });
+      if (item.id) ids.set(sku, { id: String(item.id), productId: item.product_id ? String(item.product_id) : '', retailPrice: Math.round(Number(item.retail_price) || 0) });
     }
     if (list.length < 100) break;
   }
@@ -171,12 +174,80 @@ export async function resolvePosGeo(order, config = posConfig(), fetchImpl = fet
 }
 
 /**
- * Body tạo đơn POS từ đơn CRM. `posSkus` (nếu có) lọc quà: quà không có mẫu mã
- * trong POS thì bỏ qua thay vì làm POS từ chối cả đơn.
+ * 28/09 (chủ shop): nhân viên lên đơn POS bằng MÃ COMBO (CB2-XANH-Z450, CB-VANGG+XANH, CB3-…+BGD+M…),
+ * còn bot đẩy từng túi lẻ + giảm giá → báo cáo POS lệch. Bảng giỏ (comboKey) → mẫu mã combo trên POS.
+ * `includesGifts`: combo đã gồm bát + muỗng dừa trong mã, không thêm dòng quà riêng.
+ * Có thể ghi đè/bổ sung bằng data/processed/pos-combos.json: { "<comboKey>": { "sku": "…", "includesGifts": true } }.
  */
-export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '', shopId = '', posSkus = null, geo = {} } = {}) {
+export const POS_COMBO_SKUS = Object.freeze({
+  'GRA-XANH-Z450=2': { sku: 'CB2-XANH-Z450' },
+  'GRA-VANG-H350=2': { sku: 'CB2-VANGG' },
+  'GRA-NAU-Z350=2': { sku: 'CB2-NAU-Z350' },
+  'GRA-MINT-Z300=2': { sku: 'CB2-MINT-Z300' },
+  'GRA-VANG-H350=1|GRA-XANH-Z450=1': { sku: 'CB-VANGG+XANH' },
+  'GRA-NAU-Z350=1|GRA-VANG-H350=1': { sku: 'CB-VANGG+NAU' },
+  'GRA-NAU-Z350=1|GRA-XANH-Z450=1': { sku: 'CB-XANH+NAU' },
+  'GRA-XANH-Z450=3': { sku: 'CB3-XANH-Z450+BGD+M', includesGifts: true },
+  'GRA-VANG-H350=3': { sku: 'CB3-VANGG+BGD+M', includesGifts: true },
+  'GRA-NAU-Z350=3': { sku: 'CB3-NAU-Z350+BGD+M', includesGifts: true },
+  'GRA-MINT-Z300=3': { sku: 'CB3-MINT-Z300', includesGifts: true },
+  'GRA-NAU-Z350=1|GRA-VANG-H350=1|GRA-XANH-Z450=1': { sku: 'CB-VANGG+XANH+NAU' },
+  'NGHE-H350=2': { sku: 'CB2-NGHE-H350' },
+  'NGHE-H350=3': { sku: 'CB3-NGHE-H350' }
+});
+
+const posCombosPath = process.env.POS_COMBOS_PATH || path.join(projectRoot, 'data', 'processed', 'pos-combos.json');
+let posCombosCache = { at: 0, map: null };
+function posComboOverrides() {
+  if (posCombosCache.map && Date.now() - posCombosCache.at < 5 * 60 * 1000) return posCombosCache.map;
+  let map = {};
+  try {
+    const raw = JSON.parse(readFileSync(posCombosPath, 'utf8'));
+    for (const [key, value] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+      const sku = String(value?.sku || '').trim().toUpperCase();
+      if (sku) map[String(key).trim().toUpperCase()] = { sku, includesGifts: value?.includesGifts === true };
+    }
+  } catch { map = {}; }
+  posCombosCache = { at: Date.now(), map };
+  return map;
+}
+
+/** Mẫu mã combo POS cho giỏ (nếu có và POS đang có mã đó). */
+export function posComboFor(products, posSkus = null) {
+  const key = comboKey((products || []).map(item => ({ sku: item.sku, quantity: item.quantity })));
+  if (!key) return null;
+  const entry = posComboOverrides()[key] || POS_COMBO_SKUS[key] || null;
+  if (!entry) return null;
+  if (posSkus && !posSkus.has(entry.sku)) return null;
+  return { key, ...entry };
+}
+
+/**
+ * Body tạo đơn POS từ đơn CRM. `posSkus` (nếu có) lọc quà: quà không có mẫu mã
+ * trong POS thì bỏ qua thay vì làm POS từ chối cả đơn. `posPrices` (Map mã → giá
+ * niêm yết POS) để tính giảm giá khi đẩy dòng combo.
+ */
+export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '', shopId = '', posSkus = null, posPrices = null, geo = {} } = {}) {
   const products = withCurrentSkus(order.products);
-  const items = products.filter(item => item.sku).map(item => ({
+  // Giỏ khớp một combo POS → một dòng combo (như nhân viên), giá = giá hàng CRM (tổng trừ phí ship);
+  // POS niêm yết cao hơn thì phần chênh thành giảm giá để COD đúng bằng CRM.
+  const combo = posComboFor(products, posSkus);
+  const goods = Math.max(0, money(order.total) - (order.freeShipping || money(order.shippingFee) === 0 ? 0 : money(order.shippingFee)));
+  const comboRetail = combo ? (money(posPrices?.get?.(combo.sku)?.retailPrice ?? posPrices?.get?.(combo.sku)) || goods) : 0;
+  const comboItems = combo ? [{
+    variation_id: combo.sku,
+    quantity: 1,
+    discount_each_product: 0,
+    is_bonus_product: false,
+    is_discount_percent: false,
+    is_wholesale: false,
+    variation_info: {
+      name: products.map(item => `${item.quantity} ${item.name || item.sku}`).join(' + '),
+      retail_price: comboRetail,
+      weight: money(products.reduce((sum, item) => sum + money(item.weight) * (Number(item.quantity) || 1), 0))
+    }
+  }] : null;
+  const items = comboItems || products.filter(item => item.sku).map(item => ({
     variation_id: String(item.sku).trim().toUpperCase(),
     quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
     discount_each_product: 0,
@@ -195,6 +266,8 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   for (const gift of basketKey ? giftsForKey(basketKey, { livestream: isLivestreamOrder(order) }) : []) {
     const sku = String(gift.sku || '').trim().toUpperCase();
     if (!sku || items.some(item => item.variation_id === sku)) continue;
+    // Combo POS đã gồm bát + muỗng dừa trong mã (…+BGD+M): không thêm dòng quà trùng.
+    if (combo?.includesGifts && ['BGD', 'MUONG'].includes(sku)) continue;
     if (posSkus && !posSkus.has(sku)) continue;
     items.push({
       variation_id: sku,
@@ -239,7 +312,7 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
     is_free_shipping: Boolean(order.freeShipping) || money(order.shippingFee) === 0,
     // POS tính lại total_discount từ `discount`; chỉ gửi total_discount khiến
     // đơn tạo qua API giữ giảm giá 0 dù CRM đã tính đúng giá combo.
-    discount: money(order.discount),
+    discount: combo ? Math.max(0, comboRetail - goods) : money(order.discount),
     note: noteParts.join(' · '),
     received_at_shop: false,
     status: 0,
@@ -259,7 +332,7 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
   if (missing.length) throw new Error(`POS không có mẫu mã: ${missing.join(', ')}.`);
   const warehouseId = await posWarehouseId(config, fetchImpl).catch(() => '');
   const geo = await resolvePosGeo(order, config, fetchImpl).catch(() => ({}));
-  const payload = buildPosOrderPayload(order, { conversation, warehouseId, shopId: config.shopId, posSkus, geo });
+  const payload = buildPosOrderPayload(order, { conversation, warehouseId, shopId: config.shopId, posSkus, posPrices: await posVariationIds(config, fetchImpl), geo });
   // Tạo đơn bằng SKU chữ: POS nhận dòng hàng thường nhưng BỎ ÂM THẦM dòng tặng
   // (bát gáo dừa, muỗng dừa) — mọi đơn combo 3 của bot lên POS thiếu quà. Gửi mã
   // mẫu mã nội bộ (UUID) như khi sửa đơn thì dòng tặng được giữ.

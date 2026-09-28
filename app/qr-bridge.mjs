@@ -217,7 +217,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .ticket::before, .ticket::after { content: ""; position: absolute; top: var(--notch, 32px); width: 18px; height: 18px; background: #fff; border: 1.5px solid #f3d6a4; border-radius: 50%; }
   .ticket::before { left: -10px; clip-path: inset(0 0 0 50%); }
   .ticket::after { right: -10px; clip-path: inset(0 50% 0 0); }
-  .ticket-note { color: #9a5b1c; font-size: clamp(12.5px, 3.7vw, 14px); font-weight: 600; line-height: 1.3; text-align: center; white-space: nowrap; }
+  .ticket-note { color: #9a5b1c; font-size: clamp(12px, 3.35vw, 13.5px); font-weight: 600; line-height: 1.3; text-align: center; white-space: nowrap; }
   @media (max-width: 349px) { .ticket-note { white-space: normal; text-wrap: balance; } }
   /* Nút tô màu thương hiệu từng kênh: cao 56px, rộng hết, logo trong ô trắng bên trái, mũi tên bên phải. */
   .channels { display: grid; gap: 10px; }

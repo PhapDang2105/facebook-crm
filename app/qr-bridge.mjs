@@ -198,7 +198,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .w-nang { color: #f9b122; }
   .letter-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 6px; }
   .letter-top .greet { margin: 0; white-space: nowrap; }
-  .logo { flex: none; display: block; width: clamp(82px, 25vw, 100px); height: auto; margin: -4px -4px 0 0; }
+  .logo { flex: none; display: block; width: clamp(82px, 25vw, 100px); height: auto; margin: -4px -4px 0 0; mix-blend-mode: multiply; }
   .letter { margin: 0 0 16px; padding: 16px 16px 12px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
   .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
   .letter-body { margin: 0 0 8px; color: #4a3f33; font-size: 15.5px; line-height: 1.5; }

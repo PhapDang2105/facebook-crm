@@ -217,8 +217,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .ticket::before, .ticket::after { content: ""; position: absolute; top: var(--notch, 32px); width: 18px; height: 18px; background: #fff; border: 1.5px solid #f3d6a4; border-radius: 50%; }
   .ticket::before { left: -10px; clip-path: inset(0 0 0 50%); }
   .ticket::after { right: -10px; clip-path: inset(0 50% 0 0); }
-  .ticket-tag { color: #c2410c; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-  .ticket-sub { color: #7a5a2e; font-size: 14px; }
+  .ticket-note { color: #b4531a; font-size: 15px; font-weight: 700; line-height: 1.35; text-align: center; text-wrap: balance; }
   /* Nút tô màu thương hiệu từng kênh: cao 56px, rộng hết, logo trong ô trắng bên trái, mũi tên bên phải. */
   .channels { display: grid; gap: 10px; }
   .btn { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 8px 12px 8px 8px; color: #fff; border-radius: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; transition: transform .12s ease, box-shadow .12s ease; }
@@ -277,7 +276,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <p class="sign"><span>Thương mến,<br><b>Nhà Nắng</b></span><span class="stamp" aria-hidden="true">Nhà<br>Nắng</span></p>
   </div>
   <section class="ticket" aria-label="Phiếu ưu đãi">
-    <div class="ticket-head"><span class="ticket-tag">Phiếu ưu đãi</span><span class="ticket-sub">cho lần mua hàng tiếp theo</span></div>
+    <div class="ticket-head"><span class="ticket-note">Anh/chị lưu ưu đãi cho đơn hàng tiếp theo nhé</span></div>
     <div class="channels">
       <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi<small>qua Messenger</small></span>${icons.chevron}</a>
       ${zalo}

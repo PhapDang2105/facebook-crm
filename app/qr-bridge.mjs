@@ -186,7 +186,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#efe6d2">
-<title>${name} · Cảm ơn anh chị</title>
+<title>${name} | Cảm ơn quý khách</title>
+<link rel="icon" type="image/webp" href="/q/brand/logo.webp">
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }

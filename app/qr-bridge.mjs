@@ -160,8 +160,8 @@ const sunMark = `<svg class="sun" viewBox="0 0 96 96" aria-hidden="true">
 
 // Biểu tượng nội tuyến (không tải ngoài). Nét 2px, màu theo currentColor.
 const icons = {
-  messenger: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2C6.5 2 2 6.1 2 11.3c0 2.9 1.4 5.5 3.7 7.2V22l3.5-1.9c.9.3 1.8.4 2.8.4 5.5 0 10-4.1 10-9.2S17.5 2 12 2zm1 12.4l-2.6-2.7-5 2.7 5.5-5.8 2.6 2.7 4.9-2.7-5.4 5.8z"/></svg>`,
-  zalo: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5" fill="#fff"/><text x="12" y="15.6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="9.5" fill="#0068ff">Zalo</text></svg>`,
+  messenger: `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="32" fill="#0084ff"/><path fill="#fff" d="M32 14c-10.5 0-19 7.9-19 17.7 0 5.6 2.8 10.6 7.1 13.8V52l6.6-3.6c1.7.5 3.5.7 5.3.7 10.5 0 19-7.9 19-17.7S42.5 14 32 14zm1.9 23.8-4.8-5.2-9.5 5.2 10.4-11 5 5.2 9.3-5.2-10.4 11z"/></svg>`,
+  zalo: `<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#0068ff"/><text x="32" y="41" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="24" fill="#fff">Zalo</text></svg>`,
   guide: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
   offer: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/></svg>`,
   swap: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10"/><path d="M20.5 15a9 9 0 0 1-14.9 3.4L1 14"/></svg>`,
@@ -185,7 +185,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   // bằng Zalo thì không phải rời app). Chưa đặt liên kết OA ở Cài đặt thì dùng
   // Zalo cá nhân của Heartline (zalo.me/<số điện thoại>).
   const zaloHref = escapeHtml(zaloUrl || `https://zalo.me/${heartline.tel}`);
-  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener">${icons.zalo}<span>Nhận ưu đãi qua Zalo</span></a>`;
+  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener">${icons.zalo}<b>Zalo</b><span>Nhận ưu đãi</span></a>`;
   const facebook = fallbackUrl ? ` hoặc nhắn qua trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a>` : '';
   return `<!doctype html>
 <html lang="vi">
@@ -208,13 +208,12 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .gift li { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px dashed #d9cba9; color: #3a2e22; font-size: 15.5px; line-height: 1.35; }
   .ic { flex: 0 0 22px; width: 22px; height: 22px; color: #2e6b3f; }
   .ic svg { width: 22px; height: 22px; display: block; }
-  .btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 14px 18px; margin: 0 0 10px; background: #2e6b3f; color: #fff; border: 1px solid #275a35; font-size: 17px; font-weight: 600; text-decoration: none; border-radius: 8px; }
-  .btn svg { width: 22px; height: 22px; flex: 0 0 22px; }
-  .btn:active { background: #245431; }
-  .btn-zalo { background: #fff; color: #0b57d0; border-color: #b9c9e6; }
-  .btn-zalo:active { background: #f0f4fb; }
-  .btn-zalo svg rect { fill: #0b57d0; }
-  .btn-zalo svg text { fill: #fff; }
+  .channels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; }
+  .btn { display: grid; justify-items: center; gap: 2px; padding: 16px 10px 14px; background: #fff; color: #3a2e22; border: 1px solid #d9cba9; border-radius: 12px; text-decoration: none; }
+  .btn svg { width: 56px; height: 56px; margin-bottom: 8px; }
+  .btn b { font-size: 16px; font-weight: 700; }
+  .btn span { color: #6b5d4b; font-size: 13px; }
+  .btn:active { background: #f3ede0; }
   .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
   .copy { display: inline-block; margin: 4px 0 16px; padding: 0; background: none; border: 0; color: #6b5d4b; font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
   .fallback { margin: 4px 0 0; padding-top: 14px; border-top: 1px dashed #d9cba9; color: #6b5d4b; font-size: 14px; line-height: 1.5; }
@@ -236,8 +235,10 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <li><span class="ic">${icons.offer}</span><span>Ưu đãi cho lần mua sau</span></li>
     <li><span class="ic">${icons.swap}</span><span>Đổi ngay nếu hạt mềm, thiếu hàng</span></li>
   </ul>
-  <a class="btn" id="open" href="${href}" rel="noopener">${icons.messenger}<span>Nhận ưu đãi qua Messenger</span></a>
-  ${zalo}
+  <div class="channels">
+    <a class="btn" id="open" href="${href}" rel="noopener">${icons.messenger}<b>Messenger</b><span>Nhận ưu đãi</span></a>
+    ${zalo}
+  </div>
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <button class="copy" type="button" id="copy" hidden>Sao chép liên kết</button>
   <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${icons.phone}${heartline.display}</a>${facebook}.</p>

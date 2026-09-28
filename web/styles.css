@@ -2500,37 +2500,6 @@ tr:hover .customer-tel button { opacity: .75; }
 .follow-up-status { margin: 0; color: #8a8d91; font-size: 12px; line-height: 1.5; }
 .follow-up-status b { color: #354052; font-weight: 600; }
 .follow-up-legacy { color: #ad6800; font-size: 12px; line-height: 1.4; }
-.follow-up-queue:empty { display: none; }
-.follow-up-queue { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px solid #bae0ff; border-radius: 8px; background: #f0f9ff; font-size: 12px; }
-.follow-up-queue-head { color: #0c4a6e; font-weight: 600; line-height: 1.4; }
-.follow-up-queue-head small { display: block; color: #52606d; font-weight: 400; }
-.follow-up-queue-item { display: grid; gap: 4px; padding: 8px; border-radius: 6px; background: #fff; }
-.follow-up-queue-item p { margin: 0; color: #52606d; line-height: 1.4; white-space: pre-wrap; }
-.follow-up-queue-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.follow-up-queue-actions a, .follow-up-queue-actions button { padding: 3px 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; color: #354052; font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; }
-.follow-up-queue-actions .is-primary { border-color: #0ea5e9; background: #0ea5e9; color: #fff; }
-.follow-up-relay { display: grid; gap: 6px; padding: 10px; border: 1px dashed #0ea5e9; border-radius: 6px; background: #fff; color: #354052; }
-.follow-up-relay ol { margin: 0; padding-left: 18px; line-height: 1.5; }
-.follow-up-bookmarklet { display: inline-block; padding: 2px 10px; border-radius: 6px; background: #0ea5e9; color: #fff !important; font-weight: 600; text-decoration: none; cursor: grab; }
-.follow-up-relay-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.follow-up-relay-row input { width: 64px; margin-left: 4px; padding: 3px 6px; border: 1px solid #d9d9d9; border-radius: 6px; font: inherit; }
-.follow-up-relay-row button { padding: 4px 12px; border: 1px solid #0ea5e9; border-radius: 6px; background: #0ea5e9; color: #fff; font: inherit; cursor: pointer; }
-.follow-up-relay-row button:disabled { opacity: .6; cursor: wait; }
-.follow-up-queue-error { color: #b42318; }
-.follow-up-relay code { padding: 0 4px; border-radius: 4px; background: #f1f5f9; font-size: 11px; word-break: break-all; }
-.follow-up-relay details summary { cursor: pointer; color: #52606d; }
-.follow-up-relay details[open] { display: grid; gap: 6px; }
-.golden-panel { display: grid; gap: 8px; font-size: 13px; }
-.golden-panel:empty { display: none; }
-.golden-progress { color: #52606d; font-size: 12px; }
-.golden-item { display: grid; gap: 6px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-.golden-context { color: #6b7280; font-size: 12px; line-height: 1.4; }
-.golden-context b { color: #354052; font-weight: 600; }
-.golden-text { padding: 8px 10px; border-radius: 6px; background: #f8fafc; color: #111827; line-height: 1.45; white-space: pre-wrap; }
-.golden-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.golden-actions select { flex: 1 1 260px; min-width: 200px; padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 6px; font: inherit; font-size: 12px; }
-.golden-actions button { padding: 4px 12px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
-.golden-actions button.is-primary { border-color: #16a34a; background: #16a34a; color: #fff; }
 
 /* Cài đặt → Mã QR: bảng điều khiển mã QR trên thẻ cảm ơn */
 .qr-settings-head { flex-wrap: wrap; gap: 12px 18px; padding-top: 10px; padding-bottom: 10px; }

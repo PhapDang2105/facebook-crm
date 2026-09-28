@@ -124,6 +124,38 @@ test('webhook đầu tới cuối: ghi hộp thư, đưa bot; hội thoại đã
   assert.deepEqual(allowed, { stored: 1, bot: 1 });
 });
 
+test('webhook nhiều Page: quảng cáo và bài quảng cáo của Page thứ hai tra bằng mã + token của Page thứ hai, không phải Page đầu', async () => {
+  const twoPages = { ...config, pages: [{ pageId: '110', pageName: 'Test', pageAccessToken: 'pat-1' }, { pageId: '220', pageName: 'Trang 2', pageAccessToken: 'pat-2' }] };
+  const calls = [];
+  const fetchImpl = async url => {
+    calls.push(new URL(url));
+    const body = String(url).includes('/ads')
+      ? { data: [{ id: '220990001', name: 'QC trang 2' }] }
+      : { data: [{ id: '2220001', message: 'Bài quảng cáo trang 2' }] };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const payload = {
+    page_id: '220', event_type: 'messaging',
+    data: {
+      conversation: { id: '220_901', type: 'INBOX', from: { id: '901', name: 'Chị Hoa' }, assignee_ids: [] },
+      message: {
+        id: 'ad-220-1', conversation_id: '220_901', page_id: '220', type: 'INBOX', message: '<div></div>', original_message: '',
+        inserted_at: '2026-09-19T02:40:00.000000', from: { id: '901', name: 'Chị Hoa' },
+        attachments: [{ type: 'ad_click', ad_id: '220990001', url: 'https://www.facebook.com/2220001', post_attachments: [] }]
+      }
+    }
+  };
+  await handlePancakeWebhook(payload, { processChatbotChanges: async () => {}, chatbotDependencies: {}, config: twoPages, fetchImpl });
+  // Bài quảng cáo tìm ở nền: chờ lượt gọi /posts.
+  for (let waited = 0; waited < 3000 && !calls.some(call => call.pathname.endsWith('/posts')); waited += 50) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.ok(calls.some(call => call.pathname.endsWith('/ads')), 'có tra tên quảng cáo');
+  assert.ok(calls.some(call => call.pathname.endsWith('/posts')), 'có tìm bài quảng cáo');
+  for (const call of calls) {
+    assert.match(call.pathname, /\/pages\/220\//);
+    assert.equal(call.searchParams.get('page_access_token'), 'pat-2');
+  }
+});
+
 test('đồng bộ lịch sử: kéo hội thoại inbox rồi tin của từng hội thoại, ghi theo thứ tự thời gian, chạy lại không ghi trùng, không đưa bot', async () => {
   const { syncPancakeConversations, fetchPancakeConversations } = await import('../app/pancake.mjs');
   const calls = [];

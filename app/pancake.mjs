@@ -1204,7 +1204,15 @@ export async function handlePancakeWebhook(payload, { processChatbotChanges, cha
   // Tra tên quảng cáo ở nền: gọi Pancake (tới 20 s, retry 429) không được làm khách chờ bot.
   // Chờ tối đa 1,5 s cho tên quảng cáo (thường về ngay); lâu hơn thì để chạy nền, bot đọc adTitle ở lượt sau.
   if (changes.length) {
-    const enrich = enrichPancakeAdContext(changes, config, fetchImpl).catch(error => console.warn(`Pancake: không tra được quảng cáo: ${error.message}`));
+    // Quảng cáo/bài viết thuộc Page nào thì tra bằng mã + token của Page đó (nhiều Page dùng chung
+    // một webhook): tra nhầm Page đầu tiên thì không thấy, lại bị ghi mốc chặn tra lại 24 giờ.
+    const byPage = new Map();
+    for (const change of changes) {
+      const pageId = String((change.conversation || change)?.pageId || '');
+      byPage.set(pageId, [...(byPage.get(pageId) || []), change]);
+    }
+    const enrich = Promise.all([...byPage].map(([pageId, list]) => enrichPancakeAdContext(list, getPancakePageConfig(pageId, config), fetchImpl)
+      .catch(error => console.warn(`Pancake: không tra được quảng cáo: ${error.message}`))));
     await Promise.race([enrich, pause(1500)]);
   }
   // Móc trước bot (server dùng để chào khách quét QR và bỏ tin đó khỏi bot):

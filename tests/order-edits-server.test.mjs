@@ -86,3 +86,9 @@ test('G2: bản vá chỉ { complaintKeywords } (như route PUT: normalize(merge
   assert.equal(toggled.followUps.enabled, false);
   assert.equal(toggled.followUps.maxPerRun, current.followUps.maxPerRun);
 });
+
+test('giờ ghi vào ghi chú đơn (khách sửa/hủy qua bot, POS hủy) theo giờ Việt Nam: máy chủ chạy UTC nên mọi toLocaleTimeString phải có timeZone', () => {
+  const calls = server.match(/toLocaleTimeString\([^)]*\)/g) || [];
+  assert.ok(calls.length >= 3);
+  for (const call of calls) assert.match(call, /timeZone: 'Asia\/Ho_Chi_Minh'/, call);
+});

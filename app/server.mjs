@@ -292,7 +292,7 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
   const fresh = normalizeChatbotOrder(input, conversation);
   await attachPhoneWarning(fresh);
   const keep = new Set(['id', 'createdAt', 'pos', 'chatbotSourceMessageId', 'delivery', 'processingStatus', 'hiddenFromTable', 'staffNote', 'employee', 'automatic']);
-  const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
   const result = await updateMessagingStore(store => {
     const item = store.conversations.find(entry => entry.id === conversation.id);
     const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
@@ -359,7 +359,7 @@ async function addChatbotOrderNote(conversation, orderId, note) {
 
 /** Khách nhắn hủy đơn vừa đặt: đánh dấu hủy trên chính đơn đó, hủy bên POS nếu đã đẩy. */
 async function cancelChatbotCustomerOrder(conversation, orderId) {
-  const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
   const result = await updateMessagingStore(store => {
     const item = store.conversations.find(entry => entry.id === conversation.id);
     const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));

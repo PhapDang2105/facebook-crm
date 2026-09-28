@@ -10492,12 +10492,11 @@ function renderQrMetrics(codes, keys) {
   const today = qrState.stats?.today;
   let todayScans = 0;
   for (const entry of codes) todayScans += entry.days?.[today]?.scans || 0;
-  const label = keys ? `${keys.length} ngày qua` : 'từ đầu';
   container.innerHTML = `
-    <div class="qr-metric"><span class="qr-metric-label">Lượt quét</span><span class="qr-metric-value">${sum.scans}</span><span class="qr-metric-sub">Hôm nay ${todayScans} · ${label}</span></div>
-    <div class="qr-metric"><span class="qr-metric-label">Vào Messenger</span><span class="qr-metric-value">${sum.referrals}<small>${qrPercent(sum.referrals, sum.scans)}</small></span><span class="qr-metric-sub">Referral thật nhận về trên lượt quét</span></div>
-    <div class="qr-metric"><span class="qr-metric-label">Bấm “Mở Messenger”</span><span class="qr-metric-value">${sum.opens}<small>${qrPercent(sum.opens, sum.pages)}</small></span><span class="qr-metric-sub">Trên ${sum.pages} lượt xem trang đệm</span></div>
-    <div class="qr-metric"><span class="qr-metric-label">Mã đang theo dõi</span><span class="qr-metric-value">${codes.length}</span><span class="qr-metric-sub">${active} mã có lượt quét ${label}</span></div>`;
+    <div class="qr-metric"><span class="qr-metric-label">Lượt quét</span><span class="qr-metric-value">${sum.scans}<small>hôm nay ${todayScans}</small></span></div>
+    <div class="qr-metric"><span class="qr-metric-label">Vào Messenger</span><span class="qr-metric-value">${sum.referrals}<small>${qrPercent(sum.referrals, sum.scans)}</small></span></div>
+    <div class="qr-metric"><span class="qr-metric-label">Bấm “Mở Messenger”</span><span class="qr-metric-value">${sum.opens}<small>${qrPercent(sum.opens, sum.pages)}</small></span></div>
+    <div class="qr-metric"><span class="qr-metric-label">Mã có lượt quét</span><span class="qr-metric-value">${active}<small>/ ${codes.length}</small></span></div>`;
 }
 
 function renderQrChart(codes) {
@@ -10530,7 +10529,7 @@ function renderQrTable(codes, keys) {
   const container = document.querySelector('#qr-stats');
   if (!container) return;
   if (!codes.length) {
-    container.innerHTML = '<p class="channel-empty">Chưa có mã nào. Gõ mã lô ở trên (vd: tmdt-01) rồi bấm Tạo mã QR để lấy ảnh in.</p>';
+    container.innerHTML = '<p class="channel-empty">Chưa có mã nào.</p>';
     return;
   }
   const rows = codes.map(entry => ({ entry, totals: qrRangeTotals(entry, keys) }))
@@ -10569,7 +10568,6 @@ function renderQrDetail(codes) {
       <div class="qr-detail-row"><b>Trình duyệt</b>${qrCountChips(entry.browsers, qrBrowserNames)}</div>
       <div class="qr-detail-row"><b>Phục vụ</b>${qrCountChips(entry.modes, qrModeNames)}${entry.zaloOpens ? `<span class="qr-chip">bấm Zalo ${entry.zaloOpens}</span>` : ''}</div>
       <div class="qr-detail-row"><b>Tạo</b><span>${formatQrTime(entry.firstAt)}</span><b>Quét cuối</b><span>${formatQrTime(entry.lastAt)}</span></div>
-      <p class="qr-detail-note">Khách quét mở Messenger ${escapeHtml(qrState.stats?.pageName || 'của Page')} với ref <b>${escapeHtml(entry.code)}</b>. Botcake: công cụ Messenger Ref URL với Custom Ref = ${escapeHtml(entry.code)}, tin kết thúc bằng “Mã thẻ: #${escapeHtml(entry.code)}”.${entry.prefillText ? ` Tin soạn sẵn: “${escapeHtml(entry.prefillText)}”.` : ''} In từ 2,2 cm, chừa viền trắng; đưa nhà in tệp SVG.</p>
       <div class="qr-detail-actions">
         <a class="qr-download" href="/api/qr/image/${safe}.svg?download=1" download>Tải SVG (để in)</a>
         <a class="qr-download is-secondary" href="/api/qr/image/${safe}.png?download=1" download>Tải PNG</a>
@@ -10589,7 +10587,7 @@ function renderQrRecent(recent) {
       : item.event === 'open' ? 'Bấm “Mở Messenger”'
         : `Quét · ${qrPlatformNames[item.platform] || item.platform || '—'} · ${qrBrowserNames[item.browser] || item.browser || '—'} · ${qrModeNames[item.mode] || item.mode || ''}`;
     return `<li><span class="qr-recent-time">${formatQrShortTime(item.at)}</span><span class="qr-recent-text${open ? ' is-open' : ''}"><b>${escapeHtml(item.code)}</b> · ${escapeHtml(text)}</span></li>`;
-  }).join('')}</ul>` : '<p class="channel-empty">Chưa có lượt quét nào. In thử rồi quét bằng điện thoại để thấy ở đây.</p>'}`;
+  }).join('')}</ul>` : '<p class="channel-empty">Chưa có lượt quét nào.</p>'}`;
 }
 
 function renderQrDashboard() {

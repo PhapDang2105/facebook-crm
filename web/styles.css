@@ -2592,8 +2592,7 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-metric { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--line-1); border-radius: 12px; background: #fafbfc; }
 .qr-metric-label { color: var(--text-2); font-size: 14px; font-weight: 600; }
 .qr-metric-value { color: var(--text-1); font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.qr-metric-value small { margin-left: 6px; color: var(--brand); font-size: 15px; font-weight: 700; }
-.qr-metric-sub { color: var(--text-2); font-size: 14px; }
+.qr-metric-value small { margin-left: 8px; color: var(--text-2); font-size: 15px; font-weight: 600; }
 
 /* Biểu đồ cột theo ngày: quét (nhạt) và vào Messenger (đậm) */
 .qr-chart { display: grid; gap: 8px; padding: 14px 16px 10px; border: 1px solid var(--line-1); border-radius: 12px; }
@@ -2644,7 +2643,6 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-detail-row { display: flex; flex-wrap: wrap; gap: 6px 8px; color: var(--text-2); font-size: 14px; }
 .qr-detail-row b { color: var(--text-1); font-weight: 600; }
 .qr-chip { padding: 3px 9px; color: var(--text-1); background: #f2f4f7; border-radius: 999px; font-size: 14px; font-variant-numeric: tabular-nums; }
-.qr-detail-note { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.5; }
 .qr-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .qr-download { display: inline-block; padding: 8px 14px; color: #fff; background: #111; border: 1px solid #111; border-radius: 8px; font: inherit; font-size: 14px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .qr-download.is-secondary { color: var(--text-1); background: #fff; border-color: #d9dde3; }

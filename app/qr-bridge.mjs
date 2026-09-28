@@ -270,7 +270,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   <div class="letter">
     <h1 class="greet">Thân gửi anh chị,</h1>
     <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</p>
-    <p class="letter-body">Em luôn nghĩ, sức khoẻ bắt đầu từ những điều nhỏ và sạch mỗi ngày. Vì vậy từng mẻ hạt ở nhà Nắng đều được nướng chứ không chiên qua dầu, không phẩm màu, không hương liệu, và đóng gói tại xưởng đạt chuẩn HACCP, ISO&nbsp;22000. Mong mỗi bữa sáng của anh chị và gia đình đều lành, đủ chất và thật an tâm.</p>
+    <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong anh chị và cả nhà luôn khoẻ, ăn ngon và thật bình an.</p>
     <p class="letter-body">Em gửi anh chị chút ưu đãi cho lần sau:</p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b></span></li>

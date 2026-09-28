@@ -211,7 +211,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .fallback svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 2px; }
   .tel { white-space: nowrap; }
   .foot { margin: 16px 0 0; color: #8d7f68; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-size: 14px; }
-  .code { display: block; margin-top: 2px; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; font-style: normal; font-size: 11.5px; color: #b0a48c; }
 </style>
 </head>
 <body>
@@ -231,7 +230,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <button class="copy" type="button" id="copy" hidden>Sao chép liên kết</button>
   <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${icons.phone}${heartline.display}</a>${facebook}.</p>
-  <p class="foot">ăn sạch · sống lành cùng Giọt Nắng<span class="code">Mã thẻ: ${safeCode}</span></p>
+  <p class="foot">ăn sạch · sống lành cùng Giọt Nắng</p>
 </main>
 <script>
 (function () {

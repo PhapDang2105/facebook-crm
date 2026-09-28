@@ -1031,10 +1031,16 @@ const server = http.createServer(async (request, response) => {
     // và trang web m.me nay bắt đăng nhập. Lý do đầy đủ ở app/qr-bridge.mjs.
     // Logo cho trang khách quét: /q/* là đường công khai duy nhất (Caddy), còn /assets nằm sau mật khẩu.
     // Chỉ đúng các tệp liệt kê ở đây được phục vụ.
-    const qrBrandFiles = { '/q/brand/logo.webp': 'giot-nang-logo.webp', '/q/brand/zalo.webp': 'zalo-icon.webp', '/q/brand/messenger.webp': 'messenger-icon.webp' };
+    const qrBrandFiles = {
+      '/q/brand/logo.webp': 'logos/giot-nang-logo.webp',
+      '/q/brand/zalo.webp': 'logos/zalo-icon.webp',
+      '/q/brand/messenger.webp': 'logos/messenger-icon.webp',
+      '/q/brand/offer-combo3-mini.webp': 'offers/combo3-mini.webp',
+      '/q/brand/offer-tam-lanh.webp': 'offers/tam-lanh.webp'
+    };
     if (request.method === 'GET' && qrBrandFiles[url.pathname]) {
       try {
-        const body = await readFile(path.join(root, 'assets', 'branding', 'logos', qrBrandFiles[url.pathname]));
+        const body = await readFile(path.join(root, 'assets', 'branding', ...qrBrandFiles[url.pathname].split('/')));
         response.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=86400' });
         return response.end(body);
       } catch {

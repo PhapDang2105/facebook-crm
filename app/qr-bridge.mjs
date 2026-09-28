@@ -237,7 +237,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
   /* Máy 360-400px: lá thư nằm trong thẻ nên lề bị cộng hai lần; thu lề để mỗi dòng dấu tích nằm trên một hàng. */
   @media (max-width: 400px) { main { padding-left: 14px; padding-right: 14px; } .letter { padding-left: 12px; padding-right: 12px; } .checks li { font-size: 14.5px; gap: 9px; } }
-  @media (max-width: 340px) { .letter { padding: 14px 12px 10px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .checks li { font-size: 13.5px; gap: 8px; } .tick { flex-basis: 20px; width: 20px; height: 20px; } .fallback { font-size: 13px; } }
+  @media (max-width: 340px) { .letter { padding: 12px 9px 8px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .checks li { font-size: 13.5px; gap: 8px; } .tick { flex-basis: 20px; width: 20px; height: 20px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }

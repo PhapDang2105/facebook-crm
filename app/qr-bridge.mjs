@@ -212,12 +212,13 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .stamp { display: grid; place-items: center; width: 44px; height: 44px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-weight: 700; font-size: 12px; line-height: 1.05; text-align: center; transform: rotate(-8deg); opacity: .9; }
   /* Phiếu ưu đãi kiểu voucher (mẫu "Lưu" của sàn TMĐT): nền kem, viền chấm, răng cưa hai bên. */
   .ticket { position: relative; margin: 0 0 14px; padding: 0 12px 12px; background: #fff6e6; border: 1.5px solid #f3d6a4; border-radius: 16px; }
-  .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 11px 0 11px; margin: 0 0 12px; }
+  .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 9px 0 9px; margin: 0 0 12px; }
   .ticket-head::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 0; border-bottom: 2px dashed #e8b765; }
   .ticket::before, .ticket::after { content: ""; position: absolute; top: var(--notch, 32px); width: 18px; height: 18px; background: #fff; border: 1.5px solid #f3d6a4; border-radius: 50%; }
   .ticket::before { left: -10px; clip-path: inset(0 0 0 50%); }
   .ticket::after { right: -10px; clip-path: inset(0 50% 0 0); }
-  .ticket-note { color: #b4531a; font-size: 15px; font-weight: 700; line-height: 1.35; text-align: center; text-wrap: balance; }
+  .ticket-note { color: #9a5b1c; font-size: clamp(12.5px, 3.7vw, 14px); font-weight: 600; line-height: 1.3; text-align: center; white-space: nowrap; }
+  @media (max-width: 349px) { .ticket-note { white-space: normal; text-wrap: balance; } }
   /* Nút tô màu thương hiệu từng kênh: cao 56px, rộng hết, logo trong ô trắng bên trái, mũi tên bên phải. */
   .channels { display: grid; gap: 10px; }
   .btn { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 8px 12px 8px 8px; color: #fff; border-radius: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; transition: transform .12s ease, box-shadow .12s ease; }

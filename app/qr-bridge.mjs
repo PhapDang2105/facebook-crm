@@ -205,6 +205,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .offers li b { color: #2e6b3f; font-weight: 700; }
   .thumb { flex: 0 0 56px; display: grid; place-items: center; width: 56px; height: 56px; overflow: hidden; background: #f6f1e4; border-radius: 12px; }
   .thumb img { max-width: 52px; max-height: 50px; width: auto; height: auto; display: block; }
+  .thumb-bare { background: transparent; }
+  .thumb-bare img { max-width: 100%; max-height: 100%; }
   .sign { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
   .sign b { color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-size: 17px; }
   .stamp { display: grid; place-items: center; width: 44px; height: 44px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-weight: 700; font-size: 12px; line-height: 1.05; text-align: center; transform: rotate(-8deg); opacity: .9; }
@@ -267,7 +269,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <h1 class="greet">Thân gửi anh chị,</h1>
     <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Em gửi anh chị ưu đãi:</p>
     <ul class="offers">
-      <li><span class="thumb"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="44" height="44"></span><span><b>Miễn phí vận chuyển</b> cho toàn bộ đơn hàng tiếp theo</span></li>
+      <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b> cho toàn bộ đơn hàng tiếp theo</span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>
       <li><span class="thumb"><img src="/q/brand/offer-yen-mach.webp" alt="Hai túi Yến mạch 500g" width="54" height="48"></span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-tam-lanh.webp" alt="Hộp Bột Ngũ Cốc Tâm Lành" width="37" height="48"></span><span>Đặc biệt mua Combo&nbsp;3 tặng <b>1&nbsp;hộp Bột Ngũ Cốc Tâm&nbsp;Lành</b></span></li>

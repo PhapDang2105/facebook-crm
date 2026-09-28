@@ -149,15 +149,6 @@ const inAppHints = {
 // Heartline in trên thẻ bảo hành: đường lùi cho khách không mở được Messenger.
 export const heartline = { display: '0899 677 899', tel: '0899677899' };
 
-// Mặt trời cười của logo, vẽ tay bằng SVG nội tuyến: trang không được tải ảnh
-// ngoài (mọi thứ dưới /assets nằm sau mật khẩu, và trang phải nhẹ).
-const sunMark = `<svg class="sun" viewBox="0 0 96 96" aria-hidden="true">
-  <g stroke="#d9a53a" stroke-width="5" stroke-linecap="round"><path d="M48 6v10M48 80v10M6 48h10M80 48h10M18 18l7 7M71 71l7 7M18 78l7-7M71 25l7-7"/></g>
-  <circle cx="48" cy="48" r="22" fill="#e6b94c"/>
-  <circle cx="40" cy="45" r="2.6" fill="#6d4a1f"/><circle cx="56" cy="45" r="2.6" fill="#7a4b1c"/>
-  <path d="M39 53q9 8 18 0" fill="none" stroke="#6d4a1f" stroke-width="3" stroke-linecap="round"/>
-</svg>`;
-
 // Biểu tượng nội tuyến (không tải ngoài). Nét 2px, màu theo currentColor.
 const icons = {
   messenger: `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="32" fill="#0084ff"/><path fill="#fff" d="M32 14c-10.5 0-19 7.9-19 17.7 0 5.6 2.8 10.6 7.1 13.8V52l6.6-3.6c1.7.5 3.5.7 5.3.7 10.5 0 19-7.9 19-17.7S42.5 14 32 14zm1.9 23.8-4.8-5.2-9.5 5.2 10.4-11 5 5.2 9.3-5.2-10.4 11z"/></svg>`,
@@ -200,8 +191,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
   main { width: 100%; max-width: 380px; padding: 30px 24px 22px; background: #fbf7ee; border: 1px solid #d9cba9; border-radius: 4px; text-align: center; }
-  .sun { width: 58px; height: 58px; display: block; margin: 0 auto 8px; }
-  .brand { margin: 0 0 20px; color: #2e6b3f; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-size: 20px; font-style: italic; letter-spacing: .01em; }
+  .logo { display: block; width: 170px; height: auto; margin: 0 auto 18px; }
   h1 { margin: 0 0 8px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-size: 25px; font-weight: 600; line-height: 1.25; }
   .lead { margin: 0 auto 20px; max-width: 300px; color: #6b5d4b; font-size: 15px; }
   .gift { margin: 0 0 22px; padding: 0; list-style: none; text-align: left; border-top: 1px dashed #d9cba9; }
@@ -226,8 +216,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 </head>
 <body>
 <main>
-  ${sunMark}
-  <p class="brand">${name}</p>
+  <img class="logo" src="/q/brand/logo.webp" alt="${name}" width="170" height="106">
   <h1>Cảm ơn anh chị đã chọn Giọt Nắng</h1>
   <p class="lead">Chọn kênh anh chị hay dùng, chúng em gửi ngay:</p>
   <ul class="gift">

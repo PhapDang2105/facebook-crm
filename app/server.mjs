@@ -1023,9 +1023,11 @@ const server = http.createServer(async (request, response) => {
     // nút "Mở Messenger", vì Safari không mở app khi tới m.me qua chuyển hướng
     // và trang web m.me nay bắt đăng nhập. Lý do đầy đủ ở app/qr-bridge.mjs.
     // Logo cho trang khách quét: /q/* là đường công khai duy nhất (Caddy), còn /assets nằm sau mật khẩu.
-    if (request.method === 'GET' && url.pathname === '/q/brand/logo.webp') {
+    // Chỉ đúng các tệp liệt kê ở đây được phục vụ.
+    const qrBrandFiles = { '/q/brand/logo.webp': 'giot-nang-logo.webp', '/q/brand/zalo.webp': 'zalo-icon.webp' };
+    if (request.method === 'GET' && qrBrandFiles[url.pathname]) {
       try {
-        const body = await readFile(path.join(root, 'assets', 'branding', 'logos', 'giot-nang-logo.webp'));
+        const body = await readFile(path.join(root, 'assets', 'branding', 'logos', qrBrandFiles[url.pathname]));
         response.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=86400' });
         return response.end(body);
       } catch {

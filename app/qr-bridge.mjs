@@ -152,7 +152,8 @@ export const heartline = { display: '0899 677 899', tel: '0899677899' };
 // Biểu tượng nội tuyến (không tải ngoài). Nét 2px, màu theo currentColor.
 const icons = {
   messenger: `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="32" fill="#0084ff"/><path fill="#fff" d="M32 14c-10.5 0-19 7.9-19 17.7 0 5.6 2.8 10.6 7.1 13.8V52l6.6-3.6c1.7.5 3.5.7 5.3.7 10.5 0 19-7.9 19-17.7S42.5 14 32 14zm1.9 23.8-4.8-5.2-9.5 5.2 10.4-11 5 5.2 9.3-5.2-10.4 11z"/></svg>`,
-  zalo: `<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#0068ff"/><text x="32" y="41" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="24" fill="#fff">Zalo</text></svg>`,
+  // Logo Zalo chính thức (tệp webp), phục vụ qua đường công khai /q/brand/ như logo thương hiệu.
+  zalo: `<img src="/q/brand/zalo.webp" alt="" width="56" height="56">`,
   guide: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
   offer: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/></svg>`,
   swap: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10"/><path d="M20.5 15a9 9 0 0 1-14.9 3.4L1 14"/></svg>`,
@@ -200,7 +201,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .ic svg { width: 22px; height: 22px; display: block; }
   .channels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; }
   .btn { display: grid; justify-items: center; gap: 2px; padding: 16px 10px 14px; background: #fff; color: #3a2e22; border: 1px solid #d9cba9; border-radius: 12px; text-decoration: none; }
-  .btn svg { width: 56px; height: 56px; margin-bottom: 8px; }
+  .btn svg, .btn img { width: 56px; height: 56px; display: block; margin-bottom: 8px; }
   .btn b { font-size: 16px; font-weight: 700; }
   .btn span { color: #6b5d4b; font-size: 13px; }
   .btn:active { background: #f3ede0; }

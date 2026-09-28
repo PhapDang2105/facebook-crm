@@ -171,10 +171,11 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   const href = escapeHtml(destination);
   const safeCode = escapeHtml(code);
   const hint = classification.inApp ? (inAppHints[classification.browser] ?? inAppHints.webview) : '';
-  // Khách quét bằng Zalo hay quen Zalo thì có đường đi thẳng, không phải rời app.
-  const zalo = zaloUrl
-    ? `<a class="btn btn-zalo" id="zalo" href="${escapeHtml(zaloUrl)}" rel="noopener">Nhắn qua Zalo</a>`
-    : '';
+  // Zalo là kênh ngang hàng với Messenger (khách không có Messenger, hoặc quét
+  // bằng Zalo thì không phải rời app). Chưa đặt liên kết OA ở Cài đặt thì dùng
+  // Zalo cá nhân của Heartline (zalo.me/<số điện thoại>).
+  const zaloHref = escapeHtml(zaloUrl || `https://zalo.me/${heartline.tel}`);
+  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener">Nhận ưu đãi qua Zalo</a>`;
   const facebook = fallbackUrl ? ` hoặc nhắn qua trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a>` : '';
   return `<!doctype html>
 <html lang="vi">
@@ -198,8 +199,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .gift b { display: block; margin-bottom: 4px; color: #2f8f4e; font-size: 20px; font-weight: 700; }
   .btn { display: block; width: 100%; padding: 17px 20px; margin: 0 0 12px; background: #2f8f4e; color: #fff; font-size: 19px; font-weight: 700; text-decoration: none; border-radius: 16px; box-shadow: 0 6px 18px rgba(47,143,78,.25); }
   .btn:active { background: #257540; transform: translateY(1px); }
-  .btn-zalo { background: #fff; color: #0068ff; border: 1.5px solid #cfe0ff; box-shadow: none; }
-  .btn-zalo:active { background: #eef4ff; }
+  .btn-zalo { background: #0068ff; box-shadow: 0 6px 18px rgba(0,104,255,.22); }
+  .btn-zalo:active { background: #0052cc; }
   .hint { margin: 4px 0 14px; padding: 12px 14px; background: #fff7dc; border: 1px solid #f3e2a3; border-radius: 12px; color: #5b4a12; font-size: 15px; line-height: 1.45; text-align: left; }
   .copy { display: inline-block; margin: 2px 0 16px; padding: 8px 14px; background: none; border: 1px solid #d9cfb6; border-radius: 999px; color: #7a4b1c; font: inherit; font-size: 15px; }
   .fallback { margin: 6px 0 0; padding-top: 16px; border-top: 1px solid #efe4c9; color: #6f6353; font-size: 14px; line-height: 1.5; }
@@ -214,13 +215,13 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   ${sunMark}
   <p class="brand">${name}</p>
   <h1>Cảm ơn anh chị đã chọn Giọt Nắng</h1>
-  <p class="lead">Nhắn cho chúng em một tin qua Messenger, chúng em gửi ngay:</p>
+  <p class="lead">Chọn kênh anh chị hay dùng, chúng em gửi ngay:</p>
   <ul class="gift">
     <li><b>1</b>Hướng dẫn dùng ngon nhất</li>
-    <li><b>2</b>Quà cảm ơn từ Ngôi nhà của Nắng</li>
+    <li><b>2</b>Ưu đãi cho lần mua sau</li>
     <li><b>3</b>Đổi ngay nếu hạt mềm, thiếu hàng</li>
   </ul>
-  <a class="btn" id="open" href="${href}" rel="noopener">Nhận quà qua Messenger</a>
+  <a class="btn" id="open" href="${href}" rel="noopener">Nhận ưu đãi qua Messenger</a>
   ${zalo}
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <button class="copy" type="button" id="copy" hidden>Sao chép liên kết</button>

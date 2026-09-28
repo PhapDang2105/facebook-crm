@@ -85,9 +85,10 @@ test('trang đệm: trong app thì có hướng dẫn đúng app', () => {
   assert.doesNotMatch(render('Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Mobile/15E148 [MessengerForiOS;FBAV/470]'), /class="hint"/);
 });
 
-test('trang đệm: nút Zalo chỉ hiện khi có liên kết; lượt bấm đếm từ lúc chạm, tách Messenger/Zalo', () => {
+test('trang đệm: nút Zalo luôn có (liên kết OA đã đặt, không thì Zalo Heartline); lượt bấm đếm từ lúc chạm, tách Messenger/Zalo', () => {
+  // Zalo là kênh ngang hàng: chưa đặt liên kết OA thì về Zalo của Heartline.
   const without = render(agents.iosSafari);
-  assert.doesNotMatch(without, /id="zalo"|Nhắn qua Zalo/);
+  assert.match(without, /<a class="btn btn-zalo" id="zalo" href="https:\/\/zalo\.me\/0899677899"/);
   const withZalo = render(agents.zaloIos, { zaloUrl: 'https://zalo.me/g/abcdef' });
   assert.match(withZalo, /<a class="btn btn-zalo" id="zalo" href="https:\/\/zalo\.me\/g\/abcdef"/);
   assert.match(withZalo, /pointerdown/, 'đếm từ lúc chạm, không đợi click (iPhone nhảy app trước click)');

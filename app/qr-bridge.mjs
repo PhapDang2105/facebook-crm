@@ -156,9 +156,7 @@ const icons = {
   // Logo Zalo chính thức (tệp webp), phục vụ qua đường công khai /q/brand/ như logo thương hiệu.
   zalo: `<img src="/q/brand/zalo.webp" alt="" width="30" height="30">`,
   chevron: `<svg class="chev" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
-  guide: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
-  offer: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/></svg>`,
-  swap: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10"/><path d="M20.5 15a9 9 0 0 1-14.9 3.4L1 14"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>`,
   phone: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg>`
 };
 
@@ -196,17 +194,20 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
   main { width: 100%; max-width: 400px; padding: clamp(20px, 6vw, 28px) clamp(16px, 5.5vw, 26px) 22px; background: #fff; border: 1px solid #e3d8bf; border-radius: 20px; box-shadow: 0 1px 2px rgba(58,46,34,.04), 0 8px 24px rgba(58,46,34,.06); text-align: center; }
-  .nowrap { white-space: nowrap; }
   .wordmark { white-space: nowrap; font-weight: 700; }
   .w-giot { color: #7cc254; }
   .w-nang { color: #f9b122; }
-  .logo { display: block; width: clamp(140px, 44vw, 170px); height: auto; margin: 0 auto 16px; }
-  h1 { margin: 0 0 8px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-size: clamp(21px, 6.4vw, 26px); text-wrap: balance; font-weight: 600; line-height: 1.25; }
-  .lead { margin: 0 auto 20px; max-width: 300px; color: #6b5d4b; font-size: 15px; }
-  .gift { margin: 0 0 22px; padding: 0; list-style: none; text-align: left; border-top: 1px dashed #d9cba9; }
-  .gift li { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px dashed #d9cba9; color: #3a2e22; font-size: 15.5px; line-height: 1.35; }
-  .ic { flex: 0 0 22px; width: 22px; height: 22px; color: #2e6b3f; }
-  .ic svg { width: 22px; height: 22px; display: block; }
+  .logo { display: block; width: clamp(128px, 40vw, 150px); height: auto; margin: 0 auto 14px; }
+  .letter { margin: 0 0 16px; padding: 16px 16px 12px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
+  .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
+  .letter-body { margin: 0 0 10px; color: #4a3f33; font-size: 15.5px; line-height: 1.5; }
+  .checks { display: grid; gap: 7px; margin: 0 0 10px; padding: 0; list-style: none; }
+  .checks li { display: flex; align-items: center; gap: 10px; color: #3a2e22; font-size: 15px; line-height: 1.35; }
+  .tick { flex: 0 0 22px; display: grid; place-items: center; width: 22px; height: 22px; background: #e6f4dc; color: #3f8f2c; border-radius: 50%; }
+  .tick svg { width: 14px; height: 14px; }
+  .sign { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
+  .sign b { color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-size: 17px; }
+  .stamp { display: grid; place-items: center; width: 44px; height: 44px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-weight: 700; font-size: 12px; line-height: 1.05; text-align: center; transform: rotate(-8deg); opacity: .9; }
   /* Phiếu ưu đãi kiểu voucher (mẫu "Lưu" của sàn TMĐT): nền kem, viền chấm, răng cưa hai bên. */
   .ticket { position: relative; margin: 0 0 14px; padding: 0 12px 12px; background: #fff6e6; border: 1.5px solid #f3d6a4; border-radius: 16px; }
   .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 11px 0 11px; margin: 0 0 12px; }
@@ -234,16 +235,15 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   @keyframes nudge { 0%, 70%, 100% { transform: translateX(0); } 80% { transform: translateX(4px); } 90% { transform: translateX(0); } }
   @media (prefers-reduced-motion: reduce) { .chev { animation: none; } .btn { transition: none; } }
   /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
-  @media (max-width: 340px) { h1 { font-size: 19.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
+  @media (max-width: 340px) { .letter { padding: 14px 12px 10px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .checks li { font-size: 14px; gap: 8px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
     main { padding-top: 16px; padding-bottom: 14px; }
-    .logo { width: 118px; margin-bottom: 8px; }
-    h1 { margin-bottom: 4px; }
-    .lead { margin-bottom: 12px; font-size: 14px; }
-    .gift { margin-bottom: 14px; }
-    .gift li { padding: 7px 2px; }
+    .logo { width: 112px; margin-bottom: 8px; }
+    .letter { margin-bottom: 12px; padding-top: 12px; padding-bottom: 8px; }
+    .checks { gap: 5px; margin-bottom: 6px; }
+    .stamp { width: 38px; height: 38px; }
     .ticket-head { padding: 8px 0 7px; margin-bottom: 10px; }
     .btn { min-height: 54px; }
     .channels { gap: 8px; }
@@ -258,14 +258,17 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 </head>
 <body>
 <main>
-  <img class="logo" src="/q/brand/logo.webp" alt="${name}" width="170" height="106">
-  <h1><span class="nowrap">Cảm ơn anh chị đã tin tưởng</span><br><span class="nowrap">và ủng hộ</span> <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span></h1>
-  <p class="lead">Anh chị nhắn cho chúng em qua Messenger hoặc Zalo để nhận:</p>
-  <ul class="gift">
-    <li><span class="ic">${icons.guide}</span><span>Hướng dẫn dùng ngon nhất</span></li>
-    <li><span class="ic">${icons.offer}</span><span>Ưu đãi cho lần mua hàng tiếp theo</span></li>
-    <li><span class="ic">${icons.swap}</span><span>Đổi ngay nếu hạt mềm, thiếu hàng</span></li>
-  </ul>
+  <img class="logo" src="/q/brand/logo.webp" alt="${name}" width="150" height="83">
+  <div class="letter">
+    <h1 class="greet">Thân gửi anh chị,</h1>
+    <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Nhắn cho chúng em một tin, chúng em gửi ngay:</p>
+    <ul class="checks">
+      <li><span class="tick">${icons.check}</span>Hướng dẫn dùng ngon nhất</li>
+      <li><span class="tick">${icons.check}</span>Ưu đãi cho lần mua hàng tiếp theo</li>
+      <li><span class="tick">${icons.check}</span>Đổi ngay nếu hạt mềm, thiếu hàng</li>
+    </ul>
+    <p class="sign"><span>Thương mến,<br><b>Nhà Nắng</b></span><span class="stamp" aria-hidden="true">Nhà<br>Nắng</span></p>
+  </div>
   <section class="ticket" aria-label="Phiếu ưu đãi">
     <div class="ticket-head"><span class="ticket-tag">Phiếu ưu đãi</span><span class="ticket-sub">cho lần mua hàng tiếp theo</span></div>
     <div class="channels">

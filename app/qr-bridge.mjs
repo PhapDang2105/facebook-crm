@@ -192,7 +192,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
-  main { width: 100%; max-width: 400px; padding: clamp(20px, 6vw, 28px) clamp(16px, 5.5vw, 26px) 22px; background: #fff; border: 1px solid #d9cba9; border-radius: 4px; text-align: center; }
+  main { width: 100%; max-width: 400px; padding: clamp(20px, 6vw, 28px) clamp(16px, 5.5vw, 26px) 22px; background: #fff; border: 1px solid #e3d8bf; border-radius: 20px; box-shadow: 0 1px 2px rgba(58,46,34,.04), 0 8px 24px rgba(58,46,34,.06); text-align: center; }
   .logo { display: block; width: clamp(140px, 44vw, 170px); height: auto; margin: 0 auto 16px; }
   h1 { margin: 0 0 8px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-size: clamp(21px, 6.4vw, 26px); text-wrap: balance; font-weight: 600; line-height: 1.25; }
   .lead { margin: 0 auto 20px; max-width: 300px; color: #6b5d4b; font-size: 15px; }

@@ -255,6 +255,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     .channels { gap: 8px; }
     .fallback { padding-top: 10px; }
   }
+  .terms { margin: -4px 4px 12px; color: #a0937d; font-size: 11.5px; line-height: 1.45; text-align: center; text-wrap: balance; }
   .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
   .fallback { margin: 4px 0 0; padding-top: 14px; border-top: 1px dashed #d9cba9; color: #6b5d4b; font-size: 14px; line-height: 1.5; }
   .fallback a { color: #2e6b3f; font-size: 13.5px; font-weight: 700; text-decoration: none; }
@@ -283,6 +284,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
       ${zalo}
     </div>
   </section>
+  <p class="terms">* Ưu đãi chỉ áp dụng trên kênh Facebook và Zalo của nhà Giọt Nắng, không áp dụng trên sàn Shopee hoặc TikTok.</p>
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${icons.phone}${heartline.display}</a>${facebook}.</p>
 </main>

@@ -268,7 +268,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <h1 class="greet">Thân gửi anh chị,</h1>
     <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Em gửi anh chị ưu đãi:</p>
     <ul class="offers">
-      <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b> cho toàn bộ đơn hàng tiếp theo</span></li>
+      <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>
       <li><span class="thumb"><img src="/q/brand/offer-yen-mach.webp" alt="Hai túi Yến mạch 500g" width="54" height="48"></span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-tam-lanh.webp" alt="Hộp Bột Ngũ Cốc Tâm Lành" width="37" height="48"></span><span>Đặc biệt mua Combo&nbsp;3 tặng <b>1&nbsp;hộp Bột Ngũ Cốc Tâm&nbsp;Lành</b></span></li>

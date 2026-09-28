@@ -207,9 +207,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .letter-top .greet { margin: 0; white-space: nowrap; }
   .logo { flex: none; display: block; width: clamp(82px, 25vw, 100px); height: auto; margin: -4px -4px 0 0; mix-blend-mode: multiply; }
   .letter { margin: 0 0 12px; padding: 12px 14px 10px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
-  .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
+  .greet { margin: 0 0 6px; color: #3a2e22; font-weight: 700; font-size: 18px; line-height: 1.3; }
   .letter-body { margin: 0 0 6px; color: #4a3f33; font-size: 15px; line-height: 1.45; }
-  .nowrap { white-space: nowrap; }
   .letter-body:last-of-type { margin-bottom: 10px; }
   .offers { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
   .offers li { display: flex; align-items: center; gap: 12px; color: #3a2e22; font-size: 15px; line-height: 1.4; }
@@ -220,8 +219,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .thumb-bare { background: transparent; }
   .thumb-bare img { max-width: 44px; max-height: 44px; }
   .sign { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: -2px 0 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
-  .sign b { color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-size: 17px; }
-  .stamp { display: grid; place-items: center; width: 38px; height: 38px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-weight: 700; font-size: 12px; line-height: 1.05; text-align: center; transform: rotate(-8deg); opacity: .9; }
+  .sign b { color: #3a2e22; font-weight: 700; font-size: 15px; }
+  .stamp { display: grid; place-items: center; width: 38px; height: 38px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-weight: 800; font-size: 10.5px; line-height: 1.1; text-align: center; transform: rotate(-8deg); opacity: .9; }
   .ticket { position: relative; margin: 0 0 14px; padding: 0 12px 12px; background: #fff6e6; border: 1.5px solid #f3d6a4; border-radius: 16px; }
   .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 9px 0 9px; margin: 0 0 12px; }
   .ticket-head::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 0; border-bottom: 2px dashed #e8b765; }
@@ -250,7 +249,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   @keyframes nudge { 0%, 70%, 100% { transform: translateX(0); } 80% { transform: translateX(4px); } 90% { transform: translateX(0); } }
   @media (prefers-reduced-motion: reduce) { .chev { animation: none; } .btn { transition: none; } }
   @media (max-width: 400px) { main { padding-left: 14px; padding-right: 14px; } .letter { padding-left: 12px; padding-right: 12px; } .offers li { font-size: 14.5px; gap: 10px; } }
-  @media (max-width: 340px) { .greet { font-size: 18px; } .logo { width: 70px; } .letter { padding: 12px 9px 8px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .offers li { font-size: 14px; gap: 9px; } .thumb { flex-basis: 48px; width: 48px; height: 48px; } .thumb img { max-width: 44px; max-height: 42px; } .fallback { font-size: 13px; } }
+  @media (max-width: 340px) { .greet { font-size: 17px; } .logo { width: 70px; } .letter { padding: 12px 9px 8px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .offers li { font-size: 14px; gap: 9px; } .thumb { flex-basis: 48px; width: 48px; height: 48px; } .thumb img { max-width: 44px; max-height: 42px; } .fallback { font-size: 13px; } }
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
     main { padding-top: 16px; padding-bottom: 14px; }
@@ -277,8 +276,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <main>
   <div class="letter">
     <div class="letter-top"><h1 class="greet">Thân gửi Anh/Chị,</h1><img class="logo" src="/q/brand/logo.webp" alt="${name}" width="96" height="53"></div>
-    <p class="letter-body thanks"><span class="nowrap">Cảm ơn Anh/Chị đã tin tưởng</span> <span class="nowrap">và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</span></p>
-    <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong Anh/Chị và cả nhà luôn khoẻ, ăn ngon và thật bình an. Em gửi Anh/Chị chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng Anh/Chị thật&nbsp;lâu:</p>
+    <p class="letter-body">Cảm ơn Anh/Chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong Anh/Chị và cả nhà luôn khoẻ, ăn ngon và thật bình an. Em gửi Anh/Chị chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng Anh/Chị thật&nbsp;lâu:</p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b class="free-ship">MIỄN PHÍ VẬN CHUYỂN</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>

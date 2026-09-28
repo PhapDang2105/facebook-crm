@@ -131,10 +131,10 @@ export function shouldRedirectDirectly(classification) {
 }
 
 const inAppHints = {
-  zalo: 'Bạn đang mở trong Zalo. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở bằng trình duyệt</b>, rồi bấm lại nút.',
-  facebook: 'Bạn đang mở trong ứng dụng Facebook. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',
-  instagram: 'Bạn đang mở trong Instagram. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',
-  tiktok: 'Bạn đang mở trong TikTok. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',
+  zalo: 'Anh/Chị đang mở trong Zalo. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở bằng trình duyệt</b>, rồi bấm lại nút.',
+  facebook: 'Anh/Chị đang mở trong ứng dụng Facebook. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',
+  instagram: 'Anh/Chị đang mở trong Instagram. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',
+  tiktok: 'Anh/Chị đang mở trong TikTok. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',
   messenger: '',
   'app khac': 'Nếu nút trên không mở được Messenger, hãy mở trang này bằng Safari hoặc Chrome, hoặc gọi Heartline bên dưới.',
   webview: 'Nếu nút trên không mở được Messenger, hãy mở trang này bằng Safari hoặc Chrome, hoặc gọi Heartline bên dưới.'
@@ -165,7 +165,7 @@ const icons = {
  * mở Messenger. Nút là thẻ <a> trỏ thẳng m.me?ref (lượt bấm thật của khách mới
  * kích hoạt Universal Link / App Link), có hướng dẫn riêng khi đang ở trong app,
  * và đường lùi là Heartline + trang Facebook của Page. Không tài nguyên ngoài,
- * không tự chuyển hướng, không cookie. Giọng thẻ bảo hành: "chúng em" / "anh chị".
+ * không tự chuyển hướng, không cookie. Giọng thẻ bảo hành: xưng "em", gọi khách "Anh/Chị".
  *
  * Ghi chú bố cục (không gửi xuống máy khách để giữ trang nhẹ):
  *  - Phiếu ưu đãi kiểu voucher: nền kem, viền chấm, răng cưa hai bên; script căn răng cưa theo đường chấm.
@@ -214,6 +214,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .offers { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
   .offers li { display: flex; align-items: center; gap: 12px; color: #3a2e22; font-size: 15px; line-height: 1.4; }
   .offers li b { color: #2e6b3f; font-weight: 700; }
+  .offers li b.free-ship { color: #eea514; font-weight: 800; letter-spacing: .02em; }
   .thumb { flex: 0 0 48px; display: grid; place-items: center; width: 48px; height: 48px; overflow: hidden; background: #f6f1e4; border-radius: 12px; }
   .thumb img { max-width: 44px; max-height: 44px; width: auto; height: auto; display: block; }
   .thumb-bare { background: transparent; }
@@ -275,11 +276,11 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <body>
 <main>
   <div class="letter">
-    <div class="letter-top"><h1 class="greet">Thân gửi anh chị,</h1><img class="logo" src="/q/brand/logo.webp" alt="${name}" width="96" height="53"></div>
+    <div class="letter-top"><h1 class="greet">Thân gửi Anh/Chị,</h1><img class="logo" src="/q/brand/logo.webp" alt="${name}" width="96" height="53"></div>
     <p class="letter-body thanks"><span class="nowrap">Cảm ơn Anh/Chị đã tin tưởng</span> <span class="nowrap">và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</span></p>
-    <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong anh chị và cả nhà luôn khoẻ, ăn ngon và thật bình an. Em gửi anh/chị chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng anh/chị thật&nbsp;lâu:</p>
+    <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong Anh/Chị và cả nhà luôn khoẻ, ăn ngon và thật bình an. Em gửi Anh/Chị chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng Anh/Chị thật&nbsp;lâu:</p>
     <ul class="offers">
-      <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b></span></li>
+      <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b class="free-ship">MIỄN PHÍ VẬN CHUYỂN</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>
       <li><span class="thumb"><img src="/q/brand/offer-yen-mach.webp" alt="Hai túi Yến mạch 500g" width="54" height="48"></span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-tam-lanh.webp" alt="Hộp Bột Ngũ Cốc Tâm Lành" width="37" height="48"></span><span>Đặc biệt mua Combo&nbsp;3 tặng <b>1&nbsp;hộp Bột Ngũ Cốc Tâm&nbsp;Lành</b></span></li>
@@ -287,7 +288,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <p class="sign"><span>Thương mến,<br><b>Nhà Nắng</b></span><span class="stamp" aria-hidden="true">Nhà<br>Nắng</span></p>
   </div>
   <section class="ticket" aria-label="Phiếu ưu đãi">
-    <div class="ticket-head"><span class="ticket-note">Anh/chị lưu ưu đãi cho đơn hàng tiếp theo nhé</span></div>
+    <div class="ticket-head"><span class="ticket-note">Anh/Chị lưu ưu đãi cho đơn hàng tiếp theo nhé</span></div>
     <div class="channels">
       <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi<small>qua Messenger</small></span>${icons.chevron}</a>
       ${zalo}

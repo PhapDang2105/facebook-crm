@@ -64,7 +64,9 @@ test('trang đệm: nút Mở Messenger là thẻ <a> trỏ thẳng m.me?ref, kh
   assert.match(html, /Nông Sản Giọt Nắng/);
   assert.match(html, /href="https:\/\/www\.facebook\.com\/123456"/);
   assert.match(html, /href="tel:0899677899"/, 'đường lùi Heartline như thẻ bảo hành');
-  assert.match(html, /anh chị/, 'giọng thẻ bảo hành: anh chị / chúng em');
+  assert.match(html, /Anh\/Chị/, 'xưng hô thống nhất: Anh/Chị');
+  assert.doesNotMatch(html, /anh chị|anh\/chị|Anh\/chị|Bạn đang/, 'không lẫn cách xưng hô khác');
+  assert.match(html, /<b class="free-ship">MIỄN PHÍ VẬN CHUYỂN<\/b>/);
   assert.match(html, /\/q\/tmdt-01\/open/);
   assert.doesNotMatch(html, /src="(?!\/q\/brand\/)|<link(?! rel="icon" [^>]*href="\/q\/brand\/)|@import|url\(/, 'không được tải tài nguyên ngoài: /assets nằm sau mật khẩu; chỉ logo/icon dưới /q/brand/ là công khai');
   assert.match(html, /<title>Nông Sản Giọt Nắng \| Cảm ơn quý khách<\/title>/);
@@ -77,7 +79,8 @@ test('trang đệm: nút Mở Messenger là thẻ <a> trỏ thẳng m.me?ref, kh
 });
 
 test('trang đệm: trong app thì có hướng dẫn đúng app', () => {
-  assert.match(render(agents.zaloAndroid), /Bạn đang mở trong Zalo/);
+  assert.match(render(agents.zaloAndroid), /Anh\/Chị đang mở trong Zalo/);
+  assert.doesNotMatch(render(agents.facebookIos), /Bạn đang/, 'hướng dẫn trong app cũng xưng Anh/Chị');
   assert.match(render(agents.zaloIos), /Mở bằng trình duyệt/);
   assert.match(render(agents.facebookIos), /ứng dụng Facebook/);
   assert.match(render(agents.instagram), /Instagram/);

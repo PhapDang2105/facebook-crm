@@ -82,7 +82,8 @@ test('trang đệm: trong app thì có hướng dẫn đúng app', () => {
   assert.match(render(agents.facebookIos), /ứng dụng Facebook/);
   assert.match(render(agents.instagram), /Instagram/);
   assert.match(render(agents.tiktok), /TikTok/);
-  assert.match(render(agents.androidWebview), /sao chép liên kết/);
+  assert.match(render(agents.androidWebview), /mở trang này bằng Safari hoặc Chrome/);
+  assert.doesNotMatch(render(agents.androidWebview), /id="copy"|Sao chép liên kết/, 'không còn nút sao chép liên kết');
   // Trình duyệt trong chính app Messenger: bấm là mở luồng, không cần hướng dẫn.
   assert.doesNotMatch(render('Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Mobile/15E148 [MessengerForiOS;FBAV/470]'), /class="hint"/);
 });

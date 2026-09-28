@@ -136,8 +136,8 @@ const inAppHints = {
   instagram: 'Bạn đang mở trong Instagram. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',
   tiktok: 'Bạn đang mở trong TikTok. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',
   messenger: '',
-  'app khac': 'Nếu nút trên không mở được Messenger, hãy sao chép liên kết rồi mở bằng Safari hoặc Chrome.',
-  webview: 'Nếu nút trên không mở được Messenger, hãy sao chép liên kết rồi mở bằng Safari hoặc Chrome.'
+  'app khac': 'Nếu nút trên không mở được Messenger, hãy mở trang này bằng Safari hoặc Chrome, hoặc gọi Heartline bên dưới.',
+  webview: 'Nếu nút trên không mở được Messenger, hãy mở trang này bằng Safari hoặc Chrome, hoặc gọi Heartline bên dưới.'
 };
 
 /**
@@ -207,7 +207,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .btn:active { background: #f7f2e6; border-color: #cdbf9f; }
   .btn:active { background: #f3ede0; }
   .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
-  .copy { display: inline-block; margin: 4px 0 16px; padding: 0; background: none; border: 0; color: #6b5d4b; font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
   .fallback { margin: 4px 0 0; padding-top: 14px; border-top: 1px dashed #d9cba9; color: #6b5d4b; font-size: 14px; line-height: 1.5; }
   .fallback a { color: #2e6b3f; font-weight: 600; text-decoration: none; }
   .fallback svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 2px; }
@@ -229,13 +228,11 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     ${zalo}
   </div>
   ${hint ? `<div class="hint">${hint}</div>` : ''}
-  <button class="copy" type="button" id="copy" hidden>Sao chép liên kết</button>
   <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${icons.phone}${heartline.display}</a>${facebook}.</p>
 </main>
 <script>
 (function () {
   var open = document.getElementById('open');
-  var copy = document.getElementById('copy');
   var beacon = '/q/${safeCode}/open';
   // Đếm ngay khi ngón tay chạm nút (pointerdown/touchstart), không đợi click:
   // trên iPhone, bấm liên kết mở app là Safari nhảy sang Messenger trước khi
@@ -255,12 +252,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   }
   arm(open, 'messenger');
   arm(document.getElementById('zalo'), 'zalo');
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    copy.hidden = false;
-    copy.addEventListener('click', function () {
-      navigator.clipboard.writeText(open.href).then(function () { copy.textContent = 'Đã sao chép'; }, function () {});
-    });
-  }
 })();
 </script>
 </body>

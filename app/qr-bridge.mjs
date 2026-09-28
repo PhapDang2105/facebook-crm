@@ -206,7 +206,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .thumb { flex: 0 0 56px; display: grid; place-items: center; width: 56px; height: 56px; overflow: hidden; background: #f6f1e4; border-radius: 12px; }
   .thumb img { max-width: 52px; max-height: 50px; width: auto; height: auto; display: block; }
   .thumb-bare { background: transparent; }
-  .thumb-bare img { max-width: 100%; max-height: 100%; }
+  .thumb-bare img { max-width: 44px; max-height: 44px; }
   .sign { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
   .sign b { color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-size: 17px; }
   .stamp { display: grid; place-items: center; width: 44px; height: 44px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-weight: 700; font-size: 12px; line-height: 1.05; text-align: center; transform: rotate(-8deg); opacity: .9; }

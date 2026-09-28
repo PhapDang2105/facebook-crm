@@ -202,6 +202,19 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .ic svg { width: 22px; height: 22px; display: block; }
   .channels { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 3vw, 12px); margin: 0 0 14px; }
   @media (max-width: 340px) { .btn span { font-size: 15.5px; } .gift li { font-size: 14.5px; gap: 10px; } }
+  /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
+  @media (max-height: 680px) {
+    body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+    main { padding-top: 16px; padding-bottom: 14px; }
+    .logo { width: 118px; margin-bottom: 8px; }
+    h1 { margin-bottom: 4px; }
+    .lead { margin-bottom: 12px; font-size: 14px; }
+    .gift { margin-bottom: 14px; }
+    .gift li { padding: 7px 2px; }
+    .btn { padding: 12px 8px 11px; }
+    .btn svg, .btn img { width: 42px; height: 42px; margin-bottom: 8px; }
+    .fallback { padding-top: 10px; }
+  }
   .btn { display: flex; flex-direction: column; align-items: center; padding: 18px 10px 16px; background: #fff; color: #3a2e22; border: 1.5px solid #e3d8bf; border-radius: 14px; text-decoration: none; box-shadow: 0 1px 2px rgba(58,46,34,.06); }
   .btn svg, .btn img { width: 52px; height: 52px; display: block; margin-bottom: 12px; }
   .btn span { order: 1; color: #d4731c; font-size: 17px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }

@@ -19,6 +19,7 @@ Thư mục này chứa mọi thứ cần để đưa CRM lên một máy chủ D
 - `/product-images/*` cũng đi thẳng: Messenger tải ảnh sản phẩm từ đây để hiện trên receipt và sau bảng giá.
 - `/webhooks/landing` đi thẳng: nền tảng landing page (Webcake) gọi bằng máy; endpoint tự xác thực bằng `LANDING_WEBHOOK_TOKEN` trong `.env`. Máy chủ dựng trước khi có khối này thì thêm khối `@landing` từ `Caddyfile` vào `/etc/caddy/Caddyfile` rồi `systemctl reload caddy`.
 - `/webhooks/pancake` đi thẳng: Pancake (pages.fm) gọi bằng máy khi khách nhắn tin; endpoint tự xác thực bằng `PANCAKE_WEBHOOK_TOKEN` trong `.env`. Máy chủ dựng trước khi có khối này thì thêm khối `@pancake` từ `Caddyfile` vào `/etc/caddy/Caddyfile` rồi `systemctl reload caddy`.
+- `/q/*` đi thẳng: trang khách thấy khi quét mã QR trên thẻ cảm ơn, cùng các ảnh logo/ưu đãi dưới `/q/brand/` (máy chủ chỉ phục vụ đúng các tệp đã liệt kê trong `app/server.mjs`).
 - Mọi đường dẫn còn lại yêu cầu tên đăng nhập và mật khẩu.
 
 Khi nào CRM có đăng nhập riêng thì có thể bỏ lớp này.

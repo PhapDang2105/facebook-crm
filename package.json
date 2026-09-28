@@ -1,4 +1,9 @@
 {
+  "name": "facebook-crm",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node app/server.mjs",
     "test": "node --test --import ./tests/helpers/quiet-console.mjs tests/*.test.mjs",

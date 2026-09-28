@@ -12,7 +12,7 @@ Yêu cầu Windows PowerShell 5.1 trở lên. Từ thư mục dự án chạy:
 .\run.ps1
 ```
 
-Sau đó mở `http://localhost:8080`. Dữ liệu demo được sao chép vào `data/processed/crm-store.json` ở lần chạy đầu tiên.
+Sau đó mở `http://localhost:8080`. Dữ liệu chạy thật nằm trong `data/processed/` (không commit); thư mục trống thì CRM khởi động với kho rỗng.
 
 Chạy kiểm thử (Node 22 hoặc bản portable trong `tools/node`):
 

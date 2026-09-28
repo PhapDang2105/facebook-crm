@@ -339,7 +339,7 @@ function renderChatbotFollowUpQueue(queue) {
     <b>Gửi hàng loạt ngay trong CRM: cài cầu nối Pancake (một lần)</b>
     <ol>
       <li>Mở <code>chrome://extensions</code>, bật <b>Chế độ dành cho nhà phát triển</b> (góc phải trên).</li>
-      <li>Bấm <b>Tải tiện ích đã giải nén</b> → chọn thư mục <code>C:\\Users\\first\\Facebook\\facebook-crm\\extensions\\crm-pancake-bridge</code>.</li>
+      <li>Bấm <b>Tải tiện ích đã giải nén</b> → chọn thư mục <code>extensions\\crm-pancake-bridge</code> trong thư mục dự án CRM.</li>
       <li>Tải lại trang CRM này: nút <b>Gửi ngay</b> sẽ hiện ở đây.</li>
     </ol>
     <details><summary>Cách cũ không cần cài: dấu trang trên tab Pancake</summary>

@@ -4,8 +4,8 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { buildExportRows, exportPreviewStreets, exportedOrderData } from './order-export.mjs';
-import { parseXlsx } from './xlsx-import.mjs';
-import { buildPlainXlsx } from './xlsx-export.mjs';
+import { columnIndex as excelColumnIndex, parseXlsx } from './xlsx-import.mjs';
+import { buildPlainXlsx, excelColumnName } from './xlsx-export.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
@@ -22,7 +22,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { cancelPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
-import { goldenLabeled, goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
+import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
 import { applyCustomerOrderEdits } from './order-edits.mjs';
@@ -694,21 +694,6 @@ function escapeXml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
-}
-
-function excelColumnName(index) {
-  let value = index + 1;
-  let name = '';
-  while (value > 0) {
-    value -= 1;
-    name = String.fromCharCode(65 + (value % 26)) + name;
-    value = Math.floor(value / 26);
-  }
-  return name;
-}
-
-function excelColumnIndex(name) {
-  return [...name].reduce((value, character) => (value * 26) + character.charCodeAt(0) - 64, 0) - 1;
 }
 
 function findDataCellStyle(xml, column) {
@@ -1966,7 +1951,7 @@ const server = http.createServer(async (request, response) => {
           // Qua Pancake nhiều ảnh đi chung một tin (một cụm ảnh); Meta gửi từng ảnh.
           if (imageTarget && imageUrls.length && imageTarget.pancakeConversationId) {
             last = await sendConversationMessage(imageTarget, { imageUrls: imageUrls.map(publicImageUrl), staff: true });
-            messages.push(last.message, ...(last.extras || []));
+            messages.push(last.message);
           } else {
             for (const imageUrl of imageTarget ? imageUrls : []) {
               last = await sendConversationMessage(imageTarget, { imageUrl: publicImageUrl(imageUrl), staff: true });

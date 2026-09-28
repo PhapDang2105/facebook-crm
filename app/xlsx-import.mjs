@@ -65,7 +65,7 @@ function excelDate(serial) {
   return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso.replace('T', ' ').replace('.000Z', '');
 }
 
-function columnIndex(address) {
+export function columnIndex(address) {
   const letters = String(address).match(/^[A-Z]+/i)?.[0]?.toUpperCase() || '';
   return [...letters].reduce((value, character) => value * 26 + character.charCodeAt(0) - 64, 0) - 1;
 }

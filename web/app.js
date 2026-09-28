@@ -10403,7 +10403,7 @@ chatbotSettingsEnabled?.addEventListener('change', async () => {
 //
 // Ảnh QR do máy chủ vẽ (/api/qr/image/<mã>.svg|png) và luôn mã hoá /q/<mã>,
 // nên nhân viên chỉ cần gõ mã lô; thống kê đọc từ /api/qr/stats mỗi lần mở.
-const qrPlatformNames = { ios: 'iPhone', android: 'Android', 'may tinh': 'Máy tính', khac: 'Khác' };
+const qrPlatformNames = { ios: 'iPhone', android: 'Android', 'may tinh': 'Máy tính', khac: 'Máy không rõ' };
 const qrBrowserNames = {
   zalo: 'Zalo', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok', messenger: 'Messenger',
   chrome: 'Chrome', safari: 'Safari', samsung: 'Samsung', firefox: 'Firefox', edge: 'Edge', opera: 'Opera',
@@ -10412,9 +10412,9 @@ const qrBrowserNames = {
 
 const qrModeNames = { page: 'trang đệm', redirect: 'chuyển thẳng' };
 
-function qrCountChips(counts, names) {
+function qrCountText(counts, names) {
   const entries = Object.entries(counts || {}).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
-  return entries.length ? entries.map(([key, count]) => `<span class="qr-chip">${escapeHtml(names[key] || key)} ${count}</span>`).join('') : '<span class="qr-chip">—</span>';
+  return entries.length ? entries.map(([key, count]) => `<span>${escapeHtml(names[key] || key)} ${count}</span>`).join('<span>·</span>') : '<span>Chưa có lượt quét</span>';
 }
 
 function formatQrTime(value) {
@@ -10564,10 +10564,9 @@ function renderQrDetail(codes) {
     <div class="qr-detail-info">
       <h2 class="qr-detail-code">${escapeHtml(entry.code)}</h2>
       <div class="qr-detail-link"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a><button type="button" class="qr-mini" data-qr-copy="${escapeHtml(url)}">Sao chép</button></div>
-      <div class="qr-detail-row"><b>Máy</b>${qrCountChips(entry.platforms, qrPlatformNames)}</div>
-      <div class="qr-detail-row"><b>Trình duyệt</b>${qrCountChips(entry.browsers, qrBrowserNames)}</div>
-      <div class="qr-detail-row"><b>Phục vụ</b>${qrCountChips(entry.modes, qrModeNames)}${entry.zaloOpens ? `<span class="qr-chip">bấm Zalo ${entry.zaloOpens}</span>` : ''}</div>
-      <div class="qr-detail-row"><b>Tạo</b><span>${formatQrTime(entry.firstAt)}</span><b>Quét cuối</b><span>${formatQrTime(entry.lastAt)}</span></div>
+      <div class="qr-detail-row"><b>${entry.scans || 0} lượt quét</b><span>·</span><b>${entry.referrals || 0} vào Messenger</b></div>
+      <div class="qr-detail-row">${qrCountText(entry.platforms, qrPlatformNames)}</div>
+      <div class="qr-detail-row"><span>Tạo ${formatQrTime(entry.firstAt)}</span><span>·</span><span>Quét cuối ${formatQrTime(entry.lastAt)}</span></div>
       <div class="qr-detail-actions">
         <a class="qr-download" href="/api/qr/image/${safe}.svg?download=1" download>Tải SVG (để in)</a>
         <a class="qr-download is-secondary" href="/api/qr/image/${safe}.png?download=1" download>Tải PNG</a>

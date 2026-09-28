@@ -177,7 +177,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   // bằng Zalo thì không phải rời app). Chưa đặt liên kết OA ở Cài đặt thì dùng
   // Zalo cá nhân của Heartline (zalo.me/<số điện thoại>).
   const zaloHref = escapeHtml(zaloUrl || `https://zalo.me/${heartline.tel}`);
-  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener" aria-label="Nhận ưu đãi qua Zalo">${icons.zalo}<span>Nhận ưu đãi</span></a>`;
+  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener" aria-label="Lưu ưu đãi qua Zalo">${icons.zalo}<span>Lưu ưu đãi</span></a>`;
   const facebook = fallbackUrl ? ` hoặc nhắn qua trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a>` : '';
   return `<!doctype html>
 <html lang="vi">
@@ -192,15 +192,16 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
-  main { width: 100%; max-width: 380px; padding: 26px 24px 22px; background: #fff; border: 1px solid #d9cba9; border-radius: 4px; text-align: center; }
-  .logo { display: block; width: 170px; height: auto; margin: 0 auto 18px; }
-  h1 { margin: 0 0 8px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-size: 24px; text-wrap: balance; font-weight: 600; line-height: 1.25; }
+  main { width: 100%; max-width: 400px; padding: clamp(20px, 6vw, 28px) clamp(16px, 5.5vw, 26px) 22px; background: #fff; border: 1px solid #d9cba9; border-radius: 4px; text-align: center; }
+  .logo { display: block; width: clamp(140px, 44vw, 170px); height: auto; margin: 0 auto 16px; }
+  h1 { margin: 0 0 8px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-size: clamp(21px, 6.4vw, 26px); text-wrap: balance; font-weight: 600; line-height: 1.25; }
   .lead { margin: 0 auto 20px; max-width: 300px; color: #6b5d4b; font-size: 15px; }
   .gift { margin: 0 0 22px; padding: 0; list-style: none; text-align: left; border-top: 1px dashed #d9cba9; }
   .gift li { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px dashed #d9cba9; color: #3a2e22; font-size: 15.5px; line-height: 1.35; }
   .ic { flex: 0 0 22px; width: 22px; height: 22px; color: #2e6b3f; }
   .ic svg { width: 22px; height: 22px; display: block; }
-  .channels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; }
+  .channels { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 3vw, 12px); margin: 0 0 14px; }
+  @media (max-width: 340px) { .btn span { font-size: 15.5px; } .gift li { font-size: 14.5px; gap: 10px; } }
   .btn { display: flex; flex-direction: column; align-items: center; padding: 18px 10px 16px; background: #fff; color: #3a2e22; border: 1.5px solid #e3d8bf; border-radius: 14px; text-decoration: none; box-shadow: 0 1px 2px rgba(58,46,34,.06); }
   .btn svg, .btn img { width: 52px; height: 52px; display: block; margin-bottom: 12px; }
   .btn span { order: 1; color: #d4731c; font-size: 17px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }
@@ -220,11 +221,11 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   <p class="lead">Anh chị nhắn cho chúng em qua Messenger hoặc Zalo để nhận:</p>
   <ul class="gift">
     <li><span class="ic">${icons.guide}</span><span>Hướng dẫn dùng ngon nhất</span></li>
-    <li><span class="ic">${icons.offer}</span><span>Ưu đãi cho lần mua sau</span></li>
+    <li><span class="ic">${icons.offer}</span><span>Ưu đãi cho lần mua hàng tiếp theo</span></li>
     <li><span class="ic">${icons.swap}</span><span>Đổi ngay nếu hạt mềm, thiếu hàng</span></li>
   </ul>
   <div class="channels">
-    <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Nhận ưu đãi qua Messenger">${icons.messenger}<span>Nhận ưu đãi</span></a>
+    <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger">${icons.messenger}<span>Lưu ưu đãi</span></a>
     ${zalo}
   </div>
   ${hint ? `<div class="hint">${hint}</div>` : ''}

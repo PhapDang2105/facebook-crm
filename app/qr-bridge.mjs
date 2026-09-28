@@ -157,7 +157,6 @@ const icons = {
   zalo: `<img src="/q/brand/zalo.webp" alt="" width="30" height="30">`,
   chevron: `<svg class="chev" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
   truck: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 5.5h12v10h-12z"/><path d="M13.5 9h4.2l3.3 3.6v2.9h-7.5"/><circle cx="6" cy="17.5" r="2"/><circle cx="17.5" cy="17.5" r="2"/></svg>`,
-  oat: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22V8"/><path d="M12 8c-2.4-.4-3.6-2.2-3.4-4.6 2.4.2 3.6 2 3.4 4.6z"/><path d="M12 8c2.4-.4 3.6-2.2 3.4-4.6-2.4.2-3.6 2-3.4 4.6z"/><path d="M12 13c-2.6-.3-4-2.2-3.8-4.8 2.6.2 4 2.2 3.8 4.8z"/><path d="M12 13c2.6-.3 4-2.2 3.8-4.8-2.6.2-4 2.2-3.8 4.8z"/><path d="M12 18c-2.6-.3-4-2.2-3.8-4.8 2.6.2 4 2.2 3.8 4.8z"/><path d="M12 18c2.6-.3 4-2.2 3.8-4.8-2.6.2-4 2.2-3.8 4.8z"/></svg>`,
   phone: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg>`
 };
 
@@ -273,7 +272,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <ul class="offers">
       <li><span class="thumb thumb-icon">${icons.truck}</span><span><b>Miễn phí vận chuyển</b> cho toàn bộ đơn hàng tiếp theo</span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>
-      <li><span class="thumb thumb-icon">${icons.oat}</span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
+      <li><span class="thumb"><img src="/q/brand/offer-yen-mach.webp" alt="Hai túi Yến mạch 500g" width="54" height="48"></span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-tam-lanh.webp" alt="Hộp Bột Ngũ Cốc Tâm Lành" width="37" height="48"></span><span>Đặc biệt mua Combo&nbsp;3 tặng <b>1&nbsp;hộp Bột Ngũ Cốc Tâm&nbsp;Lành</b></span></li>
     </ul>
     <p class="sign"><span>Thương mến,<br><b>Nhà Nắng</b></span><span class="stamp" aria-hidden="true">Nhà<br>Nắng</span></p>

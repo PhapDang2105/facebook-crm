@@ -227,7 +227,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .chev { flex: 0 0 22px; width: 22px; height: 22px; opacity: .9; animation: nudge 1.8s ease-in-out infinite; }
   @keyframes nudge { 0%, 70%, 100% { transform: translateX(0); } 80% { transform: translateX(4px); } 90% { transform: translateX(0); } }
   @media (prefers-reduced-motion: reduce) { .chev { animation: none; } .btn { transition: none; } }
-  .micro { margin: 10px 0 0; color: #8a6d45; font-size: 13px; }
   /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
   @media (max-width: 340px) { h1 { font-size: 19.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 16.5px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
@@ -242,7 +241,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     .ticket-head { padding: 8px 0 7px; margin-bottom: 10px; }
     .btn { min-height: 50px; }
     .channels { gap: 8px; }
-    .micro { margin-top: 8px; }
     .fallback { padding-top: 10px; }
   }
   .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
@@ -268,7 +266,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
       <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi</span>${icons.chevron}</a>
       ${zalo}
     </div>
-    <p class="micro">Miễn phí · Một chạm, chúng em gửi ngay</p>
   </section>
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${icons.phone}${heartline.display}</a>${facebook}.</p>

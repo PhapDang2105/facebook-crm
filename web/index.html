@@ -679,38 +679,34 @@
         </section>
         <section class="settings-section-content hidden" data-settings-panel="qr" aria-labelledby="qr-settings-title">
           <section class="settings-card qr-settings-card">
-            <header class="settings-card-head">
-              <div>
-                <h1 id="qr-settings-title">Mã QR</h1>
+            <header class="settings-card-head qr-settings-head">
+              <h1 id="qr-settings-title">Mã QR</h1>
+              <div class="qr-range" id="qr-range" role="group" aria-label="Khoảng thời gian">
+                <button type="button" data-qr-range="7">7 ngày</button>
+                <button type="button" data-qr-range="30" class="is-active">30 ngày</button>
+                <button type="button" data-qr-range="all">Tất cả</button>
               </div>
-            </header>
-            <div class="qr-settings-body">
               <form class="qr-make" id="qr-make-form">
-                <label class="qr-make-field"><span>Mã lô in</span><input id="qr-code-input" name="code" placeholder="vd: tmdt-01" autocomplete="off" spellcheck="false" maxlength="40" pattern="[a-z0-9][a-z0-9-]{0,39}" title="Chữ thường, số và gạch nối, tối đa 40 ký tự"></label>
+                <input id="qr-code-input" name="code" placeholder="Mã lô mới, vd: tmdt-02" autocomplete="off" spellcheck="false" maxlength="40" pattern="[a-z0-9][a-z0-9-]{0,39}" title="Chữ thường, số và gạch nối, tối đa 40 ký tự" aria-label="Mã lô mới">
                 <button class="settings-save-button" type="submit">Tạo mã QR</button>
               </form>
-              <form class="qr-make" id="qr-prefill-form">
-                <label class="qr-make-field qr-make-field-wide"><span>Tin soạn sẵn khi mở Messenger từ thẻ (tùy chọn; để trống khi Botcake đã tự chào theo ref. {page} = tên Page, {code} = mã lô; tối đa 140 ký tự)</span><input id="qr-prefill-text" name="prefillText" placeholder="Để trống, hoặc: Mình vừa quét thẻ cảm ơn {page}, cho mình nhận quà nhé #{code}" autocomplete="off" maxlength="140"></label>
-                <button class="settings-save-button" type="submit">Lưu tin soạn sẵn</button>
-              </form>
-              <form class="qr-make" id="qr-zalo-form">
-                <label class="qr-make-field qr-make-field-wide"><span>Liên kết Zalo trên trang đệm (để trống là không hiện nút Zalo)</span><input id="qr-zalo-url" name="zaloUrl" placeholder="https://zalo.me/… hoặc https://zalo.me/g/…" autocomplete="off" spellcheck="false" inputmode="url"></label>
-                <button class="settings-save-button" type="submit">Lưu liên kết Zalo</button>
-              </form>
-              <div class="qr-preview hidden" id="qr-preview">
-                <img class="qr-preview-image" id="qr-preview-image" alt="Mã QR">
-                <div class="qr-preview-info">
-                  <p class="qr-preview-code" id="qr-preview-code"></p>
-                  <p class="qr-preview-url"><a id="qr-preview-url" target="_blank" rel="noopener"></a></p>
-                  <p class="qr-preview-note" id="qr-preview-messenger"></p>
-                  <p class="qr-preview-note">In cạnh QR từ 2,2 cm, chừa viền trắng quanh mã, in kèm dòng địa chỉ bên trên cho người không quét được. Tệp SVG đưa nhà in; PNG để xem nhanh.</p>
-                  <div class="qr-preview-actions">
-                    <a class="qr-download" id="qr-download-svg" download>Tải SVG (để in)</a>
-                    <a class="qr-download" id="qr-download-png" download>Tải PNG</a>
-                  </div>
-                </div>
-              </div>
+            </header>
+            <div class="qr-settings-body">
+              <div class="qr-metrics" id="qr-metrics"></div>
+              <div class="qr-chart" id="qr-chart"></div>
               <div class="qr-stats" id="qr-stats"><p class="channel-empty">Đang tải thống kê...</p></div>
+              <div class="qr-lower">
+                <section class="qr-detail hidden" id="qr-detail" aria-label="Chi tiết mã"></section>
+                <section class="qr-recent" id="qr-recent" aria-label="Lượt gần đây"></section>
+              </div>
+              <details class="qr-options" id="qr-options">
+                <summary>Tuỳ chọn trang đệm</summary>
+                <form class="qr-options-form" id="qr-options-form">
+                  <label><span>Tin soạn sẵn khi mở Messenger</span><input id="qr-prefill-text" name="prefillText" placeholder="Để trống nếu Botcake đã tự chào theo ref" autocomplete="off" maxlength="140" title="{page} = tên Page, {code} = mã lô; tối đa 140 ký tự; CRM tự nối #mã vào cuối"></label>
+                  <label><span>Liên kết Zalo</span><input id="qr-zalo-url" name="zaloUrl" placeholder="https://zalo.me/… (để trống là không hiện nút Zalo)" autocomplete="off" spellcheck="false" inputmode="url"></label>
+                  <button class="settings-save-button" type="submit">Lưu</button>
+                </form>
+              </details>
             </div>
           </section>
         </section>

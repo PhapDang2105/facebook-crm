@@ -10401,9 +10401,11 @@ const qrBrowserNames = {
   webview: 'Trong app', 'app khac': 'App khác', khac: 'Khác'
 };
 
-function qrCountList(counts, names) {
+const qrModeNames = { page: 'trang đệm', redirect: 'chuyển thẳng' };
+
+function qrCountChips(counts, names) {
   const entries = Object.entries(counts || {}).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
-  return entries.length ? entries.map(([key, count]) => `${escapeHtml(names[key] || key)} ${count}`).join(', ') : '—';
+  return entries.length ? entries.map(([key, count]) => `<span class="qr-chip">${escapeHtml(names[key] || key)} ${count}</span>`).join('') : '<span class="qr-chip">—</span>';
 }
 
 function formatQrTime(value) {
@@ -10412,57 +10414,188 @@ function formatQrTime(value) {
   return new Date(time).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function showQrPreview(code) {
-  const preview = document.querySelector('#qr-preview');
-  if (!preview) return;
-  const safe = encodeURIComponent(code);
-  document.querySelector('#qr-preview-image').src = `/api/qr/image/${safe}.png?size=512`;
-  document.querySelector('#qr-preview-code').textContent = `Mã ${code}`;
-  const link = document.querySelector('#qr-preview-url');
-  const url = `${qrBaseUrl || window.location.origin}/q/${code}`;
-  link.textContent = url;
-  link.href = url;
-  const known = qrStatsCodes.find(entry => entry.code === code);
-  const messengerNote = document.querySelector('#qr-preview-messenger');
-  if (messengerNote) {
-    messengerNote.textContent = known?.prefillText
-      ? `Khách quét sẽ mở Messenger của ${qrPageName || 'Page'} với ref "${code}" (Botcake tự chào nếu có công cụ Messenger Ref URL với Custom Ref = ${code}) và tin soạn sẵn: “${known.prefillText}”.`
-      : `Khách quét sẽ mở Messenger của ${qrPageName || 'Page'} với ref "${code}". Botcake tự gửi tin ưu đãi ngay khi mở hội thoại nếu có công cụ Messenger Ref URL với Custom Ref Parameter = ${code}; tin đó kết thúc bằng "Mã thẻ: #${code}" để CRM ghi nhận.`;
-  }
-  document.querySelector('#qr-download-svg').href = `/api/qr/image/${safe}.svg?download=1`;
-  document.querySelector('#qr-download-png').href = `/api/qr/image/${safe}.png?download=1`;
-  const input = document.querySelector('#qr-code-input');
-  if (input && input.value !== code) input.value = code;
-  preview.classList.remove('hidden');
+function formatQrShortTime(value) {
+  const time = Number(value) || 0;
+  if (!time) return '—';
+  return new Date(time).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
 }
 
-let qrBaseUrl = '';
-let qrPageName = '';
-let qrStatsCodes = [];
+function qrPercent(part, whole) {
+  return whole ? `${Math.round((part / whole) * 100)}%` : '';
+}
 
-function renderQrStats({ codes = [], baseUrl = '', pageName = '' } = {}) {
+// Trạng thái màn hình: số liệu từ /api/qr/stats, kỳ đang chọn (7/30 ngày hoặc
+// tất cả) và mã đang xem chi tiết. Số theo kỳ cộng từ `days` của từng mã; "Tất
+// cả" dùng tổng cộng dồn nên khớp với số liệu cũ.
+const qrState = { stats: null, settings: null, range: '30', selected: '' };
+
+function qrDayKeys(today, count) {
+  const [year, month, day] = String(today || '').split('-').map(Number);
+  const base = year ? Date.UTC(year, month - 1, day) : Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+  const keys = [];
+  for (let index = count - 1; index >= 0; index -= 1) keys.push(new Date(base - index * 86_400_000).toISOString().slice(0, 10));
+  return keys;
+}
+
+/** Số của một mã trong kỳ đang chọn: quét, lượt phục vụ bằng trang đệm, bấm mở, bấm Zalo, vào Messenger. */
+function qrRangeTotals(entry, keys) {
+  if (!keys) {
+    return {
+      scans: entry.scans || 0,
+      pages: Number(entry.modes?.page) || 0,
+      opens: entry.opens || 0,
+      zaloOpens: entry.zaloOpens || 0,
+      referrals: entry.referrals || 0
+    };
+  }
+  const totals = { scans: 0, pages: 0, opens: 0, zaloOpens: 0, referrals: 0 };
+  for (const key of keys) {
+    const day = entry.days?.[key];
+    if (!day) continue;
+    totals.scans += day.scans || 0;
+    totals.pages += day.pages || 0;
+    totals.opens += day.opens || 0;
+    totals.zaloOpens += day.zaloOpens || 0;
+    totals.referrals += day.referrals || 0;
+  }
+  return totals;
+}
+
+function qrCurrentKeys() {
+  const range = qrState.range;
+  if (range === 'all') return null;
+  return qrDayKeys(qrState.stats?.today, Number(range) || 30);
+}
+
+function renderQrMetrics(codes, keys) {
+  const container = document.querySelector('#qr-metrics');
+  if (!container) return;
+  const sum = { scans: 0, pages: 0, opens: 0, referrals: 0 };
+  let active = 0;
+  for (const entry of codes) {
+    const totals = qrRangeTotals(entry, keys);
+    sum.scans += totals.scans;
+    sum.pages += totals.pages;
+    sum.opens += totals.opens;
+    sum.referrals += totals.referrals;
+    if (totals.scans) active += 1;
+  }
+  const today = qrState.stats?.today;
+  let todayScans = 0;
+  for (const entry of codes) todayScans += entry.days?.[today]?.scans || 0;
+  const label = keys ? `${keys.length} ngày qua` : 'từ đầu';
+  container.innerHTML = `
+    <div class="qr-metric"><span class="qr-metric-label">Lượt quét</span><span class="qr-metric-value">${sum.scans}</span><span class="qr-metric-sub">Hôm nay ${todayScans} · ${label}</span></div>
+    <div class="qr-metric"><span class="qr-metric-label">Vào Messenger</span><span class="qr-metric-value">${sum.referrals}<small>${qrPercent(sum.referrals, sum.scans)}</small></span><span class="qr-metric-sub">Referral thật nhận về trên lượt quét</span></div>
+    <div class="qr-metric"><span class="qr-metric-label">Bấm “Mở Messenger”</span><span class="qr-metric-value">${sum.opens}<small>${qrPercent(sum.opens, sum.pages)}</small></span><span class="qr-metric-sub">Trên ${sum.pages} lượt xem trang đệm</span></div>
+    <div class="qr-metric"><span class="qr-metric-label">Mã đang theo dõi</span><span class="qr-metric-value">${codes.length}</span><span class="qr-metric-sub">${active} mã có lượt quét ${label}</span></div>`;
+}
+
+function renderQrChart(codes) {
+  const container = document.querySelector('#qr-chart');
+  if (!container) return;
+  const keys = qrDayKeys(qrState.stats?.today, qrState.range === '7' ? 7 : 30);
+  const selected = qrState.selected ? codes.filter(entry => entry.code === qrState.selected) : codes;
+  const series = keys.map(key => {
+    let scans = 0;
+    let referrals = 0;
+    for (const entry of selected) {
+      scans += entry.days?.[key]?.scans || 0;
+      referrals += entry.days?.[key]?.referrals || 0;
+    }
+    return { key, scans, referrals };
+  });
+  const peak = Math.max(1, ...series.map(point => point.scans), ...series.map(point => point.referrals));
+  const today = qrState.stats?.today;
+  const label = day => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
+  const every = keys.length > 10 ? 5 : 1;
+  container.innerHTML = `
+    <div class="qr-chart-head"><b>${qrState.selected ? escapeHtml(qrState.selected) : 'Tất cả mã'} · ${keys.length} ngày</b>
+      <span class="qr-legend"><i></i>Quét</span><span class="qr-legend is-arrival"><i></i>Vào Messenger</span></div>
+    <div class="qr-bars">${series.map(point => `<div class="qr-bar${point.key === today ? ' is-today' : ''}" title="${label(point.key)}: quét ${point.scans}, vào Messenger ${point.referrals}">
+        <i style="height:${Math.round((point.scans / peak) * 100)}%"></i><i class="is-arrival" style="height:${Math.round((point.referrals / peak) * 100)}%"></i></div>`).join('')}</div>
+    <div class="qr-bar-axis">${series.map((point, index) => `<span>${index % every === 0 || index === series.length - 1 ? label(point.key) : ''}</span>`).join('')}</div>`;
+}
+
+function renderQrTable(codes, keys) {
   const container = document.querySelector('#qr-stats');
   if (!container) return;
-  qrBaseUrl = baseUrl || '';
-  qrPageName = pageName || '';
-  qrStatsCodes = codes;
   if (!codes.length) {
-    container.innerHTML = '<p class="channel-empty">Chưa có lượt quét nào. Tạo mã QR ở trên, in thử rồi quét bằng điện thoại để thấy số liệu tại đây.</p>';
+    container.innerHTML = '<p class="channel-empty">Chưa có mã nào. Gõ mã lô ở trên (vd: tmdt-01) rồi bấm Tạo mã QR để lấy ảnh in.</p>';
     return;
   }
+  const rows = codes.map(entry => ({ entry, totals: qrRangeTotals(entry, keys) }))
+    .sort((a, b) => b.totals.scans - a.totals.scans || (b.entry.lastAt || 0) - (a.entry.lastAt || 0));
+  const cell = (value, whole) => `<td class="is-num">${value}${whole ? `<small>${qrPercent(value, whole)}</small>` : ''}</td>`;
   container.innerHTML = `<table class="qr-stats-table"><thead><tr>
-      <th>Mã</th><th>Lượt quét</th><th>Máy</th><th>Trình duyệt</th><th>Bấm nút</th><th>Vào Messenger</th><th>Lần cuối</th><th></th>
-    </tr></thead><tbody>${codes.map(entry => `<tr>
-      <td><b>${escapeHtml(entry.code)}</b></td>
-      <td>${entry.scans || 0}</td>
-      <td>${qrCountList(entry.platforms, qrPlatformNames)}</td>
-      <td>${qrCountList(entry.browsers, qrBrowserNames)}</td>
-      <td>Messenger ${entry.opens || 0}${entry.openRate === null || entry.openRate === undefined ? '' : ` <small>(${entry.openRate}% lượt xem trang)</small>`}${entry.zaloOpens ? `<br>Zalo ${entry.zaloOpens}` : ''}</td>
-      <td>${entry.referrals || 0}${entry.arrivalRate === null || entry.arrivalRate === undefined ? '' : ` <small>(${entry.arrivalRate}%)</small>`}</td>
-      <td>${formatQrTime(entry.lastAt)}</td>
-      <td><button type="button" class="qr-stats-show" data-qr-code="${escapeHtml(entry.code)}">Xem QR</button></td>
-    </tr>`).join('')}</tbody></table>
-    <p class="qr-stats-note">Bấm nút chỉ đếm với lượt được phục vụ bằng trang đệm (iPhone, Zalo, trình duyệt trong app); Android Chrome được chuyển thẳng sang Messenger nên không có bước này. Vào Messenger là số referral Meta thật sự gửi về, Meta không cam kết gửi đủ.</p>`;
+      <th>Mã</th><th class="is-num">Quét</th><th class="is-num">Trang đệm</th><th class="is-num">Bấm mở</th><th class="is-num">Vào Messenger</th><th>Lần cuối</th><th></th>
+    </tr></thead><tbody>${rows.map(({ entry, totals }) => `<tr data-qr-row="${escapeHtml(entry.code)}"${entry.code === qrState.selected ? ' class="is-selected"' : ''}>
+      <td class="is-code"><b>${escapeHtml(entry.code)}</b></td>
+      ${cell(totals.scans)}
+      ${cell(totals.pages, totals.scans)}
+      ${cell(totals.opens, totals.pages)}
+      ${cell(totals.referrals, totals.scans)}
+      <td class="is-time">${formatQrTime(entry.lastAt)}</td>
+      <td class="is-actions"><a class="qr-mini" href="/api/qr/image/${encodeURIComponent(entry.code)}.svg?download=1" download>Tải SVG</a><button type="button" class="qr-mini is-danger" data-qr-delete="${escapeHtml(entry.code)}">Xoá</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function renderQrDetail(codes) {
+  const container = document.querySelector('#qr-detail');
+  if (!container) return;
+  const entry = codes.find(item => item.code === qrState.selected);
+  if (!entry) {
+    container.classList.add('hidden');
+    container.innerHTML = '';
+    return;
+  }
+  const safe = encodeURIComponent(entry.code);
+  const url = entry.url || `${qrState.stats?.baseUrl || window.location.origin}/q/${entry.code}`;
+  container.innerHTML = `
+    <img class="qr-detail-image" src="/api/qr/image/${safe}.png?size=512" alt="Mã QR ${escapeHtml(entry.code)}">
+    <div class="qr-detail-info">
+      <h2 class="qr-detail-code">${escapeHtml(entry.code)}</h2>
+      <div class="qr-detail-link"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a><button type="button" class="qr-mini" data-qr-copy="${escapeHtml(url)}">Sao chép</button></div>
+      <div class="qr-detail-row"><b>Máy</b>${qrCountChips(entry.platforms, qrPlatformNames)}</div>
+      <div class="qr-detail-row"><b>Trình duyệt</b>${qrCountChips(entry.browsers, qrBrowserNames)}</div>
+      <div class="qr-detail-row"><b>Phục vụ</b>${qrCountChips(entry.modes, qrModeNames)}${entry.zaloOpens ? `<span class="qr-chip">bấm Zalo ${entry.zaloOpens}</span>` : ''}</div>
+      <div class="qr-detail-row"><b>Tạo</b><span>${formatQrTime(entry.firstAt)}</span><b>Quét cuối</b><span>${formatQrTime(entry.lastAt)}</span></div>
+      <p class="qr-detail-note">Khách quét mở Messenger ${escapeHtml(qrState.stats?.pageName || 'của Page')} với ref <b>${escapeHtml(entry.code)}</b>. Botcake: công cụ Messenger Ref URL với Custom Ref = ${escapeHtml(entry.code)}, tin kết thúc bằng “Mã thẻ: #${escapeHtml(entry.code)}”.${entry.prefillText ? ` Tin soạn sẵn: “${escapeHtml(entry.prefillText)}”.` : ''} In từ 2,2 cm, chừa viền trắng; đưa nhà in tệp SVG.</p>
+      <div class="qr-detail-actions">
+        <a class="qr-download" href="/api/qr/image/${safe}.svg?download=1" download>Tải SVG (để in)</a>
+        <a class="qr-download is-secondary" href="/api/qr/image/${safe}.png?download=1" download>Tải PNG</a>
+        <button type="button" class="qr-download is-danger" data-qr-delete="${escapeHtml(entry.code)}">Xoá mã</button>
+      </div>
+    </div>`;
+  container.classList.remove('hidden');
+}
+
+function renderQrRecent(recent) {
+  const container = document.querySelector('#qr-recent');
+  if (!container) return;
+  const items = (recent || []).slice(0, 40);
+  container.innerHTML = `<h2>Lượt gần đây</h2>${items.length ? `<ul class="qr-recent-list">${items.map(item => {
+    const open = item.event === 'open' || item.event === 'open-zalo';
+    const text = item.event === 'open-zalo' ? 'Bấm “Nhắn qua Zalo”'
+      : item.event === 'open' ? 'Bấm “Mở Messenger”'
+        : `Quét · ${qrPlatformNames[item.platform] || item.platform || '—'} · ${qrBrowserNames[item.browser] || item.browser || '—'} · ${qrModeNames[item.mode] || item.mode || ''}`;
+    return `<li><span class="qr-recent-time">${formatQrShortTime(item.at)}</span><span class="qr-recent-text${open ? ' is-open' : ''}"><b>${escapeHtml(item.code)}</b> · ${escapeHtml(text)}</span></li>`;
+  }).join('')}</ul>` : '<p class="channel-empty">Chưa có lượt quét nào. In thử rồi quét bằng điện thoại để thấy ở đây.</p>'}`;
+}
+
+function renderQrDashboard() {
+  const stats = qrState.stats;
+  if (!stats) return;
+  const codes = stats.codes || [];
+  if (qrState.selected && !codes.some(entry => entry.code === qrState.selected)) qrState.selected = '';
+  if (!qrState.selected && codes.length) qrState.selected = [...codes].sort((a, b) => (b.scans || 0) - (a.scans || 0))[0].code;
+  const keys = qrCurrentKeys();
+  document.querySelectorAll('#qr-range [data-qr-range]').forEach(button => button.classList.toggle('is-active', button.dataset.qrRange === qrState.range));
+  renderQrMetrics(codes, keys);
+  renderQrChart(codes);
+  renderQrTable(codes, keys);
+  renderQrDetail(codes);
+  renderQrRecent(stats.recent);
 }
 
 async function loadQrSettings() {
@@ -10473,59 +10606,50 @@ async function loadQrSettings() {
       readApiResponse(await fetch('/api/qr/stats')),
       readApiResponse(await fetch('/api/qr/settings'))
     ]);
+    qrState.stats = stats;
+    qrState.settings = settings;
     const zaloInput = document.querySelector('#qr-zalo-url');
     if (zaloInput && document.activeElement !== zaloInput) zaloInput.value = settings.zaloUrl || '';
     const prefillInput = document.querySelector('#qr-prefill-text');
     if (prefillInput && document.activeElement !== prefillInput) prefillInput.value = settings.prefillText || '';
-    renderQrStats(stats);
+    renderQrDashboard();
   } catch (error) {
     container.innerHTML = '<p class="channel-empty">Chưa tải được thống kê.</p>';
     showToast(error.message || 'Chưa tải được thống kê mã QR.', 'error');
   }
 }
 
-document.querySelector('#qr-prefill-form')?.addEventListener('submit', async event => {
+document.querySelector('#qr-range')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-qr-range]');
+  if (!button) return;
+  qrState.range = button.dataset.qrRange;
+  renderQrDashboard();
+});
+
+document.querySelector('#qr-options-form')?.addEventListener('submit', async event => {
   event.preventDefault();
-  const input = document.querySelector('#qr-prefill-text');
+  const prefillInput = document.querySelector('#qr-prefill-text');
+  const zaloInput = document.querySelector('#qr-zalo-url');
   const button = event.currentTarget.querySelector('button[type="submit"]');
   if (button) button.disabled = true;
   try {
     const saved = await readApiResponse(await fetch('/api/qr/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prefillText: String(input?.value || '').trim() })
+      body: JSON.stringify({ prefillText: String(prefillInput?.value || '').trim(), zaloUrl: String(zaloInput?.value || '').trim() })
     }));
-    if (input) input.value = saved.prefillText || '';
-    showToast(saved.prefillText ? 'Đã lưu tin soạn sẵn.' : 'Đã về tin soạn sẵn mặc định.', 'success');
+    if (prefillInput) prefillInput.value = saved.prefillText || '';
+    if (zaloInput) zaloInput.value = saved.zaloUrl || '';
+    showToast('Đã lưu tuỳ chọn trang đệm.', 'success');
     loadQrSettings();
   } catch (error) {
-    showToast(error.message || 'Chưa lưu được tin soạn sẵn.', 'error');
+    showToast(error.message || 'Chưa lưu được tuỳ chọn trang đệm.', 'error');
   } finally {
     if (button) button.disabled = false;
   }
 });
 
-document.querySelector('#qr-zalo-form')?.addEventListener('submit', async event => {
-  event.preventDefault();
-  const input = document.querySelector('#qr-zalo-url');
-  const button = event.currentTarget.querySelector('button[type="submit"]');
-  if (button) button.disabled = true;
-  try {
-    const saved = await readApiResponse(await fetch('/api/qr/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zaloUrl: String(input?.value || '').trim() })
-    }));
-    if (input) input.value = saved.zaloUrl || '';
-    showToast(saved.zaloUrl ? 'Đã lưu. Trang đệm sẽ hiện thêm nút "Nhắn qua Zalo".' : 'Đã bỏ nút Zalo khỏi trang đệm.', 'success');
-  } catch (error) {
-    showToast(error.message || 'Chưa lưu được liên kết Zalo.', 'error');
-  } finally {
-    if (button) button.disabled = false;
-  }
-});
-
-document.querySelector('#qr-make-form')?.addEventListener('submit', event => {
+document.querySelector('#qr-make-form')?.addEventListener('submit', async event => {
   event.preventDefault();
   const input = document.querySelector('#qr-code-input');
   const code = String(input?.value || '').trim().toLowerCase();
@@ -10534,11 +10658,61 @@ document.querySelector('#qr-make-form')?.addEventListener('submit', event => {
     input?.focus();
     return;
   }
-  input.value = code;
-  showQrPreview(code);
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  if (button) button.disabled = true;
+  try {
+    const result = await readApiResponse(await fetch('/api/qr/codes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
+    }));
+    input.value = '';
+    qrState.selected = code;
+    showToast(result.created ? `Đã tạo mã ${code}. Tải SVG bên dưới để in.` : `Mã ${code} đã có, đang hiện chi tiết.`, 'success');
+    await loadQrSettings();
+    document.querySelector('#qr-detail')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (error) {
+    showToast(error.message || 'Chưa tạo được mã QR.', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
 });
 
-document.querySelector('#qr-stats')?.addEventListener('click', event => {
-  const button = event.target.closest('[data-qr-code]');
-  if (button) showQrPreview(button.dataset.qrCode);
+async function deleteQrCodeFromUi(code) {
+  const entry = qrState.stats?.codes?.find(item => item.code === code);
+  const scans = entry?.scans || 0;
+  if (!window.confirm(`Xoá mã ${code}?${scans ? ` Mất luôn ${scans} lượt quét đã đếm.` : ''} Thẻ đã in với mã này quét sẽ không được đếm nữa.`)) return;
+  try {
+    await readApiResponse(await fetch(`/api/qr/codes/${encodeURIComponent(code)}`, { method: 'DELETE' }));
+    if (qrState.selected === code) qrState.selected = '';
+    showToast(`Đã xoá mã ${code}.`, 'success');
+    loadQrSettings();
+  } catch (error) {
+    showToast(error.message || 'Chưa xoá được mã.', 'error');
+  }
+}
+
+document.querySelector('.qr-settings-body')?.addEventListener('click', async event => {
+  const remove = event.target.closest('[data-qr-delete]');
+  if (remove) {
+    event.stopPropagation();
+    deleteQrCodeFromUi(remove.dataset.qrDelete);
+    return;
+  }
+  const copy = event.target.closest('[data-qr-copy]');
+  if (copy) {
+    try {
+      await navigator.clipboard.writeText(copy.dataset.qrCopy);
+      showToast('Đã sao chép liên kết.', 'success');
+    } catch {
+      showToast('Trình duyệt không cho sao chép, hãy chọn và chép tay.', 'error');
+    }
+    return;
+  }
+  if (event.target.closest('a')) return;
+  const row = event.target.closest('[data-qr-row]');
+  if (row) {
+    qrState.selected = row.dataset.qrRow;
+    renderQrDashboard();
+  }
 });

@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 process.env.QR_SCANS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'qr-')), 'qr-scans.json');
 
 const { classifyUserAgent, isLinkPreviewBot, renderBridgePage, shouldRedirectDirectly } = await import('../app/qr-bridge.mjs');
-const { recordQrScan, recordQrOpen, listQrScans, isValidQrCode, isKnownQrCode, registerQrCode, deleteQrCode, countQrReferrals } = await import('../app/qr-scans.mjs');
+const { recordQrScan, recordQrOpen, listQrScans, isValidQrCode, isKnownQrCode, registerQrCode, deleteQrCode, countQrReferrals, countQrReferralsByDay, qrDayKey } = await import('../app/qr-scans.mjs');
 
 const agents = {
   iosSafari: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
@@ -189,4 +189,37 @@ test('thống kê "vào Messenger": một lượt quét về CRM ba đường (M
   ];
   assert.deepEqual(countQrReferrals(conversations), { 'tmdt-01': 3, 'tmdt-02': 1 });
   assert.deepEqual(countQrReferrals([]), {});
+  // Cùng phép khử trùng, tách theo ngày (giờ Việt Nam) để bảng điều khiển lọc theo kỳ.
+  assert.deepEqual(countQrReferralsByDay(conversations), { 'tmdt-01': { '1970-01-11': 2, '1970-01-12': 1 }, 'tmdt-02': { '1970-01-11': 1 } });
+});
+
+test('bộ đếm theo ngày: quét, trang đệm, bấm mở, bấm Zalo ghi vào ngày (giờ Việt Nam); referral theo ngày gộp vào; kho cũ chưa có days thì dựng lại từ lượt gần đây', async () => {
+  assert.equal(qrDayKey(Date.UTC(2026, 8, 27, 18, 30)), '2026-09-28', '01:30 sáng 28/09 giờ Việt Nam');
+  // tmdt-01 ở test trên: 3 lượt quét (2 trang đệm), 1 bấm mở, 1 bấm Zalo, tất cả ngày 1970-01-01.
+  const { codes } = await listQrScans({ 'tmdt-01': 2 }, { referralDays: { 'tmdt-01': { '1970-01-01': 1, '1970-01-02': 1 } } });
+  const entry = codes.find(item => item.code === 'tmdt-01');
+  assert.deepEqual(entry.days, {
+    '1970-01-01': { scans: 3, pages: 2, opens: 1, zaloOpens: 1, referrals: 1 },
+    '1970-01-02': { scans: 0, pages: 0, opens: 0, zaloOpens: 0, referrals: 1 }
+  });
+  // Kho ghi từ bản trước: mục không có `days`, chỉ có lượt gần đây → dựng lại một lần khi nạp.
+  const legacyPath = path.join(mkdtempSync(path.join(tmpdir(), 'qr-legacy-')), 'qr-scans.json');
+  const day = 86_400_000;
+  writeFileSync(legacyPath, JSON.stringify({
+    codes: { 'lo-cu': { code: 'lo-cu', scans: 3, opens: 1, firstAt: 20 * day, lastAt: 21 * day, platforms: { ios: 3 }, browsers: { safari: 3 }, modes: { page: 2, redirect: 1 } } },
+    recent: [
+      { code: 'lo-cu', at: 20 * day, platform: 'ios', browser: 'safari', mode: 'page' },
+      { code: 'lo-cu', at: 20 * day + 60_000, event: 'open' },
+      { code: 'lo-cu', at: 21 * day, platform: 'ios', browser: 'safari', mode: 'page' },
+      { code: 'lo-cu', at: 21 * day + 1, platform: 'android', browser: 'chrome', mode: 'redirect' }
+    ]
+  }));
+  process.env.QR_SCANS_PATH = legacyPath;
+  const legacy = await import('../app/qr-scans.mjs?legacy-days');
+  const legacyEntry = (await legacy.listQrScans()).codes[0];
+  assert.deepEqual(legacyEntry.days, {
+    '1970-01-21': { scans: 1, pages: 1, opens: 1, zaloOpens: 0, referrals: 0 },
+    '1970-01-22': { scans: 2, pages: 1, opens: 0, zaloOpens: 0, referrals: 0 }
+  });
+  assert.equal(legacyEntry.scans, 3, 'tổng cộng dồn giữ nguyên');
 });

@@ -30,7 +30,7 @@ import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
 import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
-import { countQrReferrals, deleteQrCode, isValidQrCode, listQrScans, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
+import { countQrReferrals, countQrReferralsByDay, deleteQrCode, isValidQrCode, listQrScans, qrDayKey, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
 import { classifyUserAgent, isLinkPreviewBot, messengerDestination, prefillMessageFor, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
 import { createQrGreeter, isCardScan } from './qr-greeting.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
@@ -1085,13 +1085,15 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/qr/stats') {
       const store = await readMessagingStore();
       // Một lượt quét = một referral, dù về CRM qua mấy đường (Meta, Botcake, tin soạn sẵn).
-      const stats = await listQrScans(countQrReferrals(store.conversations || []));
+      const conversations = store.conversations || [];
+      const stats = await listQrScans(countQrReferrals(conversations), { referralDays: countQrReferralsByDay(conversations) });
       const page = await resolveQrPage();
       const qrSettings = await readQrSettings();
       return sendJson(response, 200, {
         baseUrl: metaConfig.publicBaseUrl,
         pageId: page.id,
         pageName: page.name,
+        today: qrDayKey(Date.now()),
         codes: stats.codes.map(entry => ({
           ...entry,
           url: qrTargetUrl(metaConfig.publicBaseUrl, entry.code),
@@ -1119,6 +1121,18 @@ const server = http.createServer(async (request, response) => {
     // Ảnh mã QR để in lên thẻ: mã hoá /q/<mã>. Sau mật khẩu (Caddy chỉ mở /q/*),
     // vì đây là công cụ của nhân viên, không phải của khách. SVG cho nhà in,
     // PNG (?size=, mặc định 1024) để xem nhanh hay dán vào thiết kế.
+    // Tạo mã từ Cài đặt → Mã QR: mã có mặt trong bảng ngay với 0 lượt quét, không cần tải ảnh trước.
+    if (request.method === 'POST' && url.pathname === '/api/qr/codes') {
+      try {
+        const payload = await readBody(request);
+        const code = String(payload?.code || '').trim().toLowerCase();
+        if (!isValidQrCode(code)) return sendJson(response, 400, { error: 'Mã QR chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự.' });
+        const created = await registerQrCode(code);
+        return sendJson(response, created ? 201 : 200, { code, created: Boolean(created) });
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
+      }
+    }
     // Xoá mã gõ nhầm / lô không in (mất số liệu của mã đó).
     const qrDeleteMatch = url.pathname.match(/^\/api\/qr\/codes\/([^/]+)$/);
     if (qrDeleteMatch && request.method === 'DELETE') {

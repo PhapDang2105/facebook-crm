@@ -81,6 +81,11 @@ test('trang đệm: nút Mở Messenger là thẻ <a> trỏ thẳng m.me?ref, kh
 
 test('trang đệm: trong app thì có hướng dẫn đúng app', () => {
   assert.match(render(agents.zaloAndroid), /Anh\/Chị đang mở trong Zalo/);
+  // iPhone trình duyệt thường: nhắc bấm "Mở bằng Messenger" nếu iOS dừng ở trang Facebook; trong app và Android thì không.
+  assert.match(render(agents.iosSafari), /class="ios-tip"[^>]*>Nếu máy mở trang Facebook/);
+  assert.match(render(agents.iosChrome), /class="ios-tip"/);
+  assert.doesNotMatch(render(agents.zaloIos), /class="ios-tip"/);
+  assert.doesNotMatch(render(agents.androidWebview), /class="ios-tip"/);
   assert.doesNotMatch(render(agents.facebookIos), /Bạn đang/, 'hướng dẫn trong app cũng xưng Anh/Chị');
   assert.match(render(agents.zaloIos), /Mở bằng trình duyệt/);
   assert.match(render(agents.facebookIos), /ứng dụng Facebook/);

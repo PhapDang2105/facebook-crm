@@ -179,6 +179,10 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   const href = escapeHtml(destination);
   const safeCode = escapeHtml(code);
   const hint = classification.inApp ? (inAppHints[classification.browser] ?? inAppHints.webview) : '';
+  // iPhone trình duyệt thường: iOS có thể "nhớ" mở m.me bằng Safari (Universal Link bị tắt cho m.me) và dừng ở trang Facebook có nút "Mở bằng Messenger".
+  const iosTip = classification.platform === 'ios' && !classification.inApp
+    ? `<p class="ios-tip">Nếu máy mở trang Facebook, Anh/Chị bấm <b>“Mở bằng Messenger”</b> là vào ngay.</p>`
+    : '';
   // Zalo là kênh ngang hàng với Messenger (khách không có Messenger, hoặc quét
   // bằng Zalo thì không phải rời app). Chưa đặt liên kết OA ở Cài đặt thì dùng
   // Zalo cá nhân của Heartline (zalo.me/<số điện thoại>).
@@ -235,6 +239,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .btn { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 8px 12px 8px 8px; color: #fff; border-radius: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; transition: transform .12s ease, box-shadow .12s ease; }
   #open { background: linear-gradient(110deg, #0a84ff 0%, #7b3dff 58%, #ff4f81 100%); box-shadow: 0 6px 16px -4px rgba(123,61,255,.5); }
   .label small { display: block; margin-top: 1px; font-size: 13px; font-weight: 600; opacity: .9; letter-spacing: 0; }
+  .ios-tip { margin: -2px 0 0; color: #8a7a62; font-size: 12px; line-height: 1.4; text-align: center; }
+  .ios-tip b { color: #5b4a36; font-weight: 700; }
   .alt { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 6px; padding: 4px 4px 0; color: #6b5d4b; font-size: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; }
   .alt span, .alt b { white-space: nowrap; }
   .alt img { width: 22px; height: 22px; display: block; }
@@ -292,6 +298,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <div class="ticket-head"><span class="ticket-note">Anh/Chị lưu ưu đãi cho đơn hàng tiếp theo nhé</span></div>
     <div class="channels">
       <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi<small>qua Messenger</small></span>${icons.chevron}</a>
+      ${iosTip}
       ${zalo}
     </div>
   </section>

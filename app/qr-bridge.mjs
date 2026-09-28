@@ -203,7 +203,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .letter-body { margin: 0 0 10px; color: #4a3f33; font-size: 15.5px; line-height: 1.5; }
   .checks { display: grid; gap: 7px; margin: 0 0 10px; padding: 0; list-style: none; }
   .checks li { display: flex; align-items: flex-start; gap: 10px; color: #3a2e22; font-size: 15px; line-height: 1.4; }
-  .checks li b { color: #2e6b3f; font-weight: 700; }
+  .checks li b { color: #2e6b3f; font-weight: 700; white-space: nowrap; }
   .checks .tick { margin-top: 1px; }
   .tick { flex: 0 0 22px; display: grid; place-items: center; width: 22px; height: 22px; background: #e6f4dc; color: #3f8f2c; border-radius: 50%; }
   .tick svg { width: 14px; height: 14px; }

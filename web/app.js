@@ -825,7 +825,6 @@ const settingsPanels = new Map([...document.querySelectorAll('[data-settings-pan
 const orderPanels = new Map([...document.querySelectorAll('[data-order-panel]')].map(panel => [panel.dataset.orderPanel, panel]));
 const orderImport = document.querySelector('#order-import');
 const orderSearch = document.querySelector('#order-search');
-const orderFilter = document.querySelector('#order-filter');
 const orderSourceFilter = document.querySelector('#order-source-filter');
 // Ngày đơn ở Nhập dữ liệu: ô chọn liệt kê rõ từng ngày có đơn ("Ngày 19/09/2026"),
 // mở lên là hôm nay; cuối danh sách có "Tất cả ngày".
@@ -998,14 +997,6 @@ function orderRowStatuses(entries, data = orderData) {
     statuses.set(entry.index, { recentDays, oldCustomer: exportedOrders.length > 0 });
   }
   return statuses;
-}
-
-function orderRowStatusHtml(status) {
-  if (!status || (!status.recentDays?.length && !status.oldCustomer)) return '';
-  const lines = [];
-  if (status.recentDays?.length) lines.push(`<span class="order-status-line order-status-line--recent">Trùng đơn ngày ${escapeHtml(status.recentDays.join(', '))}</span>`);
-  if (status.oldCustomer) lines.push('<span class="order-status-line order-status-line--old"><img src="/assets/icons/customers.svg" alt="">Khách hàng cũ</span>');
-  return lines.join('');
 }
 
 function phoneWarningFor(value) {
@@ -1197,13 +1188,6 @@ function fillCustomersLabelOptions() {
   select.innerHTML = '<option value="">Mọi thẻ</option>'
     + inboxLabels.map(label => `<option value="${escapeHtml(label.id)}">${escapeHtml(label.name)}</option>`).join('');
   select.value = current;
-}
-
-function formatCustomerTime(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  const pad = number => String(number).padStart(2, '0');
-  return `${pad(date.getHours())}:${pad(date.getMinutes())} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
 /** "3 ngày trước", "2 tháng trước" — nhân viên đọc nhanh hơn ngày tháng thuần. */
@@ -7947,7 +7931,6 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     'khach hang': 'minmax(100px, 170px)',
     'so dien thoai': 'max-content'
   };
-  const columnTemplate = orderedColumns.map(column => templates[column.name] || 'max-content').join(' ');
   const previewClassName = index => {
     const columnName = normalizeColumnName(headers[index]);
     return columnName === 'dia chi' ? 'preview-address'
@@ -8054,16 +8037,8 @@ function renderOrderData() {
     || duplicatePhoneRowIndexes.has(index)
     || warningRowIndexes.has(index)
     || reviewRowIndexes.has(index)));
-  const processingRowIndexes = new Set(processingRows.map(entry => entry.index));
   const rowNotes = getRowProcessingNotes(orderData, { duplicateRowIndexes, duplicatePhoneRowIndexes, warningRowIndexes });
-  const filterValue = orderFilter?.value || 'all';
-  let importRows = filterValue === 'valid' ? allRows.filter(entry => !processingRowIndexes.has(entry.index))
-    : filterValue === 'invalid' ? processingRows
-      : filterValue === 'duplicate-any' ? allRows.filter(entry => duplicateRowIndexes.has(entry.index) || duplicatePhoneRowIndexes.has(entry.index))
-        : filterValue === 'duplicate' ? allRows.filter(entry => duplicateRowIndexes.has(entry.index))
-        : filterValue === 'duplicate-phone' ? allRows.filter(entry => duplicatePhoneRowIndexes.has(entry.index))
-          : filterValue === 'phone-warning' ? allRows.filter(entry => warningRowIndexes.has(entry.index))
-            : allRows;
+  let importRows = allRows;
   // Phones the cache has not seen yet are looked up in the background; the
   // table re-renders with badges once the answer arrives.
   const phoneColumn = orderPhoneColumnIndex();
@@ -8769,7 +8744,6 @@ orderSearch?.addEventListener('input', () => {
   window.clearTimeout(orderSearchTimer);
   orderSearchTimer = window.setTimeout(renderOrderData, 120);
 });
-orderFilter?.addEventListener('change', renderOrderData);
 orderSourceFilter?.addEventListener('change', renderOrderData);
 orderDayFilter?.addEventListener('change', renderOrderData);
 loadExportedCustomerPhones();
@@ -10467,8 +10441,6 @@ const qrBrowserNames = {
   chrome: 'Chrome', safari: 'Safari', samsung: 'Samsung', firefox: 'Firefox', edge: 'Edge', opera: 'Opera',
   webview: 'Trong app', 'app khac': 'App khác', khac: 'Khác'
 };
-
-const qrModeNames = { page: 'trang đệm', redirect: 'chuyển thẳng' };
 
 function qrCountText(counts, names) {
   const entries = Object.entries(counts || {}).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);

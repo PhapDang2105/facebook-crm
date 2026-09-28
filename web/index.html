@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Nông Sản Giọt Nắng | Facebook</title>
   <link rel="icon" type="image/webp" href="/assets/giot-nang-logo.webp">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=20260922-merge-2">
 </head>
 <body>
@@ -416,7 +413,7 @@
     <section id="settings-view" class="view hidden">
       <div class="settings-page">
         <section class="settings-section-content" data-settings-panel="channels" aria-labelledby="channel-settings-title">
-          <section class="settings-card channel-settings-card">
+          <section class="settings-card">
             <header class="settings-card-head"><h1 id="channel-settings-title">Kênh</h1></header>
             <div class="channel-summary">
               <div class="channel-summary-platform"><img class="channel-platform-logo facebook-badge" src="/assets/icons/facebook.png" alt=""><strong>Facebook</strong></div>
@@ -424,7 +421,7 @@
             </div>
             <div class="channel-list" id="facebook-channel-list" aria-live="polite"><p class="channel-empty">Đang tải danh sách kênh...</p></div>
             <div class="channel-summary">
-              <div class="channel-summary-platform"><img class="channel-platform-logo zalo-badge" src="/assets/icons/zalo.png" alt=""><strong>Zalo</strong></div>
+              <div class="channel-summary-platform"><img class="channel-platform-logo" src="/assets/icons/zalo.png" alt=""><strong>Zalo</strong></div>
               <button class="channel-connect-button" id="zalo-connect-button" type="button">Kết nối Zalo</button>
             </div>
             <div class="channel-list" id="zalo-channel-list"><p class="channel-empty">Chưa có tài khoản Zalo OA nào được kết nối.</p></div>
@@ -678,7 +675,7 @@
           </section>
         </section>
         <section class="settings-section-content hidden" data-settings-panel="qr" aria-labelledby="qr-settings-title">
-          <section class="settings-card qr-settings-card">
+          <section class="settings-card">
             <header class="settings-card-head qr-settings-head">
               <h1 id="qr-settings-title">Mã QR</h1>
               <div class="qr-range" id="qr-range" role="group" aria-label="Khoảng thời gian">
@@ -779,8 +776,8 @@
           <label><span>Giá combo (mỗi sản phẩm)</span><div class="product-price-input"><input id="product-combo-price" type="number" min="0" step="1000" placeholder="Bỏ trống = không giảm"><span>₫</span></div></label>
           <label><span>Đơn vị (chữ bot dùng để đếm)</span><input id="product-unit" maxlength="30" placeholder="Túi, Hũ, Hộp, Combo..." autocomplete="off"></label>
           <label><span>Khối lượng xuất kho</span><div class="product-price-input"><input id="product-weight" type="number" min="0" step="10" placeholder="0"><span>g</span></div></label>
-          <label class="product-form-checkbox"><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
-          <label class="product-form-checkbox"><span>Ghép đơn</span><span class="product-form-switch"><input id="product-mixable" type="checkbox"><span>Ghép được với sản phẩm ghép khác trong cùng đơn</span></span></label>
+          <label><span>Trạng thái</span><span class="product-form-switch"><input id="product-active" type="checkbox" checked><span>Đang bán — chatbot được tư vấn và lên đơn</span></span></label>
+          <label><span>Ghép đơn</span><span class="product-form-switch"><input id="product-mixable" type="checkbox"><span>Ghép được với sản phẩm ghép khác trong cùng đơn</span></span></label>
           <label class="product-form-wide"><span>Tên gọi khác (mỗi dòng hoặc cách nhau bằng dấu phẩy)</span><textarea id="product-aliases" rows="3" placeholder="túi xanh, granola xanh, #granolatuixanh&#10;Khách gọi sản phẩm bằng những tên này thì bot vẫn nhận ra."></textarea></label>
           <div class="product-form-wide quick-reply-images-field">
             <div class="quick-reply-image-list" id="product-gallery-list"></div>

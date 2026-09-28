@@ -43,7 +43,6 @@ input:focus-visible {
 }
 
 .hidden { display: none !important; }
-.chatbot-field:has(#chatbot-settings-direct-key) { display: none !important; }
 
 .topbar {
   position: fixed;
@@ -441,11 +440,6 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-stage[data-order-panel="process"] { display: block; flex: 0 1 auto; height: fit-content; min-height: 0; }
 .settings-page:has([data-settings-panel="customers"]:not(.hidden)) { width: 100%; max-width: none; }
 .customer-settings-card .settings-card-head { display: flex; align-items: center; justify-content: space-between; }
-.customer-dialog-panel { width: min(900px, 100%); max-height: 92vh; padding: 26px 30px; }
-.customer-dialog-identity { display: flex; align-items: center; gap: 14px; }
-.customer-dialog-identity .avatar { width: 52px; height: 52px; font-size: 20px; }
-.customer-dialog-identity h2 { font-size: 20px; }
-.customer-dialog-identity small { display: block; margin-top: 2px; color: #8a8d91; font-size: 13px; }
 .customers-export { position: relative; }
 .customers-export > .order-history-button { display: inline-flex; align-items: center; gap: 6px; }
 .customers-export > .order-history-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
@@ -457,7 +451,6 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customers-toolbar > .order-search-control { flex: 1 1 230px; min-width: 200px; }
 .customers-toolbar > .order-filter-control { flex: 1 1 150px; min-width: 140px; max-width: 230px; }
 /* Hàng lọc remarketing: tách khỏi bộ lọc dữ liệu để nhân viên không lẫn hai việc. */
-.customers-table td.customer-address { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customers-table td.customer-order-count { color: #344054; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .customers-table td.customer-bought-when { white-space: nowrap; }
 .customers-table td.customer-bought-when b { display: block; color: #101828; font-weight: 600; }
@@ -474,16 +467,10 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customers-table th { position: sticky; top: 0; padding: 10px 12px; color: #687080; background: #f6f8f7; border-bottom: 0.9px solid #dfe5e1; font-size: 12px; font-weight: 700; letter-spacing: .03em; text-align: left; text-transform: uppercase; white-space: nowrap; }
 .customers-table td { padding: 11px 12px; border-bottom: 0.9px solid #edf1ee; vertical-align: middle; }
 .customers-table tbody tr { cursor: pointer; }
-.customers-table tbody tr:hover td { background: #f6fbf7; }
 .customers-table tbody tr.is-unread td:first-child strong { font-weight: 800; }
-.customer-cell { display: flex; align-items: center; gap: 9px; min-width: 200px; }
-.customer-cell .avatar { flex: none; width: 34px; height: 34px; }
-.customer-cell strong { display: block; color: #1d2b22; font-size: 14.5px; }
-.customer-cell small { display: block; color: #8a8d91; font-size: 12px; }
 .customers-total { margin: 10px 0 0; color: #687080; font-size: 13px; }
 .chatbot-template-group { margin: 10px 0 4px; padding: 0 4px; color: #687080; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .customers-table.is-empty { min-height: 320px; }
-.customers-table td.customer-time { color: #4b4f56; white-space: nowrap; }
 .customers-table td.customer-money { text-align: right; white-space: nowrap; }
 .order-stage[data-order-panel="import"] .data-preview { margin-top: 14.4px; }
 /* Thanh tìm kiếm/lọc/Import/Export của Nhập dữ liệu dính theo khi cuộn, nằm ngay
@@ -498,13 +485,10 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-import-summary .order-import-summary-valid strong { color: #1f7a3a; }
 .order-import-controls .order-filter-control { flex: 0 0 auto; min-width: 130px; }
 .order-import-controls .order-filter-control.hidden { display: none; }
-.order-date-control input[type="date"] { box-sizing: border-box; height: 37.8px; padding: 0 10px; color: #17251c; background: #f6fbf7; border: 0.9px solid #b9d6c0; border-radius: 8.1px; font: inherit; font-size: 12.6px; }
 .order-search-control,
 .order-filter-control { display: block; }
 .order-search-control input,
 .order-filter-control select { box-sizing: border-box; width: 100%; height: 37.8px; padding: 0 11.7px; color: #17251c; background: #f6fbf7; border: 0.9px solid #b9d6c0; border-radius: 8.1px; outline: none; font: inherit; font-size: 12.6px; font-weight: 500; }
-.order-search-control input:focus,
-.order-filter-control select:focus { border-color: #72ad80; box-shadow: 0 0 0 2.7px rgba(114, 173, 128, .16); }
 .order-import-controls .file-button { display: flex; align-items: center; box-sizing: border-box; height: 37.8px; }
 /* Import cùng kiểu với Lịch sử: nền trắng viền đen, không nền đen. */
 .order-import-controls .file-button { color: #111; background: #fff; border: 0.9px solid #111; }
@@ -536,12 +520,6 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .import-history-rows { margin-top: 5.4px; max-height: 220px; overflow: auto; border-top: 0.9px solid #eceff3; }
 .import-history-row { display: grid; grid-template-columns: 1.1fr 0.9fr 1.2fr 2fr; gap: 7.2px; padding: 3.6px 0; border-bottom: 0.9px solid #f5f6f8; font-size: 11.7px; }
 .import-history-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.order-history-item { display: flex; align-items: center; justify-content: space-between; gap: 16.2px; padding: 8.1px 0; border-bottom: 0.9px solid #e5e9e6; }
-.order-history-item:last-child { border-bottom: 0; }
-.order-history-item div { display: flex; flex-direction: column; gap: 2.7px; min-width: 0; }
-.order-history-item strong { overflow: hidden; font-size: 11.7px; text-overflow: ellipsis; white-space: nowrap; }
-.order-history-item small { color: #687080; font-size: 9.9px; }
-.order-history-item > span { flex: none; color: #355d42; font-size: 10.8px; font-weight: 700; }
 .order-row-delete { display: inline-grid; width: 26px; height: 26px; place-items: center; padding: 0; color: #98a2b2; background: transparent; border: 0; border-radius: 6px; font-size: 17px; line-height: 1; cursor: pointer; }
 .order-row-delete:hover { color: #b42318; background: #fff1f0; }
 .order-row-delete:disabled { opacity: .4; cursor: default; }
@@ -589,16 +567,8 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-cell-select { display: block; width: 100%; max-width: 100%; padding: 0 14px 0 0; color: inherit; background: transparent; border: 0; border-radius: 0; outline: none; font: inherit; font-size: 11.7px; line-height: 1.45; appearance: none; -webkit-appearance: none; box-shadow: inset 0 -1.8px 0 #fe2c55; cursor: pointer; }
 .order-clear-button { color: #b42318; border-color: #f4c7c3; }
 .order-clear-button:hover { color: #fff; background: #b42318; border-color: #b42318; }
-.customer-orders-management-list { display: grid; gap: 6.3px; }
-.customer-orders-management-row { display: grid; grid-template-columns: 90px minmax(150px, 1fr) 130px 125px 100px 32px; align-items: center; gap: 10.8px; padding: 9px 10.8px; background: #fff; border: .9px solid #e2e8e4; border-radius: 7.2px; font-size: 11.7px; }
-.customer-orders-management-row > strong:last-child { color: #27643a; text-align: right; }
-.customer-orders-management-status { color: #27643a; font-weight: 700; }
 .data-preview .preview-status { white-space: nowrap; }
 .data-preview .preview-total { white-space: nowrap; font-weight: 600; }
-.order-status-line { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; line-height: 18px; white-space: nowrap; }
-.order-status-line--recent { color: #b42318; }
-.order-status-line--old { color: #1b5e20; }
-.order-status-line img { width: 13px; height: 13px; }
 .data-preview tbody tr.order-row-duplicate td { background: #fde8ef; }
 .data-preview tbody tr.order-row-duplicate-phone td { background: #fff3bf; }
 
@@ -775,7 +745,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .data-preview td.preview-phone { flex-wrap: wrap; white-space: normal; }
 #order-import-preview td.preview-phone { cursor: copy; }
 #order-import-preview td.preview-phone:hover { text-decoration: underline dotted; }
-.data-preview td.preview-phone .phone-warning-badge { margin-left: 0; }
 .data-preview th.preview-product-heading { justify-content: center; text-align: center; }
 .product-with-image { position: relative; display: flex; align-items: center; width: 100%; min-height: 41.4px; padding-right: 50.4px; text-align: left; }
 .product-with-image img { position: absolute; top: 50%; right: 0; display: block; width: 39.6px; height: 39.6px; object-fit: contain; transform: translateY(-50%); }
@@ -907,7 +876,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-workflow-column { min-height: 0; overflow-y: auto; }
 .chatbot-processing-config { display: grid; align-content: stretch; gap: 15px; min-height: 0; }
 .chatbot-processing-code { min-width: 0; padding: 0; border: 0; border-radius: 0; }
-.chatbot-settings-card:has([data-chatbot-workspace-panel="messages"]:not(.hidden), [data-chatbot-workspace-panel="processing"]:not(.hidden)) .chatbot-settings-footer { display: none; }
 .chatbot-general-config { display: grid; grid-template-columns: minmax(620px, 1.3fr) minmax(340px, .7fr); align-items: stretch; gap: 8px; max-width: none; height: max(540px, calc(100vh - 242px)); min-height: 540px; margin: 0; padding: 8px; background: #f5f7fb; border-radius: 14px; }
 .chatbot-general-settings-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr); align-content: stretch; gap: 12px; min-width: 0; height: 100%; max-height: none; overflow: auto; padding: 0 16px 18px; background: #fff; border: 1px solid #e0e5ed; border-radius: 14px; box-shadow: 0 6px 18px rgba(41, 57, 85, .05); }
 .chatbot-llm-pane-tabs { display: flex; gap: 18px; margin: 0 -16px; padding: 0 16px; border-bottom: 1px solid #e5e9ef; }
@@ -923,9 +891,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-ai-overview span { color: #687080; font-size: 12px; }
 .chatbot-ai-overview a { padding: 9px 12px; color: #0866ff; background: #fff; border: 1px solid #cfe0fb; border-radius: 8px; font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; }
 .chatbot-ai-overview a:hover { background: #eef6ff; }
-.chatbot-general-settings-pane > .chatbot-llm-card { min-height: 0; grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
-.chatbot-general-settings-pane > .chatbot-llm-card > .chatbot-field { min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-content: stretch; }
-.chatbot-general-settings-pane > .chatbot-llm-card > .chatbot-field textarea { height: 100%; min-height: 260px; resize: none; }
 .chatbot-preview-card { position: relative; display: grid; grid-template-rows: auto 1fr; gap: 0; min-width: 0; height: 100%; min-height: 0; padding: 0; overflow: hidden; background: #fff; border: 1px solid #e0e5ed; border-radius: 14px; box-shadow: 0 6px 18px rgba(41, 57, 85, .05); }
 .chatbot-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 0 16px; border-bottom: 1px solid #e7ebf1; }
 .chatbot-preview-head strong, .chatbot-preview-head span { display: block; }
@@ -937,7 +902,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-preview-window-actions button span { margin: 0; color: inherit; font-size: 21px; line-height: 1; }
 .chatbot-preview-window-actions button img { width: 15px; height: 15px; opacity: .72; }
 .chatbot-preview-button { min-width: 86px; padding: 9px 14px; }
-.chatbot-preview-open { padding: 8px 12px; color: #36527a; background: #eef4ff; border: 1px solid #c7d8f5; border-radius: 8px; font: inherit; font-size: 12px; cursor: pointer; }
 .chatbot-preview-dialog { width: min(680px, calc(100vw - 32px)); padding: 0; border: 0; border-radius: 14px; box-shadow: 0 20px 70px rgba(15,23,42,.25); }
 .chatbot-preview-dialog::backdrop { background: rgba(15,23,42,.45); }
 .chatbot-preview-dialog-head, .chatbot-preview-dialog-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid #e5e9f0; }
@@ -1215,7 +1179,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 
 .settings-save-button { padding: 9.9px 16.2px; color: #fff; background: #111; border: 0; border-radius: 8.1px; font-size: 12.6px; font-weight: 700; cursor: pointer; }
 .settings-save-button:hover { background: #333; }
-#settings-status { color: #355d42; font-size: 11.7px; font-weight: 700; }
 
 .settings-page:has([data-settings-panel="products"]:not(.hidden), [data-settings-panel="gifts"]:not(.hidden)) { width: 100%; max-width: none; }
 #settings-view, #settings-view * { font-family: Roboto, sans-serif; }
@@ -2113,9 +2076,6 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .conversation-list::-webkit-scrollbar-corner,
 .chat-body::-webkit-scrollbar-corner,
 .contact-panel::-webkit-scrollbar-corner { background: transparent; }
-.order-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 13.5px; padding: 9px 0; border-bottom: 1.125px solid #e6e6e6; font-size: 14.625px; }
-.order-row:last-child { border-bottom: 0; }
-.order-row strong { max-width: 58%; font-weight: 600; text-align: right; }
 
 /* Laptop 1366–1780px: ba cột co lại thay vì cắt mất panel khách bên phải (kiểm thử 25/09).
    Lưới gốc cần 427.5 + 517.5 + 472.5 + 2×11.25 gap + 2×18 đệm = 1.476px, cộng sidebar
@@ -2512,9 +2472,6 @@ tr:hover .customer-tel button { opacity: .75; }
 /* Khách chưa có số hay chưa có hội thoại thì nút tương ứng mờ đi, bấm không được. */
 .customer-sheet-actions button[disabled] { opacity: .45; cursor: default; }
 .customer-sheet-actions button[disabled]:hover { color: var(--text-1); border-color: #dbe0e6; }
-.customer-note-item { padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; margin-bottom: 7px; }
-.customer-note-item p { margin: 0; color: #344054; font-size: 13.2px; }
-.customer-note-item small { display: block; margin-top: 4px; color: #98a2b3; font-size: 11.8px; }
 
 /* --- Băng ghi chú riêng của bản xem trước, không thuộc thiết kế --- */
 

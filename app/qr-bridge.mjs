@@ -208,9 +208,9 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .btn:active { background: #f3ede0; }
   .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
   .fallback { margin: 4px 0 0; padding-top: 14px; border-top: 1px dashed #d9cba9; color: #6b5d4b; font-size: 14px; line-height: 1.5; }
-  .fallback a { color: #2e6b3f; font-weight: 800; text-decoration: none; }
-  .fallback svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 2px; }
-  .fallback .tel { color: #d0312d; font-size: 15.5px; font-weight: 800; white-space: nowrap; }
+  .fallback a { color: #2e6b3f; font-size: 13.5px; font-weight: 700; text-decoration: none; }
+  .fallback .tel svg { width: 1.2em; height: 1.2em; vertical-align: -.24em; margin-right: 3px; stroke-width: 2.4; }
+  .fallback .tel { color: #d0312d; white-space: nowrap; }
 </style>
 </head>
 <body>

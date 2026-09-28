@@ -192,11 +192,13 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
-  main { width: 100%; max-width: 400px; padding: clamp(20px, 6vw, 28px) clamp(16px, 5.5vw, 26px) 22px; background: #fff; border: 1px solid #e3d8bf; border-radius: 20px; box-shadow: 0 1px 2px rgba(58,46,34,.04), 0 8px 24px rgba(58,46,34,.06); text-align: center; }
+  main { width: 100%; max-width: 400px; padding: clamp(14px, 4.5vw, 20px) clamp(16px, 5.5vw, 26px) 22px; background: #fff; border: 1px solid #e3d8bf; border-radius: 20px; box-shadow: 0 1px 2px rgba(58,46,34,.04), 0 8px 24px rgba(58,46,34,.06); text-align: center; }
   .wordmark { white-space: nowrap; font-weight: 700; }
   .w-giot { color: #7cc254; }
   .w-nang { color: #f9b122; }
-  .logo { display: block; width: clamp(128px, 40vw, 150px); height: auto; margin: 0 auto 14px; }
+  .letter-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 6px; }
+  .letter-top .greet { margin: 0; }
+  .logo { flex: none; display: block; width: clamp(82px, 25vw, 100px); height: auto; margin: -4px -4px 0 0; }
   .letter { margin: 0 0 16px; padding: 16px 16px 12px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
   .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
   .letter-body { margin: 0 0 8px; color: #4a3f33; font-size: 15.5px; line-height: 1.5; }
@@ -245,7 +247,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
     main { padding-top: 16px; padding-bottom: 14px; }
-    .logo { width: 112px; margin-bottom: 8px; }
+    .logo { width: 80px; }
     .letter { margin-bottom: 12px; padding-top: 12px; padding-bottom: 8px; }
     .offers { gap: 6px; margin-bottom: 6px; }
     .thumb { flex-basis: 48px; width: 48px; height: 48px; }
@@ -266,9 +268,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 </head>
 <body>
 <main>
-  <img class="logo" src="/q/brand/logo.webp" alt="${name}" width="150" height="83">
   <div class="letter">
-    <h1 class="greet">Thân gửi anh chị,</h1>
+    <div class="letter-top"><h1 class="greet">Thân gửi anh chị,</h1><img class="logo" src="/q/brand/logo.webp" alt="${name}" width="96" height="53"></div>
     <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</p>
     <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong anh chị và cả nhà luôn khoẻ, ăn ngon và thật bình an.</p>
     <p class="letter-body">Em gửi anh/chị chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng anh/chị thật&nbsp;lâu:</p>

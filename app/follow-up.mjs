@@ -526,7 +526,7 @@ export async function followUpQueue({ now = Date.now() } = {}) {
   const byId = new Map((store.conversations || []).map(item => [item.id, item]));
   return Object.entries(state.sent)
     .filter(([, item]) => item.queued && stillWanted(item, byId, store))
-    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, attempts: item.attempts || 0, lastError: item.lastError || (item.noGlobalId ? 'Pancake chưa có ID Facebook của khách — gửi tay bằng nút Mở Pancake' : ''), noGlobalId: item.noGlobalId === true, leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
+    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, globalId: item.globalId || '', attempts: item.attempts || 0, lastError: item.lastError || (item.noGlobalId ? 'Pancake chưa có ID Facebook của khách — gửi tay bằng nút Mở Pancake' : ''), noGlobalId: item.noGlobalId === true, leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
     .sort((first, second) => first.repliedAt - second.repliedAt);
 }
 

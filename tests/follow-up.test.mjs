@@ -208,6 +208,24 @@ test('trạm gửi Pancake: lô hỏi lại Pancake (bỏ khách đã có đơn 
   assert.deepEqual((await fresh.followUpQueue({ now })).map(item => item.key), []);
 });
 
+test('ID Facebook extension tìm được (kể cả khi gửi lỗi) được dùng ở lô sau: không đánh dấu thiếu ID, không tìm lại', async () => {
+  const write = (await import('node:fs')).writeFileSync;
+  write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: { 'trial:110:a': { scenarioId: 'trial', conversationId: `${page}:a`, name: 'A', at: now, repliedAt: now - 13 * HOUR, queued: true, text: 'Dạ chị ơi', pageId: page, psid: 'a', freeShipDays: 7 } } }));
+  const fresh = await import(`../app/follow-up.mjs?globalid=${Date.now()}`);
+  // Pancake vẫn chưa lưu ID Facebook của khách này.
+  const conversationInfo = async () => ({ globalId: '', recentOrders: 0, canInbox: true });
+  const first = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now });
+  assert.deepEqual(first.items.map(item => [item.globalUserId, item.needsGlobalId]), [['', true]]);
+  // Extension tìm ra ID nhưng gửi lỗi: khách về hàng chờ, ID được ghi lại.
+  assert.deepEqual(await fresh.recordFollowUpBatchResults([{ key: 'trial:110:a', ok: false, error: 'CAN NOT SEND', globalId: '1000888' }], { now, token: first.token }), { sent: 0, failed: 1, dropped: 0 });
+  const [queued] = await fresh.followUpQueue({ now });
+  assert.equal(queued.globalId, '1000888');
+  assert.equal(queued.noGlobalId, false);
+  const second = await fresh.buildFollowUpBatch({ limit: 10, conversationInfo, now: now + 60000 });
+  assert.deepEqual(second.items.map(item => [item.globalUserId, item.needsGlobalId]), [['1000888', false]], 'lô sau mang ID đã tìm, không nhờ extension tìm lại');
+  assert.equal((await fresh.readFollowUpState()).sent['trial:110:a'].noGlobalId, undefined, 'không bị đánh dấu thiếu ID lần nữa');
+});
+
 test('trạm gửi hết giờ chờ (unknown): giữ chỗ 45 phút, không tính lần lỗi; hết giữ chỗ thì về hàng chờ; tin đồng bộ về thì xác nhận; kết quả trễ sau đó bị từ chối', async () => {
   const write = (await import('node:fs')).writeFileSync;
   const text = 'Dạ chị ơi, Giọt Nắng gửi chị ưu đãi riêng: lấy 1 túi granola dùng thử vẫn được MIỄN PHÍ VẬN CHUYỂN ạ';

@@ -220,19 +220,21 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .channels { display: grid; gap: 10px; }
   .btn { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 8px 12px 8px 8px; color: #fff; border-radius: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; transition: transform .12s ease, box-shadow .12s ease; }
   #open { background: linear-gradient(110deg, #0a84ff 0%, #7b3dff 58%, #ff4f81 100%); box-shadow: 0 6px 16px -4px rgba(123,61,255,.5); }
-  .alt { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 4px 0; color: #6b5d4b; font-size: 14px; white-space: nowrap; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+  .label small { display: block; margin-top: 1px; font-size: 13px; font-weight: 600; opacity: .9; letter-spacing: 0; }
+  .alt { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 6px; padding: 4px 4px 0; color: #6b5d4b; font-size: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+  .alt span, .alt b { white-space: nowrap; }
   .alt img { width: 22px; height: 22px; display: block; }
   .alt b { color: #0068ff; font-weight: 800; }
   .alt:active b { text-decoration: underline; }
   .btn:active { transform: scale(.98); box-shadow: 0 2px 6px -2px rgba(0,0,0,.3); }
   .badge { flex: 0 0 40px; display: grid; place-items: center; width: 40px; height: 40px; background: #fff; border-radius: 11px; }
   .badge img { width: 30px; height: 30px; display: block; }
-  .label { flex: 1; text-align: left; font-size: 16.5px; font-weight: 800; letter-spacing: -.005em; line-height: 1.2; }
+  .label { flex: 1; min-width: 0; text-align: left; font-size: 18px; font-weight: 800; letter-spacing: -.005em; line-height: 1.2; }
   .chev { flex: 0 0 22px; width: 22px; height: 22px; opacity: .9; animation: nudge 1.8s ease-in-out infinite; }
   @keyframes nudge { 0%, 70%, 100% { transform: translateX(0); } 80% { transform: translateX(4px); } 90% { transform: translateX(0); } }
   @media (prefers-reduced-motion: reduce) { .chev { animation: none; } .btn { transition: none; } }
   /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
-  @media (max-width: 340px) { h1 { font-size: 19.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 15.5px; } .alt { font-size: 13px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
+  @media (max-width: 340px) { h1 { font-size: 19.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
@@ -267,7 +269,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   <section class="ticket" aria-label="Phiếu ưu đãi">
     <div class="ticket-head"><span class="ticket-tag">Phiếu ưu đãi</span><span class="ticket-sub">cho lần mua hàng tiếp theo</span></div>
     <div class="channels">
-      <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi qua Messenger</span>${icons.chevron}</a>
+      <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi<small>qua Messenger</small></span>${icons.chevron}</a>
       ${zalo}
     </div>
   </section>

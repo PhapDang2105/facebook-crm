@@ -177,7 +177,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   // bằng Zalo thì không phải rời app). Chưa đặt liên kết OA ở Cài đặt thì dùng
   // Zalo cá nhân của Heartline (zalo.me/<số điện thoại>).
   const zaloHref = escapeHtml(zaloUrl || `https://zalo.me/${heartline.tel}`);
-  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener">${icons.zalo}<b>Zalo</b><span>Nhận ưu đãi</span></a>`;
+  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener" aria-label="Nhận ưu đãi qua Zalo">${icons.zalo}<span>Nhận ưu đãi</span></a>`;
   const facebook = fallbackUrl ? ` hoặc nhắn qua trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a>` : '';
   return `<!doctype html>
 <html lang="vi">
@@ -204,8 +204,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .btn { display: flex; flex-direction: column; align-items: center; padding: 18px 10px 16px; background: #fff; color: #3a2e22; border: 1.5px solid #e3d8bf; border-radius: 14px; text-decoration: none; box-shadow: 0 1px 2px rgba(58,46,34,.06); }
   .btn svg, .btn img { width: 52px; height: 52px; display: block; margin-bottom: 12px; }
   .btn span { order: 1; color: #d4731c; font-size: 17px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }
-  .btn b { order: 2; margin-top: 3px; font-size: 13.5px; font-weight: 500; color: #8d7f68; }
-  .btn b::before { content: "qua "; }
   .btn:active { background: #f7f2e6; border-color: #cdbf9f; }
   .btn:active { background: #f3ede0; }
   .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
@@ -227,7 +225,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <li><span class="ic">${icons.swap}</span><span>Đổi ngay nếu hạt mềm, thiếu hàng</span></li>
   </ul>
   <div class="channels">
-    <a class="btn" id="open" href="${href}" rel="noopener">${icons.messenger}<b>Messenger</b><span>Nhận ưu đãi</span></a>
+    <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Nhận ưu đãi qua Messenger">${icons.messenger}<span>Nhận ưu đãi</span></a>
     ${zalo}
   </div>
   ${hint ? `<div class="hint">${hint}</div>` : ''}

@@ -152,9 +152,10 @@ export const heartline = { display: '0899 677 899', tel: '0899677899' };
 // Biểu tượng nội tuyến (không tải ngoài). Nét 2px, màu theo currentColor.
 const icons = {
   // Logo Messenger chính thức (tệp webp 256px), phục vụ qua đường công khai /q/brand/.
-  messenger: `<img src="/q/brand/messenger.webp" alt="" width="56" height="56">`,
+  messenger: `<img src="/q/brand/messenger.webp" alt="" width="30" height="30">`,
   // Logo Zalo chính thức (tệp webp), phục vụ qua đường công khai /q/brand/ như logo thương hiệu.
-  zalo: `<img src="/q/brand/zalo.webp" alt="" width="56" height="56">`,
+  zalo: `<img src="/q/brand/zalo.webp" alt="" width="30" height="30">`,
+  chevron: `<svg class="chev" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
   guide: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
   offer: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/></svg>`,
   swap: `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10"/><path d="M20.5 15a9 9 0 0 1-14.9 3.4L1 14"/></svg>`,
@@ -178,7 +179,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   // bằng Zalo thì không phải rời app). Chưa đặt liên kết OA ở Cài đặt thì dùng
   // Zalo cá nhân của Heartline (zalo.me/<số điện thoại>).
   const zaloHref = escapeHtml(zaloUrl || `https://zalo.me/${heartline.tel}`);
-  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener" aria-label="Lưu ưu đãi qua Zalo">${icons.zalo}<span>Lưu ưu đãi</span></a>`;
+  const zalo = `<a class="btn btn-zalo" id="zalo" href="${zaloHref}" rel="noopener" aria-label="Lưu ưu đãi qua Zalo"><span class="badge">${icons.zalo}</span><span class="label">Lưu ưu đãi</span>${icons.chevron}</a>`;
   const facebook = fallbackUrl ? ` hoặc nhắn qua trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a>` : '';
   return `<!doctype html>
 <html lang="vi">
@@ -205,9 +206,29 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .gift li { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px dashed #d9cba9; color: #3a2e22; font-size: 15.5px; line-height: 1.35; }
   .ic { flex: 0 0 22px; width: 22px; height: 22px; color: #2e6b3f; }
   .ic svg { width: 22px; height: 22px; display: block; }
-  .channels { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 3vw, 12px); margin: 0 0 14px; }
+  /* Phiếu ưu đãi kiểu voucher (mẫu "Lưu" của sàn TMĐT): nền kem, viền chấm, răng cưa hai bên. */
+  .ticket { position: relative; margin: 0 0 14px; padding: 0 12px 12px; background: #fff8ec; border: 1.5px dashed #efc98a; border-radius: 16px; }
+  .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 11px 0 10px; margin: 0 -12px 12px; border-bottom: 1.5px dashed #efc98a; }
+  .ticket-head::before, .ticket-head::after { content: ""; position: absolute; bottom: -9px; width: 16px; height: 16px; background: #fff; border: 1.5px dashed #efc98a; border-radius: 50%; }
+  .ticket-head::before { left: -9px; clip-path: inset(0 0 0 50%); }
+  .ticket-head::after { right: -9px; clip-path: inset(0 50% 0 0); }
+  .ticket-tag { color: #c2410c; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .ticket-sub { color: #7a5a2e; font-size: 14px; }
+  /* Nút tô màu thương hiệu từng kênh: cao 56px, rộng hết, logo trong ô trắng bên trái, mũi tên bên phải. */
+  .channels { display: grid; gap: 10px; }
+  .btn { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 8px 14px 8px 8px; color: #fff; border-radius: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; transition: transform .12s ease, box-shadow .12s ease; }
+  #open { background: linear-gradient(110deg, #0a84ff 0%, #7b3dff 58%, #ff4f81 100%); box-shadow: 0 6px 16px -4px rgba(123,61,255,.5); }
+  .btn-zalo { background: linear-gradient(180deg, #1a7bff 0%, #0068ff 100%); box-shadow: 0 6px 16px -4px rgba(0,104,255,.5); }
+  .btn:active { transform: scale(.98); box-shadow: 0 2px 6px -2px rgba(0,0,0,.3); }
+  .badge { flex: 0 0 40px; display: grid; place-items: center; width: 40px; height: 40px; background: #fff; border-radius: 11px; }
+  .badge img { width: 30px; height: 30px; display: block; }
+  .label { flex: 1; text-align: left; font-size: 17.5px; font-weight: 800; letter-spacing: -.005em; line-height: 1.2; }
+  .chev { flex: 0 0 22px; width: 22px; height: 22px; opacity: .9; animation: nudge 1.8s ease-in-out infinite; }
+  @keyframes nudge { 0%, 70%, 100% { transform: translateX(0); } 80% { transform: translateX(4px); } 90% { transform: translateX(0); } }
+  @media (prefers-reduced-motion: reduce) { .chev { animation: none; } .btn { transition: none; } }
+  .micro { margin: 10px 0 0; color: #8a6d45; font-size: 13px; }
   /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
-  @media (max-width: 340px) { h1 { font-size: 19.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .btn span { font-size: 15.5px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
+  @media (max-width: 340px) { h1 { font-size: 19.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 16.5px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
@@ -217,15 +238,12 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     .lead { margin-bottom: 12px; font-size: 14px; }
     .gift { margin-bottom: 14px; }
     .gift li { padding: 7px 2px; }
-    .btn { padding: 12px 8px 11px; }
-    .btn svg, .btn img { width: 42px; height: 42px; margin-bottom: 8px; }
+    .ticket-head { padding: 8px 0 7px; margin-bottom: 10px; }
+    .btn { min-height: 50px; }
+    .channels { gap: 8px; }
+    .micro { margin-top: 8px; }
     .fallback { padding-top: 10px; }
   }
-  .btn { display: flex; flex-direction: column; align-items: center; padding: 18px 10px 16px; background: #fff; color: #3a2e22; border: 1.5px solid #e3d8bf; border-radius: 14px; text-decoration: none; box-shadow: 0 1px 2px rgba(58,46,34,.06); }
-  .btn svg, .btn img { width: 52px; height: 52px; display: block; margin-bottom: 12px; }
-  .btn span { order: 1; color: #d4731c; font-size: 17px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }
-  .btn:active { background: #f7f2e6; border-color: #cdbf9f; }
-  .btn:active { background: #f3ede0; }
   .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
   .fallback { margin: 4px 0 0; padding-top: 14px; border-top: 1px dashed #d9cba9; color: #6b5d4b; font-size: 14px; line-height: 1.5; }
   .fallback a { color: #2e6b3f; font-size: 13.5px; font-weight: 700; text-decoration: none; }
@@ -243,10 +261,14 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <li><span class="ic">${icons.offer}</span><span>Ưu đãi cho lần mua hàng tiếp theo</span></li>
     <li><span class="ic">${icons.swap}</span><span>Đổi ngay nếu hạt mềm, thiếu hàng</span></li>
   </ul>
-  <div class="channels">
-    <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger">${icons.messenger}<span>Lưu ưu đãi</span></a>
-    ${zalo}
-  </div>
+  <section class="ticket" aria-label="Phiếu ưu đãi">
+    <div class="ticket-head"><span class="ticket-tag">Phiếu ưu đãi</span><span class="ticket-sub">cho lần mua hàng tiếp theo</span></div>
+    <div class="channels">
+      <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi</span>${icons.chevron}</a>
+      ${zalo}
+    </div>
+    <p class="micro">Miễn phí · Một chạm, chúng em gửi ngay</p>
+  </section>
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${icons.phone}${heartline.display}</a>${facebook}.</p>
 </main>

@@ -94,6 +94,10 @@ test('trang đệm: nút Zalo luôn có (liên kết OA đã đặt, không thì
   assert.match(without, /<a class="btn" id="open" [^>]*aria-label="Lưu ưu đãi qua Messenger"/);
   assert.match(without, /<a class="alt" id="zalo" href="https:\/\/zalo\.me\/0899677899"/);
   assert.match(without, /Không dùng Messenger\?/);
+  // Thanh Messenger bám đáy: ẩn sẵn, chỉ hiện khi nút trong phiếu khuất; lượt bấm vẫn đếm là Messenger.
+  assert.match(without, /<div class="sticky" id="sticky" hidden>\s*<a class="btn sticky-btn" id="open-sticky" href="https:\/\/m\.me\//);
+  assert.match(without, /arm\(document\.getElementById\('open-sticky'\), 'messenger'\)/);
+  assert.match(without, /IntersectionObserver/);
   const withZalo = render(agents.zaloIos, { zaloUrl: 'https://zalo.me/g/abcdef' });
   assert.match(withZalo, /<a class="alt" id="zalo" href="https:\/\/zalo\.me\/g\/abcdef"/);
   assert.match(withZalo, /pointerdown/, 'đếm từ lúc chạm, không đợi click (iPhone nhảy app trước click)');

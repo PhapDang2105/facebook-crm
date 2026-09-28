@@ -166,6 +166,13 @@ const icons = {
  * kích hoạt Universal Link / App Link), có hướng dẫn riêng khi đang ở trong app,
  * và đường lùi là Heartline + trang Facebook của Page. Không tài nguyên ngoài,
  * không tự chuyển hướng, không cookie. Giọng thẻ bảo hành: "chúng em" / "anh chị".
+ *
+ * Ghi chú bố cục (không gửi xuống máy khách để giữ trang nhẹ):
+ *  - Phiếu ưu đãi kiểu voucher: nền kem, viền chấm, răng cưa hai bên; script căn răng cưa theo đường chấm.
+ *  - Messenger là nút chính; thanh .sticky bám đáy màn chỉ hiện khi nút trong phiếu chưa lọt hẳn vào màn
+ *    (máy thấp, trình duyệt trong app có thanh tiêu đề), lượt bấm vẫn đếm là Messenger.
+ *  - Lượt bấm đếm ngay khi chạm (pointerdown/touchstart): trên iPhone, Safari nhảy sang app trước khi click kịp chạy.
+ *  - Máy 360-400px, máy 320px, máy màn thấp có mức thu gọn riêng (các @media cuối khối style).
  */
 export function renderBridgePage({ code, destination, pageName, fallbackUrl = '', zaloUrl = '', classification = {} }) {
   const name = escapeHtml(pageName || 'Giọt Nắng');
@@ -191,7 +198,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
+  body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: flex-start; justify-content: center; padding: 10px 12px calc(84px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
   main { width: 100%; max-width: 400px; padding: clamp(14px, 4.5vw, 20px) clamp(16px, 5.5vw, 26px) 22px; background: #fff; border: 1px solid #e3d8bf; border-radius: 20px; box-shadow: 0 1px 2px rgba(58,46,34,.04), 0 8px 24px rgba(58,46,34,.06); text-align: center; }
   .wordmark { white-space: nowrap; font-weight: 700; }
   .w-giot { color: #7cc254; }
@@ -199,21 +206,20 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .letter-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 6px; }
   .letter-top .greet { margin: 0; white-space: nowrap; }
   .logo { flex: none; display: block; width: clamp(82px, 25vw, 100px); height: auto; margin: -4px -4px 0 0; mix-blend-mode: multiply; }
-  .letter { margin: 0 0 16px; padding: 16px 16px 12px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
+  .letter { margin: 0 0 12px; padding: 12px 14px 10px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
   .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
-  .letter-body { margin: 0 0 8px; color: #4a3f33; font-size: 15.5px; line-height: 1.5; }
+  .letter-body { margin: 0 0 6px; color: #4a3f33; font-size: 15px; line-height: 1.45; }
   .letter-body:last-of-type { margin-bottom: 10px; }
-  .offers { display: grid; gap: 8px; margin: 0 0 10px; padding: 0; list-style: none; }
+  .offers { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
   .offers li { display: flex; align-items: center; gap: 12px; color: #3a2e22; font-size: 15px; line-height: 1.4; }
   .offers li b { color: #2e6b3f; font-weight: 700; }
-  .thumb { flex: 0 0 56px; display: grid; place-items: center; width: 56px; height: 56px; overflow: hidden; background: #f6f1e4; border-radius: 12px; }
-  .thumb img { max-width: 52px; max-height: 50px; width: auto; height: auto; display: block; }
+  .thumb { flex: 0 0 48px; display: grid; place-items: center; width: 48px; height: 48px; overflow: hidden; background: #f6f1e4; border-radius: 12px; }
+  .thumb img { max-width: 44px; max-height: 44px; width: auto; height: auto; display: block; }
   .thumb-bare { background: transparent; }
   .thumb-bare img { max-width: 44px; max-height: 44px; }
-  .sign { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
+  .sign { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: -2px 0 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
   .sign b { color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-size: 17px; }
-  .stamp { display: grid; place-items: center; width: 44px; height: 44px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-weight: 700; font-size: 12px; line-height: 1.05; text-align: center; transform: rotate(-8deg); opacity: .9; }
-  /* Phiếu ưu đãi kiểu voucher (mẫu "Lưu" của sàn TMĐT): nền kem, viền chấm, răng cưa hai bên. */
+  .stamp { display: grid; place-items: center; width: 38px; height: 38px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-weight: 700; font-size: 12px; line-height: 1.05; text-align: center; transform: rotate(-8deg); opacity: .9; }
   .ticket { position: relative; margin: 0 0 14px; padding: 0 12px 12px; background: #fff6e6; border: 1.5px solid #f3d6a4; border-radius: 16px; }
   .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 9px 0 9px; margin: 0 0 12px; }
   .ticket-head::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 0; border-bottom: 2px dashed #e8b765; }
@@ -222,7 +228,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .ticket::after { right: -10px; clip-path: inset(0 50% 0 0); }
   .ticket-note { color: #9a5b1c; font-size: clamp(12px, 3.35vw, 13.5px); font-weight: 600; line-height: 1.3; text-align: center; white-space: nowrap; }
   @media (max-width: 349px) { .ticket-note { white-space: normal; text-wrap: balance; } }
-  /* Nút tô màu thương hiệu từng kênh: cao 56px, rộng hết, logo trong ô trắng bên trái, mũi tên bên phải. */
   .channels { display: grid; gap: 10px; }
   .btn { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 8px 12px 8px 8px; color: #fff; border-radius: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; transition: transform .12s ease, box-shadow .12s ease; }
   #open { background: linear-gradient(110deg, #0a84ff 0%, #7b3dff 58%, #ff4f81 100%); box-shadow: 0 6px 16px -4px rgba(123,61,255,.5); }
@@ -230,7 +235,10 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .alt { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 6px; padding: 4px 4px 0; color: #6b5d4b; font-size: 14px; text-decoration: none; -webkit-tap-highlight-color: transparent; }
   .alt span, .alt b { white-space: nowrap; }
   .alt img { width: 22px; height: 22px; display: block; }
-  .alt b { color: #0068ff; font-weight: 800; }
+  .sticky { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(239,230,210,0) 0%, rgba(239,230,210,.94) 30%); }
+  .sticky[hidden] { display: none; }
+  .sticky-btn { max-width: 400px; margin: 0 auto; background: linear-gradient(110deg, #0a84ff 0%, #7b3dff 58%, #ff4f81 100%); box-shadow: 0 8px 20px -6px rgba(123,61,255,.55); }
+  .alt b { color: #0068ff; font-weight: 800; font-style: italic; }
   .alt:active b { text-decoration: underline; }
   .btn:active { transform: scale(.98); box-shadow: 0 2px 6px -2px rgba(0,0,0,.3); }
   .badge { flex: 0 0 40px; display: grid; place-items: center; width: 40px; height: 40px; background: #fff; border-radius: 11px; }
@@ -239,11 +247,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .chev { flex: 0 0 22px; width: 22px; height: 22px; opacity: .9; animation: nudge 1.8s ease-in-out infinite; }
   @keyframes nudge { 0%, 70%, 100% { transform: translateX(0); } 80% { transform: translateX(4px); } 90% { transform: translateX(0); } }
   @media (prefers-reduced-motion: reduce) { .chev { animation: none; } .btn { transition: none; } }
-  /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
-  /* Máy 360-400px: lá thư nằm trong thẻ nên lề bị cộng hai lần; thu lề để mỗi dòng dấu tích nằm trên một hàng. */
   @media (max-width: 400px) { main { padding-left: 14px; padding-right: 14px; } .letter { padding-left: 12px; padding-right: 12px; } .offers li { font-size: 14.5px; gap: 10px; } }
   @media (max-width: 340px) { .greet { font-size: 18px; } .logo { width: 70px; } .letter { padding: 12px 9px 8px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .offers li { font-size: 14px; gap: 9px; } .thumb { flex-basis: 48px; width: 48px; height: 48px; } .thumb img { max-width: 44px; max-height: 42px; } .fallback { font-size: 13px; } }
-  /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
     main { padding-top: 16px; padding-bottom: 14px; }
@@ -291,13 +296,13 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   ${hint ? `<div class="hint">${hint}</div>` : ''}
   <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${icons.phone}${heartline.display}</a>${facebook}.</p>
 </main>
+<div class="sticky" id="sticky" hidden>
+  <a class="btn sticky-btn" id="open-sticky" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi<small>qua Messenger</small></span>${icons.chevron}</a>
+</div>
 <script>
 (function () {
   var open = document.getElementById('open');
   var beacon = '/q/${safeCode}/open';
-  // Đếm ngay khi ngón tay chạm nút (pointerdown/touchstart), không đợi click:
-  // trên iPhone, bấm liên kết mở app là Safari nhảy sang Messenger trước khi
-  // sự kiện click kịp chạy, nên đếm ở click là mất lượt.
   function send(to) {
     var url = beacon + '?to=' + to;
     try { if (navigator.sendBeacon && navigator.sendBeacon(url)) return; } catch (e) {}
@@ -313,7 +318,13 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   }
   arm(open, 'messenger');
   arm(document.getElementById('zalo'), 'zalo');
-  // Răng cưa của phiếu nằm đúng trên đường chấm, kể cả khi dòng tiêu đề phiếu xuống hàng trên máy hẹp.
+  arm(document.getElementById('open-sticky'), 'messenger');
+  var sticky = document.getElementById('sticky');
+  if (sticky && open && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (entries) {
+      sticky.hidden = entries[0].intersectionRatio >= 0.95;
+    }, { threshold: [0, 0.95, 1] }).observe(open);
+  }
   var ticket = document.querySelector('.ticket');
   var head = ticket && ticket.querySelector('.ticket-head');
   function notch() { if (head) ticket.style.setProperty('--notch', (head.offsetHeight - 10) + 'px'); }

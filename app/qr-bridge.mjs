@@ -209,7 +209,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .letter { margin: 0 0 12px; padding: 12px 14px 10px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
   .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
   .letter-body { margin: 0 0 6px; color: #4a3f33; font-size: 15px; line-height: 1.45; }
-  .letter-body.thanks { font-size: 15px; white-space: nowrap; }
+  .nowrap { white-space: nowrap; }
   .letter-body:last-of-type { margin-bottom: 10px; }
   .offers { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
   .offers li { display: flex; align-items: center; gap: 12px; color: #3a2e22; font-size: 15px; line-height: 1.4; }
@@ -276,7 +276,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <main>
   <div class="letter">
     <div class="letter-top"><h1 class="greet">Thân gửi anh chị,</h1><img class="logo" src="/q/brand/logo.webp" alt="${name}" width="96" height="53"></div>
-    <p class="letter-body thanks">Cảm ơn Anh/Chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</p>
+    <p class="letter-body thanks"><span class="nowrap">Cảm ơn Anh/Chị đã tin tưởng</span> <span class="nowrap">và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</span></p>
     <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong anh chị và cả nhà luôn khoẻ, ăn ngon và thật bình an. Em gửi anh/chị chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng anh/chị thật&nbsp;lâu:</p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b></span></li>
@@ -329,11 +329,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   var ticket = document.querySelector('.ticket');
   var head = ticket && ticket.querySelector('.ticket-head');
   function notch() { if (head) ticket.style.setProperty('--notch', (head.offsetHeight - 10) + 'px'); }
-  var thanks = document.querySelector(".thanks");
-  function fitThanks() { if (!thanks) return; thanks.style.fontSize = ""; thanks.style.whiteSpace = ""; var w = thanks.clientWidth, s = thanks.scrollWidth; if (s <= w) return; var size = 15 * w / s - 0.2; if (size < 11.5) thanks.style.whiteSpace = "normal"; else thanks.style.fontSize = size + "px"; }
-  fitThanks();
   notch();
-  addEventListener('resize', function () { fitThanks(); notch(); });
+  addEventListener('resize', notch);
 })();
 </script>
 </body>

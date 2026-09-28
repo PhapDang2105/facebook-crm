@@ -201,7 +201,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .ic { flex: 0 0 22px; width: 22px; height: 22px; color: #2e6b3f; }
   .ic svg { width: 22px; height: 22px; display: block; }
   .channels { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 3vw, 12px); margin: 0 0 14px; }
-  @media (max-width: 340px) { .btn span { font-size: 15.5px; } .gift li { font-size: 14.5px; gap: 10px; } }
+  /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
+  @media (max-width: 340px) { body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .btn span { font-size: 15.5px; } .gift li { font-size: 14px; gap: 9px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }

@@ -197,7 +197,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .w-giot { color: #7cc254; }
   .w-nang { color: #f9b122; }
   .letter-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 6px; }
-  .letter-top .greet { margin: 0; }
+  .letter-top .greet { margin: 0; white-space: nowrap; }
   .logo { flex: none; display: block; width: clamp(82px, 25vw, 100px); height: auto; margin: -4px -4px 0 0; }
   .letter { margin: 0 0 16px; padding: 16px 16px 12px; background: #fffdf8; border: 1px solid #efe4cc; border-radius: 14px; text-align: left; }
   .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
@@ -242,7 +242,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   /* Máy hẹp (320px): nới lề ngoài, chữ lợi ích 14px để mỗi dòng nằm trên một hàng. */
   /* Máy 360-400px: lá thư nằm trong thẻ nên lề bị cộng hai lần; thu lề để mỗi dòng dấu tích nằm trên một hàng. */
   @media (max-width: 400px) { main { padding-left: 14px; padding-right: 14px; } .letter { padding-left: 12px; padding-right: 12px; } .offers li { font-size: 14.5px; gap: 10px; } }
-  @media (max-width: 340px) { .letter { padding: 12px 9px 8px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .offers li { font-size: 14px; gap: 9px; } .thumb { flex-basis: 48px; width: 48px; height: 48px; } .thumb img { max-width: 44px; max-height: 42px; } .fallback { font-size: 13px; } }
+  @media (max-width: 340px) { .greet { font-size: 18px; } .logo { width: 70px; } .letter { padding: 12px 9px 8px; } .letter-body { font-size: 14.5px; } body { padding-left: 10px; padding-right: 10px; } main { padding-left: 14px; padding-right: 14px; } .label { font-size: 17px; } .alt { font-size: 13px; } .offers li { font-size: 14px; gap: 9px; } .thumb { flex-basis: 48px; width: 48px; height: 48px; } .thumb img { max-width: 44px; max-height: 42px; } .fallback { font-size: 13px; } }
   /* Máy màn thấp (iPhone SE 568px, Android nhỏ): thu khoảng cách để hai nút và Heartline nằm trong một màn, không phải cuộn. */
   @media (max-height: 680px) {
     body { padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }

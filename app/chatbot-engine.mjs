@@ -7,7 +7,7 @@ import { productHint, resolveConversationProduct } from './processing/product-de
 import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { findProductBySku, getCatalogProducts, getGifts, matchProduct } from './processing/catalog.mjs';
-import { isLivestreamConversation } from './conversation-orders.mjs';
+import { isLivestreamConversation, isLivestreamCustomer } from './conversation-orders.mjs';
 import { ruleIntent } from './processing/rule-intent.mjs';
 import { activeTrial, filterTrialReply, promoBowlActive, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
 import { intentSafeTemplates, predictIntent } from './processing/intent-model.mjs';
@@ -1018,7 +1018,9 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       || conversation.botLastTemplateId === 'WHOLESALE_CTV_CONTACT'
       || Boolean(conversation.botUpsoldAt)
       || recent.some(item => item?.direction === 'outgoing' && /lấy 2 \S+ thì giá chỉ còn/iu.test(String(item.text || '')));
-    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, latestOrder, lastTemplateId: conversation.botLastTemplateId || '', previousDelivery, trial: trialState, trialBags: trialState ? trialBagOptions() : '', promoBowl: promoBowlActive(conversation), now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], noUpsell, customer: { gender: lockedGender, name: conversation.name || '' } };
+    const replyContext = { pendingOrder: conversation.pendingOrder, recentOrder, latestOrder, lastTemplateId: conversation.botLastTemplateId || '', previousDelivery, trial: trialState, trialBags: trialState ? trialBagOptions() : '', promoBowl: promoBowlActive(conversation), now: Date.now(), recentOutgoing: recent.filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000).map(item => String(item.text || '')), messageText: String(message.text || ''), recentCustomerTexts: [...recentComments, ...recentCustomerTexts], noUpsell, customer: { gender: lockedGender, name: conversation.name || '' },
+      // Khách livestream (bài live, thẻ Livestream — kể cả thẻ trong hộp thư Pancake): mẫu tính giá/quà mới kèm quà chỉ khách live.
+      livestream: isLivestreamCustomer(conversation) || conversationLabels.includes('livestream') };
     // Mốc tin Page gần nhất (nhân viên hay bot): nhân viên nhắn sau bot > 5 giây thì luật/gác coi là nhân viên đang trả lời.
     const lastOutgoingAt = Math.max(0, ...recent.filter(item => item?.direction === 'outgoing').map(item => Number(item.createdAt) || 0));
     const staffRepliedAfterBot = lastOutgoingAt > (Number(conversation.botLastReplyAt) || 0) + 5000;

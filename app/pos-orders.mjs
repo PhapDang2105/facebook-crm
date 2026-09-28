@@ -13,6 +13,7 @@ import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import { comboKey, findProductBySku, getGifts, giftsForKey, matchProduct } from './processing/catalog.mjs';
+import { isLivestreamOrder } from './conversation-orders.mjs';
 
 /**
  * SKU gửi POS cho một dòng đơn. Đơn cũ còn ghi SKU đã đổi trong danh mục
@@ -188,9 +189,10 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
       weight: money(item.weight)
     }
   }));
-  // Quà theo tổ hợp giỏ (bảng quà trong Cài đặt), như file xuất kho.
+  // Quà theo tổ hợp giỏ (bảng quà trong Cài đặt), như file xuất kho. Quà chỉ khách
+  // livestream (Quà Tặng LIVE) chỉ vào đơn khách live (order.livestream / "(Live) ").
   const basketKey = comboKey(products.map(item => ({ sku: item.sku, quantity: item.quantity })));
-  for (const gift of basketKey ? giftsForKey(basketKey) : []) {
+  for (const gift of basketKey ? giftsForKey(basketKey, { livestream: isLivestreamOrder(order) }) : []) {
     const sku = String(gift.sku || '').trim().toUpperCase();
     if (!sku || items.some(item => item.variation_id === sku)) continue;
     if (posSkus && !posSkus.has(sku)) continue;

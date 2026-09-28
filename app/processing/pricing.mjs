@@ -20,13 +20,15 @@ export function unitPriceInBasket(product, totalQuantity) {
   return combo && product.comboPrice > 0 ? product.comboPrice : product.unitPrice;
 }
 
+// Ngữ cảnh quà: { livestream } — khách đến từ phiên live mới nhận quà "chỉ khách
+// livestream" (catalog.giftsForKey). Mọi hàm tính giỏ/quà dưới đây nhận cùng tuỳ chọn.
 /** Shipping charged on a basket: the configured fee unless its combination was given free shipping. */
-export function shippingFeeForKey(key) {
-  return giftsForKey(key).some(isFreeShippingGift) ? 0 : getShippingFee();
+export function shippingFeeForKey(key, { livestream = false } = {}) {
+  return giftsForKey(key, { livestream }).some(isFreeShippingGift) ? 0 : getShippingFee();
 }
 
-export function giftTextForKey(key) {
-  return giftsForKey(key).map(gift => gift.name).join(' + ');
+export function giftTextForKey(key, { livestream = false } = {}) {
+  return giftsForKey(key, { livestream }).map(gift => gift.name).join(' + ');
 }
 
 const comboIndex = () => new Set(listCombos().map(combo => combo.key));
@@ -37,8 +39,9 @@ const unpriceable = (reason, totalQuantity = 0) => ({ priceable: false, reason, 
  * Prices a basket of { sku | product | name, quantity }. Returns
  * { priceable, reason, total, gift, gifts, totalQuantity, lines }. A basket
  * that cannot be priced exactly is handed to a human rather than guessed at.
+ * `livestream: true` (khách từ phiên live) mới tính quà chỉ dành cho khách live.
  */
-export function priceBasket(items = []) {
+export function priceBasket(items = [], { livestream = false } = {}) {
   const lines = [];
   for (const item of Array.isArray(items) ? items : []) {
     const quantity = Math.round(Number(item?.quantity) || 0);
@@ -72,8 +75,8 @@ export function priceBasket(items = []) {
     };
   });
   if (!(total > 0)) return unpriceable('no-price', totalQuantity);
-  const gifts = giftsForKey(key);
-  const shippingFee = shippingFeeForKey(key);
+  const gifts = giftsForKey(key, { livestream });
+  const shippingFee = shippingFeeForKey(key, { livestream });
   return {
     priceable: true,
     reason: '',
@@ -143,15 +146,15 @@ export function buildCatalogPrompt({ compact = false } = {}) {
  * list price at the single rate, the price actually paid, shipping or free
  * shipping for that combination, gifts other than free shipping, total weight.
  */
-export function quoteTiers(productText) {
+export function quoteTiers(productText, { livestream = false } = {}) {
   const product = matchProduct(productText);
   if (!product) return null;
   const tiers = [];
   const top = product.comboPrice > 0 ? maxComboQuantity : 1;
   for (let quantity = 1; quantity <= top; quantity += 1) {
     const key = comboKey([{ sku: product.sku, quantity }]);
-    const gifts = giftsForKey(key);
-    const shippingFee = shippingFeeForKey(key);
+    const gifts = giftsForKey(key, { livestream });
+    const shippingFee = shippingFeeForKey(key, { livestream });
     tiers.push({
       quantity,
       listPrice: product.unitPrice * quantity,
@@ -178,7 +181,8 @@ export function describeGiftTable() {
     const range = gift.maxQuantity && gift.maxQuantity === gift.minQuantity ? `đúng ${gift.minQuantity} sản phẩm`
       : gift.maxQuantity && gift.maxQuantity > gift.minQuantity ? `từ ${gift.minQuantity} đến ${gift.maxQuantity} sản phẩm`
       : `từ ${gift.minQuantity} sản phẩm`;
-    const rule = `${range}${excluded.length ? ` (trừ ${excluded.join(', ')})` : ''}`;
+    // Quà chỉ khách livestream: ghi rõ cho mô hình/GIFT_POLICY, khỏi hứa quà live với khách thường.
+    const rule = `${range}${excluded.length ? ` (trừ ${excluded.join(', ')})` : ''}${gift.livestreamOnly ? ' (chỉ khách livestream)' : ''}`;
     groups.set(rule, [...(groups.get(rule) || []), gift.name]);
   }
   if (!groups.size) return ['- Hiện chưa có quà tặng.'];

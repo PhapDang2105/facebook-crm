@@ -17,6 +17,33 @@ export function isLivestreamConversation(conversation = {}) {
   return /\b(live|livestream|phien live|san deal|phat truc tiep|video truc tiep)\b/i.test(normalizeText(source));
 }
 
+/**
+ * "Khách livestream" — định nghĩa dùng chung cho quà chỉ khách live, ngữ cảnh
+ * mẫu trả lời và cờ đơn: bài/quảng cáo là phiên live (isLivestreamConversation),
+ * HOẶC hội thoại mang thẻ "livestream" (tự gắn hay nhân viên gắn tay), HOẶC bài
+ * khách bình luận được đánh dấu là video trực tiếp (post.live / post.isLive /
+ * post.type 'live', nếu nguồn có trường). Khách thường (hộp thư, bài thường) → false.
+ */
+export function isLivestreamCustomer(conversation = {}) {
+  if (!conversation || typeof conversation !== 'object') return false;
+  if (isLivestreamConversation(conversation)) return true;
+  const labels = Array.isArray(conversation.labels) ? conversation.labels : [];
+  if (labels.some(label => normalizeText(typeof label === 'string' ? label : label?.id ?? label?.name) === 'livestream')) return true;
+  const post = conversation.post && typeof conversation.post === 'object' ? conversation.post : null;
+  if (post && (post.live === true || post.isLive === true || /^live(_?video)?$/i.test(String(post.type || post.kind || '')))) return true;
+  return false;
+}
+
+/**
+ * Đơn của khách livestream (nhận quà chỉ khách live khi đẩy POS / xuất kho):
+ * cờ order.livestream (đơn bot tạo từ 28/09), cờ liveOrder cũ, hoặc địa chỉ
+ * nhân viên ghi tay mở đầu "(Live) ".
+ */
+export function isLivestreamOrder(order = {}) {
+  if (!order || typeof order !== 'object') return false;
+  return order.livestream === true || order.liveOrder === true || /^\s*\(live\)/i.test(String(order.address || ''));
+}
+
 function text(value, maximum) {
   return String(value || '').trim().slice(0, maximum);
 }
@@ -107,7 +134,9 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   const total = money(input.total);
   const totalQuantityForPricing = items.reduce((sum, item) => sum + item.quantity, 0);
   // Gift and shipping come from the basket's combination in the gift table.
-  const priced = priceBasket(items.map(item => ({ sku: item.sku, quantity: item.quantity })));
+  // Khách từ phiên live mới nhận quà "chỉ khách livestream" (Quà Tặng LIVE).
+  const livestream = isLivestreamCustomer(conversation);
+  const priced = priceBasket(items.map(item => ({ sku: item.sku, quantity: item.quantity })), { livestream });
   const shippingFee = input.shippingFee !== undefined ? money(input.shippingFee) : (priced.priceable ? priced.shippingFee : 0);
   const pricedItems = items.map((item, index) => {
     const product = findProductBySku(item.sku);
@@ -145,10 +174,13 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   }, { now, id });
   if (total) order.total = total;
   order.gift = text(input.gift ?? (priced.priceable ? priced.gift : ''), 300);
-  // Đơn chốt từ phiên livestream (bài/quảng cáo "Săn deal hời", "live tối nay"):
-  // địa chỉ mang đầu "(Live) " như nhân viên vẫn ghi tay, để kho và POS biết
-  // đơn live (quà live, giá live). Ba cấp tỉnh/huyện/xã đã tách xong trước đó.
-  if (isLivestreamConversation(conversation) && order.address && !/^\(live\)/i.test(order.address)) {
+  // Cờ đơn khách livestream: pos-orders / order-export dựa vào đây để thêm dòng
+  // quà chỉ khách live (giftsForKey(..., { livestream })). Luôn ghi true/false.
+  order.livestream = livestream;
+  // Đơn chốt từ phiên livestream (bài/quảng cáo "Săn deal hời", "live tối nay",
+  // thẻ Livestream): địa chỉ mang đầu "(Live) " như nhân viên vẫn ghi tay, để kho
+  // và POS biết đơn live (quà live, giá live). Ba cấp tỉnh/huyện/xã đã tách xong trước đó.
+  if (livestream && order.address && !/^\(live\)/i.test(order.address)) {
     order.address = `(Live) ${order.address}`;
     if (order.street) order.street = `(Live) ${order.street}`;
     order.liveOrder = true;

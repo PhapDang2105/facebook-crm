@@ -323,11 +323,15 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
     const useComboPricing = (bagQuantityByOrder.get(orderKey) || 0) + catalogQuantity >= 2;
     // Shipping (when the combination was not given free shipping) rides on the
     // order's first catalogue line only.
-    const shippingFee = basketKey && isFirstOrderLine ? shippingFeeForKey(basketKey) : 0;
+    // Đơn khách livestream trong file: địa chỉ mở đầu "(Live) " (bot/nhân viên ghi)
+    // hoặc cột "Livestream" = Có/true/1 — mới kèm quà chỉ khách live.
+    const livestream = /^\s*\(live\)/i.test(String(value(row, 'Địa chỉ') || ''))
+      || /^(co|true|1|x|yes)$/i.test(normalizeColumnName(value(row, 'Livestream')));
+    const shippingFee = basketKey && isFirstOrderLine ? shippingFeeForKey(basketKey, { livestream }) : 0;
     const items = splitSkuForExport(value(row, 'Mã mẫu mã'), value(row, 'Số lượng'), value(row, 'Đơn giá'), useComboPricing, value(row, 'Sản phẩm'), shippingFee);
     // Gifts ticked for this combination in Cài đặt → Quà tặng, once per order, after its last product line.
     if (basketKey && lastRowIndexByOrder.get(orderKey) === rowIndex) {
-      for (const gift of giftsForKey(basketKey)) {
+      for (const gift of giftsForKey(basketKey, { livestream })) {
         if (gift.sku && !items.some(item => item.sku === gift.sku)) items.push({ sku: gift.sku, quantity: 1, price: 0, weight: gift.weight });
       }
     }

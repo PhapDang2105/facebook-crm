@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import './helpers/seed-catalog.mjs';
-import { buildCustomerOrderConfirmation, normalizeChatbotOrder, normalizeCustomerOrder } from '../app/conversation-orders.mjs';
+import { buildCustomerOrderConfirmation, isLivestreamCustomer, isLivestreamOrder, normalizeChatbotOrder, normalizeCustomerOrder } from '../app/conversation-orders.mjs';
 
 const input = {
   id: 'QA-1001',
@@ -83,6 +83,39 @@ test('quà tặng của giỏ đi theo đơn và vào tin xác nhận (form tạ
   assert.match(buildCustomerOrderConfirmation(order), /🎁 Quà tặng: Miễn phí vận chuyển \+ Bộ bát gáo dừa/);
   assert.equal(normalizeCustomerOrder(input).gift, '');
   assert.doesNotMatch(buildCustomerOrderConfirmation(normalizeCustomerOrder(input)), /Quà tặng/);
+});
+
+test('isLivestreamCustomer: bài/quảng cáo live, thẻ livestream, bài đánh dấu live → true; hộp thư/bài thường → false', () => {
+  assert.equal(isLivestreamCustomer({ post: { message: 'Săn deal hời tối nay' } }), true);
+  assert.equal(isLivestreamCustomer({ referral: { adTitle: 'Live tối nay 20h' } }), true);
+  assert.equal(isLivestreamCustomer({ labels: ['livestream'] }), true);
+  assert.equal(isLivestreamCustomer({ labels: ['vip', { id: 'livestream', name: 'Livestream' }] }), true);
+  assert.equal(isLivestreamCustomer({ post: { message: 'Bài thường', live: true } }), true);
+  assert.equal(isLivestreamCustomer({ post: { message: 'Bài thường', type: 'live_video' } }), true);
+  // Khách thường: hộp thư không bài, bài giảm giá thường, thẻ khác.
+  assert.equal(isLivestreamCustomer({}), false);
+  assert.equal(isLivestreamCustomer({ post: { message: 'Granola Túi Xanh 450g giảm 20%' }, labels: ['complaint'] }), false);
+  assert.equal(isLivestreamCustomer({ referral: { adTitle: 'Granola ăn sáng' } }), false);
+  assert.equal(isLivestreamCustomer(null), false);
+  // Cờ đơn khách live cho POS/xuất kho.
+  assert.equal(isLivestreamOrder({ livestream: true }), true);
+  assert.equal(isLivestreamOrder({ liveOrder: true }), true);
+  assert.equal(isLivestreamOrder({ address: '(Live) 12 Lê Lợi, Quận 1' }), true);
+  assert.equal(isLivestreamOrder({ livestream: false, address: '12 Lê Lợi, Quận 1' }), false);
+  assert.equal(isLivestreamOrder({}), false);
+});
+
+test('đơn bot tạo từ hội thoại luôn ghi order.livestream true/false; thẻ livestream cũng thành đơn live "(Live) "', () => {
+  const items = [{ name: 'Granola Túi Xanh 450g', quantity: 2 }];
+  const base = { items, total: 298000, phone: '0909123456', address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' };
+  const plain = normalizeChatbotOrder(base, { name: 'Khách' }, { now: 1000, id: 'p1' });
+  assert.equal(plain.livestream, false);
+  assert.equal(plain.liveOrder, undefined);
+  assert.doesNotMatch(plain.address, /^\(Live\)/);
+  const labelled = normalizeChatbotOrder(base, { name: 'Khách', labels: ['livestream'] }, { now: 1000, id: 'l1' });
+  assert.equal(labelled.livestream, true);
+  assert.equal(labelled.liveOrder, true);
+  assert.match(labelled.address, /^\(Live\) 12 Lê Lợi/);
 });
 
 test('bản chữ "XÁC NHẬN ĐƠN ĐẶT HÀNG…" không còn đường nào gửi cho khách (chủ shop yêu cầu)', async () => {

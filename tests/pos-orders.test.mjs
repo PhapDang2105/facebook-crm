@@ -229,3 +229,41 @@ test('Quà Tặng LIVE (đúng 2 túi, SKU QUA-TANG-LIVE): dòng tặng POS giá
     reloadCatalog();
   }
 });
+
+test('Quà Tặng LIVE chỉ khách livestream (livestreamOnly): đơn khách thường 2 túi KHÔNG có dòng QUA-TANG-LIVE; đơn order.livestream / liveOrder / địa chỉ "(Live)" có', async () => {
+  const { reloadCatalog } = await import('../app/processing/catalog.mjs');
+  const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
+  const gifts = JSON.parse(original);
+  gifts.items.push({ id: 'qua-tang-live', name: 'Quà Tặng LIVE', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 });
+  writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
+  reloadCatalog();
+  try {
+    const twoBags = {
+      ...order, id: 'live3',
+      products: [
+        { name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1, price: 174000, weight: 450 },
+        { name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 1, price: 174000, weight: 350 }
+      ],
+      discount: 50000, total: 298000, gift: 'Miễn phí vận chuyển'
+    };
+    const posSkus = new Set(['GRA-XANH-Z450', 'GRA-VANG-H350', 'GRA-NAU-Z350', 'BGD', 'MUONG', 'QUA-TANG-LIVE']);
+    const bonus = payload => payload.items.filter(item => item.is_bonus_product).map(item => item.variation_id);
+    // Lỗi 28/09: đơn 2 túi của khách thường (không cờ) nhận quà live → giờ không còn.
+    assert.deepEqual(bonus(buildPosOrderPayload(twoBags, { posSkus })), []);
+    assert.deepEqual(bonus(buildPosOrderPayload({ ...twoBags, livestream: false }, { posSkus })), []);
+    // Đơn khách livestream: cờ mới order.livestream, cờ cũ liveOrder, hay địa chỉ nhân viên ghi "(Live) ".
+    const live = buildPosOrderPayload({ ...twoBags, livestream: true, gift: 'Miễn phí vận chuyển + Quà Tặng LIVE' }, { posSkus });
+    assert.deepEqual(bonus(live), ['QUA-TANG-LIVE']);
+    assert.deepEqual(live.items[2].variation_info, { name: 'Quà Tặng LIVE', retail_price: 0, weight: 50 });
+    assert.equal(live.items.reduce((sum, item) => sum + item.quantity * item.variation_info.retail_price, 0) - live.discount + live.shipping_fee, 298000);
+    assert.deepEqual(bonus(buildPosOrderPayload({ ...twoBags, liveOrder: true }, { posSkus })), ['QUA-TANG-LIVE']);
+    assert.deepEqual(bonus(buildPosOrderPayload({ ...twoBags, address: `(Live) ${twoBags.address}` }, { posSkus })), ['QUA-TANG-LIVE']);
+    // Khách live 3 túi: trần 2 túi vẫn giữ → bát + muỗng, không quà live.
+    assert.deepEqual(bonus(buildPosOrderPayload({ ...order, livestream: true }, { posSkus })), ['BGD', 'MUONG']);
+    // POS chưa có mẫu mã QUA-TANG-LIVE thì bỏ dòng quà dù là đơn live.
+    assert.deepEqual(bonus(buildPosOrderPayload({ ...twoBags, livestream: true }, { posSkus: new Set(['GRA-XANH-Z450', 'GRA-VANG-H350']) })), []);
+  } finally {
+    writeFileSync(process.env.GIFTS_PATH, original);
+    reloadCatalog();
+  }
+});

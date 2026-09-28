@@ -180,6 +180,10 @@ function formatWeight(grams) {
 // The customer the reply is for, set by renderChatbotReply for the duration
 // of one render so every template can address them correctly.
 let activeCustomer = {};
+// Khách livestream của lượt đang dựng (context.livestream): giỏ/quà/bảng giá kèm
+// quà chỉ khách live (Quà Tặng LIVE); khách thường không thấy quà đó.
+let activeLivestream = false;
+const giftContext = () => ({ livestream: activeLivestream });
 // Đơn gần nhất của khách trong hội thoại, để trả lời "đơn của em tới đâu rồi".
 let activeRecentOrder = null;
 
@@ -206,11 +210,12 @@ export function pickVariant(reply, random = Math.random) {
 
 /** Shipping and gifts of one basket key as template values. */
 function basketValues(key) {
-  const gifts = giftsForKey(key);
+  const gifts = giftsForKey(key, giftContext());
   const free = gifts.find(isFreeShippingGift);
+  const shipFee = free ? 0 : shippingFeeForKey(key, giftContext());
   return {
     free_ship: free ? free.name : '',
-    ship_fee: free ? '' : (shippingFeeForKey(key) ? formatMoney(shippingFeeForKey(key)) : ''),
+    ship_fee: shipFee ? formatMoney(shipFee) : '',
     gift: gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + ')
   };
 }
@@ -302,7 +307,7 @@ function withPromoFreeShipping(price) {
 function upsellTwoBags(price, templates) {
   const line = price.lines?.[0];
   if (!line) return '';
-  const two = priceBasket([{ sku: line.sku, quantity: 2 }]);
+  const two = priceBasket([{ sku: line.sku, quantity: 2 }], giftContext());
   if (!two.priceable || !two.lines?.[0]) return '';
   const saving = Math.max(0, (Number(line.unitPrice) || 0) - (Number(two.lines[0].basketUnitPrice) || 0));
   return fill(templates.UPSELL_TWO_BAGS, {
@@ -379,12 +384,12 @@ function renderOrder(value, templates, context = {}) {
   // The price comes from the basket itself, never from a key the model
   // declared: an order_key the model invented used to price three bags as one.
   const freshKey = buildOrderKey(freshItems);
-  const freshPrice = freshKey ? priceBasket(freshItems) : null;
+  const freshPrice = freshKey ? priceBasket(freshItems, giftContext()) : null;
   const pending = usablePendingOrder(context.pendingOrder, { now, templateId });
   const trialBagItem = context.trial?.stage === 'chosen' && context.trial.bag && !freshItems.length && !pending?.items?.length ? [{ product: context.trial.bag, quantity: 1 }] : [];
   const items = freshItems.length ? freshItems : (pending?.items?.length ? pending.items : trialBagItem);
   const key = freshKey || pending?.key || '';
-  const priced = items.length ? priceBasket(items) : null;
+  const priced = items.length ? priceBasket(items, giftContext()) : null;
   // Khách đã nhận ưu đãi miễn phí vận chuyển (tin bám đuổi "1 túi dùng thử vẫn
   // miễn ship", còn hạn): đơn không cộng phí ship, ghi rõ quà để kho và khách thấy.
   // Chỉ luồng dùng thử (processing/trial-flow.mjs) đặt context.trial; ưu đãi áp đúng
@@ -688,8 +693,8 @@ function unitSlug(unit) {
  * old PRICE_TUI_XANH ids still work: "tui xanh" is the product's alias.
  */
 function renderPriceQuote(templateId, value, templates) {
-  const quote = quoteTiers(value.Product_N1 || value.product || '')
-    || quoteTiers(templateId.replace(/^PRICE_/, '').replace(/_/g, ' '));
+  const quote = quoteTiers(value.Product_N1 || value.product || '', giftContext())
+    || quoteTiers(templateId.replace(/^PRICE_/, '').replace(/_/g, ' '), giftContext());
   if (!quote) return fill(templates.ASK_PRODUCT, commonValues());
   const { product } = quote;
   const slug = unitSlug(product.unit);
@@ -745,7 +750,7 @@ function renderDiscountPolicy(value, templates) {
   if (!named) {
     const main = getCatalogProducts().filter(product => product.active && product.mixable && product.comboPrice > 0);
     const lines = main.map(product => {
-      const tiers = (quoteTiers(product.sku)?.tiers || []).filter(tier => tier.quantity >= 2 && tier.quantity <= 3);
+      const tiers = (quoteTiers(product.sku, giftContext())?.tiers || []).filter(tier => tier.quantity >= 2 && tier.quantity <= 3);
       if (!tiers.length) return null;
       const price = tiers.map(tier => `${tier.quantity} ${String(product.unit || 'túi').toLowerCase()} ${formatMoney(tier.price)}${tier.gifts.length ? ` (tặng ${tier.gifts.join(' + ')})` : ''}`).join(' · ');
       return { label: product.name, price, list_price: '', free_ship: tiers.every(tier => tier.freeShipping) ? 'miễn phí vận chuyển' : '', gift: '' };
@@ -753,7 +758,7 @@ function renderDiscountPolicy(value, templates) {
     if (lines.length) return fill(templates.DISCOUNT_POLICY, commonValues(), { combos: lines });
   }
   const products = (named ? [named] : getCatalogProducts()).filter(product => product.active && product.comboPrice > 0);
-  const combos = products.flatMap(product => (quoteTiers(product.sku)?.tiers || [])
+  const combos = products.flatMap(product => (quoteTiers(product.sku, giftContext())?.tiers || [])
     .filter(tier => tier.quantity >= 2 && (tier.price < tier.listPrice || tier.freeShipping || tier.gifts.length))
     .map(tier => ({
       // Tên đã mở đầu bằng đơn vị ("Combo 10 gói Mix"): không ghi "2 Combo Combo 10 gói Mix".
@@ -933,6 +938,7 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
 
 function renderSingleReply(value = {}, templates = {}, context = {}) {
   activeCustomer = context.customer || {};
+  activeLivestream = context.livestream === true;
   activeRecentOrder = context.recentOrder || null;
   const templateId = String(value.template_id || '').trim();
   // Khách dặn thêm cho đơn vừa đặt (hàng mới, giờ giao, gọi trước): ghi chú vào

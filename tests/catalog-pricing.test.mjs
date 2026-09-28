@@ -89,6 +89,68 @@ test('quà có "Tối đa (túi)": Quà Tặng LIVE tặng đơn đúng 2 túi �
   }
 });
 
+test('quà "chỉ khách livestream" (livestreamOnly): khách thường không có, khách live có; mọi hàm giá/quà theo ngữ cảnh; bảng quà ghi rõ (chỉ khách livestream)', () => {
+  // normalizeGift: dữ liệu cũ không có trường = false; chỉ đúng boolean true mới bật.
+  assert.equal(catalog.normalizeGift({ name: 'Cũ', minQuantity: 2 }).livestreamOnly, false);
+  assert.equal(catalog.normalizeGift({ name: 'Live', minQuantity: 2, livestreamOnly: true }).livestreamOnly, true);
+  assert.equal(catalog.normalizeGift({ name: 'Chuỗi', minQuantity: 2, livestreamOnly: 'true' }).livestreamOnly, false);
+  const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
+  const gifts = JSON.parse(original);
+  // Đúng bản quà sống 28/09: Quà Tặng LIVE đúng 2 túi, chỉ khách livestream.
+  gifts.items.push({ id: 'qua-tang-live', name: 'Quà Tặng LIVE', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 });
+  writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
+  catalog.reloadCatalog();
+  try {
+    // giftsForKey: chữ ký cũ (1 tham số) = khách thường → không có quà live; { livestream: true } → có.
+    assert.deepEqual(catalog.giftsForKey('GRA-XANH-Z450=2').map(gift => gift.name), ['Miễn phí vận chuyển']);
+    assert.deepEqual(catalog.giftsForKey('GRA-XANH-Z450=2', { livestream: false }).map(gift => gift.name), ['Miễn phí vận chuyển']);
+    assert.deepEqual(catalog.giftsForKey('GRA-XANH-Z450=2', { livestream: true }).map(gift => gift.name), ['Miễn phí vận chuyển', 'Quà Tặng LIVE']);
+    assert.deepEqual(catalog.giftsForKey('GRA-VANG-H350=1|GRA-XANH-Z450=1', { livestream: true }).map(gift => gift.name), ['Miễn phí vận chuyển', 'Quà Tặng LIVE']);
+    // Trần 2 túi vẫn giữ: khách live 3 túi chỉ bát + muỗng; 1 túi không quà.
+    assert.deepEqual(catalog.giftsForKey('GRA-NAU-Z350=1|GRA-XANH-Z450=2', { livestream: true }).map(gift => gift.name), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa']);
+    assert.deepEqual(catalog.giftsForKey('GRA-XANH-Z450=1', { livestream: true }), []);
+    // priceBasket.gift theo ngữ cảnh; tiền không đổi (quà giá 0).
+    const plain = basket({ sku: 'GRA-XANH-Z450', quantity: 2 });
+    assert.equal(plain.gift, 'Miễn phí vận chuyển');
+    assert.deepEqual(plain.gifts.map(gift => gift.name), ['Miễn phí vận chuyển']);
+    const live = pricing.priceBasket([{ sku: 'GRA-XANH-Z450', quantity: 2 }], { livestream: true });
+    assert.equal(live.gift, 'Miễn phí vận chuyển + Quà Tặng LIVE');
+    assert.equal(live.total, 298000);
+    assert.equal(plain.total, 298000);
+    assert.equal(pricing.priceBasket([{ sku: 'GRA-XANH-Z450', quantity: 3 }], { livestream: true }).gift, gift3);
+    // giftTextForKey / shippingFeeForKey / quoteTiers nhận cùng tuỳ chọn.
+    assert.equal(pricing.giftTextForKey('GRA-XANH-Z450=2'), 'Miễn phí vận chuyển');
+    assert.equal(pricing.giftTextForKey('GRA-XANH-Z450=2', { livestream: true }), 'Miễn phí vận chuyển + Quà Tặng LIVE');
+    assert.equal(pricing.shippingFeeForKey('GRA-XANH-Z450=2', { livestream: true }), 0);
+    assert.deepEqual(pricing.quoteTiers('túi xanh').tiers.map(tier => tier.gifts), [[], [], ['Bộ bát gáo dừa', 'Muỗng dừa']]);
+    assert.deepEqual(pricing.quoteTiers('túi xanh', { livestream: true }).tiers.map(tier => tier.gifts), [[], ['Quà Tặng LIVE'], ['Bộ bát gáo dừa', 'Muỗng dừa']]);
+    // Bảng giá gửi khách: khách thường không thấy quà live ở bậc 2 túi; khách live (context.livestream) thấy.
+    const quotePlain = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates).messages[0];
+    assert.doesNotMatch(quotePlain, /Quà Tặng LIVE/);
+    assert.match(quotePlain, /447\.000đ \(Miễn phí vận chuyển\)\n🎁 Tặng kèm: Bộ bát gáo dừa \+ Muỗng dừa ạ\./);
+    const quoteLive = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates, { livestream: true }).messages[0];
+    assert.match(quoteLive, /298\.000đ \(Miễn phí vận chuyển\)\n🎁 Tặng kèm: Quà Tặng LIVE ạ\./);
+    // Ngữ cảnh live không "dính" sang lượt sau không có cờ.
+    assert.doesNotMatch(renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates, {}).messages[0], /Quà Tặng LIVE/);
+    // Bảng quà cho mô hình / GIFT_POLICY ghi rõ đối tượng.
+    const table = pricing.describeGiftTable();
+    assert.ok(table.some(line => line === '- Quà Tặng LIVE: đúng 2 sản phẩm (chỉ khách livestream)'), table.join('\n'));
+    assert.ok(table.some(line => line.startsWith('- Miễn phí vận chuyển: từ 2 sản phẩm') && !line.includes('livestream')));
+    // Đơn bot tạo từ hội thoại: khách thường không có quà live, order.livestream = false; khách live có, order.livestream = true.
+    const items = [{ name: 'Granola Túi Xanh 450g', quantity: 2 }];
+    const plainOrder = normalizeChatbotOrder({ items, total: 298000, phone: '0909123456', address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' }, { name: 'Khách' }, { now: 1000, id: 'p1' });
+    assert.equal(plainOrder.livestream, false);
+    assert.equal(plainOrder.gift, 'Miễn phí vận chuyển');
+    const liveOrder = normalizeChatbotOrder({ items, total: 298000, phone: '0909123456', address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' }, { name: 'Khách', post: { message: 'Săn deal hời tối nay' } }, { now: 1000, id: 'l1' });
+    assert.equal(liveOrder.livestream, true);
+    assert.equal(liveOrder.gift, 'Miễn phí vận chuyển + Quà Tặng LIVE');
+    assert.match(liveOrder.address, /^\(Live\) /);
+  } finally {
+    writeFileSync(process.env.GIFTS_PATH, original);
+    catalog.reloadCatalog();
+  }
+});
+
 test('nhận diện theo tên và tên gọi khác, không nhận màu đơn lẻ', () => {
   assert.equal(detectProduct('cho em 2 túi xanh'), 'Granola Túi Xanh 450g');
   assert.equal(detectProduct('granola cacao'), 'Granola Túi Nâu vị cacao 350g');

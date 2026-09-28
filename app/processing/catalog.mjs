@@ -101,6 +101,9 @@ export function normalizeGift(item) {
     // LIVE chỉ tặng đơn ĐÚNG 2 túi (min 2, max 2); đơn 3 túi nhận bát + muỗng.
     maxQuantity: Math.max(0, Math.round(Number(item?.maxQuantity) || 0)),
     excludedSkus: [...new Set((Array.isArray(item?.excludedSkus) ? item.excludedSkus : []).map(normalizeSkuText).filter(Boolean))].slice(0, 100),
+    // Chỉ khách livestream: quà nhân viên thêm cho khách xem live (Quà Tặng LIVE),
+    // không áp cho mọi đơn 2 túi. Dữ liệu cũ không có trường này = false.
+    livestreamOnly: item?.livestreamOnly === true,
     // Warehouse SKU and weight so the export can list the gift as a shipped line.
     sku: normalizeSkuText(item?.sku).slice(0, 80),
     weight: money(item?.weight)
@@ -193,13 +196,16 @@ export function parseComboKey(key) {
 /**
  * Active gifts a basket earns under the rules in Cài đặt → Quà tặng: enough
  * units in total (and not more than maxQuantity when one is set), and none of
- * the gift's excluded products in the basket.
+ * the gift's excluded products in the basket. Quà "chỉ khách livestream"
+ * (livestreamOnly) chỉ trả khi gọi với { livestream: true } — khách đến từ
+ * phiên live (isLivestreamCustomer); gọi một tham số như cũ = khách thường.
  */
-export function giftsForKey(key) {
+export function giftsForKey(key, { livestream = false } = {}) {
   const lines = parseComboKey(key);
   if (!lines.length) return [];
   const total = lines.reduce((sum, line) => sum + line.quantity, 0);
   return readGiftStoreSync().items.filter(gift => gift.active
+    && (!gift.livestreamOnly || livestream === true)
     && total >= gift.minQuantity
     // maxQuantity > 0 là "tặng tới N túi": tổng túi vượt N thì không tặng nữa.
     && (!gift.maxQuantity || total <= gift.maxQuantity)

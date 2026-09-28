@@ -2011,6 +2011,8 @@ const server = http.createServer(async (request, response) => {
           const maxQuantity = item?.maxQuantity === undefined || item?.maxQuantity === null || item?.maxQuantity === '' ? 0 : Number(item.maxQuantity);
           if (!Number.isInteger(maxQuantity) || maxQuantity < 0 || maxQuantity > 99) return sendJson(response, 400, { error: `Quà "${String(item.name).trim()}": Tối đa (túi) phải là số nguyên từ 0 đến 99 (0 = không giới hạn).` });
           if (maxQuantity > 0 && maxQuantity < minQuantity) return sendJson(response, 400, { error: `Quà "${String(item.name).trim()}": Tối đa (túi) phải lớn hơn hoặc bằng Tặng từ (${minQuantity}).` });
+          // Chỉ khách livestream: bỏ trống = không (quà cho mọi khách); có gửi thì phải là true/false.
+          if (item?.livestreamOnly !== undefined && item?.livestreamOnly !== null && typeof item.livestreamOnly !== 'boolean') return sendJson(response, 400, { error: `Quà "${String(item.name).trim()}": "Chỉ khách livestream" phải là true hoặc false.` });
         }
         const shippingFee = Number(payload.shippingFee);
         if (payload.shippingFee !== undefined && (!Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });

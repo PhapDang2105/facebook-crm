@@ -5097,6 +5097,7 @@ function renderGifts() {
       <span class="gift-weight"><input type="number" data-gift-field="weight" data-gift-index="${index}" value="${Number(gift.weight) || 0}" min="0" step="10"><span>g</span></span>
       <button class="price-master-remove" type="button" data-gift-remove="${index}" aria-label="Xóa quà tặng" title="Xóa quà tặng">×</button>
       <div class="gift-exclusions"><span>Không áp dụng cho:</span>${chips || '<em>Chưa có sản phẩm đang bán.</em>'}</div>
+      <div class="gift-exclusions gift-audience"><span>Đối tượng:</span><label class="gift-chip gift-live-chip${gift.livestreamOnly === true ? ' is-on' : ''}" title="Bật: quà chỉ tặng khách đến từ phiên livestream (bài live, thẻ Livestream, địa chỉ (Live)). Tắt: mọi khách đủ điều kiện."><input type="checkbox" data-gift-field="livestreamOnly" data-gift-index="${index}" ${gift.livestreamOnly === true ? 'checked' : ''}>Chỉ khách livestream</label>${gift.livestreamOnly === true ? '<em>Khách thường không nhận quà này.</em>' : ''}</div>
     </div>`;
   }).join('');
 }
@@ -5133,6 +5134,10 @@ giftRowsElement?.addEventListener('change', event => {
   if (event.target.dataset.giftField === 'active') {
     gift.active = event.target.checked;
     event.target.closest('.gift-row')?.classList.toggle('is-off', !gift.active);
+  } else if (event.target.dataset.giftField === 'livestreamOnly') {
+    // Chỉ khách livestream: vẽ lại dòng để hiện/ẩn lời nhắc "Khách thường không nhận quà này".
+    gift.livestreamOnly = event.target.checked;
+    renderGifts();
   } else if (event.target.dataset.giftExclude) {
     const sku = event.target.dataset.giftExclude;
     const set = new Set(gift.excludedSkus || []);
@@ -5150,7 +5155,7 @@ giftRowsElement?.addEventListener('click', event => {
 });
 
 giftAddButton?.addEventListener('click', () => {
-  giftItems.push({ id: '', name: '', active: true, minQuantity: 2, maxQuantity: 0, excludedSkus: [], sku: '', weight: 0 });
+  giftItems.push({ id: '', name: '', active: true, minQuantity: 2, maxQuantity: 0, livestreamOnly: false, excludedSkus: [], sku: '', weight: 0 });
   renderGifts();
   giftRowsElement?.querySelector('.gift-row:last-child input[data-gift-field="name"]')?.focus();
 });

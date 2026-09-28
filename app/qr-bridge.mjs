@@ -202,7 +202,9 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .greet { margin: 0 0 6px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-weight: 400; font-size: 21px; line-height: 1.25; }
   .letter-body { margin: 0 0 10px; color: #4a3f33; font-size: 15.5px; line-height: 1.5; }
   .checks { display: grid; gap: 7px; margin: 0 0 10px; padding: 0; list-style: none; }
-  .checks li { display: flex; align-items: center; gap: 10px; color: #3a2e22; font-size: 15px; line-height: 1.35; }
+  .checks li { display: flex; align-items: flex-start; gap: 10px; color: #3a2e22; font-size: 15px; line-height: 1.4; }
+  .checks li b { color: #2e6b3f; font-weight: 700; }
+  .checks .tick { margin-top: 1px; }
   .tick { flex: 0 0 22px; display: grid; place-items: center; width: 22px; height: 22px; background: #e6f4dc; color: #3f8f2c; border-radius: 50%; }
   .tick svg { width: 14px; height: 14px; }
   .sign { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
@@ -263,11 +265,11 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   <img class="logo" src="/q/brand/logo.webp" alt="${name}" width="150" height="83">
   <div class="letter">
     <h1 class="greet">Thân gửi anh chị,</h1>
-    <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Nhắn cho chúng em một tin, chúng em gửi ngay:</p>
+    <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>. Em gửi anh chị ưu đãi:</p>
     <ul class="checks">
-      <li><span class="tick">${icons.check}</span>Hướng dẫn dùng ngon nhất</li>
-      <li><span class="tick">${icons.check}</span>Ưu đãi cho lần mua hàng tiếp theo</li>
-      <li><span class="tick">${icons.check}</span>Đổi ngay nếu hạt mềm, thiếu hàng</li>
+      <li><span class="tick">${icons.check}</span><span><b>Miễn phí vận chuyển</b> cho toàn bộ đơn hàng tiếp theo</span></li>
+      <li><span class="tick">${icons.check}</span><span>Mua Combo 1 tặng <b>Combo 3 mini</b> Xanh + Vàng + Nâu</span></li>
+      <li><span class="tick">${icons.check}</span><span>Mua Combo 2 tặng <b>2 túi Yến mạch</b></span></li>
     </ul>
     <p class="sign"><span>Thương mến,<br><b>Nhà Nắng</b></span><span class="stamp" aria-hidden="true">Nhà<br>Nắng</span></p>
   </div>

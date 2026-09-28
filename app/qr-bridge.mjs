@@ -271,7 +271,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <h1 class="greet">Thân gửi anh chị,</h1>
     <p class="letter-body">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</p>
     <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong anh chị và cả nhà luôn khoẻ, ăn ngon và thật bình an.</p>
-    <p class="letter-body">Em gửi anh/chị chút yêu thương cho những đơn hàng tiếp theo để mong nhận được sự yêu thương và đồng hành cùng anh/chị trong chặng đường tiếp&nbsp;theo:</p>
+    <p class="letter-body">Em gửi anh/chị chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng anh/chị thật&nbsp;lâu:</p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>

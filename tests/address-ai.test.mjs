@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -9,7 +9,7 @@ const directory = mkdtempSync(path.join(os.tmpdir(), 'crm-address-ai-'));
 process.env.ADDRESS_AI_CACHE_PATH = path.join(directory, 'cache.json');
 process.on('exit', () => rmSync(directory, { recursive: true, force: true }));
 
-const { addressHint, inferAddress, parseAddressAnswer, resetAddressAiCache, validateAddressGuess } = await import('../app/processing/address-ai.mjs');
+const { addressHint, flushAddressAiCache, inferAddress, parseAddressAnswer, resetAddressAiCache, validateAddressGuess } = await import('../app/processing/address-ai.mjs');
 const { refineAddressWithAi } = await import('../app/chatbot-engine.mjs');
 
 const settings = {
@@ -98,6 +98,34 @@ test('không gọi mô hình khi tắt, khi không dùng Vertex, hay địa ch�
   assert.equal(await inferAddress('12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', { settings, fetchImpl }), null);
   assert.equal(await inferAddress('Chưa có địa chỉ', { settings, fetchImpl }), null);
   assert.equal(calls, 0);
+});
+
+test('hai lượt tra song song: lượt chậm vẫn được nhớ dù lượt nhanh đã ghi cache xong trước', async () => {
+  // Bắt đầu từ cache trống (các test trước đã ghi tệp).
+  await flushAddressAiCache();
+  rmSync(process.env.ADDRESS_AI_CACHE_PATH, { force: true });
+  resetAddressAiCache();
+  let release;
+  const slowGate = new Promise(resolve => { release = resolve; });
+  const slowReply = vertexReply({ province: 'Thành phố Hồ Chí Minh', district: 'Quận 8', ward: 'Phường 5', street: '332 Tạ Quang Bửu', confidence: 'high', ambiguous: false, reason: 'Chánh Hưng thuộc Phường 5, Quận 8' });
+  const slow = inferAddress('332 ta quang Bửu phường chánh hưng', { settings, fetchImpl: async (url, init) => { await slowGate; return slowReply(url, init); } });
+  const fast = await inferAddress('190/53 xóm đất p binh thoi', { settings, fetchImpl: vertexReply({ province: '', district: '', ward: '', ambiguous: true, reason: 'không đủ' }) });
+  assert.equal(fast, null);
+  await flushAddressAiCache();
+  release();
+  assert.equal((await slow).canonical, '332 Tạ Quang Bửu, Phường 5, Quận 8, TP Hồ Chí Minh');
+  await flushAddressAiCache();
+  let calls = 0;
+  const counting = async () => { calls += 1; throw new Error('phải lấy từ cache'); };
+  assert.equal((await inferAddress('332 ta quang Bửu phường chánh hưng', { settings, fetchImpl: counting })).canonical, '332 Tạ Quang Bửu, Phường 5, Quận 8, TP Hồ Chí Minh');
+  assert.equal(await inferAddress('190/53 xóm đất p binh thoi', { settings, fetchImpl: counting }), null);
+  assert.equal(calls, 0, 'cả hai kết quả đều nằm trong cache');
+  // Tệp cache trên đĩa cũng có đủ cả hai.
+  const saved = JSON.parse(readFileSync(process.env.ADDRESS_AI_CACHE_PATH, 'utf8'));
+  assert.equal(Object.keys(saved).length, 2);
+  // Trả lại cache trống cho các test sau.
+  rmSync(process.env.ADDRESS_AI_CACHE_PATH, { force: true });
+  resetAddressAiCache();
 });
 
 test('mô hình báo mơ hồ hay lỗi mạng thì không đổi gì', async () => {

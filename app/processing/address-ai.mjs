@@ -39,12 +39,19 @@ async function readCache() {
   return cache;
 }
 
+// Cắt bớt NGAY TRÊN đối tượng cache đang dùng (không gán đối tượng mới): lượt tra khác đang
+// chờ mô hình vẫn ghi kết quả vào đúng cache sẽ được lưu, không bị mất.
 function scheduleCacheWrite() {
   cacheWrite = cacheWrite.then(async () => {
-    const entries = Object.entries(cache).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, maximumCacheEntries);
-    cache = Object.fromEntries(entries);
+    const current = cache;
+    if (!current) return;
+    const keys = Object.keys(current);
+    if (keys.length > maximumCacheEntries) {
+      keys.sort((a, b) => (current[b].at || 0) - (current[a].at || 0));
+      for (const key of keys.slice(maximumCacheEntries)) delete current[key];
+    }
     await mkdir(path.dirname(cachePath), { recursive: true });
-    await writeFile(cachePath, JSON.stringify(cache, null, 2));
+    await writeFile(cachePath, JSON.stringify(current, null, 2));
   }).catch(() => {});
   return cacheWrite;
 }
@@ -182,11 +189,17 @@ export async function inferAddress(raw, options = {}) {
   if (!text || /^chưa có địa chỉ$/i.test(text)) return null;
   const settings = options.settings || await dependencies.readSettings();
   if (!addressAiEnabled(settings)) return null;
-  const hint = addressHint(text);
   if (describeDeliveryAddress(text).complete) return null;
+  const hint = addressHint(text);
   const key = `${normalizeLocationKey(text)}|${settings.addressAiSearch !== false ? 's' : 'n'}`;
   const store = await readCache();
   if (options.force !== true && key in store) return store[key].result;
+  // Hỏi mô hình mất tới hàng chục giây: ghi kết quả vào cache đọc lại SAU khi chờ (cache có thể
+  // đã được nạp/đặt lại trong lúc đó), không vào `store` cũ.
+  const remember = async entry => {
+    (await readCache())[key] = entry;
+    scheduleCacheWrite();
+  };
   let result = null;
   try {
     const { answer, sources } = await requestAddressGuess({ raw: text, hint: hint.text, settings, fetchImpl: options.fetchImpl, timeoutMs: options.timeoutMs });
@@ -206,8 +219,7 @@ export async function inferAddress(raw, options = {}) {
       };
     } else if (options.explain) {
       result = null;
-      store[key] = { at: Date.now(), result, rejected: checked.reason, guess };
-      scheduleCacheWrite();
+      await remember({ at: Date.now(), result, rejected: checked.reason, guess });
       return { rejected: checked.reason, guess, sources };
     }
   } catch (error) {
@@ -215,8 +227,7 @@ export async function inferAddress(raw, options = {}) {
     if (options.explain) return { error: error.message };
     return null;
   }
-  store[key] = { at: Date.now(), result };
-  scheduleCacheWrite();
+  await remember({ at: Date.now(), result });
   return result;
 }
 

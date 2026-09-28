@@ -207,11 +207,12 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .ic { flex: 0 0 22px; width: 22px; height: 22px; color: #2e6b3f; }
   .ic svg { width: 22px; height: 22px; display: block; }
   /* Phiếu ưu đãi kiểu voucher (mẫu "Lưu" của sàn TMĐT): nền kem, viền chấm, răng cưa hai bên. */
-  .ticket { position: relative; margin: 0 0 14px; padding: 0 12px 12px; background: #fff8ec; border: 1.5px dashed #efc98a; border-radius: 16px; }
-  .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 11px 0 10px; margin: 0 -12px 12px; border-bottom: 1.5px dashed #efc98a; }
-  .ticket-head::before, .ticket-head::after { content: ""; position: absolute; bottom: -9px; width: 16px; height: 16px; background: #fff; border: 1.5px dashed #efc98a; border-radius: 50%; }
-  .ticket-head::before { left: -9px; clip-path: inset(0 0 0 50%); }
-  .ticket-head::after { right: -9px; clip-path: inset(0 50% 0 0); }
+  .ticket { position: relative; margin: 0 0 14px; padding: 0 12px 12px; background: #fff6e6; border: 1.5px solid #f3d6a4; border-radius: 16px; }
+  .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 11px 0 11px; margin: 0 0 12px; }
+  .ticket-head::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 0; border-bottom: 2px dashed #e8b765; }
+  .ticket::before, .ticket::after { content: ""; position: absolute; top: var(--notch, 32px); width: 18px; height: 18px; background: #fff; border: 1.5px solid #f3d6a4; border-radius: 50%; }
+  .ticket::before { left: -10px; clip-path: inset(0 0 0 50%); }
+  .ticket::after { right: -10px; clip-path: inset(0 50% 0 0); }
   .ticket-tag { color: #c2410c; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
   .ticket-sub { color: #7a5a2e; font-size: 14px; }
   /* Nút tô màu thương hiệu từng kênh: cao 56px, rộng hết, logo trong ô trắng bên trái, mũi tên bên phải. */
@@ -294,6 +295,12 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   }
   arm(open, 'messenger');
   arm(document.getElementById('zalo'), 'zalo');
+  // Răng cưa của phiếu nằm đúng trên đường chấm, kể cả khi dòng tiêu đề phiếu xuống hàng trên máy hẹp.
+  var ticket = document.querySelector('.ticket');
+  var head = ticket && ticket.querySelector('.ticket-head');
+  function notch() { if (head) ticket.style.setProperty('--notch', (head.offsetHeight - 10) + 'px'); }
+  notch();
+  addEventListener('resize', notch);
 })();
 </script>
 </body>

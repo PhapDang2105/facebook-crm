@@ -218,7 +218,7 @@ export async function recordQrOpen(code, { at = Date.now(), target = 'messenger'
 /**
  * Số referral Messenger nhận được cho từng mã, đọc từ hội thoại trong hộp thư.
  * Một lượt quét có thể về CRM tới ba lần (referral Meta, tin Botcake "Mã thẻ:
- * #mã", tin soạn sẵn của khách) — khử trùng theo hội thoại | mã | ngày để một
+ * #mã", tin soạn sẵn của khách) — khử trùng theo hội thoại | mã | ngày (giờ VN) để một
  * lượt quét đếm đúng một, không thì tỷ lệ "vào Messenger" vượt 100%.
  * Đọc `qrReferrals` (kho mới) lẫn `referrals` SHORTLINK (bản ghi từ trước khi tách ô).
  */
@@ -232,7 +232,9 @@ function* uniqueQrReferrals(conversations = []) {
     for (const referral of list) {
       const code = qrCodeFromRef(referral?.ref);
       if (!code) continue;
-      const day = Math.floor((Number(referral?.at) || 0) / 86_400_000);
+      // Ngày theo giờ Việt Nam (cùng ranh giới với qrDayKey, không dựng chuỗi ngày): khử trùng
+      // và biểu đồ theo ngày chia ngày giống nhau.
+      const day = Math.floor(((Number(referral?.at) || 0) + vietnamOffsetMs) / 86_400_000);
       const key = `${conversation.id || `${conversation.pageId}:${conversation.psid}`}|${code}|${day}`;
       if (seen.has(key)) continue;
       seen.add(key);

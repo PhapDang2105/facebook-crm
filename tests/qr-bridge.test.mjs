@@ -214,6 +214,24 @@ test('thống kê "vào Messenger": một lượt quét về CRM ba đường (M
   assert.deepEqual(countQrReferralsByDay(conversations), { 'tmdt-01': { '1970-01-11': 2, '1970-01-12': 1 }, 'tmdt-02': { '1970-01-11': 1 } });
 });
 
+test('thống kê "vào Messenger": khử trùng theo ngày giờ Việt Nam, khớp biểu đồ theo ngày (không theo ngày UTC)', () => {
+  const hour = 60 * 60 * 1000;
+  const conversations = [
+    // 00:30 và 23:00 ngày 28/09 giờ VN: hai ngày UTC khác nhau nhưng cùng một ngày VN → một lượt.
+    { id: '1:x', qrReferrals: [
+      { ref: 'tmdt-01', source: 'SHORTLINK', at: Date.UTC(2026, 8, 27, 17, 30) },
+      { ref: 'tmdt-01', source: 'SHORTLINK', at: Date.UTC(2026, 8, 28, 16, 0) }
+    ] },
+    // 23:30 ngày 27/09 và 00:30 ngày 28/09 giờ VN: cùng ngày UTC nhưng hai ngày VN → hai lượt.
+    { id: '1:y', qrReferrals: [
+      { ref: 'tmdt-02', source: 'SHORTLINK', at: Date.UTC(2026, 8, 27, 16, 30) },
+      { ref: 'tmdt-02', source: 'SHORTLINK', at: Date.UTC(2026, 8, 27, 16, 30) + 2 * hour }
+    ] }
+  ];
+  assert.deepEqual(countQrReferrals(conversations), { 'tmdt-01': 1, 'tmdt-02': 2 });
+  assert.deepEqual(countQrReferralsByDay(conversations), { 'tmdt-01': { '2026-09-28': 1 }, 'tmdt-02': { '2026-09-27': 1, '2026-09-28': 1 } });
+});
+
 test('bộ đếm theo ngày: quét, trang đệm, bấm mở, bấm Zalo ghi vào ngày (giờ Việt Nam); referral theo ngày gộp vào; kho cũ chưa có days thì dựng lại từ lượt gần đây', async () => {
   assert.equal(qrDayKey(Date.UTC(2026, 8, 27, 18, 30)), '2026-09-28', '01:30 sáng 28/09 giờ Việt Nam');
   // tmdt-01 ở test trên: 3 lượt quét (2 trang đệm), 1 bấm mở, 1 bấm Zalo, tất cả ngày 1970-01-01.

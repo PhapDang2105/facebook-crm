@@ -152,10 +152,10 @@ export const heartline = { display: '0899 677 899', tel: '0899677899' };
 // Mặt trời cười của logo, vẽ tay bằng SVG nội tuyến: trang không được tải ảnh
 // ngoài (mọi thứ dưới /assets nằm sau mật khẩu, và trang phải nhẹ).
 const sunMark = `<svg class="sun" viewBox="0 0 96 96" aria-hidden="true">
-  <g stroke="#f2b134" stroke-width="5" stroke-linecap="round"><path d="M48 6v10M48 80v10M6 48h10M80 48h10M18 18l7 7M71 71l7 7M18 78l7-7M71 25l7-7"/></g>
-  <circle cx="48" cy="48" r="22" fill="#f8c74d"/>
-  <circle cx="40" cy="45" r="2.6" fill="#7a4b1c"/><circle cx="56" cy="45" r="2.6" fill="#7a4b1c"/>
-  <path d="M39 53q9 8 18 0" fill="none" stroke="#7a4b1c" stroke-width="3" stroke-linecap="round"/>
+  <g stroke="#d9a53a" stroke-width="5" stroke-linecap="round"><path d="M48 6v10M48 80v10M6 48h10M80 48h10M18 18l7 7M71 71l7 7M18 78l7-7M71 25l7-7"/></g>
+  <circle cx="48" cy="48" r="22" fill="#e6b94c"/>
+  <circle cx="40" cy="45" r="2.6" fill="#6d4a1f"/><circle cx="56" cy="45" r="2.6" fill="#7a4b1c"/>
+  <path d="M39 53q9 8 18 0" fill="none" stroke="#6d4a1f" stroke-width="3" stroke-linecap="round"/>
 </svg>`;
 
 // Biểu tượng nội tuyến (không tải ngoài). Nét 2px, màu theo currentColor.
@@ -193,35 +193,36 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#fbf5e6">
+<meta name="theme-color" content="#efe6d2">
 <title>${name} · Cảm ơn anh chị</title>
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); background: #fbf5e6; background-image: radial-gradient(circle at 50% -10%, #fde9b0 0, rgba(253,233,176,0) 55%); color: #3d3226; font: 17px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
-  main { width: 100%; max-width: 400px; text-align: center; }
-  .sun { width: 84px; height: 84px; display: block; margin: 0 auto 6px; }
-  .brand { margin: 0 0 22px; color: #7a4b1c; font-size: 15px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-  h1 { margin: 0 0 10px; color: #3d3226; font-size: 27px; line-height: 1.2; letter-spacing: -.01em; }
-  .lead { margin: 0 auto 24px; max-width: 320px; color: #5f5344; }
-  .gift { display: grid; margin: 0 0 22px; padding: 4px 16px; background: #fff; border: 1px solid #efe4c9; border-radius: 16px; list-style: none; text-align: left; }
-  .gift li { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid #f3ecd9; color: #3d3226; font-size: 16px; line-height: 1.3; }
-  .gift li:last-child { border-bottom: 0; }
-  .ic { flex: 0 0 38px; display: grid; place-items: center; width: 38px; height: 38px; background: #e9f5ee; border-radius: 12px; color: #2f8f4e; }
-  .ic svg { width: 20px; height: 20px; }
-  .btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 16px 20px; margin: 0 0 12px; background: #2f8f4e; color: #fff; font-size: 18px; font-weight: 700; text-decoration: none; border-radius: 16px; box-shadow: 0 6px 18px rgba(47,143,78,.25); }
-  .btn svg { width: 26px; height: 26px; flex: 0 0 26px; }
-  .btn:active { background: #257540; transform: translateY(1px); }
-  .btn-zalo { background: #0068ff; box-shadow: 0 6px 18px rgba(0,104,255,.22); }
-  .btn-zalo:active { background: #0052cc; }
-  .fallback svg { width: 15px; height: 15px; vertical-align: -2px; margin-right: 2px; }
-  .hint { margin: 4px 0 14px; padding: 12px 14px; background: #fff7dc; border: 1px solid #f3e2a3; border-radius: 12px; color: #5b4a12; font-size: 15px; line-height: 1.45; text-align: left; }
-  .copy { display: inline-block; margin: 2px 0 16px; padding: 8px 14px; background: none; border: 1px solid #d9cfb6; border-radius: 999px; color: #7a4b1c; font: inherit; font-size: 15px; }
-  .fallback { margin: 6px 0 0; padding-top: 16px; border-top: 1px solid #efe4c9; color: #6f6353; font-size: 14px; line-height: 1.5; }
-  .fallback a { color: #2f8f4e; font-weight: 600; text-decoration: none; }
+  body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
+  main { width: 100%; max-width: 380px; padding: 30px 24px 22px; background: #fbf7ee; border: 1px solid #d9cba9; border-radius: 4px; text-align: center; }
+  .sun { width: 58px; height: 58px; display: block; margin: 0 auto 8px; }
+  .brand { margin: 0 0 20px; color: #2e6b3f; font-family: Georgia, "Times New Roman", "Noto Serif", serif; font-size: 20px; font-style: italic; letter-spacing: .01em; }
+  h1 { margin: 0 0 8px; color: #3a2e22; font-family: Georgia, "Times New Roman", "Noto Serif", serif; font-size: 25px; font-weight: 600; line-height: 1.25; }
+  .lead { margin: 0 auto 20px; max-width: 300px; color: #6b5d4b; font-size: 15px; }
+  .gift { margin: 0 0 22px; padding: 0; list-style: none; text-align: left; border-top: 1px dashed #d9cba9; }
+  .gift li { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px dashed #d9cba9; color: #3a2e22; font-size: 15.5px; line-height: 1.35; }
+  .ic { flex: 0 0 22px; width: 22px; height: 22px; color: #2e6b3f; }
+  .ic svg { width: 22px; height: 22px; display: block; }
+  .btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 14px 18px; margin: 0 0 10px; background: #2e6b3f; color: #fff; border: 1px solid #275a35; font-size: 17px; font-weight: 600; text-decoration: none; border-radius: 8px; }
+  .btn svg { width: 22px; height: 22px; flex: 0 0 22px; }
+  .btn:active { background: #245431; }
+  .btn-zalo { background: #fff; color: #0b57d0; border-color: #b9c9e6; }
+  .btn-zalo:active { background: #f0f4fb; }
+  .btn-zalo svg rect { fill: #0b57d0; }
+  .btn-zalo svg text { fill: #fff; }
+  .hint { margin: 4px 0 14px; padding: 10px 12px; background: #f6ecd0; border: 1px solid #e2cf9c; border-radius: 6px; color: #5b4a12; font-size: 14.5px; line-height: 1.45; text-align: left; }
+  .copy { display: inline-block; margin: 4px 0 16px; padding: 0; background: none; border: 0; color: #6b5d4b; font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+  .fallback { margin: 4px 0 0; padding-top: 14px; border-top: 1px dashed #d9cba9; color: #6b5d4b; font-size: 14px; line-height: 1.5; }
+  .fallback a { color: #2e6b3f; font-weight: 600; text-decoration: none; }
+  .fallback svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 2px; }
   .tel { white-space: nowrap; }
-  .foot { margin: 18px 0 0; color: #9a8d78; font-size: 13px; }
-  .code { display: block; margin-top: 4px; font-size: 12px; color: #b5a98f; }
+  .foot { margin: 16px 0 0; color: #8d7f68; font-family: Georgia, "Times New Roman", "Noto Serif", serif; font-style: italic; font-size: 14px; }
+  .code { display: block; margin-top: 2px; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; font-style: normal; font-size: 11.5px; color: #b0a48c; }
 </style>
 </head>
 <body>

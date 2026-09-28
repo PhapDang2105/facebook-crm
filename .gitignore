@@ -49,3 +49,6 @@ references/
 *.jsonl
 scratch/
 replay-llm-out*.json
+
+# Nhật ký quyết định của bot (chữ khách đã che SĐT, vẫn là dữ liệu thật)
+data/processed/decision-log/

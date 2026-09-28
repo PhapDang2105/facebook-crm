@@ -146,6 +146,13 @@ export function normalizeChatbotSettings(value = {}) {
     // Cache phần tĩnh của prompt trên Vertex (explicit context cache): 'on' mặc định (thăm dò 25/09 chạy tốt).
     promptCache: value.promptCache === 'off' ? 'off' : 'on',
     intentThreshold: Math.min(0.99, Math.max(0.5, Number(value.intentThreshold) || 0.9)),
+    // Nhật ký quyết định (processing/decision-log.mjs): mỗi lượt một dòng JSONL. 'on' mặc định | 'off'.
+    decisionLog: value.decisionLog === 'off' ? 'off' : 'on',
+    // Gác trước LLM (khách giục / lặp câu vừa hỏi sau mẫu thông tin → "đã gửi ở trên" không cần gọi
+    // mô hình): 'shadow' (mặc định, chỉ ghi so sánh) | 'on' | 'off'.
+    preGuard: ['on', 'shadow', 'off'].includes(value.preGuard) ? value.preGuard : 'shadow',
+    // responseSchema với enum template_id khi gọi Vertex Gemini: 'off' mặc định (A/B trước khi bật).
+    responseEnum: value.responseEnum === 'on' ? 'on' : 'off',
     // Các phần rút gọn ngữ cảnh gửi mô hình (mặc định tắt cả; bật từng phần sau khi A/B đạt).
     contextTrim: Object.fromEntries(['memory', 'query', 'catalog', 'templates'].map(key => [key, value.contextTrim?.[key] === true])),
     // Mức suy nghĩ của model ('' = mặc định của model; minimal | low | medium | high).

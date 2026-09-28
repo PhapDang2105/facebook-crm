@@ -56,13 +56,8 @@ test('2. "đã gửi ở trên" chỉ khi khách lặp câu (≥ 80%) hay giục
   assert.ok(!isNudgeMessage('túi xanh có yến mạch không?'));
   assert.ok(textSimilarity('Shop ơi giá sao', 'shop oi gia sao') >= 0.8);
   assert.ok(textSimilarity('giá sao', 'túi xanh có yến mạch không') < 0.8);
-  const info = renderChatbotReply({ template_id: 'INGREDIENTS_ALLERGY' }, templates, {});
-  const retried = await run({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: now() - 60000 }, 'túi xanh có yến mạch không?', {
-    reply: (payload, call) => (call === 1 ? renderChatbotReply({ template_id: 'REPLY_ALREADY_SENT_INFO' }, templates, {}) : info)
-  });
-  assert.equal(retried.asked.length, 2, 'gọi lại mô hình một lần');
-  assert.match(retried.asked[1].conversation.replyHint, /KHÔNG dùng REPLY_ALREADY_SENT/);
-  assert.equal(retried.results[0].templateId, 'INGREDIENTS_ALLERGY');
+  // Vòng 9: mô hình không còn được chọn REPLY_ALREADY_SENT* (prompt bỏ), nên không gọi lại lần hai
+  // — vẫn chọn thì chuyển người + thẻ ngay (xem tests/round9-engine.test.mjs).
   const stubborn = await run({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: now() - 60000 }, 'túi xanh có yến mạch không?', { reply: renderChatbotReply({ template_id: 'REPLY_ALREADY_SENT_INFO' }, templates, {}) });
   assert.equal(stubborn.results[0].templateId, 'CSKH_HANDOFF');
   assert.ok(stubborn.saved.at(-1).addLabelEvents.includes('handoff'));

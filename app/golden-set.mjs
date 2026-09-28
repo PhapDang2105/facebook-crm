@@ -1,14 +1,21 @@
 // Bộ test vàng cho chatbot: tin khách thật (đã che SĐT) kèm ngữ cảnh, mô hình/LLM gợi ý một
 // mã mẫu, nhân viên chấm "mẫu đúng". Chỉ dùng để ĐO (replay, ngưỡng mô hình nhỏ), không huấn luyện.
 // Lưu ở data/processed/golden-set.json: { items: [{ id, text, prevCustomer, prevBot, source,
-// lastTemplate, suggested, label, labeledAt }] }.
+// lastTemplate, suggested, label, labeledAt, at,
+//   // ngữ cảnh tuỳ chọn (hợp đồng dữ liệu v2, không bắt buộc — mục cũ không có vẫn hợp lệ):
+//   hasBasket, basketItems, hasOrder, orderAgeMin, prevBotAsks, phoneInText, addressInText, bagCount }] }.
+// Thiếu ngữ cảnh thì `enrichGoldenContext` dựng lại từ kho hội thoại (hoặc từ chính mục khi không có kho).
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { ADDRESS_WORDS, askedSlotOf, countBags, normalizeIntentText } from './processing/intent-features.mjs';
 
 const goldenPath = process.env.GOLDEN_SET_PATH || path.join(projectRoot, 'data', 'processed', 'golden-set.json');
 let cached = null;
 let writeQueue = Promise.resolve();
+
+/** Các trường ngữ cảnh tuỳ chọn của một mục golden (cùng tên với hợp đồng dữ liệu v2). */
+export const goldenContextFields = ['hasBasket', 'basketItems', 'hasOrder', 'orderAgeMin', 'prevBotAsks', 'phoneInText', 'addressInText', 'bagCount'];
 
 export async function readGoldenSet() {
   if (cached) return cached;
@@ -36,8 +43,24 @@ function updateGoldenSet(mutate) {
 }
 
 const text = (value, limit) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
+const ASK_SLOTS = new Set(['phone', 'address', 'phone_address', 'flavor', 'quantity', 'confirm']);
 
-/** Nạp danh sách tin cần chấm (thêm mới theo id, giữ nhãn đã chấm). */
+/** Lọc/chuẩn hoá phần ngữ cảnh tuỳ chọn của một mục; trường thiếu hay sai kiểu thì bỏ (không ghi). */
+export function pickGoldenContext(raw = {}) {
+  const out = {};
+  if (typeof raw.hasBasket === 'boolean') out.hasBasket = raw.hasBasket;
+  if (Array.isArray(raw.basketItems)) out.basketItems = raw.basketItems.slice(0, 12).map(item => (typeof item === 'string' ? text(item, 60) : item)).filter(item => item !== '' && item !== null && item !== undefined);
+  if (typeof raw.hasOrder === 'boolean') out.hasOrder = raw.hasOrder;
+  if (raw.orderAgeMin === null) out.orderAgeMin = null;
+  else if (Number.isFinite(Number(raw.orderAgeMin)) && raw.orderAgeMin !== '' && raw.orderAgeMin !== undefined) out.orderAgeMin = Math.max(0, Math.round(Number(raw.orderAgeMin)));
+  if (typeof raw.prevBotAsks === 'string' && (raw.prevBotAsks === '' || ASK_SLOTS.has(raw.prevBotAsks))) out.prevBotAsks = raw.prevBotAsks;
+  if (typeof raw.phoneInText === 'boolean') out.phoneInText = raw.phoneInText;
+  if (typeof raw.addressInText === 'boolean') out.addressInText = raw.addressInText;
+  if (Number.isFinite(Number(raw.bagCount)) && raw.bagCount !== '' && raw.bagCount !== null && raw.bagCount !== undefined) out.bagCount = Math.max(0, Math.round(Number(raw.bagCount)));
+  return out;
+}
+
+/** Nạp danh sách tin cần chấm (thêm mới theo id, giữ nhãn đã chấm; ngữ cảnh v2 tuỳ chọn được giữ nếu có). */
 export async function importGoldenItems(items = []) {
   return updateGoldenSet(state => {
     const byId = new Map(state.items.map(item => [item.id, item]));
@@ -46,7 +69,7 @@ export async function importGoldenItems(items = []) {
       const id = text(raw?.id, 120);
       if (!id || !text(raw?.text, 300)) continue;
       const existing = byId.get(id);
-      const fresh = { id, text: text(raw.text, 300), prevCustomer: text(raw.prevCustomer, 160), prevBot: text(raw.prevBot, 240), source: raw.source === 'comment' ? 'comment' : 'inbox', lastTemplate: text(raw.lastTemplate, 60), suggested: text(raw.suggested, 60), at: Number(raw.at) || 0 };
+      const fresh = { id, text: text(raw.text, 300), prevCustomer: text(raw.prevCustomer, 160), prevBot: text(raw.prevBot, 240), source: raw.source === 'comment' ? 'comment' : 'inbox', lastTemplate: text(raw.lastTemplate, 60), suggested: text(raw.suggested, 60), at: Number(raw.at) || 0, ...pickGoldenContext(raw) };
       if (existing) Object.assign(existing, fresh, { label: existing.label || '', labeledAt: existing.labeledAt || 0 });
       else { state.items.push({ ...fresh, label: '', labeledAt: 0 }); byId.set(id, state.items.at(-1)); added += 1; }
     }
@@ -81,4 +104,55 @@ export async function goldenSetOverview({ batch = 10 } = {}) {
 export async function goldenLabeled() {
   const state = await readGoldenSet();
   return state.items.filter(item => item.label && item.label !== 'SKIP');
+}
+
+// ---- Dựng ngữ cảnh v2 cho mục golden cũ (chỉ có text/prevBot/lastTemplate/at) ----
+
+/** Mẫu mà sau đó bot đang giữ giỏ (khách đã nêu sản phẩm, đang xin SĐT/địa chỉ/chốt). */
+export const basketStepTemplates = new Set(['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_UPDATED', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'ORDER_CART_LINE', 'CONFIRM_YES', 'ORDER_EXISTING_CONFIRM', 'UPSELL_TWO_BAGS']);
+// Chữ ký câu bot đang giữ giỏ (có dấu hoặc bỏ dấu): "em vẫn đang giữ đơn…", "đơn của chị gồm…", "em ghi nhận đơn…".
+const BASKET_SIGNATURE = /đang giữ đơn|dang giu don|đơn của .{0,40}?gồm|don cua .{0,40}?gom|ghi nhận đơn|ghi nhan don|xác nhận lại thông tin đặt hàng|xac nhan lai thong tin dat hang/i;
+const BASKET_TTL_MIN = 120;
+const PHONE_RE = /\+?\d[\d .-]{8,13}|<sdt>/;
+const BASKET_ITEM_RE = /(\d{1,2})\s*(túi|gói|hộp|set|combo)\s*(xanh|vàng|nâu|cacao|vang|nau)?/giu;
+
+const isCancelled = order => String(order?.processingStatus || '') === 'cancelled' || String(order?.status || '') === 'Hủy';
+const conversationIdOf = id => { const at = String(id || '').lastIndexOf(':'); return at > 0 ? String(id).slice(0, at) : ''; };
+
+/**
+ * Dựng các trường ngữ cảnh v2 còn thiếu cho từng mục golden. Không ghi đè trường đã có.
+ * - `store` = kho hội thoại ({ conversations, messages } như meta-conversations.json) hay null (không kho):
+ *   hasOrder/orderAgeMin từ customerOrders (createdAt/status so với item.at); tuổi câu bot trước lấy từ
+ *   tin outgoing gần nhất trước item.at. Không có kho → không có đơn; câu bot trước coi như vừa gửi.
+ * - pendingOrder không lưu lịch sử → hasBasket suy từ lastTemplate ∈ bước đơn hoặc prevBot khớp chữ ký giỏ,
+ *   và câu bot trước chưa quá 120 phút (hạn giỏ).
+ * Trả về mảng mục mới (không sửa mảng vào).
+ */
+export function enrichGoldenContext(items = [], store = null) {
+  const conversations = new Map((Array.isArray(store?.conversations) ? store.conversations : []).map(item => [item.id, item]));
+  const messagesOf = id => (Array.isArray(store?.messages?.[id]) ? store.messages[id] : []);
+  return (Array.isArray(items) ? items : []).map(item => {
+    const out = { ...item };
+    const at = Number(item.at) || 0;
+    const conversationId = conversationIdOf(item.id);
+    const conversation = conversations.get(conversationId) || (at ? [...conversations.values()].find(entry => messagesOf(entry.id).some(message => message?.direction === 'incoming' && Number(message.createdAt) === at)) : null);
+    const messages = conversation ? messagesOf(conversation.id) : [];
+    const previousOut = at ? messages.filter(message => message?.direction === 'outgoing' && Number(message.createdAt) < at).sort((a, b) => b.createdAt - a.createdAt)[0] : null;
+    const prevBotAgeMin = previousOut ? (at - Number(previousOut.createdAt)) / 60000 : 0;
+    const prevBot = String(item.prevBot || previousOut?.text || '');
+    const lastTemplate = String(item.lastTemplate || '');
+    if (out.prevBotAsks === undefined) out.prevBotAsks = askedSlotOf(prevBot, lastTemplate);
+    if (out.hasBasket === undefined) out.hasBasket = prevBotAgeMin < BASKET_TTL_MIN && (basketStepTemplates.has(lastTemplate) || BASKET_SIGNATURE.test(prevBot));
+    if (out.basketItems === undefined) out.basketItems = out.hasBasket ? [...prevBot.matchAll(BASKET_ITEM_RE)].map(match => `${match[1]} ${match[2]}${match[3] ? ` ${match[3]}` : ''}`.toLowerCase()).slice(0, 12) : [];
+    if (out.hasOrder === undefined || out.orderAgeMin === undefined) {
+      const orders = (Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : []).filter(order => Number(order?.createdAt) > 0 && (!at || Number(order.createdAt) <= at));
+      const newestActive = orders.filter(order => !isCancelled(order)).sort((a, b) => b.createdAt - a.createdAt)[0];
+      if (out.hasOrder === undefined) out.hasOrder = orders.length > 0;
+      if (out.orderAgeMin === undefined) out.orderAgeMin = newestActive && at ? Math.max(0, Math.round((at - Number(newestActive.createdAt)) / 60000)) : null;
+    }
+    if (out.phoneInText === undefined) out.phoneInText = PHONE_RE.test(String(item.text || ''));
+    if (out.addressInText === undefined) out.addressInText = ADDRESS_WORDS.test(normalizeIntentText(item.text));
+    if (out.bagCount === undefined) out.bagCount = countBags(item.text);
+    return out;
+  });
 }

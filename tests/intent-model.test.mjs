@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import './helpers/seed-catalog.mjs';
 import { featuresOf, normalizeIntentText } from '../app/processing/intent-features.mjs';
-import { intentSafeTemplates, loadIntentModel, predictIntent } from '../app/processing/intent-model.mjs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { intentSafeTemplates, loadIntentModel, loadIntentModelFrom, predictIntent, predictIntentWith } from '../app/processing/intent-model.mjs';
 import { normalizeChatbotSettings } from '../app/chatbot-settings.mjs';
 import { processChatbotChanges } from '../app/chatbot-engine.mjs';
 import { defaultMessageTemplates } from '../app/chatbot-templates.mjs';
@@ -50,4 +53,35 @@ test('cài đặt: intentModel mặc định shadow, ngưỡng 0.9; engine ở s
   if (guess.confidence >= 0.5 && guess.margin >= 0.25 && intentSafeTemplates.has(guess.templateId)) { assert.equal(on.asked, false); assert.ok(on.sent.length >= 1); } else assert.equal(on.asked, true);
   const off = await run({ intentModel: 'off' }, 'giá bao nhiêu vậy shop');
   assert.ok(!off.logs.some(line => line.startsWith('Mô hình nhỏ')));
+});
+
+test('predictIntent trả topK 3 phần tử giảm dần, phần tử đầu = templateId/confidence; ctx v2 thừa không làm mô hình v5 lỗi', () => {
+  const guess = predictIntent({ text: 'giá bao nhiêu vậy shop', source: 'inbox', lastTemplate: '' });
+  assert.equal(guess.topK.length, 3);
+  assert.equal(guess.topK[0].templateId, guess.templateId);
+  assert.ok(Math.abs(guess.topK[0].p - guess.confidence) < 1e-3);
+  assert.ok(guess.topK[0].p >= guess.topK[1].p && guess.topK[1].p >= guess.topK[2].p);
+  assert.equal(guess.topK[1].templateId, guess.second);
+  const rich = predictIntent({ text: 'giá bao nhiêu vậy shop', source: 'inbox', lastTemplate: '', prevBot: 'Dạ chị cho em xin số điện thoại', hasOrder: true, orderAgeMin: 5, prevBotAsks: 'phone', phoneInText: false, addressInText: false, bagCount: 0, basketItems: [] });
+  assert.ok(rich && rich.topK.length === 3);
+});
+
+test('loadIntentModelFrom: v6 đọc nhiệt độ từ meta.calibration; v5 top-level temperature; tệp hỏng → null', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'intent-model-'));
+  const base = { labels: ['A', 'B'], idf: { 'w:gia': 1.5, 'w:xin': 1.2 }, classes: [{ label: 'A', bias: 0, weights: { 'w:gia': 2 } }, { label: 'B', bias: 0, weights: { 'w:xin': 2 } }] };
+  const v6 = path.join(directory, 'v6.json');
+  writeFileSync(v6, JSON.stringify({ ...base, version: 3, temperature: 0.8, meta: { calibration: { temperature: 1.5, method: 'temperature' }, trainedAt: '2026-09-28T00:00:00.000Z', rows: 10, ruleMiss: { n: 2, accuracy: 1 } } }));
+  const model = loadIntentModelFrom(v6);
+  assert.equal(model.temperature, 1.5, 'meta.calibration thắng temperature top-level');
+  assert.deepEqual([model.trainedAt, model.rows, model.meta.ruleMiss.n], ['2026-09-28T00:00:00.000Z', 10, 2]);
+  const v5 = path.join(directory, 'v5.json');
+  writeFileSync(v5, JSON.stringify({ ...base, version: 2, temperature: 0.8 }));
+  assert.equal(loadIntentModelFrom(v5).temperature, 0.8);
+  assert.equal(loadIntentModelFrom(path.join(directory, 'v5.json')).calibration.temperature, 0.8);
+  writeFileSync(path.join(directory, 'bad.json'), '{');
+  assert.equal(loadIntentModelFrom(path.join(directory, 'bad.json')), null);
+  const guess = predictIntentWith(model, { text: 'giá', source: 'inbox' });
+  assert.equal(guess.templateId, 'A');
+  assert.equal(guess.topK.length, 2, 'ít lớp hơn K → topK ngắn hơn');
+  rmSync(directory, { recursive: true, force: true });
 });

@@ -24,7 +24,8 @@ export function toLocalPhone(value) {
  */
 export function extractVietnamesePhone(text) {
   const raw = String(text ?? '');
-  const joined = raw.replace(/(\d)[\s.\-()]+(\d)/g, '$1$2');
+  // Không nối chữ số qua xuống dòng: tin gộp "0912 345 678" + xuống dòng + "12 Nguyễn Huệ" là SĐT rồi số nhà (28/09).
+  const joined = raw.replace(/(\d)[ 	.\-()]+(\d)/g, '$1$2');
   // Thử bản đã nối ("0912 345 678") trước, rồi bản gốc: SĐT đứng ngay trước số
   // nhà ("0912345678 3a2/109 đường…") nối vào nhau sẽ hỏng, nhưng nhóm gốc vẫn đúng.
   const groups = [...(joined.match(/\+?\d+/g) || []), ...(raw.match(/\+?\d+/g) || [])];

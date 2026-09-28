@@ -62,17 +62,21 @@ export async function readQrSettings() {
   return cachedSettings;
 }
 
-/** Từ chối (reject) với lời tiếng Việt để route trả thẳng cho người dùng. */
+/**
+ * Từ chối (reject) với lời tiếng Việt để route trả thẳng cho người dùng. Ô không gửi
+ * (undefined) giữ giá trị đang lưu; giá trị đang lưu đọc TRONG hàng ghi để hai lần lưu
+ * từng phần gần nhau (một bên chỉ Zalo, một bên chỉ tin soạn sẵn) không đè mất nhau.
+ */
 export async function writeQrSettings({ zaloUrl, prefillText } = {}) {
-  const current = await readQrSettings();
-  const link = zaloUrl === undefined ? current.zaloUrl : String(zaloUrl || '').trim();
+  const link = zaloUrl === undefined ? undefined : String(zaloUrl || '').trim();
   if (link && !isAllowedZaloUrl(link)) {
     throw new Error('Liên kết Zalo phải là địa chỉ https trên zalo.me (ví dụ https://zalo.me/0901234567 hoặc https://zalo.me/g/abcdef).');
   }
-  const text = prefillText === undefined ? current.prefillText : String(prefillText || '').replace(/\s+/g, ' ').trim();
-  if (text.length > prefillTextMaxLength) throw new Error(`Tin soạn sẵn tối đa ${prefillTextMaxLength} ký tự (đang ${text.length}).`);
+  const text = prefillText === undefined ? undefined : String(prefillText || '').replace(/\s+/g, ' ').trim();
+  if (text !== undefined && text.length > prefillTextMaxLength) throw new Error(`Tin soạn sẵn tối đa ${prefillTextMaxLength} ký tự (đang ${text.length}).`);
   const operation = writeQueue.then(async () => {
-    const settings = { zaloUrl: link, prefillText: text, updatedAt: Date.now() };
+    const current = await readQrSettings();
+    const settings = { zaloUrl: link ?? current.zaloUrl, prefillText: text ?? current.prefillText, updatedAt: Date.now() };
     await mkdir(path.dirname(settingsPath), { recursive: true });
     const temporaryPath = `${settingsPath}.tmp`;
     await writeFile(temporaryPath, JSON.stringify(settings, null, 2), 'utf8');

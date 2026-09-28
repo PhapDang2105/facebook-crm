@@ -201,8 +201,8 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); background: #efe6d2; color: #3a2e22; font: 16px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
   main { width: 100%; max-width: 380px; padding: 30px 24px 22px; background: #fbf7ee; border: 1px solid #d9cba9; border-radius: 4px; text-align: center; }
   .sun { width: 58px; height: 58px; display: block; margin: 0 auto 8px; }
-  .brand { margin: 0 0 20px; color: #2e6b3f; font-family: Georgia, "Times New Roman", "Noto Serif", serif; font-size: 20px; font-style: italic; letter-spacing: .01em; }
-  h1 { margin: 0 0 8px; color: #3a2e22; font-family: Georgia, "Times New Roman", "Noto Serif", serif; font-size: 25px; font-weight: 600; line-height: 1.25; }
+  .brand { margin: 0 0 20px; color: #2e6b3f; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-size: 20px; font-style: italic; letter-spacing: .01em; }
+  h1 { margin: 0 0 8px; color: #3a2e22; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-size: 25px; font-weight: 600; line-height: 1.25; }
   .lead { margin: 0 auto 20px; max-width: 300px; color: #6b5d4b; font-size: 15px; }
   .gift { margin: 0 0 22px; padding: 0; list-style: none; text-align: left; border-top: 1px dashed #d9cba9; }
   .gift li { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px dashed #d9cba9; color: #3a2e22; font-size: 15.5px; line-height: 1.35; }
@@ -220,7 +220,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .fallback a { color: #2e6b3f; font-weight: 600; text-decoration: none; }
   .fallback svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 2px; }
   .tel { white-space: nowrap; }
-  .foot { margin: 16px 0 0; color: #8d7f68; font-family: Georgia, "Times New Roman", "Noto Serif", serif; font-style: italic; font-size: 14px; }
+  .foot { margin: 16px 0 0; color: #8d7f68; font-family: "Times New Roman", Times, "Noto Serif", "Tinos", serif; font-style: italic; font-size: 14px; }
   .code { display: block; margin-top: 2px; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; font-style: normal; font-size: 11.5px; color: #b0a48c; }
 </style>
 </head>

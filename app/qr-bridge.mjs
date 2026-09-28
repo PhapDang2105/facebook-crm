@@ -218,7 +218,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <main>
   <img class="logo" src="/q/brand/logo.webp" alt="${name}" width="170" height="106">
   <h1>Cảm ơn anh chị<br>đã chọn Giọt&nbsp;Nắng</h1>
-  <p class="lead">Chọn kênh anh chị hay dùng, chúng em gửi ngay:</p>
+  <p class="lead">Anh chị nhắn cho chúng em qua Messenger hoặc Zalo để nhận:</p>
   <ul class="gift">
     <li><span class="ic">${icons.guide}</span><span>Hướng dẫn dùng ngon nhất</span></li>
     <li><span class="ic">${icons.offer}</span><span>Ưu đãi cho lần mua sau</span></li>

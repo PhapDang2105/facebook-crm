@@ -276,7 +276,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
 <main>
   <div class="letter">
     <div class="letter-top"><h1 class="greet">Thân gửi anh chị,</h1><img class="logo" src="/q/brand/logo.webp" alt="${name}" width="96" height="53"></div>
-    <p class="letter-body thanks">Cảm ơn anh chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</p>
+    <p class="letter-body thanks">Cảm ơn Anh/Chị đã tin tưởng và ủng hộ <span class="wordmark"><span class="w-giot">Giọt</span> <span class="w-nang">Nắng</span></span>.</p>
     <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày. Mong anh chị và cả nhà luôn khoẻ, ăn ngon và thật bình an. Em gửi anh/chị chút yêu thương cho những đơn hàng sau, mong được đồng hành cùng anh/chị thật&nbsp;lâu:</p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b>Miễn phí vận chuyển</b></span></li>

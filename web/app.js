@@ -192,6 +192,7 @@ function renderChatbotFollowUps() {
     </div>
     <label class="llm-field"><span>Mẫu tin gửi khách (soạn ở Thiết lập tin nhắn → nhóm Bám đuổi; {title} = anh/chị, {name} = tên khách)</span><select data-follow-up-field="templateId">${followUpTemplateOptions(scenario.templateId)}</select></label>
     ${!scenario.templateId && scenario.message ? `<small class="follow-up-legacy">Lời đang ghi thẳng trên kịch bản: ${escapeHtml(scenario.message.slice(0, 120))}${scenario.message.length > 120 ? '…' : ''} — chọn một mẫu để chuyển sang Thiết lập tin nhắn.</small>` : ''}
+    <label class="llm-toggle-line"${scenario.trigger === 'inbox-no-reply' ? '' : ' hidden'}><span>Gửi cả khách đã quá 24 giờ (Messenger không cho API gửi: xếp vào hàng chờ để gửi bằng Pancake)</span><span class="llm-switch"><input type="checkbox" data-follow-up-field="outsideWindow" ${scenario.outsideWindow ? 'checked' : ''}><span></span></span></label>
     <label class="llm-toggle-line"${scenario.trigger === 'inbox-no-reply' ? ' hidden' : ''}><span>Không nhắn riêng được (khách chưa từng inbox) thì trả lời công khai dưới bình luận</span><span class="llm-switch"><input type="checkbox" data-follow-up-field="publicFallback" ${scenario.publicFallback === false ? '' : 'checked'}><span></span></span></label>
   </div>`).join('');
 }
@@ -201,7 +202,7 @@ chatbotFollowUpList?.addEventListener('input', event => {
   const row = event.target.closest('[data-follow-up-index]');
   const scenario = chatbotFollowUpScenarios[Number(row?.dataset.followUpIndex)];
   if (!field || !scenario) return;
-  if (field === 'enabled' || field === 'publicFallback') scenario[field] = event.target.checked;
+  if (field === 'enabled' || field === 'publicFallback' || field === 'outsideWindow') scenario[field] = event.target.checked;
   else if (field === 'delayHours') scenario.delayHours = Math.max(1, Math.round(Number(event.target.value) || 12));
   else scenario[field] = event.target.value;
   if (field === 'enabled') row.classList.toggle('is-off', !event.target.checked);
@@ -231,11 +232,317 @@ async function renderChatbotFollowUpStatus() {
     parts.push(`chốt được <b>${status.wonTotal || 0}</b> đơn${status.wonAmount ? ` (${escapeHtml(new Intl.NumberFormat('vi-VN').format(status.wonAmount))}đ)` : ''} — lọc thẻ "Bám đuổi thành công"`);
     const recent = (status.recent || []).filter(item => !item.error).slice(0, 3).map(item => `${escapeHtml(item.name || item.conversationId)} (${escapeHtml(formatCustomerPanelTime(item.at))})`);
     chatbotFollowUpStatus.innerHTML = `${parts.join(' · ')}${recent.length ? `<br>Gần nhất: ${recent.join(', ')}` : ''}`;
+    renderChatbotFollowUpQueue(status.queue || []);
   } catch {
     chatbotFollowUpStatus.textContent = '';
   }
 }
 
+// Hàng chờ ngoài 24 giờ: API không gửi được, nhân viên mở hội thoại trong Pancake
+// (extension Pancake gửi được ngoài 24 giờ), dán lời, gửi rồi bấm "Đã gửi".
+const chatbotFollowUpQueue = document.querySelector('#chatbot-follow-up-queue');
+let chatbotFollowUpQueueItems = [];
+const followUpQueueShown = 15;
+let followUpBatchMessage = '';
+let followUpBatchSize = 30;
+
+/**
+ * Trạm gửi Pancake — chạy trên tab pancake.vn (dấu trang "Gửi bám đuổi"), KHÔNG
+ * chạy trong CRM. Đọc lô gửi CRM vừa chép vào clipboard, đưa từng tin cho
+ * extension Pancake (lệnh REPLY_INBOX_PHOTO, loại chữ — đúng lệnh giao diện
+ * Pancake dùng, gửi được ngoài 24 giờ), chờ extension báo từng tin, giãn cách
+ * 15–30 giây, dừng khi lỗi 3 tin liền. Xong thì mở CRM kèm kết quả trong #hash.
+ * Hàm phải tự đủ (không dùng biến ngoài): nó được chép nguyên văn vào dấu trang.
+ */
+function pancakeFollowUpRelay(crmOrigin) {
+  if (!/(^|\.)pancake\.vn$/.test(location.hostname)) { alert('Mở tab Pancake (pancake.vn) rồi bấm dấu trang "Gửi bám đuổi".'); return; }
+  if (window.__giotNangRelay) { alert('Trạm gửi đang chạy một lô rồi.'); return; }
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const readBatch = async () => {
+    let raw = '';
+    try { raw = await navigator.clipboard.readText(); } catch (error) { /* không cho đọc clipboard thì hỏi dán tay */ }
+    if (!raw.includes('GIOTNANG_FOLLOWUP')) raw = prompt('Dán lô gửi đã sao chép từ CRM (Ctrl+V) rồi bấm OK:') || '';
+    try { return JSON.parse(raw); } catch (error) { return null; }
+  };
+  const sendOne = item => new Promise(resolve => {
+    const taskId = `giotnang-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const finish = result => { clearTimeout(timer); window.removeEventListener('message', onMessage); resolve(result); };
+    const timer = setTimeout(() => finish({ ok: false, error: 'extension Pancake không trả lời sau 90 giây' }), 90000);
+    function onMessage(event) {
+      const data = event.data;
+      if (event.source !== window || !data || data.taskId !== taskId) return;
+      if (data.type === 'REPLY_INBOX_PHOTO_SUCCESS') finish({ ok: true, messageId: String(data.messageId || '') });
+      else if (data.type === 'REPLY_INBOX_PHOTO_FAILURE') finish({ ok: false, error: (typeof data.error === 'string' ? data.error : JSON.stringify(data.error || 'extension báo lỗi')).slice(0, 200) });
+    }
+    window.addEventListener('message', onMessage);
+    window.postMessage({ type: 'REPLY_INBOX_PHOTO', taskId, pageId: item.pageId, convId: item.convId, message: item.text, attachmentType: 'SEND_TEXT_ONLY', globalUserId: item.globalUserId, platform: 'facebook', isBusiness: true, customerName: item.name, files: [] }, '*');
+  });
+  (async () => {
+    const batch = await readBatch();
+    if (!batch || batch.kind !== 'GIOTNANG_FOLLOWUP' || !Array.isArray(batch.items)) { alert('Không đọc được lô gửi. Vào CRM bấm "Chuẩn bị lô gửi" rồi thử lại.'); return; }
+    if (Date.now() - Number(batch.createdAt) > 40 * 60 * 1000) { alert('Lô gửi đã quá 40 phút. Vào CRM chuẩn bị lô mới để kiểm tra lại khách.'); return; }
+    if (!batch.items.length) { alert('Lô gửi trống.'); return; }
+    if (!confirm(`Gửi ${batch.items.length} tin bám đuổi qua extension Pancake?\nMỗi tin cách nhau 15–30 giây, cứ để tab này mở cho tới khi xong.`)) return;
+    const state = window.__giotNangRelay = { stop: false };
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;width:320px;padding:12px 14px;border-radius:10px;background:#0c4a6e;color:#fff;font:13px/1.45 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.25)';
+    const line = document.createElement('div');
+    const button = document.createElement('button');
+    button.textContent = 'Dừng';
+    button.style.cssText = 'margin-top:8px;padding:4px 12px;border:0;border-radius:6px;background:#fff;color:#0c4a6e;font:inherit;cursor:pointer';
+    button.onclick = () => { state.stop = true; button.disabled = true; button.textContent = 'Đang dừng…'; };
+    box.append(line, button);
+    document.body.appendChild(box);
+    const results = [];
+    let failedInRow = 0;
+    const [minDelay, maxDelay] = Array.isArray(batch.delayMs) ? batch.delayMs : [15000, 30000];
+    for (const [index, item] of batch.items.entries()) {
+      if (state.stop) break;
+      line.textContent = `Giọt Nắng — đang gửi ${index + 1}/${batch.items.length}: ${item.name || ''}`;
+      const result = await sendOne(item);
+      results.push({ key: item.key, ...result });
+      failedInRow = result.ok ? 0 : failedInRow + 1;
+      if (failedInRow >= 3) { state.stop = true; line.textContent = `Dừng: 3 tin liền lỗi (${result.error}).`; break; }
+      if (index < batch.items.length - 1 && !state.stop) {
+        const pause = minDelay + Math.random() * Math.max(0, maxDelay - minDelay);
+        line.textContent = `Giọt Nắng — đã gửi ${results.filter(entry => entry.ok).length}/${batch.items.length}, lỗi ${results.filter(entry => !entry.ok).length}. Tin sau sau ${Math.round(pause / 1000)} giây…`;
+        await wait(pause);
+      }
+    }
+    const sent = results.filter(entry => entry.ok).length;
+    line.textContent = `${failedInRow >= 3 ? line.textContent + ' ' : ''}Xong: gửi ${sent}, lỗi ${results.length - sent}${results.length < batch.items.length ? `, chưa gửi ${batch.items.length - results.length}` : ''}.`;
+    const payload = btoa(unescape(encodeURIComponent(JSON.stringify(results.map(entry => ({ key: entry.key, ok: entry.ok, error: entry.error || '' }))))));
+    button.disabled = false;
+    button.textContent = 'Báo kết quả về CRM';
+    button.onclick = () => { window.open(`${crmOrigin}/#followup-results=${encodeURIComponent(payload)}`, '_blank'); box.remove(); };
+    delete window.__giotNangRelay;
+  })().catch(error => { alert(`Trạm gửi lỗi: ${error.message}`); delete window.__giotNangRelay; });
+}
+
+const pancakeRelayBookmarklet = () => `javascript:${encodeURIComponent(`(${pancakeFollowUpRelay.toString()})(${JSON.stringify(window.location.origin)});void 0`)}`;
+
+function renderChatbotFollowUpQueue(queue) {
+  if (!chatbotFollowUpQueue) return;
+  chatbotFollowUpQueueItems = queue;
+  const waiting = queue.filter(item => !item.leased);
+  const leased = queue.length - waiting.length;
+  const bridge = document.documentElement.dataset.gnBridge;
+  const run = followUpBridgeRun;
+  const direct = bridge ? `<div class="follow-up-relay">
+    <b>Gửi ngay trong CRM (cầu nối Pancake ${escapeHtml(bridge)} đã cài)</b>
+    <small>CRM hỏi lại Pancake từng khách (bỏ khách đã có đơn), rồi nhờ extension Pancake gửi, mỗi tin cách nhau 15–30 giây. Cứ để trang CRM mở tới khi xong; tab Pancake chạy nền (tự mở nếu chưa có).</small>
+    ${run?.active ? `<div class="follow-up-relay-row"><b>${escapeHtml(run.status)}</b><button type="button" id="follow-up-bridge-stop"${run.stop ? ' disabled' : ''}>${run.stop ? 'Đang dừng…' : 'Dừng'}</button></div>`
+      : `<div class="follow-up-relay-row"><label>Số khách <input type="number" min="1" max="50" value="${followUpBatchSize}" id="follow-up-batch-size"></label><button type="button" class="is-primary" id="follow-up-bridge-send">Gửi ngay</button></div>
+    <small>${escapeHtml(run?.status || 'Nên gửi khoảng 30–50 khách mỗi ngày để Facebook không hạn chế Page.')}${leased ? ` ${leased} khách đang nằm trong lô chưa xong.` : ''}</small>`}
+  </div>` : '';
+  const relay = !queue.length ? '' : direct || `<div class="follow-up-relay">
+    <b>Gửi hàng loạt ngay trong CRM: cài cầu nối Pancake (một lần)</b>
+    <ol>
+      <li>Mở <code>chrome://extensions</code>, bật <b>Chế độ dành cho nhà phát triển</b> (góc phải trên).</li>
+      <li>Bấm <b>Tải tiện ích đã giải nén</b> → chọn thư mục <code>extensions\\crm-pancake-bridge</code> trong thư mục dự án CRM.</li>
+      <li>Tải lại trang CRM này: nút <b>Gửi ngay</b> sẽ hiện ở đây.</li>
+    </ol>
+    <details><summary>Cách cũ không cần cài: dấu trang trên tab Pancake</summary>
+      <ol>
+        <li>Kéo nút <a class="follow-up-bookmarklet" href="${escapeHtml(pancakeRelayBookmarklet())}" title="Kéo lên thanh dấu trang">⭐ Gửi bám đuổi</a> lên thanh dấu trang của Chrome.</li>
+        <li>Chọn số khách rồi bấm "Chuẩn bị lô gửi" (lô được chép vào clipboard).</li>
+        <li>Sang tab Pancake, bấm dấu trang "Gửi bám đuổi", xong thì bấm "Báo kết quả về CRM".</li>
+      </ol>
+      <div class="follow-up-relay-row"><label>Số khách mỗi lô <input type="number" min="1" max="50" value="${followUpBatchSize}" id="follow-up-batch-size"></label><button type="button" class="is-primary" id="follow-up-batch-prepare">Chuẩn bị lô gửi</button></div>
+      <small id="follow-up-batch-note">${escapeHtml(followUpBatchMessage || '')}${leased ? ` ${leased} khách đang nằm trong lô chưa báo kết quả.` : ''}</small>
+    </details>
+  </div>`;
+  chatbotFollowUpQueue.innerHTML = queue.length ? `<div class="follow-up-queue-head">Chờ gửi qua Pancake: ${queue.length} khách đã quá 24 giờ<small>Gửi hàng loạt bằng trạm gửi bên dưới, hay từng khách: bấm "Mở Pancake" (lời đã được sao chép sẵn), dán vào ô chat và gửi — CRM tự nhận ra tin đã gửi.</small></div>${relay}${queue.slice(0, followUpQueueShown).map((item, index) => `<div class="follow-up-queue-item">
+    <b>${escapeHtml(item.name || item.conversationId)}</b>
+    <p>${escapeHtml(item.text || '')}</p>
+    <div class="follow-up-queue-actions">
+      <a href="${escapeHtml(item.pancakeUrl)}" target="_blank" rel="noopener" data-follow-up-open="${index}">Mở Pancake</a>
+      <button type="button" data-follow-up-copy="${index}">Sao chép lời</button>
+      <button type="button" class="is-primary" data-follow-up-done="${index}">Đã gửi</button>
+      <button type="button" data-follow-up-skip="${index}">Bỏ qua</button>
+    </div>
+    ${item.lastError ? `<small class="follow-up-queue-error">Lần gửi trước lỗi: ${escapeHtml(item.lastError)}</small>` : ''}
+  </div>`).join('')}${queue.length > followUpQueueShown ? `<small>… và ${queue.length - followUpQueueShown} khách nữa.</small>` : ''}` : '';
+}
+
+// Gửi ngay trong CRM: extension "Giọt Nắng CRM – Cầu nối Pancake"
+// (extensions/crm-pancake-bridge) nhận lệnh qua window.postMessage và nhờ extension
+// Pancake gửi trong một tab pancake.vn chạy nền.
+let followUpBridgeRun = null;
+const followUpBridgeWaiters = new Map();
+// Yêu cầu đã hết giờ chờ (đã báo "chưa rõ" lên máy chủ): nhớ khách + mã lô để kết
+// quả extension trả về trễ vẫn ghi được "đã gửi" (không thì máy chủ chờ tới hết giữ chỗ).
+const followUpBridgeLateResults = new Map();
+let followUpBridgeReadyAt = 0;
+window.addEventListener('message', event => {
+  const data = event.data;
+  if (event.source !== window || event.origin !== window.location.origin || !data) return;
+  if (data.type === 'GN_BRIDGE_READY') followUpBridgeReadyAt = Date.now();
+  if (data.type === 'GN_BRIDGE_READY' && chatbotFollowUpQueueItems.length && !chatbotFollowUpQueue?.querySelector('#follow-up-bridge-send, #follow-up-bridge-stop')) renderChatbotFollowUpQueue(chatbotFollowUpQueueItems);
+  if (data.type !== 'GN_BRIDGE_RESULT') return;
+  if (followUpBridgeWaiters.has(data.requestId)) {
+    followUpBridgeWaiters.get(data.requestId)(data);
+    followUpBridgeWaiters.delete(data.requestId);
+    return;
+  }
+  const late = followUpBridgeLateResults.get(data.requestId);
+  if (!late) return;
+  followUpBridgeLateResults.delete(data.requestId);
+  // Chỉ kết quả gửi ĐƯỢC mới sửa lại "chưa rõ" thành "đã gửi"; lỗi thì để máy chủ
+  // tự trả khách về hàng chờ khi hết giữ chỗ (extension có thể đã gửi ở lần thử khác).
+  if (!data.ok) return;
+  fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: late.token, results: [{ key: late.key, ok: true, error: '', globalId: data.globalId || '' }] }) })
+    .then(() => { const run = followUpBridgeRun; if (run) { run.sent += 1; run.unknown = Math.max(0, (run.unknown || 0) - 1); renderChatbotFollowUpQueue(chatbotFollowUpQueueItems); } })
+    .catch(() => {});
+});
+
+function sendThroughBridge(item, token = '') {
+  return new Promise(resolve => {
+    const requestId = `gn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Cầu nối tự chờ extension Pancake tối đa 90 giây; thêm biên cho việc mở tab Pancake.
+    // Cầu nối: mở tab Pancake (≤35 s) + tìm ID Facebook (≤90 s) + gửi (≤90 s): chờ đủ để không báo lỗi trong khi extension vẫn gửi (gửi trùng).
+    const waitMs = item.needsGlobalId ? 240000 : 150000;
+    // Hết giờ chờ: extension vẫn có thể đã gửi, nên báo "chưa rõ" (unknown) chứ
+    // không báo lỗi thường — server không nên đưa khách này lại hàng chờ ngay.
+    // Kết quả tới trễ vẫn được nhận (followUpBridgeLateResults) trong vòng 1 giờ.
+    const timer = setTimeout(() => {
+      followUpBridgeWaiters.delete(requestId);
+      followUpBridgeLateResults.set(requestId, { key: item.key, token });
+      setTimeout(() => followUpBridgeLateResults.delete(requestId), 60 * 60 * 1000);
+      resolve({ ok: false, error: 'timeout', unknown: true, detail: `cầu nối không trả lời sau ${Math.round(waitMs / 60000)} phút (chưa rõ đã gửi hay chưa)` });
+    }, waitMs);
+    followUpBridgeWaiters.set(requestId, result => { clearTimeout(timer); resolve({ ok: Boolean(result.ok), error: result.error || '', globalId: result.globalId || '' }); });
+    window.postMessage({ type: 'GN_BRIDGE_SEND', requestId, item: { pageId: item.pageId, convId: item.convId, globalUserId: item.globalUserId || '', needsGlobalId: item.needsGlobalId === true, updatedTime: item.updatedTime || 0, text: item.text, name: item.name } }, window.location.origin);
+  });
+}
+
+// Khách trong lô chưa gửi tới: bỏ giữ chỗ (bấm Dừng, lô xong sớm, hay đóng trang).
+function releaseFollowUpLeases(run, { beacon = false } = {}) {
+  // Khách đang gửi dở (inFlight) không trả chỗ: extension có thể đã gửi, trả chỗ là lô sau gửi trùng.
+  const keys = (run?.batch?.items || []).map(item => item.key).filter(key => !run.done?.has(key) && key !== run.inFlight);
+  if (!keys.length) return Promise.resolve();
+  const body = JSON.stringify({ keys });
+  if (beacon && navigator.sendBeacon) { navigator.sendBeacon('/api/chatbot/follow-ups/release', new Blob([body], { type: 'application/json' })); return Promise.resolve(); }
+  return fetch('/api/chatbot/follow-ups/release', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+}
+window.addEventListener('beforeunload', () => { if (followUpBridgeRun?.active) releaseFollowUpLeases(followUpBridgeRun, { beacon: true }); });
+
+async function runFollowUpBridge() {
+  const limit = Math.max(1, Math.min(50, Number(document.querySelector('#follow-up-batch-size')?.value) || 30));
+  followUpBatchSize = limit;
+  if (!confirm(`Gửi tin bám đuổi "1 túi dùng thử miễn ship" cho tối đa ${limit} khách chưa có đơn?\nMỗi tin cách nhau 15–30 giây, để trang CRM mở tới khi xong.`)) return;
+  const run = followUpBridgeRun = { active: true, stop: false, sent: 0, failed: 0, unknown: 0, status: 'Đang kiểm tra khách trên Pancake…' };
+  const redraw = () => renderChatbotFollowUpQueue(chatbotFollowUpQueueItems);
+  redraw();
+  try {
+    const batch = await readApiResponse(await fetch('/api/chatbot/follow-ups/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit }) }));
+    run.batch = batch;
+    run.done = new Set();
+    const skipped = batch.skipped?.length ? ` Bỏ qua ${batch.skipped.length} khách (${[...new Set(batch.skipped.map(item => item.reason))].join(', ')}).` : '';
+    let failedInRow = 0;
+    for (const [index, item] of batch.items.entries()) {
+      if (run.stop) break;
+      const counts = () => `đã gửi ${run.sent}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}`;
+      run.status = `Đang gửi ${index + 1}/${batch.items.length}: ${item.name || ''} (${counts()})`;
+      redraw();
+      run.inFlight = item.key;
+      const result = await sendThroughBridge(item, batch.token || '');
+      run.inFlight = '';
+      run.done.add(item.key);
+      // Báo từng tin ngay: tải lại trang giữa chừng cũng không mất kết quả.
+      await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: batch.token || '', results: [{ key: item.key, ok: result.ok, error: result.error, ...(result.unknown ? { unknown: true } : {}), globalId: result.globalId || '' }] }) }).catch(() => {});
+      if (result.ok) { run.sent += 1; failedInRow = 0; }
+      else if (result.unknown) {
+        // Hết giờ chờ mà extension vẫn đang chạy (báo sẵn sàng trong 5 phút gần đây):
+        // là "chưa rõ", không phải lỗi — không tính vào 3 lần lỗi liền.
+        run.unknown += 1;
+        run.lastError = result.detail;
+        if (Date.now() - followUpBridgeReadyAt > 5 * 60 * 1000) failedInRow += 1;
+      } else { run.failed += 1; failedInRow += 1; run.lastError = result.detail || result.error; }
+      if (failedInRow >= 3) { run.stop = true; run.halted = `Dừng vì 3 tin liền ${result.unknown ? 'không rõ kết quả (cầu nối không trả lời)' : 'lỗi'}: ${result.detail || result.error}`; break; }
+      if (index < batch.items.length - 1 && !run.stop) {
+        const pause = 15000 + Math.random() * 15000;
+        run.status = `Đã gửi ${run.sent}/${batch.items.length}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}. Tin sau sau ${Math.round(pause / 1000)} giây…`;
+        redraw();
+        const until = Date.now() + pause;
+        while (Date.now() < until && !run.stop) await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    // Dừng giữa lô: trả chỗ cho khách chưa gửi để lô sau lấy lại ngay.
+    await releaseFollowUpLeases(run);
+    run.status = run.halted || (batch.items.length ? `Xong: đã gửi ${run.sent} tin, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown} (cầu nối không trả lời; CRM giữ chỗ 45 phút, đồng bộ Pancake sẽ xác nhận)` : ''}${run.lastError ? ` (${run.lastError})` : ''}.${skipped}` : `Không còn khách nào gửi được tự động.${skipped}`);
+  } catch (error) {
+    run.status = `Lỗi: ${error.message}`;
+  } finally {
+    run.active = false;
+    renderChatbotFollowUpStatus();
+  }
+}
+
+async function prepareFollowUpBatch(button) {
+  const limit = Math.max(1, Math.min(50, Number(document.querySelector('#follow-up-batch-size')?.value) || 30));
+  followUpBatchSize = limit;
+  button.disabled = true;
+  button.textContent = 'Đang kiểm tra khách trên Pancake…';
+  try {
+    const batch = await readApiResponse(await fetch('/api/chatbot/follow-ups/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit }) }));
+    const skipped = batch.skipped?.length ? ` Bỏ ${batch.skipped.length} khách (${[...new Set(batch.skipped.map(item => item.reason))].join(', ')}).` : '';
+    if (!batch.items.length) {
+      followUpBatchMessage = `Không còn khách nào để gửi.${skipped}`;
+    } else {
+      let copied = true;
+      try { await navigator.clipboard.writeText(JSON.stringify(batch)); } catch { copied = false; }
+      if (!copied) prompt('Trình duyệt không cho chép tự động — chép đoạn dưới (Ctrl+C) rồi dán khi dấu trang hỏi:', JSON.stringify(batch));
+      followUpBatchMessage = `Đã chép lô ${batch.items.length} khách vào clipboard.${skipped} Sang tab Pancake bấm dấu trang "Gửi bám đuổi" trong 40 phút.`;
+    }
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Chuẩn bị lô gửi';
+    renderChatbotFollowUpStatus();
+  }
+}
+
+// Dấu trang báo kết quả bằng cách mở CRM kèm #followup-results=… (không cần mở
+// API cho pancake.vn gọi chéo): ghi kết quả, xoá hash, mở lại Cài đặt.
+async function receiveFollowUpRelayResults(hash) {
+  const match = String(hash || '').match(/^#followup-results=(.+)$/);
+  if (!match) return false;
+  if (window.location.hash.startsWith('#followup-results=')) history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings`);
+  try {
+    const results = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(match[1])))));
+    const summary = await readApiResponse(await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ results }) }));
+    alert(`Trạm gửi Pancake: đã gửi ${summary.sent} tin, lỗi ${summary.failed}${summary.dropped ? ` (${summary.dropped} khách lỗi 2 lần, đã bỏ khỏi hàng chờ)` : ''}.`);
+  } catch (error) {
+    alert(`Không ghi được kết quả trạm gửi: ${error.message}. Tin đã gửi vẫn được CRM tự nhận ra khi đồng bộ.`);
+  }
+  return true;
+}
+chatbotFollowUpQueue?.addEventListener('click', async event => {
+  if (event.target.closest('.follow-up-bookmarklet')) { event.preventDefault(); alert('Kéo nút này lên thanh dấu trang của Chrome (không bấm ở đây). Sau đó mở tab Pancake và bấm dấu trang.'); return; }
+  const prepare = event.target.closest('#follow-up-batch-prepare');
+  if (prepare) { prepareFollowUpBatch(prepare); return; }
+  if (event.target.closest('#follow-up-bridge-send')) { if (!followUpBridgeRun?.active) runFollowUpBridge(); return; }
+  if (event.target.closest('#follow-up-bridge-stop') && followUpBridgeRun?.active) { followUpBridgeRun.stop = true; renderChatbotFollowUpQueue(chatbotFollowUpQueueItems); return; }
+  const target = event.target.closest('[data-follow-up-open],[data-follow-up-copy],[data-follow-up-done],[data-follow-up-skip]');
+  if (!target) return;
+  const index = Number(target.dataset.followUpOpen ?? target.dataset.followUpCopy ?? target.dataset.followUpDone ?? target.dataset.followUpSkip);
+  const item = chatbotFollowUpQueueItems[index];
+  if (!item) return;
+  if (target.dataset.followUpOpen !== undefined || target.dataset.followUpCopy !== undefined) {
+    try { await navigator.clipboard.writeText(item.text || ''); if (target.dataset.followUpCopy !== undefined) target.textContent = 'Đã sao chép'; } catch { /* trình duyệt chặn clipboard: nhân viên tự chép */ }
+    return;
+  }
+  target.disabled = true;
+  try {
+    const status = await readApiResponse(await fetch('/api/chatbot/follow-ups/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: item.key, action: target.dataset.followUpSkip !== undefined ? 'skip' : 'sent' }) }));
+    renderChatbotFollowUpQueue(status.queue || []);
+  } catch (error) {
+    target.disabled = false;
+    alert(error.message);
+  }
+});
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
 const chatbotSettingsMemoryWindowRange = document.querySelector('#chatbot-settings-memory-window-range');
 const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
@@ -8239,7 +8546,7 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         commentHide: chatbotSettingsCommentHide?.value || 'phone',
         addressAi: chatbotSettingsAddressAi?.checked !== false,
         addressAiSearch: chatbotSettingsAddressAiSearch?.checked !== false,
-        followUps: { enabled: chatbotFollowUpsEnabled?.checked === true, scenarios: chatbotFollowUpScenarios.map(scenario => ({ ...scenario, outsideWindow: false })) },
+        followUps: { enabled: chatbotFollowUpsEnabled?.checked === true, scenarios: chatbotFollowUpScenarios },
         memoryWindow: chatbotSettingsMemoryWindow.value,
         structuredOutput: chatbotSettingsStructuredOutput.checked,
         retryCount: chatbotSettingsRetryCount.value,
@@ -9252,7 +9559,11 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
 orderExport.onclick = () => exportOrdersToXlsx(orderExport);
 orderExportSkip?.addEventListener('click', () => exportOrdersToXlsx(orderExportSkip, { skipInvalidLocations: true }));
 
-const initialView = viewNames.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'dashboard';
+// Trạm gửi Pancake mở CRM kèm #followup-results=…: vào Cài đặt và ghi kết quả.
+// Giữ hash trước: showView đổi hash thành #settings trước khi kết quả được đọc.
+const relayResultsHash = window.location.hash.startsWith('#followup-results=') ? window.location.hash : '';
+const relayResultsPending = Boolean(relayResultsHash);
+const initialView = relayResultsPending ? 'settings' : viewNames.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'dashboard';
 const metaConnectionParams = new URLSearchParams(window.location.search);
 renderOrderImportHistory();
 renderShippingHistory();
@@ -9992,9 +10303,10 @@ else showView(initialView);
 // Nút Back/Forward và gõ #hash tay: đổi màn theo hash (showView chỉ đặt hash khi khác).
 window.addEventListener('hashchange', () => {
   const name = window.location.hash.slice(1);
-  if (!viewNames.includes(name)) return;
+  if (!viewNames.includes(name) || name.startsWith('followup-results')) return;
   if (name === 'orders') showOrderStage(getRecommendedOrderStage()); else showView(name);
 });
+if (relayResultsPending) receiveFollowUpRelayResults(relayResultsHash).then(() => renderChatbotFollowUpStatus());
 loadFacebookChannels().catch(() => {});
 loadMessageChannels().catch(() => {});
 loadProducts().catch(renderProductLoadError);

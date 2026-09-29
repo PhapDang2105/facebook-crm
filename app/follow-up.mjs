@@ -496,6 +496,7 @@ const pancakeConversationUrl =(pageId, psid) => `https://pancake.vn/${encodeURIC
 // Một lô đã giao cho trạm gửi Pancake thì giữ chỗ 45 phút: lô sau không lấy lại
 // cùng khách (gửi trùng) khi lô trước còn đang chạy hay chưa báo kết quả.
 const batchLeaseMs = 45 * 60 * 1000;
+const queueMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
 const maxBatchSize = 50;
 const maxRelayAttempts = 2;
 
@@ -677,6 +678,12 @@ async function buildFollowUpBatchOnce({ limit = 30, conversationInfo, now = Date
     return !scenario || now - Number(item.repliedAt) >= scenario.delayHours * 60 * 60 * 1000;
   };
   for (const item of queue) {
+    // Khách im quá 7 ngày: ưu đãi dùng thử không còn hợp ngữ cảnh, bỏ khỏi hàng thay vì gửi.
+    if (now - Number(item.repliedAt) > queueMaxAgeMs) {
+      await resolveFollowUpQueueItem(item.key, 'skip', { now, reason: 'quá 7 ngày trong hàng chờ' });
+      skipped.push({ key: item.key, name: item.name, reason: 'quá 7 ngày' });
+      continue;
+    }
     if (items.length >= size) break;
     if (!due(item)) continue;
     const conversationId = `${item.pageId}_${item.psid}`;

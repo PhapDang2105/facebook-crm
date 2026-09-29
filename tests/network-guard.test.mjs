@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertPublicHost, isInternalHost, isPrivateAddress } from '../app/network-guard.mjs';
+import { assertPublicHost, isInternalHost, isPrivateAddress, isSafeRequestTarget } from '../app/network-guard.mjs';
 
 test('địa chỉ nội bộ, loopback, link-local và metadata bị coi là riêng tư', () => {
   for (const address of ['127.0.0.1', '10.1.2.3', '172.16.0.9', '192.168.1.1', '169.254.169.254', '0.0.0.0', '100.64.0.1', '::1', '::ffff:127.0.0.1', 'fd00::1', 'fe80::1']) {
@@ -27,4 +27,10 @@ test('assertPublicHost tra DNS: tên miền công khai trỏ về IP nội bộ 
   await assert.rejects(assertPublicHost('no-such.example', { lookupImpl: async () => { throw new Error('ENOTFOUND'); } }), /phân giải/);
   assert.equal(await assertPublicHost('cdn.example', { resolve: false }), 'cdn.example', 'không tra DNS khi resolve=false');
   await assert.rejects(assertPublicHost('localhost', { resolve: false }), /nội bộ/);
+});
+
+test('isSafeRequestTarget: chặn "//q/api/…" (vượt Basic Auth qua đường đi thẳng của Caddy), "/\\", dạng tuyệt đối', () => {
+  for (const target of ['/', '/api/health', '/q/abc', '/product-images/a.jpg', '/webhooks/landing?token=x', '/a//b']) assert.equal(isSafeRequestTarget(target), true, target);
+  for (const target of ['//q/api/customers', '//product-images/api/health', '/\\q/api/x', '\\\\q/api', 'http://evil/api/x', '', undefined, '*']) assert.equal(isSafeRequestTarget(target), false, String(target));
+  assert.equal(new URL('//q/api/customers', 'http://localhost').pathname, '/api/customers', 'lý do: URL tương đối theo scheme đổi host');
 });

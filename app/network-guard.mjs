@@ -55,3 +55,13 @@ export async function assertPublicHost(hostname, { lookupImpl = lookup, resolve 
   }
   return host;
 }
+
+/**
+ * Đích request (request.url) an toàn để parse: phải là origin-form bắt đầu bằng ĐÚNG MỘT "/". Caddy so khớp
+ * "/q/*", "/product-images/*" trên đường dẫn đã gộp "//" rồi chuyển nguyên URI xuống, còn new URL("//q/api/x", base)
+ * coi "q" là host → pathname "/api/x": "//q/api/..." từng vượt Basic Auth. "\" được WHATWG URL coi như "/" nên cũng chặn.
+ */
+export function isSafeRequestTarget(target) {
+  const value = String(target ?? '');
+  return value.startsWith('/') && !/^[/\\]{2}/.test(value);
+}

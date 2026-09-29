@@ -10,7 +10,7 @@ import { getSpxTracking } from './spx-tracking.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
-import { assertPublicHost } from './network-guard.mjs';
+import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin } from './chatbot-templates.mjs';
@@ -1005,6 +1005,8 @@ const chatbotDependencies = {
 let pancakeNoTokenWarnedAt = 0;
 const server = http.createServer(async (request, response) => {
   try {
+    // "//q/api/…" từng vượt Basic Auth (Caddy cho /q/* đi thẳng, new URL coi "q" là host): chặn trước khi parse.
+    if (!isSafeRequestTarget(request.url)) return sendJson(response, 400, { error: 'Đường dẫn không hợp lệ.' });
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
     // Hai webhook do máy ngoài gọi và tự xác thực lấy, nên không áp luật Origin.
     const isWebhook = url.pathname === metaConfig.webhookPath || url.pathname === landingConfig.path || url.pathname === pancakeConfig.path;

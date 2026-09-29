@@ -12,6 +12,7 @@ import { ruleIntent } from './processing/rule-intent.mjs';
 import { stripPhone } from './processing/order-flow.mjs';
 import { activeTrial, filterTrialReply, promoBowlActive, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
 import { intentSafeTemplates, predictIntent } from './processing/intent-model.mjs';
+import { decisionLabelOf, intentRowOf } from './processing/intent-features.mjs';
 import { formatExamples, loadExampleBank, nearestExamples } from './processing/example-bank.mjs';
 import { appendDecisionLog } from './processing/decision-log.mjs';
 import { gateCheck } from './processing/llm-router.mjs';
@@ -857,9 +858,9 @@ export function shadowRuleLine(shadow, stableTemplateId, render, conversationId 
  * ORDER_ADDRESS_REMIND ≡ ORDER_ADDRESS, còn "đã gửi ở trên" là trung tính (~).
  */
 export function intentMatchMark(predicted, chosen) {
-  const same = id => (id === 'ORDER_ADDRESS_REMIND' ? 'ORDER_ADDRESS' : id);
+  // Mẫu con ORDER_ADDRESS (PARTIAL/CART_LINE/REMIND…) do bộ soạn chọn theo giỏ: cùng một quyết định (decisionLabelOf).
   if (['REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO'].includes(chosen)) return '~';
-  return same(predicted) === same(chosen) ? '✓' : '✗';
+  return decisionLabelOf(predicted) === decisionLabelOf(chosen) ? '✓' : '✗';
 }
 
 /**
@@ -1402,17 +1403,18 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const intentMode = settings.intentModel || 'shadow';
     // Chỉ hộp thư: bình luận đi luồng riêng (mẫu COMMENT_*), so sánh không có nghĩa.
     const intentEligible = message.type === 'text' && conversation.source !== 'comment' && !asksForHuman && !cartReply && !trialActive;
-    // Row chung cho mô hình phẳng và mô hình tầng: ngữ cảnh v2 + các trường của decisionContext (mô hình v5 bỏ
-    // qua đặc trưng lạ; tầng và v6 dùng hasOrder/orderAgeMin/prevBotAsks/phoneInText/addressInText/bagCount…).
+    // Row chung cho mô hình phẳng và mô hình tầng: intentRowOf — CÙNG định nghĩa với dữ liệu huấn luyện và bộ chấm
+    // (trước đây engine tự dựng: thiếu ask:confirm sau ORDER_CONFIRMATION, ask:flavor đọc từ câu bot, bước đơn sau
+    // ASK_FLAVOR/ORDER_ADDRESS_REMIND, addressInText/bagCount khác định nghĩa → mô hình chạy thật kém hơn số đo).
+    // pendingOrder null (không phải undefined) = biết là không có giỏ: họ ORDER_ADDRESS xin theo giỏ như prevBotAsks.
     const intentRow = intentEligible ? {
-      text: message.text, source: conversation.source, lastTemplate: conversation.botLastTemplateId || '',
-      lastWasOrderStep: isOrderStep(conversation.botLastTemplateId),
-      hasBasket: Boolean(usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items?.length),
-      livestream: isLivestreamPost(conversation),
-      hasOrder: Boolean(hasOrder), hasRecentOrder: Boolean(trace.ctx?.hasRecentOrder), orderAgeMin: trace.ctx?.orderAgeMin ?? null,
-      prevBotAsks: prevBotAsks(conversation.botLastTemplateId, conversation.pendingOrder),
-      phoneInText: Boolean(phoneInText), addressInText: Boolean(trace.ctx?.addressInText), bagCount: Number(trace.ctx?.bagCount) || 0,
-      staffRepliedAfterBot: Boolean(staffRepliedAfterBot)
+      ...intentRowOf({
+        text: message.text, source: conversation.source, lastTemplateId: conversation.botLastTemplateId || '', prevBotText: trace.prevBotText,
+        pendingOrder: conversation.pendingOrder ?? null, now: Date.now(), livestream: isLivestreamPost(conversation),
+        hasOrder: Boolean(hasOrder), orderAgeMin: trace.ctx?.orderAgeMin ?? null, phoneInText: Boolean(phoneInText),
+        staffRepliedAfterBot: Boolean(staffRepliedAfterBot)
+      }),
+      hasRecentOrder: Boolean(trace.ctx?.hasRecentOrder)
     } : null;
     const intent = intentMode !== 'off' && intentRow ? predictIntent(intentRow) : null;
     const intentThreshold = Number(settings.intentThreshold) || 0.9;

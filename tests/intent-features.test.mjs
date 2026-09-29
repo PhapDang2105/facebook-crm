@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ADDRESS_WORDS, askedSlotOf, canonicalTemplateId, countBags, countColours, featuresOf, intentRowFromRecord, intentRowOf, isOrderStepContext, labelTemplateId, normalizeIntentText, orderContextOf, prevBotAsksOf } from '../app/processing/intent-features.mjs';
+import { ADDRESS_WORDS, askedSlotOf, canonicalTemplateId, countBags, countColours, decisionLabelOf, featuresOf, intentRowFromRecord, intentRowOf, isOrderStepContext, labelTemplateId, normalizeIntentText, orderContextOf, prevBotAsksOf } from '../app/processing/intent-features.mjs';
+import { intentMatchMark } from '../app/chatbot-engine.mjs';
+import { intentMatchMark as reportMatchMark } from '../tools-intent/shadow-report.mjs';
 
 test('askedSlotOf: mã mẫu nói rõ thì theo mã; mẫu điền {missing} thì đọc câu bot; không có gì → rỗng', () => {
   assert.equal(askedSlotOf('Dạ để lên đơn đúng tuyến, chị cho em xin số điện thoại và địa chỉ trước sáp nhập', 'ORDER_ADDRESS'), 'phone_address');
@@ -110,4 +112,24 @@ test('orderContextOf / intentRowOf: MỘT định nghĩa row (đơn chưa hủy 
   assert.deepEqual([fixed.label, fixed.weak, fixed.lastTemplate, fixed.lastWasOrderStep, fixed.prevBotAsks, fixed.hasOrder, fixed.orderAgeMin], ['ORDER_CONFIRMATION', true, 'ORDER_ADDRESS', true, 'phone', false, 5000]);
   assert.deepEqual(intentRowFromRecord(fixed), fixed, 'idempotent');
   assert.deepEqual([...featuresOf(fixed)].sort(), [...featuresOf(intentRowOf({ text: '<sdt>', lastTemplateId: 'ORDER_ADDRESS', prevBotText: record.prevBot, hasBasket: true, hasOrder: true, orderAgeMin: 5000, now }))].sort(), 'đặc trưng dữ liệu = đặc trưng lúc chạy');
+});
+
+test('decisionLabelOf / intentMatchMark (vòng 13): mẫu con ORDER_ADDRESS do bộ soạn chọn là cùng một quyết định', () => {
+  for (const id of ['ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_CART_LINE', 'UPSELL_TWO_BAGS', 'ORDER_ADDRESS_REMIND']) assert.equal(decisionLabelOf(id), 'ORDER_ADDRESS', id);
+  for (const id of ['ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ASK_FLAVOR', 'ORDER_UPDATED', 'PRICE_QUOTE', '']) assert.equal(decisionLabelOf(id), id, 'mẫu khác giữ nguyên');
+  for (const mark of [intentMatchMark, reportMatchMark]) {
+    assert.equal(mark('ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL'), '✓', 'engine và shadow-report cùng quy ước');
+    assert.equal(mark('ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND'), '✓');
+    assert.equal(mark('ORDER_ADDRESS', 'ORDER_CONFIRMATION'), '✗');
+    assert.equal(mark('PRICE_QUOTE', 'REPLY_ALREADY_SENT'), '~');
+  }
+});
+
+test('featuresOf ô điền (vòng 13): bot xin gì × SĐT/địa chỉ trong tin × có giỏ — tách chỉ SĐT, đủ cả hai, chưa có món', () => {
+  const base = { source: 'inbox', lastTemplate: 'ORDER_ADDRESS', lastWasOrderStep: true, prevBotAsks: 'phone_address' };
+  assert.ok(featuresOf({ ...base, text: '<sdt>', hasBasket: true }).has('slot:phone_address|p|b'));
+  assert.ok(featuresOf({ ...base, text: '<sdt> 12 lê lợi phường 5 quận 3', hasBasket: true }).has('slot:phone_address|pa|b'));
+  assert.ok(featuresOf({ source: 'inbox', lastTemplate: 'PRICE_QUOTE', text: '<sdt> 12 lê lợi phường 5 quận 3', hasBasket: false }).has('slot:none|pa|nb'), 'SĐT/địa chỉ khi chưa có món');
+  assert.ok(![...featuresOf({ source: 'inbox', text: 'giá bao nhiêu' })].some(feature => feature.startsWith('slot:')), 'không SĐT/địa chỉ → không có ô điền');
+  assert.ok(featuresOf({ source: 'inbox', text: '2 túi xanh', hasBasket: false }).has('x:bags|colour|nb'));
 });

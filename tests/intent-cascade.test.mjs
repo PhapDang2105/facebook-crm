@@ -68,7 +68,7 @@ test('trainClassifier (tách từ train-intent): trả model định dạng inte
   const { model, report } = trainClassifier(rows, { log: line => lines.push(line) });
   assert.match(lines[0], /^Dòng: 145 · bỏ OTHER 3 · bỏ lớp < 4 mẫu: VAT_INVOICE \(2\) → còn 140$/);
   assert.equal(model.version, 3);
-  assert.equal(model.labels.length, 7);
+  assert.equal(model.labels.length, 6, 'ORDER_ADDRESS_PARTIAL gộp vào ORDER_ADDRESS (nhãn quyết định)');
   assert.equal(model.meta.rows, 140);
   assert.equal(model.temperature, model.meta.calibration.temperature);
   assert.deepEqual(report.dataset.weights, { 1: 91, 2: 21, 0.7: 28 });
@@ -95,7 +95,7 @@ test('trainClassifier (tách từ train-intent): trả model định dạng inte
   const loaded = loadIntentModelFrom(cliOut);
   const distribution = probabilitiesOf(loaded, PRICE_ROW);
   const guess = predictIntentWith(loaded, PRICE_ROW);
-  assert.equal(Object.keys(distribution).length, 7);
+  assert.equal(Object.keys(distribution).length, 6);
   assert.ok(Math.abs(Object.values(distribution).reduce((sum, p) => sum + p, 0) - 1) < 1e-9);
   assert.ok(Math.abs(distribution[guess.templateId] - guess.confidence) < 1e-6);
 });
@@ -106,7 +106,7 @@ test('predictCascadeWith: p = p(nhóm) × p(mẫu|nhóm), pWithin/marginWithin, 
   assert.equal(other, 3);
   const { raw } = trainCascadeModels(rows);
   assert.deepEqual(raw.groups, ['ANSWER', 'ORDER', 'SUPPORT'], 'OTHER chỉ 3 dòng < 4 → lớp bị bỏ trên dữ liệu tổng hợp');
-  assert.ok(raw.specialists.ORDER && raw.specialists.ORDER.labels.length === 4);
+  assert.ok(raw.specialists.ORDER && raw.specialists.ORDER.labels.length === 3);
   assert.deepEqual(raw.specialists.ANSWER.labels, ['PRICE_QUOTE', 'THANK_YOU'], 'ANSWER = PRICE_QUOTE + THANK_YOU (VAT_INVOICE < 4)');
   assert.equal(raw.specialists.SUPPORT, null, 'SUPPORT 20 dòng < 30 → null');
   assert.equal(raw.specialists.PRICE, null, 'PRICE 20 dòng, 1 lớp → null');
@@ -223,7 +223,7 @@ test('train-cascade CLI: dữ liệu tổng hợp → JSON đúng cấu trúc (c
   assert.match(out, /tập rule-miss \(ruleTemplate rỗng\): \d+ dòng/, 'dataset tổng hợp có trường ruleTemplate');
   assert.match(out, /→ answerMode chọn: (flat|subgroup)/);
   assert.match(out, /Huấn luyện bản triển khai trên toàn bộ 145 dòng/);
-  assert.match(out, /saved .*cascade\.json \d+ KB · nhóm ANSWER\/ORDER\/SUPPORT · answerMode (flat|subgroup) · mô hình con: ORDER 4 mẫu · SUPPORT null · ANSWER 2 mẫu · PRICE null · INFO null · SOCIAL null/);
+  assert.match(out, /saved .*cascade\.json \d+ KB · nhóm ANSWER\/ORDER\/SUPPORT · answerMode (flat|subgroup) · mô hình con: ORDER 3 mẫu · SUPPORT null · ANSWER 2 mẫu · PRICE null · INFO null · SOCIAL null/);
   const saved = JSON.parse(readFileSync(outPath, 'utf8'));
   assert.equal(saved.version, 'cascade-2');
   assert.ok(saved.trainedAt && saved.rows === 145);
@@ -232,7 +232,7 @@ test('train-cascade CLI: dữ liệu tổng hợp → JSON đúng cấu trúc (c
   assert.equal(saved.groupModel.version, 3, 'mô hình nhóm định dạng intent-model.json');
   assert.ok(saved.groupModel.meta.calibration.temperature >= 0.5);
   assert.deepEqual(Object.keys(saved.specialists), ['ORDER', 'SUPPORT', 'ANSWER', 'PRICE', 'INFO', 'SOCIAL']);
-  assert.deepEqual(saved.specialists.ORDER.labels, ['ASK_FLAVOR', 'ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_CANCELLED']);
+  assert.deepEqual(saved.specialists.ORDER.labels, ['ASK_FLAVOR', 'ORDER_ADDRESS', 'ORDER_CANCELLED'], 'mẫu con PARTIAL học như ORDER_ADDRESS');
   assert.equal(saved.specialists.SUPPORT, null);
   assert.ok(['flat', 'subgroup'].includes(saved.answerMode) && saved.answerMode === saved.report.heldOut.bestMode);
   const held = saved.report.heldOut.all;
@@ -242,7 +242,7 @@ test('train-cascade CLI: dữ liệu tổng hợp → JSON đúng cấu trúc (c
   assert.ok(typeof held.ece.flat.product === 'number' && typeof held.ece.flat.tier1 === 'number' && typeof held.ece.plain === 'number');
   assert.ok(saved.report.heldOut.ruleMiss && saved.report.heldOut.ruleMiss.n > 0);
   assert.ok(saved.report.heldOut.staff && saved.report.heldOut.staff.n === 7);
-  assert.ok(saved.report.heldOut.flat && saved.report.heldOut.flat.labels.length === 7);
+  assert.ok(saved.report.heldOut.flat && saved.report.heldOut.flat.labels.length === 6);
   assert.equal(saved.report.subModels.specialists.SUPPORT.skipped, '< 30 dòng');
   assert.equal(saved.report.dataset.groupCounts.ORDER, 80);
   assert.equal(saved.report.dataset.other, 3);
@@ -308,8 +308,8 @@ test('replay-golden --cascade: bảng phẳng vs tầng (toàn bộ, rule-miss, 
   const result = run('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', cascadePath]);
   assert.equal(result.status, 0, result.stderr);
   const out = result.stdout;
-  assert.match(out, /^mô hình: .*flat-replay\.json · 7 nhãn/m);
-  assert.match(out, /^mô hình tầng: .*cascade-replay\.json · nhóm ANSWER\/ORDER\/SUPPORT · answerMode (flat|subgroup) · mô hình con \(số mẫu\): ORDER 4 · SUPPORT null · ANSWER 2 · PRICE null · INFO null · SOCIAL null · 145 dòng/m);
+  assert.match(out, /^mô hình: .*flat-replay\.json · 6 nhãn/m);
+  assert.match(out, /^mô hình tầng: .*cascade-replay\.json · nhóm ANSWER\/ORDER\/SUPPORT · answerMode (flat|subgroup) · mô hình con \(số mẫu\): ORDER 3 · SUPPORT null · ANSWER 2 · PRICE null · INFO null · SOCIAL null · 145 dòng/m);
   assert.match(out, /6 tin hộp thư đã chấm · 1 tin bỏ qua/);
   assert.match(out, /--cascade · toàn bộ tin đã chấm: 6 tin \(5 có mẫu, 1 nhóm OTHER\)/);
   assert.match(out, /phẳng \(mô hình 1\)\s+tầng \(ANSWER-(flat|subgroup)\)/);

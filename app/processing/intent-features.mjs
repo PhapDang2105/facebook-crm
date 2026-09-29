@@ -102,6 +102,15 @@ export const STORED_TEMPLATE_ID = Object.freeze({
   ORDER_UPDATED: 'ORDER_UPDATE', ORDER_CANCELLED: 'ORDER_CANCEL', ORDER_NOTE_ADDED: 'ORDER_NOTE'
 });
 
+/**
+ * Nhãn QUYẾT ĐỊNH cho mô hình nhỏ/tầng (vòng 13): các mẫu con của ORDER_ADDRESS (PARTIAL/CLARIFY/CHOOSE/CART_LINE/
+ * UPSELL_TWO_BAGS/REMIND) do renderChatbotReply({ template_id: 'ORDER_ADDRESS' }) tự chọn theo giỏ/SĐT/địa chỉ — mô hình
+ * chỉ cần đoán ORDER_ADDRESS. Học chúng như lớp riêng làm mô hình "sai" ở chỗ không phải quyết định của nó (giữ-out:
+ * ORDER_CART_LINE → ORDER_ADDRESS là lỗi hàng đầu). Dùng chung khi huấn luyện, đo trên bộ chấm và dấu ✓/✗ chạy ẩn.
+ */
+export const ORDER_ADDRESS_VARIANTS = new Set(['ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_CART_LINE', 'UPSELL_TWO_BAGS', 'ORDER_ADDRESS_REMIND']);
+export const decisionLabelOf = templateId => { const id = String(templateId || '').trim(); return ORDER_ADDRESS_VARIANTS.has(id) ? 'ORDER_ADDRESS' : id; };
+
 /** Mã engine trả (renderChatbotReply) → mã mẫu dùng làm NHÃN (khớp nhãn chấm/chữ ký mẫu): ORDER_UPDATE → ORDER_UPDATED… */
 export const LABEL_OF_ENGINE_ID = Object.freeze({ ORDER_UPDATE: 'ORDER_UPDATED', ORDER_CANCEL: 'ORDER_CANCELLED', ORDER_NOTE: 'ORDER_NOTE_ADDED' });
 export const labelTemplateId = templateId => { const id = String(templateId || '').trim(); return LABEL_OF_ENGINE_ID[id] || id; };
@@ -280,6 +289,12 @@ export function featuresOf(row) {
     if (hasPhone) set.add(`x:ask:${asks}|has:sdt`);
     if (hasAddress) set.add(`x:ask:${asks}|has:addr`);
   }
+  // Ô điền (vòng 13): bot xin gì × tin có SĐT/địa chỉ × có giỏ — MỘT đặc trưng giao, vì mô hình tuyến tính không tự
+  // tách "chỉ SĐT" (ORDER_ADDRESS_PARTIAL) khỏi "SĐT + địa chỉ" (ORDER_CONFIRMATION), hay SĐT/địa chỉ khi chưa có
+  // món (ASK_FLAVOR) khỏi khi đã có giỏ.
+  const slot = `${hasPhone ? 'p' : ''}${hasAddress ? 'a' : ''}`;
+  if (slot) set.add(`slot:${asks || 'none'}|${slot}|${row.hasBasket ? 'b' : 'nb'}`);
+  if (bags > 0) set.add(`x:bags|${hasColour ? 'colour' : 'nocolour'}|${row.hasBasket ? 'b' : 'nb'}`);
   // Giao đặc trưng (kiểu Vowpal Wabbit): cùng chữ "1" / "xanh" / "ok" nhưng ý khác nhau tuỳ mẫu
   // bot vừa gửi và bước đơn — chỉ giao với từ đơn để không phình từ vựng.
   for (const word of words.slice(0, 8)) set.add(`x:${last}|${word}`);

@@ -38,7 +38,7 @@ if (!existsSync(goldenPath)) cliFail(`Không thấy bộ chấm: ${goldenPath}`)
 for (const [flag, file] of [['--model', modelPath], ['--compare', comparePath], ['--cascade', cascadePath]]) if (file && !existsSync(file)) cliFail(`Không thấy tệp ${flag}: ${file}`);
 const { loadIntentModelFrom, predictIntentWith, intentSafeTemplates } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'intent-model.mjs')).href);
 const { loadCascadeFrom, predictCascadeWith, groupOf, fineGroupOf, cascadeSafeTemplates, CASCADE_FINE_GROUPS, probabilitiesOf, sumByGroup } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'intent-cascade.mjs')).href);
-const { intentRowFromRecord, isOrderStepContext, canonicalTemplateId } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'intent-features.mjs')).href);
+const { intentRowFromRecord, isOrderStepContext, canonicalTemplateId, decisionLabelOf } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'intent-features.mjs')).href);
 const { ruleIntent } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'rule-intent.mjs')).href);
 const { describeDeliveryAddress } = await import(pathToFileURL(path.join(root, 'app', 'processing', 'locations.mjs')).href);
 const { enrichGoldenContext, goldenContextFields } = await import(pathToFileURL(path.join(root, 'app', 'golden-set.mjs')).href);
@@ -89,8 +89,11 @@ if (comparePath && invalidModels.length) {
 }
 
 const rawItems = goldenAll.filter(item => item && item.source !== 'comment');
-const graded = rawItems.filter(item => item.label && item.label !== 'SKIP').map(item => ({ ...item, truth: item.label }));
-const picked = graded.length || !useAll ? graded : rawItems.filter(item => item.suggested).map(item => ({ ...item, truth: item.suggested }));
+// Nhãn QUYẾT ĐỊNH (decisionLabelOf): mẫu con ORDER_ADDRESS (PARTIAL/CART_LINE…) do bộ soạn chọn theo giỏ ≡ ORDER_ADDRESS —
+// áp cho nhãn chấm, dự đoán (kể cả mô hình cũ còn lớp mẫu con) và luật, như dấu ✓/✗ chạy ẩn.
+const decided = guess => (guess ? { ...guess, templateId: decisionLabelOf(guess.templateId), topK: (guess.topK || []).map(candidate => ({ ...candidate, templateId: decisionLabelOf(candidate.templateId) })) } : guess);
+const graded = rawItems.filter(item => item.label && item.label !== 'SKIP').map(item => ({ ...item, truth: decisionLabelOf(item.label) }));
+const picked = graded.length || !useAll ? graded : rawItems.filter(item => item.suggested).map(item => ({ ...item, truth: decisionLabelOf(item.suggested) }));
 if (!picked.length) { console.log('Chưa có tin nào được chấm (Cài đặt → Thiết lập chatbot → Chấm mẫu). Thêm --all để xem sơ bộ theo nhãn gợi ý.'); process.exit(0); }
 console.log(`${picked.length} tin hộp thư ${graded.length ? 'đã chấm' : 'theo nhãn gợi ý LLM (sơ bộ)'} · ${rawItems.length - picked.length} tin bỏ qua`);
 
@@ -110,10 +113,10 @@ const contextOf = item => intentRowFromRecord({
   hasOrder: item.hasOrder, orderAgeMin: item.orderAgeMin, livestream: false, prevBotAsks: item.prevBotAsks, phoneInText: item.phoneInText, at: item.at
 });
 const results = rows.map(item => {
-  const intents = models.map(entry => predictIntentWith(entry.model, contextOf(item)));
+  const intents = models.map(entry => decided(predictIntentWith(entry.model, contextOf(item))));
   const ruled = ruleIntent(item.text, { source: item.source, botLastTemplateId: canonicalTemplateId(item.lastTemplate) });
-  const ruleTemplate = ruled?.value?.template_id || (ruled?.commentRule ? 'COMMENT_RULE' : '');
-  const tiered = cascade ? predictCascadeWith(cascade, contextOf(item)) : null;
+  const ruleTemplate = decisionLabelOf(ruled?.value?.template_id) || (ruled?.commentRule ? 'COMMENT_RULE' : '');
+  const tiered = cascade ? decided(predictCascadeWith(cascade, contextOf(item))) : null;
   return { item, intent: intents[0], intents, ruleTemplate, cascade: tiered };
 });
 

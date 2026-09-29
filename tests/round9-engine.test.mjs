@@ -287,7 +287,7 @@ test('5a. cài đặt intentCascade mặc định shadow; shadow: nhật ký ghi
     extraDeps: { predictCascade: row => { seen.push(row); return cascadeOf('INFO', 'BAG_COMPARISON_XANH_VANG'); }, cascadeGroupOf: groupOfFake }
   }));
   assert.equal(seen.length, 1, 'gọi mô hình tầng đúng một lần');
-  assert.deepEqual(Object.keys(seen[0]), ['text', 'source', 'lastTemplate', 'lastWasOrderStep', 'hasBasket', 'livestream', 'hasOrder', 'hasRecentOrder', 'orderAgeMin', 'prevBotAsks', 'phoneInText', 'addressInText', 'bagCount', 'staffRepliedAfterBot'], 'cùng row với predictIntent, kèm các trường của decisionContext');
+  assert.deepEqual(Object.keys(seen[0]).sort(), ['text', 'source', 'lastTemplate', 'lastWasOrderStep', 'hasBasket', 'livestream', 'hasOrder', 'hasRecentOrder', 'orderAgeMin', 'prevBotAsks', 'phoneInText', 'addressInText', 'bagCount', 'staffRepliedAfterBot'].sort(), 'cùng row với predictIntent, kèm các trường của decisionContext');
   assert.deepEqual([seen[0].hasOrder, seen[0].hasRecentOrder, seen[0].orderAgeMin, seen[0].prevBotAsks, seen[0].phoneInText, seen[0].addressInText, seen[0].bagCount, seen[0].staffRepliedAfterBot], [false, false, null, '', false, false, 0, false]);
   assert.equal(flow.asked.length, 1, 'shadow vẫn hỏi LLM');
   assert.equal(flow.results[0].templateId, 'BAG_COMPARISON_XANH_VANG');
@@ -311,6 +311,29 @@ test('5a. cài đặt intentCascade mặc định shadow; shadow: nhật ký ghi
     extraDeps: { predictCascade: () => { throw new Error('không được gọi'); } }
   });
   assert.equal(off.records[0].cascade, null);
+});
+
+test('5a2. row mô hình lúc chạy = intentRowOf (như dữ liệu huấn luyện): ask:confirm sau ORDER_CONFIRMATION, bước đơn sau ASK_FLAVOR, đọc câu bot trước', async () => {
+  const rowAfter = async (conversation, text, recent = []) => {
+    const seen = [];
+    await captureLogs(() => run({ botLastReplyAt: now() - 60000, ...conversation }, text, {
+      reply: llmReply('THANK_YOU'), recent,
+      extraSettings: { intentModel: 'off', preGuard: 'off', ruleIntent: 'off' },
+      extraDeps: { predictCascade: row => { seen.push(row); return cascadeOf('SOCIAL', 'THANK_YOU'); }, cascadeGroupOf: groupOfFake }
+    }));
+    return seen[0];
+  };
+  const confirm = await rowAfter({ botLastTemplateId: 'ORDER_CONFIRMATION' }, 'hàng tới chưa shop');
+  assert.equal(confirm.prevBotAsks, 'confirm', 'engine cũ để rỗng — dữ liệu huấn luyện có ask:confirm');
+  assert.equal(confirm.lastWasOrderStep, true);
+  const flavor = await rowAfter({ botLastTemplateId: 'ASK_FLAVOR' }, 'cho mình hỏi thêm chút');
+  assert.equal(flavor.lastWasOrderStep, true, 'ASK_FLAVOR là bước đơn như isOrderStepContext');
+  assert.equal(flavor.prevBotAsks, 'flavor');
+  const read = await rowAfter({ botLastTemplateId: 'GENERAL_INFO' }, 'cho mình hỏi thêm chút', [outgoing('Dạ chị muốn lấy vị nào ạ?', 60000)]);
+  assert.equal(read.prevBotAsks, 'flavor', 'mẫu không nói rõ → đọc câu bot trước');
+  const address = await rowAfter({ botLastTemplateId: 'ORDER_ADDRESS' }, 'Số 12 ngõ 5 phường Láng Hạ quận Đống Đa', [outgoing('Dạ chị cho em xin số điện thoại và địa chỉ nhé', 60000)]);
+  assert.equal(address.prevBotAsks, 'phone_address', 'không giỏ: họ ORDER_ADDRESS xin cả hai như engine.prevBotAsks');
+  assert.equal(address.addressInText, true);
 });
 
 test('5b. on + chắc + nhóm INFO/PRICE + mẫu an toàn → trả mẫu tầng, KHÔNG gọi LLM; log không có "(thử)"; PRICE_QUOTE lấy sản phẩm ngữ cảnh', async () => {

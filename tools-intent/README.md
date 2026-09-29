@@ -18,7 +18,7 @@ vào git. Không công cụ nào gửi tin cho khách. Đối số sai (cờ thi
 `app/processing/intent-features.mjs` → `intentRowOf({ text, lastTemplateId, prevBotText, pendingOrder, orders, now,
 source, phoneInText?, hasBasket?, hasOrder?, orderAgeMin?, prevBotAsks?, livestream? })` dựng row mô hình dùng ở
 dựng dữ liệu (`dataset-context`, `build-dataset`), đo (`golden-set.enrichGoldenContext`, `replay-golden`), huấn luyện
-(`train-intent` / `train-cascade` qua `intentRowFromRecord`) và (khi engine nối) lúc chạy:
+(`train-intent` / `train-cascade` qua `intentRowFromRecord`) và lúc chạy (engine dựng row mô hình phẳng + tầng bằng `intentRowOf`, cùng câu bot trước và giỏ — trước vòng 13 engine tự dựng row nên thiếu `ask:confirm`, bước đơn sau ASK_FLAVOR…):
 
 | Trường | Định nghĩa |
 |---|---|
@@ -111,6 +111,13 @@ Ghi `meta.trainIds` (băm FNV-1a id các dòng dataset) và, với `--golden`, `
 matchedRows, matchedIds, excluded, byKind } + `meta.sawGolden` (true = dataset chứa mục golden → cảnh báo; không có
 `--golden` → null = không rõ). `--quiet`: chỉ một dòng "saved …".
 
+**Nhãn quyết định** (`decisionLabelOf`, vòng 13): ORDER_ADDRESS_PARTIAL/CLARIFY/CHOOSE, ORDER_CART_LINE, UPSELL_TWO_BAGS,
+ORDER_ADDRESS_REMIND là mẫu con do `renderChatbotReply({ template_id: 'ORDER_ADDRESS' })` tự chọn theo giỏ/SĐT/địa chỉ,
+nên `train-intent`/`train-cascade` học chúng là ORDER_ADDRESS và `replay-golden` chấm nhãn chấm, dự đoán, luật theo cùng
+quy ước (như dấu ✓/✗ chạy ẩn). Số đo trước vòng 13 (chấm nhãn con) thấp hơn vài điểm — so hai mô hình phải cùng một bản
+replay-golden. Siêu tham số huấn luyện (`epochs`, `rate`, `l2`, `smoothing`, `minDf`) nhận qua `trainClassifier(rows,
+options)` để dò; CLI dùng mặc định (dò 29/09 trên 1.400 dòng: mọi biến thể trong ±2 điểm — không phải đòn bẩy).
+
 `train-cascade`: như trên cho mô hình tầng (tầng 1 ORDER/SUPPORT/ANSWER/OTHER + mô hình con), đo giữ-out tầng vs phẳng
 cùng dữ liệu; `model.meta` có trainIds / goldenExcluded / sawGolden. `--golden` được kiểm TRƯỚC khi huấn luyện; bảng bộ
 chấm so với bản PHẲNG "m" huấn luyện CÙNG dataset, cùng công thức (hay `--flat <m.json>` có sẵn; `--flat-out` ghi bản m).
@@ -146,7 +153,7 @@ Bảng theo ngày: lượt, lượt LLM, bỏ qua theo lý do, luật ổn đị
 p ≥ 0,7/0,8/0,9 **chỉ trên lượt LLM**, gác trước ✓/✗, người gác agree/ngoài theo mẫu, token trung bình và median
 (vào/cache/ra/suy nghĩ), % lượt có suy nghĩ, ước chi phí (USD; phần vào không cache × giá vào + cache × giá cache +
 (ra + suy nghĩ) × giá ra), mô hình tầng (nhóm ✓/✗, mẫu ✓/✗ theo ngưỡng; tầng đoán OTHER — không mẫu — vẫn đếm cột
-nhóm). Dấu ✓/✗ theo quy ước engine (`intentMatchMark`: ORDER_ADDRESS_REMIND ≡ ORDER_ADDRESS); REPLY_ALREADY_SENT*
+nhóm). Dấu ✓/✗ theo quy ước engine (`intentMatchMark`: nhãn quyết định `decisionLabelOf`, mẫu con ORDER_ADDRESS ≡ ORDER_ADDRESS); REPLY_ALREADY_SENT*
 là "~" (trung tính) và **loại khỏi n** cho cả mô hình nhỏ lẫn tầng. Giá không phải số, `--journal` không có,
 `--since` sai định dạng → lỗi.
 

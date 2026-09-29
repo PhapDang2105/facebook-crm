@@ -12,16 +12,16 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { decisionLabelOf } from '../app/processing/intent-features.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const THRESHOLDS = [0.7, 0.8, 0.9];
 export const DEFAULT_PRICES = { input: 0.5, cache: 0.05, output: 3.0 };
 
-/** Dấu so mô hình nhỏ với mẫu đã chọn — cùng quy ước engine.intentMatchMark (REMIND ≡ ADDRESS, "đã gửi ở trên" trung tính ~). */
+/** Dấu so mô hình nhỏ với mẫu đã chọn — cùng quy ước engine.intentMatchMark (mẫu con ORDER_ADDRESS ≡ ADDRESS theo decisionLabelOf, "đã gửi ở trên" trung tính ~). */
 export function intentMatchMark(predicted, chosen) {
-  const same = id => (id === 'ORDER_ADDRESS_REMIND' ? 'ORDER_ADDRESS' : id);
   if (['REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO'].includes(chosen)) return '~';
-  return same(predicted) === same(chosen) ? '✓' : '✗';
+  return decisionLabelOf(predicted) === decisionLabelOf(chosen) ? '✓' : '✗';
 }
 
 /**

@@ -24,7 +24,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { featuresOf, intentRowFromRecord } from '../app/processing/intent-features.mjs';
+import { decisionLabelOf, featuresOf, intentRowFromRecord } from '../app/processing/intent-features.mjs';
 import { cliFail, parseCliArgs, readJsonl } from './dataset-context.mjs';
 import { goldenIndex, goldenMatch } from './merge-labels.mjs';
 
@@ -118,10 +118,17 @@ export function trainClassifier(inputRows, options = {}) {
   const dropOther = options.dropOther ?? true;
 
   const includeComments = options.includeComments ?? false;
+  // Siêu tham số (mặc định = hằng số ở đầu tệp): công cụ dò tham số truyền vào, CLI giữ nguyên.
+  const epochs = options.epochs ?? EPOCHS;
+  const baseRate = options.rate ?? RATE;
+  const l2 = options.l2 ?? L2;
+  const smoothing = options.smoothing ?? SMOOTHING;
+  const minDf = options.minDf ?? 2;
   // ---- 0. Bỏ bình luận, OTHER và lớp quá nhỏ, gán trọng số mẫu; ngữ cảnh dựng lại như lúc chạy (intentRowOf).
   const valid = inputRows.filter(row => row && row.text && row.label);
   const commentRows = includeComments ? [] : valid.filter(isCommentRow);
-  const loaded = (includeComments ? valid : valid.filter(row => !isCommentRow(row))).map(intentRowFromRecord).sort((a, b) => (a.at || 0) - (b.at || 0));
+  // Nhãn quyết định (decisionLabelOf): mẫu con ORDER_ADDRESS do bộ soạn chọn → một lớp ORDER_ADDRESS.
+  const loaded = (includeComments ? valid : valid.filter(row => !isCommentRow(row))).map(row => ({ ...intentRowFromRecord(row), label: decisionLabelOf(row.label) })).sort((a, b) => (a.at || 0) - (b.at || 0));
   const otherRows = dropOther ? loaded.filter(row => row.label === 'OTHER') : [];
   const kept = dropOther ? loaded.filter(row => row.label !== 'OTHER') : loaded;
   const labelCounts = kept.reduce((acc, row) => { acc[row.label] = (acc[row.label] || 0) + 1; return acc; }, {});
@@ -142,7 +149,7 @@ export function trainClassifier(inputRows, options = {}) {
     const featureSets = rows.map(row => featuresOf(row));
     const df = new Map();
     for (const set of featureSets) for (const feature of set) df.set(feature, (df.get(feature) || 0) + 1);
-    const vocab = [...df.entries()].filter(([, count]) => count >= 2).map(([feature]) => feature);
+    const vocab = [...df.entries()].filter(([, count]) => count >= minDf).map(([feature]) => feature);
     const index = new Map(vocab.map((feature, i) => [feature, i]));
     const idf = vocab.map(feature => Math.log((rows.length + 1) / (df.get(feature) + 1)) + 1);
     const D = vocab.length;
@@ -159,19 +166,19 @@ export function trainClassifier(inputRows, options = {}) {
     const B = new Float64Array(K);
     const scoresOf = vector => { const out = new Float64Array(K); for (let k = 0; k < K; k += 1) { let sum = B[k]; const base = k * D; for (const [i, value] of vector) sum += W[base + i] * value; out[k] = sum; } return Array.from(out); };
     seed = 42;
-    for (let epoch = 0; epoch < EPOCHS; epoch += 1) {
+    for (let epoch = 0; epoch < epochs; epoch += 1) {
       const order = vectors.map((_, i) => i).sort(() => random() - 0.5);
-      const rate = RATE / (1 + epoch * 0.15);
+      const rate = baseRate / (1 + epoch * 0.15);
       for (const i of order) {
         const probabilities = softmax(scoresOf(vectors[i]));
         for (let k = 0; k < K; k += 1) {
           // Label smoothing: đích = (1−ε)·one-hot + ε/K → xác suất bớt cực đoan, hiệu chuẩn tốt hơn.
-          const target = (k === targets[i] ? 1 - SMOOTHING : 0) + SMOOTHING / K;
+          const target = (k === targets[i] ? 1 - smoothing : 0) + smoothing / K;
           // Trọng số mẫu nhân vào gradient (SGD có trọng số) — không cần lặp dòng.
           const gradient = (probabilities[k] - target) * weights[i];
           if (Math.abs(gradient) < 1e-6) continue;
           const base = k * D;
-          for (const [i2, value] of vectors[i]) W[base + i2] -= rate * (gradient * value + L2 * W[base + i2]);
+          for (const [i2, value] of vectors[i]) W[base + i2] -= rate * (gradient * value + l2 * W[base + i2]);
           B[k] -= rate * gradient;
         }
       }

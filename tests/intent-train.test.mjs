@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { syntheticDataset, syntheticLabels } from './helpers/intent-synthetic.mjs';
 import { loadIntentModelFrom, predictIntentWith } from '../app/processing/intent-model.mjs';
+import { decisionLabelOf } from '../app/processing/intent-features.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const directory = mkdtempSync(path.join(tmpdir(), 'intent-train-'));
@@ -29,7 +30,8 @@ test('train-intent: dataset v2 tổng hợp → bỏ OTHER + lớp < 4 mẫu, tr
   assert.match(out, /dòng nhân viên được miễn/);
   const saved = JSON.parse(readFileSync(modelPath, 'utf8'));
   assert.equal(saved.version, 3);
-  assert.deepEqual(saved.labels, [...syntheticLabels].sort(), 'OTHER và VAT_INVOICE không nằm trong nhãn');
+  assert.deepEqual(saved.labels, [...new Set(syntheticLabels.map(decisionLabelOf))].sort(), 'OTHER và VAT_INVOICE không nằm trong nhãn; ORDER_ADDRESS_PARTIAL (mẫu con) học như ORDER_ADDRESS');
+  assert.ok(!saved.labels.includes('ORDER_ADDRESS_PARTIAL'));
   assert.ok(saved.meta && saved.meta.trainedAt && saved.meta.rows === 140);
   assert.equal(saved.meta.calibration.method, 'temperature');
   assert.ok(saved.meta.calibration.temperature >= 0.5 && saved.meta.calibration.temperature <= 3);
@@ -44,7 +46,7 @@ test('train-intent: dataset v2 tổng hợp → bỏ OTHER + lớp < 4 mẫu, tr
   const address = predictIntentWith(model, { text: '<sdt> 3 lê lợi phường 7 quận 5', source: 'inbox', lastTemplate: 'ORDER_ADDRESS', lastWasOrderStep: true, hasBasket: true, prevBotAsks: 'phone_address', phoneInText: true, addressInText: true, bagCount: 0 });
   assert.equal(address.templateId, 'ORDER_ADDRESS');
   const phone = predictIntentWith(model, { text: 'sđt <sdt>', source: 'inbox', lastTemplate: 'ORDER_ADDRESS', lastWasOrderStep: true, hasBasket: true, prevBotAsks: 'phone_address', phoneInText: true, addressInText: false, bagCount: 0 });
-  assert.equal(phone.templateId, 'ORDER_ADDRESS_PARTIAL');
+  assert.equal(phone.templateId, 'ORDER_ADDRESS', 'chỉ SĐT: mô hình quyết ORDER_ADDRESS, bộ soạn chọn mẫu con PARTIAL');
   assert.equal(predictIntentWith(model, { text: 'giá bao nhiêu vậy', source: 'inbox', lastTemplate: '' }).templateId, 'PRICE_QUOTE', 'thiếu ctx v2 vẫn đoán');
   assert.equal(address.topK.length, 3);
 });
@@ -68,7 +70,7 @@ test('replay-golden: --model/--compare in hai cột, tập rule-miss, --gate pre
   const result = run('replay-golden.mjs', [goldenPath, '--model', modelPath, '--compare', path.join(root, 'app', 'processing', 'intent-model.json'), '--gate']);
   assert.equal(result.status, 0, result.stderr);
   const out = result.stdout;
-  assert.match(out, /mô hình 1: .*model-v6\.json · 7 nhãn/);
+  assert.match(out, /mô hình 1: .*model-v6\.json · 6 nhãn/, 'ORDER_ADDRESS_PARTIAL gộp vào ORDER_ADDRESS (nhãn quyết định)');
   assert.match(out, /mô hình 2: .*intent-model\.json/);
   assert.match(out, /5 tin hộp thư đã chấm · 1 tin bỏ qua/);
   assert.match(out, /Dựng ngữ cảnh v2 cho 5 tin thiếu trường \(kho /);

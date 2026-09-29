@@ -50,8 +50,8 @@ test('groupOf 4 nhóm tầng 1 (ANSWER = PRICE ∪ INFO ∪ SOCIAL), subGroupOf 
   assert.equal(fineGroupOf('ORDER_ADDRESS'), 'ORDER');
   assert.equal(fineGroupOf('WEIGHT_EXPIRY'), 'INFO');
   assert.equal(fineGroupOf('XYZ'), 'OTHER');
-  assert.equal(Object.keys(GROUP_OF_TEMPLATE).length, 82);
-  assert.equal(Object.keys(SUBGROUP_OF_TEMPLATE).length, 82);
+  assert.equal(Object.keys(GROUP_OF_TEMPLATE).length, 84);
+  assert.equal(Object.keys(SUBGROUP_OF_TEMPLATE).length, 84);
   assert.ok(Object.values(GROUP_OF_TEMPLATE).every(group => ['ORDER', 'SUPPORT', 'ANSWER'].includes(group)));
   assert.ok(Object.isFrozen(GROUP_OF_TEMPLATE) && Object.isFrozen(SUBGROUP_OF_TEMPLATE));
   assert.ok(cascadeSafeTemplates.has('PRICE_QUOTE') && cascadeSafeTemplates.has('THANK_YOU') && cascadeSafeTemplates.has('WEIGHT_EXPIRY'));

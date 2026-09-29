@@ -2146,7 +2146,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       templateId: reply.templateId,
       keywords: settings.complaintKeywords,
       // Khách đổi/hủy đơn, đến từ phiên live, số hay bom hàng: thẻ tương ứng.
-      updated: Boolean(outcome?.updated),
+      // Xin đổi đơn mà bot không tự sửa được (reply.orderChange): vẫn gắn thẻ Đổi sản phẩm cho nhân viên.
+      updated: Boolean(outcome?.updated) || Boolean(reply.orderChange),
       cancelled: Boolean(outcome?.cancelled),
       livestream: isLivestreamPost(conversation),
       phoneWarningLevel: outcome?.order?.phoneWarning?.level || ''

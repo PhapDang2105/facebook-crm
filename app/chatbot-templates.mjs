@@ -230,6 +230,20 @@ const recentOrderWindowMs = 2 * 60 * 60 * 1000;
 export const orderUpdateWindowMs = 60 * 60 * 1000;
 // Khách tự hủy qua bot được trong khoảng này (chưa giao); lâu hơn thì nhân viên lo.
 export const orderCancelWindowMs = 24 * 60 * 60 * 1000;
+// Khách xin đổi đơn đã quá hạn bot tự sửa (orderUpdateWindowMs) nhưng đơn còn mới trong khoảng
+// này: bot ghi yêu cầu vào đơn và báo nhân viên, không coi là đơn mới (hỏi lại SĐT/địa chỉ).
+const orderChangeStaffWindowMs = 3 * 24 * 60 * 60 * 1000;
+
+// Lời xin đổi quà tặng (đã bỏ dấu): "đổi quà khác", "thay quà", "không lấy bát", "gáo dừa có rồi".
+// "đổi qua túi vàng" (bỏ dấu trùng "đổi quà") là đổi sản phẩm: chữ ngay sau "qua" phải không phải loại túi.
+const giftSwapPattern = /\b(qua (gi|j|nao|khac) (de )?thay|thay cho (bo |cai )?(bat|chen|gao dua|muong)|(doi|thay|chon|lay) (phan )?qua(?! (tui|goi|hop|bich|xanh|vang|nau|loai|vi|cacao|\d))|qua (tang )?khac|tang (c|chi|e|em|a|anh|minh)? ?(cai|mon|thu)? ?khac|(khong|ko|k|hong|kg) (lay|can|muon|thich) (bo |cai )?(bat|chen|gao dua|muong|qua)|(bat|chen|gao dua|muong dua)( [a-z]+){0,4} (co roi|du roi|nhieu roi|dung roi))\b/;
+export function isGiftSwapRequest(text) {
+  return giftSwapPattern.test(normalizeText(String(text || '')));
+}
+
+// Khách nói rõ muốn đổi đơn đã đặt (đã bỏ dấu): "đổi lại 1 xanh 1 vàng", "đặt nhầm, sửa đơn",
+// "chuyển sang túi nâu", "thay bằng 2 túi vàng".
+const orderChangePattern = /\b(doi (lai|sang|thanh|vi|loai|mau|tui|goi|san pham|sp|cho)|doi qua (tui|goi|hop|bich|xanh|vang|nau|loai|vi|cacao|\d)|doi \d|thay (bang|thanh|vao)|chuyen (sang|qua|thanh)|sua (lai )?(don|gio)|sua giup|dat nham|chon nham|bam nham|dat lon|nham (vi|loai|mau|tui|goi))\b/;
 function dropRecentlyOrdered(items, recentOrder, now) {
   const at = Number(recentOrder?.createdAt) || 0;
   // Đơn đã hủy không "giữ" món nào: khách hủy 1 Xanh rồi đặt "1 xanh 1 vàng" phải ra đủ hai túi.
@@ -359,6 +373,27 @@ function renderOrder(value, templates, context = {}) {
   const implicitUpdate = !separateOrder && recentOpen && recentOrder.automatic !== false && namedItems.length > 0
     && ['ORDER_CONFIRMATION', 'ORDER_ADDRESS'].includes(templateId);
   const updating = (templateId === 'ORDER_UPDATE' && recentOpen) || implicitUpdate;
+  // Khách nói rõ muốn đổi đơn đã đặt mà bot không tự sửa được (quá 60 phút — kho có thể đã đóng
+  // gói; đơn nhân viên/POS lên; đơn đang giao): trước đây rơi xuống nhánh đơn MỚI, bot hỏi lại
+  // SĐT/địa chỉ và mời thêm túi. Nay: ghi giỏ khách muốn vào ghi chú đơn, gắn thẻ Đổi sản phẩm +
+  // Cần người xử lý để nhân viên sửa. Đang giữ giỏ mới hơn đơn (khách đang đặt đơn khác) thì thôi.
+  const heldNewer = Number(context.pendingOrder?.at) > (Number(recentOrder?.createdAt) || 0) && (context.pendingOrder?.items || []).length > 0;
+  if (!updating && !separateOrder && !mergeRequest && namedItems.length && recentOrder?.id && templates.ORDER_CHANGE_STAFF
+    && orderChangePattern.test(messageWords) && !isGiftSwapRequest(context.messageText) && !heldNewer
+    && String(recentOrder.processingStatus || '') !== 'cancelled' && recentOrder.status !== 'Hủy'
+    && !/đã giao|giao thành công|hoàn thành/i.test(String(recentOrder.status || ''))
+    && now - (Number(recentOrder.createdAt) || 0) < orderChangeStaffWindowMs) {
+    const cart = namedItems.map(item => `${item.quantity} ${matchProduct(item.product)?.name || item.product}`).join(" + ");
+    return {
+      templateId: 'ORDER_CHANGE_STAFF',
+      ...splitMessages(fill(templates.ORDER_CHANGE_STAFF, { ...commonValues(), cart })),
+      handoff: false,
+      attention: true,
+      orderChange: true,
+      pendingOrder: null,
+      order: { noteOrderId: String(recentOrder.id), note: `Khách xin đổi đơn thành: ${cart}` }
+    };
+  }
   if (templateId === 'ORDER_UPDATE' && !updating && !namedItems.length && templates.ORDER_WRONG) {
     return { templateId: 'ORDER_WRONG', ...splitMessages(fill(templates.ORDER_WRONG, commonValues())), handoff: false };
   }
@@ -890,7 +925,7 @@ export function isProductQuoteId(templateId) {
 }
 
 // Templates the server picks on its own; the model never needs to name them.
-const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'ORDER_PHONE_ASK_FLAVOR', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'TRIAL_ACCEPT', 'TRIAL_REMIND', 'TRIAL_PRICE', 'TRIAL_FREESHIP_INFO', 'TRIAL_NEXT_STEP', 'TRIAL_DECLINED']);
+const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'ORDER_PHONE_ASK_FLAVOR', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'ORDER_CHANGE_STAFF', 'GIFT_SWAP', 'TRIAL_ACCEPT', 'TRIAL_REMIND', 'TRIAL_PRICE', 'TRIAL_FREESHIP_INFO', 'TRIAL_NEXT_STEP', 'TRIAL_DECLINED']);
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -988,6 +1023,23 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
   activeLivestream = context.livestream === true;
   activeRecentOrder = context.recentOrder || null;
   const templateId = String(value.template_id || '').trim();
+  // Khách xin đổi quà ("đổi quà khác được không", "bát gáo dừa có rồi"): mô hình hay chọn
+  // GIFT_POLICY và bot kể lại bảng quà, không trả lời. Nay: nhận yêu cầu, gắn thẻ cho nhân
+  // viên chọn quà thay, ghi vào đơn đang mở (29/09: nhân viên hứa đổi quà mà đơn không ghi,
+  // khách nhận thiếu quà). Giỏ đang giữ thì giữ nguyên (không đặt pendingOrder).
+  if (templateId === 'GIFT_POLICY' && templates.GIFT_SWAP && isGiftSwapRequest(context.messageText)) {
+    const recent = context.recentOrder || null;
+    const now = Number(context.now) || Date.now();
+    const open = Boolean(recent?.id) && now - (Number(recent.createdAt) || 0) < orderCancelWindowMs && String(recent.processingStatus || '') !== 'cancelled' && recent.status !== 'Hủy';
+    const note = `Khách xin đổi quà: ${String(context.messageText || '').replace(/\s+/g, ' ').trim().slice(0, 150)}`;
+    return {
+      templateId: 'GIFT_SWAP',
+      ...splitMessages(fill(templates.GIFT_SWAP, commonValues())),
+      handoff: false,
+      attention: true,
+      ...(open ? { order: { noteOrderId: String(recent.id), note } } : {})
+    };
+  }
   // Khách dặn thêm cho đơn vừa đặt (hàng mới, giờ giao, gọi trước): ghi chú vào
   // đúng đơn đó, trả lời ngắn. Không có đơn đang mở thì kể trạng thái như thường.
   if (templateId === 'ORDER_NOTE') {

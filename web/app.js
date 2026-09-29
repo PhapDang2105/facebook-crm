@@ -166,7 +166,6 @@ const chatbotSettingsAddressAiSearch = document.querySelector('#chatbot-settings
 const chatbotFollowUpsEnabled = document.querySelector('#chatbot-settings-follow-ups-enabled');
 const chatbotFollowUpList = document.querySelector('#chatbot-follow-up-list');
 const chatbotFollowUpAdd = document.querySelector('#chatbot-follow-up-add');
-const chatbotFollowUpStatus = document.querySelector('#chatbot-follow-up-status');
 let chatbotFollowUpScenarios = [];
 const followUpTriggerLabels = { 'comment-no-reply': 'Khách bình luận, Page đã trả lời, khách im lặng', 'inbox-no-reply': 'Khách nhắn hộp thư, Page đã trả lời, khách im lặng' };
 
@@ -221,20 +220,14 @@ chatbotFollowUpAdd?.addEventListener('click', () => {
   chatbotFollowUpList?.querySelector('.follow-up-row:last-child input[type="text"]')?.focus();
 });
 
+// Dòng thống kê bám đuổi (bật từ, lần xét cuối, đã gửi, chốt được, gần nhất) không hiện nữa
+// theo ý chủ shop (29/09) — kết quả xem qua thẻ "Bám đuổi thành công". Chỉ còn nạp hàng chờ.
 async function renderChatbotFollowUpStatus() {
-  if (!chatbotFollowUpStatus) return;
   try {
     const status = await readApiResponse(await fetch('/api/chatbot/follow-ups'));
-    const parts = [];
-    if (status.activatedAt) parts.push(`Bật từ <b>${escapeHtml(formatCustomerPanelTime(status.activatedAt))}</b>`);
-    if (status.lastRunAt) parts.push(`lần xét cuối <b>${escapeHtml(formatCustomerPanelTime(status.lastRunAt))}</b> (xét ${status.lastRun?.checked || 0}, gửi ${status.lastRun?.sent || 0})`);
-    parts.push(`đã gửi tổng <b>${status.sentTotal || 0}</b> tin`);
-    parts.push(`chốt được <b>${status.wonTotal || 0}</b> đơn${status.wonAmount ? ` (${escapeHtml(new Intl.NumberFormat('vi-VN').format(status.wonAmount))}đ)` : ''} — lọc thẻ "Bám đuổi thành công"`);
-    const recent = (status.recent || []).filter(item => !item.error).slice(0, 3).map(item => `${escapeHtml(item.name || item.conversationId)} (${escapeHtml(formatCustomerPanelTime(item.at))})`);
-    chatbotFollowUpStatus.innerHTML = `${parts.join(' · ')}${recent.length ? `<br>Gần nhất: ${recent.join(', ')}` : ''}`;
     renderChatbotFollowUpQueue(status.queue || []);
   } catch {
-    chatbotFollowUpStatus.textContent = '';
+    // Không tải được: giữ hàng chờ đang hiện.
   }
 }
 
@@ -242,7 +235,6 @@ async function renderChatbotFollowUpStatus() {
 // (extension Pancake gửi được ngoài 24 giờ), dán lời, gửi rồi bấm "Đã gửi".
 const chatbotFollowUpQueue = document.querySelector('#chatbot-follow-up-queue');
 let chatbotFollowUpQueueItems = [];
-const followUpQueueShown = 15;
 let followUpBatchMessage = '';
 let followUpBatchSize = 30;
 
@@ -352,17 +344,9 @@ function renderChatbotFollowUpQueue(queue) {
       <small id="follow-up-batch-note">${escapeHtml(followUpBatchMessage || '')}${leased ? ` ${leased} khách đang nằm trong lô chưa báo kết quả.` : ''}</small>
     </details>
   </div>`;
-  chatbotFollowUpQueue.innerHTML = queue.length ? `<div class="follow-up-queue-head">Chờ gửi qua Pancake: ${queue.length} khách đã quá 24 giờ<small>Gửi hàng loạt bằng trạm gửi bên dưới, hay từng khách: bấm "Mở Pancake" (lời đã được sao chép sẵn), dán vào ô chat và gửi — CRM tự nhận ra tin đã gửi.</small></div>${relay}${queue.slice(0, followUpQueueShown).map((item, index) => `<div class="follow-up-queue-item">
-    <b>${escapeHtml(item.name || item.conversationId)}</b>
-    <p>${escapeHtml(item.text || '')}</p>
-    <div class="follow-up-queue-actions">
-      <a href="${escapeHtml(item.pancakeUrl)}" target="_blank" rel="noopener" data-follow-up-open="${index}">Mở Pancake</a>
-      <button type="button" data-follow-up-copy="${index}">Sao chép lời</button>
-      <button type="button" class="is-primary" data-follow-up-done="${index}">Đã gửi</button>
-      <button type="button" data-follow-up-skip="${index}">Bỏ qua</button>
-    </div>
-    ${item.lastError ? `<small class="follow-up-queue-error">Lần gửi trước lỗi: ${escapeHtml(item.lastError)}</small>` : ''}
-  </div>`).join('')}${queue.length > followUpQueueShown ? `<small>… và ${queue.length - followUpQueueShown} khách nữa.</small>` : ''}` : '';
+  // Chủ shop (29/09): nhân viên chỉ cần bấm "Gửi ngay" — không liệt kê từng khách (lời gửi, nút
+  // Mở Pancake / Sao chép / Đã gửi / Bỏ qua, lỗi lần trước). API hàng chờ vẫn giữ nguyên.
+  chatbotFollowUpQueue.innerHTML = queue.length ? `<div class="follow-up-queue-head">Chờ gửi qua Pancake: ${queue.length} khách đã quá 24 giờ</div>${relay}` : '';
 }
 
 // Gửi ngay trong CRM: extension "Giọt Nắng CRM – Cầu nối Pancake"

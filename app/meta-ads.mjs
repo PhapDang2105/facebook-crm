@@ -8,9 +8,8 @@
 // (120 ngày gần nhất) để màn Chiến dịch mở ra không phải chờ Meta; vòng nền
 // đồng bộ lại mỗi 60 phút (Meta còn chỉnh số của vài ngày gần đây).
 import { createHmac } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { metaAdsConfig, metaConfig } from './config.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { shortenMetaError } from './meta-graph.mjs';
 
 export const MESSAGING_ACTION = 'onsite_conversion.messaging_conversation_started_7d';
@@ -40,7 +39,6 @@ function emptyStore() {
 }
 
 function normalizeAdStore(value) {
-  if (!value || typeof value !== 'object') return emptyStore();
   const plainObject = item => (item && typeof item === 'object' && !Array.isArray(item) ? item : {});
   return {
     syncedAt: Number(value.syncedAt) || null,
@@ -52,33 +50,26 @@ function normalizeAdStore(value) {
   };
 }
 
+/**
+ * Chưa có tệp → kho rỗng; tệp hỏng → cất `.corrupt-*` rồi kho rỗng; lỗi đọc khác (EBUSY,
+ * EACCES…) → ném. Trước đây mọi lỗi = kho rỗng, và lượt đồng bộ kế tiếp ghi đè kho chỉ còn
+ * 7 ngày mới kéo (mất ~113 ngày chi tiêu).
+ */
 export async function readAdStore(filePath = metaAdsConfig.insightsPath) {
-  try {
-    return normalizeAdStore(JSON.parse(await readFile(filePath, 'utf8')));
-  } catch {
-    return emptyStore();
-  }
+  return readJsonFile(filePath, { fallback: emptyStore, normalize: normalizeAdStore, label: 'Kho số liệu quảng cáo' });
 }
 
-async function persistAdStore(store, filePath) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store), 'utf8');
-  await rename(temporaryPath, filePath);
-}
-
-let writeQueue = Promise.resolve();
+const enqueueWrite = createWriteQueue();
 
 /** Ghi tuần tự: đồng bộ tay và vòng nền trùng lúc không đè mất nhau. */
 function updateAdStore(mutate, filePath = metaAdsConfig.insightsPath) {
-  const operation = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const store = await readAdStore(filePath);
     const result = await mutate(store);
-    await persistAdStore(store, filePath);
+    // Kho lớn (120 ngày × quảng cáo): ghi gọn, không thụt lề, như trước.
+    await writeJsonAtomic(filePath, store, { space: 0 });
     return result;
   });
-  writeQueue = operation.then(() => undefined, () => undefined);
-  return operation;
 }
 
 // ===== Gọi Graph API =====
@@ -109,14 +100,21 @@ export function adsGraphError(payload, status, accountId = '') {
   return wrapped;
 }
 
+// Graph treo thì lượt đồng bộ treo theo (cờ `running` giữ mãi, vòng nền chết lặng): mỗi lần gọi
+// (kể cả đọc thân phản hồi) tối đa 30 giây.
+export const GRAPH_TIMEOUT_MS = 30_000;
+
 async function fetchJson(url, fetchImpl, accountId) {
   let response;
+  const signal = AbortSignal.timeout(GRAPH_TIMEOUT_MS);
   try {
-    response = await fetchImpl(url, { method: 'GET' });
+    response = await fetchImpl(url, { method: 'GET', signal });
   } catch (error) {
-    throw new Error(`Không kết nối được tới Facebook (graph.facebook.com): ${error?.cause?.code || error?.message || error}.`);
+    const reason = error?.name === 'TimeoutError' || signal.aborted ? `quá ${GRAPH_TIMEOUT_MS / 1000} giây không trả lời` : (error?.cause?.code || error?.message || error);
+    throw new Error(`Không kết nối được tới Facebook (graph.facebook.com): ${reason}.`);
   }
   const payload = await response.json().catch(() => ({}));
+  if (signal.aborted) throw new Error(`Không kết nối được tới Facebook (graph.facebook.com): quá ${GRAPH_TIMEOUT_MS / 1000} giây không trả lời.`);
   if (!response.ok || payload?.error) throw adsGraphError(payload, response.status, accountId);
   return payload;
 }
@@ -292,8 +290,20 @@ export async function adsConnectionStatus({ config = metaAdsConfig, store = null
 let timer = null;
 
 /**
+ * Số ngày vòng nền kéo lại: kho trống → 90 ngày; còn lại → từ lần đồng bộ thành công cuối
+ * + 3 ngày (Meta còn chỉnh số vài ngày gần đây), kẹp trong 7–120. Trước đây luôn 7 ngày nên
+ * máy chủ ngưng/token hỏng quá 7 ngày thì khoảng giữa không bao giờ được kéo lại → thiếu
+ * chi tiêu, ROAS đẹp hơn thật.
+ */
+export function catchUpDays(syncedAt, now = Date.now()) {
+  if (!Number(syncedAt)) return 90;
+  const gap = Math.ceil(Math.max(0, now - Number(syncedAt)) / DAY_MS) + 3;
+  return Math.min(AD_INSIGHTS_KEEP_DAYS, Math.max(7, gap));
+}
+
+/**
  * Đồng bộ nền mỗi 60 phút (lượt đầu sau khởi động: 90 ngày nếu kho còn trống,
- * không thì 7 ngày). Tắt khi chưa cấu hình hoặc đặt META_ADS_SYNC_DISABLED.
+ * không thì từ lần đồng bộ cuối, xem catchUpDays). Tắt khi chưa cấu hình hoặc đặt META_ADS_SYNC_DISABLED.
  */
 export function startAdInsightsSync({ log = console.log, config = metaAdsConfig } = {}) {
   if (!isAdsConfigured(config) || config.syncDisabled) return null;
@@ -303,7 +313,7 @@ export function startAdInsightsSync({ log = console.log, config = metaAdsConfig 
     running = true;
     try {
       const store = await readAdStore(config.insightsPath);
-      const summary = await syncAdInsights({ days: store.syncedAt ? 7 : 90, config });
+      const summary = await syncAdInsights({ days: catchUpDays(store.syncedAt), config });
       if (!store.syncedAt) log(`Đồng bộ quảng cáo: ${summary.rows} dòng số liệu, ${summary.campaigns} chiến dịch (${summary.since} → ${summary.until}).`);
     } catch (error) {
       log(`Đồng bộ quảng cáo lỗi: ${error.message}`);

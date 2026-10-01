@@ -4,6 +4,7 @@
 // so it can never drift from what the inbox shows.
 import { genderRank, readMessagingStore } from './messaging-store.mjs';
 import { readChannelStore } from './channel-store.mjs';
+import { pancakeConfig } from './config.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
 import { applyCustomerEdits, readCustomerEdits } from './customer-edits.mjs';
 import { collectOrderFacts, isCancelledOrder, isIncompleteOrder, isValidFact } from './order-facts.mjs';
@@ -308,7 +309,11 @@ async function buildBuyerList() {
   // Màn Khách hàng là kho dữ liệu người ĐÃ MUA: người mới hỏi giá vẫn nằm trong
   // Tin nhắn, đưa vào đây chỉ làm loãng danh sách remarketing. Khách của đơn đã
   // xuất kho (tệp khách hàng) luôn có mặt, kể cả chưa từng nhắn tin.
-  const buyers = buildCustomers(store, channels.items || [], exported).filter(customer => customer.orderCount > 0);
+  // Page vận hành qua Pancake không có trong kho kênh Meta: thêm tên từ cấu hình Pancake để cột "Trang" hiện
+  // tên Page thay vì mã số (kênh Meta cùng mã đứng sau nên thắng).
+  const pancakePages = (pancakeConfig.pages?.length ? pancakeConfig.pages : (pancakeConfig.pageId ? [pancakeConfig] : []))
+    .map(page => ({ id: String(page.pageId), name: page.pageName || '' }));
+  const buyers = buildCustomers(store, [...pancakePages, ...(channels.items || [])], exported).filter(customer => customer.orderCount > 0);
   // Phủ trước khi lọc: nhân viên sửa số điện thoại hay tên xong thì tìm kiếm và
   // bộ lọc phải thấy bản mới, không phải bản suy ra cũ.
   return applyCustomerEdits(buyers, edits);
@@ -365,11 +370,21 @@ export function customersToCsv(customers, labels = []) {
     customer.labels.map(label => labelNamesById.get(label) || labelNames[label]).filter(Boolean).join(', '),
     customer.adTitle
   ]);
-  const escape = value => {
-    const text = String(value ?? '');
-    return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-  };
-  return `\uFEFF${[headers, ...rows].map(row => row.map(escape).join(',')).join('\r\n')}\r\n`;
+  return `\uFEFF${[headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
+}
+
+/**
+ * \u00D4 CSV cho t\u1EC7p m\u1EDF b\u1EB1ng Excel (c\u00F9ng c\u00E1ch csvCell c\u1EE7a reports.mjs; ch\u00E9p l\u1EA1i \u0111\u1EC3 kh\u00F4ng k\u00E9o c\u1EA3
+ * reports.mjs \u2014 chi\u1EBFn d\u1ECBch, b\u00E1m \u0111u\u1ED5i\u2026 \u2014 v\u00E0o module n\u00E0y): t\u00EAn Facebook, \u0111\u1ECBa ch\u1EC9 kh\u00E1ch g\u00F5, t\u00EAn qu\u1EA3ng c\u00E1o do ng\u01B0\u1EDDi
+ * ngo\u00E0i ki\u1EC3m so\u00E1t \u2014 ch\u1EEF b\u1EAFt \u0111\u1EA7u b\u1EB1ng = + - @ (hay tab/CR) th\u00EAm ' \u0111\u1EC3 Excel kh\u00F4ng ch\u1EA1y c\u00F4ng
+ * th\u1EE9c (v\u00ED d\u1EE5 =HYPERLINK(...)). KH\u00D4NG d\u00F9ng cho audience.csv: Meta kh\u1EDBp `fn` theo ch\u1EEF g\u1ED1c.
+ */
+function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+  let text = String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
 /**

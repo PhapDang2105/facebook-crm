@@ -2,9 +2,10 @@
 // replies they pick from the composer. Both are plain lists staff edit on
 // screen — nothing here is hard-coded into the inbox, so renaming a label or
 // changing a reply never needs a deploy.
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { autoLabelEvents } from './processing/auto-label.mjs';
 
 const inboxSettingsPath = process.env.INBOX_SETTINGS_PATH
@@ -152,30 +153,27 @@ export async function normalizeInboxSettings(value = {}, storeImage) {
 
 let cached = null;
 
+/**
+ * Chưa có tệp → bộ mặc định. Tệp hỏng → cất `.corrupt-*` rồi bộ mặc định. Lỗi đọc khác
+ * (EBUSY, EACCES…) → ném và KHÔNG nhớ bộ mặc định: trước đây bộ mặc định được nhớ lại và lần
+ * lưu kế tiếp từ màn Cài đặt đè mất bộ thẻ/tin trả lời nhanh thật.
+ */
 export async function readInboxSettings() {
   if (cached) return cached;
-  try {
-    cached = await normalizeInboxSettings(JSON.parse(await readFile(inboxSettingsPath, 'utf8')));
-  } catch {
-    cached = await normalizeInboxSettings(defaultInboxSettings);
-  }
+  const stored = await readJsonFile(inboxSettingsPath, { fallback: () => defaultInboxSettings, label: 'Cài đặt tin nhắn (inbox-settings.json)' });
+  cached = await normalizeInboxSettings(stored);
   return cached;
 }
 
-let writeQueue = Promise.resolve();
+const enqueueWrite = createWriteQueue();
 export function writeInboxSettings(value, storeImage) {
-  // Ghi tuần tự, tệp tạm duy nhất: hai lần lưu gần nhau không đè cùng một .tmp.
-  const operation = writeQueue.then(async () => {
+  // Ghi tuần tự, tệp tạm riêng: hai lần lưu gần nhau không đè cùng một .tmp.
+  return enqueueWrite(async () => {
     const settings = await normalizeInboxSettings({ ...value, updatedAt: Date.now() }, storeImage);
-    await mkdir(path.dirname(inboxSettingsPath), { recursive: true });
-    const temporaryPath = `${inboxSettingsPath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(settings, null, 2), 'utf8');
-    await rename(temporaryPath, inboxSettingsPath);
+    await writeJsonAtomic(inboxSettingsPath, settings);
     cached = settings;
     return settings;
   });
-  writeQueue = operation.then(() => undefined, () => undefined);
-  return operation;
 }
 
 const labelIconsPath = path.join(projectRoot, 'web', 'assets', 'icons', 'labels');

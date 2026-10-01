@@ -17,10 +17,13 @@ const archiveDirectory = process.env.ORDER_ARCHIVE_PATH
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
-/** Tên file theo tháng đặt đơn: 2026-09.ndjson. */
+// Giờ Việt Nam (Asia/Ho_Chi_Minh, +7, không đổi giờ mùa hè): VM chạy UTC, đơn 01/10 03:00
+// giờ VN trước đây rơi vào tệp 2026-09.
+const vietnamOffsetMs = 7 * 60 * 60 * 1000;
+
+/** Tên file theo tháng đặt đơn (giờ Việt Nam): 2026-09.ndjson. */
 export function archiveMonth(at) {
-  const date = new Date(Number(at) || Date.now());
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  return new Date((Number(at) || Date.now()) + vietnamOffsetMs).toISOString().slice(0, 7);
 }
 
 /**

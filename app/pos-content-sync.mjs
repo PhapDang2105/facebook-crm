@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { findProductBySku } from './processing/catalog.mjs';
 import { toLocalPhone } from './processing/customer-info.mjs';
 import { resolvedAddressFields } from './processing/locations.mjs';
-import { recordOrderHistory } from './order-edits.mjs';
+import { recordOrderHistory, staffEditedGroups } from './order-edits.mjs';
 import { posComboBasket } from './pos-orders.mjs';
 import { posOrderToPayload } from './pos-sync.mjs';
 import { matchPosStatus } from './pos-status.mjs';
@@ -111,9 +111,12 @@ export function applyPosContent(order, posOrder, { now = Date.now() } = {}) {
   if ([6, 7].includes(Number(posOrder.status))) return result;
   const signature = posContentSignature(posOrder);
   const previous = order.posContent;
+  // Dấu kèm giá trị từng trường (`values`): lượt sau chỉ chép trường POS thật sự đổi, không chép
+  // lại cả nhóm — đơn landing không PUT sang POS, nhân viên sửa địa chỉ trong CRM rồi POS đổi phí
+  // ship thì trước đây địa chỉ bị đè về bản POS.
   const mark = () => {
-    if (previous?.info === signature.info && previous?.items === signature.items) return;
-    order.posContent = { info: signature.info, items: signature.items, at: now };
+    if (previous?.info === signature.info && previous?.items === signature.items && previous?.values) return;
+    order.posContent = { info: signature.info, items: signature.items, values: signature.values, at: now };
     result.marked = true;
   };
   let infoChanged;
@@ -133,12 +136,22 @@ export function applyPosContent(order, posOrder, { now = Date.now() } = {}) {
   }
   const changed = result.changed;
   const values = signature.values;
+  // Trường POS có đổi so với lần ghi dấu trước không. Dấu cũ (trước khi có `values`) thì không
+  // biết: coi là đổi, trừ khi nhân viên đã sửa nhóm đó trong CRM sau lần ghi dấu (sửa của CRM thắng).
+  const known = previous?.values && typeof previous.values === 'object' ? previous.values : null;
+  const editedGroups = staffEditedGroups(order);
+  const editedAfterMark = group => {
+    if (!previous) return false;
+    const at = Number(order.staffEdited?.[group]) || (order.staffEdited ? 0 : Number(order.editedByStaffAt) || 0);
+    return editedGroups.has(group) && at > (Number(previous.at) || 0);
+  };
+  const posChanged = (field, group) => (known ? known[field] !== values[field] : !editedAfterMark(group));
   if (infoChanged) {
-    if (values.name && values.name !== order.name) { order.name = values.name; changed.push('tên'); }
-    if (values.phone && values.phone !== (toLocalPhone(order.phone) || order.phone)) { order.phone = values.phone; changed.push('SĐT'); }
-    if (values.address && values.address !== order.address) { Object.assign(order, resolvedAddressFields(values.address)); changed.push('địa chỉ'); }
+    if (values.name && values.name !== order.name && posChanged('name', 'name')) { order.name = values.name; changed.push('tên'); }
+    if (values.phone && values.phone !== (toLocalPhone(order.phone) || order.phone) && (!previous || posChanged('phone', 'phone'))) { order.phone = values.phone; changed.push('SĐT'); }
+    if (values.address && values.address !== order.address && posChanged('address', 'address')) { Object.assign(order, resolvedAddressFields(values.address)); changed.push('địa chỉ'); }
     const freeShipping = Boolean(posOrder.is_free_shipping) || values.shippingFee === 0;
-    if (values.shippingFee !== money(order.shippingFee) || freeShipping !== Boolean(order.freeShipping)) {
+    if ((values.shippingFee !== money(order.shippingFee) || freeShipping !== Boolean(order.freeShipping)) && posChanged('shippingFee', 'basket')) {
       order.shippingFee = values.shippingFee;
       order.freeShipping = freeShipping;
       changed.push('phí ship');
@@ -155,7 +168,7 @@ export function applyPosContent(order, posOrder, { now = Date.now() } = {}) {
     order.giftItems = giftItems;
   }
   const total = values.total;
-  if (total > 0 && total !== money(order.total)) {
+  if (total > 0 && total !== money(order.total) && (itemsChanged || posChanged('total', 'basket'))) {
     order.total = total;
     const subtotal = (order.products || []).reduce((sum, item) => sum + money(item.price) * (Number(item.quantity) || 1), 0);
     order.discount = Math.max(0, subtotal + (order.freeShipping ? 0 : money(order.shippingFee)) - total);
@@ -189,7 +202,8 @@ export function needsPosContent(order, index) {
   const posOrder = matchPosStatus(order, index);
   if (!posOrder || [6, 7].includes(Number(posOrder.status))) return false;
   const signature = posContentSignature(posOrder);
-  return order.posContent?.info !== signature.info || order.posContent?.items !== signature.items;
+  // Dấu cũ chưa có `values`: ghi lại một lần để lượt sau so được từng trường.
+  return order.posContent?.info !== signature.info || order.posContent?.items !== signature.items || !order.posContent?.values;
 }
 
 /** Áp nội dung POS lên đơn trong hội thoại (kho tin nhắn). Trả về số đơn đã đổi nội dung. */

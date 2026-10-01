@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { metaConfig, projectRoot } from './config.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 
 // META_CHANNELS_PATH: ghi đè vị trí kho kênh (test dùng thư mục tạm); mặc định data/processed.
 const channelStorePath = process.env.META_CHANNELS_PATH || path.join(projectRoot, 'data', 'processed', 'meta-channels.json');
@@ -30,26 +30,23 @@ export function decryptToken(encrypted) {
   return Buffer.concat([decipher.update(Buffer.from(encrypted.value, 'base64')), decipher.final()]).toString('utf8');
 }
 
+/**
+ * Chưa có tệp → chưa kết nối Page nào. Tệp hỏng → cất `.corrupt-*` (giữ token mã hoá để
+ * cứu) rồi coi như chưa có Page. Lỗi đọc khác (EBUSY, EACCES…) → ném: người gọi không được
+ * coi là "không có Page" rồi ghi đè kho thật.
+ */
 export async function readChannelStore() {
-  try {
-    const value = JSON.parse(await readFile(channelStorePath, 'utf8'));
-    return Array.isArray(value.items) ? value : { items: [] };
-  } catch {
-    return { items: [] };
-  }
+  return readJsonFile(channelStorePath, {
+    fallback: () => ({ items: [] }),
+    normalize: value => (Array.isArray(value.items) ? value : { items: [] }),
+    label: 'Kho kênh Facebook (meta-channels.json)'
+  });
 }
 
-let writeQueue = Promise.resolve();
+const enqueueWrite = createWriteQueue();
 export function writeChannelStore(store) {
-  // Ghi tuần tự, tệp tạm duy nhất (confirm/refresh Page có thể ghi gần nhau).
-  const operation = writeQueue.then(async () => {
-    await mkdir(path.dirname(channelStorePath), { recursive: true });
-    const temporaryPath = `${channelStorePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-    await rename(temporaryPath, channelStorePath);
-  });
-  writeQueue = operation.then(() => undefined, () => undefined);
-  return operation;
+  // Ghi tuần tự, tệp tạm riêng theo tiến trình (confirm/refresh Page có thể ghi gần nhau).
+  return enqueueWrite(() => writeJsonAtomic(channelStorePath, store));
 }
 
 export async function findChannel(pageId) {

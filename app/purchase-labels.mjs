@@ -5,6 +5,7 @@
 //  2. khách đặt qua landing (Webcake) rồi nhắn Page: đơn landing không nối với hội thoại;
 //  3. luồng bình luận của khách đã mua (cùng Page, cùng khách) không bao giờ được gắn.
 // Mỗi đơn/luồng chỉ gắn MỘT lần (cờ), để nhân viên gỡ thẻ thì lượt sau không gắn lại.
+import { isCancelledOrder, isIncompleteOrder } from './order-facts.mjs';
 
 const DAY = 24 * 60 * 60 * 1000;
 // Chỉ xét đơn gần đây: không gắn lại hàng loạt cho lịch sử cũ.
@@ -14,12 +15,16 @@ const landingMatchWindowMs = 7 * DAY;
 // Đơn bot vừa tạo: để luồng trả lời tự gắn trước, lượt bù chỉ nhặt đơn đã qua chút thời gian.
 const settleMs = 2 * 60 * 1000;
 
-const activeOrder = order => Boolean(order) && order.processingStatus !== 'cancelled' && order.status !== 'Hủy';
+// Đơn còn hiệu lực: không hủy/hoàn (khách hủy, trạng thái POS 4/5/6/7…) và không phải form landing
+// khách bỏ dở (chưa là đơn, trừ khi nhân viên đã gọi xác nhận) — cùng định nghĩa với báo cáo.
+const activeOrder = order => Boolean(order) && order.status !== 'Hủy' && !isCancelledOrder(order) && !isIncompleteOrder(order);
 const phoneKey = value => String(value || '').replace(/\D/g, '').slice(-9);
-// Mọi dãy số (kể cả SĐT viết cách "0912 345 678", "0912.345.678") trong tin khách → 9 số cuối của từng cụm.
+// SĐT trong tin khách (kể cả viết cách "0912 345 678", "0912.345.678") → 9 số cuối. Đúng 9 chữ số sau
+// 0/84, chỉ nối qua dấu cách/chấm/gạch trên CÙNG dòng, và không được dính liền chữ số khác: tin
+// "0912345678 5 Lê Lợi" hay "0912345678" + xuống dòng + "12 Nguyễn Huệ" không nuốt số nhà vào SĐT.
 export function phoneKeysInText(text) {
   const keys = new Set();
-  for (const match of String(text || '').matchAll(/(?:\+?84|0)(?:[\s.-]?\d){9,10}/g)) {
+  for (const match of String(text || '').matchAll(/(?<!\d)(?:\+?84|0)(?:[ .-]?\d){9}(?!\d)/g)) {
     const key = phoneKey(match[0]);
     if (key.length === 9) keys.add(key);
   }

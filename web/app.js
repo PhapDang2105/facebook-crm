@@ -7732,13 +7732,16 @@ function chatSeenByText(seenBy, messages = [], self = '') {
   return `${who} đã xem · ${formatChatSeenTime(viewers[0].at)}`;
 }
 
-// Dòng người xem ngay dưới tên khách ở đầu khung chat (như Pancake). Chưa ai xem: "Chưa có
-// người xem" — chỉ khi đã bật đăng nhập (chưa bật thì không biết ai là ai).
+// Dòng người xem ngay dưới tên khách ở đầu khung chat (như Pancake). Người đang mở hội thoại
+// cũng tính là đã xem (lúc này) — không chờ máy chủ ghi seenBy rồi đẩy về. Chưa ai xem: "Chưa
+// có người xem" — chỉ khi đã bật đăng nhập (chưa bật thì không biết ai là ai).
 function renderChatSeenBy(conversation = getActiveConversation()) {
   const line = document.querySelector('#chat-head-seen');
   if (!line) return;
   const id = conversation?.dataset.conversationId;
-  const text = id ? chatSeenByText(remoteConversations.get(id)?.seenBy, getConversationMessages(conversation), sessionUsername) : '';
+  const seenBy = { ...(remoteConversations.get(id)?.seenBy || {}) };
+  if (id && sessionUsername) seenBy[sessionUsername] = { name: sessionDisplayName || sessionUsername, at: Date.now() };
+  const text = id ? chatSeenByText(seenBy, getConversationMessages(conversation)) : '';
   line.textContent = text || (id && sessionLoginEnabled ? 'Chưa có người xem' : '');
   line.classList.toggle('hidden', !line.textContent);
 }

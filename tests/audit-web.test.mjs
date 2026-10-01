@@ -186,6 +186,7 @@ test('dòng "… đã xem" (seenBy) ở đầu khung chat: sau tin khách cuối
   assert.match(render, /remoteConversations\.get\(id\)\?\.seenBy/);
   assert.match(render, /'Chưa có người xem'/);
   assert.match(render, /sessionLoginEnabled/, '"Chưa có người xem" chỉ khi đã bật đăng nhập');
+  assert.match(render, /seenBy\[sessionUsername\] = \{ name: sessionDisplayName \|\| sessionUsername, at: Date\.now\(\) \}/, 'người đang mở hội thoại cũng tính là đã xem');
   assert.match(fn('renderChatMessages'), /renderChatSeenBy\(conversation\);/);
   assert.match(section(web, 'function connectMessagingStream()', 1500), /addEventListener\('conversation'/);
 });

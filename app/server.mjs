@@ -20,7 +20,7 @@ import { loadDashboard, normalizeDashboardDays } from './dashboard.mjs';
 import { loadReport, normalizeReportSection, reportCsvFileName, reportSectionCsv } from './reports.mjs';
 import { startAdInsightsSync, syncAdInsights } from './meta-ads.mjs';
 import { configureCampaignAi, generateCampaignInsights, readCampaignInsights } from './campaign-ai.mjs';
-import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin } from './chatbot-templates.mjs';
+import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin, splitMessages } from './chatbot-templates.mjs';
 import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
@@ -684,9 +684,11 @@ function syncBotHook(changes, deps) {
 async function qrOfferMessage(conversation) {
   const settings = await readChatbotSettings();
   const template = settings.messageTemplates?.QR_OFFER || defaultMessageTemplates().QR_OFFER || '';
-  if (!template.trim()) return '';
+  if (!template.trim()) return [];
   // spin: chọn ngẫu nhiên trong {a|b}. applyHonorific: thay anh/chị theo giới tính.
-  return applyHonorific(spin(template), conversation.gender || '').replace(/\{title\}/g, honorific(conversation.gender || ''));
+  const filled = applyHonorific(spin(template), conversation.gender || '').replace(/\{title\}/gi, match => (match[1] === 'T' ? honorific(conversation.gender || '').replace(/^\p{L}/u, c => c.toUpperCase()) : honorific(conversation.gender || '')));
+  // Thẻ ưu đãi là ẢNH (![](https://…) trong mẫu) kèm chữ; giữ đúng thứ tự ảnh/chữ như mẫu.
+  return splitMessages(filled).parts;
 }
 
 // Bộ chào (app/qr-greeting.mjs): hẹn giờ, hủy khi Botcake đã chào, né bot tắt /

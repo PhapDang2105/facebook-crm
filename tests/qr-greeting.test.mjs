@@ -119,3 +119,12 @@ test('mã lạ, thiếu psid: bỏ qua; mẫu QR_OFFER trống: không gửi và
   assert.equal(failing.greetedAt.has(conv.id), false);
   assert.ok(failing.logs.some(line => /ERR .*ngoài cửa sổ 24h/.test(line)));
 });
+
+test('mẫu có ảnh: gửi ảnh rồi chữ theo đúng thứ tự phần trong mẫu', async () => {
+  const g = greeter({ offerMessage: async () => [{ type: 'image', url: 'https://fb.giotnang.vn/assets/qr/uu-dai.png' }, { type: 'text', text: 'Ưu đãi cho chị' }] });
+  const conv = conversation('1:img');
+  g.schedule([metaReferral(conv)]);
+  await pause(120);
+  assert.deepEqual(g.sent, [{ id: conv.id, imageUrl: 'https://fb.giotnang.vn/assets/qr/uu-dai.png' }, { id: conv.id, text: 'Ưu đãi cho chị' }]);
+  assert.ok(g.logs.some(line => /đã gửi ưu đãi .*ảnh\+chữ/.test(line)));
+});

@@ -47,7 +47,17 @@ export function createQrGreeter({
     return true;
   }
 
+  // Mục quá thời gian chờ không còn tác dụng (lần quét sau đã được chào lại): dọn mỗi lần
+  // hẹn, nếu không Map giữ mọi hội thoại từng quét tới khi khởi động lại.
+  function pruneGreeted() {
+    const current = now();
+    for (const [conversationId, at] of greetedAt) {
+      if (current - at >= cooldownMs && !timers.has(conversationId)) greetedAt.delete(conversationId);
+    }
+  }
+
   function schedule(changes) {
+    pruneGreeted();
     for (const change of changes || []) {
       // Không lọc theo `change.type`: khách cũ quét thì ra change kiểu `referral`,
       // khách mới bấm "Bắt đầu" thì ra kiểu `message` mang theo referral. Cái
@@ -79,14 +89,20 @@ export function createQrGreeter({
       const timer = setTimeout(async () => {
         timers.delete(conversation.id);
         try {
-          const text = await offerMessage(conversation);
-          if (!text) {
+          // offerMessage trả chuỗi (chỉ chữ) hoặc dãy phần [{type:'text'|'image'}] —
+          // thẻ ưu đãi là ảnh, gửi theo đúng thứ tự trong mẫu.
+          const offer = await offerMessage(conversation);
+          const parts = typeof offer === 'string' ? (offer ? [{ type: 'text', text: offer }] : []) : (Array.isArray(offer) ? offer : []);
+          if (!parts.length) {
             log('QR: mẫu tin QR_OFFER để trống nên không gửi gì.');
             greetedAt.delete(conversation.id);
             return;
           }
-          await send(conversation, { text });
-          log(`QR: đã gửi ưu đãi cho ${label}`);
+          for (const part of parts) {
+            if (part.type === 'image') await send(conversation, { imageUrl: part.url });
+            else if (part.text) await send(conversation, { text: part.text });
+          }
+          log(`QR: đã gửi ưu đãi cho ${label} (${parts.map(part => part.type === 'image' ? 'ảnh' : 'chữ').join('+')})`);
         } catch (error) {
           // Ngoài cửa sổ 24h Meta trả lỗi ở đây — đó cũng là kết quả đáng ghi lại.
           logError(`QR: KHÔNG gửi được ưu đãi cho ${label}: ${error.message}`);

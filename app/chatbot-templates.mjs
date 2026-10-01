@@ -105,7 +105,7 @@ export function applyHonorific(text, gender = activeCustomer.gender) {
 // thì ảnh đi trước chữ, ảnh đứng sau chữ thì gửi sau. `parts` là dãy gửi;
 // `messages`/`images` giữ cho chỗ nào chỉ cần chữ (trả lời riêng bình luận…).
 const maximumImagesPerReply = 6;
-function splitMessages(text) {
+export function splitMessages(text) {
   const parts = [];
   for (const segment of applyHonorific(String(text ?? '')).split('###')) {
     const found = [];

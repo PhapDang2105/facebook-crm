@@ -407,8 +407,25 @@ function renderChatbotFollowUpQueue(queue) {
   </div>`;
   // Chủ shop (29/09): nhân viên chỉ cần bấm "Gửi ngay" — không liệt kê từng khách (lời gửi, nút
   // Mở Pancake / Sao chép / Đã gửi / Bỏ qua, lỗi lần trước). API hàng chờ vẫn giữ nguyên.
-  chatbotFollowUpQueue.innerHTML = queue.length ? `<div class="follow-up-queue-head">Chờ gửi qua Pancake: ${queue.length} khách đã quá 24 giờ</div>${relay}` : '';
+  // Hàng chờ vừa hết (lô cuối gửi xong, hay lô bỏ hết khách quá 7 ngày / khách cũ): vẫn hiện kết
+  // quả lần gửi vừa rồi — trước đây cả khung biến mất, nhân viên không biết đã gửi gì, vì sao.
+  const lastRun = !queue.length && run?.status && !run.active ? `<div class="follow-up-relay"><small>${escapeHtml(run.status)}</small></div>` : '';
+  chatbotFollowUpQueue.innerHTML = queue.length ? `<div class="follow-up-queue-head">Chờ gửi qua Pancake: ${queue.length} khách đã quá 24 giờ</div>${relay}` : lastRun;
 }
+
+// Lỗi extension Pancake trả về thường là JSON của Facebook ({"errorDescription":…,"fbErrorCode":…}):
+// lấy câu mô tả cho nhân viên đọc được.
+function followUpErrorText(error) {
+  const text = String(error || '');
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed?.errorDescription) return `${parsed.errorDescription}${parsed.fbErrorCode ? ` (mã ${parsed.fbErrorCode})` : ''}`;
+  } catch { /* không phải JSON */ }
+  return text;
+}
+// Facebook trên trình duyệt này đã đăng xuất (Pancake gửi bằng phiên Facebook của Chrome): mọi tin
+// sau cũng sẽ lỗi — dừng ngay ở tin đầu, không đợi 3 tin liền.
+const facebookLoggedOut = error => /1340004|chưa đăng nhập|not logged in/i.test(String(error || ''));
 
 // Gửi ngay trong CRM: extension "Giọt Nắng CRM – Cầu nối Pancake"
 // (extensions/crm-pancake-bridge) nhận lệnh qua window.postMessage và nhờ extension
@@ -491,11 +508,17 @@ async function runFollowUpBridge() {
       run.status = `Đang gửi ${index + 1}/${batch.items.length}: ${item.name || ''} (${counts()})`;
       redraw();
       run.inFlight = item.key;
+      // Hỏi cầu nối còn sống trước mỗi tin (nó đáp GN_BRIDGE_READY → followUpBridgeReadyAt): lô dài
+      // hơn 5 phút không còn coi mọi lần hết giờ là cầu nối chết.
+      window.postMessage({ type: 'GN_BRIDGE_PING' }, window.location.origin);
       const result = await sendThroughBridge(item, batch.token || '');
       run.inFlight = '';
       run.done.add(item.key);
-      // Báo từng tin ngay: tải lại trang giữa chừng cũng không mất kết quả.
-      await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: batch.token || '', results: [{ key: item.key, ok: result.ok, error: result.error, ...(result.unknown ? { unknown: true } : {}), globalId: result.globalId || '' }] }) }).catch(() => {});
+      // Báo từng tin ngay: tải lại trang giữa chừng cũng không mất kết quả. Máy chủ không ghi được
+      // (lỗi mạng, hết phiên đăng nhập…) thì dừng lô: không thì khách vẫn bị giữ chỗ, 45 phút sau
+      // trở lại hàng chờ và lô sau gửi trùng.
+      const saved = await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: batch.token || '', results: [{ key: item.key, ok: result.ok, error: result.error, ...(result.unknown ? { unknown: true } : {}), globalId: result.globalId || '' }] }) })
+        .then(response => response.ok ? '' : `máy chủ trả ${response.status}`, error => error.message || 'lỗi mạng');
       if (result.ok) { run.sent += 1; failedInRow = 0; }
       else if (result.unknown) {
         // Hết giờ chờ mà extension vẫn đang chạy (báo sẵn sàng trong 5 phút gần đây):
@@ -503,8 +526,10 @@ async function runFollowUpBridge() {
         run.unknown += 1;
         run.lastError = result.detail;
         if (Date.now() - followUpBridgeReadyAt > 5 * 60 * 1000) failedInRow += 1;
-      } else { run.failed += 1; failedInRow += 1; run.lastError = result.detail || result.error; }
-      if (failedInRow >= 3) { run.stop = true; run.halted = `Dừng vì 3 tin liền ${result.unknown ? 'không rõ kết quả (cầu nối không trả lời)' : 'lỗi'}: ${result.detail || result.error}`; break; }
+      } else { run.failed += 1; failedInRow += 1; run.lastError = followUpErrorText(result.detail || result.error); }
+      if (saved) { run.stop = true; run.halted = `Dừng: không ghi được kết quả lên CRM (${saved}) — tải lại trang (đăng nhập lại nếu được hỏi) rồi bấm Gửi ngay tiếp. Đã gửi ${run.sent} tin.`; break; }
+      if (!result.ok && facebookLoggedOut(result.error)) { run.stop = true; run.halted = `Dừng: Facebook trên trình duyệt này chưa đăng nhập (Pancake báo "${followUpErrorText(result.error)}"). Đăng nhập lại facebook.com bằng tài khoản quản lý Page, tải lại tab pancake.vn rồi bấm Gửi ngay lại.`; break; }
+      if (failedInRow >= 3) { run.stop = true; run.halted = `Dừng vì 3 tin liền ${result.unknown ? 'không rõ kết quả (cầu nối không trả lời)' : 'lỗi'}: ${followUpErrorText(result.detail || result.error)}`; break; }
       if (index < batch.items.length - 1 && !run.stop) {
         const pause = 15000 + Math.random() * 15000;
         run.status = `Đã gửi ${run.sent}/${batch.items.length}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}. Tin sau sau ${Math.round(pause / 1000)} giây…`;

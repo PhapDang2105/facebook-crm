@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const directory = mkdtempSync(path.join(tmpdir(), 'posorders-'));
+const directory = tempDir('posorders-');
 process.env.POS_CONFIG_PATH = path.join(directory, 'pos-config.json');
 process.env.META_CONVERSATIONS_PATH = path.join(directory, 'meta-conversations.json');
 process.env.POS_PUSH_ORDERS = '1';

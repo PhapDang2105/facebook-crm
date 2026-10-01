@@ -42,6 +42,8 @@ export function cascadeMatchMark(cascade, chosen, groupOf = defaultGroupOf) {
 
 // Nhóm mà tầng đoán SAI vào đó là lỗi nguy hiểm (tự trả lời mẫu thông tin khi khách đang đặt hàng / cần người).
 export const DANGER_GROUPS = new Set(['ORDER', 'SUPPORT']);
+// Nhóm tầng được tự trả lời khi bật (cùng cascadeAutoGroups của engine).
+export const AUTO_ANSWER_GROUPS = new Set(['ANSWER', 'PRICE', 'INFO', 'SOCIAL']);
 
 const emptyCascade = () => ({
   group: { n: 0, ok: 0, bad: 0, danger: 0 },
@@ -57,7 +59,9 @@ function addCascadeMark(stats, cascade, mark, chosenGroup = '') {
   if (mark === '~') return;
   const hasTemplate = Boolean(cascade.templateId);
   const groupOk = mark === '✓' || mark === 'nhóm✓';
-  const danger = !groupOk && DANGER_GROUPS.has(String(chosenGroup || '')) && String(cascade.group || '') !== String(chosenGroup);
+  // Vòng 12 (B5 #14): chỉ nguy hiểm khi tầng đoán một nhóm ĐƯỢC tự trả lời (ANSWER/PRICE/INFO/SOCIAL) — đoán ORDER/SUPPORT/OTHER
+  // thì engine không bao giờ tự trả lời bằng tầng, sai nhóm không gây hại.
+  const danger = !groupOk && AUTO_ANSWER_GROUPS.has(String(cascade.group || '')) && DANGER_GROUPS.has(String(chosenGroup || '')) && String(cascade.group || '') !== String(chosenGroup);
   stats.group.n += 1;
   if (groupOk) stats.group.ok += 1; else stats.group.bad += 1;
   if (danger) stats.group.danger += 1;
@@ -98,6 +102,8 @@ const emptyDay = () => ({
 /** Cộng một lượt (dạng nhật ký quyết định v1) vào ngày. options.groupOf: nhóm của mẫu (mặc định mô-đun tầng). */
 export function addEntry(day, entry, prices = DEFAULT_PRICES, options = {}) {
   const groupOf = typeof options.groupOf === 'function' ? options.groupOf : defaultGroupOf;
+  // Vòng 12 (B5 #14): lượt thử tay (conversationId "test", 28/09) không tính vào báo cáo.
+  if (String(entry.conversationId || '') === 'test') return;
   if (entry.skipped) { day.skipped[entry.skipped] = (day.skipped[entry.skipped] || 0) + 1; return; }
   day.turns += 1;
   if (entry.rule) day.ruleStable += 1;
@@ -323,20 +329,32 @@ export function formatReport(days) {
 /** Lỗi CLI: in gọn, thoát 1 (không stack). */
 function fail(message) { console.error(message); process.exit(1); }
 
-function main() {
+/** Ngày YYYY-MM-DD có thật trên lịch (2026-02-30, 2026-13-01 bị từ chối — trước đây chỉ kiểm định dạng). */
+export function isValidDay(text) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(text || ''));
+  if (!match) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+async function main() {
   const args = process.argv.slice(2);
-  const valueFlags = ['--since', '--dir', '--journal', '--year', '--price-in', '--price-cache', '--price-out'];
-  for (let i = 0; i < args.length; i += 1) if (valueFlags.includes(args[i]) && (args[i + 1] === undefined || args[i + 1] === '' || args[i + 1].startsWith('--'))) fail(`Thiếu giá trị cho ${args[i]}.`);
-  const value = (flag, fallback) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : fallback);
+  // --help (in khối chú thích đầu tệp, thoát 0), thiếu giá trị, cờ lạ: dùng chung parseCliArgs với các công cụ khác.
+  const { parseCliArgs } = await import('./dataset-context.mjs');
+  const cli = parseCliArgs(args, ['--since', '--dir', '--journal', '--year', '--price-in', '--price-cache', '--price-out'], ['--json']);
+  const value = (flag, fallback) => cli.value(flag, fallback);
   const number = (flag, fallback) => { const raw = value(flag, String(fallback)); const parsed = Number(raw); if (raw === '' || !Number.isFinite(parsed) || parsed < 0) fail(`${flag} phải là số không âm (nhận "${raw}").`); return parsed; };
   const prices = { input: number('--price-in', DEFAULT_PRICES.input), cache: number('--price-cache', DEFAULT_PRICES.cache), output: number('--price-out', DEFAULT_PRICES.output) };
   const since = value('--since', '');
   if (since && !/^\d{4}-\d{2}-\d{2}$/.test(since)) fail(`--since sai định dạng "${since}" (cần YYYY-MM-DD).`);
+  if (since && !isValidDay(since)) fail(`--since không phải ngày có thật: "${since}".`);
   const journal = value('--journal', '');
   let days;
   if (journal) {
     if (!existsSync(journal)) fail(`Không thấy tệp journal: ${journal}`);
     const year = number('--year', new Date().getFullYear());
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) fail(`--year phải là năm 2000–2100 (nhận "${value('--year', '')}").`);
     const items = parseJournal(readFileSync(journal, 'utf8'), { year });
     days = summarizeJournal(items.filter(item => !since || item.day >= since), prices);
     console.log(`Journal ${journal}: ${items.length} dòng nhận ra (lượt LLM đếm theo dòng "Token"; mô hình nhỏ ghép theo hội thoại).`);
@@ -352,4 +370,4 @@ function main() {
 }
 
 const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
-if (isMain) main();
+if (isMain) await main();

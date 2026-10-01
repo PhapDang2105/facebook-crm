@@ -65,8 +65,10 @@ fi
 
 NODE_MAJOR="$(node --version | sed 's/^v\([0-9]*\).*/\1/')"
 echo "    Node $(node --version)"
-if [[ "$NODE_MAJOR" -lt 18 ]]; then
-  echo "Cần Node.js 18 trở lên: mã nguồn dùng fetch, FormData và Blob toàn cục." >&2
+if [[ "$NODE_MAJOR" -lt 22 ]]; then
+  # package.json: engines.node >=22 (fetch/FormData/Blob toàn cục, node:test, fs.globSync…).
+  # Kho Debian có thể chỉ có Node cũ hơn: cài Node 22 bằng tay (NodeSource/nvm) rồi chạy lại script.
+  echo "Cần Node.js 22 trở lên (đang có $(node --version)). Xem package.json → engines." >&2
   exit 1
 fi
 
@@ -101,7 +103,8 @@ fi
 
 echo "==> Cài phụ thuộc"
 cd "$APP_DIR"
-npm install --omit=dev
+# npm ci (không phải npm install): giữ nguyên package-lock.json, lần git pull sau không bị chặn.
+npm ci --omit=dev
 
 echo "==> Chuẩn bị thư mục dữ liệu"
 mkdir -p "$APP_DIR/data/processed" "$APP_DIR/logs"
@@ -121,16 +124,31 @@ install -m 644 "$APP_DIR/deploy/facebook-crm.service" /etc/systemd/system/facebo
 systemctl daemon-reload
 systemctl enable facebook-crm
 
+echo "==> Tài khoản đăng nhập CRM (chủ shop)"
+# Không còn Basic Auth ở Caddy: CRM tự hỏi đăng nhập. PUBLIC_BASE_URL là https nên
+# chưa có tài khoản thì CRM trả 503 "Chưa cấu hình đăng nhập" (không mở toang).
+if ! grep -qE '^CRM_LOGIN_USERS=.+' "$APP_DIR/.env"; then
+  read -rp "Tên đăng nhập chủ shop (chữ thường, không dấu): " OWNER_USER
+  echo "Mật khẩu chủ shop (≥ 8 ký tự), gõ xong bấm Enter:"
+  OWNER_HASH="$(sudo -u "$APP_USER" node "$APP_DIR/app/auth.mjs" hash-password | grep -o 'scrypt\$[A-Za-z0-9_-]*\$[A-Za-z0-9_-]*' || true)"
+  if [[ -z "$OWNER_USER" || -z "$OWNER_HASH" ]]; then
+    echo "Chưa tạo được tài khoản chủ shop — tự thêm CRM_LOGIN_USERS vào $APP_DIR/.env (xem deploy/README.md)." >&2
+  else
+    sed -i '/^CRM_LOGIN_USERS=/d' "$APP_DIR/.env"
+    echo "CRM_LOGIN_USERS=${OWNER_USER,,}:$OWNER_HASH" >> "$APP_DIR/.env"
+  fi
+fi
+if ! grep -qE '^CRM_SESSION_SECRET=.+' "$APP_DIR/.env"; then
+  sed -i '/^CRM_SESSION_SECRET=/d' "$APP_DIR/.env"
+  echo "CRM_SESSION_SECRET=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")" >> "$APP_DIR/.env"
+fi
+
 echo "==> Cấu hình Caddy"
-read -rp "Tên đăng nhập cho trang quản trị: " ADMIN_USER
-CADDY_HASH="$(caddy hash-password)"
 # Dựng ra tệp tạm và kiểm TRƯỚC, chỉ khi đạt mới thay tệp thật. Ghi thẳng rồi
 # mới validate là khi hỏng để lại một /etc/caddy/Caddyfile sai: Caddy vẫn chạy
 # bằng cấu hình cũ trong bộ nhớ nhưng chết ở lần reload hoặc reboot kế tiếp.
 CADDY_NEW="$(mktemp)"
 sed -e "s#<DOMAIN>#$DOMAIN#" \
-    -e "s#<USERNAME>#$ADMIN_USER#" \
-    -e "s#<BCRYPT_HASH>#$CADDY_HASH#" \
     "$APP_DIR/deploy/Caddyfile" > "$CADDY_NEW"
 if ! caddy validate --config "$CADDY_NEW" --adapter caddyfile; then
   echo "Cấu hình Caddy vừa dựng không hợp lệ. KHÔNG đụng tới /etc/caddy/Caddyfile đang chạy." >&2
@@ -162,8 +180,8 @@ Còn phải làm bằng tay:
   2. Khởi động dịch vụ:  systemctl start facebook-crm
   3. Kiểm tra:           systemctl status facebook-crm
                          curl -s http://127.0.0.1:8080/api/health
-     (gọi qua https://$DOMAIN sẽ ra 401 vì Basic Auth chắn mọi đường
-      trừ /privacy, /webhooks/facebook, /webhooks/landing, /product-images)
+     (gọi API qua https://$DOMAIN khi chưa đăng nhập sẽ ra 401 — CRM tự chặn
+      mọi đường trừ /login, /privacy, /q/*, /product-images và các webhook)
   4. Dán vào Meta App:
      Callback URL       https://$DOMAIN/webhooks/facebook
      OAuth Redirect URI https://$DOMAIN/api/channels/meta/callback

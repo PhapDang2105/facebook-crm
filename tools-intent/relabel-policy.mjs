@@ -185,7 +185,7 @@ export function relabelRows(rows, options = {}) {
 async function main() {
   const args = process.argv.slice(2);
   const usage = 'Dùng: node tools-intent/relabel-policy.mjs <in.jsonl> <out.jsonl> [--templates <settings.json>] [--conflicts <file.jsonl>] [--stable-only]';
-  const cli = parseCliArgs(args, ['--templates', '--conflicts']);
+  const cli = parseCliArgs(args, ['--templates', '--conflicts'], ['--stable-only']);
   const [inPath, outPath] = cli.positional;
   if (!inPath || !outPath) cliFail(usage);
   if (!existsSync(inPath)) cliFail(`Không thấy tệp vào: ${inPath}`);

@@ -148,7 +148,9 @@ test('7. Không dựng giỏ từ tin không phải đặt hàng: chỉ ảnh �
   assert.notEqual(photos.results[0].templateId, 'ORDER_ADDRESS');
   assert.ok(!photos.saved.at(-1).pendingOrder?.items?.length);
   const mint = await run({}, 'cho mình 1 túi xanh mint', { reply: orderReply });
-  assert.equal(mint.results[0].templateId, 'LIVE_ONLY_PRODUCT');
+  // Vòng 12: "xanh mint" là Granola Tropical (danh mục) — mô hình lên giỏ Túi Nâu sai món → báo giá Tropical + thẻ, không giỏ.
+  assert.equal(mint.results[0].templateId, 'PRICE_QUOTE');
+  assert.match(mint.sent.join('\n'), /Tropical/);
   assert.ok(mint.saved.at(-1).addLabelEvents.includes('handoff'));
   assert.ok(!mint.saved.at(-1).pendingOrder?.items?.length);
   assert.equal(mint.saved.at(-1).botEnabled, undefined, 'bot vẫn bật');
@@ -181,7 +183,11 @@ test('8. Nhân viên đang xử lý: nhân viên nhắn sau bot trong 2 giờ, h
     requestReply: async () => ({ templateId: 'PRICE_QUOTE', messages: ['Bảng giá'], handoff: false })
   });
   assert.equal(results[0].skipped, 'nhân viên đang xử lý');
-  assert.deepEqual(sent, []);
+  // Vòng 12 (B4 #4): bình luận hỏi giá/đặt hàng lúc nhân viên đang chat hộp thư → không nhắn riêng, chỉ một lời công khai
+  // ngắn "bạn phụ trách nhắn mình ngay" (không để bình luận trơ trọi 35 phút).
+  assert.equal(sent.length, 1);
+  assert.doesNotMatch(sent[0], /Bảng giá/);
+  assert.match(sent[0], /bạn phụ trách/);
 });
 
 test('9. Sau ORDER_STATUS_CHECKING (< 24h) khách nhắn tiếp → WAITING_STAFF đúng một lần, tin sau im; nhân viên đã nhắn (> 2h) thì luồng thường', async () => {
@@ -248,16 +254,18 @@ test('11. Bình luận: chê → xin lỗi công khai + thẻ; khen → cảm ơ
   assert.match(handoff.sent.find(text => text.startsWith('riêng')), /Bảng giá Granola Túi Xanh 450g/);
   assert.doesNotMatch(handoff.sent.join('\n'), /chuyển bạn phụ trách/);
   const live = await comment('mua 2 túi được quà gì', renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates, {}), { post: { message: 'Săn deal hời cùng Giọt Nắng' } });
-  assert.equal(live.results[0].templateId, 'LIVESTREAM_COMMENT');
-  assert.match(live.sent.find(text => text.startsWith('riêng')), /phiên live nhà em có/);
+  // Vòng 12: khách live hỏi quà → câu quà live (2 túi 298k miễn ship tặng Quạt + Bát gáo dừa), không phải bảng quà chung.
+  assert.equal(live.results[0].templateId, 'GIFT_POLICY_LIVE');
+  assert.match(live.sent.find(text => text.startsWith('riêng')), /Quạt \+ Bát gáo dừa/);
   // Giỏ ghi trong bình luận.
   assert.deepEqual(commentBasket('cho mình 2 túi socola'), [{ product: 'Granola Túi Nâu vị cacao 350g', quantity: 2 }]);
   assert.deepEqual(commentBasket('lấy 2 hộp xanh'), [{ product: 'Combo 10 gói Xanh', quantity: 2 }]);
   assert.deepEqual(commentBasket('cho em 1 hộp 10 gói'), [{ product: 'Combo 10 gói Mix', quantity: 1 }]);
-  assert.deepEqual(commentBasket('lấy 2 túi vị dâu'), []);
-  assert.deepEqual(commentBasket('cho 1 túi xanh mint'), []);
-  const strange = await comment('cho mình 2 túi vị dâu nhé', { templateId: 'PRICE_QUOTE', messages: ['Bảng giá'], handoff: false });
-  assert.ok(strange.saved.some(state => (state.addLabelEvents || []).includes('handoff')));
+  // Vòng 12: "vị dâu" / "xanh mint" là Granola Tropical (sản phẩm danh mục) → giỏ Tropical; "xanh nhạt" còn mơ hồ → không giỏ.
+  assert.deepEqual(commentBasket('lấy 2 túi vị dâu'), [{ product: 'Granola Tropical vị Cacao 300g', quantity: 2 }]);
+  assert.deepEqual(commentBasket('cho 1 túi xanh mint'), [{ product: 'Granola Tropical vị Cacao 300g', quantity: 1 }]);
+  assert.deepEqual(commentBasket('cho 1 túi xanh nhạt'), []);
+  const strange = await comment('cho mình 2 túi xanh nhạt nhé', { templateId: 'PRICE_QUOTE', messages: ['Bảng giá'], handoff: false });
   assert.ok(!strange.saved.some(state => state.pendingOrder?.items?.length));
 });
 

@@ -19,11 +19,18 @@
         "xanh nguyên bản",
         "túi 450",
         "450g",
-        "#granolatuixanh"
+        "#granolatuixanh",
+        "xanh lá",
+        "xanh lá cây",
+        "túi xanh lá",
+        "granola xanh lá",
+        "loại 450",
+        "450 gram"
       ],
       "active": true,
       "image": "",
-      "mixable": true
+      "mixable": true,
+      "mixGroup": "granola"
     },
     {
       "id": "seed-granola-vang",
@@ -47,7 +54,8 @@
       ],
       "active": true,
       "image": "",
-      "mixable": true
+      "mixable": true,
+      "mixGroup": "granola"
     },
     {
       "id": "seed-granola-nau",
@@ -75,11 +83,12 @@
       ],
       "active": true,
       "image": "",
-      "mixable": true
+      "mixable": true,
+      "mixGroup": "granola"
     },
     {
       "id": "seed-cacao-300",
-      "name": "Granola Tropical Cacao 300g",
+      "name": "Granola Tropical vị Cacao 300g",
       "sku": "GRA-MINT-Z300",
       "originalPrice": 204000,
       "salePrice": 204000,
@@ -90,11 +99,43 @@
         "tropical cacao",
         "granola tropical",
         "cacao 300g",
-        "cacao 300"
+        "cacao 300",
+        "Granola Tropical Cacao 300g",
+        "tropical",
+        "premium cacao",
+        "granola premium cacao",
+        "xanh mint",
+        "túi xanh mint",
+        "mint",
+        "túi mint",
+        "xanh bạc hà",
+        "xanh min",
+        "túi xanh min",
+        "xanh nhạt",
+        "túi xanh nhạt",
+        "xanh biển",
+        "túi xanh biển",
+        "xanh ngọc",
+        "túi xanh ngọc",
+        "xanh da trời",
+        "xanh dương",
+        "túi xanh dương",
+        "túi dâu tây",
+        "túi có dâu",
+        "loại có dâu",
+        "dâu tây",
+        "granola dâu",
+        "xoài dâu",
+        "loại mới",
+        "nhiệt đới",
+        "granola nhiệt đới",
+        "300g",
+        "túi 300"
       ],
       "active": true,
       "image": "",
-      "mixable": false
+      "mixable": false,
+      "mixGroup": "granola"
     },
     {
       "id": "seed-combo10-xanh",
@@ -121,7 +162,8 @@
       ],
       "active": true,
       "image": "",
-      "mixable": false
+      "mixable": false,
+      "mixGroup": "granola"
     },
     {
       "id": "seed-combo10-nau",
@@ -140,7 +182,8 @@
       ],
       "active": true,
       "image": "",
-      "mixable": false
+      "mixable": false,
+      "mixGroup": "granola"
     },
     {
       "id": "seed-combo10-cam",
@@ -165,7 +208,8 @@
       ],
       "active": true,
       "image": "",
-      "mixable": false
+      "mixable": false,
+      "mixGroup": "granola"
     },
     {
       "id": "seed-combo10-mix",
@@ -185,7 +229,8 @@
       ],
       "active": true,
       "image": "",
-      "mixable": false
+      "mixable": false,
+      "mixGroup": "granola"
     },
     {
       "id": "seed-nghe-lanh",
@@ -222,7 +267,8 @@
       ],
       "active": true,
       "image": "",
-      "mixable": false
+      "mixable": false,
+      "staffOnly": true
     }
   ]
 }

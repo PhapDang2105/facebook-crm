@@ -67,7 +67,8 @@ test('replay-golden: --model/--compare in hai cột, tập rule-miss, --gate pre
   writeFileSync(path.join(directory, 'replay-llm-out.json'), JSON.stringify([
     { id: `p:b:${at + 3}`, llm: 'ORDER_STATUS' }, { id: `p:b:${at + 4}`, llm: 'ORDER_UPDATE' }, { id: `p:a:${at + 1}`, llm: 'GENERAL_INFO' }
   ]));
-  const result = run('replay-golden.mjs', [goldenPath, '--model', modelPath, '--compare', path.join(root, 'app', 'processing', 'intent-model.json'), '--gate']);
+  // Kho hội thoại nằm cạnh bộ chấm; chỉ rõ đường dẫn vì quiet-console trỏ META_CONVERSATIONS_PATH về thư mục tạm.
+  const result = run('replay-golden.mjs', [goldenPath, '--model', modelPath, '--compare', path.join(root, 'app', 'processing', 'intent-model.json'), '--gate'], { META_CONVERSATIONS_PATH: path.join(directory, 'meta-conversations.json') });
   assert.equal(result.status, 0, result.stderr);
   const out = result.stdout;
   assert.match(out, /mô hình 1: .*model-v6\.json · 6 nhãn/, 'ORDER_ADDRESS_PARTIAL gộp vào ORDER_ADDRESS (nhãn quyết định)');

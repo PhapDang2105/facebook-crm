@@ -17,9 +17,18 @@ Sau đó mở `http://localhost:8080`. Dữ liệu chạy thật nằm trong `da
 Chạy kiểm thử (Node 22 hoặc bản portable trong `tools/node`):
 
 ```powershell
-npm test
-npm run test:integration
+npm test                  # kiểm thử đơn vị, không đụng .env hay data/processed thật
+npm run test:coverage     # như trên, kèm bảng độ phủ mã
+npm run test:integration  # webhook Meta (đọc .env/dữ liệu thật — chỉ chạy khi cần)
 ```
+
+Chi tiết (chạy lẻ một tệp, thư mục tạm, DNS giả): `tests/README.md`.
+
+## Đăng nhập, Nhân sự, Lịch sử hoạt động
+
+- **Đăng nhập** (`/login`, `app/auth.mjs`): là lớp bảo vệ chính trên máy chủ — Caddy không còn Basic Auth. Tài khoản chủ shop khai ở `.env` (`CRM_LOGIN_USERS=ten:chuoi-bam`, băm bằng `node app/auth.mjs hash-password`) và gộp với **Nhân sự**. Máy chủ https chưa có tài khoản nào thì trả 503 "Chưa cấu hình đăng nhập" (không mở toang); máy local http chưa có tài khoản thì không hỏi. Đường công khai không cần đăng nhập: các webhook (`/webhooks/facebook`, `/webhooks/landing`, `/webhooks/pancake` — xác thực bằng chữ ký/token), `/q/*` (QR), `/product-images/*`, `/privacy`, `/api/health`. Xem `deploy/README.md`.
+- **Cài đặt → Nhân sự** (`app/staff.mjs`, `data/processed/staff.json`, đổi bằng `STAFF_PATH`): vai trò Quản trị / Nhân viên; người đang làm có mật khẩu đăng nhập được ngay (thêm nhân sự đầu tiên có mật khẩu là bật đăng nhập). Không xoá người — chuyển "Đã nghỉ" để giữ lịch sử; đổi mật khẩu / cho nghỉ làm phiên cũ hết hiệu lực. Nhân viên thường không ghi được các mục Cài đặt.
+- **Lịch sử hoạt động** (Cài đặt → Nhật ký, `app/audit-log.mjs`, `GET /api/audit`): ai nhắn tin, xem hội thoại, lên/sửa/huỷ đơn, sửa khách/thẻ/bot, sửa cài đặt, đăng nhập. Mỗi ngày một tệp `data/processed/audit-log/YYYY-MM-DD.jsonl` (giờ VN, đổi bằng `AUDIT_LOG_DIR`), giữ 365 ngày, SĐT/email được che. Chủ shop / Quản trị xem toàn bộ; nhân viên chỉ xem lịch sử của một hội thoại hay một đơn.
 
 ## Kết nối Facebook Messenger
 
@@ -73,7 +82,7 @@ GraphCode and a portable Node.js runtime are installed locally under `tools/`; n
 
 ## Đơn từ landing page (Webcake)
 
-`app/landing-orders.mjs` nhận đơn từ form landing qua webhook `POST /webhooks/landing?token=<LANDING_WEBHOOK_TOKEN>` (JSON hoặc form-urlencoded; token đặt trong `.env`, để trống là tắt). Trường được nhận dạng theo nghĩa nên tên khác nhau vẫn đọc được: họ tên / name / full_name, số điện thoại / phone / sđt, địa chỉ + phường/xã + quận/huyện + tỉnh/thành, sản phẩm / product / sku (một dòng hoặc danh sách `products[]`), số lượng, tổng tiền, ghi chú, mã đơn (order_id), utm/campaign/page. Sản phẩm được khớp với Cài đặt → Sản phẩm để lấy SKU kho và giá combo; địa chỉ được tách ba cấp như đơn chatbot. Thiếu địa chỉ hay sản phẩm lạ vẫn tạo đơn kèm cờ "Thiếu địa chỉ" / "Kiểm tra sản phẩm" trong cột Ghi chú; thiếu số điện thoại hợp lệ thì từ chối. Chống trùng theo `order_id` hoặc cùng SĐT + giỏ trong 10 phút. Đơn lưu ở `data/processed/landing-orders.json`, xuất hiện trong **Đơn hàng** với Nguồn đơn = Landing page (mã `LP-…`) và đi cùng luồng kiểm tra → xuất kho. `GET /api/landing/recent` (sau mật khẩu) trả 30 payload gần nhất để đối chiếu khi một trường chưa được nhận ra. Trên VPS, Caddy phải cho `/webhooks/landing` đi thẳng (đã có trong `deploy/Caddyfile`).
+`app/landing-orders.mjs` nhận đơn từ form landing qua webhook `POST /webhooks/landing?token=<LANDING_WEBHOOK_TOKEN>` (JSON hoặc form-urlencoded; token đặt trong `.env`, để trống là tắt). Trường được nhận dạng theo nghĩa nên tên khác nhau vẫn đọc được: họ tên / name / full_name, số điện thoại / phone / sđt, địa chỉ + phường/xã + quận/huyện + tỉnh/thành, sản phẩm / product / sku (một dòng hoặc danh sách `products[]`), số lượng, tổng tiền, ghi chú, mã đơn (order_id), utm/campaign/page. Sản phẩm được khớp với Cài đặt → Sản phẩm để lấy SKU kho và giá combo; địa chỉ được tách ba cấp như đơn chatbot. Thiếu địa chỉ hay sản phẩm lạ vẫn tạo đơn kèm cờ "Thiếu địa chỉ" / "Kiểm tra sản phẩm" trong cột Ghi chú; thiếu số điện thoại hợp lệ thì từ chối. Chống trùng theo `order_id` hoặc cùng SĐT + giỏ trong 10 phút. Đơn lưu ở `data/processed/landing-orders.json`, xuất hiện trong **Đơn hàng** với Nguồn đơn = Landing page (mã `LP-…`) và đi cùng luồng kiểm tra → xuất kho. `GET /api/landing/recent` (sau mật khẩu) trả 30 payload gần nhất để đối chiếu khi một trường chưa được nhận ra. Trên VPS, `/webhooks/landing` là đường công khai do CRM tự cho qua (xác thực bằng token), không cần đăng nhập.
 
 ## Luồng đơn hàng
 

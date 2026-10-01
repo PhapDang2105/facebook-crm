@@ -10,6 +10,7 @@ import { readInboxSettings } from './inbox-settings.mjs';
 import { listLandingOrders } from './landing-orders.mjs';
 import { readMessagingStore } from './messaging-store.mjs';
 import { adsConnectionStatus, readAdStore, vietnamDay } from './meta-ads.mjs';
+import { countNewCustomers, firstOrderDates, METRIC_DEFINITIONS, withAdsFreshness } from './metrics.mjs';
 import { collectOrderFacts, datesBetween, DAY_MS, isCancelledOrder, isValidFact, shiftDay, sourceLabel, vietnamDayStartMs } from './order-facts.mjs';
 import { processingNotes } from './order-notes.mjs';
 
@@ -76,12 +77,9 @@ export function buildDashboard({
   const facts = collectOrderFacts({ conversations, landingOrders });
   const sources = new Map();
   const products = new Map();
-  const firstOrderDate = new Map();
   const orderedConversations = { current: new Set(), prev: new Set() };
   for (const fact of facts) {
     if (!isValidFact(fact)) continue;
-    // facts đã xếp cũ trước: lần đầu gặp khách là đơn đầu tiên.
-    if (!firstOrderDate.has(fact.customerKey)) firstOrderDate.set(fact.customerKey, fact.dateVN);
     const bucket = period(fact.dateVN);
     if (!bucket) continue;
     stats[bucket].orders += 1;
@@ -103,10 +101,10 @@ export function buildDashboard({
       products.set(key, product);
     }
   }
-  for (const date of firstOrderDate.values()) {
-    const bucket = period(date);
-    if (bucket) stats[bucket].newCustomers += 1;
-  }
+  // Khách mới: cùng định nghĩa với Báo cáo (metrics.mjs).
+  const firstDates = firstOrderDates(facts, isValidFact);
+  stats.current.newCustomers = countNewCustomers(firstDates, since, until);
+  stats.prev.newCustomers = countNewCustomers(firstDates, previous.since, previous.until);
 
   // Cuộc trò chuyện: hội thoại hộp thư có tin khách trong kỳ.
   const bounds = {
@@ -160,6 +158,9 @@ export function buildDashboard({
   }
 
   const campaignReport = buildCampaignReport({ conversations, landingOrders, adStore, from: since, to: until, now, ads, facts });
+  // ROAS: một định nghĩa (metrics.mjs) — doanh thu quy về quảng cáo Meta ÷ chi phí Meta,
+  // lấy thẳng từ báo cáo chiến dịch của từng kỳ (trước đây: mọi doanh thu ÷ chi phí).
+  const previousCampaignReport = buildCampaignReport({ conversations, landingOrders, adStore, from: previous.since, to: previous.until, now, ads, facts });
   const knownCampaigns = adStore.campaigns && typeof adStore.campaigns === 'object' ? Object.values(adStore.campaigns) : [];
   const activeCampaigns = new Set([
     ...knownCampaigns.filter(item => item?.id && String(item.status).toUpperCase() === 'ACTIVE').map(item => String(item.id)),
@@ -169,7 +170,7 @@ export function buildDashboard({
   const adsConnected = Boolean(ads?.connected);
   const kpi = pick => ({ value: pick(stats.current), prev: pick(stats.prev) });
   const aov = item => (item.orders ? round(item.revenue / item.orders) : null);
-  const roas = item => (item.spend ? round(item.revenue / item.spend, 2) : null);
+  const freshAds = withAdsFreshness({ connected: adsConnected, syncedAt: ads?.syncedAt ?? adStore.syncedAt ?? null, ...(ads?.error ? { error: ads.error } : {}) }, now);
 
   return {
     range: { since, until, days: span },
@@ -180,7 +181,7 @@ export function buildDashboard({
       aov: kpi(aov),
       // Chưa nối tài khoản quảng cáo: chi tiêu/ROAS không biết (null), không phải 0.
       spend: adsConnected ? kpi(item => round(item.spend)) : { value: null, prev: null },
-      roas: adsConnected ? kpi(roas) : { value: null, prev: null },
+      roas: adsConnected ? { value: campaignReport.totals.roas, prev: previousCampaignReport.totals.roas } : { value: null, prev: null },
       newCustomers: kpi(item => item.newCustomers),
       conversations: kpi(item => item.conversations),
       conversionRate: kpi(item => ratio(item.converted, item.conversations, 4)),
@@ -195,11 +196,8 @@ export function buildDashboard({
       .slice(0, 5)
       .map(row => ({ id: row.id, name: row.name, source: row.source, spend: row.spend, orders: row.orders, revenue: row.revenue, roas: row.roas })),
     todo: dashboardTodo({ conversations, landingOrders, labels, followUpQueueLength, now }),
-    ads: {
-      connected: adsConnected,
-      syncedAt: ads?.syncedAt ?? adStore.syncedAt ?? null,
-      ...(ads?.error ? { error: ads.error } : {})
-    }
+    ads: freshAds,
+    definitions: METRIC_DEFINITIONS
   };
 }
 

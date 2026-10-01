@@ -9,11 +9,15 @@ import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './confi
 import { applyWebhookEvents } from './meta-webhook.mjs';
 import { qrCodeFromText } from './qr-bridge.mjs';
 import { isKnownQrCode } from './qr-scans.mjs';
-import { applyGenderGuess, conversationId as crmConversationId, publicConversation, readMessagingStore, reconcileCustomerGender, saveMessage, updateMessagingStore } from './messaging-store.mjs';
+import { applyGenderGuess, conversationId as crmConversationId, flushMessagingStore, publicConversation, readMessagingStore, reconcileCustomerGender, saveMessage, messageSenderFields, updateMessagingStore } from './messaging-store.mjs';
 import { matchesFollowUpText, recentFollowUpTexts } from './follow-up.mjs';
-import { genderFromName } from './processing/customer-info.mjs';
+import { genderFromMessage, genderFromName } from './processing/customer-info.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import { assertPublicHost } from './network-guard.mjs';
+import { AUTOMATED_ACTORS, appendAssignAudit, appendBotToggleAudit } from './audit-log.mjs';
+import { backoffPancake, withPancakeSlot } from './pancake-rate-limit.mjs';
+import { stickerFields } from './stickers.mjs';
+export { stickerInfo, LIKE_STICKER_IDS } from './stickers.mjs';
 
 // Đủ cấu hình khi có ít nhất một Page (mã + token API) và một token webhook: token chung
 // PANCAKE_WEBHOOK_TOKEN HAY token riêng của từng Page trong PANCAKE_PAGES (webhookToken).
@@ -128,11 +132,23 @@ export function pancakeGenderOf(conversation) {
 }
 
 /** Quảng cáo đưa khách tới hội thoại: Pancake chỉ cho ad_id và post_id của bài quảng cáo (tên tra riêng qua GET /ads). */
+/**
+ * Người được phân công hội thoại trong Pancake: tên (current_assign_users), thiếu tên thì mã.
+ * null khi gói không có assignee_ids (không biết), để nhật ký không ghi nhầm là "bỏ phân công".
+ */
+export function pancakeAssigneesOf(conversation = {}) {
+  if (!Array.isArray(conversation?.assignee_ids)) return null;
+  const names = new Map((Array.isArray(conversation.current_assign_users) ? conversation.current_assign_users : []).map(user => [String(user?.id || ''), String(user?.name || '').trim()]));
+  return conversation.assignee_ids.map(id => names.get(String(id)) || String(id)).filter(Boolean).sort();
+}
+
 function pancakeAdOf(conversation) {
   const ads = Array.isArray(conversation?.ads) ? conversation.ads : [];
   const latest = ads.at(-1);
   const adId = String(latest?.ad_id || (Array.isArray(conversation?.ad_ids) ? conversation.ad_ids.at(-1) : '') || '');
-  return adId ? { adId, postId: String(latest?.post_id || '') } : null;
+  // `inserted_at` của mục quảng cáo = lúc khách bấm (mốc cho báo cáo chiến dịch); không có thì 0 (dùng giờ tin).
+  const at = latest?.inserted_at ? pancakeTime(latest.inserted_at, 0) : 0;
+  return adId ? { adId, postId: String(latest?.post_id || ''), ...(at ? { at } : {}) } : null;
 }
 
 /** Bài viết Pancake (webhook data.post hay `post` của API tin) → bối cảnh bài như bên Meta: id, nội dung, link, ảnh. */
@@ -186,6 +202,8 @@ export function pancakeCommentEvent(pageId, conversation, comment, post = {}, no
       customerName: String(conversation.from?.name || (fromPage ? '' : comment.from?.name) || '').trim(),
       pageCustomerId: String(comment.from?.page_customer_id || ''),
       assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
+      // Tên người được phân công (current_assign_users); null khi gói không kèm danh sách phân công.
+      assignees: pancakeAssigneesOf(conversation),
       staff: isStaffAdmin(adminName, pancakeMessageText(comment)),
       staffName: adminName,
       post: pancakePostContext(post) || { id: postId, message: '', permalink: `https://www.facebook.com/${postId}`, picture: '' },
@@ -236,6 +254,10 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
         text: pancakeMessageText({ message: quoted.message }) || (Array.isArray(quoted.attachments) && quoted.attachments.length ? '[Ảnh/tệp]' : 'tin nhắn')
       }
     : null;
+  // Nhãn dán (sticker, kể cả nút 👍): vẫn vẽ như ảnh, nhưng tin mang cờ sticker/like để bot không
+  // trả lời "em đã nhận được hình".
+  const stickerAttachment = attachments.find(item => kindOf(item) === 'sticker' || /\/stickers\//.test(String(item?.url || '')));
+  const sticker = stickerAttachment ? stickerFields({ ...stickerAttachment, sticker: true }) : {};
   const video = !photos.length && attachments.find(item => kindOf(item) === 'video' && item?.url);
   const media = photos.length
     ? { type: 'image', dataUrl: photos[0], ...(photos.length > 1 ? { images: photos } : {}) }
@@ -306,6 +328,7 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       type: media ? media.type : receipt ? 'order-receipt' : adClick ? 'ad' : text || cartText || addressText || !attachments.length ? 'text' : 'attachment',
       text: receipt ? 'Đã gửi xác nhận đơn hàng' : adClick ? adText : text || cartText || addressText || (attachments.length && !media ? '[Tệp đính kèm]' : ''),
       ...(media ? { dataUrl: media.dataUrl, name: '', ...(media.images ? { images: media.images } : {}) } : {}),
+      ...sticker,
       ...(cart.length ? { cart } : {}),
       ...(replyTo ? { replyTo } : {}),
       // Nhân viên gõ trong Pancake: dấu trên tin để đường đồng bộ (không qua webhook) cũng biết mà nhường.
@@ -320,6 +343,8 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       pageCustomerId: String(message.from?.page_customer_id || ''),
       // Hội thoại đã có nhân viên nhận thì bot đứng ngoài (trừ khi cấu hình cho phép).
       assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
+      // Tên người được phân công (current_assign_users); null khi gói không kèm danh sách phân công.
+      assignees: pancakeAssigneesOf(conversation),
       staff: outgoing && isStaffAdmin(adminName, text),
       staffName: adminName,
       // Khách đến từ quảng cáo: ghi như referral của Meta để bot biết sản phẩm.
@@ -337,28 +362,38 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
 // đưa bot (tin cũ không phải để trả lời).
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
+/**
+ * Một lần gọi Pancake qua hàng đợi giới hạn tốc độ của Page (pancake-rate-limit.mjs): đồng hồ
+ * hủy (`timeoutMs`) chỉ chạy từ lúc thật sự gọi, không tính thời gian xếp hàng. Trả { response, body }.
+ */
+function pancakeFetch(pageId, url, init, fetchImpl, timeoutMs) {
+  return withPancakeSlot(pageId, async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetchImpl(url, { ...init, signal: controller.signal });
+      let body = {};
+      try { body = await response.json(); } catch {}
+      return { response, body };
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+}
+
 // Pancake giới hạn 5 lần gọi mỗi giây cho mỗi Page; quá thì trả 429 "Too many
-// requests". Gặp 429 thì nghỉ rồi gọi lại (tối đa 3 lần).
+// requests". Gặp 429 thì cả Page lùi lại rồi gọi lại (tối đa 3 lần).
 async function pancakeGet(pathname, params, config, fetchImpl, attempt = 0) {
   const url = new URL(`${config.apiBase.replace(/\/+$/, '')}${pathname}`);
   url.searchParams.set('page_access_token', config.pageAccessToken);
   for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const response = await fetchImpl(url, { signal: controller.signal });
-    let body = {};
-    try { body = await response.json(); } catch {}
-    if (response.status === 429 && attempt < 3) {
-      clearTimeout(timer);
-      await pause(1500 * (attempt + 1));
-      return pancakeGet(pathname, params, config, fetchImpl, attempt + 1);
-    }
-    if (!response.ok || body.success === false) throw new Error(`Pancake trả về ${response.status}: ${body.message || body.error || 'không rõ lý do'}`);
-    return body;
-  } finally {
-    clearTimeout(timer);
+  const { response, body } = await pancakeFetch(config.pageId, url, {}, fetchImpl, 20000);
+  if (response.status === 429 && attempt < 3) {
+    backoffPancake(config.pageId, 1500 * (attempt + 1));
+    return pancakeGet(pathname, params, config, fetchImpl, attempt + 1);
   }
+  if (!response.ok || body.success === false) throw new Error(`Pancake trả về ${response.status}: ${body.message || body.error || 'không rõ lý do'}`);
+  return body;
 }
 
 /** Hội thoại mới nhất của Page theo loại (INBOX hay COMMENT), nhiều nhất `limit`, lùi dần bằng last_conversation_id. */
@@ -517,55 +552,77 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
   const allFailures = [];
   const collected = [];
 
-  for (const page of pages) {
-    const pId = String(page.pageId);
-    if (!pId || !page.pageAccessToken) continue;
-    const conversations = await fetchPancakeConversations({ limit }, page, fetchImpl);
-    for (const [index, conversation] of conversations.entries()) {
-      if (index) await pause(200);
-      try {
-        const messages = await fetchPancakeMessages(conversation.id, { pages: messagePages }, page, fetchImpl);
-        const events = messages
-          .map(message => pancakeMessageEvent(pId, conversation, message))
-          .filter(Boolean)
-          .sort((first, second) => first.timestamp - second.timestamp);
-        const changes = await storePancakeEvents(events);
-        collected.push(...changes);
-        totalStored += changes.filter(change => change.type === 'message').length;
-      } catch (error) {
-        allFailures.push(`${conversation.id}: ${error.message}`);
-      }
+  // Mỗi bước bọc riêng: Pancake trả 500 / hủy giữa chừng ở một hội thoại, ở danh sách bình luận hay
+  // ở bước tra quảng cáo thì chỉ bước đó hỏng; tin đã ghi trước đó vẫn được đưa bot ở cuối lượt
+  // (trước đây một lỗi ném ra khỏi hàm là mất cả phần đã đồng bộ → bot bỏ sót khách).
+  const step = async (label, task, fallback = null) => {
+    try {
+      return await task();
+    } catch (error) {
+      allFailures.push(`${label}: ${error.message}`);
+      return fallback;
     }
-    const store = await readMessagingStore();
-    const pendingAds = store.conversations.filter(item => item.pageId === pId && needsAdContext(item));
-    if (pendingAds.length) await enrichPancakeAdContext(pendingAds, page, fetchImpl);
-    const threads = commentLimit > 0 ? await fetchPancakeConversations({ limit: commentLimit, type: 'COMMENT' }, page, fetchImpl) : [];
-    for (const thread of threads) {
-      await pause(200);
-      try {
-        const comments = await fetchPancakeMessages(thread.id, { pages: 1 }, page, fetchImpl);
-        const post = comments.post || { id: thread.post_id };
-        const events = comments
-          .map(comment => pancakeCommentEvent(pId, thread, comment, post))
-          .filter(Boolean)
-          .sort((first, second) => (first.parentId ? 1 : 0) - (second.parentId ? 1 : 0) || first.timestamp - second.timestamp);
-        const changes = await storePancakeEvents(events);
-        collected.push(...changes);
-        totalStored += changes.filter(change => change.type === 'message').length;
-      } catch (error) {
-        allFailures.push(`${thread.id}: ${error.message}`);
+  };
+  // Ghi kho gộp: cả lượt chỉ sửa bộ nhớ, ghi đĩa một lần ở cuối (finally) thay vì mỗi hội thoại một lần.
+  const store = events => storePancakeEvents(events, { deferWrite: true });
+  try {
+    for (const page of pages) {
+      const pId = String(page.pageId);
+      if (!pId || !page.pageAccessToken) continue;
+      const conversations = await step(`${pId} danh sách hội thoại`, () => fetchPancakeConversations({ limit }, page, fetchImpl), []);
+      for (const [index, conversation] of conversations.entries()) {
+        if (index) await pause(200);
+        await step(conversation.id, async () => {
+          const messages = await fetchPancakeMessages(conversation.id, { pages: messagePages }, page, fetchImpl);
+          const events = messages
+            .map(message => pancakeMessageEvent(pId, conversation, message))
+            .filter(Boolean)
+            .sort((first, second) => first.timestamp - second.timestamp);
+          const changes = await store(events);
+          collected.push(...changes);
+          totalStored += changes.filter(change => change.type === 'message').length;
+        });
       }
+      await step(`${pId} quảng cáo`, async () => {
+        const current = await readMessagingStore();
+        const pendingAds = current.conversations.filter(item => item.pageId === pId && needsAdContext(item));
+        if (pendingAds.length) await enrichPancakeAdContext(pendingAds, page, fetchImpl);
+      });
+      const threads = commentLimit > 0
+        ? await step(`${pId} danh sách bình luận`, () => fetchPancakeConversations({ limit: commentLimit, type: 'COMMENT' }, page, fetchImpl), [])
+        : [];
+      for (const thread of threads) {
+        await pause(200);
+        await step(thread.id, async () => {
+          const comments = await fetchPancakeMessages(thread.id, { pages: 1 }, page, fetchImpl);
+          const post = comments.post || { id: thread.post_id };
+          const events = comments
+            .map(comment => pancakeCommentEvent(pId, thread, comment, post))
+            .filter(Boolean)
+            .sort((first, second) => (first.parentId ? 1 : 0) - (second.parentId ? 1 : 0) || first.timestamp - second.timestamp);
+          const changes = await store(events);
+          collected.push(...changes);
+          totalStored += changes.filter(change => change.type === 'message').length;
+        });
+      }
+      totalConversations += conversations.length + threads.length;
     }
-    totalConversations += conversations.length + threads.length;
+  } catch (error) {
+    // Lỗi ngoài dự kiến (không thuộc bước nào): vẫn đi tiếp để tin đã ghi tới được bot.
+    allFailures.push(`đồng bộ: ${error.message}`);
+  } finally {
+    await flushMessagingStore().catch(error => allFailures.push(`ghi kho: ${error.message}`));
   }
   // Webhook không tới (Pancake tạm ngưng, dịch vụ khởi động lại): tin mới chưa ai trả lời vẫn được bot xử lý.
   let bot = 0;
   if (processChatbotChanges && collected.length) {
-    const missed = missedBotChanges(collected, await readMessagingStore(), { windowMs: botWindowMs, botWhenAssigned: Boolean(config.botWhenAssigned) });
-    if (missed.length) {
-      bot = missed.length;
-      try { await processChatbotChanges(missed, chatbotDependencies); } catch (error) { allFailures.push(`bot: ${error.message}`); }
-    }
+    await step('bot', async () => {
+      const missed = missedBotChanges(collected, await readMessagingStore(), { windowMs: botWindowMs, botWhenAssigned: Boolean(config.botWhenAssigned) });
+      if (missed.length) {
+        bot = missed.length;
+        await processChatbotChanges(missed, chatbotDependencies);
+      }
+    });
   }
   return { conversations: totalConversations, messages: totalStored, ...(bot ? { bot } : {}), ...(allFailures.length ? { failures: allFailures } : {}) };
 }
@@ -637,12 +694,27 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, quickMs = 2 * 60
   return pancakeSyncTimer;
 }
 
+// Dấu vân tay các hội thoại (và tin) mà lô sự kiện chạm tới: đồng bộ chạy lại trên tin đã có thì
+// không đổi gì → không ghi kho (tệp ~19 MB). Rẻ: chỉ vài hội thoại của đúng khách trong lô.
+function touchedFingerprint(store, keys) {
+  const parts = [store.conversations.length, Object.keys(store.commentIndex || {}).length];
+  for (const conversation of store.conversations) {
+    if (!keys.has(`${conversation.pageId}:${conversation.psid}`)) continue;
+    parts.push(JSON.stringify(conversation), JSON.stringify(store.messages[conversation.id] || []));
+  }
+  return parts.join('\u0000');
+}
+
 /**
  * Ghi tin vào hộp thư và trả về các thay đổi cho bot. Ghi thêm mã hội thoại
  * Pancake và tên khách lên hội thoại CRM để còn gửi trả lời đúng chỗ.
+ * `deferWrite: true` (đường đồng bộ): kho chỉ sửa trong bộ nhớ, ghi đĩa gộp sau (runPancakeSync
+ * gọi flushMessagingStore cuối lượt). Webhook giữ ghi ngay.
  */
-export async function storePancakeEvents(incomingEvents, { fromWebhook = false } = {}) {
+export async function storePancakeEvents(incomingEvents, { fromWebhook = false, deferWrite = false } = {}) {
   if (!incomingEvents.length) return [];
+  const touchedKeys = new Set(incomingEvents.map(event => `${event.pageId}:${event.psid}`));
+  let touched = true;
   // Tin bám đuổi do trạm gửi (extension Pancake) gửi: Pancake ghi admin_name là nhân viên đang mở
   // trình duyệt (28/09: 6 tin "Dạ chị ơi, Giọt Nắng gửi chị ưu đãi riêng…" mang tên một nhân viên)
   // → trước đây bị coi là nhân viên nhắn: bot tắt, khách trả lời bám đuổi thì bot im. Tin Page mang
@@ -654,91 +726,164 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false }
     if (!matchesFollowUpText(entries, event.message)) continue;
     delete event.message.staff;
     delete event.message.staffName;
+    event.message.sender = 'bot';
     event.message.followUp = true;
     event.pancake = { ...event.pancake, staff: false, followUp: true };
   }
+  // Bot tự tắt / phân công đổi: ghi nhật ký sau khi lưu kho (ngoài hàng đợi ghi của kho).
+  const automaticAudits = [];
   const changes = await updateMessagingStore(store => {
-    // Tin nhắn riêng CRM gửi từ bình luận đã nằm ở hộp thư của khách; Pancake
-    // dội lại bản đó trong luồng bình luận thì không ghi thành bình luận của Page.
-    const events = incomingEvents.filter(event => !(event.type === 'comment' && event.fromPage
-      && (store.messages[`${event.pageId}:${event.psid}`] || []).some(item => item.id === event.commentId && item.privateReply)));
-    if (!events.length) return [];
-    // Tin ảnh đã có URL từ trước thì bản dội lại không có gì mới để báo hộp thư.
-    const lackedPicture = new Set(events
-      .filter(event => event.type === 'message' && event.message.dataUrl)
-      .filter(event => {
-        const id = `${event.pageId}:${event.psid}`;
-        const stored = (store.messages[id] || []).find(item => item.id === event.message.id);
-        return stored && !stored.dataUrl;
-      })
-      .map(event => event.message.id));
-    const applied = applyWebhookEvents(store, events);
-    for (const event of events) {
-      const isComment = event.type === 'comment';
-      const messageId = isComment ? event.commentId : event.message.id;
-      // Luồng bình luận: applyCommentEvent đã ghi mã bình luận → mã luồng.
-      const conversation = isComment
-        ? store.conversations.find(item => item.id === store.commentIndex?.[messageId]) || null
-        : store.conversations.find(item => item.pageId === event.pageId && item.psid === event.psid && item.source !== 'comment');
-      if (!conversation) continue;
-      if (event.pancake.conversationId) conversation.pancakeConversationId = event.pancake.conversationId;
-      if (event.pancake.pageCustomerId) conversation.pancakePageCustomerId = event.pancake.pageCustomerId;
-      const inserted = applied.some(change => change.message?.id === messageId && !change.updated);
-      if (isComment) {
-        // Bài viết đi kèm bình luận: nội dung bài là thứ bot dùng để đoán sản phẩm.
-        const post = event.pancake.post;
-        if (post?.id && (!conversation.post?.message || conversation.post.id !== post.id)) {
-          conversation.post = { ...(conversation.post || {}), ...post, message: post.message || conversation.post?.message || '' };
-        }
-      } else {
-        // Ảnh CRM gửi đi được ghi trước khi Pancake dội lại; bản dội mang URL ảnh
-        // trên CDN (đã gộp vào tin cùng mã), báo cho hộp thư vẽ lại.
-        if (!inserted && lackedPicture.has(messageId)) {
-          const stored = (store.messages[conversation.id] || []).find(item => item.id === messageId);
-          // `updated`: hộp thư vẽ lại; bot bỏ qua (tin cũ, đã trả lời) để không trả lời lần hai.
-          if (stored) applied.push({ type: 'message', conversation, message: stored, updated: true });
-        }
-        // Khách đến từ quảng cáo: ghi referral như Meta (nguồn 'ADS', tên quảng
-        // cáo tra sau bằng enrichPancakeAdContext). Chỉ ghi khi quảng cáo đổi.
-        const ad = event.pancake.ad;
-        if (ad && (conversation.referral?.adId !== ad.adId || (ad.adTitle && !conversation.referral?.adTitle))) {
-          const referral = { ref: '', source: 'ADS', adId: ad.adId, adTitle: ad.adTitle || '', postId: ad.postId, photoUrl: ad.photoUrl || '' };
-          conversation.referrals = [...(conversation.referrals || []), { ...referral, at: Date.now() }].slice(-20);
-          conversation.referral = referral;
-        }
-      }
-      // Nhân viên trả lời trong Pancake (tin mới, không phải tin dội lại của
-      // CRM, không phải lịch sử kéo về): bot đứng ngoài hội thoại này cho tới
-      // khi bật lại trong CRM, để không nói chen vào người thật.
-      const recentStaff = event.pancake.staff && Date.now() - (Number(event.message?.createdAt || event.timestamp) || 0) < 60 * 60 * 1000;
-      if ((fromWebhook || recentStaff) && inserted && event.pancake.staff && conversation.botEnabled !== false) {
-        conversation.botEnabled = false;
-        conversation.botPausedBy = event.pancake.staffName;
-        conversation.botPausedAt = Date.now();
-      }
-      // Ảnh khách: Pancake có đường công khai chuyển hướng tới ảnh trên CDN, không cần token.
-      if (!conversation.picture && conversation.psid) {
-        conversation.picture = pancakeAvatarUrl(event.pageId, conversation.psid);
-        conversation.profileResolvedAt = conversation.profileResolvedAt || Date.now();
-      }
-      // Tên mặc định của hộp thư ("Khách Facebook 1234") thay bằng tên Pancake biết.
-      if (event.pancake.customerName && (!conversation.name || /^Khách Facebook \d*$/.test(conversation.name))) conversation.name = event.pancake.customerName;
-      // Giới tính trong hồ sơ Pancake: hơn bản đoán theo tên/xưng hô, kém nhân viên chọn tay; đổi thì báo hộp thư.
-      // Không có trong hồ sơ thì đoán theo tên; rồi dồn cho mọi luồng của cùng khách.
-      const genderChanged = (event.pancake.gender && applyGenderGuess(conversation, event.pancake.gender, 'pancake'))
-        || applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
-      const reconciled = reconcileCustomerGender(store, conversation);
-      for (const changed of [...(genderChanged ? [conversation] : []), ...reconciled]) {
-        if (!applied.some(change => change.type === 'conversation' && change.conversation?.id === changed.id)) applied.push({ type: 'conversation', conversation: changed });
-      }
-      conversation.pancakeAssigned = event.pancake.assigned;
-    }
+    const before = touchedFingerprint(store, touchedKeys);
+    const applied = applyPancakeEventsToStore(store, incomingEvents, { fromWebhook, automaticAudits });
+    touched = touchedFingerprint(store, touchedKeys) !== before;
     return applied;
-  });
+  }, { defer: deferWrite, unchanged: () => !touched });
+  for (const item of automaticAudits) {
+    if (item.kind === 'bot') appendBotToggleAudit({ actor: AUTOMATED_ACTORS.system, conversation: item.conversation, enabled: false, reason: item.reason });
+    else appendAssignAudit({ actor: AUTOMATED_ACTORS.system, conversation: item.conversation, from: item.from, to: item.to, reason: 'Pancake' });
+  }
   for (const change of changes) {
     publishMessagingEvent(change.conversation ? { ...change, conversation: publicConversation(change.conversation) } : change);
   }
   return changes;
+}
+
+/**
+ * Lần bấm quảng cáo (referral 'ADS') từ một tin Pancake. Mốc là giờ của TIN (tin ad_click, hay tin đầu
+ * tiên mang quảng cáo trong hội thoại), không phải lúc đồng bộ kéo về (trước 01/10: Date.now() — đồng bộ
+ * lần đầu sau khởi động dán mốc "bây giờ" cho mọi hội thoại cũ, báo cáo chiến dịch quy đơn sai).
+ *  - quảng cáo mới (khác adId): thêm một lần bấm vào lịch sử `referrals`, `referral` = quảng cáo này
+ *    (firstAt = lastAt = giờ tin);
+ *  - cùng quảng cáo, tên quảng cáo vừa có: điền tên, KHÔNG thêm lần bấm (trước đây thêm → đếm trùng);
+ *  - khách bấm LẠI cùng quảng cáo (tin ad_click mới): thêm lần bấm mới (quy đơn theo lần bấm gần nhất),
+ *    `referral.lastAt` = mốc mới nhất, `referral.firstAt` giữ mốc lần đầu.
+ * Đồng bộ kéo lại đúng tin đã có thì không đổi gì.
+ */
+export function applyPancakeAdReferral(conversation, event, { inserted = true } = {}) {
+  const ad = event?.pancake?.ad;
+  if (!ad?.adId) return false;
+  // Giờ bấm: mục quảng cáo của hội thoại (ads[].inserted_at), không có thì giờ của tin mang quảng cáo.
+  const clickedAt = Number(ad.at) || Number(event.message?.createdAt) || Number(event.timestamp) || Date.now();
+  const current = conversation.referral;
+  const sameAd = Boolean(current) && current.adId === ad.adId;
+  const history = Array.isArray(conversation.referrals) ? conversation.referrals : [];
+  if (!sameAd) {
+    const referral = { ref: '', source: 'ADS', adId: ad.adId, adTitle: ad.adTitle || '', postId: ad.postId, photoUrl: ad.photoUrl || '', firstAt: clickedAt, lastAt: clickedAt };
+    conversation.referrals = [...history, { ref: '', source: 'ADS', adId: ad.adId, adTitle: referral.adTitle, postId: ad.postId, photoUrl: referral.photoUrl, at: clickedAt }].slice(-20);
+    conversation.referral = referral;
+    return true;
+  }
+  let changed = false;
+  if (ad.adTitle && !current.adTitle) {
+    conversation.referral = { ...current, adTitle: ad.adTitle, photoUrl: current.photoUrl || ad.photoUrl || '' };
+    const lastIndex = history.map(item => item?.adId).lastIndexOf(ad.adId);
+    if (lastIndex >= 0 && !history[lastIndex].adTitle) {
+      conversation.referrals = history.map((item, index) => (index === lastIndex ? { ...item, adTitle: ad.adTitle } : item));
+    }
+    changed = true;
+  }
+  // Bấm lại: tin ad_click MỚI, hay mục quảng cáo của hội thoại mang mốc bấm mới hơn lần đã ghi. Tin thường
+  // không mốc bấm, hay tin kéo lại, thì không. Dữ liệu cũ chưa có lastAt: lấy lần bấm cuối trong lịch sử.
+  const lastClick = Number(conversation.referral.lastAt)
+    || Math.max(0, ...history.filter(item => item?.adId === ad.adId).map(item => Number(item.at) || 0));
+  const reclick = ((inserted && event.message?.type === 'ad') || Number(ad.at) > 0) && clickedAt > lastClick
+    && !history.some(item => item?.adId === ad.adId && Number(item.at) === clickedAt);
+  if (reclick) {
+    const referral = conversation.referral;
+    conversation.referral = { ...referral, firstAt: Number(referral.firstAt) || Number(history.find(item => item?.adId === ad.adId)?.at) || clickedAt, lastAt: clickedAt };
+    conversation.referrals = [...(conversation.referrals || history), { ref: '', source: 'ADS', adId: ad.adId, adTitle: referral.adTitle || '', postId: referral.postId || ad.postId, photoUrl: referral.photoUrl || '', at: clickedAt }].slice(-20);
+    changed = true;
+  }
+  return changed;
+}
+
+function applyPancakeEventsToStore(store, incomingEvents, { fromWebhook, automaticAudits }) {
+  // Tin nhắn riêng CRM gửi từ bình luận đã nằm ở hộp thư của khách; Pancake
+  // dội lại bản đó trong luồng bình luận thì không ghi thành bình luận của Page.
+  const events = incomingEvents.filter(event => !(event.type === 'comment' && event.fromPage
+    && (store.messages[`${event.pageId}:${event.psid}`] || []).some(item => item.id === event.commentId && item.privateReply)));
+  if (!events.length) return [];
+  // Tin ảnh đã có URL từ trước thì bản dội lại không có gì mới để báo hộp thư.
+  const lackedPicture = new Set(events
+    .filter(event => event.type === 'message' && event.message.dataUrl)
+    .filter(event => {
+      const id = `${event.pageId}:${event.psid}`;
+      const stored = (store.messages[id] || []).find(item => item.id === event.message.id);
+      return stored && !stored.dataUrl;
+    })
+    .map(event => event.message.id));
+  const applied = applyWebhookEvents(store, events);
+  for (const event of events) {
+    const isComment = event.type === 'comment';
+    const messageId = isComment ? event.commentId : event.message.id;
+    // Luồng bình luận: applyCommentEvent đã ghi mã bình luận → mã luồng.
+    const conversation = isComment
+      ? store.conversations.find(item => item.id === store.commentIndex?.[messageId]) || null
+      : store.conversations.find(item => item.pageId === event.pageId && item.psid === event.psid && item.source !== 'comment');
+    if (!conversation) continue;
+    if (event.pancake.conversationId) conversation.pancakeConversationId = event.pancake.conversationId;
+    if (event.pancake.pageCustomerId) conversation.pancakePageCustomerId = event.pancake.pageCustomerId;
+    const inserted = applied.some(change => change.message?.id === messageId && !change.updated);
+    if (isComment) {
+      // Bài viết đi kèm bình luận: nội dung bài là thứ bot dùng để đoán sản phẩm.
+      const post = event.pancake.post;
+      if (post?.id && (!conversation.post?.message || conversation.post.id !== post.id)) {
+        conversation.post = { ...(conversation.post || {}), ...post, message: post.message || conversation.post?.message || '' };
+      }
+    } else {
+      // Ảnh CRM gửi đi được ghi trước khi Pancake dội lại; bản dội mang URL ảnh
+      // trên CDN (đã gộp vào tin cùng mã), báo cho hộp thư vẽ lại.
+      if (!inserted && lackedPicture.has(messageId)) {
+        const stored = (store.messages[conversation.id] || []).find(item => item.id === messageId);
+        // `updated`: hộp thư vẽ lại; bot bỏ qua (tin cũ, đã trả lời) để không trả lời lần hai.
+        if (stored) applied.push({ type: 'message', conversation, message: stored, updated: true });
+      }
+      // Khách đến từ quảng cáo: ghi referral như Meta (nguồn 'ADS', tên quảng
+      // cáo tra sau bằng enrichPancakeAdContext).
+      applyPancakeAdReferral(conversation, event, { inserted });
+    }
+    // Nhân viên trả lời trong Pancake (tin mới, không phải tin dội lại của
+    // CRM, không phải lịch sử kéo về): bot đứng ngoài hội thoại này cho tới
+    // khi bật lại trong CRM, để không nói chen vào người thật.
+    const recentStaff = event.pancake.staff && Date.now() - (Number(event.message?.createdAt || event.timestamp) || 0) < 60 * 60 * 1000;
+    if ((fromWebhook || recentStaff) && inserted && event.pancake.staff && conversation.botEnabled !== false) {
+      conversation.botEnabled = false;
+      conversation.botPausedBy = event.pancake.staffName;
+      conversation.botPausedAt = Date.now();
+      automaticAudits.push({ kind: 'bot', conversation: { id: conversation.id, name: conversation.name || '' }, reason: `${event.pancake.staffName || 'nhân viên'} nhắn trong Pancake` });
+    }
+    // Ảnh khách: Pancake có đường công khai chuyển hướng tới ảnh trên CDN, không cần token.
+    if (!conversation.picture && conversation.psid) {
+      conversation.picture = pancakeAvatarUrl(event.pageId, conversation.psid);
+      conversation.profileResolvedAt = conversation.profileResolvedAt || Date.now();
+    }
+    // Tên mặc định của hộp thư ("Khách Facebook 1234") thay bằng tên Pancake biết.
+    if (event.pancake.customerName && (!conversation.name || /^Khách Facebook \d*$/.test(conversation.name))) conversation.name = event.pancake.customerName;
+    // Giới tính trong hồ sơ Pancake: hơn bản đoán theo tên/xưng hô, kém nhân viên chọn tay; đổi thì báo hộp thư.
+    // Không có trong hồ sơ thì đoán theo tên; rồi dồn cho mọi luồng của cùng khách.
+    // Khách tự xưng trong tin vừa đến ("Lấy chị 1 túi vàng"): bằng chứng mạnh hơn hồ sơ Pancake (GENDER_SOURCE_RANK).
+    const selfGender = !isComment && inserted && event.message?.direction === 'incoming' ? genderFromMessage(event.message.text) : '';
+    const selfChanged = Boolean(selfGender) && applyGenderGuess(conversation, selfGender, 'message');
+    const genderChanged = selfChanged
+      || (event.pancake.gender && applyGenderGuess(conversation, event.pancake.gender, 'pancake'))
+      || applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
+    const reconciled = reconcileCustomerGender(store, conversation);
+    for (const changed of [...(genderChanged ? [conversation] : []), ...reconciled]) {
+      if (!applied.some(change => change.type === 'conversation' && change.conversation?.id === changed.id)) applied.push({ type: 'conversation', conversation: changed });
+    }
+    conversation.pancakeAssigned = event.pancake.assigned;
+    // Phân công trong Pancake đổi: lịch sử hội thoại (nhật ký, người làm 'system'). Lần đầu thấy
+    // danh sách chỉ ghi nhớ (không biết trước đó là ai), gói không kèm danh sách thì bỏ qua.
+    const assignees = Array.isArray(event.pancake.assignees) ? event.pancake.assignees : null;
+    if (assignees) {
+      const previous = Array.isArray(conversation.pancakeAssignees) ? conversation.pancakeAssignees : null;
+      if (previous && previous.join('|') !== assignees.join('|')) {
+        automaticAudits.push({ kind: 'assign', conversation: { id: conversation.id, name: conversation.name || '' }, from: previous.join(', '), to: assignees.join(', ') });
+      }
+      conversation.pancakeAssignees = assignees;
+    }
+  }
+  return applied;
 }
 
 const apiRoot = config => config.apiBase.replace(/\/+$/, '');
@@ -763,37 +908,118 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
     : action === 'private_replies'
       ? { action, post_id: postId, message_id: commentId, from_id: fromId, ...content }
       : { action: 'reply_inbox', ...content };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
+  // Lần gửi trước của đúng tin này hết giờ chờ (không rõ đã tới khách chưa): kiểm tin của hội
+  // thoại trên Pancake trước, đã có thì coi như đã gửi, chưa chắc thì không gửi lại.
+  const uncertainKey = uncertainSendKey({ pageId, conversationId, action, commentId, text, contentIds });
+  if (attempt === 0 && uncertainSends.has(uncertainKey)) {
+    const recovered = await resolveUncertainSend(uncertainKey, pageConfig, fetchImpl);
+    if (recovered) return recovered;
+  }
+  let response;
+  let body;
   try {
-    const response = await fetchImpl(url, {
+    ({ response, body } = await pancakeFetch(pageId, url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-    let body = {};
-    try { body = await response.json(); } catch {}
-    // Quá 5 lần gọi/giây: nghỉ rồi gửi lại (tối đa 3 lần).
-    if (response.status === 429 && attempt < 3) {
-      clearTimeout(timer);
-      await pause(1500 * (attempt + 1));
-      return sendPancakeMessage({ pageId, conversationId, text, contentIds, action, commentId, postId, fromId }, config, fetchImpl, attempt + 1);
-    }
-    if (!response.ok || body.success === false) {
-      // Pancake hay trả 200 + success:false, lý do nằm trong original_error.
-      // Mã lỗi hay gặp dịch sang tiếng Việt để panel khách đọc được thay vì JSON thô.
-      const known = { invalid_upload_fb_attachments_result: 'Facebook từ chối ảnh vừa tải lên (invalid_upload_fb_attachments_result)' };
-      const reason = body.message || body.error
-        || (body.original_error && (typeof body.original_error === 'string' ? body.original_error : JSON.stringify(body.original_error).slice(0, 300)))
-        || known[body.message_code]
-        || `phản hồi: ${JSON.stringify(body).slice(0, 300)}`;
-      throw new Error(`Pancake không nhận tin (${response.status}): ${reason}`);
-    }
-    return { id: String(body.id || body.message_id || `pancake-sent-${Date.now()}`) };
-  } finally {
-    clearTimeout(timer);
+      body: JSON.stringify(payload)
+    }, fetchImpl, 15000));
+  } catch (error) {
+    // Hết giờ / đứt kết nối sau khi yêu cầu đã đi: Pancake có thể đã gửi cho khách.
+    if (!isUncertainSendError(error)) throw error;
+    throw markUncertainSend(uncertainKey, { pageId, conversationId, action, fromId, text, contentIds }, error.name === 'AbortError' ? 'hết giờ chờ 15 giây' : error.message);
   }
+  // Quá 5 lần gọi/giây: cả Page lùi lại rồi gửi lại (tối đa 3 lần). 429 = Pancake chưa nhận, gửi lại an toàn.
+  if (response.status === 429 && attempt < 3) {
+    backoffPancake(pageId, 1500 * (attempt + 1));
+    return sendPancakeMessage({ pageId, conversationId, text, contentIds, action, commentId, postId, fromId }, config, fetchImpl, attempt + 1);
+  }
+  // Cổng của Pancake hết giờ (502/504): yêu cầu có thể đã chạy xong phía sau.
+  if (response.status === 502 || response.status === 504) {
+    throw markUncertainSend(uncertainKey, { pageId, conversationId, action, fromId, text, contentIds }, `Pancake trả ${response.status}`);
+  }
+  if (!response.ok || body.success === false) {
+    // Pancake hay trả 200 + success:false, lý do nằm trong original_error.
+    // Mã lỗi hay gặp dịch sang tiếng Việt để panel khách đọc được thay vì JSON thô.
+    const known = { invalid_upload_fb_attachments_result: 'Facebook từ chối ảnh vừa tải lên (invalid_upload_fb_attachments_result)' };
+    const reason = body.message || body.error
+      || (body.original_error && (typeof body.original_error === 'string' ? body.original_error : JSON.stringify(body.original_error).slice(0, 300)))
+      || known[body.message_code]
+      || `phản hồi: ${JSON.stringify(body).slice(0, 300)}`;
+    throw new Error(`Pancake không nhận tin (${response.status}): ${reason}`);
+  }
+  uncertainSends.delete(uncertainKey);
+  return { id: String(body.id || body.message_id || `pancake-sent-${Date.now()}`) };
+}
+
+// ===== Gửi "không rõ đã tới" =====
+//
+// Pancake không có khóa idempotency cho API gửi tin. Lần gửi hết giờ chờ (abort) hay cổng 502/504
+// có thể đã tới khách; người gọi thử lại (bot thử lại sau 3 giây) là khách nhận hai tin. Nên: ghi
+// lại lần gửi "không rõ", lần gửi lại đúng tin đó (cùng hội thoại, cùng kiểu, cùng chữ) phải kiểm
+// tin của hội thoại trên Pancake trước — thấy tin của Page khớp thì trả về như đã gửi, không gửi
+// lại; chưa thấy mà còn trong `uncertainGraceMs` (Pancake có thể còn đang xử lý) hay không kiểm
+// được thì báo lỗi "không rõ đã gửi", không gửi; quá hạn đó mà vẫn không thấy thì mới gửi lại.
+const uncertainSends = new Map();
+const uncertainTtlMs = 30 * 60 * 1000;
+const uncertainGraceMs = 30 * 1000;
+const compactWhitespace = value => String(value || '').replace(/\s+/g, ' ').trim();
+
+function uncertainSendKey({ pageId, conversationId, action, commentId, text, contentIds }) {
+  // Ảnh/tệp: mỗi lần gửi lại tải lên mã nội dung mới, nên khóa theo "có tệp" chứ không theo mã.
+  return [pageId, conversationId, action, commentId || '', contentIds?.length ? '[tệp]' : compactWhitespace(text)].join('|');
+}
+
+function isUncertainSendError(error) {
+  if (error?.name === 'AbortError' || error?.name === 'TimeoutError') return true;
+  // fetch failed: không kết nối được (DNS, từ chối kết nối) thì chắc chắn chưa gửi; đứt giữa chừng thì không rõ.
+  const code = String(error?.cause?.code || error?.code || '');
+  if (['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH'].includes(code)) return false;
+  return error instanceof TypeError && /fetch failed|terminated|socket/i.test(`${error.message} ${error.cause?.message || ''}`);
+}
+
+function markUncertainSend(key, { pageId, conversationId, action, fromId, text, contentIds }, reason) {
+  const now = Date.now();
+  for (const [entryKey, entry] of uncertainSends) if (now - entry.at > uncertainTtlMs) uncertainSends.delete(entryKey);
+  // Tin nhắn riêng (private_replies) nằm ở hộp thư của khách, không ở luồng bình luận.
+  const verifyConversationId = action === 'private_replies' && fromId ? `${pageId}_${fromId}` : conversationId;
+  uncertainSends.set(key, { at: now, pageId: String(pageId), verifyConversationId, text: compactWhitespace(text), attachment: Boolean(contentIds?.length) });
+  return Object.assign(new Error(`Pancake không rõ đã nhận tin (${reason}) — không rõ đã gửi; không tự gửi lại, lần gửi sau sẽ kiểm tin trên Pancake trước.`), { code: 'PANCAKE_SEND_UNCERTAIN', unknownDelivery: true });
+}
+
+/** Tin của Page khớp lần gửi "không rõ" trong `messages` (API tin của Pancake), hay null. */
+export function findUncertainSendMatch(messages, entry) {
+  const since = entry.at - 2 * 60 * 1000;
+  return (Array.isArray(messages) ? messages : []).find(message => {
+    if (String(message?.from?.id || '') !== String(entry.pageId)) return false;
+    if (pancakeTime(message.inserted_at, 0) < since) return false;
+    if (entry.attachment) return Array.isArray(message.attachments) && message.attachments.length > 0;
+    return compactWhitespace(pancakeMessageText(message)) === entry.text;
+  }) || null;
+}
+
+async function resolveUncertainSend(key, pageConfig, fetchImpl) {
+  const entry = uncertainSends.get(key);
+  if (!entry || Date.now() - entry.at > uncertainTtlMs) {
+    uncertainSends.delete(key);
+    return null;
+  }
+  let messages;
+  try {
+    messages = await fetchPancakeMessages(entry.verifyConversationId, { pages: 1 }, { ...pageConfig, pageId: entry.pageId }, fetchImpl);
+  } catch (error) {
+    throw Object.assign(new Error(`Tin trước không rõ đã gửi và chưa kiểm được trên Pancake (${error.message}) — không gửi lại để tránh khách nhận hai lần.`), { code: 'PANCAKE_SEND_UNCERTAIN', unknownDelivery: true });
+  }
+  const found = findUncertainSendMatch(messages, entry);
+  if (found) {
+    uncertainSends.delete(key);
+    return { id: String(found.id || `pancake-sent-${Date.now()}`), recovered: true };
+  }
+  if (Date.now() - entry.at < uncertainGraceMs) {
+    throw Object.assign(new Error('Tin trước không rõ đã gửi, Pancake chưa hiện tin — không gửi lại lúc này để tránh khách nhận hai lần.'), { code: 'PANCAKE_SEND_UNCERTAIN', unknownDelivery: true });
+  }
+  // Quá thời gian chờ mà Pancake vẫn không có tin: lần trước không tới, gửi lại được.
+  uncertainSends.delete(key);
+  return null;
 }
 
 /** Tải một tệp (ảnh, video…) lên Page trong Pancake; mã trả về dùng để gửi kèm tin. */
@@ -804,25 +1030,17 @@ export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg
   const url = `${apiRoot(config)}/v1/pages/${encodeURIComponent(pageId)}/upload_contents?page_access_token=${encodeURIComponent(pageConfig.pageAccessToken)}`;
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mime }), filename);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
-  try {
-    const response = await fetchImpl(url, { method: 'POST', body: form, signal: controller.signal });
-    let body = {};
-    try { body = await response.json(); } catch {}
-    // Quá 5 lần gọi/giây: nghỉ rồi tải lại (tối đa 3 lần).
-    if (response.status === 429 && attempt < 3) {
-      clearTimeout(timer);
-      await pause(1500 * (attempt + 1));
-      return uploadPancakeContent({ pageId, buffer, filename, mime }, config, fetchImpl, attempt + 1);
-    }
-    if (!response.ok || body.success === false || !body.id) {
-      throw new Error(`Pancake không nhận tệp (${response.status}): ${body.message || body.error || 'không rõ lý do'}`);
-    }
-    return { id: String(body.id), attachmentType: String(body.attachment_type || '') };
-  } finally {
-    clearTimeout(timer);
+  // Tải lên (chưa gửi cho khách): thử lại an toàn, nên chỉ cần đi qua hàng đợi giới hạn tốc độ.
+  const { response, body } = await pancakeFetch(pageId, url, { method: 'POST', body: form }, fetchImpl, 30000);
+  // Quá 5 lần gọi/giây: cả Page lùi lại rồi tải lại (tối đa 3 lần).
+  if (response.status === 429 && attempt < 3) {
+    backoffPancake(pageId, 1500 * (attempt + 1));
+    return uploadPancakeContent({ pageId, buffer, filename, mime }, config, fetchImpl, attempt + 1);
   }
+  if (!response.ok || body.success === false || !body.id) {
+    throw new Error(`Pancake không nhận tệp (${response.status}): ${body.message || body.error || 'không rõ lý do'}`);
+  }
+  return { id: String(body.id), attachmentType: String(body.attachment_type || '') };
 }
 
 const productImagesPath = path.join(projectRoot, 'data', 'processed', 'product-images');
@@ -951,15 +1169,15 @@ function decodeDataUrl(dataUrl) {
  * (attachment) tải lên Pancake trước rồi gửi bằng mã nội dung. Receipt/template
  * dùng bản chữ. Chữ đi kèm tệp được gửi thành tin riêng sau tệp.
  */
-// `staff: true` = nhân viên gửi từ CRM; `followUp: true` = tin bám đuổi (follow-up.mjs) — hai cờ ghi lên tin lưu.
-export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '', imageUrls = [], privateReply = false, staff = false, followUp = false }, config = defaultConfig, fetchImpl = fetch) {
+// `staff: true` (hay { name, username } của người gửi) = nhân viên gửi từ CRM; `followUp: true` = tin bám đuổi (follow-up.mjs) — hai cờ ghi lên tin lưu.
+export async function sendConversationMessageViaPancake(conversation, { text = '', templateText = '', attachment = null, imageUrl = '', imageUrls = [], privateReply = false, staff = false, sentBy = null, followUp = false }, config = defaultConfig, fetchImpl = fetch) {
   const body = String(templateText || text || '').trim();
   const target = { pageId: conversation.pageId, conversationId: conversation.pancakeConversationId };
   // Nhiều ảnh đi chung một tin (Facebook nhận tới 30 mã một lần), khách thấy một cụm ảnh thay vì từng ảnh lắc nhắc.
   const pictures = [...new Set([imageUrl, ...(Array.isArray(imageUrls) ? imageUrls : [])].map(item => String(item || '').trim()).filter(Boolean))].slice(0, 30);
   if (!body && !attachment && !pictures.length) throw Object.assign(new Error('Tin nhắn trống.'), { statusCode: 400 });
   // Trả lời bình luận (công khai hay nhắn riêng) cũng mang cờ nhân viên / bám đuổi như tin hộp thư.
-  if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply, staff, followUp }, config, fetchImpl);
+  if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply, staff, sentBy, followUp }, config, fetchImpl);
   let message;
   if (pictures.length) {
     // Tải tuần tự, nghỉ giữa các ảnh: Pancake giới hạn 5 lần gọi mỗi giây mỗi Page.
@@ -1011,7 +1229,7 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   }
   const saved = await updateMessagingStore(store => {
     // Nhân viên gửi từ CRM: gắn cờ staff như tin admin gửi trong Pancake (bot dùng để im khi nhân viên đang xử lý).
-    if (staff) Object.assign(message, { staff: true, staffName: 'CRM' });
+    Object.assign(message, messageSenderFields({ staff, sentBy }));
     if (followUp) message.followUp = true;
     const outcome = saveMessage(store, { pageId: conversation.pageId, psid: conversation.psid, message });
     outcome.conversation.unread = false;
@@ -1029,7 +1247,7 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
  * thừa bài viết và mang mã hội thoại inbox của Pancake ({page}_{psid}) để
  * các tin sau đi thẳng. Chỉ gửi được chữ (như Meta).
  */
-async function sendCommentReplyViaPancake(conversation, { text, privateReply, staff = false, followUp = false }, config, fetchImpl) {
+async function sendCommentReplyViaPancake(conversation, { text, privateReply, staff = false, sentBy = null, followUp = false }, config, fetchImpl) {
   if (!text) throw Object.assign(new Error('Bình luận chỉ trả lời được bằng chữ.'), { statusCode: 400 });
   if (!conversation.lastCommentId) throw Object.assign(new Error('Chưa có bình luận nào của khách để trả lời.'), { statusCode: 400 });
   const sent = await sendPancakeMessage({
@@ -1045,7 +1263,7 @@ async function sendCommentReplyViaPancake(conversation, { text, privateReply, st
     id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text, createdAt: Date.now(), status: 'sent',
     ...(privateReply ? { privateReply: true } : { commentId: sent.id, parentId: conversation.lastCommentId }),
     // Nhân viên trả lời bình luận từ CRM: cờ staff như tin hộp thư (bot im khi nhân viên đang xử lý).
-    ...(staff ? { staff: true, staffName: 'CRM' } : {}),
+    ...messageSenderFields({ staff, sentBy }),
     ...(followUp ? { followUp: true } : {})
   };
   const saved = await updateMessagingStore(store => {

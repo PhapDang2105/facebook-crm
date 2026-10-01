@@ -79,6 +79,70 @@ const MERGED_PROVINCES = {
   'an giang': ['kien giang']
 };
 
+// Vòng 12: tên phường/xã MỚI (sau 1/7/2025) hay gặp trong đơn, theo tỉnh mới. Danh mục kho
+// (dmhc.csv) vẫn là đơn vị cũ nên các tên này không tra được ở đó; khách ghi đúng tên mới
+// (có hay không có chữ "phường/xã") + tỉnh khớp là đủ → giữ nguyên chữ khách ghi, nhân viên
+// đối chiếu (ghi chú đơn). Không cần đủ cả nước: chỉ cần những nơi khách hay ghi; tên thiếu thì
+// bot vẫn hỏi lại một lần rồi nhận nguyên chữ (maxAddressAsks).
+const NEW_WARD_NAMES = {
+  'ho chi minh': 'Sài Gòn|Tân Định|Bến Thành|Cầu Ông Lãnh|Bàn Cờ|Xuân Hòa|Nhiêu Lộc|Xóm Chiếu|Khánh Hội|Vĩnh Hội|Chợ Quán|An Đông|Chợ Lớn|Bình Tây|Bình Tiên|Bình Phú|Phú Lâm|Tân Thuận|Phú Thuận|Tân Mỹ|Tân Hưng|Chánh Hưng|Phú Định|Bình Đông|Diên Hồng|Vườn Lài|Hòa Hưng|Minh Phụng|Bình Thới|Hòa Bình|Phú Thọ|Đông Hưng Thuận|Trung Mỹ Tây|Tân Thới Hiệp|Thới An|An Phú Đông|An Lạc|Bình Tân|Tân Tạo|Bình Trị Đông|Bình Hưng Hòa|Gia Định|Bình Thạnh|Bình Lợi Trung|Thạnh Mỹ Tây|Bình Quới|Hạnh Thông|An Nhơn|Gò Vấp|An Hội Đông|Thông Tây Hội|An Hội Tây|Đức Nhuận|Cầu Kiệu|Phú Nhuận|Tân Sơn Hòa|Tân Sơn Nhất|Tân Hòa|Bảy Hiền|Tân Bình|Tân Sơn|Tây Thạnh|Tân Sơn Nhì|Phú Thọ Hòa|Tân Phú|Phú Thạnh|Hiệp Bình|Thủ Đức|Tam Bình|Linh Xuân|Tăng Nhơn Phú|Long Bình|Long Phước|Long Trường|Cát Lái|Bình Trưng|Phước Long|An Khánh|Vĩnh Lộc|Tân Vĩnh Lộc|Bình Lợi|Tân Nhựt|Bình Chánh|Hưng Long|Bình Hưng|Bình Khánh|An Thới Đông|Cần Giờ|Củ Chi|Tân An Hội|Thái Mỹ|An Nhơn Tây|Nhuận Đức|Phú Hòa Đông|Bình Mỹ|Đông Thạnh|Hóc Môn|Xuân Thới Sơn|Bà Điểm|Nhà Bè|Hiệp Phước|Thạnh An|Thủ Dầu Một|Phú Lợi|Bình Dương|Phú An|Chánh Hiệp|Thuận An|Thuận Giao|Bình Hòa|Lái Thiêu|An Phú|Dĩ An|Đông Hòa|Tân Đông Hiệp|Bến Cát|Tân Uyên|Vũng Tàu|Tam Thắng|Rạch Dừa|Phước Thắng|Bà Rịa|Long Hương|Tam Long|Phú Mỹ|Tân Thành|Tân Phước|Tân Hải|Long Hải|Long Điền|Phước Hải|Đất Đỏ|Châu Pha|Ngãi Giao|Xuyên Mộc|Hồ Tràm|Bình Châu',
+  'ha noi': 'Hoàn Kiếm|Cửa Nam|Ba Đình|Ngọc Hà|Giảng Võ|Hai Bà Trưng|Vĩnh Tuy|Bạch Mai|Đống Đa|Kim Liên|Văn Miếu Quốc Tử Giám|Láng|Ô Chợ Dừa|Hồng Hà|Lĩnh Nam|Hoàng Mai|Vĩnh Hưng|Tương Mai|Định Công|Hoàng Liệt|Yên Sở|Thanh Xuân|Khương Đình|Phương Liệt|Cầu Giấy|Nghĩa Đô|Yên Hòa|Tây Hồ|Phú Thượng|Tây Tựu|Phú Diễn|Xuân Đỉnh|Đông Ngạc|Thượng Cát|Từ Liêm|Xuân Phương|Tây Mỗ|Đại Mỗ|Long Biên|Bồ Đề|Việt Hưng|Phúc Lợi|Hà Đông|Dương Nội|Yên Nghĩa|Phú Lương|Kiến Hưng|Thanh Liệt|Chương Mỹ|Sơn Tây|Tùng Thiện|Thanh Trì|Đại Thanh|Nam Phù|Ngọc Hồi|Gia Lâm|Thuận An|Bát Tràng|Phù Đổng|Đông Anh|Phúc Thịnh|Thư Lâm|Thiên Lộc|Vĩnh Thanh|Sóc Sơn|Kim Anh|Trung Giã|Đa Phúc|Nội Bài|Mê Linh|Yên Lãng|Tiến Thắng|Quang Minh|Tây Phương',
+  'da nang': 'Hải Châu|Hòa Cường|Thanh Khê|An Khê|An Hải|Sơn Trà|Ngũ Hành Sơn|Hòa Khánh|Hải Vân|Liên Chiểu|Cẩm Lệ|Hòa Xuân|Hòa Vang|Hòa Tiến|Bà Nà|Tam Kỳ|Hội An|Điện Bàn',
+  'hai phong': 'Thủy Nguyên|Thiên Hương|Hòa Bình|Nam Triệu|Bạch Đằng|Lưu Kiếm|Lê Ích Mộc|Hồng Bàng|Hồng An|Ngô Quyền|Gia Viên|Lê Chân|An Biên|Hải An|Đông Hải|Kiến An|Phù Liễn|Nam Đồ Sơn|Đồ Sơn|Hưng Đạo|Dương Kinh|An Dương|An Phong|Hải Dương|Lê Thanh Nghị|Việt Hòa|Thành Đông|Nam Đồng|Tân Hưng|Thạch Khôi|Tứ Minh|Ái Quốc|Chu Văn An|Chí Linh|Trần Hưng Đạo|Nguyễn Trãi|Kinh Môn',
+  'can tho': 'Ninh Kiều|Cái Khế|Tân An|An Bình|Thới An Đông|Bình Thủy|Long Tuyền|Cái Răng|Hưng Phú|Ô Môn|Phước Thới|Thới Long|Thốt Nốt|Vị Thanh|Ngã Bảy|Sóc Trăng|Phú Lợi|Mỹ Xuyên|Vĩnh Châu|Ngã Năm',
+  'nghe an': 'Thành Vinh|Trường Vinh|Vinh Hưng|Vinh Phú|Vinh Lộc|Cửa Lò|Hoàng Mai|Tân Mai|Quỳnh Mai|Thái Hòa|Tây Hiếu',
+  'thanh hoa': 'Hạc Thành|Quảng Phú|Đông Quang|Đông Sơn|Đông Tiến|Hàm Rồng|Nguyệt Viên|Sầm Sơn|Nam Sầm Sơn|Bỉm Sơn|Quang Trung|Ngọc Sơn|Tân Dân|Hải Lĩnh|Tĩnh Gia|Đào Duy Từ|Hải Bình|Trúc Lâm|Nghi Sơn',
+  'bac ninh': 'Kinh Bắc|Võ Cường|Vũ Ninh|Hạp Lĩnh|Nam Sơn|Từ Sơn|Tam Sơn|Đồng Nguyên|Phù Khê|Thuận Thành|Mão Điền|Trạm Lộ|Trí Quả|Song Liễu|Ninh Xá|Quế Võ|Phương Liễu|Nhân Hòa|Đào Viên|Bồng Lai|Chũ|Phượng Sơn|Bắc Giang|Đa Mai|Tiền Phong|Tân An|Yên Dũng|Tân Tiến|Cảnh Thụy|Việt Yên|Nếnh|Vân Hà',
+  'ninh binh': 'Hoa Lư|Nam Hoa Lư|Tây Hoa Lư|Tam Điệp|Yên Sơn|Trung Sơn|Nam Định|Thiên Trường|Đông A|Vị Khê|Thành Nam|Trường Thi|Hồng Quang|Mỹ Lộc|Phủ Lý|Phù Vân|Châu Sơn|Liêm Tuyền|Duy Tiên|Duy Tân|Đồng Văn|Duy Hà|Tiên Sơn|Lê Hồ|Nguyễn Úy|Lý Thường Kiệt|Kim Thanh|Tam Chúc|Kim Bảng|Hà Nam',
+  'khanh hoa': 'Nha Trang|Bắc Nha Trang|Tây Nha Trang|Nam Nha Trang|Bắc Cam Ranh|Cam Ranh|Cam Linh|Ba Ngòi|Ninh Hòa|Đông Ninh Hòa|Hòa Thắng|Phan Rang|Đông Hải|Ninh Chử|Bảo An|Đô Vinh',
+  'quang tri': 'Đông Hà|Nam Đông Hà|Đồng Hới|Đồng Thuận|Đồng Sơn|Quảng Trị|Ba Đồn|Bắc Gianh|Nam Trạch|Bố Trạch|Đông Trạch|Hoàn Lão|Phong Nha|Lệ Thủy|Vĩnh Linh|Gio Linh|Cam Lộ|Hải Lăng|Triệu Phong|Khe Sanh|Lao Bảo',
+  'hue': 'Thuận Hóa|Phú Xuân|Kim Long|Vỹ Dạ|Thuận An|Hương Thủy|Hương Trà|Phong Điền'
+};
+let newWardKeys = null;
+function newWardIndex() {
+  if (!newWardKeys) {
+    newWardKeys = new Map(Object.entries(NEW_WARD_NAMES).map(([key, names]) => [key, [...new Set(names.split('|').map(normalizeLocationKey).filter(Boolean))].sort((a, b) => b.length - a.length)]));
+  }
+  return newWardKeys;
+}
+
+/** Tỉnh mới (sau 2025) chứa tỉnh này: chính nó nếu là tỉnh mới, không thì tỉnh đã nhận nó. */
+function newProvinceKeys(province) {
+  const bare = province?.bare || '';
+  if (!bare) return [];
+  const keys = [bare];
+  for (const [parent, members] of Object.entries(MERGED_PROVINCES)) if (members.includes(bare)) keys.push(parent);
+  if (bare === 'thua thien hue') keys.push('hue');
+  return keys;
+}
+
+/**
+ * Tên phường/xã mới sau sáp nhập (NEW_WARD_NAMES) có trong địa chỉ không, thuộc đúng tỉnh mới
+ * của `province`. `skip(start, end)` loại khoảng đã là tên quận/tỉnh (trừ khi khách ghi rõ
+ * "phường/xã" trước tên). Trả tên đã chuẩn hoá hoặc ''.
+ */
+export function newWardMentioned(text, province, { skip = () => false, normalized = null } = {}) {
+  const norm = normalized ?? normalizeAligned(expandAddressAbbreviations(text));
+  const index = newWardIndex();
+  for (const key of newProvinceKeys(province)) {
+    for (const name of index.get(key) || []) {
+      const pattern = boundary(name);
+      let match;
+      while ((match = pattern.exec(norm))) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const typed = prefixBefore(norm, start);
+        const wardTyped = typed && ['phuong', 'xa', 'p', 'x', 'thi tran', 'tt'].includes(typed.prefix);
+        // Tên đường trùng tên phường ("đường Bà Điểm", "phố Hoàng Mai"): không tính.
+        if (!wardTyped && streetWordBefore(norm, start)) continue;
+        if (!wardTyped && skip(start, end)) continue;
+        return name;
+      }
+    }
+  }
+  return '';
+}
+
 /** Các tỉnh cũ đã nhập vào tỉnh này (theo danh mục), rỗng nếu tỉnh không nhận thêm ai. */
 export function mergedProvinceMembers(province, locationIndex = loadLocationIndex()) {
   const members = MERGED_PROVINCES[province?.bare] || [];
@@ -141,6 +205,12 @@ const ABBREVIATIONS = [
   abbreviation('dak\\s*nong|daknong|đăk\\s*nông', 'Đắk Nông'),
   [new RegExp(`${B}q\\s*\\.?\\s*(\\d{1,2})${E}`, 'giu'), 'Quận $1'],
   [new RegExp(`${B}p\\s*\\.?\\s*(\\d{1,2})${E}`, 'giu'), 'Phường $1'],
+  // Vòng 12: "f5", "F.14" là phường số (khách miền Nam gõ "f" thay "p").
+  [new RegExp(`${B}f\\s*\\.?\\s*(\\d{1,2})${E}`, 'giu'), 'Phường $1'],
+  // Vòng 12: từ loại hình gõ cụt ("huyệ. Châu Đức", "phườ Tân Mai").
+  [new RegExp(`${B}huyệ${E}\\.?`, 'giu'), 'Huyện'],
+  [new RegExp(`${B}quậ${E}\\.?`, 'giu'), 'Quận'],
+  [new RegExp(`${B}phườ${E}\\.?`, 'giu'), 'Phường'],
   [new RegExp(`${B}q\\s*\\.\\s*`, 'giu'), 'Quận '],
   [new RegExp(`${B}p\\s*\\.\\s*`, 'giu'), 'Phường '],
   [new RegExp(`${B}h\\s*\\.\\s*`, 'giu'), 'Huyện '],
@@ -149,7 +219,10 @@ const ABBREVIATIONS = [
   [new RegExp(`${B}tt\\s*\\.\\s*`, 'giu'), 'Thị trấn '],
   [new RegExp(`${B}tp\\s*\\.\\s*`, 'giu'), 'Thành phố '],
   // "Phường 05" → "Phường 5" (chạy sau khi P./Q. đã được bung).
-  [new RegExp(`${B}(quận|phường|quan|phuong)\\s+0(\\d)${E}`, 'giu'), '$1 $2']
+  [new RegExp(`${B}(quận|phường|quan|phuong)\\s+0(\\d)${E}`, 'giu'), '$1 $2'],
+  // Vòng 12: dấu chấm giữa hai cụm chữ là dấu ngăn đoạn ("Đường số6. hiệp bình.thủ đức",
+  // "Tk16/36D. Nguyễn cảnh chân"). Chạy sau cùng: "P.", "Q.", "TP.", "TX." đã được bung ở trên.
+  [/(?<=[\p{L}\p{N}])\s*\.(?:\s*\.)*\s*(?=\p{L})/gu, ', ']
 ];
 
 export function expandAddressAbbreviations(text) {
@@ -248,7 +321,10 @@ export function buildLocationIndex(rows) {
   for (const row of rows) {
     let province = provinces.get(row.province_code);
     if (!province) {
-      province = { ...makeEntry(row.province_code, row.province, PROVINCE_PREFIXES, PROVINCE_ALIASES[stripPrefix(normalizeLocationKey(row.province), PROVINCE_PREFIXES)] || []), districts: new Map() };
+      const provinceBare = stripPrefix(normalizeLocationKey(row.province), PROVINCE_PREFIXES);
+      // Vòng 12: tên tỉnh viết dính ("soctrang", "danang", "cantho") cũng là alias.
+      const joined = provinceBare.includes(' ') && provinceBare.replace(/ /g, '').length >= 6 ? [provinceBare.replace(/ /g, '')] : [];
+      province = { ...makeEntry(row.province_code, row.province, PROVINCE_PREFIXES, [...(PROVINCE_ALIASES[provinceBare] || []), ...joined]), districts: new Map() };
       provinces.set(row.province_code, province);
     }
     const districtKey = normalizeLocationKey(row.district);
@@ -607,6 +683,26 @@ function remainingStreet(expanded, norm, consumed) {
  * để bot hỏi khách chọn.
  */
 export function resolveAddress(text, locationIndex = loadLocationIndex()) {
+  const first = resolveAddressOnce(text, locationIndex);
+  if (first.province && (first.ward || first.postMerger)) return first;
+  // Vòng 12: khách viết liền không dấu phẩy, tỉnh đứng trước phường ("83 hải phòng Dà nẵng phường
+  // Hải châu"): tên không có loại hình phải đứng cuối đoạn nên cả tỉnh lẫn phường đều trượt. Thử lại
+  // với dấu phẩy chèn trước mỗi từ loại hình (phường/xã/quận/huyện/thành phố/tỉnh); chỉ lấy khi
+  // đọc ra nhiều cấp hơn.
+  const split = splitBeforeAdminWords(text);
+  if (split === String(text ?? '')) return first;
+  const second = resolveAddressOnce(split, locationIndex);
+  const levels = result => (result.province ? 1 : 0) + (result.district ? 1 : 0) + (result.ward ? 1 : 0) + (result.postMerger ? 0.5 : 0) - (result.ambiguous ? 0.25 : 0);
+  return levels(second) > levels(first) ? second : first;
+}
+
+// "thị xã" không bị tách thành "thị, xã"; chỉ chèn khi phía trước là chữ/số (không phải dấu phẩy sẵn).
+const ADMIN_SPLIT = /(?<=[\p{L}\p{N}])(?<!(?<![\p{L}])thị)(?<!(?<![\p{L}])thi)\s+(?=(?:phường|phuong|xã|thị\s+trấn|thi\s+tran|quận|quan|huyện|huyen|thị\s+xã|thi\s+xa|thành\s+phố|thanh\s+pho|tỉnh|tinh|tp)(?![\p{L}\p{N}]))/giu;
+function splitBeforeAdminWords(text) {
+  return String(text ?? '').replace(ADMIN_SPLIT, ', ');
+}
+
+function resolveAddressOnce(text, locationIndex = loadLocationIndex()) {
   const expanded = expandAddressAbbreviations(text);
   // Bản chuẩn hoá được che dần các phần đã nhận ra; bản gốc giữ nguyên để so dấu.
   let norm = normalizeAligned(expanded);
@@ -629,9 +725,33 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
     // phường nào của tỉnh: nhiều khả năng là đơn vị mới sau sáp nhập 1/7/2025.
     if (province && !result.ambiguous && !result.ward) {
       result.postMerger = looksPostMerger(norm, provinceHit ? provinceHit.start : norm.length, province, null, locationIndex);
+      // Vòng 12: tên phường/xã MỚI hay gặp ("phường Thành Vinh", "Hòa Cường, tp Đà Nẵng", "bà điểm
+      // Tphcm") — kể cả không có chữ "phường/xã" — thuộc đúng tỉnh khách ghi: địa chỉ sau sáp nhập.
+      const typedProvince = mergedFrom || province;
+      const overlaps = (start, end) => consumed.some(range => start < range.end && end > range.start);
+      const name = newWardMentioned('', typedProvince, { normalized: fullNorm, skip: overlaps });
+      if (name) { result.postMerger = true; result.newWard = name; }
+      if (result.postMerger) {
+        // Phần đường phố không tính đoạn chỉ là tên phường/xã ("Phường hải châu", "Hòa Cường"): để biết
+        // khách có ghi số nhà/đường thật không (ghép địa chỉ nhiều tin, hỏi thiếu số nhà).
+        const wardOnly = new RegExp(`^(?:(?:phuong|xa|p|x|thi tran|tt) [a-z ]+|${name ? escapeRegExp(name) : '\\0'})$`);
+        result.streetWithoutWard = result.street.split(/\s*,\s*/).filter(part => !wardOnly.test(normalizeLocationKey(part))).join(', ');
+      }
     }
+    // Khách ghi "phường X" mà danh mục cũ là "Xã X" (hay ngược lại): xã đã lên phường sau sáp nhập →
+    // giữ nguyên chữ khách ghi trên phiếu ("phường nam Sơn thành phố Bắc ninh" ≠ "Xã Nam Sơn").
+    if (ward && wardHit && Number.isFinite(wardHit.start)) {
+      const typed = fullNorm.slice(wardHit.start, wardHit.end).trim();
+      const typedType = /^(phuong|p)\s/.test(typed) ? 'phuong' : /^(xa|x)\s/.test(typed) ? 'xa' : '';
+      if (typedType && ward.prefix && typedType !== ward.prefix && ['phuong', 'xa'].includes(ward.prefix)) result.typeMismatch = true;
+    }
+    if (mergedFrom) result.typedProvince = { code: mergedFrom.code, name: mergedFrom.name };
     return result;
   };
+  // Bản chuẩn hoá chưa che gì (cùng vị trí với `norm`), cho các bước dò tên trên toàn câu.
+  const fullNorm = norm;
+  // Tỉnh khách ghi khi máy phải chuyển sang tỉnh cũ đã nhập vào (bước 4b).
+  let mergedFrom = null;
   let districtRef = null;
   const districtEntry = () => districtRef;
   const markAmbiguous = (level, hit) => {
@@ -698,7 +818,12 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
         ? findBest(norm, expanded, [...national.entry.wards.values()], wardSearchOptions({ limit: national.start }))
         : null;
       const confirmed = Boolean(confirming && confirming.prefixed && !confirming.ambiguous);
-      if (sameName.length === 1 && (national.prefixed || exactSegment || confirmed)) {
+      // Vòng 12: tên quận/huyện hai chữ trở lên, duy nhất cả nước, đứng cuối hẳn địa chỉ sau phần
+      // đường phố ("236 đường linh trung thủ đức"): là quận khách ghi, không phải tên đường.
+      const atTextEnd = !national.prefixed && national.entry.bare.includes(' ') && national.start > 0
+        && !/[a-z0-9]/.test(norm.slice(national.end).replace(COUNTRY_TOKENS, ''))
+        && /[a-z]/.test(norm.slice(0, national.start));
+      if (sameName.length === 1 && (national.prefixed || exactSegment || confirmed || atTextEnd)) {
         districtHit = national;
         district = national.entry;
         province = district.province;
@@ -842,6 +967,7 @@ export function resolveAddress(text, locationIndex = loadLocationIndex()) {
     }
     if (found.length === 1) {
       const [hit] = found;
+      mergedFrom = province;
       province = hit.province;
       result.province = { code: province.code, name: province.name };
       district = hit.district;
@@ -1110,11 +1236,22 @@ export function describeDeliveryAddress(text, locationIndex = loadLocationIndex(
   // nguyên chữ khách ghi làm địa chỉ giao (không ép về đơn vị cũ). Cũng giữ nguyên chữ
   // khách khi họ không ghi quận/huyện mà máy chỉ suy ra từ tên phường.
   const postMerger = resolved.postMerger === true && Boolean(resolved.province);
-  const keepAsTyped = postMerger || (Boolean(resolved.province) && Boolean(resolved.ward) && !districtMentioned(text, resolved.district));
+  // Vòng 12: tỉnh khách ghi khác tỉnh máy suy ra ("xã đất đỏ thành phố Hồ Chí Minh" → máy tìm thấy ở
+  // Bà Rịa-Vũng Tàu cũ) hay khách ghi "phường" mà danh mục cũ là "xã": đơn vị đã đổi sau sáp nhập →
+  // giữ nguyên chữ khách ghi, không đổi về Huyện Đất Đỏ, BR-VT / Xã Nam Sơn.
+  const typedElsewhere = Boolean(resolved.typedProvince) || resolved.typeMismatch === true;
+  const keepAsTyped = postMerger || typedElsewhere || (Boolean(resolved.province) && Boolean(resolved.ward) && !districtMentioned(text, resolved.district));
+  const usableStreet = isUsableStreet(resolved.streetWithoutWard ?? resolved.street);
+  // Vòng 12: có số nhà/đường + quận/huyện + tỉnh mà thiếu phường/xã (không mơ hồ): vẫn nhận, đơn mang
+  // ghi chú để nhân viên bổ sung phường/xã ("ngách 143/300 phố Nguyễn Chính, Hoàng Mai, Hà Nội").
+  // Chỉ địa chỉ phố có số nhà; "Xóm 3"/"Thôn 2"/"Ấp 1" thiếu xã thì shipper không tìm được → vẫn hỏi.
+  const streetKey = normalizeLocationKey(resolved.street);
+  const cityStreet = /\d/.test(streetKey) && !/^(?:xom|thon|ap|to|khu|ban|lang|kp|khu pho|doi|tdp|to dan pho)\s+\S+$/.test(streetKey)
+    && !/^(?:xom|thon|ap|ban|lang|doi)\b/.test(streetKey);
+  const wardUnverified = !resolved.ward && !postMerger && Boolean(resolved.province) && Boolean(resolved.district) && usableStreet && cityStreet && !resolved.ambiguous;
   if (!resolved.province) missing.push('province');
   if (!resolved.district && !sameNameDistricts && !postMerger) missing.push('district');
-  if (!resolved.ward && !postMerger) missing.push('ward');
-  const usableStreet = isUsableStreet(resolved.street);
+  if (!resolved.ward && !postMerger && !wardUnverified) missing.push('ward');
   if (!usableStreet) missing.push('street');
   const known = [resolved.ward?.name, resolved.district?.name, resolved.province?.name].filter(Boolean).join(', ');
   const choices = resolved.ambiguous && !sameNameDistricts && resolved.ambiguous.options.length > 1 && resolved.ambiguous.options.length <= 4
@@ -1128,8 +1265,24 @@ export function describeDeliveryAddress(text, locationIndex = loadLocationIndex(
     known,
     choices,
     keepAsTyped,
-    canonical: missing.length === 0 ? (keepAsTyped ? String(text || '').replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim() : formatResolvedAddress(resolved)) : ''
+    // Thiếu phường/xã nhưng vẫn nhận (đủ đường + quận + tỉnh): nhân viên bổ sung.
+    wardUnverified,
+    canonical: missing.length === 0 ? (keepAsTyped ? typedAddress(text, resolved, locationIndex) : formatResolvedAddress(resolved)) : ''
   };
+}
+
+/**
+ * Địa chỉ giữ nguyên chữ khách ghi: gọn khoảng trắng/dấu phẩy, bỏ dấu chấm cuối; khách không ghi
+ * tên tỉnh (máy suy ra từ quận: "…hiệp bình.thủ đức.") thì thêm tên tỉnh ở cuối cho kho/shipper.
+ */
+function typedAddress(text, resolved, locationIndex) {
+  const typed = String(text || '').replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').replace(/[\s.,;]+$/u, '').trim();
+  const province = resolved.typedProvince || resolved.province;
+  if (!province?.name) return typed;
+  const entry = locationIndex.provinces.find(item => item.code === province.code);
+  const norm = normalizeLocationKey(expandAddressAbbreviations(typed));
+  const mentioned = (entry?.aliases || [normalizeLocationKey(province.name)]).some(alias => alias && new RegExp(`(?<![a-z0-9])${escapeRegExp(alias)}(?![a-z0-9])`).test(norm));
+  return mentioned ? typed : `${typed}, ${province.name}`;
 }
 
 /**
@@ -1151,31 +1304,78 @@ export function mergeAddressFragment(fresh, saved, locationIndex = loadLocationI
     const merged = resolveAddress(combined, locationIndex);
     if (merged.province && (merged.district || merged.ward || isUsableStreet(merged.street))) return combined;
   }
-  if (own.province) return next;
   // Phần khách đã viết mà chưa nhận ra được (ví dụ "Xa Hoang Dong" không dấu
   // khi có hai xã cùng tên) không được giữ lại, nếu không nó lại gây mơ hồ
   // ngay cả khi khách vừa chọn xong.
   const ambiguousKeys = (old.ambiguous?.options || []).map(name => stripPrefix(normalizeLocationKey(name), [...WARD_PREFIXES, ...DISTRICT_PREFIXES]));
-  const keptStreet = String(old.street || '').split(/\s*,\s*/).filter(part => {
+  const keptStreet = String(old.streetWithoutWard ?? old.street ?? '').split(/\s*,\s*/).filter(part => {
     const key = normalizeLocationKey(part);
     return !ambiguousKeys.some(option => option && key.endsWith(option));
   }).join(', ');
   const oldStreet = isUsableStreet(keptStreet) ? keptStreet : '';
+  const score = text => {
+    const r = resolveAddress(text, locationIndex);
+    return (r.province ? 1 : 0) + (r.district ? 1 : 0) + (r.ward || r.postMerger ? 1 : 0) + (isUsableStreet(r.street) ? 1 : 0) - (r.ambiguous ? 0.5 : 0);
+  };
+  const pickBest = candidates => {
+    let best = candidates[0];
+    let bestScore = score(best);
+    for (const candidate of candidates.slice(1)) {
+      const value = score(candidate);
+      if (value > bestScore) { best = candidate; bestScore = value; }
+    }
+    return best;
+  };
+  if (own.province) {
+    // Vòng 12 (NẶNG): khách bổ sung phường/quận/tỉnh ("Phường hải châu thành phố đà nẵng", "Quan Bình
+    // Thạnh, tp, HCM nhé") cho địa chỉ đã có số nhà/đường ("83 hải phòng…", "Số13/112 ngõ 663 Trương
+    // Định", "19A Huỳnh Đình Hai, P14"): phần mới không có số nhà/đường dùng được → giữ số nhà/đường cũ
+    // + phần mới, thay vì thay cả địa chỉ (phiếu từng chỉ còn phường + tỉnh). Khác tỉnh = địa chỉ mới.
+    if (!isUsableStreet(own.streetWithoutWard ?? own.street) && oldStreet &&(!old.province || sameNewProvince(old, own, locationIndex))) {
+      // Phần mới chỉ là tên tỉnh: nối sau toàn bộ phần cũ. Phần mới có phường/quận: chỉ giữ số nhà/đường
+      // cũ (phần cũ chưa đọc được thường lẫn tên tỉnh/phường viết liền, ghép cả vào là lặp).
+      const appendAll = `${previous}, ${next}`;
+      const keepStreet = [`${oldStreet}, ${next}`, [oldStreet, old.ward?.name, next].filter(Boolean).join(', ')];
+      const lowerLevels = Boolean(own.district || own.ward || own.postMerger);
+      return dedupeAddressSegments(pickBest(lowerLevels ? [...keepStreet, appendAll] : [appendAll, ...keepStreet]));
+    }
+    return next;
+  }
   const candidates = [
     `${next}, ${previous}`,
     [oldStreet, next, old.ward?.name, old.district?.name, old.province?.name].filter(Boolean).join(', '),
     [oldStreet, next, old.district?.name, old.province?.name].filter(Boolean).join(', '),
     [next, old.district?.name, old.province?.name].filter(Boolean).join(', ')
   ];
-  const score = text => {
-    const r = resolveAddress(text, locationIndex);
-    return (r.province ? 1 : 0) + (r.district ? 1 : 0) + (r.ward ? 1 : 0) + (isUsableStreet(r.street) ? 1 : 0) - (r.ambiguous ? 0.5 : 0);
+  return pickBest(candidates);
+}
+
+/** Hai kết quả đọc địa chỉ cùng một tỉnh (kể cả tỉnh cũ đã nhập vào tỉnh mới kia). */
+function sameNewProvince(a, b, locationIndex) {
+  const codes = result => [result.province?.code, result.typedProvince?.code].filter(Boolean);
+  const left = codes(a);
+  const right = codes(b);
+  if (left.some(code => right.includes(code))) return true;
+  const keysOf = result => {
+    const entry = locationIndex.provinces.find(item => item.code === result.province?.code);
+    return newProvinceKeys(entry);
   };
-  let best = candidates[0];
-  let bestScore = score(best);
-  for (const candidate of candidates.slice(1)) {
-    const value = score(candidate);
-    if (value > bestScore) { best = candidate; bestScore = value; }
-  }
-  return best;
+  const leftKeys = keysOf(a);
+  return keysOf(b).some(key => leftKeys.includes(key));
+}
+
+/**
+ * Bỏ đoạn (giữa dấu phẩy) lặp lại sau khi ghép: trùng hẳn, hay nằm trọn trong một đoạn dài hơn
+ * ("phường Hải châu" + "Phường hải châu thành phố đà nẵng"; "236 đường linh trung" lặp).
+ */
+export function dedupeAddressSegments(text) {
+  const parts = String(text || '').split(/\s*,\s*/).map(part => part.trim()).filter(Boolean);
+  const keys = parts.map(part => normalizeLocationKey(part));
+  const contains = (outer, inner) => outer !== inner && inner.length >= 6 && ` ${outer} `.includes(` ${inner} `);
+  return parts.filter((part, index) => {
+    const key = keys[index];
+    if (!key) return false;
+    if (keys.indexOf(key) < index) return false;
+    return !keys.some(other => contains(other, key));
+  }).join(', ');
 }

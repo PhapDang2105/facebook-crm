@@ -25,12 +25,31 @@ export function sourceLabel(key) {
   return SOURCE_LABELS[key] || String(key || SOURCE_LABELS.other);
 }
 
-/** Đơn hủy / hoàn / đang hoàn: không tính doanh thu. */
+/**
+ * Mã trạng thái Pancake POS coi là không thành doanh thu: 4 đang hoàn, 5 đã
+ * hoàn (bom/khách không nhận), 6 đã hủy, 7 đã xóa.
+ */
+export const POS_FAILED_STATUS_CODES = Object.freeze([4, 5, 6, 7]);
+
+const foldStatus = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase();
+// "hoàn tất"/"hoàn thành" (form Webcake) không phải hoàn hàng; "bom"/"boom" là khách không nhận hàng.
+const FAILED_STATUS = /\bhuy\b|\bhoan\b(?!\s*(tat|thanh))|return|cancel|delet|\bbo+m\b|tra hang|khong nhan hang|giao (hang )?that bai/;
+
+/**
+ * Đơn hủy / hoàn / đang hoàn / bom: không tính doanh thu. Xét trạng thái MỚI
+ * NHẤT ở mọi nơi đơn mang: trạng thái CRM, trạng thái POS lúc đẩy/kéo về
+ * (`pos.status`) và trạng thái POS đồng bộ sau đó (`posStatus`, cập nhật cả khi
+ * đơn bị hủy/hoàn trên POS nhiều ngày sau lúc đặt).
+ */
 export function isCancelledOrder(order) {
   if (String(order?.processingStatus || '') === 'cancelled') return true;
-  // Bỏ dấu để "Hủy"/"Huỷ" cùng khớp; "hoàn tất"/"hoàn thành" (form Webcake) không phải hoàn hàng.
-  const status = String(order?.status || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase();
-  return /\bhuy\b|\bhoan\b(?!\s*(tat|thanh))|return|cancel/.test(status);
+  const posCode = order?.posStatus?.code;
+  const hasPosCode = posCode !== undefined && posCode !== null && posCode !== '' && Number.isFinite(Number(posCode));
+  if (hasPosCode && POS_FAILED_STATUS_CODES.includes(Number(posCode))) return true;
+  // Có mã POS mới nhất thì tin mã (tên "hoàn một phần" không làm mất cả đơn); trạng thái POS
+  // cũ lúc đẩy/kéo về chỉ dùng khi chưa đồng bộ mã mới.
+  const names = hasPosCode ? [order?.status] : [order?.status, order?.posStatus?.name, order?.pos?.status];
+  return names.some(value => FAILED_STATUS.test(foldStatus(value)));
 }
 
 /** Form landing khách bỏ dở: chưa là đơn, trừ khi nhân viên đã gọi xác nhận. */
@@ -94,6 +113,9 @@ export function orderFact(order, conversation = null) {
     processingStatus: String(order?.processingStatus || ''),
     cancelled: isCancelledOrder(order),
     incomplete: isIncompleteOrder(order),
+    // Nhân viên đã xóa khỏi bảng Đơn hàng; là đơn trùng hay không do markHiddenDuplicates quyết.
+    hidden: order?.hiddenFromTable === true,
+    duplicate: false,
     total,
     products: productLines(order?.products, total),
     phone: toLocalPhone(order?.phone) || String(order?.phone || ''),
@@ -136,11 +158,44 @@ export function collectOrderFacts({ conversations = [], landingOrders = [], attr
     }
     facts.push(fact);
   }
-  return facts.sort((first, second) => first.createdAt - second.createdAt);
+  return markHiddenDuplicates(facts.sort((first, second) => first.createdAt - second.createdAt));
 }
 
-/** Đơn tính doanh thu: chưa hủy, không phải form bỏ dở. */
-export const isValidFact = fact => !fact.cancelled && !fact.incomplete;
+/** Cửa sổ "trùng đơn" — cùng 7 ngày bảng Đơn hàng dùng để báo "Trùng đơn ngày …". */
+export const DUPLICATE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Đơn trùng đã xóa khỏi bảng: đơn bị ẩn (hiddenFromTable) mà cùng khách (cùng
+ * SĐT) còn một đơn khác vẫn được tính trong vòng 7 ngày — đơn còn hiện trong
+ * bảng, hoặc đơn ẩn sớm hơn đã được giữ — thì là bản trùng, không đếm đơn,
+ * doanh thu hay khách. Đơn ẩn không có đơn nào khác đứng thay (nhân viên "Xóa
+ * bảng", đơn quá hẹn tự rời bảng) vẫn là đơn thật và vẫn được tính.
+ * `facts` xếp cũ trước; đánh dấu tại chỗ và trả lại chính mảng đó.
+ */
+export function markHiddenDuplicates(facts, windowMs = DUPLICATE_WINDOW_MS) {
+  const byCustomer = new Map();
+  for (const fact of facts) {
+    if (fact.cancelled || fact.incomplete) continue;
+    const list = byCustomer.get(fact.customerKey) || [];
+    list.push(fact);
+    byCustomer.set(fact.customerKey, list);
+  }
+  for (const list of byCustomer.values()) {
+    if (list.length < 2 || !list.some(fact => fact.hidden)) continue;
+    for (const fact of list) {
+      if (!fact.hidden) continue;
+      fact.duplicate = list.some(other => other !== fact
+        && !other.duplicate
+        && Math.abs(other.createdAt - fact.createdAt) <= windowMs
+        // Đơn còn hiện trong bảng đứng thay được ở bất kỳ phía nào; đơn ẩn chỉ khi sớm hơn (đã được giữ).
+        && (!other.hidden || other.createdAt < fact.createdAt || (other.createdAt === fact.createdAt && other.id < fact.id)));
+    }
+  }
+  return facts;
+}
+
+/** Đơn tính doanh thu: chưa hủy/hoàn/bom, không phải form bỏ dở, không phải đơn trùng đã xóa khỏi bảng. */
+export const isValidFact = fact => !fact.cancelled && !fact.incomplete && !fact.duplicate;
 
 // ===== Khoảng ngày (giờ Việt Nam) =====
 

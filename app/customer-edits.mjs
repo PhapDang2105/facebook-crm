@@ -152,7 +152,7 @@ export function applyCustomerEdits(customers, edits = {}) {
  * Ô để trống nghĩa là GỠ phần đã sửa, trả ô đó về dữ liệu gốc — đó là đường
  * duy nhất để sửa lại một trường lỡ nhập sai.
  */
-export async function updateCustomerProfile(key, patch = {}, now = Date.now()) {
+export async function updateCustomerProfile(key, patch = {}, now = Date.now(), { by = null } = {}) {
   const fields = {};
 
   if (patch.name !== undefined) fields.name = text(patch.name, 120);
@@ -180,6 +180,8 @@ export async function updateCustomerProfile(key, patch = {}, now = Date.now()) {
       else delete entry[field];
     }
     entry.updatedAt = now;
+    // Người sửa gần nhất (nhật ký hoạt động giữ đủ từng lần).
+    if (by) entry.updatedBy = { username: text(by.username, 32), name: text(by.name, 80) };
     return { ...entry };
   });
 }
@@ -190,7 +192,7 @@ export async function updateCustomerProfile(key, patch = {}, now = Date.now()) {
  * là thêm vào, cái nào là gỡ đi; gỡ phải ghi lại rõ ràng, nếu không thẻ hội
  * thoại sẽ mọc lại ở lần dựng danh sách kế tiếp.
  */
-export async function setCustomerLabels(key, labels = [], derivedLabels = [], now = Date.now()) {
+export async function setCustomerLabels(key, labels = [], derivedLabels = [], now = Date.now(), { by = null } = {}) {
   if (!Array.isArray(labels)) throw new Error('Danh sách thẻ không hợp lệ.');
   const clean = list => [...new Set((Array.isArray(list) ? list : []).map(label => text(label, 60)).filter(Boolean))];
   const chosen = new Set(clean(labels).slice(0, 20));
@@ -200,6 +202,7 @@ export async function setCustomerLabels(key, labels = [], derivedLabels = [], no
     entry.labels = [...chosen].filter(label => !derived.has(label));
     entry.hiddenLabels = [...derived].filter(label => !chosen.has(label));
     entry.updatedAt = now;
+    if (by) entry.updatedBy = { username: text(by.username, 32), name: text(by.name, 80) };
     return { labels: entry.labels, hiddenLabels: entry.hiddenLabels };
   });
 }
@@ -208,10 +211,14 @@ export async function setCustomerLabels(key, labels = [], derivedLabels = [], no
 export async function addCustomerNote(key, note = {}, now = Date.now()) {
   const body = text(note.text, 1000);
   if (!body) throw new Error('Ghi chú không được để trống.');
-  const by = text(note.by, 80) || 'Nhân viên';
+  // `author` { username, name }: người viết thật (server lấy từ phiên đăng nhập) — thắng `by` gõ tay.
+  const author = note.author && typeof note.author === 'object'
+    ? { username: text(note.author.username, 32), name: text(note.author.name, 80) || text(note.author.username, 32) }
+    : null;
+  const by = (author?.name) || text(note.by, 80) || 'Nhân viên';
   return updateStore(store => {
     const entry = entryFor(store, key);
-    const saved = { id: `note-${now.toString(36)}-${entry.notes.length}`, text: body, by, at: now };
+    const saved = { id: `note-${now.toString(36)}-${entry.notes.length}`, text: body, by, at: now, ...(author ? { author } : {}) };
     entry.notes.push(saved);
     entry.updatedAt = now;
     return saved;

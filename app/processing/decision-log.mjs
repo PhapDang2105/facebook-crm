@@ -29,7 +29,7 @@ const longNumberPattern = /(?<!\d)\d{9,}(?!\d)/g;
 // Khóa định danh (mã hội thoại, mã tin, mốc giờ, mã mẫu, tên luật/nhóm của mô hình…): giữ nguyên
 // để còn nối lại với kho tin nhắn và dựng dataset. Chỉ chuỗi tự do (text, ghi chú…) mới bị che.
 const identifierKeys = new Set([
-  'v', 'at', 'conversationId', 'mid', 'id', 'source', 'type', 'prevBot', 'lastTemplate', 'templateId',
+  'v', 'at', 'receivedAt', 'conversationId', 'mid', 'id', 'source', 'type', 'prevBot', 'lastTemplate', 'templateId',
   'llmTemplateId', 'ruleTemplateId', 'chosen', 'final', 'also', 'fewShot', 'name', 'group', 'subGroup', 'path', 'model', 'mode', 'decision'
 ]);
 

@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import './helpers/seed-catalog.mjs';
+import { installFakeDns } from './helpers/fake-dns.mjs';
 import { buildChatbotQuery, parseModelAnswer, processChatbotChanges, requestDirectModelReply } from '../app/chatbot-engine.mjs';
 import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
+
+// Endpoint AI tuỳ chỉnh (DeepSeek, Anthropic) đi qua assertPublicHost → tra DNS: dùng bản giả
+// để test không phụ thuộc mạng của máy chạy.
+after(installFakeDns());
 
 // The texts the bot speaks come only from Thiết lập tin nhắn; the shipped
 // defaults stand in for a saved settings file here.
@@ -123,7 +128,7 @@ test('chỉ tự trả lời khi cả hệ thống và hội thoại đều bậ
     conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true },
     message: { direction: 'incoming', type: 'text', text: 'xin chào' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', provider: 'vertex', directApiKey: 'secret', handoffKeywords: '' }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', provider: 'vertex', directApiKey: 'secret', handoffKeywords: '', fragmentWaitMs: 0 }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => sent.push(message.text),
     saveBotState: async (_id, value) => state.push(value),
@@ -141,7 +146,7 @@ test('đơn được lưu trước, rồi mới gửi xác nhận và receipt sa
     conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true },
     message: { id: 'mid.customer.1', mid: 'mid.customer.1', direction: 'incoming', type: 'text', text: 'chốt đơn' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '' }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0 }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); return { message: { mid: 'mid.bot.1' } }; },
     sendReceipt: async (_conversation, order) => { log.push(`receipt:${order.id}`); },
@@ -166,7 +171,7 @@ test('khách xác nhận lần hai không tạo đơn trùng và không gửi l�
     conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true },
     message: { id: 'mid.customer.2', mid: 'mid.customer.2', direction: 'incoming', type: 'text', text: 'ok chốt' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '' }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0 }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); },
     sendReceipt: async () => { log.push('receipt'); },
@@ -185,7 +190,7 @@ test('tắt tự động lên đơn: bot vẫn trả lời nhưng không gọi c
     conversation: { id: 'page:user', psid: 'user', name: 'Khách', botEnabled: true },
     message: { id: 'mid.customer.1', mid: 'mid.customer.1', direction: 'incoming', type: 'text', text: 'chốt đơn' }
   }], {
-    readSettings: async () => ({ enabled: true, autoOrder: false, responseMode: 'automatic', handoffKeywords: '' }),
+    readSettings: async () => ({ enabled: true, autoOrder: false, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0 }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); return { message: { mid: 'mid.bot.1' } }; },
     sendReceipt: async (_conversation, order) => { log.push(`receipt:${order.id}`); },
@@ -266,9 +271,14 @@ test('đã hỏi một lần, khách trả lời bằng địa chỉ đầy đ�
   const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: full }, templates, { pendingOrder: pending });
   assert.equal(reply.templateId, 'ORDER_CONFIRMATION', 'không hỏi lần hai khi khách đã ghi đủ cấp');
   assert.match(reply.order.address, /số 5 ngõ 12/, 'giữ phần khách ghi cho nhân viên đối chiếu');
-  // Khách chỉ nhắn một mẩu ("Hà Nội") thì vẫn hỏi tiếp như cũ.
+  // Vòng 12 (maxAddressAsks 2 → 1): đã hỏi một lần, khách gửi thêm một mẩu → nhận nguyên chữ, đơn mang
+  // ghi chú cho nhân viên soát phường/xã (trước đây hỏi lần hai, khách bỏ đi).
   const fragment = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: 'quận Trung Tâm' }, templates, { pendingOrder: pending });
-  assert.equal(fragment.templateId, 'ORDER_ADDRESS');
+  assert.equal(fragment.templateId, 'ORDER_CONFIRMATION');
+  assert.match(fragment.order.addressCheck, /Soát phường\/xã/);
+  // Chưa hỏi lần nào thì vẫn hỏi phần còn thiếu.
+  const firstAsk = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Customer_Address: 'quận Trung Tâm' }, templates, { pendingOrder: { ...pending, address: '', addressAsks: 0 } });
+  assert.equal(firstAsk.templateId, 'ORDER_ADDRESS');
 });
 
 test('hỏi tối đa hai lần rồi vẫn lên đơn với địa chỉ khách đưa', () => {
@@ -342,7 +352,7 @@ test('khách gửi ảnh: bot báo đã nhận hình, gắn thẻ cần người
   let savedState = null;
   const templatesWithImage = { ...templates, IMAGE_RECEIVED: 'Dạ em đã nhận được hình của mình ạ.' };
   const deps = {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templatesWithImage }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: templatesWithImage }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); return { message: { mid: 'mid.bot.9' } }; },
     saveBotState: async (_id, state) => { savedState = state; },
@@ -399,7 +409,7 @@ test('khách để "." hay "ib" dưới bài về một sản phẩm: gửi th�
     conversation: { id: 'page:dot', psid: 'dot', name: 'Khách', botEnabled: true, post: { message: 'GRANOLA TÚI XANH 450g giòn rụm, ưu đãi hôm nay' } },
     message: { id: 'mid.dot.1', mid: 'mid.dot.1', direction: 'incoming', type: 'text', text: '.' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templates }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: templates }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => { log.push(message.text || '[ảnh]'); return { message: { mid: 'mid.bot.d' } }; },
     saveBotState: async () => {},
@@ -413,8 +423,8 @@ test('mã mẫu lạ từ mô hình và giỏ không tính được giá: không
   const unknown = renderChatbotReply({ template_id: 'MAU_KHONG_TON_TAI' }, templates, { customer: { gender: 'female' } });
   assert.equal(unknown.templateId, 'GENERAL_INFO');
   assert.equal(unknown.handoff, false);
-  const flavor = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '5', Phone_Number: '0909123456', Customer_Address: fullAddress }, templates, { customer: { gender: 'female' } });
-  assert.equal(flavor.templateId, 'ORDER_CUSTOM_BASKET', '5 túi vượt combo: ghi nhận, nhân viên tính giá, không chuyển người');
+  const flavor = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '25', Phone_Number: '0909123456', Customer_Address: fullAddress }, templates, { customer: { gender: 'female' } });
+  assert.equal(flavor.templateId, 'ORDER_CUSTOM_BASKET', '25 túi (quá 20, đơn sỉ): ghi nhận, nhân viên tính giá, không chuyển người');
   assert.equal(flavor.handoff, false);
   assert.equal(flavor.attention, true);
   assert.equal(flavor.order, undefined, 'không tự lên đơn giỏ chưa có giá');
@@ -446,7 +456,7 @@ test('không gửi lại y nguyên tin bot vừa gửi trong 10 phút; SĐT ở 
     conversation: { id: 'page:rep', psid: 'rep', name: 'Khách', botEnabled: true, gender: 'female' },
     message: { id: 'mid.rep.2', mid: 'mid.rep.2', direction: 'incoming', type: 'text', text: 'Gửi rồi mà em' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templates }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: templates }),
     listMessages: async () => [
       { id: 'mid.rep.0', direction: 'incoming', type: 'text', text: '0909123456', createdAt: Date.now() - 120000 },
       { id: 'mid.bot.r', direction: 'outgoing', type: 'text', text: sameText, createdAt: Date.now() - 60000 },
@@ -499,7 +509,7 @@ test('hết hạn mức sau mọi lần thử: hẹn chạy lại sau; lúc đó
   let failures = 1;
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const deps = (recent = []) => ({
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', capacityRetryDelayMs: 30 }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, capacityRetryDelayMs: 30 }),
     listMessages: async () => recent,
     sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); return { message: { mid: 'mid.bot' } }; },
     saveBotState: async (_id, state) => { if (state.botLastError) log.push(`error:${state.botLastError}`); },
@@ -526,7 +536,7 @@ test('ảnh sau tin nhắn riêng từ bình luận bị Facebook chặn: nhớ 
   const { rememberPendingImages, takePendingImages } = await import('../app/chatbot-engine.mjs');
   const log = [];
   const base = {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '' }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0 }),
     listMessages: async () => [],
     saveBotState: async () => {},
     getConversation: async id => (id === 'page:user' ? { id: 'page:user', pageId: 'page', psid: 'user', botEnabled: true } : null),
@@ -590,7 +600,7 @@ test('ảnh khách gửi qua Vertex: model nhận ra sản phẩm thì trả l�
       conversation: { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true },
       message: { id: `img-${answer}`, mid: `img-${answer}`, direction: 'incoming', type: 'image', text: '', dataUrl: 'https://content.pancake.vn/ad.jpg', createdAt: 5 }
     }], {
-      readSettings: async () => ({ enabled: true, responseMode: 'automatic', provider: 'vertex', handoffKeywords: '', messageTemplates: { ...templates, IMAGE_RECEIVED: 'Dạ em đã nhận được hình ạ' } }),
+      readSettings: async () => ({ enabled: true, responseMode: 'automatic', provider: 'vertex', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: { ...templates, IMAGE_RECEIVED: 'Dạ em đã nhận được hình ạ' } }),
       listMessages: async () => [{ id: 't1', direction: 'incoming', type: 'text', text: 'cho 2 túi', createdAt: 1 }],
       saveBotState: async (_id, state) => { if (state.labels) log.push(`labels:${state.labels.join(',')}`); },
       sendMessage: async (_conversation, message) => { log.push(`text:${message.text}`); return { message: { mid: 'm' } }; },
@@ -614,7 +624,7 @@ test('khách bình luận nhiều lần dưới cùng bài: tin riêng y hệt �
   const log = [];
   const inboxMessages = [];
   const deps = {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib cho mình rồi ạ', COMMENT_PUBLIC_REPEAT: 'Dạ em đã gửi trong tin nhắn rồi ạ' } }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib cho mình rồi ạ', COMMENT_PUBLIC_REPEAT: 'Dạ em đã gửi trong tin nhắn rồi ạ' } }),
     listMessages: async id => (id === 'page:user' ? inboxMessages : []),
     getConversation: async id => (id === 'page:user' ? { id: 'page:user', pageId: 'page', psid: 'user', botEnabled: true } : null),
     saveBotState: async () => {},
@@ -652,7 +662,7 @@ test('bình luận dưới phiên livestream nhiều sản phẩm: hỏi giá ch
     conversation: { id: 'page:comment:c9:p9', pageId: 'page', psid: 'u9', source: 'comment', name: 'Khách', botEnabled: true, post: { id: 'p9', message: 'Săn deal hời' } },
     message: { id: 'c9', mid: 'c9', direction: 'incoming', type: 'text', text: 'Hộp bn', createdAt: 1 }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib ạ', LIVESTREAM_COMMENT: 'Dạ phiên live nhà em có đủ 3 vị ạ, {title} quan tâm loại nào ạ?' } }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib ạ', LIVESTREAM_COMMENT: 'Dạ phiên live nhà em có đủ 3 vị ạ, {title} quan tâm loại nào ạ?' } }),
     listMessages: async () => [],
     getConversation: async () => null,
     saveBotState: async () => {},

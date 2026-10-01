@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Kho hội thoại, trạng thái bám đuổi, thẻ và mã QR tạm: không đụng dữ liệu thật.
-const directory = mkdtempSync(path.join(tmpdir(), 'pancake-relay-'));
+const directory = tempDir('pancake-relay-');
 process.env.META_CONVERSATIONS_PATH = path.join(directory, 'meta-conversations.json');
 process.env.FOLLOW_UPS_PATH = path.join(directory, 'follow-ups.json');
 process.env.INBOX_SETTINGS_PATH = path.join(directory, 'inbox-settings.json');

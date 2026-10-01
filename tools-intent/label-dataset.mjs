@@ -76,7 +76,7 @@ export async function labelRows(rows, { cache, callModel, concurrency = 2, retri
 
 async function main() {
   const args = process.argv.slice(2);
-  const cli = parseCliArgs(args, ['--limit', '--concurrency']);
+  const cli = parseCliArgs(args, ['--limit', '--concurrency'], ['--only-drift']);
   // Đường dẫn tương đối tính theo thư mục gọi lệnh (main chdir về gốc dự án để nạp engine).
   const [inPath, labelsPath] = cli.positional.map(file => path.resolve(file));
   if (!inPath || !labelsPath) cliFail('Dùng: node --env-file=.env tools-intent/label-dataset.mjs <in.jsonl> <labels.jsonl> [--only-drift] [--limit N] [--concurrency 2]');

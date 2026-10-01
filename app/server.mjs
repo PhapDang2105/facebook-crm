@@ -3,13 +3,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
-import { buildExportRows, exportPreviewStreets, exportedOrderData } from './order-export.mjs';
+import { buildExportRows, exportFactsForOrders, exportPreviewStreets, exportedOrderData } from './order-export.mjs';
+import { listAllSystemOrders, reserveOrderIdInStore, takenOrderIds, uniqueOrderId } from './order-lookup.mjs';
 import { columnIndex as excelColumnIndex, parseXlsx } from './xlsx-import.mjs';
 import { buildPlainXlsx, excelColumnName } from './xlsx-export.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
-import { assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
+import { aiKeyReentryError, assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
@@ -30,7 +31,10 @@ import { cancelPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, syncOrderToPos
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote, processingNotes } from './order-notes.mjs';
-import { applyCustomerOrderEdits } from './order-edits.mjs';
+import { applyCustomerOrderEdits, describeOrderEdits, orderEditAction, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
+import { AUDIT_ACTIONS, AUTOMATED_ACTORS, appendAudit, appendBotToggleAudit, appendLabelAudit, auditActionLabel, auditActors, createViewThrottle, labelChangeDetails, labelChangeText, queryAudit } from './audit-log.mjs';
+import { BOT_ACTOR, actorOf, actorStamp, clearActorCache, clientIp, createRequireManager, isManager } from './request-actor.mjs';
+import { HTML_CSP, LOGIN_SETUP_MESSAGE, allowedWithoutLoginSetup, applySecurityHeaders, createLogLimiter, debugFlagOn, installConsoleRedaction, loginGate, loginSetupPage, safeNextPath } from './security.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
@@ -50,7 +54,7 @@ import {
   projectRoot,
   serverConfig, pancakeConfig, isReferralOnlyPage, subscriptionFieldsFor, authConfig } from './config.mjs';
 import { createAuth, isPublicPath, parseUsers } from './auth.mjs';
-import { listStaff, saveStaffMember, staffByUsername, staffLoginUsers, STAFF_ROLES } from './staff.mjs';
+import { listStaff, saveStaffMember, staffByUsername, staffLoginAccounts, STAFF_ROLES } from './staff.mjs';
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
@@ -61,13 +65,18 @@ import { moderateComment, sendConversationMessage, syncPageConversations } from 
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
 import {
   getConversation,
+  installMessagingStoreShutdownFlush,
   listConversations,
   listMessages,
+  markConversationSeen,
   publicConversation,
   readMessagingStore,
   setConversationFlags,
   updateMessagingStore
 } from './messaging-store.mjs';
+
+// Mọi dòng log của tiến trình (cả các mô-đun khác) che token/khóa trong URL: access_token=***.
+installConsoleRedaction(console);
 
 const root = projectRoot;
 const webRoot = path.join(root, 'web');
@@ -233,6 +242,8 @@ function publicCustomerPanel(conversation) {
     notes: Array.isArray(conversation?.customerNotes) ? conversation.customerNotes : [],
     orders: Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [],
     botEnabled: conversation?.botEnabled !== false,
+    // Ai bật/tắt bot gần nhất { username, name, at, enabled } (null khi chưa ai bấm từ khi có nhật ký).
+    botChangedBy: conversation?.botChangedBy || null,
     gender: conversation?.gender || '',
     genderSource: conversation?.genderSource || '',
     // Surfaced so a chatbot order that failed to save is visible to staff instead
@@ -298,7 +309,7 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
 async function updateChatbotCustomerOrder(conversation, orderId, input) {
   const fresh = normalizeChatbotOrder(input, conversation);
   await attachPhoneWarning(fresh);
-  const keep = new Set(['id', 'createdAt', 'pos', 'chatbotSourceMessageId', 'delivery', 'processingStatus', 'hiddenFromTable', 'staffNote', 'employee', 'automatic']);
+  const keep = new Set(['id', 'createdAt', 'pos', 'chatbotSourceMessageId', 'delivery', 'processingStatus', 'hiddenFromTable', 'staffNote', 'employee', 'automatic', 'createdBy', 'history', 'updatedBy']);
   const stamp = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
   const result = await updateMessagingStore(store => {
     const item = store.conversations.find(entry => entry.id === conversation.id);
@@ -311,6 +322,7 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
     const requests = String(existing.note || '').match(/Khách dặn: [^.]*\./g) || [];
     existing.note = [`Tạo tự động từ xác nhận của chatbot. Khách sửa đơn lúc ${stamp}.`, ...requests].join(' ');
     existing.updatedAt = Date.now();
+    recordOrderHistory(existing, { by: BOT_ACTOR, action: 'order.update', summary: 'Khách sửa đơn qua chatbot.' });
     return { order: existing };
   });
   if (!result) throw new Error('Không tìm thấy đơn để sửa.');
@@ -344,6 +356,7 @@ async function addChatbotOrderNote(conversation, orderId, note) {
     if (!existing) return null;
     if (text && !String(existing.note || '').includes(text)) existing.note = `${String(existing.note || '').trim()} Khách dặn: ${text}.`.trim();
     existing.updatedAt = Date.now();
+    recordOrderHistory(existing, { by: BOT_ACTOR, action: 'order.update', summary: `Khách dặn thêm qua chatbot: ${text}`.slice(0, 200) });
     return { order: { ...existing } };
   });
   if (!result) throw new Error('Không tìm thấy đơn để ghi chú.');
@@ -375,6 +388,7 @@ async function cancelChatbotCustomerOrder(conversation, orderId) {
     existing.status = 'Hủy';
     existing.note = `${String(existing.note || '').trim()} Khách hủy đơn qua chatbot lúc ${stamp}.`.trim();
     existing.updatedAt = Date.now();
+    recordOrderHistory(existing, { by: BOT_ACTOR, action: 'order.cancel', summary: 'Khách hủy đơn qua chatbot.' });
     return { order: existing };
   });
   if (!result) throw new Error('Không tìm thấy đơn để hủy.');
@@ -453,6 +467,8 @@ async function importPosConversationOrders(posOrders) {
           automatic: false,
           employee: posOrder.creator?.name || posOrder.assigning_seller?.name || posOrder.account_name || '',
           pos: { id: String(posOrder.id), systemId: String(posOrder.system_id || ''), status: String(posOrder.status_name || ''), importedAt: Date.now() },
+          // Dòng tặng trên POS (mã + số lượng) để file xuất kho ghi đủ quà như POS.
+          giftItems: (posOrder.items || []).filter(item => item.is_bonus_product && item.variation_info?.display_id).map(item => ({ sku: String(item.variation_info.display_id).trim().toUpperCase(), name: String(item.variation_info.name || ''), quantity: Math.max(1, Math.round(Number(item.quantity) || 1)) })),
           ...(Number(posOrder.status) === 6 ? { processingStatus: 'cancelled' } : {})
         }
       });
@@ -464,8 +480,17 @@ async function importPosConversationOrders(posOrders) {
   let created = 0;
   const touched = new Set();
   // Thẻ "Đã mua hàng" cho hội thoại có đơn POS chưa hủy (đơn mới, và đơn đã kéo về trước đây mà chưa gắn).
-  const orderLabels = labelsForEvents((await readInboxSettings().catch(() => ({ labels: [] }))).labels, ['order']);
+  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const orderLabels = labelsForEvents(labelDefs, ['order']);
   const relabeled = [];
+  // Lịch sử thẻ của hội thoại: thẻ do đồng bộ POS tự gắn cũng vào nhật ký (người làm 'system').
+  const labelChanges = [];
+  const relabel = (conversation, order) => {
+    const before = Array.isArray(conversation.labels) ? [...conversation.labels] : [];
+    if (!applyPurchaseLabels(conversation, order, orderLabels)) return;
+    relabeled.push(publicConversation(conversation));
+    labelChanges.push({ conversation: { id: conversation.id, name: conversation.name || '' }, before, after: [...conversation.labels] });
+  };
   await updateMessagingStore(store => {
     const byPancakeId = new Map(store.conversations.filter(item => item.pancakeConversationId && item.source !== 'comment').map(item => [String(item.pancakeConversationId), item]));
     for (const { conversationKey, order } of drafts) {
@@ -475,21 +500,27 @@ async function importPosConversationOrders(posOrders) {
       const existing = conversation.customerOrders.find(entry => entry.id === order.id || (entry.pos?.systemId && entry.pos.systemId === order.pos.systemId));
       if (existing) {
         // Đã kéo về: chỉ theo trạng thái hủy của POS; sửa của nhân viên trong CRM giữ nguyên.
+        // Đơn kéo về trước 01/10 chưa có dòng quà POS: bổ sung (file kho cần mã quà).
+        if (!Array.isArray(existing.giftItems) && Array.isArray(order.giftItems)) existing.giftItems = order.giftItems;
         if (order.processingStatus === 'cancelled' && existing.processingStatus !== 'cancelled') {
           Object.assign(existing, { processingStatus: 'cancelled', status: 'Hủy', updatedAt: Date.now() });
+          recordOrderHistory(existing, { by: { username: 'pos', name: 'Pancake POS' }, action: 'order.cancel', summary: 'Đơn đã hủy trên Pancake POS, CRM hủy theo.' });
           touched.add(conversation.id);
         }
-        if (applyPurchaseLabels(conversation, existing, orderLabels)) relabeled.push(publicConversation(conversation));
+        relabel(conversation, existing);
         continue;
       }
+      // Đơn nhân viên/Shop lên trên POS: người tạo là người lên đơn trên POS (nếu POS cho biết).
+      order.createdBy = { username: 'pos', name: order.employee ? `${order.employee} (POS)` : 'Pancake POS' };
       conversation.customerOrders.unshift(order);
       conversation.customerOrders = conversation.customerOrders.slice(0, 200);
-      if (applyPurchaseLabels(conversation, order, orderLabels)) relabeled.push(publicConversation(conversation));
+      relabel(conversation, order);
       created += 1;
       touched.add(conversation.id);
     }
     return null;
   });
+  for (const change of labelChanges) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason: 'đồng bộ đơn POS' });
   for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
   for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
   if (relabeled.length) console.log(`Đồng bộ POS: gắn thẻ Đã mua hàng cho ${relabeled.length} hội thoại có đơn POS.`);
@@ -512,6 +543,7 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
     order.updatedAt = Date.now();
     // Chỉ đồng bộ hủy MỘT lần: nhân viên mở lại đơn trong CRM thì lượt sau không hủy lại.
     order.pos = { ...(order.pos || {}), cancelled: true, cancelSyncedAt: Date.now(), error: undefined };
+    recordOrderHistory(order, { by: { username: 'pos', name: 'Pancake POS' }, action: 'order.cancel', summary: 'Đơn đã hủy trên Pancake POS, CRM hủy theo.' });
   };
   const changed = [];
   const touched = new Set();
@@ -573,6 +605,23 @@ async function resolveQrPage() {
   return cachedQrPage;
 }
 
+/**
+ * Webhook landing đã trả 200 cho Webcake: tạo đơn ở nền (tự điền địa chỉ, tra cảnh báo SĐT có thể
+ * mất vài giây). Không bao giờ ném ra ngoài (promise bỏ rơi).
+ */
+function processLandingWebhookInBackground(payload, page) {
+  recordLandingOrder(payload, { page })
+    .then(result => {
+      if (result.error) {
+        console.error(`Webhook landing: không tạo được đơn — ${result.error}`);
+        return;
+      }
+      console.log(`Webhook landing: ${result.created ? 'tạo đơn' : 'đơn trùng, bỏ qua'} #${result.order.id} (${String(result.order.phone || '').replace(/\d(?=\d{3})/g, '*')})`);
+      publishMessagingEvent({ type: 'landing-order', orderId: result.order.id });
+    })
+    .catch(error => console.error(`Webhook landing: lỗi khi tạo đơn ở nền — ${error.message}`));
+}
+
 /** Đồng bộ Pancake (định kỳ và nút Đồng bộ) đưa bot qua cùng móc như webhook. */
 function syncBotHook(changes, deps) {
   scheduleQrGreetings(changes);
@@ -605,7 +654,8 @@ const scheduleQrGreetings = changes => qrGreeter.schedule(changes);
 /** Sends the tappable Messenger receipt. Kept separate from creating the order so
  *  the chatbot can persist the order first and still close with the receipt. */
 /** `force`: nhân viên bấm "Gửi lại cho khách" — gửi cả khi POS đã gửi thẻ, và ném lỗi thay vì chỉ ghi log. */
-async function sendChatbotOrderReceipt(conversation, order, { force = false } = {}) {
+/** `sentBy` { name, username }: nhân viên đã bấm (đơn tạo tay, "Gửi lại phiếu") — tin mang sender 'staff'; không có là bot gửi. */
+async function sendChatbotOrderReceipt(conversation, order, { force = false, sentBy = null } = {}) {
   try {
     // Qua Pancake không gửi được thẻ receipt của Messenger: phiếu được vẽ
     // thành ảnh và gửi như ảnh đính kèm (bản chữ chỉ lặp lại ORDER_CONFIRMATION).
@@ -614,15 +664,15 @@ async function sendChatbotOrderReceipt(conversation, order, { force = false } = 
     // chủ shop): phiếu chỉ là thẻ receipt của Messenger, thẻ của POS, hoặc ảnh phiếu.
     if (conversation.pancakeConversationId) {
       if (order.pos?.id && !force) return;
-      await sendReceiptImage(conversation, order);
+      await sendReceiptImage(conversation, order, { sentBy });
       return;
     }
     try {
-      await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }) });
+      await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }), sentBy });
     } catch (error) {
       // Messenger từ chối thẻ receipt: gửi ảnh phiếu thay vì bản chữ.
       console.error(`Messenger từ chối thẻ receipt của đơn ${order.id}, gửi ảnh phiếu: ${error.message}`);
-      await sendReceiptImage(conversation, order);
+      await sendReceiptImage(conversation, order, { sentBy });
     }
   } catch (error) {
     if (force) throw error;
@@ -630,10 +680,11 @@ async function sendChatbotOrderReceipt(conversation, order, { force = false } = 
   }
 }
 
-async function sendReceiptImage(conversation, order) {
+async function sendReceiptImage(conversation, order, { sentBy = null } = {}) {
   const image = await renderOrderReceiptImage(order, { merchantName: pancakeConfig.pageName.replace(/\s*\(Pancake\)\s*$/i, '') || 'Giọt Nắng' });
   return sendConversationMessage(conversation, {
-    attachment: { dataUrl: `data:image/png;base64,${image.toString('base64')}`, name: `phieu-don-${order.id}.png`, type: 'image' }
+    attachment: { dataUrl: `data:image/png;base64,${image.toString('base64')}`, name: `phieu-don-${order.id}.png`, type: 'image' },
+    sentBy
   });
 }
 
@@ -929,6 +980,8 @@ async function serveFile(request, response, pathname) {
       etag = `W/"${createHash('sha1').update(body).digest('hex').slice(0, 16)}"`;
     }
     const headers = { 'Content-Type':types[path.extname(filePath)] || 'application/octet-stream', 'Cache-Control':'no-cache', 'ETag':etag };
+    // CSP chỉ cho trang HTML của web/ (đã rà: không script nội tuyến) — lý do từng chỉ thị ở app/security.mjs.
+    if (path.extname(filePath) === '.html') headers['Content-Security-Policy'] = HTML_CSP;
     if (request.headers['if-none-match'] === etag) {
       response.writeHead(304, headers);
       return response.end();
@@ -991,23 +1044,32 @@ const chatbotDependencies = {
   // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
   // nhận sự kiện là do nhân viên chọn trong Cài đặt → Tin nhắn.
   saveBotState: async (id, { addLabelEvents = [], ...botState }) => {
-    const addLabels = addLabelEvents.length
-      ? labelsForEvents((await readInboxSettings()).labels, addLabelEvents)
-      : [];
-    return updateMessagingStore(store => {
+    const labelDefs = addLabelEvents.length ? (await readInboxSettings()).labels : [];
+    const addLabels = addLabelEvents.length ? labelsForEvents(labelDefs, addLabelEvents) : [];
+    // Thẻ bot gắn và bot tự tắt (chuyển CSKH) vào lịch sử hội thoại (nhật ký, người làm 'bot').
+    let labelChange = null;
+    let botOff = null;
+    const saved = await updateMessagingStore(store => {
       const conversation = store.conversations.find(item => item.id === id);
       if (!conversation) return null;
+      const botWasOn = conversation.botEnabled !== false;
       Object.assign(conversation, botState);
+      if (botWasOn && botState.botEnabled === false) botOff = { id: conversation.id, name: conversation.name || '' };
       if (addLabels.length) {
         const before = Array.isArray(conversation.labels) ? conversation.labels : [];
         const merged = [...new Set([...before, ...addLabels])];
         if (merged.length !== before.length) {
           conversation.labels = merged;
+          labelChange = { conversation: { id: conversation.id, name: conversation.name || '' }, before: [...before], after: [...merged] };
           publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
         }
       }
       return conversation;
     });
+    const eventNames = { order: 'chốt đơn', handoff: 'chuyển nhân viên', complaint: 'khiếu nại', warranty: 'bảo hành', update: 'khách đổi đơn', cancel: 'khách hủy đơn', livestream: 'khách livestream', wholesale: 'khách sỉ', bad: 'khách xấu' };
+    if (labelChange) appendLabelAudit({ actor: AUTOMATED_ACTORS.bot, ...labelChange, labelDefs, reason: `bot: ${addLabelEvents.map(event => eventNames[event] || event).join(', ')}` });
+    if (botOff) appendBotToggleAudit({ actor: AUTOMATED_ACTORS.bot, conversation: botOff, enabled: false, reason: 'bot chuyển nhân viên' });
+    return saved;
   }
 };
 
@@ -1016,21 +1078,130 @@ const chatbotDependencies = {
 // đổi mật khẩu hay cho nghỉ có hiệu lực ngay (phiên cũ của người đổi mật khẩu/nghỉ hết hạn theo dấu vân tay).
 const envLoginUsers = parseUsers(authConfig.users);
 const loginUsers = new Map(envLoginUsers);
+// Giá trị của Nhân sự là { hash, version } (sessionVersion): đổi mật khẩu / cho nghỉ → cookie cũ vô hiệu.
+// Đọc kho lỗi thì NÉM (giữ danh sách cũ), không xoá hết tài khoản.
+let loginUsersCheckedAt = 0;
 async function refreshLoginUsers() {
-  const staff = await staffLoginUsers();
+  const staff = await staffLoginAccounts();
   for (const name of [...loginUsers.keys()]) if (!envLoginUsers.has(name) && !staff.has(name)) loginUsers.delete(name);
-  for (const [name, hash] of staff) if (!envLoginUsers.has(name)) loginUsers.set(name, hash);
+  for (const [name, account] of staff) if (!envLoginUsers.has(name)) loginUsers.set(name, account);
+  loginUsersCheckedAt = Date.now();
+}
+// Kiểm Nhân sự còn đang làm ở mỗi request, nhớ 15 giây (staff.json sửa bằng tay/script cũng có hiệu lực).
+const LOGIN_USERS_CACHE_MS = 15 * 1000;
+let loginUsersRefreshing = null;
+function refreshLoginUsersIfStale() {
+  if (Date.now() - loginUsersCheckedAt < LOGIN_USERS_CACHE_MS) return Promise.resolve();
+  loginUsersRefreshing ||= refreshLoginUsers()
+    .catch(error => { loginUsersCheckedAt = Date.now(); console.warn(`Không đọc được Nhân sự cho đăng nhập (giữ danh sách cũ): ${error.message}`); })
+    .finally(() => { loginUsersRefreshing = null; });
+  return loginUsersRefreshing;
 }
 await refreshLoginUsers().catch(error => console.warn(`Không đọc được Nhân sự cho đăng nhập: ${error.message}`));
 const auth = createAuth({ users: loginUsers, secret: authConfig.sessionSecret, secure: authConfig.secureCookie });
 
-/** Caddy chạy cùng máy và ghi X-Forwarded-For; CRM chỉ nghe loopback nên tin được. */
+/** IP người dùng: X-Forwarded-For chỉ được tin khi kết nối từ loopback (Caddy) — app/request-actor.mjs. */
 function clientAddress(request) {
-  return String(request.headers['x-forwarded-for'] || '').split(',')[0].trim() || request.socket.remoteAddress || '';
+  return clientIp(request);
+}
+
+/* ---- Nhật ký hoạt động (app/audit-log.mjs) ----
+ * Mọi thao tác của NGƯỜI DÙNG (route do giao diện gọi) ghi một dòng sau khi thành công; thất bại
+ * quan trọng (đăng nhập sai) cũng ghi. Việc tự động của bot/đồng bộ không ghi ở đây.
+ * tests/audit-routes.test.mjs đọc mã nguồn: route ghi nào thiếu `audit(request` là test hỏng.
+ */
+/** Người gọi request: { username, name, role, roleName, ip } (nhân sự nhớ 30 giây). */
+const requestActor = request => actorOf(request, { auth, envLoginUsers });
+/** Người của một tên đăng nhập (lúc đăng nhập: phiên chưa có trên request). */
+const actorForUsername = (request, username) => actorOf(request, { auth: { enabled: true, session: () => ({ username }) }, envLoginUsers });
+/**
+ * Phân quyền Cài đặt: `if (!(await requireManager(request, response))) return;` ở đầu route ghi.
+ * Nhân viên thường (role staff) bị 403; chủ shop / Quản trị qua. Danh sách route có chốt này được
+ * tests/security-routes.test.mjs kiểm trên mã nguồn.
+ */
+const requireManager = createRequireManager(requestActor, sendJson);
+
+/**
+ * Ghi một dòng nhật ký (không chặn request, lỗi chỉ warn). `details`: { target, conversationId,
+ * orderId, summary }. `actor`: người đã tra sẵn (tránh tra lại), mặc định tra từ phiên.
+ */
+function audit(request, action, details = {}, actor = null) {
+  return Promise.resolve(actor || requestActor(request))
+    .then(who => appendAudit({ ...details, actor: who.username, actorName: who.name, role: who.role, ip: who.ip || clientIp(request), action }))
+    .catch(error => console.warn(`Nhật ký hoạt động: ${error.message}`));
+}
+
+// Xem hội thoại: cùng người + cùng hội thoại ghi nhật ký tối đa 1 lần / 30 phút (đánh dấu đã đọc cũng vậy).
+const shouldAuditView = createViewThrottle();
+const shouldAuditRead = createViewThrottle();
+// "Ai đã xem" trên chính hội thoại (conversation.seenBy): ghi kho tối đa 1 lần / phút / người / hội thoại.
+const shouldStoreSeen = createViewThrottle({ windowMs: 60 * 1000 });
+
+/** Ghi "người này vừa xem" lên hội thoại và báo các máy khác (SSE). Chưa bật đăng nhập thì thôi. */
+async function recordConversationSeen(conversationId, actor) {
+  if (!actor?.username || !shouldStoreSeen(actor.username, conversationId)) return;
+  const updated = await updateMessagingStore(store => markConversationSeen(store, conversationId, { username: actor.username, name: actor.name }));
+  if (updated) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(updated) });
+}
+
+/** Định nghĩa thẻ (Cài đặt → Tin nhắn) để nhật ký ghi TÊN thẻ, không chỉ mã. */
+async function inboxLabelDefs() {
+  const { labels } = await readInboxSettings().catch(() => ({ labels: [] }));
+  return Array.isArray(labels) ? labels : [];
+}
+
+/** "Sửa cài đặt chatbot: prompt, 3 mẫu tin bot, bám đuổi" — không bao giờ ghi khoá API. */
+function chatbotSettingsChangeText(before = {}, after = {}, payload = {}) {
+  const labels = {
+    responseMode: 'chế độ trả lời', systemPrompt: 'prompt', prompt: 'prompt', welcomeMessage: 'lời chào',
+    provider: 'nhà cung cấp AI', directEndpoint: 'endpoint AI', directModel: 'mô hình AI', directAuthType: 'kiểu xác thực AI',
+    followUps: 'bám đuổi', handoffKeywords: 'từ khóa chuyển CSKH', complaintKeywords: 'từ khóa khiếu nại', contextTrim: 'rút gọn ngữ cảnh'
+  };
+  const changed = [];
+  for (const key of Object.keys(payload || {})) {
+    if (['messageTemplates', 'directApiKey', 'updatedAt', 'enabled'].includes(key)) continue;
+    if (JSON.stringify(before?.[key]) === JSON.stringify(after?.[key])) continue;
+    const label = labels[key] || key;
+    if (!changed.includes(label)) changed.push(label);
+  }
+  const templates = Object.keys({ ...(before?.messageTemplates || {}), ...(after?.messageTemplates || {}) })
+    .filter(id => JSON.stringify(before?.messageTemplates?.[id]) !== JSON.stringify(after?.messageTemplates?.[id]));
+  if (templates.length) changed.push(`${templates.length} mẫu tin bot (${templates.slice(0, 4).join(', ')}${templates.length > 4 ? '…' : ''})`);
+  if (String(payload?.directApiKey || '').trim()) changed.push('đổi khoá API');
+  if (before?.enabled !== after?.enabled) changed.unshift(after?.enabled ? 'BẬT bot' : 'TẮT bot');
+  return `Sửa cài đặt chatbot: ${changed.join(', ') || 'không đổi'}.`;
+}
+
+const orderTarget = order => ({ type: 'order', id: String(order?.id || ''), name: String(order?.name || '') });
+const conversationTarget = conversation => ({ type: 'conversation', id: String(conversation?.id || ''), name: String(conversation?.name || '') });
+
+/** Ghi một mục lịch sử lên đơn ở cả hai kho (đơn hội thoại / đơn landing). */
+async function addOrderHistory(orderId, entry) {
+  let found = false;
+  await updateMessagingStore(store => {
+    for (const conversation of store.conversations) {
+      const order = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(item => String(item.id) === String(orderId));
+      if (order) { recordOrderHistory(order, entry); found = true; break; }
+    }
+    return null;
+  });
+  if (!found) await updateLandingStore(store => { const order = store.orders.find(item => String(item.id) === String(orderId)); if (order) recordOrderHistory(order, entry); });
 }
 
 /** /api/auth/*, chặn khi chưa đăng nhập. Trả true khi đã tự trả lời request. */
 async function handleAuth(request, response, url, isWebhook) {
+  // Nhân sự cho nghỉ / đổi mật khẩu (kể cả sửa staff.json ngoài giao diện): phiên cũ hết hiệu lực trong ≤15 giây.
+  if (!isWebhook) await refreshLoginUsersIfStale();
+  // Fail-closed: máy chủ thật (https / CRM_REQUIRE_LOGIN=1) mà chưa có tài khoản nào thì KHÔNG mở toang.
+  if (loginGate({ enabled: auth.enabled, required: authConfig.requireLogin }) === 'setup-required' && !allowedWithoutLoginSetup(url.pathname, { isWebhook })) {
+    if (url.pathname.startsWith('/api/') || request.method !== 'GET') {
+      sendJson(response, 503, { error: LOGIN_SETUP_MESSAGE });
+    } else {
+      response.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': '300' });
+      response.end(loginSetupPage());
+    }
+    return true;
+  }
   if (url.pathname === '/api/auth/session' && request.method === 'GET') {
     const session = auth.session(request);
     // Kèm họ tên và vai trò trong Nhân sự để thanh trên cùng hiện đúng người đang đăng nhập.
@@ -1043,16 +1214,26 @@ async function handleAuth(request, response, url, isWebhook) {
     const payload = await readBody(request);
     const result = await auth.login({ username: payload.username, password: payload.password, clientId: clientAddress(request) });
     if (!result.ok) {
-      if (result.status === 401 || result.status === 429) console.warn(`Đăng nhập thất bại (${clientAddress(request)}): ${String(payload.username || '').slice(0, 40)}`);
+      if (result.status === 401 || result.status === 429) {
+        const typed = String(payload.username || '').trim().toLowerCase().slice(0, 40);
+        console.warn(`Đăng nhập thất bại (${clientAddress(request)}): ${typed}`);
+        // Đăng nhập sai: người = tên đã gõ (không ghi mật khẩu).
+        audit(request, 'auth.login_failed', {
+          summary: result.status === 429 ? 'Đăng nhập sai quá nhiều lần, bị khóa 15 phút.' : 'Sai tên đăng nhập hoặc mật khẩu.'
+        }, { username: typed, name: typed, role: '', ip: clientAddress(request) });
+      }
       sendJson(response, result.status, { error: result.error });
       return true;
     }
     console.log(`Đăng nhập: ${result.username} (${clientAddress(request)})`);
+    audit(request, 'auth.login', { summary: 'Đăng nhập CRM.' }, await actorForUsername(request, result.username));
     response.setHeader('Set-Cookie', result.cookie);
     sendJson(response, 200, { username: result.username });
     return true;
   }
   if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+    // Tra người TRƯỚC khi xóa cookie (phiên còn trên request này).
+    if (auth.session(request)?.username) audit(request, 'auth.logout', { summary: 'Đăng xuất.' }, await requestActor(request));
     response.setHeader('Set-Cookie', auth.logoutCookie());
     sendJson(response, 200, { ok: true });
     return true;
@@ -1060,7 +1241,8 @@ async function handleAuth(request, response, url, isWebhook) {
   const session = auth.session(request);
   if ((url.pathname === '/login' || url.pathname === '/login.html') && request.method === 'GET') {
     if (session && auth.enabled) {
-      response.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' });
+      // Đã đăng nhập: về ?next= nếu là đường dẫn nội bộ an toàn, không thì về trang chủ (chống open redirect).
+      response.writeHead(302, { Location: safeNextPath(url.searchParams.get('next')), 'Cache-Control': 'no-store' });
       response.end();
       return true;
     }
@@ -1078,8 +1260,11 @@ async function handleAuth(request, response, url, isWebhook) {
 }
 
 let pancakeNoTokenWarnedAt = 0;
+const pancakeDebugAllowed = createLogLimiter({ max: 30, windowMs: 60 * 1000 });
 const server = http.createServer(async (request, response) => {
   try {
+    // Header bảo mật cho mọi phản hồi (HTML/JSON/tệp): nosniff, chống nhúng khung, Referrer, HSTS khi https.
+    applySecurityHeaders(response, { https: authConfig.https });
     // "//q/api/…" từng vượt Basic Auth (Caddy cho /q/* đi thẳng, new URL coi "q" là host): chặn trước khi parse.
     if (!isSafeRequestTarget(request.url)) return sendJson(response, 400, { error: 'Đường dẫn không hợp lệ.' });
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
@@ -1204,12 +1389,16 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname === '/api/qr/settings') {
       if (request.method === 'GET') return sendJson(response, 200, await readQrSettings());
       if (request.method === 'PUT') {
+        if (!(await requireManager(request, response))) return;
         try {
           const payload = await readBody(request);
-          return sendJson(response, 200, await writeQrSettings({
+          const saved = await writeQrSettings({
             ...(payload?.zaloUrl !== undefined ? { zaloUrl: payload.zaloUrl } : {}),
             ...(payload?.prefillText !== undefined ? { prefillText: payload.prefillText } : {})
-          }));
+          });
+          const changed = [payload?.zaloUrl !== undefined ? 'liên kết Zalo' : '', payload?.prefillText !== undefined ? 'tin soạn sẵn' : ''].filter(Boolean);
+          audit(request, 'settings.qr', { target: { type: 'qr-settings', id: 'qr', name: 'Trang đệm QR' }, summary: `Sửa trang đệm QR: ${changed.join(', ') || 'không đổi'}.` });
+          return sendJson(response, 200, saved);
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }
@@ -1220,11 +1409,13 @@ const server = http.createServer(async (request, response) => {
     // PNG (?size=, mặc định 1024) để xem nhanh hay dán vào thiết kế.
     // Tạo mã từ Cài đặt → Mã QR: mã có mặt trong bảng ngay với 0 lượt quét, không cần tải ảnh trước.
     if (request.method === 'POST' && url.pathname === '/api/qr/codes') {
+      if (!(await requireManager(request, response))) return;
       try {
         const payload = await readBody(request);
         const code = String(payload?.code || '').trim().toLowerCase();
         if (!isValidQrCode(code)) return sendJson(response, 400, { error: 'Mã QR chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự.' });
         const created = await registerQrCode(code);
+        if (created) audit(request, 'settings.qr', { target: { type: 'qr-code', id: code, name: code }, summary: `Tạo mã QR ${code}.` });
         return sendJson(response, created ? 201 : 200, { code, created: Boolean(created) });
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
@@ -1233,9 +1424,11 @@ const server = http.createServer(async (request, response) => {
     // Xoá mã gõ nhầm / lô không in (mất số liệu của mã đó).
     const qrDeleteMatch = url.pathname.match(/^\/api\/qr\/codes\/([^/]+)$/);
     if (qrDeleteMatch && request.method === 'DELETE') {
+      if (!(await requireManager(request, response))) return;
       const code = decodeURIComponent(qrDeleteMatch[1]).toLowerCase();
       if (!isValidQrCode(code)) return sendJson(response, 400, { error: 'Mã QR chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự.' });
       const deleted = await deleteQrCode(code);
+      if (deleted) audit(request, 'settings.qr', { target: { type: 'qr-code', id: code, name: code }, summary: `Xóa mã QR ${code} (mất số liệu của mã).` });
       return sendJson(response, deleted ? 200 : 404, deleted ? { deleted: code } : { error: 'Không có mã này trong kho.' });
     }
     const qrImageMatch = url.pathname.match(/^\/api\/qr\/image\/([^/]+)\.(svg|png)$/);
@@ -1264,6 +1457,7 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { items, total: items.length, updatedAt: store.updatedAt });
     }
     if (request.method === 'POST' && url.pathname === '/api/products') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request, 8 * 1024 * 1024);
       const id = randomUUID();
       const product = await updateProductStore(async store => {
@@ -1274,15 +1468,19 @@ const server = http.createServer(async (request, response) => {
         store.items.unshift(created);
         return created;
       });
+      audit(request, 'settings.products', { target: { type: 'product', id: product.id, name: product.name }, summary: `Thêm sản phẩm ${product.name}${product.sku ? ` (${product.sku})` : ''}.` });
       return sendJson(response, 201, product);
     }
     const productMatch = url.pathname.match(/^\/api\/products\/([^/]+)$/);
     if (productMatch && ['PUT', 'DELETE'].includes(request.method)) {
+      if (!(await requireManager(request, response))) return;
       const payload = request.method === 'PUT' ? await readBody(request, 8 * 1024 * 1024) : null;
       let missing = false;
+      let before = null;
       const result = await updateProductStore(async store => {
         const index = store.items.findIndex(product => product.id === productMatch[1]);
         if (index < 0) { missing = true; return undefined; }
+        before = { ...store.items[index] };
         if (request.method === 'DELETE') return store.items.splice(index, 1)[0];
         const product = normalizeProduct(payload, store.items[index]);
         assertUniqueSku(store.items, product.sku, product.id);
@@ -1293,6 +1491,14 @@ const server = http.createServer(async (request, response) => {
         return product;
       });
       if (missing) return sendJson(response, 404, { error: 'Không tìm thấy sản phẩm.' });
+      if (request.method === 'DELETE') {
+        audit(request, 'settings.products', { target: { type: 'product', id: result.id, name: result.name }, summary: `Xóa sản phẩm ${result.name}${result.sku ? ` (${result.sku})` : ''}.` });
+      } else {
+        const fields = { name: 'tên', sku: 'mã', originalPrice: 'giá gốc', salePrice: 'giá bán', comboPrice: 'giá combo', weight: 'khối lượng', unit: 'đơn vị', aliases: 'tên gọi khác', mixable: 'cho phối', active: 'đang bán', image: 'ảnh', images: 'thư viện ảnh' };
+        const changed = Object.entries(fields).filter(([key]) => JSON.stringify(before?.[key]) !== JSON.stringify(result?.[key])).map(([, label]) => label);
+        const price = before?.salePrice !== result?.salePrice ? ` (giá bán ${Number(before?.salePrice) || 0} → ${Number(result?.salePrice) || 0})` : '';
+        audit(request, 'settings.products', { target: { type: 'product', id: result.id, name: result.name }, summary: `Sửa sản phẩm ${result.name}: ${changed.join(', ') || 'không đổi'}${price}.` });
+      }
       return sendJson(response, 200, result);
     }
     // Bám đuổi: trạng thái (bật từ khi nào, lần chạy cuối, các lần gửi gần nhất) và chạy tay một lượt.
@@ -1301,14 +1507,19 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { ...(await goldenSetOverview({ batch: Math.max(1, Math.min(50, Number(url.searchParams.get('batch')) || 10)) })), templateIds: Object.keys((await readChatbotSettings()).messageTemplates || {}) });
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/golden/import') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
-      return sendJson(response, 200, await importGoldenItems(payload.items));
+      const imported = await importGoldenItems(payload.items);
+      audit(request, 'settings.golden', { summary: `Nạp ${Number(imported?.added) || 0} tin vào bộ test vàng (tổng ${Number(imported?.total) || 0}).` });
+      return sendJson(response, 200, imported);
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/golden/label') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       try {
         const item = await labelGoldenItem(String(payload.id || ''), String(payload.label || ''));
         if (!item) return sendJson(response, 404, { error: 'Không thấy tin này trong bộ test.' });
+        audit(request, 'settings.golden', { target: { type: 'golden-item', id: String(payload.id || ''), name: '' }, summary: `Chấm nhãn bộ test vàng: ${String(payload.label || '(bỏ nhãn)').slice(0, 60)}.` });
         return sendJson(response, 200, { item, ...(await goldenSetOverview({ batch: 10 })) });
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
@@ -1318,35 +1529,48 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, await followUpStatus());
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/run') {
+      if (!(await requireManager(request, response))) return;
       const summary = await runFollowUps({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
+      audit(request, 'followup.run', {
+        summary: summary?.disabled ? 'Bấm Gửi ngay: bám đuổi đang tắt.' : summary?.quiet ? 'Bấm Gửi ngay: giờ yên lặng (22h–7h), không gửi.'
+          : `Bấm Gửi ngay: xét ${Number(summary?.checked) || 0}, gửi ${Number(summary?.sent) || 0}, lỗi ${Number(summary?.failed) || 0}, bỏ qua ${Number(summary?.skipped) || 0}.`,
+        details: { sent: Number(summary?.sent) || 0, failed: Number(summary?.failed) || 0 }
+      });
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }
     // Hàng chờ ngoài 24 giờ: nhân viên gửi trong Pancake rồi bấm "Đã gửi" (hay "Bỏ qua").
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/queue') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       const action = payload.action === 'skip' ? 'skip' : 'sent';
       const done = await resolveFollowUpQueueItem(String(payload.key || ''), action, { readSettings: readChatbotSettings });
       if (!done) return sendJson(response, 404, { error: 'Tin này không còn trong hàng chờ.' });
+      audit(request, 'followup.queue', { target: { type: 'follow-up', id: String(payload.key || ''), name: '' }, summary: action === 'skip' ? 'Bỏ qua tin bám đuổi trong hàng chờ.' : 'Đánh dấu đã gửi tin bám đuổi (gửi tay trong Pancake).' });
       return sendJson(response, 200, await followUpStatus());
     }
     // Trạm gửi Pancake: lô gửi (ID Facebook lấy lại từ Pancake, khách đã có đơn thì bỏ)
     // và kết quả dấu trang "Gửi bám đuổi" báo về sau khi extension Pancake gửi xong.
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       const batch = await buildFollowUpBatch({ limit: payload.limit, readSettings: readChatbotSettings, conversationInfo: followUpConversationInfo });
+      audit(request, 'followup.batch', { summary: `Lấy lô bám đuổi cho trạm Pancake: ${Array.isArray(batch?.items) ? batch.items.length : 0} khách (còn ${Number(batch?.remaining) || 0}).` });
       return sendJson(response, 200, batch);
     }
     // Dọn hàng chờ ngay: tra lại khách chưa xét, khách cũ (đã từng mua) bỏ khỏi hàng.
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/prune') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       const result = await pruneReturningFromQueue({ conversationInfo: followUpConversationInfo, limit: Math.max(1, Math.min(300, Number(payload.limit) || 100)) });
       console.log(`Bám đuổi: dọn hàng chờ, xét ${result.checked}, bỏ ${result.removed} khách cũ`);
+      audit(request, 'followup.prune', { summary: `Dọn hàng chờ bám đuổi: xét ${result.checked}, bỏ ${result.removed} khách cũ.` });
       return sendJson(response, 200, { ...result, status: await followUpStatus() });
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch-results') {
       const payload = await readBody(request);
       const summary = await recordFollowUpBatchResults(payload.results, { readSettings: readChatbotSettings, token: String(payload.token || '') });
       console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''})`);
+      audit(request, 'followup.batch_results', { summary: `Trạm Pancake gửi bám đuổi: gửi ${summary.sent}, lỗi ${summary.failed}, bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''}.`, details: { sent: Number(summary.sent) || 0, failed: Number(summary.failed) || 0 } });
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }
     // Nhân viên bấm Dừng / đóng trang giữa lô: bỏ giữ chỗ để lô sau lấy lại ngay.
@@ -1365,6 +1589,7 @@ const server = http.createServer(async (request, response) => {
       });
     }
     if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {
+      if (!(await requireManager(request, response))) return;
       const current = await readChatbotSettings();
       const payload = await readBody(request);
       const directEndpoint = String(payload.directEndpoint || current.directEndpoint || '');
@@ -1386,6 +1611,9 @@ const server = http.createServer(async (request, response) => {
           return sendJson(response, 400, { error: error.message });
         }
       }
+      // Chặn trộm khóa AI: đổi endpoint mà không nhập lại khóa → khóa cũ KHÔNG được mang sang địa chỉ mới.
+      const keyReentryError = aiKeyReentryError(current, normalizeChatbotSettings({ ...mergeChatbotSettingsPatch(current, payload), directApiKey: current.directApiKey }), payload);
+      if (keyReentryError) return sendJson(response, 400, { error: keyReentryError });
       // Gộp sâu bản vá (followUps, contextTrim; khóa không gửi/null giữ giá trị cũ —
       // handoffKeywords không bị xóa khi form không gửi).
       const settings = await writeChatbotSettings({
@@ -1396,6 +1624,7 @@ const server = http.createServer(async (request, response) => {
       });
       // Bám đuổi vừa bật lại: tính từ bây giờ, không gửi dồn cho khách cũ.
       if (settings.followUps?.enabled && !current.followUps?.enabled) await resetFollowUpActivation();
+      audit(request, 'settings.chatbot', { target: { type: 'settings', id: 'chatbot', name: 'Cài đặt chatbot' }, summary: chatbotSettingsChangeText(current, settings, payload) });
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
         templates: settings.messageTemplates,
@@ -1407,6 +1636,7 @@ const server = http.createServer(async (request, response) => {
     // (nhân viên nhắn, POS, chuyển CSKH) được bật lại và xóa lỗi cũ; tắt thì tắt hết.
     // Giữ nguyên giỏ đang chờ, đơn, thẻ, ghi chú và lịch sử tin nhắn.
     if (request.method === 'POST' && url.pathname === '/api/chatbot/master-switch') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       const enabled = payload.enabled === true;
       const current = await readChatbotSettings();
@@ -1426,9 +1656,15 @@ const server = http.createServer(async (request, response) => {
         return { total: store.conversations.length, changed };
       });
       console.log(`Chatbot ${enabled ? 'BẬT' : 'TẮT'} cho mọi hội thoại: ${summary.changed}/${summary.total} hội thoại được đặt lại.`);
+      audit(request, 'settings.chatbot', {
+        target: { type: 'settings', id: 'chatbot', name: 'Công tắc chatbot' },
+        summary: `${enabled ? 'BẬT' : 'TẮT'} chatbot cho mọi hội thoại (${summary.changed}/${summary.total} hội thoại được đặt lại).`,
+        details: { enabled, changed: summary.changed, total: summary.total }
+      });
       return sendJson(response, 200, { enabled: settings.enabled === true, conversations: summary.total, changed: summary.changed });
     }
     if (request.method === 'POST' && url.pathname === '/api/chatbot/test') {
+      if (!(await requireManager(request, response))) return;
       const current = await readChatbotSettings();
       const payload = await readBody(request, 256 * 1024);
       const text = String(payload.message || '').trim();
@@ -1547,6 +1783,7 @@ const server = http.createServer(async (request, response) => {
       });
     }
     if (request.method === 'POST' && url.pathname === '/api/channels/meta/confirm') {
+      if (!(await requireManager(request, response))) return;
       cleanExpiredMetaSessions();
       const payload = await readBody(request);
       const pending = metaPendingPages.get(payload.ticket || '');
@@ -1591,10 +1828,12 @@ const server = http.createServer(async (request, response) => {
         } catch { /* The Page stays connected even when the first import fails. */ }
       }
       await writeChannelStore(store);
+      audit(request, 'settings.channels', { target: { type: 'channel', id: connected.map(page => page.id).join(','), name: connected.map(page => page.name).join(', ') }, summary: `Kết nối Facebook Page: ${connected.map(page => `${page.name}${page.subscribed ? '' : ' (chưa đăng ký webhook)'}`).join(', ')}.` });
       return sendJson(response, 200, { items: store.items.map(publicChannel) });
     }
     const channelMatch = url.pathname.match(/^\/api\/channels\/facebook\/([^/]+)$/);
     if (request.method === 'DELETE' && channelMatch) {
+      if (!(await requireManager(request, response))) return;
       const store = await readChannelStore();
       const pageId = decodeURIComponent(channelMatch[1]);
       const channel = store.items.find(item => item.id === pageId);
@@ -1604,19 +1843,25 @@ const server = http.createServer(async (request, response) => {
       } catch { /* The local connection can still be removed if Meta is unavailable. */ }
       store.items = store.items.filter(item => item.id !== pageId);
       await writeChannelStore(store);
+      audit(request, 'settings.channels', { target: { type: 'channel', id: pageId, name: channel.name || '' }, summary: `Ngắt kết nối Facebook Page ${channel.name || pageId}.` });
       return sendJson(response, 200, { items: store.items.map(publicChannel) });
     }
     // Cài đặt → Kênh → Tải ảnh khách: retry avatars for threads still showing a letter.
     const profilesChannelMatch = url.pathname.match(/^\/api\/channels\/facebook\/([^/]+)\/profiles$/);
     if (request.method === 'POST' && profilesChannelMatch) {
+      if (!(await requireManager(request, response))) return;
       try {
-        return sendJson(response, 200, await refreshCustomerProfiles(decodeURIComponent(profilesChannelMatch[1])));
+        const profilePageId = decodeURIComponent(profilesChannelMatch[1]);
+        const refreshed = await refreshCustomerProfiles(profilePageId);
+        audit(request, 'settings.channels', { target: { type: 'channel', id: profilePageId, name: '' }, summary: `Tải lại ảnh/tên khách cho Page ${profilePageId}.` });
+        return sendJson(response, 200, refreshed);
       } catch (error) {
         return sendJson(response, 502, { error: error.message });
       }
     }
     const refreshChannelMatch = url.pathname.match(/^\/api\/channels\/facebook\/([^/]+)\/refresh$/);
     if (request.method === 'POST' && refreshChannelMatch) {
+      if (!(await requireManager(request, response))) return;
       const store = await readChannelStore();
       const pageId = decodeURIComponent(refreshChannelMatch[1]);
       const channel = store.items.find(item => item.id === pageId);
@@ -1656,6 +1901,7 @@ const server = http.createServer(async (request, response) => {
       }
       channel.checkedAt = new Date().toISOString();
       await writeChannelStore(store);
+      audit(request, 'settings.channels', { target: { type: 'channel', id: pageId, name: channel.name || '' }, summary: `Kiểm tra lại kết nối Page ${channel.name || pageId}: ${channel.status === 'connected' ? 'đang kết nối' : 'cần xử lý'}.` });
       return sendJson(response, 200, publicChannel(channel));
     }
     if (request.method === 'GET' && url.pathname === metaConfig.webhookPath) {
@@ -1688,14 +1934,13 @@ const server = http.createServer(async (request, response) => {
       // Webcake cho thêm ?event=... vào URL để phân biệt sự kiện; ghi nhận cùng trang gọi.
       const page = [url.searchParams.get('page') || request.headers.referer || '', url.searchParams.get('event') ? `event=${url.searchParams.get('event')}` : '']
         .filter(Boolean).join(' ').slice(0, 200);
-      const result = await recordLandingOrder(payload, { page });
-      if (result.error) {
-        console.error(`Webhook landing: không tạo được đơn — ${result.error}`);
-        return sendJson(response, 202, { accepted: false, error: result.error });
-      }
-      console.log(`Webhook landing: ${result.created ? 'tạo đơn' : 'đơn trùng, bỏ qua'} #${result.order.id} (${String(result.order.phone || '').replace(/\d(?=\d{3})/g, '*')})`);
-      publishMessagingEvent({ type: 'landing-order', orderId: result.order.id });
-      return sendJson(response, result.created ? 201 : 200, { accepted: true, created: result.created, orderId: result.order.id });
+      // Token đã đúng, thân đã đọc: trả 200 NGAY rồi mới tạo đơn ở nền. Tạo đơn có tự điền địa chỉ
+      // và tra cảnh báo SĐT trên POS (gọi mạng), từng làm webhook trả lời quá 5 giây → Webcake gửi lại.
+      // Kết quả (tạo / trùng / lỗi) xem ở Cài đặt → landing (danh sách gói gần đây) và nhật ký máy chủ;
+      // đơn lọt (máy chủ tắt giữa chừng) vẫn được đồng bộ POS 5 phút một lần kéo về.
+      sendJson(response, 200, { accepted: true, queued: true });
+      processLandingWebhookInBackground(payload, page);
+      return undefined;
     }
     // Cảnh báo số điện thoại hay bom hàng: tra một lượt cho bảng Đơn hàng, và
     // danh sách nhân viên tự đánh dấu.
@@ -1711,20 +1956,29 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, posStatus());
     }
     if (request.method === 'POST' && url.pathname === '/api/phone-warnings/pos') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       try {
-        return sendJson(response, 200, await connectPos({ apiKey: payload.apiKey, shopId: payload.shopId }));
+        const connected = await connectPos({ apiKey: payload.apiKey, shopId: payload.shopId });
+        // Không ghi khoá API: chỉ ghi là đã kết nối (và mã shop nếu có).
+        audit(request, 'settings.pos', { target: { type: 'pos', id: String(payload.shopId || ''), name: 'Pancake POS' }, summary: `Kết nối Pancake POS${payload.shopId ? ` (shop ${String(payload.shopId).slice(0, 20)})` : ''}.` });
+        return sendJson(response, 200, connected);
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
       }
     }
     if (request.method === 'DELETE' && url.pathname === '/api/phone-warnings/pos') {
-      return sendJson(response, 200, await disconnectPos());
+      if (!(await requireManager(request, response))) return;
+      const disconnected = await disconnectPos();
+      audit(request, 'settings.pos', { target: { type: 'pos', id: '', name: 'Pancake POS' }, summary: 'Ngắt kết nối Pancake POS.' });
+      return sendJson(response, 200, disconnected);
     }
     // Kéo đơn landing từ POS ngay (mặc định 48 giờ gần nhất); bình thường chạy tự động mỗi 5 phút.
     if (request.method === 'POST' && url.pathname === '/api/landing/sync-pos') {
       const payload = await readBody(request);
-      const summary = await syncPosLandingOrders({ sinceHours: Math.min(24 * 30, Math.max(1, Number(payload.sinceHours) || 48)) });
+      const sinceHours = Math.min(24 * 30, Math.max(1, Number(payload.sinceHours) || 48));
+      const summary = await syncPosLandingOrders({ sinceHours });
+      audit(request, 'landing.sync_pos', { summary: `Kéo đơn landing từ POS (${sinceHours} giờ): mới ${Number(summary?.created) || 0}, cập nhật ${Number(summary?.updated) || 0}, hủy ${Number(summary?.cancelled) || 0}.` });
       return sendJson(response, 200, summary);
     }
     if (request.method === 'GET' && url.pathname === '/api/landing/recent') {
@@ -1777,7 +2031,8 @@ const server = http.createServer(async (request, response) => {
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         response.end('{"received":true}');
         if (!payload || !payload.event_type || payload.event_type === 'verify') return undefined;
-        if (process.env.PANCAKE_DEBUG_KEYS) console.log(describePancakePayload(payload));
+        // Chẩn đoán cấu trúc gói tin: chỉ PANCAKE_DEBUG_KEYS=1 mới bật, tối đa 30 dòng/phút.
+        if (debugFlagOn('PANCAKE_DEBUG_KEYS') && pancakeDebugAllowed()) console.log(describePancakePayload(payload));
         try {
           const summary = await handlePancakeWebhook(payload, {
             processChatbotChanges,
@@ -1847,6 +2102,7 @@ const server = http.createServer(async (request, response) => {
       });
       if (url.pathname === '/api/reports') return sendJson(response, 200, report);
       const section = normalizeReportSection(url.searchParams.get('section'));
+      audit(request, 'report.export', { summary: `Tải CSV báo cáo "${section}" (${url.searchParams.get('from') || '…'} → ${url.searchParams.get('to') || '…'}).` });
       response.writeHead(200, {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="${reportCsvFileName(section, report.range)}"`,
@@ -1862,6 +2118,7 @@ const server = http.createServer(async (request, response) => {
       } catch (error) {
         return sendJson(response, 502, { error: error.message });
       }
+      audit(request, 'campaign.sync', { summary: `Đồng bộ số liệu quảng cáo ${days} ngày.` });
       return sendJson(response, 200, await loadCampaignReport({ days }));
     }
     if (request.method === 'GET' && url.pathname === '/api/campaigns/insights') {
@@ -1871,7 +2128,9 @@ const server = http.createServer(async (request, response) => {
       const payload = await readBody(request);
       const days = normalizeRangeDays(payload.days);
       const report = await loadCampaignReport({ days });
-      return sendJson(response, 200, await generateCampaignInsights(report, { days }));
+      const insights = await generateCampaignInsights(report, { days });
+      audit(request, 'campaign.insights', { summary: `Nhờ AI phân tích chiến dịch ${days} ngày.` });
+      return sendJson(response, 200, insights);
     }
     if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {
       const filters = Object.fromEntries([
@@ -1880,6 +2139,11 @@ const server = http.createServer(async (request, response) => {
         'orderedWithin', 'product', 'combo', 'minOrders'
       ].map(key => [key, url.searchParams.get(key) || '']));
       const result = await listCustomers(filters);
+      // Tải danh sách khách (dữ liệu cá nhân) ra tệp: ghi nhật ký ai tải, bao nhiêu khách, lọc gì.
+      if (url.pathname.endsWith('.csv')) {
+        const activeFilters = Object.entries(filters).filter(([, value]) => value).map(([key, value]) => `${key}=${String(value).slice(0, 30)}`);
+        audit(request, 'customer.export', { summary: `Tải ${url.pathname.endsWith('audience.csv') ? 'tệp remarketing' : 'CSV khách hàng'}: ${(result.items || []).length} khách${activeFilters.length ? ` (lọc ${activeFilters.join(', ')})` : ''}.` });
+      }
       if (url.pathname === '/api/customers/audience.csv') {
         response.writeHead(200, {
           'Content-Type': 'text/csv; charset=utf-8',
@@ -1908,8 +2172,13 @@ const server = http.createServer(async (request, response) => {
       const customer = await findCustomerById(decodeURIComponent(customerRoute[0]));
       if (!customer) return sendJson(response, 404, { error: 'Không tìm thấy khách hàng.' });
       try {
-        await updateCustomerProfile(customer.editKey, await readBody(request));
+        const actor = await requestActor(request);
+        const patch = await readBody(request);
+        await updateCustomerProfile(customer.editKey, patch, Date.now(), { by: actorStamp(actor) });
         invalidateBuyersCache();
+        const fieldNames = { name: 'tên', phone: 'SĐT', address: 'địa chỉ', gender: 'giới tính' };
+        const fields = Object.keys(fieldNames).filter(key => patch[key] !== undefined).map(key => (patch[key] === '' ? `bỏ ${fieldNames[key]} đã sửa` : fieldNames[key]));
+        audit(request, 'customer.update', { target: { type: 'customer', id: customer.id, name: customer.name || '' }, summary: `Sửa thông tin khách: ${fields.join(', ') || 'không đổi'}.` }, actor);
         return sendJson(response, 200, await findCustomerById(customer.id));
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
@@ -1923,9 +2192,17 @@ const server = http.createServer(async (request, response) => {
       if (customerRoute[1] === 'labels' && request.method === 'PUT') {
         try {
           const payload = await readBody(request);
-          await setCustomerLabels(customer.editKey, payload.labels || [], customer.derivedLabels);
+          const actor = await requestActor(request);
+          await setCustomerLabels(customer.editKey, payload.labels || [], customer.derivedLabels, Date.now(), { by: actorStamp(actor) });
           invalidateBuyersCache();
-          return sendJson(response, 200, await findCustomerById(customer.id));
+          const fresh = await findCustomerById(customer.id);
+          const change = labelChangeDetails(customer.labels || [], fresh?.labels || [], await inboxLabelDefs());
+          audit(request, 'customer.labels', {
+            target: { type: 'customer', id: customer.id, name: customer.name || '' },
+            summary: `Thẻ khách: ${labelChangeText(change) || 'không đổi'}.`,
+            details: { added: change.added, removed: change.removed }
+          }, actor);
+          return sendJson(response, 200, fresh);
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }
@@ -1935,8 +2212,12 @@ const server = http.createServer(async (request, response) => {
         if (request.method === 'GET') return sendJson(response, 200, { items: await listCustomerNotes(customer.editKey) });
         if (request.method === 'POST') {
           try {
-            const note = await addCustomerNote(customer.editKey, await readBody(request));
+            const actor = await requestActor(request);
+            const payload = await readBody(request);
+            // Người viết ghi chú lấy từ phiên đăng nhập (chưa bật đăng nhập thì giữ tên gõ tay `by`).
+            const note = await addCustomerNote(customer.editKey, { ...payload, ...(actor.username ? { author: actorStamp(actor) } : {}) });
             invalidateBuyersCache();
+            audit(request, 'customer.note', { target: { type: 'customer', id: customer.id, name: customer.name || '' }, summary: `Ghi chú khách: ${String(note.text || '').slice(0, 80)}` }, actor);
             return sendJson(response, 200, { note, noteCount: (await findCustomerById(customer.id))?.noteCount || 0 });
           } catch (error) {
             return sendJson(response, 400, { error: error.message });
@@ -1994,6 +2275,7 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname === '/api/inbox/settings') {
       if (request.method === 'GET') return sendJson(response, 200, { ...(await readInboxSettings()), defaultLabels: defaultConversationLabels, icons: await listLabelIcons() });
       if (request.method === 'PUT') {
+        if (!(await requireManager(request, response))) return;
         const current = await readInboxSettings();
         // Mẫu trả lời nhanh có thể kèm ảnh base64 tới 5 MB.
         const payload = await readBody(request, 16 * 1024 * 1024);
@@ -2002,6 +2284,13 @@ const server = http.createServer(async (request, response) => {
             labels: payload.labels ?? current.labels,
             quickReplies: payload.quickReplies ?? current.quickReplies
           }, saveProductImage);
+          const parts = [];
+          if (payload.labels !== undefined) {
+            const change = labelChangeDetails((current.labels || []).map(label => label.id), (settings.labels || []).map(label => label.id), [...(current.labels || []), ...(settings.labels || [])]);
+            parts.push(`thẻ hội thoại (${(settings.labels || []).length}${change.added.length || change.removed.length ? `: ${labelChangeText(change)}` : ''})`);
+          }
+          if (payload.quickReplies !== undefined) parts.push(`mẫu trả lời nhanh (${(current.quickReplies || []).length} → ${(settings.quickReplies || []).length})`);
+          audit(request, 'settings.messages', { target: { type: 'settings', id: 'inbox', name: 'Cài đặt → Tin nhắn' }, summary: `Sửa ${parts.join(', ') || 'cài đặt tin nhắn'}.` });
           return sendJson(response, 200, settings);
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
@@ -2022,6 +2311,7 @@ const server = http.createServer(async (request, response) => {
       const summary = isPancake
         ? await syncPancakeConversations({ pageId, limit: Number(payload.limit) || 60, messagePages: 2, processChatbotChanges: syncBotHook, chatbotDependencies })
         : await syncPageConversations(pageId, { limit: Number(payload.limit) || 25 });
+      audit(request, 'conversation.sync', { target: { type: 'channel', id: pageId, name: '' }, summary: `Bấm Đồng bộ hội thoại Page ${pageId}${isPancake ? ' (Pancake)' : ''}.` });
       return sendJson(response, 200, { ...summary, items: await listConversations(pageId) });
     }
     if (request.method === 'GET' && url.pathname === '/api/messaging/stream') {
@@ -2046,8 +2336,14 @@ const server = http.createServer(async (request, response) => {
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
       if (request.method === 'GET') {
         const items = await listMessages(id, Number(url.searchParams.get('limit')) || 100);
+        const actor = await requestActor(request);
+        // "Ai đã xem" trên chính hội thoại (mốc mới nhất; ghi kho tối đa 1 lần/phút/người).
+        await recordConversationSeen(id, actor).catch(error => console.warn(`Không ghi được người xem hội thoại: ${error.message}`));
+        // Nhật ký: cùng người + cùng hội thoại tối đa 1 dòng / 30 phút.
+        if (shouldAuditView(actor.username || actor.ip, id)) audit(request, 'conversation.view', { target: conversationTarget(conversation), conversationId: id, summary: `Xem hội thoại ${conversation.name || id}.` }, actor);
+        const viewed = actor.username ? await getConversation(id).catch(() => null) : null;
         return sendJson(response, 200, {
-          conversation: publicConversation(conversation),
+          conversation: publicConversation(viewed || conversation),
           // A comment thread shows comments only; private replies live in Messenger.
           items: conversation.source === 'comment' ? items.filter(item => !item.privateReply) : items
         });
@@ -2065,9 +2361,12 @@ const server = http.createServer(async (request, response) => {
           .slice(0, 6);
         if (!text && !attachment && !imageUrls.length) return sendJson(response, 400, { error: 'Nội dung tin nhắn không được để trống.' });
         try {
+          const actor = await requestActor(request);
+          // Cờ staff + đích danh người gửi (staffName = họ tên, staffUsername); chưa bật đăng nhập thì như cũ ('CRM').
+          const staff = actor.username ? actorStamp(actor) : true;
           // Comment threads: reply under the comment, or privately to Messenger.
           // Tuyến này chỉ nhân viên dùng (giao diện CRM): gắn cờ staff để bot biết nhân viên đang xử lý hội thoại.
-          const sent = text || attachment ? await sendConversationMessage(conversation, { text, attachment, privateReply, staff: true }) : null;
+          const sent = text || attachment ? await sendConversationMessage(conversation, { text, attachment, privateReply, staff }) : null;
           const messages = sent ? [sent.message] : [];
           let last = sent;
           // A private reply lands in the person's Messenger thread; pictures follow it there.
@@ -2076,15 +2375,28 @@ const server = http.createServer(async (request, response) => {
             : conversation;
           // Qua Pancake nhiều ảnh đi chung một tin (một cụm ảnh); Meta gửi từng ảnh.
           if (imageTarget && imageUrls.length && imageTarget.pancakeConversationId) {
-            last = await sendConversationMessage(imageTarget, { imageUrls: imageUrls.map(publicImageUrl), staff: true });
+            last = await sendConversationMessage(imageTarget, { imageUrls: imageUrls.map(publicImageUrl), staff });
             messages.push(last.message);
           } else {
             for (const imageUrl of imageTarget ? imageUrls : []) {
-              last = await sendConversationMessage(imageTarget, { imageUrl: publicImageUrl(imageUrl), staff: true });
+              last = await sendConversationMessage(imageTarget, { imageUrl: publicImageUrl(imageUrl), staff });
               messages.push(last.message);
             }
           }
           if (!last) return sendJson(response, 400, { error: 'Khách chưa có hội thoại Messenger để nhận ảnh.' });
+          // Loại tin: chữ / ảnh / tệp / tin mẫu (ảnh của mẫu trả lời nhanh, hay giao diện báo quickReplyId).
+          const kinds = [
+            text ? 'chữ' : '',
+            attachment ? (attachment.type === 'image' ? 'ảnh' : 'tệp') : '',
+            imageUrls.length || payload.quickReplyId ? 'tin mẫu' : ''
+          ].filter(Boolean);
+          const action = conversation.source === 'comment' ? (privateReply ? 'comment.private_reply' : 'comment.reply') : 'message.send';
+          audit(request, action, {
+            target: conversationTarget(conversation),
+            conversationId: conversation.id,
+            summary: `[${kinds.join(' + ')}] ${text ? text.slice(0, 80) : attachment ? String(attachment.name || 'tệp đính kèm').slice(0, 80) : `${imageUrls.length} ảnh mẫu`}`,
+            details: { kind: kinds, ...(imageUrls.length ? { images: imageUrls.length } : {}), ...(payload.quickReplyId ? { quickReplyId: String(payload.quickReplyId).slice(0, 60) } : {}) }
+          }, actor);
           return sendJson(response, 200, { ...last, message: (sent || last).message, messages });
         } catch (error) {
           return sendJson(response, error.statusCode === 400 ? 400 : 502, { error: error.message });
@@ -2094,8 +2406,18 @@ const server = http.createServer(async (request, response) => {
     const conversationReadMatch = url.pathname.match(/^\/api\/messaging\/conversations\/([^/]+)\/read$/);
     if (request.method === 'POST' && conversationReadMatch) {
       const id = decodeURIComponent(conversationReadMatch[1]);
-      const conversation = await updateMessagingStore(store => setConversationFlags(store, id, { unread: false }));
+      const actor = await requestActor(request);
+      // Đánh dấu đã đọc cũng là "đã xem": ghi seenBy ngay trong lượt ghi kho này (khi đăng nhập).
+      let seenChanged = false;
+      const conversation = await updateMessagingStore(store => {
+        const flagged = setConversationFlags(store, id, { unread: false });
+        if (flagged && actor.username && shouldStoreSeen(actor.username, id)) seenChanged = Boolean(markConversationSeen(store, id, { username: actor.username, name: actor.name }));
+        return flagged;
+      });
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+      if (seenChanged) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
+      // Nhật ký: gộp như "xem hội thoại" (giao diện tự gọi mỗi lần mở hội thoại chưa đọc).
+      if (shouldAuditRead(actor.username || actor.ip, id)) audit(request, 'conversation.read', { target: conversationTarget(conversation), conversationId: id, summary: `Đánh dấu đã đọc ${conversation.name || id}.` }, actor);
       if (conversation.source === 'comment') return sendJson(response, 200, publicConversation(conversation));
       try {
         await sendSenderAction({
@@ -2111,8 +2433,23 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'PATCH' && conversationFlagsMatch) {
       const id = decodeURIComponent(conversationFlagsMatch[1]);
       const payload = await readBody(request);
-      const conversation = await updateMessagingStore(store => setConversationFlags(store, id, payload));
+      let before = null;
+      const conversation = await updateMessagingStore(store => {
+        const current = store.conversations.find(item => item.id === id);
+        if (current) before = { labels: Array.isArray(current.labels) ? [...current.labels] : [], muted: Boolean(current.muted), unread: Boolean(current.unread) };
+        return setConversationFlags(store, id, payload);
+      });
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+      const actor = await requestActor(request);
+      if (Array.isArray(payload.labels)) {
+        appendLabelAudit({ actor, conversation: { id: conversation.id, name: conversation.name || '' }, before: before?.labels || [], after: conversation.labels || [], labelDefs: await inboxLabelDefs() });
+      }
+      if (typeof payload.muted === 'boolean' && payload.muted !== before?.muted) {
+        audit(request, 'conversation.mute', { target: conversationTarget(conversation), conversationId: id, summary: `${payload.muted ? 'Tắt' : 'Bật'} thông báo hội thoại ${conversation.name || id}.`, details: { muted: payload.muted } }, actor);
+      }
+      if (payload.unread === true && !before?.unread) {
+        audit(request, 'conversation.unread', { target: conversationTarget(conversation), conversationId: id, summary: `Đánh dấu chưa đọc ${conversation.name || id}.` }, actor);
+      }
       return sendJson(response, 200, publicConversation(conversation));
     }
     // Tính giỏ hàng cho form Tạo đơn của nhân viên bằng đúng bộ giá của bot:
@@ -2146,8 +2483,30 @@ const server = http.createServer(async (request, response) => {
       });
     }
     // Cài đặt → Nhân sự. Ai cũng xem được danh sách (không có chuỗi băm mật khẩu); chỉ tài khoản chủ shop
-    // (.env) hay Quản trị mới thêm/sửa. Chưa bật đăng nhập (chưa có tài khoản nào) thì CRM vẫn sau Basic Auth
-    // của Caddy nên cho sửa. Không có xoá: cho nghỉ (active false) để giữ lịch sử.
+    // (.env) hay Quản trị mới thêm/sửa. Chưa bật đăng nhập (chưa có tài khoản nào) chỉ xảy ra ở máy local
+    // (máy chủ https trả 503 trước khi tới đây) nên cho sửa. Không có xoá: cho nghỉ (active false) để giữ lịch sử.
+    // Nhật ký hoạt động (Cài đặt → Nhật ký). Chủ shop / Quản trị (hoặc CRM chưa bật đăng nhập) xem
+    // toàn bộ; nhân viên thường chỉ xem lịch sử của MỘT hội thoại hay MỘT đơn (lọc conversationId/orderId).
+    if (request.method === 'GET' && url.pathname === '/api/audit') {
+      const actor = await requestActor(request);
+      const filters = Object.fromEntries(['from', 'to', 'actor', 'action', 'q', 'conversationId', 'orderId', 'limit', 'before']
+        .map(key => [key, String(url.searchParams.get(key) || '').slice(0, 200)]));
+      if (!isManager(actor) && !filters.conversationId && !filters.orderId) {
+        return sendJson(response, 403, { error: 'Chỉ chủ shop hoặc Quản trị mới xem được toàn bộ nhật ký hoạt động.' });
+      }
+      const result = await queryAudit(filters);
+      // Người để lọc: tài khoản chủ shop, mọi người trong Nhân sự (cả đã nghỉ) và người có trong nhật ký (bot, hệ thống).
+      const people = new Map();
+      for (const username of envLoginUsers.keys()) people.set(username, username);
+      for (const member of await listStaff().catch(() => [])) people.set(member.username, member.name);
+      for (const item of await auditActors()) if (!people.has(item.username)) people.set(item.username, item.name);
+      return sendJson(response, 200, {
+        items: result.items.map(item => ({ ...item, label: auditActionLabel(item.action) })),
+        next: result.next,
+        actors: [...people].map(([username, name]) => ({ username, name })).sort((first, second) => String(first.name).localeCompare(String(second.name), 'vi')),
+        actions: Object.entries(AUDIT_ACTIONS).map(([action, label]) => ({ action, label }))
+      });
+    }
     if (url.pathname === '/api/staff' || url.pathname.startsWith('/api/staff/')) {
       const session = auth.session(request);
       const me = session?.username
@@ -2161,11 +2520,34 @@ const server = http.createServer(async (request, response) => {
       const creating = request.method === 'POST' && url.pathname === '/api/staff';
       if (creating || (request.method === 'PATCH' && staffMatch)) {
         if (!canManage) return sendJson(response, 403, { error: 'Chỉ Quản trị mới thêm hoặc sửa Nhân sự.' });
+        if (!(await requireManager(request, response, 'Chỉ Quản trị mới thêm hoặc sửa Nhân sự.'))) return;
         try {
           const payload = await readBody(request);
-          const member = await saveStaffMember(payload, { id: staffMatch ? decodeURIComponent(staffMatch[1]) : '', reservedUsernames: new Set(envLoginUsers.keys()) });
+          const staffId = staffMatch ? decodeURIComponent(staffMatch[1]) : '';
+          const previous = staffId ? (await listStaff()).find(item => item.id === staffId) : null;
+          const member = await saveStaffMember(payload, { id: staffId, reservedUsernames: new Set(envLoginUsers.keys()) });
           await refreshLoginUsers();
+          // Tên/vai trò mới có hiệu lực ngay cho nhật ký và dấu người làm.
+          clearActorCache();
           console.log(`Nhân sự: ${creating ? 'thêm' : 'sửa'} ${member.username} (${member.roleName}${member.active ? '' : ', đã nghỉ'})${session?.username ? ` bởi ${session.username}` : ''}`);
+          // Không bao giờ ghi mật khẩu: chỉ ghi "đặt/đổi mật khẩu".
+          const passwordChanged = Boolean(String(payload.password || ''));
+          const changes = creating
+            ? [`vai trò ${member.roleName}`, passwordChanged ? 'đặt mật khẩu' : 'chưa có mật khẩu']
+            : [
+              previous && previous.name !== member.name ? `tên ${previous.name} → ${member.name}` : '',
+              previous && previous.username !== member.username ? `tên đăng nhập ${previous.username} → ${member.username}` : '',
+              previous && previous.role !== member.role ? `vai trò ${previous.roleName} → ${member.roleName}` : '',
+              previous && previous.active !== member.active ? (member.active ? 'đi làm lại' : 'cho nghỉ') : '',
+              previous && previous.phone !== member.phone ? 'SĐT' : '',
+              previous && JSON.stringify(previous.pancakeNames) !== JSON.stringify(member.pancakeNames) ? 'tên Pancake' : '',
+              passwordChanged ? 'đổi mật khẩu' : ''
+            ].filter(Boolean);
+          audit(request, 'settings.staff', {
+            target: { type: 'staff', id: member.id, name: member.name },
+            summary: `${creating ? 'Thêm' : 'Sửa'} nhân sự ${member.name} (${member.username}): ${changes.join(', ') || 'không đổi'}.`,
+            details: { passwordChanged, role: member.role, active: member.active }
+          });
           return sendJson(response, creating ? 201 : 200, { member, items: await listStaff(), loginEnabled: auth.enabled });
         } catch (error) {
           return sendJson(response, error.statusCode || 400, { error: error.message });
@@ -2182,6 +2564,7 @@ const server = http.createServer(async (request, response) => {
       });
       if (request.method === 'GET') return sendJson(response, 200, giftResponse());
       if (request.method === 'PUT') {
+        if (!(await requireManager(request, response))) return;
         const payload = await readBody(request);
         // Không gửi `items` = chỉ đổi phí ship, giữ nguyên danh sách quà (trước đây xóa sạch quà).
         const hasItems = payload.items !== undefined;
@@ -2208,10 +2591,21 @@ const server = http.createServer(async (request, response) => {
         // null / "" không phải 0: Number(null) = 0 từng lặng lẽ đặt phí ship về 0.
         const shippingFeeInvalid = payload.shippingFee === null || (typeof payload.shippingFee === 'string' && !payload.shippingFee.trim()) || typeof payload.shippingFee === 'boolean';
         if (payload.shippingFee !== undefined && (shippingFeeInvalid || !Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });
+        const beforeGifts = getGifts();
+        const beforeFee = getShippingFee();
         await updateGiftStore(current => ({
           items: items || current.items,
           shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee
         }));
+        const afterGifts = getGifts();
+        const giftNames = list => new Set((list || []).map(gift => String(gift.name || '')));
+        const added = [...giftNames(afterGifts)].filter(name => !giftNames(beforeGifts).has(name));
+        const removed = [...giftNames(beforeGifts)].filter(name => !giftNames(afterGifts).has(name));
+        const giftParts = [
+          items ? `${afterGifts.length} quà${added.length ? `, thêm ${added.slice(0, 3).join(', ')}` : ''}${removed.length ? `, bỏ ${removed.slice(0, 3).join(', ')}` : ''}` : '',
+          payload.shippingFee !== undefined && beforeFee !== getShippingFee() ? `phí ship ${beforeFee} → ${getShippingFee()}` : ''
+        ].filter(Boolean);
+        audit(request, 'settings.gifts', { target: { type: 'settings', id: 'gifts', name: 'Quà tặng' }, summary: `Sửa quà tặng / phí ship: ${giftParts.join('; ') || 'không đổi'}.` });
         return sendJson(response, 200, giftResponse());
       }
     }
@@ -2240,43 +2634,63 @@ const server = http.createServer(async (request, response) => {
           } catch (error) {
             return sendJson(response, 400, { error: error.message });
           }
+          order.id = uniqueOrderId(order.id, await takenOrderIds());
+          // Đơn tạo tay: người tạo = người đang đăng nhập (createdBy + mục lịch sử đầu tiên).
+          const actor = await requestActor(request);
+          const creator = actorStamp(actor);
+          if (actor.username && (!order.employee || order.employee === 'Bạn')) order.employee = creator.name;
+          stampOrderCreated(order, creator, { summary: `Tạo đơn tay: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 120)}, tổng ${order.total}đ.` });
           const viaPancake = Boolean(conversation.pancakeConversationId);
           if (!viaPancake) {
             // Messenger trực tiếp: thẻ receipt; bị từ chối thì ảnh phiếu. Không bao giờ gửi bản chữ.
             try {
               let sent;
               try {
-                sent = await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }) });
+                sent = await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }), sentBy: actor.username ? creator : null });
               } catch (error) {
                 console.error(`Messenger từ chối thẻ receipt của đơn ${order.id}, gửi ảnh phiếu: ${error.message}`);
-                sent = await sendReceiptImage(conversation, order);
+                sent = await sendReceiptImage(conversation, order, { sentBy: actor.username ? creator : null });
               }
               order.delivery = { status: 'sent', messageId: String(sent?.message?.mid || sent?.message?.id || ''), sentAt: Date.now() };
             } catch (error) {
               return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });
             }
           }
-          const orderLabels = labelsForEvents((await readInboxSettings().catch(() => ({ labels: [] }))).labels, ['order']);
+          const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+          const orderLabels = labelsForEvents(labelDefs, ['order']);
           let relabeledConversation = null;
+          let labelsBefore = [];
           const stored = await updateMessagingStore(store => {
             const item = store.conversations.find(entry => entry.id === id);
             if (!item) return null;
             if (!Array.isArray(item.customerOrders)) item.customerOrders = [];
+            reserveOrderIdInStore(order, store);
             item.customerOrders.unshift(order);
             item.customerOrders = item.customerOrders.slice(0, 200);
+            labelsBefore = Array.isArray(item.labels) ? [...item.labels] : [];
             // Nhân viên tạo đơn trong CRM: gắn thẻ "Đã mua hàng" như đơn bot chốt.
             if (applyPurchaseLabels(item, order, orderLabels)) relabeledConversation = publicConversation(item);
             return item;
           });
           if (!stored) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
-          if (relabeledConversation) publishMessagingEvent({ type: 'conversation', conversation: relabeledConversation });
+          audit(request, 'order.create', {
+            target: orderTarget(order),
+            conversationId: id,
+            orderId: order.id,
+            summary: `Tạo đơn #${order.id} cho ${order.name}: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 100)}, tổng ${order.total}đ.`,
+            details: { total: order.total, quantity: order.products.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) }
+          }, actor);
+          if (relabeledConversation) {
+            publishMessagingEvent({ type: 'conversation', conversation: relabeledConversation });
+            appendLabelAudit({ actor, conversation: { id, name: stored.name || '' }, before: labelsBefore, after: relabeledConversation.labels, labelDefs, reason: 'tự gắn khi tạo đơn' });
+          }
           markFollowUpWins().catch(() => {});
           if (viaPancake) {
             // Hội thoại Pancake: không gửi bản chữ. Đẩy đơn sang Pancake POS, POS
             // gửi khách thẻ xác nhận đơn; POS lỗi thì CRM gửi phiếu ảnh của mình.
             const pos = await syncOrderToPos(id, order.id).catch(error => ({ error: error.message, at: Date.now() }));
             if (pos) order.pos = pos;
-            if (!pos?.id) await sendChatbotOrderReceipt(conversation, order);
+            if (!pos?.id) await sendChatbotOrderReceipt(conversation, order, { sentBy: actor.username ? creator : null });
             order.delivery = { status: 'sent', messageId: '', sentAt: Date.now(), via: pos?.id ? 'pos' : 'receipt-image' };
             await updateMessagingStore(store => {
               const item = store.conversations.find(entry => entry.id === id);
@@ -2286,8 +2700,12 @@ const server = http.createServer(async (request, response) => {
             });
           }
           const panel = await readMessagingStore().then(store => publicCustomerPanel(store.conversations.find(entry => entry.id === id)));
-          return sendJson(response, 201, panel);
+          // Mã đơn thật (có thể đã thêm hậu tố khi trùng) để trình duyệt báo đúng mã.
+          return sendJson(response, 201, { ...panel, createdOrderId: order.id });
         }
+        const actor = await requestActor(request);
+        const author = actorStamp(actor);
+        let botWasOn = null;
         const panel = await updateMessagingStore(store => {
           const item = store.conversations.find(entry => entry.id === id);
           if (!item) return null;
@@ -2295,10 +2713,14 @@ const server = http.createServer(async (request, response) => {
             const text = String(payload.text || '').trim().slice(0, 2000);
             if (!text) throw new Error('Nội dung ghi chú không được để trống.');
             if (!Array.isArray(item.customerNotes)) item.customerNotes = [];
-            item.customerNotes.unshift({ id: randomUUID(), text, createdAt: Date.now() });
+            // Ghi chú mang người viết (author) để hộp chi tiết hiện "ai ghi".
+            item.customerNotes.unshift({ id: randomUUID(), text, createdAt: Date.now(), ...(actor.username ? { author } : {}) });
             item.customerNotes = item.customerNotes.slice(0, 100);
           } else if (payload.type === 'bot') {
+            botWasOn = item.botEnabled !== false;
             item.botEnabled = payload.enabled === true;
+            // Ai bật/tắt bot gần nhất (hiện trong bảng khách); lịch sử đủ nằm ở nhật ký.
+            item.botChangedBy = { ...author, at: Date.now(), enabled: item.botEnabled };
           } else if (payload.type === 'bot-error' && payload.clear === true) {
             item.botLastError = '';
             item.botLastErrorAt = 0;
@@ -2319,6 +2741,17 @@ const server = http.createServer(async (request, response) => {
           return publicCustomerPanel(item);
         });
         if (!panel) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+        const panelTarget = conversationTarget(conversation);
+        if (payload.type === 'note') {
+          audit(request, 'customer.note', { target: panelTarget, conversationId: id, summary: `Ghi chú khách: ${String(payload.text || '').trim().slice(0, 80)}` }, actor);
+        } else if (payload.type === 'bot') {
+          if (botWasOn !== (payload.enabled === true)) appendBotToggleAudit({ actor, conversation: { id, name: conversation.name || '' }, enabled: payload.enabled === true });
+        } else if (payload.type === 'bot-error') {
+          audit(request, 'conversation.bot_error', { target: panelTarget, conversationId: id, summary: 'Xóa lỗi bot đang hiện trên hội thoại.' }, actor);
+        } else if (payload.type === 'gender') {
+          const gender = ['male', 'female'].includes(payload.gender) ? payload.gender : '';
+          audit(request, 'customer.update', { target: panelTarget, conversationId: id, summary: `Đặt xưng hô: ${gender === 'male' ? 'anh (nam)' : gender === 'female' ? 'chị (nữ)' : 'bỏ chọn, để bot tự đoán'}.` }, actor);
+        }
         return sendJson(response, 200, panel);
       }
     }
@@ -2331,13 +2764,28 @@ const server = http.createServer(async (request, response) => {
       const hidden = payload.hidden !== false;
       if (!ids.size) return sendJson(response, 400, { error: 'Thiếu danh sách mã đơn.' });
       let changed = 0;
-      const apply = order => { if (applyCustomerOrderEdits(order, { hiddenFromTable: hidden }).length) changed += 1; };
+      const actor = await requestActor(request);
+      const by = actorStamp(actor);
+      const changedIds = [];
+      const apply = order => {
+        if (!applyCustomerOrderEdits(order, { hiddenFromTable: hidden }).length) return;
+        changed += 1;
+        changedIds.push(String(order.id));
+        recordOrderHistory(order, { by, action: 'order.hide', summary: hidden ? 'Ẩn khỏi bảng Đơn hàng.' : 'Hiện lại trong bảng Đơn hàng.' });
+      };
       await updateMessagingStore(store => {
         for (const conversation of store.conversations) {
           for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) if (ids.has(String(order.id))) apply(order);
         }
       });
       await updateLandingStore(store => { for (const order of store.orders) if (ids.has(String(order.id))) apply(order); });
+      if (changed) {
+        audit(request, 'order.hide', {
+          ...(changed === 1 ? { orderId: changedIds[0], target: { type: 'order', id: changedIds[0], name: '' } } : {}),
+          summary: `${hidden ? 'Ẩn' : 'Hiện lại'} ${changed} đơn ${hidden ? 'khỏi' : 'trong'} bảng Đơn hàng${changed > 1 ? `: ${changedIds.slice(0, 8).join(', ')}${changed > 8 ? '…' : ''}` : ''}.`,
+          details: { hidden, count: changed }
+        }, actor);
+      }
       return sendJson(response, 200, { changed, hidden });
     }
     // Đẩy lại một đơn sang Pancake POS (khi lần đầu lỗi: mạng, POS thiếu mẫu mã…).
@@ -2349,6 +2797,11 @@ const server = http.createServer(async (request, response) => {
       if (!owner) return sendJson(response, 404, { error: 'Không tìm thấy đơn này trong hội thoại nào.' });
       if (!posConfigured()) return sendJson(response, 400, { error: 'Chưa kết nối Pancake POS (Cài đặt → Kênh).' });
       const outcome = await syncOrderToPos(owner.id, orderId);
+      const actor = await requestActor(request);
+      const pushed = owner.customerOrders.find(order => order.id === orderId);
+      const pushSummary = outcome?.error ? `Đẩy đơn sang POS lỗi: ${String(outcome.error).slice(0, 120)}` : `Đẩy đơn sang POS${outcome?.systemId || outcome?.id ? ` (mã POS ${outcome.systemId || outcome.id})` : ''}.`;
+      await addOrderHistory(orderId, { by: actorStamp(actor), action: 'order.push_pos', summary: pushSummary });
+      audit(request, 'order.push_pos', { target: orderTarget(pushed), conversationId: owner.id, orderId, summary: `#${orderId}: ${pushSummary}` }, actor);
       return sendJson(response, outcome?.error ? 502 : 200, { pos: outcome, error: outcome?.error || '' });
     }
     const customerOrderDeleteMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)$/);
@@ -2358,19 +2811,28 @@ const server = http.createServer(async (request, response) => {
     if (customerOrderDeleteMatch && request.method === 'PATCH') {
       const orderId = decodeURIComponent(customerOrderDeleteMatch[1]);
       const patch = await readBody(request);
+      const actor = await requestActor(request);
       let updated = null;
       let failure = null;
+      // Dấu vết: trường đổi, câu tóm tắt và mã hành động (sửa / đổi trạng thái / hủy) cho lịch sử đơn + nhật ký.
+      let edit = null;
+      let ownerConversationId = '';
       // Kiểm trên bản sao rồi mới chép đè. applyCustomerOrderEdits sửa TẠI CHỖ
       // từng trường một rồi mới ném lỗi ở trường sau, mà lỗi lại bị bắt ngay
       // trong mutator nên kho vẫn được ghi xuống đĩa — sửa thẳng thì một patch
       // bị từ chối vẫn kịp để lại nửa thay đổi, API trả 400 mà dữ liệu đã đổi.
       const apply = order => {
         const draft = structuredClone(order);
+        let changed;
         try {
-          applyCustomerOrderEdits(draft, patch);
+          changed = applyCustomerOrderEdits(draft, patch);
         } catch (error) {
           failure = error;
           return;
+        }
+        if (changed.length) {
+          edit = { changed, action: orderEditAction(changed, draft), summary: describeOrderEdits(order, draft, changed) };
+          recordOrderHistory(draft, { by: actorStamp(actor), action: edit.action, summary: edit.summary });
         }
         Object.assign(order, draft);
         updated = order;
@@ -2380,7 +2842,7 @@ const server = http.createServer(async (request, response) => {
           const order = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(item => item.id === orderId);
           if (!order) continue;
           apply(order);
-          if (updated) publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+          if (updated) { ownerConversationId = conversation.id; publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id }); }
           break;
         }
       });
@@ -2392,6 +2854,15 @@ const server = http.createServer(async (request, response) => {
       }
       if (failure) return sendJson(response, 400, { error: failure.message });
       if (!updated) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
+      if (edit) {
+        audit(request, edit.action, {
+          target: orderTarget(updated),
+          conversationId: ownerConversationId,
+          orderId,
+          summary: `#${orderId}${ownerConversationId ? '' : ' (landing)'}: ${edit.summary || edit.changed.join(', ')}`,
+          details: { fields: edit.changed }
+        }, actor);
+      }
       // Bản vừa sửa vào kho lưu trữ: dòng sau cùng của một mã đơn là bản đúng.
       await appendOrderToArchive(updated).catch(() => {});
       // Nhân viên chọn "Khách hủy"/bấm Hủy trên thẻ đơn: đơn đã sang POS thì hủy bên đó theo.
@@ -2437,29 +2908,36 @@ const server = http.createServer(async (request, response) => {
       const owner = store.conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));
       const order = owner?.customerOrders.find(item => item.id === orderId);
       if (!owner || !order) return sendJson(response, 404, { error: 'Không tìm thấy đơn này trong hội thoại nào.' });
+      const actor = await requestActor(request);
       try {
-        await sendChatbotOrderReceipt(owner, order, { force: true });
+        await sendChatbotOrderReceipt(owner, order, { force: true, sentBy: actor.username ? actorStamp(actor) : null });
       } catch (error) {
         return sendJson(response, 502, { error: `Chưa gửi lại được phiếu: ${error.message}` });
       }
       await updateMessagingStore(current => {
         const item = current.conversations.find(entry => entry.id === owner.id);
         const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === orderId);
-        if (target) target.delivery = { ...(target.delivery || {}), status: 'sent', resentAt: Date.now() };
+        if (target) {
+          target.delivery = { ...(target.delivery || {}), status: 'sent', resentAt: Date.now() };
+          recordOrderHistory(target, { by: actorStamp(actor), action: 'order.resend_receipt', summary: 'Gửi lại phiếu xác nhận đơn cho khách.' });
+        }
         return null;
       });
       publishMessagingEvent({ type: 'customer-panel', conversationId: owner.id });
+      audit(request, 'order.resend_receipt', { target: orderTarget(order), conversationId: owner.id, orderId, summary: `Gửi lại phiếu đơn #${orderId} cho ${order.name || 'khách'}.` }, actor);
       return sendJson(response, 200, { ok: true });
     }
     if (customerOrderDeleteMatch && request.method === 'DELETE') {
       const orderId = decodeURIComponent(customerOrderDeleteMatch[1]);
       let removed = null;
+      let removedFrom = '';
       await updateMessagingStore(store => {
         for (const conversation of store.conversations) {
           const orders = Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [];
           const index = orders.findIndex(order => order.id === orderId);
           if (index < 0) continue;
           [removed] = orders.splice(index, 1);
+          removedFrom = conversation.id;
           publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
           break;
         }
@@ -2469,6 +2947,7 @@ const server = http.createServer(async (request, response) => {
       if (!removed) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
       // Xóa khỏi hệ thống nhưng vẫn giữ một dòng trong kho để còn tra lại.
       await appendOrderToArchive(removed, { status: 'deleted' }).catch(() => {});
+      audit(request, 'order.delete', { target: orderTarget(removed), conversationId: removedFrom, orderId, summary: `Xóa đơn #${orderId} của ${removed.name || 'khách'} (tổng ${Number(removed.total) || 0}đ) khỏi hệ thống.` });
       return sendJson(response, 200, removed);
     }
     // Kho lưu trữ đơn: tra lại khách, số điện thoại, sản phẩm, địa chỉ của mọi
@@ -2515,7 +2994,9 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'POST' && url.pathname === '/api/orders/import/xlsx') {
       const workbook = await readBinaryBody(request);
-      return sendJson(response, 200, parseXlsx(workbook));
+      const parsed = parseXlsx(workbook);
+      audit(request, 'order.import', { summary: `Nhập tệp XLSX vào bảng Nhập dữ liệu (${Array.isArray(parsed?.rows) ? parsed.rows.length : 0} dòng, ${Math.round(workbook.length / 1024)} KB).` });
+      return sendJson(response, 200, parsed);
     }
     // The export preview and the file come from the same function, so what
     // staff see on screen is exactly what the warehouse receives.
@@ -2524,7 +3005,8 @@ const server = http.createServer(async (request, response) => {
       if (!payload.orderData || !Array.isArray(payload.orderData.headers) || !Array.isArray(payload.orderData.rows)) {
         return sendJson(response, 400, { error: 'Dữ liệu đơn hàng không hợp lệ.' });
       }
-      const rows = buildExportRows(payload.orderData);
+      // Cờ của đơn hệ thống (khách live, quà ưu đãi, dòng quà POS) mà dòng bảng không mang.
+      const rows = buildExportRows(payload.orderData, { orderFacts: exportFactsForOrders(await listAllSystemOrders()) });
       // `streets`: phần đường phố cho cột Địa chỉ của bảng xem trước; file vẫn đủ.
       // `locationCheck`: đơn nào ba cấp chưa đúng danh mục kho, để chặn xuất.
       return sendJson(response, 200, { rows, streets: exportPreviewStreets(rows), locationCheck: rows.locationCheck });
@@ -2537,6 +3019,7 @@ const server = http.createServer(async (request, response) => {
       const rows = Array.isArray(payload.rows) ? payload.rows.filter(Array.isArray).slice(0, 20000) : [];
       if (!headers.length || !rows.length) return sendJson(response, 400, { error: 'Bảng đang trống, không có gì để xuất.' });
       const fileName = String(payload.fileName || '').replace(/[^A-Za-z0-9._-]/g, '') || `nhap-du-lieu-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      audit(request, 'order.export', { target: { type: 'file', id: fileName, name: fileName }, summary: `Xuất bảng Nhập dữ liệu ra XLSX: ${rows.length} dòng (${fileName}).`, details: { kind: 'table', rows: rows.length } });
       return sendBinary(response, 200, buildPlainXlsx(headers, rows, { sheetName: 'Nhập dữ liệu' }), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName);
     }
     if (request.method === 'POST' && url.pathname === '/api/orders/export') {
@@ -2545,7 +3028,7 @@ const server = http.createServer(async (request, response) => {
         throw new Error('Dữ liệu đơn hàng xuất không hợp lệ. Vui lòng tải lại trang và thử lại.');
       }
       const skipInvalidLocations = payload.skipInvalidLocations === true;
-      const rows = buildExportRows(payload.orderData, { skipInvalidLocations });
+      const rows = buildExportRows(payload.orderData, { skipInvalidLocations, orderFacts: exportFactsForOrders(await listAllSystemOrders()) });
       // Kho nhận file theo ba cột tỉnh/quận/phường: đơn nào chưa đúng danh mục
       // thì không xuất, trừ khi nhân viên chọn xuất bỏ qua các đơn đó.
       if (!skipInvalidLocations && rows.locationCheck.invalid.length) {
@@ -2579,6 +3062,12 @@ const server = http.createServer(async (request, response) => {
         fileName,
         buffer: output
       }).catch(error => console.error(`Không ghi được lịch sử xuất: ${error.message}`));
+      const exportedOrders = new Set(rows.map(row => String(row[0] || '')).filter(Boolean)).size;
+      audit(request, 'order.export', {
+        target: { type: 'file', id: fileName, name: fileName },
+        summary: `Xuất file kho ${fileName}: ${exportedOrders} đơn, ${rows.length} dòng${payload.exportDay ? `, ngày ${String(payload.exportDay).slice(0, 20)}` : ''}${skipInvalidLocations && rows.locationCheck.invalid.length ? `, bỏ ${rows.locationCheck.invalid.length} đơn sai địa chỉ` : ''}.`,
+        details: { kind: 'warehouse', orders: exportedOrders, rows: rows.length }
+      });
       return sendBinary(response, 200, output, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName);
     }
     // Số điện thoại đã có trong tệp khách hàng (đơn đã xuất kho) kèm mã và ngày
@@ -2602,6 +3091,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && exportFileMatch) {
       const file = await readExportFile(exportFileMatch[1]);
       if (!file) return sendJson(response, 404, { error: 'Tệp xuất này không còn (lịch sử giữ 14 ngày).' });
+      audit(request, 'order.export', { target: { type: 'file', id: exportFileMatch[1], name: file.fileName }, summary: `Tải lại file kho đã xuất ${file.fileName}.`, details: { kind: 'history' } });
       return sendBinary(response, 200, file.buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', file.fileName);
     }
     if(request.method==='GET') return serveFile(request,response,url.pathname);
@@ -2633,10 +3123,16 @@ process.on('uncaughtException', error => {
   console.error('Lỗi không ai bắt, thoát để khởi động lại:', error);
   process.exit(1);
 });
+// systemd restart/deploy gửi SIGTERM: ghi nốt kho hội thoại còn trong bộ nhớ (ghi gộp của đồng bộ) rồi mới thoát.
+installMessagingStoreShutdownFlush();
 server.on('clientError', (error, socket) => {
   if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
   else socket.destroy();
 });
+// Sau Caddy: Node mặc định đóng kết nối rảnh sau 5 giây, Caddy có thể đang dùng lại đúng kết nối đó
+// → 502 lác đác. Giữ lâu hơn thời gian rảnh của proxy; headersTimeout phải lớn hơn keepAliveTimeout.
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
 
 server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`CRM running at http://${serverConfig.host}:${serverConfig.port}/`);
@@ -2650,7 +3146,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
   // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).
   startAdInsightsSync();
-  if (!auth.enabled) console.warn('CRM_LOGIN_USERS trống: giao diện không hỏi đăng nhập. Chỉ để vậy khi chạy trên máy mình hoặc Caddy còn Basic Auth.');
+  if (!auth.enabled && authConfig.requireLogin) console.error('CHƯA CẤU HÌNH ĐĂNG NHẬP: máy chủ bắt buộc đăng nhập (PUBLIC_BASE_URL https hoặc CRM_REQUIRE_LOGIN=1) mà chưa có tài khoản — giao diện/API trả 503 cho tới khi khai CRM_LOGIN_USERS hoặc Nhân sự có mật khẩu.');
+  else if (!auth.enabled) console.warn('CRM_LOGIN_USERS trống: giao diện không hỏi đăng nhập. Chỉ để vậy khi chạy trên máy mình.');
   else if (!authConfig.sessionSecret) console.warn('CRM_SESSION_SECRET trống: khoá phiên sinh ngẫu nhiên, khởi động lại là mọi người phải đăng nhập lại.');
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);
   const missing = missingWebhookConfiguration();

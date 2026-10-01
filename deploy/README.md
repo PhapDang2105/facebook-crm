@@ -4,41 +4,33 @@ Thư mục này chứa mọi thứ cần để đưa CRM lên một máy chủ D
 
 | Tệp | Vai trò |
 | --- | --- |
-| `setup-server.sh` | Script cài đặt một lần: Node.js, Caddy, người dùng dịch vụ, mã nguồn, systemd |
+| `setup-server.sh` | Script cài đặt một lần: Node.js ≥ 22, Caddy, người dùng dịch vụ `crm`, mã nguồn, systemd, tài khoản chủ shop |
 | `facebook-crm.service` | Unit systemd để CRM tự chạy lại khi lỗi hoặc khi máy khởi động |
-| `Caddyfile` | Reverse proxy, HTTPS tự động, và Basic Auth bảo vệ giao diện |
+| `Caddyfile` | Reverse proxy, HTTPS tự động, header bảo mật (không còn Basic Auth — CRM tự hỏi đăng nhập) |
 
-## Vì sao cần Basic Auth
+## Đăng nhập (thay cho Basic Auth cũ)
 
-Khi `CRM_LOGIN_USERS` còn trống, CRM **không hỏi đăng nhập**. Nếu đưa thẳng ra Internet, bất kỳ ai biết địa chỉ đều đọc được toàn bộ tin nhắn khách hàng và gửi tin dưới danh nghĩa Facebook Page.
-
-`Caddyfile` xử lý việc đó bằng cách chia hai nhánh:
-
-- `/privacy` đi thẳng: trang chính sách quyền riêng tư mà Meta yêu cầu để app ở chế độ Chính thức.
-- `/webhooks/facebook` đi thẳng, không hỏi mật khẩu. Meta gọi bằng máy nên không đăng nhập được; bản thân endpoint này đã tự xác thực bằng chữ ký `X-Hub-Signature-256`.
-- `/product-images/*` cũng đi thẳng: Messenger tải ảnh sản phẩm từ đây để hiện trên receipt và sau bảng giá.
-- `/webhooks/landing` đi thẳng: nền tảng landing page (Webcake) gọi bằng máy; endpoint tự xác thực bằng `LANDING_WEBHOOK_TOKEN` trong `.env`. Máy chủ dựng trước khi có khối này thì thêm khối `@landing` từ `Caddyfile` vào `/etc/caddy/Caddyfile` rồi `systemctl reload caddy`.
-- `/webhooks/pancake` đi thẳng: Pancake (pages.fm) gọi bằng máy khi khách nhắn tin; endpoint tự xác thực bằng `PANCAKE_WEBHOOK_TOKEN` trong `.env`. Máy chủ dựng trước khi có khối này thì thêm khối `@pancake` từ `Caddyfile` vào `/etc/caddy/Caddyfile` rồi `systemctl reload caddy`.
-- `/q/*` đi thẳng: trang khách thấy khi quét mã QR trên thẻ cảm ơn, cùng các ảnh logo/ưu đãi dưới `/q/brand/` (máy chủ chỉ phục vụ đúng các tệp đã liệt kê trong `app/server.mjs`).
-- Mọi đường dẫn còn lại yêu cầu tên đăng nhập và mật khẩu.
-
-## Đăng nhập riêng của CRM
-
-CRM nay có trang đăng nhập (`/login`), bật khi `.env` có tài khoản:
+Từ 01/10 máy chủ thật **không còn Basic Auth** ở Caddy: CRM tự hỏi đăng nhập ở `/login`. Tài khoản gồm chủ shop trong `.env` (`CRM_LOGIN_USERS`) và Cài đặt → Nhân sự (`data/processed/staff.json`, người đang làm có mật khẩu).
 
 ```bash
 cd /opt/facebook-crm
-sudo -u facebook-crm node app/auth.mjs hash-password   # nhập mật khẩu (≥ 8 ký tự), in ra chuỗi scrypt$…
+sudo -u crm node app/auth.mjs hash-password   # nhập mật khẩu (≥ 8 ký tự), in ra chuỗi scrypt$…
 ```
 
 ```ini
 CRM_LOGIN_USERS=huy:scrypt$…,lan:scrypt$…
 CRM_SESSION_SECRET=<chuỗi ngẫu nhiên dài, ví dụ: openssl rand -hex 32>
+# Tuỳ chọn: 1 = bắt buộc đăng nhập kể cả khi PUBLIC_BASE_URL không phải https;
+# 0 = tắt bắt buộc (chỉ chạy local qua đường hầm https).
+# CRM_REQUIRE_LOGIN=1
 ```
 
-Rồi `systemctl restart facebook-crm`. Phiên là cookie `HttpOnly` sống 30 ngày (`Secure` khi `PUBLIC_BASE_URL` là https); đổi mật khẩu của ai thì phiên cũ của người đó hết hiệu lực; sai 10 lần trong 15 phút thì địa chỉ đó bị khoá 15 phút.
-
-Khi đăng nhập đã chạy, có thể bỏ khối `basic_auth { … }` trong `/etc/caddy/Caddyfile` rồi `systemctl reload caddy`. **Chỉ bỏ sau khi `CRM_LOGIN_USERS` đã có tài khoản** — để trống thì CRM không hỏi đăng nhập (log khởi động báo dòng cảnh báo).
+- **Không mở toang**: `PUBLIC_BASE_URL` là https (hoặc `CRM_REQUIRE_LOGIN=1`) mà chưa có tài khoản nào thì mọi trang/API trả **503 "Chưa cấu hình đăng nhập"**; chỉ webhook, `/q/*`, `/product-images/*`, `/privacy`, `/api/health` còn chạy. Máy local (http://localhost) chưa khai tài khoản thì vẫn dùng không cần đăng nhập.
+- Đường công khai do CRM tự quyết: webhook Meta (chữ ký `X-Hub-Signature-256`), `/webhooks/landing` (`LANDING_WEBHOOK_TOKEN`), `/webhooks/pancake` (`PANCAKE_WEBHOOK_TOKEN`), `/q/*` (khách quét QR), `/product-images/*` (Messenger tải ảnh), `/privacy` (Meta kiểm tra).
+- Phiên: cookie `HttpOnly` 30 ngày (`Secure` khi https). Đổi mật khẩu, cho nghỉ, đổi tên đăng nhập trong Nhân sự → mọi phiên cũ của người đó hết hiệu lực (chậm nhất 15 giây).
+- Khoá đăng nhập: sai 10 lần / 15 phút theo **IP** (IP lấy từ `X-Forwarded-For` chỉ khi kết nối từ chính Caddy trên 127.0.0.1/::1) và 20 lần / 15 phút theo **tên đăng nhập**.
+- Nhân viên thường (vai trò Nhân viên) không ghi được các mục Cài đặt (chatbot, sản phẩm, quà, kênh, POS, QR, Nhân sự, bám đuổi hàng loạt); chủ shop / Quản trị thì được.
+- Header bảo mật (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, HSTS khi https, CSP cho trang HTML) do CRM tự gắn; `Caddyfile` gắn thêm khi CRM chưa gắn.
 
 ## Các bước
 
@@ -49,13 +41,13 @@ curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/deploy/setup-server
 sudo bash setup-server.sh fb.example.com https://github.com/OWNER/REPO.git
 ```
 
-Script sẽ hỏi tên đăng nhập quản trị rồi yêu cầu nhập mật khẩu để băm bằng `caddy hash-password`. Mật khẩu không được lưu ở dạng gốc ở bất kỳ đâu.
+Script sẽ hỏi tên đăng nhập chủ shop rồi mật khẩu, băm bằng `node app/auth.mjs hash-password` và ghi `CRM_LOGIN_USERS` + `CRM_SESSION_SECRET` vào `.env` (nếu chưa có). Mật khẩu không được lưu ở dạng gốc ở bất kỳ đâu.
 
 Sau khi script chạy xong:
 
 1. Sửa `/opt/facebook-crm/.env`, điền `META_APP_ID`, `META_APP_SECRET`, `META_GRAPH_VERSION`, `META_VERIFY_TOKEN`.
 2. `systemctl start facebook-crm`
-3. Kiểm tra: `curl -s http://127.0.0.1:8080/api/health` — gọi qua tên miền sẽ ra 401 vì Basic Auth chắn mọi đường trừ `/privacy`, `/webhooks/facebook`, `/webhooks/landing`, `/product-images`
+3. Kiểm tra: `curl -s http://127.0.0.1:8080/api/health` — gọi API qua tên miền khi chưa đăng nhập sẽ ra 401 (CRM tự chặn mọi đường trừ `/login`, `/privacy`, `/q/*`, `/product-images` và các webhook)
 
 Điều kiện để Caddy xin được chứng chỉ: DNS của tên miền đã trỏ đúng về máy chủ, và cổng 80/443 mở trên tường lửa.
 

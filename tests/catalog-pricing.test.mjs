@@ -39,11 +39,14 @@ test('giá lẻ + ship cho 1 sản phẩm, giá combo và miễn ship từ 2 —
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 2 }).shippingFee, 0);
 });
 
-test('chỉ tổ hợp có trong bảng quà mới được tự tính; túi ghép được, combo 10 gói không; lạ hoặc quá 3 thì chuyển nhân viên', () => {
+test('giỏ cùng nhóm ghép (túi lớn, Tropical, combo 10 gói) tự tính mọi cỡ tới 20; khác nhóm hoặc quá 20 thì chuyển nhân viên', () => {
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 1 }, { sku: 'GRA-VANG-H350', quantity: 1 }).key, 'GRA-VANG-H350=1|GRA-XANH-Z450=1');
-  assert.equal(basket({ sku: 'CB10-MIX', quantity: 1 }, { sku: 'GRA-XANH-Z450', quantity: 1 }).reason, 'not-a-combo');
+  // 01/10: combo 10 gói ghép đơn với túi lớn (1 combo Mix + 1 Xanh = 179k + 149k, miễn ship).
+  assert.equal(basket({ sku: 'CB10-MIX', quantity: 1 }, { sku: 'GRA-XANH-Z450', quantity: 1 }).total, 328000);
+  assert.equal(basket({ sku: 'NGHE-H350', quantity: 1 }, { sku: 'GRA-XANH-Z450', quantity: 1 }).reason, 'not-a-combo');
   assert.equal(basket({ product: 'Set quà Tết', quantity: 1 }).reason, 'unknown-product');
-  assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 4 }).reason, 'too-many');
+  assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 4 }).total, 596000);
+  assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 20 }).priceable, true);
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 21 }).reason, 'too-many');
   // 3 túi lẻ ×1..3 + mọi bộ ghép ≤3 của 3 túi trộn được + 7 sản phẩm còn lại ×1..3.
   const combos = catalog.listCombos();
@@ -252,7 +255,10 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   const single = { ...templates, PRICE_QUOTE: templates.PRICE_QUOTE };
   const solo = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'yến mạch' }, { ...single, PRICE_QUOTE: templates.PRICE_QUOTE });
   assert.equal(solo.messages[0], neutral(templates.ASK_PRODUCT));
-  assert.deepEqual(pricing.quoteTiers('hạt an lành').tiers.map(tier => [tier.price, tier.freeShipping, tier.gifts.length]), [[269000, false, 0], [528000, true, 0], [792000, true, 0]]);
+  // Hạt An Lành (staffOnly, 01/10: chỉ CSKH bán): bot không báo giá; đơn nhân viên vẫn tính được theo SKU.
+  assert.equal(pricing.quoteTiers('hạt an lành'), null);
+  assert.equal(pricing.quoteTiers('Bột ngũ cốc Nghệ Lành').tiers.length, 3);
+  assert.deepEqual([basket({ sku: 'MIX5-H420', quantity: 2 }).total, basket({ sku: 'MIX5-H420', quantity: 2 }).gift], [528000, 'Miễn phí vận chuyển']);
 });
 
 test('tin xác nhận đơn: 2 túi ghép — không dòng ship, miễn ship ghi cạnh tổng tiền, không dòng quà', () => {

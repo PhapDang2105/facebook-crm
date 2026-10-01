@@ -95,7 +95,9 @@ test('Tổng quan 7 ngày: KPI so với kỳ trước, hủy/bỏ dở không t�
   assert.deepEqual(kpis.orders, { value: 5, prev: 1 });
   assert.deepEqual(kpis.aov, { value: 240400, prev: 200000 });
   assert.deepEqual(kpis.spend, { value: 150000, prev: 40000 });
-  assert.deepEqual(kpis.roas, { value: 8.01, prev: 5 });
+  // ROAS chung một định nghĩa với Chiến dịch: chỉ l1 (utm c1) là doanh thu quảng cáo; kỳ trước c2 tiêu 40k mà 0 đơn.
+  // (Trước đây: mọi doanh thu ÷ chi phí = 8,01 / 5.)
+  assert.deepEqual(kpis.roas, { value: 2.98, prev: 0 });
   // Mới kỳ này: B, landing l1, l3, l4 (A mua từ 10/09). Kỳ trước: C.
   assert.deepEqual(kpis.newCustomers, { value: 4, prev: 1 });
   // Kỳ này: a, b, d (bình luận không tính); kỳ trước: b (18/09), c.
@@ -131,7 +133,11 @@ test('Tổng quan hôm nay: một dòng theo ngày, kỳ trước là hôm qua; 
   assert.equal(result.daily.length, 1);
   assert.deepEqual(result.kpis.orders, { value: 3, prev: 1 });
   assert.deepEqual(result.kpis.revenue, { value: 457000, prev: 298000 });
-  assert.deepEqual(result.ads, { connected: true, syncedAt: 5, error: 'Token hết hạn' });
+  // Meta Ads lỗi mà kho còn số cũ: cảnh báo "dữ liệu đến …" thay vì hiện số cũ như số mới.
+  assert.equal(result.ads.error, 'Token hết hạn');
+  assert.equal(result.ads.stale, true);
+  assert.equal(result.ads.dataUntil, 5);
+  assert.match(result.ads.notice, /dữ liệu đến 07:00 01\/01\/1970 \(Meta Ads đang lỗi\)/);
 });
 
 test('Tổng quan trống: không chia cho 0 (aov/roas/tỷ lệ null), ngày vẫn đủ', () => {

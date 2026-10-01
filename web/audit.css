@@ -1,0 +1,82 @@
+/* Cài đặt → Lịch sử (web/audit.js). Dùng lại .settings-card, ô lọc .order-filter-control / .order-search-control. */
+.audit-head { flex-wrap: wrap; min-height: 72px; padding-top: 12px; padding-bottom: 12px; }
+.audit-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.audit-control select { min-width: 140px; }
+.audit-dates { display: inline-flex; align-items: center; gap: 6px; color: #98a2b3; }
+.audit-dates.hidden { display: none; }
+.audit-date { height: 40px; padding: 0 10px; color: var(--text-1, #101828); background: #fff; border: 1px solid #dbe0e6; border-radius: 10px; font: inherit; font-size: 13.2px; }
+.audit-date:focus { outline: none; border-color: var(--brand, #1f7a45); box-shadow: 0 0 0 3px rgba(31, 122, 69, .12); }
+.audit-search { display: block; width: 240px; }
+.audit-search input { box-sizing: border-box; width: 100%; }
+
+.audit-table { margin: 16px 20px 12px; overflow: hidden; border: 1px solid #e9ebf0; border-radius: 8px; }
+.audit-row { display: grid; grid-template-columns: 64px minmax(160px, 1.1fr) minmax(130px, .9fr) minmax(140px, 1fr) minmax(200px, 2fr) 104px; align-items: center; gap: 12px; padding: 9px 12px; border-bottom: 1px solid #f2f4f7; font-size: 13px; }
+.audit-row:last-child { border-bottom: 0; }
+.audit-row > * { min-width: 0; }
+.audit-table-head { color: #475467; background: #f7f8fa; border-bottom: 1px solid #e9ebf0; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+.audit-row.is-failed { background: #fef3f2; }
+.audit-row.is-failed .audit-summary { color: #b42318; }
+
+.audit-day { padding: 7px 12px; color: #344054; background: #fafbfc; border-bottom: 1px solid #f2f4f7; font-size: 12.5px; font-weight: 600; }
+.audit-time { color: #344054; font-variant-numeric: tabular-nums; font-weight: 500; }
+
+.audit-actor { display: flex; align-items: center; gap: 8px; }
+.audit-avatar { display: grid; flex: 0 0 28px; place-items: center; width: 28px; height: 28px; color: #1f7a45; background: #e8f5ee; border-radius: 50%; font-size: 12.5px; font-weight: 700; }
+.audit-avatar.is-bot { color: #155eef; background: #eff4ff; }
+.audit-actor-copy { display: grid; min-width: 0; line-height: 1.25; }
+.audit-actor-copy strong { overflow: hidden; color: #101828; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.audit-actor-copy small { color: #8a91a0; font-size: 11.5px; }
+
+.audit-badge { display: inline-block; max-width: 100%; padding: 2px 8px; overflow: hidden; color: #475467; background: #f2f4f7; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.audit-badge--auth { color: #475467; background: #f2f4f7; }
+.audit-badge--message { color: #175cd3; background: #eff4ff; }
+.audit-badge--order { color: #1f7a45; background: #e8f5ee; }
+.audit-badge--customer { color: #6941c6; background: #f4f3ff; }
+.audit-badge--settings { color: #b54708; background: #fffaeb; }
+.audit-row.is-failed .audit-badge { color: #b42318; background: #fee4e2; }
+
+.audit-target { display: grid; min-width: 0; line-height: 1.3; }
+.audit-target > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-target small { color: #8a91a0; font-size: 11.5px; }
+.audit-target-link { justify-self: start; max-width: 100%; padding: 0; color: #1677ff; background: none; border: 0; font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.audit-target-link:hover { text-decoration: underline; }
+.audit-summary { overflow: hidden; color: #475467; text-overflow: ellipsis; white-space: nowrap; }
+.audit-ip { overflow: hidden; color: #98a2b3; font-size: 11.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.audit-muted { color: #98a2b3; }
+.audit-empty { padding: 20px 12px; }
+.audit-denied { color: #b42318; }
+.audit-more-wrap { display: flex; justify-content: center; padding: 0 20px 18px; }
+.audit-more.hidden { display: none; }
+.audit-more:disabled { opacity: .6; cursor: default; }
+
+@media (max-width: 1100px) {
+  .audit-head { align-items: flex-start; }
+  .audit-filters { justify-content: flex-start; width: 100%; }
+  .audit-search { flex: 1 1 200px; width: auto; }
+  .audit-table { margin: 12px; }
+  .audit-table-head { display: none; }
+  .audit-row { grid-template-columns: 52px minmax(0, 1fr); row-gap: 5px; align-items: start; }
+  .audit-row > :not(.audit-time) { grid-column: 2; }
+  .audit-time { grid-row: 1 / span 2; padding-top: 5px; }
+  .audit-summary { white-space: normal; overflow-wrap: anywhere; }
+  .audit-ip:empty { display: none; }
+}
+
+/* Hộp "Lịch sử cập nhật hội thoại" (nút đồng hồ ở đầu khung chat). */
+.audit-dialog { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: rgba(16, 24, 40, .45); }
+.audit-dialog-panel { display: flex; flex-direction: column; width: min(620px, 100%); max-height: min(640px, calc(100vh - 32px)); overflow: hidden; background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(16, 24, 40, .25); }
+.audit-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px 10px; }
+.audit-dialog-head h2 { margin: 0; color: #101828; font-size: 17px; font-weight: 700; }
+.audit-dialog-close { width: 30px; height: 30px; padding: 0; color: #667085; background: transparent; border: 0; border-radius: 50%; font-size: 22px; line-height: 1; cursor: pointer; }
+.audit-dialog-close:hover { background: #f2f4f7; }
+.audit-dialog-tabs { display: flex; gap: 4px; padding: 0 16px; overflow-x: auto; border-bottom: 1px solid #eef0f3; }
+.audit-dialog-tab { flex: 0 0 auto; padding: 9px 10px; color: #667085; background: transparent; border: 0; border-bottom: 2px solid transparent; font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.audit-dialog-tab:hover { color: #101828; }
+.audit-dialog-tab.is-active { color: var(--brand, #1f7a45); border-bottom-color: var(--brand, #1f7a45); }
+.audit-dialog-list { display: grid; align-content: start; gap: 8px; min-height: 160px; margin: 0; padding: 14px 20px 20px; overflow-y: auto; list-style: none; }
+.audit-dialog-item { padding: 9px 11px; background: #f7f8fa; border-radius: 8px; font-size: 13px; line-height: 1.45; }
+.audit-dialog-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.audit-dialog-item-head b { color: #101828; font-weight: 600; }
+.audit-dialog-item-head time { margin-left: auto; color: #8a91a0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.audit-dialog-item p { margin: 3px 0 0; color: #475467; overflow-wrap: anywhere; }
+.audit-dialog-empty { padding: 36px 0; color: #8a91a0; font-size: 13.5px; text-align: center; }

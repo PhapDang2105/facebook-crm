@@ -2,20 +2,25 @@
 // cho từng tin hộp thư đã chấm, so mã mẫu LLM chọn (và luật ổn định nếu bắt) với mã nhân viên chấm.
 // Chạy trên máy chủ: node --env-file=.env tools-intent/replay-llm.mjs [golden-set.json] [--limit N]
 // Không gửi gì cho khách. Kết quả chi tiết ghi ra replay-llm-out.json cạnh tệp bộ chấm.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const load = file => import(pathToFileURL(path.join(root, file)).href);
-const { botTextOf, cliFail, lastTemplateOf, parseCliArgs, positiveIntArg } = await load('tools-intent/dataset-context.mjs');
+const { botTextOf, cliFail, lastTemplateOf, parseCliArgs, positiveIntArg, readJsonFileOrFail } = await load('tools-intent/dataset-context.mjs');
 const { canonicalTemplateId } = await load('app/processing/intent-features.mjs');
 const args = process.argv.slice(2);
-const cli = parseCliArgs(args, ['--limit']);
+const cli = parseCliArgs(args, ['--limit'], ['--fewshot']);
 // Đường dẫn tương đối tính theo thư mục gọi lệnh (rồi mới chdir về gốc dự án để nạp engine).
 const goldenPath = path.resolve(cli.positional[0] || path.join(root, 'data', 'processed', 'golden-set.json'));
 const limit = cli.has('--limit') ? positiveIntArg(cli.value('--limit'), '--limit') : Infinity;
 if (!existsSync(goldenPath)) cliFail(`Không thấy bộ chấm: ${goldenPath}`);
+// Đọc (và kiểm) bộ chấm + cài đặt chatbot TRƯỚC khi nạp engine: tệp hỏng → lỗi gọn, exit 1, không stack.
+const allItems = readJsonFileOrFail(goldenPath, 'Bộ chấm').items || [];
+const settingsPath = process.env.CHATBOT_SETTINGS_PATH || path.join(root, 'data', 'processed', 'chatbot-settings.json');
+if (!existsSync(settingsPath)) cliFail(`Không thấy cài đặt chatbot: ${settingsPath}`);
+const stored = readJsonFileOrFail(settingsPath, 'Cài đặt chatbot');
 process.chdir(root);
 // --fewshot: chèn 3 ví dụ đã chấm gần nhất (bỏ chính tin đang đo = leave-one-out).
 const fewShot = cli.has('--fewshot');
@@ -27,10 +32,8 @@ const { ruleIntent } = await load('app/processing/rule-intent.mjs');
 const { renderChatbotReply } = await load('app/chatbot-templates.mjs');
 const { buildExampleBank, nearestExamples } = await load('app/processing/example-bank.mjs');
 (await load('app/processing/catalog.mjs')).reloadCatalog();
-const stored = JSON.parse(readFileSync(path.join(root, 'data', 'processed', 'chatbot-settings.json'), 'utf8'));
 const settings = normalizeChatbotSettings({ ...stored, enabled: true });
 
-const allItems = JSON.parse(readFileSync(goldenPath, 'utf8')).items || [];
 const items = allItems.filter(item => item.source !== 'comment' && item.label && item.label !== 'SKIP').slice(0, limit);
 const bank = fewShot ? buildExampleBank(allItems.filter(item => item.label && item.label !== 'SKIP')) : null;
 if (!items.length) { console.log('Chưa có tin hộp thư nào được chấm.'); process.exit(0); }

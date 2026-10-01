@@ -147,13 +147,27 @@ export function decisionLabelOf(entry) {
  * Dòng v2 từ nhật ký quyết định (labelSource 'pipeline'). `prevBot` của nhật ký là MÃ MẪU (botLastTemplateId) →
  * lastTemplate; câu bot trước = `prevBotText` (đã che) nếu engine ghi (nhật ký cũ ghi chữ ở `prevBot` vẫn đọc được).
  * Giỏ: `basket` [{ sku, quantity }] giữ nguyên trên dòng (relabel dựng lại pendingOrder). Trường mô hình: intentRowOf.
- * `stats`: pipeline, skipped, comments, beforeSince, duplicates.
+ * `stats`: pipeline, skipped, comments, beforeSince, duplicates, legacyPrev.
+ *
+ * Vòng 12 (B5 #1): nhật ký v1 (trước bản sửa 10/2026) ghi prevBot/lastTemplate/prevBotAgeMin/prevBotAsks SAU khi bot trả
+ * lời (engine đọc conversation đã bị saveBotState ghi đè → prevBot == final ở 1.096/1.106 lượt): dùng làm đặc trưng là
+ * rò đáp án. Bản ghi v1: KHÔNG đọc các trường đó; lastTemplate dựng lại từ prevBotText (chụp trước khi trả lời, tin
+ * cậy) qua chữ ký mẫu, không khớp thì lấy `final` của lượt trước cùng hội thoại trong nhật ký; prevBotAsks/prevBotAgeMin
+ * bỏ trống. Bản ghi v2 (engine chụp trace.prev lúc bắt đầu lượt) đọc thẳng như cũ.
  */
 export function rowsFromDecisionLog(entries, { templates = {}, includeComments = false, since = 0, stats = {} } = {}) {
   const signatures = templateSignatures(templates);
-  Object.assign(stats, { pipeline: 0, skipped: 0, comments: 0, beforeSince: 0, duplicates: 0, ...stats });
+  Object.assign(stats, { pipeline: 0, skipped: 0, comments: 0, beforeSince: 0, duplicates: 0, legacyPrev: 0, ...stats });
   const rows = [];
   const seen = new Set();
+  // Mẫu bot gửi ở lượt trước cùng hội thoại (theo thời gian) — chỉ dùng cho bản ghi v1.
+  const timeOf = entry => Number(entry?.at) || Date.parse(entry?.at) || 0;
+  const previousFinal = new Map();
+  const lastFinal = new Map();
+  for (const entry of [...entries].filter(Boolean).sort((a, b) => timeOf(a) - timeOf(b))) {
+    previousFinal.set(entry, lastFinal.get(String(entry.conversationId)) || '');
+    if (entry.final && !entry.skipped) lastFinal.set(String(entry.conversationId), String(entry.final));
+  }
   for (const entry of entries) {
     if (!entry || entry.skipped || (entry.type || 'text') !== 'text' || !entry.final || !String(entry.text || '').trim()) { stats.skipped += 1; continue; }
     const at = Number(entry.at) || Date.parse(entry.at) || 0;
@@ -164,15 +178,19 @@ export function rowsFromDecisionLog(entries, { templates = {}, includeComments =
     if (seen.has(id)) { stats.duplicates += 1; continue; }
     seen.add(id);
     const ctx = entry.ctx || {};
-    const loggedId = looksLikeTemplateId(entry.prevBot) ? String(entry.prevBot) : '';
-    const prevBotRaw = entry.prevBotText ?? (loggedId ? '' : entry.prevBot);
+    const trustedPrev = Number(entry.v) >= 2;
+    if (!trustedPrev) stats.legacyPrev += 1;
+    const codeLogged = looksLikeTemplateId(entry.prevBot);
+    const loggedId = codeLogged && trustedPrev ? String(entry.prevBot) : '';
+    const prevBotRaw = entry.prevBotText ?? (codeLogged ? '' : entry.prevBot);
     const prevBot = maskPhone(prevBotRaw || '').slice(0, 240);
-    const lastTemplate = canonicalTemplateId(entry.lastTemplate || loggedId || ctx.lastTemplate || (prevBot ? matchTemplate(prevBot, signatures) : '') || '');
+    const lastTemplate = canonicalTemplateId((trustedPrev ? entry.lastTemplate || loggedId : '') || ctx.lastTemplate || (prevBot ? matchTemplate(prevBot, signatures) : '')
+      || (trustedPrev ? '' : previousFinal.get(entry) || '') || '');
     const text = maskPhone(entry.text).slice(0, 300);
     const basket = Array.isArray(entry.basket) ? entry.basket.filter(item => item && (item.sku || item.code)).map(item => ({ sku: String(item.sku || item.code), quantity: Math.max(1, Number(item.quantity) || 1) })) : null;
     const modelRow = intentRowOf({
       text, source, lastTemplateId: lastTemplate, prevBotText: prevBot, hasBasket: basket ? basket.length > 0 || Boolean(ctx.hasBasket) : ctx.hasBasket,
-      hasOrder: ctx.hasOrder ?? ctx.hasRecentOrder, orderAgeMin: ctx.orderAgeMin, prevBotAsks: entry.prevBotAsks, livestream: ctx.livestream,
+      hasOrder: ctx.hasOrder ?? ctx.hasRecentOrder, orderAgeMin: ctx.orderAgeMin, prevBotAsks: trustedPrev ? entry.prevBotAsks : undefined, livestream: ctx.livestream,
       phoneInText: ctx.phoneInText, staffRepliedAfterBot: ctx.staffRepliedAfterBot, now: at
     });
     const label = decisionLabelOf(entry);
@@ -189,7 +207,7 @@ export function rowsFromDecisionLog(entries, { templates = {}, includeComments =
       basketItems: basket ? basket.reduce((sum, item) => sum + item.quantity, 0) : Array.isArray(ctx.basketItems) ? ctx.basketItems.reduce((sum, item) => sum + (Number(item?.quantity) || 1), 0) : Number(ctx.basketItems) || basketItemsOf({ lastTemplate, prevBot }),
       ruleTemplate: labelTemplateId(entry.rule?.templateId || ''),
       at,
-      prevBotAgeMin: Number.isFinite(Number(entry.prevBotAgeMin)) && entry.prevBotAgeMin !== null ? entry.prevBotAgeMin : null,
+      prevBotAgeMin: trustedPrev && Number.isFinite(Number(entry.prevBotAgeMin)) && entry.prevBotAgeMin !== null ? entry.prevBotAgeMin : null,
       staffRepliedAfterBot: Boolean(ctx.staffRepliedAfterBot),
       ...(basket ? { basket } : {}),
       ...(entry.rule?.name ? { ruleName: entry.rule.name } : {}),
@@ -230,7 +248,7 @@ async function makeStaffLabeller(templates) {
 async function main() {
   const args = process.argv.slice(2);
   const usage = 'Dùng: node tools-intent/build-dataset.mjs <out.jsonl> [--since YYYY-MM-DD] [--llm] [--include-comments] [--from-decision-log <dir>]';
-  const cli = parseCliArgs(args, ['--since', '--from-decision-log']);
+  const cli = parseCliArgs(args, ['--since', '--from-decision-log'], ['--include-comments', '--llm']);
   const outPath = cli.positional[0];
   if (!outPath) cliFail(usage);
   const sinceText = cli.value('--since', DEFAULT_SINCE);

@@ -2,11 +2,11 @@
 // cất sang .corrupt-<mốc> rồi bắt đầu kho mới — không âm thầm đè mất số liệu.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, writeFileSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readdirSync, writeFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const directory = mkdtempSync(path.join(tmpdir(), 'qr-corrupt-'));
+const directory = tempDir('qr-corrupt-');
 process.env.QR_SCANS_PATH = path.join(directory, 'qr-scans.json');
 process.env.QR_SETTINGS_PATH = path.join(directory, 'qr-settings.json');
 writeFileSync(process.env.QR_SCANS_PATH, '{"codes": {"tmdt-01": {"code":"tmdt-01","scans":7', 'utf8');

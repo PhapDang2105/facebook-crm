@@ -3,7 +3,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { metaConfig, projectRoot } from './config.mjs';
 
-const channelStorePath = path.join(projectRoot, 'data', 'processed', 'meta-channels.json');
+// META_CHANNELS_PATH: ghi đè vị trí kho kênh (test dùng thư mục tạm); mặc định data/processed.
+const channelStorePath = process.env.META_CHANNELS_PATH || path.join(projectRoot, 'data', 'processed', 'meta-channels.json');
 
 function tokenKey() {
   // Khoá mã hoá token Page dẫn xuất từ App Secret; thiếu secret thì mọi máy dùng

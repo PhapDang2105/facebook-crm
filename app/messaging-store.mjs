@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
-import { genderFromName } from './processing/customer-info.mjs';
+import { GENDER_SOURCE_RANK, genderFromName } from './processing/customer-info.mjs';
 
 // META_CONVERSATIONS_PATH lets the integration test run without touching real customer data.
 const messagingStorePath = process.env.META_CONVERSATIONS_PATH
@@ -115,9 +115,58 @@ async function storeMtimeMs() {
   }
 }
 
+// ===== Gộp ghi =====
+//
+// Kho ~19 MB trên production: trước đây MỖI lần sửa (mỗi hội thoại của một lượt đồng bộ Pancake,
+// mỗi webhook) là một lần JSON.stringify + ghi cả tệp, chặn vòng lặp sự kiện hàng trăm lần mỗi
+// lượt. Giờ: sửa chạy tuần tự trong bộ nhớ (như cũ), còn ghi đĩa thì
+//  - một lần ghi tại một thời điểm (tệp tạm rồi rename nguyên tử, định dạng tệp giữ nguyên);
+//  - các lần sửa trong lúc đang ghi được gộp vào MỘT lần ghi kế tiếp;
+//  - `defer: true` (đường đồng bộ): trả về ngay sau khi sửa bộ nhớ, ghi gộp sau ~1 giây
+//    (chậm nhất 5 giây), hay khi flushMessagingStore() được gọi (cuối lượt đồng bộ, lúc tắt);
+//  - không có gì đổi (mutationVersion không tăng) thì không ghi.
+// Lời gọi thường (không defer) vẫn chỉ trả về khi thay đổi của nó đã nằm trên đĩa.
+let mutationVersion = 0;
+let writtenVersion = 0;
+let activeWrite = null;
+let flushTimer = null;
+let pendingSince = 0;
+const flushDelayMs = Math.max(0, Number(process.env.MESSAGING_STORE_FLUSH_MS) || 1000);
+const flushMaxWaitMs = 5000;
+// Mốc sửa do chính tiến trình này ghi/nạp (vài mốc gần nhất): lượt stat chạy song song với một lần
+// ghi có thể thấy mốc cũ hay mốc mới — cả hai đều không phải "tiến trình khác vừa ghi".
+const knownMtimes = [];
+function rememberMtime(mtime) {
+  if (!mtime) return;
+  knownMtimes.push(mtime);
+  if (knownMtimes.length > 8) knownMtimes.shift();
+}
+const isForeignMtime = mtime => Boolean(mtime) && mtime !== cachedStoreMtimeMs && !knownMtimes.includes(mtime);
+
+/** Còn thay đổi trong bộ nhớ chưa ghi xuống đĩa? */
+export function messagingStoreHasPendingWrites() {
+  return writtenVersion < mutationVersion;
+}
+
 let loadingStore = null;
 export async function readMessagingStore() {
-  if (cachedStore && (await storeMtimeMs()) !== cachedStoreMtimeMs) cachedStore = null;
+  // Đang ghi: tệp đổi mốc là do chính mình, bộ nhớ là bản mới nhất.
+  if (cachedStore && !activeWrite) {
+    const mtime = await storeMtimeMs();
+    if (cachedStore && !activeWrite && mtime !== cachedStoreMtimeMs) {
+      if (!mtime) {
+        // Tệp biến mất: còn thay đổi chưa ghi thì giữ bộ nhớ (lần ghi tới tạo lại tệp), không thì kho rỗng như cũ.
+        if (!messagingStoreHasPendingWrites()) cachedStore = null;
+      } else if (isForeignMtime(mtime)) {
+        // Tiến trình khác (script bảo trì) ghi tệp: bản trên đĩa thắng, như trước đây.
+        if (messagingStoreHasPendingWrites()) {
+          console.warn('Kho hội thoại bị tiến trình khác ghi trong lúc còn thay đổi chưa ghi: đọc lại tệp, bỏ thay đổi trong bộ nhớ.');
+          writtenVersion = mutationVersion;
+        }
+        cachedStore = null;
+      }
+    }
+  }
   if (cachedStore) return cachedStore;
   // Nhiều lượt đọc cùng lúc lúc khởi động dùng chung một lần nạp, để không có
   // hai bản kho song song (bản ghi sau đè bản ghi trước).
@@ -134,6 +183,7 @@ export async function readMessagingStore() {
         store = emptyStore();
       }
       cachedStoreMtimeMs = await storeMtimeMs();
+      rememberMtime(cachedStoreMtimeMs);
       cachedStore = store;
       return store;
     })().finally(() => { loadingStore = null; });
@@ -151,34 +201,132 @@ async function quarantineStoreFile(error) {
   }
 }
 
-async function persistStore(store) {
+/** Một lần ghi: bản chụp của kho trong bộ nhớ (JSON đồng bộ, nhất quán) → tệp tạm → rename nguyên tử. */
+async function writeSnapshot() {
+  const before = await storeMtimeMs();
+  if (!cachedStore) {
+    // Bộ nhớ đã bị bỏ (đọc lại tệp): không còn gì để ghi.
+    writtenVersion = mutationVersion;
+    return;
+  }
+  if (isForeignMtime(before)) {
+    // Tiến trình khác vừa ghi tệp mà chưa ai đọc lại: tệp thắng (như đường đọc), không ghi đè.
+    if (messagingStoreHasPendingWrites()) console.warn('Kho hội thoại bị tiến trình khác ghi: bỏ thay đổi trong bộ nhớ chưa ghi, đọc lại tệp.');
+    cachedStore = null;
+    writtenVersion = mutationVersion;
+    return;
+  }
+  const version = mutationVersion;
+  const text = JSON.stringify(cachedStore, null, 2);
   await mkdir(path.dirname(messagingStorePath), { recursive: true });
   const temporaryPath = `${messagingStorePath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
+  await writeFile(temporaryPath, text, 'utf8');
   await rename(temporaryPath, messagingStorePath);
-  // Trong lúc mutate còn chờ, một lượt đọc thường có thể đã nạp lại tệp (mốc sửa
-  // đổi bên ngoài) vào cache; bản vừa ghi mới là sự thật, kẻo lượt ghi sau đè mất.
-  cachedStore = store;
   cachedStoreMtimeMs = await storeMtimeMs();
+  rememberMtime(cachedStoreMtimeMs);
+  writtenVersion = Math.max(writtenVersion, version);
 }
 
-/** Serializes writes so bursts of webhook events cannot overwrite each other. */
-export function updateMessagingStore(mutate) {
-  const operation = writeQueue.then(async () => {
+/**
+ * Ghi xuống đĩa mọi thay đổi đã có tới lúc gọi (gộp với lần ghi đang chạy nếu có). Không có gì
+ * mới thì không ghi. Lỗi ghi ném ra cho người gọi.
+ */
+export async function flushMessagingStore() {
+  const target = mutationVersion;
+  while (writtenVersion < target) {
+    if (activeWrite) {
+      await activeWrite.catch(() => {});
+      continue;
+    }
+    activeWrite = writeSnapshot().finally(() => { activeWrite = null; });
+    await activeWrite;
+  }
+}
+
+function scheduleFlush(delayMs = flushDelayMs) {
+  const now = Date.now();
+  if (!pendingSince) pendingSince = now;
+  if (flushTimer) clearTimeout(flushTimer);
+  const delay = Math.max(0, Math.min(delayMs, pendingSince + flushMaxWaitMs - now));
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    pendingSince = 0;
+    flushMessagingStore().catch(error => {
+      console.error(`Không ghi được kho hội thoại (sẽ thử lại): ${error.message}`);
+      scheduleFlush(5000);
+    });
+  }, delay);
+  // Không giữ tiến trình sống chỉ vì hẹn ghi; lúc tắt có flush riêng (beforeExit / SIGTERM).
+  if (typeof flushTimer.unref === 'function') flushTimer.unref();
+}
+
+/**
+ * Sửa kho tuần tự (webhook dồn dập không đè nhau). `mutate(store)` sửa tại chỗ và trả kết quả.
+ * Tuỳ chọn:
+ *  - `defer: true`: trả về ngay khi bộ nhớ đã sửa, ghi đĩa gộp sau (đường đồng bộ lịch sử);
+ *  - `unchanged(result)`: trả true khi mutate không đổi gì → không đánh dấu cần ghi.
+ */
+export function updateMessagingStore(mutate, { defer = false, unchanged = null } = {}) {
+  const mutation = writeQueue.then(async () => {
     const store = await readMessagingStore();
     let result;
     try {
       result = await mutate(store);
     } catch (error) {
-      // Sửa dở giữa chừng thì bỏ bản trong bộ nhớ, lần sau đọc lại từ tệp đã ghi tốt.
-      cachedStore = null;
+      // Sửa dở giữa chừng: không còn gì chưa ghi thì bỏ bản trong bộ nhớ, lần sau đọc lại từ tệp
+      // đã ghi tốt (như trước). Còn thay đổi của lời gọi khác chưa ghi thì giữ, kẻo mất tin khách.
+      if (!messagingStoreHasPendingWrites() && !activeWrite) cachedStore = null;
       throw error;
     }
-    await persistStore(store);
+    if (typeof unchanged === 'function' && unchanged(result)) return { result, changed: false };
+    // Trong lúc mutate còn chờ, một lượt đọc thường có thể đã nạp lại tệp (mốc sửa đổi bên
+    // ngoài) vào cache; bản vừa sửa mới là sự thật, kẻo lượt ghi sau đè mất.
+    cachedStore = store;
+    mutationVersion += 1;
+    return { result, changed: true };
+  });
+  writeQueue = mutation.then(() => undefined, () => undefined);
+  return mutation.then(async ({ result, changed }) => {
+    if (changed) {
+      if (defer) scheduleFlush();
+      else await flushMessagingStore();
+    }
     return result;
   });
-  writeQueue = operation.then(() => undefined, () => undefined);
-  return operation;
+}
+
+let exitFlushTried = false;
+process.on('beforeExit', () => {
+  if (exitFlushTried || !messagingStoreHasPendingWrites()) return;
+  exitFlushTried = true;
+  flushMessagingStore().catch(error => console.error(`Không ghi được kho hội thoại lúc thoát: ${error.message}`));
+});
+
+let shutdownInstalled = false;
+/**
+ * Tắt tiến trình (systemd gửi SIGTERM khi restart/deploy): ghi nốt thay đổi còn trong bộ nhớ rồi
+ * mới thoát (chờ tối đa `timeoutMs`). Gọi một lần từ server.mjs.
+ */
+export function installMessagingStoreShutdownFlush({ signals = ['SIGTERM', 'SIGINT'], timeoutMs = 10000, exit = code => process.exit(code) } = {}) {
+  if (shutdownInstalled) return;
+  shutdownInstalled = true;
+  let stopping = false;
+  for (const signal of signals) {
+    process.on(signal, () => {
+      if (stopping) return;
+      stopping = true;
+      const timer = setTimeout(() => {
+        console.error('Hết giờ chờ ghi kho hội thoại lúc tắt, thoát.');
+        exit(1);
+      }, timeoutMs);
+      flushMessagingStore()
+        .then(() => exit(0), error => {
+          console.error(`Không ghi được kho hội thoại lúc tắt: ${error.message}`);
+          exit(1);
+        })
+        .finally(() => clearTimeout(timer));
+    });
+  }
 }
 
 export function messagePreview(message) {
@@ -259,6 +407,11 @@ function insertMessage(messages, message) {
     const merged = { ...existing, ...message };
     // Cờ nhân viên gửi (từ CRM) không bị bản dội về của Pancake/Meta (không biết ai gửi) xóa mất.
     if (existing.staff && !message.staff) { merged.staff = true; if (existing.staffName && !message.staffName) merged.staffName = existing.staffName; }
+    // Tin gửi từ CRM đã biết đích danh người gửi (staffUsername): bản dội về mang tên tài khoản
+    // Pancake chung không được đè họ tên nhân viên.
+    if (existing.staffUsername) Object.assign(merged, { staffName: existing.staffName, staffUsername: existing.staffUsername, ...(existing.staff ? { staff: true } : {}) });
+    // Ai gửi (sender 'bot' / 'staff') là của CRM lúc gửi: bản dội về không biết nên không đổi.
+    if (existing.sender) merged.sender = existing.sender;
     // Bản dội về (echo) không hạ trạng thái đã giao/đã đọc xuống "sent".
     if ((statusRank[existing.status] ?? 0) > (statusRank[merged.status] ?? 0)) merged.status = existing.status;
     if (merged.createdAt === existing.createdAt) {
@@ -274,6 +427,34 @@ function insertMessage(messages, message) {
   if (messages.length > maximumMessagesPerConversation) messages.splice(0, messages.length - maximumMessagesPerConversation);
   // Tin cũ hơn cả cửa sổ đang giữ thì bị cắt ngay: không coi là đã chèn.
   return { message, inserted: messages.includes(message) };
+}
+
+/**
+ * Trường ghi lên tin nhân viên gửi từ CRM. `staff`: true (cũ: chỉ biết "nhân viên", tên 'CRM')
+ * hoặc { name, username } của người gửi (nhật ký hoạt động) → staffName = họ tên, staffUsername.
+ */
+export function staffMessageFields(staff) {
+  if (!staff) return {};
+  if (typeof staff !== 'object') return { staff: true, staffName: 'CRM' };
+  const username = String(staff.username || '').trim().slice(0, 32);
+  const name = String(staff.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) || username || 'CRM';
+  return { staff: true, staffName: name, ...(username ? { staffUsername: username } : {}) };
+}
+
+/**
+ * Dấu người gửi ghi lên MỌI tin CRM gửi đi (giao diện hiện "Chatbot · giờ" hay tên nhân viên):
+ * - nhân viên gửi từ CRM (`staff`): sender 'staff' + staff/staffName/staffUsername (staffMessageFields);
+ * - việc máy làm thay nhân viên (`sentBy` { name, username }: phiếu đơn của đơn tạo tay, nút
+ *   "Gửi lại phiếu"): sender 'staff' + staffName/staffUsername nhưng KHÔNG cờ staff (bot không nhường);
+ * - còn lại (chatbot trả lời, bám đuổi, chào QR, phiếu đơn bot): sender 'bot'.
+ */
+export function messageSenderFields({ staff = false, sentBy = null } = {}) {
+  if (staff) return { ...staffMessageFields(staff), sender: 'staff' };
+  if (sentBy && typeof sentBy === 'object' && (sentBy.name || sentBy.username)) {
+    const { staffName, staffUsername } = staffMessageFields(sentBy);
+    return { sender: 'staff', staffName, ...(staffUsername ? { staffUsername } : {}) };
+  }
+  return { sender: 'bot' };
 }
 
 /** Adds a message and returns the updated conversation plus whether it was new. */
@@ -352,7 +533,9 @@ export function publicConversation(conversation) {
     lastMessagePreview: conversation.lastMessagePreview || '',
     lastMessageDirection: conversation.lastMessageDirection || '',
     replyWindowEndsAt,
-    canReply: replyWindowEndsAt > Date.now()
+    canReply: replyWindowEndsAt > Date.now(),
+    // Ai đã xem hội thoại (như "Thúy Hằng đã xem • 16:28" của Pancake): { [username]: { name, at } }.
+    ...(conversation.seenBy && typeof conversation.seenBy === 'object' && Object.keys(conversation.seenBy).length ? { seenBy: conversation.seenBy } : {})
   };
 }
 
@@ -376,8 +559,9 @@ export async function listMessages(id, limit = 100) {
 }
 
 // Trust order of gender sources; a guess never overwrites a stronger one.
-// Nhân viên chọn tay > hồ sơ Pancake (Facebook khai) > đoán theo cách xưng hô > đoán theo tên.
-export const genderRank = { staff: 3, pancake: 2.5, message: 2, name: 1 };
+// Vòng 12 (GENDER_SOURCE_RANK): nhân viên chọn tay (3) > khách tự xưng trong tin (2.7: "Lấy chị 1 túi")
+// > hồ sơ Pancake (2.5) > đoán theo tên (1). Trước đây Pancake thắng lời khách tự xưng.
+export const genderRank = GENDER_SOURCE_RANK;
 
 /** Records a guessed gender unless a more trusted source already set one. */
 export function applyGenderGuess(conversation, gender, source) {
@@ -386,6 +570,27 @@ export function applyGenderGuess(conversation, gender, source) {
   conversation.gender = gender;
   conversation.genderSource = source;
   return true;
+}
+
+export const maximumSeenByPerConversation = 30;
+
+/**
+ * Người dùng CRM (đã đăng nhập) vừa mở / đánh dấu đã đọc hội thoại: seenBy[username] = { name, at }.
+ * Giữ tối đa 30 người, bỏ người xem lâu nhất. Trả hội thoại đã đổi, null khi không có hội thoại
+ * hay thiếu tên đăng nhập (CRM chưa bật đăng nhập thì không ghi).
+ */
+export function markConversationSeen(store, id, { username, name = '', at = Date.now() } = {}) {
+  const key = String(username || '').trim().toLowerCase().slice(0, 32);
+  if (!key) return null;
+  const conversation = findConversation(store, id);
+  if (!conversation) return null;
+  const seenBy = conversation.seenBy && typeof conversation.seenBy === 'object' && !Array.isArray(conversation.seenBy)
+    ? Object.assign(Object.create(null), conversation.seenBy)
+    : Object.create(null);
+  seenBy[key] = { name: String(name || key).replace(/\s+/g, ' ').trim().slice(0, 80), at: Number(at) || Date.now() };
+  const entries = Object.entries(seenBy).sort((first, second) => (Number(second[1]?.at) || 0) - (Number(first[1]?.at) || 0)).slice(0, maximumSeenByPerConversation);
+  conversation.seenBy = Object.fromEntries(entries);
+  return conversation;
 }
 
 export function setConversationFlags(store, id, changes) {

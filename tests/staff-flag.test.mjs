@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Kho hội thoại tạm cho test: không đụng dữ liệu thật.
-process.env.META_CONVERSATIONS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'crm-staff-')), 'store.json');
+process.env.META_CONVERSATIONS_PATH = path.join(tempDir('crm-staff-'), 'store.json');
 
 test('tin nhân viên gửi từ CRM mang cờ staff; bản dội về (không biết ai gửi) không xóa cờ', async () => {
   const { saveMessage } = await import('../app/messaging-store.mjs');

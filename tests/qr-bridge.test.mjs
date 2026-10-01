@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-process.env.QR_SCANS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'qr-')), 'qr-scans.json');
+process.env.QR_SCANS_PATH = path.join(tempDir('qr-'), 'qr-scans.json');
 
 const { classifyUserAgent, isLinkPreviewBot, renderBridgePage, shouldRedirectDirectly } = await import('../app/qr-bridge.mjs');
 const { recordQrScan, recordQrOpen, listQrScans, isValidQrCode, isKnownQrCode, registerQrCode, deleteQrCode, countQrReferrals, countQrReferralsByDay, qrDayKey } = await import('../app/qr-scans.mjs');
@@ -242,7 +242,7 @@ test('bộ đếm theo ngày: quét, trang đệm, bấm mở, bấm Zalo ghi v�
     '1970-01-02': { scans: 0, pages: 0, opens: 0, zaloOpens: 0, referrals: 1 }
   });
   // Kho ghi từ bản trước: mục không có `days`, chỉ có lượt gần đây → dựng lại một lần khi nạp.
-  const legacyPath = path.join(mkdtempSync(path.join(tmpdir(), 'qr-legacy-')), 'qr-scans.json');
+  const legacyPath = path.join(tempDir('qr-legacy-'), 'qr-scans.json');
   const day = 86_400_000;
   writeFileSync(legacyPath, JSON.stringify({
     codes: { 'lo-cu': { code: 'lo-cu', scans: 3, opens: 1, firstAt: 20 * day, lastAt: 21 * day, platforms: { ios: 3 }, browsers: { safari: 3 }, modes: { page: 2, redirect: 1 } } },

@@ -458,8 +458,8 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 /* Thanh tìm kiếm/lọc/Import/Export của Nhập dữ liệu dính theo khi cuộn, nằm ngay
    dưới thanh trên cùng (57.6px); hàng tiêu đề bảng dính ngay dưới thanh này
    (chiều cao đo bằng JS vào --import-toolbar-height vì có thể xuống dòng). */
-.order-import-controls { position: sticky; top: 57.6px; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 10.8px; margin: -21.6px -21.6px 0; padding: 12px 21.6px; background: #fff; }
-.order-stage[data-order-panel="import"] .data-preview th { top: calc(57.6px + var(--import-toolbar-height, 61.8px)); }
+.order-import-controls { position: sticky; top: calc(57.6px + var(--subnav-offset, 0px)); z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 10.8px; margin: -21.6px -21.6px 0; padding: 12px 21.6px; background: #fff; }
+.order-stage[data-order-panel="import"] .data-preview { max-height: calc(100vh - 57.6px - var(--subnav-offset, 0px) - var(--import-toolbar-height, 61.8px) - 28px); }
 .order-import-controls .order-search-control { flex: 1 1 252px; max-width: 468px; }
 .order-import-summary { display: flex; gap: 18px; margin-left: auto; padding: 0 4px; color: #475467; font-size: 13px; white-space: nowrap; }
 .order-import-summary strong { color: #111; font-weight: 700; }
@@ -554,7 +554,7 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .data-preview tbody tr.order-row-duplicate td { background: #fde8ef; }
 .data-preview tbody tr.order-row-duplicate-phone td { background: #fff3bf; }
 
-main:has(#orders-view:not(.hidden)) { padding: 57.6px 0 0; }
+main:has(#orders-view:not(.hidden)) { padding: calc(57.6px + var(--subnav-offset, 0px)) 0 0; }
 
 main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px, 14vh, 150px) 24px 48px; background: #fff; }
 #shipping-view { font: 400 14px/22px Roboto, sans-serif; }
@@ -697,10 +697,13 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .export-button:hover:not(:disabled) { background: #333; }
 .export-button:disabled { color: #999; background: #e6e6e6; cursor: not-allowed; }
 
-/* Giữ overflow: clip (không phải auto): khung không được thành vùng cuộn, nếu
-   không tiêu đề dính sẽ bám vào khung và các dòng lòi lên trên tiêu đề. */
-.data-preview { position: relative; flex: none; height: auto; overflow: clip; border: 0.9px solid #111; border-radius: 9px; }
-.data-preview::before { position: absolute; top: 0; right: 0; left: 0; z-index: 7; height: 1.8px; background: linear-gradient(90deg, #25f4ee, #fe2c55); pointer-events: none; content: ''; }
+/* Bảng rộng hơn khung (vd 1.506px trong 1.175px) phải cuộn ngang được, nên khung
+   là vùng cuộn riêng (overflow: auto) cao tối đa phần còn lại của màn hình; tiêu
+   đề dính ở top: 0 của chính khung (không còn bám theo trang) nên dòng không lòi
+   lên trên tiêu đề. Vạch màu trên cùng cũng dính để không trôi theo khi cuộn. */
+.data-preview { position: relative; flex: none; height: auto; max-height: calc(100vh - 57.6px - var(--subnav-offset, 0px) - 96px); overflow: auto; overscroll-behavior-x: contain; border: 0.9px solid #111; border-radius: 9px; }
+.data-preview::before { position: sticky; top: 0; left: 0; z-index: 7; display: block; height: 1.8px; margin-bottom: -1.8px; background: linear-gradient(90deg, #25f4ee, #fe2c55); pointer-events: none; content: ''; }
+.data-preview table { min-width: 100%; }
 .data-preview > p { margin: 0; padding: 27px; color: #687080; text-align: center; }
 .data-preview.is-empty, .export-preview.is-empty { border: 0; overflow: visible; margin-top: 0; }
 .data-preview.is-empty::before { display: none; }
@@ -708,7 +711,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .order-stage:has(.is-empty) .is-empty { display: flex; flex: 1 1 auto; }
 .order-empty { display: grid; flex: 1 1 auto; justify-items: center; align-content: center; gap: 14px; color: #8c8c8c; font-size: 14px; }
 .order-empty img { width: 140px; height: 140px; opacity: .92; }
-.data-preview table { display: grid; grid-template-columns: var(--preview-template); column-gap: 16px; width: 100%; background: linear-gradient(to bottom, #fff 0 46.8px, #fe2c55 46.8px 48.6px, transparent 48.6px); border-collapse: collapse; }
+.data-preview table { display: grid; grid-template-columns: var(--preview-template); column-gap: 16px; width: min-content; background: linear-gradient(to bottom, #fff 0 46.8px, #fe2c55 46.8px 48.6px, transparent 48.6px); border-collapse: collapse; }
 .data-preview thead,
 .data-preview tbody,
 .data-preview tr { display: contents; }
@@ -741,7 +744,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .network-logo--viettel img { position: absolute; top: -10.8px; left: -3.6px; display: block; width: 46.8px; height: 47.7px; max-width: none; }
 .network-logo--vinaphone { position: relative; width: 68.4px; height: 13.5px; overflow: hidden; }
 .network-logo--vinaphone img { position: absolute; top: -26.1px; left: 0; display: block; width: 68.4px; height: 68.4px; max-width: none; }
-.data-preview th { position: sticky; top: 57.6px; z-index: 5; display: flex; align-items: center; box-sizing: border-box; height: 48.6px; padding-top: 0; padding-bottom: 2.7px; color: #111; background: #fff; border-bottom: 0; box-shadow: 8px 0 0 #fff, -8px 0 0 #fff; font-size: 14.4px; font-weight: 750; letter-spacing: .015em; }
+.data-preview th { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; box-sizing: border-box; height: 48.6px; padding-top: 0; padding-bottom: 2.7px; color: #111; background: #fff; border-bottom: 0; box-shadow: 8px 0 0 #fff, -8px 0 0 #fff; font-size: 14.4px; font-weight: 750; letter-spacing: .015em; }
 .data-preview th::after { position: absolute; right: -8px; bottom: 0; left: -8px; height: 1.8px; background: #fe2c55; content: ''; }
 .data-preview th:first-child::before,
 .data-preview th:last-child::before { position: absolute; top: 0; bottom: 0; z-index: 1; width: 1.8px; background: linear-gradient(to bottom, #25f4ee, #fe2c55); content: ''; }
@@ -768,11 +771,14 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .export-preview .export-group-end::after { position: absolute; top: 0; right: -0.9px; bottom: 0; width: 1.8px; background: #fe2c55; content: ''; }
 .export-preview th.export-group-end::after { background: linear-gradient(to bottom, #25f4ee, #fe2c55); }
 
+/* Toast ở giữa, ngay dưới thanh đầu trang: góc dưới phải hay che nút Lưu/Gửi. */
 .app-toast {
   position: fixed;
-  right: 21.6px;
-  bottom: 21.6px;
+  top: calc(66px + var(--subnav-offset, 0px));
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1000;
+  pointer-events: none;
   max-width: min(378px, calc(100vw - 43.2px));
   padding: 10.8px 14.4px;
   border: 0.9px solid #111;
@@ -788,6 +794,10 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
   color: #111;
   background: #fff;
 }
+.app-toast--info { color: #10243e; background: #eef4ff; border-color: #b7cdf3; }
+.app-toast--warning { color: #6a3d00; background: #fff6e0; border-color: #f0c36d; }
+.app-toast--error { color: #fff; background: #b42318; border-color: #8f1c13; }
+.notification-item--critical { border-left: 3px solid #df4d3f; }
 
 .settings-page { width: min(1180px, 100%); margin: 0 auto; }
 .settings-section-content { min-width: 0; }
@@ -2062,28 +2072,94 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 /* Laptop 1366–1780px: ba cột co lại thay vì cắt mất panel khách bên phải (kiểm thử 25/09).
    Lưới gốc cần 427.5 + 517.5 + 472.5 + 2×11.25 gap + 2×18 đệm = 1.476px, cộng sidebar
    219.6 + đệm main 75.6 → viewport ≥ 1.772px; mốc 1700 để hở khoảng 1701–1771px. */
+/* Cột giữa (chat) ở 1440px chỉ còn 448px với lưới 330/1fr/390: thu hai cột bên
+   để khung chat rộng ~510px (kiểm thử giao diện 01/10). */
 @media (max-width: 1780px) {
-  .messenger-shell { grid-template-columns: 330px minmax(0, 1fr) 390px; gap: 8px; }
+  .messenger-shell { grid-template-columns: 300px minmax(0, 1fr) 360px; gap: 8px; }
+  .hide-contact-panel .messenger-shell { grid-template-columns: 330px minmax(0, 1fr); }
   .conversation-panel, .chat-panel, .contact-panel { min-width: 0; }
 }
+
+/* ≤1313px: panel Thông tin/Tạo đơn thành ngăn kéo phủ bên phải, nút ⓘ mở. */
+.contact-drawer-close,
+.contact-drawer-backdrop,
+.chat-back-button { display: none; }
 @media (max-width: 1313px) {
-  .messenger-shell { grid-template-columns: 315px minmax(427.5px, 1fr); }
-  .contact-panel { display: none; }
+  .messenger-shell,
+  .hide-contact-panel .messenger-shell { grid-template-columns: 300px minmax(0, 1fr); }
+  .contact-panel,
+  .hide-contact-panel .contact-panel { display: none; }
+  body.contact-drawer-open .contact-panel { position: fixed; z-index: 45; top: 57.6px; right: 0; bottom: 0; display: block; width: min(400px, 100vw); border-radius: 0; box-shadow: -14px 0 36px rgba(16, 24, 40, .18); animation: contact-drawer-in .18s var(--ease-out, ease-out); }
+  body.contact-drawer-open .contact-drawer-backdrop { position: fixed; z-index: 44; inset: 57.6px 0 0; display: block; background: rgba(16, 24, 40, .28); }
+  body.contact-drawer-open .contact-drawer-close { position: absolute; z-index: 3; top: 8px; right: 10px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; color: #344054; background: #f2f4f7; border: 0; border-radius: 50%; font-size: 22px; line-height: 1; cursor: pointer; }
+  body.contact-drawer-open .contact-drawer-close:hover { color: #fff; background: #344054; }
+  body.contact-drawer-open .customer-panel-tabs { padding-right: 52px; }
+}
+@keyframes contact-drawer-in { from { transform: translateX(24px); } to { transform: none; } }
+
+/* Menu con Đơn hàng/Cài đặt khi thanh bên thu về icon (≤900px hoặc bấm thu gọn):
+   thành thanh tab cuộn ngang ngay dưới thanh trên cùng thay vì biến mất. */
+@media (min-width: 901px) {
+  body.sidebar-collapsed:has(.nav[data-view="orders"].active),
+  body.sidebar-collapsed:has(.nav[data-view="settings"].active) { --subnav-offset: 44px; }
+  body.sidebar-collapsed .nav[data-view="orders"].active + .order-subnav,
+  body.sidebar-collapsed .nav[data-view="settings"].active + .settings-subnav { position: fixed; z-index: 9; top: 57.6px; right: 0; left: 68.4px; display: flex; align-items: center; gap: 4px; height: 44px; margin: 0; padding: 0 16px; overflow-x: auto; background: #fff; border-left: 0; border-bottom: 1px solid #e4e7ec; scrollbar-width: none; }
+  body.sidebar-collapsed .order-subnav-item,
+  body.sidebar-collapsed .settings-subnav-item { flex: 0 0 auto; padding: 7px 12px; font-size: 12.5px; white-space: nowrap; }
+  body.sidebar-collapsed main { padding-top: calc(82.8px + var(--subnav-offset, 0px)); }
 }
 
 @media (max-width: 900px) {
   .assistant-link { display: none; }
-  .topbar-user { width: 32.4px; padding-right: 2.7px; overflow: hidden; font-size: 0; }
+  .topbar-user { flex: 0 0 auto; width: auto; padding: 2.7px; overflow: hidden; font-size: 0; }
+  .topbar-user b, .topbar-user-caret { display: none; }
+  .topbar-user span { flex: 0 0 25.2px; font-size: 11.7px; }
   .search-trigger { flex: 1; }
   .sidebar { width: 68.4px; }
   .sidebar-toggle { display: none; }
   .nav { justify-content: center; font-size: 0; }
   main { width: calc(100% - 68.4px); margin-left: 68.4px; padding-right: 21.6px; padding-left: 21.6px; }
+  body:has(.nav[data-view="orders"].active),
+  body:has(.nav[data-view="settings"].active) { --subnav-offset: 44px; }
+  .nav[data-view="orders"].active + .order-subnav,
+  .nav[data-view="settings"].active + .settings-subnav { position: fixed; z-index: 9; top: 57.6px; right: 0; left: 68.4px; display: flex; align-items: center; gap: 4px; height: 44px; margin: 0; padding: 0 12px; overflow-x: auto; background: #fff; border-left: 0; border-bottom: 1px solid #e4e7ec; scrollbar-width: none; }
+  .order-subnav-item,
+  .settings-subnav-item { flex: 0 0 auto; padding: 7px 12px; font-size: 12.5px; white-space: nowrap; }
+  main { padding-top: calc(82.8px + var(--subnav-offset, 0px)); }
 }
 
+/* ≤875px: kiểu master-detail — hiện danh sách; chọn hội thoại thì hiện khung
+   chat với nút ← quay lại danh sách. */
 @media (max-width: 875px) {
-  .messenger-shell { display: block; min-height: calc(100vh - 57.6px); }
-  .conversation-panel { display: none; }
+  .messenger-shell,
+  .hide-contact-panel .messenger-shell { display: block; height: calc(100dvh - 57.6px); min-height: 0; padding: 10px; }
+  .conversation-panel { display: flex; height: 100%; }
+  .chat-panel { display: none; height: 100%; }
+  .messenger-shell.is-detail .conversation-panel { display: none; }
+  .messenger-shell.is-detail .chat-panel { display: flex; }
+  .chat-back-button { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; margin-right: -4px; padding: 0; color: #1c1e21; background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
+  .chat-back-button:hover { background: #f0f2f5; }
+  .chat-back-button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+}
+
+/* Điện thoại: tên shop ẩn, ô tìm kiếm thu thành icon, thanh bên hẹp hơn. */
+.search-trigger-icon { display: none; }
+@media (max-width: 600px) {
+  .topbar { gap: 8px; padding-right: 8px; }
+  .topbar-brand strong { display: none; }
+  .topbar-brand img { width: 52px; }
+  .search-trigger { flex: 0 0 36px; justify-content: center; width: 36px; min-width: 36px; padding: 0; }
+  .search-trigger-label, .search-trigger kbd { display: none; }
+  .search-trigger-icon { display: block; width: 18px; height: 18px; fill: none; stroke: #d7d7d9; stroke-width: 2; stroke-linecap: round; }
+  .topbar-actions { gap: 10px; min-width: 0; }
+  .notification-panel { position: fixed; top: 57.6px; right: 8px; left: 8px; width: auto; }
+  .sidebar { width: 56px; padding: 12px 4px; }
+  .nav { padding: 10px 4px; }
+  main { width: calc(100% - 56px); margin-left: 56px; padding-right: 12px; padding-left: 12px; }
+  .nav[data-view="orders"].active + .order-subnav,
+  .nav[data-view="settings"].active + .settings-subnav { left: 56px; padding: 0 8px; }
+  main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
+  .messenger-shell, .hide-contact-panel .messenger-shell { padding: 6px; }
 }
 
 /* ---- Thẻ hội thoại (Cài đặt → Tin nhắn → Thẻ hội thoại) ---- */
@@ -2623,6 +2699,7 @@ tr:hover .customer-tel button { opacity: .75; }
 .campaigns-notice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 14px 20px 0; padding: 10px 14px; color: #7a4a00; background: #fffaeb; border: 1px solid #fde7b0; border-radius: 10px; font-size: 16px; }
 .campaigns-notice strong { font-weight: 600; }
 .campaigns-notice span { color: #93620a; font-size: 14px; overflow-wrap: anywhere; }
+.report-note { margin: 8px 0 12px; color: #6b7280; font-size: 14px; }
 
 .campaigns-summary { overflow-x: auto; }
 .campaigns-summary th { font-size: 13px; }
@@ -2823,4 +2900,139 @@ tr:hover .customer-tel button { opacity: .75; }
   .reports-tabs { flex-wrap: nowrap; overflow-x: auto; }
   .reports-toolbar { width: 100%; }
   .reports-body { padding: 12px 16px 16px; }
+}
+
+/* ======================================================================
+   Dấu vết nhân viên (web/audit.js đi kèm): tên người gửi dưới bong bóng,
+   dòng "… đã xem" + nút đồng hồ ở đầu khung chat, người tạo/lịch sử sửa trên thẻ đơn.
+   ====================================================================== */
+.message-sender { max-width: 100%; margin: 3px 8px 0; overflow: hidden; color: #8a8d91; font-size: 11.5px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.message-row.message-sender-repeat .message-sender { display: none; }
+.chat-head-seen { overflow: hidden; color: #8a8d91; font-size: 12px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.chat-head-seen.hidden { display: none; }
+.chat-head-history { display: grid; place-items: center; flex: 0 0 22.5px; width: 22.5px; height: 22.5px; padding: 0; color: #65676b; background: transparent; border: 0; border-radius: 5.625px; cursor: pointer; }
+.chat-head-history:hover { background: #f0f2f5; }
+.chat-head-history svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.customer-order-authorship { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; color: #8c8c8c; border-top: 1px dashed #f0f0f0; font-size: 12.5px; }
+.customer-order-authorship > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customer-order-history-toggle { flex: 0 0 auto; padding: 2px 8px; color: #1677ff; background: #eff4ff; border: 1px solid #c7dbff; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer; }
+.customer-order-history { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+.customer-order-history.hidden { display: none; }
+.customer-order-history li { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; padding: 6px 8px; color: #595959; background: #f7f8fa; border-radius: 6px; font-size: 12.5px; line-height: 1.4; }
+.customer-order-history b { color: #262626; font-weight: 600; }
+.customer-order-history time { justify-self: end; color: #8c8c8c; font-size: 11px; }
+.customer-order-history span { grid-column: 1 / -1; overflow-wrap: anywhere; }
+
+/* ======================================================================
+   Kiểm thử giao diện 01/10: đầu khung chat và ô soạn tin theo bề rộng khung
+   chat (container query), không theo bề rộng màn hình.
+   ====================================================================== */
+.chat-panel { container: chatpanel / inline-size; }
+.chat-head-copy > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-head-meta { min-width: 0; }
+.chat-actions { flex: 0 0 auto; align-items: center; }
+.composer-preview { position: relative; }
+.composer-preview-remove { top: 50%; right: 9px; transform: translateY(-50%); }
+
+/* Khung chat hẹp (≤660px): tên + nút ở hàng trên (tên cắt …), các tab
+   Chat/File/Ghim/Tài liệu xuống hàng riêng — không còn chồng lên nhau. */
+@container chatpanel (max-width: 760px) {
+  .chat-head { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "back avatar name actions" "back avatar seen actions" "meta meta meta meta"; align-items: center; column-gap: 0; row-gap: 0; padding: 8px 12px 6px; }
+  .chat-head > .chat-back-button { grid-area: back; }
+  .chat-head > .avatar { grid-area: avatar; margin-right: 10px; }
+  .chat-head-copy { display: contents; }
+  .chat-head-copy > strong { grid-area: name; align-self: end; }
+  .chat-head-seen { grid-area: seen; align-self: start; }
+  .chat-head-meta { grid-area: meta; margin-top: 6px; overflow-x: auto; scrollbar-width: none; }
+  .chat-head-meta::-webkit-scrollbar { display: none; }
+  .chat-actions { grid-area: actions; gap: 0; margin-left: 8px; }
+  .chat-actions .icon-button, .chatbot-toggle-button, .mark-unread-button { width: 36px; height: 36px; padding: 5px; }
+  .mark-unread-button img, .chatbot-toggle-button img { width: 22px; height: 22px; }
+  .chat-gender-button { height: 32px; padding: 0 6px; }
+}
+@container chatpanel (max-width: 420px) {
+  .chat-head .avatar-large { width: 34px; height: 34px; }
+  .chat-gender-button span { display: none; }
+  .chat-head strong { font-size: 15.5px; }
+}
+
+/* Ô soạn tin: ở khung chat hẹp, các nút công cụ ở hàng trên, ô nhập + nút Gửi
+   chiếm trọn hàng dưới (trước đây ô nhập chỉ còn ~133px ở 1440px). */
+@container chatpanel (max-width: 760px) {
+  .composer { flex-wrap: wrap; row-gap: 4px; padding: 6px 10px 10px; }
+  .composer > .composer-input-wrap { order: 10; flex: 1 1 calc(100% - 52px); }
+  .composer > .send-button { order: 11; }
+  .composer-icon { flex-basis: 32px; width: 32px; height: 32px; padding: 5px; }
+  .composer-icon svg, .composer-icon img { width: 21px; height: 21px; }
+}
+
+/* Thanh thẻ hội thoại gọn: một hàng cuộn ngang thay vì 3 hàng nút. */
+.conversation-label-bar { flex-wrap: nowrap; gap: 5px; min-height: 0; padding: 8px 12px 2px; overflow-x: auto; scrollbar-width: thin; }
+.conversation-label-bar button { flex: 0 0 auto; height: 27px; padding: 0 9px 0 7px; font-size: 12px; }
+.conversation-label-bar button .label-icon { width: 14px; height: 14px; }
+.conversation-label-bar-title { flex: 0 0 auto; }
+
+/* Form Tạo đơn: ô Đơn giá đủ rộng cho 6 chữ số; giá theo combo có chú thích. */
+.customer-product-table-head,
+.customer-product-row { grid-template-columns: minmax(0, 1fr) 46px 98px 80px; column-gap: 6px; }
+.customer-product-row input { width: 100%; min-width: 0; padding: 0 6px; }
+.customer-product-row .cell-price { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.customer-product-row .cell-price-note { color: #d46b08; font-size: 11px; line-height: 1.2; text-align: right; white-space: nowrap; }
+.customer-product-row .cell-price-note[hidden] { display: none; }
+.shipping-search-row input[aria-invalid="true"]::placeholder { color: #b42318; }
+.shipping-search-card:has(input[aria-invalid="true"]) { box-shadow: 0 0 0 2px rgba(180, 35, 24, .35); }
+/* Thanh bên 1280px: "QUẢN LÝ CHIẾN DỊCH" thiếu ~7px, bớt đệm phải/khoảng cách icon. */
+@media (min-width: 901px) { body:not(.sidebar-collapsed) .nav { gap: 8px; padding-right: 6px; padding-left: 12px; } }
+/* Tab Tài liệu: tiêu đề cột không xuống dòng, icon kính lúp không đè chữ gợi ý. */
+.conversation-docs-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-docs-search .search-icon { position: static; inset: auto; flex: 0 0 auto; margin: 0; transform: none; }
+.conversation-docs-search input { padding-left: 2px; }
+@container chatpanel (max-width: 760px) {
+  .conversation-docs { padding-right: 10px; }
+  .conversation-docs-row { grid-template-columns: minmax(0, 1fr) 108px 92px 34px; gap: 8px; padding: 10px 8px; }
+}
+@container chatpanel (max-width: 440px) {
+  .conversation-docs-row { grid-template-columns: minmax(0, 1fr) 84px 34px; }
+  .conversation-docs-row > :nth-child(2) { display: none; }
+}
+/* Khách hàng: hàng bộ lọc thụt lề như bảng tóm tắt/tab (20px), không chạm mép
+   thẻ; ô chọn đủ rộng để nhãn "Tất cả nguồn khách" không bị cắt. */
+.customers-toolbar { padding: 0 20px; }
+.customers-toolbar > .order-filter-control { flex: 1 1 172px; min-width: 172px; }
+.customers-toolbar > .customers-more-toggle,
+.customers-toolbar > .customers-clear-filters { flex: 0 0 auto; }
+@media (max-width: 600px) {
+  .customers-toolbar { padding: 0 12px; }
+  .customers-toolbar > .order-filter-control { flex-basis: 100%; max-width: none; }
+}
+/* Xử lý dữ liệu: bảng "Lịch sử" (kho lưu trữ) mở ngay dưới nút Lịch sử, canh phải,
+   phủ lên bảng thay vì chen vào đầu trang bên trái. */
+.order-stage[data-order-panel="process"] { position: relative; }
+#order-processed-history-button { anchor-name: --order-history-button; }
+.order-stage[data-order-panel="process"] > .order-history-panel { position: absolute; z-index: 12; top: 66px; right: 21.6px; width: min(680px, calc(100% - 43.2px)); margin: 0; box-shadow: 0 14px 34px rgba(16, 24, 40, .16); }
+@supports (anchor-name: --a) {
+  .order-stage[data-order-panel="process"] > .order-history-panel { position-anchor: --order-history-button; top: calc(anchor(bottom) + 6px); right: calc(anchor(right)); }
+}
+/* Nhân viên thường (role staff): Cài đặt chỉ xem — nút ghi bị ẩn, có dòng nhắc. */
+.is-staff-readonly .staff-hidden { display: none !important; }
+.staff-readonly-note { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 12px; color: #6a3d00; background: #fff6e0; border: 1px solid #f0d08a; border-radius: 9px; font-size: 13px; font-weight: 600; }
+.staff-readonly-note::before { content: '🔒'; font-size: 13px; }
+.is-staff-readonly :is(input, select, textarea):disabled { cursor: not-allowed; }
+/* Khung chat rất hẹp (điện thoại ~300px): nút đầu khung xuống hàng riêng để tên
+   khách không bị cắt còn một chữ; bong bóng rộng hơn, nút thao tác tin nổi lên
+   trên bong bóng thay vì chiếm chỗ bên cạnh. */
+@container chatpanel (max-width: 460px) {
+  .chat-head { grid-template-columns: auto auto minmax(0, 1fr); grid-template-areas: "back avatar name" "back avatar seen" "actions actions actions" "meta meta meta"; }
+  .chat-actions { justify-content: flex-start; gap: 2px; margin: 4px 0 0 -4px; }
+  .chat-body { padding: 14px 6px 14px 10px; }
+  .message-row { max-width: 90%; }
+  .message-quick-actions { position: absolute; z-index: 5; bottom: calc(100% - 4px); right: 0; padding: 2px; background: #fff; border-radius: 999px; box-shadow: 0 2px 8px rgba(16, 24, 40, .14); }
+  .incoming .message-quick-actions { right: auto; left: 36px; }
+}
+/* Cài đặt → Kênh trên điện thoại: nút của từng Page xuống hàng, form POS xếp dọc. */
+@media (max-width: 600px) {
+  .channel-item { flex-wrap: wrap; }
+  .channel-item-actions { flex: 1 1 100%; flex-wrap: wrap; padding-left: 42px; }
+  .pos-connect-form { flex-wrap: wrap; }
+  .pos-connect-form input { flex: 1 1 100%; width: auto; max-width: none; min-width: 0; }
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createAuth, hashPassword, isPublicPath, parseUsers, verifyPassword, SESSION_COOKIE } from '../app/auth.mjs';
+import { LOGIN_LIMITS, accountOf, createAttemptLimiter, createAuth, hashPassword, isPublicPath, parseUsers, verifyPassword, SESSION_COOKIE } from '../app/auth.mjs';
 
 const requestWith = cookie => ({ headers: cookie ? { cookie } : {} });
 const tokenFrom = setCookie => setCookie.split(';')[0];
@@ -78,9 +78,64 @@ test('server: chặn đăng nhập chạy trước mọi route, sau bước ch�
   assert.ok(gate < server.indexOf('const qrBrandFiles'));
 });
 
-test('login.js: ?next= chỉ nhận đường dẫn nội bộ', async () => {
+test('login.js: ?next= chỉ nhận đường dẫn nội bộ (kể cả /%09/…, //…, /\\…)', async () => {
   const source = await readFile(new URL('../web/login.js', import.meta.url), 'utf8');
-  const pattern = new RegExp(source.match(/return (\/\^.+?\/)\.test\(next\)/)[1].slice(1, -1));
-  assert.equal(pattern.test('/?view=orders'), true);
-  for (const bad of ['//evil.example', '/\\evil.example', 'https://evil.example']) assert.equal(pattern.test(bad), false, bad);
+  const body = source.slice(source.indexOf('function safeNext('), source.indexOf('function nextPath('));
+  const safeNext = new Function(`${body}; return safeNext;`)();
+  for (const good of ['/', '/?view=orders', '/#settings', '/orders/123?tab=a%2Fb']) assert.equal(safeNext(good), good, good);
+  for (const bad of ['//evil.example', '/\\evil.example', '/\tevil', '/\t/evil.example', '/\n/evil.example', '/%09/evil.example', '/%2F/evil.example', '/%5Cevil.example',
+    'https://evil.example', 'javascript:alert(1)', ' /x', '', null, '/ /evil'])
+    assert.equal(safeNext(bad), '/', JSON.stringify(bad));
+});
+
+test('auth: yêu cầu song song không vượt được khoá — đếm (giữ chỗ) TRƯỚC khi chờ scrypt', async () => {
+  const users = new Map([['huy', await hashPassword('mat-khau-dai')]]);
+  const auth = createAuth({ users, secret: 's' });
+  const results = await Promise.all(Array.from({ length: 40 }, () => auth.login({ username: 'huy', password: 'doan-mo', clientId: '9.9.9.9' })));
+  assert.equal(results.filter(item => item.status === 401).length, LOGIN_LIMITS.perIp, 'chỉ đúng 10 lần được chấm mật khẩu');
+  assert.equal(results.filter(item => item.status === 429).length, 40 - LOGIN_LIMITS.perIp);
+  assert.equal((await auth.login({ username: 'huy', password: 'mat-khau-dai', clientId: '9.9.9.9' })).status, 429, 'đúng mật khẩu cũng chờ hết khoá');
+});
+
+test('auth: khoá theo tên đăng nhập — đổi IP liên tục cũng chỉ được 20 lần / 15 phút', async () => {
+  let clock = 5_000_000;
+  const users = new Map([['huy', await hashPassword('mat-khau-dai')]]);
+  const auth = createAuth({ users, secret: 's', now: () => clock });
+  const attempts = await Promise.all(Array.from({ length: 30 }, (_, index) => auth.login({ username: 'HUY', password: 'sai', clientId: `10.0.0.${index}` })));
+  assert.equal(attempts.filter(item => item.status === 401).length, LOGIN_LIMITS.perUser);
+  assert.equal((await auth.login({ username: 'huy', password: 'mat-khau-dai', clientId: '10.9.9.9' })).status, 429);
+  assert.equal((await auth.login({ username: 'lan', password: 'x', clientId: '10.9.9.9' })).status, 401, 'tên khác không bị vạ lây');
+  clock += LOGIN_LIMITS.windowMs;
+  assert.equal((await auth.login({ username: 'huy', password: 'mat-khau-dai', clientId: '10.9.9.9' })).ok, true, 'hết 15 phút thì mở');
+});
+
+test('auth: đăng nhập đúng chỉ trả lại lượt vừa giữ, không xoá các lần sai trước', async () => {
+  const limiter = createAttemptLimiter({ max: 3, windowMs: 1000, now: () => 0 });
+  assert.equal(limiter.reserve('a'), true);
+  assert.equal(limiter.reserve('a'), true);
+  limiter.release('a');
+  assert.equal(limiter.count('a'), 1);
+  assert.equal(limiter.reserve('a') && limiter.reserve('a'), true);
+  assert.equal(limiter.reserve('a'), false);
+  assert.equal(limiter.blocked('a'), true);
+});
+
+test('auth: phiên mang sessionVersion — tăng phiên bản (đổi mật khẩu / cho nghỉ) là phiên cũ vô hiệu', async () => {
+  const hash = await hashPassword('mat-khau-dai');
+  const users = new Map([['hang', { hash, version: 2 }], ['huy', hash]]);
+  const auth = createAuth({ users, secret: 's' });
+  const cookie = tokenFrom((await auth.login({ username: 'hang', password: 'mat-khau-dai' })).cookie);
+  assert.deepEqual(auth.session(requestWith(cookie)), { username: 'hang' });
+  users.set('hang', { hash, version: 3 });
+  assert.equal(auth.session(requestWith(cookie)), null, 'cùng mật khẩu nhưng phiên bản mới → phiên cũ hết hiệu lực');
+  users.delete('hang');
+  users.set('hang', { hash, version: 2 });
+  assert.ok(auth.session(requestWith(cookie)), 'phiên bản khớp lại thì còn (dùng cho hiểu cơ chế)');
+  users.delete('hang');
+  assert.equal(auth.session(requestWith(cookie)), null, 'không còn trong danh sách (nghỉ) → hết phiên');
+  // Tài khoản .env (chuỗi băm trơn) và cookie cũ không có "v" vẫn dùng được sau khi nâng cấp.
+  const owner = tokenFrom((await auth.login({ username: 'huy', password: 'mat-khau-dai' })).cookie);
+  assert.deepEqual(auth.session(requestWith(owner)), { username: 'huy' });
+  assert.deepEqual(accountOf('scrypt$a$b'), { hash: 'scrypt$a$b', version: 0 });
+  assert.deepEqual(accountOf({ hash: 'h', version: '4' }), { hash: 'h', version: 4 });
 });

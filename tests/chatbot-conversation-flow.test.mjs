@@ -7,7 +7,7 @@ import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-temp
 import { reloadCatalog } from '../app/processing/catalog.mjs';
 
 const templates = Object.fromEntries(Object.entries(defaultMessageTemplates()).map(([id, text]) => [id, text.trim()]));
-const settings = { enabled: true, responseMode: 'automatic', provider: 'vertex', directApiKey: 'secret', handoffKeywords: '', complaintKeywords: '', messageTemplates: templates };
+const settings = { enabled: true, responseMode: 'automatic', provider: 'vertex', directApiKey: 'secret', handoffKeywords: '', complaintKeywords: '', fragmentWaitMs: 0, messageTemplates: templates };
 const conversation = { id: 'page:user', pageId: 'page', psid: 'user', name: 'Khách', botEnabled: true };
 const incoming = (id, text, createdAt) => ({ id, mid: id, direction: 'incoming', type: 'text', text, createdAt });
 const change = message => ({ type: 'message', conversation, message });
@@ -126,7 +126,7 @@ test('lời xin địa chỉ là một câu liền, không còn mảnh câu đ�
 test('DISCOUNT_POLICY: giá lẻ không bớt, ưu đãi là combo đọc từ danh mục', () => {
   const reply = renderChatbotReply({ template_id: 'DISCOUNT_POLICY', Product_N1: 'Granola Túi Xanh 450g' }, templates, {});
   assert.equal(reply.templateId, 'DISCOUNT_POLICY');
-  assert.match(reply.messages[0], /giá lẻ bên em đang là giá tốt nhất/);
+  assert.match(reply.messages[0], /bên em đang có ưu đãi combo/, 'vòng 12: bỏ câu "giá lẻ… tốt nhất rồi"');
   assert.match(reply.messages[0], /2 Túi Granola Túi Xanh 450g: 298\.000đ/);
   assert.match(reply.messages[0], /giá gốc/);
   const all = renderChatbotReply({ template_id: 'DISCOUNT_POLICY' }, templates, {});

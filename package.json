@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node app/server.mjs",
     "test": "node --test --import ./tests/helpers/quiet-console.mjs tests/*.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=app/**/*.mjs --test-coverage-include=tools-intent/*.mjs --import ./tests/helpers/quiet-console.mjs tests/*.test.mjs",
     "test:integration": "node tests/integration/meta-webhook.integration.mjs"
   },
   "dependencies": {

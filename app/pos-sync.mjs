@@ -8,8 +8,9 @@
 // rồi đi qua recordLandingOrder: trùng webhook thì gộp, đơn dở thì tự điền,
 // số bom hàng thì cảnh báo — một luồng duy nhất.
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
-import { readLandingStore, recordLandingOrder } from './landing-orders.mjs';
+import { readLandingStore, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { isCrmPushedPosOrder } from './pos-orders.mjs';
+import { applyPosStatusesToConversations, applyPosStatusesToOrders, indexPosStatuses, matchPosStatus, posStatusUpdate } from './pos-status.mjs';
 
 export const POS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const LANDING_SOURCES = /webcake|landing/i;
@@ -101,8 +102,8 @@ export function isLandingPosOrder(order) {
  * mọi đơn cùng số điện thoại để nhân viên quyết định. Trả về thống kê. Không
  * ném lỗi mạng: log rồi thử lại ở lần sau.
  */
-export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig(), fetchImpl = fetch, maxPages = 10, onCrmOrdersCancelled = null, onPosConversationOrders = null } = {}) {
-  const summary = { checked: 0, landing: 0, created: 0, updated: 0, skipped: 0, rejected: 0, cancelled: 0, conversationOrders: 0, errors: [] };
+export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig(), fetchImpl = fetch, maxPages = 10, onCrmOrdersCancelled = null, onPosConversationOrders = null, onPosStatuses = null } = {}) {
+  const summary = { checked: 0, landing: 0, created: 0, updated: 0, skipped: 0, rejected: 0, cancelled: 0, conversationOrders: 0, statusUpdated: 0, errors: [] };
   if (!posConfigured(config)) return { ...summary, disabled: true };
   const store = await readLandingStore();
   // Đơn CRM đang giữ mỗi mã POS (mã chính và các mã đã gộp).
@@ -112,23 +113,51 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
   }
   const start = Math.floor((Date.now() - sinceHours * 60 * 60 * 1000) / 1000);
   const end = Math.floor(Date.now() / 1000) + 60;
-  const fetched = [];
-  for (let page = 1; page <= maxPages; page += 1) {
-    let data;
-    try {
-      data = await posRequest('/orders', { page_size: 100, page_number: page, updateStatus: 'inserted_at', startDateTime: start, endDateTime: end, option_sort: 'inserted_at_desc' }, config, fetchImpl);
-    } catch (error) {
-      summary.errors.push(error.message);
-      break;
+  const fetchWindow = async updateStatus => {
+    const list = [];
+    for (let page = 1; page <= maxPages; page += 1) {
+      let data;
+      try {
+        data = await posRequest('/orders', { page_size: 100, page_number: page, updateStatus, startDateTime: start, endDateTime: end, option_sort: 'inserted_at_desc' }, config, fetchImpl);
+      } catch (error) {
+        summary.errors.push(error.message);
+        break;
+      }
+      const orders = Array.isArray(data?.data) ? data.data : [];
+      list.push(...orders);
+      if (orders.length < 100 || page >= Number(data?.total_pages || 1)) break;
     }
-    const orders = Array.isArray(data?.data) ? data.data : [];
-    fetched.push(...orders);
-    if (orders.length < 100 || page >= Number(data?.total_pages || 1)) break;
-  }
+    return list;
+  };
+  const fetched = await fetchWindow('inserted_at');
+  // Lượt thứ hai: đơn ĐỔI trạng thái trong cùng khoảng giờ dù đặt từ lâu — hủy,
+  // hoàn, bom sau 48 giờ. Chỉ dùng để chép trạng thái mới nhất (và hủy đơn CRM
+  // theo POS), không tạo đơn landing / đơn hội thoại từ các đơn cũ này.
+  const insertedIds = new Set(fetched.map(order => String(order.id)));
+  const changedLater = (await fetchWindow('updated_at')).filter(order => !insertedIds.has(String(order.id)));
   fetched.sort((first, second) => String(first.inserted_at || '').localeCompare(String(second.inserted_at || '')) || Number(first.id) - Number(second.id));
   // Đơn CRM đẩy sang POS mà nhân viên hủy ngay trên POS: CRM trước đây vẫn
   // ghi "Mới" (đơn trùng vẫn bị đếm, vẫn hiện chờ xử lý). Gom lại để CRM hủy theo.
   const cancelledCrmIds = [];
+  for (const order of changedLater) {
+    if (isCrmPushedPosOrder(order) && (Number(order.status) === 6 || /cancel/i.test(String(order.status_name || '')))) {
+      cancelledCrmIds.push(String(order.custom_id || order.id).replace(/^CRM-/, ''));
+    }
+  }
+  // Trạng thái mới nhất của mọi đơn POS vừa đọc → đơn CRM tương ứng (landing ở
+  // đây, đơn trong hội thoại qua onPosStatuses).
+  const statusUpdates = [...fetched, ...changedLater].map(order => posStatusUpdate(order));
+  const statusIndex = indexPosStatuses(statusUpdates);
+  if ([...knownByPosId.values()].some(order => {
+    const update = matchPosStatus(order, statusIndex);
+    return update && Number(order.posStatus?.code) !== update.code;
+  })) {
+    try {
+      summary.statusUpdated += await updateLandingStore(current => applyPosStatusesToOrders(current.orders, statusUpdates, statusIndex));
+    } catch (error) {
+      summary.errors.push(`trạng thái POS của đơn landing: ${error.message}`);
+    }
+  }
   // Đơn POS gắn một hội thoại Facebook mà KHÔNG do CRM tạo: khách thanh toán qua
   // Facebook Shop (Pancake tự tạo) hay nhân viên lên đơn trong Pancake. Trước đây
   // không kéo về, nên bảng Đơn hàng thiếu (4 ngày 21–25/09: 69 đơn) dù Pancake đã
@@ -173,13 +202,20 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
       summary.errors.push(`hủy đơn CRM theo POS: ${error.message}`);
     }
   }
+  if (statusUpdates.length && typeof onPosStatuses === 'function') {
+    try {
+      summary.statusUpdated += Number(await onPosStatuses(statusUpdates)) || 0;
+    } catch (error) {
+      summary.errors.push(`trạng thái POS của đơn hội thoại: ${error.message}`);
+    }
+  }
   return summary;
 }
 
 let timer = null;
 
 /** Chạy ngay một lần rồi lặp mỗi 5 phút; chỉ khi POS đã kết nối. */
-export function startPosSync({ log = console.log, onCrmOrdersCancelled = null, onPosConversationOrders = null } = {}) {
+export function startPosSync({ log = console.log, onCrmOrdersCancelled = null, onPosConversationOrders = null, onPosStatuses = applyPosStatusesToConversations } = {}) {
   // Lượt trước chưa xong (POS chậm) thì lượt sau bỏ qua, không chạy chồng.
   let running = false;
   let first = true;
@@ -188,11 +224,11 @@ export function startPosSync({ log = console.log, onCrmOrdersCancelled = null, o
     running = true;
     try {
       // Lượt đầu sau khi khởi động kéo 7 ngày (bù đơn Facebook trên POS chưa từng kéo về), sau đó 48 giờ.
-      const summary = await syncPosLandingOrders({ onCrmOrdersCancelled, onPosConversationOrders, ...(first ? { sinceHours: 7 * 24, maxPages: 30 } : {}) });
+      const summary = await syncPosLandingOrders({ onCrmOrdersCancelled, onPosConversationOrders, onPosStatuses, ...(first ? { sinceHours: 7 * 24, maxPages: 30 } : {}) });
       first = false;
       if (summary.disabled) return;
-      if (summary.created || summary.updated || summary.cancelled || summary.conversationOrders || summary.errors.length) {
-        log(`Đồng bộ POS: ${summary.landing} đơn landing trong ${summary.checked} đơn, tạo ${summary.created}, cập nhật ${summary.updated}, bỏ qua ${summary.skipped}${summary.conversationOrders ? `, ${summary.conversationOrders} đơn Facebook/nhân viên vào hội thoại` : ''}${summary.cancelled ? `, hủy theo POS ${summary.cancelled} đơn CRM` : ''}${summary.rejected ? `, từ chối ${summary.rejected}` : ''}${summary.errors.length ? `, lỗi: ${summary.errors.join('; ')}` : ''}`);
+      if (summary.created || summary.updated || summary.cancelled || summary.conversationOrders || summary.statusUpdated || summary.errors.length) {
+        log(`Đồng bộ POS: ${summary.landing} đơn landing trong ${summary.checked} đơn, tạo ${summary.created}, cập nhật ${summary.updated}, bỏ qua ${summary.skipped}${summary.conversationOrders ? `, ${summary.conversationOrders} đơn Facebook/nhân viên vào hội thoại` : ''}${summary.cancelled ? `, hủy theo POS ${summary.cancelled} đơn CRM` : ''}${summary.statusUpdated ? `, cập nhật trạng thái POS ${summary.statusUpdated} đơn` : ''}${summary.rejected ? `, từ chối ${summary.rejected}` : ''}${summary.errors.length ? `, lỗi: ${summary.errors.join('; ')}` : ''}`);
       }
     } catch (error) {
       log(`Đồng bộ POS lỗi: ${error.message}`);

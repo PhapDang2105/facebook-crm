@@ -51,7 +51,8 @@ export function configureCampaignAi(overrides = {}) {
 }
 
 async function readStoredChatbotSettings() {
-  const settingsPath = path.join(projectRoot, 'data', 'processed', 'chatbot-settings.json');
+  // CHATBOT_SETTINGS_PATH: ghi đè vị trí tệp cài đặt chatbot (test dùng thư mục tạm); mặc định data/processed.
+  const settingsPath = process.env.CHATBOT_SETTINGS_PATH || path.join(projectRoot, 'data', 'processed', 'chatbot-settings.json');
   let stored;
   try {
     stored = JSON.parse(await readFile(settingsPath, 'utf8'));
@@ -226,6 +227,8 @@ export function buildCampaignPrompt(report = {}, { days, thresholds = campaignAi
       don: round(totals.orders), doanhThu: round(totals.revenue), cpa: round(baseline.cpa), roas: round(baseline.roas, 2)
     },
     donKhongGanChienDich: { don: round(report.unattributed?.orders), doanhThu: round(report.unattributed?.revenue) },
+    // Đơn landing gắn UTM không khớp chiến dịch Meta nào: không có chi phí tương ứng, không nằm trong ROAS tài khoản.
+    donUtmKhongCoChiPhi: { don: round(report.utm?.orders), doanhThu: round(report.utm?.revenue) },
     tongSoChienDich: Array.isArray(report.campaigns) ? report.campaigns.length : 0,
     chienDich: campaigns.map(campaign => {
       const flag = campaignFlags(campaign, baseline, thresholds);
@@ -329,8 +332,40 @@ function modelEndpoint(settings, model) {
     .replace(/\/models\/[^/:]+:generateContent(?:\?.*)?$/, `/models/${encodeURIComponent(model)}:generateContent`);
 }
 
-/** Một lượt hỏi–đáp JSON với nhà cung cấp đang cấu hình ở Cài đặt chatbot. Trả về chữ mô hình viết. */
-export async function requestModelText({ system, prompt, settings, fetchImpl = dependencies.fetchImpl, timeoutMs = modelTimeoutMs }) {
+// Lỗi tạm thời của nhà cung cấp (Vertex 429 "Resource exhausted" giờ cao điểm,
+// 5xx, rớt mạng): thử lại vài lần, lùi dần. Lỗi cấu hình (4xx khác, thiếu khoá,
+// JSON hỏng) thì không thử lại.
+export const modelRetry = Object.freeze({ retries: 2, baseDelayMs: 1500, maxDelayMs: 10000 });
+
+export function isRetryableStatus(status) {
+  const code = Number(status);
+  return code === 408 || code === 429 || (code >= 500 && code <= 599 && code !== 501);
+}
+
+/** Thời gian chờ trước lần thử thứ `attempt` (1, 2…): Retry-After nếu có, không thì lùi gấp đôi. */
+export function retryDelayMs(attempt, { retryAfter = null, baseDelayMs = modelRetry.baseDelayMs, maxDelayMs = modelRetry.maxDelayMs } = {}) {
+  const seconds = Number(retryAfter);
+  if (retryAfter !== null && retryAfter !== '' && Number.isFinite(seconds) && seconds >= 0) return Math.min(maxDelayMs, seconds * 1000);
+  return Math.min(maxDelayMs, baseDelayMs * 2 ** Math.max(0, attempt - 1));
+}
+
+const defaultSleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/** Một lượt hỏi–đáp JSON với nhà cung cấp đang cấu hình ở Cài đặt chatbot, thử lại khi lỗi tạm thời. Trả về chữ mô hình viết. */
+export async function requestModelText({ retries = modelRetry.retries, baseDelayMs = modelRetry.baseDelayMs, maxDelayMs = modelRetry.maxDelayMs, sleep = defaultSleep, ...input }) {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await requestModelTextOnce(input);
+    } catch (error) {
+      attempt += 1;
+      if (!error?.retryable || attempt > Math.max(0, Number(retries) || 0)) throw error;
+      await sleep(retryDelayMs(attempt, { retryAfter: error.retryAfter ?? null, baseDelayMs, maxDelayMs }));
+    }
+  }
+}
+
+async function requestModelTextOnce({ system, prompt, settings, fetchImpl = dependencies.fetchImpl, timeoutMs = modelTimeoutMs }) {
   const vertex = settings.provider === 'vertex';
   const anthropic = !vertex && settings.directProtocol === 'anthropic';
   const useGoogleKey = vertex && settings.directAuthType === 'api_key';
@@ -354,21 +389,38 @@ export async function requestModelText({ system, prompt, settings, fetchImpl = d
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      redirect: 'manual',
-      headers: {
-        ...(anthropic
-          ? { 'x-api-key': settings.directApiKey, 'anthropic-version': '2023-06-01' }
-          : useGoogleKey ? { 'x-goog-api-key': settings.directApiKey } : { Authorization: `Bearer ${accessToken}` }),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
+    let response;
+    try {
+      response = await fetchImpl(endpoint, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          ...(anthropic
+            ? { 'x-api-key': settings.directApiKey, 'anthropic-version': '2023-06-01' }
+            : useGoogleKey ? { 'x-goog-api-key': settings.directApiKey } : { Authorization: `Bearer ${accessToken}` }),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+    } catch (error) {
+      // Hết giờ chờ (đã đợi đủ 60 giây) thì không thử lại; rớt mạng thì có.
+      if (error?.name === 'AbortError') throw new Error('Nhà cung cấp mô hình phản hồi quá lâu.');
+      const wrapped = new Error(`Không kết nối được nhà cung cấp mô hình: ${error?.cause?.code || error?.message || error}.`);
+      wrapped.retryable = true;
+      throw wrapped;
+    }
     if (response.status >= 300 && response.status < 400) throw new Error(`Endpoint AI chuyển hướng (${response.status}).`);
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error?.message || payload?.message || `Nhà cung cấp mô hình trả về lỗi ${response.status}.`);
+    if (!response.ok) {
+      const failure = new Error(payload?.error?.message || payload?.message || `Nhà cung cấp mô hình trả về lỗi ${response.status}.`);
+      failure.status = response.status;
+      if (isRetryableStatus(response.status)) {
+        failure.retryable = true;
+        failure.retryAfter = response.headers?.get?.('retry-after') ?? null;
+      }
+      throw failure;
+    }
     const text = vertex
       ? payload?.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('')
       : anthropic
@@ -437,7 +489,12 @@ export async function generateCampaignInsights(report = {}, options = {}) {
       settings = options.settings || await (options.readSettings || dependencies.readSettings)();
       const system = campaignAiSystemPrompt;
       const prompt = buildCampaignPrompt(safeReport, { days });
-      const call = options.callModel || (input => requestModelText({ ...input, fetchImpl: options.fetchImpl }));
+      const call = options.callModel || (input => requestModelText({
+        ...input,
+        fetchImpl: options.fetchImpl,
+        ...(options.sleep ? { sleep: options.sleep } : {}),
+        ...(options.retries !== undefined ? { retries: options.retries } : {})
+      }));
       const answer = await call({ system, prompt, settings: settings || {} });
       const text = typeof answer === 'string' ? answer : answer?.text;
       const model = (typeof answer === 'object' && answer?.model) || settings?.directModel || 'ai';

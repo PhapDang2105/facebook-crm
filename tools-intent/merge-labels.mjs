@@ -140,7 +140,7 @@ function readJsonFile(file, what) {
 
 function main() {
   const args = process.argv.slice(2);
-  const cli = parseCliArgs(args, ['--trust', '--golden-window']);
+  const cli = parseCliArgs(args, ['--trust', '--golden-window'], ['--keep-other']);
   const [datasetPath, labelsPath, outPath, goldenPath] = cli.positional;
   if (!datasetPath || !labelsPath || !outPath) cliFail('Dùng: node tools-intent/merge-labels.mjs <dataset.jsonl> <labels.jsonl> <out.jsonl> [golden-set.json] [--trust replay-llm-out.json] [--keep-other] [--golden-window 10]');
   const rows = readJsonlFile(datasetPath, 'dataset');

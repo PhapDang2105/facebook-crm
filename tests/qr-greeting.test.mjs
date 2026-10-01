@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-process.env.QR_SCANS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'qr-greet-')), 'qr-scans.json');
+process.env.QR_SCANS_PATH = path.join(tempDir('qr-greet-'), 'qr-scans.json');
 
 const { createQrGreeter, isCardScan } = await import('../app/qr-greeting.mjs');
 const { registerQrCode } = await import('../app/qr-scans.mjs');

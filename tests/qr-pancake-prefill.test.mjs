@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const directory = mkdtempSync(path.join(tmpdir(), 'qr-prefill-'));
+const directory = tempDir('qr-prefill-');
 process.env.META_CONVERSATIONS_PATH = path.join(directory, 'conv.json');
 process.env.QR_SETTINGS_PATH = path.join(directory, 'qr-settings.json');
 process.env.QR_SCANS_PATH = path.join(directory, 'qr-scans.json');

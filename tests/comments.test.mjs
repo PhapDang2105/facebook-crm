@@ -75,7 +75,7 @@ test('bot trả lời bình luận: nhắn riêng nội dung, công khai một c
     conversation: { id: commentConversationId(pageId, userId, postId), psid: userId, name: 'Minh Quân', source: 'comment', botEnabled: true, lastCommentId: 'c1' },
     message: { id: 'c1', mid: 'c1', direction: 'incoming', type: 'text', text: 'chốt 2 túi, 0909123456, 12 Lê Lợi' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templates }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: templates }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => { sent.push(message); return { message: { mid: 'x' } }; },
     createOrder: async () => { throw new Error('không được tạo đơn từ bình luận'); },
@@ -98,7 +98,9 @@ test('bot trả lời bình luận: nhắn riêng nội dung, công khai một c
   // The public line is one of the ### variants, addressed by name.
   assert.equal(sent[1].privateReply, undefined);
   assert.equal(templates.COMMENT_PUBLIC_REPLY.split('###').length, 3);
-  assert.ok(/Minh Quân|anh\/chị/.test(sent[1].text), sent[1].text);
+  // Vòng 12: lời công khai gọi tên hay "mình" (không ghi nguyên "anh/chị").
+  assert.ok(/Minh Quân|mình/.test(sent[1].text), sent[1].text);
+  assert.doesNotMatch(sent[1].text, /anh\/chị|check hộp tin nhắn/);
   assert.ok(!/[{}#]/.test(sent[1].text), 'placeholders, spintax and separators are all resolved');
 });
 
@@ -111,7 +113,7 @@ test('nhắn riêng thất bại (#10 app khác giữ thread): công khai mời 
     conversation: { id: commentConversationId(pageId, userId, postId), psid: userId, name: 'Phạm Nhài', source: 'comment', lastCommentId: 'c9' },
     message: { id: 'c9', mid: 'c9', direction: 'incoming', type: 'text', text: 'inbox' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: templates }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: templates }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => {
       if (message.privateReply) throw new Error('(#10) Không gửi được tin nhắn do một ứng dụng khác hiện đang kiểm soát thread này.');
@@ -140,7 +142,7 @@ test('bình luận: chọn ngẫu nhiên một mẫu, {Dạ|Hi} xoay chữ, thí
     conversation: { id: 'c', psid: userId, name: 'Minh Quân', source: 'comment', lastCommentId: 'c1' },
     message: { id: 'c1', mid: 'c1', direction: 'incoming', type: 'text', text, commentId: 'c1' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', commentLike: true, commentHide, messageTemplates: defaultMessageTemplates() }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, commentLike: true, commentHide, messageTemplates: defaultMessageTemplates() }),
     listMessages: async () => [],
     sendMessage: async (_c, message) => { sent.push(message); return {}; },
     moderateComment: async (_c, message, actions) => { moderated.push({ id: message.commentId, ...actions }); },
@@ -220,7 +222,7 @@ test('bot bật cho mọi hội thoại; chỉ im lặng khi nhân viên tắt',
     conversation: { id: 'c', psid: userId, name: 'Khách', ...(botEnabled === undefined ? {} : { botEnabled }) },
     message: { id: 'm', mid: 'm', direction: 'incoming', type: 'text', text: 'hi' }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: defaultMessageTemplates() }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: defaultMessageTemplates() }),
     listMessages: async () => [], sendMessage: async () => ({}), saveBotState: async () => {},
     requestReply: async () => ({ templateId: 'WELCOME', messages: ['Chào'], handoff: false })
   });

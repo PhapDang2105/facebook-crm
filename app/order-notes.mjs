@@ -105,7 +105,13 @@ export function processingNotes(order) {
     else if (missing.length) notes.push(`⚠ Thiếu ${missing.join(', ')}`);
     if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên, hỏi lại');
     else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('⚠ Địa chỉ đã sửa, đối chiếu');
+    // Vòng 12: bot nhận địa chỉ sau một lần hỏi (nguyên chữ khách ghi) hay thiếu phường/xã → nhân viên soát.
+    const check = String(order.addressCheck || '').trim();
+    if (check && !notes.some(note => note.includes(check))) notes.push(`⚠ ${check}`);
   }
+  // Ghi chú giao hàng khách ghi lẫn trong địa chỉ ("giao giờ hành chính").
+  const deliveryNote = String(order.deliveryNote || '').trim();
+  if (deliveryNote) notes.push(`ℹ Giao: ${deliveryNote}`);
   if (!hasProduct) notes.push('⚠ Chưa chọn sản phẩm');
   else if (unmatched.length) notes.push(`⚠ Sản phẩm lạ: ${unmatched.join(', ')}`);
   else if (landing.needsProduct && landing.rawProducts && !landing.autoFilled?.product) notes.push(`⚠ Form ghi SP: ${String(landing.rawProducts).slice(0, 80)}`);

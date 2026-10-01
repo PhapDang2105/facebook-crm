@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Kho nhân sự tạm cho test: không đụng dữ liệu thật.
-process.env.STAFF_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'crm-staff-')), 'staff.json');
+process.env.STAFF_PATH = path.join(tempDir('crm-staff-'), 'staff.json');
 const { listStaff, saveStaffMember, staffLoginUsers, staffByUsername, MIN_PASSWORD_LENGTH } = await import('../app/staff.mjs');
 const { verifyPassword } = await import('../app/auth.mjs');
 
@@ -62,4 +62,23 @@ test('nhân sự: không để mất Quản trị cuối cùng có mật khẩu 
   await assert.rejects(saveStaffMember({ active: false }, { id: admin.id }), /ít nhất một Quản trị/);
   const ok = await saveStaffMember({ role: 'staff' }, { id: admin.id, reservedUsernames: new Set(['chu.shop']) });
   assert.equal(ok.role, 'staff', 'còn tài khoản chủ shop trong .env thì được hạ quyền');
+});
+
+test('nhân sự: sessionVersion tăng khi đổi mật khẩu / cho nghỉ / đi làm lại → phiên cũ bị thu hồi; đổi tên hiển thị thì không', async () => {
+  const { staffLoginAccounts } = await import('../app/staff.mjs');
+  const owner = new Set(['chu.shop']); // còn tài khoản chủ shop (.env) nên không vướng luật "Quản trị cuối cùng"
+  const minh = await saveStaffMember({ name: 'Minh', username: 'minh.nv', role: 'staff', password: 'minh-matkhau-1' }, { reservedUsernames: owner });
+  assert.equal('sessionVersion' in minh, false, 'không trả phiên bản ra giao diện');
+  const version = async () => (await staffLoginAccounts()).get('minh.nv')?.version;
+  assert.equal(await version(), 0);
+  await saveStaffMember({ name: 'Minh (ca sáng)' }, { id: minh.id, reservedUsernames: owner });
+  assert.equal(await version(), 0, 'đổi tên hiển thị không đăng xuất ai');
+  await saveStaffMember({ password: 'minh-matkhau-2' }, { id: minh.id, reservedUsernames: owner });
+  assert.equal(await version(), 1);
+  await saveStaffMember({ active: false }, { id: minh.id, reservedUsernames: owner });
+  assert.equal((await staffLoginAccounts()).has('minh.nv'), false, 'đã nghỉ thì không còn trong danh sách đăng nhập');
+  await saveStaffMember({ active: true }, { id: minh.id, reservedUsernames: owner });
+  assert.equal(await version(), 3, 'đi làm lại: phiên trước khi nghỉ KHÔNG sống lại');
+  const account = (await staffLoginAccounts()).get('minh.nv');
+  assert.match(account.hash, /^scrypt\$/);
 });

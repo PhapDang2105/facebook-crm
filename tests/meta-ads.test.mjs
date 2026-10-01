@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 import { normalizeAdAccountIds } from '../app/config.mjs';
 import { adsConnectionStatus, adsGraphError, mergeAdInsights, parseInsightRow, readAdStore, syncAdInsights, vietnamDay } from '../app/meta-ads.mjs';
 
-const directory = mkdtempSync(path.join(tmpdir(), 'meta-ads-'));
+const directory = tempDir('meta-ads-');
 // 29/09/2026 10:00 giờ Việt Nam.
 const now = Date.parse('2026-09-29T03:00:00Z');
 

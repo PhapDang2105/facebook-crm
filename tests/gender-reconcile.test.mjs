@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const directory = mkdtempSync(path.join(tmpdir(), 'gender-'));
+const directory = tempDir('gender-');
 const storePath = path.join(directory, 'meta-conversations.json');
 process.env.META_CONVERSATIONS_PATH = storePath;
 
@@ -30,9 +30,12 @@ test('nạp kho: hội thoại chưa có giới tính được đoán theo tên;
   assert.equal(byId['110:1'].genderSource, 'name');
   assert.equal(byId['110:2'].gender, 'male');
   assert.equal(byId['110:3'].gender, undefined, 'tên không rõ giới thì để trung tính');
-  // Pancake (2.5) hơn xưng hô (2): hộp thư theo luồng bình luận.
-  assert.equal(byId['110:4'].gender, 'male');
-  assert.equal(byId['110:4'].genderSource, 'pancake');
+  // Vòng 12 (GENDER_SOURCE_RANK): khách tự xưng trong tin (2.7) hơn hồ sơ Pancake (2.5): luồng bình luận
+  // theo hộp thư, không phải ngược lại.
+  assert.equal(byId['110:4'].gender, 'female');
+  assert.equal(byId['110:4'].genderSource, 'message');
+  assert.equal(byId['110:comment:4:p1'].gender, 'female');
+  assert.equal(byId['110:comment:4:p1'].genderSource, 'message');
 });
 
 test('reconcileCustomerGender: nhân viên chọn ở một luồng thì luồng khác theo; không hạ nguồn tin cậy hơn', async () => {

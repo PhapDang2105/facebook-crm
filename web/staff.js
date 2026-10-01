@@ -30,6 +30,7 @@
       credentials: 'same-origin'
     });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 403 && !/trang khác/i.test(String(data.error || ''))) throw new Error('Chỉ Quản trị được thay đổi mục này.');
     if (!response.ok) throw new Error(data.error || `Lỗi ${response.status}`);
     return data;
   }

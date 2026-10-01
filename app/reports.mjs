@@ -2,13 +2,15 @@
 // và khách quay lại, nhân viên, chiến dịch, bám đuổi — cho một khoảng from/to
 // (giờ Việt Nam, tối đa 366 ngày), kèm xuất CSV từng phần.
 //
-// Cùng luật với Tổng quan và Chiến dịch (order-facts.mjs): đơn hủy/hoàn và form
-// landing bỏ dở không tính doanh thu; đơn hủy đếm riêng ở cột Đơn hủy.
+// Cùng luật với Tổng quan và Chiến dịch (order-facts.mjs): đơn hủy/hoàn/bom,
+// đơn trùng đã xóa khỏi bảng và form landing bỏ dở không tính doanh thu; đơn
+// hủy/hoàn đếm riêng ở cột Đơn hủy. ROAS và khách mới theo metrics.mjs.
 import { buildCampaignReport } from './campaigns.mjs';
 import { followUpStatus } from './follow-up.mjs';
 import { listLandingOrders } from './landing-orders.mjs';
 import { readMessagingStore } from './messaging-store.mjs';
 import { adsConnectionStatus, readAdStore, vietnamDay } from './meta-ads.mjs';
+import { firstOrderDates, METRIC_DEFINITIONS, roasOf } from './metrics.mjs';
 import { collectOrderFacts, datesBetween, isValidFact, normalizeDayRange, shiftDay, sourceLabel } from './order-facts.mjs';
 
 export const REPORT_GROUPS = ['day', 'week', 'month'];
@@ -91,7 +93,7 @@ export function buildReport({
   const periods = periodsBetween(query.from, query.to, query.groupBy);
   const blankRow = period => ({
     period, label: periodLabel(period, query.groupBy),
-    orders: 0, revenue: 0, cancelled: 0, cancelledValue: 0, spend: 0,
+    orders: 0, revenue: 0, cancelled: 0, cancelledValue: 0, spend: 0, adRevenue: 0,
     customers: new Set(), newCustomers: new Set()
   });
   const rows = new Map(periods.map(period => [period, blankRow(period)]));
@@ -101,12 +103,14 @@ export function buildReport({
   const sources = new Map();
   const products = new Map();
   const staff = new Map();
-  const firstOrderDate = new Map();
+  // Khách mới: cùng định nghĩa với Tổng quan (metrics.mjs).
+  const firstOrderDate = firstOrderDates(facts, isValidFact);
   const ordersUpToEnd = new Map();
   const customersInRange = new Set();
 
   for (const fact of facts) {
-    if (fact.incomplete || !fact.dateVN) continue;
+    // Form bỏ dở và đơn trùng đã xóa khỏi bảng: không phải đơn, không vào cột nào.
+    if (fact.incomplete || fact.duplicate || !fact.dateVN) continue;
     if (fact.cancelled) {
       if (inRange(fact.dateVN)) {
         const row = rowOf(fact.dateVN);
@@ -115,8 +119,7 @@ export function buildReport({
       }
       continue;
     }
-    // Đơn hợp lệ (facts xếp cũ trước: lần đầu gặp khách là đơn đầu tiên).
-    if (!firstOrderDate.has(fact.customerKey)) firstOrderDate.set(fact.customerKey, fact.dateVN);
+    if (!isValidFact(fact)) continue;
     if (fact.dateVN <= query.to) ordersUpToEnd.set(fact.customerKey, (ordersUpToEnd.get(fact.customerKey) || 0) + 1);
     if (!inRange(fact.dateVN)) continue;
     const row = rowOf(fact.dateVN);
@@ -153,6 +156,12 @@ export function buildReport({
     if (inRange(date)) rowOf(date).spend += Number(entry.spend) || 0;
   }
 
+  // ROAS từng kỳ: doanh thu quy về quảng cáo Meta (báo cáo chiến dịch) ÷ chi phí — không phải mọi doanh thu ÷ chi phí.
+  const campaignReport = buildCampaignReport({ conversations, landingOrders, adStore, from: query.from, to: query.to, now, ads, facts });
+  for (const [date, revenue] of Object.entries(campaignReport.adRevenueByDate || {})) {
+    if (inRange(date)) rowOf(date).adRevenue += revenue;
+  }
+
   // Khách mới / quay lại. Theo kỳ: mới = đơn hợp lệ đầu tiên của khách nằm trong
   // kỳ đó; quay lại = khách có đơn trong kỳ mà đơn đầu tiên ở kỳ trước đó.
   let newTotal = 0;
@@ -176,18 +185,19 @@ export function buildReport({
     cancelledValue: round(row.cancelledValue),
     aov: row.orders ? round(row.revenue / row.orders) : null,
     spend: round(row.spend),
-    roas: row.spend ? round(row.revenue / row.spend, 2) : null
+    adRevenue: round(row.adRevenue),
+    roas: roasOf(row.adRevenue, row.spend)
   });
   const salesRows = [...rows.values()].map(row => ({ period: row.period, label: row.label, ...salesRow(row) }));
   const totals = salesRow([...rows.values()].reduce((sum, row) => {
-    for (const key of ['orders', 'revenue', 'cancelled', 'cancelledValue', 'spend']) sum[key] += row[key];
+    for (const key of ['orders', 'revenue', 'cancelled', 'cancelledValue', 'spend', 'adRevenue']) sum[key] += row[key];
     return sum;
-  }, { orders: 0, revenue: 0, cancelled: 0, cancelledValue: 0, spend: 0 }));
-
-  const campaignReport = buildCampaignReport({ conversations, landingOrders, adStore, from: query.from, to: query.to, now, ads, facts });
+  }, { orders: 0, revenue: 0, cancelled: 0, cancelledValue: 0, spend: 0, adRevenue: 0 }));
 
   return {
     range: { from: query.from, to: query.to, groupBy: query.groupBy },
+    ads: campaignReport.ads,
+    definitions: METRIC_DEFINITIONS,
     sales: { rows: salesRows, totals },
     sources: [...sources.values()]
       .sort((first, second) => second.revenue - first.revenue || second.orders - first.orders)
@@ -204,8 +214,11 @@ export function buildReport({
     staff: [...staff.values()]
       .sort((first, second) => second.revenue - first.revenue || second.orders - first.orders)
       .map(person => ({ ...person, revenue: round(person.revenue) })),
-    // Dòng chiến dịch như màn Chiến dịch (bỏ mảng theo ngày cho gọn).
+    // Dòng chiến dịch như màn Chiến dịch (bỏ mảng theo ngày cho gọn); tổng và
+    // phần UTM không có chi phí lấy từ chính báo cáo chiến dịch (cùng ROAS).
     campaigns: campaignReport.campaigns.map(({ daily, ...row }) => row),
+    campaignTotals: campaignReport.totals,
+    campaignUtm: campaignReport.utm,
     followUps: followUpSummary(followUp)
   };
 }
@@ -256,8 +269,8 @@ export function reportSectionCsv(report, section) {
         report.campaigns.map(item => [item.name, item.id, item.source, item.status, item.spend, item.impressions, item.clicks, item.messages, item.orders, item.revenue, item.cpa, item.roas]));
     case 'sales':
     default: {
-      const line = (period, label, item) => [period, label, item.orders, item.revenue, item.cancelled, item.cancelledValue, item.aov, item.spend, item.roas];
-      return toCsv(['Mã kỳ', 'Kỳ', 'Số đơn', 'Doanh thu', 'Đơn hủy', 'Giá trị hủy', 'Giá trị TB đơn', 'Chi tiêu QC', 'ROAS'],
+      const line = (period, label, item) => [period, label, item.orders, item.revenue, item.cancelled, item.cancelledValue, item.aov, item.spend, item.adRevenue, item.roas];
+      return toCsv(['Mã kỳ', 'Kỳ', 'Số đơn', 'Doanh thu', 'Đơn hủy', 'Giá trị hủy', 'Giá trị TB đơn', 'Chi tiêu QC', 'Doanh thu từ QC', 'ROAS'],
         [...report.sales.rows.map(item => line(item.period, item.label, item)), line('', 'Tổng', report.sales.totals)]);
     }
   }

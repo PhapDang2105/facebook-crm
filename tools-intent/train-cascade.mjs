@@ -287,7 +287,7 @@ const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).h
 if (isMain) {
   const args = process.argv.slice(2);
   const usage = 'Dùng: node tools-intent/train-cascade.mjs <dataset.jsonl> <out.json> [--holdout 0.2] [--golden golden.json] [--flat m.json] [--flat-out m.json] [--include-comments] [--quiet]';
-  const cli = parseCliArgs(args, ['--holdout', '--golden', '--flat', '--flat-out']);
+  const cli = parseCliArgs(args, ['--holdout', '--golden', '--flat', '--flat-out'], ['--include-comments', '--quiet']);
   const [datasetPath, outPath] = cli.positional;
   if (!datasetPath || !outPath) cliFail(usage);
   if (!existsSync(datasetPath)) cliFail(`Không thấy dataset: ${datasetPath}`);

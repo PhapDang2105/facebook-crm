@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { tempDir as createTempDir } from './helpers/temp-dir.mjs';
 import { appendDecisionLog, flushDecisionLog, maskPhones, sanitizeRecord, vnDateKey } from '../app/processing/decision-log.mjs';
 
-const tempDir = () => mkdtemp(path.join(os.tmpdir(), 'decision-log-'));
+// Thư mục tạm tự xoá khi tiến trình test thoát (trước đây để lại decision-log-* trong %TEMP% mỗi lần chạy).
+const tempDir = async () => createTempDir('decision-log-');
 const record = (extra = {}) => ({
   v: 1, at: new Date().toISOString(), conversationId: 'page:user', source: 'inbox', mid: 'm1', text: 'Cho em 2 túi xanh, sđt 0385805790 nhé', type: 'text',
   prevBot: 'PRICE_QUOTE', prevBotAgeMin: 1.5, prevBotAsks: '', ctx: { hasBasket: false, phoneInText: true, bagCount: 2 }, rule: null, shadow: [], intent: { templateId: 'ORDER_ADDRESS', p: 0.9, margin: 0.5, topK: [] },

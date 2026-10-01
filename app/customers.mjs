@@ -6,6 +6,7 @@ import { genderRank, readMessagingStore } from './messaging-store.mjs';
 import { readChannelStore } from './channel-store.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
 import { applyCustomerEdits, readCustomerEdits } from './customer-edits.mjs';
+import { collectOrderFacts, isCancelledOrder, isIncompleteOrder, isValidFact } from './order-facts.mjs';
 
 function customerKey(conversation) {
   return `${conversation.pageId}:${conversation.psid}`;
@@ -25,7 +26,9 @@ function collectPurchases(customer, orders) {
   for (const order of orders) {
     const createdAt = Number(order?.createdAt) || 0;
     if (createdAt) {
-      if (!customer.firstOrderAt || createdAt < customer.firstOrderAt) customer.firstOrderAt = createdAt;
+      // "Khách mới" (metrics.mjs): mốc đơn ĐẦU TIÊN chỉ tính đơn hợp lệ — đơn hủy/hoàn/bom
+      // hay form bỏ dở không biến khách thành khách mới, như Tổng quan và Báo cáo.
+      if (!isCancelledOrder(order) && !isIncompleteOrder(order) && (!customer.firstOrderAt || createdAt < customer.firstOrderAt)) customer.firstOrderAt = createdAt;
       if (createdAt > customer.lastOrderAt) customer.lastOrderAt = createdAt;
     }
     const items = Array.isArray(order?.products) ? order.products : [];
@@ -64,6 +67,12 @@ function collectPurchases(customer, orders) {
 
 /** Merges every thread of one person into a single customer record. */
 export function buildCustomers(store, channels = [], exported = []) {
+  // Đơn không thành doanh thu — hủy/hoàn/bom (trạng thái mới nhất), form bỏ dở, đơn trùng
+  // đã xóa khỏi bảng — cùng luật với Báo cáo (order-facts.mjs): không vào "Tổng đã chi",
+  // số đơn hay "đã mua sản phẩm"; mã đơn vẫn được ghi để tệp xuất không cộng lại.
+  const notCounted = new Set(collectOrderFacts({ conversations: store.conversations || [] })
+    .filter(fact => fact.id && !isValidFact(fact)).map(fact => fact.id));
+  const countedOrders = orders => orders.filter(order => order && !notCounted.has(String(order.id || '')));
   const channelNames = new Map(channels.map(channel => [String(channel.id), channel.name]));
   const customers = new Map();
   for (const conversation of store.conversations) {
@@ -133,10 +142,11 @@ export function buildCustomers(store, channels = [], exported = []) {
     if (latestOrder?.address && !existing.address) existing.address = latestOrder.address;
     if (!existing.phone && conversation.pendingOrder?.phone) existing.phone = conversation.pendingOrder.phone;
     if (!existing.address && conversation.pendingOrder?.address) existing.address = conversation.pendingOrder.address;
-    existing.orderCount += orders.length;
+    const counted = countedOrders(orders);
+    existing.orderCount += counted.length;
     existing.orderIds.push(...orders.map(order => String(order?.id || '')).filter(Boolean));
-    existing.orderTotal += orders.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
-    collectPurchases(existing, orders);
+    existing.orderTotal += counted.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
+    collectPurchases(existing, counted);
     existing.noteCount += notes.length;
     for (const label of Array.isArray(conversation.labels) ? conversation.labels : []) {
       if (!existing.labels.includes(label)) existing.labels.push(label);

@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-process.env.PHONE_WARNINGS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'warnings-')), 'phone-warnings.json');
+process.env.PHONE_WARNINGS_PATH = path.join(tempDir('warnings-'), 'phone-warnings.json');
 
 const { assessPhone, fetchPosPhoneReport, lookupPhone, lookupPhones, attachPhoneWarning } = await import('../app/phone-warnings.mjs');
 
@@ -61,8 +60,9 @@ test('tra POS: đếm đơn hoàn/huỷ và thành công của đúng số, đ�
     customers: [{ id: 'c1', phone_numbers: ['0909123456'], is_block: false, tags: [{ name: 'Thường xuyên hoàn' }], order_count: 3, succeed_order_count: 1 }]
   });
   const report = await fetchPosPhoneReport('0909 123 456', { config: posConfig, fetchImpl });
-  assert.equal(report.orders, 3);
-  assert.equal(report.failed, 2);
+  // 01/10: đơn HỦY (status 6) trước khi giao không phải bom hàng — không đếm.
+  assert.equal(report.orders, 2);
+  assert.equal(report.failed, 1);
   assert.equal(report.success, 1);
   assert.deepEqual(report.report, { fail: 2, success: 1, warning: 1 });
   assert.deepEqual(report.customer.tags, ['Thường xuyên hoàn']);
@@ -75,6 +75,26 @@ test('tra POS: đếm đơn hoàn/huỷ và thành công của đúng số, đ�
   assert.equal(failing.error, 'timeout');
   // Chưa cấu hình POS: null.
   assert.equal(await fetchPosPhoneReport('0909123456', { config: { apiKey: '', shopId: '' } }), null);
+});
+
+test('đếm cảnh báo SĐT bỏ đơn đã hủy/đã xóa trên POS (trùng đơn, khách đổi ý); hủy sau khi giao thất bại vẫn tính', async () => {
+  const phone = '0933111222';
+  const fetchImpl = posFetch({
+    orders: [
+      { status: 6, bill_phone_number: phone },
+      { status: 6, bill_phone_number: phone },
+      { status: 7, bill_phone_number: phone },
+      { status: 3, bill_phone_number: phone }
+    ],
+    customers: []
+  });
+  const clean = await fetchPosPhoneReport(phone, { config: posConfig, fetchImpl });
+  assert.equal(clean.orders, 1, 'chỉ còn đơn đã giao');
+  assert.equal(clean.failed, 0, 'hai đơn hủy + một đơn xóa không phải bom');
+  assert.equal(assessPhone({ pos: clean }).level, 'none', 'khách chỉ hủy đơn trùng thì không bị cảnh báo');
+  const shippedThenCancelled = await fetchPosPhoneReport(phone, { config: posConfig, fetchImpl: posFetch({ orders: [{ status: 6, bill_phone_number: phone, partner: { first_undeliverable_at: '2026-09-30T10:00:00' } }, { status: 3, bill_phone_number: phone }] }) });
+  assert.equal(shippedThenCancelled.orders, 2);
+  assert.equal(shippedThenCancelled.failed, 1, 'đơn đã đi giao thất bại rồi mới hủy vẫn là không nhận hàng');
 });
 
 test('tra cứu có cache 24 giờ và tra nhiều số một lượt', async () => {
@@ -105,7 +125,7 @@ test('gắn cảnh báo vào đơn, không ném lỗi khi POS hỏng', async () 
 });
 
 test('kết nối POS bằng khoá dán vào Cài đặt: kiểm tra qua /shops, tự lấy shop, che khoá khi hiển thị', async () => {
-  process.env.POS_CONFIG_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'posconf-')), 'pos-config.json');
+  process.env.POS_CONFIG_PATH = path.join(tempDir('posconf-'), 'pos-config.json');
   const { connectPos, disconnectPos, posStatus, posConfig } = await import('../app/phone-warnings.mjs?pos');
   const fetchImpl = async url => {
     assert.match(String(url), /\/shops\?api_key=abcd1234efgh$/);

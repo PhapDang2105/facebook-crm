@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Hộp thư thử riêng: storePancakeEvents ghi vào messaging-store.
-process.env.META_CONVERSATIONS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-comments-')), 'meta-conversations.json');
+process.env.META_CONVERSATIONS_PATH = path.join(tempDir('pancake-comments-'), 'meta-conversations.json');
 // Trạng thái bám đuổi tạm (storePancakeEvents đối chiếu tin nhân viên với lời bám đuổi): không đọc tệp thật.
-process.env.FOLLOW_UPS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-comments-fu-')), 'follow-ups.json');
+process.env.FOLLOW_UPS_PATH = path.join(tempDir('pancake-comments-fu-'), 'follow-ups.json');
 const {
   backlogBotChanges, enrichPancakeAdContext, findPancakePost, handlePancakeWebhook, missedBotChanges, normalizePancakeWebhook, pancakeSyncPlan, sendConversationMessageViaPancake, syncPancakeConversations
 } = await import('../app/pancake.mjs');
@@ -104,8 +103,11 @@ test('khách đến từ quảng cáo: referral nguồn ADS, tên quảng cáo t
   const result = await handlePancakeWebhook(inbox({ conversation: adConversation, message: { id: 'm_902_1', conversation_id: '110_902', message: 'Còn hàng không', from: { id: '902', name: 'Chị Hoa' } } }), { processChatbotChanges: async () => {}, chatbotDependencies: {}, config, fetchImpl: fetchMock });
   assert.equal(result.stored, 1);
   const conversation = await getConversation('110:902');
-  assert.deepEqual(conversation.referral, { ref: '', source: 'ADS', adId: 'ad-1', adTitle: 'Túi Vàng - Video 01 · Granola T9', postId: '110_888', photoUrl: 'https://cdn/ad.jpg' });
+  // firstAt/lastAt: lúc khách bấm (ads[].inserted_at của Pancake), không phải lúc CRM nhận tin.
+  const clickedAt = Date.UTC(2026, 8, 19, 1, 0);
+  assert.deepEqual(conversation.referral, { ref: '', source: 'ADS', adId: 'ad-1', adTitle: 'Túi Vàng - Video 01 · Granola T9', postId: '110_888', photoUrl: 'https://cdn/ad.jpg', firstAt: clickedAt, lastAt: clickedAt });
   assert.equal(conversation.referrals.length, 1);
+  assert.equal(conversation.referrals[0].at, clickedAt);
   const post = await findPancakePost('110_888', { months: 1 }, config, fetchMock);
   assert.equal(post.message, 'Bài quảng cáo Granola Túi Vàng 350g');
   for (let attempt = 0; attempt < 30 && !(await getConversation('110:902')).post?.message; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
@@ -160,13 +162,15 @@ test('nhiều ảnh gửi chung một tin Pancake (content_ids nhiều mã), h�
   assert.equal(stored[0].dataUrl, 'https://cdn.example/1.png');
 });
 
-test('giới tính từ hồ sơ Pancake vào hội thoại: hơn bản đoán theo xưng hô, kém nhân viên chọn tay', async () => {
+test('giới tính từ hồ sơ Pancake vào hội thoại: hơn đoán theo tên, kém khách tự xưng trong tin (vòng 12) và nhân viên chọn tay', async () => {
   const { applyGenderGuess } = await import('../app/messaging-store.mjs');
   const withGender = { id: '110_906', type: 'INBOX', from: { id: '906', name: 'Khách Sáu' }, assignee_ids: [], page_customer: { gender: 'female', psid: '906' } };
   await handlePancakeWebhook(inbox({ conversation: withGender, message: { id: 'm_906_1', conversation_id: '110_906', message: 'anh ơi còn hàng không', from: { id: '906', name: 'Khách Sáu' } } }), { processChatbotChanges: async () => {}, chatbotDependencies: {}, config, fetchImpl: notFound });
   const conversation = await getConversation('110:906');
-  assert.deepEqual([conversation.gender, conversation.genderSource], ['female', 'pancake'], 'hồ sơ Pancake thắng bản đoán từ câu chữ');
-  assert.equal(applyGenderGuess(conversation, 'male', 'message'), false, 'đoán theo xưng hô không ghi đè hồ sơ Pancake');
+  // "anh ơi" là khách gọi shop, không phải tự xưng: hồ sơ Pancake giữ nguyên.
+  assert.deepEqual([conversation.gender, conversation.genderSource], ['female', 'pancake'], 'gọi "anh ơi" không phải tự xưng');
+  assert.equal(applyGenderGuess(conversation, 'male', 'name'), false, 'đoán theo tên không ghi đè hồ sơ Pancake');
+  assert.equal(applyGenderGuess(conversation, 'male', 'message'), true, 'khách tự xưng ("lấy anh 1 túi") thắng hồ sơ Pancake');
   assert.equal(applyGenderGuess(conversation, 'male', 'staff'), true, 'nhân viên chọn tay vẫn thắng');
   const unknown = { id: '110_907', type: 'INBOX', from: { id: '907', name: 'Khách Bảy' }, assignee_ids: [], page_customer: { gender: null } };
   await handlePancakeWebhook(inbox({ conversation: unknown, message: { id: 'm_907_1', conversation_id: '110_907', message: 'xin chào', from: { id: '907', name: 'Khách Bảy' } } }), { processChatbotChanges: async () => {}, chatbotDependencies: {}, config, fetchImpl: notFound });

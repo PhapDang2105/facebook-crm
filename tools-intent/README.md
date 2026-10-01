@@ -10,7 +10,8 @@ chạy song song theo cài đặt `intentCascade`.
 Tất cả công cụ chạy trên máy chủ, trong `/opt/facebook-crm`, bằng `sudo -u crm node --env-file=.env …`
 (đọc kho ở `data/processed`; đặt `CRM_DATA_DIR` chỉ khi chạy trên bản sao dữ liệu ở máy khác).
 Tệp dữ liệu chứa chữ khách (đã che SĐT, không có tên) chỉ để ở `/tmp` hoặc `data/processed`, không đưa
-vào git. Không công cụ nào gửi tin cho khách. Đối số sai (cờ thiếu giá trị, số không hợp lệ, tệp không có)
+vào git. Không công cụ nào gửi tin cho khách. `--help` (hay `-h`) in hướng dẫn ở đầu tệp rồi thoát 0, không
+chạy gì. Đối số sai (cờ thiếu giá trị, cờ lạ như `--limt`, số/ngày không hợp lệ, tệp không có hay JSON hỏng)
 → báo lỗi một dòng, mã thoát 1. Dòng JSONL hỏng (ghi dở) được bỏ qua và đếm.
 
 ## Row cho mô hình: MỘT định nghĩa (`intentRowOf`)

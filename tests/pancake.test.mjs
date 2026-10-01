@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Hộp thư thử riêng: storePancakeEvents ghi vào messaging-store.
-process.env.META_CONVERSATIONS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-')), 'meta-conversations.json');
+process.env.META_CONVERSATIONS_PATH = path.join(tempDir('pancake-'), 'meta-conversations.json');
 // Trạng thái bám đuổi tạm (storePancakeEvents đối chiếu tin nhân viên với lời bám đuổi): không đọc tệp thật.
-process.env.FOLLOW_UPS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'pancake-fu-')), 'follow-ups.json');
+process.env.FOLLOW_UPS_PATH = path.join(tempDir('pancake-fu-'), 'follow-ups.json');
 const {
   handlePancakeWebhook, isPancakeWebhookTokenValid, normalizePancakeWebhook, pancakeMessageText, pancakeTime, sendPancakeMessage
 } = await import('../app/pancake.mjs');
@@ -36,7 +35,8 @@ test('tin inbox của khách → sự kiện cùng dạng webhook Meta: chữ s�
   assert.equal(event.message.type, 'text');
   assert.equal(event.message.id, 'm_abc');
   assert.equal(event.message.createdAt, Date.UTC(2026, 8, 19, 2, 30));
-  assert.deepEqual(event.pancake, { conversationId: '110_555', customerName: 'Chị Mai', pageCustomerId: 'pc-1', assigned: false, staff: false, staffName: '', ad: null, gender: '' });
+  // assignees: tên người được phân công trong Pancake (nhật ký "Phân công nhân viên"); [] = chưa ai nhận.
+  assert.deepEqual(event.pancake, { conversationId: '110_555', customerName: 'Chị Mai', pageCustomerId: 'pc-1', assigned: false, assignees: [], staff: false, staffName: '', ad: null, gender: '' });
 });
 
 test('ảnh khách gửi hiện thẳng bằng URL CDN; tin Page gõ trong Pancake là của nhân viên, tin qua Public API là của CRM', () => {

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from './helpers/temp-dir.mjs';
 import './helpers/seed-catalog.mjs';
 import { engineLikeRow, goldenRows, isTrusted, measureOrderCoverage, ORDER_GROUP, ruleOutcome } from '../tools-intent/order-coverage.mjs';
 import { loadSeedTemplates } from '../tools-intent/relabel-policy.mjs';
@@ -49,7 +49,7 @@ test('order-coverage: ctx như engine (PARTIAL/CLARIFY/CART_LINE/UPSELL → ORDE
 });
 
 test('order-coverage: đọc bộ chấm (bỏ trống/SKIP/bình luận, dựng ctx v2) và chạy được từ dòng lệnh', async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'order-coverage-'));
+  const dir = tempDir('order-coverage-');
   const golden = path.join(dir, 'golden.json');
   writeFileSync(golden, JSON.stringify({ items: [
     { id: 'a:1:1', text: 'Cho mình 1 xanh 1 vàng', prevBot: 'Dạ bảng giá…', source: 'inbox', lastTemplate: 'GENERAL_INFO', label: 'ORDER_ADDRESS', at: 1790000000000 },

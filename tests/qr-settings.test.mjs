@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-process.env.QR_SETTINGS_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'qr-settings-')), 'qr-settings.json');
+process.env.QR_SETTINGS_PATH = path.join(tempDir('qr-settings-'), 'qr-settings.json');
 const { isAllowedZaloUrl, readQrSettings, writeQrSettings } = await import('../app/qr-settings.mjs');
 
 test('chỉ nhận liên kết https trên zalo.me / zaloapp.com — trang đệm là trang công khai', () => {

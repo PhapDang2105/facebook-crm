@@ -24,8 +24,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-const { cliFail, parseCliArgs } = await import(pathToFileURL(path.join(root, 'tools-intent', 'dataset-context.mjs')).href);
-const cli = parseCliArgs(args, ['--model', '--compare', '--cascade']);
+const { cliFail, parseCliArgs, readJsonFileOrFail } = await import(pathToFileURL(path.join(root, 'tools-intent', 'dataset-context.mjs')).href);
+const cli = parseCliArgs(args, ['--model', '--compare', '--cascade'], ['--all', '--gate']);
 const option = name => cli.value(name);
 const useAll = cli.has('--all');
 const useGate = cli.has('--gate');
@@ -323,7 +323,8 @@ if (useGate) {
   const llmPath = path.join(path.dirname(goldenPath), 'replay-llm-out.json');
   if (!existsSync(llmPath)) console.log(`\n--gate: không thấy ${llmPath} (chạy replay-llm.mjs trước).`);
   else {
-    const llmOut = JSON.parse(readFileSync(llmPath, 'utf8'));
+    const llmOut = readJsonFileOrFail(llmPath, 'Kết quả replay-llm');
+    if (!Array.isArray(llmOut)) cliFail(`Kết quả replay-llm ${llmPath} phải là mảng JSON.`);
     const llmById = new Map(llmOut.map(row => [row.id, row]));
     const GATE_GROUP = /^ORDER_(CONFIRMATION|UPDATE|CANCEL)/;
     models.forEach((entry, m) => {

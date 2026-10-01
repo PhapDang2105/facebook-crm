@@ -32,6 +32,45 @@
       ],
       "sku": "MUONG",
       "weight": 10
+    },
+    {
+      "id": "tang-tui-vang-5",
+      "name": "1 Túi Vàng 350g",
+      "active": true,
+      "minQuantity": 5,
+      "maxQuantity": 5,
+      "excludedSkus": [
+        "NGHE-H350",
+        "MIX5-H420"
+      ],
+      "sku": "GRA-VANG-H350",
+      "weight": 350
+    },
+    {
+      "id": "tang-tui-vang-10",
+      "name": "1 Túi Vàng 350g",
+      "active": true,
+      "minQuantity": 10,
+      "maxQuantity": 0,
+      "excludedSkus": [
+        "NGHE-H350",
+        "MIX5-H420"
+      ],
+      "sku": "GRA-VANG-H350",
+      "weight": 350
+    },
+    {
+      "id": "tang-tui-nau-10",
+      "name": "1 Túi Nâu 350g",
+      "active": true,
+      "minQuantity": 10,
+      "maxQuantity": 0,
+      "excludedSkus": [
+        "NGHE-H350",
+        "MIX5-H420"
+      ],
+      "sku": "GRA-NAU-Z350",
+      "weight": 350
     }
   ],
   "shippingFee": 15000

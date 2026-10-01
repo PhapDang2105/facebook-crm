@@ -1,12 +1,15 @@
-import { comboKey, findProductBySku, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity, normalizeText } from './catalog.mjs';
+import { canShareBasket, comboKey, findProductBySku, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, largeBasketGiftNote, matchProduct, maxBasketQuantity, maxComboQuantity, normalizeText } from './catalog.mjs';
 
 // The rule, as the business states it: one unit sells at the single price;
-// from two units — of the same product or mixed with other mixable products —
-// every unit sells at its own product's combo price. Checked against every
-// row of the retired 34-line price table: the combo price per unit was
-// constant from two upward (298.000/2 = 447.000/3 = 149.000), so one number
-// per product is all the table ever encoded. Gifts and free shipping are
-// ticked per basket combination in Cài đặt → Quà tặng.
+// from two units — of the same product or mixed with other products of the
+// same mix group — every unit sells at its own product's combo price. Checked
+// against every row of the retired 34-line price table: the combo price per
+// unit was constant from two upward (298.000/2 = 447.000/3 = 149.000), so one
+// number per product is all the table ever encoded. 01/10 (chủ shop): the same
+// rule holds for ANY basket size up to maxBasketQuantity — 4 túi 596k, 5 túi
+// 740k, 9 túi 1.341k, 2 Vàng + 1 combo 10 gói Cam 477k, Tropical + Vàng 323k —
+// so the bot quotes and closes big/mixed baskets itself. Gifts and free
+// shipping follow the rules in Cài đặt → Quà tặng.
 
 function money(value) {
   return Math.max(0, Math.round(Number(value) || 0));
@@ -31,14 +34,19 @@ export function giftTextForKey(key, { livestream = false } = {}) {
   return giftsForKey(key, { livestream }).map(gift => gift.name).join(' + ');
 }
 
-const comboIndex = () => new Set(listCombos().map(combo => combo.key));
-
-const unpriceable = (reason, totalQuantity = 0) => ({ priceable: false, reason, total: 0, subtotal: 0, shippingFee: 0, gift: '', gifts: [], totalQuantity, lines: [] });
+const unpriceable = (reason, totalQuantity = 0) => ({ priceable: false, reason, total: 0, subtotal: 0, listSubtotal: 0, discount: 0, shippingFee: 0, gift: '', gifts: [], giftNote: '', totalQuantity, lines: [] });
 
 /**
  * Prices a basket of { sku | product | name, quantity }. Returns
- * { priceable, reason, total, gift, gifts, totalQuantity, lines }. A basket
- * that cannot be priced exactly is handed to a human rather than guessed at.
+ * { priceable, reason, key, subtotal, listSubtotal, discount, shippingFee,
+ * total, gift, gifts, giftNote, totalQuantity, lines }. A basket that cannot
+ * be priced exactly is handed to a human rather than guessed at:
+ * 'unknown-product' / 'bad-quantity' / 'empty' / 'no-price', 'not-a-combo'
+ * (products of different mix groups, or a sold-alone product with anything
+ * else) and 'too-many' (more than maxBasketQuantity units — wholesale).
+ * `listSubtotal` is every unit at its single price ("Tổng giá" of the staff
+ * summary), `discount` its gap to `subtotal`; `giftNote` is a staff-only note
+ * for basket sizes whose gifts the owner has not confirmed (6–9, >10 units).
  * `livestream: true` (khách từ phiên live) mới tính quà chỉ dành cho khách live.
  */
 export function priceBasket(items = [], { livestream = false } = {}) {
@@ -54,16 +62,19 @@ export function priceBasket(items = [], { livestream = false } = {}) {
   }
   if (!lines.length) return unpriceable('empty');
   const totalQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
-  // Only a listed combination is auto-priced: a non-mixable product with
-  // anything else, or more than maxComboQuantity units, goes to a person.
+  // Any size up to maxBasketQuantity is priced; products of different mix
+  // groups (Nghệ Lành with a granola bag…) go to a person.
   const key = comboKey(lines);
-  if (!comboIndex().has(key)) return unpriceable(totalQuantity > maxComboQuantity ? 'too-many' : 'not-a-combo', totalQuantity);
+  if (totalQuantity > maxBasketQuantity) return unpriceable('too-many', totalQuantity);
+  if (!canShareBasket(lines.map(line => line.product))) return unpriceable('not-a-combo', totalQuantity);
 
   let total = 0;
+  let listSubtotal = 0;
   const priced = lines.map(line => {
     const unit = unitPriceInBasket(line.product, totalQuantity);
     const lineTotal = money(unit * line.quantity);
     total += lineTotal;
+    listSubtotal += money(line.product.unitPrice * line.quantity);
     return {
       sku: line.sku,
       name: line.name,
@@ -82,10 +93,13 @@ export function priceBasket(items = [], { livestream = false } = {}) {
     reason: '',
     key,
     subtotal: money(total),
+    listSubtotal: money(Math.max(listSubtotal, total)),
+    discount: money(Math.max(listSubtotal, total) - total),
     shippingFee,
     total: money(total + shippingFee),
     gift: gifts.map(gift => gift.name).join(' + '),
     gifts,
+    giftNote: largeBasketGiftNote(totalQuantity),
     totalQuantity,
     lines: priced
   };
@@ -99,7 +113,8 @@ export function priceBasket(items = [], { livestream = false } = {}) {
  * short on purpose, because it is paid for on every single reply.
  */
 export function buildCatalogPrompt({ compact = false } = {}) {
-  const products = getCatalogProducts().filter(product => product.active);
+  // Sản phẩm chỉ CSKH bán (staffOnly) không vào danh mục của mô hình: bot không bán.
+  const products = getCatalogProducts().filter(product => product.active && !product.staffOnly);
   if (!products.length) return '';
   // Bản cũ (mặc định): tối đa 6 tên gọi khác, bỏ hashtag, kèm dòng tối đa sản phẩm/đơn.
   if (!compact) {
@@ -109,7 +124,7 @@ export function buildCatalogPrompt({ compact = false } = {}) {
         const aliases = product.aliases.filter(alias => !alias.startsWith('#')).slice(0, 6);
         return `- ${product.name}${aliases.length ? `: ${aliases.join(', ')}` : ''}`;
       }),
-      `Tối đa ${maxComboQuantity} sản phẩm/đơn.`
+      `Tối đa ${maxBasketQuantity} sản phẩm/đơn.`
     ].join('\n');
   }
   // Chỉ giữ cách gọi MANG THÊM thông tin so với tên chuẩn ("nguyên bản", "nhiều
@@ -148,7 +163,8 @@ export function buildCatalogPrompt({ compact = false } = {}) {
  */
 export function quoteTiers(productText, { livestream = false } = {}) {
   const product = matchProduct(productText);
-  if (!product) return null;
+  // Sản phẩm chỉ CSKH bán: bot không báo giá (mẫu rơi về hỏi sản phẩm; engine chuyển nhân viên trước).
+  if (!product || product.staffOnly) return null;
   const tiers = [];
   const top = product.comboPrice > 0 ? maxComboQuantity : 1;
   for (let quantity = 1; quantity <= top; quantity += 1) {
@@ -187,4 +203,43 @@ export function describeGiftTable() {
   }
   if (!groups.size) return ['- Hiện chưa có quà tặng.'];
   return [...groups.entries()].map(([rule, names]) => `- ${names.join(' + ')}: ${rule}`);
+}
+
+function formatVnd(value) {
+  return `${money(value).toLocaleString('vi-VN')}đ`;
+}
+
+/**
+ * Câu tóm tắt đơn kiểu nhân viên (Thúy Hằng), cho mẫu xác nhận đơn:
+ *
+ *   Dạ đơn hàng của mình gồm:
+ *   • 2 Granola Túi Vàng 350g
+ *   • 1 Combo 10 gói Cam
+ *   Tổng giá: 527.000đ
+ *   🎉 Ưu đãi còn: 477.000đ
+ *   ✅ Miễn phí vận chuyển
+ *   🎁 Tặng kèm Bộ bát gáo dừa + Muỗng dừa
+ *
+ * Nhận giỏ [{ sku | product | name, quantity }] hoặc kết quả priceBasket sẵn.
+ * Không giảm giá thì bỏ dòng "Ưu đãi còn"; còn phí ship thì ghi phí + tổng thanh
+ * toán. Quà miễn ship không lặp ở dòng quà. Giỏ không tính được giá → ''.
+ * Tuỳ chọn: { livestream, intro (câu mở đầu), gifts (danh sách quà thay cho quà
+ * theo bảng, vd. sau applyGiftSwap) }.
+ */
+export function formatOrderSummary(basket, { livestream = false, intro = 'Dạ đơn hàng của mình gồm:', gifts = null } = {}) {
+  const priced = Array.isArray(basket) ? priceBasket(basket, { livestream }) : basket;
+  if (!priced?.priceable || !priced.lines?.length) return '';
+  const lines = [intro, ...priced.lines.map(line => `• ${line.quantity} ${line.name}`)];
+  const listSubtotal = priced.listSubtotal || priced.subtotal;
+  lines.push(`Tổng giá: ${formatVnd(listSubtotal)}`);
+  if (priced.subtotal < listSubtotal) lines.push(`🎉 Ưu đãi còn: ${formatVnd(priced.subtotal)}`);
+  if (priced.shippingFee > 0) {
+    lines.push(`🚚 Phí vận chuyển: ${formatVnd(priced.shippingFee)}`);
+    lines.push(`💰 Tổng thanh toán: ${formatVnd(priced.total)}`);
+  } else {
+    lines.push('✅ Miễn phí vận chuyển');
+  }
+  const giftNames = (Array.isArray(gifts) ? gifts : priced.gifts || []).filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).filter(Boolean);
+  if (giftNames.length) lines.push(`🎁 Tặng kèm ${giftNames.join(' + ')}`);
+  return lines.join('\n');
 }

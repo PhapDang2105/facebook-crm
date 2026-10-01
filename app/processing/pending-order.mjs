@@ -4,10 +4,21 @@
 // restart and stays scoped to one customer.
 
 export const pendingOrderTtlMs = 2 * 60 * 60 * 1000;
+// Vòng 12: giỏ đã có tin nhắc giữ đơn (bám đuổi ORDER_ADDRESS_REMIND, tới 24 giờ) còn dùng được tới
+// 24 giờ sau lần nhắc — khách trả lời tin nhắc bằng SĐT/địa chỉ không bị hỏi lại vị.
+export const remindedPendingOrderTtlMs = 24 * 60 * 60 * 1000;
 export const orderStepTemplateIds = ['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION', 'ORDER_UPDATE'];
+// Bước mà giỏ đang giữ vẫn dùng được (vòng 12: thêm tin nhắc giữ đơn, xin SĐT tra địa chỉ cũ,
+// hỏi vị, giỏ chờ tính giá). Không đổi isOrderStep: renderChatbotReply dùng nó để chọn bộ soạn đơn.
+export const basketStepTemplateIds = [...orderStepTemplateIds, 'ORDER_ADDRESS_REMIND', 'ORDER_ADDRESS_OLD_ASK_PHONE', 'ORDER_CUSTOM_BASKET', 'ASK_FLAVOR'];
 
 export function isOrderStep(templateId) {
   return orderStepTemplateIds.includes(String(templateId || '').trim());
+}
+
+/** Bot vừa ở một bước của luồng đơn (kể cả nhắc giữ đơn / hỏi vị / xin SĐT tra địa chỉ cũ). */
+export function isBasketStep(templateId) {
+  return basketStepTemplateIds.includes(String(templateId || '').trim());
 }
 
 export function normalizePendingOrder(value) {
@@ -19,9 +30,12 @@ export function normalizePendingOrder(value) {
   // How many times the bot has already asked for a missing part of the address,
   // so it stops asking after two tries and lets the order through.
   const addressAsks = Math.max(0, Math.round(Number(value?.addressAsks) || 0));
+  // Vòng 12: số túi khách đã nêu khi chưa nói vị ("Cho mình 2 túi" → hỏi vị → "Túi vàng" = 2 Vàng).
+  const askedBagCount = Math.max(0, Math.min(99, Math.round(Number(value?.askedBagCount) || 0)));
   // A record holding only a phone number is still worth keeping: customers give
   // contact details before naming products just as often as the other way round.
-  if (!at || (!items.length && !phone && !address)) return null;
+  if (!at || (!items.length && !phone && !address && !askedBagCount && !value?.wantsPrevious)) return null;
+  const remindedAt = Number(value?.remindedAt) || 0;
   return {
     key,
     at,
@@ -30,6 +44,11 @@ export function normalizePendingOrder(value) {
     phone,
     address,
     addressAsks,
+    ...(askedBagCount ? { askedBagCount } : {}),
+    // Vòng 12: khách đã nói "gửi địa chỉ cũ / như mấy lần" từ tin đặt đầu: nhớ để lượt sau (khi có SĐT) lấy lại.
+    ...(value?.wantsPrevious ? { wantsPrevious: true } : {}),
+    // Vòng 12: lúc gửi tin nhắc giữ đơn gần nhất (follow-up gọi touchPendingOrder).
+    ...(remindedAt ? { remindedAt } : {}),
     // Đã gợi ý lên 2 túi cho giỏ này rồi thì không gợi ý lại.
     ...(value?.upsold ? { upsold: true } : {}),
     // Đang chờ khách xác nhận đặt THÊM đơn (khách đã có đơn trong 7 ngày).
@@ -42,11 +61,30 @@ export function normalizePendingOrder(value) {
   };
 }
 
+/** Giỏ còn hạn tới lúc nào: 2 giờ từ khi lập, hoặc 24 giờ từ tin nhắc giữ đơn gần nhất. */
+export function pendingOrderExpiresAt(pending) {
+  const at = Number(pending?.at) || 0;
+  const remindedAt = Number(pending?.remindedAt) || 0;
+  return Math.max(at + pendingOrderTtlMs, remindedAt ? remindedAt + remindedPendingOrderTtlMs : 0);
+}
+
 /** A basket is reusable only while the conversation is still on an order step. */
 export function usablePendingOrder(value, { now = Date.now(), templateId = '' } = {}) {
   const pending = normalizePendingOrder(value);
   if (!pending) return null;
-  if (!isOrderStep(templateId)) return null;
-  if (now - pending.at > pendingOrderTtlMs) return null;
+  if (!isBasketStep(templateId)) return null;
+  if (now > pendingOrderExpiresAt(pending)) return null;
   return pending;
+}
+
+/**
+ * Vòng 12: tin nhắc giữ đơn vừa gửi (bám đuổi ORDER_ADDRESS_REMIND) — ghi mốc nhắc vào giỏ để giỏ còn
+ * dùng được 24 giờ sau lần nhắc. follow-up.mjs (markConversationFollowedUp) gọi trên hội thoại trong
+ * updateMessagingStore. Trả true khi có giỏ để ghi.
+ */
+export function touchPendingOrder(conversation, now = Date.now()) {
+  const pending = conversation?.pendingOrder;
+  if (!pending || typeof pending !== 'object' || !(Array.isArray(pending.items) && pending.items.length)) return false;
+  conversation.pendingOrder = { ...pending, remindedAt: Number(now) || Date.now() };
+  return true;
 }

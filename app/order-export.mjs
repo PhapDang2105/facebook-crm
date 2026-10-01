@@ -1,8 +1,50 @@
-import { comboKey, findProductBySku, getGifts, giftsForKey, matchProduct } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, getGifts, giftsForKey, livestreamGiftSkus, matchProduct, normalizeText } from './processing/catalog.mjs';
 import { shippingFeeForKey, unitPriceInBasket } from './processing/pricing.mjs';
 import { canonicalLocationColumns, checkLocationColumns, normalizeExportLocation, streetForDisplay } from './processing/locations.mjs';
+import { isLivestreamOrder } from './conversation-orders.mjs';
 
 export { normalizeExportLocation };
+
+/** Mã dòng của đơn hệ thống trong bảng Đơn hàng (như systemOrderRowId ở web/app.js). */
+export function systemOrderRowId(order = {}) {
+  return `${order.source === 'Landing page' ? 'LP' : 'CB'}-${order.id}`;
+}
+
+/**
+ * Dòng quà của đơn kéo từ POS: `giftItems` (dòng tặng POS, ghi khi đồng bộ), đơn
+ * kéo về trước đó chỉ có chữ `gift` ("Quà Tặng LIVE + Bộ bát gáo dừa") thì tra tên
+ * (hay SKU) trong bảng quà. Quà không tra được SKU thì bỏ (kho không nhận dòng không mã).
+ */
+export function posGiftLines(order = {}) {
+  if (Array.isArray(order.giftItems) && order.giftItems.length) {
+    return order.giftItems.map(item => ({ sku: String(item?.sku || '').trim().toUpperCase(), quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)), weight: Number(item?.weight) || 0 })).filter(item => item.sku);
+  }
+  // Tên quà có thể chứa " + " ("Quạt + Bát gáo dừa"): so cả cụm giữa các dấu " + ",
+  // không tách từng mảnh. Chữ là SKU (POS ghi display_id khi thiếu tên) cũng nhận.
+  const text = String(order.gift || '');
+  const padded = ` + ${normalizeText(text)} + `;
+  const parts = new Set(text.split(' + ').map(part => part.trim().toUpperCase()).filter(Boolean));
+  return (getGifts() || [])
+    .filter(gift => gift.sku && (padded.includes(` + ${normalizeText(gift.name)} + `) || parts.has(gift.sku)))
+    .map(gift => ({ sku: gift.sku, quantity: 1, weight: gift.weight }));
+}
+
+/**
+ * Cờ của đơn hệ thống mà dòng bảng không mang, theo mã dòng ("CB-…"/"LP-…"):
+ * khách live (quà live), quà ưu đãi bám đuổi, và dòng quà POS của đơn nguồn POS.
+ */
+export function exportFactsForOrders(orders = []) {
+  const facts = new Map();
+  for (const order of Array.isArray(orders) ? orders : []) {
+    if (!order?.id) continue;
+    facts.set(systemOrderRowId(order), {
+      livestream: isLivestreamOrder(order),
+      promoGift: Boolean(order.promoGift),
+      ...(order.source === 'POS' ? { posGifts: posGiftLines(order) } : {})
+    });
+  }
+  return facts;
+}
 
 export const EXPORT_COLUMNS = [
   'STT*', 'Mã đơn hàng', 'Nguồn đơn hàng', 'Ngày đặt hàng', 'Tác động tồn kho', 'Gửi email thông báo',
@@ -261,7 +303,7 @@ export function exportPreviewStreets(rows) {
  * đơn đó bị bỏ khỏi file — và khỏi `rows.sourceRowIndexes` để nơi gọi loại
  * cùng những dòng nguồn ấy khi ghi tệp khách hàng.
  */
-export function buildExportRows(orderData = {}, { skipInvalidLocations = false } = {}) {
+export function buildExportRows(orderData = {}, { skipInvalidLocations = false, orderFacts = null } = {}) {
   const headers = Array.isArray(orderData.headers) ? orderData.headers : [];
   const rows = Array.isArray(orderData.rows) ? orderData.rows : [];
   const sourceIndex = new Map(headers.map((header, index) => [normalizeColumnName(header), index]));
@@ -284,6 +326,7 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
   const invalidLocations = [];
   const exportedSourceRowIndexes = [];
   const bagQuantityByOrder = new Map();
+  const emittedSkusByOrder = new Map();
   let orderNumber = 0;
 
   // Catalogue lines of each order, so the order's combination decides its
@@ -346,7 +389,11 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
     // order's first catalogue line only.
     // Đơn khách livestream trong file: địa chỉ mở đầu "(Live) " (bot/nhân viên ghi)
     // hoặc cột "Livestream" = Có/true/1 — mới kèm quà chỉ khách live.
-    const livestream = /^\s*\(live\)/i.test(String(value(row, 'Địa chỉ') || ''))
+    // Đơn hệ thống (CB-/LP-…): cờ trên đơn ở máy chủ (orderFacts) — đơn nhân viên
+    // tạo cho khách live có cờ livestream mà địa chỉ không mang "(Live) ".
+    const facts = sourceOrderId && orderFacts?.get ? orderFacts.get(String(sourceOrderId).trim()) || null : null;
+    const livestream = Boolean(facts?.livestream)
+      || /^\s*\(live\)/i.test(String(value(row, 'Địa chỉ') || ''))
       || /^(co|true|1|x|yes)$/i.test(normalizeColumnName(value(row, 'Livestream')));
     // Miễn ship theo cờ đơn: đơn dùng thử bám đuổi ghi "(Freeship) " đầu địa chỉ
     // (hay cột "Miễn ship" = Có) thì không cộng phí ship dù giỏ 1 túi.
@@ -356,19 +403,36 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false }
     // Ô Đơn giá của đơn hệ thống là giá khách trả (paidPrice, đã gồm ship nhân
     // viên thu và giá gõ tay): dùng thẳng; ô trống/0 thì tính theo bộ giá như cũ.
     const items = splitSkuForExport(value(row, 'Mã mẫu mã'), value(row, 'Số lượng'), value(row, 'Đơn giá'), useComboPricing, value(row, 'Sản phẩm'), shippingFee, { paidPrice: true });
-    // Gifts ticked for this combination in Cài đặt → Quà tặng, once per order, after its last product line.
-    if (basketKey && lastRowIndexByOrder.get(orderKey) === rowIndex) {
-      for (const gift of giftsForKey(basketKey, { livestream })) {
-        if (gift.sku && !items.some(item => item.sku === gift.sku)) items.push({ sku: gift.sku, quantity: 1, price: 0, weight: gift.weight });
-      }
-      // Quà ưu đãi bám đuổi (bộ bát gáo dừa cho combo đúng 2 túi): ghi trong ghi chú
+    // Quà của đơn, một lần sau dòng sản phẩm cuối. Mã đã ra ở dòng trước của cùng
+    // đơn (combo POS "CB3-…+BGD+M" đã gồm bát + muỗng) không ghi lại lần hai.
+    const emitted = emittedSkusByOrder.get(orderKey) || new Set();
+    if (lastRowIndexByOrder.get(orderKey) === rowIndex) {
+      const has = sku => emitted.has(sku) || items.some(item => item.sku === sku);
+      const addGift = (sku, quantity, weight) => {
+        const code = String(sku || '').trim().toUpperCase();
+        // Quà là túi sản phẩm (01/10: đơn 5 túi tặng 1 Túi Vàng, 10 túi thêm Túi Nâu): dòng tặng giá 0
+        // riêng, kể cả khi khách cũng mua túi cùng mã — chỉ bỏ khi đã có dòng tặng (giá 0) cùng mã.
+        const duplicate = findProductBySku(code) ? items.some(item => item.sku === code && !(Number(item.price) > 0)) : has(code);
+        if (code && !duplicate) items.push({ sku: code, quantity: Math.max(1, Math.round(Number(quantity) || 1)), price: 0, weight: weight || skuWeight(code) });
+      };
+      // Đơn nguồn POS (nhân viên/Facebook Shop lên trên Pancake): quà là đúng các
+      // dòng tặng trên POS (Quà Tặng LIVE nhân viên thêm tay…), không đoán lại.
+      const posGifts = Array.isArray(facts?.posGifts) && facts.posGifts.length ? facts.posGifts : null;
+      if (posGifts) posGifts.forEach(gift => addGift(gift.sku, gift.quantity, gift.weight));
+      // Còn lại: quà tick cho tổ hợp giỏ trong Cài đặt → Quà tặng.
+      else if (basketKey) giftsForKey(basketKey, { livestream }).forEach(gift => addGift(gift.sku, 1, gift.weight));
+      // Quà ưu đãi bám đuổi (bộ bát gáo dừa cho combo đúng 2 túi): cờ đơn, ghi chú
       // đơn ("Ưu đãi bám đuổi combo 2 túi: tặng …") hay cột "Quà ưu đãi" → dòng BGD.
-      const promo = String(value(row, 'Quà ưu đãi') || '').trim() || /ưu đãi bám đuổi combo 2 túi: tặng/i.test(String(value(row, 'Ghi chú') || ''));
-      if (promo && catalogQuantity === 2 && !items.some(item => item.sku === 'BGD')) {
+      // Đơn đã có quà live (Quạt + Bát gáo dừa) thì không thêm bát thứ hai.
+      const promo = facts?.promoGift || String(value(row, 'Quà ưu đãi') || '').trim() || /ưu đãi bám đuổi combo 2 túi: tặng/i.test(String(value(row, 'Ghi chú') || ''));
+      const hasLiveGift = [...livestreamGiftSkus()].some(has);
+      if (promo && catalogQuantity === 2 && !hasLiveGift && !has('BGD')) {
         const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === 'BGD');
         items.push({ sku: 'BGD', quantity: 1, price: 0, weight: bowl?.weight || SKU_WEIGHTS.BGD });
       }
     }
+    items.forEach(item => { if (item.sku) emitted.add(item.sku); });
+    emittedSkusByOrder.set(orderKey, emitted);
     items.forEach((item, itemIndex) => {
       const output = Array(EXPORT_COLUMNS.length).fill('');
       if (isFirstOrderLine && itemIndex === 0) {

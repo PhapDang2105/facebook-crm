@@ -92,7 +92,7 @@ function bagPicks(raw) {
   const folded = foldVietnamese(String(raw || '')
     .replace(/n[âa]u\s+(v[ịi]\s+)?ca\s*cao/giu, 'nâu').replace(/ca\s+cao/giu, 'cacao')
     .replace(/s[ôo]\s*-?\s*c[ôo]\s*-?\s*la|socola|chocolate|choco\b/giu, 'nâu'))
-    .replace(/xanh (duong|la cay|mint|bac ha)|dau xanh/g, ' ').replace(/\+?\d{9,11}/g, ' ');
+    .replace(/xanh (duong|la cay|mint|min|bac ha|bien|ngoc|da troi|nhat)|dau xanh/g, ' ').replace(/\+?\d{9,11}/g, ' ');
   const picks = new Map();
   let explicitQuantity = false;
   for (const match of folded.matchAll(/(?:\b(\d{1,2})\s*(?:tui|goi|bich|x)?\s*)?\b(xanh|vang|nau|cacao)\b(?:\s*(?:x\s*)?(\d{1,2})\b)?/g)) {
@@ -118,7 +118,7 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   const s = core(raw);
   // Khách quan tâm gói nhỏ / combo 10 gói / sản phẩm khác (ưu đãi chỉ cho túi lớn),
   // hay đang trả lời câu hỏi về gói nhỏ bot vừa hỏi: sang luồng thường.
-  if (/\b(goi nho|chia goi|combo 10|hop 10|10 goi|tung bua|tropical|xanh mint|xanh bac ha|bot nghe|nghe lanh|hat an lanh|hu hat)\b/.test(s) || lastTemplateId === 'PACKAGING_INFO') {
+  if (/\b(goi nho|chia goi|combo 10|hop 10|10 goi|tung bua|tropical|xanh mint|xanh bac ha|xanh bien|xanh ngoc|xanh duong|xanh min|xanh da troi|bot nghe|nghe lanh|hat an lanh|hu hat)\b/.test(s) || lastTemplateId === 'PACKAGING_INFO') {
     return { exit: 'converted', patch: { stage: 'converted', endedAt: now, reason: 'khách quan tâm sản phẩm khác' } };
   }
   const phone = extractVietnamesePhone(raw);
@@ -144,7 +144,14 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   const info = s.length <= 90 && infoRules.find(([rule, pattern, , exclude]) => !PRICE_RULES.has(rule) && pattern.test(s) && !(exclude && exclude(s, {})));
   if (info && !phone) return { value: { template_id: info[2], also: 'TRIAL_NEXT_STEP', values: { bags } } };
   if (asks && picks.size >= 2 && !phone) return { value: { template_id: 'BAG_COMPARISON', also: 'TRIAL_NEXT_STEP', values: { bags } } };
-  if (FREESHIP.test(s)) return { value: { template_id: 'TRIAL_FREESHIP_INFO', values: { bags } } };
+  // Vòng 12 (chủ shop 01/10): trong cửa sổ ưu đãi 36 giờ, khách đặt điều kiện "lấy 1 túi xanh nếu miễn ship thì chốt" → xác
+  // nhận miễn ship và chốt luôn túi đó (bước xin SĐT/địa chỉ); chưa nêu túi thì báo miễn ship như cũ.
+  if (FREESHIP.test(s)) {
+    const wantsOne = picks.size === 1 && !phone && !(quantity >= 2) && !(looseQuantity >= 2) && /\b(lay|dat|mua|chot|ship|gui|thu)\b/.test(s);
+    const product = wantsOne ? bagProduct([...picks.keys()][0]) : null;
+    if (product) return { value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: '1', also: 'TRIAL_FREESHIP_INFO' }, patch: { stage: 'chosen', bag: product.name, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) } };
+    return { value: { template_id: 'TRIAL_FREESHIP_INFO', values: { bags } } };
+  }
   // Đúng 2 túi lớn ("1 xanh 1 vàng", "2 túi xanh", "combo 2", "lấy combo 2 túi xanh"): rời luồng 1 túi nhưng giữ
   // ưu đãi combo 2 → tặng bát gáo dừa (renderOrder đọc context.promoBowl). Xét TRƯỚC câu hỏi giá/khuyến mãi:
   // chữ "combo" nằm trong DISCOUNT, mà mẫu mời ghi "Combo 2 Túi bất kỳ" nên khách trả lời đúng chữ đó là chọn,

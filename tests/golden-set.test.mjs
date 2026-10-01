@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-process.env.GOLDEN_SET_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'golden-')), 'golden-set.json');
+process.env.GOLDEN_SET_PATH = path.join(tempDir('golden-'), 'golden-set.json');
 const { importGoldenItems, labelGoldenItem, goldenSetOverview, goldenLabeled, readGoldenSet, enrichGoldenContext, goldenContextFields } = await import('../app/golden-set.mjs');
 
 test('bộ test vàng: nạp tin (không trùng id, giữ nhãn đã chấm), chấm nhãn, bỏ qua, tóm tắt gợi ý đúng/sai', async () => {

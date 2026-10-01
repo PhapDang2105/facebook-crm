@@ -9,13 +9,20 @@
 //    chiến dịch trong adTitle ("Tên quảng cáo · Tên chiến dịch", pancake.mjs ghép như vậy).
 //  - Đơn landing: utm_campaign (campaignKey) khớp mã chiến dịch, rồi khớp tên
 //    (không phân biệt hoa thường); không khớp thì là một dòng riêng nguồn "utm".
+//    utm_campaign là bằng chứng trực tiếp nên đứng trước lần bấm quảng cáo
+//    tin nhắn, kể cả khi đơn landing đã gắn vào một hội thoại.
 //  - Còn lại: chưa quy được (`unattributed`).
-// Đơn hủy/hoàn và form landing bỏ dở chưa xác nhận không tính doanh thu
-// (luật chung ở order-facts.mjs).
+// Đơn hủy/hoàn/bom, đơn trùng đã xóa khỏi bảng và form landing bỏ dở chưa xác
+// nhận không tính doanh thu (luật chung ở order-facts.mjs).
+//
+// ROAS (metrics.mjs → roasOf): doanh thu đơn quy về quảng cáo Meta ÷ chi phí
+// Meta. Dòng "utm" không có chi phí tương ứng nên không vào tổng ROAS, nằm
+// riêng ở `utm`.
 import { campaignConfig } from './config.mjs';
 import { listLandingOrders } from './landing-orders.mjs';
 import { readMessagingStore } from './messaging-store.mjs';
 import { adsConnectionStatus, readAdStore, vietnamDay } from './meta-ads.mjs';
+import { cpaOf, METRIC_DEFINITIONS, roasOf, withAdsFreshness } from './metrics.mjs';
 import { collectOrderFacts, datesBetween, DAY_MS, isCancelledOrder, isValidFact, normalizeDayRange } from './order-facts.mjs';
 
 export { isCancelledOrder };
@@ -129,8 +136,10 @@ export function buildCampaignReport({
     if (!entry || !inRange(String(entry.date))) continue;
     totalSpend += Number(entry.spend) || 0;
     const campaignId = String(entry.campaignId || adMap[entry.adId]?.campaignId || '');
-    if (!campaignId) continue;
-    const row = metaRow(campaignId, adMap[entry.adId]?.campaignName);
+    // Chi tiêu không rõ chiến dịch vẫn là chi phí Meta: vào dòng "chưa rõ chiến dịch" thay vì rơi mất khỏi tổng.
+    const row = campaignId
+      ? metaRow(campaignId, adMap[entry.adId]?.campaignName)
+      : rowFor({ key: UNKNOWN_AD_CAMPAIGN.id, ...UNKNOWN_AD_CAMPAIGN, source: 'meta' });
     row.spend += Number(entry.spend) || 0;
     row.impressions += Number(entry.impressions) || 0;
     row.clicks += Number(entry.clicks) || 0;
@@ -149,7 +158,18 @@ export function buildCampaignReport({
   const attribute = (fact, conversation) => {
     if (!isValidFact(fact) || !inRange(fact.dateVN)) return;
     let row = null;
-    if (conversation) {
+    if (fact.source === 'landing') {
+      // Đơn landing → utm_campaign. Trước đây đơn landing đã gắn vào hội thoại
+      // bỏ qua utm (đi nhánh hội thoại), nên mất chiến dịch hoặc bị gán nhầm
+      // cho quảng cáo tin nhắn khách bấm trước đó.
+      const key = safeDecode(String(fact.utmCampaign || '').trim());
+      // "{{campaign.id}}" là tham số động Meta chưa thay: không nói được gì.
+      if (key && !key.includes('{{')) {
+        const campaign = knownCampaigns[key] || byName.get(lower(key));
+        row = campaign ? metaRow(campaign.id) : rowFor({ key: `utm:${lower(key)}`, id: key, name: key, source: 'utm' });
+      }
+    }
+    if (!row && conversation) {
       // Đơn trong hội thoại → lần bấm quảng cáo gần nhất trong cửa sổ quy đơn.
       const click = referralForOrder(conversation, fact.createdAt, attributionWindowMs);
       if (click) {
@@ -158,14 +178,6 @@ export function buildCampaignReport({
         if (mapped?.campaignId) row = metaRow(mapped.campaignId, mapped.campaignName);
         else if (nameFromTitle) row = rowForCampaignName(nameFromTitle);
         else row = rowFor({ key: UNKNOWN_AD_CAMPAIGN.id, ...UNKNOWN_AD_CAMPAIGN, source: 'meta' });
-      }
-    } else if (fact.source === 'landing') {
-      // Đơn landing → utm_campaign (hoặc trang landing).
-      const key = safeDecode(String(fact.utmCampaign || '').trim());
-      // "{{campaign.id}}" là tham số động Meta chưa thay: không nói được gì.
-      if (key && !key.includes('{{')) {
-        const campaign = knownCampaigns[key] || byName.get(lower(key));
-        row = campaign ? metaRow(campaign.id) : rowFor({ key: `utm:${lower(key)}`, id: key, name: key, source: 'utm' });
       }
     }
     rowOfFact.set(fact, row);
@@ -196,9 +208,6 @@ export function buildCampaignReport({
   }
 
   // CPA/ROAS chỉ có nghĩa khi có chi tiêu: dòng utm (không có số chi) để null.
-  const cpaOf = (spend, orders) => (spend && orders ? round(spend / orders) : null);
-  const roasOf = (spend, revenue) => (spend ? round(revenue / spend, 2) : null);
-
   const campaigns = [...rows.values()].map(row => ({
     id: row.id,
     name: row.name,
@@ -212,46 +221,61 @@ export function buildCampaignReport({
     orders: row.orders,
     revenue: round(row.revenue),
     cpa: cpaOf(row.spend, row.orders),
-    roas: roasOf(row.spend, row.revenue),
+    roas: roasOf(row.revenue, row.spend),
     daily: dates.map(date => {
       const bucket = row.byDate.get(date) || { spend: 0, orders: 0, revenue: 0 };
       return { date, spend: round(bucket.spend, 2), orders: bucket.orders, revenue: round(bucket.revenue) };
     })
   })).sort((first, second) => second.spend - first.spend || second.revenue - first.revenue);
 
-  // Tổng chỉ gồm đơn đã quy được về chiến dịch; đơn chưa quy được nằm riêng ở `unattributed`.
-  const sum = key => campaigns.reduce((total, row) => total + row[key], 0);
+  // Tổng (và ROAS tài khoản) chỉ gồm chi phí Meta và đơn quy về quảng cáo Meta —
+  // cùng nguồn với chi phí. Đơn landing gắn UTM không khớp chiến dịch nào có chi
+  // phí nằm riêng ở `utm`; trước đây chúng được cộng vào doanh thu mà không có
+  // chi phí tương ứng nên ROAS bị phóng đại. Đơn chưa quy được nằm ở `unattributed`.
+  const metaRows = [...rows.values()].filter(row => row.source === 'meta');
+  const utmRows = [...rows.values()].filter(row => row.source !== 'meta');
+  const sum = (list, key) => list.reduce((total, row) => total + row[key], 0);
   const totals = {
-    spend: round(sum('spend'), 2),
-    impressions: sum('impressions'),
-    clicks: sum('clicks'),
-    messages: sum('messages'),
-    orders: sum('orders'),
-    revenue: round(sum('revenue'))
+    spend: round(sum(metaRows, 'spend'), 2),
+    impressions: sum(metaRows, 'impressions'),
+    clicks: sum(metaRows, 'clicks'),
+    messages: sum(metaRows, 'messages'),
+    orders: sum(metaRows, 'orders'),
+    revenue: round(sum(metaRows, 'revenue'))
   };
   totals.cpa = cpaOf(totals.spend, totals.orders);
-  totals.roas = totals.spend ? round(totals.revenue / totals.spend, 2) : null;
+  totals.roas = roasOf(totals.revenue, totals.spend);
+  const utm = { orders: sum(utmRows, 'orders'), revenue: round(sum(utmRows, 'revenue')) };
 
-  // Toàn cảnh: mọi đơn trong khoảng (đã quy + chưa quy) trên toàn bộ chi tiêu
-  // (kể cả chi tiêu của quảng cáo chưa rõ chiến dịch).
-  const blendedOrders = totals.orders + unattributed.orders;
-  const blendedRevenue = round(totals.revenue + unattributed.revenue);
+  // Doanh thu quy về quảng cáo Meta theo ngày: Báo cáo tính ROAS từng kỳ từ đây (cùng định nghĩa).
+  const adRevenueByDate = {};
+  for (const row of metaRows) {
+    for (const [date, bucket] of row.byDate) if (bucket.revenue) adRevenueByDate[date] = (adRevenueByDate[date] || 0) + bucket.revenue;
+  }
+
+  // Toàn cảnh để đối chiếu: mọi đơn trong khoảng (Meta + UTM + chưa quy) và toàn
+  // bộ chi phí. Không gọi là ROAS (doanh thu đơn không đến từ quảng cáo không
+  // phải lợi nhuận của quảng cáo) nên không có trường roas.
+  const blendedOrders = totals.orders + utm.orders + unattributed.orders;
+  const blendedRevenue = round(totals.revenue + utm.revenue + unattributed.revenue);
   const blendedSpend = round(totalSpend, 2);
   const blended = {
     orders: blendedOrders,
     revenue: blendedRevenue,
     spend: blendedSpend,
-    cpa: cpaOf(blendedSpend, blendedOrders),
-    roas: roasOf(blendedSpend, blendedRevenue)
+    cpa: cpaOf(blendedSpend, blendedOrders)
   };
 
   return {
     range: { since, until, days: span },
-    ads: ads || { connected: false, accounts: [], syncedAt: adStore.syncedAt || null },
+    ads: withAdsFreshness(ads || { connected: false, accounts: [], syncedAt: adStore.syncedAt || null }, now),
     totals,
+    utm,
     blended,
     campaigns,
-    unattributed: { orders: unattributed.orders, revenue: round(unattributed.revenue) }
+    unattributed: { orders: unattributed.orders, revenue: round(unattributed.revenue) },
+    adRevenueByDate,
+    definitions: { roas: METRIC_DEFINITIONS.roas }
   };
 }
 

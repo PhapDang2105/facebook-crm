@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, readdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const directory = mkdtempSync(path.join(tmpdir(), 'export-history-'));
+const directory = tempDir('export-history-');
 process.env.EXPORT_HISTORY_PATH = path.join(directory, 'export-history.json');
 process.env.EXPORT_FILES_DIR = path.join(directory, 'exports');
 const { exportHistoryTtlMs, listExports, readExportFile, recordExport } = await import('../app/export-history.mjs');

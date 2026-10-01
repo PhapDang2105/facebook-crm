@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Vòng rà 28/09: combo POS khi giá CRM cao hơn niêm yết, quà bám đuổi, sửa/hủy đơn trên POS, tên tỉnh "TP …".
-const directory = mkdtempSync(path.join(tmpdir(), 'poscombo-'));
+const directory = tempDir('poscombo-');
 process.env.POS_CONFIG_PATH = path.join(directory, 'pos-config.json');
 process.env.META_CONVERSATIONS_PATH = path.join(directory, 'meta-conversations.json');
 process.env.POS_COMBOS_PATH = path.join(directory, 'khong-co-pos-combos.json');

@@ -44,6 +44,8 @@ function normalizeMember(item) {
     active: item.active !== false,
     passwordHash: typeof item.passwordHash === 'string' && item.passwordHash.startsWith('scrypt$') ? item.passwordHash : '',
     passwordSetAt: Number(item.passwordSetAt) || 0,
+    // Phiên bản phiên đăng nhập: tăng khi đổi mật khẩu / cho nghỉ / đổi tên đăng nhập → mọi cookie cũ vô hiệu.
+    sessionVersion: Math.max(0, Math.trunc(Number(item.sessionVersion) || 0)),
     createdAt: Number(item.createdAt) || 0,
     updatedAt: Number(item.updatedAt) || 0
   };
@@ -81,7 +83,7 @@ function updateStaffStore(mutate) {
 
 /** Bản gửi ra giao diện: không có chuỗi băm, chỉ biết đã đặt mật khẩu chưa. */
 export function publicMember(member) {
-  const { passwordHash, ...rest } = member;
+  const { passwordHash, sessionVersion, ...rest } = member;
   return { ...rest, roleName: STAFF_ROLES[member.role], hasPassword: Boolean(passwordHash) };
 }
 
@@ -133,6 +135,10 @@ export async function saveStaffMember(input = {}, { id = '', reservedUsernames =
       ...(passwordHash ? { passwordHash, passwordSetAt: now } : {}),
       updatedAt: now
     });
+    // Thu hồi phiên phía máy chủ: đổi mật khẩu, cho nghỉ (hay đi làm lại), đổi tên đăng nhập.
+    if (existing && (passwordHash || next.active !== existing.active || next.username !== existing.username)) {
+      next.sessionVersion = (existing.sessionVersion || 0) + 1;
+    }
     const items = existing ? store.items.map(item => (item.id === existing.id ? next : item)) : [...store.items, next];
     if (!keepsAnAdmin(items, reservedUsernames)) throw badRequest('Cần ít nhất một Quản trị đang làm có mật khẩu, để còn người vào được trang Nhân sự.');
     store.items = items;
@@ -144,6 +150,17 @@ export async function saveStaffMember(input = {}, { id = '', reservedUsernames =
 export async function staffLoginUsers() {
   const store = await readStaffStore().catch(() => emptyStore());
   return new Map(store.items.filter(item => item.active && item.passwordHash).map(item => [item.username, item.passwordHash]));
+}
+
+/**
+ * Như staffLoginUsers nhưng kèm phiên bản phiên: tên → { hash, version } (cho createAuth).
+ * KHÔNG nuốt lỗi đọc kho: người gọi giữ danh sách cũ khi đĩa trục trặc, thay vì xoá hết
+ * tài khoản (xoá hết = đăng nhập tắt).
+ */
+export async function staffLoginAccounts() {
+  const store = await readStaffStore();
+  return new Map(store.items.filter(item => item.active && item.passwordHash)
+    .map(item => [item.username, { hash: item.passwordHash, version: item.sessionVersion || 0 }]));
 }
 
 /** Nhân viên theo tên đăng nhập (đang làm), để biết vai trò của phiên. */

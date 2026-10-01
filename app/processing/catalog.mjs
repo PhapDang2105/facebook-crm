@@ -70,6 +70,15 @@ function normalizeCatalogProduct(item) {
     // Mixable products (the granola bags) may share one order in any mix of up
     // to maxComboQuantity units; every other product is sold on its own.
     mixable: item?.mixable === true,
+    // Nhóm ghép giỏ (01/10, chủ shop): mọi sản phẩm cùng nhóm ở chung một đơn, từ
+    // 2 đơn vị mỗi món tính giá combo của nó (Tropical + Vàng = 174k + 149k; 2 Vàng
+    // + 1 combo 10 gói Cam = 298k + 179k). Khác `mixable` (3 túi chủ lực trong bảng
+    // mix/giảm giá): Tropical và combo 10 gói ghép đơn được mà không vào bảng đó.
+    // Dữ liệu cũ không có trường: sản phẩm `mixable` thuộc nhóm "granola".
+    mixGroup: normalizeText(item?.mixGroup).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || (item?.mixable === true ? 'granola' : ''),
+    // Chỉ nhân viên CSKH bán (01/10: Granola Siêu Hạt Premium, hàng dạng hũ/hạt):
+    // vẫn tra được theo SKU/tên cho đơn nhân viên, nhưng bot không báo giá/chốt.
+    staffOnly: item?.staffOnly === true,
     active: item?.active !== false
   };
 }
@@ -122,6 +131,8 @@ export function normalizeGiftStore(value) {
   }
   return {
     items,
+    // Quà thay thế (GIFT_SWAP): khách không lấy bát/quạt → 2 gói granola nhỏ.
+    swap: normalizeGiftSwap(value?.swap),
     // Charged on orders that have not earned free shipping. The business
     // quotes "174.000đ + ship 15.000đ" for one bag; 189.000đ is what the
     // customer pays and what the warehouse file must show.
@@ -144,6 +155,29 @@ export function comboKey(items = []) {
 
 /** The largest basket the bot closes on its own; bigger ones are wholesale, handled by a person. */
 export const maxComboQuantity = 3;
+
+/**
+ * Giỏ lớn nhất bot tự tính giá và chốt (01/10, chủ shop: 4, 5, 6, 9, 10 túi đều
+ * tính theo giá combo từng túi). Vượt mức này là đơn sỉ, nhân viên lo.
+ */
+export const maxBasketQuantity = 20;
+
+/** Nhóm ghép giỏ của sản phẩm ('' = chỉ bán riêng). */
+export function mixGroupOf(product) {
+  return product ? String(product.mixGroup || (product.mixable ? 'granola' : '')) : '';
+}
+
+/**
+ * Các sản phẩm có ở chung một giỏ được không: một sản phẩm luôn được; từ hai
+ * sản phẩm khác nhau thì tất cả phải cùng một nhóm ghép (mixGroup) khác rỗng.
+ */
+export function canShareBasket(products = []) {
+  const list = (Array.isArray(products) ? products : []).filter(Boolean);
+  const skus = new Set(list.map(product => product.sku));
+  if (skus.size <= 1) return true;
+  const groups = new Set(list.map(mixGroupOf));
+  return groups.size === 1 && !groups.has('');
+}
 
 /**
  * Every basket combination the business sells: each non-mixable product on
@@ -204,12 +238,158 @@ export function giftsForKey(key, { livestream = false } = {}) {
   const lines = parseComboKey(key);
   if (!lines.length) return [];
   const total = lines.reduce((sum, line) => sum + line.quantity, 0);
-  return readGiftStoreSync().items.filter(gift => gift.active
+  const earned = readGiftStoreSync().items.filter(gift => gift.active
     && (!gift.livestreamOnly || livestream === true)
     && total >= gift.minQuantity
     // maxQuantity > 0 là "tặng tới N túi": tổng túi vượt N thì không tặng nữa.
     && (!gift.maxQuantity || total <= gift.maxQuantity)
     && !lines.some(line => gift.excludedSkus.includes(line.sku)));
+  return applyLiveGiftPolicy(earned, total);
+}
+
+/**
+ * 01/10 (chủ shop): quà live và quà khuyến mãi KHÔNG cộng dồn (đơn từng bị tặng
+ * hai bát: "Quạt + Bát gáo dừa" của live và bộ bát + muỗng). Đơn khách live đúng
+ * 2 túi chỉ nhận quà live (bỏ quà hiện vật khác, giữ miễn ship); từ 3 túi chỉ nhận
+ * quà khuyến mãi thường (bát + muỗng), không thêm quà live — kể cả khi bảng quà
+ * trên máy chủ thiếu "Tối đa 2 túi" cho quà live.
+ */
+export function applyLiveGiftPolicy(gifts, totalQuantity) {
+  const list = Array.isArray(gifts) ? gifts : [];
+  if (!list.some(gift => gift?.livestreamOnly)) return list;
+  if (Number(totalQuantity) >= 3) return list.filter(gift => !gift.livestreamOnly);
+  // Quà hiện vật (có SKU) khác quà live bị bỏ; quà không hiện vật (miễn ship) giữ.
+  return list.filter(gift => gift.livestreamOnly || !gift.sku);
+}
+
+/** Danh sách quà có quà chỉ khách live (Quà Tặng LIVE) không. */
+export function hasLivestreamGift(gifts) {
+  return (Array.isArray(gifts) ? gifts : []).some(gift => gift?.livestreamOnly);
+}
+
+/** SKU kho của các quà chỉ khách live trong bảng quà (vd. QUA-TANG-LIVE). */
+export function livestreamGiftSkus() {
+  return new Set(readGiftStoreSync().items.filter(gift => gift.livestreamOnly && gift.sku).map(gift => gift.sku));
+}
+
+/**
+ * Quà tặng là một túi sản phẩm (đơn 5 túi tặng 1 Túi Vàng; 10 túi tặng thêm Túi
+ * Nâu): SKU quà là SKU sản phẩm trong danh mục. Dòng POS/kho của nó là dòng tặng
+ * giá 0 RIÊNG, không gộp với dòng hàng cùng SKU khách mua.
+ */
+export function isBonusProductGift(gift) {
+  return Boolean(gift?.sku) && Boolean(findProductBySku(gift.sku));
+}
+
+/**
+ * 01/10 (chủ shop): những đơn có số túi chủ shop chưa chốt quà riêng (6–9 túi,
+ * hơn 10 túi) vẫn nhận quà theo bảng (bát + muỗng; từ 10 túi thêm Túi Vàng + Túi
+ * Nâu) nhưng nhân viên cần xem lại. Trả câu ghi chú cho nhân viên, '' khi không cần.
+ */
+export const confirmedGiftQuantities = Object.freeze([1, 2, 3, 4, 5, 10]);
+export function largeBasketGiftNote(totalQuantity) {
+  const total = Math.round(Number(totalQuantity) || 0);
+  if (total < 6 || confirmedGiftQuantities.includes(total)) return '';
+  return `Đơn ${total} túi: quà theo bảng quà hiện hành; chủ shop chưa chốt quà riêng cho ${total} túi — nhân viên xem lại quà trước khi giao.`;
+}
+
+// ===== Quà thay thế (GIFT_SWAP) =====
+// 01/10 (chủ shop): khách không lấy bát/quạt → tặng thay 2 gói granola nhỏ bất kỳ
+// (Xanh, Cam, Nâu), KHÔNG trừ tiền. Mặc định ở đây; gifts.json có thể ghi đè bằng
+// khoá `swap` (cùng dạng). Lưu ý: PUT /api/gifts hiện chỉ ghi items + shippingFee
+// nên khoá `swap` ghi tay sẽ mất sau lần lưu từ màn hình → dùng mặc định này.
+export const defaultGiftSwap = Object.freeze({
+  text: '2 gói granola nhỏ bất kỳ (Xanh, Cam, Nâu)',
+  quantity: 2,
+  refund: 0,
+  options: Object.freeze([
+    Object.freeze({ id: 'xanh', label: 'Xanh', name: 'Gói granola nhỏ Xanh 35g', sku: 'GRA-XANH-G35', weight: 35 }),
+    Object.freeze({ id: 'cam', label: 'Cam', name: 'Gói granola nhỏ Cam 30g', sku: 'GRA-CAM-G30', weight: 30 }),
+    Object.freeze({ id: 'nau', label: 'Nâu', name: 'Gói granola nhỏ Nâu 35g', sku: 'GRA-NAU-G35', weight: 35 })
+  ])
+});
+
+function normalizeGiftSwap(value) {
+  if (!value || typeof value !== 'object') return null;
+  const options = (Array.isArray(value.options) ? value.options : []).map(option => {
+    const label = String(option?.label ?? '').trim().slice(0, 40);
+    const sku = normalizeSkuText(option?.sku).slice(0, 80);
+    if (!label || !sku) return null;
+    return {
+      id: String(option?.id ?? '').trim() || normalizeText(label).replace(/[^a-z0-9]+/g, '-'),
+      label,
+      name: String(option?.name ?? '').trim().slice(0, 200) || `Gói granola nhỏ ${label}`,
+      sku,
+      weight: money(option?.weight)
+    };
+  }).filter(Boolean);
+  return {
+    text: String(value.text ?? '').trim().slice(0, 300) || defaultGiftSwap.text,
+    quantity: Math.max(1, Math.min(10, Math.round(Number(value.quantity) || defaultGiftSwap.quantity))),
+    refund: money(value.refund),
+    options: options.length ? options : defaultGiftSwap.options.map(option => ({ ...option }))
+  };
+}
+
+/** Cấu hình quà thay thế đang dùng: { text, quantity, refund, options: [{ id, label, name, sku, weight }] }. */
+export function getGiftSwap() {
+  const stored = readGiftStoreSync().swap;
+  return stored || normalizeGiftSwap(defaultGiftSwap);
+}
+
+/** Quà hiện vật đổi được (bát, muỗng, quạt + bát của live): có SKU, không phải miễn ship, không phải túi tặng. */
+export function isSwappableGift(gift) {
+  return Boolean(gift?.sku) && !isFreeShippingGift(gift) && !isBonusProductGift(gift);
+}
+
+/**
+ * Vị khách chọn cho quà thay ("2 gói xanh", "1 xanh 1 cam", "cam với nâu"): danh
+ * sách đúng `quantity` lựa chọn; khách chỉ nêu một vị không số → lấy vị đó cho cả
+ * hai gói; không nêu vị → [] (bot hỏi lại hay để nhân viên chọn).
+ */
+export function parseGiftSwapChoice(text, swap = getGiftSwap()) {
+  const content = normalizeText(text);
+  const wanted = swap.quantity;
+  const picks = [];
+  for (const option of swap.options) {
+    const word = normalizeText(option.label);
+    // "cảm ơn" bỏ dấu cũng là "cam on": không phải vị Cam.
+    const pattern = new RegExp(`(?:(\\d{1,2})\\s*(?:goi|tui|bich)?\\s*)?(?<![a-z])${word}(?![a-z])(?!\\s+on(?![a-z]))`, 'g');
+    for (const match of content.matchAll(pattern)) {
+      picks.push({ option, index: match.index, count: match[1] ? Number(match[1]) : 0 });
+    }
+  }
+  if (!picks.length) return [];
+  picks.sort((a, b) => a.index - b.index);
+  const chosen = [];
+  if (picks.length === 1 && !picks[0].count) {
+    for (let index = 0; index < wanted; index += 1) chosen.push(picks[0].option);
+  } else {
+    for (const pick of picks) for (let index = 0; index < Math.max(1, pick.count); index += 1) chosen.push(pick.option);
+  }
+  return chosen.slice(0, wanted).map(option => ({ ...option }));
+}
+
+/**
+ * Đổi quà: bỏ quà hiện vật (bát/muỗng/quạt), thêm `quantity` gói nhỏ theo vị đã
+ * chọn (thiếu vị → để trống `sku`, nhân viên chọn). Tiền không đổi.
+ * Trả { gifts, removed, added, text } — `gifts` là danh sách quà mới của đơn.
+ */
+export function applyGiftSwap(gifts, choices = [], swap = getGiftSwap()) {
+  const list = Array.isArray(gifts) ? gifts : [];
+  const removed = list.filter(isSwappableGift);
+  if (!removed.length) return { gifts: list, removed: [], added: [], text: '' };
+  const added = [];
+  for (let index = 0; index < swap.quantity; index += 1) {
+    const option = choices[index] || null;
+    added.push(option
+      ? { id: `swap-${option.id}-${index + 1}`, name: option.name, sku: option.sku, weight: option.weight, active: true, swap: true }
+      : { id: `swap-any-${index + 1}`, name: 'Gói granola nhỏ (vị khách chọn)', sku: '', weight: 35, active: true, swap: true });
+  }
+  const counts = new Map();
+  for (const item of added) counts.set(item.name, (counts.get(item.name) || 0) + 1);
+  const text = [...counts.entries()].map(([name, count]) => `${count} ${name}`).join(' + ');
+  return { gifts: [...list.filter(gift => !isSwappableGift(gift)), ...added], removed, added, text };
 }
 
 export const defaultShippingFee = 15000;
@@ -219,7 +399,7 @@ function readGiftStoreSync() {
     try {
       giftCache = normalizeGiftStore(JSON.parse(readFileSync(giftsPath, 'utf8')));
     } catch {
-      giftCache = { items: [], shippingFee: defaultShippingFee, updatedAt: 0 };
+      giftCache = { items: [], swap: null, shippingFee: defaultShippingFee, updatedAt: 0 };
     }
   }
   return giftCache;
@@ -282,12 +462,154 @@ export function matchProduct(text) {
   const products = getCatalogProducts();
   const bySku = products.find(product => product.active && normalizeText(product.sku) === content);
   if (bySku) return bySku;
-  const hit = buildIndex(products).find(entry => content.includes(entry.keyword));
+  const hit = buildIndex(products).find(entry => keywordInText(content, entry.keyword));
   return hit ? hit.product : null;
+}
+
+/**
+ * Tên gọi chữ phải đứng thành từ trọn ("túi dâu" không khớp "túi đâu tiên"/"túi
+ * đầu", "dâu tây" không khớp trong từ khác); tên gọi có chữ số ("450g", "cacao
+ * 300", "combo 10 gói") vẫn khớp chuỗi con như cũ ("450gr", "cacao 300g").
+ * Trước con chữ số được phép ("2túi xanh").
+ */
+export function keywordInText(content, keyword) {
+  if (!keyword) return false;
+  if (/\d/.test(keyword) || keyword.startsWith('#')) return content.includes(keyword);
+  for (let index = content.indexOf(keyword); index >= 0; index = content.indexOf(keyword, index + 1)) {
+    const before = index > 0 ? content[index - 1] : ' ';
+    const after = content[index + keyword.length] ?? ' ';
+    if (!/[a-z]/.test(before) && !/[a-z]/.test(after)) return true;
+  }
+  return false;
 }
 
 export function findProductBySku(sku) {
   const key = normalizeSkuText(sku);
   if (!key) return null;
   return getCatalogProducts().find(product => product.sku === key) || null;
+}
+
+// ===== Sản phẩm chỉ nhân viên CSKH bán =====
+// 01/10 (chủ shop): Granola Siêu Hạt Premium 420g, granola/hạt dạng hũ, lọ, hộp
+// nhựa, mua hạt riêng: CHỈ CSKH bán, bot chưa được báo giá/chốt → bot ghi nhận và
+// chuyển nhân viên. Cụm từ đặt ở đây (không phải bảng sản phẩm) vì phần lớn các
+// sản phẩm này không có trong danh mục bot; sản phẩm danh mục có cờ `staffOnly`
+// (Hạt An Lành dạng hũ) cũng tính, theo tên và tên gọi khác của nó.
+export const STAFF_ONLY_PRODUCTS = Object.freeze([
+  Object.freeze({ id: 'sieu-hat-premium', name: 'Granola Siêu Hạt Premium 420g', pattern: /\bsieu hat\b|\bhat premium\b|\bgranola premium\b(?! cacao)|\bpremium 420\b|(?<!\d)420 ?(?:g|gr|gram)\b/ }),
+  Object.freeze({ id: 'hat-an-lanh', name: 'Hạt An Lành dạng hũ', pattern: /\bhat an lanh\b|\ban lanh dang hu\b/ }),
+  // "đang lo"/"đừng lo" bỏ dấu là "dang lo"/"dung lo": lọ chỉ nhận "loại lọ", "đựng trong lọ", "granola lọ", "lọ hạt".
+  // Hũ thuỷ tinh 300ml (quà yến mạch) và hũ sữa chua không phải hàng hũ.
+  Object.freeze({ id: 'hu-lo', name: 'Granola/hạt dạng hũ, lọ', pattern: /(?:\b(?:granola|hat|loai|dang|dung trong) hu\b|\b(?:granola|loai|dung trong) lo\b|\b(?:hu|lo) (?:hat|granola|ngu coc)\b)(?! (?:thuy tinh|300 ?ml|sua chua))/ }),
+  Object.freeze({ id: 'hop-nhua', name: 'Granola hộp nhựa', pattern: /\bhop nhua\b/ }),
+  // "Mình muốn mua hạt", "chỉ mua các loại hạt", "bên em có bán hạt không" — không phải "mua túi nhiều hạt".
+  Object.freeze({ id: 'mua-hat', name: 'Các loại hạt bán riêng', pattern: /\b(?:mua|ban) (?:cac loai |may loai |rieng |them )?hat(?= dinh duong| rieng| thoi| khong| ko| k\b| ?[?.!,]| ?$)(?!.*\b(?:tui|goi|granola|bich)\b)/ })
+]);
+
+/**
+ * Tin khách nói tới sản phẩm chỉ CSKH bán? Trả { id, name, product } (product: sản
+ * phẩm danh mục có cờ staffOnly nếu khớp tên gọi của nó) hay null. Chạy TRƯỚC
+ * matchProduct trong bot: khớp thì ghi nhận + chuyển nhân viên, không báo giá
+ * granola thay. "nhiều hạt" (Túi Vàng), "hạt gì", "có hạt óc chó không" không khớp.
+ */
+export function matchStaffOnlyProduct(text) {
+  const content = normalizeText(text).replace(/[^a-z0-9 ?.!,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!content) return null;
+  const listed = getCatalogProducts().filter(product => product.active && product.staffOnly);
+  for (const product of listed) {
+    const keyword = productKeywords(product).find(item => keywordInText(content, item));
+    if (keyword) return { id: normalizeText(product.sku).replace(/[^a-z0-9]+/g, '-'), name: product.name, product, keyword };
+  }
+  for (const entry of STAFF_ONLY_PRODUCTS) {
+    const match = content.match(entry.pattern);
+    if (match) return { id: entry.id, name: entry.name, product: null, keyword: match[0].trim() };
+  }
+  return null;
+}
+
+// ===== Giỏ Facebook Shop: mã SKU → sản phẩm danh mục =====
+// Shop gửi mã combo POS: "CB2-XANH-Z450" (2 Túi Xanh), "CB-VANGG+NAU" (Vàng + Nâu),
+// "CB3-XANH-Z450+BGD+M" (3 Túi Xanh, kèm bát + muỗng trong mã), "CB10-CAM-G30"
+// (sản phẩm danh mục). Yến mạch ("CB2-HT-YM-T500" = 2 hộp 500g cán dẹt) không có
+// trong danh mục bot: trả needsStaff để chuyển nhân viên lên đơn.
+const cartGiftTokens = new Set(['BGD', 'M', 'MUONG', 'QUAT', 'QUA']);
+const oatSkuPattern = /^CB(\d*)-(HT-YM|YM-VO)-T500$|^(HT-YM|YM-VO)-T500$|^CB-YM-DET\+VO$/;
+
+function colourProduct(token) {
+  const colour = String(token || '').toUpperCase().split('-')[0].replace(/^VANGG$/, 'VANG');
+  if (!colour) return null;
+  const products = getCatalogProducts().filter(product => product.active);
+  return products.find(product => /^GRA-/.test(product.sku) && product.sku.split('-')[1] === colour)
+    || products.find(product => product.sku.split('-')[0] === colour)
+    || null;
+}
+
+/**
+ * Chuẩn hoá MỘT mã SKU giỏ Shop. Trả
+ * { sku, items: [{ sku, name, quantity }], gifts: ['BGD', 'MUONG'], needsStaff, reason, label }.
+ * `quantity` là số dòng giỏ (khách bấm 2 lần combo 2 túi = 4 túi).
+ * reason: '' | 'oat' (yến mạch — nhân viên lên đơn) | 'unknown' (mã lạ).
+ */
+export function parseCartSku(rawSku, quantity = 1) {
+  const sku = normalizeSkuText(rawSku);
+  const times = Math.max(1, Math.round(Number(quantity) || 1));
+  const result = { sku, items: [], gifts: [], needsStaff: false, reason: '', label: '' };
+  if (!sku) return { ...result, needsStaff: true, reason: 'unknown' };
+  const direct = findProductBySku(sku);
+  if (direct) return { ...result, items: [{ sku: direct.sku, name: direct.name, quantity: times }] };
+  const oat = sku.match(oatSkuPattern);
+  if (oat) {
+    const boxes = sku === 'CB-YM-DET+VO' ? 2 : Math.max(1, Number(oat[1]) || 1);
+    const kind = sku.includes('YM-VO') && sku !== 'CB-YM-DET+VO' ? 'cán vỡ' : sku === 'CB-YM-DET+VO' ? 'cán dẹt + cán vỡ' : 'cán dẹt';
+    const kilograms = (boxes * 500 * times) / 1000;
+    return { ...result, needsStaff: true, reason: 'oat', label: `Yến Mạch Úc Nguyên Cám ${kind} ${String(kilograms).replace('.', ',')}kg` };
+  }
+  const tokens = sku.split('+');
+  const gifts = tokens.slice(1).filter(token => cartGiftTokens.has(token)).map(token => (token === 'M' ? 'MUONG' : token));
+  const parts = [tokens[0], ...tokens.slice(1).filter(token => !cartGiftTokens.has(token))];
+  const head = parts[0].match(/^CB(\d*)-(.+)$/);
+  if (!head) {
+    // Mã sản phẩm kèm đuôi quà ("GRA-XANH-Z450+BGD").
+    const product = parts.length === 1 ? findProductBySku(parts[0]) : null;
+    if (product) return { ...result, gifts, items: [{ sku: product.sku, name: product.name, quantity: times }] };
+    return { ...result, needsStaff: true, reason: 'unknown' };
+  }
+  const each = Math.max(1, Number(head[1]) || 1);
+  const counts = new Map();
+  for (const token of [head[2], ...parts.slice(1)]) {
+    const product = findProductBySku(token) || colourProduct(token);
+    if (!product) return { ...result, gifts, needsStaff: true, reason: 'unknown' };
+    const entry = counts.get(product.sku) || { sku: product.sku, name: product.name, quantity: 0 };
+    entry.quantity += each * times;
+    counts.set(product.sku, entry);
+  }
+  return { ...result, gifts, items: [...counts.values()] };
+}
+
+/**
+ * Cả giỏ Shop [{ sku, quantity }] → { items (gộp theo SKU), gifts, needsStaff,
+ * reasons, labels, unknownSkus }. needsStaff = có dòng yến mạch/mã lạ: bot không
+ * tự chốt, chuyển nhân viên kèm `labels` (vd. "Yến Mạch Úc Nguyên Cám cán dẹt 1kg").
+ */
+export function parseShopCart(cart = []) {
+  const counts = new Map();
+  const gifts = new Set();
+  const reasons = new Set();
+  const labels = [];
+  const unknownSkus = [];
+  for (const line of Array.isArray(cart) ? cart : []) {
+    const parsed = parseCartSku(line?.sku, line?.quantity);
+    parsed.gifts.forEach(gift => gifts.add(gift));
+    if (parsed.needsStaff) {
+      reasons.add(parsed.reason);
+      if (parsed.label) labels.push(parsed.label);
+      if (parsed.reason === 'unknown') unknownSkus.push(parsed.sku);
+    }
+    for (const item of parsed.items) {
+      const entry = counts.get(item.sku) || { ...item, quantity: 0 };
+      entry.quantity += item.quantity;
+      counts.set(item.sku, entry);
+    }
+  }
+  return { items: [...counts.values()], gifts: [...gifts], needsStaff: reasons.size > 0, reasons: [...reasons], labels, unknownSkus };
 }

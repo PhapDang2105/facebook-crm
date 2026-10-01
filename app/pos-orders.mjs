@@ -15,7 +15,7 @@ import { projectRoot } from './config.mjs';
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
-import { comboKey, findProductBySku, getGifts, giftsForKey, matchProduct } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, getGifts, giftsForKey, hasLivestreamGift, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
 
 /**
@@ -98,6 +98,28 @@ export async function posWarehouseId(config = posConfig(), fetchImpl = fetch) {
 
 function money(value) {
   return Math.max(0, Math.round(Number(value) || 0));
+}
+
+function formatVnd(value) {
+  return `${new Intl.NumberFormat('vi-VN').format(money(value))}đ`;
+}
+
+/** Phương thức thanh toán là chuyển khoản ("Chuyển khoản", "chuyen khoan", "Bank transfer"). */
+export function isBankTransferPayment(value) {
+  const folded = String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase();
+  return /chuyen khoan|bank|transfer/.test(folded);
+}
+
+/**
+ * Số tiền khách đã trả trước bằng chuyển khoản: `order.prepaid` (đặt cọc, chuyển
+ * một phần) nếu có, không thì cả tổng đơn khi phương thức là "Chuyển khoản";
+ * đơn COD = 0. Không vượt tổng đơn.
+ */
+export function posPrepaidAmount(order = {}) {
+  const total = money(order?.total);
+  const explicit = money(order?.prepaid);
+  if (explicit > 0) return Math.min(explicit, total);
+  return isBankTransferPayment(order?.payment) ? total : 0;
 }
 
 // ===== Mã tỉnh/quận/phường của POS =====
@@ -279,9 +301,11 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   // Quà theo tổ hợp giỏ (bảng quà trong Cài đặt), như file xuất kho. Quà chỉ khách
   // livestream (Quà Tặng LIVE) chỉ vào đơn khách live (order.livestream / "(Live) ").
   const basketKey = comboKey(products.map(item => ({ sku: item.sku, quantity: item.quantity })));
-  for (const gift of basketKey ? giftsForKey(basketKey, { livestream: isLivestreamOrder(order) }) : []) {
+  const basketGifts = basketKey ? giftsForKey(basketKey, { livestream: isLivestreamOrder(order) }) : [];
+  for (const gift of basketGifts) {
     const sku = String(gift.sku || '').trim().toUpperCase();
-    if (!sku || items.some(item => item.variation_id === sku)) continue;
+    // Chỉ bỏ khi đã có DÒNG QUÀ cùng mã: túi tặng (đơn 5 Túi Vàng tặng thêm 1 Túi Vàng) trùng SKU dòng hàng vẫn phải đẩy.
+    if (!sku || items.some(item => item.variation_id === sku && item.is_bonus_product)) continue;
     // Combo POS đã gồm bát + muỗng dừa trong mã (…+BGD+M): không thêm dòng quà trùng.
     if (combo?.includesGifts && ['BGD', 'MUONG'].includes(sku)) continue;
     if (posSkus && !posSkus.has(sku)) continue;
@@ -298,7 +322,8 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   // Quà ưu đãi bám đuổi (bộ bát gáo dừa cho combo 2): không nằm trong bảng quà theo giỏ, đẩy thêm một dòng quà.
   // Chỉ khi giỏ đúng 2 túi (đơn sửa sang 1/3 túi mà cờ còn sót thì bỏ) và combo POS chưa gồm bát trong mã.
   const bagCount = products.reduce((sum, item) => sum + Math.max(0, Math.round(Number(item.quantity) || 0)), 0);
-  if (order.promoGift && bagCount === 2 && !combo?.includesGifts) {
+  // Đơn live đúng 2 túi đã có "Quạt + Bát gáo dừa": không thêm bát ưu đãi bám đuổi (tặng hai bát).
+  if (order.promoGift && bagCount === 2 && !combo?.includesGifts && !hasLivestreamGift(basketGifts)) {
     const sku = 'BGD';
     const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === sku);
     if (!items.some(item => item.variation_id === sku) && (!posSkus || posSkus.has(sku))) {
@@ -306,7 +331,15 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
     }
   }
   const address = String(order.address || '').trim();
-  const noteParts = [`Đơn CRM #${order.id}`, order.employee ? `tạo bởi ${order.employee}` : '', order.gift ? `Quà: ${order.gift}` : '', order.note ? `Khách ghi: ${order.note}` : ''].filter(Boolean);
+  // Khách đã chuyển khoản (đủ hay đặt cọc): POS chỉ thu hộ phần còn lại.
+  const prepaid = posPrepaidAmount(order);
+  const codAmount = Math.max(0, money(order.total) - prepaid);
+  const paymentNote = prepaid <= 0 ? '' : codAmount > 0
+    ? `Đã chuyển khoản ${formatVnd(prepaid)} (đặt cọc), thu COD ${formatVnd(codAmount)}`
+    : `Đã chuyển khoản ${formatVnd(prepaid)}, KHÔNG thu COD`;
+  const noteParts = [`Đơn CRM #${order.id}`, order.employee ? `tạo bởi ${order.employee}` : '', paymentNote, order.gift ? `Quà: ${order.gift}` : '', order.note ? `Khách ghi: ${order.note}` : '',
+    // Vòng 12: ghi chú giao hàng khách ghi lẫn trong địa chỉ và cảnh báo địa chỉ bot nhận cần soát.
+    order.deliveryNote ? `Giao: ${order.deliveryNote}` : '', order.addressCheck ? `⚠ ${order.addressCheck}` : ''].filter(Boolean);
   return {
     ...(shopId ? { shop_id: Number(shopId) } : {}),
     custom_id: `${POS_ORDER_CUSTOM_PREFIX}${order.id}`,
@@ -331,6 +364,9 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
     // POS tính lại total_discount từ `discount`; chỉ gửi total_discount khiến
     // đơn tạo qua API giữ giảm giá 0 dù CRM đã tính đúng giá combo.
     discount: combo ? Math.max(0, comboRetail - goods) : money(order.discount),
+    // `transfer_money` (tiền khách chuyển khoản) là trường POS trừ khỏi tiền thu hộ;
+    // gửi kèm `cod` = phần còn lại để đơn chuyển khoản đủ không bị thu COD lần nữa.
+    ...(prepaid > 0 ? { transfer_money: prepaid, cod: codAmount } : {}),
     note: noteParts.join(' · '),
     received_at_shop: false,
     status: 0,
@@ -383,17 +419,29 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    const response = await fetchImpl(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+    } catch (error) {
+      // Hết giờ / đứt mạng SAU KHI đã gửi POST: POS có thể đã tạo đơn. Đánh dấu
+      // "chưa chắc" để lần đẩy lại kiểm POS trước, không đẩy mù thành hai đơn.
+      throw uncertainPosError(error.name === 'AbortError'
+        ? `Pancake POS không phản hồi trong ${Math.round(requestTimeoutMs / 1000)} giây — đơn có thể đã lên POS, CRM sẽ kiểm trên POS trước khi đẩy lại.`
+        : `Mất kết nối khi gửi đơn sang Pancake POS (${error.message}) — CRM sẽ kiểm trên POS trước khi đẩy lại.`);
+    }
     let body = {};
     try { body = await response.json(); } catch {}
     const data = body?.data && typeof body.data === 'object' ? body.data : body;
     if (!response.ok || body?.success === false || !data?.id) {
-      throw new Error(`Pancake POS không nhận đơn (${response.status}): ${body?.message || body?.error || body?.errors?.[0]?.message || 'không rõ lý do'}`);
+      const failure = new Error(`Pancake POS không nhận đơn (${response.status}): ${body?.message || body?.error || body?.errors?.[0]?.message || 'không rõ lý do'}`);
+      // Lỗi máy chủ/cổng (5xx) cũng có thể xảy ra sau khi POS đã ghi đơn.
+      if (Number(response.status) >= 500) failure.uncertain = true;
+      throw failure;
     }
     const created = { id: String(data.id), systemId: data.system_id ? String(data.system_id) : '', status: String(data.status_name || '') };
     // 26/09: POS vẫn BỎ dòng tặng lúc tạo đơn (đủ UUID, is_bonus_product) — đơn combo 3 của bot lên POS không
@@ -424,7 +472,7 @@ export async function ensurePosGiftLines(posOrderId, payload, config = posConfig
   const missing = gifts.filter(item => !have.has(String(item.variation_id)));
   if (!missing.length) return 0;
   // Chỉ gửi giỏ + giá: gửi cả đơn (địa chỉ, ghi chú) có thể đè phần nhân viên vừa sửa trên POS và POS gửi lại phiếu.
-  const update = { items: payload.items, discount: payload.discount, shipping_fee: payload.shipping_fee, is_free_shipping: payload.is_free_shipping };
+  const update = { items: payload.items, discount: payload.discount, shipping_fee: payload.shipping_fee, is_free_shipping: payload.is_free_shipping, ...(payload.transfer_money ? { transfer_money: payload.transfer_money, cod: payload.cod } : {}) };
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}/orders/${encodeURIComponent(posOrderId)}`);
   url.searchParams.set('api_key', config.apiKey);
   const controller = new AbortController();
@@ -541,6 +589,39 @@ export function syncOrderToPos(conversationId, orderId, options = {}) {
   return pending;
 }
 
+/** Lỗi đẩy POS mà không biết POS đã tạo đơn hay chưa (hết giờ, đứt mạng, 5xx). */
+function uncertainPosError(message) {
+  const error = new Error(message);
+  error.uncertain = true;
+  return error;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Đơn CRM đã có trên POS chưa (sau một lần đẩy hết giờ): tìm đơn POS theo SĐT
+ * khách (POS tìm cả trong ghi chú) rồi khớp đúng mã — custom_id/mã đơn
+ * "CRM-<mã>" hay ghi chú "Đơn CRM #<mã>". Bỏ qua đơn đã xóa trên POS (status 7).
+ * Trả về { id, systemId, status } hoặc null; lỗi mạng thì ném.
+ */
+export async function findExistingPosOrder(order, config = posConfig(), fetchImpl = fetch) {
+  const orderId = String(order?.id || '').trim();
+  if (!orderId) return null;
+  const customId = `${POS_ORDER_CUSTOM_PREFIX}${orderId}`;
+  const marker = new RegExp(`Đơn CRM #${escapeRegExp(orderId)}(?![\\w-])`);
+  const phone = String(order?.phone || '').replace(/\D/g, '');
+  const data = await posRequest('/orders', { search: phone || `Đơn CRM #${orderId}`, page_size: 50 }, config, fetchImpl);
+  const list = Array.isArray(data?.data) ? data.data : [];
+  const found = list.find(item => item && Number(item.status) !== 7 && (
+    String(item.custom_id || '') === customId
+    || String(item.id || '') === customId
+    || marker.test(String(item.note || ''))
+  ));
+  return found ? { id: String(found.id), systemId: found.system_id ? String(found.system_id) : '', status: String(found.status_name || '') } : null;
+}
+
 async function syncOrderToPosOnce(conversationId, orderId, { config = posConfig(), fetchImpl = fetch, log = console.log } = {}) {
   if (!posOrderPushEnabled(config)) return null;
   const store = await readMessagingStore();
@@ -550,12 +631,35 @@ async function syncOrderToPosOnce(conversationId, orderId, { config = posConfig(
   if (order.pos?.id) return order.pos;
   let outcome;
   try {
-    const created = await pushOrderToPos(order, { conversation, config, fetchImpl });
-    outcome = { ...created, at: Date.now() };
-    log(`Đơn ${order.id} đã đẩy sang Pancake POS #${created.id}`);
+    // Lần đẩy trước hết giờ/đứt mạng (pos.uncertain): POS có thể đã tạo đơn. Kiểm
+    // POS trước; có rồi thì nhận mã đó, không POST lần hai. Không kiểm được thì
+    // KHÔNG đẩy mù — giữ lỗi để thử lại sau.
+    if (order.pos?.uncertain) {
+      let existing;
+      try {
+        existing = await findExistingPosOrder(order, config, fetchImpl);
+      } catch (error) {
+        throw uncertainPosError(`Chưa kiểm được đơn trên Pancake POS (${error.message}) — chưa đẩy lại để tránh tạo hai đơn, thử lại sau.`);
+      }
+      if (existing) {
+        outcome = { ...existing, at: Date.now(), recovered: true };
+        log(`Đơn ${order.id} đã có trên Pancake POS #${existing.id} (lần đẩy trước hết giờ), không đẩy lại.`);
+      }
+    }
+    if (!outcome) {
+      const created = await pushOrderToPos(order, { conversation, config, fetchImpl });
+      outcome = { ...created, at: Date.now() };
+      log(`Đơn ${order.id} đã đẩy sang Pancake POS #${created.id}`);
+    }
   } catch (error) {
-    outcome = { error: error.message, at: Date.now() };
-    log(`Đơn ${order.id} chưa đẩy được sang Pancake POS: ${error.message}`);
+    outcome = { error: error.message, at: Date.now(), ...(error.uncertain ? { uncertain: true } : {}) };
+    if (error.uncertain) {
+      // Hỏi lại POS ngay một lần: đơn đã lên (POS chậm trả lời) thì ghi mã luôn.
+      const existing = await findExistingPosOrder(order, config, fetchImpl).catch(() => null);
+      if (existing) outcome = { ...existing, at: Date.now(), recovered: true };
+    }
+    if (outcome.id) log(`Đơn ${order.id} đã có trên Pancake POS #${outcome.id} dù lần gửi báo lỗi: ${error.message}`);
+    else log(`Đơn ${order.id} chưa đẩy được sang Pancake POS: ${error.message}`);
   }
   await updateMessagingStore(current => {
     const item = current.conversations.find(entry => entry.id === conversationId);

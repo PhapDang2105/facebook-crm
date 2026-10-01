@@ -73,11 +73,14 @@ test('báo cáo theo ngày: doanh số, hủy riêng, chi tiêu/ROAS, nguồn, s
   const report = buildReport({ ...fixture(), followUp, from: '2026-09-22', to: '2026-09-29', groupBy: 'day', now });
   assert.deepEqual(report.range, { from: '2026-09-22', to: '2026-09-29', groupBy: 'day' });
   assert.equal(report.sales.rows.length, 8, 'mọi ngày trong khoảng, kể cả ngày trống');
-  assert.deepEqual(report.sales.rows[0], { period: '2026-09-22', label: '22/09', orders: 1, revenue: 298000, cancelled: 0, cancelledValue: 0, aov: 298000, spend: 0, roas: null });
-  assert.deepEqual(report.sales.rows[1], { period: '2026-09-23', label: '23/09', orders: 1, revenue: 447000, cancelled: 0, cancelledValue: 0, aov: 447000, spend: 100000, roas: 4.47 });
-  assert.deepEqual(report.sales.rows[2], { period: '2026-09-24', label: '24/09', orders: 0, revenue: 0, cancelled: 1, cancelledValue: 500000, aov: null, spend: 0, roas: null });
-  assert.deepEqual(report.sales.rows.at(-1), { period: '2026-09-29', label: '29/09', orders: 2, revenue: 308000, cancelled: 0, cancelledValue: 0, aov: 154000, spend: 50000, roas: 6.16 });
-  assert.deepEqual(report.sales.totals, { orders: 4, revenue: 1053000, cancelled: 1, cancelledValue: 500000, aov: 263250, spend: 150000, roas: 7.02 });
+  assert.deepEqual(report.sales.rows[0], { period: '2026-09-22', label: '22/09', orders: 1, revenue: 298000, cancelled: 0, cancelledValue: 0, aov: 298000, spend: 0, adRevenue: 0, roas: null });
+  assert.deepEqual(report.sales.rows[1], { period: '2026-09-23', label: '23/09', orders: 1, revenue: 447000, cancelled: 0, cancelledValue: 0, aov: 447000, spend: 100000, adRevenue: 0, roas: 0 });
+  assert.deepEqual(report.sales.rows[2], { period: '2026-09-24', label: '24/09', orders: 0, revenue: 0, cancelled: 1, cancelledValue: 500000, aov: null, spend: 0, adRevenue: 0, roas: null });
+  assert.deepEqual(report.sales.rows.at(-1), { period: '2026-09-29', label: '29/09', orders: 2, revenue: 308000, cancelled: 0, cancelledValue: 0, aov: 154000, spend: 50000, adRevenue: 149000, roas: 2.98 });
+  // ROAS = doanh thu quy về quảng cáo (chỉ l1 theo utm c1) ÷ chi phí — không phải mọi doanh thu ÷ chi phí (trước đây 7,02).
+  assert.deepEqual(report.sales.totals, { orders: 4, revenue: 1053000, cancelled: 1, cancelledValue: 500000, aov: 263250, spend: 150000, adRevenue: 149000, roas: 0.99 });
+  assert.equal(report.campaignTotals.roas, report.sales.totals.roas, 'Báo cáo và Chiến dịch cùng một ROAS');
+  assert.match(report.definitions.roas, /ROAS = doanh thu đơn quy được về quảng cáo Meta/);
 
   assert.deepEqual(report.sources, [
     { key: 'chatbot', label: 'Chatbot', orders: 2, revenue: 457000, share: 0.434 },
@@ -128,7 +131,7 @@ test('báo cáo theo tuần và tháng: gộp đúng kỳ, khách mới tính th
 test('báo cáo trống: tỷ lệ null, bám đuổi không có số thì null', () => {
   const report = buildReport({ from: '2026-09-01', to: '2026-09-03', now });
   assert.equal(report.sales.rows.length, 3);
-  assert.deepEqual(report.sales.totals, { orders: 0, revenue: 0, cancelled: 0, cancelledValue: 0, aov: null, spend: 0, roas: null });
+  assert.deepEqual(report.sales.totals, { orders: 0, revenue: 0, cancelled: 0, cancelledValue: 0, aov: null, spend: 0, adRevenue: 0, roas: null });
   assert.equal(report.customers.repeatRate, null);
   assert.deepEqual(report.followUps, { sent: 0, won: 0, wonAmount: 0, sentRate: null, holdoutRate: null });
   assert.deepEqual(followUpSummary(null), report.followUps);
@@ -145,9 +148,9 @@ test('CSV: BOM UTF-8, tiêu đề tiếng Việt, ngoặc kép/xuống dòng đ�
   const report = buildReport({ ...fixture(), from: '2026-09-22', to: '2026-09-29', now });
   report.products.push({ sku: 'X,1', name: 'Tên "lạ"', quantity: 1, revenue: 0, orders: 1 });
   const sales = reportSectionCsv(report, 'sales');
-  assert.ok(sales.startsWith('﻿Mã kỳ,Kỳ,Số đơn,Doanh thu,Đơn hủy,Giá trị hủy,Giá trị TB đơn,Chi tiêu QC,ROAS\r\n'));
-  assert.match(sales, /\r\n2026-09-23,23\/09,1,447000,0,0,447000,100000,4\.47\r\n/);
-  assert.match(sales, /\r\n,Tổng,4,1053000,1,500000,263250,150000,7\.02\r\n$/);
+  assert.ok(sales.startsWith('﻿Mã kỳ,Kỳ,Số đơn,Doanh thu,Đơn hủy,Giá trị hủy,Giá trị TB đơn,Chi tiêu QC,Doanh thu từ QC,ROAS\r\n'));
+  assert.match(sales, /\r\n2026-09-23,23\/09,1,447000,0,0,447000,100000,0,0\r\n/);
+  assert.match(sales, /\r\n,Tổng,4,1053000,1,500000,263250,150000,149000,0\.99\r\n$/);
   const products = reportSectionCsv(report, 'products');
   assert.ok(products.startsWith('﻿SKU,Sản phẩm,Số lượng,Doanh thu,Số đơn\r\n'));
   assert.match(products, /"X,1","Tên ""lạ""",1,0,1\r\n$/);

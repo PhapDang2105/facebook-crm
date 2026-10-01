@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 import './helpers/seed-catalog.mjs';
 
 // Kho, trạng thái bám đuổi và thẻ tạm riêng cho tệp này.
-const directory = mkdtempSync(path.join(tmpdir(), 'followup-s5-'));
+const directory = tempDir('followup-s5-');
 process.env.META_CONVERSATIONS_PATH = path.join(directory, 'meta-conversations.json');
 process.env.FOLLOW_UPS_PATH = path.join(directory, 'follow-ups.json');
 process.env.INBOX_SETTINGS_PATH = path.join(directory, 'inbox-settings.json');
@@ -61,14 +61,16 @@ test('S5c: xưng hô dùng giới đã khóa của bot (botGender) trước gi�
 });
 
 test('S5b: kịch bản miễn ship với khách chỉ bình luận → bỏ qua "noInbox" MỘT lần (không hoãn mãi)', async () => {
-  const settings = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true, scenarios: [{ id: 'comment-ship', name: 'Bình luận miễn ship', trigger: 'comment-no-reply', delayHours: 12, freeShipDays: 3, message: 'Dạ {title} ơi, shop tặng miễn ship ạ' }] } });
+  // Ưu đãi miễn ship chỉ ở kịch bản 36 giờ (chủ shop 01/10): kịch bản bình luận 36 giờ, xét lúc lời Page đã 37 giờ.
+  const settings = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true, scenarios: [{ id: 'comment-ship', name: 'Bình luận miễn ship', trigger: 'comment-no-reply', delayHours: 36, freeShipDays: 3, message: 'Dạ {title} ơi, shop tặng miễn ship ạ' }] } });
   const calls = [];
-  const options = { readSettings: async () => settings, sendMessage: async () => { throw new Error('không được gửi'); }, conversationInfo: async (...args) => { calls.push(args); return {}; }, now, quietHours: false, log: () => {} };
+  const at = now + 24 * HOUR;
+  const options = { readSettings: async () => settings, sendMessage: async () => { throw new Error('không được gửi'); }, conversationInfo: async (...args) => { calls.push(args); return {}; }, now: at, quietHours: false, log: () => {} };
   const summary = await runFollowUps(options);
   assert.equal(summary.skipReasons.noInbox, 1);
   assert.equal(summary.deferred, undefined, 'không đếm hoãn');
   assert.equal((await readFollowUpState()).sent[`comment-ship:${page}:${onlyComment}`].skipped, 'noInbox');
-  const again = await runFollowUps({ ...options, now: now + 15 * 60 * 1000 });
+  const again = await runFollowUps({ ...options, now: at + 15 * 60 * 1000 });
   assert.deepEqual(again.skipReasons, { alreadySent: 1 }, 'lượt sau: đã ghi, không xét lại');
   assert.equal(calls.length, 0);
 });

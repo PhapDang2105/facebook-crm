@@ -126,9 +126,12 @@ test('báo cáo: chi tiêu theo chiến dịch, đơn hội thoại quy theo qu�
 
   assert.deepEqual(report.unattributed, { orders: 2, revenue: 300000 });
   assert.deepEqual(report.campaigns.map(row => row.id), ['c1', 'c2', 'tiktok-thang9', 'c3'], 'chi tiêu giảm dần rồi doanh thu giảm dần');
-  assert.deepEqual(report.totals, { spend: 280000, impressions: 22000, clicks: 550, messages: 34, orders: 6, revenue: 1650000, cpa: 46667, roas: 5.89 });
-  // Toàn cảnh: cả đơn chưa quy được (o4, o5) trên toàn bộ chi tiêu.
-  assert.deepEqual(report.blended, { orders: 8, revenue: 1950000, spend: 280000, cpa: 35000, roas: 6.96 });
+  // Tổng/ROAS chỉ gồm đơn quy về quảng cáo Meta (c1, c2) — đơn UTM tiktok (không có chi phí) hiện riêng,
+  // không còn thổi ROAS lên (trước đây: 6 đơn, 1.650.000, ROAS 5,89).
+  assert.deepEqual(report.totals, { spend: 280000, impressions: 22000, clicks: 550, messages: 34, orders: 5, revenue: 1500000, cpa: 56000, roas: 5.36 });
+  assert.deepEqual(report.utm, { orders: 1, revenue: 150000 });
+  // Toàn cảnh để đối chiếu: Meta + UTM + chưa quy (o4, o5); không phải ROAS nên không có trường roas.
+  assert.deepEqual(report.blended, { orders: 8, revenue: 1950000, spend: 280000, cpa: 35000 });
 });
 
 test('báo cáo trống: tổng 0, CPA/ROAS null, kết nối mặc định là chưa', () => {
@@ -137,7 +140,8 @@ test('báo cáo trống: tổng 0, CPA/ROAS null, kết nối mặc định là 
   assert.deepEqual(report.totals, { spend: 0, impressions: 0, clicks: 0, messages: 0, orders: 0, revenue: 0, cpa: null, roas: null });
   assert.deepEqual(report.campaigns, []);
   assert.deepEqual(report.unattributed, { orders: 0, revenue: 0 });
-  assert.deepEqual(report.blended, { orders: 0, revenue: 0, spend: 0, cpa: null, roas: null });
+  assert.deepEqual(report.blended, { orders: 0, revenue: 0, spend: 0, cpa: null });
+  assert.deepEqual(report.utm, { orders: 0, revenue: 0 });
   assert.equal(report.ads.connected, false);
 });
 

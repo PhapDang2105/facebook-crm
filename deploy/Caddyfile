@@ -1,67 +1,43 @@
-# Caddy đứng trước CRM: tự xin chứng chỉ HTTPS và chặn truy cập bằng mật khẩu.
+# Caddy đứng trước CRM: tự xin chứng chỉ HTTPS và chuyển mọi yêu cầu vào CRM
+# (127.0.0.1:8080). Khớp máy chủ thật (fb.giotnang.vn) từ 01/10: KHÔNG còn
+# Basic Auth — CRM tự hỏi đăng nhập (trang /login, tài khoản CRM_LOGIN_USERS
+# trong .env + Cài đặt → Nhân sự).
 #
-# Thay <DOMAIN> bằng tên miền thật và <BCRYPT_HASH> bằng chuỗi băm sinh ra từ:
-#   caddy hash-password
+# Thay <DOMAIN> bằng tên miền thật (vd fb.giotnang.vn).
 #
-# Meta gọi webhook bằng máy, không đăng nhập được, nên đường dẫn webhook phải
-# đi thẳng. Mọi đường dẫn còn lại yêu cầu Basic Auth. CRM nay có trang đăng nhập
-# riêng (CRM_LOGIN_USERS trong .env); khi đã khai tài khoản thì có thể bỏ khối
-# basic_auth bên dưới — xem deploy/README.md.
+# An toàn khi bỏ Basic Auth vì:
+# - PUBLIC_BASE_URL là https nên CRM bắt buộc đăng nhập: chưa có tài khoản nào
+#   thì CRM trả 503 "Chưa cấu hình đăng nhập", không mở toang (app/security.mjs).
+# - Đường công khai do CRM tự quyết (app/auth.mjs isPublicPath): webhook Meta
+#   (chữ ký X-Hub-Signature-256), /webhooks/landing và /webhooks/pancake (token),
+#   /q/* (khách quét QR), /product-images/* (Messenger tải ảnh), /privacy (Meta
+#   kiểm tra), /login. Mọi đường khác cần phiên đăng nhập.
+# - CRM chỉ tin X-Forwarded-For khi kết nối từ 127.0.0.1/::1 (chính Caddy này),
+#   và lấy địa chỉ CUỐI chuỗi (địa chỉ Caddy ghi) để khoá đăng nhập theo IP.
+#   Caddy mặc định KHÔNG tin X-Forwarded-For khách tự gửi (không khai
+#   trusted_proxies) — giữ nguyên như vậy.
 
 <DOMAIN> {
 	encode zstd gzip
 
-	# Chỉ webhook của Meta được vào tự do; chính nó tự xác thực bằng chữ ký
-	# X-Hub-Signature-256 nên không cần thêm lớp mật khẩu.
-	@webhook path /webhooks/facebook
-	handle @webhook {
-		reverse_proxy 127.0.0.1:8080
+	# Header bảo mật. CRM tự gắn các header này (và CSP cho trang HTML); "?" = chỉ
+	# đặt khi CRM chưa gắn, để phản hồi lỗi của chính Caddy (502…) cũng có.
+	header {
+		?Strict-Transport-Security "max-age=31536000"
+		?X-Content-Type-Options "nosniff"
+		?X-Frame-Options "DENY"
+		?Referrer-Policy "same-origin"
+		-Server
 	}
 
-	# Webhook nhận đơn từ landing page (Webcake...): nền tảng gọi bằng máy,
-	# tự xác thực bằng token trong URL/header (LANDING_WEBHOOK_TOKEN).
-	@landing path /webhooks/landing
-	handle @landing {
-		reverse_proxy 127.0.0.1:8080
-	}
-
-	# Webhook tin nhắn từ Pancake (pages.fm): Pancake gọi bằng máy, tự xác thực
-	# bằng token trong URL (PANCAKE_WEBHOOK_TOKEN); bot của CRM trả lời qua Pancake.
-	@pancake path /webhooks/pancake
-	handle @pancake {
-		reverse_proxy 127.0.0.1:8080
-	}
-
-	# Ảnh sản phẩm cũng phải công khai: Messenger tải ảnh từ link này để hiện
-	# trên receipt và sau bảng giá. Ứng dụng chỉ trả tệp ảnh có tên hợp lệ.
-	@productImages path /product-images/*
-	handle @productImages {
-		reverse_proxy 127.0.0.1:8080
-	}
-
-	# Chính sách quyền riêng tư phải đọc được không cần đăng nhập: Meta kiểm tra
-	# URL này để cho ứng dụng chuyển sang chế độ Chính thức.
-	@privacy path /privacy /privacy.html
-	handle @privacy {
-		reverse_proxy 127.0.0.1:8080
-	}
-
-	# Mã QR trên phiếu cảm ơn trỏ vào đây. Khách quét là người ngoài, chưa đăng
-	# nhập gì, nên phải đi thẳng. Ứng dụng chỉ nhận mã dạng chữ-số-gạch nối và
-	# tự dựng địa chỉ đích, nên đường này không mở ra chuyển hướng tuỳ ý.
-	@qr path /q/*
-	handle @qr {
-		reverse_proxy 127.0.0.1:8080
-	}
-
-	# Toàn bộ giao diện và API quản trị nằm sau mật khẩu.
-	handle {
-		basic_auth {
-			<USERNAME> <BCRYPT_HASH>
-		}
-		reverse_proxy 127.0.0.1:8080 {
-			# Server-Sent Events cho hộp thư thời gian thực: không được đệm.
-			flush_interval -1
+	reverse_proxy 127.0.0.1:8080 {
+		# Server-Sent Events cho hộp thư thời gian thực: không được đệm.
+		flush_interval -1
+		transport http {
+			# Kết nối rảnh tới CRM đóng sau 60 giây — NGẮN hơn keepAliveTimeout của
+			# CRM (65 giây, app/server.mjs), để Caddy không bao giờ dùng lại một kết
+			# nối CRM vừa đóng (nguồn của 502 lác đác).
+			keepalive 60s
 		}
 	}
 

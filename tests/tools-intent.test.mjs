@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import './helpers/seed-catalog.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 import { buildRowsFromStore, decisionLabelOf, parseSinceDate, readDecisionLog, rowsFromDecisionLog } from '../tools-intent/build-dataset.mjs';
 import { customerTurns, hasBasketOf, basketItemsOf, maskPhone, POLICY_DRIFT, readJsonl } from '../tools-intent/dataset-context.mjs';
 import { basketContextKnown, loadSeedTemplates, relabelRows, templatesFromSettings } from '../tools-intent/relabel-policy.mjs';
@@ -419,7 +420,7 @@ test('shadow-report: cột mô hình tầng từ trường `cascade` (nhóm ✓,
 test('build-dataset --from-decision-log (vòng 12): prevBot là MÃ MẪU → lastTemplate; prevBotText/basket; nhãn chosen sau gác; khử trùng; đếm hỏng/trước since', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'crm-dlog12-'));
   try {
-    const base = { v: 1, conversationId: 'c7', source: 'inbox', type: 'text', ctx: { hasBasket: true, hasRecentOrder: false, orderAgeMin: null, lastWasOrderStep: true, livestream: false, phoneInText: true, addressInText: false, bagCount: 0 } };
+    const base = { v: 2, conversationId: 'c7', source: 'inbox', type: 'text', ctx: { hasBasket: true, hasRecentOrder: false, orderAgeMin: null, lastWasOrderStep: true, livestream: false, phoneInText: true, addressInText: false, bagCount: 0 } };
     const entries = [
       { ...base, at: t0, mid: 'm1', text: '0912 345 678', prevBot: 'ORDER_CART_LINE', prevBotText: 'Dạ đơn của chị gồm 2 Granola Túi Xanh 450g, chị cho em xin <sdt> và địa chỉ', basket: [{ sku: 'GRA-XANH-Z450', quantity: 2 }], prevBotAsks: 'phone_address', chosen: 'ORDER_ADDRESS', final: 'ORDER_ADDRESS' },
       { ...base, at: t0 + MIN, mid: 'm2', text: 'giá sao', prevBot: 'PRICE_QUOTE', chosen: 'PRICE_QUOTE', final: 'REPLY_ALREADY_SENT', ctx: {} },
@@ -548,4 +549,39 @@ test('readJsonl: dòng ghi dở bỏ qua và đếm; label-dataset / replay-llm:
     assert.equal(golden.status, 1);
     assert.match(golden.stderr, /Thiếu giá trị cho --model/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('CLI tools-intent: --help in hướng dẫn và thoát 0 (không chạy), cờ lạ → exit 1, shadow-report từ chối ngày không có thật, JSON hỏng → lỗi gọn', () => {
+  const run = (script, extra) => spawnSync(process.execPath, [`tools-intent/${script}`, ...extra], { cwd: root, encoding: 'utf8' });
+  for (const script of ['replay-llm.mjs', 'replay-golden.mjs', 'order-coverage.mjs', 'shadow-report.mjs']) {
+    for (const flag of script === 'shadow-report.mjs' ? ['--help', '-h'] : ['--help']) {
+      const help = run(script, [flag]);
+      assert.equal(help.status, 0, `${script} ${flag}: ${help.stderr}`);
+      assert.match(help.stdout, /Dùng|Chạy/, `${script} ${flag} in khối hướng dẫn đầu tệp`);
+      assert.doesNotMatch(help.stdout, /Không thấy bộ chấm|Không có bộ chấm|Không có nhật ký quyết định ở|đã chấm ·/, `${script} ${flag} không chạy phần đo`);
+      assert.equal(help.stderr, '');
+    }
+  }
+  const dir = tempDir('crm-cli-help-');
+  writeFileSync(path.join(dir, 'golden.json'), JSON.stringify({ items: [] }));
+  writeFileSync(path.join(dir, 'bad.json'), '{"items": [');
+  const typo = run('replay-llm.mjs', [path.join(dir, 'golden.json'), '--limt', '5']);
+  assert.equal(typo.status, 1);
+  assert.match(typo.stderr, /Cờ lạ: --limt/);
+  assert.equal(run('replay-golden.mjs', [path.join(dir, 'golden.json'), '--gates']).status, 1);
+  assert.equal(run('order-coverage.mjs', [path.join(dir, 'golden.json'), '--jsonn']).status, 1);
+  const report = run('shadow-report.mjs', ['--sinse', '2026-09-01']);
+  assert.equal(report.status, 1);
+  assert.match(report.stderr, /Cờ lạ: --sinse/);
+  const badDay = run('shadow-report.mjs', ['--since', '2026-02-30', '--dir', dir]);
+  assert.equal(badDay.status, 1);
+  assert.match(badDay.stderr, /không phải ngày có thật/);
+  assert.equal(run('shadow-report.mjs', ['--since', '2026-13-01', '--dir', dir]).status, 1);
+  assert.equal(run('shadow-report.mjs', ['--since', '2026-09-01', '--dir', dir]).status, 0, 'ngày hợp lệ vẫn chạy');
+  for (const script of ['replay-llm.mjs', 'replay-golden.mjs', 'order-coverage.mjs']) {
+    const broken = run(script, [path.join(dir, 'bad.json')]);
+    assert.equal(broken.status, 1, `${script}: ${broken.stdout}`);
+    assert.match(broken.stderr, /Bộ chấm .*bad\.json/, `${script} báo tên tệp hỏng`);
+    assert.doesNotMatch(broken.stderr, /\n\s+at /, `${script} không in stack`);
+  }
 });

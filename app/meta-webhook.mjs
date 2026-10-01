@@ -2,7 +2,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getPageAccessToken } from './channel-store.mjs';
 import { fetchCommentDetails, fetchCustomerProfile, fetchPostSummary } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
+import { createLogLimiter, debugFlagOn } from './security.mjs';
 import { genderFromMessage, genderFromName } from './processing/customer-info.mjs';
+import { stickerFields } from './stickers.mjs';
 import {
   applyGenderGuess,
   reconcileCustomerGender,
@@ -72,8 +74,14 @@ export function normalizeWebhookMessage(messagingEvent) {
   const attachment = (message.attachments || []).map(normalizeWebhookAttachment).find(Boolean);
   // Khách gửi nhiều ảnh trong một tin: giữ đủ danh sách để hộp thư vẽ lưới ảnh.
   const images = (message.attachments || []).filter(item => item?.type === 'image' && item.payload?.url).map(item => String(item.payload.url));
+  // Nhãn dán (payload.sticker_id, hay message.sticker_id): giữ ảnh, gắn sticker/stickerId/like như đường Pancake.
+  const stickerAttachment = (message.attachments || []).find(item => item?.payload?.sticker_id);
+  const sticker = message.sticker_id || stickerAttachment
+    ? stickerFields({ sticker: true, sticker_id: String(message.sticker_id || stickerAttachment?.payload?.sticker_id || ''), url: stickerAttachment?.payload?.url })
+    : {};
   const base = {
     ...(images.length > 1 ? { images } : {}),
+    ...sticker,
     id: identifier,
     mid: identifier,
     direction: isEcho ? 'outgoing' : 'incoming',
@@ -244,10 +252,15 @@ function applyCommentEvent(store, event) {
  *    `conversation.referral` thì bot mất tên quảng cáo, nguồn khách đổi từ
  *    "ads" thành "inbox", và `adGreeted` tưởng đã chào quảng cáo vì `ref` có giá trị.
  */
-export function attachReferral(conversation, referral) {
+// Referral QR đi kèm một TIN (tin Botcake "Mã thẻ: #…", tin soạn sẵn của khách): `messageId` + giờ của
+// tin. Đồng bộ Pancake kéo lại cùng tin đó mỗi 10 phút; trước đây mỗi lần kéo lại là một referral mới
+// mang giờ lúc kéo (Date.now()) → mỗi ngày tin còn trong 60 hội thoại mới nhất là đếm thêm một lượt
+// "vào Messenger". Giờ: cùng tin chỉ ghi một lần, mốc là giờ của tin.
+export function attachReferral(conversation, referral, { messageId = '', at = 0 } = {}) {
   if (!referral) return;
-  const stamped = { ...referral, at: Date.now() };
+  const stamped = { ...referral, at: Number(at) > 0 ? Number(at) : Date.now(), ...(messageId ? { messageId: String(messageId) } : {}) };
   if (referral.source === 'SHORTLINK') {
+    if (messageId && (conversation.qrReferrals || []).some(item => item?.messageId === String(messageId))) return;
     conversation.qrReferrals = [...(conversation.qrReferrals || []), stamped].slice(-20);
     return;
   }
@@ -274,7 +287,7 @@ export function applyWebhookEvents(store, events) {
       // Gắn vào hội thoại chứ không vào tin nhắn: đây là bối cảnh của cả luồng.
       // Quảng cáo chỉ đến một lần, nhưng mã QR thì khách quét lại nhiều lần —
       // nên giữ bản mới nhất và một ít lịch sử, thay vì chỉ giữ lần đầu.
-      if (event.referral) attachReferral(conversation, event.referral);
+      if (event.referral) attachReferral(conversation, event.referral, { messageId: message?.mid || message?.id || '', at: message?.createdAt });
       // A customer who commented first and then writes in Messenger (after the
       // bot's private reply) is still asking about that post's product.
       if (inserted && message.direction === 'incoming' && (!conversation.post || !conversation.picture)) {
@@ -427,6 +440,9 @@ async function resolveMissingProfiles(changes) {
   }).filter(Boolean));
 }
 
+// Chẩn đoán cấu trúc: tối đa 30 gói/phút để bật quên tắt cũng không làm ngập journald.
+const webhookDebugAllowed = createLogLimiter({ max: 30, windowMs: 60 * 1000 });
+
 /** One line per delivery so `journalctl` shows what Meta actually sent. */
 function describeWebhookPayload(payload, events) {
   const fields = (payload?.entry || []).flatMap(entry => (entry.changes || []).map(change => `${change.field}:${change.value?.item || '?'}/${change.value?.verb || '?'}`));
@@ -434,8 +450,8 @@ function describeWebhookPayload(payload, events) {
   // Chẩn đoán bật bằng WEBHOOK_DEBUG_KEYS=1: ghi TÊN TRƯỜNG Meta gửi tới, không
   // ghi nội dung tin nhắn. Dùng để biết CRM đang bỏ sót sự kiện nào — ví dụ
   // referral có về mà bị chuẩn hoá nhầm thì dòng tóm tắt bên trên không lộ ra.
-  const shape = process.env.WEBHOOK_DEBUG_KEYS
-    ? (payload?.entry || []).flatMap(entry => (entry.messaging || []).map(item => {
+  const shape = debugFlagOn('WEBHOOK_DEBUG_KEYS') && webhookDebugAllowed()
+    ?(payload?.entry || []).flatMap(entry => (entry.messaging || []).map(item => {
       const keys = Object.keys(item).filter(key => key !== 'sender' && key !== 'recipient' && key !== 'timestamp');
       const chiTiet = [];
       if (item.referral) chiTiet.push(`referral{ref=${item.referral.ref || '-'},source=${item.referral.source || '-'},type=${item.referral.type || '-'}}`);

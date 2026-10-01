@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const directory = mkdtempSync(path.join(tmpdir(), 'possync-'));
+const directory = tempDir('possync-');
 process.env.LANDING_ORDERS_PATH = path.join(directory, 'landing-orders.json');
 process.env.PHONE_WARNINGS_PATH = path.join(directory, 'phone-warnings.json');
 process.env.POS_CONFIG_PATH = path.join(directory, 'pos-config.json');
@@ -118,4 +117,38 @@ test('nhẹ (e): tổng đơn landing từ POS = cod nếu có, không thì ti�
   assert.equal(posOrderTotal({ total_price: 174000, shipping_fee: 15000, is_free_shipping: true }), 174000);
   assert.equal(posOrderToPayload(posOrder({ total_price: 522000, total_discount: 75000, shipping_fee: 0, cod: 447000 })).total, 447000);
   assert.equal(posOrderToPayload(posOrder({ total_price: 522000, total_discount: 75000, shipping_fee: 0 })).total, 447000);
+});
+
+test('lượt updated_at: đơn đặt từ lâu bị hoàn/hủy trên POS sau 48 giờ → chép trạng thái mới nhất về đơn landing, hủy đơn CRM theo, không tạo đơn mới', async () => {
+  const old = posOrder({ id: 60001, bill_phone_number: '0977000111', inserted_at: '2026-09-01T02:00:00.000000' });
+  const recorded = await recordLandingOrder(posOrderToPayload(old), { page: 'https://granola.giotnang.vn/', posId: old.id, checkPhone: false });
+  assert.equal(recorded.created, true);
+  const returned = { ...old, status: 5, status_name: 'returned' };
+  const crmCancelled = { id: 60002, custom_id: 'CRM-crm-xyz', status: 6, status_name: 'canceled', order_sources_name: 'Facebook', inserted_at: '2026-09-02T02:00:00.000000' };
+  const neverSeen = posOrder({ id: 60003, bill_phone_number: '0977000333', inserted_at: '2026-09-03T02:00:00.000000', status: 3, status_name: 'delivered' });
+  const asked = [];
+  const fetchImpl = async url => {
+    const updateStatus = new URL(String(url)).searchParams.get('updateStatus');
+    asked.push(updateStatus);
+    const data = updateStatus === 'updated_at' ? [returned, crmCancelled, neverSeen] : [];
+    return { ok: true, json: async () => ({ data, total_pages: 1 }) };
+  };
+  let cancelledIds = null;
+  let statusUpdates = null;
+  const summary = await syncPosLandingOrders({
+    config: { apiKey: 'k', shopId: '1', baseUrl: 'https://pos.example/api/v1' },
+    fetchImpl,
+    onCrmOrdersCancelled: async ids => { cancelledIds = ids; return ids.length; },
+    onPosStatuses: async updates => { statusUpdates = updates; return 0; }
+  });
+  assert.deepEqual(asked, ['inserted_at', 'updated_at']);
+  assert.equal(summary.created, 0, 'đơn cũ chỉ đổi trạng thái: không tạo đơn landing mới');
+  assert.equal(summary.statusUpdated, 1);
+  assert.deepEqual(cancelledIds, ['crm-xyz']);
+  assert.deepEqual(statusUpdates.map(update => [update.posId, update.code]), [['60001', 5], ['60002', 6], ['60003', 3]]);
+  const mine = (await listLandingOrders()).find(order => order.landing?.posId === '60001');
+  assert.equal(mine.posStatus.code, 5);
+  const { isCancelledOrder } = await import('../app/order-facts.mjs');
+  assert.equal(isCancelledOrder(mine), true, 'đơn bom/hoàn không còn tính doanh thu');
+  assert.equal((await listLandingOrders()).some(order => order.phone === '0977000333'), false);
 });

@@ -65,7 +65,8 @@ function repriceFromCatalog(order, products, { basketChanged }) {
   order.discount = discount;
   order.total = Math.max(0, subtotal + shippingFee - discount);
   if (basketChanged) {
-    if (priced.totalQuantity !== 2) delete order.promoGift;
+    // Bát ưu đãi bám đuổi chỉ cho combo đúng 2 túi, và không cộng với quà live (đã có bát).
+    if (priced.totalQuantity !== 2 || priced.gifts.some(gift => gift.livestreamOnly)) delete order.promoGift;
     order.gift = [order.trialFreeShip && priced.shippingFee > 0 ? trialGiftText : '', priced.gift, order.promoGift || ''].filter(Boolean).join(' + ');
   }
   return true;
@@ -284,4 +285,85 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     order.editedByStaffAt = now;
   }
   return changed;
+}
+
+/* ---- Ai đã làm gì với đơn (lịch sử ghi ngay trên đơn) ----
+ * createdBy { username, name }: người tạo (đơn tạo tay = nhân viên; đơn bot = { 'bot', 'Chatbot AI' }).
+ * updatedBy { username, name }: người sửa gần nhất. history: [{ at, by, action, summary }], cũ → mới,
+ * tối đa 50 mục. Đơn cũ không có các trường này vẫn đọc bình thường (mảng tạo khi sửa lần đầu).
+ */
+export const ORDER_HISTORY_LIMIT = 50;
+
+/** Mã trạng thái xử lý (cột Trạng thái của bảng Đơn hàng) → nhãn hiện cho người đọc. */
+export const ORDER_STATUS_LABELS = Object.freeze({
+  '': 'Chưa xử lý', call1: 'Gọi lần 1', call2: 'Gọi lần 2', call3: 'Gọi lần 3', calling: 'Đang gọi',
+  callback: 'Hẹn gọi lại', transfer: 'Chờ chuyển khoản', hold: 'Giữ đơn', confirmed: 'Đã xác nhận', cancelled: 'Khách hủy'
+});
+
+const statusLabel = value => ORDER_STATUS_LABELS[String(value || '')] ?? String(value || '');
+
+function stampOf(by) {
+  const username = String(by?.username || '').slice(0, 32);
+  return { username, name: String(by?.name || username || 'Không rõ').slice(0, 80) };
+}
+
+/** Ghi một mục lịch sử lên đơn (đổi tại chỗ) và đặt updatedBy. Trả về mục vừa ghi. */
+export function recordOrderHistory(order, { by, action, summary = '', at = Date.now() } = {}) {
+  if (!order || typeof order !== 'object') return null;
+  const stamp = stampOf(by);
+  const entry = { at, by: stamp, action: String(action || 'order.update'), summary: String(summary || '').replace(/\s+/g, ' ').trim().slice(0, 200) };
+  const history = Array.isArray(order.history) ? order.history : [];
+  history.push(entry);
+  order.history = history.slice(-ORDER_HISTORY_LIMIT);
+  order.updatedBy = stamp;
+  return entry;
+}
+
+/** Đặt người tạo cho đơn mới (không đè người tạo đã có), kèm mục lịch sử "tạo đơn". */
+export function stampOrderCreated(order, by, { at = Number(order?.createdAt) || Date.now(), summary = '' } = {}) {
+  if (!order || typeof order !== 'object') return order;
+  if (!order.createdBy) order.createdBy = stampOf(by);
+  if (!Array.isArray(order.history) || !order.history.length) {
+    order.history = [{ at, by: stampOf(by), action: 'order.create', summary: String(summary || '').slice(0, 200) }];
+  }
+  return order;
+}
+
+const moneyText = value => `${Math.round(Number(value) || 0).toLocaleString('vi-VN')}đ`;
+const basketText = products => (Array.isArray(products) ? products : [])
+  .map(item => `${Math.round(Number(item?.quantity) || 0)} ${String(item?.name || item?.sku || '').trim()}`)
+  .join(' + ').slice(0, 80);
+
+/** Mã hành động nhật ký cho một lần sửa: hủy / đổi trạng thái / ẩn khỏi bảng / sửa đơn. */
+export function orderEditAction(changed = [], after = {}) {
+  if (changed.includes('processingStatus') && String(after.processingStatus || '') === 'cancelled') return 'order.cancel';
+  const rest = changed.filter(field => !['processingStatus', 'hiddenFromTable', 'staffNote'].includes(field));
+  if (!rest.length && changed.includes('processingStatus')) return 'order.status';
+  if (!rest.length && !changed.includes('staffNote') && changed.includes('hiddenFromTable')) return 'order.hide';
+  return 'order.update';
+}
+
+/**
+ * Câu tóm tắt tiếng Việt cho một lần sửa đơn: trường nào đổi, giá trị trước → sau với những
+ * trường đọc được ngay (trạng thái, giỏ, tổng tiền, phí ship, giảm giá, tên). SĐT/địa chỉ chỉ
+ * nêu là đã đổi (nhật ký che SĐT; địa chỉ dài).
+ */
+export function describeOrderEdits(before = {}, after = {}, changed = []) {
+  const parts = [];
+  const has = field => changed.includes(field);
+  if (has('processingStatus')) parts.push(`trạng thái: ${statusLabel(before.processingStatus)} → ${statusLabel(after.processingStatus)}`);
+  if (has('lines') || has('products')) parts.push(`giỏ: ${basketText(before.products)} → ${basketText(after.products)}`);
+  if (has('name')) parts.push(`tên khách → ${String(after.name || '').slice(0, 40)}`);
+  if (has('phone')) parts.push('SĐT');
+  if (has('address')) parts.push('địa chỉ');
+  if (has('freeShipping')) parts.push(after.freeShipping ? 'miễn ship' : 'bỏ miễn ship');
+  if (has('shippingFee')) parts.push(`phí ship ${moneyText(before.shippingFee)} → ${moneyText(after.shippingFee)}`);
+  if (has('discount')) parts.push(`giảm giá ${moneyText(before.discount)} → ${moneyText(after.discount)}`);
+  if (has('payment')) parts.push(`thanh toán → ${String(after.payment || '').slice(0, 30)}`);
+  if (has('gift')) parts.push('quà');
+  if (has('note')) parts.push('ghi chú khách');
+  if (has('staffNote')) parts.push('ghi chú xử lý');
+  if (has('hiddenFromTable')) parts.push(after.hiddenFromTable ? 'ẩn khỏi bảng' : 'hiện lại trong bảng');
+  if ((Number(before.total) || 0) !== (Number(after.total) || 0)) parts.push(`tổng ${moneyText(before.total)} → ${moneyText(after.total)}`);
+  return parts.join('; ').slice(0, 200);
 }

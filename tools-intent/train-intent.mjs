@@ -314,7 +314,7 @@ export function printTrainingReport(report, log = console.log) {
 const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 if (isMain) {
   const args = process.argv.slice(2);
-  const cli = parseCliArgs(args, ['--holdout', '--golden']);
+  const cli = parseCliArgs(args, ['--holdout', '--golden'], ['--include-comments', '--quiet']);
   const [datasetPath, outPath] = cli.positional;
   if (!datasetPath) cliFail('Dùng: node tools-intent/train-intent.mjs <dataset.jsonl> [out-model.json] [--holdout 0.2] [--golden golden.json] [--include-comments] [--quiet]');
   if (!existsSync(datasetPath)) cliFail(`Không thấy dataset: ${datasetPath}`);

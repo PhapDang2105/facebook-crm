@@ -23,7 +23,8 @@ export function toLocalPhone(value) {
  * inside a number are joined first, so "0385 805 790" and "0385.805.790" work.
  */
 export function extractVietnamesePhone(text) {
-  const raw = String(text ?? '');
+  // Vòng 12 (inbox-3 #17): chữ "O"/"o" gõ thay số 0 ở đầu SĐT ("O972…"): chỉ khi ngay sau là đủ 9 chữ số.
+  const raw = String(text ?? '').replace(/(?<![\p{L}\p{N}])[oO](?=(?:[ .\-]?\d){9}(?![\d]))/gu, '0');
   // Không nối chữ số qua xuống dòng: tin gộp "0912 345 678" + xuống dòng + "12 Nguyễn Huệ" là SĐT rồi số nhà (28/09).
   const joined = raw.replace(/(\d)[ 	.\-()]+(\d)/g, '$1$2');
   // Thử bản đã nối ("0912 345 678") trước, rồi bản gốc: SĐT đứng ngay trước số
@@ -57,8 +58,12 @@ const maleMiddleNames = new Set(['văn', 'hữu', 'công', 'đình', 'đức', '
 
 const stripDiacritics = value => value.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
 const withKeys = set => { const map = new Map(); for (const item of set) map.set(stripDiacritics(item), item); return map; };
+// Vòng 12: tên gõ không dấu mà bỏ dấu ra trùng nhau giữa hai giới hay với tên trung tính
+// ("Thanh" = Thanh/Thành) thì không đoán ("Dao Thi My Thanh" từng thành "anh").
+const asciiAmbiguous = new Set(['thanh']);
 const femaleAscii = withKeys(femaleGivenNames);
 const maleAscii = withKeys(maleGivenNames);
+for (const key of asciiAmbiguous) { femaleAscii.delete(key); maleAscii.delete(key); }
 const familyAscii = withKeys(familyNames);
 
 /**
@@ -74,9 +79,10 @@ export function genderFromName(name) {
   const words = String(name || '').trim().split(/\s+/).filter(Boolean).map(word => word.toLowerCase());
   if (words.length < 2) return '';
   const middle = words.slice(1, -1);
-  if (middle.some(word => femaleMiddleNames.has(word))) return 'female';
-  if (middle.some(word => maleMiddleNames.has(word))) return 'male';
   const ascii = words.every(word => word === stripDiacritics(word));
+  // "Thi" không dấu ở giữa tên = "Thị" (vòng 12: "Dao Thi My Thanh").
+  if (middle.some(word => femaleMiddleNames.has(word) || (ascii && word === 'thi'))) return 'female';
+  if (middle.some(word => maleMiddleNames.has(word))) return 'male';
   const isFamily = word => (ascii ? familyAscii.has(stripDiacritics(word)) : familyNames.has(word));
   const western = isFamily(words.at(-1)) && !isFamily(words[0]);
   const given = western ? words[0] : words.at(-1);
@@ -105,10 +111,35 @@ const objectForm = new RegExp(`${edgeBefore}(?:lấy|gửi|gởi|ship|giao|bán|
 // "chị ơi", "anh ơi" address the shop, never the customer.
 const vocative = new RegExp(`${edgeBefore}${selfPronoun}\\s+(?:ơi|oi|ei|êi)`, 'iu');
 
+// Vòng 12: khách tự giới thiệu ở đầu tin ("Chị tâm Địa chỉ: …", "Anh Hùng, sđt …").
+const selfIntro = new RegExp(`^\\s*(anh|chị|cô|chú)\\s+(?!(?:ơi|oi|ei|êi|ạ|à|nhé|nha|chị|anh|em|shop|cho|xem|hỏi)(?![\\p{L}]))\\p{L}+(?:\\s+\\p{L}+)?\\s*(?:[,:]|\\s+(?:địa\\s+chỉ|đ\\/c|đc|dc|sđt|sdt|đt|số|ở|nhà)(?![\\p{L}]))`, 'iu');
+// "em đặt…", "e lấy…": khách xưng em — không nói giới tính.
+const selfEm = new RegExp(`${edgeBefore}(em|e)\\s+(?:muốn|cần|đặt|lấy|mua|order|chốt|gửi|xin)${edgeAfter}`, 'iu');
+
+/**
+ * Vòng 12: khách tự xưng trong tin — { pronoun: 'anh'|'chị'|'cô'|'chú'|'em'|'', gender }. "Lấy chị…",
+ * "cho cô…", "anh lấy…", "Chị tâm Địa chỉ:…" → có giới tính; "em đặt…" → pronoun 'em', không giới tính.
+ * Lời khách tự xưng là bằng chứng mạnh hơn giới tính hồ sơ Pancake và tên (xem GENDER_SOURCE_RANK).
+ */
+export function selfReference(text) {
+  const gender = genderFromMessage(text);
+  const message = String(text || '');
+  const word = (message.match(subjectForm) || message.match(objectForm) || message.match(selfIntro))?.[1]?.toLowerCase() || '';
+  const pronoun = gender ? ({ a: 'anh', c: 'chị' }[word] || word) : (selfEm.test(message) ? 'em' : '');
+  return { pronoun: gender || pronoun === 'em' ? pronoun : '', gender };
+}
+
+/**
+ * Thứ tự tin cậy đề xuất cho giới tính (vòng 12): nhân viên chọn tay > khách tự xưng trong tin > hồ sơ
+ * Pancake > tên. messaging-store.mjs (genderRank: pancake 2.5 > message 2) đang để Pancake thắng lời
+ * khách tự xưng ("Lấy chị 1 túi vàng" vẫn bị gọi "anh") — F-SYNC đổi genderRank theo bảng này.
+ */
+export const GENDER_SOURCE_RANK = Object.freeze({ staff: 3, message: 2.7, pancake: 2.5, name: 1 });
+
 export function genderFromMessage(text) {
   // "lấy cho anh nhà mình", "tặng chị của em", "gửi cho anh ấy": nói về người khác, không phải khách.
   const message = String(text || '').replace(/(?:cho|tặng|gửi|gởi|của|với)\s+(?:anh|chị|cô|chú|a|c)\s+(?:nhà|xã|mình|ấy|em|tôi|con|bạn)(?![\p{L}])/giu, ' ');
-  const match = message.match(subjectForm) || message.match(objectForm);
+  const match = message.match(subjectForm) || message.match(objectForm) || message.match(selfIntro);
   if (!match) return '';
   const word = match[1].toLowerCase();
   // "anh ơi … anh …" is the shop being addressed, so that word says nothing;

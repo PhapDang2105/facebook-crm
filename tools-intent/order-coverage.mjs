@@ -135,7 +135,7 @@ function printReport(title, result, show) {
 
 async function main() {
   const args = process.argv.slice(2);
-  const cli = parseCliArgs(args, ['--show', '--templates']);
+  const cli = parseCliArgs(args, ['--show', '--templates'], ['--all', '--json']);
   const goldenPath = cli.positional[0] || path.join(root, 'data', 'processed', 'golden-set.json');
   const datasetPath = cli.positional[1] || '';
   if (datasetPath && !existsSync(datasetPath)) cliFail(`Không thấy dataset: ${datasetPath}`);
@@ -148,9 +148,11 @@ async function main() {
   (await import(pathToFileURL(path.join(root, 'app/processing/catalog.mjs')).href)).reloadCatalog();
 
   const rows = [];
-  if (existsSync(goldenPath)) rows.push(...await goldenRows(goldenPath));
+  if (existsSync(goldenPath)) {
+    try { rows.push(...await goldenRows(goldenPath)); } catch (error) { cliFail(`Bộ chấm ${goldenPath} không đọc được: ${String(error.message).slice(0, 80)}`); }
+  }
   else console.log(`Không có bộ chấm ${goldenPath} (bỏ qua).`);
-  if (datasetPath) { const readStats = {}; rows.push(...readJsonl(readFileSync(datasetPath, 'utf8'), readStats).filter(row => row.source !== 'comment')); if (readStats.bad) console.warn(`Bỏ ${readStats.bad} dòng hỏng trong ${datasetPath}`); }
+  if (datasetPath) { const readStats = {}; let content = ''; try { content = readFileSync(datasetPath, 'utf8'); } catch (error) { cliFail(`Dataset ${datasetPath} không đọc được: ${error.code || error.message}`); } rows.push(...readJsonl(content, readStats).filter(row => row.source !== 'comment')); if (readStats.bad) console.warn(`Bỏ ${readStats.bad} dòng hỏng trong ${datasetPath}`); }
   if (!rows.length) { console.log('Không có dòng nào để đo. Dùng: node tools-intent/order-coverage.mjs [golden.json] [dataset.jsonl] [--all]'); process.exit(1); }
 
   const trusted = rows.filter(isTrusted);

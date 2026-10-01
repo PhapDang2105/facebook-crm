@@ -42,11 +42,11 @@ test('đã hỏi một lần, khách trả lời địa chỉ có "xã" (chữ c
 
 test('đang xin SĐT/địa chỉ mà khách đổi sang số lượng không tính được giá: giữ giỏ mới, xin phần còn thiếu, gắn thẻ cho nhân viên tính giá; không chốt giỏ cũ', () => {
   const pending = { items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }], key: 'GRA-XANH-Z450=1', at: Date.now(), phone: '', address: '', addressAsks: 0 };
-  const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Túi Xanh', No_A: '5', Phone_Number: '0909123456' }, templates, { pendingOrder: pending });
+  const reply = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Túi Xanh', No_A: '25', Phone_Number: '0909123456' }, templates, { pendingOrder: pending });
   // Khách đã nói rõ loại và số lượng: không hỏi lại vị (bot từng im vì hỏi lặp).
   assert.equal(reply.templateId, 'ORDER_CUSTOM_BASKET');
   assert.equal(reply.attention, true);
-  assert.match(reply.messages[0], /5 Granola Túi Xanh 450g/);
+  assert.match(reply.messages[0], /25 Granola Túi Xanh 450g/);
   assert.match(reply.messages[0], /địa chỉ nhận hàng/);
   assert.equal(reply.order, undefined);
   assert.equal(reply.pendingOrder.phone, '0909123456', 'SĐT vừa gửi vẫn được giữ');
@@ -86,7 +86,7 @@ test('tin riêng đã gửi trong 24 giờ chỉ khác khoảng trắng: vẫn t
     conversation: { id: 'page:comment:c2:p1', pageId: 'page', psid: 'user', source: 'comment', name: 'Tiên', botEnabled: true },
     message: { id: 'c2', mid: 'c2', direction: 'incoming', type: 'text', text: 'combo đó mấy gói em', createdAt: Date.now() }
   }], {
-    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib cho mình rồi ạ', COMMENT_PUBLIC_REPEAT: 'Dạ em đã gửi trong tin nhắn rồi ạ' } }),
+    readSettings: async () => ({ enabled: true, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, messageTemplates: { ...templates, COMMENT_PRIVATE_REPLY: 'Dạ em thấy {title} để lại bình luận ạ', COMMENT_PUBLIC_REPLY: 'Dạ em vừa ib cho mình rồi ạ', COMMENT_PUBLIC_REPEAT: 'Dạ em đã gửi trong tin nhắn rồi ạ' } }),
     listMessages: async id => (id === 'page:user' ? inboxMessages : []),
     getConversation: async id => (id === 'page:user' ? { id: 'page:user', pageId: 'page', psid: 'user', botEnabled: true } : null),
     saveBotState: async () => {},
@@ -106,7 +106,7 @@ test('hẹn chạy lại sau khi hết hạn mức: lúc chạy lại bot đã b
     conversation: { id: 'page:off', psid: 'off', name: 'Khách', botEnabled: true },
     message: { id: 'mid.off.1', mid: 'mid.off.1', direction: 'incoming', type: 'text', text: 'giá sao', createdAt: 1000 }
   }], {
-    readSettings: async () => ({ enabled, responseMode: 'automatic', handoffKeywords: '', capacityRetryDelayMs: 30 }),
+    readSettings: async () => ({ enabled, responseMode: 'automatic', handoffKeywords: '', fragmentWaitMs: 0, capacityRetryDelayMs: 30 }),
     listMessages: async () => [],
     sendMessage: async (_conversation, message) => { log.push(`send:${message.text}`); return { message: { mid: 'mid.bot' } }; },
     saveBotState: async () => {},

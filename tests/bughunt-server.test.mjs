@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Mọi kho mà recordLandingOrder chạm tới đều trỏ vào thư mục tạm, không đụng data/processed.
-const directory = mkdtempSync(path.join(tmpdir(), 'bughunt-'));
+const directory = tempDir('bughunt-');
 process.env.LANDING_ORDERS_PATH = path.join(directory, 'landing-orders.json');
 process.env.ORDER_ARCHIVE_PATH = path.join(directory, 'order-archive');
 process.env.PHONE_WARNINGS_PATH = path.join(directory, 'phone-warnings.json');

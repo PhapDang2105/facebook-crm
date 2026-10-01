@@ -6,10 +6,24 @@ const submitButton = document.querySelector('#login-submit');
 const passwordInput = document.querySelector('#login-password');
 const passwordToggle = document.querySelector('#login-password-toggle');
 
+// Chỉ nhận đường dẫn NỘI BỘ: "/x" được; "//host", "/\host", "/%09/host" (trình duyệt bỏ tab/xuống
+// dòng → "//host"), "https://…", ký tự điều khiển, khoảng trắng hay "\" thì quay về "/".
+// Giống hệt safeNextPath() trong app/security.mjs (tests/security.test.mjs chạy cả hai).
+function safeNext(value) {
+  const next = String(value == null ? '' : value);
+  if (!next || next.length > 2000 || next[0] !== '/' || next[1] === '/') return '/';
+  if (/[\u0000- \u007f-\u009f\\]/.test(next)) return '/';
+  if (/^\/%(?:2f|5c|0[0-9a-f]|1[0-9a-f]|20|7f)/i.test(next)) return '/';
+  try {
+    if (new URL(next, 'https://crm.invalid').origin !== 'https://crm.invalid') return '/';
+  } catch {
+    return '/';
+  }
+  return next;
+}
+
 function nextPath() {
-  const next = new URLSearchParams(location.search).get('next') || '/';
-  // "/x" được, "//host" hay "/\host" thì không — chặn chuyển hướng ra trang ngoài.
-  return /^\/(?![/\\])/.test(next) ? next : '/';
+  return safeNext(new URLSearchParams(location.search).get('next'));
 }
 
 function showError(message) {

@@ -72,6 +72,26 @@ export function assertUsableAiEndpoint(endpoint, { provider = '', authType = '' 
   return parsed.toString();
 }
 
+function normalizedEndpoint(value) {
+  try { return new URL(String(value || '').trim()).toString(); } catch { return String(value || '').trim(); }
+}
+
+export const AI_KEY_REENTRY_ERROR = 'Đổi endpoint AI thì phải nhập lại khóa API (khóa đang lưu không được gửi sang địa chỉ mới).';
+
+/**
+ * Chặn trộm khóa AI: khóa đã lưu chỉ được gửi tới đúng endpoint lúc nhập khóa. Bản vá đổi
+ * endpoint (URL khác, kể cả cùng host khác đường dẫn — cổng AI dùng chung phân tài khoản theo
+ * đường dẫn) mà không kèm khóa mới → trả thông báo lỗi; ngược lại trả ''.
+ * Đổi nhà cung cấp thì server tự xóa khóa cũ nên không cần chặn ở đây.
+ * `next`: cấu hình SẼ lưu (đã gộp bản vá + chuẩn hóa — endpoint trống thành endpoint mặc định).
+ */
+export function aiKeyReentryError(current = {}, next = {}, patch = {}) {
+  if (String(patch?.directApiKey || '').trim()) return '';
+  if (!String(current?.directApiKey || '').trim()) return '';
+  if (patch?.provider && patch.provider !== current?.provider) return '';
+  return normalizedEndpoint(next?.directEndpoint) === normalizedEndpoint(current?.directEndpoint) ? '' : AI_KEY_REENTRY_ERROR;
+}
+
 // Trần số mẫu tin lưu được (seed + mẫu tự tạo).
 export const maxMessageTemplates = 200;
 
@@ -292,7 +312,9 @@ export function normalizeFollowUps(value) {
     };
   }).filter(item => (item.templateId || item.message) && !seen.has(item.id) && seen.add(item.id));
   // Mỗi lượt (15 phút) gửi tối đa N tin: chia đều, tránh gửi dồn hàng trăm tin một lúc.
-  return { enabled: source.enabled === true, maxPerRun: Math.max(1, Math.min(100, Math.round(Number(source.maxPerRun) || 15))), scenarios };
+  // commentEnabled: tắt riêng mọi kịch bản bám đuổi bình luận (comment-no-reply) mà không tắt cả bám đuổi.
+  // Mặc định bật (giữ hành vi cũ); chỉ false khi đặt rõ false.
+  return { enabled: source.enabled === true, commentEnabled: source.commentEnabled !== false, maxPerRun: Math.max(1, Math.min(100, Math.round(Number(source.maxPerRun) || 15))), scenarios };
 }
 
 export function publicChatbotSettings(value = {}) {

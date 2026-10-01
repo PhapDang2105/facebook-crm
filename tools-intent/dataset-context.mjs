@@ -4,6 +4,8 @@
 // Vòng 12: các trường mô hình dùng (lastTemplate, lastWasOrderStep, prevBotAsks, hasOrder, phone/address/bag…) dựng
 // bằng intentRowOf của app/processing/intent-features.mjs — MỘT định nghĩa với engine; che bằng maskPersonal của
 // nhật ký quyết định (token "<sdt>/<email>/<so>" khớp nhật ký, số tiền không bị che).
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { extractVietnamesePhone } from '../app/processing/customer-info.mjs';
 import { maskPersonal } from '../app/processing/decision-log.mjs';
 import { ADDRESS_WORDS, canonicalTemplateId, countBags, intentRowOf, isOrderStepContext, normalizeIntentText, orderContextOf, prevBotAsksOf as prevBotAsksOfRow } from '../app/processing/intent-features.mjs';
@@ -161,16 +163,50 @@ export function cliFail(message) {
   process.exit(1);
 }
 
+export const HELP_FLAGS = ['--help', '-h'];
+
+/** Hướng dẫn dùng của một CLI = khối chú thích `//` liền ở đầu tệp (đã viết sẵn ở mọi công cụ). */
+export function cliUsage(file = process.argv[1]) {
+  let content = '';
+  try { content = readFileSync(String(file).startsWith('file:') ? fileURLToPath(file) : file, 'utf8'); } catch { return ''; }
+  const lines = [];
+  for (const line of content.split(/\r?\n/)) {
+    if (!line.startsWith('//')) break;
+    lines.push(line.replace(/^\/\/ ?/, ''));
+  }
+  return lines.join('\n');
+}
+
+/** Đọc JSON từ tệp; tệp thiếu/hỏng → lỗi CLI gọn (không stack), exit 1. `label` nêu tệp gì trong thông báo. */
+export function readJsonFileOrFail(file, label = 'Tệp JSON') {
+  let content;
+  try { content = readFileSync(file, 'utf8'); } catch (error) { cliFail(`${label} ${file} không đọc được: ${String(error.code || error.message).slice(0, 80)}`); }
+  try { return JSON.parse(content); } catch (error) { cliFail(`${label} ${file} không phải JSON hợp lệ: ${String(error.message).slice(0, 80)}`); }
+}
+
 /**
- * Đọc đối số CLI: cờ có giá trị (`valueFlags`) thiếu giá trị (hết đối số hay giá trị bắt đầu bằng "--") → lỗi rõ, exit 1.
+ * Đọc đối số CLI:
+ * - `--help` / `-h`: in hướng dẫn (khối chú thích đầu tệp CLI đang chạy, hay `help` truyền vào) rồi thoát 0 — không chạy gì;
+ * - cờ có giá trị (`valueFlags`) thiếu giá trị (hết đối số hay giá trị bắt đầu bằng "--") → lỗi rõ, exit 1;
+ * - có `booleanFlags` (mảng cờ bật/tắt): cờ "--…" không thuộc valueFlags ∪ booleanFlags → lỗi "cờ lạ", exit 1
+ *   (gõ nhầm "--limt 10" trước đây bị bỏ qua lặng lẽ và chạy hết bộ dữ liệu).
  * @returns {{ positional: string[], has: (flag: string) => boolean, value: (flag: string, fallback?: string) => string }}
  */
-export function parseCliArgs(args, valueFlags = []) {
+export function parseCliArgs(args, valueFlags = [], booleanFlags = null, { help = '' } = {}) {
   const flags = new Set(valueFlags);
+  if (args.some((arg, index) => HELP_FLAGS.includes(arg) && !flags.has(args[index - 1]))) {
+    console.log(help || cliUsage() || 'Không có hướng dẫn cho lệnh này.');
+    process.exit(0);
+  }
   for (let i = 0; i < args.length; i += 1) {
     if (!flags.has(args[i])) continue;
     const next = args[i + 1];
     if (next === undefined || next === '' || next.startsWith('--')) cliFail(`Thiếu giá trị cho ${args[i]}.`);
+  }
+  if (Array.isArray(booleanFlags)) {
+    const known = new Set([...valueFlags, ...booleanFlags]);
+    const unknown = args.filter((arg, index) => arg.startsWith('--') && !known.has(arg) && !flags.has(args[index - 1]));
+    if (unknown.length) cliFail(`Cờ lạ: ${unknown.join(', ')}. Cờ hợp lệ: ${[...known].sort().join(' ') || '(không có)'} — xem --help.`);
   }
   const positional = args.filter((arg, index) => !arg.startsWith('--') && !flags.has(args[index - 1]));
   return {

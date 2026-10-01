@@ -37,7 +37,14 @@ export function applyEnvironmentFile(filePath = path.join(projectRoot, '.env')) 
   return values;
 }
 
-applyEnvironmentFile();
+// Kiểm thử không được nạp .env THẬT của máy (token Page, khoá POS, đường dẫn kho):
+// dưới `node --test` (NODE_TEST_CONTEXT do runner đặt cho tiến trình con) hoặc khi
+// CRM_SKIP_ENV_FILE=1 (tests/helpers/quiet-console.mjs đặt sẵn) thì bỏ qua tệp này.
+export function shouldSkipEnvironmentFile(environment = process.env) {
+  return Boolean(environment.NODE_TEST_CONTEXT) || environment.CRM_SKIP_ENV_FILE === '1';
+}
+
+if (!shouldSkipEnvironmentFile()) applyEnvironmentFile();
 
 function readPort() {
   const fromArgument = Number(process.argv[2]);
@@ -213,10 +220,25 @@ export const campaignConfig = {
 };
 
 // Đăng nhập CRM: CRM_LOGIN_USERS="ten:chuoi-bam,ten2:chuoi-bam" (băm bằng
-// `node app/auth.mjs hash-password`). Để trống là không hỏi đăng nhập — chỉ dùng
-// khi chạy trên máy mình hoặc đã có Basic Auth của Caddy chắn phía trước.
+// `node app/auth.mjs hash-password`), gộp với tài khoản ở Cài đặt → Nhân sự
+// (staff.json) có mật khẩu. Cả hai đều trống thì không hỏi đăng nhập — chỉ dùng
+// khi chạy trên máy mình.
+//
+// Bắt buộc đăng nhập (fail-closed): PUBLIC_BASE_URL là https (máy chủ thật) hoặc
+// CRM_REQUIRE_LOGIN=1. Khi đó chưa có tài khoản nào thì CRM trả 503 "Chưa cấu hình
+// đăng nhập" thay vì mở cho mọi người. CRM_REQUIRE_LOGIN=0 tắt hẳn (chỉ dùng khi
+// chạy local qua đường hầm https và biết mình đang làm gì).
+export function loginRequired(environment = process.env, baseUrl = publicBaseUrl) {
+  const flag = String(environment.CRM_REQUIRE_LOGIN ?? '').trim();
+  if (flag === '1' || flag.toLowerCase() === 'true') return true;
+  if (flag === '0' || flag.toLowerCase() === 'false') return false;
+  return String(baseUrl || '').startsWith('https://');
+}
+
 export const authConfig = {
   users: String(process.env.CRM_LOGIN_USERS || ''),
   sessionSecret: String(process.env.CRM_SESSION_SECRET || ''),
-  secureCookie: publicBaseUrl.startsWith('https://')
+  secureCookie: publicBaseUrl.startsWith('https://'),
+  requireLogin: loginRequired(),
+  https: publicBaseUrl.startsWith('https://')
 };

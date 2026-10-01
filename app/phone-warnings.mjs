@@ -29,7 +29,11 @@ export const POS_STATUS = Object.freeze({
   packing: 8, waitingShipping: 9, waitingGoods: 11, waitingPrint: 12, printed: 13, partiallyReturned: 15,
   collected: 16, waitingConfirm: 17, ordered: 20
 });
-const FAILED_STATUSES = new Set([POS_STATUS.returning, POS_STATUS.returned, POS_STATUS.canceled, POS_STATUS.partiallyReturned]);
+// Đơn hoàn = đã giao mà khách không nhận. Đơn HỦY (6) trước khi giao — trùng đơn,
+// khách đổi ý, nhân viên dọn — và đơn đã XÓA (7) không phải bom hàng: không đếm
+// vào hoàn lẫn tổng đơn (trừ khi đơn hủy từng đi giao thất bại: first_undeliverable_at).
+const FAILED_STATUSES = new Set([POS_STATUS.returning, POS_STATUS.returned, POS_STATUS.partiallyReturned]);
+const IGNORED_STATUSES = new Set([POS_STATUS.canceled, POS_STATUS.removed]);
 const SUCCESS_STATUSES = new Set([POS_STATUS.received, POS_STATUS.collected]);
 const RETURN_TAG = /(hoan|bom|khong nhan|tra hang|boom)/;
 
@@ -219,7 +223,9 @@ export async function fetchPosPhoneReport(phone, { config = posConfig(), fetchIm
       .filter(order => [order.bill_phone_number, order.shipping_address?.phone_number].some(value => normalizeWarningPhone(value) === key));
     // Form landing bỏ dở (Webcake đẩy sang POS với is_abandoned_order) chưa bao
     // giờ được giao: bị huỷ dọn dẹp cũng không phải bom hàng, không tính vào đơn.
-    const rows = matching.filter(order => !order.is_abandoned_order);
+    // Đơn hủy/xóa trước khi giao cũng không tính (xem FAILED_STATUSES).
+    const rows = matching.filter(order => !order.is_abandoned_order
+      && (!IGNORED_STATUSES.has(Number(order.status)) || order.partner?.first_undeliverable_at));
     const failed = rows.filter(order => FAILED_STATUSES.has(Number(order.status)) || order.partner?.first_undeliverable_at).length;
     const success = rows.filter(order => SUCCESS_STATUSES.has(Number(order.status))).length;
     // Báo cáo theo số điện thoại mà POS đính kèm đơn: order_fail/order_success/warning.

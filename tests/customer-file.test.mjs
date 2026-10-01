@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-process.env.CUSTOMER_FILE_PATH = path.join(mkdtempSync(path.join(tmpdir(), 'customer-file-')), 'customer-file.json');
+process.env.CUSTOMER_FILE_PATH = path.join(tempDir('customer-file-'), 'customer-file.json');
 const { customersFromExport, recordExportedOrders, listExportedCustomers, orderedAtFromLabel } = await import('../app/customer-file.mjs');
 const { buildCustomers } = await import('../app/customers.mjs');
 

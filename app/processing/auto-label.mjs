@@ -36,6 +36,8 @@ export const complaintTemplateIds = Object.freeze(['OIL_SMELL_WARRANTY', 'DELIVE
 // biến mọi câu "shop còn hàng không" thành một lời khiếu nại.
 export const defaultComplaintKeywords = [
   'khiếu nại', 'phàn nàn', 'không hài lòng', 'thất vọng', 'tệ quá', 'dở quá', 'quá tệ',
+  // Vòng 12 (B4 #1, #2): chê dưới bình luận từng bị cảm ơn công khai.
+  'không ngon', 'hok ngon', 'hông ngon', 'ko ngon', 'chả ngon', 'chẳng ngon', 'khó ăn', 'nuốt không nổi', 'cứng như đá',
   'hôi dầu', 'có mùi', 'mùi lạ', 'mốc', 'bị ẩm', 'bị ỉu', 'hết hạn', 'quá hạn', 'cận date',
   'bị hỏng', 'bị hư', 'bị móp', 'bị bể', 'bị vỡ', 'bị rách', 'chảy nước', 'dị vật', 'có sâu', 'có kiến',
   'hàng lỗi', 'sản phẩm lỗi', 'kém chất lượng', 'không giống', 'sai hàng', 'giao sai', 'giao nhầm',

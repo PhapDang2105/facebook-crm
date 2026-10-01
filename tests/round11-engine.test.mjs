@@ -85,7 +85,7 @@ function held(agoMs, extra = {}, items = [XANH(1), VANG(1)]) {
 }
 
 const QUESTIONS = [
-  ['Có tặng cho chị bát và thìa o', 'GIFT_POLICY'], ['Có tặng bát không?', 'GIFT_POLICY'], ['miễn ship không', 'FREESHIP_POLICY'], ['có ngọt không', 'NO_ADDED_SUGAR'],
+  ['Có tặng cho chị bát không o', 'GIFT_POLICY'], ['Có tặng bát không?', 'GIFT_POLICY'], ['miễn ship không', 'FREESHIP_POLICY'], ['có ngọt không', 'NO_ADDED_SUGAR'],
   ['ship mấy ngày tới', 'SHIPPING_POLICY'], ['mẹ bầu ăn được không', 'HEALTH_CONDITION'], ['túi xanh với vàng khác gì', 'BAG_COMPARISON_XANH_VANG'],
   ['thanh toán cod được không', 'PAYMENT_METHODS'], ['bao nhiêu gam', 'WEIGHT_EXPIRY'], ['bé 2 tuổi ăn được không', 'KIDS_FAMILY'], ['ăn có béo không', 'CALORIES_DIET'],
   ['thành phần gồm gì', 'INGREDIENTS_ALLERGY'], ['hàng mới không', 'FRESHNESS'], ['có giảm giá không', 'DISCOUNT_POLICY'], ['có voucher không', 'DISCOUNT_POLICY']
@@ -161,8 +161,8 @@ test('P1/E17: cài đặt thiếu ORDER_ADDRESS_REMIND + GIFT_POLICY → hỏi m
 
 // ===== P2: câu hỏi không tính là một lần hỏi địa chỉ =====
 
-test('P2 (F1/C3): SĐT + địa chỉ thiếu cấp → hỏi quà → hỏi ship → KHÔNG tạo đơn "Xóm 3 Vô Tranh Phú Lương"; addressAsks giữ nguyên; nhắc đúng phần thiếu', async () => {
-  const sim = held(120000, { phone: '0912345678', address: 'Xóm 3 Vô Tranh Phú Lương', addressAsks: 1 }, [XANH(2)]);
+test('P2 (F1/C3): SĐT + địa chỉ thiếu cấp → hỏi quà → hỏi ship → KHÔNG tạo đơn "Xóm 3 Phú Lương" (vòng 12: "Xóm 3 Vô Tranh Phú Lương" nay đọc đủ cấp); addressAsks giữ nguyên; nhắc đúng phần thiếu', async () => {
+  const sim = held(120000, { phone: '0912345678', address: 'Xóm 3 Phú Lương', addressAsks: 1 }, [XANH(2)]);
   const gift = await sim.send('có tặng bát không shop');
   assert.equal(gift.sent[0], render('GIFT_POLICY').messages[0]);
   assert.match(gift.sent[1], /vẫn đang giữ đơn 2 Granola Túi Xanh 450g/);
@@ -174,7 +174,7 @@ test('P2 (F1/C3): SĐT + địa chỉ thiếu cấp → hỏi quà → hỏi shi
   await sim.send('có ngọt không');
   assert.deepEqual(sim.orders, [], 'không tự chốt địa chỉ thiếu cấp');
   assert.equal(sim.conversation.pendingOrder.addressAsks, 1);
-  assert.equal(sim.conversation.pendingOrder.address, 'Xóm 3 Vô Tranh Phú Lương');
+  assert.equal(sim.conversation.pendingOrder.address, 'Xóm 3 Phú Lương');
   // Câu nhắc y hệt vừa gửi < 10 phút không lặp; sau 10 phút nhắc lại.
   assert.equal(ship.sent.length, 1);
   sim.later(11 * 60 * 1000);
@@ -364,9 +364,10 @@ test('V10 (E12): câu hỏi thành phần xoài sấy / vị dâu không bị LI
   for (const text of ['túi xanh có xoài sấy hả', 'granola có xoài sấy', 'trong túi vàng có xoài à', 'có vị dâu không', 'có hạt điều không']) {
     assert.notEqual(ruleIntent(text, ctx)?.rule, 'LIVE_ONLY', text);
   }
-  for (const text of ['sữa hạt giá sao', 'bên em có túi dâu không', 'lấy 2 hũ hạt điều', 'xanh mint còn không']) {
-    assert.equal(ruleIntent(text, ctx)?.rule, 'LIVE_ONLY', text);
-  }
+  // Vòng 12: túi dâu / xanh mint là Granola Tropical (TROPICAL); hũ hạt là hàng chỉ CSKH bán (STAFF_ONLY).
+  assert.equal(ruleIntent('sữa hạt giá sao', ctx)?.rule, 'LIVE_ONLY');
+  for (const text of ['bên em có túi dâu không', 'xanh mint còn không']) assert.equal(ruleIntent(text, ctx)?.rule, 'TROPICAL', text);
+  assert.equal(ruleIntent('lấy 2 hũ hạt điều', ctx)?.rule, 'STAFF_ONLY');
   const sim = new Sim({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 120000 });
   await sim.send('túi xanh có xoài sấy hả');
   assert.notEqual(sim.conversation.botEnabled, false);

@@ -115,7 +115,8 @@ test('giỏ ghi trong bình luận: nhận ra túi và số lượng, cần ý m
   assert.deepEqual(commentBasket('Túi vàng với túi xanh lá cây').map(item => item.quantity), [1, 1]);
   assert.deepEqual(commentBasket('2 xanh 1 nâu').map(item => [item.product, item.quantity]), [['Granola Túi Xanh 450g', 2], ['Granola Túi Nâu vị cacao 350g', 1]]);
   assert.deepEqual(commentBasket('Túi vàng'), [], 'chỉ nêu một màu, không ý mua: để model báo giá');
-  assert.deepEqual(commentBasket('lấy 1 túi xanh dương'), []);
+  // Vòng 12: "xanh dương" là Granola Tropical (alias danh mục GRA-MINT-Z300), không phải Túi Xanh.
+  assert.deepEqual(commentBasket('lấy 1 túi xanh dương'), [{ product: 'Granola Tropical vị Cacao 300g', quantity: 1 }]);
   assert.deepEqual(commentBasket('hạt này nấu sữa được không, lấy 2 hũ'), []);
 });
 

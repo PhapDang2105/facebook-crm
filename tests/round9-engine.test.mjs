@@ -104,8 +104,8 @@ test('1a. hộp thư: ghi đúng schema sau khi quyết định (luật/mô hìn
   });
   assert.equal(flow.records.length, 1);
   const row = flow.records[0];
-  assert.deepEqual(Object.keys(row), ['v', 'at', 'conversationId', 'source', 'mid', 'text', 'type', 'prevBot', 'lastTemplate', 'prevBotText', 'prevBotAgeMin', 'prevBotAsks', 'ctx', 'rule', 'shadow', 'intent', 'cascade', 'llm', 'fewShot', 'chosen', 'final', 'also', 'skipped', 'guards', 'attention', 'handoff', 'ms']);
-  assert.equal(row.v, 1);
+  assert.deepEqual(Object.keys(row), ['v', 'at', 'receivedAt', 'conversationId', 'source', 'mid', 'text', 'type', 'prevBot', 'lastTemplate', 'prevBotText', 'prevBotAgeMin', 'prevBotAsks', 'ctx', 'rule', 'shadow', 'intent', 'cascade', 'llm', 'fewShot', 'chosen', 'final', 'also', 'skipped', 'guards', 'attention', 'handoff', 'ms']);
+  assert.equal(row.v, 2, 'vòng 12: v2 = prevBot… là trạng thái TRƯỚC lượt');
   assert.equal(row.source, 'inbox');
   assert.equal(row.mid, 'm-new');
   assert.equal(row.text, '2 túi vàng nhé\ntúi vàng có yến mạch không?', 'tin gộp đúng như engine đưa vào xử lý');

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { toLocalPhone } from './processing/customer-info.mjs';
-import { matchProduct, findProductBySku } from './processing/catalog.mjs';
+import { matchProduct, findProductBySku, hasLivestreamGift } from './processing/catalog.mjs';
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { resolveAddress, resolvedAddressFields } from './processing/locations.mjs';
 import { normalizeText } from './processing/catalog.mjs';
@@ -114,6 +114,8 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
     status: text(input.status || 'Mới', 80),
     source: text(input.source || 'Facebook', 80),
     payment: text(input.payment || 'COD', 80),
+    // Tiền khách đã chuyển khoản trước (đặt cọc / chuyển một phần): POS chỉ thu hộ phần còn lại.
+    ...(money(input.prepaid) > 0 ? { prepaid: money(input.prepaid) } : {}),
     freeShipping,
     shippingFee,
     discount,
@@ -215,14 +217,28 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
     order.note = 'Tạo tự động từ xác nhận của chatbot · Ưu đãi dùng thử bám đuổi (1 túi miễn phí vận chuyển).';
   }
   // Combo 2 túi trong cửa sổ bám đuổi: quà bộ bát gáo dừa ghi rõ để kho/POS đóng kèm.
-  if (input.promoGift) {
+  // Khách live đúng 2 túi đã nhận quà live (Quạt + Bát gáo dừa): không cộng thêm bát
+  // ưu đãi (quà live và quà khuyến mãi không cộng dồn — applyLiveGiftPolicy).
+  if (input.promoGift && priced.priceable && hasLivestreamGift(priced.gifts)) {
+    const promo = text(input.promoGift, 100);
+    order.gift = String(order.gift || '').split(' + ').filter(part => part.trim() && part.trim() !== promo).join(' + ');
+  } else if (input.promoGift) {
     order.promoGift = text(input.promoGift, 100);
     order.note = `${order.note ? `${order.note} · ` : 'Tạo tự động từ xác nhận của chatbot · '}Ưu đãi bám đuổi combo 2 túi: tặng ${order.promoGift}.`;
   }
   // What the customer actually typed, next to the standardised address they confirmed.
   order.rawAddress = text(input.rawAddress, 500);
+  // Vòng 12: bot nhận địa chỉ cần nhân viên soát ("Địa chỉ nhận sau một lần hỏi…") và ghi chú giao hàng
+  // khách ghi lẫn trong địa chỉ ("giao giờ hành chính"): order-notes hiện "⚠ …" / "ℹ Giao: …" và đi sang POS.
+  const addressCheck = text(input.addressCheck, 300);
+  const deliveryNote = text(input.deliveryNote, 300);
+  if (addressCheck) order.addressCheck = addressCheck;
+  if (deliveryNote) order.deliveryNote = deliveryNote;
   order.chatbotSourceMessageId = text(sourceMessageId, 200);
   order.automatic = true;
+  // Người tạo: bot (nhật ký hoạt động chỉ ghi thao tác người dùng; dấu vết của bot nằm trên đơn).
+  order.createdBy = { username: 'bot', name: 'Chatbot AI' };
+  order.history = [{ at: now, by: { username: 'bot', name: 'Chatbot AI' }, action: 'order.create', summary: 'Chatbot tạo đơn từ xác nhận của khách.' }];
   order.delivery = {
     status: 'sent',
     messageId: text(deliveryMessageId, 200),

@@ -76,7 +76,8 @@ test('kho ghi gộp: 40 lần sửa hoãn ghi chỉ nằm trong bộ nhớ tới
   assert.equal(store.messagingStoreHasPendingWrites(), false);
   const text = readFileSync(storePath, 'utf8');
   assert.equal(JSON.parse(text).conversations.length, 40);
-  assert.equal(text, JSON.stringify(await store.readMessagingStore(), null, 2), 'định dạng tệp không đổi (JSON thụt 2)');
+  // 01/10: kho ghi JSON gọn (không thụt dòng) — nhỏ hơn ~26%, ghi nhanh hơn; nội dung vẫn đúng bản trong bộ nhớ.
+  assert.equal(text, JSON.stringify(await store.readMessagingStore()), 'tệp là JSON gọn của đúng kho trong bộ nhớ');
   // Không còn gì mới: flush lần nữa không ghi.
   const written = statSync(storePath).mtimeMs;
   await store.flushMessagingStore();

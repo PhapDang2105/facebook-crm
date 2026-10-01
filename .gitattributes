@@ -8,6 +8,17 @@
 *.service text eol=lf
 Caddyfile text eol=lf
 
+# Mã nguồn và dữ liệu văn bản: luôn LF kể cả khi checkout trên Windows (core.autocrlf=true).
+# Nhiều test đọc mã nguồn và so chuỗi có "\n" (tests/security-routes.test.mjs…); bản CRLF làm chúng
+# đỏ dù mã đúng. Tệp đã checkout dạng CRLF chỉ đổi khi được checkout lại (khi không còn sửa dở: xoá
+# tệp rồi git checkout -- <tệp>) — các test đó đã tự bỏ \r nên không bắt buộc.
+*.mjs text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
 # Tệp nhị phân: Git không được đụng vào nội dung.
 *.png binary
 *.jpg binary

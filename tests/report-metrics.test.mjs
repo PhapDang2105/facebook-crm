@@ -248,7 +248,7 @@ test('Meta Ads lỗi / mất kết nối / lâu chưa đồng bộ: cờ stale +
 });
 
 test('giao diện hiện cảnh báo số quảng cáo cũ ở Tổng quan, Chiến dịch, Báo cáo và chú thích định nghĩa từ máy chủ', async () => {
-  const web = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
+  const web = (await readFile(new URL('../web/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const body = name => web.slice(web.indexOf(`function ${name}(`), web.indexOf('\n}\n', web.indexOf(`function ${name}(`)));
   assert.match(body('adsStaleNoticeHtml'), /ads\?\.stale && ads\?\.notice/);
   assert.match(body('renderDashboardNotice'), /adsStaleNoticeHtml\(ads\)/);

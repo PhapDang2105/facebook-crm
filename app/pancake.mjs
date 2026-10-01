@@ -597,8 +597,12 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
     for (const page of pages) {
       const pId = String(page.pageId);
       if (!pId || !page.pageAccessToken) continue;
-      const conversations = await step(`${pId} danh sách hội thoại`, () => fetchPancakeConversations({ limit }, page, fetchImpl), []);
-      for (const [index, conversation] of conversations.entries()) {
+      const failuresBefore = allFailures.length;
+      let listFailed = false;
+      let fetchedOk = 0;
+      const conversations = await step(`${pId} danh sách hội thoại`, () => fetchPancakeConversations({ limit }, page, fetchImpl), null);
+      if (conversations === null) listFailed = true;
+      for (const [index, conversation] of (conversations || []).entries()) {
         if (index) await pause(200);
         await step(conversation.id, async () => {
           const messages = await fetchPancakeMessages(conversation.id, { pages: messagePages }, page, fetchImpl);
@@ -609,8 +613,11 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
           const changes = await store(events);
           collected.push(...changes);
           totalStored += changes.filter(change => change.type === 'message').length;
+          fetchedOk += 1;
         });
       }
+      // Trạng thái đồng bộ của Page cho Cài đặt → Kênh (token hết hạn → mọi lượt lỗi, chủ shop thấy ngay).
+      notePancakePageSync(pId, { listFailed, attempted: (conversations || []).length, fetchedOk, failures: allFailures.slice(failuresBefore) });
       await step(`${pId} quảng cáo`, async () => {
         const current = await readMessagingStore();
         const pendingAds = current.conversations.filter(item => item.pageId === pId && needsAdContext(item));
@@ -633,7 +640,7 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
           totalStored += changes.filter(change => change.type === 'message').length;
         });
       }
-      totalConversations += conversations.length + threads.length;
+      totalConversations += (conversations || []).length + threads.length;
     }
   } catch (error) {
     // Lỗi ngoài dự kiến (không thuộc bước nào): vẫn đi tiếp để tin đã ghi tới được bot.
@@ -653,6 +660,39 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
     });
   }
   return { conversations: totalConversations, messages: totalStored, ...(bot ? { bot } : {}), ...(allFailures.length ? { failures: allFailures } : {}) };
+}
+
+// Kết quả đồng bộ gần nhất của từng Page (chỉ trong bộ nhớ; khởi động lại thì chờ lượt đầu, ~5 giây).
+const pancakeSyncStatus = new Map();
+
+/**
+ * Ghi kết quả một lượt đồng bộ của Page: lỗi khi không lấy được danh sách hội thoại, hoặc có hội thoại mà
+ * KHÔNG hội thoại nào tải được tin (token hết hạn, Pancake chặn). Lỗi lác đác vài hội thoại không tính là
+ * Page lỗi. Lượt thành công xoá lỗi cũ.
+ */
+export function notePancakePageSync(pageId, { listFailed = false, attempted = 0, fetchedOk = 0, failures = [] } = {}, now = Date.now()) {
+  const key = String(pageId);
+  const previous = pancakeSyncStatus.get(key) || { syncedAt: '', syncError: '', syncErrorAt: 0 };
+  const broken = listFailed || (attempted > 0 && fetchedOk === 0);
+  if (!broken) {
+    pancakeSyncStatus.set(key, { syncedAt: new Date(now).toISOString(), syncError: '', syncErrorAt: 0 });
+    return pancakeSyncStatus.get(key);
+  }
+  const reason = String(failures[0] || 'không rõ nguyên nhân').replace(/^\S+ (danh sách hội thoại|danh sách bình luận): /, '').slice(0, 160);
+  pancakeSyncStatus.set(key, {
+    syncedAt: previous.syncedAt || '',
+    syncError: listFailed
+      ? `Đồng bộ Pancake lỗi: không lấy được danh sách hội thoại (${reason}).`
+      : `Đồng bộ Pancake lỗi: ${attempted} hội thoại đều không tải được tin (${reason}).`,
+    syncErrorAt: now
+  });
+  return pancakeSyncStatus.get(key);
+}
+
+/** { syncedAt (ISO, '' khi chưa có lượt nào thành công), syncError ('' khi ổn), syncErrorAt (ms, 0) } hoặc null khi chưa đồng bộ. */
+export function pancakeSyncStatusFor(pageId) {
+  const status = pancakeSyncStatus.get(String(pageId));
+  return status ? { ...status } : null;
 }
 
 let pancakeSyncTimer = null;
@@ -737,7 +777,7 @@ function touchedFingerprint(store, keys) {
  * Ghi tin vào hộp thư và trả về các thay đổi cho bot. Ghi thêm mã hội thoại
  * Pancake và tên khách lên hội thoại CRM để còn gửi trả lời đúng chỗ.
  * `deferWrite: true` (đường đồng bộ): kho chỉ sửa trong bộ nhớ, ghi đĩa gộp sau (runPancakeSync
- * gọi flushMessagingStore cuối lượt). Webhook giữ ghi ngay.
+ * gọi flushMessagingStore cuối lượt). handlePancakeWebhook cũng ghi gộp (01/10); gọi thẳng không cờ thì ghi ngay.
  */
 export async function storePancakeEvents(incomingEvents, { fromWebhook = false, deferWrite = false } = {}) {
   if (!incomingEvents.length) return [];
@@ -1365,6 +1405,15 @@ async function sendCommentReplyViaPancake(conversation, { text, privateReply, st
 const adCache = new Map();
 const postCache = new Map();
 const adCacheTtlMs = 24 * 60 * 60 * 1000;
+// Bộ nhớ quảng cáo có hạn (như postCache): trước 01/10 mỗi mã quảng cáo từng gặp nằm mãi trong RAM.
+const maximumAdCacheEntries = 2000;
+export function rememberPancakeAd(id, entry) {
+  adCache.delete(id);
+  adCache.set(id, entry);
+  while (adCache.size > maximumAdCacheEntries) adCache.delete(adCache.keys().next().value);
+}
+/** Số mục đang nhớ (test). */
+export const pancakeAdCacheSize = () => adCache.size;
 const postMissTtlMs = 6 * 60 * 60 * 1000;
 
 /** Tên/ảnh/chiến dịch của các quảng cáo (tối đa 20 mã một lần), nhớ 24 giờ. */
@@ -1377,9 +1426,9 @@ export async function fetchPancakeAds(adIds, config = defaultConfig, fetchImpl =
     if (start) await pause(250);
     const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/ads`, { ad_ids: chunk.join(','), type: 'ads' }, config, fetchImpl);
     for (const item of Array.isArray(body.data) ? body.data : []) {
-      adCache.set(String(item.id), { at: Date.now(), name: String(item.name || '').trim(), imageUrl: String(item.image_url || ''), campaignName: String(item.campaign_name || '').trim() });
+      rememberPancakeAd(String(item.id), { at: Date.now(), name: String(item.name || '').trim(), imageUrl: String(item.image_url || ''), campaignName: String(item.campaign_name || '').trim() });
     }
-    for (const id of chunk) if (!adCache.has(id)) adCache.set(id, { at: Date.now(), name: '', imageUrl: '', campaignName: '' });
+    for (const id of chunk) if (!adCache.has(id)) rememberPancakeAd(id, { at: Date.now(), name: '', imageUrl: '', campaignName: '' });
   }
   return Object.fromEntries(wanted.map(id => [id, adCache.get(id)]));
 }
@@ -1488,7 +1537,10 @@ let postLookupQueue = Promise.resolve();
 export async function handlePancakeWebhook(payload, { processChatbotChanges, chatbotDependencies, beforeBot = null, config = defaultConfig, now = Date.now(), fetchImpl = fetch }) {
   const events = normalizePancakeWebhook(payload, config, now);
   if (payload?.event_type && payload.event_type !== 'verify') notePancakeWebhook(now);
-  const changes = await storePancakeEvents(events, { fromWebhook: true });
+  // Ghi gộp (≤ 1–5 giây): webhook không chờ ghi cả kho ~19 MB. Bot đọc kho trong bộ nhớ nên thấy ngay;
+  // lượt ghi đồng bộ kế tiếp (trạng thái bot, tin gửi đi, đơn) ghi luôn phần này. Tiến trình chết trước
+  // khi ghi: đồng bộ Pancake (10 phút) kéo lại tin khách.
+  const changes = await storePancakeEvents(events, { fromWebhook: true, deferWrite: true });
   // Tra tên quảng cáo ở nền: gọi Pancake (tới 20 s, retry 429) không được làm khách chờ bot.
   // Chờ tối đa 1,5 s cho tên quảng cáo (thường về ngay); lâu hơn thì để chạy nền, bot đọc adTitle ở lượt sau.
   if (changes.length) {

@@ -368,11 +368,15 @@ const profileRetryAfterMs = 3 * 60 * 60 * 1000;
 // The same Graph refusal repeats for every customer; journalctl gets it once
 // per reason, with the first PSID it happened for.
 const loggedProfileMisses = new Set();
-function logProfileMiss(kind, psid, error) {
+// Lý do lỗi có thể mang chi tiết riêng từng lần (mã yêu cầu…): giữ tối đa 200 lý do, bỏ cái cũ nhất.
+const maximumLoggedProfileMisses = 200;
+export const loggedProfileMissCount = () => loggedProfileMisses.size;
+export function logProfileMiss(kind, psid, error) {
   const reason = error || 'Graph không trả về ảnh';
   const key = `${kind}:${reason}`;
   if (loggedProfileMisses.has(key)) return;
   loggedProfileMisses.add(key);
+  while (loggedProfileMisses.size > maximumLoggedProfileMisses) loggedProfileMisses.delete(loggedProfileMisses.values().next().value);
   console.warn(`Ảnh đại diện (${kind}) không lấy được cho ${psid}: ${reason}`);
 }
 
@@ -474,7 +478,12 @@ export async function processWebhookPayload(payload) {
   const events = collectWebhookEvents(payload);
   console.log(describeWebhookPayload(payload, events));
   if (!events.length) return [];
-  const changes = await updateMessagingStore(store => applyWebhookEvents(store, events));
+  // Gói chỉ có trạng thái đã giao / đã xem (mỗi tin gửi đi kéo theo 1–2 gói như vậy): ghi gộp, không bắt
+  // webhook chờ ghi cả kho; mất tối đa vài giây trạng thái hiển thị nếu tiến trình chết. Gói có tin khách,
+  // bình luận, referral vẫn ghi ngay (Meta không có lượt đồng bộ định kỳ để kéo lại như Pancake).
+  const statusOnly = events.every(event => event.type === 'delivery' || event.type === 'read');
+  // Trạng thái chỉ sửa kho khi có tin được nâng trạng thái (markOutgoingStatusUntil đếm) → không có thay đổi thì không ghi.
+  const changes = await updateMessagingStore(store => applyWebhookEvents(store, events), statusOnly ? { defer: true, unchanged: list => !list.length } : {});
   const profileChanges = [...await resolveMissingProfiles(changes), ...await resolveCommentContext(changes)];
   for (const change of [...changes, ...profileChanges]) {
     publishMessagingEvent(change.conversation

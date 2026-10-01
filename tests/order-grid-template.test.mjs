@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const source = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+const source = (readFileSync(new URL('../web/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
 test('bề rộng cột bảng đơn hàng không dùng cú pháp grid sai', () => {
   const templates = [...source.matchAll(/'(?:dia chi|ghi chu|ghi chu xu ly|san pham|khach hang|so dien thoai)':\s*'([^']+)'/g)]

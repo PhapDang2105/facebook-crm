@@ -5,15 +5,18 @@ import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { buildExportRows, exportFactsForOrders, exportPreviewStreets, exportedOrderData } from './order-export.mjs';
 import { listAllSystemOrders, reserveOrderIdInStore, takenOrderIds, uniqueOrderId } from './order-lookup.mjs';
-import { columnIndex as excelColumnIndex, parseXlsx } from './xlsx-import.mjs';
-import { buildPlainXlsx, excelColumnName } from './xlsx-export.mjs';
+import { parseXlsx } from './xlsx-import.mjs';
+import { buildPlainXlsx } from './xlsx-export.mjs';
+import { fillTemplateSheet } from './xlsx-template.mjs';
+import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
+import { auditFiltersFrom, canReadAudit, contentEtag, conversationOrdersFingerprint, etagMatches, createSeenOnce, fileVersionStamp, friendlyAdsError, friendlyAdsStatus, friendlyAiTestError, friendlyCampaignInsights, createStaffNoteWriter, hasStaffSession, pancakeWebhookDecision, publicNoticePage, purchaseLabelFingerprint, qrVisitorKey, staticCacheControl } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { aiKeyReentryError, assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
-import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
+import { processChatbotChanges, requestDirectModelReply, warmUpChatbotModels } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
 import { loadCampaignReport, normalizeRangeDays } from './campaigns.mjs';
 import { loadDashboard, normalizeDashboardDays } from './dashboard.mjs';
@@ -26,7 +29,7 @@ import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, 
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
-import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
+import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { applyPosContentToConversations } from './pos-content-sync.mjs';
 import { cancelPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
@@ -40,7 +43,7 @@ import { HTML_CSP, LOGIN_SETUP_MESSAGE, allowedWithoutLoginSetup, applySecurityH
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
-import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
+import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { countQrReferrals, countQrReferralsByDay, deleteQrCode, isValidQrCode, listQrScans, qrDayKey, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
 import { classifyUserAgent, isLinkPreviewBot, messengerDestination, prefillMessageFor, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
 import { createQrGreeter, isCardScan } from './qr-greeting.mjs';
@@ -98,12 +101,10 @@ async function initializeStore() {
   await ensureGifts();
 }
 
+// Chưa có tệp → kho rỗng; JSON hỏng → cất .corrupt-* rồi kho rỗng; lỗi đọc tạm (EBUSY, EACCES…) → NÉM.
+// Trước 01/10 mọi lỗi đọc thành "kho rỗng" và lần lưu sản phẩm kế tiếp ghi đè mất cả danh mục.
 async function readProductStore() {
-  try {
-    return normalizeProductStore(JSON.parse(await readFile(productsPath, 'utf8')));
-  } catch {
-    return { items: [], updatedAt: 0 };
-  }
+  return readJsonFile(productsPath, { fallback: () => ({ items: [], updatedAt: 0 }), normalize: normalizeProductStore, label: 'Kho sản phẩm' });
 }
 
 // Kho sản phẩm và kho quà là hai chỗ duy nhất còn đọc–sửa–ghi mà không xếp
@@ -139,9 +140,7 @@ function updateGiftStore(mutate) {
 async function writeProductStore(store) {
   const normalized = normalizeProductStore(store);
   normalized.updatedAt = Date.now();
-  const temporaryPath = `${productsPath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(normalized, null, 2), 'utf8');
-  await rename(temporaryPath, productsPath);
+  await writeJsonAtomic(productsPath, normalized);
   // Pricing, detection and the prompt all read this catalogue through a cache.
   reloadCatalog();
   return normalized;
@@ -173,19 +172,13 @@ async function ensureProductCatalogue() {
 }
 
 async function readGiftStore() {
-  try {
-    return normalizeGiftStore(JSON.parse(await readFile(giftsPath, 'utf8')));
-  } catch {
-    return { items: [], updatedAt: 0 };
-  }
+  return readJsonFile(giftsPath, { fallback: () => ({ items: [], updatedAt: 0 }), normalize: normalizeGiftStore, label: 'Kho quà tặng' });
 }
 
 async function writeGiftStore(store) {
   const normalized = normalizeGiftStore(store);
   normalized.updatedAt = Date.now();
-  const temporaryPath = `${giftsPath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(normalized, null, 2), 'utf8');
-  await rename(temporaryPath, giftsPath);
+  await writeJsonAtomic(giftsPath, normalized);
   reloadCatalog();
   return normalized;
 }
@@ -237,6 +230,29 @@ function redirect(response, location) {
 function sendJson(response, statusCode, value) {
   response.writeHead(statusCode, { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store' });
   response.end(JSON.stringify(value));
+}
+
+/** Đồng bộ quảng cáo lỗi: chủ shop thấy câu dễ hiểu; tên biến .env, mã lỗi Graph… chỉ vào nhật ký máy chủ. */
+function sendAdsSyncError(response, days, error) {
+  console.error(`Đồng bộ quảng cáo (${days} ngày) lỗi: ${error?.message || error}`);
+  return sendJson(response, 502, { error: friendlyAdsError(error) });
+}
+
+/**
+ * Như sendJson(200) nhưng có ETag theo nội dung: trình duyệt hỏi lại (If-None-Match) mà không có gì đổi thì
+ * trả 304 — khỏi tải lại 1–2 MB và parse ở trình duyệt. `private, no-cache`: chỉ trình duyệt của người đang
+ * đăng nhập giữ bản sao và luôn hỏi lại máy chủ trước khi dùng.
+ */
+function sendJsonWithEtag(request, response, value) {
+  const body = JSON.stringify(value);
+  const etag = contentEtag(body);
+  const headers = { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'private, no-cache', ETag: etag };
+  if (etagMatches(request.headers['if-none-match'], etag)) {
+    response.writeHead(304, headers);
+    return response.end();
+  }
+  response.writeHead(200, headers);
+  return response.end(body);
 }
 
 function publicCustomerPanel(conversation) {
@@ -453,16 +469,19 @@ async function followUpConversationInfo(pageId, conversationId) {
   return { ...info, posOrders, crmOrders };
 }
 
+const shouldLogSkippedPosOrder = createSeenOnce(2000);
 async function importPosConversationOrders(posOrders) {
   const drafts = [];
   for (const posOrder of Array.isArray(posOrders) ? posOrders : []) {
     const address = posOrder.shipping_address || {};
     const lines = (posOrder.items || []).filter(item => !item.is_bonus_product);
+    // POS hay lưu SĐT mất số 0 đầu ("912345678") hoặc dạng 0084…: chuẩn hoá trước khi kiểm, kẻo đơn bị bỏ.
+    const rawPhone = String(posOrder.bill_phone_number || address.phone_number || '');
     try {
       const order = normalizeCustomerOrder({
         id: `pos${posOrder.system_id || posOrder.id}`,
         name: posOrder.bill_full_name || address.full_name || 'Khách Facebook',
-        phone: posOrder.bill_phone_number || address.phone_number || '',
+        phone: toLocalPhoneLoose(rawPhone) || rawPhone,
         address: address.full_address || [address.address, address.commune_name, address.district_name, address.province_name].filter(Boolean).join(', '),
         products: lines.map(item => ({ name: item.variation_info?.name || item.variation_info?.display_id || 'Sản phẩm', sku: item.variation_info?.display_id || '', quantity: item.quantity, price: item.variation_info?.retail_price })),
         shippingFee: posOrder.shipping_fee,
@@ -486,8 +505,11 @@ async function importPosConversationOrders(posOrders) {
           ...(Number(posOrder.status) === 6 ? { processingStatus: 'cancelled' } : {})
         }
       });
-    } catch {
-      // Đơn thiếu SĐT/địa chỉ/sản phẩm (đơn nháp trên POS): bỏ qua.
+    } catch (error) {
+      // Đơn thiếu SĐT/địa chỉ/sản phẩm (đơn nháp trên POS), hay SĐT dạng lạ (912…, 0084…): bỏ qua nhưng
+      // ghi log (mỗi đơn một lần — đồng bộ 5 phút/lần kéo lại cùng cửa sổ 48 giờ), để còn biết đơn nào bị bỏ.
+      const posKey = String(posOrder?.system_id || posOrder?.id || '?');
+      if (shouldLogSkippedPosOrder(posKey)) console.warn(`Đồng bộ POS: bỏ qua đơn POS ${posKey} của hội thoại ${posOrder?.conversation_id || '?'}: ${error?.message || error}`);
     }
   }
   if (!drafts.length) return 0;
@@ -505,8 +527,13 @@ async function importPosConversationOrders(posOrders) {
     relabeled.push(publicConversation(conversation));
     labelChanges.push({ conversation: { id: conversation.id, name: conversation.name || '' }, before, after: [...conversation.labels] });
   };
+  // Đồng bộ 5 phút/lần luôn thấy lại các đơn POS 48 giờ qua: không đổi gì (kể cả cờ im lặng như
+  // purchaseLabeled, khởi tạo customerOrders) thì không ghi lại cả kho ~19 MB.
+  let dirty = false;
   await updateMessagingStore(store => {
     const byPancakeId = new Map(store.conversations.filter(item => item.pancakeConversationId && item.source !== 'comment').map(item => [String(item.pancakeConversationId), item]));
+    const affected = [...new Set(drafts.map(draft => byPancakeId.get(draft.conversationKey)).filter(Boolean))];
+    const fingerprintBefore = conversationOrdersFingerprint(affected);
     for (const { conversationKey, order } of drafts) {
       const conversation = byPancakeId.get(conversationKey);
       if (!conversation) continue;
@@ -532,8 +559,9 @@ async function importPosConversationOrders(posOrders) {
       created += 1;
       touched.add(conversation.id);
     }
+    dirty = conversationOrdersFingerprint(affected) !== fingerprintBefore;
     return null;
-  });
+  }, { unchanged: () => !dirty });
   for (const change of labelChanges) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason: 'đồng bộ đơn POS' });
   for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
   for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
@@ -553,14 +581,19 @@ async function runPurchaseLabelBackfill() {
   const landingOrders = await listLandingOrders().catch(() => []);
   let changes = [];
   const relabeled = [];
+  // Chạy 5 phút/lần: không gắn gì mới thì không ghi cả kho. So dấu vân tay (thẻ + mọi cờ "đã gắn")
+  // chứ không chỉ changes.length: backfill còn đặt cờ im lặng (đơn đã có thẻ sẵn) cần ghi xuống đĩa.
+  let dirty = false;
   await updateMessagingStore(store => {
+    const fingerprintBefore = purchaseLabelFingerprint(store.conversations);
     changes = backfillPurchaseLabels(store, { orderLabels, landingOrders });
     for (const change of changes) {
       const conversation = store.conversations.find(item => item.id === change.conversation.id);
       if (conversation) relabeled.push(publicConversation(conversation));
     }
+    dirty = changes.length > 0 || purchaseLabelFingerprint(store.conversations) !== fingerprintBefore;
     return null;
-  });
+  }, { unchanged: () => !dirty });
   for (const { reason, ...change } of changes) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason });
   for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
   if (changes.length) console.log(`Thẻ Đã mua hàng: gắn bù cho ${changes.length} hội thoại (${[...new Set(changes.map(change => change.reason))].join('; ')}).`);
@@ -586,17 +619,20 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
   };
   const changed = [];
   const touched = new Set();
+  // Đồng bộ POS gọi lại với mọi đơn đã hủy trong 48 giờ: đơn đã hủy theo từ trước thì không ghi lại kho.
   await updateMessagingStore(store => {
+    let cancelledNow = 0;
     for (const conversation of store.conversations) {
       for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) {
         if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled' || order.pos?.cancelSyncedAt || /Đã hủy trên POS/.test(String(order.note || ''))) continue;
         markCancelled(order);
         changed.push({ ...order });
         touched.add(conversation.id);
+        cancelledNow += 1;
       }
     }
-    return null;
-  });
+    return cancelledNow;
+  }, { unchanged: cancelledNow => !cancelledNow });
   await updateLandingStore(store => {
     for (const order of store.orders) {
       if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled' || order.pos?.cancelSyncedAt || /Đã hủy trên POS/.test(String(order.note || ''))) continue;
@@ -644,7 +680,11 @@ registerQrCode(qrMainCode).catch(error => console.error(`QR: không tạo đư�
 let cachedQrPage = null;
 async function resolveQrPage() {
   if (cachedQrPage) return cachedQrPage;
-  const channels = await readChannelStore();
+  // Kho kênh đọc lỗi tạm (channel-store giờ ném thay vì coi là rỗng): đã ghim QR_PAGE_ID thì vẫn phục vụ được.
+  const channels = await readChannelStore().catch(error => {
+    if (process.env.QR_PAGE_ID) return { items: [] };
+    throw error;
+  });
   const first = channels.items?.[0] || {};
   const id = String(process.env.QR_PAGE_ID || first.id || '');
   const name = String(process.env.QR_PAGE_NAME || (String(first.id) === id ? first.name : '') || process.env.PANCAKE_PAGE_NAME || '').trim();
@@ -705,6 +745,11 @@ const scheduleQrGreetings = changes => qrGreeter.schedule(changes);
  *  the chatbot can persist the order first and still close with the receipt. */
 /** `force`: nhân viên bấm "Gửi lại cho khách" — gửi cả khi POS đã gửi thẻ, và ném lỗi thay vì chỉ ghi log. */
 /** `sentBy` { name, username }: nhân viên đã bấm (đơn tạo tay, "Gửi lại phiếu") — tin mang sender 'staff'; không có là bot gửi. */
+/**
+ * Trả kết quả gửi thật (không ném khi `force` = false): { sent: true, via: 'receipt-image' | 'messenger' }
+ * | { sent: false, via: 'pos' } (POS đã gửi thẻ, CRM không gửi thêm) | { sent: false, error } (gửi lỗi).
+ * Trước 01/10 lỗi bị nuốt và đơn tạo tay vẫn báo "Đã gửi xác nhận cho khách".
+ */
 async function sendChatbotOrderReceipt(conversation, order, { force = false, sentBy = null } = {}) {
   try {
     // Qua Pancake không gửi được thẻ receipt của Messenger: phiếu được vẽ
@@ -713,20 +758,23 @@ async function sendChatbotOrderReceipt(conversation, order, { force = false, sen
     // Bản chữ "XÁC NHẬN ĐƠN ĐẶT HÀNG…" KHÔNG BAO GIỜ gửi cho khách (yêu cầu của
     // chủ shop): phiếu chỉ là thẻ receipt của Messenger, thẻ của POS, hoặc ảnh phiếu.
     if (conversation.pancakeConversationId) {
-      if (order.pos?.id && !force) return;
+      if (order.pos?.id && !force) return { sent: false, via: 'pos' };
       await sendReceiptImage(conversation, order, { sentBy });
-      return;
+      return { sent: true, via: 'receipt-image' };
     }
     try {
       await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }), sentBy });
+      return { sent: true, via: 'messenger' };
     } catch (error) {
       // Messenger từ chối thẻ receipt: gửi ảnh phiếu thay vì bản chữ.
       console.error(`Messenger từ chối thẻ receipt của đơn ${order.id}, gửi ảnh phiếu: ${error.message}`);
       await sendReceiptImage(conversation, order, { sentBy });
+      return { sent: true, via: 'receipt-image' };
     }
   } catch (error) {
     if (force) throw error;
     console.error(`Không gửi được hoá đơn cho đơn ${order.id}: ${error.message}`);
+    return { sent: false, error: String(error?.message || error) };
   }
 }
 
@@ -783,9 +831,7 @@ function writeChatbotSettings(settings) {
       ...safeSettings,
       ...(directApiKey ? { directApiKeyEncrypted: encryptToken(directApiKey) } : {})
     };
-    const temporaryPath = `${chatbotSettingsPath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(stored, null, 2), 'utf8');
-    await rename(temporaryPath, chatbotSettingsPath);
+    await writeJsonAtomic(chatbotSettingsPath, stored);
     return normalized;
   });
   chatbotSettingsWriteQueue = operation.then(() => undefined, () => undefined);
@@ -795,68 +841,6 @@ function writeChatbotSettings(settings) {
 function sendBinary(response, statusCode, body, contentType, filename) {
   response.writeHead(statusCode, { 'Content-Type': contentType, 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control':'no-store' });
   response.end(body);
-}
-
-function escapeXml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function findDataCellStyle(xml, column) {
-  const cellPattern = new RegExp(`<c\\b([^>]*\\br="${column}(\\d+)"[^>]*)`, 'g');
-  for (const match of xml.matchAll(cellPattern)) {
-    if (Number(match[2]) < 4) continue;
-    const style = match[1].match(/\bs="(\d+)"/);
-    if (style) return style[1];
-  }
-  return null;
-}
-
-function writeTemplateCell(xml, address, value) {
-  if (value === '' || value === null || value === undefined) return xml;
-  const cellPattern = new RegExp(`<c([^>]*\\br="${address}"[^>]*)(?:\\/>|>[\\s\\S]*?<\\/c>)`);
-  const match = xml.match(cellPattern);
-  const isNumber = typeof value === 'number' && Number.isFinite(value);
-  const createCell = attributes => isNumber
-    ? `<c${attributes}><v>${value}</v></c>`
-    : `<c${attributes} t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
-
-  if (match) {
-    const attributes = match[1].replace(/\s+t="[^"]*"/g, '');
-    return xml.replace(cellPattern, createCell(attributes));
-  }
-
-  const addressParts = address.match(/^([A-Z]+)(\d+)$/);
-  if (!addressParts) throw new Error(`Invalid Excel cell address: ${address}`);
-  const [, column, rowText] = addressParts;
-  const rowNumber = Number(rowText);
-  const style = findDataCellStyle(xml, column);
-  const newCell = createCell(` r="${address}"${style ? ` s="${style}"` : ''}`);
-  const rowPattern = new RegExp(`<row([^>]*\\br="${rowNumber}"[^>]*)>([\\s\\S]*?)<\\/row>`);
-  const rowMatch = xml.match(rowPattern);
-
-  if (rowMatch) {
-    const targetColumn = excelColumnIndex(column);
-    let insertAt = rowMatch[2].length;
-    const cells = /<c\b[^>]*\br="([A-Z]+)\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g;
-    for (const cell of rowMatch[2].matchAll(cells)) {
-      if (excelColumnIndex(cell[1]) > targetColumn) { insertAt = cell.index; break; }
-    }
-    const rowContent = `${rowMatch[2].slice(0, insertAt)}${newCell}${rowMatch[2].slice(insertAt)}`;
-    return xml.replace(rowPattern, `<row${rowMatch[1]}>${rowContent}</row>`);
-  }
-
-  const newRow = `<row r="${rowNumber}">${newCell}</row>`;
-  const sheetDataEnd = xml.indexOf('</sheetData>');
-  if (sheetDataEnd < 0) throw new Error('Excel template sheet data was not found.');
-  let updatedXml = `${xml.slice(0, sheetDataEnd)}${newRow}${xml.slice(sheetDataEnd)}`;
-  updatedXml = updatedXml.replace(/<dimension ref="([A-Z]+\d+):([A-Z]+)(\d+)"\/>/, (tag, start, endColumn, endRow) =>
-    Number(endRow) < rowNumber ? `<dimension ref="${start}:${endColumn}${rowNumber}"/>` : tag);
-  return updatedXml;
 }
 
 function removeDataRowBackgrounds(workbook, worksheetPath) {
@@ -991,7 +975,7 @@ async function readBinaryBody(request, maximumBytes = 25 * 1024 * 1024) {
   return Buffer.concat(chunks);
 }
 
-async function serveFile(request, response, pathname) {
+async function serveFile(request, response, pathname, version = '') {
   if (pathname === '/assets/giot-nang-logo.webp') {
     try {
       const body = await readFile(path.join(root, 'assets', 'branding', 'logos', 'giot-nang-logo.webp'));
@@ -1020,16 +1004,21 @@ async function serveFile(request, response, pathname) {
     let etag = `W/"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
     let body = null;
     if (relative === 'index.html') {
-      // Phiên bản app.js/styles.css gắn theo mốc sửa tệp: mỗi lần deploy trình duyệt
-      // tự tải bản mới, không phụ thuộc chuỗi ?v= ghi tay trong index.html.
-      const stamp = async name => { try { return Math.trunc((await stat(path.join(webRoot, name))).mtimeMs).toString(36); } catch { return ''; } };
-      const [appStamp, cssStamp] = await Promise.all([stamp('app.js'), stamp('styles.css')]);
-      body = Buffer.from(String(await readFile(filePath, 'utf8'))
-        .replace(/app\.js\?v=[^"']*/g, `app.js?v=${appStamp}`)
-        .replace(/styles\.css\?v=[^"']*/g, `styles.css?v=${cssStamp}`), 'utf8');
+      // Phiên bản mọi tệp .js/.css cạnh index.html (app.js, styles.css, staff.js, audit.css…) gắn theo mốc sửa
+      // tệp: mỗi lần deploy trình duyệt tự tải bản mới, không phụ thuộc chuỗi ?v= ghi tay; nhờ đó các tệp này
+      // được cache hẳn (staticCacheControl). Tệp không có trên đĩa thì giữ nguyên chuỗi cũ.
+      const stamp = async name => { try { return fileVersionStamp((await stat(path.join(webRoot, name))).mtimeMs); } catch { return ''; } };
+      const source = String(await readFile(filePath, 'utf8'));
+      const versioned = /(["'])([A-Za-z0-9_-]+\.(?:js|css))\?v=[^"']*/g;
+      const names = [...new Set([...source.matchAll(versioned)].map(match => match[2]))];
+      const stamps = new Map(await Promise.all(names.map(async name => [name, await stamp(name)])));
+      body = Buffer.from(source.replace(versioned, (match, quote, name) => (stamps.get(name) ? `${quote}${name}?v=${stamps.get(name)}` : match)), 'utf8');
       etag = `W/"${createHash('sha1').update(body).digest('hex').slice(0, 16)}"`;
     }
-    const headers = { 'Content-Type':types[path.extname(filePath)] || 'application/octet-stream', 'Cache-Control':'no-cache', 'ETag':etag };
+    // app.js?v=<mốc sửa tệp> (index.html tự gắn): URL đổi mỗi lần deploy nên cache hẳn, khỏi hỏi lại mỗi lần
+    // tải trang. ?v= ghi tay hay sai mốc, và index.html: no-cache (hỏi lại bằng ETag) như cũ.
+    const cacheControl = staticCacheControl({ relative, version, stamp: fileVersionStamp(stats.mtimeMs) });
+    const headers = { 'Content-Type':types[path.extname(filePath)] || 'application/octet-stream', 'Cache-Control':cacheControl, 'ETag':etag };
     // CSP chỉ cho trang HTML của web/ (đã rà: không script nội tuyến) — lý do từng chỉ thị ở app/security.mjs.
     if (path.extname(filePath) === '.html') headers['Content-Security-Policy'] = HTML_CSP;
     if (request.headers['if-none-match'] === etag) {
@@ -1091,10 +1080,24 @@ const chatbotDependencies = {
     };
   },
   sendReceipt: sendChatbotOrderReceipt,
+  // Ghi chú nội bộ cho nhân viên khi bot không tự làm (C2: SĐT trùng đơn của hội thoại khác, cần đối chiếu):
+  // vào ghi chú hồ sơ khách, tác giả "Chatbot AI" (chatbot-engine noteForStaff).
+  addStaffNote: createStaffNoteWriter({
+    findCustomerById,
+    addCustomerNote,
+    onSaved: ({ conversation }) => {
+      invalidateBuyersCache();
+      publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+    }
+  }),
   // Bot báo về sự kiện (chốt đơn / chuyển nhân viên / khiếu nại); thẻ nào
   // nhận sự kiện là do nhân viên chọn trong Cài đặt → Tin nhắn.
   saveBotState: async (id, { addLabelEvents = [], ...botState }) => {
-    const labelDefs = addLabelEvents.length ? (await readInboxSettings()).labels : [];
+    // Đọc cài đặt thẻ lỗi tạm (EBUSY/EACCES…, inbox-settings giờ ném thay vì trả bộ mặc định): vẫn lưu trạng
+    // thái bot (giỏ, bot tắt…), chỉ bỏ gắn thẻ lần này và ghi log — mất trạng thái bot tệ hơn thiếu một thẻ.
+    const labelDefs = addLabelEvents.length
+      ? ((await readInboxSettings().catch(error => { console.warn(`Bot: không đọc được cài đặt thẻ, bỏ gắn ${addLabelEvents.join(', ')} cho ${id}: ${error.message}`); return null; }))?.labels || [])
+      : [];
     const addLabels = addLabelEvents.length ? labelsForEvents(labelDefs, addLabelEvents) : [];
     // Thẻ bot gắn và bot tự tắt (chuyển CSKH) vào lịch sử hội thoại (nhật ký, người làm 'bot').
     let labelChange = null;
@@ -1190,7 +1193,9 @@ const shouldStoreSeen = createViewThrottle({ windowMs: 60 * 1000 });
 /** Ghi "người này vừa xem" lên hội thoại và báo các máy khác (SSE). Chưa bật đăng nhập thì thôi. */
 async function recordConversationSeen(conversationId, actor) {
   if (!actor?.username || !shouldStoreSeen(actor.username, conversationId)) return;
-  const updated = await updateMessagingStore(store => markConversationSeen(store, conversationId, { username: actor.username, name: actor.name }));
+  // Ghi gộp (defer): GET tin nhắn không phải chờ ghi cả kho; "ai đã xem" chỉ để hiển thị, mất tối đa
+  // vài giây khi tiến trình chết là chấp nhận được. Không có hội thoại / tên đăng nhập thì không đổi gì.
+  const updated = await updateMessagingStore(store => markConversationSeen(store, conversationId, { username: actor.username, name: actor.name }), { defer: true, unchanged: result => !result });
   if (updated) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(updated) });
 }
 
@@ -1309,6 +1314,7 @@ async function handleAuth(request, response, url, isWebhook) {
   return true;
 }
 
+const TRANSIENT_FILE_ERRORS = new Set(['EBUSY', 'EACCES', 'EPERM', 'EMFILE', 'ENFILE', 'EAGAIN']);
 let pancakeNoTokenWarnedAt = 0;
 const pancakeDebugAllowed = createLogLimiter({ max: 30, windowMs: 60 * 1000 });
 const server = http.createServer(async (request, response) => {
@@ -1358,15 +1364,30 @@ const server = http.createServer(async (request, response) => {
     if (qrMatch && (request.method === 'GET' || request.method === 'POST')) {
       const code = decodeURIComponent(qrMatch[1]).toLowerCase();
       const isOpenBeacon = Boolean(qrMatch[2]);
-      if (!isValidQrCode(code)) return sendJson(response, 404, { error: 'Mã QR không hợp lệ.' });
+      // Khách quét thấy trang HTML ngắn, không phải JSON thô; beacon (POST) vẫn trả JSON.
+      const sendQrNotice = (status, title, message) => {
+        if (request.method !== 'GET') return sendJson(response, status, { error: message });
+        response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' });
+        return response.end(publicNoticePage({ title, message }));
+      };
+      if (!isValidQrCode(code)) return sendQrNotice(404, 'Mã QR không đúng', 'Mã QR này không đúng. Bạn vui lòng quét lại mã in trên thẻ, hoặc nhắn tin trực tiếp cho Giọt Nắng trên Facebook nhé.');
+      // Máy nhân viên (có phiên đăng nhập CRM) quét thử / bấm thử: không vào số liệu quét thật.
+      const staffScan = hasStaffSession(auth, request);
       // Mã chưa tạo ở Cài đặt → Mã QR: vẫn phục vụ (thẻ in rồi là không sửa được),
       // nhưng recordQrScan/recordQrOpen bỏ qua — kho chỉ đếm mã nhân viên đã tạo.
       if (isOpenBeacon) {
         // Beacon từ trang đệm khi khách bấm nút. Chỉ đếm, không cần thân tin.
         if (request.method !== 'POST') return sendJson(response, 405, { error: 'Chỉ nhận POST.' });
         const target = url.searchParams.get('to') === 'zalo' ? 'zalo' : 'messenger';
-        console.log(`QR: bấm nút ${target} cho mã ${code}`);
-        recordQrOpen(code, { target }).catch(error => console.error(`QR: không ghi được lượt bấm ${code}: ${error.message}`));
+        if (staffScan) {
+          console.log(`QR: bỏ đếm lượt bấm ${target} cho mã ${code}: máy nhân viên (đã đăng nhập CRM)`);
+        } else {
+          console.log(`QR: bấm nút ${target} cho mã ${code}`);
+          // Dấu vết ngắn hạn của máy bấm (băm IP + User-Agent, chỉ giữ trong bộ nhớ 30 phút ở qr-scans, không ghi
+          // đĩa): cùng máy bấm lại / gửi beacon dồn chỉ tính một lượt.
+          const visitor = qrVisitorKey(clientIp(request), request.headers['user-agent']);
+          recordQrOpen(code, { target, visitor }).catch(error => console.error(`QR: không ghi được lượt bấm ${code}: ${error.message}`));
+        }
         response.writeHead(204, { 'Cache-Control': 'no-store' });
         return response.end();
       }
@@ -1378,14 +1399,22 @@ const server = http.createServer(async (request, response) => {
       // liên kết (khách dán link vào Zalo/Messenger) không phải lượt quét.
       if (isLinkPreviewBot(userAgent)) {
         console.log(`QR: bỏ qua đếm ${code}: máy xem trước / máy quét (${userAgent.slice(0, 60) || 'UA rỗng'})`);
+      } else if (staffScan) {
+        console.log(`QR: bỏ qua đếm ${code}: máy nhân viên (đã đăng nhập CRM) quét thử`);
       } else {
         recordQrScan(code, { userAgent, mode: redirect ? 'redirect' : 'page' })
           .catch(error => console.error(`QR: không ghi được lượt quét ${code}: ${error.message}`));
       }
-      const page = await resolveQrPage();
+      let page;
+      try {
+        page = await resolveQrPage();
+      } catch (error) {
+        console.error(`QR: không đọc được kho kênh để biết Page: ${error.message}`);
+        page = { id: '' };
+      }
       if (!page.id) {
         console.error('QR: chưa có Page nào kết nối nên không biết đưa khách đi đâu.');
-        return sendJson(response, 503, { error: 'Chưa cấu hình Page Facebook.' });
+        return sendQrNotice(503, 'Giọt Nắng', 'Trang nhắn tin đang được cập nhật. Bạn vui lòng thử lại sau ít phút, hoặc tìm "Giọt Nắng" trên Facebook để nhắn cho shop nhé.');
       }
       const { zaloUrl, prefillText } = await readQrSettings();
       // ref kiểu Pancake + tin soạn sẵn mang #mã: Pancake ghi nguồn truy cập, và
@@ -1743,13 +1772,21 @@ const server = http.createServer(async (request, response) => {
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
       }
-      const reply = await requestDirectModelReply({
-        settings,
-        conversation: { id: 'preview', name: 'Khách xem trước', botEnabled: true },
-        message: imageUrl ? { type: 'image', text, dataUrl: imageUrl } : { type: 'text', text },
-        recentMessages,
-        rawResponse: true
-      });
+      let reply;
+      try {
+        reply = await requestDirectModelReply({
+          settings,
+          conversation: { id: 'preview', name: 'Khách xem trước', botEnabled: true },
+          message: imageUrl ? { type: 'image', text, dataUrl: imageUrl } : { type: 'text', text },
+          recentMessages,
+          rawResponse: true
+        });
+      } catch (error) {
+        // Thiếu tệp khoá Vertex (ENOENT …vertex.json), mạng, nhà cung cấp lỗi: chi tiết vào log, giao diện thấy câu chung.
+        console.error('Thử chatbot: gọi mô hình lỗi:', error?.message || error);
+        // Lỗi hệ thống (có .code: ENOENT, EACCES…) → câu chung; lỗi nhà cung cấp (sai mô hình, 429…) giữ để Quản trị sửa cấu hình.
+        return sendJson(response, 502, { error: typeof error?.code === 'string' ? friendlyAiTestError(error) : `Chưa gọi được mô hình AI: ${error?.message || error}` });
+      }
       return sendJson(response, 200, { raw: reply.raw, parsed: reply.parsed });
     }
     if (request.method === 'GET' && url.pathname === '/api/channels') {
@@ -1766,7 +1803,9 @@ const server = http.createServer(async (request, response) => {
           ...store.items.map(publicChannel),
           // Page vận hành trong Pancake: không có token Meta, hiện như một kênh để
           // hộp thư xem được hội thoại bot đang trả lời qua Pancake.
-          ...(isPancakeConfigured() ? (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]).map(p => ({ id: p.pageId, name: p.pageName, picture: p.picture || defaultPicture, platform: 'facebook', via: 'pancake', status: 'connected', subscribed: true, subscribedFields: [], subscriptionError: '', connectedAt: 0, checkedAt: 0, syncedAt: '' })) : [])
+          // Kết quả đồng bộ gần nhất (pancake.mjs): syncedAt (ISO), syncError ('' khi ổn), syncErrorAt (ms) — token
+          // hết hạn / Pancake chặn thì Cài đặt → Kênh báo lỗi thay vì chấm xanh mãi.
+          ...(isPancakeConfigured() ? (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]).map(p => ({ id: p.pageId, name: p.pageName, picture: p.picture || defaultPicture, platform: 'facebook', via: 'pancake', status: 'connected', subscribed: true, subscribedFields: [], subscriptionError: '', connectedAt: 0, checkedAt: 0, syncedAt: '', syncError: '', syncErrorAt: 0, ...(pancakeSyncStatusFor(p.pageId) || {}) })) : [])
         ],
         pancake: { configured: isPancakeConfigured(), webhookUrl: pancakeConfig.webhookUrl, pageId: pancakeConfig.pageId }
       });
@@ -2068,17 +2107,27 @@ const server = http.createServer(async (request, response) => {
         // không có), nên ngoài token khớp còn nhận khi page_id là Page đã cấu
         // hình. Ghi log khi chỉ khớp page để còn dấu vết nếu có kẻ giả mạo.
         const pageValid = Boolean(pageId) && (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]).some(p => String(p.pageId) === pageId);
-        if (!isPancakeConfigured() || (!tokenValid && !pageValid)) {
-          if (isPancakeConfigured()) console.warn('Webhook Pancake token không khớp, bỏ qua (page', pageId || '?', ')');
+        // Gói không token: nhận theo page_id khi đường webhook là đường bí mật; ở đường mặc định (đoán được)
+        // vẫn nhận kèm cảnh báo, trừ khi đã bật PANCAKE_WEBHOOK_REQUIRE_SECRET=1 (app/server-helpers.mjs).
+        const decision = pancakeWebhookDecision({
+          configured: isPancakeConfigured(), tokenValid, pageValid,
+          secretPath: !pancakeConfig.defaultPath, strict: pancakeConfig.requireSecret
+        });
+        if (!decision.accept) {
+          if (decision.reason === 'token-mismatch') console.warn('Webhook Pancake token không khớp, bỏ qua (page', pageId || '?', ')');
+          else if (decision.reason === 'default-path-no-token' && Date.now() - pancakeNoTokenWarnedAt > 60 * 60 * 1000) {
+            pancakeNoTokenWarnedAt = Date.now();
+            console.warn(`Webhook Pancake không có token ở đường mặc định ${pancakeConfig.path}: bỏ qua (PANCAKE_WEBHOOK_REQUIRE_SECRET=1). Đặt PANCAKE_WEBHOOK_PATH bí mật trong .env và cùng URL đó ở Pancake → Webhook.`);
+          }
           // Pancake tạm ngưng webhook khi gặp mã lỗi liên tiếp (26/09: hai lần 401 lúc khởi động lại
           // → webhook im 35 phút). Gói lạ vẫn trả 200 và bỏ qua; chỉ báo 503 khi chưa cấu hình Pancake.
-          response.writeHead(isPancakeConfigured() ? 200 : 503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-          return response.end(isPancakeConfigured() ? '{"received":false}' : '{"error":"Pancake webhook is not configured"}');
+          response.writeHead(decision.status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+          return response.end(decision.status === 503 ? '{"error":"Pancake webhook is not configured"}' : '{"received":false}');
         }
-        // Pancake không gửi token (hành vi đã biết): ghi 1 dòng/giờ, không phủ đầy log.
-        if (!tokenValid && payload?.event_type && payload.event_type !== 'verify' && Date.now() - pancakeNoTokenWarnedAt > 60 * 60 * 1000) {
+        // Pancake không gửi token (hành vi đã biết) ở đường mặc định: ghi 1 dòng/giờ, không phủ đầy log.
+        if (decision.warn && payload?.event_type && payload.event_type !== 'verify' && Date.now() - pancakeNoTokenWarnedAt > 60 * 60 * 1000) {
           pancakeNoTokenWarnedAt = Date.now();
-          console.warn('Webhook Pancake không có token, nhận theo page_id', pageId);
+          console.warn(`Webhook Pancake không có token, nhận theo page_id ${pageId} ở đường MẶC ĐỊNH ${pancakeConfig.path} (ai biết page_id cũng gửi giả được). Đặt PANCAKE_WEBHOOK_PATH bí mật trong .env và cùng URL đó ở Pancake → Webhook.`);
         }
         // Luôn trả 200 (Pancake tạm ngưng webhook khi >80% lần gọi lỗi); thân hỏng chỉ ghi log.
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -2136,11 +2185,13 @@ const server = http.createServer(async (request, response) => {
     // Quản lý chiến dịch: chi tiêu quảng cáo (Marketing API, chỉ đọc) ghép với đơn thật → CPA/ROAS.
     if (request.method === 'GET' && url.pathname === '/api/campaigns') {
       // from/to (YYYY-MM-DD, giờ Việt Nam) nếu có thì dùng thay cho days.
-      return sendJson(response, 200, await loadCampaignReport({
+      const report = await loadCampaignReport({
         days: normalizeRangeDays(url.searchParams.get('days')),
         from: url.searchParams.get('from') || undefined,
         to: url.searchParams.get('to') || undefined
-      }));
+      });
+      // Lỗi lần đồng bộ cuối (ads.error) hiện cho chủ shop bằng câu dễ hiểu; nguyên văn đã ghi log lúc đồng bộ.
+      return sendJson(response, 200, report && typeof report === 'object' ? { ...report, ads: friendlyAdsStatus(report.ads) } : report);
     }
     // Tổng quan: hôm nay / 7 / 30 ngày so với kỳ liền trước (dashboard.mjs).
     if (request.method === 'GET' && url.pathname === '/api/dashboard') {
@@ -2163,27 +2214,37 @@ const server = http.createServer(async (request, response) => {
       });
       return response.end(reportSectionCsv(report, section));
     }
+    // Đồng bộ quảng cáo và Cố vấn AI (tốn lượt gọi Meta/Vertex): chỉ chủ shop / Quản trị (quyết định 01/10).
     if (request.method === 'POST' && url.pathname === '/api/campaigns/sync') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       const days = normalizeRangeDays(payload.days);
       try {
         await syncAdInsights({ days });
       } catch (error) {
-        return sendJson(response, 502, { error: error.message });
+        return sendAdsSyncError(response, days, error);
       }
       audit(request, 'campaign.sync', { summary: `Đồng bộ số liệu quảng cáo ${days} ngày.` });
-      return sendJson(response, 200, await loadCampaignReport({ days }));
+      const report = await loadCampaignReport({ days });
+      return sendJson(response, 200, report && typeof report === 'object' ? { ...report, ads: friendlyAdsStatus(report.ads) } : report);
     }
     if (request.method === 'GET' && url.pathname === '/api/campaigns/insights') {
-      return sendJson(response, 200, await readCampaignInsights());
+      return sendJson(response, 200, friendlyCampaignInsights(await readCampaignInsights()));
     }
     if (request.method === 'POST' && url.pathname === '/api/campaigns/insights') {
+      if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       const days = normalizeRangeDays(payload.days);
       const report = await loadCampaignReport({ days });
       const insights = await generateCampaignInsights(report, { days });
+      if (insights?.error) console.warn(`Cố vấn AI chiến dịch: mô hình lỗi, dùng gợi ý theo luật — ${insights.error}`);
       audit(request, 'campaign.insights', { summary: `Nhờ AI phân tích chiến dịch ${days} ngày.` });
-      return sendJson(response, 200, insights);
+      return sendJson(response, 200, friendlyCampaignInsights(insights));
+    }
+    // Tải danh sách khách ra tệp (toàn bộ tên/SĐT/địa chỉ): chỉ chủ shop / Quản trị (quyết định 01/10).
+    // Xem danh sách trên màn Khách hàng (/api/customers) vẫn mở cho nhân viên.
+    if (request.method === 'GET' && (url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {
+      if (!(await requireManager(request, response, 'Chỉ chủ shop hoặc Quản trị mới tải được danh sách khách hàng.'))) return;
     }
     if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {
       const filters = Object.fromEntries([
@@ -2214,7 +2275,7 @@ const server = http.createServer(async (request, response) => {
         });
         return response.end(customersToCsv(result.items, labels));
       }
-      return sendJson(response, 200, result);
+      return sendJsonWithEtag(request, response, result);
     }
     // Hộp chi tiết khách hàng: sửa thông tin, gắn thẻ, ghi chú, lịch sử đơn.
     // Mã khách có dấu hai chấm ("export:0903…") nên luôn đi qua encodeURIComponent.
@@ -2227,12 +2288,14 @@ const server = http.createServer(async (request, response) => {
       try {
         const actor = await requestActor(request);
         const patch = await readBody(request);
-        await updateCustomerProfile(customer.editKey, patch, Date.now(), { by: actorStamp(actor) });
+        const saved = await updateCustomerProfile(customer.editKey, patch, Date.now(), { by: actorStamp(actor) });
         invalidateBuyersCache();
         const fieldNames = { name: 'tên', phone: 'SĐT', address: 'địa chỉ', gender: 'giới tính' };
         const fields = Object.keys(fieldNames).filter(key => patch[key] !== undefined).map(key => (patch[key] === '' ? `bỏ ${fieldNames[key]} đã sửa` : fieldNames[key]));
         audit(request, 'customer.update', { target: { type: 'customer', id: customer.id, name: customer.name || '' }, summary: `Sửa thông tin khách: ${fields.join(', ') || 'không đổi'}.` }, actor);
-        return sendJson(response, 200, await findCustomerById(customer.id));
+        // warnings: cảnh báo không chặn của updateCustomerProfile (SĐT lạ…), rỗng khi không có.
+        const fresh = await findCustomerById(customer.id);
+        return sendJson(response, 200, fresh ? { ...fresh, warnings: Array.isArray(saved?.warnings) ? saved.warnings : [] } : fresh);
       } catch (error) {
         return sendJson(response, 400, { error: error.message });
       }
@@ -2262,7 +2325,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       if (customerRoute[1] === 'notes') {
-        if (request.method === 'GET') return sendJson(response, 200, { items: await listCustomerNotes(customer.editKey) });
+        if (request.method === 'GET') return sendJson(response, 200, { items: await listCustomerNotes(customer.editKey, { aliases: [customer.id] }) });
         if (request.method === 'POST') {
           try {
             const actor = await requestActor(request);
@@ -2285,14 +2348,20 @@ const server = http.createServer(async (request, response) => {
       // nên dễ kéo nhầm đơn người khác.
       if (customerRoute[1] === 'orders' && request.method === 'GET') {
         const key = customerPhoneKey(customer.phone);
-        if (!key) return sendJson(response, 200, { items: [] });
+        // Đơn đang nằm trong chính các hội thoại của khách (đơn bot/nhân viên chưa xuất kho, chưa vào kho lưu
+        // trữ): trước 01/10 "Tổng số đơn 1" mà "Lịch sử đơn (0)". Bản ở tệp khách hàng / kho lưu trữ (nếu có) thắng.
+        const conversationIds = new Set((customer.conversations || []).map(item => String(item?.id || '')));
+        const liveOrders = conversationIds.size
+          ? (await readMessagingStore()).conversations.filter(item => conversationIds.has(String(item.id))).flatMap(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []))
+          : [];
+        if (!key && !liveOrders.length) return sendJson(response, 200, { items: [] });
         const names = new Map(getCatalogProducts().map(product => [product.sku, product.name]));
         // Tên sản phẩm của chính khách này là bản dự phòng khi SKU đã rời danh mục.
         for (const product of customer.products || []) if (product?.sku) names.set(product.sku, product.name);
         const productName = (sku, name) => name || names.get(String(sku || '')) || String(sku || '');
 
         const byId = new Map();
-        const exported = (await listExportedCustomers()).find(person => customerPhoneKey(person.phone) === key);
+        const exported = key ? (await listExportedCustomers()).find(person => customerPhoneKey(person.phone) === key) : null;
         for (const order of exported?.orders || []) {
           byId.set(String(order.id), {
             id: String(order.id),
@@ -2307,7 +2376,7 @@ const server = http.createServer(async (request, response) => {
         }
         // Một đơn có thể vừa nằm trong kho lưu trữ vừa đã xuất kho; bản ở tệp
         // khách hàng chi tiết hơn nên giữ, bản kho chỉ bù phần còn thiếu.
-        const { items } = await readOrderArchive({ limit: 0 });
+        const { items } = key ? await readOrderArchive({ limit: 0 }) : { items: [] };
         for (const record of items) {
           if (customerPhoneKey(record.phone) !== key || byId.has(String(record.id))) continue;
           byId.set(String(record.id), {
@@ -2318,6 +2387,19 @@ const server = http.createServer(async (request, response) => {
             total: Number(record.total) || 0,
             products: (Array.isArray(record.items) ? record.items : []).map(([sku, quantity]) => ({
               sku: String(sku || ''), name: productName(sku, ''), quantity: Number(quantity) || 0
+            }))
+          });
+        }
+        for (const order of liveOrders) {
+          if (!order?.id || byId.has(String(order.id))) continue;
+          byId.set(String(order.id), {
+            id: String(order.id),
+            at: Number(order.createdAt) || 0,
+            status: order.processingStatus === 'cancelled' ? 'Hủy' : String(order.status || 'Mới'),
+            source: String(order.source || ''),
+            total: Number(order.total) || 0,
+            products: (Array.isArray(order.products) ? order.products : []).map(item => ({
+              sku: String(item?.sku || ''), name: productName(item?.sku, item?.name), quantity: Number(item?.quantity) || 0
             }))
           });
         }
@@ -2462,11 +2544,15 @@ const server = http.createServer(async (request, response) => {
       const actor = await requestActor(request);
       // Đánh dấu đã đọc cũng là "đã xem": ghi seenBy ngay trong lượt ghi kho này (khi đăng nhập).
       let seenChanged = false;
+      let wasUnread = false;
+      // Giao diện gọi route này ở mỗi tin khách mới khi hội thoại đang mở (mỗi tab một lần): hội thoại vốn đã
+      // đọc và không ghi "đã xem" thì không ghi kho; có đổi thì ghi gộp (cờ hiển thị, không ảnh hưởng bot/đơn).
       const conversation = await updateMessagingStore(store => {
+        wasUnread = Boolean(store.conversations.find(item => item.id === id)?.unread);
         const flagged = setConversationFlags(store, id, { unread: false });
         if (flagged && actor.username && shouldStoreSeen(actor.username, id)) seenChanged = Boolean(markConversationSeen(store, id, { username: actor.username, name: actor.name }));
         return flagged;
-      });
+      }, { defer: true, unchanged: flagged => !flagged || (!wasUnread && !seenChanged) });
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
       if (seenChanged) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
       // Nhật ký: gộp như "xem hội thoại" (giao diện tự gọi mỗi lần mở hội thoại chưa đọc).
@@ -2542,9 +2628,9 @@ const server = http.createServer(async (request, response) => {
     // toàn bộ; nhân viên thường chỉ xem lịch sử của MỘT hội thoại hay MỘT đơn (lọc conversationId/orderId).
     if (request.method === 'GET' && url.pathname === '/api/audit') {
       const actor = await requestActor(request);
-      const filters = Object.fromEntries(['from', 'to', 'actor', 'action', 'q', 'conversationId', 'orderId', 'limit', 'before']
-        .map(key => [key, String(url.searchParams.get(key) || '').slice(0, 200)]));
-      if (!isManager(actor) && !filters.conversationId && !filters.orderId) {
+      // Đã trim: chốt quyền và queryAudit dùng cùng giá trị (?conversationId=%20 từng lọt chốt rồi thành "không lọc").
+      const filters = auditFiltersFrom(url.searchParams);
+      if (!canReadAudit(isManager(actor), filters)) {
         return sendJson(response, 403, { error: 'Chỉ chủ shop hoặc Quản trị mới xem được toàn bộ nhật ký hoạt động.' });
       }
       const result = await queryAudit(filters);
@@ -2578,6 +2664,9 @@ const server = http.createServer(async (request, response) => {
           const payload = await readBody(request);
           const staffId = staffMatch ? decodeURIComponent(staffMatch[1]) : '';
           const previous = staffId ? (await listStaff()).find(item => item.id === staffId) : null;
+          // Tra người làm TRƯỚC khi lưu: tự đổi mật khẩu làm phiên hiện tại hết hiệu lực ngay sau saveStaffMember,
+          // tra sau thì nhật ký ghi "Không đăng nhập".
+          const actorBefore = await requestActor(request);
           const member = await saveStaffMember(payload, { id: staffId, reservedUsernames: new Set(envLoginUsers.keys()) });
           await refreshLoginUsers();
           // Tên/vai trò mới có hiệu lực ngay cho nhật ký và dấu người làm.
@@ -2600,7 +2689,14 @@ const server = http.createServer(async (request, response) => {
             target: { type: 'staff', id: member.id, name: member.name },
             summary: `${creating ? 'Thêm' : 'Sửa'} nhân sự ${member.name} (${member.username}): ${changes.join(', ') || 'không đổi'}.`,
             details: { passwordChanged, role: member.role, active: member.active }
-          });
+          }, actorBefore);
+          // Tự đổi mật khẩu / tên đăng nhập của chính mình: phiên cũ (mọi máy) đã hết hiệu lực theo phiên bản tài khoản;
+          // cấp lại cookie MỚI cho đúng máy vừa đổi (đăng nhập lại bằng mật khẩu mới vừa gửi) để không bị đá ra.
+          const selfEdit = !creating && session?.username && previous && session.username === previous.username;
+          if (selfEdit && member.active && passwordChanged && auth.enabled) {
+            const relogin = await auth.login({ username: member.username, password: String(payload.password), clientId: clientAddress(request) });
+            if (relogin.ok) response.setHeader('Set-Cookie', relogin.cookie);
+          }
           return sendJson(response, creating ? 201 : 200, { member, items: await listStaff(), loginEnabled: auth.enabled });
         } catch (error) {
           return sendJson(response, error.statusCode || 400, { error: error.message });
@@ -2738,13 +2834,21 @@ const server = http.createServer(async (request, response) => {
             appendLabelAudit({ actor, conversation: { id, name: stored.name || '' }, before: labelsBefore, after: relabeledConversation.labels, labelDefs, reason: 'tự gắn khi tạo đơn' });
           }
           markFollowUpWins().catch(() => {});
+          // Phiếu xác nhận có tới khách thật không (giao diện báo "Đã gửi…" hay "chưa gửi được, bấm Gửi lại").
+          // Messenger trực tiếp: gửi lỗi thì đã trả 502 "Chưa tạo đơn" ở trên, tới đây là đã gửi.
+          let receipt = { receiptSent: true, receiptVia: 'messenger', receiptError: '' };
           if (viaPancake) {
             // Hội thoại Pancake: không gửi bản chữ. Đẩy đơn sang Pancake POS, POS
             // gửi khách thẻ xác nhận đơn; POS lỗi thì CRM gửi phiếu ảnh của mình.
             const pos = await syncOrderToPos(id, order.id).catch(error => ({ error: error.message, at: Date.now() }));
             if (pos) order.pos = pos;
-            if (!pos?.id) await sendChatbotOrderReceipt(conversation, order, { sentBy: actor.username ? creator : null });
-            order.delivery = { status: 'sent', messageId: '', sentAt: Date.now(), via: pos?.id ? 'pos' : 'receipt-image' };
+            const outcome = pos?.id ? { sent: true, via: 'pos' } : await sendChatbotOrderReceipt(conversation, order, { sentBy: actor.username ? creator : null });
+            receipt = outcome.sent
+              ? { receiptSent: true, receiptVia: outcome.via, receiptError: '' }
+              : { receiptSent: false, receiptVia: 'receipt-image', receiptError: 'Chưa gửi được phiếu xác nhận cho khách (Pancake không nhận tin). Bấm "Gửi lại phiếu" ở đơn để thử lại.' };
+            order.delivery = outcome.sent
+              ? { status: 'sent', messageId: '', sentAt: Date.now(), via: outcome.via }
+              : { status: 'failed', messageId: '', failedAt: Date.now(), via: 'receipt-image', error: String(outcome.error || '').slice(0, 300) };
             await updateMessagingStore(store => {
               const item = store.conversations.find(entry => entry.id === id);
               const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === order.id);
@@ -2753,8 +2857,9 @@ const server = http.createServer(async (request, response) => {
             });
           }
           const panel = await readMessagingStore().then(store => publicCustomerPanel(store.conversations.find(entry => entry.id === id)));
-          // Mã đơn thật (có thể đã thêm hậu tố khi trùng) để trình duyệt báo đúng mã.
-          return sendJson(response, 201, { ...panel, createdOrderId: order.id });
+          // Mã đơn thật (có thể đã thêm hậu tố khi trùng) để trình duyệt báo đúng mã; receiptSent/receiptVia/
+          // receiptError: phiếu xác nhận đã tới khách chưa (web báo lỗi thay vì "Đã gửi xác nhận…").
+          return sendJson(response, 201, { ...panel, createdOrderId: order.id, ...receipt });
         }
         const actor = await requestActor(request);
         const author = actorStamp(actor);
@@ -2869,6 +2974,7 @@ const server = http.createServer(async (request, response) => {
       let failure = null;
       // Dấu vết: trường đổi, câu tóm tắt và mã hành động (sửa / đổi trạng thái / hủy) cho lịch sử đơn + nhật ký.
       let edit = null;
+      let editWarnings = [];
       let ownerConversationId = '';
       // Kiểm trên bản sao rồi mới chép đè. applyCustomerOrderEdits sửa TẠI CHỖ
       // từng trường một rồi mới ném lỗi ở trường sau, mà lỗi lại bị bắt ngay
@@ -2883,6 +2989,8 @@ const server = http.createServer(async (request, response) => {
           failure = error;
           return;
         }
+        // Cảnh báo không chặn (SĐT lạ: +84 đã đổi về 0, số bàn…) để giao diện báo cạnh ô.
+        if (Array.isArray(changed.warnings)) editWarnings = changed.warnings;
         if (changed.length) {
           edit = { changed, action: orderEditAction(changed, draft), summary: describeOrderEdits(order, draft, changed) };
           recordOrderHistory(draft, { by: actorStamp(actor), action: edit.action, summary: edit.summary });
@@ -2951,7 +3059,8 @@ const server = http.createServer(async (request, response) => {
         await updateLandingStore(store => { const target = store.orders.find(order => order.id === orderId); if (target) target.pos = posOutcome; });
         updated.pos = posOutcome;
       }
-      return sendJson(response, 200, { ...updated, processingNotes: processingNotes(updated) });
+      // warnings: [chuỗi] cảnh báo không chặn của lần sửa (rỗng khi không có) — web hiện cạnh ô SĐT.
+      return sendJson(response, 200, { ...updated, processingNotes: processingNotes(updated), warnings: editWarnings });
     }
     // Gửi lại phiếu xác nhận đơn cho khách (ảnh phiếu qua Pancake, thẻ receipt qua Messenger).
     const customerOrderResendMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)\/resend$/);
@@ -3035,7 +3144,7 @@ const server = http.createServer(async (request, response) => {
         const refreshed = { ...order, phoneWarning, note: customerNote(order) };
         withNotes.push({ ...refreshed, processingNotes: processingNotes(refreshed) });
       }
-      return sendJson(response, 200, { items: withNotes, total: withNotes.length });
+      return sendJsonWithEtag(request, response, { items: withNotes, total: withNotes.length });
     }
     if (request.method === 'GET' && url.pathname === '/api/shipping/spx/track') {
       try {
@@ -3098,10 +3207,8 @@ const server = http.createServer(async (request, response) => {
       const workbook = new AdmZip(exportTemplateBuffer);
       const worksheetPath = 'xl/worksheets/sheet1.xml';
       const cleanedWorkbook = removeDataRowBackgrounds(workbook, worksheetPath);
-      let worksheetXml = cleanedWorkbook.worksheetXml;
-      rows.forEach((row, rowIndex) => row.forEach((value, columnIndex) => {
-        worksheetXml = writeTemplateCell(worksheetXml, `${excelColumnName(columnIndex)}${rowIndex + 4}`, value);
-      }));
+      // Dữ liệu từ dòng 4 của mẫu, dựng sheetData một lượt (app/xlsx-template.mjs) thay vì quét lại cả XML cho từng ô.
+      const worksheetXml = fillTemplateSheet(cleanedWorkbook.worksheetXml, rows, { firstRow: 4 });
       workbook.updateFile('xl/styles.xml', Buffer.from(cleanedWorkbook.stylesXml, 'utf8'));
       workbook.updateFile(worksheetPath, Buffer.from(worksheetXml, 'utf8'));
       const output = workbook.toBuffer();
@@ -3147,7 +3254,7 @@ const server = http.createServer(async (request, response) => {
       audit(request, 'order.export', { target: { type: 'file', id: exportFileMatch[1], name: file.fileName }, summary: `Tải lại file kho đã xuất ${file.fileName}.`, details: { kind: 'history' } });
       return sendBinary(response, 200, file.buffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', file.fileName);
     }
-    if(request.method==='GET') return serveFile(request,response,url.pathname);
+    if(request.method==='GET') return serveFile(request,response,url.pathname,url.searchParams.get('v') || '');
     sendJson(response,404,{error:'Route not found.'});
   } catch (error) {
     // Header đã gửi rồi (route CSV, SSE) thì không đổi sang JSON lỗi được nữa:
@@ -3160,6 +3267,9 @@ const server = http.createServer(async (request, response) => {
     // bộ ra ngoài, mà giám sát thì không bao giờ thấy 5xx để báo động.
     if (error?.code && typeof error.code === 'string') {
       console.error(`Lỗi hệ thống khi xử lý ${request.method} ${request.url}:`, error);
+      // Đọc kho lỗi tạm (tệp đang bận/khoá, hết lượt mở tệp): các kho giờ NÉM thay vì coi là rỗng (json-store) →
+      // báo "thử lại" thay cho lỗi chung; dữ liệu trên đĩa không bị đụng tới.
+      if (TRANSIENT_FILE_ERRORS.has(error.code)) return sendJson(response, 503, { error: 'Máy chủ đang bận đọc dữ liệu, vui lòng thử lại sau ít giây.' });
       return sendJson(response, 500, { error: 'Máy chủ gặp lỗi khi xử lý yêu cầu.' });
     }
     sendJson(response, 400, { error: error.message });
@@ -3172,6 +3282,9 @@ const server = http.createServer(async (request, response) => {
 process.on('unhandledRejection', error => console.error('Promise bị bỏ rơi:', error));
 // Lỗi không ai bắt thì trạng thái tiến trình không còn tin được nữa: ghi lại
 // cho có dấu vết rồi thoát để systemd dựng lại bản sạch (unit đặt Restart).
+// CỐ Ý không ghi nốt kho hội thoại ở đây (khác SIGTERM): bộ nhớ có thể đang sửa dở nên ghi xuống là
+// ghi trạng thái hỏng. Phần ghi gộp còn treo chỉ là tin/trạng thái webhook vào (≤ 5 giây) và "đã xem/
+// đã đọc"; đồng bộ Pancake (10 phút) kéo lại tin khách. Đơn hàng, trạng thái bot, tin gửi đi ghi ngay.
 process.on('uncaughtException', error => {
   console.error('Lỗi không ai bắt, thoát để khởi động lại:', error);
   process.exit(1);
@@ -3213,6 +3326,12 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   if (!auth.enabled && authConfig.requireLogin) console.error('CHƯA CẤU HÌNH ĐĂNG NHẬP: máy chủ bắt buộc đăng nhập (PUBLIC_BASE_URL https hoặc CRM_REQUIRE_LOGIN=1) mà chưa có tài khoản — giao diện/API trả 503 cho tới khi khai CRM_LOGIN_USERS hoặc Nhân sự có mật khẩu.');
   else if (!auth.enabled) console.warn('CRM_LOGIN_USERS trống: giao diện không hỏi đăng nhập. Chỉ để vậy khi chạy trên máy mình.');
   else if (!authConfig.sessionSecret) console.warn('CRM_SESSION_SECRET trống: khoá phiên sinh ngẫu nhiên, khởi động lại là mọi người phải đăng nhập lại.');
+  if (isPancakeConfigured() && pancakeConfig.defaultPath) {
+    console.warn(`Webhook Pancake ở đường MẶC ĐỊNH ${pancakeConfig.path}: Pancake không gửi token nên gói được nhận theo page_id (công khai) — ai biết đường này gửi tin giả được. Đặt PANCAKE_WEBHOOK_PATH bí mật (dài, ngẫu nhiên) trong .env, nhập đúng URL đó ở Pancake → Webhook, rồi bật PANCAKE_WEBHOOK_REQUIRE_SECRET=1.${pancakeConfig.requireSecret ? ' (Đang bật chặn: gói không token ở đường này bị bỏ.)' : ''}`);
+  }
+  // Nạp sẵn mô hình intent (readFileSync 2–3 MB mỗi tệp, ~50–60 ms) ngay sau khởi động thay vì ở tin khách đầu tiên.
+  // warmUpChatbotModels (chatbot-engine) không ném; lỗi nạp tự ghi log.
+  setImmediate(() => { warmUpChatbotModels().catch(() => {}); });
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);
   const missing = missingWebhookConfiguration();
   if (missing.length) console.log(`Webhook chưa sẵn sàng, còn thiếu: ${missing.join(', ')}`);

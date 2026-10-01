@@ -98,6 +98,12 @@ function productLines(products, total) {
   });
 }
 
+/** Phí ship khách trả trong tổng đơn (miễn ship → 0; không vượt tổng). */
+function chargedShipping(order, total) {
+  if (!order || order.freeShipping === true) return 0;
+  return Math.min(Math.max(0, Math.round(Number(order.shippingFee) || 0)), total);
+}
+
 /** Một đơn → một sự kiện đơn phẳng. */
 export function orderFact(order, conversation = null) {
   const createdAt = Number(order?.createdAt) || 0;
@@ -117,7 +123,10 @@ export function orderFact(order, conversation = null) {
     hidden: order?.hiddenFromTable === true,
     duplicate: false,
     total,
-    products: productLines(order?.products, total),
+    // Doanh thu theo sản phẩm chia phần TIỀN HÀNG (tổng trừ phí ship khách trả), không chia cả phí ship
+    // (01/10: 1 Túi Xanh 174k + ship 15k từng ghi 189k cho Túi Xanh). Tổng đơn, cột Đơn giá và file xuất kho
+    // vẫn gồm ship như cũ (paidUnitPrices — chủ ý).
+    products: productLines(order?.products, Math.max(0, total - chargedShipping(order, total))),
     phone: toLocalPhone(order?.phone) || String(order?.phone || ''),
     customerKey: customerKeyOf(order?.phone, conversation, id),
     employee: String(order?.employee || '').trim(),

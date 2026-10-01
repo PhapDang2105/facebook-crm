@@ -165,7 +165,7 @@ test('việc cần làm: đơn quá 30 ngày hay đã ẩn khỏi bảng không 
 });
 
 test('máy chủ nối route /api/dashboard', async () => {
-  const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+  const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(server, /import \{ loadDashboard, normalizeDashboardDays \} from '\.\/dashboard\.mjs'/);
   assert.match(server, /request\.method === 'GET' && url\.pathname === '\/api\/dashboard'\)[\s\S]{0,200}loadDashboard\(\{ days: normalizeDashboardDays\(url\.searchParams\.get\('days'\)\) \}\)/);
 });

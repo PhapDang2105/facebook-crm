@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { AUDIT_FILTER_KEYS } from '../app/server-helpers.mjs';
 
 // server.mjs khởi động máy chủ ngay khi nạp, nên kiểm trên MÃ NGUỒN: mọi route ghi (POST/PUT/PATCH/
 // DELETE) do người dùng gọi phải ghi nhật ký hoạt động (`audit(request` hay appendLabelAudit /
 // appendBotToggleAudit). Route nào thêm mới mà quên ghi nhật ký là test này đỏ, kèm danh sách.
-const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
 // Route ghi KHÔNG ghi nhật ký, có lý do. Mỗi mục: chuỗi nhận diện nằm trong khối route + lý do.
 const EXEMPT = [
@@ -169,11 +170,16 @@ test('nhật ký: tin nhân viên gửi mang họ tên người gửi; đơn t�
 
 test('API /api/audit: chủ shop/Quản trị xem hết; nhân viên thường chỉ khi lọc theo hội thoại hay đơn; trả label/actors/actions', () => {
   const route = server.slice(server.indexOf("url.pathname === '/api/audit'"), server.indexOf("url.pathname === '/api/staff' || url.pathname.startsWith('/api/staff/')"));
-  assert.match(route, /if \(!isManager\(actor\) && !filters\.conversationId && !filters\.orderId\)/);
+  // 01/10 (SEC-1): chốt cũ `!filters.conversationId && !filters.orderId` trên giá trị CHƯA trim cho "%20" lọt qua
+  // rồi queryAudit trim thành "không lọc" → nhân viên đọc cả nhật ký. Giờ lọc đã trim một lần (server-helpers)
+  // và chốt + truy vấn dùng cùng bộ lọc (hành vi: tests/fix-server-helpers.test.mjs).
+  assert.match(route, /const filters = auditFiltersFrom\(url\.searchParams\);/);
+  assert.match(route, /if \(!canReadAudit\(isManager\(actor\), filters\)\)/);
+  assert.match(route, /await queryAudit\(filters\)/);
   assert.match(route, /sendJson\(response, 403, \{ error:/);
   assert.match(route, /label: auditActionLabel\(item\.action\)/);
   assert.match(route, /next: result\.next/);
   assert.match(route, /actors:/);
   assert.match(route, /actions: Object\.entries\(AUDIT_ACTIONS\)/);
-  for (const key of ['from', 'to', 'actor', 'action', 'q', 'conversationId', 'orderId', 'limit', 'before']) assert.match(route, new RegExp(`'${key}'`));
+  assert.deepEqual(AUDIT_FILTER_KEYS, ['from', 'to', 'actor', 'action', 'q', 'conversationId', 'orderId', 'limit', 'before']);
 });

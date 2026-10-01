@@ -132,7 +132,7 @@ Sau khi được cấp Advanced Access, xóa cờ để CRM thử lại:
 
 ```bash
 sudo systemctl stop facebook-crm
-sudo -u crm sed -i 's/"pictureAttemptedAt": [0-9]*,//g; s/"profileResolvedAt": [0-9]*,//g' /opt/facebook-crm/data/processed/meta-conversations.json
+sudo -u crm sed -i 's/"pictureAttemptedAt": *[0-9]*,//g; s/"profileResolvedAt": *[0-9]*,//g' /opt/facebook-crm/data/processed/meta-conversations.json
 sudo systemctl start facebook-crm
 ```
 

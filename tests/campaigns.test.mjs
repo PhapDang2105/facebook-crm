@@ -152,7 +152,7 @@ test('dữ liệu cũ chỉ có referral (không có referrals[]) thì lấy lú
 });
 
 test('máy chủ nối đủ bốn route Chiến dịch và vòng đồng bộ quảng cáo', async () => {
-  const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+  const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(server, /request\.method === 'GET' && url\.pathname === '\/api\/campaigns'\)[\s\S]{0,300}loadCampaignReport\(\{\s*days: normalizeRangeDays\(url\.searchParams\.get\('days'\)\),\s*from: url\.searchParams\.get\('from'\) \|\| undefined,\s*to: url\.searchParams\.get\('to'\) \|\| undefined\s*\}\)/);
   assert.match(server, /request\.method === 'POST' && url\.pathname === '\/api\/campaigns\/sync'\)[\s\S]{0,400}syncAdInsights\(\{ days \}\)[\s\S]{0,300}loadCampaignReport\(\{ days \}\)/);
   assert.match(server, /request\.method === 'GET' && url\.pathname === '\/api\/campaigns\/insights'\)[\s\S]{0,200}readCampaignInsights\(\)/);
@@ -193,7 +193,7 @@ test('đơn trùng mã (hai nơi) chỉ tính một lần', () => {
 });
 
 test('config: CAMPAIGN_ATTRIBUTION_DAYS có trong config.mjs và .env.example', async () => {
-  const config = await readFile(new URL('../app/config.mjs', import.meta.url), 'utf8');
+  const config = (await readFile(new URL('../app/config.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(config, /process\.env\.CAMPAIGN_ATTRIBUTION_DAYS/);
   const example = await readFile(new URL('../.env.example', import.meta.url), 'utf8');
   assert.match(example, /CAMPAIGN_ATTRIBUTION_DAYS=7/);

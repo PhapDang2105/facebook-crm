@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#f7f1e3">
+  <title>Đăng nhập | Nông Sản Giọt Nắng</title>
+  <link rel="icon" type="image/webp" href="/assets/giot-nang-logo.webp">
+  <link rel="stylesheet" href="/login.css">
+</head>
+<body>
+  <main class="login">
+    <!-- Bên trái: thương hiệu (ẩn bớt trên điện thoại). Bên phải: ô đăng nhập. -->
+    <section class="login-brand" aria-hidden="true">
+      <div class="login-sun"></div>
+      <div class="login-brand-inner">
+        <img class="login-brand-logo" src="/assets/giot-nang-logo.webp" alt="">
+        <p class="login-brand-name">Giọt Nắng</p>
+        <p class="login-tagline">Hạt yêu thương – Ươm hạnh phúc</p>
+        <ul class="login-points">
+          <li>Tin nhắn Facebook, bình luận và chatbot</li>
+          <li>Đơn hàng, khách hàng, vận chuyển</li>
+          <li>Báo cáo và chiến dịch của nhà Nắng</li>
+        </ul>
+      </div>
+      <p class="login-brand-foot">ăn sạch – sống lành cùng Giọt Nắng</p>
+    </section>
+
+    <section class="login-panel">
+      <form class="login-card" id="login-form" novalidate>
+        <img class="login-logo" src="/assets/giot-nang-logo.webp" alt="Giọt Nắng">
+        <div class="login-heading">
+          <h1>Đăng nhập</h1>
+          <p class="login-subtitle">Dùng tài khoản Quản trị đã cấp cho bạn.</p>
+        </div>
+
+        <label class="login-field">
+          <span>Tên đăng nhập</span>
+          <span class="login-input">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"></path></svg>
+            <input id="login-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="vd: hang.th" required autofocus>
+          </span>
+        </label>
+
+        <label class="login-field">
+          <span>Mật khẩu</span>
+          <span class="login-input login-password">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Mật khẩu của bạn" required>
+            <button id="login-password-toggle" type="button" aria-label="Hiện mật khẩu" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
+          </span>
+          <small class="login-caps" id="login-caps" hidden>Đang bật Caps Lock</small>
+        </label>
+
+        <p class="login-error" id="login-error" role="alert" hidden></p>
+
+        <button class="login-submit" id="login-submit" type="submit">
+          <span class="login-spinner" aria-hidden="true"></span>
+          <span class="login-submit-text">Đăng nhập</span>
+        </button>
+
+        <p class="login-help">Quên mật khẩu? Nhờ Quản trị đặt lại trong <strong>Cài đặt → Nhân sự</strong>.</p>
+      </form>
+      <p class="login-legal">© Công ty Cổ phần GONA Việt Nam · Nông Sản Giọt Nắng</p>
+    </section>
+  </main>
+  <script src="/login.js" defer></script>
+</body>
+</html>

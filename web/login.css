@@ -1,0 +1,204 @@
+/* Trang đăng nhập CRM theo nhận diện Giọt Nắng: nền kem ấm, xanh lá chủ đạo, vàng nắng nhấn,
+   nâu đất cho chữ tiêu đề. Không dùng màu lạnh. Chỉ tải tệp ở đường công khai (/assets/fonts, logo). */
+@font-face { font-family: Roboto; src: url('/assets/fonts/Roboto-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: Roboto; src: url('/assets/fonts/Roboto-Medium.ttf') format('truetype'); font-weight: 500; font-display: swap; }
+@font-face { font-family: Roboto; src: url('/assets/fonts/Roboto-Bold.ttf') format('truetype'); font-weight: 700; font-display: swap; }
+
+:root {
+  --cream: #f7f1e3;      /* nền kem nhạt */
+  --cream-2: #fbf7ee;
+  --leaf: #1f7a45;       /* xanh lá chủ đạo */
+  --leaf-hover: #17633a;
+  --leaf-soft: #e6f2ea;
+  --sun: #f2b632;        /* vàng nắng */
+  --earth: #5b3a1e;      /* nâu đất */
+  --ink: #2a2118;
+  --muted: #7a6c5d;
+  --line: #e4d9c4;
+  --danger: #b3261e;
+  --danger-soft: #fdecea;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background: var(--cream);
+  font: 15px/1.5 Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.login { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); min-height: 100vh; }
+
+/* ---------- Bên thương hiệu ---------- */
+.login-brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: 56px 64px 40px;
+  color: #fff;
+  background:
+    radial-gradient(120% 80% at 0% 100%, rgba(242, 182, 50, .22), transparent 60%),
+    linear-gradient(160deg, #2a8a52 0%, var(--leaf) 45%, #145a33 100%);
+}
+.login-sun {
+  position: absolute;
+  top: -120px;
+  right: -120px;
+  width: 360px;
+  height: 360px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(242, 182, 50, .9) 0 34%, rgba(242, 182, 50, .28) 35% 52%, rgba(242, 182, 50, .1) 53% 70%, transparent 71%);
+  pointer-events: none;
+}
+.login-brand-inner { position: relative; max-width: 440px; margin-top: auto; margin-bottom: auto; }
+.login-brand-logo {
+  width: 88px;
+  height: 88px;
+  padding: 10px;
+  object-fit: contain;
+  background: var(--cream-2);
+  border-radius: 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .15);
+}
+.login-brand-name { margin: 22px 0 4px; font-size: 40px; font-weight: 700; letter-spacing: -.01em; line-height: 1.1; }
+.login-tagline { margin: 0 0 28px; color: #ffe9a8; font-size: 18px; font-weight: 500; }
+.login-points { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.login-points li { position: relative; padding-left: 30px; color: rgba(255, 255, 255, .92); font-size: 15px; }
+.login-points li::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--sun) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b3a1e' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+.login-brand-foot { position: relative; margin: 0; color: rgba(255, 255, 255, .7); font-size: 13px; letter-spacing: .02em; }
+
+/* ---------- Bên đăng nhập ---------- */
+.login-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 40px 24px; }
+
+.login-card {
+  display: grid;
+  gap: 18px;
+  width: min(100%, 400px);
+  padding: 36px 32px 28px;
+  background: #fff;
+  border: 1px solid #efe6d4;
+  border-radius: 20px;
+  box-shadow: 0 18px 40px rgba(91, 58, 30, .08);
+}
+
+.login-logo { display: none; justify-self: center; width: 64px; height: 64px; object-fit: contain; }
+.login-heading { display: grid; gap: 4px; }
+.login-card h1 { margin: 0; color: var(--earth); font-size: 26px; font-weight: 700; letter-spacing: -.01em; }
+.login-subtitle { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+.login-field { display: grid; gap: 6px; color: var(--earth); font-size: 13px; font-weight: 500; }
+
+.login-input { position: relative; display: block; }
+.login-input > svg {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: #a8977f;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.login-input input {
+  width: 100%;
+  height: 48px;
+  padding: 0 14px 0 42px;
+  color: var(--ink);
+  font: 400 15px Roboto, system-ui, sans-serif;
+  background: var(--cream-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  transition: border-color 150ms, box-shadow 150ms, background 150ms;
+}
+.login-input input::placeholder { color: #b6a68f; }
+.login-input input:hover { border-color: #d3c3a5; }
+.login-input input:focus { outline: none; background: #fff; border-color: var(--leaf); box-shadow: 0 0 0 4px rgba(31, 122, 69, .14); }
+.login-input:focus-within > svg { stroke: var(--leaf); }
+
+.login-password input { padding-right: 48px; }
+.login-password button {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  color: #a8977f;
+  background: none;
+  border: 0;
+  border-radius: 0 12px 12px 0;
+  cursor: pointer;
+}
+.login-password button:hover { color: var(--earth); }
+.login-password button[aria-pressed="true"] { color: var(--leaf); }
+.login-password button:focus-visible { outline: 2px solid var(--leaf); outline-offset: -4px; }
+.login-password button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+.login-caps { color: #9a6a00; font-size: 12px; font-weight: 500; }
+.login-caps::before { content: '⇪ '; }
+.login-caps[hidden] { display: none; }
+
+.login-error { margin: 0; padding: 10px 12px; color: var(--danger); background: var(--danger-soft); border: 1px solid #f6c9c4; border-radius: 10px; font-size: 13px; }
+.login-error[hidden] { display: none; }
+
+.login-submit {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 50px;
+  color: #fff;
+  font: 700 15px Roboto, system-ui, sans-serif;
+  background: var(--leaf);
+  border: 0;
+  border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(31, 122, 69, .25);
+  cursor: pointer;
+  transition: background 150ms, transform 150ms, box-shadow 150ms;
+}
+.login-submit:hover { background: var(--leaf-hover); }
+.login-submit:active { transform: translateY(1px); box-shadow: 0 3px 8px rgba(31, 122, 69, .25); }
+.login-submit:focus-visible { outline: 3px solid rgba(242, 182, 50, .8); outline-offset: 2px; }
+.login-submit:disabled { cursor: wait; opacity: .85; }
+.login-spinner { display: none; width: 16px; height: 16px; border: 2px solid rgba(255, 255, 255, .45); border-top-color: #fff; border-radius: 50%; animation: login-spin .8s linear infinite; }
+.login-submit:disabled .login-spinner { display: inline-block; }
+@keyframes login-spin { to { transform: rotate(360deg); } }
+
+.login-help { margin: 2px 0 0; color: var(--muted); text-align: center; font-size: 12.5px; }
+.login-help strong { color: var(--earth); font-weight: 500; }
+.login-legal { margin: 0; color: #a8977f; font-size: 12px; text-align: center; }
+
+/* ---------- Máy tính bảng / điện thoại ---------- */
+@media (max-width: 900px) {
+  .login { grid-template-columns: 1fr; }
+  .login-brand { display: none; }
+  .login-panel { justify-content: flex-start; padding-top: 48px; background: radial-gradient(140% 60% at 50% -10%, rgba(242, 182, 50, .22), transparent 60%), var(--cream); }
+  .login-logo { display: block; }
+  .login-heading { text-align: center; }
+}
+@media (max-width: 420px) {
+  .login-panel { padding: 32px 16px; }
+  .login-card { padding: 28px 20px 22px; border-radius: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-spinner { animation-duration: 2.4s; }
+  .login-submit, .login-input input { transition: none; }
+}

@@ -10,7 +10,7 @@ Thư mục này chứa mọi thứ cần để đưa CRM lên một máy chủ D
 
 ## Vì sao cần Basic Auth
 
-Ứng dụng CRM **chưa có cơ chế đăng nhập**. Nếu đưa thẳng ra Internet, bất kỳ ai biết địa chỉ đều đọc được toàn bộ tin nhắn khách hàng và gửi tin dưới danh nghĩa Facebook Page.
+Khi `CRM_LOGIN_USERS` còn trống, CRM **không hỏi đăng nhập**. Nếu đưa thẳng ra Internet, bất kỳ ai biết địa chỉ đều đọc được toàn bộ tin nhắn khách hàng và gửi tin dưới danh nghĩa Facebook Page.
 
 `Caddyfile` xử lý việc đó bằng cách chia hai nhánh:
 
@@ -22,7 +22,23 @@ Thư mục này chứa mọi thứ cần để đưa CRM lên một máy chủ D
 - `/q/*` đi thẳng: trang khách thấy khi quét mã QR trên thẻ cảm ơn, cùng các ảnh logo/ưu đãi dưới `/q/brand/` (máy chủ chỉ phục vụ đúng các tệp đã liệt kê trong `app/server.mjs`).
 - Mọi đường dẫn còn lại yêu cầu tên đăng nhập và mật khẩu.
 
-Khi nào CRM có đăng nhập riêng thì có thể bỏ lớp này.
+## Đăng nhập riêng của CRM
+
+CRM nay có trang đăng nhập (`/login`), bật khi `.env` có tài khoản:
+
+```bash
+cd /opt/facebook-crm
+sudo -u facebook-crm node app/auth.mjs hash-password   # nhập mật khẩu (≥ 8 ký tự), in ra chuỗi scrypt$…
+```
+
+```ini
+CRM_LOGIN_USERS=huy:scrypt$…,lan:scrypt$…
+CRM_SESSION_SECRET=<chuỗi ngẫu nhiên dài, ví dụ: openssl rand -hex 32>
+```
+
+Rồi `systemctl restart facebook-crm`. Phiên là cookie `HttpOnly` sống 30 ngày (`Secure` khi `PUBLIC_BASE_URL` là https); đổi mật khẩu của ai thì phiên cũ của người đó hết hiệu lực; sai 10 lần trong 15 phút thì địa chỉ đó bị khoá 15 phút.
+
+Khi đăng nhập đã chạy, có thể bỏ khối `basic_auth { … }` trong `/etc/caddy/Caddyfile` rồi `systemctl reload caddy`. **Chỉ bỏ sau khi `CRM_LOGIN_USERS` đã có tài khoản** — để trống thì CRM không hỏi đăng nhập (log khởi động báo dòng cảnh báo).
 
 ## Các bước
 

@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Nông Sản Giọt Nắng | Facebook</title>
   <link rel="icon" type="image/webp" href="/assets/giot-nang-logo.webp">
-  <link rel="stylesheet" href="styles.css?v=20260922-merge-2">
+  <link rel="stylesheet" href="styles.css?v=20260929-dashboard">
+  <link rel="stylesheet" href="staff.css?v=20261001-staff">
 </head>
 <body>
   <div class="topbar">
@@ -26,6 +27,9 @@
       </div>
       <span class="notification-announcement sr-only" role="status" aria-live="polite"></span>
       <div class="topbar-user"><span id="topbar-user-avatar">H</span><b id="topbar-user-name">Huy Facebook</b></div>
+      <button class="logout-button hidden" id="logout-button" type="button" aria-label="Đăng xuất" title="Đăng xuất">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
+      </button>
     </div>
   </div>
   <aside class="sidebar">
@@ -51,16 +55,42 @@
         <button class="settings-subnav-item" type="button" data-settings-section="products">Sản phẩm</button>
         <button class="settings-subnav-item" type="button" data-settings-section="gifts">Quà tặng</button>
         <button class="settings-subnav-item" type="button" data-settings-section="qr">Mã QR</button>
+        <button class="settings-subnav-item" type="button" data-settings-section="staff">Nhân sự</button>
       </div>
     </nav>
   </aside>
   <main>
     <section id="dashboard-view" class="view">
-      <div class="cards">
-        <article class="card"><p>Doanh thu</p><strong>0 ₫</strong></article>
-        <article class="card"><p>Chi phí</p><strong>0 ₫</strong></article>
-        <article class="card"><p>Khách hàng</p><strong>0</strong></article>
-        <article class="card"><p>Chiến dịch</p><strong>0</strong></article>
+      <div class="dash-toolbar">
+        <div class="dash-range" id="dashboard-range" role="group" aria-label="Khoảng thời gian">
+          <button type="button" data-dashboard-days="1">Hôm nay</button>
+          <button type="button" data-dashboard-days="7">7 ngày</button>
+          <button type="button" data-dashboard-days="30">30 ngày</button>
+        </div>
+      </div>
+      <div class="campaigns-notice dash-notice hidden" id="dashboard-notice" role="status"></div>
+      <div class="dash-kpis" id="dashboard-kpis"></div>
+      <div class="dash-grid">
+        <section class="dash-panel dash-panel--wide" id="dashboard-trend-panel">
+          <header class="dash-panel-head"><h2>Doanh thu và chi phí</h2><span class="chart-legend"><span><i class="is-revenue"></i>Doanh thu</span><span><i class="is-spend"></i>Chi phí QC</span></span></header>
+          <div class="dash-panel-body" id="dashboard-trend"></div>
+        </section>
+        <section class="dash-panel hidden" id="dashboard-todo-panel">
+          <header class="dash-panel-head"><h2>Việc cần làm</h2></header>
+          <div class="dash-panel-body" id="dashboard-todo"></div>
+        </section>
+        <section class="dash-panel">
+          <header class="dash-panel-head"><h2>Nguồn đơn</h2></header>
+          <div class="dash-panel-body" id="dashboard-sources"></div>
+        </section>
+        <section class="dash-panel">
+          <header class="dash-panel-head"><h2>Sản phẩm bán chạy</h2></header>
+          <div class="dash-panel-body dash-panel-body--table" id="dashboard-top-products"></div>
+        </section>
+        <section class="dash-panel dash-panel--wide">
+          <header class="dash-panel-head"><h2>Chiến dịch</h2><b class="dash-panel-count" id="dashboard-active-campaigns" title="Chiến dịch đang chạy"></b></header>
+          <div class="dash-panel-body dash-panel-body--table" id="dashboard-top-campaigns"></div>
+        </section>
       </div>
     </section>
     <section id="messages-view" class="view hidden">
@@ -230,7 +260,33 @@
         </aside>
       </div>
     </section>
-    <section id="campaigns-view" class="view hidden"></section>
+    <section id="campaigns-view" class="view hidden">
+      <section class="settings-card campaigns-card">
+        <header class="settings-card-head campaigns-head">
+          <div><h1>Chiến dịch</h1></div>
+          <div class="campaigns-head-actions">
+            <small class="campaigns-synced" id="campaigns-synced"></small>
+            <label class="order-filter-control campaigns-range"><select id="campaigns-range" aria-label="Khoảng thời gian">
+              <option value="7">7 ngày</option>
+              <option value="14">14 ngày</option>
+              <option value="30">30 ngày</option>
+              <option value="90">90 ngày</option>
+            </select></label>
+            <button class="order-history-button campaigns-button" id="campaigns-sync" type="button">Đồng bộ</button>
+            <button class="order-history-button campaigns-button campaigns-button--ai" id="campaigns-ai-run" type="button">AI phân tích</button>
+          </div>
+        </header>
+        <div class="campaigns-notice hidden" id="campaigns-notice" role="status"></div>
+        <div id="campaigns-summary"></div>
+        <div class="campaigns-body">
+          <div class="campaigns-table" id="campaigns-table"></div>
+          <aside class="campaigns-ai" id="campaigns-ai" aria-label="Đề xuất AI">
+            <header class="campaigns-ai-head"><strong>Đề xuất</strong><small id="campaigns-ai-meta"></small></header>
+            <div class="campaigns-ai-body" id="campaigns-ai-body"></div>
+          </aside>
+        </div>
+      </section>
+    </section>
     <section id="orders-view" class="view hidden">
       <section class="order-stage" data-order-panel="import">
         <div class="order-import-controls">
@@ -409,7 +465,43 @@
         </div>
       </div>
     </section>
-    <section id="reports-view" class="view hidden"></section>
+    <section id="reports-view" class="view hidden">
+      <section class="settings-card reports-card">
+        <header class="settings-card-head reports-head">
+          <nav class="reports-tabs" id="reports-tabs" role="tablist" aria-label="Loại báo cáo">
+            <button type="button" role="tab" data-report-tab="sales">Doanh thu</button>
+            <button type="button" role="tab" data-report-tab="products">Sản phẩm</button>
+            <button type="button" role="tab" data-report-tab="sources">Nguồn đơn</button>
+            <button type="button" role="tab" data-report-tab="customers">Khách hàng</button>
+            <button type="button" role="tab" data-report-tab="staff">Nhân viên</button>
+            <button type="button" role="tab" data-report-tab="campaigns">Chiến dịch</button>
+            <button type="button" role="tab" data-report-tab="followUps">Bám đuổi</button>
+          </nav>
+          <div class="reports-toolbar">
+            <label class="order-filter-control reports-control"><select id="reports-preset" aria-label="Khoảng thời gian">
+              <option value="today">Hôm nay</option>
+              <option value="7d">7 ngày</option>
+              <option value="30d">30 ngày</option>
+              <option value="thisMonth">Tháng này</option>
+              <option value="lastMonth">Tháng trước</option>
+              <option value="custom">Tùy chọn</option>
+            </select></label>
+            <span class="reports-dates hidden" id="reports-dates">
+              <input class="reports-date" id="reports-from" type="date" aria-label="Từ ngày">
+              <span aria-hidden="true">–</span>
+              <input class="reports-date" id="reports-to" type="date" aria-label="Đến ngày">
+            </span>
+            <label class="order-filter-control reports-control"><select id="reports-group" aria-label="Gom theo">
+              <option value="day">Ngày</option>
+              <option value="week">Tuần</option>
+              <option value="month">Tháng</option>
+            </select></label>
+            <a class="order-history-button campaigns-button reports-export" id="reports-export" href="#" download>Xuất CSV</a>
+          </div>
+        </header>
+        <div class="reports-body" id="reports-body"></div>
+      </section>
+    </section>
     <section id="settings-view" class="view hidden">
       <div class="settings-page">
         <section class="settings-section-content" data-settings-panel="channels" aria-labelledby="channel-settings-title">
@@ -700,6 +792,22 @@
             </div>
           </section>
         </section>
+        <section class="settings-section-content hidden" data-settings-panel="staff" aria-labelledby="staff-settings-title">
+          <section class="settings-card staff-settings-card">
+            <header class="settings-card-head">
+              <div>
+                <h1 id="staff-settings-title">Nhân sự</h1>
+                <p>Tài khoản đăng nhập CRM của từng người. Người đã nghỉ thì chuyển "Đã nghỉ", không xoá để giữ lịch sử đơn và tin nhắn.</p>
+              </div>
+              <button class="price-master-add" id="staff-add" type="button">+ Thêm nhân sự</button>
+            </header>
+            <p class="staff-login-note" id="staff-login-note" hidden></p>
+            <div class="staff-table">
+              <div class="staff-row staff-table-head"><span>Họ tên</span><span>Tên đăng nhập</span><span>Vai trò</span><span>Số điện thoại</span><span title="Tên của người này trên Pancake/POS (hiện ở tin nhắn và đơn), để CRM nhận ra ai đã làm.">Tên trên Pancake/POS</span><span>Mật khẩu</span><span>Trạng thái</span><span></span></div>
+              <div id="staff-rows"><p class="channel-empty staff-empty">Đang tải nhân sự...</p></div>
+            </div>
+          </section>
+        </section>
       </div>
     </section>
   </main>
@@ -803,6 +911,7 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260922-merge-2"></script>
+  <script src="app.js?v=20260929-dashboard"></script>
+  <script src="staff.js?v=20261001-staff"></script>
 </body>
 </html>

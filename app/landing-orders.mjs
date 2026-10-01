@@ -476,7 +476,8 @@ function signature(order) {
  */
 // ===== Tự điền cho đơn khách bỏ dở =====
 
-const campaignKey = order => {
+/** utm_campaign của đơn landing (không có thì trang landing); campaigns.mjs dùng để quy đơn về chiến dịch. */
+export const campaignKey = order => {
   const match = String(order?.landing?.campaign || '').match(/utm_campaign=([^;]+)/);
   return (match ? match[1].trim() : '') || String(order?.landing?.page || '').trim();
 };

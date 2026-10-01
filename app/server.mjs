@@ -13,6 +13,11 @@ import { assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPat
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
+import { loadCampaignReport, normalizeRangeDays } from './campaigns.mjs';
+import { loadDashboard, normalizeDashboardDays } from './dashboard.mjs';
+import { loadReport, normalizeReportSection, reportCsvFileName, reportSectionCsv } from './reports.mjs';
+import { startAdInsightsSync, syncAdInsights } from './meta-ads.mjs';
+import { configureCampaignAi, generateCampaignInsights, readCampaignInsights } from './campaign-ai.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin } from './chatbot-templates.mjs';
 import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
@@ -43,7 +48,9 @@ import {
   missingMetaConfiguration,
   missingWebhookConfiguration,
   projectRoot,
-  serverConfig, pancakeConfig, isReferralOnlyPage, subscriptionFieldsFor } from './config.mjs';
+  serverConfig, pancakeConfig, isReferralOnlyPage, subscriptionFieldsFor, authConfig } from './config.mjs';
+import { createAuth, isPublicPath, parseUsers } from './auth.mjs';
+import { listStaff, saveStaffMember, staffByUsername, staffLoginUsers, STAFF_ROLES } from './staff.mjs';
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
@@ -661,6 +668,8 @@ async function readChatbotSettings() {
 }
 
 configureAddressAi({ readSettings: readChatbotSettings });
+// Cố vấn chiến dịch dùng chung mô hình với chatbot (Cài đặt → Chatbot).
+configureCampaignAi({ readSettings: readChatbotSettings });
 
 // Ghi tuần tự, tên tệp tạm duy nhất: hai yêu cầu ghi gần nhau (PUT settings + master-switch) không đè lên
 // cùng một .tmp rồi rename giữa chừng thành JSON cụt.
@@ -901,7 +910,7 @@ async function serveFile(request, response, pathname) {
     } catch { return sendJson(response, 404, { error:'Resource not found.' }); }
   }
   // Meta requires a public privacy policy URL; Caddy lets /privacy through without a password.
-  const relative = pathname === '/' ? 'index.html' : pathname === '/privacy' ? 'privacy.html' : pathname.slice(1);
+  const relative = pathname === '/' ? 'index.html' : pathname === '/privacy' ? 'privacy.html' : pathname === '/login' ? 'login.html' : pathname.slice(1);
   const filePath = path.resolve(webRoot, relative);
   if (!filePath.startsWith(path.resolve(webRoot) + path.sep)) return sendJson(response, 400, { error:'Invalid path.' });
   const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.webp':'image/webp', '.woff2':'font/woff2', '.ico':'image/x-icon' };
@@ -1002,6 +1011,69 @@ const chatbotDependencies = {
   }
 };
 
+// Tài khoản đăng nhập = tài khoản chủ shop trong .env (CRM_LOGIN_USERS) + Nhân sự đang làm đã có mật khẩu
+// (Cài đặt → Nhân sự). Map dùng chung với auth và được cập nhật tại chỗ mỗi lần lưu Nhân sự: thêm người,
+// đổi mật khẩu hay cho nghỉ có hiệu lực ngay (phiên cũ của người đổi mật khẩu/nghỉ hết hạn theo dấu vân tay).
+const envLoginUsers = parseUsers(authConfig.users);
+const loginUsers = new Map(envLoginUsers);
+async function refreshLoginUsers() {
+  const staff = await staffLoginUsers();
+  for (const name of [...loginUsers.keys()]) if (!envLoginUsers.has(name) && !staff.has(name)) loginUsers.delete(name);
+  for (const [name, hash] of staff) if (!envLoginUsers.has(name)) loginUsers.set(name, hash);
+}
+await refreshLoginUsers().catch(error => console.warn(`Không đọc được Nhân sự cho đăng nhập: ${error.message}`));
+const auth = createAuth({ users: loginUsers, secret: authConfig.sessionSecret, secure: authConfig.secureCookie });
+
+/** Caddy chạy cùng máy và ghi X-Forwarded-For; CRM chỉ nghe loopback nên tin được. */
+function clientAddress(request) {
+  return String(request.headers['x-forwarded-for'] || '').split(',')[0].trim() || request.socket.remoteAddress || '';
+}
+
+/** /api/auth/*, chặn khi chưa đăng nhập. Trả true khi đã tự trả lời request. */
+async function handleAuth(request, response, url, isWebhook) {
+  if (url.pathname === '/api/auth/session' && request.method === 'GET') {
+    const session = auth.session(request);
+    sendJson(response, session ? 200 : 401, session ? { enabled: auth.enabled, username: session.username } : { error: 'Chưa đăng nhập.' });
+    return true;
+  }
+  if (url.pathname === '/api/auth/login' && request.method === 'POST') {
+    const payload = await readBody(request);
+    const result = await auth.login({ username: payload.username, password: payload.password, clientId: clientAddress(request) });
+    if (!result.ok) {
+      if (result.status === 401 || result.status === 429) console.warn(`Đăng nhập thất bại (${clientAddress(request)}): ${String(payload.username || '').slice(0, 40)}`);
+      sendJson(response, result.status, { error: result.error });
+      return true;
+    }
+    console.log(`Đăng nhập: ${result.username} (${clientAddress(request)})`);
+    response.setHeader('Set-Cookie', result.cookie);
+    sendJson(response, 200, { username: result.username });
+    return true;
+  }
+  if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+    response.setHeader('Set-Cookie', auth.logoutCookie());
+    sendJson(response, 200, { ok: true });
+    return true;
+  }
+  const session = auth.session(request);
+  if ((url.pathname === '/login' || url.pathname === '/login.html') && request.method === 'GET') {
+    if (session && auth.enabled) {
+      response.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' });
+      response.end();
+      return true;
+    }
+    return false;
+  }
+  if (session || isWebhook || isPublicPath(url.pathname)) return false;
+  if (url.pathname.startsWith('/api/') || request.method !== 'GET') {
+    sendJson(response, 401, { error: 'Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.' });
+    return true;
+  }
+  const next = url.pathname === '/' ? '' : `?next=${encodeURIComponent(url.pathname + url.search)}`;
+  response.writeHead(302, { Location: `/login${next}`, 'Cache-Control': 'no-store' });
+  response.end();
+  return true;
+}
+
 let pancakeNoTokenWarnedAt = 0;
 const server = http.createServer(async (request, response) => {
   try {
@@ -1013,6 +1085,7 @@ const server = http.createServer(async (request, response) => {
     if (!isWebhook && isCrossSiteWrite(request)) {
       return sendJson(response, 403, { error: 'Yêu cầu đến từ trang khác nên bị từ chối.' });
     }
+    if (await handleAuth(request, response, url, isWebhook)) return;
     if (request.method === 'GET' && url.pathname === '/api/health') return sendJson(response, 200, { status:'ok', time:new Date().toISOString() });
     // Lớp trung gian của mã QR trên phiếu cảm ơn. Công khai (Caddy cho đi thẳng)
     // vì khách quét chưa đăng nhập gì cả. Đích đến do MÁY CHỦ quyết định, mã chỉ
@@ -1749,6 +1822,54 @@ const server = http.createServer(async (request, response) => {
       return undefined;
     }
     // Khách hàng: every person who has messaged or commented, one row per Page.
+    // Quản lý chiến dịch: chi tiêu quảng cáo (Marketing API, chỉ đọc) ghép với đơn thật → CPA/ROAS.
+    if (request.method === 'GET' && url.pathname === '/api/campaigns') {
+      // from/to (YYYY-MM-DD, giờ Việt Nam) nếu có thì dùng thay cho days.
+      return sendJson(response, 200, await loadCampaignReport({
+        days: normalizeRangeDays(url.searchParams.get('days')),
+        from: url.searchParams.get('from') || undefined,
+        to: url.searchParams.get('to') || undefined
+      }));
+    }
+    // Tổng quan: hôm nay / 7 / 30 ngày so với kỳ liền trước (dashboard.mjs).
+    if (request.method === 'GET' && url.pathname === '/api/dashboard') {
+      return sendJson(response, 200, await loadDashboard({ days: normalizeDashboardDays(url.searchParams.get('days')) }));
+    }
+    // Báo cáo: doanh số theo ngày/tuần/tháng, nguồn, sản phẩm, khách, nhân viên, chiến dịch (reports.mjs).
+    if (request.method === 'GET' && (url.pathname === '/api/reports' || url.pathname === '/api/reports/export.csv')) {
+      const report = await loadReport({
+        from: url.searchParams.get('from') || undefined,
+        to: url.searchParams.get('to') || undefined,
+        groupBy: url.searchParams.get('groupBy') || undefined
+      });
+      if (url.pathname === '/api/reports') return sendJson(response, 200, report);
+      const section = normalizeReportSection(url.searchParams.get('section'));
+      response.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${reportCsvFileName(section, report.range)}"`,
+        'Cache-Control': 'no-store'
+      });
+      return response.end(reportSectionCsv(report, section));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/campaigns/sync') {
+      const payload = await readBody(request);
+      const days = normalizeRangeDays(payload.days);
+      try {
+        await syncAdInsights({ days });
+      } catch (error) {
+        return sendJson(response, 502, { error: error.message });
+      }
+      return sendJson(response, 200, await loadCampaignReport({ days }));
+    }
+    if (request.method === 'GET' && url.pathname === '/api/campaigns/insights') {
+      return sendJson(response, 200, await readCampaignInsights());
+    }
+    if (request.method === 'POST' && url.pathname === '/api/campaigns/insights') {
+      const payload = await readBody(request);
+      const days = normalizeRangeDays(payload.days);
+      const report = await loadCampaignReport({ days });
+      return sendJson(response, 200, await generateCampaignInsights(report, { days }));
+    }
     if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {
       const filters = Object.fromEntries([
         'q', 'channelId', 'source', 'gender', 'label', 'activeWithin',
@@ -2020,6 +2141,34 @@ const server = http.createServer(async (request, response) => {
         gifts: (priced.gifts || []).map(gift => ({ name: gift.name, sku: gift.sku || '', weight: Number(gift.weight) || 0 })),
         lines: (priced.lines || []).map(line => ({ sku: line.sku, name: line.name, quantity: line.quantity, unitPrice: line.unitPrice, basketUnitPrice: line.basketUnitPrice, lineTotal: line.lineTotal }))
       });
+    }
+    // Cài đặt → Nhân sự. Ai cũng xem được danh sách (không có chuỗi băm mật khẩu); chỉ tài khoản chủ shop
+    // (.env) hay Quản trị mới thêm/sửa. Chưa bật đăng nhập (chưa có tài khoản nào) thì CRM vẫn sau Basic Auth
+    // của Caddy nên cho sửa. Không có xoá: cho nghỉ (active false) để giữ lịch sử.
+    if (url.pathname === '/api/staff' || url.pathname.startsWith('/api/staff/')) {
+      const session = auth.session(request);
+      const me = session?.username
+        ? (envLoginUsers.has(session.username) ? { role: 'owner' } : await staffByUsername(session.username))
+        : null;
+      const canManage = !auth.enabled || me?.role === 'owner' || me?.role === 'admin';
+      if (request.method === 'GET' && url.pathname === '/api/staff') {
+        return sendJson(response, 200, { items: await listStaff(), loginEnabled: auth.enabled, currentUser: session?.username || '', canManage, roles: STAFF_ROLES, ownerAccounts: envLoginUsers.size });
+      }
+      const staffMatch = url.pathname.match(/^\/api\/staff\/([^/]+)$/);
+      const creating = request.method === 'POST' && url.pathname === '/api/staff';
+      if (creating || (request.method === 'PATCH' && staffMatch)) {
+        if (!canManage) return sendJson(response, 403, { error: 'Chỉ Quản trị mới thêm hoặc sửa Nhân sự.' });
+        try {
+          const payload = await readBody(request);
+          const member = await saveStaffMember(payload, { id: staffMatch ? decodeURIComponent(staffMatch[1]) : '', reservedUsernames: new Set(envLoginUsers.keys()) });
+          await refreshLoginUsers();
+          console.log(`Nhân sự: ${creating ? 'thêm' : 'sửa'} ${member.username} (${member.roleName}${member.active ? '' : ', đã nghỉ'})${session?.username ? ` bởi ${session.username}` : ''}`);
+          return sendJson(response, creating ? 201 : 200, { member, items: await listStaff(), loginEnabled: auth.enabled });
+        } catch (error) {
+          return sendJson(response, error.statusCode || 400, { error: error.message });
+        }
+      }
+      return sendJson(response, 405, { error: 'Không hỗ trợ thao tác này.' });
     }
     if (url.pathname === '/api/gifts') {
       // The product list rides along so the screen can offer "không áp dụng cho" choices.
@@ -2496,6 +2645,10 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   startPancakeSync({ chatbotDependencies, processChatbotChanges: syncBotHook });
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
+  // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).
+  startAdInsightsSync();
+  if (!auth.enabled) console.warn('CRM_LOGIN_USERS trống: giao diện không hỏi đăng nhập. Chỉ để vậy khi chạy trên máy mình hoặc Caddy còn Basic Auth.');
+  else if (!authConfig.sessionSecret) console.warn('CRM_SESSION_SECRET trống: khoá phiên sinh ngẫu nhiên, khởi động lại là mọi người phải đăng nhập lại.');
   console.log(`Meta webhook callback URL: ${metaConfig.webhookUrl}`);
   const missing = missingWebhookConfiguration();
   if (missing.length) console.log(`Webhook chưa sẵn sàng, còn thiếu: ${missing.join(', ')}`);

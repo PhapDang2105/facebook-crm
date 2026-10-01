@@ -160,6 +160,24 @@ export const pancakeConfig = {
   botWhenAssigned: process.env.PANCAKE_BOT_WHEN_ASSIGNED === '1'
 };
 
+// Quản lý chiến dịch: đọc số liệu Facebook Marketing API (chỉ đọc, quyền ads_read).
+// Token riêng (System User / người dùng có quyền ads_read), khác token Page;
+// tài khoản quảng cáo ghi có hay không có tiền tố "act_" đều được.
+export function normalizeAdAccountIds(value) {
+  return [...new Set(String(value || '').split(',')
+    .map(item => item.trim().replace(/^act_/i, ''))
+    .filter(item => /^\d+$/.test(item))
+    .map(item => `act_${item}`))];
+}
+
+export const metaAdsConfig = {
+  accessToken: String(process.env.META_ADS_ACCESS_TOKEN || '').trim(),
+  accountIds: normalizeAdAccountIds(process.env.META_AD_ACCOUNT_IDS),
+  graphVersion: process.env.META_GRAPH_VERSION || 'v26.0',
+  insightsPath: process.env.AD_INSIGHTS_PATH || path.join(projectRoot, 'data', 'processed', 'ad-insights.json'),
+  syncDisabled: Boolean(process.env.META_ADS_SYNC_DISABLED)
+};
+
 export function missingMetaConfiguration() {
   return [
     !metaConfig.appId && 'META_APP_ID',
@@ -183,3 +201,22 @@ export function missingWebhookConfiguration() {
 export function isWebhookConfigured() {
   return missingWebhookConfiguration().length === 0;
 }
+
+// Quy đơn về chiến dịch: lần bấm quảng cáo gần nhất trong N ngày trước lúc đặt (mặc định 7).
+function readAttributionDays() {
+  const days = Number(process.env.CAMPAIGN_ATTRIBUTION_DAYS);
+  return Number.isFinite(days) && days > 0 ? Math.min(90, days) : 7;
+}
+
+export const campaignConfig = {
+  attributionDays: readAttributionDays()
+};
+
+// Đăng nhập CRM: CRM_LOGIN_USERS="ten:chuoi-bam,ten2:chuoi-bam" (băm bằng
+// `node app/auth.mjs hash-password`). Để trống là không hỏi đăng nhập — chỉ dùng
+// khi chạy trên máy mình hoặc đã có Basic Auth của Caddy chắn phía trước.
+export const authConfig = {
+  users: String(process.env.CRM_LOGIN_USERS || ''),
+  sessionSecret: String(process.env.CRM_SESSION_SECRET || ''),
+  secureCookie: publicBaseUrl.startsWith('https://')
+};

@@ -1,0 +1,44 @@
+/* Cài đặt → Nhân sự (web/staff.js). Dùng lại thẻ .settings-card, nút .price-master-add / .settings-save-button. */
+.staff-settings-card .settings-card-head { min-height: 72px; padding-top: 12px; padding-bottom: 12px; }
+.staff-login-note { margin: 14px 20px 0; padding: 10px 12px; color: #6b4e00; background: #fff7e0; border: 1px solid #f3dfa2; border-radius: 8px; font-size: 13px; line-height: 1.45; }
+.staff-table { margin: 16px 20px 20px; overflow: hidden; border: 1px solid #e9ebf0; border-radius: 8px; }
+.staff-row { display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(110px, 1fr) 100px 120px minmax(140px, 1.2fr) 90px 90px 60px; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #f2f4f7; font-size: 13px; }
+.staff-row:last-child { border-bottom: 0; }
+.staff-table-head { color: #475467; background: #f7f8fa; border-bottom: 1px solid #e9ebf0; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+.staff-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.staff-row.is-inactive { color: #98a2b3; background: #fcfcfd; }
+.staff-name { font-weight: 600; color: #101828; }
+.staff-row.is-inactive .staff-name { color: #98a2b3; }
+.staff-you { margin-left: 6px; padding: 1px 6px; color: #1f7a45; background: #e8f5ee; border-radius: 999px; font-size: 11px; font-style: normal; font-weight: 600; }
+.staff-username { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.staff-role { justify-self: start; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.staff-role--admin { color: #1f7a45; background: #e8f5ee; }
+.staff-role--staff { color: #475467; background: #f2f4f7; }
+.staff-muted { color: #8a91a0; }
+.staff-ok { color: #1f7a45; font-weight: 500; }
+.staff-status { color: #1f7a45; font-weight: 500; }
+.staff-status.is-off { color: #98a2b3; }
+.staff-actions { text-align: right; }
+.staff-edit { padding: 4px 10px; color: #1677ff; background: #eff4ff; border: 1px solid #c7dbff; border-radius: 6px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.staff-empty { padding: 16px 12px; }
+
+.staff-dialog { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: rgba(16, 24, 40, .45); }
+.staff-dialog-panel { width: min(520px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 20px 22px; background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(16, 24, 40, .25); }
+.staff-dialog-panel h2 { margin: 0 0 14px; color: #101828; font-size: 18px; }
+.staff-field { display: grid; gap: 5px; margin-bottom: 12px; }
+.staff-field-label { color: #344054; font-size: 13px; font-weight: 600; }
+.staff-field input, .staff-field select { width: 100%; height: 38px; padding: 0 10px; color: #101828; background: #fff; border: 1px solid #d0d5dd; border-radius: 8px; font: inherit; font-size: 14px; box-sizing: border-box; }
+.staff-field input:focus, .staff-field select:focus { outline: 2px solid #c7dbff; border-color: #1677ff; }
+.staff-field-hint { color: #8a91a0; font-size: 12px; line-height: 1.4; }
+.staff-check { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 12px; color: #344054; font-size: 13px; line-height: 1.4; }
+.staff-check input { margin-top: 2px; }
+.staff-form-error { margin: 0 0 12px; padding: 8px 10px; color: #b42318; background: #fef3f2; border: 1px solid #fecdca; border-radius: 8px; font-size: 13px; }
+.staff-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.staff-cancel { padding: 9px 16px; color: #344054; background: #fff; border: 1px solid #d0d5dd; border-radius: 8px; font: inherit; font-size: 12.6px; font-weight: 600; cursor: pointer; }
+
+@media (max-width: 1100px) {
+  .staff-table-head { display: none; }
+  .staff-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+  .staff-row > span:not(.staff-name):not(.staff-actions) { grid-column: 1; white-space: normal; }
+  .staff-actions { grid-column: 2; grid-row: 1; }
+}

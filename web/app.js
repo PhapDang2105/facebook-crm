@@ -1,3 +1,22 @@
+// Phiên đăng nhập hết hạn giữa chừng: mọi API trả 401, đưa về trang đăng nhập
+// (giữ trang đang xem để quay lại). Bọc fetch một lần cho mọi lời gọi.
+const nativeFetch = window.fetch.bind(window);
+let redirectingToLogin = false;
+function redirectToLogin() {
+  if (redirectingToLogin) return;
+  redirectingToLogin = true;
+  const here = location.pathname + location.search + location.hash;
+  location.assign(here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
+}
+window.fetch = async (...args) => {
+  const response = await nativeFetch(...args);
+  if (response.status === 401) {
+    const target = new URL(args[0] instanceof Request ? args[0].url : String(args[0]), location.href);
+    if (target.origin === location.origin && target.pathname.startsWith('/api/') && !target.pathname.startsWith('/api/auth/')) redirectToLogin();
+  }
+  return response;
+};
+
 const sidebarToggle = document.querySelector('#sidebar-toggle');
 const viewNames = ['dashboard', 'messages', 'campaigns', 'orders', 'customers', 'shipping', 'reports', 'settings'];
 const views = new Map(viewNames.map(name => [name, document.querySelector(`#${name}-view`)]));
@@ -109,6 +128,18 @@ const customerOrderReset = document.querySelector('#customer-order-reset');
 const customerOrderSubmit = document.querySelector('#customer-order-submit');
 const topbarUserAvatar = document.querySelector('#topbar-user-avatar');
 const topbarUserName = document.querySelector('#topbar-user-name');
+const logoutButton = document.querySelector('#logout-button');
+
+fetch('/api/auth/session').then(response => response.ok ? response.json() : null).then(session => {
+  if (!session?.enabled || !logoutButton) return;
+  logoutButton.classList.remove('hidden');
+  logoutButton.title = `Đăng xuất (${session.username})`;
+}).catch(() => {});
+logoutButton?.addEventListener('click', async () => {
+  logoutButton.disabled = true;
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  location.assign('/login');
+});
 const productCreateButton = document.querySelector('#product-create-button');
 const productSearch = document.querySelector('#product-search');
 const productCount = document.querySelector('#product-count');
@@ -842,6 +873,9 @@ function showView(name) {
     if (!sharedProducts.length) loadProducts().then(() => renderOrderData()).catch(() => {});
   }
   if (name === 'customers') loadCustomers();
+  if (name === 'campaigns') loadCampaigns();
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'reports') loadReports();
   if (name === 'settings') loadPosChannel();
 }
 
@@ -1401,6 +1435,1166 @@ function resetCustomersView() {
   loadCustomers();
 }
 
+// ---------------------------------------------------------------------------
+// Quản lý chiến dịch. Số liệu chi phí lấy từ Marketing API, đơn và doanh thu
+// lấy từ đơn CRM gán theo chiến dịch (Meta hoặc utm/landing). Đề xuất AI chỉ
+// là gợi ý để người bán tự quyết — không có nút nào đụng vào tài khoản quảng cáo.
+const campaignsRange = document.querySelector('#campaigns-range');
+const campaignsSyncButton = document.querySelector('#campaigns-sync');
+const campaignsAiButton = document.querySelector('#campaigns-ai-run');
+const campaignsSynced = document.querySelector('#campaigns-synced');
+const campaignsNotice = document.querySelector('#campaigns-notice');
+const campaignsSummaryBox = document.querySelector('#campaigns-summary');
+const campaignsTable = document.querySelector('#campaigns-table');
+const campaignsAiBody = document.querySelector('#campaigns-ai-body');
+const campaignsAiMeta = document.querySelector('#campaigns-ai-meta');
+
+let campaignsRequestId = 0;
+let campaignsInsightsRequestId = 0;
+let campaignsReport = null;
+let campaignsInsights = null;
+let campaignsSortKey = 'spend';
+let campaignsSortDir = -1;
+let campaignsSyncing = false;
+let campaignsAnalyzing = false;
+// Bấm một chiến dịch ở Tổng quan: mở màn này và tô dòng đó khi số liệu về.
+let campaignsPendingHighlight = '';
+
+const campaignsColumns = [
+  { key: 'name', label: 'Chiến dịch' },
+  { key: 'dailyBudget', label: 'Ngân sách/ngày', num: true },
+  { key: 'spend', label: 'Chi phí', num: true },
+  { key: 'impressions', label: 'Hiển thị', num: true },
+  { key: 'clicks', label: 'Nhấp', num: true },
+  { key: 'messages', label: 'Tin nhắn', num: true },
+  { key: 'orders', label: 'Đơn', num: true },
+  { key: 'revenue', label: 'Doanh thu', num: true },
+  { key: 'cpa', label: 'CPA', num: true },
+  { key: 'roas', label: 'ROAS', num: true },
+  { key: 'daily', label: 'Chi phí / doanh thu', sortable: false }
+];
+
+const campaignInsightKinds = [
+  { kind: 'pause', label: 'Tạm dừng' },
+  { kind: 'reduce', label: 'Giảm ngân sách' },
+  { kind: 'scale', label: 'Tăng ngân sách' },
+  { kind: 'creative', label: 'Đổi nội dung QC' },
+  { kind: 'watch', label: 'Theo dõi' }
+];
+
+function campaignsDays() {
+  const days = Number(campaignsRange?.value);
+  return [7, 14, 30, 90].includes(days) ? days : 7;
+}
+
+function campaignNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number ? new Intl.NumberFormat('vi-VN').format(Math.round(number)) : '—';
+}
+
+function campaignRoasText(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+  return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 }).format(Number(value))}x`;
+}
+
+function campaignMoneyOrDash(value) {
+  return value === null || value === undefined ? '—' : formatCustomerMoney(value);
+}
+
+/** Mốc đồng bộ và mốc phân tích có thể là số mili giây hoặc chuỗi ISO. Trong
+ *  ngày thì đếm phút/giờ — "Hôm nay" không cho biết số đã cũ tới đâu. */
+function campaignsAgo(value) {
+  const at = typeof value === 'number' ? value : Date.parse(value);
+  if (!Number.isFinite(at) || !at) return '';
+  const minutes = Math.floor((Date.now() - at) / 60000);
+  if (minutes < 1) return 'vừa xong';
+  if (minutes < 60) return `${minutes} phút trước`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} giờ trước`;
+  return timeSince(at).toLowerCase();
+}
+
+function campaignStatusChip(status) {
+  const key = String(status || '').toUpperCase();
+  if (!key) return '';
+  const label = key === 'ACTIVE' ? 'Đang chạy' : key.includes('PAUSED') ? 'Tạm dừng' : key === 'ARCHIVED' || key === 'DELETED' ? 'Đã tắt' : key;
+  const tone = key === 'ACTIVE' ? 'is-on' : 'is-off';
+  return `<span class="campaign-chip ${tone}">${escapeHtml(label)}</span>`;
+}
+
+/** ROAS tô nhẹ theo mức trung bình của cả tài khoản trong khoảng đang xem:
+ *  cao hơn hẳn thì xanh, thấp hẳn thì đỏ nhạt, quanh mức trung bình để nguyên. */
+function campaignRoasTone(roas, average) {
+  if (roas === null || roas === undefined || !Number.isFinite(Number(roas)) || !Number(average)) return '';
+  if (Number(roas) >= Number(average) * 1.2) return 'is-good';
+  if (Number(roas) <= Number(average) * 0.7) return 'is-bad';
+  return '';
+}
+
+/** Đường nhỏ chi phí (xám) và doanh thu (màu nhấn) theo ngày, chung một thang. */
+function campaignSparkline(daily) {
+  const points = Array.isArray(daily) ? daily : [];
+  if (points.length < 2) return '<span class="customer-never">—</span>';
+  const width = 110;
+  const height = 30;
+  const max = Math.max(1, ...points.map(point => Math.max(Number(point.spend) || 0, Number(point.revenue) || 0)));
+  const line = key => points.map((point, index) => {
+    const x = (index / (points.length - 1)) * (width - 2) + 1;
+    const y = height - 1 - ((Number(point[key]) || 0) / max) * (height - 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const spend = points.reduce((sum, point) => sum + (Number(point.spend) || 0), 0);
+  const revenue = points.reduce((sum, point) => sum + (Number(point.revenue) || 0), 0);
+  const title = `Chi phí ${formatCustomerMoney(spend)} · Doanh thu ${formatCustomerMoney(revenue)}`;
+  return `<svg class="campaign-spark" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${escapeHtml(title)}"><title>${escapeHtml(title)}</title>`
+    + `<polyline class="campaign-spark-spend" points="${line('spend')}"></polyline>`
+    + `<polyline class="campaign-spark-revenue" points="${line('revenue')}"></polyline></svg>`;
+}
+
+function renderCampaignsSummary(report) {
+  if (!campaignsSummaryBox) return;
+  const totals = report.totals || {};
+  const unattributed = report.unattributed || {};
+  const figures = [
+    { label: 'Chi phí', value: shortCustomerMoney(totals.spend) },
+    { label: 'Doanh thu', value: shortCustomerMoney(totals.revenue) },
+    { label: 'Đơn', value: campaignNumber(totals.orders) },
+    { label: 'CPA', value: totals.cpa === null || totals.cpa === undefined ? '—' : shortCustomerMoney(totals.cpa), hint: 'Chi phí chia cho số đơn' },
+    { label: 'ROAS', value: campaignRoasText(totals.roas), hint: 'Doanh thu chia cho chi phí' },
+    { label: 'Tin nhắn', value: campaignNumber(totals.messages) }
+  ];
+  const loose = Number(unattributed.orders) || 0;
+  // Số chính là số gán được cho chiến dịch; "Tổng tất cả đơn" gộp cả đơn chưa gán
+  // để đối chiếu với tổng chi phí quảng cáo (ROAS toàn tài khoản).
+  const blended = report.blended && typeof report.blended === 'object' ? report.blended : null;
+  const blendedTitle = blended ? [
+    `Tất cả đơn trong khoảng: ${statCount(blended.orders)} đơn`,
+    `Doanh thu ${statMoney(blended.revenue)}`,
+    `Chi phí ${statMoney(blended.spend)}`,
+    `CPA ${statMoney(blended.cpa)}`,
+    `ROAS ${campaignRoasText(blended.roas)}`
+  ].join(' · ') : '';
+  const blendedHead = blended ? `<th title="${escapeHtml(blendedTitle)}">Tổng tất cả đơn</th>` : '';
+  const blendedCell = blended ? `<td class="campaigns-summary-loose" title="${escapeHtml(blendedTitle)}">${escapeHtml(`${statCount(blended.orders)} đơn · ${statShortMoney(blended.revenue)} · ROAS ${campaignRoasText(blended.roas)}`)}</td>` : '';
+  campaignsSummaryBox.className = 'customers-summary campaigns-summary';
+  campaignsSummaryBox.innerHTML = `<table>
+    <thead><tr>${figures.map(figure => `<th${figure.hint ? ` title="${escapeHtml(figure.hint)}"` : ''}>${escapeHtml(figure.label)}</th>`).join('')}<th title="Đơn trong khoảng này không gắn được với chiến dịch nào">Chưa gán chiến dịch</th>${blendedHead}</tr></thead>
+    <tbody><tr>${figures.map(figure => `<td>${escapeHtml(figure.value)}</td>`).join('')}<td class="campaigns-summary-loose">${loose
+      ? `${escapeHtml(campaignNumber(loose))} đơn · ${escapeHtml(shortCustomerMoney(unattributed.revenue))}`
+      : '—'}</td>${blendedCell}</tr></tbody>
+  </table>`;
+}
+
+function renderCampaignsNotice(ads) {
+  if (!campaignsNotice) return;
+  const connected = Boolean(ads?.connected);
+  campaignsNotice.classList.toggle('hidden', connected && !ads?.error);
+  if (connected && !ads?.error) {
+    campaignsNotice.textContent = '';
+    return;
+  }
+  const head = connected ? 'Marketing API lỗi' : 'Marketing API chưa kết nối';
+  campaignsNotice.innerHTML = `<strong>${head}</strong>${ads?.error ? `<span>${escapeHtml(ads.error)}</span>` : ''}`;
+}
+
+function sortedCampaigns(list) {
+  return sortRowsBy(list, campaignsSortKey, campaignsSortDir);
+}
+
+function campaignsHeadHtml() {
+  return sortableHeadHtml(campaignsColumns, campaignsSortKey, campaignsSortDir);
+}
+
+function campaignRowHtml(campaign, averageRoas) {
+  const source = campaign.source === 'meta' ? 'Meta' : 'UTM';
+  const tone = campaignRoasTone(campaign.roas, averageRoas);
+  return `<tr data-campaign-id="${escapeHtml(campaign.id)}">
+    <td class="campaign-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong><span class="campaign-chips">${campaignStatusChip(campaign.status)}<span class="campaign-chip is-source">${source}</span></span></td>
+    <td class="is-num">${escapeHtml(campaignMoneyOrDash(campaign.dailyBudget))}</td>
+    <td class="is-num">${escapeHtml(formatCustomerMoney(campaign.spend))}</td>
+    <td class="is-num">${escapeHtml(campaignNumber(campaign.impressions))}</td>
+    <td class="is-num">${escapeHtml(campaignNumber(campaign.clicks))}</td>
+    <td class="is-num">${escapeHtml(campaignNumber(campaign.messages))}</td>
+    <td class="is-num">${escapeHtml(campaignNumber(campaign.orders))}</td>
+    <td class="is-num">${escapeHtml(formatCustomerMoney(campaign.revenue))}</td>
+    <td class="is-num">${escapeHtml(campaignMoneyOrDash(campaign.cpa))}</td>
+    <td class="is-num campaign-roas ${tone}">${escapeHtml(campaignRoasText(campaign.roas))}</td>
+    <td class="campaign-trend">${campaignSparkline(campaign.daily)}</td>
+  </tr>`;
+}
+
+function renderCampaignsTable() {
+  if (!campaignsTable) return;
+  const list = Array.isArray(campaignsReport?.campaigns) ? campaignsReport.campaigns : [];
+  if (!list.length) {
+    renderEmptyState(campaignsTable, campaignsReport?.ads?.connected
+      ? 'Chưa có chiến dịch nào trong khoảng này.'
+      : 'Chưa có chiến dịch nào. Kết nối Marketing API hoặc gắn utm cho landing page.');
+    return;
+  }
+  campaignsTable.classList.remove('is-empty');
+  const averageRoas = campaignsReport?.totals?.roas;
+  campaignsTable.innerHTML = `<table><thead><tr>${campaignsHeadHtml()}</tr></thead><tbody>${
+    sortedCampaigns(list).map(campaign => campaignRowHtml(campaign, averageRoas)).join('')}</tbody></table>`;
+}
+
+function renderCampaignsSynced() {
+  if (!campaignsSynced) return;
+  const ago = campaignsAgo(campaignsReport?.ads?.syncedAt);
+  campaignsSynced.textContent = ago ? `Cập nhật ${ago}` : '';
+}
+
+function renderCampaignsReport(report) {
+  campaignsReport = report || {};
+  renderCampaignsNotice(campaignsReport.ads);
+  renderCampaignsSummary(campaignsReport);
+  renderCampaignsTable();
+  renderCampaignsSynced();
+  if (campaignsPendingHighlight) {
+    const target = campaignsPendingHighlight;
+    campaignsPendingHighlight = '';
+    highlightCampaignRow(target, { quiet: true });
+  }
+}
+
+function renderCampaignsInsights() {
+  if (!campaignsAiBody) return;
+  const insights = campaignsInsights;
+  if (campaignsAiMeta) {
+    const parts = insights ? [campaignsAgo(insights.generatedAt), insights.model, insights.days ? `${insights.days} ngày` : ''].filter(Boolean) : [];
+    campaignsAiMeta.textContent = parts.join(' · ');
+  }
+  if (campaignsAnalyzing && !insights) {
+    campaignsAiBody.classList.remove('is-empty');
+    campaignsAiBody.innerHTML = '<p class="campaigns-ai-wait">Đang phân tích…</p>';
+    return;
+  }
+  const actions = Array.isArray(insights?.actions) ? insights.actions : [];
+  if (!insights || (!insights.summary && !actions.length)) {
+    renderEmptyState(campaignsAiBody, 'Chưa có phân tích. Bấm AI phân tích.');
+    return;
+  }
+  campaignsAiBody.classList.remove('is-empty');
+  const groups = campaignInsightKinds.map(({ kind, label }) => {
+    const items = actions.filter(action => action.kind === kind);
+    if (!items.length) return '';
+    return `<section class="campaigns-ai-group campaigns-ai-group--${kind}"><h3>${label}<b>${items.length}</b></h3><ul>${items.map(action => `<li><button type="button" data-campaign-target="${escapeHtml(action.campaignId || '')}">
+      <strong>${escapeHtml(action.campaignName || 'Chiến dịch')}</strong>
+      <span>${escapeHtml(action.reason || '')}</span>
+      ${action.confidence ? `<small>Độ tin cậy: ${escapeHtml(action.confidence)}</small>` : ''}
+    </button></li>`).join('')}</ul></section>`;
+  }).join('');
+  campaignsAiBody.innerHTML = `${insights.summary ? `<p class="campaigns-ai-summary">${escapeHtml(insights.summary)}</p>` : ''}${groups}`;
+}
+
+function setCampaignsBusy(button, busy, busyLabel, idleLabel) {
+  if (!button) return;
+  button.disabled = busy;
+  button.classList.toggle('is-busy', busy);
+  button.textContent = busy ? busyLabel : idleLabel;
+}
+
+async function loadCampaigns() {
+  if (!campaignsTable) return;
+  const requestId = ++campaignsRequestId;
+  if (!campaignsReport) campaignsTable.innerHTML = '';
+  try {
+    const report = await readApiResponse(await fetch(`/api/campaigns?days=${campaignsDays()}`));
+    if (requestId !== campaignsRequestId) return;
+    renderCampaignsReport(report);
+  } catch (error) {
+    if (requestId !== campaignsRequestId) return;
+    renderEmptyState(campaignsTable, error.message || 'Chưa tải được số liệu chiến dịch.');
+  }
+  if (!campaignsInsights && !campaignsAnalyzing) loadCampaignInsights();
+}
+
+async function loadCampaignInsights() {
+  if (!campaignsAiBody) return;
+  const requestId = ++campaignsInsightsRequestId;
+  try {
+    const insights = await readApiResponse(await fetch('/api/campaigns/insights'));
+    if (requestId !== campaignsInsightsRequestId) return;
+    campaignsInsights = insights && typeof insights === 'object' && (insights.summary || insights.actions) ? insights : null;
+  } catch {
+    if (requestId !== campaignsInsightsRequestId) return;
+    campaignsInsights = null;
+  }
+  renderCampaignsInsights();
+}
+
+async function syncCampaigns() {
+  if (campaignsSyncing) return;
+  campaignsSyncing = true;
+  setCampaignsBusy(campaignsSyncButton, true, 'Đang đồng bộ…', 'Đồng bộ');
+  const requestId = ++campaignsRequestId;
+  try {
+    const report = await readApiResponse(await fetch('/api/campaigns/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ days: campaignsDays() })
+    }));
+    if (requestId === campaignsRequestId) renderCampaignsReport(report);
+    if (report?.ads?.error) showToast(report.ads.error);
+    else showToast('Đã đồng bộ số liệu chiến dịch.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa đồng bộ được chiến dịch.');
+  } finally {
+    campaignsSyncing = false;
+    setCampaignsBusy(campaignsSyncButton, false, '', 'Đồng bộ');
+  }
+}
+
+async function analyzeCampaigns() {
+  if (campaignsAnalyzing) return;
+  campaignsAnalyzing = true;
+  setCampaignsBusy(campaignsAiButton, true, 'Đang phân tích…', 'AI phân tích');
+  const requestId = ++campaignsInsightsRequestId;
+  renderCampaignsInsights();
+  try {
+    const insights = await readApiResponse(await fetch('/api/campaigns/insights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ days: campaignsDays() })
+    }));
+    if (requestId === campaignsInsightsRequestId) campaignsInsights = insights || null;
+  } catch (error) {
+    showToast(error.message || 'AI chưa phân tích được chiến dịch.');
+  } finally {
+    campaignsAnalyzing = false;
+    setCampaignsBusy(campaignsAiButton, false, '', 'AI phân tích');
+    renderCampaignsInsights();
+  }
+}
+
+function highlightCampaignRow(campaignId, { quiet = false } = {}) {
+  if (!campaignsTable || !campaignId) return;
+  const row = [...campaignsTable.querySelectorAll('tr[data-campaign-id]')].find(item => item.dataset.campaignId === campaignId);
+  if (!row) {
+    if (!quiet) showToast('Chiến dịch này không có trong khoảng đang xem.', 'error', 2500);
+    return;
+  }
+  campaignsTable.querySelectorAll('tr.is-highlight').forEach(item => item.classList.remove('is-highlight'));
+  row.classList.add('is-highlight');
+  row.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+  window.setTimeout(() => row.classList.remove('is-highlight'), 2400);
+}
+
+campaignsRange?.addEventListener('change', () => {
+  // Đổi khoảng thời gian là đổi toàn bộ con số: đợi số mới, không sắp lại số cũ.
+  loadCampaigns();
+});
+campaignsSyncButton?.addEventListener('click', syncCampaigns);
+campaignsAiButton?.addEventListener('click', analyzeCampaigns);
+campaignsTable?.addEventListener('click', event => {
+  const head = event.target.closest('th[data-sort]');
+  if (!head) return;
+  const key = head.dataset.sort;
+  if (campaignsSortKey === key) campaignsSortDir *= -1;
+  else {
+    campaignsSortKey = key;
+    campaignsSortDir = key === 'name' ? 1 : -1;
+  }
+  renderCampaignsTable();
+});
+campaignsAiBody?.addEventListener('click', event => {
+  const target = event.target.closest('[data-campaign-target]');
+  if (target) highlightCampaignRow(target.dataset.campaignTarget);
+});
+
+// ---------------------------------------------------------------------------
+// Số liệu dùng chung cho Tổng quan, Báo cáo và Quản lý chiến dịch: định dạng số,
+// mũi tên so kỳ trước, bảng sắp xếp được và biểu đồ SVG nội tuyến (không thư viện).
+function isBlankNumber(value) {
+  return value === null || value === undefined || value === '' || !Number.isFinite(Number(value));
+}
+
+/** Số đếm: 0 vẫn là "0" (khác campaignNumber); rỗng mới là "—". */
+function statCount(value) {
+  return isBlankNumber(value) ? '—' : new Intl.NumberFormat('vi-VN').format(Math.round(Number(value)));
+}
+
+function statMoney(value) {
+  return isBlankNumber(value) ? '—' : `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(value)))}đ`;
+}
+
+function statShortMoney(value) {
+  if (isBlankNumber(value)) return '—';
+  const amount = Math.round(Number(value));
+  const size = Math.abs(amount);
+  const short = (divisor, unit) => `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(amount / divisor)} ${unit}`;
+  if (size >= 1000000000) return short(1000000000, 'tỷ');
+  if (size >= 1000000) return short(1000000, 'triệu');
+  return statMoney(amount);
+}
+
+/** Tỷ lệ API trả dạng 0–1; giá trị lớn hơn 1 coi như đã là phần trăm. */
+function ratioToPercent(value) {
+  if (isBlankNumber(value)) return null;
+  const number = Number(value);
+  return Math.abs(number) > 1 ? number : number * 100;
+}
+
+function statPercent(value) {
+  const percent = ratioToPercent(value);
+  return percent === null ? '—' : `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(percent)}%`;
+}
+
+/** Mũi tên so kỳ trước: tăng xanh, giảm đỏ; chi phí thì trung tính vì tăng hay
+ *  giảm đều không tự nó là tốt hay xấu. */
+function statDeltaHtml(value, prev, { neutral = false, format = statCount } = {}) {
+  if (isBlankNumber(value) || isBlankNumber(prev) || !Number(prev)) return '';
+  const change = Math.round(((Number(value) - Number(prev)) / Math.abs(Number(prev))) * 100);
+  const tone = neutral || !change ? 'is-flat' : change > 0 ? 'is-up' : 'is-down';
+  const arrow = change > 0 ? '▲ ' : change < 0 ? '▼ ' : '';
+  return `<span class="stat-delta ${tone}" title="Kỳ trước: ${escapeHtml(format(prev))}">${arrow}${new Intl.NumberFormat('vi-VN').format(Math.abs(change))}%</span>`;
+}
+
+function statCardHtml({ label, value, title = '', delta = '' }) {
+  return `<article class="stat-card"><p>${escapeHtml(label)}</p><strong${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(value)}</strong>${delta}</article>`;
+}
+
+/** Giá trị để sắp xếp: chuỗi không phải số so theo tiếng Việt, số rỗng luôn nằm cuối. */
+function sortCellValue(value) {
+  if (typeof value === 'string' && !/^-?\d+(\.\d+)?$/.test(value.trim())) return value;
+  return isBlankNumber(value) ? null : Number(value);
+}
+
+function sortRowsBy(list, key, dir) {
+  return [...list].sort((first, second) => {
+    const a = sortCellValue(first?.[key]);
+    const b = sortCellValue(second?.[key]);
+    if (a === null && b === null) return 0;
+    if (a === null) return 1;
+    if (b === null) return -1;
+    if (typeof a === 'string' || typeof b === 'string') return dir * String(a).localeCompare(String(b), 'vi');
+    return dir * (a - b);
+  });
+}
+
+/** Hàng tiêu đề bấm để sắp xếp — dùng chung cho bảng chiến dịch và bảng báo cáo. */
+function sortableHeadHtml(columns, sortKey, sortDir) {
+  return columns.map(column => {
+    const sortable = column.sortable !== false;
+    const sorted = sortKey === column.key;
+    const icon = !sortable ? '' : `<img class="customers-sort-icon" src="${!sorted
+      ? '/assets/icons/customers/sort.svg'
+      : sortDir < 0 ? '/assets/icons/customers/sort-down.svg' : '/assets/icons/customers/sort-up.svg'}" alt="">`;
+    const classes = [column.num ? 'is-num' : '', sortable ? 'is-sortable' : '', sorted ? 'is-sorted' : ''].filter(Boolean).join(' ');
+    return `<th class="${classes}"${sortable ? ` data-sort="${column.key}" title="Bấm để sắp xếp"` : ''}${sorted ? ` aria-sort="${sortDir < 0 ? 'descending' : 'ascending'}"` : ''}><span class="customers-th">${column.label}${icon}</span></th>`;
+  }).join('');
+}
+
+/** Mức trần tròn cho trục dọc: 1, 2, 2,5, 5 × 10^n. */
+function niceChartMax(value) {
+  const max = Math.max(1, Number(value) || 0);
+  const power = 10 ** Math.floor(Math.log10(max));
+  for (const step of [1, 2, 2.5, 5, 10]) if (step * power >= max) return step * power;
+  return 10 * power;
+}
+
+/** Dd/mm từ YYYY-MM-DD. */
+function shortDateLabel(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ''));
+  return match ? `${match[3]}/${match[2]}` : String(value || '');
+}
+
+function chartLegendHtml(items) {
+  return `<span class="chart-legend">${items.map(item => `<span><i class="${item.cls}"></i>${escapeHtml(item.label)}</span>`).join('')}</span>`;
+}
+
+/**
+ * Biểu đồ cột theo kỳ (cột có thể chồng nhiều loạt) kèm một đường, chung một
+ * thang. SVG co giãn theo khung (preserveAspectRatio none) nên chữ trục đặt bằng
+ * HTML bên ngoài; mỗi kỳ có một ô trong suốt mang <title> làm chú thích khi rê chuột.
+ */
+function columnChartHtml(rows, { bars, line = null, label, tip, axis = statShortMoney, ariaLabel = '' }) {
+  const width = 1000;
+  const height = 240;
+  const stack = row => bars.reduce((sum, bar) => sum + Math.max(0, Number(row[bar.key]) || 0), 0);
+  const peak = Math.max(0, ...rows.map(row => Math.max(stack(row), line ? Math.max(0, Number(row[line.key]) || 0) : 0)));
+  const top = niceChartMax(peak);
+  const slot = width / rows.length;
+  const barWidth = Math.max(1, Math.min(slot * 0.62, 60));
+  const scale = value => (Math.max(0, Number(value) || 0) / top) * height;
+  const grid = [0.5, 1].map(part => `<line class="col-chart-grid" x1="0" x2="${width}" y1="${(height - part * height).toFixed(1)}" y2="${(height - part * height).toFixed(1)}"></line>`).join('');
+  const columns = rows.map((row, index) => {
+    const x = index * slot + (slot - barWidth) / 2;
+    let y = height;
+    return bars.map(bar => {
+      const size = scale(row[bar.key]);
+      if (!size) return '';
+      y -= size;
+      return `<rect class="${bar.cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${size.toFixed(1)}"></rect>`;
+    }).join('');
+  }).join('');
+  const path = line && rows.length > 1
+    ? `<polyline class="${line.cls}" points="${rows.map((row, index) => `${(index * slot + slot / 2).toFixed(1)},${(height - scale(row[line.key])).toFixed(1)}`).join(' ')}"></polyline>`
+    : '';
+  const hits = rows.map((row, index) => `<rect class="col-chart-hit" x="${(index * slot).toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${height}"><title>${escapeHtml(tip(row))}</title></rect>`).join('');
+  const step = Math.max(1, Math.ceil(rows.length / 7));
+  const ticks = rows.map((row, index) => `<span>${index % step === 0 ? escapeHtml(label(row)) : ''}</span>`).join('');
+  return `<div class="col-chart">
+    <div class="col-chart-plot">
+      ${peak > 0 ? `<span class="col-chart-y" style="top:0">${escapeHtml(axis(top))}</span>
+      <span class="col-chart-y" style="top:50%">${escapeHtml(axis(top / 2))}</span>` : ""}
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(ariaLabel)}">${grid}<line class="col-chart-base" x1="0" x2="${width}" y1="${height}" y2="${height}"></line>${columns}${path}${hits}</svg>
+    </div>
+    <div class="col-chart-x" style="grid-template-columns:repeat(${rows.length},minmax(0,1fr))">${ticks}</div>
+  </div>`;
+}
+
+/** Thanh ngang so sánh các mục (nguồn đơn, sản phẩm, nhân viên). */
+function hbarListHtml(items, { value, label, detail, title = null }) {
+  const max = Math.max(1, ...items.map(item => Math.max(0, Number(value(item)) || 0)));
+  return `<ul class="hbar-list">${items.map(item => {
+    const width = (Math.max(0, Number(value(item)) || 0) / max) * 100;
+    const name = label(item);
+    return `<li${title ? ` title="${escapeHtml(title(item))}"` : ''}><span class="hbar-label" title="${escapeHtml(name)}">${escapeHtml(name)}</span><span class="hbar-value">${escapeHtml(detail(item))}</span><span class="hbar-track"><i style="width:${width.toFixed(1)}%"></i></span></li>`;
+  }).join('')}</ul>`;
+}
+
+function panelEmptyHtml(message) {
+  return `<p class="panel-empty">${escapeHtml(message)}</p>`;
+}
+
+function readStoredValue(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredValue(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Trình duyệt chặn lưu trữ: chỉ mất phần ghi nhớ lựa chọn.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tổng quan: một lượt /api/dashboard cho cả màn — thẻ số so kỳ trước, doanh thu
+// và chi phí theo ngày, nguồn đơn, sản phẩm và chiến dịch dẫn đầu, việc cần làm.
+// Tự làm mới mỗi phút khi màn đang mở.
+const dashboardView = document.querySelector('#dashboard-view');
+const dashboardRange = document.querySelector('#dashboard-range');
+const dashboardNotice = document.querySelector('#dashboard-notice');
+const dashboardKpis = document.querySelector('#dashboard-kpis');
+const dashboardTrendPanel = document.querySelector('#dashboard-trend-panel');
+const dashboardTrend = document.querySelector('#dashboard-trend');
+const dashboardTodoPanel = document.querySelector('#dashboard-todo-panel');
+const dashboardTodo = document.querySelector('#dashboard-todo');
+const dashboardSources = document.querySelector('#dashboard-sources');
+const dashboardTopProducts = document.querySelector('#dashboard-top-products');
+const dashboardTopCampaigns = document.querySelector('#dashboard-top-campaigns');
+const dashboardActiveCampaigns = document.querySelector('#dashboard-active-campaigns');
+const dashboardDaysKey = 'crm-dashboard-days';
+const dashboardRefreshMs = 60000;
+
+const dashboardStoredDays = readStoredValue(dashboardDaysKey, '7');
+let dashboardDaysChoice = ['1', '7', '30'].includes(dashboardStoredDays) ? dashboardStoredDays : '7';
+let dashboardRequestId = 0;
+let dashboardData = null;
+
+const dashboardKpiList = [
+  { key: 'revenue', label: 'Doanh thu', format: statShortMoney, full: statMoney },
+  { key: 'orders', label: 'Đơn', format: statCount },
+  { key: 'aov', label: 'Giá trị TB/đơn', format: statShortMoney, full: statMoney },
+  { key: 'spend', label: 'Chi phí QC', format: statShortMoney, full: statMoney, neutral: true },
+  { key: 'roas', label: 'ROAS', format: campaignRoasText },
+  { key: 'newCustomers', label: 'Khách mới', format: statCount },
+  { key: 'conversations', label: 'Hội thoại', format: statCount },
+  { key: 'conversionRate', label: 'Tỷ lệ chốt', format: statPercent }
+];
+
+const dashboardTodoItems = [
+  { key: 'ordersToReview', label: 'Đơn cần duyệt', open: () => showOrderStage('process') },
+  { key: 'ordersIncomplete', label: 'Đơn thiếu thông tin', open: () => showOrderStage('process') },
+  { key: 'conversationsNeedStaff', label: 'Hội thoại cần người xử lý', open: () => showView('messages') },
+  { key: 'followUpQueue', label: 'Khách chờ gửi bám đuổi', open: openFollowUpQueue }
+];
+
+function dashboardDays() {
+  return Number(dashboardDaysChoice) || 7;
+}
+
+/** Hàng chờ bám đuổi nằm ở Cài đặt → Thiết lập chatbot → thẻ Chung. */
+function openFollowUpQueue() {
+  showSettingsSection('chatbot');
+  document.querySelector('[data-chatbot-workspace="general"]')?.click();
+  window.requestAnimationFrame(() => document.querySelector('#chatbot-follow-ups')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+}
+
+function openCampaignFromDashboard(campaignId) {
+  campaignsPendingHighlight = campaignId || '';
+  showView('campaigns');
+}
+
+function renderDashboardRange() {
+  dashboardRange?.querySelectorAll('[data-dashboard-days]').forEach(button => {
+    const active = button.dataset.dashboardDays === dashboardDaysChoice;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function renderDashboardKpis(kpis = {}) {
+  if (!dashboardKpis) return;
+  dashboardKpis.classList.remove('is-empty');
+  dashboardKpis.innerHTML = dashboardKpiList.map(kpi => {
+    const figure = kpis[kpi.key] || {};
+    const full = kpi.full || kpi.format;
+    return statCardHtml({
+      label: kpi.label,
+      value: kpi.format(figure.value),
+      title: full(figure.value),
+      delta: statDeltaHtml(figure.value, figure.prev, { neutral: kpi.neutral, format: full })
+    });
+  }).join('');
+}
+
+function renderDashboardTrend(daily) {
+  if (!dashboardTrend) return;
+  const rows = Array.isArray(daily) ? daily : [];
+  // Một ngày thì không có xu hướng để xem: ẩn khung, các khối còn lại giãn ra.
+  dashboardTrendPanel?.classList.toggle('hidden', rows.length < 2);
+  if (rows.length < 2) {
+    dashboardTrend.innerHTML = '';
+    return;
+  }
+  dashboardTrend.innerHTML = columnChartHtml(rows, {
+    bars: [{ key: 'revenue', cls: 'is-revenue' }],
+    line: { key: 'spend', cls: 'is-spend' },
+    label: row => shortDateLabel(row.date),
+    tip: row => `${shortDateLabel(row.date)}: Doanh thu ${statMoney(row.revenue)} · Chi phí QC ${statMoney(row.spend)} · ${statCount(row.orders)} đơn · ${statCount(row.conversations)} hội thoại`,
+    ariaLabel: 'Doanh thu và chi phí quảng cáo theo ngày'
+  });
+}
+
+function renderDashboardTodo(todo = {}) {
+  if (!dashboardTodo) return;
+  const items = dashboardTodoItems.filter(item => Number(todo?.[item.key]) > 0);
+  dashboardTodoPanel?.classList.toggle('hidden', !items.length);
+  dashboardTodo.innerHTML = items.length
+    ? `<ul class="dash-todo">${items.map(item => `<li><button type="button" data-dashboard-todo="${item.key}"><span>${escapeHtml(item.label)}</span><b>${escapeHtml(statCount(todo[item.key]))}</b></button></li>`).join('')}</ul>`
+    : '';
+}
+
+function renderDashboardSources(sources) {
+  if (!dashboardSources) return;
+  const list = (Array.isArray(sources) ? sources : []).filter(source => Number(source.orders) > 0 || Number(source.revenue) > 0);
+  dashboardSources.innerHTML = list.length
+    ? hbarListHtml(sortRowsBy(list, 'revenue', -1), {
+      value: source => source.revenue,
+      label: source => source.label || source.key || 'Khác',
+      detail: source => `${statShortMoney(source.revenue)} · ${statCount(source.orders)} đơn`
+    })
+    : panelEmptyHtml('Chưa có đơn.');
+}
+
+function renderDashboardProducts(products) {
+  if (!dashboardTopProducts) return;
+  const list = Array.isArray(products) ? products : [];
+  dashboardTopProducts.innerHTML = list.length ? `<div class="data-table"><table>
+    <thead><tr><th>Sản phẩm</th><th class="is-num">SL</th><th class="is-num">Doanh thu</th></tr></thead>
+    <tbody>${list.map(product => `<tr>
+      <td class="data-name"><strong title="${escapeHtml(product.name || '')}">${escapeHtml(product.name || product.sku || 'Không tên')}</strong>${product.sku ? `<small>${escapeHtml(product.sku)}</small>` : ''}</td>
+      <td class="is-num">${escapeHtml(statCount(product.quantity))}</td>
+      <td class="is-num">${escapeHtml(statMoney(product.revenue))}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>` : panelEmptyHtml('Chưa bán được sản phẩm nào.');
+}
+
+function renderDashboardCampaigns(campaigns, active) {
+  if (dashboardActiveCampaigns) {
+    dashboardActiveCampaigns.textContent = isBlankNumber(active) ? '' : `${statCount(active)} đang chạy`;
+  }
+  if (!dashboardTopCampaigns) return;
+  const list = Array.isArray(campaigns) ? campaigns : [];
+  dashboardTopCampaigns.innerHTML = list.length ? `<div class="data-table"><table>
+    <thead><tr><th>Chiến dịch</th><th class="is-num">Chi phí</th><th class="is-num">Đơn</th><th class="is-num">Doanh thu</th><th class="is-num">ROAS</th></tr></thead>
+    <tbody>${list.map(campaign => `<tr data-dashboard-campaign="${escapeHtml(campaign.id || '')}" tabindex="0" title="Mở trong Quản lý chiến dịch">
+      <td class="data-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong><span class="campaign-chips"><span class="campaign-chip is-source">${campaign.source === 'meta' ? 'Meta' : 'UTM'}</span></span></td>
+      <td class="is-num">${escapeHtml(statMoney(campaign.spend))}</td>
+      <td class="is-num">${escapeHtml(statCount(campaign.orders))}</td>
+      <td class="is-num">${escapeHtml(statMoney(campaign.revenue))}</td>
+      <td class="is-num campaign-roas">${escapeHtml(campaignRoasText(campaign.roas))}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>` : panelEmptyHtml('Chưa có chiến dịch nào trong khoảng này.');
+}
+
+function renderDashboardNotice(ads) {
+  if (!dashboardNotice) return;
+  const error = ads?.error ? String(ads.error) : '';
+  dashboardNotice.classList.toggle('hidden', !error);
+  dashboardNotice.innerHTML = error ? `<strong>Marketing API lỗi</strong><span>${escapeHtml(error)}</span>` : '';
+}
+
+function renderDashboard(data) {
+  dashboardData = data || {};
+  renderDashboardRange();
+  renderDashboardNotice(dashboardData.ads);
+  renderDashboardKpis(dashboardData.kpis || {});
+  renderDashboardTrend(dashboardData.daily);
+  renderDashboardTodo(dashboardData.todo || {});
+  renderDashboardSources(dashboardData.sources);
+  renderDashboardProducts(dashboardData.topProducts);
+  renderDashboardCampaigns(dashboardData.topCampaigns, dashboardData.kpis?.activeCampaigns?.value);
+}
+
+async function loadDashboard({ quiet = false } = {}) {
+  if (!dashboardKpis) return;
+  renderDashboardRange();
+  const requestId = ++dashboardRequestId;
+  if (!quiet && dashboardData) dashboardView?.classList.add('is-loading');
+  try {
+    const data = await readApiResponse(await fetch(`/api/dashboard?days=${dashboardDays()}`));
+    if (requestId !== dashboardRequestId) return;
+    renderDashboard(data);
+  } catch (error) {
+    if (requestId !== dashboardRequestId || quiet) return;
+    if (dashboardData) showToast(error.message || 'Chưa tải được số liệu tổng quan.');
+    else renderEmptyState(dashboardKpis, error.message || 'Chưa tải được số liệu tổng quan.');
+  } finally {
+    if (requestId === dashboardRequestId) dashboardView?.classList.remove('is-loading');
+  }
+}
+
+dashboardRange?.addEventListener('click', event => {
+  const button = event.target.closest('[data-dashboard-days]');
+  if (!button || button.dataset.dashboardDays === dashboardDaysChoice) return;
+  dashboardDaysChoice = button.dataset.dashboardDays;
+  writeStoredValue(dashboardDaysKey, dashboardDaysChoice);
+  loadDashboard();
+});
+dashboardTodo?.addEventListener('click', event => {
+  const button = event.target.closest('[data-dashboard-todo]');
+  dashboardTodoItems.find(item => item.key === button?.dataset.dashboardTodo)?.open();
+});
+dashboardTopCampaigns?.addEventListener('click', event => {
+  const row = event.target.closest('tr[data-dashboard-campaign]');
+  if (row) openCampaignFromDashboard(row.dataset.dashboardCampaign);
+});
+dashboardTopCampaigns?.addEventListener('keydown', event => {
+  const row = event.target.closest('tr[data-dashboard-campaign]');
+  if (row && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault();
+    openCampaignFromDashboard(row.dataset.dashboardCampaign);
+  }
+});
+window.setInterval(() => {
+  if (document.hidden || !dashboardView || dashboardView.classList.contains('hidden')) return;
+  loadDashboard({ quiet: true });
+}, dashboardRefreshMs);
+
+// ---------------------------------------------------------------------------
+// Báo cáo: một lượt /api/reports cho khoảng ngày đang chọn, bảy thẻ đọc chung số
+// liệu đó (đổi thẻ không tải lại). Xuất CSV là liên kết tải thẳng từ máy chủ.
+const reportsTabsBar = document.querySelector('#reports-tabs');
+const reportsPreset = document.querySelector('#reports-preset');
+const reportsDates = document.querySelector('#reports-dates');
+const reportsFrom = document.querySelector('#reports-from');
+const reportsTo = document.querySelector('#reports-to');
+const reportsGroup = document.querySelector('#reports-group');
+const reportsExport = document.querySelector('#reports-export');
+const reportsBody = document.querySelector('#reports-body');
+const reportsStateKey = 'crm-reports-view';
+
+const reportTabList = [
+  { key: 'sales', label: 'Doanh thu', section: 'sales', sort: ['label', 1] },
+  { key: 'products', label: 'Sản phẩm', section: 'products', sort: ['revenue', -1] },
+  { key: 'sources', label: 'Nguồn đơn', section: 'sources', sort: ['revenue', -1] },
+  { key: 'customers', label: 'Khách hàng', section: '', sort: ['label', 1] },
+  { key: 'staff', label: 'Nhân viên', section: 'staff', sort: ['revenue', -1] },
+  { key: 'campaigns', label: 'Chiến dịch', section: 'campaigns', sort: ['spend', -1] },
+  { key: 'followUps', label: 'Bám đuổi', section: '', sort: null }
+];
+const reportPresets = ['today', '7d', '30d', 'thisMonth', 'lastMonth', 'custom'];
+const reportGroups = ['day', 'week', 'month'];
+
+let reportsState = { tab: 'sales', preset: '7d', groupBy: 'day', from: '', to: '' };
+try {
+  const saved = JSON.parse(readStoredValue(reportsStateKey, 'null'));
+  if (saved && typeof saved === 'object') {
+    reportsState = {
+      tab: reportTabList.some(tab => tab.key === saved.tab) ? saved.tab : 'sales',
+      preset: reportPresets.includes(saved.preset) ? saved.preset : '7d',
+      groupBy: reportGroups.includes(saved.groupBy) ? saved.groupBy : 'day',
+      from: dateFromInput(saved.from) ? saved.from : '',
+      to: dateFromInput(saved.to) ? saved.to : ''
+    };
+  }
+} catch {
+  // Lựa chọn cũ hỏng: dùng mặc định.
+}
+let reportsData = null;
+let reportsRequestId = 0;
+let reportsSort = { key: '', dir: 1 };
+
+function saveReportsState() {
+  writeStoredValue(reportsStateKey, JSON.stringify(reportsState));
+}
+
+function currentReportTab() {
+  return reportTabList.find(tab => tab.key === reportsState.tab) || reportTabList[0];
+}
+
+/** Khoảng ngày (YYYY-MM-DD, tính theo giờ máy) cho lựa chọn đang có. */
+function reportsRange() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysAgo = count => new Date(today.getFullYear(), today.getMonth(), today.getDate() - count);
+  let from = today;
+  let to = today;
+  if (reportsState.preset === '7d') from = daysAgo(6);
+  if (reportsState.preset === '30d') from = daysAgo(29);
+  if (reportsState.preset === 'thisMonth') from = new Date(today.getFullYear(), today.getMonth(), 1);
+  if (reportsState.preset === 'lastMonth') {
+    from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    to = new Date(today.getFullYear(), today.getMonth(), 0);
+  }
+  if (reportsState.preset === 'custom') {
+    from = dateFromInput(reportsState.from) || daysAgo(6);
+    to = dateFromInput(reportsState.to) || today;
+    if (from > to) [from, to] = [to, from];
+  }
+  return { from: dateKeyOf(from), to: dateKeyOf(to), groupBy: reportsState.groupBy };
+}
+
+function reportsQuery(range = reportsRange()) {
+  return new URLSearchParams({ from: range.from, to: range.to, groupBy: range.groupBy }).toString();
+}
+
+/** Liên kết tải CSV cho đúng thẻ và khoảng ngày đang xem; '' khi thẻ không xuất được. */
+function reportsExportUrl(section, range = reportsRange()) {
+  if (!section) return '';
+  return `/api/reports/export.csv?${new URLSearchParams({ from: range.from, to: range.to, groupBy: range.groupBy, section }).toString()}`;
+}
+
+function syncReportsControls() {
+  const tab = currentReportTab();
+  reportsTabsBar?.querySelectorAll('[data-report-tab]').forEach(button => {
+    const active = button.dataset.reportTab === tab.key;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  if (reportsPreset) reportsPreset.value = reportsState.preset;
+  if (reportsGroup) reportsGroup.value = reportsState.groupBy;
+  const custom = reportsState.preset === 'custom';
+  reportsDates?.classList.toggle('hidden', !custom);
+  if (custom) {
+    const range = reportsRange();
+    if (reportsFrom) reportsFrom.value = range.from;
+    if (reportsTo) reportsTo.value = range.to;
+  }
+  if (reportsExport) {
+    const href = reportsExportUrl(tab.section);
+    reportsExport.classList.toggle('hidden', !href);
+    if (href) {
+      reportsExport.href = href;
+      reportsExport.setAttribute('download', `bao-cao-${tab.section}-${reportsRange().from}-${reportsRange().to}.csv`);
+    }
+  }
+}
+
+/**
+ * Bảng báo cáo: cột { key, label, num, cell(row) → HTML đã escape, total(totals),
+ * sortBy }. Bấm tiêu đề để sắp xếp; dòng Tổng cộng luôn nằm cuối.
+ */
+function reportTableHtml(columns, rows, totals = null) {
+  const tab = currentReportTab();
+  const key = reportsSort.key || tab.sort?.[0] || columns[0].key;
+  const dir = reportsSort.key ? reportsSort.dir : (tab.sort?.[1] || 1);
+  const column = columns.find(item => item.key === key) || columns[0];
+  const sorted = sortRowsBy(rows, column.sortBy || column.key, dir);
+  const foot = totals ? `<tfoot><tr>${columns.map((item, index) => `<td${item.num ? ' class="is-num"' : ''}>${index === 0 ? 'Tổng cộng' : item.total ? item.total(totals) : ''}</td>`).join('')}</tr></tfoot>` : '';
+  return `<div class="data-table"><table>
+    <thead><tr>${sortableHeadHtml(columns, key, dir)}</tr></thead>
+    <tbody>${sorted.map(row => `<tr>${columns.map(item => `<td class="${[item.num ? 'is-num' : '', item.cls || ''].filter(Boolean).join(' ')}">${item.cell(row)}</td>`).join('')}</tr>`).join('')}</tbody>
+    ${foot}
+  </table></div>`;
+}
+
+function reportChartHtml(title, legend, chart) {
+  return `<section class="report-chart"><header><h2>${escapeHtml(title)}</h2>${legend || ''}</header>${chart}</section>`;
+}
+
+const reportCell = {
+  count: key => row => escapeHtml(statCount(row[key])),
+  money: key => row => escapeHtml(statMoney(row[key])),
+  percent: key => row => escapeHtml(statPercent(row[key])),
+  roas: key => row => escapeHtml(campaignRoasText(row[key]))
+};
+const sumOf = (rows, key) => rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+const divideOrNull = (top, bottom) => (Number(bottom) ? Number(top) / Number(bottom) : null);
+
+function renderReportSales(data) {
+  const sales = data.sales || {};
+  const rows = Array.isArray(sales.rows) ? sales.rows : [];
+  const totals = sales.totals || {};
+  if (!rows.length && !Number(totals.orders)) return '';
+  const kpis = `<div class="report-kpis">${[
+    { label: 'Doanh thu', value: statShortMoney(totals.revenue), title: statMoney(totals.revenue) },
+    { label: 'Đơn', value: statCount(totals.orders) },
+    { label: 'Giá trị TB/đơn', value: statShortMoney(totals.aov), title: statMoney(totals.aov) },
+    { label: 'Đơn hủy', value: statCount(totals.cancelled), title: statMoney(totals.cancelledValue) },
+    { label: 'Chi phí QC', value: statShortMoney(totals.spend), title: statMoney(totals.spend) },
+    { label: 'ROAS', value: campaignRoasText(totals.roas) }
+  ].map(statCardHtml).join('')}</div>`;
+  const chart = rows.length > 1 ? reportChartHtml('Doanh thu và chi phí', chartLegendHtml([{ cls: 'is-revenue', label: 'Doanh thu' }, { cls: 'is-spend', label: 'Chi phí QC' }]), columnChartHtml(rows, {
+    bars: [{ key: 'revenue', cls: 'is-revenue' }],
+    line: { key: 'spend', cls: 'is-spend' },
+    label: row => row.label || shortDateLabel(row.period),
+    tip: row => `${row.label || row.period}: Doanh thu ${statMoney(row.revenue)} · Chi phí QC ${statMoney(row.spend)} · ${statCount(row.orders)} đơn`,
+    ariaLabel: 'Doanh thu và chi phí quảng cáo theo kỳ'
+  })) : '';
+  const table = reportTableHtml([
+    { key: 'label', label: 'Kỳ', sortBy: 'period', cell: row => escapeHtml(row.label || row.period || '') },
+    { key: 'orders', label: 'Đơn', num: true, cell: reportCell.count('orders'), total: t => escapeHtml(statCount(t.orders)) },
+    { key: 'revenue', label: 'Doanh thu', num: true, cell: reportCell.money('revenue'), total: t => escapeHtml(statMoney(t.revenue)) },
+    { key: 'aov', label: 'Giá trị TB', num: true, cell: reportCell.money('aov'), total: t => escapeHtml(statMoney(t.aov)) },
+    { key: 'cancelled', label: 'Đơn hủy', num: true, cell: reportCell.count('cancelled'), total: t => escapeHtml(statCount(t.cancelled)) },
+    { key: 'cancelledValue', label: 'Giá trị hủy', num: true, cell: reportCell.money('cancelledValue'), total: t => escapeHtml(statMoney(t.cancelledValue)) },
+    { key: 'spend', label: 'Chi phí QC', num: true, cell: reportCell.money('spend'), total: t => escapeHtml(statMoney(t.spend)) },
+    { key: 'roas', label: 'ROAS', num: true, cell: reportCell.roas('roas'), total: t => escapeHtml(campaignRoasText(t.roas)) }
+  ], rows, totals);
+  return kpis + chart + table;
+}
+
+function renderReportProducts(data) {
+  const rows = Array.isArray(data.products) ? data.products : [];
+  if (!rows.length) return '';
+  const revenue = sumOf(rows, 'revenue');
+  const withShare = rows.map(row => ({ ...row, share: divideOrNull(row.revenue, revenue) }));
+  const top = sortRowsBy(withShare, 'revenue', -1).slice(0, 10);
+  const chart = reportChartHtml('Doanh thu theo sản phẩm', '', hbarListHtml(top, {
+    value: row => row.revenue,
+    label: row => row.name || row.sku || 'Không tên',
+    detail: row => `${statShortMoney(row.revenue)} · ${statCount(row.quantity)} SL`
+  }));
+  const table = reportTableHtml([
+    { key: 'name', label: 'Sản phẩm', cls: 'data-name', cell: row => `<strong title="${escapeHtml(row.name || '')}">${escapeHtml(row.name || row.sku || 'Không tên')}</strong>${row.sku ? `<small>${escapeHtml(row.sku)}</small>` : ''}` },
+    { key: 'quantity', label: 'SL', num: true, cell: reportCell.count('quantity'), total: t => escapeHtml(statCount(t.quantity)) },
+    { key: 'orders', label: 'Số đơn', num: true, cell: reportCell.count('orders') },
+    { key: 'revenue', label: 'Doanh thu', num: true, cell: reportCell.money('revenue'), total: t => escapeHtml(statMoney(t.revenue)) },
+    { key: 'share', label: 'Tỷ trọng', num: true, cell: reportCell.percent('share'), total: () => '100%' }
+  ], withShare, { quantity: sumOf(rows, 'quantity'), revenue });
+  return chart + table;
+}
+
+function renderReportSources(data) {
+  const rows = (Array.isArray(data.sources) ? data.sources : []).map(row => ({ ...row, aov: divideOrNull(row.revenue, row.orders) }));
+  if (!rows.length) return '';
+  const orders = sumOf(rows, 'orders');
+  const revenue = sumOf(rows, 'revenue');
+  const chart = reportChartHtml('Doanh thu theo nguồn', '', hbarListHtml(sortRowsBy(rows, 'revenue', -1), {
+    value: row => row.revenue,
+    label: row => row.label || row.key || 'Khác',
+    detail: row => `${statShortMoney(row.revenue)} · ${statPercent(row.share)}`
+  }));
+  const table = reportTableHtml([
+    { key: 'label', label: 'Nguồn', cell: row => `<strong>${escapeHtml(row.label || row.key || 'Khác')}</strong>` },
+    { key: 'orders', label: 'Đơn', num: true, cell: reportCell.count('orders'), total: t => escapeHtml(statCount(t.orders)) },
+    { key: 'revenue', label: 'Doanh thu', num: true, cell: reportCell.money('revenue'), total: t => escapeHtml(statMoney(t.revenue)) },
+    { key: 'aov', label: 'Giá trị TB', num: true, cell: reportCell.money('aov'), total: t => escapeHtml(statMoney(t.aov)) },
+    { key: 'share', label: 'Tỷ trọng', num: true, cell: reportCell.percent('share'), total: () => '100%' }
+  ], rows, { orders, revenue, aov: divideOrNull(revenue, orders) });
+  return chart + table;
+}
+
+function renderReportCustomers(data) {
+  const customers = data.customers || {};
+  const rows = (Array.isArray(customers.rows) ? customers.rows : []).map(row => ({
+    ...row,
+    total: (Number(row.new) || 0) + (Number(row.returning) || 0),
+    returningShare: divideOrNull(row.returning, (Number(row.new) || 0) + (Number(row.returning) || 0))
+  }));
+  if (!rows.length && !Number(customers.new) && !Number(customers.returning)) return '';
+  const kpis = `<div class="report-kpis">${[
+    { label: 'Khách mới', value: statCount(customers.new) },
+    { label: 'Khách quay lại', value: statCount(customers.returning) },
+    { label: 'Tỷ lệ mua lại', value: statPercent(customers.repeatRate) }
+  ].map(statCardHtml).join('')}</div>`;
+  const chart = rows.length > 1 ? reportChartHtml('Khách mua theo kỳ', chartLegendHtml([{ cls: 'is-new', label: 'Khách mới' }, { cls: 'is-returning', label: 'Khách quay lại' }]), columnChartHtml(rows, {
+    bars: [{ key: 'new', cls: 'is-new' }, { key: 'returning', cls: 'is-returning' }],
+    label: row => row.label || shortDateLabel(row.period),
+    tip: row => `${row.label || row.period}: ${statCount(row.new)} khách mới · ${statCount(row.returning)} khách quay lại`,
+    axis: statCount,
+    ariaLabel: 'Khách mới và khách quay lại theo kỳ'
+  })) : '';
+  const newTotal = isBlankNumber(customers.new) ? sumOf(rows, 'new') : Number(customers.new);
+  const returningTotal = isBlankNumber(customers.returning) ? sumOf(rows, 'returning') : Number(customers.returning);
+  const table = rows.length ? reportTableHtml([
+    { key: 'label', label: 'Kỳ', sortBy: 'period', cell: row => escapeHtml(row.label || row.period || '') },
+    { key: 'new', label: 'Khách mới', num: true, cell: reportCell.count('new'), total: t => escapeHtml(statCount(t.new)) },
+    { key: 'returning', label: 'Khách quay lại', num: true, cell: reportCell.count('returning'), total: t => escapeHtml(statCount(t.returning)) },
+    { key: 'total', label: 'Tổng khách', num: true, cell: reportCell.count('total'), total: t => escapeHtml(statCount(t.total)) },
+    { key: 'returningShare', label: 'Tỷ lệ quay lại', num: true, cell: reportCell.percent('returningShare'), total: t => escapeHtml(statPercent(t.returningShare)) }
+  ], rows, { new: newTotal, returning: returningTotal, total: newTotal + returningTotal, returningShare: divideOrNull(returningTotal, newTotal + returningTotal) }) : '';
+  return kpis + chart + table;
+}
+
+function renderReportStaff(data) {
+  const rows = (Array.isArray(data.staff) ? data.staff : []).map(row => ({ ...row, aov: divideOrNull(row.revenue, row.orders) }));
+  if (!rows.length) return '';
+  const orders = sumOf(rows, 'orders');
+  const revenue = sumOf(rows, 'revenue');
+  const withShare = rows.map(row => ({ ...row, share: divideOrNull(row.revenue, revenue) }));
+  const chart = reportChartHtml('Doanh thu theo nhân viên', '', hbarListHtml(sortRowsBy(withShare, 'revenue', -1), {
+    value: row => row.revenue,
+    label: row => row.employee || 'Chưa rõ',
+    detail: row => `${statShortMoney(row.revenue)} · ${statCount(row.orders)} đơn`
+  }));
+  const table = reportTableHtml([
+    { key: 'employee', label: 'Nhân viên', cell: row => `<strong>${escapeHtml(row.employee || 'Chưa rõ')}</strong>` },
+    { key: 'orders', label: 'Đơn', num: true, cell: reportCell.count('orders'), total: t => escapeHtml(statCount(t.orders)) },
+    { key: 'revenue', label: 'Doanh thu', num: true, cell: reportCell.money('revenue'), total: t => escapeHtml(statMoney(t.revenue)) },
+    { key: 'aov', label: 'Giá trị TB', num: true, cell: reportCell.money('aov'), total: t => escapeHtml(statMoney(t.aov)) },
+    { key: 'share', label: 'Tỷ trọng', num: true, cell: reportCell.percent('share'), total: () => '100%' }
+  ], withShare, { orders, revenue, aov: divideOrNull(revenue, orders) });
+  return chart + table;
+}
+
+function renderReportCampaigns(data) {
+  const rows = Array.isArray(data.campaigns) ? data.campaigns : [];
+  if (!rows.length) return '';
+  const spend = sumOf(rows, 'spend');
+  const orders = sumOf(rows, 'orders');
+  const revenue = sumOf(rows, 'revenue');
+  const averageRoas = divideOrNull(revenue, spend);
+  return reportTableHtml([
+    { key: 'name', label: 'Chiến dịch', cls: 'campaign-name', cell: row => `<strong title="${escapeHtml(row.name || '')}">${escapeHtml(row.name || 'Không tên')}</strong><span class="campaign-chips">${campaignStatusChip(row.status)}<span class="campaign-chip is-source">${row.source === 'meta' ? 'Meta' : 'UTM'}</span></span>` },
+    { key: 'spend', label: 'Chi phí', num: true, cell: reportCell.money('spend'), total: t => escapeHtml(statMoney(t.spend)) },
+    { key: 'orders', label: 'Đơn', num: true, cell: reportCell.count('orders'), total: t => escapeHtml(statCount(t.orders)) },
+    { key: 'revenue', label: 'Doanh thu', num: true, cell: reportCell.money('revenue'), total: t => escapeHtml(statMoney(t.revenue)) },
+    { key: 'cpa', label: 'CPA', num: true, cell: reportCell.money('cpa'), total: t => escapeHtml(statMoney(t.cpa)) },
+    { key: 'roas', label: 'ROAS', num: true, cell: row => `<span class="campaign-roas ${campaignRoasTone(row.roas, averageRoas)}">${escapeHtml(campaignRoasText(row.roas))}</span>`, total: t => escapeHtml(campaignRoasText(t.roas)) }
+  ], rows, { spend, orders, revenue, cpa: spend && orders ? spend / orders : null, roas: averageRoas });
+}
+
+/** Bám đuổi: tỷ lệ chốt của nhóm được gửi so với nhóm đối chứng (không gửi) —
+ *  phần chênh là phần tin bám đuổi thực sự kéo thêm được. */
+function renderReportFollowUps(data) {
+  const followUps = data.followUps || {};
+  if (!Number(followUps.sent)) return '';
+  const sentRate = ratioToPercent(followUps.sentRate);
+  const holdoutRate = ratioToPercent(followUps.holdoutRate);
+  const lift = sentRate === null || holdoutRate === null ? null : sentRate - holdoutRate;
+  const liftText = lift === null ? '—' : `${lift > 0 ? '+' : ''}${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(lift)} điểm`;
+  const kpis = `<div class="report-kpis">${[
+    { label: 'Đã gửi', value: statCount(followUps.sent) },
+    { label: 'Chốt được', value: statCount(followUps.won) },
+    { label: 'Doanh thu', value: statShortMoney(followUps.wonAmount), title: statMoney(followUps.wonAmount) },
+    { label: 'Chênh so với không gửi', value: liftText, title: 'Tỷ lệ chốt khi gửi trừ tỷ lệ chốt của nhóm đối chứng' }
+  ].map(statCardHtml).join('')}</div>`;
+  const compare = hbarListHtml([
+    { label: 'Được gửi bám đuổi', rate: sentRate, value: followUps.sentRate },
+    { label: 'Nhóm đối chứng (không gửi)', rate: holdoutRate, value: followUps.holdoutRate }
+  ], {
+    value: row => row.rate,
+    label: row => row.label,
+    detail: row => statPercent(row.value)
+  });
+  const sentWon = hbarListHtml([
+    { label: 'Đã gửi', value: followUps.sent },
+    { label: 'Chốt được', value: followUps.won }
+  ], {
+    value: row => row.value,
+    label: row => row.label,
+    detail: row => statCount(row.value)
+  });
+  return `${kpis}<div class="report-split">${reportChartHtml('Gửi và chốt', '', sentWon)}${reportChartHtml('Tỷ lệ chốt', '', compare)}</div>`;
+}
+
+const reportRenderers = {
+  sales: renderReportSales,
+  products: renderReportProducts,
+  sources: renderReportSources,
+  customers: renderReportCustomers,
+  staff: renderReportStaff,
+  campaigns: renderReportCampaigns,
+  followUps: renderReportFollowUps
+};
+
+function renderReports() {
+  if (!reportsBody) return;
+  syncReportsControls();
+  if (!reportsData) return;
+  const html = reportRenderers[currentReportTab().key]?.(reportsData) || '';
+  if (!html) {
+    renderEmptyState(reportsBody, 'Chưa có số liệu trong khoảng này.');
+    return;
+  }
+  reportsBody.classList.remove('is-empty');
+  reportsBody.innerHTML = html;
+}
+
+async function loadReports() {
+  if (!reportsBody) return;
+  syncReportsControls();
+  const requestId = ++reportsRequestId;
+  reportsBody.classList.add('is-loading');
+  try {
+    const data = await readApiResponse(await fetch(`/api/reports?${reportsQuery()}`));
+    if (requestId !== reportsRequestId) return;
+    reportsData = data || {};
+    renderReports();
+  } catch (error) {
+    if (requestId !== reportsRequestId) return;
+    reportsData = null;
+    renderEmptyState(reportsBody, error.message || 'Chưa tải được báo cáo.');
+  } finally {
+    if (requestId === reportsRequestId) reportsBody.classList.remove('is-loading');
+  }
+}
+
+reportsTabsBar?.addEventListener('click', event => {
+  const button = event.target.closest('[data-report-tab]');
+  if (!button || button.dataset.reportTab === reportsState.tab) return;
+  reportsState.tab = button.dataset.reportTab;
+  reportsSort = { key: '', dir: 1 };
+  saveReportsState();
+  renderReports();
+});
+reportsPreset?.addEventListener('change', () => {
+  if (reportsPreset.value === 'custom' && reportsState.preset !== 'custom') {
+    // Mở Tùy chọn thì bắt đầu từ đúng khoảng đang xem.
+    const range = reportsRange();
+    reportsState.from = range.from;
+    reportsState.to = range.to;
+  }
+  reportsState.preset = reportPresets.includes(reportsPreset.value) ? reportsPreset.value : '7d';
+  saveReportsState();
+  loadReports();
+});
+[reportsFrom, reportsTo].forEach(input => input?.addEventListener('change', () => {
+  if (!dateFromInput(reportsFrom?.value) || !dateFromInput(reportsTo?.value)) return;
+  reportsState.from = reportsFrom.value;
+  reportsState.to = reportsTo.value;
+  saveReportsState();
+  loadReports();
+}));
+reportsGroup?.addEventListener('change', () => {
+  reportsState.groupBy = reportGroups.includes(reportsGroup.value) ? reportsGroup.value : 'day';
+  saveReportsState();
+  loadReports();
+});
+reportsBody?.addEventListener('click', event => {
+  const head = event.target.closest('th[data-sort]');
+  if (!head) return;
+  const tab = currentReportTab();
+  const current = reportsSort.key || tab.sort?.[0];
+  const currentDir = reportsSort.key ? reportsSort.dir : (tab.sort?.[1] || 1);
+  const key = head.dataset.sort;
+  reportsSort = current === key
+    ? { key, dir: -currentDir }
+    : { key, dir: ['label', 'name', 'employee'].includes(key) ? 1 : -1 };
+  renderReports();
+});
 
 // Attribute sheet: everything the CRM knows about one person, with links
 // into their threads. Mirrors the contact card staff used in Smax.
@@ -3698,7 +4892,11 @@ function connectMessagingStream() {
       handleMessagingEvent(JSON.parse(event.data));
     } catch { /* Ignore payloads this build does not understand. */ }
   });
-  messagingStream.addEventListener('error', () => { droppedConnection = true; });
+  messagingStream.addEventListener('error', () => {
+    droppedConnection = true;
+    // EventSource không cho biết mã lỗi: hỏi lại phiên, hết phiên thì fetch tự đưa về trang đăng nhập.
+    fetch('/api/auth/session').then(response => { if (response.status === 401) redirectToLogin(); }).catch(() => {});
+  });
   messagingStream.addEventListener('open', () => {
     if (!droppedConnection) return;
     droppedConnection = false;

@@ -4,8 +4,9 @@
 #   caddy hash-password
 #
 # Meta gọi webhook bằng máy, không đăng nhập được, nên đường dẫn webhook phải
-# đi thẳng. Mọi đường dẫn còn lại đều yêu cầu Basic Auth vì ứng dụng CRM chưa
-# có cơ chế đăng nhập của riêng nó.
+# đi thẳng. Mọi đường dẫn còn lại yêu cầu Basic Auth. CRM nay có trang đăng nhập
+# riêng (CRM_LOGIN_USERS trong .env); khi đã khai tài khoản thì có thể bỏ khối
+# basic_auth bên dưới — xem deploy/README.md.
 
 <DOMAIN> {
 	encode zstd gzip

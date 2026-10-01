@@ -2596,12 +2596,9 @@ tr:hover .customer-tel button { opacity: .75; }
 
 /* Ba thẻ số liệu theo thứ tự phễu: quét → bấm nút → vào Messenger */
 .qr-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
-.qr-metric { display: grid; grid-template-columns: 44px minmax(0, 1fr); grid-template-areas: "icon label" "icon value"; gap: 2px 14px; align-items: center; padding: 16px 18px; background: #fff; border: 1px solid var(--line-1); border-radius: 14px; }
-.qr-metric-icon { grid-area: icon; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; }
-.qr-metric-icon .qr-icon { width: 28px; height: 28px; }
-.qr-metric.is-scan .qr-metric-icon { background: #eef4ff; }
-.qr-metric.is-page .qr-metric-icon { background: #eef6ff; }
-.qr-metric.is-arrival .qr-metric-icon { background: #f4f0ff; }
+.qr-metric { display: grid; grid-template-columns: 52px minmax(0, 1fr); grid-template-areas: "icon label" "icon value"; gap: 2px 14px; align-items: center; padding: 16px 18px; background: #fff; border: 1px solid var(--line-1); border-radius: 14px; }
+.qr-metric-icon { grid-area: icon; display: grid; place-items: center; width: 52px; height: 52px; }
+.qr-metric-icon .qr-icon { width: 48px; height: 48px; }
 .qr-metric-label { grid-area: label; color: var(--text-2); font-size: 14px; font-weight: 600; }
 .qr-metric-value { grid-area: value; color: var(--text-1); font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .qr-metric-value small { margin-left: 8px; color: var(--text-2); font-size: 14px; font-weight: 600; }
@@ -2644,7 +2641,7 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-recent-outcome.is-ok { color: var(--brand); background: #e8f4ed; }
 .qr-recent-outcome.is-muted { color: var(--text-2); background: #f2f4f7; }
 .qr-recent-empty { display: grid; flex: 1; place-items: center; align-content: center; gap: 10px; padding: 24px 16px; color: var(--text-2); text-align: center; }
-.qr-recent-empty .qr-icon { width: 40px; height: 40px; padding: 12px; box-sizing: content-box; background: #f5f8ff; border-radius: 16px; }
+.qr-recent-empty .qr-icon { width: 64px; height: 64px; }
 .qr-recent-empty p { margin: 0; font-size: 14px; line-height: 1.5; }
 
 /* Biểu đồ cột theo ngày: quét (nhạt) và vào Messenger (đậm) */

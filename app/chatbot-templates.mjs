@@ -1,5 +1,5 @@
 import { describeGiftTable, priceBasket, quoteTiers, shippingFeeForKey } from './processing/pricing.mjs';
-import { comboKey, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, maxComboQuantity, normalizeText } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, matchStaffOnlyProduct, maxComboQuantity, normalizeText } from './processing/catalog.mjs';
 import { PROMO_BOWL_GIFT } from './processing/trial-flow.mjs';
 import { metaConfig } from './config.mjs';
 import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
@@ -231,8 +231,12 @@ function basketValues(key) {
 const recentOrderWindowMs = 2 * 60 * 60 * 1000;
 // Đơn vừa chốt trong khoảng này còn sửa được ngay trong hội thoại (ORDER_UPDATE).
 export const orderUpdateWindowMs = 60 * 60 * 1000;
-// Khách tự hủy qua bot được trong khoảng này (chưa giao); lâu hơn thì nhân viên lo.
+// Đơn còn ghi chú / ghép đơn / đổi quà qua bot trong khoảng này (chưa giao). Hủy đơn: bot chỉ tự hủy trong
+// orderUpdateWindowMs (60 phút, C4 01/10), quá hạn thì ghi nhận cho nhân viên (orderCancelStaffWindowMs).
 export const orderCancelWindowMs = 24 * 60 * 60 * 1000;
+// Khách xin hủy đơn đã quá 60 phút mà đơn còn trong khoảng này (như luật ORDER_CANCEL_STAFF: đơn ≤ 7 ngày):
+// ORDER_CANCEL_STAFF (ghi chú vào đơn + thẻ). Cũ hơn nữa thì CSKH_HANDOFF.
+const orderCancelStaffWindowMs = 7 * 24 * 60 * 60 * 1000;
 // Khách xin đổi đơn đã quá hạn bot tự sửa (orderUpdateWindowMs) nhưng đơn còn mới trong khoảng
 // này: bot ghi yêu cầu vào đơn và báo nhân viên, không coi là đơn mới (hỏi lại SĐT/địa chỉ).
 const orderChangeStaffWindowMs = 3 * 24 * 60 * 60 * 1000;
@@ -441,6 +445,28 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
   return plain(next);
 }
 
+/**
+ * Số lượng mô hình ghi ở No_A/B/C. Số thập phân ("1.5", "2,5") lấy phần nguyên — trước đây ghép mọi chữ số nên
+ * "1.5" thành 15 túi (T6, 01/10). Dạng khác giữ như cũ (ghép chữ số: "2+1" → 21 > trần giỏ → nhân viên tính).
+ */
+function modelQuantity(raw) {
+  const text = String(raw ?? '');
+  const decimal = text.match(/^\D*?(\d+)[.,]\d{1,2}(?!\d)\D*$/);
+  if (decimal) return Number(decimal[1]) || 0;
+  return Number(text.replace(/\D/g, '')) || 0;
+}
+
+/** Món đầu tiên trong giỏ là sản phẩm chỉ CSKH bán: { name } hay null. Sản phẩm danh mục theo cờ staffOnly; tên ngoài danh mục theo STAFF_ONLY_PRODUCTS. */
+function staffOnlyItemOf(items) {
+  for (const item of Array.isArray(items) ? items : []) {
+    const product = (item?.code && findProductBySku(item.code)) || matchProduct(String(item?.product || ''));
+    if (product?.staffOnly) return { name: product.name };
+    const named = !product ? matchStaffOnlyProduct(String(item?.product || '')) : null;
+    if (named) return { name: named.name };
+  }
+  return null;
+}
+
 function renderOrder(value, templates, context = {}) {
   const now = Number(context.now) || Date.now();
   const templateId = String(value.template_id || '').trim();
@@ -456,9 +482,9 @@ function renderOrder(value, templates, context = {}) {
   // gần nhất đã có món đó hay khách đã nêu số túi trước (adjustOrderQuantities, vòng 12).
   const rawNamed = toPricedItems(products.map((product, index) => ({
     product: String(product || '').trim(),
-    quantity: Number(String(quantities[index] || '').replace(/\D/g, '')) || 1
+    quantity: modelQuantity(quantities[index]) || 1
   })).filter(item => item.product && item.product !== '0'))
-    .map((item, index) => ({ ...item, given: /\d/.test(String(quantities[index] || '')) && Number(String(quantities[index]).replace(/\D/g, '')) > 1 }));
+    .map((item, index) => ({ ...item, given: /\d/.test(String(quantities[index] || '')) && modelQuantity(quantities[index]) > 1 }));
   const heldForQuantity = usablePendingOrder(context.pendingOrder, { now, templateId: 'ORDER_ADDRESS' })?.items || [];
   const recentForQuantity = recentOrder && !(String(recentOrder.processingStatus || '') === 'cancelled' || recentOrder.status === 'Hủy')
     && now - (Number(recentOrder.createdAt) || 0) < recentOrderWindowMs
@@ -479,13 +505,14 @@ function renderOrder(value, templates, context = {}) {
       burstTexts: Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.slice(-2) : [],
       adding: String(value.add_to_basket || '') === '1' || /\b(them|nua|cong them)\b/.test(messageWords)
     });
-  // "Lấy thêm 1 túi vàng ghép đơn" vài giờ sau khi chốt: vẫn gộp vào đơn cũ
-  // (trong 24 giờ, chưa giao) thay vì tạo đơn riêng tính thêm phí ship.
+  // "Lấy thêm 1 túi vàng ghép đơn": bot chỉ tự gộp vào đơn cũ trong 60 phút như mọi lần sửa đơn
+  // (chủ shop 01/10 — sau đó kho có thể đã đóng gói); quá hạn thì ghi chú + thẻ cho nhân viên
+  // (ORDER_CHANGE_STAFF), không tạo đơn riêng tính thêm phí ship.
   const mergeRequest = /\b(ghep (don|chung|vao)|gop (don|chung|vao)|them vao don)\b/.test(messageWords);
   const shipped = /đã giao|đang giao|đã gửi/i.test(String(recentOrder?.status || ''));
   // Đơn nhân viên/Facebook Shop tạo trên POS (source 'POS'): bot không tự sửa — nhân viên lo.
   const recentOpen = Boolean(recentOrder?.id) && !shipped && recentOrder.source !== 'POS'
-    && now - (Number(recentOrder.createdAt) || 0) < (mergeRequest ? orderCancelWindowMs : orderUpdateWindowMs)
+    && now - (Number(recentOrder.createdAt) || 0) < orderUpdateWindowMs
     && String(recentOrder.processingStatus || '') !== 'cancelled';
   // Mô hình vẫn chọn ORDER_CONFIRMATION/ORDER_ADDRESS khi khách sửa hay thêm vào
   // đơn bot vừa chốt (dưới 60 phút) → trước đây tạo đơn thứ hai, thứ ba. Nay: khách
@@ -503,12 +530,14 @@ function renderOrder(value, templates, context = {}) {
   // SĐT/địa chỉ và mời thêm túi. Nay: ghi giỏ khách muốn vào ghi chú đơn, gắn thẻ Đổi sản phẩm +
   // Cần người xử lý để nhân viên sửa. Đang giữ giỏ mới hơn đơn (khách đang đặt đơn khác) thì thôi.
   const heldNewer = Number(context.pendingOrder?.at) > (Number(recentOrder?.createdAt) || 0) && (context.pendingOrder?.items || []).length > 0;
-  if (!updating && !separateOrder && !mergeRequest && namedItems.length && recentOrder?.id && templates.ORDER_CHANGE_STAFF
-    && orderChangePattern.test(messageWords) && !isGiftSwapRequest(context.messageText) && !heldNewer
+  if (!updating && !separateOrder && namedItems.length && recentOrder?.id && templates.ORDER_CHANGE_STAFF
+    && (mergeRequest || orderChangePattern.test(messageWords)) && !isGiftSwapRequest(context.messageText) && !heldNewer
     && String(recentOrder.processingStatus || '') !== 'cancelled' && recentOrder.status !== 'Hủy'
     && !/đã giao|giao thành công|hoàn thành/i.test(String(recentOrder.status || ''))
     && now - (Number(recentOrder.createdAt) || 0) < orderChangeStaffWindowMs) {
-    const cart = namedItems.map(item => `${item.quantity} ${matchProduct(item.product)?.name || item.product}`).join(" + ");
+    const items = namedItems.map(item => `${item.quantity} ${matchProduct(item.product)?.name || item.product}`).join(" + ");
+    // Ghép đơn quá 60 phút: món khách nêu là món THÊM, không phải cả đơn mới.
+    const cart = mergeRequest ? `đơn đã đặt + ${items}` : items;
     return {
       templateId: 'ORDER_CHANGE_STAFF',
       ...splitMessages(fill(templates.ORDER_CHANGE_STAFF, { ...commonValues(), cart })),
@@ -516,7 +545,7 @@ function renderOrder(value, templates, context = {}) {
       attention: true,
       orderChange: true,
       pendingOrder: null,
-      order: { noteOrderId: String(recentOrder.id), note: `Khách xin đổi đơn thành: ${cart}` }
+      order: { noteOrderId: String(recentOrder.id), note: mergeRequest ? `Khách xin ghép thêm vào đơn: ${items}` : `Khách xin đổi đơn thành: ${items}` }
     };
   }
   if (templateId === 'ORDER_UPDATE' && !updating && !namedItems.length && templates.ORDER_WRONG) {
@@ -573,6 +602,21 @@ function renderOrder(value, templates, context = {}) {
   const trialBagItem = context.trial?.stage === 'chosen' && context.trial.bag && !freshItems.length && !pending?.items?.length ? [{ product: context.trial.bag, quantity: 1 }] : [];
   const items = freshItems.length ? freshItems : (pending?.items?.length ? pending.items : trialBagItem);
   const key = freshKey || pending?.key || '';
+  // C3 (01/10): sản phẩm chỉ CSKH bán (staffOnly: Hạt An Lành hũ, Siêu Hạt…) — bot không lên đơn / không giữ giỏ,
+  // kể cả khi mô hình tự nêu tên (lượt trước bot vừa nói tên sản phẩm). Chặn ở phía bot, không ở priceBasket
+  // (đơn nhân viên/landing/POS vẫn tính giá được theo SKU).
+  const staffOnlyItem = staffOnlyItemOf(items);
+  if (staffOnlyItem && templates.STAFF_ONLY_PRODUCT) {
+    const heldStaffOnly = Boolean(staffOnlyItemOf(pending?.items));
+    return {
+      templateId: 'STAFF_ONLY_PRODUCT',
+      ...splitMessages(fill(templates.STAFF_ONLY_PRODUCT, { ...commonValues(), product: staffOnlyItem.name })),
+      handoff: false,
+      attention: true,
+      // Giỏ đang giữ có món staffOnly thì bỏ; giỏ khác (hợp lệ) để nguyên.
+      ...(heldStaffOnly ? { pendingOrder: null } : {})
+    };
+  }
   const priced = items.length ? priceBasket(items, giftContext()) : null;
   // Khách đã nhận ưu đãi miễn phí vận chuyển (tin bám đuổi "1 túi dùng thử vẫn
   // miễn ship", còn hạn): đơn không cộng phí ship, ghi rõ quà để kho và khách thấy.
@@ -644,6 +688,10 @@ function renderOrder(value, templates, context = {}) {
   const addressAccepted = Boolean(delivery) && (delivery.complete || answeredAfterAsk || answeredInFull || postMergerWard);
   // Nhận khi chưa đủ cấp: nhân viên soát lại (ghi chú đơn ⚠).
   const addressCheck = addressAccepted && !delivery.complete ? 'Soát phường/xã: bot nhận nguyên chữ khách ghi' : (delivery?.wardUnverified ? 'Thiếu phường/xã: nhân viên bổ sung' : '');
+  // Ghi chú soát đi theo giỏ tới khi lên đơn: địa chỉ AI suy ra độ tin thấp (T7, engine đặt value.addressAiCheck)
+  // và SĐT trùng đơn landing/POS không thuộc hội thoại (C2, previousDelivery.foreign).
+  const foreignCheck = previous?.foreign ? `SĐT trùng đơn ${previous.foreign.source || 'ngoài'} ${previous.foreign.orderId || ''} không thuộc hội thoại, đối chiếu người nhận`.replace(/\s+/g, ' ') : '';
+  const staffCheck = [...new Set([String(value.addressAiCheck || '').trim(), foreignCheck, ...String(pending?.staffCheck || '').split('; ')].filter(Boolean))].join('; ').slice(0, 300);
 
   // Remember a priceable basket, plus whatever contact detail has arrived so
   // far, so the customer never has to repeat something already given.
@@ -660,6 +708,7 @@ function renderOrder(value, templates, context = {}) {
         ...(pending?.upsold && (!freshPriceable || freshKey === pending.key) ? { upsold: true } : {}),
         // Vòng 12: khách muốn gửi về địa chỉ cũ mà chưa tra ra (chưa có SĐT/đơn cũ): nhớ cho lượt sau.
         ...(wantsPrevious && !previous?.address && !address ? { wantsPrevious: true } : {}),
+        ...(staffCheck ? { staffCheck } : {}),
         // Vòng 12: số túi khách đã nêu khi chưa chọn vị — giữ tới khi giỏ có hàng.
         ...(!freshPriceable && !(pending?.items || []).length && Number(context.pendingOrder?.askedBagCount) ? { askedBagCount: Number(context.pendingOrder.askedBagCount) } : {})
       }
@@ -778,6 +827,8 @@ function renderOrder(value, templates, context = {}) {
       // Vòng 12: khách muốn gửi về địa chỉ cũ, đã có SĐT mà không tra ra địa chỉ (engine đã tra đơn
       // CRM/landing/POS cục bộ theo SĐT — lookupPreviousAddress): cần người xem, không hỏi từng cấp.
       ...(wantsPrevious && hasPhone && !hasAddress ? { attention: true, oldAddressMissing: true } : {}),
+      // C2: địa chỉ cũ thuộc đơn ngoài hội thoại (không điền) — luôn gắn thẻ cho nhân viên đối chiếu.
+      ...(previous?.foreign ? { attention: true, oldAddressMissing: true } : {}),
       pendingOrder: upsell && nextPending ? { ...nextPending, upsold: true } : nextPending
     };
   }
@@ -785,7 +836,8 @@ function renderOrder(value, templates, context = {}) {
   const total = price.total;
   // Vòng 12: ghi chú cho nhân viên đi kèm đơn (order-notes.mjs đọc addressCheck/deliveryNote; cần
   // conversation-orders.normalizeChatbotOrder chép hai trường này sang bản ghi đơn).
-  const orderNoteFields = { ...(addressCheck ? { addressCheck } : {}), ...(deliveryNote ? { deliveryNote } : {}) };
+  const fullCheck = [addressCheck, staffCheck].filter(Boolean).join('; ');
+  const orderNoteFields = { ...(fullCheck ? { addressCheck: fullCheck } : {}), ...(deliveryNote ? { deliveryNote } : {}) };
   // Catalogue names, not the customer's wording, so the confirmation and the
   // order record agree on what is being shipped.
   const orderItems = price.lines.map(line => ({ product: line.name, code: line.sku, quantity: line.quantity }));
@@ -1084,7 +1136,39 @@ export function isProductQuoteId(templateId) {
 const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'ORDER_PHONE_ASK_FLAVOR', 'FOLLOW_UP_COMMENT_FREESHIP', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_AFTER_SALE', 'GIFT_POLICY_EMPTY', 'PRICE_QUOTE_COMBO', 'CSKH_HANDOFF', 'COMMENT_PUBLIC_REPLY', 'COMMENT_PUBLIC_FALLBACK', 'COMMENT_PUBLIC_REPEAT', 'LIVESTREAM_COMMENT', 'COMMENT_PRIVATE_REPLY', 'ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_CANCELLED', 'ORDER_STATUS_NONE', 'UPSELL_TWO_BAGS', 'REPLY_ALREADY_SENT', 'COMMENT_STAFF_FOLLOWUP', 'ORDER_CART_LINE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'REPLY_ALREADY_SENT_INFO', 'ORDER_STATUS_CHECKING', 'LIVE_DEAL_CLAIMED', 'COMMENT_PUBLIC_SORRY', 'SHOP_ORDER_RECEIVED', 'ORDER_NOTE_ADDED', 'QR_OFFER', 'ORDER_WRONG', 'ORDER_CHANGE_STAFF', 'GIFT_SWAP', 'TRIAL_ACCEPT', 'TRIAL_REMIND', 'TRIAL_PRICE', 'TRIAL_FREESHIP_INFO', 'TRIAL_NEXT_STEP', 'TRIAL_DECLINED',
   // Vòng 12: mẫu engine/luật tự chọn (cần số liệu điền sẵn hay ngữ cảnh) — mô hình không gọi tên.
   'PRICE_COUNT', 'PRICE_ONE_BAG', 'ASK_REORDER', 'TROPICAL_CONFIRM', 'GIFT_POLICY_LIVE', 'GIFT_POLICY_PROMO', 'GIFT_POLICY_UPSELL3', 'ASK_TWO_BAGS', 'IMAGE_WITH_PHONE',
-  'COMMENT_PUBLIC_STAFF', 'COMMENT_PUBLIC_FEEDBACK', 'ORDER_CANCEL_STAFF', 'ORDER_HOLD_STAFF', 'STAFF_ONLY_PRODUCT', 'RECEIVED_CHECK']);
+  'COMMENT_PUBLIC_STAFF', 'COMMENT_PUBLIC_FEEDBACK', 'ORDER_CANCEL_STAFF', 'ORDER_HOLD_STAFF', 'STAFF_ONLY_PRODUCT', 'RECEIVED_CHECK',
+  // fix-bot 01/10: câu "đặt thêm?" khi đơn ngoài hội thoại (engine tự chọn, không kể chi tiết đơn).
+  'ORDER_EXISTING_CONFIRM_PHONE']);
+
+// fix-bot T1 (01/10): mẫu "báo sự việc đã xảy ra" (đã nhận đơn Shop, đã hủy/sửa/ghi chú đơn, đã nhận deal live, đơn
+// đang có…) — chỉ engine được chọn khi việc đó thật sự xảy ra; mô hình trả các mã này thì luôn đổi về GENERAL_INFO.
+const engineFactTemplateIds = new Set(['SHOP_ORDER_RECEIVED', 'ORDER_CANCELLED', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_NOTE_ADDED', 'LIVE_DEAL_CLAIMED', 'ORDER_EXISTING_CONFIRM', 'ORDER_EXISTING_CONFIRM_PHONE']);
+// Mẫu nội bộ mà mô hình vẫn được gọi tên (bước đơn ảo + chuyển người).
+const modelAllowedInternalIds = new Set(['ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_CANCEL', 'ORDER_NOTE', 'CSKH_HANDOFF']);
+// Trường JSON mô hình được trả (đúng những trường renderChatbotReply đọc từ mô hình — xem responseSchemaFor).
+const modelAnswerFields = ['template_id', 'Product_N1', 'No_A', 'Product_N2', 'No_B', 'Product_N3', 'No_C', 'Phone_Number', 'Customer_Address', 'also', 'warming', 'add_to_basket', 'product'];
+
+/**
+ * fix-bot T1 (01/10): làm sạch JSON của mô hình trước khi soạn tin. Chỉ giữ các trường mô hình được trả — bỏ `values`
+ * (số liệu điền mẫu: "đã nhận đơn 10 túi – tổng 1.000đ"), `orderNote`, `clearBasket`, `cart`, `addressAiCheck`… mà khách
+ * có thể lái mô hình tự điền. Mã mẫu nội bộ (engine tự chọn) mà prompt của chủ shop không nhắc tới → GENERAL_INFO;
+ * mẫu "báo việc đã xảy ra" → luôn GENERAL_INFO. `also` nội bộ thì bỏ.
+ */
+export function sanitizeModelAnswer(parsed, systemPrompt = '') {
+  const source = parsed && typeof parsed === 'object' ? parsed : {};
+  const clean = {};
+  for (const field of modelAnswerFields) if (source[field] !== undefined && typeof source[field] !== 'object') clean[field] = source[field];
+  const prompt = String(systemPrompt || '');
+  const mentioned = id => new RegExp(`(?<![A-Z0-9_])${id}(?![A-Z0-9_])`).test(prompt);
+  const blocked = id => Boolean(id) && (engineFactTemplateIds.has(id) || (internalTemplateIds.has(id) && !modelAllowedInternalIds.has(id) && !mentioned(id)));
+  const templateId = String(clean.template_id ?? '').trim();
+  if (blocked(templateId)) {
+    console.warn(`Mô hình trả mẫu nội bộ ${templateId}: đổi về GENERAL_INFO`);
+    clean.template_id = 'GENERAL_INFO';
+  }
+  if (blocked(String(clean.also ?? '').trim())) delete clean.also;
+  return clean;
+}
 
 /**
  * The template inventory as text for the model, appended to the system
@@ -1231,10 +1315,25 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
       return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items })), handoff: false };
     }
     const shipped = /đã giao|đang giao|đã gửi/i.test(String(recent?.status || ''));
-    const cancellable = Boolean(recent?.id) && recent.source !== 'POS' && now - (Number(recent.createdAt) || 0) < orderCancelWindowMs && !shipped && String(recent.processingStatus || '') !== 'cancelled';
+    const ageMs = now - (Number(recent?.createdAt) || 0);
+    const open = Boolean(recent?.id) && recent.source !== 'POS' && !shipped && String(recent.processingStatus || '') !== 'cancelled' && recent.status !== 'Hủy';
+    // C4 (01/10): bot chỉ tự hủy trong 60 phút như luật (rule-intent ORDER_CANCEL) — sau đó kho có thể đã đóng gói
+    // / đơn đã lên POS. Trước đây mô hình chọn ORDER_CANCEL thì cửa sổ là 24 giờ, nên "thôi chị không lấy nữa" với
+    // đơn 5 giờ bị hủy luôn cả trên POS. Quá 60 phút (≤ 7 ngày): ghi nhận + ghi chú vào đơn + thẻ cho nhân viên.
+    const cancellable = open && ageMs < orderUpdateWindowMs;
     if (cancellable && templates.ORDER_CANCELLED) {
       const items = (Array.isArray(recent.products) ? recent.products : []).map(item => `${item.name || item.product || 'sản phẩm'} x${Number(item.quantity) || 1}`).join(', ') || 'đơn vừa đặt';
       return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items })), handoff: false, pendingOrder: null, order: { cancelOrderId: String(recent.id) } };
+    }
+    if (open && ageMs < orderCancelStaffWindowMs && templates.ORDER_CANCEL_STAFF) {
+      const said = String(context.messageText || '').replace(/\s+/g, ' ').trim().slice(0, 150);
+      return {
+        templateId: 'ORDER_CANCEL_STAFF',
+        ...splitMessages(fill(templates.ORDER_CANCEL_STAFF, commonValues())),
+        handoff: false,
+        attention: true,
+        order: { noteOrderId: String(recent.id), note: said ? `Khách xin hủy đơn: ${said}` : 'Khách xin hủy đơn' }
+      };
     }
     if (recent && String(recent.processingStatus || '') === 'cancelled' && templates.ORDER_CANCELLED) {
       return { templateId: 'ORDER_CANCEL', ...splitMessages(fill(templates.ORDER_CANCELLED, { ...commonValues(), items: 'vừa đặt' })), handoff: false };

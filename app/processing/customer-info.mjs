@@ -25,6 +25,12 @@ export function toLocalPhone(value) {
 export function extractVietnamesePhone(text) {
   // Vòng 12 (inbox-3 #17): chữ "O"/"o" gõ thay số 0 ở đầu SĐT ("O972…"): chỉ khi ngay sau là đủ 9 chữ số.
   const raw = String(text ?? '').replace(/(?<![\p{L}\p{N}])[oO](?=(?:[ .\-]?\d){9}(?![\d]))/gu, '0');
+  // T3 (01/10): SĐT 10 số viết tách nhóm, ngay sau là số nhà/số lượng ("0912 345 678 12 Lê Lợi", "091 234 5678 - 3 túi"):
+  // bước nối bên dưới nuốt luôn số phía sau. Thử trước mẫu chính xác (cùng mẫu với stripPhone của order-flow).
+  for (const match of raw.match(/(?<!\d)(?:\+?84[ .-]?|0)\d(?:[ .-]?\d){8}(?!\d)/g) || []) {
+    const local = toLocalPhone(match);
+    if (local) return local;
+  }
   // Không nối chữ số qua xuống dòng: tin gộp "0912 345 678" + xuống dòng + "12 Nguyễn Huệ" là SĐT rồi số nhà (28/09).
   const joined = raw.replace(/(\d)[ 	.\-()]+(\d)/g, '$1$2');
   // Thử bản đã nối ("0912 345 678") trước, rồi bản gốc: SĐT đứng ngay trước số

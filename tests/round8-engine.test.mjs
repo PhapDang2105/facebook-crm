@@ -369,8 +369,12 @@ test('20. Đơn ngoài hội thoại cùng SĐT (POS / landing, 7 ngày): hỏi 
   const asked = await run({}, `cho 2 túi vàng, 0909123456, ${address}`, { reply: confirmation(), extraDeps: deps([posOrder()], calls) });
   assert.deepEqual(asked.created, [], 'không tạo đơn trùng với đơn POS');
   assert.equal(asked.results[0].templateId, 'ORDER_EXISTING_CONFIRM');
-  assert.match(asked.sent.join(' '), /đang có đơn Granola Túi Xanh 450g x2/);
+  // fix-bot C2 (01/10): đơn POS/landing tìm theo SĐT không thuộc hội thoại — hỏi "đặt thêm?" KHÔNG kể món/giờ/tổng tiền
+  // của đơn đó (trước đây: "đang có đơn Granola Túi Xanh 450g x2 đặt lúc …"), gắn thẻ cho nhân viên đối chiếu.
+  assert.doesNotMatch(asked.sent.join(' '), /Granola Túi Xanh 450g x2|348.000|đặt lúc/);
+  assert.match(asked.sent.join(' '), /số điện thoại này đã có một đơn/);
   assert.match(asked.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Vàng 350g/);
+  assert.ok(asked.saved.at(-1).addLabelEvents.includes('handoff'));
   assert.match(calls[0], /\/shops\/714\/orders\?.*search=0909123456/);
   const pending = asked.saved.at(-1).pendingOrder;
   assert.equal(pending.awaitingConfirm, true);
@@ -379,12 +383,13 @@ test('20. Đơn ngoài hội thoại cùng SĐT (POS / landing, 7 ngày): hỏi 
   const yes = await run({ pendingOrder: pending, botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: now() - 60000 }, 'Đúng rồi', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false }, extraDeps: deps([posOrder()]) });
   assert.equal(yes.results[0].templateId, 'ORDER_CONFIRMATION');
   assert.equal(yes.created.length, 1);
-  // "Không" → kể lại đơn POS đang có, gắn thẻ, không tạo.
+  // "Không" → (fix-bot C2) không kể lại đơn ngoài hội thoại: nhân viên tra (ORDER_STATUS_CHECKING), gắn thẻ, không tạo.
   const no = await run({ pendingOrder: pending, botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: now() - 60000 }, 'Không, đơn đó của chị rồi', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false }, extraDeps: deps([posOrder()]) });
-  assert.equal(no.results[0].templateId, 'ORDER_STATUS');
+  assert.equal(no.results[0].templateId, 'ORDER_STATUS_CHECKING');
   assert.deepEqual(no.created, []);
-  assert.match(no.sent.join(' '), /Granola Túi Xanh 450g x2/);
+  assert.doesNotMatch(no.sent.join(' '), /Granola Túi Xanh 450g x2/);
   assert.doesNotMatch(no.sent.join(' '), /chưa thấy đơn nào/);
+  assert.ok(no.saved.at(-1).addLabelEvents.includes('handoff'));
   // Nhớ 10 phút theo SĐT: lượt sau cùng SĐT không gọi POS lần nữa.
   const cachedCalls = [];
   await run({}, `cho 2 túi vàng, 0909123456, ${address}`, { reply: confirmation(), extraDeps: deps([posOrder()], cachedCalls) });
@@ -403,7 +408,7 @@ test('20. Đơn ngoài hội thoại cùng SĐT (POS / landing, 7 ngày): hỏi 
   const landingOrder = { id: 'ld1', phone: '0909123456', status: 'Mới', createdAt: now() - 3 * 24 * 60 * 60 * 1000, total: 447000, products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 3 }], source: 'Landing page' };
   const fromLanding = await run({}, `cho 2 túi vàng, 0909123456, ${address}`, { reply: confirmation(), extraDeps: landing(landingOrder) });
   assert.equal(fromLanding.results[0].templateId, 'ORDER_EXISTING_CONFIRM');
-  assert.match(fromLanding.sent.join(' '), /Granola Túi Xanh 450g x3/);
+  assert.doesNotMatch(fromLanding.sent.join(' '), /Granola Túi Xanh 450g x3|447.000/);
   clearExternalOrderCache();
   const incomplete = await run({}, `cho 2 túi vàng, 0909123456, ${address}`, { reply: confirmation(), extraDeps: landing({ ...landingOrder, status: 'Chưa hoàn tất', landing: { incomplete: true } }) });
   assert.equal(incomplete.results[0].templateId, 'ORDER_CONFIRMATION');

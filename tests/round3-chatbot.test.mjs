@@ -82,11 +82,18 @@ test('"luôn" không phải cộng thêm: đơn 1 túi, "gửi e 2 túi luôn c 
   // Mô hình trả giỏ ĐẦY ĐỦ kèm chữ "thêm": không cộng lần nữa.
   const full = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '1', Product_N2: 'Granola Túi Vàng 350g', No_B: '1' }, templates, { now, recentOrder, messageText: 'lấy thêm 1 túi vàng' });
   assert.deepEqual(full.order.items.map(item => [item.code, item.quantity]).sort(), [['GRA-VANG-H350', 1], ['GRA-XANH-Z450', 1]]);
-  // "ghép đơn" 4 giờ sau vẫn gộp vào đơn cũ (chưa giao), không đơn mới có ship.
+  // "ghép đơn" trong 60 phút: bot tự gộp vào đơn cũ, không đơn mới có ship.
+  const soon = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Vàng 350g', No_A: '1' }, templates, { now, recentOrder: { ...recentOrder, createdAt: now - 30 * 60 * 1000 }, messageText: 'lấy thêm 1 túi vàng ghép đơn nhé' });
+  assert.equal(soon.templateId, 'ORDER_UPDATE');
+  assert.equal(soon.order.updateOrderId, 'o1');
+  assert.equal(soon.order.shippingFee, 0);
+  // Chủ shop 01/10: quá 60 phút (kho có thể đã đóng gói) → ghi chú + thẻ cho nhân viên, không tự sửa, không đơn mới.
   const later = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Vàng 350g', No_A: '1' }, templates, { now, recentOrder: { ...recentOrder, createdAt: now - 4 * 60 * 60 * 1000 }, messageText: 'lấy thêm 1 túi vàng ghép đơn nhé' });
-  assert.equal(later.templateId, 'ORDER_UPDATE');
-  assert.equal(later.order.updateOrderId, 'o1');
-  assert.equal(later.order.shippingFee, 0);
+  assert.equal(later.templateId, 'ORDER_CHANGE_STAFF');
+  assert.equal(later.order.noteOrderId, 'o1');
+  assert.match(later.order.note, /ghép thêm vào đơn: 1 Granola Túi Vàng 350g/);
+  assert.equal(later.order.items, undefined);
+  assert.equal(later.attention, true);
 });
 
 test('tin vừa đặt vừa hỏi ("also"): trả lời câu hỏi rồi mới xin SĐT/địa chỉ', () => {
@@ -104,7 +111,11 @@ test('khách hỏi đơn đã đặt rồi gửi SĐT: tra theo SĐT ở mọi h
   const found = { id: 'x1', createdAt: Date.now() - 3 * 60 * 60 * 1000, total: 298000, products: [{ name: 'Granola Túi Xanh 450g', quantity: 2 }], phone: '0909123456' };
   const hit = await run({ botLastTemplateId: 'ORDER_STATUS' }, '0909123456', { reply: { templateId: 'ORDER_ADDRESS', messages: ['xin địa chỉ'], handoff: false }, extraDeps: { findOrdersByPhone: async () => [found] } });
   assert.equal(hit.asked, false);
-  assert.match(hit.sent[0], /Granola Túi Xanh 450g x2/);
+  // fix-bot C2 (01/10): trước đây kể món/giờ/tổng tiền của đơn tìm theo SĐT (đơn ở hội thoại KHÁC — gõ SĐT người
+  // khác là đọc được đơn của họ). Nay: báo nhân viên tra (ORDER_STATUS_CHECKING) + thẻ, không nêu chi tiết.
+  assert.equal(hit.results[0].templateId, 'ORDER_STATUS_CHECKING');
+  assert.doesNotMatch(hit.sent.join(' '), /Granola Túi Xanh 450g x2|298\.000/);
+  assert.ok(hit.saved.at(-1).addLabelEvents.includes('handoff'));
   const miss = await run({ botLastTemplateId: 'ORDER_STATUS' }, 'mình đã đặt rồi 0909123456', { reply: { templateId: 'ORDER_ADDRESS', messages: ['xin địa chỉ'], handoff: false }, extraDeps: { findOrdersByPhone: async () => [] } });
   assert.equal(miss.results[0].templateId, 'ORDER_STATUS_CHECKING');
   assert.ok(miss.saved.at(-1).addLabelEvents.includes('handoff'));

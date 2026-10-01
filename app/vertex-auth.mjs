@@ -10,11 +10,23 @@ function base64Url(value) {
   return Buffer.from(value).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
+// Tệp key đã đọc, nhớ theo đường dẫn + mtime + cỡ (perf-analysis, 01/10): vertexProjectId() được gọi mỗi lượt gọi
+// model khi chưa đặt GOOGLE_CLOUD_PROJECT — trước đây đọc + parse tệp mỗi lần. Thay tệp key (mtime đổi) thì đọc lại.
+let cachedCredentials = null;
+
 function readServiceAccount() {
   const file = process.env.GOOGLE_APPLICATION_CREDENTIALS || '/etc/facebook-crm/vertex-gemini-key.json';
+  const stat = fs.statSync(file);
+  if (cachedCredentials && cachedCredentials.file === file && cachedCredentials.mtimeMs === stat.mtimeMs && cachedCredentials.size === stat.size) return cachedCredentials.credentials;
   const credentials = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (!credentials.client_email || !credentials.private_key || !credentials.project_id) throw new Error('Credential Vertex không hợp lệ.');
+  cachedCredentials = { file, mtimeMs: stat.mtimeMs, size: stat.size, credentials };
   return credentials;
+}
+
+/** Quên tệp key đã nhớ (kiểm thử). */
+export function resetVertexCredentialCache() {
+  cachedCredentials = null;
 }
 
 export function vertexProjectId() {

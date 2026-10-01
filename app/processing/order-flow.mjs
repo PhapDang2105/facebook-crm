@@ -42,8 +42,30 @@ export function stripPhone(raw) {
 export function mentionsOldAddress(text) {
   return OLD_ADDRESS.test(normalizeIntentText(String(text || '')));
 }
-const looksLikeAddress =(raw, normalized) => Boolean(raw) && raw.length <= 200 && !NOT_ADDRESS.test(normalized)
-  && (ADDRESS_WORDS.test(normalized) || Boolean(describeDeliveryAddress(raw).resolved?.province));
+// fix-addr (01/10): câu hỏi/phủ định không phải địa chỉ ("Quà thay là gì ạ" từng thành Thị xã La Gi và thay địa chỉ đã
+// lưu; "Không phải Tân An long an" là khách đính chính — để LLM đọc).
+// Từ chỉ cấp/đơn vị địa chỉ rõ (đã bỏ dấu), đủ để coi là mảnh địa chỉ dù chưa đọc ra tỉnh ("xã Vô Tranh", "thôn Đông").
+const STRONG_ADDRESS_WORDS = /\b(phuong|huyen|thi tran|thi xa|thon|khu pho|ngo|hem|ngach|so nha|chung cu|tinh|xom|to dan pho)\b|\bxa (?!(?:xa|lam|qua|khong|ko|k|dung|dum|giup|de|nhe|nha|ha|hon|roi|vay|the|ma|va|nhat|lac)\b)[a-z]{2,}/;
+const NOT_ADDRESS_PHRASE =/\b(la gi|gi vay|gi the|gi a|khong phai|ko phai|k phai|kh phai|hong phai|chua phai|dau phai)\b/;
+// Không có từ địa chỉ thì phải có chữ số (số nhà/ngõ) hoặc đọc ra đủ quận + tỉnh khách ghi: một tên quận/huyện đứng
+// trơ trọi ("Ba túi ba vị" → Ba Vì, "La Gi") không đủ là địa chỉ.
+const looksLikeAddress = (raw, normalized) => {
+  if (!raw || raw.length > 200 || NOT_ADDRESS.test(normalized) || NOT_ADDRESS_PHRASE.test(normalized)) return false;
+  const resolved = describeDeliveryAddress(raw).resolved;
+  // Từ địa chỉ kèm chữ số hay một cấp đọc ra được; "đường" (đường ăn), "xa" (date xa), "quán" một mình thì không.
+  if (ADDRESS_WORDS.test(normalized)) return /\d/.test(raw) || Boolean(resolved?.province) || STRONG_ADDRESS_WORDS.test(normalized);
+  if (!resolved?.province) return false;
+  return /\d/.test(raw) || Boolean(resolved.ward || resolved.postMerger) || Boolean(resolved.district && provinceNamed(raw, resolved));
+};
+
+/** Khách tự ghi tên tỉnh (không phải máy suy ra từ một tên quận duy nhất cả nước). */
+function provinceNamed(raw, resolved) {
+  const district = String(resolved.district?.name || '');
+  const province = normalizeIntentText(String(resolved.province?.name || '').replace(/^(?:tỉnh|thành phố|tp)\s+/iu, ''));
+  const text = normalizeIntentText(raw);
+  const districtBare = normalizeIntentText(district.replace(/^(?:quận|huyện|thị xã|thành phố)\s+/iu, ''));
+  return Boolean(province) && text.includes(province) && province !== districtBare;
+}
 
 /**
  * @param {string} text tin khách
@@ -105,9 +127,18 @@ const RECEIVER_PHRASE = /(?:^|[\s,.;])(?:chuyển|chuyen|gửi|gởi|gui|giao)\s
 // Ghi chú giao hàng nằm lẫn trong địa chỉ.
 const DELIVERY_NOTE = /(?:giao|ship|gọi|goi)?\s*(?:trong\s+)?giờ\s+hành\s+chính|gio\s+hanh\s+chinh|gọi\s+trước\s+khi\s+giao|goi\s+truoc\s+khi\s+giao|tránh\s+(?:ngày\s+)?(?:chủ\s+nhật|cn|t7|thứ\s+7)|giao\s+(?:buổi\s+)?(?:sáng|chiều|tối)(?:\s+(?:thứ\s+\d|cn|chủ\s+nhật))?/giu;
 // Chữ đệm cuối câu.
-const TRAILING_PARTICLES = /[\s,.;:!~-]*(?:(?:nhé|nhe|nha|nhá|ạ|nhen|nghen|nhaa|nhaaa|shop|sop|giúp\s+em|giùm|dùm|với|e\s+nhé|em\s+nhé|em\s+nha|e\s+nha|em\s+ơi|e\s+ơi|ạ\s+shop)[\s,.;:!~-]*)+$/iu;
+// fix-addr (01/10): chữ đệm phải là một từ riêng — "ạ" cuối "Láng Hạ" không phải chữ đệm ("phố Láng Hạ" từng thành "Láng H").
+const TRAILING_PARTICLES = /[\s,.;:!~-]*(?<![\p{L}\p{N}])(?:(?:nhé|nhe|nha|nhá|ạ|nhen|nghen|nhaa|nhaaa|shop|sop|giúp\s+em|giùm|dùm|với|e\s+nhé|em\s+nhé|em\s+nha|e\s+nha|em\s+ơi|e\s+ơi|ạ\s+shop)(?![\p{L}\p{N}])[\s,.;:!~-]*)+$/iu;
 // Câu trả lời ngắn chen trước địa chỉ ("1 trước ạ.", "ok shop.", "vâng ạ."): bỏ khi không có chữ địa chỉ.
-const LEADING_REPLY = /^\s*([^.!?,;\n]{1,30}?(?:ạ|nhé|nha|nhá|ha|shop|ok|oke|vâng|dạ))\s*(?:[.!]+[\s,;]*|[,;]\s*)(?=\S)/iu;
+// fix-addr (01/10): chữ đệm cuối phải là một từ riêng ("88 Láng Hạ," không phải "… ạ,"), và đoạn có số nhà + tên
+// đường ("12 Lê Lợi nha,") không phải câu trả lời ngắn — xem looksLikeHouseAndStreet.
+const LEADING_REPLY = /^\s*([^.!?,;\n]{1,30}?(?<![\p{L}\p{N}])(?:ạ|nhé|nha|nhá|ha|shop|ok|oke|vâng|dạ))\s*(?:[.!]+[\s,;]*|[,;]\s*)(?=\S)/iu;
+// Số nhà + ít nhất hai chữ tên đường ("12 Lê Lợi", "88 láng hạ"); "1 trước", "2 túi nha" thì không.
+function looksLikeHouseAndStreet(reply) {
+  const body = String(reply || '').replace(/(?<![\p{L}\p{N}])(?:ạ|nhé|nha|nhá|ha|shop|ok|oke|vâng|dạ)\s*$/iu, '').trim();
+  return /\d/.test(body) && !/\d\s*(?:túi|tui|gói|goi|bịch|hộp|combo|set)(?![\p{L}])/iu.test(body)
+    && /\d[\p{L}\d\/\-]*\s+\p{L}+\s+\p{L}+/u.test(body);
+}
 
 /** Ghi chú giao hàng khách ghi lẫn trong địa chỉ ("giao giờ hành chính"), '' nếu không có. */
 export function extractDeliveryNote(text) {
@@ -131,7 +162,7 @@ export function cleanAddressText(raw) {
     const before = text;
     for (const pattern of LEADING_LABELS) text = text.replace(pattern, '');
     const reply = text.match(LEADING_REPLY);
-    if (reply && !ADDRESS_WORDS.test(normalizeIntentText(reply[1])) && !ADMIN_OR_STREET.test(reply[1])) text = text.slice(reply[0].length);
+    if (reply && !ADDRESS_WORDS.test(normalizeIntentText(reply[1])) && !ADMIN_OR_STREET.test(reply[1]) && !looksLikeHouseAndStreet(reply[1])) text = text.slice(reply[0].length);
     const named = text.match(NAME_COLON);
     if (named && named[1].trim().split(/\s+/).length <= 4 && !ADMIN_OR_STREET.test(named[1].replace(/(?:địa\s*chỉ|dia\s*chi)\s*$/iu, ''))) text = text.slice(named[0].length);
     text = text.replace(/^[\s,.;:!\-–]+/u, '');

@@ -588,6 +588,15 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
 const qrGreetingDelayMs = Number(process.env.QR_GREETING_DELAY_MS) || 10_000;
 const qrGreetingCooldownMs = Number(process.env.QR_GREETING_COOLDOWN_MS) || 6 * 60 * 60 * 1000;
 
+// Chỉ một mã QR in lên mọi thẻ (nhiều mã theo lô/sàn làm bộ phận vận hành rối).
+// Mã nằm trong đường dẫn và trong tin soạn sẵn (#mã) nên chỉ chữ thường không dấu; tên
+// hiện cho nhân viên là QR_MAIN_LABEL. Mã khác còn trong kho là mã chạy thử: không tính
+// vào số liệu, xoá được.
+const qrMainCode = String(process.env.QR_MAIN_CODE || 'tmdt-test').trim().toLowerCase();
+const qrMainLabel = String(process.env.QR_MAIN_LABEL || 'Thương mại điện tử').trim();
+if (!isValidQrCode(qrMainCode)) throw new Error(`QR_MAIN_CODE không hợp lệ: ${qrMainCode}`);
+registerQrCode(qrMainCode).catch(error => console.error(`QR: không tạo được mã chính ${qrMainCode}: ${error.message}`));
+
 /**
  * Page mà /q/<mã> đưa khách tới. Lấy từ Page đang kết nối trong CRM; đặt
  * QR_PAGE_ID (và QR_PAGE_NAME cho tên hiện trên trang đệm) trong .env để ghim
@@ -1377,6 +1386,8 @@ const server = http.createServer(async (request, response) => {
         pageId: page.id,
         pageName: page.name,
         today: qrDayKey(Date.now()),
+        mainCode: qrMainCode,
+        mainLabel: qrMainLabel,
         codes: stats.codes.map(entry => ({
           ...entry,
           url: qrTargetUrl(metaConfig.publicBaseUrl, entry.code),
@@ -1428,6 +1439,7 @@ const server = http.createServer(async (request, response) => {
       if (!(await requireManager(request, response))) return;
       const code = decodeURIComponent(qrDeleteMatch[1]).toLowerCase();
       if (!isValidQrCode(code)) return sendJson(response, 400, { error: 'Mã QR chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự.' });
+      if (code === qrMainCode) return sendJson(response, 400, { error: `${code} là mã QR in trên thẻ, không xoá được.` });
       const deleted = await deleteQrCode(code);
       if (deleted) audit(request, 'settings.qr', { target: { type: 'qr-code', id: code, name: code }, summary: `Xóa mã QR ${code} (mất số liệu của mã).` });
       return sendJson(response, deleted ? 200 : 404, deleted ? { deleted: code } : { error: 'Không có mã này trong kho.' });

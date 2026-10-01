@@ -781,19 +781,19 @@
                 <button type="button" data-qr-range="30" class="is-active">30 ngày</button>
                 <button type="button" data-qr-range="all">Tất cả</button>
               </div>
-              <form class="qr-make" id="qr-make-form">
-                <input id="qr-code-input" name="code" placeholder="Mã lô mới" autocomplete="off" spellcheck="false" maxlength="40" pattern="[a-z0-9][a-z0-9-]{0,39}" aria-label="Mã lô mới">
-                <button class="settings-save-button" type="submit">Tạo mã QR</button>
-              </form>
             </header>
             <div class="qr-settings-body">
-              <div class="qr-metrics" id="qr-metrics"></div>
-              <div class="qr-chart" id="qr-chart"></div>
-              <div class="qr-stats" id="qr-stats"><p class="channel-empty">Đang tải thống kê...</p></div>
+              <div class="qr-metrics" id="qr-metrics"><p class="channel-empty">Đang tải thống kê...</p></div>
               <div class="qr-lower">
-                <section class="qr-detail hidden" id="qr-detail" aria-label="Chi tiết mã"></section>
+                <section class="qr-detail hidden" id="qr-detail" aria-label="Mã QR in lên thẻ"></section>
                 <section class="qr-recent" id="qr-recent" aria-label="Lượt gần đây"></section>
               </div>
+              <div class="qr-chart" id="qr-chart"></div>
+              <details class="qr-options qr-old hidden" id="qr-old">
+                <summary id="qr-old-summary">Mã thử</summary>
+                <p class="qr-old-note">Mã tạo lúc chạy thử, không tính vào số liệu phía trên và không dùng để in. Xoá khi không cần xem lại.</p>
+                <div class="qr-stats" id="qr-stats"></div>
+              </details>
               <details class="qr-options" id="qr-options">
                 <summary>Tuỳ chọn trang đệm</summary>
                 <form class="qr-options-form" id="qr-options-form">

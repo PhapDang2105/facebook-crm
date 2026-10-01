@@ -2671,6 +2671,9 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-options-form input { height: 38px; padding: 0 12px; color: var(--text-1); border: 1px solid #e0e3ea; border-radius: 8px; outline: none; font: inherit; font-size: 15px; }
 .qr-options-form input:focus { border-color: #84adff; box-shadow: 0 0 0 2px rgba(21, 94, 239, .12); }
 .qr-options-form .settings-save-button { height: 38px; padding: 0 18px; font-size: 14px; }
+.qr-old-note { margin: 0; padding: 0 16px 12px; color: var(--text-2); font-size: 14px; }
+.qr-old .qr-stats { margin: 0 16px 16px; }
+.qr-old .qr-stats-table tbody tr { cursor: default; }
 
 @media (max-width: 1100px) {
   .qr-lower { grid-template-columns: 1fr; }

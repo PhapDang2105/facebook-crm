@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 // server.mjs khởi động máy chủ ngay khi nạp, nên kiểm trên MÃ NGUỒN (như tests/audit-routes.test.mjs):
 // mọi route GHI của Cài đặt phải mở đầu bằng chốt quản lý, còn việc hằng ngày của nhân viên thì không.
-const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const GUARD = 'if (!(await requireManager(request, response';
 
 // Route chỉ chủ shop / Quản trị được ghi. `open`: đoạn mã mở khối route (duy nhất trong server.mjs).
@@ -31,7 +31,11 @@ const MANAGER_ONLY_ROUTES = [
   { route: 'DELETE /api/phone-warnings/pos', open: "if (request.method === 'DELETE' && url.pathname === '/api/phone-warnings/pos') {" },
   { route: 'PUT /api/inbox/settings', open: "if (request.method === 'PUT') {\n        if (!(await requireManager(request, response))) return;\n        const current = await readInboxSettings();" },
   { route: 'PUT /api/gifts', open: "if (request.method === 'PUT') {\n        if (!(await requireManager(request, response))) return;\n        const payload = await readBody(request);\n        // Không gửi `items`" },
-  { route: 'POST /api/staff, PATCH /api/staff/:id', open: "if (creating || (request.method === 'PATCH' && staffMatch)) {" }
+  { route: 'POST /api/staff, PATCH /api/staff/:id', open: "if (creating || (request.method === 'PATCH' && staffMatch)) {" },
+  // Quyết định chủ shop 01/10: tải toàn bộ danh sách khách ra tệp, đồng bộ quảng cáo và Cố vấn AI (tốn lượt gọi) chỉ Quản trị.
+  { route: 'GET /api/customers/export.csv|audience.csv', open: "if (request.method === 'GET' && (url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {" },
+  { route: 'POST /api/campaigns/sync', open: "if (request.method === 'POST' && url.pathname === '/api/campaigns/sync') {" },
+  { route: 'POST /api/campaigns/insights (Cố vấn AI)', open: "if (request.method === 'POST' && url.pathname === '/api/campaigns/insights') {" }
 ];
 
 /** Vài dòng đầu của khối route (sau `{` mở khối). */
@@ -66,6 +70,10 @@ test('phân quyền: việc hằng ngày của nhân viên KHÔNG bị chặn (n
     { route: 'POST read', open: "if (request.method === 'POST' && conversationReadMatch) {" },
     { route: 'PATCH flags', open: "if (request.method === 'PATCH' && conversationFlagsMatch) {" },
     { route: 'POST /api/messaging/sync', open: "if (request.method === 'POST' && url.pathname === '/api/messaging/sync') {" },
+    // Đồng bộ đơn landing từ POS: vẫn cho nhân viên (quyết định 01/10).
+    { route: 'POST /api/landing/sync-pos', open: "if (request.method === 'POST' && url.pathname === '/api/landing/sync-pos') {" },
+    // Xem danh sách khách trên màn Khách hàng (JSON) vẫn mở; chỉ tải tệp CSV mới cần Quản trị.
+    { route: 'GET /api/customers (JSON)', open: "if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {" },
     { route: 'PUT labels khách', open: "if (customerRoute[1] === 'labels' && request.method === 'PUT') {" },
     { route: 'POST /api/chatbot/follow-ups/release', open: "if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/release') {" }
   ];
@@ -74,7 +82,17 @@ test('phân quyền: việc hằng ngày của nhân viên KHÔNG bị chặn (n
     assert.ok(at > 0, `không thấy route ${item.route}`);
     assert.ok(!server.slice(at, at + 600).includes('requireManager('), `${item.route} không được chặn nhân viên`);
   }
+  // Đọc kết quả Cố vấn AI đã chạy (GET) vẫn cho mọi người.
+  const insightsGet = server.indexOf("if (request.method === 'GET' && url.pathname === '/api/campaigns/insights') {");
+  assert.ok(insightsGet > 0 && !server.slice(insightsGet, insightsGet + 200).includes('requireManager('), 'GET /api/campaigns/insights không được chặn nhân viên');
   // Gửi tin trong hội thoại: khối ngay sau "const conversationMessagesMatch".
   const send = server.slice(server.indexOf('const conversationMessagesMatch'), server.indexOf('const conversationReadMatch'));
   assert.doesNotMatch(send, /requireManager\(/);
+});
+
+test('nhật ký: /api/audit kiểm quyền và truy vấn bằng CÙNG bộ lọc đã trim (SEC-1: ?conversationId=%20 không lọt)', () => {
+  const block = server.slice(server.indexOf("if (request.method === 'GET' && url.pathname === '/api/audit') {"), server.indexOf("if (url.pathname === '/api/staff' || url.pathname.startsWith('/api/staff/')) {"));
+  assert.match(block, /const filters = auditFiltersFrom\(url\.searchParams\);/);
+  assert.match(block, /if \(!canReadAudit\(isManager\(actor\), filters\)\) \{/);
+  assert.match(block, /await queryAudit\(filters\)/);
 });

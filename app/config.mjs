@@ -113,7 +113,8 @@ export const landingConfig = {
 // Pancake (pages.fm): Page vận hành trong Pancake, bot của CRM trả lời khách
 // qua Pancake. Token và ID Page lấy ở Pancake → Cài đặt → Công cụ (Public API
 // access token, Webhook). Để trống là tắt.
-const pancakePath = webhookPathFrom(process.env.PANCAKE_WEBHOOK_PATH, '/webhooks/pancake');
+const pancakeDefaultPath = '/webhooks/pancake';
+const pancakePath = webhookPathFrom(process.env.PANCAKE_WEBHOOK_PATH, pancakeDefaultPath);
 
 function parsePancakePages() {
   const pages = [];
@@ -161,6 +162,11 @@ export const pancakeConfig = {
   pageAccessToken: parsedPages[0]?.pageAccessToken || process.env.PANCAKE_PAGE_ACCESS_TOKEN || '',
   webhookToken: process.env.PANCAKE_WEBHOOK_TOKEN || '',
   path: pancakePath,
+  // Pancake không gửi token: đường mặc định đoán được, nên nhận gói theo page_id chỉ an toàn khi
+  // PANCAKE_WEBHOOK_PATH là đường bí mật (dài, ngẫu nhiên — nhập đúng URL đó ở Pancake → Webhook).
+  // PANCAKE_WEBHOOK_REQUIRE_SECRET=1: ở đường mặc định, gói không token bị bỏ (chỉ bật sau khi đã đổi URL).
+  defaultPath: pancakePath === pancakeDefaultPath,
+  requireSecret: process.env.PANCAKE_WEBHOOK_REQUIRE_SECRET === '1',
   webhookUrl: `${publicBaseUrl}${pancakePath}`,
   apiBase: process.env.PANCAKE_API_BASE || 'https://pages.fm/api/public_api',
   // Mặc định bot im khi hội thoại đã có nhân viên nhận trong Pancake.

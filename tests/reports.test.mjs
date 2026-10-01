@@ -163,7 +163,7 @@ test('CSV: BOM UTF-8, tiêu đề tiếng Việt, ngoặc kép/xuống dòng đ�
 });
 
 test('máy chủ nối route /api/reports và /api/reports/export.csv', async () => {
-  const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+  const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(server, /import \{ loadReport, normalizeReportSection, reportCsvFileName, reportSectionCsv \} from '\.\/reports\.mjs'/);
   const route = server.slice(server.indexOf("url.pathname === '/api/reports'"), server.indexOf("url.pathname === '/api/reports'") + 1200);
   assert.match(route, /url\.pathname === '\/api\/reports\/export\.csv'/);

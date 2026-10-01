@@ -5,8 +5,8 @@ import { readFile } from 'node:fs/promises';
 // server.mjs khởi động máy chủ ngay khi nạp (và ghi cấu hình chatbot thật), nên các nhánh
 // dưới đây được kiểm trên mã nguồn; logic thuần nằm ở module riêng có test hành vi
 // (order-edits-reprice, pos-orders-combo, conversation-orders).
-const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
-const web = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
+const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+const web = (await readFile(new URL('../web/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const section = (source, start, length = 4000) => {
   const at = source.indexOf(start);
   assert.ok(at >= 0, `không tìm thấy: ${start}`);

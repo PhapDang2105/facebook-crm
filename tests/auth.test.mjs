@@ -71,7 +71,7 @@ test('auth: chỉ trang đăng nhập, QR, ảnh sản phẩm, chính sách và 
 });
 
 test('server: chặn đăng nhập chạy trước mọi route, sau bước chặn đường dẫn "//"', async () => {
-  const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+  const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const gate = server.indexOf('if (await handleAuth(request, response, url, isWebhook)) return;');
   assert.ok(gate > server.indexOf('isSafeRequestTarget(request.url)'));
   assert.ok(gate < server.indexOf("url.pathname === '/api/health'"));
@@ -79,7 +79,7 @@ test('server: chặn đăng nhập chạy trước mọi route, sau bước ch�
 });
 
 test('login.js: ?next= chỉ nhận đường dẫn nội bộ (kể cả /%09/…, //…, /\\…)', async () => {
-  const source = await readFile(new URL('../web/login.js', import.meta.url), 'utf8');
+  const source = (await readFile(new URL('../web/login.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const body = source.slice(source.indexOf('function safeNext('), source.indexOf('function nextPath('));
   const safeNext = new Function(`${body}; return safeNext;`)();
   for (const good of ['/', '/?view=orders', '/#settings', '/orders/123?tab=a%2Fb']) assert.equal(safeNext(good), good, good);

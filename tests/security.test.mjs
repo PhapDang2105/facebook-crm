@@ -17,7 +17,7 @@ const { createAuth, hashPassword, isPublicPath } = await import('../app/auth.mjs
 const { staffLoginAccounts } = await import('../app/staff.mjs');
 const { AI_KEY_REENTRY_ERROR, aiKeyReentryError, mergeChatbotSettingsPatch, normalizeChatbotSettings } = await import('../app/chatbot-settings.mjs');
 
-const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
 /* ---- 2. Fail-closed khi chưa có tài khoản ---- */
 
@@ -72,7 +72,7 @@ test('server: cổng 503 + làm mới Nhân sự chạy đầu handleAuth; kho N
 /* ---- 6. Open redirect ---- */
 
 test('safeNextPath (máy chủ) và safeNext (web/login.js) cho cùng kết quả, chặn open redirect', async () => {
-  const source = await readFile(new URL('../web/login.js', import.meta.url), 'utf8');
+  const source = (await readFile(new URL('../web/login.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const safeNext = new Function(`${source.slice(source.indexOf('function safeNext('), source.indexOf('function nextPath('))}; return safeNext;`)();
   const cases = ['/', '/?view=orders', '/#settings', '/a/b?c=%2F', '//evil.example', '/\\evil', '/\t/evil.example', '/%09/evil.example',
     '/%0a/evil', '/%2f%2fevil', '/%5c/evil', 'https://evil.example', 'javascript:alert(1)', 'evil', '', null, undefined, '/x y', '/\u0000x', '/ '];
@@ -119,7 +119,7 @@ test('CSP cho trang HTML: không script nội tuyến trong web/, chặn nhúng 
 test('server: keepAliveTimeout 65 s, headersTimeout 66 s (lớn hơn keepalive 60 s của Caddy)', async () => {
   assert.match(server, /server\.keepAliveTimeout = 65000;/);
   assert.match(server, /server\.headersTimeout = 66000;/);
-  const caddy = await readFile(new URL('../deploy/Caddyfile', import.meta.url), 'utf8');
+  const caddy = (await readFile(new URL('../deploy/Caddyfile', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(caddy, /keepalive 60s/);
 });
 
@@ -160,7 +160,7 @@ test('cờ chẩn đoán WEBHOOK_DEBUG_KEYS / PANCAKE_DEBUG_KEYS: mặc định 
   assert.equal(allowed(), true, 'sang phút mới thì ghi tiếp');
   assert.match(server, /if \(debugFlagOn\('PANCAKE_DEBUG_KEYS'\) && pancakeDebugAllowed\(\)\) console\.log\(describePancakePayload\(payload\)\);/);
   assert.doesNotMatch(server, /if \(process\.env\.PANCAKE_DEBUG_KEYS\)/);
-  const webhook = await readFile(new URL('../app/meta-webhook.mjs', import.meta.url), 'utf8');
+  const webhook = (await readFile(new URL('../app/meta-webhook.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(webhook, /debugFlagOn\('WEBHOOK_DEBUG_KEYS'\) && webhookDebugAllowed\(\)/);
   assert.doesNotMatch(webhook, /const shape = process\.env\.WEBHOOK_DEBUG_KEYS/);
 });
@@ -197,14 +197,14 @@ test('server: PUT /api/chatbot/settings kiểm khóa AI TRƯỚC khi ghi, sau ch
 /* ---- 10. Caddyfile khớp production ---- */
 
 test('deploy/Caddyfile: không còn basic_auth, có header bảo mật, vẫn che ?token= trong log', async () => {
-  const caddy = await readFile(new URL('../deploy/Caddyfile', import.meta.url), 'utf8');
+  const caddy = (await readFile(new URL('../deploy/Caddyfile', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const code = caddy.split('\n').filter(line => !line.trim().startsWith('#')).join('\n');
   assert.doesNotMatch(code, /basic_auth|basicauth|<BCRYPT_HASH>|<USERNAME>/);
   for (const header of ['Strict-Transport-Security', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy']) assert.match(code, new RegExp(header));
   assert.match(code, /reverse_proxy 127\.0\.0\.1:8080/);
   assert.match(code, /flush_interval -1/);
   assert.match(code, /delete token/);
-  const setup = await readFile(new URL('../deploy/setup-server.sh', import.meta.url), 'utf8');
+  const setup = (await readFile(new URL('../deploy/setup-server.sh', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.doesNotMatch(setup, /caddy hash-password|<BCRYPT_HASH>/);
 });
 

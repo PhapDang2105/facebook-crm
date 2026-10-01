@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { GENDER_SOURCE_RANK, genderFromName } from './processing/customer-info.mjs';
 
 // META_CONVERSATIONS_PATH lets the integration test run without touching real customer data.
@@ -59,8 +60,36 @@ function normalizeStore(value) {
   for (const conversation of store.conversations) {
     if (conversation && !conversation.gender) applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
   }
-  for (const conversation of store.conversations) reconcileCustomerGender(store, conversation);
+  reconcileAllCustomerGenders(store);
   return store;
+}
+
+/**
+ * reconcileCustomerGender cho cả kho trong một lượt: gom luồng theo (pageId, psid) MỘT lần thay vì lọc lại
+ * cả mảng cho từng hội thoại (O(n²): ~225 ms mỗi lần nạp kho 2.200 hội thoại). Map lồng nhau giữ đúng phép
+ * so === của bản cũ ("123" và 123 là hai khách). Kết quả như gọi reconcileCustomerGender cho từng hội thoại:
+ * applyGenderGuess chỉ ghi khi nguồn mạnh hơn hẳn nên chạy lại trên cùng nhóm không đổi gì thêm.
+ */
+export function reconcileAllCustomerGenders(store) {
+  const groups = new Map();
+  for (const conversation of store.conversations) {
+    if (!conversation?.psid) continue;
+    let byPsid = groups.get(conversation.pageId);
+    if (!byPsid) groups.set(conversation.pageId, byPsid = new Map());
+    const siblings = byPsid.get(conversation.psid);
+    if (siblings) siblings.push(conversation);
+    else byPsid.set(conversation.psid, [conversation]);
+  }
+  const changed = [];
+  for (const byPsid of groups.values()) {
+    for (const siblings of byPsid.values()) {
+      if (siblings.length < 2) continue;
+      const best = siblings.filter(item => item.gender).sort((first, second) => (genderRank[second.genderSource] || 0) - (genderRank[first.genderSource] || 0))[0];
+      if (!best) continue;
+      for (const item of siblings) if (item !== best && applyGenderGuess(item, best.gender, best.genderSource)) changed.push(item);
+    }
+  }
+  return changed;
 }
 
 /**
@@ -120,7 +149,7 @@ async function storeMtimeMs() {
 // Kho ~19 MB trên production: trước đây MỖI lần sửa (mỗi hội thoại của một lượt đồng bộ Pancake,
 // mỗi webhook) là một lần JSON.stringify + ghi cả tệp, chặn vòng lặp sự kiện hàng trăm lần mỗi
 // lượt. Giờ: sửa chạy tuần tự trong bộ nhớ (như cũ), còn ghi đĩa thì
-//  - một lần ghi tại một thời điểm (tệp tạm rồi rename nguyên tử, định dạng tệp giữ nguyên);
+//  - một lần ghi tại một thời điểm (tệp tạm rồi rename nguyên tử; JSON gọn từ 01/10);
 //  - các lần sửa trong lúc đang ghi được gộp vào MỘT lần ghi kế tiếp;
 //  - `defer: true` (đường đồng bộ): trả về ngay sau khi sửa bộ nhớ, ghi gộp sau ~1 giây
 //    (chậm nhất 5 giây), hay khi flushMessagingStore() được gọi (cuối lượt đồng bộ, lúc tắt);
@@ -172,16 +201,10 @@ export async function readMessagingStore() {
   // hai bản kho song song (bản ghi sau đè bản ghi trước).
   if (!loadingStore) {
     loadingStore = (async () => {
-      let store;
-      try {
-        store = normalizeStore(JSON.parse(await readFile(messagingStorePath, 'utf8')));
-      } catch (error) {
-        // Chưa có tệp (lần chạy đầu) thì kho rỗng là đúng. Tệp có mà không đọc
-        // được (JSON cắt dở, EACCES...) thì phải cất bản đó sang tên khác trước:
-        // nếu không, lượt ghi kế tiếp ghi đè tệp thật bằng kho rỗng và mất hết.
-        if (error?.code !== 'ENOENT') await quarantineStoreFile(error);
-        store = emptyStore();
-      }
+      // Chưa có tệp (lần chạy đầu) → kho rỗng. JSON hỏng (cắt dở, sửa tay) → cất sang .corrupt-* rồi kho rỗng,
+      // để lượt ghi kế tiếp không đè mất bản hỏng. Lỗi đọc tạm (EACCES, EBUSY, EMFILE…) → NÉM (01/10): coi là
+      // kho rỗng thì lần ghi sau xoá sạch tệp thật đang lành (app/json-store.mjs).
+      const store = await readJsonFile(messagingStorePath, { fallback: emptyStore, expect: 'any', normalize: normalizeStore, label: 'Kho hội thoại' });
       cachedStoreMtimeMs = await storeMtimeMs();
       rememberMtime(cachedStoreMtimeMs);
       cachedStore = store;
@@ -191,17 +214,7 @@ export async function readMessagingStore() {
   return loadingStore;
 }
 
-async function quarantineStoreFile(error) {
-  const backupPath = `${messagingStorePath}.corrupt-${Date.now()}`;
-  try {
-    await rename(messagingStorePath, backupPath);
-    console.error(`Không đọc được kho hội thoại (${error?.message || error}); bản hỏng đã cất tại ${backupPath}, bắt đầu với kho rỗng.`);
-  } catch {
-    // Không cất được (ví dụ tệp vừa biến mất) thì cũng không còn gì để ghi đè.
-  }
-}
-
-/** Một lần ghi: bản chụp của kho trong bộ nhớ (JSON đồng bộ, nhất quán) → tệp tạm → rename nguyên tử. */
+/** Một lần ghi: bản chụp của kho trong bộ nhớ (JSON đồng bộ, nhất quán) → tệp tạm → fsync → rename nguyên tử. */
 async function writeSnapshot() {
   const before = await storeMtimeMs();
   if (!cachedStore) {
@@ -217,11 +230,12 @@ async function writeSnapshot() {
     return;
   }
   const version = mutationVersion;
-  const text = JSON.stringify(cachedStore, null, 2);
-  await mkdir(path.dirname(messagingStorePath), { recursive: true });
-  const temporaryPath = `${messagingStorePath}.tmp`;
-  await writeFile(temporaryPath, text, 'utf8');
-  await rename(temporaryPath, messagingStorePath);
+  // JSON gọn (01/10, không thụt dòng): kho ~19 MB → ~14 MB, stringify nhanh hơn ~20%. Mọi nơi đọc đều
+  // JSON.parse; công thức sed bảo trì (integrations/meta/README.md) đã sửa để khớp cả hai định dạng.
+  const text = JSON.stringify(cachedStore);
+  // Tệp tạm riêng theo tiến trình + fsync trước rename (app/json-store.mjs): script bảo trì chạy song song
+  // không dẫm cùng tệp .tmp, mất điện giữa chừng không để lại tệp kho rỗng/cụt.
+  await writeJsonAtomic(messagingStorePath, null, { text });
   cachedStoreMtimeMs = await storeMtimeMs();
   rememberMtime(cachedStoreMtimeMs);
   writtenVersion = Math.max(writtenVersion, version);

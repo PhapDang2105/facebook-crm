@@ -245,6 +245,19 @@ export function posComboFor(products, posSkus = null) {
   return { key, ...entry };
 }
 
+/** Ngược lại: mẫu mã combo POS ("CB3-XANH-Z450+BGD+M") → các túi trong giỏ [{ sku, quantity }], không phải combo thì null. */
+export function posComboBasket(sku) {
+  const wanted = String(sku || '').trim().toUpperCase();
+  if (!wanted) return null;
+  const entries = { ...POS_COMBO_SKUS, ...posComboOverrides() };
+  const key = Object.keys(entries).find(item => entries[item]?.sku === wanted);
+  if (!key) return null;
+  return key.split('|').map(part => {
+    const [bag, quantity] = part.split('=');
+    return { sku: bag, quantity: Math.max(1, Math.round(Number(quantity) || 1)) };
+  });
+}
+
 /**
  * Có đẩy giỏ bằng một dòng combo POS không, và giá của nó. Giỏ khớp combo POS →
  * một dòng combo (như nhân viên), giá hàng = tổng CRM trừ phí ship; POS niêm yết

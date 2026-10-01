@@ -27,6 +27,7 @@ import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus } from './phone-warnings.mjs';
 import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
+import { applyPosContentToConversations } from './pos-content-sync.mjs';
 import { cancelPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
@@ -3137,7 +3138,14 @@ server.headersTimeout = 66000;
 server.listen(serverConfig.port, serverConfig.host, () => {
   console.log(`CRM running at http://${serverConfig.host}:${serverConfig.port}/`);
   // Đơn landing từ mọi trang Webcake (kể cả đơn bỏ dở) được kéo từ POS mỗi 5 phút.
-  if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders });
+  // Nhân viên sửa đơn trên POS: nội dung mới chép về đơn trong hội thoại, khung khách vẽ lại.
+  const onPosContent = posOrders => applyPosContentToConversations(posOrders, {
+    onChanged: async ({ conversationId, orders }) => {
+      for (const order of orders) await appendOrderToArchive(order).catch(() => {});
+      publishMessagingEvent({ type: 'customer-panel', conversationId });
+    }
+  });
+  if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders, onPosContent });
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   // Đồng bộ định kỳ cũng đưa bot tin khách mới chưa ai trả lời (webhook Pancake bỏ sót / tạm ngưng).
   // Cùng móc như webhook: chào khách quét QR và bỏ tin quét thẻ khỏi bot.

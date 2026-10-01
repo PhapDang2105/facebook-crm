@@ -5,8 +5,8 @@ import vm from 'node:vm';
 
 // Màn Tổng quan là HTML/JS thuần, không có bước build: kiểm dây nối trên mã nguồn
 // và chạy thử vài hàm thuần (định dạng số, mũi tên so kỳ, biểu đồ) trong vm.
-const web = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
-const html = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
+const web = (await readFile(new URL('../web/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+const html = (await readFile(new URL('../web/index.html', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const section = (source, start, length = 4000) => {
   const at = source.indexOf(start);
   assert.ok(at >= 0, `không tìm thấy: ${start}`);

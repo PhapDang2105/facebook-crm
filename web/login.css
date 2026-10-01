@@ -157,6 +157,9 @@ body {
 
 .login-error { margin: 0; padding: 10px 12px; color: var(--danger); background: var(--danger-soft); border: 1px solid #f6c9c4; border-radius: 10px; font-size: 13px; }
 .login-error[hidden] { display: none; }
+/* Lý do phải đăng nhập lại (vừa đổi mật khẩu, phiên hết hạn): báo trung tính, không phải lỗi. */
+.login-notice { margin: 0; padding: 10px 12px; color: #1d4f91; background: #eef4ff; border: 1px solid #c7dbff; border-radius: 10px; font-size: 13px; line-height: 1.45; }
+.login-notice[hidden] { display: none; }
 
 .login-submit {
   position: relative;
@@ -183,7 +186,7 @@ body {
 @keyframes login-spin { to { transform: rotate(360deg); } }
 
 .login-help { margin: 2px 0 0; color: var(--muted); text-align: center; font-size: 12.5px; }
-.login-help strong { color: var(--earth); font-weight: 500; }
+.login-help strong { color: var(--earth); font-weight: 500; white-space: nowrap; }
 .login-legal { margin: 0; color: #a8977f; font-size: 12px; text-align: center; }
 
 /* ---------- Máy tính bảng / điện thoại ---------- */

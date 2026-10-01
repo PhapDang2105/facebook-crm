@@ -26,6 +26,18 @@ function nextPath() {
   return safeNext(new URLSearchParams(location.search).get('next'));
 }
 
+// Lý do bị đưa về đây (?reason=): báo để người dùng không tưởng là lỗi.
+const loginReasons = {
+  'password-changed': 'Mật khẩu đã đổi. Đăng nhập lại bằng mật khẩu mới.',
+  expired: 'Phiên đăng nhập đã hết hạn hoặc bị đăng xuất từ nơi khác. Vui lòng đăng nhập lại.'
+};
+const notice = document.querySelector('#login-notice');
+const reasonText = loginReasons[new URLSearchParams(location.search).get('reason') || ''] || '';
+if (notice && reasonText) {
+  notice.textContent = reasonText;
+  notice.hidden = false;
+}
+
 function showError(message) {
   errorBox.textContent = message;
   errorBox.hidden = !message;

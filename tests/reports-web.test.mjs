@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 // Màn Báo cáo là HTML/JS thuần, không có bước build: kiểm dây nối trên mã nguồn.
-const web = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
-const html = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
+const web = (await readFile(new URL('../web/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+const html = (await readFile(new URL('../web/index.html', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const section = (source, start, length = 4000) => {
   const at = source.indexOf(start);
   assert.ok(at >= 0, `không tìm thấy: ${start}`);

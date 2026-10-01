@@ -6,7 +6,8 @@ function redirectToLogin() {
   if (redirectingToLogin) return;
   redirectingToLogin = true;
   const here = location.pathname + location.search + location.hash;
-  location.assign(here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
+  // reason=expired: trang đăng nhập nói rõ vì sao (không phải lỗi người dùng).
+  location.assign(here === '/' ? '/login?reason=expired' : `/login?reason=expired&next=${encodeURIComponent(here)}`);
 }
 window.fetch = async (...args) => {
   const response = await nativeFetch(...args);
@@ -139,6 +140,8 @@ let sessionDisplayName = '';
 // Tên đăng nhập của người đang dùng: dòng "… đã xem" trong khung chat không tính chính mình.
 let sessionUsername = '';
 let sessionLoginEnabled = false;
+// Hội thoại đang mở do tự khôi phục lúc tải trang (chưa ai thao tác) — '' khi nhân viên tự mở.
+let autoReopenedConversationId = '';
 
 function showTopbarIdentity(name, meta = '') {
   if (!name) return;
@@ -151,7 +154,11 @@ function showTopbarIdentity(name, meta = '') {
   if (topbarUserButton) topbarUserButton.title = `Tài khoản: ${name}`;
 }
 
-fetch('/api/auth/session').then(response => response.ok ? response.json() : null).then(session => {
+// Một lần hỏi phiên cho cả trang: staff.js/audit.js dùng chung qua window.crmSessionRequest
+// (trước đây mỗi tệp tự gọi /api/auth/session lúc tải).
+const crmSessionRequest = fetch('/api/auth/session').then(response => (response.ok ? response.json() : null)).catch(() => null);
+window.crmSessionRequest = crmSessionRequest;
+crmSessionRequest.then(session => {
   if (!session?.enabled) return;
   logoutButton?.classList.remove('hidden');
   sessionDisplayName = session.name || session.username || '';
@@ -212,7 +219,9 @@ function applyStaffReadOnly() {
     if (!staffReadOnlyObservers.has(panel)) {
       const observer = new MutationObserver(() => {
         if (staffReadOnlyFrame) return;
-        staffReadOnlyFrame = window.requestAnimationFrame(() => {
+        // setTimeout thay cho requestAnimationFrame: rAF dừng khi thẻ trình duyệt bị ẩn, nút
+        // Quản trị vẽ lúc đó (danh sách Kênh tải xong) sẽ không được ẩn cho tới lần vẽ sau.
+        staffReadOnlyFrame = window.setTimeout(() => {
           staffReadOnlyFrame = 0;
           staffReadOnlySections.forEach(name => {
             const target = document.querySelector(`[data-settings-panel="${name}"]`);
@@ -977,12 +986,17 @@ const importHistoryRowLimit = 2000;
 let orderImportHistory = [];
 const hiddenPreviewColumns = new Set(['ma don hang', 'phuong xa', 'quan huyen', 'tinh thanh pho', 'ma mau ma']);
 
+// Bảng đơn đã lưu ở trình duyệt. Chỉ đọc ở đây; thêm cột "Ghi chú xử lý" làm lúc khởi động
+// (trước renderOrderData đầu tiên) vì hằng orderStaffNoteHeader khai báo phía dưới: gọi
+// ensureOrderStaffNoteColumn tại đây ném ReferenceError, rơi vào catch và XOÁ bảng đã lưu
+// (kể cả dòng import XLSX) ở mỗi lần tải trang. Chỉ xoá khi JSON hỏng thật.
+let savedOrderData = null;
 try {
-  const savedOrderData = JSON.parse(localStorage.getItem('crm-orders') || 'null');
-  if (savedOrderData && Array.isArray(savedOrderData.headers) && Array.isArray(savedOrderData.rows)) orderData = ensureOrderStaffNoteColumn(savedOrderData);
+  savedOrderData = JSON.parse(localStorage.getItem('crm-orders') || 'null');
 } catch {
-  localStorage.removeItem('crm-orders');
+  try { localStorage.removeItem('crm-orders'); } catch {}
 }
+if (savedOrderData && Array.isArray(savedOrderData.headers) && Array.isArray(savedOrderData.rows)) orderData = savedOrderData;
 
 try {
   const savedImportHistory = JSON.parse(localStorage.getItem(importHistoryKey) || '[]');
@@ -991,12 +1005,18 @@ try {
   localStorage.removeItem(importHistoryKey);
 }
 
+let hashSetByShowView = '';
 function showView(name) {
   views.forEach((view, viewName) => view.classList.toggle('hidden', viewName !== name));
   navItems.forEach(item => item.classList.toggle('active', item.dataset.view === name));
   orderNav.setAttribute('aria-expanded', String(name === 'orders'));
   settingsNav?.setAttribute('aria-expanded', String(name === 'settings'));
-  if (window.location.hash !== `#${name}`) window.location.hash = name;
+  if (window.location.hash !== `#${name}`) {
+    // Đổi hash ở đây sinh sự kiện hashchange: đánh dấu để bộ nghe bỏ qua, không mở màn lần
+    // hai (trước đây mỗi lần bấm menu gọi API của màn đó hai lần).
+    hashSetByShowView = name;
+    window.location.hash = name;
+  }
   if (name === 'orders') {
     syncChatbotOrdersIntoTable();
     // Ảnh sản phẩm ở cột Sản phẩm lấy từ danh mục: tải danh mục lần đầu mở bảng.
@@ -1006,7 +1026,9 @@ function showView(name) {
   if (name === 'campaigns') loadCampaigns();
   if (name === 'dashboard') loadDashboard();
   if (name === 'reports') loadReports();
-  if (name === 'settings') loadPosChannel();
+  // Kênh Pancake POS chỉ nằm ở mục Kênh: mục khác đang mở thì không hỏi (showSettingsSection
+  // tự gọi khi chọn Kênh).
+  if (name === 'settings' && !settingsPanels.get('channels')?.classList.contains('hidden')) loadPosChannel();
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,13 +1181,21 @@ function renderPosChannel(pos) {
     : '<p class="channel-empty">Chưa kết nối. Lấy khoá trong POS: Cài đặt → Nâng cao → Tích hợp bên thứ 3 → Webhook/API → API Key → Thêm mới, rồi dán vào ô bên trên. Khi đã kết nối, số hay bom hàng được cảnh báo tự động trong Đơn hàng.</p>';
 }
 
-async function loadPosChannel() {
-  if (!posChannelList) return;
-  try {
-    renderPosChannel(await readApiResponse(await fetch('/api/phone-warnings/pos')));
-  } catch (error) {
-    posChannelList.innerHTML = `<p class="channel-empty">${escapeHtml(error.message || 'Chưa kiểm tra được kết nối Pancake POS.')}</p>`;
-  }
+// Mở Cài đặt (showView) và chọn mục Kênh (showSettingsSection) cùng gọi: dùng chung một lần hỏi.
+let posChannelRequest = null;
+function loadPosChannel() {
+  if (!posChannelList) return Promise.resolve();
+  if (posChannelRequest) return posChannelRequest;
+  posChannelRequest = (async () => {
+    try {
+      renderPosChannel(await readApiResponse(await fetch('/api/phone-warnings/pos')));
+    } catch (error) {
+      posChannelList.innerHTML = `<p class="channel-empty">${escapeHtml(error.message || 'Chưa kiểm tra được kết nối Pancake POS.')}</p>`;
+    } finally {
+      posChannelRequest = null;
+    }
+  })();
+  return posChannelRequest;
 }
 
 document.querySelector('#pos-connect-form')?.addEventListener('submit', async event => {
@@ -1298,17 +1328,28 @@ function timeSince(value) {
   return `${Math.floor(months / 12)} năm trước`;
 }
 
-/** Ngày mua gọn cho ô đơn hàng — giờ phút không giúp gì cho remarketing. */
-function formatCustomerDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
+// ===== Định dạng chung: ngày dd/mm/yyyy, tiền "149.000đ" (mọi màn dùng hai hàm này) =====
+function formatVnDate(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
   const pad = number => String(number).padStart(2, '0');
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
+function formatVnMoney(value) {
+  return `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(value) || 0))}đ`;
+}
+
+/** Ngày mua gọn cho ô đơn hàng — giờ phút không giúp gì cho remarketing. */
+function formatCustomerDate(value) {
+  if (!value) return '';
+  return formatVnDate(value);
+}
+
 function formatCustomerMoney(value) {
   const amount = Math.max(0, Math.round(Number(value) || 0));
-  return amount ? `${new Intl.NumberFormat('vi-VN').format(amount)}đ` : '—';
+  return amount ? formatVnMoney(amount) : '—';
 }
 
 /** Tỉnh thành lấy từ mảnh cuối của địa chỉ, phần còn lại là địa chỉ chi tiết. */
@@ -1869,7 +1910,8 @@ async function loadCampaignInsights() {
 }
 
 async function syncCampaigns() {
-  if (campaignsSyncing) return;
+  // Nhân viên thường: máy chủ trả 403 (chỉ Quản trị đồng bộ quảng cáo); nút đã ẩn bằng CSS role-staff.
+  if (campaignsSyncing || isStaffReadOnly()) return;
   campaignsSyncing = true;
   setCampaignsBusy(campaignsSyncButton, true, 'Đang đồng bộ…', 'Đồng bộ');
   const requestId = ++campaignsRequestId;
@@ -1905,7 +1947,7 @@ function friendlyAiError(error, fallback) {
 }
 
 async function analyzeCampaigns() {
-  if (campaignsAnalyzing) return;
+  if (campaignsAnalyzing || isStaffReadOnly()) return;
   campaignsAnalyzing = true;
   setCampaignsBusy(campaignsAiButton, true, 'Đang phân tích…', 'AI phân tích');
   const requestId = ++campaignsInsightsRequestId;
@@ -2824,6 +2866,19 @@ function customerGenderText(customer) {
 let customerSheet = null;
 let customerSheetToken = 0;
 
+/** Cảnh báo không chặn máy chủ trả sau khi lưu (PATCH khách / đơn): `warnings: string[]`. */
+function saveWarnings(result) {
+  return (Array.isArray(result?.warnings) ? result.warnings : []).map(item => String(item || '').trim()).filter(Boolean).slice(0, 5);
+}
+/** Báo cảnh báo sau khi lưu: toast vàng (không vào chuông, không chặn), giữ lâu hơn để kịp đọc. */
+function showSaveWarnings(warnings, prefix = 'Đã lưu, nhưng lưu ý') {
+  if (!warnings.length) return false;
+  showToast(`${prefix}: ${warnings.join(' · ')}`, 'warning', 8000);
+  return true;
+}
+// Cảnh báo của lần lưu hồ sơ khách gần nhất, hiện ngay dưới ô SĐT trong hộp chi tiết khách.
+let customerSheetWarnings = { id: '', items: [] };
+
 function customerFact(label, value) {
   return `<div><dt>${escapeHtml(label)}</dt><dd>${value || '—'}</dd></div>`;
 }
@@ -2835,6 +2890,33 @@ function customerNoteCountText(customer) {
   const staff = Number(customer.staffNoteCount) || 0;
   if (!total) return '';
   return staff && staff !== total ? `${total} ghi chú (${staff} thêm ở đây)` : `${total} ghi chú`;
+}
+
+// Tên Page của khách: máy chủ chỉ biết Page trong kho kênh; Page Pancake (cấu hình .env)
+// lấy tên từ danh sách kênh của màn Tin nhắn. Không có tên mới hiện mã.
+function customerChannelName(customer) {
+  if (customer?.channelName) return customer.channelName;
+  const channel = messageChannels.find(item => String(item.id) === String(customer?.channelId || ''));
+  return channel?.name || String(customer?.channelId || '');
+}
+
+/**
+ * Đơn trong hội thoại của khách (bot chốt, nhân viên lên) chưa vào kho lưu trữ: "Tổng số đơn"
+ * đã đếm nhưng /api/customers/:id/orders chỉ đọc tệp xuất kho + kho lưu trữ. Bù từ khung
+ * khách hàng của từng hội thoại (tối đa 5), gộp theo mã đơn.
+ */
+async function customerConversationOrders(customer) {
+  const conversations = (customer?.conversations || []).slice(0, 5);
+  const panels = await Promise.all(conversations.map(item => fetch(`/api/messaging/conversations/${encodeURIComponent(item.id)}/customer-panel`)
+    .then(response => (response.ok ? response.json() : null)).catch(() => null)));
+  return panels.flatMap(panel => (Array.isArray(panel?.orders) ? panel.orders : [])).map(order => ({
+    id: String(order.id || ''),
+    at: Number(order.createdAt) || 0,
+    status: String(order.status || ''),
+    source: String(order.source || ''),
+    total: Number(order.total) || 0,
+    products: (Array.isArray(order.products) ? order.products : []).map(item => ({ sku: String(item.sku || ''), name: String(item.name || item.sku || ''), quantity: Number(item.quantity) || 0 }))
+  })).filter(order => order.id);
 }
 
 function customerSheetOrdersHtml(orders) {
@@ -2871,13 +2953,13 @@ function renderCustomerSheet(customer, orders) {
     <section class="customer-sheet-block">
       <h3><img src="/assets/icons/customer-panel/user.png" alt="">Thông tin liên hệ</h3>
       <dl class="customer-facts">
-        ${customerFact('Số điện thoại', escapeHtml(customer.phone))}
+        ${customerFact('Số điện thoại', `${escapeHtml(customer.phone)}${customerSheetWarnings.id === customer.id && customerSheetWarnings.items.length ? customerSheetWarnings.items.map(item => `<small class="field-warning" role="status">⚠ ${escapeHtml(item)}</small>`).join('') : ''}`)}
         ${customerFact('Giới tính', escapeHtml(customerGenderText(customer)))}
         ${customerFact('Khu vực', escapeHtml(customerProvince(customer)))}
         ${customerFact('Địa chỉ giao hàng', escapeHtml(customer.address))}
         ${customerFact('Nguồn khách', escapeHtml((customer.sources || []).map(source => customerSourceNames[source] || source).join(', ')))}
         ${customerFact('Quảng cáo dẫn vào', escapeHtml(customer.adTitle))}
-        ${customerFact('Trang', escapeHtml(customer.channelName || customer.channelId))}
+        ${customerFact('Trang', escapeHtml(customerChannelName(customer)))}
         ${customerFact('Thẻ', labels.map(customerLabelChip).join(' '))}
       </dl>
     </section>
@@ -2917,6 +2999,7 @@ async function openCustomerDialog(customer) {
   // phải huỷ kết quả của lần mở trước, nếu không bản cũ về sau sẽ vẽ đè lên và
   // xoá mất thay đổi vừa lưu.
   const token = ++customerSheetToken;
+  if (customerSheetWarnings.id && customerSheetWarnings.id !== customer.id) customerSheetWarnings = { id: '', items: [] };
   customerSheet = { customer, orders: null, token };
   closeCustomerSheetForm();
   // "Gọi" chỉ bấm được khi có số; nút chết mà vẫn sáng thì gây hiểu nhầm.
@@ -2926,10 +3009,15 @@ async function openCustomerDialog(customer) {
   customerDialog.classList.remove('hidden');
 
   try {
-    const result = await readApiResponse(await fetch(`/api/customers/${encodeURIComponent(customer.id)}/orders`));
+    const [archived, conversationOrders] = await Promise.all([
+      fetch(`/api/customers/${encodeURIComponent(customer.id)}/orders`).then(readApiResponse).then(result => (Array.isArray(result.items) ? result.items : [])),
+      customerConversationOrders(customer)
+    ]);
     // Nhân viên đã đóng hộp hoặc mở khách khác trong lúc chờ thì bỏ kết quả.
     if (customerSheetToken !== token) return;
-    customerSheet.orders = Array.isArray(result.items) ? result.items : [];
+    const known = new Set(archived.map(order => rawOrderIdOf(order.id)));
+    customerSheet.orders = [...archived, ...conversationOrders.filter(order => !known.has(rawOrderIdOf(order.id)))]
+      .sort((first, second) => (Number(second.at) || 0) - (Number(first.at) || 0));
     renderCustomerSheet(customer, customerSheet.orders);
   } catch {
     if (customerSheetToken !== token) return;
@@ -3064,7 +3152,9 @@ async function saveCustomerSheet(kind) {
       body: JSON.stringify(request.body)
     }));
     closeCustomerSheetForm();
-    showToast(kind === 'note' ? 'Đã lưu ghi chú.' : 'Đã lưu thay đổi.', 'success');
+    const warnings = kind === 'profile' ? saveWarnings(result) : [];
+    customerSheetWarnings = { id: warnings.length ? String(result?.id || customer.id) : '', items: warnings };
+    if (!showSaveWarnings(warnings)) showToast(kind === 'note' ? 'Đã lưu ghi chú.' : 'Đã lưu thay đổi.', 'success');
     // Vẽ lại hộp bằng chính bản server vừa trả về, KHÔNG đợi loadCustomers rồi
     // tra lại: loadCustomers nuốt lỗi mạng và cũng thoát sớm khi có lượt tải
     // mới hơn, nên tra sau nó có thể ra đúng bản cũ và hộp hiện lại giá trị
@@ -3206,6 +3296,8 @@ function closeCustomersExportMenu() {
 
 customersExportButton?.addEventListener('click', event => {
   event.stopPropagation();
+  // Xuất danh sách / tệp remarketing chỉ Quản trị (máy chủ 403 với nhân viên thường).
+  if (isStaffReadOnly()) return;
   const open = customersExportMenu?.classList.toggle('hidden') === false;
   customersExportButton.setAttribute('aria-expanded', String(open));
 });
@@ -3247,7 +3339,9 @@ async function syncChatbotOrdersIntoTable() {
   try {
     const result = await readApiResponse(await fetch('/api/customer-orders'));
     // Đơn mới tự vào bảng lặng lẽ, không báo số lượng (thông báo thừa với nhân viên).
-    mergeChatbotOrdersIntoTable(Array.isArray(result.items) ? result.items : []);
+    const added = mergeChatbotOrdersIntoTable(Array.isArray(result.items) ? result.items : []);
+    // Màn Xuất dữ liệu đang mở mà bảng không đổi (không vẽ lại): vẫn dựng bảng xuất từ dữ liệu đã có.
+    if (!added && !orderPanels.get('export')?.classList.contains('hidden')) renderExportPreview();
   } catch (error) {
     showToast(error.message || 'Chưa lấy được đơn từ chatbot.', 'error');
   }
@@ -3313,6 +3407,18 @@ function paidUnitPrices(order, products) {
   return units;
 }
 
+// Nguồn đơn hệ thống trên bảng, cùng luật với Báo cáo (app/order-facts.mjs orderSourceKey):
+// landing → "Landing page"; đơn tạo trên POS kéo về → "Pancake"; bot chốt → "Chatbot";
+// nhân viên lên tay trong khung khách hàng (nguồn trống/"Facebook") → "Nhập tay".
+function systemOrderSourceLabel(order) {
+  const source = String(order?.source || '').trim();
+  if (source === 'Landing page' || order?.landing) return 'Landing page';
+  if (source === 'POS') return 'Pancake';
+  if (order?.automatic === true || order?.employee === 'Chatbot AI') return 'Chatbot';
+  if (!source || source === 'Facebook') return 'Nhập tay';
+  return source;
+}
+
 function chatbotOrderToRows(order) {
   // The server resolves the three levels against the warehouse list when the
   // order is created; the comma split only covers orders made before that.
@@ -3323,8 +3429,7 @@ function chatbotOrderToRows(order) {
   const ward = resolved ? (order.ward || '') : (parts.length > 3 ? parts.at(-3) : '');
   const products = Array.isArray(order.products) && order.products.length ? order.products : [{ name: '', sku: '', quantity: 1, price: order.total }];
   const paidUnits = paidUnitPrices(order, products);
-  // Đơn nhân viên/Facebook Shop tạo trên POS (đồng bộ về) ghi nguồn "Pancake".
-  const sourceLabel = order.source === 'Landing page' ? 'Landing page' : order.source === 'POS' ? 'Pancake' : 'Chatbot';
+  const sourceLabel = systemOrderSourceLabel(order);
   // Ghi chú xử lý do server dựng (⚠ thiếu gì, ⏳ bỏ dở, 🤖 tự điền, ☎ gọi xác
   // nhận, ℹ thông tin thêm) đứng trước lời khách; bảng tô màu theo ký hiệu.
   const flags = (Array.isArray(order.processingNotes) ? order.processingNotes : []).join(' · ');
@@ -3842,12 +3947,12 @@ async function saveOrderRowEdit(rowIndex) {
   });
   if (!serverId) { showToast('Đã lưu thay đổi.', 'success'); return; }
   try {
-    await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(serverId)}`, {
+    const saved = await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(serverId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch)
     }));
-    showToast('Đã lưu', 'success', 1200);
+    if (!showSaveWarnings(saveWarnings(saved))) showToast('Đã lưu', 'success', 1200);
   } catch (error) {
     showToast(error.message || 'Chưa lưu được lên máy chủ, bảng đang giữ bản sửa tạm.', 'critical');
   }
@@ -4161,8 +4266,8 @@ function renderImportSummary(entries) {
   }
   for (const kept of keptByPhone.values()) { validOrders += 1; validCod += kept.total; }
   box.innerHTML = entries.length
-    ? `<span>Tổng đơn: <strong>${orders.size}</strong></span><span>COD: <strong>${cod.toLocaleString('vi-VN')} đ</strong></span>`
-      + `<span class="order-import-summary-valid">Đơn hợp lệ: <strong>${validOrders}</strong></span><span class="order-import-summary-valid">COD hợp lệ: <strong>${validCod.toLocaleString('vi-VN')} đ</strong></span>`
+    ? `<span>Tổng đơn: <strong>${orders.size}</strong></span><span>COD: <strong>${formatVnMoney(cod)}</strong></span>`
+      + `<span class="order-import-summary-valid">Đơn hợp lệ: <strong>${validOrders}</strong></span><span class="order-import-summary-valid">COD hợp lệ: <strong>${formatVnMoney(validCod)}</strong></span>`
     : '';
 }
 
@@ -4557,6 +4662,9 @@ function showOrderStage(stage) {
   orderStageButtons.forEach(button => button.classList.toggle('active', button.dataset.orderStage === stage));
   // Màn này bị bỏ qua ở lần vẽ trước (đang ẩn) thì vẽ bây giờ.
   if (orderPanelsDirty.has(stage)) renderOrderData();
+  // Xuất dữ liệu lấy dòng từ máy chủ (đã có bộ đệm theo nội dung bảng): mở màn là dựng ngay,
+  // không phụ thuộc màn Nhập dữ liệu đã vẽ chưa — trước đây vào thẳng thì bảng trống, nút Xuất khoá.
+  else if (stage === 'export') renderExportPreview();
 }
 
 function parseCsv(text) {
@@ -4632,7 +4740,8 @@ function renderNotifications() {
     message.textContent = item.message;
     const time = document.createElement('time');
     time.dateTime = new Date(item.at).toISOString();
-    time.textContent = new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }).format(item.at);
+    // Cùng kiểu "01/10 15:18" với cột Ngày của Đơn hàng.
+    time.textContent = formatOrderDate({ createdAt: item.at });
     row.append(message, time);
     notificationList.appendChild(row);
   }
@@ -4655,12 +4764,13 @@ function setNotificationsOpen(open) {
 
 // Loại thông báo: success (xanh), info (tin trung tính, vd "Đang lọc…"),
 // warning (nhắc kiểm tra ô nhập), error (lỗi), critical (lỗi có thể mất dữ liệu).
-// Chỉ success/error/critical mới ghi vào chuông; info/warning chỉ hiện toast
-// cho khỏi thành "lỗi đỏ". Chỉ critical mới tự mở bảng Thông báo.
-const NOTIFICATION_STORED_TYPES = new Set(['success', 'error', 'critical']);
-function addNotification(message, type) {
+// Chuông chỉ giữ thông báo QUAN TRỌNG: lỗi (error/critical) và những tin thành công
+// được gọi kèm { notify: true } (vd đã tạo đơn cho khách). "Đã lưu…", nhắc nhập liệu
+// chỉ hiện toast. Chỉ critical mới tự mở bảng Thông báo.
+const NOTIFICATION_STORED_TYPES = new Set(['error', 'critical']);
+function addNotification(message, type, { notify } = {}) {
   if (notificationAnnouncement) notificationAnnouncement.textContent = String(message);
-  if (!NOTIFICATION_STORED_TYPES.has(type)) return;
+  if (!(notify ?? NOTIFICATION_STORED_TYPES.has(type))) return;
   notifications.unshift({ message: String(message), type, at: Date.now(), read: false });
   notifications = notifications.slice(0, 50);
   saveNotifications();
@@ -4682,9 +4792,9 @@ document.addEventListener('keydown', event => {
 });
 renderNotifications();
 
-function showToast(message, type = 'info', duration = 3500) {
+function showToast(message, type = 'info', duration = 3500, options = {}) {
   if (!['success', 'info', 'warning', 'error', 'critical'].includes(type)) type = 'info';
-  addNotification(message, type);
+  addNotification(message, type, options);
   document.querySelector('.app-toast')?.remove();
   const toast = document.createElement('div');
   toast.className = `app-toast app-toast--${type}${type === 'critical' ? ' app-toast--error' : ''}`;
@@ -4713,6 +4823,21 @@ function channelAvatar(channel) {
     : `<span class="channel-item-avatar">${escapeHtml(channel.name.trim().charAt(0).toUpperCase() || 'f')}</span>`;
 }
 
+/**
+ * Câu báo lỗi đồng bộ của một Page, '' khi ổn. Đọc được nhiều dạng máy chủ có thể trả:
+ * syncError/lastSyncError (chuỗi), sync { ok, error, errorAt|at }, syncErrorAt. Lần đồng bộ
+ * thành công sau lỗi (syncedAt mới hơn errorAt) thì coi như hết lỗi.
+ */
+function channelSyncError(channel) {
+  const sync = channel?.sync && typeof channel.sync === 'object' ? channel.sync : {};
+  const message = String(channel?.syncError || channel?.lastSyncError || sync.error || (sync.ok === false ? 'Đồng bộ thất bại' : '') || '').trim();
+  if (!message) return '';
+  const errorAt = Number(channel?.syncErrorAt || sync.errorAt || sync.at) || 0;
+  const syncedAt = Number(channel?.syncedAt) || Date.parse(channel?.syncedAt || '') || 0;
+  if (errorAt && syncedAt > errorAt) return '';
+  return `Lỗi đồng bộ${errorAt ? ` lúc ${formatOrderDate({ createdAt: errorAt })}` : ''}: ${message.slice(0, 160)}`;
+}
+
 function renderFacebookChannels(state) {
   const items = Array.isArray(state.items) ? state.items : [];
   if (facebookConnectButton) {
@@ -4724,17 +4849,28 @@ function renderFacebookChannels(state) {
     const healthy = channel.status === 'connected';
     // The dot says it all when the page is healthy; text appears only when something needs attention.
     const problem = channel.subscribed ? '' : `${channel.subscriptionError || 'Chưa đăng ký webhook'} · `;
-    return `<article class="channel-item" data-channel-id="${escapeHtml(channel.id)}">
+    // Lỗi đồng bộ gần nhất (máy chủ ghi khi kéo hội thoại Pancake/Meta thất bại): chấm đỏ + giờ lỗi.
+    const syncError = channelSyncError(channel);
+    const dotClass = syncError || channel.status === 'error' ? ' error' : (healthy && channel.subscribed ? '' : ' warning');
+    return `<article class="channel-item${syncError ? ' is-sync-error' : ''}" data-channel-id="${escapeHtml(channel.id)}">
       ${channelAvatar(channel)}
-      <div class="channel-item-copy"><strong>${escapeHtml(channel.name)}</strong><small><span class="channel-connected-dot${healthy && channel.subscribed ? '' : ' warning'}"></span>${escapeHtml(problem)}ID ${escapeHtml(channel.id)}</small></div>
+      <div class="channel-item-copy"><strong>${escapeHtml(channel.name)}</strong><small><span class="channel-connected-dot${dotClass}"></span>${escapeHtml(problem)}ID ${escapeHtml(channel.id)}</small>${syncError ? `<small class="channel-sync-error">${escapeHtml(syncError)}</small>` : ''}</div>
       <div class="channel-item-actions"><button type="button" data-channel-action="refresh">Làm mới</button><button type="button" data-channel-action="profiles" title="Tra lại tên và ảnh đại diện cho các khách chưa có ảnh">Tải ảnh khách</button><button class="channel-remove-button" type="button" data-channel-action="remove">Ngắt kết nối</button></div>
     </article>`;
   }).join('') : '<p class="channel-empty">Chưa có Facebook Page nào được kết nối.</p>';
 }
 
+// Kênh (Facebook Page) cho Cài đặt → Kênh và màn Tin nhắn: hai nơi gọi cùng lúc lúc tải trang
+// thì dùng chung một lần gọi /api/channels; gọi sau khi xong thì hỏi lại máy chủ.
+let channelsRequest = null;
+function fetchChannelsState() {
+  if (!channelsRequest) channelsRequest = fetch('/api/channels').then(readApiResponse).finally(() => { channelsRequest = null; });
+  return channelsRequest;
+}
+
 async function loadFacebookChannels() {
   try {
-    const state = await readApiResponse(await fetch('/api/channels'));
+    const state = await fetchChannelsState();
     renderFacebookChannels(state);
     return state;
   } catch (error) {
@@ -5003,8 +5139,29 @@ function reopenLastConversation() {
   // Có tin mới chưa đọc từ lúc rời trang: không tự mở (mở là bị coi đã đọc), để nhân viên bấm.
   if (!element || element.classList.contains('hidden') || element.classList.contains('unread')) return false;
   selectConversation(element);
+  // Tự mở lại, chưa ai thao tác: tin khách mới đến vẫn để chưa đọc (không gửi "đã xem" cho
+  // khách) cho tới khi nhân viên bấm/gõ trong khung chat.
+  autoReopenedConversationId = element.dataset.conversationId || '';
   return true;
 }
+
+function isUnattendedConversation(conversation) {
+  return Boolean(autoReopenedConversationId) && conversation?.dataset.conversationId === autoReopenedConversationId;
+}
+// Nhân viên bấm/gõ trong khung chat của hội thoại tự mở lại: coi như đã mở thật, đánh dấu
+// đã đọc nếu trong lúc đó khách nhắn thêm.
+function engageAutoReopenedConversation(event) {
+  if (!autoReopenedConversationId || !event.target?.closest?.('.chat-panel')) return;
+  const active = getActiveConversation();
+  autoReopenedConversationId = '';
+  if (active?.classList.contains('unread')) {
+    active.classList.remove('unread');
+    markRemoteConversationRead(active);
+    updateMarkUnreadButton();
+  }
+}
+document.addEventListener('pointerdown', engageAutoReopenedConversation, true);
+document.addEventListener('keydown', engageAutoReopenedConversation, true);
 
 function conversationPreviewText(conversation) {
   const preview = conversation.lastMessagePreview || 'Chưa có tin nhắn';
@@ -5185,14 +5342,17 @@ function handleMessagingEvent(event) {
   }
   const conversation = event.conversation;
   if (!conversation || conversation.channelId !== currentMessageChannelId) return;
-  const isActive = getActiveConversation()?.dataset.conversationId === conversation.id;
+  const activeElement = getActiveConversation();
+  const isActive = activeElement?.dataset.conversationId === conversation.id;
+  // Đang mở nhưng chỉ do tự khôi phục (chưa ai xem): giữ trạng thái chưa đọc của máy chủ.
+  const attended = isActive && !isUnattendedConversation(activeElement);
   if (event.message) cacheRemoteMessage(conversation.id, event.message);
-  const element = applyRemoteConversation({ ...conversation, unread: isActive ? false : conversation.unread });
+  const element = applyRemoteConversation({ ...conversation, unread: attended ? false : conversation.unread });
   if (isActive) {
     renderConversation(element);
-    if (event.message?.direction === 'incoming') markRemoteConversationRead(element);
+    if (attended && event.message?.direction === 'incoming') markRemoteConversationRead(element);
   }
-  sortConversationsByRecentActivity();
+  // filterConversations() tự sắp xếp (chỉ dời dòng lệch chỗ) trước khi lọc.
   filterConversations();
 }
 
@@ -5285,7 +5445,7 @@ function getDefaultChannelId(channels) {
 async function loadMessageChannels() {
   let connected = [];
   try {
-    const state = await readApiResponse(await fetch('/api/channels'));
+    const state = await fetchChannelsState();
     connected = (state.items || []).map(item => ({ id: String(item.id), name: item.name, picture: item.picture, platform: item.platform || 'facebook' }));
   } catch { /* Keep the local demo channel available while the server reconnects. */ }
   usingRemoteConversations = connected.length > 0;
@@ -5315,12 +5475,24 @@ async function loadMessageChannels() {
   reopenLastConversation();
 }
 
+// Chuỗi tìm kiếm đã chuẩn hoá (bỏ dấu) của từng dòng hội thoại, tính lại chỉ khi chữ của dòng
+// đổi. Trước đây mỗi sự kiện SSE chuẩn hoá lại textContent của cả ~2.200 dòng khi ô tìm có chữ.
+const conversationSearchKeys = new WeakMap();
+function conversationSearchKey(conversation) {
+  const raw = conversation.textContent;
+  const cached = conversationSearchKeys.get(conversation);
+  if (cached && cached.raw === raw) return cached.key;
+  const key = normalizeColumnName(raw);
+  conversationSearchKeys.set(conversation, { raw, key });
+  return key;
+}
+
 function filterConversations() {
   sortConversationsByRecentActivity();
   const query = normalizeColumnName(messageSearchInput?.value || '');
   let visibleCount = 0;
   getConversationItems().forEach(conversation => {
-    const matchesSearch = !query || normalizeColumnName(conversation.textContent).includes(query);
+    const matchesSearch = !query || conversationSearchKey(conversation).includes(query);
     const matchesFilter = currentConversationFilter !== 'unread' || conversation.classList.contains('unread');
     const matchesChannel = conversation.dataset.channelId === currentMessageChannelId;
     const labels = (conversation.dataset.labels || '').split(/\s+/).filter(Boolean);
@@ -5427,7 +5599,45 @@ function sortConversationsByRecentActivity() {
     return Number(first.dataset.initialOrder || 0) - Number(second.dataset.initialOrder || 0);
   });
   if (ordered.every((conversation, index) => conversation === conversations[index])) return;
-  ordered.forEach(conversation => conversationList.insertBefore(conversation, conversationEmpty));
+  moveConversationsIntoOrder(conversations, ordered);
+}
+
+/**
+ * Đưa danh sách về đúng thứ tự `ordered` (đã sắp xếp đủ) nhưng chỉ di chuyển những dòng lệch
+ * chỗ: giữ nguyên dãy con tăng dài nhất của vị trí hiện tại, chèn các dòng còn lại vào trước
+ * dòng đứng sau nó. Một hội thoại nhảy lên đầu = 1 lần chèn thay vì chèn lại cả ~2.200 dòng.
+ */
+function moveConversationsIntoOrder(current, ordered) {
+  const position = new Map(current.map((conversation, index) => [conversation, index]));
+  const positions = ordered.map(conversation => position.get(conversation));
+  const kept = new Set(longestIncreasingRun(positions).map(index => ordered[index]));
+  let anchor = conversationEmpty && conversationEmpty.parentNode === conversationList ? conversationEmpty : null;
+  // Danh sách có dòng cuối không phải conversationEmpty: neo sau dòng hội thoại cuối cùng.
+  if (!anchor) anchor = current.length ? current[current.length - 1].nextSibling : null;
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const conversation = ordered[index];
+    if (!kept.has(conversation)) conversationList.insertBefore(conversation, anchor);
+    anchor = conversation;
+  }
+}
+
+/** Chỉ số (trong `values`) của một dãy con tăng ngặt dài nhất — O(n log n). */
+function longestIncreasingRun(values) {
+  const tails = [];
+  const previous = new Array(values.length).fill(-1);
+  for (let index = 0; index < values.length; index += 1) {
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (values[tails[middle]] < values[index]) low = middle + 1; else high = middle;
+    }
+    if (low > 0) previous[index] = tails[low - 1];
+    tails[low] = index;
+  }
+  const run = [];
+  for (let index = tails.length ? tails[tails.length - 1] : -1; index >= 0; index = previous[index]) run.push(index);
+  return run.reverse();
 }
 
 function restoreConversationActivity() {
@@ -6483,7 +6693,33 @@ function chatbotTemplateLabel(id) {
     PRICE_MIX_TUI_LON: 'Bảng giá mix túi lớn', PRICE_ADJUSTMENT: 'Giải thích điều chỉnh giá', PRICE_QUOTE_COMBO: 'Báo giá sản phẩm (đơn vị Combo)',
     ECOMMERCE_LINKS: 'Link gian hàng', BAG_COMPARISON: 'So sánh các túi', SHIPPING_POLICY: 'Chính sách giao hàng',
     BANK_TRANSFER: 'Thông tin chuyển khoản', THANK_YOU: 'Cảm ơn khách hàng',
-    FOLLOW_UP_COMMENT_FREESHIP: 'Bám đuổi: tặng miễn ship dùng thử'
+    FOLLOW_UP_COMMENT_FREESHIP: 'Bám đuổi: tặng miễn ship dùng thử',
+    // Tên tiếng Việt cho mọi mẫu còn lại (mã mẫu tiếng Anh vẫn hiện ở ô "Mã mẫu tin").
+    ASK_FLAVOR: 'Hỏi khách chọn vị', ASK_FLAVOR_NGUYENBAN: 'Tư vấn vị nguyên bản', ASK_REORDER: 'Hỏi khách cũ đặt lại', ASK_TWO_BAGS: 'Hỏi vị cho combo 2 túi',
+    BAG_COMPARISON_XANH_VANG: 'So sánh Túi Xanh và Túi Vàng', BENEFITS: 'Công dụng của granola', CALLBACK_REQUEST: 'Hẹn gọi lại', CALORIES_DIET: 'Calo và ăn kiêng',
+    CERTIFICATION: 'Giấy tờ, công bố sản phẩm', COMBO3_FLAVOR: 'Chọn vị cho combo 3 túi', CONFIRM_YES: 'Khách xác nhận "đúng rồi"', CRUNCHY_CEREAL_INFO: 'Viên ngũ cốc giòn là gì',
+    DELIVERY_DELAY: 'Xin lỗi giao hàng chậm', DISCOUNT_POLICY: 'Chương trình ưu đãi combo', FREESHIP_POLICY: 'Chính sách miễn phí vận chuyển', FRESHNESS: 'Hàng mới, hạn dùng',
+    GIFT_POLICY_LIVE: 'Quà tặng khách xem live', GIFT_POLICY_PROMO: 'Quà tặng thời gian ưu đãi', GIFT_POLICY_UPSELL3: 'Quà tặng đơn từ 3 túi', GIFT_SWAP: 'Đổi quà tặng',
+    HEALTH_CONDITION: 'Người có bệnh nền', HEALTH_DIABETES: 'Người tiểu đường', HOW_TO_USE_GRANOLA: 'Cách dùng granola', IMAGE_RECEIVED: 'Đã nhận hình khách gửi',
+    IMAGE_WITH_PHONE: 'Đã nhận hình kèm số điện thoại', INGREDIENTS_ALLERGY: 'Thành phần, dị ứng', INSPECTION_RETURN_POLICY: 'Đồng kiểm và đổi trả', KIDS_FAMILY: 'Trẻ em, gia đình dùng',
+    LIVESTREAM_COMMENT: 'Bình luận phiên live', LIVESTREAM_VOUCHER: 'Voucher trên phiên live', LIVE_DEAL_CLAIMED: 'Khách đã săn deal trên live', LIVE_ONLY_PRODUCT: 'Sản phẩm chỉ bán trên live',
+    NO_ADDED_SUGAR: 'Không thêm đường', NO_VARIANT: 'Không đổi công thức theo yêu cầu', OIL_SMELL_WARRANTY: 'Mùi dầu, bảo hành chất lượng', OTHER_PRODUCTS: 'Sản phẩm khác ngoài granola',
+    ORDER_ADDRESS_OLD_ASK_PHONE: 'Xin SĐT để lấy lại địa chỉ cũ', ORDER_ADDRESS_REMIND: 'Nhắc khách gửi thông tin nhận hàng', ORDER_CANCELLED: 'Đã hủy đơn', ORDER_CANCEL_STAFF: 'Khách muốn hủy đơn (chuyển nhân viên)',
+    ORDER_CART_LINE: 'Tóm tắt giỏ hàng', ORDER_CHANGE_STAFF: 'Khách muốn đổi đơn (chuyển nhân viên)', ORDER_CUSTOM_BASKET: 'Giỏ lớn, nhân viên tính giá', ORDER_EXISTING_CONFIRM: 'Hỏi lại khi khách đã có đơn',
+    ORDER_HELP: 'Hướng dẫn đặt hàng qua tin nhắn', ORDER_HOLD_STAFF: 'Khách muốn tạm hoãn giao (chuyển nhân viên)', ORDER_INFO_ASK_FLAVOR: 'Đã có thông tin nhận hàng, hỏi vị', ORDER_NOTE_ADDED: 'Đã ghi chú vào đơn',
+    ORDER_PHONE_ASK_FLAVOR: 'Đã có SĐT, hỏi vị', ORDER_POSTPONED: 'Khách hẹn đặt sau', ORDER_STATUS: 'Tình trạng đơn hàng', ORDER_STATUS_CHECKING: 'Đang tra đơn (chuyển nhân viên)',
+    ORDER_STATUS_NONE: 'Chưa thấy đơn trong hội thoại', ORDER_UNCHANGED: 'Đơn giữ nguyên', ORDER_UPDATED: 'Đã sửa đơn', ORDER_WRONG: 'Đơn bị sai, xin sửa lại',
+    PACKAGING_INFO: 'Quy cách đóng gói', PAYMENT_METHODS: 'Cách thanh toán', PAYMENT_RECEIVED_CHECK: 'Đã nhận ảnh chuyển khoản', PRICE_COMPARE: 'Giá khác nhau giữa các kênh',
+    PRICE_COUNT: 'Báo giá theo số túi', PRICE_ONE_BAG: 'Báo giá 1 túi', PRICE_YEN_MACH_UC_NGUYEN_CAM: 'Bảng giá Yến Mạch Úc Nguyên Cám', PRODUCTION_PLACE: 'Nơi sản xuất',
+    PRODUCT_PHOTOS: 'Gửi hình sản phẩm', QR_OFFER: 'Ưu đãi khi quét mã QR', RECEIVED_CHECK: 'Hỏi khách đã nhận đủ hàng', RECOMMEND_BEGINNER: 'Gợi ý cho người mới ăn',
+    REFUSED_DELIVERY: 'Đơn bị từ chối nhận', REPLY_ALREADY_SENT: 'Đã gửi thông tin ở tin trên', REPLY_ALREADY_SENT_INFO: 'Đã trả lời ở tin trên', SHOP_ORDER_RECEIVED: 'Đã nhận đơn Facebook Shop',
+    STAFF_ONLY_PRODUCT: 'Sản phẩm do nhân viên bán', STORAGE: 'Cách bảo quản', STORE_ADDRESS: 'Địa chỉ cửa hàng', TRIAL_ACCEPT: 'Khách nhận ưu đãi dùng thử',
+    TRIAL_DECLINED: 'Khách chưa dùng thử', TRIAL_FREESHIP_INFO: 'Dùng thử miễn phí vận chuyển', TRIAL_NEXT_STEP: 'Hỏi khách chọn gói dùng thử', TRIAL_PRICE: 'Giá ưu đãi dùng thử',
+    TRIAL_REMIND: 'Nhắc ưu đãi dùng thử', TROPICAL_CONFIRM: 'Hỏi lại Granola Tropical', UPSELL_TWO_BAGS: 'Gợi ý lấy 2 túi', VAT_INVOICE: 'Hóa đơn VAT', VEGAN_INFO: 'Người ăn chay',
+    WAITING_STAFF: 'Xin lỗi khách đang chờ nhân viên', WEIGHT_EXPIRY: 'Trọng lượng và hạn dùng', WEIGHT_GAIN: 'Tăng cân', WHOLESALE_CTV_CONTACT: 'Khách sỉ / CTV xin Zalo', WHOLESALE_RECEIVED: 'Đã nhận Zalo khách sỉ',
+    COMMENT_PUBLIC_FEEDBACK: 'Cảm ơn góp ý dưới bình luận', COMMENT_PUBLIC_REPEAT: 'Nhắc khách xem tin nhắn (bình luận lặp lại)', COMMENT_PUBLIC_SORRY: 'Xin lỗi dưới bình luận', COMMENT_PUBLIC_STAFF: 'Báo nhân viên sẽ nhắn (bình luận)',
+    COMMENT_PUBLIC_THANKS: 'Cảm ơn dưới bình luận', COMMENT_STAFF_FOLLOWUP: 'Chuyển nhân viên đơn hàng (bình luận)',
+    FOLLOW_UP_COMMENT_REMIND: 'Bám đuổi: nhắc xem tin nhắn sau bình luận', FOLLOW_UP_INBOX_REMIND: 'Bám đuổi: nhắc khách hộp thư', FOLLOW_UP_TRIAL_FREESHIP: 'Bám đuổi: ưu đãi dùng thử miễn ship'
   };
   return labels[id] || id.replace(/^PRICE_/, 'Bảng giá · ').replace(/^FOLLOW_UP_/, 'Bám đuổi · ').replaceAll('_', ' ').toLowerCase().replace(/^./, value => value.toUpperCase());
 }
@@ -6494,7 +6730,7 @@ function renderChatbotTemplateList() {
   // Texts stored in Thiết lập tin nhắn (editable) and catalogue-written ones (read-only) in one list.
   const entries = Object.entries(chatbotTemplatesState)
     .map(([id, content]) => ({ id, content }))
-    .filter(({ id, content }) => `${id} ${content}`.toLowerCase().includes(keyword));
+    .filter(({ id, content }) => `${id} ${chatbotTemplateLabel(id)} ${content}`.toLowerCase().includes(keyword));
   // Comment replies first under their own heading; everything else is Messenger.
   const groups = [
     ['Bình luận', entries.filter(entry => entry.id.startsWith('COMMENT_'))],
@@ -6769,7 +7005,7 @@ function renderProducts() {
     const initial = escapeHtml(String(product.name || 'S').trim().charAt(0).toUpperCase());
     const image = product.image ? `<img src="${escapeHtml(product.image)}" alt="">` : initial;
     return `<article class="product-row${product.active === false ? ' is-off' : ''}" data-product-id="${escapeHtml(product.id)}">
-      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${new Date(product.updatedAt || product.createdAt || Date.now()).toLocaleDateString('vi-VN')}</small></span></div>
+      <div class="product-row-main"><span class="product-row-image">${image}</span><span class="product-row-copy"><strong>${escapeHtml(product.name)}${product.active === false ? ' <span class="product-row-off">Ngừng bán</span>' : ''}</strong><small>Cập nhật ${formatVnDate(product.updatedAt || product.createdAt || Date.now())}</small></span></div>
       <code class="product-row-sku">${escapeHtml(product.sku)}</code>
       <strong class="product-row-price product-row-sale">${escapeHtml(formatOrderMoney(product.salePrice))}</strong>
       <span class="product-row-combo">${Number(product.comboPrice) > 0 ? `<b>${escapeHtml(formatOrderMoney(product.comboPrice))}</b>` : '<em>Không giảm</em>'}</span>
@@ -6917,7 +7153,7 @@ async function saveCustomerPanelChange(conversation, payload) {
 }
 
 function formatOrderMoney(value) {
-  return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, Number(value) || 0))} đ`;
+  return formatVnMoney(Math.max(0, Number(value) || 0));
 }
 
 // Line icons drawn as inline SVG. The 16px PNGs they replaced were raster art
@@ -7057,13 +7293,73 @@ function detectPhoneCarrier(phone) {
   return Object.keys(vietnamCarrierPrefixes).find(carrier => vietnamCarrierPrefixes[carrier].includes(prefix)) || '';
 }
 
+// ===== Khớp sản phẩm giống máy chủ (app/processing/catalog.mjs) =====
+// /api/orders/price tìm theo SKU rồi theo tên/tên gọi khác đã bỏ dấu ("tui xanh"
+// = "Túi Xanh"), tên gọi dài nhất thắng. Form phải khớp y như vậy, không thì dòng
+// gõ không dấu thành 0đ trong khi máy chủ vẫn tính nó vào combo (tổng lệch).
+function normalizeCatalogText(value) {
+  return String(value ?? '')
+    .replace(/\\n/g, '\n')
+    .replace(/\r/g, '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function catalogProductKeywords(product) {
+  const keywords = new Set();
+  const add = value => { const key = normalizeCatalogText(value); if (key.length >= 4) keywords.add(key); };
+  const name = String(product?.name || '');
+  add(name);
+  add(name.replace(/\b\d+\s*(g|kg|gram|ml|l)\b/gi, ''));
+  const aliases = Array.isArray(product?.aliases) ? product.aliases : String(product?.aliases ?? '').split(/[\n,;]+/);
+  for (const alias of aliases) add(String(alias ?? '').trim().replace(/\s+/g, ' '));
+  return [...keywords];
+}
+
+/** Như keywordInText của máy chủ: tên gọi chữ phải đứng thành từ trọn; có chữ số thì khớp chuỗi con. */
+function catalogKeywordInText(content, keyword) {
+  if (!keyword) return false;
+  if (/\d/.test(keyword) || keyword.startsWith('#')) return content.includes(keyword);
+  for (let index = content.indexOf(keyword); index >= 0; index = content.indexOf(keyword, index + 1)) {
+    const before = index > 0 ? content[index - 1] : ' ';
+    const after = content[index + keyword.length] ?? ' ';
+    if (!/[a-z]/.test(before) && !/[a-z]/.test(after)) return true;
+  }
+  return false;
+}
+
+let catalogIndexCache = { source: null, entries: [] };
+function catalogKeywordIndex() {
+  if (catalogIndexCache.source === sharedProducts) return catalogIndexCache.entries;
+  const entries = sharedProducts
+    .filter(product => product && product.active !== false)
+    .flatMap(product => catalogProductKeywords(product).map(keyword => ({ keyword, product })))
+    .sort((a, b) => b.keyword.length - a.keyword.length);
+  catalogIndexCache = { source: sharedProducts, entries };
+  return entries;
+}
+
 function findSharedProduct(value) {
-  const query = String(value || '').trim().toLocaleLowerCase('vi');
-  if (!query) return null;
-  return sharedProducts.find(item => String(item.sku || '').toLocaleLowerCase('vi') === query)
-    || sharedProducts.find(item => String(item.name || '').toLocaleLowerCase('vi') === query)
-    || sharedProducts.find(item => `${item.name} ${item.sku}`.toLocaleLowerCase('vi').includes(query))
-    || null;
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  // 1. Đúng SKU (findProductBySku). 2. matchProduct: SKU bỏ dấu, rồi tên gọi dài nhất nằm trong chuỗi.
+  const skuKey = raw.toUpperCase().replace(/\s+/g, '_');
+  const bySku = sharedProducts.find(item => String(item.sku || '') === skuKey);
+  if (bySku) return bySku;
+  const content = normalizeCatalogText(raw);
+  if (!content) return null;
+  const byNormalizedSku = sharedProducts.find(item => item.active !== false && normalizeCatalogText(item.sku) === content);
+  if (byNormalizedSku) return byNormalizedSku;
+  const hit = catalogKeywordIndex().find(entry => catalogKeywordInText(content, entry.keyword));
+  if (hit) return hit.product;
+  // Gõ dở tên/mã ("granola tui"): nhận khi chỉ đúng một sản phẩm chứa chuỗi đó. Form gửi
+  // kèm SKU nên máy chủ tính đúng sản phẩm này.
+  const partial = sharedProducts.filter(item => item.active !== false && normalizeCatalogText(`${item.name} ${item.sku}`).includes(content));
+  return partial.length === 1 ? partial[0] : null;
 }
 
 function getProductUnitWeight(item) {
@@ -7276,6 +7572,8 @@ function getCustomerDraftWeight() {
 const customerOrderGiftRow = document.querySelector('#customer-order-gift-row');
 const customerOrderGiftText = document.querySelector('#customer-order-gift');
 let customerDraftGift = '';
+// Kết quả /api/orders/price gần nhất { signature, subtotal } (xem customerDraftSignature).
+let customerDraftServerPricing = null;
 let customerDraftPricingTimer = 0;
 let customerDraftPricingRequest = 0;
 let customerFreeShippingManual = false;
@@ -7303,6 +7601,9 @@ function applyCustomerDraftPrices() {
     if (totalCell) totalCell.textContent = formatOrderMoney(item.quantity * item.price);
     const note = row.querySelector('.cell-price-note');
     if (note) note.outerHTML = customerPriceNoteHtml(item);
+    // Máy chủ đã khớp dòng gõ tự do: bỏ cảnh báo "chưa khớp", hiện SKU.
+    const unmatched = row.querySelector('.cell-unmatched');
+    if (unmatched && item.sku) unmatched.outerHTML = `<small>${escapeHtml(item.sku)}</small>`;
   }
 }
 
@@ -7346,7 +7647,24 @@ async function refreshCustomerDraftPricing() {
   }
   if (request !== customerDraftPricingRequest) return;
   customerDraftPricedLivestream = priced?.livestream === true;
-  const pricedBySku = new Map((priced?.priceable ? priced.lines : []).map(line => [line.sku, line]));
+  const pricedLines = priced?.priceable && Array.isArray(priced.lines) ? priced.lines : [];
+  const pricedBySku = new Map(pricedLines.map(line => [line.sku, line]));
+  // Dòng chưa có SKU (gõ tự do, danh mục chưa tải xong) mà máy chủ vẫn khớp được:
+  // nhận SKU máy chủ trả để đơn giá, trọng lượng và đơn lưu đúng sản phẩm.
+  const claimed = new Set(customerDraftProducts.map(item => item.sku).filter(sku => sku && pricedBySku.has(sku)));
+  const spareLines = pricedLines.filter(line => !claimed.has(line.sku));
+  for (const item of customerDraftProducts) {
+    if (item.sku && pricedBySku.has(item.sku)) continue;
+    const resolved = findSharedProduct(item.sku || item.name);
+    const line = resolved && pricedBySku.has(resolved.sku) ? pricedBySku.get(resolved.sku) : (!item.sku ? spareLines.shift() : null);
+    if (!line) continue;
+    const index = spareLines.indexOf(line);
+    if (index >= 0) spareLines.splice(index, 1);
+    const product = resolved?.sku === line.sku ? resolved : sharedProducts.find(entry => entry.sku === line.sku);
+    item.sku = line.sku;
+    if (!(Number(item.weight) > 0) && Number(product?.weight) > 0) item.weight = Number(product.weight);
+    if (!(Number(item.listPrice) > 0)) item.listPrice = Math.max(0, Number(line.unitPrice) || 0);
+  }
   for (const item of customerDraftProducts) {
     if (item.manualPrice) continue;
     const line = item.sku ? pricedBySku.get(item.sku) : null;
@@ -7355,6 +7673,10 @@ async function refreshCustomerDraftPricing() {
     if (price > 0) item.price = price;
   }
   customerDraftGift = priced?.priceable ? String(priced.gift || '') : '';
+  // Tổng tiền hàng của máy chủ là nguồn sự thật khi không dòng nào sửa tay đơn giá.
+  customerDraftServerPricing = priced?.priceable && !customerDraftProducts.some(item => item.manualPrice)
+    ? { signature: customerDraftSignature(), subtotal: Math.max(0, Number(priced.subtotal) || 0) }
+    : null;
   if (!customerFreeShippingManual && customerFreeShipping) {
     customerFreeShipping.checked = Boolean(priced?.priceable && priced.shippingFee === 0);
   }
@@ -7366,8 +7688,15 @@ async function refreshCustomerDraftPricing() {
   updateCustomerOrderTotals();
 }
 
+// Giỏ lúc máy chủ tính giá: SKU/tên, SL, đơn giá từng dòng. Giỏ đổi mà chưa tính lại thì dùng tổng tại chỗ.
+function customerDraftSignature() {
+  return JSON.stringify(customerDraftProducts.map(item => [item.sku || item.name, Number(item.quantity) || 0, Number(item.price) || 0, Boolean(item.manualPrice)]));
+}
+
 function updateCustomerOrderTotals() {
-  const subtotal = customerDraftProducts.reduce((sum, item) => sum + item.quantity * item.price, 0);
+  const localSubtotal = customerDraftProducts.reduce((sum, item) => sum + item.quantity * item.price, 0);
+  const server = customerDraftServerPricing && customerDraftServerPricing.signature === customerDraftSignature() ? customerDraftServerPricing : null;
+  const subtotal = server ? server.subtotal : localSubtotal;
   const quantity = customerDraftProducts.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
   const shipping = customerFreeShipping?.checked ? 0 : Math.max(0, Number(customerShippingFee?.value) || 0);
   const discount = Math.max(0, Number(customerOrderDiscount?.value) || 0);
@@ -7390,7 +7719,7 @@ function renderCustomerDraftProducts() {
       .filter(Boolean);
     const subline = variant.length
       ? `<small>${escapeHtml(variant[0])}${variant[1] ? `, <em>${escapeHtml(variant[1])}</em>` : ''}</small>`
-      : (item.sku ? `<small>${escapeHtml(item.sku)}</small>` : '');
+      : (item.sku ? `<small>${escapeHtml(item.sku)}</small>` : '<small class="cell-unmatched" title="Không khớp sản phẩm nào trong danh mục: máy chủ không tính được giá combo cho đơn này">Chưa khớp danh mục — kiểm tra đơn giá</small>');
     return `<div class="customer-product-row">
       <span class="cell-name"><strong>${escapeHtml(item.name)}</strong>${subline}<button type="button" data-remove-customer-product="${index}">Xóa</button></span>
       <input type="number" min="1" step="1" value="${Math.max(1, Number(item.quantity) || 1)}" data-customer-quantity="${index}" aria-label="Số lượng">
@@ -8266,6 +8595,7 @@ function restoreComposerDraft(conversation) {
 
 function selectConversation(conversation) {
   if (!conversation) return;
+  autoReopenedConversationId = '';
   closeConversationMenu();
   closeConversationSearch();
   stopAudioRecording(true);
@@ -9266,7 +9596,7 @@ function exportDayLabels() {
   const date = selectedExportDate();
   if (!date) return { key: '', label: '' };
   const pad = value => String(value).padStart(2, '0');
-  return { key: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`, label: date.toLocaleDateString('vi-VN') };
+  return { key: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`, label: formatVnDate(date) };
 }
 
 /**
@@ -9314,7 +9644,7 @@ async function renderExportHistory() {
   }
   const dayLabel = key => {
     const [year, month, day] = String(key || '').split('-').map(Number);
-    return year && month && day ? new Date(year, month - 1, day).toLocaleDateString('vi-VN') : 'không rõ ngày';
+    return year && month && day ? formatVnDate(new Date(year, month - 1, day)) : 'không rõ ngày';
   };
   orderExportHistoryPanel.innerHTML = [
     '<p class="order-archive-count">Lịch sử xuất kho 14 ngày gần nhất</p>',
@@ -9399,6 +9729,8 @@ function renderPreviewCell(value, header) {
   // Số điện thoại chỉ là số: cảnh báo bom hàng đã nằm ở cột Ghi chú và màu dòng.
   if (column === 'don gia') {
     const price = String(previewValue ?? '').trim();
+    // Số thuần ("189000") hiện "189.000đ"; ô đã có chữ (giá nhập tay kèm đơn vị) giữ nguyên.
+    if (/^\d+$/.test(price)) return escapeHtml(formatVnMoney(Number(price)));
     return price && !/[đ₫]$/iu.test(price) ? `${escapeHtml(price)} đ` : escapeHtml(price);
   }
   if (column === 'san pham') {
@@ -9563,7 +9895,7 @@ function renderOrderTable(preview, headers, rowEntries, emptyMessage, rowClassNa
     if (quantityIndex < 0 || priceIndex < 0) return '';
     const orderId = orderIdIndex >= 0 ? String(entry.row[orderIdIndex] ?? '').trim() : '';
     const total = orderId ? orderData.rows.filter(row => String(row[orderIdIndex] ?? '').trim() === orderId).reduce((sum, row) => sum + lineTotal(row), 0) : lineTotal(entry.row);
-    return total ? `${total.toLocaleString('vi-VN')} đ` : '';
+    return total ? formatVnMoney(total) : '';
   };
   const totalCell = (entry, continued = false) => `<td class="preview-total">${continued ? '' : escapeHtml(orderTotalFor(entry))}</td>`;
   const headCells = visibleIndexes.map((index, position) => `${statusAt(position) ? '<th class="preview-status">Trạng thái</th>' : ''}${totalAt(position) ? '<th class="preview-total">Tổng tiền</th>' : ''}<th class="${previewHeaderClassName(index)}">${escapeHtml(headers[index])}</th>`);
@@ -9656,10 +9988,12 @@ function renderOrderData() {
         sourcesByPhone.set(phone, set);
       }
     }
-    const both = new Set([...sourcesByPhone.entries()].filter(([, set]) => set.has(normalizeColumnName('Landing page')) && set.has(normalizeColumnName('Chatbot'))).map(([phone]) => phone));
+    // Đơn nhân viên lên tay trong hội thoại ("Nhập tay") tính như đơn chatbot: cùng là đơn qua tin nhắn.
+    const chatSources = new Set([normalizeColumnName('Chatbot'), normalizeColumnName('Nhập tay')]);
+    const both = new Set([...sourcesByPhone.entries()].filter(([, set]) => set.has(normalizeColumnName('Landing page')) && [...chatSources].some(source => set.has(source))).map(([phone]) => phone));
     importRows = importRows.filter(entry => {
       const source = normalizeColumnName(entry.row[sourceColumn] || '');
-      return both.has(normalizeRowPhone(entry.row[phoneColumn])) && (source === normalizeColumnName('Landing page') || source === normalizeColumnName('Chatbot'));
+      return both.has(normalizeRowPhone(entry.row[phoneColumn])) && (source === normalizeColumnName('Landing page') || chatSources.has(source));
     });
   } else if (sourceValue !== 'all' && sourceColumn >= 0) {
     const wanted = normalizeColumnName(sourceValue);
@@ -10633,6 +10967,8 @@ customerProductList?.addEventListener('input', event => {
   const totalCell = row?.querySelector('.cell-total');
   if (totalCell) totalCell.textContent = formatOrderMoney(item.quantity * item.price);
   updateCustomerOrderTotals();
+  // Gõ số âm ("-3"): ô hiện đúng số đang tính (SL ≥ 1, đơn giá ≥ 0), không để ô và tổng lệch nhau.
+  if (String(field.value).trim().startsWith('-')) field.value = String(isQuantity ? item.quantity : item.price);
   // Đổi số lượng: tính lại giá combo, quà tặng và miễn ship cho cả giỏ.
   if (isQuantity) scheduleCustomerDraftPricing();
 });
@@ -10821,6 +11157,27 @@ async function saveCustomerOrderEdit(orderId) {
 [customerOrderName, customerOrderPhone, customerOrderAddress, customerShippingFee, customerOrderDiscount]
   .filter(Boolean)
   .forEach(input => input.addEventListener('input', updateCustomerOrderTotals));
+// Phí ship / giảm giá âm: tổng đã kẹp về 0, ô cũng về 0 cho khỏi hiện "-10000".
+[customerShippingFee, customerOrderDiscount].filter(Boolean).forEach(input => input.addEventListener('change', () => {
+  if (Number(input.value) < 0) { input.value = '0'; updateCustomerOrderTotals(); }
+}));
+// SĐT sai báo ngay tại ô (rời ô), không đợi bấm Tạo đơn mới hiện toast máy chủ.
+function customerPhoneProblem(value) {
+  const digits = String(value || '').replace(/[\s.\-()]/g, '');
+  if (!digits) return '';
+  return /^(\+?84|0)\d{9}$/.test(digits) ? '' : 'Số điện thoại chưa đúng: cần 10 số, bắt đầu bằng 0 (vd 0912 345 678).';
+}
+customerOrderPhone?.addEventListener('change', () => {
+  const problem = customerPhoneProblem(customerOrderPhone.value);
+  customerOrderPhone.setCustomValidity(problem);
+  customerOrderPhone.toggleAttribute('aria-invalid', Boolean(problem));
+  if (problem) customerOrderPhone.reportValidity();
+});
+customerOrderPhone?.addEventListener('input', () => {
+  if (!customerOrderPhone.validationMessage) return;
+  customerOrderPhone.setCustomValidity('');
+  customerOrderPhone.removeAttribute('aria-invalid');
+});
 [customerOrderName, customerOrderPhone].filter(Boolean)
   .forEach(input => input.addEventListener('input', () => renderCustomerOrderChip()));
 customerFreeShipping?.addEventListener('change', () => { customerFreeShippingManual = true; updateCustomerOrderTotals(); });
@@ -10851,6 +11208,7 @@ customerOrderForm?.addEventListener('submit', async event => {
       await loadCustomerPanelFromServer(conversation);
       setCustomerPanelTab('info');
       if (updated?.pos?.error) showToast(updated.pos.error, 'error');
+      else showSaveWarnings(saveWarnings(updated), `Đã lưu đơn ${editingId}, nhưng lưu ý`);
     } catch (error) {
       showToast(error.message || 'Chưa lưu được đơn.', 'critical');
     } finally {
@@ -10903,8 +11261,16 @@ customerOrderForm?.addEventListener('submit', async event => {
     // và khách nhận hai tin xác nhận.
     resetCustomerOrderForm(conversation);
     setCustomerPanelTab('info');
-    // Máy chủ thêm hậu tố khi mã ngắn trùng đơn cũ: báo mã thật.
-    showToast(`Đã gửi xác nhận cho khách và tạo đơn ${panel.createdOrderId || order.id}.`, 'success');
+    // Máy chủ thêm hậu tố khi mã ngắn trùng đơn cũ: báo mã thật. Gửi phiếu thất
+    // bại (máy chủ báo qua cờ gửi) thì báo rõ đơn đã tạo nhưng khách chưa nhận phiếu.
+    const createdId = panel.createdOrderId || order.id;
+    const delivery = customerOrderDeliveryOutcome(panel, createdId);
+    if (delivery.failed) {
+      showToast(`Đã tạo đơn ${createdId} nhưng CHƯA gửi được phiếu xác nhận cho khách${delivery.reason ? ` (${delivery.reason})` : ''}. Bấm "Gửi lại cho khách" ở đơn.`, 'critical');
+    } else {
+      // receiptVia 'pos': Pancake POS gửi thẻ xác nhận thay cho phiếu của CRM.
+      showToast(panel.receiptVia === 'pos' ? `Đã tạo đơn ${createdId}; Pancake POS đã gửi xác nhận cho khách.` : `Đã gửi xác nhận cho khách và tạo đơn ${createdId}.`, 'success', 3500, { notify: true });
+    }
   } catch (error) {
     showToast(error.message || 'Chưa gửi được xác nhận cho khách. Đơn chưa được tạo.', 'critical');
   } finally {
@@ -10913,6 +11279,22 @@ customerOrderForm?.addEventListener('submit', async event => {
     updateCustomerOrderTotals();
   }
 });
+
+/**
+ * Kết quả gửi phiếu của đơn vừa tạo, đọc được cả bản máy chủ cũ (không có cờ → coi như đã gửi)
+ * lẫn bản mới: cờ cấp phản hồi (receiptSent/receipt/delivery/receiptError) hay delivery của đơn.
+ */
+function customerOrderDeliveryOutcome(panel, orderId) {
+  const text = value => (typeof value === 'string' ? value : value?.error || value?.message || '').trim();
+  const failedStatus = status => ['failed', 'error', 'not-sent', 'unsent'].includes(String(status || '').toLowerCase());
+  const order = (Array.isArray(panel?.orders) ? panel.orders : []).find(item => String(item?.id) === String(orderId)) || null;
+  const candidates = [panel?.receipt, panel?.delivery, order?.delivery].filter(item => item && typeof item === 'object');
+  const failed = panel?.receiptSent === false || panel?.delivered === false || Boolean(text(panel?.receiptError) || text(panel?.deliveryError))
+    || candidates.some(item => item.sent === false || item.ok === false || failedStatus(item.status));
+  if (!failed) return { failed: false, reason: '' };
+  const reason = text(panel?.receiptError) || text(panel?.deliveryError) || candidates.map(item => text(item.error)).find(Boolean) || '';
+  return { failed: true, reason: reason.slice(0, 160) };
+}
 
 function closeCustomerGenderMenu() {
   document.querySelector('#customer-gender-menu')?.classList.add('hidden');
@@ -11541,11 +11923,19 @@ async function loadMessageSettings() {
   loadComplaintKeywords();
 }
 
+// Mục Cài đặt → Tin nhắn đọc thiết lập chatbot ở hai chỗ cùng lúc (mẫu mặc định, từ khoá
+// khiếu nại): dùng chung một lần gọi đang chạy; gọi sau khi xong thì hỏi lại máy chủ.
+let chatbotSettingsRequest = null;
+function fetchChatbotSettings() {
+  if (!chatbotSettingsRequest) chatbotSettingsRequest = fetch('/api/chatbot/settings').then(readApiResponse).finally(() => { chatbotSettingsRequest = null; });
+  return chatbotSettingsRequest;
+}
+
 /** Từ khóa khiếu nại nằm trong thiết lập chatbot; màn Thẻ hội thoại đọc riêng. */
 async function loadComplaintKeywords() {
   if (!labelComplaintKeywords) return;
   try {
-    const settings = await readApiResponse(await fetch('/api/chatbot/settings'));
+    const settings = await fetchChatbotSettings();
     labelComplaintKeywords.value = settings.complaintKeywords || '';
   } catch {
     labelComplaintKeywords.value = '';
@@ -11783,7 +12173,7 @@ async function saveLabelSettings() {
 async function loadMessageDefaults() {
   if (!messageDefaultsForm) return;
   try {
-    const settings = await readApiResponse(await fetch('/api/chatbot/settings'));
+    const settings = await fetchChatbotSettings();
     messageDefaultTemplates = { ...(settings.templates || {}) };
     for (const id of messageDefaultIds) {
       const field = document.querySelector(`#message-default-${id}`);
@@ -11956,6 +12346,8 @@ document.addEventListener('click', event => {
 loadInboxSettings();
 
 window.setInterval(updateConversationTimeLabels, 30000);
+// Bảng đọc từ trình duyệt lúc tải (xem savedOrderData): giờ các hằng cột đã có, thêm cột còn thiếu.
+orderData = ensureOrderStaffNoteColumn(orderData);
 // Drawn even with no rows so each order panel shows its empty state.
 renderOrderData();
 if (initialView === 'orders') showOrderStage(getRecommendedOrderStage());
@@ -11963,6 +12355,9 @@ else showView(initialView);
 // Nút Back/Forward và gõ #hash tay: đổi màn theo hash (showView chỉ đặt hash khi khác).
 window.addEventListener('hashchange', () => {
   const name = window.location.hash.slice(1);
+  const setByCode = hashSetByShowView;
+  hashSetByShowView = '';
+  if (setByCode && setByCode === name) return;
   if (!viewNames.includes(name) || name.startsWith('followup-results')) return;
   if (name === 'orders') showOrderStage(getRecommendedOrderStage()); else showView(name);
 });

@@ -5894,7 +5894,10 @@ function chatMessageSenderName(item) {
   if (!item || item.direction === 'incoming') return '';
   if (item.bot === true || item.chatbot === true || item.followUp === true || item.staffUsername === 'bot' || item.sender === 'bot') return 'Chatbot';
   const name = String(item.staffName || '').trim();
-  return item.staff && name && name !== 'CRM' ? name : '';
+  // sender 'staff' không cờ staff: việc máy làm thay nhân viên (phiếu đơn đơn tạo tay, "Gửi lại phiếu").
+  if ((item.staff || item.sender === 'staff') && name && name !== 'CRM') return name;
+  // Tin trang không do nhân viên/bot CRM gửi: nguồn Pancake ghi được ("Pancake POS", "Ngoài Pancake"…).
+  return String(item.pancakeSender || '').trim();
 }
 
 function formatChatSenderTime(timestamp) {
@@ -6086,6 +6089,8 @@ function appendChatMessage(message, direction = 'outgoing', initial = '', messag
   const senderName = direction === 'outgoing' && action !== 'recalled' ? chatMessageSenderName(item) : '';
   if (senderName) {
     row.dataset.sender = senderName;
+    // Như Pancake: rê chuột vào bất kỳ tin nào của trang cũng biết ai gửi (nhãn dưới bong bóng chỉ ở tin cuối chuỗi).
+    if (row.dataset.hoverTime) row.dataset.hoverTime = `${senderName} · ${row.dataset.hoverTime}`;
     if (messageContent === bubble) {
       const stack = document.createElement('div');
       stack.className = 'message-content-stack';

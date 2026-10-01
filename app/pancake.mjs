@@ -14,7 +14,8 @@ import { matchesFollowUpText, recentFollowUpTexts } from './follow-up.mjs';
 import { genderFromMessage, genderFromName } from './processing/customer-info.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import { assertPublicHost } from './network-guard.mjs';
-import { AUTOMATED_ACTORS, appendAssignAudit, appendBotToggleAudit } from './audit-log.mjs';
+import { AUTOMATED_ACTORS, appendAssignAudit, appendAudit, appendBotToggleAudit } from './audit-log.mjs';
+import { matchStaffByPancakeName, readStaffStore } from './staff.mjs';
 import { backoffPancake, withPancakeSlot } from './pancake-rate-limit.mjs';
 import { stickerFields } from './stickers.mjs';
 export { stickerInfo, LIKE_STICKER_IDS } from './stickers.mjs';
@@ -118,11 +119,33 @@ const automatedAdminNames = new Set(['public api', 'pos', 'botcake', 'pancake bo
 // Lời chào QR do Botcake gửi (kết thúc bằng "Mã thẻ: #<mã>"): máy gửi, dù Pancake ghi tên ai.
 const qrGreetingPattern = /Mã thẻ:\s*#\S+/iu;
 
-/** Tin của Page có admin_name là nhân viên thật (không phải máy gửi, không phải lời chào QR)? */
-export function isStaffAdmin(adminName, text = '') {
+/** Tin của Page có admin_name là nhân viên thật (không phải máy gửi, không phải lời chào QR, không phải AI của Pancake)? */
+export function isStaffAdmin(adminName, text = '', from = null) {
   const name = String(adminName || '').trim();
   if (!name || automatedAdminNames.has(name.toLowerCase())) return false;
+  if (from?.ai_generated === true) return false;
   return !qrGreetingPattern.test(String(text || ''));
+}
+
+/**
+ * Nguồn của tin trang KHÔNG do nhân viên gõ, theo `from` của Pancake (khảo sát 01/10, 434 tin):
+ *  - admin_name "POS" (thẻ xác nhận đơn, không uid) → "Pancake POS";
+ *  - "Botcake"/"Pancake bot", lời chào QR "Mã thẻ: #…" → "Botcake";
+ *  - ai_generated: true → "AI Pancake";
+ *  - "Public API" → "Public API" (tin của chính CRM giữ nhãn Chatbot/nhân viên lúc gửi);
+ *  - không admin_name (tin tự động của Meta, gõ ở Business Suite/Messenger ngoài Pancake) → "Ngoài Pancake".
+ * Nhân viên thật → ''.
+ */
+export function pancakeAutomatedSender(from = {}, text = '') {
+  const name = String(from?.admin_name || '').trim();
+  const key = name.toLowerCase();
+  if (from?.ai_generated === true) return 'AI Pancake';
+  if (key === 'pos') return 'Pancake POS';
+  if (key === 'botcake' || key === 'pancake bot' || (name && qrGreetingPattern.test(String(text || '')))) return 'Botcake';
+  if (key === 'public api') return 'Public API';
+  if (key === 'chatbot') return 'Chatbot';
+  if (!name) return 'Ngoài Pancake';
+  return '';
 }
 
 /** Giới tính khách trong hồ sơ Pancake (`page_customer.gender`, Facebook khai): male/female, khác thì bỏ. */
@@ -204,8 +227,10 @@ export function pancakeCommentEvent(pageId, conversation, comment, post = {}, no
       assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
       // Tên người được phân công (current_assign_users); null khi gói không kèm danh sách phân công.
       assignees: pancakeAssigneesOf(conversation),
-      staff: isStaffAdmin(adminName, pancakeMessageText(comment)),
+      staff: isStaffAdmin(adminName, pancakeMessageText(comment), comment.from),
       staffName: adminName,
+      staffUid: fromPage ? String(comment.from?.uid || '') : '',
+      automatedSender: fromPage && !isStaffAdmin(adminName, pancakeMessageText(comment), comment.from) ? pancakeAutomatedSender(comment.from, pancakeMessageText(comment)) : '',
       post: pancakePostContext(post) || { id: postId, message: '', permalink: `https://www.facebook.com/${postId}`, picture: '' },
       ad: null,
       gender: pancakeGenderOf(conversation)
@@ -333,7 +358,9 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       ...(replyTo ? { replyTo } : {}),
       // Nhân viên gõ trong Pancake: dấu trên tin để đường đồng bộ (không qua webhook) cũng biết mà nhường.
       // (Tin trùng lời bám đuổi trạm gửi đã gửi dưới tên nhân viên: storePancakeEvents gỡ cờ này, gắn followUp.)
-      ...(outgoing && isStaffAdmin(adminName, text) ? { staff: true, staffName: adminName } : {}),
+      ...(outgoing && isStaffAdmin(adminName, text, message.from) ? { staff: true, staffName: adminName, ...(message.from?.uid ? { staffUid: String(message.from.uid) } : {}), ...(message.from?.platform ? { staffPlatform: String(message.from.platform) } : {}) } : {}),
+      // Tin trang do máy gửi (POS, Botcake, AI Pancake, ngoài Pancake): ghi nguồn để hộp thư hiện ai/cái gì gửi.
+      ...(outgoing && !isStaffAdmin(adminName, text, message.from) && pancakeAutomatedSender(message.from, text) ? { pancakeSender: pancakeAutomatedSender(message.from, text) } : {}),
       createdAt: at,
       status: outgoing ? 'sent' : 'received'
     },
@@ -345,8 +372,9 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       assigned: Array.isArray(conversation.assignee_ids) && conversation.assignee_ids.length > 0,
       // Tên người được phân công (current_assign_users); null khi gói không kèm danh sách phân công.
       assignees: pancakeAssigneesOf(conversation),
-      staff: outgoing && isStaffAdmin(adminName, text),
+      staff: outgoing && isStaffAdmin(adminName, text, message.from),
       staffName: adminName,
+      ...(outgoing && message.from?.uid ? { staffUid: String(message.from.uid) } : {}),
       // Khách đến từ quảng cáo: ghi như referral của Meta để bot biết sản phẩm.
       ad: adInfo || pancakeAdOf(conversation),
       gender: pancakeGenderOf(conversation)
@@ -726,9 +754,24 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false, 
     if (!matchesFollowUpText(entries, event.message)) continue;
     delete event.message.staff;
     delete event.message.staffName;
+    delete event.message.staffUid;
+    delete event.message.staffPlatform;
     event.message.sender = 'bot';
     event.message.followUp = true;
     event.pancake = { ...event.pancake, staff: false, followUp: true };
+  }
+  // Tên nhân viên trên Pancake → tài khoản CRM (Cài đặt → Nhân sự, "Tên trên Pancake/POS"): tin,
+  // nhật ký và báo cáo cùng gắn một người như khi họ nhắn từ CRM.
+  const named = incomingEvents.filter(event => event.pancake?.staff && event.pancake.staffName);
+  if (named.length) {
+    const staffMembers = await readStaffStore().then(store => store.items).catch(() => []);
+    for (const event of named) {
+      const member = matchStaffByPancakeName(event.pancake.staffName, staffMembers);
+      if (!member) continue;
+      event.pancake.staffUsername = member.username;
+      event.pancake.staffName = member.name;
+      if (event.message?.staff) Object.assign(event.message, { staffName: member.name, staffUsername: member.username });
+    }
   }
   // Bot tự tắt / phân công đổi: ghi nhật ký sau khi lưu kho (ngoài hàng đợi ghi của kho).
   const automaticAudits = [];
@@ -740,7 +783,19 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false, 
   }, { defer: deferWrite, unchanged: () => !touched });
   for (const item of automaticAudits) {
     if (item.kind === 'bot') appendBotToggleAudit({ actor: AUTOMATED_ACTORS.system, conversation: item.conversation, enabled: false, reason: item.reason });
-    else appendAssignAudit({ actor: AUTOMATED_ACTORS.system, conversation: item.conversation, from: item.from, to: item.to, reason: 'Pancake' });
+    else if (item.kind === 'message') {
+      // Người làm: tài khoản CRM khi đối chiếu được (Nhân sự → "Tên trên Pancake/POS"), không thì tên Pancake.
+      appendAudit({
+        actor: item.staffUsername || `pancake:${item.staffUid || item.staffName}`.slice(0, 64),
+        actorName: item.staffName,
+        role: item.staffUsername ? 'staff' : 'pancake',
+        action: item.action,
+        target: { type: 'conversation', ...item.conversation },
+        conversationId: item.conversation.id,
+        summary: `[${item.kindLabel}] ${item.text.slice(0, 80)} (gõ trong Pancake)`,
+        details: { via: 'pancake', ...(item.staffUid ? { pancakeUid: item.staffUid } : {}) }
+      }, { now: item.at });
+    } else appendAssignAudit({ actor: AUTOMATED_ACTORS.system, conversation: item.conversation, from: item.from, to: item.to, reason: 'Pancake' });
   }
   for (const change of changes) {
     publishMessagingEvent(change.conversation ? { ...change, conversation: publicConversation(change.conversation) } : change);
@@ -846,6 +901,21 @@ function applyPancakeEventsToStore(store, incomingEvents, { fromWebhook, automat
     // CRM, không phải lịch sử kéo về): bot đứng ngoài hội thoại này cho tới
     // khi bật lại trong CRM, để không nói chen vào người thật.
     const recentStaff = event.pancake.staff && Date.now() - (Number(event.message?.createdAt || event.timestamp) || 0) < 60 * 60 * 1000;
+    // Tin/bình luận nhân viên gõ trong Pancake vào nhật ký hoạt động như tin gửi từ CRM (chỉ tin mới,
+    // không phải lịch sử kéo về): "Lịch sử cập nhật hội thoại" và Cài đặt → Lịch sử thấy đủ ai đã nhắn.
+    if ((fromWebhook || recentStaff) && inserted && event.pancake.staff) {
+      automaticAudits.push({
+        kind: 'message',
+        conversation: { id: conversation.id, name: conversation.name || '' },
+        action: isComment ? 'comment.reply' : 'message.send',
+        staffName: event.pancake.staffName || '',
+        staffUsername: event.pancake.staffUsername || '',
+        staffUid: event.pancake.staffUid || '',
+        text: isComment ? String(event.text || '') : String(event.message?.text || ''),
+        kindLabel: !isComment && event.message?.type === 'image' ? 'ảnh' : 'chữ',
+        at: Number(isComment ? event.createdAt : event.message?.createdAt) || Date.now()
+      });
+    }
     if ((fromWebhook || recentStaff) && inserted && event.pancake.staff && conversation.botEnabled !== false) {
       conversation.botEnabled = false;
       conversation.botPausedBy = event.pancake.staffName;

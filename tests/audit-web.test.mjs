@@ -139,7 +139,7 @@ test('hộp "Lịch sử cập nhật hội thoại": nút đồng hồ ở đ�
   assert.equal(url.pathname, '/api/audit');
   assert.equal(url.searchParams.get('conversationId'), '1035:abc');
   assert.equal(url.searchParams.get('action'), 'conversation.labels');
-  for (const [label, action] of [['Thẻ hội thoại', 'conversation.labels'], ['Phân công nhân viên', 'conversation.assign'], ['Bot', 'conversation.bot'], ['Đơn hàng', 'order.'], ['Tin nhắn & xem', 'message.send,conversation.view']]) {
+  for (const [label, action] of [['Thẻ hội thoại', 'conversation.labels'], ['Phân công nhân viên', 'conversation.assign'], ['Bot', 'conversation.bot'], ['Đơn hàng', 'order.'], ['Tin nhắn & xem', 'message.send,comment.reply,comment.private_reply,conversation.view']]) {
     assert.match(audit, new RegExp(`label: '${label}', action: '${action.replace(/\./g, '\\.')}'`));
   }
   assert.match(audit, /'Chưa có thay đổi nào'/);

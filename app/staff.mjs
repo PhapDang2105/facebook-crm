@@ -163,6 +163,31 @@ export async function staffLoginAccounts() {
     .map(item => [item.username, { hash: item.passwordHash, version: item.sessionVersion || 0 }]));
 }
 
+const nameKey = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Nhân viên CRM ứng với một tên trên Pancake/POS (admin_name của tin, người tạo đơn POS):
+ * khớp "Tên trên Pancake/POS" ở Nhân sự trước, rồi tới họ tên; không phân biệt dấu, hoa thường.
+ * Kể cả người đã nghỉ (tin cũ vẫn là của họ). Không khớp hoặc khớp nhiều người thì null.
+ */
+export function matchStaffByPancakeName(name, members = []) {
+  const key = nameKey(name);
+  if (!key) return null;
+  for (const pick of [member => member.pancakeNames.some(item => nameKey(item) === key), member => nameKey(member.name) === key]) {
+    const found = members.filter(pick);
+    if (found.length === 1) return found[0];
+    if (found.length > 1) return found.find(member => member.active) || null;
+  }
+  return null;
+}
+
+/** Như trên, đọc kho Nhân sự (lỗi đọc → null). */
+export async function staffByPancakeName(name) {
+  const store = await readStaffStore().catch(() => emptyStore());
+  const member = matchStaffByPancakeName(name, store.items);
+  return member ? { username: member.username, name: member.name } : null;
+}
+
 /** Nhân viên theo tên đăng nhập (đang làm), để biết vai trò của phiên. */
 export async function staffByUsername(username) {
   const name = String(username || '').trim().toLowerCase();

@@ -297,7 +297,7 @@
     { key: 'assign', label: 'Phân công nhân viên', action: 'conversation.assign' },
     { key: 'bot', label: 'Bot', action: 'conversation.bot' },
     { key: 'orders', label: 'Đơn hàng', action: 'order.' },
-    { key: 'messages', label: 'Tin nhắn & xem', action: 'message.send,conversation.view' }
+    { key: 'messages', label: 'Tin nhắn & xem', action: 'message.send,comment.reply,comment.private_reply,conversation.view' }
   ];
   const fullFormat = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   /** dd/mm/yyyy HH:MM theo giờ Việt Nam. */

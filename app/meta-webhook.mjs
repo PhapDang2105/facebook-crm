@@ -207,7 +207,10 @@ function applyCommentEvent(store, event) {
     createdAt: event.createdAt,
     status: event.fromPage ? 'sent' : 'received',
     commentId: event.commentId,
-    parentId: event.parentId
+    parentId: event.parentId,
+    // Trả lời bình luận nhân viên gõ trong Pancake: tên người gõ (như tin inbox).
+    ...(event.fromPage && event.pancake?.staff && event.pancake.staffName ? { staff: true, staffName: event.pancake.staffName, sender: 'staff', ...(event.pancake.staffUsername ? { staffUsername: event.pancake.staffUsername } : {}), ...(event.pancake.staffUid ? { staffUid: event.pancake.staffUid } : {}) } : {}),
+    ...(event.fromPage && event.pancake?.automatedSender ? { pancakeSender: event.pancake.automatedSender } : {})
   };
   if (event.fromPage) {
     // Our own reply, echoed back. Attach it to the thread of the comment it

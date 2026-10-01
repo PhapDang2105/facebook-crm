@@ -42,6 +42,11 @@
       rows.append(el('p', 'channel-empty staff-empty', 'Chưa có nhân sự nào.'));
       return;
     }
+    // Hàng tiêu đề cột ("—", "Đã đặt", "Đang làm" đứng một mình thì khó hiểu). Màn hẹp ẩn (staff.css).
+    const head = el('div', 'staff-row staff-table-head');
+    head.setAttribute('aria-hidden', 'true');
+    for (const label of ['Họ tên', 'Tên đăng nhập', 'Vai trò', 'Số điện thoại', 'Tên trên Pancake/POS', 'Mật khẩu', 'Trạng thái', '']) head.append(el('span', '', label));
+    rows.append(head);
     for (const member of state.items) {
       const row = el('div', `staff-row${member.active ? '' : ' is-inactive'}`);
       const name = el('span', 'staff-name', member.name);
@@ -154,6 +159,16 @@
         password.focus();
         return;
       }
+      // SĐT sai (chữ, thiếu số) máy chủ âm thầm xoá thành trống: báo ngay tại ô.
+      const phoneDigits = phone.value.replace(/[\s.\-()]/g, '');
+      if (phoneDigits && !/^(\+?84|0)\d{9}$/.test(phoneDigits)) {
+        error.textContent = 'Số điện thoại chưa đúng (10 số, bắt đầu bằng 0). Để trống nếu không có.';
+        error.hidden = false;
+        phone.setAttribute('aria-invalid', 'true');
+        phone.focus();
+        return;
+      }
+      phone.removeAttribute('aria-invalid');
       const body = {
         name: name.value,
         username: username.value,
@@ -163,16 +178,38 @@
         active: active.checked
       };
       if (password.value) body.password = password.value;
+      // Sửa chính mình: đổi mật khẩu/tên đăng nhập làm mọi phiên cũ hết hiệu lực. Kèm mật khẩu mới
+      // thì máy chủ cấp lại cookie cho máy này (ở lại CRM, máy khác phải đăng nhập lại). Đổi tên
+      // đăng nhập mà không kèm mật khẩu, hay cho chính mình nghỉ: máy này cũng phải đăng nhập lại.
+      const self = editing && state.currentUser && member.username === state.currentUser;
+      const usernameChanged = self && username.value.trim().toLowerCase() !== String(member.username || '').toLowerCase();
+      const deactivatingSelf = self && member.active && !body.active;
+      const endsOwnSession = self && (deactivatingSelf || (usernameChanged && !body.password));
+      const ownQuestion = deactivatingSelf
+        ? 'Bạn đang chuyển chính mình sang "Đã nghỉ". Lưu xong bạn sẽ bị đăng xuất và không đăng nhập lại được. Tiếp tục?'
+        : endsOwnSession
+          ? 'Bạn đang đổi tên đăng nhập của chính mình. Lưu xong bạn cần đăng nhập lại bằng tên mới. Tiếp tục?'
+          : self && body.password
+            ? 'Bạn đang đổi mật khẩu của chính mình. Máy này vẫn giữ đăng nhập; các máy khác đang dùng tài khoản này sẽ phải đăng nhập lại bằng mật khẩu mới. Tiếp tục?'
+            : '';
+      if (ownQuestion && !window.confirm(ownQuestion)) return;
       save.disabled = true;
       try {
         const result = editing
           ? await api('PATCH', `/api/staff/${encodeURIComponent(member.id)}`, body)
           : await api('POST', '/api/staff', body);
         password.value = '';
+        if (endsOwnSession) {
+          close();
+          location.assign(`/login?reason=expired&next=${encodeURIComponent(location.pathname + location.hash)}`);
+          return;
+        }
+        // Đổi tên đăng nhập kèm mật khẩu: phiên mới mang tên mới, dấu "bạn" theo tên mới.
+        if (self && result.member?.username) state.currentUser = result.member.username;
         state = { ...state, items: result.items, loginEnabled: result.loginEnabled ?? state.loginEnabled };
         render();
         close();
-        toast(editing ? `Đã lưu ${result.member.name}.` : `Đã thêm ${result.member.name}.`, 'success');
+        toast(self && body.password ? 'Đã đổi mật khẩu. Máy này vẫn đăng nhập; máy khác cần đăng nhập lại bằng mật khẩu mới.' : (editing ? `Đã lưu ${result.member.name}.` : `Đã thêm ${result.member.name}.`), 'success');
         // Vừa bật đăng nhập (tài khoản có mật khẩu đầu tiên): tải lại để màn hình hỏi đăng nhập.
         if (!editing && result.loginEnabled && !state.currentUser) toast('Đăng nhập đã bật. Lần mở CRM sau, mọi người cần đăng nhập.', 'success');
       } catch (failure) {

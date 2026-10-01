@@ -6,9 +6,9 @@ import vm from 'node:vm';
 // Dấu vết nhân viên phía giao diện (Cài đặt → Lịch sử, tên người gửi dưới bong bóng, dòng
 // "… đã xem", hộp lịch sử hội thoại, người tạo/sửa đơn). HTML/JS thuần, không build: kiểm dây
 // nối trên mã nguồn và chạy thử các hàm thuần trong vm.
-const web = await readFile(new URL('../web/app.js', import.meta.url), 'utf8');
-const audit = await readFile(new URL('../web/audit.js', import.meta.url), 'utf8');
-const html = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
+const web = (await readFile(new URL('../web/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+const audit = (await readFile(new URL('../web/audit.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+const html = (await readFile(new URL('../web/index.html', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const section = (source, start, length = 4000) => {
   const at = source.indexOf(start);
   assert.ok(at >= 0, `không tìm thấy: ${start}`);

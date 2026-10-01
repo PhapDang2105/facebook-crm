@@ -102,8 +102,8 @@
   // ---------------------------------------------------------------------------
   // Ẩn mục Lịch sử với nhân viên thường (đã bật đăng nhập). Chưa bật đăng nhập thì hiện.
   const subnavButton = document.querySelector('[data-settings-section="audit"]');
-  fetch('/api/auth/session', { credentials: 'same-origin' })
-    .then(response => (response.ok ? response.json() : null))
+  // Dùng chung lần hỏi phiên của app.js (window.crmSessionRequest), không gọi lần hai.
+  (window.crmSessionRequest || fetch('/api/auth/session', { credentials: 'same-origin' }).then(response => (response.ok ? response.json() : null)))
     .then(session => {
       if (!subnavButton || !session?.enabled) return;
       subnavButton.hidden = session.role === 'staff';

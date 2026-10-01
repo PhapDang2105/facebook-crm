@@ -12041,11 +12041,6 @@ const qrBrowserNames = {
   webview: 'Trong app', 'app khac': 'App khác', khac: 'Khác'
 };
 
-function qrCountText(counts, names) {
-  const entries = Object.entries(counts || {}).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
-  return entries.length ? entries.map(([key, count]) => `<span>${escapeHtml(names[key] || key)} ${count}</span>`).join('<span>·</span>') : '<span>Chưa có lượt quét</span>';
-}
-
 function formatQrTime(value) {
   const time = Number(value) || 0;
   if (!time) return '—';
@@ -12058,6 +12053,26 @@ function formatQrShortTime(value) {
   return new Date(time).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
 }
 
+// Icon nét mảnh (24×24, stroke = màu chữ) cho màn Mã QR.
+const qrIconPaths = {
+  scan: '<path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M8 8h3v3H8zM13 13h3v3h-3zM13 8h3M8 16h3"/>',
+  messenger: '<path d="M12 3.5c-4.7 0-8.5 3.5-8.5 7.9 0 2.5 1.2 4.7 3.1 6.1v3l2.9-1.6c.8.2 1.6.3 2.5.3 4.7 0 8.5-3.5 8.5-7.8S16.7 3.5 12 3.5Z"/><path d="m7.5 13.5 3-3.2 2.2 2 3.8-3.8-3 3.2-2.2-2Z"/>',
+  page: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M4 8h16M8 12.5h8M8 16h5"/>',
+  chart: '<path d="M4 20h16"/><path d="M7 16v-4M12 16V7M17 16v-6"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>',
+  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/>',
+  image: '<rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m20 15-4.5-4.5L6 20"/>',
+  phone: '<rect x="7" y="3" width="10" height="18" rx="2.2"/><path d="M11 18h2"/>',
+  desktop: '<rect x="3" y="4" width="18" height="12" rx="1.8"/><path d="M9 20h6M12 16v4"/>',
+  history: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.7"/><path d="M4 4v4.7h4.7M12 8v4.3l3 1.8"/>',
+  flask: '<path d="M9.5 3.5h5M10.5 3.5v6L5 18.6A1.6 1.6 0 0 0 6.4 21h11.2a1.6 1.6 0 0 0 1.4-2.4L13.5 9.5v-6"/><path d="M7.4 15h9.2"/>',
+  tag: '<path d="M3.5 12.2V4.8a1.3 1.3 0 0 1 1.3-1.3h7.4l8.3 8.3a1.3 1.3 0 0 1 0 1.8l-7.4 7.4a1.3 1.3 0 0 1-1.8 0Z"/><circle cx="8" cy="8" r="1.4"/>'
+};
+function qrIcon(name, className = 'qr-icon') {
+  return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true">${qrIconPaths[name] || ''}</svg>`;
+}
+
 function qrPercent(part, whole) {
   return whole ? `${Math.round((part / whole) * 100)}%` : '';
 }
@@ -12065,7 +12080,7 @@ function qrPercent(part, whole) {
 // Trạng thái màn hình: số liệu từ /api/qr/stats, kỳ đang chọn (7/30 ngày hoặc
 // tất cả). Số theo kỳ cộng từ `days` của từng mã; "Tất
 // cả" dùng tổng cộng dồn nên khớp với số liệu cũ.
-const qrState = { stats: null, settings: null, range: '30' };
+const qrState = { stats: null, range: '30' };
 
 function qrDayKeys(today, count) {
   const [year, month, day] = String(today || '').split('-').map(Number);
@@ -12076,6 +12091,11 @@ function qrDayKeys(today, count) {
 }
 
 /** Số của một mã trong kỳ đang chọn: quét, lượt phục vụ bằng trang đệm, bấm mở, bấm Zalo, vào Messenger. */
+/** Lượt vào Messenger từ trang: bấm nút "Mở Messenger" + lượt chuyển hướng thẳng (quét không qua trang đệm). */
+function qrOpenedCount(totals) {
+  return (totals.opens || 0) + Math.max(0, (totals.scans || 0) - (totals.pages || 0));
+}
+
 function qrRangeTotals(entry, keys) {
   if (!keys) {
     return {
@@ -12110,10 +12130,16 @@ function renderQrMetrics(main, keys) {
   if (!container) return;
   const sum = main ? qrRangeTotals(main, keys) : { scans: 0, pages: 0, opens: 0, referrals: 0 };
   const todayScans = main?.days?.[qrState.stats?.today]?.scans || 0;
-  container.innerHTML = `
-    <div class="qr-metric"><span class="qr-metric-label">Lượt quét</span><span class="qr-metric-value">${sum.scans}<small>hôm nay ${todayScans}</small></span></div>
-    <div class="qr-metric"><span class="qr-metric-label">Vào Messenger</span><span class="qr-metric-value">${sum.referrals}<small>${qrPercent(sum.referrals, sum.scans)}</small></span></div>
-    <div class="qr-metric"><span class="qr-metric-label">Bấm “Mở Messenger”</span><span class="qr-metric-value">${sum.opens}<small>${qrPercent(sum.opens, sum.pages)}</small></span></div>`;
+  const tile = (tone, icon, label, value, note) => `<div class="qr-metric is-${tone}">
+      <span class="qr-metric-icon">${qrIcon(icon)}</span>
+      <span class="qr-metric-label">${label}</span>
+      <span class="qr-metric-value">${value}${note ? `<small>${note}</small>` : ''}</span></div>`;
+  // Theo thứ tự của phễu: quét → trang đệm → mở Messenger. Mở Messenger = bấm nút trên
+  // trang đệm + lượt Android chuyển thẳng (không qua trang đệm), nên so với tổng lượt quét.
+  const opened = qrOpenedCount(sum);
+  container.innerHTML = tile('scan', 'scan', 'Lượt quét', sum.scans, `hôm nay ${todayScans}`)
+    + tile('page', 'page', 'Trang đệm', sum.pages, qrPercent(sum.pages, sum.scans))
+    + tile('arrival', 'messenger', 'Mở Messenger', opened, qrPercent(opened, sum.scans));
 }
 
 function renderQrChart(main) {
@@ -12123,22 +12149,23 @@ function renderQrChart(main) {
   const selected = main ? [main] : [];
   const series = keys.map(key => {
     let scans = 0;
-    let referrals = 0;
+    let opened = 0;
     for (const entry of selected) {
-      scans += entry.days?.[key]?.scans || 0;
-      referrals += entry.days?.[key]?.referrals || 0;
+      const day = entry.days?.[key] || {};
+      scans += day.scans || 0;
+      opened += qrOpenedCount(day);
     }
-    return { key, scans, referrals };
+    return { key, scans, opened };
   });
-  const peak = Math.max(1, ...series.map(point => point.scans), ...series.map(point => point.referrals));
+  const peak = Math.max(1, ...series.map(point => point.scans), ...series.map(point => point.opened));
   const today = qrState.stats?.today;
   const label = day => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
   const every = keys.length > 10 ? 5 : 1;
   container.innerHTML = `
-    <div class="qr-chart-head"><b>Lượt quét theo ngày · ${keys.length} ngày</b>
-      <span class="qr-legend"><i></i>Quét</span><span class="qr-legend is-arrival"><i></i>Vào Messenger</span></div>
-    <div class="qr-bars">${series.map(point => `<div class="qr-bar${point.key === today ? ' is-today' : ''}" title="${label(point.key)}: quét ${point.scans}, vào Messenger ${point.referrals}">
-        <i style="height:${Math.round((point.scans / peak) * 100)}%"></i><i class="is-arrival" style="height:${Math.round((point.referrals / peak) * 100)}%"></i></div>`).join('')}</div>
+    <div class="qr-chart-head"><span class="qr-card-title">${qrIcon('chart')}Lượt quét theo ngày<small>${keys.length} ngày</small></span>
+      <span class="qr-legend"><i></i>Quét</span><span class="qr-legend is-arrival"><i></i>Mở Messenger</span></div>
+    <div class="qr-bars">${series.map(point => `<div class="qr-bar${point.key === today ? ' is-today' : ''}" title="${label(point.key)}: quét ${point.scans}, mở Messenger ${point.opened}">
+        <i style="height:${Math.round((point.scans / peak) * 100)}%"></i><i class="is-arrival" style="height:${Math.round((point.opened / peak) * 100)}%"></i></div>`).join('')}</div>
     <div class="qr-bar-axis">${series.map((point, index) => `<span>${index % every === 0 || index === series.length - 1 ? label(point.key) : ''}</span>`).join('')}</div>`;
 }
 
@@ -12149,7 +12176,7 @@ function renderQrTable(codes, keys) {
   if (!container || !wrapper) return;
   wrapper.classList.toggle('hidden', !codes.length);
   const summary = document.querySelector('#qr-old-summary');
-  if (summary) summary.textContent = `Mã thử (${codes.length})`;
+  if (summary) summary.innerHTML = `${qrIcon('flask')}Mã thử<small>${codes.length}</small>`;
   if (!codes.length) {
     container.innerHTML = '';
     return;
@@ -12158,13 +12185,12 @@ function renderQrTable(codes, keys) {
     .sort((a, b) => b.totals.scans - a.totals.scans || (b.entry.lastAt || 0) - (a.entry.lastAt || 0));
   const cell = (value, whole) => `<td class="is-num">${value}${whole ? `<small>${qrPercent(value, whole)}</small>` : ''}</td>`;
   container.innerHTML = `<table class="qr-stats-table"><thead><tr>
-      <th>Mã</th><th class="is-num">Quét</th><th class="is-num">Xem trang đệm</th><th class="is-num">Bấm Mở Messenger</th><th class="is-num">Vào Messenger</th><th>Quét cuối</th><th></th>
+      <th>Mã</th><th class="is-num">Quét</th><th class="is-num">Trang đệm</th><th class="is-num">Mở Messenger</th><th>Quét cuối</th><th></th>
     </tr></thead><tbody>${rows.map(({ entry, totals }) => `<tr>
       <td class="is-code"><b>${escapeHtml(entry.code)}</b></td>
       ${cell(totals.scans)}
       ${cell(totals.pages, totals.scans)}
-      ${cell(totals.opens, totals.pages)}
-      ${cell(totals.referrals, totals.scans)}
+      ${cell(qrOpenedCount(totals), totals.scans)}
       <td class="is-time">${formatQrTime(entry.lastAt)}</td>
       <td class="is-actions"><button type="button" class="qr-mini is-danger" data-qr-delete="${escapeHtml(entry.code)}">Xoá</button></td>
     </tr>`).join('')}</tbody></table>`;
@@ -12180,17 +12206,21 @@ function renderQrDetail(entry) {
   }
   const safe = encodeURIComponent(entry.code);
   const url = entry.url || `${qrState.stats?.baseUrl || window.location.origin}/q/${entry.code}`;
+  const label = qrState.stats?.mainLabel || entry.code;
+  const devices = Object.entries(entry.platforms || {}).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
   container.innerHTML = `
-    <img class="qr-detail-image" src="/api/qr/image/${safe}.png?size=512" alt="Mã QR ${escapeHtml(qrState.stats?.mainLabel || entry.code)}">
+    <div class="qr-detail-frame"><img class="qr-detail-image" src="/api/qr/image/${safe}.png?size=512" alt="Mã QR ${escapeHtml(label)}"></div>
     <div class="qr-detail-info">
-      <h2 class="qr-detail-code">${escapeHtml(qrState.stats?.mainLabel || entry.code)}</h2>
-      <div class="qr-detail-link"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a><button type="button" class="qr-mini" data-qr-copy="${escapeHtml(url)}">Sao chép</button></div>
-      <div class="qr-detail-row"><b>${entry.scans || 0} lượt quét</b><span>·</span><b>${entry.referrals || 0} vào Messenger</b></div>
-      <div class="qr-detail-row">${qrCountText(entry.platforms, qrPlatformNames)}</div>
-      ${entry.scans ? `<div class="qr-detail-row"><span>Quét cuối ${formatQrTime(entry.lastAt)}</span></div>` : ''}
+      <span class="qr-detail-badge">${qrIcon('tag')}Mã in trên thẻ cảm ơn</span>
+      <h2 class="qr-detail-code">${escapeHtml(label)}</h2>
+      <div class="qr-detail-link">${qrIcon('link')}<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url.replace(/^https?:\/\//, ''))}</a><button type="button" class="qr-icon-button" data-qr-copy="${escapeHtml(url)}" title="Sao chép liên kết" aria-label="Sao chép liên kết">${qrIcon('copy')}</button></div>
+      <div class="qr-detail-devices">${devices.length
+        ? devices.map(([key, count]) => `<span class="qr-chip">${qrIcon(key === 'may tinh' ? 'desktop' : 'phone')}${escapeHtml(qrPlatformNames[key] || key)}<b>${count}</b></span>`).join('')
+        : '<span class="qr-detail-muted">Chưa có lượt quét nào</span>'}</div>
+      ${entry.scans ? `<div class="qr-detail-muted">${qrIcon('history')}Quét cuối ${formatQrTime(entry.lastAt)}</div>` : ''}
       <div class="qr-detail-actions">
-        <a class="qr-download" href="/api/qr/image/${safe}.svg?download=1" download>Tải SVG (để in)</a>
-        <a class="qr-download is-secondary" href="/api/qr/image/${safe}.png?download=1" download>Tải PNG</a>
+        <a class="qr-download" href="/api/qr/image/${safe}.svg?download=1" download>${qrIcon('download')}Tải SVG để in</a>
+        <a class="qr-download is-secondary" href="/api/qr/image/${safe}.png?download=1" download>${qrIcon('image')}Tải PNG</a>
       </div>
     </div>`;
   container.classList.remove('hidden');
@@ -12233,14 +12263,15 @@ function renderQrRecent(recent, mainCode) {
   const container = document.querySelector('#qr-recent');
   if (!container) return;
   const rows = qrMergeRecent((recent || []).filter(item => item.code === mainCode)).slice(0, 40);
-  container.innerHTML = `<h2>Lượt quét gần đây</h2>${rows.length ? `<ul class="qr-recent-list">${rows.map(row => {
+  container.innerHTML = `<h2 class="qr-card-title">${qrIcon('history')}Lượt quét gần đây</h2>${rows.length ? `<ul class="qr-recent-list">${rows.map(row => {
     const outcome = qrOutcomeNames[row.outcome] || qrOutcomeNames.page;
     return `<li>
-      <span class="qr-recent-time">${formatQrShortTime(row.at)}</span>
+      <span class="qr-recent-avatar">${qrIcon(row.platform === 'may tinh' ? 'desktop' : 'phone')}</span>
       <span class="qr-recent-device">${escapeHtml(qrDeviceText(row))}</span>
+      <span class="qr-recent-time">${formatQrShortTime(row.at)}</span>
       <span class="qr-recent-outcome is-${outcome.tone}">${escapeHtml(outcome.label)}</span>
     </li>`;
-  }).join('')}</ul>` : '<p class="channel-empty">Chưa có lượt quét nào.</p>'}`;
+  }).join('')}</ul>` : `<div class="qr-recent-empty">${qrIcon('scan')}<p>Chưa có lượt quét nào.<br>Khách quét thẻ sẽ hiện ở đây.</p></div>`}`;
 }
 
 function renderQrDashboard() {
@@ -12261,16 +12292,7 @@ async function loadQrSettings() {
   const container = document.querySelector('#qr-metrics');
   if (!container) return;
   try {
-    const [stats, settings] = await Promise.all([
-      readApiResponse(await fetch('/api/qr/stats')),
-      readApiResponse(await fetch('/api/qr/settings'))
-    ]);
-    qrState.stats = stats;
-    qrState.settings = settings;
-    const zaloInput = document.querySelector('#qr-zalo-url');
-    if (zaloInput && document.activeElement !== zaloInput) zaloInput.value = settings.zaloUrl || '';
-    const prefillInput = document.querySelector('#qr-prefill-text');
-    if (prefillInput && document.activeElement !== prefillInput) prefillInput.value = settings.prefillText || '';
+    qrState.stats = await readApiResponse(await fetch('/api/qr/stats'));
     renderQrDashboard();
   } catch (error) {
     container.innerHTML = '<p class="channel-empty">Chưa tải được thống kê.</p>';
@@ -12283,29 +12305,6 @@ document.querySelector('#qr-range')?.addEventListener('click', event => {
   if (!button) return;
   qrState.range = button.dataset.qrRange;
   renderQrDashboard();
-});
-
-document.querySelector('#qr-options-form')?.addEventListener('submit', async event => {
-  event.preventDefault();
-  const prefillInput = document.querySelector('#qr-prefill-text');
-  const zaloInput = document.querySelector('#qr-zalo-url');
-  const button = event.currentTarget.querySelector('button[type="submit"]');
-  if (button) button.disabled = true;
-  try {
-    const saved = await readApiResponse(await fetch('/api/qr/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prefillText: String(prefillInput?.value || '').trim(), zaloUrl: String(zaloInput?.value || '').trim() })
-    }));
-    if (prefillInput) prefillInput.value = saved.prefillText || '';
-    if (zaloInput) zaloInput.value = saved.zaloUrl || '';
-    showToast('Đã lưu tuỳ chọn trang đệm.', 'success');
-    loadQrSettings();
-  } catch (error) {
-    showToast(error.message || 'Chưa lưu được tuỳ chọn trang đệm.', 'error');
-  } finally {
-    if (button) button.disabled = false;
-  }
 });
 
 async function deleteQrCodeFromUi(code) {

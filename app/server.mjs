@@ -9,6 +9,7 @@ import { columnIndex as excelColumnIndex, parseXlsx } from './xlsx-import.mjs';
 import { buildPlainXlsx, excelColumnName } from './xlsx-export.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
+import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { aiKeyReentryError, assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
@@ -270,6 +271,11 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
   // Số điện thoại hay bom hàng: đơn vẫn được tạo (khách đã xác nhận) nhưng
   // mang cảnh báo để nhân viên gọi lại trước khi giao.
   await attachPhoneWarning(order);
+  // Thẻ "Đã mua hàng" gắn ngay lúc lưu đơn (01/10): trước đây chỉ gắn sau khi bot gửi xong tin xác
+  // nhận, gửi lỗi (Pancake hết giờ chờ…) là đơn có mà hội thoại không có thẻ.
+  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const orderLabels = labelsForEvents(labelDefs, ['order']);
+  let labelChange = null;
   const result = await updateMessagingStore(store => {
     const item = store.conversations.find(entry => entry.id === conversation.id);
     if (!item) return null;
@@ -286,9 +292,16 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
     if (existing) return { order: existing, created: false };
     item.customerOrders.unshift(order);
     item.customerOrders = item.customerOrders.slice(0, 200);
+    const before = Array.isArray(item.labels) ? [...item.labels] : [];
+    if (applyPurchaseLabels(item, order, orderLabels)) labelChange = { conversation: { id: item.id, name: item.name || '' }, before, after: [...item.labels], published: publicConversation(item) };
     return { order, created: true };
   });
   if (!result) throw new Error('Không tìm thấy hội thoại để tự tạo đơn.');
+  if (labelChange) {
+    const { published, ...change } = labelChange;
+    appendLabelAudit({ actor: AUTOMATED_ACTORS.bot, ...change, labelDefs, reason: 'bot: chốt đơn' });
+    publishMessagingEvent({ type: 'conversation', conversation: published });
+  }
   if (result.created) {
     publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
     // Khách được bám đuổi vừa chốt: thẻ Bám đuổi thành công.
@@ -527,6 +540,31 @@ async function importPosConversationOrders(posOrders) {
   if (relabeled.length) console.log(`Đồng bộ POS: gắn thẻ Đã mua hàng cho ${relabeled.length} hội thoại có đơn POS.`);
   if (created) markFollowUpWins().catch(() => {});
   return created;
+}
+
+/**
+ * Gắn bù thẻ "Đã mua hàng" trong CRM (app/purchase-labels.mjs): đơn đã có mà chưa gắn, khách đặt qua
+ * landing có nhắn Page (khớp SĐT), luồng bình luận của khách đã mua. Chạy lúc khởi động và mỗi 5 phút.
+ */
+async function runPurchaseLabelBackfill() {
+  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const orderLabels = labelsForEvents(labelDefs, ['order']);
+  if (!orderLabels.length) return 0;
+  const landingOrders = await listLandingOrders().catch(() => []);
+  let changes = [];
+  const relabeled = [];
+  await updateMessagingStore(store => {
+    changes = backfillPurchaseLabels(store, { orderLabels, landingOrders });
+    for (const change of changes) {
+      const conversation = store.conversations.find(item => item.id === change.conversation.id);
+      if (conversation) relabeled.push(publicConversation(conversation));
+    }
+    return null;
+  });
+  for (const { reason, ...change } of changes) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason });
+  for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
+  if (changes.length) console.log(`Thẻ Đã mua hàng: gắn bù cho ${changes.length} hội thoại (${[...new Set(changes.map(change => change.reason))].join('; ')}).`);
+  return changes.length;
 }
 
 /**
@@ -3166,6 +3204,10 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
   // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).
   startAdInsightsSync();
+  // Thẻ "Đã mua hàng" trong CRM: gắn bù 30 giây sau khởi động rồi mỗi 5 phút.
+  const purchaseLabelPass = () => runPurchaseLabelBackfill().catch(error => console.warn(`Gắn bù thẻ Đã mua hàng lỗi: ${error.message}`));
+  setTimeout(purchaseLabelPass, 30 * 1000).unref?.();
+  setInterval(purchaseLabelPass, 5 * 60 * 1000).unref?.();
   if (!auth.enabled && authConfig.requireLogin) console.error('CHƯA CẤU HÌNH ĐĂNG NHẬP: máy chủ bắt buộc đăng nhập (PUBLIC_BASE_URL https hoặc CRM_REQUIRE_LOGIN=1) mà chưa có tài khoản — giao diện/API trả 503 cho tới khi khai CRM_LOGIN_USERS hoặc Nhân sự có mật khẩu.');
   else if (!auth.enabled) console.warn('CRM_LOGIN_USERS trống: giao diện không hỏi đăng nhập. Chỉ để vậy khi chạy trên máy mình.');
   else if (!authConfig.sessionSecret) console.warn('CRM_SESSION_SECRET trống: khoá phiên sinh ngẫu nhiên, khởi động lại là mọi người phải đăng nhập lại.');

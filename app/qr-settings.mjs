@@ -1,9 +1,9 @@
 // Cấu hình của trang đệm QR do nhân viên đặt ở Cài đặt → Mã QR: hiện chỉ có
 // liên kết Zalo (OA hoặc nhóm) để khách quét thẻ được chọn Zalo thay vì
 // Messenger. Lưu riêng, không trộn vào kho đếm lượt quét.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
 
 const settingsPath = process.env.QR_SETTINGS_PATH
   || path.join(projectRoot, 'data', 'processed', 'qr-settings.json');
@@ -41,24 +41,7 @@ function normalizeSettings(value) {
 /** Tệp chưa có → mặc định. Tệp hỏng → cất sang `.corrupt-<mốc>` thay vì để lượt lưu sau đè mất. Lỗi đọc khác thì ném ra. */
 export async function readQrSettings() {
   if (cachedSettings) return cachedSettings;
-  let raw;
-  try {
-    raw = await readFile(settingsPath, 'utf8');
-  } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-    cachedSettings = normalizeSettings({});
-    return cachedSettings;
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('không phải object JSON');
-    cachedSettings = normalizeSettings(parsed);
-  } catch (error) {
-    const quarantined = `${settingsPath}.corrupt-${Date.now()}`;
-    await rename(settingsPath, quarantined).catch(() => {});
-    console.error(`Cài đặt mã QR hỏng (${error.message}), đã cất sang ${path.basename(quarantined)}; dùng mặc định.`);
-    cachedSettings = normalizeSettings({});
-  }
+  cachedSettings = await readJsonFile(settingsPath, { fallback: () => normalizeSettings({}), normalize: normalizeSettings, label: 'Cài đặt mã QR' });
   return cachedSettings;
 }
 
@@ -77,10 +60,7 @@ export async function writeQrSettings({ zaloUrl, prefillText } = {}) {
   const operation = writeQueue.then(async () => {
     const current = await readQrSettings();
     const settings = { zaloUrl: link ?? current.zaloUrl, prefillText: text ?? current.prefillText, updatedAt: Date.now() };
-    await mkdir(path.dirname(settingsPath), { recursive: true });
-    const temporaryPath = `${settingsPath}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(settings, null, 2), 'utf8');
-    await rename(temporaryPath, settingsPath);
+    await writeJsonAtomic(settingsPath, settings);
     cachedSettings = settings;
     return settings;
   });

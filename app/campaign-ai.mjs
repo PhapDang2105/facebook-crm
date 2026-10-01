@@ -9,9 +9,10 @@
 // liệu → chỉ theo dõi. Các cờ này gửi kèm prompt, và câu trả lời của mô hình
 // được kiểm lại theo chính các cờ đó. Mô hình lỗi/trả JSON hỏng thì dùng luật.
 // Chỉ gửi số tổng hợp theo chiến dịch — không có dữ liệu khách hàng.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { defaultChatbotSettings, normalizeChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost } from './network-guard.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
@@ -437,23 +438,20 @@ async function requestModelTextOnce({ system, prompt, settings, fetchImpl = depe
 
 let writeQueue = Promise.resolve();
 
+/** ENOENT → []; tệp hỏng → cất `.corrupt-*` rồi []; lỗi đọc khác → ném (lần lưu không đè mất các lượt cũ). */
 async function readRuns(filePath) {
-  try {
-    const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-    return Array.isArray(parsed?.runs) ? parsed.runs : [];
-  } catch {
-    return [];
-  }
+  return readJsonFile(filePath, {
+    fallback: () => [],
+    normalize: parsed => (Array.isArray(parsed.runs) ? parsed.runs : []),
+    label: 'Lịch sử Cố vấn AI chiến dịch'
+  });
 }
 
 function saveRun(result, options = {}) {
   const filePath = insightsPath(options);
   const operation = writeQueue.then(async () => {
     const runs = [result, ...(await readRuns(filePath))].slice(0, campaignAiThresholds.keepRuns);
-    await mkdir(path.dirname(filePath), { recursive: true });
-    const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify({ runs }, null, 2), 'utf8');
-    await rename(temporaryPath, filePath);
+    await writeJsonAtomic(filePath, { runs });
   });
   writeQueue = operation.then(() => undefined, () => undefined);
   return operation;

@@ -3,58 +3,49 @@
 // với hội thoại Facebook, nên khách landing hay import chưa từng nhắn tin cũng
 // có mặt để theo dõi và chăm sóc lại. Kho là JSON, ghi tuần tự (atomic rename)
 // như các kho khác.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { normalizeColumnName } from './order-export.mjs';
-import { toLocalPhone } from './processing/customer-info.mjs';
+import { toLocalPhoneLoose } from './phone-warnings.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 
 const customerFilePath = process.env.CUSTOMER_FILE_PATH
   || path.join(projectRoot, 'data', 'processed', 'customer-file.json');
 
 let cachedStore = null;
-let writeQueue = Promise.resolve();
+const enqueueWrite = createWriteQueue();
 
 function emptyStore() {
   return { customers: {} };
 }
 
 function normalizeStore(value) {
-  const customers = value && typeof value === 'object' && value.customers && typeof value.customers === 'object' ? value.customers : {};
+  const customers = value.customers && typeof value.customers === 'object' && !Array.isArray(value.customers) ? value.customers : {};
   return { customers };
 }
 
+/** ENOENT → rỗng; tệp hỏng → cất `.corrupt-*`; lỗi đọc khác → ném (không nhớ kho rỗng rồi ghi đè). */
 async function readStore() {
   if (cachedStore) return cachedStore;
-  try {
-    cachedStore = normalizeStore(JSON.parse(await readFile(customerFilePath, 'utf8')));
-  } catch {
-    cachedStore = emptyStore();
-  }
+  cachedStore = await readJsonFile(customerFilePath, { fallback: emptyStore, normalize: normalizeStore, label: 'Tệp khách hàng' });
   return cachedStore;
 }
 
-async function persistStore(store) {
-  await mkdir(path.dirname(customerFilePath), { recursive: true });
-  const temporaryPath = `${customerFilePath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-  await rename(temporaryPath, customerFilePath);
-}
-
 function updateStore(mutate) {
-  const operation = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const store = await readStore();
     const result = await mutate(store);
-    await persistStore(store);
+    await writeJsonAtomic(customerFilePath, store);
     return result;
   });
-  writeQueue = operation.then(() => undefined, () => undefined);
-  return operation;
 }
 
-/** Số điện thoại làm khoá: dạng 0xxxxxxxxx; số lạ thì giữ chuỗi số để không mất khách. */
+/**
+ * Số điện thoại làm khoá: dạng 0xxxxxxxxx (kể cả "912345678" mất số 0 đầu, "0084…");
+ * số lạ thì giữ chuỗi số để không mất khách.
+ */
 export function customerPhoneKey(value) {
-  return toLocalPhone(value) || String(value ?? '').replace(/\D/g, '');
+  return toLocalPhoneLoose(value) || String(value ?? '').replace(/\D/g, '');
 }
 
 const text = (value, max = 200) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -63,17 +54,22 @@ const integer = (value, fallback) => {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 };
 
-/** Cột Ngày của bảng ("16/09 07:52", không có năm) → mốc thời gian; không đọc được thì lấy lúc xuất. */
+const vietnamOffsetMs = 7 * 60 * 60 * 1000;
+
+/**
+ * Cột Ngày của bảng ("16/09 07:52", không có năm) → mốc thời gian; không đọc được thì lấy lúc xuất.
+ * Giờ trong cột là giờ Việt Nam (+7): dựng theo UTC rồi trừ 7 giờ, không theo múi giờ máy chủ
+ * (VM chạy UTC → trước đây lệch +7 giờ). Năm mặc định cũng lấy theo ngày VN của lúc xuất.
+ */
 export function orderedAtFromLabel(label, exportedAt) {
   const match = String(label || '').match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?(?:\s+(\d{1,2}):(\d{2}))?/);
   if (!match) return exportedAt;
-  const now = new Date(exportedAt);
-  const build = year => new Date(year, Number(match[2]) - 1, Number(match[1]), Number(match[4]) || 0, Number(match[5]) || 0).getTime();
-  let at = build(match[3] ? Number(match[3]) : now.getFullYear());
-  // Không có năm mà rơi vào "sau hôm nay" thì là năm trước (qua Tết dương). Cho
-  // dư một ngày: giờ trong cột là giờ Việt Nam, máy chủ chạy UTC nên đơn 13:08
-  // hôm nay có thể "muộn hơn" lúc xuất tính theo UTC mà vẫn là hôm nay.
-  if (!match[3] && at > exportedAt + 24 * 60 * 60 * 1000) at = build(now.getFullYear() - 1);
+  const exportYear = new Date(Number(exportedAt) + vietnamOffsetMs).getUTCFullYear();
+  const build = year => Date.UTC(year, Number(match[2]) - 1, Number(match[1]), Number(match[4]) || 0, Number(match[5]) || 0) - vietnamOffsetMs;
+  let at = build(match[3] ? Number(match[3]) : exportYear);
+  // Không có năm mà rơi vào "sau hôm nay" thì là năm trước (qua Tết dương). Cho dư một
+  // ngày (đơn đặt sát lúc xuất, đồng hồ lệch).
+  if (!match[3] && at > exportedAt + 24 * 60 * 60 * 1000) at = build(exportYear - 1);
   return Number.isNaN(at) ? exportedAt : at;
 }
 

@@ -448,8 +448,16 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
         : `Mất kết nối khi gửi đơn sang Pancake POS (${error.message}) — CRM sẽ kiểm trên POS trước khi đẩy lại.`);
     }
     let body = {};
-    try { body = await response.json(); } catch {}
+    let bodyUnreadable = false;
+    try { body = await response.json(); } catch { bodyUnreadable = true; }
     const data = body?.data && typeof body.data === 'object' ? body.data : body;
+    if (response.ok && body?.success !== false && !data?.id) {
+      // POS trả 2xx (đã nhận, có thể đã tạo đơn) nhưng thân phản hồi cắt dở / hết giờ lúc đọc /
+      // không có mã đơn: KHÔNG coi là "POS từ chối" — lần đẩy lại phải kiểm POS trước.
+      throw uncertainPosError(bodyUnreadable
+        ? `Pancake POS trả ${response.status} nhưng không đọc được phản hồi — đơn có thể đã lên POS, CRM sẽ kiểm trên POS trước khi đẩy lại.`
+        : `Pancake POS trả ${response.status} nhưng không có mã đơn — đơn có thể đã lên POS, CRM sẽ kiểm trên POS trước khi đẩy lại.`);
+    }
     if (!response.ok || body?.success === false || !data?.id) {
       const failure = new Error(`Pancake POS không nhận đơn (${response.status}): ${body?.message || body?.error || body?.errors?.[0]?.message || 'không rõ lý do'}`);
       // Lỗi máy chủ/cổng (5xx) cũng có thể xảy ra sau khi POS đã ghi đơn.
@@ -642,21 +650,23 @@ async function syncOrderToPosOnce(conversationId, orderId, { config = posConfig(
   const order = (Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : []).find(item => item.id === orderId);
   if (!conversation || !order) return null;
   if (order.pos?.id) return order.pos;
+  const previouslyUncertain = Boolean(order.pos?.uncertain);
   let outcome;
   try {
-    // Lần đẩy trước hết giờ/đứt mạng (pos.uncertain): POS có thể đã tạo đơn. Kiểm
-    // POS trước; có rồi thì nhận mã đó, không POST lần hai. Không kiểm được thì
-    // KHÔNG đẩy mù — giữ lỗi để thử lại sau.
-    if (order.pos?.uncertain) {
-      let existing;
+    // Mọi lần ĐẨY LẠI (đã có lần trước lỗi): kiểm POS trước — có rồi thì nhận mã đó, không
+    // POST lần hai. Lần trước "chưa chắc" (hết giờ, đứt mạng, 5xx, 2xx không đọc được) mà
+    // không kiểm được thì KHÔNG đẩy mù — giữ lỗi để thử lại sau. Lần trước bị POS từ chối rõ
+    // ràng mà không kiểm được thì đẩy như cũ (POS chưa có đơn).
+    if (order.pos && (previouslyUncertain || order.pos.error)) {
+      let existing = null;
       try {
         existing = await findExistingPosOrder(order, config, fetchImpl);
       } catch (error) {
-        throw uncertainPosError(`Chưa kiểm được đơn trên Pancake POS (${error.message}) — chưa đẩy lại để tránh tạo hai đơn, thử lại sau.`);
+        if (previouslyUncertain) throw uncertainPosError(`Chưa kiểm được đơn trên Pancake POS (${error.message}) — chưa đẩy lại để tránh tạo hai đơn, thử lại sau.`);
       }
       if (existing) {
         outcome = { ...existing, at: Date.now(), recovered: true };
-        log(`Đơn ${order.id} đã có trên Pancake POS #${existing.id} (lần đẩy trước hết giờ), không đẩy lại.`);
+        log(`Đơn ${order.id} đã có trên Pancake POS #${existing.id} (lần đẩy trước báo lỗi), không đẩy lại.`);
       }
     }
     if (!outcome) {
@@ -674,10 +684,14 @@ async function syncOrderToPosOnce(conversationId, orderId, { config = posConfig(
     if (outcome.id) log(`Đơn ${order.id} đã có trên Pancake POS #${outcome.id} dù lần gửi báo lỗi: ${error.message}`);
     else log(`Đơn ${order.id} chưa đẩy được sang Pancake POS: ${error.message}`);
   }
+  // Lần trước "chưa chắc" mà lần này vẫn chưa có mã: giữ cờ — lỗi rõ ràng của lần này (ví dụ POS
+  // từ chối vì trùng mã CRM-…) không chứng minh được POS chưa có đơn của lần trước.
+  if (previouslyUncertain && !outcome.id) outcome.uncertain = true;
   await updateMessagingStore(current => {
     const item = current.conversations.find(entry => entry.id === conversationId);
     const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === orderId);
-    if (target) target.pos = outcome;
+    // Đơn đã nhận mã POS ở đường khác trong lúc chờ: không đè mã bằng lỗi.
+    if (target && !(target.pos?.id && !outcome.id)) target.pos = outcome;
     return null;
   });
   publishMessagingEvent({ type: 'customer-panel', conversationId });

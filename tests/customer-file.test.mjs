@@ -8,7 +8,9 @@ const { customersFromExport, recordExportedOrders, listExportedCustomers, ordere
 const { buildCustomers } = await import('../app/customers.mjs');
 
 const headers = ['Nguồn đơn', 'Ngày', 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Nhà mạng', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
-const exportedAt = new Date(2026, 8, 16, 15, 0).getTime();
+// Mốc theo giờ Việt Nam (+7) viết tường minh bằng UTC: kết quả không phụ thuộc múi giờ máy chạy test.
+const vn = (year, month, day, hour = 0, minute = 0) => Date.UTC(year, month, day, hour, minute) - 7 * 60 * 60 * 1000;
+const exportedAt = vn(2026, 8, 16, 15, 0);
 const orderData = {
   headers,
   rows: [
@@ -28,13 +30,13 @@ test('gom dòng xuất thành khách theo số điện thoại, mỗi đơn nhi�
   assert.equal(mai.orders.length, 1, 'hai dòng cùng mã là một đơn');
   assert.deepEqual(mai.orders[0].products.map(item => [item.sku, item.quantity, item.price]), [['GRA-XANH-Z450', 2, 149000], ['GRA-VANG-H350', 1, 149000]]);
   assert.equal(mai.orders[0].total, 447000);
-  assert.equal(mai.orders[0].orderedAt, new Date(2026, 8, 16, 7, 52).getTime(), 'ngày đặt đọc từ cột Ngày, năm suy ra từ lúc xuất');
+  assert.equal(mai.orders[0].orderedAt, vn(2026, 8, 16, 7, 52), 'ngày đặt đọc từ cột Ngày (giờ VN), năm suy ra từ lúc xuất');
   assert.equal(orderedAtFromLabel('', exportedAt), exportedAt);
   // Đơn 13:08 hôm nay (giờ Việt Nam) xuất lúc 05:34 UTC cùng ngày: vẫn là năm nay, không lùi một năm.
-  const exportedEarlyUtc = new Date(2026, 8, 19, 5, 34).getTime();
-  assert.equal(orderedAtFromLabel('19/09 13:08', exportedEarlyUtc), new Date(2026, 8, 19, 13, 8).getTime());
+  const exportedEarlyUtc = Date.UTC(2026, 8, 19, 5, 34);
+  assert.equal(orderedAtFromLabel('19/09 13:08', exportedEarlyUtc), vn(2026, 8, 19, 13, 8));
   // Qua Tết dương: cột ghi 30/12 mà xuất ngày 02/01 thì là năm trước.
-  assert.equal(orderedAtFromLabel('30/12 10:00', new Date(2027, 0, 2).getTime()), new Date(2026, 11, 30, 10, 0).getTime());
+  assert.equal(orderedAtFromLabel('30/12 10:00', vn(2027, 0, 2)), vn(2026, 11, 30, 10, 0));
 });
 
 test('ghi tệp: xuất lại cùng đơn không nhân đôi, giữ mốc xuất lần đầu', async () => {

@@ -6,11 +6,10 @@
 // chính shop mình, và trạng thái khách (chặn, thẻ "thường xuyên hoàn"). Kết
 // quả được ghim vào đơn chatbot/landing lúc tạo và bảng Đơn hàng tra lại khi
 // mở, để nhân viên gọi xác nhận trước khi giao — không có gì phải nhập tay.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { toLocalPhone } from './processing/customer-info.mjs';
+import { createWriteQueue, readJsonFile, readJsonFileSync, writeJsonAtomic } from './json-store.mjs';
 
 const warningsPath = process.env.PHONE_WARNINGS_PATH
   || path.join(projectRoot, 'data', 'processed', 'phone-warnings.json');
@@ -41,43 +40,48 @@ const cacheTtlMs = 24 * 60 * 60 * 1000;
 const requestTimeoutMs = 6000;
 
 let cachedStore = null;
-let writeQueue = Promise.resolve();
+const enqueueWrite = createWriteQueue();
 
 function emptyStore() {
   return { cache: {} };
 }
 
 function normalizeStore(value) {
-  if (!value || typeof value !== 'object') return emptyStore();
-  return { cache: value.cache && typeof value.cache === 'object' ? value.cache : {} };
+  return { cache: value.cache && typeof value.cache === 'object' && !Array.isArray(value.cache) ? value.cache : {} };
 }
 
+/** ENOENT → rỗng; tệp hỏng → cất `.corrupt-*`; lỗi đọc khác → ném (không nhớ kho rỗng). */
 export async function readWarningStore() {
   if (cachedStore) return cachedStore;
-  try {
-    cachedStore = normalizeStore(JSON.parse(await readFile(warningsPath, 'utf8')));
-  } catch {
-    cachedStore = emptyStore();
-  }
+  cachedStore = await readJsonFile(warningsPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho cảnh báo SĐT' });
   return cachedStore;
 }
 
 export function updateWarningStore(mutate) {
-  const operation = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const store = await readWarningStore();
     const result = await mutate(store);
-    await mkdir(path.dirname(warningsPath), { recursive: true });
-    const temporaryPath = `${warningsPath}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-    await rename(temporaryPath, warningsPath);
+    await writeJsonAtomic(warningsPath, store);
     return result;
   });
-  writeQueue = operation.then(() => undefined, () => undefined);
-  return operation;
+}
+
+/**
+ * toLocalPhone cộng hai dạng hay gặp mà toLocalPhone bỏ: 9 chữ số mất số 0 đầu (ô số của
+ * form/Excel: "912345678") và tiền tố quốc tế 0084. Vẫn chỉ nhận đầu số di động (số bàn
+ * 02x bị loại như chủ ý của customer-info). Không hợp lệ → ''.
+ */
+export function toLocalPhoneLoose(value) {
+  const direct = toLocalPhone(value);
+  if (direct) return direct;
+  const digits = String(value ?? '').replace(/[\s.\-()]/g, '');
+  if (/^0084\d{9}$/.test(digits)) return toLocalPhone(`0${digits.slice(4)}`);
+  if (/^[35789]\d{8}$/.test(digits)) return toLocalPhone(`0${digits}`);
+  return '';
 }
 
 export function normalizeWarningPhone(value) {
-  return toLocalPhone(value) || String(value ?? '').replace(/\D/g, '');
+  return toLocalPhoneLoose(value) || String(value ?? '').replace(/\D/g, '');
 }
 
 function foldText(value) {
@@ -100,11 +104,13 @@ let savedPosConfig = null;
 function loadSavedPosConfig() {
   if (savedPosConfig) return savedPosConfig;
   try {
-    // Tệp khoá rất nhỏ, đọc đồng bộ một lần rồi giữ trong bộ nhớ.
-    const parsed = JSON.parse(readFileSync(posConfigPath, 'utf8'));
-    savedPosConfig = parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    savedPosConfig = {};
+    // Tệp khoá rất nhỏ, đọc đồng bộ một lần rồi giữ trong bộ nhớ. Hỏng → cất `.corrupt-*`.
+    savedPosConfig = readJsonFileSync(posConfigPath, { fallback: () => ({}), label: 'Khoá POS (pos-config.json)' });
+  } catch (error) {
+    // Lỗi đọc thoáng qua (EBUSY, EACCES…): lần này coi như chưa kết nối nhưng KHÔNG nhớ,
+    // lần gọi sau đọc lại (trước đây nhớ {} tới khi khởi động lại → POS "chưa kết nối").
+    console.error(error?.message || error);
+    return {};
   }
   return savedPosConfig;
 }
@@ -149,16 +155,16 @@ export async function connectPos({ apiKey, shopId = '' }, { fetchImpl = fetch } 
   const shops = Array.isArray(payload?.shops) ? payload.shops : [];
   if (!shops.length) throw new Error('Khoá hợp lệ nhưng không thấy shop nào. Tạo khoá trong đúng shop cần tra.');
   const chosen = shops.find(shop => String(shop.id) === String(shopId)) || shops[0];
-  savedPosConfig = { apiKey: key, shopId: String(chosen.id), shopName: String(chosen.name || ''), savedAt: Date.now() };
-  await mkdir(path.dirname(posConfigPath), { recursive: true });
-  await writeFile(posConfigPath, JSON.stringify(savedPosConfig, null, 2), { encoding: 'utf8', mode: 0o600 });
+  const saved = { apiKey: key, shopId: String(chosen.id), shopName: String(chosen.name || ''), savedAt: Date.now() };
+  // Ghi nguyên tử (tệp tạm + rename): sự cố giữa chừng không để lại tệp khoá cắt dở.
+  await writeJsonAtomic(posConfigPath, saved, { mode: 0o600 });
+  savedPosConfig = saved;
   return { ...posStatus(), shops: shops.map(shop => ({ id: String(shop.id), name: String(shop.name || '') })) };
 }
 
 export async function disconnectPos() {
+  await writeJsonAtomic(posConfigPath, {}, { text: '{}', mode: 0o600 });
   savedPosConfig = {};
-  await mkdir(path.dirname(posConfigPath), { recursive: true });
-  await writeFile(posConfigPath, '{}', { encoding: 'utf8', mode: 0o600 });
   return posStatus();
 }
 
@@ -340,7 +346,13 @@ export async function lookupPhone(phone, { force = false, fetchImpl = fetch, con
 export async function cachedPhoneWarning(phone) {
   const key = normalizeWarningPhone(phone);
   if (!key) return null;
-  const store = await readWarningStore();
+  let store;
+  try {
+    store = await readWarningStore();
+  } catch {
+    // Đường chỉ đọc (liệt kê đơn): kho đọc lỗi thoáng qua thì coi như chưa tra số này.
+    return null;
+  }
   const pos = store.cache[key];
   if (!pos || pos.error) return null;
   const scored = assessPhone({ pos });

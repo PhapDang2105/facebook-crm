@@ -4,16 +4,17 @@
 // lên: sửa thẳng vào bản suy ra thì lần dựng sau mất sạch. Kho này giữ riêng
 // phần nhân viên tự nhập rồi phủ lên bản suy ra, cùng lối với customer-file.mjs
 // và order-edits.mjs: JSON, ghi tuần tự, đổi tên nguyên khối.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { customerPhoneKey } from './customer-file.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
+import { normalizeEditedPhone } from './order-edits.mjs';
 
 const customerEditsPath = process.env.CUSTOMER_EDITS_PATH
   || path.join(projectRoot, 'data', 'processed', 'customer-edits.json');
 
 let cachedStore = null;
-let writeQueue = Promise.resolve();
+const enqueueWrite = createWriteQueue();
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -22,39 +23,27 @@ function emptyStore() {
 }
 
 function normalizeStore(value) {
-  const stored = value && typeof value === 'object' && value.customers && typeof value.customers === 'object' ? value.customers : {};
+  const stored = value.customers && typeof value.customers === 'object' && !Array.isArray(value.customers) ? value.customers : {};
   // Object không prototype: khoá "__proto__" đọc lên từ JSON chỉ là một khoá
   // thường, không với tới được Object.prototype của cả tiến trình.
   return { customers: Object.assign(Object.create(null), stored) };
 }
 
+/** ENOENT → rỗng; tệp hỏng → cất `.corrupt-*`; lỗi đọc khác → ném (không nhớ kho rỗng rồi ghi đè). */
 async function readStore() {
   if (cachedStore) return cachedStore;
-  try {
-    cachedStore = normalizeStore(JSON.parse(await readFile(customerEditsPath, 'utf8')));
-  } catch {
-    cachedStore = emptyStore();
-  }
+  cachedStore = await readJsonFile(customerEditsPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho sửa thông tin khách' });
   return cachedStore;
-}
-
-async function persistStore(store) {
-  await mkdir(path.dirname(customerEditsPath), { recursive: true });
-  const temporaryPath = `${customerEditsPath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-  await rename(temporaryPath, customerEditsPath);
 }
 
 /** Ghi tuần tự: hai nhân viên bấm cùng lúc thì lần sau đọc được kết quả lần trước. */
 function updateStore(mutate) {
-  const operation = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const store = await readStore();
     const result = await mutate(store);
-    await persistStore(store);
+    await writeJsonAtomic(customerEditsPath, store);
     return result;
   });
-  writeQueue = operation.catch(() => {});
-  return operation;
 }
 
 // Khoá do người dùng chi phối mà gán thẳng vào object literal thì "__proto__"
@@ -118,6 +107,11 @@ export function applyCustomerEdits(customers, edits = {}) {
     customer.derivedLabels = [...(customer.labels || [])];
     // Bản ghi từ trước khi đổi sang khoá bền vẫn phải đọc được.
     const entry = store[key] || store[customer.id];
+    // Ghi chú: gộp cả khoá chính lẫn khoá hội thoại (bot ghi cho khách chưa có SĐT theo
+    // `pageId:psid`), cùng phép gộp với listCustomerNotes để số đếm khớp danh sách.
+    const notes = mergeNotes([store[key], store[customer.id]]);
+    if (!entry && !notes.length) continue;
+    applyNoteCounts(customer, notes);
     if (!entry) continue;
 
     if (entry.name) customer.name = entry.name;
@@ -134,17 +128,34 @@ export function applyCustomerEdits(customers, edits = {}) {
       if (!customer.labels.includes(label)) customer.labels.push(label);
     }
 
-    const notes = Array.isArray(entry.notes) ? entry.notes : [];
-    // noteCount là tổng cả ghi chú bên hội thoại; staffNoteCount chỉ đếm phần
-    // thêm từ hộp chi tiết, tức đúng phần listCustomerNotes trả về.
-    customer.staffNoteCount = notes.length;
-    if (notes.length) {
-      customer.noteCount = (Number(customer.noteCount) || 0) + notes.length;
-      customer.lastStaffNoteAt = notes.reduce((latest, note) => Math.max(latest, Number(note?.at) || 0), 0);
-    }
     customer.editedByStaffAt = Number(entry.updatedAt) || 0;
   }
   return customers;
+}
+
+/** Ghi chú của nhiều bản ghi (khoá chính, khoá hội thoại) gộp lại, khử trùng theo id + lúc + chữ. */
+function mergeNotes(entries) {
+  const seen = new Set();
+  const notes = [];
+  for (const entry of new Set(entries.filter(Boolean))) {
+    for (const note of Array.isArray(entry.notes) ? entry.notes : []) {
+      const fingerprint = `${note?.id}|${note?.at}|${note?.text}`;
+      if (seen.has(fingerprint)) continue;
+      seen.add(fingerprint);
+      notes.push(note);
+    }
+  }
+  return notes;
+}
+
+// noteCount là tổng cả ghi chú bên hội thoại; staffNoteCount chỉ đếm phần thêm từ hộp chi
+// tiết (và ghi chú bot), tức đúng phần listCustomerNotes trả về.
+function applyNoteCounts(customer, notes) {
+  customer.staffNoteCount = notes.length;
+  if (notes.length) {
+    customer.noteCount = (Number(customer.noteCount) || 0) + notes.length;
+    customer.lastStaffNoteAt = notes.reduce((latest, note) => Math.max(latest, Number(note?.at) || 0), 0);
+  }
 }
 
 /**
@@ -157,10 +168,12 @@ export async function updateCustomerProfile(key, patch = {}, now = Date.now(), {
 
   if (patch.name !== undefined) fields.name = text(patch.name, 120);
 
+  // +84/0084 → 0, thêm số 0 đầu bị mất; số không giống di động VN vẫn lưu, kèm cảnh báo.
+  let phoneWarning = '';
   if (patch.phone !== undefined) {
-    const phone = text(patch.phone, 20).replace(/[^\d+]/g, '');
-    if (phone && phone.replace(/\D/g, '').length < 9) throw new Error('Số điện thoại không hợp lệ.');
-    fields.phone = phone;
+    const normalized = normalizeEditedPhone(patch.phone);
+    fields.phone = normalized.phone;
+    phoneWarning = normalized.warning;
   }
 
   if (patch.address !== undefined) fields.address = text(patch.address, 500);
@@ -182,7 +195,7 @@ export async function updateCustomerProfile(key, patch = {}, now = Date.now(), {
     entry.updatedAt = now;
     // Người sửa gần nhất (nhật ký hoạt động giữ đủ từng lần).
     if (by) entry.updatedBy = { username: text(by.username, 32), name: text(by.name, 80) };
-    return { ...entry };
+    return { ...entry, ...(phoneWarning ? { warnings: [phoneWarning] } : {}) };
   });
 }
 
@@ -225,10 +238,13 @@ export async function addCustomerNote(key, note = {}, now = Date.now()) {
   });
 }
 
-/** Ghi chú của một khách, mới nhất lên đầu. */
-export async function listCustomerNotes(key) {
+/**
+ * Ghi chú của một khách, mới nhất lên đầu. `aliases`: các khoá cũ của cùng khách — chatbot ghi
+ * chú cho khách CHƯA có SĐT theo khoá `pageId:psid` (customer.id); khi khách có SĐT thì khoá
+ * chính thành `phone:<sđt>` và ghi chú cũ nằm ở khoá kia. Gộp, khử trùng (cùng id + lúc + chữ).
+ */
+export async function listCustomerNotes(key, { aliases = [] } = {}) {
   const store = await readStore();
-  const entry = store.customers[text(key, 200)];
-  const notes = entry && Array.isArray(entry.notes) ? entry.notes : [];
-  return [...notes].sort((first, second) => (Number(second.at) || 0) - (Number(first.at) || 0));
+  const keys = [...new Set([key, ...(Array.isArray(aliases) ? aliases : [])].map(value => text(value, 200)).filter(Boolean))];
+  return mergeNotes(keys.map(id => store.customers[id])).sort((first, second) => (Number(second.at) || 0) - (Number(first.at) || 0));
 }

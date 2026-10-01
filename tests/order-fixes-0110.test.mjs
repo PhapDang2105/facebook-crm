@@ -73,7 +73,7 @@ test('mã đơn tạo tay: mã ngắn chưa dùng giữ nguyên; trùng (đơn �
   // Mã có hậu tố vẫn hợp lệ qua chuẩn hoá đơn (chỉ giữ chữ, số, gạch).
   assert.equal(normalizeCustomerOrder({ id: '40001-2', name: 'A', phone: '0385805790', address: ADDRESS, products: [{ name: 'Granola Túi Xanh 450g', sku: XANH, quantity: 1, price: 174000 }] }).id, '40001-2');
   // Máy chủ dùng mã duy nhất khi tạo đơn tay và trả mã thật cho trình duyệt.
-  const server = readFileSync(new URL('../app/server.mjs', import.meta.url), 'utf8');
+  const server = (readFileSync(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const create = server.slice(server.indexOf("if (payload.type === 'order') {"), server.indexOf("if (payload.type === 'order') {") + 4000);
   assert.match(create, /order\.id = uniqueOrderId\(order\.id, await takenOrderIds\(\)\);/);
   assert.match(create, /reserveOrderIdInStore\(order, store\);/);

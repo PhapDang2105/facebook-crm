@@ -3,30 +3,28 @@
 // XLSX đã tải để tải lại. Nhẹ: chỉ vài trăm byte mỗi dòng cộng tệp vài chục
 // KB; tự xoá sau 14 ngày (khi ghi và khi đọc), không ai phải dọn tay.
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 
 const historyPath = process.env.EXPORT_HISTORY_PATH || path.join(projectRoot, 'data', 'processed', 'export-history.json');
 const filesDirectory = process.env.EXPORT_FILES_DIR || path.join(projectRoot, 'data', 'processed', 'exports');
 export const exportHistoryTtlMs = 14 * 24 * 60 * 60 * 1000;
 
-let writeQueue = Promise.resolve();
+const enqueueWrite = createWriteQueue();
 
+/** ENOENT → rỗng; tệp hỏng → cất `.corrupt-*`; lỗi đọc khác → ném (không ghi đè lịch sử thật bằng rỗng). */
 async function readHistory() {
-  try {
-    const parsed = JSON.parse(await readFile(historyPath, 'utf8'));
-    return { items: Array.isArray(parsed?.items) ? parsed.items : [] };
-  } catch {
-    return { items: [] };
-  }
+  return readJsonFile(historyPath, {
+    fallback: () => ({ items: [] }),
+    normalize: parsed => ({ items: Array.isArray(parsed.items) ? parsed.items : [] }),
+    label: 'Lịch sử xuất kho'
+  });
 }
 
 async function writeHistory(store) {
-  await mkdir(path.dirname(historyPath), { recursive: true });
-  const temporary = `${historyPath}.tmp`;
-  await writeFile(temporary, JSON.stringify(store, null, 2), 'utf8');
-  await rename(temporary, historyPath);
+  await writeJsonAtomic(historyPath, store);
 }
 
 /** Bỏ dòng quá 14 ngày và xoá tệp của chúng; trả về store đã gọn. */
@@ -42,14 +40,12 @@ async function prune(store, now) {
 }
 
 function update(mutate) {
-  const run = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const store = await readHistory();
     const result = await mutate(store);
     await writeHistory(store);
     return result;
   });
-  writeQueue = run.catch(() => {});
-  return run;
 }
 
 const publicEntry = item => ({

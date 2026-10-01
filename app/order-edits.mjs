@@ -7,6 +7,7 @@ import { resolvedAddressFields } from './processing/locations.mjs';
 import { findProductBySku } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
+import { toLocalPhoneLoose } from './phone-warnings.mjs';
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -116,9 +117,12 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     if (name !== order.name) { order.name = name; changed.push('name'); }
   }
 
+  let phoneWarning = '';
   if (patch.phone !== undefined) {
-    const phone = text(patch.phone, 20).replace(/[^\d+]/g, '');
-    if (phone.replace(/\D/g, '').length < 9) throw new Error('Số điện thoại không hợp lệ.');
+    const normalized = normalizeEditedPhone(patch.phone);
+    if (!normalized.phone) throw new Error('Số điện thoại không hợp lệ.');
+    const phone = normalized.phone;
+    phoneWarning = normalized.warning;
     if (phone !== order.phone) { order.phone = phone; changed.push('phone'); }
   }
 
@@ -283,8 +287,56 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
   if (changed.length) {
     order.updatedAt = now;
     order.editedByStaffAt = now;
+    // Nhóm nội dung nhân viên đã tự tay sửa (địa chỉ, giỏ…): bản form hoàn tất đến sau
+    // (landing-orders.mjs) không được đè các nhóm này.
+    const groups = [...new Set(changed.map(field => STAFF_EDIT_FIELD_GROUP[field]).filter(Boolean))];
+    if (groups.length) {
+      const staffEdited = order.staffEdited && typeof order.staffEdited === 'object' ? order.staffEdited : {};
+      for (const group of groups) staffEdited[group] = now;
+      order.staffEdited = staffEdited;
+    }
   }
+  if (phoneWarning) changed.warnings = [phoneWarning];
   return changed;
+}
+
+/** Nhóm nội dung đơn nhân viên có thể sửa → các trường của đơn thuộc nhóm đó. */
+export const STAFF_EDIT_GROUPS = Object.freeze({
+  name: ['name'],
+  phone: ['phone'],
+  address: ['address', 'street', 'province', 'district', 'ward', 'locationConfidence', 'postMerger'],
+  basket: ['products', 'total', 'discount', 'shippingFee', 'freeShipping', 'gift', 'promoGift'],
+  payment: ['payment'],
+  note: ['note']
+});
+const STAFF_EDIT_FIELD_GROUP = Object.freeze({
+  name: 'name', phone: 'phone', address: 'address', lines: 'basket', products: 'basket', freeShipping: 'basket',
+  shippingFee: 'basket', discount: 'basket', gift: 'basket', payment: 'payment', note: 'note'
+});
+
+/**
+ * Nhóm nội dung nhân viên đã sửa trên đơn. Đơn sửa trước khi có `staffEdited` (chỉ có
+ * `editedByStaffAt`) thì không biết nhóm nào: coi như đã sửa tất cả (an toàn: không đè).
+ */
+export function staffEditedGroups(order) {
+  if (order?.staffEdited && typeof order.staffEdited === 'object') {
+    return new Set(Object.keys(order.staffEdited).filter(group => STAFF_EDIT_GROUPS[group]));
+  }
+  return order?.editedByStaffAt ? new Set(Object.keys(STAFF_EDIT_GROUPS)) : new Set();
+}
+
+/**
+ * SĐT nhân viên gõ khi sửa đơn/khách: bỏ ký tự thừa, +84/84/0084 → 0, 9 số mất số 0 đầu → thêm 0.
+ * Số không giống di động VN (số bàn, gõ nhầm đầu số) vẫn lưu như gõ — chỉ kèm cảnh báo, không chặn.
+ * Ít hơn 9 chữ số thì ném lỗi như trước.
+ */
+export function normalizeEditedPhone(value) {
+  const raw = text(value, 20).replace(/[^\d+]/g, '');
+  if (!raw) return { phone: '', warning: '' };
+  if (raw.replace(/\D/g, '').length < 9) throw new Error('Số điện thoại không hợp lệ.');
+  const local = toLocalPhoneLoose(raw);
+  if (local) return { phone: local, warning: '' };
+  return { phone: raw, warning: `Số ${raw} không giống số di động Việt Nam (đầu số lạ hoặc số bàn): kiểm lại trước khi giao.` };
 }
 
 /* ---- Ai đã làm gì với đơn (lịch sử ghi ngay trên đơn) ----

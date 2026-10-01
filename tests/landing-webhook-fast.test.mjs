@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 // webhook landing phải xác thực token, đọc thân, rồi trả 200 NGAY — tạo đơn (tự điền địa chỉ, tra cảnh
 // báo SĐT trên POS, có thể > 5 giây) chạy ở nền. Trước 01/10 route chờ recordLandingOrder xong mới
 // trả lời → Webcake thấy chậm hơn 5 giây và gửi lại.
-const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
 test('webhook landing: xác thực token trước, trả 200 trước khi tạo đơn, tạo đơn ở nền không chặn phản hồi', () => {
   const start = server.indexOf('if (url.pathname === landingConfig.path) {');

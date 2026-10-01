@@ -120,9 +120,9 @@ test('đơn bot tạo từ hội thoại luôn ghi order.livestream true/false; 
 
 test('bản chữ "XÁC NHẬN ĐƠN ĐẶT HÀNG…" không còn đường nào gửi cho khách (chủ shop yêu cầu)', async () => {
   const { readFile } = await import('node:fs/promises');
-  const server = await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8');
+  const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.doesNotMatch(server, /buildCustomerOrderConfirmation/, 'server không dựng bản chữ xác nhận để gửi');
-  const metaSync = await readFile(new URL('../app/meta-sync.mjs', import.meta.url), 'utf8');
+  const metaSync = (await readFile(new URL('../app/meta-sync.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(metaSync, /if \(!text\) throw error;/, 'thẻ receipt bị từ chối thì không lùi về bản chữ khi không có chữ');
 });
 

@@ -8,9 +8,9 @@
 //    referrals will always work"). Đếm ở đây rồi đối chiếu với số referral
 //    webhook nhận được là cách duy nhất biết tỷ lệ rớt thật, thay vì đoán.
 //  - Máy không mở được Messenger vẫn có chỗ để đi tiếp.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
+import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { classifyUserAgent, qrCodeFromRef } from './qr-bridge.mjs';
 
 const scansPath = process.env.QR_SCANS_PATH
@@ -63,7 +63,6 @@ function emptyStore() {
 }
 
 function normalizeStore(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('không phải object JSON');
   const codes = value.codes && typeof value.codes === 'object' && !Array.isArray(value.codes) ? value.codes : {};
   const recent = Array.isArray(value.recent) ? value.recent.slice(-recentLimit) : [];
   const store = { codes: Object.assign(Object.create(null), codes), recent };
@@ -87,30 +86,12 @@ export function isKnownQrCode(code) {
  */
 async function readStore() {
   if (cachedStore) return cachedStore;
-  let raw;
-  try {
-    raw = await readFile(scansPath, 'utf8');
-  } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-    cachedStore = emptyStore();
-    return cachedStore;
-  }
-  try {
-    cachedStore = normalizeStore(JSON.parse(raw));
-  } catch (error) {
-    const quarantined = `${scansPath}.corrupt-${Date.now()}`;
-    await rename(scansPath, quarantined).catch(() => {});
-    console.error(`Kho lượt quét QR hỏng (${error.message}), đã cất sang ${path.basename(quarantined)}; bắt đầu kho mới.`);
-    cachedStore = emptyStore();
-  }
+  cachedStore = await readJsonFile(scansPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho lượt quét QR' });
   return cachedStore;
 }
 
 async function persistStore(store) {
-  await mkdir(path.dirname(scansPath), { recursive: true });
-  const temporaryPath = `${scansPath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-  await rename(temporaryPath, scansPath);
+  await writeJsonAtomic(scansPath, store);
 }
 
 /** Ghi tuần tự như các kho khác: nhiều người quét cùng lúc không đè mất nhau. Mutate trả `null` = không có gì đổi, không ghi đĩa. */
@@ -164,6 +145,18 @@ export async function deleteQrCode(code) {
   }).then(result => result === true);
 }
 
+// Cửa sổ ghép beacon /open với lượt trang đệm, và giữ dấu vết khử trùng (chỉ trong bộ nhớ).
+const openPairWindowMs = 30 * 60 * 1000;
+const recentOpenVisitors = new Map(); // `${mã}|${loại}|${dấu vết}` → lúc bấm
+const maximumOpenVisitors = 5000;
+function pruneOpenVisitors(now) {
+  for (const [key, at] of recentOpenVisitors) {
+    if (now - at > openPairWindowMs || at > now + openPairWindowMs) recentOpenVisitors.delete(key);
+  }
+  // Gửi dồn với dấu vết giả mỗi lần một khác: chặn bộ nhớ, bỏ mục cũ nhất.
+  while (recentOpenVisitors.size > maximumOpenVisitors) recentOpenVisitors.delete(recentOpenVisitors.keys().next().value);
+}
+
 function pushRecent(store, item) {
   store.recent.push(item);
   if (store.recent.length > recentLimit) store.recent = store.recent.slice(-recentLimit);
@@ -201,12 +194,28 @@ export async function recordQrScan(code, { at = Date.now(), userAgent = '', mode
  * `opens`, "Nhắn qua Zalo" đếm vào `zaloOpens`. Lượt quét chuyển hướng thẳng
  * không có bước này, nên tỷ lệ bấm chỉ so với số lượt được phục vụ bằng trang.
  */
-export async function recordQrOpen(code, { at = Date.now(), target = 'messenger' } = {}) {
+export async function recordQrOpen(code, { at = Date.now(), target = 'messenger', visitor = '' } = {}) {
   if (!isValidQrCode(code)) throw new Error('Mã QR không hợp lệ.');
   const zalo = target === 'zalo';
+  const event = zalo ? 'open-zalo' : 'open';
+  // Cùng một máy (server đưa dấu vết ngắn hạn, ví dụ hash UA+IP — không lưu đĩa) bấm lại trong
+  // 30 phút: một lượt. Không có dấu vết thì chỉ dựa vào phép ghép với lượt trang đệm bên dưới.
+  const visitorKey = visitor ? `${code}|${event}|${String(visitor).slice(0, 128)}` : '';
   return updateStore(store => {
     const entry = entryFor(store, code, at);
     if (!entry) return null;
+    pruneOpenVisitors(at);
+    if (visitorKey && recentOpenVisitors.has(visitorKey)) return null;
+    // Beacon /open là công khai: chỉ đếm khi có lượt được phục vụ bằng trang đệm của cùng mã
+    // trong 30 phút trước và lượt đó chưa "dùng" cho một lần bấm cùng loại — mỗi lượt trang
+    // đệm cho tối đa một lần bấm Messenger (và một lần Zalo). Gửi beacon dồn/không quét
+    // trước không làm tỷ lệ mở vượt 100%.
+    const since = at - openPairWindowMs;
+    const inWindow = item => item?.code === code && Number(item.at) >= since && Number(item.at) <= at;
+    const pages = store.recent.filter(item => inWindow(item) && !item.event && item.mode === 'page').length;
+    const opened = store.recent.filter(item => inWindow(item) && item.event === event).length;
+    if (pages <= opened) return null;
+    if (visitorKey) recentOpenVisitors.set(visitorKey, at);
     if (zalo) entry.zaloOpens = (Number(entry.zaloOpens) || 0) + 1;
     else entry.opens += 1;
     bumpDay(entry, at, zalo ? 'zaloOpens' : 'opens');

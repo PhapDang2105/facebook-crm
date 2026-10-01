@@ -19,13 +19,34 @@ function getAttribute(attributes, name) {
   return match ? decodeXml(match[1]) : '';
 }
 
+// Giới hạn SAU GIẢI NÉN cho mỗi phần của tệp XLSX. Chặn 25 MB của route chỉ áp cho tệp nén:
+// một tệp 25 MB toàn số 0 có thể nở ra nhiều GB trong RAM (zip bomb) làm sập tiến trình.
+// adm-zip ≥ 0.6 không giải nén quá kích thước khai trong header (maxOutputLength), nên kiểm
+// kích thước khai là đủ chặn. Bảng đơn thật chỉ vài MB.
+export const XLSX_MAX_ENTRY_BYTES = 50 * 1024 * 1024;
+export const XLSX_MAX_TOTAL_BYTES = 100 * 1024 * 1024;
+// Tổng số byte đã giải nén của từng tệp đang đọc (khoá theo đối tượng zip, tự giải phóng).
+const readTotals = new WeakMap();
+
 function getXml(zip, entryName, required = true) {
   const entry = zip.getEntry(entryName);
   if (!entry) {
     if (!required) return '';
     throw new Error(`Tệp Excel thiếu thành phần bắt buộc: ${entryName}`);
   }
-  return entry.getData().toString('utf8');
+  const declared = Number(entry.header?.size);
+  if (!Number.isFinite(declared) || declared > XLSX_MAX_ENTRY_BYTES) {
+    throw new Error(`Tệp Excel quá lớn sau khi giải nén (${entryName} vượt ${Math.round(XLSX_MAX_ENTRY_BYTES / 1024 / 1024)} MB).`);
+  }
+  const total = (readTotals.get(zip) || 0) + declared;
+  readTotals.set(zip, total);
+  if (total > XLSX_MAX_TOTAL_BYTES) {
+    throw new Error(`Tệp Excel quá lớn sau khi giải nén (vượt ${Math.round(XLSX_MAX_TOTAL_BYTES / 1024 / 1024)} MB).`);
+  }
+  const data = entry.getData();
+  // Phòng adm-zip cũ không giới hạn theo header: kích thước thật vẫn phải trong trần.
+  if (data.length > XLSX_MAX_ENTRY_BYTES) throw new Error(`Tệp Excel quá lớn sau khi giải nén (${entryName}).`);
+  return data.toString('utf8');
 }
 
 function extractText(xml) {

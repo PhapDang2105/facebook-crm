@@ -7,37 +7,52 @@
 // nên ba cấp địa chỉ, giá và SKU kho đều được xử lý y hệt. Payload gốc của
 // những lần gọi gần nhất được giữ lại để đối chiếu khi một trường chưa được
 // nhận ra.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { projectRoot } from './config.mjs';
 import { normalizeCustomerOrder } from './conversation-orders.mjs';
 import { findProductBySku, matchProduct, normalizeText } from './processing/catalog.mjs';
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
-import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
-import { attachPhoneWarning, fetchPosCustomerAddresses } from './phone-warnings.mjs';
-import { isUsableStreet, resolveAddress } from './processing/locations.mjs';
+import { extractVietnamesePhone } from './processing/customer-info.mjs';
+import { attachPhoneWarning, fetchPosCustomerAddresses, toLocalPhoneLoose } from './phone-warnings.mjs';
+import { STAFF_EDIT_GROUPS, staffEditedGroups } from './order-edits.mjs';
+import { isUsableStreet, lostHouseNumbers, normalizeLocationKey, resolveAddress } from './processing/locations.mjs';
 import { inferAddress } from './processing/address-ai.mjs';
-import { appendOrderToArchive } from './order-archive.mjs';
+import { appendOrderToArchive, archiveMonth } from './order-archive.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 
 const landingOrdersPath = process.env.LANDING_ORDERS_PATH
   || path.join(projectRoot, 'data', 'processed', 'landing-orders.json');
 
+// Đơn đẩy ra khỏi kho chính (quá trần) được cất NGUYÊN BẢN theo tháng đặt đơn (giờ VN)
+// vào thư mục này; listLandingOrders đọc cả hai nên báo cáo/Tổng quan/Chiến dịch không
+// mất doanh thu cũ. Mặc định nằm cạnh landing-orders.json (test trỏ LANDING_ORDERS_PATH
+// vào thư mục tạm là thư mục lưu trữ cũng theo).
+const landingArchiveDirectory = process.env.LANDING_ARCHIVE_PATH
+  || path.join(path.dirname(landingOrdersPath), 'landing-orders-archive');
+
 export const LANDING_SOURCE = 'Landing page';
-const maximumOrders = 5000;
+// Trần của kho chính (tệp ghi lại toàn bộ sau mỗi webhook). ~70 đơn/ngày → chạm trần
+// khoảng đầu tháng 12/2026; đơn cũ hơn được chuyển sang kho lưu trữ theo tháng, không bỏ.
+export const LANDING_ACTIVE_LIMIT = 5000;
+let maximumOrders = LANDING_ACTIVE_LIMIT;
+/** Chỉ cho test: hạ trần để thử đường chuyển đơn sang kho lưu trữ. */
+export function setLandingActiveLimitForTest(limit) {
+  maximumOrders = Math.max(1, Number(limit) || LANDING_ACTIVE_LIMIT);
+}
 // Payload gốc được giữ cho mọi đơn gần đây, để tính lại đơn khi bộ nhận dạng thay đổi.
 const maximumRecent = 1000;
 const duplicateWindowMs = 10 * 60 * 1000;
 
 let cachedStore = null;
-let writeQueue = Promise.resolve();
+const enqueueWrite = createWriteQueue();
 
 function emptyStore() {
   return { orders: [], recent: [] };
 }
 
 function normalizeStore(value) {
-  if (!value || typeof value !== 'object') return emptyStore();
   const orders = Array.isArray(value.orders) ? value.orders : [];
   for (const order of orders) {
     if (order && isFieldLabelAddress(order.address)) {
@@ -51,33 +66,91 @@ function normalizeStore(value) {
   };
 }
 
+/**
+ * Chưa có tệp → kho rỗng; tệp hỏng → cất sang `.corrupt-*` rồi kho rỗng; lỗi đọc khác
+ * (EBUSY, EACCES…) → ném lỗi và KHÔNG nhớ kho rỗng (lần ghi sau không đè mất đơn thật).
+ */
 export async function readLandingStore() {
   if (cachedStore) return cachedStore;
-  try {
-    cachedStore = normalizeStore(JSON.parse(await readFile(landingOrdersPath, 'utf8')));
-  } catch {
-    cachedStore = emptyStore();
-  }
+  cachedStore = await readJsonFile(landingOrdersPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho đơn landing' });
   return cachedStore;
 }
 
 async function persistStore(store) {
-  await mkdir(path.dirname(landingOrdersPath), { recursive: true });
-  const temporaryPath = `${landingOrdersPath}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), 'utf8');
-  await rename(temporaryPath, landingOrdersPath);
+  await writeJsonAtomic(landingOrdersPath, store);
 }
 
 /** Ghi tuần tự để hai webhook đến cùng lúc không ghi đè nhau. */
 export function updateLandingStore(mutate) {
-  const operation = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const store = await readLandingStore();
     const result = await mutate(store);
+    await moveOverflowToArchive(store);
     await persistStore(store);
     return result;
   });
-  writeQueue = operation.then(() => undefined, () => undefined);
-  return operation;
+}
+
+// ===== Kho lưu trữ đơn landing (đơn quá trần của kho chính) =====
+//
+// Vì sao không chỉ dựa vào order-archive.mjs: bản ghi ở đó rút gọn (không có trạng thái
+// POS, ẩn/hủy, nguồn chiến dịch…), báo cáo không dựng lại được doanh thu từ nó. Ở đây giữ
+// nguyên đơn đầy đủ. Tệp tháng chỉ được ghi khi có đơn bị đẩy ra (hiếm), và luôn ghi
+// TRƯỚC khi kho chính bỏ đơn: sự cố giữa chừng chỉ làm đơn có ở cả hai nơi (đọc thì
+// bản ở kho chính thắng), không bao giờ mất.
+let archivedCache = null; // Map id → đơn
+
+async function readArchiveMonth(month) {
+  const file = path.join(landingArchiveDirectory, `${month}.json`);
+  return readJsonFile(file, {
+    fallback: () => ({ orders: [] }),
+    normalize: value => ({ orders: Array.isArray(value.orders) ? value.orders : [] }),
+    label: `Kho lưu trữ đơn landing ${month}`
+  });
+}
+
+async function moveOverflowToArchive(store) {
+  if (store.orders.length <= maximumOrders) return;
+  const overflow = store.orders.slice(maximumOrders);
+  const byMonth = new Map();
+  for (const order of overflow) {
+    const month = archiveMonth(Number(order?.createdAt) || Date.now());
+    if (!byMonth.has(month)) byMonth.set(month, []);
+    byMonth.get(month).push(order);
+  }
+  try {
+    for (const [month, orders] of byMonth) {
+      const current = await readArchiveMonth(month);
+      const ids = new Set(orders.map(order => String(order?.id)));
+      const merged = [...orders, ...current.orders.filter(order => !ids.has(String(order?.id)))]
+        .sort((a, b) => (Number(b?.createdAt) || 0) - (Number(a?.createdAt) || 0));
+      await writeJsonAtomic(path.join(landingArchiveDirectory, `${month}.json`), { orders: merged });
+      if (archivedCache) for (const order of orders) archivedCache.set(String(order?.id), order);
+    }
+  } catch (error) {
+    // Không cất được thì GIỮ đơn trong kho chính (vượt trần tạm thời), thử lại lần ghi sau.
+    console.error(`Không chuyển được đơn landing cũ sang kho lưu trữ (${error?.message || error}); giữ lại trong kho chính.`);
+    return;
+  }
+  store.orders = store.orders.slice(0, maximumOrders);
+}
+
+/** Mọi đơn landing đã chuyển sang kho lưu trữ (đọc một lần rồi nhớ; ghi mới cập nhật bộ nhớ). */
+async function readArchivedLandingOrders() {
+  if (archivedCache) return archivedCache;
+  let files = [];
+  try {
+    files = (await readdir(landingArchiveDirectory)).filter(name => /^\d{4}-\d{2}\.json$/.test(name)).sort();
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  const map = new Map();
+  for (const file of files) {
+    const { orders } = await readArchiveMonth(file.slice(0, 7));
+    for (const order of orders) if (order?.id !== undefined) map.set(String(order.id), order);
+  }
+  archivedCache = map;
+  return archivedCache;
 }
 
 // ===== Xác thực =====
@@ -332,7 +405,8 @@ export function normalizeLandingPayload(payload = {}) {
   const fields = flattenPayload(payload);
   const name = pick(fields, 'name');
   const phoneRaw = pick(fields, 'phone');
-  const phone = toLocalPhone(phoneRaw) || extractVietnamesePhone(phoneRaw) || extractVietnamesePhone(fields.map(field => field.value).join(' '));
+  // toLocalPhoneLoose: nhận thêm "912345678" (ô số làm mất số 0 đầu) và "0084…" — trước đây đơn bị bỏ.
+  const phone = toLocalPhoneLoose(phoneRaw) || extractVietnamesePhone(phoneRaw) || extractVietnamesePhone(fields.map(field => field.value).join(' '));
   // "country" của Webcake là tỉnh/thành khi giá trị không phải tên quốc gia.
   const country = pick(fields, 'country');
   const province = pick(fields, 'province') || (country && !COUNTRY_VALUES.test(keyOf(country)) ? country : '');
@@ -519,6 +593,10 @@ function addressLevels(text) {
  */
 export async function pickAddressForPhone(order, orders, { fetchAddresses = fetchPosCustomerAddresses } = {}) {
   const typed = resolveAddress(order.address === 'Chưa có địa chỉ' ? '' : order.address);
+  // fix-addr (01/10): khách đã gõ số nhà/đường thì chỉ lấy địa chỉ POS/đơn trước có chứa đúng phần đường đó — không đè
+  // địa chỉ khách vừa gõ ("12 Tên Lửa, phường Bình Tân") bằng địa chỉ cũ ở nơi khác ("5 Lê Lợi, Quận 1").
+  const typedStreet = String(typed.streetWithoutWard ?? typed.street ?? '').split(/\s*,\s*/)[0] || '';
+  const typedStreetKey = isUsableStreet(typedStreet) && /\d/.test(typedStreet) ? normalizeLocationKey(typedStreet) : '';
   const fromPos = (await fetchAddresses(order.phone)).map(address => ({ address, source: 'POS' }));
   const fromCrm = orders
     .filter(entry => entry.id !== order.id && entry.phone === order.phone && !entry.landing?.autoFilled?.address && entry.address && entry.address !== 'Chưa có địa chỉ')
@@ -530,6 +608,7 @@ export async function pickAddressForPhone(order, orders, { fetchAddresses = fetc
     if (typed.province && typed.province.code !== resolved.province.code) continue;
     if (typed.district && typed.district.code !== resolved.district.code) continue;
     if (typed.ward && typed.ward.code !== resolved.ward.code) continue;
+    if (typedStreetKey && !` ${normalizeLocationKey(candidate.address)} `.includes(` ${typedStreetKey} `)) continue;
     return candidate;
   }
   return null;
@@ -567,8 +646,10 @@ export async function autoFillLandingOrder(order, payload, orders, context = {})
     } else if (order.address && order.address !== 'Chưa có địa chỉ' && ['none', 'partial'].includes(order.locationConfidence)) {
       // Khách có gõ địa chỉ nhưng bộ đọc luật không tách đủ ba cấp: hỏi AI.
       // Kết quả đã được đối chiếu danh mục kho; đơn vẫn vào Xử lý dữ liệu để duyệt.
-      const guess = await (context.inferAddress || inferAddress)(order.address);
-      if (guess?.canonical) {
+      // fix-addr (01/10): cả địa chỉ luật đã nhận nhưng thiếu phường/xã (wardUnverified) — chạy nền, đơn vẫn vào Xử lý dữ liệu.
+      const guess = await (context.inferAddress || inferAddress)(order.address, { allowWardUnverified: true });
+      // Số nhà khách gõ phải còn trên địa chỉ AI trả (AI chỉ được điền cấp hành chính).
+      if (guess?.canonical && !lostHouseNumbers(order.address, guess.canonical).length) {
         for (const key of Object.keys(patched)) if (/^(address|short_address|location|province|district|ward|commune|country|city|state)$/i.test(key)) delete patched[key];
         patched.address = guess.canonical;
         autoFilled.address = `${guess.canonical} (AI suy ra từ "${order.address}"${guess.confidence === 'low' ? ', cần đối chiếu' : ''})`;
@@ -616,21 +697,7 @@ export async function recordLandingOrder(payload, context = {}) {
       const realBeatsAutoFilled = Boolean(existing.landing?.autoFilled) && !order.landing.incomplete && !order.landing.autoFilled;
       if (existing.landing?.incomplete && (realBeatsAutoFilled || !isLessComplete(order, existing))) {
         const index = store.orders.indexOf(existing);
-        const upgraded = {
-          ...order,
-          id: existing.id,
-          createdAt: existing.createdAt,
-          updatedAt: receivedAt,
-          // Ghi chú và trạng thái nhân viên đặt cho bản dở dang đi theo bản khách gửi xong.
-          staffNote: existing.staffNote || order.staffNote || '',
-          processingStatus: existing.processingStatus || order.processingStatus || '',
-          landing: {
-            ...order.landing,
-            posId: order.landing.posId || existing.landing?.posId,
-            posIds: [...new Set([...(existing.landing?.posIds || []), existing.landing?.posId, order.landing.posId].filter(Boolean))],
-            formIds: [...new Set([...formIds(existing), order.landing.externalId].filter(Boolean))]
-          }
-        };
+        const upgraded = mergeCompletedForm(existing, order, { receivedAt, formIds: formIds(existing) });
         store.orders[index] = upgraded;
         return { order: upgraded, created: false, updated: true, error: '' };
       }
@@ -645,8 +712,8 @@ export async function recordLandingOrder(payload, context = {}) {
       ? store.orders.find(entry => signature(entry) === signature(order) && receivedAt - (Number(entry.createdAt) || 0) < duplicateWindowMs)
       : null;
     if (duplicate) return { order: duplicate, created: false, error: '' };
+    // Quá trần thì updateLandingStore chuyển đơn cũ nhất sang kho lưu trữ (không bỏ).
     store.orders.unshift(order);
-    store.orders = store.orders.slice(0, maximumOrders);
     return { order, created: true, error: '' };
   });
   // Mọi đơn đều vào kho lưu trữ, kể cả đơn sau này bị hủy hay xóa.
@@ -654,6 +721,65 @@ export async function recordLandingOrder(payload, context = {}) {
   return result;
 }
 
+
+/**
+ * Bản dở dang → bản khách gửi xong (cùng form). Nội dung form mới thắng, NHƯNG:
+ * - mọi thứ không phải nội dung form đi theo đơn cũ: lịch sử, cờ ẩn khỏi bảng, kết quả đẩy
+ *   POS (`pos`), trạng thái POS, thẻ đã mua, người tạo/sửa, ghi chú & trạng thái xử lý;
+ * - nhóm nội dung nhân viên đã tự tay sửa (địa chỉ, giỏ, tên, SĐT… — order-edits ghi
+ *   `staffEdited`) giữ bản nhân viên; form hoàn tất khác bản đó thì cất vào
+ *   `landing.completedForm` để nhân viên đối chiếu.
+ */
+function mergeCompletedForm(existing, order, { receivedAt, formIds }) {
+  const landing = {
+    ...order.landing,
+    posId: order.landing.posId || existing.landing?.posId,
+    posIds: [...new Set([...(existing.landing?.posIds || []), existing.landing?.posId, order.landing.posId].filter(Boolean))],
+    formIds: [...new Set([...formIds, order.landing.externalId].filter(Boolean))]
+  };
+  const upgraded = {
+    ...existing,
+    ...order,
+    id: existing.id,
+    createdAt: existing.createdAt,
+    updatedAt: receivedAt,
+    // Ghi chú và trạng thái nhân viên đặt cho bản dở dang đi theo bản khách gửi xong.
+    staffNote: existing.staffNote || order.staffNote || '',
+    processingStatus: existing.processingStatus || order.processingStatus || '',
+    // Nhãn "Chưa hoàn tất" của bản dở theo bản mới; trạng thái nhân viên đã đặt (Đã xác nhận, Hủy) giữ.
+    status: existing.status && existing.status !== INCOMPLETE_LABEL ? existing.status : order.status,
+    landing
+  };
+  if (!order.phoneWarning) delete upgraded.phoneWarning;
+  if (landing.autoFilled) landing.autoFilled = { ...landing.autoFilled };
+  const edited = staffEditedGroups(existing);
+  if (!edited.size) return upgraded;
+  const completedForm = {};
+  for (const group of edited) {
+    for (const field of STAFF_EDIT_GROUPS[group]) {
+      if (Object.hasOwn(existing, field)) upgraded[field] = existing[field];
+      else delete upgraded[field];
+    }
+    const formValue = group === 'basket'
+      ? order.products.map(item => `${item.quantity} ${item.sku || item.name}`).join(' + ')
+      : ['name', 'phone', 'address', 'payment', 'note'].includes(group) ? String(order[group] ?? '') : '';
+    const keptValue = group === 'basket'
+      ? (existing.products || []).map(item => `${item.quantity} ${item.sku || item.name}`).join(' + ')
+      : String(existing[group] ?? '');
+    if (formValue && formValue !== keptValue) completedForm[group] = formValue;
+  }
+  if (edited.has('address')) {
+    landing.needsAddress = Boolean(existing.landing?.needsAddress);
+    if (landing.autoFilled?.address) delete landing.autoFilled.address;
+  }
+  if (edited.has('basket')) {
+    landing.needsProduct = Boolean(existing.landing?.needsProduct);
+    if (landing.autoFilled?.product) delete landing.autoFilled.product;
+  }
+  if (landing.autoFilled && !Object.keys(landing.autoFilled).length) delete landing.autoFilled;
+  if (Object.keys(completedForm).length) landing.completedForm = { ...completedForm, at: receivedAt };
+  return upgraded;
+}
 
 /** Ghi mã form/POS của bản cập nhật cùng form vào đơn đang giữ để lần sau nhận ra ngay. */
 function absorbInto(keeper, other) {
@@ -669,9 +795,27 @@ function isLessComplete(fresh, existing) {
   return score(fresh) < score(existing);
 }
 
-export async function listLandingOrders() {
+/**
+ * Đơn landing cho bảng Đơn hàng, báo cáo, Tổng quan, Chiến dịch: kho chính và (mặc định)
+ * cả đơn đã chuyển sang kho lưu trữ khi quá trần, để doanh thu kỳ cũ không biến mất.
+ * `includeArchived: false` khi chỉ cần đơn đang xử lý. Kho lưu trữ đọc lỗi thì log và trả
+ * kho chính (không nhớ lỗi, lần sau đọc lại).
+ */
+export async function listLandingOrders({ includeArchived = true } = {}) {
   const store = await readLandingStore();
-  return store.orders.map(order => ({ ...order, conversationId: '', conversationName: order.name || '' }));
+  const view = order => ({ ...order, conversationId: '', conversationName: order.name || '' });
+  const active = store.orders.map(view);
+  if (!includeArchived) return active;
+  let archived;
+  try {
+    archived = await readArchivedLandingOrders();
+  } catch (error) {
+    console.error(`Không đọc được kho lưu trữ đơn landing (${error?.message || error}); chỉ trả đơn trong kho chính.`);
+    return active;
+  }
+  if (!archived.size) return active;
+  const activeIds = new Set(store.orders.map(order => String(order?.id)));
+  return [...active, ...[...archived.values()].filter(order => !activeIds.has(String(order?.id))).map(view)];
 }
 
 export async function deleteLandingOrder(orderId) {

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Nông Sản Giọt Nắng | Facebook</title>
   <link rel="icon" type="image/webp" href="/assets/giot-nang-logo.webp">
-  <link rel="stylesheet" href="styles.css?v=20260929-dashboard">
-  <link rel="stylesheet" href="staff.css?v=20261001-staff">
+  <link rel="stylesheet" href="styles.css?v=20261001-usermenu">
+  <link rel="stylesheet" href="staff.css?v=20261001-staff2">
 </head>
 <body>
   <div class="topbar">
@@ -26,10 +26,19 @@
         <div class="notification-list"></div>
       </div>
       <span class="notification-announcement sr-only" role="status" aria-live="polite"></span>
-      <div class="topbar-user"><span id="topbar-user-avatar">H</span><b id="topbar-user-name">Huy Facebook</b></div>
-      <button class="logout-button hidden" id="logout-button" type="button" aria-label="Đăng xuất" title="Đăng xuất">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
-      </button>
+      <div class="topbar-user-wrap">
+        <button class="topbar-user" id="topbar-user-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="topbar-user-menu">
+          <span id="topbar-user-avatar">H</span><b id="topbar-user-name">Huy Facebook</b>
+          <svg class="topbar-user-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <div class="topbar-user-menu hidden" id="topbar-user-menu" role="menu" aria-label="Tài khoản">
+          <div class="topbar-user-menu-head"><strong id="topbar-user-menu-name">Huy Facebook</strong><span id="topbar-user-menu-meta"></span></div>
+          <button class="topbar-user-menu-item hidden" id="logout-button" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
+            Đăng xuất
+          </button>
+        </div>
+      </div>
     </div>
   </div>
   <aside class="sidebar">
@@ -797,13 +806,11 @@
             <header class="settings-card-head">
               <div>
                 <h1 id="staff-settings-title">Nhân sự</h1>
-                <p>Tài khoản đăng nhập CRM của từng người. Người đã nghỉ thì chuyển "Đã nghỉ", không xoá để giữ lịch sử đơn và tin nhắn.</p>
               </div>
               <button class="price-master-add" id="staff-add" type="button">+ Thêm nhân sự</button>
             </header>
-            <p class="staff-login-note" id="staff-login-note" hidden></p>
             <div class="staff-table">
-              <div class="staff-row staff-table-head"><span>Họ tên</span><span>Tên đăng nhập</span><span>Vai trò</span><span>Số điện thoại</span><span title="Tên của người này trên Pancake/POS (hiện ở tin nhắn và đơn), để CRM nhận ra ai đã làm.">Tên trên Pancake/POS</span><span>Mật khẩu</span><span>Trạng thái</span><span></span></div>
+              <div class="staff-row staff-table-head"><span>Họ tên</span><span>Tên đăng nhập</span><span>Vai trò</span><span>Số điện thoại</span><span>Tên trên Pancake/POS</span><span>Mật khẩu</span><span>Trạng thái</span><span></span></div>
               <div id="staff-rows"><p class="channel-empty staff-empty">Đang tải nhân sự...</p></div>
             </div>
           </section>
@@ -911,7 +918,7 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20260929-dashboard"></script>
-  <script src="staff.js?v=20261001-staff"></script>
+  <script src="app.js?v=20261001-usermenu"></script>
+  <script src="staff.js?v=20261001-staff2"></script>
 </body>
 </html>

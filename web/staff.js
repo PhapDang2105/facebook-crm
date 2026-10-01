@@ -5,7 +5,6 @@
   const panel = document.querySelector('[data-settings-panel="staff"]');
   const rows = document.getElementById('staff-rows');
   const addButton = document.getElementById('staff-add');
-  const note = document.getElementById('staff-login-note');
   if (!panel || !rows || !addButton) return;
 
   let state = { items: [], loginEnabled: false, canManage: true, currentUser: '', ownerAccounts: 0 };
@@ -35,27 +34,11 @@
     return data;
   }
 
-  function renderNote() {
-    if (!note) return;
-    const withPassword = state.items.filter(item => item.active && item.hasPassword).length;
-    let message = '';
-    if (!state.loginEnabled) {
-      message = 'Đăng nhập chưa bật. Khi đặt mật khẩu cho tài khoản đầu tiên (phải là Quản trị), CRM sẽ bắt mọi người đăng nhập bằng tài khoản của mình.';
-    } else if (!state.canManage) {
-      message = 'Bạn đang xem danh sách. Chỉ Quản trị mới thêm hoặc sửa được Nhân sự.';
-    } else if (!withPassword && state.ownerAccounts) {
-      message = 'Hiện chỉ có tài khoản chủ shop đăng nhập được. Đặt mật khẩu để nhân viên đăng nhập bằng tài khoản riêng.';
-    }
-    note.hidden = !message;
-    note.textContent = message;
-  }
-
   function render() {
-    renderNote();
     addButton.hidden = !state.canManage;
     rows.replaceChildren();
     if (!state.items.length) {
-      rows.append(el('p', 'channel-empty staff-empty', 'Chưa có nhân sự nào. Bấm “+ Thêm nhân sự” để tạo tài khoản đầu tiên.'));
+      rows.append(el('p', 'channel-empty staff-empty', 'Chưa có nhân sự nào.'));
       return;
     }
     for (const member of state.items) {
@@ -96,10 +79,9 @@
     }
   }
 
-  function field(labelText, input, hint = '') {
+  function field(labelText, input) {
     const label = el('label', 'staff-field');
     label.append(el('span', 'staff-field-label', labelText), input);
-    if (hint) label.append(el('small', 'staff-field-hint', hint));
     return label;
   }
 
@@ -115,7 +97,7 @@
     overlay.setAttribute('aria-labelledby', title.id);
 
     const name = Object.assign(el('input'), { name: 'name', required: true, maxLength: 80, value: member?.name || '', autocomplete: 'off' });
-    const username = Object.assign(el('input'), { name: 'username', required: true, maxLength: 32, value: member?.username || '', autocomplete: 'off', spellcheck: false, placeholder: 'vd: hang.th' });
+    const username = Object.assign(el('input'), { name: 'username', required: true, maxLength: 32, value: member?.username || '', autocomplete: 'off', spellcheck: false, placeholder: 'chữ thường không dấu, vd: hang.th' });
     const role = el('select');
     role.name = 'role';
     for (const [value, labelText] of Object.entries(state.roles || { staff: 'Nhân viên', admin: 'Quản trị' })) {
@@ -124,11 +106,11 @@
       role.append(option);
     }
     const phone = Object.assign(el('input'), { name: 'phone', value: member?.phone || '', inputMode: 'tel', autocomplete: 'off', maxLength: 15 });
-    const pancakeNames = Object.assign(el('input'), { name: 'pancakeNames', value: (member?.pancakeNames || []).join(', '), autocomplete: 'off', maxLength: 300, placeholder: 'vd: Thúy Hằng' });
+    const pancakeNames = Object.assign(el('input'), { name: 'pancakeNames', value: (member?.pancakeNames || []).join(', '), autocomplete: 'off', maxLength: 300, placeholder: 'vd: Thúy Hằng, nhiều tên cách dấu phẩy' });
     const password = Object.assign(el('input'), { name: 'password', type: 'password', autocomplete: 'new-password', minLength: 8, placeholder: editing ? 'Để trống nếu không đổi' : 'Ít nhất 8 ký tự' });
     const active = Object.assign(el('input'), { name: 'active', type: 'checkbox', checked: member ? member.active : true });
     const activeLabel = el('label', 'staff-check');
-    activeLabel.append(active, el('span', '', 'Đang làm (bỏ chọn khi nhân viên đã nghỉ: không đăng nhập được nữa)'));
+    activeLabel.append(active, el('span', '', 'Đang làm'));
 
     const error = el('p', 'staff-form-error');
     error.hidden = true;
@@ -140,11 +122,11 @@
     form.append(
       title,
       field('Họ tên', name),
-      field('Tên đăng nhập', username, 'Chữ thường không dấu, số và . _ - (3–32 ký tự). Dùng để đăng nhập CRM.'),
-      field('Vai trò', role, 'Quản trị: thêm/sửa Nhân sự. Nhân viên: dùng CRM, không sửa Nhân sự.'),
+      field('Tên đăng nhập', username),
+      field('Vai trò', role),
       field('Số điện thoại', phone),
-      field('Tên trên Pancake/POS', pancakeNames, 'Tên hiện ở tin nhắn và đơn của người này; nhiều tên cách nhau bằng dấu phẩy.'),
-      field(editing && member.hasPassword ? 'Đổi mật khẩu' : 'Mật khẩu', password, editing && member.hasPassword ? 'Để trống thì giữ mật khẩu cũ. Đổi mật khẩu sẽ đăng xuất người này ở mọi máy.' : 'Chưa đặt mật khẩu thì người này chưa đăng nhập được.'),
+      field('Tên trên Pancake/POS', pancakeNames),
+      field(editing && member.hasPassword ? 'Đổi mật khẩu' : 'Mật khẩu', password),
       activeLabel,
       error,
       buttons

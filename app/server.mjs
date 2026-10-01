@@ -1033,7 +1033,10 @@ function clientAddress(request) {
 async function handleAuth(request, response, url, isWebhook) {
   if (url.pathname === '/api/auth/session' && request.method === 'GET') {
     const session = auth.session(request);
-    sendJson(response, session ? 200 : 401, session ? { enabled: auth.enabled, username: session.username } : { error: 'Chưa đăng nhập.' });
+    // Kèm họ tên và vai trò trong Nhân sự để thanh trên cùng hiện đúng người đang đăng nhập.
+    const member = session?.username && !envLoginUsers.has(session.username) ? await staffByUsername(session.username) : null;
+    const identity = member ? { name: member.name, role: member.role, roleName: member.roleName } : (session?.username ? { roleName: 'Chủ shop' } : {});
+    sendJson(response, session ? 200 : 401, session ? { enabled: auth.enabled, username: session.username, ...identity } : { error: 'Chưa đăng nhập.' });
     return true;
   }
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {

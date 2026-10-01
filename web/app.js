@@ -129,12 +129,42 @@ const customerOrderSubmit = document.querySelector('#customer-order-submit');
 const topbarUserAvatar = document.querySelector('#topbar-user-avatar');
 const topbarUserName = document.querySelector('#topbar-user-name');
 const logoutButton = document.querySelector('#logout-button');
+const topbarUserButton = document.querySelector('#topbar-user-button');
+const topbarUserMenu = document.querySelector('#topbar-user-menu');
+const topbarUserMenuName = document.querySelector('#topbar-user-menu-name');
+const topbarUserMenuMeta = document.querySelector('#topbar-user-menu-meta');
+// Người đang đăng nhập (họ tên trong Cài đặt → Nhân sự): thay tên hiển thị chung của Cài đặt,
+// và đơn nhân viên tạo tay ghi đúng người tạo.
+let sessionDisplayName = '';
+
+function showTopbarIdentity(name, meta = '') {
+  if (!name) return;
+  if (topbarUserName) topbarUserName.textContent = name;
+  if (topbarUserAvatar) topbarUserAvatar.textContent = name.trim().charAt(0).toUpperCase() || 'H';
+  if (topbarUserMenuName) topbarUserMenuName.textContent = name;
+  if (topbarUserMenuMeta) topbarUserMenuMeta.textContent = meta;
+}
 
 fetch('/api/auth/session').then(response => response.ok ? response.json() : null).then(session => {
-  if (!session?.enabled || !logoutButton) return;
-  logoutButton.classList.remove('hidden');
-  logoutButton.title = `Đăng xuất (${session.username})`;
+  if (!session?.enabled) return;
+  logoutButton?.classList.remove('hidden');
+  sessionDisplayName = session.name || session.username || '';
+  showTopbarIdentity(sessionDisplayName, [session.username, session.roleName].filter(Boolean).join(' · '));
 }).catch(() => {});
+
+function setTopbarUserMenu(open) {
+  if (!topbarUserMenu || !topbarUserButton) return;
+  topbarUserMenu.classList.toggle('hidden', !open);
+  topbarUserButton.setAttribute('aria-expanded', String(open));
+}
+topbarUserButton?.addEventListener('click', event => {
+  event.stopPropagation();
+  setTopbarUserMenu(topbarUserMenu?.classList.contains('hidden'));
+});
+document.addEventListener('click', event => {
+  if (topbarUserMenu && !topbarUserMenu.classList.contains('hidden') && !event.target.closest('.topbar-user-wrap')) setTopbarUserMenu(false);
+});
+document.addEventListener('keydown', event => { if (event.key === 'Escape') setTopbarUserMenu(false); });
 logoutButton?.addEventListener('click', async () => {
   logoutButton.disabled = true;
   await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
@@ -4246,8 +4276,8 @@ function saveAppSettings() {
 
 function applyAppSettings() {
   const displayName = appSettings.displayName || 'Huy Facebook';
-  if (topbarUserName) topbarUserName.textContent = displayName;
-  if (topbarUserAvatar) topbarUserAvatar.textContent = displayName.trim().charAt(0).toUpperCase() || 'H';
+  // Đã đăng nhập thì tên của người đăng nhập thắng tên chung trong Cài đặt.
+  if (!sessionDisplayName) showTopbarIdentity(displayName);
   document.body.classList.toggle('hide-contact-panel', !appSettings.showContactPanel);
   updateContactInfoButton();
 }
@@ -10414,7 +10444,7 @@ customerOrderForm?.addEventListener('submit', async event => {
     ...(customerDraftPricedLivestream ? { livestream: true } : {}),
     createdAt: now,
     updatedAt: now,
-    employee: appSettings.displayName || topbarUserName?.textContent || 'Bạn'
+    employee: sessionDisplayName || appSettings.displayName || topbarUserName?.textContent || 'Bạn'
   };
   const originalLabel = customerOrderSubmit.textContent;
   try {

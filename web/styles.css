@@ -222,20 +222,19 @@ input:focus-visible {
 
 .topbar-user b { font: inherit; white-space: nowrap; }
 
-.logout-button {
-  display: grid;
-  place-items: center;
-  width: 32.4px;
-  height: 32.4px;
-  padding: 0;
-  color: inherit;
-  background: transparent;
-  border: 0.9px solid #9a7041;
-  border-radius: 50%;
-  cursor: pointer;
-}
-.logout-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.logout-button:hover { background: rgba(255, 255, 255, .25); }
+.topbar-user-wrap { position: relative; }
+button.topbar-user { color: inherit; background: transparent; font-family: inherit; cursor: pointer; }
+button.topbar-user:hover, button.topbar-user[aria-expanded="true"] { background: rgba(255, 255, 255, .12); }
+.topbar-user-caret { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; opacity: .8; transition: transform 160ms var(--ease-out); }
+button.topbar-user[aria-expanded="true"] .topbar-user-caret { transform: rotate(180deg); }
+.topbar-user-menu { position: absolute; z-index: 60; top: calc(100% + 8px); right: 0; min-width: 220px; padding: 6px; color: var(--ink); background: #fff; border: 1px solid #e7eaee; border-radius: 12px; box-shadow: 0 14px 34px rgba(16, 24, 40, .16); }
+.topbar-user-menu-head { display: grid; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid #f1f3f6; }
+.topbar-user-menu-head strong { font-size: 14px; }
+.topbar-user-menu-head span { color: #667085; font-size: 12px; font-weight: 500; }
+.topbar-user-menu-head span:empty { display: none; }
+.topbar-user-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 4px; padding: 9px 10px; color: #b42318; background: transparent; border: 0; border-radius: 8px; font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer; }
+.topbar-user-menu-item:hover { background: #fef3f2; }
+.topbar-user-menu-item svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 .sidebar {
   position: fixed;

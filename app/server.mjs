@@ -591,8 +591,8 @@ const qrGreetingCooldownMs = Number(process.env.QR_GREETING_COOLDOWN_MS) || 6 * 
 // Chỉ một mã QR in lên mọi thẻ (nhiều mã theo lô/sàn làm bộ phận vận hành rối).
 // Mã nằm trong đường dẫn và trong tin soạn sẵn (#mã) nên chỉ chữ thường không dấu; tên
 // hiện cho nhân viên là QR_MAIN_LABEL. Mã khác còn trong kho là mã chạy thử: không tính
-// vào số liệu, xoá được.
-const qrMainCode = String(process.env.QR_MAIN_CODE || 'tmdt-test').trim().toLowerCase();
+// vào số liệu, xoá được. tmdt-01 vì đã cài sẵn làm nguồn truy cập Pancake và Custom Ref Botcake.
+const qrMainCode = String(process.env.QR_MAIN_CODE || 'tmdt-01').trim().toLowerCase();
 const qrMainLabel = String(process.env.QR_MAIN_LABEL || 'Thương mại điện tử').trim();
 if (!isValidQrCode(qrMainCode)) throw new Error(`QR_MAIN_CODE không hợp lệ: ${qrMainCode}`);
 registerQrCode(qrMainCode).catch(error => console.error(`QR: không tạo được mã chính ${qrMainCode}: ${error.message}`));

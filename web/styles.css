@@ -2588,7 +2588,8 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-settings-body { display: grid; gap: 18px; padding: 18px 20px 22px; }
 
 /* Icon nét mảnh dùng chung của màn Mã QR */
-.qr-icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.qr-icon { display: inline-block; width: 18px; height: 18px; flex: none; background: currentColor; -webkit-mask: var(--qr-icon) center / contain no-repeat; mask: var(--qr-icon) center / contain no-repeat; }
+.qr-icon.is-color { background: none; -webkit-mask: none; mask: none; object-fit: contain; }
 .qr-card-title { display: inline-flex; align-items: center; gap: 8px; margin: 0; color: var(--text-1); font-size: 16px; font-weight: 700; }
 .qr-card-title .qr-icon { color: var(--text-2); }
 .qr-card-title small { padding: 2px 8px; color: var(--text-2); background: #f2f4f7; border-radius: 999px; font-size: 12px; font-weight: 600; }
@@ -2597,10 +2598,10 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
 .qr-metric { display: grid; grid-template-columns: 44px minmax(0, 1fr); grid-template-areas: "icon label" "icon value"; gap: 2px 14px; align-items: center; padding: 16px 18px; background: #fff; border: 1px solid var(--line-1); border-radius: 14px; }
 .qr-metric-icon { grid-area: icon; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; }
-.qr-metric-icon .qr-icon { width: 22px; height: 22px; }
-.qr-metric.is-scan .qr-metric-icon { color: #475467; background: #f2f4f7; }
-.qr-metric.is-page .qr-metric-icon { color: #b54708; background: #fef6ee; }
-.qr-metric.is-arrival .qr-metric-icon { color: var(--brand); background: #e8f4ed; }
+.qr-metric-icon .qr-icon { width: 28px; height: 28px; }
+.qr-metric.is-scan .qr-metric-icon { background: #eef4ff; }
+.qr-metric.is-page .qr-metric-icon { background: #eef6ff; }
+.qr-metric.is-arrival .qr-metric-icon { background: #f4f0ff; }
 .qr-metric-label { grid-area: label; color: var(--text-2); font-size: 14px; font-weight: 600; }
 .qr-metric-value { grid-area: value; color: var(--text-1); font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .qr-metric-value small { margin-left: 8px; color: var(--text-2); font-size: 14px; font-weight: 600; }
@@ -2612,7 +2613,7 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-detail-image { display: block; width: 184px; height: 184px; image-rendering: pixelated; }
 .qr-detail-info { display: grid; flex: 1 1 280px; gap: 12px; min-width: 0; justify-items: start; }
 .qr-detail-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; color: var(--brand); background: #e8f4ed; border-radius: 999px; font-size: 13px; font-weight: 600; }
-.qr-detail-badge .qr-icon { width: 15px; height: 15px; }
+.qr-detail-badge .qr-icon { width: 16px; height: 16px; }
 .qr-detail-code { margin: 0; color: var(--text-1); font-size: 24px; font-weight: 700; letter-spacing: -.01em; }
 .qr-detail-link { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 6px 6px 6px 12px; background: #fff; border: 1px solid var(--line-1); border-radius: 10px; }
 .qr-detail-link > .qr-icon { color: var(--text-2); }
@@ -2643,7 +2644,7 @@ tr:hover .customer-tel button { opacity: .75; }
 .qr-recent-outcome.is-ok { color: var(--brand); background: #e8f4ed; }
 .qr-recent-outcome.is-muted { color: var(--text-2); background: #f2f4f7; }
 .qr-recent-empty { display: grid; flex: 1; place-items: center; align-content: center; gap: 10px; padding: 24px 16px; color: var(--text-2); text-align: center; }
-.qr-recent-empty .qr-icon { width: 36px; height: 36px; padding: 10px; box-sizing: content-box; color: #98a2b3; background: #f7f8fa; border-radius: 14px; }
+.qr-recent-empty .qr-icon { width: 40px; height: 40px; padding: 12px; box-sizing: content-box; background: #f5f8ff; border-radius: 16px; }
 .qr-recent-empty p { margin: 0; font-size: 14px; line-height: 1.5; }
 
 /* Biểu đồ cột theo ngày: quét (nhạt) và vào Messenger (đậm) */

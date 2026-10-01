@@ -11,3 +11,9 @@ MIT License — Copyright (c) Microsoft Corporation. Permission is hereby grante
 - `customers/*.svg` — icon nút thao tác của màn Khách hàng (làm mới, xóa lọc, sắp xếp, chuyển trang, chép số, gắn thẻ, ghi chú, sửa, mở hội thoại), tải từ bộ **Fluent UI System Icons** của Microsoft (https://github.com/microsoft/fluentui-system-icons) qua `api.iconify.design`, giấy phép MIT. Cùng bộ và cùng màu `#5b6371` với các icon đơn sắc sẵn có như `search.svg`, `person.svg`.
 
 - `assets/branding/offers/free-ship.webp` — "Delivery truck" từ bộ **Fluent Emoji Flat** của Microsoft (cùng tệp `web/assets/icons/labels/delivery-truck.svg`), giấy phép MIT, chuyển sang webp 144px cho ưu đãi Miễn phí vận chuyển trên trang khách quét QR.
+
+- `qr/*.svg` — icon màn Cài đặt → Mã QR, tải qua `api.iconify.design`:
+  - `chart.svg`, `link.svg`, `copy.svg`, `download.svg`, `image.svg`, `phone.svg`, `desktop.svg`, `history.svg`, `test.svg`, `tag.svg` (đơn sắc, `fill="currentColor"`) — bộ **Fluent UI System Icons** của Microsoft (`fluent:*-24-regular`, https://github.com/microsoft/fluentui-system-icons), giấy phép MIT.
+  - `landing-page.svg` (`fluent-color:content-view-32`), `badge-card.svg` (`fluent-color:gift-card-24`) — bộ **Fluent UI System Color Icons** của Microsoft (https://github.com/microsoft/fluentui-system-icons), giấy phép MIT.
+  - `scan.svg` (`streamline-flex-color:qr-code-flat`), `empty-scan.svg` (`streamline-flex-color:phone-qr-flat`) — bộ **Streamline Flex Color** của Streamline (https://github.com/webalys-hq/streamline-vectors), giấy phép CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/) — ghi công: "Icons by Streamline (streamlinehq.com)".
+  - `messenger.svg` (`logos:messenger`) — bộ **SVG Logos** của Gil Barbara (https://github.com/gilbarbara/logos), giấy phép CC0 1.0. Logo Messenger là nhãn hiệu của Meta Platforms, chỉ dùng để chỉ kênh Messenger.

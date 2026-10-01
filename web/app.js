@@ -12053,24 +12053,14 @@ function formatQrShortTime(value) {
   return new Date(time).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
 }
 
-// Icon nét mảnh (24×24, stroke = màu chữ) cho màn Mã QR.
-const qrIconPaths = {
-  scan: '<path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M8 8h3v3H8zM13 13h3v3h-3zM13 8h3M8 16h3"/>',
-  messenger: '<path d="M12 3.5c-4.7 0-8.5 3.5-8.5 7.9 0 2.5 1.2 4.7 3.1 6.1v3l2.9-1.6c.8.2 1.6.3 2.5.3 4.7 0 8.5-3.5 8.5-7.8S16.7 3.5 12 3.5Z"/><path d="m7.5 13.5 3-3.2 2.2 2 3.8-3.8-3 3.2-2.2-2Z"/>',
-  page: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M4 8h16M8 12.5h8M8 16h5"/>',
-  chart: '<path d="M4 20h16"/><path d="M7 16v-4M12 16V7M17 16v-6"/>',
-  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
-  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>',
-  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/>',
-  image: '<rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m20 15-4.5-4.5L6 20"/>',
-  phone: '<rect x="7" y="3" width="10" height="18" rx="2.2"/><path d="M11 18h2"/>',
-  desktop: '<rect x="3" y="4" width="18" height="12" rx="1.8"/><path d="M9 20h6M12 16v4"/>',
-  history: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.7"/><path d="M4 4v4.7h4.7M12 8v4.3l3 1.8"/>',
-  flask: '<path d="M9.5 3.5h5M10.5 3.5v6L5 18.6A1.6 1.6 0 0 0 6.4 21h11.2a1.6 1.6 0 0 0 1.4-2.4L13.5 9.5v-6"/><path d="M7.4 15h9.2"/>',
-  tag: '<path d="M3.5 12.2V4.8a1.3 1.3 0 0 1 1.3-1.3h7.4l8.3 8.3a1.3 1.3 0 0 1 0 1.8l-7.4 7.4a1.3 1.3 0 0 1-1.8 0Z"/><circle cx="8" cy="8" r="1.4"/>'
-};
+// Icon màn Mã QR, tải từ thư viện (web/assets/icons/qr, nguồn ở LICENSES.md). Icon đơn sắc
+// (Fluent UI System) tô bằng mask nên theo màu chữ; icon màu (Fluent Color, Streamline,
+// logo Messenger) hiện nguyên bằng <img>.
+const qrColorIcons = new Set(['scan', 'landing-page', 'messenger', 'badge-card', 'empty-scan']);
 function qrIcon(name, className = 'qr-icon') {
-  return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true">${qrIconPaths[name] || ''}</svg>`;
+  const src = `/assets/icons/qr/${name}.svg`;
+  if (qrColorIcons.has(name)) return `<img class="${className} is-color" src="${src}" alt="" aria-hidden="true">`;
+  return `<span class="${className}" style="--qr-icon:url('${src}')" aria-hidden="true"></span>`;
 }
 
 function qrPercent(part, whole) {
@@ -12138,7 +12128,7 @@ function renderQrMetrics(main, keys) {
   // trang đệm + lượt Android chuyển thẳng (không qua trang đệm), nên so với tổng lượt quét.
   const opened = qrOpenedCount(sum);
   container.innerHTML = tile('scan', 'scan', 'Lượt quét', sum.scans, `hôm nay ${todayScans}`)
-    + tile('page', 'page', 'Trang đệm', sum.pages, qrPercent(sum.pages, sum.scans))
+    + tile('page', 'landing-page', 'Trang đệm', sum.pages, qrPercent(sum.pages, sum.scans))
     + tile('arrival', 'messenger', 'Mở Messenger', opened, qrPercent(opened, sum.scans));
 }
 
@@ -12176,7 +12166,7 @@ function renderQrTable(codes, keys) {
   if (!container || !wrapper) return;
   wrapper.classList.toggle('hidden', !codes.length);
   const summary = document.querySelector('#qr-old-summary');
-  if (summary) summary.innerHTML = `${qrIcon('flask')}Mã thử<small>${codes.length}</small>`;
+  if (summary) summary.innerHTML = `${qrIcon('test')}Mã thử<small>${codes.length}</small>`;
   if (!codes.length) {
     container.innerHTML = '';
     return;
@@ -12211,7 +12201,7 @@ function renderQrDetail(entry) {
   container.innerHTML = `
     <div class="qr-detail-frame"><img class="qr-detail-image" src="/api/qr/image/${safe}.png?size=512" alt="Mã QR ${escapeHtml(label)}"></div>
     <div class="qr-detail-info">
-      <span class="qr-detail-badge">${qrIcon('tag')}Mã in trên thẻ cảm ơn</span>
+      <span class="qr-detail-badge">${qrIcon('badge-card')}Mã in trên thẻ cảm ơn</span>
       <h2 class="qr-detail-code">${escapeHtml(label)}</h2>
       <div class="qr-detail-link">${qrIcon('link')}<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url.replace(/^https?:\/\//, ''))}</a><button type="button" class="qr-icon-button" data-qr-copy="${escapeHtml(url)}" title="Sao chép liên kết" aria-label="Sao chép liên kết">${qrIcon('copy')}</button></div>
       <div class="qr-detail-devices">${devices.length
@@ -12271,7 +12261,7 @@ function renderQrRecent(recent, mainCode) {
       <span class="qr-recent-time">${formatQrShortTime(row.at)}</span>
       <span class="qr-recent-outcome is-${outcome.tone}">${escapeHtml(outcome.label)}</span>
     </li>`;
-  }).join('')}</ul>` : `<div class="qr-recent-empty">${qrIcon('scan')}<p>Chưa có lượt quét nào.<br>Khách quét thẻ sẽ hiện ở đây.</p></div>`}`;
+  }).join('')}</ul>` : `<div class="qr-recent-empty">${qrIcon('empty-scan')}<p>Chưa có lượt quét nào.<br>Khách quét thẻ sẽ hiện ở đây.</p></div>`}`;
 }
 
 function renderQrDashboard() {

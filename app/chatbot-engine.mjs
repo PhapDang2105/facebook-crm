@@ -1,6 +1,6 @@
-import { buildTemplatePrompt, isProductQuoteId, maxAddressAsks, pickVariant, publicImageUrl, renderChatbotReply } from './chatbot-templates.mjs';
-import { chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
-import { describeDeliveryAddress, mergeAddressFragment } from './processing/locations.mjs';
+import { buildTemplatePrompt, isProductQuoteId, maxAddressAsks, pickVariant, publicImageUrl, renderChatbotReply, sanitizeModelAnswer } from './chatbot-templates.mjs';
+import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
+import { describeDeliveryAddress, isUsableStreet, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { autoLabelEventsFor, foldVietnamese, isComplaint } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
@@ -9,11 +9,11 @@ import { isBasketStep, isOrderStep, usablePendingOrder } from './processing/pend
 import { findProductBySku, getCatalogProducts, getGifts, isFreeShippingGift, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamConversation, isLivestreamCustomer } from './conversation-orders.mjs';
 import { CANCEL_ORDER, COMMENT_DISLIKE, DELIVERY_NOTE, HOLD_DELIVERY, LIVE_FEEDBACK, ruleIntent, TROPICAL_MENTION } from './processing/rule-intent.mjs';
-import { collectAddressBurst, isPaymentMessage, lookupPreviousAddress, stripPhone } from './processing/order-flow.mjs';
+import { cleanAddressText, collectAddressBurst, isPaymentMessage, lookupPreviousAddress, stripPhone } from './processing/order-flow.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { stickerInfo } from './stickers.mjs';
 import { activeTrial, filterTrialReply, promoBowlActive, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
-import { intentSafeTemplates, predictIntent } from './processing/intent-model.mjs';
+import { intentSafeTemplates, loadIntentModel, predictIntent } from './processing/intent-model.mjs';
 import { decisionLabelOf, intentRowOf } from './processing/intent-features.mjs';
 import { formatExamples, loadExampleBank, nearestExamples } from './processing/example-bank.mjs';
 import { appendDecisionLog } from './processing/decision-log.mjs';
@@ -25,6 +25,22 @@ let cascadeModulePromise = null;
 function loadCascadeModule() {
   return (cascadeModulePromise ||= import('./processing/intent-cascade.mjs').catch(() => null));
 }
+/**
+ * Nạp sẵn mô hình nhỏ + mô hình tầng (readFileSync + parse 2–3 MB mỗi tệp, ~50–60 ms chặn event loop) ngay sau khởi
+ * động, thay vì ở tin khách đầu tiên (perf-analysis #12). Máy chủ gọi một lần trong callback listen; không gọi thì vẫn
+ * nạp lười như cũ. Lỗi nạp không ném (engine chạy như không có mô hình). Trả { intent, cascade } đã nạp được hay chưa.
+ */
+export async function warmUpChatbotModels() {
+  let intent = false;
+  let cascade = false;
+  try { intent = Boolean(loadIntentModel()); } catch (error) { console.warn(`Không nạp sẵn được mô hình nhỏ: ${error.message}`); }
+  try {
+    const cascadeModule = await loadCascadeModule();
+    cascade = Boolean(typeof cascadeModule?.loadCascadeModel === 'function' && cascadeModule.loadCascadeModel());
+  } catch (error) { console.warn(`Không nạp sẵn được mô hình tầng: ${error.message}`); }
+  return { intent, cascade };
+}
+
 // Nhóm ý định mà mô hình tầng được tự trả lời khi 'on': ANSWER (tầng 1 bản mới) hay PRICE/INFO/SOCIAL (bản cũ);
 // ORDER do máy trạng thái slot của engine, SUPPORT/OTHER về LLM — không bao giờ tự trả lời.
 export const cascadeAutoGroups = new Set(['ANSWER', 'PRICE', 'INFO', 'SOCIAL']);
@@ -63,7 +79,7 @@ export const fallbackTemplates = Object.freeze({
   CONFIRM_YES: 'Dạ vâng ạ 💛',
   COMBO3_FLAVOR: 'Dạ combo 3 túi {title} chọn vị tùy ý ạ (Xanh / Vàng / Nâu, được lấy trùng vị). {Title} nhắn em 3 túi vị gì để em lên đơn nha ạ 🌾',
   // ===== Vòng 12 (r12): mẫu mới — cài đặt production chưa có thì dùng lời này (script apply-templates.mjs thêm vào). =====
-  GIFT_SWAP: 'Dạ được ạ, bên em không trừ tiền đâu ạ 💛 Thay cho quà bát/quạt/muỗng, {title} được chọn 2 gói granola nhỏ bất kỳ (Xanh, Cam hoặc Nâu). {Title} muốn lấy 2 gói vị nào để em ghi vào đơn cho mình nha ạ 🌾',
+  GIFT_SWAP: 'Dạ quà tặng bên em không đổi sang bát, quạt hay món khác được ạ. Nếu {title} không lấy quà bát/quạt/muỗng, em thay bằng 2 gói granola nhỏ bất kỳ (Xanh, Cam hoặc Nâu), không trừ tiền ạ 💛 {Title} muốn lấy 2 gói vị nào để em ghi vào đơn cho mình nha ạ 🌾',
   ORDER_CHANGE_STAFF: 'Dạ em đã ghi nhận {title} muốn đổi đơn thành: {cart} ạ. Để chắc đơn được sửa đúng trước khi kho đóng gói, em báo bạn phụ trách sửa lại và nhắn {title} ngay trong tin này nha ạ 💛',
   ORDER_CANCEL_STAFF: 'Dạ em đã ghi nhận {title} muốn hủy đơn ạ. Em báo bạn phụ trách kiểm tra với kho và xác nhận hủy cho {title} ngay trong tin này nha ạ 💛',
   ORDER_HOLD_STAFF: 'Dạ em đã ghi nhận {title} muốn tạm khoan giao đơn ạ. Em báo kho giữ đơn lại và bạn phụ trách sẽ nhắn {title} để hẹn ngày giao phù hợp nha ạ 💛',
@@ -85,7 +101,10 @@ export const fallbackTemplates = Object.freeze({
   ASK_TWO_BAGS: 'Dạ bảng giá em gửi ngay ở trên ạ 🌾 {Title} lấy 2 túi vị nào (Xanh / Vàng / Nâu) để em lên đơn miễn phí vận chuyển cho mình nha?',
   IMAGE_WITH_PHONE: 'Dạ em đã nhận hình và SĐT của {title} rồi ạ 💛 {Title} lấy loại trong hình mấy túi ạ? Em lên đơn liền cho mình nha 🌾',
   COMMENT_PUBLIC_STAFF: 'Dạ em đã ghi nhận rồi ạ, bạn phụ trách sẽ nhắn tin cho mình ngay nha 💛###Dạ {name} ơi, em đã ghi nhận, bạn phụ trách sẽ nhắn tin cho mình ngay ạ 💛',
-  COMMENT_PUBLIC_FEEDBACK: 'Dạ em cảm ơn góp ý của mình ạ 💛 Em báo bạn dẫn live chỉnh lại ngay nha.'
+  COMMENT_PUBLIC_FEEDBACK: 'Dạ em cảm ơn góp ý của mình ạ 💛 Em báo bạn dẫn live chỉnh lại ngay nha.',
+  // fix-bot C2 (01/10): đơn landing/POS cùng SĐT nhưng không thuộc hội thoại — hỏi "đặt thêm?" mà KHÔNG kể món/giờ/tổng
+  // tiền của đơn đó (có thể là đơn của người khác). Mã gửi đi vẫn là ORDER_EXISTING_CONFIRM (luồng "đúng"/"không").
+  ORDER_EXISTING_CONFIRM_PHONE: 'Dạ {title} ơi, em thấy số điện thoại này đã có một đơn đặt gần đây ạ 🌾 Mình muốn đặt THÊM một đơn mới gồm {cart} nữa đúng không ạ? {Title} nhắn "đúng" giúp em là em lên đơn liền; còn nếu là đơn cũ thì {title} cứ nhắn, bạn phụ trách sẽ kiểm tra cho mình nha ạ.'
 });
 
 /** Bộ mẫu để soạn câu: mẫu trong Cài đặt, mẫu mới chưa có thì lấy lời dự phòng. */
@@ -221,6 +240,16 @@ export function clearExternalOrderCache() {
   externalOrderCache.clear();
 }
 
+/**
+ * Dọn Map nhớ trong RAM (01/10, tránh tăng mãi): bỏ mục hết hạn (`expired(value, key)`), rồi nếu vẫn quá `maxSize`
+ * thì bỏ mục cũ nhất (Map giữ thứ tự chèn). Gọi khi ghi mục mới.
+ */
+export function pruneMap(map, expired, maxSize) {
+  for (const [key, value] of map) if (expired(value, key)) map.delete(key);
+  while (map.size > maxSize) map.delete(map.keys().next().value);
+}
+const externalOrderCacheMax = 2000;
+
 /** Giờ POS (inserted_at là UTC không có Z) → mốc ms. */
 function posTimeMs(value) {
   const text = String(value || '').trim();
@@ -289,7 +318,11 @@ export async function findExternalOrders(phone, { now = Date.now(), fetchImpl = 
   const unique = orders.sort((a, b) => b.createdAt - a.createdAt).filter(order => { const mark = order.posId || order.id; if (seen.has(mark)) return false; seen.add(mark); return true; });
   const result = { orders: unique, error };
   // Lỗi thì không nhớ: lượt sau tra lại.
-  if (!error) externalOrderCache.set(key, { at: now, result });
+  if (!error) {
+    externalOrderCache.delete(key);
+    externalOrderCache.set(key, { at: now, result });
+    pruneMap(externalOrderCache, entry => now - entry.at >= externalOrderCacheTtlMs, externalOrderCacheMax);
+  }
   return result;
 }
 
@@ -301,7 +334,9 @@ async function assertEndpointHost(endpoint) {
   const checkedAt = endpointHostChecks.get(hostname) || 0;
   if (Date.now() - checkedAt < 60 * 1000) return;
   await assertPublicHost(hostname);
+  endpointHostChecks.delete(hostname);
   endpointHostChecks.set(hostname, Date.now());
+  pruneMap(endpointHostChecks, at => Date.now() - at >= 60 * 1000, 100);
 }
 
 /**
@@ -311,11 +346,50 @@ async function assertEndpointHost(endpoint) {
  * hỏi lại, lên đơn) không cần biết địa chỉ đến từ đâu.
  */
 export async function refineAddressWithAi(parsed, context = {}, settings = {}, fetchImpl) {
+  keepTypedHouseNumber(parsed, context);
   const fresh = String(parsed?.Customer_Address || '').trim();
   const merged = mergeAddressFragment(fresh !== '0' ? fresh : '', context.pendingOrder?.address || '');
   if (!merged || describeDeliveryAddress(merged).complete) return parsed;
   const guess = await inferAddress(merged, { settings, fetchImpl, timeoutMs: chatTimeoutMs }).catch(() => null);
-  if (guess?.canonical) parsed.Customer_Address = guess.canonical;
+  if (!guess?.canonical) return parsed;
+  // fix-addr (01/10): địa chỉ ghi theo phường/xã mới (postMerger): canonical là chính chữ khách + tên tỉnh.
+  if (guess.confidence !== 'low' || guess.postMerger) {
+    parsed.Customer_Address = guess.canonical;
+    return parsed;
+  }
+  // T7 (01/10): độ tin thấp (mô hình tự báo, hay số nhà/đường không có trong chữ khách — streetInvented): chỉ nhận
+  // ba cấp hành chính (đã khớp danh mục kho), phần đường giữ đúng chữ khách gõ (bỏ số nhà AI tự thêm), và ghi chú
+  // "cần đối chiếu" cho nhân viên như luồng landing.
+  const typedHint = addressHint(merged).resolved || {};
+  const typedStreet = typedHint.streetWithoutWard ?? typedHint.street ?? '';
+  const levels = [guess.ward, guess.district, guess.province].map(part => String(part || '').trim()).filter(Boolean);
+  if (levels.length < 3) return parsed;
+  parsed.Customer_Address = [isUsableStreet(typedStreet) ? typedStreet : '', ...levels].filter(Boolean).join(', ');
+  parsed.addressAiCheck = [parsed.addressAiCheck, `Địa chỉ AI suy ra từ "${merged.replace(/\s+/g, ' ').slice(0, 120)}", cần đối chiếu`].filter(Boolean).join('; ');
+  return parsed;
+}
+
+/**
+ * fix-addr (01/10): mô hình chat viết lại Customer_Address mà bỏ số nhà khách đã gõ (đơn thật: "71/82 khu phố 1 phường
+ * Long Bình Tân…" thành "Gần siêu thị Big C, Phường Long Bình Tân…"). Tin địa chỉ gần nhất của khách (cùng tỉnh) còn số
+ * nhà mà địa chỉ mô hình trả không có → giữ chữ khách gõ, kèm ghi chú đối chiếu cho nhân viên.
+ */
+export function keepTypedHouseNumber(parsed, context = {}) {
+  const written = String(parsed?.Customer_Address || '').trim();
+  if (!written || written === '0') return parsed;
+  const writtenProvince = resolveAddress(written).province?.code || '';
+  const texts = [...(Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts : []), String(context.messageText || '')];
+  for (let index = texts.length - 1; index >= 0; index -= 1) {
+    const typed = cleanAddressText(stripPhone(texts[index]));
+    if (!typed) continue;
+    const resolved = resolveAddress(typed);
+    if (!resolved.province || (writtenProvince && ![resolved.province.code, resolved.typedProvince?.code].includes(writtenProvince))) continue;
+    const lost = lostHouseNumbers(typed, written);
+    if (!lost.length) return parsed;
+    parsed.Customer_Address = typed;
+    parsed.addressAiCheck = [parsed.addressAiCheck, `Địa chỉ mô hình viết lại bỏ số nhà ${lost.join(', ')}: giữ chữ khách gõ, cần đối chiếu`].filter(Boolean).join('; ');
+    return parsed;
+  }
   return parsed;
 }
 
@@ -580,7 +654,10 @@ async function promptCacheFor({ endpoint, model, systemPrompt, accessToken, fetc
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.name) throw new Error(payload?.error?.message || `cachedContents ${response.status}`);
+  promptCaches.delete(key);
   promptCaches.set(key, { name: payload.name, expiresAt: Date.now() + promptCacheTtlSeconds * 1000 });
+  // Mỗi lần sửa mẫu/prompt thêm một khóa: bỏ khóa hết hạn, giữ tối đa 50.
+  pruneMap(promptCaches, entry => entry.expiresAt <= Date.now(), 50);
   console.log(`Cache prompt: tạo mới cho ${model} (${payload.usageMetadata?.totalTokenCount || '?'} token, 1 giờ)`);
   return payload.name;
 }
@@ -664,21 +741,42 @@ export async function requestDirectModelReply(options) {
       // Endpoint tuỳ chỉnh chỉ được kiểm SSRF lúc lưu cài đặt; DNS có thể đổi sau đó → kiểm lại (cache 60 s)
       // và không đi theo redirect để khoá/ngữ cảnh khách không bị chuyển sang máy khác.
       if (!vertex) await assertEndpointHost(endpoint);
-      const response = await fetchImpl(endpoint, {
-        method: 'POST',
-        redirect: 'manual',
-        headers: {
-          ...(anthropic
-            ? { 'x-api-key': settings.directApiKey, 'anthropic-version': '2023-06-01' }
-            : vertex && settings.directAuthType === 'api_key'
-            ? { 'x-goog-api-key': settings.directApiKey }
-            : { Authorization: `Bearer ${accessToken}` }),
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
+      // T4 (01/10): hết giờ (mặc định 60 giây) thì hủy lời gọi và coi như lỗi tạm (isCapacityError) → model dự phòng /
+      // chạy lại sau 60 giây như 429. Trước đây không có hạn: Vertex treo là hàng đợi của khách đứng tới ~300 giây.
+      const timeoutMs = Math.max(1, Number(options.timeoutMs ?? settings.modelTimeoutMs) || modelReplyTimeoutMs);
+      const controller = new AbortController();
+      let timer = null;
+      const timedOut = new Promise((_resolve, reject) => {
+        // Không unref: lời gọi đang chờ phải giữ tiến trình sống tới khi hết giờ (luôn được clearTimeout ở finally).
+        timer = setTimeout(() => { controller.abort(); reject(modelTimeoutError(model, timeoutMs)); }, timeoutMs);
       });
-      if (response.status >= 300 && response.status < 400) throw new Error(`Endpoint AI chuyển hướng (${response.status}) — không theo để tránh lộ khóa.`);
-      const payload = await response.json().catch(() => ({}));
+      timedOut.catch(() => {});
+      let response;
+      let payload;
+      try {
+        response = await Promise.race([fetchImpl(endpoint, {
+          method: 'POST',
+          redirect: 'manual',
+          signal: controller.signal,
+          headers: {
+            ...(anthropic
+              ? { 'x-api-key': settings.directApiKey, 'anthropic-version': '2023-06-01' }
+              : vertex && settings.directAuthType === 'api_key'
+              ? { 'x-goog-api-key': settings.directApiKey }
+              : { Authorization: `Bearer ${accessToken}` }),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(body)
+        }), timedOut]).catch(error => {
+          // fetch bị hủy bởi controller (AbortError) = hết giờ.
+          if (controller.signal.aborted) throw modelTimeoutError(model, timeoutMs);
+          throw error;
+        });
+        if (response.status >= 300 && response.status < 400) throw new Error(`Endpoint AI chuyển hướng (${response.status}) — không theo để tránh lộ khóa.`);
+        payload = await Promise.race([response.json().catch(() => (controller.signal.aborted ? Promise.reject(modelTimeoutError(model, timeoutMs)) : {})), timedOut]);
+      } finally {
+        clearTimeout(timer);
+      }
       if (!response.ok) {
         // Cache hết hạn/hỏng phía Vertex (400/403/404): bỏ cache, gửi lại một lần với prompt đầy đủ.
         if (cachedContent && [400, 403, 404].includes(response.status)) {
@@ -702,8 +800,10 @@ export async function requestDirectModelReply(options) {
       if (usage && !rawResponse) {
         console.log(`Token ${model}: vào ${usage.promptTokenCount ?? '?'} (cache ${usage.cachedContentTokenCount ?? 0}) · ra ${usage.candidatesTokenCount ?? '?'} · suy nghĩ ${usage.thoughtsTokenCount ?? 0}`);
       }
-      const parsedAnswer = parseModelAnswer(answer);
-      if (rawResponse) return { raw: answer, parsed: parsedAnswer, usage, conversationId: '' };
+      if (rawResponse) return { raw: answer, parsed: parseModelAnswer(answer), usage, conversationId: '' };
+      // T1 (01/10): chỉ giữ trường mô hình được trả (bỏ `values`/`orderNote`/`clearBasket`… khách có thể lái mô hình tự
+      // điền) và chặn mẫu nội bộ — trước khi refineAddressWithAi đặt các trường của engine.
+      const parsedAnswer = sanitizeModelAnswer(parseModelAnswer(answer), settings.systemPrompt);
       await refineAddressWithAi(parsedAnswer, options.context || {}, settings, fetchImpl);
       // Kèm số liệu lượt gọi cho nhật ký quyết định: token thật, ví dụ few-shot đã chèn, model, đã thử lại.
       return {
@@ -725,7 +825,8 @@ export async function requestDirectModelReply(options) {
     } catch (error) {
       const capacity = isCapacityError(error);
       attempt += 1;
-      const limit = capacity ? (usingFallback ? 2 : capacityAttempts) : attempts;
+      // Hết giờ: không chờ thêm lần nữa với cùng model (mỗi lần tới 60 giây) — sang dự phòng / hẹn chạy lại ngay.
+      const limit = capacity ? (error?.code === 'MODEL_TIMEOUT' ? 1 : usingFallback ? 2 : capacityAttempts) : attempts;
       if (attempt < limit) {
         // Backoff mũ kèm jitter (khuyến nghị Vertex khi 429): nhiều hội thoại cùng lúc không thử lại đúng một nhịp.
         const delay = capacity ? Math.min(10000, capacityWait * 2 ** (attempt - 1)) * (0.5 + Math.random()) : baseWait;
@@ -745,10 +846,21 @@ export async function requestDirectModelReply(options) {
   }
 }
 
-/** 429 (hết hạn mức) hay 503 (quá tải): lỗi tạm, đáng thử lại; lỗi khác (401, prompt sai…) thì không. */
+/** 429 (hết hạn mức) hay 503 (quá tải), hay hết giờ chờ mô hình (T4): lỗi tạm, đáng thử lại; lỗi khác (401, prompt sai…) thì không. */
 export function isCapacityError(error) {
   const status = Number(error?.status) || 0;
-  return status === 429 || status === 503 || /resource exhausted|rate limit|quota|overloaded|currently unavailable/i.test(String(error?.message || ''));
+  return status === 429 || status === 503 || error?.code === 'MODEL_TIMEOUT' || /resource exhausted|rate limit|quota|overloaded|currently unavailable/i.test(String(error?.message || ''));
+}
+
+// T4 (01/10): hạn chờ một lời gọi mô hình trả lời khách (settings.modelTimeoutMs ghi đè). 60 giây: đủ cho lượt có
+// "suy nghĩ"/prompt dài hợp lệ (25–30 giây có thể cắt nhầm — xem verify-chatbot-security T4).
+export const modelReplyTimeoutMs = 60 * 1000;
+
+function modelTimeoutError(model, timeoutMs) {
+  const error = new Error(`Model ${model} không trả lời sau ${Math.round(timeoutMs / 1000)} giây (hết giờ).`);
+  error.code = 'MODEL_TIMEOUT';
+  error.timeout = true;
+  return error;
 }
 
 // Mỗi hội thoại một hàng đợi: tin thứ hai của cùng một khách chờ tin thứ nhất
@@ -813,12 +925,42 @@ export function unansweredCustomerMessages(recentMessages, current) {
   return bundle.slice(-bundleLimit);
 }
 
+/** SĐT về dạng 0xxxxxxxxx để so (không kiểm đầu số). */
+function toLocalPhoneDigits(value) {
+  return String(value || '').replace(/\D/g, '').replace(/^84(?=\d{9}$)/, '0');
+}
+
+/**
+ * Ghi chú nội bộ cho nhân viên (không gửi khách) khi bot không tự làm được — ví dụ đơn tìm theo SĐT không thuộc hội
+ * thoại (C2). Máy chủ đưa dependencies.addStaffNote(conversation, note) thì ghi vào hồ sơ khách; chưa có thì chỉ
+ * ghi nhật ký (không kèm địa chỉ/PII — `summary`). Lỗi ghi không chặn lượt trả lời.
+ */
+async function noteForStaff(dependencies, conversation, note, summary = '') {
+  console.log(`Ghi chú cho nhân viên (${conversation.id})${summary ? `: ${summary}` : ''}`);
+  if (typeof dependencies?.addStaffNote !== 'function') return;
+  await Promise.resolve(dependencies.addStaffNote(conversation, String(note || '').slice(0, 500))).catch(error => console.warn(`Ghi chú nhân viên lỗi (${conversation.id}): ${error.message}`));
+}
+
+// Tin hệ thống của Messenger về cuộc gọi ("Bạn đã bỏ lỡ cuộc gọi…") không phải lời khách.
+const callSystemMessage = /bỏ lỡ cuộc gọi|có thể gọi cho .* trong 7 ngày|đã gọi cho bạn|cuộc gọi (thoại|video) đã kết thúc|missed (a )?call/i;
+
+/**
+ * Tin khách mà lượt của chính nó không bao giờ trả lời bằng chữ: sticker/👍, tin hệ thống cuộc gọi,
+ * "Notes:" đi kèm giỏ Facebook Shop. Không được làm câu hỏi chữ ngay trước đó nhường lượt (C1, 01/10).
+ */
+function isSilentCustomerMessage(item) {
+  if (stickerInfo(item)) return true;
+  const text = String(item?.text || '');
+  return (item?.type || 'text') === 'text' && (callSystemMessage.test(text) || /^\s*notes?\s*:/i.test(text));
+}
+
 /** Đã có tin khách mới hơn tin đang xử lý: tin này nhường, tin sau trả lời gộp cả hai. */
 export function hasNewerCustomerMessage(recentMessages, current) {
   const list = Array.isArray(recentMessages) ? recentMessages : [];
   const index = list.findIndex(item => item?.id && item.id === current?.id);
   const after = index >= 0 ? list.slice(index + 1) : list.filter(item => (Number(item?.createdAt) || 0) > (Number(current?.createdAt) || Infinity));
-  return after.some(item => item?.direction === 'incoming');
+  // Sticker / cuộc gọi / ghi chú giỏ Shop không được trả lời → không tính là "tin sau sẽ trả lời gộp".
+  return after.some(item => item?.direction === 'incoming' && !isSilentCustomerMessage(item));
 }
 
 // Ảnh sản phẩm chưa gửi được sau tin nhắn riêng từ bình luận (Facebook chặn
@@ -827,8 +969,13 @@ const pendingInboxImages = new Map();
 const pendingImagesTtl = 3 * 24 * 60 * 60 * 1000;
 export function rememberPendingImages(pageId, psid, images) {
   if (!pageId || !psid || !images?.length) return;
-  pendingInboxImages.set(`${pageId}:${psid}`, { images: [...new Set(images)], at: Date.now() });
+  const key = `${pageId}:${psid}`;
+  pendingInboxImages.delete(key);
+  pendingInboxImages.set(key, { images: [...new Set(images)], at: Date.now() });
+  // Khách không bao giờ nhắn lại thì mục nằm mãi: bỏ mục quá hạn, giữ tối đa 5.000 khách.
+  pruneMap(pendingInboxImages, entry => Date.now() - entry.at > pendingImagesTtl, pendingInboxImagesMax);
 }
+const pendingInboxImagesMax = 5000;
 export function takePendingImages(pageId, psid) {
   const key = `${pageId}:${psid}`;
   const entry = pendingInboxImages.get(key);
@@ -1037,6 +1184,13 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         results.push({ conversationId: conversation.id, skipped: sticker.like ? 'like (không cần trả lời)' : 'sticker' });
         return;
       }
+      // C1: 👍 về trong lúc bot đang trả lời tin chữ ngay trước (tin chữ không còn nhường cho sticker) — bot đã trả lời
+      // sau khi 👍 tới thì 👍 không còn là câu đáp cho câu hỏi cũ: im, không "ok"/cảm ơn chồng.
+      const likeAt = Number(change.message?.createdAt) || 0;
+      if (likeAt && recent.some(item => item?.direction === 'outgoing' && !item.staff && (Number(item.createdAt) || 0) >= likeAt)) {
+        results.push({ conversationId: conversation.id, skipped: 'like (đã trả lời tin trước)' });
+        return;
+      }
       change = { ...change, message: { ...change.message, type: 'text', text: 'ok', likeSticker: true, dataUrl: undefined, images: undefined } };
     }
     const askedAt = Number(change.message?.createdAt) || 0;
@@ -1102,7 +1256,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const latestOrder = latestOf(allOrders);
     const recentOrder = latestOf(allOrders.filter(isActiveOrder)) || latestOrder;
     // Tin hệ thống của Messenger ("Bạn đã bỏ lỡ cuộc gọi…") không phải lời khách.
-    if (/bỏ lỡ cuộc gọi|có thể gọi cho .* trong 7 ngày|đã gọi cho bạn|cuộc gọi (thoại|video) đã kết thúc|missed (a )?call/i.test(String(change.message?.text || ''))) {
+    if (callSystemMessage.test(String(change.message?.text || ''))) {
       results.push({ conversationId: conversation.id, skipped: 'tin hệ thống cuộc gọi' });
       return;
     }
@@ -1136,8 +1290,18 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     if (oldAddressPhone) {
       // Trong tiến trình test chỉ đọc kho landing khi test đưa readLandingStore (không đụng dữ liệu thật).
       const landingStore = dependencies.readLandingStore || (process.env.NODE_TEST_CONTEXT ? null : readLandingStore);
-      const found = await lookupPreviousAddress(oldAddressPhone, { customerOrders: allOrders, landingStore }).catch(() => null);
-      if (found?.address) previousDelivery = { phone: found.phone || oldAddressPhone, address: found.address, at: Number(found.at) || 0, source: found.source || '' };
+      // C2 (01/10): chỉ đơn CỦA hội thoại này (customerOrders hộp thư/bình luận cùng khách) mới được tự điền và nhắc lại
+      // địa chỉ. Đơn kho landing/POS tìm theo SĐT không chứng minh được là của người đang nhắn (gõ SĐT người khác là
+      // lộ địa chỉ + đơn COD tới nhà họ): không điền, không nhắc; gắn thẻ + ghi chú để nhân viên đối chiếu.
+      const own = await lookupPreviousAddress(oldAddressPhone, { customerOrders: allOrders }).catch(() => null);
+      if (own?.address) previousDelivery = { phone: own.phone || oldAddressPhone, address: own.address, at: Number(own.at) || 0, source: own.source || '' };
+      else if (!(previousDelivery && toLocalPhoneDigits(previousDelivery.phone) === toLocalPhoneDigits(oldAddressPhone))) {
+        const found = await lookupPreviousAddress(oldAddressPhone, { landingStore }).catch(() => null);
+        if (found?.address) {
+          previousDelivery = { phone: found.phone || oldAddressPhone, address: '', at: Number(found.at) || 0, source: found.source || '', foreign: { orderId: found.orderId || '', source: found.source || '' } };
+          await noteForStaff(dependencies, conversation, `Khách xin gửi "địa chỉ cũ" theo SĐT ${oldAddressPhone}: có đơn ${found.source || 'ngoài'} ${found.orderId || ''} (không thuộc hội thoại này), địa chỉ đơn đó: ${found.address}. Bot không tự điền — nhân viên đối chiếu người nhận trước khi lên đơn.`, `đơn ${found.orderId || '?'}`);
+        }
+      }
     }
     // Xưng hô khóa một lần trong hội thoại (botGender): giới tính đoán từ tin/tên có thể đổi
     // giữa chừng, khách thấy "chị" rồi "anh". Nhân viên đặt tay (genderSource 'staff') vẫn thắng.
@@ -1448,7 +1612,10 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const existingConfirmReply = awaitingYes
       ? renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Phone_Number: awaitingPending.phone || '0', Customer_Address: awaitingPending.address || '0' }, templates, replyContext)
       // "Không": kể lại đơn đang có — đơn trong hội thoại, hay đơn ngoài (landing/POS) đã lưu kèm giỏ chờ.
-      : awaitingNo ? { ...renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, { ...replyContext, recentOrder: recentOrder || conversation.pendingOrder?.externalOrder || null }), attention: true, pendingOrder: null } : null;
+      // C2 (01/10): đơn ngoài (landing/POS theo SĐT, không thuộc hội thoại) không được kể lại — nhân viên tra (ORDER_STATUS_CHECKING).
+      : awaitingNo ? (!recentOrder && conversation.pendingOrder?.externalOrder && templates?.ORDER_STATUS_CHECKING
+        ? { ...renderChatbotReply({ template_id: 'ORDER_STATUS_CHECKING' }, templates, replyContext), attention: true, pendingOrder: null }
+        : { ...renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, { ...replyContext, recentOrder: recentOrder || conversation.pendingOrder?.externalOrder || null }), attention: true, pendingOrder: null }) : null;
     // Ngay sau bảng giá một sản phẩm, "dùng thử" / "combo 2" / "3 túi" là khách đã
     // chọn: lên bước xin SĐT/địa chỉ với đúng sản phẩm vừa báo giá. Mô hình hay
     // gửi lại bảng giá vì chữ "dùng thử" có sẵn trong bảng (khách bỏ đi).
@@ -1477,11 +1644,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     let lookupReply = null;
     if (phoneInText && !recentOrder?.id && !namesProducts && (asksAboutOrder || conversation.botLastTemplateId === 'ORDER_STATUS') && dependencies.findOrdersByPhone) {
       const found = (await dependencies.findOrdersByPhone(phoneInText).catch(() => [])) || [];
-      lookupReply = found.length
-        ? renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, { ...replyContext, recentOrder: found[0] })
-        : templates?.ORDER_STATUS_CHECKING
-          ? { ...renderChatbotReply({ template_id: 'ORDER_STATUS_CHECKING' }, templates, replyContext), attention: true }
-          : null;
+      // C2 (01/10): hội thoại này không có đơn nào, nên đơn tìm theo SĐT là của hội thoại KHÁC — không kể món/giờ/tổng
+      // tiền cho người đang nhắn (gõ SĐT người khác là đọc được đơn của họ). Báo nhân viên tra + thẻ + ghi chú.
+      if (found.length) await noteForStaff(dependencies, conversation, `Khách hỏi đơn đã đặt theo SĐT ${phoneInText}: có ${found.length} đơn ở hội thoại khác (${found.map(order => order.id).join(', ')}). Bot không kể chi tiết — nhân viên đối chiếu và trả lời.`, `${found.length} đơn theo SĐT ở hội thoại khác`);
+      lookupReply = templates?.ORDER_STATUS_CHECKING
+        ? { ...renderChatbotReply({ template_id: 'ORDER_STATUS_CHECKING' }, templates, replyContext), attention: true }
+        : null;
     }
     // Khách vừa đặt dặn thêm về giao hàng ("gửi hàng mới cho mình", "giao giờ hành
     // chính", "gọi trước khi giao"): ghi chú vào đơn, trả lời ngắn — mô hình từng
@@ -1542,7 +1710,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           source: conversation.source,
           botLastTemplateId: conversation.botLastTemplateId || '',
           // Có SĐT/địa chỉ đơn cũ để "gửi địa chỉ cũ" chốt được; không có thì luật hỏi SĐT đặt lần trước.
-          hasPreviousDelivery: Boolean(previousDelivery || (recentOrder?.address && recentOrder?.phone)),
+          hasPreviousDelivery: Boolean((previousDelivery && !previousDelivery.foreign) || (recentOrder?.address && recentOrder?.phone)),
           staffRepliedAfterBot,
           botLastAgeMin: conversation.botLastReplyAt ? (Date.now() - Number(conversation.botLastReplyAt)) / 60000 : Infinity,
           // Giỏ đang giữ chỉ tính khi còn hạn (2 giờ) — giỏ cũ quá hạn làm luật ADDRESS_COMPLETE dựng ASK_PRODUCT.
@@ -1938,6 +2106,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     }
     // Vòng 12 (BOT-A): không tra được địa chỉ cũ → nhân viên tra (thẻ), không hỏi từng cấp.
     if (reply.oldAddressMissing && !reply.attention) reply = { ...reply, attention: true };
+    // C2: SĐT khách gửi trùng đơn landing/POS ngoài hội thoại (địa chỉ không tự điền): luôn gắn thẻ cho nhân viên.
+    if (previousDelivery?.foreign && !reply.attention) reply = { ...reply, attention: true };
     // Vòng 12 (chủ shop 01/10): đổi quà (GIFT_SWAP: 2 gói nhỏ bất kỳ, không trừ tiền) → ghi vào đơn đang mở (≤ 24 giờ) + thẻ
     // để nhân viên đổi quà khi đóng gói.
     if ((reply.templateId === 'GIFT_SWAP' || reply.alsoTemplateId === 'GIFT_SWAP') && !reply.order) {
@@ -2195,8 +2365,9 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       return;
     }
     // Nhân viên vừa nhận khách (tắt bot) trong lúc model chạy: không lên đơn trùng
-    // với đơn nhân viên đang lên, không gửi chuỗi xác nhận thứ hai.
-    if (reply.order && !isComment && getConversation) {
+    // với đơn nhân viên đang lên, không gửi chuỗi xác nhận thứ hai. T2 (01/10): đọc lại cho MỌI lượt
+    // (cả tin không có đơn, cả bình luận) — trước đây chỉ khi có đơn nên bot vẫn gửi 1 tin thừa.
+    if (getConversation) {
       const latest = await getConversation(conversation.id).catch(() => null);
       if (latest?.botEnabled === false) {
         results.push({ conversationId: conversation.id, skipped: 'nhân viên đã nhận khách' });
@@ -2261,12 +2432,18 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         return;
       }
       // Đơn ngoài hội thoại: giỏ/giờ đơn cũ lấy từ đơn landing/POS (recentOrder tạm cho mẫu).
-      const ask = renderChatbotReply({ template_id: 'ORDER_EXISTING_CONFIRM', cart }, templates, { ...replyContext, recentOrder: existingAny });
+      // C2 (01/10): đơn ngoài hội thoại (landing/POS tìm theo SĐT) có thể là của người khác: hỏi mà không kể chi tiết đơn,
+      // gắn thẻ + ghi chú cho nhân viên đối chiếu. Đơn trong hội thoại thì kể như cũ.
+      const outside = existingAny !== existingRecent;
+      const ask = outside && templates?.ORDER_EXISTING_CONFIRM_PHONE
+        ? { ...renderChatbotReply({ template_id: 'ORDER_EXISTING_CONFIRM_PHONE', values: { cart } }, templates, replyContext), templateId: 'ORDER_EXISTING_CONFIRM' }
+        : renderChatbotReply({ template_id: 'ORDER_EXISTING_CONFIRM', cart }, templates, { ...replyContext, recentOrder: existingAny });
+      if (outside && ask.templateId === 'ORDER_EXISTING_CONFIRM') await noteForStaff(dependencies, conversation, `Khách lên đơn mới với SĐT ${reply.order.phone || ''} trùng đơn ${existingAny.source || 'ngoài'} ${existingAny.id || ''} (không thuộc hội thoại này). Bot hỏi "đặt thêm?" không nêu chi tiết đơn đó — nhân viên đối chiếu có phải cùng người không.`, `đơn ngoài ${existingAny.id || '?'}`);
       if (ask.templateId === 'ORDER_EXISTING_CONFIRM') {
         console.log(`Đơn mới khi đang có đơn ${existingAny.id}: hỏi khách xác nhận trước (${conversation.id})`);
         // addressAsks = tối đa: địa chỉ này đã được bộ soạn đơn chấp nhận (có khi sau 2 lần hỏi) —
         // lượt "đúng" không được hỏi lại phường/xã lần nữa. Đơn ngoài lưu kèm giỏ chờ để "không" kể lại được.
-        reply = { ...ask, order: undefined, attention: false, pendingOrder: { items: (reply.order.items || []).map(item => ({ product: item.product || item.name, code: item.code || item.sku || '', quantity: Number(item.quantity) || 1 })), key: reply.order.orderKey || '', at: Date.now(), phone: reply.order.phone || '', address: reply.order.rawAddress || reply.order.address || '', addressAsks: maxAddressAsks, awaitingConfirm: true, ...(existingAny !== existingRecent ? { externalOrder: existingAny } : {}) } };
+        reply = { ...ask, order: undefined, attention: outside, pendingOrder: { items: (reply.order.items || []).map(item => ({ product: item.product || item.name, code: item.code || item.sku || '', quantity: Number(item.quantity) || 1 })), key: reply.order.orderKey || '', at: Date.now(), phone: reply.order.phone || '', address: reply.order.rawAddress || reply.order.address || '', addressAsks: maxAddressAsks, awaitingConfirm: true, ...(outside ? { externalOrder: existingAny, staffCheck: [String(conversation.pendingOrder?.staffCheck || ''), `SĐT trùng đơn ${existingAny.source || 'ngoài'} ${existingAny.id || ''} không thuộc hội thoại, đối chiếu người nhận`].filter(Boolean).join('; ').slice(0, 300) } : {}) } };
       }
     }
     // Sắp tự lên đơn mới mà hội thoại đã có đơn POS trong giờ qua (khách đặt qua

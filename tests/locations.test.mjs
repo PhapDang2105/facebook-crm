@@ -135,9 +135,13 @@ test('phần đường phố để hiển thị: cắt tên cấp khách gõ dí
 });
 
 test('tỉnh mới sau sáp nhập 2025: phường/quận không có trong tỉnh ghi thì tìm ở tỉnh cũ đã nhập vào, ghi theo tên cũ của kho', () => {
+  // fix-addr (01/10): "Tân Đông Hiệp" cũng là tên phường MỚI của TP.HCM (NQ 1685/NQ-UBTVQH15, gộp thêm phường cũ khác)
+  // → giữ nguyên chữ khách (postMerger), không ghi phường cũ; quận cũ (Dĩ An) chỉ còn làm gợi ý. Trước đây khẳng định
+  // ra Phường Tân Đông Hiệp cũ — cùng kiểu lỗi "Cầu Ông Lãnh" cũ (khách thật ở Cầu Kho cũ) trong bộ đo địa chỉ.
   const merged = resolveAddress('234/51 khu phố đông an phường tân đông hiệp , Phường Tân Đông Hiệp, Hồ Chí Minh');
-  assert.deepEqual(names(merged), ['Bình Dương', 'Thành phố Dĩ An', 'Phường Tân Đông Hiệp']);
-  assert.equal(merged.confidence, 'exact');
+  assert.deepEqual(names(merged), ['Bình Dương', 'Thành phố Dĩ An', '']);
+  assert.equal(merged.postMerger, true);
+  assert.equal(merged.typedProvince?.name, 'TP Hồ Chí Minh');
   assert.deepEqual(names(resolveAddress('Dĩ An, Hồ Chí Minh')), ['Bình Dương', 'Thành phố Dĩ An', '']);
   // Chơn Thành nay thuộc Đồng Nai; danh mục kho chưa có phường Hưng Long (lập sau) nên chỉ ra được hai cấp.
   assert.deepEqual(names(resolveAddress('Phường Hưng Long, Thị xã Chơn Thành, Đồng Nai')), ['Bình Phước', 'Huyện Chơn Thành', '']);
@@ -376,10 +380,14 @@ test('địa chỉ ghi theo đơn vị sau sáp nhập 2025: không đoán phư�
     assert.equal(described.complete, true, text);
     assert.equal(described.canonical, text.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim(), text);
   }
-  // Tỉnh mới ghi kèm phường của tỉnh cũ đã nhập vào vẫn đọc được, không phải sau sáp nhập.
+  // Tỉnh mới ghi kèm phường của tỉnh cũ đã nhập vào vẫn đọc được tỉnh/quận cũ, nhưng "Tân Đông Hiệp" cũng là tên phường
+  // mới của TP.HCM nên là địa chỉ sau sáp nhập (fix-addr 01/10; trước đây khẳng định postMerger=false, phường cũ).
   const merged = resolveAddress('Phường Tân Đông Hiệp, Hồ Chí Minh');
-  assert.equal(merged.postMerger, false);
-  assert.equal(merged.confidence, 'exact');
+  assert.equal(merged.postMerger, true);
+  assert.equal(merged.ward, null);
+  assert.equal(merged.district?.name, 'Thành phố Dĩ An');
+  // Phường cũ không còn tên trong danh mục mới thì vẫn là địa chỉ cũ.
+  assert.equal(resolveAddress('Phường Bình Thắng, Dĩ An, Bình Dương').ward?.name, 'Phường Bình Thắng');
   // Đủ ba cấp, thiếu cấp không kèm "phường X", hay mơ hồ: không đánh dấu.
   assert.equal(resolveAddress('12 Lê Lợi, Phường Bến Nghé, Quận 1, HCM').postMerger, false);
   assert.equal(resolveAddress('Quận 3, Hồ Chí Minh').postMerger, false);

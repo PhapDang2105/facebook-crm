@@ -310,14 +310,18 @@ test('khách đã đặt đơn hỏi lại thời gian giao (vừa kèm trong ti
   assert.deepEqual(noOrder, []);
 });
 
-test('khách hủy đơn vừa đặt (ORDER_CANCEL): hủy đúng đơn đó qua cancelOrder, không tạo đơn, không phiếu; đơn quá 24h → chuyển nhân viên', async () => {
+test('khách hủy đơn vừa đặt (ORDER_CANCEL): hủy đúng đơn đó qua cancelOrder, không tạo đơn, không phiếu; đơn quá 60 phút → ghi nhận cho nhân viên', async () => {
   const recentOrder = { id: 'abc12345', automatic: true, createdAt: Date.now() - 30 * 60 * 1000, phone: '0909123456', address: 'Q1', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }] };
   const rendered = renderChatbotReply({ template_id: 'ORDER_CANCEL' }, templates, { recentOrder, now: Date.now() });
   assert.equal(rendered.templateId, 'ORDER_CANCEL');
   assert.equal(rendered.order.cancelOrderId, 'abc12345');
   assert.match(rendered.messages[0], /đã hủy đơn Granola Túi Xanh 450g x2/);
   const old = renderChatbotReply({ template_id: 'ORDER_CANCEL' }, templates, { recentOrder: { ...recentOrder, createdAt: Date.now() - 2 * 24 * 60 * 60 * 1000 }, now: Date.now() });
-  assert.equal(old.templateId, 'CSKH_HANDOFF');
+  // fix-bot C4 (01/10): trước đây kỳ vọng CSKH_HANDOFF (cửa sổ tự hủy 24 giờ). Nay quá 60 phút → ORDER_CANCEL_STAFF
+  // (ghi chú vào đơn + thẻ, không tự hủy), như luật rule-intent.
+  assert.equal(old.templateId, 'ORDER_CANCEL_STAFF');
+  assert.equal(old.order?.cancelOrderId, undefined);
+  assert.equal(old.order?.noteOrderId, 'abc12345');
   const log = [];
   await processChatbotChanges([{
     type: 'message',

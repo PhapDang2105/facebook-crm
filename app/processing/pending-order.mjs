@@ -47,6 +47,8 @@ export function normalizePendingOrder(value) {
     ...(askedBagCount ? { askedBagCount } : {}),
     // Vòng 12: khách đã nói "gửi địa chỉ cũ / như mấy lần" từ tin đặt đầu: nhớ để lượt sau (khi có SĐT) lấy lại.
     ...(value?.wantsPrevious ? { wantsPrevious: true } : {}),
+    // 01/10 (fix-bot C2/T7): ghi chú soát cho nhân viên đi theo giỏ tới khi lên đơn (thành addressCheck của đơn).
+    ...(value?.staffCheck ? { staffCheck: String(value.staffCheck).slice(0, 300) } : {}),
     // Vòng 12: lúc gửi tin nhắc giữ đơn gần nhất (follow-up gọi touchPendingOrder).
     ...(remindedAt ? { remindedAt } : {}),
     // Đã gợi ý lên 2 túi cho giỏ này rồi thì không gợi ý lại.

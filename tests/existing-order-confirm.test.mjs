@@ -198,7 +198,8 @@ test('"hủy đơn" lần hai ngay sau khi vừa hủy: không hủy tiếp đơ
   assert.deepEqual(cancelled, []);
   assert.doesNotMatch(only.sent.join(' '), /đơn đơn/);
   // Đơn hủy đã lâu (3 giờ), bot không vừa hủy: "hủy đơn" là hủy đơn B đang mở.
-  const later = await run({ customerOrders: [{ ...cancelledA, createdAt: Date.now() - 3 * 60 * 60 * 1000 }, { ...older, createdAt: Date.now() - 60 * 60 * 1000 }], botLastTemplateId: 'THANK_YOU', botLastReplyAt: Date.now() - 60000 }, 'hủy đơn giúp chị', { extraDeps: deps, extraSettings: { ruleIntent: 'off' } });
+  // fix-bot C4 (01/10): đơn B để 30 phút (trước đây 60 phút — bot chỉ tự hủy trong 60 phút, quá thì ORDER_CANCEL_STAFF).
+  const later = await run({ customerOrders: [{ ...cancelledA, createdAt: Date.now() - 3 * 60 * 60 * 1000 }, { ...older, createdAt: Date.now() - 30 * 60 * 1000 }],botLastTemplateId: 'THANK_YOU', botLastReplyAt: Date.now() - 60000 }, 'hủy đơn giúp chị', { extraDeps: deps, extraSettings: { ruleIntent: 'off' } });
   assert.equal(later.results[0].templateId, 'ORDER_CANCEL');
   assert.deepEqual(cancelled, ['B']);
 });

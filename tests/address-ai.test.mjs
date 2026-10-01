@@ -50,7 +50,8 @@ test('chỉ nhận câu trả lời khớp đủ ba cấp trong danh mục kho',
   const raw = '17/18 trần phú phường 3 dalat';
   const good = validateAddressGuess({ province: 'Tỉnh Lâm Đồng', district: 'Thành phố Đà Lạt', ward: 'Phường 3', street: '17/18 Trần Phú' }, raw);
   assert.equal(good.ok, true);
-  assert.equal(good.canonical, '17/18 Trần Phú, Phường 3, Thành phố Đà Lạt, Lâm Đồng');
+  // fix-addr (01/10): phần đường giữ đúng chữ khách gõ, AI chỉ điền cấp hành chính.
+  assert.equal(good.canonical, '17/18 trần phú, Phường 3, Thành phố Đà Lạt, Lâm Đồng');
   const invented = validateAddressGuess({ province: 'Tỉnh Lâm Đồng', district: 'Thành phố Đà Lạt', ward: 'Phường Hoa Hồng', street: '' }, raw);
   assert.equal(invented.ok, false, 'phường không có trong danh mục thì bỏ');
   const ambiguous = validateAddressGuess({ province: 'Tỉnh Lâm Đồng', district: 'Thành phố Đà Lạt', ward: 'Phường 3', ambiguous: true }, raw);
@@ -78,8 +79,10 @@ test('suy luận qua Vertex, đối chiếu danh mục và nhớ kết quả', a
     assert.match(body.contents[0].parts[0].text, /ta quang Bửu phường chánh hưng/);
     return vertexReply({ province: 'Thành phố Hồ Chí Minh', district: 'Quận 8', ward: 'Phường 5', street: '332 Tạ Quang Bửu', confidence: 'high', ambiguous: false, reason: 'Chánh Hưng thuộc Phường 5, Quận 8' }, ['https://example.com/q8'])(url, init);
   };
+  // fix-addr (01/10): 'Chánh Hưng' là phường MỚI của TP.HCM (NQ 1685/NQ-UBTVQH15): giữ nguyên chữ khách, AI chỉ bổ sung tỉnh,
+  // không quy đổi về Phường 5, Quận 8 cũ (quy tắc chủ shop: địa chỉ sau sáp nhập giữ nguyên như khách ghi).
   const first = await inferAddress('332 ta quang Bửu phường chánh hưng', { settings, fetchImpl });
-  assert.equal(first.canonical, '332 Tạ Quang Bửu, Phường 5, Quận 8, TP Hồ Chí Minh');
+  assert.equal(first.canonical, '332 ta quang Bửu phường chánh hưng, TP Hồ Chí Minh');
   assert.equal(first.province, 'TP Hồ Chí Minh');
   assert.deepEqual(first.sources, ['https://example.com/q8']);
   const again = await inferAddress('332 ta quang Bửu phường chánh hưng', { settings, fetchImpl });
@@ -113,11 +116,11 @@ test('hai lượt tra song song: lượt chậm vẫn được nhớ dù lượt
   assert.equal(fast, null);
   await flushAddressAiCache();
   release();
-  assert.equal((await slow).canonical, '332 Tạ Quang Bửu, Phường 5, Quận 8, TP Hồ Chí Minh');
+  assert.equal((await slow).canonical, '332 ta quang Bửu phường chánh hưng, TP Hồ Chí Minh');
   await flushAddressAiCache();
   let calls = 0;
   const counting = async () => { calls += 1; throw new Error('phải lấy từ cache'); };
-  assert.equal((await inferAddress('332 ta quang Bửu phường chánh hưng', { settings, fetchImpl: counting })).canonical, '332 Tạ Quang Bửu, Phường 5, Quận 8, TP Hồ Chí Minh');
+  assert.equal((await inferAddress('332 ta quang Bửu phường chánh hưng', { settings, fetchImpl: counting })).canonical, '332 ta quang Bửu phường chánh hưng, TP Hồ Chí Minh');
   assert.equal(await inferAddress('190/53 xóm đất p binh thoi', { settings, fetchImpl: counting }), null);
   assert.equal(calls, 0, 'cả hai kết quả đều nằm trong cache');
   // Tệp cache trên đĩa cũng có đủ cả hai.
@@ -141,7 +144,7 @@ test('chatbot thay địa chỉ khách nhắn bằng địa chỉ AI đã đối
   const fetchImpl = vertexReply({ province: 'Thành phố Hồ Chí Minh', district: 'Quận 8', ward: 'Phường 5', street: '332 Tạ Quang Bửu', ambiguous: false, reason: 'x' });
   const parsed = { template_id: 'ORDER_CONFIRM', Customer_Address: '332 ta quang Bửu phường chánh hưng' };
   await refineAddressWithAi(parsed, {}, settings, fetchImpl);
-  assert.equal(parsed.Customer_Address, '332 Tạ Quang Bửu, Phường 5, Quận 8, TP Hồ Chí Minh');
+  assert.equal(parsed.Customer_Address, '332 ta quang Bửu phường chánh hưng, TP Hồ Chí Minh');
   const complete = { template_id: 'ORDER_CONFIRM', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh' };
   await refineAddressWithAi(complete, {}, settings, async () => { throw new Error('không được gọi'); });
   assert.equal(complete.Customer_Address, '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh');

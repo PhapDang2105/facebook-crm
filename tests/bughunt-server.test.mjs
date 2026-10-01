@@ -67,7 +67,11 @@ test('địa chỉ: khách gọi cả tỉnh là "Huế" và ghi rõ xã/thị t
   assert.deepEqual(names(town), ['Thừa Thiên Huế', 'Huyện Phong Điền', 'Thị trấn Phong Điền']);
   assert.equal(town.street, 'số 3 kiệt 5');
   assert.equal(town.confidence, 'exact');
-  assert.deepEqual(names(resolveAddress('phường Phú Bài, thành phố Huế')), ['Thừa Thiên Huế', 'Thị xã Hương Thủy', 'Phường Phú Bài']);
+  // fix-addr (01/10): "Phú Bài" cũng là tên phường MỚI của thành phố Huế (NQ 1675/NQ-UBTVQH15) và khách không ghi
+  // thị xã → địa chỉ sau sáp nhập: giữ chữ khách, không ghi phường cũ (quận cũ Hương Thủy chỉ còn làm gợi ý).
+  const phuBai = resolveAddress('phường Phú Bài, thành phố Huế');
+  assert.deepEqual(names(phuBai), ['Thừa Thiên Huế', 'Thị xã Hương Thủy', '']);
+  assert.equal(phuBai.postMerger, true);
   // Phường của chính thành phố thì vẫn là thành phố; không ghi loại hình thì không suy đoán.
   assert.deepEqual(names(resolveAddress('Phường Hương Sơ, Huế')), ['Thừa Thiên Huế', 'Thành phố Huế', 'Phường Hương Sơ']);
   assert.deepEqual(names(resolveAddress('phường thuận hòa, thành phố huế')), ['Thừa Thiên Huế', 'Thành phố Huế', 'Phường Thuận Hòa']);

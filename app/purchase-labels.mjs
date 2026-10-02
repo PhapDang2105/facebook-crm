@@ -17,7 +17,7 @@ const settleMs = 2 * 60 * 1000;
 const activeOrder = order => Boolean(order) && order.processingStatus !== 'cancelled' && order.status !== 'Hủy';
 const phoneKey = value => String(value || '').replace(/\D/g, '').slice(-9);
 // Mọi dãy số (kể cả SĐT viết cách "0912 345 678", "0912.345.678") trong tin khách → 9 số cuối của từng cụm.
-function phoneKeysInText(text) {
+export function phoneKeysInText(text) {
   const keys = new Set();
   for (const match of String(text || '').matchAll(/(?:\+?84|0)(?:[\s.-]?\d){9,10}/g)) {
     const key = phoneKey(match[0]);

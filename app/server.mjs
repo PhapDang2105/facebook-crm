@@ -10,6 +10,7 @@ import { buildPlainXlsx, excelColumnName } from './xlsx-export.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
+import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { aiKeyReentryError, assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
@@ -565,6 +566,44 @@ async function runPurchaseLabelBackfill() {
   for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
   if (changes.length) console.log(`Thẻ Đã mua hàng: gắn bù cho ${changes.length} hội thoại (${[...new Set(changes.map(change => change.reason))].join('; ')}).`);
   return changes.length;
+}
+
+/**
+ * Thẻ "Số điện thoại" (app/phone-labels.mjs): `conversationIds` = gắn ngay cho hội thoại vừa có tin
+ * khách ghi SĐT; bỏ trống = quét bù mọi hội thoại (khởi động + mỗi 5 phút).
+ */
+async function runPhoneLabelPass(conversationIds = null) {
+  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const phoneLabels = labelsForEvents(labelDefs, ['phone']);
+  if (!phoneLabels.length) return 0;
+  let result = { changes: [], flagged: 0 };
+  const relabeled = [];
+  await updateMessagingStore(store => {
+    result = applyPhoneLabels(store, { phoneLabels, conversationIds });
+    for (const change of result.changes) {
+      const conversation = store.conversations.find(item => item.id === change.conversation.id);
+      if (conversation) relabeled.push(publicConversation(conversation));
+    }
+    return null;
+  }, { defer: Boolean(conversationIds), unchanged: () => !result.flagged });
+  for (const change of result.changes) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason: 'khách để lại số điện thoại' });
+  for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
+  if (result.changes.length && !conversationIds) console.log(`Thẻ Số điện thoại: gắn bù cho ${result.changes.length} hội thoại.`);
+  return result.changes.length;
+}
+
+// Tin khách vừa về (webhook Meta/Pancake, đồng bộ Pancake) có ghi SĐT: gom 2 giây rồi gắn một lượt.
+const pendingPhoneLabelIds = new Set();
+let phoneLabelTimer = null;
+function queuePhoneLabel(event) {
+  if (event?.type !== 'message' || event.updated || !event.conversation?.id || !messageHasPhone(event.message)) return;
+  pendingPhoneLabelIds.add(event.conversation.id);
+  phoneLabelTimer ||= setTimeout(() => {
+    phoneLabelTimer = null;
+    const ids = [...pendingPhoneLabelIds];
+    pendingPhoneLabelIds.clear();
+    runPhoneLabelPass(ids).catch(error => console.warn(`Gắn thẻ Số điện thoại lỗi: ${error.message}`));
+  }, 2000);
 }
 
 /**
@@ -3210,6 +3249,11 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   const purchaseLabelPass = () => runPurchaseLabelBackfill().catch(error => console.warn(`Gắn bù thẻ Đã mua hàng lỗi: ${error.message}`));
   setTimeout(purchaseLabelPass, 30 * 1000).unref?.();
   setInterval(purchaseLabelPass, 5 * 60 * 1000).unref?.();
+  // Thẻ "Số điện thoại": gắn ngay khi tin khách có SĐT về, quét bù 40 giây sau khởi động rồi mỗi 5 phút.
+  subscribeToMessagingEvents(queuePhoneLabel);
+  const phoneLabelPass = () => runPhoneLabelPass().catch(error => console.warn(`Gắn bù thẻ Số điện thoại lỗi: ${error.message}`));
+  setTimeout(phoneLabelPass, 40 * 1000).unref?.();
+  setInterval(phoneLabelPass, 5 * 60 * 1000).unref?.();
   if (!auth.enabled && authConfig.requireLogin) console.error('CHƯA CẤU HÌNH ĐĂNG NHẬP: máy chủ bắt buộc đăng nhập (PUBLIC_BASE_URL https hoặc CRM_REQUIRE_LOGIN=1) mà chưa có tài khoản — giao diện/API trả 503 cho tới khi khai CRM_LOGIN_USERS hoặc Nhân sự có mật khẩu.');
   else if (!auth.enabled) console.warn('CRM_LOGIN_USERS trống: giao diện không hỏi đăng nhập. Chỉ để vậy khi chạy trên máy mình.');
   else if (!authConfig.sessionSecret) console.warn('CRM_SESSION_SECRET trống: khoá phiên sinh ngẫu nhiên, khởi động lại là mọi người phải đăng nhập lại.');

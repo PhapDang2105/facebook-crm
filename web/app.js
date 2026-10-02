@@ -866,7 +866,8 @@ const labelAutoChoices = [
   { value: 'wholesale', label: 'Khi hỏi mua sỉ/CTV' },
   { value: 'bad', label: 'Khi số hay bom hàng (POS chặn/bom nhiều)' },
   { value: 'followup', label: 'Khi hệ thống gửi tin bám đuổi' },
-  { value: 'followup-won', label: 'Khi khách được bám đuổi chốt đơn' }
+  { value: 'followup-won', label: 'Khi khách được bám đuổi chốt đơn' },
+  { value: 'phone', label: 'Khi khách để lại số điện thoại' }
 ];
 let quickReplyDraft = null;
 let quickReplyPickerMatches = [];

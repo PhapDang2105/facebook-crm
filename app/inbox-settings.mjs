@@ -28,6 +28,8 @@ export const defaultConversationLabels = Object.freeze([
   { id: 'followup', name: 'Bám đuổi', color: '#0ea5e9', icon: 'alarm-clock', auto: 'followup' },
   // Khách đã nhận tin bám đuổi rồi chốt đơn (bot, nhân viên hay Facebook Shop) trong 14 ngày.
   { id: 'followup-won', name: 'Bám đuổi thành công', color: '#16a34a', icon: 'trophy', auto: 'followup-won' },
+  // Khách ghi số điện thoại trong tin nhắn hay bình luận (02/10).
+  { id: 'phone', name: 'Số điện thoại', color: '#0d9488', icon: 'telephone-receiver', auto: 'phone' },
   { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck', auto: '' }
 ]);
 

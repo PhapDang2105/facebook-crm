@@ -1171,6 +1171,27 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 
 .settings-save-button { padding: 9.9px 16.2px; color: #fff; background: #111; border: 0; border-radius: 8.1px; font-size: 12.6px; font-weight: 700; cursor: pointer; }
 .settings-save-button:hover { background: #333; }
+.settings-save-button:disabled { cursor: wait; opacity: .62; }
+
+/* Cài đặt → Báo cáo Lark: dán một đoạn hội thoại và gửi tới webhook phía máy chủ. */
+.lark-report-card { min-height: calc(100vh - 113px); }
+.lark-report-body { display: grid; gap: 20px; width: min(820px, 100%); padding: 24px; }
+.lark-report-notice { display: grid; gap: 5px; padding: 14px 16px; color: #664d03; background: #fff8df; border: 1px solid #f4df99; border-radius: 11px; font-size: 13px; line-height: 1.5; }
+.lark-report-notice strong { color: #4c3900; font-size: 13.5px; }
+.lark-report-field { display: grid; gap: 8px; color: #24364b; font-size: 13.5px; font-weight: 650; }
+.lark-report-field > span { display: flex; align-items: baseline; gap: 8px; }
+.lark-report-field small { color: #8a91a0; font-size: 11.5px; font-weight: 500; }
+.lark-report-field input, .lark-report-field textarea { width: 100%; box-sizing: border-box; padding: 12px 14px; color: #172b43; background: #fff; border: 1px solid #dfe4eb; border-radius: 10px; outline: none; font: inherit; font-weight: 400; line-height: 1.55; }
+.lark-report-field textarea { min-height: 310px; resize: vertical; white-space: pre-wrap; }
+.lark-report-field input:focus, .lark-report-field textarea:focus { border-color: #7897bd; box-shadow: 0 0 0 3px rgba(67, 116, 176, .12); }
+.lark-report-meta { display: flex; justify-content: space-between; gap: 16px; min-height: 20px; margin-top: -12px; color: #8a91a0; font-size: 12px; }
+#lark-report-status { color: #3c6f4a; text-align: right; }
+.lark-report-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid #eef0f3; }
+@media (max-width: 640px) {
+  .lark-report-body { padding: 18px; }
+  .lark-report-actions { padding: 14px 18px; }
+  .lark-report-meta { align-items: flex-start; flex-direction: column; gap: 4px; }
+}
 
 .settings-page:has([data-settings-panel="products"]:not(.hidden), [data-settings-panel="gifts"]:not(.hidden)) { width: 100%; max-width: none; }
 #settings-view, #settings-view * { font-family: Roboto, sans-serif; }

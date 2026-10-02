@@ -177,7 +177,7 @@ crmSessionRequest.then(session => {
 // có role), Quản trị hoặc chưa bật đăng nhập: giữ nguyên.
 let sessionRole = '';
 const STAFF_FORBIDDEN_MESSAGE = 'Chỉ Quản trị được thay đổi mục này.';
-const staffReadOnlySections = ['channels', 'chatbot', 'messages', 'products', 'gifts', 'qr', 'staff'];
+const staffReadOnlySections = ['channels', 'chatbot', 'messages', 'products', 'gifts', 'qr', 'staff', 'lark-report'];
 const staffMutatingLabel = /^[+＋]?\s*(lưu|thêm|sửa|xóa|xoá|tạo|ngắt kết nối|kết nối|làm mới|tải ảnh khách|khôi phục|áp dụng|gửi|chạy ngay|chạy thử|dọn|đặt lại|bộ thẻ mặc định|bộ mặc định|hủy|huỷ|bật|tắt|×|↻)/i;
 const staffMutatingSelector = '[data-follow-up-remove], #follow-up-bridge-send, [data-channel-action], [data-delete], [data-remove]';
 const staffReadOnlyObservers = new Map();
@@ -917,6 +917,13 @@ const orderStageButtons = [...document.querySelectorAll('[data-order-stage]')];
 const settingsNav = document.querySelector('.nav[data-view="settings"]');
 const settingsSectionButtons = [...document.querySelectorAll('[data-settings-section]')];
 const settingsPanels = new Map([...document.querySelectorAll('[data-settings-panel]')].map(panel => [panel.dataset.settingsPanel, panel]));
+const larkReportForm = document.querySelector('#lark-report-form');
+const larkReportTitleInput = document.querySelector('#lark-report-title-input');
+const larkReportConversation = document.querySelector('#lark-report-conversation');
+const larkReportCount = document.querySelector('#lark-report-count');
+const larkReportStatus = document.querySelector('#lark-report-status');
+const larkReportClear = document.querySelector('#lark-report-clear');
+const larkReportSend = document.querySelector('#lark-report-send');
 const orderPanels = new Map([...document.querySelectorAll('[data-order-panel]')].map(panel => [panel.dataset.orderPanel, panel]));
 const orderImport = document.querySelector('#order-import');
 const orderSearch = document.querySelector('#order-search');
@@ -10266,6 +10273,51 @@ orderStageButtons.forEach(button => {
 settingsSectionButtons.forEach(button => {
   button.onclick = () => showSettingsSection(button.dataset.settingsSection);
 });
+
+function syncLarkReportCount() {
+  const length = larkReportConversation?.value.length || 0;
+  if (larkReportCount) larkReportCount.textContent = `${length.toLocaleString('vi-VN')} / 12.000 ký tự`;
+}
+
+larkReportConversation?.addEventListener('input', () => {
+  syncLarkReportCount();
+  if (larkReportStatus) larkReportStatus.textContent = '';
+});
+larkReportTitleInput?.addEventListener('input', () => { if (larkReportStatus) larkReportStatus.textContent = ''; });
+larkReportClear?.addEventListener('click', () => {
+  larkReportForm?.reset();
+  syncLarkReportCount();
+  if (larkReportStatus) larkReportStatus.textContent = '';
+  larkReportConversation?.focus();
+});
+larkReportForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const conversation = larkReportConversation?.value.trim() || '';
+  if (!conversation) {
+    showToast('Hãy dán đoạn hội thoại cần báo cáo.', 'warning');
+    larkReportConversation?.focus();
+    return;
+  }
+  if (larkReportSend) larkReportSend.disabled = true;
+  if (larkReportStatus) larkReportStatus.textContent = 'Đang gửi...';
+  try {
+    await readApiResponse(await fetch('/api/reports/lark/conversation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: larkReportTitleInput?.value || '', conversation })
+    }));
+    larkReportForm.reset();
+    syncLarkReportCount();
+    if (larkReportStatus) larkReportStatus.textContent = 'Đã gửi thành công.';
+    showToast('Đã gửi báo cáo hội thoại tới nhóm Lark.', 'success', 4500, { notify: true });
+  } catch (error) {
+    if (larkReportStatus) larkReportStatus.textContent = error.message || 'Chưa gửi được.';
+    showToast(error.message || 'Chưa gửi được báo cáo tới Lark.', 'error');
+  } finally {
+    if (larkReportSend) larkReportSend.disabled = false;
+  }
+});
+syncLarkReportCount();
 
 productCreateButton?.addEventListener('click', () => openProductDialog());
 productSearch?.addEventListener('input', renderProducts);

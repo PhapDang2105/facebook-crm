@@ -66,6 +66,7 @@
         <button class="settings-subnav-item" type="button" data-settings-section="gifts">Quà tặng</button>
         <button class="settings-subnav-item" type="button" data-settings-section="qr">Mã QR</button>
         <button class="settings-subnav-item" type="button" data-settings-section="staff">Nhân sự</button>
+        <button class="settings-subnav-item" type="button" data-settings-section="lark-report">Báo cáo Lark</button>
         <button class="settings-subnav-item" type="button" data-settings-section="audit" id="audit-subnav">Lịch sử</button>
       </div>
     </nav>
@@ -811,6 +812,38 @@
               <div id="staff-rows"><p class="channel-empty staff-empty">Đang tải nhân sự...</p></div>
             </div>
           </section>
+        </section>
+        <section class="settings-section-content hidden" data-settings-panel="lark-report" aria-labelledby="lark-report-title">
+          <form class="settings-card lark-report-card" id="lark-report-form">
+            <header class="settings-card-head">
+              <div>
+                <h1 id="lark-report-title">Báo cáo hội thoại qua Lark</h1>
+                <p>Dán nội dung cần báo cáo rồi gửi thẳng tới nhóm Lark đã cấu hình.</p>
+              </div>
+            </header>
+            <div class="lark-report-body">
+              <div class="lark-report-notice" role="note">
+                <strong>Lưu ý dữ liệu khách hàng</strong>
+                <span>Hãy kiểm tra nội dung trước khi gửi. Đoạn hội thoại sẽ được chuyển tới nhóm Lark và không được lưu trong Nhật ký CRM.</span>
+              </div>
+              <label class="lark-report-field">
+                <span>Tiêu đề <small>Không bắt buộc</small></span>
+                <input id="lark-report-title-input" type="text" maxlength="120" placeholder="Ví dụ: Khách phản ánh đơn hàng #1234">
+              </label>
+              <label class="lark-report-field">
+                <span>Đoạn hội thoại</span>
+                <textarea id="lark-report-conversation" rows="15" maxlength="12000" required placeholder="Dán đoạn hội thoại cần báo cáo vào đây..."></textarea>
+              </label>
+              <div class="lark-report-meta">
+                <span id="lark-report-count">0 / 12.000 ký tự</span>
+                <span id="lark-report-status" role="status" aria-live="polite"></span>
+              </div>
+            </div>
+            <footer class="lark-report-actions">
+              <button class="channel-cancel-button" id="lark-report-clear" type="button">Xóa nội dung</button>
+              <button class="settings-save-button" id="lark-report-send" type="submit">Gửi qua Lark</button>
+            </footer>
+          </form>
         </section>
         <section class="settings-section-content hidden" data-settings-panel="audit" aria-labelledby="audit-settings-title">
           <section class="settings-card audit-settings-card">

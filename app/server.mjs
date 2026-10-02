@@ -22,6 +22,7 @@ import { configureAddressAi } from './processing/address-ai.mjs';
 import { loadCampaignReport, normalizeRangeDays } from './campaigns.mjs';
 import { loadDashboard, normalizeDashboardDays } from './dashboard.mjs';
 import { loadReport, normalizeReportSection, reportCsvFileName, reportSectionCsv } from './reports.mjs';
+import { larkReportConfig, normalizeLarkConversationReport, sendLarkConversationReport, startLarkReportScheduler } from './lark-report.mjs';
 import { startAdInsightsSync, syncAdInsights } from './meta-ads.mjs';
 import { configureCampaignAi, generateCampaignInsights, readCampaignInsights } from './campaign-ai.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin, splitMessages } from './chatbot-templates.mjs';
@@ -2328,6 +2329,27 @@ const server = http.createServer(async (request, response) => {
       });
       return response.end(reportSectionCsv(report, section));
     }
+    // Báo cáo Lark thủ công: chủ shop dán một đoạn hội thoại trong Cài đặt → Báo cáo Lark.
+    // Webhook chỉ ở .env phía máy chủ; nội dung hội thoại không được ghi vào audit log.
+    if (request.method === 'POST' && url.pathname === '/api/reports/lark/conversation') {
+      if (!(await requireManager(request, response))) return;
+      const payload = await readBody(request, 32 * 1024);
+      const conversationReport = normalizeLarkConversationReport(payload);
+      const actor = await requestActor(request);
+      const { webhookUrl } = larkReportConfig();
+      if (!webhookUrl) return sendJson(response, 503, { error: 'Chưa cấu hình webhook báo cáo Lark trên máy chủ.' });
+      try {
+        await sendLarkConversationReport(conversationReport, { webhookUrl, reporter: actor.name });
+      } catch (error) {
+        console.warn(`Gửi đoạn hội thoại tới Lark lỗi: ${error.message}`);
+        return sendJson(response, 502, { error: 'Chưa gửi được báo cáo tới Lark. Vui lòng thử lại.' });
+      }
+      audit(request, 'report.lark_conversation', {
+        target: { type: 'lark-report', id: '', name: conversationReport.title || 'Đoạn hội thoại' },
+        summary: `Gửi đoạn hội thoại qua Lark (${conversationReport.conversation.length} ký tự).`
+      }, actor);
+      return sendJson(response, 200, { ok: true, sentAt: Date.now() });
+    }
     // Đồng bộ quảng cáo và Cố vấn AI (tốn lượt gọi Meta/Vertex): chỉ chủ shop / Quản trị (quyết định 01/10).
     if (request.method === 'POST' && url.pathname === '/api/campaigns/sync') {
       if (!(await requireManager(request, response))) return;
@@ -3435,6 +3457,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
   // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).
   startAdInsightsSync();
+  // Báo cáo Lark: mặc định 08:00 gửi số liệu ngày hôm trước; trạng thái chống gửi trùng nằm trong data/processed.
+  startLarkReportScheduler({ loadReport });
   // Thẻ "Đã mua hàng" trong CRM: gắn bù 30 giây sau khởi động rồi mỗi 5 phút.
   const purchaseLabelPass = () => runPurchaseLabelBackfill().catch(error => console.warn(`Gắn bù thẻ Đã mua hàng lỗi: ${error.message}`));
   setTimeout(purchaseLabelPass, 30 * 1000).unref?.();

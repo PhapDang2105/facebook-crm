@@ -47,7 +47,7 @@ import { listExports, readExportFile, recordExport } from './export-history.mjs'
 import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { countQrReferrals, countQrReferralsByDay, deleteQrCode, isValidQrCode, listQrScans, qrDayKey, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
 import { classifyUserAgent, iosMajorVersion, isLinkPreviewBot, messengerDestination, prefillMessageFor, prefillTemplateOrDefault, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
-import { createQrGreeter, createThreadReleaser, isCardScan } from './qr-greeting.mjs';
+import { createQrGreeter, createThreadReleaser, isCardScan, lastStaffMessageAt, resolveQrOfferTemplate } from './qr-greeting.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
@@ -762,22 +762,42 @@ function syncBotHook(changes, deps) {
  */
 async function qrOfferMessage(conversation) {
   const settings = await readChatbotSettings();
-  const template = settings.messageTemplates?.QR_OFFER || defaultMessageTemplates().QR_OFFER || '';
-  if (!template.trim()) return [];
+  // Mẫu để trống trong Cài đặt = không gửi (không rơi về mẫu đi kèm mã nguồn); mẫu còn câu giữ chỗ
+  // "SỬA NỘI DUNG ƯU ĐÃI…" bị chặn, không bao giờ tới khách (resolveQrOfferTemplate).
+  const resolved = resolveQrOfferTemplate({ stored: settings.messageTemplates?.QR_OFFER, fallback: defaultMessageTemplates().QR_OFFER });
+  if (resolved.skip) return resolved;
+  const template = resolved.template;
   // spin: chọn ngẫu nhiên trong {a|b}. applyHonorific: thay anh/chị theo giới tính.
   const filled = applyHonorific(spin(template), conversation.gender || '').replace(/\{title\}/gi, match => (match[1] === 'T' ? honorific(conversation.gender || '').replace(/^\p{L}/u, c => c.toUpperCase()) : honorific(conversation.gender || '')));
   // Thẻ ưu đãi là ẢNH (![](https://…) trong mẫu) kèm chữ; giữ đúng thứ tự ảnh/chữ như mẫu.
   return splitMessages(filled).parts;
 }
 
-// Bộ chào (app/qr-greeting.mjs): hẹn giờ, hủy khi Botcake đã chào, né bot tắt /
-// nhân viên đang nhận, cooldown theo hội thoại.
+// Bộ chào (app/qr-greeting.mjs): hẹn giờ, hủy khi Botcake đã chào, cooldown theo hội thoại. Bot tắt hay
+// hội thoại đã phân công vẫn gửi ưu đãi (chủ shop 02/10); chỉ né khi nhân viên vừa nhắn trong
+// QR_GREETING_STAFF_QUIET_MS (mặc định 10 phút; 0 = không né).
+const qrGreetingStaffQuietMs = (() => {
+  const raw = String(process.env.QR_GREETING_STAFF_QUIET_MS ?? '').trim();
+  const value = Number(raw);
+  return raw && Number.isFinite(value) && value >= 0 ? value : 10 * 60 * 1000;
+})();
 const qrGreeter = createQrGreeter({
   offerMessage: qrOfferMessage,
   send: (conversation, payload) => sendConversationMessage(conversation, payload),
   delayMs: qrGreetingDelayMs,
-  cooldownMs: qrGreetingCooldownMs
+  cooldownMs: qrGreetingCooldownMs,
+  staffQuietMs: qrGreetingStaffQuietMs,
+  staffLastMessageAt: async conversation => lastStaffMessageAt((await readMessagingStore()).messages?.[conversation.id])
 });
+// Deploy / khởi động lại (SIGTERM) trong lúc đang hẹn chào: gửi ngay các lượt đang hẹn (tối đa 5 giây) trước
+// khi thoát — timer chỉ nằm trong RAM. Đăng ký TRƯỚC installMessagingStoreShutdownFlush; lệnh thoát ở đó chờ
+// lời hứa này (xem cuối tệp).
+let qrGreetingShutdownFlush = null;
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    qrGreetingShutdownFlush ||= qrGreeter.flush({ timeoutMs: 5000 }).catch(error => console.error(`QR: lỗi khi gửi nốt lượt chào lúc tắt: ${error.message}`));
+  });
+}
 const scheduleQrGreetings = (changes, options) => qrGreeter.schedule(changes, options);
 // Page vận hành ở Pancake (chỉ nghe referral) mà sự kiện Meta về ở `messaging` chứ không phải `standby`:
 // Meta đang giao luồng cho app CRM (định tuyến liên kết m.me). Xong việc — đã gửi ưu đãi QR, hoặc không
@@ -3363,7 +3383,7 @@ process.on('uncaughtException', error => {
   process.exit(1);
 });
 // systemd restart/deploy gửi SIGTERM: ghi nốt kho hội thoại còn trong bộ nhớ (ghi gộp của đồng bộ) rồi mới thoát.
-installMessagingStoreShutdownFlush();
+installMessagingStoreShutdownFlush({ exit: code => Promise.resolve(qrGreetingShutdownFlush).finally(() => process.exit(code)) });
 server.on('clientError', (error, socket) => {
   if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
   else socket.destroy();

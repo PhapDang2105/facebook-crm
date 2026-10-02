@@ -120,15 +120,15 @@ test('bộ chào gọi afterGreeting SAU khi gửi ưu đãi — đúng một l�
   assert.deepEqual(plain.finished, []);
 });
 
-test('afterGreeting vẫn chạy khi CRM không chào (bot tắt, nhân viên đang nhận, vừa chào, mẫu trống, gửi lỗi, hẹn bị hủy) — CRM không được giữ luồng mãi', async () => {
+// Sửa 02/10: "bot tắt / nhân viên đang nhận" không còn là lý do bỏ chào (quyết định chủ shop) — thay bằng
+// "nhân viên vừa nhắn"; lượt bị bỏ vì lý do đó vẫn phải trả luồng.
+test('afterGreeting vẫn chạy khi CRM không chào (nhân viên vừa nhắn, vừa chào, mẫu trống, gửi lỗi, hẹn bị hủy) — CRM không được giữ luồng mãi', async () => {
+  const busy = greeter({ staffLastMessageAt: async () => Date.now() - 60_000 });
+  busy.schedule([scan(conversation('103549382215599:nv'))], { afterGreeting: busy.afterGreeting });
+  await pause(80);
+  assert.deepEqual(busy.finished.map(item => item.id), ['103549382215599:nv']);
+  assert.equal(busy.sent.length, 0);
   const g = greeter();
-  g.schedule([
-    scan(conversation('103549382215599:tat', { botEnabled: false })),
-    scan(conversation('103549382215599:nv', { pancakeAssigned: true }))
-  ], { afterGreeting: g.afterGreeting });
-  await pause(5);
-  assert.deepEqual(g.finished.map(item => item.id), ['103549382215599:tat', '103549382215599:nv']);
-  assert.equal(g.sent.length, 0);
   // Quét lại trong thời gian chờ: không chào lại nhưng vẫn trả luồng cho lượt đó.
   const again = conversation('103549382215599:lai');
   g.schedule([scan(again)], { afterGreeting: g.afterGreeting });

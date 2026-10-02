@@ -74,18 +74,29 @@ export function pancakeRef(code) {
   return Buffer.from(`pancake_utm_source=${code}`).toString('base64url');
 }
 
-/** Mã lô từ tham số ref: dạng thô (`tmdt-01`) hoặc dạng Pancake mã hoá; không phải hai dạng đó thì rỗng. */
+/**
+ * Mã lô từ tham số ref: dạng thô (`tmdt-01`) hoặc dạng Pancake mã hoá; không phải hai dạng đó thì rỗng.
+ * Dễ dãi với cách viết: `TMDT-01` / `Tmdt-01` (link gõ tay, công cụ tự viết hoa) và `ref=tmdt-01` (dán cả
+ * tên tham số) đều ra `tmdt-01` — trước đây rơi im lặng. Mã có thật hay không vẫn do kho QR quyết định.
+ */
 export function qrCodeFromRef(ref) {
-  const raw = String(ref || '').trim();
+  const raw = String(ref || '').trim().replace(/^ref=/i, '').trim();
   if (!raw) return '';
   if (codePattern.test(raw)) return raw;
+  let decoded = '';
   try {
-    const decoded = Buffer.from(raw, 'base64url').toString('utf8');
-    const match = decoded.match(/^pancake_utm_source=([a-z0-9][a-z0-9-]{0,39})$/);
-    return match ? match[1] : '';
+    decoded = Buffer.from(raw, 'base64url').toString('utf8');
   } catch {
-    return '';
+    decoded = '';
   }
+  const match = decoded.match(/^pancake_utm_source=([a-z0-9][a-z0-9-]{0,39})$/i);
+  if (match) return match[1].toLowerCase();
+  // Có chữ hoa: hoặc là mã viết hoa, hoặc là một chuỗi base64 khác (ref của công cụ khác). Chuỗi base64 thật
+  // giải ra chữ đọc được và mã hoá lại đúng như cũ → không phải mã thẻ; còn lại hạ chữ thường rồi xét.
+  const lowered = raw.toLowerCase();
+  if (!codePattern.test(lowered)) return '';
+  const readableBase64 = /^[\x20-\x7e]+$/.test(decoded) && Buffer.from(decoded, 'utf8').toString('base64url') === raw;
+  return readableBase64 ? '' : lowered;
 }
 
 /**

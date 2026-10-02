@@ -91,14 +91,20 @@ test('Botcake chào trước, referral Meta về sau: cooldown chặn, không ch
   assert.equal(g.sent.length, 0);
 });
 
-test('bot tắt hoặc nhân viên đang nhận trong Pancake: không chen tin ưu đãi', async () => {
+// Sửa 02/10 theo quyết định chủ shop: trước đây test này khẳng định "bot tắt / nhân viên đang nhận → không
+// chào". Nay vẫn gửi ưu đãi (bot không bật lại); chỉ bỏ qua khi nhân viên vừa nhắn trong 10 phút — xem
+// tests/fix-meta-qr-staff-quiet.test.mjs.
+test('bot tắt hoặc nhân viên đang nhận trong Pancake: VẪN gửi ưu đãi, trạng thái bot giữ nguyên', async () => {
   const g = greeter();
-  g.schedule([metaReferral(conversation('1:e', { botEnabled: false })), metaReferral(conversation('1:f', { pancakeAssigned: true }))]);
-  assert.equal(g.isPending('1:e'), false);
-  assert.equal(g.isPending('1:f'), false);
+  const off = conversation('1:e', { botEnabled: false });
+  const assigned = conversation('1:f', { pancakeAssigned: true });
+  g.schedule([metaReferral(off), metaReferral(assigned)]);
+  assert.equal(g.isPending('1:e'), true);
+  assert.equal(g.isPending('1:f'), true);
   await pause(120);
-  assert.equal(g.sent.length, 0);
-  assert.ok(g.logs.some(line => /bot tắt/.test(line)) && g.logs.some(line => /nhân viên đang nhận/.test(line)));
+  assert.deepEqual(g.sent.map(item => item.id).sort(), ['1:e', '1:f']);
+  assert.equal(off.botEnabled, false, 'không bật lại bot');
+  assert.ok(!g.logs.some(line => /bot tắt|nhân viên đang nhận/.test(line)));
 });
 
 test('mã lạ, thiếu psid: bỏ qua; mẫu QR_OFFER trống: không gửi và không giữ cooldown; gửi lỗi: thả cooldown để lần sau thử lại', async () => {

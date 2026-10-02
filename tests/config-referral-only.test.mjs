@@ -9,7 +9,8 @@ test('Page vận hành ở Pancake chỉ đăng ký referral và postback; Page 
   assert.equal(isReferralOnlyPage('103549382215599'), true);
   assert.equal(isReferralOnlyPage(42), true, 'so sánh theo chuỗi');
   assert.equal(isReferralOnlyPage('110068281327307'), false);
-  assert.equal(subscriptionFieldsFor('103549382215599'), 'messaging_postbacks,messaging_referrals');
+  assert.equal(subscriptionFieldsFor('103549382215599'), 'messaging_postbacks,messaging_referrals,standby');
+  assert.equal(metaConfig.referralOnlyFallbackFields, 'messaging_postbacks,messaging_referrals');
   assert.equal(subscriptionFieldsFor('110068281327307'), metaConfig.subscribedFields);
   assert.match(metaConfig.subscribedFields, /messaging_referrals/);
   assert.doesNotMatch(metaConfig.referralOnlyFields, /\bmessages\b/, 'không được nhận tin khách hai lần');

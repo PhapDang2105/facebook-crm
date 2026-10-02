@@ -2080,6 +2080,18 @@ const server = http.createServer(async (request, response) => {
             channel.subscriptionError = '';
           } catch (subscribeError) {
             channel.subscriptionError = subscribeError.message;
+            // Page chỉ nghe referral: Meta không nhận bộ trường có `standby` thì đăng ký lại bộ cũ để vẫn
+            // nhận referral của khách cũ; giữ lời báo lỗi để biết standby chưa bật được.
+            if (isReferralOnlyPage(pageId) && metaConfig.referralOnlyFallbackFields !== subscriptionFieldsFor(pageId)) {
+              try {
+                await subscribePageToApp(pageId, pageAccessToken, metaConfig.referralOnlyFallbackFields);
+                subscription = await fetchPageSubscription(pageId, pageAccessToken);
+                channel.subscriptionError = `Chưa bật được kênh standby (khách mới quét thẻ chưa được chào chủ động): ${subscribeError.message}`;
+                console.error(`Meta: Page ${pageId} không đăng ký được trường standby, đã đăng ký lại bộ cũ: ${subscribeError.message}`);
+              } catch (fallbackError) {
+                channel.subscriptionError = fallbackError.message;
+              }
+            }
           }
         } else {
           channel.subscriptionError = '';

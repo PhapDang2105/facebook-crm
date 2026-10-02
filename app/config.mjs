@@ -89,7 +89,12 @@ export const metaConfig = {
   // nối thêm app Meta của CRM — và chỉ đăng ký hai trường này, kẻo mỗi tin khách
   // về hộp thư hai lần (Meta lẫn Pancake) và bot trả lời hai lần.
   referralOnlyPageIds: String(process.env.META_REFERRAL_ONLY_PAGES || '').split(',').map(value => value.trim()).filter(Boolean),
-  referralOnlyFields: 'messaging_postbacks,messaging_referrals'
+  // `standby`: Pancake v2 là app nhận mặc định của Page nên khi khách MỚI (chưa từng nhắn Page) bấm nút
+  // "Bắt đầu" sau khi quét thẻ, postback mang ref đi về app giữ luồng; app CRM chỉ thấy nó ở kênh standby.
+  // Khách cũ thì Meta gửi messaging_referrals thẳng cho CRM (đã chạy 02/10).
+  referralOnlyFields: 'messaging_postbacks,messaging_referrals,standby',
+  // Meta từ chối trường standby (bản API/app không hỗ trợ) thì đăng ký lại bộ cũ, kẻo mất luôn referral.
+  referralOnlyFallbackFields: 'messaging_postbacks,messaging_referrals'
 };
 
 export function isReferralOnlyPage(pageId) {

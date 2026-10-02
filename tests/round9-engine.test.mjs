@@ -424,7 +424,9 @@ test('5d. mô-đun tầng lỗi / thiếu → engine không lỗi; gateCheckWith
 });
 
 test('5e. rào cứng khi on (màu/số túi, khiếu nại, đơn gần đây + SHIPPING_POLICY/WELCOME/DELIVERY_DELAY, WELCOME loại hẳn), pWithin/subGroup/ANSWER, cascadeThreshold, canary', async () => {
-  assert.deepEqual([normalizeChatbotSettings({ enabled: true }).cascadeThreshold, normalizeChatbotSettings({ enabled: true }).cascadeCanary], [0.8, 100]);
+  // R13 (gộp, 02/10): mặc định cascadeThreshold đổi 0,8 → 0,85 theo báo cáo mô hình 3.F (khớp CASCADE_TEMPLATE_THRESHOLD của
+  // engine) — dòng này trước khẳng định mặc định cũ 0,8 nên sửa số; các ca bên dưới tự truyền ngưỡng nên không đổi.
+  assert.deepEqual([normalizeChatbotSettings({ enabled: true }).cascadeThreshold, normalizeChatbotSettings({ enabled: true }).cascadeCanary], [0.85, 100]);
   assert.deepEqual([normalizeChatbotSettings({ enabled: true, cascadeThreshold: 0.3, cascadeCanary: 250 }).cascadeThreshold, normalizeChatbotSettings({ enabled: true, cascadeThreshold: 0.3, cascadeCanary: 250 }).cascadeCanary], [0.5, 100]);
   assert.equal(normalizeChatbotSettings({ enabled: true, cascadeCanary: 0 }).cascadeCanary, 0);
   const on = (conversation, text, cascade, extra = {}, reply = llmReply('BAG_COMPARISON_XANH_VANG')) => run({ botLastTemplateId: 'GENERAL_INFO', botLastReplyAt: now() - 60000, ...conversation }, text, {

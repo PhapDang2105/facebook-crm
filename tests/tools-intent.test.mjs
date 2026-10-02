@@ -443,7 +443,11 @@ test('build-dataset --from-decision-log (vòng 12): prevBot là MÃ MẪU → la
     assert.deepEqual([already.label, already.prevBot, already.lastTemplate, already.final], ['PRICE_QUOTE', '', 'PRICE_QUOTE', 'REPLY_ALREADY_SENT'], 'nhãn = chosen khi final là mẫu gác; không đưa mã mẫu làm câu bot');
     assert.equal(update.label, 'ORDER_UPDATED', 'mã engine ORDER_UPDATE → mã mẫu');
     assert.equal(decisionLabelOf({ final: 'ORDER_ADDRESS_REMIND', chosen: 'SHIPPING_POLICY' }), 'SHIPPING_POLICY');
-    assert.equal(decisionLabelOf({ final: 'GENERAL_INFO', chosen: 'PRICE_QUOTE' }), 'GENERAL_INFO', 'hậu xử lý thường: nhãn = final');
+    // R13 (sửa test cũ — test từng khẳng định nhãn = final): có `chosen` thì nhãn LUÔN là `chosen`, cùng quy ước engine chấm
+    // ✓/✗ mô hình nhỏ (lệch 43/611 dòng hộp thư 30/09–02/10; 21 dòng thành LIVESTREAM_COMMENT rồi bị train-intent loại).
+    assert.equal(decisionLabelOf({ final: 'GENERAL_INFO', chosen: 'PRICE_QUOTE' }), 'PRICE_QUOTE', 'có chosen: nhãn = chosen (mẫu trước hậu xử lý)');
+    assert.equal(decisionLabelOf({ final: 'LIVESTREAM_COMMENT', chosen: 'GENERAL_INFO' }), 'GENERAL_INFO');
+    assert.equal(decisionLabelOf({ final: 'GENERAL_INFO' }), 'GENERAL_INFO', 'bản ghi cũ không có chosen: nhãn = final');
     assert.ok(Number.isNaN(parseSinceDate('28/09/2026')) && Number.isNaN(parseSinceDate('2026-02-30')));
     assert.equal(parseSinceDate('2026-09-28'), Date.parse('2026-09-28T00:00:00+07:00'));
     // CLI: --since sai / thiếu thư mục → lỗi rõ, mã 1; --since mặc định in ra.

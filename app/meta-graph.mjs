@@ -20,18 +20,41 @@ export async function metaRequest(pathname, options = {}) {
     else query.appsecret_proof = proof;
   }
   Object.entries(query).forEach(([key, value]) => endpoint.searchParams.set(key, value));
-  const response = await fetch(endpoint, {
+  const response = await graphFetch(endpoint, {
     method,
     headers: body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
     body: body ? new URLSearchParams(body) : undefined
-  });
+  }, options.timeoutMs);
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.error) {
-    const error = new Error(shortenMetaError(payload.error?.message) || `Meta trả về lỗi ${response.status}.`);
-    error.statusCode = response.status;
+  if (!response.ok || payload.error) throw graphError(payload.error?.message, response.status, `Meta trả về lỗi ${response.status}.`);
+  return payload;
+}
+
+// R13 (T-6b): Graph treo là treo luôn lượt gửi tin / đồng bộ Meta (fetch không có hạn chờ). 30 giây như meta-ads.mjs.
+export const GRAPH_TIMEOUT_MS = 30 * 1000;
+
+async function graphFetch(endpoint, init, timeoutMs = GRAPH_TIMEOUT_MS) {
+  try {
+    return await fetch(endpoint, { ...init, signal: AbortSignal.timeout(Math.max(1, Number(timeoutMs) || GRAPH_TIMEOUT_MS)) });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw Object.assign(new Error(`Facebook (Meta) không phản hồi trong ${Math.round((Number(timeoutMs) || GRAPH_TIMEOUT_MS) / 1000)} giây. Vui lòng thử lại.`), { statusCode: 504, timeout: true });
+    }
     throw error;
   }
-  return payload;
+}
+
+/**
+ * R13 (L8): lỗi Graph từng ra giao diện nguyên văn tiếng Anh ("(#10) This message is sent outside of allowed
+ * window…"). Thêm lời dẫn tiếng Việt, GIỮ nguyên văn phía sau (nhân viên/Quản trị vẫn cần mã lỗi để xử lý);
+ * `graphMessage` là nguyên văn cho mã cần so khớp.
+ */
+function graphError(message, status, fallback) {
+  const original = shortenMetaError(message);
+  const error = new Error(original ? `Facebook (Meta) từ chối yêu cầu: ${original}` : fallback);
+  error.statusCode = status;
+  error.graphMessage = original;
+  return error;
 }
 
 /** Meta lists every accepted value on a bad field, which floods the UI. */
@@ -220,16 +243,12 @@ export async function sendPageAttachment({ pageId, psid, attachment, pageAccessT
   form.set('access_token', pageAccessToken);
   form.set('appsecret_proof', appSecretProof(pageAccessToken));
   form.set('filedata', new Blob([file.buffer], { type: file.mimeType }), attachment.name || 'tep-dinh-kem');
-  const response = await fetch(`https://graph.facebook.com/${metaConfig.graphVersion}/${pageId}/messages`, {
+  const response = await graphFetch(`https://graph.facebook.com/${metaConfig.graphVersion}/${pageId}/messages`, {
     method: 'POST',
     body: form
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.error) {
-    const error = new Error(payload.error?.message || `Meta trả về lỗi ${response.status} khi gửi tệp.`);
-    error.statusCode = response.status;
-    throw error;
-  }
+  if (!response.ok || payload.error) throw graphError(payload.error?.message, response.status, `Meta trả về lỗi ${response.status} khi gửi tệp.`);
   return payload;
 }
 

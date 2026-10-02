@@ -325,10 +325,16 @@ test('form nối ba cấp chuẩn sau phần khách gõ tay có lặp tỉnh: đ
   assert.deepEqual(names(resolveAddress('Số 1 đinh Tiên Hoàng Nam Vĩnh Yên phường Vĩnh Phúc tỉnh Phú Thọ, Phường Khai Quang, Thành phố Vĩnh Yên')), ['Vĩnh Phúc', 'Thành phố Vĩnh Yên', 'Phường Khai Quang']);
   // Tên phường trùng tên đường trong cùng địa chỉ: tên đường giữ nguyên.
   assert.equal(resolveAddress('12 Lê Lợi, Phường Lê Lợi, Quận Ngô Quyền, Hải Phòng').street, '12 Lê Lợi');
-  // Tỉnh lặp lại sớm không bị đọc thành thành phố cùng tên: hai quận cùng có Phường Đông Sơn thì mơ hồ.
+  // Tỉnh lặp lại sớm không bị đọc thành thành phố cùng tên (quận vẫn trống).
+  // R13 (K10) — SỬA test cũ: trước đây khẳng định `ambiguous.level === 'district'` (hai quận cùng có Phường Đông Sơn
+  // cũ) khiến bot hỏi khách "quận nào". "Đông Sơn" là phường MỚI của Thanh Hóa và khách không ghi quận → địa chỉ theo
+  // đơn vị mới: giữ nguyên chữ khách (postMerger), không còn mơ hồ. Ca thật đơn …12e33f, POS ghi "Phường Đông Sơn, Thanh Hóa".
   const dongSon = resolveAddress('Tdp Đông hoàng phường đông sơn tỉnh Thanh Hoá, Phường Đông Sơn, Thanh Hóa');
   assert.equal(dongSon.district, null);
-  assert.equal(dongSon.ambiguous.level, 'district');
+  assert.equal(dongSon.ward, null);
+  assert.equal(dongSon.ambiguous, null);
+  assert.equal(dongSon.postMerger, true);
+  assert.equal(dongSon.newWard, 'dong son');
   // Có dấu ở tỉnh vẫn đủ để phân biệt Sa Pa với Sa Pả sau khi tỉnh đã được che.
   assert.deepEqual(names(resolveAddress('Sa Pa, Sa Pa, Lào Cai')), ['Lào Cai', 'Huyện Sa Pa', 'Phường Sa Pa']);
 });

@@ -16,6 +16,8 @@ import { extractVietnamesePhone } from './customer-info.mjs';
 import { getCatalogProducts } from './catalog.mjs';
 import { foldVietnamese } from './auto-label.mjs';
 import { core, infoRules } from './rule-intent.mjs';
+import { looksLikeAddressMessage, maskPlaceGia } from './order-flow.mjs';
+import { isBasketStep } from './pending-order.mjs';
 
 const HOUR = 60 * 60 * 1000;
 export const TRIAL_SCENARIO_NOTE = 'Ưu đãi dùng thử bám đuổi (1 túi miễn phí vận chuyển)';
@@ -92,7 +94,8 @@ function bagPicks(raw) {
   const folded = foldVietnamese(String(raw || '')
     .replace(/n[âa]u\s+(v[ịi]\s+)?ca\s*cao/giu, 'nâu').replace(/ca\s+cao/giu, 'cacao')
     .replace(/s[ôo]\s*-?\s*c[ôo]\s*-?\s*la|socola|chocolate|choco\b/giu, 'nâu'))
-    .replace(/xanh (duong|la cay|mint|min|bac ha|bien|ngoc|da troi|nhat)|dau xanh/g, ' ').replace(/\+?\d{9,11}/g, ' ');
+    // R13: "Hoà Vang" (huyện ở Đà Nẵng) không phải Túi Vàng ("102 kha vạn cân, hoà châu, hoà vang, đà nẵng").
+    .replace(/xanh (duong|la cay|mint|min|bac ha|bien|ngoc|da troi|nhat)|dau xanh|\bhoa vang\b/g, ' ').replace(/\+?\d{9,11}/g, ' ');
   const picks = new Map();
   let explicitQuantity = false;
   for (const match of folded.matchAll(/(?:\b(\d{1,2})\s*(?:tui|goi|bich|x)?\s*)?\b(xanh|vang|nau|cacao)\b(?:\s*(?:x\s*)?(\d{1,2})\b)?/g)) {
@@ -116,6 +119,15 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   if (type !== 'text') return { delegate: true };
   const raw = String(text || '').trim();
   const s = core(raw);
+  // R13 (inbox1 A1): địa chỉ có "Gia Lộc / Gia Lai / Gia Lâm / Tổng 2 thôn…" bỏ dấu trùng "giá"/"tổng" → từng ra TRIAL_PRICE
+  // thay vì chốt đơn. (1) "gia" là địa danh (trước Lai/Lâm/Lộc…, hay ngay sau huyện/xã/tỉnh) không tính là hỏi giá;
+  // (2) tin là ĐỊA CHỈ (có cấp hành chính / đọc ra quận-huyện + tỉnh; đang ở bước đơn thì chỉ cần tỉnh) và không có chữ
+  // hỏi rõ ("bao nhiêu", "bn", "giá" còn dấu, "?") → không trả lời giá/khuyến mãi, để luồng đơn đọc địa chỉ (delegate).
+  const sPrice = core(maskPlaceGia(raw));
+  const atOrderStep = Boolean(trial?.stage === 'chosen' && trial.bag) || isBasketStep(lastTemplateId);
+  const addressMessage = looksLikeAddressMessage(raw, { orderStep: atOrderStep });
+  const asksPrice = PRICE.test(sPrice) && !addressMessage;
+  const asksDiscount = DISCOUNT.test(s) && !addressMessage;
   // Khách quan tâm gói nhỏ / combo 10 gói / sản phẩm khác (ưu đãi chỉ cho túi lớn),
   // hay đang trả lời câu hỏi về gói nhỏ bot vừa hỏi: sang luồng thường.
   if (/\b(goi nho|chia goi|combo 10|hop 10|10 goi|tung bua|tropical|xanh mint|xanh bac ha|xanh bien|xanh ngoc|xanh duong|xanh min|xanh da troi|bot nghe|nghe lanh|hat an lanh|hu hat)\b/.test(s) || lastTemplateId === 'PACKAGING_INFO') {
@@ -157,8 +169,8 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   // chữ "combo" nằm trong DISCOUNT, mà mẫu mời ghi "Combo 2 Túi bất kỳ" nên khách trả lời đúng chữ đó là chọn,
   // không phải hỏi. "combo 2" không nêu màu vẫn là 2 túi. Từ 3 túi: đơn thường (bảng quà chung đã có bộ bát + muỗng).
   const total = quantity || looseQuantity || (/\bcombo\s*2\b/.test(s) ? 2 : 0);
-  if (!asks && !PRICE.test(s) && (total === 2 || (picks.size === 2 && quantity === 2))) return { exit: 'combo2', patch: { stage: 'converted', combo2: true, endedAt: now, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) } };
-  if (DISCOUNT.test(s) || PRICE.test(s)) return { value: { template_id: 'TRIAL_PRICE', values: { bags } } };
+  if (!asks && !asksPrice && (total === 2 || (picks.size === 2 && quantity === 2))) return { exit: 'combo2', patch: { stage: 'converted', combo2: true, endedAt: now, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) } };
+  if (asksDiscount || asksPrice) return { value: { template_id: 'TRIAL_PRICE', values: { bags } } };
   if (picks.size >= 2 || quantity >= 2 || looseQuantity >= 2) return { exit: 'converted', patch: { stage: 'converted', endedAt: now } };
   if (picks.size === 1 && !asks) {
     const product = bagProduct([...picks.keys()][0]);
@@ -168,13 +180,13 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
     if (trial?.combo2 && !explicitQuantity) return { delegate: true };
     const patch = { stage: 'chosen', bag: product.name, lockedUntil: Math.max(Number(trial?.until) || 0, now + 24 * HOUR) };
     // Kèm SĐT / địa chỉ: mô hình đọc địa chỉ; giá vẫn là 1 túi miễn ship.
-    if (phone || longText) return { delegate: true, patch };
+    if (phone || longText || addressMessage) return { delegate: true, patch };
     return { value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: '1' }, patch };
   }
   // SĐT (± địa chỉ) khi đã chọn túi: bước đơn (SĐT trơn thì bộ soạn đơn tự đọc); chưa
   // chọn túi mà đã gửi SĐT/địa chỉ: mô hình đọc, giữ SĐT cho bước sau.
   if (phone && chosen && raw.replace(/[\s.+()-]/g, '').replace(/^\D*/, '').length <= 13) return { value: orderStep };
-  if (phone || (chosen && longText)) return { delegate: true };
+  if (phone || (chosen && longText) || addressMessage) return { delegate: true };
   // Đồng ý / lời đáp ngắn ("ok", "dạ", emoji, "1"): mời chọn túi, hay bước đơn nếu đã chọn.
   const shortAck = /^[\s.…!?1👍❤️🥰😍]*$/u.test(raw) || /^(da|vang|ok|oke|oki|okie|okay|u|uh|um|ua|uk|ukm)( (a|ah|em|e|shop|chi|c|nha|nhe))*$/.test(s);
   // Đồng ý chỉ với câu ngắn (≤ 25 ký tự): "để mình hỏi chồng đã" (có "đã") không phải đồng ý.

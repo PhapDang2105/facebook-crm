@@ -9,10 +9,9 @@
 // Thay đổi do chính CRM đẩy sang (nhân viên sửa trong CRM → PUT POS, bổ sung dòng quà
 // sau khi tạo) thì chỉ ghi dấu mới, không chép ngược.
 import { createHash } from 'node:crypto';
-import { findProductBySku } from './processing/catalog.mjs';
+import { findProductBySku, getGifts } from './processing/catalog.mjs';
 import { toLocalPhone } from './processing/customer-info.mjs';
-import { resolvedAddressFields } from './processing/locations.mjs';
-import { recordOrderHistory, staffEditedAt, staffEditedGroups } from './order-edits.mjs';
+import { assignResolvedAddress, recordOrderHistory, staffEditedAt, staffEditedGroups } from './order-edits.mjs';
 import { posComboBasket } from './pos-orders.mjs';
 import { posOrderToPayload } from './pos-sync.mjs';
 import { matchPosStatus } from './pos-status.mjs';
@@ -42,10 +41,113 @@ export function posPaidTotal(posOrder = {}) {
   return Math.max(0, money(posOrder.total_price) - money(posOrder.total_discount) + shipping);
 }
 
+/** Tiền POS THỰC THU của đơn: thu hộ + đã chuyển khoản. 0 = POS không ghi tiền thu (nơi gọi giữ cách tính cũ). */
+export function posCollectedTotal(posOrder = {}) {
+  return money(posOrder?.cod) + money(posOrder?.transfer_money);
+}
+
+// R13 (C1): nhân viên thêm quà vào đơn POS như một DÒNG HÀNG THƯỜNG có giá (bát 23k, muỗng 17k, quạt + bát live 50k)
+// thay vì dòng tặng (is_bonus_product) → CRM cộng giá quà vào tổng đơn (6/33 đơn POS 01–02/10, lệch +226.000đ).
+// Mã quà: các mã cố định dưới đây + mọi SKU trong bảng quà (Cài đặt → Quà tặng) KHÔNG phải sản phẩm bán
+// (Túi Vàng/Túi Nâu tặng kèm là sản phẩm danh mục: dòng thường của nó vẫn là hàng khách mua).
+const POS_GIFT_SKUS = new Set(['BGD', 'M', 'MUONG', 'QUAT', 'QUA', 'QUA-TANG-LIVE']);
+
+/** SKU này là mã quà (không phải hàng bán)? */
+export function isPosGiftSku(sku) {
+  const code = String(sku || '').trim().toUpperCase();
+  if (!code) return false;
+  if (POS_GIFT_SKUS.has(code)) return true;
+  if (findProductBySku(code)) return false;
+  return (getGifts() || []).some(gift => String(gift?.sku || '').trim().toUpperCase() === code);
+}
+
+/** Dòng POS là QUÀ: dòng tặng (is_bonus_product) hoặc dòng thường mang mã quà. */
+export function isPosGiftItem(item) {
+  return Boolean(item?.is_bonus_product) || isPosGiftSku(item?.variation_info?.display_id);
+}
+
+/** Các dòng HÀNG của đơn POS (bỏ quà). Đơn chỉ toàn dòng mã quà (gửi bù quà…) thì giữ cách cũ: mọi dòng không phải dòng tặng. */
+export function posGoodsItems(posOrder = {}) {
+  const items = Array.isArray(posOrder?.items) ? posOrder.items : [];
+  const goods = items.filter(item => !isPosGiftItem(item));
+  return goods.length ? goods : items.filter(item => !item?.is_bonus_product);
+}
+
+/** Các dòng QUÀ của đơn POS (phần còn lại của posGoodsItems). */
+export function posGiftItems(posOrder = {}) {
+  const goods = new Set(posGoodsItems(posOrder));
+  return (Array.isArray(posOrder?.items) ? posOrder.items : []).filter(item => !goods.has(item));
+}
+
+/**
+ * R13 (C1 + T4): tổng của đơn kéo từ POS = tiền POS thực thu (thu hộ + chuyển khoản) khi POS có ghi; giảm giá
+ * tính lại cho khớp (tiền hàng + ship − tổng); tiền đã chuyển khoản ghi vào `prepaid`. POS không ghi tiền thu
+ * (cod = 0, không chuyển khoản) thì giữ nguyên tổng nơi gọi đã tính. Trả true nếu tổng đổi.
+ */
+export function applyPosCollectedTotal(order, posOrder = {}) {
+  const paid = posCollectedTotal(posOrder);
+  if (!order || !(paid > 0)) return false;
+  const before = money(order.total);
+  const subtotal = (Array.isArray(order.products) ? order.products : []).reduce((sum, item) => sum + money(item?.price) * Math.max(1, Math.round(Number(item?.quantity) || 1)), 0);
+  order.total = paid;
+  order.discount = Math.max(0, subtotal + (order.freeShipping ? 0 : money(order.shippingFee)) - paid);
+  const transfer = money(posOrder.transfer_money);
+  if (transfer > 0) order.prepaid = transfer;
+  return before !== paid;
+}
+
+const quantityOf = item => Math.max(1, Math.round(Number(item?.quantity) || 1));
+
+/** Tổng theo CÁCH CŨ (trước R13): Σ giá bán lẻ × SL của mọi dòng không phải dòng tặng + ship − giảm giá. */
+export function posLegacyLineTotal(posOrder = {}) {
+  const goods = (Array.isArray(posOrder?.items) ? posOrder.items : []).filter(item => !item?.is_bonus_product)
+    .reduce((sum, item) => sum + money(item?.variation_info?.retail_price) * quantityOf(item), 0);
+  const freeShipping = Boolean(posOrder.is_free_shipping) || !Number(posOrder.shipping_fee);
+  return Math.max(0, goods + (freeShipping ? 0 : money(posOrder.shipping_fee)) - money(posOrder.total_discount));
+}
+
+/**
+ * Hoàn tất tiền + quà cho đơn vừa dựng từ một đơn POS gắn hội thoại (importPosConversationOrders):
+ * - POS có tiền thu → tổng = tiền thực thu (applyPosCollectedTotal);
+ * - POS không ghi tiền thu → giữ đúng tổng cách cũ (kể cả giá dòng mã quà), chỉ đổi cách HIỂN THỊ dòng quà;
+ * - dòng quà (dòng tặng + dòng mã quà) → `gift` (chữ) và `giftItems` (mã + SL cho file kho).
+ */
+export function finalizePosImportedOrder(order, posOrder = {}) {
+  if (!order) return order;
+  if (!applyPosCollectedTotal(order, posOrder) && !(posCollectedTotal(posOrder) > 0)) order.total = posLegacyLineTotal(posOrder);
+  const gifts = posGiftItems(posOrder);
+  order.gift = gifts.map(item => String(item?.variation_info?.name || item?.variation_info?.display_id || '').trim()).filter(Boolean).join(' + ').slice(0, 300);
+  order.giftItems = posGiftLines(posOrder).giftItems;
+  return order;
+}
+
+/**
+ * Đơn POS đã kéo về TRƯỚC bản sửa R13 còn mang tổng tính theo cách cũ (cộng cả giá quà): chỉnh về tiền POS thực thu.
+ * Chỉ chỉnh khi: đơn nguồn POS, POS có tiền thu, tổng đang lưu đúng bằng tổng cách cũ (chưa ai/đồng bộ nào sửa),
+ * nhân viên chưa sửa giỏ/tiền trong CRM. Ghi lịch sử đơn. Trả true nếu đã chỉnh.
+ */
+export function repairPosImportedTotal(existing, fresh, posOrder = {}, { now = Date.now() } = {}) {
+  if (!existing || !fresh || String(existing.source || '') !== 'POS') return false;
+  const paid = posCollectedTotal(posOrder);
+  if (!(paid > 0) || money(existing.total) === paid) return false;
+  if (money(existing.total) !== posLegacyLineTotal(posOrder)) return false;
+  if (staffEditedGroups(existing).has('basket')) return false;
+  const before = money(existing.total);
+  existing.products = fresh.products;
+  existing.gift = fresh.gift;
+  existing.giftItems = fresh.giftItems;
+  existing.total = fresh.total;
+  existing.discount = fresh.discount;
+  if (fresh.prepaid) existing.prepaid = fresh.prepaid;
+  existing.updatedAt = now;
+  recordOrderHistory(existing, { by: POS_ACTOR, action: 'order.update', summary: `Tổng đơn chỉnh theo tiền thu trên POS: ${moneyText(before)} → ${moneyText(paid)} (quà không tính vào tiền hàng).`, at: now });
+  return true;
+}
+
 /** Dòng hàng (không tính quà) của đơn POS → dòng sản phẩm CRM; mã combo POS tách lại thành túi lẻ theo danh mục. */
 export function posItemsToProducts(posOrder = {}) {
   const products = [];
-  for (const item of Array.isArray(posOrder.items) ? posOrder.items : []) {
+  for (const item of posGoodsItems(posOrder)) {
     if (item?.is_bonus_product) continue;
     const info = item?.variation_info || {};
     const sku = String(info.display_id || '').trim().toUpperCase();
@@ -66,8 +168,8 @@ export function posItemsToProducts(posOrder = {}) {
 
 /** Dòng tặng của đơn POS → giftItems + chữ quà. */
 export function posGiftLines(posOrder = {}) {
-  const giftItems = (Array.isArray(posOrder.items) ? posOrder.items : [])
-    .filter(item => item?.is_bonus_product && item.variation_info?.display_id)
+  const giftItems = posGiftItems(posOrder)
+    .filter(item => item.variation_info?.display_id)
     .map(item => ({ sku: String(item.variation_info.display_id).trim().toUpperCase(), name: String(item.variation_info.name || ''), quantity: Math.max(1, Math.round(Number(item.quantity) || 1)) }));
   return { giftItems, gift: giftItems.map(item => item.name || item.sku).join(' + ') };
 }
@@ -150,7 +252,7 @@ export function applyPosContent(order, posOrder, { now = Date.now() } = {}) {
   if (infoChanged) {
     if (values.name && values.name !== order.name && posChanged('name', 'name')) { order.name = values.name; changed.push('tên'); }
     if (values.phone && values.phone !== (toLocalPhone(order.phone) || order.phone) && (!previous || posChanged('phone', 'phone'))) { order.phone = values.phone; changed.push('SĐT'); }
-    if (values.address && values.address !== order.address && posChanged('address', 'address')) { Object.assign(order, resolvedAddressFields(values.address)); changed.push('địa chỉ'); }
+    if (values.address && values.address !== order.address && posChanged('address', 'address')) { assignResolvedAddress(order, values.address); changed.push('địa chỉ'); }
     const freeShipping = Boolean(posOrder.is_free_shipping) || values.shippingFee === 0;
     if ((values.shippingFee !== money(order.shippingFee) || freeShipping !== Boolean(order.freeShipping)) && posChanged('shippingFee', 'basket')) {
       order.shippingFee = values.shippingFee;

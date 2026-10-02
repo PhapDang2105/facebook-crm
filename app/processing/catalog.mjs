@@ -371,6 +371,25 @@ export function parseGiftSwapChoice(text, swap = getGiftSwap()) {
 }
 
 /**
+ * Vòng 13: lựa chọn đổi quà đã lưu trên giỏ chờ (pendingOrder.giftSwap — kết quả parseGiftSwapChoice qua JSON) → các lựa
+ * chọn hợp lệ theo cấu hình quà thay hiện tại (khớp id, SKU hay nhãn), tối đa `quantity` gói. Mục lạ bị bỏ.
+ * @param {unknown} value
+ * @returns {Array<{id:string,label:string,name:string,sku:string,weight:number}>}
+ */
+export function normalizeGiftSwapChoices(value, swap = getGiftSwap()) {
+  const list = Array.isArray(value) ? value : [];
+  const chosen = [];
+  for (const entry of list) {
+    const id = normalizeText(typeof entry === 'string' ? entry : entry?.id);
+    const sku = normalizeSkuText(typeof entry === 'string' ? '' : entry?.sku);
+    const label = normalizeText(typeof entry === 'string' ? entry : entry?.label);
+    const option = swap.options.find(item => (id && normalizeText(item.id) === id) || (sku && item.sku === sku) || (label && normalizeText(item.label) === label));
+    if (option) chosen.push({ ...option });
+  }
+  return chosen.slice(0, swap.quantity);
+}
+
+/**
  * Đổi quà: bỏ quà hiện vật (bát/muỗng/quạt), thêm `quantity` gói nhỏ theo vị đã
  * chọn (thiếu vị → để trống `sku`, nhân viên chọn). Tiền không đổi.
  * Trả { gifts, removed, added, text } — `gifts` là danh sách quà mới của đơn.
@@ -390,6 +409,37 @@ export function applyGiftSwap(gifts, choices = [], swap = getGiftSwap()) {
   for (const item of added) counts.set(item.name, (counts.get(item.name) || 0) + 1);
   const text = [...counts.entries()].map(([name, count]) => `${count} ${name}`).join(' + ');
   return { gifts: [...list.filter(gift => !isSwappableGift(gift)), ...added], removed, added, text };
+}
+
+const giftNameKey = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * R13: kế hoạch dòng quà của ĐƠN ĐÃ ĐỔI QUÀ (`order.giftSwap = [{ name, sku, weight }]`, `order.giftSwapRemoved = [tên quà
+ * bị thay]`) — dùng chung cho đẩy POS (pos-orders.mjs posGiftSwapPlan) và file xuất kho (order-export.mjs). null khi đơn
+ * không đổi quà.
+ * - `removes(gift)`: quà theo bảng quà này đã bị khách đổi (không lên dòng quà);
+ * - `lines`: dòng quà thay thế [{ sku, name, weight, quantity }] (gộp theo SKU);
+ * - `missing`: quà thay thế KHÔNG lên được dòng — chưa chọn vị (không có SKU) hay `knownSkus` (Set mã POS) không có mã đó.
+ *   Không đoán mã khác: nơi gọi ghi chú cho nhân viên.
+ */
+export function giftSwapPlan(order, knownSkus = null) {
+  const swap = (Array.isArray(order?.giftSwap) ? order.giftSwap : []).filter(item => item && typeof item === 'object');
+  if (!swap.length) return null;
+  const removedNames = new Set((Array.isArray(order.giftSwapRemoved) ? order.giftSwapRemoved : []).map(giftNameKey).filter(Boolean));
+  // Không ghi quà nào bị thay (dữ liệu thiếu): coi như thay mọi quà hiện vật đổi được, như applyGiftSwap.
+  const removes = gift => (removedNames.size ? removedNames.has(giftNameKey(gift?.name)) || removedNames.has(giftNameKey(gift?.sku)) : isSwappableGift(gift));
+  const lines = new Map();
+  const missing = [];
+  for (const item of swap) {
+    const sku = String(item.sku || '').trim().toUpperCase();
+    const name = String(item.name || '').trim();
+    if (!sku) { missing.push(name || 'quà thay thế (chưa chọn vị)'); continue; }
+    if (knownSkus && !knownSkus.has(sku)) { missing.push(`${name || sku} (${sku})`); continue; }
+    const line = lines.get(sku) || { sku, name, weight: Math.max(0, Math.round(Number(item.weight) || 0)), quantity: 0 };
+    line.quantity += Math.max(1, Math.round(Number(item.quantity) || 1));
+    lines.set(sku, line);
+  }
+  return { removes, lines: [...lines.values()], missing };
 }
 
 export const defaultShippingFee = 15000;
@@ -535,27 +585,45 @@ export function matchStaffOnlyProduct(text) {
 const cartGiftTokens = new Set(['BGD', 'M', 'MUONG', 'QUAT', 'QUA']);
 const oatSkuPattern = /^CB(\d*)-(HT-YM|YM-VO)-T500$|^(HT-YM|YM-VO)-T500$|^CB-YM-DET\+VO$/;
 
-function colourProduct(token) {
-  const colour = String(token || '').toUpperCase().split('-')[0].replace(/^VANGG$/, 'VANG');
+// Vòng 13: KHÔNG đoán món khi mã lạ. Mảnh mã combo ("VANGG", "XANH-Z450", "MINT-Z300") chỉ ra sản phẩm khi:
+// - có đuôi quy cách ("XANH-Z450") → phải có đúng mã GRA-<màu>-<đuôi> trong danh mục ("XANH-G35" không phải Túi Xanh 450g);
+// - không đuôi ("VANGG", "XANH", "NAU") → túi GRA-<màu>-… duy nhất; hoặc sản phẩm DUY NHẤT có mã mở đầu bằng mảnh đó ("NGHE");
+// - combo 10 ("CB10-XANH", không đuôi) là hộp 10 gói nhỏ: chỉ khớp sản phẩm CB10-<màu>…, không bao giờ thành 10 túi lớn.
+function colourProduct(token, each = 1) {
+  const parts = String(token || '').toUpperCase().split('-').filter(Boolean);
+  const colour = String(parts[0] || '').replace(/^VANGG$/, 'VANG');
   if (!colour) return null;
   const products = getCatalogProducts().filter(product => product.active);
-  return products.find(product => /^GRA-/.test(product.sku) && product.sku.split('-')[1] === colour)
-    || products.find(product => product.sku.split('-')[0] === colour)
-    || null;
+  if (parts.length > 1) return products.find(product => product.sku === `GRA-${[colour, ...parts.slice(1)].join('-')}`) || null;
+  if (Number(each) === 10) {
+    const boxes = products.filter(product => product.sku === `CB10-${colour}` || product.sku.startsWith(`CB10-${colour}-`));
+    return boxes.length === 1 ? boxes[0] : null;
+  }
+  const bags = products.filter(product => /^GRA-/.test(product.sku) && product.sku.split('-')[1] === colour);
+  if (bags.length === 1) return bags[0];
+  if (bags.length > 1) return null;
+  const prefixed = products.filter(product => product.sku.split('-')[0] === colour);
+  return prefixed.length === 1 ? prefixed[0] : null;
 }
 
 /**
  * Chuẩn hoá MỘT mã SKU giỏ Shop. Trả
- * { sku, items: [{ sku, name, quantity }], gifts: ['BGD', 'MUONG'], needsStaff, reason, label }.
- * `quantity` là số dòng giỏ (khách bấm 2 lần combo 2 túi = 4 túi).
+ * { sku, items: [{ sku, name, quantity }], gifts: ['BGD', 'MUONG'], needsStaff, reason, label, unknown, name }.
+ * `quantity` là số dòng giỏ (khách bấm 2 lần combo 2 túi = 4 túi; Shop gửi 0 = 1).
  * reason: '' | 'oat' (yến mạch — nhân viên lên đơn) | 'unknown' (mã lạ).
+ * Vòng 13: mã lạ → `unknown: true` + `name` (tên dòng giỏ Shop gửi kèm, không có thì chính mã) để engine gắn thẻ và
+ * nêu đúng tên món cho nhân viên — không bao giờ đoán sang sản phẩm khác.
  */
-export function parseCartSku(rawSku, quantity = 1) {
+export function parseCartSku(rawSku, quantity = 1, name = '') {
   const sku = normalizeSkuText(rawSku);
   const times = Math.max(1, Math.round(Number(quantity) || 1));
-  const result = { sku, items: [], gifts: [], needsStaff: false, reason: '', label: '' };
-  if (!sku) return { ...result, needsStaff: true, reason: 'unknown' };
+  const lineName = String(name ?? '').trim().replace(/\s+/g, ' ').slice(0, 200);
+  const result = { sku, items: [], gifts: [], needsStaff: false, reason: '', label: '', unknown: false, name: lineName };
+  const unknownLine = (extra = {}) => ({ ...result, ...extra, needsStaff: true, reason: 'unknown', unknown: true, name: lineName || sku });
+  if (!sku) return unknownLine();
   const direct = findProductBySku(sku);
+  // Sản phẩm danh mục đã tắt (ngừng bán) coi như mã lạ: nhân viên xem, bot không tự lên đơn.
+  if (direct && !direct.active) return unknownLine();
   if (direct) return { ...result, items: [{ sku: direct.sku, name: direct.name, quantity: times }] };
   const oat = sku.match(oatSkuPattern);
   if (oat) {
@@ -568,28 +636,31 @@ export function parseCartSku(rawSku, quantity = 1) {
   const gifts = tokens.slice(1).filter(token => cartGiftTokens.has(token)).map(token => (token === 'M' ? 'MUONG' : token));
   const parts = [tokens[0], ...tokens.slice(1).filter(token => !cartGiftTokens.has(token))];
   const head = parts[0].match(/^CB(\d*)-(.+)$/);
-  if (!head) {
-    // Mã sản phẩm kèm đuôi quà ("GRA-XANH-Z450+BGD").
-    const product = parts.length === 1 ? findProductBySku(parts[0]) : null;
-    if (product) return { ...result, gifts, items: [{ sku: product.sku, name: product.name, quantity: times }] };
-    return { ...result, needsStaff: true, reason: 'unknown' };
-  }
+  // Mã sản phẩm danh mục kèm đuôi quà ("GRA-XANH-Z450+BGD", "CB10-XANH-G35+BGD").
+  const whole = parts.length === 1 ? findProductBySku(parts[0]) : null;
+  if (whole?.active) return { ...result, gifts, items: [{ sku: whole.sku, name: whole.name, quantity: times }] };
+  if (!head) return unknownLine({ gifts });
   const each = Math.max(1, Number(head[1]) || 1);
   const counts = new Map();
   for (const token of [head[2], ...parts.slice(1)]) {
-    const product = findProductBySku(token) || colourProduct(token);
-    if (!product) return { ...result, gifts, needsStaff: true, reason: 'unknown' };
+    const exact = findProductBySku(token);
+    const product = exact?.active ? exact : colourProduct(token, each);
+    if (!product) return unknownLine({ gifts });
+    // "CB10-XANH" khớp hộp 10 gói (một đơn vị bán), không nhân 10.
+    const units = /^CB10-/.test(product.sku) ? 1 : each;
     const entry = counts.get(product.sku) || { sku: product.sku, name: product.name, quantity: 0 };
-    entry.quantity += each * times;
+    entry.quantity += units * times;
     counts.set(product.sku, entry);
   }
   return { ...result, gifts, items: [...counts.values()] };
 }
 
 /**
- * Cả giỏ Shop [{ sku, quantity }] → { items (gộp theo SKU), gifts, needsStaff,
- * reasons, labels, unknownSkus }. needsStaff = có dòng yến mạch/mã lạ: bot không
- * tự chốt, chuyển nhân viên kèm `labels` (vd. "Yến Mạch Úc Nguyên Cám cán dẹt 1kg").
+ * Cả giỏ Shop [{ sku, quantity, name? }] → { items (gộp theo SKU), gifts, needsStaff, reasons, labels, unknownSkus,
+ * unknown, name, unknownLines }. needsStaff = có dòng yến mạch/mã lạ: bot không tự chốt, chuyển nhân viên kèm `labels`
+ * (vd. "Yến Mạch Úc Nguyên Cám cán dẹt 1kg"). Vòng 13: `unknown: true` khi có dòng mã lạ, `name` = tên các dòng lạ
+ * (tên Shop gửi, không có thì mã) nối bằng " + ", `unknownLines: [{ sku, name, quantity }]`. Giỏ rỗng → unknown.
+ * Engine gọi hàm này thay cho phần tự tách mã trong cartQuickReply; `items` đưa thẳng vào Product_N1…/No_A….
  */
 export function parseShopCart(cart = []) {
   const counts = new Map();
@@ -597,13 +668,18 @@ export function parseShopCart(cart = []) {
   const reasons = new Set();
   const labels = [];
   const unknownSkus = [];
-  for (const line of Array.isArray(cart) ? cart : []) {
-    const parsed = parseCartSku(line?.sku, line?.quantity);
+  const unknownLines = [];
+  const lines = Array.isArray(cart) ? cart : [];
+  for (const line of lines) {
+    const parsed = parseCartSku(line?.sku, line?.quantity, line?.name);
     parsed.gifts.forEach(gift => gifts.add(gift));
     if (parsed.needsStaff) {
       reasons.add(parsed.reason);
       if (parsed.label) labels.push(parsed.label);
-      if (parsed.reason === 'unknown') unknownSkus.push(parsed.sku);
+      if (parsed.reason === 'unknown') {
+        unknownSkus.push(parsed.sku);
+        unknownLines.push({ sku: parsed.sku, name: parsed.name, quantity: Math.max(1, Math.round(Number(line?.quantity) || 1)) });
+      }
     }
     for (const item of parsed.items) {
       const entry = counts.get(item.sku) || { ...item, quantity: 0 };
@@ -611,5 +687,10 @@ export function parseShopCart(cart = []) {
       counts.set(item.sku, entry);
     }
   }
-  return { items: [...counts.values()], gifts: [...gifts], needsStaff: reasons.size > 0, reasons: [...reasons], labels, unknownSkus };
+  if (!lines.length) reasons.add('unknown');
+  const unknown = !lines.length || unknownLines.length > 0;
+  return {
+    items: [...counts.values()], gifts: [...gifts], needsStaff: reasons.size > 0, reasons: [...reasons], labels, unknownSkus,
+    unknown, name: unknownLines.map(line => line.name).filter(Boolean).join(' + '), unknownLines
+  };
 }

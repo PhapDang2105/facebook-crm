@@ -42,23 +42,22 @@
       rows.append(el('p', 'channel-empty staff-empty', 'Chưa có nhân sự nào.'));
       return;
     }
-    // Hàng tiêu đề cột ("—", "Đã đặt", "Đang làm" đứng một mình thì khó hiểu). Màn hẹp ẩn (staff.css).
-    const head = el('div', 'staff-row staff-table-head');
-    head.setAttribute('aria-hidden', 'true');
-    for (const label of ['Họ tên', 'Tên đăng nhập', 'Vai trò', 'Số điện thoại', 'Tên trên Pancake/POS', 'Mật khẩu', 'Trạng thái', '']) head.append(el('span', '', label));
-    rows.append(head);
+    // R13: hàng tiêu đề cột đã có sẵn trong index.html (.staff-table-head) — trước đây dựng thêm một hàng ở đây nên
+    // tiêu đề hiện HAI lần. Màn hẹp (≤ 1100px) ẩn hàng tiêu đề, mỗi ô tự mang nhãn cột qua data-label (staff.css).
+    const [, loginLabel, roleLabel, phoneLabel, pancakeLabel, passwordLabel, statusLabel] = ['Họ tên', 'Tên đăng nhập', 'Vai trò', 'Số điện thoại', 'Tên trên Pancake/POS', 'Mật khẩu', 'Trạng thái'];
+    const cell = (label, className, text) => { const node = el('span', className, text); node.dataset.label = label; return node; };
     for (const member of state.items) {
       const row = el('div', `staff-row${member.active ? '' : ' is-inactive'}`);
       const name = el('span', 'staff-name', member.name);
       if (member.username === state.currentUser) name.append(el('em', 'staff-you', 'bạn'));
       row.append(
         name,
-        el('span', 'staff-username', member.username),
-        el('span', `staff-role staff-role--${member.role}`, member.roleName || member.role),
-        el('span', 'staff-muted', member.phone || '—'),
-        el('span', 'staff-muted', member.pancakeNames?.length ? member.pancakeNames.join(', ') : '—'),
-        el('span', member.hasPassword ? 'staff-ok' : 'staff-muted', member.hasPassword ? 'Đã đặt' : 'Chưa đặt'),
-        el('span', member.active ? 'staff-status' : 'staff-status is-off', member.active ? 'Đang làm' : 'Đã nghỉ')
+        cell(loginLabel, 'staff-username', member.username),
+        cell(roleLabel, `staff-role staff-role--${member.role}`, member.roleName || member.role),
+        cell(phoneLabel, 'staff-muted', member.phone || '—'),
+        cell(pancakeLabel, 'staff-muted', member.pancakeNames?.length ? member.pancakeNames.join(', ') : '—'),
+        cell(passwordLabel, member.hasPassword ? 'staff-ok' : 'staff-muted', member.hasPassword ? 'Đã đặt' : 'Chưa đặt'),
+        cell(statusLabel, member.active ? 'staff-status' : 'staff-status is-off', member.active ? 'Đang làm' : 'Đã nghỉ')
       );
       const actions = el('span', 'staff-actions');
       if (state.canManage) {

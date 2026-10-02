@@ -205,13 +205,18 @@ export async function updateCustomerProfile(key, patch = {}, now = Date.now(), {
  * là thêm vào, cái nào là gỡ đi; gỡ phải ghi lại rõ ràng, nếu không thẻ hội
  * thoại sẽ mọc lại ở lần dựng danh sách kế tiếp.
  */
-export async function setCustomerLabels(key, labels = [], derivedLabels = [], now = Date.now(), { by = null } = {}) {
+export async function setCustomerLabels(key, labels = [], derivedLabels = [], now = Date.now(), { by = null, allowedIds = null } = {}) {
   if (!Array.isArray(labels)) throw new Error('Danh sách thẻ không hợp lệ.');
-  const clean = list => [...new Set((Array.isArray(list) ? list : []).map(label => text(label, 60)).filter(Boolean))];
-  const chosen = new Set(clean(labels).slice(0, 20));
+  // R13 (M4): chỉ nhận CHUỖI (object/số/null bị bỏ, không ép thành "[object Object]"), bỏ trùng, ≤ 20 thẻ.
+  const clean = list => [...new Set((Array.isArray(list) ? list : []).filter(label => typeof label === 'string').map(label => text(label, 60)).filter(Boolean))];
   const derived = new Set(clean(derivedLabels));
+  // `allowedIds` (mã thẻ trong Cài đặt → Tin nhắn; null = không kiểm): mã lạ chỉ giữ khi khách ĐANG mang nó
+  // (thẻ tự có từ hội thoại, hay thẻ đã gắn tay từ trước) — không rơi thẻ hệ thống, không nhận mã bịa.
+  const allowed = allowedIds ? new Set(allowedIds) : null;
   return updateStore(store => {
     const entry = entryFor(store, key);
+    const held = new Set([...derived, ...(Array.isArray(entry.labels) ? entry.labels : [])]);
+    const chosen = new Set(clean(labels).filter(label => !allowed || allowed.has(label) || held.has(label)).slice(0, 20));
     entry.labels = [...chosen].filter(label => !derived.has(label));
     entry.hiddenLabels = [...derived].filter(label => !chosen.has(label));
     entry.updatedAt = now;

@@ -11,6 +11,17 @@ const { registerQrCode } = await import('../app/qr-scans.mjs');
 await registerQrCode('tmdt-01');
 
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+// r13-glue (ổn định test): khẳng định "đã gửi / đã ghi" KHÔNG dựa vào một quãng chờ cố định — máy bận (nhiều tệp test chạy
+// song song) thì hẹn giờ trễ hơn quãng chờ và test đỏ ngẫu nhiên. Chờ tới khi điều kiện đúng (tối đa 15 giây); quãng chờ cố
+// định chỉ còn dùng cho khẳng định "KHÔNG gửi gì" (trễ không làm sai kết quả).
+async function until(predicate, label, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await predicate()) return;
+    if (Date.now() > deadline) assert.fail(`hết giờ chờ: ${label}`);
+    await pause(10);
+  }
+}
 const conversation = (id, extra = {}) => ({ id, psid: id.split(':')[1], pageId: '1', name: `Khách ${id}`, ...extra });
 const metaReferral = (conv, ref = 'tmdt-01') => ({ type: 'referral', conversation: conv, referral: { ref, source: 'SHORTLINK' } });
 const botcake = (conv, ref = 'tmdt-01') => ({ type: 'message', conversation: conv, referral: { ref, source: 'SHORTLINK', type: 'BOTCAKE_OPTIN' }, message: { direction: 'outgoing', text: `Dạ cảm ơn… Mã thẻ: #${ref}` } });
@@ -48,7 +59,8 @@ test('khách quét qua Meta: chào sau delay một lần; quét lại trong cool
   g.schedule([metaReferral(conv)]);
   assert.equal(g.isPending(conv.id), true);
   g.schedule([metaReferral(conv)]);
-  await pause(120);
+  await until(() => g.sent.length >= 1 && !g.isPending(conv.id), 'bộ chào gửi ưu đãi');
+  await pause(60);
   assert.equal(g.sent.length, 1);
   assert.equal(g.sent[0].text, 'Ưu đãi QR');
   assert.equal(g.isPending(conv.id), false);
@@ -101,7 +113,7 @@ test('bot tắt hoặc nhân viên đang nhận trong Pancake: VẪN gửi ưu �
   g.schedule([metaReferral(off), metaReferral(assigned)]);
   assert.equal(g.isPending('1:e'), true);
   assert.equal(g.isPending('1:f'), true);
-  await pause(120);
+  await until(() => g.sent.length >= 2, 'cả hai hội thoại nhận ưu đãi');
   assert.deepEqual(g.sent.map(item => item.id).sort(), ['1:e', '1:f']);
   assert.equal(off.botEnabled, false, 'không bật lại bot');
   assert.ok(!g.logs.some(line => /bot tắt|nhân viên đang nhận/.test(line)));
@@ -121,7 +133,7 @@ test('mã lạ, thiếu psid: bỏ qua; mẫu QR_OFFER trống: không gửi và
   const failing = greeter({ send: async () => { throw new Error('ngoài cửa sổ 24h'); } });
   const conv = conversation('1:k');
   failing.schedule([metaReferral(conv)]);
-  await pause(120);
+  await until(() => failing.logs.some(line => /ERR .*ngoài cửa sổ 24h/.test(line)), 'bộ chào báo lỗi gửi');
   assert.equal(failing.greetedAt.has(conv.id), false);
   assert.ok(failing.logs.some(line => /ERR .*ngoài cửa sổ 24h/.test(line)));
 });
@@ -130,7 +142,7 @@ test('mẫu có ảnh: gửi ảnh rồi chữ theo đúng thứ tự phần tro
   const g = greeter({ offerMessage: async () => [{ type: 'image', url: 'https://fb.giotnang.vn/assets/qr/uu-dai.png' }, { type: 'text', text: 'Ưu đãi cho chị' }] });
   const conv = conversation('1:img');
   g.schedule([metaReferral(conv)]);
-  await pause(120);
+  await until(() => g.logs.some(line => /đã gửi ưu đãi .*ảnh\+chữ/.test(line)), 'bộ chào gửi ảnh + chữ');
   assert.deepEqual(g.sent, [{ id: conv.id, imageUrl: 'https://fb.giotnang.vn/assets/qr/uu-dai.png' }, { id: conv.id, text: 'Ưu đãi cho chị' }]);
   assert.ok(g.logs.some(line => /đã gửi ưu đãi .*ảnh\+chữ/.test(line)));
 });

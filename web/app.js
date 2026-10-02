@@ -763,6 +763,8 @@ const chatbotStepCode = document.querySelector('#chatbot-step-code');
 const chatbotStepCodeApply = document.querySelector('#chatbot-step-code-apply');
 let chatbotTemplatesState = {};
 let chatbotOriginalTemplates = {};
+// Mã mẫu tin nhân viên vừa xoá trên màn hình, chờ gửi `null` ở lần lưu kế tiếp.
+const chatbotDeletedTemplates = new Set();
 let chatbotBuiltInTemplateIds = new Set();
 let chatbotProcessingSteps = [];
 let chatbotPreviewHistory = [];
@@ -1170,6 +1172,14 @@ function renderCustomerPhoneWarning() {
 // POS history automatically — there is nothing for staff to maintain.
 const posChannelList = document.querySelector('#pos-channel-list');
 
+/** R13 (T5): cảnh báo / lỗi của lượt đồng bộ POS gần nhất (máy chủ trả ở `sync`), '' khi ổn. */
+function posSyncNotice(sync) {
+  const lines = [...(Array.isArray(sync?.warnings) ? sync.warnings : []), ...(Array.isArray(sync?.errors) ? sync.errors.map(item => `lỗi: ${item}`) : [])];
+  if (!lines.length) return '';
+  const when = Number(sync.at) ? new Date(Number(sync.at)).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '';
+  return `<p class="field-warning" role="status">Đồng bộ POS${when ? ` lúc ${escapeHtml(when)}` : ''}: ${lines.map(escapeHtml).join('; ')}</p>`;
+}
+
 function renderPosChannel(pos) {
   if (!posChannelList) return;
   phoneWarningsPosConfigured = Boolean(pos?.configured);
@@ -1178,8 +1188,8 @@ function renderPosChannel(pos) {
   posChannelList.innerHTML = pos?.configured
     ? `<article class="channel-item"><span class="channel-item-avatar pos-avatar">P</span>
         <div class="channel-item-copy"><strong>${escapeHtml(pos.shopName || 'Shop Pancake POS')}</strong><small><span class="channel-connected-dot"></span>Shop ID ${escapeHtml(pos.shopId)} · khoá ${escapeHtml(pos.keyHint)} · tự cảnh báo số hay bom hàng trong Đơn hàng và Tin nhắn</small></div>
-        <div class="channel-item-actions">${pos.source === 'settings' ? '<button class="channel-remove-button" type="button" data-pos-action="disconnect">Ngắt kết nối</button>' : '<small>Khoá đặt trong .env</small>'}</div></article>`
-    : '<p class="channel-empty">Chưa kết nối. Lấy khoá trong POS: Cài đặt → Nâng cao → Tích hợp bên thứ 3 → Webhook/API → API Key → Thêm mới, rồi dán vào ô bên trên. Khi đã kết nối, số hay bom hàng được cảnh báo tự động trong Đơn hàng.</p>';
+        <div class="channel-item-actions">${pos.source === 'settings' ? '<button class="channel-remove-button" type="button" data-pos-action="disconnect">Ngắt kết nối</button>' : '<small>Khoá đặt trong .env</small>'}</div></article>${posSyncNotice(pos.sync)}`
+    :'<p class="channel-empty">Chưa kết nối. Lấy khoá trong POS: Cài đặt → Nâng cao → Tích hợp bên thứ 3 → Webhook/API → API Key → Thêm mới, rồi dán vào ô bên trên. Khi đã kết nối, số hay bom hàng được cảnh báo tự động trong Đơn hàng.</p>';
 }
 
 // Mở Cài đặt (showView) và chọn mục Kênh (showSettingsSection) cùng gọi: dùng chung một lần hỏi.
@@ -6055,16 +6065,26 @@ function updateConversationTimeLabels() {
 }
 
 const commentReplyNoticePattern = /^Bạn đang phản hồi bình luận của người dùng/u;
+// R13: tin mang cờ `system` (máy chủ gắn cho dòng hệ thống Facebook nằm trong hộp thư như tin của Page: "Bạn đang phản
+// hồi bình luận…", "<tên> đã trả lời một quảng cáo.", "<name> replied to a post. View post(link)") cũng là dòng hệ
+// thống — không vẽ bong bóng Page. Tin cũ chưa có cờ: vẫn nhận câu "Bạn đang phản hồi bình luận…" theo chữ như trước.
 function isCommentReplyNotice(item) {
-  return item?.type === 'text' && commentReplyNoticePattern.test(String(item.text || '').trim());
+  if (!item || (item.type || 'text') !== 'text') return false;
+  return item.system === true || commentReplyNoticePattern.test(String(item.text || '').trim());
+}
+
+/** Tách dòng hệ thống: phần chữ + link cuối câu ("Xem bình luận.(link)", "Xem bài viết(link)", "View post(link)"). */
+function splitSystemNoticeText(value) {
+  const raw = String(value || '').trim();
+  const tail = raw.match(/\s*(Xem bình luận|Xem bài viết|Xem quảng cáo|View comment|View post|View ad)\.?\s*(?:\((https?:\/\/[^\s)]+)\))?\s*$/u);
+  if (!tail) return { body: raw.replace(/\s*\((https?:\/\/[^\s)]+)\)\s*$/u, '').trim(), link: raw.match(/\((https?:\/\/[^\s)]+)\)\s*$/u)?.[1] || '', linkLabel: 'Xem' };
+  return { body: raw.slice(0, tail.index).trim(), link: tail[2] || '', linkLabel: tail[1] };
 }
 
 /** "Bạn đang phản hồi bình luận … Xem bình luận.(link)" → dòng mờ giữa khung, "Xem bình luận" là link. */
 function appendCommentReplyNotice(item) {
   if (!chatBody) return;
-  const raw = String(item.text || '').trim();
-  const link = raw.match(/\((https?:\/\/[^\s)]+)\)/)?.[1] || '';
-  const body = raw.replace(/\s*Xem bình luận\.?\s*(\([^)]*\))?\s*$/u, '').trim();
+  const { body, link, linkLabel } = splitSystemNoticeText(item.text);
   const notice = document.createElement('div');
   notice.className = 'chat-system-notice chat-comment-notice';
   const icon = document.createElement('img');
@@ -6078,7 +6098,7 @@ function appendCommentReplyNotice(item) {
     anchor.href = link;
     anchor.target = '_blank';
     anchor.rel = 'noopener';
-    anchor.textContent = 'Xem bình luận';
+    anchor.textContent = linkLabel;
     notice.appendChild(anchor);
   }
   const sentAt = getChatTimestamp(item.createdAt);
@@ -6928,12 +6948,15 @@ giftSaveButton?.addEventListener('click', async () => {
     showToast('Có quà tặng chưa đặt tên.', 'warning');
     return;
   }
+  // R13 (M8): xoá hết quà là xoá cả "Miễn phí vận chuyển" (đơn 2 túi sẽ bị tính ship) — hỏi lại, máy chủ cần confirmClear.
+  const clearingAll = !giftItems.length;
+  if (clearingAll && !window.confirm('Xoá TOÀN BỘ quà tặng, kể cả "Miễn phí vận chuyển"? Đơn từ 2 túi sẽ bị tính phí ship cho tới khi thêm lại quà.')) return;
   giftSaveButton.disabled = true;
   try {
     const result = await readApiResponse(await fetch('/api/gifts', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: giftItems, shippingFee: Number(giftShippingFee?.value) || 0 })
+      body: JSON.stringify({ items: giftItems, shippingFee: Number(giftShippingFee?.value) || 0, ...(clearingAll ? { confirmClear: true } : {}) })
     }));
     giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift, excludedSkus: [...(gift.excludedSkus || [])] })) : giftItems;
     giftProducts = Array.isArray(result.products) ? result.products : giftProducts;
@@ -7411,6 +7434,11 @@ function customerOrderAuthorship(order) {
 function customerOrderPosRow(order) {
   const pos = order.pos;
   if (!pos && order.source === 'Landing page') return '';
+  // R13 (M7): đơn mở lại sau khi POS đã hủy — đơn POS cũ vẫn hủy, cần lên lại thành đơn POS mới.
+  if (pos?.needsRepush && pos?.cancelled && String(order.processingStatus || '') !== 'cancelled') {
+    const repush = `<button type="button" class="customer-order-pos-retry" data-order-action="pos" data-order-id="${escapeHtml(String(order.id))}">Lên lại POS</button>`;
+    return customerOrderMetaRow('cart', 'Pancake POS', `<span class="customer-order-pos-error" title="${escapeHtml(pos.error || `Đơn POS #${pos.id || ''} đã hủy. Bấm để tạo đơn POS mới cho đơn này.`)}">Đã hủy trên POS — cần lên lại</span> ${repush}`);
+  }
   if (pos?.id) return customerOrderMetaRow('cart', 'Pancake POS', `#${escapeHtml(String(pos.id))}`);
   const retry = `<button type="button" class="customer-order-pos-retry" data-order-action="pos" data-order-id="${escapeHtml(String(order.id))}">Đẩy sang POS</button>`;
   if (pos?.error) return customerOrderMetaRow('cart', 'Pancake POS', `<span class="customer-order-pos-error" title="${escapeHtml(pos.error)}">Chưa đẩy được</span> ${retry}`);
@@ -10430,6 +10458,7 @@ function createChatbotTemplate() {
   if (Object.hasOwn(chatbotTemplatesState, id)) return showToast('Mã mẫu tin này đã tồn tại.', 'warning');
   chatbotTemplatesState[id] = '';
   chatbotOriginalTemplates[id] = '';
+  chatbotDeletedTemplates.delete(id);
   selectedChatbotTemplate = id;
   closeChatbotTemplateCreator();
   renderChatbotTemplateList();
@@ -10464,6 +10493,8 @@ chatbotTemplateDelete?.addEventListener('click', () => {
   if (!window.confirm(`Xóa mẫu tin ${id}? Thao tác này không thể hoàn tác sau khi lưu.`)) return;
   delete chatbotTemplatesState[id];
   delete chatbotOriginalTemplates[id];
+  // R13 (C2): máy chủ nay GỘP mẫu theo từng mã — mã không gửi kèm được giữ nguyên, nên xoá phải gửi rõ `null`.
+  chatbotDeletedTemplates.add(id);
   selectedChatbotTemplate = Object.keys(chatbotTemplatesState)[0] || '';
   renderChatbotTemplateList();
   renderChatbotTemplateEditor();
@@ -10530,9 +10561,11 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         welcomeMessage: chatbotSettingsWelcome.value,
         // Không gửi handoffKeywords (form này không có ô đó): gửi '' từng xóa từ khóa chuyển nhân viên.
         // followUps chỉ gửi enabled + kịch bản; máy chủ gộp sâu nên maxPerRun đang lưu được giữ.
-        messageTemplates: chatbotTemplatesState
+        // Gửi đủ bộ đang soạn; mẫu vừa xoá trên màn hình gửi `null` (máy chủ gộp theo từng mã, R13 C2).
+        messageTemplates: { ...chatbotTemplatesState, ...Object.fromEntries([...chatbotDeletedTemplates].filter(id => !Object.hasOwn(chatbotTemplatesState, id)).map(id => [id, null])) }
       })
     }));
+    chatbotDeletedTemplates.clear();
     chatbotSettingsEnabled.checked = settings.enabled === true;
     if (chatbotSettingsAutoOrder) chatbotSettingsAutoOrder.checked = settings.autoOrder !== false;
     showToast('Đã lưu cấu hình AI thành công.', 'success');
@@ -10578,7 +10611,8 @@ chatbotPreviewSend?.addEventListener('click', async () => {
     if (pendingBubble) pendingBubble.textContent = answerText;
     chatbotPreviewHistory.push({ id: `preview-user-${Date.now()}`, direction: 'incoming', text: message }, { id: `preview-bot-${Date.now()}`, direction: 'outgoing', text: answerText });
   } catch (error) {
-    if (pendingBubble) pendingBubble.textContent = `Test lỗi: ${error.message}`;
+    // Máy chủ đã đổi lỗi kỹ thuật thành câu dễ hiểu (friendlyAiTestError); ở đây không thêm tiền tố tiếng Anh "Test".
+    if (pendingBubble) pendingBubble.textContent = `Chưa thử được: ${error.message || 'máy chủ không phản hồi.'}`;
   } finally { chatbotPreviewSend.disabled = false; }
 });
 
@@ -11247,11 +11281,25 @@ customerOrderForm?.addEventListener('submit', async event => {
     creatingCustomerOrder = true;
     customerOrderSubmit.disabled = true;
     customerOrderSubmit.textContent = 'Đang gửi...';
-    const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversation.dataset.conversationId)}/customer-panel`, {
+    const postOrder = force => fetch(`/api/messaging/conversations/${encodeURIComponent(conversation.dataset.conversationId)}/customer-panel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'order', order })
-    }));
+      body: JSON.stringify({ type: 'order', order, ...(force ? { force: true } : {}) })
+    });
+    let createResponse = await postOrder(false);
+    // R13 (M1): máy chủ trả 409 khi đơn giống hệt (cùng hội thoại, SĐT, giỏ, tổng) vừa tạo trong 2 phút — hỏi lại
+    // "Đơn giống hệt vừa tạo lúc … — vẫn tạo?"; đồng ý thì gửi lại kèm force.
+    if (createResponse.status === 409) {
+      const conflict = await createResponse.clone().json().catch(() => ({}));
+      if (conflict?.duplicate) {
+        if (!window.confirm(conflict.error || 'Đơn giống hệt vừa tạo — vẫn tạo?')) {
+          showToast(`Không tạo thêm: đơn ${conflict.duplicateOrderId || ''} giống hệt đã có ở tab Thông tin.`, 'warning');
+          return;
+        }
+        createResponse = await postOrder(true);
+      }
+    }
+    const panel = await readApiResponse(createResponse);
     customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
     saveCustomerPanelStore();
     renderCustomerOrders(conversation);
@@ -12401,8 +12449,8 @@ chatbotSettingsAutoOrder?.addEventListener('change', async () => {
 chatbotSettingsEnabled?.addEventListener('change', async () => {
   const desired = chatbotSettingsEnabled.checked;
   const question = desired
-    ? 'Bật chatbot cho TẤT CẢ hội thoại? Mọi hội thoại đang tắt bot riêng (nhân viên đã nhắn, chuyển CSKH…) sẽ được bật lại và xóa trạng thái cũ. Giỏ hàng, đơn, thẻ, ghi chú giữ nguyên.'
-    : 'Tắt chatbot cho TẤT CẢ hội thoại? Bot sẽ ngừng trả lời mọi khách cho tới khi bật lại.';
+    ? 'Bật chatbot cho TẤT CẢ hội thoại?\n\nThao tác này sẽ đặt lại trạng thái bot của mọi hội thoại: hội thoại đang tắt bot riêng (nhân viên đang nhận, đã chuyển CSKH…) sẽ được bật lại và bot có thể trả lời khách ở đó; lỗi bot cũ bị xóa.\n\nGiỏ hàng, đơn, thẻ, ghi chú giữ nguyên.'
+    : 'Tắt chatbot cho TẤT CẢ hội thoại?\n\nThao tác này sẽ đặt lại trạng thái bot của mọi hội thoại: bot ngừng trả lời mọi khách cho tới khi bật lại, và khi bật lại thì MỌI hội thoại đều bật (không nhớ hội thoại nào đang tắt riêng).';
   if (!window.confirm(question)) {
     chatbotSettingsEnabled.checked = !desired;
     return;
@@ -12722,4 +12770,59 @@ document.querySelector('.qr-settings-body')?.addEventListener('click', async eve
       showToast('Trình duyệt không cho sao chép, hãy chọn và chép tay.', 'warning');
     }
   }
+});
+
+// ===== R13: các nút từng "trơ" (không có xử lý) =====
+// Sao chép / Mở rộng ô SYSTEM prompt (Cài đặt → Chatbot).
+const chatbotPromptCopy = document.querySelector('#chatbot-prompt-copy');
+const chatbotPromptExpand = document.querySelector('#chatbot-prompt-expand');
+chatbotPromptCopy?.addEventListener('click', async () => {
+  const text = chatbotSettingsSystemPrompt?.value || '';
+  if (!text) return showToast('Prompt đang trống, chưa có gì để sao chép.', 'warning');
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Trình duyệt chặn clipboard (trang không https): chọn cả ô rồi dùng lệnh sao chép cũ.
+    chatbotSettingsSystemPrompt.focus();
+    chatbotSettingsSystemPrompt.select();
+    if (!document.execCommand?.('copy')) return showToast('Trình duyệt không cho sao chép tự động. Prompt đã được bôi đen, bấm Ctrl+C.', 'warning');
+  }
+  showToast(`Đã sao chép prompt (${text.length.toLocaleString('vi-VN')} ký tự).`, 'success');
+});
+function setChatbotPromptExpanded(expanded) {
+  const box = chatbotSettingsSystemPrompt?.closest('.llm-prompt');
+  if (!box || !chatbotPromptExpand) return;
+  box.classList.toggle('is-expanded', expanded);
+  chatbotPromptExpand.setAttribute('aria-pressed', String(expanded));
+  chatbotPromptExpand.title = expanded ? 'Thu gọn' : 'Mở rộng';
+  chatbotPromptExpand.setAttribute('aria-label', expanded ? 'Thu gọn' : 'Mở rộng');
+  if (expanded) chatbotSettingsSystemPrompt.focus();
+}
+chatbotPromptExpand?.addEventListener('click', () => setChatbotPromptExpanded(chatbotPromptExpand.getAttribute('aria-pressed') !== 'true'));
+chatbotSettingsSystemPrompt?.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && chatbotPromptExpand?.getAttribute('aria-pressed') === 'true') { event.preventDefault(); setChatbotPromptExpanded(false); }
+});
+
+// Form Tạo đơn → mục Khách hàng: "Tạo khách hàng mới" (xoá thông tin khách đang điền để nhập người nhận khác) và
+// "Chọn khách hàng có sẵn" (tìm theo tên / SĐT bằng ô tìm nhanh, điền tên + SĐT + địa chỉ vào form).
+function fillCustomerOrderContact({ name = '', phone = '', address = '' } = {}) {
+  if (!customerOrderName || !customerOrderPhone || !customerOrderAddress) return;
+  customerOrderName.value = name;
+  customerOrderPhone.value = phone;
+  customerOrderAddress.value = address;
+  for (const field of [customerOrderName, customerOrderPhone, customerOrderAddress]) field.dispatchEvent(new Event('input', { bubbles: true }));
+  customerOrderPhone.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.querySelector('#customer-order-new')?.addEventListener('click', () => {
+  const filled = [customerOrderName, customerOrderPhone, customerOrderAddress].some(field => field?.value.trim());
+  if (filled && !window.confirm('Xoá tên, số điện thoại, địa chỉ đang điền để nhập khách hàng mới?')) return;
+  fillCustomerOrderContact();
+  customerOrderName?.focus();
+});
+document.querySelector('#customer-order-pick')?.addEventListener('click', () => {
+  if (!window.crmQuickSearch?.pickCustomer) return showToast('Chưa tải được ô tìm khách. Tải lại trang rồi thử lại.', 'warning');
+  window.crmQuickSearch.pickCustomer(customer => {
+    fillCustomerOrderContact({ name: customer.name || '', phone: customer.phone || '', address: customer.address || '' });
+    showToast(`Đã điền thông tin của ${customer.name || customer.phone || 'khách'}${customer.address ? '' : ' (khách này chưa có địa chỉ)'}.`, 'success');
+  });
 });

@@ -50,15 +50,23 @@ const TEMPLATES_BY_SUBGROUP = {
   SOCIAL: ['THANK_YOU', 'WELCOME'],
   SUPPORT: ['CSKH_HANDOFF', 'ORDER_STATUS', 'ORDER_STATUS_NONE', 'WHOLESALE_CTV_CONTACT', 'WAITING_STAFF', 'PAYMENT_RECEIVED_CHECK', 'LIVE_ONLY_PRODUCT', 'CALLBACK_REQUEST', 'IMAGE_RECEIVED', 'WHOLESALE_RECEIVED', 'REFUSED_DELIVERY', 'ORDER_STATUS_CHECKING',
     // vòng 12 (r12): ghi nhận + chuyển nhân viên
-    'ORDER_CANCEL_STAFF', 'ORDER_HOLD_STAFF', 'STAFF_ONLY_PRODUCT', 'RECEIVED_CHECK', 'IMAGE_WITH_PHONE'],
+    'ORDER_CANCEL_STAFF', 'ORDER_HOLD_STAFF', 'STAFF_ONLY_PRODUCT', 'RECEIVED_CHECK', 'IMAGE_WITH_PHONE',
+    // vòng 13 (r13): giỏ Facebook Shop engine ghi nhận + chuyển nhân viên (mã lạ / món nhân viên lên đơn)
+    'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF'],
   ORDER: ['ASK_FLAVOR', 'ASK_PRODUCT', 'ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_CONFIRMATION', 'ORDER_CANCELLED', 'ORDER_HELP', 'ORDER_EXISTING_CONFIRM', 'CONFIRM_YES', 'ORDER_POSTPONED', 'ORDER_INFO_ASK_FLAVOR', 'ASK_FLAVOR_NGUYENBAN',
     'ORDER_UPDATED', 'ORDER_ADDRESS_REMIND', 'ORDER_CART_LINE', 'UPSELL_TWO_BAGS', 'SHOP_ORDER_RECEIVED', 'ORDER_ADDRESS_CHOOSE', 'ORDER_ADDRESS_OLD_ASK_PHONE', 'ORDER_PHONE_ASK_FLAVOR', 'ORDER_UNCHANGED', 'ORDER_WRONG', 'ORDER_CHANGE_STAFF', 'ORDER_CUSTOM_BASKET', 'ORDER_NOTE_ADDED', 'ASK_REORDER',
     // mã engine trả (renderChatbotReply) cho ORDER_UPDATED / ORDER_CANCELLED / ORDER_NOTE_ADDED — nhãn từ nhật ký quyết định
-    'ORDER_UPDATE', 'ORDER_CANCEL', 'ORDER_NOTE']
+    'ORDER_UPDATE', 'ORDER_CANCEL', 'ORDER_NOTE',
+    // vòng 13 (r13): bước đơn engine tự chọn — đã nhận giỏ Shop (chờ kiểm đơn), ghi nhận quà thay của giỏ/đơn
+    'SHOP_CART_ACK', 'GIFT_SWAP_NOTED']
 };
 
-/** Mẫu seed CỐ Ý không thuộc nhóm nào (OTHER): luồng riêng quyết hay hậu xử lý. Test kiểm mọi mẫu seed khác đều có nhóm. */
-export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO'].includes(String(templateId || ''));
+/**
+ * Mẫu seed CỐ Ý không thuộc nhóm nào (OTHER): luồng riêng quyết hay hậu xử lý. Test kiểm mọi mẫu seed khác đều có nhóm.
+ * R13: GIFT_POLICY_ORDER / GIFT_POLICY_ORDER_NONE là hậu xử lý của bộ soạn (khách ĐÃ CÓ ĐƠN hỏi quà → nói quà của đơn
+ * đó) — không vào nhóm ANSWER để mô hình tầng không bao giờ tự trả lời bằng hai mẫu này.
+ */
+export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE'].includes(String(templateId || ''));
 
 /** Mã mẫu → nhóm 6 lớp (bảng đã chốt, PRICE/INFO/SOCIAL tách). Mã không có trong bảng và COMMENT_* không có mục. */
 export const SUBGROUP_OF_TEMPLATE = Object.freeze(Object.fromEntries(Object.entries(TEMPLATES_BY_SUBGROUP).flatMap(([subgroup, templates]) => templates.map(templateId => [templateId, subgroup]))));

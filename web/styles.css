@@ -3075,3 +3075,8 @@ body.role-staff :is(.customers-export, #campaigns-sync, #campaigns-ai-run) { dis
 .conversation-list .conversation { content-visibility: auto; contain-intrinsic-size: auto 82px; }
 /* Cảnh báo không chặn sau khi lưu (máy chủ trả warnings): chữ vàng ngay dưới giá trị. */
 .field-warning { display: block; margin-top: 3px; padding: 3px 6px; color: #6a3d00; background: #fff6e0; border: 1px solid #f0c36d; border-radius: 6px; font-size: 12px; font-weight: 500; }
+
+/* R13: nút "Mở rộng" của ô SYSTEM prompt (Cài đặt → Chatbot) — phóng ô soạn ra gần hết màn hình, bấm lại hoặc Esc để thu. */
+.llm-prompt.is-expanded { position: fixed; inset: 24px; z-index: 900; background: #fff; border-color: #c7dbff; box-shadow: 0 20px 50px rgba(16, 24, 40, .28); }
+.llm-prompt.is-expanded textarea { font-size: 14px; line-height: 22px; }
+.llm-icon-btn[aria-pressed="true"] { color: #1677ff; }

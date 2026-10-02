@@ -21,6 +21,18 @@ export function isBasketStep(templateId) {
   return basketStepTemplateIds.includes(String(templateId || '').trim());
 }
 
+/** `giftSwap` của giỏ chờ đã chuẩn hoá: mảng lựa chọn (tối đa 10, chỉ giữ id/label/name/sku/weight), `true` → `[]`; không có → null. */
+function giftSwapOf(value) {
+  const raw = value?.giftSwap;
+  if (raw === true) return [];
+  if (!Array.isArray(raw)) return null;
+  return raw.slice(0, 10).map(entry => (typeof entry === 'string'
+    ? entry.trim().slice(0, 80)
+    : entry && typeof entry === 'object'
+      ? { id: String(entry.id || '').trim(), label: String(entry.label || '').trim(), name: String(entry.name || '').trim(), sku: String(entry.sku || '').trim(), weight: Number(entry.weight) || 0 }
+      : null)).filter(Boolean);
+}
+
 export function normalizePendingOrder(value) {
   const items = Array.isArray(value?.items) ? value.items : [];
   const key = String(value?.key || '').trim();
@@ -55,6 +67,13 @@ export function normalizePendingOrder(value) {
     ...(value?.upsold ? { upsold: true } : {}),
     // Đang chờ khách xác nhận đặt THÊM đơn (khách đã có đơn trong 7 ngày).
     ...(value?.awaitingConfirm ? { awaitingConfirm: true } : {}),
+    // Vòng 13 (basket): lựa chọn đổi quà đi theo giỏ chờ — mảng của parseGiftSwapChoice; `[]` (hay `true`) = khách xin đổi
+    // quà nhưng chưa nêu vị. Không có trường thì không thêm (không đổi quà).
+    ...(giftSwapOf(value) ? { giftSwap: giftSwapOf(value) } : {}),
+    // Vòng 13 (inbox3 F3): giỏ lập từ bình luận live / khách live → giữ quà và giá live khi khách sang hộp thư.
+    ...(value?.livestream === true ? { livestream: true } : {}),
+    // Vòng 13 (inbox2 A3): khách hẹn dịp khác (ORDER_POSTPONED, keepBasket) — giỏ còn giữ nhưng không nhắc bám đuổi.
+    ...(value?.postponed ? { postponed: true } : {}),
     items: items.map(item => ({
       product: String(item?.product || '').trim(),
       code: String(item?.code || '').trim(),

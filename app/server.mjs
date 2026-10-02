@@ -11,11 +11,12 @@ import { fillTemplateSheet } from './xlsx-template.mjs';
 import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { auditFiltersFrom, canReadAudit, contentEtag, conversationOrdersFingerprint, etagMatches, createSeenOnce, fileVersionStamp, friendlyAdsError, friendlyAdsStatus, friendlyAiTestError, friendlyCampaignInsights, createStaffNoteWriter, hasStaffSession, pancakeWebhookDecision, publicNoticePage, purchaseLabelFingerprint, qrVisitorKey, staticCacheControl } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
+import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
-import { aiKeyReentryError, assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
+import { aiKeyReentryError, assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, mergeMessageTemplatesPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply, warmUpChatbotModels } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
@@ -31,23 +32,26 @@ import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
-import { startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
-import { applyPosContentToConversations } from './pos-content-sync.mjs';
-import { cancelPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
+import { posSyncStatus, recordPosSyncStatus, startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
+import { applyPosContentToConversations, finalizePosImportedOrder, posGoodsItems, repairPosImportedTotal } from './pos-content-sync.mjs';
+import { applyGiftSwapFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
-import { customerNote, processingNotes } from './order-notes.mjs';
-import { applyCustomerOrderEdits, describeOrderEdits, orderEditAction, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
+import { customerNote } from './order-notes.mjs';
+import { applyCustomerOrderEdits, applyPosRepush, assertManualOrderMoney, createManualOrderGuard, describeOrderEdits, duplicateManualOrderMessage, isLiveOnPos, moneyText, needsPosRepush, orderEditAction, orderProcessingNotes, posCancelRefOf, posRepushDraft, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
 import { AUDIT_ACTIONS, AUTOMATED_ACTORS, appendAudit, appendBotToggleAudit, appendLabelAudit, auditActionLabel, auditActors, createViewThrottle, labelChangeDetails, labelChangeText, queryAudit } from './audit-log.mjs';
 import { BOT_ACTOR, actorOf, actorStamp, clearActorCache, clientIp, createRequireManager, isManager } from './request-actor.mjs';
 import { HTML_CSP, LOGIN_SETUP_MESSAGE, allowedWithoutLoginSetup, applySecurityHeaders, createLogLimiter, debugFlagOn, installConsoleRedaction, loginGate, loginSetupPage, safeNextPath } from './security.mjs';
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
-import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
+import { brandImageFiles, describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { countQrReferrals, countQrReferralsByDay, deleteQrCode, isValidQrCode, listQrScans, qrDayKey, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
 import { classifyUserAgent, iosMajorVersion, isLinkPreviewBot, messengerDestination, prefillMessageFor, prefillTemplateOrDefault, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
-import { createLinkRoutedQrFlow, createQrGreeter, createThreadReleaser, isCardScan, lastStaffMessageAt, resolveQrOfferTemplate } from './qr-greeting.mjs';
+import { createBridgeClickMatcher, createLinkRoutedQrFlow, createQrGreeter, createThreadReleaser, isCardScan, lastStaffMessageAt, resolveQrOfferTemplate, withOfferCardImage } from './qr-greeting.mjs';
+// Riêng cho luồng QR (vòng 13): ghi referral thẻ lên hội thoại khớp lượt bấm, ghi nốt kho sau lượt chào lúc tắt.
+import { attachReferral as attachQrReferral } from './meta-webhook.mjs';
+import { flushMessagingStore as flushMessagingStoreForQr } from './messaging-store.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
@@ -64,7 +68,7 @@ import { listStaff, saveStaffMember, staffByUsername, staffLoginAccounts, STAFF_
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, releaseThreadControl, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
-import { customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listCustomers } from './customers.mjs';
+import { archiveStatusLabel, customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listCustomers, orderHistoryKey } from './customers.mjs';
 import { addCustomerNote, listCustomerNotes, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
 import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
@@ -86,9 +90,11 @@ installConsoleRedaction(console);
 
 const root = projectRoot;
 const webRoot = path.join(root, 'web');
-const chatbotSettingsPath = path.join(root, 'data', 'processed', 'chatbot-settings.json');
-const productsPath = path.join(root, 'data', 'processed', 'products.json');
-const giftsPath = path.join(root, 'data', 'processed', 'gifts.json');
+// R13 (L12): ba kho này trước đây cố định dưới data/processed dù catalog.mjs / campaign-ai.mjs đã đọc theo biến môi
+// trường — test tích hợp (và bản chạy thử cô lập) đặt *_PATH về thư mục tạm thì máy chủ vẫn ghi vào kho thật.
+const chatbotSettingsPath = process.env.CHATBOT_SETTINGS_PATH || path.join(root, 'data', 'processed', 'chatbot-settings.json');
+const productsPath = process.env.PRODUCTS_PATH || path.join(root, 'data', 'processed', 'products.json');
+const giftsPath = process.env.GIFTS_PATH || path.join(root, 'data', 'processed', 'gifts.json');
 const productImagesPath = path.join(root, 'data', 'processed', 'product-images');
 const exportTemplatePath = path.join(root, 'assets', 'templates', 'facebook-order-export.xlsx');
 let exportTemplateBuffer = null;
@@ -276,6 +282,36 @@ function publicCustomerPanel(conversation) {
 // replies with different message ids, so the source-message guard alone still let
 // the warehouse pack the same basket twice.
 const duplicateChatbotOrderWindowMs = 10 * 60 * 1000;
+// R13 (M1): đơn nhân viên tạo tay cũng có chốt trùng (2 phút, cùng hội thoại + SĐT + giỏ + tổng; `force:true` để vẫn tạo).
+const manualOrderGuard = createManualOrderGuard();
+
+/**
+ * Đơn nhân viên tạo tay từ form (POST …/customer-panel {type:'order'}): chuẩn hoá + kiểm, đặt mã, chống trùng.
+ * Trả { order } (đã giữ chỗ trong manualOrderGuard — nơi gọi phải release khi lưu xong hay lỗi) hoặc
+ * { reject: { status, body } }.
+ * - L3: `order: null` / không phải object → 400 câu tiếng Việt (trước đây lộ "Cannot read properties of null");
+ *   tổng 0đ và giảm giá lớn hơn tiền hàng bị chặn.
+ * - M1: cùng hội thoại + SĐT + giỏ + tổng trong 2 phút → 409 kèm mã đơn cũ (bấm đúp từng ra 2 đơn CRM + 2 đơn POS);
+ *   `force: true` để vẫn tạo. Kiểm và giữ chỗ liền nhau (không await ở giữa) để hai request sát nhau không cùng lọt.
+ */
+async function draftManualOrder(conversationId, payload, assignId) {
+  let order;
+  try {
+    order = normalizeCustomerOrder(payload.order && typeof payload.order === 'object' && !Array.isArray(payload.order) ? payload.order : {});
+    assertManualOrderMoney(order);
+  } catch (error) {
+    return { reject: { status: 400, body: { error: error.message } } };
+  }
+  // Mã đơn duy nhất do nơi gọi đặt (uniqueOrderId + takenOrderIds, xem route).
+  await assignId(order);
+  const currentOrders = (await getConversation(conversationId))?.customerOrders;
+  const duplicate = payload.force === true ? null : manualOrderGuard.find(conversationId, currentOrders, order);
+  if (duplicate) {
+    return { reject: { status: 409, body: { error: duplicateManualOrderMessage(duplicate), duplicate: true, duplicateOrderId: duplicate.id, duplicateCreatedAt: duplicate.createdAt } } };
+  }
+  manualOrderGuard.reserve(conversationId, order);
+  return { order, release: () => manualOrderGuard.release(conversationId, order) };
+}
 // Khóa giỏ của đơn để chống trùng: comboKey (SKU=số lượng), dòng không SKU thì theo tên.
 function basketKeyOf(order) {
   const products = Array.isArray(order?.products) ? order.products : [];
@@ -360,16 +396,21 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
   publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
   await appendOrderToArchive(result.order).catch(() => {});
   if (result.order.pos?.id) {
+    // R13 (gộp): quà thay thế (đơn đổi quà) không lên được POS ở lần sửa này → ghi chú xử lý cho nhân viên như đường tạo
+    // đơn (syncOrderToPos); sửa xong mà không còn thiếu thì gỡ ghi chú đổi quà cũ. PUT lỗi: giữ nguyên ghi chú đang có.
+    let giftSwapMissing = null;
     const posOutcome = await updatePosOrder(result.order, { conversation })
-      .then(() => ({ ...result.order.pos, updatedAt: Date.now(), error: undefined }))
+      .then(updated => { giftSwapMissing = updated?.giftSwapMissing || []; return { ...result.order.pos, updatedAt: Date.now(), error: undefined }; })
       .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Sửa trên POS lỗi: ${error.message}` }));
     await updateMessagingStore(store => {
       const item = store.conversations.find(entry => entry.id === conversation.id);
       const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
       if (target) target.pos = posOutcome;
+      if (target && giftSwapMissing) applyGiftSwapFlag(target, giftSwapMissing);
       return null;
     });
     result.order.pos = posOutcome;
+    if (giftSwapMissing) applyGiftSwapFlag(result.order, giftSwapMissing);
   }
   return { ...result, updated: true, created: false };
 }
@@ -475,7 +516,8 @@ async function importPosConversationOrders(posOrders) {
   const drafts = [];
   for (const posOrder of Array.isArray(posOrders) ? posOrders : []) {
     const address = posOrder.shipping_address || {};
-    const lines = (posOrder.items || []).filter(item => !item.is_bonus_product);
+    // R13 (C1): dòng mã quà (BGD, MUONG, quạt/quà live…) nhân viên thêm như dòng thường KHÔNG phải tiền hàng.
+    const lines = posGoodsItems(posOrder);
     // POS hay lưu SĐT mất số 0 đầu ("912345678") hoặc dạng 0084…: chuẩn hoá trước khi kiểm, kẻo đơn bị bỏ.
     const rawPhone = String(posOrder.bill_phone_number || address.phone_number || '');
     try {
@@ -493,16 +535,18 @@ async function importPosConversationOrders(posOrders) {
         status: Number(posOrder.status) === 6 ? 'Hủy' : 'Mới',
         note: String(posOrder.note || '').slice(0, 500)
       }, { now: Date.parse(`${String(posOrder.inserted_at || '').replace(/Z?$/, 'Z')}`) || Date.now() });
+      // R13 (C1 + T4): tổng = tiền POS thực thu (thu hộ + chuyển khoản) khi POS có ghi; quà hiển thị là quà.
+      finalizePosImportedOrder(order, posOrder);
       drafts.push({
         conversationKey: String(posOrder.conversation_id),
+        posOrder,
         order: {
           ...order,
           createdAt: Date.parse(`${String(posOrder.inserted_at || '').replace(/Z?$/, 'Z')}`) || Date.now(),
           automatic: false,
           employee: posOrder.creator?.name || posOrder.assigning_seller?.name || posOrder.account_name || '',
           pos: { id: String(posOrder.id), systemId: String(posOrder.system_id || ''), status: String(posOrder.status_name || ''), importedAt: Date.now() },
-          // Dòng tặng trên POS (mã + số lượng) để file xuất kho ghi đủ quà như POS.
-          giftItems: (posOrder.items || []).filter(item => item.is_bonus_product && item.variation_info?.display_id).map(item => ({ sku: String(item.variation_info.display_id).trim().toUpperCase(), name: String(item.variation_info.name || ''), quantity: Math.max(1, Math.round(Number(item.quantity) || 1)) })),
+          // Dòng tặng trên POS (mã + số lượng) để file xuất kho ghi đủ quà như POS: `giftItems` do finalizePosImportedOrder đặt.
           ...(Number(posOrder.status) === 6 ? { processingStatus: 'cancelled' } : {})
         }
       });
@@ -535,7 +579,7 @@ async function importPosConversationOrders(posOrders) {
     const byPancakeId = new Map(store.conversations.filter(item => item.pancakeConversationId && item.source !== 'comment').map(item => [String(item.pancakeConversationId), item]));
     const affected = [...new Set(drafts.map(draft => byPancakeId.get(draft.conversationKey)).filter(Boolean))];
     const fingerprintBefore = conversationOrdersFingerprint(affected);
-    for (const { conversationKey, order } of drafts) {
+    for (const { conversationKey, order, posOrder } of drafts) {
       const conversation = byPancakeId.get(conversationKey);
       if (!conversation) continue;
       if (!Array.isArray(conversation.customerOrders)) conversation.customerOrders = [];
@@ -544,6 +588,8 @@ async function importPosConversationOrders(posOrders) {
         // Đã kéo về: chỉ theo trạng thái hủy của POS; sửa của nhân viên trong CRM giữ nguyên.
         // Đơn kéo về trước 01/10 chưa có dòng quà POS: bổ sung (file kho cần mã quà).
         if (!Array.isArray(existing.giftItems) && Array.isArray(order.giftItems)) existing.giftItems = order.giftItems;
+        // R13 (C1): đơn kéo về trước bản sửa còn tổng cộng cả giá quà → chỉnh về tiền POS thực thu (một lần, có lịch sử).
+        if (repairPosImportedTotal(existing, order, posOrder)) touched.add(conversation.id);
         if (order.processingStatus === 'cancelled' && existing.processingStatus !== 'cancelled') {
           Object.assign(existing, { processingStatus: 'cancelled', status: 'Hủy', updatedAt: Date.now() });
           recordOrderHistory(existing, { by: { username: 'pos', name: 'Pancake POS' }, action: 'order.cancel', summary: 'Đơn đã hủy trên Pancake POS, CRM hủy theo.' });
@@ -640,6 +686,49 @@ function queuePhoneLabel(event) {
 }
 
 /**
+ * R13 (M7): đơn nhân viên mở lại trong CRM sau khi đã hủy bên POS (`pos.needsRepush`) → tạo ĐƠN POS MỚI với mã
+ * "CRM-<mã đơn>-L<n>" (POS dùng custom_id làm mã đơn; đơn cũ đã hủy giữ mã gốc), ghi mã mới lên đơn và bỏ ghi chú
+ * "cần lên lại". Lỗi thì giữ nguyên cờ để bấm lại. Hai lần bấm sát nhau dùng chung một lượt đẩy.
+ */
+const posRepushInFlight = new Map();
+function repushCancelledOrderToPos(conversation, order) {
+  const key = String(order.id);
+  if (posRepushInFlight.has(key)) return posRepushInFlight.get(key);
+  const pending = (async () => {
+    const draft = posRepushDraft(order);
+    let created = null;
+    let failure = null;
+    try {
+      // Lần lên lại trước báo lỗi/hết giờ: kiểm POS trước (đơn có thể đã lên), không đẩy mù thành hai đơn.
+      if (order.pos?.error) {
+        const existing = await findExistingPosOrder(draft.order).catch(() => null);
+        if (existing && !/cancel|hủy|huỷ/i.test(String(existing.status || ''))) created = existing;
+      }
+      if (!created) created = await pushOrderToPos(draft.order, { conversation });
+    } catch (error) {
+      failure = error;
+    }
+    let outcome = null;
+    await updateMessagingStore(store => {
+      const item = store.conversations.find(entry => entry.id === conversation.id);
+      const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === order.id);
+      if (!target) return null;
+      if (created) outcome = applyPosRepush(target, created, draft);
+      else {
+        target.pos = { ...(target.pos || {}), error: `Lên lại POS lỗi: ${failure?.message || 'không rõ lý do'}`, updatedAt: Date.now() };
+        outcome = target.pos;
+      }
+      return null;
+    });
+    publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+    console.log(created ? `Đơn ${order.id} (mở lại sau khi POS hủy) đã lên lại Pancake POS #${created.id} với mã ${draft.ref}.` : `Đơn ${order.id} chưa lên lại được Pancake POS: ${failure?.message || failure}`);
+    return outcome || { error: failure?.message || 'Không tìm thấy đơn để lên lại POS.' };
+  })().finally(() => posRepushInFlight.delete(key));
+  posRepushInFlight.set(key, pending);
+  return pending;
+}
+
+/**
  * Nhân viên hủy trên POS một đơn CRM đã đẩy sang (đơn trùng, khách đổi ý):
  * đồng bộ POS gọi hàm này để CRM hủy theo — không gọi lại POS. Trả về số đơn đã hủy.
  */
@@ -663,7 +752,8 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
     let cancelledNow = 0;
     for (const conversation of store.conversations) {
       for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) {
-        if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled' || order.pos?.cancelSyncedAt || /Đã hủy trên POS/.test(String(order.note || ''))) continue;
+        // Đơn đã lên lại POS (R13 M7) mang mã "<mã>-L<n>" ở pos.crmRef: chỉ hủy theo ĐƠN POS MỚI đó, không theo đơn cũ đã hủy.
+        if (!wanted.has(posCancelRefOf(order)) || order.processingStatus === 'cancelled' || order.pos?.cancelSyncedAt || /Đã hủy trên POS/.test(String(order.note || ''))) continue;
         markCancelled(order);
         changed.push({ ...order });
         touched.add(conversation.id);
@@ -750,9 +840,15 @@ function processLandingWebhookInBackground(payload, page) {
 }
 
 /** Đồng bộ Pancake (định kỳ và nút Đồng bộ) đưa bot qua cùng móc như webhook. */
-function syncBotHook(changes, deps) {
+async function syncBotHook(changes, deps) {
   scheduleQrGreetings(changes);
-  return processChatbotChanges(changes.filter(change => !isCardScan(change)), deps);
+  // Tin đầu của khách mới quét thẻ mà webhook bỏ sót: vẫn khớp với lượt bấm nút theo GIỜ CỦA TIN.
+  const held = await considerQrBridgeClicks(changes);
+  try {
+    return await processChatbotChanges(changes.filter(change => !isCardScan(change)), deps);
+  } finally {
+    qrBridgeMatcher.botDone(held);
+  }
 }
 
 /**
@@ -770,8 +866,18 @@ async function qrOfferMessage(conversation) {
   // spin: chọn ngẫu nhiên trong {a|b}. applyHonorific: thay anh/chị theo giới tính.
   const filled = applyHonorific(spin(template), conversation.gender || '').replace(/\{title\}/gi, match => (match[1] === 'T' ? honorific(conversation.gender || '').replace(/^\p{L}/u, c => c.toUpperCase()) : honorific(conversation.gender || '')));
   // Thẻ ưu đãi là ẢNH (![](https://…) trong mẫu) kèm chữ; giữ đúng thứ tự ảnh/chữ như mẫu.
-  return splitMessages(filled).parts;
+  // Mẫu chỉ có chữ: CRM tự thêm ảnh thẻ (assets/branding/offers/the-uu-dai.png, phục vụ ở /q/brand/offer-card.png)
+  // lên đầu như tin Botcake. Thiếu tệp, PUBLIC_BASE_URL không https, hay QR_OFFER_IMAGE=0 thì chỉ gửi chữ.
+  return withOfferCardImage(splitMessages(filled).parts, {
+    baseUrl: metaConfig.publicBaseUrl,
+    imagePath: qrOfferCardRoute,
+    enabled: String(process.env.QR_OFFER_IMAGE ?? '').trim() !== '0',
+    available: await stat(qrOfferCardFile).then(info => info.isFile() && info.size > 0, () => false)
+  });
 }
+// Ảnh thẻ ưu đãi gửi kèm tin QR_OFFER (dựng từ trang đệm, đổi ưu đãi thì dựng lại tệp này).
+const qrOfferCardRoute = '/q/brand/offer-card.png';
+const qrOfferCardFile = path.join(root, 'assets', 'branding', 'offers', 'the-uu-dai.png');
 
 // Bộ chào (app/qr-greeting.mjs): hẹn giờ, hủy khi Botcake đã chào, cooldown theo hội thoại. Bot tắt hay
 // hội thoại đã phân công vẫn gửi ưu đãi (chủ shop 02/10); chỉ né khi nhân viên vừa nhắn trong
@@ -787,7 +893,23 @@ const qrGreeter = createQrGreeter({
   delayMs: qrGreetingDelayMs,
   cooldownMs: qrGreetingCooldownMs,
   staffQuietMs: qrGreetingStaffQuietMs,
-  staffLastMessageAt: async conversation => lastStaffMessageAt((await readMessagingStore()).messages?.[conversation.id])
+  staffLastMessageAt: async conversation => lastStaffMessageAt((await readMessagingStore()).messages?.[conversation.id]),
+  // Mốc "đã chào" lưu bền trên hội thoại (`qrGreetedAt`): khởi động lại không chào lần hai (02/10 10:42).
+  greetedStore: {
+    load: async () => (await readMessagingStore()).conversations
+      .filter(conversation => Number(conversation.qrGreetedAt) > 0)
+      .map(conversation => [conversation.id, Number(conversation.qrGreetedAt)]),
+    save: (conversation, at) => updateMessagingStore(store => {
+      const stored = store.conversations.find(item => item.id === conversation.id);
+      if (!stored || Number(stored.qrGreetedAt) === at) return false;
+      stored.qrGreetedAt = at;
+      return true;
+    }, { defer: true, unchanged: changed => !changed })
+  },
+  // Đơn gần nhất của khách này (mọi luồng cùng Page + khách): có đơn tạo trong thời gian chờ chào lại thì thôi.
+  recentOrderAt: async conversation => Math.max(0, ...(await readMessagingStore()).conversations
+    .filter(item => item.pageId === conversation.pageId && item.psid === conversation.psid)
+    .flatMap(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).map(order => Number(order?.createdAt) || 0)))
 });
 // Deploy / khởi động lại (SIGTERM) trong lúc đang hẹn chào: gửi ngay các lượt đang hẹn (tối đa 5 giây) trước
 // khi thoát — timer chỉ nằm trong RAM. Đăng ký TRƯỚC installMessagingStoreShutdownFlush; lệnh thoát ở đó chờ
@@ -795,10 +917,52 @@ const qrGreeter = createQrGreeter({
 let qrGreetingShutdownFlush = null;
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
-    qrGreetingShutdownFlush ||= qrGreeter.flush({ timeoutMs: 5000 }).catch(error => console.error(`QR: lỗi khi gửi nốt lượt chào lúc tắt: ${error.message}`));
+    // Gửi nốt xong thì ghi kho thêm một lượt: mốc `qrGreetedAt` của lượt vừa gửi là ghi gộp (defer).
+    qrGreetingShutdownFlush ||= qrGreeter.flush({ timeoutMs: 5000 })
+      .then(count => (count ? flushMessagingStoreForQr() : undefined))
+      .catch(error => console.error(`QR: lỗi khi gửi nốt lượt chào lúc tắt: ${error.message}`));
   });
 }
 const scheduleQrGreetings = (changes, options) => qrGreeter.schedule(changes, options);
+
+// Khách MỚI quét thẻ (chưa từng nhắn Page): Meta không báo mã cho ai, nên khớp lượt bấm nút "Mở Messenger"
+// trên trang đệm với tin đầu của hội thoại hộp thư mới không dấu nguồn (app/qr-greeting.mjs, createBridgeClickMatcher).
+// QR_BRIDGE_MATCH_WINDOW_MS: cửa sổ từ lúc bấm tới tin đầu (mặc định 90 giây — ca thật 49 giây; 0 = tắt).
+// QR_BRIDGE_AMBIGUITY_MS: hai hội thoại mới cách nhau trong quãng này tranh một lượt bấm → không chào ai (15 giây).
+const qrBridgeEnvMs = (name, fallback) => {
+  const raw = String(process.env[name] ?? '').trim();
+  const value = Number(raw);
+  return raw && Number.isFinite(value) && value >= 0 ? value : fallback;
+};
+const qrBridgeMatcher = createBridgeClickMatcher({
+  windowMs: qrBridgeEnvMs('QR_BRIDGE_MATCH_WINDOW_MS', 90_000),
+  ambiguityMs: qrBridgeEnvMs('QR_BRIDGE_AMBIGUITY_MS', 15_000),
+  greetDelayMs: qrGreetingDelayMs,
+  pageId: async () => (await resolveQrPage()).id,
+  inspect: async change => {
+    const store = await readMessagingStore();
+    const conversation = store.conversations.find(item => item.id === change.conversation.id) || change.conversation;
+    const commentAt = Math.max(0, ...store.conversations
+      .filter(item => item.source === 'comment' && item.pageId === conversation.pageId && item.psid === conversation.psid)
+      .map(item => Number(item.lastMessageAt) || 0));
+    return { conversation, messages: store.messages?.[conversation.id] || [], commentAt };
+  },
+  greet: (change, options) => {
+    // Ghi như referral thẻ QR (ô qrReferrals): thống kê "vào Messenger" và nhãn nguồn dùng chung với các đường khác.
+    updateMessagingStore(store => {
+      const stored = store.conversations.find(item => item.id === change.conversation.id);
+      if (!stored) return false;
+      attachQrReferral(stored, change.referral, { messageId: change.message?.mid || change.message?.id || '', at: change.message?.createdAt });
+      return true;
+    }, { defer: true, unchanged: changed => !changed }).catch(error => console.error(`QR: không ghi được referral lượt bấm: ${error.message}`));
+    scheduleQrGreetings([change], options);
+  }
+});
+/** Móc trước bot: xét tin khách mới với lượt bấm đang chờ; không bao giờ ném (webhook vẫn phải đưa bot). */
+const considerQrBridgeClicks = changes => qrBridgeMatcher.consider(changes).catch(error => {
+  console.error(`QR: lỗi khi xét lượt bấm chờ khớp: ${error.message}`);
+  return [];
+});
 // Page vận hành ở Pancake (chỉ nghe referral) mà sự kiện Meta về ở `messaging` chứ không phải `standby`:
 // Meta đang giao luồng cho app CRM (định tuyến liên kết m.me). Xong việc — đã gửi ưu đãi QR, hoặc không
 // có gì để gửi — thì trả luồng về app mặc định, kẻo tin sau của khách không tới Pancake.
@@ -1283,6 +1447,12 @@ async function inboxLabelDefs() {
   return Array.isArray(labels) ? labels : [];
 }
 
+/** Mã thẻ hợp lệ (Cài đặt → Tin nhắn) để kiểm thẻ nhân viên gắn; null khi không đọc được cài đặt (không kiểm, không làm rơi thẻ). */
+async function allowedLabelIdSet() {
+  const defs = await inboxLabelDefs();
+  return defs.length ? new Set(defs.map(label => label.id)) : null;
+}
+
 /** "Sửa cài đặt chatbot: prompt, 3 mẫu tin bot, bám đuổi" — không bao giờ ghi khoá API. */
 function chatbotSettingsChangeText(before = {}, after = {}, payload = {}) {
   const labels = {
@@ -1393,12 +1563,23 @@ async function handleAuth(request, response, url, isWebhook) {
 }
 
 const TRANSIENT_FILE_ERRORS = new Set(['EBUSY', 'EACCES', 'EPERM', 'EMFILE', 'ENFILE', 'EAGAIN']);
+function friendlyRequestError(error, { method = '', url = '' } = {}) {
+  const friendly = friendlyClientError(error);
+  if (friendly !== String(error?.message || '')) console.warn(`Yêu cầu lỗi ${method} ${String(url).split('?')[0]}: ${error?.name || 'Error'}: ${error?.message || error}`);
+  return friendly;
+}
 let pancakeNoTokenWarnedAt = 0;
 const pancakeDebugAllowed = createLogLimiter({ max: 30, windowMs: 60 * 1000 });
 const server = http.createServer(async (request, response) => {
   try {
     // Header bảo mật cho mọi phản hồi (HTML/JSON/tệp): nosniff, chống nhúng khung, Referrer, HSTS khi https.
     applySecurityHeaders(response, { https: authConfig.https });
+    // R13 (L6): HEAD xử lý như GET (cùng mã trạng thái + header; Node tự bỏ thân với request HEAD) — trước đây mọi
+    // đường kể cả /api/health trả 404 cho HEAD, công cụ giám sát tưởng máy chủ chết. Luồng SSE không mở cho HEAD.
+    if (request.method === 'HEAD') {
+      if (String(request.url || '').split('?')[0] === '/api/messaging/stream') { response.writeHead(405, { Allow: 'GET' }); return response.end(); }
+      request.method = 'GET';
+    }
     // "//q/api/…" từng vượt Basic Auth (Caddy cho /q/* đi thẳng, new URL coi "q" là host): chặn trước khi parse.
     if (!isSafeRequestTarget(request.url)) return sendJson(response, 400, { error: 'Đường dẫn không hợp lệ.' });
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
@@ -1423,20 +1604,15 @@ const server = http.createServer(async (request, response) => {
     // nút "Mở Messenger", vì Safari không mở app khi tới m.me qua chuyển hướng
     // và trang web m.me nay bắt đăng nhập. Lý do đầy đủ ở app/qr-bridge.mjs.
     // Logo cho trang khách quét: /q/* là đường công khai duy nhất (Caddy), còn /assets nằm sau mật khẩu.
-    // Chỉ đúng các tệp liệt kê ở đây được phục vụ.
-    const qrBrandFiles = {
-      '/q/brand/logo.webp': 'logos/giot-nang-logo.webp',
-      '/q/brand/zalo.webp': 'logos/zalo-icon.webp',
-      '/q/brand/messenger.webp': 'logos/messenger-icon.webp',
-      '/q/brand/offer-combo3-mini.webp': 'offers/combo3-mini.webp',
-      '/q/brand/offer-tam-lanh.webp': 'offers/tam-lanh.webp',
-      '/q/brand/offer-yen-mach.webp': 'offers/yen-mach.webp',
-      '/q/brand/offer-free-ship.webp': 'offers/free-ship.webp'
-    };
+    // Chỉ đúng các tệp liệt kê trong bảng được phục vụ. R13 (gộp): MỘT bảng dùng chung `brandImageFiles` (pancake.mjs) —
+    // route này và bộ đọc ảnh gửi đi (readImageForUpload) cùng một nguồn, gồm ảnh thẻ ưu đãi qrOfferCardRoute
+    // (/q/brand/offer-card.png → offers/the-uu-dai.png; Messenger/Pancake tải từ đây nên phải công khai).
+    const qrBrandFiles = brandImageFiles;
     if (request.method === 'GET' && qrBrandFiles[url.pathname]) {
       try {
         const body = await readFile(path.join(root, 'assets', 'branding', ...qrBrandFiles[url.pathname].split('/')));
-        response.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=86400' });
+        const brandTypes = { '.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
+        response.writeHead(200, { 'Content-Type': brandTypes[path.extname(qrBrandFiles[url.pathname]).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
         return response.end(body);
       } catch {
         return sendJson(response, 404, { error: 'Resource not found.' });
@@ -1477,6 +1653,8 @@ const server = http.createServer(async (request, response) => {
           // đĩa): cùng máy bấm lại / gửi beacon dồn chỉ tính một lượt.
           const visitor = qrVisitorKey(clientIp(request), request.headers['user-agent']);
           recordQrOpen(code, { target, visitor }).catch(error => console.error(`QR: không ghi được lượt bấm ${code}: ${error.message}`));
+          // Khách MỚI với Page: Meta không báo mã — ghi lượt bấm chờ khớp với tin đầu của hội thoại mới.
+          if (target === 'messenger') qrBridgeMatcher.noteClick({ code, visitor });
         }
         response.writeHead(204, { 'Cache-Control': 'no-store' });
         return response.end();
@@ -1499,6 +1677,9 @@ const server = http.createServer(async (request, response) => {
       } else {
         recordQrScan(code, { userAgent, mode: redirect ? 'redirect' : 'page' })
           .catch(error => console.error(`QR: không ghi được lượt quét ${code}: ${error.message}`));
+        // Chrome Android được chuyển hướng thẳng sang m.me (không có trang đệm, không có beacon): lượt quét
+        // chính là lượt "mở Messenger" → cũng chờ khớp với hội thoại mới.
+        if (redirect) qrBridgeMatcher.noteClick({ code, visitor: qrVisitorKey(clientIp(request), userAgent), via: 'redirect' });
       }
       let page;
       try {
@@ -1616,8 +1797,11 @@ const server = http.createServer(async (request, response) => {
     if (qrImageMatch && request.method === 'GET') {
       const code = decodeURIComponent(qrImageMatch[1]).toLowerCase();
       if (!isValidQrCode(code)) return sendJson(response, 400, { error: 'Mã QR chỉ gồm chữ thường, số và gạch nối, tối đa 40 ký tự.' });
-      // Nhân viên lấy ảnh = tạo mã: từ đây /q/<mã> được đếm và "#mã" trong tin được nhận là mã thẻ.
-      await registerQrCode(code);
+      // R13 (L5): GET KHÔNG tạo mã nữa. Trước đây lấy ảnh = tạo mã, nên nhân viên thường (bị 403 ở POST /api/qr/codes)
+      // vẫn tạo được mã bằng cách mở URL ảnh, và mở nhầm URL là sinh mã rác. Mã chính tự đăng ký lúc khởi động;
+      // mã khác phải tạo ở Cài đặt → Mã QR (Quản trị) rồi mới lấy được ảnh.
+      const knownQrCode = code === qrMainCode || (await listQrScans()).codes.some(entry => entry.code === code);
+      if (!knownQrCode) return sendJson(response, 404, { error: 'Chưa có mã QR này. Tạo mã ở Cài đặt → Mã QR trước khi lấy ảnh.' });
       const target = qrTargetUrl(metaConfig.publicBaseUrl, code);
       const download = url.searchParams.get('download') === '1';
       const disposition = `${download ? 'attachment' : 'inline'}; filename="qr-${code}.${qrImageMatch[2]}"`;
@@ -1799,7 +1983,8 @@ const server = http.createServer(async (request, response) => {
       // handoffKeywords không bị xóa khi form không gửi).
       const settings = await writeChatbotSettings({
         ...mergeChatbotSettingsPatch(current, payload),
-        messageTemplates: payload.messageTemplates ?? current.messageTemplates,
+        // R13 (C2): GỘP theo từng mã mẫu (mã không gửi giữ nguyên, null = về mặc định / xoá mẫu tự tạo), không thay cả bộ.
+        messageTemplates: mergeMessageTemplatesPatch(current.messageTemplates, payload.messageTemplates),
         directApiKey: String(payload.directApiKey || '').trim() || (providerChanged ? '' : current.directApiKey),
         updatedAt: Date.now()
       });
@@ -2156,7 +2341,8 @@ const server = http.createServer(async (request, response) => {
     // Kết nối Pancake POS (Cài đặt → Kênh): khoá dán một lần, được kiểm tra với
     // POS rồi lưu riêng trên máy chủ; giao diện chỉ thấy vài ký tự đầu/cuối.
     if (request.method === 'GET' && url.pathname === '/api/phone-warnings/pos') {
-      return sendJson(response, 200, posStatus());
+      // R13 (T5): kèm trạng thái lượt đồng bộ POS gần nhất (cảnh báo chạm trần trang, lỗi).
+      return sendJson(response, 200, { ...posStatus(), sync: posSyncStatus() });
     }
     if (request.method === 'POST' && url.pathname === '/api/phone-warnings/pos') {
       if (!(await requireManager(request, response))) return;
@@ -2181,6 +2367,8 @@ const server = http.createServer(async (request, response) => {
       const payload = await readBody(request);
       const sinceHours = Math.min(24 * 30, Math.max(1, Number(payload.sinceHours) || 48));
       const summary = await syncPosLandingOrders({ sinceHours });
+      if (!summary?.disabled) recordPosSyncStatus(summary);
+      if (summary?.warnings?.length) console.warn(`Đồng bộ POS (tay) CẢNH BÁO: ${summary.warnings.join('; ')}`);
       audit(request, 'landing.sync_pos', { summary: `Kéo đơn landing từ POS (${sinceHours} giờ): mới ${Number(summary?.created) || 0}, cập nhật ${Number(summary?.updated) || 0}, hủy ${Number(summary?.cancelled) || 0}.` });
       return sendJson(response, 200, summary);
     }
@@ -2246,20 +2434,26 @@ const server = http.createServer(async (request, response) => {
         if (!payload || !payload.event_type || payload.event_type === 'verify') return undefined;
         // Chẩn đoán cấu trúc gói tin: chỉ PANCAKE_DEBUG_KEYS=1 mới bật, tối đa 30 dòng/phút.
         if (debugFlagOn('PANCAKE_DEBUG_KEYS') && pancakeDebugAllowed()) console.log(describePancakePayload(payload));
+        // Hội thoại mới đang giữ một lượt bấm nút trang đệm (khách mới quét thẻ): chào SAU khi bot trả lời xong.
+        let qrBridgeHeld = [];
         try {
           const summary = await handlePancakeWebhook(payload, {
             processChatbotChanges,
             chatbotDependencies,
             // Khách quét QR gửi tin soạn sẵn mang #mã: chào bằng QR_OFFER như
             // luồng Meta, và không đưa chính tin đó cho bot (kẻo khách nhận hai tin).
-            beforeBot: changes => {
+            // Khách mới khớp lượt bấm (không mang mã): bot VẪN trả lời tin đầu như thường, ưu đãi đi sau.
+            beforeBot: async changes => {
               scheduleQrGreetings(changes);
+              qrBridgeHeld = await considerQrBridgeClicks(changes);
               return changes.filter(change => !isCardScan(change));
             }
           });
           if (summary.stored) console.log(`Webhook Pancake: ghi ${summary.stored} tin, đưa bot ${summary.bot}`);
         } catch (error) {
           console.error('Webhook Pancake xử lý lỗi:', error.message);
+        } finally {
+          qrBridgeMatcher.botDone(qrBridgeHeld);
         }
         return undefined;
       }
@@ -2375,7 +2569,7 @@ const server = http.createServer(async (request, response) => {
       if (url.pathname === '/api/customers/audience.csv') {
         response.writeHead(200, {
           'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="remarketing-${new Date().toISOString().slice(0, 10)}.csv"`,
+          'Content-Disposition': `attachment; filename="remarketing-${vnDateStamp()}.csv"`,
           'Cache-Control': 'no-store'
         });
         return response.end(customersToAudienceCsv(result.items));
@@ -2384,7 +2578,7 @@ const server = http.createServer(async (request, response) => {
         const { labels } = await readInboxSettings();
         response.writeHead(200, {
           'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="khach-hang-${new Date().toISOString().slice(0, 10)}.csv"`,
+          'Content-Disposition': `attachment; filename="khach-hang-${vnDateStamp()}.csv"`,
           'Cache-Control': 'no-store'
         });
         return response.end(customersToCsv(result.items, labels));
@@ -2423,7 +2617,7 @@ const server = http.createServer(async (request, response) => {
         try {
           const payload = await readBody(request);
           const actor = await requestActor(request);
-          await setCustomerLabels(customer.editKey, payload.labels || [], customer.derivedLabels, Date.now(), { by: actorStamp(actor) });
+          await setCustomerLabels(customer.editKey, payload.labels || [], customer.derivedLabels, Date.now(), { by: actorStamp(actor), allowedIds: await allowedLabelIdSet() });
           invalidateBuyersCache();
           const fresh = await findCustomerById(customer.id);
           const change = labelChangeDetails(customer.labels || [], fresh?.labels || [], await inboxLabelDefs());
@@ -2474,10 +2668,12 @@ const server = http.createServer(async (request, response) => {
         for (const product of customer.products || []) if (product?.sku) names.set(product.sku, product.name);
         const productName = (sku, name) => name || names.get(String(sku || '')) || String(sku || '');
 
+        // R13 (M3): tệp khách hàng lưu mã kèm tiền tố nguồn ("CB-…", "LP-…"), kho lưu trữ và hội thoại lưu mã trần →
+        // khử trùng theo mã ĐÃ BỎ tiền tố (trước đây mỗi đơn đã xuất kho hiện hai lần).
         const byId = new Map();
         const exported = key ? (await listExportedCustomers()).find(person => customerPhoneKey(person.phone) === key) : null;
         for (const order of exported?.orders || []) {
-          byId.set(String(order.id), {
+          byId.set(orderHistoryKey(order.id), {
             id: String(order.id),
             at: Number(order.orderedAt) || Number(order.exportedAt) || 0,
             status: 'Đã xuất kho',
@@ -2492,11 +2688,11 @@ const server = http.createServer(async (request, response) => {
         // khách hàng chi tiết hơn nên giữ, bản kho chỉ bù phần còn thiếu.
         const { items } = key ? await readOrderArchive({ limit: 0 }) : { items: [] };
         for (const record of items) {
-          if (customerPhoneKey(record.phone) !== key || byId.has(String(record.id))) continue;
-          byId.set(String(record.id), {
+          if (customerPhoneKey(record.phone) !== key || byId.has(orderHistoryKey(record.id))) continue;
+          byId.set(orderHistoryKey(record.id), {
             id: String(record.id),
             at: Number(record.at) || 0,
-            status: record.st || 'Đã ghi kho',
+            status: archiveStatusLabel(record.st),
             source: record.src || '',
             total: Number(record.total) || 0,
             products: (Array.isArray(record.items) ? record.items : []).map(([sku, quantity]) => ({
@@ -2505,8 +2701,8 @@ const server = http.createServer(async (request, response) => {
           });
         }
         for (const order of liveOrders) {
-          if (!order?.id || byId.has(String(order.id))) continue;
-          byId.set(String(order.id), {
+          if (!order?.id || byId.has(orderHistoryKey(order.id))) continue;
+          byId.set(orderHistoryKey(order.id), {
             id: String(order.id),
             at: Number(order.createdAt) || 0,
             status: order.processingStatus === 'cancelled' ? 'Hủy' : String(order.status || 'Mới'),
@@ -2687,10 +2883,12 @@ const server = http.createServer(async (request, response) => {
       const id = decodeURIComponent(conversationFlagsMatch[1]);
       const payload = await readBody(request);
       let before = null;
+      // R13 (M4): thẻ gửi lên chỉ nhận mã có trong Cài đặt → Tin nhắn (thẻ hội thoại đang mang thì giữ), chỉ chuỗi, bỏ trùng, ≤ 20.
+      const allowedLabelIds = Array.isArray(payload.labels) ? await allowedLabelIdSet() : null;
       const conversation = await updateMessagingStore(store => {
         const current = store.conversations.find(item => item.id === id);
         if (current) before = { labels: Array.isArray(current.labels) ? [...current.labels] : [], muted: Boolean(current.muted), unread: Boolean(current.unread) };
-        return setConversationFlags(store, id, payload);
+        return setConversationFlags(store, id, payload, { allowedLabelIds });
       });
       if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
       const actor = await requestActor(request);
@@ -2833,6 +3031,8 @@ const server = http.createServer(async (request, response) => {
         const hasItems = payload.items !== undefined;
         if (hasItems && !Array.isArray(payload.items)) return sendJson(response, 400, { error: 'Danh sách quà tặng không hợp lệ.' });
         const items = hasItems ? payload.items : null;
+        // R13 (M8): `items: []` từng xoá sạch quà kể cả miễn ship (2 túi thành 318.000đ có ship) — xoá hết phải kèm confirmClear:true.
+        if (items && !items.length && payload.confirmClear !== true && getGifts().length) return sendJson(response, 400, { error: 'Danh sách quà tặng rỗng sẽ xoá toàn bộ quà (kể cả miễn phí vận chuyển). Nếu đúng là muốn xoá hết, hãy xác nhận (confirmClear: true).', needsConfirmClear: true });
         if (items && items.length > 50) return sendJson(response, 400, { error: 'Tối đa 50 quà tặng.' });
         const giftIds = new Set();
         for (const item of items || []) {
@@ -2878,6 +3078,8 @@ const server = http.createServer(async (request, response) => {
     }
     const pipelineStepMatch = url.pathname.match(/^\/api\/chatbot\/pipeline\/([a-z_]+)$/);
     if (pipelineStepMatch && request.method === 'GET') {
+      // R13 (L7): bước xử lý trả MÃ NGUỒN máy chủ — chỉ chủ shop / Quản trị xem (danh sách bước vẫn mở cho nhân viên).
+      if (!(await requireManager(request, response, 'Chỉ chủ shop hoặc Quản trị mới xem được mã nguồn bước xử lý.'))) return;
       const step = await readPipelineStep(pipelineStepMatch[1]);
       if (!step) return sendJson(response, 404, { error: 'Không có bước xử lý này.' });
       return sendJson(response, 200, step);
@@ -2891,18 +3093,14 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'POST') {
         const payload = await readBody(request);
         if (payload.type === 'order') {
-          let order;
-          try {
-            order = normalizeCustomerOrder(payload.order);
-          } catch (error) {
-            return sendJson(response, 400, { error: error.message });
-          }
-          order.id = uniqueOrderId(order.id, await takenOrderIds());
+          const draft = await draftManualOrder(id, payload, async order => { order.id = uniqueOrderId(order.id, await takenOrderIds()); });
+          if (draft.reject) return sendJson(response, draft.reject.status, draft.reject.body);
+          const { order } = draft;
           // Đơn tạo tay: người tạo = người đang đăng nhập (createdBy + mục lịch sử đầu tiên).
           const actor = await requestActor(request);
           const creator = actorStamp(actor);
           if (actor.username && (!order.employee || order.employee === 'Bạn')) order.employee = creator.name;
-          stampOrderCreated(order, creator, { summary: `Tạo đơn tay: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 120)}, tổng ${order.total}đ.` });
+          stampOrderCreated(order, creator, { summary: `Tạo đơn tay: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 120)}, tổng ${moneyText(order.total)}.` });
           const viaPancake = Boolean(conversation.pancakeConversationId);
           if (!viaPancake) {
             // Messenger trực tiếp: thẻ receipt; bị từ chối thì ảnh phiếu. Không bao giờ gửi bản chữ.
@@ -2916,6 +3114,7 @@ const server = http.createServer(async (request, response) => {
               }
               order.delivery = { status: 'sent', messageId: String(sent?.message?.mid || sent?.message?.id || ''), sentAt: Date.now() };
             } catch (error) {
+              draft.release();
               return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });
             }
           }
@@ -2934,13 +3133,13 @@ const server = http.createServer(async (request, response) => {
             // Nhân viên tạo đơn trong CRM: gắn thẻ "Đã mua hàng" như đơn bot chốt.
             if (applyPurchaseLabels(item, order, orderLabels)) relabeledConversation = publicConversation(item);
             return item;
-          });
+          }).finally(draft.release);
           if (!stored) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
           audit(request, 'order.create', {
             target: orderTarget(order),
             conversationId: id,
             orderId: order.id,
-            summary: `Tạo đơn #${order.id} cho ${order.name}: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 100)}, tổng ${order.total}đ.`,
+            summary: `Tạo đơn #${order.id} cho ${order.name}: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 100)}, tổng ${moneyText(order.total)}.`,
             details: { total: order.total, quantity: order.products.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) }
           }, actor);
           if (relabeledConversation) {
@@ -2948,6 +3147,9 @@ const server = http.createServer(async (request, response) => {
             appendLabelAudit({ actor, conversation: { id, name: stored.name || '' }, before: labelsBefore, after: relabeledConversation.labels, labelDefs, reason: 'tự gắn khi tạo đơn' });
           }
           markFollowUpWins().catch(() => {});
+          // R13: đơn tay cũng vào kho lưu trữ ngay lúc tạo như đơn bot / landing (trước đây chỉ vào khi được sửa) —
+          // ô tìm nhanh Ctrl K và "Lịch sử đơn" của khách tra đơn theo kho này.
+          await appendOrderToArchive(order).catch(() => {});
           // Phiếu xác nhận có tới khách thật không (giao diện báo "Đã gửi…" hay "chưa gửi được, bấm Gửi lại").
           // Messenger trực tiếp: gửi lỗi thì đã trả 502 "Chưa tạo đơn" ở trên, tới đây là đã gửi.
           let receipt = { receiptSent: true, receiptVia: 'messenger', receiptError: '' };
@@ -3068,7 +3270,9 @@ const server = http.createServer(async (request, response) => {
       const owner = store.conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));
       if (!owner) return sendJson(response, 404, { error: 'Không tìm thấy đơn này trong hội thoại nào.' });
       if (!posConfigured()) return sendJson(response, 400, { error: 'Chưa kết nối Pancake POS (Cài đặt → Kênh).' });
-      const outcome = await syncOrderToPos(owner.id, orderId);
+      // R13 (M7): đơn mở lại sau khi POS đã hủy → lên lại thành ĐƠN POS MỚI (đơn cũ bên POS giữ nguyên trạng thái hủy).
+      const reopened = owner.customerOrders.find(order => order.id === orderId);
+      const outcome = needsPosRepush(reopened) ? await repushCancelledOrderToPos(owner, reopened) : await syncOrderToPos(owner.id, orderId);
       const actor = await requestActor(request);
       const pushed = owner.customerOrders.find(order => order.id === orderId);
       const pushSummary = outcome?.error ? `Đẩy đơn sang POS lỗi: ${String(outcome.error).slice(0, 120)}` : `Đẩy đơn sang POS${outcome?.systemId || outcome?.id ? ` (mã POS ${outcome.systemId || outcome.id})` : ''}.`;
@@ -3109,6 +3313,9 @@ const server = http.createServer(async (request, response) => {
           edit = { changed, action: orderEditAction(changed, draft), summary: describeOrderEdits(order, draft, changed) };
           recordOrderHistory(draft, { by: actorStamp(actor), action: edit.action, summary: edit.summary });
         }
+        // R13: trường applyCustomerOrderEdits đã XOÁ trên bản sao (cờ "Ô chọn khác chữ khách gõ" sau khi sửa địa chỉ, quà
+        // bám đuổi khi giỏ đổi, dấu ẩn khỏi bảng…) cũng phải mất trên đơn thật — Object.assign chỉ chép, không xoá.
+        for (const key of Object.keys(order)) if (!(key in draft)) delete order[key];
         Object.assign(order, draft);
         updated = order;
       };
@@ -3174,7 +3381,7 @@ const server = http.createServer(async (request, response) => {
         updated.pos = posOutcome;
       }
       // warnings: [chuỗi] cảnh báo không chặn của lần sửa (rỗng khi không có) — web hiện cạnh ô SĐT.
-      return sendJson(response, 200, { ...updated, processingNotes: processingNotes(updated), warnings: editWarnings });
+      return sendJson(response, 200, { ...updated, processingNotes: orderProcessingNotes(updated), warnings: editWarnings });
     }
     // Gửi lại phiếu xác nhận đơn cho khách (ảnh phiếu qua Pancake, thẻ receipt qua Messenger).
     const customerOrderResendMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)\/resend$/);
@@ -3207,23 +3414,27 @@ const server = http.createServer(async (request, response) => {
       const orderId = decodeURIComponent(customerOrderDeleteMatch[1]);
       let removed = null;
       let removedFrom = '';
+      // R13 (M2): đơn đã lên POS mà chưa hủy thì không xoá (xoá ở CRM để lại đơn POS sống → vẫn đi kiện). Không tự hủy POS.
+      let liveOnPos = null;
       await updateMessagingStore(store => {
         for (const conversation of store.conversations) {
           const orders = Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [];
           const index = orders.findIndex(order => order.id === orderId);
           if (index < 0) continue;
+          if (isLiveOnPos(orders[index])) { liveOnPos = orders[index]; return null; }
           [removed] = orders.splice(index, 1);
           removedFrom = conversation.id;
           publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
           break;
         }
         return removed;
-      });
+      }, { unchanged: result => !result });
+      if (liveOnPos) return sendJson(response, 409, { error: `Đơn này đã lên Pancake POS (#${liveOnPos.pos.systemId || liveOnPos.pos.id}) và chưa hủy. Hãy hủy đơn trước khi xoá.`, posId: String(liveOnPos.pos.id) });
       if (!removed) removed = await deleteLandingOrder(orderId);
       if (!removed) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
       // Xóa khỏi hệ thống nhưng vẫn giữ một dòng trong kho để còn tra lại.
       await appendOrderToArchive(removed, { status: 'deleted' }).catch(() => {});
-      audit(request, 'order.delete', { target: orderTarget(removed), conversationId: removedFrom, orderId, summary: `Xóa đơn #${orderId} của ${removed.name || 'khách'} (tổng ${Number(removed.total) || 0}đ) khỏi hệ thống.` });
+      audit(request, 'order.delete', { target: orderTarget(removed), conversationId: removedFrom, orderId, summary: `Xóa đơn #${orderId} của ${removed.name || 'khách'} (tổng ${moneyText(removed.total)}) khỏi hệ thống.` });
       return sendJson(response, 200, removed);
     }
     // Kho lưu trữ đơn: tra lại khách, số điện thoại, sản phẩm, địa chỉ của mọi
@@ -3258,7 +3469,8 @@ const server = http.createServer(async (request, response) => {
         const phoneWarning = fresh ? (fresh.level === 'none' && !fresh.hint ? undefined : fresh) : order.phoneWarning;
         // Ghi chú trả về chỉ còn lời khách; các mẩu máy từng chèn (nguồn, chiến dịch) bị bỏ.
         const refreshed = { ...order, phoneWarning, note: customerNote(order) };
-        withNotes.push({ ...refreshed, processingNotes: processingNotes(refreshed) });
+        // orderProcessingNotes = cờ gắn trên đơn (có thể trùng đơn, giá landing lệch, cần lên lại POS…) + ghi chú dựng từ dữ liệu.
+        withNotes.push({ ...refreshed, processingNotes: orderProcessingNotes(refreshed) });
       }
       return sendJsonWithEtag(request, response, { items: withNotes, total: withNotes.length });
     }
@@ -3296,7 +3508,7 @@ const server = http.createServer(async (request, response) => {
       const headers = Array.isArray(payload.headers) ? payload.headers.map(item => String(item ?? '')) : [];
       const rows = Array.isArray(payload.rows) ? payload.rows.filter(Array.isArray).slice(0, 20000) : [];
       if (!headers.length || !rows.length) return sendJson(response, 400, { error: 'Bảng đang trống, không có gì để xuất.' });
-      const fileName = String(payload.fileName || '').replace(/[^A-Za-z0-9._-]/g, '') || `nhap-du-lieu-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fileName = String(payload.fileName || '').replace(/[^A-Za-z0-9._-]/g, '') || `nhap-du-lieu-${vnDateStamp()}.xlsx`;
       audit(request, 'order.export', { target: { type: 'file', id: fileName, name: fileName }, summary: `Xuất bảng Nhập dữ liệu ra XLSX: ${rows.length} dòng (${fileName}).`, details: { kind: 'table', rows: rows.length } });
       return sendBinary(response, 200, buildPlainXlsx(headers, rows, { sheetName: 'Nhập dữ liệu' }), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName);
     }
@@ -3328,7 +3540,7 @@ const server = http.createServer(async (request, response) => {
       workbook.updateFile('xl/styles.xml', Buffer.from(cleanedWorkbook.stylesXml, 'utf8'));
       workbook.updateFile(worksheetPath, Buffer.from(worksheetXml, 'utf8'));
       const output = workbook.toBuffer();
-      const fileName = String(payload.fileName || '').replace(/[^A-Za-z0-9._-]/g, '') || `don-hang-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fileName = String(payload.fileName || '').replace(/[^A-Za-z0-9._-]/g, '') || `don-hang-${vnDateStamp()}.xlsx`;
       // Lịch sử xuất (14 ngày): ngày đơn đã chọn, số đơn (dòng có STT), số dòng, tệp để tải lại.
       await recordExport({
         day: String(payload.exportDay || ''),
@@ -3388,7 +3600,9 @@ const server = http.createServer(async (request, response) => {
       if (TRANSIENT_FILE_ERRORS.has(error.code)) return sendJson(response, 503, { error: 'Máy chủ đang bận đọc dữ liệu, vui lòng thử lại sau ít giây.' });
       return sendJson(response, 500, { error: 'Máy chủ gặp lỗi khi xử lý yêu cầu.' });
     }
-    sendJson(response, 400, { error: error.message });
+    // R13 (L8): lỗi kỹ thuật tiếng Anh ("Unexpected end of JSON input", "URI malformed", "Cannot read properties of
+    // null…") không đưa nguyên văn ra giao diện: câu tiếng Việt, chi tiết vào log.
+    sendJson(response, 400, { error: friendlyRequestError(error, { method: request.method, url: request.url }) });
   }
 });
 

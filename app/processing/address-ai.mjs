@@ -11,6 +11,11 @@ import { projectRoot } from '../config.mjs';
 import { getVertexAccessToken, vertexProjectId } from '../vertex-auth.mjs';
 import { describeDeliveryAddress, expandAddressAbbreviations, isUsableStreet, loadLocationIndex, lostHouseNumbers, newWardMentioned, normalizeLocationKey, resolveAddress, streetForDisplay } from './locations.mjs';
 
+// R13 (K12): phiên bản quy tắc suy luận nằm trong khoá cache. Kết quả sinh bằng prompt/phép kiểm CŨ (phường tự suy gắn
+// "high", quy đổi đơn vị mới về cũ) không được dùng lại: đổi prompt hay phép kiểm thì tăng phiên bản này.
+export const ADDRESS_AI_CACHE_VERSION = 'r13';
+const cacheKeySuffix = `|v:${ADDRESS_AI_CACHE_VERSION}`;
+
 const cachePath = process.env.ADDRESS_AI_CACHE_PATH || path.join(projectRoot, 'data', 'processed', 'address-ai-cache.json');
 const maximumCacheEntries = 5000;
 // Tra cứu Google Search có lúc mất hơn 20 giây: đơn landing (chạy nền) đợi được,
@@ -45,6 +50,8 @@ function scheduleCacheWrite() {
   cacheWrite = cacheWrite.then(async () => {
     const current = cache;
     if (!current) return;
+    // Mục của phiên bản cũ (khoá không mang phiên bản hiện tại) không còn được đọc: bỏ khỏi tệp.
+    for (const key of Object.keys(current)) if (!key.endsWith(cacheKeySuffix)) delete current[key];
     const keys = Object.keys(current);
     if (keys.length > maximumCacheEntries) {
       keys.sort((a, b) => (current[b].at || 0) - (current[a].at || 0));
@@ -79,10 +86,14 @@ export function addressHint(raw) {
 }
 
 export const addressAiSystemPrompt = [
-  'Bạn chuẩn hoá địa chỉ giao hàng tại Việt Nam cho kho vận. Kho dùng đơn vị hành chính BA CẤP theo danh mục TRƯỚC đợt sáp nhập năm 2025: 63 tỉnh/thành phố; quận/huyện/thị xã/thành phố thuộc tỉnh; phường/xã/thị trấn. Không dùng tên tỉnh mới sau sáp nhập, không bỏ cấp quận/huyện.',
+  // R13 (K12): câu mở đầu từng ghi "Kho dùng… BA CẤP… TRƯỚC đợt sáp nhập… Không dùng tên tỉnh mới, không bỏ cấp quận/huyện" —
+  // kéo ngược quy tắc "không quy đổi đơn vị mới về cũ" ở dưới (17 ca quy đổi, có ca sai hẳn nơi). Nay nói rõ hai kiểu.
+  'Bạn chuẩn hoá địa chỉ giao hàng tại Việt Nam cho kho vận. Khách ghi địa chỉ theo một trong hai kiểu, KHÔNG được đổi kiểu này sang kiểu kia: (1) kiểu CŨ ba cấp, trước đợt sáp nhập 1/7/2025 — 63 tỉnh/thành phố; quận/huyện/thị xã/thành phố thuộc tỉnh; phường/xã/thị trấn — danh mục của kho chỉ có kiểu này; (2) kiểu MỚI hai cấp từ 1/7/2025 — phường/xã mới + tỉnh/thành mới, không có quận/huyện. Địa chỉ kiểu cũ thì điền đủ ba cấp theo danh mục cũ (không dùng tên tỉnh mới, không bỏ cấp quận/huyện). Địa chỉ kiểu mới thì giữ nguyên như khách ghi, theo quy tắc ở cuối.',
   'Nhiệm vụ: từ địa chỉ khách gõ (có thể viết tắt, thiếu dấu, sai chính tả, dùng tên cũ, ghi khu đô thị/đường/địa danh thay cho phường), xác định đúng phường/xã, quận/huyện, tỉnh/thành mà địa chỉ đó thuộc về. Nếu được tra cứu Google Search, hãy tra để biết đường, khu dân cư, địa danh nằm ở phường/quận nào.',
   'Trả về DUY NHẤT một JSON, không markdown, không giải thích ngoài JSON:',
   '{"province":"tên đầy đủ có loại hình, ví dụ Thành phố Hồ Chí Minh / Tỉnh Lâm Đồng","district":"ví dụ Quận 1 / Thành phố Đà Lạt / Huyện Chợ Đồn","ward":"ví dụ Phường Bến Nghé / Xã Hoằng Đông / Thị trấn Chợ Đồn","street":"số nhà, ngõ, tên đường, thôn/ấp còn lại (không lặp lại ba cấp)","confidence":"high|low","ambiguous":false,"reason":"một câu ngắn tiếng Việt giải thích căn cứ"}',
+  // R13 (K12): phường/xã suy từ tên đường/địa danh (không có trong chữ khách) chỉ là GỢI Ý cho nhân viên.
+  'Khách không ghi phường/xã mà bạn chỉ suy ra được từ tên đường, khu dân cư hay địa danh: vẫn điền "ward" nhưng đặt confidence="low" và ghi trong "reason" căn cứ suy ra (ví dụ "phường suy từ tên đường"). Không chọn bừa một phường khi tên đường chạy qua nhiều phường.',
   'Quy tắc: không bịa. Địa chỉ ghi hai tỉnh khác nhau, hoặc không đủ thông tin để biết phường/xã, thì đặt ambiguous=true và để trống cấp không chắc. Giữ nguyên tỉnh/quận mà bộ đọc đã nhận ra, chỉ điền cấp còn thiếu. Tên cũ trước 2025 (ví dụ Quận 2, Quận 9 thuộc Thành phố Thủ Đức; Hà Tây thuộc Hà Nội) ghi theo danh mục hiện hành trước 2025 (Thành phố Thủ Đức).',
   // fix-addr (01/10): quy tắc chủ shop — địa chỉ sau sáp nhập giữ nguyên như khách ghi; AI chỉ điền cấp hành chính.
   'Địa chỉ khách ghi theo đơn vị MỚI từ 1/7/2025 (phường/xã mới + tỉnh/thành mới, không ghi quận/huyện, ví dụ "phường Chánh Hưng", "phường Trấn Biên, Đồng Nai"): KHÔNG quy đổi về phường/quận cũ. Chỉ điền "province" (tỉnh/thành chứa phường/xã mới đó), để trống "ward" và "district", ghi reason "địa chỉ sau sáp nhập".',
@@ -190,8 +201,51 @@ export function validateAddressGuess(guess, raw, hint = addressHint(raw)) {
   const streetInvented = !fromText && /\d/.test(finalStreet) && lostHouseNumbers(finalStreet, raw).length > 0;
   // Độ tin "high" chỉ khi phường/xã AI trả có trong chữ khách (so bỏ dấu) hay trùng phường bộ đọc đã nhận ra: phường
   // bịa ra (cùng quận, có trong danh mục) từng được nhận "high" 20/20 ca đo giả lập.
-  const wardInText = Boolean(known.ward) || wardNameInText(resolved.ward.name, raw);
+  // R13 (K12): cũng tính là "có trong chữ khách" khi kiểm được bằng danh mục — khách đã ghi quận/huyện và trong quận đó
+  // chỉ đúng MỘT phường/xã có tên gần trùng một cụm khách gõ (gõ lỗi, viết dính, i/y) và đó chính là phường AI trả.
+  const wardInText = Boolean(known.ward) || wardNameInText(resolved.ward.name, raw) || wardCheckedByCatalog(resolved, known, raw);
   return { ok: true, canonical, street: finalStreet, ward: resolved.ward.name, district: resolved.district.name, province: resolved.province.name, streetInvented, wardInText };
+}
+
+/**
+ * R13 (K12): khách đã ghi quận/huyện (bộ đọc nhận ra) và trong quận đó chỉ đúng một phường/xã có tên gần trùng một cụm
+ * khách gõ — sai 1 ký tự (2 với tên ≥ 9 ký tự), viết dính, khác i/y — và đó là phường mô hình trả. Phường số không tính.
+ */
+function wardCheckedByCatalog(resolved, known, raw) {
+  if (!known.district || known.district.code !== resolved.district.code) return false;
+  const index = loadLocationIndex();
+  const district = index.districts.find(entry => entry.code === resolved.district.code && entry.province.code === resolved.province.code);
+  if (!district) return false;
+  // Chỉ xét phần đường phố bộ đọc để lại (đã bỏ tên quận/tỉnh): "phù CÁT BÌNH định" không phải "Cát Minh" gõ lỗi.
+  const words = normalizeLocationKey(known.streetWithoutWard ?? known.street ?? '').split(' ').filter(Boolean);
+  const compact = value => value.replace(/ /g, '').replace(/y/g, 'i');
+  const near = entry => {
+    if (entry.numeric || entry.bare.length < 5) return false;
+    const target = compact(entry.bare);
+    const allowed = target.length >= 9 ? 2 : 1;
+    const size = entry.bare.split(' ').length;
+    // Cụm cùng số chữ với tên, hoặc một chữ viết dính ("tanmai").
+    for (const count of new Set([size, 1])) {
+      for (let i = 0; i + count <= words.length; i += 1) {
+        const window = compact(words.slice(i, i + count).join(' '));
+        if (Math.abs(window.length - target.length) <= allowed && editDistance(window, target) <= allowed) return true;
+      }
+    }
+    return false;
+  };
+  const matches = [...district.wards.values()].filter(near);
+  return matches.length === 1 && matches[0].code === resolved.ward.code;
+}
+
+function editDistance(a, b) {
+  if (a === b) return 0;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j += 1) current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    previous = current;
+  }
+  return previous[b.length];
 }
 
 /** Tên phường/xã (bỏ loại hình, trừ phường số) có trong chữ khách gõ không, so bỏ dấu. */
@@ -238,7 +292,7 @@ export async function inferAddress(raw, options = {}) {
   const described = describeDeliveryAddress(text);
   if (described.complete && !(options.allowWardUnverified === true && described.wardUnverified)) return null;
   const hint = addressHint(text);
-  const key = `${normalizeLocationKey(text)}|${settings.addressAiSearch !== false ? 's' : 'n'}`;
+  const key = `${normalizeLocationKey(text)}|${settings.addressAiSearch !== false ? 's' : 'n'}${cacheKeySuffix}`;
   const store = await readCache();
   if (options.force !== true && key in store) return store[key].result;
   // Hỏi mô hình mất tới hàng chục giây: ghi kết quả vào cache đọc lại SAU khi chờ (cache có thể
@@ -252,7 +306,24 @@ export async function inferAddress(raw, options = {}) {
     const { answer, sources } = await requestAddressGuess({ raw: text, hint: hint.text, settings, fetchImpl: options.fetchImpl, timeoutMs: options.timeoutMs });
     const guess = parseAddressAnswer(answer);
     const checked = validateAddressGuess(guess, text, hint);
-    if (checked.ok) {
+    if (checked.ok && !checked.postMerger && !checked.wardInText) {
+      // R13 (K12): phường/xã mô hình tự suy (không có trong chữ khách, không kiểm được bằng danh mục) — 21 ngày: 84/171
+      // kết quả, khoảng 1/10 bị nhân viên đổi phường trên POS. KHÔNG tự điền vào đơn: `canonical` rỗng (nơi gọi chỉ
+      // điền khi có canonical), kết quả mang `suggestion` để ghi gợi ý cho nhân viên đối chiếu.
+      result = {
+        canonical: '',
+        street: checked.street,
+        ward: '',
+        district: '',
+        province: '',
+        suggestOnly: true,
+        suggestion: { canonical: checked.canonical, ward: checked.ward, district: checked.district, province: checked.province },
+        reason: `Gợi ý (AI tự suy, chưa kiểm được): ${checked.ward}, ${checked.district}${guess.reason ? ` — ${String(guess.reason).trim()}` : ''}`.slice(0, 300),
+        confidence: 'low',
+        sources,
+        model: settings.directModel || ''
+      };
+    } else if (checked.ok) {
       result = {
         canonical: checked.canonical,
         street: checked.street,

@@ -135,6 +135,23 @@ export function mergeChatbotSettingsPatch(current = {}, patch = {}) {
 }
 
 /**
+ * R13 (C2): gộp bản vá mẫu tin vào bộ đang lưu. Trước đây PUT /api/chatbot/settings thay CẢ BỘ bằng
+ * `payload.messageTemplates`: một script gửi 1 mẫu (hay `{}`) là mọi mẫu đã chỉnh về mặc định mà không
+ * báo gì (QR_OFFER về bản giữ chỗ → ưu đãi QR ngừng gửi). Nay: mã không gửi kèm giữ nguyên; giá trị
+ * `null` = bỏ bản đã lưu (mẫu có sẵn về lời mặc định khi chuẩn hoá, mẫu tự tạo bị xoá); chuỗi rỗng vẫn
+ * là "tắt mẫu" như cũ. Bản vá không phải object thì bỏ qua.
+ */
+export function mergeMessageTemplatesPatch(current = {}, patch = undefined) {
+  const merged = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {};
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return merged;
+  for (const [id, text] of Object.entries(patch)) {
+    if (text === null || text === undefined) delete merged[id];
+    else merged[id] = text;
+  }
+  return merged;
+}
+
+/**
  * Chuẩn hóa cấu hình. `current` (tùy chọn): cấu hình đang lưu — khi có, `value` được coi là bản vá
  * và gộp sâu vào `current` trước (mergeChatbotSettingsPatch).
  */
@@ -214,6 +231,8 @@ export function normalizeChatbotSettings(input = {}, current = null) {
     ruleIntent: ['on', 'shadow', 'off'].includes(value.ruleIntent) ? value.ruleIntent : 'on',
     // Luật thử nghiệm (TRIAL_ASK, ORDER_ASK, TERSE_HOW, ADDRESS_COMPLETE): 'shadow' chỉ ghi log so với mô hình.
     experimentalRules: value.experimentalRules === 'on' ? 'on' : 'shadow',
+    // R13: luật ứng viên K1/K1b/K3/K4/K5 (rule-intent candidateRules) — 'shadow' (mặc định) chỉ ghi nhật ký, 'on' mới trả lời, 'off' tắt.
+    candidateRules: ['on', 'off'].includes(value.candidateRules) ? value.candidateRules : 'shadow',
     // Mô hình ra quyết định trước LLM (processing/intent-model.mjs): 'shadow' chỉ ghi log so với
     // câu trả lời thật; 'on' đủ tin cậy (≥ intentThreshold) và mẫu an toàn thì trả lời thẳng.
     intentModel: ['on', 'shadow', 'off'].includes(value.intentModel) ? value.intentModel : 'shadow',
@@ -224,7 +243,8 @@ export function normalizeChatbotSettings(input = {}, current = null) {
     // Khi cả intentModel 'on' và intentCascade 'on' thì tầng thắng — nên chỉ bật MỘT cái để so được kết quả.
     intentCascade: ['on', 'shadow', 'off'].includes(value.intentCascade) ? value.intentCascade : 'shadow',
     // Ngưỡng xác suất mẫu TRONG NHÓM (pWithin) để mô hình tầng tự trả lời; ngưỡng nhóm (pGroup ≥ 0,85) là hằng trong engine.
-    cascadeThreshold: Math.min(0.99, Math.max(0.5, Number(value.cascadeThreshold) || 0.8)),
+    // R13: mặc định 0,85 (khớp CASCADE_TEMPLATE_THRESHOLD trong engine; trước là 0,8). Cài đặt đã lưu giữ nguyên giá trị đã lưu.
+    cascadeThreshold: Math.min(0.99, Math.max(0.5, Number(value.cascadeThreshold) || 0.85)),
     // Canary: khi 'on' chỉ áp cho hội thoại có hash(id) % 100 < cascadeCanary (0–100, mặc định 100 = tất cả);
     // hội thoại ngoài canary chạy như shadow (nhật ký ghi cascade.canary: false).
     // null / "" (ô để trống) = không gửi → mặc định 100 (gộp với cấu hình cũ thì giữ giá trị cũ, xem mergeChatbotSettingsPatch).

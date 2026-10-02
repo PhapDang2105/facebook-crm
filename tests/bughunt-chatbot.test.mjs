@@ -122,7 +122,7 @@ test('hẹn chạy lại sau khi hết hạn mức: lúc chạy lại bot đã b
 });
 
 // ===== Cải tiến sau đánh giá hội thoại 23/09 =====
-import { cartQuickReply, processChatbotChanges as runChanges } from '../app/chatbot-engine.mjs';
+import { cartQuickReply, processChatbotChanges as runChanges, withFallbackTemplates } from '../app/chatbot-engine.mjs';
 import { resolveConversationProduct } from '../app/processing/product-detect.mjs';
 import { splitLongText } from '../app/pancake.mjs';
 
@@ -137,7 +137,12 @@ test('giỏ Facebook Shop: 1 SKU → bảng giá; SKU combo CB2-XANH / CB-VANGG+
   assert.deepEqual(two.pendingOrder.items.map(i => `${i.product} x${i.quantity}`), ['Granola Túi Xanh 450g x2']);
   const mix = cartQuickReply([{ sku: 'CB-VANGG+NAU', quantity: 0 }], t, {});
   assert.deepEqual(mix.pendingOrder.items.map(i => `${i.product} x${i.quantity}`).sort(), ['Granola Túi Nâu vị cacao 350g x1', 'Granola Túi Vàng 350g x1']);
-  assert.equal(cartQuickReply([{ sku: 'XYZ-123', quantity: 1 }], t, {}), null);
+  // R13 (02/10) — sửa khẳng định cũ `=== null` ("SKU lạ → để model"): đó chính là hành vi lỗi của vòng 13 (inbox1 B5 —
+  // giỏ CB10-MIX bị mô hình đoán thành "Combo 10 gói Cam"). Mã lạ nay trả mẫu ghi nhận + thẻ, không dựng giỏ, không về mô hình.
+  const unknown = cartQuickReply([{ sku: 'XYZ-123', quantity: 1 }], withFallbackTemplates(t), {});
+  assert.equal(unknown.templateId, 'SHOP_CART_UNKNOWN');
+  assert.equal(unknown.attention, true);
+  assert.equal(unknown.pendingOrder, undefined);
 });
 
 test('tên quảng cáo nội bộ "qc mess 2504 · mess Xanh" / "xanh mes" nhận ra Túi Xanh', () => {

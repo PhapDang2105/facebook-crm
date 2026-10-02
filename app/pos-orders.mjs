@@ -15,8 +15,9 @@ import { projectRoot } from './config.mjs';
 import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
-import { comboKey, findProductBySku, getGifts, giftsForKey, hasLivestreamGift, matchProduct } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, getGifts, giftsForKey, giftSwapPlan, hasLivestreamGift, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
+import { addProcessingFlag, removeProcessingFlag } from './order-edits.mjs';
 
 /**
  * SKU gửi POS cho một dòng đơn. Đơn cũ còn ghi SKU đã đổi trong danh mục
@@ -282,9 +283,59 @@ export function posComboPlan(order, { posSkus = null, posPrices = null, products
  * trong POS thì bỏ qua thay vì làm POS từ chối cả đơn. `posPrices` (Map mã → giá
  * niêm yết POS) để tính giảm giá khi đẩy dòng combo.
  */
+/* ===== R13: đơn khách ĐỔI QUÀ (bát/muỗng/quạt → 2 gói granola nhỏ) =====
+ * Bộ soạn đơn ghi `order.giftSwap = [{ name, sku, weight }]` (mỗi gói một mục; `sku` rỗng = khách chưa chọn vị) và
+ * `order.giftSwapRemoved = [tên quà bị thay]`. Trước đây dòng quà đẩy POS dựng thẳng từ bảng quà (giftsForKey) nên
+ * đơn đã đổi quà vẫn lên bát + muỗng. Đơn KHÔNG có giftSwap chạy y như cũ.
+ */
+/**
+ * Kế hoạch dòng quà của đơn đổi quà; null khi đơn không đổi quà.
+ * - `removes(gift)`: quà theo bảng quà này đã bị khách đổi (không đẩy lên POS);
+ * - `lines`: dòng quà thay thế đẩy được [{ sku, name, weight, quantity }] (gộp theo SKU);
+ * - `missing`: quà thay thế KHÔNG đẩy được — chưa chọn vị (không có SKU) hay POS chưa có mẫu mã đó. Không đoán mã
+ *   khác: nơi gọi ghi vào ghi chú đơn POS và gắn ghi chú xử lý cho nhân viên.
+ * R13 (gộp): phần tính nằm ở giftSwapPlan (processing/catalog.mjs) — dùng chung với file xuất kho (order-export.mjs).
+ */
+export function posGiftSwapPlan(order, posSkus = null) {
+  return giftSwapPlan(order, posSkus);
+}
+
+/** Câu ghi chú xử lý cho nhân viên khi quà thay thế không đẩy được lên POS. */
+export function posGiftSwapFlag(missing = []) {
+  return `⚠ Đổi quà: POS chưa có ${[...new Set(missing)].join(', ')} — nhân viên thêm quà thay thế trên POS`.slice(0, 160);
+}
+
+/**
+ * R13 (gộp): đặt lại ghi chú xử lý "Đổi quà: POS chưa có …" của đơn theo kết quả lần đẩy/sửa POS gần nhất — bỏ ghi chú
+ * đổi quà cũ (giỏ/quà đã đổi), gắn ghi chú mới khi còn quà thay thế chưa lên được POS. Trả true nếu đơn có thay đổi.
+ */
+export function applyGiftSwapFlag(order, missing = []) {
+  if (!order || typeof order !== 'object') return false;
+  const list = (Array.isArray(missing) ? missing : []).filter(Boolean);
+  const flag = list.length ? posGiftSwapFlag(list) : '';
+  const removed = removeProcessingFlag(order, item => String(item).startsWith('⚠ Đổi quà: POS chưa có') && item !== flag);
+  const added = flag ? addProcessingFlag(order, flag) : false;
+  return removed || added;
+}
+
+/** Đơn đổi quà bỏ bát/muỗng mà mã combo POS đã GỒM bát + muỗng (…+BGD+M): không dùng mã combo đó. */
+function giftSwapDropsBundledGifts(order) {
+  const plan = posGiftSwapPlan(order);
+  if (!plan) return false;
+  return (getGifts() || []).some(gift => ['BGD', 'MUONG'].includes(String(gift?.sku || '').trim().toUpperCase()) && plan.removes(gift));
+}
+
+/** posComboPlan cho đơn thật: thêm luật đổi quà (không dùng combo gồm sẵn quà khách đã đổi → đẩy từng túi + giảm giá). */
+function comboPlanForOrder(order, options) {
+  const plan = posComboPlan(order, options);
+  if (plan.combo?.includesGifts && giftSwapDropsBundledGifts(order)) return { ...plan, combo: null, comboRetail: 0 };
+  return plan;
+}
+
 export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '', shopId = '', posSkus = null, posPrices = null, geo = {} } = {}) {
   const products = withCurrentSkus(order.products);
-  const { combo, goods, comboRetail } = posComboPlan(order, { posSkus, posPrices, products });
+  const { combo, goods, comboRetail } = comboPlanForOrder(order, { posSkus, posPrices, products });
+  const giftSwap = posGiftSwapPlan(order, posSkus);
   const comboItems = combo ? [{
     variation_id: combo.sku,
     quantity: 1,
@@ -317,6 +368,8 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   const basketGifts = basketKey ? giftsForKey(basketKey, { livestream: isLivestreamOrder(order) }) : [];
   for (const gift of basketGifts) {
     const sku = String(gift.sku || '').trim().toUpperCase();
+    // R13: khách đã đổi quà này (bát/muỗng/quạt → gói nhỏ): không đẩy; quà thay thế thêm ở dưới.
+    if (giftSwap?.removes(gift)) continue;
     // Chỉ bỏ khi đã có DÒNG QUÀ cùng mã: túi tặng (đơn 5 Túi Vàng tặng thêm 1 Túi Vàng) trùng SKU dòng hàng vẫn phải đẩy.
     if (!sku || items.some(item => item.variation_id === sku && item.is_bonus_product)) continue;
     // Combo POS đã gồm bát + muỗng dừa trong mã (…+BGD+M): không thêm dòng quà trùng.
@@ -339,9 +392,16 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   if (order.promoGift && bagCount === 2 && !combo?.includesGifts && !hasLivestreamGift(basketGifts)) {
     const sku = 'BGD';
     const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === sku);
-    if (!items.some(item => item.variation_id === sku) && (!posSkus || posSkus.has(sku))) {
+    // R13: khách đã đổi bát lấy gói nhỏ thì bát ưu đãi bám đuổi cũng không đẩy.
+    const swapped = Boolean(giftSwap) && (giftSwap.removes({ name: order.promoGift, sku }) || (bowl && giftSwap.removes(bowl)));
+    if (!swapped && !items.some(item => item.variation_id === sku) && (!posSkus || posSkus.has(sku))) {
       items.push({ variation_id: sku, quantity: 1, discount_each_product: 0, is_bonus_product: true, is_discount_percent: false, is_wholesale: false, variation_info: { name: String(order.promoGift), retail_price: 0, weight: money(bowl?.weight || 10) } });
     }
+  }
+  // R13: quà thay thế khách chọn (gói granola nhỏ) → dòng tặng riêng giá 0. Mã POS chưa có / chưa chọn vị thì KHÔNG
+  // đoán mã khác: ghi rõ trong ghi chú đơn POS, nơi đẩy gắn thêm ghi chú xử lý cho nhân viên (posGiftSwapFlag).
+  for (const line of giftSwap?.lines || []) {
+    items.push({ variation_id: line.sku, quantity: line.quantity, discount_each_product: 0, is_bonus_product: true, is_discount_percent: false, is_wholesale: false, variation_info: { name: line.name, retail_price: 0, weight: line.weight } });
   }
   const address = String(order.address || '').trim();
   // Khách đã chuyển khoản (đủ hay đặt cọc): POS chỉ thu hộ phần còn lại.
@@ -350,7 +410,8 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   const paymentNote = prepaid <= 0 ? '' : codAmount > 0
     ? `Đã chuyển khoản ${formatVnd(prepaid)} (đặt cọc), thu COD ${formatVnd(codAmount)}`
     : `Đã chuyển khoản ${formatVnd(prepaid)}, KHÔNG thu COD`;
-  const noteParts = [`Đơn CRM #${order.id}`, order.employee ? `tạo bởi ${order.employee}` : '', paymentNote, order.gift ? `Quà: ${order.gift}` : '', order.note ? `Khách ghi: ${order.note}` : '',
+  const swapNote = giftSwap?.missing.length ? `⚠ Đổi quà: chưa có mã POS cho ${[...new Set(giftSwap.missing)].join(', ')} — nhân viên thêm quà thay thế` : '';
+  const noteParts = [`Đơn CRM #${order.id}`, order.employee ? `tạo bởi ${order.employee}` : '', paymentNote, order.gift ? `Quà: ${order.gift}` : '', swapNote, order.note ? `Khách ghi: ${order.note}` : '',
     // Vòng 12: ghi chú giao hàng khách ghi lẫn trong địa chỉ và cảnh báo địa chỉ bot nhận cần soát.
     order.deliveryNote ? `Giao: ${order.deliveryNote}` : '', order.addressCheck ? `⚠ ${order.addressCheck}` : ''].filter(Boolean);
   return {
@@ -394,7 +455,7 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
  * trên POS (posComboFor đã kiểm), không đòi từng túi lẻ; không thì mọi SKU dòng.
  */
 function missingPosSkus(order, products, posSkus, posPrices) {
-  if (posComboPlan(order, { posSkus, posPrices, products, warn: false }).combo) return [];
+  if (comboPlanForOrder(order, { posSkus, posPrices, products, warn: false }).combo) return [];
   return products.filter(item => !item.sku || !posSkus.has(String(item.sku).trim().toUpperCase())).map(item => item.sku || item.name);
 }
 
@@ -464,7 +525,9 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
       if (Number(response.status) >= 500) failure.uncertain = true;
       throw failure;
     }
-    const created = { id: String(data.id), systemId: data.system_id ? String(data.system_id) : '', status: String(data.status_name || '') };
+    // R13: quà thay thế không đẩy được (POS chưa có mã / chưa chọn vị) đi kèm kết quả để nơi gọi gắn ghi chú xử lý.
+    const swapMissing = posGiftSwapPlan(order, posSkus)?.missing || [];
+    const created = { id: String(data.id), systemId: data.system_id ? String(data.system_id) : '', status: String(data.status_name || ''), ...(swapMissing.length ? { giftSwapMissing: [...new Set(swapMissing)] } : {}) };
     // 26/09: POS vẫn BỎ dòng tặng lúc tạo đơn (đủ UUID, is_bonus_product) — đơn combo 3 của bot lên POS không
     // có bát/muỗng dừa dù CRM ghi quà. Sửa đơn (PUT) thì POS giữ dòng tặng: đọc lại đơn vừa tạo, thiếu quà thì
     // gửi PUT cùng giỏ để bổ sung. Lỗi ở bước này không làm hỏng việc tạo đơn (chỉ ghi log).
@@ -536,7 +599,10 @@ export async function updatePosOrder(order, { conversation = {}, config = posCon
     let body = {};
     try { body = await response.json(); } catch {}
     if (!response.ok || body?.success === false) throw new Error(`Pancake POS không nhận sửa đơn (${response.status}): ${body?.message || body?.error || 'không rõ lý do'}`);
-    return { id: String(order.pos.id) };
+    // R13 (gộp): như đường tạo đơn — quà thay thế không lên được POS (chưa có mã / chưa chọn vị) đi kèm kết quả để nơi
+    // gọi gắn ghi chú xử lý (applyGiftSwapFlag). Đơn không đổi quà: kết quả y như cũ ({ id }).
+    const swapMissing = posGiftSwapPlan(order, posSkus)?.missing || [];
+    return { id: String(order.pos.id), ...(swapMissing.length ? { giftSwapMissing: [...new Set(swapMissing)] } : {}) };
   } finally {
     clearTimeout(timer);
   }
@@ -692,6 +758,8 @@ async function syncOrderToPosOnce(conversationId, orderId, { config = posConfig(
     const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === orderId);
     // Đơn đã nhận mã POS ở đường khác trong lúc chờ: không đè mã bằng lỗi.
     if (target && !(target.pos?.id && !outcome.id)) target.pos = outcome;
+    // R13: đơn đổi quà mà quà thay thế chưa lên được POS → ghi chú xử lý cho nhân viên (bảng Đơn hàng).
+    if (target && outcome.giftSwapMissing?.length) addProcessingFlag(target, posGiftSwapFlag(outcome.giftSwapMissing));
     return null;
   });
   publishMessagingEvent({ type: 'customer-panel', conversationId });

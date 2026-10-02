@@ -220,15 +220,18 @@ test('giỏ đang giữ: khách quen (thẻ Đã mua, đơn cũ) + thẻ cần n
   assert.equal(followUp.basketAfterOrders({ pendingOrder: pending, customerOrders: [{ id: 'o', createdAt: now - 40 * DAY }] }, [], now), true);
 });
 
-test('tin nhắc giỏ: bot đã hỏi phường/xã một lần thì không hỏi lại y câu đó, chỉ nhắc chung giỏ', () => {
+test('tin nhắc giỏ: bot đã hỏi phường/xã một lần thì tin nhắc vẫn nêu đúng phần còn thiếu (R13: trước là lời nhắc chung)', () => {
   const templates = normalizeChatbotSettings({ enabled: true }).messageTemplates;
   const pending = { items: [{ product: 'Granola Túi Vàng 350g', code: 'GRA-VANG-H350', quantity: 2 }], key: 'k', at: now - HOUR, phone: '0909123456', address: '12 Lê Lợi, Hồ Chí Minh' };
   const first = followUp.orderRemindText({ gender: 'female', pendingOrder: { ...pending, addressAsks: 0 } }, templates, { now });
   assert.match(first, /phường\/xã/, 'chưa hỏi lần nào: nêu đúng phần thiếu');
   const again = followUp.orderRemindText({ gender: 'female', pendingOrder: { ...pending, addressAsks: 1 } }, templates, { now });
   assert.match(again, /^Dạ em vẫn đang giữ đơn 2 Granola Túi Vàng 350g/);
-  assert.doesNotMatch(again, /phường|quận/);
-  assert.match(again, /Chị nhắn em khi tiện để em lên đơn/);
+  // R13 (02/10, inbox2 C2) — sửa khẳng định cũ (không nêu phường/quận, chỉ "nhắn em khi tiện"): lời nhắc chung không cho
+  // khách biết đơn chỉ còn thiếu đúng phường/xã, và khi bot đã hỏi hết lượt thì tin nhắc RỖNG (giỏ đủ SĐT + địa chỉ thiếu
+  // phường không bao giờ được bám). Nay tin nhắc luôn nêu đúng phần còn thiếu.
+  assert.match(again, /gửi giúp em .*phường\/xã/);
+  assert.doesNotMatch(again, /nhắn em khi tiện/);
   // Thiếu SĐT (không phải phường/xã): vẫn xin SĐT như cũ.
   assert.match(followUp.orderRemindText({ gender: 'female', pendingOrder: { ...pending, phone: '', addressAsks: 1 } }, templates, { now }), /gửi giúp em số điện thoại/);
 });

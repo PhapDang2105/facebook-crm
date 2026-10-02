@@ -269,9 +269,12 @@ test('vòng 9.5: đang giữ giỏ, câu tóm tắt "…đúng không/phải kh�
 
 test('vòng 9.6: hẹn dịp khác / rút ý định đặt → ORDER_POSTPONED + clearBasket; đã có đơn thật thì không (hủy đơn đi luồng riêng)', () => {
   const ctx = { commentBasket };
-  for (const text of ['thôi để bữa khác chốt nha', 'xin lỗi shop, mình hủy nhé', 'thôi để sau', 'hôm khác mình đặt', 'để đợt khác mua', 'xin lỗi em, chị không lấy nữa']) {
+  // R13 (sửa test cũ — test từng khẳng định hành vi lỗi): chỉ HẸN dịp khác ("bữa khác chốt", "để sau") thì KHÔNG xóa giỏ
+  // nữa (keepBasket) — ca thật 01/10: giỏ bị xóa, 3 phút sau khách gửi SĐT + địa chỉ thì bot hỏi lại vị. Có lời hủy rõ
+  // ("mình hủy", "không lấy nữa") mới xóa giỏ như cũ.
+  for (const [text, clears] of [['thôi để bữa khác chốt nha', false], ['xin lỗi shop, mình hủy nhé', true], ['thôi để sau', false], ['hôm khác mình đặt', false], ['để đợt khác mua', false], ['xin lỗi em, chị không lấy nữa', true]]) {
     const ruled = ruleIntent(text, { ...ctx, hasBasket: true, lastWasOrderStep: true, botLastTemplateId: 'ORDER_ADDRESS', botLastAgeMin: 3 });
-    assert.deepEqual([ruled?.rule, ruled?.value?.template_id, ruled?.clearBasket], ['ORDER_POSTPONED', 'ORDER_POSTPONED', true], text);
+    assert.deepEqual([ruled?.rule, ruled?.value?.template_id, Boolean(ruled?.clearBasket), Boolean(ruled?.keepBasket)], ['ORDER_POSTPONED', 'ORDER_POSTPONED', clears, !clears], text);
   }
   // Vòng 12: có đơn thật (≤ 60 phút) → luật ORDER_CANCEL (bot hủy đúng đơn đó), không phải ORDER_POSTPONED.
   assert.equal(ruleIntent('xin lỗi shop, mình hủy nhé', { ...ctx, hasRecentOrder: true, orderAgeMin: 30 })?.value?.template_id, 'ORDER_CANCEL');
@@ -393,7 +396,10 @@ test('vòng 10.2: số túi không vị (1/2/3, "combo 2 túi 298k fship", "1 t�
   for (const text of ['M lấy 1 túi', 'Cho chị 2 gói nhé', 'Mình 3 túi nhé', 'Mjh lấy com bo 2 túi 298k fship', 'Mình lấy một túi thôi', 'Lay cho 1 bit', 'Cho mình combo 3 túi', '2 túi 298 k miễn sip', 'Chị 2 gói', 'Gửi mình 2 túi nhé', 'Lấy 1 túi 174k']) {
     assert.deepEqual([ruleIntent(text, ctx)?.rule, ruleIntent(text, ctx)?.value?.template_id], ['BAGS_NO_FLAVOR', 'ASK_FLAVOR'], text);
   }
-  assert.equal(ruleIntent('M lấy 1 túi', { ...ctx, hasBasket: true, lastWasOrderStep: true, botLastTemplateId: 'ORDER_ADDRESS', botLastAgeMin: 3 }), null, 'đang giữ giỏ: có thể là bớt túi → mô hình');
+  // R13 (sửa test cũ): đang giữ giỏ, tin chỉ nêu số túi nay do luật ỨNG VIÊN K3 nhận — mặc định chạy ẩn (shadowOnly: engine
+  // vẫn hỏi mô hình như test cũ khẳng định); chỉ thành câu trả lời thật khi cờ luật ứng viên/thử nghiệm 'on'.
+  const heldOne = ruleIntent('M lấy 1 túi', { ...ctx, hasBasket: true, lastWasOrderStep: true, botLastTemplateId: 'ORDER_ADDRESS', botLastAgeMin: 3 });
+  assert.deepEqual([heldOne?.rule, heldOne?.shadowOnly, heldOne?.candidate], ['K3_QTY_HELD', true, true], 'đang giữ giỏ: có thể là bớt túi → mô hình (K3 chỉ chạy ẩn)');
   assert.notEqual(ruleIntent('1tui miễn ship hả', ctx)?.value?.template_id, 'ASK_FLAVOR', '"1 túi miễn ship hả" là hỏi chính sách');
   assert.notEqual(ruleIntent('Vàng 2 túi', ctx)?.value?.template_id, 'ASK_FLAVOR', '"vàng" là màu, không phải "vâng"');
   for (const text of ['Ba túi ba vị nhé', '3 túi 3 vị', 'Mình lấy ba túi ba vị đc ko', 'Uh chị đặt 3 túi mix 3 vị cho c', 'Mình lấy mỗi loại 1 túi', 'Cho mình 3 gói mỗi gói 1 loại nhé', 'Mình lấy 3 gói nhưng khác vị', '3 túi xanh vàng nâu nha em']) {

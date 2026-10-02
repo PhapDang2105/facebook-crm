@@ -1,4 +1,4 @@
-import { comboKey, findProductBySku, getGifts, giftsForKey, livestreamGiftSkus, matchProduct, normalizeText } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, getGifts, giftsForKey, giftSwapPlan, livestreamGiftSkus, matchProduct, normalizeText } from './processing/catalog.mjs';
 import { shippingFeeForKey, unitPriceInBasket } from './processing/pricing.mjs';
 import { canonicalLocationColumns, checkLocationColumns, normalizeExportLocation, streetForDisplay } from './processing/locations.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
@@ -40,6 +40,8 @@ export function exportFactsForOrders(orders = []) {
     facts.set(systemOrderRowId(order), {
       livestream: isLivestreamOrder(order),
       promoGift: Boolean(order.promoGift),
+      // R13 (gộp): đơn khách ĐỔI QUÀ (bát/muỗng/quạt → gói granola nhỏ) — file kho lên dòng quà theo quà đã đổi.
+      ...(Array.isArray(order.giftSwap) && order.giftSwap.length ? { giftSwap: { giftSwap: order.giftSwap, giftSwapRemoved: Array.isArray(order.giftSwapRemoved) ? order.giftSwapRemoved : [] } } : {}),
       ...(order.source === 'POS' ? { posGifts: posGiftLines(order) } : {})
     });
   }
@@ -418,17 +420,28 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
       // Đơn nguồn POS (nhân viên/Facebook Shop lên trên Pancake): quà là đúng các
       // dòng tặng trên POS (Quà Tặng LIVE nhân viên thêm tay…), không đoán lại.
       const posGifts = Array.isArray(facts?.posGifts) && facts.posGifts.length ? facts.posGifts : null;
+      // R13 (gộp): đơn hệ thống khách đã ĐỔI QUÀ (facts.giftSwap — order.giftSwap / giftSwapRemoved): bỏ dòng quà khách đã
+      // đổi (bát/muỗng/quạt), thêm dòng gói nhỏ thay thế giá 0 — cùng kế hoạch với đơn đẩy POS (giftSwapPlan). Gói chưa
+      // chọn vị (không SKU) không lên dòng (kho không nhận dòng không mã) — nhân viên đã có ghi chú xử lý trên đơn.
+      // Đơn không đổi quà (swap = null) chạy y như cũ.
+      const swap = !posGifts && facts?.giftSwap ? giftSwapPlan(facts.giftSwap) : null;
+      const basketGifts = !posGifts && basketKey ? giftsForKey(basketKey, { livestream }) : [];
       if (posGifts) posGifts.forEach(gift => addGift(gift.sku, gift.quantity, gift.weight));
       // Còn lại: quà tick cho tổ hợp giỏ trong Cài đặt → Quà tặng.
-      else if (basketKey) giftsForKey(basketKey, { livestream }).forEach(gift => addGift(gift.sku, 1, gift.weight));
+      else {
+        basketGifts.filter(gift => !swap?.removes(gift)).forEach(gift => addGift(gift.sku, 1, gift.weight));
+        (swap?.lines || []).forEach(line => addGift(line.sku, line.quantity, line.weight));
+      }
       // Quà ưu đãi bám đuổi (bộ bát gáo dừa cho combo đúng 2 túi): cờ đơn, ghi chú
       // đơn ("Ưu đãi bám đuổi combo 2 túi: tặng …") hay cột "Quà ưu đãi" → dòng BGD.
       // Đơn đã có quà live (Quạt + Bát gáo dừa) thì không thêm bát thứ hai.
       const promo = facts?.promoGift || String(value(row, 'Quà ưu đãi') || '').trim() || /ưu đãi bám đuổi combo 2 túi: tặng/i.test(String(value(row, 'Ghi chú') || ''));
-      const hasLiveGift = [...livestreamGiftSkus()].some(has);
+      const liveSkus = [...livestreamGiftSkus()];
+      // (Đơn đổi quà: quà live đã bị thay vẫn tính là "đơn có quà live" — không thêm bát ưu đãi; bát đã đổi cũng không thêm.)
+      const hasLiveGift = liveSkus.some(has) || (Boolean(swap) && basketGifts.some(gift => liveSkus.includes(String(gift.sku || '').trim().toUpperCase())));
       if (promo && catalogQuantity === 2 && !hasLiveGift && !has('BGD')) {
         const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === 'BGD');
-        items.push({ sku: 'BGD', quantity: 1, price: 0, weight: bowl?.weight || SKU_WEIGHTS.BGD });
+        if (!swap?.removes(bowl || { name: '', sku: 'BGD' })) items.push({ sku: 'BGD', quantity: 1, price: 0, weight: bowl?.weight || SKU_WEIGHTS.BGD });
       }
     }
     items.forEach(item => { if (item.sku) emitted.add(item.sku); });

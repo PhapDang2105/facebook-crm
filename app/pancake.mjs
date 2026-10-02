@@ -18,6 +18,7 @@ import { AUTOMATED_ACTORS, appendAssignAudit, appendAudit, appendBotToggleAudit 
 import { matchStaffByPancakeName, readStaffStore } from './staff.mjs';
 import { backoffPancake, withPancakeSlot } from './pancake-rate-limit.mjs';
 import { stickerFields } from './stickers.mjs';
+import { isPageSystemNotice, isPageSystemNoticeText } from './conversation-orders.mjs';
 export { stickerInfo, LIKE_STICKER_IDS } from './stickers.mjs';
 
 // Đủ cấu hình khi có ít nhất một Page (mã + token API) và một token webhook: token chung
@@ -356,6 +357,10 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       ...sticker,
       ...(cart.length ? { cart } : {}),
       ...(replyTo ? { replyTo } : {}),
+      // R13: dòng hệ thống của Facebook ("Bạn đang phản hồi bình luận… Xem bình luận", "… đã trả lời một quảng cáo.", "… replied
+      // to a post") về như tin của Page: giữ type 'text' (giao diện cũ vẫn vẽ được) nhưng mang cờ `system` để bot, bám đuổi và
+      // backlog không coi là lời Page đã trả lời khách.
+      ...(outgoing && isPageSystemNoticeText(text) ? { system: true } : {}),
       // Nhân viên gõ trong Pancake: dấu trên tin để đường đồng bộ (không qua webhook) cũng biết mà nhường.
       // (Tin trùng lời bám đuổi trạm gửi đã gửi dưới tên nhân viên: storePancakeEvents gỡ cờ này, gắn followUp.)
       ...(outgoing && isStaffAdmin(adminName, text, message.from) ? { staff: true, staffName: adminName, ...(message.from?.uid ? { staffUid: String(message.from.uid) } : {}), ...(message.from?.platform ? { staffPlatform: String(message.from.platform) } : {}) } : {}),
@@ -507,7 +512,7 @@ export function syncPancakeConversations(options = {}, config = defaultConfig, f
 /** Tin Page gần nhất đứng trước mốc `at`. */
 function lastOutgoingBefore(messages, at) {
   let found = null;
-  for (const item of messages || []) if (item?.direction === 'outgoing' && (Number(item.createdAt) || 0) < at) found = item;
+  for (const item of messages || []) if (item?.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) < at) found = item;
   return found;
 }
 
@@ -525,6 +530,28 @@ export function staffRepliedRecently(messages, now = Date.now()) {
   return (messages || []).some(item => item?.direction === 'outgoing' && item.staff && now - (Number(item.createdAt) || 0) < 60 * 60 * 1000);
 }
 
+/**
+ * R13 (02/10, F1): bot ĐÃ xử lý tin này rồi dù luồng không có tin Page nào sau nó.
+ * - Luồng bình luận: câu trả lời thật là tin nhắn riêng nằm ở HỘP THƯ `${pageId}:${psid}` (privateReply), lời công
+ *   khai có khi bị bỏ có chủ ý (đã có lời công khai trong 10 phút) → chỉ nhìn tin của luồng bình luận thì mỗi lần
+ *   khởi động lại bot trả lời lại bình luận cũ (ca thật 02/10 10:26 và 11:05). Coi là đã xử lý khi
+ *   `botLastReplyAt >= at` (engine ghi sau mỗi lượt trả lời) hay hộp thư có tin riêng sau thời điểm bình luận.
+ * - Mọi luồng: lượt bot bỏ qua CÓ CHỦ Ý (bình luận chỉ tag bạn bè, lặp tin vừa gửi, nhân viên đang xử lý) ghi
+ *   `botHandledMessageId` = mã tin → backlog / đồng bộ không đưa lại.
+ */
+export function botAlreadyHandled(conversation, message, store) {
+  if (!conversation || !message) return false;
+  const stored = (store?.conversations || []).find(item => item?.id === conversation.id) || conversation;
+  const messageId = String(message.id || message.mid || '');
+  if (messageId && String(stored.botHandledMessageId || '') === messageId) return true;
+  if ((stored.source || conversation.source) !== 'comment') return false;
+  const at = Number(message.createdAt) || 0;
+  if (!at) return false;
+  if ((Number(stored.botLastReplyAt) || 0) >= at) return true;
+  const inbox = store?.messages?.[`${stored.pageId || conversation.pageId}:${stored.psid || conversation.psid}`] || [];
+  return inbox.some(item => item?.direction === 'outgoing' && item.privateReply === true && (Number(item.createdAt) || 0) >= at);
+}
+
 export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 30 * 60 * 1000, botWhenAssigned = false } = {}) {
   const seen = new Set();
   return changes.filter(change => {
@@ -535,7 +562,9 @@ export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 
     // Hội thoại đã có nhân viên nhận trong Pancake: như đường webhook, bot không chen.
     if (!botWhenAssigned && change.conversation.pancakeAssigned) return false;
     const messages = store?.messages?.[change.conversation.id] || [];
-    if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) return false;
+    if (messages.some(item => item.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) >= at)) return false;
+    // R13 (F1): bình luận đã được nhắn riêng (tin nằm ở hộp thư) hay lượt bot đã bỏ qua có chủ ý.
+    if (botAlreadyHandled(change.conversation, change.message, store)) return false;
     if (staffRepliedRecently(messages, now)) return false;
     // Tin Page gần nhất trước tin khách là của nhân viên (trong 2 giờ): khách đang nói chuyện với người thật.
     if (recentStaffBefore(messages, at, now)) return false;
@@ -557,11 +586,14 @@ export function backlogBotChanges(store, { now = Date.now(), windowMs = 60 * 60 
     if (conversation.botEnabled === false) continue;
     if (!botWhenAssigned && conversation.pancakeAssigned) continue;
     const messages = store.messages?.[conversation.id] || [];
-    const last = messages[messages.length - 1];
+    // R13: dòng hệ thống Facebook ("… đã trả lời một quảng cáo.") đứng sau tin khách không phải lời Page — bỏ qua khi tìm tin cuối.
+    const last = messages.findLast(item => !isPageSystemNotice(item));
     if (!last || last.direction !== 'incoming' || !['text', 'image'].includes(last.type)) continue;
     const at = Number(last.createdAt) || 0;
     if (now - at > windowMs || at > now + 5 * 60 * 1000) continue;
-    if (messages.some(item => item.direction === 'outgoing' && (Number(item.createdAt) || 0) >= at)) continue;
+    if (messages.some(item => item.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) >= at)) continue;
+    // R13 (F1): bình luận đã được nhắn riêng (tin nằm ở hộp thư) hay lượt bot đã bỏ qua có chủ ý → không đưa lại sau khởi động.
+    if (botAlreadyHandled(conversation, last, store)) continue;
     if (staffRepliedRecently(messages, now)) continue;
     if (recentStaffBefore(messages, at, now)) continue;
     changes.push({ type: 'message', conversation, message: last, late: true });
@@ -998,6 +1030,11 @@ function applyPancakeEventsToStore(store, incomingEvents, { fromWebhook, automat
 
 const apiRoot = config => config.apiBase.replace(/\/+$/, '');
 
+/** Hạn chờ một lần gửi tin qua Pancake: trả lời bình luận / nhắn riêng sau bình luận 28 giây, tin hộp thư 15 giây. */
+export function pancakeSendTimeoutMs(action = 'reply_inbox') {
+  return ['reply_comment', 'private_replies'].includes(String(action)) ? 28000 : 15000;
+}
+
 /**
  * Gửi một tin vào hội thoại Pancake bằng Public API v1: chữ (`message`) hoặc
  * tệp đã tải lên (`content_ids`); Pancake không cho gửi cả hai trong một tin.
@@ -1027,16 +1064,19 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
   }
   let response;
   let body;
+  // R13 (F3 bình luận): reply_comment / private_replies của Pancake thường mất 15–25 giây (Pancake gọi tiếp Graph) —
+  // hết giờ 15 giây làm lượt bình luận báo "không rõ đã gửi" dù tin vẫn lên. Hai kiểu này chờ 28 giây; tin hộp thư giữ 15.
+  const sendTimeoutMs = pancakeSendTimeoutMs(action);
   try {
     ({ response, body } = await pancakeFetch(pageId, url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
-    }, fetchImpl, 15000));
+    }, fetchImpl, sendTimeoutMs));
   } catch (error) {
     // Hết giờ / đứt kết nối sau khi yêu cầu đã đi: Pancake có thể đã gửi cho khách.
     if (!isUncertainSendError(error)) throw error;
-    throw markUncertainSend(uncertainKey, { pageId, conversationId, action, fromId, text, contentIds }, error.name === 'AbortError' ? 'hết giờ chờ 15 giây' : error.message);
+    throw markUncertainSend(uncertainKey, { pageId, conversationId, action, fromId, text, contentIds }, error.name === 'AbortError' ? `hết giờ chờ ${Math.round(sendTimeoutMs / 1000)} giây` : error.message);
   }
   // Quá 5 lần gọi/giây: cả Page lùi lại rồi gửi lại (tối đa 3 lần). 429 = Pancake chưa nhận, gửi lại an toàn.
   if (response.status === 429 && attempt < 3) {
@@ -1158,12 +1198,38 @@ const imageMimeTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'im
 const maxUploadBytes = 5 * 1024 * 1024;
 
 /** Ảnh gửi đi: ảnh sản phẩm của CRM đọc thẳng từ đĩa, ảnh ngoài thì tải về. */
+// R13 (QR): ảnh thương hiệu phục vụ công khai ở /q/brand/* (ảnh thẻ ưu đãi kèm tin QR_OFFER…) nằm ngay trên đĩa
+// (assets/branding/…). R13 (gộp): đây là bảng DUY NHẤT — route GET /q/brand/* của server.mjs (`qrBrandFiles`) dùng
+// chính bảng này; thêm ảnh công khai mới thì chỉ thêm một dòng ở đây.
+export const brandImageFiles = Object.freeze({
+  '/q/brand/logo.webp': 'logos/giot-nang-logo.webp',
+  '/q/brand/zalo.webp': 'logos/zalo-icon.webp',
+  '/q/brand/messenger.webp': 'logos/messenger-icon.webp',
+  '/q/brand/offer-combo3-mini.webp': 'offers/combo3-mini.webp',
+  '/q/brand/offer-tam-lanh.webp': 'offers/tam-lanh.webp',
+  '/q/brand/offer-yen-mach.webp': 'offers/yen-mach.webp',
+  '/q/brand/offer-free-ship.webp': 'offers/free-ship.webp',
+  '/q/brand/offer-card.png': 'offers/the-uu-dai.png'
+});
+const brandImagesPath = path.join(projectRoot, 'assets', 'branding');
+
 export async function readImageForUpload(imageUrl, fetchImpl) {
   const parsed = new URL(imageUrl);
-  const local = parsed.origin === new URL(metaConfig.publicBaseUrl).origin && parsed.pathname.match(/^\/product-images\/([A-Za-z0-9-]+\.(?:png|jpe?g|webp))$/);
+  const ownOrigin = parsed.origin === new URL(metaConfig.publicBaseUrl).origin;
+  const local = ownOrigin && parsed.pathname.match(/^\/product-images\/([A-Za-z0-9-]+\.(?:png|jpe?g|webp))$/);
   if (local) {
     const filename = local[1];
     return { buffer: await readFile(path.join(productImagesPath, filename)), filename, mime: imageMimeTypes[path.extname(filename).toLowerCase()] };
+  }
+  // R13 (QR): ảnh /q/brand/* của chính máy chủ này — đọc thẳng từ đĩa như /product-images/ thay vì tự gọi lại địa chỉ
+  // công khai của mình (vòng qua Caddy/DNS, có lúc hết giờ làm tin ưu đãi QR mất ảnh thẻ). Tệp không đọc được (thiếu
+  // trên đĩa) thì rơi xuống đường tải qua mạng như cũ.
+  const brandFile = ownOrigin ? brandImageFiles[parsed.pathname] : '';
+  if (brandFile) {
+    try {
+      const buffer = await readFile(path.join(brandImagesPath, ...brandFile.split('/')));
+      return { buffer, filename: path.basename(brandFile), mime: imageMimeTypes[path.extname(brandFile).toLowerCase()] || 'application/octet-stream' };
+    } catch { /* thiếu tệp trên đĩa: tải qua mạng như cũ */ }
   }
   // Ảnh ngoài: máy chủ tải hộ, nên đích phải là máy công khai (không phải
   // 127.0.0.1 hay metadata của VM), không theo chuyển hướng, phải là ảnh thật

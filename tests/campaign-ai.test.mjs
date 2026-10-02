@@ -156,7 +156,11 @@ test('JSON hỏng hoặc mô hình lỗi: rơi về hành động theo luật, t
     assert.deepEqual(broken.actions, ruleBasedActions(makeReport()));
     const failed = await generateCampaignInsights(makeReport(), { path: file, settings: {}, callModel: async () => { throw new Error('429 quota'); } });
     assert.equal(failed.source, 'rules');
-    assert.match(failed.summary, /429 quota/);
+    // R13 — sửa khẳng định cũ: test từng đòi câu tóm tắt (hiện cho chủ shop) chứa nguyên văn lỗi kỹ thuật "429 quota"
+    // (đúng hành vi lỗi "lỗi thô ở Chiến dịch"). Nay nguyên văn chỉ nằm ở `error` (log máy chủ), tóm tắt là câu thân thiện.
+    assert.match(failed.error, /429 quota/);
+    assert.doesNotMatch(failed.summary, /429 quota/);
+    assert.match(failed.summary, /^AI tạm thời không dùng được \(nhờ bộ phận kỹ thuật kiểm tra kết nối AI\), nên dưới đây/);
     assert.equal(failed.days, 7);
   } finally {
     await rm(directory, { recursive: true, force: true });

@@ -11,6 +11,16 @@ const nodePath = process.platform === 'win32' ? path.join(projectRoot, 'tools', 
 // The test writes to a throwaway store so a real inbox is never touched.
 const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'crm-webhook-test-'));
 const storePath = path.join(temporaryDirectory, 'meta-conversations.json');
+// Mọi biến *_PATH / *_DIR mà app đọc (grep `process.env.*_(PATH|DIR)` trong app/) trừ ba kho đã đặt riêng bên dưới
+// và các đường webhook (META_/LANDING_/PANCAKE_WEBHOOK_PATH là đường URL, không phải tệp).
+const isolatedStorePaths = Object.fromEntries(Object.entries({
+  CHATBOT_SETTINGS_PATH: 'chatbot-settings.json', PRODUCTS_PATH: 'products.json', GIFTS_PATH: 'gifts.json', STAFF_PATH: 'staff.json',
+  INBOX_SETTINGS_PATH: 'inbox-settings.json', CUSTOMER_FILE_PATH: 'customer-file.json', CUSTOMER_EDITS_PATH: 'customer-edits.json',
+  LANDING_ORDERS_PATH: 'landing-orders.json', LANDING_ARCHIVE_PATH: 'landing-archive', ORDER_ARCHIVE_PATH: 'order-archive',
+  FOLLOW_UPS_PATH: 'follow-ups.json', PHONE_WARNINGS_PATH: 'phone-warnings.json', POS_CONFIG_PATH: 'pos-config.json', POS_COMBOS_PATH: 'pos-combos.json',
+  EXPORT_HISTORY_PATH: 'export-history.json', EXPORT_FILES_DIR: 'exports', GOLDEN_SET_PATH: 'golden-set.json', ADDRESS_AI_CACHE_PATH: 'address-ai-cache.json',
+  AD_INSIGHTS_PATH: 'ad-insights.json', CAMPAIGN_AI_PATH: 'campaign-ai.json', DECISION_LOG_DIR: 'decision-log', AUDIT_LOG_DIR: 'audit-log'
+}).map(([name, file]) => [name, path.join(temporaryDirectory, file)]));
 const port = Number(process.argv[2]) || 8123;
 const appSecret = 'integration-app-secret';
 const verifyToken = 'integration-verify-token';
@@ -62,6 +72,9 @@ const server = spawn(nodePath, [path.join(projectRoot, 'app', 'server.mjs'), Str
     QR_SCANS_PATH: path.join(temporaryDirectory, 'qr-scans.json'),
     META_CHANNELS_PATH: path.join(temporaryDirectory, 'meta-channels.json'),
     QR_SETTINGS_PATH: path.join(temporaryDirectory, 'qr-settings.json'),
+    // R13 (L12): MỌI kho còn lại cũng về thư mục tạm — trước đây staff.json, đơn landing, nhật ký, cài đặt chatbot,
+    // sản phẩm/quà, tệp khách hàng… rơi về data/processed của thư mục chạy (kho thật nếu chạy trên máy có dữ liệu).
+    ...isolatedStorePaths,
     QR_PAGE_ID: pageId,
     QR_PAGE_NAME: 'Giọt Nắng',
     // Không để server thử chạm POS/Pancake/landing thật hay ghi vào kho thật khi máy có .env thật.

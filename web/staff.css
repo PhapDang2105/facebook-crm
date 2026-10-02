@@ -38,5 +38,8 @@
   .staff-table-head { display: none; }
   .staff-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
   .staff-row > span:not(.staff-name):not(.staff-actions) { grid-column: 1; white-space: normal; }
+  /* Hàng tiêu đề ẩn ở màn hẹp: mỗi ô tự ghi nhãn cột ("Mật khẩu: Đã đặt", "Trạng thái: Đang làm"). */
+  .staff-row > span[data-label]::before { content: attr(data-label) ": "; color: #667085; font-weight: 400; }
+  .staff-row > .staff-role { padding-left: 0; background: none; }
   .staff-actions { grid-column: 2; grid-row: 1; }
 }

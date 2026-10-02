@@ -122,5 +122,11 @@
   "IMAGE_WITH_PHONE": "Dạ em đã nhận hình và SĐT của {title} rồi ạ 💛 {Title} lấy loại trong hình mấy túi ạ? Em lên đơn liền cho mình nha 🌾",
   "COMMENT_PUBLIC_STAFF": "Dạ em đã ghi nhận rồi ạ, bạn phụ trách sẽ nhắn tin cho mình ngay nha 💛###Dạ {name} ơi, em đã ghi nhận, bạn phụ trách sẽ nhắn tin cho mình ngay ạ 💛",
   "COMMENT_PUBLIC_FEEDBACK": "Dạ em cảm ơn góp ý của mình ạ 💛 Em báo bạn dẫn live chỉnh lại ngay nha.",
-  "FOLLOW_UP_COMMENT_REMIND": "Dạ {title} ơi, em đã nhắn tin trả lời bình luận của mình rồi ạ 💛 {Title} xem tin nhắn giúp em, cần tư vấn thêm loại nào cứ nhắn em nha 🌾"
+  "FOLLOW_UP_COMMENT_REMIND": "Dạ {title} ơi, em đã nhắn tin trả lời bình luận của mình rồi ạ 💛 {Title} xem tin nhắn giúp em, cần tư vấn thêm loại nào cứ nhắn em nha 🌾",
+  "SHOP_CART_UNKNOWN": "Dạ em đã nhận giỏ hàng {title} chọn trên Facebook Shop rồi ạ 💛 Em báo bạn phụ trách kiểm tra sản phẩm và lên đơn, bạn ấy nhắn {title} ngay trong tin này nha ạ.",
+  "SHOP_CART_STAFF": "Dạ em đã ghi nhận {title} chọn {product} trên Facebook Shop ạ 💛 {Title} cho em xin số điện thoại và địa chỉ nhận hàng, bạn phụ trách lên đơn và xác nhận với {title} ngay trong tin này nha ạ 🌾",
+  "SHOP_CART_ACK": "Dạ em đã nhận giỏ hàng {cart} của {title} rồi ạ 💛 {Title} chờ em ít phút, em kiểm tra đơn rồi nhắn mình ngay nha.",
+  "GIFT_SWAP_NOTED": "Dạ em đã ghi nhận thay quà của {title} bằng {gift} (không trừ tiền) ạ 💛",
+  "GIFT_POLICY_ORDER": "Dạ đơn {items} của {title} đã có quà tặng kèm {gift} rồi ạ 🎁 Bên em gửi quà cùng đơn cho mình nha 💛",
+  "GIFT_POLICY_ORDER_NONE": "Dạ đơn {items} của {title}[?free_ship] được {free_ship}[/?] ạ; đơn này chưa kèm quà tặng hiện vật ạ 🌾 Chương trình quà hiện tại bên em:\n[[gifts]]• {gifts}: {rule}[[/gifts]]"
 }

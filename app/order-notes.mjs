@@ -80,9 +80,23 @@ export function missingAddressParts(order) {
 /**
  * Danh sách ghi chú xử lý của một đơn (chatbot hoặc landing). Thứ tự: việc
  * phải làm trước (gọi khách, bổ sung) rồi đến thông tin nền.
+ *
+ * R13: ghi chú gắn thẳng trên đơn (`order.processingFlags` — có thể trùng đơn, giá landing lệch, cần lên lại POS, đổi
+ * quà thiếu mã POS, gợi ý phường/xã của AI; xem order-edits.mjs addProcessingFlag) đứng TRƯỚC ghi chú dựng từ dữ liệu,
+ * không lặp chuỗi trùng — để Tổng quan (dashboard.mjs) và mọi nơi gọi processingNotes đều thấy.
  */
 export function processingNotes(order) {
   if (!order || typeof order !== 'object') return [];
+  const flags = [...new Set((Array.isArray(order.processingFlags) ? order.processingFlags : [])
+    .filter(item => typeof item === 'string').map(item => item.trim()).filter(Boolean))];
+  return [...flags, ...dataNotes(order).filter(note => !flags.includes(note))];
+}
+
+/** Gợi ý phường/xã do AI tự suy (chưa kiểm): chỉ là thông tin thêm (ℹ), không phải việc thiếu (⚠). */
+const AI_WARD_HINT = /^Gợi ý phường\/xã \(AI, chưa kiểm\)/;
+
+/** Ghi chú dựng từ dữ liệu đơn (không tính processingFlags). */
+function dataNotes(order) {
   const notes = [];
   const landing = order.landing || {};
   const address = String(order.address || '').trim();
@@ -106,8 +120,11 @@ export function processingNotes(order) {
     if (order.locationConfidence === 'ambiguous' || landing.ambiguousAddress) notes.push('⚠ Địa chỉ trùng tên, hỏi lại');
     else if (!missing.length && order.locationConfidence === 'fuzzy') notes.push('⚠ Địa chỉ đã sửa, đối chiếu');
     // Vòng 12: bot nhận địa chỉ sau một lần hỏi (nguyên chữ khách ghi) hay thiếu phường/xã → nhân viên soát.
-    const check = String(order.addressCheck || '').trim();
+    // R13: phần "Gợi ý phường/xã (AI, chưa kiểm): …" trong addressCheck (các ý nối bằng "; ") hiện ℹ, phần còn lại vẫn ⚠.
+    const checkParts = String(order.addressCheck || '').split('; ').map(part => part.trim()).filter(Boolean);
+    const check = checkParts.filter(part => !AI_WARD_HINT.test(part)).join('; ');
     if (check && !notes.some(note => note.includes(check))) notes.push(`⚠ ${check}`);
+    for (const hint of checkParts.filter(part => AI_WARD_HINT.test(part))) if (!notes.includes(`ℹ ${hint}`)) notes.push(`ℹ ${hint}`);
   }
   // Ghi chú giao hàng khách ghi lẫn trong địa chỉ ("giao giờ hành chính").
   const deliveryNote = String(order.deliveryNote || '').trim();

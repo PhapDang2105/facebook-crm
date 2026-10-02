@@ -230,6 +230,18 @@ export function mergeAdInsights(store, results, { since, until, now = Date.now()
     rows.set(`${row.date}|${row.adId}`, row);
   }
   for (const result of results) {
+    // R13 (TB-3): Graph /campaigns mặc định KHÔNG trả chiến dịch đã lưu trữ / đã xoá. Chiến dịch của tài khoản vừa
+    // đồng bộ mà không còn trong kết quả thì trước đây giữ mãi trạng thái cũ (ACTIVE) → Tổng quan / Chiến dịch đếm
+    // thừa "đang chạy". Nay đánh dấu ARCHIVED; lần sau Meta trả lại thì trạng thái thật ghi đè.
+    // Danh sách trả về RỖNG thì không kết luận gì (có thể Graph trục trặc): không đổi trạng thái chiến dịch nào.
+    const returned = new Set(result.campaigns.map(campaign => String(campaign.id)));
+    for (const campaign of returned.size ? Object.values(store.campaigns || {}) : []) {
+      if (!campaign || String(campaign.accountId || '') !== String(result.accountId || '') || returned.has(String(campaign.id))) continue;
+      if (!['ARCHIVED', 'DELETED'].includes(String(campaign.status || '').toUpperCase())) {
+        campaign.status = 'ARCHIVED';
+        campaign.archivedAt = now;
+      }
+    }
     for (const campaign of result.campaigns) store.campaigns[campaign.id] = campaign;
     Object.assign(store.ads, result.ads);
     for (const row of result.daily) if (row.date >= keptSince) rows.set(`${row.date}|${row.adId}`, row);

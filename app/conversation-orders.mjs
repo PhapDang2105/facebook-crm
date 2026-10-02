@@ -27,11 +27,34 @@ export function isLivestreamConversation(conversation = {}) {
 export function isLivestreamCustomer(conversation = {}) {
   if (!conversation || typeof conversation !== 'object') return false;
   if (isLivestreamConversation(conversation)) return true;
+  // R13 (inbox3 F3): khách bình luận dưới bài live rồi được nhắn riêng — hộp thư của khách thường đã mang bài/quảng cáo
+  // KHÁC (bài live không được kế thừa) nên mất quà live khi chốt ở hộp thư. Engine ghi cờ `livestreamCustomer` lên hộp thư
+  // lúc nhắn riêng từ bình luận bài live (kèm thẻ Livestream); giỏ chờ mang `livestream: true` cũng tính.
+  if (conversation.livestreamCustomer === true || conversation.pendingOrder?.livestream === true) return true;
   const labels = Array.isArray(conversation.labels) ? conversation.labels : [];
   if (labels.some(label => normalizeText(typeof label === 'string' ? label : label?.id ?? label?.name) === 'livestream')) return true;
   const post = conversation.post && typeof conversation.post === 'object' ? conversation.post : null;
   if (post && (post.live === true || post.isLive === true || /^live(_?video)?$/i.test(String(post.type || post.kind || '')))) return true;
   return false;
+}
+
+// R13 (bình luận F10): dòng hệ thống của Facebook/Pancake nằm trong hộp thư như một tin của Page — "Bạn đang phản hồi
+// bình luận của người dùng… Xem bình luận.(link)", "<tên khách> đã trả lời một quảng cáo.", "<tên> đã trả lời về một bài
+// viết. Xem bài viết(link)", "<name> replied to a post. View post(link)". Không phải lời Page: các phép kiểm "Page đã trả
+// lời" (bot đến muộn, backlog sau khởi động, bám đuổi, nhân viên trả lời sau bot) phải bỏ qua. Tin mới mang cờ
+// `system: true` (pancakeMessageEvent); dữ liệu cũ chưa có cờ thì nhận theo chữ.
+const pageSystemNoticePattern = /^(?:Bạn đang phản hồi bình luận|You(?: are|['’]re) (?:responding|replying) to a comment)|^.{1,80}? (?:đã trả lời (?:một quảng cáo|về một bài viết)|replied to (?:a post|an ad))(?![\p{L}\p{N}])/u;
+
+/** Chữ của một tin Page có phải dòng hệ thống Facebook (không phải lời Page)? */
+export function isPageSystemNoticeText(text) {
+  const value = String(text || '').trim();
+  return value.length > 0 && value.length <= 400 && pageSystemNoticePattern.test(value);
+}
+
+/** Tin Page là dòng hệ thống (cờ `system`, hay chữ khớp với tin cũ chưa có cờ); tin nhân viên / tin khách thì không. */
+export function isPageSystemNotice(item) {
+  if (!item || item.direction !== 'outgoing' || item.staff) return false;
+  return item.system === true || ((item.type || 'text') === 'text' && isPageSystemNoticeText(item.text));
 }
 
 /**
@@ -159,7 +182,8 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   const totalQuantityForPricing = items.reduce((sum, item) => sum + item.quantity, 0);
   // Gift and shipping come from the basket's combination in the gift table.
   // Khách từ phiên live mới nhận quà "chỉ khách livestream" (Quà Tặng LIVE).
-  const livestream = isLivestreamCustomer(conversation);
+  // R13: bot đã soạn đơn theo ngữ cảnh live (khách đi từ bình luận bài live sang hộp thư — input.livestream) thì đơn giữ quà live.
+  const livestream = isLivestreamCustomer(conversation) || input.livestream === true;
   const priced = priceBasket(items.map(item => ({ sku: item.sku, quantity: item.quantity })), { livestream });
   const shippingFee = input.shippingFee !== undefined ? money(input.shippingFee) : (priced.priceable ? priced.shippingFee : 0);
   const pricedItems = items.map((item, index) => {
@@ -225,6 +249,18 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   } else if (input.promoGift) {
     order.promoGift = text(input.promoGift, 100);
     order.note = `${order.note ? `${order.note} · ` : 'Tạo tự động từ xác nhận của chatbot · '}Ưu đãi bám đuổi combo 2 túi: tặng ${order.promoGift}.`;
+  }
+  // R13 (inbox1 A2): khách đổi quà khi giỏ còn chờ — bộ soạn đơn gắn `giftSwap` (các gói nhỏ thay quà: tên, SKU, khối lượng)
+  // và `giftSwapRemoved` (tên quà bị bỏ: bát/quạt/muỗng) vào đơn; chép sang đơn lưu để POS / xuất kho lên đúng dòng quà.
+  const swapItems = (Array.isArray(input.giftSwap) ? input.giftSwap : []).slice(0, 10).map(item => ({
+    name: text(item?.name, 200),
+    sku: text(item?.sku, 80),
+    weight: Math.max(0, Math.round(Number(item?.weight) || 0))
+  })).filter(item => item.name);
+  if (swapItems.length) {
+    order.giftSwap = swapItems;
+    const removed = (Array.isArray(input.giftSwapRemoved) ? input.giftSwapRemoved : []).slice(0, 10).map(name => text(name, 200)).filter(Boolean);
+    if (removed.length) order.giftSwapRemoved = removed;
   }
   // What the customer actually typed, next to the standardised address they confirmed.
   order.rawAddress = text(input.rawAddress, 500);

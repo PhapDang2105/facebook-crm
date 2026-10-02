@@ -40,12 +40,16 @@ export const defaultConversationLabels = Object.freeze([
  * thì thêm vào cuối, thẻ có sẵn mà chưa gắn sự kiện nào thì gắn sự kiện mặc
  * định (không đè lựa chọn nhân viên đã đặt).
  */
-export function mergeDefaultLabels(labels) {
+export function mergeDefaultLabels(labels, removedDefaults = []) {
   const list = (Array.isArray(labels) ? labels : []).map(label => ({ ...label }));
   const usedEvents = new Set(list.map(label => label.auto).filter(Boolean));
+  // R13 (T-2): thẻ mặc định nhân viên ĐÃ XOÁ ở Cài đặt → Tin nhắn (ghi ở `removedDefaults`) không tự thêm lại.
+  // Thẻ mặc định MỚI của một bản phát hành (chưa từng có, chưa từng xoá) vẫn được bổ sung như cũ.
+  const removed = new Set(Array.isArray(removedDefaults) ? removedDefaults : []);
   for (const preset of defaultConversationLabels) {
     const existing = list.find(label => label.id === preset.id);
     if (!existing) {
+      if (removed.has(preset.id)) continue;
       if (preset.auto && usedEvents.has(preset.auto)) continue;
       list.push({ ...preset });
       if (preset.auto) usedEvents.add(preset.auto);
@@ -144,11 +148,34 @@ export async function normalizeQuickReplies(value, storeImage = async () => '') 
 
 export async function normalizeInboxSettings(value = {}, storeImage) {
   const labels = normalizeConversationLabels(value.labels);
+  const defaultIds = new Set(defaultConversationLabels.map(label => label.id));
+  // Chỉ giữ mã thẻ mặc định thật và chưa có lại trong danh sách; bộ thẻ trống = về bộ mặc định đầy đủ.
+  const removedDefaults = labels.length
+    ? [...new Set((Array.isArray(value.removedDefaults) ? value.removedDefaults : []).map(id => String(id)))]
+      .filter(id => defaultIds.has(id) && !labels.some(label => label.id === id))
+    : [];
   return {
-    labels: labels.length ? mergeDefaultLabels(labels) : [...defaultConversationLabels],
+    labels: labels.length ? mergeDefaultLabels(labels, removedDefaults) : [...defaultConversationLabels],
     quickReplies: await normalizeQuickReplies(value.quickReplies, storeImage),
+    ...(removedDefaults.length ? { removedDefaults } : {}),
     updatedAt: Number(value.updatedAt) || Date.now()
   };
+}
+
+/**
+ * R13 (T-2): thẻ mặc định bị xoá ở lần lưu này = thẻ mặc định ĐANG có trong bộ đã lưu mà bộ gửi lên không còn;
+ * cộng các thẻ đã xoá từ trước (trừ thẻ vừa được thêm lại). Trước đây xoá thẻ mặc định xong lưu là thẻ tự sống lại.
+ */
+export function removedDefaultLabelIds(previous = {}, submittedLabels = []) {
+  const submitted = new Set(normalizeConversationLabels(submittedLabels).map(label => label.id));
+  if (!submitted.size) return [];
+  const before = new Set((Array.isArray(previous?.labels) ? previous.labels : []).map(label => label?.id));
+  const removed = new Set(Array.isArray(previous?.removedDefaults) ? previous.removedDefaults : []);
+  for (const preset of defaultConversationLabels) {
+    if (submitted.has(preset.id)) removed.delete(preset.id);
+    else if (before.has(preset.id)) removed.add(preset.id);
+  }
+  return [...removed];
 }
 
 let cached = null;
@@ -169,7 +196,10 @@ const enqueueWrite = createWriteQueue();
 export function writeInboxSettings(value, storeImage) {
   // Ghi tuần tự, tệp tạm riêng: hai lần lưu gần nhau không đè cùng một .tmp.
   return enqueueWrite(async () => {
-    const settings = await normalizeInboxSettings({ ...value, updatedAt: Date.now() }, storeImage);
+    // Nơi gọi chỉ gửi { labels, quickReplies }: thẻ mặc định bị xoá suy từ bộ đang lưu (đọc lỗi thì coi như chưa xoá gì).
+    const previous = await readInboxSettings().catch(() => null);
+    const removedDefaults = Array.isArray(value?.removedDefaults) ? value.removedDefaults : removedDefaultLabelIds(previous || {}, value?.labels);
+    const settings = await normalizeInboxSettings({ ...value, removedDefaults, updatedAt: Date.now() }, storeImage);
     await writeJsonAtomic(inboxSettingsPath, settings);
     cached = settings;
     return settings;

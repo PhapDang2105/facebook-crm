@@ -607,11 +607,41 @@ export function markConversationSeen(store, id, { username, name = '', at = Date
   return conversation;
 }
 
-export function setConversationFlags(store, id, changes) {
+export const maximumLabelsPerConversation = 20;
+
+/**
+ * R13 (M4): bộ thẻ nhân viên gửi lên cho một hội thoại → chỉ chuỗi (≤ 60 ký tự), bỏ trùng, tối đa 20 thẻ.
+ * `allowedIds` (Set mã thẻ trong Cài đặt → Tin nhắn; null = không kiểm): mã LẠ chỉ được giữ khi hội thoại ĐANG
+ * mang nó (`current`) — thẻ hệ thống tự gắn (Đã mua hàng, Số điện thoại, thẻ bot) hay thẻ cũ đã xoá khỏi Cài đặt
+ * không bị rơi khi nhân viên bật/tắt một thẻ khác; thẻ đang có không bao giờ bị cắt vì vượt trần.
+ * Trước đây `labels: [{a:1}, 12345, "x"×5000, null]` được lưu nguyên.
+ */
+export function sanitizeConversationLabels(labels, { current = [], allowedIds = null } = {}) {
+  const existing = new Set((Array.isArray(current) ? current : []).filter(label => typeof label === 'string'));
+  const allowed = allowedIds ? new Set(allowedIds) : null;
+  const kept = [];
+  const seen = new Set();
+  for (const item of Array.isArray(labels) ? labels : []) {
+    if (typeof item !== 'string') continue;
+    const label = item.trim();
+    if (!label || label.length > 60 || seen.has(label)) continue;
+    if (allowed && !allowed.has(label) && !existing.has(label)) continue;
+    seen.add(label);
+    kept.push(label);
+  }
+  if (kept.length <= maximumLabelsPerConversation) return kept;
+  // Vượt trần: giữ thẻ đang có trước, phần còn lại theo thứ tự gửi lên.
+  const held = kept.filter(label => existing.has(label));
+  const fresh = kept.filter(label => !existing.has(label)).slice(0, Math.max(0, maximumLabelsPerConversation - held.length));
+  const keep = new Set([...held, ...fresh]);
+  return kept.filter(label => keep.has(label));
+}
+
+export function setConversationFlags(store, id, changes, { allowedLabelIds = null } = {}) {
   const conversation = findConversation(store, id);
   if (!conversation) return null;
   if (typeof changes.unread === 'boolean') conversation.unread = changes.unread;
   if (typeof changes.muted === 'boolean') conversation.muted = changes.muted;
-  if (Array.isArray(changes.labels)) conversation.labels = changes.labels;
+  if (Array.isArray(changes.labels)) conversation.labels = sanitizeConversationLabels(changes.labels, { current: conversation.labels, allowedIds: allowedLabelIds });
   return conversation;
 }

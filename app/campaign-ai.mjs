@@ -120,6 +120,32 @@ function dailyStats(daily = []) {
  * (null = không có gì để nói), `judgeable` = đủ dữ liệu để mô hình được kết luận.
  */
 export function campaignFlags(campaign = {}, baseline = {}, thresholds = campaignAiThresholds) {
+  const result = spendFlags(campaign, baseline, thresholds);
+  // R13 (T-3): "tạm dừng / tăng / giảm ngân sách" chỉ có nghĩa với MỘT chiến dịch Meta thật đang chạy. Trước đây luật
+  // khuyên "tạm dừng" chiến dịch đã PAUSED và cả dòng gộp ("chưa rõ chiến dịch", dòng theo tên, dòng utm).
+  if (BUDGET_KINDS.has(result.suggestion)) {
+    const blocked = !isRealMetaCampaign(campaign) ? 'khong-phai-chien-dich-meta' : !campaignIsRunning(campaign) ? 'da-dung' : '';
+    if (blocked) return { ...result, flags: [...result.flags, blocked], suggestion: null, reason: '' };
+  }
+  return result;
+}
+
+const BUDGET_KINDS = new Set(['pause', 'scale', 'reduce']);
+
+/** Dòng báo cáo là MỘT chiến dịch Meta thật (có mã chiến dịch để vào Trình quản lý quảng cáo dừng / đổi ngân sách)? */
+export function isRealMetaCampaign(campaign = {}) {
+  const id = String(campaign?.id ?? '').trim();
+  if (!id || id === 'meta:unknown' || /^(name|utm):/i.test(id)) return false;
+  return !campaign.source || campaign.source === 'meta';
+}
+
+/** Chiến dịch đang chạy? Trạng thái trống (kho chưa có) = chưa biết → không chặn lời khuyên. */
+export function campaignIsRunning(campaign = {}) {
+  const status = String(campaign?.status || '').trim().toUpperCase();
+  return !status || status === 'ACTIVE';
+}
+
+function spendFlags(campaign = {}, baseline = {}, thresholds = campaignAiThresholds) {
   const spend = number(campaign.spend);
   const orders = number(campaign.orders);
   const revenue = number(campaign.revenue);
@@ -211,7 +237,7 @@ export const campaignAiSystemPrompt = [
   'Bạn là chuyên viên quảng cáo Facebook cẩn trọng, cố vấn cho Giọt Nắng — shop nhỏ bán đồ ăn (granola, hạt, đồ ăn vặt lành mạnh) qua Facebook Messenger và landing page. Tiền tệ là VND.',
   'Bạn nhận số liệu tổng hợp theo chiến dịch trong một khoảng ngày: chi tiêu, hiển thị, click, tin nhắn, đơn, doanh thu, CPA (chi/đơn), ROAS (doanh thu/chi), số theo ngày, và CỜ do hệ thống tính sẵn bằng luật.',
   'Nhiệm vụ: đưa ra ít lời khuyên cụ thể, thận trọng, có căn cứ số liệu. Các loại hành động: "scale" (tăng ngân sách từ từ, 15–20%), "reduce" (giảm ngân sách), "pause" (tạm dừng), "creative" (đổi nội dung/ảnh/video, tệp khách), "watch" (chưa làm gì, theo dõi thêm).',
-  'Quy tắc: chiến dịch có cờ "it-du-lieu" hoặc "khong-co-chi-tieu" thì KHÔNG được kết luận — chỉ được "watch" hoặc bỏ qua. Không đề xuất "scale" cho chiến dịch chưa có đơn. Chỉ dùng campaignId có trong dữ liệu. Không bịa số. Đơn có thể về chậm vài ngày nên đừng vội. Nhiều tin nhắn mà ít đơn gợi ý vấn đề chốt đơn/giá/ưu đãi hơn là quảng cáo. Tối đa 10 hành động, ưu tiên thứ tốn tiền nhất.',
+  'Quy tắc: chiến dịch có cờ "it-du-lieu" hoặc "khong-co-chi-tieu" thì KHÔNG được kết luận — chỉ được "watch" hoặc bỏ qua. Không đề xuất "scale" cho chiến dịch chưa có đơn. Chiến dịch có trangThai khác ACTIVE (đã dừng, đã lưu trữ) hoặc có cờ "da-dung" / "khong-phai-chien-dich-meta" thì KHÔNG đề xuất "pause", "scale", "reduce". Chỉ dùng campaignId có trong dữ liệu. Không bịa số. Đơn có thể về chậm vài ngày nên đừng vội. Nhiều tin nhắn mà ít đơn gợi ý vấn đề chốt đơn/giá/ưu đãi hơn là quảng cáo. Tối đa 10 hành động, ưu tiên thứ tốn tiền nhất.',
   'Trả về DUY NHẤT một JSON, không markdown:',
   '{"summary":"2–4 câu tiếng Việt tóm tắt tình hình và việc nên làm trước","actions":[{"campaignId":"id đúng như dữ liệu","kind":"scale|reduce|pause|creative|watch","reason":"một–hai câu, có số liệu","confidence":"cao|vừa|thấp"}]}'
 ].join('\n');
@@ -314,6 +340,8 @@ export function validateInsights(parsed, report = {}, thresholds = campaignAiThr
     const flag = campaignFlags(campaign, baseline, thresholds);
     if (!flag.judgeable && kind !== 'watch') { kind = 'watch'; confidence = 'thấp'; }
     if (kind === 'scale' && number(campaign.orders) === 0) { kind = 'watch'; confidence = 'thấp'; }
+    // R13 (T-3): không "tạm dừng / tăng / giảm" chiến dịch đã dừng hay dòng không phải một chiến dịch Meta thật.
+    if (BUDGET_KINDS.has(kind) && (!isRealMetaCampaign(campaign) || !campaignIsRunning(campaign))) { kind = 'watch'; confidence = 'thấp'; }
     const key = `${id}|${kind}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -506,7 +534,9 @@ export async function generateCampaignInsights(report = {}, options = {}) {
     } catch (error) {
       result = {
         ...base, model: 'rules', source: 'rules', error: String(error?.message || error).slice(0, 300),
-        summary: `AI tạm thời không dùng được (${String(error?.message || 'lỗi không rõ').slice(0, 120)}), nên dưới đây chỉ là gợi ý theo luật tính sẵn: ${rules.length ? `${rules.length} chiến dịch cần để ý.` : 'không có chiến dịch nào vượt ngưỡng.'}`,
+        // R13: không chèn nguyên văn lỗi kỹ thuật (429 Resource exhausted, ENOENT …vertex.json) vào câu cho chủ shop —
+        // chi tiết nằm ở `error` (máy chủ ghi log, friendlyCampaignInsights không đưa ra giao diện).
+        summary: `AI tạm thời không dùng được (nhờ bộ phận kỹ thuật kiểm tra kết nối AI), nên dưới đây chỉ là gợi ý theo luật tính sẵn: ${rules.length ? `${rules.length} chiến dịch cần để ý.` : 'không có chiến dịch nào vượt ngưỡng.'}`,
         actions: rules
       };
     }

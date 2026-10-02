@@ -63,7 +63,10 @@ test('T9: CSV khách hàng thêm \' trước ô bắt đầu bằng = + - @; t�
   assert.match(row, /,0912345678,/, 'SĐT không bị thêm dấu');
   assert.match(row, /,2,300000,/, 'số giữ nguyên');
   const audience = customersToAudienceCsv([{ ...customer, name: '=Lan' }]);
-  assert.match(audience, /84912345678,=Lan,VN/, 'audience.csv không thêm \' (Meta khớp fn theo chữ gốc)');
+  // R13 (T9) — sửa khẳng định cũ: trước đây test đòi audience.csv giữ nguyên "=Lan" (ô mở công thức khi mở bằng
+  // Excel = đúng hành vi lỗi). Nay: vẫn KHÔNG thêm dấu ' (Meta khớp fn theo chữ), nhưng bỏ ký tự mở công thức ở đầu tên.
+  assert.match(audience, /84912345678,Lan,VN/, 'audience.csv không thêm \' và không để ô bắt đầu bằng =');
+  assert.doesNotMatch(audience, /,[=+\-@']/, 'không ô nào của audience.csv mở đầu bằng ký tự công thức hay dấu \'');
 });
 
 test('T13: XLSX có phần giải nén vượt trần bị từ chối trước khi giải nén', () => {

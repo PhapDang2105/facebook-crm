@@ -174,7 +174,9 @@ export function buildReport({
   }
   const customerRows = [...rows.values()].map(row => {
     let fresh = 0;
-    for (const key of row.customers) if (periodKey(firstOrderDate.get(key), query.groupBy) === row.period) fresh += 1;
+    // R13 (T-1): cùng điều kiện với tổng (đơn đầu tiên nằm TRONG khoảng báo cáo). Trước đây dòng chỉ so kỳ: `from`
+    // rơi giữa tuần/tháng thì khách có đơn đầu trước `from` nhưng cùng kỳ vẫn tính "mới" → cộng các dòng lệch tổng.
+    for (const key of row.customers) if (periodKey(firstOrderDate.get(key), query.groupBy) === row.period && firstOrderDate.get(key) >= query.from) fresh += 1;
     return { period: row.period, label: row.label, new: fresh, returning: row.customers.size - fresh };
   });
 

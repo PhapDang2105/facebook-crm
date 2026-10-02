@@ -402,11 +402,30 @@ export function customersToAudienceCsv(customers) {
     const phone = `84${local.slice(1)}`;
     if (seen.has(phone)) continue;
     seen.add(phone);
-    rows.push([phone, String(customer.name || '').trim(), 'VN']);
+    // R13 (T9): t\u00EAn Facebook do ng\u01B0\u1EDDi ngo\u00E0i \u0111\u1EB7t \u2014 b\u1ECF c\u00E1c k\u00FD t\u1EF1 m\u1EDF c\u00F4ng th\u1EE9c (= + - @, tab, CR) \u1EDF \u0110\u1EA6U t\u00EAn \u0111\u1EC3 t\u1EC7p m\u1EDF
+    // b\u1EB1ng Excel kh\u00F4ng ch\u1EA1y c\u00F4ng th\u1EE9c. Kh\u00F4ng th\u00EAm d\u1EA5u ' nh\u01B0 csvCell: Meta kh\u1EDBp `fn` theo ch\u1EEF, d\u1EA5u ' l\u00E0m l\u1EC7ch.
+    rows.push([phone, audienceName(customer.name), 'VN']);
   }
   const escape = value => {
     const text = String(value ?? '');
     return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
   };
   return `\uFEFF${[headers, ...rows].map(row => row.map(escape).join(',')).join('\r\n')}\r\n`;
+}
+
+/** T\u00EAn cho audience.csv: b\u1ECF chu\u1ED7i k\u00FD t\u1EF1 m\u1EDF c\u00F4ng th\u1EE9c (= + - @, tab, CR, kho\u1EA3ng tr\u1EAFng xen gi\u1EEFa) \u1EDF \u0111\u1EA7u. */
+export function audienceName(value) {
+  return String(value || '').trim().replace(/^[=+\-@\t\r\s]+/, '').trim();
+}
+
+/** R13 (M3): kho\u00E1 kh\u1EED tr\u00F9ng "L\u1ECBch s\u1EED \u0111\u01A1n" c\u1EE7a kh\u00E1ch \u2014 m\u00E3 \u0111\u01A1n b\u1ECF ti\u1EC1n t\u1ED1 ngu\u1ED3n "CB-" / "LP-" (t\u1EC7p kh\u00E1ch h\u00E0ng l\u01B0u k\u00E8m ti\u1EC1n t\u1ED1). */
+export function orderHistoryKey(id) {
+  return String(id ?? '').trim().replace(/^(CB|LP)-/i, '');
+}
+
+/** Nh\u00E3n tr\u1EA1ng th\u00E1i c\u1EE7a m\u1ED9t d\u00F2ng kho l\u01B0u tr\u1EEF \u0111\u01A1n trong "L\u1ECBch s\u1EED \u0111\u01A1n": m\u00E3 n\u1ED9i b\u1ED9 \u2192 ch\u1EEF cho ng\u01B0\u1EDDi \u0111\u1ECDc. */
+export function archiveStatusLabel(status) {
+  const value = String(status || '').trim();
+  if (!value) return '\u0110\u00E3 ghi kho';
+  return { deleted: '\u0110\u00E3 xo\u00E1', cancelled: 'H\u1EE7y', confirmed: '\u0110\u00E3 x\u00E1c nh\u1EADn' }[value] || value;
 }

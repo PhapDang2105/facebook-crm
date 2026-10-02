@@ -96,8 +96,24 @@ const emptyDay = () => ({
   intent: Object.fromEntries(THRESHOLDS.map(t => [String(t), { n: 0, ok: 0, bad: 0 }])),
   cascade: emptyCascade(),
   preGuard: { n: 0, ok: 0, bad: 0, decisions: {} }, gate: { agree: 0, outside: 0, byTemplate: {}, reasons: {} },
-  tokens: { input: [], cached: [], output: [], thinking: [] }, thinkingTurns: 0, handoff: 0, attention: 0, cost: 0
+  tokens: { input: [], cached: [], output: [], thinking: [] }, thinkingTurns: 0, handoff: 0, attention: 0, cost: 0,
+  // R13: luật ỨNG VIÊN (K1/K1b/K3/K4/K5 — trường `candidateRule` của nhật ký). n = lượt K-luật khớp khi CHẠY ẨN
+  // (mode 'shadow'), ok/bad = mẫu của luật trùng / khác mẫu đã chọn thật (`chosen`), neutral = lượt "~" không so được
+  // (REPLY_ALREADY_SENT*), live = lượt luật đã bật thật (mode 'on' — không so, vì chính nó là câu trả lời).
+  candidate: { n: 0, ok: 0, bad: 0, neutral: 0, live: 0, byRule: {} }
 });
+
+/** Cộng một lượt có `candidateRule` vào thống kê luật ứng viên (xem emptyDay.candidate). */
+function addCandidateRule(stats, candidate, chosen) {
+  const name = String(candidate?.name || '');
+  if (!name) return;
+  const slot = stats.byRule[name] || (stats.byRule[name] = { n: 0, ok: 0, bad: 0, neutral: 0, live: 0 });
+  if (candidate.mode === 'on') { stats.live += 1; slot.live += 1; return; }
+  stats.n += 1; slot.n += 1;
+  const mark = candidate.templateId && chosen ? intentMatchMark(candidate.templateId, chosen) : '~';
+  const key = mark === '✓' ? 'ok' : mark === '✗' ? 'bad' : 'neutral';
+  stats[key] += 1; slot[key] += 1;
+}
 
 /** Cộng một lượt (dạng nhật ký quyết định v1) vào ngày. options.groupOf: nhóm của mẫu (mặc định mô-đun tầng). */
 export function addEntry(day, entry, prices = DEFAULT_PRICES, options = {}) {
@@ -154,6 +170,7 @@ export function addEntry(day, entry, prices = DEFAULT_PRICES, options = {}) {
   }
   if (entry.handoff) day.handoff += 1;
   if (entry.attention) day.attention += 1;
+  if (entry.candidateRule) addCandidateRule(day.candidate, entry.candidateRule, entry.chosen || entry.final);
 }
 
 /** Đọc thư mục nhật ký → [{ day, entry }] (ngày lấy theo tên tệp). */
@@ -303,6 +320,9 @@ export function formatReport(days) {
     for (const key of Object.keys(stats.tokens)) total.tokens[key].push(...stats.tokens[key]);
     for (const [template, slot] of Object.entries(stats.gate.byTemplate)) { const target = total.gate.byTemplate[template] || (total.gate.byTemplate[template] = { agree: 0, outside: 0 }); target.agree += slot.agree; target.outside += slot.outside; }
     for (const [reason, n] of Object.entries(stats.gate.reasons)) total.gate.reasons[reason] = (total.gate.reasons[reason] || 0) + n;
+    const candidate = stats.candidate || { byRule: {} };
+    for (const key of ['n', 'ok', 'bad', 'neutral', 'live']) total.candidate[key] += candidate[key] || 0;
+    for (const [rule, slot] of Object.entries(candidate.byRule)) { const target = total.candidate.byRule[rule] || (total.candidate.byRule[rule] = { n: 0, ok: 0, bad: 0, neutral: 0, live: 0 }); for (const key of ['n', 'ok', 'bad', 'neutral', 'live']) target[key] += slot[key] || 0; }
   }
   if (Object.keys(days).length > 1) lines.push(rowOf('TỔNG', total));
   const skipped = Object.entries(total.skipped).sort((a, b) => b[1] - a[1]);
@@ -315,6 +335,16 @@ export function formatReport(days) {
   const cascadeGroups = Object.entries(total.cascade.byGroup).sort((a, b) => b[1].n - a[1].n);
   if (cascadeGroups.length) lines.push(`Mô hình tầng theo nhóm (lượt LLM): ${cascadeGroups.map(([group, slot]) => `${group} ${slot.n} (nhóm ${pct(slot.groupOk, slot.n)}, mẫu ${slot.tplOk}✓/${slot.tplBad}✗${slot.refused ? `, không mẫu ${slot.refused}` : ''}${slot.danger ? `, ⚠${slot.danger} vào ORDER/SUPPORT` : ''})`).join(' · ')}`);
   if (total.cascade.group.danger) lines.push(`Mô hình tầng ✗ nguy hiểm (thật là ORDER/SUPPORT mà tầng đoán nhóm khác): ${total.cascade.group.danger}`);
+  // R13: luật ứng viên K (candidateRule) — số lượt khớp khi chạy ẩn và tỷ lệ mẫu của luật trùng mẫu đã chọn thật (`chosen`),
+  // theo ngày và theo luật, để sau vài ngày chạy ẩn quyết định bật (settings.candidateRules). Dòng riêng dưới bảng: các
+  // cột của bảng giữ nguyên vị trí. Tỷ lệ tính trên lượt so được (✓ + ✗; lượt "~" trung tính không tính).
+  const candidateLine = slot => `${slot.n} lượt, trùng chosen ${slot.ok}/${slot.ok + slot.bad} (${pct(slot.ok, slot.ok + slot.bad)})${slot.neutral ? `, ~${slot.neutral}` : ''}${slot.live ? `, đã bật thật ${slot.live}` : ''}`;
+  if (total.candidate.n || total.candidate.live) {
+    const perDay = Object.entries(days).sort().filter(([, stats]) => stats.candidate && (stats.candidate.n || stats.candidate.live));
+    lines.push(`Luật ứng viên K (candidateRule, chạy ẩn) theo ngày: ${perDay.map(([day, stats]) => `${day} ${candidateLine(stats.candidate)}`).join(' · ')}${perDay.length > 1 ? ` · TỔNG ${candidateLine(total.candidate)}` : ''}`);
+    const perRule = Object.entries(total.candidate.byRule).sort((a, b) => (b[1].n + b[1].live) - (a[1].n + a[1].live));
+    lines.push(`Luật ứng viên K theo luật: ${perRule.map(([rule, slot]) => `${rule} ${candidateLine(slot)}`).join(' · ')}`);
+  }
   return lines.join('\n');
   function rowOf(day, stats) {
     const skippedTotal = Object.values(stats.skipped).reduce((sum, n) => sum + n, 0);

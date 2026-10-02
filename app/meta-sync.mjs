@@ -147,13 +147,22 @@ async function sendCommentReply(conversation, { text, imageUrl, privateReply, st
 
 /** Like and/or hide the customer's latest comment, as the bot settings ask. */
 export async function moderateComment(conversation, message, { like = false, hide = false } = {}) {
-  const commentId = message?.commentId || conversation.lastCommentId;
-  if (!commentId || (!like && !hide)) return;
+  // R13 (bình luận F2): bình luận cần thích/ẩn là bình luận của CHÍNH tin được đưa vào (bot gộp nhiều bình luận rồi gọi
+  // riêng cho từng bình luận có SĐT) — tin bình luận lưu mã ở `commentId` (webhook Meta) hay `id`/`mid` (đồng bộ Pancake);
+  // chỉ khi không có tin mới dùng bình luận cuối của luồng. Trước đây thiếu commentId là ẩn nhầm bình luận cuối.
+  const ownId = message?.direction === 'outgoing' ? '' : String(message?.commentId || message?.id || message?.mid || '');
+  const commentId = ownId || conversation.lastCommentId;
+  if (!commentId || (!like && !hide)) return { liked: false, hidden: false, reason: 'nothing' };
   // Public API của Pancake không có thích/ẩn bình luận; Page đó cũng không có token Meta trong CRM.
-  if (conversation.pancakeConversationId) return;
+  // KHÔNG gọi API nào ở đây (chủ shop chưa quyết đường ẩn qua Pancake / token Meta) — chỉ ghi log rõ để rà được.
+  if (conversation.pancakeConversationId) {
+    if (hide) console.warn(`Bình luận ${commentId} không ẩn được: Page nối qua Pancake (không có API ẩn/thích) — nhân viên ẩn tay nếu có SĐT (${conversation.id})`);
+    return { liked: false, hidden: false, reason: 'pancake' };
+  }
   const pageAccessToken = await getPageAccessToken(conversation.pageId);
-  if (like) await likeComment({ commentId, pageAccessToken }).catch(() => {});
-  if (hide) await hideComment({ commentId, pageAccessToken }).catch(() => {});
+  const liked = like ? await likeComment({ commentId, pageAccessToken }).then(() => true, () => false) : false;
+  const hidden = hide ? await hideComment({ commentId, pageAccessToken }).then(() => true, () => false) : false;
+  return { liked, hidden, reason: '' };
 }
 
 /** Sends a reply through the Send API and records it in the local conversation. */

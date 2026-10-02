@@ -54,14 +54,24 @@ dựng dữ liệu (`dataset-context`, `build-dataset`), đo (`golden-set.enrich
 - Trường thêm (không bắt buộc, công cụ khác bỏ qua): `prevBotAgeMin` (có trường này = dòng v2, biết chắc ngữ cảnh
   giỏ), `staffRepliedAfterBot`, `bundleSize`, `ruleName`, `labelBefore`, `chosen`, `final`, `llmTemplate`,
   `basket` ([{ sku, quantity }] từ nhật ký), `lastTemplateMatched` (mã con khớp chữ), `ruleUncertain`,
-  `ruleMissingTemplate`.
+  `ruleMissingTemplate`, `candidateRule`.
+- **`staffRepliedAfterBot` đổi nghĩa từ r13 (02/10/2026)**: trong nhật ký quyết định (`ctx.staffRepliedAfterBot`) cờ
+  này nay chỉ `true` khi có tin **thật của nhân viên** sau lượt bot + 5 giây (cờ `staff`, hay tin Page không mang dấu
+  máy gửi). Trước r13, mọi tin Page sau lượt bot — ưu đãi QR, bám đuổi, lời chào Botcake / AI Pancake, thẻ đơn POS —
+  cũng bật cờ. Dòng nhật ký trước 02/10 vì vậy có cờ `true` nhiều hơn thực tế; khi huấn luyện gộp cả hai giai đoạn
+  thì đặc trưng này lệch phân phối (dùng `--since 2026-10-02`, hoặc lưu ý khi so kết quả). Luật vẫn nhận "có tin
+  Page sau lượt bot" (nghĩa cũ) qua `ctx.staffRepliedAfterBot` của `ruleIntent` — chỉ nhật ký / đặc trưng đổi.
+- **`candidateRule`** (từ r13): `{ name, templateId, mode }` — luật ứng viên K1/K1b/K3/K4/K5 khớp ở lượt đó; `mode`
+  `shadow` = chỉ ghi nhật ký (mặc định, `settings.candidateRules`), `on` = luật đã trả lời thật. Không phải đặc trưng
+  huấn luyện; `shadow-report` in hai dòng "Luật ứng viên K …" (số lượt khớp khi chạy ẩn và tỷ lệ mẫu của luật trùng
+  `chosen`, theo ngày và theo luật) để sau vài ngày chạy ẩn quyết định bật.
 
 ## Quy trình huấn luyện lại (mỗi tuần)
 
 ```sh
 # 1. Dựng dataset. Ưu tiên nhật ký quyết định (từ khi engine ghi data/processed/decision-log/YYYY-MM-DD.jsonl):
 node tools-intent/build-dataset.mjs /tmp/dataset.jsonl --from-decision-log data/processed/decision-log [--since 2026-09-28] [--include-comments]
-#    Nhãn = `chosen` khi final là mẫu gác/hậu xử lý (REPLY_ALREADY_SENT*, ORDER_ADDRESS_REMIND) và có chosen, còn lại = final
+#    Nhãn = `chosen` (mẫu đã chọn trước hậu xử lý) khi có — từ r13; bản ghi cũ không có chosen thì = final
 #    (mã engine ORDER_UPDATE/CANCEL/NOTE → ORDER_UPDATED/CANCELLED/NOTE_ADDED). `prevBot` của nhật ký là MÃ MẪU → lastTemplate;
 #    câu bot trước đọc từ `prevBotText`, giỏ từ `basket` nếu engine ghi. Khử trùng id; in số dòng hỏng / trước since / trùng.
 #    --since YYYY-MM-DD theo giờ Việt Nam, mặc định 2026-09-18 (in ra khi chạy); sai định dạng → lỗi.

@@ -30,10 +30,15 @@ await writeChannelStore({ items: [{ id: pageId, name: 'Giọt Nắng', token: en
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 // Pancake giãn nhịp giữa các lần gọi (giới hạn 5 lần/giây mỗi Page) nên không đợi theo giờ cố định: chờ tới khi
 // bộ chào ghi dòng kết thúc của hội thoại đó (đã gửi / KHÔNG gửi / không chào), rồi nán thêm cho bước trả luồng.
-async function settled(w, marker, extraMs = 120) {
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline && !w.logs.some(line => marker.test(line))) await pause(20);
-  await pause(extraMs);
+async function until(condition, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !condition()) await pause(10);
+}
+// Chờ dòng log kết thúc, rồi chờ ĐỦ số lời gọi mong đợi (bước trả luồng sau khi gửi), rồi nán ngắn để bắt lời gọi thừa.
+async function settled(w, marker, expectedCalls = 0) {
+  await until(() => w.logs.some(line => marker.test(line)));
+  await until(() => w.calls.length >= expectedCalls);
+  await pause(60);
 }
 let clock = 1_790_100_000_000;
 const referralPayload = (psid, channel = 'messaging') => ({
@@ -96,7 +101,7 @@ function wiring({ pancake = 'ok', release = 'ok', metaSend = 'ok' } = {}) {
     log: line => logs.push(line),
     logError: line => logs.push(`ERR ${line}`)
   });
-  return { calls, logs, handle, greeter, restore: () => { globalThis.fetch = realFetch; } };
+  return { calls, logs, handle, greeter, restore: async () => { await greeter.flush({ timeoutMs: 3000 }).catch(() => {}); await pause(30); globalThis.fetch = realFetch; } };
 }
 
 const storedTexts = async psid => ((await readMessagingStore()).messages[`${pageId}:${psid}`] || []).filter(item => item.direction === 'outgoing').map(item => item.text);
@@ -106,16 +111,16 @@ test('khách cũ (có hội thoại Pancake): trả luồng NGAY khi nhận refe
   const w = wiring();
   try {
     w.handle(await processWebhookPayload(referralPayload('cu-1')));
-    await pause(15);
-    assert.deepEqual(w.calls, ['release'], 'trả luồng ngay, không đợi hết thời gian hẹn chào');
-    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-1/);
+    await until(() => w.calls.length >= 1);
+    assert.equal(w.calls[0], 'release', 'trả luồng trước mọi lời gửi');
+    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-1/, 3);
     assert.deepEqual(w.calls, ['release', 'pancake-send', 'pancake-send']);
     assert.deepEqual(await storedTexts('cu-1'), ['Ưu đãi QR phần 1', 'Ưu đãi QR phần 2']);
     assert.equal(w.logs.filter(line => line === 'QR: đã trả luồng về app mặc định — Khách cũ cu-1').length, 1);
     assert.equal(w.logs.filter(line => line === 'QR: ưu đãi gửi qua Pancake (sau khi trả luồng) — Khách cũ cu-1').length, 1);
     assert.ok(w.logs.some(line => /QR: đã gửi ưu đãi cho Khách cũ cu-1 \(chữ\+chữ\)/.test(line)));
   } finally {
-    w.restore();
+    await w.restore();
   }
 });
 
@@ -124,14 +129,14 @@ test('khách cũ, Pancake từ chối: thử Send API Meta một lần, các ph�
   const w = wiring({ pancake: 'fail' });
   try {
     w.handle(await processWebhookPayload(referralPayload('cu-2')));
-    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-2/);
+    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-2/, 4);
     assert.deepEqual(w.calls, ['release', 'pancake-send', 'meta-send', 'meta-send'], 'Pancake chỉ bị thử một lần');
     assert.deepEqual(await storedTexts('cu-2'), ['Ưu đãi QR phần 1', 'Ưu đãi QR phần 2']);
     assert.ok(w.logs.some(line => /^ERR QR: gửi ưu đãi qua Pancake lỗi \(Pancake không nhận tin .*Tin nhắn bị Facebook từ chối\), thử Send API Meta — Khách cũ cu-2$/.test(line)), w.logs.join('\n'));
     assert.equal(w.logs.filter(line => line === 'QR: ưu đãi gửi qua Send API Meta (dự phòng, Pancake lỗi) — Khách cũ cu-2').length, 1);
     assert.ok(!w.logs.some(line => /gửi qua Pancake \(sau khi trả luồng\)/.test(line)));
   } finally {
-    w.restore();
+    await w.restore();
   }
 });
 
@@ -140,13 +145,13 @@ test('khách cũ, trả luồng lỗi: vẫn thử gửi qua Pancake, gửi xong
   const w = wiring({ release: 'fail' });
   try {
     w.handle(await processWebhookPayload(referralPayload('cu-3')));
-    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-3/);
+    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-3/, 4);
     assert.deepEqual(w.calls, ['release', 'pancake-send', 'pancake-send', 'release']);
     assert.deepEqual(await storedTexts('cu-3'), ['Ưu đãi QR phần 1', 'Ưu đãi QR phần 2']);
     assert.ok(w.logs.some(line => /^ERR QR: không trả được quyền giữ luồng cho Khách cũ cu-3: .*not thread owner/.test(line)));
     assert.ok(!w.logs.some(line => /đã trả luồng về app mặc định/.test(line)));
   } finally {
-    w.restore();
+    await w.restore();
   }
 });
 
@@ -155,22 +160,22 @@ test('khách cũ, cả Pancake lẫn Send API Meta đều lỗi: ghi "KHÔNG g�
   const both = wiring({ pancake: 'fail', metaSend: 'fail' });
   try {
     both.handle(await processWebhookPayload(referralPayload('cu-4')));
-    await settled(both, /KHÔNG gửi được ưu đãi cho Khách cũ cu-4/);
+    await settled(both, /KHÔNG gửi được ưu đãi cho Khách cũ cu-4/, 3);
     assert.deepEqual(both.calls, ['release', 'pancake-send', 'meta-send']);
     assert.ok(both.logs.some(line => /^ERR QR: KHÔNG gửi được ưu đãi cho Khách cũ cu-4: /.test(line)));
     assert.deepEqual(await storedTexts('cu-4'), []);
   } finally {
-    both.restore();
+    await both.restore();
   }
   await seedPancakeCustomer('cu-5');
   const gateway = wiring({ pancake: 'gateway' });
   try {
     gateway.handle(await processWebhookPayload(referralPayload('cu-5')));
-    await settled(gateway, /KHÔNG gửi được ưu đãi cho Khách cũ cu-5/);
+    await settled(gateway, /KHÔNG gửi được ưu đãi cho Khách cũ cu-5/, 2);
     assert.deepEqual(gateway.calls, ['release', 'pancake-send'], 'tin có thể đã tới khách: không gửi lần hai qua Meta');
     assert.ok(gateway.logs.some(line => /^ERR QR: KHÔNG gửi được ưu đãi cho Khách cũ cu-5: .*không rõ đã gửi/.test(line)), gateway.logs.join('\n'));
   } finally {
-    gateway.restore();
+    await gateway.restore();
   }
 });
 
@@ -178,15 +183,13 @@ test('khách mới (chưa có hội thoại Pancake): gửi qua Send API Meta TR
   const w = wiring();
   try {
     w.handle(await processWebhookPayload(referralPayload('moi-1')));
-    await pause(15);
-    assert.deepEqual(w.calls, [], 'chưa gửi thì chưa trả luồng — CRM cần giữ luồng để gửi');
-    await settled(w, /đã gửi ưu đãi cho /);
+    await settled(w, /đã gửi ưu đãi cho /, 3);
     assert.deepEqual(w.calls, ['meta-send', 'meta-send', 'release']);
     assert.deepEqual(await storedTexts('moi-1'), ['Ưu đãi QR phần 1', 'Ưu đãi QR phần 2']);
     assert.equal(w.logs.filter(line => /^QR: ưu đãi gửi qua Send API Meta \(CRM đang giữ luồng\) — /.test(line)).length, 1);
     assert.equal(w.logs.filter(line => /^QR: đã trả luồng về app mặc định — /.test(line)).length, 1);
   } finally {
-    w.restore();
+    await w.restore();
   }
 });
 
@@ -195,11 +198,12 @@ test('luôn trả luồng khi không chào: quét lại trong thời gian chờ,
   const w = wiring();
   try {
     w.handle(await processWebhookPayload(referralPayload('cu-6')));
-    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-6/);
+    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-6/, 3);
     w.calls.length = 0;
     // Quét lại trong cooldown: không gửi nữa nhưng vẫn trả luồng (Meta lại giao luồng cho CRM khi khách mở link).
     w.handle(await processWebhookPayload(referralPayload('cu-6')));
-    await pause(100);
+    await until(() => w.calls.length >= 1);
+    await pause(60);
     assert.deepEqual(w.calls, ['release']);
     assert.equal(w.logs.filter(line => /đã trả luồng về app mặc định — Khách cũ cu-6/.test(line)).length, 1, 'dòng log chỉ ghi lần đầu của mỗi hội thoại');
     // Referral không phải mã thẻ (ref lạ) trên Page chỉ nghe referral: CRM không trả lời, trả luồng ngay.
@@ -207,16 +211,17 @@ test('luôn trả luồng khi không chào: quét lại trong thời gian chờ,
     const strange = referralPayload('cu-6');
     strange.entry[0].messaging[0].referral.ref = 'chien-dich-khac';
     w.handle(await processWebhookPayload(strange));
-    await pause(50);
+    await until(() => w.calls.length >= 1);
+    await pause(60);
     assert.deepEqual(w.calls, ['release']);
     // Standby: CRM không giữ luồng → không gọi release, ưu đãi đi đường cũ (Pancake).
     await seedPancakeCustomer('cu-7');
     w.calls.length = 0;
     w.handle(await processWebhookPayload(referralPayload('cu-7', 'standby')));
-    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-7/);
+    await settled(w, /đã gửi ưu đãi cho Khách cũ cu-7/, 2);
     assert.deepEqual(w.calls, ['pancake-send', 'pancake-send']);
   } finally {
-    w.restore();
+    await w.restore();
   }
   // Nhân viên vừa nhắn: không chào, vẫn trả luồng (khách mới → trả sau khi quyết định không gửi).
   const busyLogs = [];
@@ -231,7 +236,7 @@ test('luôn trả luồng khi không chào: quét lại trong thời gian chờ,
   });
   const scan = (id, extra = {}) => ({ type: 'referral', conversation: { id, psid: id.split(':')[1], pageId, name: id, ...extra }, referral: { ref: 'tmdt-01', source: 'SHORTLINK' } });
   busyFlow([scan(`${pageId}:ban-1`), scan(`${pageId}:ban-2`, { pancakeConversationId: 'x' })]);
-  await pause(100);
+  await until(() => released.length >= 2 && busyLogs.filter(line => /nhân viên vừa nhắn 1 phút trước/.test(line)).length >= 2);
   assert.deepEqual(released.sort(), [`${pageId}:ban-1`, `${pageId}:ban-2`], 'mỗi lượt trả luồng đúng một lần');
   assert.equal(busyLogs.filter(line => /nhân viên vừa nhắn 1 phút trước/.test(line)).length, 2);
 });

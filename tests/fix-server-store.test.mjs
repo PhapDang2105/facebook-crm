@@ -93,7 +93,9 @@ test('#4 webhook Meta chỉ có trạng thái đã giao/đã xem: không có tin
   await processWebhookPayload(delivery(Date.now()));
   assert.equal(store.messagingStoreHasPendingWrites(), true, 'trạng thái đổi → chờ ghi gộp');
   assert.equal((await store.listMessages('p1:999'))[0].status, 'delivered');
-  await wait(400);
+  // r13-glue (ổn định test): trước đây chờ cố định 400 ms rồi khẳng định — máy bận thì lượt ghi gộp chạy trễ hơn và test đỏ
+  // ngẫu nhiên (gặp 1/4 lần khi chạy 4 bộ test song song). Chờ tới khi hết việc ghi (tối đa 15 giây).
+  for (const deadline = Date.now() + 15_000; store.messagingStoreHasPendingWrites() && Date.now() < deadline;) await wait(25);
   assert.equal(store.messagingStoreHasPendingWrites(), false, 'ghi gộp đã chạy');
 });
 

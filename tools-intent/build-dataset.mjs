@@ -7,8 +7,16 @@
 //     → với --llm, Gemini quy về mã mẫu (labelSource 'staff', cache data/processed/staff-labels.json);
 //     nhân viên viết lại trong 10 phút sau bot → nhãn nhân viên thay nhãn bot, đánh dấu corrected.
 //   - Từ NHẬT KÝ QUYẾT ĐỊNH (ưu tiên khi có): mỗi dòng là một lượt engine thật, labelSource 'pipeline'.
-//     Nhãn = `chosen` khi final là mẫu hậu xử lý / gác (REPLY_ALREADY_SENT*, ORDER_ADDRESS_REMIND) và có chosen,
-//     còn lại = final (mã engine ORDER_UPDATE/CANCEL/NOTE quy về mã mẫu ORDER_UPDATED/CANCELLED/NOTE_ADDED).
+//     Nhãn = `chosen` (mẫu mô hình/luật đã chọn, trước hậu xử lý) khi có; bản ghi cũ không có chosen thì = final
+//     (mã engine ORDER_UPDATE/CANCEL/NOTE quy về mã mẫu ORDER_UPDATED/CANCELLED/NOTE_ADDED) — xem decisionLabelOf.
+//     LƯU Ý từ r13 (02/10): `ctx.staffRepliedAfterBot` của nhật ký ĐỔI NGHĨA — chỉ còn true khi có tin THẬT của nhân viên
+//     sau lượt bot + 5 giây (cờ staff, hay tin Page không mang dấu máy gửi). Trước r13, MỌI tin Page sau lượt bot (ưu
+//     đãi QR, bám đuổi, lời chào Botcake/AI Pancake, thẻ đơn POS) cũng bật cờ này → dòng nhật ký trước 02/10 có cờ
+//     true nhiều hơn thực tế; khi huấn luyện gộp hai giai đoạn, đặc trưng này lệch phân phối (cân nhắc --since 2026-10-02
+//     hay bỏ đặc trưng khi so sánh). Bản dựng từ kho hội thoại (dataset-context) vốn đã chỉ tính tin có cờ staff.
+//     Trường mới `candidateRule` { name, templateId, mode } (luật ứng viên K1/K1b/K3/K4/K5; mode 'shadow' = chỉ ghi nhật
+//     ký, 'on' = đã trả lời thật) được chép sang dòng dataset khi nhật ký có — KHÔNG phải đặc trưng huấn luyện, chỉ để
+//     đối chiếu luật ứng viên với nhãn (shadow-report in tỷ lệ trùng `chosen`).
 //     Trường `prevBot` của nhật ký là MÃ MẪU bot trước (botLastTemplateId) → lastTemplate; câu bot trước (đã che)
 //     đọc từ `prevBotText` nếu engine ghi; giỏ đang giữ đọc từ `basket` [{ sku, quantity }] nếu có.
 //     Ngữ cảnh mô hình dựng bằng intentRowOf (một định nghĩa với engine) từ ctx/chữ của nhật ký.
@@ -133,14 +141,17 @@ export function readDecisionLog(dir, { since = 0, stats = {} } = {}) {
   return entries;
 }
 
-// Mẫu hậu xử lý / gác: câu engine GỬI không phải câu trả lời nội dung → nhãn là mẫu đã chọn trước gác (`chosen`).
-const POST_GUARD_FINALS = new Set(['REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'ORDER_ADDRESS_REMIND']);
-
-/** Nhãn của một bản ghi nhật ký: chosen khi final là mẫu hậu xử lý/gác (và có chosen), còn lại final; mã engine → mã mẫu. */
+/**
+ * Nhãn của một bản ghi nhật ký: mẫu mô hình/luật ĐÃ CHỌN (`chosen`, trước mọi hậu xử lý) khi có; bản ghi cũ không có
+ * `chosen` thì lấy `final`; mã engine → mã mẫu.
+ * R13 (báo cáo mô hình, mục 3.E.2): trước đây chỉ lấy `chosen` khi `final` là 3 mẫu gác (REPLY_ALREADY_SENT*,
+ * ORDER_ADDRESS_REMIND), còn lại lấy `final` — trong khi engine chấm ✓/✗ mô hình nhỏ theo `chosen`. Lệch 43/611 dòng hộp
+ * thư 30/09–02/10 (7,0%); 21 dòng thành LIVESTREAM_COMMENT (hậu xử lý GENERAL_INFO → lời chào live) rồi bị train-intent loại.
+ */
 export function decisionLabelOf(entry) {
   const final = String(entry?.final || '');
   const chosen = String(entry?.chosen || '');
-  return labelTemplateId(POST_GUARD_FINALS.has(final) && chosen ? chosen : final);
+  return labelTemplateId(chosen || final);
 }
 
 /**
@@ -211,6 +222,8 @@ export function rowsFromDecisionLog(entries, { templates = {}, includeComments =
       staffRepliedAfterBot: Boolean(ctx.staffRepliedAfterBot),
       ...(basket ? { basket } : {}),
       ...(entry.rule?.name ? { ruleName: entry.rule.name } : {}),
+      // R13: luật ứng viên (K-luật) khớp ở lượt này — chỉ để đối chiếu, không phải đặc trưng.
+      ...(entry.candidateRule?.name ? { candidateRule: { name: String(entry.candidateRule.name), templateId: labelTemplateId(entry.candidateRule.templateId || ''), mode: entry.candidateRule.mode === 'on' ? 'on' : 'shadow' } } : {}),
       ...(entry.chosen && labelTemplateId(entry.chosen) !== label ? { chosen: entry.chosen } : {}),
       ...(String(entry.final) !== label ? { final: entry.final } : {}),
       ...(entry.llm?.templateId ? { llmTemplate: entry.llm.templateId } : {})

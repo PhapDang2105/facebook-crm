@@ -3,11 +3,12 @@
 // (chatbot, landing) nên sửa phải ghi về đây, nếu không lần đồng bộ sau bảng
 // lại lấy bản cũ. Địa chỉ mới được tách ba cấp lại và ghi chú xử lý tự cập nhật
 // vì order-notes.mjs dựng ghi chú từ chính dữ liệu đơn.
-import { resolvedAddressFields } from './processing/locations.mjs';
+import { ADDRESS_PICK_CONFLICT_REASON, resolvedAddressFields } from './processing/locations.mjs';
 import { findProductBySku } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
 import { toLocalPhoneLoose } from './phone-warnings.mjs';
+import { processingNotes } from './order-notes.mjs';
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -78,7 +79,7 @@ function repriceFromCatalog(order, products, { basketChanged }) {
  * ship riêng): chia giảm giá theo tỷ lệ giá dòng, dòng đầu nhận phí ship và phần
  * làm tròn — Σ paidPrice × số lượng = tổng đơn, như ô Đơn giá của bảng và file kho.
  */
-function spreadPaidPrices(order) {
+export function spreadPaidPrices(order) {
   const products = Array.isArray(order.products) ? order.products : [];
   if (!products.length) return;
   const quantityOf = item => Math.max(1, Math.round(Number(item?.quantity) || 1));
@@ -101,6 +102,19 @@ function dropStalePromoGift(order) {
   const promo = String(order.promoGift);
   delete order.promoGift;
   if (order.gift) order.gift = String(order.gift).split(' + ').filter(part => part.trim() !== promo).join(' + ');
+}
+
+/**
+ * Ghi địa chỉ mới lên đơn (tách lại ba cấp). R13 (K7): cờ "Ô chọn khác chữ khách gõ" (`addressCheck`, do
+ * resolvedAddressFields gắn khi chữ khách gõ và ô chọn của form/POS là hai nơi khác nhau) là của ĐỊA CHỈ CŨ — địa chỉ mới
+ * không còn mâu thuẫn thì xoá cờ; trước đây cờ còn lại sau khi nhân viên đã sửa xong địa chỉ. Ghi chú soát khác
+ * (bot nhận địa chỉ sau một lần hỏi…) không bị đụng. Trả về các trường vừa ghi.
+ */
+export function assignResolvedAddress(order, address) {
+  const fields = resolvedAddressFields(address);
+  Object.assign(order, fields);
+  if (!fields.addressCheck && String(order.addressCheck || '').startsWith(ADDRESS_PICK_CONFLICT_REASON)) delete order.addressCheck;
+  return fields;
 }
 
 /**
@@ -130,7 +144,7 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     const address = text(patch.address, 500);
     if (!address) throw new Error('Địa chỉ không được để trống.');
     if (address !== order.address) {
-      Object.assign(order, resolvedAddressFields(address));
+      assignResolvedAddress(order, address);
       // Nhân viên đã tự tay ghi địa chỉ: không còn là "máy tự điền" hay "thiếu địa chỉ".
       if (order.landing && typeof order.landing === 'object') {
         order.landing.needsAddress = false;
@@ -206,6 +220,13 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
   // dòng), phí ship, giảm giá, thanh toán, quà, ghi chú khách; tổng tính lại.
   let moneyChanged = false;
   if (Array.isArray(patch.products)) {
+    // R13 (L4): dòng không gửi giá (thiếu `price` / để trống) lấy giá danh mục theo SKU — trước đây thành 0đ
+    // và cả đơn tụt tổng về 0. Gửi rõ 0 thì vẫn là 0 (dòng tặng).
+    const linePrice = item => {
+      const blank = item?.price === undefined || item?.price === null || String(item.price).trim() === '';
+      const typed = blank ? null : money(item.price);
+      return typed ?? (Number(findProductBySku(item?.sku)?.unitPrice) || 0);
+    };
     const products = patch.products.slice(0, 100).map(item => ({
       name: text(item?.name, 200),
       sku: text(item?.sku, 80),
@@ -213,8 +234,8 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
       image: text(item?.image, 500),
       weight: Math.max(0, Math.round(Number(item?.weight) || 0)),
       quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)),
-      price: money(item?.price) ?? 0,
-      paidPrice: money(item?.price) ?? 0
+      price: linePrice(item),
+      paidPrice: linePrice(item)
     })).filter(item => item.name);
     if (!products.length) throw new Error('Đơn cần ít nhất một sản phẩm.');
     if (JSON.stringify(products) !== JSON.stringify(order.products)) { order.products = products; changed.push('products'); moneyChanged = true; }
@@ -256,7 +277,11 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
   // transfer, confirmed, cancelled; rỗng là chưa xử lý).
   if (patch.processingStatus !== undefined) {
     const processingStatus = text(patch.processingStatus, 40);
+    // R13 (L2): chỉ nhận mã có trong ORDER_STATUS_LABELS — trước đây giá trị bất kỳ ("khong-co") cũng được lưu.
+    if (!Object.hasOwn(ORDER_STATUS_LABELS, processingStatus)) throw new Error('Trạng thái xử lý không hợp lệ.');
     if (processingStatus !== String(order.processingStatus || '')) {
+      // R13 (M7): mở lại đơn đã hủy mà bên POS đơn vẫn đang hủy → cảnh báo + cho đẩy lại thành đơn POS mới.
+      if (String(order.processingStatus || '') === 'cancelled' && markReopenedAfterPosCancel(order, now)) changed.posReopened = true;
       order.processingStatus = processingStatus;
       changed.push('processingStatus');
       // Trạng thái hiển thị trên thẻ đơn đi theo: hủy → "Hủy", xác nhận → "Đã xác nhận", bỏ chọn → "Mới".
@@ -408,7 +433,8 @@ export function stampOrderCreated(order, by, { at = Number(order?.createdAt) || 
   return order;
 }
 
-const moneyText = value => `${Math.round(Number(value) || 0).toLocaleString('vi-VN')}đ`;
+/** 189000 → "189.000đ" (nhật ký, lịch sử đơn, ghi chú xử lý). */
+export const moneyText = value => `${Math.round(Number(value) || 0).toLocaleString('vi-VN')}đ`;
 const basketText = products => (Array.isArray(products) ? products : [])
   .map(item => `${Math.round(Number(item?.quantity) || 0)} ${String(item?.name || item?.sku || '').trim()}`)
   .join(' + ').slice(0, 80);
@@ -444,5 +470,151 @@ export function describeOrderEdits(before = {}, after = {}, changed = []) {
   if (has('staffNote')) parts.push('ghi chú xử lý');
   if (has('hiddenFromTable')) parts.push(after.hiddenFromTable ? 'ẩn khỏi bảng' : 'hiện lại trong bảng');
   if ((Number(before.total) || 0) !== (Number(after.total) || 0)) parts.push(`tổng ${moneyText(before.total)} → ${moneyText(after.total)}`);
+  if (changed.posReopened) parts.push('đơn đã hủy trên POS — cần lên lại');
   return parts.join('; ').slice(0, 200);
+}
+
+/* ---- R13: ghi chú xử lý gắn trên đơn (processingFlags) ----
+ * order-notes.mjs dựng ghi chú xử lý TỪ DỮ LIỆU đơn (thiếu địa chỉ, tự điền…). Có những cảnh báo không suy ra
+ * được từ dữ liệu (đơn có thể trùng đơn khác, giá landing khác bảng giá, đơn mở lại sau khi POS đã hủy): lưu
+ * thẳng trên đơn ở `order.processingFlags` — mảng chuỗi, mỗi chuỗi mở đầu bằng ký hiệu ⚠ / ℹ như ghi chú xử lý.
+ */
+export const PROCESSING_FLAG_LIMIT = 8;
+export const POS_REOPEN_FLAG = '⚠ Đơn đã hủy trên POS — cần lên lại';
+
+/** Thêm một ghi chú xử lý lên đơn (không trùng, tối đa PROCESSING_FLAG_LIMIT). Trả true nếu vừa thêm. */
+export function addProcessingFlag(order, flag) {
+  const value = String(flag || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  if (!order || typeof order !== 'object' || !value) return false;
+  const flags = Array.isArray(order.processingFlags) ? order.processingFlags.filter(item => typeof item === 'string') : [];
+  if (flags.includes(value)) return false;
+  order.processingFlags = [...flags, value].slice(-PROCESSING_FLAG_LIMIT);
+  return true;
+}
+
+/** Bỏ các ghi chú xử lý khớp `match` (chuỗi = đúng chuỗi đó; hàm = điều kiện). Trả true nếu có bỏ. */
+export function removeProcessingFlag(order, match) {
+  if (!order || !Array.isArray(order.processingFlags)) return false;
+  const test = typeof match === 'function' ? match : item => item === match;
+  const kept = order.processingFlags.filter(item => !test(item));
+  if (kept.length === order.processingFlags.length) return false;
+  if (kept.length) order.processingFlags = kept; else delete order.processingFlags;
+  return true;
+}
+
+/**
+ * Ghi chú xử lý của đơn: cờ gắn trên đơn (processingFlags) trước, rồi ghi chú dựng từ dữ liệu.
+ * R13 (gộp): order-notes.mjs processingNotes đã tự đọc processingFlags và khử trùng — hàm này chỉ còn là tên gọi cũ.
+ */
+export function orderProcessingNotes(order) {
+  return processingNotes(order);
+}
+
+/**
+ * R13 (M7): mở lại đơn đã hủy trong CRM trong khi đơn bên POS vẫn hủy (`pos.cancelled`). Trước đây đơn về "Mới",
+ * không cảnh báo, nút Đẩy POS không làm gì (đơn còn `pos.id`) → đơn sống trong CRM mà không ai giao.
+ * Nay: gắn ghi chú xử lý POS_REOPEN_FLAG, đặt `pos.needsRepush` (route Đẩy POS tạo ĐƠN POS MỚI) và
+ * `pos.cancelSyncedAt` (đồng bộ POS không hủy lại đơn vừa mở). Trả true nếu đơn thuộc trường hợp này.
+ */
+export function markReopenedAfterPosCancel(order, now = Date.now()) {
+  if (!order?.pos || typeof order.pos !== 'object' || order.pos.cancelled !== true) return false;
+  order.pos = { ...order.pos, needsRepush: true, cancelSyncedAt: Number(order.pos.cancelSyncedAt) || now };
+  addProcessingFlag(order, POS_REOPEN_FLAG);
+  return true;
+}
+
+/** Đơn cần lên lại POS (mở lại sau khi POS đã hủy, chưa đẩy lại)? */
+export function needsPosRepush(order) {
+  return Boolean(order?.pos?.needsRepush) && order.pos.cancelled === true && String(order.processingStatus || '') !== 'cancelled';
+}
+
+/**
+ * Bản sao đơn để đẩy lại POS thành đơn MỚI: mã "<mã đơn>-L<n>" (POS dùng custom_id "CRM-<mã>" làm mã đơn nên
+ * đơn cũ đã hủy còn giữ mã gốc). Trả { order: bản sao không có `pos`, ref: mã dùng trên POS, attempt }.
+ */
+export function posRepushDraft(order) {
+  const attempt = (Math.round(Number(order?.pos?.repushCount)) || 0) + 1;
+  const ref = `${order.id}-L${attempt + 1}`;
+  const { pos, ...rest } = order;
+  return { order: { ...rest, id: ref }, ref, attempt };
+}
+
+/** Ghi kết quả đẩy lại (đơn POS mới) lên đơn: bỏ cờ cần lên lại + ghi chú xử lý. */
+export function applyPosRepush(order, created, { ref, attempt, now = Date.now() } = {}) {
+  const previous = order.pos || {};
+  order.pos = { id: String(created.id), systemId: String(created.systemId || ''), status: String(created.status || ''), at: now, crmRef: String(ref || ''), repushCount: attempt, previousId: String(previous.id || '') };
+  removeProcessingFlag(order, POS_REOPEN_FLAG);
+  // Dấu "Đã hủy trên POS (đồng bộ lúc …)" của lần hủy cũ chặn đồng bộ hủy về sau: đơn POS mới thì bỏ dấu.
+  if (order.note) order.note = String(order.note).replace(/\s*Đã hủy trên POS \(đồng bộ lúc [^)]*\)\.?/g, '').trim();
+  order.updatedAt = now;
+  return order.pos;
+}
+
+/** Mã đơn CRM mà một đơn POS "CRM-<mã>" trỏ tới có phải đơn này không (đơn đẩy lại mang mã "<mã>-L<n>" ở pos.crmRef). */
+export function posCancelRefOf(order) {
+  return String(order?.pos?.crmRef || order?.id || '');
+}
+
+/* ---- R13 (L3): kiểm đơn nhân viên tạo tay (form Tạo đơn) sau khi chuẩn hoá ---- */
+export function assertManualOrderMoney(order) {
+  const subtotal = (Array.isArray(order?.products) ? order.products : []).reduce((sum, item) => sum + (Number(item?.quantity) || 0) * (Number(item?.price) || 0), 0);
+  if ((Number(order?.discount) || 0) > subtotal) throw new Error(`Giảm giá (${moneyText(order.discount)}) không được lớn hơn tiền hàng (${moneyText(subtotal)}).`);
+  if (!((Number(order?.total) || 0) > 0)) throw new Error('Tổng đơn phải lớn hơn 0đ: kiểm lại đơn giá từng sản phẩm.');
+}
+
+/* ---- R13 (M1): chống tạo trùng đơn tay ----
+ * Bấm "Tạo đơn" hai lần (mạng chậm, bấm đúp) từng ra 2 đơn CRM và 2 đơn POS. Cùng hội thoại + SĐT + giỏ + tổng
+ * trong 2 phút → nơi gọi trả 409 kèm mã đơn cũ; người dùng chắc chắn thì gửi lại kèm `force: true`.
+ */
+export const MANUAL_ORDER_DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
+
+const manualOrderKey = order => `${String(order?.phone || '').replace(/\D/g, '')}|${basketSignature(order?.products)}|${Math.round(Number(order?.total) || 0)}`;
+
+/**
+ * Bộ gác đơn tay trùng cho một tiến trình. `find(conversationId, existingOrders, order)` → { id, createdAt } của
+ * đơn giống hệt (đơn đã lưu chưa hủy, hoặc đơn ĐANG tạo dở ở request khác — hai request cách nhau < 1 giây cùng
+ * đọc kho khi chưa đơn nào kịp lưu) hay null. `reserve` giữ chỗ trước khi lưu, `release` trả chỗ khi tạo lỗi.
+ */
+export function createManualOrderGuard({ windowMs = MANUAL_ORDER_DUPLICATE_WINDOW_MS, clock = Date.now } = {}) {
+  const pending = new Map();
+  const sweep = now => { for (const [key, entry] of pending) if (now - entry.createdAt >= windowMs) pending.delete(key); };
+  return {
+    find(conversationId, existingOrders, order) {
+      const now = clock();
+      sweep(now);
+      const key = manualOrderKey(order);
+      const stored = (Array.isArray(existingOrders) ? existingOrders : []).find(entry => entry
+        && String(entry.processingStatus || '') !== 'cancelled' && entry.status !== 'Hủy'
+        && manualOrderKey(entry) === key
+        && Math.abs(now - (Number(entry.createdAt) || 0)) < windowMs);
+      if (stored) return { id: String(stored.id), createdAt: Number(stored.createdAt) || now };
+      const held = pending.get(`${conversationId}|${key}`);
+      return held ? { id: held.id, createdAt: held.createdAt } : null;
+    },
+    reserve(conversationId, order) {
+      pending.set(`${conversationId}|${manualOrderKey(order)}`, { id: String(order.id), createdAt: Number(order.createdAt) || clock() });
+    },
+    release(conversationId, order) {
+      const key = `${conversationId}|${manualOrderKey(order)}`;
+      if (pending.get(key)?.id === String(order.id)) pending.delete(key);
+    }
+  };
+}
+
+/** Câu hỏi cho nhân viên khi đơn tay trùng (giao diện hiện đúng câu này kèm nút vẫn tạo). */
+export function duplicateManualOrderMessage(duplicate) {
+  const time = new Date(Number(duplicate?.createdAt) || Date.now()).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
+  return `Đơn giống hệt vừa tạo lúc ${time} (mã #${duplicate?.id || '?'}) — vẫn tạo?`;
+}
+
+/* ---- R13 (M2): xoá đơn ---- */
+/**
+ * Đơn đã lên POS mà chưa hủy (xoá ở CRM sẽ để đơn POS sống → vẫn đi kiện)? Chỉ xét đơn mang `pos.id` (đơn CRM đã
+ * đẩy sang POS, đơn POS kéo về hội thoại); đơn landing (form Webcake, mã ở landing.posId) xoá như cũ.
+ */
+export function isLiveOnPos(order) {
+  if (!order?.pos?.id) return false;
+  if (order.pos?.cancelled === true || String(order.processingStatus || '') === 'cancelled' || order.status === 'Hủy') return false;
+  const code = Number(order.posStatus?.code);
+  return !(code === 6 || code === 7);
 }

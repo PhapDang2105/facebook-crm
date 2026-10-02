@@ -16,7 +16,7 @@ import { findProductBySku, matchProduct, normalizeText } from './processing/cata
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { attachPhoneWarning, fetchPosCustomerAddresses, toLocalPhoneLoose } from './phone-warnings.mjs';
-import { STAFF_EDIT_GROUPS, staffEditedGroups } from './order-edits.mjs';
+import { STAFF_EDIT_GROUPS, addProcessingFlag, moneyText, spreadPaidPrices, staffEditedGroups } from './order-edits.mjs';
 import { isUsableStreet, lostHouseNumbers, normalizeLocationKey, resolveAddress } from './processing/locations.mjs';
 import { inferAddress } from './processing/address-ai.mjs';
 import { appendOrderToArchive, archiveMonth } from './order-archive.mjs';
@@ -529,6 +529,13 @@ export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID()
     createdAt: now
   }, { now, id });
   if (total) order.total = total;
+  // R13 (M6): tổng form khác giá danh mục (landing chạy giá riêng, hay form ghi nhầm): ghi chú xử lý để nhân viên
+  // biết, và chia lại giá khách trả từng dòng (paidPrice) cho khớp tổng — trước đây "Combo 3 Xanh 399.000" lưu
+  // tổng 399.000 nhưng paidPrice 149.000 × 3 = 447.000 (bảng đơn / file kho cộng lại không ra tổng).
+  if (total && priced?.priceable && Number(priced.total) > 0 && total !== priced.total) {
+    addProcessingFlag(order, `ℹ Giá landing ${moneyText(total)} khác bảng giá ${moneyText(priced.total)}`);
+    spreadPaidPrices(order);
+  }
   order.gift = priced?.priceable ? String(priced.gift || '') : '';
   order.landing = {
     externalId: parsed.externalId,
@@ -634,6 +641,7 @@ export async function autoFillLandingOrder(order, payload, orders, context = {})
   if (!needsProduct && !needsAddress) return order;
   const patched = { ...payload };
   const autoFilled = {};
+  let aiSuggestion = '';
   if (needsProduct) {
     const basket = defaultBasketForCampaign(orders, order);
     if (basket) {
@@ -662,15 +670,63 @@ export async function autoFillLandingOrder(order, payload, orders, context = {})
         patched.address = guess.canonical;
         autoFilled.address = `${guess.canonical} (AI suy ra từ "${order.address}"${guess.confidence === 'low' ? ', cần đối chiếu' : ''})`;
         autoFilled.addressAi = { original: order.address, reason: guess.reason, sources: guess.sources || [] };
+      } else if (guess?.suggestOnly && guess.suggestion?.ward) {
+        // R13 (K12): phường/xã AI tự suy, chưa kiểm được bằng danh mục → KHÔNG tự điền, chỉ ghi gợi ý cho nhân viên đối chiếu.
+        aiSuggestion = `ℹ Gợi ý phường/xã (AI, chưa kiểm): ${[guess.suggestion.ward, guess.suggestion.district].filter(Boolean).join(', ')}`;
       }
     }
   }
-  if (!Object.keys(autoFilled).length) return order;
+  if (!Object.keys(autoFilled).length) {
+    if (aiSuggestion) addProcessingFlag(order, aiSuggestion);
+    return order;
+  }
   const rebuilt = buildLandingOrder(patched, { now: order.createdAt, id: order.id, page: order.landing.page });
+  if (aiSuggestion) addProcessingFlag(rebuilt, aiSuggestion);
   rebuilt.status = order.status;
   rebuilt.phoneWarning = order.phoneWarning;
   rebuilt.landing = { ...rebuilt.landing, incomplete: order.landing.incomplete, formStatus: order.landing.formStatus, externalId: order.landing.externalId, formIds: order.landing.formIds, posId: order.landing.posId, autoFilled };
   return rebuilt;
+}
+
+/**
+ * R13 (T2): thời điểm khách gửi form theo POS ("2026-09-16 07:52:24", giờ Việt Nam — pos-sync.posTimeToWebcake) → ms.
+ * Không đọc được, ở tương lai, hay cũ hơn 120 ngày thì trả `fallback` (lúc nhận).
+ */
+export function landingSubmittedAt(insertedAt, fallback = Date.now()) {
+  const match = String(insertedAt || '').trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)/);
+  if (!match) return fallback;
+  const parsed = Date.parse(`${match[1]}T${match[2].length === 5 ? `${match[2]}:00` : match[2]}+07:00`);
+  if (!Number.isFinite(parsed) || parsed > fallback + 5 * 60 * 1000 || parsed < fallback - 120 * 24 * 60 * 60 * 1000) return fallback;
+  return parsed;
+}
+
+/** Khoá địa chỉ để dò đơn có thể trùng: bỏ dấu, bỏ "(Live)"/"(Freeship)", chỉ chữ và số; quá ngắn (≤ 15 ký tự) thì không xét. */
+function duplicateAddressKey(order) {
+  const address = String(order?.address || '');
+  if (!address || /^chưa có địa chỉ$/i.test(address.trim())) return '';
+  const key = normalizeText(address).replace(/\(live\)|\(freeship\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+  return key.length > 15 ? key : '';
+}
+
+const isCompletedLiveOrder = order => Boolean(order) && order.landing?.incomplete !== true
+  && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy';
+
+/**
+ * R13 (M5): đơn landing có thể trùng — cùng SĐT hoặc cùng địa chỉ, hai form HOÀN TẤT cách nhau ≤ 10 phút, chưa hủy
+ * (21 ngày: 19 cặp, 8 cặp cả hai cùng lên POS). KHÔNG gộp (mỗi form là một đơn riêng, chủ ý); chỉ gắn ghi chú xử lý
+ * "⚠ Có thể trùng đơn LP-<mã>" lên ĐƠN SAU của cặp. Trả về đơn vừa được gắn (hay null).
+ */
+export function flagPossibleDuplicate(orders, order) {
+  if (!isCompletedLiveOrder(order)) return null;
+  const at = Number(order.createdAt) || 0;
+  const addressKey = duplicateAddressKey(order);
+  const twin = (Array.isArray(orders) ? orders : []).find(entry => entry !== order && entry?.id !== order.id && isCompletedLiveOrder(entry)
+    && Math.abs((Number(entry.createdAt) || 0) - at) <= duplicateWindowMs
+    && ((order.phone && entry.phone === order.phone) || (addressKey && duplicateAddressKey(entry) === addressKey)));
+  if (!twin) return null;
+  // Đơn sau của cặp nhận ghi chú (đơn kéo từ POS mang ngày tạo thật có thể CŨ hơn đơn đang giữ).
+  const [earlier, later] = (Number(twin.createdAt) || 0) > at ? [order, twin] : [twin, order];
+  return addProcessingFlag(later, `⚠ Có thể trùng đơn LP-${earlier.id}`) ? later : null;
 }
 
 export async function recordLandingOrder(payload, context = {}) {
@@ -678,7 +734,10 @@ export async function recordLandingOrder(payload, context = {}) {
   let order;
   let error = '';
   try {
-    order = buildLandingOrder(payload, { ...context, now: receivedAt });
+    // R13 (T2): đơn kéo từ POS lấy NGÀY TẠO THẬT trên POS (inserted_at) — trước đây lấy lúc đồng bộ, nên sau mỗi lần
+    // khởi động lại (lượt đầu kéo 7 ngày) đơn cũ bị dồn vào ngày đồng bộ trong Báo cáo/Tổng quan.
+    const createdAt = context.posId ? landingSubmittedAt(payload?.inserted_at, receivedAt) : receivedAt;
+    order = buildLandingOrder(payload, { ...context, now: createdAt });
     // Khách điền dở: điền sản phẩm mặc định của chiến dịch và địa chỉ đã biết,
     // đơn đi vào Xử lý dữ liệu chờ nhân viên duyệt.
     if (context.autoFill !== false) order = await autoFillLandingOrder(order, payload, (await readLandingStore()).orders, context);
@@ -707,6 +766,7 @@ export async function recordLandingOrder(payload, context = {}) {
         const index = store.orders.indexOf(existing);
         const upgraded = mergeCompletedForm(existing, order, { receivedAt, formIds: formIds(existing) });
         store.orders[index] = upgraded;
+        flagPossibleDuplicate(store.orders, upgraded);
         return { order: upgraded, created: false, updated: true, error: '' };
       }
       // Đơn webhook chưa có mã POS: ghi mã POS vào để lần đồng bộ sau nhận ra ngay.
@@ -722,6 +782,8 @@ export async function recordLandingOrder(payload, context = {}) {
     if (duplicate) return { order: duplicate, created: false, error: '' };
     // Quá trần thì updateLandingStore chuyển đơn cũ nhất sang kho lưu trữ (không bỏ).
     store.orders.unshift(order);
+    // R13 (M5): không gộp, chỉ cảnh báo trên đơn sau của cặp có thể trùng.
+    flagPossibleDuplicate(store.orders, order);
     return { order, created: true, error: '' };
   });
   // Mọi đơn đều vào kho lưu trữ, kể cả đơn sau này bị hủy hay xóa.

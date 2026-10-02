@@ -230,7 +230,13 @@ test('fix-addr AI: thiếu phường (wardUnverified) chỉ hỏi AI khi đượ
   assert.equal(calls, 0);
   const guess = await inferAddress(text, { settings, fetchImpl, allowWardUnverified: true });
   assert.equal(calls, 1);
-  assert.equal(guess.canonical, '18 ngách 143/300 phố nguyễn chính, Phường Tân Mai, Quận Hoàng Mai, Hà Nội');
+  // R13 (K12) — SỬA test cũ: trước đây khẳng định AI tự điền "Phường Tân Mai" (suy từ tên đường, không có trong chữ khách)
+  // vào địa chỉ đơn với độ tin "low". 21 ngày đơn thật: 84/171 kết quả AI là phường tự suy, khoảng 1/10 bị nhân viên đổi
+  // phường trên POS → nay KHÔNG tự điền: canonical rỗng, phường chỉ nằm trong `suggestion` để ghi gợi ý cho nhân viên.
+  assert.equal(guess.canonical, '');
+  assert.equal(guess.suggestOnly, true);
+  assert.equal(guess.suggestion.ward, 'Phường Tân Mai');
+  assert.equal(guess.suggestion.canonical, '18 ngách 143/300 phố nguyễn chính, Phường Tân Mai, Quận Hoàng Mai, Hà Nội');
   assert.equal(guess.confidence, 'low', 'phường AI suy ra không có trong chữ khách → nhân viên đối chiếu');
 });
 

@@ -223,7 +223,13 @@
 
   addButton.addEventListener('click', () => openForm());
   // app.js bật/tắt lớp "hidden" của bảng khi chọn mục Cài đặt: bảng Nhân sự hiện ra thì tải lại danh sách.
-  new MutationObserver(() => { if (!panel.classList.contains('hidden')) load(); })
-    .observe(panel, { attributes: true, attributeFilter: ['class'] });
-  if (!panel.classList.contains('hidden')) load();
+  // Chỉ tải khi bảng CHUYỂN từ ẩn sang hiện: lớp khác đổi (is-staff-readonly của app.js thêm lại sau
+  // mỗi lần vẽ) không được gọi load() — trước đây nhân viên thường mở mục này là gọi /api/staff liên tục.
+  let wasHidden = panel.classList.contains('hidden');
+  new MutationObserver(() => {
+    const hidden = panel.classList.contains('hidden');
+    if (wasHidden && !hidden) load();
+    wasHidden = hidden;
+  }).observe(panel, { attributes: true, attributeFilter: ['class'] });
+  if (!wasHidden) load();
 })();

@@ -47,7 +47,7 @@ import { listExports, readExportFile, recordExport } from './export-history.mjs'
 import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { countQrReferrals, countQrReferralsByDay, deleteQrCode, isValidQrCode, listQrScans, qrDayKey, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
 import { classifyUserAgent, iosMajorVersion, isLinkPreviewBot, messengerDestination, prefillMessageFor, prefillTemplateOrDefault, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
-import { createQrGreeter, createThreadReleaser, isCardScan, lastStaffMessageAt, resolveQrOfferTemplate } from './qr-greeting.mjs';
+import { createLinkRoutedQrFlow, createQrGreeter, createThreadReleaser, isCardScan, lastStaffMessageAt, resolveQrOfferTemplate } from './qr-greeting.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
@@ -802,10 +802,21 @@ const scheduleQrGreetings = (changes, options) => qrGreeter.schedule(changes, op
 // Page vận hành ở Pancake (chỉ nghe referral) mà sự kiện Meta về ở `messaging` chứ không phải `standby`:
 // Meta đang giao luồng cho app CRM (định tuyến liên kết m.me). Xong việc — đã gửi ưu đãi QR, hoặc không
 // có gì để gửi — thì trả luồng về app mặc định, kẻo tin sau của khách không tới Pancake.
+const shouldReleaseQrThread = change => !change.standby && isReferralOnlyPage(change.conversation?.pageId);
 const releaseQrThread = createThreadReleaser({
   release: releaseThreadControl,
   getToken: getPageAccessToken,
-  shouldRelease: change => !change.standby && isReferralOnlyPage(change.conversation?.pageId)
+  shouldRelease: shouldReleaseQrThread
+});
+// Thứ tự trả luồng / gửi ưu đãi cho sự kiện Meta khi dùng "Định tuyến liên kết" (createLinkRoutedQrFlow):
+// khách cũ (có hội thoại Pancake) trả luồng trước rồi gửi qua Pancake, Pancake lỗi thì gửi qua Send API
+// Meta; khách mới gửi qua Send API Meta rồi mới trả luồng.
+const handleMetaQrChanges = createLinkRoutedQrFlow({
+  schedule: scheduleQrGreetings,
+  releaseThread: releaseQrThread,
+  shouldRelease: shouldReleaseQrThread,
+  sendPrimary: (conversation, payload) => sendConversationMessage(conversation, payload),
+  sendViaMeta: (conversation, payload) => sendConversationMessage({ ...conversation, pancakeConversationId: '' }, payload)
 });
 
 /** Sends the tappable Messenger receipt. Kept separate from creating the order so
@@ -2249,12 +2260,8 @@ const server = http.createServer(async (request, response) => {
       response.end('EVENT_RECEIVED');
       try {
         const changes = await processWebhookPayload(JSON.parse(rawBody.toString('utf8')));
-        scheduleQrGreetings(changes, { afterGreeting: releaseQrThread });
-        // Sự kiện khác của khách (không phải lượt quét thẻ) trên Page chỉ nghe referral: CRM không trả lời
-        // gì, trả luồng ngay.
-        for (const change of changes) {
-          if ((change.type === 'message' || change.type === 'referral') && !isCardScan(change)) releaseQrThread(change);
-        }
+        // Hẹn chào khách quét thẻ và trả luồng về app mặc định (kể cả sự kiện không phải lượt quét thẻ).
+        handleMetaQrChanges(changes);
         // Khách quét phiếu đã có tin ưu đãi riêng; để bot chào thêm câu chung
         // nữa là khách nhận hai tin trong mười giây. Những tin sau của họ vẫn
         // đi qua bot bình thường — chỉ bỏ qua đúng sự kiện mở hội thoại.

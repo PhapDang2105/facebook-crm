@@ -54,13 +54,20 @@ export function createThreadReleaser({
   logError = console.error
 } = {}) {
   const errorLoggedAt = new Map();
+  // Dòng "đã trả luồng" chỉ ghi lần thành công ĐẦU của mỗi hội thoại (để chủ shop kiểm trên máy chủ mà
+  // không ngập log); giữ tối đa 5000 hội thoại gần nhất.
+  const releasedOnce = new Set();
   return async function releaseThread(change) {
     const conversation = change?.conversation;
     if (!conversation?.psid || !conversation.pageId || !shouldRelease(change)) return false;
     const label = conversation.name || conversation.id;
     try {
       await release({ pageId: conversation.pageId, psid: conversation.psid, pageAccessToken: await getToken(conversation.pageId), metadata: 'crm-qr' });
-      log(`QR: đã trả quyền giữ luồng về app mặc định của Page — ${label}`);
+      if (!releasedOnce.has(conversation.id)) {
+        if (releasedOnce.size >= 5000) releasedOnce.delete(releasedOnce.values().next().value);
+        releasedOnce.add(conversation.id);
+        log(`QR: đã trả luồng về app mặc định — ${label}`);
+      }
       return true;
     } catch (error) {
       const reason = String(error?.message || error);
@@ -72,6 +79,76 @@ export function createThreadReleaser({
       }
       return false;
     }
+  };
+}
+
+/**
+ * Luồng chào cho sự kiện Meta khi Page dùng "Định tuyến liên kết" (link m.me?ref=<mã> giao luồng cho app
+ * CRM, app mặc định vẫn là Pancake). Theo Conversation Routing chỉ app đang giữ luồng gửi được tin, nên
+ * thứ tự phụ thuộc đường gửi:
+ *  - hội thoại CÓ `pancakeConversationId` (khách cũ, ưu đãi đi qua Pancake): TRẢ luồng ngay khi nhận sự
+ *    kiện, rồi mới gửi qua Pancake; trả luồng lỗi vẫn thử gửi; Pancake gửi lỗi thì thử Send API của Meta
+ *    (token Page của CRM) một lần — các phần còn lại của cùng lượt chào đi tiếp đường đó; riêng lỗi
+ *    "không rõ đã gửi" của Pancake (hết giờ, 502/504) thì KHÔNG gửi thêm qua Meta kẻo khách nhận hai lần;
+ *  - hội thoại KHÔNG có (khách mới): gửi qua Send API của Meta trước, xong mới trả luồng;
+ *  - mọi nhánh khác (không chào, lỗi, sự kiện không phải lượt quét thẻ) đều trả luồng.
+ * Chỉ áp dụng cho change mà `shouldRelease(change)` đúng (Page chỉ nghe referral, không phải standby);
+ * change khác đi `sendPrimary` như cũ. `releaseThread(change)` → true khi trả được (createThreadReleaser).
+ */
+export function createLinkRoutedQrFlow({
+  schedule,
+  releaseThread,
+  shouldRelease,
+  sendPrimary,
+  sendViaMeta,
+  known = isKnownQrCode,
+  log = console.log,
+  logError = console.error
+} = {}) {
+  return function handleMetaChanges(changes) {
+    const released = new Map(); // change → Promise<boolean> của lần trả luồng sớm
+    const routes = new Map(); // change → { viaMeta, logged }
+    for (const change of changes || []) {
+      if (!change?.conversation || !shouldRelease(change)) continue;
+      if (!isCardScan(change, { known })) {
+        // CRM không trả lời gì cho sự kiện này: trả luồng ngay.
+        if (change.type === 'message' || change.type === 'referral') releaseThread(change);
+        continue;
+      }
+      if (change.conversation.pancakeConversationId) released.set(change, Promise.resolve().then(() => releaseThread(change)).catch(() => false));
+    }
+    schedule(changes, {
+      send: async (conversation, payload, change) => {
+        if (!shouldRelease(change)) return sendPrimary(conversation, payload);
+        const label = conversation.name || conversation.id;
+        const route = routes.get(change) || { viaMeta: false, logged: false };
+        routes.set(change, route);
+        const sent = (result, line) => {
+          if (!route.logged) log(line);
+          route.logged = true;
+          return result;
+        };
+        if (!conversation.pancakeConversationId) return sent(await sendPrimary(conversation, payload), `QR: ưu đãi gửi qua Send API Meta (CRM đang giữ luồng) — ${label}`);
+        // Trả luồng xong (dù được hay không) mới gửi qua Pancake.
+        await released.get(change);
+        if (!route.viaMeta) {
+          try {
+            return sent(await sendPrimary(conversation, payload), `QR: ưu đãi gửi qua Pancake (sau khi trả luồng) — ${label}`);
+          } catch (error) {
+            // Pancake hết giờ / cổng 502: tin có thể ĐÃ tới khách — gửi thêm qua Meta là khách nhận hai lần.
+            if (error?.unknownDelivery) throw error;
+            logError(`QR: gửi ưu đãi qua Pancake lỗi (${error?.message || error}), thử Send API Meta — ${label}`);
+            route.viaMeta = true;
+          }
+        }
+        return sent(await sendViaMeta(conversation, payload), `QR: ưu đãi gửi qua Send API Meta (dự phòng, Pancake lỗi) — ${label}`);
+      },
+      afterGreeting: async change => {
+        // Đã trả sớm thành công thì thôi; chưa (khách mới, hoặc lần trả sớm lỗi) thì trả bây giờ.
+        if (await released.get(change)) return;
+        await releaseThread(change);
+      }
+    });
   };
 }
 
@@ -179,7 +256,8 @@ export function createQrGreeter({
 
   // `afterGreeting(change)`: gọi một lần cho mỗi lượt quét thẻ khi CRM đã xong việc với nó — sau khi gửi
   // ưu đãi (kể cả gửi lỗi), hoặc ngay khi quyết định không chào. Webhook Meta dùng để trả quyền giữ luồng.
-  function schedule(changes, { afterGreeting = null } = {}) {
+  // `send(conversation, payload, change)` (tuỳ chọn): đường gửi riêng cho lượt hẹn này thay cho `send` chung.
+  function schedule(changes, { afterGreeting = null, send: scheduleSend = null } = {}) {
     pruneGreeted();
     const finish = change => {
       if (!afterGreeting) return;
@@ -245,9 +323,10 @@ export function createQrGreeter({
             greetedAt.delete(conversation.id);
             return;
           }
+          const sendPart = scheduleSend ? payload => scheduleSend(conversation, payload, change) : payload => send(conversation, payload);
           for (const part of parts) {
-            if (part.type === 'image') await send(conversation, { imageUrl: part.url });
-            else if (part.text) await send(conversation, { text: part.text });
+            if (part.type === 'image') await sendPart({ imageUrl: part.url });
+            else if (part.text) await sendPart({ text: part.text });
           }
           log(`QR: đã gửi ưu đãi cho ${label} (${parts.map(part => part.type === 'image' ? 'ảnh' : 'chữ').join('+')})`);
         } catch (error) {

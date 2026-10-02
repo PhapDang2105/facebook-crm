@@ -65,7 +65,13 @@ test('createThreadReleaser: chỉ trả luồng khi shouldRelease cho phép; l�
   });
   assert.equal(await releaser(scan(conversation('103549382215599:a'))), true);
   assert.deepEqual(released, [{ pageId: '103549382215599', psid: 'a', pageAccessToken: 'token-103549382215599', metadata: 'crm-qr' }]);
-  assert.match(logs[0], /^QR: đã trả quyền giữ luồng về app mặc định của Page — Khách 103549382215599:a$/);
+  // Sửa 02/10: dòng log đổi thành "QR: đã trả luồng về app mặc định — <khách>", chỉ ghi lần thành công đầu
+  // của mỗi hội thoại (chủ shop kiểm trên máy chủ).
+  assert.deepEqual(logs, ['QR: đã trả luồng về app mặc định — Khách 103549382215599:a']);
+  assert.equal(await releaser(scan(conversation('103549382215599:a'))), true);
+  assert.equal(released.length, 2, 'lần sau vẫn trả luồng');
+  assert.equal(logs.length, 1, 'nhưng không ghi thêm dòng cho cùng hội thoại');
+  released.pop();
   // Standby (CRM không giữ luồng), Page CRM tự vận hành, change không có hội thoại: không gọi Meta.
   assert.equal(await releaser(scan(conversation('103549382215599:b'), { standby: true })), false);
   assert.equal(await releaser(scan(conversation('200000000000002:c'))), false);

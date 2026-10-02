@@ -55,6 +55,15 @@ const server = spawn(nodePath, [path.join(projectRoot, 'app', 'server.mjs'), Str
     META_VERIFY_TOKEN: verifyToken,
     PUBLIC_BASE_URL: 'https://crm.example.com',
     META_CONVERSATIONS_PATH: storePath,
+    // PUBLIC_BASE_URL https bật bắt buộc đăng nhập (fail-closed) → mọi /api trả 503 khi chưa có tài khoản;
+    // bài test gọi API không đăng nhập nên tắt hẳn ở đây.
+    CRM_REQUIRE_LOGIN: '0',
+    // Kho mã QR / kênh cũng về thư mục tạm: gói standby mang referral thẻ QR không được chạm kho thật.
+    QR_SCANS_PATH: path.join(temporaryDirectory, 'qr-scans.json'),
+    META_CHANNELS_PATH: path.join(temporaryDirectory, 'meta-channels.json'),
+    QR_SETTINGS_PATH: path.join(temporaryDirectory, 'qr-settings.json'),
+    QR_PAGE_ID: pageId,
+    QR_PAGE_NAME: 'Giọt Nắng',
     // Không để server thử chạm POS/Pancake/landing thật hay ghi vào kho thật khi máy có .env thật.
     POS_SYNC_DISABLED: '1',
     POS_API_KEY: '',
@@ -114,6 +123,50 @@ try {
     body: JSON.stringify({ muted: true, labels: ['consulting'] })
   })).json();
   check('Conversation flags can be updated', flags.muted === true && flags.labels?.[0] === 'consulting', JSON.stringify(flags));
+
+  // Handover Protocol: app khác là Primary Receiver thì Meta gửi sự kiện trong `standby`. Referral của thẻ QR
+  // (m.me?ref) và tin khách vẫn được ghi nhận; hội thoại mở ra cho khách chỉ có referral.
+  const standbyPsid = '99887766';
+  const standbyPayload = JSON.stringify({
+    object: 'page',
+    entry: [{
+      id: pageId,
+      time: Date.now(),
+      standby: [
+        { sender: { id: standbyPsid }, recipient: { id: pageId }, timestamp: Date.now(), referral: { ref: 'tmdt-01', source: 'SHORTLINK', type: 'OPEN_THREAD' } },
+        { sender: { id: standbyPsid }, recipient: { id: pageId }, timestamp: Date.now() + 1, postback: { mid: 'mid.integration.standby.1', title: 'Bắt đầu', referral: { ref: 'tmdt-01', source: 'SHORTLINK', type: 'OPEN_THREAD' } } }
+      ]
+    }]
+  });
+  const standbyAccepted = await postWebhook(standbyPayload, signPayload(standbyPayload));
+  check('Standby delivery is accepted', standbyAccepted.status === 200);
+  await new Promise(resolve => setTimeout(resolve, 600));
+  const afterStandby = await (await fetch(`${baseUrl}/api/messaging/conversations?channelId=${pageId}`)).json();
+  const standbyConversation = afterStandby.items?.find(item => item.id === `${pageId}:${standbyPsid}`);
+  check('Standby events are stored (referral + Get Started postback)', Boolean(standbyConversation) && standbyConversation.lastMessagePreview === 'Bắt đầu', JSON.stringify(afterStandby.items?.map(item => [item.id, item.lastMessagePreview])));
+
+  // Trang đệm /q/<mã>: Android Chrome vẫn 302 thẳng sang m.me?ref; iPhone trong Zalo nhận trang có hướng dẫn
+  // mở bằng Safari (x-safari-https trỏ về chính trang này kèm from=inapp, không đếm thêm lượt quét).
+  const androidChrome = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.71 Mobile Safari/537.36';
+  const zaloIos = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Zalo iOS/640 ZaloTheme/light ZaloLanguage/vn';
+  const iosSafari = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1';
+  const redirected = await fetch(`${baseUrl}/q/tmdt-01`, { headers: { 'User-Agent': androidChrome }, redirect: 'manual' });
+  // Cài đặt chưa đặt tin soạn sẵn: link vẫn mang text= mặc định kết bằng #mã (đường nhận khách qua webhook Pancake).
+  const location = redirected.status === 302 ? new URL(redirected.headers.get('location')) : null;
+  check('QR bridge: Android Chrome is still redirected to m.me?ref', location?.origin === 'https://m.me' && location.pathname === `/${pageId}` && location.searchParams.get('ref') === 'tmdt-01', `${redirected.status} ${redirected.headers.get('location')}`);
+  check('QR bridge: the m.me link carries the default prefilled text ending with #code', / #tmdt-01$/.test(location?.searchParams.get('text') || ''), location?.searchParams.get('text'));
+  const inApp = await fetch(`${baseUrl}/q/tmdt-01`, { headers: { 'User-Agent': zaloIos }, redirect: 'manual' });
+  const inAppHtml = await inApp.text();
+  check('QR bridge: iOS inside Zalo gets the open-in-Safari guide', inApp.status === 200
+    && inAppHtml.includes('class="hint hint-ios"')
+    && inAppHtml.includes('href="x-safari-https://crm.example.com/q/tmdt-01?from=inapp"')
+    && inAppHtml.includes('data-link="https://crm.example.com/q/tmdt-01?from=inapp"')
+    && inAppHtml.includes(`href="https://m.me/${pageId}?ref=tmdt-01&amp;text=`));
+  const reopened = await fetch(`${baseUrl}/q/tmdt-01?from=inapp`, { headers: { 'User-Agent': iosSafari }, redirect: 'manual' });
+  const reopenedHtml = await reopened.text();
+  check('QR bridge: reopened in Safari shows the plain page', reopened.status === 200 && !reopenedHtml.includes('hint-ios') && reopenedHtml.includes(`href="https://m.me/${pageId}?ref=tmdt-01&amp;text=`));
+  const escapeBeacon = await fetch(`${baseUrl}/q/tmdt-01/open?to=safari`, { method: 'POST', headers: { 'User-Agent': zaloIos } });
+  check('QR bridge: open-in-Safari beacon is acknowledged', escapeBeacon.status === 204, String(escapeBeacon.status));
 
   const channels = await (await fetch(`${baseUrl}/api/channels`)).json();
   check('Webhook reports as configured', channels.webhookConfigured === true, JSON.stringify(channels.missingWebhookConfiguration));

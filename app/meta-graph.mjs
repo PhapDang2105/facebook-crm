@@ -233,6 +233,22 @@ export async function sendPageAttachment({ pageId, psid, attachment, pageAccessT
   return payload;
 }
 
+/**
+ * Handover Protocol: trả quyền giữ luồng (thread control) của một khách về app nhận mặc định của Page.
+ * Dùng khi app CRM được giao luồng (định tuyến liên kết m.me) nhưng Page vận hành ở app khác (Pancake):
+ * gửi xong ưu đãi QR là trả lại, không thì tin sau của khách không về app mặc định nữa.
+ */
+export function releaseThreadControl({ pageId, psid, pageAccessToken, metadata = '' }) {
+  return metaRequest(`${pageId}/release_thread_control`, {
+    method: 'POST',
+    body: {
+      recipient: JSON.stringify({ id: psid }),
+      ...(metadata ? { metadata: String(metadata).slice(0, 1000) } : {}),
+      access_token: pageAccessToken
+    }
+  });
+}
+
 export function sendSenderAction({ pageId, psid, action, pageAccessToken }) {
   return metaRequest(`${pageId}/messages`, {
     method: 'POST',

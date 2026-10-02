@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getPageAccessToken } from './channel-store.mjs';
+import { isReferralOnlyPage } from './config.mjs';
 import { fetchCommentDetails, fetchCustomerProfile, fetchPostSummary } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import { createLogLimiter, debugFlagOn } from './security.mjs';
@@ -179,12 +180,38 @@ export function normalizeCommentEvent(change, pageId) {
   };
 }
 
-export function collectWebhookEvents(payload) {
+/**
+ * Sự kiện trong `entry.standby` (Handover Protocol): Page có app khác làm Primary Receiver (Pancake) thì
+ * app CRM không nhận ở `messaging` mà ở `standby` — cùng cấu trúc, riêng postback không kèm `payload`.
+ * Xử lý như `messaging` nhưng gắn `standby: true`: CRM không giữ luồng nên bot KHÔNG trả lời, chỉ ghi
+ * nhận và để bộ chào QR chạy.
+ * Page chỉ nghe referral (vận hành ở Pancake, tin đã về qua webhook Pancake): chỉ giữ referral và
+ * postback; tin thường / đã giao / đã xem bỏ qua kẻo mỗi tin vào hộp thư hai lần, còn tin đầu tiên
+ * mang `message.referral` thì chỉ lấy phần referral.
+ */
+function normalizeStandbyEvent(messagingEvent, pageId, referralOnly) {
+  const normalized = normalizeWebhookEvent(messagingEvent, pageId);
+  if (!normalized) return null;
+  if (referralOnly) {
+    if (normalized.type === 'message' && messagingEvent.message) {
+      if (!normalized.referral) return null;
+      return { pageId: normalized.pageId, psid: normalized.psid, timestamp: normalized.timestamp, type: 'referral', referral: normalized.referral, standby: true };
+    }
+    if (normalized.type !== 'message' && normalized.type !== 'referral') return null;
+  }
+  return { ...normalized, standby: true };
+}
+
+export function collectWebhookEvents(payload, { referralOnly = isReferralOnlyPage } = {}) {
   if (payload?.object !== 'page') return [];
   const events = [];
   for (const entry of payload.entry || []) {
     for (const messagingEvent of entry.messaging || []) {
       const normalized = normalizeWebhookEvent(messagingEvent, entry.id);
+      if (normalized) events.push(normalized);
+    }
+    for (const standbyEvent of entry.standby || []) {
+      const normalized = normalizeStandbyEvent(standbyEvent, entry.id, referralOnly(entry.id));
       if (normalized) events.push(normalized);
     }
     for (const change of entry.changes || []) {
@@ -305,7 +332,8 @@ export function applyWebhookEvents(store, events) {
       // Kèm referral vào change: khách MỚI bấm "Bắt đầu" thì Meta gửi postback,
       // và postback được chuẩn hoá thành sự kiện kiểu `message` — nên nếu chỉ
       // nghe nhánh `referral` sẽ bỏ sót đúng nhóm khách mới.
-      if (inserted) changes.push({ type: 'message', conversation, message, ...(event.referral ? { referral: event.referral } : {}) });
+      // `standby`: sự kiện tới qua kênh standby (app khác giữ luồng) — nơi nhận change không đưa cho bot.
+      if (inserted) changes.push({ type: 'message', conversation, message, ...(event.referral ? { referral: event.referral } : {}), ...(event.standby ? { standby: true } : {}) });
       continue;
     }
     if (event.type === 'referral' && event.referral) {
@@ -313,7 +341,7 @@ export function applyWebhookEvents(store, events) {
       attachReferral(conversation, event.referral);
       // Trước đây nhánh này lặng lẽ `continue`, nên không ai dưới hạ nguồn biết
       // khách vừa quét. Đẩy một thay đổi ra để còn chào lại được.
-      changes.push({ type: 'referral', conversation, referral: event.referral });
+      changes.push({ type: 'referral', conversation, referral: event.referral, ...(event.standby ? { standby: true } : {}) });
       continue;
     }
     if (event.type === 'delivery' || event.type === 'read') {
@@ -451,26 +479,28 @@ async function resolveMissingProfiles(changes) {
 const webhookDebugAllowed = createLogLimiter({ max: 30, windowMs: 60 * 1000 });
 
 /** One line per delivery so `journalctl` shows what Meta actually sent. */
-function describeWebhookPayload(payload, events) {
+export function describeWebhookPayload(payload, events) {
   const fields = (payload?.entry || []).flatMap(entry => (entry.changes || []).map(change => `${change.field}:${change.value?.item || '?'}/${change.value?.verb || '?'}`));
   const messaging = (payload?.entry || []).reduce((count, entry) => count + (entry.messaging || []).length, 0);
+  // Handover Protocol: app khác là Primary Receiver thì sự kiện nằm ở `standby` chứ không ở `messaging`.
+  const standby = (payload?.entry || []).reduce((count, entry) => count + (entry.standby || []).length, 0);
   // Chẩn đoán bật bằng WEBHOOK_DEBUG_KEYS=1: ghi TÊN TRƯỜNG Meta gửi tới, không
   // ghi nội dung tin nhắn. Dùng để biết CRM đang bỏ sót sự kiện nào — ví dụ
   // referral có về mà bị chuẩn hoá nhầm thì dòng tóm tắt bên trên không lộ ra.
   const shape = debugFlagOn('WEBHOOK_DEBUG_KEYS') && webhookDebugAllowed()
-    ?(payload?.entry || []).flatMap(entry => (entry.messaging || []).map(item => {
+    ? (payload?.entry || []).flatMap(entry => [...(entry.messaging || []).map(item => ['', item]), ...(entry.standby || []).map(item => ['standby:', item])].map(([prefix, item]) => {
       const keys = Object.keys(item).filter(key => key !== 'sender' && key !== 'recipient' && key !== 'timestamp');
       const chiTiet = [];
       if (item.referral) chiTiet.push(`referral{ref=${item.referral.ref || '-'},source=${item.referral.source || '-'},type=${item.referral.type || '-'}}`);
       if (item.postback) chiTiet.push(`postback{payload=${item.postback.payload ? 'có' : '-'},referral=${item.postback.referral ? 'CÓ' : '-'}}`);
       if (item.message) chiTiet.push(`message{referral=${item.message.referral ? 'CÓ' : '-'},echo=${item.message.is_echo ? 'có' : '-'}}`);
       if (item.optin) chiTiet.push(`optin{ref=${item.optin.ref || '-'},login_id=${item.optin.login_id || '-'}}`);
-      return `[${keys.join('+') || 'rỗng'}] ${chiTiet.join(' ')}`;
+      return `${prefix}[${keys.join('+') || 'rỗng'}] ${chiTiet.join(' ')}`;
     })).join(' || ')
     : '';
 
   return `Webhook Meta: ${events.length} sự kiện xử lý (${events.map(event => event.type).join(', ') || 'không'})` +
-    (messaging ? `, messaging=${messaging}` : '') + (fields.length ? `, changes=${fields.join(' ')}` : '') +
+    (messaging ? `, messaging=${messaging}` : '') + (standby ? `, standby=${standby}` : '') + (fields.length ? `, changes=${fields.join(' ')}` : '') +
     (shape ? `\n    └─ Meta gửi: ${shape}` : '');
 }
 

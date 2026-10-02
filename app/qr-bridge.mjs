@@ -103,6 +103,19 @@ export function qrCodeFromText(text, { outgoing = false } = {}) {
 
 export const samplePrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận hướng dẫn và quà nhé 💛 #{code}';
 
+/**
+ * Tin soạn sẵn MẶC ĐỊNH khi Cài đặt chưa đặt gì. Đây là đường nhận ra khách quét thẻ không phụ thuộc
+ * Meta: Page vận hành ở Pancake (Pancake là app nhận mặc định) nên Meta không gửi referral của m.me cho
+ * app CRM, và Botcake không dùng — chỉ còn tin khách bấm gửi, mang "#mã" ở cuối, về qua webhook Pancake.
+ * Link m.me không có `text=` thì khách mở đúng khung chat nhưng CRM không biết để gửi ưu đãi.
+ */
+export const defaultPrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận ưu đãi nhé #{code}';
+
+/** Mẫu tin soạn sẵn đang dùng: mẫu nhân viên đặt, trống thì mẫu mặc định. */
+export function prefillTemplateOrDefault(template) {
+  return String(template || '').trim() || defaultPrefillText;
+}
+
 /** Tin soạn sẵn cho một mã: điền {page}/{code}; thiếu `#mã` thì tự nối vào cuối để CRM còn nhận ra. Mẫu rỗng → không có tin. */
 export function prefillMessageFor({ code, pageName = '', template = '' }) {
   const source = String(template || '').trim();
@@ -140,6 +153,39 @@ const inAppHints = {
   webview: 'Nếu nút trên không mở được Messenger, hãy mở trang này bằng Safari hoặc Chrome, hoặc gọi Heartline bên dưới.'
 };
 
+// iPhone trong trình duyệt của app khác (Zalo, Facebook…): webview tự tải m.me rồi dừng ở trang đăng nhập
+// Facebook, không bàn giao cho app Messenger — Universal Link chỉ chạy khi khách bấm nút TRONG Safari.
+// Vì vậy hướng dẫn ở đây là việc chính, đặt ngay dưới nút: mở trang này bằng Safari rồi bấm lại.
+const iosInAppHints = {
+  zalo: 'Anh/Chị đang mở trong Zalo nên Messenger có thể không mở được. Bấm biểu tượng <b>⋯</b> ở góc trên bên phải, chọn <b>Mở bằng trình duyệt</b> (Safari), rồi bấm lại nút <b>Lưu ưu đãi</b>.',
+  facebook: 'Anh/Chị đang mở trong ứng dụng Facebook. Nếu nút trên không mở được Messenger, bấm biểu tượng <b>⋯</b> ở góc trên bên phải, chọn <b>Mở trong trình duyệt</b> (Safari), rồi bấm lại nút <b>Lưu ưu đãi</b>.',
+  instagram: 'Anh/Chị đang mở trong Instagram. Nếu nút trên không mở được Messenger, bấm biểu tượng <b>⋯</b> ở góc trên bên phải, chọn <b>Mở trong trình duyệt</b> (Safari), rồi bấm lại nút <b>Lưu ưu đãi</b>.',
+  tiktok: 'Anh/Chị đang mở trong TikTok. Nếu nút trên không mở được Messenger, bấm biểu tượng <b>⋯</b> ở góc trên bên phải, chọn <b>Mở trong trình duyệt</b> (Safari), rồi bấm lại nút <b>Lưu ưu đãi</b>.',
+  webview: 'Anh/Chị đang mở trong một ứng dụng khác nên Messenger có thể không mở được. Anh/Chị mở trang này bằng <b>Safari</b> rồi bấm lại nút <b>Lưu ưu đãi</b>.'
+};
+
+/** Số phiên bản chính của iOS trong User-Agent ("iPhone OS 17_5" → 17); không phải iOS thì 0. */
+export function iosMajorVersion(userAgent = '') {
+  const match = String(userAgent || '').match(/(?:iPhone|CPU) OS (\d+)[_.]/);
+  return match ? Number(match[1]) : 0;
+}
+
+/**
+ * Liên kết nhờ iOS mở một trang https bằng Safari từ trong webview của app khác: `x-safari-https://…`.
+ * Đây là scheme riêng của Safari (iOS 17 trở lên), Apple KHÔNG có tài liệu: chạy được trong nhiều app
+ * (TikTok, Telegram…), không ổn định trong webview của Meta (Facebook, Instagram) — nên chỉ là nút phụ
+ * bên cạnh hướng dẫn bấm ⋯ và nút sao chép; máy không hiểu scheme thì bấm không có gì xảy ra.
+ * Không dùng `fb-messenger://`: Meta chỉ có tài liệu cho m.me?ref, scheme đó không mang được `ref`
+ * nên khách có vào Messenger thì CRM cũng không biết là khách quét thẻ.
+ */
+export function safariEscapeLink(pageUrl, { classification = {}, iosVersion = 0 } = {}) {
+  const url = String(pageUrl || '');
+  if (!/^https:\/\/[^\s"'<>]+$/.test(url)) return '';
+  if (classification.platform !== 'ios' || !classification.inApp) return '';
+  if (['messenger', 'facebook', 'instagram'].includes(classification.browser)) return '';
+  return iosVersion >= 17 ? `x-safari-${url}` : '';
+}
+
 /**
  * Trang HTML tối thiểu: một nút "Mở Messenger" là thẻ <a> trỏ thẳng m.me?ref
  * (lượt bấm thật của khách kích hoạt Universal Link / App Link), hướng dẫn
@@ -174,11 +220,43 @@ const icons = {
  *  - Lượt bấm đếm ngay khi chạm (pointerdown/touchstart): trên iPhone, Safari nhảy sang app trước khi click kịp chạy.
  *  - Máy 360-400px, máy 320px, máy màn thấp có mức thu gọn riêng (các @media cuối khối style).
  */
-export function renderBridgePage({ code, destination, pageName, fallbackUrl = '', zaloUrl = '', classification = {} }) {
+export function renderBridgePage({ code, destination, pageName, fallbackUrl = '', zaloUrl = '', classification = {}, pageUrl = '', iosVersion = 0 }) {
   const name = escapeHtml(pageName || 'Giọt Nắng');
   const href = escapeHtml(destination);
   const safeCode = escapeHtml(code);
-  const hint = classification.inApp ? (inAppHints[classification.browser] ?? inAppHints.webview) : '';
+  // iPhone trong app khác (trừ chính Messenger): khối hướng dẫn nổi bật ngay dưới nút, kèm nút "Mở bằng Safari"
+  // (khi máy hỗ trợ) và "Sao chép liên kết". `pageUrl` là địa chỉ https của chính trang này (máy chủ đưa vào).
+  const iosInApp = classification.platform === 'ios' && classification.inApp && classification.browser !== 'messenger';
+  const hint = !classification.inApp ? ''
+    : iosInApp ? (iosInAppHints[classification.browser] ?? iosInAppHints.webview)
+      : (inAppHints[classification.browser] ?? inAppHints.webview);
+  const ownUrl = iosInApp && /^https:\/\/[^\s"'<>]+$/.test(String(pageUrl || '')) ? String(pageUrl) : '';
+  const safariHref = ownUrl ? safariEscapeLink(ownUrl, { classification, iosVersion }) : '';
+  const escapeActions = ownUrl
+    ? `<div class="hint-actions">${safariHref ? `<a class="hint-btn" id="safari" href="${escapeHtml(safariHref)}">Mở bằng Safari</a>` : ''}<button class="hint-btn" id="copy" type="button" data-link="${escapeHtml(ownUrl)}">Sao chép liên kết</button></div><input class="hint-link" id="copy-link" readonly hidden value="${escapeHtml(ownUrl)}" aria-label="Liên kết trang này">`
+    : '';
+  const iosHint = iosInApp && hint ? `<div class="hint hint-ios">${hint}${escapeActions}</div>` : '';
+  const iosHintStyle = iosHint ? `
+  .hint-ios { margin: 0; border-radius: 12px; }
+  .hint-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .hint-btn { flex: 1; display: grid; place-items: center; min-height: 44px; padding: 6px 8px; background: #fff; border: 1.5px solid #c9a94f; border-radius: 10px; color: #5b4a12; font: inherit; font-size: 14px; font-weight: 700; text-align: center; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+  .hint-link { width: 100%; margin-top: 8px; padding: 8px; border: 1px solid #e2cf9c; border-radius: 8px; background: #fff; color: #3a2e22; font: inherit; font-size: 13px; }
+  .hint-link[hidden] { display: none; }` : '';
+  const iosHintScript = iosHint ? `
+  var copy = document.getElementById('copy');
+  var box = document.getElementById('copy-link');
+  if (copy && box) copy.addEventListener('click', function () {
+    var link = copy.getAttribute('data-link');
+    var done = function () { copy.textContent = 'Đã sao chép, dán vào Safari'; };
+    var manual = function () {
+      box.hidden = false;
+      copy.textContent = 'Nhấn giữ liên kết bên dưới để sao chép';
+      try { box.focus(); box.setSelectionRange(0, link.length); if (document.execCommand('copy')) done(); } catch (e) {}
+    };
+    try { navigator.clipboard.writeText(link).then(done, manual); } catch (e) { manual(); }
+  });
+  arm(copy, 'copy');
+  arm(document.getElementById('safari'), 'safari');` : '';
   // iPhone trình duyệt thường: iOS có thể "nhớ" mở m.me bằng Safari (Universal Link bị tắt cho m.me) và dừng ở trang Facebook có nút "Mở bằng Messenger".
   const iosTip = classification.platform === 'ios' && !classification.inApp
     ? `<p class="ios-tip">Nếu máy mở trang Facebook, Anh/Chị bấm <b>“Mở bằng Messenger”</b> là vào ngay.</p>`
@@ -277,7 +355,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .fallback { margin: 4px 0 0; padding-top: 14px; border-top: 1px dashed #d9cba9; color: #6b5d4b; font-size: 14px; line-height: 1.5; }
   .fallback a { color: #2e6b3f; font-size: 13.5px; font-weight: 700; text-decoration: none; }
   .fallback .tel svg { width: .9em; height: .9em; vertical-align: -.08em; margin-right: 3px; stroke-width: 2.4; }
-  .fallback .tel { color: #d0312d; white-space: nowrap; }
+  .fallback .tel { color: #d0312d; white-space: nowrap; }${iosHintStyle}
 </style>
 </head>
 <body>
@@ -298,12 +376,12 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <div class="ticket-head"><span class="ticket-note">Anh/Chị lưu ưu đãi cho đơn hàng tiếp theo nhé</span></div>
     <div class="channels">
       <a class="btn" id="open" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi<small>qua Messenger</small></span>${icons.chevron}</a>
-      ${iosTip}
+      ${iosTip}${iosHint}
       ${zalo}
     </div>
   </section>
   <p class="terms">* Ưu đãi chỉ áp dụng trên kênh Facebook và Zalo của nhà Giọt Nắng, không áp dụng trên sàn Shopee hoặc TikTok.</p>
-  ${hint ? `<div class="hint">${hint}</div>` : ''}
+  ${hint && !iosHint ? `<div class="hint">${hint}</div>` : ''}
   <p class="fallback">Không mở được? Gọi Heartline <a class="tel" href="tel:${heartline.tel}">${icons.phone}${heartline.display}</a>${facebook}.</p>
 </main>
 <div class="sticky" id="sticky" hidden>
@@ -328,7 +406,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   }
   arm(open, 'messenger');
   arm(document.getElementById('zalo'), 'zalo');
-  arm(document.getElementById('open-sticky'), 'messenger');
+  arm(document.getElementById('open-sticky'), 'messenger');${iosHintScript}
   var sticky = document.getElementById('sticky');
   if (sticky && open && 'IntersectionObserver' in window) {
     new IntersectionObserver(function (entries) {

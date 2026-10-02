@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { findProductBySku } from './processing/catalog.mjs';
 import { toLocalPhone } from './processing/customer-info.mjs';
 import { resolvedAddressFields } from './processing/locations.mjs';
-import { recordOrderHistory, staffEditedGroups } from './order-edits.mjs';
+import { recordOrderHistory, staffEditedAt, staffEditedGroups } from './order-edits.mjs';
 import { posComboBasket } from './pos-orders.mjs';
 import { posOrderToPayload } from './pos-sync.mjs';
 import { matchPosStatus } from './pos-status.mjs';
@@ -140,10 +140,11 @@ export function applyPosContent(order, posOrder, { now = Date.now() } = {}) {
   // biết: coi là đổi, trừ khi nhân viên đã sửa nhóm đó trong CRM sau lần ghi dấu (sửa của CRM thắng).
   const known = previous?.values && typeof previous.values === 'object' ? previous.values : null;
   const editedGroups = staffEditedGroups(order);
+  // Chỉ nhóm nhân viên THẬT SỰ sửa (staffEdited) mới chặn; ẩn dòng / đổi trạng thái / ghi chú xử lý không
+  // chặn chép sửa của POS. Đơn sửa kiểu cũ (chỉ có editedByStaffAt) thì coi như sửa mọi nhóm ở mốc đó.
   const editedAfterMark = group => {
     if (!previous) return false;
-    const at = Number(order.staffEdited?.[group]) || (order.staffEdited ? 0 : Number(order.editedByStaffAt) || 0);
-    return editedGroups.has(group) && at > (Number(previous.at) || 0);
+    return editedGroups.has(group) && staffEditedAt(order, group) > (Number(previous.at) || 0);
   };
   const posChanged = (field, group) => (known ? known[field] !== values[field] : !editedAfterMark(group));
   if (infoChanged) {

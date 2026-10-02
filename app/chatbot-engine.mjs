@@ -2636,8 +2636,10 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const stripEmoji = text => String(text).replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, '').replace(/\s{2,}/g, ' ').trim();
       for (const text of pickVariant(publicReply).map(text => (neutralPublic ? stripEmoji(text) : text))) {
         // Hết thời gian chờ khi đăng (Pancake vẫn đăng được): không coi là lỗi của cả lượt.
+        // 02/10: Pancake hết giờ chờ giờ báo PANCAKE_SEND_UNCERTAIN ("không rõ đã nhận tin"), không còn chữ "abort" —
+        // ném lỗi ra là bỏ qua lưu trạng thái/gắn thẻ và hiện "Bot chưa trả lời được" dù lời công khai đã lên bài.
         await sendMessage(conversation, { text }).catch(error => {
-          if (!/abort/i.test(error.message || '')) throw error;
+          if (!error?.unknownDelivery && error?.code !== 'PANCAKE_SEND_UNCERTAIN' && !/abort/i.test(error.message || '')) throw error;
           console.warn(`Lời công khai hết thời gian chờ (${conversation.id}): ${error.message}`);
         });
       }

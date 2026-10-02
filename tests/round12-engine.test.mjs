@@ -370,3 +370,17 @@ test('B3 #7 / #22: "Mình lấy 1 đơn thôi" khi đang hỏi đặt thêm = KH
   assert.equal(quiet.result.skipped, 'nhân viên vừa trả lời');
   assert.deepEqual(quiet.sent, []);
 });
+
+test('02/10: lời công khai dưới bình luận hết giờ chờ Pancake (PANCAKE_SEND_UNCERTAIN) → không báo "Bot chưa trả lời được", vẫn lưu trạng thái', async () => {
+  const sim = new Sim({ id: 'page:comment:c10:p1', source: 'comment', post: { message: 'Săn deal cùng Giọt Nắng ạ' } });
+  const sent = [];
+  sim.extraDeps.sendMessage = async (_c, payload) => {
+    sent.push(payload);
+    if (!payload.privateReply) throw Object.assign(new Error('Pancake không rõ đã nhận tin (hết giờ chờ 15 giây) — không rõ đã gửi; không tự gửi lại, lần gửi sau sẽ kiểm tin trên Pancake trước.'), { code: 'PANCAKE_SEND_UNCERTAIN', unknownDelivery: true });
+    return { message: { mid: 'x' } };
+  };
+  const turn = await sim.send('C gói nâu', { llm: { template_id: 'PRICE_QUOTE' } });
+  assert.ok(sent.some(payload => !payload.privateReply), 'đã thử đăng lời công khai');
+  assert.ok(!turn.result.error, `lượt không bị coi là lỗi: ${turn.result.error}`);
+  assert.ok(turn.saved.some(state => state.botLastReplyAt && !state.botLastError), 'trạng thái bot được lưu, không ghi lỗi');
+});

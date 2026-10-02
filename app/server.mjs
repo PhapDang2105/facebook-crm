@@ -1404,7 +1404,11 @@ const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
     // Hai webhook do máy ngoài gọi và tự xác thực lấy, nên không áp luật Origin.
     const isWebhook = url.pathname === metaConfig.webhookPath || url.pathname === landingConfig.path || url.pathname === pancakeConfig.path;
-    if (!isWebhook && isCrossSiteWrite(request)) {
+    // Beacon "bấm nút mở Messenger" của trang đệm QR (POST /q/<mã>/open): trang đệm đặt Referrer-Policy
+    // no-referrer nên trình duyệt gửi `Origin: null` — luật Origin trả 403 và số "Mở Messenger" luôn bằng 0.
+    // Route này công khai, không cần đăng nhập và chỉ đếm một lượt bấm nên không cần chống CSRF.
+    const isQrBeacon = request.method === 'POST' && /^\/q\/[^/]+\/open$/.test(url.pathname);
+    if (!isWebhook && !isQrBeacon && isCrossSiteWrite(request)) {
       return sendJson(response, 403, { error: 'Yêu cầu đến từ trang khác nên bị từ chối.' });
     }
     if (await handleAuth(request, response, url, isWebhook)) return;

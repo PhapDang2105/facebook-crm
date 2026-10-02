@@ -135,22 +135,30 @@ async function moveOverflowToArchive(store) {
   store.orders = store.orders.slice(0, maximumOrders);
 }
 
-/** Mọi đơn landing đã chuyển sang kho lưu trữ (đọc một lần rồi nhớ; ghi mới cập nhật bộ nhớ). */
-async function readArchivedLandingOrders() {
+/**
+ * Mọi đơn landing đã chuyển sang kho lưu trữ (đọc một lần rồi nhớ; ghi mới cập nhật bộ nhớ).
+ * Lần nạp đầu đi qua hàng ghi (enqueueWrite): nếu đọc tệp tháng song song với moveOverflowToArchive thì có thể
+ * đọc TRƯỚC lần ghi, trong khi lần chuyển bỏ qua bước cập nhật bộ nhớ (cache còn null) — đơn vừa chuyển vắng khỏi
+ * báo cáo tới lúc khởi động lại. Không gọi hàm này từ bên trong một việc của hàng ghi (sẽ tự chờ chính mình).
+ */
+function readArchivedLandingOrders() {
   if (archivedCache) return archivedCache;
-  let files = [];
-  try {
-    files = (await readdir(landingArchiveDirectory)).filter(name => /^\d{4}-\d{2}\.json$/.test(name)).sort();
-  } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-  }
-  const map = new Map();
-  for (const file of files) {
-    const { orders } = await readArchiveMonth(file.slice(0, 7));
-    for (const order of orders) if (order?.id !== undefined) map.set(String(order.id), order);
-  }
-  archivedCache = map;
-  return archivedCache;
+  return enqueueWrite(async () => {
+    if (archivedCache) return archivedCache;
+    let files = [];
+    try {
+      files = (await readdir(landingArchiveDirectory)).filter(name => /^\d{4}-\d{2}\.json$/.test(name)).sort();
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    const map = new Map();
+    for (const file of files) {
+      const { orders } = await readArchiveMonth(file.slice(0, 7));
+      for (const order of orders) if (order?.id !== undefined) map.set(String(order.id), order);
+    }
+    archivedCache = map;
+    return archivedCache;
+  });
 }
 
 // ===== Xác thực =====
@@ -804,15 +812,17 @@ function isLessComplete(fresh, existing) {
 export async function listLandingOrders({ includeArchived = true } = {}) {
   const store = await readLandingStore();
   const view = order => ({ ...order, conversationId: '', conversationName: order.name || '' });
-  const active = store.orders.map(view);
-  if (!includeArchived) return active;
+  if (!includeArchived) return store.orders.map(view);
   let archived;
   try {
     archived = await readArchivedLandingOrders();
   } catch (error) {
     console.error(`Không đọc được kho lưu trữ đơn landing (${error?.message || error}); chỉ trả đơn trong kho chính.`);
-    return active;
+    return store.orders.map(view);
   }
+  // Chụp kho chính SAU khi đã có kho lưu trữ (lần nạp đầu có thể chờ sau một lần chuyển đơn): chụp trước thì
+  // đơn vừa chuyển nằm ở cả hai danh sách mà không bị khử trùng.
+  const active = store.orders.map(view);
   if (!archived.size) return active;
   const activeIds = new Set(store.orders.map(order => String(order?.id)));
   return [...active, ...[...archived.values()].filter(order => !activeIds.has(String(order?.id))).map(view)];

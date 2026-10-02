@@ -1,6 +1,6 @@
 import { buildTemplatePrompt, isProductQuoteId, maxAddressAsks, pickVariant, publicImageUrl, renderChatbotReply, sanitizeModelAnswer } from './chatbot-templates.mjs';
 import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
-import { describeDeliveryAddress, isUsableStreet, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
+import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { autoLabelEventsFor, foldVietnamese, isComplaint } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
@@ -104,7 +104,10 @@ export const fallbackTemplates = Object.freeze({
   COMMENT_PUBLIC_FEEDBACK: 'Dạ em cảm ơn góp ý của mình ạ 💛 Em báo bạn dẫn live chỉnh lại ngay nha.',
   // fix-bot C2 (01/10): đơn landing/POS cùng SĐT nhưng không thuộc hội thoại — hỏi "đặt thêm?" mà KHÔNG kể món/giờ/tổng
   // tiền của đơn đó (có thể là đơn của người khác). Mã gửi đi vẫn là ORDER_EXISTING_CONFIRM (luồng "đúng"/"không").
-  ORDER_EXISTING_CONFIRM_PHONE: 'Dạ {title} ơi, em thấy số điện thoại này đã có một đơn đặt gần đây ạ 🌾 Mình muốn đặt THÊM một đơn mới gồm {cart} nữa đúng không ạ? {Title} nhắn "đúng" giúp em là em lên đơn liền; còn nếu là đơn cũ thì {title} cứ nhắn, bạn phụ trách sẽ kiểm tra cho mình nha ạ.'
+  ORDER_EXISTING_CONFIRM_PHONE: 'Dạ {title} ơi, em thấy số điện thoại này đã có một đơn đặt gần đây ạ 🌾 Mình muốn đặt THÊM một đơn mới gồm {cart} nữa đúng không ạ? {Title} nhắn "đúng" giúp em là em lên đơn liền; còn nếu là đơn cũ thì {title} cứ nhắn, bạn phụ trách sẽ kiểm tra cho mình nha ạ.',
+  // fix-review (02/10): cài đặt thiếu mẫu này thì nhánh "không" của đơn ngoài hội thoại (C2) rơi về ORDER_STATUS và
+  // kể chi tiết đơn của người khác; tra đơn theo SĐT thì bot im. Lời dự phòng ngắn, không kể chi tiết đơn.
+  ORDER_STATUS_CHECKING: 'Dạ em đang kiểm tra lại đơn giúp {title}, bạn phụ trách sẽ nhắn lại ngay ạ 💛'
 });
 
 /** Bộ mẫu để soạn câu: mẫu trong Cài đặt, mẫu mới chưa có thì lấy lời dự phòng. */
@@ -373,6 +376,10 @@ export async function refineAddressWithAi(parsed, context = {}, settings = {}, f
  * fix-addr (01/10): mô hình chat viết lại Customer_Address mà bỏ số nhà khách đã gõ (đơn thật: "71/82 khu phố 1 phường
  * Long Bình Tân…" thành "Gần siêu thị Big C, Phường Long Bình Tân…"). Tin địa chỉ gần nhất của khách (cùng tỉnh) còn số
  * nhà mà địa chỉ mô hình trả không có → giữ chữ khách gõ, kèm ghi chú đối chiếu cho nhân viên.
+ *
+ * fix-review (02/10): CHỈ xét tin MỚI NHẤT của khách có số nhà. Tin đó không đọc ra tỉnh (hay khác tỉnh của địa chỉ
+ * mô hình viết) thì dừng, KHÔNG lùi về tin cũ hơn: đó thường là tin khách sửa số nhà / đổi địa chỉ ("số nhà 45 chứ
+ * không phải 12", "gửi lên công ty: tầng 9 tòa Mipec Tây Sơn") — lùi về tin cũ là đưa địa chỉ CŨ trở lại đơn.
  */
 export function keepTypedHouseNumber(parsed, context = {}) {
   const written = String(parsed?.Customer_Address || '').trim();
@@ -381,9 +388,10 @@ export function keepTypedHouseNumber(parsed, context = {}) {
   const texts = [...(Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts : []), String(context.messageText || '')];
   for (let index = texts.length - 1; index >= 0; index -= 1) {
     const typed = cleanAddressText(stripPhone(texts[index]));
-    if (!typed) continue;
+    // Tin không có số nhà ("ok em", "chị ở gần siêu thị") không phải tin địa chỉ đang xét: xem tin trước đó.
+    if (!typed || !houseNumbersOf(typed).length) continue;
     const resolved = resolveAddress(typed);
-    if (!resolved.province || (writtenProvince && ![resolved.province.code, resolved.typedProvince?.code].includes(writtenProvince))) continue;
+    if (!resolved.province || (writtenProvince && ![resolved.province.code, resolved.typedProvince?.code].includes(writtenProvince))) return parsed;
     const lost = lostHouseNumbers(typed, written);
     if (!lost.length) return parsed;
     parsed.Customer_Address = typed;

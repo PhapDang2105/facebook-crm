@@ -285,16 +285,22 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
   }
 
   if (changed.length) {
+    const tracked = isTrackedStaffEdit(order);
+    // Đơn đã sửa TRƯỚC khi có `staffEdited` (chỉ có `editedByStaffAt`, không biết sửa nhóm nào): ghi lại mốc
+    // đó vào cờ riêng trước khi bắt đầu theo dõi nhóm, để lần sửa này không xoá mất dấu "đã sửa kiểu cũ".
+    if (!tracked && Number(order.editedByStaffAt) > 0 && !order.staffEditedLegacyAt) order.staffEditedLegacyAt = Number(order.editedByStaffAt);
     order.updatedAt = now;
     order.editedByStaffAt = now;
     // Nhóm nội dung nhân viên đã tự tay sửa (địa chỉ, giỏ…): bản form hoàn tất đến sau
-    // (landing-orders.mjs) không được đè các nhóm này.
-    const groups = [...new Set(changed.map(field => STAFF_EDIT_FIELD_GROUP[field]).filter(Boolean))];
-    if (groups.length) {
-      const staffEdited = order.staffEdited && typeof order.staffEdited === 'object' ? order.staffEdited : {};
-      for (const group of groups) staffEdited[group] = now;
-      order.staffEdited = staffEdited;
+    // (landing-orders.mjs) không được đè các nhóm này. LUÔN có object `staffEdited` sau mỗi lần sửa:
+    // object rỗng = "đã theo dõi, chưa sửa nhóm nội dung nào" (chỉ ẩn dòng / đổi trạng thái / ghi chú xử lý)
+    // — trước đây thiếu object thì staffEditedGroups coi là sửa MỌI nhóm và form hoàn tất bị bỏ.
+    const staffEdited = tracked ? order.staffEdited : {};
+    for (const field of changed) {
+      const group = STAFF_EDIT_FIELD_GROUP[field];
+      if (group) staffEdited[group] = now;
     }
+    order.staffEdited = staffEdited;
   }
   if (phoneWarning) changed.warnings = [phoneWarning];
   return changed;
@@ -314,15 +320,36 @@ const STAFF_EDIT_FIELD_GROUP = Object.freeze({
   shippingFee: 'basket', discount: 'basket', gift: 'basket', payment: 'payment', note: 'note'
 });
 
+const isTrackedStaffEdit = order => Boolean(order?.staffEdited) && typeof order.staffEdited === 'object' && !Array.isArray(order.staffEdited);
+
 /**
- * Nhóm nội dung nhân viên đã sửa trên đơn. Đơn sửa trước khi có `staffEdited` (chỉ có
- * `editedByStaffAt`) thì không biết nhóm nào: coi như đã sửa tất cả (an toàn: không đè).
+ * Mốc lần sửa "kiểu cũ" của đơn: sửa bằng bản mã trước khi có `staffEdited`, lúc đó MỌI thay đổi (kể cả
+ * đổi trạng thái) chỉ để lại `editedByStaffAt`, không biết nhân viên sửa nhóm nào. Nhận ra bằng hai dấu rõ ràng:
+ * - đơn có `editedByStaffAt` mà KHÔNG có object `staffEdited` (bản mã mới luôn ghi object này, kể cả rỗng,
+ *   nên đơn như vậy chắc chắn chỉ được sửa trước khi lên bản mới);
+ * - cờ `staffEditedLegacyAt`: applyCustomerOrderEdits chép mốc cũ vào đây khi đơn kiểu cũ được sửa tiếp.
+ * Trả 0 khi đơn không có lần sửa kiểu cũ nào.
+ */
+export function legacyStaffEditAt(order) {
+  const flagged = Number(order?.staffEditedLegacyAt) || 0;
+  if (flagged) return flagged;
+  return isTrackedStaffEdit(order) ? 0 : Number(order?.editedByStaffAt) || 0;
+}
+
+/**
+ * Nhóm nội dung nhân viên đã sửa trên đơn: đúng các nhóm ghi trong `staffEdited` (object rỗng = chưa sửa
+ * nhóm nào — chỉ ẩn dòng, đổi trạng thái, ghi chú xử lý). Riêng đơn có lần sửa kiểu cũ (legacyStaffEditAt)
+ * thì không biết nhóm nào: coi như đã sửa tất cả (an toàn: không đè).
  */
 export function staffEditedGroups(order) {
-  if (order?.staffEdited && typeof order.staffEdited === 'object') {
-    return new Set(Object.keys(order.staffEdited).filter(group => STAFF_EDIT_GROUPS[group]));
-  }
-  return order?.editedByStaffAt ? new Set(Object.keys(STAFF_EDIT_GROUPS)) : new Set();
+  if (legacyStaffEditAt(order)) return new Set(Object.keys(STAFF_EDIT_GROUPS));
+  if (!isTrackedStaffEdit(order)) return new Set();
+  return new Set(Object.keys(order.staffEdited).filter(group => STAFF_EDIT_GROUPS[group]));
+}
+
+/** Mốc nhân viên sửa nhóm `group` gần nhất (0 = chưa sửa); đơn sửa kiểu cũ thì lấy mốc sửa kiểu cũ. */
+export function staffEditedAt(order, group) {
+  return Math.max(isTrackedStaffEdit(order) ? Number(order.staffEdited[group]) || 0 : 0, legacyStaffEditAt(order));
 }
 
 /**

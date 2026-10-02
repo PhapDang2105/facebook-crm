@@ -46,8 +46,8 @@ import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from '.
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
 import { describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { countQrReferrals, countQrReferralsByDay, deleteQrCode, isValidQrCode, listQrScans, qrDayKey, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
-import { classifyUserAgent, isLinkPreviewBot, messengerDestination, prefillMessageFor, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
-import { createQrGreeter, isCardScan } from './qr-greeting.mjs';
+import { classifyUserAgent, iosMajorVersion, isLinkPreviewBot, messengerDestination, prefillMessageFor, prefillTemplateOrDefault, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
+import { createQrGreeter, createThreadReleaser, isCardScan } from './qr-greeting.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
@@ -62,7 +62,7 @@ import {
 import { createAuth, isPublicPath, parseUsers } from './auth.mjs';
 import { listStaff, saveStaffMember, staffByUsername, staffLoginAccounts, STAFF_ROLES } from './staff.mjs';
 import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
-import { fetchPageSubscription, metaRequest, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
+import { fetchPageSubscription, metaRequest, releaseThreadControl, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listCustomers } from './customers.mjs';
 import { addCustomerNote, listCustomerNotes, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
@@ -778,7 +778,15 @@ const qrGreeter = createQrGreeter({
   delayMs: qrGreetingDelayMs,
   cooldownMs: qrGreetingCooldownMs
 });
-const scheduleQrGreetings = changes => qrGreeter.schedule(changes);
+const scheduleQrGreetings = (changes, options) => qrGreeter.schedule(changes, options);
+// Page vận hành ở Pancake (chỉ nghe referral) mà sự kiện Meta về ở `messaging` chứ không phải `standby`:
+// Meta đang giao luồng cho app CRM (định tuyến liên kết m.me). Xong việc — đã gửi ưu đãi QR, hoặc không
+// có gì để gửi — thì trả luồng về app mặc định, kẻo tin sau của khách không tới Pancake.
+const releaseQrThread = createThreadReleaser({
+  release: releaseThreadControl,
+  getToken: getPageAccessToken,
+  shouldRelease: change => !change.standby && isReferralOnlyPage(change.conversation?.pageId)
+});
 
 /** Sends the tappable Messenger receipt. Kept separate from creating the order so
  *  the chatbot can persist the order first and still close with the receipt. */
@@ -1417,7 +1425,15 @@ const server = http.createServer(async (request, response) => {
       if (isOpenBeacon) {
         // Beacon từ trang đệm khi khách bấm nút. Chỉ đếm, không cần thân tin.
         if (request.method !== 'POST') return sendJson(response, 405, { error: 'Chỉ nhận POST.' });
-        const target = url.searchParams.get('to') === 'zalo' ? 'zalo' : 'messenger';
+        const to = url.searchParams.get('to');
+        // Nút thoát webview trên iPhone trong app ("Mở bằng Safari", "Sao chép liên kết"): chỉ ghi log để biết
+        // khách có bấm hay không — không phải lượt mở Messenger nên không vào số liệu.
+        if (to === 'safari' || to === 'copy') {
+          console.log(`QR: bấm "${to === 'safari' ? 'Mở bằng Safari' : 'Sao chép liên kết'}" cho mã ${code}${staffScan ? ' (máy nhân viên)' : ''}`);
+          response.writeHead(204, { 'Cache-Control': 'no-store' });
+          return response.end();
+        }
+        const target = to === 'zalo' ? 'zalo' : 'messenger';
         if (staffScan) {
           console.log(`QR: bỏ đếm lượt bấm ${target} cho mã ${code}: máy nhân viên (đã đăng nhập CRM)`);
         } else {
@@ -1436,8 +1452,13 @@ const server = http.createServer(async (request, response) => {
       const redirect = shouldRedirectDirectly(classification);
       // Đếm trước, nhưng không để việc ghi đĩa làm khách phải chờ. Máy xem trước
       // liên kết (khách dán link vào Zalo/Messenger) không phải lượt quét.
+      // `?from=inapp`: khách mở LẠI trang này bằng Safari từ trong Zalo/Facebook… (nút "Mở bằng Safari" hay
+      // dán liên kết đã sao chép) — cùng một lượt quét, đã đếm ở lần tải đầu.
+      const reopened = url.searchParams.get('from') === 'inapp';
       if (isLinkPreviewBot(userAgent)) {
         console.log(`QR: bỏ qua đếm ${code}: máy xem trước / máy quét (${userAgent.slice(0, 60) || 'UA rỗng'})`);
+      } else if (reopened) {
+        console.log(`QR: mở lại ${code} bằng trình duyệt từ trong app (${classification.platform}/${classification.browser}), không đếm thêm lượt quét`);
       } else if (staffScan) {
         console.log(`QR: bỏ qua đếm ${code}: máy nhân viên (đã đăng nhập CRM) quét thử`);
       } else {
@@ -1457,8 +1478,9 @@ const server = http.createServer(async (request, response) => {
       }
       const { zaloUrl, prefillText } = await readQrSettings();
       // ref kiểu Pancake + tin soạn sẵn mang #mã: Pancake ghi nguồn truy cập, và
-      // tin khách gửi về CRM qua webhook Pancake mang theo mã lô.
-      const destination = messengerDestination({ pageId: page.id, code, pageName: page.name, prefillText });
+      // tin khách gửi về CRM qua webhook Pancake mang theo mã lô. Chưa đặt tin soạn sẵn thì dùng mẫu mặc
+      // định — link không có `text=` là mất đường duy nhất không phụ thuộc Meta để nhận ra khách quét thẻ.
+      const destination = messengerDestination({ pageId: page.id, code, pageName: page.name, prefillText: prefillTemplateOrDefault(prefillText) });
       if (redirect) {
         console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}) -> chuyển hướng Messenger`);
         response.writeHead(302, { Location: destination, 'Cache-Control': 'no-store' });
@@ -1471,7 +1493,10 @@ const server = http.createServer(async (request, response) => {
         pageName: page.name,
         fallbackUrl: `https://www.facebook.com/${encodeURIComponent(page.id)}`,
         zaloUrl,
-        classification
+        classification,
+        // iPhone trong app: địa chỉ https của chính trang này cho nút "Mở bằng Safari" / "Sao chép liên kết".
+        pageUrl: metaConfig.publicBaseUrl.startsWith('https://') ? `${metaConfig.publicBaseUrl}/q/${encodeURIComponent(code)}?from=inapp` : '',
+        iosVersion: iosMajorVersion(userAgent)
       });
       response.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
@@ -1499,8 +1524,8 @@ const server = http.createServer(async (request, response) => {
         codes: stats.codes.map(entry => ({
           ...entry,
           url: qrTargetUrl(metaConfig.publicBaseUrl, entry.code),
-          messengerUrl: page.id ? messengerDestination({ pageId: page.id, code: entry.code, pageName: page.name, prefillText: qrSettings.prefillText }) : '',
-          prefillText: prefillMessageFor({ code: entry.code, pageName: page.name, template: qrSettings.prefillText })
+          messengerUrl: page.id ? messengerDestination({ pageId: page.id, code: entry.code, pageName: page.name, prefillText: prefillTemplateOrDefault(qrSettings.prefillText) }) : '',
+          prefillText: prefillMessageFor({ code: entry.code, pageName: page.name, template: prefillTemplateOrDefault(qrSettings.prefillText) })
         })),
         recent: stats.recent
       });
@@ -2204,15 +2229,22 @@ const server = http.createServer(async (request, response) => {
       response.end('EVENT_RECEIVED');
       try {
         const changes = await processWebhookPayload(JSON.parse(rawBody.toString('utf8')));
-        scheduleQrGreetings(changes);
+        scheduleQrGreetings(changes, { afterGreeting: releaseQrThread });
+        // Sự kiện khác của khách (không phải lượt quét thẻ) trên Page chỉ nghe referral: CRM không trả lời
+        // gì, trả luồng ngay.
+        for (const change of changes) {
+          if ((change.type === 'message' || change.type === 'referral') && !isCardScan(change)) releaseQrThread(change);
+        }
         // Khách quét phiếu đã có tin ưu đãi riêng; để bot chào thêm câu chung
         // nữa là khách nhận hai tin trong mười giây. Những tin sau của họ vẫn
         // đi qua bot bình thường — chỉ bỏ qua đúng sự kiện mở hội thoại.
         // Page chỉ nghe referral (vận hành ở Pancake, META_REFERRAL_ONLY_PAGES):
         // tin khách về qua Pancake rồi; postback "Bắt đầu" từ Meta mà đưa bot
         // là trả lời chồng lên Botcake và mở hội thoại Meta song song.
+        // Sự kiện tới qua `standby` (app khác là Primary Receiver, đang giữ luồng): chỉ ghi nhận và chào
+        // QR ở trên, bot không trả lời.
         await processChatbotChanges(
-          changes.filter(change => !isCardScan(change) && !isReferralOnlyPage(change.conversation?.pageId)),
+          changes.filter(change => !change.standby && !isCardScan(change) && !isReferralOnlyPage(change.conversation?.pageId)),
           chatbotDependencies
         );
       } catch (error) {
@@ -3170,7 +3202,9 @@ const server = http.createServer(async (request, response) => {
             conversationName: conversation.name || ''
           }))
         ),
-        ...await listLandingOrders()
+        // Chỉ đơn ở kho chính: đơn landing đã lưu trữ không sửa/xoá/đồng bộ POS được (PATCH/DELETE trả 404),
+        // nên không hiện ở bảng Đơn hàng. Báo cáo, Tổng quan, Chiến dịch vẫn tính cả kho lưu trữ.
+        ...await listLandingOrders({ includeArchived: false })
       ].sort((first, second) => (Number(second.createdAt) || 0) - (Number(first.createdAt) || 0));
       // Cảnh báo số điện thoại tính lại từ cache theo ngưỡng hiện hành (mức ghim
       // lúc tạo đơn có thể đã cũ), rồi dựng ghi chú xử lý (thiếu gì, tự điền gì,

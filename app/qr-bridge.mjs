@@ -115,16 +115,16 @@ export function qrCodeFromText(text, { outgoing = false } = {}) {
 export const samplePrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận hướng dẫn và quà nhé 💛 #{code}';
 
 /**
- * Tin soạn sẵn MẶC ĐỊNH khi Cài đặt chưa đặt gì. Đây là đường nhận ra khách quét thẻ không phụ thuộc
- * Meta: Page vận hành ở Pancake (Pancake là app nhận mặc định) nên Meta không gửi referral của m.me cho
- * app CRM, và Botcake không dùng — chỉ còn tin khách bấm gửi, mang "#mã" ở cuối, về qua webhook Pancake.
- * Link m.me không có `text=` thì khách mở đúng khung chat nhưng CRM không biết để gửi ưu đãi.
+ * Mẫu tin soạn sẵn dự phòng (khách bấm gửi, tin mang "#mã" về qua webhook Pancake). KHÔNG dùng mặc định:
+ * chủ shop 02/10 không muốn khách phải gửi tin soạn sẵn — Page chủ động chào trước. Từ khi công cụ Ref URL
+ * của Botcake thôi giữ mã thẻ, Meta gửi referral của m.me?ref cho app CRM và CRM chào ngay khi khách mở
+ * khung chat. Chỉ khi Cài đặt có đặt tin soạn sẵn thì link mới mang `text=`.
  */
 export const defaultPrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận ưu đãi nhé #{code}';
 
-/** Mẫu tin soạn sẵn đang dùng: mẫu nhân viên đặt, trống thì mẫu mặc định. */
+/** Mẫu tin soạn sẵn đang dùng: mẫu nhân viên đặt; trống thì KHÔNG có tin soạn sẵn (link chỉ mang ref). */
 export function prefillTemplateOrDefault(template) {
-  return String(template || '').trim() || defaultPrefillText;
+  return String(template || '').trim();
 }
 
 /** Tin soạn sẵn cho một mã: điền {page}/{code}; thiếu `#mã` thì tự nối vào cuối để CRM còn nhận ra. Mẫu rỗng → không có tin. */

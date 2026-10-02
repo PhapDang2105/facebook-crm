@@ -19,17 +19,23 @@ await registerQrCode('tmdt-01');
 
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-test('cài đặt chưa đặt tin soạn sẵn → link m.me vẫn có text= theo mẫu mặc định, kết bằng #mã; mẫu nhân viên đặt thì giữ nguyên', async () => {
+// Chủ shop 02/10: không muốn khách phải gửi tin soạn sẵn — Page chủ động chào (Meta gửi referral về CRM
+// từ khi công cụ Botcake thôi giữ mã). Mặc định link chỉ mang ref; tin soạn sẵn chỉ có khi Cài đặt đặt.
+test('cài đặt chưa đặt tin soạn sẵn → link m.me chỉ mang ref, KHÔNG có text=; mẫu nhân viên đặt thì có text= kết bằng #mã', async () => {
   const settings = await readQrSettings();
   assert.equal(settings.prefillText, '', 'kho cài đặt mới: chưa đặt gì');
-  assert.equal(prefillTemplateOrDefault(settings.prefillText), defaultPrefillText);
-  assert.equal(prefillTemplateOrDefault('   '), defaultPrefillText);
+  assert.equal(prefillTemplateOrDefault(settings.prefillText), '');
+  assert.equal(prefillTemplateOrDefault('   '), '');
   assert.equal(prefillTemplateOrDefault(' Cho mình nhận quà '), 'Cho mình nhận quà');
-  const text = prefillMessageFor({ code: 'tmdt-01', pageName: 'Giọt Nắng', template: prefillTemplateOrDefault(settings.prefillText) });
+  const plain = new URL(messengerDestination({ pageId: '103549382215599', code: 'tmdt-01', pageName: 'Giọt Nắng', prefillText: prefillTemplateOrDefault(settings.prefillText) }));
+  assert.equal(plain.href, 'https://m.me/103549382215599?ref=tmdt-01');
+  assert.equal(plain.searchParams.has('text'), false);
+  // Mẫu do nhân viên đặt (hoặc mẫu dự phòng có sẵn) vẫn chạy như cũ.
+  const text = prefillMessageFor({ code: 'tmdt-01', pageName: 'Giọt Nắng', template: defaultPrefillText });
   assert.equal(text, 'Mình vừa quét thẻ cảm ơn Giọt Nắng, cho mình nhận ưu đãi nhé #tmdt-01');
   assert.ok(text.length <= 140);
   assert.equal(qrCodeFromText(text), 'tmdt-01', 'CRM đọc ngược được mã từ chính tin soạn sẵn');
-  const destination = new URL(messengerDestination({ pageId: '103549382215599', code: 'tmdt-01', pageName: 'Giọt Nắng', prefillText: prefillTemplateOrDefault(settings.prefillText) }));
+  const destination = new URL(messengerDestination({ pageId: '103549382215599', code: 'tmdt-01', pageName: 'Giọt Nắng', prefillText: defaultPrefillText }));
   assert.equal(destination.origin + destination.pathname, 'https://m.me/103549382215599');
   assert.equal(destination.searchParams.get('ref'), 'tmdt-01', 'ref vẫn giữ: Meta có gửi referral thì vẫn nhận');
   assert.equal(destination.searchParams.get('text'), text);

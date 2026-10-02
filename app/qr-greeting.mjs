@@ -75,7 +75,10 @@ export function createThreadReleaser({
       if (last === undefined || now() - last >= errorLogWindowMs) {
         if (errorLoggedAt.size >= 50) errorLoggedAt.clear();
         errorLoggedAt.set(reason, now());
-        logError(`QR: không trả được quyền giữ luồng cho ${label}: ${reason}`);
+        // (#100) "chỉ chủ sở hữu hiện tại của thread…": CRM không giữ luồng (Meta gửi referral mà không
+        // chuyển quyền) — không có gì để trả, không phải lỗi.
+        if (/#100\b/.test(reason)) log(`QR: không cần trả luồng (CRM không giữ) — ${label}`);
+        else logError(`QR: không trả được quyền giữ luồng cho ${label}: ${reason}`);
       }
       return false;
     }

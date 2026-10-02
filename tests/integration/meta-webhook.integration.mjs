@@ -151,20 +151,20 @@ try {
   const zaloIos = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Zalo iOS/640 ZaloTheme/light ZaloLanguage/vn';
   const iosSafari = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1';
   const redirected = await fetch(`${baseUrl}/q/tmdt-01`, { headers: { 'User-Agent': androidChrome }, redirect: 'manual' });
-  // Cài đặt chưa đặt tin soạn sẵn: link vẫn mang text= mặc định kết bằng #mã (đường nhận khách qua webhook Pancake).
+  // Cài đặt chưa đặt tin soạn sẵn: link chỉ mang ref (chủ shop 02/10: Page chủ động chào, khách không phải gửi tin soạn sẵn).
   const location = redirected.status === 302 ? new URL(redirected.headers.get('location')) : null;
   check('QR bridge: Android Chrome is still redirected to m.me?ref', location?.origin === 'https://m.me' && location.pathname === `/${pageId}` && location.searchParams.get('ref') === 'tmdt-01', `${redirected.status} ${redirected.headers.get('location')}`);
-  check('QR bridge: the m.me link carries the default prefilled text ending with #code', / #tmdt-01$/.test(location?.searchParams.get('text') || ''), location?.searchParams.get('text'));
+  check('QR bridge: the m.me link carries no prefilled text by default', location?.searchParams.has('text') === false, location?.searchParams.get('text'));
   const inApp = await fetch(`${baseUrl}/q/tmdt-01`, { headers: { 'User-Agent': zaloIos }, redirect: 'manual' });
   const inAppHtml = await inApp.text();
   check('QR bridge: iOS inside Zalo gets the open-in-Safari guide', inApp.status === 200
     && inAppHtml.includes('class="hint hint-ios"')
     && inAppHtml.includes('href="x-safari-https://crm.example.com/q/tmdt-01?from=inapp"')
     && inAppHtml.includes('data-link="https://crm.example.com/q/tmdt-01?from=inapp"')
-    && inAppHtml.includes(`href="https://m.me/${pageId}?ref=tmdt-01&amp;text=`));
+    && inAppHtml.includes(`href="https://m.me/${pageId}?ref=tmdt-01"`));
   const reopened = await fetch(`${baseUrl}/q/tmdt-01?from=inapp`, { headers: { 'User-Agent': iosSafari }, redirect: 'manual' });
   const reopenedHtml = await reopened.text();
-  check('QR bridge: reopened in Safari shows the plain page', reopened.status === 200 && !reopenedHtml.includes('hint-ios') && reopenedHtml.includes(`href="https://m.me/${pageId}?ref=tmdt-01&amp;text=`));
+  check('QR bridge: reopened in Safari shows the plain page', reopened.status === 200 && !reopenedHtml.includes('hint-ios') && reopenedHtml.includes(`href="https://m.me/${pageId}?ref=tmdt-01"`));
   const escapeBeacon = await fetch(`${baseUrl}/q/tmdt-01/open?to=safari`, { method: 'POST', headers: { 'User-Agent': zaloIos } });
   check('QR bridge: open-in-Safari beacon is acknowledged', escapeBeacon.status === 204, String(escapeBeacon.status));
 

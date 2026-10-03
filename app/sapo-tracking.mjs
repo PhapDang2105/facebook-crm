@@ -223,7 +223,9 @@ export function shipmentNoticePlan(store, conversation, order, { now = Date.now(
 export function markShipmentNotified(shipment, { stage, via, at = Date.now(), error = '' }) {
   if (!shipment) return;
   if (error) {
-    Object.assign(shipment, { noticeError: String(error).slice(0, 200), noticeErrorAt: at, noticeErrorStage: stage });
+    // Đếm số lần lỗi của đúng giai đoạn này (giai đoạn mới thì đếm lại): tự gửi qua cầu nối dừng sau 2 lần.
+    const attempts = (shipment.noticeErrorStage === stage ? Number(shipment.noticeAttempts) || 0 : 0) + 1;
+    Object.assign(shipment, { noticeError: String(error).slice(0, 200), noticeErrorAt: at, noticeErrorStage: stage, noticeAttempts: attempts });
     return;
   }
   const history = Array.isArray(shipment.notices) ? shipment.notices : [];
@@ -231,5 +233,6 @@ export function markShipmentNotified(shipment, { stage, via, at = Date.now(), er
   delete shipment.noticeError;
   delete shipment.noticeErrorAt;
   delete shipment.noticeErrorStage;
+  delete shipment.noticeAttempts;
 }
 

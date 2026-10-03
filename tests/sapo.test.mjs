@@ -328,3 +328,15 @@ test('thẻ mặc định mới có trong bộ thẻ và sự kiện tự độn
   assert.ok(ids.includes('delivered:delivered'));
   assert.ok(autoLabelEvents.includes('shipment-sent') && autoLabelEvents.includes('delivered'));
 });
+
+test('gửi qua cầu nối lỗi: đếm số lần theo giai đoạn để tự gửi dừng sau 2 lần', () => {
+  const { store } = linkedStore({ lastCustomerMessageAt: now - 30 * HOUR });
+  const key = 'c1|A|picked_up';
+  recordShipmentNoticeResult(store, key, { ok: false, error: 'extension Pancake không tìm được ID Facebook của khách', now });
+  recordShipmentNoticeResult(store, key, { ok: false, error: 'extension Pancake không tìm được ID Facebook của khách', now });
+  const [item] = listShipmentNoticeQueue(store, { now });
+  assert.equal(item.attempts, 2);
+  assert.match(item.error, /không tìm được ID Facebook/);
+  recordShipmentNoticeResult(store, key, { ok: true, via: 'manual', now });
+  assert.equal(store.conversations[0].customerOrders[0].shipment.noticeAttempts, undefined);
+});

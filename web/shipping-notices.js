@@ -12,6 +12,8 @@
   const sendAllButton = root.querySelector('#shipping-notices-send-all');
   const AUTO_KEY = 'crm-shipping-auto-bridge';
   const AUTO_EVERY_MS = 5 * 60 * 1000;
+  // Tự gửi bỏ qua tin đã lỗi từ 2 lần (thường là Pancake không tìm được tài khoản Facebook của khách): nhân viên xử lý tay.
+  const AUTO_MAX_ATTEMPTS = 2;
   let items = [];
   let running = false;
   const done = new Set();
@@ -55,7 +57,7 @@
           <span class="shipping-notice-window ${item.inWindow ? 'is-open' : ''}">${item.inWindow ? 'Trong 24 giờ – máy chủ sẽ tự gửi' : 'Ngoài 24 giờ – gửi qua Pancake'}</span>
         </div>
         <div class="shipping-notice-meta">${esc(item.carrier)} · <a href="${esc(item.trackingUrl)}" target="_blank" rel="noopener">${esc(item.trackingNumber)}</a>${item.stageAt ? ` · ${time(item.stageAt)}` : ''}</div>
-        ${item.error ? `<div class="shipping-notice-error">Lần gửi trước lỗi: ${esc(item.error)}</div>` : ''}
+        ${item.error ? `<div class="shipping-notice-error">Đã thử ${item.attempts || 1} lần, lỗi: ${esc(item.error)}${(item.attempts || 0) >= AUTO_MAX_ATTEMPTS ? ' — tự gửi đã dừng, nhân viên gửi tay trong Pancake rồi bấm "Đã gửi tay"' : ''}</div>` : ''}
         <details><summary>Lời sẽ gửi</summary><pre>${esc(item.text)}</pre></details>
         <div class="shipping-notice-actions">
           <button type="button" data-action="send">${item.inWindow ? 'Gửi ngay' : 'Gửi qua Pancake'}</button>
@@ -100,7 +102,7 @@
 
   async function runAll(auto = false) {
     if (running) return;
-    const keys = items.filter(item => !item.inWindow && !done.has(item.key)).map(item => item.key);
+    const keys = items.filter(item => !item.inWindow && !done.has(item.key) && (!auto || (item.attempts || 0) < AUTO_MAX_ATTEMPTS)).map(item => item.key);
     if (!keys.length) return;
     if (!auto && !confirm(`Gửi ${keys.length} tin báo vận đơn qua Pancake?\nMỗi tin cách nhau 15–30 giây, để trang CRM mở tới khi xong.`)) return;
     running = true;

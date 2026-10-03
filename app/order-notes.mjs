@@ -146,7 +146,7 @@ function dataNotes(order) {
   // Vận đơn từ Sapo (app/sapo-tracking.mjs): hãng, mã, trạng thái giao; chưa nhắn được mã cho khách thì nhắc nhân viên.
   const shipment = shipmentNote(order);
   if (shipment) notes.push(shipment);
-  if (order.shipment?.noticeVia === 'failed') notes.push(`⚠ Chưa nhắn được mã vận đơn cho khách: ${String(order.shipment.noticeError || '').slice(0, 80)}`);
+  if (order.shipment?.noticeError) notes.push(`⚠ Chưa nhắn được mã vận đơn cho khách: ${String(order.shipment.noticeError).slice(0, 80)}`);
 
   // Khách điền nhiều form thì mỗi form một đơn, không tự gộp; bảng Đơn hàng tự
   // ghi "cùng số điện thoại với đơn …"; nhóm được so và xử lý ở Nhập dữ liệu.

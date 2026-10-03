@@ -3607,6 +3607,8 @@ const server = http.createServer(async (request, response) => {
       const queue = (await shipmentNoticeQueue()).filter(item => wanted.has(item.key));
       const items = [];
       const skipped = [];
+      // Như lô bám đuổi: khách Pancake chưa lưu ID Facebook phải nhờ extension dò (chậm, hay hụt) — tối đa 10 khách/lô.
+      let lookups = 0;
       for (const item of queue) {
         const convId = `${item.pageId}_${item.psid}`;
         let info = null;
@@ -3617,6 +3619,8 @@ const server = http.createServer(async (request, response) => {
           continue;
         }
         if (info && info.canInbox === false) { skipped.push({ key: item.key, reason: 'khách không nhận tin (chặn Page)' }); continue; }
+        if (!info?.globalId && lookups >= 10) { skipped.push({ key: item.key, reason: 'chờ lô sau (tìm ID Facebook tối đa 10 khách/lô)' }); continue; }
+        if (!info?.globalId) lookups += 1;
         const updatedTime = Math.max(0, ...((await readMessagingStore()).messages?.[item.conversationId] || []).map(message => Number(message.createdAt) || 0));
         items.push({ key: item.key, pageId: item.pageId, convId, globalUserId: info?.globalId || '', needsGlobalId: !info?.globalId, updatedTime, name: item.name, text: item.text });
       }

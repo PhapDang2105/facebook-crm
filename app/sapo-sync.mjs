@@ -290,7 +290,8 @@ export function listShipmentNoticeQueue(store, { now = Date.now(), templates = {
       stageLabel: shipmentStageLabel(plan.stage),
       stageAt: Number(shipment.stageAt) || 0,
       inWindow: plan.action === 'send',
-      error: shipment.noticeError || '',
+      error: shipment.noticeErrorStage === plan.stage ? shipment.noticeError || '' : '',
+      attempts: shipment.noticeErrorStage === plan.stage ? Number(shipment.noticeAttempts) || (shipment.noticeError ? 1 : 0) : 0,
       text
     });
   }

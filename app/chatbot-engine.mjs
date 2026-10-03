@@ -711,8 +711,10 @@ function buildMemoryTurns({ recentMessages = [], message, settings }) {
   // Bản cũ (mặc định): từng tin, tin Page cắt 160 ký tự, tin khách 300. Bản gọn
   // (settings.contextTrim.memory) chưa bật: A/B 25/09 chưa chứng minh giữ độ chính xác.
   if (settings?.contextTrim?.memory !== true) {
+    // Bỏ tin quảng cáo / biên nhận đơn / tệp đính kèm / tin hệ thống (memoryNoise) như bản gọn — chỉ là nhiễu cho mô hình.
     return recentMessages
-      .filter(item => item && item.id !== message?.id && String(item.text || '').trim())
+      .filter(item => item && item.id !== message?.id && String(item.text || '').trim()
+        && !['ad', 'order-receipt', 'attachment'].includes(item.type) && !memoryNoise.test(String(item.text).replace(/\s+/g, ' ').trim()))
       .slice(-limit)
       .map(item => {
         const text = String(item.text).replace(/\s+/g, ' ').trim();

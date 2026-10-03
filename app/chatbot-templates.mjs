@@ -38,9 +38,13 @@ import { fileURLToPath } from 'node:url';
 // the shipped texts; a shipped id the settings lack is read from there.
 const seedPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'chatbot-templates.seed.json');
 
+// Tệp mẫu gốc chỉ đổi khi deploy (khởi động lại): đọc + parse một lần, mỗi lần gọi trả bản sao riêng.
+let seedTemplates = null;
+
 /** The shipped default texts — used only to seed settings that have none. */
 export function defaultMessageTemplates() {
-  return JSON.parse(readFileSync(seedPath, 'utf8'));
+  seedTemplates ||= JSON.parse(readFileSync(seedPath, 'utf8'));
+  return structuredClone(seedTemplates);
 }
 
 const isDivider = line => line.trim() !== '' && line.trim() !== '###' && !/[\p{L}\p{N}]/u.test(line);

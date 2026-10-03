@@ -1,6 +1,6 @@
 import { buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, renderChatbotReply, sanitizeModelAnswer } from './chatbot-templates.mjs';
 import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
-import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
+import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, loadLocationIndex, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { AD_MISMATCH_COMPLAINT, autoLabelEventsFor, foldVietnamese, isComplaint, mentionsOtherSeller, shortBadTaste } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
@@ -35,6 +35,8 @@ export async function warmUpChatbotModels() {
   let intent = false;
   let cascade = false;
   try { intent = Boolean(loadIntentModel()); } catch (error) { console.warn(`Không nạp sẵn được mô hình nhỏ: ${error.message}`); }
+  // Chỉ mục địa giới (~1,5 s đọc CSV đồng bộ), danh mục sản phẩm và quà: nạp sẵn thay vì chặn tin địa chỉ đầu tiên.
+  try { loadLocationIndex(); getCatalogProducts(); getGifts(); } catch (error) { console.warn(`Không nạp sẵn được địa giới/danh mục: ${error.message}`); }
   try {
     const cascadeModule = await loadCascadeModule();
     cascade = Boolean(typeof cascadeModule?.loadCascadeModel === 'function' && cascadeModule.loadCascadeModel());

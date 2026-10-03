@@ -32,6 +32,7 @@ import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, 
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { flushDecisionLog } from './processing/decision-log.mjs';
+import { clearStaffIdleRechecks } from './processing/staff-idle.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, readLandingStore, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { configurePosSync, posSyncStatus, recordPosSyncStatus, runPosSync, startPosSync } from './pos-sync.mjs';
@@ -3821,6 +3822,8 @@ installMessagingStoreShutdownFlush({
   prepare: async () => {
     server.close();
     server.closeIdleConnections?.();
+    // Lượt hẹn "nhân viên im 5 phút — bot nhận đơn" không chạy giữa lúc tắt (mất khi khởi động lại: chấp nhận).
+    clearStaffIdleRechecks();
     await qrGreetingShutdownFlush;
     await drainAllWrites({ timeoutMs: 6000 });
     await Promise.all([flushAudit(), flushDecisionLog()]);

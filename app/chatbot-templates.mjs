@@ -17,7 +17,7 @@ import { normalizeColourTypos, quantityOnlyRequest } from './processing/rule-int
 // Vòng 12: hỏi lại tối đa MỘT lần; khách trả lời gì thì nhận nguyên chữ khách ghi, đơn mang ghi chú
 // để nhân viên soát phường/xã (khách bỏ đi khi bị hỏi từng cấp lần 2, lần 3).
 export const maxAddressAsks = 1;
-import { shipmentStage, shipmentTemplateValues } from './shipment-stage.mjs';
+import { LEGACY_SHIPMENT_TEMPLATES, shipmentStage, shipmentTemplateValues } from './shipment-stage.mjs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1467,9 +1467,13 @@ function renderOrderStatus(templates) {
   const state = cancelled ? 'đã hủy' : shipped ? 'đã chuyển sang kho để đóng gói và bàn giao vận chuyển' : confirmed ? 'đã được xác nhận, kho đang chuẩn bị hàng' : 'đã được ghi nhận, kho đang chuẩn bị hàng';
   // Đơn đã có vận đơn Sapo (app/sapo-tracking.mjs): kể hãng, mã vận đơn, giai đoạn giao và link tra
   // (mẫu ORDER_STATUS_SHIPPED; để trống mẫu đó thì nói như cũ).
-  const shippedTemplate = String(templates.ORDER_STATUS_SHIPPED || '').trim();
+  const storedShipped = String(templates.ORDER_STATUS_SHIPPED || '').trim();
+  const shippedTemplate = storedShipped && storedShipped === LEGACY_SHIPMENT_TEMPLATES.ORDER_STATUS_SHIPPED ? String(defaultMessageTemplates().ORDER_STATUS_SHIPPED || '').trim() : storedShipped;
   if (!cancelled && shippedTemplate && order.shipment?.trackingNumber && shipmentStage(order.shipment)) {
-    return fill(shippedTemplate, { ...commonValues(), items, ordered_at: orderedAt, total: formatMoney(Number(order.total) || 0), ...shipmentTemplateValues(order.shipment, activeCustomer.gender) });
+    // fill() bỏ cả dòng có ô trống: {tracking_hint} (chỉ J&T có) phải nằm riêng một dòng trong mẫu, không thì
+    // dòng link tra của SPX bị bỏ theo; bỏ xuống dòng đầu của gợi ý vì mẫu đã xuống dòng sẵn.
+    const values = shipmentTemplateValues(order.shipment, activeCustomer.gender);
+    return fill(shippedTemplate, { ...commonValues(), items, ordered_at: orderedAt, total: formatMoney(Number(order.total) || 0), ...values, tracking_hint: values.tracking_hint.replace(/^\n/, '') });
   }
   const text = fill(templates.ORDER_STATUS, { ...commonValues(), items, ordered_at: orderedAt, state, total: formatMoney(Number(order.total) || 0) });
   // Đơn đã hủy: không nối đoạn "thời gian giao dự kiến… gửi mã vận đơn" (chỉ giữ câu đầu nêu trạng thái).

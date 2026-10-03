@@ -7,6 +7,8 @@ import { defaultConversationLabels } from '../app/inbox-settings.mjs';
 import { autoLabelEvents } from '../app/processing/auto-label.mjs';
 
 import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
+import { normalizeChatbotSettings } from '../app/chatbot-settings.mjs';
+import { LEGACY_SHIPMENT_TEMPLATES } from '../app/shipment-stage.mjs';
 import { processingNotes } from '../app/order-notes.mjs';
 
 const HOUR = 60 * 60 * 1000;
@@ -174,10 +176,10 @@ test('báo khách: ngoài 24 giờ vào hàng chờ, giờ nghỉ thì chờ, gi
 test('lời báo khách: mẫu mặc định, mẫu chủ shop sửa, mẫu để trống = tắt; J&T nhắc 4 số cuối SĐT', () => {
   const shipment = { carrier: 'J&T Express', trackingNumber: '802835136377', trackingUrl: 'https://jtexpress.vn/x', status: 'picked_up' };
   const text = renderShipmentNotice(shipment, 'female');
-  assert.match(text, /đơn hàng của chị đã được đóng gói và tạo vận đơn J&T Express/);
+  assert.match(text, /^Dạ, Giọt Nắng báo chị đơn hàng đã được đóng gói và giao cho J&T Express rồi ạ 📦/);
   assert.match(text, /Mã vận đơn: 802835136377/);
   assert.match(text, /Trạng thái: Đã lấy hàng/);
-  assert.match(text, /Chị theo dõi hành trình đơn tại: https:\/\/jtexpress\.vn\/x/);
+  assert.match(text, /🔎 Theo dõi hành trình: https:\/\/jtexpress\.vn\/x/);
   assert.match(text, /4 số cuối SĐT/);
   assert.doesNotMatch(renderShipmentNotice({ ...shipment, carrier: 'SPX Express' }), /4 số cuối/);
   assert.equal(renderShipmentNotice(shipment, 'male', 'SHIPMENT_DELIVERED', { SHIPMENT_DELIVERED: 'Cảm ơn {title}!' }), 'Cảm ơn anh!');
@@ -191,11 +193,27 @@ test('bot trả lời "đơn tới đâu" bằng mã vận đơn + giai đoạn 
   const { order } = linkedStore({ status: 'delivering' });
   const reply = renderChatbotReply({ template_id: 'ORDER_STATUS' }, defaultMessageTemplates(), { recentOrder: order, customer: { gender: 'female' } });
   const text = reply.messages.join('\n');
-  assert.match(text, /mã vận đơn 802835136377/);
-  assert.match(text, /hiện Đang vận chuyển/);
-  assert.match(text, /jtexpress\.vn/);
+  assert.match(text, /🏷️ Mã vận đơn: 802835136377/);
+  assert.match(text, /📍 Trạng thái: Đang vận chuyển/);
+  assert.match(text, /🔎 Theo dõi hành trình: https:\/\/jtexpress\.vn/);
+  assert.match(text, /📱 Trang J&T hỏi số điện thoại/);
   const plain = renderChatbotReply({ template_id: 'ORDER_STATUS' }, defaultMessageTemplates(), { recentOrder: crmOrder('Z'), customer: { gender: 'female' } });
-  assert.doesNotMatch(plain.messages.join('\n'), /mã vận đơn \d/);
+  assert.doesNotMatch(plain.messages.join('\n'), /Mã vận đơn: \d/);
+  // SPX không có dòng gợi ý J&T: dòng link vẫn phải còn (fill() bỏ dòng có ô trống).
+  const spx = { ...order, shipment: { ...order.shipment, carrier: 'SPX Express', trackingNumber: 'SPXVN1', trackingUrl: 'https://spx.vn/track?SPXVN1' } };
+  const spxText = renderChatbotReply({ template_id: 'ORDER_STATUS' }, defaultMessageTemplates(), { recentOrder: spx, customer: { gender: 'female' } }).messages.join('\n');
+  assert.match(spxText, /🔎 Theo dõi hành trình: https:\/\/spx\.vn\/track\?SPXVN1/);
+  assert.doesNotMatch(spxText, /4 số cuối/);
+});
+
+test('mẫu vận đơn còn đúng lời mặc định cũ thì tự đổi sang lời mới; lời chủ shop đã sửa giữ nguyên', () => {
+  const shipment = { carrier: 'SPX Express', trackingNumber: 'SPXVN1', trackingUrl: 'u', status: 'picked_up' };
+  const legacy = renderShipmentNotice(shipment, 'female', 'SHIPMENT_PICKED_UP', { SHIPMENT_PICKED_UP: LEGACY_SHIPMENT_TEMPLATES.SHIPMENT_PICKED_UP });
+  assert.match(legacy, /^Dạ, đơn hàng của chị đã được SPX Express lấy hàng thành công rồi ạ ✅/);
+  assert.equal(renderShipmentNotice(shipment, 'female', 'SHIPMENT_PICKED_UP', { SHIPMENT_PICKED_UP: 'Lời riêng {tracking_number}' }), 'Lời riêng SPXVN1');
+  const settings = normalizeChatbotSettings({ messageTemplates: { SHIPMENT_DELIVERED: LEGACY_SHIPMENT_TEMPLATES.SHIPMENT_DELIVERED, ORDER_STATUS_SHIPPED: LEGACY_SHIPMENT_TEMPLATES.ORDER_STATUS_SHIPPED } });
+  assert.equal(settings.messageTemplates.SHIPMENT_DELIVERED, defaultMessageTemplates().SHIPMENT_DELIVERED);
+  assert.equal(settings.messageTemplates.ORDER_STATUS_SHIPPED, defaultMessageTemplates().ORDER_STATUS_SHIPPED);
 });
 
 test('bảng Đơn hàng hiện hãng + mã + giai đoạn giao', () => {

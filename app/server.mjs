@@ -477,7 +477,9 @@ async function shipmentTemplates() {
 }
 
 // Giữ chỗ mục báo vận đơn đã giao cho cầu nối Pancake: mã → hết hạn (ms). Lô gửi 15–30 giây/tin, ≤ 50 tin.
-const shipmentBridgeLeases = createLeaseBook(30 * 60 * 1000);
+// R1-03: 1 giờ — bằng thời gian trình duyệt giữ tin "chưa rõ" (web/shipping-notices.js UNCERTAIN_HOLD_MS); nhân viên đã xác
+// nhận gửi lại thì gửi force: true để vượt giữ chỗ.
+const shipmentBridgeLeases = createLeaseBook(60 * 60 * 1000);
 
 /** Hàng chờ báo khách vận đơn (trang Vận chuyển). */
 async function shipmentNoticeQueue(now = Date.now()) {
@@ -1072,7 +1074,9 @@ async function sendChatbotOrderReceipt(conversation, order, { force = false, sen
       await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }), sentBy });
       return { sent: true, via: 'messenger' };
     } catch (error) {
-      // Messenger từ chối thẻ receipt: gửi ảnh phiếu thay vì bản chữ.
+      // Messenger từ chối thẻ receipt: gửi ảnh phiếu thay vì bản chữ. Chỉ khi Meta TỪ CHỐI rõ (có lời Graph): hết giờ
+      // chờ / 5xx / không rõ đã tới thì thẻ có thể đã tới khách — gửi thêm ảnh phiếu là khách nhận hai phiếu.
+      if (!receiptRefused(error)) throw error;
       console.error(`Messenger từ chối thẻ receipt của đơn ${order.id}, gửi ảnh phiếu: ${error.message}`);
       await sendReceiptImage(conversation, order, { sentBy });
       return { sent: true, via: 'receipt-image' };
@@ -1080,8 +1084,42 @@ async function sendChatbotOrderReceipt(conversation, order, { force = false, sen
   } catch (error) {
     if (force) throw error;
     console.error(`Không gửi được hoá đơn cho đơn ${order.id}: ${error.message}`);
-    return { sent: false, error: String(error?.message || error) };
+    return { sent: false, error: String(error?.message || error), ...(deliveryUncertain(error) ? { unknown: true } : {}) };
   }
+}
+
+/**
+ * Phiếu đơn tạo tay qua Messenger trực tiếp: thẻ receipt; Meta từ chối rõ (lời Graph) thì ảnh phiếu, không bao giờ bản chữ.
+ * Ghi `order.delivery`. Trả {} khi đã gửi, { uncertain: true } khi phiếu có thể đã tới (hết giờ chờ / 504 / gửi dở — đơn vẫn
+ * tạo, KHÔNG gửi phiếu thứ hai), { error } khi chắc chắn chưa gửi (route trả 502 "Chưa tạo đơn").
+ */
+async function sendDirectOrderReceipt(conversation, order, sentBy) {
+  try {
+    let sent;
+    try {
+      sent = await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }), sentBy });
+    } catch (error) {
+      if (!receiptRefused(error)) throw error;
+      console.error(`Messenger từ chối thẻ receipt của đơn ${order.id}, gửi ảnh phiếu: ${error.message}`);
+      sent = await sendReceiptImage(conversation, order, { sentBy });
+    }
+    order.delivery = { status: 'sent', messageId: String(sent?.message?.mid || sent?.message?.id || ''), sentAt: Date.now() };
+    return {};
+  } catch (error) {
+    if (!deliveryUncertain(error)) return { error };
+    console.warn(`Phiếu đơn ${order.id} không rõ đã tới khách (${error.message}): vẫn tạo đơn, không gửi phiếu thứ hai`);
+    order.delivery = { status: 'unknown', messageId: '', failedAt: Date.now(), error: String(error.message || '').slice(0, 300) };
+    return { uncertain: true };
+  }
+}
+
+/** Meta từ chối rõ ràng (lời Graph, không hết giờ, không 5xx, không "gửi dở"): chắc chắn khách chưa nhận phiếu. */
+function receiptRefused(error) {
+  return Boolean(error?.graphMessage) && !error.timeout && !error.unknownDelivery && !error.partial && !(Number(error.statusCode) >= 500);
+}
+/** Lỗi gửi mà tin có thể đã tới khách (hết giờ chờ, 504, gửi dở, Pancake không rõ): KHÔNG gửi lại / gửi bản thay thế. */
+function deliveryUncertain(error) {
+  return Boolean(error?.unknownDelivery || error?.partial || error?.timeout || error?.code === 'PANCAKE_SEND_UNCERTAIN' || Number(error?.statusCode) === 504);
 }
 
 async function sendReceiptImage(conversation, order, { sentBy = null } = {}) {
@@ -2004,8 +2042,8 @@ const server = http.createServer(async (request, response) => {
       const payload = await readBody(request);
       const summary = await recordFollowUpBatchResults(payload.results, { readSettings: readChatbotSettings, token: String(payload.token || '') });
       // R14: kèm lý do lỗi (ngắn, che SĐT, tối đa 3 lý do khác nhau) — trước đây chỉ có số đếm, không biết vì sao lỗi.
-      const relayErrors = summary.failed ? followUpRelayErrorText(payload.results) : '';
-      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''})${relayErrors ? ` — lý do: ${relayErrors}` : ''}`);
+      const relayErrors = summary.failed || summary.lookupFailed ? followUpRelayErrorText(payload.results) : '';
+      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''})${summary.lookupFailed ? `, không tìm được ID Facebook ${summary.lookupFailed} (cần gửi tay)` : ''}${relayErrors ? ` — lý do: ${relayErrors}` : ''}`);
       audit(request, 'followup.batch_results', { summary: `Trạm Pancake gửi bám đuổi: gửi ${summary.sent}, lỗi ${summary.failed}, bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''}.`, details: { sent: Number(summary.sent) || 0, failed: Number(summary.failed) || 0 } });
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }
@@ -2923,6 +2961,9 @@ const server = http.createServer(async (request, response) => {
           .filter(() => conversation.source !== 'comment' || privateReply)
           .slice(0, 6);
         if (!text && !attachment && !imageUrls.length) return sendJson(response, 400, { error: 'Nội dung tin nhắn không được để trống.' });
+        // Tin đã tới khách trong lượt này (chữ rồi ảnh): lỗi ở phần sau không được báo "không gửi được" cả cụm.
+        const messages = [];
+        let last = null;
         try {
           const actor = await requestActor(request);
           // Cờ staff + đích danh người gửi (staffName = họ tên, staffUsername); chưa bật đăng nhập thì như cũ ('CRM').
@@ -2930,8 +2971,8 @@ const server = http.createServer(async (request, response) => {
           // Comment threads: reply under the comment, or privately to Messenger.
           // Tuyến này chỉ nhân viên dùng (giao diện CRM): gắn cờ staff để bot biết nhân viên đang xử lý hội thoại.
           const sent = text || attachment ? await sendConversationMessage(conversation, { text, attachment, privateReply, staff }) : null;
-          const messages = sent ? [sent.message] : [];
-          let last = sent;
+          if (sent) messages.push(sent.message);
+          last = sent;
           // A private reply lands in the person's Messenger thread; pictures follow it there.
           const imageTarget = conversation.source === 'comment' && privateReply
             ? await getConversation(sent?.conversation?.id || `${conversation.pageId}:${conversation.psid}`)
@@ -2962,6 +3003,13 @@ const server = http.createServer(async (request, response) => {
           }, actor);
           return sendJson(response, 200, { ...last, message: (sent || last).message, messages });
         } catch (error) {
+          // INT-03: gửi dở (phần đầu đã tới khách) hay chữ đã gửi mà ảnh sau lỗi: trả 200 kèm cảnh báo — trả lỗi thì nhân
+          // viên gửi lại cả cụm và khách nhận phần đầu hai lần.
+          if (error?.saved?.message) { messages.push(error.saved.message); last = error.saved; }
+          if (messages.length) {
+            return sendJson(response, 200, { ...(last || {}), message: messages[0], messages, partial: true, warning: `Mới gửi được một phần (${error.message}). Xem hội thoại trước khi gửi lại phần còn thiếu.` });
+          }
+          if (deliveryUncertain(error)) return sendJson(response, 502, { error: `Không rõ tin đã tới khách chưa (${error.message}). Xem hội thoại trước khi gửi lại.`, uncertain: true });
           return sendJson(response, error.statusCode === 400 ? 400 : 502, { error: error.message });
         }
       }
@@ -3217,22 +3265,14 @@ const server = http.createServer(async (request, response) => {
           if (actor.username && (!order.employee || order.employee === 'Bạn')) order.employee = creator.name;
           stampOrderCreated(order, creator, { summary: `Tạo đơn tay: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 120)}, tổng ${moneyText(order.total)}.` });
           const viaPancake = Boolean(conversation.pancakeConversationId);
-          if (!viaPancake) {
-            // Messenger trực tiếp: thẻ receipt; bị từ chối thì ảnh phiếu. Không bao giờ gửi bản chữ.
-            try {
-              let sent;
-              try {
-                sent = await sendConversationMessage(conversation, { template: buildOrderReceiptPayload(order, { baseUrl: metaConfig.publicBaseUrl }), sentBy: actor.username ? creator : null });
-              } catch (error) {
-                console.error(`Messenger từ chối thẻ receipt của đơn ${order.id}, gửi ảnh phiếu: ${error.message}`);
-                sent = await sendReceiptImage(conversation, order, { sentBy: actor.username ? creator : null });
-              }
-              order.delivery = { status: 'sent', messageId: String(sent?.message?.mid || sent?.message?.id || ''), sentAt: Date.now() };
-            } catch (error) {
-              draft.release();
-              return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });
-            }
+          // Messenger trực tiếp: thẻ receipt (Meta từ chối rõ thì ảnh phiếu). Không rõ đã tới (hết giờ chờ, gửi dở): vẫn tạo đơn,
+          // không gửi phiếu thứ hai (sendDirectOrderReceipt). Lỗi chắc chắn chưa gửi: chưa tạo đơn.
+          const direct = viaPancake ? null : await sendDirectOrderReceipt(conversation, order, actor.username ? creator : null);
+          if (direct?.error) {
+            draft.release();
+            return sendJson(response, 502, { error: `Chưa tạo đơn: ${direct.error.message}` });
           }
+          const receiptUncertain = Boolean(direct?.uncertain);
           const labelDefs = await inboxLabelDefs();
           const orderLabels = labelsForEvents(labelDefs, ['order']);
           let relabeledConversation = null;
@@ -3267,7 +3307,9 @@ const server = http.createServer(async (request, response) => {
           await appendOrderToArchive(order).catch(() => {});
           // Phiếu xác nhận có tới khách thật không (giao diện báo "Đã gửi…" hay "chưa gửi được, bấm Gửi lại").
           // Messenger trực tiếp: gửi lỗi thì đã trả 502 "Chưa tạo đơn" ở trên, tới đây là đã gửi.
-          let receipt = { receiptSent: true, receiptVia: 'messenger', receiptError: '' };
+          let receipt = receiptUncertain
+            ? { receiptSent: false, receiptVia: 'messenger', receiptError: 'Không rõ phiếu xác nhận đã tới khách chưa (Facebook không trả lời kịp). Xem hội thoại trước khi bấm "Gửi lại cho khách".' }
+            : { receiptSent: true, receiptVia: 'messenger', receiptError: '' };
           if (viaPancake) {
             // Hội thoại Pancake: không gửi bản chữ. Đẩy đơn sang Pancake POS, POS
             // gửi khách thẻ xác nhận đơn; POS lỗi thì CRM gửi phiếu ảnh của mình.
@@ -3276,10 +3318,12 @@ const server = http.createServer(async (request, response) => {
             const outcome = pos?.id ? { sent: true, via: 'pos' } : await sendChatbotOrderReceipt(conversation, order, { sentBy: actor.username ? creator : null });
             receipt = outcome.sent
               ? { receiptSent: true, receiptVia: outcome.via, receiptError: '' }
-              : { receiptSent: false, receiptVia: 'receipt-image', receiptError: 'Chưa gửi được phiếu xác nhận cho khách (Pancake không nhận tin). Bấm "Gửi lại phiếu" ở đơn để thử lại.' };
+              : { receiptSent: false, receiptVia: 'receipt-image', receiptError: outcome.unknown
+                ? 'Không rõ phiếu xác nhận đã tới khách chưa (Pancake không trả lời kịp). Xem hội thoại trước khi bấm "Gửi lại cho khách".'
+                : 'Chưa gửi được phiếu xác nhận cho khách (Pancake không nhận tin). Bấm "Gửi lại phiếu" ở đơn để thử lại.' };
             order.delivery = outcome.sent
               ? { status: 'sent', messageId: '', sentAt: Date.now(), via: outcome.via }
-              : { status: 'failed', messageId: '', failedAt: Date.now(), via: 'receipt-image', error: String(outcome.error || '').slice(0, 300) };
+              : { status: outcome.unknown ? 'unknown' : 'failed', messageId: '', failedAt: Date.now(), via: 'receipt-image', error: String(outcome.error || '').slice(0, 300) };
             await updateMessagingStore(store => {
               const item = store.conversations.find(entry => entry.id === id);
               const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === order.id);
@@ -3504,6 +3548,8 @@ const server = http.createServer(async (request, response) => {
       try {
         await sendChatbotOrderReceipt(owner, order, { force: true, sentBy: actor.username ? actorStamp(actor) : null });
       } catch (error) {
+        // Hết giờ chờ / gửi dở: phiếu có thể đã tới khách — báo rõ để nhân viên xem hội thoại thay vì bấm gửi lại ngay.
+        if (deliveryUncertain(error)) return sendJson(response, 502, { error: `Không rõ phiếu đã tới khách chưa (${error.message}). Xem hội thoại trước khi bấm gửi lại.`, uncertain: true });
         return sendJson(response, 502, { error: `Chưa gửi lại được phiếu: ${error.message}` });
       }
       await updateMessagingStore(current => {
@@ -3630,7 +3676,9 @@ const server = http.createServer(async (request, response) => {
         if (!info?.globalId && lookups >= 10) { skip(item.key, 'chờ lô sau (tìm ID Facebook tối đa 10 khách/lô)'); continue; }
         if (!info?.globalId) lookups += 1;
         const updatedTime = Math.max(0, ...((await readMessagingStore()).messages?.[item.conversationId] || []).map(message => Number(message.createdAt) || 0));
-        items.push({ key: item.key, pageId: item.pageId, convId, globalUserId: info?.globalId || '', needsGlobalId: !info?.globalId, updatedTime, name: item.name, text: item.text });
+        // Như lô bám đuổi: khách cần tìm ID mang theo tên / mốc / mã luồng Pancake đang giữ (cầu nối ưu tiên dùng).
+        const lookupHints = info?.globalId ? {} : { pancakeName: String(info?.name || ''), pancakeUpdatedAt: Number(info?.updatedAt) || 0, threadId: String(info?.threadId || ''), threadKey: String(info?.threadKey || '') };
+        items.push({ key: item.key, pageId: item.pageId, convId, globalUserId: info?.globalId || '', needsGlobalId: !info?.globalId, updatedTime, name: item.name, text: item.text, ...lookupHints });
       }
       audit(request, 'shipping.notice_batch', { summary: `Lấy ${items.length} tin báo vận đơn để gửi qua Pancake${skipped.length ? `, bỏ ${skipped.length}` : ''}.` });
       return sendJson(response, 200, { items, skipped });

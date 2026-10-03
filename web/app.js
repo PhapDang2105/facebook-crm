@@ -494,7 +494,13 @@ function renderChatbotFollowUpQueue(queue) {
   // Hàng chờ vừa hết (lô cuối gửi xong, hay lô bỏ hết khách quá 7 ngày / khách cũ): vẫn hiện kết
   // quả lần gửi vừa rồi — trước đây cả khung biến mất, nhân viên không biết đã gửi gì, vì sao.
   const lastRun = !queue.length && run?.status && !run.active ? `<div class="follow-up-relay"><small>${escapeHtml(run.status)}</small></div>` : '';
-  chatbotFollowUpQueue.innerHTML = queue.length ? `<div class="follow-up-queue-head">Chờ gửi qua Pancake: ${queue.length} khách đã quá 24 giờ</div>${relay}` : lastRun;
+  // Khách extension Pancake không tìm được ID Facebook (24 giờ mới thử lại): vẫn trong hàng, "cần gửi tay" — chỉ hiện
+  // danh sách thu gọn của riêng nhóm này (Mở Pancake / Đã gửi), không liệt kê cả hàng chờ (quyết định chủ shop 29/09).
+  const manual = queue.map((item, index) => ({ item, index })).filter(entry => entry.item.needsManual);
+  const manualBox = manual.length ? `<details class="follow-up-relay"><summary>${manual.length} khách cần gửi tay (extension Pancake không tìm được ID Facebook; tự thử lại sau 24 giờ)</summary>
+    ${manual.slice(0, 50).map(({ item, index }) => `<div class="follow-up-relay-row"><span>${escapeHtml(item.name || 'Khách')}</span><a href="${escapeHtml(item.pancakeUrl || '')}" target="_blank" rel="noopener" data-follow-up-open="${index}" title="Mở hội thoại trong Pancake (lời gửi được chép sẵn)">Mở Pancake</a><button type="button" data-follow-up-done="${index}">Đã gửi</button></div>`).join('')}
+  </details>` : '';
+  chatbotFollowUpQueue.innerHTML = queue.length ? `<div class="follow-up-queue-head">Chờ gửi qua Pancake: ${queue.length} khách đã quá 24 giờ${manual.length ? ` (${manual.length} cần gửi tay)` : ''}</div>${relay}${manualBox}` : lastRun;
 }
 
 // Lỗi extension Pancake trả về thường là JSON của Facebook ({"errorDescription":…,"fbErrorCode":…}):
@@ -516,6 +522,8 @@ const facebookLoggedOut = error => /1340004|chưa đăng nhập|not logged in/i.
 // Pancake gửi trong một tab pancake.vn chạy nền.
 let followUpBridgeRun = null;
 const followUpBridgeWaiters = new Map();
+// requestId → hàm đếm lại hạn chờ (gọi khi cầu nối báo bắt đầu chạy lệnh).
+const followUpBridgeStarts = new Map();
 // Yêu cầu đã hết giờ chờ (đã báo "chưa rõ" lên máy chủ): nhớ khách + mã lô để kết
 // quả extension trả về trễ vẫn ghi được "đã gửi" (không thì máy chủ chờ tới hết giữ chỗ).
 const followUpBridgeLateResults = new Map();
@@ -524,6 +532,10 @@ window.addEventListener('message', event => {
   const data = event.data;
   if (event.source !== window || event.origin !== window.location.origin || !data) return;
   if (data.type === 'GN_BRIDGE_READY') followUpBridgeReadyAt = Date.now();
+  // Cầu nối bắt đầu chạy lệnh (hết lượt xếp hàng sau lệnh khác): đếm lại hạn chờ từ lúc này.
+  if (data.type === 'GN_BRIDGE_STARTED') { followUpBridgeStarts.get(data.requestId)?.(); return; }
+  // Extension vừa tải lại mà trang chưa tải lại: cầu nối cũ đã mất (crm-bridge.js gỡ dấu gnBridge) — vẽ lại để ẩn nút Gửi ngay.
+  if (data.type === 'GN_BRIDGE_GONE') { if (!followUpBridgeRun?.active) renderChatbotFollowUpQueue(chatbotFollowUpQueueItems); return; }
   if (data.type === 'GN_BRIDGE_READY' && chatbotFollowUpQueueItems.length && !chatbotFollowUpQueue?.querySelector('#follow-up-bridge-send, #follow-up-bridge-stop')) renderChatbotFollowUpQueue(chatbotFollowUpQueueItems);
   if (data.type !== 'GN_BRIDGE_RESULT') return;
   if (followUpBridgeWaiters.has(data.requestId)) {
@@ -551,22 +563,55 @@ window.addEventListener('message', event => {
 function sendThroughBridge(item, token = '', { onLate = null } = {}) {
   return new Promise(resolve => {
     const requestId = `gn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    // Cầu nối tự chờ extension Pancake tối đa 90 giây; thêm biên cho việc mở tab Pancake.
-    // Cầu nối: mở tab Pancake (≤35 s) + tìm ID Facebook (≤90 s) + gửi (≤90 s): chờ đủ để không báo lỗi trong khi extension vẫn gửi (gửi trùng).
-    const waitMs = item.needsGlobalId ? 240000 : 150000;
+    // Cầu nối 1.1.3: mở tab Pancake (≤30 s) + chờ trang sẵn sàng (≤20 s) + tìm ID Facebook (≤60 s, tab vừa mở thì thử lại
+    // 1 lần) + gửi (≤90 s): chờ đủ để không báo lỗi trong khi extension vẫn gửi (gửi trùng). Hạn đếm lại khi cầu nối báo
+    // bắt đầu chạy lệnh (GN_BRIDGE_STARTED) — lệnh xếp hàng sau lô vận đơn / tab khác không bị coi là "không trả lời".
+    const waitMs = item.needsGlobalId ? 300000 : 150000;
     // Hết giờ chờ: extension vẫn có thể đã gửi, nên báo "chưa rõ" (unknown) chứ
     // không báo lỗi thường — server không nên đưa khách này lại hàng chờ ngay.
     // Kết quả tới trễ vẫn được nhận (followUpBridgeLateResults) trong vòng 1 giờ.
-    const timer = setTimeout(() => {
+    let timer = null;
+    const expire = () => {
       followUpBridgeWaiters.delete(requestId);
+      followUpBridgeStarts.delete(requestId);
       followUpBridgeLateResults.set(requestId, { key: item.key, token, onLate });
       setTimeout(() => followUpBridgeLateResults.delete(requestId), 60 * 60 * 1000);
       resolve({ ok: false, error: 'timeout', unknown: true, detail: `cầu nối không trả lời sau ${Math.round(waitMs / 60000)} phút (chưa rõ đã gửi hay chưa)` });
-    }, waitMs);
-    followUpBridgeWaiters.set(requestId, result => { clearTimeout(timer); resolve({ ok: Boolean(result.ok), error: result.error || '', globalId: result.globalId || '' }); });
-    window.postMessage({ type: 'GN_BRIDGE_SEND', requestId, item: { pageId: item.pageId, convId: item.convId, globalUserId: item.globalUserId || '', needsGlobalId: item.needsGlobalId === true, updatedTime: item.updatedTime || 0, text: item.text, name: item.name } }, window.location.origin);
+    };
+    const arm = () => { clearTimeout(timer); timer = setTimeout(expire, waitMs); };
+    arm();
+    followUpBridgeStarts.set(requestId, arm);
+    followUpBridgeWaiters.set(requestId, result => {
+      clearTimeout(timer);
+      followUpBridgeStarts.delete(requestId);
+      resolve({ ok: Boolean(result.ok), error: result.error || '', globalId: result.globalId || '', lookupFailed: result.lookupFailed === true, bridgeGone: result.bridgeGone === true });
+    });
+    window.postMessage({ type: 'GN_BRIDGE_SEND', requestId, item: bridgeItem(item) }, window.location.origin);
   });
 }
+
+/**
+ * Lệnh gửi cho cầu nối: thêm tên / mốc / mã luồng Pancake (máy chủ lấy từ API Pancake cho khách cần tìm ID Facebook) để
+ * cầu nối ưu tiên dùng khi nhờ extension Pancake tìm ID; `key` chỉ để cầu nối ghi nhật ký.
+ */
+function bridgeItem(item) {
+  return {
+    key: String(item.key || ''),
+    pageId: item.pageId,
+    convId: item.convId,
+    globalUserId: item.globalUserId || '',
+    needsGlobalId: item.needsGlobalId === true,
+    updatedTime: item.updatedTime || 0,
+    text: item.text,
+    name: item.name,
+    ...(item.needsGlobalId ? { pancakeName: item.pancakeName || '', pancakeUpdatedAt: Number(item.pancakeUpdatedAt) || 0, threadId: item.threadId || '', threadKey: item.threadKey || '' } : {})
+  };
+}
+
+/** Lý do hụt ID (bỏ số, gọn) để nhận ra "cùng một lý do" trong một lô. */
+const bridgeLookupReason = error => String(error || '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 120);
+/** Lỗi gần nhất rút gọn cho dòng trạng thái đang gửi. */
+const shortBridgeError = error => { const text = followUpErrorText(error).replace(/\s+/g, ' ').trim(); return text.length > 140 ? `${text.slice(0, 139)}…` : text; };
 
 // Khách trong lô chưa gửi tới: bỏ giữ chỗ (bấm Dừng, lô xong sớm, hay đóng trang).
 function releaseFollowUpLeases(run, { beacon = false } = {}) {
@@ -582,8 +627,11 @@ window.addEventListener('beforeunload', () => { if (followUpBridgeRun?.active) r
 async function runFollowUpBridge() {
   const limit = Math.max(1, Math.min(50, Number(document.querySelector('#follow-up-batch-size')?.value) || 30));
   followUpBatchSize = limit;
-  if (!confirm(`Gửi tin bám đuổi "1 túi dùng thử miễn ship" cho tối đa ${limit} khách chưa có đơn?\nMỗi tin cách nhau 15–30 giây, để trang CRM mở tới khi xong.`)) return;
-  const run = followUpBridgeRun = { active: true, stop: false, sent: 0, failed: 0, unknown: 0, status: 'Đang kiểm tra khách trên Pancake…' };
+  // Khách Pancake chưa có ID Facebook phải nhờ extension Pancake tìm (chậm, hay hụt): báo trước để nhân viên biết.
+  const lookupWaiting = chatbotFollowUpQueueItems.filter(item => !item.leased && !item.globalId && item.noGlobalId && !item.needsManual).length;
+  const lookupNote = lookupWaiting ? `\n${lookupWaiting} khách trong hàng chờ chưa có ID Facebook trên Pancake: cầu nối phải nhờ extension Pancake tìm (tối đa 10 khách/lô, chậm và có thể không tìm được).` : '';
+  if (!confirm(`Gửi tin bám đuổi "1 túi dùng thử miễn ship" cho tối đa ${limit} khách chưa có đơn?\nMỗi tin cách nhau 15–30 giây, để trang CRM mở tới khi xong.${lookupNote}`)) return;
+  const run = followUpBridgeRun = { active: true, stop: false, sent: 0, failed: 0, unknown: 0, lookupFailed: 0, lookupSkipped: 0, status: 'Đang kiểm tra khách trên Pancake…' };
   const redraw = () => renderChatbotFollowUpQueue(chatbotFollowUpQueueItems);
   redraw();
   try {
@@ -591,11 +639,19 @@ async function runFollowUpBridge() {
     run.batch = batch;
     run.done = new Set();
     const skipped = batch.skipped?.length ? ` Bỏ qua ${batch.skipped.length} khách (${[...new Set(batch.skipped.map(item => item.reason))].join(', ')}).` : '';
+    const lookups = batch.items.filter(item => item.needsGlobalId).length;
+    run.lookupNote = lookups ? ` Lô ${batch.items.length} khách, ${lookups} khách cần tìm ID Facebook qua extension Pancake (gửi sau cùng).` : '';
     let failedInRow = 0;
+    // Hụt ID Facebook không phải lỗi gửi (chưa gửi gì): không tính vào "3 lỗi liền"; cùng một lý do 2 lần trong lô thì
+    // bỏ qua các khách cần tìm ID còn lại của lô (trả chỗ cho họ ở cuối lô).
+    const lookupReasons = new Map();
+    let skipLookups = '';
+    const willSend = next => !(next.needsGlobalId && skipLookups);
     for (const [index, item] of batch.items.entries()) {
       if (run.stop) break;
-      const counts = () => `đã gửi ${run.sent}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}`;
-      run.status = `Đang gửi ${index + 1}/${batch.items.length}: ${item.name || ''} (${counts()})`;
+      if (!willSend(item)) { run.lookupSkipped += 1; continue; }
+      const counts = () => `đã gửi ${run.sent}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}${run.lookupFailed ? `, không tìm được ID ${run.lookupFailed}` : ''}`;
+      run.status = `Đang gửi ${index + 1}/${batch.items.length}: ${item.name || ''}${item.needsGlobalId ? ' (đang nhờ extension Pancake tìm ID Facebook)' : ''} (${counts()})${run.lastError ? ` — lỗi gần nhất: ${shortBridgeError(run.lastError)}` : ''}.${index ? '' : run.lookupNote}`;
       redraw();
       run.inFlight = item.key;
       // Hỏi cầu nối còn sống trước mỗi tin (nó đáp GN_BRIDGE_READY → followUpBridgeReadyAt): lô dài
@@ -607,7 +663,8 @@ async function runFollowUpBridge() {
       // Báo từng tin ngay: tải lại trang giữa chừng cũng không mất kết quả. Máy chủ không ghi được
       // (lỗi mạng, hết phiên đăng nhập…) thì dừng lô: không thì khách vẫn bị giữ chỗ, 45 phút sau
       // trở lại hàng chờ và lô sau gửi trùng.
-      const saved = await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: batch.token || '', results: [{ key: item.key, ok: result.ok, error: result.error, ...(result.unknown ? { unknown: true } : {}), globalId: result.globalId || '' }] }) })
+      const lookupFailed = !result.ok && !result.unknown && result.lookupFailed === true;
+      const saved = await fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: batch.token || '', results: [{ key: item.key, ok: result.ok, error: result.error, ...(result.unknown ? { unknown: true } : {}), ...(lookupFailed ? { lookupFailed: true } : {}), globalId: result.globalId || '' }] }) })
         .then(response => response.ok ? '' : `máy chủ trả ${response.status}`, error => error.message || 'lỗi mạng');
       if (result.ok) { run.sent += 1; failedInRow = 0; }
       else if (result.unknown) {
@@ -616,21 +673,30 @@ async function runFollowUpBridge() {
         run.unknown += 1;
         run.lastError = result.detail;
         if (Date.now() - followUpBridgeReadyAt > 5 * 60 * 1000) failedInRow += 1;
+      } else if (lookupFailed) {
+        run.lookupFailed += 1;
+        run.lastError = followUpErrorText(result.error);
+        const reason = bridgeLookupReason(result.error);
+        lookupReasons.set(reason, (lookupReasons.get(reason) || 0) + 1);
+        if (lookupReasons.get(reason) >= 2) skipLookups = reason;
       } else { run.failed += 1; failedInRow += 1; run.lastError = followUpErrorText(result.detail || result.error); }
       if (saved) { run.stop = true; run.halted = `Dừng: không ghi được kết quả lên CRM (${saved}) — tải lại trang (đăng nhập lại nếu được hỏi) rồi bấm Gửi ngay tiếp. Đã gửi ${run.sent} tin.`; break; }
+      if (result.bridgeGone) { run.stop = true; run.halted = `Dừng: cầu nối Pancake vừa cập nhật — tải lại trang CRM (F5) rồi bấm Gửi ngay lại. Đã gửi ${run.sent} tin.`; break; }
       if (!result.ok && facebookLoggedOut(result.error)) { run.stop = true; run.halted = `Dừng: Facebook trên trình duyệt này chưa đăng nhập (Pancake báo "${followUpErrorText(result.error)}"). Đăng nhập lại facebook.com bằng tài khoản quản lý Page, tải lại tab pancake.vn rồi bấm Gửi ngay lại.`; break; }
       if (failedInRow >= 3) { run.stop = true; run.halted = `Dừng vì 3 tin liền ${result.unknown ? 'không rõ kết quả (cầu nối không trả lời)' : 'lỗi'}: ${followUpErrorText(result.detail || result.error)}`; break; }
-      if (index < batch.items.length - 1 && !run.stop) {
-        const pause = 15000 + Math.random() * 15000;
-        run.status = `Đã gửi ${run.sent}/${batch.items.length}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}. Tin sau sau ${Math.round(pause / 1000)} giây…`;
+      if (batch.items.slice(index + 1).some(willSend) && !run.stop) {
+        // Hụt ID không gửi gì cho khách: nghỉ ngắn. Tin đã gửi (hay có thể đã gửi): nghỉ 15–30 giây.
+        const pause = lookupFailed ? 3000 : 15000 + Math.random() * 15000;
+        run.status = `Đã gửi ${run.sent}/${batch.items.length}, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown}` : ''}${run.lookupFailed ? `, không tìm được ID ${run.lookupFailed}` : ''}. Tin sau sau ${Math.round(pause / 1000)} giây…${run.lastError ? ` Lỗi gần nhất: ${shortBridgeError(run.lastError)}` : ''}`;
         redraw();
         const until = Date.now() + pause;
         while (Date.now() < until && !run.stop) await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
-    // Dừng giữa lô: trả chỗ cho khách chưa gửi để lô sau lấy lại ngay.
+    // Dừng giữa lô (hay bỏ qua khách cần tìm ID): trả chỗ cho khách chưa gửi để lô sau lấy lại ngay.
     await releaseFollowUpLeases(run);
-    run.status = run.halted || (batch.items.length ? `Xong: đã gửi ${run.sent} tin, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown} (cầu nối không trả lời; CRM giữ chỗ 45 phút, đồng bộ Pancake sẽ xác nhận)` : ''}${run.lastError ? ` (${run.lastError})` : ''}.${skipped}` : `Không còn khách nào gửi được tự động.${skipped}`);
+    const lookupText = `${run.lookupFailed ? `, ${run.lookupFailed} khách extension Pancake không tìm được ID Facebook (cần gửi tay)` : ''}${run.lookupSkipped ? `, bỏ qua ${run.lookupSkipped} khách cần tìm ID (extension hụt 2 lần cùng lý do)` : ''}`;
+    run.status = run.halted || (batch.items.length ? `Xong: đã gửi ${run.sent} tin, lỗi ${run.failed}${run.unknown ? `, chưa rõ ${run.unknown} (cầu nối không trả lời; CRM giữ chỗ 45 phút, đồng bộ Pancake sẽ xác nhận)` : ''}${lookupText}${run.lastError ? ` (${shortBridgeError(run.lastError)})` : ''}.${skipped}` : `Không còn khách nào gửi được tự động.${skipped}`);
   } catch (error) {
     run.status = `Lỗi: ${error.message}`;
   } finally {
@@ -9415,6 +9481,8 @@ async function sendRemoteMessage(conversation, text, attachment, imageUrls = [])
       }
     }
     if (result.conversation) applyRemoteConversation(result.conversation);
+    // Máy chủ báo gửi dở (phần đầu đã tới khách): hiện cảnh báo, không coi là lỗi (gửi lại là khách nhận trùng).
+    if (result.warning) showComposerStatus(result.warning, 8000);
     if (targetId !== conversationId) showToast('Đã nhắn riêng qua Messenger — xem trong hội thoại Messenger của khách.', 'success');
   } catch (error) {
     const messages = remoteMessages.get(conversationId) || [];

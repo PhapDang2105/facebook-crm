@@ -20,6 +20,7 @@ import { formatExamples, loadExampleBank, nearestExamples } from './processing/e
 import { appendDecisionLog } from './processing/decision-log.mjs';
 import { gateCheck } from './processing/llm-router.mjs';
 import { isOrderishText, scheduleStaffIdleRecheck, staffIdleDelayMs, staffIdleReason } from './processing/staff-idle.mjs';
+import { messengerWindowOpen } from './messenger-window.mjs';
 
 // Mô hình tầng (processing/intent-cascade.mjs, đang viết): nạp động MỘT lần, thiếu tệp / lỗi nạp → null
 // (engine chạy như không có). Test đưa mô hình giả qua dependencies.predictCascade (+ cascadeGroupOf).
@@ -1216,6 +1217,9 @@ export function hasNewerCustomerMessage(recentMessages, current) {
 // Ảnh sản phẩm chưa gửi được sau tin nhắn riêng từ bình luận (Facebook chặn
 // tới khi khách nhắn vào Messenger): giữ theo khách, gửi ngay khi khách nhắn lại.
 const pendingInboxImages = new Map();
+/** Lỗi gửi mà tin có thể đã tới khách (gửi dở INT-03, hết giờ chờ Pancake): người gọi coi như đã gửi, không gửi lại. */
+export const sendMaybeDelivered = error => Boolean(error?.partial || error?.unknownDelivery || error?.code === 'PANCAKE_SEND_UNCERTAIN');
+
 const pendingImagesTtl = 3 * 24 * 60 * 60 * 1000;
 export function rememberPendingImages(pageId, psid, images) {
   if (!pageId || !psid || !images?.length) return;
@@ -3507,10 +3511,17 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         // gửi câu trả lời như tin thường vào hộp thư — khách vẫn nhận được, lời công khai "em đã nhắn tin" là đúng.
         if (privateError && getConversation) {
           const inbox = inboxThread || await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
-          const windowOpen = inboxMessages.some(item => item?.direction === 'incoming' && Date.now() - (Number(item.createdAt) || 0) < 24 * 60 * 60 * 1000);
+          // INT-15: cùng một cách tính cửa sổ 24 giờ như bám đuổi / vận đơn (mốc khách của hộp thư + tin đã lưu, chừa 1 giờ).
+          const windowOpen = Boolean(inbox) && messengerWindowOpen({ messages: { [inbox.id]: inboxMessages } }, inbox);
           if (inbox && windowOpen) {
             const viaInbox = await (async () => {
-              for (const chunk of splitMessageText(joinPrivate([...reply.messages]), 1900)) await sendMessage(inbox, { text: chunk });
+              for (const chunk of splitMessageText(joinPrivate([...reply.messages]), 1900)) {
+                // Gửi dở / không rõ đã tới (hết giờ chờ): coi như đã gửi — như lời công khai; gửi lại là khách nhận trùng.
+                await sendMessage(inbox, { text: chunk }).catch(error => {
+                  if (!sendMaybeDelivered(error)) throw error;
+                  console.warn(`Tin vào hộp thư không rõ đã tới (${conversation.id}): coi như đã gửi — ${error.message}`);
+                });
+              }
               return true;
             })().catch(error => { console.warn(`Tin riêng lỗi, gửi vào hộp thư cũng lỗi (${conversation.id}): ${error.message}`); return false; });
             if (viaInbox) {
@@ -3525,7 +3536,11 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
           for (const chunk of privateChunks.slice(1)) {
             if (!inbox) break;
-            const ok = await sendMessage(inbox, { text: chunk }).then(() => true).catch(error => { console.warn(`Phần sau tin riêng không gửi được (${conversation.id}): ${error.message}`); return false; });
+            const ok = await sendMessage(inbox, { text: chunk }).then(() => true).catch(error => {
+              if (sendMaybeDelivered(error)) { console.warn(`Phần sau tin riêng không rõ đã tới (${conversation.id}): coi như đã gửi — ${error.message}`); return true; }
+              console.warn(`Phần sau tin riêng không gửi được (${conversation.id}): ${error.message}`);
+              return false;
+            });
             if (!ok) break;
           }
         }

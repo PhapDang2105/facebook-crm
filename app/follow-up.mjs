@@ -27,6 +27,7 @@ import { describeDeliveryAddress } from './processing/locations.mjs';
 import { touchPendingOrder } from './processing/pending-order.mjs';
 import { randomUUID } from 'node:crypto';
 import { isPageSystemNotice } from './conversation-orders.mjs';
+import { MESSENGER_WINDOW_MARGIN_MS, MESSENGER_WINDOW_MS, messengerWindowOpen } from './messenger-window.mjs';
 
 // Đơn còn hiệu lực (chưa hủy / hoàn / bom — isCancelledOrder của order-facts, cùng luật với báo cáo):
 // dùng chung cho "khách đã có đơn" và "bám đuổi thành công" ở mọi chỗ.
@@ -39,7 +40,7 @@ const statePath = process.env.FOLLOW_UPS_PATH || path.join(projectRoot, 'data', 
 export const FOLLOW_UP_INTERVAL_MS = 15 * 60 * 1000;
 const maxReplyAgeMs = 7 * 24 * 60 * 60 * 1000;
 // Chừa 1 giờ trước hạn 24 giờ của Messenger (lượt bám đuổi chạy 15 phút một lần).
-export const messengerWindowMs = 23 * 60 * 60 * 1000;
+export const messengerWindowMs = MESSENGER_WINDOW_MS - MESSENGER_WINDOW_MARGIN_MS;
 const maxSentRecords = 5000;
 
 let cachedState = null;
@@ -419,7 +420,8 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
       if (now - repliedAt < delayMs) { excluded(inbox, `chưa đủ ${scenario.delayHours} giờ`); continue; }
       // Messenger chỉ cho Page nhắn trong 24 giờ kể từ tin cuối của khách: quá mốc
       // thì bỏ qua — trừ kịch bản "ngoài 24 giờ" (xếp hàng chờ gửi qua extension Pancake).
-      const outside = now - customerAt > messengerWindowMs;
+      // INT-15: cùng cách tính với inboxWindowOpen/Sapo (cả mốc lastCustomerMessageAt của hộp thư, chừa 1 giờ).
+      const outside = !messengerWindowOpen(store, inbox, { now });
       if (outside && !scenario.outsideWindow) { excluded(inbox, 'ngoài 24 giờ Messenger'); continue; }
       candidates.push({ key: `${scenario.id}:${inbox.pageId}:${inbox.psid}`, conversation: inbox, inbox, thread: null, repliedAt, outsideWindow: outside });
     }
@@ -986,9 +988,7 @@ export function isUndeliverableError(error) {
 
 /** Cửa sổ 24 giờ của hộp thư còn mở: khách nhắn hộp thư trong `messengerWindowMs` (23 giờ, chừa 1 giờ). */
 export function inboxWindowOpen(store, inbox, now = Date.now()) {
-  if (!inbox) return false;
-  const customerAt = Math.max(Number(inbox.lastCustomerMessageAt) || 0, lastAt(incomingOf(messagesIn(store, inbox)), () => true));
-  return customerAt > 0 && now - customerAt <= messengerWindowMs;
+  return messengerWindowOpen(store, inbox, { now });
 }
 
 /** Khách nằm trong danh sách "không nhận được tin" và chưa nhắn lại Page từ lúc đó → mục chặn; không thì null. */

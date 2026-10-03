@@ -23,12 +23,16 @@ const message = (direction, createdAt, extra = {}) => ({ id: `m${createdAt}${dir
 writeFileSync(process.env.META_CONVERSATIONS_PATH, JSON.stringify({ conversations: [], messages: {}, commentIndex: {} }));
 const { normalizeChatbotSettings } = await import('../app/chatbot-settings.mjs');
 const followUp = await import('../app/follow-up.mjs');
+const { flushMessagingStore } = await import('../app/messaging-store.mjs');
 
 const psids = Array.from({ length: 200 }, (_, index) => `r${index}`).filter(id => !followUp.isFollowUpHoldout(id));
 let cursor = 0;
 const nextPsid = () => psids[cursor++];
 let seedCount = 0;
-function seedStore(store) {
+// Bám đuổi ghi sổ sách kiểu gộp (INT-08): ghi nốt thay đổi còn trong bộ nhớ TRƯỚC khi ghi đè tệp từ ngoài,
+// kẻo lượt ghi gộp hẹn giờ đè mất kho vừa dựng.
+async function seedStore(store) {
+  await flushMessagingStore();
   writeFileSync(process.env.META_CONVERSATIONS_PATH, JSON.stringify({ messages: {}, commentIndex: {}, ...store }));
   seedCount += 1;
   const at = new Date(Date.now() + 60_000 + seedCount * 1000);
@@ -100,7 +104,7 @@ test('…897712: khách đã có đơn landing (SĐT trong tin khách hay SĐT P
   const viaPancake = nextPsid();
   const fresh1 = nextPsid();
   const silent = (psid, text = 'Giá bn ạ') => [message('incoming', now - 5 * HOUR, { text }), message('outgoing', now - 4 * HOUR, { text: 'Dạ bảng giá…' })];
-  seedStore({
+  await seedStore({
     conversations: [local, viaPancake, fresh1].map(psid => ({ id: `${page}:${psid}`, pageId: page, psid, name: `Khách ${psid}`, source: 'inbox' })),
     messages: { [`${page}:${local}`]: silent(local, `sđt mình ${PHONE}`), [`${page}:${viaPancake}`]: silent(viaPancake), [`${page}:${fresh1}`]: silent(fresh1) }
   });
@@ -125,7 +129,7 @@ test('…039804: kịch bản bình luận 12h + hộp thư 3h cùng nhắm mộ
   const psid = nextPsid();
   const inbox = { id: `${page}:${psid}`, pageId: page, psid, name: 'Khách B', source: 'inbox', gender: 'female', pendingOrder: basket(now - 13 * HOUR) };
   const thread = { id: `${page}:comment:${psid}:p1`, pageId: page, psid, name: 'Khách B', source: 'comment', lastCommentId: 'c1' };
-  seedStore({
+  await seedStore({
     conversations: [inbox, thread],
     messages: {
       [inbox.id]: [message('incoming', now - 13 * HOUR, { text: 'Khách chọn mua từ Facebook Shop: Granola (CB2-XANH-Z450) — 298.000đ', id: 'a' }), message('outgoing', now - 13 * HOUR + 60_000, { text: 'Dạ đơn của chị gồm 2 Granola Túi Xanh 450g…', id: 'b' })],

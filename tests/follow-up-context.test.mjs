@@ -21,7 +21,7 @@ const message = (direction, createdAt, extra = {}) => ({ id: `m${createdAt}${dir
 
 writeFileSync(process.env.META_CONVERSATIONS_PATH, JSON.stringify({ conversations: [], messages: {}, commentIndex: {} }));
 const { normalizeChatbotSettings } = await import('../app/chatbot-settings.mjs');
-const { readMessagingStore } = await import('../app/messaging-store.mjs');
+const { flushMessagingStore, readMessagingStore } = await import('../app/messaging-store.mjs');
 const followUp = await import('../app/follow-up.mjs');
 
 // psid không rơi vào nhóm đối chứng 10% (nhóm đó không bao giờ được gửi).
@@ -30,7 +30,10 @@ let psidCursor = 0;
 const nextPsid = () => psids[psidCursor++];
 
 let seedCount = 0;
-function seedStore(store) {
+// Bám đuổi ghi sổ sách kiểu gộp (INT-08): ghi nốt thay đổi còn trong bộ nhớ TRƯỚC khi ghi đè tệp từ ngoài,
+// kẻo lượt ghi gộp hẹn giờ đè mất kho vừa dựng.
+async function seedStore(store) {
+  await flushMessagingStore();
   writeFileSync(process.env.META_CONVERSATIONS_PATH, JSON.stringify({ messages: {}, commentIndex: {}, ...store }));
   // Mốc sửa khác hẳn mọi lần trước: kho trong bộ nhớ biết tệp vừa bị ghi từ ngoài và đọc lại.
   seedCount += 1;
@@ -47,7 +50,7 @@ const inbox = (psid, extra = {}) => ({ id: `${page}:${psid}`, pageId: page, psid
 test('#551: khách không nhận được tin → bỏ qua vĩnh viễn (tới khi khách nhắn lại), KHÔNG tính vào trần mỗi lượt', async () => {
   const blocked = nextPsid();
   const ok = nextPsid();
-  seedStore({
+  await seedStore({
     conversations: [inbox(blocked), inbox(ok)],
     messages: {
       // Khách bị chặn im lâu hơn → xét trước, trước đây ăn hết trần maxPerRun = 1.
@@ -89,7 +92,7 @@ test('#551: khách không nhận được tin → bỏ qua vĩnh viễn (tới k
 test('bám đuổi bình luận: hộp thư chưa mở cửa sổ 24 giờ (chỉ có tin nhắn riêng của Page) và kịch bản không cho công khai → không gọi API, bỏ qua một lần; tắt riêng bám đuổi bình luận', async () => {
   const psid = nextPsid();
   const thread = { id: `${page}:comment:${psid}:p1`, pageId: page, psid, name: 'Chị Bình Luận', source: 'comment', lastCommentId: 'c1' };
-  seedStore({
+  await seedStore({
     conversations: [thread, inbox(psid, { name: 'Chị Bình Luận' })],
     messages: {
       [thread.id]: [message('incoming', now - 14 * HOUR)],
@@ -118,7 +121,7 @@ test('bám đuổi bình luận: hộp thư chưa mở cửa sổ 24 giờ (ch�
 });
 
 test('hàng chờ ngoài 24 giờ: mục quá 7 ngày dọn mỗi lượt (kể cả khi bám đuổi tắt), mục mới và mục đang trong lô giữ nguyên', async () => {
-  seedStore({ conversations: [], messages: {} });
+  await seedStore({ conversations: [], messages: {} });
   seedState({ sent: {
     'a:110:old': { queued: true, conversationId: '110:old', repliedAt: now - 8 * DAY, at: now - 8 * DAY, pageId: '110', psid: 'old', text: 'x' },
     'a:110:new': { queued: true, conversationId: '110:new', repliedAt: now - 2 * DAY, at: now - 2 * DAY, pageId: '110', psid: 'new', text: 'x' },
@@ -165,7 +168,7 @@ test('lý do không bám (01/10): tin cuối chỉ dấu câu/emoji, khách bả
 
 test('lời theo ngữ cảnh: khách hỏi yến mạch thì không bám bằng câu granola; xưng hô theo cách Page đang gọi khách', async () => {
   const psid = nextPsid();
-  seedStore({
+  await seedStore({
     conversations: [inbox(psid, { gender: '', botLastTemplateId: 'PRICE_YEN_MACH_UC_NGUYEN_CAM' })],
     messages: { [`${page}:${psid}`]: [message('incoming', now - 5 * HOUR, { text: 'Yến mạch úc giá sao shop' }), message('outgoing', now - 4 * HOUR, { text: 'Dạ yến mạch Úc nguyên cám giá … ạ' })] }
   });
@@ -189,7 +192,7 @@ test('lời theo ngữ cảnh: khách hỏi yến mạch thì không bám bằng
 test('giỏ đang giữ: khách quen (thẻ Đã mua, đơn cũ) + thẻ cần người xử lý vẫn được nhắc giỏ, không tra Pancake/POS; nhắc xong giỏ được giữ thêm (pendingOrder.at = lúc nhắc)', async () => {
   const psid = nextPsid();
   const pending = { items: [{ product: 'Granola Túi Vàng 350g', code: 'GRA-VANG-H350', quantity: 2 }], key: 'GRA-VANG-H350=2', at: now - 5 * HOUR, phone: '', address: '' };
-  seedStore({
+  await seedStore({
     conversations: [inbox(psid, { gender: 'female', labels: ['customer', 'consulting'], attention: true, botLastTemplateId: 'ORDER_ADDRESS_REMIND', pendingOrder: pending,
       customerOrders: [{ id: 'old-1', createdAt: now - 40 * DAY, total: 298000, status: 'Đã giao' }] })],
     messages: { [`${page}:${psid}`]: [
@@ -262,7 +265,7 @@ test('ưu đãi chỉ ở kịch bản 36 giờ (chủ shop 01/10): kịch bản
   const psid = nextPsid();
   const thread = { id: `${page}:comment:${psid}:p9`, pageId: page, psid, name: 'Chị Mười Hai', source: 'comment', lastCommentId: 'c9' };
   const later = nextPsid();
-  seedStore({
+  await seedStore({
     conversations: [thread, inbox(later, { name: 'Anh Ba Sáu' })],
     messages: {
       [thread.id]: [message('incoming', now - 14 * HOUR, { text: 'giá sao' }), message('outgoing', now - 13 * HOUR, { text: 'Dạ em ib chị ạ' })],
@@ -292,7 +295,7 @@ test('ưu đãi chỉ ở kịch bản 36 giờ (chủ shop 01/10): kịch bản
   assert.equal(promo.until, now + 7 * DAY);
   // Tin xếp hàng từ bản cũ của một kịch bản 24 giờ (có ghi freeShipDays): "Đã gửi" không bật ưu đãi nữa.
   seedState({ sent: { 'old-24:110:zz': { scenarioId: 'old-24', conversationId: `${page}:${later}`, at: now, repliedAt: now - 30 * HOUR, queued: true, text: 'x', pageId: page, psid: later, freeShipDays: 7 } } });
-  seedStore({ conversations: [inbox(later)], messages: {} });
+  await seedStore({ conversations: [inbox(later)], messages: {} });
   const legacy = await fresh();
   const old = normalizeChatbotSettings({ enabled: true, followUps: { enabled: true, scenarios: [{ id: 'old-24', name: 'Cũ', trigger: 'inbox-no-reply', delayHours: 24, templateId: 'FOLLOW_UP_TRIAL_FREESHIP', outsideWindow: true, freeShipDays: 7 }] } });
   assert.equal(await legacy.resolveFollowUpQueueItem('old-24:110:zz', 'sent', { readSettings: async () => old, now }), true);

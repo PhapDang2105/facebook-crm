@@ -277,6 +277,8 @@ export function normalizeChatbotSettings(input = {}, current = null) {
     thinkingLevel: ['minimal', 'low', 'medium', 'high'].includes(value.thinkingLevel) ? value.thinkingLevel : '',
     retryCount: Math.max(0, Math.min(5, value.retryCount === undefined ? defaultChatbotSettings.retryCount : Number(value.retryCount) || 0)),
     fallbackModel: cleanText(value.fallbackModel ?? defaultChatbotSettings.fallbackModel, '', 200),
+    // Bot xem ảnh khách gửi (Vertex): mặc định bật; trước 03/10 khoá này bị bỏ khi chuẩn hoá nên ô tắt không lưu được.
+    visionEnabled: value.visionEnabled !== false,
     retryIntervalMs: Math.max(100, Math.min(10000, Number(value.retryIntervalMs) || defaultChatbotSettings.retryIntervalMs)),
     // R14 (chủ shop 03/10, quyết định 8): giỏ Facebook Shop chờ đơn POS bao lâu (ms) trước khi xin SĐT/địa chỉ — mặc định 20 giây
     // (trước 60 giây; chỉ 1/33 giỏ thấy đơn trong lúc chờ). 0 = không chờ (đơn POS vào muộn vẫn được tra nền báo "đã nhận").

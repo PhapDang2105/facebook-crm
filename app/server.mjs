@@ -9,7 +9,7 @@ import { parseXlsx } from './xlsx-import.mjs';
 import { buildPlainXlsx } from './xlsx-export.mjs';
 import { fillTemplateSheet } from './xlsx-template.mjs';
 import { createWriteQueue, drainAllWrites, readJsonFile, writeJsonAtomic } from './json-store.mjs';
-import { auditFiltersFrom, canReadAudit, contentEtag, conversationOrdersFingerprint, etagMatches, createSeenOnce, fileVersionStamp, friendlyAdsError, friendlyAdsStatus, friendlyAiTestError, friendlyCampaignInsights, createStaffNoteWriter, hasStaffSession, pancakeWebhookDecision, publicNoticePage, purchaseLabelFingerprint, qrVisitorKey, staticCacheControl } from './server-helpers.mjs';
+import { auditFiltersFrom, canReadAudit, contentEtag, conversationOrdersFingerprint, etagMatches, createLeaseBook, createSeenOnce, fileVersionStamp, friendlyAdsError, friendlyAdsStatus, friendlyAiTestError, friendlyCampaignInsights, createStaffNoteWriter, hasStaffSession, pancakeWebhookDecision, publicNoticePage, purchaseLabelFingerprint, qrVisitorKey, staticCacheControl } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
@@ -473,6 +473,9 @@ async function cancelChatbotCustomerOrder(conversation, orderId) {
 async function shipmentTemplates() {
   return (await readChatbotSettings().catch(() => null))?.messageTemplates || {};
 }
+
+// Giữ chỗ mục báo vận đơn đã giao cho cầu nối Pancake: mã → hết hạn (ms). Lô gửi 15–30 giây/tin, ≤ 50 tin.
+const shipmentBridgeLeases = createLeaseBook(30 * 60 * 1000);
 
 /** Hàng chờ báo khách vận đơn (trang Vận chuyển). */
 async function shipmentNoticeQueue(now = Date.now()) {
@@ -3594,9 +3597,18 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/shipping/notices/bridge-items') {
       const payload = await readBody(request);
       const wanted = new Set((Array.isArray(payload.keys) ? payload.keys : []).map(String).slice(0, 50));
-      const queue = (await shipmentNoticeQueue()).filter(item => wanted.has(item.key));
       const items = [];
       const skipped = [];
+      // Giữ chỗ (như lô bám đuổi): mục đã giao cho một tab/người khác mà chưa báo kết quả thì không giao lần nữa tới
+      // khi hết hạn (hai tab bật tự gửi từng gửi trùng một tin vận đơn). Giữ ngay lúc chọn (đồng bộ, trước mọi await)
+      // để hai request sát nhau không cùng lọt; mục bị bỏ ở dưới thì trả chỗ. `force: true`: nhân viên đã xác nhận gửi lại.
+      const queue = (await shipmentNoticeQueue()).filter(item => {
+        if (!wanted.has(item.key)) return false;
+        if (shipmentBridgeLeases.take(item.key, { force: payload.force === true })) return true;
+        skipped.push({ key: item.key, reason: 'đang được gửi ở tab/máy khác' });
+        return false;
+      });
+      const skip = (key, reason) => { shipmentBridgeLeases.release(key); skipped.push({ key, reason }); };
       // Như lô bám đuổi: khách Pancake chưa lưu ID Facebook phải nhờ extension dò (chậm, hay hụt) — tối đa 10 khách/lô.
       let lookups = 0;
       for (const item of queue) {
@@ -3605,11 +3617,11 @@ const server = http.createServer(async (request, response) => {
         try {
           info = await fetchPancakeConversationInfo(item.pageId, convId);
         } catch (error) {
-          skipped.push({ key: item.key, reason: `Pancake lỗi: ${error.message}` });
+          skip(item.key, `Pancake lỗi: ${error.message}`);
           continue;
         }
-        if (info && info.canInbox === false) { skipped.push({ key: item.key, reason: 'khách không nhận tin (chặn Page)' }); continue; }
-        if (!info?.globalId && lookups >= 10) { skipped.push({ key: item.key, reason: 'chờ lô sau (tìm ID Facebook tối đa 10 khách/lô)' }); continue; }
+        if (info && info.canInbox === false) { skip(item.key, 'khách không nhận tin (chặn Page)'); continue; }
+        if (!info?.globalId && lookups >= 10) { skip(item.key, 'chờ lô sau (tìm ID Facebook tối đa 10 khách/lô)'); continue; }
         if (!info?.globalId) lookups += 1;
         const updatedTime = Math.max(0, ...((await readMessagingStore()).messages?.[item.conversationId] || []).map(message => Number(message.createdAt) || 0));
         items.push({ key: item.key, pageId: item.pageId, convId, globalUserId: info?.globalId || '', needsGlobalId: !info?.globalId, updatedTime, name: item.name, text: item.text });
@@ -3623,8 +3635,12 @@ const server = http.createServer(async (request, response) => {
         key: String(result?.key || ''),
         ok: result?.ok === true,
         via: ['pancake-bridge', 'manual', 'skipped'].includes(result?.via) ? result.via : 'pancake-bridge',
-        error: String(result?.error || '').slice(0, 200)
+        error: String(result?.error || '').slice(0, 200),
+        unknown: result?.ok !== true && (result?.unknown === true || /chưa rõ/i.test(String(result?.error || '')))
       })).filter(result => result.key);
+      // Có kết quả chắc chắn (đã gửi / lỗi rõ) thì bỏ giữ chỗ; "chưa rõ" (hết giờ chờ cầu nối — có thể đã gửi) thì GIỮ
+      // tới hết hạn để tab khác không gửi lại ngay.
+      for (const result of results) if (!result.unknown) shipmentBridgeLeases.release(result.key);
       const saved = await saveShipmentNoticeResults(results);
       const sent = results.filter(result => result.ok).length;
       audit(request, 'shipping.notice_result', { summary: `Báo vận đơn cho khách: ${sent} xong, ${results.length - sent} lỗi.`, details: { sent, failed: results.length - sent } });

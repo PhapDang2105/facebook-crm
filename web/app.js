@@ -537,12 +537,18 @@ window.addEventListener('message', event => {
   // Chỉ kết quả gửi ĐƯỢC mới sửa lại "chưa rõ" thành "đã gửi"; lỗi thì để máy chủ
   // tự trả khách về hàng chờ khi hết giữ chỗ (extension có thể đã gửi ở lần thử khác).
   if (!data.ok) return;
+  // Người gọi tự báo kết quả trễ về đúng chỗ của nó (vd hàng chờ vận đơn → /api/shipping/notices/results);
+  // không có thì là lô bám đuổi như trước.
+  if (typeof late.onLate === 'function') {
+    try { late.onLate(data); } catch { /* bên gọi tự lo lỗi */ }
+    return;
+  }
   fetch('/api/chatbot/follow-ups/batch-results', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: late.token, results: [{ key: late.key, ok: true, error: '', globalId: data.globalId || '' }] }) })
     .then(() => { const run = followUpBridgeRun; if (run) { run.sent += 1; run.unknown = Math.max(0, (run.unknown || 0) - 1); renderChatbotFollowUpQueue(chatbotFollowUpQueueItems); } })
     .catch(() => {});
 });
 
-function sendThroughBridge(item, token = '') {
+function sendThroughBridge(item, token = '', { onLate = null } = {}) {
   return new Promise(resolve => {
     const requestId = `gn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     // Cầu nối tự chờ extension Pancake tối đa 90 giây; thêm biên cho việc mở tab Pancake.
@@ -553,7 +559,7 @@ function sendThroughBridge(item, token = '') {
     // Kết quả tới trễ vẫn được nhận (followUpBridgeLateResults) trong vòng 1 giờ.
     const timer = setTimeout(() => {
       followUpBridgeWaiters.delete(requestId);
-      followUpBridgeLateResults.set(requestId, { key: item.key, token });
+      followUpBridgeLateResults.set(requestId, { key: item.key, token, onLate });
       setTimeout(() => followUpBridgeLateResults.delete(requestId), 60 * 60 * 1000);
       resolve({ ok: false, error: 'timeout', unknown: true, detail: `cầu nối không trả lời sau ${Math.round(waitMs / 60000)} phút (chưa rõ đã gửi hay chưa)` });
     }, waitMs);

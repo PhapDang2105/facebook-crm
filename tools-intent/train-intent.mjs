@@ -119,7 +119,8 @@ export function trainClassifier(inputRows, options = {}) {
 
   const includeComments = options.includeComments ?? false;
   // Siêu tham số (mặc định = hằng số ở đầu tệp): công cụ dò tham số truyền vào, CLI giữ nguyên.
-  const epochs = options.epochs ?? EPOCHS;
+  // INTENT_TRAIN_EPOCHS: chỉ để test chạy nhanh (dữ liệu tổng hợp nhỏ); không đặt thì giữ EPOCHS mặc định.
+  const epochs = options.epochs ?? (Number(process.env.INTENT_TRAIN_EPOCHS) > 0 ? Math.floor(Number(process.env.INTENT_TRAIN_EPOCHS)) : EPOCHS);
   const baseRate = options.rate ?? RATE;
   const l2 = options.l2 ?? L2;
   const smoothing = options.smoothing ?? SMOOTHING;

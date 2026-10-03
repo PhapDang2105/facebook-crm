@@ -825,12 +825,23 @@ let usingRemoteConversations = false;
 let messagingStream = null;
 const remoteConversations = new Map();
 const remoteMessages = new Map();
+// Dòng hội thoại theo id (buildConversationElement ghi): tra một dòng không phải duyệt cả ~2.200 dòng.
+const conversationElementsById = new Map();
+// Dòng đang mở (getActiveConversation nhớ lại, kiểm còn trong trang và còn class active).
+let activeConversationElement = null;
+// Mã lần tải danh sách hội thoại: đổi Page nhanh thì bỏ kết quả về trễ của Page trước.
+let conversationsRequestId = 0;
 const syncedChannelIds = new Set();
 let customerDraftProducts = [];
-let customerPanelStore = { notes: {}, orders: {}, bots: {} };
+let customerPanelStore = { notes: {}, orders: {}, bots: {}, touched: {} };
 // Gender per conversation, from the server: {gender, source}. Not persisted locally.
 const customerGenders = new Map();
 let customerPanelRequestId = 0;
+// Lần GET customer-panel đang chạy: { id, promise, queued }. Gọi dồn cho cùng hội thoại (mở hội
+// thoại + sự kiện 'customer-panel' + lưu đơn…) gộp thành tối đa một lần GET nữa sau lần đang chạy.
+let customerPanelInflight = null;
+// Lần tải panel đầu tiên sau khi mở hội thoại: kéo khung chat xuống cuối như trước.
+let customerPanelScrollOnLoad = false;
 // Cài đặt → Tin nhắn: thẻ hội thoại và mẫu trả lời nhanh (state and elements).
 const conversationLabelBar = document.querySelector('#conversation-label-bar');
 const messageLabelMenuLabels = document.querySelector('#message-label-menu-labels');
@@ -894,11 +905,12 @@ try {
     customerPanelStore = {
       notes: savedCustomerPanel.notes && typeof savedCustomerPanel.notes === 'object' ? savedCustomerPanel.notes : {},
       orders: savedCustomerPanel.orders && typeof savedCustomerPanel.orders === 'object' ? savedCustomerPanel.orders : {},
-      bots: savedCustomerPanel.bots && typeof savedCustomerPanel.bots === 'object' ? savedCustomerPanel.bots : {}
+      bots: savedCustomerPanel.bots && typeof savedCustomerPanel.bots === 'object' ? savedCustomerPanel.bots : {},
+      touched: savedCustomerPanel.touched && typeof savedCustomerPanel.touched === 'object' ? savedCustomerPanel.touched : {}
     };
   }
 } catch {
-  localStorage.removeItem('crm-customer-panel-v1');
+  try { localStorage.removeItem('crm-customer-panel-v1'); } catch { /* trình duyệt chặn lưu */ }
 }
 
 const conversationProfiles = {
@@ -914,6 +926,15 @@ const conversationProfiles = {
     ]
   }
 };
+
+/**
+ * Hồ sơ mẫu (dữ liệu demo) của dòng hội thoại — CHỈ cho dòng demo (không có conversationId, chưa nối
+ * Page). Khách Facebook thật trùng tên "Lan Anh" không được nhận SĐT/địa chỉ/đơn giả của hồ sơ mẫu.
+ */
+function demoConversationProfile(conversation) {
+  if (!conversation || conversation.dataset?.conversationId || usingRemoteConversations) return null;
+  return conversationProfiles[getConversationName(conversation)] || null;
+}
 
 getConversationItems().forEach(ensureConversationMetadata);
 const orderNav = document.querySelector('.nav[data-view="orders"]');
@@ -5193,7 +5214,7 @@ function activateCurrentMessageChannel() {
     return;
   }
   if (active) stashComposerDraft(active);
-  getConversationItems().forEach(item => item.classList.remove('active'));
+  document.querySelectorAll('.conversation-list .conversation.active').forEach(item => item.classList.remove('active'));
   // Không còn hội thoại mở (vd vừa đổi kênh rồi quay lại): mở lại đúng hội
   // thoại lần trước nếu nó hiện trong bộ lọc hiện tại và không có tin chưa đọc.
   if (reopenLastConversation()) {
@@ -5270,15 +5291,18 @@ function updateConversationElement(element, conversation) {
   element.classList.toggle('muted', Boolean(conversation.muted));
   const avatar = element.querySelector('.avatar');
   if (avatar) {
-    avatar.textContent = conversationInitial(conversation.name);
+    // Chỉ đổi chữ cái đầu: gán textContent cho .avatar là xoá luôn ảnh + huy hiệu nguồn rồi dựng lại mỗi sự kiện.
+    setAvatarInitial(avatar, conversationInitial(conversation.name));
     applyAvatarPhoto(avatar, conversation.picture || '');
   }
   const name = element.querySelector('strong');
-  if (name) name.textContent = conversation.name;
+  if (name && getConversationName(element) !== String(conversation.name || '').trim()) name.textContent = conversation.name;
   const preview = element.querySelector('small');
-  if (preview) preview.textContent = conversationPreviewText(conversation);
+  const previewText = conversationPreviewText(conversation);
+  if (preview && preview.textContent !== previewText) preview.textContent = previewText;
   const time = element.querySelector('time');
-  if (time) time.textContent = conversation.lastMessageAt ? formatConversationActivityTime(conversation.lastMessageAt) : '';
+  const timeText = conversation.lastMessageAt ? formatConversationActivityTime(conversation.lastMessageAt) : '';
+  if (time && time.textContent !== timeText) time.textContent = timeText;
   if (conversation.lastMessageAt) element.dataset.latestSentAt = String(conversation.lastMessageAt);
   element.dataset.initialPreview = conversationPreviewText(conversation);
   element.dataset.initialTime = time?.textContent || '';
@@ -5313,11 +5337,25 @@ function buildConversationElement(conversation) {
   moreIcon.alt = '';
   more.appendChild(moreIcon);
   element.append(avatar, copy, time, more);
+  conversationElementsById.set(String(conversation.id), element);
   return updateConversationElement(element, conversation);
 }
 
+/** Đặt chữ cái đầu của ô avatar mà không đụng ảnh/huy hiệu bên trong (chỉ sửa nút chữ). */
+function setAvatarInitial(avatar, initial) {
+  if (!avatar) return;
+  const text = [...avatar.childNodes].find(node => node.nodeType === Node.TEXT_NODE);
+  if (text) {
+    if (text.nodeValue !== initial) text.nodeValue = initial;
+  } else if (initial) {
+    avatar.append(initial);
+  }
+}
+
 function findConversationElement(conversationId) {
-  return getConversationItems().find(item => item.dataset.conversationId === conversationId) || null;
+  const element = conversationElementsById.get(String(conversationId));
+  if (element?.isConnected && element.dataset.conversationId === String(conversationId)) return element;
+  return null;
 }
 
 function applyRemoteConversation(conversation) {
@@ -5325,27 +5363,42 @@ function applyRemoteConversation(conversation) {
   const existing = findConversationElement(conversation.id);
   if (existing) return updateConversationElement(existing, conversation);
   const element = buildConversationElement(conversation);
-  element.dataset.initialOrder = String(getConversationItems().length);
+  // Thứ tự gốc chỉ để phân xử khi trùng giờ: số con hiện có của danh sách luôn ≥ số dòng (O(1)).
+  element.dataset.initialOrder = String(conversationList?.childElementCount ?? 0);
   conversationList?.insertBefore(element, conversationEmpty);
   return element;
 }
 
+/**
+ * Vẽ lại cả danh sách từ máy chủ. Dòng của hội thoại đã có thì cập nhật tại chỗ (giữ nguyên phần
+ * tử): dòng đang mở, conversationMenuTarget, phần tử sendRemoteMessage đang giữ… không bị thay
+ * bằng phần tử mới (trước đây bong bóng vừa gửi kẹt "đang gửi" sau một lần "sync").
+ */
 function renderRemoteConversations(items) {
   if (!conversationList) return;
   const activeId = getActiveConversation()?.dataset.conversationId || '';
   remoteConversations.clear();
-  getConversationItems().forEach(item => item.remove());
-  items.forEach((conversation, index) => {
+  const keep = new Set();
+  const ordered = items.map((conversation, index) => {
     remoteConversations.set(conversation.id, conversation);
-    const element = buildConversationElement(conversation);
+    const existing = findConversationElement(conversation.id);
+    const element = existing ? updateConversationElement(existing, conversation) : buildConversationElement(conversation);
     element.dataset.initialOrder = String(index);
     element.classList.toggle('active', conversation.id === activeId);
-    conversationList.insertBefore(element, conversationEmpty);
+    keep.add(element);
+    return element;
   });
+  getConversationItems().forEach(item => { if (!keep.has(item)) item.remove(); });
+  for (const [id, element] of conversationElementsById) if (!keep.has(element)) conversationElementsById.delete(id);
+  ordered.forEach(element => conversationList.insertBefore(element, conversationEmpty));
 }
 
 async function loadRemoteConversations(channelId) {
+  const requestId = ++conversationsRequestId;
+  const isStale = () => requestId !== conversationsRequestId || channelId !== currentMessageChannelId;
   const state = await readApiResponse(await fetch(`/api/messaging/conversations?channelId=${encodeURIComponent(channelId)}`));
+  // Đổi Page nhanh (A → B): kết quả của A về sau B không được vẽ đè danh sách của B.
+  if (isStale()) return state.items || [];
   let items = state.items || [];
   // An empty inbox usually means the Page was connected before this build; pull its history once.
   if (!items.length && !syncedChannelIds.has(channelId)) {
@@ -5358,23 +5411,46 @@ async function loadRemoteConversations(channelId) {
       }));
       items = synced.items || [];
     } catch { /* An empty inbox is still a usable inbox. */ }
+    if (isStale()) return items;
   }
   renderRemoteConversations(items);
   return items;
+}
+
+/**
+ * Gộp tin đã tải từ máy chủ với tin SSE đẩy vào chỗ giữ tạm trong lúc đang tải (cùng id/mid thì
+ * lấy bản tải về, tin chỉ có ở SSE thì giữ lại), xếp theo giờ.
+ */
+function mergeFetchedMessages(fetched, pending) {
+  const items = Array.isArray(fetched) ? [...fetched] : [];
+  for (const message of Array.isArray(pending) ? pending : []) {
+    if (!items.some(item => item.id === message.id || (message.mid && item.mid === message.mid))) items.push(message);
+  }
+  return items.sort((first, second) => (first.createdAt || 0) - (second.createdAt || 0));
 }
 
 async function ensureRemoteMessages(conversation, { force = false } = {}) {
   const id = conversation?.dataset.conversationId;
   if (!id || (!force && remoteMessages.has(id))) return;
   if (!remoteMessages.has(id)) remoteMessages.set(id, []);
+  const placeholder = remoteMessages.get(id);
+  const before = new Set(placeholder);
   try {
     const state = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(id)}/messages`));
-    remoteMessages.set(id, state.items || []);
+    // Tin SSE tới (hay bong bóng đang gửi) trong lúc đang tải nằm trong mảng đang giữ: gộp vào,
+    // không để bản tải về ghi đè mất. Tin đã có từ trước khi tải thì lấy theo máy chủ.
+    const current = remoteMessages.get(id);
+    const pending = current !== placeholder ? [] : current.filter(message => !before.has(message) || message.status === 'sending');
+    remoteMessages.set(id, mergeFetchedMessages(state.items, pending));
     if (state.conversation) remoteConversations.set(id, state.conversation);
     // Chỉ vẽ lại phần tin: header và panel khách đã vẽ lúc mở, vẽ lại là gọi
     // customer-panel thêm một lần và chạm vào form Tạo đơn đang gõ.
-    if (getActiveConversation()?.dataset.conversationId === id) renderChatMessages(getActiveConversation());
+    const active = getActiveConversation();
+    if (active?.dataset.conversationId === id) renderChatMessages(active, { keepScroll: force });
   } catch (error) {
+    // Tải hỏng (502 lúc khởi động lại, mạng chập): bỏ chỗ giữ tạm để lần mở sau tải lại,
+    // không để hội thoại trống suốt phiên.
+    if (remoteMessages.get(id) === placeholder && !force) remoteMessages.delete(id);
     showComposerStatus(error.message);
   }
 }
@@ -5423,19 +5499,53 @@ function handleMessagingEvent(event) {
     return;
   }
   const conversation = event.conversation;
-  if (!conversation || conversation.channelId !== currentMessageChannelId) return;
+  if (!conversation) return;
+  if (conversation.channelId !== currentMessageChannelId) {
+    // Hội thoại của Page khác: tin đã tải của nó nay thiếu tin này → bỏ bản đã tải, mở lại thì tải mới.
+    if (event.message) remoteMessages.delete(conversation.id);
+    return;
+  }
   const activeElement = getActiveConversation();
   const isActive = activeElement?.dataset.conversationId === conversation.id;
   // Đang mở nhưng chỉ do tự khôi phục (chưa ai xem): giữ trạng thái chưa đọc của máy chủ.
   const attended = isActive && !isUnattendedConversation(activeElement);
+  const previous = remoteConversations.get(conversation.id);
   if (event.message) cacheRemoteMessage(conversation.id, event.message);
   const element = applyRemoteConversation({ ...conversation, unread: attended ? false : conversation.unread });
   if (isActive) {
-    renderConversation(element);
+    refreshOpenConversationFromEvent(element, previous, conversation, Boolean(event.message));
     if (attended && event.message?.direction === 'incoming') markRemoteConversationRead(element);
   }
-  // filterConversations() tự sắp xếp (chỉ dời dòng lệch chỗ) trước khi lọc.
-  filterConversations();
+  // filterConversations() tự sắp xếp (chỉ dời dòng lệch chỗ) trước khi lọc; gộp một lần mỗi khung hình.
+  scheduleFilterConversations();
+}
+
+/**
+ * Sự kiện SSE của hội thoại đang mở: chỉ vẽ lại phần thật sự đổi. Tin mới → vẽ lại khung tin (giữ chỗ
+ * cuộn nếu nhân viên đang kéo lên đọc); tên/ảnh/thẻ/nguồn đổi → đầu khung chat; chỉ seenBy đổi (ai đó
+ * vừa mở hội thoại) → dòng "… đã xem". Không vẽ lại / gọi lại panel khách: sự kiện 'customer-panel'
+ * của máy chủ lo phần đó.
+ */
+function refreshOpenConversationFromEvent(element, previous, next, hasMessage) {
+  const changed = key => JSON.stringify(previous?.[key] ?? null) !== JSON.stringify(next?.[key] ?? null);
+  if (!previous || ['name', 'picture', 'labels', 'source', 'ad', 'post', 'gender', 'genderSource'].some(changed)) {
+    renderConversationHeaderBasics(element);
+    renderCustomerGender(element);
+    renderCustomerOrderChip(element);
+  }
+  if (hasMessage || !previous || ['post', 'source'].some(changed)) renderChatMessages(element, { keepScroll: true });
+  else if (changed('seenBy')) renderChatSeenBy(element);
+}
+
+let filterConversationsFrame = 0;
+/** Gộp các lần lọc/sắp xếp danh sách do SSE dồn dập vào một lần mỗi khung hình. */
+function scheduleFilterConversations() {
+  if (filterConversationsFrame) return;
+  const run = () => {
+    filterConversationsFrame = 0;
+    filterConversations();
+  };
+  filterConversationsFrame = typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame(run) : window.setTimeout(run, 16);
 }
 
 // Mất kết nối SSE: tự đóng rồi nối lại theo cấp số (1s → 2s → … → 30s) thay vì
@@ -5489,6 +5599,10 @@ function connectMessagingStream() {
     if (!messagingStreamDropped) return;
     messagingStreamDropped = false;
     // Events sent while the stream was down are only recoverable by reloading the inbox.
+    // Tin đã tải của các hội thoại khác cũng có thể thiếu tin lúc mất kết nối: bỏ để mở lại thì tải mới
+    // (hội thoại đang mở được tải lại ngay bên dưới).
+    const openId = getActiveConversation()?.dataset.conversationId || '';
+    for (const id of [...remoteMessages.keys()]) if (id !== openId) remoteMessages.delete(id);
     loadRemoteConversations(currentMessageChannelId)
       .then(() => {
         // The rebuilt list must respect the label/search filter in force.
@@ -5507,8 +5621,10 @@ async function switchMessageChannel(channelId) {
     try {
       await loadRemoteConversations(channelId);
     } catch (error) {
-      showToast(error.message, 'error');
+      if (channelId === currentMessageChannelId) showToast(error.message, 'error');
     }
+    // Trong lúc chờ đã đổi sang Page khác: lần đổi sau tự vẽ, lần này thôi.
+    if (channelId !== currentMessageChannelId) return;
   }
   activateCurrentMessageChannel();
   reopenLastConversation();
@@ -5524,12 +5640,35 @@ function getDefaultChannelId(channels) {
   return channels[0]?.id || '';
 }
 
+// /api/channels hỏng lúc tải trang (502 khi máy chủ đang khởi động lại sau deploy): thử lại theo cấp
+// số 2s → 4s → … → 30s thay vì kẹt ở hộp thư mẫu, không SSE, tới khi tải lại trang.
+let messageChannelsRetryDelay = 0;
+let messageChannelsRetryTimer = null;
+function scheduleMessageChannelsRetry() {
+  messageChannelsRetryDelay = Math.min(30000, messageChannelsRetryDelay ? messageChannelsRetryDelay * 2 : 2000);
+  window.clearTimeout(messageChannelsRetryTimer);
+  messageChannelsRetryTimer = window.setTimeout(() => {
+    messageChannelsRetryTimer = null;
+    loadMessageChannels().catch(() => {});
+  }, messageChannelsRetryDelay);
+}
+
 async function loadMessageChannels() {
   let connected = [];
+  let failed = false;
   try {
     const state = await fetchChannelsState();
     connected = (state.items || []).map(item => ({ id: String(item.id), name: item.name, picture: item.picture, platform: item.platform || 'facebook' }));
-  } catch { /* Keep the local demo channel available while the server reconnects. */ }
+    messageChannelsRetryDelay = 0;
+  } catch {
+    failed = true;
+  }
+  if (failed) {
+    // Đã có hộp thư thật thì giữ nguyên; chưa có thì tạm hiện kênh mẫu như trước, và thử lại.
+    if (!messageChannelsRetryDelay) showToast('Chưa tải được danh sách Page, đang thử lại…', 'error');
+    scheduleMessageChannelsRetry();
+    if (usingRemoteConversations) return;
+  }
   usingRemoteConversations = connected.length > 0;
   messageChannels = usingRemoteConversations ? connected : [{
     id: 'local-facebook',
@@ -5560,8 +5699,10 @@ async function loadMessageChannels() {
 // Chuỗi tìm kiếm đã chuẩn hoá (bỏ dấu) của từng dòng hội thoại, tính lại chỉ khi chữ của dòng
 // đổi. Trước đây mỗi sự kiện SSE chuẩn hoá lại textContent của cả ~2.200 dòng khi ô tìm có chữ.
 const conversationSearchKeys = new WeakMap();
+// Chỉ tên + tin cuối + tên thẻ (.conversation-copy), không lấy nhãn giờ: trước đây gõ "phút" hay
+// "Hôm qua" là khớp theo giờ của dòng.
 function conversationSearchKey(conversation) {
-  const raw = conversation.textContent;
+  const raw = (conversation.querySelector('.conversation-copy') || conversation).textContent;
   const cached = conversationSearchKeys.get(conversation);
   if (cached && cached.raw === raw) return cached.key;
   const key = normalizeColumnName(raw);
@@ -5620,6 +5761,9 @@ function applyAvatarPhoto(avatar, source) {
     photo = document.createElement('img');
     photo.className = 'avatar-photo';
     photo.alt = '';
+    // ~2.200 dòng: content-visibility bỏ qua vẽ nhưng không bỏ tải ảnh — chỉ tải ảnh của dòng sắp hiện.
+    photo.loading = 'lazy';
+    photo.decoding = 'async';
     avatar.prepend(photo);
   }
   if (photo.getAttribute('src') !== source) photo.setAttribute('src', source);
@@ -5674,11 +5818,16 @@ function ensureConversationMetadata(conversation) {
 function sortConversationsByRecentActivity() {
   if (!conversationList) return;
   const conversations = getConversationItems();
+  // Đọc giờ/thứ tự mỗi dòng một lần (trước đây đọc dataset + parse trong từng lần so sánh, n log n lần).
+  const keys = new Map(conversations.map(conversation => [conversation, {
+    at: getChatTimestamp(conversation.dataset.latestSentAt),
+    order: Number(conversation.dataset.initialOrder || 0)
+  }]));
   const ordered = [...conversations].sort((first, second) => {
-    const firstTimestamp = getChatTimestamp(first.dataset.latestSentAt);
-    const secondTimestamp = getChatTimestamp(second.dataset.latestSentAt);
-    if (firstTimestamp !== secondTimestamp) return secondTimestamp - firstTimestamp;
-    return Number(first.dataset.initialOrder || 0) - Number(second.dataset.initialOrder || 0);
+    const a = keys.get(first);
+    const b = keys.get(second);
+    if (a.at !== b.at) return b.at - a.at;
+    return a.order - b.order;
   });
   if (ordered.every((conversation, index) => conversation === conversations[index])) return;
   moveConversationsIntoOrder(conversations, ordered);
@@ -5779,7 +5928,7 @@ function renderMutedConversations() {
 }
 
 function updateMarkUnreadButton() {
-  const isUnread = document.querySelector('.conversation.active')?.classList.contains('unread') || false;
+  const isUnread = getActiveConversation()?.classList.contains('unread') || false;
   if (!markUnreadButton) return;
   markUnreadButton.classList.toggle('active', isUnread);
   markUnreadButton.setAttribute('aria-pressed', String(isUnread));
@@ -5796,7 +5945,10 @@ function renderUnreadConversations() {
 }
 
 function getActiveConversation() {
-  return document.querySelector('.conversation.active');
+  const cached = activeConversationElement;
+  if (cached?.isConnected && cached.classList.contains('active')) return cached;
+  activeConversationElement = document.querySelector('.conversation.active');
+  return activeConversationElement;
 }
 
 /** True for threads backed by a real Facebook Page rather than the demo data. */
@@ -5887,9 +6039,9 @@ function getChatMessageActions() {
   return readStoredJson(chatMessageActionsKey, {}, actions => actions && typeof actions === 'object' && !Array.isArray(actions) ? actions : {});
 }
 
-function getChatMessageAction(name, messageId) {
+function getChatMessageAction(name, messageId, conversation = getActiveConversation()) {
   const actions = getChatMessageActions();
-  return actions[`${getConversationStorageKey(name)}:${messageId}`] || actions[`${name}:${messageId}`] || '';
+  return actions[`${getConversationStorageKey(name, conversation)}:${messageId}`] || actions[`${name}:${messageId}`] || '';
 }
 
 function saveChatMessageAction(name, messageId, action) {
@@ -6072,8 +6224,10 @@ function positionMessageTimeTooltip() {
   const maximumLeft = window.innerWidth - tooltipRect.width - margin;
   messageTimeTooltip.style.left = `${Math.max(margin, Math.min(maximumLeft, preferredLeft))}px`;
   messageTimeTooltip.style.top = `${Math.max(margin, Math.min(window.innerHeight - tooltipRect.height - margin, anchorRect.top + (anchorRect.height - tooltipRect.height) / 2))}px`;
-  messageTimeTooltipFrame = window.requestAnimationFrame(positionMessageTimeTooltip);
+  // Đặt chỗ một lần khi hiện (và khi đổi cỡ cửa sổ); cuộn khung chat thì tooltip tự ẩn. Trước đây
+  // tự gọi lại mỗi khung hình (3 lần đo bố cục/khung) suốt lúc chuột đậu trên bong bóng.
 }
+window.addEventListener('resize', () => { if (messageTimeTooltip) positionMessageTimeTooltip(); });
 
 function showMessageTimeTooltip(row) {
   const label = row?.dataset.hoverTime;
@@ -6124,14 +6278,33 @@ function formatConversationActivityTime(timestamp) {
   if (isSameCalendarDay(date, now)) return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
   if (isSameCalendarDay(date, yesterday)) return 'Hôm qua';
-  return date.toLocaleDateString('vi-VN', { weekday: 'short' }).replace('Th ', 'T');
+  // Trong tuần: thứ (T2…CN); cũ hơn: ngày/tháng (thêm năm nếu khác năm) — trước đây tin 3 tháng trước cũng chỉ ghi "T2".
+  const dayDistance = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(date.getFullYear(), date.getMonth(), date.getDate())) / 86400000);
+  if (dayDistance > 0 && dayDistance < 7) return ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][date.getDay()];
+  const pad = value => String(value).padStart(2, '0');
+  const dayMonth = `${pad(date.getDate())}/${pad(date.getMonth() + 1)}`;
+  return date.getFullYear() === now.getFullYear() ? dayMonth : `${dayMonth}/${date.getFullYear()}`;
 }
 
+// Nhãn giờ của danh sách (30 giây/lần): bỏ qua khi tab ẩn; chỉ duyệt các dòng có nhãn còn có thể đổi
+// (lần trước còn tính theo phút, < 1 giờ) — sang ngày mới mới duyệt hết; chỉ ghi khi chữ khác.
+let conversationTimeLabelsDay = '';
+let conversationTimeLabelsAt = 0;
 function updateConversationTimeLabels() {
+  if (document.hidden) return;
+  const now = Date.now();
+  const day = new Date(now).toDateString();
+  const fullPass = day !== conversationTimeLabelsDay;
+  const previousRun = conversationTimeLabelsAt;
+  conversationTimeLabelsDay = day;
+  conversationTimeLabelsAt = now;
   getConversationItems().forEach(conversation => {
     const timestamp = getChatTimestamp(conversation.dataset.latestSentAt);
+    if (!timestamp || (!fullPass && previousRun - timestamp >= 3600000)) return;
     const time = conversation.querySelector('time');
-    if (timestamp && time) time.textContent = formatConversationActivityTime(timestamp);
+    if (!time) return;
+    const label = formatConversationActivityTime(timestamp);
+    if (time.textContent !== label) time.textContent = label;
   });
 }
 
@@ -6566,8 +6739,8 @@ function updateMessageGrouping() {
 function getConversationMessages(conversation) {
   const remoteId = conversation?.dataset.conversationId;
   if (remoteId) return remoteMessages.get(remoteId) || [];
-  const name = getConversationName(conversation);
-  if (conversationProfiles[name]?.messages) return conversationProfiles[name].messages;
+  const demo = demoConversationProfile(conversation);
+  if (demo?.messages) return demo.messages;
   const preview = conversation?.dataset.initialPreview || '';
   if (!preview) return [];
   const isOutgoing = preview.startsWith('Bạn:');
@@ -6582,8 +6755,37 @@ function getCustomerPanelKey(conversation = getActiveConversation()) {
   return conversation.dataset.conversationId || `name:${getConversationName(conversation)}`;
 }
 
-function saveCustomerPanelStore() {
-  try { localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore)); } catch {}
+// Bản sao panel khách trong trình duyệt chỉ là đệm (máy chủ mới là gốc): giữ tối đa 200 hội thoại
+// mở gần nhất. Trước đây lưu mọi hội thoại từng mở, tới trần ~5 MB thì mọi lần lưu sau âm thầm hỏng.
+const customerPanelStoreLimit = 200;
+
+/** Bỏ các hội thoại cũ nhất (theo touched) để còn tối đa `limit` khoá; khoá chưa có touched coi là cũ nhất. */
+function pruneCustomerPanelStore(store, limit = customerPanelStoreLimit) {
+  const touched = store.touched || (store.touched = {});
+  const keys = new Set([...Object.keys(store.notes || {}), ...Object.keys(store.orders || {}), ...Object.keys(store.bots || {}), ...Object.keys(touched)]);
+  if (keys.size <= limit) return store;
+  const drop = [...keys].sort((first, second) => (Number(touched[second]) || 0) - (Number(touched[first]) || 0)).slice(limit);
+  for (const key of drop) {
+    delete store.notes?.[key];
+    delete store.orders?.[key];
+    delete store.bots?.[key];
+    delete touched[key];
+  }
+  return store;
+}
+
+function saveCustomerPanelStore(key = '') {
+  if (key) (customerPanelStore.touched ||= {})[key] = Date.now();
+  pruneCustomerPanelStore(customerPanelStore);
+  try {
+    localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore));
+  } catch {
+    // Hết chỗ (trang khác cùng máy dùng nhiều): thu còn 50 hội thoại gần nhất rồi thử lại một lần.
+    try {
+      pruneCustomerPanelStore(customerPanelStore, 50);
+      localStorage.setItem('crm-customer-panel-v1', JSON.stringify(customerPanelStore));
+    } catch { /* trình duyệt chặn lưu: vẫn dùng bản trong bộ nhớ */ }
+  }
 }
 
 const chatbotProviderProfiles = {
@@ -7195,10 +7397,28 @@ function renderChatbotToggle(conversation = getActiveConversation()) {
   chatbotToggleButton.title = label;
 }
 
-async function loadCustomerPanelFromServer(conversation = getActiveConversation()) {
+function loadCustomerPanelFromServer(conversation = getActiveConversation()) {
+  const conversationId = conversation?.dataset.conversationId;
+  if (!conversationId || !getCustomerPanelKey(conversation)) return Promise.resolve();
+  const current = customerPanelInflight;
+  if (current?.id === conversationId) {
+    current.queued ||= current.promise.then(() => loadCustomerPanelFromServer(conversation));
+    return current.queued;
+  }
+  const entry = { id: conversationId, queued: null };
+  entry.promise = fetchCustomerPanelFromServer(conversation).finally(() => {
+    if (customerPanelInflight === entry) customerPanelInflight = null;
+  });
+  customerPanelInflight = entry;
+  return entry.promise;
+}
+
+async function fetchCustomerPanelFromServer(conversation) {
   const conversationId = conversation?.dataset.conversationId;
   const key = getCustomerPanelKey(conversation);
-  if (!conversationId || !key) return;
+  // Hội thoại không còn mở (lần gọi gộp chạy sau khi nhân viên đã bấm sang khách khác): kết quả sẽ bị
+  // bỏ, mà tăng mã yêu cầu thì lại bỏ mất lần tải của hội thoại đang mở.
+  if (!conversationId || !key || getCustomerPanelKey() !== key) return;
   const requestId = ++customerPanelRequestId;
   try {
     const panel = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(conversationId)}/customer-panel`));
@@ -7208,14 +7428,19 @@ async function loadCustomerPanelFromServer(conversation = getActiveConversation(
     customerPanelStore.bots[key] = panel.botEnabled === true;
     customerGenders.set(conversationId, { gender: panel.gender || '', source: panel.genderSource || '' });
     customerBotErrors[key] = { message: String(panel.botLastError || ''), at: Number(panel.botLastErrorAt) || 0 };
-    saveCustomerPanelStore();
+    saveCustomerPanelStore(key);
+    // Thẻ đơn trong khung chat đổi chiều cao: chỉ kéo xuống cuối khi nhân viên đang ở gần cuối.
+    // Lần tải đầu sau khi mở hội thoại thì vẫn xuống cuối như trước.
+    const nearBottom = customerPanelScrollOnLoad || (chatBody ? chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 80 : false);
+    customerPanelScrollOnLoad = false;
     renderChatbotToggle(conversation);
     renderCustomerGender(conversation);
     renderChatbotError(conversation);
     renderCustomerNotes(conversation);
     renderCustomerOrders(conversation);
     renderConversationOrderCards(conversation);
-    if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+    refreshCustomerOrderProfile(conversation);
+    if (chatBody && nearBottom) chatBody.scrollTop = chatBody.scrollHeight;
   } catch {
     // Keep the local copy available if the server cannot be reached.
   }
@@ -7234,9 +7459,11 @@ async function saveCustomerPanelChange(conversation, payload) {
     customerPanelStore.notes[key] = Array.isArray(panel.notes) ? panel.notes : [];
     customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
     customerPanelStore.bots[key] = panel.botEnabled === true;
-    saveCustomerPanelStore();
-    renderChatbotToggle(conversation);
+    saveCustomerPanelStore(key);
+    // Nút bot là nút chung đầu khung chat: chỉ vẽ khi hội thoại vừa lưu VẪN đang mở (đã bấm sang
+    // khách khác thì vẽ là hiện trạng thái bot của khách cũ).
     if (getCustomerPanelKey() === key) {
+      renderChatbotToggle(conversation);
       renderCustomerNotes(conversation);
       renderCustomerOrders(conversation);
       renderConversationOrderCards(conversation);
@@ -7293,7 +7520,7 @@ function formatCustomerPanelTime(value, includeDate = false) {
 function getCustomerPanelProfile(conversation = getActiveConversation()) {
   if (!conversation) return { name: '', phone: '', address: '', avatar: '' };
   const name = getConversationName(conversation);
-  const profile = conversationProfiles[name] || {};
+  const profile = demoConversationProfile(conversation) || {};
   // Pancake pre-fills the order form from the customer record. The nearest
   // equivalent here is the newest order already placed in this conversation,
   // which is why a repeat customer never has to retype phone and address.
@@ -7310,7 +7537,7 @@ function getCustomerPanelProfile(conversation = getActiveConversation()) {
 
 function getSeedCustomerOrder(conversation = getActiveConversation()) {
   if (!conversation) return [];
-  const profile = conversationProfiles[getConversationName(conversation)];
+  const profile = demoConversationProfile(conversation);
   if (!profile?.order?.length) return [];
   const values = profile.order;
   return [{
@@ -7947,6 +8174,7 @@ function renderCustomerPanel(conversation = getActiveConversation()) {
   const key = getCustomerPanelKey(conversation) || '';
   const previousKey = customerPanelLoadedProfile.key;
   if (previousKey !== key) {
+    customerPanelScrollOnLoad = true;
     // Đổi hội thoại: cất nháp đang gõ của khách cũ (sản phẩm, ghi chú, đang sửa
     // đơn…) theo khách đó, dọn sạch form rồi lấy lại nháp của khách mới nếu có —
     // không để giỏ của khách A nằm dưới tên khách B, không mất địa chỉ đã gõ.
@@ -7965,6 +8193,29 @@ function renderCustomerPanel(conversation = getActiveConversation()) {
   renderCustomerOrderChip(conversation);
   updateCustomerOrderTotals();
   loadCustomerPanelFromServer(conversation);
+}
+
+/**
+ * Đơn của khách vừa tải từ máy chủ: cập nhật địa chỉ đã lưu, thẻ khách trong form, và nạp lại
+ * tên/SĐT/địa chỉ vào form Tạo đơn nếu form chưa ai đụng (cùng luật như renderCustomerPanel).
+ * Trước đây việc này chỉ xảy ra nhờ mỗi sự kiện SSE vẽ lại cả panel.
+ */
+function refreshCustomerOrderProfile(conversation) {
+  const key = getCustomerPanelKey(conversation) || '';
+  if (customerPanelLoadedProfile.key === key && !customerOrderFormDirty()) {
+    const profile = getCustomerPanelProfile(conversation);
+    const phoneChanged = (customerOrderPhone?.value ?? '') !== profile.phone;
+    if (customerOrderName) customerOrderName.value = profile.name;
+    if (customerOrderPhone) customerOrderPhone.value = profile.phone;
+    if (customerOrderAddress) customerOrderAddress.value = profile.address;
+    customerPanelLoadedProfile = { key, name: profile.name, phone: profile.phone, address: profile.address };
+    if (phoneChanged) {
+      renderCustomerPhoneWarning();
+      if (profile.phone) refreshPhoneWarnings([profile.phone]);
+    }
+  }
+  renderCustomerSavedAddresses(conversation);
+  renderCustomerOrderChip(conversation);
 }
 
 /** Form Tạo đơn đã có dấu tay nhân viên: sản phẩm nháp, đang sửa đơn, con trỏ trong form, hay ô nào khác bộ đã nạp. */
@@ -8025,13 +8276,20 @@ function restoreCustomerOrderDraft(key) {
 }
 
 function renderConversationHeader(conversation) {
+  const result = renderConversationHeaderBasics(conversation);
+  renderCustomerPanel(conversation);
+  updateChatHeadViewState();
+  return result;
+}
+
+/** Đầu khung chat (tên, ảnh, kênh, thẻ, kiểu bình luận) — không đụng panel khách / form Tạo đơn. */
+function renderConversationHeaderBasics(conversation) {
   const name = getConversationName(conversation);
   const initial = conversation.querySelector('.avatar')?.textContent.trim() || name.charAt(0);
   const avatarPhoto = conversation.dataset.avatar || '';
-  const profile = conversationProfiles[name] || {};
   const channel = messageChannels.find(item => item.id === currentMessageChannelId);
 
-  if (chatHeadAvatar) chatHeadAvatar.textContent = initial;
+  setAvatarInitial(chatHeadAvatar, initial);
   applyAvatarPhoto(chatHeadAvatar, avatarPhoto);
   if (chatHeadName) chatHeadName.textContent = name;
   chatHeadMeta?.classList.remove('hidden');
@@ -8039,8 +8297,6 @@ function renderConversationHeader(conversation) {
   if (messageComposerInput) messageComposerInput.disabled = false;
   renderCommentThreadState(conversation);
   renderConversationLabelBar(conversation);
-  renderCustomerPanel(conversation);
-  updateChatHeadViewState();
   return { name, initial };
 }
 
@@ -8180,10 +8436,14 @@ function renderChatSeenBy(conversation = getActiveConversation()) {
   line.classList.toggle('hidden', !line.textContent);
 }
 
-function renderChatMessages(conversation = getActiveConversation()) {
+function renderChatMessages(conversation = getActiveConversation(), { keepScroll = false } = {}) {
   if (!conversation || !chatBody) return;
   const name = getConversationName(conversation);
   const initial = conversation.querySelector('.avatar')?.textContent.trim() || name.charAt(0);
+  // keepScroll (tin SSE tới): nhân viên đang kéo lên đọc tin cũ thì giữ nguyên chỗ, chỉ xuống
+  // cuối khi đang ở gần cuối (≤ 80px).
+  const previousScrollTop = chatBody.scrollTop;
+  const stayPut = keepScroll && chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight > 80;
   chatBody.replaceChildren();
   const date = document.createElement('div');
   date.className = 'chat-date';
@@ -8194,25 +8454,25 @@ function renderChatMessages(conversation = getActiveConversation()) {
   if (conversation.dataset.source === 'comment' || conversation.dataset.postTitle || conversation.dataset.postUrl) chatBody.appendChild(buildPostContext(conversation));
   getConversationMessages(conversation).forEach((message, index) => {
     const messageId = message.id || `base-${normalizeColumnName(name)}-${index}`;
-    const action = message.direction === 'outgoing' ? getChatMessageAction(name, messageId) : '';
+    const action = message.direction === 'outgoing' ? getChatMessageAction(name, messageId, conversation) : '';
     appendChatMessage(message, message.direction, initial, messageId, action);
   });
-  const messages = getSavedChatMessages(name);
-  messages.forEach(message => appendChatMessage(message, 'outgoing', initial, message.id, getChatMessageAction(name, message.id)));
+  const messages = getSavedChatMessages(name, conversation);
+  messages.forEach(message => appendChatMessage(message, 'outgoing', initial, message.id, getChatMessageAction(name, message.id, conversation)));
   renderConversationOrderCards(conversation);
   renderChatSeenBy(conversation);
   const latestMessage = [...messages].reverse().find(message => message.type !== 'system');
   if (latestMessage) {
     const preview = conversation.querySelector('small');
     const time = conversation.querySelector('time');
-    const latestAction = getChatMessageAction(name, latestMessage.id);
+    const latestAction = getChatMessageAction(name, latestMessage.id, conversation);
     if (preview && latestAction !== 'deleted') preview.textContent = latestAction === 'recalled' ? 'Bạn: Đã thu hồi một tin nhắn' : `Bạn: ${getMessagePreview(latestMessage)}`;
     const latestSentAt = getChatTimestamp(latestMessage.createdAt);
     if (latestSentAt) conversation.dataset.latestSentAt = String(latestSentAt);
     if (time) time.textContent = latestSentAt ? formatConversationActivityTime(latestSentAt) : 'Bây giờ';
   }
   updateMessageGrouping();
-  chatBody.scrollTop = chatBody.scrollHeight;
+  chatBody.scrollTop = stayPut ? previousScrollTop : chatBody.scrollHeight;
   renderPinnedBanner(conversation);
   if (!chatPinnedPanel?.classList.contains('hidden')) renderPinnedPanel(conversation);
   if (!chatSearchBar?.classList.contains('hidden')) updateConversationSearch();
@@ -8708,7 +8968,10 @@ function selectConversation(conversation) {
     stashComposerDraft(previous);
     restoreComposerDraft(conversation);
   }
-  getConversationItems().forEach(item => item.classList.toggle('active', item === conversation));
+  // Chỉ gỡ "active" ở dòng đang có (thường một dòng), không duyệt cả ~2.200 dòng.
+  document.querySelectorAll('.conversation-list .conversation.active').forEach(item => { if (item !== conversation) item.classList.remove('active'); });
+  conversation.classList.add('active');
+  activeConversationElement = conversation;
   rememberOpenConversation(conversation);
   const wasUnread = conversation.classList.contains('unread');
   conversation.classList.remove('unread');
@@ -9098,8 +9361,10 @@ async function sendRemoteMessage(conversation, text, attachment, imageUrls = [])
   // sang khách khác thì vẽ ở đây sẽ thay nội dung khung chat bằng hội thoại cũ
   // trong khi danh sách bên trái vẫn sáng ở khách mới — gõ tiếp là gửi nhầm
   // người. Các hàm nạp tin khác đều có chốt này, riêng chỗ gửi thì thiếu.
-  if (getActiveConversation() !== conversation) return;
-  renderChatMessages(conversation);
+  // So theo mã hội thoại, không theo phần tử: danh sách vẽ lại ("sync") có thể đã thay phần tử dòng.
+  const active = getActiveConversation();
+  if (!active || active.dataset.conversationId !== conversationId) return;
+  renderChatMessages(active);
   if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
 }
 
@@ -10034,6 +10299,12 @@ const orderPanelsDirty = new Set();
 function renderOrderData() {
   // Chỉ đọc và vẽ. Chuẩn hoá ô và ghi vào trình duyệt là việc của commitOrderData(),
   // gọi đúng lúc dữ liệu đổi (import, đồng bộ, xoá dòng, sửa ô), không phải mỗi lần vẽ.
+  // Màn Đơn hàng đang ẩn (nhân viên ở hộp thư: đơn chatbot về, SĐT mới trong panel khách…): không
+  // phân tích cả bảng, chỉ ghi cả ba màn "cần vẽ lại" — showOrderStage vẽ khi mở.
+  if (views.get('orders')?.classList.contains('hidden')) {
+    ['import', 'process', 'export'].forEach(name => orderPanelsDirty.add(name));
+    return;
+  }
   const { headers, rows } = orderData;
   const allRows = rows.map((row, index) => ({ row, index }));
   const invalidRows = getInvalidOrderRows();
@@ -10745,7 +11016,7 @@ chatbotPreviewDialogSend?.addEventListener('click', async () => {
   const chat = chatbotPreviewDialog.querySelector('.chatbot-preview-chat');
   if (!message) return;
   chatbotPreviewDialogSend.disabled = true;
-  chat.innerHTML += `<div class="chatbot-preview-user">${escapeHtml(message)}</div><div class="chatbot-preview-bot">Đang xử lý…</div>`;
+  chat.insertAdjacentHTML('beforeend', `<div class="chatbot-preview-user">${escapeHtml(message)}</div><div class="chatbot-preview-bot">Đang xử lý…</div>`);
   try {
     const result = await readApiResponse(await fetch('/api/chatbot/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: chatbotSettingsProvider.value, directEndpoint: chatbotSettingsDirectEndpoint.value, directModel: chatbotSettingsDirectModel.value, systemPrompt: chatbotSettingsSystemPrompt.value.trim() || 'Bạn là trợ lý chăm sóc khách hàng. Trả lời bằng JSON hợp lệ.', structuredOutput: chatbotSettingsStructuredOutput.checked, directAuthType: 'access_token', message }) }));
     chat.lastElementChild.textContent = JSON.stringify(result.parsed || result.raw || {}, null, 2);
@@ -10763,7 +11034,8 @@ function applyImportedRecords(sourceHeaders, records) {
     rows: nonEmptyRows.map(row => retainedIndexes.map(index => normalizeImportedValue(row[index] || '', sourceHeaders[index])))
   });
   commitOrderData();
-  renderOrderData();
+  // Một lần vẽ: đánh dấu cả ba màn cần vẽ lại, showOrderStage vẽ màn được mở (trước đây vẽ hai lần).
+  ['import', 'process', 'export'].forEach(name => orderPanelsDirty.add(name));
   showOrderStage(getRecommendedOrderStage());
 }
 
@@ -10918,7 +11190,7 @@ document.addEventListener('keydown', event => {
 });
 
 markUnreadButton?.addEventListener('click', () => {
-  const activeConversation = document.querySelector('.conversation.active');
+  const activeConversation = getActiveConversation();
   if (!activeConversation) return;
   activeConversation.classList.add('unread');
   if (activeConversation.dataset.conversationId) patchRemoteConversationFlags(activeConversation, { unread: true });
@@ -11043,7 +11315,7 @@ customerNoteInput?.addEventListener('keydown', event => {
   const notes = customerPanelStore.notes[key] || [];
   notes.unshift({ text, createdAt: Date.now() });
   customerPanelStore.notes[key] = notes.slice(0, 50);
-  saveCustomerPanelStore();
+  saveCustomerPanelStore(key);
   customerNoteInput.value = '';
   renderCustomerNotes();
   saveCustomerPanelChange(conversation, { type: 'note', text });
@@ -11417,7 +11689,7 @@ customerOrderForm?.addEventListener('submit', async event => {
     }
     const panel = await readApiResponse(createResponse);
     customerPanelStore.orders[key] = Array.isArray(panel.orders) ? panel.orders : [];
-    saveCustomerPanelStore();
+    saveCustomerPanelStore(key);
     renderCustomerOrders(conversation);
     await ensureRemoteMessages(conversation, { force: true });
     // Dọn form ngay sau khi đơn đã tạo. Không dọn thì `finally` bên dưới gọi
@@ -11515,7 +11787,7 @@ chatbotToggleButton?.addEventListener('click', async () => {
   const enabled = !Boolean(customerPanelStore.bots[key]);
   if (!conversationId) {
     customerPanelStore.bots[key] = enabled;
-    saveCustomerPanelStore();
+    saveCustomerPanelStore(key);
     renderChatbotToggle(conversation);
     showToast(enabled ? 'Đã bật bot cho hội thoại này.' : 'Đã tắt bot cho hội thoại này.', 'success');
     return;
@@ -11528,8 +11800,8 @@ chatbotToggleButton?.addEventListener('click', async () => {
       body: JSON.stringify({ type: 'bot', enabled })
     }));
     customerPanelStore.bots[key] = panel.botEnabled === true;
-    saveCustomerPanelStore();
-    renderChatbotToggle(conversation);
+    saveCustomerPanelStore(key);
+    if (getCustomerPanelKey() === key) renderChatbotToggle(conversation);
     showToast(panel.botEnabled ? 'Đã bật bot cho hội thoại này.' : 'Đã tắt bot cho hội thoại này.', 'success');
   } catch (error) {
     showToast(error.message || 'Chưa cập nhật được trạng thái bot.', 'error');
@@ -12511,6 +12783,8 @@ document.addEventListener('click', event => {
 loadInboxSettings();
 
 window.setInterval(updateConversationTimeLabels, 30000);
+// Tab ẩn thì bộ đếm bỏ qua: quay lại tab là cập nhật ngay, không chờ tới nhịp 30 giây sau.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) updateConversationTimeLabels(); });
 // Bảng đọc từ trình duyệt lúc tải (xem savedOrderData): giờ các hằng cột đã có, thêm cột còn thiếu.
 orderData = ensureOrderStaffNoteColumn(orderData);
 // Drawn even with no rows so each order panel shows its empty state.

@@ -128,6 +128,11 @@ export function mergeChatbotSettingsPatch(current = {}, patch = {}) {
       merged.followUps = next;
       continue;
     }
+    // R15: bản vá cờ luật ứng viên theo từng luật ({ K1: 'on' }) gộp vào đối tượng đang lưu (không đưa các luật khác về 'shadow').
+    if (key === 'candidateRules' && typeof item === 'object' && !Array.isArray(item) && base.candidateRules && typeof base.candidateRules === 'object' && !Array.isArray(base.candidateRules)) {
+      merged.candidateRules = { ...base.candidateRules, ...item };
+      continue;
+    }
     if (key === 'contextTrim' && typeof item === 'object' && !Array.isArray(item)) {
       merged.contextTrim = { ...(base.contextTrim && typeof base.contextTrim === 'object' ? base.contextTrim : {}), ...item };
       continue;
@@ -152,6 +157,20 @@ export function mergeMessageTemplatesPatch(current = {}, patch = undefined) {
     else merged[id] = text;
   }
   return merged;
+}
+
+const candidateRuleKeys = ['K1', 'K1b', 'K3', 'K4', 'K5'];
+const candidateRuleModes = ['on', 'shadow', 'off'];
+/**
+ * R15: cờ luật ứng viên. Chuỗi 'on' | 'shadow' | 'off' giữ nguyên (cờ chung). Đối tượng → chỉ nhận khoá K1/K1b/K3/K4/K5 với giá
+ * trị on/shadow/off, thiếu khoá = 'shadow'; đối tượng không có khoá hợp lệ nào → 'shadow'. Giá trị khác → 'shadow'.
+ */
+export function normalizeCandidateRules(value) {
+  if (typeof value === 'string') return candidateRuleModes.includes(value) ? value : 'shadow';
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'shadow';
+  const valid = candidateRuleKeys.filter(key => candidateRuleModes.includes(value[key]));
+  if (!valid.length) return 'shadow';
+  return Object.fromEntries(candidateRuleKeys.map(key => [key, candidateRuleModes.includes(value[key]) ? value[key] : 'shadow']));
 }
 
 /**
@@ -237,7 +256,9 @@ export function normalizeChatbotSettings(input = {}, current = null) {
     // Luật thử nghiệm (TRIAL_ASK, ORDER_ASK, TERSE_HOW, ADDRESS_COMPLETE): 'shadow' chỉ ghi log so với mô hình.
     experimentalRules: value.experimentalRules === 'on' ? 'on' : 'shadow',
     // R13: luật ứng viên K1/K1b/K3/K4/K5 (rule-intent candidateRules) — 'shadow' (mặc định) chỉ ghi nhật ký, 'on' mới trả lời, 'off' tắt.
-    candidateRules: ['on', 'off'].includes(value.candidateRules) ? value.candidateRules : 'shadow',
+    // R15 (chủ shop 03/10, quyết định 12): cờ có thể theo TỪNG luật — đối tượng { K1, K1b, K3, K4, K5 } mỗi khoá 'on'|'shadow'|'off'
+    // (thiếu khoá = 'shadow'; khoá lạ / giá trị lạ bỏ). Chuỗi hợp lệ giữ nguyên như trước.
+    candidateRules: normalizeCandidateRules(value.candidateRules),
     // Mô hình ra quyết định trước LLM (processing/intent-model.mjs): 'shadow' chỉ ghi log so với
     // câu trả lời thật; 'on' đủ tin cậy (≥ intentThreshold) và mẫu an toàn thì trả lời thẳng.
     intentModel: ['on', 'shadow', 'off'].includes(value.intentModel) ? value.intentModel : 'shadow',

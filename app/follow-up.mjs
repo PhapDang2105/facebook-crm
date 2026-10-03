@@ -188,6 +188,17 @@ const recentOrderMs = 14 * 24 * 60 * 60 * 1000;
 // Thẻ khiếu nại / bảo hành / khách sỉ: không bám trong MỌI trường hợp (kể cả đang giữ giỏ).
 const hardSkipLabelIds = ['complaint', 'warranty', 'wholesale'];
 
+// R15: khách báo đã mua trên sàn (TikTok/Shopee/web): mẫu cuối của bot là BOUGHT_ON_MARKETPLACE, hay mốc boughtElsewhereAt
+// (engine ghi) trong 14 ngày.
+const boughtElsewhereMs = 14 * 24 * 60 * 60 * 1000;
+export function boughtOnMarketplace(record, now = Date.now()) {
+  if (!record) return false;
+  if (String(record.botLastTemplateId || '') === 'BOUGHT_ON_MARKETPLACE') return true;
+  const at = Number(record.boughtElsewhereAt) || 0;
+  // Bot đã trả lời chuyện khác sau đó (khách quay lại hỏi mua) → mốc cũ không chặn nữa.
+  return at > 0 && now - at < boughtElsewhereMs && (Number(record.botLastReplyAt) || 0) <= at + 60 * 1000;
+}
+
 // ===== Ngữ cảnh khách (01/10) =====
 // Dòng sản phẩm nhận ra trong một đoạn chữ (đã bỏ dấu): để không bám khách hỏi yến mạch bằng câu granola.
 const productFamilyPatterns = {
@@ -261,6 +272,9 @@ const thanksText = /c(ả|á)m\s+ơn/iu;
 export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSkipLabelIds, hardLabelIds = hardSkipLabelIds, basketHeld = false, now = Date.now() } = {}) {
   const records = [candidate.inbox, candidate.thread, candidate.conversation].filter(Boolean);
   if (records.some(item => item.botEnabled === false)) return 'botOff';
+  // R15 (inbox3 A2, ca …659307 "Mình đặt của shop trên tiktok rồi" → 3 giờ sau vẫn nhận "em vẫn đang giữ đơn…"): khách báo đã
+  // mua trên sàn (bot trả BOUGHT_ON_MARKETPLACE, bỏ giỏ; engine ghi mốc boughtElsewhereAt) → không bám, kể cả lời nhắc giỏ.
+  if (records.some(item => boughtOnMarketplace(item, now))) return 'boughtElsewhere';
   const labels = new Set(records.flatMap(item => (Array.isArray(item.labels) ? item.labels : [])));
   if ((basketHeld ? hardLabelIds : skipLabelIds).some(id => labels.has(id))) return 'label';
   // attention: true hay { open: true } / chưa đóng — nhân viên đang xử lý.
@@ -296,6 +310,8 @@ export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSki
  */
 export function orderRemindText(conversation, templates = {}, { now = Date.now(), messages = null } = {}) {
   const pending = conversation?.pendingOrder;
+  // R15: khách đã mua trên sàn → không nhắc giỏ (giỏ còn sót cũng không nhắc).
+  if (boughtOnMarketplace(conversation, now)) return '';
   const items = Array.isArray(pending?.items) ? pending.items.filter(item => item?.product) : [];
   if (!items.length || !templates.ORDER_ADDRESS_REMIND) return '';
   // R13: khách đã hẹn dịp khác ("để bữa khác chốt") — bot giữ giỏ với cờ `postponed`; không nhắc giỏ ("em vẫn đang giữ đơn…").

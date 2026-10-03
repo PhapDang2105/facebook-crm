@@ -625,6 +625,21 @@ export function backlogBotChanges(store, { now = Date.now(), windowMs = 60 * 60 
     const messages = store.messages?.[conversation.id] || [];
     // R13: dòng hệ thống Facebook ("… đã trả lời một quảng cáo.") đứng sau tin khách không phải lời Page — bỏ qua khi tìm tin cuối.
     const last = messages.findLast(item => !isPageSystemNotice(item));
+    // R15 (inbox1 A9, ca …3756388949): dịch vụ khởi động lại trong lúc chờ kiểm đơn POS sau tin "đã nhận giỏ, chờ em ít phút"
+    // (SHOP_CART_ACK) → khách không nhận tin xin SĐT nữa. Hội thoại còn mốc ack (engine ghi shopCartAckPendingAt, xoá khi lượt
+    // xong) < 30 phút, tin cuối là tin ack của bot sau tin giỏ (không ai nhắn thêm) → đưa lại tin giỏ với cờ resumeShopCart:
+    // engine chạy tiếp bước kiểm đơn / xin SĐT, KHÔNG gửi ack lần hai.
+    const ackAt = Number(conversation.shopCartAckPendingAt) || 0;
+    if (ackAt && now - ackAt < 30 * 60 * 1000 && last?.direction === 'outgoing' && !last.staff) {
+      const cartIndex = messages.findLastIndex(item => item?.direction === 'incoming');
+      const cartMessage = cartIndex >= 0 ? messages[cartIndex] : null;
+      const after = messages.slice(cartIndex + 1).filter(item => item?.direction === 'outgoing' && !isPageSystemNotice(item));
+      if (cartMessage && Array.isArray(cartMessage.cart) && cartMessage.cart.length && after.length <= 2 && !after.some(item => item.staff)
+        && (!conversation.shopCartAckMessageId || String(conversation.shopCartAckMessageId) === String(cartMessage.id || cartMessage.mid || ''))) {
+        changes.push({ type: 'message', conversation, message: cartMessage, late: true, resumeShopCart: true });
+      }
+      continue;
+    }
     if (!last || last.direction !== 'incoming' || !['text', 'image'].includes(last.type)) continue;
     const at = Number(last.createdAt) || 0;
     if (now - at > windowMs || at > now + 5 * 60 * 1000) continue;

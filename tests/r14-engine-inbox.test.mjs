@@ -91,7 +91,8 @@ test('S1: giỏ đã giữ im lặng một lần ("đang chờ xác nhận đặ
   const inbox = sim.inbox({ customerOrders: [old], botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: Date.now() - 60000,
     pendingOrder: basket([XANH(3)], 3 * 60000, { phone: PHONE, address: old.address, addressAsks: 2, awaitingConfirm: true, heldSilently: true }) });
   const turn = await sim.send(inbox, 'Túi có dâu để ăn thử', { llm: { template_id: 'PRICE_QUOTE', Product_N1: 'Granola Tropical vị Cacao 300g' } });
-  assert.match(texts(turn), /THÊM|thêm/);
+  // R15: lời seed ORDER_EXISTING_CONFIRM mới hỏi gộp/tách (chủ shop 03/10) thay cho "đặt THÊM".
+  assert.match(texts(turn), /THÊM|thêm|gộp .* vào đơn đang có/);
   assert.match(texts(turn), /3 Granola Túi Xanh 450g/);
   assert.equal(inbox.pendingOrder.awaitingConfirm, true);
   assert.equal(inbox.pendingOrder.heldSilently, false);
@@ -153,9 +154,11 @@ test('quyết định 10 (ca …929527): "gửi địa chỉ cũ" không tra đ�
   assert.ok(Number(inbox.oldAddressAskedAt) > 0);
   assert.deepEqual(inbox.pendingOrder.items.map(item => item.code), ['GRA-XANH-Z450']);
   const second = await sim.send(inbox, 'E đã gởi địa chỉ bữa trước e cho đó', { llm: { template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Xanh 450g', No_A: '1' }, extra });
-  assert.match(second.result.templateId, /^STAFF_WAIT_/, JSON.stringify(second.result));
+  // R15 — sửa khẳng định cũ theo quyết định chủ shop 03/10 (#8): không tra được địa chỉ cũ → bot HỎI THẲNG địa chỉ
+  // (ORDER_ADDRESS_OLD_NOT_FOUND), không STAFF_WAIT, không thẻ; vẫn không xin SĐT lần hai, vẫn ghi chú cho nhân viên.
+  assert.equal(second.result.templateId, 'ORDER_ADDRESS_OLD_NOT_FOUND', JSON.stringify(second.result));
   assert.doesNotMatch(texts(second), /số điện thoại/);
-  assert.ok(inbox.labels.includes('handoff'));
+  assert.ok(!inbox.labels.includes('handoff'));
   assert.equal(notes.length, 1);
   assert.match(notes[0], /địa chỉ cũ/);
 });

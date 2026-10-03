@@ -63,9 +63,17 @@ export function normalizeColourTypos(text) {
     .replace(/xanh {2,}/g, 'xanh ');
 }
 
+/**
+ * R15 (inbox4 A3, ca …434300 "S₫t.<sđt> chợ củ tinh Biên ang giang"): "chợ/chở" bỏ dấu trùng "chỗ" ("về chỗ cũ") — "chợ cũ/chợ
+ * củ" là TÊN CHỢ trong địa chỉ mới. Đổi chữ "chợ/chở" CÒN DẤU thành chữ khác trước khi bỏ dấu để so cụm "địa chỉ cũ" (chỉ
+ * "chỗ/chổ cũ", "địa chỉ cũ", "như cũ/như lần trước" mới là địa chỉ cũ). Khách gõ không dấu "cho cu" thì vẫn như trước.
+ */
+export function maskMarketWord(text) {
+  return String(text || '').normalize('NFC').replace(/(?<![\p{L}])ch[ợở](?![\p{L}])/giu, 'chowj');
+}
 /** Tin khách có nói "gửi về địa chỉ cũ / như lần trước / dc cũ…" không (cùng bộ từ với luồng đơn tất định). */
 export function mentionsOldAddress(text) {
-  return OLD_ADDRESS.test(normalizeIntentText(String(text || '')));
+  return OLD_ADDRESS.test(normalizeIntentText(maskMarketWord(text)));
 }
 // fix-addr (01/10): câu hỏi/phủ định không phải địa chỉ ("Quà thay là gì ạ" từng thành Thị xã La Gi và thay địa chỉ đã
 // lưu; "Không phải Tân An long an" là khách đính chính — để LLM đọc).
@@ -150,7 +158,7 @@ export function orderFlowStep(text, ctx = {}) {
   if (CHANGE.test(normalizeIntentText(normalizeColourTypos(raw)).replace(ADMIN, ' ').replace(/\bgoi dia chi cu\b/g, ' '))) return null;
   if (LEADING_BASKET_SHORT.test(stripPhone(raw).replace(PHONE_LABEL, ' ').replace(/^[\s,.;:!\-–]+/u, ''))) return null;
   // Vòng 12 (inbox-3 #2): "địa chỉ cũ" khi đang giữ giỏ là đủ rõ, không cần bot vừa hỏi SĐT/địa chỉ.
-  if (OLD_ADDRESS.test(s)) {
+  if (mentionsOldAddress(raw)) {
     // "Địa chỉ cũ" mà hệ thống không có đơn/địa chỉ giao trước của khách này: xin SĐT đã đặt lần trước
     // để tra (ORDER_ADDRESS_OLD_ASK_PHONE) + thẻ cần người xem.
     if (ctx.hasPreviousDelivery === false) return { rule: 'OLD_ADDRESS_ASK', value: { template_id: 'ORDER_ADDRESS_OLD_ASK_PHONE' }, attention: true };
@@ -378,7 +386,8 @@ export function collectAddressBurst(messages, { windowMs = 90 * 1000 } = {}) {
     const raw = String(item.text).trim();
     const s = normalizeIntentText(raw);
     const phoneOnly = Boolean(extractVietnamesePhone(raw)) && !stripPhone(raw).replace(/[\s,.;:]+/g, '').replace(/s[đd]t|đt|dt/giu, '');
-    if (!phoneOnly && (raw.includes('?') || raw.length > 160 || BURST_PRODUCT.test(s.replace(ADMIN, ' ')) || NOT_ADDRESS.test(s))) break;
+    // R15 (inbox2 A3, ca …660136): tin "Gửi địa chỉ cũ cho c" không phải mảnh địa chỉ — dừng gom (trước đây "cũ cho c" lên phiếu).
+    if (!phoneOnly && (raw.includes('?') || raw.length > 160 || BURST_PRODUCT.test(s.replace(ADMIN, ' ')) || NOT_ADDRESS.test(s) || mentionsOldAddress(raw))) break;
     picked.unshift(raw);
     newer = item;
   }

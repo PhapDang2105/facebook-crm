@@ -53,11 +53,12 @@ test('LIVE_ONLY_PRODUCT chỉ cho khách live nêu đúng hàng live; món lạ 
   assert.doesNotMatch(strange.sent.map(item => item.text).join(' '), /giữ giá live|phiên live/);
   assert.ok(liveInbox.labels.includes('handoff'));
   assert.notEqual(liveInbox.botEnabled, false, 'bot vẫn bật');
-  // Khách live nêu đúng hàng live (sữa hạt): giữ LIVE_ONLY_PRODUCT, luôn gắn thẻ.
+  // Khách live nêu sữa hạt. R15 — sửa khẳng định cũ theo quyết định chủ shop 03/10 (#4): hạt điều / sữa hạt / hũ hạt khách
+  // live hỏi cũng chuyển nhân viên (STAFF_ONLY_PRODUCT + thẻ), không còn LIVE_ONLY_PRODUCT "giữ giá live".
   const listed = new Sim({ settings: { ruleIntent: 'off' } });
   const listedInbox = listed.inbox({ labels: ['livestream'], post: LIVE_POST });
   const milk = await listed.send(listedInbox, 'sữa hạt trên live còn không em', { llm: { template_id: 'LIVE_ONLY_PRODUCT' } });
-  assert.equal(milk.result.templateId, 'LIVE_ONLY_PRODUCT');
+  assert.equal(milk.result.templateId, 'STAFF_ONLY_PRODUCT');
   assert.ok(listedInbox.labels.includes('handoff'));
   // Khách thường (không live) hỏi hàng live: không nói "chỉ bán trên live", không tắt bot (trước đây CSKH_HANDOFF tắt bot).
   const plain = new Sim({ settings: { ruleIntent: 'off' } });

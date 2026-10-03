@@ -38,7 +38,8 @@ test('đang có đơn trong 7 ngày mà mô hình chốt đơn mới: chưa tạ
   assert.deepEqual(out.created, [], 'không tạo đơn thứ hai');
   assert.equal(out.results[0].templateId, 'ORDER_EXISTING_CONFIRM');
   assert.match(out.sent.join(' '), /đang có đơn Granola Túi Xanh 450g x1, Granola Túi Vàng 350g x1/);
-  assert.match(out.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Xanh 450g – tổng 298\.000đ/);
+  // R15 (chủ shop 03/10): mẫu seed hỏi GỘP vào đơn đang có hay TÁCH đơn mới (trước đây "đặt THÊM một đơn mới…").
+  assert.match(out.sent.join(' '), /gộp 2 Granola Túi Xanh 450g – tổng 298\.000đ vào đơn đang có, hay tách thành đơn mới/);
   const pending = out.saved.at(-1).pendingOrder;
   assert.equal(pending.awaitingConfirm, true);
   assert.deepEqual(pending.items, [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 2 }]);
@@ -92,7 +93,8 @@ test('đang chờ xác nhận mà khách nêu giỏ mới ("2 túi vàng nhé"):
   // Hỏi đã lâu (35 phút): hỏi lại với giỏ mới như cũ.
   const later = await run({ ...asked, pendingOrder: { ...waiting, at: Date.now() - 35 * 60 * 1000 } }, '2 túi vàng nhé', { reply: { templateId: 'GENERAL_INFO', messages: ['không được hỏi mô hình'], handoff: false }, extraSettings: { ruleIntent: 'on' } });
   assert.equal(later.results[0].templateId, 'ORDER_EXISTING_CONFIRM');
-  assert.match(later.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Vàng 350g/);
+  // R15: lời seed mới hỏi gộp/tách (chủ shop 03/10).
+  assert.match(later.sent.join(' '), /gộp 2 Granola Túi Vàng 350g.*vào đơn đang có, hay tách thành đơn mới/);
   // Khách "đúng" sau đó: chốt giỏ 2 Vàng, không hỏi lại phường/xã.
   const yes = await run({ ...asked, pendingOrder: pending }, 'Đúng rồi', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false } });
   assert.equal(yes.results[0].templateId, 'ORDER_CONFIRMATION');

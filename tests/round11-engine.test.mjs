@@ -248,7 +248,8 @@ test('P4 (E7): chờ "đặt thêm?" — khách nhắc lại đúng giỏ đang 
   assert.equal(other.conversation.pendingOrder.heldSilently, true);
   const nudge = await other.send('shop ơi');
   assert.equal(nudge.result.templateId, 'ORDER_EXISTING_CONFIRM', 'lần sau: hỏi lại với giỏ đang giữ');
-  assert.match(nudge.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Vàng 350g/);
+  // R15: lời seed mới hỏi gộp/tách (chủ shop 03/10), trước đây "đặt THÊM một đơn mới gồm…".
+  assert.match(nudge.sent.join(' '), /gộp 2 Granola Túi Vàng 350g.*vào đơn đang có, hay tách thành đơn mới/);
   assert.deepEqual(other.orders, []);
 });
 
@@ -376,11 +377,13 @@ test('V10 (E12): câu hỏi thành phần xoài sấy / vị dâu không bị LI
   assert.notEqual(sim.conversation.botEnabled, false);
 });
 
-test('V11 (F4): khách post.isLive / thẻ livestream hỏi hàng live → LIVE_ONLY_PRODUCT, bot vẫn bật (không chuyển người)', async () => {
+// R15 — sửa khẳng định cũ theo quyết định chủ shop 03/10 (#4): sữa hạt / hạt điều / hũ hạt khách live hỏi → STAFF_ONLY_PRODUCT
+// (chuyển nhân viên + thẻ, bot vẫn bật), không còn LIVE_ONLY_PRODUCT "giữ giá live".
+test('V11 (F4): khách post.isLive / thẻ livestream hỏi sữa hạt → STAFF_ONLY_PRODUCT (R15 #4), bot vẫn bật (không chuyển người)', async () => {
   for (const conversation of [{ post: { isLive: true, message: 'Chào cả nhà' } }, { labels: ['livestream'] }]) {
     const sim = new Sim({ botLastTemplateId: 'WELCOME', botLastReplyAt: Date.now() - 120000, ...conversation });
     const out = await sim.send('sữa hạt bao nhiêu');
-    assert.equal(out.result.templateId, 'LIVE_ONLY_PRODUCT', JSON.stringify(conversation));
+    assert.equal(out.result.templateId, 'STAFF_ONLY_PRODUCT', JSON.stringify(conversation));
     assert.notEqual(sim.conversation.botEnabled, false);
   }
 });

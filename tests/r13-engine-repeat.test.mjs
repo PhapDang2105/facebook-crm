@@ -79,13 +79,17 @@ test('gọi lại mà mô hình vẫn chọn mẫu vừa gửi / chuyển ngư�
   const handoff = await sim.send(inbox, 'Thế có 2 trang giọt nắng hả', { llm: (payload, call) => (call === 1 ? { template_id: 'CERTIFICATION' } : { template_id: 'CSKH_HANDOFF', warming: '1' }) });
   assert.equal(handoff.result.skipped, 'lặp tin vừa gửi');
   assert.notEqual(inbox.botEnabled, false);
-  // Khách lặp lại y câu vừa hỏi: nhắc "đã gửi ở trên" như cũ, không tốn lượt gọi lại.
+  // Khách lặp lại y câu vừa hỏi: không tốn lượt gọi lại.
+  // R15 (inbox2 A6, ca …990595 "Goi nho du vi ko" → "Goi nho du vi"): sửa khẳng định cũ — khách hỏi lại ngay sau câu trả lời
+  // THÔNG TIN tức là câu trước chưa đúng ý; không còn "em vừa gửi ở tin ngay trên" (REPLY_ALREADY_SENT_INFO) mà báo bạn phụ
+  // trách trả lời (STAFF_WAIT_*) + thẻ như vòng 14.
   const repeatSim = new Sim({ settings: { ruleIntent: 'off' } });
   const repeatInbox = repeatSim.inbox();
   await repeatSim.send(repeatInbox, 'có giấy chứng nhận không', { llm: { template_id: 'CERTIFICATION' } });
   const repeated = await repeatSim.send(repeatInbox, 'có giấy chứng nhận không', { llm: { template_id: 'CERTIFICATION' } });
   assert.equal(repeated.asked.length, 1);
-  assert.equal(repeated.result.templateId, 'REPLY_ALREADY_SENT_INFO');
+  assert.match(repeated.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/);
+  assert.ok(repeatInbox.labels.includes('handoff'));
 });
 
 test('ASK_TWO_BAGS ("bảng giá em gửi ở trên, lấy 2 túi vị nào") chỉ khi khách HỎI GIÁ; câu khác thì không', async () => {

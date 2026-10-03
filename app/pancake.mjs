@@ -3,7 +3,7 @@
 // tin được ghi vào hộp thư CRM (để theo dõi) rồi đưa cho bot; câu trả lời của
 // bot gửi ngược qua Public API của Pancake nên hiện ngay trong Pancake cho
 // nhân viên thấy. Tài liệu: integrations/pancake/README.md.
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
 import { applyWebhookEvents } from './meta-webhook.mjs';
@@ -1288,7 +1288,8 @@ export async function readImageForUpload(imageUrl, fetchImpl) {
   const local = ownOrigin && parsed.pathname.match(/^\/product-images\/([A-Za-z0-9-]+\.(?:png|jpe?g|webp))$/);
   if (local) {
     const filename = local[1];
-    return { buffer: await readFile(path.join(productImagesPath, filename)), filename, mime: imageMimeTypes[path.extname(filename).toLowerCase()] };
+    const file = path.join(productImagesPath, filename);
+    return { buffer: await readFile(file), filename, mime: imageMimeTypes[path.extname(filename).toLowerCase()], sourceKey: await localSourceKey(file) };
   }
   // R13 (QR): ảnh /q/brand/* của chính máy chủ này — đọc thẳng từ đĩa như /product-images/ thay vì tự gọi lại địa chỉ
   // công khai của mình (vòng qua Caddy/DNS, có lúc hết giờ làm tin ưu đãi QR mất ảnh thẻ). Tệp không đọc được (thiếu
@@ -1296,8 +1297,9 @@ export async function readImageForUpload(imageUrl, fetchImpl) {
   const brandFile = ownOrigin ? brandImageFiles[parsed.pathname] : '';
   if (brandFile) {
     try {
-      const buffer = await readFile(path.join(brandImagesPath, ...brandFile.split('/')));
-      return { buffer, filename: path.basename(brandFile), mime: imageMimeTypes[path.extname(brandFile).toLowerCase()] || 'application/octet-stream' };
+      const file = path.join(brandImagesPath, ...brandFile.split('/'));
+      const buffer = await readFile(file);
+      return { buffer, filename: path.basename(brandFile), mime: imageMimeTypes[path.extname(brandFile).toLowerCase()] || 'application/octet-stream', sourceKey: await localSourceKey(file) };
     } catch { /* thiếu tệp trên đĩa: tải qua mạng như cũ */ }
   }
   // Ảnh ngoài: máy chủ tải hộ, nên đích phải là máy công khai (không phải
@@ -1367,9 +1369,42 @@ export function splitLongText(text, limit = 1900) {
 // và nén sang JPEG trước khi tải (sharp). Tệp không phải ảnh thì phải tự nhỏ.
 export const pancakeUploadLimit = 500 * 1024;
 
+// INT-13: ảnh sản phẩm/ảnh thương hiệu trên đĩa nén một lần rồi nhớ (khoá: đường dẫn + mtime + cỡ, tối đa 50 ảnh, mỗi
+// ảnh ≤ 500 KB): trước đây mỗi lần bot gửi ảnh là đọc + nén lại bằng sharp (tới 6 lượt). Chỉ nhớ BYTES đã nén; mã tải
+// lên Pancake vẫn mới mỗi lần gửi (xem pancakeContentIdForImage).
+const fittedImageCache = new Map();
+const maximumFittedImages = 50;
+async function localSourceKey(file) {
+  try {
+    const info = await stat(file);
+    return `${file}|${info.mtimeMs}|${info.size}`;
+  } catch {
+    return '';
+  }
+}
+/** Số ảnh nén đang nhớ (test). */
+export const fittedImageCacheSize = () => fittedImageCache.size;
+
 /** Ảnh lớn hơn giới hạn của Pancake → JPEG nhỏ dần (cạnh dài 1080px, chất lượng giảm) cho tới khi lọt. */
 export async function fitImageForPancake(file, limit = pancakeUploadLimit) {
   if (!file?.buffer || file.buffer.length <= limit || !/^image\/(png|jpe?g|webp)$/i.test(file.mime || '')) return file;
+  const cacheKey = file.sourceKey ? `${file.sourceKey}|${limit}` : '';
+  const cached = cacheKey ? fittedImageCache.get(cacheKey) : null;
+  if (cached) {
+    // Dùng gần đây nhất → cuối hàng (LRU).
+    fittedImageCache.delete(cacheKey);
+    fittedImageCache.set(cacheKey, cached);
+    return { ...cached };
+  }
+  const fitted = await compressImageForPancake(file, limit);
+  if (cacheKey) {
+    fittedImageCache.set(cacheKey, fitted);
+    while (fittedImageCache.size > maximumFittedImages) fittedImageCache.delete(fittedImageCache.keys().next().value);
+  }
+  return { ...fitted };
+}
+
+async function compressImageForPancake(file, limit) {
   let sharp;
   try {
     ({ default: sharp } = await import('sharp'));
@@ -1426,11 +1461,11 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   let message;
   let partial = null;
   if (pictures.length) {
-    // Tải tuần tự, nghỉ giữa các ảnh: Pancake giới hạn 5 lần gọi mỗi giây mỗi Page.
+    // Tải tuần tự; giới hạn 5 lần gọi/giây mỗi Page do hàng đợi withPancakeSlot giữ (INT-23: bỏ nghỉ 250 ms cố định
+    // giữa các ảnh — 30 ảnh từng thêm ~7 giây trước khi khách thấy ảnh).
     const upload = async () => {
       const ids = [];
-      for (const [index, url] of pictures.entries()) {
-        if (index) await pause(250);
+      for (const url of pictures) {
         ids.push((await pancakeContentIdForImage(target.pageId, url, config, fetchImpl)).id);
       }
       return ids;
@@ -1587,8 +1622,8 @@ export async function fetchPancakeAds(adIds, config = defaultConfig, fetchImpl =
   const missing = wanted.filter(id => !(adCache.has(id) && Date.now() - adCache.get(id).at < adCacheTtlMs));
   // Pancake nhận tối đa 20 mã một lần: chia lô, không cắt bỏ phần sau.
   for (let start = 0; start < missing.length; start += 20) {
+    // Nhịp gọi do hàng đợi withPancakeSlot giữ (INT-23: bỏ nghỉ cố định giữa các lô).
     const chunk = missing.slice(start, start + 20);
-    if (start) await pause(250);
     const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/ads`, { ad_ids: chunk.join(','), type: 'ads' }, config, fetchImpl);
     for (const item of Array.isArray(body.data) ? body.data : []) {
       rememberPancakeAd(String(item.id), { at: Date.now(), name: String(item.name || '').trim(), imageUrl: String(item.image_url || ''), campaignName: String(item.campaign_name || '').trim() });
@@ -1618,7 +1653,8 @@ export async function findPancakePost(postId, { months = 12 } = {}, config = def
   for (let month = 0; month < months && !found; month += 1) {
     const since = until - monthSeconds;
     for (let pageNumber = 1; pageNumber <= 3 && !found; pageNumber += 1) {
-      // Quét lùi nhiều trang: giãn ra để không chạm giới hạn 5 lần/giây của Pancake.
+      // Quét lùi nhiều trang (việc nền, tới 36 lần gọi): cố ý giãn ra dưới trần của hàng đợi để chừa lượt cho bot
+      // gửi tin trả lời khách cùng lúc — không phải nghỉ chồng lên giới hạn tốc độ (INT-23 giữ lại có chủ đích).
       if (month || pageNumber > 1) await pause(350);
       const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/posts`, { since, until, page_number: pageNumber, page_size: 30 }, config, fetchImpl);
       const posts = Array.isArray(body.data) ? body.data : Array.isArray(body.posts) ? body.posts : [];

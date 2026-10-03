@@ -31,13 +31,14 @@ import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProdu
 import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
-import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
+import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, readLandingStore, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { posSyncStatus, recordPosSyncStatus, startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
 import { applyGiftSwapFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
-import { buildFollowUpBatch, followUpRelayErrorText, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { startSapoSync } from './sapo-sync.mjs';
+import { buildFollowUpBatch, followUpGender, followUpRelayErrorText, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote } from './order-notes.mjs';
 import { applyCustomerOrderEdits, applyPosRepush, assertManualOrderMoney, createManualOrderGuard, describeOrderEdits, duplicateManualOrderMessage, isLiveOnPos, moneyText, needsPosRepush, orderEditAction, orderProcessingNotes, posCancelRefOf, posRepushDraft, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
 import { AUDIT_ACTIONS, AUTOMATED_ACTORS, appendAudit, appendBotToggleAudit, appendLabelAudit, auditActionLabel, auditActors, createViewThrottle, labelChangeDetails, labelChangeText, queryAudit } from './audit-log.mjs';
@@ -3709,6 +3710,17 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   startPancakeSync({ chatbotDependencies, processChatbotChanges: syncBotHook });
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
+  // Sapo: mã vận đơn J&T/SPX (đơn Facebook nhân viên import từ Pancake) ghép vào đơn CRM mỗi 10 phút;
+  // nhắn mã cho khách chỉ khi SAPO_NOTIFY_CUSTOMERS=1 (mặc định chỉ ghi mã + log số tin lẽ ra gửi).
+  startSapoSync({
+    readMessagingStore,
+    updateMessagingStore,
+    readLandingStore,
+    updateLandingStore,
+    sendMessage: sendConversationMessage,
+    genderOf: followUpGender,
+    onChanged: conversationId => publishMessagingEvent({ type: 'customer-panel', conversationId })
+  });
   // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).
   startAdInsightsSync();
   // Báo cáo Lark: mặc định 08:00 gửi số liệu ngày hôm trước; trạng thái chống gửi trùng nằm trong data/processed.

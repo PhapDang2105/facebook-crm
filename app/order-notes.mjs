@@ -8,6 +8,7 @@
 //   🤖 máy tự điền, cần duyệt     ☎ số điện thoại cần gọi xác nhận
 //   ℹ thông tin thêm
 import { isUsableStreet } from './processing/locations.mjs';
+import { shipmentNote } from './sapo-tracking.mjs';
 
 export const NOTE_MARKERS = ['⚠', '⏳', '🤖', '☎', 'ℹ'];
 export const NOTE_SEPARATOR = ' · ';
@@ -141,6 +142,11 @@ function dataNotes(order) {
   if (warning && warning.level && warning.level !== 'none') notes.push(`☎ ${shortWarning(warning)}`);
   // Dưới ngưỡng cảnh báo nhưng POS có ghi bom/cảnh báo: vẫn cho nhân viên thấy.
   else if (warning?.hint) notes.push(`☎ ${warning.hint}`);
+
+  // Vận đơn từ Sapo (app/sapo-tracking.mjs): hãng, mã, trạng thái giao; chưa nhắn được mã cho khách thì nhắc nhân viên.
+  const shipment = shipmentNote(order);
+  if (shipment) notes.push(shipment);
+  if (order.shipment?.noticeVia === 'failed') notes.push(`⚠ Chưa nhắn được mã vận đơn cho khách: ${String(order.shipment.noticeError || '').slice(0, 80)}`);
 
   // Khách điền nhiều form thì mỗi form một đơn, không tự gộp; bảng Đơn hàng tự
   // ghi "cùng số điện thoại với đơn …"; nhóm được so và xử lý ở Nhập dữ liệu.

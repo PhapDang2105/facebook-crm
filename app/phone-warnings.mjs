@@ -60,9 +60,15 @@ export async function readWarningStore() {
 export function updateWarningStore(mutate) {
   return enqueueWrite(async () => {
     const store = await readWarningStore();
-    const result = await mutate(store);
-    await writeJsonAtomic(warningsPath, store);
-    return result;
+    try {
+      const result = await mutate(store);
+      await writeJsonAtomic(warningsPath, store);
+      return result;
+    } catch (error) {
+      // C6: sửa dở / ghi lỗi → bỏ bản trong bộ nhớ, lần đọc sau nạp lại tệp tốt cuối cùng.
+      cachedStore = null;
+      throw error;
+    }
   });
 }
 

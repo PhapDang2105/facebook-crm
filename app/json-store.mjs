@@ -151,17 +151,28 @@ export function createWriteQueue() {
  */
 export async function drainAllWrites({ timeoutMs = 8000 } = {}) {
   const deadline = Date.now() + timeoutMs;
-  while (busyQueues.size && Date.now() < deadline) {
-    const waits = [...busyQueues].map(handle => handle.tail());
+  while ((busyQueues.size || trackedWrites.size) && Date.now() < deadline) {
+    const waits = [...[...busyQueues].map(handle => handle.tail()), ...trackedWrites];
     let timer;
     const timeout = new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now())); });
     await Promise.race([Promise.all(waits), timeout]);
     clearTimeout(timer);
   }
-  return busyQueues.size === 0;
+  return busyQueues.size === 0 && trackedWrites.size === 0;
 }
 
-/** Số hàng ghi còn đang có việc (cho test / chẩn đoán). */
+// Lượt ghi lẻ không đi qua hàng (nối dòng vào kho lưu trữ đơn…): drainAllWrites cũng chờ.
+const trackedWrites = new Set();
+
+/** Ghi danh một lượt ghi đang chạy để drainAllWrites chờ nó. Trả lại chính promise đó (lỗi vẫn tới người gọi). */
+export function trackWrite(promise) {
+  const settled = Promise.resolve(promise).then(() => undefined, () => undefined);
+  trackedWrites.add(settled);
+  settled.then(() => trackedWrites.delete(settled));
+  return promise;
+}
+
+/** Số hàng ghi / lượt ghi lẻ còn đang có việc (cho test / chẩn đoán). */
 export function pendingWriteQueues() {
-  return busyQueues.size;
+  return busyQueues.size + trackedWrites.size;
 }

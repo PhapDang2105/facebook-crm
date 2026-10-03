@@ -8,7 +8,7 @@ import { listAllSystemOrders, reserveOrderIdInStore, takenOrderIds, uniqueOrderI
 import { parseXlsx } from './xlsx-import.mjs';
 import { buildPlainXlsx } from './xlsx-export.mjs';
 import { fillTemplateSheet } from './xlsx-template.mjs';
-import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
+import { createWriteQueue, drainAllWrites, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { auditFiltersFrom, canReadAudit, contentEtag, conversationOrdersFingerprint, etagMatches, createSeenOnce, fileVersionStamp, friendlyAdsError, friendlyAdsStatus, friendlyAiTestError, friendlyCampaignInsights, createStaffNoteWriter, hasStaffSession, pancakeWebhookDecision, publicNoticePage, purchaseLabelFingerprint, qrVisitorKey, staticCacheControl } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
@@ -31,9 +31,10 @@ import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProdu
 import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
+import { flushDecisionLog } from './processing/decision-log.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, readLandingStore, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
-import { posSyncStatus, recordPosSyncStatus, startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
+import { configurePosSync, posSyncStatus, recordPosSyncStatus, runPosSync, startPosSync } from './pos-sync.mjs';
 import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
 import { applyGiftSwapFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
@@ -42,11 +43,11 @@ import { isSapoConfigured } from './sapo.mjs';
 import { buildFollowUpBatch, followUpGender, followUpRelayErrorText, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote } from './order-notes.mjs';
 import { applyCustomerOrderEdits, applyPosRepush, assertManualOrderMoney, createManualOrderGuard, describeOrderEdits, duplicateManualOrderMessage, isLiveOnPos, moneyText, needsPosRepush, orderEditAction, orderProcessingNotes, posCancelRefOf, posRepushDraft, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
-import { AUDIT_ACTIONS, AUTOMATED_ACTORS, appendAudit, appendBotToggleAudit, appendLabelAudit, auditActionLabel, auditActors, createViewThrottle, labelChangeDetails, labelChangeText, queryAudit } from './audit-log.mjs';
+import { AUDIT_ACTIONS, AUTOMATED_ACTORS, appendAudit, appendBotToggleAudit, appendLabelAudit, auditActionLabel, auditActors, createViewThrottle, flushAudit, labelChangeDetails, labelChangeText, queryAudit } from './audit-log.mjs';
 import { BOT_ACTOR, actorOf, actorStamp, clearActorCache, clientIp, createRequireManager, isManager } from './request-actor.mjs';
 import { HTML_CSP, LOGIN_SETUP_MESSAGE, allowedWithoutLoginSetup, applySecurityHeaders, createLogLimiter, debugFlagOn, installConsoleRedaction, loginGate, loginSetupPage, safeNextPath } from './security.mjs';
-import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
-import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
+import { appendOrderToArchive, findArchiveByPhone, readOrderArchive } from './order-archive.mjs';
+import { customerPhoneKey, findExportedCustomer, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
 import { brandImageFiles, describePancakePayload, fetchPancakeConversationInfo, fetchPancakeMessages, getPancakePageConfig, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, pancakeTime, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { countQrReferrals, countQrReferralsByDay, deleteQrCode, isValidQrCode, listQrScans, qrDayKey, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
@@ -120,12 +121,12 @@ async function readProductStore() {
 // Kho sản phẩm và kho quà là hai chỗ duy nhất còn đọc–sửa–ghi mà không xếp
 // hàng: hai tab bấm gần nhau thì cả hai cùng đọc một bản, bên ghi sau xoá mất
 // thay đổi của bên ghi trước. Mọi kho khác (messaging, landing, customer-file,
-// customer-edits) đều đã đi qua một hàng đợi như thế này.
-let productWriteQueue = Promise.resolve();
+// customer-edits) đều đã đi qua một hàng đợi như thế này. createWriteQueue: lúc tắt máy chủ drainAllWrites chờ hàng này.
+const productWriteQueue = createWriteQueue();
 
 /** Đọc kho, sửa, ghi lại — trọn gói một lượt, không ai chen vào giữa. */
 function updateProductStore(mutate) {
-  const operation = productWriteQueue.then(async () => {
+  return productWriteQueue(async () => {
     const store = await readProductStore();
     const result = await mutate(store);
     // Mutator trả về `undefined` là "không đổi gì" (ví dụ không tìm thấy sản
@@ -134,17 +135,13 @@ function updateProductStore(mutate) {
     if (result !== undefined) await writeProductStore(store);
     return result;
   });
-  productWriteQueue = operation.then(() => undefined, () => undefined);
-  return operation;
 }
 
-let giftWriteQueue = Promise.resolve();
+const giftWriteQueue = createWriteQueue();
 
 /** Như trên, cho kho quà: `mutate` nhận kho hiện tại và trả về kho mới. */
 function updateGiftStore(mutate) {
-  const operation = giftWriteQueue.then(async () => writeGiftStore(await mutate(await readGiftStore())));
-  giftWriteQueue = operation.then(() => undefined, () => undefined);
-  return operation;
+  return giftWriteQueue(async () => writeGiftStore(await mutate(await readGiftStore())));
 }
 
 async function writeProductStore(store) {
@@ -405,12 +402,9 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
     const posOutcome = await updatePosOrder(result.order, { conversation })
       .then(updated => { giftSwapMissing = updated?.giftSwapMissing || []; return { ...result.order.pos, updatedAt: Date.now(), error: undefined }; })
       .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Sửa trên POS lỗi: ${error.message}` }));
-    await updateMessagingStore(store => {
-      const item = store.conversations.find(entry => entry.id === conversation.id);
-      const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
-      if (target) target.pos = posOutcome;
-      if (target && giftSwapMissing) applyGiftSwapFlag(target, giftSwapMissing);
-      return null;
+    await setOrderPosOutcome(orderId, posOutcome, {
+      conversationId: conversation.id, publish: false, landing: false,
+      extra: target => { if (target && giftSwapMissing) applyGiftSwapFlag(target, giftSwapMissing); }
     });
     result.order.pos = posOutcome;
     if (giftSwapMissing) applyGiftSwapFlag(result.order, giftSwapMissing);
@@ -442,12 +436,7 @@ async function addChatbotOrderNote(conversation, orderId, note) {
     const posOutcome = await updatePosOrderNote(result.order)
       .then(() => ({ ...result.order.pos, updatedAt: Date.now(), error: undefined }))
       .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Ghi chú lên POS lỗi: ${error.message}` }));
-    await updateMessagingStore(store => {
-      const item = store.conversations.find(entry => entry.id === conversation.id);
-      const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
-      if (target) target.pos = posOutcome;
-      return null;
-    });
+    await setOrderPosOutcome(orderId, posOutcome, { conversationId: conversation.id, publish: false, landing: false });
   }
   return { ...result, noted: true, created: false };
 }
@@ -473,12 +462,7 @@ async function cancelChatbotCustomerOrder(conversation, orderId) {
     const posOutcome = await cancelPosOrder(result.order)
       .then(() => ({ ...result.order.pos, updatedAt: Date.now(), cancelled: true, error: undefined }))
       .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Hủy trên POS lỗi: ${error.message}` }));
-    await updateMessagingStore(store => {
-      const item = store.conversations.find(entry => entry.id === conversation.id);
-      const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
-      if (target) target.pos = posOutcome;
-      return null;
-    });
+    await setOrderPosOutcome(orderId, posOutcome, { conversationId: conversation.id, publish: false, landing: false });
     result.order.pos = posOutcome;
   }
   return { ...result, cancelled: true, created: false };
@@ -825,13 +809,17 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
     }
     return cancelledNow;
   }, { unchanged: cancelledNow => !cancelledNow });
+  // P2: không có đơn landing nào cần hủy theo thì không ghi lại cả kho landing (đồng bộ chạy 5 phút/lần).
   await updateLandingStore(store => {
+    let cancelledNow = 0;
     for (const order of store.orders) {
       if (!wanted.has(String(order.id)) || order.processingStatus === 'cancelled' || order.pos?.cancelSyncedAt || /Đã hủy trên POS/.test(String(order.note || ''))) continue;
       markCancelled(order);
+      cancelledNow += 1;
       if (!changed.some(item => item.id === order.id)) changed.push({ ...order });
     }
-  });
+    return cancelledNow;
+  }, { unchanged: cancelledNow => !cancelledNow });
   for (const order of changed) await appendOrderToArchive(order).catch(() => {});
   for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
   return changed.length;
@@ -1515,14 +1503,51 @@ const conversationTarget = conversation => ({ type: 'conversation', id: String(c
 /** Ghi một mục lịch sử lên đơn ở cả hai kho (đơn hội thoại / đơn landing). */
 async function addOrderHistory(orderId, entry) {
   let found = false;
+  // P2: đơn landing (không nằm trong hội thoại) thì không ghi lại kho hội thoại ~19 MB; không thấy ở đâu thì không ghi gì.
   await updateMessagingStore(store => {
     for (const conversation of store.conversations) {
       const order = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(item => String(item.id) === String(orderId));
       if (order) { recordOrderHistory(order, entry); found = true; break; }
     }
     return null;
-  });
-  if (!found) await updateLandingStore(store => { const order = store.orders.find(item => String(item.id) === String(orderId)); if (order) recordOrderHistory(order, entry); });
+  }, { unchanged: () => !found });
+  if (!found) {
+    await updateLandingStore(store => {
+      const order = store.orders.find(item => String(item.id) === String(orderId));
+      if (order) recordOrderHistory(order, entry);
+      return Boolean(order);
+    }, { unchanged: landingFound => !landingFound });
+  }
+}
+
+/**
+ * U2: ghi kết quả POS (`pos`) lên đơn theo mã — trong hội thoại `conversationId` (nếu có) hay mọi hội thoại; không
+ * thấy thì ở kho đơn landing (trừ khi `landing: false`). `extra(order)`: sửa thêm trên cùng đơn. `publish`: báo khung
+ * khách của hội thoại vẽ lại. Không thấy đơn thì không ghi kho nào. Trả true khi đã ghi.
+ */
+async function setOrderPosOutcome(orderId, outcome, { conversationId = '', extra = null, publish = true, landing = true } = {}) {
+  const wanted = String(orderId);
+  const touched = [];
+  await updateMessagingStore(store => {
+    for (const conversation of store.conversations) {
+      if (conversationId && conversation.id !== conversationId) continue;
+      const target = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(order => String(order.id) === wanted);
+      if (!target) continue;
+      target.pos = outcome;
+      if (extra) extra(target);
+      touched.push(conversation.id);
+    }
+    return null;
+  }, { unchanged: () => !touched.length });
+  if (publish) for (const id of touched) publishMessagingEvent({ type: 'customer-panel', conversationId: id });
+  if (touched.length || !landing) return touched.length > 0;
+  return updateLandingStore(store => {
+    const target = store.orders.find(order => String(order.id) === wanted);
+    if (!target) return false;
+    target.pos = outcome;
+    if (extra) extra(target);
+    return true;
+  }, { unchanged: found => !found });
 }
 
 /** /api/auth/*, chặn khi chưa đăng nhập. Trả true khi đã tự trả lời request. */
@@ -2421,7 +2446,9 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/landing/sync-pos') {
       const payload = await readBody(request);
       const sinceHours = Math.min(24 * 30, Math.max(1, Number(payload.sinceHours) || 48));
-      const summary = await syncPosLandingOrders({ sinceHours });
+      // INT-10: cùng lượt chạy và cùng móc với vòng 5 phút (đơn Facebook/nhân viên vào hội thoại, hủy theo POS,
+      // trạng thái/nội dung POS của đơn hội thoại); vòng 5 phút đang chạy thì chờ nó xong rồi chạy lượt này.
+      const summary = await runPosSync({ sinceHours });
       if (!summary?.disabled) recordPosSyncStatus(summary);
       if (summary?.warnings?.length) console.warn(`Đồng bộ POS (tay) CẢNH BÁO: ${summary.warnings.join('; ')}`);
       audit(request, 'landing.sync_pos', { summary: `Kéo đơn landing từ POS (${sinceHours} giờ): mới ${Number(summary?.created) || 0}, cập nhật ${Number(summary?.updated) || 0}, hủy ${Number(summary?.cancelled) || 0}.` });
@@ -2756,7 +2783,8 @@ const server = http.createServer(async (request, response) => {
         // R13 (M3): tệp khách hàng lưu mã kèm tiền tố nguồn ("CB-…", "LP-…"), kho lưu trữ và hội thoại lưu mã trần →
         // khử trùng theo mã ĐÃ BỎ tiền tố (trước đây mỗi đơn đã xuất kho hiện hai lần).
         const byId = new Map();
-        const exported = key ? (await listExportedCustomers()).find(person => customerPhoneKey(person.phone) === key) : null;
+        // P4: tra đúng một khách / đúng các dòng lưu trữ của SĐT này (chỉ mục), không chép cả tệp khách và cả kho lưu trữ.
+        const exported = key ? await findExportedCustomer(key) : null;
         for (const order of exported?.orders || []) {
           byId.set(orderHistoryKey(order.id), {
             id: String(order.id),
@@ -2771,7 +2799,7 @@ const server = http.createServer(async (request, response) => {
         }
         // Một đơn có thể vừa nằm trong kho lưu trữ vừa đã xuất kho; bản ở tệp
         // khách hàng chi tiết hơn nên giữ, bản kho chỉ bù phần còn thiếu.
-        const { items } = key ? await readOrderArchive({ limit: 0 }) : { items: [] };
+        const items = key ? await findArchiveByPhone(key) : [];
         for (const record of items) {
           if (customerPhoneKey(record.phone) !== key || byId.has(orderHistoryKey(record.id))) continue;
           byId.set(orderHistoryKey(record.id), {
@@ -3335,12 +3363,15 @@ const server = http.createServer(async (request, response) => {
         changedIds.push(String(order.id));
         recordOrderHistory(order, { by, action: 'order.hide', summary: hidden ? 'Ẩn khỏi bảng Đơn hàng.' : 'Hiện lại trong bảng Đơn hàng.' });
       };
+      // P2: kho nào không có đơn nào đổi (đơn đã ẩn sẵn, mã không thuộc kho đó) thì không ghi lại.
+      let changedInMessaging = 0;
       await updateMessagingStore(store => {
         for (const conversation of store.conversations) {
           for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) if (ids.has(String(order.id))) apply(order);
         }
-      });
-      await updateLandingStore(store => { for (const order of store.orders) if (ids.has(String(order.id))) apply(order); });
+        changedInMessaging = changed;
+      }, { unchanged: () => !changedInMessaging });
+      await updateLandingStore(store => { for (const order of store.orders) if (ids.has(String(order.id))) apply(order); }, { unchanged: () => changed === changedInMessaging });
       if (changed) {
         audit(request, 'order.hide', {
           ...(changed === 1 ? { orderId: changedIds[0], target: { type: 'order', id: changedIds[0], name: '' } } : {}),
@@ -3419,12 +3450,13 @@ const server = http.createServer(async (request, response) => {
           if (updated) { ownerConversationId = conversation.id; publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id }); }
           break;
         }
-      });
+        // P2: đơn landing (không có ở đây) hay bản sửa bị từ chối (failure, đơn thật chưa đụng tới) → không ghi lại kho ~19 MB.
+      }, { unchanged: () => !updated });
       if (!updated && !failure) {
         await updateLandingStore(store => {
           const order = store.orders.find(item => item.id === orderId);
           if (order) apply(order);
-        });
+        }, { unchanged: () => !updated });
       }
       if (failure) return sendJson(response, 400, { error: failure.message });
       if (!updated) return sendJson(response, 404, { error: 'Không tìm thấy đơn này.' });
@@ -3444,14 +3476,7 @@ const server = http.createServer(async (request, response) => {
         const posOutcome = await cancelPosOrder(updated)
           .then(() => ({ ...updated.pos, updatedAt: Date.now(), cancelled: true, error: undefined }))
           .catch(error => ({ ...updated.pos, updatedAt: Date.now(), error: `Hủy trên POS lỗi: ${error.message}` }));
-        await updateMessagingStore(store => {
-          for (const conversation of store.conversations) {
-            const target = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(order => order.id === orderId);
-            if (target) { target.pos = posOutcome; publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id }); }
-          }
-          return null;
-        });
-        await updateLandingStore(store => { const target = store.orders.find(order => order.id === orderId); if (target) target.pos = posOutcome; });
+        await setOrderPosOutcome(orderId, posOutcome);
         updated.pos = posOutcome;
       }
       // Đơn đã có trên Pancake POS: sửa bên đó theo (sản phẩm, địa chỉ, phí, ghi chú); lỗi ghi lên đơn.
@@ -3462,14 +3487,7 @@ const server = http.createServer(async (request, response) => {
         const posOutcome = await updatePosOrder(updated, { conversation: owner || {} })
           .then(() => ({ ...updated.pos, updatedAt: Date.now(), error: undefined }))
           .catch(error => ({ ...updated.pos, updatedAt: Date.now(), error: `Sửa trên POS lỗi: ${error.message}` }));
-        await updateMessagingStore(store => {
-          for (const conversation of store.conversations) {
-            const target = (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).find(order => order.id === orderId);
-            if (target) { target.pos = posOutcome; publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id }); }
-          }
-          return null;
-        });
-        await updateLandingStore(store => { const target = store.orders.find(order => order.id === orderId); if (target) target.pos = posOutcome; });
+        await setOrderPosOutcome(orderId, posOutcome);
         updated.pos = posOutcome;
       }
       // warnings: [chuỗi] cảnh báo không chặn của lần sửa (rỗng khi không có) — web hiện cạnh ô SĐT.
@@ -3785,8 +3803,22 @@ process.on('uncaughtException', error => {
   console.error('Lỗi không ai bắt, thoát để khởi động lại:', error);
   process.exit(1);
 });
-// systemd restart/deploy gửi SIGTERM: ghi nốt kho hội thoại còn trong bộ nhớ (ghi gộp của đồng bộ) rồi mới thoát.
-installMessagingStoreShutdownFlush({ exit: code => Promise.resolve(qrGreetingShutdownFlush).finally(() => process.exit(code)) });
+// systemd restart/deploy gửi SIGTERM (C5, 03/10): theo thứ tự
+//  1) ngừng nhận kết nối mới (server.close) — webhook đến sau lúc này Meta/Pancake/Webcake tự gửi lại;
+//  2) gửi nốt lượt chào QR đang hẹn (tối đa 5 giây, đăng ký ở trên);
+//  3) chờ MỌI hàng ghi kho nhỏ (landing, tệp khách, cảnh báo SĐT, cài đặt, kho lưu trữ đơn…), nhật ký hoạt động
+//     và nhật ký quyết định của bot ghi xong;
+//  4) ghi nốt kho hội thoại (gồm các lượt sửa còn xếp hàng) rồi mới thoát. Hết 10 giây thì thoát dù chưa xong.
+installMessagingStoreShutdownFlush({
+  prepare: async () => {
+    server.close();
+    server.closeIdleConnections?.();
+    await qrGreetingShutdownFlush;
+    await drainAllWrites({ timeoutMs: 6000 });
+    await Promise.all([flushAudit(), flushDecisionLog()]);
+  },
+  exit: code => process.exit(code)
+});
 server.on('clientError', (error, socket) => {
   if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
   else socket.destroy();
@@ -3806,7 +3838,10 @@ server.listen(serverConfig.port, serverConfig.host, () => {
       publishMessagingEvent({ type: 'customer-panel', conversationId });
     }
   });
-  if (!process.env.POS_SYNC_DISABLED) startPosSync({ onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders, onPosContent });
+  // INT-10: cùng móc cho vòng 5 phút và nút "Kéo đơn từ POS" (runPosSync, một lượt chạy một lúc).
+  const posSyncHooks = { onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders, onPosContent };
+  configurePosSync(posSyncHooks);
+  if (!process.env.POS_SYNC_DISABLED) startPosSync(posSyncHooks);
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   // Đồng bộ định kỳ cũng đưa bot tin khách mới chưa ai trả lời (webhook Pancake bỏ sót / tạm ngưng).
   // Cùng móc như webhook: chào khách quét QR và bỏ tin quét thẻ khỏi bot.

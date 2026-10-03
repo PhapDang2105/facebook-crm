@@ -400,16 +400,16 @@ const settingsStores = new Map();
 export function chatbotSettingsStore(filePath = defaultChatbotSettingsPath()) {
   if (settingsStores.has(filePath)) return settingsStores.get(filePath);
   const enqueue = createWriteQueue();
-  let cache = null; // { mtimeMs, size, settings }
+  let cache = null; // { mtimeMs, size, ino, settings } — ino: ghi nguyên tử (đổi tên tệp) đổi inode dù cùng mtime/kích thước
 
   async function read() {
     const info = await stat(filePath).catch(() => null);
-    if (info && cache && cache.mtimeMs === info.mtimeMs && cache.size === info.size) return structuredClone(cache.settings);
+    if (info && cache && cache.mtimeMs === info.mtimeMs && cache.size === info.size && cache.ino === info.ino) return structuredClone(cache.settings);
     const stored = await readSettingsFile(filePath);
     if (!stored) return normalizeChatbotSettings(defaultChatbotSettings);
     const settings = decodeStoredSettings(stored);
     // Mốc lấy TRƯỚC khi đọc: tệp đổi giữa chừng thì lần sau mốc khác → đọc lại (không bao giờ giữ bản cũ).
-    if (info) cache = { mtimeMs: info.mtimeMs, size: info.size, settings };
+    if (info) cache = { mtimeMs: info.mtimeMs, size: info.size, ino: info.ino, settings };
     return structuredClone(settings);
   }
 

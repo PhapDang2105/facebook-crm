@@ -1,3 +1,4 @@
+import { LEGACY_SHIPMENT_TEMPLATES } from './shipment-stage.mjs';
 import { defaultMessageTemplates, isProductQuoteId } from './chatbot-templates.mjs';
 import { isInternalHost } from './network-guard.mjs';
 import { defaultComplaintKeywords } from './processing/auto-label.mjs';
@@ -194,6 +195,8 @@ export function normalizeChatbotSettings(input = {}, current = null) {
   // stored under an old PRICE_<sản phẩm> id is a stale price: dropped.
   const stored = value.messageTemplates && typeof value.messageTemplates === 'object' ? value.messageTemplates : {};
   const submitted = { ...defaultMessageTemplates(), ...stored };
+  // 03/10: mẫu vận đơn còn đúng lời mặc định cũ (chưa ai sửa) theo lời mới của seed.
+  for (const [key, text] of Object.entries(LEGACY_SHIPMENT_TEMPLATES)) if (submitted[key] === text) submitted[key] = defaultMessageTemplates()[key];
   // Texts saved before {title} existed still spell out "anh/ chị"; they are
   // rewritten to the placeholder so the bot addresses the customer properly.
   const placeholderHonorific = text => String(text ?? '')

@@ -20,6 +20,8 @@ const templates = Object.fromEntries(Object.entries(defaultMessageTemplates()).m
 // {title} in the shipped templates renders as the neutral form when gender is unknown.
 const neutral = text => text.replaceAll('{Title}', 'Anh/chị').replaceAll('{title}', 'anh/chị');
 
+const giftText = (key, options) => catalog.giftsForKey(key, options).map(gift => gift.name).join(' + ');
+
 test('giá lẻ + ship cho 1 sản phẩm, giá combo và miễn ship từ 2 — khớp bảng giá gốc', () => {
   const rows = [
     [[['GRA-XANH-Z450', 1]], 189000, ''], [[['GRA-XANH-Z450', 2]], 298000, 'Miễn phí vận chuyển'], [[['GRA-XANH-Z450', 3]], 447000, gift3],
@@ -121,9 +123,9 @@ test('quà "chỉ khách livestream" (livestreamOnly): khách thường không c
     assert.equal(live.total, 298000);
     assert.equal(plain.total, 298000);
     assert.equal(pricing.priceBasket([{ sku: 'GRA-XANH-Z450', quantity: 3 }], { livestream: true }).gift, gift3);
-    // giftTextForKey / shippingFeeForKey / quoteTiers nhận cùng tuỳ chọn.
-    assert.equal(pricing.giftTextForKey('GRA-XANH-Z450=2'), 'Miễn phí vận chuyển');
-    assert.equal(pricing.giftTextForKey('GRA-XANH-Z450=2', { livestream: true }), 'Miễn phí vận chuyển + Quà Tặng LIVE');
+    // giftsForKey / shippingFeeForKey / quoteTiers nhận cùng tuỳ chọn.
+    assert.equal(giftText('GRA-XANH-Z450=2'), 'Miễn phí vận chuyển');
+    assert.equal(giftText('GRA-XANH-Z450=2', { livestream: true }), 'Miễn phí vận chuyển + Quà Tặng LIVE');
     assert.equal(pricing.shippingFeeForKey('GRA-XANH-Z450=2', { livestream: true }), 0);
     assert.deepEqual(pricing.quoteTiers('túi xanh').tiers.map(tier => tier.gifts), [[], [], ['Bộ bát gáo dừa', 'Muỗng dừa']]);
     assert.deepEqual(pricing.quoteTiers('túi xanh', { livestream: true }).tiers.map(tier => tier.gifts), [[], ['Quà Tặng LIVE'], ['Bộ bát gáo dừa', 'Muỗng dừa']]);
@@ -312,8 +314,8 @@ test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu 
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   catalog.reloadCatalog();
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 1 }).total, 219000);
-  assert.equal(pricing.giftTextForKey('GRA-XANH-Z450=3'), 'Bộ bát gáo dừa');
-  assert.equal(pricing.giftTextForKey('GRA-NAU-Z350=3'), 'Miễn phí vận chuyển + Bộ bát gáo dừa');
+  assert.equal(giftText('GRA-XANH-Z450=3'), 'Bộ bát gáo dừa');
+  assert.equal(giftText('GRA-NAU-Z350=3'), 'Miễn phí vận chuyển + Bộ bát gáo dừa');
   // 2 túi xanh không còn được miễn ship → chịu phí ship mới; 2 túi nâu cũng vậy vì chưa đủ 3.
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 2 }).total, 298000 + 20000);
   assert.equal(basket({ sku: 'GRA-NAU-Z350', quantity: 2 }).total, 288000 + 20000);

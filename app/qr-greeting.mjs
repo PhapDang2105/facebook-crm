@@ -336,6 +336,9 @@ export function createQrGreeter({
       const run = async () => {
         timers.delete(conversation.id);
         pendingRuns.delete(conversation.id);
+        // INT-31: phần nào của ưu đãi đã (hay có thể đã) tới khách thì coi như đã chào, kể cả khi phần sau lỗi —
+        // trước đây lỗi phần chữ xoá mốc đã chào, khách quét lại trong 6 giờ nhận ảnh thẻ lần nữa.
+        const sentKinds = [];
         try {
           // Mốc đã chào lưu trong kho (đọc lại lúc khởi động) có thể về SAU khi hẹn giờ: xét lại lúc gửi.
           await restored;
@@ -386,7 +389,6 @@ export function createQrGreeter({
             return;
           }
           const sendPart = scheduleSend ? payload => scheduleSend(conversation, payload, change) : payload => send(conversation, payload);
-          const sentKinds = [];
           for (const part of parts) {
             if (part.type === 'image') {
               try {
@@ -408,8 +410,14 @@ export function createQrGreeter({
           log(`QR: đã gửi ưu đãi cho ${label} (${sentKinds.join('+')})`);
         } catch (error) {
           // Ngoài cửa sổ 24h Meta trả lỗi ở đây — đó cũng là kết quả đáng ghi lại.
-          logError(`QR: KHÔNG gửi được ưu đãi cho ${label}: ${error.message}`);
-          greetedAt.delete(conversation.id);
+          if (sentKinds.length || error?.unknownDelivery) {
+            logError(`QR: ưu đãi cho ${label} gửi dở / không rõ đã tới (${sentKinds.join('+') || 'chưa phần nào chắc chắn'}): ${error.message} — coi như đã chào`);
+            greetedAt.set(conversation.id, now());
+            persistGreeted(conversation, now());
+          } else {
+            logError(`QR: KHÔNG gửi được ưu đãi cho ${label}: ${error.message}`);
+            greetedAt.delete(conversation.id);
+          }
         } finally {
           pendingFinish.delete(conversation.id);
           finish(change);

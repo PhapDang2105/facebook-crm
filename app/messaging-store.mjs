@@ -316,12 +316,28 @@ process.on('beforeExit', () => {
   flushMessagingStore().catch(error => console.error(`Không ghi được kho hội thoại lúc thoát: ${error.message}`));
 });
 
+/**
+ * Lúc tắt (C5): chờ các lượt sửa đang xếp hàng chạy xong (kể cả lượt chúng xếp thêm), rồi ghi tới khi không còn
+ * thay đổi nào chưa ghi. Trước đây chỉ ghi các thay đổi có tới lúc gọi: lượt sửa đến sau (webhook vừa nhận) mất.
+ */
+export async function drainMessagingStore({ rounds = 5 } = {}) {
+  for (let round = 0; round < rounds; round += 1) {
+    const queued = writeQueue;
+    await queued;
+    await flushMessagingStore();
+    if (queued === writeQueue && !messagingStoreHasPendingWrites()) return;
+  }
+}
+
 let shutdownInstalled = false;
 /**
  * Tắt tiến trình (systemd gửi SIGTERM khi restart/deploy): ghi nốt thay đổi còn trong bộ nhớ rồi
  * mới thoát (chờ tối đa `timeoutMs`). Gọi một lần từ server.mjs.
+ * `prepare` chỉ được tối đa `prepareTimeoutMs` (R1-04): quá thì bỏ chờ và ghi kho hội thoại luôn — kho này
+ * (vài chục MB, nhiều lượt ghi gộp: mốc bám đuổi, báo vận đơn…) quan trọng hơn các việc dọn dẹp trong prepare.
+ * `timeoutMs` 30 giây: còn xa dưới hạn dừng mặc định 90 giây của systemd (deploy/facebook-crm.service).
  */
-export function installMessagingStoreShutdownFlush({ signals = ['SIGTERM', 'SIGINT'], timeoutMs = 10000, exit = code => process.exit(code) } = {}) {
+export function installMessagingStoreShutdownFlush({ signals = ['SIGTERM', 'SIGINT'], timeoutMs = 30000, prepareTimeoutMs = 4000, exit = code => process.exit(code), prepare = null } = {}) {
   if (shutdownInstalled) return;
   shutdownInstalled = true;
   let stopping = false;
@@ -333,7 +349,19 @@ export function installMessagingStoreShutdownFlush({ signals = ['SIGTERM', 'SIGI
         console.error('Hết giờ chờ ghi kho hội thoại lúc tắt, thoát.');
         exit(1);
       }, timeoutMs);
-      flushMessagingStore()
+      // `prepare` (server.mjs): ngừng nhận request, chờ các kho nhỏ ghi xong… — lỗi ở đó không chặn việc ghi kho này.
+      let prepareTimer = null;
+      const prepareDeadline = new Promise(resolve => {
+        prepareTimer = setTimeout(() => {
+          console.error('Chuẩn bị tắt quá lâu, bỏ chờ và ghi kho hội thoại.');
+          resolve();
+        }, prepareTimeoutMs);
+      });
+      Promise.resolve()
+        .then(() => Promise.race([Promise.resolve(typeof prepare === 'function' ? prepare() : undefined), prepareDeadline]))
+        .catch(error => console.error(`Lỗi khi chuẩn bị tắt: ${error?.message || error}`))
+        .finally(() => clearTimeout(prepareTimer))
+        .then(() => drainMessagingStore())
         .then(() => exit(0), error => {
           console.error(`Không ghi được kho hội thoại lúc tắt: ${error.message}`);
           exit(1);

@@ -1,20 +1,18 @@
 // Nhân sự (Cài đặt → Nhân sự): danh sách người dùng CRM, chuẩn bị cho đăng nhập.
 // Lưu ở data/processed/staff.json (đổi bằng STAFF_PATH). Mật khẩu chỉ lưu chuỗi băm
 // scrypt (hashPassword của app/auth.mjs); API và giao diện không bao giờ trả chuỗi băm.
-// Nhân viên đang làm và đã đặt mật khẩu được thêm vào danh sách đăng nhập (staffLoginUsers).
+// Nhân viên đang làm và đã đặt mật khẩu được thêm vào danh sách đăng nhập (staffLoginAccounts).
 // Không xoá nhân viên: chuyển "Đã nghỉ" để giữ lịch sử (đơn, tin nhắn còn ghi tên họ).
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { hashPassword } from './auth.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 
 export const staffPath = process.env.STAFF_PATH || path.join(projectRoot, 'data', 'processed', 'staff.json');
 export const STAFF_ROLES = Object.freeze({ admin: 'Quản trị', staff: 'Nhân viên' });
 export const MIN_PASSWORD_LENGTH = 8;
 const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,31}$/;
-
-let writeQueue = Promise.resolve();
 
 function emptyStore() {
   return { items: [], updatedAt: 0 };
@@ -51,34 +49,29 @@ function normalizeMember(item) {
   };
 }
 
+/**
+ * Chưa có tệp → rỗng. Lỗi đọc HAY tệp hỏng → NÉM (cố ý khác json-store, không cất .corrupt rồi coi là rỗng):
+ * Nhân sự rỗng là mọi tài khoản nhân viên mất đăng nhập, lần lưu sau ghi đè danh sách thật. Người gọi
+ * (refreshLoginUsers) giữ danh sách đăng nhập cũ khi đọc lỗi.
+ */
 export async function readStaffStore() {
-  try {
-    const raw = JSON.parse(await readFile(staffPath, 'utf8'));
-    return { items: (Array.isArray(raw?.items) ? raw.items : []).map(normalizeMember).filter(Boolean), updatedAt: Number(raw?.updatedAt) || 0 };
-  } catch (error) {
-    if (error.code === 'ENOENT') return emptyStore();
-    throw new Error(`Không đọc được danh sách nhân sự: ${error.message}`);
-  }
+  const raw = await readJsonFile(staffPath, { fallback: null, expect: 'any', label: 'Danh sách nhân sự', onCorrupt: 'throw' });
+  if (raw === null) return emptyStore();
+  return { items: (Array.isArray(raw?.items) ? raw.items : []).map(normalizeMember).filter(Boolean), updatedAt: Number(raw?.updatedAt) || 0 };
 }
 
-async function writeStaffStore(store) {
-  await mkdir(path.dirname(staffPath), { recursive: true });
-  const temporary = `${staffPath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
-  await rename(temporary, staffPath);
-}
+// H5: ghi nguyên tử qua json-store (tệp tạm riêng + fsync + rename) và một hàng ghi đã ghi danh (tắt máy chủ chờ xong).
+const enqueueWrite = createWriteQueue();
 
 /** Một lần sửa kho tại một thời điểm (hai người lưu cùng lúc không đè nhau). */
 function updateStaffStore(mutate) {
-  const run = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const store = await readStaffStore();
     const result = await mutate(store);
     store.updatedAt = Date.now();
-    await writeStaffStore(store);
+    await writeJsonAtomic(staffPath, store);
     return result;
   });
-  writeQueue = run.catch(() => {});
-  return run;
 }
 
 /** Bản gửi ra giao diện: không có chuỗi băm, chỉ biết đã đặt mật khẩu chưa. */
@@ -146,14 +139,8 @@ export async function saveStaffMember(input = {}, { id = '', reservedUsernames =
   });
 }
 
-/** Tên đăng nhập → chuỗi băm của nhân viên đang làm đã đặt mật khẩu (cho app/auth.mjs). */
-export async function staffLoginUsers() {
-  const store = await readStaffStore().catch(() => emptyStore());
-  return new Map(store.items.filter(item => item.active && item.passwordHash).map(item => [item.username, item.passwordHash]));
-}
-
 /**
- * Như staffLoginUsers nhưng kèm phiên bản phiên: tên → { hash, version } (cho createAuth).
+ * Nhân viên đang làm có mật khẩu: tên đăng nhập → { hash, version } (phiên bản phiên, cho createAuth).
  * KHÔNG nuốt lỗi đọc kho: người gọi giữ danh sách cũ khi đĩa trục trặc, thay vì xoá hết
  * tài khoản (xoá hết = đăng nhập tắt).
  */
@@ -179,13 +166,6 @@ export function matchStaffByPancakeName(name, members = []) {
     if (found.length > 1) return found.find(member => member.active) || null;
   }
   return null;
-}
-
-/** Như trên, đọc kho Nhân sự (lỗi đọc → null). */
-export async function staffByPancakeName(name) {
-  const store = await readStaffStore().catch(() => emptyStore());
-  const member = matchStaffByPancakeName(name, store.items);
-  return member ? { username: member.username, name: member.name } : null;
 }
 
 /** Nhân viên theo tên đăng nhập (đang làm), để biết vai trò của phiên. */

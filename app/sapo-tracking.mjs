@@ -15,6 +15,7 @@
 // gửi qua cầu nối Pancake (tiện ích Pancake gửi được ngoài 24 giờ).
 import { isCancelledOrder, isIncompleteOrder } from './order-facts.mjs';
 import { SHIPMENT_STAGES, STAGE_TEMPLATES, shipmentStage, shipmentStageLabel } from './shipment-stage.mjs';
+import { MESSENGER_WINDOW_MARGIN_MS, MESSENGER_WINDOW_MS, messengerWindowOpen } from './messenger-window.mjs';
 export * from './shipment-stage.mjs';
 
 const HOUR = 60 * 60 * 1000;
@@ -24,7 +25,7 @@ const shipmentMatchAfterMs = 2 * HOUR;
 // Giai đoạn đã qua quá lâu thì không báo nữa (tin "đang giao" sau 2 ngày là sai sự thật).
 export const shipmentStageNoticeMaxAgeMs = 2 * DAY;
 // Messenger: tin tự động chỉ gửi được khi khách nhắn hộp thư trong 24 giờ (chừa 1 giờ như bám đuổi).
-export const shipmentNoticeWindowMs = 23 * HOUR;
+export const shipmentNoticeWindowMs = MESSENGER_WINDOW_MS - MESSENGER_WINDOW_MARGIN_MS;
 
 
 const phoneKey = value => String(value || '').replace(/\D/g, '').slice(-9);
@@ -177,12 +178,6 @@ export const sameCustomerInbox = (store, conversation) => conversation.source !=
   ? conversation
   : (store.conversations || []).find(item => item.source !== 'comment' && item.pageId === conversation.pageId && item.psid === conversation.psid) || null;
 
-function lastCustomerAt(store, inbox) {
-  const messages = Array.isArray(store.messages?.[inbox.id]) ? store.messages[inbox.id] : [];
-  const fromMessages = messages.reduce((latest, message) => message?.direction === 'incoming' ? Math.max(latest, Number(message.createdAt) || 0) : latest, 0);
-  return Math.max(Number(inbox.lastCustomerMessageAt) || 0, fromMessages);
-}
-
 export const notifiedStage = shipment => String(shipment?.notifiedStage || '');
 
 /** Page (bot hay nhân viên) đã tự nhắn mã vận đơn này trong hội thoại chưa. */
@@ -215,12 +210,12 @@ export function shipmentNoticePlan(store, conversation, order, { now = Date.now(
   // Tin đầu (chưa báo gì) luôn là tin mã vận đơn, trừ khi đơn đã giao xong (chỉ còn lời cảm ơn).
   const templateId = !done && stage !== 'delivered' ? STAGE_TEMPLATES.created : STAGE_TEMPLATES[stage];
   if (quietHour) return { action: 'wait', reason: 'giờ nghỉ (22h–7h)' };
-  if (now - lastCustomerAt(store, inbox) > shipmentNoticeWindowMs) return { action: 'queue', inbox, stage, templateId, reason: 'ngoài 24 giờ Messenger' };
+  if (!messengerWindowOpen(store, inbox, { now })) return { action: 'queue', inbox, stage, templateId, reason: 'ngoài 24 giờ Messenger' };
   return { action: 'send', inbox, stage, templateId };
 }
 
 /** Ghi dấu đã báo một giai đoạn (lịch sử ngắn để nhân viên xem lại) hay lỗi gửi. */
-export function markShipmentNotified(shipment, { stage, via, at = Date.now(), error = '' }) {
+export function markShipmentNotified(shipment, { stage, via, at = Date.now(), error = '', uncertain = false }) {
   if (!shipment) return;
   if (error) {
     // Đếm số lần lỗi của đúng giai đoạn này (giai đoạn mới thì đếm lại): tự gửi qua cầu nối dừng sau 2 lần.
@@ -229,7 +224,8 @@ export function markShipmentNotified(shipment, { stage, via, at = Date.now(), er
     return;
   }
   const history = Array.isArray(shipment.notices) ? shipment.notices : [];
-  Object.assign(shipment, { notifiedStage: stage, notifiedAt: at, notices: [...history, { stage, via, at }].slice(-8) });
+  // `uncertain`: gửi hết giờ chờ, không rõ đã tới khách — vẫn tính là đã báo (không gửi lại).
+  Object.assign(shipment, { notifiedStage: stage, notifiedAt: at, notices: [...history, { stage, via, at, ...(uncertain ? { uncertain: true } : {}) }].slice(-8) });
   delete shipment.noticeError;
   delete shipment.noticeErrorAt;
   delete shipment.noticeErrorStage;

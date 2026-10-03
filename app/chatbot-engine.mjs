@@ -1,6 +1,6 @@
 import { asksToAdd, buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, phoneLooksShort, renderChatbotReply, sanitizeModelAnswer, withoutInviteTail } from './chatbot-templates.mjs';
 import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
-import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
+import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, loadLocationIndex, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { AD_MISMATCH_COMPLAINT, autoLabelEventsFor, foldVietnamese, isComplaint, mentionsOtherSeller, shortBadTaste } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
@@ -19,6 +19,8 @@ import { decisionLabelOf, intentRowOf } from './processing/intent-features.mjs';
 import { formatExamples, loadExampleBank, nearestExamples } from './processing/example-bank.mjs';
 import { appendDecisionLog } from './processing/decision-log.mjs';
 import { gateCheck } from './processing/llm-router.mjs';
+import { isOrderishText, scheduleStaffIdleRecheck, staffIdleDelayMs, staffIdleReason } from './processing/staff-idle.mjs';
+import { messengerWindowOpen } from './messenger-window.mjs';
 
 // Mô hình tầng (processing/intent-cascade.mjs, đang viết): nạp động MỘT lần, thiếu tệp / lỗi nạp → null
 // (engine chạy như không có). Test đưa mô hình giả qua dependencies.predictCascade (+ cascadeGroupOf).
@@ -35,6 +37,8 @@ export async function warmUpChatbotModels() {
   let intent = false;
   let cascade = false;
   try { intent = Boolean(loadIntentModel()); } catch (error) { console.warn(`Không nạp sẵn được mô hình nhỏ: ${error.message}`); }
+  // Chỉ mục địa giới (~1,5 s đọc CSV đồng bộ), danh mục sản phẩm và quà: nạp sẵn thay vì chặn tin địa chỉ đầu tiên.
+  try { loadLocationIndex(); getCatalogProducts(); getGifts(); } catch (error) { console.warn(`Không nạp sẵn được địa giới/danh mục: ${error.message}`); }
   try {
     const cascadeModule = await loadCascadeModule();
     cascade = Boolean(typeof cascadeModule?.loadCascadeModel === 'function' && cascadeModule.loadCascadeModel());
@@ -718,8 +722,10 @@ function buildMemoryTurns({ recentMessages = [], message, settings }) {
   // Bản cũ (mặc định): từng tin, tin Page cắt 160 ký tự, tin khách 300. Bản gọn
   // (settings.contextTrim.memory) chưa bật: A/B 25/09 chưa chứng minh giữ độ chính xác.
   if (settings?.contextTrim?.memory !== true) {
+    // Bỏ tin quảng cáo / biên nhận đơn / tệp đính kèm / tin hệ thống (memoryNoise) như bản gọn — chỉ là nhiễu cho mô hình.
     return recentMessages
-      .filter(item => item && item.id !== message?.id && String(item.text || '').trim())
+      .filter(item => item && item.id !== message?.id && String(item.text || '').trim()
+        && !['ad', 'order-receipt', 'attachment'].includes(item.type) && !memoryNoise.test(String(item.text).replace(/\s+/g, ' ').trim()))
       .slice(-limit)
       .map(item => {
         const text = String(item.text).replace(/\s+/g, ' ').trim();
@@ -812,14 +818,29 @@ function hashText(text) {
   return hash.toString(16);
 }
 
+// Lượt tạo cache đang chạy theo khóa (R1-05): lô bot chạy song song 3 lượt cùng lúc sau khởi động / lúc
+// cache hết hạn không tạo 3 cachedContents trùng (2 cái mồ côi tính tiền 1 giờ). Hỏng thì bỏ, lượt sau tạo lại.
+const promptCacheInFlight = new Map();
+
 export function clearPromptCaches() {
   promptCaches.clear();
+  promptCacheInFlight.clear();
 }
 
-async function promptCacheFor({ endpoint, model, systemPrompt, accessToken, fetchImpl }) {
-  const key = `${model}:${hashText(systemPrompt)}`;
+async function promptCacheFor(options) {
+  const key = `${options.model}:${hashText(options.systemPrompt)}`;
   const entry = promptCaches.get(key);
   if (entry && entry.expiresAt > Date.now() + 60000) return entry.name;
+  const running = promptCacheInFlight.get(key);
+  if (running) return running;
+  const pending = createPromptCache(options, key).finally(() => {
+    if (promptCacheInFlight.get(key) === pending) promptCacheInFlight.delete(key);
+  });
+  promptCacheInFlight.set(key, pending);
+  return pending;
+}
+
+async function createPromptCache({ endpoint, model, systemPrompt, accessToken, fetchImpl }, key) {
   const root = endpoint.replace(/\/publishers\/google\/models\/.*$/, '');
   const project = root.match(/\/projects\/([^/]+)\/locations\/([^/]+)/);
   if (!project) return '';
@@ -1135,6 +1156,39 @@ async function noteForStaff(dependencies, conversation, note, summary = '') {
   await Promise.resolve(dependencies.addStaffNote(conversation, String(note || '').slice(0, 500))).catch(error => console.warn(`Ghi chú nhân viên lỗi (${conversation.id}): ${error.message}`));
 }
 
+/**
+ * Chủ shop 03/10 (processing/staff-idle.mjs): lượt kiểm lại sau khi bot im vì "nhân viên đang xử lý" với tin đặt hàng của khách
+ * (hộp thư). Đọc lại hội thoại: bot đã tắt, đã có tin Page (nhân viên hay bot) sau tin khách, hay tin khách chưa có ý đặt hàng
+ * → thôi. Tin khách mới nhất chưa đủ `idleMs` → hẹn lại phần còn thiếu. Còn lại: chạy luồng trả lời thường cho tin khách mới
+ * nhất (gộp các tin từ sau tin Page cuối như thường) với cờ staffIdleTakeover, ghi chú cho nhân viên.
+ */
+async function staffIdleRecheck(conversationId, dependencies, idleMs) {
+  const { getConversation, listMessages } = dependencies;
+  const conversation = getConversation ? await getConversation(conversationId).catch(() => null) : null;
+  if (!conversation || conversation.botEnabled === false || conversation.source === 'comment') return null;
+  const stored = await Promise.resolve(listMessages(conversationId)).catch(() => []);
+  const list = (Array.isArray(stored) ? stored : []).filter(item => !isPageSystemNotice(item));
+  const lastPage = list.findLastIndex(item => item?.direction === 'outgoing');
+  const waiting = list.slice(lastPage + 1).filter(item => item?.direction === 'incoming' && !isSilentCustomerMessage(item));
+  const latest = waiting.at(-1);
+  if (!latest) return null;
+  if (!waiting.some(item => (item.type || 'text') === 'text' && (isOrderishText(item.text) || commentBasket(String(item.text || '')).length > 0))) return null;
+  const left = idleMs - (Date.now() - (Number(latest.createdAt) || 0));
+  if (left > 1000) {
+    scheduleStaffIdleRecheck(conversationId, left, () => staffIdleRecheck(conversationId, dependencies, idleMs));
+    return null;
+  }
+  const reason = staffIdleReason(idleMs);
+  console.log(`Bot nhận đơn: ${reason} (${conversationId})`);
+  const results = await processChatbotChanges([{ type: 'message', conversation, message: latest, staffIdleTakeover: true, staffIdleReason: reason }], dependencies);
+  const result = results.find(item => item?.conversationId === conversationId) || null;
+  if (result) Object.assign(result, { staffIdleTakeover: true, reason });
+  if (result && !result.skipped && !result.error) {
+    await noteForStaff(dependencies, conversation, `Bot đã tự nhận đơn (${reason}): khách gửi thông tin đặt hàng mà chưa ai của Page trả lời. Nhân viên kiểm lại đơn/tin bot vừa gửi.`, reason);
+  }
+  return result;
+}
+
 // Tin hệ thống của Messenger về cuộc gọi ("Bạn đã bỏ lỡ cuộc gọi…") không phải lời khách.
 const callSystemMessage = /bỏ lỡ cuộc gọi|có thể gọi cho .* trong 7 ngày|đã gọi cho bạn|cuộc gọi (thoại|video) đã kết thúc|missed (a )?call/i;
 
@@ -1172,6 +1226,9 @@ export function hasNewerCustomerMessage(recentMessages, current) {
 // Ảnh sản phẩm chưa gửi được sau tin nhắn riêng từ bình luận (Facebook chặn
 // tới khi khách nhắn vào Messenger): giữ theo khách, gửi ngay khi khách nhắn lại.
 const pendingInboxImages = new Map();
+/** Lỗi gửi mà tin có thể đã tới khách (gửi dở INT-03, hết giờ chờ Pancake): người gọi coi như đã gửi, không gửi lại. */
+export const sendMaybeDelivered = error => Boolean(error?.partial || error?.unknownDelivery || error?.code === 'PANCAKE_SEND_UNCERTAIN');
+
 const pendingImagesTtl = 3 * 24 * 60 * 60 * 1000;
 export function rememberPendingImages(pageId, psid, images) {
   if (!pageId || !psid || !images?.length) return;
@@ -1505,11 +1562,33 @@ export function isActiveOrder(order) {
   return Boolean(order) && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy';
 }
 
+// Số lượt (khách khác nhau) của một lô chạy cùng lúc.
+export const CHATBOT_BATCH_CONCURRENCY = 3;
+
+/** Bộ giới hạn nhỏ: tối đa `max` tác vụ async chạy cùng lúc, còn lại chờ theo thứ tự xin. */
+function createLimiter(max) {
+  let active = 0;
+  const waiting = [];
+  const next = () => {
+    if (active >= max || !waiting.length) return;
+    active += 1;
+    const { task, resolve, reject } = waiting.shift();
+    Promise.resolve().then(task).then(resolve, reject).finally(() => { active -= 1; next(); });
+  };
+  return task => new Promise((resolve, reject) => { waiting.push({ task, resolve, reject }); next(); });
+}
+
 export async function processChatbotChanges(changes, dependencies) {
   const { readSettings } = dependencies;
   const settings = await readSettings();
   if (!settings.enabled) return [];
   const results = [];
+  // Lô nhiều tin (đồng bộ bù, backlog sau khởi động, webhook nhiều sự kiện): khách KHÁC NHAU chạy song song, tối đa
+  // CHATBOT_BATCH_CONCURRENCY lượt cùng lúc (giữ hạn mức Vertex) — khách B không phải chờ lượt chậm của khách A
+  // (chờ gộp tin, chờ giỏ Shop, LLM thử lại). Tin của CÙNG một khách vẫn nối tiếp đúng thứ tự qua hàng đợi theo khách:
+  // xếp hàng ngay khi duyệt lô, chỉ xin chỗ chạy khi tới lượt trong hàng của khách đó.
+  const limit = createLimiter(CHATBOT_BATCH_CONCURRENCY);
+  const runs = [];
   for (const change of changes) {
     // `updated`: tin cũ vừa có thêm dữ liệu (ảnh có URL) — hộp thư vẽ lại, bot không trả lời lần hai.
     if (change.type !== 'message' || change.message?.direction !== 'incoming' || !change.conversation || change.updated) continue;
@@ -1517,18 +1596,15 @@ export async function processChatbotChanges(changes, dependencies) {
     const inFlightKey = `${change.conversation.id}:${change.message.id || change.message.mid || change.message.createdAt}`;
     if (inFlightMessages.has(inFlightKey)) { results.push({ conversationId: change.conversation.id, skipped: 'đang xử lý tin này' }); continue; }
     inFlightMessages.add(inFlightKey);
-    try {
-      // Hàng đợi theo KHÁCH (pageId:psid): bình luận và hộp thư của cùng một
-      // người nối tiếp nhau, hai bình luận liền nhau không chạy song song.
-      const queueKey = change.conversation.pageId && change.conversation.psid ? `${change.conversation.pageId}:${change.conversation.psid}` : change.conversation.id;
-      await queueForConversation(queueKey, () => answerChange(change, settings, results, dependencies));
-    } catch (error) {
+    // Hàng đợi theo KHÁCH (pageId:psid): bình luận và hộp thư của cùng một
+    // người nối tiếp nhau, hai bình luận liền nhau không chạy song song.
+    const queueKey = change.conversation.pageId && change.conversation.psid ? `${change.conversation.pageId}:${change.conversation.psid}` : change.conversation.id;
+    runs.push(queueForConversation(queueKey, () => limit(() => answerChange(change, settings, results, dependencies)))
       // Một hội thoại hỏng (kho tin không ghi được…) không làm rơi các tin còn lại trong lô.
-      results.push({ conversationId: change.conversation.id, error: error.message });
-    } finally {
-      inFlightMessages.delete(inFlightKey);
-    }
+      .catch(error => { results.push({ conversationId: change.conversation.id, error: error.message }); })
+      .finally(() => { inFlightMessages.delete(inFlightKey); }));
   }
+  await Promise.all(runs);
   // Bot im (nhân viên vừa trả lời, gộp tin, lặp…): ghi một dòng để rà được về sau.
   for (const item of results) if (item.skipped && item.skipped !== 'gộp với tin sau') console.log(`Bot bỏ qua: ${item.skipped} (${item.conversationId})`);
   return results;
@@ -1832,7 +1908,11 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const staffRecently = staffMessages.some(item => Date.now() - (Number(item.createdAt) || 0) < 24 * 60 * 60 * 1000);
     const handoffLabelled = conversationLabels.some(label => /^(consulting|handoff)$/.test(label));
     const staffWithin2h = staffMessages.some(item => Date.now() - (Number(item.createdAt) || 0) < 2 * 60 * 60 * 1000);
-    if (staffAfterBot || (staffLabelled && staffRecently) || (handoffLabelled && staffWithin2h)) {
+    // Chủ shop 03/10 (processing/staff-idle.mjs): lượt kiểm lại "nhân viên im 5 phút" sau tin đặt hàng của khách (hộp thư) bỏ qua
+    // phần "nhân viên nhắn sau bot / thẻ cần người + nhân viên nhắn trong 2 giờ"; khiếu nại/bảo hành vẫn giữ bot im.
+    const staffIdleTakeover = change.staffIdleTakeover === true && conversation.source !== 'comment';
+    if (staffIdleTakeover) trace.staffIdle = { takeover: true, reason: String(change.staffIdleReason || staffIdleReason()) };
+    if ((staffLabelled && staffRecently) || (!staffIdleTakeover && (staffAfterBot || (handoffLabelled && staffWithin2h)))) {
       // Vòng 12 (B4 #4): bình luận ĐẶT HÀNG/hỏi giá trong lúc nhân viên đang chat hộp thư: không để bình luận trơ trọi
       // (35 phút không ai trả lời) — lời công khai ngắn "bạn phụ trách nhắn mình ngay" + thẻ cần người + ẩn SĐT.
       if (conversation.source === 'comment' && settings.responseMode === 'automatic' && message.type === 'text' && isOrderComment(message.text)) {
@@ -1852,6 +1932,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         }
         results.push({ conversationId: conversation.id, skipped: 'nhân viên đang xử lý', ...(staffPublic ? { publicNotice: true } : {}) });
         return;
+      }
+      // Hộp thư, không phải khiếu nại/bảo hành, khách vừa gửi tin đặt hàng: hẹn kiểm lại — nhân viên im 5 phút thì bot nhận đơn.
+      if (conversation.source !== 'comment' && !(staffLabelled && staffRecently) && !staffIdleTakeover && message.type === 'text'
+        && bundle.some(item => isOrderishText(item?.text) || commentBasket(String(item?.text || '')).length > 0)) {
+        const idleMs = Number(dependencies.staffIdleMs ?? staffIdleDelayMs());
+        if (scheduleStaffIdleRecheck(conversation.id, idleMs, () => staffIdleRecheck(conversation.id, dependencies, idleMs))) trace.staffIdle = { scheduled: true, inMs: idleMs };
       }
       results.push({ conversationId: conversation.id, skipped: 'nhân viên đang xử lý' });
       return;
@@ -3296,7 +3382,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     })();
     const commentComplaint = conversation.source === 'comment' && !mentionsOtherSeller(message.text) && (
       isComplaint({ text: message.text, keywords: settings.complaintKeywords })
-      || /hôi/iu.test(String(message.text || ''))
+      || /(?<![\p{L}\p{N}])hôi(?![\p{L}\p{N}])/iu.test(String(message.text || '').normalize('NFC'))
       || /\b(khong|ko|k|kg|hong|cha|chang) (co |thay |an )?ngon\b|\b(te|do|chan) (qua|that|ghe|ec|lam)\b|\bkem (chat luong|qua)\b/.test(folded)
       // Vòng 12 (B4 #1, #2, #10): "Hok ngon nha", "ăn món này ối luôn", "không nuốt nổi", "khó ăn", "ngọt quá", "toàn gãy nứt".
       || COMMENT_DISLIKE.test(folded.replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim())
@@ -4033,10 +4119,17 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         // gửi câu trả lời như tin thường vào hộp thư — khách vẫn nhận được, lời công khai "em đã nhắn tin" là đúng.
         if (privateError && getConversation) {
           const inbox = inboxThread || await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
-          const windowOpen = inboxMessages.some(item => item?.direction === 'incoming' && Date.now() - (Number(item.createdAt) || 0) < 24 * 60 * 60 * 1000);
+          // INT-15: cùng một cách tính cửa sổ 24 giờ như bám đuổi / vận đơn (mốc khách của hộp thư + tin đã lưu, chừa 1 giờ).
+          const windowOpen = Boolean(inbox) && messengerWindowOpen({ messages: { [inbox.id]: inboxMessages } }, inbox);
           if (inbox && windowOpen) {
             const viaInbox = await (async () => {
-              for (const chunk of splitMessageText(joinPrivate([...reply.messages]), 1900)) await sendMessage(inbox, { text: chunk });
+              for (const chunk of splitMessageText(joinPrivate([...reply.messages]), 1900)) {
+                // Gửi dở / không rõ đã tới (hết giờ chờ): coi như đã gửi — như lời công khai; gửi lại là khách nhận trùng.
+                await sendMessage(inbox, { text: chunk }).catch(error => {
+                  if (!sendMaybeDelivered(error)) throw error;
+                  console.warn(`Tin vào hộp thư không rõ đã tới (${conversation.id}): coi như đã gửi — ${error.message}`);
+                });
+              }
               return true;
             })().catch(error => { console.warn(`Tin riêng lỗi, gửi vào hộp thư cũng lỗi (${conversation.id}): ${error.message}`); return false; });
             if (viaInbox) {
@@ -4051,7 +4144,11 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           const inbox = await getConversation(`${conversation.pageId}:${conversation.psid}`).catch(() => null);
           for (const chunk of privateChunks.slice(1)) {
             if (!inbox) break;
-            const ok = await sendMessage(inbox, { text: chunk }).then(() => true).catch(error => { console.warn(`Phần sau tin riêng không gửi được (${conversation.id}): ${error.message}`); return false; });
+            const ok = await sendMessage(inbox, { text: chunk }).then(() => true).catch(error => {
+              if (sendMaybeDelivered(error)) { console.warn(`Phần sau tin riêng không rõ đã tới (${conversation.id}): coi như đã gửi — ${error.message}`); return true; }
+              console.warn(`Phần sau tin riêng không gửi được (${conversation.id}): ${error.message}`);
+              return false;
+            });
             if (!ok) break;
           }
         }
@@ -4570,6 +4667,8 @@ export function buildDecisionRecord({ conversation, change, trace, result = null
     ...(trace.sticker ? { sticker: trace.sticker } : {}),
     // R13: luật ứng viên đã khớp ở lượt này ({ name, templateId, mode: 'shadow' | 'on', setQuantity? }) — chỉ ghi khi có.
     ...(trace.candidateRule ? { candidateRule: trace.candidateRule } : {}),
+    // Chủ shop 03/10: lượt bot nhận đơn vì nhân viên im ({ takeover, reason }) hay lượt im đã hẹn kiểm lại ({ scheduled, inMs }).
+    ...(trace.staffIdle ? { staffIdle: trace.staffIdle } : {}),
     ms: Date.now() - startedAt
   };
 }

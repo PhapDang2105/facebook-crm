@@ -13,6 +13,7 @@ const customerFilePath = process.env.CUSTOMER_FILE_PATH
   || path.join(projectRoot, 'data', 'processed', 'customer-file.json');
 
 let cachedStore = null;
+let storeLoading = null;
 const enqueueWrite = createWriteQueue();
 
 function emptyStore() {
@@ -27,16 +28,27 @@ function normalizeStore(value) {
 /** ENOENT → rỗng; tệp hỏng → cất `.corrupt-*`; lỗi đọc khác → ném (không nhớ kho rỗng rồi ghi đè). */
 async function readStore() {
   if (cachedStore) return cachedStore;
-  cachedStore = await readJsonFile(customerFilePath, { fallback: emptyStore, normalize: normalizeStore, label: 'Tệp khách hàng' });
-  return cachedStore;
+  // Nhớ cả lượt đọc ĐANG CHẠY: hai lượt đọc đầu tiên đồng thời dùng chung một bản kho (bản đọc xong sau từng đè
+  // bản đã được sửa trong hàng ghi → mất thay đổi).
+  storeLoading ||= readJsonFile(customerFilePath, { fallback: emptyStore, normalize: normalizeStore, label: 'Tệp khách hàng' })
+    .then(store => { cachedStore = store; return store; })
+    .finally(() => { storeLoading = null; });
+  return storeLoading;
 }
 
 function updateStore(mutate) {
   return enqueueWrite(async () => {
     const store = await readStore();
-    const result = await mutate(store);
-    await writeJsonAtomic(customerFilePath, store);
-    return result;
+    try {
+      const result = await mutate(store);
+      await writeJsonAtomic(customerFilePath, store);
+      return result;
+    } catch (error) {
+      // C6: sửa dở hay ghi đĩa lỗi → bỏ bản trong bộ nhớ, lần đọc sau nạp lại tệp tốt cuối cùng (không để lần
+      // ghi sau lặng lẽ lưu thay đổi mà người gọi đã được báo là lỗi).
+      cachedStore = null;
+      throw error;
+    }
   });
 }
 
@@ -170,11 +182,25 @@ export async function recordExportedOrders(orderData, now = Date.now()) {
   });
 }
 
+const withSortedOrders = customer => ({
+  ...customer,
+  orders: Object.values(customer.orders || {}).sort((first, second) => (second.orderedAt || 0) - (first.orderedAt || 0))
+});
+
+/**
+ * Một khách theo SĐT (P13): kho đã khoá theo customerPhoneKey nên tra thẳng; khoá cũ lệch dạng thì dò tuần tự —
+ * không chép và sắp đơn của MỌI khách như listExportedCustomers (hộp chi tiết khách gọi mỗi lần mở).
+ */
+export async function findExportedCustomer(phone) {
+  const key = customerPhoneKey(phone);
+  if (!key) return null;
+  const store = await readStore();
+  const customer = Object.hasOwn(store.customers, key) ? store.customers[key] : Object.values(store.customers).find(item => customerPhoneKey(item?.phone) === key);
+  return customer ? withSortedOrders(customer) : null;
+}
+
 /** Danh sách khách trong tệp, đơn xếp mới nhất trước. */
 export async function listExportedCustomers() {
   const store = await readStore();
-  return Object.values(store.customers).map(customer => ({
-    ...customer,
-    orders: Object.values(customer.orders || {}).sort((first, second) => (second.orderedAt || 0) - (first.orderedAt || 0))
-  }));
+  return Object.values(store.customers).map(withSortedOrders);
 }

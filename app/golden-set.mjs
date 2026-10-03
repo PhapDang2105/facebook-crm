@@ -9,6 +9,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { intentRowOf, orderContextOf } from './processing/intent-features.mjs';
+import { pendingOrderTtlMs } from './processing/pending-order.mjs';
 
 const goldenPath = process.env.GOLDEN_SET_PATH || path.join(projectRoot, 'data', 'processed', 'golden-set.json');
 let cached = null;
@@ -112,7 +113,8 @@ export async function goldenLabeled() {
 export const basketStepTemplates = new Set(['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_UPDATED', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_ADDRESS_CHOOSE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'ORDER_CART_LINE', 'CONFIRM_YES', 'ORDER_EXISTING_CONFIRM', 'UPSELL_TWO_BAGS']);
 // Chữ ký câu bot đang giữ giỏ (có dấu hoặc bỏ dấu): "em vẫn đang giữ đơn…", "đơn của chị gồm…", "em ghi nhận đơn…".
 const BASKET_SIGNATURE = /đang giữ đơn|dang giu don|đơn của .{0,40}?gồm|don cua .{0,40}?gom|ghi nhận đơn|ghi nhan don|xác nhận lại thông tin đặt hàng|xac nhan lai thong tin dat hang/i;
-const BASKET_TTL_MIN = 120;
+// Hạn giỏ = hạn runtime (pending-order.mjs, 24 giờ từ 03/10) — không để lệch giữa golden/huấn luyện và engine.
+const BASKET_TTL_MIN = pendingOrderTtlMs / 60000;
 const BASKET_ITEM_RE = /(\d{1,2})\s*(túi|gói|hộp|set|combo)\s*(xanh|vàng|nâu|cacao|vang|nau)?/giu;
 
 const conversationIdOf = id => { const at = String(id || '').lastIndexOf(':'); return at > 0 ? String(id).slice(0, at) : ''; };
@@ -125,7 +127,7 @@ const conversationIdOf = id => { const at = String(id || '').lastIndexOf(':'); r
  *   hasOrder = có đơn CHƯA hủy đặt trước item.at trong 24 giờ (như engine), orderAgeMin = tuổi đơn chưa hủy gần nhất;
  *   tuổi câu bot trước lấy từ tin outgoing gần nhất trước item.at. Không có kho → không có đơn; câu bot trước coi như vừa gửi.
  * - pendingOrder không lưu lịch sử → hasBasket suy từ lastTemplate ∈ bước đơn hoặc prevBot khớp chữ ký giỏ,
- *   và câu bot trước chưa quá 120 phút (hạn giỏ); prevBotAsks đọc {missing} trong câu bot (không biết giỏ).
+ *   và câu bot trước chưa quá hạn giỏ (pendingOrderTtlMs, 24 giờ); prevBotAsks đọc {missing} trong câu bot (không biết giỏ).
  * Trả về mảng mục mới (không sửa mảng vào).
  */
 export function enrichGoldenContext(items = [], store = null) {

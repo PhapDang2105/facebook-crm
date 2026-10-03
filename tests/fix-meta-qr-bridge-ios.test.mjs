@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { classifyUserAgent, iosMajorVersion, renderBridgePage, safariEscapeLink, shouldRedirectDirectly } = await import('../app/qr-bridge.mjs');
+const { classifyUserAgent, iosMajorVersion, renderBridgePage, safariEscapeLink } = await import('../app/qr-bridge.mjs');
 
 const agents = {
   iosSafari: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
@@ -95,9 +95,6 @@ test('không đổi các nhánh khác: Safari hệ thống, trong chính Messeng
   }
   assert.match(render(agents.zaloAndroid), /<div class="hint">Anh\/Chị đang mở trong Zalo\. Nếu nút trên không mở được Messenger/, 'Android trong Zalo: khối hướng dẫn cũ, ở cuối trang');
   assert.match(render(agents.iosSafari), /class="ios-tip"/);
-  // R13 fix2 (A2): Android Chrome không còn 302 thẳng (lượt 302 không phân biệt được người bấm với HEAD/crawler) — qua trang đệm.
-  assert.equal(shouldRedirectDirectly(classifyUserAgent(agents.androidChrome)), false, 'Android Chrome cũng qua trang đệm');
-  assert.equal(shouldRedirectDirectly(classifyUserAgent(agents.zaloIos18)), false);
 });
 
 test('địa chỉ trang không phải https hoặc thiếu: không có nút (máy chủ chạy thử http://localhost), hướng dẫn vẫn hiện; địa chỉ được escape', () => {

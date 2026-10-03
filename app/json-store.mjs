@@ -21,6 +21,7 @@ const isPlainObject = value => Boolean(value) && typeof value === 'object' && !A
  *   (ví dụ `null`, mảng thay cho object) cũng coi là hỏng.
  * - `normalize`: hàm chuẩn hoá giá trị đọc được; ném lỗi thì cũng coi là hỏng.
  * - `label`: tên kho cho dòng log (tiếng Việt).
+ * - `onCorrupt`: 'quarantine' (mặc định, như trên) hoặc 'throw' (giữ nguyên tệp hỏng và ném lỗi).
  */
 export async function readJsonFile(filePath, options = {}) {
   let raw;
@@ -73,6 +74,12 @@ function parseOrQuarantine(filePath, raw, options, quarantine) {
     problem = error;
   }
   if (!problem) return value;
+  // `onCorrupt: 'throw'`: kho mà "rỗng" nguy hiểm hơn "lỗi" (Nhân sự: rỗng = mất mọi đăng nhập) — để nguyên tệp, ném.
+  if (options.onCorrupt === 'throw') {
+    const failure = new Error(`${label || path.basename(filePath)} hỏng (${problem?.message || problem}).`);
+    failure.cause = problem;
+    throw failure;
+  }
   const report = quarantined => {
     console.error(`${label || path.basename(filePath)} hỏng (${problem?.message || problem})${quarantined ? `, đã cất sang ${path.basename(quarantined)}` : ''}; bắt đầu lại từ mặc định.`);
     return fallbackOf(options);
@@ -121,15 +128,58 @@ export async function writeJsonAtomic(filePath, value, { space = 2, text, mode }
   }
 }
 
+// Mọi hàng ghi đang có việc (để lúc tắt máy chủ chờ ghi xong hết — drainAllWrites).
+const busyQueues = new Set();
+
 /**
  * Hàng ghi tuần tự cho một kho: `queue(fn)` chạy fn sau mọi lượt trước đó; lỗi
  * của một lượt không chặn các lượt sau. Trả promise kết quả của fn.
  */
 export function createWriteQueue() {
   let tail = Promise.resolve();
+  let pending = 0;
+  const handle = { tail: () => tail };
   return function enqueue(task) {
+    pending += 1;
+    busyQueues.add(handle);
     const operation = tail.then(task);
-    tail = operation.then(() => undefined, () => undefined);
+    tail = operation.then(() => undefined, () => undefined).finally(() => {
+      pending -= 1;
+      if (!pending) busyQueues.delete(handle);
+    });
     return operation;
   };
+}
+
+/**
+ * Chờ mọi lượt ghi đã xếp ở MỌI hàng (createWriteQueue) chạy xong — kể cả lượt mà chính các lượt đó
+ * xếp thêm. Dùng lúc tắt máy chủ: đơn landing / tệp khách / cài đặt vừa nhận không mất vì process.exit.
+ * Không ném (lỗi ghi đã được báo cho người gọi lượt đó). `timeoutMs`: thôi chờ sau quãng này.
+ */
+export async function drainAllWrites({ timeoutMs = 8000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while ((busyQueues.size || trackedWrites.size) && Date.now() < deadline) {
+    const waits = [...[...busyQueues].map(handle => handle.tail()), ...trackedWrites];
+    let timer;
+    const timeout = new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now())); });
+    await Promise.race([Promise.all(waits), timeout]);
+    clearTimeout(timer);
+  }
+  return busyQueues.size === 0 && trackedWrites.size === 0;
+}
+
+// Lượt ghi lẻ không đi qua hàng (nối dòng vào kho lưu trữ đơn…): drainAllWrites cũng chờ.
+const trackedWrites = new Set();
+
+/** Ghi danh một lượt ghi đang chạy để drainAllWrites chờ nó. Trả lại chính promise đó (lỗi vẫn tới người gọi). */
+export function trackWrite(promise) {
+  const settled = Promise.resolve(promise).then(() => undefined, () => undefined);
+  trackedWrites.add(settled);
+  settled.then(() => trackedWrites.delete(settled));
+  return promise;
+}
+
+/** Số hàng ghi / lượt ghi lẻ còn đang có việc (cho test / chẩn đoán). */
+export function pendingWriteQueues() {
+  return busyQueues.size + trackedWrites.size;
 }

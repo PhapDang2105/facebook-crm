@@ -27,6 +27,7 @@ import { describeDeliveryAddress } from './processing/locations.mjs';
 import { touchPendingOrder } from './processing/pending-order.mjs';
 import { randomUUID } from 'node:crypto';
 import { isPageSystemNotice } from './conversation-orders.mjs';
+import { MESSENGER_WINDOW_MARGIN_MS, MESSENGER_WINDOW_MS, messengerWindowOpen } from './messenger-window.mjs';
 
 // Đơn còn hiệu lực (chưa hủy / hoàn / bom — isCancelledOrder của order-facts, cùng luật với báo cáo):
 // dùng chung cho "khách đã có đơn" và "bám đuổi thành công" ở mọi chỗ.
@@ -39,7 +40,7 @@ const statePath = process.env.FOLLOW_UPS_PATH || path.join(projectRoot, 'data', 
 export const FOLLOW_UP_INTERVAL_MS = 15 * 60 * 1000;
 const maxReplyAgeMs = 7 * 24 * 60 * 60 * 1000;
 // Chừa 1 giờ trước hạn 24 giờ của Messenger (lượt bám đuổi chạy 15 phút một lần).
-export const messengerWindowMs = 23 * 60 * 60 * 1000;
+export const messengerWindowMs = MESSENGER_WINDOW_MS - MESSENGER_WINDOW_MARGIN_MS;
 const maxSentRecords = 5000;
 
 let cachedState = null;
@@ -381,7 +382,18 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
   const delayMs = scenario.delayHours * 60 * 60 * 1000;
   const conversations = store.conversations || [];
   const messagesOf = conversation => (Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : []);
-  const inboxOf = (pageId, psid) => conversations.find(item => item.pageId === pageId && item.psid === psid && item.source !== 'comment') || null;
+  // INT-07: hộp thư theo page:psid dựng một lần (giữ mục đầu tiên như find), không find cho từng luồng bình luận.
+  let inboxIndex = null;
+  const inboxOf = (pageId, psid) => {
+    if (!inboxIndex) {
+      inboxIndex = new Map();
+      for (const item of conversations) {
+        const key = `${item.pageId}\u0000${item.psid}`;
+        if (item.source !== 'comment' && !inboxIndex.has(key)) inboxIndex.set(key, item);
+      }
+    }
+    return inboxIndex.get(`${pageId}\u0000${psid}`) || null;
+  };
   // Khách đã có đơn trong CRM hay mang thẻ Đã mua hàng: không bám (chỉ bám khách mới).
   // Bot tắt, thẻ khiếu nại / cần người xử lý, nhân viên đã nhắn…: xét ở vòng gửi (followUpSkipReason) để đếm lý do.
   const bought = conversation => (Array.isArray(conversation?.labels) ? conversation.labels : []).some(label => boughtLabelIds.includes(label));
@@ -427,7 +439,8 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
       if (now - repliedAt < delayMs) { excluded(inbox, `chưa đủ ${scenario.delayHours} giờ`); continue; }
       // Messenger chỉ cho Page nhắn trong 24 giờ kể từ tin cuối của khách: quá mốc
       // thì bỏ qua — trừ kịch bản "ngoài 24 giờ" (xếp hàng chờ gửi qua extension Pancake).
-      const outside = now - customerAt > messengerWindowMs;
+      // INT-15: cùng cách tính với inboxWindowOpen/Sapo (cả mốc lastCustomerMessageAt của hộp thư, chừa 1 giờ).
+      const outside = !messengerWindowOpen(store, inbox, { now });
       if (outside && !scenario.outsideWindow) { excluded(inbox, 'ngoài 24 giờ Messenger'); continue; }
       candidates.push({ key: `${scenario.id}:${inbox.pageId}:${inbox.psid}`, conversation: inbox, inbox, thread: null, repliedAt, outsideWindow: outside });
     }
@@ -499,6 +512,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
   // R14 (…039804): hai kịch bản (bình luận 12h + hộp thư 3h) cùng nhắm MỘT hộp thư → 2 tin y hệt cùng phút (khóa sent
   // theo `kịch bản:page:psid`). Mỗi khách (page + psid) chỉ một tin trong một lượt và trong `followUpSpacingMs`.
   const touchedThisRun = new Set();
+  const sentIndex = followUpSentIndex(state);
   // R14 (quyết định 6, …897712): khách đã có đơn landing cùng SĐT (kho landing cục bộ, không gọi mạng) — đọc một lần mỗi lượt.
   let landingOrdersCache = null;
   const landingOrdersOnce = async () => {
@@ -532,7 +546,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       // R14 (…039804): khách vừa nhận (hay đang xếp hàng) một tin bám đuổi của kịch bản khác trong lượt này / 12 giờ qua.
       // Kịch bản chỉ nhắc (không ưu đãi): ghi bỏ qua luôn (lời nhắc thứ hai y hệt vô ích); kịch bản ưu đãi: để lượt sau.
       const customerKey = customerKeyOf(candidate.conversation);
-      if (touchedThisRun.has(customerKey) || now - lastFollowUpAt(state, store, candidate, customerKey) < followUpSpacingMs) {
+      if (touchedThisRun.has(customerKey) || now - lastFollowUpAt(state, store, candidate, customerKey, sentIndex) < followUpSpacingMs) {
         if (!scenario.freeShipDays) {
           await updateFollowUpState(current => {
             current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, error: 'khách vừa nhận tin bám đuổi khác', skipped: 'sameCustomer' };
@@ -622,7 +636,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       // (so tỷ lệ đơn 14 ngày giữa nhóm gửi và nhóm không gửi).
       if (isFollowUpHoldout(candidate.conversation.psid)) {
         await updateFollowUpState(current => { current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, error: 'nhóm đối chứng (không gửi để đo hiệu quả)', holdout: true }; return null; });
-        await updateMessagingStore(current => { const target = current.conversations.find(item => item.id === candidate.conversation.id); if (target && !target.followUpHoldout) target.followUpHoldout = { scenarioId: scenario.id, at: now }; return null; });
+        await updateMessagingStore(current => { const target = current.conversations.find(item => item.id === candidate.conversation.id); if (target && !target.followUpHoldout) target.followUpHoldout = { scenarioId: scenario.id, at: now }; return null; }, { defer: true });
         summary.holdout = (summary.holdout || 0) + 1;
         noteSkip('holdout', candidate.conversation);
         continue;
@@ -675,8 +689,13 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
           const sent = await sendMessage(candidate.inbox, { text: remind || text, followUp: true });
           outcome = { via: 'private', messageId: String(sent?.message?.mid || sent?.message?.id || ''), text: remind || text, ...(remind ? { templateId: 'ORDER_ADDRESS_REMIND' } : {}) };
         } catch (failure) {
-          error = failure.message;
-          undeliverable = isUndeliverableError(failure);
+          // INT-04: "không rõ đã gửi" (hết giờ chờ Pancake, gửi dở) = coi như ĐÃ gửi: ghi lời bám đuổi (để bản dội về
+          // mang cờ bám đuổi, giãn cách 12 giờ tính cả lần này), gắn thẻ, không gửi công khai dự phòng, không gửi lại.
+          if (failure?.unknownDelivery) outcome = { via: 'private', messageId: '', text: remind || text, uncertain: true, ...(remind ? { templateId: 'ORDER_ADDRESS_REMIND' } : {}) };
+          else {
+            error = failure.message;
+            undeliverable = isUndeliverableError(failure);
+          }
         }
       } else if (candidate.inbox) {
         error = 'ngoài 24 giờ Messenger (khách chưa nhắn hộp thư gần đây)';
@@ -686,13 +705,13 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
           const sent = await sendMessage(candidate.thread, { text, privateReply: false, followUp: true });
           outcome = { via: 'public', messageId: String(sent?.message?.mid || sent?.message?.id || ''), text };
         } catch (failure) {
-          error = failure.message;
+          if (failure?.unknownDelivery) outcome = { via: 'public', messageId: '', text, uncertain: true };
+          else error = failure.message;
         }
       }
       await updateFollowUpState(current => {
         current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, ...(outcome || { error: error || 'không có kênh gửi', ...(undeliverable ? { skipped: 'undeliverable' } : {}) }) };
-        const keys = Object.keys(current.sent);
-        if (keys.length > maxSentRecords) for (const key of keys.slice(0, keys.length - maxSentRecords)) delete current.sent[key];
+        trimSentRecords(current.sent);
         // Khách không nhận được tin (#551 / chặn / ngoài cửa sổ): mọi kịch bản bỏ qua khách này cho tới khi khách nhắn lại.
         if (!outcome && undeliverable) {
           current.undeliverable = current.undeliverable && typeof current.undeliverable === 'object' ? current.undeliverable : {};
@@ -705,7 +724,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       if (outcome) {
         touchedThisRun.add(customerKey);
         summary.sent += 1;
-        log(`Bám đuổi "${scenario.name}": đã gửi ${outcome.via === 'public' ? 'công khai' : 'riêng'} cho ${candidate.conversation.name || candidate.conversation.id}`);
+        log(`Bám đuổi "${scenario.name}": ${outcome.uncertain ? 'không rõ đã tới (coi như đã gửi)' : 'đã gửi'} ${outcome.via === 'public' ? 'công khai' : 'riêng'} cho ${candidate.conversation.name || candidate.conversation.id}`);
         await markConversationFollowedUp(candidate.conversation.id, scenario, outcome.via, now, { remindedBasket: outcome.templateId === 'ORDER_ADDRESS_REMIND' });
       } else if (undeliverable) {
         // Không tính vào trần mỗi lượt (maxPerRun): trước đây 100% lỗi #551 ăn hết trần, khách gửi được phải chờ.
@@ -763,7 +782,7 @@ async function markConversationFollowedUp(conversationId, scenario, via, now, { 
       target.pendingOrder = null;
     }
     return null;
-  });
+  }, { defer: true });
   // Lịch sử thẻ của hội thoại (nhật ký hoạt động): thẻ Bám đuổi do hệ thống tự gắn.
   if (labelChange) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...labelChange, labelDefs, reason: 'bám đuổi' });
   publishMessagingEvent({ type: 'customer-panel', conversationId });
@@ -845,6 +864,11 @@ const batchLeaseMs = 45 * 60 * 1000;
 const queueMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
 const maxBatchSize = 50;
 const maxRelayAttempts = 2;
+// Extension Pancake không tìm được ID Facebook của khách (lệnh GET_GLOBAL_ID_FOR_CONV): không phải lần gửi lỗi —
+// khách KHÔNG bị bỏ khỏi hàng (không tính vào maxRelayAttempts), được đánh dấu "cần gửi tay" và chỉ nhờ extension
+// tìm lại sau 24 giờ (03/10: 29 lần hụt liền, cả hàng 137 khách bị bỏ dần mà chưa ai được gửi).
+export const followUpLookupRetryMs = 24 * 60 * 60 * 1000;
+const lookupBlocked = (entry, now) => Number(entry?.lookupFailedAt) > 0 && now - Number(entry.lookupFailedAt) < followUpLookupRetryMs;
 
 // Thẻ mặc định không bám: Đã mua hàng, Cần người xử lý, Khiếu nại, Bảo hành, Hủy đơn, Khách xấu, Bám đuổi thành công.
 const skipLabelIds = new Set(['customer', 'consulting', 'complaint', 'warranty', 'cancelled', 'bad', 'followup-won']);
@@ -900,16 +924,35 @@ export const followUpSpacingMs = 12 * 60 * 60 * 1000;
  * Lần gần nhất khách (page + psid) nhận / đang chờ nhận một tin bám đuổi: mục đã gửi (via) hay đang xếp hàng
  * trong follow-ups.json của MỌI kịch bản, và followUps[] ghi trên hộp thư / luồng bình luận. 0 = chưa có.
  */
-export function lastFollowUpAt(state, store, candidate, customerKey = customerKeyOf(candidate?.conversation)) {
+export function lastFollowUpAt(state, store, candidate, customerKey = customerKeyOf(candidate?.conversation), sentIndex = null) {
   let latest = 0;
-  for (const [key, entry] of Object.entries(state?.sent || {})) {
-    if (!entry || !(entry.via || entry.queued) || !key.endsWith(`:${customerKey}`)) continue;
-    latest = Math.max(latest, Number(entry.sentAt) || Number(entry.at) || 0);
+  if (sentIndex) latest = sentIndex.get(customerKey) || 0;
+  else {
+    for (const [key, entry] of Object.entries(state?.sent || {})) {
+      if (!entry || !(entry.via || entry.queued) || !key.endsWith(`:${customerKey}`)) continue;
+      latest = Math.max(latest, Number(entry.sentAt) || Number(entry.at) || 0);
+    }
   }
   for (const record of [candidate?.inbox, candidate?.thread, candidate?.conversation].filter(Boolean)) {
     for (const item of Array.isArray(record.followUps) ? record.followUps : []) latest = Math.max(latest, Number(item?.at) || 0);
   }
   return latest;
+}
+
+/**
+ * INT-07: Map<"page:psid", mốc bám đuổi gần nhất> dựng MỘT lần mỗi lượt từ follow-ups.json (khoá "kịch bản:page:psid"),
+ * thay vì duyệt tới 5000 mục cho từng ứng viên. Mục ghi thêm trong lượt đã được `touchedThisRun` chặn riêng.
+ */
+function followUpSentIndex(state) {
+  const index = new Map();
+  for (const [key, entry] of Object.entries(state?.sent || {})) {
+    if (!entry || !(entry.via || entry.queued)) continue;
+    const parts = key.split(':');
+    if (parts.length < 3) continue;
+    const customerKey = parts.slice(-2).join(':');
+    index.set(customerKey, Math.max(index.get(customerKey) || 0, Number(entry.sentAt) || Number(entry.at) || 0));
+  }
+  return index;
 }
 
 /** SĐT dạng 0xxxxxxxxx (10 số) hay '' — so khớp đơn landing. */
@@ -969,9 +1012,7 @@ export function isUndeliverableError(error) {
 
 /** Cửa sổ 24 giờ của hộp thư còn mở: khách nhắn hộp thư trong `messengerWindowMs` (23 giờ, chừa 1 giờ). */
 export function inboxWindowOpen(store, inbox, now = Date.now()) {
-  if (!inbox) return false;
-  const customerAt = Math.max(Number(inbox.lastCustomerMessageAt) || 0, lastAt(incomingOf(messagesIn(store, inbox)), () => true));
-  return customerAt > 0 && now - customerAt <= messengerWindowMs;
+  return messengerWindowOpen(store, inbox, { now });
 }
 
 /** Khách nằm trong danh sách "không nhận được tin" và chưa nhắn lại Page từ lúc đó → mục chặn; không thì null. */
@@ -1006,13 +1047,22 @@ export async function expireFollowUpQueue({ now = Date.now(), limit = 200 } = {}
       entry.expiredAt = now;
       removed += 1;
     }
-    const keys = Object.keys(current.sent);
-    if (keys.length > maxSentRecords) {
-      const done = keys.filter(key => !current.sent[key]?.queued);
-      for (const key of done.slice(0, keys.length - maxSentRecords)) delete current.sent[key];
-    }
+    trimSentRecords(current.sent);
     return removed;
   });
+}
+
+/**
+ * Lịch sử bám đuổi quá `maxSentRecords`: bỏ mục ĐÃ XỬ LÝ cũ nhất (theo `at`); mục còn trong hàng chờ ngoài 24 giờ
+ * (queued, kể cả đang nằm trong lô) giữ nguyên (INT-14: trước đây lượt gửi cắt theo thứ tự khoá, xoá cả mục còn chờ).
+ */
+function trimSentRecords(sent) {
+  const keys = Object.keys(sent);
+  if (keys.length <= maxSentRecords) return 0;
+  const done = keys.filter(key => !sent[key]?.queued).sort((first, second) => (Number(sent[first]?.at) || 0) - (Number(sent[second]?.at) || 0));
+  const drop = done.slice(0, keys.length - maxSentRecords);
+  for (const key of drop) delete sent[key];
+  return drop.length;
 }
 
 function stillWanted(item, byId, store) {
@@ -1035,7 +1085,7 @@ export async function followUpQueue({ now = Date.now() } = {}) {
   const byId = new Map((store.conversations || []).map(item => [item.id, item]));
   return Object.entries(state.sent)
     .filter(([, item]) => item.queued && stillWanted(item, byId, store))
-    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, globalId: item.globalId || '', attempts: item.attempts || 0, lastError: item.lastError || (item.noGlobalId ? 'Pancake chưa có ID Facebook của khách — gửi tay bằng nút Mở Pancake' : ''), noGlobalId: item.noGlobalId === true, leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
+    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, globalId: item.globalId || '', attempts: item.attempts || 0, lastError: item.lastError || (item.noGlobalId ? 'Pancake chưa có ID Facebook của khách — gửi tay bằng nút Mở Pancake' : ''), noGlobalId: item.noGlobalId === true, lookupFailedAt: Number(item.lookupFailedAt) || 0, lookupError: item.lookupError || '', needsManual: !item.globalId && lookupBlocked(item, now), leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
     .sort((first, second) => first.repliedAt - second.repliedAt);
 }
 
@@ -1222,6 +1272,8 @@ async function buildFollowUpBatchOnce({ limit = 30, conversationInfo, now = Date
     if (!globalId) {
       // Pancake chưa lưu ID Facebook: ghi dấu, đưa vào lô (có hạn) để extension tự tìm ID.
       if (!item.noGlobalId) await updateFollowUpState(current => { if (current.sent[item.key]) current.sent[item.key].noGlobalId = true; return null; });
+      // Extension đã hụt ID khách này trong 24 giờ qua: không nhờ tìm lại (vẫn ở hàng chờ, "cần gửi tay").
+      if (lookupBlocked(item, now)) { skipped.push({ key: item.key, name: item.name, reason: 'cần gửi tay (extension Pancake chưa tìm được ID Facebook, thử lại sau 24 giờ)' }); continue; }
       if (lookups >= maxLookups) { skipped.push({ key: item.key, name: item.name, reason: 'chờ lô sau (tìm ID Facebook tối đa 10 khách/lô)' }); continue; }
       lookups += 1;
     }
@@ -1229,7 +1281,9 @@ async function buildFollowUpBatchOnce({ limit = 30, conversationInfo, now = Date
     texts.set(item.key, text);
     const conversation = (store.conversations || []).find(entry => entry.id === item.conversationId);
     const updatedTime = Math.max(Number(conversation?.lastMessageAt) || 0, ...((store.messages?.[item.conversationId] || []).map(message => Number(message.createdAt) || 0)));
-    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: globalId, needsGlobalId: !globalId, updatedTime, name: item.name, text });
+    // Khách cần tìm ID: kèm tên / mốc / mã luồng PANCAKE đang giữ (cầu nối ưu tiên dùng, thiếu thì lùi về PSID / tên / mốc CRM).
+    const lookupHints = globalId ? {} : { pancakeName: String(info.name || ''), pancakeUpdatedAt: Number(info.updatedAt) || 0, threadId: String(info.threadId || ''), threadKey: String(info.threadKey || '') };
+    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: globalId, needsGlobalId: !globalId, updatedTime, name: item.name, text, ...lookupHints });
   }
   // Khách phải tìm ID xếp cuối lô: không làm lô dừng sớm vì 3 lần tìm ID lỗi liền.
   items.sort((first, second) => Number(first.needsGlobalId) - Number(second.needsGlobalId));
@@ -1290,10 +1344,11 @@ export async function recordFollowUpBatchResults(results = [], { now = Date.now(
     const key = String(result?.key || '');
     if (!key) continue;
     // Kết quả phải mang đúng mã lô đã cấp (chống link #followup-results giả).
+    // lookupFailed: true = extension Pancake không tìm được ID Facebook (chưa gửi gì) — xem nhánh riêng ở dưới.
     const entry = state.sent[key];
     if (!entry?.queued || (entry.batchToken ? entry.batchToken !== String(token || '') : Boolean(token))) { summary.rejected = (summary.rejected || 0) + 1; continue; }
     // Extension vừa tìm được ID Facebook: ghi lại để lần sau khỏi tìm.
-    if (/^\d{5,25}$/.test(String(result.globalId || ''))) await updateFollowUpState(current => { const target = current.sent[key]; if (target) { target.globalId = String(result.globalId); delete target.noGlobalId; } return null; });
+    if (/^\d{5,25}$/.test(String(result.globalId || ''))) await updateFollowUpState(current => { const target = current.sent[key]; if (target) { target.globalId = String(result.globalId); delete target.noGlobalId; delete target.lookupFailedAt; delete target.lookupError; } return null; });
     if (result.ok) {
       if (await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake-relay', readSettings })) summary.sent += 1;
       continue;
@@ -1314,6 +1369,22 @@ export async function recordFollowUpBatchResults(results = [], { now = Date.now(
       continue;
     }
     const error = String(result.error || 'không rõ lỗi').slice(0, 200);
+    if (result.lookupFailed === true) {
+      // Hụt ID Facebook (chưa gửi gì cho khách): giữ trong hàng chờ, không tính lần lỗi, đánh dấu "cần gửi tay";
+      // lô sau không nhờ extension tìm lại trong 24 giờ (buildFollowUpBatch / lookupBlocked).
+      const marked = await updateFollowUpState(current => {
+        const target = current.sent[key];
+        if (!target?.queued) return null;
+        delete target.leasedUntil;
+        target.noGlobalId = true;
+        target.lookupFailedAt = now;
+        target.lookupError = error;
+        target.lastError = `cần gửi tay — extension Pancake không tìm được ID Facebook: ${error}`;
+        return true;
+      });
+      if (marked) summary.lookupFailed = (summary.lookupFailed || 0) + 1;
+      continue;
+    }
     const dropped = await updateFollowUpState(current => {
       const entry = current.sent[key];
       if (!entry?.queued) return null;

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const { createBridgeClickMatcher, bridgeSourceMarker, isSourceNotice } = await import('../app/qr-greeting.mjs');
-const { isLinkPreviewBot, shouldRedirectDirectly, classifyUserAgent } = await import('../app/qr-bridge.mjs');
+const { isLinkPreviewBot, classifyUserAgent } = await import('../app/qr-bridge.mjs');
 
 const PAGE = '103549382215599';
 const known = code => code === 'tmdt-01';
@@ -146,7 +146,6 @@ test('A2: HEAD /q/<mã> không đếm, không tạo lượt chờ; không còn 3
   assert.doesNotMatch(route, /shouldRedirectDirectly\(/, 'không còn gọi shouldRedirectDirectly (chỉ còn nhắc trong chú thích)');
   assert.match(route, /recordQrScan\(code, \{ userAgent, mode: 'page' \}\)/);
   const androidChrome = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.71 Mobile Safari/537.36';
-  assert.equal(shouldRedirectDirectly(classifyUserAgent(androidChrome)), false);
   const crawlers = [
     'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36 (compatible; GoogleOther)',
     'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36 (compatible; AdsBot-Google-Mobile; +http://www.google.com/mobile/adsbot.html)',

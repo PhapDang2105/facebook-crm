@@ -225,7 +225,7 @@ async function notifyCustomers(deps, { now, summary, log }) {
         if (found?.order.shipment?.trackingNumber === mark.trackingNumber) markShipmentNotified(found.order.shipment, { stage: mark.stage, via: mark.via, at: now });
       }
       return null;
-    });
+    }, { defer: true });
     summary.marked += marks.length;
   }
   // Mỗi vận đơn một tin mỗi lượt, tối đa MAX_NOTICES_PER_RUN tin.
@@ -243,17 +243,28 @@ async function notifyCustomers(deps, { now, summary, log }) {
         summary.sent += 1;
         log(`Sapo: đã báo "${shipmentStageLabel(plan.stage)}" (${order.shipment.trackingNumber}) cho ${plan.inbox.name || plan.inbox.id}`);
       } catch (error) {
-        // Không thử lại ngay: ghi lỗi; vận đơn vào hàng chờ để nhân viên gửi qua Pancake.
-        mark = { stage: plan.stage, via: 'bot', at: now, error: String(error.message || error) };
-        summary.failed += 1;
-        log(`Sapo: không báo được vận đơn ${order.shipment.trackingNumber} cho ${plan.inbox.name || plan.inbox.id}: ${mark.error.slice(0, 200)}`);
+        if (error?.unknownDelivery) {
+          // INT-04: "không rõ đã gửi" (hết giờ chờ Pancake, gửi dở) = coi như đã báo: không vào hàng chờ có lỗi để
+          // nhân viên gửi lại (khách nhận hai tin báo vận đơn).
+          mark = { stage: plan.stage, via: 'bot', at: now, uncertain: true };
+          summary.sent += 1;
+          log(`Sapo: báo "${shipmentStageLabel(plan.stage)}" (${order.shipment.trackingNumber}) cho ${plan.inbox.name || plan.inbox.id} không rõ đã tới — coi như đã gửi: ${String(error.message || error).slice(0, 200)}`);
+        } else {
+          // Không thử lại ngay: ghi lỗi; vận đơn vào hàng chờ để nhân viên gửi qua Pancake.
+          mark = { stage: plan.stage, via: 'bot', at: now, error: String(error.message || error) };
+          summary.failed += 1;
+          log(`Sapo: không báo được vận đơn ${order.shipment.trackingNumber} cho ${plan.inbox.name || plan.inbox.id}: ${mark.error.slice(0, 200)}`);
+        }
       }
     }
+    // Tin đã (hoặc có thể đã) tới khách: ghi dấu NGAY (R1-06) — ghi gộp mà máy chủ sập trong khoảng chờ thì lượt sau
+    // không thấy notifiedStage và nhắn lại. Không gửi gì (mẫu tắt, lỗi chắc chắn): ghi gộp (INT-08), mất thì chỉ thử lại.
+    const delivered = mark.via === 'bot' && !mark.error;
     await deps.updateMessagingStore(current => {
       const found = findOrder(current, conversation.id, order.id);
       if (found?.order.shipment?.trackingNumber === order.shipment.trackingNumber) markShipmentNotified(found.order.shipment, mark);
       return null;
-    });
+    }, { defer: !delivered });
   }
 }
 

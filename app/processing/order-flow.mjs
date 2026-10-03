@@ -151,11 +151,13 @@ export function orderFlowStep(text, ctx = {}) {
   if (!raw || raw.includes('?')) return null;
   const s = normalizeIntentText(raw);
   // "gọi địa chỉ cũ": "gọi" bỏ dấu thành "gói" (từ đổi giỏ) — bỏ cụm này trước khi dò CHANGE.
-  if (CHANGE.test(s.replace(ADMIN, ' ').replace(/\bgoi dia chi cu\b/g, ' '))) return null;
+  // Chỉ dò CHANGE SAU khi chuẩn hoá lỗi gõ (dưới): dò trên chữ thô thì "Dạ vâng 0912…" (vâng → "vang" = Vàng) đã trả null
+  // trước khi phép chuẩn hoá vâng → dạ kịp chạy. "cacao 300g" thành "tropical" sau chuẩn hoá — vẫn là đổi giỏ như trước.
   // R13 (models A4, ca …068500): "2ca cao,<sđt>,79xom hạ…" / "2 t ap 4 hoa binh…" — phần chữ ngoài SĐT mang GIỎ viết sai
   // hay viết tắt (CHANGE không thấy "ca cao", "2 t"): không phải tin chỉ có SĐT/địa chỉ → trả null để luật giỏ + địa chỉ
   // (BASKET_ADDRESS) hay mô hình đọc cả giỏ; trước đây chốt đơn với số túi cũ và "2ca cao" nằm trong địa chỉ.
-  if (CHANGE.test(normalizeIntentText(normalizeColourTypos(raw)).replace(ADMIN, ' ').replace(/\bgoi dia chi cu\b/g, ' '))) return null;
+  const typoFolded = normalizeIntentText(normalizeColourTypos(raw));
+  if (CHANGE.test(typoFolded.replace(ADMIN, ' ').replace(/\bgoi dia chi cu\b/g, ' ')) || /\bcacao\b/.test(s)) return null;
   if (LEADING_BASKET_SHORT.test(stripPhone(raw).replace(PHONE_LABEL, ' ').replace(/^[\s,.;:!\-–]+/u, ''))) return null;
   // Vòng 12 (inbox-3 #2): "địa chỉ cũ" khi đang giữ giỏ là đủ rõ, không cần bot vừa hỏi SĐT/địa chỉ.
   if (mentionsOldAddress(raw)) {
@@ -175,7 +177,8 @@ export function orderFlowStep(text, ctx = {}) {
   const withAlso = value => (alsoFor ? { ...value, also: alsoFor } : value);
   if (phone && ctx.addressComplete) return { rule: 'PHONE_ADDRESS', value: withAlso({ template_id: 'ORDER_ADDRESS', Phone_Number: phone, Customer_Address: address }) };
   if (phone) {
-    const leftover = s.replace(/<sdt>/g, ' ').split(' ').filter(Boolean);
+    // Chữ đệm xét trên bản đã chuẩn hoá lỗi gõ: "Dạ vâng <sđt>" → "dạ <sđt>" = chỉ SĐT.
+    const leftover = typoFolded.replace(/<sdt>/g, ' ').split(' ').filter(Boolean);
     if (leftover.every(word => FILLER.has(word))) return { rule: 'PHONE_ONLY', value: { template_id: 'ORDER_ADDRESS', Phone_Number: phone } };
     // SĐT + địa chỉ chưa đủ cấp ("<sđt> Xóm 3 xã Vô Tranh Phú Lương"): vẫn đưa vào, bộ soạn đơn hỏi phần thiếu.
     if (looksLikeAddress(address, normalizeIntentText(address))) return { rule: 'PHONE_ADDRESS_PARTIAL', value: withAlso({ template_id: 'ORDER_ADDRESS', Phone_Number: phone, Customer_Address: address }) };
@@ -359,7 +362,7 @@ export function cleanAddressText(raw) {
 /** Tin thanh toán ("gửi stk", "ck", "chuyển khoản", "lên đơn 0đ", "đã chuyển"): không bao giờ là sửa đơn. */
 export function isPaymentMessage(text) {
   const s = normalizeIntentText(text);
-  return /\b(stk|so tai khoan|tai khoan|ck|chuyen khoan|chuyen tien|da chuyen|da ck|bank|banking|0d|0 d|0 dong|0đ|thanh toan truoc|tra truoc)\b/.test(s)
+  return /\b(stk|so tai khoan|tai khoan|ck|chuyen khoan|chuyen tien|da chuyen|da ck|bank|banking|0d|0 d|0 dong|thanh toan truoc|tra truoc)\b/.test(s)
     || /(?<![\d.])0\s*(?:đ|d|vnd|dong)(?![\p{L}\d])/iu.test(String(text || ''));
 }
 

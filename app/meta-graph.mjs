@@ -3,13 +3,20 @@ import { metaConfig } from './config.mjs';
 
 const oauthEndpoints = new Set(['oauth/access_token', 'debug_token']);
 
-export function appSecretProof(accessToken) {
-  return createHmac('sha256', metaConfig.appSecret).update(accessToken).digest('hex');
+// INT-18: một bản appsecret_proof và một bộ dựng địa chỉ Graph, dùng chung với meta-ads.mjs (token quảng cáo có thể
+// thuộc app khác nên nhận `secret` riêng).
+export function appSecretProof(accessToken, secret = metaConfig.appSecret) {
+  return createHmac('sha256', secret).update(accessToken).digest('hex');
+}
+
+/** https://graph.facebook.com/<version>/<pathname> (bỏ "/" đầu). */
+export function graphEndpoint(pathname, version = metaConfig.graphVersion) {
+  return new URL(`https://graph.facebook.com/${version}/${String(pathname).replace(/^\//, '')}`);
 }
 
 export async function metaRequest(pathname, options = {}) {
   if (!metaConfig.graphVersion) throw new Error('Chưa cấu hình META_GRAPH_VERSION cho Graph API.');
-  const endpoint = new URL(`https://graph.facebook.com/${metaConfig.graphVersion}/${pathname.replace(/^\//, '')}`);
+  const endpoint = graphEndpoint(pathname);
   const method = options.method || 'GET';
   const query = { ...(options.query || {}) };
   const body = options.body ? { ...options.body } : null;

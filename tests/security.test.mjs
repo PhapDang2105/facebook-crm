@@ -189,7 +189,8 @@ test('server: PUT /api/chatbot/settings kiểm khóa AI TRƯỚC khi ghi, sau ch
   const route = server.slice(server.indexOf("if (request.method === 'PUT' && url.pathname === '/api/chatbot/settings') {"), server.indexOf("url.pathname === '/api/chatbot/master-switch'"));
   const guard = route.indexOf('await requireManager(request, response)');
   const check = route.indexOf('aiKeyReentryError(current, normalizeChatbotSettings(');
-  const write = route.indexOf('await writeChatbotSettings(');
+  // 03/10 (C2): ghi qua updateChatbotSettings (đọc bản mới nhất trong hàng ghi) thay cho writeChatbotSettings.
+  const write = route.indexOf('await updateChatbotSettings(');
   assert.ok(guard > 0 && guard < check && check < write, `${guard} < ${check} < ${write}`);
   assert.match(route, /if \(keyReentryError\) return sendJson\(response, 400, \{ error: keyReentryError \}\);/);
 });

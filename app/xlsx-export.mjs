@@ -2,10 +2,21 @@
 // tải đúng các cột/dòng đang hiển thị, không qua mẫu kho và không ghi lịch sử xuất.
 import AdmZip from 'adm-zip';
 
-function escapeXml(value) {
+/**
+ * Thoát chữ cho XML của tệp XLSX (dùng chung với xlsx-template.mjs). Bỏ ký tự điều khiển XML 1.0
+ * không cho phép (\x00-\x08, \x0B, \x0C, \x0E-\x1F; tên Facebook / chữ dán từ nơi khác hay mang theo):
+ * một ký tự như vậy là Excel báo tệp hỏng, không mở được.
+ */
+export function escapeXml(value) {
   return String(value ?? '')
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+/** Tên sheet: tối đa 31 ký tự (giới hạn của Excel) đếm trên chữ GỐC, rồi mới thoát XML (cắt sau khi thoát từng làm đứt "&amp;"). */
+export function sheetNameXml(name) {
+  const clean = String(name ?? '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').replace(/[[\]:*?/\\]/g, ' ');
+  return escapeXml([...clean].slice(0, 31).join('') || 'Sheet1');
 }
 
 export function excelColumnName(index) {
@@ -42,7 +53,7 @@ export function buildPlainXlsx(headers = [], rows = [], { sheetName = 'Đơn hà
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>`;
   const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${escapeXml(sheetName).slice(0, 31)}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetNameXml(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
   const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
   const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

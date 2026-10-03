@@ -84,10 +84,15 @@ export function isKnownQrCode(code) {
  * `.corrupt-<mốc>` để còn cứu số liệu, KHÔNG âm thầm đè bằng kho rỗng ở lượt
  * quét kế tiếp. Lỗi đọc khác (quyền, đĩa) thì ném ra, không nhớ kho rỗng.
  */
+// Giữ lời hứa đang đọc: lượt đọc nạp sẵn lúc khởi động và lượt quét đầu tiên dùng chung một kho,
+// không để hai bản đọc song song rồi bản về sau đè mất mã vừa tạo trên bản kia.
+let storeLoading = null;
 async function readStore() {
   if (cachedStore) return cachedStore;
-  cachedStore = await readJsonFile(scansPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho lượt quét QR' });
-  return cachedStore;
+  storeLoading ||= readJsonFile(scansPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho lượt quét QR' })
+    .then(store => { cachedStore = store; return store; })
+    .finally(() => { storeLoading = null; });
+  return storeLoading;
 }
 
 async function persistStore(store) {

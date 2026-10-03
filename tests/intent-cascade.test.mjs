@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,6 +15,33 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const directory = mkdtempSync(path.join(tmpdir(), 'intent-cascade-'));
 const run = (script, args, env = {}) => spawnSync(process.execPath, [path.join(root, 'tools-intent', script), ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, CRM_TEST_VERBOSE: '1', ...env } });
 test.after(() => rmSync(directory, { recursive: true, force: true }));
+// Dữ liệu tổng hợp nhỏ: 5 vòng (epoch) là đủ cho các khẳng định cấu trúc/dự đoán dưới đây; mặc định CLI vẫn 25.
+process.env.INTENT_TRAIN_EPOCHS ||= '5';
+const runAsync = (script, args, env = {}) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [path.join(root, 'tools-intent', script), ...args], { cwd: root, env: { ...process.env, CRM_TEST_VERBOSE: '1', ...env } });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+  child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+  child.on('error', reject);
+  child.on('close', status => resolve({ status, stdout, stderr }));
+});
+
+// Huấn luyện MỘT lần cho cả tệp (trước đây mỗi bài tự chạy lại CLI trên cùng syntheticDataset(20)): mô hình phẳng
+// (train-intent CLI) và mô hình tầng (train-cascade CLI, --holdout 0.2) chạy song song; các bài dưới dùng chung tệp ra.
+const sharedDatasetPath = path.join(directory, 'dataset-shared.jsonl');
+const sharedFlatPath = path.join(directory, 'flat.json');
+const sharedCascadePath = path.join(directory, 'cascade.json');
+const shared = {};
+test.before(async () => {
+  writeFileSync(sharedDatasetPath, syntheticDataset(20).map(row => JSON.stringify(row)).join('\n'));
+  [shared.flat, shared.cascade, shared.quietCascade] = await Promise.all([
+    runAsync('train-intent.mjs', [sharedDatasetPath, sharedFlatPath]),
+    runAsync('train-cascade.mjs', [sharedDatasetPath, sharedCascadePath, '--holdout', '0.2']),
+    // Bản --quiet (bài "train-cascade CLI" kiểm chỉ in một dòng saved) ra tệp riêng.
+    runAsync('train-cascade.mjs', [sharedDatasetPath, path.join(directory, 'cascade-quiet.json'), '--quiet'])
+  ]);
+});
 
 const ADDRESS_ROW = { text: '<sdt> 3 lê lợi phường 7 quận 5', source: 'inbox', lastTemplate: 'ORDER_ADDRESS', lastWasOrderStep: true, hasBasket: true, prevBotAsks: 'phone_address', phoneInText: true, addressInText: true, bagCount: 0 };
 const PRICE_ROW = { text: 'giá bao nhiêu vậy', source: 'inbox', lastTemplate: '' };
@@ -86,11 +113,9 @@ test('trainClassifier (tách từ train-intent): trả model định dạng inte
   const withOther = trainClassifier(rows.map(row => ({ ...row, label: row.label === 'VAT_INVOICE' ? 'OTHER' : row.label })), { dropOther: false, log: line => keptOther.push(line) });
   assert.match(keptOther[0], /^Dòng: 145 · bỏ OTHER 0 · bỏ lớp < 4 mẫu: không → còn 145$/);
   assert.ok(withOther.model.labels.includes('OTHER'), 'OTHER thành một lớp thường');
-  // CLI: cùng dòng dữ liệu, cùng thông điệp và tệp ra.
-  const datasetPath = path.join(directory, 'dataset.jsonl');
-  writeFileSync(datasetPath, rows.map(row => JSON.stringify(row)).join('\n'));
-  const cliOut = path.join(directory, 'flat.json');
-  const result = run('train-intent.mjs', [datasetPath, cliOut]);
+  // CLI (chạy một lần ở before, cùng syntheticDataset(20)): cùng dòng dữ liệu, cùng thông điệp và tệp ra.
+  const cliOut = sharedFlatPath;
+  const result = shared.flat;
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^Dòng: 145 · bỏ OTHER 3/);
   assert.match(result.stdout, /\nsaved /);
@@ -202,11 +227,10 @@ test('bảng nhóm phủ mọi mẫu seed: mẫu nào cũng có nhóm, trừ m�
 });
 
 test('train-cascade CLI: dữ liệu tổng hợp → JSON đúng cấu trúc (cascade-2, answerMode, groupModel, 6 mô hình con, report), báo cáo giữ-out tầng (2 cách) vs phẳng', () => {
-  const rows = syntheticDataset(20);
-  const datasetPath = path.join(directory, 'dataset-cascade.jsonl');
-  writeFileSync(datasetPath, rows.map(row => JSON.stringify(row)).join('\n'));
-  const outPath = path.join(directory, 'cascade.json');
-  const result = run('train-cascade.mjs', [datasetPath, outPath, '--holdout', '0.2']);
+  // Huấn luyện một lần ở before: train-cascade <dataset> <out> --holdout 0.2 trên syntheticDataset(20).
+  const datasetPath = sharedDatasetPath;
+  const outPath = sharedCascadePath;
+  const result = shared.cascade;
   assert.equal(result.status, 0, result.stderr);
   const out = result.stdout;
   assert.match(out, /^Dòng: 145 · bỏ bình luận 0 · COMMENT_\* 0 · giữ OTHER 3 \(trong đó nhãn ngoài bảng nhóm → OTHER: 0\) → còn 145/);
@@ -257,7 +281,7 @@ test('train-cascade CLI: dữ liệu tổng hợp → JSON đúng cấu trúc (c
   assert.equal(predictCascadeWith(cascade, ADDRESS_ROW).templateId, 'ORDER_ADDRESS');
   assert.deepEqual([saved.meta.sawGolden, saved.meta.goldenExcluded, saved.meta.trainIds.hash, saved.meta.trainIds.ids.length], [null, null, 'fnv1a32', 145], 'không có --golden → không rõ; băm id dataset');
   // --quiet im thật: chỉ dòng saved.
-  const quiet = run('train-cascade.mjs', [datasetPath, outPath, '--quiet']);
+  const quiet = shared.quietCascade;
   assert.equal(quiet.status, 0);
   assert.deepEqual(quiet.stdout.trim().split('\n').length, 1, quiet.stdout);
   assert.match(quiet.stdout, /^saved /);
@@ -270,7 +294,7 @@ test('train-cascade CLI: dữ liệu tổng hợp → JSON đúng cấu trúc (c
   assert.equal(missingGolden.status, 1);
   assert.match(missingGolden.stderr, /Không thấy bộ chấm --golden/);
   assert.ok(!existsSync(noGoldenOut), 'không huấn luyện khi --golden hỏng');
-  assert.equal(run('train-cascade.mjs', [datasetPath, outPath, '--holdout']).status, 1, 'cờ thiếu giá trị');
+  assert.equal(run('train-cascade.mjs', [datasetPath, path.join(directory, 'cascade-flag.json'), '--holdout']).status, 1, 'cờ thiếu giá trị');
 });
 
 test('trainCascade (hàm): bình luận / COMMENT_* bị bỏ, nhãn ngoài bảng nhóm → OTHER kèm cảnh báo, dataset không có ruleTemplate → "không đo"', () => {
@@ -290,14 +314,12 @@ test('trainCascade (hàm): bình luận / COMMENT_* bị bỏ, nhãn ngoài bả
   assert.equal(model.report.dataset.other, 4);
 });
 
-test('replay-golden --cascade: bảng phẳng vs tầng (toàn bộ, rule-miss, an toàn ANSWER), OTHER là nhóm từ chối, risk–coverage, theo 6 lớp; tệp tầng hỏng → mã 1', () => {
-  const rows = syntheticDataset(20);
-  const datasetPath = path.join(directory, 'dataset-replay.jsonl');
-  writeFileSync(datasetPath, rows.map(row => JSON.stringify(row)).join('\n'));
-  const flatPath = path.join(directory, 'flat-replay.json');
-  const cascadePath = path.join(directory, 'cascade-replay.json');
-  assert.equal(run('train-intent.mjs', [datasetPath, flatPath]).status, 0);
-  assert.equal(run('train-cascade.mjs', [datasetPath, cascadePath, '--quiet']).status, 0);
+test('replay-golden --cascade: bảng phẳng vs tầng (toàn bộ, rule-miss, an toàn ANSWER), OTHER là nhóm từ chối, risk–coverage, theo 6 lớp; tệp tầng hỏng → mã 1', async () => {
+  // Mô hình phẳng + tầng huấn luyện một lần ở before (cùng syntheticDataset(20)).
+  assert.equal(shared.flat.status, 0, shared.flat.stderr);
+  assert.equal(shared.cascade.status, 0, shared.cascade.stderr);
+  const flatPath = sharedFlatPath;
+  const cascadePath = sharedCascadePath;
   const at = 1_800_000_000_000;
   const goldenPath = path.join(directory, 'golden-set.json');
   writeFileSync(goldenPath, JSON.stringify({ items: [
@@ -311,11 +333,18 @@ test('replay-golden --cascade: bảng phẳng vs tầng (toàn bộ, rule-miss, 
     { id: `p:c:${at + 7}`, text: 'có vị gì', source: 'inbox', label: 'SKIP', at: at + 7 }
   ] }));
   writeFileSync(path.join(directory, 'meta-conversations.json'), JSON.stringify({ conversations: [{ id: 'p:b', customerOrders: [{ id: 'o1', createdAt: at - 3_600_000 }] }], messages: {} }));
-  const result = run('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', cascadePath]);
+  writeFileSync(path.join(directory, 'broken.json'), '{ hỏng');
+  // Bốn lần chạy CLI chỉ đọc, độc lập → chạy song song.
+  const [result, plain, missing, broken] = await Promise.all([
+    runAsync('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', cascadePath]),
+    runAsync('replay-golden.mjs', [goldenPath, '--model', flatPath]),
+    runAsync('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', path.join(directory, 'missing.json')]),
+    runAsync('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', path.join(directory, 'broken.json')])
+  ]);
   assert.equal(result.status, 0, result.stderr);
   const out = result.stdout;
-  assert.match(out, /^mô hình: .*flat-replay\.json · 6 nhãn/m);
-  assert.match(out, /^mô hình tầng: .*cascade-replay\.json · nhóm ANSWER\/ORDER\/SUPPORT · answerMode (flat|subgroup) · mô hình con \(số mẫu\): ORDER 3 · SUPPORT null · ANSWER 2 · PRICE null · INFO null · SOCIAL null · 145 dòng/m);
+  assert.match(out, /^mô hình: .*flat\.json · 6 nhãn/m);
+  assert.match(out, /^mô hình tầng: .*cascade\.json · nhóm ANSWER\/ORDER\/SUPPORT · answerMode (flat|subgroup) · mô hình con \(số mẫu\): ORDER 3 · SUPPORT null · ANSWER 2 · PRICE null · INFO null · SOCIAL null · 145 dòng/m);
   assert.match(out, /6 tin hộp thư đã chấm · 1 tin bỏ qua/);
   assert.match(out, /--cascade · toàn bộ tin đã chấm: 6 tin \(5 có mẫu, 1 nhóm OTHER\)/);
   assert.match(out, /phẳng \(mô hình 1\)\s+tầng \(ANSWER-(flat|subgroup)\)/);
@@ -333,17 +362,13 @@ test('replay-golden --cascade: bảng phẳng vs tầng (toàn bộ, rule-miss, 
   assert.match(out, /^tầng · (ngưỡng gợi ý|không có ngưỡng)/m);
   assert.match(out, /Toàn bộ tin đã chấm: 6 tin/, 'báo cáo phẳng cũ vẫn in');
   // Không có --cascade: không in bảng tầng. Tệp tầng hỏng: mã 1.
-  const plain = run('replay-golden.mjs', [goldenPath, '--model', flatPath]);
   assert.equal(plain.status, 0);
   assert.doesNotMatch(plain.stdout, /--cascade/);
-  const missing = run('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', path.join(directory, 'missing.json')]);
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /Không thấy tệp --cascade/);
-  writeFileSync(path.join(directory, 'broken.json'), '{ hỏng');
-  const broken = run('replay-golden.mjs', [goldenPath, '--model', flatPath, '--cascade', path.join(directory, 'broken.json')]);
   assert.equal(broken.status, 1);
   assert.match(broken.stderr, /Không đọc được mô hình tầng/);
   // Mô hình đo có meta.trainIds → in trạng thái rò golden (bộ chấm này không nằm trong dataset tổng hợp → sạch).
-  assert.match(out, /^mô hình: .*flat-replay\.json .* · sạch golden \(0\/8 id\)/m);
+  assert.match(out, /^mô hình: .*flat\.json .* · sạch golden \(0\/8 id\)/m);
   assert.match(out, /^mô hình tầng: .* · sạch golden \(0\/8 id\)/m);
 });

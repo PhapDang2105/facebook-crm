@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { extractVietnamesePhone } from '../app/processing/customer-info.mjs';
 import { maskPersonal } from '../app/processing/decision-log.mjs';
 import { ADDRESS_WORDS, canonicalTemplateId, countBags, intentRowOf, isOrderStepContext, normalizeIntentText, orderContextOf, prevBotAsksOf as prevBotAsksOfRow } from '../app/processing/intent-features.mjs';
+import { pendingOrderTtlMs } from '../app/processing/pending-order.mjs';
 import { foldText } from '../app/processing/template-match.mjs';
 
 /** Nhãn mà câu bot đã gửi KHÔNG chắc là câu đúng (chính sách đổi, hậu xử lý, thiếu ngữ cảnh): LLM được phép sửa. */
@@ -33,9 +34,10 @@ export const lastWasOrderStepOf = id => isOrderStepContext(id);
 const BASKET_STEPS = /^ORDER_(ADDRESS|PHONE|CONFIRMATION|UPDATE|UPDATED|CART_LINE)|^ORDER_CUSTOM_BASKET$|^UPSELL_TWO_BAGS$/;
 /** Chữ ký giỏ trong câu bot: "đang giữ đơn …", "đơn của chị gồm …". */
 const BASKET_SIGNATURE = /\bdang giu don\b|\bdon (hang )?cua \S+ gom\b/;
-export const basketTtlMin = 120;
+// Hạn giỏ = hạn runtime (pending-order.mjs, 24 giờ từ 03/10) — tránh lệch huấn luyện/chạy thật.
+export const basketTtlMin = pendingOrderTtlMs / 60000;
 
-/** Giỏ còn hạn suy từ câu bot trước: bước đơn / chữ ký giỏ, và câu đó gửi chưa quá 120 phút. */
+/** Giỏ còn hạn suy từ câu bot trước: bước đơn / chữ ký giỏ, và câu đó gửi chưa quá hạn giỏ (basketTtlMin). */
 export function hasBasketOf({ lastTemplate = '', prevBot = '', prevBotAgeMin = Infinity } = {}) {
   const age = Number.isFinite(Number(prevBotAgeMin)) && prevBotAgeMin !== null ? Number(prevBotAgeMin) : Infinity;
   if (age >= basketTtlMin) return false;

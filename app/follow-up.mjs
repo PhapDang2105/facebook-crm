@@ -845,6 +845,11 @@ const batchLeaseMs = 45 * 60 * 1000;
 const queueMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
 const maxBatchSize = 50;
 const maxRelayAttempts = 2;
+// Extension Pancake không tìm được ID Facebook của khách (lệnh GET_GLOBAL_ID_FOR_CONV): không phải lần gửi lỗi —
+// khách KHÔNG bị bỏ khỏi hàng (không tính vào maxRelayAttempts), được đánh dấu "cần gửi tay" và chỉ nhờ extension
+// tìm lại sau 24 giờ (03/10: 29 lần hụt liền, cả hàng 137 khách bị bỏ dần mà chưa ai được gửi).
+export const followUpLookupRetryMs = 24 * 60 * 60 * 1000;
+const lookupBlocked = (entry, now) => Number(entry?.lookupFailedAt) > 0 && now - Number(entry.lookupFailedAt) < followUpLookupRetryMs;
 
 // Thẻ mặc định không bám: Đã mua hàng, Cần người xử lý, Khiếu nại, Bảo hành, Hủy đơn, Khách xấu, Bám đuổi thành công.
 const skipLabelIds = new Set(['customer', 'consulting', 'complaint', 'warranty', 'cancelled', 'bad', 'followup-won']);
@@ -1061,7 +1066,7 @@ export async function followUpQueue({ now = Date.now() } = {}) {
   const byId = new Map((store.conversations || []).map(item => [item.id, item]));
   return Object.entries(state.sent)
     .filter(([, item]) => item.queued && stillWanted(item, byId, store))
-    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, globalId: item.globalId || '', attempts: item.attempts || 0, lastError: item.lastError || (item.noGlobalId ? 'Pancake chưa có ID Facebook của khách — gửi tay bằng nút Mở Pancake' : ''), noGlobalId: item.noGlobalId === true, leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
+    .map(([key, item]) => ({ key, conversationId: item.conversationId, name: item.name, at: item.at, repliedAt: item.repliedAt, scenarioId: item.scenarioId, text: item.text, pageId: item.pageId, psid: item.psid, globalId: item.globalId || '', attempts: item.attempts || 0, lastError: item.lastError || (item.noGlobalId ? 'Pancake chưa có ID Facebook của khách — gửi tay bằng nút Mở Pancake' : ''), noGlobalId: item.noGlobalId === true, lookupFailedAt: Number(item.lookupFailedAt) || 0, lookupError: item.lookupError || '', needsManual: !item.globalId && lookupBlocked(item, now), leased: Number(item.leasedUntil) > now, pancakeUrl: pancakeConversationUrl(item.pageId, item.psid) }))
     .sort((first, second) => first.repliedAt - second.repliedAt);
 }
 
@@ -1248,6 +1253,8 @@ async function buildFollowUpBatchOnce({ limit = 30, conversationInfo, now = Date
     if (!globalId) {
       // Pancake chưa lưu ID Facebook: ghi dấu, đưa vào lô (có hạn) để extension tự tìm ID.
       if (!item.noGlobalId) await updateFollowUpState(current => { if (current.sent[item.key]) current.sent[item.key].noGlobalId = true; return null; });
+      // Extension đã hụt ID khách này trong 24 giờ qua: không nhờ tìm lại (vẫn ở hàng chờ, "cần gửi tay").
+      if (lookupBlocked(item, now)) { skipped.push({ key: item.key, name: item.name, reason: 'cần gửi tay (extension Pancake chưa tìm được ID Facebook, thử lại sau 24 giờ)' }); continue; }
       if (lookups >= maxLookups) { skipped.push({ key: item.key, name: item.name, reason: 'chờ lô sau (tìm ID Facebook tối đa 10 khách/lô)' }); continue; }
       lookups += 1;
     }
@@ -1255,7 +1262,9 @@ async function buildFollowUpBatchOnce({ limit = 30, conversationInfo, now = Date
     texts.set(item.key, text);
     const conversation = (store.conversations || []).find(entry => entry.id === item.conversationId);
     const updatedTime = Math.max(Number(conversation?.lastMessageAt) || 0, ...((store.messages?.[item.conversationId] || []).map(message => Number(message.createdAt) || 0)));
-    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: globalId, needsGlobalId: !globalId, updatedTime, name: item.name, text });
+    // Khách cần tìm ID: kèm tên / mốc / mã luồng PANCAKE đang giữ (cầu nối ưu tiên dùng, thiếu thì lùi về PSID / tên / mốc CRM).
+    const lookupHints = globalId ? {} : { pancakeName: String(info.name || ''), pancakeUpdatedAt: Number(info.updatedAt) || 0, threadId: String(info.threadId || ''), threadKey: String(info.threadKey || '') };
+    items.push({ key: item.key, pageId: item.pageId, convId: conversationId, globalUserId: globalId, needsGlobalId: !globalId, updatedTime, name: item.name, text, ...lookupHints });
   }
   // Khách phải tìm ID xếp cuối lô: không làm lô dừng sớm vì 3 lần tìm ID lỗi liền.
   items.sort((first, second) => Number(first.needsGlobalId) - Number(second.needsGlobalId));
@@ -1316,10 +1325,11 @@ export async function recordFollowUpBatchResults(results = [], { now = Date.now(
     const key = String(result?.key || '');
     if (!key) continue;
     // Kết quả phải mang đúng mã lô đã cấp (chống link #followup-results giả).
+    // lookupFailed: true = extension Pancake không tìm được ID Facebook (chưa gửi gì) — xem nhánh riêng ở dưới.
     const entry = state.sent[key];
     if (!entry?.queued || (entry.batchToken ? entry.batchToken !== String(token || '') : Boolean(token))) { summary.rejected = (summary.rejected || 0) + 1; continue; }
     // Extension vừa tìm được ID Facebook: ghi lại để lần sau khỏi tìm.
-    if (/^\d{5,25}$/.test(String(result.globalId || ''))) await updateFollowUpState(current => { const target = current.sent[key]; if (target) { target.globalId = String(result.globalId); delete target.noGlobalId; } return null; });
+    if (/^\d{5,25}$/.test(String(result.globalId || ''))) await updateFollowUpState(current => { const target = current.sent[key]; if (target) { target.globalId = String(result.globalId); delete target.noGlobalId; delete target.lookupFailedAt; delete target.lookupError; } return null; });
     if (result.ok) {
       if (await resolveFollowUpQueueItem(key, 'sent', { now, via: 'pancake-relay', readSettings })) summary.sent += 1;
       continue;
@@ -1340,6 +1350,22 @@ export async function recordFollowUpBatchResults(results = [], { now = Date.now(
       continue;
     }
     const error = String(result.error || 'không rõ lỗi').slice(0, 200);
+    if (result.lookupFailed === true) {
+      // Hụt ID Facebook (chưa gửi gì cho khách): giữ trong hàng chờ, không tính lần lỗi, đánh dấu "cần gửi tay";
+      // lô sau không nhờ extension tìm lại trong 24 giờ (buildFollowUpBatch / lookupBlocked).
+      const marked = await updateFollowUpState(current => {
+        const target = current.sent[key];
+        if (!target?.queued) return null;
+        delete target.leasedUntil;
+        target.noGlobalId = true;
+        target.lookupFailedAt = now;
+        target.lookupError = error;
+        target.lastError = `cần gửi tay — extension Pancake không tìm được ID Facebook: ${error}`;
+        return true;
+      });
+      if (marked) summary.lookupFailed = (summary.lookupFailed || 0) + 1;
+      continue;
+    }
     const dropped = await updateFollowUpState(current => {
       const entry = current.sent[key];
       if (!entry?.queued) return null;

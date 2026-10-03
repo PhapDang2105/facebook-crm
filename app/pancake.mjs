@@ -460,11 +460,22 @@ export async function fetchPancakeConversationInfo(pageId, conversationId, confi
   const customers = Array.isArray(body.customers) ? body.customers : [];
   const customer = customers[0] || null;
   const phoneOf = value => String(typeof value === 'string' ? value : value?.phone_number || value?.captured || '').replace(/\D/g, '');
+  // Dữ liệu cho lệnh GET_GLOBAL_ID_FOR_CONV của extension Pancake (cầu nối CRM, extensions/crm-pancake-bridge):
+  // extension dò hộp thư Page theo tên khách + thời điểm hội thoại, nên dùng đúng tên / mốc PANCAKE đang giữ
+  // (không phải tên / mốc của CRM). Theo bản mô tả API (integrations/pancake/pancake-api.yaml, MessagesResponse):
+  // tên ở `conv_from.name` / `customers[].name`, tin mới nhất trước với `messages[].inserted_at`. `updated_at`,
+  // `thread_id` (có ở page_customers) và `thread_key` (có ở export_data) KHÔNG có trong mô tả của API tin nhắn —
+  // đọc nếu Pancake có trả, không có thì '' / 0 (cầu nối lùi về PSID / tên CRM / mốc CRM).
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const lastMessageAt = Math.max(0, ...messages.map(message => pancakeTime(message?.inserted_at, 0)));
   return {
     globalId: String(body.global_id || customer?.global_id || ''),
     recentOrders: Array.isArray(body.recent_orders) ? body.recent_orders.length : 0,
     canInbox: body.can_inbox !== false && customer?.can_inbox !== false,
-    name: String(customer?.name || ''),
+    name: String(customer?.name || body.conv_from?.name || ''),
+    updatedAt: pancakeTime(body.updated_at || body.conversation?.updated_at, 0) || lastMessageAt,
+    threadId: String(body.thread_id || body.conversation?.thread_id || customer?.thread_id || ''),
+    threadKey: String(body.thread_key || body.conversation?.thread_key || ''),
     // Hồ sơ khách Pancake (liên kết POS): khách cũ nhận ra được cả khi chưa để lại SĐT.
     orderCount: Math.max(0, ...customers.map(item => Number(item.order_count) || 0)),
     succeedOrderCount: Math.max(0, ...customers.map(item => Number(item.succeed_order_count) || 0)),

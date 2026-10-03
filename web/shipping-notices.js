@@ -117,9 +117,10 @@
   }
 
   /** Gửi một nhóm mục ngoài 24 giờ qua cầu nối, lần lượt, cách nhau 15–30 giây. */
-  async function sendViaBridge(keys) {
+  // `force`: nhân viên đã xác nhận gửi lại tin "chưa rõ" — vượt giữ chỗ máy chủ (R1-03; không thì máy chủ bỏ qua tin đang giữ).
+  async function sendViaBridge(keys, { force = false } = {}) {
     if (!bridgeReady() || typeof sendThroughBridge !== 'function') throw new Error('Chưa cài cầu nối Pancake trên trình duyệt này.');
-    const { items: batch = [], skipped = [] } = await api('/api/shipping/notices/bridge-items', { method: 'POST', body: JSON.stringify({ keys }) });
+    const { items: batch = [], skipped = [] } = await api('/api/shipping/notices/bridge-items', { method: 'POST', body: JSON.stringify({ keys, ...(force ? { force: true } : {}) }) });
     let sent = 0;
     let failed = skipped.length;
     for (const [index, item] of batch.entries()) {
@@ -133,11 +134,13 @@
         await report([{ key: item.key, ok: false, error: 'Cầu nối không trả lời — chưa rõ đã gửi hay chưa', via: 'pancake-bridge' }]).catch(() => {});
         continue;
       }
+      // Cầu nối vừa cập nhật (trang chưa tải lại): chưa gửi gì — dừng, không tính lần thử.
+      if (result.bridgeGone) throw new Error(`${result.error} (đã gửi ${sent} tin).`);
       await report([{ key: item.key, ok: result.ok, error: result.error, via: 'pancake-bridge' }]).catch(() => {});
       if (result.ok) { sent += 1; done.add(item.key); } else failed += 1;
       render({ ...(await api('/api/shipping/notices').catch(() => ({}))), items });
     }
-    return { sent, failed };
+    return { sent, failed, skippedReasons: [...new Set(skipped.map(item => item.reason))] };
   }
 
   async function runAll(auto = false) {
@@ -170,10 +173,11 @@
         await api('/api/shipping/notices/send', { method: 'POST', body: JSON.stringify({ key: item.key }) });
         done.add(item.key);
       } else if (button.dataset.action === 'send') {
-        if (isUncertain(item.key) && !confirm('Lần gửi trước chưa rõ khách đã nhận chưa (cầu nối không trả lời). Đã kiểm tra trong Pancake và vẫn gửi lại?')) return;
+        const uncertain = isUncertain(item.key);
+        if (uncertain && !confirm('Lần gửi trước chưa rõ khách đã nhận chưa (cầu nối không trả lời). Đã kiểm tra trong Pancake và vẫn gửi lại?')) return;
         running = true;
-        const { sent } = await sendViaBridge([item.key]);
-        if (!sent) throw new Error('Pancake chưa gửi được tin này.');
+        const { sent, skippedReasons } = await sendViaBridge([item.key], { force: uncertain });
+        if (!sent) throw new Error(skippedReasons.length ? `Chưa gửi: ${skippedReasons.join(', ')}.` : 'Pancake chưa gửi được tin này.');
       } else {
         const via = button.dataset.action === 'manual' ? 'manual' : 'skipped';
         await report([{ key: item.key, ok: true, via }]);

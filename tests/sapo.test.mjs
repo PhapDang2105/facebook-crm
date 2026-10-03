@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { carrierInfo, fetchSapoOrdersPage, sapoConfigFrom, sapoShipment } from '../app/sapo.mjs';
-import { attachShipmentsToConversations, attachShipmentsToLandingOrders, pickShipmentOrder, renderShipmentNotice, shipmentNote, shipmentNoticePlan } from '../app/sapo-tracking.mjs';
-import { runSapoSync } from '../app/sapo-sync.mjs';
+import { applyCarrierStage, attachShipmentsToConversations, attachShipmentsToLandingOrders, pickShipmentOrder, renderShipmentNotice, shipmentNote, shipmentNoticePlan, shipmentStage, stageFromSpxRecords } from '../app/sapo-tracking.mjs';
+import { listShipmentNoticeQueue, recordShipmentNoticeResult, runSapoSync } from '../app/sapo-sync.mjs';
+
+import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
 import { processingNotes } from '../app/order-notes.mjs';
 
 const HOUR = 60 * 60 * 1000;
@@ -35,11 +37,12 @@ test('đọc vận đơn từ đơn Sapo: bỏ đơn sàn, đơn chưa có mã, 
   assert.equal(carrierInfo({ carrier: 'SAPO_EXPRESS', trackingNumber: 'SPXVN1234567' }).name, 'SPX Express');
 });
 
-test('cấu hình Sapo: bỏ đuôi .mysapo.net, mặc định KHÔNG nhắn khách', () => {
+test('cấu hình Sapo: bỏ đuôi .mysapo.net; báo khách theo cài đặt trừ khi .env đặt cứng', () => {
   const config = sapoConfigFrom({ SAPO_STORE: 'shop.mysapo.net', SAPO_API_KEY: 'k', SAPO_API_SECRET: 's' });
   assert.equal(config.store, 'shop');
-  assert.equal(config.notifyCustomers, false);
+  assert.equal(config.notifyCustomers, null);
   assert.equal(sapoConfigFrom({ SAPO_NOTIFY_CUSTOMERS: '1' }).notifyCustomers, true);
+  assert.equal(sapoConfigFrom({ SAPO_NOTIFY_CUSTOMERS: '0' }).notifyCustomers, false);
 });
 
 test('gọi API Sapo: Basic auth, lọc theo modified_on_min, không truyền status', async () => {
@@ -94,10 +97,12 @@ test('ghép vào hội thoại: hai vận đơn cùng SĐT vào hai đơn khác 
   assert.equal(a.shipment.trackingNumber, '802800000001');
   assert.equal(b.shipment.trackingNumber, '802800000002');
   assert.equal(a.shipment.statusLabel, 'Đã lấy hàng');
+  assert.equal(a.shipment.stage, 'picked_up');
 
   const again = attachShipmentsToConversations(store, [sapoShipment(sapoOrder({ id: 1, number: '802800000001', url: null, status: 'delivering' }))], { now: now + HOUR });
   assert.deepEqual(again.changes, [{ conversationId: 'c1', orderId: 'A', isNew: false, statusChanged: true }]);
-  assert.equal(a.shipment.statusLabel, 'Đang giao');
+  assert.equal(a.shipment.statusLabel, 'Đang vận chuyển');
+  assert.equal(a.shipment.stage, 'in_transit');
   assert.equal(a.shipment.matchedAt, now);
   assert.equal(attachShipmentsToConversations(store, [sapoShipment(sapoOrder({ id: 1, number: '802800000001', url: null, status: 'delivering' }))], { now }).changes.length, 0);
 });
@@ -108,41 +113,98 @@ test('đơn landing nhận vận đơn khi không có hội thoại nào khớp'
   assert.equal(landing.orders[0].shipment.carrier, 'J&T Express');
 });
 
-test('nhắn khách: chỉ trong 24 giờ Messenger, ngoài giờ nghỉ, vận đơn còn mới và chưa giao', () => {
-  const order = crmOrder('A');
-  const inbox = conversation('c1', [order]);
-  const store = { conversations: [inbox], messages: {} };
-  attachShipmentsToConversations(store, [sapoShipment(sapoOrder())], { now });
-  assert.equal(shipmentNoticePlan(store, inbox, order, { now }).action, 'send');
-  assert.equal(shipmentNoticePlan(store, inbox, order, { now, quietHour: true }).action, 'wait');
-  assert.equal(shipmentNoticePlan(store, { ...inbox, lastCustomerMessageAt: now - 30 * HOUR }, order, { now }).reason, 'ngoài 24 giờ Messenger');
-  assert.equal(shipmentNoticePlan(store, inbox, { ...order, shipment: { ...order.shipment, status: 'delivered' } }, { now }).action, 'skip');
-  assert.equal(shipmentNoticePlan(store, inbox, { ...order, shipment: { ...order.shipment, noticeAt: now } }, { now }).action, 'skip');
-  assert.equal(shipmentNoticePlan(store, inbox, order, { now: now + 5 * 24 * HOUR }).reason, 'vận đơn đã cũ');
-  // Đơn nằm ở luồng bình luận: nhắn vào hộp thư của cùng khách.
-  const comment = conversation('t1', [order], { source: 'comment', psid: 'c1' });
-  assert.equal(shipmentNoticePlan({ conversations: [comment, inbox], messages: {} }, comment, order, { now }).inbox, inbox);
+test('giai đoạn vận đơn: Sapo + hành trình SPX; hoàn/hủy thì dừng', () => {
+  assert.equal(shipmentStage({ status: 'pending' }), 'created');
+  assert.equal(shipmentStage({ status: 'picked_up' }), 'picked_up');
+  assert.equal(shipmentStage({ status: 'delivering' }), 'in_transit');
+  assert.equal(shipmentStage({ status: 'delivering', carrierStage: 'out_for_delivery' }), 'out_for_delivery');
+  assert.equal(shipmentStage({ status: 'retry_delivery' }), 'out_for_delivery');
+  assert.equal(shipmentStage({ status: 'delivered', carrierStage: 'in_transit' }), 'delivered');
+  assert.equal(shipmentStage({ status: 'returned' }), null);
+  assert.equal(stageFromSpxRecords([{ status: 'Enter Domestic Sorting Center' }, { status: 'Pickup From Domestic Seller' }]), 'in_transit');
+  assert.equal(stageFromSpxRecords([{ status: 'Delivering' }, { status: 'Enter Domestic Sorting Center' }]), 'out_for_delivery');
+  assert.equal(stageFromSpxRecords([{ status: 'Delivered' }]), 'delivered');
+  assert.equal(stageFromSpxRecords([{ status: 'Pickup Done' }]), 'picked_up');
 });
 
-test('tin báo mã vận đơn: xưng hô, link, nhắc 4 số cuối SĐT cho J&T', () => {
-  const text = renderShipmentNotice({ carrier: 'J&T Express', trackingNumber: '802835136377', trackingUrl: 'https://jtexpress.vn/x' }, 'female');
-  assert.match(text, /đơn hàng của chị đã được giao cho J&T Express, mã vận đơn: 802835136377/);
+function linkedStore({ status = 'picked_up', lastCustomerMessageAt = now - HOUR, messages = {} } = {}) {
+  const order = crmOrder('A');
+  const inbox = conversation('c1', [order], { lastCustomerMessageAt });
+  const store = { conversations: [inbox], messages };
+  attachShipmentsToConversations(store, [sapoShipment(sapoOrder({ status }))], { now });
+  return { store, inbox, order };
+}
+
+test('báo khách: tin đầu là mã vận đơn; giai đoạn sau mỗi giai đoạn một tin; nhảy cóc chỉ báo mới nhất', () => {
+  const { store, inbox, order } = linkedStore();
+  let plan = shipmentNoticePlan(store, inbox, order, { now });
+  assert.equal(plan.action, 'send');
+  assert.equal(plan.templateId, 'SHIPMENT_CREATED');
+  assert.equal(plan.stage, 'picked_up');
+  order.shipment.notifiedStage = 'picked_up';
+  assert.equal(shipmentNoticePlan(store, inbox, order, { now }).action, 'skip');
+  order.shipment.status = 'delivering';
+  order.shipment.stageAt = now;
+  applyCarrierStage(order, 'out_for_delivery', now);
+  plan = shipmentNoticePlan(store, inbox, order, { now });
+  assert.equal(plan.templateId, 'SHIPMENT_OUT_FOR_DELIVERY');
+  order.shipment.status = 'delivered';
+  assert.equal(shipmentNoticePlan(store, inbox, order, { now }).templateId, 'SHIPMENT_DELIVERED');
+});
+
+test('báo khách: ngoài 24 giờ vào hàng chờ, giờ nghỉ thì chờ, giai đoạn quá 2 ngày chỉ ghi dấu, đã gửi mã tay thì thôi', () => {
+  const outside = linkedStore({ lastCustomerMessageAt: now - 30 * HOUR });
+  assert.equal(shipmentNoticePlan(outside.store, outside.inbox, outside.order, { now }).action, 'queue');
+  const fresh = linkedStore();
+  assert.equal(shipmentNoticePlan(fresh.store, fresh.inbox, fresh.order, { now, quietHour: true }).action, 'wait');
+  assert.equal(shipmentNoticePlan(fresh.store, fresh.inbox, fresh.order, { now: now + 3 * 24 * HOUR }).action, 'mark');
+  const staff = linkedStore({ messages: { c1: [{ direction: 'outgoing', text: 'Mã vận đơn của chị: 802835136377 nha', createdAt: now }] } });
+  assert.deepEqual(shipmentNoticePlan(staff.store, staff.inbox, staff.order, { now }), { action: 'mark', stage: 'picked_up', reason: 'đã gửi mã trong hội thoại' });
+  // Đơn ở luồng bình luận: báo vào hộp thư của cùng khách.
+  const order = crmOrder('B');
+  const comment = conversation('t1', [order], { source: 'comment', psid: 'c1' });
+  const inbox = conversation('c1', []);
+  const store = { conversations: [comment, inbox], messages: {} };
+  attachShipmentsToConversations(store, [sapoShipment(sapoOrder())], { now });
+  assert.equal(shipmentNoticePlan(store, comment, order, { now }).inbox, inbox);
+});
+
+test('lời báo khách: mẫu mặc định, mẫu chủ shop sửa, mẫu để trống = tắt; J&T nhắc 4 số cuối SĐT', () => {
+  const shipment = { carrier: 'J&T Express', trackingNumber: '802835136377', trackingUrl: 'https://jtexpress.vn/x', status: 'picked_up' };
+  const text = renderShipmentNotice(shipment, 'female');
+  assert.match(text, /đơn hàng của chị đã được đóng gói và tạo vận đơn J&T Express/);
+  assert.match(text, /Mã vận đơn: 802835136377/);
+  assert.match(text, /Trạng thái: Đã lấy hàng/);
   assert.match(text, /Chị theo dõi hành trình đơn tại: https:\/\/jtexpress\.vn\/x/);
   assert.match(text, /4 số cuối SĐT/);
-  assert.doesNotMatch(renderShipmentNotice({ carrier: 'SPX Express', trackingNumber: 'SPXVN1', trackingUrl: 'u' }), /4 số cuối/);
-  assert.match(renderShipmentNotice({ carrier: 'SPX Express', trackingNumber: 'SPXVN1', trackingUrl: 'u' }), /anh\/chị/);
+  assert.doesNotMatch(renderShipmentNotice({ ...shipment, carrier: 'SPX Express' }), /4 số cuối/);
+  assert.equal(renderShipmentNotice(shipment, 'male', 'SHIPMENT_DELIVERED', { SHIPMENT_DELIVERED: 'Cảm ơn {title}!' }), 'Cảm ơn anh!');
+  assert.equal(renderShipmentNotice(shipment, 'male', 'SHIPMENT_IN_TRANSIT', { SHIPMENT_IN_TRANSIT: '' }), '');
+  // Mẫu mặc định nằm trong seed để chủ shop sửa ở Cài đặt → Tin nhắn.
+  const seed = defaultMessageTemplates();
+  for (const id of ['SHIPMENT_CREATED', 'SHIPMENT_PICKED_UP', 'SHIPMENT_IN_TRANSIT', 'SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED', 'ORDER_STATUS_SHIPPED']) assert.ok(seed[id], id);
 });
 
-test('bảng Đơn hàng hiện hãng + mã + trạng thái giao', () => {
-  const order = crmOrder('A', { address: '' });
-  attachShipmentsToConversations({ conversations: [conversation('c1', [order])], messages: {} }, [sapoShipment(sapoOrder({ status: 'delivering' }))], { now });
-  assert.equal(shipmentNote(order), 'ℹ J&T Express 802835136377 · Đang giao');
-  assert.ok(processingNotes(order).includes('ℹ J&T Express 802835136377 · Đang giao'));
+test('bot trả lời "đơn tới đâu" bằng mã vận đơn + giai đoạn + link khi đơn đã có vận đơn', () => {
+  const { order } = linkedStore({ status: 'delivering' });
+  const reply = renderChatbotReply({ template_id: 'ORDER_STATUS' }, defaultMessageTemplates(), { recentOrder: order, customer: { gender: 'female' } });
+  const text = reply.messages.join('\n');
+  assert.match(text, /mã vận đơn 802835136377/);
+  assert.match(text, /hiện Đang vận chuyển/);
+  assert.match(text, /jtexpress\.vn/);
+  const plain = renderChatbotReply({ template_id: 'ORDER_STATUS' }, defaultMessageTemplates(), { recentOrder: crmOrder('Z'), customer: { gender: 'female' } });
+  assert.doesNotMatch(plain.messages.join('\n'), /mã vận đơn \d/);
 });
 
-function memoryDeps({ store, orders, notify = false, sendMessage }) {
+test('bảng Đơn hàng hiện hãng + mã + giai đoạn giao', () => {
+  const { order } = linkedStore({ status: 'delivering' });
+  assert.equal(shipmentNote(order), 'ℹ J&T Express 802835136377 · Đang vận chuyển');
+  assert.ok(processingNotes(order).includes('ℹ J&T Express 802835136377 · Đang vận chuyển'));
+});
+
+function memoryDeps({ store, orders, notify = true, sendMessage, state: initial = { noticesFrom: now - HOUR }, trackSpx }) {
   const sent = [];
-  let state = {};
+  let state = initial;
   return {
     sent,
     get state() { return state; },
@@ -158,39 +220,74 @@ function memoryDeps({ store, orders, notify = false, sendMessage }) {
       readLandingStore: async () => ({ orders: [] }),
       updateLandingStore: async mutate => mutate({ orders: [] }),
       sendMessage: sendMessage || (async (inbox, payload) => { sent.push({ inbox: inbox.id, ...payload }); return { message: { mid: 'm1' } }; }),
-      genderOf: inbox => inbox.gender
+      genderOf: inbox => inbox.gender,
+      readTemplates: async () => ({}),
+      trackSpx
     }
   };
 }
 
-test('một lượt đồng bộ khi CHƯA bật nhắn khách: ghi mã vào đơn, chỉ đếm tin lẽ ra gửi', async () => {
+test('đồng bộ khi TẮT báo khách: chỉ ghi mã vào đơn, không gửi', async () => {
   const store = { conversations: [conversation('c1', [crmOrder('A')])], messages: {} };
-  const harness = memoryDeps({ store, orders: [sapoOrder(), sapoOrder({ id: 9, source: 'shopee' })] });
+  const harness = memoryDeps({ store, orders: [sapoOrder(), sapoOrder({ id: 9, source: 'shopee' })], notify: false });
   const summary = await runSapoSync(harness.deps);
   assert.equal(summary.shipments, 1);
   assert.equal(summary.linked, 1);
-  assert.equal(summary.wouldSend, 1);
   assert.equal(harness.sent.length, 0);
-  assert.equal(store.conversations[0].customerOrders[0].shipment.noticeAt, undefined);
+  assert.equal(store.conversations[0].customerOrders[0].shipment.notifiedStage, undefined);
   assert.equal(harness.state.cursor, now);
 });
 
-test('bật nhắn khách: gửi một lần mỗi mã vận đơn; gửi lỗi thì ghi lỗi, không gửi lại', async () => {
+test('đồng bộ khi BẬT: gửi tin mã vận đơn một lần; lỗi thì không tự gửi lại mà vào hàng chờ', async () => {
   const store = { conversations: [conversation('c1', [crmOrder('A')])], messages: {} };
-  const harness = memoryDeps({ store, orders: [sapoOrder()], notify: true });
-  const summary = await runSapoSync(harness.deps);
-  assert.equal(summary.sent, 1);
-  assert.equal(harness.sent.length, 1);
-  assert.match(harness.sent[0].text, /mã vận đơn: 802835136377/);
-  assert.equal(store.conversations[0].customerOrders[0].shipment.noticeVia, 'bot');
+  const harness = memoryDeps({ store, orders: [sapoOrder()] });
+  assert.equal((await runSapoSync(harness.deps)).sent, 1);
+  assert.match(harness.sent[0].text, /Mã vận đơn: 802835136377/);
+  assert.equal(store.conversations[0].customerOrders[0].shipment.notifiedStage, 'picked_up');
   await runSapoSync(harness.deps);
   assert.equal(harness.sent.length, 1);
 
   const failing = { conversations: [conversation('c2', [crmOrder('B')])], messages: {} };
-  const broken = memoryDeps({ store: failing, orders: [sapoOrder()], notify: true, sendMessage: async () => { throw new Error('(#10) outside allowed window'); } });
-  const result = await runSapoSync(broken.deps);
-  assert.equal(result.failed, 1);
-  const order = failing.conversations[0].customerOrders[0];
-  assert.equal(order.shipment.noticeVia, 'failed');
-  assert.ok(processingNotes(order).some(note => note.startsWith('⚠ Chưa nhắn được mã vận đơn')));
+  const broken = memoryDeps({ store: failing, orders: [sapoOrder()], sendMessage: async () => { throw new Error('(#10) outside allowed window'); } });
+  assert.equal((await runSapoSync(broken.deps)).failed, 1);
+  const again = await runSapoSync(broken.deps);
+  assert.equal(again.failed, 0);
+  assert.equal(again.queued, 1);
+  const queue = listShipmentNoticeQueue(failing, { now });
+  assert.equal(queue.length, 1);
+  assert.match(queue[0].error, /outside allowed window/);
+  assert.equal(queue[0].key, 'c2|B|picked_up');
+});
+
+test('lần đầu bật: vận đơn cũ hơn 24 giờ chỉ ghi dấu, không nhắn dồn', async () => {
+  const store = { conversations: [conversation('c1', [crmOrder('A', { createdAt: now - 60 * HOUR })]), conversation('c2', [crmOrder('B', { phone: '0987654321' })])], messages: {} };
+  const harness = memoryDeps({ store, orders: [sapoOrder({ created: now - 50 * HOUR }), sapoOrder({ id: 2, phone: '0987654321', number: '802800000009', url: null })], state: {} });
+  const summary = await runSapoSync(harness.deps);
+  assert.equal(summary.marked, 1);
+  assert.equal(summary.sent, 1);
+  assert.equal(harness.sent[0].inbox, 'c2');
+  assert.equal(store.conversations[0].customerOrders[0].shipment.notices[0].via, 'baseline');
+  assert.ok(harness.state.noticesFrom);
+});
+
+test('tra hành trình SPX: "đang giao cho khách" báo sớm hơn Sapo', async () => {
+  const store = { conversations: [conversation('c1', [crmOrder('A')])], messages: {} };
+  const orders = [sapoOrder({ carrier: 'SHOPEE_XPRESS', number: 'SPXVN0001', url: null, status: 'delivering' })];
+  const harness = memoryDeps({ store, orders, trackSpx: async () => ({ records: [{ status: 'Delivering' }] }) });
+  await runSapoSync(harness.deps);
+  const shipment = store.conversations[0].customerOrders[0].shipment;
+  assert.equal(shipment.carrierStage, 'out_for_delivery');
+  assert.equal(shipment.notifiedStage, 'out_for_delivery');
+  assert.match(harness.sent[0].text, /SPX Express/);
+});
+
+test('hàng chờ: nhân viên gửi qua Pancake / gửi tay / bỏ qua đều ghi dấu giai đoạn', () => {
+  const { store } = linkedStore({ lastCustomerMessageAt: now - 30 * HOUR });
+  const [item] = listShipmentNoticeQueue(store, { now });
+  assert.equal(item.inWindow, false);
+  assert.match(item.text, /Mã vận đơn/);
+  assert.ok(recordShipmentNoticeResult(store, item.key, { ok: true, via: 'pancake-bridge', now }));
+  assert.equal(listShipmentNoticeQueue(store, { now }).length, 0);
+  assert.equal(store.conversations[0].customerOrders[0].shipment.notices.at(-1).via, 'pancake-bridge');
+  assert.equal(recordShipmentNoticeResult(store, 'khong|co|gi', { ok: true }), false);
 });

@@ -1,4 +1,4 @@
-// Ghép vận đơn Sapo (app/sapo.mjs) vào đơn CRM và quyết định có nhắn mã vận đơn cho khách không.
+// Ghép vận đơn Sapo (app/sapo.mjs) vào đơn CRM và báo khách hành trình đơn theo từng giai đoạn.
 //
 // Đơn Facebook trên Sapo do nhân viên import tay từ file Pancake: không mang mã đơn Pancake/CRM,
 // nên ghép theo SĐT người nhận (9 số cuối) + thời gian (đơn CRM tạo trước vận đơn tối đa 10 ngày).
@@ -6,22 +6,29 @@
 // ghép cột "Mã đơn" của file Pancake vào ô Ghi chú lúc import.
 // Một SĐT khớp đơn của HAI khách khác nhau (khác Page/psid): chỉ ghép khi đúng một đơn trùng tổng
 // tiền, không thì bỏ — nhắn nhầm mã của người khác tệ hơn không nhắn.
+//
+// Giai đoạn (chủ shop 03/10): có mã vận đơn → đã lấy hàng → đang vận chuyển → đang giao cho khách →
+// giao thành công (cảm ơn). Sapo chỉ có pending / picked_up / delivering / retry_delivery / delivered,
+// nên "đang giao cho khách" lấy từ hành trình của hãng (SPX) hay retry_delivery. Tin đầu luôn kèm mã
+// vận đơn + link tra + trạng thái hiện tại; sau đó mỗi giai đoạn mới một tin, nhảy cóc thì chỉ báo
+// giai đoạn mới nhất. Trong 24 giờ Messenger: máy chủ tự gửi; ngoài 24 giờ: vào hàng chờ, trang CRM
+// gửi qua cầu nối Pancake (tiện ích Pancake gửi được ngoài 24 giờ).
 import { isCancelledOrder, isIncompleteOrder } from './order-facts.mjs';
-import { shipmentStatusLabel } from './sapo.mjs';
+import { SHIPMENT_STAGES, STAGE_TEMPLATES, shipmentStage, shipmentStageLabel } from './shipment-stage.mjs';
+export * from './shipment-stage.mjs';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 export const shipmentMatchBeforeMs = 10 * DAY;
 const shipmentMatchAfterMs = 2 * HOUR;
-// Vận đơn tạo quá lâu thì không nhắn nữa (khách đã nhận/đã được nhân viên báo).
-export const shipmentNoticeMaxAgeMs = 4 * DAY;
+// Giai đoạn đã qua quá lâu thì không báo nữa (tin "đang giao" sau 2 ngày là sai sự thật).
+export const shipmentStageNoticeMaxAgeMs = 2 * DAY;
 // Messenger: tin tự động chỉ gửi được khi khách nhắn hộp thư trong 24 giờ (chừa 1 giờ như bám đuổi).
 export const shipmentNoticeWindowMs = 23 * HOUR;
-const LATE_STATUSES = new Set(['delivered', 'returning', 'returned', 'cancelled']);
 
-// Như honorific() của chatbot-templates (không import: chatbot-templates → order-notes → đây là vòng).
-const honorific = gender => gender === 'male' ? 'anh' : gender === 'female' ? 'chị' : 'anh/chị';
+
 const phoneKey = value => String(value || '').replace(/\D/g, '').slice(-9);
+const stageIndex = stage => SHIPMENT_STAGES.indexOf(stage);
 const usableOrder = order => Boolean(order) && order.status !== 'Hủy' && !isCancelledOrder(order) && !isIncompleteOrder(order);
 
 /** Mã của đơn CRM có thể xuất hiện trong ghi chú đơn Sapo (mã CRM, mã POS, mã hệ thống POS). */
@@ -79,7 +86,8 @@ export function applyShipment(order, shipment, matchedBy, now = Date.now()) {
     trackingNumber: shipment.trackingNumber,
     trackingUrl: shipment.trackingUrl,
     status: shipment.status,
-    statusLabel: shipmentStatusLabel(shipment.status),
+    statusLabel: shipmentStageLabel(shipmentStage({ status: shipment.status, cancelled: shipment.cancelled }) || 'created'),
+    carrierStage: before?.carrierStage || '',
     createdAt: shipment.createdAt,
     deliveredAt: shipment.deliveredAt || 0,
     cancelled: shipment.cancelled,
@@ -88,7 +96,11 @@ export function applyShipment(order, shipment, matchedBy, now = Date.now()) {
   };
   const statusChanged = Boolean(before) && (before.status !== next.status || Boolean(before.cancelled) !== Boolean(next.cancelled));
   const changed = !before || statusChanged || before.trackingUrl !== next.trackingUrl || before.carrier !== next.carrier;
-  if (changed) order.shipment = { ...next, updatedAt: now };
+  if (changed) {
+    const stage = shipmentStage(next) || '';
+    if (stage !== (before?.stage || '') || !before) Object.assign(next, { stage, stageAt: now });
+    order.shipment = { ...next, updatedAt: now };
+  }
   return { isNew: !before, statusChanged, changed };
 }
 
@@ -148,7 +160,20 @@ export function attachShipmentsToLandingOrders(landingStore, shipments, { now = 
   return changed;
 }
 
-const sameCustomerInbox = (store, conversation) => conversation.source !== 'comment'
+/** Hành trình của hãng (SPX) đổi giai đoạn: ghi carrierStage, tính lại stage. Trả về true nếu đổi. */
+export function applyCarrierStage(order, carrierStage, now = Date.now()) {
+  const shipment = order?.shipment;
+  if (!shipment || !carrierStage) return false;
+  shipment.carrierCheckedAt = now;
+  if (shipment.carrierStage === carrierStage) return false;
+  shipment.carrierStage = carrierStage;
+  const stage = shipmentStage(shipment) || '';
+  if (stage !== (shipment.stage || '')) Object.assign(shipment, { stage, stageAt: now });
+  shipment.updatedAt = now;
+  return true;
+}
+
+export const sameCustomerInbox = (store, conversation) => conversation.source !== 'comment'
   ? conversation
   : (store.conversations || []).find(item => item.source !== 'comment' && item.pageId === conversation.pageId && item.psid === conversation.psid) || null;
 
@@ -158,39 +183,53 @@ function lastCustomerAt(store, inbox) {
   return Math.max(Number(inbox.lastCustomerMessageAt) || 0, fromMessages);
 }
 
+export const notifiedStage = shipment => String(shipment?.notifiedStage || '');
+
+/** Page (bot hay nhân viên) đã tự nhắn mã vận đơn này trong hội thoại chưa. */
+function trackingSentInConversation(store, inbox, shipment) {
+  const messages = Array.isArray(store.messages?.[inbox.id]) ? store.messages[inbox.id] : [];
+  return messages.some(message => message?.direction === 'outgoing' && String(message.text || '').includes(shipment.trackingNumber));
+}
+
 /**
- * Nhắn mã vận đơn cho đơn này không? { action: 'send', inbox } | { action: 'wait', reason }
- * (ngoài 24 giờ / giờ nghỉ: lượt sau xét lại, nhân viên thấy ghi chú) | { action: 'skip', reason }.
+ * Báo khách giai đoạn nào của vận đơn này, qua đường nào:
+ *  { action: 'send', inbox, stage, templateId }          trong 24 giờ Messenger → máy chủ tự gửi;
+ *  { action: 'queue', inbox, stage, templateId, reason } ngoài 24 giờ → hàng chờ gửi qua cầu nối Pancake;
+ *  { action: 'wait', reason }                             giờ nghỉ / chưa có hộp thư — lượt sau xét lại;
+ *  { action: 'mark', stage, reason }                      đã báo cách khác / đã qua lâu → chỉ ghi dấu;
+ *  { action: 'skip', reason }.
  */
 export function shipmentNoticePlan(store, conversation, order, { now = Date.now(), quietHour = false } = {}) {
   const shipment = order?.shipment;
   if (!shipment?.trackingNumber) return { action: 'skip', reason: 'chưa có vận đơn' };
-  if (shipment.noticeAt) return { action: 'skip', reason: 'đã báo khách' };
-  if (shipment.cancelled || LATE_STATUSES.has(shipment.status)) return { action: 'skip', reason: `vận đơn ${shipmentStatusLabel(shipment.status).toLowerCase()}` };
-  if (now - (Number(shipment.createdAt) || now) > shipmentNoticeMaxAgeMs) return { action: 'skip', reason: 'vận đơn đã cũ' };
+  const stage = shipmentStage(shipment);
+  if (!stage) return { action: 'skip', reason: 'vận đơn hoàn/hủy' };
+  const done = notifiedStage(shipment);
+  if (done && stageIndex(stage) <= stageIndex(done)) return { action: 'skip', reason: 'đã báo giai đoạn này' };
   if (!usableOrder(order)) return { action: 'skip', reason: 'đơn CRM đã hủy' };
+  if (now - (Number(shipment.stageAt) || now) > shipmentStageNoticeMaxAgeMs) return { action: 'mark', stage, reason: 'giai đoạn đã qua lâu' };
   const inbox = sameCustomerInbox(store, conversation);
   if (!inbox) return { action: 'wait', reason: 'khách chưa có hộp thư (chỉ bình luận)' };
-  if (now - lastCustomerAt(store, inbox) > shipmentNoticeWindowMs) return { action: 'wait', reason: 'ngoài 24 giờ Messenger' };
+  // Tin đầu: nhân viên/bot đã gửi mã trong hội thoại rồi thì coi như đã báo giai đoạn hiện tại.
+  if (!done && stage !== 'delivered' && trackingSentInConversation(store, inbox, shipment)) return { action: 'mark', stage, reason: 'đã gửi mã trong hội thoại' };
+  // Tin đầu (chưa báo gì) luôn là tin mã vận đơn, trừ khi đơn đã giao xong (chỉ còn lời cảm ơn).
+  const templateId = !done && stage !== 'delivered' ? STAGE_TEMPLATES.created : STAGE_TEMPLATES[stage];
   if (quietHour) return { action: 'wait', reason: 'giờ nghỉ (22h–7h)' };
-  return { action: 'send', inbox };
+  if (now - lastCustomerAt(store, inbox) > shipmentNoticeWindowMs) return { action: 'queue', inbox, stage, templateId, reason: 'ngoài 24 giờ Messenger' };
+  return { action: 'send', inbox, stage, templateId };
 }
 
-/** Tin báo mã vận đơn. J&T hỏi 4 số cuối SĐT khi tra nên nhắc khách trước. */
-export function renderShipmentNotice(shipment, gender = '') {
-  const you = honorific(gender);
-  const You = you.charAt(0).toUpperCase() + you.slice(1);
-  const lines = [`Dạ đơn hàng của ${you} đã được giao cho ${shipment.carrier}, mã vận đơn: ${shipment.trackingNumber} ạ.`];
-  if (shipment.trackingUrl) lines.push(`${You} theo dõi hành trình đơn tại: ${shipment.trackingUrl}`);
-  if (/J&T/i.test(shipment.carrier)) lines.push(`(Trang J&T hỏi số điện thoại thì ${you} nhập 4 số cuối SĐT nhận hàng giúp em nhé.)`);
-  lines.push(`Giọt Nắng cảm ơn ${you} đã ủng hộ ạ!`);
-  return lines.join('\n');
+/** Ghi dấu đã báo một giai đoạn (lịch sử ngắn để nhân viên xem lại) hay lỗi gửi. */
+export function markShipmentNotified(shipment, { stage, via, at = Date.now(), error = '' }) {
+  if (!shipment) return;
+  if (error) {
+    Object.assign(shipment, { noticeError: String(error).slice(0, 200), noticeErrorAt: at, noticeErrorStage: stage });
+    return;
+  }
+  const history = Array.isArray(shipment.notices) ? shipment.notices : [];
+  Object.assign(shipment, { notifiedStage: stage, notifiedAt: at, notices: [...history, { stage, via, at }].slice(-8) });
+  delete shipment.noticeError;
+  delete shipment.noticeErrorAt;
+  delete shipment.noticeErrorStage;
 }
 
-/** Ghi chú cho bảng Đơn hàng: "ℹ J&T Express 8028… · Đang giao". */
-export function shipmentNote(order) {
-  const shipment = order?.shipment;
-  if (!shipment?.trackingNumber) return '';
-  const label = shipment.cancelled ? 'Vận đơn đã hủy' : shipment.statusLabel || shipmentStatusLabel(shipment.status);
-  return `ℹ ${shipment.carrier} ${shipment.trackingNumber} · ${label}`;
-}

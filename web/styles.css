@@ -584,6 +584,29 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .shipping-error-state > span { display: grid; place-items: center; width: 57.6px; height: 57.6px; margin-bottom: 12.6px; color: #ee4d2d; border: 1.8px solid #f3aa9b; border-radius: 50%; font-size: 24.3px; font-weight: 400; }
 .shipping-spinner { width: 36px; height: 36px; margin-bottom: 13.5px; border: 2.7px solid #ebecef; border-top-color: #ee4d2d; border-radius: 50%; animation: shipping-spin .8s linear infinite; }
 @keyframes shipping-spin { to { transform: rotate(360deg); } }
+/* Báo khách hành trình đơn (web/shipping-notices.js). */
+.shipping-notices { margin: 28px auto 40px; padding: 18px 22px; background: #fff; border: 1px solid #e6e8ec; border-radius: 8px; }
+.shipping-notices-head { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+.shipping-notices-head h2 { margin: 0 0 4px; color: #282d38; font-size: 16px; font-weight: 600; }
+.shipping-notices-head p { margin: 0; color: #6b707a; font-size: 12.5px; max-width: 620px; }
+.shipping-notices-controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; }
+.shipping-notices-controls label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.shipping-notices button { padding: 6px 12px; color: #fff; background: #ee4d2d; border: 0; border-radius: 5px; font-size: 13px; cursor: pointer; }
+.shipping-notices button.ghost { color: #4a505c; background: #f1f2f5; }
+.shipping-notices button:disabled { opacity: .5; cursor: default; }
+#shipping-notices-list { display: grid; gap: 10px; }
+.shipping-notice { padding: 12px 14px; background: #f8f9fb; border: 1px solid #eceef2; border-radius: 6px; }
+.shipping-notice-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.shipping-notice-head strong { font-size: 14px; }
+.shipping-notice-stage { padding: 2px 8px; color: #3274f7; background: #f0f7ff; border-radius: 4px; font-size: 12px; }
+.shipping-notice-window { color: #b45309; font-size: 12px; }
+.shipping-notice-window.is-open { color: #15803d; }
+.shipping-notice-meta { margin-top: 4px; color: #6b707a; font-size: 12.5px; }
+.shipping-notice-meta a { color: #ee4d2d; }
+.shipping-notice-error { margin-top: 4px; color: #b42318; font-size: 12px; }
+.shipping-notice details { margin-top: 6px; font-size: 12.5px; }
+.shipping-notice pre { margin: 6px 0 0; padding: 8px 10px; white-space: pre-wrap; font: inherit; background: #fff; border: 1px solid #eceef2; border-radius: 4px; }
+.shipping-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .shipping-recent-card { position: sticky; top: 84px; width: 100%; min-height: 220px; margin: 0; padding: 19.8px 22.5px; background: #f5f6f9; border: 0; border-radius: 6.3px; }
 .shipping-card-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
 .shipping-card-title h2 { margin: 0; color: #282d38; font-size: 14px; font-weight: 500; }

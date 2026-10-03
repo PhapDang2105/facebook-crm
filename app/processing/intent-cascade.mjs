@@ -40,6 +40,7 @@ export const CASCADE_TOP_GROUPS = 2;
 // (dòng giỏ, nhắc giỏ, gợi ý 2 túi, sửa/ghi chú/giữ nguyên đơn, giỏ Shop…) vào ORDER, câu chuyển người / tra đơn vào
 // SUPPORT. Còn lại là OTHER CÓ CHỦ Ý (CASCADE_INTENTIONAL_OTHER): luồng riêng quyết (bình luận, bám đuổi, dùng thử, QR,
 // săn deal live) hay hậu xử lý (REPLY_ALREADY_SENT*) — mô hình không học các mẫu này.
+// 03/10: SHIPMENT_* (báo hành trình vận đơn) và ORDER_STATUS_SHIPPED do máy chủ tự chọn, cũng OTHER có chủ ý.
 const TEMPLATES_BY_SUBGROUP = {
   PRICE: ['PRICE_QUOTE', 'PRICE_QUOTE_COMBO', 'PRICE_MIX_TUI_LON', 'GENERAL_INFO', 'PRICE_ADJUSTMENT', 'PRICE_SHIP_EXPLAIN', 'DISCOUNT_POLICY', 'FREESHIP_POLICY', 'GIFT_POLICY', 'LIVESTREAM_VOUCHER', 'PRICE_YEN_MACH_UC_NGUYEN_CAM', 'GIFT_POLICY_EMPTY', 'GIFT_SWAP',
     // vòng 12 (r12): giá theo số túi / 1 túi, so giá sàn, quà theo ngữ cảnh
@@ -66,7 +67,7 @@ const TEMPLATES_BY_SUBGROUP = {
  * R13: GIFT_POLICY_ORDER / GIFT_POLICY_ORDER_NONE là hậu xử lý của bộ soạn (khách ĐÃ CÓ ĐƠN hỏi quà → nói quà của đơn
  * đó) — không vào nhóm ANSWER để mô hình tầng không bao giờ tự trả lời bằng hai mẫu này.
  */
-export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE'].includes(String(templateId || ''));
+export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED'].includes(String(templateId || ''));
 
 /** Mã mẫu → nhóm 6 lớp (bảng đã chốt, PRICE/INFO/SOCIAL tách). Mã không có trong bảng và COMMENT_* không có mục. */
 export const SUBGROUP_OF_TEMPLATE = Object.freeze(Object.fromEntries(Object.entries(TEMPLATES_BY_SUBGROUP).flatMap(([subgroup, templates]) => templates.map(templateId => [templateId, subgroup]))));

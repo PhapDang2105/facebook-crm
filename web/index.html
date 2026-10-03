@@ -487,6 +487,21 @@
             <div id="shipping-recent-list"><p class="shipping-recent-empty">Chưa có mã vận đơn nào.</p></div>
           </aside>
         </div>
+        <section class="shipping-notices" id="shipping-notices" aria-live="polite">
+          <div class="shipping-notices-head">
+            <div>
+              <h2>Báo khách hành trình đơn</h2>
+              <p id="shipping-notices-status">Đang tải…</p>
+            </div>
+            <div class="shipping-notices-controls">
+              <label title="Máy chủ tự nhắn khách mã vận đơn và từng giai đoạn giao khi khách còn trong 24 giờ Messenger"><input id="shipping-notify-toggle" type="checkbox"> Tự nhắn khách (trong 24 giờ)</label>
+              <label title="Trình duyệt này tự gửi hàng chờ ngoài 24 giờ qua cầu nối Pancake mỗi 5 phút khi đang mở CRM"><input id="shipping-auto-bridge" type="checkbox"> Tự gửi hàng chờ khi mở CRM</label>
+              <button type="button" id="shipping-notices-send-all">Gửi hàng chờ qua Pancake</button>
+              <button type="button" id="shipping-notices-refresh" class="ghost">Tải lại</button>
+            </div>
+          </div>
+          <div id="shipping-notices-list"></div>
+        </section>
       </div>
     </section>
     <section id="reports-view" class="view hidden">
@@ -995,5 +1010,6 @@
   <script src="staff.js?v=20261001-fixweb2"></script>
   <script src="audit.js?v=20261001-fixweb2"></script>
   <script src="quick-search.js?v=20261002-r13"></script>
+  <script src="shipping-notices.js?v=20261003-sapo"></script>
 </body>
 </html>

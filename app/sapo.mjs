@@ -21,8 +21,8 @@ export function sapoConfigFrom(environment = process.env) {
     store: String(environment.SAPO_STORE || '').trim().replace(/\.mysapo\.net.*$/i, ''),
     apiKey: String(environment.SAPO_API_KEY || '').trim(),
     apiSecret: String(environment.SAPO_API_SECRET || '').trim(),
-    // Mặc định CHỈ ghi mã vận đơn vào đơn CRM; tự nhắn khách chỉ bật khi SAPO_NOTIFY_CUSTOMERS=1.
-    notifyCustomers: environment.SAPO_NOTIFY_CUSTOMERS === '1',
+    // Báo khách bật/tắt ở trang Vận chuyển; SAPO_NOTIFY_CUSTOMERS=1/0 trong .env thắng (null = theo cài đặt).
+    notifyCustomers: environment.SAPO_NOTIFY_CUSTOMERS === '1' ? true : environment.SAPO_NOTIFY_CUSTOMERS === '0' ? false : null,
     disabled: Boolean(environment.SAPO_SYNC_DISABLED)
   };
 }

@@ -8,7 +8,7 @@
 //   🤖 máy tự điền, cần duyệt     ☎ số điện thoại cần gọi xác nhận
 //   ℹ thông tin thêm
 import { isUsableStreet } from './processing/locations.mjs';
-import { shipmentNote } from './sapo-tracking.mjs';
+import { shipmentNote } from './shipment-stage.mjs';
 
 export const NOTE_MARKERS = ['⚠', '⏳', '🤖', '☎', 'ℹ'];
 export const NOTE_SEPARATOR = ' · ';

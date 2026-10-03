@@ -1,28 +1,50 @@
-// Đồng bộ mã vận đơn Sapo → đơn CRM, mỗi 10 phút; tùy chọn nhắn mã vận đơn cho khách.
+// Đồng bộ vận đơn Sapo → đơn CRM mỗi 10 phút, rồi báo khách hành trình đơn theo giai đoạn.
 //
-// Mỗi lượt đọc các đơn Sapo SỬA từ mốc lần trước (lùi 10 phút cho chắc), ghép vận đơn vào đơn trong
-// hội thoại và đơn landing (app/sapo-tracking.mjs), rồi xét nhắn khách. Nhắn khách chỉ chạy khi
-// SAPO_NOTIFY_CUSTOMERS=1; không bật thì chỉ ghi mã + log số tin LẼ RA đã gửi để chủ shop xem trước.
-// Lần chạy đầu lùi 1 ngày. Mốc lưu ở data/processed/sapo-sync.json.
+// Mỗi lượt: đọc đơn Sapo SỬA từ mốc lần trước (lùi 10 phút cho chắc) → ghép vận đơn vào đơn trong
+// hội thoại / đơn landing (app/sapo-tracking.mjs) → tra hành trình SPX của vận đơn đang đi để biết
+// "đang giao cho khách" / "đã giao" sớm hơn Sapo → báo khách:
+//  - trong 24 giờ Messenger: máy chủ tự gửi (ngoài giờ nghỉ 22h–7h);
+//  - ngoài 24 giờ: nằm trong hàng chờ (listShipmentNoticeQueue), trang CRM gửi qua cầu nối Pancake.
+// Bật/tắt tự nhắn ở Vận chuyển (data/processed/sapo-settings.json); SAPO_NOTIFY_CUSTOMERS=0/1 trong
+// .env thắng cài đặt. Lần chạy đầu lùi 1 ngày. Mốc lưu ở data/processed/sapo-sync.json.
+// Lần đầu bật báo khách: vận đơn tạo trước đó hơn 24 giờ chỉ được ghi dấu (không nhắn dồn tin cũ).
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { isSapoConfigured, listSapoOrdersModifiedSince, sapoConfig, sapoShipment } from './sapo.mjs';
-import { attachShipmentsToConversations, attachShipmentsToLandingOrders, renderShipmentNotice, shipmentNoticePlan } from './sapo-tracking.mjs';
+import {
+  applyCarrierStage, attachShipmentsToConversations, attachShipmentsToLandingOrders, markShipmentNotified,
+  notifiedStage, renderShipmentNotice, shipmentNoticePlan, shipmentStage, shipmentStageLabel, stageFromSpxRecords
+} from './sapo-tracking.mjs';
 
 export const SAPO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 // ~2.300 đơn/ngày (gần hết đơn sàn) + mỗi lần đổi trạng thái lại tính là "sửa": lùi 1 ngày ≈ 35 trang.
 const FIRST_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const OVERLAP_MS = 10 * 60 * 1000;
+const BASELINE_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_NOTICES_PER_RUN = 30;
+// Tra hành trình SPX: mỗi vận đơn tối đa 30 phút/lần, tối đa 40 vận đơn mỗi lượt.
+const CARRIER_RECHECK_MS = 30 * 60 * 1000;
+const MAX_CARRIER_CHECKS = 40;
 export const sapoStatePath = path.join(projectRoot, 'data', 'processed', 'sapo-sync.json');
+export const sapoSettingsPath = path.join(projectRoot, 'data', 'processed', 'sapo-settings.json');
 
-const isQuietHourVN = now => { const hour = (new Date(now).getUTCHours() + 7) % 24; return hour >= 22 || hour < 7; };
+export const isQuietHourVN = now => { const hour = (new Date(now).getUTCHours() + 7) % 24; return hour >= 22 || hour < 7; };
+
+const conversationOrders = store => (store.conversations || []).flatMap(conversation =>
+  (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []).map(order => ({ conversation, order })));
+
+const findOrder = (store, conversationId, orderId) => {
+  const conversation = (store.conversations || []).find(item => item.id === conversationId);
+  const order = conversation?.customerOrders?.find(item => String(item.id) === String(orderId));
+  return conversation && order ? { conversation, order } : null;
+};
 
 /**
- * Một lượt đồng bộ. Mọi phụ thuộc truyền vào để kiểm thử được:
+ * Một lượt đồng bộ. Phụ thuộc truyền vào để kiểm thử được:
  * { listOrders(since), readMessagingStore, updateMessagingStore, readLandingStore, updateLandingStore,
- *   sendMessage(inbox, { text }), genderOf(conversation, messages), notify, readState, writeState, now, log }
+ *   sendMessage(inbox, { text }), genderOf(conversation, messages), readTemplates(), trackSpx(number),
+ *   notify, readState, writeState, onChanged(conversationId), now, log }
  */
 export async function runSapoSync(deps) {
   const now = deps.now ?? Date.now();
@@ -31,7 +53,8 @@ export async function runSapoSync(deps) {
   const since = Number(state.cursor) ? Number(state.cursor) - OVERLAP_MS : now - FIRST_LOOKBACK_MS;
   const { orders, complete } = await deps.listOrders(since);
   const shipments = orders.map(sapoShipment).filter(Boolean);
-  const summary = { fetched: orders.length, shipments: shipments.length, linked: 0, updated: 0, ambiguous: 0, unmatched: 0, landing: 0, sent: 0, wouldSend: 0, waiting: 0, failed: 0 };
+  const summary = { fetched: orders.length, shipments: shipments.length, linked: 0, updated: 0, ambiguous: 0, unmatched: 0, landing: 0, carrierUpdated: 0, sent: 0, queued: 0, waiting: 0, failed: 0, marked: 0 };
+  const changedConversations = new Set();
 
   if (shipments.length) {
     let attached = null;
@@ -42,7 +65,7 @@ export async function runSapoSync(deps) {
     summary.linked = attached.changes.filter(change => change.isNew).length;
     summary.updated = attached.changes.length - summary.linked;
     summary.ambiguous = attached.ambiguous;
-    for (const conversationId of new Set(attached.changes.map(change => change.conversationId))) deps.onChanged?.(conversationId);
+    for (const change of attached.changes) changedConversations.add(change.conversationId);
     // Kho landing ghi cả tệp mỗi lần cập nhật: thử trên bản sao nông trước, chỉ ghi khi có đơn đổi.
     const landingPreview = attached.unmatched.length && deps.readLandingStore && deps.updateLandingStore
       ? attachShipmentsToLandingOrders({ orders: ((await deps.readLandingStore()).orders || []).map(order => ({ ...order })) }, attached.unmatched, { now })
@@ -56,53 +79,181 @@ export async function runSapoSync(deps) {
     summary.unmatched = attached.unmatched.length - summary.landing;
   }
 
-  await notifyCustomers(deps, { now, summary, log });
+  summary.carrierUpdated = await refreshCarrierStages(deps, { now, changedConversations });
+  for (const conversationId of changedConversations) deps.onChanged?.(conversationId);
+
+  let noticesFrom = Number(state.noticesFrom) || 0;
+  if (deps.notify) {
+    if (!noticesFrom) {
+      noticesFrom = now;
+      summary.marked += await markBaseline(deps, now);
+    }
+    await notifyCustomers(deps, { now, summary, log });
+  }
   // Chưa đọc hết (quá trần trang) vẫn tiến mốc: giữ mốc cũ thì lượt sau lại vấp đúng trần đó mãi.
   if (!complete) log(`Sapo: quá trần trang, bỏ qua một phần đơn sửa từ ${new Date(since).toISOString()}.`);
-  await deps.writeState({ cursor: now, lastRunAt: now, lastSummary: summary, ...(complete ? {} : { warning: 'Lượt này chưa đọc hết đơn Sapo (quá trần trang).' }) });
+  await deps.writeState({ cursor: now, lastRunAt: now, lastSummary: summary, ...(noticesFrom ? { noticesFrom } : {}), ...(complete ? {} : { warning: 'Lượt này chưa đọc hết đơn Sapo (quá trần trang).' }) });
   return summary;
+}
+
+/** Vận đơn SPX đang đi: tra hành trình trên spx.vn để biết "đang giao cho khách" / "đã giao". */
+async function refreshCarrierStages(deps, { now, changedConversations }) {
+  if (!deps.trackSpx) return 0;
+  const store = await deps.readMessagingStore();
+  const due = conversationOrders(store).filter(({ order }) => {
+    const shipment = order.shipment;
+    const stage = shipmentStage(shipment);
+    return shipment && /SPX/i.test(shipment.carrier || '') && ['picked_up', 'in_transit', 'out_for_delivery'].includes(stage)
+      && now - (Number(shipment.carrierCheckedAt) || 0) >= CARRIER_RECHECK_MS;
+  }).slice(0, MAX_CARRIER_CHECKS);
+  const results = [];
+  for (const { conversation, order } of due) {
+    try {
+      const tracking = await deps.trackSpx(order.shipment.trackingNumber);
+      results.push({ conversationId: conversation.id, orderId: order.id, trackingNumber: order.shipment.trackingNumber, stage: stageFromSpxRecords(tracking?.records) });
+    } catch {
+      results.push({ conversationId: conversation.id, orderId: order.id, trackingNumber: order.shipment.trackingNumber, stage: '' });
+    }
+  }
+  if (!results.length) return 0;
+  let updated = 0;
+  await deps.updateMessagingStore(current => {
+    for (const result of results) {
+      const found = findOrder(current, result.conversationId, result.orderId);
+      if (found?.order.shipment?.trackingNumber !== result.trackingNumber) continue;
+      if (!result.stage) { found.order.shipment.carrierCheckedAt = now; continue; }
+      if (applyCarrierStage(found.order, result.stage, now)) { updated += 1; changedConversations.add(result.conversationId); }
+    }
+    return null;
+  });
+  return updated;
+}
+
+/** Lần đầu bật báo khách: vận đơn đã có từ trước hơn 24 giờ chỉ ghi dấu, không nhắn dồn. */
+async function markBaseline(deps, now) {
+  let marked = 0;
+  await deps.updateMessagingStore(store => {
+    for (const { order } of conversationOrders(store)) {
+      const shipment = order.shipment;
+      if (!shipment?.trackingNumber || notifiedStage(shipment)) continue;
+      if (!shipment.stageAt) shipment.stageAt = Number(shipment.matchedAt) || now;
+      if (now - (Number(shipment.createdAt) || now) <= BASELINE_AGE_MS) continue;
+      const stage = shipmentStage(shipment);
+      if (!stage) continue;
+      markShipmentNotified(shipment, { stage, via: 'baseline', at: now });
+      marked += 1;
+    }
+    return null;
+  }, { unchanged: () => false });
+  return marked;
+}
+
+async function readTemplatesSafe(deps) {
+  try { return (await deps.readTemplates?.()) || {}; } catch { return {}; }
 }
 
 async function notifyCustomers(deps, { now, summary, log }) {
   const store = await deps.readMessagingStore();
   const quietHour = isQuietHourVN(now);
+  const templates = await readTemplatesSafe(deps);
   const due = [];
-  for (const conversation of store.conversations || []) {
-    for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) {
-      if (!order.shipment?.trackingNumber || order.shipment.noticeAt) continue;
-      const plan = shipmentNoticePlan(store, conversation, order, { now, quietHour });
-      if (plan.action === 'send') due.push({ conversation, order, inbox: plan.inbox });
-      else if (plan.action === 'wait') summary.waiting += 1;
-    }
+  const marks = [];
+  for (const { conversation, order } of conversationOrders(store)) {
+    if (!order.shipment?.trackingNumber) continue;
+    const plan = shipmentNoticePlan(store, conversation, order, { now, quietHour });
+    // Lần tự gửi trước của đúng giai đoạn này đã lỗi: không thử lại mỗi 10 phút, để hàng chờ cho nhân viên.
+    if (plan.action === 'send' && order.shipment.noticeErrorStage === plan.stage) summary.queued += 1;
+    else if (plan.action === 'send') due.push({ conversation, order, plan });
+    else if (plan.action === 'mark') marks.push({ conversationId: conversation.id, orderId: order.id, trackingNumber: order.shipment.trackingNumber, stage: plan.stage, via: plan.reason === 'đã gửi mã trong hội thoại' ? 'conversation' : 'stale' });
+    else if (plan.action === 'queue') summary.queued += 1;
+    else if (plan.action === 'wait') summary.waiting += 1;
   }
-  if (!due.length) return;
-  if (!deps.notify) {
-    summary.wouldSend = due.length;
-    return;
+  if (marks.length) {
+    await deps.updateMessagingStore(current => {
+      for (const mark of marks) {
+        const found = findOrder(current, mark.conversationId, mark.orderId);
+        if (found?.order.shipment?.trackingNumber === mark.trackingNumber) markShipmentNotified(found.order.shipment, { stage: mark.stage, via: mark.via, at: now });
+      }
+      return null;
+    });
+    summary.marked += marks.length;
   }
-  // Một khách nhiều đơn cùng lúc: mỗi mã vận đơn một tin, tối đa MAX_NOTICES_PER_RUN tin mỗi lượt.
-  for (const { conversation, order, inbox } of due.slice(0, MAX_NOTICES_PER_RUN)) {
-    const messages = Array.isArray(store.messages?.[inbox.id]) ? store.messages[inbox.id] : [];
-    const text = renderShipmentNotice(order.shipment, deps.genderOf ? deps.genderOf(inbox, messages) : inbox.gender);
+  // Mỗi vận đơn một tin mỗi lượt, tối đa MAX_NOTICES_PER_RUN tin.
+  for (const { conversation, order, plan } of due.slice(0, MAX_NOTICES_PER_RUN)) {
+    const messages = Array.isArray(store.messages?.[plan.inbox.id]) ? store.messages[plan.inbox.id] : [];
+    const text = renderShipmentNotice(order.shipment, deps.genderOf ? deps.genderOf(plan.inbox, messages) : plan.inbox.gender, plan.templateId, templates);
     let mark;
-    try {
-      await deps.sendMessage(inbox, { text, followUp: true });
-      mark = { noticeAt: now, noticeVia: 'bot' };
-      summary.sent += 1;
-      log(`Sapo: đã nhắn mã vận đơn ${order.shipment.trackingNumber} cho ${inbox.name || inbox.id}`);
-    } catch (error) {
-      // Không thử lại vô hạn: ghi lỗi, nhân viên thấy ở ghi chú đơn và gửi tay.
-      mark = { noticeAt: now, noticeVia: 'failed', noticeError: String(error.message || error).slice(0, 200) };
-      summary.failed += 1;
-      log(`Sapo: không nhắn được mã vận đơn cho ${inbox.name || inbox.id}: ${mark.noticeError}`);
+    if (!text) {
+      // Chủ shop để trống mẫu giai đoạn này = tắt: ghi dấu đã qua, không gửi.
+      mark = { stage: plan.stage, via: 'disabled', at: now };
+    } else {
+      try {
+        await deps.sendMessage(plan.inbox, { text, followUp: true });
+        mark = { stage: plan.stage, via: 'bot', at: now };
+        summary.sent += 1;
+        log(`Sapo: đã báo "${shipmentStageLabel(plan.stage)}" (${order.shipment.trackingNumber}) cho ${plan.inbox.name || plan.inbox.id}`);
+      } catch (error) {
+        // Không thử lại ngay: ghi lỗi; vận đơn vào hàng chờ để nhân viên gửi qua Pancake.
+        mark = { stage: plan.stage, via: 'bot', at: now, error: String(error.message || error) };
+        summary.failed += 1;
+        log(`Sapo: không báo được vận đơn ${order.shipment.trackingNumber} cho ${plan.inbox.name || plan.inbox.id}: ${mark.error.slice(0, 200)}`);
+      }
     }
     await deps.updateMessagingStore(current => {
-      const target = (current.conversations || []).find(item => item.id === conversation.id);
-      const saved = target?.customerOrders?.find(item => item.id === order.id);
-      if (saved?.shipment?.trackingNumber === order.shipment.trackingNumber) Object.assign(saved.shipment, mark);
+      const found = findOrder(current, conversation.id, order.id);
+      if (found?.order.shipment?.trackingNumber === order.shipment.trackingNumber) markShipmentNotified(found.order.shipment, mark);
       return null;
     });
   }
+}
+
+/**
+ * Hàng chờ báo khách cho trang Vận chuyển: vận đơn cần báo mà máy chủ không tự gửi được (ngoài 24 giờ,
+ * lần gửi trước lỗi) — kèm lời sẽ gửi. `key` = "<hội thoại>|<đơn>|<giai đoạn>".
+ */
+export function listShipmentNoticeQueue(store, { now = Date.now(), templates = {}, genderOf = null } = {}) {
+  const items = [];
+  for (const { conversation, order } of conversationOrders(store)) {
+    const shipment = order.shipment;
+    if (!shipment?.trackingNumber) continue;
+    // Giờ nghỉ không chặn hàng chờ: nhân viên tự quyết lúc gửi.
+    const plan = shipmentNoticePlan(store, conversation, order, { now, quietHour: false });
+    // Trong 24 giờ máy chủ tự gửi ở lượt tới; vẫn liệt kê để nhân viên thấy và gửi ngay nếu muốn.
+    if (plan.action !== 'queue' && plan.action !== 'send') continue;
+    const inbox = plan.inbox;
+    const messages = Array.isArray(store.messages?.[inbox.id]) ? store.messages[inbox.id] : [];
+    const text = renderShipmentNotice(shipment, genderOf ? genderOf(inbox, messages) : inbox.gender, plan.templateId, templates);
+    if (!text) continue;
+    items.push({
+      key: `${conversation.id}|${order.id}|${plan.stage}`,
+      conversationId: inbox.id,
+      orderConversationId: conversation.id,
+      orderId: order.id,
+      pageId: inbox.pageId,
+      psid: inbox.psid,
+      pancakeConversationId: inbox.pancakeConversationId || '',
+      name: inbox.name || conversation.name || '',
+      carrier: shipment.carrier,
+      trackingNumber: shipment.trackingNumber,
+      trackingUrl: shipment.trackingUrl || '',
+      stage: plan.stage,
+      stageLabel: shipmentStageLabel(plan.stage),
+      stageAt: Number(shipment.stageAt) || 0,
+      inWindow: plan.action === 'send',
+      error: shipment.noticeError || '',
+      text
+    });
+  }
+  return items.sort((first, second) => second.stageAt - first.stageAt);
+}
+
+/** Ghi kết quả gửi của một mục hàng chờ (nhân viên gửi qua cầu nối / gửi tay / bỏ qua). */
+export function recordShipmentNoticeResult(store, key, { ok, via = 'pancake-bridge', error = '', now = Date.now() } = {}) {
+  const [conversationId, orderId, stage] = String(key || '').split('|');
+  const found = findOrder(store, conversationId, orderId);
+  if (!found?.order.shipment?.trackingNumber || !stage) return false;
+  markShipmentNotified(found.order.shipment, ok ? { stage, via, at: now } : { stage, via, at: now, error: error || 'gửi không thành công' });
+  return true;
 }
 
 export async function readSapoState() {
@@ -111,6 +262,20 @@ export async function readSapoState() {
 
 export function writeSapoState(value) {
   return writeJsonAtomic(sapoStatePath, value);
+}
+
+/** Cài đặt báo khách: { notifyCustomers } (mặc định bật — chủ shop 03/10); .env SAPO_NOTIFY_CUSTOMERS thắng. */
+export async function readSapoSettings(config = sapoConfig) {
+  const stored = await readJsonFile(sapoSettingsPath, { fallback: {}, label: 'cài đặt Sapo' }).catch(() => ({}));
+  const forced = typeof config.notifyCustomers === 'boolean' ? config.notifyCustomers : null;
+  return { notifyCustomers: forced ?? (stored.notifyCustomers !== false), lockedByEnv: forced !== null };
+}
+
+export async function writeSapoSettings(patch = {}) {
+  const stored = await readJsonFile(sapoSettingsPath, { fallback: {}, label: 'cài đặt Sapo' }).catch(() => ({}));
+  const next = { ...stored, ...(typeof patch.notifyCustomers === 'boolean' ? { notifyCustomers: patch.notifyCustomers } : {}) };
+  await writeJsonAtomic(sapoSettingsPath, next);
+  return next;
 }
 
 let timer = null;
@@ -123,15 +288,16 @@ export function startSapoSync(deps, config = sapoConfig) {
     if (running) return;
     running = true;
     try {
+      const settings = await readSapoSettings(config);
       const summary = await runSapoSync({
         listOrders: since => listSapoOrdersModifiedSince(since, { config, maxPages: 120 }),
         readState: readSapoState,
         writeState: writeSapoState,
         ...deps,
-        notify: config.notifyCustomers
+        notify: settings.notifyCustomers
       });
-      if (summary.linked || summary.updated || summary.sent || summary.failed || summary.wouldSend || summary.ambiguous) {
-        (deps.log || console.log)(`Sapo: ${summary.shipments} vận đơn, ghép mới ${summary.linked}, cập nhật ${summary.updated}, đơn landing ${summary.landing}, không chắc ${summary.ambiguous}, nhắn khách ${summary.sent}${summary.wouldSend ? `, lẽ ra nhắn ${summary.wouldSend} (chưa bật SAPO_NOTIFY_CUSTOMERS)` : ''}, chờ ${summary.waiting}, lỗi ${summary.failed}`);
+      if (summary.linked || summary.updated || summary.carrierUpdated || summary.sent || summary.failed || summary.ambiguous || summary.marked) {
+        (deps.log || console.log)(`Sapo: ${summary.shipments} vận đơn, ghép mới ${summary.linked}, cập nhật ${summary.updated}, hành trình hãng ${summary.carrierUpdated}, đơn landing ${summary.landing}, không chắc ${summary.ambiguous}, báo khách ${summary.sent}, hàng chờ ngoài 24h ${summary.queued}, chờ ${summary.waiting}, ghi dấu ${summary.marked}, lỗi ${summary.failed}${settings.notifyCustomers ? '' : ' (đang TẮT báo khách)'}`);
       }
     } catch (error) {
       (deps.log || console.log)(`Đồng bộ Sapo lỗi: ${error.message}`);

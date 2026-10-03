@@ -17,6 +17,7 @@ import { normalizeColourTypos, quantityOnlyRequest } from './processing/rule-int
 // Vòng 12: hỏi lại tối đa MỘT lần; khách trả lời gì thì nhận nguyên chữ khách ghi, đơn mang ghi chú
 // để nhân viên soát phường/xã (khách bỏ đi khi bị hỏi từng cấp lần 2, lần 3).
 export const maxAddressAsks = 1;
+import { shipmentStage, shipmentTemplateValues } from './shipment-stage.mjs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1464,6 +1465,12 @@ function renderOrderStatus(templates) {
   // Đơn đã hủy (qua bot, nhân viên hay POS) không được kể là "kho đang chuẩn bị hàng".
   const cancelled = String(order.processingStatus || '') === 'cancelled' || order.status === 'Hủy';
   const state = cancelled ? 'đã hủy' : shipped ? 'đã chuyển sang kho để đóng gói và bàn giao vận chuyển' : confirmed ? 'đã được xác nhận, kho đang chuẩn bị hàng' : 'đã được ghi nhận, kho đang chuẩn bị hàng';
+  // Đơn đã có vận đơn Sapo (app/sapo-tracking.mjs): kể hãng, mã vận đơn, giai đoạn giao và link tra
+  // (mẫu ORDER_STATUS_SHIPPED; để trống mẫu đó thì nói như cũ).
+  const shippedTemplate = String(templates.ORDER_STATUS_SHIPPED || '').trim();
+  if (!cancelled && shippedTemplate && order.shipment?.trackingNumber && shipmentStage(order.shipment)) {
+    return fill(shippedTemplate, { ...commonValues(), items, ordered_at: orderedAt, total: formatMoney(Number(order.total) || 0), ...shipmentTemplateValues(order.shipment, activeCustomer.gender) });
+  }
   const text = fill(templates.ORDER_STATUS, { ...commonValues(), items, ordered_at: orderedAt, state, total: formatMoney(Number(order.total) || 0) });
   // Đơn đã hủy: không nối đoạn "thời gian giao dự kiến… gửi mã vận đơn" (chỉ giữ câu đầu nêu trạng thái).
   return cancelled ? text.split(/(?<=ạ\.)\s+/u)[0] : text;
@@ -1529,7 +1536,9 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
   'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE',
   // Vòng 13 (gộp): mẫu engine tự chọn vừa đưa vào seed — giỏ Facebook Shop (mã lạ / món nhân viên lên đơn / đã nhận giỏ),
   // ghi nhận quà thay. Mô hình không gọi tên, không hiện trong danh sách mẫu của prompt.
-  'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF', 'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED']);
+  'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF', 'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED',
+  // 03/10: báo hành trình vận đơn Sapo theo giai đoạn (app/sapo-sync.mjs) + trả lời "đơn tới đâu" khi đã có vận đơn.
+  'ORDER_STATUS_SHIPPED', 'SHIPMENT_CREATED', 'SHIPMENT_PICKED_UP', 'SHIPMENT_IN_TRANSIT', 'SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED']);
 
 // fix-bot T1 (01/10): mẫu "báo sự việc đã xảy ra" (đã nhận đơn Shop, đã hủy/sửa/ghi chú đơn, đã nhận deal live, đơn
 // đang có…) — chỉ engine được chọn khi việc đó thật sự xảy ra; mô hình trả các mã này thì luôn đổi về GENERAL_INFO.

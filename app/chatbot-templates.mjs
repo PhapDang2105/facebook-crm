@@ -665,9 +665,21 @@ function renderOrder(value, templates, context = {}) {
   // gói; đơn nhân viên/POS lên; đơn đang giao): trước đây rơi xuống nhánh đơn MỚI, bot hỏi lại
   // SĐT/địa chỉ và mời thêm túi. Nay: ghi giỏ khách muốn vào ghi chú đơn, gắn thẻ Đổi sản phẩm +
   // Cần người xử lý để nhân viên sửa. Đang giữ giỏ mới hơn đơn (khách đang đặt đơn khác) thì thôi.
-  const heldNewer = Number(context.pendingOrder?.at) > (Number(recentOrder?.createdAt) || 0) && (context.pendingOrder?.items || []).length > 0;
+  // 02/10 (ca Nguyễn Tuyết, đơn 1 Túi Xanh 83 phút trước): "Lấy 2goi xanh chi" — cùng MỘT món của đơn, chỉ khác số lượng, không SĐT/
+  // địa chỉ, không nói "đơn khác" → là xin đổi số lượng đơn đã đặt, không phải đơn mới (trước đây bot mở đơn mới và xin lại địa chỉ).
+  // Món KHÁC đơn ("cho chị 2 túi vàng" sau đơn Xanh) vẫn là đơn mới như đã chốt (order-exchange.test).
+  const modelBlank = field => { const text = String(field || '').trim(); return !text || text === '0'; };
+  const orderLines = (recentOrder?.products || []).map(item => ({ code: String(item.sku || item.code || ''), quantity: Number(item.quantity) || 1 })).filter(item => item.code);
+  const sameItemNewQuantity = namedItems.length === 1 && orderLines.length === 1
+    && (matchProduct(namedItems[0].product)?.sku || namedItems[0].code || '') === orderLines[0].code && Number(namedItems[0].quantity) !== orderLines[0].quantity;
+  const plainBasketTurn = sameItemNewQuantity && ['ORDER_ADDRESS', 'ORDER_CONFIRMATION'].includes(templateId) && modelBlank(value.Phone_Number)
+    && modelBlank(value.Customer_Address) && !/d{9,}/.test(customerText.replace(/[s.-]/g, ''))
+    && !shipped && recentOrder?.source !== 'POS' && now - (Number(recentOrder?.createdAt) || 0) < 24 * 60 * 60 * 1000;
+  // Giỏ giữ mới hơn đơn = khách đang đặt đơn khác; riêng ca đổi số lượng cùng món, giỏ trơn (chưa có SĐT/địa chỉ riêng) không chặn.
+  const heldNewer = Number(context.pendingOrder?.at) > (Number(recentOrder?.createdAt) || 0) && (context.pendingOrder?.items || []).length > 0
+    && !(plainBasketTurn && !context.pendingOrder?.phone && !context.pendingOrder?.address);
   if (!updating && !separateOrder && namedItems.length && recentOrder?.id && templates.ORDER_CHANGE_STAFF
-    && (mergeRequest || orderChangePattern.test(messageWords)) && !isGiftSwapRequest(customerText) && !heldNewer
+    && (mergeRequest || orderChangePattern.test(messageWords) || plainBasketTurn) && !isGiftSwapRequest(customerText) && !heldNewer
     && String(recentOrder.processingStatus || '') !== 'cancelled' && recentOrder.status !== 'Hủy'
     && !/đã giao|giao thành công|hoàn thành/i.test(String(recentOrder.status || ''))
     && now - (Number(recentOrder.createdAt) || 0) < orderChangeStaffWindowMs) {

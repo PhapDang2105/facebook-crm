@@ -74,6 +74,8 @@ export function normalizePendingOrder(value) {
     ...(value?.livestream === true ? { livestream: true } : {}),
     // Vòng 13 (inbox2 A3): khách hẹn dịp khác (ORDER_POSTPONED, keepBasket) — giỏ còn giữ nhưng không nhắc bám đuổi.
     ...(value?.postponed ? { postponed: true } : {}),
+    // Vòng 13 (02/10): giỏ do bình luận mang sang hộp thư — bình luận mới hơn được thay giỏ này (engine inboxBasketFresh).
+    ...(value?.fromComment === true ? { fromComment: true } : {}),
     items: items.map(item => ({
       product: String(item?.product || '').trim(),
       code: String(item?.code || '').trim(),

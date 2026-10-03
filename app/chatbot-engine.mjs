@@ -3003,9 +3003,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       // khách chốt ở hộp thư bị mất quà live (Quạt + Bát gáo dừa) và giá live.
       const liveCarry = replyContext.livestream === true;
       const carried = reply.pendingOrder && (reply.pendingOrder.items?.length || reply.pendingOrder.phone || reply.pendingOrder.askedBagCount)
-        ? { ...reply.pendingOrder, ...(liveCarry ? { livestream: true } : {}) } : null;
-      // Giỏ khách vừa nêu trong hộp thư (dưới 30 phút) mới hơn bình luận: không ghi đè.
-      const inboxBasketFresh = inboxThread?.pendingOrder?.items?.length && Date.now() - (Number(inboxThread.pendingOrder.at) || 0) < 30 * 60 * 1000;
+        ? { ...reply.pendingOrder, ...(liveCarry ? { livestream: true } : {}), fromComment: true } : null;
+      // Giỏ khách vừa nêu trong hộp thư (dưới 30 phút) mới hơn bình luận: không ghi đè. Giỏ hộp thư do bình luận TRƯỚC mang
+      // sang (fromComment) thì bình luận mới hơn được thay: ca thật 02/10 "1xanh la" rồi 70 giây sau "2xanh la" — bot báo
+      // "đơn gồm 2 túi" nhưng giỏ hộp thư vẫn 1 túi nên khách gửi địa chỉ là chốt đơn 1 túi.
+      const inboxBasketFresh = inboxThread?.pendingOrder?.items?.length && inboxThread.pendingOrder.fromComment !== true
+        && Date.now() - (Number(inboxThread.pendingOrder.at) || 0) < 30 * 60 * 1000;
       const liveInboxState = liveCarry ? { livestreamCustomer: true, addLabelEvents: ['livestream'] } : {};
       if (!privateError && !privateSkipped && saveBotState) {
         // Hộp thư biết mẫu vừa gửi riêng: khách nhắn tiếp thì bot không gửi lại y nguyên.

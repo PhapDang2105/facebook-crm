@@ -808,14 +808,29 @@ function hashText(text) {
   return hash.toString(16);
 }
 
+// Lượt tạo cache đang chạy theo khóa (R1-05): lô bot chạy song song 3 lượt cùng lúc sau khởi động / lúc
+// cache hết hạn không tạo 3 cachedContents trùng (2 cái mồ côi tính tiền 1 giờ). Hỏng thì bỏ, lượt sau tạo lại.
+const promptCacheInFlight = new Map();
+
 export function clearPromptCaches() {
   promptCaches.clear();
+  promptCacheInFlight.clear();
 }
 
-async function promptCacheFor({ endpoint, model, systemPrompt, accessToken, fetchImpl }) {
-  const key = `${model}:${hashText(systemPrompt)}`;
+async function promptCacheFor(options) {
+  const key = `${options.model}:${hashText(options.systemPrompt)}`;
   const entry = promptCaches.get(key);
   if (entry && entry.expiresAt > Date.now() + 60000) return entry.name;
+  const running = promptCacheInFlight.get(key);
+  if (running) return running;
+  const pending = createPromptCache(options, key).finally(() => {
+    if (promptCacheInFlight.get(key) === pending) promptCacheInFlight.delete(key);
+  });
+  promptCacheInFlight.set(key, pending);
+  return pending;
+}
+
+async function createPromptCache({ endpoint, model, systemPrompt, accessToken, fetchImpl }, key) {
   const root = endpoint.replace(/\/publishers\/google\/models\/.*$/, '');
   const project = root.match(/\/projects\/([^/]+)\/locations\/([^/]+)/);
   if (!project) return '';

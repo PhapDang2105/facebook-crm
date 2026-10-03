@@ -320,8 +320,57 @@ const placeStart = '(?:trường|truong|nhà|số|sn|tổ|khu|kp|đường|ngõ|
 // "số/sn/nhà" phải có dấu ngăn ("Nguyễn thị hương, sn 79b").
 const placeWord = '(?:trường|truong|tổ|khu|kp|đường|ngõ|ngách|hẻm|kiệt|chợ|cty|công\\s+ty|ubnd|bệnh\\s+viện|tạp\\s+hóa|tạp\\s+hoá|cửa\\s+hàng|chung\\s+cư|cc|thôn|ấp|xóm|bản|làng)(?![\\p{L}])';
 const middleNamePattern = new RegExp(`^((?:${surnames})\\s+(?:thị|thi|văn)\\s+(?!${placeStart})[\\p{L}]+)(?:\\s*[,.\\-–:]\\s*(?=${placeStart})|\\s+(?=${placeWord}))`, 'iu');
-export function stripReceiverName(address) {
-  const text = String(address || '');
+// R14 (C7a/M3/M7, 9 ca thật 02–03/10): tên người nhận đứng đầu địa chỉ TRÙNG tên Facebook của khách ("Kim van ấp 6…" —
+// khách Kim Van; "Vũ Hoàng Anh Cụm Công nghiệp…" — Hoàng Anh; "Nguyễn Ngọc Lâm, Saigon Royal…" — Lam Ngoc Nguyen; "Lại
+// Liên, xóm 11…"; "Oanh Vy Thôn…"). Cụm đầu = các chữ trước dấu phẩy / từ chỉ nơi chốn / chữ số đầu tiên, 2–4 chữ, không
+// chữ nào là từ địa chỉ. Bỏ khi: ≥2 chữ trùng tên hồ sơ (không kể thứ tự, không dấu), hoặc cụm mở bằng họ + chữ cuối trùng
+// chữ cuối tên hồ sơ ("Đinh Huyền tk…" — Diệu Huyền). Phần còn lại phải còn chữ.
+// Từ chỉ nơi chốn, so CÒN DẤU (bỏ dấu thì "Huyền"/"huyện", "Phương"/"phường", "Dương"/"đường", "Tình"/"tỉnh" trùng nhau).
+// Chữ khách gõ không dấu thì so với bản không dấu, bỏ các chữ trùng tên người.
+const LEAD_STOP_WORDS = new Set(['thôn', 'ấp', 'xóm', 'số', 'sn', 'khu', 'kp', 'tk', 'tdp', 'cụm', 'đường', 'ngõ', 'ngách', 'hẻm', 'kiệt', 'trường', 'nhà', 'cty', 'ubnd', 'chung', 'cc', 'tòa', 'toà', 'phường', 'xã', 'huyện', 'tỉnh', 'tp', 'p', 'q', 'f', 'x', 'h', 'tt', 'tx', 'block', 'thửa', 'lô', 'tầng', 'quận', 'thị trấn']);
+const LEAD_STOP_ASCII = new Set(['thon', 'ap', 'xom', 'so', 'sn', 'khu', 'kp', 'tk', 'tdp', 'cum', 'ngo', 'ngach', 'hem', 'kiet', 'nha', 'cty', 'ubnd', 'chung', 'cc', 'toa', 'xa', 'tp', 'p', 'q', 'f', 'x', 'h', 'tt', 'tx', 'block', 'thua']);
+const SURNAME_KEYS = new Set(surnames.split('|').map(name => normalizeText(name)));
+function stripProfileName(text, profileName) {
+  const profile = normalizeText(profileName).split(/[^a-z0-9]+/).filter(Boolean);
+  if (profile.length < 2) return text;
+  // Cụm đầu: dừng ở dấu ngăn, chữ số hay từ chỉ nơi chốn đầu tiên.
+  // Mỗi chữ của cụm đầu kèm vị trí kết thúc; cụm tên có thể dính liền tên tòa nhà ("Nguyễn Ngọc Lâm Saigon Royal…").
+  const words = [];
+  let offset = 0;
+  const tokens = [...String(text).matchAll(/([\p{L}]+)|([^\p{L}]+)/gu)];
+  for (const token of tokens) {
+    if (token[2]) {
+      if (/[,.;:\-–\n\d(]/u.test(token[2])) break;
+      offset += token[0].length;
+      continue;
+    }
+    const lower = token[1].normalize('NFC').toLowerCase();
+    if (LEAD_STOP_WORDS.has(lower) || (/^[a-z]+$/.test(lower) && LEAD_STOP_ASCII.has(lower))) break;
+    offset += token[0].length;
+    words.push({ key: normalizeText(token[1]), end: offset });
+    if (words.length >= 6) break;
+  }
+  const profileSet = new Set(profile);
+  // Cụm tên dài nhất (2–4 chữ, kết thúc bằng một chữ của tên hồ sơ) khớp tên hồ sơ.
+  for (let size = Math.min(4, words.length); size >= 2; size -= 1) {
+    const lead = words.slice(0, size).map(word => word.key);
+    if (!profileSet.has(lead.at(-1))) continue;
+    const overlap = lead.filter(word => profileSet.has(word)).length;
+    const surnameLast = size === words.length && SURNAME_KEYS.has(lead[0]) && size <= 3 && lead.at(-1) === profile.at(-1) && !profileSet.has(lead[0]) && overlap === 1;
+    const sameName = overlap >= 2 && (overlap >= Math.min(profile.length, size) || overlap >= size - 1);
+    if (!sameName && !surnameLast) continue;
+    const rest = String(text).slice(words[size - 1].end).replace(/^[\s,.;:\-–]+/u, '');
+    if (!/\p{L}/u.test(rest)) return text;
+    // Cụm đó có thể là TÊN ĐƯỜNG trùng tên khách ("Nguyễn Văn Linh, Q7" — khách Linh Nguyễn): phần còn lại phải còn số nhà /
+    // thôn / ấp… (bộ đọc địa chỉ không báo thiếu đường).
+    if (describeDeliveryAddress(rest).missing?.includes('street')) return text;
+    return rest;
+  }
+  return text;
+}
+
+export function stripReceiverName(address, profileName = '') {
+  const text = profileName ? stripProfileName(String(address || ''), profileName) : String(address || '');
   const middle = text.match(middleNamePattern);
   if (middle && !/(?<![\p{L}])(phường|xã|quận|huyện|tỉnh|thành phố|thị trấn)(?![\p{L}])/iu.test(middle[1]) && text.slice(middle[0].length).trim()) return text.slice(middle[0].length).trim();
   const match = text.match(receiverNamePattern);
@@ -449,17 +498,43 @@ function colourText(text) {
   return normalizeColourTypos(String(text ?? ''));
 }
 
+/**
+ * R14 (…958786): tên vị theo đặc điểm, trên chữ ĐÃ bỏ dấu — "cân bằng" là Túi Xanh ("1 Granola cân bằng"), "nhiều hạt" là
+ * Túi Vàng — trừ khi đứng cạnh một màu ("Túi Vàng nhiều hạt", "xanh cân bằng") hay là lời tả ("có nhiều hạt", "nhiều hạt
+ * hơn"). "nguyên bản" KHÔNG đổi: Xanh và Vàng đều được gọi là nguyên bản → bộ soạn đơn hỏi lại (ASK_FLAVOR_NGUYENBAN).
+ * @param {string} s chữ đã normalizeIntentText
+ */
+export function flavourSynonyms(s) {
+  return String(s ?? '')
+    .replace(/(?<!\b(?:xanh|vang|nau|cacao|co|it|hon|la) )\bcan bang\b(?! (?:xanh|vang|nau|hon|khong|ko|k|ha|chua|dinh duong))/g, 'xanh')
+    .replace(/(?<!\b(?:xanh|vang|nau|cacao|co|it|hon|la|kha|rat|qua|cung) )\bnhieu hat\b(?! (?:xanh|vang|nau|hon|qua|khong|ko|k|ha|the|vay|nhat))/g, 'vang');
+}
+
+// Chữ khách nêu "nguyên bản" mà không kèm Xanh/Vàng ("1 túi nâu 1 túi nguyên bản"): số túi phần nguyên bản (≥ 1), 0 nếu
+// không mơ hồ. Câu hỏi ("nguyên bản là gì") để mô hình trả lời.
+function ambiguousNguyenBan(text) {
+  const s = normalizeIntentText(colourText(text));
+  if (!/\bnguyen ban(?:g)?\b/.test(s)) return 0;
+  if (/\b(?:xanh|vang)(?: la| (?:tui|goi|loai|vi))? nguyen ban|\bnguyen ban(?:g)? (?:xanh|vang|450|350)\b|\bnguyen ban(?:g)? (?:la )?(?:gi|sao|the nao|ntn|nhu nao)\b|\?/.test(s)) return 0;
+  const counted = s.match(/\b(\d{1,2}|mot|hai|ba)\s*(?:(?:tui|goi|bich|bit)\s+)?(?:(?:granola|vi|loai)\s+)?nguyen ban/);
+  return counted ? numberOf(counted[1]) || 1 : 1;
+}
+
 /** Màu khách nêu kèm số túi trong tin ("2 xanh", "1 túi vàng 1 túi nâu", "túi xanh x2", "mỗi loại 1 túi"). */
 export function colourCountsInText(text) {
   // Vòng 13: sửa lỗi gõ ("1 túi vành", "2ca cao") trước khi đếm; cho chữ đệm giữa đơn vị và màu ("2 túi hạt vàng",
   // "2 túi loại xanh", "1 gói granola nâu"). Không đơn vị thì chỉ nhận "màu/vị" như cũ ("2 loại xanh và vàng" là hai loại).
   // Vị khách nói KHÔNG lấy ("Vậy thôi đừng lấy ca cao nha mà lấy chị 2 túi xanh+ 1 túi vàng") không tính là vị được nhắc.
-  const s = normalizeIntentText(colourText(text)).replace(new RegExp(`\\b(?:dung|khong|ko|hong)\\s+(?:lay|mua|gui)\\s+(?:(?:tui|goi|bich|vi|loai|mau)\\s+)?(?:xanh|vang|nau|cacao)\\b${NOT_GREEN}`, 'g'), ' ');
+  // R14: "cân bằng" = Xanh, "nhiều hạt" = Vàng (flavourSynonyms); "Ko fai 2 túi nâu" (khách đính chính giỏ sai) không tính.
+  const s = flavourSynonyms(normalizeIntentText(colourText(text)))
+    .replace(new RegExp(`\\b(?:dung|khong|ko|hong)\\s+(?:lay|mua|gui)\\s+(?:(?:tui|goi|bich|vi|loai|mau)\\s+)?(?:xanh|vang|nau|cacao)\\b${NOT_GREEN}`, 'g'), ' ')
+    .replace(/\b(?:khong|ko|k|kg|hong|kp|chu khong|chu ko)\s+(?:phai|fai|pai)\s+(?:la\s+)?(?:\d{1,2}|mot|hai|ba)?\s*(?:(?:tui|goi|bich|bit)\s+)?(?:xanh|vang|nau|cacao)\b/g, ' ');
   const counts = {};
   const mentioned = new Set();
   // "1vang" (dính số) vẫn là nhắc vị Vàng.
   for (const match of s.matchAll(new RegExp(`(?<![a-z])(xanh|vang|nau|cacao${NOT_TROPICAL})\\b${NOT_GREEN}`, 'g'))) mentioned.add(COLOUR_OF_WORD[match[1]]);
-  for (const match of s.matchAll(new RegExp(`\\b(\\d{1,2}|mot|hai|ba|bon|nam|sau)\\s*(?:(?:tui|tuy|goi|bich|bit|b|t)\\s*(?:(?:hat|loai|vi|mau|granola)\\s+)?|(?:mau|vi)\\s+)?(xanh|vang|nau|cacao${NOT_TROPICAL})\\b${NOT_GREEN}`, 'g'))) {
+  // R14: "1 Granola vị ca cao và 1 Granola cân bằng" — "granola (vị/loại)" đứng giữa số và vị.
+  for (const match of s.matchAll(new RegExp(`\\b(\\d{1,2}|mot|hai|ba|bon|nam|sau)\\s*(?:(?:tui|tuy|goi|bich|bit|b|t)\\s*(?:(?:hat|loai|vi|mau|granola)\\s+)?|granola\\s+(?:(?:vi|loai)\\s+)?|(?:mau|vi)\\s+)?(xanh|vang|nau|cacao${NOT_TROPICAL})\\b${NOT_GREEN}`, 'g'))) {
     const colour = COLOUR_OF_WORD[match[2]];
     counts[colour] = (counts[colour] || 0) + numberOf(match[1]);
   }
@@ -488,10 +563,11 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
   const plain = list => list.map(({ product, code, quantity }) => ({ product, code, quantity }));
   // Vòng 13: tin giỏ Facebook Shop là chữ CRM tự sinh (tên sản phẩm + mã SKU), không phải lời khách → không đếm/lọc theo chữ.
   if (!text.trim() || isShopCartText(text)) return plain(items);
-  const s = normalizeIntentText(colourText(text));
+  const s = flavourSynonyms(normalizeIntentText(colourText(text)));
   const bags = countBags(text);
   // Vòng 13: "Chị lấy 2 mà" / "lấy 2 nha" / "Số lượng là 2" — chỉ nói lại số lượng.
-  const quantityOnly = bags > 0 ? 0 : quantityOnlyRequest(text);
+  // R14 (…216841): "2 mà e" (không động từ, không chữ túi) cũng là nói lại số lượng.
+  const quantityOnly = bags > 0 ? 0 : (quantityOnlyRequest(text) || shortQuantityReply(s));
   const { counts, mentioned, each } = colourCountsInText(text);
   const countGiven = bags > 0 || quantityOnly > 0 || Object.keys(counts).length > 0 || each;
   const reference = heldItems.length ? heldItems : recentItems;
@@ -508,8 +584,12 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
   if (!BASKET_WORDS.test(s) && !countGiven) return !burstNamesBasket && reference.length ? plain(reference) : plain(items);
   let next = items.map(item => ({ ...item }));
   const allColour = next.length > 0 && next.every(item => colourOfItem(item));
+  // R14 (…837888): "mình lấy 2 túi 1 xanh + lâu" — tổng túi khách nêu bằng tổng món mô hình đọc được thì giữ đủ các món
+  // mô hình trả (vị gõ sai không có trong chữ), không lọc theo màu (trước đây còn 1 Xanh 189k).
+  const modelTotal = next.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+  const keepModelColours = bags > 1 && next.length > 1 && bags === modelTotal;
   if (allColour && mentioned.length && !/\b(combo|hop|goi nho|yen mach|mix|cam)\b/.test(s)) {
-    const kept = next.filter(item => mentioned.includes(colourOfItem(item)));
+    const kept = keepModelColours ? next : next.filter(item => mentioned.includes(colourOfItem(item)));
     if (kept.length) next = kept;
     for (const item of next) {
       const colour = colourOfItem(item);
@@ -519,7 +599,9 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
     // "vành" không ai đọc ra → giỏ chỉ có 1 Xanh): thêm vị thiếu với đúng số khách nêu. Không làm khi tin là câu hỏi
     // hay có ý đổi/bỏ ("đổi 1 xanh thành 1 vàng", "không lấy 1 nâu").
     const missing = Object.keys(counts).filter(colour => counts[colour] > 0 && !next.some(item => colourOfItem(item) === colour));
-    if (missing.length && kept.length === next.length && !QUESTION.test(s) && !/\b(doi|thay|bo|bot|huy|tru|khong|ko|k|hong|hok|kg|dung|thoi)\b/.test(s)) {
+    // R14: "Ko fai 2 túi nâu / 1 Granola vị ca cao và 1 Granola cân bằng" — lời đính chính "không phải …" không phải ý bỏ món.
+    const sNoCorrection = s.replace(/\b(?:khong|ko|k|kg|hong)\s+(?:phai|fai|pai)\b/g, ' ');
+    if (missing.length && !keepModelColours && kept.length === next.length && !QUESTION.test(sNoCorrection) && !/\b(doi|thay|bo|bot|huy|tru|khong|ko|k|hong|hok|kg|dung|thoi)\b/.test(sNoCorrection)) {
       for (const colour of missing) {
         const product = getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith(`GRA-${colour}-`));
         if (product) next.push({ product: product.name, code: product.sku, quantity: counts[colour] });
@@ -557,7 +639,18 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
       else if (!adding && next.length === 1 && heldItems.length === 1 && colourOfItem(heldItems[0]) && colourOfItem(item)) item.quantity = Number(heldItems[0].quantity) || item.quantity;
     }
   }
+  // R14 (…216841): "C lấy combo vị ca cao nhé" ngay sau bảng giá — "combo" không kèm số là combo 2 túi (mô hình ghi 1 túi
+  // 219k). Chỉ cho túi lớn (GRA-…); "Combo 10 gói" là tên sản phẩm, không nhân đôi.
+  if (/\bcombo\b/.test(s) && !bags && !quantityOnly && !Object.keys(counts).length && !each && !QUESTION.test(s)
+    && next.length === 1 && /^GRA-/i.test(String(next[0].code || '')) && Number(next[0].quantity) === 1) next[0].quantity = 2;
   return plain(next);
+}
+
+// R14 (…216841): "2 mà e", "2 chứ shop", "3 nha c" — chỉ số + chữ đệm (đã bỏ dấu), không động từ/chữ túi.
+function shortQuantityReply(s) {
+  const match = String(s || '').trim().match(/^(?:(?:thi|vay|la|chi|c|minh|em|e|anh|a)\s+)?(\d{1,2}|hai|ba|bon|nam)\s+(?:ma|chu|nha|nhe|do|day|thoi|luon|nhen)(?:\s+(?:e|em|shop|s|ban|b|c|chi|a|anh|oi|nha|nhe|ma))*$/);
+  const count = match ? numberOf(match[1]) : 0;
+  return count >= 1 && count <= 20 ? count : 0;
 }
 
 /**
@@ -601,8 +694,16 @@ function renderOrder(value, templates, context = {}) {
   const paymentMessage = isPaymentMessage(customerText);
   // Khách nêu loại mà không nói số ("C đặt nhé" sau khi được báo giá): tính là 1 — trừ khi giỏ/đơn
   // gần nhất đã có món đó hay khách đã nêu số túi trước (adjustOrderQuantities, vòng 12).
+  // R14: mô hình chép nguyên lời khách ("Granola cân bằng", "Granola nhiều hạt") — đổi sang tên túi để danh mục nhận ra.
+  const flavourName = product => {
+    const text = String(product || '').trim();
+    const key = normalizeIntentText(text);
+    if (/\b(xanh|vang|nau|cacao|mint|tropical|combo|hop|goi)\b/.test(key)) return text;
+    const mapped = flavourSynonyms(key);
+    return mapped === key ? text : /\bxanh\b/.test(mapped) ? 'Granola Túi Xanh' : /\bvang\b/.test(mapped) ? 'Granola Túi Vàng' : text;
+  };
   const rawNamed = toPricedItems(products.map((product, index) => ({
-    product: String(product || '').trim(),
+    product: flavourName(product),
     quantity: modelQuantity(quantities[index]) || 1
   })).filter(item => item.product && item.product !== '0'))
     .map((item, index) => ({ ...item, given: /\d/.test(String(quantities[index] || '')) && modelQuantity(quantities[index]) > 1 }));
@@ -629,6 +730,8 @@ function renderOrder(value, templates, context = {}) {
     }
     return 0;
   };
+  // R14: bot vừa hỏi nguyên bản là Xanh hay Vàng (ASK_FLAVOR_NGUYENBAN, giỏ chờ mang nguyenBanAsk = số túi phần đó).
+  const askedNguyenBan = context.lastTemplateId === 'ASK_FLAVOR_NGUYENBAN' && Number(context.pendingOrder?.nguyenBanAsk) > 0;
   const namedItems = paymentAfterOrder
     ? (recentEditable ? recentForQuantity : [])
     : fromCart
@@ -639,7 +742,7 @@ function renderOrder(value, templates, context = {}) {
         recentItems: recentForQuantity,
         askedBagCount: Number(context.pendingOrder?.askedBagCount) || askedBagsBefore(),
         burstTexts: Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.slice(-2) : [],
-        adding: String(value.add_to_basket || '') === '1' || /\b(them|nua|cong them)\b/.test(messageWords)
+        adding: String(value.add_to_basket || '') === '1' || /\b(them|nua|cong them)\b/.test(messageWords) || askedNguyenBan
       });
   // "Lấy thêm 1 túi vàng ghép đơn": bot chỉ tự gộp vào đơn cũ trong 60 phút như mọi lần sửa đơn
   // (chủ shop 01/10 — sau đó kho có thể đã đóng gói); quá hạn thì ghi chú + thẻ cho nhân viên
@@ -720,6 +823,28 @@ function renderOrder(value, templates, context = {}) {
     return { templateId: 'ORDER_WRONG', ...splitMessages(fill(templates.ORDER_WRONG, commonValues())), handoff: false };
   }
   const pending = usablePendingOrder(context.pendingOrder, { now, templateId });
+  // R14 (…958786): "1 túi nâu 1 túi nguyên bản" — Xanh và Vàng đều được gọi là nguyên bản, mô hình đoán (từng thành 2 Nâu,
+  // khách bỏ đơn): hỏi lại bằng ASK_FLAVOR_NGUYENBAN. Giỏ chờ giữ phần khách đã nói rõ (1 Nâu) + số túi phần nguyên bản
+  // (askedBagCount / nguyenBanAsk); khách trả lời Xanh/Vàng thì cộng vào giỏ (answersNguyenBan). Không hỏi lại lần hai.
+  const nguyenBanQty = !updating && !fromCart && !paymentMessage && templates.ASK_FLAVOR_NGUYENBAN && !askedNguyenBan
+    && context.lastTemplateId !== 'ASK_FLAVOR_NGUYENBAN' ? ambiguousNguyenBan(customerText) : 0;
+  if (nguyenBanQty > 0) {
+    const { counts } = colourCountsInText(customerText);
+    const adding = /\b(them|nua|cong them)\b/.test(messageWords);
+    const stated = Object.entries(counts).filter(([, count]) => count > 0).map(([colour, count]) => {
+      const product = getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith(`GRA-${colour}-`));
+      return product ? { product: product.name, code: product.sku, quantity: count } : null;
+    }).filter(Boolean);
+    const items = adding ? (pending?.items || []) : stated;
+    const key = items.length ? buildOrderKey(items) : '';
+    const phone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(customerText) || pending?.phone || '';
+    return {
+      templateId: 'ASK_FLAVOR_NGUYENBAN',
+      ...splitMessages(fill(templates.ASK_FLAVOR_NGUYENBAN, commonValues())),
+      handoff: false,
+      pendingOrder: { items: key ? items : [], key, at: now, phone, address: pending?.address || '', addressAsks: pending?.addressAsks || 0, askedBagCount: nguyenBanQty, nguyenBanAsk: nguyenBanQty, ...(pending?.upsold ? { upsold: true } : {}) }
+    };
+  }
   // Vòng 11 (P7): đang giữ giỏ (chưa có đơn để sửa) mà khách "lấy thêm 1 túi nâu": cộng món vừa nêu vào giỏ đang
   // giữ, không thay giỏ (giỏ 2 Xanh → 2 Xanh + 1 Nâu). Luật giỏ đánh dấu add_to_basket (món vừa nêu chắc chắn là
   // phần thêm); mô hình thì chỉ cộng khi tin có "thêm/nữa" và giỏ trả về chưa phủ giỏ đang giữ (mô hình đã trả giỏ
@@ -731,8 +856,10 @@ function renderOrder(value, templates, context = {}) {
     return heldItems.every(item => (named.get(itemKey(item)) || 0) >= (Number(item.quantity) || 1));
   };
   const replacesHeld = /\b(doi|thay|chi (lay|can|mua)|bot|khong lay|ko lay|k lay)\b/.test(messageWords);
+  // R14: bot vừa hỏi "nguyên bản là Xanh hay Vàng" (giỏ chờ giữ phần đã rõ, vd 1 Nâu) — khách trả lời vị thì CỘNG vào giỏ.
+  const answersNguyenBan = askedNguyenBan && baseItems.length > 0 && baseItems.every(item => /^GRA-(XANH|VANG)-/i.test(String(item.code || '')));
   const addsToHeld = heldItems.length > 0 && baseItems.length > 0 && isOrderStep(templateId) && !replacesHeld
-    && (String(value.add_to_basket || '') === '1' || (/\b(them|nua|cong them)\b/.test(messageWords) && !coversHeld()));
+    && (String(value.add_to_basket || '') === '1' || ((/\b(them|nua|cong them)\b/.test(messageWords) || answersNguyenBan) && !coversHeld()));
   const mergeHeld = () => {
     const byKey = new Map();
     for (const item of [...heldItems, ...baseItems]) {
@@ -813,7 +940,9 @@ function renderOrder(value, templates, context = {}) {
   // Vòng 13: đuôi lời dặn dính sau địa chỉ ("…An Hưng- Thanh Hoá nhé b", "… nha shop ạ") làm máy không đọc ra tỉnh → cắt.
   // Chỉ cắt khi mở bằng nhé/nha/nhen/ạ (chữ "b"/"e" trơ trọi cuối địa chỉ có thể là "khu B").
   const stripCourtesyTail = text => String(text || '').replace(/(?:[\s,.;-]+(?:nhé|nhe|nha|nhá|nhen|nghen|ạ))(?:[\s,.;-]+(?:b|bạn|ban|shop|sốp|em|e|ơi|oi|ạ|nhé|nha))*[\s,.;-]*$/iu, '').trim();
-  const givenAddress = typedAddress && typedAddress !== '0' ? (stripCourtesyTail(stripReceiverName(cleanAddressText(typedAddress))) || stripReceiverName(cleanAddressText(typedAddress))) : typedAddress;
+  // R14: tên người nhận trùng tên Facebook của khách ở đầu địa chỉ cũng bỏ (stripReceiverName nhận tên hồ sơ).
+  const profileName = String(activeCustomer.name || '');
+  const givenAddress = typedAddress && typedAddress !== '0' ? (stripCourtesyTail(stripReceiverName(cleanAddressText(typedAddress), profileName)) || stripReceiverName(cleanAddressText(typedAddress), profileName)) : typedAddress;
   // Vòng 13 (inbox2 A4): đang sửa đơn vừa chốt (updating) mà khách gửi địa chỉ:
   // - đúng địa chỉ của đơn (hay một phần của nó, không thêm gì) → dùng lại địa chỉ đơn, không hỏi lại phường/xã;
   // - MỘT MẢNH chưa đủ cấp ("Khu Đô Thị Mới Đông Sơn", "số nhà 12") → ghép vào địa chỉ khách đã ghi của đơn như ghép mảnh
@@ -971,8 +1100,15 @@ function renderOrder(value, templates, context = {}) {
     // Không mời khi khách đã nói rõ chỉ lấy 1 ("1 túi thôi", "chỉ lấy 1", "dùng thử đã"), khi engine
     // báo không mời (context.noUpsell: hội thoại có khiếu nại/cần người xử lý, vừa nói sỉ/CTV, đã mời
     // một lần trong hội thoại), hay giỏ này đã được mời (pending.upsold).
-    const declinesUpsell = /\b(thoi|chi (lay|mua|can|lay thu)|(1|mot) (tui|goi|hop|bich) (thoi|la du|da|truoc)|(dung|an|lay|mua) thu (thoi|da|truoc))\b/.test(messageWords);
-    const upsell = price?.totalQuantity === 1 && !trial && templates.UPSELL_TWO_BAGS && !pending?.upsold && !context.noUpsell && !declinesUpsell ? upsellTwoBags(price, templates) : '';
+    // R14 (quyết định 5, ca …211779 "Lấy 1 túi 174k" → bị mời ngay trước phiếu → "Đã mua 1 mà hỏi hoài"; …580804 "1 túi dùng
+    // thử"): khách nêu "1 túi + giá", "1 túi dùng/ăn thử", "dùng thử" — ở tin này hay một tin gần đây — là đã chọn 1 túi.
+    const ONE_BAG_FIRM = /\b(thoi|chi (lay|mua|can|lay thu)|(1|mot) (tui|goi|hop|bich) (thoi|la du|da|truoc)|(dung|an|lay|mua) thu|(1|mot) (tui|goi|hop|bich)(?: [a-z]+){0,3} (?:\d{2,3} ?k|\d{2,3}(?:\.|,)?000|\d{2,3} ngan|dung thu|an thu))\b/;
+    const recentTexts = (Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts : []).map(text => normalizeText(String(text || ''))).slice(-6);
+    const oneBagSaid = [...recentTexts, messageWords].filter(text => /\b(1|mot) (tui|goi|bich|hop)\b/.test(text)).length;
+    const declinesUpsell = ONE_BAG_FIRM.test(messageWords) || recentTexts.some(text => ONE_BAG_FIRM.test(text)) || oneBagSaid >= 2;
+    // Không mời khi khách đã gửi SĐT cho đơn 1 túi (lời mời tới ngay trước phiếu), hay tin đã nêu 2 túi trở lên.
+    const upsell = price?.totalQuantity === 1 && !trial && templates.UPSELL_TWO_BAGS && !pending?.upsold && !context.noUpsell && !declinesUpsell
+      && !hasPhone && countBags(customerText) < 2 ? upsellTwoBags(price, templates) : '';
     // Nêu lại giỏ và tổng tiền trước câu xin SĐT/địa chỉ: nhân viên từng phải gõ
     // tay "Dạ đơn của mình gồm…" và khách hỏi "tổng bao nhiêu" thì không có số.
     // Lời gợi ý 2 túi đã có số tiền thì thôi, không lặp.
@@ -1109,7 +1245,8 @@ function renderGiftPolicy(templates) {
 // Mẫu quà mời đặt (GIFT_POLICY_LIVE "…lấy 2 túi vị nào để em lên đơn liền nha?", GIFT_POLICY_PROMO, GIFT_POLICY_UPSELL3)
 // gửi cho khách vừa chốt đơn là mời đặt lại đơn đã có. Khi khách có đơn (context.hasOrder — engine truyền; chưa truyền thì
 // tự xét đơn gần nhất chưa hủy trong 24 giờ như engine) → nói quà của CHÍNH ĐƠN ĐÓ, không mời đặt.
-const giftInviteTemplateIds = new Set(['GIFT_POLICY_LIVE', 'GIFT_POLICY_PROMO', 'GIFT_POLICY_UPSELL3']);
+// R14: GIFT_POLICY (seed mới kết bằng "lấy mấy túi để em lên đơn kèm quà") cũng là lời mời đặt.
+const giftInviteTemplateIds = new Set(['GIFT_POLICY', 'GIFT_POLICY_LIVE', 'GIFT_POLICY_PROMO', 'GIFT_POLICY_UPSELL3']);
 // Lời dự phòng (như fallbackTemplates của engine): mẫu cùng mã trong Cài đặt → Thiết lập tin nhắn thì dùng mẫu đó.
 // R13 (gộp): hai mẫu này ĐÃ có trong seed (chủ shop sửa lời ở Cài đặt → Tin nhắn); bảng dưới chỉ còn dùng khi nơi gọi
 // truyền bộ mẫu thiếu mã (test, cấu hình cũ chưa qua normalizeChatbotSettings). Trong intent-cascade là OTHER có chủ ý.
@@ -1475,6 +1612,57 @@ export function buildTemplatePrompt(templates = {}, basePrompt = '', { compact =
  */
 // Mẫu không được dùng làm ý phụ ("also"): bước đơn, chuyển người, lời chào/cảm ơn.
 const alsoBlocked = new Set(['CSKH_HANDOFF', 'WELCOME', 'THANK_YOU', 'IMAGE_RECEIVED', 'REPLY_ALREADY_SENT', 'CALLBACK_REQUEST', 'GENERAL_INFO', 'ASK_FLAVOR', 'ASK_PRODUCT']);
+// R14 (H3, ca …265828 "Chị chốt một túi xanh" + RECOMMEND_BEGINNER "lấy 1 túi thử hay combo 2?"; …919462 đã chọn 2 túi +
+// FREESHIP_POLICY "lấy 2 túi vị nào"): bước đơn ĐÃ CÓ MÓN thì không ghép câu kèm mà cả câu là mời chọn túi/vị/số lượng.
+const alsoInviteWhenBasket = new Set(['RECOMMEND_BEGINNER', 'ASK_FLAVOR_NGUYENBAN', 'COMBO3_FLAVOR', 'UPSELL_TWO_BAGS', 'TRIAL_NEXT_STEP', 'ASK_TWO_BAGS', 'ASK_REORDER', 'IMAGE_WITH_PHONE', 'PRICE_COUNT']);
+// Câu kèm còn lại (có thông tin thật: FREESHIP_POLICY, GIFT_POLICY, KIDS_FAMILY, DISCOUNT_POLICY…) mà kết bằng câu mời chọn
+// ("lấy 2 túi vị nào…", "lấy mấy túi để em lên đơn…"): giữ phần trả lời, cắt câu mời cuối.
+// Một câu = chữ giữa hai dấu kết câu (. ! ? xuống dòng, emoji 🌾💛🎁✨); dấu chấm trong số tiền ("432.000đ") không kết câu.
+const INVITE_SENTENCE = /(?:^|(?<=[!?\n🌾💛🎁✨]|\.(?=\s)))\s*(?:[^.!?\n🌾💛🎁✨]|\.(?=\d))*?(?<![\p{L}])(?:lấy|chọn|thử)(?![\p{L}])(?:[^.!?\n🌾💛🎁✨]|\.(?=\d))*?(?:nào|hay|mấy|không ạ|lên đơn)(?:[^.!?\n🌾💛🎁✨]|\.(?=\d))*?[.!?]?\s*(?:[🌾💛🎁✨]\s*)*$/u;
+/** Câu trả lời đã bỏ câu mời chọn cuối (dùng cho câu kèm khi bước đơn đã có món). */
+export function withoutInviteTail(text) {
+  return trimInviteTail([{ type: 'text', text: String(text ?? '') }]).map(part => part.text).join('\n');
+}
+function trimInviteTail(parts) {
+  const list = [...parts];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (list[index].type !== 'text') continue;
+    const trimmed = list[index].text.replace(INVITE_SENTENCE, '').trim();
+    if (trimmed === list[index].text) return list;
+    if (trimmed && /\p{L}/u.test(trimmed)) list[index] = { ...list[index], text: trimmed };
+    else list.splice(index, 1);
+    return list;
+  }
+  return list;
+}
+
+/**
+ * R14: giỏ chờ còn hạn có đúng 1 túi → tin "đơn của mình gồm 1 …, tổng 189.000đ (đã gồm 15.000đ phí ship)" + xin phần còn
+ * thiếu (ORDER_CART_LINE + ORDER_ADDRESS/ORDER_ADDRESS_PARTIAL). Không giỏ 1 túi → null.
+ */
+function heldOneBagReply(templates, context = {}) {
+  const pending = usablePendingOrder(context.pendingOrder, { now: Number(context.now) || Date.now(), templateId: 'ORDER_ADDRESS' });
+  if (!pending?.items?.length || !templates.ORDER_CART_LINE) return null;
+  const price = priceBasket(pending.items, giftContext());
+  if (!price?.priceable || price.totalQuantity !== 1) return null;
+  const hasPhone = Boolean(pending.phone);
+  const hasAddress = Boolean(pending.address);
+  const missing = hasPhone && !hasAddress ? 'địa chỉ nhận hàng đầy đủ' : !hasPhone && hasAddress ? 'số điện thoại' : 'số điện thoại và địa chỉ nhận hàng đầy đủ';
+  const known = hasPhone ? 'số điện thoại' : hasAddress ? 'địa chỉ' : '';
+  const cartLine = fill(templates.ORDER_CART_LINE, {
+    ...commonValues(),
+    cart: price.lines.map(line => `${line.quantity} ${line.name}`).join(' + '),
+    total: formatMoney(price.total),
+    free_ship: price.gifts.find(isFreeShippingGift)?.name || '',
+    ship_fee: price.shippingFee ? formatMoney(price.shippingFee) : '',
+    gift: price.gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + '),
+    missing
+  });
+  const askTemplate = hasPhone && hasAddress ? '' : (known ? templates.ORDER_ADDRESS_PARTIAL : templates.ORDER_ADDRESS) || '';
+  const askText = askTemplate ? fill(askTemplate, { ...commonValues(), missing, known }) : '';
+  const text = askText ? `${cartLine}\n${askText.replace(/^Dạ,?\s+(\p{L})/u, (_, first) => first.toUpperCase())}` : cartLine;
+  return { templateId: 'FREESHIP_POLICY', ...splitMessages(text), handoff: false };
+}
 
 /**
  * Khách vừa đặt vừa hỏi ("cho chị 1 bịch vàng, bịch này có yến mạch không"):
@@ -1486,8 +1674,14 @@ export function renderChatbotReply(value = {}, templates = {}, context = {}) {
   const also = String(value?.also || '').trim();
   if (!also || also === '0' || also === main.templateId || also.startsWith('ORDER_') || alsoBlocked.has(also) || main.handoff) return main;
   if (!templates[also] && !catalogRenderers[also] && !isProductQuoteId(also)) return main;
-  const extra = renderSingleReply({ template_id: also, Product_N1: value.Product_N1 }, templates, context);
-  if (extra.handoff || extra.templateId !== also && !isProductQuoteId(also)) return main;
+  // R14 (H3): bước đơn đã có món → không mời chọn lại.
+  const mainBasket = (isOrderStep(main.templateId) || main.templateId === 'ORDER_CUSTOM_BASKET') && (Boolean(main.pendingOrder?.items?.length) || Boolean(main.order));
+  if (mainBasket && alsoInviteWhenBasket.has(also)) return main;
+  const rendered = renderSingleReply({ template_id: also, Product_N1: value.Product_N1 }, templates, { ...context, alsoRender: true });
+  if (rendered.handoff || rendered.templateId !== also && !isProductQuoteId(also)) return main;
+  const extraParts = mainBasket ? trimInviteTail(rendered.parts || rendered.messages.map(text => ({ type: 'text', text }))) : null;
+  const extra = extraParts ? { ...rendered, parts: extraParts, messages: extraParts.filter(part => part.type === 'text').map(part => part.text) } : rendered;
+  if (!extra.messages.length) return main;
   // Ý phụ vừa gửi trong 30 phút (bảng giá vừa gửi…): không gửi lại cả bảng/ảnh.
   const squash = text => String(text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   const opening = squash(extra.messages[0]);
@@ -1591,6 +1785,19 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
   if (giftInviteTemplateIds.has(templateId) && hasOrderContext(context)) {
     const orderGift = renderOrderGiftReply(templates, context);
     if (orderGift) return { ...orderGift, templateId };
+  }
+  // R14: mô hình chọn STAFF_ONLY_PRODUCT — {product} lấy từ Product_N1 (trống thì "sản phẩm mình hỏi"; trước đây dòng có
+  // {product} trống bị bỏ → tin rỗng) và gắn thẻ cần người.
+  if (templateId === 'STAFF_ONLY_PRODUCT' && templates.STAFF_ONLY_PRODUCT) {
+    const named = String(value.Product_N1 || '').trim();
+    const product = named && named !== '0' ? (matchStaffOnlyProduct(named)?.name || matchProduct(named)?.name || named) : 'sản phẩm mình hỏi';
+    return { templateId, ...splitMessages(fill(templates.STAFF_ONLY_PRODUCT, { ...commonValues(), product })), handoff: false, attention: true };
+  }
+  // R14 (quyết định 5, ca …541740): hỏi phí ship khi đang giữ giỏ 1 túi → báo đúng tổng của giỏ (174k + ship = 189k) và xin
+  // phần còn thiếu, không mời lại "lấy 2 túi vị nào".
+  if (templateId === 'FREESHIP_POLICY' && !context.alsoRender) {
+    const held = heldOneBagReply(templates, context);
+    if (held) return held;
   }
   if (isOrderStep(templateId)) return renderOrder(value, templates, context);
   // Vòng 11 (P3): PRICE_QUOTE_COMBO là mẫu con của bảng giá (đơn vị "Combo"), chỉ điền được qua renderPriceQuote:

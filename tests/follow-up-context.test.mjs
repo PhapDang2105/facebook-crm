@@ -76,7 +76,9 @@ test('#551: khách không nhận được tin → bỏ qua vĩnh viễn (tới k
   const second = await module.runFollowUps({
     readSettings: async () => settingsWith([{ ...askScenario, id: 'inbox-ask-2', message: 'Dạ {title} ơi, em hỏi thăm ạ' }]),
     sendMessage: async conversation => { calls.push(conversation.psid); return { message: { mid: 'y' } }; },
-    now: now + HOUR, log: () => {}
+    // R14 (…039804): kịch bản khác không gửi cho cùng khách trong 12 giờ (trước đây lượt sau 1 giờ gửi tiếp cho `ok`) —
+    // lượt sau đặt ở +13 giờ để vẫn kiểm được khách #551 bị bỏ qua ngay còn khách gửi được thì nhận tin.
+    now: now + 13 * HOUR, quietHours: false, log: () => {}
   });
   assert.deepEqual(calls, [ok]);
   assert.equal(second.skipReasons.undeliverable, 1);

@@ -36,7 +36,7 @@ import { posSyncStatus, recordPosSyncStatus, startPosSync, syncPosLandingOrders 
 import { applyPosContentToConversations, finalizePosImportedOrder, posGoodsItems, repairPosImportedTotal } from './pos-content-sync.mjs';
 import { applyGiftSwapFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
-import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { buildFollowUpBatch, followUpRelayErrorText, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote } from './order-notes.mjs';
 import { applyCustomerOrderEdits, applyPosRepush, assertManualOrderMoney, createManualOrderGuard, describeOrderEdits, duplicateManualOrderMessage, isLiveOnPos, moneyText, needsPosRepush, orderEditAction, orderProcessingNotes, posCancelRefOf, posRepushDraft, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
 import { AUDIT_ACTIONS, AUTOMATED_ACTORS, appendAudit, appendBotToggleAudit, appendLabelAudit, auditActionLabel, auditActors, createViewThrottle, labelChangeDetails, labelChangeText, queryAudit } from './audit-log.mjs';
@@ -1934,7 +1934,9 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch-results') {
       const payload = await readBody(request);
       const summary = await recordFollowUpBatchResults(payload.results, { readSettings: readChatbotSettings, token: String(payload.token || '') });
-      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''})`);
+      // R14: kèm lý do lỗi (ngắn, che SĐT, tối đa 3 lý do khác nhau) — trước đây chỉ có số đếm, không biết vì sao lỗi.
+      const relayErrors = summary.failed ? followUpRelayErrorText(payload.results) : '';
+      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''})${relayErrors ? ` — lý do: ${relayErrors}` : ''}`);
       audit(request, 'followup.batch_results', { summary: `Trạm Pancake gửi bám đuổi: gửi ${summary.sent}, lỗi ${summary.failed}, bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''}.`, details: { sent: Number(summary.sent) || 0, failed: Number(summary.failed) || 0 } });
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }

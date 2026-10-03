@@ -65,14 +65,36 @@ export function parseKeywords(value) {
     .filter(words => words.length);
 }
 
+// R14 (quyết định chủ shop 4, ca thật 02–03/10): lời chê "không như quảng cáo" / "không đúng với quoảng cáo" /
+// "ko đc như quảng cao" / "khác hình" / "mở ra bên trong toàn yến mạch" — có chữ chen giữa nên không viết được thành
+// từ khoá liền; so bằng mã trên chữ bỏ dấu (luôn bật, không phụ thuộc danh sách từ khoá trong Cài đặt).
+export const AD_MISMATCH_COMPLAINT = /\b(?:khong|ko|k|kg|hong|hok|cha|chang)(?: (?:duoc|dc|dung|giong|nhu|voi|la|bang|y))+ (?:quang cao|quoang cao|quang cau|qc)\b|\b(?:khong|ko|k|kg|hong|hok|cha|chang)(?: (?:duoc|dc|dung|y))? (?:nhu|giong) (?:(?:tren|trong) )?(?:hinh|anh quang cao)\b|\bkhac (?:(?:voi|so voi|xa|han) )?(?:quang cao|quoang cao|qc|hinh|(?:tren|trong) hinh)\b|\bmo ra\b.{0,20}\b(?:toan|chu yeu)\b|\bmo ra (?:thi )?it\b/;
+// "Dở" / "Dỡ" (chê, gõ sai dấu) đứng riêng trong tin ngắn (≤ 3 từ): chỉ nhận trên chữ CÒN DẤU — bỏ dấu thì "dở" trùng
+// "đó/đỏ/do". "bỏ dở", "dở dang", "dở chừng" không phải chê.
+const BAD_TASTE_RAW = /(?<![\p{L}])(?:dở|dỡ)(?![\p{L}])/iu;
+const BAD_TASTE_NOT = /(?<![\p{L}])(?:bỏ\s+dở|dở\s+dang|dở\s+chừng|dỡ\s+hàng)(?![\p{L}])/iu;
+export function shortBadTaste(text) {
+  const raw = String(text || '').normalize('NFC').trim();
+  if (!raw || !BAD_TASTE_RAW.test(raw) || BAD_TASTE_NOT.test(raw)) return false;
+  return raw.split(/[^\p{L}\p{N}]+/u).filter(Boolean).length <= 3;
+}
+// R14 (ca …727620): khách kể hàng CHỖ KHÁC dở/hôi ("bữa mua một loại ở chổ khác mà về ăn ko ngon, bị hôi dầu") — không phải
+// khiếu nại / bảo hành với shop (thẻ đó chặn bám đuổi). "thôi mua bên khác" (dọa bỏ shop) KHÔNG thuộc mẫu này.
+export const OTHER_SELLER = /\b(?:o|tu|cua|tai|hang|bua|lan truoc) (?:cho|shop|ben|noi|tiem|cua hang|hang) khac\b|\b(?:shop|ben|tiem|cua hang|hang) khac (?:ban|giao|gui)\b/;
+export const mentionsOtherSeller = text => OTHER_SELLER.test(foldVietnamese(text).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim());
+
 /**
  * Khách đang khiếu nại? Hoặc bot chọn mẫu trả lời khiếu nại, hoặc lời khách có
  * từ khoá. Chỉ xét tin của khách gửi vào, không xét tin bot gửi ra.
+ * R14: thêm lời chê "không như quảng cáo / khác hình / mở ra … toàn yến mạch", "dở" đứng riêng; câu chê hàng CHỖ KHÁC
+ * không tính (kể cả khi bot chọn mẫu bảo hành cho câu đó).
  */
 export function isComplaint({ text = '', templateId = '', keywords = defaultComplaintKeywords } = {}) {
-  if (complaintTemplateIds.includes(templateId)) return true;
+  const otherSeller = mentionsOtherSeller(text);
+  if (complaintTemplateIds.includes(templateId) && !otherSeller) return true;
   const message = toWords(text);
-  if (!message.length) return false;
+  if (!message.length || otherSeller) return false;
+  if (AD_MISMATCH_COMPLAINT.test(message.join(' ')) || shortBadTaste(text)) return true;
   return parseKeywords(keywords).some(keyword => hasWordSequence(message, keyword));
 }
 
@@ -90,7 +112,8 @@ export function autoLabelEventsFor({ order = null, handoff = false, text = '', t
   if (cancelled) events.push('cancel');
   if (livestream) events.push('livestream');
   const words = toWords(text);
-  if (warrantyTemplateIds.includes(templateId) || parseKeywords(warrantyKeywords).some(keyword => hasWordSequence(words, keyword))) events.push('warranty');
+  // R14 (ca …727620): kể hàng chỗ khác bị hôi dầu → không gắn Bảo hành (thẻ này chặn bám đuổi).
+  if (!mentionsOtherSeller(text) && (warrantyTemplateIds.includes(templateId) || parseKeywords(warrantyKeywords).some(keyword => hasWordSequence(words, keyword)))) events.push('warranty');
   if (wholesaleTemplateIds.includes(templateId) || parseKeywords(wholesaleKeywords).some(keyword => hasWordSequence(words, keyword))) events.push('wholesale');
   // Số bị POS chặn hay bom nhiều: thẻ "Khách xấu" để nhân viên cân nhắc trước khi giao.
   const level = String(phoneWarningLevel || order?.phoneWarning?.level || '');

@@ -6,7 +6,7 @@ import { tempDir } from './helpers/temp-dir.mjs';
 
 process.env.QR_SCANS_PATH = path.join(tempDir('qr-'), 'qr-scans.json');
 
-const { classifyUserAgent, isLinkPreviewBot, renderBridgePage, shouldRedirectDirectly } = await import('../app/qr-bridge.mjs');
+const { classifyUserAgent, isLinkPreviewBot, renderBridgePage } = await import('../app/qr-bridge.mjs');
 const { recordQrScan, recordQrOpen, listQrScans, isValidQrCode, isKnownQrCode, registerQrCode, deleteQrCode, countQrReferrals, countQrReferralsByDay, qrDayKey } = await import('../app/qr-scans.mjs');
 
 const agents = {
@@ -40,14 +40,6 @@ test('nhận diện máy và trình duyệt: Zalo, Facebook, Instagram, TikTok, 
   assert.deepEqual(classifyUserAgent(agents.tiktok), { platform: 'android', browser: 'tiktok', inApp: true });
   assert.deepEqual(classifyUserAgent(agents.desktopChrome), { platform: 'may tinh', browser: 'chrome', inApp: false });
   assert.deepEqual(classifyUserAgent(''), { platform: 'khac', browser: 'khac', inApp: false });
-});
-
-// R13 fix2 (A2): trước đây khẳng định "Chrome Android được 302 thẳng" — chính nhánh đó biến HEAD/crawler mang UA Android thành
-// "lượt bấm chờ khớp" và khách lạ nhận ưu đãi. Nay không máy nào được chuyển hướng thẳng: mọi máy qua trang đệm.
-test('không máy nào được chuyển hướng 302 thẳng (Android Chrome cũng qua trang đệm — R13 fix2 A2)', () => {
-  for (const key of Object.keys(agents)) {
-    assert.equal(shouldRedirectDirectly(classifyUserAgent(agents[key])), false, `${key} phải nhận trang đệm`);
-  }
 });
 
 const render = (userAgent, extra = {}) => renderBridgePage({

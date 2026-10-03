@@ -3,7 +3,8 @@
 // tin được ghi vào hộp thư CRM (để theo dõi) rồi đưa cho bot; câu trả lời của
 // bot gửi ngược qua Public API của Pancake nên hiện ngay trong Pancake cho
 // nhân viên thấy. Tài liệu: integrations/pancake/README.md.
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import path from 'node:path';
 import { metaConfig, pancakeConfig as defaultConfig, projectRoot } from './config.mjs';
 import { applyWebhookEvents } from './meta-webhook.mjs';
@@ -393,38 +394,38 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
 // lúc server đang khởi động lại, được kéo về bằng API liệt kê hội thoại và tin
 // nhắn: khi mở kênh lần đầu, lúc khởi động, và định kỳ. Chỉ ghi hộp thư, không
 // đưa bot (tin cũ không phải để trả lời).
-const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
-
 /**
  * Một lần gọi Pancake qua hàng đợi giới hạn tốc độ của Page (pancake-rate-limit.mjs): đồng hồ
  * hủy (`timeoutMs`) chỉ chạy từ lúc thật sự gọi, không tính thời gian xếp hàng. Trả { response, body }.
+ * Pancake giới hạn 5 lần gọi mỗi giây cho mỗi Page; quá thì trả 429 "Too many requests" (Pancake CHƯA nhận
+ * yêu cầu, gọi lại an toàn kể cả gửi tin): cả Page lùi lại rồi gọi lại, tối đa `retry429` lần (INT-16: một chỗ
+ * duy nhất thay cho ba bản chép ở pancakeGet / sendPancakeMessage / uploadPancakeContent). Hết lượt thì trả
+ * phản hồi 429 cho người gọi xử lý như lỗi.
  */
-function pancakeFetch(pageId, url, init, fetchImpl, timeoutMs) {
-  return withPancakeSlot(pageId, async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetchImpl(url, { ...init, signal: controller.signal });
-      let body = {};
-      try { body = await response.json(); } catch {}
-      return { response, body };
-    } finally {
-      clearTimeout(timer);
-    }
-  });
+async function pancakeFetch(pageId, url, init, fetchImpl, timeoutMs, { retry429 = 3 } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await withPancakeSlot(pageId, async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetchImpl(url, { ...init, signal: controller.signal });
+        let body = {};
+        try { body = await response.json(); } catch {}
+        return { response, body };
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+    if (result.response.status !== 429 || attempt >= retry429) return result;
+    backoffPancake(pageId, 1500 * (attempt + 1));
+  }
 }
 
-// Pancake giới hạn 5 lần gọi mỗi giây cho mỗi Page; quá thì trả 429 "Too many
-// requests". Gặp 429 thì cả Page lùi lại rồi gọi lại (tối đa 3 lần).
-async function pancakeGet(pathname, params, config, fetchImpl, attempt = 0) {
+async function pancakeGet(pathname, params, config, fetchImpl) {
   const url = new URL(`${config.apiBase.replace(/\/+$/, '')}${pathname}`);
   url.searchParams.set('page_access_token', config.pageAccessToken);
   for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
   const { response, body } = await pancakeFetch(config.pageId, url, {}, fetchImpl, 20000);
-  if (response.status === 429 && attempt < 3) {
-    backoffPancake(config.pageId, 1500 * (attempt + 1));
-    return pancakeGet(pathname, params, config, fetchImpl, attempt + 1);
-  }
   if (!response.ok || body.success === false) throw new Error(`Pancake trả về ${response.status}: ${body.message || body.error || 'không rõ lý do'}`);
   return body;
 }
@@ -496,12 +497,23 @@ export async function fetchPancakeMessages(conversationId, { pages = 1 } = {}, c
  * vô hại. Trả về số hội thoại đã duyệt và số tin mới ghi.
  */
 let activeSync = null;
-export function syncPancakeConversations(options = {}, config = defaultConfig, fetchImpl = fetch) {
-  // Vòng 10 phút và nút Đồng bộ trong CRM dùng chung một lượt đang chạy, không
-  // chạy chồng (mỗi lượt là hàng trăm lần gọi Pancake trong hạn 5 lần/giây).
-  if (activeSync) return activeSync;
-  activeSync = runPancakeSync(options, config, fetchImpl).finally(() => { activeSync = null; });
-  return activeSync;
+// Phần dữ liệu của tuỳ chọn (bỏ hàm gọi lại): hai lời gọi cùng dữ liệu là cùng một yêu cầu.
+const syncOptionsKey = options => JSON.stringify(Object.entries(options || {}).filter(([, value]) => typeof value !== 'function').sort(([first], [second]) => first.localeCompare(second)));
+export async function syncPancakeConversations(options = {}, config = defaultConfig, fetchImpl = fetch) {
+  // Vòng 10 phút và nút Đồng bộ trong CRM không chạy chồng (mỗi lượt là hàng trăm lần gọi Pancake trong
+  // hạn 5 lần/giây). Cùng yêu cầu (cùng tuỳ chọn) thì dùng chung lượt đang chạy; yêu cầu KHÁC (INT-11: đồng bộ
+  // tay một Page, số hội thoại khác…) thì chờ lượt đang chạy xong rồi chạy đúng lượt mình yêu cầu — trước đây
+  // nhận nhầm kết quả của lượt nền và không làm gì.
+  const key = syncOptionsKey(options);
+  while (activeSync) {
+    if (activeSync.key === key && activeSync.config === config && activeSync.fetchImpl === fetchImpl) return activeSync.promise;
+    await activeSync.promise.catch(() => {});
+  }
+  const promise = runPancakeSync(options, config, fetchImpl).finally(() => {
+    if (activeSync?.promise === promise) activeSync = null;
+  });
+  activeSync = { key, config, fetchImpl, promise };
+  return promise;
 }
 
 /**
@@ -672,7 +684,7 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
       const conversations = await step(`${pId} danh sách hội thoại`, () => fetchPancakeConversations({ limit }, page, fetchImpl), null);
       if (conversations === null) listFailed = true;
       for (const [index, conversation] of (conversations || []).entries()) {
-        if (index) await pause(200);
+        if (index) await sleep(200);
         await step(conversation.id, async () => {
           const messages = await fetchPancakeMessages(conversation.id, { pages: messagePages }, page, fetchImpl);
           const events = messages
@@ -696,7 +708,7 @@ async function runPancakeSync({ pageId, limit = 60, messagePages = 1, commentLim
         ? await step(`${pId} danh sách bình luận`, () => fetchPancakeConversations({ limit: commentLimit, type: 'COMMENT' }, page, fetchImpl), [])
         : [];
       for (const thread of threads) {
-        await pause(200);
+        await sleep(200);
         await step(thread.id, async () => {
           const comments = await fetchPancakeMessages(thread.id, { pages: 1 }, page, fetchImpl);
           const post = comments.post || { id: thread.post_id };
@@ -833,13 +845,32 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, quickMs = 2 * 60
 
 // Dấu vân tay các hội thoại (và tin) mà lô sự kiện chạm tới: đồng bộ chạy lại trên tin đã có thì
 // không đổi gì → không ghi kho (tệp ~19 MB). Rẻ: chỉ vài hội thoại của đúng khách trong lô.
-function touchedFingerprint(store, keys) {
+// INT-06: danh sách hội thoại chạm tới tìm MỘT lần (lần trước, `conversations` truyền lại cho lần sau — hội thoại
+// mới tạo làm đổi số hội thoại nên vẫn bắt được), và chỉ stringify các tin mà lô sự kiện nhắc tới (mã/mid) cùng
+// số tin của luồng, không stringify cả luồng hai lần. Tin không được nhắc tới thì đường ghi Pancake không đổi
+// (gộp/chèn theo mã; cắt bớt tin cũ làm đổi số tin hoặc chính tin mới).
+function touchedConversations(store, keys) {
+  return store.conversations.filter(conversation => keys.has(`${conversation.pageId}:${conversation.psid}`));
+}
+
+function touchedFingerprint(store, conversations, messageIds) {
   const parts = [store.conversations.length, Object.keys(store.commentIndex || {}).length];
-  for (const conversation of store.conversations) {
-    if (!keys.has(`${conversation.pageId}:${conversation.psid}`)) continue;
-    parts.push(JSON.stringify(conversation), JSON.stringify(store.messages[conversation.id] || []));
+  for (const conversation of conversations) {
+    const messages = store.messages[conversation.id] || [];
+    parts.push(JSON.stringify(conversation), messages.length);
+    for (const message of messages) {
+      if (messageIds.has(message?.id) || (message?.mid && messageIds.has(message.mid))) parts.push(JSON.stringify(message));
+    }
   }
   return parts.join('\u0000');
+}
+
+function eventMessageIds(events) {
+  const ids = new Set();
+  for (const event of events) {
+    for (const value of [event.message?.id, event.message?.mid, event.commentId, event.mid]) if (value) ids.add(value);
+  }
+  return ids;
 }
 
 /**
@@ -885,9 +916,13 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false, 
   // Bot tự tắt / phân công đổi: ghi nhật ký sau khi lưu kho (ngoài hàng đợi ghi của kho).
   const automaticAudits = [];
   const changes = await updateMessagingStore(store => {
-    const before = touchedFingerprint(store, touchedKeys);
+    const conversations = touchedConversations(store, touchedKeys);
+    const messageIds = eventMessageIds(incomingEvents);
+    const before = touchedFingerprint(store, conversations, messageIds);
+    const conversationCount = store.conversations.length;
     const applied = applyPancakeEventsToStore(store, incomingEvents, { fromWebhook, automaticAudits });
-    touched = touchedFingerprint(store, touchedKeys) !== before;
+    // Có hội thoại mới thì số hội thoại đã khác: khỏi so tiếp.
+    touched = store.conversations.length !== conversationCount || touchedFingerprint(store, conversations, messageIds) !== before;
     return applied;
   }, { defer: deferWrite, unchanged: () => !touched });
   for (const item of automaticAudits) {
@@ -977,13 +1012,22 @@ function applyPancakeEventsToStore(store, incomingEvents, { fromWebhook, automat
     })
     .map(event => event.message.id));
   const applied = applyWebhookEvents(store, events);
+  // Tra hội thoại bằng bảng dựng một lần (sau khi đã ghi, nên có cả hội thoại mới) thay vì find mỗi sự kiện (INT-06).
+  // Giữ mục ĐẦU TIÊN mỗi khoá như find.
+  const byId = new Map();
+  const inboxByKey = new Map();
+  for (const item of store.conversations) {
+    if (!byId.has(item.id)) byId.set(item.id, item);
+    const key = `${item.pageId}:${item.psid}`;
+    if (item.source !== 'comment' && !inboxByKey.has(key)) inboxByKey.set(key, item);
+  }
   for (const event of events) {
     const isComment = event.type === 'comment';
     const messageId = isComment ? event.commentId : event.message.id;
     // Luồng bình luận: applyCommentEvent đã ghi mã bình luận → mã luồng.
     const conversation = isComment
-      ? store.conversations.find(item => item.id === store.commentIndex?.[messageId]) || null
-      : store.conversations.find(item => item.pageId === event.pageId && item.psid === event.psid && item.source !== 'comment');
+      ? byId.get(store.commentIndex?.[messageId]) || null
+      : inboxByKey.get(`${event.pageId}:${event.psid}`);
     if (!conversation) continue;
     if (event.pancake.conversationId) conversation.pancakeConversationId = event.pancake.conversationId;
     if (event.pancake.pageCustomerId) conversation.pancakePageCustomerId = event.pancake.pageCustomerId;
@@ -1079,7 +1123,7 @@ export function pancakeSendTimeoutMs(action = 'reply_inbox') {
  * luận `commentId`), private_replies (nhắn riêng cho người bình luận: cần
  * `postId`, `commentId`, `fromId`).
  */
-export async function sendPancakeMessage({ pageId, conversationId, text = '', contentIds = [], action = 'reply_inbox', commentId = '', postId = '', fromId = '' }, config = defaultConfig, fetchImpl = fetch, attempt = 0) {
+export async function sendPancakeMessage({ pageId, conversationId, text = '', contentIds = [], action = 'reply_inbox', commentId = '', postId = '', fromId = '' }, config = defaultConfig, fetchImpl = fetch) {
   const pageConfig = getPancakePageConfig(pageId, config);
   if (!pageConfig.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
   if (!conversationId) throw new Error('Hội thoại này chưa có mã Pancake để gửi.');
@@ -1095,7 +1139,7 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
   // Lần gửi trước của đúng tin này hết giờ chờ (không rõ đã tới khách chưa): kiểm tin của hội
   // thoại trên Pancake trước, đã có thì coi như đã gửi, chưa chắc thì không gửi lại.
   const uncertainKey = uncertainSendKey({ pageId, conversationId, action, commentId, text, contentIds });
-  if (attempt === 0 && uncertainSends.has(uncertainKey)) {
+  if (uncertainSends.has(uncertainKey)) {
     const recovered = await resolveUncertainSend(uncertainKey, pageConfig, fetchImpl);
     if (recovered) return recovered;
   }
@@ -1115,11 +1159,7 @@ export async function sendPancakeMessage({ pageId, conversationId, text = '', co
     if (!isUncertainSendError(error)) throw error;
     throw markUncertainSend(uncertainKey, { pageId, conversationId, action, fromId, text, contentIds }, error.name === 'AbortError' ? `hết giờ chờ ${Math.round(sendTimeoutMs / 1000)} giây` : error.message);
   }
-  // Quá 5 lần gọi/giây: cả Page lùi lại rồi gửi lại (tối đa 3 lần). 429 = Pancake chưa nhận, gửi lại an toàn.
-  if (response.status === 429 && attempt < 3) {
-    backoffPancake(pageId, 1500 * (attempt + 1));
-    return sendPancakeMessage({ pageId, conversationId, text, contentIds, action, commentId, postId, fromId }, config, fetchImpl, attempt + 1);
-  }
+  // Quá 5 lần gọi/giây (429 = Pancake chưa nhận): pancakeFetch đã lùi lại và gửi lại tối đa 3 lần.
   // Cổng của Pancake hết giờ (502/504): yêu cầu có thể đã chạy xong phía sau.
   if (response.status === 502 || response.status === 504) {
     throw markUncertainSend(uncertainKey, { pageId, conversationId, action, fromId, text, contentIds }, `Pancake trả ${response.status}`);
@@ -1210,7 +1250,7 @@ async function resolveUncertainSend(key, pageConfig, fetchImpl) {
 }
 
 /** Tải một tệp (ảnh, video…) lên Page trong Pancake; mã trả về dùng để gửi kèm tin. */
-export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg', mime = 'application/octet-stream' }, config = defaultConfig, fetchImpl = fetch, attempt = 0) {
+export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg', mime = 'application/octet-stream' }, config = defaultConfig, fetchImpl = fetch) {
   const pageConfig = getPancakePageConfig(pageId, config);
   if (!pageConfig.pageAccessToken) throw new Error('Chưa có PANCAKE_PAGE_ACCESS_TOKEN.');
   if (!buffer?.length) throw new Error('Tệp trống.');
@@ -1218,12 +1258,8 @@ export async function uploadPancakeContent({ pageId, buffer, filename = 'anh.jpg
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mime }), filename);
   // Tải lên (chưa gửi cho khách): thử lại an toàn, nên chỉ cần đi qua hàng đợi giới hạn tốc độ.
+  // Quá 5 lần gọi/giây: pancakeFetch lùi lại rồi tải lại (tối đa 3 lần; FormData gửi lại được nguyên).
   const { response, body } = await pancakeFetch(pageId, url, { method: 'POST', body: form }, fetchImpl, 30000);
-  // Quá 5 lần gọi/giây: cả Page lùi lại rồi tải lại (tối đa 3 lần).
-  if (response.status === 429 && attempt < 3) {
-    backoffPancake(pageId, 1500 * (attempt + 1));
-    return uploadPancakeContent({ pageId, buffer, filename, mime }, config, fetchImpl, attempt + 1);
-  }
   if (!response.ok || body.success === false || !body.id) {
     throw new Error(`Pancake không nhận tệp (${response.status}): ${body.message || body.error || 'không rõ lý do'}`);
   }
@@ -1256,7 +1292,8 @@ export async function readImageForUpload(imageUrl, fetchImpl) {
   const local = ownOrigin && parsed.pathname.match(/^\/product-images\/([A-Za-z0-9-]+\.(?:png|jpe?g|webp))$/);
   if (local) {
     const filename = local[1];
-    return { buffer: await readFile(path.join(productImagesPath, filename)), filename, mime: imageMimeTypes[path.extname(filename).toLowerCase()] };
+    const file = path.join(productImagesPath, filename);
+    return { buffer: await readFile(file), filename, mime: imageMimeTypes[path.extname(filename).toLowerCase()], sourceKey: await localSourceKey(file) };
   }
   // R13 (QR): ảnh /q/brand/* của chính máy chủ này — đọc thẳng từ đĩa như /product-images/ thay vì tự gọi lại địa chỉ
   // công khai của mình (vòng qua Caddy/DNS, có lúc hết giờ làm tin ưu đãi QR mất ảnh thẻ). Tệp không đọc được (thiếu
@@ -1264,8 +1301,9 @@ export async function readImageForUpload(imageUrl, fetchImpl) {
   const brandFile = ownOrigin ? brandImageFiles[parsed.pathname] : '';
   if (brandFile) {
     try {
-      const buffer = await readFile(path.join(brandImagesPath, ...brandFile.split('/')));
-      return { buffer, filename: path.basename(brandFile), mime: imageMimeTypes[path.extname(brandFile).toLowerCase()] || 'application/octet-stream' };
+      const file = path.join(brandImagesPath, ...brandFile.split('/'));
+      const buffer = await readFile(file);
+      return { buffer, filename: path.basename(brandFile), mime: imageMimeTypes[path.extname(brandFile).toLowerCase()] || 'application/octet-stream', sourceKey: await localSourceKey(file) };
     } catch { /* thiếu tệp trên đĩa: tải qua mạng như cũ */ }
   }
   // Ảnh ngoài: máy chủ tải hộ, nên đích phải là máy công khai (không phải
@@ -1335,9 +1373,42 @@ export function splitLongText(text, limit = 1900) {
 // và nén sang JPEG trước khi tải (sharp). Tệp không phải ảnh thì phải tự nhỏ.
 export const pancakeUploadLimit = 500 * 1024;
 
+// INT-13: ảnh sản phẩm/ảnh thương hiệu trên đĩa nén một lần rồi nhớ (khoá: đường dẫn + mtime + cỡ, tối đa 50 ảnh, mỗi
+// ảnh ≤ 500 KB): trước đây mỗi lần bot gửi ảnh là đọc + nén lại bằng sharp (tới 6 lượt). Chỉ nhớ BYTES đã nén; mã tải
+// lên Pancake vẫn mới mỗi lần gửi (xem pancakeContentIdForImage).
+const fittedImageCache = new Map();
+const maximumFittedImages = 50;
+async function localSourceKey(file) {
+  try {
+    const info = await stat(file);
+    return `${file}|${info.mtimeMs}|${info.size}`;
+  } catch {
+    return '';
+  }
+}
+/** Số ảnh nén đang nhớ (test). */
+export const fittedImageCacheSize = () => fittedImageCache.size;
+
 /** Ảnh lớn hơn giới hạn của Pancake → JPEG nhỏ dần (cạnh dài 1080px, chất lượng giảm) cho tới khi lọt. */
 export async function fitImageForPancake(file, limit = pancakeUploadLimit) {
   if (!file?.buffer || file.buffer.length <= limit || !/^image\/(png|jpe?g|webp)$/i.test(file.mime || '')) return file;
+  const cacheKey = file.sourceKey ? `${file.sourceKey}|${limit}` : '';
+  const cached = cacheKey ? fittedImageCache.get(cacheKey) : null;
+  if (cached) {
+    // Dùng gần đây nhất → cuối hàng (LRU).
+    fittedImageCache.delete(cacheKey);
+    fittedImageCache.set(cacheKey, cached);
+    return { ...cached };
+  }
+  const fitted = await compressImageForPancake(file, limit);
+  if (cacheKey) {
+    fittedImageCache.set(cacheKey, fitted);
+    while (fittedImageCache.size > maximumFittedImages) fittedImageCache.delete(fittedImageCache.keys().next().value);
+  }
+  return { ...fitted };
+}
+
+async function compressImageForPancake(file, limit) {
   let sharp;
   try {
     ({ default: sharp } = await import('sharp'));
@@ -1392,12 +1463,13 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   // Trả lời bình luận (công khai hay nhắn riêng) cũng mang cờ nhân viên / bám đuổi như tin hộp thư.
   if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply, staff, sentBy, followUp }, config, fetchImpl);
   let message;
+  let partial = null;
   if (pictures.length) {
-    // Tải tuần tự, nghỉ giữa các ảnh: Pancake giới hạn 5 lần gọi mỗi giây mỗi Page.
+    // Tải tuần tự; giới hạn 5 lần gọi/giây mỗi Page do hàng đợi withPancakeSlot giữ (INT-23: bỏ nghỉ 250 ms cố định
+    // giữa các ảnh — 30 ảnh từng thêm ~7 giây trước khi khách thấy ảnh).
     const upload = async () => {
       const ids = [];
-      for (const [index, url] of pictures.entries()) {
-        if (index) await pause(250);
+      for (const url of pictures) {
         ids.push((await pancakeContentIdForImage(target.pageId, url, config, fetchImpl)).id);
       }
       return ids;
@@ -1428,17 +1500,34 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
     } catch (error) {
       // Như với ảnh sản phẩm: Facebook từ chối tệp vừa tải thì tải lại, gửi thêm một lần.
       if (!/invalid_upload/.test(error.message)) throw error;
-      await pause(1000);
+      await sleep(1000);
       sent = await uploadAndSend();
     }
     // Nội dung tệp không lưu vào kho; bản dội lại từ Pancake mang URL ảnh trên CDN.
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: attachment.type || 'document', text: '', name: attachment.name || '', dataUrl: '', createdAt: Date.now(), status: 'sent' };
-    if (body) for (const chunk of splitLongText(body)) await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
+    // Chữ đi sau tệp: tệp đã tới khách, chữ lỗi thì vẫn lưu tệp rồi báo "gửi dở" (INT-03).
+    if (body) {
+      try {
+        for (const chunk of splitLongText(body)) await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
+      } catch (error) {
+        partial = partialSendError(error, 1);
+      }
+    }
   } else {
     // Facebook từ chối tin dài quá 2000 ký tự: cắt theo đoạn, gửi lần lượt.
     let sent = null;
-    for (const chunk of splitLongText(body)) sent = await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
-    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text: body, createdAt: Date.now(), status: 'sent' };
+    const sentChunks = [];
+    try {
+      for (const chunk of splitLongText(body)) {
+        sent = await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
+        sentChunks.push(chunk);
+      }
+    } catch (error) {
+      // Đoạn đầu chưa đi: lỗi thường, người gọi gửi lại được. Đoạn đầu đã tới khách: lưu phần đã gửi, báo "gửi dở".
+      if (!sentChunks.length) throw error;
+      partial = partialSendError(error, sentChunks.length);
+    }
+    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text: partial ? sentChunks.join('\n\n') : body, createdAt: Date.now(), status: 'sent' };
   }
   const saved = await updateMessagingStore(store => {
     // Nhân viên gửi từ CRM: gắn cờ staff như tin admin gửi trong Pancake (bot dùng để im khi nhân viên đang xử lý).
@@ -1449,7 +1538,19 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
     return { message: outcome.message, conversation: publicConversation(outcome.conversation) };
   });
   publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: saved.message });
+  if (partial) throw Object.assign(partial, { saved });
   return saved;
+}
+
+/**
+ * INT-03: tin nhiều phần (chữ dài cắt nhiều tin, tệp + chữ) mà phần đầu đã tới khách, phần sau lỗi. Phần đã gửi
+ * được lưu vào hộp thư; lỗi mang `partial` + `unknownDelivery` để người gọi coi như "có thể đã gửi" và KHÔNG gửi
+ * lại cả tin (trước đây gửi lại → khách nhận phần đầu hai lần).
+ */
+export function partialSendError(error, sentParts) {
+  return Object.assign(new Error(`Mới gửi được ${sentParts} phần đầu của tin, phần sau lỗi (${error?.message || 'không rõ'}) — không gửi lại cả tin để khách khỏi nhận trùng.`), {
+    code: 'SEND_PARTIAL', partial: true, unknownDelivery: true, sentParts, cause: error
+  });
 }
 
 /**
@@ -1525,8 +1626,8 @@ export async function fetchPancakeAds(adIds, config = defaultConfig, fetchImpl =
   const missing = wanted.filter(id => !(adCache.has(id) && Date.now() - adCache.get(id).at < adCacheTtlMs));
   // Pancake nhận tối đa 20 mã một lần: chia lô, không cắt bỏ phần sau.
   for (let start = 0; start < missing.length; start += 20) {
+    // Nhịp gọi do hàng đợi withPancakeSlot giữ (INT-23: bỏ nghỉ cố định giữa các lô).
     const chunk = missing.slice(start, start + 20);
-    if (start) await pause(250);
     const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/ads`, { ad_ids: chunk.join(','), type: 'ads' }, config, fetchImpl);
     for (const item of Array.isArray(body.data) ? body.data : []) {
       rememberPancakeAd(String(item.id), { at: Date.now(), name: String(item.name || '').trim(), imageUrl: String(item.image_url || ''), campaignName: String(item.campaign_name || '').trim() });
@@ -1556,8 +1657,9 @@ export async function findPancakePost(postId, { months = 12 } = {}, config = def
   for (let month = 0; month < months && !found; month += 1) {
     const since = until - monthSeconds;
     for (let pageNumber = 1; pageNumber <= 3 && !found; pageNumber += 1) {
-      // Quét lùi nhiều trang: giãn ra để không chạm giới hạn 5 lần/giây của Pancake.
-      if (month || pageNumber > 1) await pause(350);
+      // Quét lùi nhiều trang (việc nền, tới 36 lần gọi): cố ý giãn ra dưới trần của hàng đợi để chừa lượt cho bot
+      // gửi tin trả lời khách cùng lúc — không phải nghỉ chồng lên giới hạn tốc độ (INT-23 giữ lại có chủ đích).
+      if (month || pageNumber > 1) await sleep(350);
       const body = await pancakeGet(`/v1/pages/${encodeURIComponent(config.pageId)}/posts`, { since, until, page_number: pageNumber, page_size: 30 }, config, fetchImpl);
       const posts = Array.isArray(body.data) ? body.data : Array.isArray(body.posts) ? body.posts : [];
       found = posts.find(post => String(post?.id) === id) || null;
@@ -1580,8 +1682,12 @@ export async function findPancakePost(postId, { months = 12 } = {}, config = def
 const postLookupRetryMs = 24 * 60 * 60 * 1000;
 const needsPostLookup = conversation => Boolean(conversation.referral?.postId) && !conversation.post?.message
   && !(conversation.adPostLookupAt && Date.now() - conversation.adPostLookupAt < postLookupRetryMs);
+// Pancake trả tên quảng cáo rỗng (INT-02): ghi mốc adLookupAt, 24 giờ sau mới tra lại — trước đây hội thoại cứ
+// "chờ tên" mãi nên mỗi webhook/vòng đồng bộ lại ghi cả kho ~19 MB.
+const needsAdTitle = conversation => !conversation.referral.adTitle
+  && !(conversation.adLookupAt && Date.now() - conversation.adLookupAt < postLookupRetryMs);
 const needsAdContext = conversation => Boolean(conversation?.referral?.adId)
-  && (!conversation.referral.adTitle || needsPostLookup(conversation));
+  && (needsAdTitle(conversation) || needsPostLookup(conversation));
 
 export async function enrichPancakeAdContext(changes, config = defaultConfig, fetchImpl = fetch) {
   const pending = [...new Map(changes
@@ -1595,18 +1701,32 @@ export async function enrichPancakeAdContext(changes, config = defaultConfig, fe
   } catch {
     ads = {};
   }
+  // Chỉ ghi khi thật sự đổi, và ghi gộp (defer): webhook không phải chờ ghi cả kho.
+  let changed = false;
   await updateMessagingStore(store => {
+    const wanted = new Set(pending.map(item => item.id));
+    const byId = new Map();
+    for (const entry of store.conversations) if (wanted.has(entry.id)) byId.set(entry.id, entry);
     for (const item of pending) {
-      const conversation = store.conversations.find(entry => entry.id === item.id);
+      const conversation = byId.get(item.id);
       const ad = ads[item.referral?.adId];
-      if (!conversation?.referral || !ad?.name || conversation.referral.adTitle) continue;
+      if (!conversation?.referral || conversation.referral.adTitle || !ad) continue;
+      if (!ad.name) {
+        // Pancake trả lời nhưng không có tên: ghi mốc để khỏi tra lại liên tục.
+        if (!conversation.adLookupAt || Date.now() - conversation.adLookupAt >= postLookupRetryMs) {
+          conversation.adLookupAt = Date.now();
+          changed = true;
+        }
+        continue;
+      }
+      changed = true;
       // Tên quảng cáo hay là mã nội bộ ("gn ht 2705"); tên chiến dịch ("mess Xanh") nói rõ sản phẩm hơn, ghép vào để bot đọc.
       const adTitle = ad.campaignName && !ad.name.includes(ad.campaignName) ? `${ad.name} · ${ad.campaignName}` : ad.name;
       conversation.referral = { ...conversation.referral, adTitle, photoUrl: conversation.referral.photoUrl || ad.imageUrl };
       publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
     }
     return null;
-  });
+  }, { defer: true, unchanged: () => !changed });
   // Tìm bài quảng cáo nền, từng hội thoại một và tối đa 5 mỗi lượt (mỗi lần
   // tìm có thể tới 36 lần gọi API); mốc đã tìm ghi lại dù thấy hay không.
   for (const item of pending.filter(needsPostLookup).slice(0, 5)) {
@@ -1624,7 +1744,7 @@ export async function enrichPancakeAdContext(changes, config = defaultConfig, fe
           publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
         }
         return null;
-      });
+      }, { defer: true });
     }).catch(error => console.error(`Không ghi được bài quảng cáo ${item.referral.postId}: ${error.message}`));
   }
   return pending.length;
@@ -1656,7 +1776,7 @@ export async function handlePancakeWebhook(payload, { processChatbotChanges, cha
     }
     const enrich = Promise.all([...byPage].map(([pageId, list]) => enrichPancakeAdContext(list, getPancakePageConfig(pageId, config), fetchImpl)
       .catch(error => console.warn(`Pancake: không tra được quảng cáo: ${error.message}`))));
-    await Promise.race([enrich, pause(1500)]);
+    await Promise.race([enrich, sleep(1500)]);
   }
   // Móc trước bot (server dùng để chào khách quét QR và bỏ tin đó khỏi bot):
   // nhận MỌI thay đổi, kể cả hội thoại đã có nhân viên nhận, trả về phần bot xử lý.

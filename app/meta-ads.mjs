@@ -7,10 +7,9 @@
 // Số liệu theo ngày × quảng cáo được giữ ở data/processed/ad-insights.json
 // (120 ngày gần nhất) để màn Chiến dịch mở ra không phải chờ Meta; vòng nền
 // đồng bộ lại mỗi 60 phút (Meta còn chỉnh số của vài ngày gần đây).
-import { createHmac } from 'node:crypto';
 import { metaAdsConfig, metaConfig } from './config.mjs';
 import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
-import { shortenMetaError } from './meta-graph.mjs';
+import { GRAPH_TIMEOUT_MS, appSecretProof, graphEndpoint, shortenMetaError } from './meta-graph.mjs';
 
 export const MESSAGING_ACTION = 'onsite_conversion.messaging_conversation_started_7d';
 export const AD_INSIGHTS_KEEP_DAYS = 120;
@@ -101,8 +100,7 @@ export function adsGraphError(payload, status, accountId = '') {
 }
 
 // Graph treo thì lượt đồng bộ treo theo (cờ `running` giữ mãi, vòng nền chết lặng): mỗi lần gọi
-// (kể cả đọc thân phản hồi) tối đa 30 giây.
-export const GRAPH_TIMEOUT_MS = 30_000;
+// (kể cả đọc thân phản hồi) tối đa GRAPH_TIMEOUT_MS (30 giây, hằng chung của meta-graph.mjs).
 
 async function fetchJson(url, fetchImpl, accountId) {
   let response;
@@ -120,11 +118,11 @@ async function fetchJson(url, fetchImpl, accountId) {
 }
 
 function graphUrl(pathname, query, config, withProof) {
-  const url = new URL(`https://graph.facebook.com/${config.graphVersion || 'v26.0'}/${String(pathname).replace(/^\//, '')}`);
+  const url = graphEndpoint(pathname, config.graphVersion || 'v26.0');
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, String(value));
   url.searchParams.set('access_token', config.accessToken);
   const secret = config.appSecret ?? metaConfig.appSecret;
-  if (withProof && secret) url.searchParams.set('appsecret_proof', createHmac('sha256', secret).update(config.accessToken).digest('hex'));
+  if (withProof && secret) url.searchParams.set('appsecret_proof', appSecretProof(config.accessToken, secret));
   return url;
 }
 
@@ -148,6 +146,8 @@ export async function graphList(pathname, query, { config = metaAdsConfig, fetch
     items.push(...(Array.isArray(body.data) ? body.data : []));
     next = body.paging?.next;
   }
+  // INT-28: dừng ở trần trang mà Meta còn trang sau → danh sách THIẾU; người gọi không được coi là đủ.
+  if (next) items.truncated = true;
   return items;
 }
 
@@ -215,12 +215,19 @@ export async function fetchAccountInsights(accountId, { since, until, config = m
       adName: String(row.ad_name || '').trim()
     };
   }
-  return { campaigns: campaigns.map(item => parseCampaign(item, accountId)).filter(item => item.id), ads, daily };
+  return {
+    campaigns: campaigns.map(item => parseCampaign(item, accountId)).filter(item => item.id), ads, daily,
+    ...(rows.truncated ? { dailyTruncated: true } : {}),
+    ...(campaigns.truncated ? { campaignsTruncated: true } : {})
+  };
 }
 
 /** Gộp kết quả đồng bộ vào kho: thay trọn khoảng ngày vừa kéo của các tài khoản đó, bỏ trùng ngày+quảng cáo, giữ 120 ngày. */
 export function mergeAdInsights(store, results, { since, until, now = Date.now(), accounts = [] } = {}) {
-  const synced = new Set(results.map(result => result.accountId));
+  // INT-28: tài khoản có số liệu bị cắt ở trần trang thì KHÔNG xoá dòng cũ trong khoảng (chỉ ghi đè dòng trùng ngày+quảng
+  // cáo) — xoá rồi chèn phần thiếu là mất chi tiêu, ROAS đẹp hơn thật.
+  const synced = new Set(results.filter(result => !result.dailyTruncated).map(result => result.accountId));
+  const truncated = results.filter(result => result.dailyTruncated || result.campaignsTruncated).map(result => result.accountId);
   const keptSince = vietnamDay(now - (AD_INSIGHTS_KEEP_DAYS - 1) * DAY_MS);
   const rows = new Map();
   for (const row of store.daily) {
@@ -235,7 +242,8 @@ export function mergeAdInsights(store, results, { since, until, now = Date.now()
     // thừa "đang chạy". Nay đánh dấu ARCHIVED; lần sau Meta trả lại thì trạng thái thật ghi đè.
     // Danh sách trả về RỖNG thì không kết luận gì (có thể Graph trục trặc): không đổi trạng thái chiến dịch nào.
     const returned = new Set(result.campaigns.map(campaign => String(campaign.id)));
-    for (const campaign of returned.size ? Object.values(store.campaigns || {}) : []) {
+    // Danh sách chiến dịch bị cắt ở trần trang: thiếu ≠ đã lưu trữ.
+    for (const campaign of returned.size && !result.campaignsTruncated ? Object.values(store.campaigns || {}) : []) {
       if (!campaign || String(campaign.accountId || '') !== String(result.accountId || '') || returned.has(String(campaign.id))) continue;
       if (!['ARCHIVED', 'DELETED'].includes(String(campaign.status || '').toUpperCase())) {
         campaign.status = 'ARCHIVED';
@@ -249,7 +257,8 @@ export function mergeAdInsights(store, results, { since, until, now = Date.now()
   store.daily = [...rows.values()].sort((first, second) => first.date.localeCompare(second.date) || first.adId.localeCompare(second.adId));
   store.accounts = accounts;
   store.syncedAt = now;
-  delete store.lastError;
+  if (truncated.length) store.lastError = { message: `Meta trả quá ${MAXIMUM_PAGES} trang số liệu cho tài khoản ${truncated.join(', ')}: lượt này chỉ ghi thêm, không xoá số cũ; số liệu có thể thiếu.`, at: now };
+  else delete store.lastError;
   return store;
 }
 

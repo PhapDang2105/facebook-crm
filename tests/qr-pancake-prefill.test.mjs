@@ -12,7 +12,10 @@ process.env.PANCAKE_PAGE_NAME = 'Giọt Nắng';
 process.env.PANCAKE_PAGE_ACCESS_TOKEN = 't';
 process.env.PANCAKE_WEBHOOK_TOKEN = 'w';
 
-const { pancakeRef, qrCodeFromRef, qrCodeFromText, prefillMessageFor, messengerDestination, samplePrefillText } = await import('../app/qr-bridge.mjs');
+const { qrCodeFromRef, qrCodeFromText, prefillMessageFor, messengerDestination } = await import('../app/qr-bridge.mjs');
+// Ref kiểu Pancake (base64url của `pancake_utm_source=<mã>`) — dữ liệu thử; app chỉ cần GIẢI mã (qrCodeFromRef).
+const pancakeRef = code => Buffer.from(`pancake_utm_source=${code}`).toString('base64url');
+const samplePrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận hướng dẫn và quà nhé 💛 #{code}';
 const { normalizePancakeWebhook, handlePancakeWebhook } = await import('../app/pancake.mjs');
 const { writeQrSettings, readQrSettings } = await import('../app/qr-settings.mjs');
 const { registerQrCode, isKnownQrCode } = await import('../app/qr-scans.mjs');

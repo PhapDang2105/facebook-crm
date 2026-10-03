@@ -71,15 +71,6 @@ export function isLinkPreviewBot(userAgent = '') {
 const codePattern = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 /**
- * Tham số `ref` theo đúng cách Pancake tạo "đường dẫn với nguồn truy cập"
- * (Cài đặt → Công cụ): base64url của `pancake_utm_source=<mã>`. Nhờ vậy Pancake
- * tự ghi nguồn truy cập cho hội thoại, còn CRM nhận ra mã theo cả hai chiều.
- */
-export function pancakeRef(code) {
-  return Buffer.from(`pancake_utm_source=${code}`).toString('base64url');
-}
-
-/**
  * Mã lô từ tham số ref: dạng thô (`tmdt-01`) hoặc dạng Pancake mã hoá; không phải hai dạng đó thì rỗng.
  * Dễ dãi với cách viết: `TMDT-01` / `Tmdt-01` (link gõ tay, công cụ tự viết hoa) và `ref=tmdt-01` (dán cả
  * tên tham số) đều ra `tmdt-01` — trước đây rơi im lặng. Mã có thật hay không vẫn do kho QR quyết định.
@@ -117,17 +108,11 @@ export function qrCodeFromText(text, { outgoing = false } = {}) {
   return match ? match[1].toLowerCase() : '';
 }
 
-export const samplePrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận hướng dẫn và quà nhé 💛 #{code}';
-
 /**
- * Mẫu tin soạn sẵn dự phòng (khách bấm gửi, tin mang "#mã" về qua webhook Pancake). KHÔNG dùng mặc định:
- * chủ shop 02/10 không muốn khách phải gửi tin soạn sẵn — Page chủ động chào trước. Từ khi công cụ Ref URL
- * của Botcake thôi giữ mã thẻ, Meta gửi referral của m.me?ref cho app CRM và CRM chào ngay khi khách mở
- * khung chat. Chỉ khi Cài đặt có đặt tin soạn sẵn thì link mới mang `text=`.
+ * Mẫu tin soạn sẵn đang dùng: mẫu nhân viên đặt; trống thì KHÔNG có tin soạn sẵn (link chỉ mang ref). Không có mẫu
+ * mặc định: chủ shop 02/10 không muốn khách phải gửi tin soạn sẵn — Page chủ động chào trước (referral m.me?ref).
+ * Tin soạn sẵn chỉ là đường dự phòng khi Cài đặt → Mã QR có đặt mẫu.
  */
-export const defaultPrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận ưu đãi nhé #{code}';
-
-/** Mẫu tin soạn sẵn đang dùng: mẫu nhân viên đặt; trống thì KHÔNG có tin soạn sẵn (link chỉ mang ref). */
 export function prefillTemplateOrDefault(template) {
   return String(template || '').trim();
 }
@@ -154,16 +139,7 @@ export function messengerDestination({ pageId, code, pageName = '', prefillText 
   return `https://m.me/${encodeURIComponent(pageId)}?ref=${encodeURIComponent(code)}${text ? `&text=${encodeURIComponent(text)}` : ''}`;
 }
 
-/**
- * Trước R13 fix2: Chrome hệ thống trên Android được 302 thẳng sang m.me (mở được app sau chuyển hướng). Nay KHÔNG máy nào
- * được chuyển hướng thẳng (A2): lượt 302 không phân biệt được người bấm với HEAD/crawler, nên mọi máy qua trang đệm — Chrome
- * Android mở App Link m.me khi khách tự bấm nút, và beacon mới là bằng chứng "người bấm". Giữ hàm để nơi gọi/test cũ không đổi API.
- */
-export function shouldRedirectDirectly(classification) {
-  void classification;
-  return false;
-}
-
+// R13 fix2 (A2): không máy nào được 302 thẳng sang m.me — mọi máy qua trang đệm (hàm shouldRedirectDirectly luôn false đã bỏ, INT-24).
 const inAppHints = {
   zalo: 'Anh/Chị đang mở trong Zalo. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở bằng trình duyệt</b>, rồi bấm lại nút.',
   facebook: 'Anh/Chị đang mở trong ứng dụng Facebook. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở trong trình duyệt</b>, rồi bấm lại nút.',

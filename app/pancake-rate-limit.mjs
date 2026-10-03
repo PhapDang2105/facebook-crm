@@ -72,9 +72,3 @@ export function backoffPancake(key, milliseconds) {
   const state = stateOf(key);
   state.blockedUntil = Math.max(state.blockedUntil, Date.now() + Math.max(0, Number(milliseconds) || 0));
 }
-
-/** Tình trạng hàng đợi (chẩn đoán / test). */
-export function pancakeRateLimitState(key) {
-  const state = stateOf(key);
-  return { active: state.active, waiting: state.queue.length, blockedUntil: state.blockedUntil };
-}

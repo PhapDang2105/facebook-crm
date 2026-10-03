@@ -42,9 +42,14 @@
       rows.append(el('p', 'channel-empty staff-empty', 'Chưa có nhân sự nào.'));
       return;
     }
-    // R13: hàng tiêu đề cột đã có sẵn trong index.html (.staff-table-head) — trước đây dựng thêm một hàng ở đây nên
-    // tiêu đề hiện HAI lần. Màn hẹp (≤ 1100px) ẩn hàng tiêu đề, mỗi ô tự mang nhãn cột qua data-label (staff.css).
-    const [, loginLabel, roleLabel, phoneLabel, pancakeLabel, passwordLabel, statusLabel] = ['Họ tên', 'Tên đăng nhập', 'Vai trò', 'Số điện thoại', 'Tên trên Pancake/POS', 'Mật khẩu', 'Trạng thái'];
+    // 03/10: MỘT hàng tiêu đề cột, vẽ ở đây (index.html không có hàng tĩnh — tests/r14-staff-header). Từng có hai hàng
+    // (tĩnh + vẽ), rồi không hàng nào khi hai lần sửa bỏ ở hai nơi. Màn hẹp (≤ 1100px) ẩn hàng này, mỗi ô tự mang nhãn
+    // cột qua data-label (staff.css).
+    const columns = ['Họ tên', 'Tên đăng nhập', 'Vai trò', 'Số điện thoại', 'Tên trên Pancake/POS', 'Mật khẩu', 'Trạng thái'];
+    const [, loginLabel, roleLabel, phoneLabel, pancakeLabel, passwordLabel, statusLabel] = columns;
+    const head = el('div', 'staff-row staff-table-head');
+    head.append(...columns.map(label => el('span', '', label)), el('span', ''));
+    rows.append(head);
     const cell = (label, className, text) => { const node = el('span', className, text); node.dataset.label = label; return node; };
     for (const member of state.items) {
       const row = el('div', `staff-row${member.active ? '' : ' is-inactive'}`);

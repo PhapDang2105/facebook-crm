@@ -8,11 +8,12 @@ import { readFile } from 'node:fs/promises';
 const read = async name => (await readFile(new URL(`../web/${name}`, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const [html, app, staff, staffCss, quick, quickCss, styles] = await Promise.all(['index.html', 'app.js', 'staff.js', 'staff.css', 'quick-search.js', 'quick-search.css', 'styles.css'].map(read));
 
-test('Nhân sự: chỉ MỘT hàng tiêu đề (index.html), staff.js không dựng thêm; màn ≤ 1100px mỗi ô tự mang nhãn cột', () => {
-  assert.equal(html.split('staff-table-head').length - 1, 1);
-  assert.doesNotMatch(staff, /el\('div', 'staff-row staff-table-head'\)/, 'staff.js không còn dựng hàng tiêu đề thứ hai');
-  // Nhãn cột lấy từ MỘT danh sách (cùng chữ với hàng tiêu đề trong index.html) và gắn cho từng ô qua data-label.
-  assert.ok(staff.includes("= ['Họ tên', 'Tên đăng nhập', 'Vai trò', 'Số điện thoại', 'Tên trên Pancake/POS', 'Mật khẩu', 'Trạng thái'];"));
+test('Nhân sự: đúng MỘT hàng tiêu đề (staff.js vẽ, index.html không có hàng tĩnh); màn ≤ 1100px mỗi ô tự mang nhãn cột', () => {
+  // 03/10: hai lần sửa "tiêu đề lặp" bỏ ở hai nơi khác nhau → không còn hàng nào; nay thống nhất staff.js vẽ một hàng.
+  assert.equal(html.split('staff-table-head').length - 1, 0);
+  assert.equal(staff.split("el('div', 'staff-row staff-table-head')").length - 1, 1, 'staff.js vẽ đúng một hàng tiêu đề');
+  // Nhãn cột lấy từ MỘT danh sách (cùng chữ với hàng tiêu đề) và gắn cho từng ô qua data-label.
+  assert.ok(staff.includes("const columns = ['Họ tên', 'Tên đăng nhập', 'Vai trò', 'Số điện thoại', 'Tên trên Pancake/POS', 'Mật khẩu', 'Trạng thái'];"));
   for (const name of ['loginLabel', 'roleLabel', 'phoneLabel', 'pancakeLabel', 'passwordLabel', 'statusLabel']) {
     assert.ok(staff.includes(`cell(${name},`), `ô ${name} phải mang data-label`);
   }

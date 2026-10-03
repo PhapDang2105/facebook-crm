@@ -9,5 +9,6 @@ test('bảng Nhân sự: index.html không có hàng tiêu đề tĩnh (staff.js
   const table = html.slice(html.indexOf('class="staff-table"'), html.indexOf('id="staff-rows"'));
   assert.doesNotMatch(table, /staff-table-head/);
   const script = readFileSync(new URL('../web/staff.js', import.meta.url), 'utf8');
-  assert.match(script, /staff-table-head/, 'staff.js vẫn vẽ một hàng tiêu đề');
+  // 03/10: khớp câu lệnh vẽ thật — trước đây /staff-table-head/ khớp cả dòng chú thích nên test xanh khi không còn hàng nào.
+  assert.match(script, /el\('div', 'staff-row staff-table-head'\)/, 'staff.js vẫn vẽ một hàng tiêu đề');
 });

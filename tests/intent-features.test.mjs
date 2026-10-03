@@ -101,7 +101,7 @@ test('orderContextOf / intentRowOf: MỘT định nghĩa row (đơn chưa hủy 
   // Engine: có pendingOrder + orders thật.
   const engineRow = intentRowOf({ text: '0912 345 678 12 Nguyễn Trãi phường 5 quận 3', lastTemplateId: 'ORDER_ADDRESS', pendingOrder: { key: 'k', at: now - 10 * minute, items: [{ product: 'Granola Túi Xanh 450g', quantity: 2 }] }, orders: [{ createdAt: now - 3 * 24 * 60 * minute }], now, source: 'inbox', phoneInText: '0912345678' });
   assert.deepEqual(engineRow, { text: '0912 345 678 12 Nguyễn Trãi phường 5 quận 3', source: 'inbox', lastTemplate: 'ORDER_ADDRESS', lastWasOrderStep: true, hasBasket: true, livestream: false, hasOrder: false, orderAgeMin: 4320, prevBotAsks: 'phone_address', phoneInText: true, addressInText: true, bagCount: 0 });
-  assert.equal(intentRowOf({ text: 'ok', lastTemplateId: 'ORDER_ADDRESS', pendingOrder: { key: 'k', at: now - 3 * 60 * minute, items: [{ product: 'X', quantity: 1 }] }, now }).hasBasket, false, 'giỏ quá 2 giờ hết hạn');
+  assert.equal(intentRowOf({ text: 'ok', lastTemplateId: 'ORDER_ADDRESS', pendingOrder: { key: 'k', at: now - 25 * 60 * minute, items: [{ product: 'X', quantity: 1 }] }, now }).hasBasket, false, 'giỏ quá 24 giờ hết hạn (03/10: hạn 2 → 24 giờ)');
   // Ngoại tuyến: mã con, hasBasket/hasOrder đưa vào; hasOrder chỉ khi < 24 giờ.
   const offline = intentRowOf({ text: '<sdt>', lastTemplateId: 'ORDER_CART_LINE', prevBotText: 'Dạ đơn của chị gồm 2 túi xanh, chị cho em xin số điện thoại và địa chỉ', hasBasket: true, hasOrder: true, orderAgeMin: 2000, now });
   assert.deepEqual([offline.lastTemplate, offline.lastWasOrderStep, offline.hasBasket, offline.hasOrder, offline.prevBotAsks, offline.phoneInText], ['ORDER_ADDRESS', true, true, false, 'phone_address', true]);

@@ -3,7 +3,10 @@
 // for two hours; here it is stored on the conversation record so it survives a
 // restart and stays scoped to one customer.
 
-export const pendingOrderTtlMs = 2 * 60 * 60 * 1000;
+// 03/10 (ca Trang Nhi Vân): 2 giờ → 24 giờ. Khách bấm giỏ Shop 2 Túi Xanh, bot xin SĐT/địa chỉ; 2 giờ 55 phút sau khách gửi
+// đủ → giỏ đã hết hạn nên bot hỏi lại vị. Giỏ vẫn chỉ dùng khi tin cuối của bot là bước đơn (usablePendingOrder/isBasketStep),
+// và 24 giờ là khung Messenger cho phép nhắn khách.
+export const pendingOrderTtlMs = 24 * 60 * 60 * 1000;
 // Vòng 12: giỏ đã có tin nhắc giữ đơn (bám đuổi ORDER_ADDRESS_REMIND, tới 24 giờ) còn dùng được tới
 // 24 giờ sau lần nhắc — khách trả lời tin nhắc bằng SĐT/địa chỉ không bị hỏi lại vị.
 export const remindedPendingOrderTtlMs = 24 * 60 * 60 * 1000;
@@ -86,7 +89,7 @@ export function normalizePendingOrder(value) {
   };
 }
 
-/** Giỏ còn hạn tới lúc nào: 2 giờ từ khi lập, hoặc 24 giờ từ tin nhắc giữ đơn gần nhất. */
+/** Giỏ còn hạn tới lúc nào: 24 giờ từ khi lập, hoặc 24 giờ từ tin nhắc giữ đơn gần nhất. */
 export function pendingOrderExpiresAt(pending) {
   const at = Number(pending?.at) || 0;
   const remindedAt = Number(pending?.remindedAt) || 0;

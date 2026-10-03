@@ -22,6 +22,18 @@ test('bảng giá Túi Xanh vừa gửi → "1 goi" lên giỏ 1 Túi Xanh; gử
   assert.deepEqual(closed.created[0].items.map(item => [item.code, item.quantity]), [['GRA-XANH-Z450', 1]]);
 });
 
+test('ca Trang Nhi Vân: giỏ Shop 2 Túi Xanh giữ 2 giờ 55 phút, bot vẫn đang xin SĐT/địa chỉ → khách gửi đủ thì chốt 2 Túi Xanh', async () => {
+  const sim = new Sim({ psid: 'van' });
+  const held = { items: [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 2 }], key: 'GRA-XANH-Z450=2', at: Date.now() - 175 * MIN, phone: '', address: '', addressAsks: 0 };
+  const inbox = sim.inbox({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 175 * MIN, pendingOrder: held });
+  sim.history(inbox, 'outgoing', 'Dạ đơn của chị gồm 2 Granola Túi Xanh 450g, tổng 298.000đ (Miễn phí vận chuyển) ạ 🌾\nĐể lên đơn đúng tuyến cho đơn vị vận chuyển, chị cho em xin số điện thoại và địa chỉ nha ạ.', 175 * MIN, { sender: 'bot' });
+  const address = 'Đội 6 thôn Trung Hoà, xã Dân Hoà, Thanh Oai, Hà Nội, ngõ 5 nhà số 3';
+  const closed = await sim.send(inbox, `${address} Sđt ${PHONE}`, { llm: { template_id: 'ORDER_CONFIRMATION', Phone_Number: PHONE, Customer_Address: address } });
+  assert.equal(closed.created.length, 1, JSON.stringify(closed.result));
+  assert.deepEqual(closed.created[0].items.map(item => [item.code, item.quantity]), [['GRA-XANH-Z450', 2]]);
+  assert.doesNotMatch(closed.sent.map(item => item.text).join(' '), /mỗi loại mấy túi/);
+});
+
 test('"1 túi" KHÔNG sau bảng giá một sản phẩm → vẫn hỏi vị như cũ; "1 gói nhỏ" không bị nhận là 1 túi lớn', async () => {
   const sim = new Sim();
   const inbox = sim.inbox({ botLastTemplateId: 'WELCOME', botLastReplyAt: Date.now() - 2 * MIN });

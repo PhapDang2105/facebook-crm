@@ -195,6 +195,9 @@ export function boughtOnMarketplace(record, now = Date.now()) {
   if (!record) return false;
   if (String(record.botLastTemplateId || '') === 'BOUGHT_ON_MARKETPLACE') return true;
   const at = Number(record.boughtElsewhereAt) || 0;
+  // R15-fix3 (phản biện L5): khách lập GIỎ MỚI sau mốc (vừa nói đã mua trên sàn rồi đặt luôn ở đây, bot trả lời < 60 giây) → hết chặn.
+  const basket = record.pendingOrder && typeof record.pendingOrder === 'object' ? record.pendingOrder : null;
+  if (at > 0 && Array.isArray(basket?.items) && basket.items.length && (Number(basket.at) || 0) > at) return false;
   // Bot đã trả lời chuyện khác sau đó (khách quay lại hỏi mua) → mốc cũ không chặn nữa.
   return at > 0 && now - at < boughtElsewhereMs && (Number(record.botLastReplyAt) || 0) <= at + 60 * 1000;
 }

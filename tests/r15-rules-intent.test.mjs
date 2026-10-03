@@ -163,8 +163,12 @@ test('#11 NO_VARIANT: "có trái cây sấy không ăn đc" (…350724), kiêng 
   const result = ruleIntent('vậy chị cảm ơn có trái cây sấy không ăn đc', inbox({ botLastTemplateId: 'NO_ADDED_SUGAR', botLastAgeMin: 2 }));
   assert.equal(result?.rule, 'NO_VARIANT', JSON.stringify(result));
   assert.equal(result.value.values.ingredient, 'trái cây sấy');
-  assert.equal(ruleIntent('mình kiêng đậu phộng', inbox())?.value?.values?.ingredient, 'đậu phộng');
-  assert.equal(ruleIntent('con dị ứng hạt điều', inbox())?.value?.values?.ingredient, 'hạt điều');
+  assert.equal(ruleIntent('mình kiêng hạt điều', inbox())?.value?.values?.ingredient, 'hạt điều');
+  // r15-fix2 (phản biện luật #3) — sửa test cũ vì nó khẳng định hành vi lỗi: mẫu NO_VARIANT nói "cả 3 túi đều có {ingredient}"
+  // nên "kiêng đậu phộng" (granola không có đậu phộng) không được ra NO_VARIANT; câu "dị ứng …" giữ INGREDIENTS_ALLERGY như
+  // bản cũ (gửi bảng thành phần) — xem tests/r15-fix2-rules.test.mjs.
+  assert.notEqual(ruleIntent('mình kiêng đậu phộng', inbox())?.rule, 'NO_VARIANT');
+  assert.equal(tpl(ruleIntent('con dị ứng hạt điều', inbox())), 'INGREDIENTS_ALLERGY');
   assert.notEqual(ruleIntent('ăn không được, dở quá', inbox())?.rule, 'NO_VARIANT');
 });
 

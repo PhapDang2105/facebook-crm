@@ -995,6 +995,9 @@ function wardBeforeProvince(text, result, locationIndex) {
     const lead = words.length > size ? words[words.length - size - 1].word : '';
     const lead2 = words.length > size + 1 ? `${words[words.length - size - 2].word} ${lead}` : '';
     if (NOT_WARD_LEAD.has(lead) || NOT_WARD_LEAD.has(lead2)) continue;
+    // R15 sửa (phản biện luật #6): chữ ngay trước là SỐ NHÀ thuần ("20 Hoàng Liên Lào Cai", "102 Hùng Vương Phú Thọ") → tên đứng
+    // sau là tên ĐƯỜNG trùng tên phường/xã, không đoán ("142f3 Bắc Cường Lào Cai" — số nhà có chữ — vẫn đoán như cũ).
+    if (/^\d+$/.test(lead)) continue;
     const wards = [];
     for (const district of province.districts.values()) for (const ward of district.wards.values()) if (ward.bare === key) wards.push(ward);
     const districtSameName = [...province.districts.values()].some(district => district.bare === key);

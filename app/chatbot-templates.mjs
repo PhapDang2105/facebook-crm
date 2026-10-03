@@ -544,6 +544,11 @@ function ambiguousNguyenBan(text) {
   const s = normalizeIntentText(colourText(text));
   if (!/\bnguyen ban(?:g)?\b/.test(s)) return 0;
   if (/\b(?:xanh|vang)(?: la| (?:tui|goi|loai|vi))? nguyen ban|\bnguyen ban(?:g)? (?:xanh|vang|450|350)\b|\bnguyen ban(?:g)? (?:la )?(?:gi|sao|the nao|ntn|nhu nao)\b|\?/.test(s)) return 0;
+  // R15 sửa (phản biện luật #4): "nguyên bản" là lời tả của chính món Xanh/Vàng đứng trước, cách ≤ 3 chữ không xen chữ nối / số
+  // túi mới ("Lấy 1 túi vàng 350g nguyên bản nha", "1 túi vàng nhiều hạt nguyên bản"; "1 túi vàng và 1 túi nguyên bản" vẫn là
+  // hai món), hay có phủ định ngay trước ("1 túi vàng thôi, không lấy nguyên bản") → không mơ hồ, không hỏi lại / thêm Xanh.
+  if (/\b(?:xanh|vang)(?: (?!(?:va|voi|vs|them|cung|con|\d{1,2}|mot|hai|ba)\b)[a-z0-9]+){0,3} nguyen ban/.test(s)) return 0;
+  if (/\b(?:khong|ko|k|kg|hong|dung|bo|chua)(?: (?:lay|can|mua|dat|chon|an))?(?: (?:tui|goi|bich|loai|vi|phan))? nguyen ban/.test(s)) return 0;
   const counted = s.match(/\b(\d{1,2}|mot|hai|ba)\s*(?:(?:tui|goi|bich|bit)\s+)?(?:(?:granola|vi|loai)\s+)?nguyen ban/);
   return counted ? numberOf(counted[1]) || 1 : 1;
 }
@@ -557,6 +562,10 @@ function ambiguousNguyenBan(text) {
 export function nguyenBanMeansXanh(text) {
   const qty = ambiguousNguyenBan(text);
   if (!qty) return 0;
+  // R15 sửa (phản biện luật #4): cụm Vàng / phủ định đã loại ở ambiguousNguyenBan; thêm: "nguyên bản" phải có số túi RIÊNG
+  // ("1 túi nguyên bản và 1 túi vàng nhiều hạt" có; "túi vàng, nguyên bản nhé" không) mới tự hiểu là Xanh.
+  const s = normalizeIntentText(colourText(text));
+  if (!/\b(\d{1,2}|mot|hai|ba)\s*(?:(?:tui|goi|bich|bit)\s+)?(?:(?:granola|vi|loai)\s+)?nguyen ban/.test(s)) return 0;
   const { counts, mentioned } = colourCountsInText(text);
   return counts.VANG > 0 && !mentioned.includes('XANH') ? qty : 0;
 }
@@ -671,6 +680,10 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
     && !/\b(combo|hop|goi nho|yen mach|mix|cam|mint|tropical)\b/.test(s)) {
     const base = reference[0];
     const held = reference.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+    // R15-fix3 (phản biện luật, engine-probe B1): "giảm đi 1 túi" / "bớt 1 túi" / "bỏ 1 túi" khi giữ 3 Xanh = BỚT 1 (còn 2), không
+    // phải đặt số lượng thành 1. "bớt còn 1 túi" / "lấy 1 túi thôi" vẫn là số lượng mới.
+    const removing = !adding && /\b(?:giam|bot|bo|tru)\b/.test(s) && !/\b(?:con|lay|chi|de lai)\b/.test(s);
+    if (removing && held - bags >= 1) return [{ product: base.product, code: base.code, quantity: held - bags }];
     return [{ product: base.product, code: base.code, quantity: adding ? held + bags : bags }];
   }
   if (!countGiven) {
@@ -1379,6 +1392,9 @@ function withR15Fallbacks(templates) {
 export function phoneLooksShort(text) {
   const raw = String(text ?? '');
   if (extractVietnamesePhone(raw)) return '';
+  // R15 sửa (phản biện luật, THẤP): số tài khoản / mã vận đơn 9 số không phải SĐT thiếu số.
+  const folded = raw.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
+  if (/\b(?:stk|so tai khoan|tai khoan|tk|ma (?:van )?don|mvd|ck|chuyen khoan)\b/.test(folded)) return '';
   // Dãy số có thể chia bằng dấu chấm/gạch/một khoảng trắng ("091 234 567"); không dính chữ số / chữ cái hai đầu.
   for (const match of raw.matchAll(/(?<![\p{L}\p{N}+])(\+?)(\d(?:[.\- ]?\d)+)(?![\p{L}\p{N}])/gu)) {
     const digits = match[2].replace(/\D/g, '');

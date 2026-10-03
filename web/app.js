@@ -2212,9 +2212,14 @@ function writeStoredValue(key, value) {
 // ---------------------------------------------------------------------------
 // Tổng quan: một lượt /api/dashboard cho cả màn — thẻ số so kỳ trước, doanh thu
 // và chi phí theo ngày, nguồn đơn, sản phẩm và chiến dịch dẫn đầu, việc cần làm.
-// Tự làm mới mỗi phút khi màn đang mở.
+// Tự làm mới mỗi phút khi màn đang mở. Ngoài Hôm nay/7/30 ngày còn "Tùy chọn":
+// từ ngày – đến ngày (tính cả ngày cuối, tối đa 366 ngày), so với kỳ liền trước cùng độ dài.
 const dashboardView = document.querySelector('#dashboard-view');
 const dashboardRange = document.querySelector('#dashboard-range');
+const dashboardDates = document.querySelector('#dashboard-dates');
+const dashboardFrom = document.querySelector('#dashboard-from');
+const dashboardTo = document.querySelector('#dashboard-to');
+const dashboardCompare = document.querySelector('#dashboard-compare');
 const dashboardNotice = document.querySelector('#dashboard-notice');
 const dashboardKpis = document.querySelector('#dashboard-kpis');
 const dashboardTrendPanel = document.querySelector('#dashboard-trend-panel');
@@ -2226,10 +2231,15 @@ const dashboardTopProducts = document.querySelector('#dashboard-top-products');
 const dashboardTopCampaigns = document.querySelector('#dashboard-top-campaigns');
 const dashboardActiveCampaigns = document.querySelector('#dashboard-active-campaigns');
 const dashboardDaysKey = 'crm-dashboard-days';
+const dashboardDatesKey = 'crm-dashboard-dates';
 const dashboardRefreshMs = 60000;
+const dashboardMaxCustomDays = 366;
 
 const dashboardStoredDays = readStoredValue(dashboardDaysKey, '7');
-let dashboardDaysChoice = ['1', '7', '30'].includes(dashboardStoredDays) ? dashboardStoredDays : '7';
+let dashboardDaysChoice = ['1', '7', '30', 'custom'].includes(dashboardStoredDays) ? dashboardStoredDays : '7';
+// Khoảng tự chọn nhớ dạng "YYYY-MM-DD|YYYY-MM-DD"; trống thì mặc định 7 ngày gần nhất.
+const [dashboardStoredFrom = '', dashboardStoredTo = ''] = String(readStoredValue(dashboardDatesKey, '')).split('|');
+let dashboardCustom = { from: dashboardStoredFrom, to: dashboardStoredTo };
 let dashboardRequestId = 0;
 let dashboardData = null;
 
@@ -2255,6 +2265,33 @@ function dashboardDays() {
   return Number(dashboardDaysChoice) || 7;
 }
 
+/** Khoảng tự chọn đã chuẩn hóa (YYYY-MM-DD theo giờ máy): đảo ngược thì đổi chỗ, không quá hôm nay, tối đa 366 ngày. */
+function dashboardCustomRange() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let from = dateFromInput(dashboardCustom.from) || new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6);
+  let to = dateFromInput(dashboardCustom.to) || today;
+  if (from > to) [from, to] = [to, from];
+  if (to > today) to = today;
+  if (from > to) from = to;
+  const earliest = new Date(to.getFullYear(), to.getMonth(), to.getDate() - (dashboardMaxCustomDays - 1));
+  if (from < earliest) from = earliest;
+  return { from: dateKeyOf(from), to: dateKeyOf(to), today: dateKeyOf(today) };
+}
+
+/** Tham số gửi /api/dashboard: days=1|7|30, hoặc from/to khi chọn "Tùy chọn". */
+function dashboardQuery() {
+  if (dashboardDaysChoice !== 'custom') return `days=${dashboardDays()}`;
+  const range = dashboardCustomRange();
+  return new URLSearchParams({ from: range.from, to: range.to }).toString();
+}
+
+/** Dd/mm/yyyy từ YYYY-MM-DD (khoảng tự chọn có thể qua năm). */
+function dashboardDateLabel(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ''));
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value || '');
+}
+
 /** Hàng chờ bám đuổi nằm ở Cài đặt → Thiết lập chatbot → thẻ Chung. */
 function openFollowUpQueue() {
   showSettingsSection('chatbot');
@@ -2273,6 +2310,23 @@ function renderDashboardRange() {
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
+  const custom = dashboardDaysChoice === 'custom';
+  dashboardDates?.classList.toggle('hidden', !custom);
+  if (custom) {
+    const range = dashboardCustomRange();
+    [dashboardFrom, dashboardTo].forEach(input => { if (input) input.max = range.today; });
+    if (dashboardFrom) dashboardFrom.value = range.from;
+    if (dashboardTo) dashboardTo.value = range.to;
+  }
+}
+
+/** Khoảng tự chọn: ghi rõ kỳ đem ra so (liền trước, cùng độ dài) vì không hiển nhiên như "7 ngày". */
+function renderDashboardCompare(data) {
+  if (!dashboardCompare) return;
+  const previous = data?.previous;
+  const show = Boolean(data?.range?.custom && previous?.since && previous?.until);
+  dashboardCompare.classList.toggle('hidden', !show);
+  dashboardCompare.textContent = show ? `So với ${dashboardDateLabel(previous.since)} – ${dashboardDateLabel(previous.until)}` : '';
 }
 
 function renderDashboardKpis(kpis = {}) {
@@ -2372,6 +2426,7 @@ function renderDashboardNotice(ads) {
 function renderDashboard(data) {
   dashboardData = data || {};
   renderDashboardRange();
+  renderDashboardCompare(dashboardData);
   renderDashboardNotice(dashboardData.ads);
   renderDashboardKpis(dashboardData.kpis || {});
   renderDashboardTrend(dashboardData.daily);
@@ -2387,7 +2442,7 @@ async function loadDashboard({ quiet = false } = {}) {
   const requestId = ++dashboardRequestId;
   if (!quiet && dashboardData) dashboardView?.classList.add('is-loading');
   try {
-    const data = await readApiResponse(await fetch(`/api/dashboard?days=${dashboardDays()}`));
+    const data = await readApiResponse(await fetch(`/api/dashboard?${dashboardQuery()}`));
     if (requestId !== dashboardRequestId) return;
     renderDashboard(data);
   } catch (error) {
@@ -2406,6 +2461,13 @@ dashboardRange?.addEventListener('click', event => {
   writeStoredValue(dashboardDaysKey, dashboardDaysChoice);
   loadDashboard();
 });
+[dashboardFrom, dashboardTo].forEach(input => input?.addEventListener('change', () => {
+  // Chỉ nạp khi cả hai ô đều là ngày (đang gõ dở thì chờ).
+  if (!dateFromInput(dashboardFrom?.value) || !dateFromInput(dashboardTo?.value)) return;
+  dashboardCustom = { from: dashboardFrom.value, to: dashboardTo.value };
+  writeStoredValue(dashboardDatesKey, `${dashboardCustom.from}|${dashboardCustom.to}`);
+  loadDashboard();
+}));
 dashboardTodo?.addEventListener('click', event => {
   const button = event.target.closest('[data-dashboard-todo]');
   dashboardTodoItems.find(item => item.key === button?.dataset.dashboardTodo)?.open();

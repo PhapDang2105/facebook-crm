@@ -34,7 +34,7 @@ test('showView mở Tổng quan thì nạp /api/dashboard theo khoảng đang ch
   const view = section(web, 'function showView(name)', 1200);
   assert.match(view, /if \(name === 'dashboard'\) loadDashboard\(\);/);
   const load = section(web, 'async function loadDashboard(', 1200);
-  assert.match(load, /fetch\(`\/api\/dashboard\?days=\$\{dashboardDays\(\)\}`\)/);
+  assert.match(load, /fetch\(`\/api\/dashboard\?\$\{dashboardQuery\(\)\}`\)/);
   assert.match(load, /requestId !== dashboardRequestId/, 'chặn kết quả cũ đè kết quả mới');
 });
 
@@ -44,6 +44,8 @@ test('#dashboard-view có chọn Hôm nay/7 ngày/30 ngày và đủ khung số 
   assert.match(markup, /data-dashboard-days="1">Hôm nay</);
   assert.match(markup, /data-dashboard-days="7">7 ngày</);
   assert.match(markup, /data-dashboard-days="30">30 ngày</);
+  assert.match(markup, /data-dashboard-days="custom">Tùy chọn</);
+  assert.match(markup, /id="dashboard-dates"[^>]*>[\s\S]*id="dashboard-from" type="date"[\s\S]*id="dashboard-to" type="date"/);
   for (const id of ['dashboard-kpis', 'dashboard-trend', 'dashboard-todo', 'dashboard-sources', 'dashboard-top-products', 'dashboard-top-campaigns']) {
     assert.match(markup, new RegExp(`id="${id}"`), id);
   }
@@ -71,6 +73,35 @@ test('khoảng ngày được nhớ trong localStorage có try/catch; tự làm 
   assert.match(fn('writeStoredValue'), /try \{[\s\S]*localStorage\.setItem[\s\S]*catch/);
   assert.match(web, /const dashboardRefreshMs = 60000;/);
   assert.match(web, /window\.setInterval\(\(\) => \{\s*if \(document\.hidden \|\| !dashboardView \|\| dashboardView\.classList\.contains\('hidden'\)\) return;\s*loadDashboard\(\{ quiet: true \}\);/);
+});
+
+test('Tùy chọn: gửi from/to (đổi chỗ, không quá hôm nay, tối đa 366 ngày), preset vẫn gửi days', () => {
+  const context = { URLSearchParams };
+  vm.createContext(context);
+  const keyStart = web.indexOf('const dateKeyOf = date => {');
+  vm.runInContext([
+    web.slice(keyStart, web.indexOf('\n};\n', keyStart) + 4),
+    fn('dateFromInput'),
+    'const dashboardMaxCustomDays = 366;',
+    "var dashboardDaysChoice = '7'; var dashboardCustom = { from: '', to: '' };",
+    fn('dashboardDays'), fn('dashboardCustomRange'), fn('dashboardQuery'), fn('dashboardDateLabel')
+  ].join('\n'), context);
+  assert.equal(vm.runInContext('dashboardQuery()', context), 'days=7');
+  vm.runInContext("dashboardDaysChoice = '30'", context);
+  assert.equal(vm.runInContext('dashboardQuery()', context), 'days=30');
+  vm.runInContext("dashboardDaysChoice = 'custom'; dashboardCustom = { from: '2026-03-10', to: '2026-03-01' }", context);
+  assert.equal(vm.runInContext('dashboardQuery()', context), 'from=2026-03-01&to=2026-03-10');
+  vm.runInContext("dashboardCustom = { from: '2020-01-01', to: '2021-12-31' }", context);
+  assert.equal(vm.runInContext('dashboardQuery()', context), 'from=2020-12-31&to=2021-12-31', 'cắt còn 366 ngày phía đầu (tính cả hai đầu)');
+  // Chưa chọn ngày: 7 ngày gần nhất tính cả hôm nay; ngày tương lai lùi về hôm nay.
+  const fresh = vm.runInContext("dashboardCustom = { from: '', to: '' }; dashboardCustomRange()", context);
+  assert.equal(fresh.to, fresh.today);
+  const future = vm.runInContext("dashboardCustom = { from: '2026-01-01', to: '2999-01-01' }; dashboardCustomRange()", context);
+  assert.equal(future.to, future.today);
+  assert.equal(vm.runInContext("dashboardDateLabel('2026-09-05')", context), '05/09/2026');
+  // Đổi ngày thì nhớ lại và nạp lại; ghi chú kỳ so sánh chỉ hiện với khoảng tự chọn.
+  assert.match(web, /\[dashboardFrom, dashboardTo\]\.forEach\(input => input\?\.addEventListener\('change'[\s\S]{0,400}writeStoredValue\(dashboardDatesKey[\s\S]{0,80}loadDashboard\(\)/);
+  assert.match(fn('renderDashboardCompare'), /data\?\.range\?\.custom/);
 });
 
 test('bấm dòng chiến dịch ở Tổng quan mở màn Quản lý chiến dịch', () => {

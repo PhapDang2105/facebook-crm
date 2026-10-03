@@ -20,7 +20,7 @@ import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply, warmUpChatbotModels } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
 import { loadCampaignReport, normalizeRangeDays } from './campaigns.mjs';
-import { loadDashboard, normalizeDashboardDays } from './dashboard.mjs';
+import { loadDashboard, normalizeDashboardCustomRange, normalizeDashboardDays } from './dashboard.mjs';
 import { loadReport, normalizeReportSection, reportCsvFileName, reportSectionCsv } from './reports.mjs';
 import { larkReportConfig, normalizeLarkConversationReport, sendLarkConversationReport, startLarkReportScheduler } from './lark-report.mjs';
 import { startAdInsightsSync, syncAdInsights } from './meta-ads.mjs';
@@ -2308,9 +2308,15 @@ const server = http.createServer(async (request, response) => {
       // Lỗi lần đồng bộ cuối (ads.error) hiện cho chủ shop bằng câu dễ hiểu; nguyên văn đã ghi log lúc đồng bộ.
       return sendJson(response, 200, report && typeof report === 'object' ? { ...report, ads: friendlyAdsStatus(report.ads) } : report);
     }
-    // Tổng quan: hôm nay / 7 / 30 ngày so với kỳ liền trước (dashboard.mjs).
+    // Tổng quan: hôm nay / 7 / 30 ngày, hoặc from/to tự chọn (YYYY-MM-DD giờ Việt Nam,
+    // tính cả ngày cuối, tối đa 366 ngày), so với kỳ liền trước cùng độ dài (dashboard.mjs).
     if (request.method === 'GET' && url.pathname === '/api/dashboard') {
-      return sendJson(response, 200, await loadDashboard({ days: normalizeDashboardDays(url.searchParams.get('days')) }));
+      const from = url.searchParams.get('from') || undefined;
+      const to = url.searchParams.get('to') || undefined;
+      if ((from || to) && !normalizeDashboardCustomRange(from, to)) {
+        return sendJson(response, 400, { error: 'Khoảng ngày không hợp lệ: cần cả "từ ngày" và "đến ngày" dạng YYYY-MM-DD.' });
+      }
+      return sendJson(response, 200, await loadDashboard({ days: normalizeDashboardDays(url.searchParams.get('days')), from, to }));
     }
     // Báo cáo: doanh số theo ngày/tuần/tháng, nguồn, sản phẩm, khách, nhân viên, chiến dịch (reports.mjs).
     if (request.method === 'GET' && (url.pathname === '/api/reports' || url.pathname === '/api/reports/export.csv')) {

@@ -78,7 +78,15 @@
           <button type="button" data-dashboard-days="1">Hôm nay</button>
           <button type="button" data-dashboard-days="7">7 ngày</button>
           <button type="button" data-dashboard-days="30">30 ngày</button>
+          <button type="button" data-dashboard-days="custom">Tùy chọn</button>
         </div>
+        <!-- Khoảng tự chọn: từ ngày – đến ngày (tính cả ngày cuối), chỉ hiện khi chọn "Tùy chọn". -->
+        <span class="dash-dates hidden" id="dashboard-dates">
+          <input class="reports-date" id="dashboard-from" type="date" aria-label="Từ ngày">
+          <span aria-hidden="true">–</span>
+          <input class="reports-date" id="dashboard-to" type="date" aria-label="Đến ngày">
+        </span>
+        <span class="dash-compare hidden" id="dashboard-compare"></span>
       </div>
       <div class="campaigns-notice dash-notice hidden" id="dashboard-notice" role="status"></div>
       <div class="dash-kpis" id="dashboard-kpis"></div>

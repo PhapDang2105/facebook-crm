@@ -2822,6 +2822,8 @@ tr:hover .customer-tel button { opacity: .75; }
 .dash-range button:hover { color: var(--text-1); }
 .dash-range button.active { color: #fff; background: var(--brand); font-weight: 600; }
 .dash-range button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.dash-dates { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
+.dash-compare { color: var(--text-2); font-size: 14px; }
 .dash-notice { margin: 0 0 14px; }
 .dash-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 @media (min-width: 1500px) { .dash-kpis { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
@@ -2912,7 +2914,9 @@ tr:hover .customer-tel button { opacity: .75; }
 
 @media (max-width: 720px) {
   .dash-range { display: flex; width: 100%; }
-  .dash-range button { flex: 1; padding: 0 8px; }
+  .dash-range button { flex: 1; padding: 0 4px; font-size: 15px; white-space: nowrap; }
+  .dash-dates { display: flex; width: 100%; }
+  .dash-dates .reports-date { flex: 1; min-width: 0; padding: 0 6px; }
   .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .stat-card { padding: 12px 14px; }
   .stat-card strong { font-size: 22px; }

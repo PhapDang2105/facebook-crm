@@ -1,5 +1,5 @@
-// Tổng quan: các con số chính của hôm nay / 7 ngày / 30 ngày so với kỳ liền
-// trước cùng độ dài, doanh thu theo ngày, nguồn đơn, sản phẩm và chiến dịch
+// Tổng quan: các con số chính của hôm nay / 7 ngày / 30 ngày / khoảng ngày tự
+// chọn so với kỳ liền trước cùng độ dài, doanh thu theo ngày, nguồn đơn, sản phẩm và chiến dịch
 // dẫn đầu, và việc đang chờ nhân viên.
 //
 // Đọc mỗi kho một lần (hội thoại, đơn landing, số liệu quảng cáo, cài đặt thẻ,
@@ -11,16 +11,49 @@ import { listLandingOrders } from './landing-orders.mjs';
 import { readMessagingStore } from './messaging-store.mjs';
 import { adsConnectionStatus, readAdStore, vietnamDay } from './meta-ads.mjs';
 import { countNewCustomers, firstOrderDates, METRIC_DEFINITIONS, withAdsFreshness } from './metrics.mjs';
-import { collectOrderFacts, datesBetween, DAY_MS, isCancelledOrder, isValidFact, shiftDay, sourceLabel, vietnamDayStartMs } from './order-facts.mjs';
+import { collectOrderFacts, datesBetween, DAY_MS, daySpan, isCancelledOrder, isValidFact, normalizeDayRange, shiftDay, sourceLabel, vietnamDayStartMs } from './order-facts.mjs';
 import { processingNotes } from './order-notes.mjs';
 
 export const DASHBOARD_RANGES = [1, 7, 30];
+/** Khoảng tự chọn dài nhất (ngày): đủ một năm, kỳ so sánh cũng dài chừng ấy. */
+export const DASHBOARD_MAX_CUSTOM_DAYS = 366;
 /** Đơn còn mở cũ hơn chừng này ngày không còn tính là việc cần làm. */
 export const TODO_WINDOW_DAYS = 30;
 
 export function normalizeDashboardDays(value) {
   const days = Number(value);
   return DASHBOARD_RANGES.includes(days) ? days : 7;
+}
+
+/**
+ * Khoảng tự chọn `from`/`to` ("YYYY-MM-DD", giờ Việt Nam, tính cả ngày cuối).
+ * Không hợp lệ → null. Đảo ngược thì đổi chỗ; dài quá 366 ngày thì cắt phía
+ * đầu; ngày cuối sau hôm nay thì lùi về hôm nay (tương lai chưa có số).
+ */
+export function normalizeDashboardCustomRange(from, to, now = Date.now()) {
+  const explicit = normalizeDayRange(from, to, { maxDays: DASHBOARD_MAX_CUSTOM_DAYS });
+  if (!explicit) return null;
+  const today = vietnamDay(now);
+  const until = explicit.until > today ? today : explicit.until;
+  const since = explicit.since > until ? until : explicit.since;
+  return { since, until, days: daySpan(since, until), custom: true };
+}
+
+/**
+ * Khoảng của Tổng quan và kỳ liền trước cùng độ dài. Có from/to hợp lệ thì
+ * dùng khoảng tự chọn, không thì `days` (1/7/30) ngày gần nhất tính cả hôm nay.
+ */
+export function dashboardRange({ days = 7, from, to, now = Date.now() } = {}) {
+  const custom = from || to ? normalizeDashboardCustomRange(from, to, now) : null;
+  let range;
+  if (custom) range = custom;
+  else {
+    const span = normalizeDashboardDays(days);
+    const until = vietnamDay(now);
+    range = { since: shiftDay(until, -(span - 1)), until, days: span };
+  }
+  const previous = { since: shiftDay(range.since, -range.days), until: shiftDay(range.since, -1) };
+  return { range, previous };
 }
 
 const round = (value, digits = 0) => {
@@ -56,16 +89,15 @@ export function dashboardTodo({ conversations = [], landingOrders = [], labels =
 
 /**
  * Dựng Tổng quan. Thuần: mọi dữ liệu truyền vào. `days` = 1 (hôm nay), 7 hay
- * 30 ngày gần nhất tính cả hôm nay, giờ Việt Nam; kỳ trước cùng độ dài liền trước.
+ * 30 ngày gần nhất tính cả hôm nay, giờ Việt Nam; hoặc `from`/`to` tự chọn
+ * (xem dashboardRange). Kỳ trước cùng độ dài liền trước.
  */
 export function buildDashboard({
   conversations = [], messages = {}, landingOrders = [], adStore = {}, labels = [], followUpQueueLength = 0,
-  days = 7, now = Date.now(), ads = null
+  days = 7, from, to, now = Date.now(), ads = null
 } = {}) {
-  const span = normalizeDashboardDays(days);
-  const until = vietnamDay(now);
-  const since = shiftDay(until, -(span - 1));
-  const previous = { since: shiftDay(since, -span), until: shiftDay(since, -1) };
+  const { range, previous } = dashboardRange({ days, from, to, now });
+  const { since, until } = range;
   const dates = datesBetween(since, until);
   const period = date => (date >= since && date <= until ? 'current' : date >= previous.since && date <= previous.until ? 'prev' : '');
 
@@ -173,7 +205,7 @@ export function buildDashboard({
   const freshAds = withAdsFreshness({ connected: adsConnected, syncedAt: ads?.syncedAt ?? adStore.syncedAt ?? null, ...(ads?.error ? { error: ads.error } : {}) }, now);
 
   return {
-    range: { since, until, days: span },
+    range,
     previous,
     kpis: {
       revenue: kpi(item => round(item.revenue)),
@@ -202,7 +234,7 @@ export function buildDashboard({
 }
 
 /** Tổng quan trên dữ liệu thật. */
-export async function loadDashboard({ days = 7, now = Date.now() } = {}) {
+export async function loadDashboard({ days = 7, from, to, now = Date.now() } = {}) {
   const [store, landingOrders, adStore, settings, queue] = await Promise.all([
     readMessagingStore(),
     listLandingOrders(),
@@ -219,6 +251,8 @@ export async function loadDashboard({ days = 7, now = Date.now() } = {}) {
     labels: settings.labels || [],
     followUpQueueLength: queue.length,
     days,
+    from,
+    to,
     now,
     ads
   });

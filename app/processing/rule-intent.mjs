@@ -356,6 +356,13 @@ export function ruleIntent(text, ctx = {}) {
     : { rule, value: { template_id: templateId }, ...extra });
   // Đơn còn mở (≤ 7 ngày, chưa hủy) để nói về hủy / khoan giao.
   const orderOpen = Boolean(ctx.hasRecentOrder) && orderAgeMin <= 7 * 24 * 60;
+  // 03/10 (Mong Lý): "TN trước 1 túi xanh là 174.000₫ mà shop", "sao tin nhắn vừa rồi lại 189.000₫" — khách so giá túi
+  // (bảng live) với tổng đã gồm ship → giải thích 174k + ship 15k = 189k, không phải "giá túi lẻ có điều chỉnh".
+  const quoted = [...new Set([...sFull.matchAll(/\b(1[4-9]\d)(?: ?000|k)\b/g)].map(match => match[1]))];
+  if (!isComment && !phone && !complaint && quoted.length && sFull.length <= 120 && !/\b(shopee|tiktok|lazada|san|tren (nay|do|kia)|ben kia|cho khac)\b/.test(sFull)
+    && (quoted.length >= 2 || /\b(truoc|vua roi|luc nay|hom qua|tin nhan|tn|khac|chenh|lech)\b|\bsao\b.*\blai\b|\bma\b/.test(sFull))) {
+    return { rule: 'PRICE_SHIP_EXPLAIN', value: { template_id: 'PRICE_SHIP_EXPLAIN' } };
+  }
 
   // ===== Vòng 12: luật đi trước mọi nhánh giỏ / luật thử =====
   // Sản phẩm chỉ CSKH bán (Siêu Hạt Premium 420g, granola hũ/lọ, hộp nhựa, mua hạt riêng — chủ shop 01/10): ghi nhận +

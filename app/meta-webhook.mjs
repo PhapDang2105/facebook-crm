@@ -23,8 +23,14 @@ import {
 export function verifyWebhookSubscription(searchParams, verifyToken) {
   const mode = searchParams.get('hub.mode');
   const token = searchParams.get('hub.verify_token');
-  if (mode !== 'subscribe' || !verifyToken || token !== verifyToken) return null;
+  if (mode !== 'subscribe' || !verifyToken || token === null || !constantTimeEqual(token, verifyToken)) return null;
   return searchParams.get('hub.challenge') || '';
+}
+
+/** So hai chuỗi bí mật không lộ qua thời gian so (INT-30): băm cùng độ dài rồi timingSafeEqual. */
+function constantTimeEqual(first, second) {
+  const digest = value => createHmac('sha256', 'verify-token').update(String(value)).digest();
+  return timingSafeEqual(digest(first), digest(second));
 }
 
 export function verifyWebhookSignature(rawBody, signatureHeader, appSecret) {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Nông Sản Giọt Nắng | Facebook</title>
   <link rel="icon" type="image/webp" href="/assets/giot-nang-logo.webp">
-  <link rel="stylesheet" href="styles.css?v=20261002-fixweb3">
+  <link rel="stylesheet" href="styles.css?v=20261003-labels">
   <link rel="stylesheet" href="staff.css?v=20261002-fixweb3">
   <link rel="stylesheet" href="audit.css?v=20261001-audit">
   <link rel="stylesheet" href="quick-search.css?v=20261002-r13">
@@ -487,6 +487,21 @@
             <div id="shipping-recent-list"><p class="shipping-recent-empty">Chưa có mã vận đơn nào.</p></div>
           </aside>
         </div>
+        <section class="shipping-notices" id="shipping-notices" aria-live="polite">
+          <div class="shipping-notices-head">
+            <div>
+              <h2>Báo khách hành trình đơn</h2>
+              <p id="shipping-notices-status">Đang tải…</p>
+            </div>
+            <div class="shipping-notices-controls">
+              <label title="Máy chủ tự nhắn khách mã vận đơn và từng giai đoạn giao khi khách còn trong 24 giờ Messenger"><input id="shipping-notify-toggle" type="checkbox"> Tự nhắn khách (trong 24 giờ)</label>
+              <label title="Trình duyệt này tự gửi hàng chờ ngoài 24 giờ qua cầu nối Pancake mỗi 5 phút khi đang mở CRM"><input id="shipping-auto-bridge" type="checkbox"> Tự gửi hàng chờ khi mở CRM</label>
+              <button type="button" id="shipping-notices-send-all">Gửi hàng chờ qua Pancake</button>
+              <button type="button" id="shipping-notices-refresh" class="ghost">Tải lại</button>
+            </div>
+          </div>
+          <div id="shipping-notices-list"></div>
+        </section>
       </div>
     </section>
     <section id="reports-view" class="view hidden">
@@ -817,7 +832,6 @@
               <button class="price-master-add" id="staff-add" type="button">+ Thêm nhân sự</button>
             </header>
             <div class="staff-table">
-              <div class="staff-row staff-table-head"><span>Họ tên</span><span>Tên đăng nhập</span><span>Vai trò</span><span>Số điện thoại</span><span>Tên trên Pancake/POS</span><span>Mật khẩu</span><span>Trạng thái</span><span></span></div>
               <div id="staff-rows"><p class="channel-empty staff-empty">Đang tải nhân sự...</p></div>
             </div>
           </section>
@@ -996,5 +1010,6 @@
   <script src="staff.js?v=20261001-fixweb2"></script>
   <script src="audit.js?v=20261001-fixweb2"></script>
   <script src="quick-search.js?v=20261002-r13"></script>
+  <script src="shipping-notices.js?v=20261003-sapo2"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import './helpers/seed-catalog.mjs';
 import { buildDecisionRecord, commentBasket, processChatbotChanges, withFallbackTemplates } from '../app/chatbot-engine.mjs';
-import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
+import { defaultMessageTemplates, renderChatbotReply, withoutInviteTail } from '../app/chatbot-templates.mjs';
 import { ruleIntent } from '../app/processing/rule-intent.mjs';
 import { mentionsOldAddress, orderFlowStep, stripPhone } from '../app/processing/order-flow.mjs';
 import { sanitizeRecord } from '../app/processing/decision-log.mjs';
@@ -103,8 +103,11 @@ test('P1: 15 câu hỏi thông tin khi giữ giỏ, bot xin SĐT/địa chỉ 30
       assert.equal(out.result.templateId, 'ORDER_ADDRESS_REMIND', label);
       assert.equal(out.asked.length, 0, `${label}: không gọi mô hình`);
       assert.equal(out.sent.length, 2, `${label}: câu trả lời + câu nhắc`);
-      const expected = render(answerId).messages[0];
-      assert.equal(out.sent[0], expected, `${label}: câu trả lời ${answerId}`);
+      // R14 (H3): giỏ đang giữ → câu trả lời bỏ câu mời chọn cuối ("lấy 2 túi vị nào…") — xem withoutInviteTail.
+      // ("có voucher không" đi nhánh riêng của engine — không qua câu kèm — nên còn nguyên câu mời; đã báo agent engine.)
+      const expected = withoutInviteTail(render(answerId).messages[0]);
+      if (answerId === 'DISCOUNT_POLICY') assert.ok([expected, render(answerId).messages[0]].includes(out.sent[0]), `${label}: câu trả lời ${answerId}`);
+      else assert.equal(out.sent[0], expected, `${label}: câu trả lời ${answerId}`);
       assert.match(out.sent[1], /vẫn đang giữ đơn 1 Granola Túi Xanh 450g \+ 1 Granola Túi Vàng 350g – tổng 298\.000đ/, label);
       assert.match(out.sent[1], /số điện thoại và địa chỉ nhận hàng/, label);
       assert.doesNotMatch(out.sent.join('\n'), /trước sáp nhập/, `${label}: không xin lại cả đoạn`);
@@ -118,7 +121,7 @@ test('P1/E3: câu trả lời quà vừa gửi 5 phút trước, khách hỏi l�
   const sim = held(180000);
   sim.history('outgoing', render('GIFT_POLICY').messages[0], 300000);
   const out = await sim.send('vậy có tặng bát không');
-  assert.equal(out.sent[0], render('GIFT_POLICY').messages[0]);
+  assert.equal(out.sent[0], withoutInviteTail(render('GIFT_POLICY').messages[0]));
   assert.match(out.sent[1], /vẫn đang giữ đơn/);
   // Không giữ giỏ: ý phụ vừa gửi trong 30 phút vẫn bỏ như cũ.
   const recentOutgoing = [render('GIFT_POLICY').messages[0]];
@@ -131,12 +134,12 @@ test('P1: sau CONFIRM_YES (giỏ còn giữ) câu hỏi thông tin cũng có câ
   confirm.conversation.botLastTemplateId = 'CONFIRM_YES';
   assert.deepEqual(ruleIntent('miễn ship không', { botLastTemplateId: 'CONFIRM_YES', hasBasket: true, lastWasOrderStep: false, botLastAgeMin: 1, commentBasket })?.value, { template_id: 'ORDER_ADDRESS', also: 'FREESHIP_POLICY' });
   const out = await confirm.send('miễn ship không');
-  assert.equal(out.sent[0], render('FREESHIP_POLICY').messages[0]);
+  assert.equal(out.sent[0], withoutInviteTail(render('FREESHIP_POLICY').messages[0]));
   assert.match(out.sent[1], /vẫn đang giữ đơn/);
   const viaModel = held(30000);
   const llm = await viaModel.send('bát gáo dừa tặng khi nào vậy', { llm: { template_id: 'ORDER_ADDRESS', also: 'GIFT_POLICY' } });
   assert.equal(llm.result.templateId, 'ORDER_ADDRESS_REMIND');
-  assert.equal(llm.sent[0], render('GIFT_POLICY').messages[0]);
+  assert.equal(llm.sent[0], withoutInviteTail(render('GIFT_POLICY').messages[0]));
   assert.match(llm.sent[1], /vẫn đang giữ đơn/);
 });
 
@@ -154,7 +157,7 @@ test('P1/E17: cài đặt thiếu ORDER_ADDRESS_REMIND + GIFT_POLICY → hỏi m
   const blank = held(30000);
   blank.settings.messageTemplates = { ...seed, ORDER_ADDRESS_REMIND: '' };
   const off = await blank.send('có tặng bát không');
-  assert.equal(off.sent[0], render('GIFT_POLICY').messages[0]);
+  assert.equal(off.sent[0], withoutInviteTail(render('GIFT_POLICY').messages[0]));
   assert.ok(off.sent.length >= 2, 'không im: kèm câu xin SĐT/địa chỉ');
   assert.match(off.sent.slice(1).join('\n'), /số điện thoại và địa chỉ/);
 });
@@ -164,7 +167,7 @@ test('P1/E17: cài đặt thiếu ORDER_ADDRESS_REMIND + GIFT_POLICY → hỏi m
 test('P2 (F1/C3): SĐT + địa chỉ thiếu cấp → hỏi quà → hỏi ship → KHÔNG tạo đơn "Xóm 3 Phú Lương" (vòng 12: "Xóm 3 Vô Tranh Phú Lương" nay đọc đủ cấp); addressAsks giữ nguyên; nhắc đúng phần thiếu', async () => {
   const sim = held(120000, { phone: '0912345678', address: 'Xóm 3 Phú Lương', addressAsks: 1 }, [XANH(2)]);
   const gift = await sim.send('có tặng bát không shop');
-  assert.equal(gift.sent[0], render('GIFT_POLICY').messages[0]);
+  assert.equal(gift.sent[0], withoutInviteTail(render('GIFT_POLICY').messages[0]));
   assert.match(gift.sent[1], /vẫn đang giữ đơn 2 Granola Túi Xanh 450g/);
   assert.match(gift.sent[1], /phường\/xã/, 'nhắc đúng cấp địa chỉ còn thiếu');
   sim.later(120000);

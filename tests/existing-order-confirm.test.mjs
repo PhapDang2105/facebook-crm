@@ -69,9 +69,13 @@ test('đang chờ xác nhận: "Dạ cảm ơn shop" / "Đã đặt rồi mà" k
   assert.ok(!thanks.saved.at(-1).pendingOrder?.awaitingConfirm, 'khách nói chuyện khác thì bỏ cờ chờ xác nhận');
   const already = await run(asked, 'Đã đặt rồi mà', { reply: { templateId: 'ORDER_STATUS', messages: ['x'], handoff: false } });
   assert.deepEqual(already.created, []);
-  // Bot vừa gửi mẫu khác (không phải câu hỏi xác nhận) thì "ok" không chốt giỏ đang giữ.
+  // R14 (chủ shop 03/10, inbox3 S1 ca …762063): trước đây bot vừa gửi mẫu khác thì "ok" không chốt — khách "Ok" sau khi bot
+  // chen bảng giá Tropical nhận lời cảm ơn suông, mất đơn. Nay dựa vào cờ chờ xác nhận còn hạn 30 phút (hỏi 5 phút trước):
+  // "Ok" là đồng ý, chốt giỏ đang giữ. Hỏi quá 30 phút (và mẫu cuối không phải câu hỏi) thì "ok" không chốt.
   const stale = await run({ ...asked, botLastTemplateId: 'SHIPPING_POLICY' }, 'Ok', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false } });
-  assert.deepEqual(stale.created, []);
+  assert.equal(stale.created.length, 1);
+  const old = await run({ ...asked, botLastTemplateId: 'SHIPPING_POLICY', pendingOrder: { ...waiting, at: Date.now() - 40 * 60 * 1000 } }, 'Ok', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false } });
+  assert.deepEqual(old.created, []);
 });
 
 test('đang chờ xác nhận mà khách nêu giỏ mới ("2 túi vàng nhé"): giỏ đổi thành 2 Vàng, không tạo; vừa hỏi < 30 phút thì không hỏi lại lần hai', async () => {

@@ -540,13 +540,14 @@ export function findProductBySku(sku) {
 }
 
 // ===== Sản phẩm chỉ nhân viên CSKH bán =====
+// R14 (ca …746955): "granola premium 300g" là Granola Tropical cacao 300g (bot bán được), không phải Siêu Hạt 420g.
 // 01/10 (chủ shop): Granola Siêu Hạt Premium 420g, granola/hạt dạng hũ, lọ, hộp
 // nhựa, mua hạt riêng: CHỈ CSKH bán, bot chưa được báo giá/chốt → bot ghi nhận và
 // chuyển nhân viên. Cụm từ đặt ở đây (không phải bảng sản phẩm) vì phần lớn các
 // sản phẩm này không có trong danh mục bot; sản phẩm danh mục có cờ `staffOnly`
 // (Hạt An Lành dạng hũ) cũng tính, theo tên và tên gọi khác của nó.
 export const STAFF_ONLY_PRODUCTS = Object.freeze([
-  Object.freeze({ id: 'sieu-hat-premium', name: 'Granola Siêu Hạt Premium 420g', pattern: /\bsieu hat\b|\bhat premium\b|\bgranola premium\b(?! cacao)|\bpremium 420\b|(?<!\d)420 ?(?:g|gr|gram)\b/ }),
+  Object.freeze({ id: 'sieu-hat-premium', name: 'Granola Siêu Hạt Premium 420g', pattern: /\bsieu hat\b|\bhat premium\b|\bgranola premium\b(?! (?:cacao|tropical|300|xanh))|\bpremium 420\b|(?<!\d)420 ?(?:g|gr|gram)\b/ }),
   Object.freeze({ id: 'hat-an-lanh', name: 'Hạt An Lành dạng hũ', pattern: /\bhat an lanh\b|\ban lanh dang hu\b/ }),
   // "đang lo"/"đừng lo" bỏ dấu là "dang lo"/"dung lo": lọ chỉ nhận "loại lọ", "đựng trong lọ", "granola lọ", "lọ hạt".
   // Hũ thuỷ tinh 300ml (quà yến mạch) và hũ sữa chua không phải hàng hũ.

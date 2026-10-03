@@ -170,7 +170,8 @@ test('fix-bot C3: mô hình nêu sản phẩm chỉ CSKH bán (Hạt An Lành h�
   await sim.send('shop ơi hũ hạt an lành giá sao');
   const second = await sim.send('ok lấy chị 1 cái nha', { llm: () => ({ template_id: 'ORDER_ADDRESS', Product_N1: 'Hạt An Lành dạng hũ', No_A: '1' }) });
   // Bộ soạn trả STAFF_ONLY_PRODUCT; engine thấy lặp tin vừa gửi thì im + thẻ (không lên bước xin SĐT/địa chỉ).
-  assert.ok(second.result.templateId === 'STAFF_ONLY_PRODUCT' || second.result.skipped === 'lặp tin vừa gửi', JSON.stringify(second.result));
+  // R14: lặp tin vừa gửi → báo bạn phụ trách trả lời (STAFF_WAIT_*) thay vì im.
+  assert.ok(second.result.templateId === 'STAFF_ONLY_PRODUCT' || /^STAFF_WAIT_/.test(String(second.result.templateId)) || second.result.skipped === 'lặp tin vừa gửi', JSON.stringify(second.result));
   assert.ok(second.saved.at(-1).addLabelEvents.includes('handoff'));
   assert.doesNotMatch(second.sent.join(' '), /số điện thoại|địa chỉ nhận hàng/);
   const direct = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: 'Hạt An Lành dạng hũ', No_A: '1' }, templates, {});

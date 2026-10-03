@@ -40,15 +40,16 @@ export const CASCADE_TOP_GROUPS = 2;
 // (dòng giỏ, nhắc giỏ, gợi ý 2 túi, sửa/ghi chú/giữ nguyên đơn, giỏ Shop…) vào ORDER, câu chuyển người / tra đơn vào
 // SUPPORT. Còn lại là OTHER CÓ CHỦ Ý (CASCADE_INTENTIONAL_OTHER): luồng riêng quyết (bình luận, bám đuổi, dùng thử, QR,
 // săn deal live) hay hậu xử lý (REPLY_ALREADY_SENT*) — mô hình không học các mẫu này.
+// 03/10: SHIPMENT_* (báo hành trình vận đơn) và ORDER_STATUS_SHIPPED do máy chủ tự chọn, cũng OTHER có chủ ý.
 const TEMPLATES_BY_SUBGROUP = {
   PRICE: ['PRICE_QUOTE', 'PRICE_QUOTE_COMBO', 'PRICE_MIX_TUI_LON', 'GENERAL_INFO', 'PRICE_ADJUSTMENT', 'PRICE_SHIP_EXPLAIN', 'DISCOUNT_POLICY', 'FREESHIP_POLICY', 'GIFT_POLICY', 'LIVESTREAM_VOUCHER', 'PRICE_YEN_MACH_UC_NGUYEN_CAM', 'GIFT_POLICY_EMPTY', 'GIFT_SWAP',
     // vòng 12 (r12): giá theo số túi / 1 túi, so giá sàn, quà theo ngữ cảnh
     'PRICE_COUNT', 'PRICE_ONE_BAG', 'PRICE_COMPARE', 'GIFT_POLICY_LIVE', 'GIFT_POLICY_PROMO', 'GIFT_POLICY_UPSELL3', 'ASK_TWO_BAGS'],
   INFO: ['BAG_COMPARISON', 'BAG_COMPARISON_XANH_VANG', 'CRUNCHY_CEREAL_INFO', 'DELIVERY_DELAY', 'ECOMMERCE_LINKS', 'FRESHNESS', 'HEALTH_CONDITION', 'INGREDIENTS_ALLERGY', 'INSPECTION_RETURN_POLICY', 'NO_ADDED_SUGAR', 'OIL_SMELL_WARRANTY', 'OTHER_PRODUCTS', 'PACKAGING_INFO', 'PRODUCT_PHOTOS', 'SHIPPING_POLICY', 'VAT_INVOICE', 'WEIGHT_EXPIRY', 'RECOMMEND_BEGINNER', 'NO_VARIANT', 'COMBO3_FLAVOR', 'PAYMENT_METHODS', 'BANK_TRANSFER', 'KIDS_FAMILY', 'CALORIES_DIET', 'STORAGE', 'HOW_TO_USE_GRANOLA', 'STORE_ADDRESS', 'CERTIFICATION', 'ORDER_AFTER_SALE',
     // vòng 12 (r12)
-    'HEALTH_DIABETES', 'WEIGHT_GAIN', 'VEGAN_INFO', 'BENEFITS', 'PRODUCTION_PLACE', 'TROPICAL_CONFIRM'],
+    'HEALTH_DIABETES', 'HEALTH_CAUTION', 'WEIGHT_GAIN', 'VEGAN_INFO', 'BENEFITS', 'PRODUCTION_PLACE', 'TROPICAL_CONFIRM'],
   SOCIAL: ['THANK_YOU', 'WELCOME'],
-  SUPPORT: ['CSKH_HANDOFF', 'ORDER_STATUS', 'ORDER_STATUS_NONE', 'WHOLESALE_CTV_CONTACT', 'WAITING_STAFF', 'PAYMENT_RECEIVED_CHECK', 'LIVE_ONLY_PRODUCT', 'CALLBACK_REQUEST', 'IMAGE_RECEIVED', 'WHOLESALE_RECEIVED', 'REFUSED_DELIVERY', 'ORDER_STATUS_CHECKING',
+  SUPPORT: ['CSKH_HANDOFF', 'COMPLAINT_SORRY','ORDER_STATUS', 'ORDER_STATUS_NONE', 'WHOLESALE_CTV_CONTACT', 'WAITING_STAFF', 'PAYMENT_RECEIVED_CHECK', 'LIVE_ONLY_PRODUCT', 'CALLBACK_REQUEST', 'IMAGE_RECEIVED', 'WHOLESALE_RECEIVED', 'REFUSED_DELIVERY', 'ORDER_STATUS_CHECKING',
     // vòng 12 (r12): ghi nhận + chuyển nhân viên
     'ORDER_CANCEL_STAFF', 'ORDER_HOLD_STAFF', 'STAFF_ONLY_PRODUCT', 'RECEIVED_CHECK', 'IMAGE_WITH_PHONE',
     // vòng 13 (r13): giỏ Facebook Shop engine ghi nhận + chuyển nhân viên (mã lạ / món nhân viên lên đơn)
@@ -58,7 +59,7 @@ const TEMPLATES_BY_SUBGROUP = {
     // mã engine trả (renderChatbotReply) cho ORDER_UPDATED / ORDER_CANCELLED / ORDER_NOTE_ADDED — nhãn từ nhật ký quyết định
     'ORDER_UPDATE', 'ORDER_CANCEL', 'ORDER_NOTE',
     // vòng 13 (r13): bước đơn engine tự chọn — đã nhận giỏ Shop (chờ kiểm đơn), ghi nhận quà thay của giỏ/đơn
-    'SHOP_CART_ACK', 'GIFT_SWAP_NOTED']
+    'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED']
 };
 
 /**
@@ -66,7 +67,7 @@ const TEMPLATES_BY_SUBGROUP = {
  * R13: GIFT_POLICY_ORDER / GIFT_POLICY_ORDER_NONE là hậu xử lý của bộ soạn (khách ĐÃ CÓ ĐƠN hỏi quà → nói quà của đơn
  * đó) — không vào nhóm ANSWER để mô hình tầng không bao giờ tự trả lời bằng hai mẫu này.
  */
-export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE'].includes(String(templateId || ''));
+export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED'].includes(String(templateId || ''));
 
 /** Mã mẫu → nhóm 6 lớp (bảng đã chốt, PRICE/INFO/SOCIAL tách). Mã không có trong bảng và COMMENT_* không có mục. */
 export const SUBGROUP_OF_TEMPLATE = Object.freeze(Object.fromEntries(Object.entries(TEMPLATES_BY_SUBGROUP).flatMap(([subgroup, templates]) => templates.map(templateId => [templateId, subgroup]))));

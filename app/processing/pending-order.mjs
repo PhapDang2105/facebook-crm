@@ -57,6 +57,8 @@ export function normalizePendingOrder(value) {
     address,
     addressAsks,
     ...(askedBagCount ? { askedBagCount } : {}),
+    // R14: bot vừa hỏi "nguyên bản" là Xanh hay Vàng — số túi phần đó; câu trả lời vị được CỘNG vào giỏ chờ.
+    ...(Number(value?.nguyenBanAsk) > 0 ? { nguyenBanAsk: Math.min(20, Math.round(Number(value.nguyenBanAsk))) } : {}),
     // Vòng 12: khách đã nói "gửi địa chỉ cũ / như mấy lần" từ tin đặt đầu: nhớ để lượt sau (khi có SĐT) lấy lại.
     ...(value?.wantsPrevious ? { wantsPrevious: true } : {}),
     // 01/10 (fix-bot C2/T7): ghi chú soát cho nhân viên đi theo giỏ tới khi lên đơn (thành addressCheck của đơn).

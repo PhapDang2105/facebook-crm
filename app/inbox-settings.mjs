@@ -31,6 +31,9 @@ export const defaultConversationLabels = Object.freeze([
   { id: 'followup-won', name: 'Bám đuổi thành công', color: '#16a34a', icon: 'trophy', auto: 'followup-won' },
   // Khách ghi số điện thoại trong tin nhắn hay bình luận (02/10).
   { id: 'phone', name: 'Số điện thoại', color: '#0d9488', icon: 'telephone-receiver', auto: 'phone' },
+  // Vận đơn Sapo (03/10): đã gửi mã/hành trình vận đơn cho khách; vận đơn giao thành công.
+  { id: 'shipment-sent', name: 'Đã gửi mã vận đơn', color: '#f97316', icon: 'pickup-truck', auto: 'shipment-sent' },
+  { id: 'delivered', name: 'Giao hàng thành công', color: '#22c55e', icon: 'check-mark-button', auto: 'delivered' },
   { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck', auto: '' }
 ]);
 

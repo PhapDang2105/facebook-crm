@@ -21,6 +21,8 @@ export const defaultChatbotSettings = Object.freeze({
   structuredOutput: true,
   retryCount: 1,
   retryIntervalMs: 1000,
+  // R14 (quyết định 8): giỏ Facebook Shop chờ đơn POS 20 giây trước khi xin SĐT/địa chỉ.
+  shopOrderWaitMs: 20000,
   // Model dự phòng khi model chính hết hạn mức (429); trống = không dùng.
   fallbackModel: 'gemini-2.5-flash',
   welcomeMessage: '',
@@ -98,7 +100,7 @@ export const maxMessageTemplates = 200;
 // Giá trị "không gửi": undefined, null hay chuỗi trống (ô số để trống trên màn hình).
 const isBlank = item => item === undefined || item === null || (typeof item === 'string' && !item.trim());
 // Khóa số: null/"" trong bản vá = không gửi (giữ giá trị cũ), không phải "đặt về 0/mặc định".
-const numericSettingKeys = new Set(['cascadeCanary', 'cascadeThreshold', 'intentThreshold', 'memoryWindow', 'retryCount', 'retryIntervalMs']);
+const numericSettingKeys = new Set(['cascadeCanary', 'cascadeThreshold', 'intentThreshold', 'memoryWindow', 'retryCount', 'retryIntervalMs', 'shopOrderWaitMs']);
 
 /**
  * Gộp bản vá cấu hình (payload POST từ màn hình) vào cấu hình hiện tại, TRƯỚC khi chuẩn hóa:
@@ -266,6 +268,9 @@ export function normalizeChatbotSettings(input = {}, current = null) {
     retryCount: Math.max(0, Math.min(5, value.retryCount === undefined ? defaultChatbotSettings.retryCount : Number(value.retryCount) || 0)),
     fallbackModel: cleanText(value.fallbackModel ?? defaultChatbotSettings.fallbackModel, '', 200),
     retryIntervalMs: Math.max(100, Math.min(10000, Number(value.retryIntervalMs) || defaultChatbotSettings.retryIntervalMs)),
+    // R14 (chủ shop 03/10, quyết định 8): giỏ Facebook Shop chờ đơn POS bao lâu (ms) trước khi xin SĐT/địa chỉ — mặc định 20 giây
+    // (trước 60 giây; chỉ 1/33 giỏ thấy đơn trong lúc chờ). 0 = không chờ (đơn POS vào muộn vẫn được tra nền báo "đã nhận").
+    shopOrderWaitMs: isBlank(value.shopOrderWaitMs) || !Number.isFinite(Number(value.shopOrderWaitMs)) ? defaultChatbotSettings.shopOrderWaitMs : Math.max(0, Math.min(120000, Math.round(Number(value.shopOrderWaitMs)))),
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
     // Chuỗi rỗng là một lựa chọn: tắt hẳn việc đoán khiếu nại theo từ khoá.

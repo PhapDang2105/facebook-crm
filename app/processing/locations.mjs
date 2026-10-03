@@ -352,7 +352,9 @@ const ABBREVIATIONS = [
   // R13 (K8): "phường Sài Gòn" là phường MỚI của TP.HCM — giữ tên phường, vẫn cho biết tỉnh; "Sài Gòn" trơ vẫn là TP.HCM.
   [new RegExp(`(?<=${B}(?:phường|phuong|p\\.?)\\s*)(?:sai\\s*gon|sài\\s*gòn)${E}`, 'giu'), 'Sài Gòn, Thành phố Hồ Chí Minh'],
   [new RegExp(`(?<!Sài Gòn, )${B}(?:tp\\s*\\.?\\s*hcm|tphcm|hcmc|hcm|sg)${E}`, 'giu'), 'Thành phố Hồ Chí Minh'],
-  [new RegExp(`(?<!(?:phường|phuong|p\\.?)\\s*)${B}(?:sai\\s*gon|sài\\s*gòn)${E}(?!, Thành phố Hồ Chí Minh)`, 'giu'), 'Thành phố Hồ Chí Minh'],
+  // R14 (…958786): "Saigon" là một phần TÊN tòa nhà/khu ("VPBank Saigon Tower", "Saigon Royal", "Sài Gòn Pearl") → giữ
+  // nguyên; trước đây bung thành "Thành phố Hồ Chí Minh" giữa tên rồi bị cắt ("VPBank, Tower").
+  [new RegExp(`(?<!(?:phường|phuong|p\\.?)\\s*)${B}(?:sai\\s*gon|sài\\s*gòn)${E}(?!, Thành phố Hồ Chí Minh)(?!\\s*(?:tower|royal|pearl|center|centre|plaza|court|building|residence|residences|square|mall|garden|gardens|bay|park|riverside|airport|apartment|mansion|gateway|land|heights|avenue|south|hotel|coop|co\\.?op|food|trade|bank)${E})`, 'giu'), 'Thành phố Hồ Chí Minh'],
   // R13 (K8): "phuong hai thi xa quang tri" = Phường 2 — số viết bằng chữ ngay sau "phường", liền sau là hết đoạn hoặc
   // một loại hình cấp trên ("phường Hai Bà Trưng", "phường Ba Đình" không đổi).
   // R13 fix2 (B2): "nha sach phuong nam", "chi phuong hai", "gui chi Phuong Tam" là tên riêng/cửa hàng không dấu, không phải phường
@@ -406,6 +408,9 @@ const ABBREVIATIONS = [
   abbreviation('brvt', 'Bà Rịa - Vũng Tàu'),
   abbreviation('dak\\s*lak|daklak|dac\\s*lac|đắc\\s*lắc|đăk\\s*lăk', 'Đắk Lắk'),
   abbreviation('dak\\s*nong|daknong|đăk\\s*nông', 'Đắk Nông'),
+  // R14 (…766850): "20/26 đoàn văn bơ q9 q4" — hai "q + số" liền nhau: cái đầu là Phường (gõ nhầm p), cái sau là Quận
+  // (trước đây ra "Quận 9, Quận 4").
+  [new RegExp(`${B}q\\s*\\.?\\s*(\\d{1,2})(?=\\s*[,;]?\\s*(?:q|quận|quan)\\s*\\.?\\s*\\d{1,2}${E})`, 'giu'), 'Phường $1'],
   [new RegExp(`${B}q\\s*\\.?\\s*(\\d{1,2})${E}`, 'giu'), 'Quận $1'],
   [new RegExp(`${B}p\\s*\\.?\\s*(\\d{1,2})${E}`, 'giu'), 'Phường $1'],
   // Vòng 12: "f5", "F.14" là phường số (khách miền Nam gõ "f" thay "p").

@@ -500,8 +500,11 @@ test('mục 2: bỏ qua khách khiếu nại / bảo hành / cần người xử
   const sent = [];
   const summary = await fresh.runFollowUps({ readSettings: async () => remindSettings, sendMessage: async c => { sent.push(c.id); return { message: { mid: 'x' } }; }, now, quietHours: false, log: () => {} });
   for (const psid of Object.keys(cases)) assert.ok(!sent.includes(`${page}:${psid}`), `không gửi cho ${psid}`);
-  assert.deepEqual(summary.skipReasons, { label: 2, attention: 1, handoffTemplate: 1, staffReplied: 1, botOff: 1 });
-  assert.equal(summary.skipped, 6);
+  // R14: hộp thư của các bước trước trong test này vừa nhận tin bám đuổi (followUps[] trên hội thoại, trạng thái đã
+  // reset) → giờ bỏ qua 'sameCustomer' (một khách một tin trong 12 giờ) thay vì gửi lại; không thuộc sáu ca đang xét.
+  const { sameCustomer = 0, ...reasons } = summary.skipReasons;
+  assert.deepEqual(reasons, { label: 2, attention: 1, handoffTemplate: 1, staffReplied: 1, botOff: 1 });
+  assert.equal(summary.skipped, 6 + sameCustomer);
 });
 
 test('mục 3: xưng hô theo conversation.gender — nam "anh", nữ "chị", chưa rõ "anh/chị"; "anh/chị" viết sẵn trong mẫu cũng đổi (ca Huy Hoang: gender male → anh)', () => {

@@ -67,7 +67,8 @@ test('bình luận tag tên không bị xét lại: lượt bỏ qua có chủ �
 
 test('hộp thư: lượt "lặp tin vừa gửi" ghi dấu ngay trong lần lưu thẻ; tin đưa lại sau khởi động bị bỏ', async () => {
   const sim = new Sim({ settings: { ruleIntent: 'off' } });
-  const inbox = sim.inbox();
+  // R14: vừa báo bạn phụ trách trả lời (trong 2 giờ) → lượt lặp tiếp theo im như cũ (đường được kiểm ở test này).
+  const inbox = sim.inbox({ staffWaitAt: Date.now() - 10 * 60 * 1000 });
   const first = await sim.send(inbox, 'có giấy chứng nhận không', { llm: { template_id: 'CERTIFICATION' } });
   assert.equal(first.result.templateId, 'CERTIFICATION');
   // Ca thật 30/09: mô hình trả lại đúng mẫu vừa gửi (cả khi được nhắc chọn mẫu khác) → im + thẻ.

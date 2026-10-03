@@ -64,14 +64,16 @@ test('câu trả lời trùng tin vừa gửi mà khách hỏi ý mới: gọi l
   assert.equal(second.record.final, 'INGREDIENTS_ALLERGY');
 });
 
-test('gọi lại mà mô hình vẫn chọn mẫu vừa gửi / chuyển người / lên đơn: im + thẻ như cũ; khách lặp y câu thì không gọi lại', async () => {
+// R14 (chủ shop 03/10): chỗ trước đây bot im lần ĐẦU nay báo bạn phụ trách trả lời (STAFF_WAIT_*) + thẻ; trong 2 giờ sau đó
+// mới im như cũ (tests/r14-staff-wait.test.mjs).
+test('gọi lại mà mô hình vẫn chọn mẫu vừa gửi / chuyển người / lên đơn: báo bạn phụ trách lần đầu, sau đó im + thẻ; khách lặp y câu thì không gọi lại', async () => {
   const sim = new Sim({ settings: { ruleIntent: 'off' } });
   const inbox = sim.inbox();
   await sim.send(inbox, 'có giấy chứng nhận không', { llm: { template_id: 'CERTIFICATION' } });
   const same = await sim.send(inbox, 'Vẫn là bên bạn à', { llm: { template_id: 'CERTIFICATION' } });
   assert.equal(same.asked.length, 2);
-  assert.equal(same.result.skipped, 'lặp tin vừa gửi');
-  assert.deepEqual(same.sent, []);
+  assert.match(same.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/, JSON.stringify(same.result));
+  assert.ok(same.sent.length > 0);
   assert.ok(inbox.labels.includes('handoff'));
   // Mô hình đổi sang chuyển người hay lên đơn ở lượt gọi lại: không nhận (không tắt bot / không tạo đơn từ lượt cứu lặp).
   const handoff = await sim.send(inbox, 'Thế có 2 trang giọt nắng hả', { llm: (payload, call) => (call === 1 ? { template_id: 'CERTIFICATION' } : { template_id: 'CSKH_HANDOFF', warming: '1' }) });
@@ -103,10 +105,10 @@ test('ASK_TWO_BAGS ("bảng giá em gửi ở trên, lấy 2 túi vị nào") ch
   assert.notEqual(flavours.result.templateId, 'ASK_TWO_BAGS');
   assert.equal(flavours.result.templateId, 'BAG_COMPARISON', JSON.stringify(flavours.result));
   assert.match(flavours.asked[1].conversation.replyHint, /GENERAL_INFO/);
-  // Không có mẫu nào khác: im + thẻ, không mời "lấy 2 túi vị nào".
+  // Không có mẫu nào khác: không mời "lấy 2 túi vị nào" — R14: báo bạn phụ trách trả lời + thẻ (trước đây im).
   const none = await start();
   const silent = await none.sim.send(none.inbox, 'Có mấy loại', { llm: { template_id: 'GENERAL_INFO' } });
-  assert.equal(silent.result.skipped, 'lặp tin vừa gửi');
+  assert.match(silent.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/, JSON.stringify(silent.result));
   assert.ok(none.inbox.labels.includes('handoff'));
 });
 

@@ -52,8 +52,10 @@ test('groupOf 4 nhóm tầng 1 (ANSWER = PRICE ∪ INFO ∪ SOCIAL), subGroupOf 
   assert.equal(fineGroupOf('XYZ'), 'OTHER');
   // R13 (gộp, 02/10): +4 mẫu engine tự chọn vừa vào seed (SHOP_CART_UNKNOWN/STAFF → SUPPORT, SHOP_CART_ACK / GIFT_SWAP_NOTED
   // → ORDER); 03/10: +PRICE_SHIP_EXPLAIN → số mục bảng nhóm 103 → 108; không mẫu R13 nào vào ANSWER (tests/r13-glue-core.test.mjs).
-  assert.equal(Object.keys(GROUP_OF_TEMPLATE).length, 108, 'vòng 12 (r12): +19 mẫu mới; vòng 13: +4 mẫu engine tự chọn; 03/10: +PRICE_SHIP_EXPLAIN');
-  assert.equal(Object.keys(SUBGROUP_OF_TEMPLATE).length, 108);
+  // R14: +2 mẫu engine tự chọn (STAFF_WAIT_OPEN / STAFF_WAIT_CLOSED — báo bạn phụ trách trả lời theo giờ hành chính)
+  // và +1 mẫu thông tin HEALTH_CAUTION (câu hỏi bệnh lý), +1 COMPLAINT_SORRY (khách chê ngắn, nhóm SUPPORT) → 112.
+  assert.equal(Object.keys(GROUP_OF_TEMPLATE).length, 112, 'vòng 12: +19; vòng 13: +4; 03/10: +PRICE_SHIP_EXPLAIN; vòng 14: +4');
+  assert.equal(Object.keys(SUBGROUP_OF_TEMPLATE).length, 112);
   assert.ok(Object.values(GROUP_OF_TEMPLATE).every(group => ['ORDER', 'SUPPORT', 'ANSWER'].includes(group)));
   assert.ok(Object.isFrozen(GROUP_OF_TEMPLATE) && Object.isFrozen(SUBGROUP_OF_TEMPLATE));
   assert.ok(cascadeSafeTemplates.has('PRICE_QUOTE') && cascadeSafeTemplates.has('THANK_YOU') && cascadeSafeTemplates.has('WEIGHT_EXPIRY'));

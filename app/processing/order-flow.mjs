@@ -56,6 +56,8 @@ export function normalizeColourTypos(text) {
     .replace(/(?<![\p{L}])cacao\s*300\s*(?:g|gr|gam|gram)?(?![\p{L}\p{N}])/giu, 'tropical')
     .replace(/(?<![\p{L}])(?:vag|vàg|vangf|vàngf|vangg|vàngg|vnag|vagf|vangd|vàngd)(?![\p{L}\p{N}])/giu, 'vàng')
     .replace(/(?<![\p{L}])(?:naau|nâuu|nauu)(?![\p{L}\p{N}])/giu, 'nâu')
+    // R14 (…837888): "2 túi 1 xanh + lâu" — "lâu" ngay sau số, túi/gói/bịch/màu/vị hay dấu "+" là Nâu gõ sai ("để lâu" giữ nguyên).
+    .replace(/((?:\d|\+|(?<![\p{L}])(?:túi|tui|gói|goi|bịch|bich|màu|mau|vị|vi))\s*)lâu(?![\p{L}\p{N}])/giu, '$1nâu')
     .replace(/((?:\d|(?<![\p{L}])(?:túi|tui|gói|goi|bịch|bich|màu|mau|vị|vi|loại|loai))\s*)vành(?![\p{L}])(?!\s+đai)/giu, '$1vàng')
     .replace(/(?<![\p{L}])(?:xah|xanhh+|xamh|xnah)(?=\d|(?![\p{L}]))/giu, 'xanh ')
     .replace(/xanh {2,}/g, 'xanh ');
@@ -191,6 +193,10 @@ const LEADING_LABELS = [
   /^\s*(?:(?:vui\s+lòng|vui\s+long|làm\s+ơn|lam\s+on|nhờ|nho|phiền|phien)\s+)?(?:(?:shop|sop|em|e|bạn|ban)\s+)?(?:gửi|gởi|gui|ship|giao|chuyển|chuyen)\s+(?:(?:hàng|hang)\s+)?(?:(?:giúp|giup|giùm|dùm|cho)\s+(?:mình|minh|em|e|chị|chi|c|anh|a|tôi|toi)\s+)?(?:về|đến|tới|ve|den|toi|qua)\s*(?:(?:địa\s*chỉ|dia\s*chi|đc|dc|đ\/c)(?![\p{L}\p{N}])\s*[:：]?\s*)?/iu,
   // R13 (inbox2 A4/C1): "về, 12 Lê Lợi…", "về 83 hải phòng…" — chữ "về" trơ trọi đầu chuỗi (trước dấu phẩy hay số nhà).
   /^\s*(?:về|ve)\s*(?:[,:;]\s*|\s+(?=\d))/iu,
+  // R14 (…049331): "gửi địa chỉ 158, thôn 8…", "ship đc: …" — động từ gửi + nhãn địa chỉ (không có "về/đến").
+  /^\s*(?:gửi|gởi|gui|goi|ship|giao)\s+(?:(?:về|ve)\s+)?(?:địa\s*chỉ|dia\s*chi|đ\/c|d\/c|đc|dc)(?![\p{L}\p{N}])\s*[:：.\-]?\s*/iu,
+  // R14 (…027555): "chỉ tổ dân phố…" — đuôi của chữ "Địa chỉ" (khách chép từ ảnh) đứng đầu, ngay trước cấp/số nhà.
+  /^\s*chỉ\s*[:：.\-]?\s+(?=(?:tổ|to|thôn|thon|ấp|ap|xóm|xom|số|so|sn|khu|kp|tdp|đường|duong|ngõ|ngo|hẻm|hem|phường|phuong|xã|xa|\d))/iu,
   /^\s*(?:nhà\s+)?(?:mình|minh|em|e|chị|chi|c|anh|a|tôi|toi|t|cô|chú|bác)\s+ở\s+/iu,
   /^\s*ở\s+(?=\S)/iu
 ];
@@ -199,6 +205,10 @@ const NAME_COLON = /^\s*([\p{L}][\p{L}\s]{0,40}?)\s*[:：]\s*(?=\S)/u;
 const ADMIN_OR_STREET = /(?<![\p{L}])(phường|xã|quận|huyện|tỉnh|thành phố|thị trấn|thị xã|thôn|ấp|xóm|tổ|khu|số|đường|ngõ|ngách|hẻm|kiệt|phố|tp|kp)(?![\p{L}])/iu;
 // Người nhận chen giữa ("chuyển cho chị Ngân", "giao cho anh Tuấn").
 const RECEIVER_PHRASE = /(?:^|[\s,.;])(?:chuyển|chuyen|gửi|gởi|gui|giao)\s+(?:cho|tới|toi)\s+(?:anh|chị|chi|em|cô|chú|bác|a|c|e|bạn)\s+\p{Lu}[\p{L}]*(?:\s+\p{Lu}[\p{L}]*)?(?=$|[\s,.;])/gu;
+// R14 (…078679): lời giới thiệu tên người nhận lẫn trong khối địa chỉ ("e tên yến sdt …", "chị tên là Lan, số 5…"): bỏ cả
+// cụm. Tên 1–4 chữ, không chữ nào là từ chỉ nơi chốn/cấp hành chính; sau tên phải là hết đoạn, dấu ngăn, số hay từ chỉ nơi chốn.
+const NAME_INTRO_PLACE = '(?:thôn|thon|ấp|ap|xóm|xom|số|so|sn|tổ|to|khu|kp|đường|duong|phố|pho|ngõ|ngo|hẻm|hem|phường|phuong|xã|xa|quận|quan|huyện|huyen|tỉnh|tinh|tp|thành|thanh|thị|thi|trường|truong|chợ|cho|nhà|nha)(?![\\p{L}])';
+const NAME_INTRO = new RegExp(`(?<![\\p{L}\\p{N}])(?:e|em|chị|chi|c|anh|a|mình|minh|tôi|toi|t|mk|cháu|chau)\\s+tên\\s+(?:là\\s+|la\\s+)?(?!${NAME_INTRO_PLACE})\\p{L}+(?:\\s+(?!${NAME_INTRO_PLACE})\\p{L}+){0,3}(?=\\s*(?:[,.;\\n]|$)|\\s+(?:${NAME_INTRO_PLACE}|\\d))`, 'giu');
 // Ghi chú giao hàng nằm lẫn trong địa chỉ.
 const DELIVERY_NOTE = /(?:giao|ship|gọi|goi)?\s*(?:trong\s+)?giờ\s+hành\s+chính|gio\s+hanh\s+chinh|gọi\s+trước\s+khi\s+giao|goi\s+truoc\s+khi\s+giao|tránh\s+(?:ngày\s+)?(?:chủ\s+nhật|cn|t7|thứ\s+7)|giao\s+(?:buổi\s+)?(?:sáng|chiều|tối)(?:\s+(?:thứ\s+\d|cn|chủ\s+nhật))?/giu;
 // Chữ đệm cuối câu.
@@ -295,8 +305,11 @@ export function extractDeliveryNote(text) {
  * ghi chú giao hàng, chữ đệm cuối câu ("nhé/nha/ạ"), sửa từ gõ cụt "huyệ", và đoạn lặp.
  */
 export function cleanAddressText(raw) {
-  let text = stripPhone(String(raw || '')).replace(/\r/g, '');
+  // R14 (…195669): "Hèm 120 ₫uông…" — ký hiệu tiền "₫" gõ thay chữ "đ", "Hèm" trước số nhà là "Hẻm".
+  let text = stripPhone(String(raw || '').normalize('NFC').replace(/₫/g, 'đ')).replace(/\r/g, '');
+  text = text.replace(/(?<![\p{L}\p{N}])H(?:è|e)m(?=\s+\d)/gu, 'Hẻm').replace(/(?<![\p{L}\p{N}])h(?:è|e)m(?=\s+\d)/gu, 'hẻm');
   text = text.replace(PHONE_LABEL, ' ');
+  text = text.replace(NAME_INTRO, ' ');
   text = text.replace(RECEIVER_PHRASE, ' ');
   text = text.replace(DELIVERY_NOTE, ' ');
   text = text.replace(/(?<![\p{L}])huyệ(?![\p{L}])\.?/giu, 'huyện');
@@ -324,6 +337,8 @@ export function cleanAddressText(raw) {
     const question = text.match(TRAILING_QUESTION);
     if (question && TRAILING_QUESTION_TOPIC.test(question[0]) && !ADMIN_OR_STREET.test(question[0]) && !/\d/.test(question[0])) text = text.slice(0, question.index);
     text = text.replace(TRAILING_BASKET, '').replace(/[\s,;:\-–]+$/u, '').replace(/\s+[.!]+$/u, '');
+    // R14 (…838545): mã bưu chính 6 số cuối địa chỉ ("… Hồ Chí Minh 700000") — chỉ khi đứng sau một tên (chữ), không sau "số/ngõ".
+    text = text.replace(/(?<=\p{L})(?<!(?<![\p{L}])(?:số|so|sn|ngõ|ngo|hẻm|hem|nhà|nha|lô|lo|kiệt|kiet))[\s,.\-–]+\d{6}[\s.]*$/u, '');
     if (text === before) break;
   }
   text = dropOrphanBrackets(text);

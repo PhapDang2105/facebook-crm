@@ -343,8 +343,12 @@ test('tin xác nhận đơn và lời xin địa chỉ điền chỗ trống c�
   ]);
   assert.deepEqual(reply.images, []);
   const partial = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1', Phone_Number: '0909123456' }, custom);
-  assert.equal(partial.messages[0], 'Có số điện thoại, thiếu địa chỉ nhận hàng đầy đủ.');
-  assert.match(partial.messages[1], /lấy 2 túi/, 'giỏ 1 túi kèm gợi ý lên 2 túi');
+  // R14 (quyết định 5 của chủ shop): khách đã gửi SĐT cho đơn 1 túi thì KHÔNG mời lên 2 túi nữa (ca "Đã mua 1 mà hỏi
+  // hoài") — tin nêu giỏ + tổng rồi xin phần còn thiếu. (Trước đây test khẳng định có lời mời ở bước này.)
+  assert.equal(partial.messages[0], 'Dạ đơn của anh/chị gồm 1 Granola Túi Xanh 450g, tổng 189.000đ (đã gồm 15.000đ phí ship) ạ 🌾\nCó số điện thoại, thiếu địa chỉ nhận hàng đầy đủ.');
+  assert.ok(!partial.messages.some(message => /lấy 2 túi/.test(message)), 'đã có SĐT: không gợi ý lên 2 túi');
+  const fresh = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '1' }, custom);
+  assert.match(fresh.messages[1], /lấy 2 túi/, 'giỏ 1 túi chưa có SĐT vẫn kèm gợi ý lên 2 túi');
 });
 
 test('khách gửi ảnh: bot báo đã nhận hình, gắn thẻ cần người xử lý nhưng KHÔNG tắt bot; sticker thì im', async () => {
@@ -466,8 +470,11 @@ test('không gửi lại y nguyên tin bot vừa gửi trong 10 phút; SĐT ở 
     saveBotState: async () => {},
     requestReply: async () => ({ templateId: 'ORDER_ADDRESS', messages: [sameText], handoff: false })
   });
-  assert.deepEqual(log, [], 'câu hỏi y hệt vừa gửi thì không gửi lại');
-  assert.equal(result[0].skipped, 'lặp tin vừa gửi');
+  // R14 (chủ shop 03/10): không gửi lại câu xin SĐT y hệt; "Gửi rồi mà em" nhận câu báo bạn phụ trách trả lời (trước đây im).
+  assert.equal(log.length, 1, 'không gửi lại câu hỏi y hệt vừa gửi');
+  assert.notEqual(log[0], sameText);
+  assert.match(log[0], /bạn phụ trách/);
+  assert.match(result[0].templateId, /^STAFF_WAIT_/);
   const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '2', Phone_Number: '0', Customer_Address: fullAddress }, templates, { customer: { gender: 'female' }, recentCustomerTexts: ['176/1A KP1', '0909123456', 'Gửi rồi mà em'] });
   assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
   assert.equal(reply.order.phone, '0909123456');

@@ -60,10 +60,14 @@ test('khách nhắn có nội dung mà bot sắp gửi lại y câu xin SĐT/đ�
   assert.equal(out.sent.length, 1);
   assert.match(out.sent[0], /vẫn đang giữ đơn 2 Granola Túi Xanh 450g – tổng 298\.000đ/);
   assert.equal(out.results[0].templateId, 'ORDER_ADDRESS_REMIND');
-  // Lần thứ hai vẫn lặp: im, nhưng gắn thẻ cho nhân viên và giữ giỏ.
+  // Lần thứ hai vẫn lặp: R14 (chủ shop 03/10) — "sao em không trả lời" nhận câu báo bạn phụ trách trả lời + thẻ, giữ giỏ;
+  // đã báo trong 2 giờ thì im + thẻ như cũ.
   const again = await run({ botLastTemplateId: 'ORDER_ADDRESS_REMIND', botLastReplyAt: Date.now() - 30 * 1000, pendingOrder: same.pendingOrder }, 'sao em không trả lời', { recent, reply: same });
-  assert.deepEqual(again.sent, []);
-  assert.deepEqual(again.saved.at(-1).addLabelEvents, ['handoff']);
+  assert.equal(again.sent.length, 1);
+  assert.match(again.sent[0], /bạn phụ trách/);
+  const quiet = await run({ botLastTemplateId: 'ORDER_ADDRESS_REMIND', botLastReplyAt: Date.now() - 30 * 1000, pendingOrder: same.pendingOrder, staffWaitAt: Date.now() - 5 * 60 * 1000 }, 'sao em không trả lời', { recent, reply: same });
+  assert.deepEqual(quiet.sent, []);
+  assert.deepEqual(quiet.saved.at(-1).addLabelEvents, ['handoff']);
   // "ok" khi giỏ còn thiếu SĐT/địa chỉ (vòng 8, mục 3b): nhắc ngắn giỏ + phần thiếu, không cảm ơn, không hỏi mô hình.
   const ack = await run({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 30 * 1000, pendingOrder: same.pendingOrder }, 'ok', { recent, reply: same });
   assert.equal(ack.asked, false);

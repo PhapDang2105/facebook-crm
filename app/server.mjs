@@ -31,13 +31,15 @@ import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProdu
 import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
-import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
+import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, readLandingStore, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { posSyncStatus, recordPosSyncStatus, startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
 import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
 import { applyGiftSwapFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
-import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
+import { applyShipmentLabels, isQuietHourVN, listShipmentNoticeQueue, readSapoSettings, readSapoState, recordShipmentNoticeResult, startSapoSync, writeSapoSettings } from './sapo-sync.mjs';
+import { isSapoConfigured } from './sapo.mjs';
+import { buildFollowUpBatch, followUpGender, followUpRelayErrorText, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote } from './order-notes.mjs';
 import { applyCustomerOrderEdits, applyPosRepush, assertManualOrderMoney, createManualOrderGuard, describeOrderEdits, duplicateManualOrderMessage, isLiveOnPos, moneyText, needsPosRepush, orderEditAction, orderProcessingNotes, posCancelRefOf, posRepushDraft, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
 import { AUDIT_ACTIONS, AUTOMATED_ACTORS, appendAudit, appendBotToggleAudit, appendLabelAudit, auditActionLabel, auditActors, createViewThrottle, labelChangeDetails, labelChangeText, queryAudit } from './audit-log.mjs';
@@ -493,6 +495,54 @@ async function cancelChatbotCustomerOrder(conversation, orderId) {
  * Thông tin khách cho bám đuổi (chỉ bám khách mới): hồ sơ khách Pancake/POS của
  * hội thoại, cộng lịch sử POS và bảng đơn CRM theo các SĐT khách từng để lại.
  */
+/** Mẫu tin vận đơn đang dùng (Cài đặt → Tin nhắn, đã gộp mẫu mặc định). */
+async function shipmentTemplates() {
+  return (await readChatbotSettings().catch(() => null))?.messageTemplates || {};
+}
+
+/** Hàng chờ báo khách vận đơn (trang Vận chuyển). */
+async function shipmentNoticeQueue(now = Date.now()) {
+  return listShipmentNoticeQueue(await readMessagingStore(), { now, templates: await shipmentTemplates(), genderOf: followUpGender });
+}
+
+/** Thẻ CRM cho sự kiện vận đơn: "Đã gửi mã vận đơn" (shipment-sent), "Giao hàng thành công" (delivered). */
+async function shipmentLabelIds() {
+  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  return { sent: labelsForEvents(labelDefs, ['shipment-sent']), delivered: labelsForEvents(labelDefs, ['delivered']), labelDefs };
+}
+
+/** Ghi nhật ký + báo hộp thư cho các thay đổi thẻ do vận đơn. */
+async function publishShipmentLabelChanges(changes, labelDefs = null) {
+  const defs = labelDefs || (await shipmentLabelIds()).labelDefs;
+  const store = await readMessagingStore();
+  for (const { reason, ...change } of changes) {
+    appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs: defs, reason });
+    const conversation = (store.conversations || []).find(item => item.id === change.conversation.id);
+    if (conversation) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
+  }
+}
+
+async function saveShipmentNoticeResults(results, now = Date.now()) {
+  const touched = new Set();
+  const labels = await shipmentLabelIds();
+  let saved = 0;
+  let labelChanges = [];
+  await updateMessagingStore(store => {
+    for (const result of results) {
+      if (recordShipmentNoticeResult(store, result.key, { ok: result.ok === true, via: result.via, error: result.error, now })) {
+        saved += 1;
+        touched.add(String(result.key).split('|')[0]);
+      }
+    }
+    // Nhân viên vừa gửi mã qua Pancake / gửi tay: gắn thẻ "Đã gửi mã vận đơn" ngay.
+    if (saved) labelChanges = applyShipmentLabels(store, { sentLabels: labels.sent, deliveredLabels: labels.delivered });
+    return null;
+  }, { unchanged: () => saved === 0 });
+  for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
+  if (labelChanges.length) await publishShipmentLabelChanges(labelChanges, labels.labelDefs);
+  return saved;
+}
+
 async function followUpConversationInfo(pageId, conversationId) {
   const info = await fetchPancakeConversationInfo(pageId, conversationId);
   const phones = info.phones.map(phone => normalizeWarningPhone(phone)).filter(Boolean).slice(0, 3);
@@ -1959,7 +2009,9 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'POST' && url.pathname === '/api/chatbot/follow-ups/batch-results') {
       const payload = await readBody(request);
       const summary = await recordFollowUpBatchResults(payload.results, { readSettings: readChatbotSettings, token: String(payload.token || '') });
-      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''})`);
+      // R14: kèm lý do lỗi (ngắn, che SĐT, tối đa 3 lý do khác nhau) — trước đây chỉ có số đếm, không biết vì sao lỗi.
+      const relayErrors = summary.failed ? followUpRelayErrorText(payload.results) : '';
+      console.log(`Bám đuổi qua trạm Pancake: gửi ${summary.sent}, lỗi ${summary.failed} (bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''})${relayErrors ? ` — lý do: ${relayErrors}` : ''}`);
       audit(request, 'followup.batch_results', { summary: `Trạm Pancake gửi bám đuổi: gửi ${summary.sent}, lỗi ${summary.failed}, bỏ ${summary.dropped}${summary.rejected ? `, sai mã lô ${summary.rejected}` : ''}.`, details: { sent: Number(summary.sent) || 0, failed: Number(summary.failed) || 0 } });
       return sendJson(response, 200, { ...summary, status: await followUpStatus() });
     }
@@ -3534,6 +3586,78 @@ const server = http.createServer(async (request, response) => {
       }
       return sendJsonWithEtag(request, response, { items: withNotes, total: withNotes.length });
     }
+    // Báo khách hành trình vận đơn (Sapo): hàng chờ + bật/tắt tự nhắn + gửi qua cầu nối Pancake.
+    if (request.method === 'GET' && url.pathname === '/api/shipping/notices') {
+      const now = Date.now();
+      const [settings, state, items] = await Promise.all([readSapoSettings(), readSapoState(), shipmentNoticeQueue(now)]);
+      return sendJson(response, 200, { configured: isSapoConfigured(), settings, quietHour: isQuietHourVN(now), lastRunAt: Number(state.lastRunAt) || 0, lastSummary: state.lastSummary || null, items });
+    }
+    if (request.method === 'PUT' && url.pathname === '/api/shipping/settings') {
+      if (!(await requireManager(request, response, 'Chỉ Quản trị mới bật/tắt tự nhắn khách.'))) return;
+      const payload = await readBody(request);
+      if (typeof payload.notifyCustomers !== 'boolean') return sendJson(response, 400, { error: 'Thiếu notifyCustomers (true/false).' });
+      await writeSapoSettings({ notifyCustomers: payload.notifyCustomers });
+      audit(request, 'shipping.settings', { summary: `${payload.notifyCustomers ? 'Bật' : 'Tắt'} tự nhắn khách hành trình vận đơn.` });
+      return sendJson(response, 200, { settings: await readSapoSettings() });
+    }
+    // Lệnh cho cầu nối Pancake (gửi được ngoài 24 giờ): thêm ID Facebook của khách từ Pancake.
+    if (request.method === 'POST' && url.pathname === '/api/shipping/notices/bridge-items') {
+      const payload = await readBody(request);
+      const wanted = new Set((Array.isArray(payload.keys) ? payload.keys : []).map(String).slice(0, 50));
+      const queue = (await shipmentNoticeQueue()).filter(item => wanted.has(item.key));
+      const items = [];
+      const skipped = [];
+      // Như lô bám đuổi: khách Pancake chưa lưu ID Facebook phải nhờ extension dò (chậm, hay hụt) — tối đa 10 khách/lô.
+      let lookups = 0;
+      for (const item of queue) {
+        const convId = `${item.pageId}_${item.psid}`;
+        let info = null;
+        try {
+          info = await fetchPancakeConversationInfo(item.pageId, convId);
+        } catch (error) {
+          skipped.push({ key: item.key, reason: `Pancake lỗi: ${error.message}` });
+          continue;
+        }
+        if (info && info.canInbox === false) { skipped.push({ key: item.key, reason: 'khách không nhận tin (chặn Page)' }); continue; }
+        if (!info?.globalId && lookups >= 10) { skipped.push({ key: item.key, reason: 'chờ lô sau (tìm ID Facebook tối đa 10 khách/lô)' }); continue; }
+        if (!info?.globalId) lookups += 1;
+        const updatedTime = Math.max(0, ...((await readMessagingStore()).messages?.[item.conversationId] || []).map(message => Number(message.createdAt) || 0));
+        items.push({ key: item.key, pageId: item.pageId, convId, globalUserId: info?.globalId || '', needsGlobalId: !info?.globalId, updatedTime, name: item.name, text: item.text });
+      }
+      audit(request, 'shipping.notice_batch', { summary: `Lấy ${items.length} tin báo vận đơn để gửi qua Pancake${skipped.length ? `, bỏ ${skipped.length}` : ''}.` });
+      return sendJson(response, 200, { items, skipped });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/shipping/notices/results') {
+      const payload = await readBody(request);
+      const results = (Array.isArray(payload.results) ? payload.results : []).slice(0, 100).map(result => ({
+        key: String(result?.key || ''),
+        ok: result?.ok === true,
+        via: ['pancake-bridge', 'manual', 'skipped'].includes(result?.via) ? result.via : 'pancake-bridge',
+        error: String(result?.error || '').slice(0, 200)
+      })).filter(result => result.key);
+      const saved = await saveShipmentNoticeResults(results);
+      const sent = results.filter(result => result.ok).length;
+      audit(request, 'shipping.notice_result', { summary: `Báo vận đơn cho khách: ${sent} xong, ${results.length - sent} lỗi.`, details: { sent, failed: results.length - sent } });
+      return sendJson(response, 200, { saved });
+    }
+    // Gửi ngay qua API (chỉ được khi khách còn trong 24 giờ Messenger).
+    if (request.method === 'POST' && url.pathname === '/api/shipping/notices/send') {
+      const payload = await readBody(request);
+      const item = (await shipmentNoticeQueue()).find(entry => entry.key === String(payload.key || ''));
+      if (!item) return sendJson(response, 404, { error: 'Không còn tin này trong hàng chờ (đã gửi hoặc vận đơn đã đổi).' });
+      const store = await readMessagingStore();
+      const inbox = (store.conversations || []).find(entry => entry.id === item.conversationId);
+      if (!inbox) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại của khách.' });
+      try {
+        const actor = requestActor(request);
+        await sendConversationMessage(inbox, { text: item.text, staff: true, sentBy: actor.username ? actorStamp(actor) : null });
+        await saveShipmentNoticeResults([{ key: item.key, ok: true, via: 'manual' }]);
+        audit(request, 'shipping.notice_send', { summary: `Gửi tin vận đơn ${item.trackingNumber} (${item.stageLabel}) cho ${item.name || 'khách'}.` });
+        return sendJson(response, 200, { ok: true });
+      } catch (error) {
+        return sendJson(response, 502, { error: `Không gửi được qua API (khách ngoài 24 giờ thì gửi qua Pancake): ${error.message}` });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/shipping/spx/track') {
       try {
         const tracking = await getSpxTracking(url.searchParams.get('trackingNumber'));
@@ -3707,6 +3831,21 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   startPancakeSync({ chatbotDependencies, processChatbotChanges: syncBotHook });
   // Bám đuổi: kịch bản nền (khách im lặng sau khi Page trả lời → gửi ưu đãi), mỗi 15 phút.
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
+  // Sapo: mã vận đơn J&T/SPX (đơn Facebook nhân viên import từ Pancake) ghép vào đơn CRM mỗi 10 phút;
+  // báo khách theo giai đoạn (bật/tắt ở trang Vận chuyển): trong 24 giờ máy chủ tự gửi, ngoài 24 giờ vào hàng chờ.
+  startSapoSync({
+    readMessagingStore,
+    updateMessagingStore,
+    readLandingStore,
+    updateLandingStore,
+    sendMessage: sendConversationMessage,
+    genderOf: followUpGender,
+    readTemplates: shipmentTemplates,
+    trackSpx: getSpxTracking,
+    labelIds: shipmentLabelIds,
+    onLabelChanges: changes => publishShipmentLabelChanges(changes).catch(error => console.warn(`Ghi thẻ vận đơn lỗi: ${error.message}`)),
+    onChanged: conversationId => publishMessagingEvent({ type: 'customer-panel', conversationId })
+  });
   // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).
   startAdInsightsSync();
   // Báo cáo Lark: mặc định 08:00 gửi số liệu ngày hôm trước; trạng thái chống gửi trùng nằm trong data/processed.

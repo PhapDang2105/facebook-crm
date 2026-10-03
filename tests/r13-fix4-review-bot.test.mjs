@@ -59,16 +59,16 @@ test('C1: giỏ 2 Xanh (chỉ miễn ship) — "không lấy quà có được k
   assert.equal(close.created[0].giftSwap, undefined, 'đơn không mang gói nhỏ thay quà');
 });
 
-test('C1 đối chứng: giỏ 3 Xanh (bát + muỗng) — "Không lấy bát đâu em" vẫn hỏi vị quà thay, "2 gói nâu" ghi nhận vào giỏ', async () => {
+// R14 (chủ shop 03/10): đổi quà không còn hỏi vị 2 gói nhỏ — bot ghi chú, xin bộ phận phụ trách duyệt rồi nhắn khách.
+test('C1 đối chứng: giỏ 3 Xanh (bát + muỗng) — "Không lấy bát đâu em" vẫn là GIFT_SWAP (xin bộ phận phụ trách duyệt), không chờ chọn vị quà thay', async () => {
   const sim = new Sim();
   const inbox = sim.inbox({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - MIN, pendingOrder: basket([XANH(3)], MIN) });
   sim.history(inbox, 'outgoing', 'Dạ đơn của chị gồm 3 Granola Túi Xanh 450g…', MIN, { sender: 'bot' });
   const ask = await sim.send(inbox, 'Không lấy bát đâu em');
   assert.ok(ask.result.templateId === 'GIFT_SWAP' || ask.result.templateId === 'ORDER_ADDRESS_REMIND', JSON.stringify(ask.result));
-  assert.ok(Number(inbox.giftSwapAskedAt) > 0);
-  const choice = await sim.send(inbox, '2 gói nâu');
-  assert.ok(Array.isArray(inbox.pendingOrder.giftSwap) && inbox.pendingOrder.giftSwap.length === 2, JSON.stringify(inbox.pendingOrder));
-  assert.match(choice.sent.map(item => item.text).join('\n'), /ghi nhận thay quà/);
+  assert.match(ask.sent.map(item => item.text).join('\n'), /bộ phận phụ trách/);
+  assert.ok(!(Number(inbox.giftSwapAskedAt) > 0));
+  assert.ok(inbox.labels.includes('handoff'));
 });
 
 // ===== T1 =====

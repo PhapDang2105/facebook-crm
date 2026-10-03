@@ -878,7 +878,9 @@ const labelAutoChoices = [
   { value: 'bad', label: 'Khi số hay bom hàng (POS chặn/bom nhiều)' },
   { value: 'followup', label: 'Khi hệ thống gửi tin bám đuổi' },
   { value: 'followup-won', label: 'Khi khách được bám đuổi chốt đơn' },
-  { value: 'phone', label: 'Khi khách để lại số điện thoại' }
+  { value: 'phone', label: 'Khi khách để lại số điện thoại' },
+  { value: 'shipment-sent', label: 'Khi đã gửi mã/hành trình vận đơn cho khách' },
+  { value: 'delivered', label: 'Khi vận đơn giao thành công' }
 ];
 let quickReplyDraft = null;
 let quickReplyPickerMatches = [];

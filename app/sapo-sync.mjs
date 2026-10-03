@@ -14,7 +14,7 @@ import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { isSapoConfigured, listSapoOrdersModifiedSince, sapoConfig, sapoShipment } from './sapo.mjs';
 import {
   applyCarrierStage, attachShipmentsToConversations, attachShipmentsToLandingOrders, markShipmentNotified,
-  notifiedStage, renderShipmentNotice, shipmentNoticePlan, shipmentStage, shipmentStageLabel, stageFromSpxRecords
+  notifiedStage, renderShipmentNotice, sameCustomerInbox, shipmentNoticePlan, shipmentStage, shipmentStageLabel, stageFromSpxRecords
 } from './sapo-tracking.mjs';
 
 export const SAPO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
@@ -40,11 +40,50 @@ const findOrder = (store, conversationId, orderId) => {
   return conversation && order ? { conversation, order } : null;
 };
 
+// Cách báo khách được tính là "đã gửi mã vận đơn" (không tính ghi dấu baseline / quá lâu / mẫu tắt / bỏ qua).
+const SENT_VIAS = new Set(['bot', 'pancake-bridge', 'manual', 'conversation']);
+
+/**
+ * Thẻ CRM tự động cho vận đơn (chỉ thẻ CRM, không đụng Pancake — như thẻ Đã mua hàng):
+ *  - `sentLabels` (sự kiện shipment-sent): khách đã nhận mã / hành trình vận đơn;
+ *  - `deliveredLabels` (sự kiện delivered): vận đơn giao thành công.
+ * Gắn vào hộp thư của khách (đơn nằm ở luồng bình luận thì gắn cả luồng đó). Mỗi vận đơn gắn MỘT lần
+ * (cờ trên vận đơn), nhân viên gỡ thẻ thì lượt sau không gắn lại. Sửa `store` tại chỗ; trả về các thay
+ * đổi thẻ `{ conversation, before, after, reason }` để ghi nhật ký.
+ */
+export function applyShipmentLabels(store, { sentLabels = [], deliveredLabels = [] } = {}) {
+  const changes = [];
+  if (!sentLabels.length && !deliveredLabels.length) return changes;
+  const label = (conversations, ids, reason) => {
+    for (const conversation of conversations) {
+      const before = Array.isArray(conversation.labels) ? conversation.labels : [];
+      const after = [...new Set([...before, ...ids])];
+      if (after.length === before.length) continue;
+      conversation.labels = after;
+      changes.push({ conversation: { id: conversation.id, name: conversation.name || '' }, before: [...before], after: [...after], reason });
+    }
+  };
+  for (const { conversation, order } of conversationOrders(store)) {
+    const shipment = order.shipment;
+    if (!shipment?.trackingNumber) continue;
+    const targets = [...new Set([sameCustomerInbox(store, conversation), conversation].filter(Boolean))];
+    if (sentLabels.length && !shipment.sentLabeled && (shipment.notices || []).some(notice => SENT_VIAS.has(notice.via))) {
+      shipment.sentLabeled = true;
+      label(targets, sentLabels, `đã gửi mã vận đơn ${shipment.trackingNumber}`);
+    }
+    if (deliveredLabels.length && !shipment.deliveredLabeled && shipmentStage(shipment) === 'delivered') {
+      shipment.deliveredLabeled = true;
+      label(targets, deliveredLabels, `vận đơn ${shipment.trackingNumber} giao thành công`);
+    }
+  }
+  return changes;
+}
+
 /**
  * Một lượt đồng bộ. Phụ thuộc truyền vào để kiểm thử được:
  * { listOrders(since), readMessagingStore, updateMessagingStore, readLandingStore, updateLandingStore,
  *   sendMessage(inbox, { text }), genderOf(conversation, messages), readTemplates(), trackSpx(number),
- *   notify, readState, writeState, onChanged(conversationId), now, log }
+ *   labelIds() → { sent, delivered }, onLabelChanges(changes), notify, readState, writeState, onChanged(conversationId), now, log }
  */
 export async function runSapoSync(deps) {
   const now = deps.now ?? Date.now();
@@ -89,6 +128,17 @@ export async function runSapoSync(deps) {
       summary.marked += await markBaseline(deps, now);
     }
     await notifyCustomers(deps, { now, summary, log });
+  }
+  // Thẻ "Đã gửi mã vận đơn" / "Giao hàng thành công" (gắn cả khi tắt báo khách: giao thành công vẫn đúng).
+  if (deps.labelIds) {
+    const ids = await deps.labelIds();
+    let labelChanges = [];
+    await deps.updateMessagingStore(store => {
+      labelChanges = applyShipmentLabels(store, { sentLabels: ids?.sent || [], deliveredLabels: ids?.delivered || [] });
+      return null;
+    }, { unchanged: () => !labelChanges.length });
+    summary.labeled = labelChanges.length;
+    if (labelChanges.length) deps.onLabelChanges?.(labelChanges);
   }
   // Chưa đọc hết (quá trần trang) vẫn tiến mốc: giữ mốc cũ thì lượt sau lại vấp đúng trần đó mãi.
   if (!complete) log(`Sapo: quá trần trang, bỏ qua một phần đơn sửa từ ${new Date(since).toISOString()}.`);
@@ -296,8 +346,8 @@ export function startSapoSync(deps, config = sapoConfig) {
         ...deps,
         notify: settings.notifyCustomers
       });
-      if (summary.linked || summary.updated || summary.carrierUpdated || summary.sent || summary.failed || summary.ambiguous || summary.marked) {
-        (deps.log || console.log)(`Sapo: ${summary.shipments} vận đơn, ghép mới ${summary.linked}, cập nhật ${summary.updated}, hành trình hãng ${summary.carrierUpdated}, đơn landing ${summary.landing}, không chắc ${summary.ambiguous}, báo khách ${summary.sent}, hàng chờ ngoài 24h ${summary.queued}, chờ ${summary.waiting}, ghi dấu ${summary.marked}, lỗi ${summary.failed}${settings.notifyCustomers ? '' : ' (đang TẮT báo khách)'}`);
+      if (summary.linked || summary.updated || summary.carrierUpdated || summary.sent || summary.failed || summary.ambiguous || summary.marked || summary.labeled) {
+        (deps.log || console.log)(`Sapo: ${summary.shipments} vận đơn, ghép mới ${summary.linked}, cập nhật ${summary.updated}, hành trình hãng ${summary.carrierUpdated}, đơn landing ${summary.landing}, không chắc ${summary.ambiguous}, báo khách ${summary.sent}, gắn thẻ ${summary.labeled || 0}, hàng chờ ngoài 24h ${summary.queued}, chờ ${summary.waiting}, ghi dấu ${summary.marked}, lỗi ${summary.failed}${settings.notifyCustomers ? '' : ' (đang TẮT báo khách)'}`);
       }
     } catch (error) {
       (deps.log || console.log)(`Đồng bộ Sapo lỗi: ${error.message}`);

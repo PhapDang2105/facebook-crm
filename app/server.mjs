@@ -37,7 +37,7 @@ import { posSyncStatus, recordPosSyncStatus, startPosSync, syncPosLandingOrders 
 import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
 import { applyGiftSwapFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
-import { isQuietHourVN, listShipmentNoticeQueue, readSapoSettings, readSapoState, recordShipmentNoticeResult, startSapoSync, writeSapoSettings } from './sapo-sync.mjs';
+import { applyShipmentLabels, isQuietHourVN, listShipmentNoticeQueue, readSapoSettings, readSapoState, recordShipmentNoticeResult, startSapoSync, writeSapoSettings } from './sapo-sync.mjs';
 import { isSapoConfigured } from './sapo.mjs';
 import { buildFollowUpBatch, followUpGender, followUpRelayErrorText, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote } from './order-notes.mjs';
@@ -505,9 +505,28 @@ async function shipmentNoticeQueue(now = Date.now()) {
   return listShipmentNoticeQueue(await readMessagingStore(), { now, templates: await shipmentTemplates(), genderOf: followUpGender });
 }
 
+/** Thẻ CRM cho sự kiện vận đơn: "Đã gửi mã vận đơn" (shipment-sent), "Giao hàng thành công" (delivered). */
+async function shipmentLabelIds() {
+  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  return { sent: labelsForEvents(labelDefs, ['shipment-sent']), delivered: labelsForEvents(labelDefs, ['delivered']), labelDefs };
+}
+
+/** Ghi nhật ký + báo hộp thư cho các thay đổi thẻ do vận đơn. */
+async function publishShipmentLabelChanges(changes, labelDefs = null) {
+  const defs = labelDefs || (await shipmentLabelIds()).labelDefs;
+  const store = await readMessagingStore();
+  for (const { reason, ...change } of changes) {
+    appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs: defs, reason });
+    const conversation = (store.conversations || []).find(item => item.id === change.conversation.id);
+    if (conversation) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
+  }
+}
+
 async function saveShipmentNoticeResults(results, now = Date.now()) {
   const touched = new Set();
+  const labels = await shipmentLabelIds();
   let saved = 0;
+  let labelChanges = [];
   await updateMessagingStore(store => {
     for (const result of results) {
       if (recordShipmentNoticeResult(store, result.key, { ok: result.ok === true, via: result.via, error: result.error, now })) {
@@ -515,9 +534,12 @@ async function saveShipmentNoticeResults(results, now = Date.now()) {
         touched.add(String(result.key).split('|')[0]);
       }
     }
+    // Nhân viên vừa gửi mã qua Pancake / gửi tay: gắn thẻ "Đã gửi mã vận đơn" ngay.
+    if (saved) labelChanges = applyShipmentLabels(store, { sentLabels: labels.sent, deliveredLabels: labels.delivered });
     return null;
   }, { unchanged: () => saved === 0 });
   for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
+  if (labelChanges.length) await publishShipmentLabelChanges(labelChanges, labels.labelDefs);
   return saved;
 }
 
@@ -3816,6 +3838,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
     genderOf: followUpGender,
     readTemplates: shipmentTemplates,
     trackSpx: getSpxTracking,
+    labelIds: shipmentLabelIds,
+    onLabelChanges: changes => publishShipmentLabelChanges(changes).catch(error => console.warn(`Ghi thẻ vận đơn lỗi: ${error.message}`)),
     onChanged: conversationId => publishMessagingEvent({ type: 'customer-panel', conversationId })
   });
   // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).

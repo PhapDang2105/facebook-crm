@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { carrierInfo, fetchSapoOrdersPage, sapoConfigFrom, sapoShipment } from '../app/sapo.mjs';
 import { applyCarrierStage, attachShipmentsToConversations, attachShipmentsToLandingOrders, pickShipmentOrder, renderShipmentNotice, shipmentNote, shipmentNoticePlan, shipmentStage, stageFromSpxRecords } from '../app/sapo-tracking.mjs';
-import { listShipmentNoticeQueue, recordShipmentNoticeResult, runSapoSync } from '../app/sapo-sync.mjs';
+import { applyShipmentLabels, listShipmentNoticeQueue, recordShipmentNoticeResult, runSapoSync } from '../app/sapo-sync.mjs';
+import { defaultConversationLabels } from '../app/inbox-settings.mjs';
+import { autoLabelEvents } from '../app/processing/auto-label.mjs';
 
 import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
 import { processingNotes } from '../app/order-notes.mjs';
@@ -290,4 +292,39 @@ test('hàng chờ: nhân viên gửi qua Pancake / gửi tay / bỏ qua đều g
   assert.equal(listShipmentNoticeQueue(store, { now }).length, 0);
   assert.equal(store.conversations[0].customerOrders[0].shipment.notices.at(-1).via, 'pancake-bridge');
   assert.equal(recordShipmentNoticeResult(store, 'khong|co|gi', { ok: true }), false);
+});
+
+test('thẻ tự động: "Đã gửi mã vận đơn" khi đã báo khách, "Giao hàng thành công" khi giao xong; mỗi vận đơn một lần', async () => {
+  const store = { conversations: [conversation('c1', [crmOrder('A')])], messages: {} };
+  const changes = [];
+  const harness = memoryDeps({ store, orders: [sapoOrder()] });
+  Object.assign(harness.deps, { labelIds: async () => ({ sent: ['shipment-sent'], delivered: ['delivered'] }), onLabelChanges: list => changes.push(...list) });
+  const first = await runSapoSync(harness.deps);
+  assert.equal(first.sent, 1);
+  assert.deepEqual(store.conversations[0].labels, ['shipment-sent']);
+  assert.match(changes[0].reason, /đã gửi mã vận đơn 802835136377/);
+  // Nhân viên gỡ thẻ: lượt sau không gắn lại.
+  store.conversations[0].labels = [];
+  harness.deps.listOrders = async () => ({ orders: [sapoOrder({ status: 'delivered' })], complete: true });
+  await runSapoSync(harness.deps);
+  assert.deepEqual(store.conversations[0].labels, ['delivered']);
+  await runSapoSync(harness.deps);
+  assert.deepEqual(store.conversations[0].labels, ['delivered']);
+  assert.equal(changes.length, 2);
+});
+
+test('thẻ tự động: ghi dấu baseline không tính là đã gửi mã; gửi qua Pancake thì có thẻ ngay', () => {
+  const { store } = linkedStore({ lastCustomerMessageAt: now - 30 * HOUR });
+  store.conversations[0].customerOrders[0].shipment.notices = [{ stage: 'created', via: 'baseline', at: now }];
+  assert.deepEqual(applyShipmentLabels(store, { sentLabels: ['shipment-sent'] }), []);
+  recordShipmentNoticeResult(store, 'c1|A|picked_up', { ok: true, via: 'pancake-bridge', now });
+  assert.equal(applyShipmentLabels(store, { sentLabels: ['shipment-sent'] }).length, 1);
+  assert.deepEqual(store.conversations[0].labels, ['shipment-sent']);
+});
+
+test('thẻ mặc định mới có trong bộ thẻ và sự kiện tự động', () => {
+  const ids = defaultConversationLabels.map(label => `${label.id}:${label.auto}`);
+  assert.ok(ids.includes('shipment-sent:shipment-sent'));
+  assert.ok(ids.includes('delivered:delivered'));
+  assert.ok(autoLabelEvents.includes('shipment-sent') && autoLabelEvents.includes('delivered'));
 });

@@ -32,6 +32,15 @@ export function configureAddressAi(overrides = {}) {
 
 let cache = null;
 let cacheWrite = Promise.resolve();
+// R13 fix2 (B5): Vertex trả 429 → nghỉ `backoffMs` (không gọi lại ngay trong cùng phút, kể cả địa chỉ khác); cùng một địa chỉ đang
+// hỏi dở (nhiều đơn/lượt xử lý lại cùng lúc) → dùng chung một lượt gọi thay vì mỗi lượt một lần.
+const backoffMs = 60_000;
+let cooldownUntil = 0;
+const inFlight = new Map();
+/** Mốc hết nghỉ sau 429 (0 = không nghỉ) — cho test và chẩn đoán. */
+export function addressAiCooldownUntil() {
+  return cooldownUntil;
+}
 
 async function readCache() {
   if (cache) return cache;
@@ -66,6 +75,8 @@ function scheduleCacheWrite() {
 /** Chỉ dùng trong kiểm thử: quên cache đang giữ trong bộ nhớ. */
 export function resetAddressAiCache() {
   cache = null;
+  cooldownUntil = 0;
+  inFlight.clear();
 }
 
 export function addressAiEnabled(settings) {
@@ -295,6 +306,18 @@ export async function inferAddress(raw, options = {}) {
   const key = `${normalizeLocationKey(text)}|${settings.addressAiSearch !== false ? 's' : 'n'}${cacheKeySuffix}`;
   const store = await readCache();
   if (options.force !== true && key in store) return store[key].result;
+  // R13 fix2 (B5): lượt hỏi cùng địa chỉ đang bay → chờ chung; vừa bị 429 → không gọi, trả null (không nhớ) để lượt sau thử lại.
+  if (inFlight.has(key)) return inFlight.get(key);
+  if (Date.now() < cooldownUntil) {
+    if (options.explain) return { error: `Vertex vừa báo hết hạn mức (429), tạm nghỉ tới ${new Date(cooldownUntil).toISOString()}` };
+    return null;
+  }
+  const pending = askModelOnce(text, key, hint, settings, options).finally(() => { if (inFlight.get(key) === pending) inFlight.delete(key); });
+  inFlight.set(key, pending);
+  return pending;
+}
+
+async function askModelOnce(text, key, hint, settings, options) {
   // Hỏi mô hình mất tới hàng chục giây: ghi kết quả vào cache đọc lại SAU khi chờ (cache có thể
   // đã được nạp/đặt lại trong lúc đó), không vào `store` cũ.
   const remember = async entry => {
@@ -344,6 +367,8 @@ export async function inferAddress(raw, options = {}) {
     }
   } catch (error) {
     // Lỗi mạng/hạn mức thì không nhớ, để lần sau thử lại.
+    // R13 fix2 (B5): 429 (hết hạn mức) → nghỉ một phút cho mọi địa chỉ, không dồn thêm lượt gọi lỗi.
+    if (error?.status === 429) cooldownUntil = Date.now() + backoffMs;
     if (options.explain) return { error: error.message };
     return null;
   }

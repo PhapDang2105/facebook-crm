@@ -67,9 +67,9 @@ function loadAuditScript(values = {}) {
   return { context, fetched, subnav };
 }
 
-test('Cài đặt có mục "Lịch sử" sau "Nhân sự", bảng audit có đủ bộ lọc và bảng; tải audit.js/audit.css sau staff', () => {
+test('Cài đặt có mục "Lịch sử" sau "Nhân sự" và "Báo cáo Lark", bảng audit có đủ bộ lọc và bảng; tải audit.js/audit.css sau staff', () => {
   const subnav = section(html, '<div class="settings-subnav"', 1500);
-  assert.match(subnav, /data-settings-section="staff">Nhân sự<\/button>\s*<button class="settings-subnav-item" type="button" data-settings-section="audit"[^>]*>Lịch sử<\/button>/);
+  assert.match(subnav, /data-settings-section="staff">Nhân sự<\/button>\s*<button class="settings-subnav-item" type="button" data-settings-section="lark-report">Báo cáo Lark<\/button>\s*<button class="settings-subnav-item" type="button" data-settings-section="audit"[^>]*>Lịch sử<\/button>/);
   const panel = section(html, 'data-settings-panel="audit"', 3500);
   assert.match(panel, /<h1 id="audit-settings-title">Lịch sử<\/h1>/);
   assert.match(panel, /<select id="audit-range"[\s\S]*value="today">Hôm nay[\s\S]*value="7d" selected>7 ngày[\s\S]*value="30d">30 ngày[\s\S]*value="custom">Tùy chọn/);

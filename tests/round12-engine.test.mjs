@@ -384,3 +384,15 @@ test('02/10: lời công khai dưới bình luận hết giờ chờ Pancake (PA
   assert.ok(!turn.result.error, `lượt không bị coi là lỗi: ${turn.result.error}`);
   assert.ok(turn.saved.some(state => state.botLastReplyAt && !state.botLastError), 'trạng thái bot được lưu, không ghi lỗi');
 });
+
+test('03/10: bảng giá live ghi rõ chưa gồm ship 15.000đ; khách so 174k với 189k → giải thích đã cộng ship, không "giá có điều chỉnh"', async () => {
+  assert.match(seed.LIVESTREAM_COMMENT, /chưa gồm phí vận chuyển 15\.000đ/);
+  for (const text of ['TN trước 1 túi xanh nguyên bản là 174.000₫ mà shop', 'Vậy sao tin nhắn vừa rồi lại 189.000₫']) {
+    const sim = new Sim({ botLastTemplateId: 'LIVESTREAM_COMMENT', botLastReplyAt: Date.now() - 60000 }).history('outgoing', seed.LIVESTREAM_COMMENT.replace(/\{title\}/g, 'chị').replace(/\{Title\}/g, 'Chị'), 60000);
+    const turn = await sim.send(text);
+    assert.equal(turn.asked.length, 0, `không gọi mô hình: ${text}`);
+    assert.ok(turn.sent.some(out => /174\.000đ \+ 15\.000đ = 189\.000đ/.test(out)), `${text} → ${turn.sent.join(' / ')}`);
+    assert.ok(!turn.sent.some(out => /điều chỉnh/.test(out)));
+  }
+  assert.notEqual(pick('lấy 1 túi xanh 174k nhé')?.rule, 'PRICE_SHIP_EXPLAIN');
+});

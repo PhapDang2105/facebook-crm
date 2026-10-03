@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { buildDashboard, dashboardTodo, normalizeDashboardDays } from '../app/dashboard.mjs';
+import { buildDashboard, dashboardRange, dashboardTodo, normalizeDashboardCustomRange, normalizeDashboardDays } from '../app/dashboard.mjs';
 
 // 29/09/2026 10:00 giờ Việt Nam: 7 ngày = 23/09 → 29/09, kỳ trước 16/09 → 22/09.
 const now = Date.parse('2026-09-29T03:00:00Z');
@@ -166,8 +166,14 @@ test('việc cần làm: đơn quá 30 ngày hay đã ẩn khỏi bảng không 
 
 test('máy chủ nối route /api/dashboard', async () => {
   const server = (await readFile(new URL('../app/server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
-  assert.match(server, /import \{ loadDashboard, normalizeDashboardDays \} from '\.\/dashboard\.mjs'/);
-  assert.match(server, /request\.method === 'GET' && url\.pathname === '\/api\/dashboard'\)[\s\S]{0,200}loadDashboard\(\{ days: normalizeDashboardDays\(url\.searchParams\.get\('days'\)\) \}\)/);
+  assert.match(server, /import \{ loadDashboard, normalizeDashboardCustomRange, normalizeDashboardDays \} from '\.\/dashboard\.mjs'/);
+  const start = server.indexOf("url.pathname === '/api/dashboard')");
+  assert.ok(start >= 0);
+  const route = server.slice(start, start + 700);
+  assert.match(route, /url\.searchParams\.get\('from'\)[\s\S]*url\.searchParams\.get\('to'\)/);
+  // from/to có mà sai → 400, không lặng lẽ rơi về 7 ngày.
+  assert.match(route, /\(from \|\| to\) && !normalizeDashboardCustomRange\(from, to\)\)[\s\S]{0,80}sendJson\(response, 400/);
+  assert.match(route, /loadDashboard\(\{ days: normalizeDashboardDays\(url\.searchParams\.get\('days'\)\), from, to \}\)/);
 });
 
 test('chưa nối quảng cáo: chi tiêu và ROAS là null dù kho còn số cũ; tỷ lệ là số 0..1', () => {
@@ -176,4 +182,62 @@ test('chưa nối quảng cáo: chi tiêu và ROAS là null dù kho còn số c�
   assert.deepEqual(result.kpis.roas, { value: null, prev: null });
   assert.ok(result.kpis.conversionRate.value > 0 && result.kpis.conversionRate.value <= 1);
   assert.equal(result.ads.connected, false);
+});
+
+test('khoảng tự chọn: kiểm hợp lệ, đổi chỗ khi đảo ngược, không quá hôm nay, tối đa 366 ngày', () => {
+  assert.deepEqual(normalizeDashboardCustomRange('2026-09-01', '2026-09-10', now), { since: '2026-09-01', until: '2026-09-10', days: 10, custom: true });
+  assert.deepEqual(normalizeDashboardCustomRange('2026-09-10', '2026-09-01', now), { since: '2026-09-01', until: '2026-09-10', days: 10, custom: true }, 'đảo ngược → đổi chỗ');
+  assert.deepEqual(normalizeDashboardCustomRange('2026-09-05', '2026-09-05', now), { since: '2026-09-05', until: '2026-09-05', days: 1, custom: true }, 'một ngày');
+  // Hôm nay giờ Việt Nam là 29/09: ngày cuối sau đó lùi về hôm nay; cả khoảng ở tương lai thành hôm nay.
+  assert.deepEqual(normalizeDashboardCustomRange('2026-09-25', '2026-10-15', now), { since: '2026-09-25', until: '2026-09-29', days: 5, custom: true });
+  assert.deepEqual(normalizeDashboardCustomRange('2026-10-05', '2026-10-15', now), { since: '2026-09-29', until: '2026-09-29', days: 1, custom: true });
+  // Dài quá 366 ngày: cắt phía đầu.
+  assert.deepEqual(normalizeDashboardCustomRange('2020-01-01', '2026-09-29', now), { since: '2025-09-29', until: '2026-09-29', days: 366, custom: true });
+  for (const [from, to] of [['2026-09-01', undefined], [undefined, '2026-09-01'], ['2026-02-30', '2026-03-01'], ['01/09/2026', '2026-09-10'], ['2026-9-1', '2026-09-10'], ['', '']]) {
+    assert.equal(normalizeDashboardCustomRange(from, to, now), null, `${from} → ${to}`);
+  }
+});
+
+test('dashboardRange: kỳ trước cùng độ dài liền trước; preset giữ nguyên; from/to sai thì về days', () => {
+  assert.deepEqual(dashboardRange({ from: '2026-09-01', to: '2026-09-10', now }), {
+    range: { since: '2026-09-01', until: '2026-09-10', days: 10, custom: true },
+    previous: { since: '2026-08-22', until: '2026-08-31' }
+  });
+  // Qua cuối tháng 2.
+  assert.deepEqual(dashboardRange({ from: '2026-03-01', to: '2026-03-03', now }).previous, { since: '2026-02-26', until: '2026-02-28' });
+  assert.deepEqual(dashboardRange({ days: 30, now }), { range: { since: '2026-08-31', until: '2026-09-29', days: 30 }, previous: { since: '2026-08-01', until: '2026-08-30' } });
+  assert.deepEqual(dashboardRange({ days: 7, from: 'xấu', to: '2026-09-10', now }).range, { since: '2026-09-23', until: '2026-09-29', days: 7 });
+  // 23:30 giờ Việt Nam ngày 29/09 (16:30 UTC) vẫn là 29/09; 00:30 ngày 30/09 (17:30 UTC) đã sang 30/09.
+  assert.equal(normalizeDashboardCustomRange('2026-09-29', '2026-09-30', Date.parse('2026-09-29T16:30:00Z')).until, '2026-09-29');
+  assert.equal(normalizeDashboardCustomRange('2026-09-29', '2026-09-30', Date.parse('2026-09-29T17:30:00Z')).until, '2026-09-30');
+});
+
+test('Tổng quan khoảng tự chọn: mọi thẻ tính trong khoảng, so với kỳ liền trước cùng độ dài', () => {
+  const ads = { connected: true, accounts: ['act_1'], syncedAt: now - 1000 };
+  // 27/09 → 28/09 (2 ngày, tính cả 28/09); kỳ trước 25/09 → 26/09.
+  const result = buildDashboard({ ...fixture(), from: '2026-09-27', to: '2026-09-28', now, ads });
+  assert.deepEqual(result.range, { since: '2026-09-27', until: '2026-09-28', days: 2, custom: true });
+  assert.deepEqual(result.previous, { since: '2026-09-25', until: '2026-09-26' });
+  // Kỳ này: l1 447k (27/09), a2 298k (28/09); l2 bỏ dở không tính. Kỳ trước không có đơn.
+  assert.deepEqual(result.kpis.revenue, { value: 745000, prev: 0 });
+  assert.deepEqual(result.kpis.orders, { value: 2, prev: 0 });
+  assert.deepEqual(result.kpis.aov, { value: 372500, prev: null });
+  assert.deepEqual(result.kpis.spend, { value: 100000, prev: 0 });
+  // l1 mới; A đã mua từ 10/09.
+  assert.deepEqual(result.kpis.newCustomers, { value: 1, prev: 0 });
+  // Kỳ này: a (27, 28/09); kỳ trước: d (26/09).
+  assert.deepEqual(result.kpis.conversations, { value: 1, prev: 1 });
+  assert.deepEqual(result.kpis.conversionRate, { value: 1, prev: 0 });
+  assert.deepEqual(result.daily.map(day => day.date), ['2026-09-27', '2026-09-28']);
+  assert.deepEqual(result.daily[1], { date: '2026-09-28', revenue: 298000, orders: 1, spend: 100000, conversations: 1 });
+  assert.deepEqual(result.sources.map(source => source.key), ['landing', 'chatbot']);
+  assert.deepEqual(result.topProducts, [{ sku: 'GX', name: 'Granola Xanh', quantity: 5, revenue: 745000 }]);
+  assert.deepEqual(result.topCampaigns.map(row => [row.id, row.spend, row.orders, row.revenue]), [['c1', 100000, 1, 447000]]);
+  assert.equal(result.kpis.roas.value, 4.47);
+  // Kỳ dài hơn: 16/09 → 29/09 (14 ngày) so với 02/09 → 15/09; a1 10/09 rơi vào kỳ trước.
+  const long = buildDashboard({ ...fixture(), from: '2026-09-16', to: '2026-09-29', now, ads });
+  assert.deepEqual(long.previous, { since: '2026-09-02', until: '2026-09-15' });
+  assert.deepEqual(long.kpis.orders, { value: 6, prev: 1 });
+  assert.deepEqual(long.kpis.revenue, { value: 1402000, prev: 100000 });
+  assert.equal(long.daily.length, 14);
 });

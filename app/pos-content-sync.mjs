@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import { findProductBySku, getGifts } from './processing/catalog.mjs';
 import { toLocalPhone } from './processing/customer-info.mjs';
-import { assignResolvedAddress, recordOrderHistory, staffEditedAt, staffEditedGroups } from './order-edits.mjs';
+import { addProcessingFlag, assignResolvedAddress, recordOrderHistory, removeProcessingFlag, staffEditedAt, staffEditedGroups } from './order-edits.mjs';
 import { posComboBasket } from './pos-orders.mjs';
 import { posOrderToPayload } from './pos-sync.mjs';
 import { matchPosStatus } from './pos-status.mjs';
@@ -32,18 +32,64 @@ export function posTime(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Tiền khách trả của đơn POS: tiền thu hộ + tiền đã chuyển khoản; POS không ghi thì tiền hàng − giảm + ship. */
+/**
+ * Tiền khách trả của đơn POS — R13-fix (T1): cùng một công thức cho lượt kéo đầu và đường cập nhật (trước đây hai nơi
+ * hai công thức, xem posPreferredTotal). 0 = POS không có total_price lẫn tiền thu.
+ */
 export function posPaidTotal(posOrder = {}) {
-  const cod = money(posOrder.cod);
-  const transfer = money(posOrder.transfer_money);
-  if (cod + transfer > 0) return cod + transfer;
-  const shipping = posOrder.is_free_shipping ? 0 : money(posOrder.shipping_fee);
-  return Math.max(0, money(posOrder.total_price) - money(posOrder.total_discount) + shipping);
+  return posPreferredTotal(posOrder);
 }
 
-/** Tiền POS THỰC THU của đơn: thu hộ + đã chuyển khoản. 0 = POS không ghi tiền thu (nơi gọi giữ cách tính cũ). */
+/** Tiền POS THỰC THU của đơn: thu hộ + đã chuyển khoản. 0 = POS không ghi tiền thu. */
 export function posCollectedTotal(posOrder = {}) {
   return money(posOrder?.cod) + money(posOrder?.transfer_money);
+}
+
+/** Giá các DÒNG MÃ QUÀ nhân viên thêm như dòng thường (không phải dòng tặng) × SL — phần "tiền quà" từng bị cộng vào tổng. */
+export function posGiftLinePrice(posOrder = {}) {
+  return posGiftItems(posOrder).filter(item => !item?.is_bonus_product)
+    .reduce((sum, item) => sum + money(item?.variation_info?.retail_price) * Math.max(1, Math.round(Number(item?.quantity) || 1)), 0);
+}
+
+/**
+ * R13-fix (T1a): tổng POS TỰ TÍNH = total_price − total_discount + ship (nếu không miễn ship), trừ giá các dòng mã quà
+ * (POS cộng dòng quà có giá vào total_price). 0 khi POS không có total_price.
+ */
+export function posComputedTotal(posOrder = {}) {
+  if (!(money(posOrder?.total_price) > 0)) return 0;
+  const shipping = posOrder.is_free_shipping ? 0 : money(posOrder.shipping_fee);
+  return Math.max(0, money(posOrder.total_price) - money(posOrder.total_discount) + shipping - posGiftLinePrice(posOrder));
+}
+
+/**
+ * R13-fix (T1): tổng đơn POS theo thứ tự BẢO THỦ — (a) tổng POS tự tính (posComputedTotal); (b) chỉ khi POS không có
+ * total_price mới dùng tiền thu hộ + chuyển khoản. Trước đây lấy cod + transfer_money trước nên đơn khách trả trước
+ * bằng kênh khác (MoMo/thẻ — POS ghi ở trường CRM chưa biết tên) bị hạ tổng (348.000đ → 248.000đ).
+ */
+export function posPreferredTotal(posOrder = {}) {
+  return posComputedTotal(posOrder) || posCollectedTotal(posOrder);
+}
+
+const POS_COLLECTED_NOTE_PREFIX = 'ℹ POS ghi thu hộ';
+
+/**
+ * Ghi chú ℹ (không tính vào việc cần làm) khi tiền thu hộ + chuyển khoản POS ghi KHÁC tổng đơn: khách trả trước kênh
+ * khác hay nhân viên sửa tay COD — để chủ shop/nhân viên soát, CRM không tự đoán. '' = khớp hoặc POS không ghi tiền thu.
+ */
+export function posCollectedNote(posOrder = {}, total = 0) {
+  const cod = money(posOrder?.cod);
+  const transfer = money(posOrder?.transfer_money);
+  if (!(cod + transfer > 0) || !(money(total) > 0) || cod + transfer === money(total)) return '';
+  return `${POS_COLLECTED_NOTE_PREFIX} ${moneyText(cod)}${transfer ? ` + CK ${moneyText(transfer)}` : ''} khác tổng ${moneyText(total)} (trả trước kênh khác / sửa tay COD?)`;
+}
+
+/** Cập nhật ghi chú ℹ thu hộ khác tổng trên đơn (bỏ ghi chú cũ, thêm ghi chú mới nếu còn lệch). */
+export function applyPosCollectedNote(order, posOrder = {}) {
+  if (!order) return false;
+  const note = posCollectedNote(posOrder, order.total);
+  const removed = removeProcessingFlag(order, item => String(item).startsWith(POS_COLLECTED_NOTE_PREFIX) && item !== note);
+  const added = note ? addProcessingFlag(order, note) : false;
+  return removed || added;
 }
 
 // R13 (C1): nhân viên thêm quà vào đơn POS như một DÒNG HÀNG THƯỜNG có giá (bát 23k, muỗng 17k, quạt + bát live 50k)
@@ -80,12 +126,12 @@ export function posGiftItems(posOrder = {}) {
 }
 
 /**
- * R13 (C1 + T4): tổng của đơn kéo từ POS = tiền POS thực thu (thu hộ + chuyển khoản) khi POS có ghi; giảm giá
- * tính lại cho khớp (tiền hàng + ship − tổng); tiền đã chuyển khoản ghi vào `prepaid`. POS không ghi tiền thu
- * (cod = 0, không chuyển khoản) thì giữ nguyên tổng nơi gọi đã tính. Trả true nếu tổng đổi.
+ * R13 (C1 + T4) / R13-fix (T1): tổng của đơn kéo từ POS = posPreferredTotal (tổng POS tự tính; không có thì tiền thu
+ * hộ + chuyển khoản); giảm giá tính lại cho khớp (tiền hàng + ship − tổng); tiền đã chuyển khoản ghi vào `prepaid`.
+ * POS không có total_price lẫn tiền thu thì giữ nguyên tổng nơi gọi đã tính. Trả true nếu tổng đổi.
  */
 export function applyPosCollectedTotal(order, posOrder = {}) {
-  const paid = posCollectedTotal(posOrder);
+  const paid = posPreferredTotal(posOrder);
   if (!order || !(paid > 0)) return false;
   const before = money(order.total);
   const subtotal = (Array.isArray(order.products) ? order.products : []).reduce((sum, item) => sum + money(item?.price) * Math.max(1, Math.round(Number(item?.quantity) || 1)), 0);
@@ -114,34 +160,84 @@ export function posLegacyLineTotal(posOrder = {}) {
  */
 export function finalizePosImportedOrder(order, posOrder = {}) {
   if (!order) return order;
-  if (!applyPosCollectedTotal(order, posOrder) && !(posCollectedTotal(posOrder) > 0)) order.total = posLegacyLineTotal(posOrder);
+  if (!applyPosCollectedTotal(order, posOrder) && !(posPreferredTotal(posOrder) > 0)) order.total = posLegacyLineTotal(posOrder);
   const gifts = posGiftItems(posOrder);
   order.gift = gifts.map(item => String(item?.variation_info?.name || item?.variation_info?.display_id || '').trim()).filter(Boolean).join(' + ').slice(0, 300);
   order.giftItems = posGiftLines(posOrder).giftItems;
+  // R13-fix (T1): tiền thu POS ghi khác tổng (trả trước MoMo/thẻ, sửa tay COD) → ghi chú ℹ để soát, không tự hạ tổng.
+  applyPosCollectedNote(order, posOrder);
   return order;
 }
 
+/** Chữ mô tả các dòng mã quà có giá của đơn POS: "BGD 23.000đ + MUONG 17.000đ". */
+function posGiftLinesText(posOrder = {}) {
+  return posGiftItems(posOrder).filter(item => !item?.is_bonus_product)
+    .map(item => `${String(item?.variation_info?.display_id || item?.variation_info?.name || 'quà').trim().toUpperCase()} ${moneyText(money(item?.variation_info?.retail_price) * Math.max(1, Math.round(Number(item?.quantity) || 1)))}`)
+    .join(' + ').slice(0, 120);
+}
+
+// Đơn giữ nguyên vì chênh lệch không phải do dòng quà: log một lần mỗi đơn (đồng bộ 5 phút/lần).
+const repairSkipLogged = new Set();
+
 /**
- * Đơn POS đã kéo về TRƯỚC bản sửa R13 còn mang tổng tính theo cách cũ (cộng cả giá quà): chỉnh về tiền POS thực thu.
- * Chỉ chỉnh khi: đơn nguồn POS, POS có tiền thu, tổng đang lưu đúng bằng tổng cách cũ (chưa ai/đồng bộ nào sửa),
- * nhân viên chưa sửa giỏ/tiền trong CRM. Ghi lịch sử đơn. Trả true nếu đã chỉnh.
+ * Đơn POS đã kéo về TRƯỚC bản sửa R13 còn mang tổng tính theo cách cũ (cộng cả giá dòng quà): chỉnh về tổng POS.
+ * R13-fix (T1c): CHỈ chỉnh khi chênh lệch (tổng cũ − tổng POS) ĐÚNG BẰNG tổng giá các dòng mã quà; đơn nguồn POS,
+ * tổng đang lưu đúng bằng tổng cách cũ (chưa ai/đồng bộ nào sửa), nhân viên chưa sửa giỏ/tiền trong CRM. Chênh lệch
+ * vì lý do khác → giữ nguyên và ghi log để soát tay. Ghi lịch sử đơn. Trả true nếu đã chỉnh.
  */
-export function repairPosImportedTotal(existing, fresh, posOrder = {}, { now = Date.now() } = {}) {
+export function repairPosImportedTotal(existing, fresh, posOrder = {}, { now = Date.now(), log = console.warn } = {}) {
   if (!existing || !fresh || String(existing.source || '') !== 'POS') return false;
-  const paid = posCollectedTotal(posOrder);
-  if (!(paid > 0) || money(existing.total) === paid) return false;
-  if (money(existing.total) !== posLegacyLineTotal(posOrder)) return false;
-  if (staffEditedGroups(existing).has('basket')) return false;
+  const target = posPreferredTotal(posOrder);
   const before = money(existing.total);
+  if (!(target > 0) || before === target) return false;
+  if (before !== posLegacyLineTotal(posOrder)) return false;
+  if (staffEditedGroups(existing).has('basket')) return false;
+  const giftPrice = posGiftLinePrice(posOrder);
+  if (!(giftPrice > 0) || before - target !== giftPrice) {
+    const key = String(existing.id || '');
+    if (!repairSkipLogged.has(key)) {
+      if (repairSkipLogged.size > 5000) repairSkipLogged.clear();
+      repairSkipLogged.add(key);
+      if (typeof log === 'function') log(`Đồng bộ POS: đơn ${key} đang ghi ${moneyText(before)}, POS tính ${moneyText(target)} (chênh không phải do dòng quà) — giữ nguyên, cần soát tay.`);
+    }
+    return false;
+  }
   existing.products = fresh.products;
   existing.gift = fresh.gift;
   existing.giftItems = fresh.giftItems;
-  existing.total = fresh.total;
+  existing.total = target;
   existing.discount = fresh.discount;
   if (fresh.prepaid) existing.prepaid = fresh.prepaid;
   existing.updatedAt = now;
-  recordOrderHistory(existing, { by: POS_ACTOR, action: 'order.update', summary: `Tổng đơn chỉnh theo tiền thu trên POS: ${moneyText(before)} → ${moneyText(paid)} (quà không tính vào tiền hàng).`, at: now });
+  recordOrderHistory(existing, { by: POS_ACTOR, action: 'order.update', summary: `Tổng đơn chỉnh: bỏ giá dòng quà (${posGiftLinesText(posOrder)}) khỏi tiền hàng: ${moneyText(before)} → ${moneyText(target)}.`, at: now });
   return true;
+}
+
+/* ---- R13-fix (T2): nhớ đơn POS kéo về đã bị XOÁ trong CRM, để lượt đồng bộ sau không kéo về lại ---- */
+export const DELETED_POS_ORDER_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const DELETED_POS_ORDER_LIMIT = 50;
+
+/** Ghi vào hội thoại rằng đơn POS kéo về này vừa bị xoá. Chỉ đơn nguồn POS / đã kéo về (pos.importedAt). Trả true nếu ghi. */
+export function rememberDeletedPosOrder(conversation, order, now = Date.now()) {
+  if (!conversation || typeof conversation !== 'object' || !order) return false;
+  if (String(order.source || '') !== 'POS' && !order.pos?.importedAt) return false;
+  const list = (Array.isArray(conversation.deletedPosOrders) ? conversation.deletedPosOrders : [])
+    .filter(entry => entry && now - (Number(entry.at) || 0) < DELETED_POS_ORDER_TTL_MS);
+  // Đơn đã "Lên lại POS" mang pos.id mới (CRM-…-L2): nhớ cả mã đơn CRM (pos<system_id> của đơn POS gốc) và mã POS cũ.
+  list.push({ orderId: String(order.id || ''), id: String(order.pos?.id || ''), systemId: String(order.pos?.systemId || ''), previousId: String(order.pos?.previousId || ''), at: now });
+  conversation.deletedPosOrders = list.slice(-DELETED_POS_ORDER_LIMIT);
+  return true;
+}
+
+/** Đơn POS này từng được kéo về hội thoại rồi bị nhân viên xoá (trong 90 ngày)? */
+export function isDeletedPosOrder(conversation, posOrder, now = Date.now()) {
+  const list = conversation?.deletedPosOrders;
+  if (!Array.isArray(list) || !list.length || !posOrder) return false;
+  const posId = String(posOrder.id || '');
+  const systemId = String(posOrder.system_id || '');
+  const crmId = `pos${posOrder.system_id || posOrder.id}`;
+  return list.some(entry => entry && now - (Number(entry.at) || 0) < DELETED_POS_ORDER_TTL_MS
+    && ((posId && (String(entry.id) === posId || String(entry.previousId) === posId)) || (systemId && String(entry.systemId) === systemId) || String(entry.orderId) === crmId));
 }
 
 /** Dòng hàng (không tính quà) của đơn POS → dòng sản phẩm CRM; mã combo POS tách lại thành túi lẻ theo danh mục. */
@@ -277,6 +373,8 @@ export function applyPosContent(order, posOrder, { now = Date.now() } = {}) {
     order.discount = Math.max(0, subtotal + (order.freeShipping ? 0 : money(order.shippingFee)) - total);
     changed.push(`tổng ${moneyText(total)}`);
   }
+  // R13-fix (T1): ghi chú ℹ thu hộ khác tổng đi theo bản POS mới nhất (đổi ghi chú cũng phải ghi kho).
+  if (applyPosCollectedNote(order, posOrder)) result.marked = true;
   mark();
   if (changed.length) {
     order.updatedAt = now;

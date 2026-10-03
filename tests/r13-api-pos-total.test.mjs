@@ -89,7 +89,10 @@ test('C1 + T4: chuyển khoản tính vào tiền thực thu (đặt cọc 100k 
   const paid = importOrder({ system_id: 60004, is_free_shipping: true, cod: 0, transfer_money: 298000, items: [XANH()] });
   assert.equal(paid.total, 298000);
   // T4: đơn landing kéo từ POS (pos-sync.posOrderTotal) trước đây chỉ lấy `cod`.
-  assert.equal(posOrderTotal({ cod: 198000, transfer_money: 100000, total_price: 348000 }), 298000);
+  // R13-fix (T1, phản biện review-api): POS có total_price thì tổng = total_price − giảm + ship (348.000đ) — dòng dưới trước
+  // đây mong 298.000đ (cod + CK) là hành vi lỗi: khách trả trước MoMo/thẻ (trường POS chưa rõ tên) làm đơn bị hạ tổng.
+  assert.equal(posOrderTotal({ cod: 198000, transfer_money: 100000, total_price: 348000 }), 348000);
+  assert.equal(posOrderTotal({ cod: 198000, transfer_money: 100000 }), 298000, 'không có total_price mới lấy thu hộ + CK');
   assert.equal(posOrderTotal({ cod: 0, transfer_money: 298000, total_price: 348000, total_discount: 50000 }), 298000);
   assert.equal(posOrderTotal({ cod: 298000 }), 298000, 'chỉ COD: như cũ');
   assert.equal(posOrderTotal({ total_price: 348000, total_discount: 50000, shipping_fee: 15000 }), 313000, 'POS không ghi tiền thu: công thức cũ');

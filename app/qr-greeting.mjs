@@ -475,8 +475,16 @@ export function withOfferCardImage(parts, { baseUrl = '', imagePath = '/q/brand/
 // Tin cho thấy hội thoại hộp thư mở ra từ một BÌNH LUẬN (nhắn riêng cho người bình luận, tin hệ thống của
 // Messenger/Pancake) — số liệu 2 ngày (r13): 61 "Bạn đang phản hồi bình luận…", 59 "…để lại bình luận…",
 // 15 "…đã trả lời về một bài viết", 1 "replied to a post".
-const commentSourcePattern = /để lại bình luận|đang phản hồi bình luận|đã trả lời về một bài viết|replied to (?:a|your) (?:post|comment)/iu;
+// R13 fix2 (A5): thêm "… đã trả lời một quảng cáo" / "replied to an ad"; tin Page mang cờ `system` (pancakeMessageEvent) là dấu
+// nguồn dù chữ chưa có trong mẫu (isSourceNotice).
+const commentSourcePattern = /để lại bình luận|đang phản hồi bình luận|đã trả lời (?:về )?một (?:bài viết|quảng cáo)|replied to (?:a|your|an) (?:post|comment|ad)/iu;
 const shopCartPattern = /^Khách chọn mua từ Facebook Shop/u;
+
+/** Tin Page là dòng hệ thống cho biết khách vào từ nguồn khác (bình luận, bài viết, quảng cáo, tin/story): cờ `system` hay chữ khớp mẫu. */
+export function isSourceNotice(message) {
+  if (!message || message.direction !== 'outgoing' || message.staff) return false;
+  return message.system === true || commentSourcePattern.test(String(message.text || ''));
+}
 
 /** Giờ bấm quảng cáo gần nhất ghi trên hội thoại (0 = không có referral quảng cáo; -1 = có nhưng không rõ giờ). */
 function latestAdClickAt(conversation) {
@@ -512,6 +520,8 @@ export function bridgeSourceMarker({ conversation, messages = [], message, comme
   if (adAt > 0 && Math.abs(at - adAt) < sourceFreshMs) return `referral quảng cáo (bấm ${Math.max(0, Math.round((at - adAt) / 60000))} phút trước)`;
   if (all.some(item => (Array.isArray(item.cart) && item.cart.length) || shopCartPattern.test(String(item.text || '')))) return 'giỏ Facebook Shop';
   if (all.some(item => item.privateReply || commentSourcePattern.test(String(item.text || '')))) return 'nhắn riêng từ bình luận';
+  // R13 fix2 (A5): dòng hệ thống nào của Page ("… đã trả lời tin của bạn", mẫu Facebook đổi chữ…) cũng là dấu nguồn khác thẻ QR.
+  if (others.some(item => isSourceNotice(item))) return 'tin hệ thống của Page (khách vào từ nguồn khác)';
   if (Number(commentAt) > 0 && Math.abs(at - Number(commentAt)) < sourceFreshMs) return 'khách vừa bình luận dưới bài viết';
   // Meta đã báo referral / Botcake đã chào / tin soạn sẵn mang #mã cho chính lượt này: đường đó lo việc chào.
   if ((Array.isArray(conversation.qrReferrals) ? conversation.qrReferrals : []).some(item => Math.abs(at - (Number(item?.at) || 0)) < sourceFreshMs)) return 'đã có referral thẻ QR (đường khác xử lý)';
@@ -543,12 +553,26 @@ export function createBridgeClickMatcher({
   greetDelayMs = 10_000,
   maxBotWaitMs = 60_000,
   maximumClicks = 50,
+  // R13 fix2 (A6): `history(conversation, change)` → dãy tin của hội thoại đọc từ Pancake ([{ createdAt }]); có tin cũ hơn lượt bấm
+  // thì đây là khách cũ mà kho CRM chưa có lịch sử → không khớp. Lỗi/quá `historyTimeoutMs` → vẫn khớp như không có.
+  history = null,
+  historyTimeoutMs = 5000,
+  // Tin Pancake chỉ bị coi là "cũ hơn lượt bấm" khi sớm hơn quá `historyGraceMs` (đồng hồ Pancake có thể chậm hơn máy chủ vài giây;
+  // khách cũ thật thì tin trước đó cách hàng giờ/ngày).
+  historyGraceMs = 60_000,
+  // R13 fix2 (A4): mỗi máy (dấu vết) / mỗi IP (băm) ghi tối đa `max` lượt bấm trong `windowMs`.
+  clickRateLimit = { max: 3, windowMs: 60_000 },
+  // R13 fix2 (A5): Pancake vừa đẩy một dòng hệ thống (nguồn vào) trong `lateMarkerWindowMs` → dấu nguồn của hội thoại đang giữ
+  // cũng có thể về muộn: chờ thêm `lateMarkerExtraMs` một lần trước khi chốt chào.
+  lateMarkerWindowMs = 60_000,
+  lateMarkerExtraMs = 20_000,
   known = isKnownQrCode,
   now = Date.now,
   log = console.log,
   logError = console.error
 } = {}) {
   const clicks = []; // { code, at, visitor, via, reservedBy, consumed }
+  let lastSystemNoticeAt = 0;
   const candidates = new Map(); // conversationId → { id, label, at, arrivedAt, change, click, state, botDoneAt, holdOver, timer }
   const enabled = () => windowMs > 0;
   const shortId = value => `…${String(value || '').slice(-6)}`;
@@ -565,14 +589,47 @@ export function createBridgeClickMatcher({
     }
   }
 
-  function noteClick({ code, visitor = '', via = 'beacon', at = now() } = {}) {
+  // R13 fix2 (A4): mốc các lượt bấm gần đây theo dấu vết máy / IP (chỉ RAM, tối đa 2.000 khoá).
+  const clickStamps = new Map();
+  const rateLoggedAt = new Map();
+  function clickRateExceeded(keys, at) {
+    const max = Number(clickRateLimit?.max) || 0;
+    if (max <= 0) return false;
+    const rateWindowMs = Number(clickRateLimit?.windowMs) || 60_000;
+    const lists = keys.filter(Boolean).map(key => [key, (clickStamps.get(key) || []).filter(stamp => at - stamp < rateWindowMs)]);
+    for (const [key, stamps] of lists) clickStamps.set(key, stamps);
+    const over = lists.find(([, stamps]) => stamps.length >= max);
+    if (over) return over[0];
+    for (const [, stamps] of lists) stamps.push(at);
+    while (clickStamps.size > 2000) clickStamps.delete(clickStamps.keys().next().value);
+    return '';
+  }
+
+  function noteClick({ code, visitor = '', ip = '', via = 'beacon', at = now() } = {}) {
     const key = String(code || '').toLowerCase();
     if (!enabled() || !key || !known(key)) return false;
     prune();
     const visitorKey = visitor ? String(visitor).slice(0, 128) : '';
+    const ipKey = ip ? `ip:${String(ip).slice(0, 128)}` : '';
+    const overKey = clickRateExceeded([visitorKey, ipKey], at);
+    if (overKey) {
+      // Một dòng log mỗi phút cho mỗi khoá vượt ngưỡng (máy hay IP), không ngập log khi bị gửi dồn.
+      const logKey = overKey;
+      if (at - (rateLoggedAt.get(logKey) || 0) >= 60_000) {
+        if (rateLoggedAt.size >= 500) rateLoggedAt.clear();
+        rateLoggedAt.set(logKey, at);
+        log(`QR: bỏ qua lượt bấm ${key}: cùng máy/IP gửi quá ${clickRateLimit.max} lượt trong ${Math.round((Number(clickRateLimit.windowMs) || 60_000) / 1000)}s`);
+      }
+      return false;
+    }
     // Cùng một máy bấm lại (lần đầu Messenger không mở): vẫn là một người — dời giờ, không thêm lượt.
-    const same = visitorKey ? clicks.find(click => click.code === key && click.visitor === visitorKey && !click.reservedBy && !click.consumed) : null;
+    // R13 fix2 (A3): lượt trước đang giữ cho một hội thoại hay đã dùng (đã chào) → bỏ qua hẳn, không sinh lượt thứ hai cho khách lạ.
+    const same = visitorKey ? clicks.find(click => click.code === key && click.visitor === visitorKey && at - click.at <= windowMs + retainMs) : null;
     if (same) {
+      if (same.reservedBy || same.consumed) {
+        log(`QR: lượt bấm ${key} của cùng một máy, lượt trước ${same.reservedBy ? 'đang giữ cho một hội thoại' : 'đã dùng'} — bỏ qua, không thêm lượt`);
+        return true;
+      }
       same.at = at;
       log(`QR: lượt bấm ${key} của cùng một máy, dời mốc chờ khớp (cửa sổ ${Math.round(windowMs / 1000)}s)`);
       return true;
@@ -608,6 +665,80 @@ export function createBridgeClickMatcher({
     }
   }
 
+  /** R13 fix2 (A1): tiêu lượt bấm chưa giữ gần nhất (cùng mã nếu biết) trong cửa sổ trước `at` — lượt quét đó đã được nhận ra bằng đường khác. */
+  function consumeDangling(code, at, reason) {
+    const latest = clicks
+      .filter(click => !click.consumed && !click.reservedBy && (!code || click.code === code) && click.at <= at + clickSkewMs && at - click.at <= windowMs)
+      .sort((first, second) => second.at - first.at)[0];
+    if (!latest) return false;
+    latest.consumed = true;
+    log(`QR: tiêu lượt bấm ${latest.code} đang chờ (${reason}) — không còn chờ khớp với hội thoại mới`);
+    return true;
+  }
+
+  const latestQrReferralCode = conversation => {
+    const list = Array.isArray(conversation?.qrReferrals) ? conversation.qrReferrals : [];
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const code = qrCodeFromRef(list[index]?.ref);
+      if (code) return code;
+    }
+    return '';
+  };
+
+  /**
+   * R13 fix2 (A1): change mang referral thẻ (Botcake "Mã thẻ: #mã", tin soạn sẵn #mã, referral Meta) về cho Page QR → lượt quét
+   * ấy đã được nhận ra bằng đường khác: tiêu lượt bấm còn treo của nó (lượt chưa giữ gần nhất trong cửa sổ), kẻo khách lạ nhắn
+   * trong 90 giây kế tiếp ăn ưu đãi. Hội thoại ấy — hay hội thoại khác — đang giữ một lượt bấm cùng mã trong cửa sổ thì lượt đó
+   * thuộc về người vừa được nhận ra: huỷ khớp và tiêu luôn. Trả số lượt đã tiêu.
+   */
+  async function noteReferral(changes) {
+    if (!enabled()) return 0;
+    const list = (changes || []).filter(change => change?.conversation && isCardScan(change, { known }));
+    if (!list.length || !clicks.some(click => !click.consumed)) return 0;
+    const page = String(typeof pageId === 'function' ? await pageId() : pageId || '');
+    let count = 0;
+    for (const change of list) {
+      const conversation = change.conversation;
+      if (!page || String(conversation.pageId) !== page) continue;
+      const code = qrCodeFromRef(change.referral.ref);
+      const at = messageTime(change.message || { createdAt: change.timestamp });
+      const label = labelOf(conversation);
+      const kind = change.referral.type || 'Meta';
+      const holders = [...candidates.values()].filter(other => other.click && ['held', 'resolving'].includes(other.state)
+        && other.click.code === code && other.click.at <= at + clickSkewMs && at - other.click.at <= windowMs);
+      if (holders.length) {
+        for (const holder of holders) {
+          drop(holder, { consume: true });
+          log(`QR: referral thẻ ${code} (${kind}) về cho ${label} trong lúc ${holder.id === conversation.id ? 'chính hội thoại này' : holder.label} đang giữ lượt bấm — huỷ khớp, tiêu lượt bấm`);
+        }
+        count += 1;
+        continue;
+      }
+      if (consumeDangling(code, at, `referral thẻ ${kind} về cho ${label}`)) count += 1;
+    }
+    return count;
+  }
+
+  /** R13 fix2 (A6): mốc tin cũ nhất Pancake có cho hội thoại nếu nó cũ hơn lượt bấm đang giữ (0 = không có / không đọc được). */
+  async function historyOlderThan(candidate, facts) {
+    if (!history) return 0;
+    const conversation = facts?.conversation || candidate.change.conversation;
+    let timer;
+    const timeout = new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error(`quá ${Math.round(historyTimeoutMs / 1000)}s`)), historyTimeoutMs); });
+    timer.unref?.();
+    try {
+      const messages = await Promise.race([Promise.resolve().then(() => history(conversation, candidate.change)), timeout]);
+      const stamps = (Array.isArray(messages) ? messages : []).map(item => Number(item?.createdAt ?? item?.at) || 0).filter(value => value > 0);
+      const oldest = stamps.length ? Math.min(...stamps) : 0;
+      return oldest > 0 && oldest < candidate.click.at - historyGraceMs ? oldest : 0;
+    } catch (error) {
+      logError(`QR: không đọc được lịch sử Pancake của ${candidate.label} (${error?.message || error}) — vẫn khớp theo kho CRM`);
+      return 0;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function resolve(candidate) {
     if (candidate.state !== 'held') return;
     candidate.state = 'resolving';
@@ -619,8 +750,18 @@ export function createBridgeClickMatcher({
       if (candidate.state !== 'resolving') return; // bị hủy vì mơ hồ trong lúc đọc kho
       if (reason) {
         click.reservedBy = '';
+        // R13 fix2 (A1): đường khác (Botcake/Meta/#mã) đã nhận ra chính lượt quét này → lượt bấm cũng xong việc, không treo cho khách lạ.
+        if (reason.startsWith('đã có referral thẻ QR')) click.consumed = true;
         candidate.state = 'dropped';
         log(`QR: bỏ khớp lượt bấm ${click.code} với ${candidate.label}: ${reason}`);
+        return;
+      }
+      const olderAt = await historyOlderThan(candidate, facts);
+      if (candidate.state !== 'resolving') return;
+      if (olderAt) {
+        click.reservedBy = '';
+        candidate.state = 'dropped';
+        log(`QR: bỏ khớp lượt bấm ${click.code} với ${candidate.label}: Pancake có tin từ ${new Date(olderAt).toISOString()}, trước lượt bấm — khách cũ mà kho CRM chưa có lịch sử`);
         return;
       }
       click.reservedBy = '';
@@ -643,6 +784,19 @@ export function createBridgeClickMatcher({
   async function consider(changes) {
     const held = [];
     if (!enabled()) return held;
+    // R13 fix2 (A5): dòng hệ thống của Page ("… đã trả lời về một bài viết") có thể về SAU tin khách: hội thoại đang giữ lượt bấm
+    // mà nhận dòng này → huỷ khớp (trả lượt bấm); đồng thời nhớ mốc để các lượt giữ khác chờ thêm (afterHold).
+    for (const change of changes || []) {
+      if (change?.type !== 'message' || !change.conversation || !isSourceNotice(change.message)) continue;
+      lastSystemNoticeAt = now();
+      const candidate = candidates.get(change.conversation.id);
+      if (candidate && candidate.click && ['held', 'resolving'].includes(candidate.state)) {
+        drop(candidate, { consume: false });
+        log(`QR: huỷ khớp lượt bấm ${candidate.click.code} với ${candidate.label}: dấu nguồn về muộn ("${String(change.message.text || '').replace(/\s+/g, ' ').slice(0, 50)}")`);
+      }
+    }
+    // R13 fix2 (A1): referral thẻ về (Botcake / #mã) → tiêu lượt bấm của lượt quét đó.
+    await noteReferral(changes);
     const list = (changes || []).filter(change => change?.type === 'message' && !change.updated && !change.standby && !change.referral
       && change.conversation && change.conversation.source !== 'comment' && change.message?.direction === 'incoming');
     if (!list.length) return held;
@@ -669,6 +823,8 @@ export function createBridgeClickMatcher({
       if (reason) {
         // Khách cũ nhắn (ca thường gặp nhất) thì im; hội thoại MỚI nhưng mang dấu nguồn khác thì ghi lại.
         if (usable.length && reason !== 'hội thoại đã có tin trước đó') log(`QR: hội thoại mới ${label} không tính là quét thẻ: ${reason}`);
+        // R13 fix2 (A1): đường khác đã nhận ra lượt quét này (referral thẻ về trước tin) → lượt bấm của nó không treo nữa.
+        if (reason.startsWith('đã có referral thẻ QR')) consumeDangling(latestQrReferralCode(facts?.conversation), at, `hội thoại ${label} đã có referral thẻ`);
         continue;
       }
       if (!usable.length) {
@@ -699,8 +855,17 @@ export function createBridgeClickMatcher({
       held.push(conversation.id);
       log(`QR: khớp lượt bấm ${free.code} với hội thoại mới ${label} (sau ${Math.max(0, Math.round((at - free.at) / 1000))}s), chờ ${Math.round(ambiguityMs / 1000)}s xem có hội thoại mới khác`);
       const afterHold = () => {
-        candidate.holdOver = true;
         if (candidate.state !== 'held') return;
+        // R13 fix2 (A5): Pancake vừa đẩy dòng hệ thống (cho hội thoại khác) trong 60 s qua: dấu nguồn của hội thoại này
+        // cũng có thể về muộn → chờ thêm một lần rồi mới chốt.
+        if (!candidate.extended && lateMarkerExtraMs > 0 && lastSystemNoticeAt > 0 && now() - lastSystemNoticeAt < lateMarkerWindowMs) {
+          candidate.extended = true;
+          log(`QR: chờ thêm ${Math.round(lateMarkerExtraMs / 1000)}s trước khi chốt chào ${label} (Pancake vừa có dòng hệ thống về muộn)`);
+          candidate.timer = setTimeout(afterHold, lateMarkerExtraMs);
+          candidate.timer.unref?.();
+          return;
+        }
+        candidate.holdOver = true;
         if (candidate.botDoneAt) return void resolve(candidate);
         // Bot chưa xong (mô hình chậm): chờ thêm, quá `maxBotWaitMs` thì chào luôn kẻo mất lượt.
         candidate.timer = setTimeout(() => {
@@ -728,6 +893,7 @@ export function createBridgeClickMatcher({
 
   return {
     noteClick,
+    noteReferral,
     consider,
     botDone,
     /** Số lượt bấm còn chờ khớp (cho test và chẩn đoán). */

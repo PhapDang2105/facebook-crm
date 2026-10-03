@@ -4,7 +4,7 @@
 // lại lấy bản cũ. Địa chỉ mới được tách ba cấp lại và ghi chú xử lý tự cập nhật
 // vì order-notes.mjs dựng ghi chú từ chính dữ liệu đơn.
 import { ADDRESS_PICK_CONFLICT_REASON, resolvedAddressFields } from './processing/locations.mjs';
-import { findProductBySku } from './processing/catalog.mjs';
+import { findProductBySku, normalizeText } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
 import { toLocalPhoneLoose } from './phone-warnings.mjs';
@@ -309,6 +309,13 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     if (staffNote !== String(order.staffNote || '')) { order.staffNote = staffNote; changed.push('staffNote'); }
   }
 
+  // R13-fix (T3): nhân viên gỡ ghi chú xử lý gắn trên đơn ("⚠ Có thể trùng đơn LP-…" đã xem và thấy không trùng):
+  // `processingFlags` = danh sách GIỮ LẠI — chỉ bỏ được cờ đang có, không thêm cờ mới qua API.
+  if (Array.isArray(patch.processingFlags)) {
+    const keep = new Set(patch.processingFlags.map(item => String(item ?? '').replace(/\s+/g, ' ').trim()));
+    if (removeProcessingFlag(order, flag => !keep.has(flag))) changed.push('processingFlags');
+  }
+
   if (changed.length) {
     const tracked = isTrackedStaffEdit(order);
     // Đơn đã sửa TRƯỚC khi có `staffEdited` (chỉ có `editedByStaffAt`, không biết sửa nhóm nào): ghi lại mốc
@@ -442,7 +449,7 @@ const basketText = products => (Array.isArray(products) ? products : [])
 /** Mã hành động nhật ký cho một lần sửa: hủy / đổi trạng thái / ẩn khỏi bảng / sửa đơn. */
 export function orderEditAction(changed = [], after = {}) {
   if (changed.includes('processingStatus') && String(after.processingStatus || '') === 'cancelled') return 'order.cancel';
-  const rest = changed.filter(field => !['processingStatus', 'hiddenFromTable', 'staffNote'].includes(field));
+  const rest = changed.filter(field => !['processingStatus', 'hiddenFromTable', 'staffNote', 'processingFlags'].includes(field));
   if (!rest.length && changed.includes('processingStatus')) return 'order.status';
   if (!rest.length && !changed.includes('staffNote') && changed.includes('hiddenFromTable')) return 'order.hide';
   return 'order.update';
@@ -468,6 +475,7 @@ export function describeOrderEdits(before = {}, after = {}, changed = []) {
   if (has('gift')) parts.push('quà');
   if (has('note')) parts.push('ghi chú khách');
   if (has('staffNote')) parts.push('ghi chú xử lý');
+  if (has('processingFlags')) parts.push('gỡ cờ ghi chú xử lý');
   if (has('hiddenFromTable')) parts.push(after.hiddenFromTable ? 'ẩn khỏi bảng' : 'hiện lại trong bảng');
   if ((Number(before.total) || 0) !== (Number(after.total) || 0)) parts.push(`tổng ${moneyText(before.total)} → ${moneyText(after.total)}`);
   if (changed.posReopened) parts.push('đơn đã hủy trên POS — cần lên lại');
@@ -546,6 +554,9 @@ export function applyPosRepush(order, created, { ref, attempt, now = Date.now() 
   removeProcessingFlag(order, POS_REOPEN_FLAG);
   // Dấu "Đã hủy trên POS (đồng bộ lúc …)" của lần hủy cũ chặn đồng bộ hủy về sau: đơn POS mới thì bỏ dấu.
   if (order.note) order.note = String(order.note).replace(/\s*Đã hủy trên POS \(đồng bộ lúc [^)]*\)\.?/g, '').trim();
+  // R13-fix (L4): dấu nội dung của ĐƠN POS CŨ không so được với đơn POS mới — giữ lại thì lượt đồng bộ sau ghi lịch sử
+  // "Sửa trên Pancake POS: sản phẩm…" giả. Bỏ để lượt sau chỉ ghi dấu mới.
+  delete order.posContent;
   order.updatedAt = now;
   return order.pos;
 }
@@ -568,7 +579,8 @@ export function assertManualOrderMoney(order) {
  */
 export const MANUAL_ORDER_DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 
-const manualOrderKey = order => `${String(order?.phone || '').replace(/\D/g, '')}|${basketSignature(order?.products)}|${Math.round(Number(order?.total) || 0)}`;
+// R13-fix (L1): khoá có thêm người nhận + địa chỉ (chuẩn hoá) — cùng SĐT + giỏ + tổng nhưng gửi tới địa chỉ khác là đơn khác.
+const manualOrderKey = order => `${String(order?.phone || '').replace(/\D/g, '')}|${basketSignature(order?.products)}|${Math.round(Number(order?.total) || 0)}|${normalizeText(order?.name)}|${normalizeText(order?.address).replace(/[^a-z0-9]+/g, ' ').trim()}`;
 
 /**
  * Bộ gác đơn tay trùng cho một tiến trình. `find(conversationId, existingOrders, order)` → { id, createdAt } của

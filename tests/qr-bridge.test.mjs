@@ -42,9 +42,10 @@ test('nhận diện máy và trình duyệt: Zalo, Facebook, Instagram, TikTok, 
   assert.deepEqual(classifyUserAgent(''), { platform: 'khac', browser: 'khac', inApp: false });
 });
 
-test('chỉ Chrome hệ thống trên Android được chuyển hướng 302 thẳng', () => {
-  assert.equal(shouldRedirectDirectly(classifyUserAgent(agents.androidChrome)), true);
-  for (const key of Object.keys(agents).filter(name => name !== 'androidChrome')) {
+// R13 fix2 (A2): trước đây khẳng định "Chrome Android được 302 thẳng" — chính nhánh đó biến HEAD/crawler mang UA Android thành
+// "lượt bấm chờ khớp" và khách lạ nhận ưu đãi. Nay không máy nào được chuyển hướng thẳng: mọi máy qua trang đệm.
+test('không máy nào được chuyển hướng 302 thẳng (Android Chrome cũng qua trang đệm — R13 fix2 A2)', () => {
+  for (const key of Object.keys(agents)) {
     assert.equal(shouldRedirectDirectly(classifyUserAgent(agents[key])), false, `${key} phải nhận trang đệm`);
   }
 });

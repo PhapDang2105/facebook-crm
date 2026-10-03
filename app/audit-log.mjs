@@ -45,6 +45,7 @@ export const AUDIT_ACTIONS = Object.freeze({
   'customer.note': 'Ghi chú khách',
   'customer.export': 'Tải danh sách khách',
   'report.export': 'Tải CSV báo cáo',
+  'report.lark_conversation': 'Gửi báo cáo Lark',
   'order.create': 'Tạo đơn',
   'order.update': 'Sửa đơn',
   'order.status': 'Đổi trạng thái đơn',

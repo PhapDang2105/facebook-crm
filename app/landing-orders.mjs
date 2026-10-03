@@ -16,7 +16,7 @@ import { findProductBySku, matchProduct, normalizeText } from './processing/cata
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { attachPhoneWarning, fetchPosCustomerAddresses, toLocalPhoneLoose } from './phone-warnings.mjs';
-import { STAFF_EDIT_GROUPS, addProcessingFlag, moneyText, spreadPaidPrices, staffEditedGroups } from './order-edits.mjs';
+import { STAFF_EDIT_GROUPS, addProcessingFlag, moneyText, removeProcessingFlag, spreadPaidPrices, staffEditedGroups } from './order-edits.mjs';
 import { isUsableStreet, lostHouseNumbers, normalizeLocationKey, resolveAddress } from './processing/locations.mjs';
 import { inferAddress } from './processing/address-ai.mjs';
 import { appendOrderToArchive, archiveMonth } from './order-archive.mjs';
@@ -85,6 +85,9 @@ export function updateLandingStore(mutate) {
   return enqueueWrite(async () => {
     const store = await readLandingStore();
     const result = await mutate(store);
+    // R13-fix (T3): cờ "⚠ Có thể trùng đơn LP-…" tự gỡ khi đơn gốc đã hủy/xoá/xác nhận hay đơn mang cờ đã chốt —
+    // mọi đường ghi kho (PATCH, DELETE, hủy theo POS) đều qua đây.
+    sweepDuplicateFlags(store.orders);
     await moveOverflowToArchive(store);
     await persistStore(store);
     return result;
@@ -261,6 +264,8 @@ const FIELD_PATTERNS = {
   quantity: [/^(so ?luong|quantity|qty|sl)$/],
   price: [/^(gia|price|unit ?price|don gia)$/],
   total: [/^(tong( tien)?|total( ?price| ?amount)?|amount|thanh tien|tong cong)$/],
+  // R13-fix (L5): tiền khách đã chuyển khoản (đơn kéo từ POS: pos-sync.posOrderToPayload mang transfer_money → prepaid).
+  prepaid: [/^(prepaid|tien coc|dat coc|da chuyen khoan|tra truoc)$/],
   note: [/^(ghi ?chu|note|notes|message|loi nhan|yeu cau|comment|content|noi dung|textarea( input)?( \d+)?|text ?input( \d+)?)$/],
   coupon: [/^(coupon|ma giam gia|voucher|ma khuyen mai)$/],
   id: [/^(order ?id|ma don( hang)?|id|submission ?id|entry ?id|uuid|order ?code|ma don hang)$/],
@@ -432,6 +437,7 @@ export function normalizeLandingPayload(payload = {}) {
     if (!lines.length && matchProduct(split.product)) lines = [{ product: split.product, sku: '', quantity: split.quantity || pick(fields, 'quantity'), price: '' }];
   }
   const total = money(pick(fields, 'total'));
+  const prepaid = money(pick(fields, 'prepaid'));
   const coupon = pick(fields, 'coupon');
   // Ghi chú chỉ là lời khách và mã giảm giá; ô lựa chọn của form (select_1:
   // "1 Túi Dùng Thử"...) là dữ liệu sản phẩm, không phải lời nhắn.
@@ -460,7 +466,7 @@ export function normalizeLandingPayload(payload = {}) {
     .filter(field => field.value && !recognized.some(kind => FIELD_PATTERNS[kind].some(pattern => pattern.test(field.key))))
     .filter(field => !/^(\d+|name|title|label)$/.test(field.key) && !insideLineItem(field))
     .map(field => `${field.path}=${field.value}`);
-  return { name, phone, phoneRaw, address, lines, total, note, externalId, campaign, campaignSummary, pageUrl, insertedAt, rawProducts, formStatus, incomplete, unknown };
+  return { name, phone, phoneRaw, address, lines, total, prepaid, note, externalId, campaign, campaignSummary, pageUrl, insertedAt, rawProducts, formStatus, incomplete, unknown };
 }
 
 /** Khớp từng dòng với danh mục để lấy SKU kho và giá; không khớp thì giữ tên khách chọn. */
@@ -522,6 +528,8 @@ export function buildLandingOrder(payload, { now = Date.now(), id = randomUUID()
     payment: 'COD',
     freeShipping,
     shippingFee,
+    // R13-fix (L5): phần khách đã chuyển khoản (đơn landing kéo từ POS có đặt cọc).
+    ...(parsed.prepaid > 0 ? { prepaid: parsed.prepaid } : {}),
     // Ghi chú chỉ giữ lời khách (yêu cầu giao, mã giảm giá); nguồn/chiến dịch
     // nằm ở landing.campaign, việc cần làm do order-notes.mjs dựng.
     note: parsed.note,
@@ -726,7 +734,34 @@ export function flagPossibleDuplicate(orders, order) {
   if (!twin) return null;
   // Đơn sau của cặp nhận ghi chú (đơn kéo từ POS mang ngày tạo thật có thể CŨ hơn đơn đang giữ).
   const [earlier, later] = (Number(twin.createdAt) || 0) > at ? [order, twin] : [twin, order];
-  return addProcessingFlag(later, `⚠ Có thể trùng đơn LP-${earlier.id}`) ? later : null;
+  return addProcessingFlag(later, `${DUPLICATE_FLAG_PREFIX}${earlier.id}`) ? later : null;
+}
+
+export const DUPLICATE_FLAG_PREFIX = '⚠ Có thể trùng đơn LP-';
+/** Đơn đã chốt: nhân viên đã xem — Đã xác nhận hay Hủy. */
+const isSettledOrder = order => ['confirmed', 'cancelled'].includes(String(order?.processingStatus || '')) || order?.status === 'Hủy';
+
+/**
+ * R13-fix (T3): gỡ cờ "⚠ Có thể trùng đơn LP-<mã>" khi đơn gốc không còn trong kho (đã xoá), đã hủy hay Đã xác nhận,
+ * hoặc chính đơn mang cờ đã Đã xác nhận/Hủy (nhân viên đã xem). Trước đây cờ không bao giờ mất, Tổng quan đếm mãi.
+ * Trả về số đơn đã gỡ cờ.
+ */
+export function sweepDuplicateFlags(orders) {
+  const list = Array.isArray(orders) ? orders : [];
+  const byId = new Map(list.map(order => [String(order?.id), order]));
+  let changed = 0;
+  for (const order of list) {
+    if (!Array.isArray(order?.processingFlags)) continue;
+    const settled = isSettledOrder(order);
+    const removed = removeProcessingFlag(order, flag => {
+      if (!String(flag).startsWith(DUPLICATE_FLAG_PREFIX)) return false;
+      if (settled) return true;
+      const twin = byId.get(String(flag).slice(DUPLICATE_FLAG_PREFIX.length).trim());
+      return !twin || isSettledOrder(twin);
+    });
+    if (removed) changed += 1;
+  }
+  return changed;
 }
 
 export async function recordLandingOrder(payload, context = {}) {

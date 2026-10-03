@@ -35,7 +35,8 @@ const MANAGER_ONLY_ROUTES = [
   // Quyết định chủ shop 01/10: tải toàn bộ danh sách khách ra tệp, đồng bộ quảng cáo và Cố vấn AI (tốn lượt gọi) chỉ Quản trị.
   { route: 'GET /api/customers/export.csv|audience.csv', open: "if (request.method === 'GET' && (url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {" },
   { route: 'POST /api/campaigns/sync', open: "if (request.method === 'POST' && url.pathname === '/api/campaigns/sync') {" },
-  { route: 'POST /api/campaigns/insights (Cố vấn AI)', open: "if (request.method === 'POST' && url.pathname === '/api/campaigns/insights') {" }
+  { route: 'POST /api/campaigns/insights (Cố vấn AI)', open: "if (request.method === 'POST' && url.pathname === '/api/campaigns/insights') {" },
+  { route: 'POST /api/reports/lark/conversation', open: "if (request.method === 'POST' && url.pathname === '/api/reports/lark/conversation') {" }
 ];
 
 /** Vài dòng đầu của khối route (sau `{` mở khối). */

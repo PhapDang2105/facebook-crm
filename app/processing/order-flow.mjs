@@ -354,7 +354,7 @@ export function cleanAddressText(raw) {
 /** Tin thanh toán ("gửi stk", "ck", "chuyển khoản", "lên đơn 0đ", "đã chuyển"): không bao giờ là sửa đơn. */
 export function isPaymentMessage(text) {
   const s = normalizeIntentText(text);
-  return /\b(stk|so tai khoan|tai khoan|ck|chuyen khoan|chuyen tien|da chuyen|da ck|bank|banking|0d|0 d|0 dong|0đ|thanh toan truoc|tra truoc)\b/.test(s)
+  return /\b(stk|so tai khoan|tai khoan|ck|chuyen khoan|chuyen tien|da chuyen|da ck|bank|banking|0d|0 d|0 dong|thanh toan truoc|tra truoc)\b/.test(s)
     || /(?<![\d.])0\s*(?:đ|d|vnd|dong)(?![\p{L}\d])/iu.test(String(text || ''));
 }
 

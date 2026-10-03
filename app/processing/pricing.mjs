@@ -30,10 +30,6 @@ export function shippingFeeForKey(key, { livestream = false } = {}) {
   return giftsForKey(key, { livestream }).some(isFreeShippingGift) ? 0 : getShippingFee();
 }
 
-export function giftTextForKey(key, { livestream = false } = {}) {
-  return giftsForKey(key, { livestream }).map(gift => gift.name).join(' + ');
-}
-
 const unpriceable = (reason, totalQuantity = 0) => ({ priceable: false, reason, total: 0, subtotal: 0, listSubtotal: 0, discount: 0, shippingFee: 0, gift: '', gifts: [], giftNote: '', totalQuantity, lines: [] });
 
 /**
@@ -203,43 +199,4 @@ export function describeGiftTable() {
   }
   if (!groups.size) return ['- Hiện chưa có quà tặng.'];
   return [...groups.entries()].map(([rule, names]) => `- ${names.join(' + ')}: ${rule}`);
-}
-
-function formatVnd(value) {
-  return `${money(value).toLocaleString('vi-VN')}đ`;
-}
-
-/**
- * Câu tóm tắt đơn kiểu nhân viên (Thúy Hằng), cho mẫu xác nhận đơn:
- *
- *   Dạ đơn hàng của mình gồm:
- *   • 2 Granola Túi Vàng 350g
- *   • 1 Combo 10 gói Cam
- *   Tổng giá: 527.000đ
- *   🎉 Ưu đãi còn: 477.000đ
- *   ✅ Miễn phí vận chuyển
- *   🎁 Tặng kèm Bộ bát gáo dừa + Muỗng dừa
- *
- * Nhận giỏ [{ sku | product | name, quantity }] hoặc kết quả priceBasket sẵn.
- * Không giảm giá thì bỏ dòng "Ưu đãi còn"; còn phí ship thì ghi phí + tổng thanh
- * toán. Quà miễn ship không lặp ở dòng quà. Giỏ không tính được giá → ''.
- * Tuỳ chọn: { livestream, intro (câu mở đầu), gifts (danh sách quà thay cho quà
- * theo bảng, vd. sau applyGiftSwap) }.
- */
-export function formatOrderSummary(basket, { livestream = false, intro = 'Dạ đơn hàng của mình gồm:', gifts = null } = {}) {
-  const priced = Array.isArray(basket) ? priceBasket(basket, { livestream }) : basket;
-  if (!priced?.priceable || !priced.lines?.length) return '';
-  const lines = [intro, ...priced.lines.map(line => `• ${line.quantity} ${line.name}`)];
-  const listSubtotal = priced.listSubtotal || priced.subtotal;
-  lines.push(`Tổng giá: ${formatVnd(listSubtotal)}`);
-  if (priced.subtotal < listSubtotal) lines.push(`🎉 Ưu đãi còn: ${formatVnd(priced.subtotal)}`);
-  if (priced.shippingFee > 0) {
-    lines.push(`🚚 Phí vận chuyển: ${formatVnd(priced.shippingFee)}`);
-    lines.push(`💰 Tổng thanh toán: ${formatVnd(priced.total)}`);
-  } else {
-    lines.push('✅ Miễn phí vận chuyển');
-  }
-  const giftNames = (Array.isArray(gifts) ? gifts : priced.gifts || []).filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).filter(Boolean);
-  if (giftNames.length) lines.push(`🎁 Tặng kèm ${giftNames.join(' + ')}`);
-  return lines.join('\n');
 }

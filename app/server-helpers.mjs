@@ -235,6 +235,18 @@ export function createStaffNoteWriter({ findCustomerById, addCustomerNote, onSav
 // ===== Giữ chỗ có hạn =====
 
 /**
+ * Bản ghi trạng thái bot `patch` (saveBotState) có đổi phần khung khách đang hiển thị không: bật/tắt bot,
+ * lỗi bot gần nhất. Có thì máy chủ phát 'customer-panel' để hội thoại đang mở tải lại nút bot/cảnh báo.
+ */
+export function botPanelStateChanged(conversation, patch) {
+  if (!conversation || !patch) return false;
+  if ('botEnabled' in patch && (patch.botEnabled !== false) !== (conversation.botEnabled !== false)) return true;
+  if ('botLastError' in patch && String(patch.botLastError || '') !== String(conversation.botLastError || '')) return true;
+  if ('botLastErrorAt' in patch && (Number(patch.botLastErrorAt) || 0) !== (Number(conversation.botLastErrorAt) || 0)) return true;
+  return false;
+}
+
+/**
  * Sổ giữ chỗ trong RAM (mục báo vận đơn giao cho cầu nối Pancake): `take(key)` true khi giữ được (chưa ai giữ hoặc
  * đã hết hạn), `release(key)` bỏ giữ, `held(key)` đang bị giữ. `force` ở take: giữ lại dù đang bị giữ.
  */

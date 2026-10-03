@@ -944,6 +944,11 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false, 
   for (const change of changes) {
     publishMessagingEvent(change.conversation ? { ...change, conversation: publicConversation(change.conversation) } : change);
   }
+  // Bot tự tắt vì nhân viên nhắn trong Pancake: hội thoại đang mở tải lại khung khách (nút bot), vì
+  // publicConversation không mang trạng thái bot và hộp thư chỉ tải lại khung khi có 'customer-panel'.
+  for (const item of automaticAudits) {
+    if (item.kind === 'bot') publishMessagingEvent({ type: 'customer-panel', conversationId: item.conversation.id });
+  }
   return changes;
 }
 

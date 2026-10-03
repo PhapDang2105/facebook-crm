@@ -257,12 +257,14 @@ async function notifyCustomers(deps, { now, summary, log }) {
         }
       }
     }
-    // Ghi dấu là việc sổ sách (tin gửi đi đã ghi ngay ở đường gửi): ghi gộp (INT-08). Lượt sau idempotent theo notifiedStage.
+    // Tin đã (hoặc có thể đã) tới khách: ghi dấu NGAY (R1-06) — ghi gộp mà máy chủ sập trong khoảng chờ thì lượt sau
+    // không thấy notifiedStage và nhắn lại. Không gửi gì (mẫu tắt, lỗi chắc chắn): ghi gộp (INT-08), mất thì chỉ thử lại.
+    const delivered = mark.via === 'bot' && !mark.error;
     await deps.updateMessagingStore(current => {
       const found = findOrder(current, conversation.id, order.id);
       if (found?.order.shipment?.trackingNumber === order.shipment.trackingNumber) markShipmentNotified(found.order.shipment, mark);
       return null;
-    }, { defer: true });
+    }, { defer: !delivered });
   }
 }
 

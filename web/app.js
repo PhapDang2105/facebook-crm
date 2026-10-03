@@ -5452,13 +5452,27 @@ async function loadRemoteConversations(channelId) {
 }
 
 /**
- * Gộp tin đã tải từ máy chủ với tin SSE đẩy vào chỗ giữ tạm trong lúc đang tải (cùng id/mid thì
- * lấy bản tải về, tin chỉ có ở SSE thì giữ lại), xếp theo giờ.
+ * Gộp tin đã tải từ máy chủ với tin SSE đẩy vào chỗ giữ tạm trong lúc đang tải, xếp theo giờ. Tin chỉ
+ * có ở SSE thì giữ lại. Cùng id/mid thì gộp từng trường: bản SSE (có thể mới hơn bản máy chủ đọc lúc
+ * bắt đầu tải) thắng ở trường có giá trị, trừ trạng thái lùi lại (bong bóng "đang gửi" không đè "đã gửi");
+ * trường bản SSE bỏ trống (ảnh CDN, tệp đính kèm…) giữ theo bản tải về.
  */
 function mergeFetchedMessages(fetched, pending) {
   const items = Array.isArray(fetched) ? [...fetched] : [];
+  const statusRank = { sending: 0, failed: 1, sent: 1, received: 1, delivered: 2, read: 3, deleted: 4 };
+  const rank = status => statusRank[status] ?? 1;
+  const isEmpty = value => value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length);
   for (const message of Array.isArray(pending) ? pending : []) {
-    if (!items.some(item => item.id === message.id || (message.mid && item.mid === message.mid))) items.push(message);
+    const index = items.findIndex(item => item.id === message.id || (message.mid && item.mid === message.mid));
+    if (index < 0) { items.push(message); continue; }
+    const merged = { ...items[index] };
+    for (const [key, value] of Object.entries(message)) {
+      // Mã tin giữ theo máy chủ (bong bóng tạm có mã tạm, khớp theo mid).
+      if (isEmpty(value) || ((key === 'id' || key === 'mid') && !isEmpty(merged[key]))) continue;
+      if (key === 'status' && !isEmpty(merged.status) && rank(value) < rank(merged.status)) continue;
+      merged[key] = value;
+    }
+    items[index] = merged;
   }
   return items.sort((first, second) => (first.createdAt || 0) - (second.createdAt || 0));
 }

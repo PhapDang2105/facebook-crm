@@ -10,6 +10,7 @@ import { buildPlainXlsx } from './xlsx-export.mjs';
 import { fillTemplateSheet } from './xlsx-template.mjs';
 import { createWriteQueue, drainAllWrites, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { auditFiltersFrom, canReadAudit, contentEtag, conversationOrdersFingerprint, etagMatches, createLeaseBook, createSeenOnce, fileVersionStamp, friendlyAdsError, friendlyAdsStatus, friendlyAiTestError, friendlyCampaignInsights, createStaffNoteWriter, hasStaffSession, pancakeWebhookDecision, publicNoticePage, purchaseLabelFingerprint, qrVisitorKey, staticCacheControl } from './server-helpers.mjs';
+import { botPanelStateChanged } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
@@ -1360,10 +1361,13 @@ const chatbotDependencies = {
     // Thẻ bot gắn và bot tự tắt (chuyển CSKH) vào lịch sử hội thoại (nhật ký, người làm 'bot').
     let labelChange = null;
     let botOff = null;
+    let panelChanged = false;
     const saved = await updateMessagingStore(store => {
       const conversation = store.conversations.find(item => item.id === id);
       if (!conversation) return null;
       const botWasOn = conversation.botEnabled !== false;
+      // Khung khách (nút bot, cảnh báo "Bot chưa trả lời được") chỉ tải lại theo 'customer-panel'.
+      panelChanged = botPanelStateChanged(conversation, botState);
       Object.assign(conversation, botState);
       if (botWasOn && botState.botEnabled === false) botOff = { id: conversation.id, name: conversation.name || '' };
       if (addLabels.length) {
@@ -1380,6 +1384,7 @@ const chatbotDependencies = {
     const eventNames = { order: 'chốt đơn', handoff: 'chuyển nhân viên', complaint: 'khiếu nại', warranty: 'bảo hành', update: 'khách đổi đơn', cancel: 'khách hủy đơn', livestream: 'khách livestream', wholesale: 'khách sỉ', bad: 'khách xấu' };
     if (labelChange) appendLabelAudit({ actor: AUTOMATED_ACTORS.bot, ...labelChange, labelDefs, reason: `bot: ${addLabelEvents.map(event => eventNames[event] || event).join(', ')}` });
     if (botOff) appendBotToggleAudit({ actor: AUTOMATED_ACTORS.bot, conversation: botOff, enabled: false, reason: 'bot chuyển nhân viên' });
+    if (saved && panelChanged) publishMessagingEvent({ type: 'customer-panel', conversationId: saved.id });
     return saved;
   }
 };
@@ -3817,7 +3822,8 @@ process.on('uncaughtException', error => {
 //  2) gửi nốt lượt chào QR đang hẹn (tối đa 5 giây, đăng ký ở trên);
 //  3) chờ MỌI hàng ghi kho nhỏ (landing, tệp khách, cảnh báo SĐT, cài đặt, kho lưu trữ đơn…), nhật ký hoạt động
 //     và nhật ký quyết định của bot ghi xong;
-//  4) ghi nốt kho hội thoại (gồm các lượt sửa còn xếp hàng) rồi mới thoát. Hết 10 giây thì thoát dù chưa xong.
+//  4) ghi nốt kho hội thoại (gồm các lượt sửa còn xếp hàng) rồi mới thoát. Bước 1–3 tối đa 4 giây (quá thì bỏ chờ,
+//     sang bước 4 luôn); cả lượt tắt tối đa 30 giây (systemd chờ 90 giây) rồi thoát dù chưa xong.
 installMessagingStoreShutdownFlush({
   prepare: async () => {
     server.close();

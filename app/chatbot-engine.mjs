@@ -1386,11 +1386,33 @@ export function isActiveOrder(order) {
   return Boolean(order) && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy';
 }
 
+// Số lượt (khách khác nhau) của một lô chạy cùng lúc.
+export const CHATBOT_BATCH_CONCURRENCY = 3;
+
+/** Bộ giới hạn nhỏ: tối đa `max` tác vụ async chạy cùng lúc, còn lại chờ theo thứ tự xin. */
+function createLimiter(max) {
+  let active = 0;
+  const waiting = [];
+  const next = () => {
+    if (active >= max || !waiting.length) return;
+    active += 1;
+    const { task, resolve, reject } = waiting.shift();
+    Promise.resolve().then(task).then(resolve, reject).finally(() => { active -= 1; next(); });
+  };
+  return task => new Promise((resolve, reject) => { waiting.push({ task, resolve, reject }); next(); });
+}
+
 export async function processChatbotChanges(changes, dependencies) {
   const { readSettings } = dependencies;
   const settings = await readSettings();
   if (!settings.enabled) return [];
   const results = [];
+  // Lô nhiều tin (đồng bộ bù, backlog sau khởi động, webhook nhiều sự kiện): khách KHÁC NHAU chạy song song, tối đa
+  // CHATBOT_BATCH_CONCURRENCY lượt cùng lúc (giữ hạn mức Vertex) — khách B không phải chờ lượt chậm của khách A
+  // (chờ gộp tin, chờ giỏ Shop, LLM thử lại). Tin của CÙNG một khách vẫn nối tiếp đúng thứ tự qua hàng đợi theo khách:
+  // xếp hàng ngay khi duyệt lô, chỉ xin chỗ chạy khi tới lượt trong hàng của khách đó.
+  const limit = createLimiter(CHATBOT_BATCH_CONCURRENCY);
+  const runs = [];
   for (const change of changes) {
     // `updated`: tin cũ vừa có thêm dữ liệu (ảnh có URL) — hộp thư vẽ lại, bot không trả lời lần hai.
     if (change.type !== 'message' || change.message?.direction !== 'incoming' || !change.conversation || change.updated) continue;
@@ -1398,18 +1420,15 @@ export async function processChatbotChanges(changes, dependencies) {
     const inFlightKey = `${change.conversation.id}:${change.message.id || change.message.mid || change.message.createdAt}`;
     if (inFlightMessages.has(inFlightKey)) { results.push({ conversationId: change.conversation.id, skipped: 'đang xử lý tin này' }); continue; }
     inFlightMessages.add(inFlightKey);
-    try {
-      // Hàng đợi theo KHÁCH (pageId:psid): bình luận và hộp thư của cùng một
-      // người nối tiếp nhau, hai bình luận liền nhau không chạy song song.
-      const queueKey = change.conversation.pageId && change.conversation.psid ? `${change.conversation.pageId}:${change.conversation.psid}` : change.conversation.id;
-      await queueForConversation(queueKey, () => answerChange(change, settings, results, dependencies));
-    } catch (error) {
+    // Hàng đợi theo KHÁCH (pageId:psid): bình luận và hộp thư của cùng một
+    // người nối tiếp nhau, hai bình luận liền nhau không chạy song song.
+    const queueKey = change.conversation.pageId && change.conversation.psid ? `${change.conversation.pageId}:${change.conversation.psid}` : change.conversation.id;
+    runs.push(queueForConversation(queueKey, () => limit(() => answerChange(change, settings, results, dependencies)))
       // Một hội thoại hỏng (kho tin không ghi được…) không làm rơi các tin còn lại trong lô.
-      results.push({ conversationId: change.conversation.id, error: error.message });
-    } finally {
-      inFlightMessages.delete(inFlightKey);
-    }
+      .catch(error => { results.push({ conversationId: change.conversation.id, error: error.message }); })
+      .finally(() => { inFlightMessages.delete(inFlightKey); }));
   }
+  await Promise.all(runs);
   // Bot im (nhân viên vừa trả lời, gộp tin, lặp…): ghi một dòng để rà được về sau.
   for (const item of results) if (item.skipped && item.skipped !== 'gộp với tin sau') console.log(`Bot bỏ qua: ${item.skipped} (${item.conversationId})`);
   return results;

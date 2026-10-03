@@ -497,12 +497,23 @@ export async function fetchPancakeMessages(conversationId, { pages = 1 } = {}, c
  * vô hại. Trả về số hội thoại đã duyệt và số tin mới ghi.
  */
 let activeSync = null;
-export function syncPancakeConversations(options = {}, config = defaultConfig, fetchImpl = fetch) {
-  // Vòng 10 phút và nút Đồng bộ trong CRM dùng chung một lượt đang chạy, không
-  // chạy chồng (mỗi lượt là hàng trăm lần gọi Pancake trong hạn 5 lần/giây).
-  if (activeSync) return activeSync;
-  activeSync = runPancakeSync(options, config, fetchImpl).finally(() => { activeSync = null; });
-  return activeSync;
+// Phần dữ liệu của tuỳ chọn (bỏ hàm gọi lại): hai lời gọi cùng dữ liệu là cùng một yêu cầu.
+const syncOptionsKey = options => JSON.stringify(Object.entries(options || {}).filter(([, value]) => typeof value !== 'function').sort(([first], [second]) => first.localeCompare(second)));
+export async function syncPancakeConversations(options = {}, config = defaultConfig, fetchImpl = fetch) {
+  // Vòng 10 phút và nút Đồng bộ trong CRM không chạy chồng (mỗi lượt là hàng trăm lần gọi Pancake trong
+  // hạn 5 lần/giây). Cùng yêu cầu (cùng tuỳ chọn) thì dùng chung lượt đang chạy; yêu cầu KHÁC (INT-11: đồng bộ
+  // tay một Page, số hội thoại khác…) thì chờ lượt đang chạy xong rồi chạy đúng lượt mình yêu cầu — trước đây
+  // nhận nhầm kết quả của lượt nền và không làm gì.
+  const key = syncOptionsKey(options);
+  while (activeSync) {
+    if (activeSync.key === key && activeSync.config === config && activeSync.fetchImpl === fetchImpl) return activeSync.promise;
+    await activeSync.promise.catch(() => {});
+  }
+  const promise = runPancakeSync(options, config, fetchImpl).finally(() => {
+    if (activeSync?.promise === promise) activeSync = null;
+  });
+  activeSync = { key, config, fetchImpl, promise };
+  return promise;
 }
 
 /**

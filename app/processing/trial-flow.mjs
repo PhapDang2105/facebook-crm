@@ -20,7 +20,6 @@ import { looksLikeAddressMessage, maskPlaceGia } from './order-flow.mjs';
 import { isBasketStep } from './pending-order.mjs';
 
 const HOUR = 60 * 60 * 1000;
-export const TRIAL_SCENARIO_NOTE = 'Ưu đãi dùng thử bám đuổi (1 túi miễn phí vận chuyển)';
 // Chính sách bám đuổi 36 giờ (chủ shop 26/09): ngoài 1 túi miễn ship, khách lấy combo 2 túi lớn được tặng
 // thêm 1 bát gáo dừa (bảng quà chung chỉ tặng bộ bát + muỗng từ 3 túi). Quà này chỉ áp trong cửa sổ ưu đãi.
 export const PROMO_BOWL_GIFT = { name: 'Bát gáo dừa – ưu đãi bám đuổi', sku: 'BGD', minQuantity: 2, active: true, weight: 10 };

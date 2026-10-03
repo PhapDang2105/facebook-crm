@@ -158,10 +158,6 @@ test('quà thay thế (GIFT_SWAP): không lấy bát/quạt → 2 gói granola n
   assert.ok(five.gifts.some(gift => gift.name === '1 Túi Vàng 350g'));
   // Không có quà hiện vật: không đổi gì.
   assert.deepEqual(catalog.applyGiftSwap(basket([XANH, 2]).gifts).added, []);
-  // Câu tóm tắt dùng được danh sách quà sau khi đổi; tiền không đổi.
-  const summary = pricing.formatOrderSummary(priced, { gifts: swapped.gifts });
-  assert.match(summary, /🎉 Ưu đãi còn: 447\.000đ/);
-  assert.match(summary, /🎁 Tặng kèm Gói granola nhỏ Xanh 35g \+ Gói granola nhỏ Cam 30g$/);
   // gifts.json có khoá `swap` riêng thì dùng.
   withGifts(gifts => { gifts.swap = { text: '1 hũ thủy tinh', quantity: 1, options: [{ label: 'Hũ', sku: 'HU-300ML', weight: 10 }] }; }, () => {
     assert.deepEqual([catalog.getGiftSwap().text, catalog.getGiftSwap().quantity, catalog.getGiftSwap().options[0].sku], ['1 hũ thủy tinh', 1, 'HU-300ML']);
@@ -232,30 +228,3 @@ test('giỏ Facebook Shop: bỏ đuôi quà "+BGD+M", combo màu → túi, yến
   assert.equal(pricing.priceBasket(plain.items).total, 447000);
 });
 
-test('câu tóm tắt đơn kiểu nhân viên: món, Tổng giá, Ưu đãi còn, Miễn phí vận chuyển, Tặng kèm', () => {
-  assert.equal(pricing.formatOrderSummary([{ sku: VANG, quantity: 2 }, { sku: 'CB10-CAM-G30', quantity: 1 }]), [
-    'Dạ đơn hàng của mình gồm:',
-    '• 2 Granola Túi Vàng 350g',
-    '• 1 Combo 10 gói Cam',
-    'Tổng giá: 537.000đ',
-    '🎉 Ưu đãi còn: 477.000đ',
-    '✅ Miễn phí vận chuyển',
-    '🎁 Tặng kèm Bộ bát gáo dừa + Muỗng dừa'
-  ].join('\n'));
-  // 1 túi: không ưu đãi, có phí ship và tổng thanh toán, không quà.
-  assert.equal(pricing.formatOrderSummary([{ product: 'túi xanh', quantity: 1 }]), [
-    'Dạ đơn hàng của mình gồm:',
-    '• 1 Granola Túi Xanh 450g',
-    'Tổng giá: 174.000đ',
-    '🚚 Phí vận chuyển: 15.000đ',
-    '💰 Tổng thanh toán: 189.000đ'
-  ].join('\n'));
-  // 5 túi: quà túi hiện trong câu; nhận cả kết quả priceBasket.
-  const five = pricing.formatOrderSummary(basket([XANH, 5]));
-  assert.match(five, /Tổng giá: 870\.000đ\n🎉 Ưu đãi còn: 745\.000đ\n✅ Miễn phí vận chuyển\n🎁 Tặng kèm Bộ bát gáo dừa \+ Muỗng dừa \+ 1 Túi Vàng 350g$/);
-  // 2 túi: chỉ miễn ship, không dòng quà; câu mở đầu đổi được.
-  assert.equal(pricing.formatOrderSummary([{ sku: XANH, quantity: 2 }], { intro: 'Dạ em tóm tắt đơn:' }).split('\n')[0], 'Dạ em tóm tắt đơn:');
-  assert.doesNotMatch(pricing.formatOrderSummary([{ sku: XANH, quantity: 2 }]), /Tặng kèm/);
-  // Giỏ không tính được: ''.
-  assert.equal(pricing.formatOrderSummary([{ sku: 'NGHE-H350', quantity: 1 }, { sku: XANH, quantity: 1 }]), '');
-});

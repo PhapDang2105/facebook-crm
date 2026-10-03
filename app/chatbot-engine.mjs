@@ -1,6 +1,6 @@
 import { buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, renderChatbotReply, sanitizeModelAnswer } from './chatbot-templates.mjs';
 import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
-import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
+import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, loadLocationIndex, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { AD_MISMATCH_COMPLAINT, autoLabelEventsFor, foldVietnamese, isComplaint, mentionsOtherSeller, shortBadTaste } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
@@ -35,6 +35,8 @@ export async function warmUpChatbotModels() {
   let intent = false;
   let cascade = false;
   try { intent = Boolean(loadIntentModel()); } catch (error) { console.warn(`Không nạp sẵn được mô hình nhỏ: ${error.message}`); }
+  // Chỉ mục địa giới (~1,5 s đọc CSV đồng bộ), danh mục sản phẩm và quà: nạp sẵn thay vì chặn tin địa chỉ đầu tiên.
+  try { loadLocationIndex(); getCatalogProducts(); getGifts(); } catch (error) { console.warn(`Không nạp sẵn được địa giới/danh mục: ${error.message}`); }
   try {
     const cascadeModule = await loadCascadeModule();
     cascade = Boolean(typeof cascadeModule?.loadCascadeModel === 'function' && cascadeModule.loadCascadeModel());
@@ -709,8 +711,10 @@ function buildMemoryTurns({ recentMessages = [], message, settings }) {
   // Bản cũ (mặc định): từng tin, tin Page cắt 160 ký tự, tin khách 300. Bản gọn
   // (settings.contextTrim.memory) chưa bật: A/B 25/09 chưa chứng minh giữ độ chính xác.
   if (settings?.contextTrim?.memory !== true) {
+    // Bỏ tin quảng cáo / biên nhận đơn / tệp đính kèm / tin hệ thống (memoryNoise) như bản gọn — chỉ là nhiễu cho mô hình.
     return recentMessages
-      .filter(item => item && item.id !== message?.id && String(item.text || '').trim())
+      .filter(item => item && item.id !== message?.id && String(item.text || '').trim()
+        && !['ad', 'order-receipt', 'attachment'].includes(item.type) && !memoryNoise.test(String(item.text).replace(/\s+/g, ' ').trim()))
       .slice(-limit)
       .map(item => {
         const text = String(item.text).replace(/\s+/g, ' ').trim();
@@ -1384,11 +1388,33 @@ export function isActiveOrder(order) {
   return Boolean(order) && String(order.processingStatus || '') !== 'cancelled' && order.status !== 'Hủy';
 }
 
+// Số lượt (khách khác nhau) của một lô chạy cùng lúc.
+export const CHATBOT_BATCH_CONCURRENCY = 3;
+
+/** Bộ giới hạn nhỏ: tối đa `max` tác vụ async chạy cùng lúc, còn lại chờ theo thứ tự xin. */
+function createLimiter(max) {
+  let active = 0;
+  const waiting = [];
+  const next = () => {
+    if (active >= max || !waiting.length) return;
+    active += 1;
+    const { task, resolve, reject } = waiting.shift();
+    Promise.resolve().then(task).then(resolve, reject).finally(() => { active -= 1; next(); });
+  };
+  return task => new Promise((resolve, reject) => { waiting.push({ task, resolve, reject }); next(); });
+}
+
 export async function processChatbotChanges(changes, dependencies) {
   const { readSettings } = dependencies;
   const settings = await readSettings();
   if (!settings.enabled) return [];
   const results = [];
+  // Lô nhiều tin (đồng bộ bù, backlog sau khởi động, webhook nhiều sự kiện): khách KHÁC NHAU chạy song song, tối đa
+  // CHATBOT_BATCH_CONCURRENCY lượt cùng lúc (giữ hạn mức Vertex) — khách B không phải chờ lượt chậm của khách A
+  // (chờ gộp tin, chờ giỏ Shop, LLM thử lại). Tin của CÙNG một khách vẫn nối tiếp đúng thứ tự qua hàng đợi theo khách:
+  // xếp hàng ngay khi duyệt lô, chỉ xin chỗ chạy khi tới lượt trong hàng của khách đó.
+  const limit = createLimiter(CHATBOT_BATCH_CONCURRENCY);
+  const runs = [];
   for (const change of changes) {
     // `updated`: tin cũ vừa có thêm dữ liệu (ảnh có URL) — hộp thư vẽ lại, bot không trả lời lần hai.
     if (change.type !== 'message' || change.message?.direction !== 'incoming' || !change.conversation || change.updated) continue;
@@ -1396,18 +1422,15 @@ export async function processChatbotChanges(changes, dependencies) {
     const inFlightKey = `${change.conversation.id}:${change.message.id || change.message.mid || change.message.createdAt}`;
     if (inFlightMessages.has(inFlightKey)) { results.push({ conversationId: change.conversation.id, skipped: 'đang xử lý tin này' }); continue; }
     inFlightMessages.add(inFlightKey);
-    try {
-      // Hàng đợi theo KHÁCH (pageId:psid): bình luận và hộp thư của cùng một
-      // người nối tiếp nhau, hai bình luận liền nhau không chạy song song.
-      const queueKey = change.conversation.pageId && change.conversation.psid ? `${change.conversation.pageId}:${change.conversation.psid}` : change.conversation.id;
-      await queueForConversation(queueKey, () => answerChange(change, settings, results, dependencies));
-    } catch (error) {
+    // Hàng đợi theo KHÁCH (pageId:psid): bình luận và hộp thư của cùng một
+    // người nối tiếp nhau, hai bình luận liền nhau không chạy song song.
+    const queueKey = change.conversation.pageId && change.conversation.psid ? `${change.conversation.pageId}:${change.conversation.psid}` : change.conversation.id;
+    runs.push(queueForConversation(queueKey, () => limit(() => answerChange(change, settings, results, dependencies)))
       // Một hội thoại hỏng (kho tin không ghi được…) không làm rơi các tin còn lại trong lô.
-      results.push({ conversationId: change.conversation.id, error: error.message });
-    } finally {
-      inFlightMessages.delete(inFlightKey);
-    }
+      .catch(error => { results.push({ conversationId: change.conversation.id, error: error.message }); })
+      .finally(() => { inFlightMessages.delete(inFlightKey); }));
   }
+  await Promise.all(runs);
   // Bot im (nhân viên vừa trả lời, gộp tin, lặp…): ghi một dòng để rà được về sau.
   for (const item of results) if (item.skipped && item.skipped !== 'gộp với tin sau') console.log(`Bot bỏ qua: ${item.skipped} (${item.conversationId})`);
   return results;
@@ -2800,7 +2823,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // R14: câu chê hàng CHỖ KHÁC ("bữa mua ở chỗ khác … dở") không phải khiếu nại với shop (mentionsOtherSeller, auto-label).
     const commentComplaint = conversation.source === 'comment' && !mentionsOtherSeller(message.text) && (
       isComplaint({ text: message.text, keywords: settings.complaintKeywords })
-      || /hôi/iu.test(String(message.text || ''))
+      || /(?<![\p{L}\p{N}])hôi(?![\p{L}\p{N}])/iu.test(String(message.text || '').normalize('NFC'))
       || /\b(khong|ko|k|kg|hong|cha|chang) (co |thay |an )?ngon\b|\b(te|do|chan) (qua|that|ghe|ec|lam)\b|\bkem (chat luong|qua)\b/.test(folded)
       // Vòng 12 (B4 #1, #2, #10): "Hok ngon nha", "ăn món này ối luôn", "không nuốt nổi", "khó ăn", "ngọt quá", "toàn gãy nứt".
       || COMMENT_DISLIKE.test(folded.replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim())

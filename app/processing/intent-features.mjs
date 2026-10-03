@@ -244,6 +244,20 @@ const colourBucket = count => (count >= 2 ? '2+' : String(Math.max(0, count)));
  * @returns {Set<string>}
  */
 export function featuresOf(row) {
+  // Một tin đi qua mô hình nhỏ + mô hình tầng (nhóm + 1–3 chuyên biệt) với CÙNG đối tượng row: nhớ tập đặc trưng theo
+  // đối tượng (WeakMap), kèm bản chụp nội dung row để row bị sửa giữa hai lần gọi thì tính lại. Tập trả về chỉ để đọc.
+  if (!row || typeof row !== 'object') return featuresOfUncached(row);
+  let snapshot;
+  try { snapshot = JSON.stringify(row); } catch { return featuresOfUncached(row); }
+  const memo = featureMemo.get(row);
+  if (memo && memo.snapshot === snapshot) return memo.features;
+  const features = featuresOfUncached(row);
+  featureMemo.set(row, { snapshot, features });
+  return features;
+}
+const featureMemo = new WeakMap();
+
+function featuresOfUncached(row) {
   const set = new Set();
   const rawText = String(row.text || '');
   const text = normalizeIntentText(rawText).slice(0, 300);

@@ -94,13 +94,21 @@ export function appendDecisionLog(record, { dir = defaultDecisionLogDir, now = D
   const previous = queues.get(dir) || Promise.resolve();
   const run = previous.catch(() => {}).then(async () => {
     const day = vnDateKey(now);
-    await mkdir(dir, { recursive: true });
+    // mkdir một lần mỗi ngày (cùng lúc dọn tệp cũ), không phải mỗi dòng; thư mục bị xoá giữa ngày thì tạo lại rồi ghi lại.
     if (prunedDay.get(dir) !== day) {
+      await mkdir(dir, { recursive: true });
       prunedDay.set(dir, day);
       await pruneOldFiles(dir, now);
     }
     const line = JSON.stringify(sanitizeRecord(record));
-    await appendFile(path.join(dir, `${day}.jsonl`), `${line}\n`, 'utf8');
+    const file = path.join(dir, `${day}.jsonl`);
+    try {
+      await appendFile(file, `${line}\n`, 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      await mkdir(dir, { recursive: true });
+      await appendFile(file, `${line}\n`, 'utf8');
+    }
   }).catch(error => {
     console.warn(`Nhật ký quyết định: không ghi được (${String(error?.message || error).slice(0, 120)})`);
   });

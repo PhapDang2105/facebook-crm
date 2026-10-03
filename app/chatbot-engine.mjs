@@ -19,6 +19,7 @@ import { decisionLabelOf, intentRowOf } from './processing/intent-features.mjs';
 import { formatExamples, loadExampleBank, nearestExamples } from './processing/example-bank.mjs';
 import { appendDecisionLog } from './processing/decision-log.mjs';
 import { gateCheck } from './processing/llm-router.mjs';
+import { isOrderishText, scheduleStaffIdleRecheck, staffIdleDelayMs, staffIdleReason } from './processing/staff-idle.mjs';
 
 // Mô hình tầng (processing/intent-cascade.mjs, đang viết): nạp động MỘT lần, thiếu tệp / lỗi nạp → null
 // (engine chạy như không có). Test đưa mô hình giả qua dependencies.predictCascade (+ cascadeGroupOf).
@@ -1130,6 +1131,39 @@ async function noteForStaff(dependencies, conversation, note, summary = '') {
   await Promise.resolve(dependencies.addStaffNote(conversation, String(note || '').slice(0, 500))).catch(error => console.warn(`Ghi chú nhân viên lỗi (${conversation.id}): ${error.message}`));
 }
 
+/**
+ * Chủ shop 03/10 (processing/staff-idle.mjs): lượt kiểm lại sau khi bot im vì "nhân viên đang xử lý" với tin đặt hàng của khách
+ * (hộp thư). Đọc lại hội thoại: bot đã tắt, đã có tin Page (nhân viên hay bot) sau tin khách, hay tin khách chưa có ý đặt hàng
+ * → thôi. Tin khách mới nhất chưa đủ `idleMs` → hẹn lại phần còn thiếu. Còn lại: chạy luồng trả lời thường cho tin khách mới
+ * nhất (gộp các tin từ sau tin Page cuối như thường) với cờ staffIdleTakeover, ghi chú cho nhân viên.
+ */
+async function staffIdleRecheck(conversationId, dependencies, idleMs) {
+  const { getConversation, listMessages } = dependencies;
+  const conversation = getConversation ? await getConversation(conversationId).catch(() => null) : null;
+  if (!conversation || conversation.botEnabled === false || conversation.source === 'comment') return null;
+  const stored = await Promise.resolve(listMessages(conversationId)).catch(() => []);
+  const list = (Array.isArray(stored) ? stored : []).filter(item => !isPageSystemNotice(item));
+  const lastPage = list.findLastIndex(item => item?.direction === 'outgoing');
+  const waiting = list.slice(lastPage + 1).filter(item => item?.direction === 'incoming' && !isSilentCustomerMessage(item));
+  const latest = waiting.at(-1);
+  if (!latest) return null;
+  if (!waiting.some(item => (item.type || 'text') === 'text' && (isOrderishText(item.text) || commentBasket(String(item.text || '')).length > 0))) return null;
+  const left = idleMs - (Date.now() - (Number(latest.createdAt) || 0));
+  if (left > 1000) {
+    scheduleStaffIdleRecheck(conversationId, left, () => staffIdleRecheck(conversationId, dependencies, idleMs));
+    return null;
+  }
+  const reason = staffIdleReason(idleMs);
+  console.log(`Bot nhận đơn: ${reason} (${conversationId})`);
+  const results = await processChatbotChanges([{ type: 'message', conversation, message: latest, staffIdleTakeover: true, staffIdleReason: reason }], dependencies);
+  const result = results.find(item => item?.conversationId === conversationId) || null;
+  if (result) Object.assign(result, { staffIdleTakeover: true, reason });
+  if (result && !result.skipped && !result.error) {
+    await noteForStaff(dependencies, conversation, `Bot đã tự nhận đơn (${reason}): khách gửi thông tin đặt hàng mà chưa ai của Page trả lời. Nhân viên kiểm lại đơn/tin bot vừa gửi.`, reason);
+  }
+  return result;
+}
+
 // Tin hệ thống của Messenger về cuộc gọi ("Bạn đã bỏ lỡ cuộc gọi…") không phải lời khách.
 const callSystemMessage = /bỏ lỡ cuộc gọi|có thể gọi cho .* trong 7 ngày|đã gọi cho bạn|cuộc gọi (thoại|video) đã kết thúc|missed (a )?call/i;
 
@@ -1721,7 +1755,11 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const staffRecently = staffMessages.some(item => Date.now() - (Number(item.createdAt) || 0) < 24 * 60 * 60 * 1000);
     const handoffLabelled = conversationLabels.some(label => /^(consulting|handoff)$/.test(label));
     const staffWithin2h = staffMessages.some(item => Date.now() - (Number(item.createdAt) || 0) < 2 * 60 * 60 * 1000);
-    if (staffAfterBot || (staffLabelled && staffRecently) || (handoffLabelled && staffWithin2h)) {
+    // Chủ shop 03/10 (processing/staff-idle.mjs): lượt kiểm lại "nhân viên im 5 phút" sau tin đặt hàng của khách (hộp thư) bỏ qua
+    // phần "nhân viên nhắn sau bot / thẻ cần người + nhân viên nhắn trong 2 giờ"; khiếu nại/bảo hành vẫn giữ bot im.
+    const staffIdleTakeover = change.staffIdleTakeover === true && conversation.source !== 'comment';
+    if (staffIdleTakeover) trace.staffIdle = { takeover: true, reason: String(change.staffIdleReason || staffIdleReason()) };
+    if ((staffLabelled && staffRecently) || (!staffIdleTakeover && (staffAfterBot || (handoffLabelled && staffWithin2h)))) {
       // Vòng 12 (B4 #4): bình luận ĐẶT HÀNG/hỏi giá trong lúc nhân viên đang chat hộp thư: không để bình luận trơ trọi
       // (35 phút không ai trả lời) — lời công khai ngắn "bạn phụ trách nhắn mình ngay" + thẻ cần người + ẩn SĐT.
       if (conversation.source === 'comment' && settings.responseMode === 'automatic' && message.type === 'text' && isOrderComment(message.text)) {
@@ -1741,6 +1779,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         }
         results.push({ conversationId: conversation.id, skipped: 'nhân viên đang xử lý', ...(staffPublic ? { publicNotice: true } : {}) });
         return;
+      }
+      // Hộp thư, không phải khiếu nại/bảo hành, khách vừa gửi tin đặt hàng: hẹn kiểm lại — nhân viên im 5 phút thì bot nhận đơn.
+      if (conversation.source !== 'comment' && !(staffLabelled && staffRecently) && !staffIdleTakeover && message.type === 'text'
+        && bundle.some(item => isOrderishText(item?.text) || commentBasket(String(item?.text || '')).length > 0)) {
+        const idleMs = Number(dependencies.staffIdleMs ?? staffIdleDelayMs());
+        if (scheduleStaffIdleRecheck(conversation.id, idleMs, () => staffIdleRecheck(conversation.id, dependencies, idleMs))) trace.staffIdle = { scheduled: true, inMs: idleMs };
       }
       results.push({ conversationId: conversation.id, skipped: 'nhân viên đang xử lý' });
       return;
@@ -3938,6 +3982,8 @@ export function buildDecisionRecord({ conversation, change, trace, result = null
     ...(trace.sticker ? { sticker: trace.sticker } : {}),
     // R13: luật ứng viên đã khớp ở lượt này ({ name, templateId, mode: 'shadow' | 'on', setQuantity? }) — chỉ ghi khi có.
     ...(trace.candidateRule ? { candidateRule: trace.candidateRule } : {}),
+    // Chủ shop 03/10: lượt bot nhận đơn vì nhân viên im ({ takeover, reason }) hay lượt im đã hẹn kiểm lại ({ scheduled, inMs }).
+    ...(trace.staffIdle ? { staffIdle: trace.staffIdle } : {}),
     ms: Date.now() - startedAt
   };
 }

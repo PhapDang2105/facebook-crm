@@ -194,9 +194,9 @@ test('bot trả lời "đơn tới đâu" bằng mã vận đơn + giai đoạn 
   const reply = renderChatbotReply({ template_id: 'ORDER_STATUS' }, defaultMessageTemplates(), { recentOrder: order, customer: { gender: 'female' } });
   const text = reply.messages.join('\n');
   assert.match(text, /🏷️ Mã vận đơn: 802835136377/);
-  assert.match(text, /📍 Trạng thái: Đang vận chuyển/);
+  assert.match(text, /\nTrạng thái: Đang vận chuyển/);
   assert.match(text, /🔎 Theo dõi hành trình: https:\/\/jtexpress\.vn/);
-  assert.match(text, /📱 Trang J&T hỏi số điện thoại/);
+  assert.match(text, /\nTrang J&T hỏi số điện thoại/);
   const plain = renderChatbotReply({ template_id: 'ORDER_STATUS' }, defaultMessageTemplates(), { recentOrder: crmOrder('Z'), customer: { gender: 'female' } });
   assert.doesNotMatch(plain.messages.join('\n'), /Mã vận đơn: \d/);
   // SPX không có dòng gợi ý J&T: dòng link vẫn phải còn (fill() bỏ dòng có ô trống).
@@ -209,7 +209,7 @@ test('bot trả lời "đơn tới đâu" bằng mã vận đơn + giai đoạn 
 test('mẫu vận đơn còn đúng lời mặc định cũ thì tự đổi sang lời mới; lời chủ shop đã sửa giữ nguyên', () => {
   const shipment = { carrier: 'SPX Express', trackingNumber: 'SPXVN1', trackingUrl: 'u', status: 'picked_up' };
   const legacy = renderShipmentNotice(shipment, 'female', 'SHIPMENT_PICKED_UP', { SHIPMENT_PICKED_UP: LEGACY_SHIPMENT_TEMPLATES.SHIPMENT_PICKED_UP });
-  assert.match(legacy, /^Dạ, đơn hàng của chị đã được SPX Express lấy hàng thành công rồi ạ ✅/);
+  assert.match(legacy, /^Dạ, đơn hàng của chị đã được SPX Express lấy hàng thành công rồi ạ\n/);
   assert.equal(renderShipmentNotice(shipment, 'female', 'SHIPMENT_PICKED_UP', { SHIPMENT_PICKED_UP: 'Lời riêng {tracking_number}' }), 'Lời riêng SPXVN1');
   const settings = normalizeChatbotSettings({ messageTemplates: { SHIPMENT_DELIVERED: LEGACY_SHIPMENT_TEMPLATES.SHIPMENT_DELIVERED, ORDER_STATUS_SHIPPED: LEGACY_SHIPMENT_TEMPLATES.ORDER_STATUS_SHIPPED } });
   assert.equal(settings.messageTemplates.SHIPMENT_DELIVERED, defaultMessageTemplates().SHIPMENT_DELIVERED);
@@ -357,4 +357,11 @@ test('gửi qua cầu nối lỗi: đếm số lần theo giai đoạn để t�
   assert.match(item.error, /không tìm được ID Facebook/);
   recordShipmentNoticeResult(store, key, { ok: true, via: 'manual', now });
   assert.equal(store.conversations[0].customerOrders[0].shipment.noticeAttempts, undefined);
+});
+
+test('tin vận đơn ít icon: không ✅, không 🚚; chỉ 🏷️ / 🔎 và một icon đầu tin', () => {
+  for (const id of ['SHIPMENT_CREATED', 'SHIPMENT_PICKED_UP', 'SHIPMENT_IN_TRANSIT', 'SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED', 'ORDER_STATUS_SHIPPED']) {
+    const text = defaultMessageTemplates()[id];
+    assert.doesNotMatch(text, /[✅🚚📱📞🕒📍]/u, id);
+  }
 });

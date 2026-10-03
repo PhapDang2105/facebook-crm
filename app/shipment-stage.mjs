@@ -33,13 +33,14 @@ export function stageFromSpxRecords(records = []) {
 }
 
 /** Mẫu mặc định (Cài đặt → Tin nhắn sửa được lời; để trống = tắt giai đoạn đó). */
-// Lời theo kiểu tin shop vẫn gửi (03/10): "Dạ," mở đầu, mỗi ý một dòng có icon, ngăn bằng ━━━, kết 💛/🌾.
+// Lời theo kiểu tin shop vẫn gửi (03/10): "Dạ," mở đầu, mỗi ý một dòng, ngăn bằng ━━━, kết 💛/🌾.
+// Ít icon (chủ shop: nhiều icon trông như AI): chỉ 🏷️ mã vận đơn, 🔎 link tra, một icon cuối câu đầu.
 export const DEFAULT_SHIPMENT_TEMPLATES = {
-  SHIPMENT_CREATED: "Dạ, Giọt Nắng báo {title} đơn hàng đã được đóng gói và giao cho {carrier} rồi ạ 📦\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n🚚 Trạng thái: {status}\n━━━━━━━━━━━━\n🔎 Theo dõi hành trình: {tracking_url}{tracking_hint}\n\nEm cảm ơn {title} đã ủng hộ Giọt Nắng, có gì cần hỗ trợ {title} nhắn em nhé ạ 💛",
-  SHIPMENT_PICKED_UP: "Dạ, đơn hàng của {title} đã được {carrier} lấy hàng thành công rồi ạ ✅\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n🚚 Trạng thái: {status}\n\nEm sẽ báo {title} ngay khi đơn bắt đầu giao nha 🌾",
-  SHIPMENT_IN_TRANSIT: "Dạ, đơn hàng của {title} đang trên đường vận chuyển tới khu vực của mình rồi ạ 🚚\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n🔎 Theo dõi hành trình: {tracking_url}\n\n{Title} chờ em thêm chút nha, có gì em báo ngay ạ 🌾",
-  SHIPMENT_OUT_FOR_DELIVERY: "Dạ, shipper đang giao đơn hàng tới {title} rồi ạ 🛵\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n📞 {Title} để ý điện thoại giúp em nha\n\nEm cảm ơn {title} nhiều ạ 💛",
-  SHIPMENT_DELIVERED: "Dạ, đơn hàng đã giao thành công tới {title} rồi ạ 🎉\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n🌾 Chúc {title} ăn ngon miệng cùng Giọt Nắng ạ\n\nEm cảm ơn {title} đã tin tưởng ủng hộ. {Title} dùng thấy thế nào nhắn em biết với nha, cần hỗ trợ gì em luôn ở đây ạ 💛"
+  SHIPMENT_CREATED: "Dạ, Giọt Nắng báo {title} đơn hàng đã được đóng gói và giao cho {carrier} rồi ạ 📦\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\nTrạng thái: {status}\n━━━━━━━━━━━━\n🔎 Theo dõi hành trình: {tracking_url}{tracking_hint}\n\nEm cảm ơn {title} đã ủng hộ Giọt Nắng, có gì cần hỗ trợ {title} nhắn em nhé ạ 💛",
+  SHIPMENT_PICKED_UP: "Dạ, đơn hàng của {title} đã được {carrier} lấy hàng thành công rồi ạ\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\nTrạng thái: {status}\n\nEm sẽ báo {title} ngay khi đơn bắt đầu giao nha 🌾",
+  SHIPMENT_IN_TRANSIT: "Dạ, đơn hàng của {title} đang trên đường vận chuyển tới khu vực của mình rồi ạ\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n🔎 Theo dõi hành trình: {tracking_url}\n\n{Title} chờ em thêm chút nha, có gì em báo ngay ạ 🌾",
+  SHIPMENT_OUT_FOR_DELIVERY: "Dạ, shipper đang giao đơn hàng tới {title} rồi ạ 🛵\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n\n{Title} để ý điện thoại giúp em nha, em cảm ơn {title} nhiều ạ 💛",
+  SHIPMENT_DELIVERED: "Dạ, đơn hàng đã giao thành công tới {title} rồi ạ 🎉\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n\nEm cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ. {Title} dùng thấy thế nào nhắn em biết với nha, cần hỗ trợ gì em luôn ở đây ạ 💛"
 };
 
 // Lời mặc định cũ (1931224): mẫu còn đúng y lời cũ (chưa ai sửa) được đổi sang lời mới khi đọc cài đặt.
@@ -63,7 +64,7 @@ export function shipmentTemplateValues(shipment, gender = '') {
     tracking_url: shipment.trackingUrl || '',
     status: shipmentStageLabel(shipmentStage(shipment) || 'created'),
     // J&T hỏi 4 số cuối SĐT khi tra trên web: nhắc khách trước.
-    tracking_hint: /J&T/i.test(shipment.carrier || '') ? `\n━━━━━━━━━━━━\n📱 Trang J&T hỏi số điện thoại thì ${title} nhập 4 số cuối SĐT nhận hàng nhé` : ''
+    tracking_hint: /J&T/i.test(shipment.carrier || '') ? `\n━━━━━━━━━━━━\nTrang J&T hỏi số điện thoại thì ${title} nhập 4 số cuối SĐT nhận hàng nhé` : ''
   };
 }
 

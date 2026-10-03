@@ -316,12 +316,25 @@ process.on('beforeExit', () => {
   flushMessagingStore().catch(error => console.error(`Không ghi được kho hội thoại lúc thoát: ${error.message}`));
 });
 
+/**
+ * Lúc tắt (C5): chờ các lượt sửa đang xếp hàng chạy xong (kể cả lượt chúng xếp thêm), rồi ghi tới khi không còn
+ * thay đổi nào chưa ghi. Trước đây chỉ ghi các thay đổi có tới lúc gọi: lượt sửa đến sau (webhook vừa nhận) mất.
+ */
+export async function drainMessagingStore({ rounds = 5 } = {}) {
+  for (let round = 0; round < rounds; round += 1) {
+    const queued = writeQueue;
+    await queued;
+    await flushMessagingStore();
+    if (queued === writeQueue && !messagingStoreHasPendingWrites()) return;
+  }
+}
+
 let shutdownInstalled = false;
 /**
  * Tắt tiến trình (systemd gửi SIGTERM khi restart/deploy): ghi nốt thay đổi còn trong bộ nhớ rồi
  * mới thoát (chờ tối đa `timeoutMs`). Gọi một lần từ server.mjs.
  */
-export function installMessagingStoreShutdownFlush({ signals = ['SIGTERM', 'SIGINT'], timeoutMs = 10000, exit = code => process.exit(code) } = {}) {
+export function installMessagingStoreShutdownFlush({ signals = ['SIGTERM', 'SIGINT'], timeoutMs = 10000, exit = code => process.exit(code), prepare = null } = {}) {
   if (shutdownInstalled) return;
   shutdownInstalled = true;
   let stopping = false;
@@ -333,7 +346,11 @@ export function installMessagingStoreShutdownFlush({ signals = ['SIGTERM', 'SIGI
         console.error('Hết giờ chờ ghi kho hội thoại lúc tắt, thoát.');
         exit(1);
       }, timeoutMs);
-      flushMessagingStore()
+      // `prepare` (server.mjs): ngừng nhận request, chờ các kho nhỏ ghi xong… — lỗi ở đó không chặn việc ghi kho này.
+      Promise.resolve()
+        .then(() => (typeof prepare === 'function' ? prepare() : undefined))
+        .catch(error => console.error(`Lỗi khi chuẩn bị tắt: ${error?.message || error}`))
+        .then(drainMessagingStore)
         .then(() => exit(0), error => {
           console.error(`Không ghi được kho hội thoại lúc tắt: ${error.message}`);
           exit(1);

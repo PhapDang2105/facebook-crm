@@ -7,10 +7,11 @@
 // một dòng và không bao giờ phải khoá file lớn. Lúc đọc, dòng sau cùng của một
 // mã đơn là bản đúng. Tên khoá viết tắt vì kho ghi rất nhiều dòng: một đơn
 // khoảng 200 byte, nhẹ hơn bản đầy đủ trong landing-orders.json chừng mười lần.
-import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { foldVietnamese } from './processing/auto-label.mjs';
+import { trackWrite } from './json-store.mjs';
 
 const archiveDirectory = process.env.ORDER_ARCHIVE_PATH
   || path.join(projectRoot, 'data', 'processed', 'order-archive');
@@ -54,60 +55,142 @@ export function archiveRecord(order = {}, { status = '' } = {}) {
 export async function appendOrderToArchive(order, options = {}) {
   const record = archiveRecord(order, options);
   if (!record.id || !record.phone) return null;
-  await mkdir(archiveDirectory, { recursive: true });
-  await appendFile(path.join(archiveDirectory, `${archiveMonth(record.at)}.ndjson`), `${JSON.stringify(record)}\n`, 'utf8');
-  archiveCache = { at: 0, promise: null };
-  return record;
+  // trackWrite: lúc tắt máy chủ drainAllWrites chờ dòng đang ghi dở xong rồi mới thoát.
+  return trackWrite((async () => {
+    const file = `${archiveMonth(record.at)}.ndjson`;
+    const line = `${JSON.stringify(record)}\n`;
+    await mkdir(archiveDirectory, { recursive: true });
+    await appendFile(path.join(archiveDirectory, file), line, 'utf8');
+    noteAppended(file, record, Buffer.byteLength(line, 'utf8'));
+    return record;
+  })());
 }
 
 /**
- * Đọc cả kho là đọc và phân tích MỌI dòng của MỌI tháng. Hộp chi tiết khách gọi
- * tới nó mỗi lần bấm vào một dòng, nên nhớ tạm vài giây; kho chỉ ghi nối nên
- * lần ghi nào cũng tự xoá bộ nhớ tạm, không có chuyện đọc phải bản cũ.
+ * Chỉ mục trong RAM (P2, 03/10): trước đây mỗi lần ghi một dòng là bỏ bộ nhớ tạm, lần đọc sau (hộp chi tiết
+ * khách, đặt mã đơn tay) đọc và phân tích lại MỌI dòng của MỌI tháng. Nay nạp một lần: Map mã đơn → bản ghi
+ * (dòng sau cùng thắng) và 9 số cuối SĐT → mã đơn; dòng mới ghi thì cập nhật tại chỗ (kho chỉ ghi nối).
+ * Script bảo trì ghi thêm vào tệp tháng: lượt đọc (tối đa 30 giây một lần) so kích thước tệp với số byte đã
+ * biết, lệch thì nạp lại cả kho.
  */
-let archiveCache = { at: 0, promise: null };
-const archiveCacheMs = 5000;
+let archiveIndex = null; // { byId: Map, byPhone: Map<tail9, Set<id>>, sizes: Map<file, bytes>, sorted: array|null, checkedAt }
+let loadingIndex = null;
+const appendedWhileLoading = [];
+const archiveRecheckMs = 30 * 1000;
 
-function readAllRecords() {
-  const now = Date.now();
-  if (archiveCache.promise && now - archiveCache.at < archiveCacheMs) return archiveCache.promise;
-  const promise = loadArchiveRecords();
-  promise.catch(() => { archiveCache = { at: 0, promise: null }; });
-  archiveCache = { at: now, promise };
-  return promise;
+const phoneTail = value => String(value ?? '').replace(/\D/g, '').slice(-9);
+
+function indexRecord(index, record) {
+  const previous = index.byId.get(record.id);
+  if (previous) {
+    const ids = index.byPhone.get(phoneTail(previous.phone));
+    if (ids && phoneTail(previous.phone) !== phoneTail(record.phone)) ids.delete(record.id);
+  }
+  index.byId.set(record.id, record);
+  const tail = phoneTail(record.phone);
+  if (tail) {
+    if (!index.byPhone.has(tail)) index.byPhone.set(tail, new Set());
+    index.byPhone.get(tail).add(record.id);
+  }
+  index.sorted = null;
+}
+
+function noteAppended(file, record, bytes) {
+  // Đang nạp chỉ mục: nhớ dòng này để thêm sau khi nạp xong (lượt đọc tệp có thể đã qua chỗ đó).
+  if (loadingIndex) appendedWhileLoading.push({ ...record, file });
+  if (!archiveIndex) return;
+  archiveIndex.sizes.set(file, (archiveIndex.sizes.get(file) || 0) + bytes);
+  indexRecord(archiveIndex, { ...record, file });
+}
+
+async function archiveFileSizes() {
+  let files = [];
+  try {
+    files = (await readdir(archiveDirectory)).filter(name => name.endsWith('.ndjson')).sort();
+  } catch {
+    return new Map();
+  }
+  const sizes = new Map();
+  for (const file of files) {
+    const info = await stat(path.join(archiveDirectory, file)).catch(() => null);
+    if (info) sizes.set(file, info.size);
+  }
+  return sizes;
+}
+
+async function buildIndex() {
+  const sizes = await archiveFileSizes();
+  const index = { byId: new Map(), byPhone: new Map(), sizes: new Map(), sorted: null, checkedAt: Date.now() };
+  for (const file of sizes.keys()) {
+    let content = '';
+    try { content = await readFile(path.join(archiveDirectory, file), 'utf8'); } catch { continue; }
+    index.sizes.set(file, Buffer.byteLength(content, 'utf8'));
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record && record.id) indexRecord(index, { ...record, file });
+      } catch { /* dòng hỏng thì bỏ qua, phần còn lại vẫn đọc được */ }
+    }
+  }
+  return index;
+}
+
+async function sameSizes(index) {
+  const sizes = await archiveFileSizes();
+  if (sizes.size !== index.sizes.size) return false;
+  for (const [file, size] of sizes) if (index.sizes.get(file) !== size) return false;
+  return true;
+}
+
+async function loadIndex() {
+  if (archiveIndex && Date.now() - archiveIndex.checkedAt < archiveRecheckMs) return archiveIndex;
+  if (!loadingIndex) {
+    loadingIndex = (async () => {
+      if (archiveIndex && await sameSizes(archiveIndex)) {
+        archiveIndex.checkedAt = Date.now();
+        return archiveIndex;
+      }
+      const built = await buildIndex();
+      // Dòng ghi trong lúc nạp: thêm lại (đã có thì chỉ dời về cuối — vẫn là bản mới nhất). Kích thước tệp không
+      // cộng thêm: nếu lượt đọc chưa thấy dòng đó, lần kiểm sau thấy lệch và nạp lại.
+      for (const record of appendedWhileLoading.splice(0)) indexRecord(built, record);
+      archiveIndex = built;
+      return archiveIndex;
+    })().finally(() => { loadingIndex = null; appendedWhileLoading.length = 0; });
+  }
+  return loadingIndex;
+}
+
+function sortedRecords(index) {
+  index.sorted ||= [...index.byId.values()].sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+  return index.sorted;
+}
+
+async function readAllRecords() {
+  return sortedRecords(await loadIndex());
+}
+
+/** Bản ghi (dòng sau cùng của mỗi mã) có 9 số cuối SĐT trùng `phone`, mới nhất trước — không chép cả kho. */
+export async function findArchiveByPhone(phone) {
+  const tail = phoneTail(phone);
+  if (!tail) return [];
+  const index = await loadIndex();
+  return [...(index.byPhone.get(tail) || [])]
+    .map(id => index.byId.get(id))
+    .filter(Boolean)
+    .sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0))
+    .map(({ file, ...record }) => record);
+}
+
+/** Mọi mã đơn đã có trong kho lưu trữ (để đặt mã đơn tay không trùng). */
+export async function archiveOrderIds() {
+  return new Set((await loadIndex()).byId.keys());
 }
 
 function recordMatches(record, needle) {
   const haystack = [record.id, record.name, record.phone, record.addr, ...(record.items || []).map(item => item[0])].join(' ');
   return foldVietnamese(haystack).includes(needle);
-}
-
-/**
- * Đọc kho, mới nhất đứng đầu. `query` tìm trong mã đơn, tên, số điện thoại,
- * địa chỉ và SKU; `months` giới hạn số file tháng gần nhất phải đọc.
- */
-/** Đọc mọi tệp tháng, khử trùng theo mã đơn, mới nhất đứng đầu. */
-async function loadArchiveRecords() {
-  let files = [];
-  try {
-    files = (await readdir(archiveDirectory)).filter(name => name.endsWith('.ndjson')).sort();
-  } catch {
-    return [];
-  }
-  // Dòng sau cùng của một mã đơn là bản đúng; Map giữ đúng thứ tự ghi.
-  const byId = new Map();
-  for (const file of files) {
-    let content = '';
-    try { content = await readFile(path.join(archiveDirectory, file), 'utf8'); } catch { continue; }
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const record = JSON.parse(line);
-        if (record && record.id) byId.set(record.id, { ...record, file });
-      } catch { /* dòng hỏng thì bỏ qua, phần còn lại vẫn đọc được */ }
-    }
-  }
-  return [...byId.values()].sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
 }
 
 export async function readOrderArchive({ query = '', limit = 200, months = 0 } = {}) {
@@ -124,9 +207,8 @@ export async function readOrderArchive({ query = '', limit = 200, months = 0 } =
     records = records.filter(record => wanted.has(record.file));
   }
   const needle = foldVietnamese(text(query, 120));
-  // Bỏ `file` đi: nó chỉ dùng để lọc theo tháng, không phải dữ liệu của đơn.
-  const items = records
-    .filter(record => !needle || recordMatches(record, needle))
-    .map(({ file, ...record }) => record);
-  return { items: limit > 0 ? items.slice(0, limit) : items, total: items.length };
+  const matched = needle ? records.filter(record => recordMatches(record, needle)) : records;
+  // Bỏ `file` đi: nó chỉ dùng để lọc theo tháng, không phải dữ liệu của đơn. Chỉ chép phần trả về.
+  const items = (limit > 0 ? matched.slice(0, limit) : matched).map(({ file, ...record }) => record);
+  return { items, total: matched.length };
 }

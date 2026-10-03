@@ -6,7 +6,7 @@ import { tempDir } from './helpers/temp-dir.mjs';
 
 // Kho nhân sự tạm cho test: không đụng dữ liệu thật.
 process.env.STAFF_PATH = path.join(tempDir('crm-staff-'), 'staff.json');
-const { listStaff, saveStaffMember, staffLoginUsers, staffByUsername, MIN_PASSWORD_LENGTH } = await import('../app/staff.mjs');
+const { listStaff, saveStaffMember, staffLoginAccounts, staffByUsername, MIN_PASSWORD_LENGTH } = await import('../app/staff.mjs');
 const { verifyPassword } = await import('../app/auth.mjs');
 
 test('nhân sự: thêm, kiểm tên đăng nhập, mật khẩu chỉ lưu chuỗi băm, không trả chuỗi băm ra ngoài', async () => {
@@ -36,18 +36,18 @@ test('nhân sự: sửa không gửi mật khẩu thì giữ mật khẩu; danh 
   const anh = await saveStaffMember({ name: 'Phương Anh', username: 'phuonganh', role: 'staff', password: 'phuonganh-1' });
   const vy = await saveStaffMember({ name: 'Hồng Vy', username: 'hongvy' });
   assert.equal(vy.hasPassword, false);
-  let users = await staffLoginUsers();
+  let users = await staffLoginAccounts();
   assert.deepEqual([...users.keys()].sort(), ['hang.th', 'phuonganh']);
 
   const renamed = await saveStaffMember({ name: 'Phương Anh (ca tối)' }, { id: anh.id });
   assert.equal(renamed.username, 'phuonganh');
   assert.equal(renamed.hasPassword, true, 'không gửi mật khẩu thì giữ mật khẩu cũ');
-  const before = (await staffLoginUsers()).get('phuonganh');
+  const before = (await staffLoginAccounts()).get('phuonganh').hash;
   await saveStaffMember({ password: 'doi-mat-khau' }, { id: anh.id });
-  assert.notEqual((await staffLoginUsers()).get('phuonganh'), before, 'đổi mật khẩu → chuỗi băm mới (phiên cũ hết hiệu lực)');
+  assert.notEqual((await staffLoginAccounts()).get('phuonganh').hash, before, 'đổi mật khẩu → chuỗi băm mới (phiên cũ hết hiệu lực)');
 
   await saveStaffMember({ active: false }, { id: anh.id });
-  users = await staffLoginUsers();
+  users = await staffLoginAccounts();
   assert.equal(users.has('phuonganh'), false, 'đã nghỉ thì không đăng nhập được');
   assert.equal(await staffByUsername('phuonganh'), null);
   assert.equal((await staffByUsername('HANG.TH')).role, 'admin');

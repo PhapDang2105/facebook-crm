@@ -86,6 +86,10 @@ function excelDate(serial) {
   return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso.replace('T', ' ').replace('.000Z', '');
 }
 
+// Cột cuối cùng Excel cho phép là XFD (chỉ số 16383). Ô ghi địa chỉ xa hơn ("ZZZZZZ1" ≈ 3,2e8) chỉ có ở tệp
+// cố tình dựng: đặt vào row[index] là mảng hàng trăm triệu ô → hết bộ nhớ, sập cả máy chủ. Bỏ qua các ô đó.
+export const XLSX_MAX_COLUMN_INDEX = 16383;
+
 export function columnIndex(address) {
   const letters = String(address).match(/^[A-Z]+/i)?.[0]?.toUpperCase() || '';
   return [...letters].reduce((value, character) => value * 26 + character.charCodeAt(0) - 64, 0) - 1;
@@ -140,7 +144,7 @@ export function parseXlsx(buffer) {
     for (const cellMatch of rowMatch[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const address = getAttribute(cellMatch[1], 'r');
       const index = columnIndex(address);
-      if (index >= 0) row[index] = parseCell(cellMatch[1], cellMatch[2] || '', sharedStrings, dateStyles);
+      if (index >= 0 && index <= XLSX_MAX_COLUMN_INDEX) row[index] = parseCell(cellMatch[1], cellMatch[2] || '', sharedStrings, dateStyles);
     }
     while (row.length && (row[row.length - 1] === '' || row[row.length - 1] === undefined)) row.pop();
     rows.push(Array.from({ length: row.length }, (_, index) => row[index] ?? ''));

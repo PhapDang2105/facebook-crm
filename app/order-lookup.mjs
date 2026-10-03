@@ -2,7 +2,7 @@
 // bot, nhân viên tạo tay, kéo từ POS — và đơn landing) và các mã đơn đã dùng.
 import { readMessagingStore } from './messaging-store.mjs';
 import { readLandingStore } from './landing-orders.mjs';
-import { readOrderArchive } from './order-archive.mjs';
+import { archiveOrderIds } from './order-archive.mjs';
 
 /** Mọi đơn hệ thống, như danh sách /api/customer-orders (chưa thêm ghi chú xử lý). */
 export async function listAllSystemOrders() {
@@ -22,7 +22,8 @@ export async function listAllSystemOrders() {
 export async function takenOrderIds() {
   const ids = new Set((await listAllSystemOrders()).map(order => String(order?.id || '')).filter(Boolean));
   try {
-    for (const record of (await readOrderArchive({ limit: 0 })).items) if (record?.id) ids.add(String(record.id));
+    // Chỉ mục mã đơn của kho lưu trữ (không chép mọi bản ghi như readOrderArchive({ limit: 0 })).
+    for (const id of await archiveOrderIds()) if (id) ids.add(String(id));
   } catch {
     // Kho lưu trữ hỏng/không đọc được: vẫn kiểm theo đơn đang có.
   }

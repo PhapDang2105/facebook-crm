@@ -46,6 +46,7 @@ const maximumRecent = 1000;
 const duplicateWindowMs = 10 * 60 * 1000;
 
 let cachedStore = null;
+let storeLoading = null;
 const enqueueWrite = createWriteQueue();
 
 function emptyStore() {
@@ -72,25 +73,41 @@ function normalizeStore(value) {
  */
 export async function readLandingStore() {
   if (cachedStore) return cachedStore;
-  cachedStore = await readJsonFile(landingOrdersPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho đơn landing' });
-  return cachedStore;
+  // Nhớ cả lượt đọc ĐANG CHẠY: hai lượt đọc đầu tiên đồng thời dùng chung một bản kho (bản đọc xong sau từng đè
+  // bản đã được sửa trong hàng ghi → mất thay đổi).
+  storeLoading ||= readJsonFile(landingOrdersPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho đơn landing' })
+    .then(store => { cachedStore = store; return store; })
+    .finally(() => { storeLoading = null; });
+  return storeLoading;
 }
 
 async function persistStore(store) {
   await writeJsonAtomic(landingOrdersPath, store);
 }
 
-/** Ghi tuần tự để hai webhook đến cùng lúc không ghi đè nhau. */
-export function updateLandingStore(mutate) {
+/**
+ * Ghi tuần tự để hai webhook đến cùng lúc không ghi đè nhau.
+ * `unchanged(result)` (P2, 03/10): trả true khi mutate không đổi gì → không ghi lại cả kho (tới 5000 đơn) — ví dụ
+ * đồng bộ POS 5 phút/lần gọi hủy theo cho những đơn đã hủy từ trước, ẩn đơn không có ở kho landing.
+ */
+export function updateLandingStore(mutate, { unchanged = null } = {}) {
   return enqueueWrite(async () => {
     const store = await readLandingStore();
-    const result = await mutate(store);
-    // R13-fix (T3): cờ "⚠ Có thể trùng đơn LP-…" tự gỡ khi đơn gốc đã hủy/xoá/xác nhận hay đơn mang cờ đã chốt —
-    // mọi đường ghi kho (PATCH, DELETE, hủy theo POS) đều qua đây.
-    sweepDuplicateFlags(store.orders);
-    await moveOverflowToArchive(store);
-    await persistStore(store);
-    return result;
+    try {
+      const result = await mutate(store);
+      if (typeof unchanged === 'function' && unchanged(result)) return result;
+      // R13-fix (T3): cờ "⚠ Có thể trùng đơn LP-…" tự gỡ khi đơn gốc đã hủy/xoá/xác nhận hay đơn mang cờ đã chốt —
+      // mọi đường ghi kho (PATCH, DELETE, hủy theo POS) đều qua đây.
+      sweepDuplicateFlags(store.orders);
+      await moveOverflowToArchive(store);
+      await persistStore(store);
+      return result;
+    } catch (error) {
+      // C6: mutate ném giữa chừng hay ghi đĩa lỗi → bỏ bản trong bộ nhớ (đã sửa dở), lần đọc sau nạp lại tệp tốt
+      // cuối cùng; không để lần ghi kế tiếp lặng lẽ lưu thay đổi mà người gọi đã được báo là lỗi.
+      cachedStore = null;
+      throw error;
+    }
   });
 }
 

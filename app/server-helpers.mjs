@@ -232,6 +232,33 @@ export function createStaffNoteWriter({ findCustomerById, addCustomerNote, onSav
   };
 }
 
+// ===== Giữ chỗ có hạn =====
+
+/**
+ * Sổ giữ chỗ trong RAM (mục báo vận đơn giao cho cầu nối Pancake): `take(key)` true khi giữ được (chưa ai giữ hoặc
+ * đã hết hạn), `release(key)` bỏ giữ, `held(key)` đang bị giữ. `force` ở take: giữ lại dù đang bị giữ.
+ */
+export function createLeaseBook(leaseMs) {
+  const leases = new Map();
+  const held = (key, now = Date.now()) => {
+    const until = leases.get(key);
+    if (until === undefined) return false;
+    if (until > now) return true;
+    leases.delete(key);
+    return false;
+  };
+  return {
+    held,
+    take(key, { now = Date.now(), force = false } = {}) {
+      if (!force && held(key, now)) return false;
+      leases.set(key, now + leaseMs);
+      return true;
+    },
+    release(key) { leases.delete(key); },
+    size() { return leases.size; }
+  };
+}
+
 // ===== Log một lần =====
 
 /** Tập có giới hạn (bỏ mục cũ nhất khi đầy): `first(key)` true đúng lần đầu gặp key. */

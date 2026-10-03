@@ -6,16 +6,11 @@
 // từng dòng, ghép lại — trên mẫu kho thật kết quả giống hệt cách cũ (tests/fix-server-xlsx-template.test.mjs
 // so từng byte). Thêm: ô tự đóng <c …/> không còn làm hỏng ô kế bên (mẫu hiện tại không có ô như vậy).
 import { columnIndex as excelColumnIndex } from './xlsx-import.mjs';
-import { excelColumnName } from './xlsx-export.mjs';
+// escapeXml dùng chung với XLSX thuần: bỏ cả ký tự điều khiển XML 1.0 không cho phép (dòng bảng từ trình duyệt có thể
+// mang chữ dán/nhập từ nơi khác, tên Facebook) — trước đây một ký tự như vậy làm file kho hỏng, Excel không mở.
+import { escapeXml, excelColumnName } from './xlsx-export.mjs';
 
-export function escapeXml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
+export { escapeXml };
 
 const isBlank = value => value === '' || value === null || value === undefined;
 

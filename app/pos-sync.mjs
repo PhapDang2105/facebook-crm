@@ -169,7 +169,7 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
     return update && Number(order.posStatus?.code) !== update.code;
   })) {
     try {
-      summary.statusUpdated += await updateLandingStore(current => applyPosStatusesToOrders(current.orders, statusUpdates, statusIndex));
+      summary.statusUpdated += await updateLandingStore(current => applyPosStatusesToOrders(current.orders, statusUpdates, statusIndex), { unchanged: count => !count });
     } catch (error) {
       summary.errors.push(`trạng thái POS của đơn landing: ${error.message}`);
     }
@@ -180,7 +180,7 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
   const contentIndex = indexPosOrders(readOrders);
   if ([...new Set(knownByPosId.values())].some(order => needsPosContent(order, contentIndex))) {
     try {
-      summary.contentUpdated += await updateLandingStore(current => applyPosContentToOrders(current.orders, contentIndex).changedOrders.length);
+      summary.contentUpdated += await updateLandingStore(current => applyPosContentToOrders(current.orders, contentIndex).changedOrders.length, { unchanged: count => !count });
     } catch (error) {
       summary.errors.push(`nội dung POS của đơn landing: ${error.message}`);
     }
@@ -264,17 +264,46 @@ export function posSyncStatus() {
 
 let timer = null;
 
+// INT-10 (03/10): móc của lượt đồng bộ (đơn POS của hội thoại, hủy theo POS, trạng thái/nội dung POS của đơn hội thoại).
+// Trước đây chỉ vòng 5 phút có các móc này; nút "Kéo đơn từ POS" gọi syncPosLandingOrders trần (không kéo đơn
+// Facebook/nhân viên về hội thoại, không hủy theo POS…) và chạy chồng lên vòng 5 phút.
+let posSyncCallbacks = { onCrmOrdersCancelled: null, onPosConversationOrders: null, onPosStatuses: applyPosStatusesToConversations, onPosContent: null };
+let posSyncInFlight = null;
+
+/** Đặt móc dùng chung cho mọi lượt đồng bộ (vòng 5 phút và nút bấm tay). Khoá không truyền giữ giá trị cũ. */
+export function configurePosSync(callbacks = {}) {
+  posSyncCallbacks = { ...posSyncCallbacks, ...Object.fromEntries(Object.entries(callbacks).filter(([key, value]) => key in posSyncCallbacks && value !== undefined)) };
+}
+
+/** Lượt đồng bộ đang chạy (vòng 5 phút hay bấm tay)? */
+export function posSyncRunning() {
+  return Boolean(posSyncInFlight);
+}
+
+/**
+ * Một lượt đồng bộ với các móc đã đặt (configurePosSync). Chỉ một lượt chạy một lúc: đang có lượt khác thì CHỜ nó
+ * xong rồi chạy đúng lượt được yêu cầu (bấm tay 30 ngày không bị thay bằng kết quả của vòng 48 giờ đang chạy).
+ */
+export async function runPosSync(options = {}) {
+  while (posSyncInFlight) await posSyncInFlight;
+  const run = syncPosLandingOrders({ ...posSyncCallbacks, ...options });
+  // Bản "đã xong" không bao giờ reject (người chờ không phải bắt lỗi; lỗi tới đúng người gọi qua `run`).
+  const settled = run.then(() => undefined, () => undefined);
+  posSyncInFlight = settled;
+  settled.then(() => { if (posSyncInFlight === settled) posSyncInFlight = null; });
+  return run;
+}
+
 /** Chạy ngay một lần rồi lặp mỗi 5 phút; chỉ khi POS đã kết nối. */
-export function startPosSync({ log = console.log, onCrmOrdersCancelled = null, onPosConversationOrders = null, onPosStatuses = applyPosStatusesToConversations, onPosContent = null } = {}) {
-  // Lượt trước chưa xong (POS chậm) thì lượt sau bỏ qua, không chạy chồng.
-  let running = false;
+export function startPosSync({ log = console.log, onCrmOrdersCancelled, onPosConversationOrders, onPosStatuses, onPosContent } = {}) {
+  configurePosSync({ onCrmOrdersCancelled, onPosConversationOrders, onPosStatuses, onPosContent });
   let first = true;
   const run = async () => {
-    if (running) return;
-    running = true;
+    // Lượt trước (hay lượt bấm tay) chưa xong (POS chậm) thì lượt định kỳ này bỏ qua, không chạy chồng.
+    if (posSyncRunning()) return;
     try {
       // Lượt đầu sau khi khởi động kéo 7 ngày (bù đơn Facebook trên POS chưa từng kéo về), sau đó 48 giờ.
-      const summary = await syncPosLandingOrders({ onCrmOrdersCancelled, onPosConversationOrders, onPosStatuses, onPosContent, ...(first ? { sinceHours: 7 * 24, maxPages: 30 } : {}) });
+      const summary = await runPosSync(first ? { sinceHours: 7 * 24, maxPages: 30 } : {});
       first = false;
       if (summary.disabled) return;
       recordPosSyncStatus(summary);
@@ -285,8 +314,6 @@ export function startPosSync({ log = console.log, onCrmOrdersCancelled = null, o
     } catch (error) {
       recordPosSyncStatus(null, { error: error.message });
       log(`Đồng bộ POS lỗi: ${error.message}`);
-    } finally {
-      running = false;
     }
   };
   run();

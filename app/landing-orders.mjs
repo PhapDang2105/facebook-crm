@@ -46,6 +46,7 @@ const maximumRecent = 1000;
 const duplicateWindowMs = 10 * 60 * 1000;
 
 let cachedStore = null;
+let storeLoading = null;
 const enqueueWrite = createWriteQueue();
 
 function emptyStore() {
@@ -72,8 +73,12 @@ function normalizeStore(value) {
  */
 export async function readLandingStore() {
   if (cachedStore) return cachedStore;
-  cachedStore = await readJsonFile(landingOrdersPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho đơn landing' });
-  return cachedStore;
+  // Nhớ cả lượt đọc ĐANG CHẠY: hai lượt đọc đầu tiên đồng thời dùng chung một bản kho (bản đọc xong sau từng đè
+  // bản đã được sửa trong hàng ghi → mất thay đổi).
+  storeLoading ||= readJsonFile(landingOrdersPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho đơn landing' })
+    .then(store => { cachedStore = store; return store; })
+    .finally(() => { storeLoading = null; });
+  return storeLoading;
 }
 
 async function persistStore(store) {

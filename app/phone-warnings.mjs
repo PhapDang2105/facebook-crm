@@ -40,6 +40,7 @@ const cacheTtlMs = 24 * 60 * 60 * 1000;
 const requestTimeoutMs = 6000;
 
 let cachedStore = null;
+let storeLoading = null;
 const enqueueWrite = createWriteQueue();
 
 function emptyStore() {
@@ -53,8 +54,12 @@ function normalizeStore(value) {
 /** ENOENT → rỗng; tệp hỏng → cất `.corrupt-*`; lỗi đọc khác → ném (không nhớ kho rỗng). */
 export async function readWarningStore() {
   if (cachedStore) return cachedStore;
-  cachedStore = await readJsonFile(warningsPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho cảnh báo SĐT' });
-  return cachedStore;
+  // Nhớ cả lượt đọc ĐANG CHẠY: hai lượt đọc đầu tiên đồng thời dùng chung một bản kho (bản đọc xong sau từng đè
+  // bản đã được sửa trong hàng ghi → mất thay đổi).
+  storeLoading ||= readJsonFile(warningsPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho cảnh báo SĐT' })
+    .then(store => { cachedStore = store; return store; })
+    .finally(() => { storeLoading = null; });
+  return storeLoading;
 }
 
 export function updateWarningStore(mutate) {

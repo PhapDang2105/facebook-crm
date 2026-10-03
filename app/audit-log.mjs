@@ -13,7 +13,7 @@
 // Ngoại lệ "chỉ người dùng": thẻ / bật-tắt bot / phân công của hội thoại ghi cả khi bot hay hệ thống
 // tự làm (actor 'bot' / 'system') để lịch sử hội thoại đầy đủ như Pancake.
 import { randomBytes } from 'node:crypto';
-import { appendFile, mkdir, readdir, readFile, unlink } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { maskPersonal, vnDateKey } from './processing/decision-log.mjs';
@@ -286,6 +286,31 @@ async function readDay(dir, day) {
   return items;
 }
 
+// Tập mã hội thoại / mã đơn có mặt trong từng tệp NGÀY ĐÃ QUA (không còn ghi thêm): khoá thư mục + ngày, kèm kích thước
+// tệp (tệp đổi — sửa tay, dọn — thì dựng lại). Giới hạn số ngày nhớ (giữ 365 ngày nhật ký → ≤ 400 mục).
+const pastDayIndex = new Map();
+const pastDayIndexMax = 400;
+
+async function pastDayKeys(dir, day) {
+  const file = path.join(dir, `${day}.jsonl`);
+  const info = await stat(file).catch(() => null);
+  if (!info) return null;
+  const key = `${dir}\u0000${day}`;
+  const cached = pastDayIndex.get(key);
+  if (cached && cached.size === info.size) return cached;
+  const conversations = new Set();
+  const orders = new Set();
+  for (const item of await readDay(dir, day)) {
+    if (item.conversationId) conversations.add(item.conversationId);
+    if (item.orderId) orders.add(item.orderId);
+  }
+  const entry = { size: info.size, conversations, orders };
+  pastDayIndex.delete(key);
+  pastDayIndex.set(key, entry);
+  while (pastDayIndex.size > pastDayIndexMax) pastDayIndex.delete(pastDayIndex.keys().next().value);
+  return entry;
+}
+
 /** Thứ tự mới → cũ: theo `at`, cùng mốc thì theo id (tổng thứ tự cố định để con trỏ không lặp/sót). */
 function newerFirst(a, b) {
   return (Number(b.at) || 0) - (Number(a.at) || 0) || (String(b.id) < String(a.id) ? -1 : String(b.id) > String(a.id) ? 1 : 0);
@@ -339,10 +364,18 @@ export async function queryAudit(filters = {}, { dir = auditLogDir() } = {}) {
   };
 
   const items = [];
+  const today = vnDateKey(Date.now());
   for (const day of await dayFiles(dir)) {
     if (to && day > to) continue;
     if (from && day < from) break;
     if (cursorDay && day > cursorDay) continue;
+    // P1: lịch sử MỘT hội thoại / MỘT đơn hiếm khi đủ `limit` nên trước đây đọc và parse cả 365 tệp ngày mỗi lần mở.
+    // Ngày đã qua không đổi nữa: nhớ tập mã hội thoại/mã đơn của ngày đó, ngày không có mã cần tìm thì bỏ qua.
+    if ((conversationId || orderId) && day < today) {
+      const keys = await pastDayKeys(dir, day);
+      if (keys && conversationId && !keys.conversations.has(conversationId)) continue;
+      if (keys && orderId && !keys.orders.has(orderId)) continue;
+    }
     const found = (await readDay(dir, day)).filter(matches).sort(newerFirst);
     items.push(...found);
     if (items.length > limit) break;

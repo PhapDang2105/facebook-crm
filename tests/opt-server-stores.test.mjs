@@ -138,3 +138,12 @@ test('INT-10: runPosSync dùng móc đã đặt và chỉ một lượt chạy m
   assert.deepEqual(seen, [1, 1], 'lượt bấm tay cũng chạy móc đơn POS của hội thoại');
   assert.equal(posSync.posSyncRunning(), false);
 });
+
+test('Lượt đọc đầu tiên đồng thời dùng chung MỘT bản kho (landing, cảnh báo SĐT): không có bản đọc sau đè bản đã sửa', async () => {
+  const landing = await import(`../app/landing-orders.mjs?race=${Date.now()}`);
+  const [first, second] = await Promise.all([landing.readLandingStore(), landing.readLandingStore()]);
+  assert.equal(first, second);
+  const warnings = await import(`../app/phone-warnings.mjs?race=${Date.now()}`);
+  const [w1, w2] = await Promise.all([warnings.readWarningStore(), warnings.readWarningStore()]);
+  assert.equal(w1, w2);
+});

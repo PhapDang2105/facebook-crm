@@ -379,6 +379,19 @@ function decodeStoredSettings(stored) {
   return normalizeChatbotSettings({ ...rest, directApiKey });
 }
 
+// Lỗi đọc thoáng qua (Windows: đọc đúng lúc tệp đang được rename đè → EPERM/EBUSY) thử lại vài lần trước khi ném.
+const transientReadErrors = new Set(['EBUSY', 'EPERM', 'EAGAIN', 'EMFILE', 'ENFILE']);
+async function readSettingsFile(filePath, attempts = 4) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await readJsonFile(filePath, { fallback: null, label: 'Cài đặt chatbot' });
+    } catch (error) {
+      if (attempt >= attempts || !transientReadErrors.has(error?.code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 25 * attempt));
+    }
+  }
+}
+
 const settingsStores = new Map();
 
 /** Kho cài đặt chatbot cho một đường dẫn tệp (một bản cho mỗi đường dẫn: cùng hàng ghi, cùng bộ nhớ đệm). */
@@ -390,7 +403,7 @@ export function chatbotSettingsStore(filePath = defaultChatbotSettingsPath()) {
   async function read() {
     const info = await stat(filePath).catch(() => null);
     if (info && cache && cache.mtimeMs === info.mtimeMs && cache.size === info.size) return structuredClone(cache.settings);
-    const stored = await readJsonFile(filePath, { fallback: null, label: 'Cài đặt chatbot' });
+    const stored = await readSettingsFile(filePath);
     if (!stored) return normalizeChatbotSettings(defaultChatbotSettings);
     const settings = decodeStoredSettings(stored);
     // Mốc lấy TRƯỚC khi đọc: tệp đổi giữa chừng thì lần sau mốc khác → đọc lại (không bao giờ giữ bản cũ).

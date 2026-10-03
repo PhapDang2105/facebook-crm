@@ -102,6 +102,7 @@ const giftsPath = process.env.GIFTS_PATH || path.join(root, 'data', 'processed',
 const productImagesPath = path.join(root, 'data', 'processed', 'product-images');
 const exportTemplatePath = path.join(root, 'assets', 'templates', 'facebook-order-export.xlsx');
 let exportTemplateBuffer = null;
+let exportTemplateCleaned = null;
 const metaOauthStates = new Map();
 const metaPendingPages = new Map();
 
@@ -326,7 +327,7 @@ async function createChatbotCustomerOrder(conversation, input, context = {}) {
   await attachPhoneWarning(order);
   // Thẻ "Đã mua hàng" gắn ngay lúc lưu đơn (01/10): trước đây chỉ gắn sau khi bot gửi xong tin xác
   // nhận, gửi lỗi (Pancake hết giờ chờ…) là đơn có mà hội thoại không có thẻ.
-  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const labelDefs = await inboxLabelDefs();
   const orderLabels = labelsForEvents(labelDefs, ['order']);
   let labelChange = null;
   const result = await updateMessagingStore(store => {
@@ -468,17 +469,6 @@ async function cancelChatbotCustomerOrder(conversation, orderId) {
   return { ...result, cancelled: true, created: false };
 }
 
-/**
- * Đơn POS của một hội thoại Facebook mà CRM không tạo (khách thanh toán qua
- * Facebook Shop, nhân viên lên đơn trong Pancake): ghi vào đúng hội thoại, nguồn
- * "POS", để bảng Đơn hàng đủ đơn và bot biết khách đã có đơn. Mã đơn cố định
- * `pos<mã POS>` nên đồng bộ lại chỉ cập nhật (hủy trên POS thì hủy theo), không
- * nhân đôi. Trả về số đơn mới ghi.
- */
-/**
- * Thông tin khách cho bám đuổi (chỉ bám khách mới): hồ sơ khách Pancake/POS của
- * hội thoại, cộng lịch sử POS và bảng đơn CRM theo các SĐT khách từng để lại.
- */
 /** Mẫu tin vận đơn đang dùng (Cài đặt → Tin nhắn, đã gộp mẫu mặc định). */
 async function shipmentTemplates() {
   return (await readChatbotSettings().catch(() => null))?.messageTemplates || {};
@@ -491,7 +481,7 @@ async function shipmentNoticeQueue(now = Date.now()) {
 
 /** Thẻ CRM cho sự kiện vận đơn: "Đã gửi mã vận đơn" (shipment-sent), "Giao hàng thành công" (delivered). */
 async function shipmentLabelIds() {
-  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const labelDefs = await inboxLabelDefs();
   return { sent: labelsForEvents(labelDefs, ['shipment-sent']), delivered: labelsForEvents(labelDefs, ['delivered']), labelDefs };
 }
 
@@ -527,6 +517,10 @@ async function saveShipmentNoticeResults(results, now = Date.now()) {
   return saved;
 }
 
+/**
+ * Thông tin khách cho bám đuổi (chỉ bám khách mới): hồ sơ khách Pancake/POS của
+ * hội thoại, cộng lịch sử POS và bảng đơn CRM theo các SĐT khách từng để lại.
+ */
 async function followUpConversationInfo(pageId, conversationId) {
   const info = await fetchPancakeConversationInfo(pageId, conversationId);
   const phones = info.phones.map(phone => normalizeWarningPhone(phone)).filter(Boolean).slice(0, 3);
@@ -549,6 +543,13 @@ async function followUpConversationInfo(pageId, conversationId) {
 const shouldLogSkippedPosOrder = createSeenOnce(2000);
 // R13-fix (L3): hai request "Đẩy POS" sát nhau dùng chung một lượt đẩy → chỉ ghi lịch sử một lần cho mỗi (đơn, mã POS).
 const shouldLogPosPush = createSeenOnce(500);
+/**
+ * Đơn POS của một hội thoại Facebook mà CRM không tạo (khách thanh toán qua
+ * Facebook Shop, nhân viên lên đơn trong Pancake): ghi vào đúng hội thoại, nguồn
+ * "POS", để bảng Đơn hàng đủ đơn và bot biết khách đã có đơn. Mã đơn cố định
+ * `pos<mã POS>` nên đồng bộ lại chỉ cập nhật (hủy trên POS thì hủy theo), không
+ * nhân đôi. Trả về số đơn mới ghi.
+ */
 async function importPosConversationOrders(posOrders) {
   const drafts = [];
   for (const posOrder of Array.isArray(posOrders) ? posOrders : []) {
@@ -557,6 +558,8 @@ async function importPosConversationOrders(posOrders) {
     const lines = posGoodsItems(posOrder);
     // POS hay lưu SĐT mất số 0 đầu ("912345678") hoặc dạng 0084…: chuẩn hoá trước khi kiểm, kẻo đơn bị bỏ.
     const rawPhone = String(posOrder.bill_phone_number || address.phone_number || '');
+    // Giờ tạo đơn POS (inserted_at là UTC không ghi múi giờ): tính một lần cho cả hai chỗ dùng.
+    const insertedAt = Date.parse(`${String(posOrder.inserted_at || '').replace(/Z?$/, 'Z')}`) || Date.now();
     try {
       const order = normalizeCustomerOrder({
         id: `pos${posOrder.system_id || posOrder.id}`,
@@ -571,7 +574,7 @@ async function importPosConversationOrders(posOrders) {
         source: 'POS',
         status: Number(posOrder.status) === 6 ? 'Hủy' : 'Mới',
         note: String(posOrder.note || '').slice(0, 500)
-      }, { now: Date.parse(`${String(posOrder.inserted_at || '').replace(/Z?$/, 'Z')}`) || Date.now() });
+      }, { now: insertedAt });
       // R13 (C1 + T4): tổng = tiền POS thực thu (thu hộ + chuyển khoản) khi POS có ghi; quà hiển thị là quà.
       finalizePosImportedOrder(order, posOrder);
       drafts.push({
@@ -579,7 +582,7 @@ async function importPosConversationOrders(posOrders) {
         posOrder,
         order: {
           ...order,
-          createdAt: Date.parse(`${String(posOrder.inserted_at || '').replace(/Z?$/, 'Z')}`) || Date.now(),
+          createdAt: insertedAt,
           automatic: false,
           employee: posOrder.creator?.name || posOrder.assigning_seller?.name || posOrder.account_name || '',
           pos: { id: String(posOrder.id), systemId: String(posOrder.system_id || ''), status: String(posOrder.status_name || ''), importedAt: Date.now() },
@@ -598,7 +601,7 @@ async function importPosConversationOrders(posOrders) {
   let created = 0;
   const touched = new Set();
   // Thẻ "Đã mua hàng" cho hội thoại có đơn POS chưa hủy (đơn mới, và đơn đã kéo về trước đây mà chưa gắn).
-  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const labelDefs = await inboxLabelDefs();
   const orderLabels = labelsForEvents(labelDefs, ['order']);
   const relabeled = [];
   // Lịch sử thẻ của hội thoại: thẻ do đồng bộ POS tự gắn cũng vào nhật ký (người làm 'system').
@@ -669,7 +672,7 @@ async function importPosConversationOrders(posOrders) {
  * landing có nhắn Page (khớp SĐT), luồng bình luận của khách đã mua. Chạy lúc khởi động và mỗi 5 phút.
  */
 async function runPurchaseLabelBackfill() {
-  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const labelDefs = await inboxLabelDefs();
   const orderLabels = labelsForEvents(labelDefs, ['order']);
   if (!orderLabels.length) return 0;
   const landingOrders = await listLandingOrders().catch(() => []);
@@ -699,7 +702,7 @@ async function runPurchaseLabelBackfill() {
  * khách ghi SĐT; bỏ trống = quét bù mọi hội thoại (khởi động + mỗi 5 phút).
  */
 async function runPhoneLabelPass(conversationIds = null) {
-  const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+  const labelDefs = await inboxLabelDefs();
   const phoneLabels = labelsForEvents(labelDefs, ['phone']);
   if (!phoneLabels.length) return 0;
   let result = { changes: [], flagged: 0 };
@@ -837,7 +840,7 @@ async function cancelCrmOrdersCancelledOnPos(ids) {
  *    bấm quảng cáo nhận nhầm lời chào này.
  *  - Mỗi hội thoại chỉ chào lại sau QR_GREETING_COOLDOWN_MS, tránh khách quét
  *    mấy lần liền bị nhắn dồn.
- *  - Đặt QR_GREETING_TEXT rỗng trong .env là tắt hẳn, không phải sửa mã.
+ *  - Lời chào là mẫu QR_OFFER (Cài đặt → Tin nhắn); để trống mẫu là không gửi.
  */
 const qrGreetingDelayMs = Number(process.env.QR_GREETING_DELAY_MS) || 10_000;
 const qrGreetingCooldownMs = Number(process.env.QR_GREETING_COOLDOWN_MS) || 6 * 60 * 60 * 1000;
@@ -933,11 +936,13 @@ const qrOfferCardFile = path.join(root, 'assets', 'branding', 'offers', 'the-uu-
 // Bộ chào (app/qr-greeting.mjs): hẹn giờ, hủy khi Botcake đã chào, cooldown theo hội thoại. Bot tắt hay
 // hội thoại đã phân công vẫn gửi ưu đãi (chủ shop 02/10); chỉ né khi nhân viên vừa nhắn trong
 // QR_GREETING_STAFF_QUIET_MS (mặc định 10 phút; 0 = không né).
-const qrGreetingStaffQuietMs = (() => {
-  const raw = String(process.env.QR_GREETING_STAFF_QUIET_MS ?? '').trim();
+// Số mili giây từ .env cho luồng QR: trống / không phải số / âm → mặc định; 0 là giá trị hợp lệ.
+const qrBridgeEnvMs = (name, fallback) => {
+  const raw = String(process.env[name] ?? '').trim();
   const value = Number(raw);
-  return raw && Number.isFinite(value) && value >= 0 ? value : 10 * 60 * 1000;
-})();
+  return raw && Number.isFinite(value) && value >= 0 ? value : fallback;
+};
+const qrGreetingStaffQuietMs = qrBridgeEnvMs('QR_GREETING_STAFF_QUIET_MS', 10 * 60 * 1000);
 const qrGreeter = createQrGreeter({
   offerMessage: qrOfferMessage,
   send: (conversation, payload) => sendConversationMessage(conversation, payload),
@@ -980,11 +985,6 @@ const scheduleQrGreetings = (changes, options) => qrGreeter.schedule(changes, op
 // trên trang đệm với tin đầu của hội thoại hộp thư mới không dấu nguồn (app/qr-greeting.mjs, createBridgeClickMatcher).
 // QR_BRIDGE_MATCH_WINDOW_MS: cửa sổ từ lúc bấm tới tin đầu (mặc định 90 giây — ca thật 49 giây; 0 = tắt).
 // QR_BRIDGE_AMBIGUITY_MS: hai hội thoại mới cách nhau trong quãng này tranh một lượt bấm → không chào ai (15 giây).
-const qrBridgeEnvMs = (name, fallback) => {
-  const raw = String(process.env[name] ?? '').trim();
-  const value = Number(raw);
-  return raw && Number.isFinite(value) && value >= 0 ? value : fallback;
-};
 const qrBridgeMatcher = createBridgeClickMatcher({
   windowMs: qrBridgeEnvMs('QR_BRIDGE_MATCH_WINDOW_MS', 90_000),
   ambiguityMs: qrBridgeEnvMs('QR_BRIDGE_AMBIGUITY_MS', 15_000),
@@ -1042,11 +1042,11 @@ const handleMetaQrChanges = createLinkRoutedQrFlow({
   sendViaMeta: (conversation, payload) => sendConversationMessage({ ...conversation, pancakeConversationId: '' }, payload)
 });
 
-/** Sends the tappable Messenger receipt. Kept separate from creating the order so
- *  the chatbot can persist the order first and still close with the receipt. */
-/** `force`: nhân viên bấm "Gửi lại cho khách" — gửi cả khi POS đã gửi thẻ, và ném lỗi thay vì chỉ ghi log. */
-/** `sentBy` { name, username }: nhân viên đã bấm (đơn tạo tay, "Gửi lại phiếu") — tin mang sender 'staff'; không có là bot gửi. */
 /**
+ * Sends the tappable Messenger receipt. Kept separate from creating the order so
+ * the chatbot can persist the order first and still close with the receipt.
+ * `force`: nhân viên bấm "Gửi lại cho khách" — gửi cả khi POS đã gửi thẻ, và ném lỗi thay vì chỉ ghi log.
+ * `sentBy` { name, username }: nhân viên đã bấm (đơn tạo tay, "Gửi lại phiếu") — tin mang sender 'staff'; không có là bot gửi.
  * Trả kết quả gửi thật (không ném khi `force` = false): { sent: true, via: 'receipt-image' | 'messenger' }
  * | { sent: false, via: 'pos' } (POS đã gửi thẻ, CRM không gửi thêm) | { sent: false, error } (gửi lỗi).
  * Trước 01/10 lỗi bị nuốt và đơn tạo tay vẫn báo "Đã gửi xác nhận cho khách".
@@ -1161,18 +1161,24 @@ function removeDataRowBackgrounds(workbook, worksheetPath) {
  * nhập — Basic Auth không cản được vì trình duyệt tự đính kèm lại.
  * Request không có thân (ví dụ POST .../read) vẫn đi qua như cũ.
  */
-async function readBody(request, maximumBytes = 1024 * 1024) {
+/** U1: đọc thân request, dừng (ném `message`) ngay khi vượt `maximumBytes` — dùng chung cho JSON, webhook thô và tệp XLSX. */
+async function readLimited(request, maximumBytes, message) {
   const chunks = [];
   let totalBytes = 0;
   for await (const chunk of request) {
     totalBytes += chunk.length;
-    if (totalBytes > maximumBytes) throw new Error('Nội dung gửi lên vượt quá giới hạn cho phép.');
+    if (totalBytes > maximumBytes) throw new Error(message);
     chunks.push(chunk);
   }
-  if (!chunks.length) return {};
+  return Buffer.concat(chunks);
+}
+
+async function readBody(request, maximumBytes = 1024 * 1024) {
+  const body = await readLimited(request, maximumBytes, 'Nội dung gửi lên vượt quá giới hạn cho phép.');
+  if (!body.length) return {};
   const contentType = String(request.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (contentType !== 'application/json') throw new Error('Nội dung gửi lên phải là application/json.');
-  const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const parsed = JSON.parse(body.toString('utf8'));
   // null / mảng / chuỗi qua được JSON.parse nhưng route truy `payload.x` sẽ ném TypeError lộ chuỗi nội bộ.
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Thân yêu cầu phải là một object JSON.');
   return parsed;
@@ -1212,27 +1218,14 @@ function isCrossSiteWrite(request) {
 }
 
 /** Meta signs the exact bytes it sent, so the webhook body must stay unparsed. */
-async function readRawBody(request, maximumBytes = 1024 * 1024) {
-  const chunks = [];
-  let totalBytes = 0;
-  for await (const chunk of request) {
-    totalBytes += chunk.length;
-    if (totalBytes > maximumBytes) throw new Error('Webhook payload vượt quá giới hạn cho phép.');
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
+function readRawBody(request, maximumBytes = 1024 * 1024) {
+  return readLimited(request, maximumBytes, 'Webhook payload vượt quá giới hạn cho phép.');
 }
 
 async function readBinaryBody(request, maximumBytes = 25 * 1024 * 1024) {
-  const chunks = [];
-  let totalBytes = 0;
-  for await (const chunk of request) {
-    totalBytes += chunk.length;
-    if (totalBytes > maximumBytes) throw new Error('Tệp XLSX vượt quá giới hạn 25 MB.');
-    chunks.push(chunk);
-  }
-  if (!chunks.length) throw new Error('Tệp XLSX không có dữ liệu.');
-  return Buffer.concat(chunks);
+  const body = await readLimited(request, maximumBytes, 'Tệp XLSX vượt quá giới hạn 25 MB.');
+  if (!body.length) throw new Error('Tệp XLSX không có dữ liệu.');
+  return body;
 }
 
 async function serveFile(request, response, pathname, version = '') {
@@ -1254,7 +1247,7 @@ async function serveFile(request, response, pathname, version = '') {
       return response.end(body);
     } catch { return sendJson(response, 404, { error:'Resource not found.' }); }
   }
-  // Meta requires a public privacy policy URL; Caddy lets /privacy through without a password.
+  // Meta requires a public privacy policy URL: /privacy is a public path (auth.mjs isPublicPath), no login needed.
   const relative = pathname === '/' ? 'index.html' : pathname === '/privacy' ? 'privacy.html' : pathname === '/login' ? 'login.html' : pathname.slice(1);
   const filePath = path.resolve(webRoot, relative);
   if (!filePath.startsWith(path.resolve(webRoot) + path.sep)) return sendJson(response, 400, { error:'Invalid path.' });
@@ -1281,7 +1274,8 @@ async function serveFile(request, response, pathname, version = '') {
     const headers = { 'Content-Type':types[path.extname(filePath)] || 'application/octet-stream', 'Cache-Control':cacheControl, 'ETag':etag };
     // CSP chỉ cho trang HTML của web/ (đã rà: không script nội tuyến) — lý do từng chỉ thị ở app/security.mjs.
     if (path.extname(filePath) === '.html') headers['Content-Security-Policy'] = HTML_CSP;
-    if (request.headers['if-none-match'] === etag) {
+    // etagMatches: Caddy `encode` gắn hậu tố -gzip/-zstd vào ETag; so bằng === thì tệp tĩnh không bao giờ được 304.
+    if (etagMatches(request.headers['if-none-match'], etag)) {
       response.writeHead(304, headers);
       return response.end();
     }
@@ -1413,11 +1407,6 @@ function refreshLoginUsersIfStale() {
 await refreshLoginUsers().catch(error => console.warn(`Không đọc được Nhân sự cho đăng nhập: ${error.message}`));
 const auth = createAuth({ users: loginUsers, secret: authConfig.sessionSecret, secure: authConfig.secureCookie });
 
-/** IP người dùng: X-Forwarded-For chỉ được tin khi kết nối từ loopback (Caddy) — app/request-actor.mjs. */
-function clientAddress(request) {
-  return clientIp(request);
-}
-
 /* ---- Nhật ký hoạt động (app/audit-log.mjs) ----
  * Mọi thao tác của NGƯỜI DÙNG (route do giao diện gọi) ghi một dòng sau khi thành công; thất bại
  * quan trọng (đăng nhập sai) cũng ghi. Việc tự động của bot/đồng bộ không ghi ở đây.
@@ -1462,6 +1451,10 @@ async function recordConversationSeen(conversationId, actor) {
   const updated = await updateMessagingStore(store => markConversationSeen(store, conversationId, { username: actor.username, name: actor.name }), { defer: true, unchanged: result => !result });
   if (updated) publishMessagingEvent({ type: 'conversation', conversation: publicConversation(updated) });
 }
+
+// U5: các Page vận hành trong Pancake (PANCAKE_PAGES, hoặc một Page cấu hình đơn).
+const pancakePages = () => (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]);
+const isPancakePage = pageId => pancakePages().some(page => String(page.pageId) === String(pageId));
 
 /** Định nghĩa thẻ (Cài đặt → Tin nhắn) để nhật ký ghi TÊN thẻ, không chỉ mã. */
 async function inboxLabelDefs() {
@@ -1574,20 +1567,20 @@ async function handleAuth(request, response, url, isWebhook) {
   }
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
     const payload = await readBody(request);
-    const result = await auth.login({ username: payload.username, password: payload.password, clientId: clientAddress(request) });
+    const result = await auth.login({ username: payload.username, password: payload.password, clientId: clientIp(request) });
     if (!result.ok) {
       if (result.status === 401 || result.status === 429) {
         const typed = String(payload.username || '').trim().toLowerCase().slice(0, 40);
-        console.warn(`Đăng nhập thất bại (${clientAddress(request)}): ${typed}`);
+        console.warn(`Đăng nhập thất bại (${clientIp(request)}): ${typed}`);
         // Đăng nhập sai: người = tên đã gõ (không ghi mật khẩu).
         audit(request, 'auth.login_failed', {
           summary: result.status === 429 ? 'Đăng nhập sai quá nhiều lần, bị khóa 15 phút.' : 'Sai tên đăng nhập hoặc mật khẩu.'
-        }, { username: typed, name: typed, role: '', ip: clientAddress(request) });
+        }, { username: typed, name: typed, role: '', ip: clientIp(request) });
       }
       sendJson(response, result.status, { error: result.error });
       return true;
     }
-    console.log(`Đăng nhập: ${result.username} (${clientAddress(request)})`);
+    console.log(`Đăng nhập: ${result.username} (${clientIp(request)})`);
     audit(request, 'auth.login', { summary: 'Đăng nhập CRM.' }, await actorForUsername(request, result.username));
     response.setHeader('Set-Cookie', result.cookie);
     sendJson(response, 200, { username: result.username });
@@ -2167,7 +2160,7 @@ const server = http.createServer(async (request, response) => {
           // hộp thư xem được hội thoại bot đang trả lời qua Pancake.
           // Kết quả đồng bộ gần nhất (pancake.mjs): syncedAt (ISO), syncError ('' khi ổn), syncErrorAt (ms) — token
           // hết hạn / Pancake chặn thì Cài đặt → Kênh báo lỗi thay vì chấm xanh mãi.
-          ...(isPancakeConfigured() ? (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]).map(p => ({ id: p.pageId, name: p.pageName, picture: p.picture || defaultPicture, platform: 'facebook', via: 'pancake', status: 'connected', subscribed: true, subscribedFields: [], subscriptionError: '', connectedAt: 0, checkedAt: 0, syncedAt: '', syncError: '', syncErrorAt: 0, ...(pancakeSyncStatusFor(p.pageId) || {}) })) : [])
+          ...(isPancakeConfigured() ? pancakePages().map(p => ({ id: p.pageId, name: p.pageName, picture: p.picture || defaultPicture, platform: 'facebook', via: 'pancake', status: 'connected', subscribed: true, subscribedFields: [], subscriptionError: '', connectedAt: 0, checkedAt: 0, syncedAt: '', syncError: '', syncErrorAt: 0, ...(pancakeSyncStatusFor(p.pageId) || {}) })) : [])
         ],
         pancake: { configured: isPancakeConfigured(), webhookUrl: pancakeConfig.webhookUrl, pageId: pancakeConfig.pageId }
       });
@@ -2488,7 +2481,7 @@ const server = http.createServer(async (request, response) => {
         // Pancake gọi webhook không kèm token (22/09/2026: mọi lần gọi thật đều
         // không có), nên ngoài token khớp còn nhận khi page_id là Page đã cấu
         // hình. Ghi log khi chỉ khớp page để còn dấu vết nếu có kẻ giả mạo.
-        const pageValid = Boolean(pageId) && (pancakeConfig.pages?.length ? pancakeConfig.pages : [pancakeConfig]).some(p => String(p.pageId) === pageId);
+        const pageValid = Boolean(pageId) && isPancakePage(pageId);
         // Gói không token: nhận theo page_id khi đường webhook là đường bí mật; ở đường mặc định (đoán được)
         // vẫn nhận kèm cảnh báo, trừ khi đã bật PANCAKE_WEBHOOK_REQUIRE_SECRET=1 (app/server-helpers.mjs).
         const decision = pancakeWebhookDecision({
@@ -2864,7 +2857,7 @@ const server = http.createServer(async (request, response) => {
       const pageId = String(payload.channelId || '');
       if (!pageId) return sendJson(response, 400, { error: 'Thiếu channelId của Facebook Page cần đồng bộ.' });
       // Kênh Pancake: kéo lịch sử bằng API Pancake thay vì Graph của Meta.
-      const isPancake = isPancakeConfigured() && (pancakeConfig.pages?.length ? pancakeConfig.pages.some(p => String(p.pageId) === pageId) : pageId === pancakeConfig.pageId);
+      const isPancake = isPancakeConfigured() && isPancakePage(pageId);
       // Đồng bộ thủ công cũng đưa bot tin khách mới chưa ai trả lời (như lượt định kỳ).
       const summary = isPancake
         ? await syncPancakeConversations({ pageId, limit: Number(payload.limit) || 60, messagePages: 2, processChatbotChanges: syncBotHook, chatbotDependencies })
@@ -3076,17 +3069,14 @@ const server = http.createServer(async (request, response) => {
     }
     if (url.pathname === '/api/staff' || url.pathname.startsWith('/api/staff/')) {
       const session = auth.session(request);
-      const me = session?.username
-        ? (envLoginUsers.has(session.username) ? { role: 'owner' } : await staffByUsername(session.username))
-        : null;
-      const canManage = !auth.enabled || me?.role === 'owner' || me?.role === 'admin';
+      // U6: cùng một luật với requireManager (chủ shop / Quản trị / chưa bật đăng nhập), không đọc lại staff.json.
+      const canManage = isManager(await requestActor(request));
       if (request.method === 'GET' && url.pathname === '/api/staff') {
         return sendJson(response, 200, { items: await listStaff(), loginEnabled: auth.enabled, currentUser: session?.username || '', canManage, roles: STAFF_ROLES, ownerAccounts: envLoginUsers.size });
       }
       const staffMatch = url.pathname.match(/^\/api\/staff\/([^/]+)$/);
       const creating = request.method === 'POST' && url.pathname === '/api/staff';
       if (creating || (request.method === 'PATCH' && staffMatch)) {
-        if (!canManage) return sendJson(response, 403, { error: 'Chỉ Quản trị mới thêm hoặc sửa Nhân sự.' });
         if (!(await requireManager(request, response, 'Chỉ Quản trị mới thêm hoặc sửa Nhân sự.'))) return;
         try {
           const payload = await readBody(request);
@@ -3122,7 +3112,7 @@ const server = http.createServer(async (request, response) => {
           // cấp lại cookie MỚI cho đúng máy vừa đổi (đăng nhập lại bằng mật khẩu mới vừa gửi) để không bị đá ra.
           const selfEdit = !creating && session?.username && previous && session.username === previous.username;
           if (selfEdit && member.active && passwordChanged && auth.enabled) {
-            const relogin = await auth.login({ username: member.username, password: String(payload.password), clientId: clientAddress(request) });
+            const relogin = await auth.login({ username: member.username, password: String(payload.password), clientId: clientIp(request) });
             if (relogin.ok) response.setHeader('Set-Cookie', relogin.cookie);
           }
           return sendJson(response, creating ? 201 : 200, { member, items: await listStaff(), loginEnabled: auth.enabled });
@@ -3234,7 +3224,7 @@ const server = http.createServer(async (request, response) => {
               return sendJson(response, 502, { error: `Chưa tạo đơn: ${error.message}` });
             }
           }
-          const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
+          const labelDefs = await inboxLabelDefs();
           const orderLabels = labelsForEvents(labelDefs, ['order']);
           let relabeledConversation = null;
           let labelsBefore = [];
@@ -3718,7 +3708,9 @@ const server = http.createServer(async (request, response) => {
       exportTemplateBuffer ||= await readFile(exportTemplatePath);
       const workbook = new AdmZip(exportTemplateBuffer);
       const worksheetPath = 'xl/worksheets/sheet1.xml';
-      const cleanedWorkbook = removeDataRowBackgrounds(workbook, worksheetPath);
+      // P9: mẫu tĩnh → bỏ nền dòng dữ liệu một lần rồi nhớ { stylesXml, worksheetXml } (chuỗi, không bị sửa tại chỗ).
+      exportTemplateCleaned ||= removeDataRowBackgrounds(workbook, worksheetPath);
+      const cleanedWorkbook = exportTemplateCleaned;
       // Dữ liệu từ dòng 4 của mẫu, dựng sheetData một lượt (app/xlsx-template.mjs) thay vì quét lại cả XML cho từng ô.
       const worksheetXml = fillTemplateSheet(cleanedWorkbook.worksheetXml, rows, { firstRow: 4 });
       workbook.updateFile('xl/styles.xml', Buffer.from(cleanedWorkbook.stylesXml, 'utf8'));

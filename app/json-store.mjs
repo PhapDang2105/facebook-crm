@@ -21,6 +21,7 @@ const isPlainObject = value => Boolean(value) && typeof value === 'object' && !A
  *   (ví dụ `null`, mảng thay cho object) cũng coi là hỏng.
  * - `normalize`: hàm chuẩn hoá giá trị đọc được; ném lỗi thì cũng coi là hỏng.
  * - `label`: tên kho cho dòng log (tiếng Việt).
+ * - `onCorrupt`: 'quarantine' (mặc định, như trên) hoặc 'throw' (giữ nguyên tệp hỏng và ném lỗi).
  */
 export async function readJsonFile(filePath, options = {}) {
   let raw;
@@ -73,6 +74,12 @@ function parseOrQuarantine(filePath, raw, options, quarantine) {
     problem = error;
   }
   if (!problem) return value;
+  // `onCorrupt: 'throw'`: kho mà "rỗng" nguy hiểm hơn "lỗi" (Nhân sự: rỗng = mất mọi đăng nhập) — để nguyên tệp, ném.
+  if (options.onCorrupt === 'throw') {
+    const failure = new Error(`${label || path.basename(filePath)} hỏng (${problem?.message || problem}).`);
+    failure.cause = problem;
+    throw failure;
+  }
   const report = quarantined => {
     console.error(`${label || path.basename(filePath)} hỏng (${problem?.message || problem})${quarantined ? `, đã cất sang ${path.basename(quarantined)}` : ''}; bắt đầu lại từ mặc định.`);
     return fallbackOf(options);

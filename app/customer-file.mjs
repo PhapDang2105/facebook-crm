@@ -13,6 +13,7 @@ const customerFilePath = process.env.CUSTOMER_FILE_PATH
   || path.join(projectRoot, 'data', 'processed', 'customer-file.json');
 
 let cachedStore = null;
+let storeLoading = null;
 const enqueueWrite = createWriteQueue();
 
 function emptyStore() {
@@ -27,8 +28,12 @@ function normalizeStore(value) {
 /** ENOENT → rỗng; tệp hỏng → cất `.corrupt-*`; lỗi đọc khác → ném (không nhớ kho rỗng rồi ghi đè). */
 async function readStore() {
   if (cachedStore) return cachedStore;
-  cachedStore = await readJsonFile(customerFilePath, { fallback: emptyStore, normalize: normalizeStore, label: 'Tệp khách hàng' });
-  return cachedStore;
+  // Nhớ cả lượt đọc ĐANG CHẠY: hai lượt đọc đầu tiên đồng thời dùng chung một bản kho (bản đọc xong sau từng đè
+  // bản đã được sửa trong hàng ghi → mất thay đổi).
+  storeLoading ||= readJsonFile(customerFilePath, { fallback: emptyStore, normalize: normalizeStore, label: 'Tệp khách hàng' })
+    .then(store => { cachedStore = store; return store; })
+    .finally(() => { storeLoading = null; });
+  return storeLoading;
 }
 
 function updateStore(mutate) {

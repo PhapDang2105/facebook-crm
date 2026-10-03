@@ -1413,8 +1413,10 @@ function formatVnDate(value) {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
+// Bộ định dạng số tạo một lần rồi giữ trên chính hàm (gọi theo từng dòng bảng; hàm vẫn tự đủ khi test cắt riêng ra).
 function formatVnMoney(value) {
-  return `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(value) || 0))}đ`;
+  const format = formatVnMoney.format || (formatVnMoney.format = new Intl.NumberFormat('vi-VN'));
+  return `${format.format(Math.round(Number(value) || 0))}đ`;
 }
 
 /** Ngày mua gọn cho ô đơn hàng — giờ phút không giúp gì cho remarketing. */
@@ -1474,15 +1476,8 @@ function renderCustomersTabs(base) {
    nếu số đứng yên bất kể lọc gì thì nó chỉ là đồ trang trí. */
 function shortCustomerMoney(value) {
   const amount = Math.round(Number(value) || 0);
-  // Cùng kiểu với statShortMoney: dấu phẩy thập phân kiểu Việt ("1,3 triệu").
-  const short = (divisor, unit) => {
-    const scaled = amount / divisor;
-    const oneDigit = Math.round(scaled * 10) / 10;
-    const digits = Math.abs(scaled) < 10 && Math.abs(scaled - oneDigit) * divisor >= divisor / 100 ? 2 : 1;
-    return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: digits }).format(scaled)} ${unit}`;
-  };
-  if (Math.abs(amount) >= 1000000000) return short(1000000000, 'tỷ');
-  if (Math.abs(amount) >= 1000000) return short(1000000, 'triệu');
+  // Từ 1 triệu: đúng cách viết gọn của statShortMoney ("1,3 triệu"); dưới đó: 0/âm là "—" như ô tiền khách.
+  if (Math.abs(amount) >= 1000000) return statShortMoney(amount);
   return formatCustomerMoney(amount);
 }
 
@@ -1747,7 +1742,8 @@ function campaignsDays() {
 
 function campaignNumber(value) {
   const number = Number(value);
-  return Number.isFinite(number) && number ? new Intl.NumberFormat('vi-VN').format(Math.round(number)) : '—';
+  const format = campaignNumber.format || (campaignNumber.format = new Intl.NumberFormat('vi-VN'));
+  return Number.isFinite(number) && number ? format.format(Math.round(number)) : '—';
 }
 
 function campaignRoasText(value) {
@@ -2089,11 +2085,13 @@ function isBlankNumber(value) {
 
 /** Số đếm: 0 vẫn là "0" (khác campaignNumber); rỗng mới là "—". */
 function statCount(value) {
-  return isBlankNumber(value) ? '—' : new Intl.NumberFormat('vi-VN').format(Math.round(Number(value)));
+  const format = statCount.format || (statCount.format = new Intl.NumberFormat('vi-VN'));
+  return isBlankNumber(value) ? '—' : format.format(Math.round(Number(value)));
 }
 
 function statMoney(value) {
-  return isBlankNumber(value) ? '—' : `${new Intl.NumberFormat('vi-VN').format(Math.round(Number(value)))}đ`;
+  const format = statMoney.format || (statMoney.format = new Intl.NumberFormat('vi-VN'));
+  return isBlankNumber(value) ? '—' : `${format.format(Math.round(Number(value)))}đ`;
 }
 
 function statShortMoney(value) {
@@ -4241,7 +4239,8 @@ async function renderProcessedHistory() {
     orderArchiveResults.innerHTML = `<p>${query ? 'Không tìm thấy đơn nào khớp.' : 'Kho lưu trữ chưa có đơn nào.'}</p>`;
     return;
   }
-  const money = value => `${new Intl.NumberFormat('vi-VN').format(Number(value) || 0)}đ`;
+  const vnNumber = new Intl.NumberFormat('vi-VN');
+  const money = value => `${vnNumber.format(Number(value) || 0)}đ`;
   orderArchiveResults.innerHTML = [
     `<p class="order-archive-count">${items.length < total ? `${items.length} trong ${total}` : String(total)} đơn trong kho</p>`,
     ...items.map(item => {
@@ -7863,16 +7862,30 @@ function renderCustomerOrders(conversation = getActiveConversation()) {
   }).join('');
 }
 
-function getCustomerOrderProductImage(productName) {
+/**
+ * Ảnh sản phẩm theo tên — một luật chung cho bảng Đơn hàng và thẻ đơn trong khung chat (trước đây hai
+ * luật khác nhau: thẻ chat lấy mọi tên có "xanh/vàng/nâu", nên "Combo 10 gói Xanh", "Gói granola nhỏ
+ * Nâu 35g" cũng hiện ảnh túi lớn). Ảnh tải ở Cài đặt → Sản phẩm (khớp đúng tên) đi trước; không có thì
+ * ảnh mẫu: combo 2/3 túi, Túi Xanh 450g, Túi Vàng 350g, Túi Nâu vị cacao 350g. Granola Tropical vị
+ * Cacao là túi khác nên không mượn ảnh Túi Nâu. Trả về { src, key } hoặc null.
+ */
+function productImageFor(productName) {
   const name = normalizeColumnName(productName);
-  const imageName = name.includes('combo 2') && name.includes('xanh') ? 'combo2_green'
+  if (!name) return null;
+  const catalogImage = (Array.isArray(sharedProducts) ? sharedProducts : []).find(product => product.image && normalizeColumnName(product.name) === name)?.image || '';
+  if (catalogImage) return { src: catalogImage, key: '' };
+  const key = name.includes('combo 2') && name.includes('xanh') ? 'combo2_green'
     : name.includes('combo 2') && name.includes('vang') ? 'combo2_yellow'
       : name.includes('combo 3') && name.includes('xanh') ? 'combo3_green'
         : name.includes('combo 3') && name.includes('vang') ? 'combo3_yellow'
-          : name.includes('xanh') ? 'product_green'
-            : name.includes('vang') ? 'product_yellow'
-              : name.includes('nau') ? 'product_brown' : '';
-  return imageName ? `/assets/logos/${imageName}.png` : '';
+          : /\btui xanh\b|\bgranola xanh\b/.test(name) ? 'product_green'
+            : /\btui vang\b|\bgranola vang\b/.test(name) ? 'product_yellow'
+              : /\btui nau\b|\bgranola nau\b/.test(name) || (name.includes('cacao') && !name.includes('tropical')) ? 'product_brown' : '';
+  return key ? { src: `/assets/logos/${key}.png`, key } : null;
+}
+
+function getCustomerOrderProductImage(productName) {
+  return productImageFor(productName)?.src || '';
 }
 
 function formatCustomerOrderCardTime(value) {
@@ -10142,20 +10155,11 @@ function renderPreviewCell(value, header) {
     return price && !/[đ₫]$/iu.test(price) ? `${escapeHtml(price)} đ` : escapeHtml(price);
   }
   if (column === 'san pham') {
-    const productName = normalizeColumnName(previewValue);
-    // Ảnh sản phẩm tải trong Cài đặt → Sản phẩm (khớp đúng tên danh mục) đi trước;
-    // không có thì ảnh mẫu theo màu túi. Tên nay là "Granola Túi Xanh 450g" (không
-    // còn "1 Túi") nên không đòi chữ "1 túi" nữa.
-    const catalogImage = (Array.isArray(sharedProducts) ? sharedProducts : []).find(product => product.image && normalizeColumnName(product.name) === productName)?.image || '';
+    // Ảnh sản phẩm (productImageFor: ảnh danh mục trước, không thì ảnh mẫu theo túi).
     // Có ảnh thì chỉ hiện ảnh; tên nằm ở tooltip (và vẫn ở dữ liệu/tệp xuất).
-    if (catalogImage) return `<span class="product-with-image product-image-only" title="${escapeHtml(previewValue)}"><img src="${escapeHtml(catalogImage)}" alt="${escapeHtml(previewValue)}"></span>`;
-    const imageName = productName.includes('combo 2') && productName.includes('xanh') ? 'combo2_green'
-      : productName.includes('combo 2') && productName.includes('vang') ? 'combo2_yellow'
-      : productName.includes('combo 3') && productName.includes('xanh') ? 'combo3_green'
-        : productName.includes('combo 3') && productName.includes('vang') ? 'combo3_yellow'
-          : /\btui xanh\b|\bgranola xanh\b/.test(productName) ? 'product_green'
-            : /\btui vang\b|\bgranola vang\b/.test(productName) ? 'product_yellow'
-              : /\btui nau\b|\bgranola nau\b|cacao/.test(productName) ? 'product_brown' : '';
+    const image = productImageFor(previewValue);
+    if (image && !image.key) return `<span class="product-with-image product-image-only" title="${escapeHtml(previewValue)}"><img src="${escapeHtml(image.src)}" alt="${escapeHtml(previewValue)}"></span>`;
+    const imageName = image?.key || '';
     if (imageName) {
       const imageAlt = ({
         combo2_green: 'Combo 2 Túi Xanh',

@@ -14,6 +14,7 @@ const customerEditsPath = process.env.CUSTOMER_EDITS_PATH
   || path.join(projectRoot, 'data', 'processed', 'customer-edits.json');
 
 let cachedStore = null;
+let storeLoading = null;
 const enqueueWrite = createWriteQueue();
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -32,8 +33,12 @@ function normalizeStore(value) {
 /** ENOENT → rỗng; tệp hỏng → cất `.corrupt-*`; lỗi đọc khác → ném (không nhớ kho rỗng rồi ghi đè). */
 async function readStore() {
   if (cachedStore) return cachedStore;
-  cachedStore = await readJsonFile(customerEditsPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho sửa thông tin khách' });
-  return cachedStore;
+  // Nhớ cả lượt đọc ĐANG CHẠY: hai lượt đọc đầu tiên đồng thời dùng chung một bản kho (bản đọc xong sau từng đè
+  // bản đã được sửa trong hàng ghi → mất thay đổi).
+  storeLoading ||= readJsonFile(customerEditsPath, { fallback: emptyStore, normalize: normalizeStore, label: 'Kho sửa thông tin khách' })
+    .then(store => { cachedStore = store; return store; })
+    .finally(() => { storeLoading = null; });
+  return storeLoading;
 }
 
 /** Ghi tuần tự: hai nhân viên bấm cùng lúc thì lần sau đọc được kết quả lần trước. */

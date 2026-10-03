@@ -347,6 +347,18 @@ export function isSwappableGift(gift) {
  * sách đúng `quantity` lựa chọn; khách chỉ nêu một vị không số → lấy vị đó cho cả
  * hai gói; không nêu vị → [] (bot hỏi lại hay để nhân viên chọn).
  */
+// Mẫu dò một vị quà thay, dựng một lần cho mỗi nhãn (matchAll sao chép regex nên dùng chung /g an toàn).
+const giftSwapPatterns = new Map();
+function giftSwapPatternFor(word) {
+  let pattern = giftSwapPatterns.get(word);
+  if (!pattern) {
+    pattern = new RegExp(`(?:(\\d{1,2})\\s*(?:goi|tui|bich)?\\s*)?(?<![a-z])${word}(?![a-z])(?!\\s+on(?![a-z]))`, 'g');
+    if (giftSwapPatterns.size >= 64) giftSwapPatterns.clear();
+    giftSwapPatterns.set(word, pattern);
+  }
+  return pattern;
+}
+
 export function parseGiftSwapChoice(text, swap = getGiftSwap()) {
   const content = normalizeText(text);
   const wanted = swap.quantity;
@@ -354,7 +366,7 @@ export function parseGiftSwapChoice(text, swap = getGiftSwap()) {
   for (const option of swap.options) {
     const word = normalizeText(option.label);
     // "cảm ơn" bỏ dấu cũng là "cam on": không phải vị Cam.
-    const pattern = new RegExp(`(?:(\\d{1,2})\\s*(?:goi|tui|bich)?\\s*)?(?<![a-z])${word}(?![a-z])(?!\\s+on(?![a-z]))`, 'g');
+    const pattern = giftSwapPatternFor(word);
     for (const match of content.matchAll(pattern)) {
       picks.push({ option, index: match.index, count: match[1] ? Number(match[1]) : 0 });
     }
@@ -506,13 +518,26 @@ function buildIndex(products) {
  * across the whole catalogue wins, which is what keeps "combo 10 gói xanh"
  * from being read as a single "túi xanh".
  */
+// Chỉ mục tên gọi + SKU đã chuẩn hoá, dựng một lần cho mỗi danh mục đã nạp (productCache; reloadCatalog bỏ nó).
+let matchIndexCache = { products: null, index: [], skus: [] };
+function matchIndexFor(products) {
+  if (matchIndexCache.products !== products) {
+    matchIndexCache = {
+      products,
+      index: buildIndex(products),
+      skus: products.filter(product => product.active).map(product => ({ key: normalizeText(product.sku), product }))
+    };
+  }
+  return matchIndexCache;
+}
+
 export function matchProduct(text) {
   const content = normalizeText(text);
   if (!content) return null;
-  const products = getCatalogProducts();
-  const bySku = products.find(product => product.active && normalizeText(product.sku) === content);
-  if (bySku) return bySku;
-  const hit = buildIndex(products).find(entry => keywordInText(content, entry.keyword));
+  const { index, skus } = matchIndexFor(getCatalogProducts());
+  const bySku = skus.find(entry => entry.key === content);
+  if (bySku) return bySku.product;
+  const hit = index.find(entry => keywordInText(content, entry.keyword));
   return hit ? hit.product : null;
 }
 

@@ -9,11 +9,10 @@
 // liệu → chỉ theo dõi. Các cờ này gửi kèm prompt, và câu trả lời của mô hình
 // được kiểm lại theo chính các cờ đó. Mô hình lỗi/trả JSON hỏng thì dùng luật.
 // Chỉ gửi số tổng hợp theo chiến dịch — không có dữ liệu khách hàng.
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { readJsonFile, writeJsonAtomic } from './json-store.mjs';
-import { defaultChatbotSettings, normalizeChatbotSettings } from './chatbot-settings.mjs';
+import { readChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost } from './network-guard.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
 
@@ -44,33 +43,13 @@ function insightsPath(options = {}) {
 
 // ===== Cấu hình mô hình: dùng chung cài đặt chatbot =====
 
-let dependencies = { readSettings: readStoredChatbotSettings, fetchImpl: fetch };
+// Mặc định đọc cùng tệp cài đặt chatbot bằng bộ đọc chung (chatbot-settings.mjs: CHATBOT_SETTINGS_PATH, lỗi đọc thật
+// thì ném thay vì coi là mặc định). server.mjs truyền đúng bộ đọc của nó qua configureCampaignAi.
+let dependencies = { readSettings: () => readChatbotSettings(), fetchImpl: fetch };
 
 /** Tuỳ chọn: server.mjs có thể truyền readChatbotSettings của nó; không truyền thì module tự đọc tệp cài đặt. */
 export function configureCampaignAi(overrides = {}) {
   dependencies = { ...dependencies, ...overrides };
-}
-
-async function readStoredChatbotSettings() {
-  // CHATBOT_SETTINGS_PATH: ghi đè vị trí tệp cài đặt chatbot (test dùng thư mục tạm); mặc định data/processed.
-  const settingsPath = process.env.CHATBOT_SETTINGS_PATH || path.join(projectRoot, 'data', 'processed', 'chatbot-settings.json');
-  let stored;
-  try {
-    stored = JSON.parse(await readFile(settingsPath, 'utf8'));
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return normalizeChatbotSettings(defaultChatbotSettings);
-  } catch {
-    return normalizeChatbotSettings(defaultChatbotSettings);
-  }
-  let directApiKey = stored.directApiKey;
-  if (stored.directApiKeyEncrypted) {
-    try {
-      const { decryptToken } = await import('./channel-store.mjs');
-      directApiKey = decryptToken(stored.directApiKeyEncrypted);
-    } catch {
-      directApiKey = '';
-    }
-  }
-  return normalizeChatbotSettings({ ...stored, directApiKey });
 }
 
 // ===== Luật tất định =====

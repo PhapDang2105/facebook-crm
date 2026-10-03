@@ -1,3 +1,8 @@
+import { mkdir, stat } from 'node:fs/promises';
+import path from 'node:path';
+import { projectRoot } from './config.mjs';
+import { decryptToken, encryptToken } from './channel-store.mjs';
+import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
 import { LEGACY_SHIPMENT_TEMPLATES } from './shipment-stage.mjs';
 import { defaultMessageTemplates, isProductQuoteId } from './chatbot-templates.mjs';
 import { isInternalHost } from './network-guard.mjs';
@@ -194,9 +199,11 @@ export function normalizeChatbotSettings(input = {}, current = null) {
   // created themselves are theirs alone: removed on screen, gone. A text
   // stored under an old PRICE_<sản phẩm> id is a stale price: dropped.
   const stored = value.messageTemplates && typeof value.messageTemplates === 'object' ? value.messageTemplates : {};
-  const submitted = { ...defaultMessageTemplates(), ...stored };
+  // Bộ mẫu seed dựng một lần cho cả lượt chuẩn hoá (trước đây gọi 3 lần).
+  const seedTemplates = defaultMessageTemplates();
+  const submitted = { ...seedTemplates, ...stored };
   // 03/10: mẫu vận đơn còn đúng lời mặc định cũ (chưa ai sửa) theo lời mới của seed.
-  for (const [key, text] of Object.entries(LEGACY_SHIPMENT_TEMPLATES)) if (submitted[key] === text) submitted[key] = defaultMessageTemplates()[key];
+  for (const [key, text] of Object.entries(LEGACY_SHIPMENT_TEMPLATES)) if (submitted[key] === text) submitted[key] = seedTemplates[key];
   // Texts saved before {title} existed still spell out "anh/ chị"; they are
   // rewritten to the placeholder so the bot addresses the customer properly.
   const placeholderHonorific = text => String(text ?? '')
@@ -208,7 +215,7 @@ export function normalizeChatbotSettings(input = {}, current = null) {
   const cleaned = Object.entries(submitted)
     .map(([key, text]) => [String(key).trim().slice(0, 100), placeholderHonorific(text).trim().slice(0, 12000)])
     .filter(([key]) => key && !isProductQuoteId(key));
-  const seedIds = new Set(Object.keys(defaultMessageTemplates()));
+  const seedIds = new Set(Object.keys(seedTemplates));
   const customEntries = cleaned.filter(([key]) => !seedIds.has(key));
   const customRoom = Math.max(0, maxMessageTemplates - (cleaned.length - customEntries.length));
   const droppedCustom = new Set(customEntries.slice(customRoom).map(([key]) => key));
@@ -343,6 +350,104 @@ export function normalizeFollowUps(value) {
   // commentEnabled: tắt riêng mọi kịch bản bám đuổi bình luận (comment-no-reply) mà không tắt cả bám đuổi.
   // Mặc định bật (giữ hành vi cũ); chỉ false khi đặt rõ false.
   return { enabled: source.enabled === true, commentEnabled: source.commentEnabled !== false, maxPerRun: Math.max(1, Math.min(100, Math.round(Number(source.maxPerRun) || 15))), scenarios };
+}
+
+// ===== Tệp cài đặt chatbot (đọc/ghi dùng chung cho server.mjs, campaign-ai.mjs, address-ai…) =====
+//
+// Trước 03/10 server.mjs và campaign-ai.mjs mỗi nơi tự đọc tệp, và mọi lỗi đọc khác ENOENT (EACCES, EBUSY,
+// EMFILE) đều thành "cài đặt mặc định" — PUT cài đặt / công tắc bot rồi ghi mặc định + bản vá ĐÈ tệp thật (mất
+// prompt, mẫu tin, bám đuổi, khoá API). Nay theo quy tắc json-store: chưa có tệp → mặc định; tệp hỏng → cất
+// .corrupt-* rồi mặc định; lỗi đọc khác → NÉM. Ghi đi qua một hàng (createWriteQueue) và `update(mutate)` đọc bản
+// mới nhất NGAY TRONG hàng, để PUT cài đặt và công tắc bot sát nhau không làm mất thay đổi của nhau.
+// Bản đã chuẩn hoá được nhớ theo mốc sửa tệp (mỗi tin khách bot đều đọc cài đặt); ghi xong là bỏ nhớ.
+
+export function defaultChatbotSettingsPath() {
+  // CHATBOT_SETTINGS_PATH: ghi đè vị trí tệp (test dùng thư mục tạm); mặc định data/processed.
+  return process.env.CHATBOT_SETTINGS_PATH || path.join(projectRoot, 'data', 'processed', 'chatbot-settings.json');
+}
+
+function decodeStoredSettings(stored) {
+  // Khoá API không giải mã được (META_APP_SECRET đổi/thiếu): giữ nguyên tệp và mọi cài đặt khác, chỉ bỏ khoá.
+  let directApiKey = stored.directApiKey;
+  if (stored.directApiKeyEncrypted) {
+    try { directApiKey = decryptToken(stored.directApiKeyEncrypted); } catch (error) {
+      console.error(`Cài đặt chatbot: không giải mã được khoá API (${error.message}); giữ cài đặt, bỏ khoá — nhập lại khoá trong Cài đặt.`);
+      directApiKey = '';
+    }
+  }
+  const { directApiKeyEncrypted, ...rest } = stored;
+  return normalizeChatbotSettings({ ...rest, directApiKey });
+}
+
+const settingsStores = new Map();
+
+/** Kho cài đặt chatbot cho một đường dẫn tệp (một bản cho mỗi đường dẫn: cùng hàng ghi, cùng bộ nhớ đệm). */
+export function chatbotSettingsStore(filePath = defaultChatbotSettingsPath()) {
+  if (settingsStores.has(filePath)) return settingsStores.get(filePath);
+  const enqueue = createWriteQueue();
+  let cache = null; // { mtimeMs, size, settings }
+
+  async function read() {
+    const info = await stat(filePath).catch(() => null);
+    if (info && cache && cache.mtimeMs === info.mtimeMs && cache.size === info.size) return structuredClone(cache.settings);
+    const stored = await readJsonFile(filePath, { fallback: null, label: 'Cài đặt chatbot' });
+    if (!stored) return normalizeChatbotSettings(defaultChatbotSettings);
+    const settings = decodeStoredSettings(stored);
+    // Mốc lấy TRƯỚC khi đọc: tệp đổi giữa chừng thì lần sau mốc khác → đọc lại (không bao giờ giữ bản cũ).
+    if (info) cache = { mtimeMs: info.mtimeMs, size: info.size, settings };
+    return structuredClone(settings);
+  }
+
+  async function writeNow(settings) {
+    const normalized = normalizeChatbotSettings(settings);
+    const { directApiKey, ...safeSettings } = normalized;
+    const stored = { ...safeSettings, ...(directApiKey ? { directApiKeyEncrypted: encryptToken(directApiKey) } : {}) };
+    try {
+      await writeJsonAtomic(filePath, stored);
+    } finally {
+      cache = null;
+    }
+    return normalized;
+  }
+
+  const store = {
+    read,
+    /** Ghi cả bộ cài đặt (đã gộp sẵn). Trả bản đã chuẩn hoá. */
+    write: settings => enqueue(() => writeNow(settings)),
+    /**
+     * Đọc bản mới nhất TRONG hàng ghi, `mutate(current)` trả bộ cài đặt mới (undefined = không đổi gì, không ghi),
+     * rồi ghi. Trả { before, after } (after = before khi không ghi). mutate ném lỗi thì không ghi gì.
+     */
+    update: mutate => enqueue(async () => {
+      const before = await read();
+      const next = await mutate(structuredClone(before));
+      if (next === undefined) return { before, after: before, changed: false };
+      return { before, after: await writeNow(next), changed: true };
+    }),
+    /** Lúc khởi động: CHỈ khi chưa có tệp (ENOENT) mới ghi bộ mặc định; lỗi khác không đụng tới tệp. */
+    async ensureFile() {
+      try {
+        await stat(filePath);
+        return false;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          console.error(`Cài đặt chatbot: không kiểm được tệp (${error?.code || error?.message}); không ghi đè bằng mặc định.`);
+          return false;
+        }
+      }
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await enqueue(() => writeNow(defaultChatbotSettings));
+      return true;
+    },
+    invalidate() { cache = null; }
+  };
+  settingsStores.set(filePath, store);
+  return store;
+}
+
+/** Đọc cài đặt chatbot ở đường dẫn mặc định (CHATBOT_SETTINGS_PATH). */
+export function readChatbotSettings(filePath = defaultChatbotSettingsPath()) {
+  return chatbotSettingsStore(filePath).read();
 }
 
 export function publicChatbotSettings(value = {}) {

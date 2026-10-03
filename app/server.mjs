@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { buildExportRows, exportFactsForOrders, exportPreviewStreets, exportedOrderData } from './order-export.mjs';
@@ -16,7 +16,7 @@ import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, 
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
-import { aiKeyReentryError, assertUsableAiEndpoint, defaultChatbotSettings, mergeChatbotSettingsPatch, mergeMessageTemplatesPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
+import { aiKeyReentryError, assertUsableAiEndpoint, chatbotSettingsStore, mergeChatbotSettingsPatch, mergeMessageTemplatesPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply, warmUpChatbotModels } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
@@ -68,7 +68,7 @@ import {
   serverConfig, pancakeConfig, isReferralOnlyPage, subscriptionFieldsFor, authConfig } from './config.mjs';
 import { createAuth, isPublicPath, parseUsers } from './auth.mjs';
 import { listStaff, saveStaffMember, staffByUsername, staffLoginAccounts, STAFF_ROLES } from './staff.mjs';
-import { decryptToken, encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
+import { encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, releaseThreadControl, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { archiveStatusLabel, customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listCustomers, orderHistoryKey } from './customers.mjs';
@@ -105,8 +105,8 @@ const metaOauthStates = new Map();
 const metaPendingPages = new Map();
 
 async function initializeStore() {
-  await mkdir(path.dirname(chatbotSettingsPath), { recursive: true });
-  try { await stat(chatbotSettingsPath); } catch { await writeChatbotSettings(defaultChatbotSettings); }
+  // Chỉ khi CHƯA có tệp (ENOENT) mới ghi bộ mặc định: lỗi stat khác (EACCES, EBUSY…) từng ghi đè tệp thật.
+  await chatbotSettings.ensureFile();
   await ensureProductCatalogue();
   await ensureGifts();
 }
@@ -1099,57 +1099,16 @@ async function sendReceiptImage(conversation, order, { sentBy = null } = {}) {
   });
 }
 
-async function readChatbotSettings() {
-  let raw = '';
-  try {
-    raw = await readFile(chatbotSettingsPath, 'utf8');
-  } catch (error) {
-    if (error?.code !== 'ENOENT') console.error('Cài đặt chatbot: không đọc được tệp:', error.message);
-    return normalizeChatbotSettings(defaultChatbotSettings);
-  }
-  let stored;
-  try {
-    stored = JSON.parse(raw);
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) throw new Error('không phải object JSON');
-  } catch (error) {
-    // Tệp hỏng (ghi dở, đè nhau): cách ly để còn cứu, báo to thay vì âm thầm chạy với cài đặt trống (mất prompt, mẫu, endpoint).
-    const quarantined = `${chatbotSettingsPath}.corrupt-${Date.now()}`;
-    await rename(chatbotSettingsPath, quarantined).catch(() => {});
-    console.error(`Cài đặt chatbot: tệp hỏng (${error.message}), đã cất sang ${path.basename(quarantined)}; tạm dùng cài đặt mặc định.`);
-    return normalizeChatbotSettings(defaultChatbotSettings);
-  }
-  // Khoá API không giải mã được (META_APP_SECRET đổi/thiếu): giữ nguyên tệp và mọi cài đặt khác, chỉ bỏ khoá.
-  let directApiKey = stored.directApiKey;
-  if (stored.directApiKeyEncrypted) {
-    try { directApiKey = decryptToken(stored.directApiKeyEncrypted); } catch (error) {
-      console.error(`Cài đặt chatbot: không giải mã được khoá API (${error.message}); giữ cài đặt, bỏ khoá — nhập lại khoá trong Cài đặt.`);
-      directApiKey = '';
-    }
-  }
-  return normalizeChatbotSettings({ ...stored, directApiKey });
-}
+// Cài đặt chatbot (app/chatbot-settings.mjs, chatbotSettingsStore): lỗi đọc khác ENOENT thì NÉM (không coi là mặc định rồi
+// ghi đè tệp thật), bản đã chuẩn hoá nhớ theo mốc sửa tệp, ghi qua một hàng; `updateChatbotSettings` đọc bản mới nhất
+// ngay trong hàng ghi (PUT cài đặt và công tắc bot sát nhau không làm mất thay đổi của nhau).
+const chatbotSettings = chatbotSettingsStore(chatbotSettingsPath);
+const readChatbotSettings = () => chatbotSettings.read();
+const updateChatbotSettings = mutate => chatbotSettings.update(mutate);
 
 configureAddressAi({ readSettings: readChatbotSettings });
 // Cố vấn chiến dịch dùng chung mô hình với chatbot (Cài đặt → Chatbot).
 configureCampaignAi({ readSettings: readChatbotSettings });
-
-// Ghi tuần tự, tên tệp tạm duy nhất: hai yêu cầu ghi gần nhau (PUT settings + master-switch) không đè lên
-// cùng một .tmp rồi rename giữa chừng thành JSON cụt.
-let chatbotSettingsWriteQueue = Promise.resolve();
-function writeChatbotSettings(settings) {
-  const operation = chatbotSettingsWriteQueue.then(async () => {
-    const normalized = normalizeChatbotSettings(settings);
-    const { directApiKey, ...safeSettings } = normalized;
-    const stored = {
-      ...safeSettings,
-      ...(directApiKey ? { directApiKeyEncrypted: encryptToken(directApiKey) } : {})
-    };
-    await writeJsonAtomic(chatbotSettingsPath, stored);
-    return normalized;
-  });
-  chatbotSettingsWriteQueue = operation.then(() => undefined, () => undefined);
-  return operation;
-}
 
 function sendBinary(response, statusCode, body, contentType, filename) {
   response.writeHead(statusCode, { 'Content-Type': contentType, 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control':'no-store' });
@@ -1486,12 +1445,16 @@ const actorForUsername = (request, username) => actorOf(request, { auth: { enabl
  * tests/security-routes.test.mjs kiểm trên mã nguồn.
  */
 const requireManager = createRequireManager(requestActor, sendJson);
+/** Request HEAD đã đổi thành GET để đi chung route (xem đầu bộ xử lý): không ghi nhật ký, không ghi "đã xem". */
+const headRequests = new WeakSet();
 
 /**
  * Ghi một dòng nhật ký (không chặn request, lỗi chỉ warn). `details`: { target, conversationId,
  * orderId, summary }. `actor`: người đã tra sẵn (tránh tra lại), mặc định tra từ phiên.
  */
 function audit(request, action, details = {}, actor = null) {
+  // HEAD (giám sát, máy xem trước liên kết) đi chung đường với GET nhưng không phải thao tác của người dùng.
+  if (headRequests.has(request)) return Promise.resolve();
   return Promise.resolve(actor || requestActor(request))
     .then(who => appendAudit({ ...details, actor: who.username, actorName: who.name, role: who.role, ip: who.ip || clientIp(request), action }))
     .catch(error => console.warn(`Nhật ký hoạt động: ${error.message}`));
@@ -1653,6 +1616,8 @@ const server = http.createServer(async (request, response) => {
       if (String(request.url || '').split('?')[0] === '/api/messaging/stream') { response.writeHead(405, { Allow: 'GET' }); return response.end(); }
       request.method = 'GET';
     }
+    // Không tác dụng phụ cho HEAD: nhật ký (audit) và "ai đã xem" bỏ qua request này.
+    if (headRequest) headRequests.add(request);
     // "//q/api/…" từng vượt Basic Auth (Caddy cho /q/* đi thẳng, new URL coi "q" là host): chặn trước khi parse.
     if (!isSafeRequestTarget(request.url)) return sendJson(response, 400, { error: 'Đường dẫn không hợp lệ.' });
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
@@ -1693,7 +1658,6 @@ const server = http.createServer(async (request, response) => {
     }
     const qrMatch = url.pathname.match(/^\/q\/([^/]+)(\/open)?\/?$/);
     if (qrMatch && (request.method === 'GET' || request.method === 'POST')) {
-      const code = decodeURIComponent(qrMatch[1]).toLowerCase();
       const isOpenBeacon = Boolean(qrMatch[2]);
       // Khách quét thấy trang HTML ngắn, không phải JSON thô; beacon (POST) vẫn trả JSON.
       const sendQrNotice = (status, title, message) => {
@@ -1701,6 +1665,9 @@ const server = http.createServer(async (request, response) => {
         response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' });
         return response.end(publicNoticePage({ title, message }));
       };
+      // Mã in mờ / link bị cắt ("/q/%E0"): decodeURIComponent ném URIError → trước đây khách thấy JSON thô của khối catch.
+      let code = '';
+      try { code = decodeURIComponent(qrMatch[1]).toLowerCase(); } catch { code = ''; }
       if (!isValidQrCode(code)) return sendQrNotice(404, 'Mã QR không đúng', 'Mã QR này không đúng. Bạn vui lòng quét lại mã in trên thẻ, hoặc nhắn tin trực tiếp cho Giọt Nắng trên Facebook nhé.');
       // Máy nhân viên (có phiên đăng nhập CRM) quét thử / bấm thử: không vào số liệu quét thật.
       const staffScan = hasStaffSession(auth, request);
@@ -2057,17 +2024,24 @@ const server = http.createServer(async (request, response) => {
       const keyReentryError = aiKeyReentryError(current, normalizeChatbotSettings({ ...mergeChatbotSettingsPatch(current, payload), directApiKey: current.directApiKey }), payload);
       if (keyReentryError) return sendJson(response, 400, { error: keyReentryError });
       // Gộp sâu bản vá (followUps, contextTrim; khóa không gửi/null giữ giá trị cũ —
-      // handoffKeywords không bị xóa khi form không gửi).
-      const settings = await writeChatbotSettings({
-        ...mergeChatbotSettingsPatch(current, payload),
-        // R13 (C2): GỘP theo từng mã mẫu (mã không gửi giữ nguyên, null = về mặc định / xoá mẫu tự tạo), không thay cả bộ.
-        messageTemplates: mergeMessageTemplatesPatch(current.messageTemplates, payload.messageTemplates),
-        directApiKey: String(payload.directApiKey || '').trim() || (providerChanged ? '' : current.directApiKey),
-        updatedAt: Date.now()
+      // handoffKeywords không bị xóa khi form không gửi). C2: `current` trong hàm dưới là bản MỚI NHẤT đọc ngay trong
+      // hàng ghi — công tắc bot bấm sát lúc lưu không bị bản đọc ở đầu route đè ngược lại. Kiểm khoá lại trên bản đó (rẻ).
+      let reentryAtWrite = '';
+      const { before, after: settings } = await updateChatbotSettings(current => {
+        reentryAtWrite = aiKeyReentryError(current, normalizeChatbotSettings({ ...mergeChatbotSettingsPatch(current, payload), directApiKey: current.directApiKey }), payload);
+        if (reentryAtWrite) return undefined;
+        return {
+          ...mergeChatbotSettingsPatch(current, payload),
+          // R13 (C2): GỘP theo từng mã mẫu (mã không gửi giữ nguyên, null = về mặc định / xoá mẫu tự tạo), không thay cả bộ.
+          messageTemplates: mergeMessageTemplatesPatch(current.messageTemplates, payload.messageTemplates),
+          directApiKey: String(payload.directApiKey || '').trim() || (payload.provider && payload.provider !== current.provider ? '' : current.directApiKey),
+          updatedAt: Date.now()
+        };
       });
+      if (reentryAtWrite) return sendJson(response, 400, { error: reentryAtWrite });
       // Bám đuổi vừa bật lại: tính từ bây giờ, không gửi dồn cho khách cũ.
-      if (settings.followUps?.enabled && !current.followUps?.enabled) await resetFollowUpActivation();
-      audit(request, 'settings.chatbot', { target: { type: 'settings', id: 'chatbot', name: 'Cài đặt chatbot' }, summary: chatbotSettingsChangeText(current, settings, payload) });
+      if (settings.followUps?.enabled && !before.followUps?.enabled) await resetFollowUpActivation();
+      audit(request, 'settings.chatbot', { target: { type: 'settings', id: 'chatbot', name: 'Cài đặt chatbot' }, summary: chatbotSettingsChangeText(before, settings, payload) });
       return sendJson(response, 200, {
         ...publicChatbotSettings(settings),
         templates: settings.messageTemplates,
@@ -2082,19 +2056,21 @@ const server = http.createServer(async (request, response) => {
       if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       const enabled = payload.enabled === true;
-      const current = await readChatbotSettings();
-      const settings = await writeChatbotSettings({ ...current, enabled, updatedAt: Date.now() });
+      // Đọc–sửa–ghi trong hàng ghi cài đặt (C2): không dựa trên bản đọc trước đó của một PUT cài đặt đang chạy.
+      const { after: settings } = await updateChatbotSettings(latest => ({ ...latest, enabled, updatedAt: Date.now() }));
       const summary = await updateMessagingStore(store => {
         let changed = 0;
+        // Cùng một khuôn cho "trước" và "sau" (B4: trước đây khuôn sau thừa một dấu |, nên N/N luôn bị báo là đổi).
+        const stateKey = conversation => `${conversation.botEnabled !== false}|${conversation.botPausedBy || ''}|${conversation.botLastError || ''}|${conversation.botDraft || ''}`;
         for (const conversation of store.conversations) {
-          const before = `${conversation.botEnabled}|${conversation.botPausedBy || ''}|${conversation.botLastError || ''}|${conversation.botDraft || ''}`;
+          const before = stateKey(conversation);
           conversation.botEnabled = enabled;
           delete conversation.botPausedBy;
           delete conversation.botPausedAt;
           conversation.botLastError = '';
           conversation.botLastErrorAt = 0;
           conversation.botDraft = '';
-          if (before !== `${conversation.botEnabled}||||`) changed += 1;
+          if (before !== stateKey(conversation)) changed += 1;
         }
         return { total: store.conversations.length, changed };
       });
@@ -2220,6 +2196,8 @@ const server = http.createServer(async (request, response) => {
         if (!pages.length) return redirect(response, '/?meta_error=T%C3%A0i%20kho%E1%BA%A3n%20Facebook%20n%C3%A0y%20kh%C3%B4ng%20c%C3%B3%20Page%20%C4%91%E1%BB%A7%20quy%E1%BB%81n%20qu%E1%BA%A3n%20l%C3%BD.#settings');
         const ticket = randomUUID();
         metaPendingPages.set(ticket, { pages, expiresAt: Date.now() + 10 * 60 * 1000 });
+        // Phiên chọn Page giữ token Page trong RAM: hết hạn là xoá luôn, không chờ ai gọi lại route Meta (cleanExpiredMetaSessions).
+        setTimeout(() => metaPendingPages.delete(ticket), 10 * 60 * 1000 + 1000).unref?.();
         return redirect(response, `/?meta_ticket=${encodeURIComponent(ticket)}#settings`);
       } catch (error) {
         return redirect(response, `/?meta_error=${encodeURIComponent(error.message)}#settings`);
@@ -2457,7 +2435,8 @@ const server = http.createServer(async (request, response) => {
     // Pancake không ký payload nên xác thực bằng token trong URL; trả 200 ngay
     // vì Pancake tạm ngưng webhook khi lỗi hay chậm nhiều.
     if (url.pathname === pancakeConfig.path) {
-      if (request.method === 'GET' || request.method === 'HEAD') {
+      // HEAD đã được đổi thành GET ở đầu bộ xử lý.
+      if (request.method === 'GET') {
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         return response.end('{"status":"ok"}');
       }
@@ -2888,10 +2867,13 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'GET') {
         const items = await listMessages(id, Number(url.searchParams.get('limit')) || 100);
         const actor = await requestActor(request);
-        // "Ai đã xem" trên chính hội thoại (mốc mới nhất; ghi kho tối đa 1 lần/phút/người).
-        await recordConversationSeen(id, actor).catch(error => console.warn(`Không ghi được người xem hội thoại: ${error.message}`));
-        // Nhật ký: cùng người + cùng hội thoại tối đa 1 dòng / 30 phút.
-        if (shouldAuditView(actor.username || actor.ip, id)) audit(request, 'conversation.view', { target: conversationTarget(conversation), conversationId: id, summary: `Xem hội thoại ${conversation.name || id}.` }, actor);
+        // HEAD (giám sát, xem trước liên kết) không phải lượt xem: không ghi "đã xem", không ghi nhật ký.
+        if (!headRequests.has(request)) {
+          // "Ai đã xem" trên chính hội thoại (mốc mới nhất; ghi kho tối đa 1 lần/phút/người).
+          await recordConversationSeen(id, actor).catch(error => console.warn(`Không ghi được người xem hội thoại: ${error.message}`));
+          // Nhật ký: cùng người + cùng hội thoại tối đa 1 dòng / 30 phút.
+          if (shouldAuditView(actor.username || actor.ip, id)) audit(request, 'conversation.view', { target: conversationTarget(conversation), conversationId: id, summary: `Xem hội thoại ${conversation.name || id}.` }, actor);
+        }
         const viewed = actor.username ? await getConversation(id).catch(() => null) : null;
         return sendJson(response, 200, {
           conversation: publicConversation(viewed || conversation),
@@ -3649,10 +3631,10 @@ const server = http.createServer(async (request, response) => {
       const inbox = (store.conversations || []).find(entry => entry.id === item.conversationId);
       if (!inbox) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại của khách.' });
       try {
-        const actor = requestActor(request);
+        const actor = await requestActor(request);
         await sendConversationMessage(inbox, { text: item.text, staff: true, sentBy: actor.username ? actorStamp(actor) : null });
         await saveShipmentNoticeResults([{ key: item.key, ok: true, via: 'manual' }]);
-        audit(request, 'shipping.notice_send', { summary: `Gửi tin vận đơn ${item.trackingNumber} (${item.stageLabel}) cho ${item.name || 'khách'}.` });
+        audit(request, 'shipping.notice_send', { summary: `Gửi tin vận đơn ${item.trackingNumber} (${item.stageLabel}) cho ${item.name || 'khách'}.` }, actor);
         return sendJson(response, 200, { ok: true });
       } catch (error) {
         return sendJson(response, 502, { error: `Không gửi được qua API (khách ngoài 24 giờ thì gửi qua Pancake): ${error.message}` });

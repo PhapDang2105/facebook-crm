@@ -121,15 +121,47 @@ export async function writeJsonAtomic(filePath, value, { space = 2, text, mode }
   }
 }
 
+// Mọi hàng ghi đang có việc (để lúc tắt máy chủ chờ ghi xong hết — drainAllWrites).
+const busyQueues = new Set();
+
 /**
  * Hàng ghi tuần tự cho một kho: `queue(fn)` chạy fn sau mọi lượt trước đó; lỗi
  * của một lượt không chặn các lượt sau. Trả promise kết quả của fn.
  */
 export function createWriteQueue() {
   let tail = Promise.resolve();
+  let pending = 0;
+  const handle = { tail: () => tail };
   return function enqueue(task) {
+    pending += 1;
+    busyQueues.add(handle);
     const operation = tail.then(task);
-    tail = operation.then(() => undefined, () => undefined);
+    tail = operation.then(() => undefined, () => undefined).finally(() => {
+      pending -= 1;
+      if (!pending) busyQueues.delete(handle);
+    });
     return operation;
   };
+}
+
+/**
+ * Chờ mọi lượt ghi đã xếp ở MỌI hàng (createWriteQueue) chạy xong — kể cả lượt mà chính các lượt đó
+ * xếp thêm. Dùng lúc tắt máy chủ: đơn landing / tệp khách / cài đặt vừa nhận không mất vì process.exit.
+ * Không ném (lỗi ghi đã được báo cho người gọi lượt đó). `timeoutMs`: thôi chờ sau quãng này.
+ */
+export async function drainAllWrites({ timeoutMs = 8000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (busyQueues.size && Date.now() < deadline) {
+    const waits = [...busyQueues].map(handle => handle.tail());
+    let timer;
+    const timeout = new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now())); });
+    await Promise.race([Promise.all(waits), timeout]);
+    clearTimeout(timer);
+  }
+  return busyQueues.size === 0;
+}
+
+/** Số hàng ghi còn đang có việc (cho test / chẩn đoán). */
+export function pendingWriteQueues() {
+  return busyQueues.size;
 }

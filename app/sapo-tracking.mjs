@@ -220,7 +220,7 @@ export function shipmentNoticePlan(store, conversation, order, { now = Date.now(
 }
 
 /** Ghi dấu đã báo một giai đoạn (lịch sử ngắn để nhân viên xem lại) hay lỗi gửi. */
-export function markShipmentNotified(shipment, { stage, via, at = Date.now(), error = '' }) {
+export function markShipmentNotified(shipment, { stage, via, at = Date.now(), error = '', uncertain = false }) {
   if (!shipment) return;
   if (error) {
     // Đếm số lần lỗi của đúng giai đoạn này (giai đoạn mới thì đếm lại): tự gửi qua cầu nối dừng sau 2 lần.
@@ -229,7 +229,8 @@ export function markShipmentNotified(shipment, { stage, via, at = Date.now(), er
     return;
   }
   const history = Array.isArray(shipment.notices) ? shipment.notices : [];
-  Object.assign(shipment, { notifiedStage: stage, notifiedAt: at, notices: [...history, { stage, via, at }].slice(-8) });
+  // `uncertain`: gửi hết giờ chờ, không rõ đã tới khách — vẫn tính là đã báo (không gửi lại).
+  Object.assign(shipment, { notifiedStage: stage, notifiedAt: at, notices: [...history, { stage, via, at, ...(uncertain ? { uncertain: true } : {}) }].slice(-8) });
   delete shipment.noticeError;
   delete shipment.noticeErrorAt;
   delete shipment.noticeErrorStage;

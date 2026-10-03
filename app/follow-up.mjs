@@ -603,7 +603,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       // (so tỷ lệ đơn 14 ngày giữa nhóm gửi và nhóm không gửi).
       if (isFollowUpHoldout(candidate.conversation.psid)) {
         await updateFollowUpState(current => { current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, error: 'nhóm đối chứng (không gửi để đo hiệu quả)', holdout: true }; return null; });
-        await updateMessagingStore(current => { const target = current.conversations.find(item => item.id === candidate.conversation.id); if (target && !target.followUpHoldout) target.followUpHoldout = { scenarioId: scenario.id, at: now }; return null; });
+        await updateMessagingStore(current => { const target = current.conversations.find(item => item.id === candidate.conversation.id); if (target && !target.followUpHoldout) target.followUpHoldout = { scenarioId: scenario.id, at: now }; return null; }, { defer: true });
         summary.holdout = (summary.holdout || 0) + 1;
         noteSkip('holdout', candidate.conversation);
         continue;
@@ -656,8 +656,13 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
           const sent = await sendMessage(candidate.inbox, { text: remind || text, followUp: true });
           outcome = { via: 'private', messageId: String(sent?.message?.mid || sent?.message?.id || ''), text: remind || text, ...(remind ? { templateId: 'ORDER_ADDRESS_REMIND' } : {}) };
         } catch (failure) {
-          error = failure.message;
-          undeliverable = isUndeliverableError(failure);
+          // INT-04: "không rõ đã gửi" (hết giờ chờ Pancake, gửi dở) = coi như ĐÃ gửi: ghi lời bám đuổi (để bản dội về
+          // mang cờ bám đuổi, giãn cách 12 giờ tính cả lần này), gắn thẻ, không gửi công khai dự phòng, không gửi lại.
+          if (failure?.unknownDelivery) outcome = { via: 'private', messageId: '', text: remind || text, uncertain: true, ...(remind ? { templateId: 'ORDER_ADDRESS_REMIND' } : {}) };
+          else {
+            error = failure.message;
+            undeliverable = isUndeliverableError(failure);
+          }
         }
       } else if (candidate.inbox) {
         error = 'ngoài 24 giờ Messenger (khách chưa nhắn hộp thư gần đây)';
@@ -667,13 +672,13 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
           const sent = await sendMessage(candidate.thread, { text, privateReply: false, followUp: true });
           outcome = { via: 'public', messageId: String(sent?.message?.mid || sent?.message?.id || ''), text };
         } catch (failure) {
-          error = failure.message;
+          if (failure?.unknownDelivery) outcome = { via: 'public', messageId: '', text, uncertain: true };
+          else error = failure.message;
         }
       }
       await updateFollowUpState(current => {
         current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, ...(outcome || { error: error || 'không có kênh gửi', ...(undeliverable ? { skipped: 'undeliverable' } : {}) }) };
-        const keys = Object.keys(current.sent);
-        if (keys.length > maxSentRecords) for (const key of keys.slice(0, keys.length - maxSentRecords)) delete current.sent[key];
+        trimSentRecords(current.sent);
         // Khách không nhận được tin (#551 / chặn / ngoài cửa sổ): mọi kịch bản bỏ qua khách này cho tới khi khách nhắn lại.
         if (!outcome && undeliverable) {
           current.undeliverable = current.undeliverable && typeof current.undeliverable === 'object' ? current.undeliverable : {};
@@ -686,7 +691,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       if (outcome) {
         touchedThisRun.add(customerKey);
         summary.sent += 1;
-        log(`Bám đuổi "${scenario.name}": đã gửi ${outcome.via === 'public' ? 'công khai' : 'riêng'} cho ${candidate.conversation.name || candidate.conversation.id}`);
+        log(`Bám đuổi "${scenario.name}": ${outcome.uncertain ? 'không rõ đã tới (coi như đã gửi)' : 'đã gửi'} ${outcome.via === 'public' ? 'công khai' : 'riêng'} cho ${candidate.conversation.name || candidate.conversation.id}`);
         await markConversationFollowedUp(candidate.conversation.id, scenario, outcome.via, now, { remindedBasket: outcome.templateId === 'ORDER_ADDRESS_REMIND' });
       } else if (undeliverable) {
         // Không tính vào trần mỗi lượt (maxPerRun): trước đây 100% lỗi #551 ăn hết trần, khách gửi được phải chờ.
@@ -744,7 +749,7 @@ async function markConversationFollowedUp(conversationId, scenario, via, now, { 
       target.pendingOrder = null;
     }
     return null;
-  });
+  }, { defer: true });
   // Lịch sử thẻ của hội thoại (nhật ký hoạt động): thẻ Bám đuổi do hệ thống tự gắn.
   if (labelChange) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...labelChange, labelDefs, reason: 'bám đuổi' });
   publishMessagingEvent({ type: 'customer-panel', conversationId });
@@ -987,13 +992,22 @@ export async function expireFollowUpQueue({ now = Date.now(), limit = 200 } = {}
       entry.expiredAt = now;
       removed += 1;
     }
-    const keys = Object.keys(current.sent);
-    if (keys.length > maxSentRecords) {
-      const done = keys.filter(key => !current.sent[key]?.queued);
-      for (const key of done.slice(0, keys.length - maxSentRecords)) delete current.sent[key];
-    }
+    trimSentRecords(current.sent);
     return removed;
   });
+}
+
+/**
+ * Lịch sử bám đuổi quá `maxSentRecords`: bỏ mục ĐÃ XỬ LÝ cũ nhất (theo `at`); mục còn trong hàng chờ ngoài 24 giờ
+ * (queued, kể cả đang nằm trong lô) giữ nguyên (INT-14: trước đây lượt gửi cắt theo thứ tự khoá, xoá cả mục còn chờ).
+ */
+function trimSentRecords(sent) {
+  const keys = Object.keys(sent);
+  if (keys.length <= maxSentRecords) return 0;
+  const done = keys.filter(key => !sent[key]?.queued).sort((first, second) => (Number(sent[first]?.at) || 0) - (Number(sent[second]?.at) || 0));
+  const drop = done.slice(0, keys.length - maxSentRecords);
+  for (const key of drop) delete sent[key];
+  return drop.length;
 }
 
 function stillWanted(item, byId, store) {

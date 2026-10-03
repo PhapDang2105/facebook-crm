@@ -13,7 +13,7 @@ import {
   likeComment
 } from './meta-graph.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
-import { sendConversationMessageViaPancake } from './pancake.mjs';
+import { partialSendError, sendConversationMessageViaPancake } from './pancake.mjs';
 import {
   applyGenderGuess,
   conversationId,
@@ -181,7 +181,17 @@ export async function sendConversationMessage(conversation, { text = '', attachm
   // Messenger Send API chỉ nhận một ảnh mỗi tin: nhiều ảnh thì gửi lần lượt.
   if (Array.isArray(imageUrls) && imageUrls.length) {
     let last = null;
-    for (const url of [imageUrl, ...imageUrls].filter(Boolean)) last = await sendConversationMessage(conversation, { imageUrl: url, privateReply, staff, sentBy, followUp });
+    let sentCount = 0;
+    for (const url of [imageUrl, ...imageUrls].filter(Boolean)) {
+      try {
+        last = await sendConversationMessage(conversation, { imageUrl: url, privateReply, staff, sentBy, followUp });
+      } catch (error) {
+        // Ảnh trước đã tới khách (và đã lưu): báo "gửi dở" để người gọi không gửi lại cả cụm (INT-03).
+        if (!sentCount) throw error;
+        throw partialSendError(error, sentCount);
+      }
+      sentCount += 1;
+    }
     return last;
   }
   if (conversation.source === 'comment') {
@@ -200,6 +210,9 @@ export async function sendConversationMessage(conversation, { text = '', attachm
       // chỉ lùi về bản chữ khi người gọi đưa chữ; phiếu đơn KHÔNG có bản chữ
       // (chủ shop không muốn khách nhận bản chữ), người gọi tự gửi ảnh phiếu thay.
       if (!text) throw error;
+      // INT-29: chỉ lùi về bản chữ khi Meta TỪ CHỐI rõ ràng (có lời Graph). Hết giờ chờ / đứt mạng thì thẻ có thể đã
+      // tới khách — gửi thêm bản chữ là khách nhận hai lần — nên báo lỗi "không rõ đã gửi".
+      if (!isGraphRefusal(error)) throw Object.assign(error, { unknownDelivery: true });
       console.error(`Không gửi được receipt template, chuyển sang tin nhắn chữ: ${error.message}`);
       usedTemplate = false;
       result = await sendPageMessage({ ...target, text });
@@ -213,7 +226,15 @@ export async function sendConversationMessage(conversation, { text = '', attachm
     result = await sendPageMessage({ ...target, text });
   }
   // A caption cannot ride along with an attachment, so it follows as its own message.
-  if (attachment && text) await sendPageMessage({ ...target, text });
+  // INT-03: tệp đã tới khách mà chữ lỗi → vẫn lưu tệp, rồi báo "gửi dở" để người gọi không gửi lại tệp.
+  let partial = null;
+  if (attachment && text) {
+    try {
+      await sendPageMessage({ ...target, text });
+    } catch (error) {
+      partial = partialSendError(error, 1);
+    }
+  }
   const message = {
     id: String(result.message_id || `sent-${Date.now()}`),
     mid: String(result.message_id || ''),
@@ -221,7 +242,7 @@ export async function sendConversationMessage(conversation, { text = '', attachm
     // A delivered receipt template is tagged so the timeline shows only the order
     // card, not a second bubble repeating the same thing as plain text.
     type: usedTemplate ? 'order-receipt' : (attachment?.type || (imageUrl ? 'image' : 'text')),
-    text: usedTemplate ? 'Đã gửi xác nhận đơn hàng' : text,
+    text: usedTemplate ? 'Đã gửi xác nhận đơn hàng' : partial ? '' : text,
     createdAt: Date.now(),
     status: 'sent',
     // The uploaded bytes stay out of the store; the echo webhook supplies Meta's hosted URL.
@@ -240,5 +261,11 @@ export async function sendConversationMessage(conversation, { text = '', attachm
     return { message: outcome.message, conversation: publicConversation(outcome.conversation) };
   });
   publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: saved.message });
+  if (partial) throw Object.assign(partial, { saved });
   return saved;
+}
+
+/** Meta trả lời và từ chối (lỗi Graph có nội dung, không phải hết giờ / 5xx): chắc chắn chưa gửi. */
+function isGraphRefusal(error) {
+  return Boolean(error?.graphMessage) && !error.timeout && Number(error.statusCode) < 500;
 }

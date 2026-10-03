@@ -1424,6 +1424,7 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
   // Trả lời bình luận (công khai hay nhắn riêng) cũng mang cờ nhân viên / bám đuổi như tin hộp thư.
   if (conversation.source === 'comment') return sendCommentReplyViaPancake(conversation, { text: body, privateReply, staff, sentBy, followUp }, config, fetchImpl);
   let message;
+  let partial = null;
   if (pictures.length) {
     // Tải tuần tự, nghỉ giữa các ảnh: Pancake giới hạn 5 lần gọi mỗi giây mỗi Page.
     const upload = async () => {
@@ -1465,12 +1466,29 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
     }
     // Nội dung tệp không lưu vào kho; bản dội lại từ Pancake mang URL ảnh trên CDN.
     message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: attachment.type || 'document', text: '', name: attachment.name || '', dataUrl: '', createdAt: Date.now(), status: 'sent' };
-    if (body) for (const chunk of splitLongText(body)) await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
+    // Chữ đi sau tệp: tệp đã tới khách, chữ lỗi thì vẫn lưu tệp rồi báo "gửi dở" (INT-03).
+    if (body) {
+      try {
+        for (const chunk of splitLongText(body)) await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
+      } catch (error) {
+        partial = partialSendError(error, 1);
+      }
+    }
   } else {
     // Facebook từ chối tin dài quá 2000 ký tự: cắt theo đoạn, gửi lần lượt.
     let sent = null;
-    for (const chunk of splitLongText(body)) sent = await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
-    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text: body, createdAt: Date.now(), status: 'sent' };
+    const sentChunks = [];
+    try {
+      for (const chunk of splitLongText(body)) {
+        sent = await sendPancakeMessage({ ...target, text: chunk }, config, fetchImpl);
+        sentChunks.push(chunk);
+      }
+    } catch (error) {
+      // Đoạn đầu chưa đi: lỗi thường, người gọi gửi lại được. Đoạn đầu đã tới khách: lưu phần đã gửi, báo "gửi dở".
+      if (!sentChunks.length) throw error;
+      partial = partialSendError(error, sentChunks.length);
+    }
+    message = { id: sent.id, mid: sent.id, direction: 'outgoing', type: 'text', text: partial ? sentChunks.join('\n\n') : body, createdAt: Date.now(), status: 'sent' };
   }
   const saved = await updateMessagingStore(store => {
     // Nhân viên gửi từ CRM: gắn cờ staff như tin admin gửi trong Pancake (bot dùng để im khi nhân viên đang xử lý).
@@ -1481,7 +1499,19 @@ export async function sendConversationMessageViaPancake(conversation, { text = '
     return { message: outcome.message, conversation: publicConversation(outcome.conversation) };
   });
   publishMessagingEvent({ type: 'message', conversation: saved.conversation, message: saved.message });
+  if (partial) throw Object.assign(partial, { saved });
   return saved;
+}
+
+/**
+ * INT-03: tin nhiều phần (chữ dài cắt nhiều tin, tệp + chữ) mà phần đầu đã tới khách, phần sau lỗi. Phần đã gửi
+ * được lưu vào hộp thư; lỗi mang `partial` + `unknownDelivery` để người gọi coi như "có thể đã gửi" và KHÔNG gửi
+ * lại cả tin (trước đây gửi lại → khách nhận phần đầu hai lần).
+ */
+export function partialSendError(error, sentParts) {
+  return Object.assign(new Error(`Mới gửi được ${sentParts} phần đầu của tin, phần sau lỗi (${error?.message || 'không rõ'}) — không gửi lại cả tin để khách khỏi nhận trùng.`), {
+    code: 'SEND_PARTIAL', partial: true, unknownDelivery: true, sentParts, cause: error
+  });
 }
 
 /**

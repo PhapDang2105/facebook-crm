@@ -171,9 +171,10 @@ test('khách cũ, cả Pancake lẫn Send API Meta đều lỗi: ghi "KHÔNG g�
   const gateway = wiring({ pancake: 'gateway' });
   try {
     gateway.handle(await processWebhookPayload(referralPayload('cu-5')));
-    await settled(gateway, /KHÔNG gửi được ưu đãi cho Khách cũ cu-5/, 2);
+    // INT-31 (opt-integrations): "không rõ đã gửi" = có thể đã tới khách → coi như đã chào (ghi mốc), log nói rõ.
+    await settled(gateway, /ưu đãi cho Khách cũ cu-5 gửi dở \/ không rõ đã tới/, 2);
     assert.deepEqual(gateway.calls, ['release', 'pancake-send'], 'tin có thể đã tới khách: không gửi lần hai qua Meta');
-    assert.ok(gateway.logs.some(line => /^ERR QR: KHÔNG gửi được ưu đãi cho Khách cũ cu-5: .*không rõ đã gửi/.test(line)), gateway.logs.join('\n'));
+    assert.ok(gateway.logs.some(line => /^ERR QR: ưu đãi cho Khách cũ cu-5 gửi dở \/ không rõ đã tới .*không rõ đã gửi.* — coi như đã chào$/.test(line)), gateway.logs.join('\n'));
   } finally {
     await gateway.restore();
   }

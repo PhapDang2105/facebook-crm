@@ -454,7 +454,11 @@ export function colourCountsInText(text) {
   // Vòng 13: sửa lỗi gõ ("1 túi vành", "2ca cao") trước khi đếm; cho chữ đệm giữa đơn vị và màu ("2 túi hạt vàng",
   // "2 túi loại xanh", "1 gói granola nâu"). Không đơn vị thì chỉ nhận "màu/vị" như cũ ("2 loại xanh và vàng" là hai loại).
   // Vị khách nói KHÔNG lấy ("Vậy thôi đừng lấy ca cao nha mà lấy chị 2 túi xanh+ 1 túi vàng") không tính là vị được nhắc.
-  const s = normalizeIntentText(colourText(text)).replace(new RegExp(`\\b(?:dung|khong|ko|hong)\\s+(?:lay|mua|gui)\\s+(?:(?:tui|goi|bich|vi|loai|mau)\\s+)?(?:xanh|vang|nau|cacao)\\b${NOT_GREEN}`, 'g'), ' ');
+  // R13 sửa (phản biện T4): màu đứng ngay sau "số/tổ/ngõ/khu/ấp/thôn/hẻm/kp/đường + số" là địa danh ("tổ 2 Vàng Anh", "số 2 Vàng
+  // Danh") — không đếm là túi (trước đây giỏ 2 Xanh thành 2 Vàng và địa chỉ mất "tổ 2 Vàng Anh").
+  const s = normalizeIntentText(colourText(text))
+    .replace(/\b(so|to|ngo|khu|ap|thon|hem|kp|duong|ngach|xom) (\d{1,3}) (?:xanh|vang|nau|cacao)\b/g, '$1 $2 ')
+    .replace(new RegExp(`\\b(?:dung|khong|ko|hong)\\s+(?:lay|mua|gui)\\s+(?:(?:tui|goi|bich|vi|loai|mau)\\s+)?(?:xanh|vang|nau|cacao)\\b${NOT_GREEN}`, 'g'), ' ');
   const counts = {};
   const mentioned = new Set();
   // "1vang" (dính số) vẫn là nhắc vị Vàng.
@@ -672,9 +676,15 @@ function renderOrder(value, templates, context = {}) {
   const orderLines = (recentOrder?.products || []).map(item => ({ code: String(item.sku || item.code || ''), quantity: Number(item.quantity) || 1 })).filter(item => item.code);
   const sameItemNewQuantity = namedItems.length === 1 && orderLines.length === 1
     && (matchProduct(namedItems[0].product)?.sku || namedItems[0].code || '') === orderLines[0].code && Number(namedItems[0].quantity) !== orderLines[0].quantity;
+  // R13 sửa (phản biện C2): regex SĐT từng mất dấu `\` (/d{9,}/ — chữ d lặp) nên tin có SĐT vẫn bị coi là "đổi số lượng".
+  // Tin "thêm / nữa" là đặt THÊM (ORDER_EXISTING_CONFIRM hỏi đặt thêm như cũ), tin nhắc địa chỉ cũ / có từ địa chỉ là đơn
+  // mới có nơi nhận; cửa sổ 3 giờ (đơn 20 giờ trước + "Mình lấy 2 túi xanh" là đơn mới hôm sau, như trước R13).
+  const plainBasketWindowMs = 3 * 60 * 60 * 1000;
+  const plainBasketAddressWords = /\b(dia chi|d\/c|dc|dchi|phuong|quan|huyen|tinh|thanh pho|duong|ngo|ngach|hem|thon|xom|so nha|(gui|ship|giao) (ve|den|toi|cho))\b/;
   const plainBasketTurn = sameItemNewQuantity && ['ORDER_ADDRESS', 'ORDER_CONFIRMATION'].includes(templateId) && modelBlank(value.Phone_Number)
-    && modelBlank(value.Customer_Address) && !/d{9,}/.test(customerText.replace(/[s.-]/g, ''))
-    && !shipped && recentOrder?.source !== 'POS' && now - (Number(recentOrder?.createdAt) || 0) < 24 * 60 * 60 * 1000;
+    && modelBlank(value.Customer_Address) && !extractVietnamesePhone(customerText) && !/\d{9,}/.test(customerText.replace(/[\s.()+-]/g, ''))
+    && !addsToOrder && !mentionsOldAddress(customerText) && !plainBasketAddressWords.test(messageWords)
+    && !shipped && recentOrder?.source !== 'POS' && now - (Number(recentOrder?.createdAt) || 0) < plainBasketWindowMs;
   // Giỏ giữ mới hơn đơn = khách đang đặt đơn khác; riêng ca đổi số lượng cùng món, giỏ trơn (chưa có SĐT/địa chỉ riêng) không chặn.
   const heldNewer = Number(context.pendingOrder?.at) > (Number(recentOrder?.createdAt) || 0) && (context.pendingOrder?.items || []).length > 0
     && !(plainBasketTurn && !context.pendingOrder?.phone && !context.pendingOrder?.address);
@@ -1517,7 +1527,8 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
   // GIFT_POLICY và bot kể lại bảng quà, không trả lời. Nay: nhận yêu cầu, gắn thẻ cho nhân
   // viên chọn quà thay, ghi vào đơn đang mở (29/09: nhân viên hứa đổi quà mà đơn không ghi,
   // khách nhận thiếu quà). Giỏ đang giữ thì giữ nguyên (không đặt pendingOrder).
-  if (templateId === 'GIFT_POLICY' && templates.GIFT_SWAP && isGiftSwapRequest(context.messageText)) {
+  // R13 sửa (C1): engine báo giỏ/đơn đang xét không có quà hiện vật (context.giftSwappable === false) → giữ GIFT_POLICY, không hứa đổi.
+  if (templateId === 'GIFT_POLICY' && templates.GIFT_SWAP && isGiftSwapRequest(context.messageText) && context.giftSwappable !== false) {
     const recent = context.recentOrder || null;
     const now = Number(context.now) || Date.now();
     const open = Boolean(recent?.id) && now - (Number(recent.createdAt) || 0) < orderCancelWindowMs && String(recent.processingStatus || '') !== 'cancelled' && recent.status !== 'Hủy';

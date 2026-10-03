@@ -123,8 +123,11 @@ test('r13-addr K6: chú thích "cũ/củ" sau tên cấp và mốc sau tên tỉ
   assert.deepEqual([haiBoi.ward?.name, haiBoi.district?.name, haiBoi.province?.name], ['Xã Hải Bối', 'Huyện Đông Anh', 'Hà Nội']);
   assert.equal(haiBoi.street, 'Cổ điên, quán đốp cafe');
   assert.deepEqual(columns('31đg 427 hồng vân  thường tín cũ hà nội'), ['Xã Hồng Vân', 'Huyện Thường Tín', 'Hà Nội']);
-  // "xã A ( B cũ)": A là tên mới, B là tên cũ có trong danh mục kho → lấy B (đơn …24ee3a, ô chọn POS là Xã Châu Tiến).
-  assert.deepEqual(columns('Bản phúc tiến xã châu hồng ( cháu tiến cũ) quỳ hợp cũ tỉnh nghệ an'), ['Xã Châu Tiến', 'Huyện Quỳ Hợp', 'Nghệ An']);
+  // "xã A ( B cũ)": trước đây lấy B (đơn …24ee3a, ô chọn POS là Xã Châu Tiến). R13 fix2 (B1/B7, phản biện 03/10): chính luật đó gán
+  // "Thị trấn Đức Hòa" cho "xã Hòa Khánh Đông (Đức Hòa cũ)"; nay phường khách ghi đọc đúng danh mục thì GIỮ (Xã Châu Hồng), chú thích
+  // chỉ dùng khi chưa đọc ra phường. Địa chỉ đầy đủ của đơn (có đuôi ô chọn) vẫn ra Xã Châu Tiến theo đuôi.
+  assert.deepEqual(columns('Bản phúc tiến xã châu hồng ( cháu tiến cũ) quỳ hợp cũ tỉnh nghệ an'), ['Xã Châu Hồng', 'Huyện Quỳ Hợp', 'Nghệ An']);
+  assert.deepEqual(columns('Bản phúc tiến xã châu hồng ( cháu tiến cũ) quỳ hợp cũ tỉnh nghệ an, Xã Châu Tiến, Huyện Quỳ Hợp, Nghệ An'), ['Xã Châu Tiến', 'Huyện Quỳ Hợp', 'Nghệ An']);
   // Chữ "cũ/củ" là một phần của tên hay của tên đường thì giữ nguyên.
   assert.deepEqual(columns('ấp bốn phú xã Bình Mỹ huyện củ Chi'), ['Xã Bình Mỹ', 'Huyện Củ Chi', 'TP Hồ Chí Minh']);
   const phoCu = resolveAddress('Chùa phố cũ phường hợp Giang tp Cao Bằng');

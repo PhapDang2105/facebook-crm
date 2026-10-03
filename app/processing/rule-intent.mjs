@@ -356,7 +356,21 @@ function splitBasketAddress(raw) {
   // R13: sửa lỗi gõ màu trước khi tách ("2ca cao,<sđt>,79xom hạ…" → "2 cacao, , 79xom hạ…"), dấu phẩy dính liền tách ra.
   const tokens = stripPhone(normalizeColourTypos(raw)).replace(/,(?=\S)/g, ', ').split(/\s+/).filter(token => token && !/^[,.;:]+$/.test(token));
   const folded = tokens.map(token => core(prep(token)).split(' ').filter(Boolean));
-  const basketish = index => folded[index].every(word => isBasketPrefixWord(word) || word === 'mau');
+  // R13 sửa (phản biện T4): chữ màu là ĐỊA DANH, không phải túi — đứng ngay sau "số/tổ/ngõ/khu/ấp/thôn/hẻm/kp/đường + số"
+  // ("tổ 2 Vàng Anh", "số 2 Vàng Danh"), hay viết hoa và theo sau là chữ viết hoa khác (không phải màu/đơn vị/số) mà trước
+  // nó không phải số/đơn vị túi ("Cầu Vàng, Hoà Vang"; "2 túi Xanh Nguyễn Huệ" vẫn là giỏ).
+  const placeColour = index => {
+    const words = folded[index];
+    if (!words.some(word => /^(?:xanh|vang|nau|cacao)$/.test(word))) return false;
+    const prev = (folded[index - 1] || []).join(' ');
+    const prev2 = (folded[index - 2] || []).join(' ');
+    if (/^\d+$/.test(prev) && /^(?:so|to|ngo|khu|ap|thon|hem|kp|duong|ngach|xom)$/.test(prev2)) return true;
+    const next = tokens[index + 1] || '';
+    const nextFolded = (folded[index + 1] || []).join(' ');
+    return /^\p{Lu}/u.test(tokens[index]) && /^\p{Lu}/u.test(next) && !/^\d+$/.test(prev) && !(prev && folded[index - 1].every(isBasketPrefixWord))
+      && !/^(?:xanh|vang|nau|cacao|tui|goi|bich|hop|combo|va|\d+)$/.test(nextFolded);
+  };
+  const basketish = index => !placeColour(index) && folded[index].every(word => isBasketPrefixWord(word) || word === 'mau');
   // Cụm giỏ phải có màu túi, hoặc ít nhất số túi ("2 túi nhé. Thôn Đồng Tiến…" → giữ địa chỉ, hỏi vị).
   const signal = parts => {
     const joined = parts.map(part => part.join(' ')).join(' ');
@@ -468,7 +482,11 @@ export function ruleIntent(text, ctx = {}) {
       // Đổi quà / không lấy quà ("Em kgg lấy quạt tặng em cái muỗng", "Ko lấy bát có trừ tiền ko"): GIFT_SWAP (quà thay 2 gói
       // nhỏ bất kỳ, không trừ tiền); engine ghi vào đơn đang mở + thẻ.
       // R13: "Mình mua 2b mà không lấy quà có được không" ("quà" còn dấu) cũng là GIFT_SWAP — trước đây ra NO_VARIANT.
-      if (GIFT_SWAP_ASK.test(s) || GIFT_DECLINE_RAW.test(raw.normalize('NFC'))) return infoReply('GIFT_SWAP', 'GIFT_SWAP', { attention: true });
+      // R13 sửa (C1): giỏ/đơn đang xét KHÔNG có quà hiện vật (ctx.giftSwappable === false — giỏ 1–2 túi chỉ miễn ship) → không có
+      // gì để đổi: nói chính sách quà (GIFT_POLICY), không hứa 2 gói nhỏ, không mở lượt chọn vị.
+      if (GIFT_SWAP_ASK.test(s) || GIFT_DECLINE_RAW.test(raw.normalize('NFC'))) {
+        return ctx.giftSwappable === false ? infoReply('GIFT_SWAP_NO_GIFT', 'GIFT_POLICY') : infoReply('GIFT_SWAP', 'GIFT_SWAP', { attention: true });
+      }
       // Hỏi quà ("Bộ bát gì", "Tặng quạt jì", "quạt xem hình"): GIFT_POLICY theo ngữ cảnh (live/giỏ/ưu đãi) + ảnh quà (engine).
       if ((GIFT_QUESTION.test(s) || GIFT_PHOTO_RAW.test(raw.normalize('NFC'))) && !PRICE.test(s.replace(/\bbao nhieu (?:cai|bo|mon)\b/, ' '))) return infoReply('GIFT_QUESTION', 'GIFT_POLICY', { giftPhotos: true });
     }

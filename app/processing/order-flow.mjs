@@ -159,16 +159,20 @@ export function orderFlowStep(text, ctx = {}) {
   const phone = extractVietnamesePhone(raw);
   // Vòng 12: mọi nhánh (cả nhánh địa chỉ đủ) đều lọc nhãn "sđt/đc/Tên:/shop."… và chữ đệm cuối câu.
   const address = cleanAddressText(ctx.addressText || raw);
-  if (phone && ctx.addressComplete) return { rule: 'PHONE_ADDRESS', value: { template_id: 'ORDER_ADDRESS', Phone_Number: phone, Customer_Address: address } };
+  // R13 sửa (phản biện L2): cleanAddressText cắt đuôi câu hỏi quà/ship ("… Sơn Động Bắc Giang có tặng quà phải k bạn") → câu hỏi
+  // được trả lời cùng lượt bằng ý phụ (also GIFT_POLICY / FREESHIP_POLICY) thay vì bị bỏ.
+  const alsoFor = trailingQuestionTopic(ctx.addressText || raw);
+  const withAlso = value => (alsoFor ? { ...value, also: alsoFor } : value);
+  if (phone && ctx.addressComplete) return { rule: 'PHONE_ADDRESS', value: withAlso({ template_id: 'ORDER_ADDRESS', Phone_Number: phone, Customer_Address: address }) };
   if (phone) {
     const leftover = s.replace(/<sdt>/g, ' ').split(' ').filter(Boolean);
     if (leftover.every(word => FILLER.has(word))) return { rule: 'PHONE_ONLY', value: { template_id: 'ORDER_ADDRESS', Phone_Number: phone } };
     // SĐT + địa chỉ chưa đủ cấp ("<sđt> Xóm 3 xã Vô Tranh Phú Lương"): vẫn đưa vào, bộ soạn đơn hỏi phần thiếu.
-    if (looksLikeAddress(address, normalizeIntentText(address))) return { rule: 'PHONE_ADDRESS_PARTIAL', value: { template_id: 'ORDER_ADDRESS', Phone_Number: phone, Customer_Address: address } };
+    if (looksLikeAddress(address, normalizeIntentText(address))) return { rule: 'PHONE_ADDRESS_PARTIAL', value: withAlso({ template_id: 'ORDER_ADDRESS', Phone_Number: phone, Customer_Address: address }) };
     return null;
   }
-  if (ctx.addressComplete) return { rule: 'ADDRESS_COMPLETE', value: { template_id: 'ORDER_ADDRESS', Customer_Address: address } };
-  if (looksLikeAddress(address, s)) return { rule: 'ADDRESS_PARTIAL', value: { template_id: 'ORDER_ADDRESS', Customer_Address: address } };
+  if (ctx.addressComplete) return { rule: 'ADDRESS_COMPLETE', value: withAlso({ template_id: 'ORDER_ADDRESS', Customer_Address: address }) };
+  if (looksLikeAddress(address, s)) return { rule: 'ADDRESS_PARTIAL', value: withAlso({ template_id: 'ORDER_ADDRESS', Customer_Address: address }) };
   return null;
 }
 
@@ -228,6 +232,21 @@ const TRAILING_THANKS = /[\s,.;:!~-]*(?<![\p{L}\p{N}])(?:xin\s+)?(?:c[ảá]m\s+
 // Đuôi câu hỏi: "… có tặng quà phải k bạn", "… có freeship không shop", "… được kiểm hàng ko ạ".
 const TRAILING_QUESTION = /\s+(?:có|co|được|đc|dc|vậy|thì|mà|shop|cho\s+(?:mình|em|chị|c|e)\s+hỏi)\s+[^,\n]{2,45}?(?<![\p{L}])(?:không|ko|k|kg|hả|hông|hong|chưa|nhỉ|phải\s+k|phải\s+ko|phải\s+không)(?:\s+(?:bạn|ban|shop|em|e|ạ|a|nhỉ|vậy|ad))*\s*\??$/iu;
 const TRAILING_QUESTION_TOPIC = /(?<![\p{L}])(?:tặng|quà|qua tang|ship|freeship|miễn|giảm|ưu đãi|khuyến mãi|kiểm|xem hàng|thanh toán|cod|giao|nhận|voucher|đổi|trả)(?![\p{L}])/iu;
+
+/**
+ * R13 sửa (L2): đuôi câu hỏi mà cleanAddressText sẽ cắt khỏi địa chỉ có chủ đề quà / miễn ship không → mã mẫu ý phụ để luật
+ * địa chỉ trả lời cùng lượt ('' khi không có / chủ đề khác — để nguyên như trước).
+ * @param {string} text tin khách (địa chỉ thô)
+ * @returns {''|'GIFT_POLICY'|'FREESHIP_POLICY'}
+ */
+export function trailingQuestionTopic(text) {
+  const question = String(text || '').match(TRAILING_QUESTION);
+  if (!question || !TRAILING_QUESTION_TOPIC.test(question[0]) || ADMIN_OR_STREET.test(question[0]) || /\d/.test(question[0])) return '';
+  const tail = question[0].normalize('NFC');
+  if (/(?<![\p{L}])(?:tặng|quà|qua tang)(?![\p{L}])/iu.test(tail)) return 'GIFT_POLICY';
+  if (/(?<![\p{L}])(?:ship|freeship|miễn)(?![\p{L}])/iu.test(tail)) return 'FREESHIP_POLICY';
+  return '';
+}
 // Đuôi giỏ: "… Bình Thạnh Ngân Combo 2 tui", "… Hà Nội 2 túi xanh nhé", "… Đà Nẵng lấy 1 xanh 1 vàng".
 const TRAILING_BASKET = new RegExp(`[\\s,.;:\\-–]+(?:(?:lấy|lay|đặt|dat|mua|ship|chốt|chot)\\s+)?(?:(?:cho\\s+)?(?:mình|minh|em|chị|chi)\\s+)?(?:combo\\s*\\d{1,2}(?:\\s*${BAG_UNIT})?(?:\\s+${COLOUR_WORD})?|(?:\\d{1,2}\\s*${BAG_UNIT}(?:\\s+${COLOUR_WORD})?|\\d{1,2}\\s+${COLOUR_WORD})(?:\\s*(?:,|và|va|\\+)?\\s*\\d{1,2}\\s*${BAG_UNIT}?\\s*${COLOUR_WORD})*)(?![\\p{L}\\p{N}])[\\s.!]*$`, 'iu');
 /** Ngoặc mồ côi ("số 5 ngõ 2 (gần chợ, Hà Đông" / "Hà Đông) Hà Nội"): bỏ dấu ngoặc lẻ, giữ chữ. */

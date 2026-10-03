@@ -158,15 +158,18 @@ try {
   const standbyConversation = afterStandby.items?.find(item => item.id === `${pageId}:${standbyPsid}`);
   check('Standby events are stored (referral + Get Started postback)', Boolean(standbyConversation) && standbyConversation.lastMessagePreview === 'Bắt đầu', JSON.stringify(afterStandby.items?.map(item => [item.id, item.lastMessagePreview])));
 
-  // Trang đệm /q/<mã>: Android Chrome vẫn 302 thẳng sang m.me?ref; iPhone trong Zalo nhận trang có hướng dẫn
+  // Trang đệm /q/<mã>: từ R13 fix2 (03/10) Android Chrome cũng nhận trang đệm có nút m.me?ref (không 302 thẳng nữa, để lượt bấm
+  // nút là bằng chứng người thật — máy quét liên kết không tạo lượt chờ khớp); iPhone trong Zalo nhận trang có hướng dẫn
   // mở bằng Safari (x-safari-https trỏ về chính trang này kèm from=inapp, không đếm thêm lượt quét).
   const androidChrome = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.71 Mobile Safari/537.36';
   const zaloIos = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Zalo iOS/640 ZaloTheme/light ZaloLanguage/vn';
   const iosSafari = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1';
   const redirected = await fetch(`${baseUrl}/q/tmdt-01`, { headers: { 'User-Agent': androidChrome }, redirect: 'manual' });
   // Cài đặt chưa đặt tin soạn sẵn: link chỉ mang ref (chủ shop 02/10: Page chủ động chào, khách không phải gửi tin soạn sẵn).
-  const location = redirected.status === 302 ? new URL(redirected.headers.get('location')) : null;
-  check('QR bridge: Android Chrome is still redirected to m.me?ref', location?.origin === 'https://m.me' && location.pathname === `/${pageId}` && location.searchParams.get('ref') === 'tmdt-01', `${redirected.status} ${redirected.headers.get('location')}`);
+  const redirectedHtml = await redirected.text();
+  const linkMatch = redirectedHtml.match(/href="(https:\/\/m\.me\/[^"]+)"/);
+  const location = linkMatch ? new URL(linkMatch[1].replace(/&amp;/g, '&')) : null;
+  check('QR bridge: Android Chrome gets the bridge page with an m.me?ref button', redirected.status === 200 && location?.origin === 'https://m.me' && location.pathname === `/${pageId}` && location.searchParams.get('ref') === 'tmdt-01', `${redirected.status} ${linkMatch?.[1]}`);
   check('QR bridge: the m.me link carries no prefilled text by default', location?.searchParams.has('text') === false, location?.searchParams.get('text'));
   const inApp = await fetch(`${baseUrl}/q/tmdt-01`, { headers: { 'User-Agent': zaloIos }, redirect: 'manual' });
   const inAppHtml = await inApp.text();

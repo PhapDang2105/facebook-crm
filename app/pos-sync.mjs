@@ -11,7 +11,7 @@ import { posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { readLandingStore, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { isCrmPushedPosOrder } from './pos-orders.mjs';
 import { applyPosStatusesToConversations, applyPosStatusesToOrders, indexPosStatuses, matchPosStatus, posStatusUpdate } from './pos-status.mjs';
-import { applyPosContentToOrders, indexPosOrders, needsPosContent, posGoodsItems } from './pos-content-sync.mjs';
+import { applyPosContentToOrders, indexPosOrders, needsPosContent, posComputedTotal, posGoodsItems } from './pos-content-sync.mjs';
 
 export const POS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const LANDING_SOURCES = /webcake|landing/i;
@@ -47,8 +47,11 @@ export function posStreet(order) {
  * lấy thẳng thì đơn landing combo ghi cao hơn số khách thật trả.
  */
 export function posOrderTotal(order = {}) {
-  // R13 (T4): khách đã chuyển khoản (một phần hay toàn bộ) thì tiền khách trả = thu hộ + chuyển khoản; trước đây chỉ lấy
-  // `cod` nên đơn đặt cọc ghi thiếu phần đã chuyển, đơn chuyển khoản hết (cod = 0) rơi về công thức tiền hàng.
+  // R13-fix (T1): (a) tổng POS tự tính (total_price − giảm + ship, trừ giá dòng mã quà) đứng TRƯỚC; (b) chỉ khi POS không
+  // có total_price mới lấy thu hộ + chuyển khoản (R13 T4) — lấy cod + transfer_money trước làm đơn khách trả trước bằng
+  // kênh khác (MoMo/thẻ, trường POS chưa rõ tên) bị hạ tổng.
+  const computed = posComputedTotal(order);
+  if (computed > 0) return computed;
   const positive = value => { const number = Number(value); return value !== undefined && value !== null && value !== '' && Number.isFinite(number) && number > 0 ? number : 0; };
   const paid = positive(order.cod) + positive(order.transfer_money);
   if (paid > 0) return Math.round(paid);
@@ -80,6 +83,8 @@ export function posOrderToPayload(order) {
     address: fullAddress,
     products,
     total: posOrderTotal(order),
+    // R13-fix (L5): khách đã chuyển khoản (đặt cọc) → đơn landing ghi `prepaid` để nhân viên thấy phần đã trả.
+    ...(Number(order.transfer_money) > 0 ? { prepaid: Math.round(Number(order.transfer_money)) } : {}),
     status: order.is_abandoned_order ? 'Form chưa hoàn tất' : 'Form hoàn tất',
     inserted_at: posTimeToWebcake(order.inserted_at),
     location: String(order.link || ''),

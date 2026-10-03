@@ -33,7 +33,7 @@ import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { posSyncStatus, recordPosSyncStatus, startPosSync, syncPosLandingOrders } from './pos-sync.mjs';
-import { applyPosContentToConversations, finalizePosImportedOrder, posGoodsItems, repairPosImportedTotal } from './pos-content-sync.mjs';
+import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
 import { applyGiftSwapFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { buildFollowUpBatch, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
@@ -45,9 +45,9 @@ import { HTML_CSP, LOGIN_SETUP_MESSAGE, allowedWithoutLoginSetup, applySecurityH
 import { appendOrderToArchive, readOrderArchive } from './order-archive.mjs';
 import { customerPhoneKey, listExportedCustomers, recordExportedOrders } from './customer-file.mjs';
 import { listExports, readExportFile, recordExport } from './export-history.mjs';
-import { brandImageFiles, describePancakePayload, fetchPancakeConversationInfo, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
+import { brandImageFiles, describePancakePayload, fetchPancakeConversationInfo, fetchPancakeMessages, getPancakePageConfig, handlePancakeWebhook, isPancakeConfigured, isPancakeWebhookTokenValid, pancakeSyncStatusFor, pancakeTime, startPancakeSync, syncPancakeConversations } from './pancake.mjs';
 import { countQrReferrals, countQrReferralsByDay, deleteQrCode, isValidQrCode, listQrScans, qrDayKey, recordQrOpen, recordQrScan, registerQrCode } from './qr-scans.mjs';
-import { classifyUserAgent, iosMajorVersion, isLinkPreviewBot, messengerDestination, prefillMessageFor, prefillTemplateOrDefault, renderBridgePage, shouldRedirectDirectly } from './qr-bridge.mjs';
+import { classifyUserAgent, iosMajorVersion, isLinkPreviewBot, messengerDestination, prefillMessageFor, prefillTemplateOrDefault, renderBridgePage } from './qr-bridge.mjs';
 import { createBridgeClickMatcher, createLinkRoutedQrFlow, createQrGreeter, createThreadReleaser, isCardScan, lastStaffMessageAt, resolveQrOfferTemplate, withOfferCardImage } from './qr-greeting.mjs';
 // Riêng cho luồng QR (vòng 13): ghi referral thẻ lên hội thoại khớp lượt bấm, ghi nốt kho sau lượt chào lúc tắt.
 import { attachReferral as attachQrReferral } from './meta-webhook.mjs';
@@ -512,6 +512,8 @@ async function followUpConversationInfo(pageId, conversationId) {
 }
 
 const shouldLogSkippedPosOrder = createSeenOnce(2000);
+// R13-fix (L3): hai request "Đẩy POS" sát nhau dùng chung một lượt đẩy → chỉ ghi lịch sử một lần cho mỗi (đơn, mã POS).
+const shouldLogPosPush = createSeenOnce(500);
 async function importPosConversationOrders(posOrders) {
   const drafts = [];
   for (const posOrder of Array.isArray(posOrders) ? posOrders : []) {
@@ -583,8 +585,18 @@ async function importPosConversationOrders(posOrders) {
       const conversation = byPancakeId.get(conversationKey);
       if (!conversation) continue;
       if (!Array.isArray(conversation.customerOrders)) conversation.customerOrders = [];
-      const existing = conversation.customerOrders.find(entry => entry.id === order.id || (entry.pos?.systemId && entry.pos.systemId === order.pos.systemId));
+      // R13-fix (C1): khớp theo mã POS (pos.id) TRƯỚC, rồi mới tới mã đơn CRM / mã hệ thống.
+      const posId = String(posOrder.id);
+      const existing = conversation.customerOrders.find(entry => entry.pos?.id && String(entry.pos.id) === posId)
+        || conversation.customerOrders.find(entry => entry.id === order.id || (entry.pos?.systemId && entry.pos.systemId === order.pos.systemId));
+      // R13-fix (T2): đơn POS này đã kéo về rồi bị nhân viên xoá trong CRM → không kéo về lại.
+      if (!existing && isDeletedPosOrder(conversation, posOrder)) continue;
       if (existing) {
+        // R13-fix (C1): đơn đã "Lên lại POS" (pos.id = CRM-…-L2, previousId = mã POS cũ) vẫn mang mã pos<system_id> của
+        // ĐƠN POS CŨ đã hủy: đơn POS cũ không còn là đơn này — không hủy theo, không chỉnh tổng theo nó (từng bị hủy lại
+        // mỗi lượt đồng bộ trong khi POS có đơn mới đang sống).
+        const samePosOrder = !existing.pos?.id || String(existing.pos.id) === posId;
+        if (!samePosOrder || String(existing.pos?.previousId || '') === posId) { relabel(conversation, existing); continue; }
         // Đã kéo về: chỉ theo trạng thái hủy của POS; sửa của nhân viên trong CRM giữ nguyên.
         // Đơn kéo về trước 01/10 chưa có dòng quà POS: bổ sung (file kho cần mã quà).
         if (!Array.isArray(existing.giftItems) && Array.isArray(order.giftItems)) existing.giftItems = order.giftItems;
@@ -939,6 +951,14 @@ const qrBridgeMatcher = createBridgeClickMatcher({
   ambiguityMs: qrBridgeEnvMs('QR_BRIDGE_AMBIGUITY_MS', 15_000),
   greetDelayMs: qrGreetingDelayMs,
   pageId: async () => (await resolveQrPage()).id,
+  // R13 fix2 (A6): lúc chốt chào, đọc lịch sử hội thoại từ Pancake (một trang 30 tin, chờ tối đa 5 s ở bộ khớp): có tin cũ hơn
+  // lượt bấm → khách cũ mà kho CRM chưa có (trước khi nối Pancake; đồng bộ chỉ kéo 60 hội thoại) → không chào. Lỗi → vẫn khớp theo kho.
+  history: async conversation => {
+    const conversationId = String(conversation?.pancakeConversationId || '');
+    if (!conversationId) return [];
+    const messages = await fetchPancakeMessages(conversationId, { pages: 1 }, getPancakePageConfig(conversation.pageId));
+    return messages.map(message => ({ createdAt: pancakeTime(message?.inserted_at, 0) }));
+  },
   inspect: async change => {
     const store = await readMessagingStore();
     const conversation = store.conversations.find(item => item.id === change.conversation.id) || change.conversation;
@@ -1576,6 +1596,8 @@ const server = http.createServer(async (request, response) => {
     applySecurityHeaders(response, { https: authConfig.https });
     // R13 (L6): HEAD xử lý như GET (cùng mã trạng thái + header; Node tự bỏ thân với request HEAD) — trước đây mọi
     // đường kể cả /api/health trả 404 cho HEAD, công cụ giám sát tưởng máy chủ chết. Luồng SSE không mở cho HEAD.
+    // R13 fix2 (A2): /q/<mã> cần biết phương thức gốc — HEAD (giám sát, xem trước) không phải lượt quét, không được đếm.
+    const headRequest = request.method === 'HEAD';
     if (request.method === 'HEAD') {
       if (String(request.url || '').split('?')[0] === '/api/messaging/stream') { response.writeHead(405, { Allow: 'GET' }); return response.end(); }
       request.method = 'GET';
@@ -1652,9 +1674,15 @@ const server = http.createServer(async (request, response) => {
           // Dấu vết ngắn hạn của máy bấm (băm IP + User-Agent, chỉ giữ trong bộ nhớ 30 phút ở qr-scans, không ghi
           // đĩa): cùng máy bấm lại / gửi beacon dồn chỉ tính một lượt.
           const visitor = qrVisitorKey(clientIp(request), request.headers['user-agent']);
-          recordQrOpen(code, { target, visitor }).catch(error => console.error(`QR: không ghi được lượt bấm ${code}: ${error.message}`));
           // Khách MỚI với Page: Meta không báo mã — ghi lượt bấm chờ khớp với tin đầu của hội thoại mới.
-          if (target === 'messenger') qrBridgeMatcher.noteClick({ code, visitor });
+          // R13 fix2 (A4): CHỈ khi recordQrOpen ghép được beacon với một lượt trang đệm chưa dùng của cùng mã (trả mục; null = không
+          // có lượt trang đệm trong 30 phút, cùng máy đã bấm, mã chưa tạo): beacon gửi dồn không quét trước không thành lượt chờ khớp.
+          // Bộ khớp còn giới hạn ≤ 3 lượt/phút theo dấu vết máy và theo IP (băm, chỉ RAM).
+          recordQrOpen(code, { target, visitor })
+            .then(entry => {
+              if (entry && target === 'messenger') qrBridgeMatcher.noteClick({ code, visitor, ip: qrVisitorKey(clientIp(request), '') });
+            })
+            .catch(error => console.error(`QR: không ghi được lượt bấm ${code}: ${error.message}`));
         }
         response.writeHead(204, { 'Cache-Control': 'no-store' });
         return response.end();
@@ -1662,24 +1690,25 @@ const server = http.createServer(async (request, response) => {
       if (request.method !== 'GET') return sendJson(response, 405, { error: 'Chỉ nhận GET.' });
       const userAgent = String(request.headers['user-agent'] || '');
       const classification = classifyUserAgent(userAgent);
-      const redirect = shouldRedirectDirectly(classification);
+      // R13 fix2 (A2): không còn 302 thẳng cho Chrome Android (qr-bridge.mjs shouldRedirectDirectly): mọi máy qua trang đệm, lượt
+      // "bấm nút" (beacon) mới là bằng chứng người thật — HEAD của công cụ giám sát hay crawler mang UA Android từng thành lượt
+      // bấm chờ khớp và khách lạ nhắn sau đó nhận ưu đãi.
       // Đếm trước, nhưng không để việc ghi đĩa làm khách phải chờ. Máy xem trước
       // liên kết (khách dán link vào Zalo/Messenger) không phải lượt quét.
       // `?from=inapp`: khách mở LẠI trang này bằng Safari từ trong Zalo/Facebook… (nút "Mở bằng Safari" hay
       // dán liên kết đã sao chép) — cùng một lượt quét, đã đếm ở lần tải đầu.
       const reopened = url.searchParams.get('from') === 'inapp';
-      if (isLinkPreviewBot(userAgent)) {
+      if (headRequest) {
+        console.log(`QR: bỏ qua đếm ${code}: HEAD (giám sát / xem trước), không phải lượt quét`);
+      } else if (isLinkPreviewBot(userAgent)) {
         console.log(`QR: bỏ qua đếm ${code}: máy xem trước / máy quét (${userAgent.slice(0, 60) || 'UA rỗng'})`);
       } else if (reopened) {
         console.log(`QR: mở lại ${code} bằng trình duyệt từ trong app (${classification.platform}/${classification.browser}), không đếm thêm lượt quét`);
       } else if (staffScan) {
         console.log(`QR: bỏ qua đếm ${code}: máy nhân viên (đã đăng nhập CRM) quét thử`);
       } else {
-        recordQrScan(code, { userAgent, mode: redirect ? 'redirect' : 'page' })
+        recordQrScan(code, { userAgent, mode: 'page' })
           .catch(error => console.error(`QR: không ghi được lượt quét ${code}: ${error.message}`));
-        // Chrome Android được chuyển hướng thẳng sang m.me (không có trang đệm, không có beacon): lượt quét
-        // chính là lượt "mở Messenger" → cũng chờ khớp với hội thoại mới.
-        if (redirect) qrBridgeMatcher.noteClick({ code, visitor: qrVisitorKey(clientIp(request), userAgent), via: 'redirect' });
       }
       let page;
       try {
@@ -1697,11 +1726,6 @@ const server = http.createServer(async (request, response) => {
       // tin khách gửi về CRM qua webhook Pancake mang theo mã lô. Chưa đặt tin soạn sẵn thì dùng mẫu mặc
       // định — link không có `text=` là mất đường duy nhất không phụ thuộc Meta để nhận ra khách quét thẻ.
       const destination = messengerDestination({ pageId: page.id, code, pageName: page.name, prefillText: prefillTemplateOrDefault(prefillText) });
-      if (redirect) {
-        console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}) -> chuyển hướng Messenger`);
-        response.writeHead(302, { Location: destination, 'Cache-Control': 'no-store' });
-        return response.end();
-      }
       console.log(`QR: lượt quét ${code} (${classification.platform}/${classification.browser}${classification.inApp ? ', trong app' : ''}) -> trang đệm`);
       const html = renderBridgePage({
         code,
@@ -2472,6 +2496,8 @@ const server = http.createServer(async (request, response) => {
         const changes = await processWebhookPayload(JSON.parse(rawBody.toString('utf8')));
         // Hẹn chào khách quét thẻ và trả luồng về app mặc định (kể cả sự kiện không phải lượt quét thẻ).
         handleMetaQrChanges(changes);
+        // R13 fix2 (A1): referral Meta của thẻ về → lượt bấm trang đệm của lượt quét đó không còn treo chờ hội thoại mới.
+        qrBridgeMatcher.noteReferral(changes).catch(error => console.error(`QR: lỗi khi tiêu lượt bấm theo referral Meta: ${error.message}`));
         // Khách quét phiếu đã có tin ưu đãi riêng; để bot chào thêm câu chung
         // nữa là khách nhận hai tin trong mười giây. Những tin sau của họ vẫn
         // đi qua bot bình thường — chỉ bỏ qua đúng sự kiện mở hội thoại.
@@ -3272,12 +3298,16 @@ const server = http.createServer(async (request, response) => {
       if (!posConfigured()) return sendJson(response, 400, { error: 'Chưa kết nối Pancake POS (Cài đặt → Kênh).' });
       // R13 (M7): đơn mở lại sau khi POS đã hủy → lên lại thành ĐƠN POS MỚI (đơn cũ bên POS giữ nguyên trạng thái hủy).
       const reopened = owner.customerOrders.find(order => order.id === orderId);
+      const posIdBefore = String(reopened?.pos?.id || '');
       const outcome = needsPosRepush(reopened) ? await repushCancelledOrderToPos(owner, reopened) : await syncOrderToPos(owner.id, orderId);
       const actor = await requestActor(request);
       const pushed = owner.customerOrders.find(order => order.id === orderId);
       const pushSummary = outcome?.error ? `Đẩy đơn sang POS lỗi: ${String(outcome.error).slice(0, 120)}` : `Đẩy đơn sang POS${outcome?.systemId || outcome?.id ? ` (mã POS ${outcome.systemId || outcome.id})` : ''}.`;
-      await addOrderHistory(orderId, { by: actorStamp(actor), action: 'order.push_pos', summary: pushSummary });
-      audit(request, 'order.push_pos', { target: orderTarget(pushed), conversationId: owner.id, orderId, summary: `#${orderId}: ${pushSummary}` }, actor);
+      // R13-fix (L3): đơn đã có mã POS và không làm gì (bấm lại, hai request sát nhau) thì không ghi lịch sử/nhật ký.
+      if (outcome?.error || (String(outcome?.id || '') !== posIdBefore && shouldLogPosPush(`${orderId}|${outcome?.id}`))) {
+        await addOrderHistory(orderId, { by: actorStamp(actor), action: 'order.push_pos', summary: pushSummary });
+        audit(request, 'order.push_pos', { target: orderTarget(pushed), conversationId: owner.id, orderId, summary: `#${orderId}: ${pushSummary}` }, actor);
+      }
       return sendJson(response, outcome?.error ? 502 : 200, { pos: outcome, error: outcome?.error || '' });
     }
     const customerOrderDeleteMatch = url.pathname.match(/^\/api\/customer-orders\/([^/]+)$/);
@@ -3423,6 +3453,8 @@ const server = http.createServer(async (request, response) => {
           if (index < 0) continue;
           if (isLiveOnPos(orders[index])) { liveOnPos = orders[index]; return null; }
           [removed] = orders.splice(index, 1);
+          // R13-fix (T2): đơn POS kéo về mà xoá thì nhớ mã, kẻo lượt đồng bộ 5 phút sau kéo về lại.
+          rememberDeletedPosOrder(conversation, removed);
           removedFrom = conversation.id;
           publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
           break;

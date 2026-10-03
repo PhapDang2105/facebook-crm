@@ -8,8 +8,10 @@
 //  - Trình duyệt trong app Zalo, Facebook, Instagram, TikTok, app ngân hàng:
 //    tự tải trang, không bàn giao cho hệ thống; cần hướng dẫn "mở bằng trình
 //    duyệt" và một nút để bấm lại.
-//  - Chrome trên Android: coi 302 ngay sau lượt bấm là thao tác của người dùng
-//    và mở app được — nhánh duy nhất còn chuyển hướng thẳng.
+//  - Chrome trên Android: từng là nhánh duy nhất được 302 thẳng sang m.me. R13 fix2 (A2): bỏ — lượt
+//    quét 302 không có bằng chứng "người bấm" (HEAD của công cụ giám sát, crawler mang UA Android
+//    Chrome cũng thành "lượt bấm chờ khớp" và khách lạ nhắn sau đó nhận ưu đãi). Android cũng qua trang
+//    đệm: nút là thẻ <a> trỏ m.me?ref, Chrome mở App Link khi khách tự bấm; beacon ghi lượt bấm thật.
 // Trang trả về nhẹ, không tải tài nguyên ngoài (mọi thứ dưới /assets nằm sau
 // mật khẩu của Caddy, còn /q/* thì đi thẳng), không chuyển hướng tự động.
 
@@ -60,7 +62,10 @@ export function classifyUserAgent(userAgent = '') {
 export function isLinkPreviewBot(userAgent = '') {
   const ua = String(userAgent || '').trim();
   if (!ua) return true;
-  return /\bbot\b|bot\/|crawler|spider|preview|facebookexternalhit|facebookcatalog|Facebot|WhatsApp|TelegramBot|Twitterbot|Slackbot|Discordbot|LinkedInBot|Zalo(?:PC)?Bot|ZaloCrawler|curl\/|wget\/|python-requests|python-urllib|Go-http-client|okhttp\/|HeadlessChrome|Lighthouse|PhantomJS/i.test(ua);
+  // R13 fix2 (A2): crawler mang UA Chrome Android nhưng không có chữ "bot" — GoogleOther, AdsBot-Google(-Mobile),
+  // Google-InspectionTool, Google-Read-Aloud, Mediapartners, APIs-Google, FeedFetcher, Chrome-Lighthouse/PageSpeed; mọi UA dạng
+  // "(compatible; …)" là máy; thêm Zalo/Skype/Viber/Pinterest/Apple xem trước liên kết, Bing/Yandex/Baidu/DuckDuck, headless.
+  return /\bbot\b|bot\/|bot;|crawler|spider|preview|facebookexternalhit|facebookcatalog|Facebot|WhatsApp|Telegram|Twitterbot|Slackbot|Slack-ImgProxy|Discordbot|LinkedInBot|Zalo(?:PC)?Bot|ZaloCrawler|Zalo-Preview|SkypeUriPreview|Viber|Pinterest|Applebot|Google(?:Other|-InspectionTool|-Read-Aloud|-Extended|-Site-Verification)|AdsBot|Mediapartners|APIs-Google|FeedFetcher|Chrome-Lighthouse|PageSpeed|Lighthouse|bingbot|BingPreview|YandexBot|Baiduspider|DuckDuck|curl\/|wget\/|python-requests|python-urllib|Go-http-client|okhttp\/|HeadlessChrome|PhantomJS|Puppeteer|Playwright|\(compatible;/i.test(ua);
 }
 
 const codePattern = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -149,9 +154,14 @@ export function messengerDestination({ pageId, code, pageName = '', prefillText 
   return `https://m.me/${encodeURIComponent(pageId)}?ref=${encodeURIComponent(code)}${text ? `&text=${encodeURIComponent(text)}` : ''}`;
 }
 
-/** Chỉ Chrome hệ thống trên Android mở được app Messenger sau một chuyển hướng 302. */
+/**
+ * Trước R13 fix2: Chrome hệ thống trên Android được 302 thẳng sang m.me (mở được app sau chuyển hướng). Nay KHÔNG máy nào
+ * được chuyển hướng thẳng (A2): lượt 302 không phân biệt được người bấm với HEAD/crawler, nên mọi máy qua trang đệm — Chrome
+ * Android mở App Link m.me khi khách tự bấm nút, và beacon mới là bằng chứng "người bấm". Giữ hàm để nơi gọi/test cũ không đổi API.
+ */
 export function shouldRedirectDirectly(classification) {
-  return classification?.platform === 'android' && classification?.browser === 'chrome' && !classification?.inApp;
+  void classification;
+  return false;
 }
 
 const inAppHints = {
@@ -217,8 +227,8 @@ const icons = {
 };
 
 /**
- * Trang khách thấy sau khi quét thẻ cảm ơn (iPhone, Zalo, trình duyệt trong
- * app, máy tính; Android Chrome được chuyển thẳng). Một việc duy nhất: bấm nút
+ * Trang khách thấy sau khi quét thẻ cảm ơn (iPhone, Android, Zalo, trình duyệt trong
+ * app, máy tính — R13 fix2: Android Chrome cũng qua đây). Một việc duy nhất: bấm nút
  * mở Messenger. Nút là thẻ <a> trỏ thẳng m.me?ref (lượt bấm thật của khách mới
  * kích hoạt Universal Link / App Link), có hướng dẫn riêng khi đang ở trong app,
  * và đường lùi là Heartline + trang Facebook của Page. Không tài nguyên ngoài,

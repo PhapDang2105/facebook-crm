@@ -542,14 +542,51 @@ export function staffRepliedRecently(messages, now = Date.now()) {
 export function botAlreadyHandled(conversation, message, store) {
   if (!conversation || !message) return false;
   const stored = (store?.conversations || []).find(item => item?.id === conversation.id) || conversation;
+  const thread = store?.messages?.[stored.id || conversation.id] || [];
+  return commentReplyCovers(stored, message, thread);
+}
+
+/** Lệch giờ Pancake ↔ máy chủ chấp nhận khi so mốc trả lời với giờ bình luận. */
+export const COMMENT_HANDLED_SKEW_MS = 5000;
+
+/**
+ * R13 sửa (phản biện T1): bình luận `message` của luồng `stored` đã được bot xử lý chưa — chỉ từ dấu vết trong CHÍNH luồng đó.
+ * 1. `botHandledMessageId` = mã tin → đã xử lý (engine ghi ở MỌI lượt trả lời bình luận và lượt bỏ qua có chủ ý).
+ * 2. Hội thoại đã có `botHandledMessageId` khác: tin ĐỨNG TRƯỚC (hay cùng lúc) tin đã xử lý là tin đã gộp vào lượt đó;
+ *    tin đứng sau là tin mới → chưa xử lý. (Trước đây mọi tin cũ hơn `botLastReplyAt` đều bị bỏ: bình luận thứ hai tới
+ *    trong lúc bot đang soạn câu trả lời cho bình luận đầu bị rơi.)
+ * 3. Dữ liệu cũ (chưa có `botHandledMessageId`): dùng mốc `botLastReplyAt` nhưng tin phải sớm hơn mốc ≥ 5 giây (lệch giờ)
+ *    và là tin khách DUY NHẤT chưa trả lời trước mốc — còn tin khách khác cũng chưa trả lời trước nó thì không biết bot
+ *    trả lời tin nào → đưa bot (thà lặp còn hơn mất khách).
+ * Không còn nhìn "tin riêng bất kỳ ở hộp thư": tin riêng của bài KHÁC làm bình luận bài này bị coi là đã trả lời.
+ * @param {object} stored hội thoại (bản trong kho)
+ * @param {object} message tin khách đang xét
+ * @param {Array<object>} thread tin của chính luồng đó
+ */
+export function commentReplyCovers(stored, message, thread = []) {
+  if (!stored || !message) return false;
   const messageId = String(message.id || message.mid || '');
-  if (messageId && String(stored.botHandledMessageId || '') === messageId) return true;
-  if ((stored.source || conversation.source) !== 'comment') return false;
+  const handledId = String(stored.botHandledMessageId || '');
+  if (messageId && handledId && handledId === messageId) return true;
+  if (stored.source !== 'comment') return false;
   const at = Number(message.createdAt) || 0;
   if (!at) return false;
-  if ((Number(stored.botLastReplyAt) || 0) >= at) return true;
-  const inbox = store?.messages?.[`${stored.pageId || conversation.pageId}:${stored.psid || conversation.psid}`] || [];
-  return inbox.some(item => item?.direction === 'outgoing' && item.privateReply === true && (Number(item.createdAt) || 0) >= at);
+  const list = Array.isArray(thread) ? thread : [];
+  const idOf = item => String(item?.id || item?.mid || '');
+  if (handledId) {
+    const handled = list.find(item => idOf(item) === handledId);
+    if (handled) return (Number(handled.createdAt) || 0) >= at;
+  }
+  const replyAt = Number(stored.botLastReplyAt) || 0;
+  if (!replyAt || at > replyAt - COMMENT_HANDLED_SKEW_MS) return false;
+  // Tin Page gần nhất trong luồng trước tin này (lời công khai lượt trước): tin khách cũ hơn mốc đó đã có lượt riêng.
+  const previousPublic = list.reduce((latest, item) => (item?.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) < at ? Math.max(latest, Number(item.createdAt) || 0) : latest), 0);
+  const floor = Math.max(previousPublic, replyAt - 30 * 60 * 1000);
+  const customerAt = item => (item?.direction === 'incoming' && idOf(item) !== messageId ? Number(item.createdAt) || 0 : 0);
+  // Có tin khách SAU tin này mà vẫn trước mốc trả lời: tin này cũ hơn, đã được trả lời hay gộp vào lượt đó.
+  if (list.some(item => customerAt(item) > at && customerAt(item) <= replyAt - COMMENT_HANDLED_SKEW_MS)) return true;
+  // Có tin khách TRƯỚC tin này cũng chưa có lời công khai: không biết bot trả lời tin nào → coi là chưa xử lý.
+  return !list.some(item => customerAt(item) > floor && customerAt(item) < at);
 }
 
 export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 30 * 60 * 1000, botWhenAssigned = false } = {}) {

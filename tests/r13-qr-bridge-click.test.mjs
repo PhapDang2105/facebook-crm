@@ -242,7 +242,9 @@ test('hội thoại mới từ BÌNH LUẬN: tin nhắn riêng của Page đến
   await until(() => second.matcher.stateOf(`${PAGE}:9200000000000002`) !== 'held' && second.matcher.stateOf(`${PAGE}:9200000000000002`) !== 'resolving', 'bộ khớp xét xong hội thoại (b)');
   await pause(150);
   assert.equal(offersTo(second, '9200000000000002').length, 0);
-  assert.ok(second.logs.some(line => /QR: bỏ khớp lượt bấm tmdt-01 với .*: nhắn riêng từ bình luận/.test(line)), second.logs.join('\n'));
+  // R13 fix2 (A5): dòng hệ thống về trong lúc đang giữ → huỷ khớp NGAY khi dòng đó về (không đợi tới lúc chốt chào); kết quả như cũ
+  // (không chào, trả lại lượt bấm), chỉ khác dòng log.
+  assert.ok(second.logs.some(line => /QR: (?:bỏ khớp lượt bấm tmdt-01 với .*: nhắn riêng từ bình luận|huỷ khớp lượt bấm tmdt-01 với .*: dấu nguồn về muộn)/.test(line)), second.logs.join('\n'));
   assert.equal(second.matcher.pendingClicks(), 1, 'bỏ khớp thì trả lại lượt bấm');
   // (c) "X đã trả lời về một bài viết" / "replied to a post" (tin hệ thống) đến trước tin khách.
   const third = createFlow();
@@ -349,7 +351,10 @@ test('đường tin soạn sẵn #mã giữ nguyên: bot không nhận tin đó,
   await until(() => offersTo(flow, psid).length >= 2, 'khách gửi tin soạn sẵn #mã nhận ưu đãi');
   await pause(200);
   assert.equal(offersTo(flow, psid).length, 2);
-  assert.equal(flow.matcher.pendingClicks(), 1, 'lượt bấm không bị tiêu bởi đường #mã');
+  // R13 fix2 (A1): trước đây khẳng định lượt bấm CÒN TREO sau khi khách gửi tin soạn sẵn #mã — chính lỗ hổng A1 (khách lạ nhắn trong
+  // 90 giây kế tiếp ăn ưu đãi). Nay referral thẻ về (#mã / Botcake / Meta) thì lượt bấm của lượt quét đó được tiêu.
+  assert.equal(flow.matcher.pendingClicks(), 0, 'referral thẻ (#mã) về → lượt bấm của lượt quét đó được tiêu, không treo cho khách lạ');
+  assert.ok(flow.logs.some(line => /QR: tiêu lượt bấm tmdt-01 đang chờ \(referral thẻ PREFILL_TEXT/.test(line)), flow.logs.join('\n'));
 });
 
 test('khởi động lại (dựng bộ chào mới): mốc đã chào đọc lại từ kho → không chào lần hai; hội thoại có đơn trong 6 giờ → không chào', async () => {
@@ -441,7 +446,11 @@ test('server.mjs: beacon máy nhân viên không ghi lượt bấm chờ khớp;
   const beacon = source.slice(source.indexOf('if (isOpenBeacon) {'), source.indexOf("if (request.method !== 'GET') return sendJson(response, 405, { error: 'Chỉ nhận GET.' });"));
   const staffBranch = beacon.slice(beacon.indexOf('if (staffScan) {'), beacon.indexOf('} else {'));
   assert.ok(staffBranch.includes('bỏ đếm lượt bấm') && !staffBranch.includes('noteClick'), 'máy đã đăng nhập CRM: không ghi lượt bấm chờ khớp');
-  assert.match(beacon.slice(beacon.indexOf('} else {')), /if \(target === 'messenger'\) qrBridgeMatcher\.noteClick\(\{ code, visitor \}\);/);
+  // R13 fix2 (A4): trước đây khẳng định noteClick chạy NGAY với mọi beacon (không cần ghép với lượt trang đệm) — 120 beacon dồn
+  // → 4/4 khách lạ bị chào. Nay chỉ ghi lượt chờ khớp khi recordQrOpen trả mục (đã ghép), kèm dấu vết IP băm để giới hạn tốc độ.
+  const beaconTail = beacon.slice(beacon.indexOf('} else {'));
+  assert.match(beaconTail, /recordQrOpen\(code, \{ target, visitor \}\)\s*\.then\(entry => \{\s*if \(entry && target === 'messenger'\) qrBridgeMatcher\.noteClick\(\{ code, visitor, ip: qrVisitorKey\(clientIp\(request\), ''\) \}\);/);
+  assert.doesNotMatch(beaconTail, /\n\s*if \(target === 'messenger'\) qrBridgeMatcher\.noteClick\(\{ code, visitor \}\);/, 'không còn noteClick ngoài recordQrOpen');
   assert.match(source, /qrBridgeHeld = await considerQrBridgeClicks\(changes\);\n\s+return changes\.filter\(change => !isCardScan\(change\)\);/);
   assert.match(source, /\} finally \{\n\s+qrBridgeMatcher\.botDone\(qrBridgeHeld\);/);
   assert.match(source, /windowMs: qrBridgeEnvMs\('QR_BRIDGE_MATCH_WINDOW_MS', 90_000\)/);

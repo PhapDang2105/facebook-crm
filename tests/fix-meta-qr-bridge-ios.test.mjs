@@ -88,14 +88,15 @@ test('webview của Meta (Facebook, Instagram) trên iPhone: x-safari-https khô
   assert.match(generic, /href="x-safari-https:\/\/crm\.example\.com\/q\/tmdt-01\?from=inapp"/);
 });
 
-test('không đổi các nhánh khác: Safari hệ thống, trong chính Messenger, Android trong app, Android Chrome (302)', () => {
+test('không đổi các nhánh khác: Safari hệ thống, trong chính Messenger, Android trong app, Android Chrome (trang đệm)', () => {
   for (const agent of [agents.iosSafari, agents.messengerIos, agents.zaloAndroid, agents.androidChrome]) {
     const html = render(agent);
     assert.doesNotMatch(html, /hint-ios|hint-actions|id="copy"|id="safari"|x-safari-|Sao chép liên kết|navigator\.clipboard/, agent.slice(0, 60));
   }
   assert.match(render(agents.zaloAndroid), /<div class="hint">Anh\/Chị đang mở trong Zalo\. Nếu nút trên không mở được Messenger/, 'Android trong Zalo: khối hướng dẫn cũ, ở cuối trang');
   assert.match(render(agents.iosSafari), /class="ios-tip"/);
-  assert.equal(shouldRedirectDirectly(classifyUserAgent(agents.androidChrome)), true, 'Android Chrome vẫn chuyển hướng 302');
+  // R13 fix2 (A2): Android Chrome không còn 302 thẳng (lượt 302 không phân biệt được người bấm với HEAD/crawler) — qua trang đệm.
+  assert.equal(shouldRedirectDirectly(classifyUserAgent(agents.androidChrome)), false, 'Android Chrome cũng qua trang đệm');
   assert.equal(shouldRedirectDirectly(classifyUserAgent(agents.zaloIos18)), false);
 });
 

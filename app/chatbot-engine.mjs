@@ -1898,6 +1898,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const lead = '^(?:(?:cho|lay|dat|gui|ship|mua)\\s+)?(?:(?:em|minh|chi|c|e|a|anh|to|tui)\\s+)?(?:(?:lay|dat|mua)\\s+)?';
     const chosenQuantity = !quoted ? 0
       : new RegExp(`${lead}(?:(?:1|mot)\\s+(?:tui|goi|bich|hop)\\s+)?(?:dung thu|lay thu|an thu|mua thu)$`).test(choice) ? 1
+        // 03/10 (ca Giáng Hương): bảng giá Túi Xanh vừa gửi → "1 goi" / "1 túi" là chọn 1 túi loại vừa báo; trước đây bot hỏi lại vị.
+        : new RegExp(`${lead}(?:1|mot)\\s*(?:tui|goi|bich|hop)(?:\\s+(?:thoi|truoc|da))?$`).test(choice) ? 1
         : new RegExp(`${lead}(?:combo\\s*2(?:\\s*(?:tui|goi|bich|hop))?|2\\s*(?:tui|goi|bich|hop))$`).test(choice) ? 2
           : new RegExp(`${lead}(?:combo\\s*3(?:\\s*(?:tui|goi|bich|hop))?|combo gia dinh|3\\s*(?:tui|goi|bich|hop))$`).test(choice) ? 3 : 0;
     const choiceReply = chosenQuantity

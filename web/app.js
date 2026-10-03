@@ -705,6 +705,12 @@ chatbotFollowUpQueue?.addEventListener('click', async event => {
 });
 const chatbotSettingsMemoryWindow = document.querySelector('#chatbot-settings-memory-window');
 const chatbotSettingsMemoryWindowRange = document.querySelector('#chatbot-settings-memory-window-range');
+// Công tắc "Kích thước cửa sổ": tắt = không giới hạn cửa sổ (gửi mức tối đa 100 tin máy chủ nhận);
+// bật = dùng số đang chọn. Máy chủ chỉ lưu memoryWindow nên trạng thái suy ra từ đó (< 100 là bật).
+const chatbotSettingsMemoryWindowEnabled = document.querySelector('#chatbot-settings-memory-window-enabled');
+const chatbotMemoryWindowMaximum = 100;
+// "Tầm nhìn": bot xem ảnh khách gửi (máy chủ: settings.visionEnabled !== false).
+const chatbotSettingsVision = document.querySelector('#chatbot-settings-vision');
 const chatbotModelDisplay = document.querySelector('#chatbot-model-display');
 const chatbotModelParamsButton = document.querySelector('#chatbot-model-params');
 const chatbotDirectConfig = document.querySelector('#chatbot-direct-config');
@@ -725,6 +731,29 @@ function syncChatbotMemoryWindow(source) {
   chatbotSettingsMemoryWindowRange.value = String(value);
 }
 
+/** Ô số + thanh trượt cửa sổ bộ nhớ chỉ chỉnh được khi công tắc "Kích thước cửa sổ" bật. */
+function syncChatbotMemoryWindowEnabled() {
+  const enabled = chatbotSettingsMemoryWindowEnabled?.checked !== false;
+  if (chatbotSettingsMemoryWindow) chatbotSettingsMemoryWindow.disabled = !enabled;
+  if (chatbotSettingsMemoryWindowRange) chatbotSettingsMemoryWindowRange.disabled = !enabled;
+}
+
+/** Nạp memoryWindow của máy chủ vào công tắc + ô số (đủ 100 = tắt giới hạn). */
+function applyChatbotMemoryWindowSetting(memoryWindow) {
+  const value = Math.min(chatbotMemoryWindowMaximum, Math.max(1, Math.round(Number(memoryWindow)) || 50));
+  if (chatbotSettingsMemoryWindowEnabled) chatbotSettingsMemoryWindowEnabled.checked = value < chatbotMemoryWindowMaximum;
+  if (chatbotSettingsMemoryWindow) chatbotSettingsMemoryWindow.value = String(value);
+  syncChatbotMemoryWindow('number');
+  syncChatbotMemoryWindowEnabled();
+}
+
+/** memoryWindow gửi lên khi lưu: công tắc tắt thì mức tối đa, bật thì số đang chọn. */
+function chatbotMemoryWindowPayload() {
+  if (chatbotSettingsMemoryWindowEnabled && !chatbotSettingsMemoryWindowEnabled.checked) return chatbotMemoryWindowMaximum;
+  return chatbotSettingsMemoryWindow?.value;
+}
+
+chatbotSettingsMemoryWindowEnabled?.addEventListener('change', syncChatbotMemoryWindowEnabled);
 chatbotSettingsMemoryWindowRange?.addEventListener('input', () => syncChatbotMemoryWindow('range'));
 chatbotSettingsMemoryWindow?.addEventListener('input', () => syncChatbotMemoryWindow('number'));
 document.querySelector('#chatbot-settings-direct-model')?.addEventListener('change', syncChatbotModelDisplay);
@@ -6960,8 +6989,16 @@ async function loadChatbotSettings() {
     chatbotFollowUpScenarios = Array.isArray(settings.followUps?.scenarios) ? settings.followUps.scenarios.map(item => ({ ...item })) : [];
     // Danh sách kịch bản vẽ sau khi mẫu tin nạp xong (renderChatbotTemplateList gọi renderChatbotFollowUps).
     renderChatbotFollowUpStatus();
-    chatbotSettingsMemoryWindow.value = settings.memoryWindow || 50;
-    syncChatbotMemoryWindow('number');
+    applyChatbotMemoryWindowSetting(settings.memoryWindow || 50);
+    if (chatbotSettingsVision) {
+      // Máy chủ coi "không ghi" là bật (visionEnabled !== false) — ô này hiện đúng như thế.
+      chatbotSettingsVision.checked = settings.visionEnabled !== false;
+      // Máy chủ chưa lưu được trường này (bản cũ bỏ qua visionEnabled): khoá ô thay vì để nhân viên
+      // tắt, bấm Lưu, rồi thấy bot vẫn xem ảnh.
+      const supported = Object.prototype.hasOwnProperty.call(settings, 'visionEnabled');
+      chatbotSettingsVision.disabled = !supported;
+      chatbotSettingsVision.title = supported ? '' : 'Máy chủ chưa hỗ trợ tắt Tầm nhìn — bot đang xem ảnh khách gửi.';
+    }
     chatbotSettingsStructuredOutput.checked = settings.structuredOutput !== false;
     chatbotSettingsRetryCount.value = settings.retryCount ?? 1;
     chatbotSettingsRetryInterval.value = settings.retryIntervalMs || 1000;
@@ -10946,7 +10983,9 @@ chatbotSettingsForm?.addEventListener('submit', async event => {
         addressAi: chatbotSettingsAddressAi?.checked !== false,
         addressAiSearch: chatbotSettingsAddressAiSearch?.checked !== false,
         followUps: { enabled: chatbotFollowUpsEnabled?.checked === true, scenarios: chatbotFollowUpScenarios },
-        memoryWindow: chatbotSettingsMemoryWindow.value,
+        memoryWindow: chatbotMemoryWindowPayload(),
+        // Chỉ gửi khi ô dùng được (máy chủ đã lưu được trường này).
+        ...(chatbotSettingsVision && !chatbotSettingsVision.disabled ? { visionEnabled: chatbotSettingsVision.checked } : {}),
         structuredOutput: chatbotSettingsStructuredOutput.checked,
         retryCount: chatbotSettingsRetryCount.value,
         retryIntervalMs: chatbotSettingsRetryInterval.value,

@@ -7,7 +7,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const { createQrGreeter, isCardScan, lastStaffMessageAt, resolveQrOfferTemplate } = await import('../app/qr-greeting.mjs');
-const { pancakeRef, qrCodeFromRef } = await import('../app/qr-bridge.mjs');
+const { qrCodeFromRef } = await import('../app/qr-bridge.mjs');
+// Ref kiểu Pancake (base64url của `pancake_utm_source=<mã>`) — dữ liệu thử; app chỉ cần GIẢI mã (qrCodeFromRef).
+const pancakeRef = code => Buffer.from(`pancake_utm_source=${code}`).toString('base64url');
+
 const { registerQrCode } = await import('../app/qr-scans.mjs');
 const { defaultMessageTemplates } = await import('../app/chatbot-templates.mjs');
 

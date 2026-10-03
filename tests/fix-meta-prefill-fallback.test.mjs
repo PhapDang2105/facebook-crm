@@ -9,7 +9,9 @@ process.env.PANCAKE_PAGE_NAME = 'Giọt Nắng';
 process.env.PANCAKE_PAGE_ACCESS_TOKEN = 't';
 process.env.PANCAKE_WEBHOOK_TOKEN = 'w';
 
-const { defaultPrefillText, messengerDestination, prefillMessageFor, prefillTemplateOrDefault, qrCodeFromText } = await import('../app/qr-bridge.mjs');
+const { messengerDestination, prefillMessageFor, prefillTemplateOrDefault, qrCodeFromText } = await import('../app/qr-bridge.mjs');
+// Mẫu tin soạn sẵn dự phòng mà chủ shop có thể đặt ở Cài đặt → Mã QR (app không có mẫu mặc định — dữ liệu thử).
+const defaultPrefillText = 'Mình vừa quét thẻ cảm ơn {page}, cho mình nhận ưu đãi nhé #{code}';
 const { handlePancakeWebhook } = await import('../app/pancake.mjs');
 const { readQrSettings } = await import('../app/qr-settings.mjs');
 const { createQrGreeter, isCardScan } = await import('../app/qr-greeting.mjs');

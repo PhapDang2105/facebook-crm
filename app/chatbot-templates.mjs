@@ -742,7 +742,8 @@ function renderOrder(value, templates, context = {}) {
       ? rawNamed.map(({ product, code, quantity }) => ({ product, code, quantity }))
       : adjustOrderQuantities(rawNamed, {
         messageText: customerText,
-        heldItems: heldForQuantity,
+        // Trả lời "nguyên bản là Xanh/Vàng": số túi là phần nguyên bản vừa hỏi, không lấy số Xanh/Vàng đang giữ trong giỏ.
+        heldItems: askedNguyenBan ? heldForQuantity.filter(item => !/^GRA-(XANH|VANG)-/i.test(String(item.code || ''))) : heldForQuantity,
         recentItems: recentForQuantity,
         askedBagCount: Number(context.pendingOrder?.askedBagCount) || askedBagsBefore(),
         burstTexts: Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.slice(-2) : [],
@@ -845,14 +846,23 @@ function renderOrder(value, templates, context = {}) {
       const product = getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith(`GRA-${colour}-`));
       return product ? { product: product.name, code: product.sku, quantity: count } : null;
     }).filter(Boolean);
-    const items = adding ? (pending?.items || []) : stated;
+    // "thêm 1 túi nâu 1 túi nguyên bản" khi đang giữ 2 Xanh: giỏ chờ = giỏ đang giữ + phần đã nói rõ (cộng theo mã).
+    const merged = new Map();
+    for (const item of adding ? [...(pending?.items || []), ...stated] : stated) {
+      const code = String(item.code || '').toUpperCase() || item.product;
+      const current = merged.get(code);
+      merged.set(code, current ? { ...current, quantity: (Number(current.quantity) || 1) + (Number(item.quantity) || 1) } : { ...item });
+    }
+    const items = [...merged.values()];
     const key = items.length ? buildOrderKey(items) : '';
     const phone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(customerText) || pending?.phone || '';
+    // Giữ các cờ khác của giỏ (wantsPrevious, staffCheck, giftSwap, livestream, fromComment…), trừ cờ chờ xác nhận đơn.
+    const { awaitingConfirm, heldSilently, ...carry } = pending || {};
     return {
       templateId: 'ASK_FLAVOR_NGUYENBAN',
       ...splitMessages(fill(templates.ASK_FLAVOR_NGUYENBAN, commonValues())),
       handoff: false,
-      pendingOrder: { items: key ? items : [], key, at: now, phone, address: pending?.address || '', addressAsks: pending?.addressAsks || 0, askedBagCount: nguyenBanQty, nguyenBanAsk: nguyenBanQty, ...(pending?.upsold ? { upsold: true } : {}) }
+      pendingOrder: { ...carry, items: key ? items : [], key, at: now, phone, address: pending?.address || '', addressAsks: pending?.addressAsks || 0, askedBagCount: nguyenBanQty, nguyenBanAsk: nguyenBanQty }
     };
   }
   // Vòng 11 (P7): đang giữ giỏ (chưa có đơn để sửa) mà khách "lấy thêm 1 túi nâu": cộng món vừa nêu vào giỏ đang

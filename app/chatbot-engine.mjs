@@ -82,7 +82,8 @@ export const fallbackTemplates = Object.freeze({
   CONFIRM_YES: 'Dạ vâng ạ 💛',
   COMBO3_FLAVOR: 'Dạ combo 3 túi {title} chọn vị tùy ý ạ (Xanh / Vàng / Nâu, được lấy trùng vị). {Title} nhắn em 3 túi vị gì để em lên đơn nha ạ 🌾',
   // ===== Vòng 12 (r12): mẫu mới — cài đặt production chưa có thì dùng lời này (script apply-templates.mjs thêm vào). =====
-  GIFT_SWAP: 'Dạ quà tặng bên em không đổi sang bát, quạt hay món khác được ạ. Nếu {title} không lấy quà bát/quạt/muỗng, em thay bằng 2 gói granola nhỏ bất kỳ (Xanh, Cam hoặc Nâu), không trừ tiền ạ 💛 {Title} muốn lấy 2 gói vị nào để em ghi vào đơn cho mình nha ạ 🌾',
+  // R14 (chủ shop 03/10): không hứa quà thay — ghi chú đơn, xin bộ phận phụ trách duyệt, nhắn khách sau.
+  GIFT_SWAP: 'Dạ {title} muốn đổi quà thì em ghi chú vào đơn hàng của mình và xin bộ phận phụ trách cho phép đổi sang phần quà khác ạ 💛 Có kết quả em nhắn lại {title} ngay nha.',
   ORDER_CHANGE_STAFF: 'Dạ em đã ghi nhận {title} muốn đổi đơn thành: {cart} ạ. Để chắc đơn được sửa đúng trước khi kho đóng gói, em báo bạn phụ trách sửa lại và nhắn {title} ngay trong tin này nha ạ 💛',
   ORDER_CANCEL_STAFF: 'Dạ em đã ghi nhận {title} muốn hủy đơn ạ. Em báo bạn phụ trách kiểm tra với kho và xác nhận hủy cho {title} ngay trong tin này nha ạ 💛',
   ORDER_HOLD_STAFF: 'Dạ em đã ghi nhận {title} muốn tạm khoan giao đơn ạ. Em báo kho giữ đơn lại và bạn phụ trách sẽ nhắn {title} để hẹn ngày giao phù hợp nha ạ 💛',
@@ -119,8 +120,21 @@ export const fallbackTemplates = Object.freeze({
   // Giỏ Shop vừa tới, đơn chưa thấy trên POS: báo đã nhận giỏ rồi mới chờ kiểm đơn (khách không ngồi chờ 60 giây im lặng).
   SHOP_CART_ACK: 'Dạ em đã nhận giỏ hàng {cart} của {title} rồi ạ 💛 {Title} chờ em ít phút, em kiểm tra đơn rồi nhắn mình ngay nha.',
   // Khách chọn vị cho quà thay (sau GIFT_SWAP): ghi nhận, không hỏi lại "vị nào".
-  GIFT_SWAP_NOTED: 'Dạ em đã ghi nhận thay quà của {title} bằng {gift} (không trừ tiền) ạ 💛'
+  GIFT_SWAP_NOTED: 'Dạ em đã ghi nhận thay quà của {title} bằng {gift} (không trừ tiền) ạ 💛',
+  // R14 (chủ shop 03/10): bot định im vì câu trả lời trùng tin vừa gửi mà khách hỏi ý mới → báo bạn phụ trách trả lời
+  // (giờ hành chính 8h–17h giờ VN; ngoài giờ hẹn 8h sáng) + thẻ cần người, tối đa 1 lần mỗi 2 giờ mỗi hội thoại.
+  STAFF_WAIT_OPEN: 'Dạ em đã ghi nhận câu hỏi của {title} rồi ạ 💛 Em chuyển bạn phụ trách trả lời {title} ngay trong ít phút, {title} chờ em chút nha ạ.',
+  STAFF_WAIT_CLOSED: 'Dạ em đã ghi nhận câu hỏi của {title} rồi ạ 💛 Bạn phụ trách làm việc giờ hành chính từ 8h đến 17h, sẽ trả lời {title} từ 8h {when} nha ạ.'
 });
+
+// R14: giờ hành chính của bạn phụ trách (giờ Việt Nam): 8h–17h. Ngoài giờ: trước 8h → "sáng nay", sau 17h → "sáng mai".
+export const STAFF_HOURS = Object.freeze({ open: 8, close: 17 });
+export const STAFF_WAIT_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+export function staffWaitTemplate(now = Date.now()) {
+  const hour = new Date(Number(now) + 7 * 60 * 60 * 1000).getUTCHours();
+  if (hour >= STAFF_HOURS.open && hour < STAFF_HOURS.close) return { templateId: 'STAFF_WAIT_OPEN', when: '' };
+  return { templateId: 'STAFF_WAIT_CLOSED', when: hour < STAFF_HOURS.open ? 'sáng nay' : 'sáng mai' };
+}
 
 // R13: câu hỏi danh sách vị ("có mấy loại", cả lỗi gõ "Có mays lọi") — FLAVOR_LIST của rule-intent (so trên chuỗi đã
 // chuẩn hoá bằng core()); thêm mẫu gọn không neo đầu/cuối cho câu có lời đệm ("co may loai vay shop").
@@ -2432,10 +2446,16 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     if (reply.oldAddressMissing && !reply.attention) reply = { ...reply, attention: true };
     // C2: SĐT khách gửi trùng đơn landing/POS ngoài hội thoại (địa chỉ không tự điền): luôn gắn thẻ cho nhân viên.
     if (previousDelivery?.foreign && !reply.attention) reply = { ...reply, attention: true };
-    // Vòng 12 (chủ shop 01/10): đổi quà (GIFT_SWAP: 2 gói nhỏ bất kỳ, không trừ tiền) → ghi vào đơn đang mở (≤ 24 giờ) + thẻ
-    // để nhân viên đổi quà khi đóng gói.
+    // R14 (chủ shop 03/10, thay quy tắc 01/10 "2 gói nhỏ"): khách muốn đổi quà → bot KHÔNG hứa quà thay; ghi chú vào đơn
+    // đang mở (≤ 24 giờ), chưa có đơn thì ghi chú hồ sơ khách; luôn gắn thẻ để bộ phận phụ trách duyệt rồi nhắn khách.
     if ((reply.templateId === 'GIFT_SWAP' || reply.alsoTemplateId === 'GIFT_SWAP') && !reply.order) {
-      reply = { ...reply, attention: true, ...(hasOrder && recentOrder?.id ? { order: { noteOrderId: String(recentOrder.id), note: `Khách đổi quà (2 gói nhỏ thay quà, không trừ tiền): ${String(message.text || '').replace(/\s+/g, ' ').trim().slice(0, 150)}` } } : {}) };
+      const asked = String(message.text || '').replace(/\s+/g, ' ').trim().slice(0, 150);
+      const note = `Khách muốn đổi quà (chờ bộ phận phụ trách duyệt rồi nhắn khách): ${asked}`;
+      if (hasOrder && recentOrder?.id) reply = { ...reply, attention: true, order: { noteOrderId: String(recentOrder.id), note } };
+      else {
+        reply = { ...reply, attention: true };
+        if (conversation.source !== 'comment') await noteForStaff(dependencies, conversation, note, 'đổi quà');
+      }
     }
     // Vòng 12 (B1 #5, B2 #7, B3 #1): tin chữ đi cùng ảnh — SĐT → hỏi loại trong hình mấy túi; "3 bịch này" → báo giá 3 túi + hỏi
     // vị; luôn gắn thẻ để nhân viên xem ảnh.
@@ -2734,6 +2754,20 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         if (!unusable) {
           console.log(`Trùng tin vừa gửi (${reply.templateId}) mà khách hỏi ý mới: mô hình chọn lại ${again.templateId} (${conversation.id})`);
           rescued = again.templateId === 'OTHER_PRODUCTS' ? { ...again, attention: true } : again;
+        }
+      }
+      // R14 (chủ shop 03/10): 25 lượt/ngày bot im vì trùng tin vừa gửi, 7 khách chờ hơn 1 giờ (phần lớn buổi tối). Khách
+      // hộp thư nhắn có nội dung mà không cứu được bằng câu khác → báo bạn phụ trách trả lời (trong giờ 8h–17h: ngay; ngoài
+      // giờ: từ 8h sáng) + thẻ cần người. Mỗi hội thoại tối đa 1 lần mỗi 2 giờ; đã chuyển người trong 24 giờ thì vẫn im.
+      const staffWaitDue = !rescued && !canNudge && !answerAgain && !remindOrder && repeatsLast && !repeatsHandoff && substantive
+        && !isComment && !nonText && !message.likeSticker
+        && Date.now() - (Number(conversation.staffWaitAt) || 0) >= STAFF_WAIT_COOLDOWN_MS;
+      if (staffWaitDue) {
+        const wait = staffWaitTemplate();
+        const waitReply = renderChatbotReply({ template_id: wait.templateId, values: { when: wait.when } }, templates, replyContext);
+        if (waitReply.templateId === wait.templateId && waitReply.messages?.length) {
+          console.log(`Trùng tin vừa gửi (${reply.templateId}) mà khách hỏi ý mới: báo bạn phụ trách trả lời (${wait.templateId}) (${conversation.id})`);
+          rescued = { ...waitReply, pendingOrder: reply.pendingOrder, attention: true, staffWait: true };
         }
       }
       if (rescued) reply = rescued;
@@ -3167,7 +3201,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         reply = { ...reply, pendingOrder: resumed };
       }
     }
-    const gaveGiftSwapAsk = !isComment && (reply.templateId === 'GIFT_SWAP' || reply.alsoTemplateId === 'GIFT_SWAP');
+    // R14 (chủ shop 03/10): GIFT_SWAP không còn hỏi "lấy 2 gói vị nào" — không đặt mốc chờ khách chọn vị quà thay.
+    const gaveGiftSwapAsk = false;
     await saveBotState(conversation.id, {
       ...(promoUpdate ? { promo: promoUpdate } : {}),
       // R13: bot vừa hỏi "lấy 2 gói vị nào" (GIFT_SWAP) → mốc để lượt sau đọc vị khách chọn; khách đã chọn → lưu lựa chọn
@@ -3177,6 +3212,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       ...(order && chosenGiftSwap ? { giftSwapChoice: null, giftSwapAskedAt: 0 } : {}),
       // R13: đơn Shop (POS) vừa báo "đã nhận" — giỏ bấm sau đó không nhận lại đúng đơn này.
       ...(reply.shopOrderId ? { shopOrderAck: { id: String(reply.shopOrderId), at: Date.now() } } : {}),
+      // R14: mốc "đã báo bạn phụ trách trả lời" — 2 giờ không báo lại.
+      ...(reply.staffWait ? { staffWaitAt: Date.now() } : {}),
       botConversationId: reply.conversationId || conversation.botConversationId || '',
       botLastTemplateId: reply.templateId,
       botLastReplyAt: Date.now(),

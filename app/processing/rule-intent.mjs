@@ -34,7 +34,8 @@ const GIFT_PHOTO_RAW = /(?<![\p{L}])(?:xem|coi|gửi|gởi|gui|chụp|xin)(?![\p
 // ("không lấy quả" = bỏ trái cây sấy → NO_VARIANT: bỏ dấu "quả" trùng "quà", nên vế đầu không có "qua".)
 // R13 (inbox1 B1): "Mình mua 2b mà không lấy quà có được không" — "quà" CÒN DẤU là quà tặng (GIFT_SWAP), không phải "quả".
 const GIFT_DECLINE_RAW = /(?<![\p{L}])(?:không|ko|k|kg|kgg|hông|hong|khỏi|khoi)\s+(?:lấy|cần|nhận|muốn)\s+quà(?![\p{L}])/iu;
-export const GIFT_SWAP_ASK = /\b(?:khong|ko|k|kg|kgg|hong) (?:lay|can|thich|muon) (?:bo |cai )?(?:quat|bat|muong|qua tang)\b|\b(?:doi|thay) (?:qua|quat|bat|muong)(?! (?:tui|goi|hop|bich|xanh|vang|nau|loai|vi|cacao|\d))\b|\btang (?:cai|mon|thu) khac\b|\bqua thay\b|\b(?:quat|bat|muong|qua)\b.{0,20}\btru tien\b/;
+// R14 (ca thật 02/10): "C ko lấy set muỗng dừa nha e", "Sao k tặng đồ khác" từng rơi về GIFT_POLICY cụt.
+export const GIFT_SWAP_ASK = /\b(?:khong|ko|k|kg|kgg|hong) (?:lay|can|thich|muon) (?:bo |cai |set )?(?:quat|bat|muong|qua tang)\b|\b(?:doi|thay) (?:qua|quat|bat|muong)(?! (?:tui|goi|hop|bich|xanh|vang|nau|loai|vi|cacao|\d))\b|\btang (?:cai|mon|thu|do) khac\b|\bqua thay\b|\b(?:quat|bat|muong|qua)\b.{0,20}\btru tien\b/;
 // Lời khen/chê/góp ý dưới bình luận (B4 #1, #2, #9).
 export const COMMENT_DISLIKE = /\b(?:khong|ko|k|kg|hok|hong|hem|hk|cha|chang|chua) (?:co |thay |an |duoc |dc )?(?:ngon|gion|thom)\b|\bnuot (?:khong|ko|k|hong|cha) (?:noi|troi)\b|\b(?:khong|ko|k|kg|hong|hok|cha|chang) nuot (?:noi|troi|duoc|dc)\b|\bkho an\b|\bngot (?:qua|lam|gat|khe)\b|\bnut\b|\b(?:te|do|chan) (?:qua|that|ghe|ec|lam)\b|\bkem (?:chat luong|qua)\b/;
 export const LIVE_FEEDBACK = /\b(?:noi (?:cha|khong|ko|k) nghe|(?:cha|khong|ko|k) nghe (?:gi|ro|duoc|dc|thay)|nghe (?:khong|ko|k|cha) (?:ro|duoc|dc|thay)|tieng (?:nho|be|re|vang|on)|(?:nho|be) tieng|noi nhanh|doc rap|nhu (?:doc )?rap|lag|giat|mat tieng|re re)\b|\b(?:cha|khong|ko|k|kg|hong) thay (?:gi|gj|j|ji|hinh|tieng)(?: (?:het|ca|luon|het a|het tron))?$/;

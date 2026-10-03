@@ -466,8 +466,11 @@ test('không gửi lại y nguyên tin bot vừa gửi trong 10 phút; SĐT ở 
     saveBotState: async () => {},
     requestReply: async () => ({ templateId: 'ORDER_ADDRESS', messages: [sameText], handoff: false })
   });
-  assert.deepEqual(log, [], 'câu hỏi y hệt vừa gửi thì không gửi lại');
-  assert.equal(result[0].skipped, 'lặp tin vừa gửi');
+  // R14 (chủ shop 03/10): không gửi lại câu xin SĐT y hệt; "Gửi rồi mà em" nhận câu báo bạn phụ trách trả lời (trước đây im).
+  assert.equal(log.length, 1, 'không gửi lại câu hỏi y hệt vừa gửi');
+  assert.notEqual(log[0], sameText);
+  assert.match(log[0], /bạn phụ trách/);
+  assert.match(result[0].templateId, /^STAFF_WAIT_/);
   const reply = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Túi Xanh', No_A: '2', Phone_Number: '0', Customer_Address: fullAddress }, templates, { customer: { gender: 'female' }, recentCustomerTexts: ['176/1A KP1', '0909123456', 'Gửi rồi mà em'] });
   assert.equal(reply.templateId, 'ORDER_CONFIRMATION');
   assert.equal(reply.order.phone, '0909123456');

@@ -310,9 +310,13 @@ test('khách đã đặt đơn hỏi lại thời gian giao (vừa kèm trong ti
   const withOrder = await run({ customerOrders: [recentOrder] });
   assert.deepEqual(withOrder, [policy]);
   // Chưa có đơn, tin có ý mới ("mấy ngày giao đến") mà sắp lặp: vòng 8 không nhắc "em gửi ở trên" nữa
-  // (7 ca 26–28/09 nhắc sai) — im và gắn thẻ để nhân viên trả lời; chỉ khách lặp câu / giục mới được nhắc.
+  // (7 ca 26–28/09 nhắc sai) — chỉ khách lặp câu / giục mới được nhắc. R14 (chủ shop 03/10): không im nữa mà báo
+  // bạn phụ trách trả lời (giờ hành chính) + thẻ; đã báo trong 2 giờ thì im như cũ.
   const noOrder = await run({});
-  assert.deepEqual(noOrder, []);
+  assert.equal(noOrder.length, 1);
+  assert.match(noOrder[0], /bạn phụ trách/);
+  assert.doesNotMatch(noOrder[0], /gửi ở trên|phía trên/);
+  assert.deepEqual(await run({ staffWaitAt: Date.now() - 10 * 60 * 1000 }), []);
 });
 
 test('khách hủy đơn vừa đặt (ORDER_CANCEL): hủy đúng đơn đó qua cancelOrder, không tạo đơn, không phiếu; đơn quá 60 phút → ghi nhận cho nhân viên', async () => {
@@ -391,9 +395,11 @@ test('vòng 2: #10900 không đăng "ib cho Page"; bình luận hủy/khiếu n�
     });
     return { log, state, results };
   };
+  // R14 (chủ shop 03/10): ý mới mà sắp lặp bảng giá → báo bạn phụ trách trả lời + thẻ (trước đây im).
   const newIdea = await inboxRun('150 mà e');
-  assert.deepEqual(newIdea.log, []);
-  assert.equal(newIdea.results[0].skipped, 'lặp tin vừa gửi');
+  assert.equal(newIdea.log.length, 1);
+  assert.match(newIdea.log[0], /bạn phụ trách/);
+  assert.match(newIdea.results[0].templateId, /^STAFF_WAIT_/);
   assert.ok(newIdea.state.at(-1).addLabelEvents.includes('handoff'));
   const repeated = await inboxRun('giá sao', [{ id: 'i0', direction: 'incoming', type: 'text', text: 'gia sao', createdAt: Date.now() - 120000 }]);
   assert.equal(repeated.log.length, 1);

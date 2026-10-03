@@ -107,32 +107,23 @@ test('khách live ĐÃ có đơn hỏi lại quà: nói quà của đơn, không
   assert.match(invite.sent.map(item => item.text).join('\n'), /2 túi/);
 });
 
-test('sau GIFT_SWAP khách chọn vị ("2g nhỏ nâu đi shop"): giỏ chờ nhận giftSwap, không hỏi lại "vị nào", đơn chốt mang quà thay', async () => {
+// R14 (chủ shop 03/10, thay quy tắc 01/10 "quà thay = 2 gói nhỏ"): bot không hỏi vị quà thay nữa — ghi chú, bộ phận
+// phụ trách duyệt rồi nhắn khách. Phần áp lựa chọn đã lưu (giftSwapAskedAt cũ, test bên dưới) giữ cho dữ liệu đang dở.
+test('sau GIFT_SWAP: không đặt mốc chờ chọn vị quà thay, giỏ giữ nguyên; chốt đơn quà như thường (nhân viên đổi sau)', async () => {
   const sim = new Sim({ settings: { ruleIntent: 'off' } });
   // Giỏ 3 túi (quà bát + muỗng) đang chờ SĐT/địa chỉ.
   const inbox = sim.inbox({ gender: 'female', botGender: 'female', botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 2 * MIN, pendingOrder: basket([XANH(3)], 2 * MIN) });
   sim.history(inbox, 'outgoing', 'Dạ chị cho em xin số điện thoại và địa chỉ nha ạ.', 2 * MIN, { sender: 'bot' });
   const ask = await sim.send(inbox, 'Chị không lấy bát đâu, đổi quà khác được không', { llm: { template_id: 'GIFT_SWAP' } });
   assert.ok(ask.result.templateId === 'GIFT_SWAP' || ask.result.templateId === 'ORDER_ADDRESS_REMIND', JSON.stringify(ask.result));
-  assert.ok(Number(inbox.giftSwapAskedAt) > 0, 'mốc bot vừa hỏi vị quà thay');
-  const choice = await sim.send(inbox, '2g nhỏ nâu đi shop', { llm: () => { throw new Error('chọn vị quà thay không cần hỏi mô hình'); } });
-  assert.equal(choice.asked.length, 0);
-  assert.deepEqual(inbox.pendingOrder.giftSwap.map(item => item.sku), ['GRA-NAU-G35', 'GRA-NAU-G35']);
-  assert.deepEqual(inbox.pendingOrder.items.map(item => `${item.quantity} ${item.code}`), ['3 GRA-XANH-Z450'], 'giỏ giữ nguyên');
-  const said = choice.sent.map(item => item.text).join('\n');
-  assert.match(said, /2 Gói granola nhỏ Nâu 35g/);
-  assert.doesNotMatch(said, /vị nào/);
+  assert.match(ask.sent.map(item => item.text).join('\n'), /bộ phận phụ trách/);
+  assert.ok(!(Number(inbox.giftSwapAskedAt) > 0), 'không chờ khách chọn vị quà thay');
   assert.ok(inbox.labels.includes('handoff'));
-  // Chốt đơn: quà là 2 gói nhỏ Nâu (thay bát + muỗng), tiền không đổi.
+  assert.deepEqual(inbox.pendingOrder.items.map(item => `${item.quantity} ${item.code}`), ['3 GRA-XANH-Z450'], 'giỏ giữ nguyên');
   const closed = await sim.send(inbox, `${PHONE} ${ADDRESS}`, { llm: { template_id: 'ORDER_CONFIRMATION', Phone_Number: PHONE, Customer_Address: ADDRESS } });
   assert.equal(closed.created.length, 1, JSON.stringify(closed.result));
-  assert.match(String(closed.created[0].gift), /Gói granola nhỏ Nâu/);
-  assert.deepEqual(closed.created[0].giftSwap.map(item => item.sku), ['GRA-NAU-G35', 'GRA-NAU-G35']);
+  assert.equal(closed.created[0].giftSwap, undefined, 'bot không tự đổi quà trên đơn');
   assert.equal(closed.created[0].total, 447000);
-  // normalizeChatbotOrder chép quà thay sang đơn lưu cho POS.
-  const stored = normalizeChatbotOrder(closed.created[0], { name: 'Khách' });
-  assert.deepEqual(stored.giftSwap.map(item => item.sku), ['GRA-NAU-G35', 'GRA-NAU-G35']);
-  assert.ok(stored.giftSwapRemoved.length > 0);
 });
 
 test('chọn vị quà thay khi ĐÃ có đơn: ghi chú vào đơn như cũ; "2 túi xanh" (đặt túi lớn) và câu hỏi không bị coi là chọn quà', async () => {

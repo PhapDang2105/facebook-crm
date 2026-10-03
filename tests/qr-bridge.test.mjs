@@ -152,8 +152,28 @@ test('kho lượt quét: đếm theo máy, trình duyệt, cách phục vụ và
 });
 
 test('đường /q/ và beacon /open công khai: mã chưa tạo ở Cài đặt không tạo mục mới (không đếm, không phình kho); kho đủ 500 mã thì tạo thêm bị từ chối, xoá mã rồi mới tạo được', async () => {
-  const { maximumTrackedCodes, registerQrCode, deleteQrCode } = await import('../app/qr-scans.mjs');
+  // Kho riêng gieo sẵn 498 mã (ghi thẳng tệp) thay vì gọi registerQrCode 500 lần — mỗi lần ghi nguyên tử + fsync
+  // tệp đang lớn dần (~45 giây). Đường tạo mã thật vẫn được gọi cho 2 mã cuối (499, 500) và mã thứ 501.
+  const seededPath = path.join(tempDir('qr-limit-'), 'qr-scans.json');
+  const seeded = {};
+  for (let index = 0; index < 498; index += 1) {
+    const code = `lo-${index}`;
+    seeded[code] = { code, scans: 0, opens: 0, firstAt: 100 + index, lastAt: 100 + index, platforms: {}, browsers: {}, modes: {}, days: {} };
+  }
+  writeFileSync(seededPath, JSON.stringify({ codes: seeded, recent: [] }));
+  const previousPath = process.env.QR_SCANS_PATH;
+  process.env.QR_SCANS_PATH = seededPath;
+  const { maximumTrackedCodes, registerQrCode, deleteQrCode, recordQrScan, recordQrOpen, listQrScans, isKnownQrCode } = await import('../app/qr-scans.mjs?limit-500');
+  process.env.QR_SCANS_PATH = previousPath;
+  // Mô-đun tự nạp kho lúc import (readStore() không await, qr-scans.mjs cuối tệp). Gọi kho khi lượt nạp đó chưa xong
+  // thì có HAI lượt đọc song song và lượt xong sau thay cachedStore → mã vừa tạo mất khỏi bộ nhớ. Chờ lượt nạp xong
+  // (mã gieo sẵn đã "biết") rồi mới thao tác.
+  for (let waited = 0; !isKnownQrCode('lo-0'); waited += 5) {
+    assert.ok(waited < 5000, 'kho gieo sẵn chưa nạp xong');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
   assert.equal(maximumTrackedCodes, 500);
+  assert.equal((await listQrScans()).codes.length, 498, 'kho gieo sẵn được nạp');
   // Mã lạ ai đó gõ vào URL: không có mục, không ghi gì.
   assert.equal(await recordQrScan('ma-la-x', { userAgent: agents.iosSafari, mode: 'page', at: 999 }), null);
   assert.equal(await recordQrOpen('ma-la-x', { at: 1000 }), null);
@@ -166,7 +186,8 @@ test('đường /q/ và beacon /open công khai: mã chưa tạo ở Cài đặt
   assert.equal((await recordQrScan('lo-a', { userAgent: agents.androidChrome, mode: 'redirect', at: 7 })).scans, 1);
   // Kho đủ 500 mã: mã thứ 501 bị từ chối rõ ràng; xoá một mã thì tạo được.
   const before = (await listQrScans()).codes.length;
-  for (let index = before; index < maximumTrackedCodes; index += 1) await registerQrCode(`lo-${index}`, { at: 100 + index });
+  assert.equal(before, 499);
+  for (let index = before; index < maximumTrackedCodes; index += 1) assert.equal((await registerQrCode(`lo-${index}`, { at: 100 + index })).code, `lo-${index}`);
   assert.equal((await listQrScans()).codes.length, maximumTrackedCodes);
   await assert.rejects(registerQrCode('lo-thu-501', { at: 2000 }), /đã đủ 500 mã/);
   assert.equal(await recordQrScan('lo-thu-501', { userAgent: agents.iosSafari, at: 2001 }), null, 'chưa tạo được thì quét cũng không đếm');

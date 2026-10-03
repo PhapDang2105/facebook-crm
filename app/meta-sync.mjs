@@ -209,10 +209,11 @@ export async function sendConversationMessage(conversation, { text = '', attachm
       // Messenger từ chối thẻ receipt (trường không hỗ trợ, ảnh không công khai):
       // chỉ lùi về bản chữ khi người gọi đưa chữ; phiếu đơn KHÔNG có bản chữ
       // (chủ shop không muốn khách nhận bản chữ), người gọi tự gửi ảnh phiếu thay.
-      if (!text) throw error;
       // INT-29: chỉ lùi về bản chữ khi Meta TỪ CHỐI rõ ràng (có lời Graph). Hết giờ chờ / đứt mạng thì thẻ có thể đã
-      // tới khách — gửi thêm bản chữ là khách nhận hai lần — nên báo lỗi "không rõ đã gửi".
+      // tới khách — gửi thêm bản chữ là khách nhận hai lần — nên báo lỗi "không rõ đã gửi". Gắn cờ TRƯỚC khi xét `text`:
+      // phiếu đơn gửi thẻ không kèm chữ, người gọi (server.mjs) dựa vào cờ này để không gửi thêm ảnh phiếu (R1-02).
       if (!isGraphRefusal(error)) throw Object.assign(error, { unknownDelivery: true });
+      if (!text) throw error;
       console.error(`Không gửi được receipt template, chuyển sang tin nhắn chữ: ${error.message}`);
       usedTemplate = false;
       result = await sendPageMessage({ ...target, text });

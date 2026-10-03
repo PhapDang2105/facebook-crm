@@ -2800,7 +2800,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // R14: câu chê hàng CHỖ KHÁC ("bữa mua ở chỗ khác … dở") không phải khiếu nại với shop (mentionsOtherSeller, auto-label).
     const commentComplaint = conversation.source === 'comment' && !mentionsOtherSeller(message.text) && (
       isComplaint({ text: message.text, keywords: settings.complaintKeywords })
-      || /hôi/iu.test(String(message.text || ''))
+      || /(?<![\p{L}\p{N}])hôi(?![\p{L}\p{N}])/iu.test(String(message.text || '').normalize('NFC'))
       || /\b(khong|ko|k|kg|hong|cha|chang) (co |thay |an )?ngon\b|\b(te|do|chan) (qua|that|ghe|ec|lam)\b|\bkem (chat luong|qua)\b/.test(folded)
       // Vòng 12 (B4 #1, #2, #10): "Hok ngon nha", "ăn món này ối luôn", "không nuốt nổi", "khó ăn", "ngọt quá", "toàn gãy nứt".
       || COMMENT_DISLIKE.test(folded.replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim())

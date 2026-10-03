@@ -3014,8 +3014,8 @@ tr:hover .customer-tel button { opacity: .75; }
   .composer-icon svg, .composer-icon img { width: 21px; height: 21px; }
 }
 
-/* Thanh thẻ hội thoại gọn: một hàng cuộn ngang thay vì 3 hàng nút. */
-.conversation-label-bar { flex-wrap: nowrap; gap: 5px; min-height: 0; padding: 8px 12px 2px; overflow-x: auto; scrollbar-width: thin; }
+/* Thanh thẻ hội thoại gọn: nút nhỏ, xuống hàng khi hết chỗ để thấy đủ mọi thẻ (chủ shop 03/10: không cuộn ngang). */
+.conversation-label-bar { flex-wrap: wrap; gap: 5px; min-height: 0; padding: 8px 12px 2px; overflow: visible; }
 .conversation-label-bar button { flex: 0 0 auto; height: 27px; padding: 0 9px 0 7px; font-size: 12px; }
 .conversation-label-bar button .label-icon { width: 14px; height: 14px; }
 .conversation-label-bar-title { flex: 0 0 auto; }

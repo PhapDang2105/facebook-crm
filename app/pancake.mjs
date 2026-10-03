@@ -833,13 +833,32 @@ export function startPancakeSync({ intervalMs = 10 * 60 * 1000, quickMs = 2 * 60
 
 // Dấu vân tay các hội thoại (và tin) mà lô sự kiện chạm tới: đồng bộ chạy lại trên tin đã có thì
 // không đổi gì → không ghi kho (tệp ~19 MB). Rẻ: chỉ vài hội thoại của đúng khách trong lô.
-function touchedFingerprint(store, keys) {
+// INT-06: danh sách hội thoại chạm tới tìm MỘT lần (lần trước, `conversations` truyền lại cho lần sau — hội thoại
+// mới tạo làm đổi số hội thoại nên vẫn bắt được), và chỉ stringify các tin mà lô sự kiện nhắc tới (mã/mid) cùng
+// số tin của luồng, không stringify cả luồng hai lần. Tin không được nhắc tới thì đường ghi Pancake không đổi
+// (gộp/chèn theo mã; cắt bớt tin cũ làm đổi số tin hoặc chính tin mới).
+function touchedConversations(store, keys) {
+  return store.conversations.filter(conversation => keys.has(`${conversation.pageId}:${conversation.psid}`));
+}
+
+function touchedFingerprint(store, conversations, messageIds) {
   const parts = [store.conversations.length, Object.keys(store.commentIndex || {}).length];
-  for (const conversation of store.conversations) {
-    if (!keys.has(`${conversation.pageId}:${conversation.psid}`)) continue;
-    parts.push(JSON.stringify(conversation), JSON.stringify(store.messages[conversation.id] || []));
+  for (const conversation of conversations) {
+    const messages = store.messages[conversation.id] || [];
+    parts.push(JSON.stringify(conversation), messages.length);
+    for (const message of messages) {
+      if (messageIds.has(message?.id) || (message?.mid && messageIds.has(message.mid))) parts.push(JSON.stringify(message));
+    }
   }
   return parts.join('\u0000');
+}
+
+function eventMessageIds(events) {
+  const ids = new Set();
+  for (const event of events) {
+    for (const value of [event.message?.id, event.message?.mid, event.commentId, event.mid]) if (value) ids.add(value);
+  }
+  return ids;
 }
 
 /**
@@ -885,9 +904,13 @@ export async function storePancakeEvents(incomingEvents, { fromWebhook = false, 
   // Bot tự tắt / phân công đổi: ghi nhật ký sau khi lưu kho (ngoài hàng đợi ghi của kho).
   const automaticAudits = [];
   const changes = await updateMessagingStore(store => {
-    const before = touchedFingerprint(store, touchedKeys);
+    const conversations = touchedConversations(store, touchedKeys);
+    const messageIds = eventMessageIds(incomingEvents);
+    const before = touchedFingerprint(store, conversations, messageIds);
+    const conversationCount = store.conversations.length;
     const applied = applyPancakeEventsToStore(store, incomingEvents, { fromWebhook, automaticAudits });
-    touched = touchedFingerprint(store, touchedKeys) !== before;
+    // Có hội thoại mới thì số hội thoại đã khác: khỏi so tiếp.
+    touched = store.conversations.length !== conversationCount || touchedFingerprint(store, conversations, messageIds) !== before;
     return applied;
   }, { defer: deferWrite, unchanged: () => !touched });
   for (const item of automaticAudits) {
@@ -977,13 +1000,22 @@ function applyPancakeEventsToStore(store, incomingEvents, { fromWebhook, automat
     })
     .map(event => event.message.id));
   const applied = applyWebhookEvents(store, events);
+  // Tra hội thoại bằng bảng dựng một lần (sau khi đã ghi, nên có cả hội thoại mới) thay vì find mỗi sự kiện (INT-06).
+  // Giữ mục ĐẦU TIÊN mỗi khoá như find.
+  const byId = new Map();
+  const inboxByKey = new Map();
+  for (const item of store.conversations) {
+    if (!byId.has(item.id)) byId.set(item.id, item);
+    const key = `${item.pageId}:${item.psid}`;
+    if (item.source !== 'comment' && !inboxByKey.has(key)) inboxByKey.set(key, item);
+  }
   for (const event of events) {
     const isComment = event.type === 'comment';
     const messageId = isComment ? event.commentId : event.message.id;
     // Luồng bình luận: applyCommentEvent đã ghi mã bình luận → mã luồng.
     const conversation = isComment
-      ? store.conversations.find(item => item.id === store.commentIndex?.[messageId]) || null
-      : store.conversations.find(item => item.pageId === event.pageId && item.psid === event.psid && item.source !== 'comment');
+      ? byId.get(store.commentIndex?.[messageId]) || null
+      : inboxByKey.get(`${event.pageId}:${event.psid}`);
     if (!conversation) continue;
     if (event.pancake.conversationId) conversation.pancakeConversationId = event.pancake.conversationId;
     if (event.pancake.pageCustomerId) conversation.pancakePageCustomerId = event.pancake.pageCustomerId;
@@ -1580,8 +1612,12 @@ export async function findPancakePost(postId, { months = 12 } = {}, config = def
 const postLookupRetryMs = 24 * 60 * 60 * 1000;
 const needsPostLookup = conversation => Boolean(conversation.referral?.postId) && !conversation.post?.message
   && !(conversation.adPostLookupAt && Date.now() - conversation.adPostLookupAt < postLookupRetryMs);
+// Pancake trả tên quảng cáo rỗng (INT-02): ghi mốc adLookupAt, 24 giờ sau mới tra lại — trước đây hội thoại cứ
+// "chờ tên" mãi nên mỗi webhook/vòng đồng bộ lại ghi cả kho ~19 MB.
+const needsAdTitle = conversation => !conversation.referral.adTitle
+  && !(conversation.adLookupAt && Date.now() - conversation.adLookupAt < postLookupRetryMs);
 const needsAdContext = conversation => Boolean(conversation?.referral?.adId)
-  && (!conversation.referral.adTitle || needsPostLookup(conversation));
+  && (needsAdTitle(conversation) || needsPostLookup(conversation));
 
 export async function enrichPancakeAdContext(changes, config = defaultConfig, fetchImpl = fetch) {
   const pending = [...new Map(changes
@@ -1595,18 +1631,32 @@ export async function enrichPancakeAdContext(changes, config = defaultConfig, fe
   } catch {
     ads = {};
   }
+  // Chỉ ghi khi thật sự đổi, và ghi gộp (defer): webhook không phải chờ ghi cả kho.
+  let changed = false;
   await updateMessagingStore(store => {
+    const wanted = new Set(pending.map(item => item.id));
+    const byId = new Map();
+    for (const entry of store.conversations) if (wanted.has(entry.id)) byId.set(entry.id, entry);
     for (const item of pending) {
-      const conversation = store.conversations.find(entry => entry.id === item.id);
+      const conversation = byId.get(item.id);
       const ad = ads[item.referral?.adId];
-      if (!conversation?.referral || !ad?.name || conversation.referral.adTitle) continue;
+      if (!conversation?.referral || conversation.referral.adTitle || !ad) continue;
+      if (!ad.name) {
+        // Pancake trả lời nhưng không có tên: ghi mốc để khỏi tra lại liên tục.
+        if (!conversation.adLookupAt || Date.now() - conversation.adLookupAt >= postLookupRetryMs) {
+          conversation.adLookupAt = Date.now();
+          changed = true;
+        }
+        continue;
+      }
+      changed = true;
       // Tên quảng cáo hay là mã nội bộ ("gn ht 2705"); tên chiến dịch ("mess Xanh") nói rõ sản phẩm hơn, ghép vào để bot đọc.
       const adTitle = ad.campaignName && !ad.name.includes(ad.campaignName) ? `${ad.name} · ${ad.campaignName}` : ad.name;
       conversation.referral = { ...conversation.referral, adTitle, photoUrl: conversation.referral.photoUrl || ad.imageUrl };
       publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
     }
     return null;
-  });
+  }, { defer: true, unchanged: () => !changed });
   // Tìm bài quảng cáo nền, từng hội thoại một và tối đa 5 mỗi lượt (mỗi lần
   // tìm có thể tới 36 lần gọi API); mốc đã tìm ghi lại dù thấy hay không.
   for (const item of pending.filter(needsPostLookup).slice(0, 5)) {
@@ -1624,7 +1674,7 @@ export async function enrichPancakeAdContext(changes, config = defaultConfig, fe
           publishMessagingEvent({ type: 'conversation', conversation: publicConversation(conversation) });
         }
         return null;
-      });
+      }, { defer: true });
     }).catch(error => console.error(`Không ghi được bài quảng cáo ${item.referral.postId}: ${error.message}`));
   }
   return pending.length;

@@ -362,7 +362,18 @@ export function findFollowUpCandidates(store, scenario, { now = Date.now(), acti
   const delayMs = scenario.delayHours * 60 * 60 * 1000;
   const conversations = store.conversations || [];
   const messagesOf = conversation => (Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : []);
-  const inboxOf = (pageId, psid) => conversations.find(item => item.pageId === pageId && item.psid === psid && item.source !== 'comment') || null;
+  // INT-07: hộp thư theo page:psid dựng một lần (giữ mục đầu tiên như find), không find cho từng luồng bình luận.
+  let inboxIndex = null;
+  const inboxOf = (pageId, psid) => {
+    if (!inboxIndex) {
+      inboxIndex = new Map();
+      for (const item of conversations) {
+        const key = `${item.pageId}\u0000${item.psid}`;
+        if (item.source !== 'comment' && !inboxIndex.has(key)) inboxIndex.set(key, item);
+      }
+    }
+    return inboxIndex.get(`${pageId}\u0000${psid}`) || null;
+  };
   // Khách đã có đơn trong CRM hay mang thẻ Đã mua hàng: không bám (chỉ bám khách mới).
   // Bot tắt, thẻ khiếu nại / cần người xử lý, nhân viên đã nhắn…: xét ở vòng gửi (followUpSkipReason) để đếm lý do.
   const bought = conversation => (Array.isArray(conversation?.labels) ? conversation.labels : []).some(label => boughtLabelIds.includes(label));
@@ -480,6 +491,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
   // R14 (…039804): hai kịch bản (bình luận 12h + hộp thư 3h) cùng nhắm MỘT hộp thư → 2 tin y hệt cùng phút (khóa sent
   // theo `kịch bản:page:psid`). Mỗi khách (page + psid) chỉ một tin trong một lượt và trong `followUpSpacingMs`.
   const touchedThisRun = new Set();
+  const sentIndex = followUpSentIndex(state);
   // R14 (quyết định 6, …897712): khách đã có đơn landing cùng SĐT (kho landing cục bộ, không gọi mạng) — đọc một lần mỗi lượt.
   let landingOrdersCache = null;
   const landingOrdersOnce = async () => {
@@ -513,7 +525,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       // R14 (…039804): khách vừa nhận (hay đang xếp hàng) một tin bám đuổi của kịch bản khác trong lượt này / 12 giờ qua.
       // Kịch bản chỉ nhắc (không ưu đãi): ghi bỏ qua luôn (lời nhắc thứ hai y hệt vô ích); kịch bản ưu đãi: để lượt sau.
       const customerKey = customerKeyOf(candidate.conversation);
-      if (touchedThisRun.has(customerKey) || now - lastFollowUpAt(state, store, candidate, customerKey) < followUpSpacingMs) {
+      if (touchedThisRun.has(customerKey) || now - lastFollowUpAt(state, store, candidate, customerKey, sentIndex) < followUpSpacingMs) {
         if (!scenario.freeShipDays) {
           await updateFollowUpState(current => {
             current.sent[candidate.key] = { scenarioId: scenario.id, conversationId: candidate.conversation.id, name: candidate.conversation.name || '', at: now, repliedAt: candidate.repliedAt, error: 'khách vừa nhận tin bám đuổi khác', skipped: 'sameCustomer' };
@@ -886,16 +898,35 @@ export const followUpSpacingMs = 12 * 60 * 60 * 1000;
  * Lần gần nhất khách (page + psid) nhận / đang chờ nhận một tin bám đuổi: mục đã gửi (via) hay đang xếp hàng
  * trong follow-ups.json của MỌI kịch bản, và followUps[] ghi trên hộp thư / luồng bình luận. 0 = chưa có.
  */
-export function lastFollowUpAt(state, store, candidate, customerKey = customerKeyOf(candidate?.conversation)) {
+export function lastFollowUpAt(state, store, candidate, customerKey = customerKeyOf(candidate?.conversation), sentIndex = null) {
   let latest = 0;
-  for (const [key, entry] of Object.entries(state?.sent || {})) {
-    if (!entry || !(entry.via || entry.queued) || !key.endsWith(`:${customerKey}`)) continue;
-    latest = Math.max(latest, Number(entry.sentAt) || Number(entry.at) || 0);
+  if (sentIndex) latest = sentIndex.get(customerKey) || 0;
+  else {
+    for (const [key, entry] of Object.entries(state?.sent || {})) {
+      if (!entry || !(entry.via || entry.queued) || !key.endsWith(`:${customerKey}`)) continue;
+      latest = Math.max(latest, Number(entry.sentAt) || Number(entry.at) || 0);
+    }
   }
   for (const record of [candidate?.inbox, candidate?.thread, candidate?.conversation].filter(Boolean)) {
     for (const item of Array.isArray(record.followUps) ? record.followUps : []) latest = Math.max(latest, Number(item?.at) || 0);
   }
   return latest;
+}
+
+/**
+ * INT-07: Map<"page:psid", mốc bám đuổi gần nhất> dựng MỘT lần mỗi lượt từ follow-ups.json (khoá "kịch bản:page:psid"),
+ * thay vì duyệt tới 5000 mục cho từng ứng viên. Mục ghi thêm trong lượt đã được `touchedThisRun` chặn riêng.
+ */
+function followUpSentIndex(state) {
+  const index = new Map();
+  for (const [key, entry] of Object.entries(state?.sent || {})) {
+    if (!entry || !(entry.via || entry.queued)) continue;
+    const parts = key.split(':');
+    if (parts.length < 3) continue;
+    const customerKey = parts.slice(-2).join(':');
+    index.set(customerKey, Math.max(index.get(customerKey) || 0, Number(entry.sentAt) || Number(entry.at) || 0));
+  }
+  return index;
 }
 
 /** SĐT dạng 0xxxxxxxxx (10 số) hay '' — so khớp đơn landing. */

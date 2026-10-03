@@ -1,7 +1,7 @@
 // Vòng 14 (03/10) — engine, hộp thư: câu khách thật 02–03/10 (out-inbox1/2/3, out-dl). SĐT giả 0912345678.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Sim, XANH, VANG, NAU, basket, PHONE, templates } from './helpers/r13-engine-sim.mjs';
+import { Sim, XANH, VANG, NAU, basket, PHONE, templates, seedTemplates } from './helpers/r13-engine-sim.mjs';
 import { claimsLiveDeal, refusesPurchase, praisesAfterBuying, asksHowToHunt, complainsAboutProduct, shortDislike } from '../app/chatbot-engine.mjs';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -68,7 +68,10 @@ test('H4 (ca …017802): mô hình chuyển CSKH vì tin ngắn "Dỡ" → khôn
 
 test('S1 (ca …762063): "Ok" sau ORDER_EXISTING_CONFIRM khi bot đã gửi tin khác xen giữa (cờ chờ còn hạn) → chốt giỏ đang giữ', async () => {
   const old = { id: 'o1', phone: PHONE, address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', createdAt: Date.now() - 2 * DAY, status: 'Đang giao', products: [{ name: 'Granola Túi Vàng 350g', quantity: 1 }], total: 189000 };
-  const sim = new Sim({ settings: { ruleIntent: 'off' } });
+  // R15-fix4: ca thật chạy với LỜI CŨ của ORDER_EXISTING_CONFIRM ("… nhắn "đúng" là em lên đơn liền") → "Ok" là đồng ý. Với lời seed
+  // mới (hỏi gộp hay tách) "Ok" là mơ hồ → bạn phụ trách (r15-fix4-merge-split.test.mjs).
+  const LEGACY_CONFIRM = 'Dạ {title} ơi, em thấy mình đang có đơn {existing_items} đặt lúc {existing_at}, hiện {existing_state} ạ 🌾 Mình muốn đặt THÊM một đơn mới gồm {cart} nữa đúng không ạ? {Title} nhắn "đúng" giúp em là em lên đơn liền; còn nếu là đơn cũ thì {title} cứ nhắn em kiểm tra cho mình nha ạ.';
+  const sim = new Sim({ settings: { ruleIntent: 'off', messageTemplates: { ...seedTemplates, ORDER_EXISTING_CONFIRM: LEGACY_CONFIRM } } });
   const inbox = sim.inbox({ customerOrders: [old], botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 60000,
     pendingOrder: basket([XANH(3)], 4 * 60000, { phone: PHONE, address: old.address, addressAsks: 2, awaitingConfirm: true }) });
   const turn = await sim.send(inbox, 'Ok', { llm: { template_id: 'THANK_YOU' } });

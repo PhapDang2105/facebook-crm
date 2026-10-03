@@ -601,6 +601,27 @@ export function colourCountsInText(text) {
 }
 
 /**
+ * R15-fix4 (phản biện M1): số túi khách BỚT — động từ bỏ/bớt/giảm/trừ (còn dấu) đứng NGAY trước số ("bỏ 1 túi", "bớt 1",
+ * "giảm đi 1 túi"). Chữ không dấu "bo/bot/giam/tru" chỉ nhận khi số theo ngay sau và không đứng sau cho/gửi/giao/của/nhà/mẹ/ba
+ * ("cho bo 2 tui" có thể là "cho bố 2 túi"). "bố", "bộ" có dấu khác "bỏ" nên không bao giờ là bớt. Không có → 0.
+ */
+export function removedBagCount(text) {
+  const raw = String(text || '').normalize('NFC').toLowerCase();
+  const match = raw.match(/(?<![\p{L}\p{N}])(?:(cho|gửi|gui|giao|ship|của|cua|nhà|nha|mẹ|me|ba)\s+)?(bỏ|bớt|giảm|trừ|bo|bot|giam|tru)(?:\s+(?:đi|di|ra|bớt|bot|bỏ|bo))?\s+(\d{1,2}|một|mot|hai|ba)(?![\p{L}\p{N}])/u);
+  if (!match) return 0;
+  if (match[1] && /^[a-z]+$/.test(match[2])) return 0;
+  const count = ({ 'một': 1, mot: 1, hai: 2, ba: 3 })[match[3]] || Number(match[3]) || 0;
+  return count >= 1 && count <= 20 ? count : 0;
+}
+
+// R15-fix4 (phản biện mục 4, có từ trước): "không thêm nữa", "khỏi thêm", "không lấy thêm" là PHỦ ĐỊNH — không phải đặt thêm
+// ("1 túi thôi, không thêm nữa" với đơn 2 túi từng thành 3 túi 447k). Đọc trên chữ đã bỏ dấu (normalizeText).
+const NEGATED_ADD_WORDS = /\b(?:khong|ko|k|kg|hong|khum|khoi|chang|dung|khoi can|khong can|ko can|k can)(?: (?:lay|can|dat|mua|gui|cho))? (?:them|nua)(?: nua)?\b/g;
+export function asksToAdd(words) {
+  return /\b(them|nua|cong them)\b/.test(String(words || '').replace(NEGATED_ADD_WORDS, ' '));
+}
+
+/**
  * Sửa số lượng mô hình trả về theo đúng lời khách (vòng 12, hội thoại thật):
  * - câu hỏi ("Loại nào có trái cây vậy") không có số/động từ đặt → không tạo/đổi giỏ ([]);
  * - tin không nhắc hàng ("Địa chỉ chưa sáp nhập") → giữ giỏ/đơn đang có, không đổi vị;
@@ -682,8 +703,11 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
     const held = reference.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
     // R15-fix3 (phản biện luật, engine-probe B1): "giảm đi 1 túi" / "bớt 1 túi" / "bỏ 1 túi" khi giữ 3 Xanh = BỚT 1 (còn 2), không
     // phải đặt số lượng thành 1. "bớt còn 1 túi" / "lấy 1 túi thôi" vẫn là số lượng mới.
-    const removing = !adding && /\b(?:giam|bot|bo|tru)\b/.test(s) && !/\b(?:con|lay|chi|de lai)\b/.test(s);
-    if (removing && held - bags >= 1) return [{ product: base.product, code: base.code, quantity: held - bags }];
+    // R15-fix4 (phản biện M1, NGHIÊM TRỌNG): xét trên chữ CÒN DẤU — "gửi bố 2 túi" / "cho bố mẹ 2 túi" (bố bỏ dấu = "bo") từng bị
+    // đọc là "bỏ 2 túi" và trừ đơn/giỏ. Chỉ trừ khi số đứng NGAY sau động từ ("bỏ 1 túi", "bớt 1", "giảm đi 1 túi").
+    const removed = removedBagCount(text);
+    const removing = !adding && removed > 0 && !/\b(?:con|lay|chi|de lai)\b/.test(s);
+    if (removing && held - removed >= 1) return [{ product: base.product, code: base.code, quantity: held - removed }];
     return [{ product: base.product, code: base.code, quantity: adding ? held + bags : bags }];
   }
   if (!countGiven) {
@@ -799,7 +823,7 @@ function renderOrder(value, templates, context = {}) {
         recentItems: recentForQuantity,
         askedBagCount: Number(context.pendingOrder?.askedBagCount) || askedBagsBefore(),
         burstTexts: Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.slice(-2) : [],
-        adding: String(value.add_to_basket || '') === '1' || /\b(them|nua|cong them)\b/.test(messageWords) || askedNguyenBan
+        adding: String(value.add_to_basket || '') === '1' || asksToAdd(messageWords) || askedNguyenBan
       });
   // R15 (inbox1 A2): "1 túi nguyên bản và 1 túi vàng nhiều hạt" — Vàng đã nêu riêng nên nguyên bản là Túi Xanh: thêm Xanh vào
   // giỏ khi luật/mô hình chỉ đưa phần Vàng (trước đây bot hỏi lại "nguyên bản là gì" và giỏ chờ chỉ còn 1 Vàng).
@@ -829,7 +853,7 @@ function renderOrder(value, templates, context = {}) {
   // gộp / ghép" là cộng vào đơn cũ; còn lại là sửa giỏ của đơn cũ.
   const separateOrder = /\b(don khac|don moi|nguoi khac|dia chi khac|gui cho (ban|me|chi|em|anh)|tach don)\b/.test(messageWords);
   // "luôn" KHÔNG phải cộng thêm: "gửi e 2 túi luôn c nha" (đơn 1 túi) là đổi thành 2 túi.
-  const addsToOrder = /\b(them|nua|gop|ghep|cong them)\b/.test(messageWords);
+  const addsToOrder = asksToAdd(messageWords) || /\b(gop|ghep)\b/.test(messageWords);
   const implicitUpdate = !separateOrder && recentOpen && recentOrder.automatic !== false && namedItems.length > 0
     && ['ORDER_CONFIRMATION', 'ORDER_ADDRESS'].includes(templateId);
   // Tin thanh toán chỉ được nhắc lại đơn (namedItems = đúng đơn gần nhất → ORDER_UNCHANGED), không sửa.
@@ -906,7 +930,7 @@ function renderOrder(value, templates, context = {}) {
     && context.lastTemplateId !== 'ASK_FLAVOR_NGUYENBAN' && !xanhFromNguyenBan ? ambiguousNguyenBan(customerText) : 0;
   if (nguyenBanQty > 0) {
     const { counts } = colourCountsInText(customerText);
-    const adding = /\b(them|nua|cong them)\b/.test(messageWords);
+    const adding = asksToAdd(messageWords);
     const stated = Object.entries(counts).filter(([, count]) => count > 0).map(([colour, count]) => {
       const product = getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith(`GRA-${colour}-`));
       return product ? { product: product.name, code: product.sku, quantity: count } : null;
@@ -935,7 +959,7 @@ function renderOrder(value, templates, context = {}) {
   // R14: bot vừa hỏi "nguyên bản là Xanh hay Vàng" (giỏ chờ giữ phần đã rõ, vd 1 Nâu) — khách trả lời vị thì CỘNG vào giỏ.
   const answersNguyenBan = askedNguyenBan && baseItems.length > 0 && baseItems.every(item => /^GRA-(XANH|VANG)-/i.test(String(item.code || '')));
   const addsToHeld = heldItems.length > 0 && baseItems.length > 0 && isOrderStep(templateId) && !replacesHeld
-    && (String(value.add_to_basket || '') === '1' || ((/\b(them|nua|cong them)\b/.test(messageWords) || answersNguyenBan) && !coversHeld()));
+    && (String(value.add_to_basket || '') === '1' || ((asksToAdd(messageWords) || answersNguyenBan) && !coversHeld()));
   const mergeHeld = () => {
     const byKey = new Map();
     for (const item of [...heldItems, ...baseItems]) {

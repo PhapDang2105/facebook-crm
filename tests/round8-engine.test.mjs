@@ -383,9 +383,10 @@ test('20. Đơn ngoài hội thoại cùng SĐT (POS / landing, 7 ngày): hỏi 
   const yes = await run({ pendingOrder: pending, botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: now() - 60000 }, 'Đúng rồi', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false }, extraDeps: deps([posOrder()]) });
   assert.equal(yes.results[0].templateId, 'ORDER_CONFIRMATION');
   assert.equal(yes.created.length, 1);
-  // "Không" → (fix-bot C2) không kể lại đơn ngoài hội thoại: nhân viên tra (ORDER_STATUS_CHECKING), gắn thẻ, không tạo.
+  // "Không" → (fix-bot C2) không kể lại đơn ngoài hội thoại: nhân viên tra, gắn thẻ, không tạo.
+  // R15-fix4 (thiết kế gộp/tách mới): phủ định khi đang chờ → STAFF_WAIT_* (trước: ORDER_STATUS_CHECKING), giữ giỏ.
   const no = await run({ pendingOrder: pending, botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: now() - 60000 }, 'Không, đơn đó của chị rồi', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false }, extraDeps: deps([posOrder()]) });
-  assert.equal(no.results[0].templateId, 'ORDER_STATUS_CHECKING');
+  assert.match(no.results[0].templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/);
   assert.deepEqual(no.created, []);
   assert.doesNotMatch(no.sent.join(' '), /Granola Túi Xanh 450g x2/);
   assert.doesNotMatch(no.sent.join(' '), /chưa thấy đơn nào/);

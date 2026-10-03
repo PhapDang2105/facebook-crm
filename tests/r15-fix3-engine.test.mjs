@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Sim, PHONE, XANH, basket, seedTemplates } from './helpers/r13-engine-sim.mjs';
-import { readMergeSplitAnswer, singleFlavourOf, stripBagWeights } from '../app/chatbot-engine.mjs';
+import { readMergeSplitReply, singleFlavourOf, stripBagWeights } from '../app/chatbot-engine.mjs';
 import { adjustOrderQuantities } from '../app/chatbot-templates.mjs';
 import { boughtOnMarketplace } from '../app/follow-up.mjs';
 import { normalizeChatbotSettings } from '../app/chatbot-settings.mjs';
@@ -26,36 +26,27 @@ async function askedMergeSplit(psid, { legacy = false } = {}) {
   return { sim, inbox };
 }
 
-test('readMergeSplitAnswer: phủ định / câu hỏi / thôi khỏi không thành "tách"', () => {
-  assert.equal(readMergeSplitAnswer('không phải đơn mới đâu, là đơn cũ đó'), 'merge');
-  assert.equal(readMergeSplitAnswer('ko, ý c là đơn cũ thôi, không đặt đơn mới'), 'merge');
-  assert.equal(readMergeSplitAnswer('không tách đâu, gộp vào đơn cũ'), 'merge');
-  assert.equal(readMergeSplitAnswer('thôi khỏi, không cần đơn khác'), 'drop');
-  assert.equal(readMergeSplitAnswer('gộp hay tách cái nào ship nhanh hơn?'), 'question');
-  assert.equal(readMergeSplitAnswer('tách ra 2 đơn được không em?'), 'question');
-  assert.equal(readMergeSplitAnswer('tách đơn mới giúp c'), 'split');
-  assert.equal(readMergeSplitAnswer('không sao, tách đơn mới nha'), 'split');
-  assert.equal(readMergeSplitAnswer('gộp chung luôn em'), 'merge');
-  assert.equal(readMergeSplitAnswer('giao chung cư như cũ nha'), '');
-  assert.equal(readMergeSplitAnswer('C ko lấy nữa thì có giảm tiền ko'), '');
+// R15-fix4 (chủ shop 03/10, thiết kế gộp/tách mới): readMergeSplitAnswer (đọc phủ định / câu hỏi / "thôi khỏi") đã bỏ — chỉ câu NGẮN
+// VÀ RÕ mới tự làm (readMergeSplitReply); câu phủ định / hỏi / "thôi khỏi" → bạn phụ trách, giữ giỏ. Hai ca dưới thay ca cũ.
+test('readMergeSplitReply: chỉ câu ngắn rõ là gộp/tách; phủ định / câu hỏi / thôi khỏi → "" (bạn phụ trách)', () => {
+  for (const text of ['không phải đơn mới đâu, là đơn cũ đó', 'ko, ý c là đơn cũ thôi, không đặt đơn mới', 'không tách đâu, gộp vào đơn cũ', 'thôi khỏi, không cần đơn khác',
+    'gộp hay tách cái nào ship nhanh hơn?', 'tách ra 2 đơn được không em?', 'không sao, tách đơn mới nha', 'giao chung cư như cũ nha', 'C ko lấy nữa thì có giảm tiền ko']) {
+    assert.equal(readMergeSplitReply(text), '', text);
+  }
+  assert.equal(readMergeSplitReply('tách đơn mới giúp c'), 'split');
+  assert.equal(readMergeSplitReply('gộp chung luôn em'), 'merge');
 });
 
-test('N1: câu phủ định / câu hỏi sau câu gộp-tách KHÔNG tạo đơn (gộp → ghi chú NV, hỏi → bạn phụ trách, thôi khỏi → bỏ giỏ)', async () => {
-  const expected = {
-    'không phải đơn mới đâu, là đơn cũ đó': 'ORDER_CHANGE_STAFF',
-    'ko, ý c là đơn cũ thôi, không đặt đơn mới': 'ORDER_CHANGE_STAFF',
-    'thôi khỏi, không cần đơn khác': 'ORDER_POSTPONED',
-    'gộp hay tách cái nào ship nhanh hơn?': /^STAFF_WAIT_/,
-    'tách ra 2 đơn được không em?': /^STAFF_WAIT_/,
-    'không tách đâu, gộp vào đơn cũ': 'ORDER_CHANGE_STAFF'
-  };
+test('N1: câu phủ định / câu hỏi / "thôi khỏi" sau câu gộp-tách → bạn phụ trách, KHÔNG tạo/sửa/ghi chú đơn, giữ giỏ', async () => {
   let n = 0;
-  for (const [text, tpl] of Object.entries(expected)) {
+  for (const text of ['không phải đơn mới đâu, là đơn cũ đó', 'ko, ý c là đơn cũ thôi, không đặt đơn mới', 'thôi khỏi, không cần đơn khác', 'gộp hay tách cái nào ship nhanh hơn?',
+    'tách ra 2 đơn được không em?', 'không tách đâu, gộp vào đơn cũ']) {
     const { sim, inbox } = await askedMergeSplit(`fx3n1${++n}`);
     const turn = await sim.send(inbox, text, { llm: { template_id: 'ORDER_STATUS' } });
-    assert.equal(turn.created.filter(order => !order.updateOrderId && !order.noteOrderId).length, 0, text);
-    if (tpl instanceof RegExp) assert.match(turn.result.templateId, tpl, text); else assert.equal(turn.result.templateId, tpl, text);
-    if (tpl === 'ORDER_POSTPONED') assert.equal(inbox.pendingOrder, null);
+    assert.deepEqual(turn.created, [], text);
+    assert.deepEqual(turn.notes, [], text);
+    assert.match(turn.result.templateId, /^STAFF_WAIT_/, text);
+    assert.deepEqual(codes(inbox.pendingOrder.items), ['2 GRA-VANG-H350'], text);
   }
 });
 
@@ -71,16 +62,19 @@ test('N2/C1: trả lời câu gộp-tách bằng SĐT + địa chỉ MỚI → �
   }
 });
 
-test('C1: trả lời bằng SĐT + địa chỉ CŨ / "giao chung cư như cũ" → hỏi lại gộp/tách MỘT lần (không im), lần hai → bạn phụ trách', async () => {
+test('C1: trả lời bằng SĐT + địa chỉ CŨ / "giao chung cư như cũ" → bạn phụ trách MỘT lần (không im lượt đầu), lượt sau im + thẻ, không hỏi lại', async () => {
+  // R15-fix4 (thiết kế gộp/tách mới): không bao giờ hỏi lại gộp/tách (trước: hỏi lại một lần rồi mới bạn phụ trách).
   for (const [i, text] of [`${PHONE} ${ADDR}`, 'giao chung cư như cũ nha'].entries()) {
     const { sim, inbox } = await askedMergeSplit(`fx3c1${i}`);
-    const again = await sim.send(inbox, text, { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: P.V, No_A: '2', Phone_Number: PHONE, Customer_Address: ADDR } });
-    assert.equal(again.result.templateId, 'ORDER_EXISTING_CONFIRM', text);
-    assert.ok(again.sent.length > 0);
-    assert.equal(again.created.length, 0);
+    const first = await sim.send(inbox, text, { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: P.V, No_A: '2', Phone_Number: PHONE, Customer_Address: ADDR } });
+    assert.match(String(first.result.templateId || ''), /^STAFF_WAIT_/, text);
+    assert.ok(first.sent.length > 0);
+    assert.equal(first.created.length, 0);
     const second = await sim.send(inbox, text, { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: P.V, No_A: '2', Phone_Number: PHONE, Customer_Address: ADDR } });
-    assert.match(String(second.result.templateId || ''), /^STAFF_WAIT_/, text);
+    assert.ok(second.result.skipped, text);
+    assert.deepEqual(second.sent, []);
     assert.equal(second.created.length, 0);
+    assert.ok(inbox.labels.includes('handoff'));
   }
 });
 
@@ -116,13 +110,20 @@ test('C2/T1: im 30 phút sau STAFF_WAIT không nuốt tin chốt/đặt/STK/ch�
   assert.equal(quiet.result.skipped, 'đang chờ bạn phụ trách trả lời');
 });
 
-test('L4: "ok đặt thêm" / "đặt luôn em" sau câu gộp-tách → đơn mới với SĐT/địa chỉ đơn cũ (không xin lại)', async () => {
-  for (const [i, text] of ['ok đặt thêm', 'đặt luôn em'].entries()) {
-    const { sim, inbox } = await askedMergeSplit(`fx3l4${i}`);
-    const turn = await sim.send(inbox, text, { llm: { template_id: 'THANK_YOU' } });
-    assert.equal(turn.result.templateId, 'ORDER_CONFIRMATION', text);
-    assert.equal(turn.created[0].phone, PHONE);
-  }
+test('L4: "ok đặt thêm" sau câu gộp-tách → đơn mới với SĐT/địa chỉ đơn cũ (không xin lại); "đặt luôn em" chỉ đồng ý với lời cũ', async () => {
+  // R15-fix4 (thiết kế gộp/tách mới): "đặt thêm" là TÁCH rõ; "đặt luôn" không nói gộp hay tách → với lời seed là bạn phụ trách.
+  const { sim, inbox } = await askedMergeSplit('fx3l4a');
+  const turn = await sim.send(inbox, 'ok đặt thêm', { llm: { template_id: 'THANK_YOU' } });
+  assert.equal(turn.result.templateId, 'ORDER_CONFIRMATION');
+  assert.equal(turn.created[0].phone, PHONE);
+  const vague = await askedMergeSplit('fx3l4b');
+  const staff = await vague.sim.send(vague.inbox, 'đặt luôn em', { llm: { template_id: 'THANK_YOU' } });
+  assert.match(staff.result.templateId, /^STAFF_WAIT_/);
+  assert.equal(staff.created.length, 0);
+  const legacy = await askedMergeSplit('fx3l4c', { legacy: true });
+  const yes = await legacy.sim.send(legacy.inbox, 'đặt luôn em', { llm: { template_id: 'THANK_YOU' } });
+  assert.equal(yes.result.templateId, 'ORDER_CONFIRMATION');
+  assert.equal(yes.created[0].phone, PHONE);
 });
 
 test('C3: khối lượng không phải số túi — "Túi vàng 350g" / "Túi xanh 450 g" / "vàng 350" sau đơn 2 Nâu = 1 Nâu + 1 vị mới', async () => {

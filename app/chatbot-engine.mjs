@@ -1,4 +1,4 @@
-import { buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, phoneLooksShort, renderChatbotReply, sanitizeModelAnswer, withoutInviteTail } from './chatbot-templates.mjs';
+import { asksToAdd, buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, phoneLooksShort, renderChatbotReply, sanitizeModelAnswer, withoutInviteTail } from './chatbot-templates.mjs';
 import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
 import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
@@ -1237,46 +1237,58 @@ export function singleFlavourOf(text, { strict = false } = {}) {
   return leftover ? '' : colours[0];
 }
 
+// R15-fix4: từ đệm bỏ đi trước khi đọc câu trả lời gộp/tách (chữ thường, còn dấu). "đúng/ok/vâng/ừ/dạ" vừa là đệm vừa là lời đồng ý.
+const MERGE_SPLIT_FILLERS = new Set(['ạ', 'a', 'ah', 'ak', 'ạh', 'nha', 'nhá', 'nhaa', 'nhé', 'nhe', 'nhen', 'nghen', 'nè', 'em', 'e', 'shop', 'sh', 'c', 'chị', 'chi',
+  'ơi', 'oi', 'dạ', 'da', 'vâng', 'ok', 'oke', 'okê', 'okie', 'oki', 'okay', 'ừ', 'ừm', 'ừa', 'uh', 'uk', 'um', 'u', 'ờ', 'ờm', 'đúng', 'rồi', 'r',
+  'luôn', 'lun', 'đi', 'giúp', 'giùm', 'dùm', 'cho', 'tiện', 'với', 'mình', 'thôi', 'vậy']);
+const MERGE_SPLIT_YES = new Set(['đúng', 'ok', 'oke', 'okê', 'okie', 'oki', 'okay', 'vâng', 'ừ', 'ừm', 'ừa', 'uh', 'uk', 'um', 'u', 'ờ', 'ờm', 'dạ', 'da']);
+// Lời đồng ý đứng một mình (không phải đệm khi đi với chữ khác): "có", "chốt", "phải"; "dung"/"vang" không dấu chỉ khi là cả câu
+// ("dung tach" có thể là "đừng tách", "vang" có thể là Vàng).
+const MERGE_SPLIT_YES_ONLY = new Set(['có', 'co', 'phải', 'phai', 'chuẩn', 'chuan', 'chốt', 'chot', 'yes', 'dung', 'vang']);
+const MERGE_CORE = /^(?:(?:gop|ghep)(?: (?:chung|lai|vao|vo))*(?: (?:don|1 don|mot don))?(?: (?:cu|truoc|kia|do|nay|dang co|hom truoc|hom qua|vua dat))?|chung (?:don|1 don|mot don)|(?:gui|giao|ship|di) chung(?: (?:don|1 don|mot don))?|(?:(?:cong|them|cho|nhet) )?(?:vao|vo) don (?:cu|truoc|kia|do|nay|dang co))$/;
+const SPLIT_CORE = /^(?:tach(?: (?:ra|rieng))?(?: (?:don|(?:2|hai) don))?(?: (?:moi|rieng|khac))?|(?:len |lam |tao |dat )?don (?:moi|rieng|khac)|(?:de |giao |gui |ship )?rieng(?: ra)?|(?:2|hai) don(?: rieng)?|dat them(?: don(?: moi)?)?)$/;
+// Lời đồng ý kiểu "lên đơn / chốt đơn / đặt luôn": với lời cũ ("nhắn đúng là em lên đơn") là đồng ý; với lời mới là mơ hồ.
+const MERGE_SPLIT_YES_PHRASE = /^(?:len don|chot don|dat|dat luon|len don luon|chot luon)$/;
+
 /**
- * R15-fix3 (phản biện N1/T7): đọc câu khách trả lời câu hỏi "gộp vào đơn đang có hay tách đơn mới". Trả:
- * - 'question': câu HỎI có chữ gộp/tách/đơn mới ("gộp hay tách cái nào ship nhanh hơn?", "tách ra 2 đơn được không em?") → nhân viên;
- * - 'merge': nói gộp ("gộp chung luôn", "không tách đâu, gộp vào đơn cũ") hay phủ định đơn mới + nhắc đơn cũ ("không phải đơn mới
- *   đâu, là đơn cũ đó", "ko, ý c là đơn cũ thôi, không đặt đơn mới");
- * - 'drop': thôi không đặt thêm ("thôi khỏi, không cần đơn khác") → bỏ giỏ mới, không tạo đơn;
- * - 'split': nói tách / đơn riêng / đơn mới KHÔNG bị phủ định;
- * - 'unclear': phủ định tách mà không nói đơn cũ ("không tách"…), hay phủ định gộp mà không nói tách → nhân viên;
- * - '': không nói gì về gộp/tách.
- * Phủ định: không/ko/k/kg/hong/khum/chưa/khỏi/chẳng đứng trước cụm, cách tối đa 2 chữ ("không đặt đơn mới", "không cần đơn khác").
+ * R15-fix4 (chủ shop 03/10): đọc câu khách trả lời "gộp vào đơn đang có hay tách đơn mới" — CHỈ câu ngắn và rõ. Bỏ từ đệm
+ * (ạ/nha/nhé/em/shop/c/chị/dạ/vâng/ok/đúng/luôn/đi/cho tiện…), phần còn lại phải là đúng một cụm:
+ * - 'merge': gộp / gộp chung / gộp vào đơn cũ / ghép (chung) / chung đơn / gửi·giao·ship chung;
+ * - 'split': tách (đơn/riêng/ra) / đơn mới / đơn riêng / lên đơn mới / đặt thêm / để riêng / 2 đơn;
+ * - 'yes': chỉ lời đồng ý (đúng, ok, vâng, ừ, dạ, đúng rồi, có, chốt, lên đơn…);
+ * - '': mọi câu khác — phủ định ("không/đừng/khỏi"), câu hỏi ("?", "à", "làm gì", "được không", "hay"), "tùy", "hủy", tên món, số
+ *   túi, SĐT/địa chỉ, người nhận khác… (engine chuyển bạn phụ trách, không tự quyết).
  */
-export function readMergeSplitAnswer(text) {
-  const t = foldVietnamese(String(text || '')).replace(/[,;:.!…]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!t) return '';
-  // "không sao / không vấn đề / không biết" không phải phủ định cụm sau nó.
-  const calm = t.replace(/\b(?:khong|ko|k|kg|hong) (?:sao|van de|biet)\b/g, ' ');
-  const splitWord = /\b(?:tach|rieng|don moi|don khac|(?:2|hai) don)\b/;
-  const mergeWord = /\b(?:gop|ghep|gui chung|chung (?:don|1 don|mot don|voi don)|di chung|them vao|cong vao|nhap vao|vao don (?:cu|truoc|dang co|do|kia|luon))\b/;
-  const negator = '(?:khong|ko|k|kg|hong|khum|chua|khoi|chang)(?: [a-z0-9]+){0,2} ';
-  const negSplitRe = new RegExp(`\\b${negator}(?:tach|rieng|don moi|don khac|(?:2|hai) don)\\b`, 'g');
-  const negMergeRe = new RegExp(`\\b${negator}(?:gop|ghep|di chung|gui chung)\\b`, 'g');
-  const negSplit = negSplitRe.test(calm);
-  const negMerge = negMergeRe.test(calm);
-  const rest = calm.replace(negSplitRe, ' ').replace(negMergeRe, ' ').replace(/\bchung cu\b/g, ' ');
-  const split = splitWord.test(rest);
-  const merge = mergeWord.test(rest);
-  const oldRef = /\b(?:don cu|don truoc|don dang co|don kia|don hom truoc|don luc nay)\b/.test(rest);
-  const talks = split || merge || negSplit || negMerge;
-  const drop = /\b(?:thoi khoi|khoi (?:di|nha|nhe|nhen|em|e|a|luon|roi|nhe em|nha em)$|khoi$|khong can (?:nua|them|dat|mua|lay)|khong can (?:lam )?don (?:khac|moi)|(?:khong|ko|k) (?:dat|lay|mua) (?:them|nua)|thoi (?:khong|ko|k) (?:dat|lay|mua))\b/.test(calm);
-  const question = /\?/.test(t)
-    || /\b(?:duoc|dc|đc) (?:khong|ko|k|kg|hong|ha|hem|hok)\b/.test(calm)
-    || /\bhay\b(?! (?:qua|lam|that))/.test(calm)
-    || /\b(?:cai nao|bao gio|khi nao|the nao|nhu nao|nhanh hon|sao)\b/.test(calm.replace(/\bsao cung\b/g, ' '))
-    || /\b(?:co|duoc|dc)\b.{0,40}\b(?:khong|ko|kg|k|hong|ha)(?: (?:a|em|e|shop|ban|b|nhi|vay|v|z|ha|chi|c|anh))*$/.test(calm);
-  if (talks && question) return 'question';
-  if (merge || (negSplit && oldRef && !split)) return 'merge';
-  if (drop && !question) return 'drop';
-  if (split) return 'split';
-  if (negSplit || negMerge) return 'unclear';
+export function readMergeSplitReply(text) {
+  const raw = String(text || '').normalize('NFC').toLowerCase();
+  if (!raw.trim() || /\?/.test(raw)) return '';
+  const tokens = raw.replace(/[,;:.!…~"'()\-–]+/g, ' ').split(/\s+/).filter(Boolean);
+  if (!tokens.length || tokens.length > 10) return '';
+  let yesSeen = false;
+  const kept = [];
+  for (const token of tokens) {
+    if (MERGE_SPLIT_FILLERS.has(token)) { if (MERGE_SPLIT_YES.has(token)) yesSeen = true; continue; }
+    kept.push(token);
+  }
+  if (!kept.length) return yesSeen ? 'yes' : '';
+  if (kept.every(token => MERGE_SPLIT_YES_ONLY.has(token))) return 'yes';
+  const core = foldVietnamese(kept.join(' ')).replace(/\s+/g, ' ').trim();
+  // Chữ có dấu không đổi nghĩa khi bỏ dấu ở các cụm trên, trừ "đừng"/"dừng"/"đúng" (dung) — đã không thuộc cụm nào.
+  if (MERGE_CORE.test(core)) return 'merge';
+  if (SPLIT_CORE.test(core)) return 'split';
+  if (MERGE_SPLIT_YES_PHRASE.test(core)) return 'yes';
   return '';
+}
+
+/** R15-fix4: tin có chữ gộp/ghép/chung/hủy/đổi/không/đừng/khỏi hay "?" — không được coi là "tách bằng SĐT + địa chỉ mới". */
+export function mergeSplitBlockWords(text) {
+  const raw = String(text || '').normalize('NFC').toLowerCase();
+  if (/\?/.test(raw)) return true;
+  const masked = raw.replace(/chung\s+c[ưu]/gu, ' ');
+  const accented = /(?<![\p{L}\p{N}])(?:gộp|ghép|chung|hủy|huỷ|đổi|không|đừng|khỏi|chẳng|hông|khum|thôi)(?![\p{L}\p{N}])/u;
+  if (accented.test(masked)) return true;
+  // Bản không dấu chỉ xét chữ gõ KHÔNG dấu (chữ "Hồng", "Đội" trong địa chỉ có dấu nên không bị bắt nhầm).
+  return masked.split(/[^\p{L}\p{N}]+/u).some(token => /^[a-z]+$/.test(token) && ['gop', 'ghep', 'chung', 'huy', 'doi', 'khong', 'ko', 'kg', 'k', 'hong', 'dung', 'khoi', 'thoi'].includes(token));
 }
 
 /** R15: mode cài đặt của một luật ứng viên (K1/K1b/K3/K4/K5…) — cờ chung (chuỗi) hay theo từng luật (đối tượng). */
@@ -1866,9 +1878,14 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       // Tin nối tiếp câu hỏi cũ ("… nên c hỏi lại", "sao chưa ghi") vẫn im dù có chữ mua/chốt — chỉ thông tin cứng (số, SĐT, giỏ,
       // tên túi, địa chỉ, hủy) mới cho qua.
       const staffWaitText = foldVietnamese(String(change.message?.text || '')).replace(/[,;:.!…]+/g, ' ').replace(/\s+/g, ' ');
-      const asksAgain = /\b(?:hoi lai|nen (?:c|chi|minh|e|em|a|anh|t|toi) hoi|sao (?:chua|khong|ko|k)|van chua|chua (?:thay|ghi|tra loi|rep)|(?:khong|ko|k|khoing|hong) (?:thay )?ghi)\b/.test(staffWaitText);
+      // R15-fix4 (phản biện M9): lời than / giục tiếp ("c đặt từ hôm qua rồi mà", "lâu vậy em, c đang chờ mua đây", "ủa c muốn lấy
+      // mà sao im vậy", "c chốt rồi mà, quà đâu em") có chữ đặt/mua/lấy/chốt nhưng vẫn là cùng chuyện đang chờ → im + thẻ.
+      const asksAgain = /\b(?:hoi lai|nen (?:c|chi|minh|e|em|a|anh|t|toi) hoi|sao (?:chua|khong|ko|k)|van chua|chua (?:thay|ghi|tra loi|rep)|(?:khong|ko|k|khoing|hong) (?:thay )?ghi)\b/.test(staffWaitText)
+        || /\b(?:roi ma|sao im|im (?:vay|the|luon|re)|lau (?:vay|the|qua|z|v)|(?:qua|don|hang) dau|dau (?:em|e|shop|vay|v|roi|r|a|het)|tu hom qua|hom qua roi|chua (?:nhan|giao|thay don))\b/.test(staffWaitText);
+      // R15-fix4: đang chờ câu trả lời gộp/tách — câu trả lời RÕ (readMergeSplitReply) là việc mới; câu khác để khối gộp/tách xử lý
+      // (đã báo bạn phụ trách → im + thẻ).
       const newBusiness = !asksAgain && (/\b(?:goi|tropical|mix|ap|kp|khu pho|tp|thanh pho|thi tran|so nha|ngo|hem|gop|ghep|tach|rieng|don moi|don khac|len don|chot|dat|mua|lay|stk|so tk|tai khoan|chuyen khoan|ck|thanh toan)\b/.test(staffWaitText)
-        || DELIVERY_NOTE.test(staffWaitText) || Boolean(conversation.pendingOrder?.awaitingConfirm && readMergeSplitAnswer(change.message?.text)));
+        || DELIVERY_NOTE.test(staffWaitText) || Boolean(conversation.pendingOrder?.awaitingConfirm && readMergeSplitReply(change.message?.text)));
       if (String(conversation.botLastTemplateId || '').startsWith('STAFF_WAIT_') && waitingAge < 30 * 60 * 1000 && change.message?.type === 'text'
         && !extractVietnamesePhone(String(change.message?.text || '')) && !change.message?.cart?.length
         && !/\d|\b(?:tui|bich|bit|hop|combo|xanh|vang|nau|cacao|gia|bao nhieu|bn|huy|dia chi|phuong|xa|quan|huyen|tinh|duong|thon|xom)\b/.test(staffWaitText)
@@ -2238,67 +2255,60 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // Đã hỏi "đặt thêm?" trong 30 phút (pendingOrder.at là lúc hỏi): không hỏi lại lần hai trong cùng
     // hội thoại — khách nhắn tin khác có/không thì xử lý bình thường, giữ cờ chờ (log: hỏi 2 lần trong 4 phút).
     const awaitingRecent = Boolean(conversation.pendingOrder?.awaitingConfirm) && Date.now() - (Number(conversation.pendingOrder?.at) || 0) < 30 * 60 * 1000;
-    // Dấu câu bỏ hết ("Đúng rồi, lên đơn giúp chị" cũng là đồng ý); "đơn mới" không số/không màu chính là đồng ý.
-    // Vòng 11 (P4): đọc có/không trên tin CUỐI của khách (không phải cụm gộp: "2 túi vàng nhé\nđúng rồi" là đồng ý).
-    // Câu hỏi có chữ "không" ("bát gáo dừa có tặng không", "giao nhanh không em") KHÔNG phải trả lời "không":
-    // chỉ là "không" khi tin mở đầu bằng từ phủ định, hay nói về đơn cũ (hủy, đơn cũ/trước, nhầm, kiểm tra,
-    // không phải…) mà không ở dạng hỏi "có/được … không".
-    const awaitingText = foldVietnamese(String(change.message?.text || '')).trim().replace(/[,;:.!…]+/g, ' ').replace(/\s+/g, ' ').trim();
-    const awaitingOther = /\d|\?/.test(awaitingText) || /\b(tui|goi|bich|xanh|vang|nau|cacao|combo|doi|sua|dia chi)\b/.test(awaitingText);
-    const awaitingStartsNo = /^(?:khong|ko|kg|k|hong|khum|hok|thoi|chua)\b/.test(awaitingText);
-    const awaitingQuestion = !awaitingStartsNo && (/\b(?:co|duoc|dc)\b.{0,40}\b(?:khong|ko|kg|k|hong)\b/.test(awaitingText)
-      || /\b(?:khong|ko|kg|hong)(?: (?:a|em|e|shop|ban|b|nhi|vay|v|z|ha|chi|c|anh))*$/.test(awaitingText));
-    // Vòng 12 (B3 #7): "Mình lấy 1 đơn thôi", "chỉ 1 đơn", "bỏ bớt 1 đơn" = KHÔNG đặt thêm (chữ số "1" từng làm awaitingOther đúng).
-    const onlyOneOrder = /\b(?:1|mot) don (?:thoi|la du|la duoc)\b|\bchi (?:1|mot) don\b|\bbo bot\b|\b(?:1|mot) don thoi\b/.test(awaitingText);
-    // R15-fix3 (phản biện N1/T7): câu trả lời gộp/tách đọc riêng (phủ định, câu hỏi, "thôi khỏi") — đã đọc được thì không còn là "không".
-    const mergeSplitAnswer = awaitingPending && message.type === 'text' ? readMergeSplitAnswer(change.message?.text) : '';
-    const awaitingNo = Boolean(awaitingPending) && message.type === 'text' && !mergeSplitAnswer && ((!awaitingOther && !awaitingQuestion
-      && (awaitingStartsNo || /\b(huy|don cu|don do|don kia|don truoc|nham|kiem tra|check|xem lai|(?:khong|ko|k|hong) phai)\b/.test(awaitingText))) || onlyOneOrder);
-    const awaitingYes = Boolean(awaitingPending) && !awaitingNo && message.type === 'text' && !awaitingOther && awaitingText.length <= 40
-      && /^(?:da|vang|dung|chuan|ok|oke|okie|okay|oki|co|u|uh|uk|um|uhm|phai|len don|chot|yes|dat|dat them|dat luon)(?: (?:a|roi|r|nha|nhe|nhen|em|e|shop|c|chi|anh|di|luon|nhe shop|nha shop|len don|len don moi|don moi|moi|dat them|dat|chot|dung|ok|da|vang|phai|vay|the|cho (?:em|minh|chi|anh|c|e)|giup (?:em|minh|chi|c|e)))*$/.test(awaitingText);
-    // R15 (chủ shop 03/10, quyết định 7): câu hỏi đặt thêm nay là "GỘP vào đơn đang có hay TÁCH đơn mới (gửi cùng địa chỉ cũ)".
-    // - "gộp / chung / ghép / thêm vào" → đơn bot tạo ≤ 60 phút: cộng món vào đơn (sửa đơn); quá 60 phút: ghi chú ghép cho nhân
-    //   viên (ORDER_CHANGE_STAFF); đơn ngoài hội thoại: bạn phụ trách (STAFF_WAIT_*);
-    // - "tách / riêng / đơn mới / đơn khác" → đơn mới, SĐT + địa chỉ lấy lại của đơn cũ (không xin lại);
-    // - đơn đang có < 24 giờ mà khách chỉ "ok / đúng" (không rõ gộp hay tách) → bạn phụ trách (STAFF_WAIT_*) + thẻ, giữ giỏ chờ.
-    //   Đơn cũ hơn (24 giờ – 7 ngày) giữ cách cũ: "đúng" = lên đơn mới.
-    // R15-fix3 (phản biện N1/N2/C1/C2/T7/L4):
-    // - câu trả lời đọc bằng readMergeSplitAnswer: phủ định ("không phải đơn mới", "không tách") / câu hỏi không còn thành "tách";
-    // - tin có SĐT / địa chỉ: không lên đơn bằng SĐT + địa chỉ CŨ. SĐT hay địa chỉ KHÁC đơn cũ = tách, để luồng đơn thường lên đơn
-    //   với đúng thông tin trong tin (splitByInfo); thông tin trùng đơn cũ / "giao như cũ" mà không nói gộp → hỏi lại gộp/tách
-    //   một lần (không im), lần hai → bạn phụ trách;
-    // - mẫu ORDER_EXISTING_CONFIRM đang dùng còn là LỜI CŨ ("… đúng không? nhắn "đúng" là em lên đơn liền") → "đúng/ok" = lên đơn
-    //   như bản cũ (đơn mới, SĐT/địa chỉ đơn cũ); lời mới (hỏi gộp/tách) → "đúng/ok" mơ hồ → bạn phụ trách;
-    // - "ok đặt thêm" / "đặt luôn" / "lên đơn mới" = tách với SĐT/địa chỉ cũ (không xin lại).
+    // R15-fix4 (chủ shop 03/10: "hỏi khách gộp hay tách, làm theo khách, khách không quyết được → nhân viên"). Thay cách đọc
+    // từng biến thể (readMergeSplitAnswer / splitByInfo / reasked / "không" kể đơn cũ / "thôi khỏi" bỏ giỏ — đã sinh lỗi 3 vòng:
+    // "đừng tách" thành tách, "tách gửi mẹ" dùng địa chỉ cũ, "hủy đơn cũ, lên đơn mới" thành hai đơn, im ↔ hỏi lại xen kẽ…).
+    // Bot CHỈ tự làm khi câu trả lời NGẮN VÀ RÕ (readMergeSplitReply):
+    // - 'merge' ("gộp", "ghép chung", "gửi/giao/ship chung", "gộp vào đơn cũ"…) → đơn bot ≤ 60 phút: cộng vào đơn; quá 60 phút:
+    //   ghi chú ghép cho nhân viên (ORDER_CHANGE_STAFF); đơn ngoài hội thoại: bạn phụ trách;
+    // - 'split' ("tách", "đơn mới", "đơn riêng", "lên đơn mới", "(ok) đặt thêm"…) → đơn mới, SĐT + địa chỉ của giỏ chờ / đơn cũ;
+    // - tin có SĐT + địa chỉ ĐẦY ĐỦ, địa chỉ KHÁC đơn cũ, không có chữ gộp/ghép/chung/hủy/đổi/không/đừng/khỏi/"?" → tách với thông
+    //   tin mới (luồng đơn thường; đơn ra phải đúng SĐT trong tin và không mang địa chỉ cũ, không thì bạn phụ trách);
+    // - 'yes' ("đúng/ok/vâng/ừ/dạ/đúng rồi"…): mẫu ORDER_EXISTING_CONFIRM đang chạy còn LỜI CŨ ("… nhắn "đúng" là em lên đơn"), hay
+    //   mẫu đơn ngoài ORDER_EXISTING_CONFIRM_PHONE (cũng "nhắn đúng") → tách như bản cũ (an toàn C2); lời mới (hỏi gộp/tách) → mơ hồ;
+    // - MỌI câu khác (phủ định, câu hỏi, "tùy", "hủy", tên món/số túi, SĐT hay địa chỉ thiếu, "gửi mẹ" không kèm địa chỉ…) → bạn
+    //   phụ trách (STAFF_WAIT_*) + thẻ, giỏ mới GIỮ NGUYÊN, không tạo/sửa/hủy đơn. STAFF_WAIT chỉ gửi MỘT lần cho giỏ chờ này
+    //   (cờ staffAsked); lượt sau trong lúc chờ: im + thẻ, trừ câu rõ như trên → làm theo. Không bao giờ hỏi lại gộp/tách.
+    const awaitingMessage = change.message && typeof change.message === 'object' ? { ...change.message, type: message.type } : message;
+    const awaitingTextRaw = String(awaitingMessage.text || '');
+    const awaitingTextual = Boolean(awaitingPending) && message.type === 'text' && conversation.source !== 'comment';
+    const mergeSplitKind = awaitingTextual ? readMergeSplitReply(awaitingTextRaw) : '';
     const awaitingOrderRef = recentOrder?.id && isActiveOrder(recentOrder) ? recentOrder : null;
-    const awaitingRecentDay = Boolean(awaitingOrderRef) && Date.now() - (Number(awaitingOrderRef.createdAt) || 0) < 24 * 60 * 60 * 1000;
     const legacyExistingAsk = (() => {
+      // Câu hỏi đơn NGOÀI hội thoại dùng ORDER_EXISTING_CONFIRM_PHONE (lời "nhắn đúng") khi có mẫu đó.
+      // (usablePendingOrder bỏ trường externalOrder — đọc trên giỏ chờ gốc.)
+      if (conversation.pendingOrder?.externalOrder && !awaitingOrderRef && templates?.ORDER_EXISTING_CONFIRM_PHONE) return true;
       const asked = foldVietnamese(String(templates?.ORDER_EXISTING_CONFIRM || ''));
       return /\bnhan\b/.test(asked) && /\bdung\b/.test(asked) && !/\b(?:gop|tach)\b/.test(asked);
     })();
-    const awaitingMessage = change.message && typeof change.message === 'object' ? { ...change.message, type: message.type } : message;
-    const awaitingPhoneNow = awaitingPending && message.type === 'text' ? extractVietnamesePhone(String(awaitingMessage.text || '')) : '';
-    const awaitingAddressNow = Boolean(awaitingPending) && message.type === 'text' && addressWordsInText(awaitingMessage);
-    const awaitingInfo = Boolean(awaitingPhoneNow) || awaitingAddressNow;
     const squashInfo = value => foldVietnamese(String(value || '').replace(/^\((?:live|freeship)\)\s*/i, '')).replace(/[^a-z0-9]+/g, '');
-    const knownAwaitPhones = [awaitingPending?.phone, awaitingOrderRef?.phone].map(toLocalPhoneDigits).filter(Boolean);
     const knownAwaitAddresses = [awaitingPending?.address, awaitingOrderRef?.rawAddress, awaitingOrderRef?.address].map(squashInfo).filter(value => value.length >= 8);
-    const typedAwaitAddress = squashInfo(stripPhone(String(awaitingMessage.text || '')));
-    const awaitingNewInfo = (Boolean(awaitingPhoneNow) && !knownAwaitPhones.includes(toLocalPhoneDigits(awaitingPhoneNow)))
-      || (awaitingAddressNow && !knownAwaitAddresses.some(known => known.includes(typedAwaitAddress) || typedAwaitAddress.includes(known)));
-    const awaitingMerge = mergeSplitAnswer === 'merge';
-    // Tách (hay trả lời bằng SĐT/địa chỉ mới) kèm thông tin trong tin: luồng đơn thường lên đơn với đúng SĐT/địa chỉ đó.
-    const splitByInfo = Boolean(awaitingPending) && message.type === 'text' && ((mergeSplitAnswer === 'split' && awaitingInfo) || (!mergeSplitAnswer && awaitingNewInfo));
-    const yesAsSplit = awaitingYes && awaitingRecentDay && (legacyExistingAsk || /\b(?:don moi|dat them|dat luon|len don moi)\b/.test(awaitingText));
-    const awaitingSplit = Boolean(awaitingPending) && message.type === 'text' && !splitByInfo && (mergeSplitAnswer === 'split' || yesAsSplit);
-    // Thông tin trùng đơn cũ / "giao như cũ" (không nói gộp/tách) → hỏi lại gộp/tách một lần, lần hai → bạn phụ trách.
-    const sameInfoAgain = Boolean(awaitingPending) && message.type === 'text' && !mergeSplitAnswer && !awaitingYes && !awaitingNo && !splitByInfo
-      && (awaitingInfo || saysOldAddress(awaitingMessage.text));
+    const sameAsKnownAddress = value => { const typed = squashInfo(value); return typed.length > 0 && knownAwaitAddresses.some(known => known.includes(typed) || typed.includes(known)); };
+    const awaitingPhoneNow = awaitingTextual ? extractVietnamesePhone(awaitingTextRaw) : '';
+    const awaitingAddressText = awaitingPhoneNow ? stripPhone(awaitingTextRaw).trim() : '';
+    // Tách bằng thông tin mới: SĐT + địa chỉ đầy đủ (describeDeliveryAddress) khác đơn cũ, không chữ phủ định/gộp/hủy/đổi/câu hỏi.
+    const splitByNewInfo = awaitingTextual && !mergeSplitKind && Boolean(awaitingPhoneNow) && awaitingAddressText.length <= 500
+      && !mergeSplitBlockWords(awaitingTextRaw) && describeDeliveryAddress(awaitingAddressText).complete && !sameAsKnownAddress(awaitingAddressText);
+    const awaitingYes = mergeSplitKind === 'yes';
+    const awaitingNo = false;
+    // Sau khi đã báo bạn phụ trách (staffAsked), "ok/ừ/vâng" là đáp lời "chờ em chút" — không còn là đồng ý câu hỏi cũ.
+    const awaitingSplit = mergeSplitKind === 'split' || (awaitingYes && legacyExistingAsk && !conversation.pendingOrder?.staffAsked);
+    const awaitingMerge = mergeSplitKind === 'merge';
+    const awaitingUnclear = awaitingTextual && !awaitingSplit && !awaitingMerge && !splitByNewInfo;
     const staffWaitReply = () => {
       const wait = staffWaitTemplate();
       const staff = renderChatbotReply({ template_id: wait.templateId, values: { when: wait.when } }, templates, replyContext);
-      return staff.templateId === wait.templateId ? { ...staff, attention: true, staffWait: true } : null;
+      return staff.templateId === wait.templateId
+        ? { ...staff, attention: true, staffWait: true, order: undefined, pendingOrder: { ...(conversation.pendingOrder || {}), awaitingConfirm: true, staffAsked: true, at: Date.now() } }
+        : null;
     };
+    // Đã báo bạn phụ trách cho giỏ chờ này: câu không rõ tiếp theo → im + thẻ (không gửi STAFF_WAIT lần hai, không hỏi lại).
+    if (awaitingUnclear && conversation.pendingOrder?.staffAsked) {
+      console.log(`Đang chờ bạn phụ trách (câu gộp/tách chưa rõ): im + thẻ (${conversation.id})`);
+      await saveBotState(conversation.id, { addLabelEvents: ['handoff'], ...(change.message?.id || change.message?.mid ? { botHandledMessageId: String(change.message.id || change.message.mid) } : {}) }).catch(() => {});
+      results.push({ conversationId: conversation.id, skipped: 'đang chờ bạn phụ trách (gộp/tách)' });
+      return;
+    }
     const pendingValue = pending => {
       const slots = ['Product_N1', 'No_A', 'Product_N2', 'No_B', 'Product_N3', 'No_C'];
       const value = {};
@@ -2306,7 +2316,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       return value;
     };
     const mergeReply = awaitingMerge ? (() => {
-      if (!awaitingOrderRef || awaitingPending.externalOrder) return staffWaitReply();
+      if (!awaitingOrderRef || conversation.pendingOrder?.externalOrder) return staffWaitReply();
       // Chữ soạn đơn nêu rõ món thêm ("ghép vào đơn thêm 1 Granola Túi Vàng 350g") để bộ soạn cộng đúng món vào đơn cũ.
       const addedText = (awaitingPending.items || []).map(item => `${Number(item.quantity) || 1} ${item.product}`).join(' và ');
       const merged = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', ...pendingValue(awaitingPending) }, templates, { ...replyContext, pendingOrder: null, messageText: `ghép vào đơn thêm ${addedText}` });
@@ -2323,31 +2333,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       console.log(`Khách chọn TÁCH đơn mới (dùng lại SĐT/địa chỉ đơn cũ): ${created.templateId} (${conversation.id})`);
       return created;
     })() : null;
-    const ambiguousYes = awaitingYes && awaitingRecentDay && !yesAsSplit && !awaitingSplit && !awaitingMerge;
-    // "Thôi khỏi" → bỏ giỏ mới (không tạo đơn, không kể lại đơn cũ).
-    const dropReply = mergeSplitAnswer === 'drop' && awaitingPending ? (() => {
-      const postponed = renderChatbotReply({ template_id: 'ORDER_POSTPONED' }, templates, replyContext);
-      return postponed.templateId === 'ORDER_POSTPONED' ? { ...postponed, pendingOrder: null } : null;
-    })() : null;
-    // Hỏi lại gộp/tách đúng một lần (cờ reasked trên giỏ chờ), lần hai → bạn phụ trách.
-    const reaskReply = sameInfoAgain ? (() => {
-      if (conversation.pendingOrder?.reasked || !awaitingOrderRef || awaitingPending.externalOrder) return staffWaitReply();
-      const items = awaitingPending.items || [];
-      const priced = items.length ? priceBasket(items.map(item => ({ sku: item.code, product: item.product, quantity: item.quantity })), { livestream: replyContext.livestream }) : null;
-      const cart = `${items.map(item => `${Number(item.quantity) || 1} ${item.product}`).join(' + ')}${priced?.priceable && priced.total ? ` – tổng ${Number(priced.total).toLocaleString('vi-VN')}đ` : ''}`;
-      const ask = renderChatbotReply({ template_id: 'ORDER_EXISTING_CONFIRM', cart }, templates, { ...replyContext, recentOrder: awaitingOrderRef });
-      if (ask.templateId !== 'ORDER_EXISTING_CONFIRM' || !ask.messages?.length) return staffWaitReply();
-      console.log(`Khách trả lời câu gộp/tách bằng thông tin cũ: hỏi lại một lần (${conversation.id})`);
-      return { ...ask, attention: true, mergeSplitReask: true, pendingOrder: { ...(conversation.pendingOrder || {}), at: Date.now(), awaitingConfirm: true, reasked: true, ...(awaitingPhoneNow && !conversation.pendingOrder?.phone ? { phone: awaitingPhoneNow } : {}) } };
-    })() : null;
-    const awaitingStaffReply = ['question', 'unclear'].includes(mergeSplitAnswer) ? staffWaitReply() : null;
-    const existingConfirmReply = mergeReply || splitReply || dropReply || awaitingStaffReply || reaskReply || (ambiguousYes ? staffWaitReply() : null) || (awaitingYes && !ambiguousYes
-      ? renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Phone_Number: awaitingPending.phone || '0', Customer_Address: awaitingPending.address || '0' }, templates, replyContext)
-      // "Không": kể lại đơn đang có — đơn trong hội thoại, hay đơn ngoài (landing/POS) đã lưu kèm giỏ chờ.
-      // C2 (01/10): đơn ngoài (landing/POS theo SĐT, không thuộc hội thoại) không được kể lại — nhân viên tra (ORDER_STATUS_CHECKING).
-      : awaitingNo ? (!recentOrder && conversation.pendingOrder?.externalOrder && templates?.ORDER_STATUS_CHECKING
-        ? { ...renderChatbotReply({ template_id: 'ORDER_STATUS_CHECKING' }, templates, replyContext), attention: true, pendingOrder: null }
-        : { ...renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, { ...replyContext, recentOrder: recentOrder || conversation.pendingOrder?.externalOrder || null }), attention: true, pendingOrder: null }) : null);
+    if (awaitingUnclear) console.log(`Câu trả lời gộp/tách chưa rõ ("${awaitingTextRaw.slice(0, 40)}"): bạn phụ trách, giữ giỏ (${conversation.id})`);
+    const existingConfirmReply = mergeReply || splitReply || (awaitingUnclear ? staffWaitReply() : null);
     // Ngay sau bảng giá một sản phẩm, "dùng thử" / "combo 2" / "3 túi" là khách đã
     // chọn: lên bước xin SĐT/địa chỉ với đúng sản phẩm vừa báo giá. Mô hình hay
     // gửi lại bảng giá vì chữ "dùng thử" có sẵn trong bảng (khách bỏ đi).
@@ -2963,7 +2950,9 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const found = folded.match(/\b(\d{1,2}|mot|hai)\s*(?:tui|goi|bich|bit|bi)\b/);
       return found ? ({ mot: 1, hai: 2 })[found[1]] || Number(found[1]) || 0 : 0;
     })();
-    const partialQuestion = basketHeld && !nonText && conditionalAsk && partialCount > 0 && partialCount < heldBagTotal;
+    // R15-fix4 (phản biện M8): câu THÊM ("thêm 1 túi vàng được không em", "lấy thêm 1 túi xanh nữa được ko") không phải câu hỏi
+    // về một phần giỏ — để giỏ mới (2 Xanh + 1 Vàng / 3 Xanh) như 8c20fe3.
+    const partialQuestion = basketHeld && !nonText && conditionalAsk && partialCount > 0 && partialCount < heldBagTotal && !/\b(?:them|nua)\b/.test(folded);
     const partialSwap = (() => {
       if (!partialQuestion || heldItemsNow.length !== 1) return null;
       const swap = folded.match(/\b(?:doi|thay|chuyen)\s+(\d{1,2}|mot)\s*(?:tui|goi|bich|bit|bi)?\s*(?:sang|thanh|qua|lay|ra)?\s*(?:tui |vi |mau )?(xanh|vang|nau|cacao)\b/);
@@ -3105,9 +3094,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       // R15-fix3 (L1): "chỉ vàng" (còn dấu, hay "chi <màu>" đầu tin) là chọn bớt vị — không hỏi lại.
       // ("chị lấy" bỏ dấu cũng là "chi lay", "địa chỉ" không tính.)
       const saysOnly = /(?<![\p{L}])chỉ(?![\p{L}])/iu.test(String(message.text || '').normalize('NFC').replace(/địa\s*chỉ/giu, ' ')) || /^chi (?:xanh|vang|nau|cacao|ca cao)\b/.test(folded);
-      const saysReduce = saysOnly || /\b(?:bot|bo|bo bot|khong lay|ko lay|k lay|kg lay|chi lay|chi can|chi mua|chi dat|thoi|huy|tru|giam|it lai|con lai)\b/.test(folded);
+      // R15-fix4 (M1): "bỏ" xét chữ CÒN DẤU — "bố" bỏ dấu cũng là "bo" ("Túi vàng cho bố" không phải bớt).
+      const saysDrop = /(?<![\p{L}])bỏ(?![\p{L}])/u.test(String(message.text || '').normalize('NFC').toLowerCase());
+      const saysReduce = saysOnly || saysDrop || /\b(?:bot|bo bot|khong lay|ko lay|k lay|kg lay|chi lay|chi can|chi mua|chi dat|thoi|huy|tru|giam|it lai|con lai)\b/.test(folded);
       // Ngoài phạm vi diff (phản biện s6b): tin nói THÊM ("thêm 1 túi vàng nữa nha") mà đơn sửa lại ÍT túi hơn → không áp, dù tin có số.
-      const saysAdd = /\b(?:them|nua|cong them|lay them|dat them)\b/.test(folded) && !/\b(?:bot|bo|khong lay|ko lay|huy|giam|it lai)\b/.test(folded);
+      // R15-fix4: "không thêm nữa" / "khỏi thêm" / "không lấy thêm" là phủ định, không phải nói thêm (asksToAdd).
+      const saysAdd = asksToAdd(folded) && !saysDrop && !/\b(?:bot|khong lay|ko lay|huy|giam|it lai)\b/.test(folded);
       if (before > 0 && after > 0 && after < before && ((!saysCount && !saysReduce) || saysAdd)) {
         const wrong = renderChatbotReply({ template_id: 'ORDER_WRONG' }, templates, replyContext);
         if (wrong.templateId === 'ORDER_WRONG') {
@@ -3607,9 +3599,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       || CANCEL_ORDER.test(folded) || HOLD_DELIVERY.test(folded) || DELIVERY_NOTE.test(folded));
     // R13: lời xin SĐT/địa chỉ của giỏ Shop sau tin "đã nhận giỏ, chờ em kiểm tra" (cartAckSent) không phải lặp.
     // R15: câu hỏi lại vị khi khách nêu vị thứ hai sau "N ≥ 3 túi" (flavourSplit 'ask') là câu hỏi mới, không phải lặp.
-    // R15-fix3 (C1): hỏi lại gộp/tách một lần (reaskReply, khách trả lời bằng thông tin cũ) là chủ ý, không phải lặp.
-    const repeatsBeforeInfo = (repeatsText || repeatsTemplate) && !changedCart && !orderAction && !answeredWhileHeld && !cartAckSent && !reply.flavourSplit
-      && !reply.mergeSplitReask;
+    const repeatsBeforeInfo = (repeatsText || repeatsTemplate) && !changedCart && !orderAction && !answeredWhileHeld && !cartAckSent && !reply.flavourSplit;
     if (repeatsBeforeInfo && newInfoText) {
       console.log(`Tin có thông tin mới (SĐT/địa chỉ/hủy/ghi chú) trùng câu vừa gửi: vẫn trả lời + thẻ (${conversation.id})`);
       if (['ASK_FLAVOR', 'ORDER_INFO_ASK_FLAVOR'].includes(reply.templateId) && phoneInText) {
@@ -3761,12 +3751,25 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // Chỉ lời "đúng" tường minh cho câu hỏi vừa gửi mới được bỏ bước hỏi; giỏ mới (luật giỏ / mô hình)
     // trong lúc đang chờ, hay cờ chờ còn sót khi giỏ đã quá hạn, đều hỏi lại với giỏ mới.
     // R15: "tách đơn mới" (splitReply) cũng là lời quyết tường minh cho câu hỏi gộp/tách.
-    // R15-fix3 (N2/C1): khách đã chọn tách bằng SĐT/địa chỉ trong tin (splitByInfo, hay ở lượt trước — cờ splitChosen trên giỏ
-    // chờ khi tin chỉ có SĐT) → đơn thường lên với thông tin đó, không hỏi gộp/tách lại, không im.
-    const explicitYes = ((awaitingYes || awaitingSplit) && reply === existingConfirmReply) || (splitByInfo && !existingConfirmReply)
-      || (conversation.pendingOrder?.splitChosen === true && !isComment);
-    if (splitByInfo && !existingConfirmReply && reply.pendingOrder && typeof reply.pendingOrder === 'object') {
-      reply = { ...reply, pendingOrder: { ...reply.pendingOrder, awaitingConfirm: false, splitChosen: true } };
+    // R15-fix4: khách tách bằng SĐT + địa chỉ đầy đủ MỚI (splitByNewInfo) → đơn thường lên với đúng thông tin đó. Đơn ra phải mang
+    // đúng SĐT trong tin và KHÔNG mang địa chỉ cũ (mô hình điền lại địa chỉ cũ / sửa đơn cũ → bạn phụ trách). Bộ soạn còn hỏi thêm
+    // (phường/xã…) → cờ splitChosenKey gắn với ĐÚNG giỏ đó, 30 phút: lượt bổ sung lên đơn không hỏi gộp/tách lại; giỏ đổi, đơn đã
+    // tạo (giỏ chờ xoá), quá 30 phút hay tin có chữ gộp/hủy/đổi/không… thì cờ hết hiệu lực (không sống 24 giờ như splitChosen cũ).
+    const splitChosenLive = !isComment && Boolean(conversation.pendingOrder?.splitChosenKey) && Boolean(reply.order?.orderKey)
+      && String(reply.order.orderKey) === String(conversation.pendingOrder.splitChosenKey)
+      && Date.now() - (Number(conversation.pendingOrder.splitChosenAt) || 0) < 30 * 60 * 1000
+      && message.type === 'text' && !mergeSplitBlockWords(String(change.message?.text || ''));
+    const explicitYes = ((awaitingYes || awaitingSplit) && reply === existingConfirmReply) || (splitByNewInfo && !existingConfirmReply) || splitChosenLive;
+    if (splitByNewInfo && !existingConfirmReply) {
+      const editsOld = Boolean(reply.order?.updateOrderId || reply.order?.cancelOrderId || reply.order?.noteOrderId);
+      const wrongInfo = Boolean(reply.order) && (toLocalPhoneDigits(reply.order.phone) !== toLocalPhoneDigits(awaitingPhoneNow) || sameAsKnownAddress(reply.order.rawAddress || reply.order.address));
+      if (editsOld || wrongInfo) {
+        console.log(`Tách bằng SĐT/địa chỉ mới nhưng đơn ra ${editsOld ? 'sửa đơn cũ' : 'sai SĐT/địa chỉ'}: bạn phụ trách (${conversation.id})`);
+        const staff = staffWaitReply();
+        if (staff) reply = staff;
+      } else if (!reply.order && reply.pendingOrder && typeof reply.pendingOrder === 'object' && reply.pendingOrder.key) {
+        reply = { ...reply, pendingOrder: { ...reply.pendingOrder, awaitingConfirm: false, staffAsked: false, splitChosenKey: String(reply.pendingOrder.key), splitChosenAt: Date.now() } };
+      }
     }
     // Tin là câu hỏi GIÁ ("E mua 2 túi giá bao nhiêu?") mà mô hình chốt đơn: báo giá, không hỏi "đặt thêm?"
     // (ca Đào Bia bị hỏi xác nhận đặt thêm 2 Xanh). Một loại → bảng giá loại đó; nhiều loại → bảng mix.
@@ -3850,7 +3853,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const ask = renderChatbotReply({ template_id: 'ORDER_EXISTING_CONFIRM', cart }, templates, { ...replyContext, recentOrder: existingRecent });
       if (ask.templateId === 'ORDER_EXISTING_CONFIRM' && ask.messages?.length) {
         console.log(`Giỏ mới khi đang có đơn ${existingRecent.id} (< 24 giờ): hỏi gộp hay tách (${conversation.id})`);
-        reply = { ...ask, order: undefined, pendingOrder: { ...reply.pendingOrder, at: Date.now(), awaitingConfirm: true } };
+        reply = { ...ask, order: undefined, pendingOrder: { ...reply.pendingOrder, at: Date.now(), awaitingConfirm: true, staffAsked: false, splitChosenKey: '' } };
       }
     }
     // R14 (inbox3 S1): giỏ đã bị giữ IM LẶNG một lần (đang chờ "đặt thêm?") — lượt sau (khách hỏi chuyện khác: bảng giá

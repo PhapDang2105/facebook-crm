@@ -360,7 +360,8 @@ test('B3 #7 / #22: "Mình lấy 1 đơn thôi" khi đang hỏi đặt thêm = KH
   const sim = new Sim({ botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: Date.now() - 60000, pendingOrder: pending, customerOrders: [{ id: 'o1', createdAt: Date.now() - 3600000, products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }], status: 'Mới' }] });
   const out = await sim.send('Mình lấy 1 đơn thôi');
   assert.equal(out.created.length, 0);
-  assert.equal(out.result.templateId, 'ORDER_STATUS');
+  // R15-fix4 (thiết kế gộp/tách mới, chủ shop 03/10): câu không rõ gộp hay tách → bạn phụ trách (trước: ORDER_STATUS kể đơn cũ).
+  assert.match(out.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/);
   const busy = new Sim();
   busy.extraDeps.requestReply = async () => {
     busy.recent.push({ id: 'staff-1', direction: 'outgoing', type: 'text', text: 'Dạ chị ơi em báo giá ạ', staff: true, createdAt: Date.now() + 5 });

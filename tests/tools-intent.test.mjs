@@ -170,7 +170,8 @@ test('build-dataset --from-decision-log: nhãn = final, labelSource pipeline, ct
 test('dataset-context: giỏ suy từ câu bot trước, che SĐT', () => {
   const prevBot = 'Dạ em vẫn đang giữ đơn 2 Granola Túi Xanh 450g, 1 Granola Túi Vàng 350g – tổng 447.000đ cho chị ạ';
   assert.equal(hasBasketOf({ lastTemplate: '', prevBot, prevBotAgeMin: 30 }), true);
-  assert.equal(hasBasketOf({ lastTemplate: '', prevBot, prevBotAgeMin: 130 }), false, 'giỏ quá 120 phút');
+  assert.equal(hasBasketOf({ lastTemplate: '', prevBot, prevBotAgeMin: 130 }), true, 'giỏ 130 phút vẫn còn hạn (24 giờ)');
+  assert.equal(hasBasketOf({ lastTemplate: '', prevBot, prevBotAgeMin: 24 * 60 }), false, 'giỏ quá 24 giờ');
   assert.equal(hasBasketOf({ lastTemplate: 'ASK_FLAVOR', prevBot: '', prevBotAgeMin: 1 }), false, 'ASK_FLAVOR chưa có túi');
   assert.equal(hasBasketOf({ lastTemplate: 'ORDER_ADDRESS', prevBot: '', prevBotAgeMin: 1 }), true);
   assert.equal(basketItemsOf({ lastTemplate: 'ORDER_ADDRESS_REMIND', prevBot }), 3);

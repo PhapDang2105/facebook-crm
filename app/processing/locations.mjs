@@ -22,7 +22,19 @@ let index = null;
 /** Bỏ dấu, viết thường, đ→d; mỗi ký tự gốc cho đúng một ký tự để giữ nguyên vị trí. */
 const SEPARATORS = ',;\n';
 
+// Nhớ kết quả theo ký tự (hàm thuần): bộ đọc địa chỉ gọi hàm này cho từng ký tự của mỗi lần đọc.
+const normalizedChars = new Map();
 function normalizeChar(char) {
+  let normalized = normalizedChars.get(char);
+  if (normalized === undefined) {
+    normalized = normalizeCharUncached(char);
+    if (normalizedChars.size >= 8192) normalizedChars.clear();
+    normalizedChars.set(char, normalized);
+  }
+  return normalized;
+}
+
+function normalizeCharUncached(char) {
   if (SEPARATORS.includes(char)) return char;
   const lower = char.toLowerCase();
   if (lower === 'đ') return 'd';
@@ -958,8 +970,28 @@ export function clampAddressText(text) {
   return value.length > MAX_ADDRESS_LENGTH ? value.slice(0, MAX_ADDRESS_LENGTH) : value;
 }
 
+// Một lượt địa chỉ đọc cùng chuỗi ở nhiều chỗ (engine, luật, luồng đơn, bộ soạn đơn): nhớ ~200 kết quả gần nhất của
+// chỉ mục địa giới đã nạp (loadLocationIndex). Kết quả dùng chung giữa các lần gọi — nơi gọi KHÔNG được sửa nó
+// (tests/opt-bot-locations-cache.test.mjs đóng băng kết quả rồi chạy các hàm dùng nó).
+const RESOLVE_CACHE_MAX = 200;
+const resolvedAddresses = new Map();
+
 export function resolveAddress(text, locationIndex = loadLocationIndex()) {
   text = clampAddressText(text);
+  if (locationIndex !== index) return resolveAddressUncached(text, locationIndex);
+  const cached = resolvedAddresses.get(text);
+  if (cached) {
+    resolvedAddresses.delete(text);
+    resolvedAddresses.set(text, cached);
+    return cached;
+  }
+  const result = resolveAddressUncached(text, locationIndex);
+  resolvedAddresses.set(text, result);
+  if (resolvedAddresses.size > RESOLVE_CACHE_MAX) resolvedAddresses.delete(resolvedAddresses.keys().next().value);
+  return result;
+}
+
+function resolveAddressUncached(text, locationIndex) {
   let first = resolveAddressOnce(text, locationIndex);
   if (first.province && (first.ward || first.postMerger)) return first;
   // R13 (K6): không ra tỉnh vì sau tên tỉnh còn mốc/ghi chú ("… hải bối đông anh hà nội quán đốp cafe", "… triệu sơn

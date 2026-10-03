@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { tempDir } from './helpers/temp-dir.mjs';
 
 // Hộp thư thử riêng: storePancakeEvents ghi vào messaging-store.
@@ -248,7 +249,8 @@ test('ảnh lớn hơn 500 KB được thu nhỏ và nén sang JPEG trước khi
   const small = { buffer: Buffer.alloc(1000, 1), filename: 'nho.png', mime: 'image/png' };
   assert.equal(await fitImageForPancake(small), small);
   // Ảnh nhiễu 1600×1600 nén PNG vẫn vài MB, giống ảnh sản phẩm chụp thật.
-  const noise = Buffer.from(Array.from({ length: 1600 * 1600 * 3 }, () => Math.floor(Math.random() * 256)));
+  // randomBytes: cùng nhiễu đều 0–255 như Math.random nhưng sinh tức thì (Array.from 7,7 triệu phần tử mất ~2 giây).
+  const noise = randomBytes(1600 * 1600 * 3);
   const bigPng = await sharp(noise, { raw: { width: 1600, height: 1600, channels: 3 } }).png().toBuffer();
   assert.ok(bigPng.length > pancakeUploadLimit, `ảnh thử phải lớn hơn giới hạn (${bigPng.length})`);
   const fitted = await fitImageForPancake({ buffer: bigPng, filename: 'xanh.png', mime: 'image/png' });
@@ -263,8 +265,8 @@ test('ảnh PNG nền trong suốt nén sang JPEG thì nền thành trắng, kh�
   const { default: sharp } = await import('sharp');
   // Ảnh trong suốt lớn (nhiễu ở kênh màu, alpha = 0) để chắc chắn phải nén.
   const size = 1400;
-  const raw = Buffer.alloc(size * size * 4);
-  for (let i = 0; i < raw.length; i += 4) { raw[i] = Math.random() * 255; raw[i + 1] = Math.random() * 255; raw[i + 2] = Math.random() * 255; raw[i + 3] = 0; }
+  const raw = randomBytes(size * size * 4);
+  for (let i = 3; i < raw.length; i += 4) raw[i] = 0;
   const png = await sharp(raw, { raw: { width: size, height: size, channels: 4 } }).png().toBuffer();
   const fitted = await fitImageForPancake({ buffer: png, filename: 'trong.png', mime: 'image/png' });
   const { data, info } = await sharp(fitted.buffer).raw().toBuffer({ resolveWithObject: true });

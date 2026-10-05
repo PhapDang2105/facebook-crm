@@ -15,9 +15,11 @@ const { followUpRelayErrorText } = await import('../app/follow-up.mjs');
 const render = (id, extra = {}) => renderChatbotReply({ template_id: id }, seed, { customer: { gender: 'female' }, ...extra });
 
 test('HEALTH_CAUTION (quyết định 11): đúng chữ chủ shop, không nói mẹ sau sinh', () => {
-  assert.equal(seed.HEALTH_CAUTION, 'Dạ granola bên em là thực phẩm thông thường, không thêm đường, không phải thuốc hay thực phẩm chức năng ạ. Người đang điều trị bệnh (huyết áp, tim mạch…) {title} nên hỏi bác sĩ về khẩu phần phù hợp; nếu dùng thì ăn lượng vừa phải (2–3 muỗng), kèm sữa chua không đường nha ạ.');
+  // Chủ shop 05/10: granola CÓ mật thốt nốt + đường mạch nha — bỏ "không thêm đường" (trước đây test khẳng định câu đó).
+  assert.equal(seed.HEALTH_CAUTION, 'Dạ granola bên em là thực phẩm thông thường, không phải thuốc hay thực phẩm chức năng ạ; sản phẩm có dùng mật thốt nốt và đường mạch nha để tạo vị ngọt nhẹ. Người đang điều trị bệnh (huyết áp, tim mạch, tiểu đường…) {title} nên hỏi ý kiến bác sĩ về khẩu phần phù hợp; nếu dùng thì ăn lượng vừa phải (2–3 muỗng), kèm sữa chua không đường nha ạ.');
   const text = render('HEALTH_CAUTION').messages.join(' ');
-  assert.match(text, /chị nên hỏi bác sĩ/);
+  assert.match(text, /chị nên hỏi ý kiến bác sĩ/);
+  assert.doesNotMatch(text, /không thêm đường/);
   assert.doesNotMatch(text, /sau sinh|cho con bú/);
 });
 

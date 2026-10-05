@@ -54,10 +54,12 @@ test('#4 "Đặt trên ap r … giao tới đâu r / Đặt 3 bịch" (…603949
     assert.ok(!result.value.Customer_Address, text);
   }
   // Tắt luật thử: luật giỏ BAGS_ADDRESS cũng không bắt.
-  assert.notEqual(ruleIntent('Gọi đt có đc đâu\nĐặt trên ap r nhưng làm sao đê biết hàng giao tới đâu r\nĐặt 3 bịch', { ...ctx, experimentalRules: 'off' })?.rule, 'BAGS_ADDRESS');
-  // "ấp" thật trong địa chỉ vẫn là địa chỉ.
+  assert.doesNotMatch(String(ruleIntent('Gọi đt có đc đâu\nĐặt trên ap r nhưng làm sao đê biết hàng giao tới đâu r\nĐặt 3 bịch', { ...ctx, experimentalRules: 'off' })?.rule || ''), /^BAGS_ADDRESS/);
+  // "ấp" thật trong địa chỉ vẫn là địa chỉ. Chủ shop 05/10: số túi không vị + địa chỉ → mặc định Túi Xanh (luật
+  // BAGS_ADDRESS_DEFAULT_XANH, trước đây BAGS_ADDRESS giữ địa chỉ rồi hỏi vị).
   const address = ruleIntent('2 túi. ấp 3 xã Khánh Bình Tây huyện Trần Văn Thời Cà Mau', inbox());
-  assert.equal(address?.rule, 'BAGS_ADDRESS', JSON.stringify(address));
+  assert.equal(address?.rule, 'BAGS_ADDRESS_DEFAULT_XANH', JSON.stringify(address));
+  assert.deepEqual([address.value.Product_N1, address.value.No_A], ['Granola Túi Xanh 450g', '2']);
 });
 
 test('#5 "sữa chua không đường" không phải hỏi đường; tin đặt "Hộp 10 gói và 1 túi xanh" không ra PACKAGING_INFO / không mất hộp; "bn tiền" không chỉ trả trọng lượng', () => {
@@ -71,7 +73,11 @@ test('#5 "sữa chua không đường" không phải hỏi đường; tin đặt
   assert.notEqual(ruleIntent('combo 10 gói xanh', inbox())?.value?.No_A, '10');
   assert.equal(ruleIntent('lấy 1 hộp 10 gói xanh', inbox())?.value?.Product_N1, 'Combo 10 gói Xanh');
   assert.equal(tpl(ruleIntent('có hộp 10 gói không', inbox())), 'PACKAGING_INFO');
-  assert.notEqual(tpl(ruleIntent('2 túi trọng luong bn và bn tiền ạ', inbox({ botLastTemplateId: 'GENERAL_INFO', botLastAgeMin: 5 }))), 'WEIGHT_EXPIRY');
+  // R16 (sửa test cũ — inbox3 A7): nay luật trả lời CẢ HAI ý — PRICE_COUNT (giá 2 túi) + ý phụ WEIGHT_EXPIRY; ý test giữ nguyên
+  // ("bn tiền" không CHỈ trả trọng lượng).
+  const weightPrice = ruleIntent('2 túi trọng luong bn và bn tiền ạ', inbox({ botLastTemplateId: 'GENERAL_INFO', botLastAgeMin: 5 }));
+  assert.equal(weightPrice?.value?.template_id, 'PRICE_COUNT');
+  assert.equal(weightPrice?.value?.also, 'WEIGHT_EXPIRY');
   assert.equal(tpl(ruleIntent('túi xanh bao nhiêu gram', inbox())), 'WEIGHT_EXPIRY');
 });
 

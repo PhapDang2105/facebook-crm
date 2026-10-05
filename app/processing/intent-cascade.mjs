@@ -53,13 +53,19 @@ const TEMPLATES_BY_SUBGROUP = {
     // vòng 12 (r12): ghi nhận + chuyển nhân viên
     'ORDER_CANCEL_STAFF', 'ORDER_HOLD_STAFF', 'STAFF_ONLY_PRODUCT', 'RECEIVED_CHECK', 'IMAGE_WITH_PHONE',
     // vòng 13 (r13): giỏ Facebook Shop engine ghi nhận + chuyển nhân viên (mã lạ / món nhân viên lên đơn)
-    'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF'],
+    'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF',
+    // R15 (03/10): khách đã mua trên sàn (hỏi mã đơn sàn để kiểm tra)
+    'BOUGHT_ON_MARKETPLACE',
+    // R16 (05/10): tin nhắn thoại — bot không nghe được, xin khách nhắn chữ (như IMAGE_RECEIVED; không vào ANSWER)
+    'VOICE_RECEIVED'],
   ORDER: ['ASK_FLAVOR', 'ASK_PRODUCT', 'ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_CONFIRMATION', 'ORDER_CANCELLED', 'ORDER_HELP', 'ORDER_EXISTING_CONFIRM', 'CONFIRM_YES', 'ORDER_POSTPONED', 'ORDER_INFO_ASK_FLAVOR', 'ASK_FLAVOR_NGUYENBAN',
     'ORDER_UPDATED', 'ORDER_ADDRESS_REMIND', 'ORDER_CART_LINE', 'UPSELL_TWO_BAGS', 'SHOP_ORDER_RECEIVED', 'ORDER_ADDRESS_CHOOSE', 'ORDER_ADDRESS_OLD_ASK_PHONE', 'ORDER_PHONE_ASK_FLAVOR', 'ORDER_UNCHANGED', 'ORDER_WRONG', 'ORDER_CHANGE_STAFF', 'ORDER_CUSTOM_BASKET', 'ORDER_NOTE_ADDED', 'ASK_REORDER',
     // mã engine trả (renderChatbotReply) cho ORDER_UPDATED / ORDER_CANCELLED / ORDER_NOTE_ADDED — nhãn từ nhật ký quyết định
     'ORDER_UPDATE', 'ORDER_CANCEL', 'ORDER_NOTE',
     // vòng 13 (r13): bước đơn engine tự chọn — đã nhận giỏ Shop (chờ kiểm đơn), ghi nhận quà thay của giỏ/đơn
     'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED',
+    // R15 (03/10): engine tự chọn — SĐT thiếu số, không tra được địa chỉ cũ (hỏi thẳng địa chỉ), mặc cả → tặng yến mạch theo giỏ
+    'PHONE_LOOKS_SHORT', 'ORDER_ADDRESS_OLD_NOT_FOUND', 'DISCOUNT_OATS_GIFT',
     // 05/10: đổi quạt → muỗng dừa cho khách live / quà đã có muỗng (engine tự chọn)
     'GIFT_FAN_TO_SPOON', 'GIFT_SPOON_INCLUDED']
 };
@@ -69,7 +75,9 @@ const TEMPLATES_BY_SUBGROUP = {
  * R13: GIFT_POLICY_ORDER / GIFT_POLICY_ORDER_NONE là hậu xử lý của bộ soạn (khách ĐÃ CÓ ĐƠN hỏi quà → nói quà của đơn
  * đó) — không vào nhóm ANSWER để mô hình tầng không bao giờ tự trả lời bằng hai mẫu này.
  */
-export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED'].includes(String(templateId || ''));
+// R15 (03/10): BAG_SIZE_INFO / FRUIT_PAIRING / SMALL_PACK_FLAVOURS là mẫu thông tin MỚI chưa có nhãn trong dữ liệu huấn luyện —
+// OTHER có chủ ý (không vào ANSWER để mô hình tầng không tự trả lời bằng mẫu nó chưa học); chuyển sang INFO sau khi huấn luyện lại.
+export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED', 'BAG_SIZE_INFO', 'FRUIT_PAIRING', 'SMALL_PACK_FLAVOURS', 'DEFAULT_FLAVOUR_NOTE'].includes(String(templateId || ''));
 
 /** Mã mẫu → nhóm 6 lớp (bảng đã chốt, PRICE/INFO/SOCIAL tách). Mã không có trong bảng và COMMENT_* không có mục. */
 export const SUBGROUP_OF_TEMPLATE = Object.freeze(Object.fromEntries(Object.entries(TEMPLATES_BY_SUBGROUP).flatMap(([subgroup, templates]) => templates.map(templateId => [templateId, subgroup]))));

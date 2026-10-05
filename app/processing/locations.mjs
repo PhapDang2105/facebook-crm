@@ -977,6 +977,67 @@ const RESOLVE_CACHE_MAX = 200;
 const resolvedAddresses = new Map();
 
 export function resolveAddress(text, locationIndex = loadLocationIndex()) {
+  const result = resolveAddressBase(text, locationIndex);
+  if (!result.province || result.district || result.ward || result.postMerger) return result;
+  return wardBeforeProvince(clampAddressText(text), result, locationIndex) || result;
+}
+
+// R15 (inbox2 A4, ca …660136 "142f3 Bắc Cường Lào Cai"): chỉ đọc ra TỈNH, mà ngay trước tên tỉnh (khách ghi không có chữ
+// phường/xã, không có quận) là tên một phường/xã DUY NHẤT trong tỉnh đó (danh mục trước sáp nhập, tên ≥ 2 chữ) → chèn loại
+// hình ("phường/xã/thị trấn") trước tên đó rồi đọc lại; chỉ nhận khi lần đọc lại ra đúng phường/xã đó, cùng tỉnh.
+// Không áp khi trước tên là thôn/xóm/ấp/tổ/khu/đường/phố… (tên thôn, tên đường trùng tên phường).
+const WARD_TYPE_TEXT = { phuong: 'phường', xa: 'xã', 'thi tran': 'thị trấn' };
+const NOT_WARD_LEAD = new Set([...HAMLET_WORDS_BEFORE, ...STREET_WORDS, 'phuong', 'xa', 'thi tran', 'quan', 'huyen', 'thi xa', 'thanh pho', 'tp', 'tinh', 'p', 'x', 'q', 'h', 'tt', 'tx']);
+function wardBeforeProvince(text, result, locationIndex) {
+  const raw = String(text ?? '');
+  const norm = normalizeAligned(raw);
+  const province = locationIndex.provinces.find(entry => entry.code === result.province.code);
+  if (!province) return null;
+  // Lần xuất hiện CUỐI của tên tỉnh.
+  let hit = null;
+  for (const alias of province.aliases) {
+    const pattern = boundary(alias);
+    let match;
+    while ((match = pattern.exec(norm))) if (!hit || match.index > hit.index) hit = { index: match.index, end: match.index + match[0].length };
+  }
+  if (!hit) return null;
+  // Sau tên tỉnh chỉ còn dấu ngăn / khoảng trắng (tỉnh đứng cuối đoạn).
+  if (/[a-z0-9]/.test(norm.slice(hit.end).split(/[,;\n]/)[0])) return null;
+  const segmentStart = Math.max(norm.lastIndexOf(',', hit.index - 1), norm.lastIndexOf(';', hit.index - 1), norm.lastIndexOf('\n', hit.index - 1)) + 1;
+  const words = [...norm.slice(segmentStart, hit.index).matchAll(/[a-z0-9]+/g)].map(match => ({ word: match[0], index: segmentStart + match.index }));
+  for (const size of [3, 2]) {
+    if (words.length < size) continue;
+    const picked = words.slice(-size);
+    const key = picked.map(item => item.word).join(' ');
+    if (/\d/.test(key)) continue;
+    const lead = words.length > size ? words[words.length - size - 1].word : '';
+    const lead2 = words.length > size + 1 ? `${words[words.length - size - 2].word} ${lead}` : '';
+    if (NOT_WARD_LEAD.has(lead) || NOT_WARD_LEAD.has(lead2)) continue;
+    // R15 sửa (phản biện luật #6): chữ ngay trước là SỐ NHÀ thuần ("20 Hoàng Liên Lào Cai", "102 Hùng Vương Phú Thọ") → tên đứng
+    // sau là tên ĐƯỜNG trùng tên phường/xã, không đoán ("142f3 Bắc Cường Lào Cai" — số nhà có chữ — vẫn đoán như cũ).
+    if (/^\d+$/.test(lead)) continue;
+    const wards = [];
+    for (const district of province.districts.values()) for (const ward of district.wards.values()) if (ward.bare === key) wards.push(ward);
+    const districtSameName = [...province.districts.values()].some(district => district.bare === key);
+    if (wards.length !== 1 || districtSameName) continue;
+    const ward = wards[0];
+    const typeText = WARD_TYPE_TEXT[ward.prefix];
+    if (!typeText) continue;
+    const at = picked[0].index;
+    // Khách gõ có dấu thì dấu phải khớp tên ("Hât môn" ≠ "Hát Môn"); hai chữ ngay trước cũng là tên một phường/xã khác của tỉnh
+    // ("Mầm Non Tam Hiệp Hát Môn") thì không đoán.
+    const typedSlice = raw.slice(at, picked.at(-1).index + picked.at(-1).word.length);
+    if (!accentCompatible(typedSlice, ward.name.replace(/^(?:phường|xã|thị trấn)\s+/iu, ''))) continue;
+    const before2 = words.slice(Math.max(0, words.length - size - 2), words.length - size).map(item => item.word).join(' ');
+    const otherWard = before2.includes(' ') && [...province.districts.values()].some(district => [...district.wards.values()].some(entry => entry.bare === before2));
+    if (otherWard) continue;
+    const retried = resolveAddressBase(`${raw.slice(0, at)}${typeText} ${raw.slice(at)}`, locationIndex);
+    if (retried.province?.code === province.code && retried.ward?.code === ward.code) return retried;
+  }
+  return null;
+}
+
+function resolveAddressBase(text, locationIndex = loadLocationIndex()) {
   text = clampAddressText(text);
   if (locationIndex !== index) return resolveAddressUncached(text, locationIndex);
   const cached = resolvedAddresses.get(text);

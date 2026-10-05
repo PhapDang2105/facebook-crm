@@ -204,9 +204,13 @@ test('giỏ Facebook Shop: trả lời ngay (không bắt khách chờ); POS có
 
 test('sắp tự lên đơn mà hội thoại đã có đơn POS trong giờ qua (Shop / nhân viên vừa lên): không tạo đơn trùng', async () => {
   const created = [];
+  // R16 (inbox1 A3): giỏ chỉ do mô hình suy ra (khách chưa nêu món) không còn tự lên đơn — test này kiểm chặn đơn TRÙNG đơn Shop,
+  // nên khách đã nêu món ở tin trước.
+  const chose = [{ id: 'c0', direction: 'incoming', type: 'text', text: 'cho chị 2 túi xanh', createdAt: Date.now() - 60 * 1000 }];
   const confirmation = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Phone_Number: '0909123456', Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP.HCM' }, templates, {});
   assert.equal(confirmation.templateId, 'ORDER_CONFIRMATION');
   const out = await run({ pancakeConversationId: 'pc2' }, '0909123456 12 Lê Lợi Q1', {
+    recent: chose,
     reply: confirmation,
     extraDeps: {
       createOrder: async (_c, order) => { created.push(order); return { order: { id: 'dup', ...order }, created: true }; },
@@ -217,6 +221,7 @@ test('sắp tự lên đơn mà hội thoại đã có đơn POS trong giờ qua
   assert.equal(out.results[0].templateId, 'SHOP_ORDER_RECEIVED');
   // Khách nói rõ đơn thêm/đơn khác: vẫn lên đơn, gắn thẻ để nhân viên soát.
   const other = await run({ pancakeConversationId: 'pc2' }, 'làm thêm 1 đơn gửi mẹ 0909123456 12 Lê Lợi Q1', {
+    recent: chose,
     reply: confirmation,
     extraDeps: {
       createOrder: async (_c, order) => { created.push(order); return { order: { id: 'new2', ...order }, created: true }; },

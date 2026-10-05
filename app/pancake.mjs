@@ -19,7 +19,7 @@ import { AUTOMATED_ACTORS, appendAssignAudit, appendAudit, appendBotToggleAudit 
 import { matchStaffByPancakeName, readStaffStore } from './staff.mjs';
 import { backoffPancake, withPancakeSlot } from './pancake-rate-limit.mjs';
 import { stickerFields } from './stickers.mjs';
-import { isPageSystemNotice, isPageSystemNoticeText } from './conversation-orders.mjs';
+import { isPageSystemNotice, isPageSystemNoticeText, lateInfoNeedsBot } from './conversation-orders.mjs';
 export { stickerInfo, LIKE_STICKER_IDS } from './stickers.mjs';
 
 // Đủ cấu hình khi có ít nhất một Page (mã + token API) và một token webhook: token chung
@@ -622,7 +622,11 @@ export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 
     // Hội thoại đã có nhân viên nhận trong Pancake: như đường webhook, bot không chen.
     if (!botWhenAssigned && change.conversation.pancakeAssigned) return false;
     const messages = store?.messages?.[change.conversation.id] || [];
-    if (messages.some(item => item.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) >= at)) return false;
+    // R16 (inbox5 A1, ca …0740541679): lời bot sau tin này trả lời tin CŨ hơn (bot chưa đọc tới tin này) và tin có SĐT/địa chỉ/
+    // số túi/vị → vẫn đưa bot (hộp thư, < 10 phút, không có lời nhân viên sau tin).
+    const lateInfo = change.conversation.source !== 'comment' && !String(change.conversation.id || '').includes(':comment:')
+      && lateInfoNeedsBot(messages, change.message, { now, answeredUpTo: change.conversation.botAnsweredUpTo });
+    if (!lateInfo && messages.some(item => item.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) >= at)) return false;
     // R13 (F1): bình luận đã được nhắn riêng (tin nằm ở hộp thư) hay lượt bot đã bỏ qua có chủ ý.
     if (botAlreadyHandled(change.conversation, change.message, store)) return false;
     if (staffRepliedRecently(messages, now)) return false;
@@ -648,6 +652,21 @@ export function backlogBotChanges(store, { now = Date.now(), windowMs = 60 * 60 
     const messages = store.messages?.[conversation.id] || [];
     // R13: dòng hệ thống Facebook ("… đã trả lời một quảng cáo.") đứng sau tin khách không phải lời Page — bỏ qua khi tìm tin cuối.
     const last = messages.findLast(item => !isPageSystemNotice(item));
+    // R15 (inbox1 A9, ca …3756388949): dịch vụ khởi động lại trong lúc chờ kiểm đơn POS sau tin "đã nhận giỏ, chờ em ít phút"
+    // (SHOP_CART_ACK) → khách không nhận tin xin SĐT nữa. Hội thoại còn mốc ack (engine ghi shopCartAckPendingAt, xoá khi lượt
+    // xong) < 30 phút, tin cuối là tin ack của bot sau tin giỏ (không ai nhắn thêm) → đưa lại tin giỏ với cờ resumeShopCart:
+    // engine chạy tiếp bước kiểm đơn / xin SĐT, KHÔNG gửi ack lần hai.
+    const ackAt = Number(conversation.shopCartAckPendingAt) || 0;
+    if (ackAt && now - ackAt < 30 * 60 * 1000 && last?.direction === 'outgoing' && !last.staff) {
+      const cartIndex = messages.findLastIndex(item => item?.direction === 'incoming');
+      const cartMessage = cartIndex >= 0 ? messages[cartIndex] : null;
+      const after = messages.slice(cartIndex + 1).filter(item => item?.direction === 'outgoing' && !isPageSystemNotice(item));
+      if (cartMessage && Array.isArray(cartMessage.cart) && cartMessage.cart.length && after.length <= 2 && !after.some(item => item.staff)
+        && (!conversation.shopCartAckMessageId || String(conversation.shopCartAckMessageId) === String(cartMessage.id || cartMessage.mid || ''))) {
+        changes.push({ type: 'message', conversation, message: cartMessage, late: true, resumeShopCart: true });
+      }
+      continue;
+    }
     if (!last || last.direction !== 'incoming' || !['text', 'image'].includes(last.type)) continue;
     const at = Number(last.createdAt) || 0;
     if (now - at > windowMs || at > now + 5 * 60 * 1000) continue;

@@ -2093,7 +2093,7 @@ const server = http.createServer(async (request, response) => {
       if (!(await requireManager(request, response))) return;
       const summary = await runFollowUps({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
       audit(request, 'followup.run', {
-        summary: summary?.disabled ? 'Bấm Gửi ngay: bám đuổi đang tắt.' : summary?.quiet ? 'Bấm Gửi ngay: giờ yên lặng (22h–7h), không gửi.'
+        summary: summary?.disabled ? 'Bấm Gửi ngay: bám đuổi đang tắt.' : summary?.quiet ? 'Bấm Gửi ngay: giờ yên lặng (22h–8h), không gửi.'
           : `Bấm Gửi ngay: xét ${Number(summary?.checked) || 0}, gửi ${Number(summary?.sent) || 0}, lỗi ${Number(summary?.failed) || 0}, bỏ qua ${Number(summary?.skipped) || 0}.`,
         details: { sent: Number(summary?.sent) || 0, failed: Number(summary?.failed) || 0 }
       });

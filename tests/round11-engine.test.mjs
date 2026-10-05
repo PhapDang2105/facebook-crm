@@ -208,9 +208,14 @@ test('P3: SMALL_PACK_PRICE → PRICE_QUOTE + Combo 10 gói (bảng giá có số
 // ===== P4: chờ "đặt thêm?" =====
 
 const oldOrder = () => ({ id: 'o1', createdAt: Date.now() - 2 * 86400000, phone: '0912345678', address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh', total: 298000, products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2 }], status: 'Mới', automatic: true });
-const awaiting = (items = [VANG(2)]) => new Sim({ botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: Date.now() - 60000, customerOrders: [oldOrder()], pendingOrder: basket(items, 60000, { phone: '0912345678', address: '12 Lê Lợi phường Bến Nghé quận 1 tphcm', addressAsks: 2, awaitingConfirm: true }) });
+// R15-fix4 (chủ shop 03/10, thiết kế gộp/tách mới — thay hành vi vòng 11 đã khẳng định ở đây): "đúng/chuẩn/uk" chỉ là đồng ý với
+// LỜI CŨ của ORDER_EXISTING_CONFIRM ("… nhắn "đúng" là em lên đơn"); phủ định ("không em", "nhầm rồi") và câu có tên món / câu hỏi
+// → bạn phụ trách (STAFF_WAIT_*) một lần + thẻ, GIỮ giỏ, không kể đơn cũ, không đổi giỏ, không hỏi lại gộp/tách.
+const LEGACY_CONFIRM = 'Dạ {title} ơi, em thấy mình đang có đơn {existing_items} đặt lúc {existing_at}, hiện {existing_state} ạ 🌾 Mình muốn đặt THÊM một đơn mới gồm {cart} nữa đúng không ạ? {Title} nhắn "đúng" giúp em là em lên đơn liền; còn nếu là đơn cũ thì {title} cứ nhắn em kiểm tra cho mình nha ạ.';
+const awaiting = (items = [VANG(2)], { legacy = false } = {}) => new Sim({ botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: Date.now() - 60000, customerOrders: [oldOrder()], pendingOrder: basket(items, 60000, { phone: '0912345678', address: '12 Lê Lợi phường Bến Nghé quận 1 tphcm', addressAsks: 2, awaitingConfirm: true }) },
+  legacy ? { messageTemplates: { ...seed, ORDER_EXISTING_CONFIRM: LEGACY_CONFIRM } } : {});
 
-test('P4 (E6): chờ "đặt thêm?" — câu hỏi có chữ "không" không phải từ chối; "chuẩn rồi"/"uk"/"đúng rồi em, lên đơn mới nhé" là đồng ý; "không em"/"không, đơn cũ" là từ chối', async () => {
+test('P4 (E6): chờ "đặt thêm?" — câu hỏi có chữ "không" không phải từ chối; "chuẩn rồi"/"uk"/"đúng rồi em, lên đơn mới nhé" là đồng ý (lời cũ); "không em"/"không, đơn cũ" → bạn phụ trách', async () => {
   for (const text of ['bát gáo dừa có tặng không', 'giao nhanh không em', 'có ship tận nơi không']) {
     const sim = awaiting();
     const out = await sim.send(text);
@@ -219,44 +224,57 @@ test('P4 (E6): chờ "đặt thêm?" — câu hỏi có chữ "không" không ph
     assert.deepEqual(sim.orders, [], text);
   }
   for (const text of ['đúng rồi em, lên đơn mới nhé', 'chuẩn rồi', 'uk']) {
-    const sim = awaiting();
+    const sim = awaiting(undefined, { legacy: true });
     const out = await sim.send(text);
     assert.equal(out.result.templateId, 'ORDER_CONFIRMATION', text);
     assert.equal(sim.orders.length, 1, text);
     assert.equal(out.asked.length, 0, text);
   }
-  for (const text of ['không em', 'không, đơn cũ đó', 'nhầm rồi']) {
+  // Lời seed (gộp hay tách?): "chuẩn rồi"/"uk" mơ hồ → bạn phụ trách; "lên đơn mới" là tách rõ → lên đơn.
+  for (const [text, creates] of [['chuẩn rồi', false], ['uk', false], ['đúng rồi em, lên đơn mới nhé', true]]) {
     const sim = awaiting();
     const out = await sim.send(text);
-    assert.equal(out.result.templateId, 'ORDER_STATUS', text);
-    assert.equal(sim.conversation.pendingOrder, null, text);
+    assert.equal(sim.orders.length, creates ? 1 : 0, text);
+    if (!creates) assert.match(out.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/, text);
+  }
+  for (const legacy of [false, true]) {
+    for (const text of ['không em', 'không, đơn cũ đó', 'nhầm rồi']) {
+      const sim = awaiting(undefined, { legacy });
+      const out = await sim.send(text);
+      assert.match(out.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/, text);
+      assert.deepEqual(sim.conversation.pendingOrder.items.map(item => [item.code, item.quantity]), [['GRA-VANG-H350', 2]], text);
+      assert.deepEqual(sim.orders, [], text);
+    }
   }
 });
 
-test('P4 (E7): chờ "đặt thêm?" — khách nhắc lại đúng giỏ đang chờ → lên đơn; tin gộp "…\\nđúng rồi" đọc trên tin cuối; giỏ khác: im một lần rồi hỏi lại, không im mãi', async () => {
+test('P4 (E7): chờ "đặt thêm?" — câu có tên món (kể cả nhắc lại đúng giỏ) → bạn phụ trách MỘT lần, giữ giỏ; "…\\nđúng rồi" đọc trên tin cuối; không im mãi, không hỏi lại', async () => {
   const same = awaiting();
   const restate = await same.send('2 túi vàng nhé');
-  assert.equal(restate.result.templateId, 'ORDER_CONFIRMATION');
-  assert.deepEqual(same.orders.map(order => order.products.map(item => [item.sku, item.quantity])), [[['GRA-VANG-H350', 2]]]);
-  const bundled = awaiting();
+  assert.match(restate.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/);
+  assert.deepEqual(same.orders, []);
+  const bundled = awaiting(undefined, { legacy: true });
   bundled.history('incoming', 'để chị xem', 3000);
   const yes = await bundled.send('đúng rồi');
-  assert.equal(yes.result.templateId, 'ORDER_CONFIRMATION', 'tin cuối "đúng rồi" là đồng ý dù tin gộp có chữ khác');
+  assert.equal(yes.result.templateId, 'ORDER_CONFIRMATION', 'tin cuối "đúng rồi" là đồng ý (lời cũ) dù tin gộp có chữ khác');
   const other = awaiting([XANH(2)]);
   const first = await other.send('2 túi vàng nhé');
-  assert.equal(first.result.skipped, 'đang chờ xác nhận đặt thêm', 'lần đầu: giữ giỏ, gắn thẻ, im');
-  assert.equal(other.conversation.pendingOrder.heldSilently, true);
+  assert.match(first.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/, 'lần đầu: báo bạn phụ trách, giữ giỏ, gắn thẻ');
+  assert.deepEqual(other.conversation.pendingOrder.items.map(item => [item.code, item.quantity]), [['GRA-XANH-Z450', 2]]);
   const nudge = await other.send('shop ơi');
-  assert.equal(nudge.result.templateId, 'ORDER_EXISTING_CONFIRM', 'lần sau: hỏi lại với giỏ đang giữ');
-  assert.match(nudge.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Vàng 350g/);
+  assert.ok(nudge.result.skipped, 'lần sau trong lúc chờ: im + thẻ, không gửi STAFF_WAIT lần hai, không hỏi lại gộp/tách');
   assert.deepEqual(other.orders, []);
 });
 
 // ===== P5: số túi trước khi hỏi vị =====
 
 test('P5 (E8): "cho chị 2 túi" → ASK_FLAVOR → "vàng" = 2 túi vàng; "2 túi 2 vị" rồi một màu → mô hình; luật nhận ctx.askedBagCount', async () => {
+  // Chủ shop 05/10: "cho chị 2 túi" không vị → mặc định 2 Túi Xanh (trước đây ASK_FLAVOR); khách nêu "vàng" sau câu mặc định →
+  // đổi cả 2 túi sang Vàng (DEFAULT_FLAVOUR_SWAP) — kết quả cuối như cũ: đơn 2 Vàng 298k.
   const sim = new Sim({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 120000 });
-  assert.equal((await sim.send('cho chị 2 túi')).result.templateId, 'ASK_FLAVOR');
+  const asked = await sim.send('cho chị 2 túi');
+  assert.equal(asked.result.templateId, 'ORDER_ADDRESS');
+  assert.deepEqual(sim.conversation.pendingOrder.items.map(item => [item.code, item.quantity]), [['GRA-XANH-Z450', 2]]);
   const flavour = await sim.send('vàng');
   assert.equal(flavour.result.templateId, 'ORDER_ADDRESS');
   assert.deepEqual(sim.conversation.pendingOrder.items.map(item => [item.code, item.quantity]), [['GRA-VANG-H350', 2]]);
@@ -328,7 +346,9 @@ test('P8 (F2): "bữa trước ăn ngon, lấy thêm 2 túi xanh" không tự l�
 // ===== V8: ORDER_INFO =====
 
 test('V8 (E9/C5/B21): SĐT + địa chỉ trước khi nêu vị → giữ cả địa chỉ (kể số nhà sau SĐT), "2 túi xanh" chốt luôn; chỉ SĐT → không nói "đã nhận địa chỉ"', async () => {
-  const sim = new Sim({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 120000 });
+  // Chủ shop 05/10: SĐT + địa chỉ ngay sau bảng giá chung/bảng giá Túi Xanh → mặc định Túi Xanh và lên đơn luôn (ORDER_INFO_DEFAULT_XANH).
+  // Test này giữ kiểm cơ chế giữ SĐT/địa chỉ khi chưa nêu vị trong ngữ cảnh KHÔNG mặc định (sau lời chào WELCOME).
+  const sim = new Sim({ botLastTemplateId: 'WELCOME', botLastReplyAt: Date.now() - 120000 });
   const info = await sim.send('0912345678 12 Lê Lợi phường Bến Nghé quận 1 tphcm');
   assert.equal(info.result.templateId, 'ORDER_INFO_ASK_FLAVOR');
   assert.deepEqual([sim.conversation.pendingOrder.phone, sim.conversation.pendingOrder.address, sim.conversation.pendingOrder.items], ['0912345678', '12 Lê Lợi phường Bến Nghé quận 1 tphcm', []]);
@@ -376,11 +396,13 @@ test('V10 (E12): câu hỏi thành phần xoài sấy / vị dâu không bị LI
   assert.notEqual(sim.conversation.botEnabled, false);
 });
 
-test('V11 (F4): khách post.isLive / thẻ livestream hỏi hàng live → LIVE_ONLY_PRODUCT, bot vẫn bật (không chuyển người)', async () => {
+// R15 — sửa khẳng định cũ theo quyết định chủ shop 03/10 (#4): sữa hạt / hạt điều / hũ hạt khách live hỏi → STAFF_ONLY_PRODUCT
+// (chuyển nhân viên + thẻ, bot vẫn bật), không còn LIVE_ONLY_PRODUCT "giữ giá live".
+test('V11 (F4): khách post.isLive / thẻ livestream hỏi sữa hạt → STAFF_ONLY_PRODUCT (R15 #4), bot vẫn bật (không chuyển người)', async () => {
   for (const conversation of [{ post: { isLive: true, message: 'Chào cả nhà' } }, { labels: ['livestream'] }]) {
     const sim = new Sim({ botLastTemplateId: 'WELCOME', botLastReplyAt: Date.now() - 120000, ...conversation });
     const out = await sim.send('sữa hạt bao nhiêu');
-    assert.equal(out.result.templateId, 'LIVE_ONLY_PRODUCT', JSON.stringify(conversation));
+    assert.equal(out.result.templateId, 'STAFF_ONLY_PRODUCT', JSON.stringify(conversation));
     assert.notEqual(sim.conversation.botEnabled, false);
   }
 });

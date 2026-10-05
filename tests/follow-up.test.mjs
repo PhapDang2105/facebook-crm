@@ -378,13 +378,16 @@ test('lô gửi chỉ lấy khách đã im đủ số giờ của kịch bản h
   assert.match(batch.items[0].text, /ưu đãi riêng trong 7 ngày/, 'lời dựng theo mẫu hiện tại');
 });
 
-test('vòng 7: giờ yên tĩnh 22h–7h VN; release([]) không thả gì; kết quả không mã lô bị từ chối', async () => {
+test('vòng 7 (chủ shop 05/10: bắt đầu 8h thay 7h): giờ yên tĩnh 22h–8h VN; release([]) không thả gì; kết quả không mã lô bị từ chối', async () => {
   const { isQuietHourVN, releaseFollowUpLeases, recordFollowUpBatchResults } = await import('../app/follow-up.mjs');
   const vn = (h, m = 0) => Date.UTC(2026, 8, 25, (h - 7 + 24) % 24, m);
   assert.equal(isQuietHourVN(vn(21, 59)), false);
   assert.equal(isQuietHourVN(vn(22)), true);
   assert.equal(isQuietHourVN(vn(6, 59)), true);
-  assert.equal(isQuietHourVN(vn(7)), false);
+  // Chủ shop 05/10: bám đuổi buổi sáng từ 8h (trước đây 7h — tin cả đêm dồn 12–15 tin lúc 7h).
+  assert.equal(isQuietHourVN(vn(7)), true);
+  assert.equal(isQuietHourVN(vn(7, 59)), true);
+  assert.equal(isQuietHourVN(vn(8)), false);
   assert.equal(await releaseFollowUpLeases([]), 0);
   assert.deepEqual(await recordFollowUpBatchResults([{ key: 'khong:co:that', ok: true }], { token: '' }), { sent: 0, failed: 0, dropped: 0, rejected: 1 });
 });

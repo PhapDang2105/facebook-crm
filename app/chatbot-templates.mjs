@@ -251,7 +251,10 @@ const orderChangeStaffWindowMs = 3 * 24 * 60 * 60 * 1000;
 
 // Lời xin đổi quà tặng (đã bỏ dấu): "đổi quà khác", "thay quà", "không lấy bát", "gáo dừa có rồi".
 // "đổi qua túi vàng" (bỏ dấu trùng "đổi quà") là đổi sản phẩm: chữ ngay sau "qua" phải không phải loại túi.
-const giftSwapPattern = /\b(qua (gi|j|nao|khac) (de )?thay|thay cho (bo |cai )?(bat|chen|gao dua|muong)|(doi|thay|chon|lay) (phan )?qua(?! (tui|goi|hop|bich|xanh|vang|nau|loai|vi|cacao|\d))|qua (tang )?khac|tang (c|chi|e|em|a|anh|minh)? ?(cai|mon|thu)? ?khac|(khong|ko|k|hong|kg) (lay|can|muon|thich) (bo |cai )?(bat|chen|gao dua|muong|qua)|(bat|chen|gao dua|muong dua)( [a-z]+){0,4} (co roi|du roi|nhieu roi|dung roi))\b/;
+const giftSwapPattern = /\b(qua (gi|j|nao|khac) (de )?thay|thay cho (bo |cai )?(bat|chen|gao dua|muong)|(doi|thay|chon|lay) (phan )?qua(?! (tui|goi|hop|bich|xanh|vang|nau|loai|vi|cacao|\d))|qua (tang )?khac|tang (c|chi|e|em|a|anh|minh)? ?(cai|mon|thu)? ?khac|(khong|ko|k|hong|kg) (lay|can|muon|thich) (bo |cai )?(bat|chen|gao dua|muong|qua)|(bat|chen|gao dua|muong dua)( [a-z]+){0,4} (co roi|du roi|nhieu roi|dung roi)|(bat(?! (dau|buoc|duoc|ky|len|tat|may|den|loa|che|mi))|chen(?! (ngang|vao|lan))|gao dua|muong)( [a-z]+){0,4} (khong|ko|k|kg|hong|hok) (lay|can|nhan|thich|dung|muon)(?! (them|nua|hang|don|tui|goi|hop)))\b/;
+// R16 (inbox1 A7, ca …9053175659 "Bộ bát + muỗng dừa chị ko lấy đâu"): món quà đứng TRƯỚC, phủ định đứng SAU ("bát … ko lấy",
+// "bát gáo dừa thì mình k cần") cũng là xin đổi/bỏ quà (nhánh cuối) — trước đây chỉ bắt "không lấy bát". "bắt đầu / bật / chen
+// ngang" bỏ dấu cũng là "bat/chen" nên loại; "… không lấy thêm/nữa/hàng/đơn" là chuyện khác, không phải quà.
 export function isGiftSwapRequest(text) {
   return giftSwapPattern.test(normalizeText(String(text || '')));
 }
@@ -304,6 +307,26 @@ function unchangedOrder(recentOrder, orderItems, phone, address) {
   if (!recentOrder || basketSignature(recentOrder.products) !== basketSignature(orderItems)) return false;
   const phoneOf = value => toLocalPhone(value) || String(value || '').replace(/\D/g, '');
   return phoneOf(recentOrder.phone) === phoneOf(phone) && sameAddressText(recentOrder.address, address) && !addsAddressDetail(recentOrder.address, address);
+}
+/**
+ * R15 (inbox3 A5): tin khách có SĐT KHÁC SĐT của đơn, hay địa chỉ (mô hình đọc ra, và chữ đó thật sự nằm trong tin khách)
+ * KHÁC địa chỉ của đơn. Không có đơn / tin không có SĐT hay địa chỉ → false.
+ * @param {object|null} order đơn gần nhất (phone, address, rawAddress)
+ * @param {string} text tin khách
+ * @param {string} [modelAddress] Customer_Address mô hình trả
+ */
+export function contactDiffersFromOrder(order, text, modelAddress = '') {
+  if (!order) return false;
+  const phoneOf = value => toLocalPhone(value) || String(value || '').replace(/\D/g, '');
+  const textPhone = extractVietnamesePhone(String(text || ''));
+  if (textPhone && order.phone && phoneOf(textPhone) !== phoneOf(order.phone)) return true;
+  const typed = String(modelAddress || '').trim();
+  if (!typed || typed === '0' || !(order.address || order.rawAddress)) return false;
+  // Chữ địa chỉ mô hình trả phải có trong tin khách (≥ 60% số chữ), không thì là địa chỉ mô hình chép từ lịch sử.
+  const words = normalizeText(typed).split(/[^a-z0-9]+/).filter(word => word.length > 1);
+  const said = new Set(normalizeText(String(text || '')).split(/[^a-z0-9]+/).filter(Boolean));
+  if (words.length < 2 || words.filter(word => said.has(word)).length < Math.ceil(words.length * 0.6)) return false;
+  return ![order.rawAddress, order.address].filter(Boolean).some(old => sameAddressText(old, typed) && !addsAddressDetail(old, typed));
 }
 
 // Họ phổ biến: đầu địa chỉ là "Họ + tên" (2–4 chữ) rồi tới thôn/ấp/số nhà… là tên
@@ -395,6 +418,13 @@ export function stripReceiverName(address, profileName = '') {
 function withPromoBowl(price) {
   if (price.gifts.some(gift => /g[aá]o d[uừ]a/i.test(String(gift.name || '')))) return price;
   const gifts = [...price.gifts, { ...PROMO_BOWL_GIFT }];
+  return { ...price, gifts, gift: gifts.map(gift => gift.name).join(' + ') };
+}
+
+/** R15: thêm quà yến mạch khách quen vào dòng quà (giỏ từ 2 túi), không đổi tiền. */
+function withOatsGift(price, on) {
+  if (!on || !price || !(Number(price.totalQuantity) >= 2) || price.gifts.some(gift => gift.name === OATS_GIFT_NAME)) return price;
+  const gifts = [...price.gifts, { name: OATS_GIFT_NAME, sku: '', minQuantity: 2, active: true }];
   return { ...price, gifts, gift: gifts.map(gift => gift.name).join(' + ') };
 }
 
@@ -542,8 +572,30 @@ function ambiguousNguyenBan(text) {
   const s = normalizeIntentText(colourText(text));
   if (!/\bnguyen ban(?:g)?\b/.test(s)) return 0;
   if (/\b(?:xanh|vang)(?: la| (?:tui|goi|loai|vi))? nguyen ban|\bnguyen ban(?:g)? (?:xanh|vang|450|350)\b|\bnguyen ban(?:g)? (?:la )?(?:gi|sao|the nao|ntn|nhu nao)\b|\?/.test(s)) return 0;
+  // R15 sửa (phản biện luật #4): "nguyên bản" là lời tả của chính món Xanh/Vàng đứng trước, cách ≤ 3 chữ không xen chữ nối / số
+  // túi mới ("Lấy 1 túi vàng 350g nguyên bản nha", "1 túi vàng nhiều hạt nguyên bản"; "1 túi vàng và 1 túi nguyên bản" vẫn là
+  // hai món), hay có phủ định ngay trước ("1 túi vàng thôi, không lấy nguyên bản") → không mơ hồ, không hỏi lại / thêm Xanh.
+  if (/\b(?:xanh|vang)(?: (?!(?:va|voi|vs|them|cung|con|\d{1,2}|mot|hai|ba)\b)[a-z0-9]+){0,3} nguyen ban/.test(s)) return 0;
+  if (/\b(?:khong|ko|k|kg|hong|dung|bo|chua)(?: (?:lay|can|mua|dat|chon|an))?(?: (?:tui|goi|bich|loai|vi|phan))? nguyen ban/.test(s)) return 0;
   const counted = s.match(/\b(\d{1,2}|mot|hai|ba)\s*(?:(?:tui|goi|bich|bit)\s+)?(?:(?:granola|vi|loai)\s+)?nguyen ban/);
   return counted ? numberOf(counted[1]) || 1 : 1;
+}
+
+/**
+ * R15 (inbox1 A2, ca …8166458357 "Cho mình 1 túi nguyên bản và 1 túi vàng nhiều hạt nhé"): "nguyên bản" đứng cùng câu với
+ * một món VÀNG khách nêu riêng (có số túi), không nhắc Xanh → phần nguyên bản là Túi Xanh (Vàng đã được nêu tên riêng),
+ * không hỏi lại. Trả số túi Xanh (≥ 1), 0 khi không thuộc ca này ("1 túi nâu 1 túi nguyên bản" vẫn hỏi lại như R14).
+ * @param {string} text
+ */
+export function nguyenBanMeansXanh(text) {
+  const qty = ambiguousNguyenBan(text);
+  if (!qty) return 0;
+  // R15 sửa (phản biện luật #4): cụm Vàng / phủ định đã loại ở ambiguousNguyenBan; thêm: "nguyên bản" phải có số túi RIÊNG
+  // ("1 túi nguyên bản và 1 túi vàng nhiều hạt" có; "túi vàng, nguyên bản nhé" không) mới tự hiểu là Xanh.
+  const s = normalizeIntentText(colourText(text));
+  if (!/\b(\d{1,2}|mot|hai|ba)\s*(?:(?:tui|goi|bich|bit)\s+)?(?:(?:granola|vi|loai)\s+)?nguyen ban/.test(s)) return 0;
+  const { counts, mentioned } = colourCountsInText(text);
+  return counts.VANG > 0 && !mentioned.includes('XANH') ? qty : 0;
 }
 
 /** Màu khách nêu kèm số túi trong tin ("2 xanh", "1 túi vàng 1 túi nâu", "túi xanh x2", "mỗi loại 1 túi"). */
@@ -554,10 +606,47 @@ export function colourCountsInText(text) {
   // R13 sửa (phản biện T4): màu đứng ngay sau "số/tổ/ngõ/khu/ấp/thôn/hẻm/kp/đường + số" là địa danh ("tổ 2 Vàng Anh", "số 2 Vàng
   // Danh") — không đếm là túi (trước đây giỏ 2 Xanh thành 2 Vàng và địa chỉ mất "tổ 2 Vàng Anh").
   // R14: "cân bằng" = Xanh, "nhiều hạt" = Vàng (flavourSynonyms); "Ko fai 2 túi nâu" (khách đính chính giỏ sai) không tính.
-  const s = flavourSynonyms(normalizeIntentText(colourText(text)))
+  // R16 (inbox1 A2, ca …2228960004 "Vậy tổng là 5 túi, tặng 1 túi vàng + 1 bộ bát, thìa đúng ko shop"): màu đứng sau "tặng" là
+  // QUÀ, không phải túi khách mua — không đếm, không tính là vị được nhắc.
+  // R16-fix2 (phản biện M2): màu viết hoa sau dấu phẩy/xuống dòng và trước một chữ viết hoa khác là ĐỊA DANH ("2 túi xanh, Vàng Danh,
+  // Uông Bí") — bỏ trước khi đếm (trừ khi chữ sau là lời tả vị: "Vàng Nhiều Hạt", "Xanh Nguyên Bản").
+  const placeless = colourText(text).normalize('NFC').replace(/([,;\n]\s*)(?:Vàng|Xanh|Nâu|VÀNG|XANH|NÂU)(?=\s+(\p{Lu}\p{L}*))/gu, (whole, lead, next) => (
+    /^(?:nhieu|hat|nguyen|ban|cacao|ca|tui|goi|bich|la|min|mint|nhat|nha|nhe|nhen|a|e|em|chi|c|anh|cho|voi|va|moi|thoi|luon|di|mot|hai|ba|x|nua|thi|de|co|khong|ko|het|lan)$/.test(normalizeIntentText(next)) ? whole : lead));
+  const stripped = flavourSynonyms(normalizeIntentText(placeless))
     .replace(/\b(so|to|ngo|khu|ap|thon|hem|kp|duong|ngach|xom) (\d{1,3}) (?:xanh|vang|nau|cacao)\b/g, '$1 $2 ')
     .replace(new RegExp(`\\b(?:dung|khong|ko|hong)\\s+(?:lay|mua|gui)\\s+(?:(?:tui|goi|bich|vi|loai|mau)\\s+)?(?:xanh|vang|nau|cacao)\\b${NOT_GREEN}`, 'g'), ' ')
-    .replace(/\b(?:khong|ko|k|kg|hong|kp|chu khong|chu ko)\s+(?:phai|fai|pai)\s+(?:la\s+)?(?:\d{1,2}|mot|hai|ba)?\s*(?:(?:tui|goi|bich|bit)\s+)?(?:xanh|vang|nau|cacao)\b/g, ' ');
+    .replace(/\b(?:khong|ko|k|kg|hong|kp|chu khong|chu ko)\s+(?:phai|fai|pai)\s+(?:la\s+)?(?:\d{1,2}|mot|hai|ba)?\s*(?:(?:tui|goi|bich|bit)\s+)?(?:xanh|vang|nau|cacao)\b/g, ' ')
+    .replace(/\btang\s+(?:(?:kem|them|cho|c|chi|e|em|minh|a|anh)\s+)?(?:(?:\d{1,2}|mot)\s*)?(?:(?:tui|goi|bich|bit|hop)\s+)?(?:(?:mau|vi|loai)\s+)?(?:xanh|vang|nau|cacao)\b/g, ' ');
+  // R16 (inbox1 A1, ca …9387140891 "Mua 2 túi nâu xanh"): MỘT số "N túi/gói/bịch" đứng trước danh sách ≥ 2 màu không kèm số
+  // riêng (như R14 của commentBasket ở engine). N = số màu → mỗi màu 1 (1 Nâu + 1 Xanh 293k; trước đây số 2 gán cho màu đứng
+  // ngay sau → 2 Nâu + 1 Xanh 437k). N khác số màu ("3 túi xanh vàng") → không tự chia: bỏ số khỏi màu đầu, trả `splitAsk` = N để
+  // bộ soạn đơn hỏi lại vị (flavourSplitAsk). "mỗi loại 1" (each) đã nói rõ thì không áp. "hoặc" không phải danh sách.
+  const listColour = `(?:xanh|vang|nau|cacao${NOT_TROPICAL})${NOT_GREEN}`;
+  const listSep = '(?: (?:va|voi|vs|cung|mix|lan|ca))?(?: (?:tui|goi|loai|vi|mau))? ';
+  const sharedList = new RegExp(`\\b(\\d{1,2}|hai|ba|bon|nam)\\s*(?:tui|tuy|goi|bich|bit)\\s+(?:(?:hat|loai|vi|mau|granola)\\s+)?(${listColour}(?:${listSep}${listColour}){1,3})\\b(?! ?x ?\\d)(?! \\d{1,2}\\b(?! ?(?:tui|tuy|goi|bich|bit|vi|loai|mau|xanh|vang|nau|cacao)\\b))`, 'g');
+  let splitAsk = 0;
+  const eachSaid = /\bmoi (?:loai|vi|mau|thu|tui|goi) (\d{1,2}|mot|hai|ba)\b|\b(\d{1,2}|mot|hai|ba) (?:tui|goi|bich) moi (?:loai|vi|mau)\b/.test(stripped);
+  // R16-fix2 (phản biện L4): "3 túi xanh vàng, 2 xanh 1 vàng" / "4 túi xanh nâu, xanh 3 nâu 1" — khách tự chia ngay sau danh sách,
+  // các số cộng đủ N → dùng đúng phần chia đó (không hỏi lại, không cộng dồn số N vào màu đầu).
+  const spelledSplit = new RegExp(`\\b(\\d{1,2}|hai|ba|bon|nam)\\s*(?:tui|tuy|goi|bich|bit)\\s+(?:(?:hat|loai|vi|mau|granola)\\s+)?${listColour}(?:${listSep}${listColour}){1,3}\\s+((?:(?:\\d{1,2}|mot|hai|ba)\\s*(?:(?:tui|goi|bich)\\s+)?(?:xanh|vang|nau|cacao)\\b\\s*){2,4}|(?:(?:xanh|vang|nau|cacao)\\s*(?:\\d{1,2})\\b\\s*){2,4})`, 'g');
+  const respelled = stripped.replace(spelledSplit, (whole, number, parts) => {
+    const pairs = [...parts.matchAll(/(\d{1,2}|mot|hai|ba)\s*(?:(?:tui|goi|bich)\s+)?(xanh|vang|nau|cacao)|(xanh|vang|nau|cacao)\s*(\d{1,2})/g)]
+      .map(match => (match[2] ? [numberOf(match[1]), match[2]] : [numberOf(match[4]), match[3]]));
+    const total = pairs.reduce((sum, [count]) => sum + count, 0);
+    return total === numberOf(number) ? ` ${pairs.map(([count, colour]) => `${count} ${colour}`).join(' ')} ` : whole;
+  });
+  const s = respelled.replace(sharedList, (whole, number, list, offset, all) => {
+    const colours = [...new Set([...list.matchAll(/(xanh|vang|nau|cacao)/g)].map(match => COLOUR_OF_WORD[match[1]]))];
+    if (colours.length < 2) return whole;
+    // R16-fix2 (phản biện M2): sau danh sách là lời bỏ / hoãn / hỏi ("lấy 2 túi xanh, vàng thì thôi", "vàng để lần sau", "vàng có
+    // không", "2 túi xanh vàng hết rồi à") → màu sau không phải phần chia của N túi, giữ như trước vòng 16.
+    if (/^\s*(?:thi thoi|de sau|de lan sau|lan sau|het|co khong|co ko|co k|khong lay|ko lay|k lay|khoi|ha|chua)\b/.test(all.slice(offset + whole.length))) return whole;
+    const shared = numberOf(number);
+    if (shared === colours.length) return ` ${colours.map(colour => `1 ${({ XANH: 'xanh', VANG: 'vang', NAU: 'nau' })[colour]}`).join(' ')} `;
+    if (eachSaid) return whole;
+    splitAsk = splitAsk || shared;
+    return ` ${list} `;
+  });
   const counts = {};
   const mentioned = new Set();
   // "1vang" (dính số) vẫn là nhắc vị Vàng.
@@ -573,7 +662,94 @@ export function colourCountsInText(text) {
   }
   const each = s.match(/\bmoi (?:loai|vi|mau|thu|tui|goi) (\d{1,2}|mot|hai|ba)\b|\b(\d{1,2}|mot|hai|ba) (?:tui|goi|bich) moi (?:loai|vi|mau)\b/);
   if (each) for (const colour of mentioned) if (!counts[colour]) counts[colour] = numberOf(each[1] || each[2]);
-  return { counts, mentioned: [...mentioned], each: Boolean(each) };
+  return { counts, mentioned: [...mentioned], each: Boolean(each), splitAsk };
+}
+
+/**
+ * R16 (inbox1 A2, ca …2228960004 "Mình lấy 3 màu" khi đang giữ 3 Túi Xanh): "(lấy) N màu / N vị / N loại" không nêu tên màu nào
+ * = N vị khác nhau, mỗi vị 1 túi. Trả N (2 hay 3), 0 khi không thuộc ca này: câu hỏi ("có mấy vị", "3 vị khác nhau không"),
+ * "mỗi vị 2 túi", combo/hộp/gói nhỏ/Tropical/yến mạch, "3 loại hạt" (lời tả thành phần), số túi khác N ("3 túi 2 màu").
+ * @param {string} text
+ */
+export function distinctKindsCount(text) {
+  const s = normalizeIntentText(colourText(text));
+  if (!s || /\?/.test(String(text || '')) || QUESTION.test(s) || /\b(?:dc|duoc|dk) (?:k|ko|khong|hong|kg|hok)\b/.test(s)) return 0;
+  // Trên chữ CÒN DẤU: "2 mẫu" (bỏ dấu cũng là "2 mau") không phải "2 màu" ("Gửi hình ảnh 2 mẫu mình xem").
+  if (!/(?<![\p{L}\p{N}])(?:2|3|hai|ba)\s*(?:màu|mau|vị|vi|loại|loai)(?![\p{L}\p{N}])/u.test(String(text || '').normalize('NFC').toLowerCase())) return 0;
+  const eachOne = /\bmoi (?:loai|vi|mau) (?:1|mot)(?: (?:tui|goi|bich))?\b/;
+  if (/(?<![a-z])(?:xanh|vang|nau|cacao)\b|\b(?:combo|hop|goi nho|mint|tropical|yen mach|cam|nguyen ban|nhieu hat|can bang)\b/.test(s)
+    || /\bmoi\b/.test(s.replace(eachOne, ' '))) return 0;
+  const match = s.match(/\b(2|3|hai|ba) (?:mau|vi|loai)(?! (?:hat|trai cay|qua|nao|gi|j|khac nhau (?:khong|ko|k|hong|chua)))\b/);
+  if (!match) return 0;
+  // Phải có ý lấy ("lấy/mua/đặt/chốt/cho/gửi…") hay cả tin chỉ là "3 màu (nhé/nha…)".
+  const short = /^(?:(?:thi|vay|la|chi|c|minh|em|e|anh|a)\s+)?(?:2|3|hai|ba) (?:mau|vi|loai)(?: (?:nhe|nha|nhen|luon|thoi|di|a|ha|shop|e|em|c|chi|nhe shop|nha shop))*$/.test(s);
+  if (!short && !/\b(?:lay|mua|dat|chot|cho|gui|ship|order|an|thu)\b/.test(s)) return 0;
+  const kinds = numberOf(match[1]);
+  const bags = countBags(s.replace(eachOne, ' '));
+  return bags && bags !== kinds ? 0 : kinds;
+}
+
+/**
+ * R16: số túi khách nêu mà chưa rõ chia vị thế nào → bộ soạn đơn hỏi lại vị (giữ số túi), không tự chia/không đoán:
+ * - "3 túi xanh vàng" (N túi + danh sách màu không kèm số, N khác số màu — colourCountsInText.splitAsk);
+ * - "lấy 2 màu/2 vị" không nêu màu nào (3 màu thì đủ cả 3 vị — adjustOrderQuantities tự lập giỏ). Không hỏi khi hai vị đã rõ
+ *   từ tin ngay trước ("Lấy mình túi xanh và túi vàng ko đc à" → "2 loại") hay giỏ đang giữ đã có 2 vị.
+ * @param {string} text
+ * @param {{recentTexts?: string[], heldItems?: Array<{code?:string}>}} [options]
+ * @returns {number}
+ */
+export function flavourSplitAsk(text, { recentTexts = [], heldItems = [] } = {}) {
+  const { splitAsk } = colourCountsInText(text);
+  if (splitAsk > 0) return splitAsk;
+  if (distinctKindsCount(text) !== 2) return 0;
+  const current = String(text || '');
+  const earlierNamesColour = (Array.isArray(recentTexts) ? recentTexts : []).slice(-3)
+    .some(other => String(other || '') !== current && !isShopCartText(other) && colourCountsInText(other).mentioned.length > 0);
+  const heldColours = new Set((Array.isArray(heldItems) ? heldItems : []).map(item => colourOfItem(item)).filter(Boolean));
+  return earlierNamesColour || heldColours.size >= 2 ? 0 : 2;
+}
+
+/**
+ * R16 (inbox1 A8, ca …8040193418 "1 vị ca cao, 1 ngủ cốc", "1 túi vị ca cao, 01 túi hạt ngũ cốc"): "ngũ cốc" / "hạt ngũ cốc" kèm
+ * số túi riêng KHÔNG phải tên vị (granola nào cũng là ngũ cốc) — chủ shop chưa chốt mặc định vị nào (mục C) → hỏi lại vị phần
+ * đó (như "nguyên bản"), không để mô hình đoán Vàng. Trả số túi phần "ngũ cốc" (≥ 1), 0 khi không thuộc ca này: có màu ngay sau
+ * ("2 gói ngũ cốc ăn sáng màu xanh"), "bột ngũ cốc" (sản phẩm Nghệ Lành), câu hỏi, không có số túi riêng.
+ * @param {string} text
+ */
+export function ambiguousCerealBags(text) {
+  const s = normalizeIntentText(colourText(text));
+  if (!/\bngu coc\b/.test(s) || /\?/.test(String(text || ''))) return 0;
+  // Hỏi giá ("Mua hai gói ngũ cốc giá như nào", "Bao nhiều một gói ngũ cốc") để luật/mô hình báo giá; kèm món khác (yến mạch,
+  // "1kg", Nghệ Lành, combo/hộp/gói nhỏ…) thì bộ hỏi vị không giữ được món đó → không áp.
+  if (/\b(?:gia|bao nhieu|bao nhiu|bn|nhieu tien|may tien)\b/.test(s)
+    || /\b(?:yen mach|nghe|bot|combo|hop|goi nho|tropical|mint|cam|sieu hat|hat dieu|\d+ ?kg|kg)\b/.test(s)) return 0;
+  let total = 0;
+  for (const match of s.matchAll(/\b(\d{1,2}|mot|hai|ba)\s*(?:(?:tui|tuy|goi|bich|bit)\s+)?(?:(?:hat|vi|loai|granola)\s+)?(?<!\bbot )ngu coc\b((?: [a-z0-9]+){0,4})/g)) {
+    if (/\b(?:xanh|vang|nau|cacao|nguyen ban|nhieu hat|can bang|nghe|lanh)\b/.test(match[2])) continue;
+    total += numberOf(match[1]) || 1;
+  }
+  return total >= 1 && total <= 20 ? total : 0;
+}
+
+/**
+ * R15-fix4 (phản biện M1): số túi khách BỚT — động từ bỏ/bớt/giảm/trừ (còn dấu) đứng NGAY trước số ("bỏ 1 túi", "bớt 1",
+ * "giảm đi 1 túi"). Chữ không dấu "bo/bot/giam/tru" chỉ nhận khi số theo ngay sau và không đứng sau cho/gửi/giao/của/nhà/mẹ/ba
+ * ("cho bo 2 tui" có thể là "cho bố 2 túi"). "bố", "bộ" có dấu khác "bỏ" nên không bao giờ là bớt. Không có → 0.
+ */
+export function removedBagCount(text) {
+  const raw = String(text || '').normalize('NFC').toLowerCase();
+  const match = raw.match(/(?<![\p{L}\p{N}])(?:(cho|gửi|gui|giao|ship|của|cua|nhà|nha|mẹ|me|ba)\s+)?(bỏ|bớt|giảm|trừ|bo|bot|giam|tru)(?:\s+(?:đi|di|ra|bớt|bot|bỏ|bo))?\s+(\d{1,2}|một|mot|hai|ba)(?![\p{L}\p{N}])/u);
+  if (!match) return 0;
+  if (match[1] && /^[a-z]+$/.test(match[2])) return 0;
+  const count = ({ 'một': 1, mot: 1, hai: 2, ba: 3 })[match[3]] || Number(match[3]) || 0;
+  return count >= 1 && count <= 20 ? count : 0;
+}
+
+// R15-fix4 (phản biện mục 4, có từ trước): "không thêm nữa", "khỏi thêm", "không lấy thêm" là PHỦ ĐỊNH — không phải đặt thêm
+// ("1 túi thôi, không thêm nữa" với đơn 2 túi từng thành 3 túi 447k). Đọc trên chữ đã bỏ dấu (normalizeText).
+const NEGATED_ADD_WORDS = /\b(?:khong|ko|k|kg|hong|khum|khoi|chang|dung|khoi can|khong can|ko can|k can)(?: (?:lay|can|dat|mua|gui|cho))? (?:them|nua)(?: nua)?\b/g;
+export function asksToAdd(words) {
+  return /\b(them|nua|cong them)\b/.test(String(words || '').replace(NEGATED_ADD_WORDS, ' '));
 }
 
 /**
@@ -600,6 +776,17 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
   const { counts, mentioned, each } = colourCountsInText(text);
   const countGiven = bags > 0 || quantityOnly > 0 || Object.keys(counts).length > 0 || each;
   const reference = heldItems.length ? heldItems : recentItems;
+  // R16 (inbox1 A2, ca …2228960004): "Vậy tổng là 5 túi, tặng 1 túi vàng + 1 bộ bát, thìa đúng ko shop" — khách HỎI LẠI tổng
+  // giỏ (đuôi hỏi xác nhận), không đặt giỏ mới: giữ giỏ/đơn đang có (tổng khác giỏ thì câu trả lời nêu lại giỏ thật để khách
+  // xem, không đổi giỏ theo con số trong câu hỏi).
+  if (reference.length && bags > 0 && /\b(?:tong|tong cong|tat ca|vay la|tinh ra)\b/.test(s)
+    && /\b(?:dung|phai)\s+(?:khong|ko|k|kg|hong|hok|chua|ha)\b/.test(s)) return plain(reference);
+  // R16 (inbox1 A2): "Mình lấy 3 màu" (không nêu màu nào) = 3 vị, mỗi vị 1 túi — kể cả khi đang giữ 3 Xanh (trước đây giữ 3 Xanh
+  // rồi cộng Vàng + Nâu thành 5 túi 740k). Đủ 3 vị túi lớn (Xanh/Vàng/Nâu), mô hình trả gì cũng vậy. "2 màu" → hỏi vị (renderOrder).
+  if (distinctKindsCount(text) === 3) {
+    const trio = ['XANH', 'VANG', 'NAU'].map(colour => getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith(`GRA-${colour}-`))).filter(Boolean);
+    if (trio.length === 3) return trio.map(product => ({ product: product.name, code: product.sku, quantity: 1 }));
+  }
   // Vòng 13: trong CÂU HỎI, "cho" chỉ là động từ đặt hàng khi khách nêu rõ món ("cho mình túi xanh được không");
   // "Cho mix vị được không?" là hỏi, không được đổi giỏ đang giữ / tự lập giỏ.
   const namesProduct = mentioned.length > 0 || /\b(combo|hop|tropical|mint)\b/.test(s);
@@ -656,6 +843,13 @@ export function adjustOrderQuantities(items, { messageText = '', heldItems = [],
     && !/\b(combo|hop|goi nho|yen mach|mix|cam|mint|tropical)\b/.test(s)) {
     const base = reference[0];
     const held = reference.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+    // R15-fix3 (phản biện luật, engine-probe B1): "giảm đi 1 túi" / "bớt 1 túi" / "bỏ 1 túi" khi giữ 3 Xanh = BỚT 1 (còn 2), không
+    // phải đặt số lượng thành 1. "bớt còn 1 túi" / "lấy 1 túi thôi" vẫn là số lượng mới.
+    // R15-fix4 (phản biện M1, NGHIÊM TRỌNG): xét trên chữ CÒN DẤU — "gửi bố 2 túi" / "cho bố mẹ 2 túi" (bố bỏ dấu = "bo") từng bị
+    // đọc là "bỏ 2 túi" và trừ đơn/giỏ. Chỉ trừ khi số đứng NGAY sau động từ ("bỏ 1 túi", "bớt 1", "giảm đi 1 túi").
+    const removed = removedBagCount(text);
+    const removing = !adding && removed > 0 && !/\b(?:con|lay|chi|de lai)\b/.test(s);
+    if (removing && held - removed >= 1) return [{ product: base.product, code: base.code, quantity: held - removed }];
     return [{ product: base.product, code: base.code, quantity: adding ? held + bags : bags }];
   }
   if (!countGiven) {
@@ -761,7 +955,7 @@ function renderOrder(value, templates, context = {}) {
   };
   // R14: bot vừa hỏi nguyên bản là Xanh hay Vàng (ASK_FLAVOR_NGUYENBAN, giỏ chờ mang nguyenBanAsk = số túi phần đó).
   const askedNguyenBan = context.lastTemplateId === 'ASK_FLAVOR_NGUYENBAN' && Number(context.pendingOrder?.nguyenBanAsk) > 0;
-  const namedItems = paymentAfterOrder
+  const adjustedItems = paymentAfterOrder
     ? (recentEditable ? recentForQuantity : [])
     : fromCart
       ? rawNamed.map(({ product, code, quantity }) => ({ product, code, quantity }))
@@ -772,8 +966,40 @@ function renderOrder(value, templates, context = {}) {
         recentItems: recentForQuantity,
         askedBagCount: Number(context.pendingOrder?.askedBagCount) || askedBagsBefore(),
         burstTexts: Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.slice(-2) : [],
-        adding: String(value.add_to_basket || '') === '1' || /\b(them|nua|cong them)\b/.test(messageWords) || askedNguyenBan
+        adding: String(value.add_to_basket || '') === '1' || asksToAdd(messageWords) || askedNguyenBan
       });
+  // R15 (inbox1 A2): "1 túi nguyên bản và 1 túi vàng nhiều hạt" — Vàng đã nêu riêng nên nguyên bản là Túi Xanh: thêm Xanh vào
+  // giỏ khi luật/mô hình chỉ đưa phần Vàng (trước đây bot hỏi lại "nguyên bản là gì" và giỏ chờ chỉ còn 1 Vàng).
+  const xanhFromNguyenBan = !fromCart && !paymentAfterOrder && !askedNguyenBan ? nguyenBanMeansXanh(customerText) : 0;
+  const xanhProduct = xanhFromNguyenBan && !adjustedItems.some(item => colourOfItem(item) === 'XANH')
+    ? getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith('GRA-XANH-')) : null;
+  // R15 (inbox3 A5): khách gửi SĐT/địa chỉ KHÁC đơn vừa chốt (≤ 60 phút) mà mô hình chỉ trả ORDER_UPDATE không kèm món
+  // ("đt 0987654321") → sửa SĐT/địa chỉ của đúng đơn đó với giỏ của đơn (trước đây: ORDER_WRONG hỏi lại, hay mô hình chọn
+  // ORDER_UNCHANGED "đơn đã lên rồi" và SĐT mới bị bỏ — renderSingleReply chuyển ca đó về đây).
+  const contactChange = contactDiffersFromOrder(recentOrder, customerText, value.Customer_Address);
+  const contactOnlyUpdate = templateId === 'ORDER_UPDATE' && !adjustedItems.length && !fromCart && !paymentMessage
+    && recentForQuantity.length > 0 && recentOrder?.automatic !== false && now - (Number(recentOrder?.createdAt) || 0) < orderUpdateWindowMs && contactChange;
+  // Chủ shop 05/10 (quyết định c): "ngũ cốc" / "hạt ngũ cốc" kèm số túi riêng mà không nêu vị ("Mua hai gói ngũ cốc", "1 vị ca cao,
+  // 1 ngủ cốc") → MẶC ĐỊNH Túi Xanh (trước đây hỏi lại vị phần đó bằng ASK_FLAVOR_NGUYENBAN). Giỏ = các túi khách nêu rõ màu +
+  // phần "ngũ cốc" là Túi Xanh (bỏ món mô hình đoán cho phần đó). "nguyên bản" (Xanh hay Vàng) vẫn hỏi lại như cũ.
+  const cerealBags = !fromCart && !paymentAfterOrder && !askedNguyenBan && !contactOnlyUpdate && isOrderStep(templateId) && !ambiguousNguyenBan(customerText)
+    ? ambiguousCerealBags(customerText) : 0;
+  const cerealItems = cerealBags > 0 ? (() => {
+    const byCode = new Map();
+    const add = (product, quantity) => {
+      if (!product) return;
+      const current = byCode.get(product.sku);
+      byCode.set(product.sku, { product: product.name, code: product.sku, quantity: (current?.quantity || 0) + quantity });
+    };
+    for (const [colour, count] of Object.entries(colourCountsInText(customerText).counts)) {
+      if (count > 0) add(getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith(`GRA-${colour}-`)), count);
+    }
+    add(getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith('GRA-XANH-')), cerealBags);
+    return byCode.size ? [...byCode.values()] : null;
+  })() : null;
+  const namedItems = contactOnlyUpdate ? recentForQuantity
+    : cerealItems ? cerealItems
+    : xanhProduct ? [...adjustedItems, { product: xanhProduct.name, code: xanhProduct.sku, quantity: xanhFromNguyenBan }] : adjustedItems;
   // "Lấy thêm 1 túi vàng ghép đơn": bot chỉ tự gộp vào đơn cũ trong 60 phút như mọi lần sửa đơn
   // (chủ shop 01/10 — sau đó kho có thể đã đóng gói); quá hạn thì ghi chú + thẻ cho nhân viên
   // (ORDER_CHANGE_STAFF), không tạo đơn riêng tính thêm phí ship.
@@ -789,7 +1015,7 @@ function renderOrder(value, templates, context = {}) {
   // gộp / ghép" là cộng vào đơn cũ; còn lại là sửa giỏ của đơn cũ.
   const separateOrder = /\b(don khac|don moi|nguoi khac|dia chi khac|gui cho (ban|me|chi|em|anh)|tach don)\b/.test(messageWords);
   // "luôn" KHÔNG phải cộng thêm: "gửi e 2 túi luôn c nha" (đơn 1 túi) là đổi thành 2 túi.
-  const addsToOrder = /\b(them|nua|gop|ghep|cong them)\b/.test(messageWords);
+  const addsToOrder = asksToAdd(messageWords) || /\b(gop|ghep)\b/.test(messageWords);
   const implicitUpdate = !separateOrder && recentOpen && recentOrder.automatic !== false && namedItems.length > 0
     && ['ORDER_CONFIRMATION', 'ORDER_ADDRESS'].includes(templateId);
   // Tin thanh toán chỉ được nhắc lại đơn (namedItems = đúng đơn gần nhất → ORDER_UNCHANGED), không sửa.
@@ -862,11 +1088,27 @@ function renderOrder(value, templates, context = {}) {
   // R14 (…958786): "1 túi nâu 1 túi nguyên bản" — Xanh và Vàng đều được gọi là nguyên bản, mô hình đoán (từng thành 2 Nâu,
   // khách bỏ đơn): hỏi lại bằng ASK_FLAVOR_NGUYENBAN. Giỏ chờ giữ phần khách đã nói rõ (1 Nâu) + số túi phần nguyên bản
   // (askedBagCount / nguyenBanAsk); khách trả lời Xanh/Vàng thì cộng vào giỏ (answersNguyenBan). Không hỏi lại lần hai.
+  // R16 (inbox1 A1/A2): "3 túi xanh vàng" (số túi khác số màu) / "lấy 2 màu" (không nêu màu) → hỏi lại vị, giữ số túi
+  // (askedBagCount) + SĐT/địa chỉ; giỏ cũ không còn đúng ý khách nên không chốt theo giỏ cũ hay giỏ mô hình đoán.
+  const splitAsk = !updating && !fromCart && !paymentMessage && templates.ASK_FLAVOR && isOrderStep(templateId)
+    ? flavourSplitAsk(customerText, { recentTexts: Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts : [], heldItems: pending?.items || [] }) : 0;
+  if (splitAsk > 0) {
+    const { awaitingConfirm, heldSilently, nguyenBanAsk, ...carry } = pending || {};
+    const typed = String(value.Customer_Address || '').trim();
+    const typedClean = typed && typed !== '0' ? stripReceiverName(cleanAddressText(typed), String(activeCustomer.name || '')) : '';
+    return {
+      templateId: 'ASK_FLAVOR',
+      ...splitMessages(fill(templates.ASK_FLAVOR, commonValues())),
+      handoff: false,
+      pendingOrder: { ...carry, items: [], key: '', at: now, phone: toLocalPhone(value.Phone_Number) || extractVietnamesePhone(customerText) || pending?.phone || '', address: typedClean || pending?.address || '', addressAsks: pending?.addressAsks || 0, askedBagCount: splitAsk }
+    };
+  }
+  // R16 (inbox1 A8): "1 vị ca cao, 1 ngủ cốc" — phần "ngũ cốc" chưa rõ vị: hỏi lại như "nguyên bản" (giữ phần đã rõ: 1 Nâu).
   const nguyenBanQty = !updating && !fromCart && !paymentMessage && templates.ASK_FLAVOR_NGUYENBAN && !askedNguyenBan
-    && context.lastTemplateId !== 'ASK_FLAVOR_NGUYENBAN' ? ambiguousNguyenBan(customerText) : 0;
+    && context.lastTemplateId !== 'ASK_FLAVOR_NGUYENBAN' && !xanhFromNguyenBan ? (ambiguousNguyenBan(customerText) || (cerealItems ? 0 : ambiguousCerealBags(customerText))) : 0;
   if (nguyenBanQty > 0) {
     const { counts } = colourCountsInText(customerText);
-    const adding = /\b(them|nua|cong them)\b/.test(messageWords);
+    const adding = asksToAdd(messageWords);
     const stated = Object.entries(counts).filter(([, count]) => count > 0).map(([colour, count]) => {
       const product = getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith(`GRA-${colour}-`));
       return product ? { product: product.name, code: product.sku, quantity: count } : null;
@@ -904,10 +1146,15 @@ function renderOrder(value, templates, context = {}) {
   // R14: bot vừa hỏi "nguyên bản là Xanh hay Vàng" (giỏ chờ giữ phần đã rõ, vd 1 Nâu) — khách trả lời vị thì CỘNG vào giỏ.
   const answersNguyenBan = askedNguyenBan && baseItems.length > 0 && baseItems.every(item => /^GRA-(XANH|VANG)-/i.test(String(item.code || '')));
   const addsToHeld = heldItems.length > 0 && baseItems.length > 0 && isOrderStep(templateId) && !replacesHeld
-    && (String(value.add_to_basket || '') === '1' || ((/\b(them|nua|cong them)\b/.test(messageWords) || answersNguyenBan) && !coversHeld()));
+    && (String(value.add_to_basket || '') === '1' || ((asksToAdd(messageWords) || answersNguyenBan) && !coversHeld()));
+  // R16: trả lời vị cho phần "nguyên bản"/"ngũ cốc" ("Túi xanh nhé", không nêu số) = đúng số túi phần đó (nguyenBanAsk).
+  // Luật FLAVOR_ANSWER / mô hình lấy số túi của CẢ tin trước ("1 túi nâu 1 túi nguyên bản" = 2) → trước đây 1 Nâu + 2-3 Xanh.
+  const nguyenBanOpenQty = Math.round(Number(context.pendingOrder?.nguyenBanAsk) || 0);
+  const answerItems = answersNguyenBan && nguyenBanOpenQty > 0 && baseItems.length === 1 && !countBags(customerText)
+    && !Object.keys(colourCountsInText(customerText).counts).length ? [{ ...baseItems[0], quantity: nguyenBanOpenQty }] : baseItems;
   const mergeHeld = () => {
     const byKey = new Map();
-    for (const item of [...heldItems, ...baseItems]) {
+    for (const item of [...heldItems, ...answerItems]) {
       const key = itemKey(item);
       const current = byKey.get(key);
       byKey.set(key, { product: current?.product || item.product, quantity: (current?.quantity || 0) + (Number(item.quantity) || 1) });
@@ -955,13 +1202,20 @@ function renderOrder(value, templates, context = {}) {
   // khách) sau GIFT_SWAP; mảng rỗng = chưa nêu vị): dòng quà của tin giỏ / xác nhận đơn / ghi chú đơn là 2 gói nhỏ thay cho
   // bát/quạt/muỗng (chủ shop 01/10, không trừ tiền) — không còn in "tặng Quạt + Bát" sau khi đã nhận đổi.
   const giftSwap = heldGiftSwap(context.pendingOrder);
+  // R15 (chủ shop 03/10): bot đã hứa tặng yến mạch khách quen (engine đặt pendingOrder.oatsGift = true sau DISCOUNT_OATS_GIFT)
+  // → dòng quà của tin giỏ / xác nhận đơn / order.gift thêm OATS_GIFT_NAME khi giỏ từ 2 túi; tiền không đổi.
+  const oatsGift = context.pendingOrder?.oatsGift === true;
   // 05/10: quà chọn tay của giỏ (đổi quạt → muỗng dừa) thay cho quà theo bảng; có thì không áp đổi quà kiểu cũ.
+  // Gộp: lời hứa yến mạch (R15) vẫn cộng lên trên quà chọn tay (đơn lưu dựng chữ quà từ giftOverride; nhân viên vẫn có
+  // ghi chú yến mạch trong addressCheck do engine gắn).
   const giftOverride = heldGiftOverride(context.pendingOrder, basePrice);
-  const price = giftOverride ? withGiftOverride(basePrice, giftOverride) : withGiftSwap(basePrice, giftSwap);
+  const price = withOatsGift(giftOverride ? withGiftOverride(basePrice, giftOverride) : withGiftSwap(basePrice, giftSwap), oatsGift);
 
   // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):
   // đọc thẳng từ tin khách vừa nhắn thay vì hỏi lại thứ khách đã đưa.
-  const freshPhone = toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number) || extractVietnamesePhone(customerText)
+  // R15 (inbox3 A5): đang sửa đơn vừa chốt — SĐT nằm trong chính tin khách thắng SĐT mô hình điền (mô hình hay chép SĐT cũ
+  // của đơn từ lịch sử → unchangedOrder → "đơn đã lên rồi", SĐT mới bị bỏ).
+  const freshPhone = (updating ? extractVietnamesePhone(customerText) : '') || toLocalPhone(value.Phone_Number) || extractVietnamesePhone(value.Phone_Number) || extractVietnamesePhone(customerText)
     // SĐT khách gửi ở một tin riêng trước đó (hay tin bị mô hình bỏ qua): đọc lại, không hỏi nữa.
     || (Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.map(text => extractVietnamesePhone(text)).find(Boolean) || '' : '');
   // Khách quen "gửi về địa chỉ cũ / như lần trước": SĐT và địa chỉ lấy từ đơn
@@ -1058,6 +1312,8 @@ function renderOrder(value, templates, context = {}) {
         ...(staffCheck ? { staffCheck } : {}),
         // Vòng 13: lựa chọn đổi quà (engine đặt sau GIFT_SWAP) đi theo giỏ tới khi lên đơn, kể cả khi khách đổi món/số túi.
         ...(giftSwap && pending ? { giftSwap } : {}),
+        // R15: lời hứa tặng yến mạch khách quen đi theo giỏ tới khi lên đơn.
+        ...(oatsGift ? { oatsGift: true } : {}),
         // 05/10: quà chọn tay (đổi quạt → muỗng dừa) đi theo giỏ khi giỏ mới vẫn được quà live.
         ...(pending && heldGiftOverride(context.pendingOrder, freshPriceable ? freshPrice : basePrice) ? { giftOverride: heldGiftOverride(context.pendingOrder) } : {}),
         // Vòng 12: số túi khách đã nêu khi chưa chọn vị — giữ tới khi giỏ có hàng.
@@ -1065,6 +1321,22 @@ function renderOrder(value, templates, context = {}) {
       }
     : null;
 
+  // R15 (inbox1 A2): giỏ chờ còn phần "nguyên bản" chưa rõ Xanh/Vàng (nguyenBanAsk) mà tin này không nêu vị/số túi (khách gửi
+  // SĐT + địa chỉ, mô hình không điền món) → KHÔNG lên đơn thiếu túi (trước đây tạo đơn 1 Túi Vàng 189k thay cho Xanh + Vàng):
+  // giữ SĐT/địa chỉ vào giỏ chờ và hỏi lại phần nguyên bản. Khách nêu giỏ có số/vị, hay "đổi/chỉ lấy…" thì theo giỏ mới.
+  const nguyenBanOpen = Math.round(Number(context.pendingOrder?.nguyenBanAsk) || 0);
+  if (nguyenBanOpen > 0 && !updating && !fromCart && !paymentMessage && isOrderStep(templateId) && templates.ASK_FLAVOR_NGUYENBAN && pending) {
+    const quantityOf = list => (list || []).reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+    const statedBasket = Object.keys(colourCountsInText(customerText).counts).length > 0 || countBags(customerText) > 0 || replacesHeld;
+    if (!statedBasket && quantityOf(items) < quantityOf(pending.items) + nguyenBanOpen) {
+      return {
+        templateId: 'ASK_FLAVOR_NGUYENBAN',
+        ...splitMessages(fill(templates.ASK_FLAVOR_NGUYENBAN, commonValues())),
+        handoff: false,
+        pendingOrder: { ...(nextPending || {}), items: pending.items || [], key: pending.key || '', at: pending.at || now, askedBagCount: Number(context.pendingOrder?.askedBagCount) || nguyenBanOpen, nguyenBanAsk: nguyenBanOpen }
+      };
+    }
+  }
   const confirmed = isOrderStep(templateId) && Boolean(price) && hasPhone && hasAddress && addressAccepted;
 
   // Everything else is in hand but the address cannot be placed on the
@@ -1228,7 +1500,15 @@ function renderOrder(value, templates, context = {}) {
   }
   if (updating) {
     // Sửa đơn: một tin ngắn nêu giỏ mới, không lặp lại chính sách giao/đổi trả.
-    const updated = fill(templates.ORDER_UPDATED || templates.ORDER_CONFIRMATION, {
+    // R16 (inbox5 A8, ca …2228921202 đổi địa chỉ đơn live): mẫu ORDER_UPDATED đang chạy không có {gift} → câu "em đã sửa lại
+    // đơn" bỏ mất dòng quà dù đơn vẫn giữ quà (khách tưởng mất quà). Mẫu không có {gift} mà đơn có quà hiện vật → chèn dòng
+    // "🎁 Tặng kèm: …" ngay sau dòng tổng tiền (mẫu đã có {gift} thì theo mẫu).
+    const updatedGift = price.gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + ');
+    const updatedBase = templates.ORDER_UPDATED || templates.ORDER_CONFIRMATION;
+    const updatedTemplate = updatedGift && !String(updatedBase).includes('{gift}')
+      ? (/^[^\n]*\{total\}[^\n]*$/m.test(updatedBase) ? updatedBase.replace(/^([^\n]*\{total\}[^\n]*)$/m, '$1\n🎁 Tặng kèm: {gift}') : `${updatedBase}\n🎁 Tặng kèm: {gift}`)
+      : updatedBase;
+    const updated = fill(updatedTemplate, {
       ...commonValues(),
       phone,
       address: deliveryAddress,
@@ -1305,6 +1585,60 @@ export const orderGiftFallbackTemplates = Object.freeze({
   GIFT_POLICY_ORDER_NONE: 'Dạ đơn {items} của {title}[?free_ship] được {free_ship}[/?] ạ; đơn này chưa kèm quà tặng hiện vật ạ 🌾 Chương trình quà hiện tại bên em:\n[[gifts]]• {gifts}: {rule}[[/gifts]]'
 });
 const seedTemplate = id => String(orderGiftFallbackTemplates[id] || '').trim();
+
+// R15 (03/10): lời dự phòng cho mẫu MỚI của vòng 15 — cùng lời với seed. Máy chủ chạy theo mẫu trong Cài đặt (normalize
+// chỉ thêm mã seed còn thiếu, không đè mẫu cũ); bảng này dùng khi nơi gọi đưa bộ mẫu thiếu mã (test, cấu hình cũ chưa qua
+// normalizeChatbotSettings). Mẫu trống trong Cài đặt ('' = tắt) vẫn là tắt. ORDER_EXISTING_CONFIRM: lời mới (hỏi gộp/tách,
+// chủ shop 03/10) chỉ dùng khi bộ mẫu thiếu mã — lời đang chạy trên máy chủ phải áp qua Cài đặt.
+// Quà yến mạch khách quen (chủ shop 03/10): chưa có quy cách/mã POS → chữ chung, sửa một chỗ ở đây khi có mã.
+export const OATS_GIFT_LABEL = '1 phần yến mạch';
+export const OATS_GIFT_NAME = 'Yến mạch (quà khách quen)';
+export const r15FallbackTemplates = Object.freeze({
+  BOUGHT_ON_MARKETPLACE: 'Dạ em cảm ơn {title} đã ủng hộ nhà Nắng trên sàn ạ 💛 Đơn trên sàn mình cần hỗ trợ gì thì {title} nhắn em mã đơn để em kiểm tra giúp nha ạ.',
+  BAG_SIZE_INFO: 'Dạ túi lớn nhất bên em là {product} (vị nguyên bản) ạ. {Title} cần dùng nhiều thì lấy combo 3 túi[?weight_3] ({weight_3})[/?] chỉ {price_3}[?free_ship_3] ({free_ship_3})[/?][?gift_3], tặng kèm {gift_3}[/?] nha ạ 🌾',
+  PHONE_LOOKS_SHORT: 'Dạ số điện thoại [?phone]{phone} [/?]hình như còn thiếu 1 số, {title} kiểm tra lại giúp em nha ạ.',
+  FRUIT_PAIRING: 'Dạ granola bên em ăn kèm trái cây nào cũng hợp ạ: thanh long, chuối, táo, dâu… Trộn thêm sữa chua hoặc sữa hạt thì càng ngon và no lâu nha {title} 🌾',
+  DISCOUNT_OATS_GIFT: 'Dạ giá combo bên em đã là giá tốt nhất rồi nên em không giảm thêm được ạ 💛[?enough] Em xin tặng thêm {title} {oats_gift} làm quà ạ 🎁[/?][?invite] {Title} lấy từ combo 2 túi ({two_price}, miễn phí vận chuyển) là em tặng thêm {oats_gift} làm quà nha ạ 🌾[/?]\nGiỏ của mình: {cart} – {total} ạ.',
+  ORDER_ADDRESS_OLD_NOT_FOUND: 'Dạ em chưa tìm thấy địa chỉ cũ theo số này ạ, {title} gửi giúp em địa chỉ nhận hàng (số nhà, đường, phường/xã, tỉnh) để em lên đơn liền nha ạ.',
+  SMALL_PACK_FLAVOURS: 'Dạ combo 10 gói nhỏ hiện bên em chỉ còn vị Xanh nguyên bản ạ (dễ ăn, cân bằng). {Title} cần em gửi bảng giá combo 10 gói không ạ?',
+  // R15 (inbox1 A5): khách đã nêu màu ({named}) thì không hỏi lại "vị nào". Mã đã có trong seed → bảng này chỉ khi bộ mẫu thiếu mã.
+  PRICE_COUNT: 'Dạ {count} túi ({kind}) giá {total}[?ship] + phí ship {ship}[/?][?free], miễn phí vận chuyển[/?][?gift], tặng {gift}[/?] ạ 🌾[?named] {Title} lấy luôn {count} {kind} để em lên đơn liền cho mình nha?[/?][?pick] {Title} lấy {count} túi vị nào để em lên đơn liền cho mình nha?[/?]',
+  ORDER_EXISTING_CONFIRM: 'Dạ {title} ơi, em thấy mình đang có đơn {existing_items} đặt lúc {existing_at}, hiện {existing_state} ạ 🌾 {Title} muốn em gộp {cart} vào đơn đang có, hay tách thành đơn mới (em gửi cùng địa chỉ cũ) ạ?'
+});
+// R16 (05/10, inbox5 A6): mẫu MỚI — khách gửi tin nhắn thoại (bot không nghe được). Cùng lời với seed; engine chọn mẫu khi
+// tin là audio. Trong intent-cascade thuộc SUPPORT (như IMAGE_RECEIVED), không vào ANSWER.
+export const r16FallbackTemplates = Object.freeze({
+  VOICE_RECEIVED: 'Dạ em chưa nghe được tin nhắn thoại ạ, {title} nhắn chữ giúp em nha ạ 💛'
+});
+const fallbackTemplateIds = [...Object.keys(r15FallbackTemplates), ...Object.keys(r16FallbackTemplates)];
+/** Bộ mẫu + lời dự phòng R15/R16 cho mã còn thiếu (mẫu trong Cài đặt luôn thắng, kể cả mẫu trống = tắt). */
+function withR15Fallbacks(templates) {
+  const given = templates && typeof templates === 'object' ? templates : {};
+  if (fallbackTemplateIds.every(id => Object.hasOwn(given, id))) return given;
+  return { ...r15FallbackTemplates, ...r16FallbackTemplates, ...given };
+}
+
+/**
+ * R15: SĐT khách gõ THIẾU một số — 9 chữ số mở bằng 0 (03/05/07/08/09), hay 8 chữ số sau +84/84. Tin đã có SĐT đủ thì
+ * không tính. Trả số như khách gõ (chỉ chữ số, giữ +84/84), '' nếu không có. Hàm thuần — engine dùng để hỏi lại
+ * (mẫu PHONE_LOOKS_SHORT), chưa nối vào engine.
+ * @param {string} text
+ * @returns {string}
+ */
+export function phoneLooksShort(text) {
+  const raw = String(text ?? '');
+  if (extractVietnamesePhone(raw)) return '';
+  // R15 sửa (phản biện luật, THẤP): số tài khoản / mã vận đơn 9 số không phải SĐT thiếu số.
+  const folded = raw.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
+  if (/\b(?:stk|so tai khoan|tai khoan|tk|ma (?:van )?don|mvd|ck|chuyen khoan)\b/.test(folded)) return '';
+  // Dãy số có thể chia bằng dấu chấm/gạch/một khoảng trắng ("091 234 567"); không dính chữ số / chữ cái hai đầu.
+  for (const match of raw.matchAll(/(?<![\p{L}\p{N}+])(\+?)(\d(?:[.\- ]?\d)+)(?![\p{L}\p{N}])/gu)) {
+    const digits = match[2].replace(/\D/g, '');
+    if (/^0[35789]\d{7}$/.test(digits)) return digits;
+    if (/^84[35789]\d{7}$/.test(digits)) return `${match[1]}${digits}`;
+  }
+  return '';
+}
 
 function hasOrderContext(context = {}) {
   if (typeof context.hasOrder === 'boolean') return context.hasOrder && Boolean(context.recentOrder);
@@ -1550,8 +1884,56 @@ const catalogRenderers = {
   PRICE_MIX_TUI_LON: (value, templates) => renderMixPricing(templates),
   PRICE_QUOTE: (value, templates) => renderPriceQuote('PRICE_QUOTE', value, templates),
   PRODUCT_PHOTOS: (value, templates) => renderProductPhotos(value, templates),
-  DISCOUNT_POLICY: (value, templates) => renderDiscountPolicy(value, templates)
+  DISCOUNT_POLICY: (value, templates) => renderDiscountPolicy(value, templates),
+  BAG_SIZE_INFO: (value, templates) => renderBagSizeInfo(templates)
 };
+
+/**
+ * R15 BAG_SIZE_INFO ("túi to nhất", "loại nào nặng nhất"): túi lớn nhất = sản phẩm ghép combo đang bán có khối lượng lớn
+ * nhất (Túi Xanh 450g); bậc 3 túi (khối lượng, giá, miễn ship, quà) đọc từ bảng giá như PRICE_QUOTE — không ghi cứng số.
+ */
+function renderBagSizeInfo(templates) {
+  const biggest = getCatalogProducts().filter(product => product.active && !product.staffOnly && product.mixable && product.weight > 0)
+    .sort((a, b) => b.weight - a.weight)[0];
+  const quote = biggest ? quoteTiers(biggest.sku, giftContext()) : null;
+  if (!quote) return fill(templates.BAG_SIZE_INFO, { ...commonValues(), product: biggest?.name || 'Túi Xanh 450g' });
+  const values = { ...commonValues(), product: quote.product.name, weight: formatWeight(quote.product.weight) };
+  for (const tier of quote.tiers) {
+    const n = tier.quantity;
+    Object.assign(values, {
+      [`weight_${n}`]: formatWeight(tier.weight).replace('.', ','),
+      [`price_${n}`]: formatMoney(tier.price),
+      ...Object.fromEntries(Object.entries(basketValues(comboKey([{ sku: quote.product.sku, quantity: n }]))).map(([k, v]) => [`${k}_${n}`, v]))
+    });
+  }
+  return fill(templates.BAG_SIZE_INFO, values);
+}
+
+/**
+ * R15 DISCOUNT_OATS_GIFT (chủ shop 03/10: khách mặc cả / khách quen xin giảm): không giảm giá. Giỏ/đơn từ 2 túi
+ * (context.bagCount do engine đưa, không có thì đếm giỏ chờ) → tặng thêm yến mạch + nhắc giỏ; dưới 2 túi → mời lên combo 2
+ * túi để được tặng. Engine đặt pendingOrder.oatsGift = true khi đã hứa tặng (dòng quà của giỏ/đơn thêm OATS_GIFT_NAME).
+ */
+function renderDiscountOatsGift(templates, context = {}) {
+  const now = Number(context.now) || Date.now();
+  const held = usablePendingOrder(context.pendingOrder, { now, templateId: 'ORDER_ADDRESS' });
+  const heldItems = held?.items || [];
+  const heldCount = heldItems.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+  const bagCount = Number(context.bagCount) > 0 ? Number(context.bagCount) : heldCount;
+  const priced = heldItems.length ? priceBasket(heldItems, giftContext()) : null;
+  const firstSku = priced?.lines?.[0]?.sku || getCatalogProducts().find(product => product.active && product.mixable && !product.staffOnly)?.sku || '';
+  const two = firstSku ? priceBasket([{ sku: firstSku, quantity: 2 }], giftContext()) : null;
+  const enough = bagCount >= 2;
+  return fill(templates.DISCOUNT_OATS_GIFT, {
+    ...commonValues(),
+    oats_gift: OATS_GIFT_LABEL,
+    enough: enough ? '1' : '',
+    invite: enough ? '' : '1',
+    two_price: two?.priceable ? formatMoney(two.total) : 'giá combo',
+    cart: priced?.priceable ? priced.lines.map(line => `${line.quantity} ${line.name}`).join(' + ') : '',
+    total: priced?.priceable ? formatMoney(priced.total) : ''
+  });
+}
 
 /**
  * A PRICE_<sản phẩm> id from the old prompt vocabulary. It is answered
@@ -1583,7 +1965,9 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
   // 05/10: đổi quạt → muỗng dừa (khách live) và "quà đã có muỗng" — engine tự chọn khi việc đó thật sự xảy ra.
   'GIFT_FAN_TO_SPOON', 'GIFT_SPOON_INCLUDED',
   // 03/10: báo hành trình vận đơn Sapo theo giai đoạn (app/sapo-sync.mjs) + trả lời "đơn tới đâu" khi đã có vận đơn.
-  'ORDER_STATUS_SHIPPED', 'SHIPMENT_CREATED', 'SHIPMENT_PICKED_UP', 'SHIPMENT_IN_TRANSIT', 'SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED']);
+  'ORDER_STATUS_SHIPPED', 'SHIPMENT_CREATED', 'SHIPMENT_PICKED_UP', 'SHIPMENT_IN_TRANSIT', 'SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED',
+  // R15: engine tự chọn — SĐT thiếu số (cần {phone}), không tra được địa chỉ cũ theo SĐT.
+  'PHONE_LOOKS_SHORT', 'ORDER_ADDRESS_OLD_NOT_FOUND']);
 
 // fix-bot T1 (01/10): mẫu "báo sự việc đã xảy ra" (đã nhận đơn Shop, đã hủy/sửa/ghi chú đơn, đã nhận deal live, đơn
 // đang có…) — chỉ engine được chọn khi việc đó thật sự xảy ra; mô hình trả các mã này thì luôn đổi về GENERAL_INFO.
@@ -1612,6 +1996,8 @@ export function sanitizeModelAnswer(parsed, systemPrompt = '') {
   if (blocked(templateId)) {
     console.warn(`Mô hình trả mẫu nội bộ ${templateId}: đổi về GENERAL_INFO`);
     clean.template_id = 'GENERAL_INFO';
+    // R15 (inbox3 A5): nhớ mô hình đã chọn "đơn giữ nguyên" — renderSingleReply sửa đơn khi tin có SĐT/địa chỉ khác đơn.
+    if (templateId === 'ORDER_UNCHANGED') clean.modelOrderUnchanged = '1';
   }
   if (blocked(String(clean.also ?? '').trim())) delete clean.also;
   return clean;
@@ -1732,7 +2118,8 @@ function heldOneBagReply(templates, context = {}) {
  * mô hình chọn bước đơn ở template_id và câu hỏi kèm ở "also". Ý phụ là mẫu
  * thông tin có thật; đi trước câu xin SĐT/địa chỉ, sau câu trả lời thông tin.
  */
-export function renderChatbotReply(value = {}, templates = {}, context = {}) {
+export function renderChatbotReply(value = {}, givenTemplates = {}, context = {}) {
+  const templates = withR15Fallbacks(givenTemplates);
   const main = renderSingleReply(value, templates, context);
   const also = String(value?.also || '').trim();
   if (!also || also === '0' || also === main.templateId || also.startsWith('ORDER_') || alsoBlocked.has(also) || main.handoff) return main;
@@ -1863,6 +2250,34 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
     const held = heldOneBagReply(templates, context);
     if (held) return held;
   }
+  // R15 (inbox3 A5): mô hình chọn ORDER_UNCHANGED ("đơn đã lên rồi") — sanitizeModelAnswer đổi mã này về GENERAL_INFO và
+  // đánh dấu modelOrderUnchanged — mà tin có SĐT/địa chỉ KHÁC đơn bot vừa chốt (≤ 60 phút, chưa giao, bot tự lên) → sửa đơn
+  // (nhánh ORDER_UPDATE), không bỏ SĐT mới.
+  if ((templateId === 'ORDER_UNCHANGED' || (templateId === 'GENERAL_INFO' && String(value.modelOrderUnchanged || '') === '1')) && !context.alsoRender) {
+    const recent = context.recentOrder || null;
+    const now = Number(context.now) || Date.now();
+    const open = Boolean(recent?.id) && recent.source !== 'POS' && recent.automatic !== false && String(recent.processingStatus || '') !== 'cancelled' && recent.status !== 'Hủy'
+      && !/đã giao|đang giao|đã gửi/i.test(String(recent.status || '')) && now - (Number(recent.createdAt) || 0) < orderUpdateWindowMs;
+    if (open && contactDiffersFromOrder(recent, context.messageText, value.Customer_Address)) {
+      return renderOrder({ ...value, template_id: 'ORDER_UPDATE', Product_N1: '0', No_A: '0', Product_N2: '0', No_B: '0', Product_N3: '0', No_C: '0' }, templates, context);
+    }
+  }
+  // R15: mặc cả → không giảm, tặng yến mạch theo số túi (renderDiscountOatsGift).
+  if (templateId === 'DISCOUNT_OATS_GIFT' && templates.DISCOUNT_OATS_GIFT) {
+    return { templateId, ...splitMessages(renderDiscountOatsGift(templates, context)), handoff: false };
+  }
+  // R15: SĐT thiếu số — {phone} engine đưa qua values.phone, không có thì đọc từ tin khách.
+  if (templateId === 'PHONE_LOOKS_SHORT' && templates.PHONE_LOOKS_SHORT) {
+    const given = value.values && typeof value.values === 'object' ? String(value.values.phone || '') : '';
+    return { templateId, ...splitMessages(fill(templates.PHONE_LOOKS_SHORT, { ...commonValues(), phone: given || phoneLooksShort(context.messageText) })), handoff: false };
+  }
+  // R15 (inbox1 A5): PRICE_COUNT — luật đưa values.named (khách ĐÃ nêu màu: "3 túi xanh") hay values.pick (chưa nêu). Nơi gọi
+  // cũ không đưa cờ nào (engine "N túi mix vị tùy ý") → coi như pick (hỏi vị như trước). Mẫu cũ không có khối thì bỏ qua cờ.
+  if (templateId === 'PRICE_COUNT' && templates.PRICE_COUNT && value.values && typeof value.values === 'object') {
+    const given = value.values;
+    const named = String(given.named || '') === '1';
+    return { templateId, ...splitMessages(fill(templates.PRICE_COUNT, { ...commonValues(), ...given, named: named ? '1' : '', pick: named ? '' : '1' })), handoff: false };
+  }
   if (isOrderStep(templateId)) return renderOrder(value, templates, context);
   // Vòng 11 (P3): PRICE_QUOTE_COMBO là mẫu con của bảng giá (đơn vị "Combo"), chỉ điền được qua renderPriceQuote:
   // gọi thẳng kèm Product_N1 (luật cũ, mô hình) → soạn như PRICE_QUOTE, không gửi bảng giá trống.
@@ -1873,7 +2288,17 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
   if (templateId === 'PRICE_QUOTE_COMBO' && templates.GENERAL_INFO) return renderSingleReply({ template_id: 'GENERAL_INFO' }, templates, context);
   // Vòng 11 (V8/B21): khách chỉ gửi SĐT (chưa địa chỉ) → không nói "đã nhận SĐT và địa chỉ": mẫu riêng
   // ORDER_PHONE_ASK_FLAVOR (không có thì mẫu cũ), mã mẫu vẫn là ORDER_INFO_ASK_FLAVOR cho các bước sau.
-  if (templateId === 'ORDER_INFO_ASK_FLAVOR' && String(value.Phone_Number || '').trim() && !String(value.Customer_Address || '').trim() && templates.ORDER_PHONE_ASK_FLAVOR) {
+  // R16 (inbox3 A4, ca …8987226913): địa chỉ khách đã gửi ở tin trước (giỏ chờ đã lưu, hay một tin gần đây có địa chỉ đọc
+  // được) → KHÔNG dùng mẫu xin "kèm địa chỉ nhận hàng đầy đủ" (khách vừa gửi), dùng ORDER_INFO_ASK_FLAVOR ("đã nhận SĐT và
+  // địa chỉ … lấy vị nào").
+  const addressKnown = () => Boolean(String(context.pendingOrder?.address || '').trim())
+    || (Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts.slice(-4) : []).some(text => {
+      const raw = String(text || '');
+      if (!raw.trim() || raw === String(context.messageText || '') || isShopCartText(raw)) return false;
+      const delivery = describeDeliveryAddress(raw);
+      return Boolean(delivery?.resolved?.province && (delivery.resolved.district || delivery.resolved.ward));
+    });
+  if (templateId === 'ORDER_INFO_ASK_FLAVOR' && String(value.Phone_Number || '').trim() && !String(value.Customer_Address || '').trim() && templates.ORDER_PHONE_ASK_FLAVOR && !addressKnown()) {
     return { templateId, ...splitMessages(fill(templates.ORDER_PHONE_ASK_FLAVOR, commonValues())), handoff: false };
   }
   const catalogId = catalogRenderers[templateId] ? templateId : isProductQuoteId(templateId) ? 'PRICE_QUOTE' : '';

@@ -138,8 +138,12 @@ test('r13 #2: mã giỏ Shop thật — combo màu, đuôi quà, hộp 10 gói, 
   assert.deepEqual(skus(cart('CB2-NAU-Z350')), [[NAU_SKU, 2]]);
   const gifted = cart('CB3-VANGG+BGD+M');
   assert.deepEqual([skus(gifted), gifted.gifts, gifted.needsStaff, gifted.unknown], [[[VANG_SKU, 3]], ['BGD', 'MUONG'], false, false]);
-  assert.deepEqual(skus(cart('CB10-MIX')), [['CB10-MIX', 1]]);
-  assert.deepEqual(skus(cart('CB10-CAM-G30')), [['CB10-CAM-G30', 1]]);
+  // Chủ shop 05/10: Combo 10 gói Mix (và Nâu) đã tắt → mã lạ, nhân viên xử lý (SHOP_CART_STAFF/UNKNOWN). Trước đây test
+  // khẳng định CB10-MIX còn bán.
+  assert.deepEqual([skus(cart('CB10-MIX')), cart('CB10-MIX').unknown], [[], true]);
+  assert.deepEqual([skus(cart('CB10-NAU-G35')), cart('CB10-NAU-G35').unknown], [[], true]);
+  // R16: Combo 10 gói Cam đã tắt (chủ shop 03/10) → mã lạ, nhân viên xử lý.
+  assert.deepEqual([skus(cart('CB10-CAM-G30')), cart('CB10-CAM-G30').unknown], [[], true]);
   assert.deepEqual(skus(cart('CB10-XANH-G35', 2)), [['CB10-XANH-G35', 2]]);
   assert.deepEqual(skus(cart('CB10-XANH-G35+BGD')), [['CB10-XANH-G35', 1]], 'mã danh mục kèm đuôi quà');
   // Yến mạch: nhân viên lên đơn, có nhãn đúng món.
@@ -403,8 +407,11 @@ test('r13 #7: priceBasket khớp giá Shop cho các mã giỏ thật; giỏ 4/5/
   assert.deepEqual(totalOf('CB-VANGG+NAU'), [true, 293000, 0]);
   assert.deepEqual(totalOf('CB2-NAU-Z350'), [true, 288000, 0]);
   assert.deepEqual(totalOf('CB3-VANGG+BGD+M'), [true, 447000, 0]);
-  assert.deepEqual(totalOf('CB10-MIX'), [true, 204000, 15000]);
-  assert.deepEqual(totalOf('CB10-CAM-G30'), [true, 204000, 15000]);
+  // Chủ shop 05/10: Combo 10 gói Mix tắt → không tự tính giá; combo Xanh cùng giá.
+  assert.deepEqual(totalOf('CB10-MIX'), [false, 0, 0]);
+  assert.deepEqual(totalOf('CB10-XANH-G35'), [true, 204000, 15000]);
+  // R16: Combo 10 gói Cam đã tắt (chủ shop 03/10) → không tự tính giá.
+  assert.deepEqual(totalOf('CB10-CAM-G30'), [false, 0, 0]);
   assert.deepEqual(totalOf('GRA-XANH-Z450'), [true, 189000, 15000]);
   assert.match(priceBasket(catalog.parseShopCart([{ sku: 'CB3-VANGG+BGD+M' }]).items).gift, /Bộ bát gáo dừa \+ Muỗng dừa/, 'quà theo bảng quà khớp đuôi +BGD+M của mã');
   for (const [quantity, total] of [[4, 596000], [5, 745000], [6, 894000], [9, 1341000], [10, 1490000]]) {

@@ -106,7 +106,7 @@ export const maxMessageTemplates = 200;
 // Giá trị "không gửi": undefined, null hay chuỗi trống (ô số để trống trên màn hình).
 const isBlank = item => item === undefined || item === null || (typeof item === 'string' && !item.trim());
 // Khóa số: null/"" trong bản vá = không gửi (giữ giá trị cũ), không phải "đặt về 0/mặc định".
-const numericSettingKeys = new Set(['cascadeCanary', 'cascadeThreshold', 'intentThreshold', 'memoryWindow', 'retryCount', 'retryIntervalMs', 'shopOrderWaitMs']);
+const numericSettingKeys = new Set(['cascadeCanary', 'cascadeThreshold', 'intentThreshold', 'memoryWindow', 'retryCount', 'retryIntervalMs', 'shopOrderWaitMs', 'mediaWaitMs']);
 
 /**
  * Gộp bản vá cấu hình (payload POST từ màn hình) vào cấu hình hiện tại, TRƯỚC khi chuẩn hóa:
@@ -133,6 +133,13 @@ export function mergeChatbotSettingsPatch(current = {}, patch = {}) {
       merged.followUps = next;
       continue;
     }
+    // R15: bản vá cờ luật ứng viên theo từng luật ({ K1: 'on' }) gộp vào đối tượng đang lưu (không đưa các luật khác về 'shadow').
+    // R15 sửa: cờ chuỗi đang lưu ('on') + bản vá { K5: 'off' } → K1/K1b/K3/K4 giữ 'on' (mergeCandidateRules).
+    if (key === 'candidateRules' && typeof item === 'object' && !Array.isArray(item) && base.candidateRules
+      && ((typeof base.candidateRules === 'object' && !Array.isArray(base.candidateRules)) || typeof base.candidateRules === 'string')) {
+      merged.candidateRules = mergeCandidateRules(base.candidateRules, item);
+      continue;
+    }
     if (key === 'contextTrim' && typeof item === 'object' && !Array.isArray(item)) {
       merged.contextTrim = { ...(base.contextTrim && typeof base.contextTrim === 'object' ? base.contextTrim : {}), ...item };
       continue;
@@ -157,6 +164,43 @@ export function mergeMessageTemplatesPatch(current = {}, patch = undefined) {
     else merged[id] = text;
   }
   return merged;
+}
+
+const candidateRuleKeys = ['K1', 'K1b', 'K3', 'K4', 'K5'];
+const candidateRuleModes = ['on', 'shadow', 'off'];
+/**
+ * R15: cờ luật ứng viên. Chuỗi 'on' | 'shadow' | 'off' giữ nguyên (cờ chung). Đối tượng → chỉ nhận khoá K1/K1b/K3/K4/K5 với giá
+ * trị on/shadow/off, thiếu khoá = 'shadow'; đối tượng không có khoá hợp lệ nào → 'shadow'. Giá trị khác → 'shadow'.
+ */
+export function normalizeCandidateRules(value) {
+  if (typeof value === 'string') return candidateRuleModes.includes(value) ? value : 'shadow';
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'shadow';
+  const canonical = canonicalCandidateRules(value);
+  const valid = candidateRuleKeys.filter(key => candidateRuleModes.includes(canonical[key]));
+  if (!valid.length) return 'shadow';
+  return Object.fromEntries(candidateRuleKeys.map(key => [key, candidateRuleModes.includes(canonical[key]) ? canonical[key] : 'shadow']));
+}
+
+// R15 sửa (phản biện luật, THẤP): khoá không phân biệt hoa thường và nhận tên luật đầy đủ như candidateRuleMode (rule-intent):
+// "k1", "K1_SHORT_PRICE" → "K1". Khoá lạ bỏ qua.
+const candidateRuleFullNames = { K1_SHORT_PRICE: 'K1', K1B_SHORT_PRICE_HELD: 'K1b', K3_QTY_HELD: 'K3', K4_WANT_BUY: 'K4', K5_FLAVOR_LIST_HELD: 'K5' };
+function canonicalCandidateRules(value) {
+  const out = {};
+  for (const [name, mode] of Object.entries(value || {})) {
+    const upper = String(name).toUpperCase();
+    const key = candidateRuleKeys.find(entry => entry.toUpperCase() === upper) || candidateRuleFullNames[upper];
+    if (key) out[key] = typeof mode === 'string' ? mode.toLowerCase() : mode;
+  }
+  return out;
+}
+
+// Bản vá dạng đối tượng ({ K5: 'off' }) lên cờ đang lưu: cờ chuỗi 'on'/'shadow'/'off' trải ra mọi luật trước (các luật không vá
+// GIỮ chế độ chuỗi cũ, không rơi về 'shadow'); cờ đối tượng gộp theo khoá đã chuẩn hoá.
+function mergeCandidateRules(base, patch) {
+  const before = typeof base === 'string' && candidateRuleModes.includes(base)
+    ? Object.fromEntries(candidateRuleKeys.map(key => [key, base]))
+    : base && typeof base === 'object' && !Array.isArray(base) ? canonicalCandidateRules(base) : {};
+  return { ...before, ...canonicalCandidateRules(patch) };
 }
 
 /**
@@ -244,7 +288,9 @@ export function normalizeChatbotSettings(input = {}, current = null) {
     // Luật thử nghiệm (TRIAL_ASK, ORDER_ASK, TERSE_HOW, ADDRESS_COMPLETE): 'shadow' chỉ ghi log so với mô hình.
     experimentalRules: value.experimentalRules === 'on' ? 'on' : 'shadow',
     // R13: luật ứng viên K1/K1b/K3/K4/K5 (rule-intent candidateRules) — 'shadow' (mặc định) chỉ ghi nhật ký, 'on' mới trả lời, 'off' tắt.
-    candidateRules: ['on', 'off'].includes(value.candidateRules) ? value.candidateRules : 'shadow',
+    // R15 (chủ shop 03/10, quyết định 12): cờ có thể theo TỪNG luật — đối tượng { K1, K1b, K3, K4, K5 } mỗi khoá 'on'|'shadow'|'off'
+    // (thiếu khoá = 'shadow'; khoá lạ / giá trị lạ bỏ). Chuỗi hợp lệ giữ nguyên như trước.
+    candidateRules: normalizeCandidateRules(value.candidateRules),
     // Mô hình ra quyết định trước LLM (processing/intent-model.mjs): 'shadow' chỉ ghi log so với
     // câu trả lời thật; 'on' đủ tin cậy (≥ intentThreshold) và mẫu an toàn thì trả lời thẳng.
     intentModel: ['on', 'shadow', 'off'].includes(value.intentModel) ? value.intentModel : 'shadow',
@@ -283,6 +329,9 @@ export function normalizeChatbotSettings(input = {}, current = null) {
     // R14 (chủ shop 03/10, quyết định 8): giỏ Facebook Shop chờ đơn POS bao lâu (ms) trước khi xin SĐT/địa chỉ — mặc định 20 giây
     // (trước 60 giây; chỉ 1/33 giỏ thấy đơn trong lúc chờ). 0 = không chờ (đơn POS vào muộn vẫn được tra nền báo "đã nhận").
     shopOrderWaitMs: isBlank(value.shopOrderWaitMs) || !Number.isFinite(Number(value.shopOrderWaitMs)) ? defaultChatbotSettings.shopOrderWaitMs : Math.max(0, Math.min(120000, Math.round(Number(value.shopOrderWaitMs)))),
+    // R15-fix3 (phản biện L6/T2): ảnh/video/tệp ở hộp thư chờ bao lâu (ms) cho tin chữ đi kèm — 0–20000. Để trống = engine dùng
+    // mặc định 12000 (không ghi khoá để cấu hình cũ / test không đổi hành vi).
+    ...(isBlank(value.mediaWaitMs) || !Number.isFinite(Number(value.mediaWaitMs)) ? {} : { mediaWaitMs: Math.max(0, Math.min(20000, Math.round(Number(value.mediaWaitMs)))) }),
     welcomeMessage: cleanText(value.welcomeMessage, '', 2000),
     handoffKeywords: cleanText(value.handoffKeywords, defaultChatbotSettings.handoffKeywords, 1000),
     // Chuỗi rỗng là một lựa chọn: tắt hẳn việc đoán khiếu nại theo từ khoá.

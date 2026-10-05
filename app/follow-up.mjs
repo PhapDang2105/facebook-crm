@@ -33,8 +33,21 @@ import { MESSENGER_WINDOW_MARGIN_MS, MESSENGER_WINDOW_MS, messengerWindowOpen } 
 // dùng chung cho "khách đã có đơn" và "bám đuổi thành công" ở mọi chỗ.
 const liveOrders = conversation => (Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [])
   .filter(order => order && !isCancelledOrder(order) && order.status !== 'Hủy');
-// Giờ yên tĩnh (giờ VN): không gửi tin bám đuổi 22h–7h.
-export const isQuietHourVN = (now = Date.now()) => { const hour = (new Date(now).getUTCHours() + 7) % 24; return hour >= 22 || hour < 7; };
+// Giờ yên tĩnh (giờ VN): không gửi tin bám đuổi 22h–8h.
+// Chủ shop 05/10: bám đuổi buổi sáng bắt đầu 8h (trước đây 7h, tin cả đêm dồn 12–15 tin gửi cùng lúc 7h).
+export const FOLLOW_UP_DAY_START_HOUR_VN = 8;
+export const FOLLOW_UP_DAY_END_HOUR_VN = 22;
+const hourVN = now => (new Date(now).getUTCHours() + 7) % 24;
+export const isQuietHourVN = (now = Date.now()) => { const hour = hourVN(now); return hour >= FOLLOW_UP_DAY_END_HOUR_VN || hour < FOLLOW_UP_DAY_START_HOUR_VN; };
+/**
+ * Chủ shop 05/10: tin dồn cả đêm không đi cùng một lúc đầu ngày. Giờ đầu tiên sau giờ yên tĩnh (8h–9h VN) mỗi lượt
+ * (15 phút) chỉ gửi tối đa 1/3 trần `maxPerRun` (làm tròn lên) — 15 tin dồn rải ra 8h00 / 8h15 / 8h30. Ngoài giờ đó giữ trần.
+ */
+export function followUpRunCap(maxPerRun, now = Date.now(), quietHours = true) {
+  const cap = Math.max(1, Number(maxPerRun) || 15);
+  if (!quietHours || hourVN(now) !== FOLLOW_UP_DAY_START_HOUR_VN) return cap;
+  return Math.max(1, Math.ceil(cap / 3));
+}
 
 const statePath = process.env.FOLLOW_UPS_PATH || path.join(projectRoot, 'data', 'processed', 'follow-ups.json');
 export const FOLLOW_UP_INTERVAL_MS = 15 * 60 * 1000;
@@ -189,6 +202,20 @@ const recentOrderMs = 14 * 24 * 60 * 60 * 1000;
 // Thẻ khiếu nại / bảo hành / khách sỉ: không bám trong MỌI trường hợp (kể cả đang giữ giỏ).
 const hardSkipLabelIds = ['complaint', 'warranty', 'wholesale'];
 
+// R15: khách báo đã mua trên sàn (TikTok/Shopee/web): mẫu cuối của bot là BOUGHT_ON_MARKETPLACE, hay mốc boughtElsewhereAt
+// (engine ghi) trong 14 ngày.
+const boughtElsewhereMs = 14 * 24 * 60 * 60 * 1000;
+export function boughtOnMarketplace(record, now = Date.now()) {
+  if (!record) return false;
+  if (String(record.botLastTemplateId || '') === 'BOUGHT_ON_MARKETPLACE') return true;
+  const at = Number(record.boughtElsewhereAt) || 0;
+  // R15-fix3 (phản biện L5): khách lập GIỎ MỚI sau mốc (vừa nói đã mua trên sàn rồi đặt luôn ở đây, bot trả lời < 60 giây) → hết chặn.
+  const basket = record.pendingOrder && typeof record.pendingOrder === 'object' ? record.pendingOrder : null;
+  if (at > 0 && Array.isArray(basket?.items) && basket.items.length && (Number(basket.at) || 0) > at) return false;
+  // Bot đã trả lời chuyện khác sau đó (khách quay lại hỏi mua) → mốc cũ không chặn nữa.
+  return at > 0 && now - at < boughtElsewhereMs && (Number(record.botLastReplyAt) || 0) <= at + 60 * 1000;
+}
+
 // ===== Ngữ cảnh khách (01/10) =====
 // Dòng sản phẩm nhận ra trong một đoạn chữ (đã bỏ dấu): để không bám khách hỏi yến mạch bằng câu granola.
 const productFamilyPatterns = {
@@ -234,8 +261,16 @@ export function isTrivialCustomerText(text) {
 // Khách bảo dừng: "khoan giao", "hủy đơn", "không lấy nữa"… (so trên chữ có dấu để "Huy" — tên người — không khớp).
 const declinePattern = /(?<![\p{L}\p{N}])(khoan|đừng)\s+(đã\s+)?(giao|gửi|ship|đặt|lên đơn)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])h(ủy|uỷ)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(không|ko|k|hông)\s+(lấy|mua|đặt)\s+nữa(?![\p{L}\p{N}])/iu;
 /** Khách nói dừng / hủy trong tin này? */
-export function customerDeclined(text) {
-  return declinePattern.test(String(text ?? '').normalize('NFC'));
+// R16 (bình luận B6b, ca …0716122894 "da nhan hang roi nen kg mua nua"): khách gõ KHÔNG dấu — so thêm trên chữ đã bỏ dấu
+// ("kg/ko/k/khong/hong/khum mua|lay|dat nua", "đã nhận hàng rồi", "đã mua rồi"). "huy" không dấu không tính (tên người).
+const declineFoldedPattern = /\b(?:k|ko|kg|khg|khong|hong|khum|hok) (?:can )?(?:lay|mua|dat) (?:them )?nua\b|\bda nhan (?:duoc )?hang roi\b|\b(?:da|vua) mua roi\b/;
+// R16-fix2 (phản biện C1): đang giữ giỏ mà khách "không lấy THÊM nữa" = từ chối lời mời thêm, vẫn giữ giỏ → vẫn nhắc giỏ.
+export function customerDeclined(text, { basketHeld = false } = {}) {
+  const value = String(text ?? '').normalize('NFC');
+  const folded = foldText(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ');
+  if (basketHeld && /\bthem\b/.test(folded) && !/\b(?:huy|khoan|dung)\b/.test(folded)) return false;
+  if (declinePattern.test(value)) return true;
+  return !/\?/.test(value) && declineFoldedPattern.test(folded);
 }
 
 // Khách chỉ đáp lời cho xong: "OK bạn", "dạ vâng ạ", "cảm ơn shop"… (tối đa vài từ, chỉ từ đáp lời).
@@ -262,12 +297,19 @@ const thanksText = /c(ả|á)m\s+ơn/iu;
 export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSkipLabelIds, hardLabelIds = hardSkipLabelIds, basketHeld = false, now = Date.now() } = {}) {
   const records = [candidate.inbox, candidate.thread, candidate.conversation].filter(Boolean);
   if (records.some(item => item.botEnabled === false)) return 'botOff';
+  // R15 (inbox3 A2, ca …659307 "Mình đặt của shop trên tiktok rồi" → 3 giờ sau vẫn nhận "em vẫn đang giữ đơn…"): khách báo đã
+  // mua trên sàn (bot trả BOUGHT_ON_MARKETPLACE, bỏ giỏ; engine ghi mốc boughtElsewhereAt) → không bám, kể cả lời nhắc giỏ.
+  if (records.some(item => boughtOnMarketplace(item, now))) return 'boughtElsewhere';
   const labels = new Set(records.flatMap(item => (Array.isArray(item.labels) ? item.labels : [])));
   if ((basketHeld ? hardLabelIds : skipLabelIds).some(id => labels.has(id))) return 'label';
   // attention: true hay { open: true } / chưa đóng — nhân viên đang xử lý.
   const attentionOpen = item => item.attention === true || (item.attention && typeof item.attention === 'object' && item.attention.open !== false && !item.attention.closedAt && !item.attention.resolvedAt);
   if (!basketHeld && records.some(attentionOpen)) return 'attention';
   if (!basketHeld && records.some(item => handoffTemplateIds.has(String(item.botLastTemplateId || '')))) return 'handoffTemplate';
+  // R16 (bình luận B6a, ca …949494: nhắc "em vẫn đang giữ đơn" ngay sau "chuyển bạn phụ trách trả lời" mà chưa ai trả lời → khách
+  // trách "Sao e kg trả lời"): tin bot cuối là báo chờ bạn phụ trách (STAFF_WAIT_*, COMMENT_STAFF_FOLLOWUP) — kể cả khi đang giữ
+  // giỏ — thì không bám (nhân viên đã trả lời sau đó thì 'staffReplied' bên dưới cũng chặn).
+  if (records.some(item => /^STAFF_WAIT_/.test(String(item.botLastTemplateId || '')) || String(item.botLastTemplateId || '') === 'COMMENT_STAFF_FOLLOWUP')) return 'waitingStaff';
   for (const record of records) {
     const messages = messagesIn(store, record);
     const customerAt = lastAt(incomingOf(messages), () => true);
@@ -281,7 +323,7 @@ export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSki
   const incoming = all.filter(message => message.direction === 'incoming');
   const last = incoming.at(-1);
   if (last && (last.type || 'text') === 'text' && isTrivialCustomerText(last.text)) return 'customerTrivial';
-  if (incoming.some(message => now - (Number(message.createdAt) || 0) <= maxReplyAgeMs && customerDeclined(message.text))) return 'customerDeclined';
+  if (incoming.some(message => now - (Number(message.createdAt) || 0) <= maxReplyAgeMs && customerDeclined(message.text, { basketHeld }))) return 'customerDeclined';
   if (!basketHeld && last && isAckText(last.text)) {
     const after = all.filter(message => message.direction === 'outgoing' && (Number(message.createdAt) || 0) >= (Number(last.createdAt) || 0));
     if (after.some(message => thanksText.test(String(message.text || ''))) || records.some(item => item.botLastTemplateId === 'THANK_YOU')) return 'customerClosed';
@@ -297,6 +339,8 @@ export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSki
  */
 export function orderRemindText(conversation, templates = {}, { now = Date.now(), messages = null } = {}) {
   const pending = conversation?.pendingOrder;
+  // R15: khách đã mua trên sàn → không nhắc giỏ (giỏ còn sót cũng không nhắc).
+  if (boughtOnMarketplace(conversation, now)) return '';
   const items = Array.isArray(pending?.items) ? pending.items.filter(item => item?.product) : [];
   if (!items.length || !templates.ORDER_ADDRESS_REMIND) return '';
   // R13: khách đã hẹn dịp khác ("để bữa khác chốt") — bot giữ giỏ với cờ `postponed`; không nhắc giỏ ("em vẫn đang giữ đơn…").
@@ -472,7 +516,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
     log(`Bám đuổi: bỏ ${expired} tin quá 7 ngày khỏi hàng chờ`);
   }
   if (!settings?.enabled || !settings.followUps?.enabled) return { ...summary, disabled: true };
-  // 22h–7h giờ VN: không nhắn khách (tin 3 giờ sau lời Page lúc 22h sẽ đi lúc 7h).
+  // 22h–8h giờ VN: không nhắn khách (tin 3 giờ sau lời Page lúc 22h sẽ đi từ 8h, rải theo followUpRunCap).
   if (quietHours && isQuietHourVN(now)) return { ...summary, quiet: true };
   const state = await readFollowUpState();
   if (!state.activatedAt) await updateFollowUpState(current => { current.activatedAt = now; return null; });
@@ -482,7 +526,8 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
   const pruned = await pruneReturningFromQueue({ conversationInfo, now }).catch(() => ({ removed: 0 }));
   if (pruned.removed) log(`Bám đuổi: bỏ ${pruned.removed} khách cũ khỏi hàng chờ`);
   const store = await readMessagingStore();
-  const maxPerRun = Math.max(1, Number(settings.followUps.maxPerRun) || 15);
+  // Trần mỗi lượt theo cài đặt; giờ đầu ngày (8h–9h VN) rải bớt — followUpRunCap.
+  const maxPerRun = followUpRunCap(settings.followUps.maxPerRun, now, quietHours);
   const inboxLabels = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
   // Thẻ Đã mua / Hủy đơn / Khách xấu / Bám đuổi thành công: không phải ứng viên.
   const boughtLabelIds = labelsForEvents(inboxLabels, ['order', 'cancel', 'bad', 'followup-won']);

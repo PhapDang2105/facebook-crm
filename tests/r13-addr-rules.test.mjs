@@ -35,7 +35,10 @@ test('r13-addr K4: tên mới chỉ là phần đầu/gối lên một tên dài
   const thanhXuan = resolveAddress('99luong thê vinh thanh xuân bắc ha nôi');
   assert.equal(thanhXuan.newWard, undefined);
   assert.equal(thanhXuan.postMerger, false);
-  assert.equal(thanhXuan.ward, null);
+  // R15 (sửa test): trước đây khẳng định `ward === null` — đó là giới hạn cũ, không phải ý của test (ý: không bắt nhầm phường
+  // MỚI "Thanh Xuân"/"Vĩnh Thanh"). Luật r15 "tên phường/xã duy nhất trong tỉnh đứng ngay trước tên tỉnh" đọc ra đúng phường CŨ
+  // Thanh Xuân Bắc — trùng nhãn của đơn …f1bced (Phường Thanh Xuân Bắc, Quận Thanh Xuân, Hà Nội).
+  assert.equal(thanhXuan.ward?.name ?? null, 'Phường Thanh Xuân Bắc');
   assert.equal(thanhXuan.province?.name, 'Hà Nội');
   // "hiệp bình chánh" là phường cũ của Thủ Đức, không phải phường mới "Hiệp Bình" + Huyện Bình Chánh (đơn …a2566d).
   assert.deepEqual(columns('21b đường 6 phường hiệp bình chánh tphcm'), ['Phường Hiệp Bình Chánh', 'Thành phố Thủ Đức', 'TP Hồ Chí Minh']);

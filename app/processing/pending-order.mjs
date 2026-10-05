@@ -14,7 +14,8 @@ export const remindedPendingOrderTtlMs = 24 * 60 * 60 * 1000;
 export const orderStepTemplateIds = ['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION', 'ORDER_UPDATE'];
 // Bước mà giỏ đang giữ vẫn dùng được (vòng 12: thêm tin nhắc giữ đơn, xin SĐT tra địa chỉ cũ,
 // hỏi vị, giỏ chờ tính giá). Không đổi isOrderStep: renderChatbotReply dùng nó để chọn bộ soạn đơn.
-export const basketStepTemplateIds = [...orderStepTemplateIds, 'ORDER_ADDRESS_REMIND', 'ORDER_ADDRESS_OLD_ASK_PHONE', 'ORDER_CUSTOM_BASKET', 'ASK_FLAVOR'];
+// Vòng 15: bot hỏi thẳng địa chỉ khi không tra được địa chỉ cũ / báo SĐT thiếu số → tin kế của khách vẫn là bước đơn.
+export const basketStepTemplateIds = [...orderStepTemplateIds, 'ORDER_ADDRESS_REMIND', 'ORDER_ADDRESS_OLD_ASK_PHONE', 'ORDER_CUSTOM_BASKET', 'ASK_FLAVOR', 'ORDER_ADDRESS_OLD_NOT_FOUND', 'PHONE_LOOKS_SHORT'];
 
 export function isOrderStep(templateId) {
   return orderStepTemplateIds.includes(String(templateId || '').trim());
@@ -82,6 +83,9 @@ export function normalizePendingOrder(value) {
     ...(normalizeGiftOverride(value?.giftOverride).length ? { giftOverride: normalizeGiftOverride(value.giftOverride) } : {}),
     // Vòng 13 (inbox2 A3): khách hẹn dịp khác (ORDER_POSTPONED, keepBasket) — giỏ còn giữ nhưng không nhắc bám đuổi.
     ...(value?.postponed ? { postponed: true } : {}),
+    // R15 (chủ shop 03/10 #1): khách mặc cả / xin giảm được hứa tặng yến mạch khi giỏ từ combo 2 túi (DISCOUNT_OATS_GIFT) —
+    // cờ đi theo giỏ chờ để phiếu/đơn ghi quà.
+    ...(value?.oatsGift === true ? { oatsGift: true } : {}),
     // Vòng 13 (02/10): giỏ do bình luận mang sang hộp thư — bình luận mới hơn được thay giỏ này (engine inboxBasketFresh).
     ...(value?.fromComment === true ? { fromComment: true } : {}),
     items: items.map(item => ({

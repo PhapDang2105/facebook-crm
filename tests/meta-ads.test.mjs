@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tempDir } from './helpers/temp-dir.mjs';
 import { normalizeAdAccountIds } from '../app/config.mjs';
-import { adsConnectionStatus, adsGraphError, mergeAdInsights, parseInsightRow, readAdStore, syncAdInsights, vietnamDay } from '../app/meta-ads.mjs';
+import { adsConnectionStatus, adsGraphError, mergeAdInsights, parseInsightRow, readAdStore, resetProofMemory, syncAdInsights, vietnamDay } from '../app/meta-ads.mjs';
 
 const directory = tempDir('meta-ads-');
 // 29/09/2026 10:00 giờ Việt Nam.
@@ -17,6 +17,7 @@ function config(overrides = {}) {
     graphVersion: 'v26.0',
     appSecret: '',
     insightsPath: path.join(directory, `ad-insights-${Math.random().toString(36).slice(2)}.json`),
+    sleep: async () => {},
     ...overrides
   };
 }
@@ -56,6 +57,8 @@ const insightsPage2 = {
 };
 
 const standardRoutes = () => [
+  { match: url => url.pathname.endsWith('/act_111'), reply: () => json({ name: 'Giọt Nắng', currency: 'VND', timezone_name: 'Asia/Ho_Chi_Minh', account_status: 1 }) },
+  { match: url => url.pathname.endsWith('/act_111/adsets'), reply: () => json({ data: [] }) },
   { match: url => url.pathname.endsWith('/act_111/campaigns'), reply: () => json(campaignsPage) },
   { match: url => url.pathname.endsWith('/act_111/insights') && url.searchParams.get('after') === 'X', reply: () => json(insightsPage2) },
   { match: url => url.pathname.endsWith('/act_111/insights'), reply: () => json(insightsPage1) }
@@ -68,7 +71,7 @@ test('tài khoản quảng cáo: nhận có/không có tiền tố act_, bỏ tr
 
 test('một dòng insights: tin nhắn lấy từ messaging_conversation_started_7d, số chuỗi đổi ra số', () => {
   const row = parseInsightRow(insightsPage1.data[0], 'act_111');
-  assert.deepEqual(row, { date: '2026-09-28', accountId: 'act_111', campaignId: 'c1', adsetId: 's1', adId: 'a1', spend: 150000, impressions: 12000, clicks: 340, messages: 25 });
+  assert.deepEqual(row, { date: '2026-09-28', accountId: 'act_111', campaignId: 'c1', adsetId: 's1', adId: 'a1', spend: 150000, impressions: 12000, clicks: 340, linkClicks: 0, messages: 25, newMessages: 0 });
   assert.equal(parseInsightRow({ date_start: '2026-09-28', ad_id: 'a9' }).messages, 0);
 });
 
@@ -80,12 +83,13 @@ test('đồng bộ: đi hết các trang insights, lưu chiến dịch, bản đ
   assert.equal(summary.since, '2026-09-23');
   assert.equal(summary.until, '2026-09-29');
   assert.ok(calls.every(call => call.method === 'GET'), 'không bao giờ gọi lệnh ghi');
-  assert.equal(calls.filter(call => call.url.pathname.endsWith('/insights')).length, 2, 'đi theo paging.next');
-  const insightsCall = calls.find(call => call.url.pathname.endsWith('/insights') && !call.url.searchParams.get('after'));
+  assert.equal(calls.filter(call => call.url.pathname.endsWith('/insights')).length, 4, 'level=ad và level=account, mỗi loại đi theo paging.next');
+  const insightsCall = calls.find(call => call.url.pathname.endsWith('/insights') && call.url.searchParams.get('level') === 'ad' && !call.url.searchParams.get('after'));
   assert.equal(insightsCall.url.searchParams.get('level'), 'ad');
   assert.equal(insightsCall.url.searchParams.get('time_increment'), '1');
   assert.deepEqual(JSON.parse(insightsCall.url.searchParams.get('time_range')), { since: '2026-09-23', until: '2026-09-29' });
-  assert.match(insightsCall.url.searchParams.get('fields'), /campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,actions/);
+  assert.match(insightsCall.url.searchParams.get('fields'), /campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,reach,clicks,inline_link_clicks,actions/);
+  assert.equal(insightsCall.url.searchParams.get('use_unified_attribution_setting'), 'true', 'quy chuyển đổi như Trình quản lý quảng cáo');
 
   const store = await readAdStore(settings.insightsPath);
   assert.equal(store.syncedAt, now);
@@ -127,6 +131,7 @@ test('lỗi Graph: token hết hạn, thiếu ads_read, bị giới hạn → c�
 });
 
 test('appsecret_proof bị từ chối (token của app khác) thì gửi lại một lần không kèm proof', async () => {
+  resetProofMemory();
   const settings = config({ appSecret: 'bi-mat' });
   const { fetchImpl, calls } = fakeFetch([
     { match: url => url.searchParams.has('appsecret_proof'), reply: () => json({ error: { code: 100, message: 'Invalid appsecret_proof provided in the API argument' } }, 400) },

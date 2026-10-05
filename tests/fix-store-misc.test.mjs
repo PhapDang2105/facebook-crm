@@ -18,7 +18,7 @@ const { customersToCsv, customersToAudienceCsv } = await import('../app/customer
 const { parseXlsx, XLSX_MAX_ENTRY_BYTES } = await import('../app/xlsx-import.mjs');
 const { orderedAtFromLabel, customerPhoneKey } = await import('../app/customer-file.mjs');
 const { updateCustomerProfile } = await import('../app/customer-edits.mjs');
-const { catchUpDays, graphList } = await import('../app/meta-ads.mjs');
+const { planBackgroundSync, graphList } = await import('../app/meta-ads.mjs');
 const { registerQrCode, recordQrScan, recordQrOpen } = await import('../app/qr-scans.mjs');
 const { createQrGreeter } = await import('../app/qr-greeting.mjs');
 
@@ -105,12 +105,16 @@ test('T7: sửa SĐT khách: +84 → 0, số lạ lưu kèm cảnh báo, ô tr�
   assert.equal(cleared.phone, undefined);
 });
 
-test('TB-1: vòng nền quảng cáo kéo lại từ lần đồng bộ cuối + 3 ngày (7–120); kho trống 90', () => {
+test('TB-1: vòng nền quảng cáo: chưa phủ 90 ngày thì kéo bù 90; máy chủ ngưng thì kéo từ ngày cuối đã phủ − 3 (tối đa 120)', () => {
   const now = Date.UTC(2026, 9, 1);
-  assert.equal(catchUpDays(null, now), 90);
-  assert.equal(catchUpDays(now - HOUR, now), 7);
-  assert.equal(catchUpDays(now - 15 * DAY, now), 18, 'ngưng 15 ngày: kéo đủ khoảng trống');
-  assert.equal(catchUpDays(now - 400 * DAY, now), 120);
+  const [empty] = planBackgroundSync({}, ['act_1'], now);
+  assert.deepEqual([empty.since, empty.until, empty.kind], ['2026-07-04', '2026-10-01', 'backfill']);
+  const fresh = { coverage: { act_1: { since: '2026-06-01', until: '2026-10-01', deepAt: now - HOUR } } };
+  assert.equal(planBackgroundSync(fresh, ['act_1'], now)[0].since, '2026-09-29');
+  const stale = { coverage: { act_1: { since: '2026-06-01', until: '2026-09-16', deepAt: now - 15 * DAY } } };
+  assert.equal(planBackgroundSync(stale, ['act_1'], now)[0].since, '2026-09-04', 'ngưng 15 ngày: kéo đủ khoảng trống');
+  const ancient = { coverage: { act_1: { since: '2025-01-01', until: '2025-06-01', deepAt: 1 } } };
+  assert.equal(planBackgroundSync(ancient, ['act_1'], now)[0].since, '2026-06-04', 'không quá 120 ngày');
 });
 
 test('T-6: lời gọi Graph có AbortSignal (timeout), hết giờ báo lỗi tiếng Việt', async () => {

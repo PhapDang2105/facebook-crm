@@ -36,9 +36,14 @@ export function friendlyAdsError(error) {
   if (code === 190 || code === 102 || /hết hạn|thu hồi/.test(message)) {
     return `Kết nối quảng cáo Facebook đã hết hạn — ${ASK_TECH} và cấp lại quyền đọc quảng cáo.`;
   }
-  if ([4, 17, 32, 613, 80000, 80004].includes(code) || /giới hạn số lần gọi/.test(message)) {
-    return 'Facebook đang giới hạn số lần lấy số liệu quảng cáo; thử đồng bộ lại sau ít phút.';
+  if ([4, 17, 32, 613, 80000, 80004].includes(code) || /giới hạn số lần gọi|Gần chạm giới hạn/.test(message)) {
+    return 'Facebook đang giới hạn số lần lấy số liệu quảng cáo; CRM tự lấy tiếp ở lượt sau (mỗi giờ).';
   }
+  // Tài khoản không phải VND / giờ Việt Nam: số sẽ sai nên CRM không kéo.
+  const wrongSetup = message.match(/^Tài khoản quảng cáo (\S+) (dùng tiền \S+|đặt múi giờ \S+)/);
+  if (wrongSetup) return `Tài khoản quảng cáo ${wrongSetup[1]} ${wrongSetup[2].replace(/;$/, '')} — CRM chỉ tính tài khoản VND, giờ Việt Nam; ${ASK_TECH} bỏ tài khoản này khỏi cấu hình.`;
+  // Cảnh báo trạng thái tài khoản (bị vô hiệu hoá, chưa thanh toán…): câu đã thân thiện, không có tên biến.
+  if (/^Tài khoản quảng cáo \S+.* (bị vô hiệu hoá|chưa thanh toán|đang chờ|trong thời gian gia hạn|chờ đóng|đã đóng|có trạng thái)/.test(message)) return message;
   if (code === 10 || code === 294 || (code >= 200 && code < 300) || code === 100 || /ads_read|tài khoản quảng cáo/.test(message)) {
     return `CRM chưa có quyền đọc số liệu tài khoản quảng cáo — ${ASK_TECH} quyền của tài khoản quảng cáo.`;
   }

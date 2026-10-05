@@ -245,8 +245,10 @@ export function buildCampaignPrompt(report = {}, { days, thresholds = campaignAi
         ten: String(campaign.name || '').slice(0, 120),
         trangThai: campaign.status || '',
         nguon: campaign.source || '',
-        nganSachNgay: round(campaign.dailyBudget),
-        chi: round(campaign.spend), hienThi: round(campaign.impressions), click: round(campaign.clicks), tinNhan: round(campaign.messages),
+        // null = chưa biết ngân sách (không phải 0đ); "nhom" = ngân sách đặt ở nhóm quảng cáo (cộng các nhóm đang chạy).
+        nganSachNgay: campaign.dailyBudget === null || campaign.dailyBudget === undefined ? null : round(campaign.dailyBudget),
+        ...(campaign.budgetLevel === 'adset' ? { nganSachO: 'nhom' } : {}),
+        chi: round(campaign.spend), hienThi: round(campaign.impressions), click: round(campaign.clicks), clickLienKet: round(campaign.linkClicks), tinNhan: round(campaign.messages), tinNhanKhachMoi: round(campaign.newMessages),
         don: round(campaign.orders), doanhThu: round(campaign.revenue), cpa: round(campaign.cpa), roas: round(campaign.roas, 2),
         soNgayCoChi: flag.activeDays,
         co: flag.flags,

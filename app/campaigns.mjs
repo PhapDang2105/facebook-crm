@@ -116,7 +116,8 @@ export function buildCampaignReport({
         accountId: campaign?.accountId || '',
         source,
         dailyBudget: campaign?.dailyBudget ?? null,
-        spend: 0, impressions: 0, clicks: 0, messages: 0, orders: 0, revenue: 0,
+        budgetLevel: campaign?.budgetLevel || '',
+        spend: 0, impressions: 0, clicks: 0, linkClicks: 0, messages: 0, newMessages: 0, orders: 0, revenue: 0,
         byDate: new Map()
       });
     }
@@ -144,7 +145,9 @@ export function buildCampaignReport({
     row.spend += Number(entry.spend) || 0;
     row.impressions += Number(entry.impressions) || 0;
     row.clicks += Number(entry.clicks) || 0;
+    row.linkClicks += Number(entry.linkClicks) || 0;
     row.messages += Number(entry.messages) || 0;
+    row.newMessages += Number(entry.newMessages) || 0;
     day(row, entry.date).spend += Number(entry.spend) || 0;
   }
 
@@ -216,10 +219,13 @@ export function buildCampaignReport({
     accountId: row.accountId,
     source: row.source,
     dailyBudget: row.dailyBudget,
+    ...(row.budgetLevel ? { budgetLevel: row.budgetLevel } : {}),
     spend: round(row.spend, 2),
     impressions: row.impressions,
     clicks: row.clicks,
+    linkClicks: row.linkClicks,
     messages: row.messages,
+    newMessages: row.newMessages,
     orders: row.orders,
     revenue: round(row.revenue),
     cpa: cpaOf(row.spend, row.orders),
@@ -241,6 +247,8 @@ export function buildCampaignReport({
     spend: round(sum(metaRows, 'spend'), 2),
     impressions: sum(metaRows, 'impressions'),
     clicks: sum(metaRows, 'clicks'),
+    linkClicks: sum(metaRows, 'linkClicks'),
+    newMessages: sum(metaRows, 'newMessages'),
     messages: sum(metaRows, 'messages'),
     orders: sum(metaRows, 'orders'),
     revenue: round(sum(metaRows, 'revenue'))

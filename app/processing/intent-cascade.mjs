@@ -65,7 +65,9 @@ const TEMPLATES_BY_SUBGROUP = {
     // vòng 13 (r13): bước đơn engine tự chọn — đã nhận giỏ Shop (chờ kiểm đơn), ghi nhận quà thay của giỏ/đơn
     'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED',
     // R15 (03/10): engine tự chọn — SĐT thiếu số, không tra được địa chỉ cũ (hỏi thẳng địa chỉ), mặc cả → tặng yến mạch theo giỏ
-    'PHONE_LOOKS_SHORT', 'ORDER_ADDRESS_OLD_NOT_FOUND', 'DISCOUNT_OATS_GIFT']
+    'PHONE_LOOKS_SHORT', 'ORDER_ADDRESS_OLD_NOT_FOUND', 'DISCOUNT_OATS_GIFT',
+    // 05/10: đổi quạt → muỗng dừa cho khách live / quà đã có muỗng (engine tự chọn)
+    'GIFT_FAN_TO_SPOON', 'GIFT_SPOON_INCLUDED']
 };
 
 /**

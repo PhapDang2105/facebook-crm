@@ -9,6 +9,7 @@ import { priceBasket } from './processing/pricing.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
 import { toLocalPhoneLoose } from './phone-warnings.mjs';
 import { processingNotes } from './order-notes.mjs';
+import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -72,6 +73,18 @@ function repriceFromCatalog(order, products, { basketChanged }) {
     order.gift = [order.trialFreeShip && priced.shippingFee > 0 ? trialGiftText : '', priced.gift, order.promoGift || ''].filter(Boolean).join(' + ');
   }
   return true;
+}
+
+/**
+ * Chữ quà tự tính theo bảng quà cho giỏ hiện tại của đơn (như repriceFromCatalog khi giỏ đổi): dùng khi nhân viên
+ * bỏ quà chọn tay ("Theo bảng quà") mà form không gửi kèm chữ quà. Giỏ ngoài danh mục / không định giá được → null.
+ */
+function autoGiftText(order) {
+  const products = Array.isArray(order.products) ? order.products : [];
+  if (!products.length || !products.every(item => findProductBySku(item?.sku))) return null;
+  const priced = priceBasket(products.map(item => ({ sku: item.sku, quantity: item.quantity })), { livestream: isLivestreamOrder(order) });
+  if (!priced.priceable) return null;
+  return [order.trialFreeShip && priced.shippingFee > 0 ? trialGiftText : '', priced.gift, order.promoGift || ''].filter(Boolean).join(' + ');
 }
 
 /**
@@ -256,9 +269,29 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     const payment = text(patch.payment, 80) || 'COD';
     if (payment !== String(order.payment || '')) { order.payment = payment; changed.push('payment'); }
   }
-  if (patch.gift !== undefined) {
+  // 05/10: quà nhân viên CHỌN TAY (gift-override.mjs). `giftOverride: [...]` đặt danh sách, `[]`/null bỏ chọn tay.
+  // Có danh sách thì chữ quà LUÔN dựng từ danh sách (bỏ chữ form gửi; giỏ đổi cũng không ghi đè lựa chọn tay).
+  let giftOverrideCleared = false;
+  if (patch.giftOverride !== undefined) {
+    const next = normalizeGiftOverride(patch.giftOverride);
+    const before = hasGiftOverride(order) ? order.giftOverride : [];
+    if (JSON.stringify(next) !== JSON.stringify(before)) {
+      if (next.length) order.giftOverride = next; else delete order.giftOverride;
+      giftOverrideCleared = !next.length;
+      changed.push('giftOverride');
+      syncGiftOverrideFlag(order);
+    }
+  }
+  if (hasGiftOverride(order)) {
+    const gift = giftOverrideText(order.giftOverride, { freeShipping: Boolean(order.freeShipping) });
+    if (gift !== String(order.gift || '')) { order.gift = gift; if (!changed.includes('giftOverride')) changed.push('gift'); }
+  } else if (patch.gift !== undefined) {
     const gift = text(patch.gift, 300);
     if (gift !== String(order.gift || '')) { order.gift = gift; changed.push('gift'); }
+  } else if (giftOverrideCleared) {
+    // "Theo bảng quà" mà không kèm chữ quà: tự tính lại theo giỏ.
+    const gift = autoGiftText(order);
+    if (gift !== null && gift !== String(order.gift || '')) order.gift = gift;
   }
   if (patch.note !== undefined) {
     const note = text(patch.note, 1000);
@@ -343,13 +376,13 @@ export const STAFF_EDIT_GROUPS = Object.freeze({
   name: ['name'],
   phone: ['phone'],
   address: ['address', 'street', 'province', 'district', 'ward', 'locationConfidence', 'postMerger'],
-  basket: ['products', 'total', 'discount', 'shippingFee', 'freeShipping', 'gift', 'promoGift'],
+  basket: ['products', 'total', 'discount', 'shippingFee', 'freeShipping', 'gift', 'promoGift', 'giftOverride'],
   payment: ['payment'],
   note: ['note']
 });
 const STAFF_EDIT_FIELD_GROUP = Object.freeze({
   name: 'name', phone: 'phone', address: 'address', lines: 'basket', products: 'basket', freeShipping: 'basket',
-  shippingFee: 'basket', discount: 'basket', gift: 'basket', payment: 'payment', note: 'note'
+  shippingFee: 'basket', discount: 'basket', gift: 'basket', giftOverride: 'basket', payment: 'payment', note: 'note'
 });
 
 const isTrackedStaffEdit = order => Boolean(order?.staffEdited) && typeof order.staffEdited === 'object' && !Array.isArray(order.staffEdited);
@@ -465,6 +498,11 @@ export function describeOrderEdits(before = {}, after = {}, changed = []) {
   const has = field => changed.includes(field);
   if (has('processingStatus')) parts.push(`trạng thái: ${statusLabel(before.processingStatus)} → ${statusLabel(after.processingStatus)}`);
   if (has('lines') || has('products')) parts.push(`giỏ: ${basketText(before.products)} → ${basketText(after.products)}`);
+  // 05/10: đổi quà tay / trở về bảng quà: ghi rõ quà trước → sau.
+  if (has('giftOverride')) {
+    const giftOf = order => String(order.gift || '').replace(/^Miễn phí vận chuyển( \+ )?/, '').slice(0, 60) || 'không quà';
+    parts.push(`đổi quà${after.giftOverride ? '' : ' (theo bảng quà)'}: ${giftOf(before)} → ${giftOf(after)}`);
+  }
   if (has('name')) parts.push(`tên khách → ${String(after.name || '').slice(0, 40)}`);
   if (has('phone')) parts.push('SĐT');
   if (has('address')) parts.push('địa chỉ');
@@ -472,7 +510,7 @@ export function describeOrderEdits(before = {}, after = {}, changed = []) {
   if (has('shippingFee')) parts.push(`phí ship ${moneyText(before.shippingFee)} → ${moneyText(after.shippingFee)}`);
   if (has('discount')) parts.push(`giảm giá ${moneyText(before.discount)} → ${moneyText(after.discount)}`);
   if (has('payment')) parts.push(`thanh toán → ${String(after.payment || '').slice(0, 30)}`);
-  if (has('gift')) parts.push('quà');
+  if (has('gift') && !has('giftOverride')) parts.push('quà');
   if (has('note')) parts.push('ghi chú khách');
   if (has('staffNote')) parts.push('ghi chú xử lý');
   if (has('processingFlags')) parts.push('gỡ cờ ghi chú xử lý');

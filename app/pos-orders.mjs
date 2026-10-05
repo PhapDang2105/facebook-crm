@@ -18,6 +18,9 @@ import { publishMessagingEvent } from './message-events.mjs';
 import { comboKey, findProductBySku, getGifts, giftsForKey, giftSwapPlan, hasLivestreamGift, matchProduct } from './processing/catalog.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
 import { addProcessingFlag, removeProcessingFlag } from './order-edits.mjs';
+import { applyGiftOverrideFlag, giftOverridePlan } from './gift-override.mjs';
+
+export { applyGiftOverrideFlag };
 
 /**
  * SKU gửi POS cho một dòng đơn. Đơn cũ còn ghi SKU đã đổi trong danh mục
@@ -325,17 +328,31 @@ function giftSwapDropsBundledGifts(order) {
   return (getGifts() || []).some(gift => ['BGD', 'MUONG'].includes(String(gift?.sku || '').trim().toUpperCase()) && plan.removes(gift));
 }
 
+/**
+ * 05/10: đơn có quà CHỌN TAY (giftOverride) mà mã combo POS gồm sẵn bát + muỗng (…+BGD+M): chỉ giữ mã combo khi danh
+ * sách chọn tay có cả BGD và MUONG (combo lo một bát + một muỗng, phần thừa đẩy dòng tặng riêng). Thiếu một trong hai
+ * thì không dùng mã combo đó (POS sẽ đóng nhầm quà khách không lấy) → đẩy từng túi + giảm giá.
+ */
+function giftOverrideDropsBundledGifts(order) {
+  const plan = giftOverridePlan(order);
+  if (!plan) return false;
+  const skus = new Set(plan.lines.map(line => line.sku));
+  return !(skus.has('BGD') && skus.has('MUONG'));
+}
+
 /** posComboPlan cho đơn thật: thêm luật đổi quà (không dùng combo gồm sẵn quà khách đã đổi → đẩy từng túi + giảm giá). */
 function comboPlanForOrder(order, options) {
   const plan = posComboPlan(order, options);
-  if (plan.combo?.includesGifts && giftSwapDropsBundledGifts(order)) return { ...plan, combo: null, comboRetail: 0 };
+  if (plan.combo?.includesGifts && (giftOverridePlan(order) ? giftOverrideDropsBundledGifts(order) : giftSwapDropsBundledGifts(order))) return { ...plan, combo: null, comboRetail: 0 };
   return plan;
 }
 
 export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '', shopId = '', posSkus = null, posPrices = null, geo = {} } = {}) {
   const products = withCurrentSkus(order.products);
   const { combo, goods, comboRetail } = comboPlanForOrder(order, { posSkus, posPrices, products });
-  const giftSwap = posGiftSwapPlan(order, posSkus);
+  // 05/10: quà nhân viên chọn tay (giftOverride) thay TOÀN BỘ quà tự tính: bảng quà, quà ưu đãi bám đuổi, đổi quà của bot.
+  const override = giftOverridePlan(order, posSkus);
+  const giftSwap = override ? null : posGiftSwapPlan(order, posSkus);
   const comboItems = combo ? [{
     variation_id: combo.sku,
     quantity: 1,
@@ -365,7 +382,7 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   // Quà theo tổ hợp giỏ (bảng quà trong Cài đặt), như file xuất kho. Quà chỉ khách
   // livestream (Quà Tặng LIVE) chỉ vào đơn khách live (order.livestream / "(Live) ").
   const basketKey = comboKey(products.map(item => ({ sku: item.sku, quantity: item.quantity })));
-  const basketGifts = basketKey ? giftsForKey(basketKey, { livestream: isLivestreamOrder(order) }) : [];
+  const basketGifts = basketKey && !override ? giftsForKey(basketKey, { livestream: isLivestreamOrder(order) }) : [];
   for (const gift of basketGifts) {
     const sku = String(gift.sku || '').trim().toUpperCase();
     // R13: khách đã đổi quà này (bát/muỗng/quạt → gói nhỏ): không đẩy; quà thay thế thêm ở dưới.
@@ -389,7 +406,7 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   // Chỉ khi giỏ đúng 2 túi (đơn sửa sang 1/3 túi mà cờ còn sót thì bỏ) và combo POS chưa gồm bát trong mã.
   const bagCount = products.reduce((sum, item) => sum + Math.max(0, Math.round(Number(item.quantity) || 0)), 0);
   // Đơn live đúng 2 túi đã có "Quạt + Bát gáo dừa": không thêm bát ưu đãi bám đuổi (tặng hai bát).
-  if (order.promoGift && bagCount === 2 && !combo?.includesGifts && !hasLivestreamGift(basketGifts)) {
+  if (!override && order.promoGift && bagCount === 2 && !combo?.includesGifts && !hasLivestreamGift(basketGifts)) {
     const sku = 'BGD';
     const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === sku);
     // R13: khách đã đổi bát lấy gói nhỏ thì bát ưu đãi bám đuổi cũng không đẩy.
@@ -403,6 +420,13 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   for (const line of giftSwap?.lines || []) {
     items.push({ variation_id: line.sku, quantity: line.quantity, discount_each_product: 0, is_bonus_product: true, is_discount_percent: false, is_wholesale: false, variation_info: { name: line.name, retail_price: 0, weight: line.weight } });
   }
+  // 05/10: quà chọn tay → đúng các dòng tặng giá 0 trong danh sách. Mã combo POS đã gồm bát + muỗng (chỉ giữ khi danh
+  // sách có cả hai — comboPlanForOrder) thì bớt một bát + một muỗng đã nằm trong mã. Mục thiếu mã: không đoán.
+  for (const line of override?.lines || []) {
+    const quantity = line.quantity - (combo?.includesGifts && ['BGD', 'MUONG'].includes(line.sku) ? 1 : 0);
+    if (quantity < 1) continue;
+    items.push({ variation_id: line.sku, quantity, discount_each_product: 0, is_bonus_product: true, is_discount_percent: false, is_wholesale: false, variation_info: { name: line.name, retail_price: 0, weight: line.weight } });
+  }
   const address = String(order.address || '').trim();
   // Khách đã chuyển khoản (đủ hay đặt cọc): POS chỉ thu hộ phần còn lại.
   const prepaid = posPrepaidAmount(order);
@@ -411,7 +435,8 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
     ? `Đã chuyển khoản ${formatVnd(prepaid)} (đặt cọc), thu COD ${formatVnd(codAmount)}`
     : `Đã chuyển khoản ${formatVnd(prepaid)}, KHÔNG thu COD`;
   const swapNote = giftSwap?.missing.length ? `⚠ Đổi quà: chưa có mã POS cho ${[...new Set(giftSwap.missing)].join(', ')} — nhân viên thêm quà thay thế` : '';
-  const noteParts = [`Đơn CRM #${order.id}`, order.employee ? `tạo bởi ${order.employee}` : '', paymentNote, order.gift ? `Quà: ${order.gift}` : '', swapNote, order.note ? `Khách ghi: ${order.note}` : '',
+  const overrideNote = override?.missing.length ? `⚠ Quà đổi tay chưa có mã POS: ${[...new Set(override.missing)].join(', ')} — nhân viên thêm trên POS` : '';
+  const noteParts = [`Đơn CRM #${order.id}`, order.employee ? `tạo bởi ${order.employee}` : '', paymentNote, order.gift ? `Quà: ${order.gift}` : '', swapNote, overrideNote, order.note ? `Khách ghi: ${order.note}` : '',
     // Vòng 12: ghi chú giao hàng khách ghi lẫn trong địa chỉ và cảnh báo địa chỉ bot nhận cần soát.
     order.deliveryNote ? `Giao: ${order.deliveryNote}` : '', order.addressCheck ? `⚠ ${order.addressCheck}` : ''].filter(Boolean);
   return {
@@ -526,8 +551,9 @@ export async function pushOrderToPos(order, { conversation = {}, config = posCon
       throw failure;
     }
     // R13: quà thay thế không đẩy được (POS chưa có mã / chưa chọn vị) đi kèm kết quả để nơi gọi gắn ghi chú xử lý.
-    const swapMissing = posGiftSwapPlan(order, posSkus)?.missing || [];
-    const created = { id: String(data.id), systemId: data.system_id ? String(data.system_id) : '', status: String(data.status_name || ''), ...(swapMissing.length ? { giftSwapMissing: [...new Set(swapMissing)] } : {}) };
+    const overrideMissing = giftOverridePlan(order, posSkus)?.missing;
+    const swapMissing = overrideMissing ? [] : posGiftSwapPlan(order, posSkus)?.missing || [];
+    const created = { id: String(data.id), systemId: data.system_id ? String(data.system_id) : '', status: String(data.status_name || ''), ...(swapMissing.length ? { giftSwapMissing: [...new Set(swapMissing)] } : {}), ...(overrideMissing ? { giftOverrideMissing: [...new Set(overrideMissing)] } : {}) };
     // 26/09: POS vẫn BỎ dòng tặng lúc tạo đơn (đủ UUID, is_bonus_product) — đơn combo 3 của bot lên POS không
     // có bát/muỗng dừa dù CRM ghi quà. Sửa đơn (PUT) thì POS giữ dòng tặng: đọc lại đơn vừa tạo, thiếu quà thì
     // gửi PUT cùng giỏ để bổ sung. Lỗi ở bước này không làm hỏng việc tạo đơn (chỉ ghi log).
@@ -601,8 +627,10 @@ export async function updatePosOrder(order, { conversation = {}, config = posCon
     if (!response.ok || body?.success === false) throw new Error(`Pancake POS không nhận sửa đơn (${response.status}): ${body?.message || body?.error || 'không rõ lý do'}`);
     // R13 (gộp): như đường tạo đơn — quà thay thế không lên được POS (chưa có mã / chưa chọn vị) đi kèm kết quả để nơi
     // gọi gắn ghi chú xử lý (applyGiftSwapFlag). Đơn không đổi quà: kết quả y như cũ ({ id }).
-    const swapMissing = posGiftSwapPlan(order, posSkus)?.missing || [];
-    return { id: String(order.pos.id), ...(swapMissing.length ? { giftSwapMissing: [...new Set(swapMissing)] } : {}) };
+    const overrideMissing = giftOverridePlan(order, posSkus)?.missing;
+    const swapMissing = overrideMissing ? [] : posGiftSwapPlan(order, posSkus)?.missing || [];
+    // 05/10: đơn có quà chọn tay: luôn trả `giftOverrideMissing` (rỗng = đủ mã) để nơi gọi đặt lại ghi chú xử lý.
+    return { id: String(order.pos.id), ...(swapMissing.length ? { giftSwapMissing: [...new Set(swapMissing)] } : {}), ...(overrideMissing ? { giftOverrideMissing: [...new Set(overrideMissing)] } : {}) };
   } finally {
     clearTimeout(timer);
   }
@@ -760,6 +788,8 @@ async function syncOrderToPosOnce(conversationId, orderId, { config = posConfig(
     if (target && !(target.pos?.id && !outcome.id)) target.pos = outcome;
     // R13: đơn đổi quà mà quà thay thế chưa lên được POS → ghi chú xử lý cho nhân viên (bảng Đơn hàng).
     if (target && outcome.giftSwapMissing?.length) addProcessingFlag(target, posGiftSwapFlag(outcome.giftSwapMissing));
+    // 05/10: quà chọn tay chưa lên được POS (không SKU / POS chưa có mẫu mã) → ghi chú xử lý; đủ mã thì gỡ ghi chú cũ.
+    if (target && Array.isArray(outcome.giftOverrideMissing)) applyGiftOverrideFlag(target, outcome.giftOverrideMissing);
     return null;
   });
   publishMessagingEvent({ type: 'customer-panel', conversationId });

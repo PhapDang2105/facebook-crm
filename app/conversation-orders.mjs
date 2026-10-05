@@ -4,6 +4,7 @@ import { matchProduct, findProductBySku, hasLivestreamGift } from './processing/
 import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { resolveAddress, resolvedAddressFields } from './processing/locations.mjs';
 import { normalizeText } from './processing/catalog.mjs';
+import { giftOverrideText, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
 
 /** Hội thoại đến từ phiên livestream: bài viết hay tên quảng cáo có "live", "săn deal". */
 // Có bài viết thì chỉ xét BÀI VIẾT đó: tên quảng cáo là quảng cáo khách bấm lần
@@ -147,9 +148,11 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
   const freeShipping = Boolean(input.freeShipping);
   const shippingFee = freeShipping ? 0 : money(input.shippingFee);
   const discount = money(input.discount);
+  // 05/10: quà nhân viên CHỌN TAY trong form Tạo đơn (gift-override.mjs). Có thì chữ quà dựng lại từ danh sách này.
+  const giftOverride = normalizeGiftOverride(input.giftOverride);
   // Ba cấp hành chính chuẩn được đọc ngay từ địa chỉ khách nhắn, để bảng đơn
   // và file xuất kho dùng đúng tên trong danh mục mà không cần ai sửa tay.
-  return {
+  const order = {
     id: text(input.id || id, 40).replace(/[^\w-]/g, ''),
     name,
     phone: localPhone,
@@ -177,6 +180,13 @@ export function normalizeCustomerOrder(input = {}, { now = Date.now(), id = rand
     // và tính lại giá (order-edits) dựa vào đây để giữ quà chỉ khách live.
     ...(typeof input.livestream === 'boolean' ? { livestream: input.livestream } : {})
   };
+  if (giftOverride.length) {
+    order.giftOverride = giftOverride;
+    order.gift = giftOverrideText(giftOverride, { freeShipping });
+    // Mục quà chưa có mã (SKU): ghi chú xử lý cho nhân viên thêm tay trên POS.
+    syncGiftOverrideFlag(order);
+  }
+  return order;
 }
 
 export function normalizeChatbotOrder(input = {}, conversation = {}, {
@@ -273,7 +283,16 @@ export function normalizeChatbotOrder(input = {}, conversation = {}, {
   }
   // R13 (inbox1 A2): khách đổi quà khi giỏ còn chờ — bộ soạn đơn gắn `giftSwap` (các gói nhỏ thay quà: tên, SKU, khối lượng)
   // và `giftSwapRemoved` (tên quà bị bỏ: bát/quạt/muỗng) vào đơn; chép sang đơn lưu để POS / xuất kho lên đúng dòng quà.
-  const swapItems = (Array.isArray(input.giftSwap) ? input.giftSwap : []).slice(0, 10).map(item => ({
+  // 05/10: quà chọn tay đi theo giỏ (bot đổi quạt → muỗng dừa cho khách live: pendingOrder.giftOverride = bát + muỗng):
+  // đơn mang giftOverride, chữ quà dựng từ danh sách; không cộng quà bám đuổi, không áp đổi quà kiểu cũ.
+  const giftOverride = normalizeGiftOverride(input.giftOverride);
+  if (giftOverride.length) {
+    order.giftOverride = giftOverride;
+    order.gift = giftOverrideText(giftOverride, { freeShipping: Boolean(order.freeShipping) });
+    delete order.promoGift;
+    syncGiftOverrideFlag(order);
+  }
+  const swapItems = (giftOverride.length || !Array.isArray(input.giftSwap) ? [] : input.giftSwap).slice(0, 10).map(item => ({
     name: text(item?.name, 200),
     sku: text(item?.sku, 80),
     weight: Math.max(0, Math.round(Number(item?.weight) || 0))

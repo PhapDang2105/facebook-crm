@@ -84,8 +84,9 @@ test('groupOf 4 nhóm tầng 1 (ANSWER = PRICE ∪ INFO ∪ SOCIAL), subGroupOf 
   // R15: +4 mẫu mới ngoài ANSWER (BOUGHT_ON_MARKETPLACE → SUPPORT; PHONE_LOOKS_SHORT, ORDER_ADDRESS_OLD_NOT_FOUND,
   // DISCOUNT_OATS_GIFT → ORDER) → 116. BAG_SIZE_INFO / FRUIT_PAIRING / SMALL_PACK_FLAVOURS là OTHER có chủ ý (chưa có nhãn).
   // R16: +1 VOICE_RECEIVED (tin nhắn thoại → SUPPORT, ngoài ANSWER) → 117.
-  assert.equal(Object.keys(GROUP_OF_TEMPLATE).length, 117, 'vòng 12: +19; vòng 13: +4; 03/10: +PRICE_SHIP_EXPLAIN; vòng 14: +4; vòng 15: +4; vòng 16: +1');
-  assert.equal(Object.keys(SUBGROUP_OF_TEMPLATE).length, 117);
+  // 05/10 (đổi quà, nhánh chính): +GIFT_FAN_TO_SPOON / GIFT_SPOON_INCLUDED (đổi quạt → muỗng dừa, nhóm ORDER) → 119.
+  assert.equal(Object.keys(GROUP_OF_TEMPLATE).length, 119, 'vòng 12: +19; vòng 13: +4; 03/10: +PRICE_SHIP_EXPLAIN; vòng 14: +4; vòng 15: +4; vòng 16: +1; 05/10: +2');
+  assert.equal(Object.keys(SUBGROUP_OF_TEMPLATE).length, 119);
   assert.ok(Object.values(GROUP_OF_TEMPLATE).every(group => ['ORDER', 'SUPPORT', 'ANSWER'].includes(group)));
   assert.ok(Object.isFrozen(GROUP_OF_TEMPLATE) && Object.isFrozen(SUBGROUP_OF_TEMPLATE));
   assert.ok(cascadeSafeTemplates.has('PRICE_QUOTE') && cascadeSafeTemplates.has('THANK_YOU') && cascadeSafeTemplates.has('WEIGHT_EXPIRY'));

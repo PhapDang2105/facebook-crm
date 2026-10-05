@@ -1,6 +1,7 @@
 import { describeGiftTable, priceBasket, quoteTiers, shippingFeeForKey } from './processing/pricing.mjs';
 import { applyGiftSwap, comboKey, findProductBySku, getCatalogProducts, getGifts, getShippingFee, giftsForKey, isFreeShippingGift, listCombos, matchProduct, matchStaffOnlyProduct, maxComboQuantity, normalizeGiftSwapChoices, normalizeText } from './processing/catalog.mjs';
 import { PROMO_BOWL_GIFT } from './processing/trial-flow.mjs';
+import { giftOverrideItemText, normalizeGiftOverride } from './gift-override.mjs';
 import { metaConfig } from './config.mjs';
 import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
@@ -463,8 +464,28 @@ export function withGiftSwap(price, choices) {
   };
 }
 
+/**
+ * 05/10: quà CHỌN TAY đi theo giỏ chờ (`pendingOrder.giftOverride` — bot đổi quạt → muỗng dừa cho khách live). Chỉ giữ khi
+ * giỏ (giá gốc) còn được quà live: khách đổi sang giỏ khác (3 túi, 1 túi…) thì quà lại theo bảng quà.
+ */
+export function heldGiftOverride(pendingOrder, price = null) {
+  const list = normalizeGiftOverride(pendingOrder?.giftOverride);
+  if (!list.length) return null;
+  if (price && !(price.gifts || []).some(gift => gift?.livestreamOnly)) return null;
+  return list;
+}
+
+/** 05/10: áp quà chọn tay vào bộ giá của giỏ: giữ dòng miễn ship, thay mọi quà hiện vật bằng danh sách; tiền không đổi. */
+export function withGiftOverride(price, list) {
+  if (!price || !Array.isArray(list) || !list.length) return price;
+  const gifts = [...(price.gifts || []).filter(isFreeShippingGift), ...list.map(item => ({ id: item.giftId || 'gift-override', name: giftOverrideItemText(item), sku: item.sku, weight: item.weight, active: true, override: true }))];
+  return { ...price, gifts, gift: gifts.map(gift => gift.name).join(' + '), giftOverride: list.map(item => ({ ...item })) };
+}
+
 /** Trường đơn hàng khi giỏ đã đổi quà: chữ quà ghi rõ "thay …" cho nhân viên/kho, kèm lựa chọn để POS lên đúng dòng quà. */
 function giftSwapOrderFields(price) {
+  // 05/10: quà chọn tay → đơn mang giftOverride (POS / kho lên đúng danh sách; chữ quà dựng ở normalizeChatbotOrder).
+  if (price?.giftOverride) return { giftOverride: price.giftOverride.map(item => ({ ...item })) };
   if (!price?.giftSwap) return {};
   return {
     gift: `${price.gift} (đổi quà: thay ${price.giftSwap.removed.join(' + ')})`,
@@ -1165,7 +1186,11 @@ function renderOrder(value, templates, context = {}) {
   // R15 (chủ shop 03/10): bot đã hứa tặng yến mạch khách quen (engine đặt pendingOrder.oatsGift = true sau DISCOUNT_OATS_GIFT)
   // → dòng quà của tin giỏ / xác nhận đơn / order.gift thêm OATS_GIFT_NAME khi giỏ từ 2 túi; tiền không đổi.
   const oatsGift = context.pendingOrder?.oatsGift === true;
-  const price = withOatsGift(withGiftSwap(basePrice, giftSwap), oatsGift);
+  // 05/10: quà chọn tay của giỏ (đổi quạt → muỗng dừa) thay cho quà theo bảng; có thì không áp đổi quà kiểu cũ.
+  // Gộp: lời hứa yến mạch (R15) vẫn cộng lên trên quà chọn tay (đơn lưu dựng chữ quà từ giftOverride; nhân viên vẫn có
+  // ghi chú yến mạch trong addressCheck do engine gắn).
+  const giftOverride = heldGiftOverride(context.pendingOrder, basePrice);
+  const price = withOatsGift(giftOverride ? withGiftOverride(basePrice, giftOverride) : withGiftSwap(basePrice, giftSwap), oatsGift);
 
   // Mô hình bỏ sót SĐT nằm chung dòng với tên/địa chỉ ("Vũ Thanh Hải - 09xx… 3a2/109 đường…"):
   // đọc thẳng từ tin khách vừa nhắn thay vì hỏi lại thứ khách đã đưa.
@@ -1270,6 +1295,8 @@ function renderOrder(value, templates, context = {}) {
         ...(giftSwap && pending ? { giftSwap } : {}),
         // R15: lời hứa tặng yến mạch khách quen đi theo giỏ tới khi lên đơn.
         ...(oatsGift ? { oatsGift: true } : {}),
+        // 05/10: quà chọn tay (đổi quạt → muỗng dừa) đi theo giỏ khi giỏ mới vẫn được quà live.
+        ...(pending && heldGiftOverride(context.pendingOrder, freshPriceable ? freshPrice : basePrice) ? { giftOverride: heldGiftOverride(context.pendingOrder) } : {}),
         // Vòng 12: số túi khách đã nêu khi chưa chọn vị — giữ tới khi giỏ có hàng.
         ...(!freshPriceable && !(pending?.items || []).length && Number(context.pendingOrder?.askedBagCount) ? { askedBagCount: Number(context.pendingOrder.askedBagCount) } : {})
       }
@@ -1916,6 +1943,8 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
   // Vòng 13 (gộp): mẫu engine tự chọn vừa đưa vào seed — giỏ Facebook Shop (mã lạ / món nhân viên lên đơn / đã nhận giỏ),
   // ghi nhận quà thay. Mô hình không gọi tên, không hiện trong danh sách mẫu của prompt.
   'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF', 'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED',
+  // 05/10: đổi quạt → muỗng dừa (khách live) và "quà đã có muỗng" — engine tự chọn khi việc đó thật sự xảy ra.
+  'GIFT_FAN_TO_SPOON', 'GIFT_SPOON_INCLUDED',
   // 03/10: báo hành trình vận đơn Sapo theo giai đoạn (app/sapo-sync.mjs) + trả lời "đơn tới đâu" khi đã có vận đơn.
   'ORDER_STATUS_SHIPPED', 'SHIPMENT_CREATED', 'SHIPMENT_PICKED_UP', 'SHIPMENT_IN_TRANSIT', 'SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED',
   // R15: engine tự chọn — SĐT thiếu số (cần {phone}), không tra được địa chỉ cũ theo SĐT.
@@ -1925,7 +1954,7 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
 // đang có…) — chỉ engine được chọn khi việc đó thật sự xảy ra; mô hình trả các mã này thì luôn đổi về GENERAL_INFO.
 const engineFactTemplateIds = new Set(['SHOP_ORDER_RECEIVED', 'ORDER_CANCELLED', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_NOTE_ADDED', 'LIVE_DEAL_CLAIMED', 'ORDER_EXISTING_CONFIRM', 'ORDER_EXISTING_CONFIRM_PHONE',
   // R13 (gộp): "đã nhận giỏ Shop", "đã ghi nhận thay quà" — chỉ engine chọn khi việc đó thật sự xảy ra.
-  'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF', 'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED']);
+  'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF', 'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED', 'GIFT_FAN_TO_SPOON', 'GIFT_SPOON_INCLUDED']);
 // Mẫu nội bộ mà mô hình vẫn được gọi tên (bước đơn ảo + chuyển người).
 const modelAllowedInternalIds = new Set(['ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_CANCEL', 'ORDER_NOTE', 'CSKH_HANDOFF']);
 // Trường JSON mô hình được trả (đúng những trường renderChatbotReply đọc từ mô hình — xem responseSchemaFor).

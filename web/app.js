@@ -8362,11 +8362,221 @@ let creatingCustomerOrder = false;
 // hiện tại để biết nhân viên đã sửa tay chưa, tránh ghi đè khi có tin mới.
 let customerPanelLoadedProfile = { key: '', name: '', phone: '', address: '' };
 
+// ===== 05/10: đổi quà ngay trong form Tạo đơn / Sửa đơn =====
+// `customerDraftGift` là quà máy tự tính theo bảng quà (chữ); `customerDraftAutoGifts` là các dòng quà đó
+// (id, tên, SKU) để tích sẵn khi mở "Đổi quà". Nhân viên chọn tay → `customerDraftGiftOverride` = [{ name, sku,
+// quantity, weight, giftId? }] gửi lên máy chủ (order.giftOverride); null = theo bảng quà. Đổi giỏ sau đó KHÔNG ghi đè
+// lựa chọn tay (chỉ cảnh báo khi giỏ dưới 2 túi mà vẫn còn quà).
+const customerGiftChangeButton = document.querySelector('#customer-gift-change');
+const customerGiftPicker = document.querySelector('#customer-gift-picker');
+const customerGiftManual = document.querySelector('#customer-gift-manual');
+const customerGiftWarning = document.querySelector('#customer-gift-warning');
+let customerDraftAutoGifts = [];
+let customerDraftGiftOverride = null;
+let customerGiftTableCache = null;
+const customerFreeShippingGiftPattern = /mi[eễ]n ph[ií] (v[aậ]n chuy[eể]n|ship)|mi[eễ]n ship|free ?ship/i;
+
+/** Một mục quà thành chữ, như máy chủ (gift-override.mjs giftOverrideItemText): "Muỗng dừa", "2 Muỗng dừa". */
+function customerGiftItemText(item) {
+  const quantity = Math.max(1, Math.round(Number(item?.quantity) || 1));
+  return `${quantity > 1 ? `${quantity} ` : ''}${String(item?.name || '').trim()}`;
+}
+
+/** Chữ quà đang áp dụng cho đơn nháp: quà chọn tay (kèm "Miễn phí vận chuyển" khi đơn miễn ship) hay quà tự tính. */
+function customerEffectiveGiftText() {
+  if (!customerDraftGiftOverride?.length) return customerDraftGift;
+  const items = customerDraftGiftOverride.map(customerGiftItemText).filter(Boolean);
+  return [customerFreeShipping?.checked ? 'Miễn phí vận chuyển' : '', ...items].filter(Boolean).join(' + ');
+}
+
 function renderCustomerDraftGift() {
   if (!customerOrderGiftRow || !customerOrderGiftText) return;
-  customerOrderGiftRow.hidden = !customerDraftGift;
-  customerOrderGiftText.textContent = customerDraftGift;
+  const manual = Boolean(customerDraftGiftOverride?.length);
+  const text = customerEffectiveGiftText();
+  // Giỏ có sản phẩm thì luôn hiện dòng Quà tặng (để đổi/thêm quà kể cả khi bảng quà không tặng gì).
+  customerOrderGiftRow.hidden = !text && !customerDraftProducts.length;
+  customerOrderGiftText.textContent = text || 'Không có';
+  if (customerGiftManual) customerGiftManual.hidden = !manual;
+  if (customerGiftWarning) {
+    const bags = customerDraftProducts.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+    const warn = manual && bags < 2;
+    customerGiftWarning.hidden = !warn;
+    customerGiftWarning.textContent = warn ? `Giỏ ${bags} túi mà vẫn còn quà chọn tay — kiểm lại quà.` : '';
+  }
+  if (customerGiftChangeButton) customerGiftChangeButton.setAttribute('aria-expanded', String(Boolean(customerGiftPicker && !customerGiftPicker.hidden)));
 }
+
+/** Bảng quà (Cài đặt → Quà tặng) cho danh sách chọn: tải một lần mỗi phiên trang. */
+async function loadCustomerGiftTable() {
+  if (customerGiftTableCache) return customerGiftTableCache;
+  const result = await readApiResponse(await fetch('/api/gifts'));
+  customerGiftTableCache = Array.isArray(result.items) ? result.items : [];
+  return customerGiftTableCache;
+}
+
+/**
+ * Lựa chọn trong danh sách "Đổi quà": quà hiện vật đang bật trong bảng quà (bỏ "Miễn phí vận chuyển" — đã có ô
+ * Miễn phí giao hàng riêng; hai dòng cùng tên + SKU gộp một), rồi sản phẩm trong danh mục (tặng 0đ) chưa có trong
+ * bảng quà theo SKU. Mỗi mục: { key, name, sku, weight, giftId?, group }.
+ */
+function customerGiftOptions(gifts = customerGiftTableCache || []) {
+  const options = [];
+  const seen = new Set();
+  for (const gift of gifts) {
+    if (!gift || gift.active === false) continue;
+    const name = String(gift.name || '').trim();
+    const sku = String(gift.sku || '').trim().toUpperCase();
+    if (!name || (!sku && customerFreeShippingGiftPattern.test(name))) continue;
+    const id = `${sku}|${name.toLowerCase()}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    options.push({ key: `g:${gift.id || id}`, name, sku, weight: Math.max(0, Number(gift.weight) || 0), giftId: String(gift.id || ''), group: 'gift', livestreamOnly: gift.livestreamOnly === true });
+  }
+  const giftSkus = new Set(options.map(option => option.sku).filter(Boolean));
+  for (const product of sharedProducts) {
+    const sku = String(product?.sku || '').trim().toUpperCase();
+    if (!sku || product.active === false || giftSkus.has(sku)) continue;
+    giftSkus.add(sku);
+    options.push({ key: `p:${sku}`, name: String(product.name || sku), sku, weight: Math.max(0, Number(product.weight) || 0), giftId: '', group: 'product' });
+  }
+  return options;
+}
+
+/** Mục nào trong danh sách khớp một quà (chọn tay hay tự tính): theo id dòng bảng quà, rồi SKU + tên, rồi SKU. */
+function customerGiftOptionFor(options, gift) {
+  const id = String(gift?.giftId || gift?.id || '');
+  const sku = String(gift?.sku || '').trim().toUpperCase();
+  const name = String(gift?.name || '').trim().toLowerCase();
+  return (id && options.find(option => option.giftId === id))
+    || options.find(option => option.sku === sku && option.name.toLowerCase() === name)
+    || (sku ? options.find(option => option.sku === sku) : null)
+    || (!sku && name ? options.find(option => !option.sku && option.name.toLowerCase() === name) : null)
+    || null;
+}
+
+async function openCustomerGiftPicker() {
+  if (!customerGiftPicker) return;
+  customerGiftPicker.hidden = false;
+  customerGiftPicker.innerHTML = '<span class="customer-gift-picker-empty">Đang tải bảng quà…</span>';
+  renderCustomerDraftGift();
+  try {
+    await loadCustomerGiftTable();
+  } catch (error) {
+    customerGiftPicker.innerHTML = `<span class="customer-gift-picker-empty">Chưa tải được bảng quà: ${escapeHtml(error.message || '')}</span>`;
+    return;
+  }
+  if (customerGiftPicker.hidden) return;
+  const options = customerGiftOptions();
+  // Mặc định tích đúng quà đang áp dụng: chọn tay nếu có, không thì quà máy tự tính cho giỏ hiện tại.
+  const current = customerDraftGiftOverride?.length ? customerDraftGiftOverride : customerDraftAutoGifts.filter(gift => gift.sku || !customerFreeShippingGiftPattern.test(gift.name || ''));
+  const picked = new Map();
+  const extra = [];
+  for (const gift of current) {
+    const option = customerGiftOptionFor(options, gift);
+    if (option) picked.set(option.key, Math.max(1, Math.round(Number(gift.quantity) || 1)) + (picked.get(option.key) || 0));
+    else extra.push(gift);
+  }
+  // Quà chọn tay trước đây không còn trong bảng quà / danh mục: vẫn hiện để nhân viên thấy và bỏ được.
+  extra.forEach((gift, index) => {
+    const option = { key: `x:${index}`, name: String(gift.name || ''), sku: String(gift.sku || '').toUpperCase(), weight: Number(gift.weight) || 0, giftId: String(gift.giftId || ''), group: 'gift' };
+    options.unshift(option);
+    picked.set(option.key, Math.max(1, Math.round(Number(gift.quantity) || 1)));
+  });
+  const row = option => {
+    const checked = picked.has(option.key);
+    const quantity = Math.min(10, picked.get(option.key) || 1);
+    const code = option.sku ? `<small>${escapeHtml(option.sku)}</small>` : '<small class="is-missing" title="Không có mã POS: CRM ghi chú để nhân viên thêm tay trên POS">chưa có mã POS</small>';
+    return `<div class="customer-gift-option" data-gift-option="${escapeHtml(option.key)}">
+      <label><input type="checkbox" data-gift-check ${checked ? 'checked' : ''}><span title="${escapeHtml(option.name)}">${escapeHtml(option.name)}${option.livestreamOnly ? ' <small>(quà live)</small>' : ''}</span></label>
+      ${code}<input type="number" min="1" max="10" step="1" value="${quantity}" data-gift-quantity aria-label="Số lượng ${escapeHtml(option.name)}">
+    </div>`;
+  };
+  const gifts = options.filter(option => option.group === 'gift');
+  const products = options.filter(option => option.group === 'product');
+  // 05/10 (chủ shop): quà đang có "Quạt + Bát gáo dừa" (quà live) → lựa chọn nhanh đổi quạt sang muỗng dừa.
+  const hasFanGift = current.some(gift => String(gift.sku || '').toUpperCase() === 'QUA-TANG-LIVE');
+  const fanButton = hasFanGift ? '<button type="button" data-gift-picker="fan-spoon" title="Quà thành Bát gáo dừa + Muỗng dừa (theo bảng quà)">Đổi quạt → muỗng dừa</button>' : '';
+  customerGiftPicker.innerHTML = `${gifts.length ? `<h4>Quà trong bảng quà</h4>${gifts.map(row).join('')}` : ''}
+    ${products.length ? `<h4>Sản phẩm tặng (0đ)</h4>${products.map(row).join('')}` : ''}
+    ${options.length ? '' : '<span class="customer-gift-picker-empty">Bảng quà và danh mục chưa có món nào.</span>'}
+    <div class="customer-gift-picker-actions">
+      ${fanButton}
+      <button type="button" data-gift-picker="auto" title="Bỏ quà chọn tay, quay lại quà máy tự tính theo bảng quà">Theo bảng quà</button>
+      <button type="button" data-gift-picker="close">Đóng</button>
+      <button type="button" data-gift-picker="apply">Áp dụng</button>
+    </div>`;
+  customerGiftPicker._options = options;
+}
+
+function closeCustomerGiftPicker() {
+  if (!customerGiftPicker) return;
+  customerGiftPicker.hidden = true;
+  customerGiftPicker.innerHTML = '';
+  renderCustomerDraftGift();
+}
+
+/** Đổi quạt → muỗng dừa: Bát gáo dừa (BGD) + Muỗng dừa (MUONG), tên/khối lượng theo bảng quà (như bot — fanToSpoonGifts). */
+function customerFanToSpoonGifts(gifts = customerGiftTableCache || []) {
+  const pick = (sku, name) => {
+    const gift = gifts.find(item => String(item?.sku || '').trim().toUpperCase() === sku);
+    return { name: String(gift?.name || name), sku, quantity: 1, weight: Math.max(0, Number(gift?.weight) || 10), ...(gift?.id ? { giftId: String(gift.id) } : {}) };
+  };
+  return [pick('BGD', 'Bộ bát gáo dừa'), pick('MUONG', 'Muỗng dừa')];
+}
+
+/** Danh sách đang tích trong "Đổi quà" → [{ name, sku, quantity, weight, giftId? }]. */
+function readCustomerGiftPicker() {
+  const options = new Map((customerGiftPicker?._options || []).map(option => [option.key, option]));
+  return [...(customerGiftPicker?.querySelectorAll('[data-gift-option]') || [])].flatMap(row => {
+    const option = options.get(row.dataset.giftOption);
+    if (!option || !row.querySelector('[data-gift-check]')?.checked) return [];
+    const quantity = Math.min(10, Math.max(1, Math.round(Number(row.querySelector('[data-gift-quantity]')?.value) || 1)));
+    return [{ name: option.name, sku: option.sku, quantity, weight: option.weight, ...(option.giftId ? { giftId: option.giftId } : {}) }];
+  });
+}
+
+/** Lựa chọn giống hệt quà máy tự tính (mỗi món 1, cùng mã) thì coi như theo bảng quà. */
+function sameAsAutoGifts(list) {
+  const auto = customerDraftAutoGifts.filter(gift => gift.sku || !customerFreeShippingGiftPattern.test(gift.name || ''));
+  const key = items => items.map(item => `${String(item.sku || '').toUpperCase()}|${String(item.name || '').trim().toLowerCase()}|${Math.max(1, Number(item.quantity) || 1)}`).sort().join(',');
+  return key(list) === key(auto);
+}
+
+customerGiftChangeButton?.addEventListener('click', () => {
+  if (customerGiftPicker && !customerGiftPicker.hidden) closeCustomerGiftPicker();
+  else openCustomerGiftPicker();
+});
+customerGiftPicker?.addEventListener('change', event => {
+  // Sửa số lượng thì tự tích mục đó.
+  const quantity = event.target.closest?.('[data-gift-quantity]');
+  if (quantity) {
+    const check = quantity.closest('[data-gift-option]')?.querySelector('[data-gift-check]');
+    if (check) check.checked = true;
+  }
+});
+customerGiftPicker?.addEventListener('click', event => {
+  const action = event.target.closest?.('[data-gift-picker]')?.dataset.giftPicker;
+  if (!action) return;
+  if (action === 'close') { closeCustomerGiftPicker(); return; }
+  if (action === 'fan-spoon') {
+    customerDraftGiftOverride = customerFanToSpoonGifts();
+    closeCustomerGiftPicker();
+    return;
+  }
+  if (action === 'auto') {
+    customerDraftGiftOverride = null;
+    closeCustomerGiftPicker();
+    showToast('Quà theo bảng quà (máy tự tính theo giỏ).', 'info');
+    return;
+  }
+  const list = readCustomerGiftPicker();
+  if (!list.length) {
+    showToast('Chưa tích quà nào. Chọn ít nhất một quà, hoặc bấm "Theo bảng quà".', 'warning');
+    return;
+  }
+  customerDraftGiftOverride = sameAsAutoGifts(list) ? null : list;
+  closeCustomerGiftPicker();
+});
 
 /** Ghi đơn giá mới lên dòng đang hiện (không vẽ lại bảng, không mất con trỏ khi đang gõ số lượng). */
 function applyCustomerDraftPrices() {
@@ -8399,7 +8609,10 @@ function customerPriceNoteHtml(item) {
 let customerDraftLivestream = null;
 let customerDraftPricedLivestream = false;
 function customerDraftPricingBody(items) {
-  const conversationId = getActiveConversation()?.id || '';
+  // 05/10: mã hội thoại nằm ở data-conversation-id (phần tử .conversation không có thuộc tính id) — trước đây luôn rỗng
+  // nên máy chủ không suy được khách live và form Tạo đơn không ra quà live.
+  const active = getActiveConversation();
+  const conversationId = active?.dataset?.conversationId || active?.id || '';
   return { items, ...(conversationId ? { conversationId } : {}), ...(customerDraftLivestream === true ? { livestream: true } : {}) };
 }
 
@@ -8451,6 +8664,8 @@ async function refreshCustomerDraftPricing() {
     if (price > 0) item.price = price;
   }
   customerDraftGift = priced?.priceable ? String(priced.gift || '') : '';
+  // Quà máy tự tính (id, tên, SKU) để "Đổi quà" tích sẵn. Quà chọn tay (customerDraftGiftOverride) giữ nguyên.
+  customerDraftAutoGifts = priced?.priceable && Array.isArray(priced.gifts) ? priced.gifts.map(gift => ({ ...gift })) : [];
   // Tổng tiền hàng của máy chủ là nguồn sự thật khi không dòng nào sửa tay đơn giá.
   customerDraftServerPricing = priced?.priceable && !customerDraftProducts.some(item => item.manualPrice)
     ? { signature: customerDraftSignature(), subtotal: Math.max(0, Number(priced.subtotal) || 0) }
@@ -8552,6 +8767,9 @@ function resetCustomerOrderForm(conversation = getActiveConversation()) {
   if (customerFreeShipping) customerFreeShipping.checked = false;
   customerFreeShippingManual = false;
   customerDraftGift = '';
+  customerDraftAutoGifts = [];
+  customerDraftGiftOverride = null;
+  if (customerGiftPicker) { customerGiftPicker.hidden = true; customerGiftPicker.innerHTML = ''; }
   renderCustomerDraftGift();
   if (customerBankTransfer) customerBankTransfer.checked = false;
   if (customerShippingFee) customerShippingFee.value = '0';
@@ -8692,6 +8910,8 @@ function stashCustomerOrderDraft(key) {
     address: customerOrderAddress?.value ?? '',
     products: customerDraftProducts.map(item => ({ ...item })),
     gift: customerDraftGift,
+    autoGifts: customerDraftAutoGifts.map(gift => ({ ...gift })),
+    giftOverride: customerDraftGiftOverride ? customerDraftGiftOverride.map(gift => ({ ...gift })) : null,
     freeShipping: Boolean(customerFreeShipping?.checked),
     freeShippingManual: customerFreeShippingManual,
     bankTransfer: Boolean(customerBankTransfer?.checked),
@@ -8714,6 +8934,8 @@ function restoreCustomerOrderDraft(key) {
   if (customerOrderAddress) customerOrderAddress.value = draft.address;
   customerDraftProducts = draft.products.map(item => ({ ...item }));
   customerDraftGift = draft.gift || '';
+  customerDraftAutoGifts = Array.isArray(draft.autoGifts) ? draft.autoGifts : [];
+  customerDraftGiftOverride = Array.isArray(draft.giftOverride) && draft.giftOverride.length ? draft.giftOverride : null;
   customerFreeShippingManual = draft.freeShippingManual === true;
   if (customerFreeShipping) customerFreeShipping.checked = draft.freeShipping;
   if (customerBankTransfer) customerBankTransfer.checked = draft.bankTransfer;
@@ -11993,6 +12215,10 @@ async function beginCustomerOrderEdit(order) {
   customerFreeShippingManual = !standard;
   if (customerShippingFee) customerShippingFee.value = String(Number(order.shippingFee) || 0);
   customerDraftGift = String(order.gift || '');
+  // Đơn đã có quà chọn tay: mở form vẫn giữ lựa chọn đó (đổi giỏ không ghi đè).
+  customerDraftGiftOverride = Array.isArray(order.giftOverride) && order.giftOverride.length
+    ? order.giftOverride.map(gift => ({ name: String(gift.name || ''), sku: String(gift.sku || ''), quantity: Math.max(1, Number(gift.quantity) || 1), weight: Number(gift.weight) || 0, ...(gift.giftId ? { giftId: String(gift.giftId) } : {}) }))
+    : null;
   renderCustomerDraftGift();
   renderCustomerDraftProducts();
   setCustomerOrderFormMode();
@@ -12016,7 +12242,9 @@ async function saveCustomerOrderEdit(orderId) {
     shippingFee: totals.shipping,
     discount: totals.discount,
     payment: customerBankTransfer?.checked ? 'Chuyển khoản' : 'COD',
-    gift: customerDraftGift,
+    gift: customerEffectiveGiftText(),
+    // 05/10: quà chọn tay ([] = theo bảng quà — máy chủ tính lại quà theo giỏ).
+    giftOverride: customerDraftGiftOverride || [],
     note: customerOrderNote?.value.trim() || ''
   };
   const updated = await readApiResponse(await fetch(`/api/customer-orders/${encodeURIComponent(orderId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }));
@@ -12049,7 +12277,7 @@ customerOrderPhone?.addEventListener('input', () => {
 });
 [customerOrderName, customerOrderPhone].filter(Boolean)
   .forEach(input => input.addEventListener('input', () => renderCustomerOrderChip()));
-customerFreeShipping?.addEventListener('change', () => { customerFreeShippingManual = true; updateCustomerOrderTotals(); });
+customerFreeShipping?.addEventListener('change', () => { customerFreeShippingManual = true; updateCustomerOrderTotals(); renderCustomerDraftGift(); });
 customerOrderReset?.addEventListener('click', () => resetCustomerOrderForm());
 
 customerOrderForm?.addEventListener('submit', async event => {
@@ -12094,7 +12322,9 @@ customerOrderForm?.addEventListener('submit', async event => {
     phone: customerOrderPhone.value.trim(),
     address: customerOrderAddress.value.trim(),
     products: customerDraftProducts.map(item => ({ ...item, weight: getProductUnitWeight(item) })),
-    gift: customerDraftGift,
+    gift: customerEffectiveGiftText(),
+    // 05/10: quà nhân viên chọn tay trong "Đổi quà" (không có = theo bảng quà).
+    ...(customerDraftGiftOverride?.length ? { giftOverride: customerDraftGiftOverride } : {}),
     status: 'Mới',
     source: customerOrderSource?.value || 'Facebook',
     payment: customerBankTransfer?.checked ? 'Chuyển khoản' : 'COD',

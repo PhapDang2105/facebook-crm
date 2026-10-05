@@ -130,6 +130,8 @@
   "SHOP_CART_STAFF": "Dạ em đã ghi nhận {title} chọn {product} trên Facebook Shop ạ 💛 {Title} cho em xin số điện thoại và địa chỉ nhận hàng, bạn phụ trách lên đơn và xác nhận với {title} ngay trong tin này nha ạ 🌾",
   "SHOP_CART_ACK": "Dạ em đã nhận giỏ hàng {cart} của {title} rồi ạ 💛 {Title} chờ em ít phút, em kiểm tra đơn rồi nhắn mình ngay nha.",
   "GIFT_SWAP_NOTED": "Dạ em đã ghi nhận thay quà của {title} bằng {gift} (không trừ tiền) ạ 💛",
+  "GIFT_FAN_TO_SPOON": "Dạ em đổi quạt sang muỗng dừa cho {title} nha ạ 💛 Combo 2 túi của mình được tặng Bát gáo dừa + Muỗng dừa ạ.",
+  "GIFT_SPOON_INCLUDED": "Dạ có ạ 💛 Quà của {title} đã gồm {gift} rồi nha ạ.",
   "STAFF_WAIT_OPEN": "Dạ em đã ghi nhận câu hỏi của {title} rồi ạ 💛 Em chuyển bạn phụ trách trả lời {title} ngay trong ít phút, {title} chờ em chút nha ạ.",
   "STAFF_WAIT_CLOSED": "Dạ em đã ghi nhận câu hỏi của {title} rồi ạ 💛 Bạn phụ trách làm việc giờ hành chính từ 8h đến 17h, sẽ trả lời {title} từ 8h {when} nha ạ.",
   "GIFT_POLICY_ORDER": "Dạ đơn {items} của {title} đã có quà tặng kèm {gift} rồi ạ 🎁 Bên em gửi quà cùng đơn cho mình nha 💛",

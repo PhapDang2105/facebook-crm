@@ -1496,6 +1496,28 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .customer-gift-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e5e7eb; font-size: 14px; }
 .customer-gift-row span:first-child { color: #ad6800; flex: 0 0 auto; }
 .customer-gift-row span:last-child { color: #262626; text-align: right; }
+/* 05/10: đổi quà ngay trong form Tạo đơn / Sửa đơn. */
+.customer-gift-row .customer-gift-label { display: inline-flex; align-items: center; gap: 8px; }
+.customer-gift-change { padding: 0 6px; border: 1px solid #ffd591; border-radius: 4px; background: #fff7e6; color: #ad6800; font-size: 12px; line-height: 20px; cursor: pointer; }
+.customer-gift-change:hover, .customer-gift-change[aria-expanded="true"] { border-color: #fa8c16; background: #ffe7ba; }
+.customer-gift-row .customer-gift-value { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.customer-gift-row .customer-gift-value > span { color: #262626; text-align: right; }
+.customer-gift-row .customer-gift-manual { color: #d46b08; font-size: 12px; }
+.customer-gift-warning { display: block; margin-top: 4px; color: #d4380d; font-size: 12px; text-align: right; }
+.customer-gift-picker { margin-top: 8px; padding: 10px; border: 1px solid #ffd591; border-radius: 6px; background: #fffbf3; font-size: 13px; }
+.customer-gift-picker h4 { margin: 6px 0 4px; color: #8c8c8c; font-size: 12px; font-weight: 500; }
+.customer-gift-picker h4:first-child { margin-top: 0; }
+.customer-gift-option { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.customer-gift-option label { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 8px; cursor: pointer; }
+.customer-gift-option label input { width: 16px; height: 16px; flex: 0 0 16px; padding: 0; accent-color: #fa8c16; }
+.customer-gift-option label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customer-gift-option small { color: #8c8c8c; font-size: 11px; white-space: nowrap; }
+.customer-gift-option small.is-missing { color: #d4380d; }
+.customer-gift-option input[type="number"] { width: 52px; height: 26px; padding: 0 4px; text-align: center; }
+.customer-gift-picker-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.customer-gift-picker-actions button { height: 28px; padding: 0 10px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; font-size: 13px; cursor: pointer; }
+.customer-gift-picker-actions button[data-gift-picker="apply"] { border-color: #fa8c16; background: #fa8c16; color: #fff; }
+.customer-gift-picker-empty { color: #8c8c8c; }
 
 .customer-payment-options { display: flex; gap: 24px; font-size: 14px; }
 .customer-payment-options label { display: flex; align-items: center; gap: 8px; color: rgba(0, 0, 0, .85); cursor: pointer; }

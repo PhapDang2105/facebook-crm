@@ -198,6 +198,8 @@ const PHONE_LABEL = /(?<![\p{L}\p{N}])(?:s[đd₫]t|số\s*điện\s*thoại|so\
 // Nhãn/câu dẫn ở đầu: "đc", "địa chỉ:", "shop.", "Gửi về ĐC", "Mình ở", "Tên:", "Fb:".
 const LEADING_LABELS = [
   /^\s*(?:shop|sop)\s*[.,:;!]+\s*/iu,
+  // R16 (inbox1 A4, ca …6498183759 "Giao chị combo 2, Địa chỉ, 540 Đường 30/4…"): câu đặt combo đứng đầu khối địa chỉ.
+  /^\s*(?:giao|gửi|gởi|gui|ship|lấy|lay|đặt|dat)\s+(?:cho\s+)?(?:chị|chi|c|em|e|anh|a|mình|minh)\s+combo\s*\d{1,2}(?:\s*(?:túi|tui|gói|goi|bịch|bich))?(?![\p{L}\p{N}])\s*[,.:;\-]?\s*/iu,
   /^\s*(?:tên|ten|fb|facebook|name|người nhận|nguoi nhan)\s*[:：]\s*/iu,
   /^\s*(?:địa\s*chỉ(?:\s*nhận(?:\s*hàng)?)?|dia\s*chi(?:\s*nhan(?:\s*hang)?)?|đ\/c|d\/c|đ\.c|đc|dc|đchi|dchi)(?![\p{L}\p{N}])\s*[:：.\-]?\s*/iu,
   // R13 (inbox2 C1): "Vui lòng giao đến địa chỉ 275/97/14…", "nhờ shop gửi về…" — thêm lời nhờ đứng trước.
@@ -304,6 +306,39 @@ function stripLeadingLandmarkName(text) {
   return text.slice(match[0].length);
 }
 
+// ===== R16 (inbox1 A4, inbox3 A1): đoạn (giữa hai dấu phẩy / hai tin) KHÔNG phải địa chỉ =====
+// Chữ đệm xác nhận ("Rồi đó ạ" — gõ Telex "Roi ddo ak", "đủ rồi e", "vậy đó shop", "ok rồi"): mọi chữ là chữ đệm và có ít nhất một
+// chữ xác nhận (rồi/đó/đây/vậy/đủ/ok/hết/thôi) — "A" (khu A) đứng một mình không bị bỏ.
+const SEGMENT_FILLER_WORDS = new Set(['roi', 'r', 'do', 'day', 'vay', 'v', 'z', 'a', 'ak', 'ah', 'nha', 'nhe', 'nhen', 'nhak', 'ok', 'oke', 'okie', 'du', 'het', 'the', 'thoi', 'e', 'em', 'c', 'chi', 'shop', 'sop', 'vang', 'da', 'u', 'uh', 'ha', 'luon', 'la', 'nay', 'ne', 'b', 'ban', 'anh']);
+const SEGMENT_FILLER_CORE = /\b(?:roi|r|do|day|vay|du|ok|oke|okie|het|thoi)\b/;
+// "Trên cho rồi", "ở trên", "như trên", "gửi ở trên rồi", "đã gửi rồi": khách nói đã gửi địa chỉ ở trên.
+const SEGMENT_ABOVE = /^(?:(?:em|e|minh|chi|c|da|toi|anh|a)\s)*(?:(?:o|nhu|gui|ghi|cho|de|nhan|noi)\s)*tren(?:\s(?:cho|gui|ghi|co|roi|r|do|day|nhe|nha|a|ak|em|e|c|chi|shop|ban|b|het))*$|^(?:(?:em|e|minh|chi|c|toi|anh|a)\s)?(?:da\s)?(?:gui|ghi|cho)\s(?:o\s)?(?:tren\s)?roi(?:\s(?:ma|do|day|nhe|nha|a|ak|em|e|c|chi|shop))*$/;
+// Câu hỏi không có "?" chen giữa địa chỉ ("Đảm bảo k hôi k chiên qua dầu chứ e").
+const SEGMENT_QUESTION = /\b(?:dam bao|dung (?:hoi|chien|de hoi)|chu (?:e|em|a|anh|c|chi|shop|ban|b)$|(?:khong|ko|k|kg) (?:hoi|chien|ngot|dau|bi|moc|co mui)|co (?:bi|phai|hoi|chien)|phai (?:khong|ko|k)$|(?:duoc|dc) (?:khong|ko|k|kg)$)\b/;
+// Câu đặt hàng / giá chen giữa ("Lấy 1 túi xanh và 1 túi vàng gía 293.000đ", "Giao chị combo 2").
+const SEGMENT_BASKET = /^(?:(?:lay|dat|mua|ship|chot|giao|gui)\s)(?:(?:cho\s)?(?:chi|c|em|e|minh|anh|a|toi)\s)?(?:combo\s?\d|\d{1,2}\s?(?:tui|goi|bich|bit|hop|combo|xanh|vang|nau|cacao)\b)|\b\d{1,2}\s?(?:tui|goi|bich)\s(?:xanh|vang|nau|cacao)\b.*\b(?:gia|\d{3}\s?000|\d{3}\s?k|\d{3}k)\b/;
+// Nhãn đứng riêng một đoạn ("Giao chị combo 2,\nĐịa chỉ\n540 …" → ", Địa chỉ,").
+const SEGMENT_LABEL = /^(?:dia chi(?: nhan(?: hang)?)?|dc|d c|dchi|sdt|so dien thoai|so dt|dt|ten|ho ten|nguoi nhan)$/;
+const SEGMENT_PLACE_WORDS = /\b(?:phuong|huyen|thi tran|thi xa|thon|xom|khu pho|to dan pho|ngo|hem|ngach|so nha|chung cu|tinh|xa [a-z]{2,}|quan [a-z0-9]+|ap [a-z0-9]{2,}|duong [a-z0-9]+|pho [a-z0-9]+|tp [a-z]+|tphcm|hcm|ha noi|da nang)\b/;
+/** Một đoạn chữ khách ghi có phải rác (chữ đệm / "trên cho rồi" / câu hỏi / câu đặt hàng / nhãn trơ) chứ không phải mảnh địa chỉ. */
+export function isNonAddressSegment(segment) {
+  const folded = normalizeIntentText(String(segment || '')).replace(/\bdd(?=[a-z])/g, 'd').replace(/<sdt>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!folded) return true;
+  if (SEGMENT_LABEL.test(folded)) return true;
+  const words = folded.split(' ');
+  if (words.every(word => SEGMENT_FILLER_WORDS.has(word)) && SEGMENT_FILLER_CORE.test(folded)) return true;
+  if (SEGMENT_ABOVE.test(folded)) return true;
+  if (/\d/.test(folded) && !SEGMENT_BASKET.test(folded)) return false;
+  if (SEGMENT_PLACE_WORDS.test(folded)) return false;
+  return SEGMENT_QUESTION.test(folded) || SEGMENT_BASKET.test(folded);
+}
+function dropNonAddressSegments(text) {
+  const parts = String(text || '').split(/\s*,\s*/);
+  if (parts.length < 2) return text;
+  const kept = parts.filter(part => !isNonAddressSegment(part));
+  return kept.length ? kept.join(', ') : text;
+}
+
 /** Ghi chú giao hàng khách ghi lẫn trong địa chỉ ("giao giờ hành chính"), '' nếu không có. */
 export function extractDeliveryNote(text) {
   const notes = String(text || '').match(DELIVERY_NOTE) || [];
@@ -352,6 +387,9 @@ export function cleanAddressText(raw) {
     text = text.replace(/(?<=\p{L})(?<!(?<![\p{L}])(?:số|so|sn|ngõ|ngo|hẻm|hem|nhà|nha|lô|lo|kiệt|kiet))[\s,.\-–]+\d{6}[\s.]*$/u, '');
     if (text === before) break;
   }
+  // R16: bỏ đoạn rác chen giữa ("Roi ddo ak", "Trên cho rồi", "Đảm bảo k hôi k chiên qua dầu chứ e", "Lấy 1 túi xanh … gía 293.000đ",
+  // nhãn "Địa chỉ" đứng riêng) — xem isNonAddressSegment.
+  text = dropNonAddressSegments(text);
   text = dropOrphanBrackets(text);
   text = text.replace(TRAILING_PARTICLES, '');
   text = text.replace(/\s*,(?:\s*,)+/g, ',').replace(/\s+,/g, ',').replace(/,(?=\S)/g, ', ').replace(/\s{2,}/g, ' ');

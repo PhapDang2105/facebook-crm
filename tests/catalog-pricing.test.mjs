@@ -50,9 +50,11 @@ test('giỏ cùng nhóm ghép (túi lớn, Tropical, combo 10 gói) tự tính m
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 4 }).total, 596000);
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 20 }).priceable, true);
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 21 }).reason, 'too-many');
-  // 3 túi lẻ ×1..3 + mọi bộ ghép ≤3 của 3 túi trộn được + 7 sản phẩm còn lại ×1..3.
+  // 3 túi lẻ ×1..3 + mọi bộ ghép ≤3 của 3 túi trộn được + 6 sản phẩm còn lại ×1..3.
+  // R16: Combo 10 gói Cam (CB10-CAM-G30) tắt trong seed (chủ shop 03/10: combo 10 gói chỉ còn Xanh) → 7 thành 6 (sửa test cũ
+  // vì nó khẳng định Cam còn bán).
   const combos = catalog.listCombos();
-  assert.equal(combos.length, 7 * 3 + 19);
+  assert.equal(combos.length, 6 * 3 + 19);
   assert.equal(new Set(combos.map(combo => combo.key)).size, combos.length);
   // Quy tắc quà: từ 2 sản phẩm miễn ship; từ 3 thêm bát + muỗng, trừ Nghệ Lành và Hạt An Lành.
   assert.deepEqual(catalog.giftsForKey('MIX5-H420=3').map(gift => gift.name), ['Miễn phí vận chuyển']);

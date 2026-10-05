@@ -248,8 +248,14 @@ export function isTrivialCustomerText(text) {
 // Khách bảo dừng: "khoan giao", "hủy đơn", "không lấy nữa"… (so trên chữ có dấu để "Huy" — tên người — không khớp).
 const declinePattern = /(?<![\p{L}\p{N}])(khoan|đừng)\s+(đã\s+)?(giao|gửi|ship|đặt|lên đơn)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])h(ủy|uỷ)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(không|ko|k|hông)\s+(lấy|mua|đặt)\s+nữa(?![\p{L}\p{N}])/iu;
 /** Khách nói dừng / hủy trong tin này? */
+// R16 (bình luận B6b, ca …0716122894 "da nhan hang roi nen kg mua nua"): khách gõ KHÔNG dấu — so thêm trên chữ đã bỏ dấu
+// ("kg/ko/k/khong/hong/khum mua|lay|dat nua", "đã nhận hàng rồi", "đã mua rồi"). "huy" không dấu không tính (tên người).
+const declineFoldedPattern = /\b(?:k|ko|kg|khg|khong|hong|khum|hok) (?:can )?(?:lay|mua|dat) (?:them )?nua\b|\bda nhan (?:duoc )?hang roi\b|\b(?:da|vua) mua roi\b/;
 export function customerDeclined(text) {
-  return declinePattern.test(String(text ?? '').normalize('NFC'));
+  const value = String(text ?? '').normalize('NFC');
+  if (declinePattern.test(value)) return true;
+  const folded = foldText(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ');
+  return !/\?/.test(value) && declineFoldedPattern.test(folded);
 }
 
 // Khách chỉ đáp lời cho xong: "OK bạn", "dạ vâng ạ", "cảm ơn shop"… (tối đa vài từ, chỉ từ đáp lời).
@@ -285,6 +291,10 @@ export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSki
   const attentionOpen = item => item.attention === true || (item.attention && typeof item.attention === 'object' && item.attention.open !== false && !item.attention.closedAt && !item.attention.resolvedAt);
   if (!basketHeld && records.some(attentionOpen)) return 'attention';
   if (!basketHeld && records.some(item => handoffTemplateIds.has(String(item.botLastTemplateId || '')))) return 'handoffTemplate';
+  // R16 (bình luận B6a, ca …949494: nhắc "em vẫn đang giữ đơn" ngay sau "chuyển bạn phụ trách trả lời" mà chưa ai trả lời → khách
+  // trách "Sao e kg trả lời"): tin bot cuối là báo chờ bạn phụ trách (STAFF_WAIT_*, COMMENT_STAFF_FOLLOWUP) — kể cả khi đang giữ
+  // giỏ — thì không bám (nhân viên đã trả lời sau đó thì 'staffReplied' bên dưới cũng chặn).
+  if (records.some(item => /^STAFF_WAIT_/.test(String(item.botLastTemplateId || '')) || String(item.botLastTemplateId || '') === 'COMMENT_STAFF_FOLLOWUP')) return 'waitingStaff';
   for (const record of records) {
     const messages = messagesIn(store, record);
     const customerAt = lastAt(incomingOf(messages), () => true);

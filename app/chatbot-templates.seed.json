@@ -43,7 +43,7 @@
   "ORDER_ADDRESS_CHOOSE": "Dạ địa chỉ của mình thuộc {options} ạ? {Title} chọn giúp em để em lên đơn cho chính xác nha ạ.",
   "ORDER_ADDRESS_OLD_ASK_PHONE": "Dạ {title} cho em xin SĐT đã đặt lần trước để em lấy lại địa chỉ cũ lên đơn cho mình nha ạ 💛",
   "ORDER_CONFIRMATION": "Dạ, em xin phép xác nhận lại thông tin đặt hàng của mình nha:\n\n[[items]]🌾 {product} – Số lượng: {quantity}[[/items]]\n━━━━━━━━━━━━\n📞 Số điện thoại: {phone}\n━━━━━━━━━━━━\n🏡 Địa chỉ nhận hàng: {address}\n━━━━━━━━━━━━\n🚚 Phí vận chuyển: {shipping}\n━━━━━━━━━━━━\n💰 Tổng tiền: {total}[?free_ship] ({free_ship})[/?]\n━━━━━━━━━━━━\n🎁 Tặng kèm: {gift}\n\nEm cảm ơn {title} đã ủng hộ Giọt Nắng, nếu có gì sai sót, {title} nhắn cho em biết nhé ạ.",
-  "ORDER_UPDATED": "Dạ em đã sửa lại đơn cho mình như sau ạ:\n\n[[items]]🌾 {product} – Số lượng: {quantity}[[/items]]\n━━━━━━━━━━━━\n📞 Số điện thoại: {phone}\n🏡 Địa chỉ nhận hàng: {address}\n💰 Tổng tiền: {total}[?free_ship] ({free_ship})[/?]\n\nĐúng rồi thì mình không cần trả lời thêm, có gì chưa đúng {title} nhắn em sửa tiếp nha ạ.",
+  "ORDER_UPDATED": "Dạ em đã sửa lại đơn cho mình như sau ạ:\n\n[[items]]🌾 {product} – Số lượng: {quantity}[[/items]]\n━━━━━━━━━━━━\n📞 Số điện thoại: {phone}\n🏡 Địa chỉ nhận hàng: {address}\n💰 Tổng tiền: {total}[?free_ship] ({free_ship})[/?][?gift]\n🎁 Tặng kèm: {gift}[/?]\n\nĐúng rồi thì mình không cần trả lời thêm, có gì chưa đúng {title} nhắn em sửa tiếp nha ạ.",
   "ORDER_UNCHANGED": "Dạ đơn của {title} em đã lên rồi ạ:\n\n[[items]]🌾 {product} – Số lượng: {quantity}[[/items]]\n💰 Tổng tiền: {total}[?free_ship] ({free_ship})[/?]\n\nBên em sẽ đóng gói và gửi sớm cho {title} nha ạ 💛",
   "REPLY_ALREADY_SENT": "Dạ thông tin em gửi ngay tin phía trên rồi ạ 💛 {Title} ưng loại nào nhắn em tên túi và số lượng kèm SĐT, địa chỉ, em lên đơn liền cho mình nha ạ 🌾",
   "COMMENT_STAFF_FOLLOWUP": "Dạ em nhận được tin của {title} rồi ạ 💛 Em chuyển bạn phụ trách đơn hàng kiểm tra và nhắn lại {title} ngay trong tin nhắn này nha, {title} chờ em ít phút ạ.",
@@ -146,5 +146,6 @@
   "FRUIT_PAIRING": "Dạ granola bên em ăn kèm trái cây nào cũng hợp ạ: thanh long, chuối, táo, dâu… Trộn thêm sữa chua hoặc sữa hạt thì càng ngon và no lâu nha {title} 🌾",
   "DISCOUNT_OATS_GIFT": "Dạ giá combo bên em đã là giá tốt nhất rồi nên em không giảm thêm được ạ 💛[?enough] Em xin tặng thêm {title} {oats_gift} làm quà ạ 🎁[/?][?invite] {Title} lấy từ combo 2 túi ({two_price}, miễn phí vận chuyển) là em tặng thêm {oats_gift} làm quà nha ạ 🌾[/?]\nGiỏ của mình: {cart} – {total} ạ.",
   "ORDER_ADDRESS_OLD_NOT_FOUND": "Dạ em chưa tìm thấy địa chỉ cũ theo số này ạ, {title} gửi giúp em địa chỉ nhận hàng (số nhà, đường, phường/xã, tỉnh) để em lên đơn liền nha ạ.",
-  "SMALL_PACK_FLAVOURS": "Dạ combo 10 gói nhỏ hiện bên em chỉ còn vị Xanh nguyên bản ạ (dễ ăn, cân bằng). {Title} cần em gửi bảng giá combo 10 gói không ạ?"
+  "SMALL_PACK_FLAVOURS": "Dạ combo 10 gói nhỏ hiện bên em chỉ còn vị Xanh nguyên bản ạ (dễ ăn, cân bằng). {Title} cần em gửi bảng giá combo 10 gói không ạ?",
+  "VOICE_RECEIVED": "Dạ em chưa nghe được tin nhắn thoại ạ, {title} nhắn chữ giúp em nha ạ 💛"
 }

@@ -44,7 +44,10 @@ test('đang có đơn trong 7 ngày mà mô hình chốt đơn mới: chưa tạ
   assert.equal(out.results[0].templateId, 'ORDER_EXISTING_CONFIRM');
   assert.match(out.sent.join(' '), /đang có đơn Granola Túi Xanh 450g x1, Granola Túi Vàng 350g x1/);
   // R15 (chủ shop 03/10): mẫu seed hỏi GỘP vào đơn đang có hay TÁCH đơn mới (trước đây "đặt THÊM một đơn mới…").
-  assert.match(out.sent.join(' '), /gộp 2 Granola Túi Xanh 450g – tổng 298\.000đ vào đơn đang có, hay tách thành đơn mới/);
+  // R16 (inbox4 H1, quyết định 7 chỉ nói đơn < 24 giờ): đơn này 2 ngày, đang giao → không gộp được → lời cũ "đặt THÊM… đúng không"
+  // (trước R16 test khẳng định câu hỏi gộp/tách cho cả đơn đang giao — chính là hồi quy ca …011918).
+  assert.match(out.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Xanh 450g – tổng 298\.000đ nữa đúng không/);
+  assert.equal(out.saved.at(-1).pendingOrder.addOnlyAsk, true);
   const pending = out.saved.at(-1).pendingOrder;
   assert.equal(pending.awaitingConfirm, true);
   assert.deepEqual(pending.items, [{ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 2 }]);
@@ -56,8 +59,11 @@ test('đang có đơn trong 7 ngày mà mô hình chốt đơn mới: chưa tạ
   assert.equal(yes.created.length, 1);
   assert.deepEqual(yes.created[0].items.map(item => [item.product, item.quantity]), [['Granola Túi Xanh 450g', 2]]);
   assert.equal(yes.created[0].phone, '0909123456');
-  // Lời seed (gộp hay tách?): "Đúng rồi e" không trả lời được → bạn phụ trách, không tạo đơn, giữ giỏ.
-  const vague = await run({ customerOrders: [existing], pendingOrder: pending, botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: Date.now() - 60000 }, 'Đúng rồi e', { reply: { templateId: 'GENERAL_INFO', messages: ['không được hỏi mô hình'], handoff: false } });
+  // R16: bot đã hỏi bằng lời cũ (cờ addOnlyAsk — đơn không gộp được) nên "Đúng rồi e" lên đơn cả khi mẫu seed hỏi gộp/tách.
+  const viaFlag = await run({ customerOrders: [existing], pendingOrder: pending, botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: Date.now() - 60000 }, 'Đúng rồi e', { reply: { templateId: 'GENERAL_INFO', messages: ['không được hỏi mô hình'], handoff: false } });
+  assert.equal(viaFlag.created.length, 1);
+  // Lời seed (gộp hay tách?) cho giỏ chờ KHÔNG có cờ addOnlyAsk: "Đúng rồi e" không trả lời được → bạn phụ trách, không tạo đơn, giữ giỏ.
+  const vague = await run({ customerOrders: [existing], pendingOrder: { ...pending, addOnlyAsk: undefined }, botLastTemplateId: 'ORDER_EXISTING_CONFIRM', botLastReplyAt: Date.now() - 60000 }, 'Đúng rồi e', { reply: { templateId: 'GENERAL_INFO', messages: ['không được hỏi mô hình'], handoff: false } });
   assert.match(vague.results[0].templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/);
   assert.deepEqual(vague.created, []);
   assert.equal(vague.saved.at(-1).pendingOrder.staffAsked, true);
@@ -109,8 +115,8 @@ test('đang chờ xác nhận mà khách nêu giỏ mới ("2 túi vàng nhé"):
   // (R15-fix4: tin cuối của bot còn là câu hỏi gộp/tách thì vẫn đang chờ → câu có tên món là bạn phụ trách, như trên.)
   const later = await run({ ...asked, botLastTemplateId: 'SHIPPING_POLICY', pendingOrder: { ...waiting, at: Date.now() - 35 * 60 * 1000 } }, '2 túi vàng nhé', { reply: { templateId: 'GENERAL_INFO', messages: ['không được hỏi mô hình'], handoff: false }, extraSettings: { ruleIntent: 'on' } });
   assert.equal(later.results[0].templateId, 'ORDER_EXISTING_CONFIRM');
-  // R15: lời seed mới hỏi gộp/tách (chủ shop 03/10).
-  assert.match(later.sent.join(' '), /gộp 2 Granola Túi Vàng 350g.*vào đơn đang có, hay tách thành đơn mới/);
+  // R16 (inbox4 H1): đơn đang có 2 ngày, đang giao → không gộp được → lời cũ "đặt THÊM… đúng không" (trước R16: gộp/tách).
+  assert.match(later.sent.join(' '), /đặt THÊM một đơn mới gồm 2 Granola Túi Vàng 350g.*đúng không/);
   // Khách "đúng" sau câu hỏi lại (lời cũ "nhắn đúng"): chốt giỏ 2 Vàng, không hỏi lại phường/xã.
   const yes = await run({ ...asked, pendingOrder: later.saved.at(-1).pendingOrder }, 'Đúng rồi', { reply: { templateId: 'GENERAL_INFO', messages: ['x'], handoff: false }, extraSettings: legacy });
   assert.equal(yes.results[0].templateId, 'ORDER_CONFIRMATION');

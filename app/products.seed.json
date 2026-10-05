@@ -206,7 +206,7 @@
         "vị bơ hạt điều",
         "#granolatuicam"
       ],
-      "active": true,
+      "active": false,
       "image": "",
       "mixable": false,
       "mixGroup": "granola"

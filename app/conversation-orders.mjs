@@ -57,6 +57,27 @@ export function isPageSystemNotice(item) {
   return item.system === true || ((item.type || 'text') === 'text' && isPageSystemNoticeText(item.text));
 }
 
+// R16 (inbox5 A1): tin khách mang thông tin đặt hàng — SĐT, địa chỉ (từ hành chính / số nhà), số túi, vị/màu.
+const LATE_INFO_WORDS = /\b(?:xa|phuong|huyen|tinh|quan|thon|ap|xom|to dan pho|so nha|duong|ngo|ngach|hem|kiet|tp|thanh pho|thi tran|truong|khu pho|kp)\b|\b\d+\s*(?:tui|goi|bich|bit|hop|combo)\b|\b(?:xanh|vang|nau|cacao|ca cao|tropical)\b/;
+const foldLate = value => String(value || '').normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+
+/**
+ * R16 (inbox5 A1, ca …0740541679): tin hộp thư đến MUỘN (đồng bộ/webhook hụt) có SĐT / địa chỉ / số túi / vị, mà sau giờ của tin
+ * chỉ có lời BOT (không nhân viên) — lời đó trả lời tin CŨ hơn, không phải tin này. Đưa lại cho bot khi: tin < 10 phút, mọi tin
+ * Page sau nó là của bot, và bot chưa đọc tới tin này (`answeredUpTo` = giờ tin khách mới nhất của lượt bot trước; thiếu mốc thì
+ * không đưa — dữ liệu cũ).
+ */
+export function lateInfoNeedsBot(messages, message, { now = Date.now(), answeredUpTo = 0 } = {}) {
+  if (!message || message.direction !== 'incoming' || (message.type || 'text') !== 'text') return false;
+  const at = Number(message.createdAt) || 0;
+  if (!at || now - at > 10 * 60 * 1000 || !(Number(answeredUpTo) > 0) || at <= Number(answeredUpTo)) return false;
+  const text = String(message.text || '');
+  const hasPhone = /(?:\+?84|0)\d{9}\b/.test(text.replace(/[\s.\-]/g, ''));
+  if (!hasPhone && !LATE_INFO_WORDS.test(foldLate(text))) return false;
+  const after = (Array.isArray(messages) ? messages : []).filter(item => item?.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) >= at);
+  return after.length > 0 && after.every(item => !item.staff);
+}
+
 /**
  * Đơn của khách livestream (nhận quà chỉ khách live khi đẩy POS / xuất kho):
  * cờ order.livestream (đơn bot tạo từ 28/09), cờ liveOrder cũ, hoặc địa chỉ

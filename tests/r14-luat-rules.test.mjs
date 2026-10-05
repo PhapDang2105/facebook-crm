@@ -71,7 +71,11 @@ test('#5 "sữa chua không đường" không phải hỏi đường; tin đặt
   assert.notEqual(ruleIntent('combo 10 gói xanh', inbox())?.value?.No_A, '10');
   assert.equal(ruleIntent('lấy 1 hộp 10 gói xanh', inbox())?.value?.Product_N1, 'Combo 10 gói Xanh');
   assert.equal(tpl(ruleIntent('có hộp 10 gói không', inbox())), 'PACKAGING_INFO');
-  assert.notEqual(tpl(ruleIntent('2 túi trọng luong bn và bn tiền ạ', inbox({ botLastTemplateId: 'GENERAL_INFO', botLastAgeMin: 5 }))), 'WEIGHT_EXPIRY');
+  // R16 (sửa test cũ — inbox3 A7): nay luật trả lời CẢ HAI ý — PRICE_COUNT (giá 2 túi) + ý phụ WEIGHT_EXPIRY; ý test giữ nguyên
+  // ("bn tiền" không CHỈ trả trọng lượng).
+  const weightPrice = ruleIntent('2 túi trọng luong bn và bn tiền ạ', inbox({ botLastTemplateId: 'GENERAL_INFO', botLastAgeMin: 5 }));
+  assert.equal(weightPrice?.value?.template_id, 'PRICE_COUNT');
+  assert.equal(weightPrice?.value?.also, 'WEIGHT_EXPIRY');
   assert.equal(tpl(ruleIntent('túi xanh bao nhiêu gram', inbox())), 'WEIGHT_EXPIRY');
 });
 

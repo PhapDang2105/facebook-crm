@@ -19,7 +19,7 @@ import { AUTOMATED_ACTORS, appendAssignAudit, appendAudit, appendBotToggleAudit 
 import { matchStaffByPancakeName, readStaffStore } from './staff.mjs';
 import { backoffPancake, withPancakeSlot } from './pancake-rate-limit.mjs';
 import { stickerFields } from './stickers.mjs';
-import { isPageSystemNotice, isPageSystemNoticeText } from './conversation-orders.mjs';
+import { isPageSystemNotice, isPageSystemNoticeText, lateInfoNeedsBot } from './conversation-orders.mjs';
 export { stickerInfo, LIKE_STICKER_IDS } from './stickers.mjs';
 
 // Đủ cấu hình khi có ít nhất một Page (mã + token API) và một token webhook: token chung
@@ -622,7 +622,11 @@ export function missedBotChanges(changes, store, { now = Date.now(), windowMs = 
     // Hội thoại đã có nhân viên nhận trong Pancake: như đường webhook, bot không chen.
     if (!botWhenAssigned && change.conversation.pancakeAssigned) return false;
     const messages = store?.messages?.[change.conversation.id] || [];
-    if (messages.some(item => item.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) >= at)) return false;
+    // R16 (inbox5 A1, ca …0740541679): lời bot sau tin này trả lời tin CŨ hơn (bot chưa đọc tới tin này) và tin có SĐT/địa chỉ/
+    // số túi/vị → vẫn đưa bot (hộp thư, < 10 phút, không có lời nhân viên sau tin).
+    const lateInfo = change.conversation.source !== 'comment' && !String(change.conversation.id || '').includes(':comment:')
+      && lateInfoNeedsBot(messages, change.message, { now, answeredUpTo: change.conversation.botAnsweredUpTo });
+    if (!lateInfo && messages.some(item => item.direction === 'outgoing' && !isPageSystemNotice(item) && (Number(item.createdAt) || 0) >= at)) return false;
     // R13 (F1): bình luận đã được nhắn riêng (tin nằm ở hộp thư) hay lượt bot đã bỏ qua có chủ ý.
     if (botAlreadyHandled(change.conversation, change.message, store)) return false;
     if (staffRepliedRecently(messages, now)) return false;

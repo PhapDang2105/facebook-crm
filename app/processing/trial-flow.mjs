@@ -29,7 +29,9 @@ const DECLINE = /^(khong|ko|k|kh|hong|hok|khong can|ko can|khong lay|ko lay|khon
 const DECLINE_THOI = /\bthoi\b/;
 const ACCEPT = /\b(ok|oke|okie|oki|okay|dong y|lay|thu|dat|mua|chot|len don|gui|ship|duoc|dc|co|u|uh|um|vang|da|nhan|muon)\b/;
 // Khách nói đã mua / hủy / khiếu nại: không phải trả lời lời mời — nhờ mô hình đọc.
-const NOT_OFFER = /\b(mua roi|dat roi|lay roi|huy|chua nhan|bi (moc|hoi|hu|loi)|khieu nai|tra hang|hoan)\b/;
+// R16 (inbox2 C5, ca …9150303196 "E nhận hàng" rồi "Shipper gửi cho hàng xóm nha em"): nói chuyện NHẬN HÀNG / shipper / hàng xóm
+// (đơn đang giao) không phải đồng ý ưu đãi — "nhận" trơn trong ACCEPT chỉ còn cho lời đáp ngắn kiểu "ok nhận".
+const NOT_OFFER = /\b(mua roi|dat roi|lay roi|huy|chua nhan|bi (moc|hoi|hu|loi)|khieu nai|tra hang|hoan|nhan (?:duoc |dc )?hang|nhan (?:duoc|dc) roi|nhan roi|shipper|hang xom)\b/;
 const COMPARE = /(khac (nhau|gi|sao|ntn)|nao ngon|ngon hon|nen (chon|mua|lay) (loai|tui|vi)? ?nao|phan biet|so sanh)/;
 const PRICE = /\b(gia|bn|bao nhieu|bnhiu|bao tien|nhieu tien|tong|het bao nhieu)\b/;
 const FREESHIP = /(mien|free) ?(phi )?(ship|sip|van chuyen)|freeship|phi ship|tien ship|ship (bao nhieu|bn|nhieu|may)/;

@@ -112,8 +112,9 @@ test('ASK_TWO_BAGS ("bảng giá em gửi ở trên, lấy 2 túi vị nào") ch
   // Không có mẫu nào khác: không mời "lấy 2 túi vị nào" — R14: báo bạn phụ trách trả lời + thẻ (trước đây im).
   const none = await start();
   const silent = await none.sim.send(none.inbox, 'Có mấy loại', { llm: { template_id: 'GENERAL_INFO' } });
-  assert.match(silent.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/, JSON.stringify(silent.result));
-  assert.ok(none.inbox.labels.includes('handoff'));
+  // R16 (bình luận B1, ca …486243 "Bên em có mấy loại"): câu hỏi chung "mấy loại" trùng danh sách vị VỪA gửi → nhắc "em đã gửi ở
+  // tin ngay trên" (REPLY_ALREADY_SENT), không chuyển bạn phụ trách (trước R16 test khẳng định STAFF_WAIT — chính lượt bị báo sai).
+  assert.equal(silent.result.templateId, 'REPLY_ALREADY_SENT', JSON.stringify(silent.result));
 });
 
 test('tin ưu đãi QR / bám đuổi sau lượt bot không phải "nhân viên trả lời": nhật ký ghi false, luật vẫn coi ngữ cảnh đã đổi', async () => {

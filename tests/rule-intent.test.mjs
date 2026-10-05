@@ -339,7 +339,10 @@ test('vòng 9.10: "mua ở đâu / thế nào" → ORDER_HELP (không ECOMMERCE_
   // 6 túi: báo giá luôn; quà 6 túi chủ shop chưa chốt (giftNote) → kèm thẻ cần người.
   const six = ruleIntent('sáu túi bao nhiêu tiền', ctx);
   assert.deepEqual([six?.value?.template_id, six?.attention], ['PRICE_COUNT', true]);
-  assert.equal(ruleIntent('2 túi bao nhiêu', ctx)?.value?.template_id, undefined, '2 túi: bảng combo, để luật/mô hình cũ');
+  // R16 (sửa test cũ — inbox3 A7, inbox4 H4): "2 túi giá?" từng để mô hình gửi cả bảng giá rồi hỏi lại "2 túi hay 1 túi" → nay
+  // PRICE_COUNT 2 túi 298.000đ miễn ship + hỏi vị.
+  const two = ruleIntent('2 túi bao nhiêu', ctx);
+  assert.deepEqual([two?.value?.template_id, two?.value?.values?.count, two?.value?.values?.total], ['PRICE_COUNT', '2', '298.000đ']);
 });
 
 test('vòng 9.11: gói nhỏ hỏi cách khác → PACKAGING_INFO; sau PACKAGING_INFO xin giá / "có" / hỏi combo 10 → PRICE_QUOTE (Combo 10 gói, vòng 11: không gọi thẳng PRICE_QUOTE_COMBO) theo màu ngữ cảnh', () => {

@@ -19,7 +19,9 @@ test('H1 (ca …216841): "…tỉnh gia lai" khi khách có đơn cũ trong 7 ng
   const inbox2 = sim2.inbox({ customerOrders: [old] });
   const ask = await sim2.send(inbox2, 'E mua 2 túi xanh giá bao nhiêu', { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: 'Granola Túi Xanh 450g', No_A: '2', Phone_Number: PHONE, Customer_Address: '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh' } });
   assert.equal(ask.created.length, 0);
-  assert.equal(ask.result.templateId, 'PRICE_QUOTE', JSON.stringify(ask.result));
+  // R16 (sửa test cũ — inbox3 A7): hỏi giá ĐÚNG 2 túi nay trả PRICE_COUNT ("2 túi … 298.000đ, miễn phí vận chuyển"), không gửi cả
+  // bảng giá rồi hỏi lại "2 túi hay 1 túi" (lỗi vòng 16). Ý của test giữ nguyên: câu hỏi giá vẫn là câu hỏi giá, không lên đơn.
+  assert.equal(ask.result.templateId, 'PRICE_COUNT', JSON.stringify(ask.result));
 });
 
 test('săn deal: chỉ ghi nhận khi khách thật sự báo đã săn/đã đặt', () => {

@@ -1,3 +1,4 @@
+import { normalizeGiftOverride } from '../gift-override.mjs';
 // The basket a customer named and the phone/address they give afterwards almost
 // never arrive in the same message. The old workflow kept the basket in static data
 // for two hours; here it is stored on the conversation record so it survives a
@@ -77,6 +78,8 @@ export function normalizePendingOrder(value) {
     ...(giftSwapOf(value) ? { giftSwap: giftSwapOf(value) } : {}),
     // Vòng 13 (inbox3 F3): giỏ lập từ bình luận live / khách live → giữ quà và giá live khi khách sang hộp thư.
     ...(value?.livestream === true ? { livestream: true } : {}),
+    // 05/10: quà chọn tay của giỏ (bot đổi quạt → muỗng dừa cho khách live): Bát gáo dừa + Muỗng dừa.
+    ...(normalizeGiftOverride(value?.giftOverride).length ? { giftOverride: normalizeGiftOverride(value.giftOverride) } : {}),
     // Vòng 13 (inbox2 A3): khách hẹn dịp khác (ORDER_POSTPONED, keepBasket) — giỏ còn giữ nhưng không nhắc bám đuổi.
     ...(value?.postponed ? { postponed: true } : {}),
     // Vòng 13 (02/10): giỏ do bình luận mang sang hộp thư — bình luận mới hơn được thay giỏ này (engine inboxBasketFresh).

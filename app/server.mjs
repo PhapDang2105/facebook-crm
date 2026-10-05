@@ -14,6 +14,7 @@ import { botPanelStateChanged } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
+import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
@@ -39,13 +40,13 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { configurePosSync, posSyncStatus, recordPosSyncStatus, runPosSync, startPosSync } from './pos-sync.mjs';
 import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
-import { applyGiftSwapFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
+import { applyGiftSwapFlag, applyGiftOverrideFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { applyShipmentLabels, isQuietHourVN, listShipmentNoticeQueue, readSapoSettings, readSapoState, recordShipmentNoticeResult, startSapoSync, writeSapoSettings } from './sapo-sync.mjs';
 import { isSapoConfigured } from './sapo.mjs';
 import { buildFollowUpBatch, followUpGender, followUpRelayErrorText, followUpStatus, markFollowUpWins, pruneReturningFromQueue, recordFollowUpBatchResults, releaseFollowUpLeases, resetFollowUpActivation, resolveFollowUpQueueItem, runFollowUps, startFollowUpLoop } from './follow-up.mjs';
 import { customerNote } from './order-notes.mjs';
-import { applyCustomerOrderEdits, applyPosRepush, assertManualOrderMoney, createManualOrderGuard, describeOrderEdits, duplicateManualOrderMessage, isLiveOnPos, moneyText, needsPosRepush, orderEditAction, orderProcessingNotes, posCancelRefOf, posRepushDraft, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
+import { addProcessingFlag, applyCustomerOrderEdits, applyPosRepush, assertManualOrderMoney, createManualOrderGuard, describeOrderEdits, duplicateManualOrderMessage, isLiveOnPos, moneyText, needsPosRepush, orderEditAction, orderProcessingNotes, posCancelRefOf, posRepushDraft, recordOrderHistory, stampOrderCreated } from './order-edits.mjs';
 import { AUDIT_ACTIONS, AUTOMATED_ACTORS, appendAudit, appendBotToggleAudit, appendLabelAudit, auditActionLabel, auditActors, createViewThrottle, flushAudit, labelChangeDetails, labelChangeText, queryAudit } from './audit-log.mjs';
 import { BOT_ACTOR, actorOf, actorStamp, clearActorCache, clientIp, createRequireManager, isManager } from './request-actor.mjs';
 import { HTML_CSP, LOGIN_SETUP_MESSAGE, allowedWithoutLoginSetup, applySecurityHeaders, createLogLimiter, debugFlagOn, installConsoleRedaction, loginGate, loginSetupPage, safeNextPath } from './security.mjs';
@@ -389,6 +390,8 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
     for (const [key, value] of Object.entries(fresh)) if (!keep.has(key)) existing[key] = value;
     // Giỏ mới không còn quà bám đuổi / không còn là 1 túi dùng thử: bỏ cờ cũ (không thì đơn 1 túi vẫn mang quà BGD sang POS).
     for (const key of ['promoGift', 'trialFreeShip']) if (!(key in fresh)) delete existing[key];
+    // 05/10: quà nhân viên đã chọn tay giữ nguyên khi khách sửa giỏ qua bot (chữ quà theo lựa chọn tay, không theo bảng quà).
+    if (hasGiftOverride(existing)) existing.gift = giftOverrideText(existing.giftOverride, { freeShipping: Boolean(existing.freeShipping) });
     // Giữ lại lời khách dặn trước đó ("Khách dặn: gửi hàng mới.") khi sửa giỏ.
     const requests = String(existing.note || '').match(/Khách dặn: [^.]*\./g) || [];
     existing.note = [`Tạo tự động từ xác nhận của chatbot. Khách sửa đơn lúc ${stamp}.`, ...requests].join(' ');
@@ -403,15 +406,21 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
     // R13 (gộp): quà thay thế (đơn đổi quà) không lên được POS ở lần sửa này → ghi chú xử lý cho nhân viên như đường tạo
     // đơn (syncOrderToPos); sửa xong mà không còn thiếu thì gỡ ghi chú đổi quà cũ. PUT lỗi: giữ nguyên ghi chú đang có.
     let giftSwapMissing = null;
+    // 05/10: đơn có quà nhân viên chọn tay: ghi chú "Quà đổi tay chưa có mã POS" theo lần PUT này.
+    let giftOverrideMissing = null;
     const posOutcome = await updatePosOrder(result.order, { conversation })
-      .then(updated => { giftSwapMissing = updated?.giftSwapMissing || []; return { ...result.order.pos, updatedAt: Date.now(), error: undefined }; })
+      .then(updated => { giftSwapMissing = updated?.giftSwapMissing || []; giftOverrideMissing = updated?.giftOverrideMissing || null; return { ...result.order.pos, updatedAt: Date.now(), error: undefined }; })
       .catch(error => ({ ...result.order.pos, updatedAt: Date.now(), error: `Sửa trên POS lỗi: ${error.message}` }));
     await setOrderPosOutcome(orderId, posOutcome, {
       conversationId: conversation.id, publish: false, landing: false,
-      extra: target => { if (target && giftSwapMissing) applyGiftSwapFlag(target, giftSwapMissing); }
+      extra: target => {
+        if (target && giftSwapMissing) applyGiftSwapFlag(target, giftSwapMissing);
+        if (target && giftOverrideMissing) applyGiftOverrideFlag(target, giftOverrideMissing);
+      }
     });
     result.order.pos = posOutcome;
     if (giftSwapMissing) applyGiftSwapFlag(result.order, giftSwapMissing);
+    if (giftOverrideMissing) applyGiftOverrideFlag(result.order, giftOverrideMissing);
   }
   return { ...result, updated: true, created: false };
 }
@@ -420,6 +429,58 @@ async function updateChatbotCustomerOrder(conversation, orderId, input) {
  * Khách dặn thêm cho đơn vừa đặt ("gửi hàng mới", "gọi trước khi giao"): ghi vào
  * ghi chú đơn (hiện ở Xử lý dữ liệu và đi sang POS trong ghi chú "Khách ghi").
  */
+/**
+ * 05/10 (chủ shop): khách live không lấy quạt → bot đổi quà của đơn vừa chốt (< 60 phút) thành Bát gáo dừa + Muỗng dừa.
+ * Ghi `giftOverride` + chữ quà lên đơn (lịch sử "đổi quà: … → …"), rồi sửa đơn trên POS như đường sửa đơn sẵn có
+ * (updatePosOrder, chỉ đơn CRM đẩy sang). Trả { noted: true, order } (engine không coi là đơn mới); POS lỗi → thêm
+ * `posError` + ghi chú xử lý cho nhân viên sửa tay; không sửa được (không thấy đơn, đơn hủy, đơn nhân viên lên trên POS)
+ * → { error } để engine quay về luồng ghi chú + xin duyệt.
+ */
+async function setChatbotOrderGiftOverride(conversation, orderId, giftOverride) {
+  const list = normalizeGiftOverride(giftOverride);
+  if (!list.length) return { error: 'danh sách quà trống' };
+  let failure = '';
+  let updated = null;
+  await updateMessagingStore(store => {
+    const item = store.conversations.find(entry => entry.id === conversation.id);
+    const existing = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => String(entry.id) === String(orderId));
+    if (!existing) { failure = 'không tìm thấy đơn'; return null; }
+    if (String(existing.processingStatus || '') === 'cancelled' || existing.status === 'Hủy') { failure = 'đơn đã hủy'; return null; }
+    if (existing.pos?.id && !isCrmOwnedPosOrder(existing)) { failure = 'đơn nhân viên lên trên POS'; return null; }
+    const before = { gift: existing.gift, giftOverride: existing.giftOverride };
+    existing.giftOverride = list;
+    existing.gift = giftOverrideText(list, { freeShipping: Boolean(existing.freeShipping) });
+    // Quà bám đuổi / đổi quà kiểu cũ không còn áp cho đơn đã chọn quà tay.
+    delete existing.promoGift;
+    syncGiftOverrideFlag(existing);
+    existing.updatedAt = Date.now();
+    recordOrderHistory(existing, { by: BOT_ACTOR, action: 'order.update', summary: `Khách đổi quà qua chatbot — ${describeOrderEdits(before, existing, ['giftOverride'])}` });
+    updated = { ...existing };
+    return null;
+  }, { unchanged: () => !updated });
+  if (failure || !updated) return { error: failure || 'không sửa được đơn' };
+  publishMessagingEvent({ type: 'customer-panel', conversationId: conversation.id });
+  await appendOrderToArchive(updated).catch(() => {});
+  if (updated.pos?.id) {
+    let missing = null;
+    const posOutcome = await updatePosOrder(updated, { conversation })
+      .then(result => { missing = result?.giftOverrideMissing || []; return { ...updated.pos, updatedAt: Date.now(), error: undefined }; })
+      .catch(error => ({ ...updated.pos, updatedAt: Date.now(), error: `Sửa trên POS lỗi: ${error.message}` }));
+    const posError = posOutcome.error || '';
+    await setOrderPosOutcome(orderId, posOutcome, {
+      conversationId: conversation.id, landing: false,
+      extra: target => {
+        if (!target) return;
+        if (missing) applyGiftOverrideFlag(target, missing);
+        if (posError) addProcessingFlag(target, '⚠ Đổi quạt → muỗng dừa: POS chưa sửa được — nhân viên sửa quà trên POS');
+      }
+    });
+    updated.pos = posOutcome;
+    if (posError) return { noted: true, order: updated, posError };
+  }
+  return { noted: true, order: updated };
+}
+
 async function addChatbotOrderNote(conversation, orderId, note) {
   // Không để dấu chấm trong lời dặn: ghi chú tách từng lời dặn theo "Khách dặn: …."
   const text = String(note || '').replace(/\s+/g, ' ').replace(/\.+/g, ',').replace(/[,\s]+$/, '').trim().slice(0, 200);
@@ -1344,6 +1405,8 @@ const chatbotDependencies = {
   updateOrder: updateChatbotCustomerOrder,
   cancelOrder: cancelChatbotCustomerOrder,
   addOrderNote: addChatbotOrderNote,
+  // 05/10: khách live không lấy quạt → đổi quà của đơn vừa chốt sang Bát gáo dừa + Muỗng dừa.
+  setOrderGiftOverride: setChatbotOrderGiftOverride,
   // Khách hỏi đơn đã đặt và gửi SĐT: tìm đơn theo SĐT ở mọi hội thoại (đặt ở
   // trang kia, qua bình luận, đơn landing đồng bộ từ POS), mới nhất trước.
   findOrdersByPhone: async phone => {
@@ -3201,7 +3264,8 @@ const server = http.createServer(async (request, response) => {
         total: priced.total || 0,
         gift: priced.gift || '',
         livestream,
-        gifts: (priced.gifts || []).map(gift => ({ name: gift.name, sku: gift.sku || '', weight: Number(gift.weight) || 0 })),
+        // `id` (dòng bảng quà): form Tạo đơn tích sẵn đúng quà máy tự tính khi nhân viên mở "Đổi quà".
+        gifts: (priced.gifts || []).map(gift => ({ ...(gift.id ? { id: String(gift.id) } : {}), name: gift.name, sku: gift.sku || '', weight: Number(gift.weight) || 0 })),
         lines: (priced.lines || []).map(line => ({ sku: line.sku, name: line.name, quantity: line.quantity, unitPrice: line.unitPrice, basketUnitPrice: line.basketUnitPrice, lineTotal: line.lineTotal }))
       });
     }
@@ -3631,13 +3695,16 @@ const server = http.createServer(async (request, response) => {
       // Đơn đã có trên Pancake POS: sửa bên đó theo (sản phẩm, địa chỉ, phí, ghi chú); lỗi ghi lên đơn.
       // Chỉ đơn CRM tạo rồi đẩy sang (isCrmOwnedPosOrder): đơn nhân viên/Shop lên trên POS
       // rồi kéo về (source 'POS') thì POS là bản gốc — PUT từ CRM sẽ đè giỏ/quà/ghi chú trên POS.
-      if (updated.pos?.id && isCrmOwnedPosOrder(updated) && ['name', 'phone', 'address', 'lines', 'products', 'freeShipping', 'shippingFee', 'discount', 'note', 'gift'].some(field => patch[field] !== undefined)) {
+      if (updated.pos?.id && isCrmOwnedPosOrder(updated) && ['name', 'phone', 'address', 'lines', 'products', 'freeShipping', 'shippingFee', 'discount', 'note', 'gift', 'giftOverride'].some(field => patch[field] !== undefined)) {
         const owner = (await readMessagingStore()).conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));
+        // 05/10: quà chọn tay chưa lên được POS (thiếu mã / POS chưa có mẫu mã) → ghi chú xử lý; PUT lỗi thì giữ nguyên ghi chú.
+        let giftOverrideMissing = null;
         const posOutcome = await updatePosOrder(updated, { conversation: owner || {} })
-          .then(() => ({ ...updated.pos, updatedAt: Date.now(), error: undefined }))
+          .then(result => { giftOverrideMissing = result?.giftOverrideMissing || (hasGiftOverride(updated) ? null : []); return { ...updated.pos, updatedAt: Date.now(), error: undefined }; })
           .catch(error => ({ ...updated.pos, updatedAt: Date.now(), error: `Sửa trên POS lỗi: ${error.message}` }));
-        await setOrderPosOutcome(orderId, posOutcome);
+        await setOrderPosOutcome(orderId, posOutcome, giftOverrideMissing ? { extra: target => { if (target) applyGiftOverrideFlag(target, giftOverrideMissing); } } : {});
         updated.pos = posOutcome;
+        if (giftOverrideMissing) applyGiftOverrideFlag(updated, giftOverrideMissing);
       }
       // warnings: [chuỗi] cảnh báo không chặn của lần sửa (rỗng khi không có) — web hiện cạnh ô SĐT.
       return sendJson(response, 200, { ...updated, processingNotes: orderProcessingNotes(updated), warnings: editWarnings });

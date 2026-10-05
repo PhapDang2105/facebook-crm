@@ -252,7 +252,9 @@
                     <button id="customer-product-add-button" type="button" aria-label="Thêm sản phẩm" title="Thêm sản phẩm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.6v12.8M5.6 12h12.8"></path></svg></button>
                   </div>
                   <datalist id="shared-product-options"></datalist>
-                  <div class="customer-gift-row" id="customer-order-gift-row" hidden><span>Quà tặng</span><span id="customer-order-gift"></span></div>
+                  <div class="customer-gift-row" id="customer-order-gift-row" hidden><span class="customer-gift-label">Quà tặng <button class="customer-gift-change" id="customer-gift-change" type="button" aria-expanded="false" aria-controls="customer-gift-picker" title="Chọn quà khác cho đơn này">Đổi quà</button></span><span class="customer-gift-value"><span id="customer-order-gift"></span><small class="customer-gift-manual" id="customer-gift-manual" hidden>(đã đổi tay)</small></span></div>
+                  <small class="customer-gift-warning" id="customer-gift-warning" hidden></small>
+                  <div class="customer-gift-picker" id="customer-gift-picker" role="group" aria-label="Chọn quà tặng" hidden></div>
                   <div class="customer-weight-row"><span>Tổng khối lượng</span><span id="customer-order-weight">0 g</span></div>
                 </div>
               </section>

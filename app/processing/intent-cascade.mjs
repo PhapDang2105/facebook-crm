@@ -59,7 +59,9 @@ const TEMPLATES_BY_SUBGROUP = {
     // mã engine trả (renderChatbotReply) cho ORDER_UPDATED / ORDER_CANCELLED / ORDER_NOTE_ADDED — nhãn từ nhật ký quyết định
     'ORDER_UPDATE', 'ORDER_CANCEL', 'ORDER_NOTE',
     // vòng 13 (r13): bước đơn engine tự chọn — đã nhận giỏ Shop (chờ kiểm đơn), ghi nhận quà thay của giỏ/đơn
-    'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED']
+    'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED',
+    // 05/10: đổi quạt → muỗng dừa cho khách live / quà đã có muỗng (engine tự chọn)
+    'GIFT_FAN_TO_SPOON', 'GIFT_SPOON_INCLUDED']
 };
 
 /**

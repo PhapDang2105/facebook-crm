@@ -172,6 +172,12 @@ function rememberMtime(mtime) {
 }
 const isForeignMtime = mtime => Boolean(mtime) && mtime !== cachedStoreMtimeMs && !knownMtimes.includes(mtime);
 
+/** Phiên bản sửa của kho trong bộ nhớ (tăng sau mỗi lần updateMessagingStore đổi gì đó) — chỉ mục tìm kiếm
+ *  (message-search.mjs) dùng cùng với danh tính đối tượng kho để biết khi nào phải soát lại. */
+export function messagingStoreVersion() {
+  return mutationVersion;
+}
+
 /** Còn thay đổi trong bộ nhớ chưa ghi xuống đĩa? */
 export function messagingStoreHasPendingWrites() {
   return writtenVersion < mutationVersion;

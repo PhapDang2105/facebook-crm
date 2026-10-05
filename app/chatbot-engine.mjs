@@ -11,7 +11,7 @@ import { hasGiftOverride } from './gift-override.mjs';
 import { isLivestreamConversation, isLivestreamCustomer, isPageSystemNotice, lateInfoNeedsBot } from './conversation-orders.mjs';
 // R13: LIVE_ONLY (danh sách hàng chỉ bán trên live) và FLAVOR_LIST (câu hỏi danh sách vị) dùng chung một bản của rule-intent.
 import { asksSpoonIncluded, CANCEL_ORDER, COMMENT_DISLIKE, core as ruleCore, DELIVERY_NOTE, FLAVOR_LIST, HOLD_DELIVERY, isFanToSpoonRequest, LIVE_FEEDBACK, LIVE_ONLY, ruleIntent, TROPICAL_MENTION } from './processing/rule-intent.mjs';
-import { cleanAddressText, collectAddressBurst, isPaymentMessage, lookupPreviousAddress, maskMarketWord, maskPlaceGia, stripPhone } from './processing/order-flow.mjs';
+import { cleanAddressText, collectAddressBurst, isPaymentMessage, lookupPreviousAddress, maskMarketWord, maskPlaceGia, resolvePreviousAddress, stripPhone } from './processing/order-flow.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { stickerInfo } from './stickers.mjs';
 import { activeTrial, filterTrialReply, promoBowlActive, trialBagOptions, trialModelHint, trialStep } from './processing/trial-flow.mjs';
@@ -1942,10 +1942,23 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const own = await lookupPreviousAddress(oldAddressPhone, { customerOrders: allOrders }).catch(() => null);
       if (own?.address) previousDelivery = { phone: own.phone || oldAddressPhone, address: own.address, at: Number(own.at) || 0, source: own.source || '' };
       else if (!(previousDelivery && toLocalPhoneDigits(previousDelivery.phone) === toLocalPhoneDigits(oldAddressPhone))) {
-        const found = await lookupPreviousAddress(oldAddressPhone, { landingStore }).catch(() => null);
+        // 05/10 (ca …610181452166): thêm nguồn CỦA KHÁCH — địa chỉ khách tự nhắn trong chính hội thoại (cạnh tin gửi đúng
+        // SĐT này, hay ngay trước phiếu xác nhận của Page) và đơn Pancake POS cùng conversation_id; đơn POS của hội thoại
+        // khác / kho landing vẫn là "đơn ngoài" (C2). Toàn bộ lịch sử (không chỉ 100 tin gần nhất), tối đa 180 ngày.
+        const history = await Promise.resolve(listMessages(conversation.id, 5000)).catch(() => recent);
+        const resolved = await resolvePreviousAddress(oldAddressPhone, {
+          messages: Array.isArray(history) ? history : recent,
+          findPosOrdersByPhone: dependencies.findPosOrdersByPhone,
+          pancakeConversationId: conversation.pancakeConversationId || inboxThread?.pancakeConversationId || '',
+          landingStore
+        }).catch(() => ({ own: null, foreign: null }));
+        if (resolved.own?.address) {
+          previousDelivery = { phone: resolved.own.phone || oldAddressPhone, address: resolved.own.address, at: Number(resolved.own.at) || 0, source: resolved.own.source || '' };
+        }
+        const found = resolved.own?.address ? null : resolved.foreign;
         if (found?.address) {
           previousDelivery = { phone: found.phone || oldAddressPhone, address: '', at: Number(found.at) || 0, source: found.source || '', foreign: { orderId: found.orderId || '', source: found.source || '' } };
-          await noteForStaff(dependencies, conversation, `Khách xin gửi "địa chỉ cũ" theo SĐT ${oldAddressPhone}: có đơn ${found.source || 'ngoài'} ${found.orderId || ''} (không thuộc hội thoại này), địa chỉ đơn đó: ${found.address}. Bot không tự điền — nhân viên đối chiếu người nhận trước khi lên đơn.`, `đơn ${found.orderId || '?'}`);
+          await noteForStaff(dependencies, conversation, `Khách xin gửi "địa chỉ cũ" theo SĐT ${oldAddressPhone}: có đơn ${found.source === 'pos' ? 'Pancake POS' : found.source || 'ngoài'} ${found.orderId || ''} (không thuộc hội thoại này), địa chỉ đơn đó: ${found.address}. Bot không tự điền — nhân viên đối chiếu người nhận trước khi lên đơn.`, `đơn ${found.orderId || '?'}`);
         }
       }
     }

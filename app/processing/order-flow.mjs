@@ -491,3 +491,151 @@ export async function lookupPreviousAddress(phone, { customerOrders = [], landin
   } else if (landingStore && Array.isArray(landingStore.orders)) landing = landingStore.orders;
   return pickPreviousAddress(phone, customerOrders, landing);
 }
+
+// ===== 05/10 (chủ shop: "chưa tìm thấy địa chỉ cũ theo số này" dù khách đã nhắn địa chỉ trong chính hội thoại) =====
+// Nguồn "địa chỉ cũ" theo thứ tự (resolvePreviousAddress). CỦA KHÁCH (tự điền như đơn hội thoại) chỉ khi chắc cùng người:
+//  1) customerOrders của hội thoại;
+//  2) tin KHÁCH gửi trong chính hội thoại (≤ 180 ngày): địa chỉ đủ cấp gửi trong ±30 phút quanh tin có đúng SĐT đó,
+//     hay địa chỉ đủ cấp mà ngay sau là phiếu/tin xác nhận đơn của Page — lấy tin mới nhất;
+//  3) đơn Pancake POS tìm theo SĐT (chờ tối đa 5 giây; lỗi → bỏ qua, ghi log): conversation_id đúng hội thoại, chưa hủy,
+//     địa chỉ đủ → của khách; đơn POS của hội thoại khác → "đơn ngoài" (C2: không tự điền, ghi chú nhân viên);
+//  4) kho landing (đơn ngoài, như cũ).
+const DAY_MS = 24 * 60 * 60 * 1000;
+const phoneDigits = value => toLocalPhone(value) || String(value || '').replace(/\D/g, '');
+/** Mọi SĐT trong một tin (kể cả "0912 345 678", "0912.345.678", "+84 912…") → dạng 0xxxxxxxxx. */
+export function phonesInText(text) {
+  const found = new Set();
+  for (const match of String(text || '').matchAll(/(?<!\d)(?:\+?84|0)(?:[ .-]?\d){9}(?!\d)/g)) {
+    const digits = match[0].replace(/\D/g, '').replace(/^84/, '0');
+    if (digits.length === 10) found.add(digits);
+  }
+  return found;
+}
+// Phiếu/tin xác nhận đơn của Page (bot hay nhân viên).
+const PAGE_CONFIRMATION = /Địa chỉ nhận hàng:|xác nhận đơn|đã lên đơn|lên đơn cho|chốt đơn|đơn hàng của (?:anh|chị|em|mình|bạn)/iu;
+const isPageConfirmation = item => item?.direction === 'outgoing' && (item.type === 'order-receipt' || PAGE_CONFIRMATION.test(String(item.text || '')));
+
+/**
+ * Địa chỉ khách tự nhắn trong hội thoại cho SĐT này (nguồn 2). `messages` cũ → mới (như listMessages).
+ * Trả { phone, address, at, source: 'messages', messageId } hoặc null.
+ */
+export function addressFromCustomerMessages(phone, messages, { now = Date.now(), maxAgeMs = 180 * DAY_MS, windowMs = 30 * 60 * 1000, describe = describeDeliveryAddress } = {}) {
+  const key = phoneDigits(phone);
+  if (!key) return null;
+  const list = (Array.isArray(messages) ? messages : []).filter(Boolean);
+  const phoneTimes = list
+    .filter(item => item.direction === 'incoming' && phonesInText(item.text).has(key))
+    .map(item => Number(item.createdAt) || 0);
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const item = list[index];
+    if (item.direction !== 'incoming' || (item.type && item.type !== 'text')) continue;
+    const at = Number(item.createdAt) || 0;
+    if (at && now - at > maxAgeMs) break;
+    const raw = String(item.text || '').trim();
+    // Tin quá ngắn không thể là địa chỉ đủ cấp; tin dài/câu hỏi không phải tin địa chỉ.
+    if (raw.length < 12 || raw.length > 300 || mentionsOldAddress(raw)) continue;
+    const otherPhones = [...phonesInText(raw)].filter(value => value !== key);
+    if (otherPhones.length) continue; // tin ghi SĐT khác: địa chỉ của người khác
+    const nearPhone = phoneTimes.some(time => Math.abs(time - at) <= windowMs);
+    let confirmed = false;
+    if (!nearPhone) {
+      // Tin Page kế tiếp (bỏ qua tin khách xen giữa) trong 3 giờ là phiếu/tin xác nhận đơn.
+      for (let next = index + 1; next < list.length; next += 1) {
+        const later = list[next];
+        if ((Number(later.createdAt) || 0) - at > 3 * 60 * 60 * 1000) break;
+        if (later.direction !== 'outgoing') continue;
+        confirmed = isPageConfirmation(later);
+        break;
+      }
+    }
+    if (!nearPhone && !confirmed) continue;
+    const address = cleanAddressText(stripPhone(raw).trim());
+    if (!address) continue;
+    let described = null;
+    try { described = describe(address); } catch { described = null; }
+    if (!described?.complete) continue;
+    return { phone: key, address, at, source: 'messages', messageId: String(item.id || item.mid || '') };
+  }
+  return null;
+}
+
+/** Địa chỉ giao của một đơn Pancake POS (shipping_address): ghép phần thôn/số nhà + xã + huyện + tỉnh, không lặp. */
+export function posOrderAddress(order) {
+  const shipping = order?.shipping_address || {};
+  const base = String(shipping.full_address || shipping.address || '').replace(/\s+/g, ' ').trim();
+  const fold = value => normalizeIntentText(String(value || ''));
+  let text = base;
+  for (const part of [shipping.commune_name, shipping.district_name, shipping.province_name]) {
+    const name = String(part || '').trim();
+    if (name && !fold(text).includes(fold(name))) text = text ? `${text}, ${name}` : name;
+  }
+  return text;
+}
+
+/**
+ * Đơn POS (nguồn 3) của SĐT: { own, foreign }. own = đơn mới nhất của ĐÚNG hội thoại (conversation_id), chưa hủy/xoá,
+ * địa chỉ đủ; foreign = đơn mới nhất của hội thoại khác (hay không gắn hội thoại) có địa chỉ.
+ */
+export function pickPosOrderAddress(phone, posOrders, pancakeConversationId, { describe = describeDeliveryAddress } = {}) {
+  const key = phoneDigits(phone);
+  const ownThread = String(pancakeConversationId || '');
+  let own = null;
+  let foreign = null;
+  for (const order of Array.isArray(posOrders) ? posOrders : []) {
+    if (!order || [6, 7].includes(Number(order.status))) continue;
+    const phones = [order.bill_phone_number, order.shipping_address?.phone_number].map(phoneDigits).filter(Boolean);
+    if (!phones.includes(key)) continue;
+    const address = posOrderAddress(order);
+    if (!address) continue;
+    // inserted_at của POS là giờ UTC không ghi múi (như pos-sync.mjs posTimeToWebcake).
+    const inserted = String(order.inserted_at || '').trim();
+    const at = Date.parse(inserted.endsWith('Z') || /[+-]\d\d:\d\d$/.test(inserted) ? inserted : `${inserted.replace(' ', 'T')}Z`) || 0;
+    const record = { phone: key, address, at, source: 'pos', orderId: String(order.system_id || order.id || '') };
+    const same = ownThread && String(order.conversation_id || '') === ownThread;
+    if (same) {
+      let complete = false;
+      try { complete = Boolean(describe(address)?.complete); } catch { complete = false; }
+      complete ||= Boolean(order.shipping_address?.commune_name && order.shipping_address?.province_name && order.shipping_address?.address);
+      if (complete && (!own || at > own.at)) own = record;
+    } else if (!foreign || at > foreign.at) foreign = record;
+  }
+  return { own, foreign };
+}
+
+function withTimeout(promise, ms) {
+  let timer = null;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`quá ${ms} ms`)), ms); })
+  ]);
+}
+
+/**
+ * Tra "địa chỉ cũ" theo bốn nguồn (xem đầu mục). Trả { own, foreign }: own = địa chỉ CỦA khách (được tự điền),
+ * foreign = đơn ngoài cùng SĐT (chỉ để ghi chú nhân viên). Chỉ tra nguồn 3–4 khi 1–2 không ra.
+ */
+export async function resolvePreviousAddress(phone, {
+  customerOrders = [], messages = [], findPosOrdersByPhone = null, pancakeConversationId = '', landingStore = null,
+  now = Date.now(), posTimeoutMs = 5000, log = console
+} = {}) {
+  const fromOrders = pickPreviousAddress(phone, customerOrders);
+  if (fromOrders?.address) return { own: fromOrders, foreign: null };
+  const fromMessages = addressFromCustomerMessages(phone, messages, { now });
+  if (fromMessages) return { own: fromMessages, foreign: null };
+  let foreign = null;
+  if (typeof findPosOrdersByPhone === 'function') {
+    try {
+      const posOrders = await withTimeout(findPosOrdersByPhone(phoneDigits(phone)), posTimeoutMs);
+      const picked = pickPosOrderAddress(phone, posOrders, pancakeConversationId);
+      if (picked.own) return { own: picked.own, foreign: null };
+      foreign = picked.foreign;
+    } catch (error) {
+      log?.warn?.(`Tra địa chỉ cũ: bỏ qua Pancake POS (${error?.message || error}).`);
+    }
+  }
+  if (!foreign) {
+    const fromLanding = await lookupPreviousAddress(phone, { landingStore }).catch(() => null);
+    if (fromLanding?.address) foreign = fromLanding;
+  }
+  return { own: null, foreign };
+}

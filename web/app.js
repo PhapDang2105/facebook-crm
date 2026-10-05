@@ -6139,12 +6139,177 @@ function conversationSearchKey(conversation) {
   return key;
 }
 
+// ===== 05/10: ô Tìm kiếm còn tìm trong TIN NHẮN CŨ và SỐ ĐIỆN THOẠI của mọi hội thoại (GET /api/messaging/search) =====
+// Lọc tức thì theo dòng đang hiện giữ nguyên (filterConversations). Gõ ≥ 3 ký tự, ngừng 300 ms → hỏi máy chủ, hiện nhóm
+// "Trong tin nhắn cũ / số điện thoại" dưới danh sách. Bấm một dòng: mở hội thoại (tải về nếu chưa có trong danh sách,
+// tải đủ tin để thấy tin khớp) rồi cuộn tới và làm nổi tin đó (cùng class với tìm trong hội thoại).
+const messageSearchMinLength = 3;
+let messageSearchTimer = null;
+let messageSearchRequestId = 0;
+let messageSearchResultsBox = null;
+let messageSearchHasResults = false;
+// Hội thoại vừa mở từ kết quả: vẫn hiện trong danh sách dù chữ trên dòng không khớp ô tìm (khớp theo tin cũ/SĐT).
+const pinnedSearchHitIds = new Set();
+const messageSearchReasonLabels = { phone: 'SĐT', message: 'Tin nhắn', name: 'Tên' };
+
+function ensureMessageSearchResultsBox() {
+  if (messageSearchResultsBox?.isConnected) return messageSearchResultsBox;
+  messageSearchResultsBox = document.createElement('section');
+  messageSearchResultsBox.className = 'message-search-results hidden';
+  messageSearchResultsBox.setAttribute('aria-label', 'Kết quả trong tin nhắn cũ và số điện thoại');
+  conversationList?.appendChild(messageSearchResultsBox);
+  return messageSearchResultsBox;
+}
+
+function hideMessageSearchResults() {
+  messageSearchHasResults = false;
+  messageSearchResultsBox?.classList.add('hidden');
+  messageSearchResultsBox?.replaceChildren();
+}
+
+/** Đoạn trích có tô đậm chữ khớp: chữ gán qua textContent, phần khớp bọc <mark>. */
+function buildMessageSearchSnippet(item) {
+  const snippet = document.createElement('span');
+  snippet.className = 'message-search-hit-snippet';
+  const text = String(item.snippet || '');
+  const [start, end] = Array.isArray(item.highlight) ? item.highlight.map(Number) : [-1, -1];
+  if (start >= 0 && end > start && end <= text.length) {
+    const mark = document.createElement('mark');
+    mark.textContent = text.slice(start, end);
+    snippet.append(text.slice(0, start), mark, text.slice(end));
+  } else snippet.textContent = text || 'Khớp theo tên khách';
+  return snippet;
+}
+
+function formatMessageSearchDate(at) {
+  const time = Number(at) || 0;
+  if (!time) return '';
+  return new Date(time).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Ho_Chi_Minh' });
+}
+
+function renderMessageSearchResults(items, { loading = false, error = '' } = {}) {
+  const box = ensureMessageSearchResultsBox();
+  const heading = document.createElement('p');
+  heading.className = 'message-search-results-title';
+  heading.textContent = 'Trong tin nhắn cũ / số điện thoại';
+  const children = [heading];
+  if (loading || error || !items.length) {
+    const note = document.createElement('p');
+    note.className = 'message-search-results-note';
+    note.textContent = loading ? 'Đang tìm…' : error ? `Chưa tìm được: ${error}` : 'Không thấy tin nhắn hay số điện thoại nào khớp.';
+    children.push(note);
+  }
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'message-search-hit';
+    button.dataset.conversationId = item.id;
+    const head = document.createElement('span');
+    head.className = 'message-search-hit-head';
+    const name = document.createElement('strong');
+    name.textContent = item.name || 'Khách Facebook';
+    const tag = document.createElement('em');
+    tag.className = 'message-search-hit-tag';
+    tag.textContent = messageSearchReasonLabels[item.reason] || '';
+    const time = document.createElement('time');
+    time.textContent = formatMessageSearchDate(item.matchedAt);
+    head.append(name, tag, time);
+    button.append(head, buildMessageSearchSnippet(item));
+    button.addEventListener('click', () => openMessageSearchHit(item));
+    children.push(button);
+  }
+  box.replaceChildren(...children);
+  box.classList.remove('hidden');
+  messageSearchHasResults = items.length > 0;
+  conversationEmpty?.classList.toggle('hidden', messageSearchHasResults || getConversationItems().some(item => !item.classList.contains('hidden')));
+}
+
+async function runMessageSearch(query) {
+  const requestId = ++messageSearchRequestId;
+  renderMessageSearchResults([], { loading: true });
+  try {
+    const data = await readApiResponse(await fetch(`/api/messaging/search?q=${encodeURIComponent(query)}&limit=50`));
+    if (requestId !== messageSearchRequestId) return;
+    renderMessageSearchResults(Array.isArray(data.items) ? data.items : []);
+  } catch (error) {
+    if (requestId !== messageSearchRequestId) return;
+    renderMessageSearchResults([], { error: error.message });
+  }
+}
+
+function scheduleMessageSearch() {
+  clearTimeout(messageSearchTimer);
+  pinnedSearchHitIds.clear();
+  const query = String(messageSearchInput?.value || '').trim();
+  if (query.length < messageSearchMinLength || !usingRemoteConversations) {
+    messageSearchRequestId += 1;
+    hideMessageSearchResults();
+    return;
+  }
+  messageSearchTimer = setTimeout(() => runMessageSearch(query), 300);
+}
+
+/** Cuộn tới và làm nổi tin khớp khi khung chat đã vẽ xong tin của hội thoại (chờ tối đa ~4 giây). */
+async function revealMessageSearchHit(item) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (getActiveConversation()?.dataset.conversationId !== item.id) return false;
+    const rows = [...(chatBody?.querySelectorAll('.message-row') || [])];
+    const byId = item.messageId ? rows.find(row => row.dataset.messageId === String(item.messageId)) : null;
+    const position = Number(item.position) || 0;
+    const row = byId || (position > 0 && rows.length >= position && remoteMessages.get(item.id)?.length ? rows[rows.length - position] : null);
+    if (row) {
+      clearConversationSearchHighlights();
+      row.classList.add('conversation-search-match', 'conversation-search-current');
+      // Lần tải panel khách đầu tiên sau khi mở hội thoại kéo khung chat xuống cuối: bỏ lượt đó, đứng ở tin khớp.
+      customerPanelScrollOnLoad = false;
+      row.scrollIntoView({ block: 'center' });
+      return true;
+    }
+    if (!item.messageId && !position) return false;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
+/** Mở một kết quả tìm (ô Tìm kiếm danh sách hay Ctrl K). */
+async function openMessageSearchHit(item) {
+  if (!item?.id) return;
+  showView('messages');
+  if (item.channelId && item.channelId !== currentMessageChannelId && messageChannels.some(channel => channel.id === item.channelId)) {
+    await switchMessageChannel(item.channelId);
+  }
+  const position = Number(item.position) || 0;
+  const wanted = Math.max(100, position + 20);
+  let element = findConversationElement(item.id);
+  const loaded = remoteMessages.get(item.id);
+  // Chưa có trong danh sách đã tải, hay tin khớp cũ hơn số tin đang giữ: tải hội thoại kèm đủ tin.
+  if (!element || (position > 0 && (!loaded || loaded.length < position))) {
+    try {
+      const state = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(item.id)}/messages?limit=${wanted}`));
+      if (!element && state.conversation) element = applyRemoteConversation(state.conversation);
+      if (element) remoteMessages.set(item.id, mergeFetchedMessages(state.items, []));
+    } catch (error) {
+      showToast(error.message, 'error');
+      return;
+    }
+  }
+  if (!element) {
+    showToast('Không mở được hội thoại này.', 'info');
+    return;
+  }
+  pinnedSearchHitIds.add(String(item.id));
+  selectConversation(element);
+  showConversationDetail(true);
+  element.scrollIntoView({ block: 'nearest' });
+  await revealMessageSearchHit(item);
+}
+
 function filterConversations() {
   sortConversationsByRecentActivity();
   const query = normalizeColumnName(messageSearchInput?.value || '');
   let visibleCount = 0;
   getConversationItems().forEach(conversation => {
-    const matchesSearch = !query || conversationSearchKey(conversation).includes(query);
+    const matchesSearch = !query || conversationSearchKey(conversation).includes(query) || pinnedSearchHitIds.has(conversation.dataset.conversationId);
     const matchesFilter = currentConversationFilter !== 'unread' || conversation.classList.contains('unread');
     const matchesChannel = conversation.dataset.channelId === currentMessageChannelId;
     const labels = (conversation.dataset.labels || '').split(/\s+/).filter(Boolean);
@@ -6158,7 +6323,7 @@ function filterConversations() {
     conversation.classList.toggle('hidden', !matches);
     if (matches) visibleCount += 1;
   });
-  conversationEmpty?.classList.toggle('hidden', visibleCount > 0);
+  conversationEmpty?.classList.toggle('hidden', visibleCount > 0 || messageSearchHasResults);
 }
 
 function getConversationName(conversation) {
@@ -11806,10 +11971,14 @@ document.addEventListener('click', event => {
   if (!event.target.closest('#conversation-menu') && !event.target.closest('.conversation-more')) closeConversationMenu();
 });
 
-messageSearchInput?.addEventListener('input', filterConversations);
+messageSearchInput?.addEventListener('input', () => {
+  scheduleMessageSearch();
+  filterConversations();
+});
 messageSearchInput?.addEventListener('keydown', event => {
   if (event.key !== 'Escape') return;
   messageSearchInput.value = '';
+  scheduleMessageSearch();
   filterConversations();
   messageSearchInput.blur();
 });

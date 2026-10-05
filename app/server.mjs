@@ -60,6 +60,7 @@ import { createBridgeClickMatcher, createLinkRoutedQrFlow, createQrGreeter, crea
 // Riêng cho luồng QR (vòng 13): ghi referral thẻ lên hội thoại khớp lượt bấm, ghi nốt kho sau lượt chào lúc tắt.
 import { attachReferral as attachQrReferral } from './meta-webhook.mjs';
 import { flushMessagingStore as flushMessagingStoreForQr } from './messaging-store.mjs';
+import { searchConversations } from './message-search.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
@@ -1439,6 +1440,14 @@ const chatbotDependencies = {
       phone: String(found.bill_phone_number || found.shipping_address?.phone_number || ''),
       items: (found.items || []).filter(item => !item.is_bonus_product).map(item => ({ name: String(item.variation_info?.name || '').trim(), sku: String(item.variation_info?.display_id || ''), quantity: Number(item.quantity) || 1 }))
     };
+  },
+  // 05/10: "gửi địa chỉ cũ" + SĐT — đơn Pancake POS theo SĐT (chatbot-engine → resolvePreviousAddress chờ tối đa 5 giây,
+  // lỗi mạng thì bỏ qua). Chỉ đơn có conversation_id đúng hội thoại mới được tự điền; đơn khác là "đơn ngoài" (C2).
+  findPosOrdersByPhone: async phone => {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length < 9 || !posConfigured(posConfig())) return [];
+    const data = await posRequest('/orders', { search: digits, page_size: 20 }, posConfig(), fetch);
+    return Array.isArray(data?.data) ? data.data : [];
   },
   sendReceipt: sendChatbotOrderReceipt,
   // Ghi chú nội bộ cho nhân viên khi bot không tự làm (C2: SĐT trùng đơn của hội thoại khác, cần đối chiếu):
@@ -3067,6 +3076,14 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/messaging/conversations') {
       const items = await listConversations(url.searchParams.get('channelId') || '');
       return sendJson(response, 200, { items });
+    }
+    // 05/10: tìm trên TOÀN BỘ hội thoại — tên, SĐT (tin cũ, đơn, giỏ, hồ sơ khách), nội dung tin (bỏ dấu). Cùng quyền với
+    // xem hội thoại: cổng đăng nhập chung chặn khách chưa đăng nhập (401); mọi tài khoản đăng nhập đều xem được hộp thư.
+    if (request.method === 'GET' && url.pathname === '/api/messaging/search') {
+      const query = String(url.searchParams.get('q') || '').trim();
+      if (!query) return sendJson(response, 200, { items: [], tookMs: 0 });
+      const result = await searchConversations(query, { limit: Number(url.searchParams.get('limit')) || undefined });
+      return sendJson(response, 200, result);
     }
     if (request.method === 'POST' && url.pathname === '/api/messaging/sync') {
       const payload = await readBody(request);

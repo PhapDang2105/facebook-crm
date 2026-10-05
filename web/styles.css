@@ -1629,6 +1629,18 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 
 .conversation-list { flex: 1; min-height: 0; padding: 3.375px 9px 13.5px; overflow-y: auto; overscroll-behavior: contain; }
 .conversation-empty { margin: 33.75px 13.5px; color: #65676b; font-size: 15.75px; text-align: center; }
+/* 05/10: nhóm "Trong tin nhắn cũ / số điện thoại" dưới danh sách hội thoại (GET /api/messaging/search). */
+.message-search-results { margin: 9px 0 0; padding-top: 9px; border-top: 1px solid #e4e6eb; }
+.message-search-results-title { margin: 0 11.25px 6.75px; color: #65676b; font-size: 13.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; }
+.message-search-results-note { margin: 6.75px 11.25px 11.25px; color: #65676b; font-size: 14.625px; }
+.message-search-hit { display: flex; flex-direction: column; gap: 3.375px; width: 100%; padding: 10.125px 11.25px; border: 0; border-radius: 9px; background: transparent; color: #050505; font: inherit; text-align: left; cursor: pointer; }
+.message-search-hit:hover, .message-search-hit:focus-visible { background: #f0f2f5; outline: none; }
+.message-search-hit-head { display: flex; align-items: baseline; gap: 6.75px; min-width: 0; }
+.message-search-hit-head strong { overflow: hidden; font-size: 15.75px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.message-search-hit-tag { flex: none; padding: 0 5.625px; border-radius: 4.5px; background: #e7f3ff; color: #0064d1; font-size: 12.375px; font-style: normal; font-weight: 600; }
+.message-search-hit-head time { flex: none; margin-left: auto; color: #65676b; font-size: 13.5px; }
+.message-search-hit-snippet { display: -webkit-box; overflow: hidden; color: #65676b; font-size: 14.625px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; word-break: break-word; }
+.message-search-hit-snippet mark { padding: 0 1px; border-radius: 3px; background: #ffe58f; color: #050505; font-weight: 600; }
 
 .conversation {
   position: relative;

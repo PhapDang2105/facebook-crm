@@ -21,12 +21,13 @@ import { aiKeyReentryError, assertUsableAiEndpoint, chatbotSettingsStore, mergeC
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
 import { processChatbotChanges, requestDirectModelReply, warmUpChatbotModels } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
-import { loadCampaignReport, normalizeRangeDays } from './campaigns.mjs';
+import { loadCampaignReport, loadCampaignReports, normalizeRangeDays } from './campaigns.mjs';
 import { loadDashboard, normalizeDashboardCustomRange, normalizeDashboardDays } from './dashboard.mjs';
 import { loadReport, normalizeReportSection, reportCsvFileName, reportSectionCsv } from './reports.mjs';
 import { larkReportConfig, normalizeLarkConversationReport, sendLarkConversationReport, startLarkReportScheduler } from './lark-report.mjs';
 import { startAdInsightsSync, syncAdInsights } from './meta-ads.mjs';
-import { configureCampaignAi, generateCampaignInsights, readCampaignInsights } from './campaign-ai.mjs';
+import { configureCampaignAi, decisionFollowUp, followUpWindows, generateCampaignInsights, readCampaignInsights, recordCampaignDecision } from './campaign-ai.mjs';
+import { addCompetitor, addManualAd, adLibraryView, generateMarketInsights, marketBrief, readAdLibrary, removeAd, removeCompetitor, syncCompetitors, updateAdLibrary } from './ad-library.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin, splitMessages } from './chatbot-templates.mjs';
 import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProduct, normalizeProductStore } from './products.mjs';
 import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
@@ -1469,6 +1470,31 @@ const actorForUsername = (request, username) => actorOf(request, { auth: { enabl
  * tests/security-routes.test.mjs kiểm trên mã nguồn.
  */
 const requireManager = createRequireManager(requestActor, sendJson);
+
+/** Gắn kết quả trước/sau cho các đề xuất đã đánh dấu "đã làm" (một lượt đọc dữ liệu cho mọi khoảng ngày). */
+async function withDecisionFollowUps(insights, now = Date.now()) {
+  const actions = Array.isArray(insights?.actions) ? insights.actions : [];
+  const done = actions
+    .map(action => ({ action, windows: action.decision?.status === 'done' ? followUpWindows(action.decision.at, now) : null }))
+    .filter(item => item.windows);
+  if (!done.length) return insights;
+  try {
+    const ready = done.filter(item => item.windows.ready);
+    const reports = await loadCampaignReports(ready.flatMap(item => [
+      { from: item.windows.before.from, to: item.windows.before.to },
+      { from: item.windows.after.from, to: item.windows.after.to }
+    ]), { now });
+    const followUps = new Map(done.map(item => {
+      const index = ready.indexOf(item);
+      const pair = index >= 0 ? { before: reports[index * 2], after: reports[index * 2 + 1] } : {};
+      return [item.action, decisionFollowUp(item.action, item.windows, pair)];
+    }));
+    return { ...insights, actions: actions.map(action => (followUps.has(action) ? { ...action, followUp: followUps.get(action) } : action)) };
+  } catch (error) {
+    console.warn(`So trước/sau đề xuất chiến dịch lỗi: ${error.message}`);
+    return insights;
+  }
+}
 /** Request HEAD đã đổi thành GET để đi chung route (xem đầu bộ xử lý): không ghi nhật ký, không ghi "đã xem". */
 const headRequests = new WeakSet();
 
@@ -2689,17 +2715,97 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, report && typeof report === 'object' ? { ...report, ads: friendlyAdsStatus(report.ads) } : report);
     }
     if (request.method === 'GET' && url.pathname === '/api/campaigns/insights') {
-      return sendJson(response, 200, friendlyCampaignInsights(await readCampaignInsights()));
+      return sendJson(response, 200, await withDecisionFollowUps(friendlyCampaignInsights(await readCampaignInsights())));
+    }
+    // Đề xuất chiến dịch: Quản trị làm trong Trình quản lý quảng cáo rồi đánh dấu "đã làm" / "bỏ qua" (CRM không tự sửa quảng cáo).
+    if (request.method === 'POST' && url.pathname === '/api/campaigns/insights/decision') {
+      if (!(await requireManager(request, response))) return;
+      const payload = await readBody(request, 8 * 1024);
+      const actor = await requestActor(request);
+      const status = String(payload.status || '');
+      const campaignId = String(payload.campaignId || '');
+      const kind = String(payload.kind || '');
+      let run;
+      try {
+        run = await recordCampaignDecision({ generatedAt: String(payload.generatedAt || ''), campaignId, kind, status, by: actor.name });
+      } catch (error) {
+        return sendJson(response, error.statusCode || 400, { error: error.message });
+      }
+      if (!run) return sendJson(response, 404, { error: 'Không tìm thấy đề xuất này (có thể đã có lượt phân tích mới).' });
+      const action = run.actions.find(item => String(item.campaignId) === campaignId && item.kind === kind);
+      audit(request, 'campaign.decision', {
+        target: { type: 'campaign', id: campaignId, name: action?.campaignName || '' },
+        summary: `${status === 'done' ? 'Đã làm' : status === 'skipped' ? 'Bỏ qua' : 'Bỏ đánh dấu'} đề xuất "${kind}" cho ${action?.campaignName || campaignId}.`
+      }, actor);
+      return sendJson(response, 200, await withDecisionFollowUps(friendlyCampaignInsights(run)));
+    }
+    // Theo dõi đối thủ (ad-library.mjs): Thư viện quảng cáo + nội dung có thương hiệu của Meta, mẫu dán tay, AI gợi ý.
+    // Xem, thêm đối thủ, dán mẫu: mọi tài khoản; xoá, lấy dữ liệu từ Meta, AI: chỉ Quản trị.
+    if (request.method === 'GET' && url.pathname === '/api/competitors') {
+      return sendJson(response, 200, adLibraryView(await readAdLibrary()));
+    }
+    if (request.method === 'POST' && (url.pathname === '/api/competitors' || url.pathname === '/api/competitors/ads')) {
+      const payload = await readBody(request, 32 * 1024);
+      const actor = await requestActor(request);
+      const isAd = url.pathname.endsWith('/ads');
+      let item;
+      try {
+        item = await updateAdLibrary(store => (isAd ? addManualAd(store, payload, { by: actor.name }) : addCompetitor(store, payload, { by: actor.name })));
+      } catch (error) {
+        return sendJson(response, error.statusCode || 500, { error: error.message });
+      }
+      audit(request, isAd ? 'competitor.ad_add' : 'competitor.add', {
+        target: { type: 'competitor', id: isAd ? item.competitorId : item.id, name: isAd ? item.pageName : item.name },
+        summary: isAd ? `Dán mẫu quảng cáo của ${item.pageName} (${item.texts[0].length} ký tự).` : `Thêm đối thủ ${item.name}.`
+      }, actor);
+      return sendJson(response, 200, adLibraryView(await readAdLibrary()));
+    }
+    const competitorDelete = request.method === 'DELETE' && url.pathname.match(/^\/api\/competitors\/(ads\/)?([\w:%-]{1,60})$/);
+    if (competitorDelete) {
+      if (!(await requireManager(request, response))) return;
+      const [, isAd, rawId] = competitorDelete;
+      let id = rawId;
+      try { id = decodeURIComponent(rawId); } catch { /* giữ nguyên */ }
+      const removed = await updateAdLibrary(store => (isAd ? removeAd(store, id) : removeCompetitor(store, id)));
+      if (!removed) return sendJson(response, 404, { error: isAd ? 'Không tìm thấy mẫu quảng cáo.' : 'Không tìm thấy đối thủ.' });
+      audit(request, isAd ? 'competitor.ad_remove' : 'competitor.remove', {
+        target: { type: 'competitor', id: isAd ? removed.competitorId : removed.id, name: isAd ? removed.pageName : removed.name },
+        summary: isAd ? `Xoá mẫu quảng cáo của ${removed.pageName}.` : `Xoá đối thủ ${removed.name} (kèm dữ liệu đã lấy).`
+      });
+      return sendJson(response, 200, adLibraryView(await readAdLibrary()));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/competitors/sync') {
+      if (!(await requireManager(request, response))) return;
+      let summary;
+      try {
+        summary = await syncCompetitors();
+      } catch (error) {
+        return sendJson(response, error.statusCode || 502, { error: error.message });
+      }
+      if (summary.ads?.error) console.warn(`Theo dõi đối thủ — Thư viện quảng cáo: ${summary.ads.error}`);
+      if (summary.branded?.error) console.warn(`Theo dõi đối thủ — nội dung có thương hiệu: ${summary.branded.error}`);
+      audit(request, 'competitor.sync', { summary: `Lấy dữ liệu đối thủ: ${summary.ads?.found ?? 0} quảng cáo, ${summary.branded?.found ?? 0} bài hợp tác KOL.` });
+      return sendJson(response, 200, adLibraryView(await readAdLibrary()));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/competitors/insights') {
+      if (!(await requireManager(request, response))) return;
+      const payload = await readBody(request);
+      const days = normalizeRangeDays(payload.days);
+      const insights = await generateMarketInsights(await loadCampaignReport({ days }));
+      if (insights?.error) console.warn(`AI gợi ý từ đối thủ: mô hình lỗi, dùng gợi ý theo luật — ${insights.error}`);
+      audit(request, 'competitor.insights', { summary: `Nhờ AI gợi ý từ dữ liệu đối thủ (chiến dịch ${days} ngày).` });
+      return sendJson(response, 200, adLibraryView(await readAdLibrary()));
     }
     if (request.method === 'POST' && url.pathname === '/api/campaigns/insights') {
       if (!(await requireManager(request, response))) return;
       const payload = await readBody(request);
       const days = normalizeRangeDays(payload.days);
       const report = await loadCampaignReport({ days });
-      const insights = await generateCampaignInsights(report, { days });
+      const market = marketBrief(await readAdLibrary().catch(() => ({})));
+      const insights = await generateCampaignInsights(report, { days, market });
       if (insights?.error) console.warn(`Cố vấn AI chiến dịch: mô hình lỗi, dùng gợi ý theo luật — ${insights.error}`);
       audit(request, 'campaign.insights', { summary: `Nhờ AI phân tích chiến dịch ${days} ngày.` });
-      return sendJson(response, 200, friendlyCampaignInsights(insights));
+      return sendJson(response, 200, await withDecisionFollowUps(friendlyCampaignInsights(insights)));
     }
     // Tải danh sách khách ra tệp (toàn bộ tên/SĐT/địa chỉ): chỉ chủ shop / Quản trị (quyết định 01/10).
     // Xem danh sách trên màn Khách hàng (/api/customers) vẫn mở cho nhân viên.

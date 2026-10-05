@@ -234,7 +234,7 @@ test('[6][9][15] nút Quản trị ẩn bằng CSS cho nhân viên; bố cục h
 });
 
 test('[nối tiếp 1] nhân viên: ẩn/khoá Xuất danh sách khách, Tệp remarketing, Đồng bộ quảng cáo, AI phân tích', () => {
-  assert.match(css, /body\.role-staff :is\(\.customers-export, #campaigns-sync, #campaigns-ai-run\) \{ display: none !important; \}/);
+  assert.match(css, /body\.role-staff :is\(\.customers-export, #campaigns-sync, #campaigns-ai-run, #competitors-sync, #competitors-ai-run, \.campaigns-ai-decide button, \[data-competitor-remove\], \[data-competitor-ad-remove\]\) \{ display: none !important; \}/);
   assert.match(fn('syncCampaigns'), /if \(campaignsSyncing \|\| isStaffReadOnly\(\)\) return;/);
   assert.match(fn('analyzeCampaigns'), /if \(campaignsAnalyzing \|\| isStaffReadOnly\(\)\) return;/);
   assert.match(section(web, "customersExportButton?.addEventListener('click'", 300), /if \(isStaffReadOnly\(\)\) return;/);

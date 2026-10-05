@@ -196,6 +196,21 @@ export const metaAdsConfig = {
   syncDisabled: Boolean(process.env.META_ADS_SYNC_DISABLED)
 };
 
+// Theo dõi đối thủ: API Thư viện quảng cáo (GET /ads_archive, chỉ đọc). Meta chỉ cho token NGƯỜI DÙNG
+// đã xác minh danh tính ở facebook.com/ID (thiếu → lỗi 10/2332002); để trống thì thử token quảng cáo.
+// Với quảng cáo bán hàng, Meta chỉ trả quảng cáo có hiển thị ở EU/Anh — quảng cáo chỉ chạy ở VN không có.
+export function normalizeCountryCodes(value, fallback = ['VN']) {
+  const codes = [...new Set(String(value || '').split(',').map(item => item.trim().toUpperCase()).filter(item => /^[A-Z]{2}$/.test(item)))];
+  return codes.length ? codes : fallback;
+}
+
+export const adLibraryConfig = {
+  accessToken: String(process.env.META_AD_LIBRARY_TOKEN || process.env.META_ADS_ACCESS_TOKEN || '').trim(),
+  graphVersion: process.env.META_GRAPH_VERSION || 'v26.0',
+  countries: normalizeCountryCodes(process.env.AD_LIBRARY_COUNTRIES),
+  path: process.env.AD_LIBRARY_PATH || path.join(projectRoot, 'data', 'processed', 'ad-library.json')
+};
+
 export function missingMetaConfiguration() {
   return [
     !metaConfig.appId && 'META_APP_ID',

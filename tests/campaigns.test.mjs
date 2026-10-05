@@ -156,7 +156,7 @@ test('máy chủ nối đủ bốn route Chiến dịch và vòng đồng bộ q
   assert.match(server, /request\.method === 'GET' && url\.pathname === '\/api\/campaigns'\)[\s\S]{0,300}loadCampaignReport\(\{\s*days: normalizeRangeDays\(url\.searchParams\.get\('days'\)\),\s*from: url\.searchParams\.get\('from'\) \|\| undefined,\s*to: url\.searchParams\.get\('to'\) \|\| undefined\s*\}\)/);
   assert.match(server, /request\.method === 'POST' && url\.pathname === '\/api\/campaigns\/sync'\)[\s\S]{0,400}syncAdInsights\(\{ days \}\)[\s\S]{0,300}loadCampaignReport\(\{ days \}\)/);
   assert.match(server, /request\.method === 'GET' && url\.pathname === '\/api\/campaigns\/insights'\)[\s\S]{0,200}readCampaignInsights\(\)/);
-  assert.match(server, /request\.method === 'POST' && url\.pathname === '\/api\/campaigns\/insights'\)[\s\S]{0,400}generateCampaignInsights\(report, \{ days \}\)/);
+  assert.match(server, /request\.method === 'POST' && url\.pathname === '\/api\/campaigns\/insights'\)[\s\S]{0,400}marketBrief\(await readAdLibrary\(\)[\s\S]{0,80}generateCampaignInsights\(report, \{ days, market \}\)/);
   assert.match(server, /import \{[^}]*generateCampaignInsights[^}]*readCampaignInsights[^}]*\} from '\.\/campaign-ai\.mjs'/);
   assert.match(server, /import \{[^}]*startAdInsightsSync[^}]*syncAdInsights[^}]*\} from '\.\/meta-ads\.mjs'/);
   assert.match(server, /server\.listen\([\s\S]*startAdInsightsSync\(\)/);

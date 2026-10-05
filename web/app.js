@@ -1157,7 +1157,10 @@ function showView(name) {
     if (!sharedProducts.length) loadProducts().then(() => renderOrderData()).catch(() => {});
   }
   if (name === 'customers') loadCustomers();
-  if (name === 'campaigns') loadCampaigns();
+  if (name === 'campaigns') {
+    loadCampaigns();
+    loadCompetitors();
+  }
   if (name === 'dashboard') loadDashboard();
   if (name === 'reports') loadReports();
   // Kênh Pancake POS chỉ nằm ở mục Kênh: mục khác đang mở thì không hỏi (showSettingsSection
@@ -2002,11 +2005,11 @@ function renderCampaignsInsights() {
   const groups = campaignInsightKinds.map(({ kind, label }) => {
     const items = actions.filter(action => action.kind === kind);
     if (!items.length) return '';
-    return `<section class="campaigns-ai-group campaigns-ai-group--${kind}"><h3>${label}<b>${items.length}</b></h3><ul>${items.map(action => `<li><button type="button" data-campaign-target="${escapeHtml(action.campaignId || '')}">
+    return `<section class="campaigns-ai-group campaigns-ai-group--${kind}"><h3>${label}<b>${items.length}</b></h3><ul>${items.map(action => `<li class="campaigns-ai-item"><button type="button" data-campaign-target="${escapeHtml(action.campaignId || '')}">
       <strong>${escapeHtml(action.campaignName || 'Chiến dịch')}</strong>
       <span>${escapeHtml(action.reason || '')}</span>
       ${action.confidence ? `<small>Độ tin cậy: ${escapeHtml(action.confidence)}</small>` : ''}
-    </button></li>`).join('')}</ul></section>`;
+    </button>${campaignDecisionHtml(action)}</li>`).join('')}</ul></section>`;
   }).join('');
   campaignsAiBody.innerHTML = `${insights.summary ? `<p class="campaigns-ai-summary">${escapeHtml(insights.summary)}</p>` : ''}${groups}`;
 }
@@ -2138,8 +2141,320 @@ campaignsTable?.addEventListener('click', event => {
   renderCampaignsTable();
 });
 campaignsAiBody?.addEventListener('click', event => {
+  const decision = event.target.closest('[data-decision]');
+  if (decision) {
+    decideCampaignAction(decision);
+    return;
+  }
   const target = event.target.closest('[data-campaign-target]');
   if (target) highlightCampaignRow(target.dataset.campaignTarget);
+});
+
+// ---------------------------------------------------------------------------
+// Đề xuất chiến dịch: CRM chỉ khuyên (quyết định 05/10). Mỗi đề xuất có liên kết mở đúng chiến dịch trong
+// Trình quản lý quảng cáo; Quản trị làm xong bấm "Đã làm" để CRM so số liệu 7 ngày trước với các ngày sau.
+function adsManagerUrl(campaignId) {
+  const id = String(campaignId || '');
+  if (!/^\d{5,25}$/.test(id)) return '';
+  const campaign = (campaignsReport?.campaigns || []).find(item => String(item.id) === id);
+  const account = String(campaign?.accountId || '').replace(/^act_/, '');
+  const url = new URL('https://adsmanager.facebook.com/adsmanager/manage/campaigns');
+  if (/^\d+$/.test(account)) url.searchParams.set('act', account);
+  url.searchParams.set('selected_campaign_ids', id);
+  return url.toString();
+}
+
+function campaignVnDate(value) {
+  const at = Number(value);
+  return at ? new Date(at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' }) : '';
+}
+
+function campaignPeriodText(period) {
+  if (!period) return '';
+  const cpa = period.cpa === null || period.cpa === undefined ? '—' : shortCustomerMoney(period.cpa);
+  return `chi ${shortCustomerMoney(period.spendPerDay)}/ngày · ${campaignNumber(period.orders)} đơn · CPA ${cpa}`;
+}
+
+function campaignFollowUpHtml(followUp) {
+  if (!followUp) return '';
+  if (!followUp.ready) return `<p class="campaigns-ai-follow">Đợi thêm ${escapeHtml(String(Math.max(1, followUp.daysLeft || 1)))} ngày để so kết quả trước/sau.</p>`;
+  return `<p class="campaigns-ai-follow"><strong>${escapeHtml(followUp.verdict || '')}</strong><br>
+    Trước (${escapeHtml(String(followUp.before?.days || 7))} ngày): ${escapeHtml(campaignPeriodText(followUp.before))}<br>
+    Sau (${escapeHtml(String(followUp.after?.days || 0))} ngày): ${escapeHtml(campaignPeriodText(followUp.after))}</p>`;
+}
+
+function campaignDecisionHtml(action) {
+  if (!campaignsInsights?.generatedAt || !action?.campaignId) return '';
+  const link = adsManagerUrl(action.campaignId);
+  const status = action.decision?.status || '';
+  const data = `data-campaign-id="${escapeHtml(action.campaignId)}" data-kind="${escapeHtml(action.kind)}"`;
+  const buttons = status
+    ? `<span class="${status === 'done' ? 'is-decided' : 'is-decided is-skipped'}">${status === 'done' ? 'Đã làm' : 'Bỏ qua'} ${escapeHtml(campaignVnDate(action.decision.at))}${action.decision.by ? ` · ${escapeHtml(action.decision.by)}` : ''}</span><button type="button" data-decision="" ${data}>Bỏ đánh dấu</button>`
+    : `<button type="button" data-decision="done" ${data}>Đã làm</button><button type="button" data-decision="skipped" ${data}>Bỏ qua</button>`;
+  return `<div class="campaigns-ai-decide">${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Mở trong Trình quản lý QC ↗</a>` : ''}${buttons}</div>${campaignFollowUpHtml(action.followUp)}`;
+}
+
+async function decideCampaignAction(button) {
+  if (isStaffReadOnly() || !campaignsInsights?.generatedAt || button.disabled) return;
+  button.disabled = true;
+  try {
+    const insights = await readApiResponse(await fetch('/api/campaigns/insights/decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ generatedAt: campaignsInsights.generatedAt, campaignId: button.dataset.campaignId, kind: button.dataset.kind, status: button.dataset.decision })
+    }));
+    if (insights && typeof insights === 'object') campaignsInsights = insights;
+    renderCampaignsInsights();
+  } catch (error) {
+    button.disabled = false;
+    showToast(error.message || 'Chưa lưu được.', 'error');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Đối thủ: Thư viện quảng cáo + nội dung hợp tác KOL (Meta) + mẫu dán tay, AI gợi ý áp dụng (ad-library.mjs).
+const competitorsList = document.querySelector('#competitors-list');
+const competitorsFeed = document.querySelector('#competitors-feed');
+const competitorsNotice = document.querySelector('#competitors-notice');
+const competitorsSynced = document.querySelector('#competitors-synced');
+const competitorsSyncButton = document.querySelector('#competitors-sync');
+const competitorsAiButton = document.querySelector('#competitors-ai-run');
+const competitorsAiBody = document.querySelector('#competitors-ai-body');
+const competitorsAiMeta = document.querySelector('#competitors-ai-meta');
+const competitorForm = document.querySelector('#competitor-form');
+const competitorAdForm = document.querySelector('#competitor-ad-form');
+const competitorTabs = document.querySelector('.competitors-tabs');
+
+let competitorsData = null;
+let competitorsTab = 'ads';
+let competitorsRequestId = 0;
+let competitorsBusy = false;
+
+const competitorIdeaKinds = [
+  { kind: 'offer', label: 'Ưu đãi nên thử' },
+  { kind: 'creative', label: 'Nội dung / góc quảng cáo' },
+  { kind: 'audience', label: 'Tệp khách / KOL' },
+  { kind: 'test', label: 'Bài thử nhỏ' },
+  { kind: 'research', label: 'Cần tìm thêm' }
+];
+
+async function loadCompetitors() {
+  if (!competitorsList) return;
+  const requestId = ++competitorsRequestId;
+  try {
+    const data = await readApiResponse(await fetch('/api/competitors', { credentials: 'same-origin' }));
+    if (requestId === competitorsRequestId) renderCompetitors(data);
+  } catch (error) {
+    if (requestId === competitorsRequestId) renderEmptyState(competitorsList, error.message || 'Chưa tải được danh sách đối thủ.');
+  }
+}
+
+function renderCompetitors(data) {
+  competitorsData = data && typeof data === 'object' ? data : {};
+  renderCompetitorsNotice();
+  renderCompetitorsList();
+  renderCompetitorsFeed();
+  renderCompetitorsIdeas();
+  const select = competitorAdForm?.elements.competitorId;
+  if (select) {
+    const current = select.value;
+    select.innerHTML = (competitorsData.competitors || []).map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+    if (current) select.value = current;
+  }
+  if (competitorsSynced) {
+    const ago = campaignsAgo(competitorsData.lastSync?.at);
+    competitorsSynced.textContent = ago ? `Lấy ${ago}` : '';
+  }
+}
+
+function renderCompetitorsNotice() {
+  if (!competitorsNotice) return;
+  const data = competitorsData || {};
+  const lines = [];
+  if (!data.configured) lines.push('<strong>Chưa có token Meta để lấy dữ liệu đối thủ</strong><span>Đặt META_AD_LIBRARY_TOKEN (token người dùng) trên máy chủ. Vẫn có thể mở Thư viện quảng cáo và dán mẫu tay.</span>');
+  const ads = data.lastSync?.ads;
+  const branded = data.lastSync?.branded;
+  if (ads?.error) lines.push(`<strong>Thư viện quảng cáo</strong><span>${escapeHtml(ads.error)}</span>`);
+  if (branded?.error) lines.push(`<strong>KOL hợp tác</strong><span>${escapeHtml(branded.error)}</span>`);
+  for (const warning of branded?.warnings || []) lines.push(`<span>${escapeHtml(warning)}</span>`);
+  if (ads && !ads.error && !ads.found && (data.competitors || []).length) {
+    lines.push('<span>Meta không trả quảng cáo nào: API chỉ có quảng cáo bán hàng hiển thị ở EU/Anh. Bấm "Mở Thư viện" ở từng đối thủ để xem quảng cáo đang chạy ở Việt Nam, rồi dán mẫu.</span>');
+  }
+  competitorsNotice.classList.toggle('hidden', !lines.length);
+  competitorsNotice.innerHTML = lines.join('');
+}
+
+function competitorSourceText(item) {
+  return [
+    item.pageUrl ? item.pageUrl.replace(/^https:\/\/www\./, '') : item.pageId ? `Page ID ${item.pageId}` : '',
+    item.igUsername ? `IG @${item.igUsername}` : '',
+    item.keywords?.length ? `Từ khoá: ${item.keywords.join(', ')}` : ''
+  ].filter(Boolean).join(' · ');
+}
+
+function renderCompetitorsList() {
+  if (!competitorsList) return;
+  const items = competitorsData?.competitors || [];
+  if (!items.length) {
+    renderEmptyState(competitorsList, 'Chưa có đối thủ. Thêm Page / Instagram / từ khoá của đối thủ ở ô bên dưới.');
+    return;
+  }
+  competitorsList.classList.remove('is-empty');
+  const signals = new Map((competitorsData.signals?.perCompetitor || []).map(row => [row.id, row]));
+  competitorsList.innerHTML = `<table><thead><tr><th>Đối thủ</th><th class="is-num">Quảng cáo</th><th class="is-num">Chạy lâu nhất</th><th class="is-num">Bài KOL 90 ngày</th><th></th></tr></thead><tbody>${items.map(item => {
+    const row = signals.get(item.id) || {};
+    return `<tr>
+      <td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(competitorSourceText(item))}</small></td>
+      <td class="is-num">${escapeHtml(campaignNumber(item.ads))}</td>
+      <td class="is-num">${row.longestDays ? `${escapeHtml(String(row.longestDays))} ngày` : '—'}</td>
+      <td class="is-num">${escapeHtml(campaignNumber(row.brandedLast90 || 0))}</td>
+      <td><div class="competitors-actions"><a href="${escapeHtml(item.webUrl)}" target="_blank" rel="noopener noreferrer">Mở Thư viện ↗</a><button type="button" data-competitor-remove="${escapeHtml(item.id)}">Xoá</button></div></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+function competitorNameOf(id) {
+  return (competitorsData?.competitors || []).find(item => item.id === id)?.name || '';
+}
+
+function renderCompetitorsFeed() {
+  if (!competitorsFeed) return;
+  competitorTabs?.querySelectorAll('[data-competitors-tab]').forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.competitorsTab === competitorsTab)));
+  if (competitorsTab === 'branded') {
+    const posts = competitorsData?.branded || [];
+    if (!posts.length) {
+      renderEmptyState(competitorsFeed, 'Chưa có bài hợp tác KOL. Thêm Page/Instagram của đối thủ rồi bấm Lấy dữ liệu.');
+      return;
+    }
+    competitorsFeed.classList.remove('is-empty');
+    competitorsFeed.innerHTML = posts.map(post => {
+      const people = post.role === 'creator' ? (post.partners || []) : [post.creator].filter(Boolean);
+      const peopleHtml = people.map(person => (person.url
+        ? `<a href="${escapeHtml(person.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(person.name)}</a>`
+        : escapeHtml(person.name))).join(', ');
+      return `<article class="competitor-ad">
+        <header><strong>${escapeHtml(competitorNameOf(post.competitorId))}</strong><span class="campaign-chip">${escapeHtml(post.typeLabel || post.type || '')}</span><span>${escapeHtml(post.date || '')}</span></header>
+        <p>${post.role === 'creator' ? 'Đăng bài hợp tác cho' : 'Thuê creator'}: ${peopleHtml || '—'}</p>
+        <footer>${post.url ? `<a href="${escapeHtml(post.url)}" target="_blank" rel="noopener noreferrer">Xem bài ↗</a>` : ''}</footer>
+      </article>`;
+    }).join('');
+    return;
+  }
+  const ads = competitorsData?.ads || [];
+  if (!ads.length) {
+    renderEmptyState(competitorsFeed, 'Chưa có quảng cáo đối thủ. Bấm "Mở Thư viện", chép quảng cáo chạy lâu nhất vào ô Dán mẫu quảng cáo.');
+    return;
+  }
+  competitorsFeed.classList.remove('is-empty');
+  competitorsFeed.innerHTML = ads.map(ad => {
+    const body = [...(ad.texts || []), ...(ad.titles || [])].join('\n');
+    const long = Number(ad.days) >= 14;
+    return `<article class="competitor-ad">
+      <header><strong>${escapeHtml(competitorNameOf(ad.competitorId) || ad.pageName || '')}</strong>${ad.days ? `<span class="campaign-chip${long ? ' is-long' : ''}">${escapeHtml(String(ad.days))} ngày${long ? ' · chạy lâu' : ''}</span>` : ''}<span>${ad.source === 'manual' ? `Dán tay${ad.addedBy ? ` · ${escapeHtml(ad.addedBy)}` : ''}` : 'Meta API'}</span>${ad.active === false ? '<span>Đã dừng</span>' : ''}</header>
+      <p>${escapeHtml(body)}</p>
+      <footer>${(ad.offers || []).map(offer => `<span class="campaign-chip">${escapeHtml(offer)}</span>`).join('')}${ad.webUrl ? `<a href="${escapeHtml(ad.webUrl)}" target="_blank" rel="noopener noreferrer">Xem trong Thư viện ↗</a>` : ''}<button type="button" data-competitor-ad-remove="${escapeHtml(ad.key)}">Xoá</button></footer>
+    </article>`;
+  }).join('');
+}
+
+function renderCompetitorsIdeas() {
+  if (!competitorsAiBody) return;
+  const insights = competitorsData?.insights;
+  if (competitorsAiMeta) competitorsAiMeta.textContent = insights ? [campaignsAgo(insights.generatedAt), insights.model].filter(Boolean).join(' · ') : '';
+  const ideas = Array.isArray(insights?.ideas) ? insights.ideas : [];
+  if (!insights || (!insights.summary && !ideas.length)) {
+    renderEmptyState(competitorsAiBody, 'Chưa có gợi ý. Thêm dữ liệu đối thủ rồi bấm AI gợi ý.');
+    return;
+  }
+  competitorsAiBody.classList.remove('is-empty');
+  const groups = competitorIdeaKinds.map(({ kind, label }) => {
+    const items = ideas.filter(idea => idea.kind === kind);
+    if (!items.length) return '';
+    return `<section class="campaigns-ai-group campaigns-ai-group--${kind === 'offer' || kind === 'test' ? 'scale' : kind === 'research' ? 'watch' : 'creative'}"><h3>${label}<b>${items.length}</b></h3><ul>${items.map(idea => `<li><button type="button" data-campaign-target="${escapeHtml(idea.campaignId || '')}">
+      <strong>${escapeHtml(idea.title || '')}</strong>
+      <span>${escapeHtml(idea.detail || '')}</span>
+      ${idea.campaignName || (idea.competitors || []).length ? `<small>${[idea.campaignName ? `Áp vào: ${escapeHtml(idea.campaignName)}` : '', (idea.competitors || []).length ? `Dựa trên: ${escapeHtml(idea.competitors.join(', '))}` : ''].filter(Boolean).join(' · ')}</small>` : ''}
+    </button></li>`).join('')}</ul></section>`;
+  }).join('');
+  competitorsAiBody.innerHTML = `${insights.summary ? `<p class="campaigns-ai-summary">${escapeHtml(insights.summary)}</p>` : ''}${groups}`;
+}
+
+async function competitorsRequest(url, options = {}) {
+  return readApiResponse(await fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+    headers: options.body ? { 'Content-Type': 'application/json' } : undefined
+  }));
+}
+
+async function submitCompetitorForm(form, url, successMessage) {
+  if (!form || competitorsBusy) return;
+  const values = Object.fromEntries(new FormData(form).entries());
+  const button = form.querySelector('button[type="submit"]');
+  if (button) button.disabled = true;
+  try {
+    renderCompetitors(await competitorsRequest(url, { method: 'POST', body: JSON.stringify(values) }));
+    const keep = form.elements.competitorId?.value;
+    form.reset();
+    if (keep && form.elements.competitorId) form.elements.competitorId.value = keep;
+    showToast(successMessage, 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được.', 'error', 6000);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function runCompetitorsAction(button, url, busyLabel, idleLabel, body = null) {
+  if (competitorsBusy || isStaffReadOnly()) return;
+  competitorsBusy = true;
+  setCampaignsBusy(button, true, busyLabel, idleLabel);
+  try {
+    renderCompetitors(await competitorsRequest(url, { method: 'POST', body: JSON.stringify(body || {}) }));
+    const sync = competitorsData?.lastSync;
+    if (url.endsWith('/sync')) showToast(`Đã lấy ${sync?.ads?.found ?? 0} quảng cáo, ${sync?.branded?.found ?? 0} bài KOL.`, sync?.ads?.error || sync?.branded?.error ? 'info' : 'success', 5000);
+  } catch (error) {
+    showToast(url.endsWith('/insights') ? friendlyAiError(error, 'AI chưa gợi ý được.') : (error.message || 'Chưa lấy được dữ liệu đối thủ.'), 'error', 6000);
+  } finally {
+    competitorsBusy = false;
+    setCampaignsBusy(button, false, '', idleLabel);
+  }
+}
+
+competitorForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  submitCompetitorForm(competitorForm, '/api/competitors', 'Đã thêm đối thủ.');
+});
+competitorAdForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  submitCompetitorForm(competitorAdForm, '/api/competitors/ads', 'Đã lưu mẫu quảng cáo.');
+});
+competitorsSyncButton?.addEventListener('click', () => runCompetitorsAction(competitorsSyncButton, '/api/competitors/sync', 'Đang lấy…', 'Lấy dữ liệu'));
+competitorsAiButton?.addEventListener('click', () => runCompetitorsAction(competitorsAiButton, '/api/competitors/insights', 'Đang phân tích…', 'AI gợi ý', { days: campaignsDays() }));
+competitorTabs?.addEventListener('click', event => {
+  const tab = event.target.closest('[data-competitors-tab]');
+  if (!tab) return;
+  competitorsTab = tab.dataset.competitorsTab;
+  renderCompetitorsFeed();
+});
+competitorsAiBody?.addEventListener('click', event => {
+  const target = event.target.closest('[data-campaign-target]');
+  if (target?.dataset.campaignTarget) highlightCampaignRow(target.dataset.campaignTarget);
+});
+document.querySelector('.competitors-card')?.addEventListener('click', async event => {
+  const removeCompetitor = event.target.closest('[data-competitor-remove]');
+  const removeAd = event.target.closest('[data-competitor-ad-remove]');
+  if (!removeCompetitor && !removeAd) return;
+  const url = removeCompetitor
+    ? `/api/competitors/${encodeURIComponent(removeCompetitor.dataset.competitorRemove)}`
+    : `/api/competitors/ads/${encodeURIComponent(removeAd.dataset.competitorAdRemove)}`;
+  if (!window.confirm(removeCompetitor ? 'Xoá đối thủ này cùng mọi quảng cáo / bài KOL đã lấy?' : 'Xoá mẫu quảng cáo này?')) return;
+  try {
+    renderCompetitors(await competitorsRequest(url, { method: 'DELETE' }));
+  } catch (error) {
+    showToast(error.message || 'Chưa xoá được.', 'error');
+  }
 });
 
 // ---------------------------------------------------------------------------

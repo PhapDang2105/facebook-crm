@@ -13,7 +13,7 @@ const section = (source, start, length = 4000) => {
 
 test('showView mở màn chiến dịch thì nạp số liệu; Tổng quan không còn gọi thẻ chiến dịch riêng', () => {
   const view = section(web, 'function showView(name)', 1200);
-  assert.match(view, /if \(name === 'campaigns'\) loadCampaigns\(\);/);
+  assert.match(view, /if \(name === 'campaigns'\) \{\s*loadCampaigns\(\);\s*loadCompetitors\(\);/);
   assert.doesNotMatch(web, /loadDashboardCampaignCards/, 'Tổng quan đọc /api/dashboard, không gọi /api/campaigns riêng');
 });
 

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { tempDir } from './helpers/temp-dir.mjs';
 import {
-  accountGapRows, adsGraphError, applyAdsetBudgets, checkAccountInfo, planBackgroundSync, readAdStore, runBackgroundAdSync,
+  accountGapRows, adsGraphError, applyAdsetBudgets, checkAccountInfo, isVietnamClockTimezone, planBackgroundSync, readAdStore, runBackgroundAdSync,
   syncAdInsights, syncWindows, usagePercent
 } from '../app/meta-ads.mjs';
 import { buildCampaignReport } from '../app/campaigns.mjs';
@@ -167,6 +167,12 @@ test('tài khoản không phải VND / giờ Việt Nam: không kéo (số sai);
   assert.throws(() => checkAccountInfo({ currency: 'USD', timezone_name: 'Asia/Ho_Chi_Minh' }, 'act_9'), /dùng tiền USD/);
   assert.throws(() => checkAccountInfo({ currency: 'VND', timezone_name: 'America/Los_Angeles' }, 'act_9'), /múi giờ America\/Los_Angeles/);
   assert.match(checkAccountInfo({ currency: 'VND', timezone_name: 'Asia/Saigon', account_status: 3, name: 'GN' }, 'act_9').warning, /chưa thanh toán/);
+  // Tài khoản thật của shop: Asia/Bangkok = UTC+7 quanh năm như giờ Việt Nam → nhận (05/10/2026 từng bị chặn nhầm).
+  assert.equal(checkAccountInfo({ currency: 'VND', timezone_name: 'Asia/Bangkok', account_status: 1 }, 'act_542455181085610').warning, undefined);
+  assert.equal(isVietnamClockTimezone('Asia/Jakarta'), true);
+  assert.equal(isVietnamClockTimezone('Asia/Singapore'), false, 'UTC+8');
+  assert.equal(isVietnamClockTimezone('Europe/Berlin'), false);
+  assert.equal(isVietnamClockTimezone('Khong/Co'), false, 'múi giờ lạ: không coi là khớp');
   await assert.rejects(syncAdInsights({ days: 7, now, config: config(), fetchImpl: fakeMeta({ currency: 'USD' }).fetchImpl }), /dùng tiền USD/);
   assert.match(friendlyAdsError('Tài khoản quảng cáo act_9 dùng tiền USD; CRM chỉ tính được tài khoản VND. Bỏ tài khoản này khỏi META_AD_ACCOUNT_IDS.'), /^Tài khoản quảng cáo act_9 dùng tiền USD — CRM chỉ tính/);
   assert.doesNotMatch(friendlyAdsError('Tài khoản quảng cáo act_9 dùng tiền USD; Bỏ khỏi META_AD_ACCOUNT_IDS.'), /META_/);

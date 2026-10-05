@@ -31,7 +31,8 @@ const ACCEPT = /\b(ok|oke|okie|oki|okay|dong y|lay|thu|dat|mua|chot|len don|gui|
 // Khách nói đã mua / hủy / khiếu nại: không phải trả lời lời mời — nhờ mô hình đọc.
 // R16 (inbox2 C5, ca …9150303196 "E nhận hàng" rồi "Shipper gửi cho hàng xóm nha em"): nói chuyện NHẬN HÀNG / shipper / hàng xóm
 // (đơn đang giao) không phải đồng ý ưu đãi — "nhận" trơn trong ACCEPT chỉ còn cho lời đáp ngắn kiểu "ok nhận".
-const NOT_OFFER = /\b(mua roi|dat roi|lay roi|huy|chua nhan|bi (moc|hoi|hu|loi)|khieu nai|tra hang|hoan|nhan (?:duoc |dc )?hang|nhan (?:duoc|dc) roi|nhan roi|shipper|hang xom)\b/;
+const NOT_OFFER = /\b(mua roi|dat roi|lay roi|huy|chua nhan|bi (moc|hoi|hu|loi)|khieu nai|tra hang|hoan|nhan (?:duoc|dc) roi|nhan roi|hang xom)\b/;
+const NOT_OFFER_DELIVERY = /\b(nhan (?:duoc |dc )?hang|shipper)\b/;
 const COMPARE = /(khac (nhau|gi|sao|ntn)|nao ngon|ngon hon|nen (chon|mua|lay) (loai|tui|vi)? ?nao|phan biet|so sanh)/;
 const PRICE = /\b(gia|bn|bao nhieu|bnhiu|bao tien|nhieu tien|tong|het bao nhieu)\b/;
 const FREESHIP = /(mien|free) ?(phi )?(ship|sip|van chuyen)|freeship|phi ship|tien ship|ship (bao nhieu|bn|nhieu|may)/;
@@ -143,7 +144,11 @@ export function trialStep({ text = '', type = 'text', trial, now = Date.now(), l
   const orderStep = chosen ? { template_id: 'ORDER_ADDRESS', Product_N1: trial.bag, No_A: '1' } : null;
   // Đã mua / hủy / khiếu nại: không phải trả lời lời mời — mô hình đọc (kèm gợi ý).
   // "đã lấy/đặt" so trên chữ CÒN DẤU: bỏ dấu thì "Dạ lấy túi xanh" (đồng ý) thành "da lay".
-  if (NOT_OFFER.test(s) || /đã\s+(đặt|mua|nhận|lấy|chốt)/iu.test(raw)) return { delegate: true };
+  // R16-fix2 (phản biện L3): "Lấy 1 túi xanh, nhận hàng giờ hành chính nhé", "Ok gửi chị 1 túi vàng, giao shipper gọi trước nhé",
+  // "nhận hàng rồi trả tiền shipper nhé" — nói chuyện nhận hàng / shipper chỉ là "đơn đang giao" khi khách CHƯA chọn túi hay nói
+  // đã/vừa/mới nhận; còn lại để luồng ưu đãi đọc như trước vòng 16.
+  const deliveryTalk = NOT_OFFER_DELIVERY.test(s) && (!picks.size || /\b(?:da|vua|moi) nhan\b/.test(s)) && !/\btra tien\b/.test(s);
+  if (NOT_OFFER.test(s) || deliveryTalk || /đã\s+(đặt|mua|nhận|lấy|chốt)/iu.test(raw)) return { delegate: true };
   // Khất ("để mình hỏi chồng đã", "để em xem lại", "suy nghĩ thêm"): không phải đồng ý, không đóng ưu đãi — mô hình đáp mềm.
   if (/\b(de (minh|em|e|chi|c|toi|m|mk) (hoi|xem|tinh|suy nghi|coi|nghi|can nhac)|hoi (chong|vo|ba xa|ong xa|nha|me|bo)|suy nghi (da|them|lai)|(xem|tinh|coi) (da|them|lai))\b/.test(s)) return { delegate: true };
   // Từ chối. "thôi" chỉ là từ chối khi không kèm túi/số lượng/lời đồng ý ("lấy 1 túi thôi" là chọn).

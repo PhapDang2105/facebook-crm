@@ -149,7 +149,36 @@ const STRONG_COMPLAINT = /\b(goi .{0,14}(khong|ko|k|hong) (duoc|dc)|goi .{0,12}s
 // R16 (inbox1 B1, ca …7830380226 "quảng cáo nhiều hạt mà nhận toàn hạt gạo, yến mạch", "thực tế nhận thì khác hoàn toàn"; …6281113917
 // "Nhg hơi ít hath"): chê hàng KHÁC quảng cáo / ít hạt / toàn hạt gạo-yến mạch-bột → khiếu nại (CSKH_HANDOFF + thẻ, như luật khiếu nại
 // rõ). "ít hạt" chỉ tính khi có chữ chê mức độ ("hơi/quá/nhưng … ít hạt", "ít hạt quá") — "lấy loại ít hạt" là chọn vị.
-const AD_VS_REALITY = /\b(?:quang cao|qc|hinh(?: anh)?(?: quang cao)?|video)\b.{0,40}\b(?:ma|nhung|nhg|ma sao)\b.{0,25}\b(?:nhan|thuc te|ve toi|ve nha|ve thi|mo ra|giao (?:toi|den|ve))\b|\bkhac hoan toan\b|\b(?:nhan|mo ra|ben trong|thay|ma|nhung|nhg)\b.{0,20}\btoan (?:la )?(?:hat gao|gao|yen mach|bot|vun)\b|\b(?:nhung|nhg|hoi|qua|rat|kha) ?(?:it|hoi it|qua it) (?:hat|hath|hatj|hac)\b|\bit (?:hat|hath|hatj) (?:qua|the|vay|lam|ghe|xiu)\b/;
+// R16-fix2 (phản biện M1): tách hai phần.
+// - AD_CLAIM "quảng cáo … mà … nhận/mở ra": bỏ khi trước "mà" là lời KHEN ("đúng như quảng cáo mà nhận nhanh nữa", "hình quảng cáo
+//   đẹp quá mà giao tới HCM mất mấy ngày") và sau "mà" không có chữ chê.
+// - AD_DETAIL "ít hạt / toàn … / khác hoàn toàn": chỉ khi khách có đơn gần đây hoặc câu nói đã nhận / mở ra / mua về; câu hỏi
+//   (dấu ?, đuôi hả/à/không/nhỉ) và câu có giỏ / ý lấy hàng ("xanh hơi ít hạt nên lấy 2 túi vàng") không tính.
+const AD_CLAIM = /\b(?:quang cao|qc|hinh(?: anh)?(?: quang cao)?|video)\b.{0,40}\b(?:ma|nhung|nhg|ma sao)\b.{0,25}\b(?:nhan|thuc te|ve toi|ve nha|ve thi|mo ra|giao (?:toi|den|ve))\b/;
+const AD_DETAIL = /\bkhac hoan toan\b|\b(?:nhan|mo ra|ben trong|thay|ma|nhung|nhg)\b.{0,20}\btoan (?:la )?(?:hat gao|gao|yen mach|bot|vun)\b|\b(?:nhung|nhg|hoi|qua|rat|kha) ?(?:it|hoi it|qua it) (?:hat|hath|hatj|hac)\b|\bit (?:hat|hath|hatj) (?:qua|the|vay|lam|ghe|xiu)\b/;
+const AD_PRAISE_BEFORE_MA = /\b(?:dep|ngon|hay|dung nhu|giong|chuan|tot|thom|xinh)\b.{0,40}\b(?:ma|nhung|nhg)\b/;
+const AD_NEGATIVE = /\b(?:it|toan|khac|vun|khong|ko|k|kg|chang|cha|te|do|dau|cung|hoi|hu|moc|het han)\b/;
+const AD_RECEIVED = /\b(?:nhan|mo ra|mua ve|ve toi|ve nha|ve thi|an thu|an thay|ben trong|thuc te)\b/;
+const AD_QUESTION_TAIL = /(?:^|\s)(?:hả|hở|à|ak|ah|không|khong|ko|k|hông|hong|nhỉ|nhi|chưa|chua|sao|thế nào)$/u;
+// Tin trước (≤ 15 phút) cho thấy khách đã dùng hàng: "Nay chị mới ăn nhà e" (ca …6281113917 trước "Nhg hơi ít hath").
+const AD_USED_BEFORE = /\b(?:da|moi|vua|dang) (?:an|nhan|mo|dung|xai)\b|\ban thu\b|\bnhan (?:duoc )?hang\b/;
+export function adVsReality(s, raw = '', { hasRecentOrder = false, recentCustomerTexts = [] } = {}) {
+  const claim = AD_CLAIM.exec(s);
+  if (claim) {
+    const maAt = claim.index + claim[0].search(/\b(?:ma|nhung|nhg)\b/);
+    const praised = AD_PRAISE_BEFORE_MA.test(s.slice(0, maAt + 4)) && !AD_NEGATIVE.test(s.slice(maAt + 3));
+    if (!praised) return true;
+  }
+  if (!AD_DETAIL.test(s)) return false;
+  // Đuôi hỏi xét trên chữ GỐC còn dấu (core() đã cắt "hả em"; bỏ dấu thì "à" hỏi trùng "ạ").
+  if (/\?/.test(String(raw || '')) || AD_QUESTION_TAIL.test(String(raw || s).normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/(?: (?:em|e|shop|ad|bạn|b|chị|c|anh|ơi|nhé|nha|ạ))+$/u, ''))) return false;
+  // Giỏ = số túi / combo / ý lấy hàng (màu đứng riêng vẫn có thể là lời chê: "túi vàng mà nhận toàn yến mạch").
+  if (/\b\d{1,2} ?(?:tui|goi|bich)\b|\bcombo\b|\b(?:lay|dat|chot|mua (?:\d|mot|hai|ba))\b/.test(s)) return false;
+  const usedBefore = (Array.isArray(recentCustomerTexts) ? recentCustomerTexts : [])
+    .some(item => AD_USED_BEFORE.test(foldVietnamese(typeof item === 'string' ? item : String(item?.text || '')).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ')));
+  return Boolean(hasRecentOrder) || AD_RECEIVED.test(s) || usedBefore;
+}
 // "phản ánh" chỉ so trên chữ CÒN DẤU: bỏ dấu thì trùng "phần anh" ("phần anh 2 túi vàng, phần chị 1 túi xanh").
 const COMPLAINT_REPORT = /phản ánh/iu;
 // Câu nêu giỏ (số + túi/gói, hay màu túi) mà không có từ khiếu nại rõ: là đặt hàng, không chuyển người.
@@ -270,7 +299,8 @@ const BARGAIN_DISCOUNT_WORD = /\b(?:giam|uu dai|re|khuyen mai|km|bot gia|bot chu
 const BARGAIN_HAGGLE = /(?<!hạt\s)(?<![\p{L}])mặc\s+cả(?![\p{L}])/iu;
 // Không phải mặc cả: bớt SỐ TÚI ("giảm đi 1 túi", "Giảm cho mình còn 2 túi", "giảm còn 2 túi thôi"), giảm CÂN/MỠ ("có giảm được
 // mỡ bụng không"), giảm/bớt ĐƯỜNG/NGỌT, hỏi giảm qua live/voucher ("Thế đạt trên live để dc giảm cho c" — LIVESTREAM_VOUCHER).
-const BARGAIN_NOT = /\bgiam (?:(?:di|bot|lai|xuong|cho (?:minh|em|e|chi|c|toi|a|anh|m|mk|t|tui)) )*(?:con |xuong )?(?:\d{1,2}|mot|hai|ba|bon|nam) ?(?:tui|goi|bich|bit|hop|cai|xanh|vang|nau)\b|\bgiam (?:(?:duoc|dc|it|bot) )?(?:can|ky|ki|kg|mo|beo|bung|eo|duong|ngot|calo|dau|cholesterol)\b|\b(?:live|livestream|voucher|ma giam)\b/;
+// R16-fix2 (phản biện L2): "ăn giảm 10 phần trăm mỡ không", "đường giảm 30% so với loại thường à" — giảm % mỡ/đường, không mặc cả.
+const BARGAIN_NOT = /\bgiam (?:(?:di|bot|lai|xuong|cho (?:minh|em|e|chi|c|toi|a|anh|m|mk|t|tui)) )*(?:con |xuong )?(?:\d{1,2}|mot|hai|ba|bon|nam) ?(?:tui|goi|bich|bit|hop|cai|xanh|vang|nau)\b|\bgiam (?:(?:duoc|dc|it|bot) )?(?:can|ky|ki|kg|mo|beo|bung|eo|duong|ngot|calo|dau|cholesterol)\b|\b(?:live|livestream|voucher|ma giam)\b|\bgiam ?\d{1,2} ?(?:%|phan tram|pt)? ?(?:mo|beo|can|duong|ngot|calo|bung)\b|\b(?:an|duong|ngot|calo|mo|beo|can) giam\b/;
 // ("bớt 1 túi", "bớt đi 1 xanh", "bớt lại" là bớt món trong giỏ; "bớt đường/ngọt/nho khô/hạt" là bớt thành phần — không phải mặc cả.)
 const BARGAIN_RAW = /(?<![\p{L}])bớt(?![\p{L}])(?!\s*(?:\d|một|mot|1|túi|tui|gói|goi|bịch|bich|lại|lai|(?:đi|di|cho\s+\S+)\s+(?:\d|một|1)|màu|vị|loại|xanh|vàng|nâu))(?!\s*(?:đường|duong|ngọt|ngot|béo|beo|ngấy|ngay|dầu|dau|calo|nho|hạt|hat|trái|trai|quả|qua|yến|yen|hạnh|hanh|xoài|xoai|dừa|dua|mật|mat|muối|muoi|cân|can|mỡ|mo)(?![\p{L}]))/iu;
 const isBargain = (raw, s) => {
@@ -341,8 +371,10 @@ function flavourQuestionTail(raw, s) {
   if (nfc === foldVietnamese(nfc).toLowerCase() && FLAVOUR_Q_TAIL.test(foldVietnamese(bare).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim())) return true;
   return /\bcho (?:con|be|em be|chau|nha minh|nha)$/.test(s) && !ORDER_VERB.test(s);
 }
-// R16 (ca …3011340301 "Túi bao bì màu xanh" sau ASK_FLAVOR): "bao bì" là chữ đệm của lời chọn màu.
-const FLAVOR_ANSWER_WORDS =/\b(xanh|vang|nau|cacao|la|cay|tui|goi|bich|bit|mau|vi|loai|bao bi|nguyen ban|nhieu hat|nhieu qua|it hat|1|minh|em|e|chi|c|m|mk|lay|cho|dat|mua|the|thi|vay|ok|oke|da|thoi|truoc|di|luon|cua|con)\b/g;
+// R16-fix2 (phản biện engine, ca …3011340301): "Túi bao bì màu xanh" sau "Lấy Combo 3 túi.." là khách TẢ / HỎI bao bì (sau đó hỏi
+// "Màu xanh nguyên bản là sao" rồi chốt 3 Vàng) — không phải chọn vị: bỏ "bao bì" khỏi chữ đệm của lời chọn màu (như 76f4725),
+// không dựng 3 Túi Xanh từ số túi đã hỏi; mô hình / bảng giá trả lời.
+const FLAVOR_ANSWER_WORDS =/\b(xanh|vang|nau|cacao|la|cay|tui|goi|bich|bit|mau|vi|loai|nguyen ban|nhieu hat|nhieu qua|it hat|1|minh|em|e|chi|c|m|mk|lay|cho|dat|mua|the|thi|vay|ok|oke|da|thoi|truoc|di|luon|cua|con)\b/g;
 
 /**
  * R16: màu khách vừa chọn ở tin chữ NGAY TRƯỚC tin hiện tại ("Túi xanh", "Vàng nhiều hạt nhé", "nâu cacao"): 'xanh' | 'vang' | 'nau' | ''.
@@ -732,7 +764,7 @@ export function ruleIntent(text, ctx = {}) {
   // R14 (quyết định 4, ca …377332 "Chị đã mua 1 lần nhưng ko đc như quảng cao / Mở ra bên trong toàn yến mạch là nhiều",
   // "Dỡ"): lời chê quảng cáo (chữ chen giữa) và "dở/dỡ" đứng riêng là khiếu nại → người thật.
   // R16: + chê hàng khác quảng cáo / ít hạt / toàn hạt gạo (AD_VS_REALITY).
-  const adMismatch = AD_MISMATCH_COMPLAINT.test(sComplaint) || AD_VS_REALITY.test(sComplaint);
+  const adMismatch = AD_MISMATCH_COMPLAINT.test(sComplaint) || adVsReality(sComplaint, raw, { hasRecentOrder: ctx.hasRecentOrder, recentCustomerTexts: ctx.recentCustomerTexts });
   const strongComplaint = STRONG_COMPLAINT.test(sComplaint) || adMismatch || COMPLAINT_REPORT.test(raw) || shortBadTaste(raw);
   // "phần anh xanh phần chị vàng", "mình rất sợ béo": có giỏ / không có từ khiếu nại rõ thì không phải khiếu nại.
   const basketNotComplaint = BASKET_MENTION.test(sComplaint) && !COMPLAINT_WORDS.test(sComplaint) && !adMismatch && !COMPLAINT_REPORT.test(raw);
@@ -991,6 +1023,8 @@ export function ruleIntent(text, ctx = {}) {
   // sao ạ"): hỏi giá TỪNG/MỖI/CÁC loại, hay giá các loại có bằng nhau không → bảng 3 vị (GENERAL_INFO listAll — engine giữ nguyên
   // bảng 3 vị, không thay bằng bảng một túi). Không số, không màu, không gói nhỏ/hộp/Tropical/yến mạch/hạt (sản phẩm khác).
   if (!isComment && !phone && !complaint && !ctx.hasBasket && s.length <= 90 && !/\d/.test(s) && !/\b(?:xanh|vang|nau|cacao|mint|tropical|combo|hop|goi nho|nho|mini|yen mach|hat|nghe|bot|sua|kieng|calo|giam can|an kieng)\b/.test(s)
+    // R16-fix2 (phản biện M4): "Mỗi túi bao nhiêu gam", "có loại nào cho người tiểu đường không" — hỏi khối lượng / hạn / sức khoẻ.
+    && !/\b(?:gam|gram|gr|g|kg|can nang|trong luong|nang (?:bao|bn|may|nhieu)|han|hsd|tieu duong|duong|kcal)\b/.test(s)
     && ((PRICE.test(s) && /\b(?:tung|moi|cac|tat ca(?: cac)?|may|nhung|bao nhieu) (?:loai|vi|mau|tui|sp|san pham|mat hang)\b/.test(s))
       || /\bdong gia\b|\bgia (?:co )?(?:bang nhau|nhu nhau|giong nhau|khac nhau)\b|\b(?:loai|vi|mau|tui) .{0,15}\bgia (?:co )?khac\b|\b(?:gia|tien) .{0,10}\bbang nhau\b/.test(s))) {
     return { rule: 'PRICE_EACH', value: { template_id: 'GENERAL_INFO', listAll: '1' } };
@@ -1053,7 +1087,8 @@ export function ruleIntent(text, ctx = {}) {
   // bảng giá, BOT-C); "1 túi màu vàng giá như nào" → 1 túi + ship = tổng, mời lên 1 túi (engine giữ giỏ 1 túi).
   // Không áp khi kèm "miễn ship nữa hả" (câu hỏi điều kiện, để mô hình), gói nhỏ/hộp 10/set, hay nhiều màu.
   // R16 (inbox4 H4 "Mua 2g thì bn tiền"): "2g" (một chữ số + g, câu không nói gam/kg) là 2 gói.
-  const sCount = /\b(?:gam|gram|gr|kg|ky|ki|can nang|trong luong)\b/.test(s) ? s : s.replace(/\b([1-9]) ?g\b/g, '$1 goi');
+  // R16-fix2 (phản biện L1): "đường 5g bao nhiêu", "2g đường bao nhiêu calo", "1 thìa 5g" — gam đường/thìa, không phải gói.
+  const sCount = /\b(?:gam|gram|gr|kg|ky|ki|can nang|trong luong|duong|calo|kcal|thia|muong)\b/.test(s) ? s : s.replace(/\b([1-9]) ?g\b/g, '$1 goi');
   const countMatch = sCount.match(/\b(\d{1,2}|hai|ba|bon|nam|sau) (?:tui|bich|goi)\b/);
   const askedCount = countMatch ? ({ hai: 2, ba: 3, bon: 4, nam: 5, sau: 6 }[countMatch[1]] || Number(countMatch[1])) : 0;
   const askedColours = [...new Set(s.match(/\b(xanh|vang|nau|cacao)\b/g) || [])].map(colour => (colour === 'cacao' ? 'nau' : colour));
@@ -1062,7 +1097,11 @@ export function ruleIntent(text, ctx = {}) {
   const bargain = isBargain(raw, s);
   const priceish = (PRICE.test(sNoFamily) || (askedCount >= 3 && /\b(uu dai|giam|khuyen mai|km|duoc gi|qua gi)\b/.test(s)))
     && !INFO_RULES.find(([rule]) => rule === 'COMBO3')[1].test(s) && !bargain;
-  if (!isComment && !phone && priceish && askedCount >= 1 && askedColours.length <= 1 && !ctx.smallPackContext && !smallPackAsk && !TROPICAL_MENTION.test(s)
+  // R16-fix2 (phản biện H1): "2 túi yến mạch / nghệ lành / mint / hạt điều / sữa hạt / gói cam … giá" là SẢN PHẨM KHÁC — không báo
+  // giá granola combo (mọi số túi, cả nhánh ≥ 3 túi). "cảm ơn" bỏ dấu là "cam on" — không tính.
+  // "nghe" cuối câu / trước lời gọi là tiểu từ miền Nam ("2 túi bao nhiêu nghe em"), không phải Nghệ Lành.
+  const otherProductCount = /\b(?:yen mach|bot ngu coc|mint|tropical|hat dieu|sua hat|hu hat|sieu hat|kg|goi nho)\b|\bcam\b(?! on\b)|\bnghe\b(?! *$| (?:em|e|ban|b|shop|chi|c|anh|a|ad|nha|nhe|ha)\b)/.test(s);
+  if (!isComment && !phone && priceish && askedCount >= 1 && askedColours.length <= 1 && !ctx.smallPackContext && !smallPackAsk && !TROPICAL_MENTION.test(s) && !otherProductCount
     && !/\b(10|muoi) goi\b|\bgoi nho\b|\b(hop|set|mix)\b/.test(s) && !FREESHIP_ANY.test(s) && (s.match(/\b\d{1,2} ?(?:tui|bich|goi)\b/g) || []).length <= 1) {
     if (askedCount === 1 && askedColours.length === 1) {
       const one = bagCountQuote(1, askedColours[0], Boolean(ctx.livestream));

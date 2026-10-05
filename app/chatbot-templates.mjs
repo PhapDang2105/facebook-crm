@@ -587,7 +587,11 @@ export function colourCountsInText(text) {
   // R14: "cân bằng" = Xanh, "nhiều hạt" = Vàng (flavourSynonyms); "Ko fai 2 túi nâu" (khách đính chính giỏ sai) không tính.
   // R16 (inbox1 A2, ca …2228960004 "Vậy tổng là 5 túi, tặng 1 túi vàng + 1 bộ bát, thìa đúng ko shop"): màu đứng sau "tặng" là
   // QUÀ, không phải túi khách mua — không đếm, không tính là vị được nhắc.
-  const stripped = flavourSynonyms(normalizeIntentText(colourText(text)))
+  // R16-fix2 (phản biện M2): màu viết hoa sau dấu phẩy/xuống dòng và trước một chữ viết hoa khác là ĐỊA DANH ("2 túi xanh, Vàng Danh,
+  // Uông Bí") — bỏ trước khi đếm (trừ khi chữ sau là lời tả vị: "Vàng Nhiều Hạt", "Xanh Nguyên Bản").
+  const placeless = colourText(text).normalize('NFC').replace(/([,;\n]\s*)(?:Vàng|Xanh|Nâu|VÀNG|XANH|NÂU)(?=\s+(\p{Lu}\p{L}*))/gu, (whole, lead, next) => (
+    /^(?:nhieu|hat|nguyen|ban|cacao|ca|tui|goi|bich|la|min|mint|nhat|nha|nhe|nhen|a|e|em|chi|c|anh|cho|voi|va|moi|thoi|luon|di|mot|hai|ba|x|nua|thi|de|co|khong|ko|het|lan)$/.test(normalizeIntentText(next)) ? whole : lead));
+  const stripped = flavourSynonyms(normalizeIntentText(placeless))
     .replace(/\b(so|to|ngo|khu|ap|thon|hem|kp|duong|ngach|xom) (\d{1,3}) (?:xanh|vang|nau|cacao)\b/g, '$1 $2 ')
     .replace(new RegExp(`\\b(?:dung|khong|ko|hong)\\s+(?:lay|mua|gui)\\s+(?:(?:tui|goi|bich|vi|loai|mau)\\s+)?(?:xanh|vang|nau|cacao)\\b${NOT_GREEN}`, 'g'), ' ')
     .replace(/\b(?:khong|ko|k|kg|hong|kp|chu khong|chu ko)\s+(?:phai|fai|pai)\s+(?:la\s+)?(?:\d{1,2}|mot|hai|ba)?\s*(?:(?:tui|goi|bich|bit)\s+)?(?:xanh|vang|nau|cacao)\b/g, ' ')
@@ -601,9 +605,21 @@ export function colourCountsInText(text) {
   const sharedList = new RegExp(`\\b(\\d{1,2}|hai|ba|bon|nam)\\s*(?:tui|tuy|goi|bich|bit)\\s+(?:(?:hat|loai|vi|mau|granola)\\s+)?(${listColour}(?:${listSep}${listColour}){1,3})\\b(?! ?x ?\\d)(?! \\d{1,2}\\b(?! ?(?:tui|tuy|goi|bich|bit|vi|loai|mau|xanh|vang|nau|cacao)\\b))`, 'g');
   let splitAsk = 0;
   const eachSaid = /\bmoi (?:loai|vi|mau|thu|tui|goi) (\d{1,2}|mot|hai|ba)\b|\b(\d{1,2}|mot|hai|ba) (?:tui|goi|bich) moi (?:loai|vi|mau)\b/.test(stripped);
-  const s = stripped.replace(sharedList, (whole, number, list) => {
+  // R16-fix2 (phản biện L4): "3 túi xanh vàng, 2 xanh 1 vàng" / "4 túi xanh nâu, xanh 3 nâu 1" — khách tự chia ngay sau danh sách,
+  // các số cộng đủ N → dùng đúng phần chia đó (không hỏi lại, không cộng dồn số N vào màu đầu).
+  const spelledSplit = new RegExp(`\\b(\\d{1,2}|hai|ba|bon|nam)\\s*(?:tui|tuy|goi|bich|bit)\\s+(?:(?:hat|loai|vi|mau|granola)\\s+)?${listColour}(?:${listSep}${listColour}){1,3}\\s+((?:(?:\\d{1,2}|mot|hai|ba)\\s*(?:(?:tui|goi|bich)\\s+)?(?:xanh|vang|nau|cacao)\\b\\s*){2,4}|(?:(?:xanh|vang|nau|cacao)\\s*(?:\\d{1,2})\\b\\s*){2,4})`, 'g');
+  const respelled = stripped.replace(spelledSplit, (whole, number, parts) => {
+    const pairs = [...parts.matchAll(/(\d{1,2}|mot|hai|ba)\s*(?:(?:tui|goi|bich)\s+)?(xanh|vang|nau|cacao)|(xanh|vang|nau|cacao)\s*(\d{1,2})/g)]
+      .map(match => (match[2] ? [numberOf(match[1]), match[2]] : [numberOf(match[4]), match[3]]));
+    const total = pairs.reduce((sum, [count]) => sum + count, 0);
+    return total === numberOf(number) ? ` ${pairs.map(([count, colour]) => `${count} ${colour}`).join(' ')} ` : whole;
+  });
+  const s = respelled.replace(sharedList, (whole, number, list, offset, all) => {
     const colours = [...new Set([...list.matchAll(/(xanh|vang|nau|cacao)/g)].map(match => COLOUR_OF_WORD[match[1]]))];
     if (colours.length < 2) return whole;
+    // R16-fix2 (phản biện M2): sau danh sách là lời bỏ / hoãn / hỏi ("lấy 2 túi xanh, vàng thì thôi", "vàng để lần sau", "vàng có
+    // không", "2 túi xanh vàng hết rồi à") → màu sau không phải phần chia của N túi, giữ như trước vòng 16.
+    if (/^\s*(?:thi thoi|de sau|de lan sau|lan sau|het|co khong|co ko|co k|khong lay|ko lay|k lay|khoi|ha|chua)\b/.test(all.slice(offset + whole.length))) return whole;
     const shared = numberOf(number);
     if (shared === colours.length) return ` ${colours.map(colour => `1 ${({ XANH: 'xanh', VANG: 'vang', NAU: 'nau' })[colour]}`).join(' ')} `;
     if (eachSaid) return whole;

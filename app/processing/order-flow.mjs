@@ -309,7 +309,9 @@ function stripLeadingLandmarkName(text) {
 // ===== R16 (inbox1 A4, inbox3 A1): đoạn (giữa hai dấu phẩy / hai tin) KHÔNG phải địa chỉ =====
 // Chữ đệm xác nhận ("Rồi đó ạ" — gõ Telex "Roi ddo ak", "đủ rồi e", "vậy đó shop", "ok rồi"): mọi chữ là chữ đệm và có ít nhất một
 // chữ xác nhận (rồi/đó/đây/vậy/đủ/ok/hết/thôi) — "A" (khu A) đứng một mình không bị bỏ.
-const SEGMENT_FILLER_WORDS = new Set(['roi', 'r', 'do', 'day', 'vay', 'v', 'z', 'a', 'ak', 'ah', 'nha', 'nhe', 'nhen', 'nhak', 'ok', 'oke', 'okie', 'du', 'het', 'the', 'thoi', 'e', 'em', 'c', 'chi', 'shop', 'sop', 'vang', 'da', 'u', 'uh', 'ha', 'luon', 'la', 'nay', 'ne', 'b', 'ban', 'anh']);
+const SEGMENT_FILLER_WORDS = new Set(['roi', 'r', 'do', 'day', 'vay', 'v', 'z', 'a', 'ak', 'ah', 'nha', 'nhe', 'nhen', 'nhak', 'ok', 'oke', 'okie', 'du', 'het', 'the', 'thoi', 'e', 'em', 'c', 'chi', 'shop', 'sop', 'vang', 'da', 'u', 'uh', 'ha', 'luon', 'la', 'nay', 'ne', 'b', 'ban', 'anh',
+  // R16-fix2 (phản biện engine L4, p11: "12 Lê Lợi, Đúng rồi e, Phường…" — tin "đúng rồi e" tới ngay sau tin địa chỉ bị ghép vào).
+  'dung', 'chuan']);
 const SEGMENT_FILLER_CORE = /\b(?:roi|r|do|day|vay|du|ok|oke|okie|het|thoi)\b/;
 // "Trên cho rồi", "ở trên", "như trên", "gửi ở trên rồi", "đã gửi rồi": khách nói đã gửi địa chỉ ở trên.
 const SEGMENT_ABOVE = /^(?:(?:em|e|minh|chi|c|da|toi|anh|a)\s)*(?:(?:o|nhu|gui|ghi|cho|de|nhan|noi)\s)*tren(?:\s(?:cho|gui|ghi|co|roi|r|do|day|nhe|nha|a|ak|em|e|c|chi|shop|ban|b|het))*$|^(?:(?:em|e|minh|chi|c|toi|anh|a)\s)?(?:da\s)?(?:gui|ghi|cho)\s(?:o\s)?(?:tren\s)?roi(?:\s(?:ma|do|day|nhe|nha|a|ak|em|e|c|chi|shop))*$/;
@@ -326,16 +328,33 @@ export function isNonAddressSegment(segment) {
   if (!folded) return true;
   if (SEGMENT_LABEL.test(folded)) return true;
   const words = folded.split(' ');
-  if (words.every(word => SEGMENT_FILLER_WORDS.has(word)) && SEGMENT_FILLER_CORE.test(folded)) return true;
-  if (SEGMENT_ABOVE.test(folded)) return true;
+  // R16-fix2 (phản biện M3): đoạn 2 chữ có "bản/đá/hà" ("Bản Đó", "Đá Đỏ", "Hà Đô") là địa danh, không phải chữ đệm.
+  const fillerWords = words.length === 2 ? words.every(word => SEGMENT_FILLER_WORDS.has(word) && !['ban', 'da', 'ha', 'b'].includes(word)) : words.every(word => SEGMENT_FILLER_WORDS.has(word));
+  if (fillerWords && SEGMENT_FILLER_CORE.test(folded)) return true;
+  // "Chợ Trên / Đê Trên / Nội Trên" (địa danh) — chỉ là "đã gửi ở trên" khi có "rồi/r" ("Trên cho rồi").
+  if (SEGMENT_ABOVE.test(folded) && !(/^(?:cho|de|noi|nhan) tren$/.test(folded))) return true;
   if (/\d/.test(folded) && !SEGMENT_BASKET.test(folded)) return false;
   if (SEGMENT_PLACE_WORDS.test(folded)) return false;
-  return SEGMENT_QUESTION.test(folded) || SEGMENT_BASKET.test(folded);
+  // Câu hỏi chen giữa cần ≥ 3 chữ hay một hư từ hỏi ("Cổ Bi", "Cổ Chiên", "Có Phải" 2 chữ là địa danh).
+  const questionLike = SEGMENT_QUESTION.test(folded) && (words.length >= 3 || /\b(?:chu|khong|ko|kg|a|ha|nhe)\b/.test(folded));
+  return questionLike || SEGMENT_BASKET.test(folded);
 }
+// Cấp hành chính đọc được từ chữ (tỉnh / huyện / xã) — dùng để không bỏ một đoạn mang địa danh thật.
+const adminLevels = text => {
+  const resolved = describeDeliveryAddress(text)?.resolved || {};
+  return ['province', 'district', 'ward'].map(level => String(resolved[level]?.name || resolved[level]?.code || ''));
+};
 function dropNonAddressSegments(text) {
   const parts = String(text || '').split(/\s*,\s*/);
   if (parts.length < 2) return text;
-  const kept = parts.filter(part => !isNonAddressSegment(part));
+  // R16-fix2 (phản biện M3, "Xóm 3, Cổ Bi, Gia Lâm, Hà Nội" mất xã Cổ Bi): chỉ bỏ đoạn khi bỏ nó đi KHÔNG mất cấp hành chính nào.
+  let levels = null;
+  const kept = parts.filter((part, index) => {
+    if (!isNonAddressSegment(part)) return true;
+    levels = levels || adminLevels(parts.join(', '));
+    const without = adminLevels(parts.filter((_, other) => other !== index).join(', '));
+    return levels.some((name, level) => name && without[level] !== name);
+  });
   return kept.length ? kept.join(', ') : text;
 }
 

@@ -251,10 +251,12 @@ const declinePattern = /(?<![\p{L}\p{N}])(khoan|đừng)\s+(đã\s+)?(giao|gửi
 // R16 (bình luận B6b, ca …0716122894 "da nhan hang roi nen kg mua nua"): khách gõ KHÔNG dấu — so thêm trên chữ đã bỏ dấu
 // ("kg/ko/k/khong/hong/khum mua|lay|dat nua", "đã nhận hàng rồi", "đã mua rồi"). "huy" không dấu không tính (tên người).
 const declineFoldedPattern = /\b(?:k|ko|kg|khg|khong|hong|khum|hok) (?:can )?(?:lay|mua|dat) (?:them )?nua\b|\bda nhan (?:duoc )?hang roi\b|\b(?:da|vua) mua roi\b/;
-export function customerDeclined(text) {
+// R16-fix2 (phản biện C1): đang giữ giỏ mà khách "không lấy THÊM nữa" = từ chối lời mời thêm, vẫn giữ giỏ → vẫn nhắc giỏ.
+export function customerDeclined(text, { basketHeld = false } = {}) {
   const value = String(text ?? '').normalize('NFC');
-  if (declinePattern.test(value)) return true;
   const folded = foldText(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ');
+  if (basketHeld && /\bthem\b/.test(folded) && !/\b(?:huy|khoan|dung)\b/.test(folded)) return false;
+  if (declinePattern.test(value)) return true;
   return !/\?/.test(value) && declineFoldedPattern.test(folded);
 }
 
@@ -308,7 +310,7 @@ export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSki
   const incoming = all.filter(message => message.direction === 'incoming');
   const last = incoming.at(-1);
   if (last && (last.type || 'text') === 'text' && isTrivialCustomerText(last.text)) return 'customerTrivial';
-  if (incoming.some(message => now - (Number(message.createdAt) || 0) <= maxReplyAgeMs && customerDeclined(message.text))) return 'customerDeclined';
+  if (incoming.some(message => now - (Number(message.createdAt) || 0) <= maxReplyAgeMs && customerDeclined(message.text, { basketHeld }))) return 'customerDeclined';
   if (!basketHeld && last && isAckText(last.text)) {
     const after = all.filter(message => message.direction === 'outgoing' && (Number(message.createdAt) || 0) >= (Number(last.createdAt) || 0));
     if (after.some(message => thanksText.test(String(message.text || ''))) || records.some(item => item.botLastTemplateId === 'THANK_YOU')) return 'customerClosed';

@@ -55,11 +55,12 @@ test('#2 giả lập: ca Kim lên đơn 2 Xanh, địa chỉ không chứa "Ngũ
   assert.ok(!/ngũ cốc|ăn sáng/iu.test(turn.created[0].address), turn.created[0].address);
 });
 
-test('#2 "Túi bao bì màu xanh" sau ASK_FLAVOR (đã nói combo 3 túi) → 3 Xanh', () => {
+// R16-fix2 (sửa test cũ — nó khẳng định hành vi lỗi): phản biện engine vòng 16 đọc lại ca …3011340301: "Túi bao bì màu xanh" là khách
+// tả/hỏi bao bì (tin sau "Màu xanh nguyên bản là ,sao ạ", rồi chốt "3 vàng") — bot dựng 3 Túi Xanh là sai. Nay không phải FLAVOR_ANSWER.
+test('#2 "Túi bao bì màu xanh" sau ASK_FLAVOR (đã nói combo 3 túi) → KHÔNG dựng 3 Xanh', () => {
   const result = ruleIntent('Túi bao bì màu xanh', inbox({ botLastTemplateId: 'ASK_FLAVOR', botLastAgeMin: 1, askedBagCount: 3 }));
-  assert.equal(result?.rule, 'FLAVOR_ANSWER');
-  assert.equal(result.value.Product_N1, 'Granola Túi Xanh 450g');
-  assert.equal(result.value.No_A, '3');
+  assert.notEqual(result?.rule, 'FLAVOR_ANSWER');
+  assert.ok(!result?.value?.Product_N1, JSON.stringify(result));
 });
 
 test('#3 đã mua trên sàn gõ sai tên sàn → BOUGHT_ELSEWHERE; "… đúng không" không có nội dung giỏ ≠ CONFIRM_YES', () => {
@@ -112,8 +113,11 @@ test('#4 hỏi giá từng loại / đồng giá → bảng 3 vị (GENERAL_INFO
 });
 
 test('#5 chê hàng khác quảng cáo / ít hạt → COMPLAINT_HANDOFF (CSKH + thẻ), như luật khiếu nại hiện có', () => {
+  // R16-fix2 (phản biện M1): "ít hạt" không kèm "nhận/mở ra" chỉ là khiếu nại khi khách đã dùng hàng — ca thật …6281113917 có tin ngay
+  // trước "Nay chị mới ăn nhà e" (ngữ cảnh đưa vào đây); không ngữ cảnh thì không tính (xem test r16-fix2-rules).
+  const used = { recentCustomerTexts: [{ text: 'Nay chị mới ăn nhà e', at: Date.now() - 60e3 }, { text: 'Ngon hơn chỗ khác', at: Date.now() - 50e3 }] };
   for (const text of ['Quảng cáo thì hạt các loại nhiều mà nhận hàng thì toàn kiểu hạt gạo nhiều', 'Nhưng hình ảnh quảng cáo hạt đó ít, các hạt khác nhiều. Mà thực tế nhận thì khác hoàn toàn', 'Nhg hơi ít hath']) {
-    const result = ruleIntent(text, inbox());
+    const result = ruleIntent(text, inbox(used));
     assert.equal(result?.rule, 'COMPLAINT_HANDOFF', `${text} ${JSON.stringify(result)}`);
     assert.equal(tpl(result), 'CSKH_HANDOFF');
     assert.equal(result.attention, true);

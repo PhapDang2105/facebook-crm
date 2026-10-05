@@ -58,22 +58,19 @@ test('N1: đơn do LUẬT dựng ("Mỗi loại 1 túi", "Túi 450g nhé") sau c
   }
 });
 
-test('N1: mô hình đoán giỏ cho lời đệm ("Gởi c nhé") → hỏi vị; lần hai vẫn không đọc được → STAFF_WAIT + thẻ, không im', async () => {
+// Chủ shop 05/10 (quyết định c): khách chưa nêu vị → MẶC ĐỊNH Túi Xanh. Test cũ khẳng định "hỏi vị; lần hai STAFF_WAIT" — nay giỏ
+// mô hình đoán cho lời đệm được thay bằng 1 Túi Xanh và lên đơn (kèm câu ghi rõ món để khách đổi), không hỏi lại vị.
+test('N1: mô hình đoán giỏ cho lời đệm ("Gởi c nhé") sau câu hỏi vị → mặc định 1 Túi Xanh, lên đơn + câu ghi rõ món (chủ shop 05/10)', async () => {
   const ADDR = '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh';
   const sim = new Sim({ psid: 'fix2-n1d' });
   const ib = sim.inbox({ botLastTemplateId: 'ASK_FLAVOR', botLastReplyAt: Date.now() - MIN, pendingOrder: { items: [], key: '', at: Date.now() - 2 * MIN, phone: PHONE, address: ADDR, addressAsks: 0 } });
   sim.history(ib, 'incoming', `${PHONE} ${ADDR}`, 2 * MIN);
   sim.history(ib, 'outgoing', ASK, MIN, { sender: 'bot' });
-  const guess = { template_id: 'ORDER_CONFIRMATION', Product_N1: X, No_A: '1', Phone_Number: PHONE, Customer_Address: ADDR };
+  const guess = { template_id: 'ORDER_CONFIRMATION', Product_N1: V, No_A: '1', Phone_Number: PHONE, Customer_Address: ADDR };
   const first = await sim.send(ib, 'Gởi c nhé', { llm: guess });
-  assert.deepEqual(first.created, []);
-  assert.equal(first.result.templateId, 'ORDER_INFO_ASK_FLAVOR');
-  const again = await sim.send(ib, 'Hôm trước e tổng cho c đây', { llm: guess });
-  assert.deepEqual(again.created, []);
-  assert.match(String(again.result.templateId || ''), STAFF, JSON.stringify(again.result));
-  assert.ok(again.sent.length > 0, 'không im');
-  assert.ok(ib.labels.includes('handoff'), 'thẻ cần người');
-  assert.equal(ib.pendingOrder.phone, PHONE);
+  assert.deepEqual(first.created.map(order => codes(order.items)), [['1 GRA-XANH-Z450']], JSON.stringify(first.result));
+  assert.match(texts(first), /em lên 1 Túi Xanh nguyên bản 450g/);
+  assert.doesNotMatch(String(first.result.templateId || ''), STAFF);
 });
 
 // ---- C1. "Không lấy thêm nữa" sau lời mời lên 2 túi = từ chối lời mời, GIỮ giỏ.

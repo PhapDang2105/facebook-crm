@@ -68,7 +68,9 @@ test('3a/3d. "Có" sau PACKAGING_INFO → bảng giá Combo 10 gói (màu ngữ 
   assert.equal(combo.asked.length, 0);
   assert.match(combo.sent.join('\n'), /Bảng giá Combo 10 gói Xanh/);
   const brown = await run({ botLastTemplateId: 'PACKAGING_INFO', botLastReplyAt: now() - 60000 }, 'ok gửi đi', { recent: [incoming('túi nâu có gói nhỏ không', 120000), outgoing(templates.PACKAGING_INFO, 60000)], reply: { templateId: 'WELCOME', messages: ['x'], handoff: false } });
-  assert.match(brown.sent.join('\n'), /Combo 10 gói Nâu/);
+  // Chủ shop 05/10: Combo 10 gói Nâu đã tắt (combo 10 gói chỉ còn Xanh) → bảng giá Combo 10 gói Xanh (test cũ khẳng định Nâu).
+  assert.match(brown.sent.join('\n'), /Combo 10 gói Xanh/);
+  assert.doesNotMatch(brown.sent.join('\n'), /Combo 10 gói Nâu/);
   const paidText = await run({ botLastTemplateId: 'BANK_TRANSFER', botLastReplyAt: now() - 10 * 60000 }, 'Mình ck rồi nhé', { reply: { templateId: 'WELCOME', messages: ['x'], handoff: false } });
   assert.equal(paidText.asked.length, 0);
   assert.equal(paidText.results[0].templateId, 'PAYMENT_RECEIVED_CHECK');
@@ -260,7 +262,9 @@ test('11. Bình luận: chê → xin lỗi công khai + thẻ; khen → cảm ơ
   // Giỏ ghi trong bình luận.
   assert.deepEqual(commentBasket('cho mình 2 túi socola'), [{ product: 'Granola Túi Nâu vị cacao 350g', quantity: 2 }]);
   assert.deepEqual(commentBasket('lấy 2 hộp xanh'), [{ product: 'Combo 10 gói Xanh', quantity: 2 }]);
-  assert.deepEqual(commentBasket('cho em 1 hộp 10 gói'), [{ product: 'Combo 10 gói Mix', quantity: 1 }]);
+  // Chủ shop 05/10: Combo 10 gói Mix đã tắt → hộp không ghi màu là Combo 10 gói Xanh (test cũ: Mix); "hộp mix" không tự dựng giỏ.
+  assert.deepEqual(commentBasket('cho em 1 hộp 10 gói'), [{ product: 'Combo 10 gói Xanh', quantity: 1 }]);
+  assert.deepEqual(commentBasket('lấy 1 hộp mix'), []);
   // Vòng 12: "vị dâu" / "xanh mint" là Granola Tropical (sản phẩm danh mục) → giỏ Tropical; "xanh nhạt" còn mơ hồ → không giỏ.
   assert.deepEqual(commentBasket('lấy 2 túi vị dâu'), [{ product: 'Granola Tropical vị Cacao 300g', quantity: 2 }]);
   assert.deepEqual(commentBasket('cho 1 túi xanh mint'), [{ product: 'Granola Tropical vị Cacao 300g', quantity: 1 }]);

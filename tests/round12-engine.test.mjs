@@ -122,9 +122,10 @@ test('2a. "2 túi này ak\\n<sđt>\\nĐc:… Bến Tre\\nĐc cũ" sau ASK_FLAVOR
   const out = await sim.send('2 túi này ak\n0912345678\nĐc: ấp 3 xã Phú Túc, Châu Thành, Bến Tre\nĐc cũ', { llm: { template_id: 'ASK_FLAVOR' } });
   assert.notEqual(out.result.skipped, 'lặp tin vừa gửi');
   assert.ok(out.sent.length >= 1, 'có trả lời');
-  assert.equal(out.result.templateId, 'ORDER_INFO_ASK_FLAVOR');
-  assert.ok(out.saved.at(-1).addLabelEvents?.includes('handoff'), 'thẻ cần người');
-  assert.equal(sim.conversation.pendingOrder?.phone, '0912345678');
+  // Chủ shop 05/10: khách đã nêu số túi, gửi SĐT + địa chỉ mà chưa nêu vị sau câu hỏi vị → mặc định 2 Túi Xanh và lên đơn (trước
+  // đây hỏi vị lần nữa + thẻ cần người — test cũ khẳng định ORDER_INFO_ASK_FLAVOR).
+  assert.equal(out.result.templateId, 'ORDER_CONFIRMATION');
+  assert.match(out.sent.join(' '), /em lên 2 Túi Xanh nguyên bản 450g/);
 });
 
 test('2b. thẻ handoff + nhân viên nhắn cuối 4,5 giờ trước: bot vẫn trả lời ("2 gói 1 vàng 1 xanh giá bn"); khiếu nại 24 giờ vẫn im', async () => {
@@ -215,7 +216,8 @@ test('3d. giá: "3 túi bao nhiêu" 447k + quà, "Lấy 4 túi có ưu đãi ko"
   const one = pick('Mình lấy 1 túi màu vàng giá như nào');
   assert.deepEqual([one?.value?.template_id, one?.value?.values?.total, one?.holdBasket?.quantity], ['PRICE_ONE_BAG', '189.000đ', 1]);
   assert.equal(pick('giá túi xanh và vàng')?.value?.template_id, 'PRICE_MIX_TUI_LON');
-  assert.equal(pick('combo 2')?.value?.template_id, 'ASK_FLAVOR');
+  // Chủ shop 05/10: "combo 2" không vị → mặc định 2 Túi Xanh (trước đây hỏi vị).
+  assert.deepEqual([pick('combo 2')?.value?.template_id, pick('combo 2')?.value?.Product_N1, pick('combo 2')?.value?.No_A], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g', '2']);
   assert.equal(pick('Lần trước ship toàn túi vàng')?.value?.template_id, 'ASK_REORDER');
 });
 

@@ -29,7 +29,8 @@ test('giá lẻ + ship cho 1 sản phẩm, giá combo và miễn ship từ 2 —
     [[['GRA-XANH-Z450', 1], ['GRA-NAU-Z350', 1]], 293000, 'Miễn phí vận chuyển'],
     [[['GRA-XANH-Z450', 1], ['GRA-NAU-Z350', 2]], 437000, gift3],
     [[['GRA-XANH-Z450', 1], ['GRA-VANG-H350', 1], ['GRA-NAU-Z350', 1]], 442000, gift3],
-    [[['CB10-MIX', 1]], 204000, ''], [[['CB10-MIX', 2]], 358000, 'Miễn phí vận chuyển'], [[['CB10-MIX', 3]], 537000, gift3],
+    // Chủ shop 05/10: Combo 10 gói Mix/Nâu tắt (chỉ còn Xanh, cùng giá 189k/179k) — test cũ dùng CB10-MIX, nay CB10-XANH-G35.
+    [[['CB10-XANH-G35', 1]], 204000, ''], [[['CB10-XANH-G35', 2]], 358000, 'Miễn phí vận chuyển'], [[['CB10-XANH-G35', 3]], 537000, gift3],
     [[['GRA-MINT-Z300', 1]], 219000, ''], [[['GRA-MINT-Z300', 3]], 522000, gift3]
   ];
   for (const [items, total, gift] of rows) {
@@ -43,8 +44,8 @@ test('giá lẻ + ship cho 1 sản phẩm, giá combo và miễn ship từ 2 —
 
 test('giỏ cùng nhóm ghép (túi lớn, Tropical, combo 10 gói) tự tính mọi cỡ tới 20; khác nhóm hoặc quá 20 thì chuyển nhân viên', () => {
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 1 }, { sku: 'GRA-VANG-H350', quantity: 1 }).key, 'GRA-VANG-H350=1|GRA-XANH-Z450=1');
-  // 01/10: combo 10 gói ghép đơn với túi lớn (1 combo Mix + 1 Xanh = 179k + 149k, miễn ship).
-  assert.equal(basket({ sku: 'CB10-MIX', quantity: 1 }, { sku: 'GRA-XANH-Z450', quantity: 1 }).total, 328000);
+  // 01/10: combo 10 gói ghép đơn với túi lớn (1 combo + 1 Xanh = 179k + 149k, miễn ship). Chủ shop 05/10: Mix tắt → combo Xanh.
+  assert.equal(basket({ sku: 'CB10-XANH-G35', quantity: 1 }, { sku: 'GRA-XANH-Z450', quantity: 1 }).total, 328000);
   assert.equal(basket({ sku: 'NGHE-H350', quantity: 1 }, { sku: 'GRA-XANH-Z450', quantity: 1 }).reason, 'not-a-combo');
   assert.equal(basket({ product: 'Set quà Tết', quantity: 1 }).reason, 'unknown-product');
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 4 }).total, 596000);
@@ -52,9 +53,9 @@ test('giỏ cùng nhóm ghép (túi lớn, Tropical, combo 10 gói) tự tính m
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 21 }).reason, 'too-many');
   // 3 túi lẻ ×1..3 + mọi bộ ghép ≤3 của 3 túi trộn được + 6 sản phẩm còn lại ×1..3.
   // R16: Combo 10 gói Cam (CB10-CAM-G30) tắt trong seed (chủ shop 03/10: combo 10 gói chỉ còn Xanh) → 7 thành 6 (sửa test cũ
-  // vì nó khẳng định Cam còn bán).
+  // vì nó khẳng định Cam còn bán). Chủ shop 05/10: tắt thêm Combo 10 gói Nâu và Mix → 6 thành 4.
   const combos = catalog.listCombos();
-  assert.equal(combos.length, 6 * 3 + 19);
+  assert.equal(combos.length, 4 * 3 + 19);
   assert.equal(new Set(combos.map(combo => combo.key)).size, combos.length);
   // Quy tắc quà: từ 2 sản phẩm miễn ship; từ 3 thêm bát + muỗng, trừ Nghệ Lành và Hạt An Lành.
   assert.deepEqual(catalog.giftsForKey('MIX5-H420=3').map(gift => gift.name), ['Miễn phí vận chuyển']);
@@ -217,7 +218,8 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   assert.equal(isProductQuoteId('PRICE_YEN_MACH_UC_NGUYEN_CAM'), false);
   assert.equal(isProductQuoteId('PRICE_QUOTE_COMBO'), false);
   // Đơn vị "Combo" dùng mẫu PRICE_QUOTE_COMBO.
-  assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_NAU_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Nâu.*\n🌿 Combo Dùng Thử \(350g\):\n🏷️ Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ\n━+\n🔥 2 Combo Tiện Lợi \(700g\):/);
+  // Chủ shop 05/10: Combo 10 gói Nâu tắt (chỉ còn Xanh) — test cũ dùng PRICE_TUI_NAU_NHO, nay PRICE_TUI_XANH_NHO.
+  assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_XANH_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Xanh.*\n🌿 Combo Dùng Thử \(350g\):\n🏷️ Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ\n━+\n🔥 2 Combo Tiện Lợi \(700g\):/);
   const policy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates).messages[0];
   // Mỗi quy tắc một dòng; quà cùng quy tắc gộp chung.
   assert.match(policy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm \(trừ Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)/);

@@ -81,7 +81,10 @@ test('3. "Hạn sứ dung đến khi nào vay e" khi bot vừa xin SĐT đặt l
 
 // ---- 4. Giỏ chỉ do mô hình suy ra → hỏi vị, không tạo đơn.
 const QUOTE_X = 'Dạ em thấy anh/chị để lại bình luận dưới bài viết của Giọt Nắng ạ 💛 Dạ, em gửi anh/chị Bảng giá Granola Túi Xanh 450g để mình dễ tham khảo ạ: 1 Túi dùng thử (450g) 174.000đ ... Combo 2 Túi 298.000đ';
-test('4. ca …6011240055: chỉ gửi địa chỉ rồi SĐT sau bảng giá Túi Xanh (mô hình tự điền Túi Xanh) → hỏi vị, không lên đơn', async () => {
+// Chủ shop 05/10 (quyết định c): khách chưa nêu vị → MẶC ĐỊNH Túi Xanh (không hỏi lại vị). Hai test dưới trước đây khẳng định
+// "hỏi vị, không lên đơn" (R16 N1); nay giỏ mô hình đoán / số túi không vị được thay bằng N Túi Xanh và lên đơn, kèm câu ghi rõ
+// "em lên N Túi Xanh nguyên bản 450g… muốn đổi vị nhắn em".
+test('4. ca …6011240055: chỉ gửi địa chỉ rồi SĐT sau bảng giá Túi Xanh → mặc định 1 Túi Xanh, lên đơn + câu ghi rõ món (chủ shop 05/10)', async () => {
   const sim = new Sim({ psid: 'r16-4a' });
   const inbox = sim.inbox({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - MIN });
   sim.history(inbox, 'outgoing', QUOTE_X, MIN, { sender: 'bot' });
@@ -89,31 +92,29 @@ test('4. ca …6011240055: chỉ gửi địa chỉ rồi SĐT sau bảng giá T
   const first = await sim.send(inbox, address, { llm: { template_id: 'ORDER_ADDRESS', Product_N1: X, No_A: '1', Customer_Address: address } });
   assert.deepEqual(first.created, []);
   const phone = await sim.send(inbox, PHONE, { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: X, No_A: '1', Phone_Number: PHONE, Customer_Address: address } });
-  assert.deepEqual(phone.created, [], JSON.stringify(phone.result));
-  assert.equal(phone.result.templateId, 'ORDER_INFO_ASK_FLAVOR');
-  assert.equal(inbox.pendingOrder.phone, PHONE);
-  // Khách chọn vị sau đó → lên đơn với SĐT + địa chỉ đã giữ.
-  const chosen = await sim.send(inbox, 'Túi mầu vàng', { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: V, No_A: '1', Phone_Number: PHONE, Customer_Address: address } });
-  assert.deepEqual(chosen.created.map(order => codes(order.items)), [['1 GRA-VANG-H350']], JSON.stringify(chosen.result));
+  assert.deepEqual(phone.created.map(order => codes(order.items)), [['1 GRA-XANH-Z450']], JSON.stringify(phone.result));
+  assert.match(phone.sent[0].text, /em lên 1 Túi Xanh nguyên bản 450g/);
 });
 
-test('4. ca …8987226913 / …304408: bot hỏi vị, khách chỉ gửi SĐT / địa chỉ (mô hình đoán Túi Xanh) → hỏi vị, không lên đơn', async () => {
+test('4. ca …8987226913 / …304408: số túi không vị + địa chỉ/SĐT (bot hỏi vị hay chưa) → mặc định N Túi Xanh, lên đơn (chủ shop 05/10)', async () => {
   const sim = new Sim({ psid: 'r16-4b' });
   const inbox = sim.inbox({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 2 * MIN });
   sim.history(inbox, 'outgoing', QUOTE_X, 2 * MIN, { sender: 'bot' });
-  await sim.send(inbox, 'Cho mình 2 túi nhé. Số nhà 14 ngách 211/85 Khương trung thanh Xuân nhé', { llm: null });
-  await sim.send(inbox, '0987654321', { llm: null });
-  const last = await sim.send(inbox, 'Số dt dưới là số đúng nhé', { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: X, No_A: '2', Phone_Number: '0987654321', Customer_Address: 'Số nhà 14 ngách 211/85 Khương trung thanh Xuân' } });
-  assert.deepEqual(last.created, [], JSON.stringify(last.result));
+  const turns = [];
+  turns.push(await sim.send(inbox, 'Cho mình 2 túi nhé. Số nhà 14 ngách 211/85 Khương trung thanh Xuân nhé', { llm: null }));
+  assert.match(turns[0].sent[0].text, /em lên 2 Túi Xanh nguyên bản 450g/);
+  turns.push(await sim.send(inbox, '0987654321', { llm: null }));
+  turns.push(await sim.send(inbox, 'Số dt dưới là số đúng nhé', { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: X, No_A: '2', Phone_Number: '0987654321', Customer_Address: 'Số nhà 14 ngách 211/85 Khương trung thanh Xuân' } }));
+  const created = turns.flatMap(turn => turn.created).filter(order => !order.updateOrderId);
+  assert.deepEqual(created.map(order => codes(order.items)), [['2 GRA-XANH-Z450']], JSON.stringify(turns.map(turn => turn.result)));
 
   const sim2 = new Sim({ psid: 'r16-4c' });
   const ib = sim2.inbox({ botLastTemplateId: 'ASK_FLAVOR', botLastReplyAt: Date.now() - MIN, pendingOrder: { items: [], key: '', at: Date.now() - MIN, askedBagCount: 2, phone: '', address: '' } });
   sim2.history(ib, 'incoming', '2 goi ạ', 1.2 * MIN);
   sim2.history(ib, 'outgoing', 'Dạ bên em có 3 vị ... Chị muốn lấy vị nào và mỗi vị mấy túi để em lên đơn nha ạ?', MIN, { sender: 'bot' });
   const turn = await sim2.send(ib, `Đc .xóm nguyễn huệ son thành yên thành nghệ an ( xã hop minh ) Sdt ${PHONE}`, { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: X, No_A: '2', Phone_Number: PHONE, Customer_Address: 'xóm nguyễn huệ, xã Sơn Thành, huyện Yên Thành, Nghệ An' } });
-  assert.deepEqual(turn.created, []);
-  assert.equal(turn.result.templateId, 'ORDER_INFO_ASK_FLAVOR');
-  assert.equal(ib.pendingOrder.askedBagCount, 2);
+  assert.deepEqual(turn.created.map(order => codes(order.items)), [['2 GRA-XANH-Z450']], JSON.stringify(turn.result));
+  assert.match(turn.sent[0].text, /em lên 2 Túi Xanh nguyên bản 450g/);
 });
 
 test('4. đối chứng: khách đã nói "cho chị 2 túi xanh" rồi gửi SĐT + địa chỉ → vẫn lên đơn', async () => {

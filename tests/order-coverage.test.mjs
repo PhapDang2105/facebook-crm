@@ -19,8 +19,9 @@ test('order-coverage: đúng bước (luật ORDER_ADDRESS+slot, nhãn là bư�
     row({ text: 'Cho mình 1 xanh 1 vàng', label: 'ORDER_ADDRESS' }),
     // SĐT trơn khi bot đang xin (giỏ có) → PHONE_ONLY; ngoại tuyến không dựng được giỏ nên render ra ASK_PRODUCT, nhưng đúng BƯỚC.
     row({ text: '0912345678', label: 'ORDER_CONFIRMATION', lastTemplate: 'ORDER_ADDRESS_PARTIAL', hasBasket: true, prevBotAgeMin: 3 }),
-    // SĐT + địa chỉ khi chưa có giỏ → ORDER_INFO_ASK_FLAVOR ≡ ASK_FLAVOR (bộ chấm chấm trước khi có mẫu này).
-    row({ text: 'Mình ở Biên Hòa Đồng Nai 0976594931', label: 'ASK_FLAVOR', lastTemplate: 'GENERAL_INFO', prevBotAgeMin: 3 }),
+    // SĐT + địa chỉ khi chưa có giỏ sau bảng giá chung → trước đây ORDER_INFO_ASK_FLAVOR ≡ ASK_FLAVOR. Chủ shop 05/10: mặc định Túi
+    // Xanh → luật ORDER_INFO_DEFAULT_XANH lên đơn (bước ORDER_CONFIRMATION); nhãn test đổi theo quyết định mới.
+    row({ text: 'Mình ở Biên Hòa Đồng Nai 0976594931', label: 'ORDER_CONFIRMATION', lastTemplate: 'GENERAL_INFO', prevBotAgeMin: 3 }),
     // Giỏ Facebook Shop: engine xử lý trước luật → không tính.
     row({ text: 'Khách chọn mua từ Facebook Shop: Granola (GRA-XANH-Z450) — 189.000đ', label: 'ORDER_ADDRESS' }),
     // Không ORDER, luật ra bước MUA → dương tính giả.
@@ -34,7 +35,8 @@ test('order-coverage: đúng bước (luật ORDER_ADDRESS+slot, nhãn là bư�
   assert.deepEqual([result.stats.rows, result.stats.shopCart, result.stats.order, result.stats.caught, result.stats.correct, result.stats.falsePositives], [6, 1, 4, 3, 3, 1]);
   assert.deepEqual(result.misses.map(item => item.text), ['B lên đơn cho mình chưa a']);
   assert.deepEqual(result.falsePositives.map(item => item.text), ['Cho mình 2 túi xanh']);
-  assert.equal(result.byLabel.ORDER_CONFIRMATION.correct, 1);
+  // Chủ shop 05/10: thêm dòng SĐT + địa chỉ (mặc định Túi Xanh) nhãn ORDER_CONFIRMATION → 2 (trước đây 1).
+  assert.equal(result.byLabel.ORDER_CONFIRMATION.correct, 2);
 });
 
 test('order-coverage: ctx như engine (PARTIAL/CLARIFY/CART_LINE/UPSELL → ORDER_ADDRESS), giá trị thô giữ cạnh mã sau render, tin cậy = golden/staff/corrected', () => {

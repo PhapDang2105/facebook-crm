@@ -54,10 +54,12 @@ test('#4 "Đặt trên ap r … giao tới đâu r / Đặt 3 bịch" (…603949
     assert.ok(!result.value.Customer_Address, text);
   }
   // Tắt luật thử: luật giỏ BAGS_ADDRESS cũng không bắt.
-  assert.notEqual(ruleIntent('Gọi đt có đc đâu\nĐặt trên ap r nhưng làm sao đê biết hàng giao tới đâu r\nĐặt 3 bịch', { ...ctx, experimentalRules: 'off' })?.rule, 'BAGS_ADDRESS');
-  // "ấp" thật trong địa chỉ vẫn là địa chỉ.
+  assert.doesNotMatch(String(ruleIntent('Gọi đt có đc đâu\nĐặt trên ap r nhưng làm sao đê biết hàng giao tới đâu r\nĐặt 3 bịch', { ...ctx, experimentalRules: 'off' })?.rule || ''), /^BAGS_ADDRESS/);
+  // "ấp" thật trong địa chỉ vẫn là địa chỉ. Chủ shop 05/10: số túi không vị + địa chỉ → mặc định Túi Xanh (luật
+  // BAGS_ADDRESS_DEFAULT_XANH, trước đây BAGS_ADDRESS giữ địa chỉ rồi hỏi vị).
   const address = ruleIntent('2 túi. ấp 3 xã Khánh Bình Tây huyện Trần Văn Thời Cà Mau', inbox());
-  assert.equal(address?.rule, 'BAGS_ADDRESS', JSON.stringify(address));
+  assert.equal(address?.rule, 'BAGS_ADDRESS_DEFAULT_XANH', JSON.stringify(address));
+  assert.deepEqual([address.value.Product_N1, address.value.No_A], ['Granola Túi Xanh 450g', '2']);
 });
 
 test('#5 "sữa chua không đường" không phải hỏi đường; tin đặt "Hộp 10 gói và 1 túi xanh" không ra PACKAGING_INFO / không mất hộp; "bn tiền" không chỉ trả trọng lượng', () => {

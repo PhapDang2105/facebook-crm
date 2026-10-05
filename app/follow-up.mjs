@@ -33,8 +33,21 @@ import { MESSENGER_WINDOW_MARGIN_MS, MESSENGER_WINDOW_MS, messengerWindowOpen } 
 // dùng chung cho "khách đã có đơn" và "bám đuổi thành công" ở mọi chỗ.
 const liveOrders = conversation => (Array.isArray(conversation?.customerOrders) ? conversation.customerOrders : [])
   .filter(order => order && !isCancelledOrder(order) && order.status !== 'Hủy');
-// Giờ yên tĩnh (giờ VN): không gửi tin bám đuổi 22h–7h.
-export const isQuietHourVN = (now = Date.now()) => { const hour = (new Date(now).getUTCHours() + 7) % 24; return hour >= 22 || hour < 7; };
+// Giờ yên tĩnh (giờ VN): không gửi tin bám đuổi 22h–8h.
+// Chủ shop 05/10: bám đuổi buổi sáng bắt đầu 8h (trước đây 7h, tin cả đêm dồn 12–15 tin gửi cùng lúc 7h).
+export const FOLLOW_UP_DAY_START_HOUR_VN = 8;
+export const FOLLOW_UP_DAY_END_HOUR_VN = 22;
+const hourVN = now => (new Date(now).getUTCHours() + 7) % 24;
+export const isQuietHourVN = (now = Date.now()) => { const hour = hourVN(now); return hour >= FOLLOW_UP_DAY_END_HOUR_VN || hour < FOLLOW_UP_DAY_START_HOUR_VN; };
+/**
+ * Chủ shop 05/10: tin dồn cả đêm không đi cùng một lúc đầu ngày. Giờ đầu tiên sau giờ yên tĩnh (8h–9h VN) mỗi lượt
+ * (15 phút) chỉ gửi tối đa 1/3 trần `maxPerRun` (làm tròn lên) — 15 tin dồn rải ra 8h00 / 8h15 / 8h30. Ngoài giờ đó giữ trần.
+ */
+export function followUpRunCap(maxPerRun, now = Date.now(), quietHours = true) {
+  const cap = Math.max(1, Number(maxPerRun) || 15);
+  if (!quietHours || hourVN(now) !== FOLLOW_UP_DAY_START_HOUR_VN) return cap;
+  return Math.max(1, Math.ceil(cap / 3));
+}
 
 const statePath = process.env.FOLLOW_UPS_PATH || path.join(projectRoot, 'data', 'processed', 'follow-ups.json');
 export const FOLLOW_UP_INTERVAL_MS = 15 * 60 * 1000;
@@ -503,7 +516,7 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
     log(`Bám đuổi: bỏ ${expired} tin quá 7 ngày khỏi hàng chờ`);
   }
   if (!settings?.enabled || !settings.followUps?.enabled) return { ...summary, disabled: true };
-  // 22h–7h giờ VN: không nhắn khách (tin 3 giờ sau lời Page lúc 22h sẽ đi lúc 7h).
+  // 22h–8h giờ VN: không nhắn khách (tin 3 giờ sau lời Page lúc 22h sẽ đi từ 8h, rải theo followUpRunCap).
   if (quietHours && isQuietHourVN(now)) return { ...summary, quiet: true };
   const state = await readFollowUpState();
   if (!state.activatedAt) await updateFollowUpState(current => { current.activatedAt = now; return null; });
@@ -513,7 +526,8 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
   const pruned = await pruneReturningFromQueue({ conversationInfo, now }).catch(() => ({ removed: 0 }));
   if (pruned.removed) log(`Bám đuổi: bỏ ${pruned.removed} khách cũ khỏi hàng chờ`);
   const store = await readMessagingStore();
-  const maxPerRun = Math.max(1, Number(settings.followUps.maxPerRun) || 15);
+  // Trần mỗi lượt theo cài đặt; giờ đầu ngày (8h–9h VN) rải bớt — followUpRunCap.
+  const maxPerRun = followUpRunCap(settings.followUps.maxPerRun, now, quietHours);
   const inboxLabels = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
   // Thẻ Đã mua / Hủy đơn / Khách xấu / Bám đuổi thành công: không phải ứng viên.
   const boughtLabelIds = labelsForEvents(inboxLabels, ['order', 'cancel', 'bad', 'followup-won']);

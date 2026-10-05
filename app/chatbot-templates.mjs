@@ -979,7 +979,26 @@ function renderOrder(value, templates, context = {}) {
   const contactChange = contactDiffersFromOrder(recentOrder, customerText, value.Customer_Address);
   const contactOnlyUpdate = templateId === 'ORDER_UPDATE' && !adjustedItems.length && !fromCart && !paymentMessage
     && recentForQuantity.length > 0 && recentOrder?.automatic !== false && now - (Number(recentOrder?.createdAt) || 0) < orderUpdateWindowMs && contactChange;
+  // Chủ shop 05/10 (quyết định c): "ngũ cốc" / "hạt ngũ cốc" kèm số túi riêng mà không nêu vị ("Mua hai gói ngũ cốc", "1 vị ca cao,
+  // 1 ngủ cốc") → MẶC ĐỊNH Túi Xanh (trước đây hỏi lại vị phần đó bằng ASK_FLAVOR_NGUYENBAN). Giỏ = các túi khách nêu rõ màu +
+  // phần "ngũ cốc" là Túi Xanh (bỏ món mô hình đoán cho phần đó). "nguyên bản" (Xanh hay Vàng) vẫn hỏi lại như cũ.
+  const cerealBags = !fromCart && !paymentAfterOrder && !askedNguyenBan && !contactOnlyUpdate && isOrderStep(templateId) && !ambiguousNguyenBan(customerText)
+    ? ambiguousCerealBags(customerText) : 0;
+  const cerealItems = cerealBags > 0 ? (() => {
+    const byCode = new Map();
+    const add = (product, quantity) => {
+      if (!product) return;
+      const current = byCode.get(product.sku);
+      byCode.set(product.sku, { product: product.name, code: product.sku, quantity: (current?.quantity || 0) + quantity });
+    };
+    for (const [colour, count] of Object.entries(colourCountsInText(customerText).counts)) {
+      if (count > 0) add(getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith(`GRA-${colour}-`)), count);
+    }
+    add(getCatalogProducts().find(entry => entry.active && !entry.staffOnly && entry.sku.startsWith('GRA-XANH-')), cerealBags);
+    return byCode.size ? [...byCode.values()] : null;
+  })() : null;
   const namedItems = contactOnlyUpdate ? recentForQuantity
+    : cerealItems ? cerealItems
     : xanhProduct ? [...adjustedItems, { product: xanhProduct.name, code: xanhProduct.sku, quantity: xanhFromNguyenBan }] : adjustedItems;
   // "Lấy thêm 1 túi vàng ghép đơn": bot chỉ tự gộp vào đơn cũ trong 60 phút như mọi lần sửa đơn
   // (chủ shop 01/10 — sau đó kho có thể đã đóng gói); quá hạn thì ghi chú + thẻ cho nhân viên
@@ -1086,7 +1105,7 @@ function renderOrder(value, templates, context = {}) {
   }
   // R16 (inbox1 A8): "1 vị ca cao, 1 ngủ cốc" — phần "ngũ cốc" chưa rõ vị: hỏi lại như "nguyên bản" (giữ phần đã rõ: 1 Nâu).
   const nguyenBanQty = !updating && !fromCart && !paymentMessage && templates.ASK_FLAVOR_NGUYENBAN && !askedNguyenBan
-    && context.lastTemplateId !== 'ASK_FLAVOR_NGUYENBAN' && !xanhFromNguyenBan ? (ambiguousNguyenBan(customerText) || ambiguousCerealBags(customerText)) : 0;
+    && context.lastTemplateId !== 'ASK_FLAVOR_NGUYENBAN' && !xanhFromNguyenBan ? (ambiguousNguyenBan(customerText) || (cerealItems ? 0 : ambiguousCerealBags(customerText))) : 0;
   if (nguyenBanQty > 0) {
     const { counts } = colourCountsInText(customerText);
     const adding = asksToAdd(messageWords);

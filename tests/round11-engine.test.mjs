@@ -269,8 +269,12 @@ test('P4 (E7): chờ "đặt thêm?" — câu có tên món (kể cả nhắc l�
 // ===== P5: số túi trước khi hỏi vị =====
 
 test('P5 (E8): "cho chị 2 túi" → ASK_FLAVOR → "vàng" = 2 túi vàng; "2 túi 2 vị" rồi một màu → mô hình; luật nhận ctx.askedBagCount', async () => {
+  // Chủ shop 05/10: "cho chị 2 túi" không vị → mặc định 2 Túi Xanh (trước đây ASK_FLAVOR); khách nêu "vàng" sau câu mặc định →
+  // đổi cả 2 túi sang Vàng (DEFAULT_FLAVOUR_SWAP) — kết quả cuối như cũ: đơn 2 Vàng 298k.
   const sim = new Sim({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 120000 });
-  assert.equal((await sim.send('cho chị 2 túi')).result.templateId, 'ASK_FLAVOR');
+  const asked = await sim.send('cho chị 2 túi');
+  assert.equal(asked.result.templateId, 'ORDER_ADDRESS');
+  assert.deepEqual(sim.conversation.pendingOrder.items.map(item => [item.code, item.quantity]), [['GRA-XANH-Z450', 2]]);
   const flavour = await sim.send('vàng');
   assert.equal(flavour.result.templateId, 'ORDER_ADDRESS');
   assert.deepEqual(sim.conversation.pendingOrder.items.map(item => [item.code, item.quantity]), [['GRA-VANG-H350', 2]]);
@@ -342,7 +346,9 @@ test('P8 (F2): "bữa trước ăn ngon, lấy thêm 2 túi xanh" không tự l�
 // ===== V8: ORDER_INFO =====
 
 test('V8 (E9/C5/B21): SĐT + địa chỉ trước khi nêu vị → giữ cả địa chỉ (kể số nhà sau SĐT), "2 túi xanh" chốt luôn; chỉ SĐT → không nói "đã nhận địa chỉ"', async () => {
-  const sim = new Sim({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 120000 });
+  // Chủ shop 05/10: SĐT + địa chỉ ngay sau bảng giá chung/bảng giá Túi Xanh → mặc định Túi Xanh và lên đơn luôn (ORDER_INFO_DEFAULT_XANH).
+  // Test này giữ kiểm cơ chế giữ SĐT/địa chỉ khi chưa nêu vị trong ngữ cảnh KHÔNG mặc định (sau lời chào WELCOME).
+  const sim = new Sim({ botLastTemplateId: 'WELCOME', botLastReplyAt: Date.now() - 120000 });
   const info = await sim.send('0912345678 12 Lê Lợi phường Bến Nghé quận 1 tphcm');
   assert.equal(info.result.templateId, 'ORDER_INFO_ASK_FLAVOR');
   assert.deepEqual([sim.conversation.pendingOrder.phone, sim.conversation.pendingOrder.address, sim.conversation.pendingOrder.items], ['0912345678', '12 Lê Lợi phường Bến Nghé quận 1 tphcm', []]);

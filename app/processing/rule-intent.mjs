@@ -351,8 +351,9 @@ const TRIAL_ASK_B = /^(?:(?:cho|lay|mua|dat|gui|ship)\s)?(?:(?:cho\s)?(?:em|e|mi
 // ===== Vòng 10 (đo độ phủ nhóm MUA trên bộ chấm + dòng nhân viên, xem tools-intent/order-coverage.mjs) =====
 // Số túi không nêu vị ("M lấy 1 túi", "Cho chị 2 gói nhé", "Mình 3 túi", "combo 2 túi 298k fship", "1 túi thôi"):
 // hỏi vị, không tự chọn. Chỉ khi CHƯA giữ giỏ (đang giữ giỏ thì "1 túi thôi" có thể là bớt túi → mô hình).
+// Chủ shop 05/10: nay MẶC ĐỊNH Túi Xanh (defaultXanh); nhận thêm "… gói ngũ cốc / hạt ngũ cốc / granola", "… túi bất kỳ".
 // ("… dùng thử / ăn thử" là của TRIAL_ASK (thử nghiệm), không lặp ở đây. Không có "vâng" ở đầu: bỏ dấu trùng "vàng".)
-const BAGS_NO_FLAVOR = /^(?:(?:ok|oke|vay|the|uh|u|da|thoi) )?(?:(?:ban|shop|b) )?(?:(?:lay|cho|dat|mua|ship|giao|gui|goi|ban|inbox|ib|lay cho|gui cho|ban cho|ship cho) )?(?:(?:cho )?(?:em|e|minh|m|mk|mjh|chi|c|cj|ci|toi|a|anh|tui|t|co|bac|chau) )?(?:(?:lay|dat|mua|can|muon|muon lay|muon mua|chot|lay them|them) )?(?:(?:combo|com bo|set|1 set) )?(?:1|2|3) ?(?:tui|goi|bich|bit|bi|bao)(?: (?:thoi|luon|truoc|da|nua|nay|do|kia|la du))?(?: \d{3} ?k)?(?: (?:mien|free|miem) ?(?:phi )?(?:ship|sip|xip|van chuyen)| fship)?$/;
+const BAGS_NO_FLAVOR = /^(?:(?:ok|oke|vay|the|uh|u|da|thoi) )?(?:(?:ban|shop|b) )?(?:(?:lay|cho|dat|mua|ship|giao|gui|goi|ban|inbox|ib|lay cho|gui cho|ban cho|ship cho) )?(?:(?:cho )?(?:em|e|minh|m|mk|mjh|chi|c|cj|ci|toi|a|anh|tui|t|co|bac|chau) )?(?:(?:lay|dat|mua|can|muon|muon lay|muon mua|chot|lay them|them) )?(?:(?:combo|com bo|set|1 set) )?(?:1|2|3) ?(?:tui|goi|bich|bit|bi|bao)(?: (?:hat |loai |vi )?(?:ngu coc|granola)(?: an sang)?)?(?: (?:bat ky|bat ki|bk|nao cung duoc|vi nao cung duoc|loai nao cung duoc|gi cung duoc))?(?: (?:thoi|luon|truoc|da|nua|nay|do|kia|la du))?(?: \d{3} ?k)?(?: (?:mien|free|miem) ?(?:phi )?(?:ship|sip|xip|van chuyen)| fship)?$/;
 // Đuôi hỏi còn dấu ("1 túi miễn ship hả", "2 túi hông") — core() đã cắt nên so trên sFull.
 const QUESTION_TAIL = /\b(ha|hong|khong|ko|k|kg|nhi|chu|phai khong|dung khong)$/;
 // "3 túi 3 vị", "ba túi ba vị", "3 túi khác vị", "mỗi vị 1 túi", "combo 3 vị", "3 túi xanh vàng nâu": 1 Xanh + 1 Vàng + 1 Nâu.
@@ -380,6 +381,9 @@ const CANCEL_GIFT = /\b(?:bo bat|bat (?:gao|dua|an|com)|gao dua|quat|muong|qua t
 // Bot vừa hỏi vị (không gồm COMBO3_FLAVOR: "xanh" sau đó là 3 túi xanh) mà khách trả lời một màu ("Túi xanh",
 // "Vàng nhiều hạt", "Nâu cacao ạ"): chọn vị đó, 1 túi → bộ soạn đơn ghép với SĐT/địa chỉ đang giữ.
 const FLAVOR_ASK_LAST = new Set(['ASK_FLAVOR', 'ORDER_INFO_ASK_FLAVOR', 'ASK_FLAVOR_NGUYENBAN', 'RECOMMEND_BEGINNER']);
+// Chủ shop 05/10: bot vừa gửi bảng giá chung / lời mời chọn vị (không phải bảng giá MỘT sản phẩm khác Túi Xanh — defaultXanh
+// tự loại theo ctx.quotedProduct) mà khách gửi SĐT + địa chỉ chưa nêu vị → mặc định Túi Xanh.
+const DEFAULT_XANH_LAST = new Set(['GENERAL_INFO', 'LIVESTREAM_COMMENT', 'FREESHIP_POLICY', 'DISCOUNT_POLICY', 'GIFT_POLICY', 'ORDER_HELP', 'ASK_TWO_BAGS', 'PRICE_COUNT', 'PRICE_QUOTE', 'PRICE_QUOTE_COMBO', 'ASK_FLAVOR', 'ORDER_INFO_ASK_FLAVOR', 'RECOMMEND_BEGINNER', 'ORDER_PHONE_ASK_FLAVOR']);
 // R15 (inbox2 A1, ca …111673 lời chào live → "Túi xanh 450 g"; …734430 "2 túi miễn ship k ạ" → "Mình có vị gì ạ" → "Túi xanh
 // 450g"): các mẫu bảng nhiều vị / chính sách kết bằng lời mời chọn loại ("chọn loại và số lượng nhắn em", "lấy 2 túi vị nào")
 // → khách chỉ nêu MỘT màu (không hỏi giá, không "?", không đuôi hỏi) là trả lời vị, không phải xin bảng giá túi đó (PRICE_ONE).
@@ -517,6 +521,35 @@ const ICEBREAKERS = [
 const productHintName = value => (value && typeof value === 'string' ? value : '');
 const quotedProductName = value => (value && typeof value === 'string' ? value : '');
 const colourSku = colour => getCatalogProducts().find(item => item.active !== false && /^gra-/i.test(item.sku || '') && String(item.sku || '').toLowerCase().includes(`-${colour}-`));
+
+/**
+ * Chủ shop 05/10 (quyết định c): khách không nêu vị ("2 túi", "lấy 1 túi", "combo 2", "Mua hai gói ngũ cốc", "2 túi bất kỳ",
+ * SĐT + địa chỉ sau bảng giá chung…) → MẶC ĐỊNH Túi Xanh, không hỏi lại vị. Trả { value, defaultFlavour } (bước đơn N Túi Xanh;
+ * engine ghi rõ "N Túi Xanh nguyên bản 450g" trong tin để khách đổi nếu muốn) hay null khi không áp:
+ * - đang nói gói nhỏ / combo 10 gói (ctx.smallPackContext);
+ * - bot vừa báo giá / ngữ cảnh là sản phẩm KHÁC Túi Xanh (Vàng, Nâu, Tropical, yến mạch, Nghệ Lành… — ctx.quotedProduct /
+ *   ctx.contextProduct): giữ cách cũ (hỏi vị / mô hình).
+ * `extra`: SĐT/địa chỉ kèm theo (Phone_Number, Customer_Address). `raw`: tin gốc — chạy lại trên dữ liệu thật r13/r15/r16 cho thấy
+ * cần loại thêm: tin có chữ vị/sản phẩm ở bất kỳ đâu ("2ca cao,<sđt>,79 xóm…" — lỗi gõ vị; địa danh "… Vàng" thì hỏi vị cho chắc),
+ * và (khi không phải tin địa chỉ, `address` false) "1 túi NÀY / gói ĐÓ" (khách chỉ món đang thấy), "thêm / nữa" (đặt thêm vào đơn
+ * đã có), đuôi hỏi ("2 gói 298 k à").
+ */
+function defaultXanh(count, ctx = {}, extra = {}, raw = '', { address = false } = {}) {
+  // Khách gửi ảnh trong 2 giờ (có thể đang chỉ món qua ảnh) → không mặc định (ctx.customerImageRecently do engine truyền).
+  if (ctx.smallPackContext || ctx.customerImageRecently) return null;
+  const text = foldVietnamese(String(raw || '')).toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/(?:\b|\d)(?:xanh|vang|nau|ca ?cao|socola|chocolate|so ?co ?la|mint|tropical|nguyen ban|nhieu hat|yen mach|nghe lanh|bot ngu coc|goi nho|hop 10|10 goi)\b/.test(text)) return null;
+  if (!address && (/\b(?:nay|do|kia|day|them|nua)\b/.test(text) || flavourQuestionTail(raw, core(prep(String(raw || '')))))) return null;
+  const notXanh = value => {
+    const context = foldVietnamese(String(value || '')).toLowerCase();
+    return Boolean(context) && (!/\bxanh\b/.test(context) || /\b(?:mint|tropical|combo|hop|goi nho)\b|xanh (?:duong|nhat|min|bac ha)/.test(context));
+  };
+  if (notXanh(ctx.quotedProduct || ctx.contextProduct) || notXanh(ctx.lastQuoteName)) return null;
+  const product = colourSku('xanh');
+  if (!product) return null;
+  const quantity = Math.max(1, Math.min(10, Math.round(Number(count) || 1)));
+  return { value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: String(quantity), ...extra }, defaultFlavour: { product: product.name, quantity } };
+}
 
 /**
  * R16 (ca …4455835868 "Đặt mua 2 gói Ngũ cốc ăn sáng màu xanh / ĐC … / ĐT …", "Cho mình 3 bịch ngũ cốc vị cacao nhé <sđt> <đc>"): tên
@@ -847,6 +880,9 @@ export function ruleIntent(text, ctx = {}) {
       if (trialAsk) {
         const colour = trialAsk[1] ? (trialAsk[1] === 'cacao' ? 'nau' : trialAsk[1]) : '';
         const product = colour ? colourSku(colour)?.name || '' : (productHintName(ctx.contextProduct) || quotedProductName(ctx.quotedProduct));
+        // Chủ shop 05/10: "Cho chị thử 1 gói" không nêu vị, không ngữ cảnh sản phẩm → 1 Túi Xanh (trước đây hỏi vị).
+        const fallback = product ? null : defaultXanh(1, ctx, {}, raw);
+        if (fallback) return { rule: 'TRIAL_ASK', experimental: true, ...fallback };
         return { rule: 'TRIAL_ASK', experimental: true, value: product ? { template_id: 'ORDER_ADDRESS', Product_N1: product, No_A: '1' } : { template_id: 'ASK_FLAVOR' } };
       }
     }
@@ -974,6 +1010,22 @@ export function ruleIntent(text, ctx = {}) {
       return { rule: 'K3B_QTY_ORDER', value: { template_id: 'ORDER_UPDATE' }, setQuantity: quantity };
     }
   }
+  // Chủ shop 05/10: bot vừa MẶC ĐỊNH Túi Xanh (giỏ chờ, hay đơn bot tạo ≤ 60 phút — engine truyền ctx.defaultFlavourSwap
+  // { quantity, target: 'basket'|'order' } khi câu ghi rõ "em lên N Túi Xanh…" đã gửi trong 2 giờ) mà khách nêu MỘT vị khác
+  // ("vàng", "đổi sang túi vàng nha", "à chị lấy nâu nhé") → đổi đúng N túi sang vị đó (giỏ chờ thay giỏ; đơn ≤ 60 phút sửa đơn
+  // như cũ). Có số, nhiều vị, câu hỏi → luật/mô hình như cũ.
+  const swap = ctx.defaultFlavourSwap;
+  if (!isComment && !phone && !complaint && swap && Number(swap.quantity) > 0 && !raw.includes('?') && !/\d/.test(s) && s.length <= 50) {
+    const chosen = [...new Set((s.match(/\b(xanh|vang|nau|cacao)\b/g) || []).map(colour => (colour === 'cacao' ? 'nau' : colour)))];
+    const rest = s.replace(FLAVOR_ANSWER_WORDS, ' ').replace(/\b(?:doi|sang|thanh|chuyen|qua|hay|thoi|nhe|nha|a|ah|ak|ha|nhieu hat|vi|loai|hat|nguyen|ban|di|giup|dum|nho|e|em|oi|shop|sop|ad|nhi|vay|v|lai)\b/g, ' ').trim();
+    const product = chosen.length === 1 && chosen[0] !== 'xanh' ? colourSku(chosen[0]) : null;
+    if (product && !rest && !flavourQuestionTail(raw, s)) {
+      const quantity = String(Math.max(1, Math.min(10, Math.round(Number(swap.quantity)))));
+      return swap.target === 'order'
+        ? { rule: 'DEFAULT_FLAVOUR_SWAP', value: { template_id: 'ORDER_UPDATE', Product_N1: product.name, No_A: quantity } }
+        : { rule: 'DEFAULT_FLAVOUR_SWAP', value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: quantity } };
+    }
+  }
   // SĐT (± địa chỉ) khi CHƯA có giỏ và không nêu sản phẩm: khách bắt đầu đặt → ghi nhận, hỏi vị
   // (ORDER_INFO_ASK_FLAVOR). Ví dụ thật: "131/10B đường 6 linh Xuân thủ Đức tphcm <sdt>" sau ASK_FLAVOR
   // từng ra GENERAL_INFO. Ngoại lệ: sau WHOLESALE_CTV_CONTACT khách gửi số Zalo → WHOLESALE_RECEIVED + thẻ.
@@ -988,6 +1040,10 @@ export function ruleIntent(text, ctx = {}) {
     const hasAddress = Boolean(addressText) && (ADDRESS_WORDS.test(sAddress) || Boolean(describeDeliveryAddress(addressText).resolved?.province));
     const asksOrder = ORDER_ASK.test(orderAskCore(raw)) ||/\b(don|kiem tra|tra giup|tra don|check|goi lai|goi cho)\b/.test(sAddress);
     if (hasAddress && !PRODUCT_MENTION.test(sAddress) && !asksOrder && orderAgeMin >= 60) {
+      // Chủ shop 05/10: SĐT + địa chỉ mà chưa nêu vị SAU khi bot báo giá chung / mời chọn vị → N Túi Xanh (N = số túi khách đã
+      // nêu trước đó, không thì 1), lên đơn luôn; tin xác nhận ghi rõ Túi Xanh để khách đổi. Ngữ cảnh khác giữ hỏi vị.
+      const fallback = DEFAULT_XANH_LAST.has(last) && !ctx.staffRepliedAfterBot ? defaultXanh(Number(ctx.askedBagCount) || 1, ctx, { Phone_Number: phone, Customer_Address: addressText }, raw, { address: true }) : null;
+      if (fallback) return { rule: 'ORDER_INFO_DEFAULT_XANH', ...fallback };
       return { rule: 'ORDER_INFO', value: { template_id: 'ORDER_INFO_ASK_FLAVOR', Phone_Number: phone, Customer_Address: addressText } };
     }
     if (phoneOnly && SALES_LAST.has(last) && !ctx.hasRecentOrder && !ctx.staffRepliedAfterBot) {
@@ -1107,8 +1163,11 @@ export function ruleIntent(text, ctx = {}) {
     const product = colourSku(reorder[1] === 'cacao' ? 'nau' : reorder[1]);
     return { rule: 'REORDER', value: { template_id: 'ASK_REORDER', values: { previous: product?.name || 'loại cũ' } } };
   }
-  // Vòng 12 (B3 #30): "combo 2" / "lấy combo 3" không nêu vị → hỏi vị (không mặc định 2 Xanh).
+  // Vòng 12 (B3 #30): "combo 2" / "lấy combo 3" không nêu vị → hỏi vị.
+  // Chủ shop 05/10: mặc định Túi Xanh (combo 2 = 2 Túi Xanh, combo 3 = 3 Túi Xanh), không hỏi vị.
   if (!isComment && !phone && !ctx.hasBasket && /^(?:(?:lay|cho|dat|mua|chot) (?:(?:em|minh|chi|c|e|anh|a|mk) )?)?combo ?(?:2|3|hai|ba)$/.test(s)) {
+    const fallback = defaultXanh(/\b(?:3|ba)$/.test(s) ? 3 : 2, ctx, {}, raw);
+    if (fallback) return { rule: 'COMBO_DEFAULT_XANH', ...fallback };
     return { rule: 'COMBO_NO_FLAVOR', value: { template_id: 'ASK_FLAVOR' } };
   }
   // Vòng 12 (B1 #12, B2 #11/#21, B3 #4): "3 túi bao nhiêu" → 447k + quà; "Lấy 4 túi có ưu đãi ko" → 596k (giá giỏ lớn của
@@ -1189,6 +1248,9 @@ export function ruleIntent(text, ctx = {}) {
     const bags = Number((s.match(/\b([1-3]) ?(?:tui|goi|bich|bit|bi|bao)\b/) || [])[1]) || 0;
     const product = named && bags ? colourSku(named) : null;
     if (product) return { rule: 'BAGS_NAMED_BEFORE', value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: String(bags) } };
+    // Chủ shop 05/10: không nêu vị → mặc định N Túi Xanh (trước đây hỏi vị ASK_FLAVOR).
+    const fallback = defaultXanh(bags || 1, ctx, {}, raw);
+    if (fallback) return { rule: 'BAGS_DEFAULT_XANH', ...fallback };
     return { rule: 'BAGS_NO_FLAVOR', value: { template_id: 'ASK_FLAVOR' } };
   }
   // Vòng 10: "3 túi 3 vị" / "mỗi vị 1 túi" / "3 túi xanh vàng nâu" → 1 Xanh + 1 Vàng + 1 Nâu; "2 túi 2 vị" → hỏi vị.
@@ -1256,6 +1318,21 @@ export function ruleIntent(text, ctx = {}) {
   // Vòng 10: giỏ + địa chỉ (± SĐT) trong một tin ("1 túi xanh, 1 túi vàng Võ Thị Ngân tổ 13 ấp…", "Ship cho c 1 túi
   // xanh và 1 túi vàng. Hường- <sđt> HA02-17 Vinhomes…") → ORDER_ADDRESS đủ slot, bộ soạn đơn chốt hay hỏi phần thiếu.
   // Giỏ + "gửi địa chỉ cũ" → SĐT/địa chỉ lấy từ đơn trước ('0'); không có đơn trước thì để mô hình.
+  // Chủ shop 05/10 ("2 túi bất kì gửi về địa chỉ cũ"): số túi KHÔNG màu + "(gửi) địa chỉ cũ" → N Túi Xanh, SĐT/địa chỉ từ đơn
+  // trước ('0', như BASKET_OLD_ADDRESS). Không có đơn trước, "như cũ / như lần trước" (món như đơn trước), câu hỏi → như cũ.
+  if (!complaint && !isComment && orderAgeMin >= 60 && !ctx.hasBasket && !ctx.smallPackContext && !raw.includes('?') && ctx.hasPreviousDelivery !== false && !QUESTION_TAIL.test(sFull)) {
+    const OLD_PHRASE = /(?:\b(?:gui|goi|ship|giao)(?: (?:ve|toi|den|cho (?:em|e|minh|chi|c|anh|a)))? )?(?:\b(?:ve|toi|den|theo|nhu) )?\b(?:dia chi|dc|d c|dchi|cho|thong tin|tt) (?:(?:van|nhu|giong|theo) )?(?:cu|lan truoc|don truoc|hom truoc|truoc)\b/g;
+    const sOld = core(maskMarketWord(raw));
+    if (OLD_ADDRESS_CORE.test(sOld)) {
+      const rest = sOld.replace(OLD_PHRASE, ' ').replace(/\b(?:bat ky|bat ki|bk)\b/g, ' ').replace(/\s+/g, ' ').trim();
+      const sameAsBefore = /\b(?:nhu|giong|theo) (?:cu|lan truoc|don truoc|hom truoc|truoc|moi lan)\b|\b(?:loai|vi|mon) (?:cu|lan truoc|truoc)\b/.test(rest);
+      if (rest && !sameAsBefore && BAGS_NO_FLAVOR.test(rest)) {
+        const bags = Number((rest.match(/\b([1-3]) ?(?:tui|goi|bich|bit|bi|bao)\b/) || [])[1]) || 1;
+        const fallback = defaultXanh(bags, ctx, { Phone_Number: phone || '0', Customer_Address: '0' }, raw);
+        if (fallback) return { rule: 'BAGS_OLD_ADDRESS_DEFAULT_XANH', ...fallback };
+      }
+    }
+  }
   if (!complaint && !isComment && orderAgeMin >= 60 && !ctx.smallPackContext && !raw.includes('?') && typeof ctx.commentBasket === 'function') {
     // Từ đổi/hủy chỉ xét ở phần giỏ: địa chỉ có thể chứa "Huy" (xã Dương Huy), "Bột"…
     const found = splitBasketAddress(raw);
@@ -1271,6 +1348,10 @@ export function ruleIntent(text, ctx = {}) {
       if (addressText && !PRICE.test(sAddress) && !ORDER_ASK.test(sAddress) && (ADDRESS_WORDS.test(sAddress) || Boolean(describeDeliveryAddress(addressText).resolved?.province))) {
         const value = { template_id: 'ORDER_ADDRESS', Customer_Address: addressText };
         if (phone) value.Phone_Number = phone;
+        // Chủ shop 05/10: số túi không màu + địa chỉ → N Túi Xanh (trước đây giữ địa chỉ rồi hỏi vị).
+        const bags = Number((sBasket.match(/\b([1-3]) ?(?:tui|goi|bich|bit|bi|bao)\b/) || [])[1]) || 1;
+        const fallback = defaultXanh(bags, ctx, value, raw, { address: true });
+        if (fallback) return { rule: 'BAGS_ADDRESS_DEFAULT_XANH', ...fallback };
         return { rule: 'BAGS_ADDRESS', value };
       }
     }

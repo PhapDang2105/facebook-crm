@@ -77,7 +77,7 @@ const TEMPLATES_BY_SUBGROUP = {
  */
 // R15 (03/10): BAG_SIZE_INFO / FRUIT_PAIRING / SMALL_PACK_FLAVOURS là mẫu thông tin MỚI chưa có nhãn trong dữ liệu huấn luyện —
 // OTHER có chủ ý (không vào ANSWER để mô hình tầng không tự trả lời bằng mẫu nó chưa học); chuyển sang INFO sau khi huấn luyện lại.
-export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED', 'BAG_SIZE_INFO', 'FRUIT_PAIRING', 'SMALL_PACK_FLAVOURS'].includes(String(templateId || ''));
+export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED', 'BAG_SIZE_INFO', 'FRUIT_PAIRING', 'SMALL_PACK_FLAVOURS', 'DEFAULT_FLAVOUR_NOTE'].includes(String(templateId || ''));
 
 /** Mã mẫu → nhóm 6 lớp (bảng đã chốt, PRICE/INFO/SOCIAL tách). Mã không có trong bảng và COMMENT_* không có mục. */
 export const SUBGROUP_OF_TEMPLATE = Object.freeze(Object.fromEntries(Object.entries(TEMPLATES_BY_SUBGROUP).flatMap(([subgroup, templates]) => templates.map(templateId => [templateId, subgroup]))));

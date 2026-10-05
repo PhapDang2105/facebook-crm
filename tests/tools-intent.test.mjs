@@ -474,7 +474,9 @@ test('relabel-policy (vòng 12): --templates gộp seed như engine (T1); giỏ 
   assert.ok(partial.ASK_FLAVOR && partial.ORDER_INFO_ASK_FLAVOR && partial.PRICE_QUOTE, 'mẫu seed gộp vào');
   assert.equal(partial.GENERAL_INFO, 'Dạ bảng giá {x}', 'mẫu đã lưu thắng seed');
   const at = Date.now();
-  const v1 = extra => ({ id: 'v', text: 'Cho mình 2 túi', prevBot: '', lastTemplate: '', label: 'ORDER_ADDRESS', labelSource: 'llm', source: 'inbox', hasBasket: false, lastWasOrderStep: false, at, ...extra });
+  // Chủ shop 05/10: "Cho mình 2 túi" nay mặc định Túi Xanh (không còn ASK_FLAVOR) → câu mẫu đổi sang "Lấy 2 túi khác vị" (luật
+  // TWO_FLAVOURS vẫn hỏi vị và phụ thuộc giỏ như BAGS_NO_FLAVOR cũ) để test giữ đúng ý.
+  const v1 = extra => ({ id: 'v', text: 'Lấy 2 túi khác vị', prevBot: '', lastTemplate: '', label: 'ORDER_ADDRESS', labelSource: 'llm', source: 'inbox', hasBasket: false, lastWasOrderStep: false, at, ...extra });
   const rows = [
     v1({ id: 'v1' }), // v1 (không prevBotAgeMin): BAGS_NO_FLAVOR → ASK_FLAVOR phụ thuộc giỏ không biết → giữ ORDER_ADDRESS, weak
     v1({ id: 'v2', text: 'Gửi chung nguyễn xóm 7 thôn độ chàng xã Đại Thành quốc oai Hà Nội <sdt>', label: 'ORDER_CONFIRMATION', lastTemplate: 'ORDER_ADDRESS', prevBot: 'Dạ để lên đơn đúng tuyến, chị cho em xin số điện thoại và địa chỉ' }),

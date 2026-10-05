@@ -1,4 +1,4 @@
-import { asksToAdd, buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, phoneLooksShort, renderChatbotReply, renderOrderGiftReply, sanitizeModelAnswer, withoutInviteTail } from './chatbot-templates.mjs';
+import { ambiguousCerealBags, asksToAdd, buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, phoneLooksShort, renderChatbotReply, renderOrderGiftReply, sanitizeModelAnswer, withoutInviteTail } from './chatbot-templates.mjs';
 import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
 import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, loadLocationIndex, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
@@ -78,8 +78,8 @@ export const fallbackTemplates = Object.freeze({
   WHOLESALE_RECEIVED: 'Dạ em đã ghi nhận nhu cầu lấy sỉ/CTV của {title} ạ. Bạn phụ trách kinh doanh sẽ liên hệ lại {title} sớm trong tin này nha ạ 💛',
   ORDER_ADDRESS_OLD_ASK_PHONE: 'Dạ em chưa thấy địa chỉ cũ của {title} trong hội thoại này ạ. {Title} cho em xin số điện thoại đã đặt lần trước để em tra và gửi đúng địa chỉ đó nha ạ 💛',
   ORDER_INFO_ASK_FLAVOR: 'Dạ em đã ghi nhận SĐT/địa chỉ của {title} rồi ạ. {Title} cho em biết mình lấy loại nào (Túi Xanh nguyên bản / Túi Vàng nhiều hạt / Túi Nâu cacao) và số lượng để em lên đơn liền nha ạ 🌾',
-  ASK_FLAVOR_NGUYENBAN: 'Dạ Túi Xanh nguyên bản là vị cơ bản nhất, không thêm đường, hạt và yến mạch giòn tự nhiên ạ. {Title} lấy Túi Xanh hay muốn em tư vấn thêm Túi Vàng nhiều hạt / Túi Nâu cacao ạ?',
-  RECOMMEND_BEGINNER: 'Dạ mới ăn lần đầu thì {title} thử Túi Xanh nguyên bản ạ, vị dễ ăn nhất, không thêm đường 🌾 {Title} lấy 1 túi dùng thử hay combo 2 túi để được miễn ship ạ?',
+  ASK_FLAVOR_NGUYENBAN: 'Dạ vị nguyên bản nhà em có Túi Xanh 450g (dễ ăn, cân bằng) và Túi Vàng 350g (nhiều hạt hơn) ạ 💛 {Title} lấy loại nào và mấy túi để em lên đơn nha 🌾',
+  RECOMMEND_BEGINNER: 'Dạ mới ăn lần đầu thì {title} thử Túi Xanh nguyên bản ạ, vị cân bằng, dễ ăn nhất 🌾 {Title} lấy 1 túi dùng thử hay combo 2 túi để được miễn ship ạ?',
   // Vòng 11: khách chỉ gửi SĐT (chưa địa chỉ) khi chưa có giỏ; câu nhắc ngắn giỏ đang giữ (khách hỏi chuyện
   // khác lúc bot đang xin SĐT/địa chỉ) — cài đặt thiếu mẫu thì bot không im.
   ORDER_PHONE_ASK_FLAVOR: 'Dạ em đã nhận SĐT của {title} rồi ạ 💛 {Title} lấy Túi Xanh nguyên bản 450g, Túi Vàng nhiều hạt 350g hay Túi Nâu cacao 350g, mỗi loại mấy túi, kèm địa chỉ nhận hàng đầy đủ để em lên đơn liền cho mình nha 🌾',
@@ -100,9 +100,9 @@ export const fallbackTemplates = Object.freeze({
   ASK_REORDER: 'Dạ lần này {title} muốn lấy Túi Xanh hay vẫn {previous}, mấy túi để em lên đơn liền cho mình ạ? 🌾',
   TROPICAL_CONFIRM: 'Dạ có phải {title} hỏi Granola Tropical vị Cacao 300g (túi xanh nhạt, có xoài và dâu sấy) không ạ? Hay {title} muốn Túi Xanh nguyên bản 450g (túi xanh lá) ạ?',
   WEIGHT_GAIN: 'Dạ muốn tăng cân {title} dùng granola cùng sữa tươi hoặc sữa chua có đường, thêm trái cây (chuối, xoài…) và ăn thành bữa phụ mỗi ngày nha ạ; Túi Vàng nhiều hạt cho nhiều năng lượng hơn. Granola là thực phẩm thông thường, không phải thực phẩm chức năng nên hiệu quả còn tùy chế độ ăn và cơ địa ạ.',
-  HEALTH_DIABETES: 'Dạ granola bên em không thêm đường, nhưng có trái cây sấy (đường tự nhiên) và tinh bột từ yến mạch, gạo lứt ạ. Người tiểu đường hay đường huyết cao {title} nên hỏi bác sĩ về khẩu phần trước; nếu dùng thì ăn lượng nhỏ (2–3 muỗng), kèm sữa chua không đường. Đây là thực phẩm thông thường, không phải thực phẩm chức năng nên không có tác dụng điều trị ạ.',
-  VEGAN_INFO: 'Dạ người ăn chay dùng được ạ: granola bên em 100% từ thực vật (yến mạch, gạo lứt, các loại hạt, trái cây sấy), vị ngọt từ mật thốt nốt ạ.',
-  BENEFITS: 'Dạ granola là bữa sáng/bữa phụ tiện lợi: yến mạch, gạo lứt, hạt và trái cây sấy cho nhiều chất xơ, năng lượng và no lâu; không thêm đường, không chiên dầu ạ. Đây là thực phẩm thông thường, không phải thực phẩm chức năng nên không có công dụng chữa bệnh ạ.',
+  HEALTH_DIABETES: 'Dạ granola bên em có dùng mật thốt nốt và đường mạch nha để tạo vị ngọt nhẹ, ngoài ra có trái cây sấy và tinh bột từ yến mạch, gạo lứt ạ. Người tiểu đường (kể cả tiểu đường thai kỳ) hay đường huyết cao {title} nên hỏi ý kiến bác sĩ trước để được hỗ trợ tốt nhất; nếu dùng thì ăn lượng vừa phải (2–3 muỗng), kèm sữa chua không đường. Đây là thực phẩm thông thường, không phải thực phẩm chức năng nên không có tác dụng điều trị ạ.',
+  VEGAN_INFO: 'Dạ người ăn chay dùng được ạ: granola bên em 100% từ thực vật (yến mạch, gạo lứt, các loại hạt, trái cây sấy), vị ngọt từ mật thốt nốt và đường mạch nha ạ.',
+  BENEFITS: 'Dạ granola là bữa sáng/bữa phụ tiện lợi: yến mạch, gạo lứt, hạt và trái cây sấy cho nhiều chất xơ, năng lượng và no lâu; không chiên dầu, vị ngọt nhẹ từ mật thốt nốt và đường mạch nha ạ. Đây là thực phẩm thông thường, không phải thực phẩm chức năng nên không có công dụng chữa bệnh ạ.',
   PRODUCTION_PLACE: 'Dạ sản phẩm được sản xuất tại xưởng của Giọt Nắng: 52 Đường An Phú Đông 21, P. An Phú Đông, TP.HCM ạ. Hàng sản xuất trong nước, có hồ sơ công bố, ngày sản xuất và hạn dùng in trên bao bì ạ.',
   GIFT_POLICY_LIVE: 'Dạ khách xem live lấy 2 túi bất kỳ chỉ 298.000đ, miễn phí vận chuyển và được tặng Quạt + Bát gáo dừa ạ 🎁 {Title} lấy 2 túi vị nào để em lên đơn liền nha?',
   GIFT_POLICY_PROMO: 'Dạ trong thời gian ưu đãi của {title}, combo 2 túi được miễn phí vận chuyển và tặng 1 bát gáo dừa ạ 🎁 Từ 3 túi tặng bộ bát + muỗng dừa. {Title} lấy combo 2 túi vị nào để em lên đơn nha?',
@@ -136,9 +136,11 @@ export const fallbackTemplates = Object.freeze({
   STAFF_WAIT_CLOSED: 'Dạ em đã ghi nhận câu hỏi của {title} rồi ạ 💛 Bạn phụ trách làm việc giờ hành chính từ 8h đến 17h, sẽ trả lời {title} từ 8h {when} nha ạ.',
   // R14 (chủ shop 03/10, quyết định 11): câu hỏi bệnh lý (cao huyết áp, tim mạch…) — câu thận trọng ngắn + thẻ; agent luật
   // chọn mã này, agent seed thêm cùng chữ vào seed.
-  HEALTH_CAUTION: 'Dạ granola bên em là thực phẩm thông thường, không thêm đường, không phải thuốc hay thực phẩm chức năng ạ. Người đang điều trị bệnh (huyết áp, tim mạch…) {title} nên hỏi bác sĩ về khẩu phần phù hợp; nếu dùng thì ăn lượng vừa phải (2–3 muỗng), kèm sữa chua không đường nha ạ.',
+  HEALTH_CAUTION: 'Dạ granola bên em là thực phẩm thông thường, không phải thuốc hay thực phẩm chức năng ạ; sản phẩm có dùng mật thốt nốt và đường mạch nha để tạo vị ngọt nhẹ. Người đang điều trị bệnh (huyết áp, tim mạch, tiểu đường…) {title} nên hỏi ý kiến bác sĩ về khẩu phần phù hợp; nếu dùng thì ăn lượng vừa phải (2–3 muỗng), kèm sữa chua không đường nha ạ.',
   // R14 (inbox3 H4): tin hộp thư rất ngắn chê sản phẩm ("Dỡ") mà mô hình định chuyển CSKH (tắt bot) → xin lỗi, hỏi chưa ưng
   // điểm nào, bot vẫn bật + thẻ Khiếu nại.
+  // Chủ shop 05/10 (quyết định c): khách không nêu vị → mặc định Túi Xanh; câu ghi rõ món để khách đổi nếu muốn.
+  DEFAULT_FLAVOUR_NOTE: 'Dạ {title} chưa chọn vị nên em lên {count} Túi Xanh nguyên bản 450g (vị dễ ăn, bán chạy nhất) cho mình ạ 💚 {Title} muốn đổi sang Túi Vàng nhiều hạt hay Túi Nâu cacao thì nhắn em đổi liền nha.',
   COMPLAINT_SORRY: 'Dạ em xin lỗi vì sản phẩm chưa làm {title} hài lòng ạ 💛 {Title} cho em biết mình chưa ưng ở điểm nào (vị, độ ngọt hay độ giòn) để em báo bạn phụ trách kiểm tra và hỗ trợ {title} ngay nha ạ.'
 });
 
@@ -255,7 +257,8 @@ export function commentBasket(text, detail = null) {
   // "bà"/"ba" đứng trước từ khác ("bà lấy túi vàng") không đổi. "một" không đổi: "bao nhiêu một gói" là hỏi đơn giá, và
   // một túi vốn đã là số lượng mặc định.
   const numberWords = { hai: '2', ba: '3', bon: '4', nam: '5' };
-  const folded = foldVietnamese(String(text || '').replace(/nấu/giu, 'nauu')).replace(/\bs[oô] ?c[oô] ?la\b|\bsocola\b|\bchocolate\b/g, 'cacao')
+  // Chủ shop 05/10: "hợp" (phù hợp) bỏ dấu trùng "hộp" (hộp 10 gói) → giữ khác trước khi bỏ dấu.
+  const folded = foldVietnamese(String(text || '').replace(/nấu/giu, 'nauu').replace(/hợp/giu, 'hopp')).replace(/\bs[oô] ?c[oô] ?la\b|\bsocola\b|\bchocolate\b/g, 'cacao')
     .replace(/\bxanh (?:mint|min|bac ha|bien|ngoc|da troi|duong)\b|\btropical\b|\b(?:tui|goi|loai|vi) (?:co )?dau(?: tay)?\b|\bdau tay\b|\bxoai dau\b/g, 'mint').replace(/\s+/g, ' ')
     .replace(/\b(hai|ba|bon|nam) (?=(?:tui|goi|bich|bit|bi|hop|xanh|vang|nau|cacao|mint)\b)/g, (_match, word) => `${numberWords[word]} `)
     // R15 (bình luận A5, ca …020466 "Một bị màu vàng"): "một" ĐẦU câu (± lấy/cho/mua … em/chị) ngay trước đơn vị là 1.
@@ -294,11 +297,17 @@ export function commentBasket(text, detail = null) {
     const colour = colourText === 'cacao' ? 'nau' : colourText;
     counts.set(colour, (counts.get(colour) || 0) + (Number(quantityText) || 1));
   }
-  // Hộp 10 gói: "2 hộp xanh" → Combo 10 gói Xanh x2; "hộp mix" / "1 hộp" → Combo 10 gói Mix.
+  // Hộp 10 gói: "2 hộp xanh" → Combo 10 gói Xanh x2; "1 hộp" (không ghi màu) → Combo 10 gói Xanh.
+  // Chủ shop 05/10: combo 10 gói chỉ còn Xanh (Nâu/Mix/Cam đã tắt) — trước đây hộp không màu là Mix. "hộp mix"/"hộp nâu"
+  // → sản phẩm đã tắt, không tự dựng giỏ (để mô hình / nhân viên).
   if (boxed) {
     const boxCount = Number(cleaned.match(/(?<!\d)(\d{1,2})\s*hop\b/)?.[1] || cleaned.match(/\bhop\b[^\d]{0,12}(?<!\d)(\d{1,2})(?!\d|\s*(?:goi|g|gr|gram|k)\b)/)?.[1]) || 0;
-    const colourOfBox = counts.size === 1 ? [...counts.keys()][0] : (/\bmix\b/.test(cleaned) || !counts.size ? 'mix' : '');
+    const colourOfBox = counts.size === 1 ? [...counts.keys()][0] : (/\bmix\b/.test(cleaned) ? 'mix' : (!counts.size ? 'xanh' : ''));
     if (!colourOfBox) return [];
+    // Hộp KHÔNG ghi màu (mặc định Xanh): chỉ nhận tin đặt gọn "lấy 1 hộp", "cho em 2 hộp 10 gói nha" — chạy lại trên tin thật
+    // r13/r15/r16: "Cho chi giá combo 10 gói nhỏ", "Cho mình xem combo 10 gói nhỏ", "1 hộp k miễn ship à", "phù hợp" (bỏ dấu =
+    // "hop"), "lấy 2 hộp miễn ship mà em 298 K" là hỏi / nói túi lớn — không tự dựng giỏ hộp.
+    if (!counts.size && colourOfBox === 'xanh' && (/\bhopp\b/.test(folded) || !/^(?:(?:cho|lay|mua|chot|dat|gui|ship) )?(?:(?:em|e|minh|chi|c|a|anh|toi|tui|mk) )?(?:(?:lay|mua|chot|dat) )?(?:(?:\d{1,2}|mot|1) )?hop(?: (?:nha|nhe|a|ah|luon|thoi|shop|em|nhe shop|nha shop|nhe em|nha em|nhe c|nha c))*$/.test(cleaned.replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()))) return [];
     const wantsBox = boxCount > 0 || /\b(lay|mua|chot|dat|gui|ship|cho (em|minh|chi|c|e|toi|tui|anh|a))\b/.test(folded);
     const box = getCatalogProducts().find(item => item.active !== false && /^cb10-/i.test(item.sku || '') && String(item.sku || '').toLowerCase().includes(`-${colourOfBox}`));
     return wantsBox && box ? [{ product: box.name, quantity: boxCount || (counts.size === 1 ? [...counts.values()][0] : 1) }] : [];
@@ -2782,6 +2791,27 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const oatsOrder = !heldForOats.length && botOrder && Date.now() - (Number(botOrder.createdAt) || 0) < 60 * 60 * 1000 ? botOrder : null;
     replyContext.bagCount = heldForOats.length ? bigBags(heldForOats) : oatsOrder ? bigBags(botOrderItems) : 0;
     replyContext.oatsGift = conversation.pendingOrder?.oatsGift === true;
+    // Chủ shop 05/10: giỏ chờ / đơn bot vừa tạo đang là Túi Xanh MẶC ĐỊNH (câu DEFAULT_FLAVOUR_NOTE đúng số túi đã gửi ≤ 2 giờ)?
+    // → { quantity, target } cho luật DEFAULT_FLAVOUR_SWAP; không thì null.
+    const defaultFlavourSwapOf = () => {
+      const xanhOnly = items => items.length > 0 && items.every(item => /^GRA-XANH-/i.test(String(item?.code || item?.sku || '')));
+      const sum = items => items.reduce((total, item) => total + (Number(item?.quantity) || 1), 0);
+      const held = usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items || [];
+      const fresh = botOrder && Date.now() - (Number(botOrder.createdAt) || 0) < 60 * 60 * 1000 ? botOrderItems : [];
+      const target = xanhOnly(held) ? 'basket' : !held.length && xanhOnly(fresh) ? 'order' : '';
+      if (!target) return null;
+      const quantity = sum(target === 'basket' ? held : fresh);
+      const note = renderChatbotReply({ template_id: 'DEFAULT_FLAVOUR_NOTE', values: { count: String(quantity) } }, withFallbackTemplates(templates), replyContext);
+      const squash = text => foldVietnamese(String(text || '')).toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const line = note.templateId === 'DEFAULT_FLAVOUR_NOTE' ? squash(note.messages?.[0]) : '';
+      if (line.length < 20) return null;
+      const noteAt = recent.findLastIndex(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) <= 2 * 60 * 60 * 1000 && squash(item.text).includes(line));
+      if (noteAt < 0) return null;
+      // Khách đã nêu vị sau câu mặc định (chọn/đổi rồi) → hết là "mặc định"; tin sau đi luồng thường (tách vị thứ hai…).
+      const namedSince = recent.slice(noteAt + 1).some(item => item?.direction === 'incoming' && item.id !== change.message.id
+        && /\b(?:xanh|vang|nau|cacao|socola|chocolate)\b/.test(foldVietnamese(String(item.text || '')).toLowerCase()));
+      return namedSince ? null : { quantity, target };
+    };
     let ruleCtxUsed = null;
     const ruledFirst = message.type === 'text' && !asksForHuman && !cartReply && ruleMode !== 'off'
       ? ((text, ctx) => { ruleCtxUsed = ctx; return ruleIntentFn(text, ctx); })(message.text, {
@@ -2846,7 +2876,15 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           recentCustomerTexts: recent.filter(item => item?.direction === 'incoming' && (item.type || 'text') === 'text' && item.text && item.id !== change.message.id
             && Date.now() - (Number(item.createdAt) || 0) <= 15 * 60 * 1000).map(item => ({ text: String(item.text), at: Number(item.createdAt) || 0 })),
           // R16 (giao diện luật ASK_FLAVOR_NGUYENBAN): số túi bot đang hỏi "nguyên bản hay nhiều hạt" (giỏ chờ ghi).
-          nguyenBanAsk: conversation.pendingOrder?.nguyenBanAsk
+          nguyenBanAsk: conversation.pendingOrder?.nguyenBanAsk,
+          // Chủ shop 05/10 (giao diện luật DEFAULT_FLAVOUR_SWAP): giỏ chờ / đơn bot tạo ≤ 60 phút chỉ có Túi Xanh và câu "em lên N Túi
+          // Xanh… (mặc định)" đã gửi trong 2 giờ → khách nêu vị khác là đổi N túi sang vị đó.
+          defaultFlavourSwap: defaultFlavourSwapOf(),
+          // Chủ shop 05/10 (giao diện defaultXanh của luật): bảng giá MỘT sản phẩm bot gửi gần nhất (≤ 30 phút, kể cả bảng giá đoán từ
+          // ảnh — khác quotedProduct) và khách có gửi ảnh trong 2 giờ không → không mặc định Túi Xanh khi khách có thể đang chỉ món khác.
+          lastQuoteName: [...recent].reverse().filter(item => item?.direction === 'outgoing' && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000)
+            .map(item => String(item.text || '').match(/Bảng giá (.+?) để/u)?.[1]).find(Boolean) || '',
+          customerImageRecently: message.type === 'image' || recent.some(item => item?.direction === 'incoming' && item.type === 'image' && Date.now() - (Number(item.createdAt) || 0) <= 2 * 60 * 60 * 1000)
         })
       : null;
     // R16 (inbox2 C1, ca …2153698503): "Mình lấy 2 túi" / "Màu vàng nhiều hạt nhé" / "Cho về địa chỉ cũ cho mình" (3 tin chưa trả
@@ -4193,7 +4231,35 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       if ((!heldItems.length || held?.inferred === true) && customerChoice.infoOnly && customerChoice.namedNothing) return 'khách chưa chọn món';
       return null;
     })();
-    if (inferredBasket && templates?.ORDER_INFO_ASK_FLAVOR) {
+    // Chủ shop 05/10 (quyết định c): khách chưa chọn vị → MẶC ĐỊNH Túi Xanh, không hỏi lại vị. Luật đã dựng giỏ mặc định
+    // (ruled.defaultFlavour) hay giỏ mô hình đoán khi khách chưa chọn món (inferredBasket ở trên) → N Túi Xanh (N = số túi khách đã
+    // nêu, không thì 1) và lên đơn/bước đơn như thường; tin gửi kèm DEFAULT_FLAVOUR_NOTE ghi rõ "N Túi Xanh nguyên bản 450g" để
+    // khách đổi. Giữ cách cũ (hỏi vị) khi: khách gửi ẢNH trong 2 giờ (có thể chỉ món qua ảnh), giỏ mô hình có món ngoài túi lớn
+    // (yến mạch, hộp 10 gói…), khách live đang giữ giỏ từ bình luận/giỏ Shop.
+    let defaultFlavour = ruleLive && ruled?.defaultFlavour && reply.templateId === ruleReply?.templateId ? ruled.defaultFlavour : null;
+    const defaultedBasket = (() => {
+      if (!inferredBasket) return null;
+      // Khách đã nói muốn nhiều vị ("2 túi khác vị") hay bot đang hỏi "nguyên bản là Xanh hay Vàng": không mặc định.
+      if (askedBag?.mixed || conversation.botLastTemplateId === 'ASK_FLAVOR_NGUYENBAN' || Number(conversation.pendingOrder?.nguyenBanAsk) > 0) return null;
+      const imageRecently = (Array.isArray(recent) ? recent : []).some(item => item?.direction === 'incoming' && item.type === 'image' && Date.now() - (Number(item.createdAt) || 0) <= 2 * 60 * 60 * 1000);
+      const modelItems = Array.isArray(reply.order?.items) ? reply.order.items : [];
+      if (imageRecently || !modelItems.length || !modelItems.every(item => /^GRA-(?:XANH|VANG|NAU)-/i.test(String(item?.code || item?.sku || '')))) return null;
+      const xanh = getCatalogProducts().find(item => item.active !== false && !item.staffOnly && /^GRA-XANH-/i.test(String(item.sku || '')));
+      if (!xanh) return null;
+      const held = conversation.pendingOrder && typeof conversation.pendingOrder === 'object' ? conversation.pendingOrder : {};
+      const quantity = Math.max(1, Math.min(10, Math.round(Number(held.askedBagCount) || Number(askedBag?.count) || 1)));
+      const address = String(reply.order.rawAddress || reply.order.address || held.address || '').replace(/^\((?:live|freeship)\)\s*/i, '');
+      // Giỏ chờ do mô hình đoán (cờ inferred) không được ghép vào: soạn với giỏ chờ rỗng (giữ SĐT/địa chỉ/cờ khác).
+      const context = { ...replyContext, pendingOrder: { ...held, items: [], key: '', inferred: false } };
+      const rendered = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: xanh.name, No_A: String(quantity), Phone_Number: reply.order.phone || phoneInText || held.phone || '', Customer_Address: address }, templates, context);
+      if (rendered.handoff || !rendered.messages?.length || !(rendered.order?.items?.length || rendered.pendingOrder?.items?.length)) return null;
+      console.log(`Giỏ do mô hình suy ra (${inferredBasket}): chủ shop 05/10 mặc định ${quantity} Túi Xanh (${conversation.id})`);
+      return { reply: rendered, flavour: { product: xanh.name, quantity } };
+    })();
+    if (defaultedBasket) {
+      reply = defaultedBasket.reply;
+      defaultFlavour = defaultedBasket.flavour;
+    } else if (inferredBasket && templates?.ORDER_INFO_ASK_FLAVOR) {
       const asked = renderChatbotReply({ template_id: 'ORDER_INFO_ASK_FLAVOR', Phone_Number: reply.order.phone || phoneInText || '' }, templates, replyContext);
       if (asked.templateId === 'ORDER_INFO_ASK_FLAVOR' && asked.messages?.length) {
         console.log(`Giỏ do mô hình suy ra (${inferredBasket}): không lên đơn, hỏi vị (${conversation.id})`);
@@ -4223,6 +4289,25 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       && Array.isArray(reply.pendingOrder.items) && reply.pendingOrder.items.length && String(reply.pendingOrder.key || '') !== String(conversation.pendingOrder?.key || '')) {
       // Giỏ mô hình dựng khi khách chưa nêu gì về món: đánh dấu để lượt SĐT/địa chỉ sau không tự chốt giỏ này (nhánh (b) ở trên).
       reply = { ...reply, pendingOrder: { ...reply.pendingOrder, inferred: true } };
+    }
+    // Chủ shop 05/10: giỏ/đơn có Túi Xanh do MẶC ĐỊNH (luật, giỏ mô hình đoán, phần "ngũ cốc" của bộ soạn đơn) → kèm
+    // DEFAULT_FLAVOUR_NOTE "em lên N Túi Xanh nguyên bản 450g… muốn đổi vị nhắn em" trước câu trả lời của ĐÚNG lượt mặc định (lượt
+    // chốt sau đó: tin xác nhận đã ghi tên túi + số lượng). Khách vừa nêu màu trong tin này thì không (khách đã chọn).
+    {
+      const replyItems = Array.isArray(reply.order?.items) && reply.order.items.length ? reply.order.items : Array.isArray(reply.pendingOrder?.items) ? reply.pendingOrder.items : [];
+      const xanhQuantity = replyItems.filter(item => /^GRA-XANH-/i.test(String(item?.code || item?.sku || ''))).reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+      const namesColour = /\b(?:xanh|vang|nau|cacao|socola|chocolate|nguyen ban|nhieu hat)\b/.test(folded);
+      const cereal = !isComment && !cartReply ? ambiguousCerealBags(String(message.text || '')) : 0;
+      const quantity = defaultFlavour ? Number(defaultFlavour.quantity) || 0 : cereal > 0 ? cereal : 0;
+      if (quantity > 0 && xanhQuantity >= quantity && !namesColour && !isComment && !cartReply && !reply.handoff && isOrderStep(String(reply.templateId || ''))
+        && Array.isArray(reply.messages) && reply.messages.length) {
+        const all = withFallbackTemplates(templates);
+        const note = renderChatbotReply({ template_id: 'DEFAULT_FLAVOUR_NOTE', values: { count: String(quantity) } }, all, replyContext);
+        if (note.templateId === 'DEFAULT_FLAVOUR_NOTE' && note.messages?.length) {
+          const text = note.messages.join('\n');
+          reply = { ...reply, messages: [text, ...reply.messages], ...(Array.isArray(reply.parts) ? { parts: [{ type: 'text', text }, ...reply.parts] } : {}) };
+        }
+      }
     }
     // Trong lúc chờ mô hình khách nhắn thêm (chữ hay ảnh): bỏ câu này, tin sau trả lời gộp.
     const latestMessages = await listMessages(conversation.id);
@@ -4868,10 +4953,14 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const flavourMarker = (() => {
       if (isComment || nonText || reply.flavourSplit) return null;
       const heldBefore = conversation.pendingOrder && typeof conversation.pendingOrder === 'object' ? conversation.pendingOrder : null;
-      const count = Math.max(askedBag.count, !(heldBefore?.items || []).length ? Math.round(Number(heldBefore?.askedBagCount) || 0) : 0);
+      // Chủ shop 05/10: lượt đổi Túi Xanh MẶC ĐỊNH sang vị khách nêu (DEFAULT_FLAVOUR_SWAP) cũng là "lượt vị đầu" của N túi —
+      // "Lấy 2 túi" → (2 Xanh mặc định) → "Túi vàng" (2 Vàng) → "Túi nâu" trong 3 phút = 1 Vàng + 1 Nâu như trước.
+      // Khách trả lời câu mặc định bằng MỘT vị (kể cả "xanh" = giữ Túi Xanh): N túi của giỏ mặc định là số túi của lượt vị đầu.
+      const swapped = Math.round(Number(ruleCtxUsed?.defaultFlavourSwap?.quantity) || 0);
+      const count = Math.max(askedBag.count, swapped, !(heldBefore?.items || []).length ? Math.round(Number(heldBefore?.askedBagCount) || 0) : 0);
       const colour = singleFlavourOf(message.text);
       if (count < 2 || !colour) return null;
-      const created = Boolean(order) && !outcome?.updated && Boolean(reply.order) && !reply.order.updateOrderId;
+      const created = Boolean(order) && (!outcome?.updated || swapped > 0) && Boolean(reply.order) && (!reply.order.updateOrderId || swapped > 0);
       const lines = created ? reply.order.items || [] : reply.pendingOrder?.items || [];
       const code = String(lines[0]?.code || lines[0]?.sku || '').toUpperCase();
       if (lines.length !== 1 || Number(lines[0].quantity) !== count || !code.startsWith(`GRA-${colour.toUpperCase()}-`)) return null;

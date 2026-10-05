@@ -34,12 +34,15 @@ test('ca Trang Nhi Vân: giỏ Shop 2 Túi Xanh giữ 2 giờ 55 phút, bot vẫ
   assert.doesNotMatch(closed.sent.map(item => item.text).join(' '), /mỗi loại mấy túi/);
 });
 
-test('"1 túi" KHÔNG sau bảng giá một sản phẩm → vẫn hỏi vị như cũ; "1 gói nhỏ" không bị nhận là 1 túi lớn', async () => {
+// Chủ shop 05/10 (quyết định c): khách không nêu vị → MẶC ĐỊNH Túi Xanh. Test cũ khẳng định "1 tui" (không sau bảng giá một sản
+// phẩm) vẫn hỏi vị — nay lên giỏ 1 Túi Xanh kèm câu ghi rõ món để khách đổi.
+test('"1 túi" KHÔNG sau bảng giá một sản phẩm → mặc định 1 Túi Xanh (chủ shop 05/10); "1 gói nhỏ" không bị nhận là 1 túi lớn', async () => {
   const sim = new Sim();
   const inbox = sim.inbox({ botLastTemplateId: 'WELCOME', botLastReplyAt: Date.now() - 2 * MIN });
   const turn = await sim.send(inbox, '1 tui', { llm: { template_id: 'ASK_FLAVOR' } });
-  assert.notEqual(turn.result.templateId, 'ORDER_ADDRESS', JSON.stringify(turn.result));
-  assert.equal(inbox.pendingOrder?.items?.length || 0, 0);
+  assert.equal(turn.result.templateId, 'ORDER_ADDRESS', JSON.stringify(turn.result));
+  assert.deepEqual((inbox.pendingOrder?.items || []).map(item => [item.code, item.quantity]), [['GRA-XANH-Z450', 1]]);
+  assert.match(turn.sent[0].text, /em lên 1 Túi Xanh nguyên bản 450g/);
   const small = new Sim({ psid: 'nho' });
   const smallInbox = small.inbox({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 2 * MIN });
   small.history(smallInbox, 'outgoing', QUOTE, 2 * MIN, { sender: 'bot' });

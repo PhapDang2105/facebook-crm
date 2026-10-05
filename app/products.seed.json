@@ -180,7 +180,7 @@
         "túi nâu nhỏ",
         "10 gói nâu"
       ],
-      "active": true,
+      "active": false,
       "image": "",
       "mixable": false,
       "mixGroup": "granola"
@@ -227,7 +227,7 @@
         "mix 3 vị",
         "combo mix"
       ],
-      "active": true,
+      "active": false,
       "image": "",
       "mixable": false,
       "mixGroup": "granola"

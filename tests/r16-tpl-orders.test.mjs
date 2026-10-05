@@ -148,17 +148,17 @@ test('A8 (hàm thuần): "1 ngủ cốc" / "01 túi hạt ngũ cốc" chưa rõ 
 });
 
 for (const [text, llm] of [['1 vị ca cao, 1 ngủ cốc', { Product_N1: N, No_A: '1' }], ['1 túi vị ca cao, 01 túi hạt ngũ cốc', { Product_N1: N, No_A: '1', Product_N2: V, No_B: '1' }]]) {
-  test(`A8 (ca thật): "${text}" → hỏi vị phần ngũ cốc, giữ 1 Nâu (không 1 túi + mời 2 túi, không tự thành Túi Vàng)`, async () => {
+  // Chủ shop 05/10 (quyết định c): phần "ngũ cốc" không nêu vị → MẶC ĐỊNH Túi Xanh (trước đây hỏi lại vị bằng ASK_FLAVOR_NGUYENBAN,
+  // test cũ khẳng định câu hỏi đó). Giỏ = 1 Nâu (khách nêu) + 1 Xanh (mặc định), bỏ món mô hình đoán (Vàng); câu ghi rõ món.
+  test(`A8 (ca thật): "${text}" → phần ngũ cốc mặc định 1 Túi Xanh, giữ 1 Nâu (không tự thành Túi Vàng) — chủ shop 05/10`, async () => {
     const sim = new Sim({ psid: `r16-a8-${text.length}` });
     const inbox = sim.inbox();
     const turn = await sim.send(inbox, text, { llm: { template_id: 'ORDER_ADDRESS', ...llm } });
-    assert.equal(turn.result.templateId, 'ASK_FLAVOR_NGUYENBAN', JSON.stringify(turn.result));
-    assert.deepEqual(itemsOf(inbox.pendingOrder?.items), ['1 GRA-NAU-Z350']);
-    assert.equal(inbox.pendingOrder?.nguyenBanAsk, 1);
-    assert.doesNotMatch(turn.sent.map(item => item.text).join('\n'), /2 túi thì giá/);
-    // Khách trả lời vị → cộng vào giỏ: 1 Nâu + 1 Xanh 293k.
-    await sim.send(inbox, 'Túi xanh nhé', { llm: { template_id: 'ORDER_ADDRESS', Product_N1: X, No_A: '1' } });
+    assert.equal(turn.result.templateId, 'ORDER_ADDRESS', JSON.stringify(turn.result));
     assert.deepEqual(itemsOf(inbox.pendingOrder?.items), ['1 GRA-NAU-Z350', '1 GRA-XANH-Z450']);
+    const said = turn.sent.map(item => item.text).join('\n');
+    assert.match(said, /em lên 1 Túi Xanh nguyên bản 450g/);
+    assert.doesNotMatch(said, /2 túi thì giá/);
   });
 }
 

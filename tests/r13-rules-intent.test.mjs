@@ -163,7 +163,8 @@ test('r13 (models B): luật ứng viên K1/K1b/K3/K4/K5 đứng cuối chuỗi 
   }
   assert.equal(ruleIntent('Lấy 2 túi', holding({ basketCodeCount: 2 })), null, 'giỏ nhiều mã: để mô hình hỏi vị nào');
   assert.equal(ruleIntent('Lấy 2 túi', holding({ basketCodeCount: 1 }))?.rule, 'K3_QTY_HELD');
-  assert.equal(brief(ruleIntent('Lấy 2 túi', inbox())), 'BAGS_NO_FLAVOR ASK_FLAVOR', 'chưa giữ giỏ: hỏi vị như cũ');
+  // Chủ shop 05/10: chưa giữ giỏ, không nêu vị → mặc định Túi Xanh (trước đây BAGS_NO_FLAVOR hỏi vị).
+  assert.equal(brief(ruleIntent('Lấy 2 túi', inbox())), 'BAGS_DEFAULT_XANH ORDER_ADDRESS Granola Túi Xanh 450g 2', 'chưa giữ giỏ: mặc định Túi Xanh');
   // K4: "Mua", "Mua hàng".
   for (const text of ['Mua', 'Mua hàng', 'Mình muốn mua granola']) assert.equal(brief(ruleIntent(text, inbox(quoted))), 'K4_WANT_BUY GENERAL_INFO', text);
   assert.equal(ruleIntent('Mua đi', inbox(quoted)), null, '"Mua đi": để mô hình như cũ');

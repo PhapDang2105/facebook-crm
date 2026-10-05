@@ -46,7 +46,9 @@ test('ca thật …9280803337: "Lây em 2 túi" → "Túi vàng nhiêu hat" → 
   const sim = new Sim({ psid: 'r15split2' });
   const inbox = sim.inbox();
   await sim.send(inbox, 'Lây em 2 túi', { llm: { template_id: 'ASK_FLAVOR' } });
-  assert.equal(inbox.pendingOrder.askedBagCount, 2);
+  // Chủ shop 05/10: "2 túi" không vị → mặc định 2 Túi Xanh (trước đây hỏi vị, giỏ chờ askedBagCount 2); vị khách nêu sau đó đổi
+  // cả 2 túi (DEFAULT_FLAVOUR_SWAP), vị thứ hai trong 3 phút vẫn tách 1 + 1 như cũ.
+  assert.deepEqual(codes(inbox.pendingOrder.items), ['2 GRA-XANH-Z450']);
   const first = await sim.send(inbox, 'Túi vàng nhiêu hat', { llm: { template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Vàng 350g', No_A: '2' } });
   assert.deepEqual(codes(inbox.pendingOrder.items), ['2 GRA-VANG-H350'], JSON.stringify(first.result));
   const second = await sim.send(inbox, 'Túi nâu cacao', { llm: { template_id: 'ORDER_ADDRESS', Product_N1: 'Granola Túi Nâu vị cacao 350g', No_A: '2' } });

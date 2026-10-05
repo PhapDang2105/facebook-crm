@@ -121,7 +121,8 @@ test('rút gọn ngữ cảnh: mặc định giữ bản cũ; bật từng phầ
 test('luật thử nghiệm (vòng 6) mang experimental: TRIAL_ASK / ORDER_ASK / TERSE_HOW / ADDRESS_COMPLETE', () => {
   const ctx = { commentBasket };
   const trial = ruleIntent('Lấy c 1 túi dùng thử', ctx);
-  assert.deepEqual([trial.rule, trial.experimental, trial.value.template_id], ['TRIAL_ASK', true, 'ASK_FLAVOR']);
+  // Chủ shop 05/10: không nêu vị → mặc định 1 Túi Xanh (test cũ: ASK_FLAVOR).
+  assert.deepEqual([trial.rule, trial.experimental, trial.value.template_id, trial.value.Product_N1, trial.value.No_A], ['TRIAL_ASK', true, 'ORDER_ADDRESS', 'Granola Túi Xanh 450g', '1']);
   const xanh = ruleIntent('Mình lấy một túi xanh dung thử đã', ctx);
   assert.deepEqual([xanh.value.template_id, xanh.value.Product_N1, xanh.value.No_A], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g', '1']);
   assert.equal(ruleIntent('C.mua 1 túi ăn thử được không shop', { ...ctx, contextProduct: 'Granola Túi Vàng 350g' }).value.Product_N1, 'Granola Túi Vàng 350g');
@@ -145,8 +146,9 @@ test('vòng 7: luật thử nghiệm không che luật ổn định (shadow đí
   for (const text of ['Bữa e đặt hàng sao chưa thấy đơn về', 'gửi hàng chưa shop', 'đã đặt rồi sao chưa thấy']) {
     assert.equal(ruleIntent(text, ctx)?.value?.template_id, 'ORDER_STATUS', text);
   }
-  assert.equal(ruleIntent('lấy combo 2 túi', ctx).value.template_id, 'ASK_FLAVOR');
-  assert.equal(ruleIntent('2 túi', ctx).value.template_id, 'ASK_FLAVOR');
+  // Chủ shop 05/10: không nêu vị → mặc định Túi Xanh (test cũ: ASK_FLAVOR).
+  assert.deepEqual([ruleIntent('lấy combo 2 túi', ctx).value.template_id, ruleIntent('lấy combo 2 túi', ctx).value.Product_N1], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g']);
+  assert.deepEqual([ruleIntent('2 túi', ctx).value.template_id, ruleIntent('2 túi', ctx).value.No_A], ['ORDER_ADDRESS', '2']);
 });
 
 test('vòng 7: "hàng mới không em" → FRESHNESS; freeship khi đang giữ giỏ mà khách đổi "1 túi ăn thử" → để mô hình; "ship mình 2 gói" → hỏi vị', () => {
@@ -155,7 +157,8 @@ test('vòng 7: "hàng mới không em" → FRESHNESS; freeship khi đang giữ g
   assert.equal(ruleIntent('date mới ko shop', ctx)?.value?.template_id, 'FRESHNESS');
   assert.equal(ruleIntent('Có miễn ship không', { ...ctx, hasBasket: true, lastWasOrderStep: true }).value.template_id, 'ORDER_ADDRESS');
   assert.equal(ruleIntent('1túi miễn ship nha ăn thử', { ...ctx, hasBasket: true, lastWasOrderStep: true }), null, 'đổi số túi: không giữ giỏ cũ');
-  assert.equal(ruleIntent('Ship mình 2 gói', ctx)?.value?.template_id, 'ASK_FLAVOR');
+  // Chủ shop 05/10: "Ship mình 2 gói" không vị → mặc định 2 Túi Xanh (test cũ: ASK_FLAVOR).
+  assert.deepEqual([ruleIntent('Ship mình 2 gói', ctx)?.value?.template_id, ruleIntent('Ship mình 2 gói', ctx)?.value?.Product_N1], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g']);
 });
 
 test('bộ chấm mẫu 26/09: "2 túi 298k miễn ship" là đặt hàng, không hỏi chính sách; "đúng hàng mới nhận" không phải hỏi độ mới', () => {
@@ -197,8 +200,12 @@ test('vòng 8: câu đặt hàng có "phần anh" / "rất sợ béo" không ph�
 // ===== Vòng 9: đọc lại 214 hội thoại 26–28/09 (câu ví dụ lấy từ hội thoại thật).
 test('vòng 9.1: SĐT + địa chỉ khi chưa có giỏ → ORDER_INFO_ASK_FLAVOR (giữ SĐT/địa chỉ); số Zalo sau WHOLESALE_CTV_CONTACT → WHOLESALE_RECEIVED + thẻ', () => {
   const ctx = { commentBasket };
+  // Chủ shop 05/10: SĐT + địa chỉ ngay sau câu hỏi vị / bảng giá chung → mặc định Túi Xanh (ORDER_INFO_DEFAULT_XANH, test cũ:
+  // ORDER_INFO_ASK_FLAVOR). Ngữ cảnh khác (vd sau lời chào) vẫn giữ SĐT/địa chỉ và hỏi vị.
   const info = ruleIntent('131/10B đường 6 linh Xuân thủ Đức tphcm 0912345678', { ...ctx, botLastTemplateId: 'ASK_FLAVOR', botLastAgeMin: 3, lastWasOrderStep: true });
-  assert.deepEqual([info?.rule, info?.value?.template_id, info?.value?.Phone_Number, info?.value?.Customer_Address], ['ORDER_INFO', 'ORDER_INFO_ASK_FLAVOR', '0912345678', '131/10B đường 6 linh Xuân thủ Đức tphcm']);
+  assert.deepEqual([info?.rule, info?.value?.template_id, info?.value?.Product_N1, info?.value?.Phone_Number, info?.value?.Customer_Address], ['ORDER_INFO_DEFAULT_XANH', 'ORDER_ADDRESS', 'Granola Túi Xanh 450g', '0912345678', '131/10B đường 6 linh Xuân thủ Đức tphcm']);
+  const welcomed = ruleIntent('131/10B đường 6 linh Xuân thủ Đức tphcm 0912345678', { ...ctx, botLastTemplateId: 'WELCOME', botLastAgeMin: 3 });
+  assert.deepEqual([welcomed?.rule, welcomed?.value?.template_id, welcomed?.value?.Phone_Number], ['ORDER_INFO', 'ORDER_INFO_ASK_FLAVOR', '0912345678']);
   // "hòa đồn" không phải hóa đơn; tỉnh/thành nhận ra từ danh mục địa danh dù chưa đủ ba cấp.
   const partial = ruleIntent('Mình ở Biên Hòa Đồng Nai 0976594931', ctx);
   assert.equal(partial?.value?.template_id, 'ORDER_INFO_ASK_FLAVOR');
@@ -385,8 +392,9 @@ test('vòng 10.1: giỏ + địa chỉ (± SĐT) trong một tin → ORDER_ADDRE
   assert.equal(ruleIntent('Giao 2 túi xanh 450gr địa chỉ cũ', { ...ctx, hasPreviousDelivery: true })?.value?.No_A, '2', '"xanh 450gr" không thành túi thứ hai');
   // Số túi không màu + địa chỉ: giữ địa chỉ, bộ soạn đơn hỏi vị (render ra ASK_FLAVOR vì tin có "2 túi").
   const count = ruleIntent('bạn gửi cho mình 2 túi nhé. Thôn đồng Tiến. Xã Dương huy. Thành phố cẩm phả. Tỉnh Quảng Ninh', ctx);
-  assert.deepEqual([count?.rule, count?.value?.template_id, count?.value?.Product_N1, count?.value?.Customer_Address], ['BAGS_ADDRESS', 'ORDER_ADDRESS', undefined, 'Thôn đồng Tiến. Xã Dương huy. Thành phố cẩm phả. Tỉnh Quảng Ninh']);
-  assert.equal(renderChatbotReply(count.value, defaultMessageTemplates(), { messageText: 'bạn gửi cho mình 2 túi nhé. Thôn đồng Tiến. Xã Dương huy. Thành phố cẩm phả. Tỉnh Quảng Ninh' }).templateId, 'ASK_FLAVOR');
+  // Chủ shop 05/10: mặc định 2 Túi Xanh (luật BAGS_ADDRESS_DEFAULT_XANH; test cũ: giỏ không món, bộ soạn đơn hỏi vị).
+  assert.deepEqual([count?.rule, count?.value?.template_id, count?.value?.Product_N1, count?.value?.No_A, count?.value?.Customer_Address], ['BAGS_ADDRESS_DEFAULT_XANH', 'ORDER_ADDRESS', 'Granola Túi Xanh 450g', '2', 'Thôn đồng Tiến. Xã Dương huy. Thành phố cẩm phả. Tỉnh Quảng Ninh']);
+  assert.equal(renderChatbotReply(count.value, defaultMessageTemplates(), { messageText: 'bạn gửi cho mình 2 túi nhé. Thôn đồng Tiến. Xã Dương huy. Thành phố cẩm phả. Tỉnh Quảng Ninh' }).templateId, 'ORDER_ADDRESS');
   assert.equal(ruleIntent('bạn gửi cho mình 2 túi nhé. Thôn đồng Tiến, Quảng Ninh', { ...ctx, hasBasket: true, lastWasOrderStep: true, botLastTemplateId: 'ORDER_ADDRESS', botLastAgeMin: 3 })?.rule, undefined, 'đang giữ giỏ: để mô hình');
   // Giỏ + đổi/hủy, câu hỏi, chữ không phải địa chỉ: để mô hình.
   assert.equal(ruleIntent('đổi 2 túi xanh, gửi về 12 Lê Lợi phường Bến Nghé quận 1', ctx), null);
@@ -397,7 +405,8 @@ test('vòng 10.1: giỏ + địa chỉ (± SĐT) trong một tin → ORDER_ADDRE
 test('vòng 10.2: số túi không vị (1/2/3, "combo 2 túi 298k fship", "1 túi thôi") → ASK_FLAVOR khi chưa giữ giỏ; "3 túi 3 vị" → 1 Xanh + 1 Vàng + 1 Nâu; "2 túi 2 vị" → hỏi vị', () => {
   const ctx = { commentBasket };
   for (const text of ['M lấy 1 túi', 'Cho chị 2 gói nhé', 'Mình 3 túi nhé', 'Mjh lấy com bo 2 túi 298k fship', 'Mình lấy một túi thôi', 'Lay cho 1 bit', 'Cho mình combo 3 túi', '2 túi 298 k miễn sip', 'Chị 2 gói', 'Gửi mình 2 túi nhé', 'Lấy 1 túi 174k']) {
-    assert.deepEqual([ruleIntent(text, ctx)?.rule, ruleIntent(text, ctx)?.value?.template_id], ['BAGS_NO_FLAVOR', 'ASK_FLAVOR'], text);
+    // Chủ shop 05/10: không nêu vị → mặc định Túi Xanh (luật BAGS_DEFAULT_XANH / COMBO; test cũ: BAGS_NO_FLAVOR → ASK_FLAVOR).
+    assert.deepEqual([ruleIntent(text, ctx)?.rule, ruleIntent(text, ctx)?.value?.template_id, ruleIntent(text, ctx)?.value?.Product_N1], ['BAGS_DEFAULT_XANH', 'ORDER_ADDRESS', 'Granola Túi Xanh 450g'], text);
   }
   // R13 (sửa test cũ): đang giữ giỏ, tin chỉ nêu số túi nay do luật ỨNG VIÊN K3 nhận — mặc định chạy ẩn (shadowOnly: engine
   // vẫn hỏi mô hình như test cũ khẳng định); chỉ thành câu trả lời thật khi cờ luật ứng viên/thử nghiệm 'on'.
@@ -475,6 +484,7 @@ test('vòng 10.4: bot vừa hỏi vị → một màu là chọn vị; "C đặt
   // Dùng thử viết kiểu khác (luật thử nghiệm): "cho chị thử 1 gói màu xanh", "Mua thử 1 gói granola".
   assert.deepEqual([ruleIntent('cho chị thử 1 gói màu xanh', ctx)?.rule, ruleIntent('cho chị thử 1 gói màu xanh', ctx)?.value?.Product_N1], ['BASKET', 'Granola Túi Xanh 450g'], 'mặc định: luật ổn định BASKET (giỏ rõ)');
   assert.deepEqual([ruleIntent('cho chị thử 1 gói màu xanh', { ...ctx, experimentalRules: 'on' })?.rule, ruleIntent('cho chị thử 1 gói màu xanh', { ...ctx, experimentalRules: 'on' })?.value?.Product_N1], ['TRIAL_ASK', 'Granola Túi Xanh 450g']);
-  assert.deepEqual([ruleIntent('Mua thử 1 gói granola', ctx)?.rule, ruleIntent('Mua thử 1 gói granola', ctx)?.value?.template_id], ['TRIAL_ASK', 'ASK_FLAVOR']);
+  // Chủ shop 05/10: không nêu vị → mặc định 1 Túi Xanh (test cũ: ASK_FLAVOR).
+  assert.deepEqual([ruleIntent('Mua thử 1 gói granola', ctx)?.rule, ruleIntent('Mua thử 1 gói granola', ctx)?.value?.template_id, ruleIntent('Mua thử 1 gói granola', ctx)?.value?.Product_N1], ['TRIAL_ASK', 'ORDER_ADDRESS', 'Granola Túi Xanh 450g']);
   assert.equal(ruleIntent('Lấy c 1 túi dùng thử', ctx)?.rule, 'TRIAL_ASK', 'BAGS_NO_FLAVOR không lấn TRIAL_ASK');
 });

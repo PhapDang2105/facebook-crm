@@ -109,7 +109,9 @@ test('#4 hỏi giá từng loại / đồng giá → bảng 3 vị (GENERAL_INFO
     assert.equal(tpl(result), 'ASK_FLAVOR');
     assert.ok(!result.value.Product_N1);
   }
-  assert.equal(tpl(ruleIntent('3 tuis', inbox())), 'ASK_FLAVOR');
+  // Chủ shop 05/10: "3 tuis" không vị → mặc định 3 Túi Xanh (trước đây hỏi vị).
+  const three = ruleIntent('3 tuis', inbox());
+  assert.deepEqual([tpl(three), three.value.Product_N1, three.value.No_A], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g', '3']);
 });
 
 test('#5 chê hàng khác quảng cáo / ít hạt → COMPLAINT_HANDOFF (CSKH + thẻ), như luật khiếu nại hiện có', () => {
@@ -212,10 +214,11 @@ test('#10 "Túi xanh" rồi "Ok lấy cho chị 2 túi nha" → 2 Xanh (không h
   assert.equal(result?.rule, 'BAGS_NAMED_BEFORE');
   assert.equal(result.value.Product_N1, 'Granola Túi Xanh 450g');
   assert.equal(result.value.No_A, '2');
-  assert.equal(tpl(ruleIntent('Ok lấy cho chị 2 túi nha', ctx(['Túi xanh khác túi vàng sao']))), 'ASK_FLAVOR');
-  assert.equal(tpl(ruleIntent('Ok lấy cho chị 2 túi nha', ctx(['Túi xanh à']))), 'ASK_FLAVOR');
-  assert.equal(tpl(ruleIntent('Ok lấy cho chị 2 túi nha', ctx([{ text: 'Túi xanh', at: Date.now() - 40 * MIN }]))), 'ASK_FLAVOR');
-  assert.equal(tpl(ruleIntent('Ok lấy cho chị 2 túi nha', inbox())), 'ASK_FLAVOR');
+  // Chủ shop 05/10: tin trước không chọn đúng một màu → mặc định 2 Túi Xanh (luật BAGS_DEFAULT_XANH; trước đây hỏi vị).
+  for (const recent of [['Túi xanh khác túi vàng sao'], ['Túi xanh à'], [{ text: 'Túi xanh', at: Date.now() - 40 * MIN }], undefined]) {
+    const other = ruleIntent('Ok lấy cho chị 2 túi nha', recent ? ctx(recent) : inbox());
+    assert.deepEqual([other?.rule, other?.value?.Product_N1, other?.value?.No_A], ['BAGS_DEFAULT_XANH', 'Granola Túi Xanh 450g', '2'], JSON.stringify(recent));
+  }
 });
 
 test('#12 (điều phối) "Vậy tổng là 5 túi, tặng 1 túi vàng + 1 bộ bát, thìa đúng ko shop" khi giữ giỏ → CONFIRM_YES, không BIG_BASKET', () => {

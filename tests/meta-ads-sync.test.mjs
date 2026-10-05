@@ -63,6 +63,9 @@ test('kho trống: kéo bù 90 ngày theo cửa sổ, ghi mốc phủ; lượt s
   assert.deepEqual({ since: store.coverage.act_1.since, until: store.coverage.act_1.until }, { since: '2026-07-08', until: '2026-10-05' });
   assert.equal(store.daily.length, 90);
   assert.equal(store.accountInfo.act_1.currency, 'VND');
+  const campaignsCall = meta.calls.find(url => url.pathname.endsWith('/campaigns'));
+  assert.doesNotMatch(campaignsCall.searchParams.get('effective_status'), /DELETED/, 'Meta từ chối lọc DELETED (100/1815001)');
+  assert.match(campaignsCall.searchParams.get('effective_status'), /ARCHIVED/);
 
   const later = fakeMeta();
   const second = await runBackgroundAdSync({ now: now + 3600000, config: settings, fetchImpl: later.fetchImpl });

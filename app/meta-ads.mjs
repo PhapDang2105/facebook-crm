@@ -44,7 +44,9 @@ const MAXIMUM_PAGES = 200;
 const INSIGHT_FIELDS = 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,reach,clicks,inline_link_clicks,actions';
 const ACCOUNT_DAY_FIELDS = 'spend,impressions,clicks,inline_link_clicks,actions';
 const CAMPAIGN_FIELDS = 'id,name,status,effective_status,daily_budget,lifetime_budget,objective';
-const CAMPAIGN_STATUSES = '["ACTIVE","PAUSED","ARCHIVED","DELETED","IN_PROCESS","WITH_ISSUES"]';
+// Không có DELETED: Meta từ chối lọc đối tượng đã xoá ở /campaigns (100/1815001, chạy thật 05/10/2026). Chi tiêu của
+// chiến dịch đã xoá vẫn vào kho qua insights (tên lấy từ campaign_name của dòng) và dòng chênh level=account.
+const CAMPAIGN_STATUSES = '["ACTIVE","PAUSED","ARCHIVED","IN_PROCESS","WITH_ISSUES"]';
 const ADSET_FIELDS = 'id,campaign_id,daily_budget,lifetime_budget,effective_status';
 const ACCOUNT_FIELDS = 'name,currency,timezone_name,account_status';
 /**

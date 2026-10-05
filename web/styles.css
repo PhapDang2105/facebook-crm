@@ -2807,7 +2807,64 @@ tr:hover .customer-tel button { opacity: .75; }
 .campaigns-ai-group button span { line-height: 1.5; }
 .campaigns-ai-group button small { color: var(--text-2); font-size: 14px; }
 
+/* Đề xuất chiến dịch: mở trong Trình quản lý quảng cáo, đánh dấu đã làm / bỏ qua, so trước–sau. */
+.campaigns-ai-item { display: grid; gap: 6px; }
+.campaigns-ai-decide { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 2px; font-size: 14px; }
+.campaigns-ai-decide a { color: var(--brand); font-weight: 600; text-decoration: none; }
+.campaigns-ai-decide a:hover { text-decoration: underline; }
+.campaigns-ai-group .campaigns-ai-decide button { display: inline-flex; width: auto; padding: 3px 10px; color: #344054; border-radius: 999px; font-size: 14px; }
+.campaigns-ai-decide .is-decided { padding: 1px 8px; color: var(--brand); background: #e8f4ed; border-radius: 999px; }
+.campaigns-ai-decide .is-skipped { color: var(--text-2); background: #f2f4f7; }
+.campaigns-ai-follow { margin: 0; padding: 8px 10px; color: #344054; background: #f8fafb; border-radius: 8px; font-size: 14px; line-height: 1.5; }
+.campaigns-ai-follow strong { color: var(--text-1); }
+
+/* Đối thủ */
+.competitors-card { margin-top: 16px; }
+.competitors-card .settings-card-head p { color: var(--text-2); font-size: 14px; }
+.competitors-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 14px 20px 20px; }
+@media (min-width: 1400px) { .competitors-body { grid-template-columns: minmax(0, 1fr) 380px; align-items: start; } }
+.competitors-main { display: grid; gap: 14px; min-width: 0; }
+.competitors-list { overflow-x: auto; border: 1px solid var(--line-1); border-radius: 12px; }
+.competitors-list.is-empty { display: flex; min-height: 160px; border: 0; }
+.competitors-list table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.competitors-list th { padding: 10px 12px; color: var(--text-2); background: #fafbfc; border-bottom: 1px solid var(--line-1); font-size: 13px; font-weight: 600; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.competitors-list td { padding: 10px 12px; color: #344054; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+.competitors-list tbody tr:last-child td { border-bottom: 0; }
+.competitors-list td.is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.competitors-list td strong { color: var(--text-1); font-weight: 600; }
+.competitors-list small { display: block; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
+.competitors-actions { display: flex; flex-wrap: wrap; gap: 6px; white-space: nowrap; }
+.competitors-actions a, .competitors-actions button { padding: 4px 10px; color: #344054; background: #fff; border: 1px solid var(--line-1); border-radius: 8px; font: inherit; font-size: 14px; text-decoration: none; cursor: pointer; }
+.competitors-actions a:hover, .competitors-actions button:hover { border-color: #c3cad3; }
+.competitors-actions button { color: #b42318; }
+.competitors-forms { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@media (min-width: 900px) { .competitors-forms { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); } }
+.competitors-form { display: grid; align-content: start; gap: 8px; padding: 14px; border: 1px solid var(--line-1); border-radius: 12px; }
+.competitors-form h2 { margin: 0 0 2px; color: var(--text-1); font-size: 16px; font-weight: 700; }
+.competitors-form label { display: grid; gap: 4px; color: var(--text-2); font-size: 13px; font-weight: 600; }
+.competitors-form :is(input, select, textarea) { width: 100%; min-width: 0; padding: 8px 10px; color: var(--text-1); background: #fff; border: 1px solid var(--line-1); border-radius: 8px; font: inherit; font-size: 15px; font-weight: 400; box-sizing: border-box; }
+.competitors-form textarea { resize: vertical; line-height: 1.45; }
+.competitors-form :is(input, select, textarea):focus { outline: 2px solid var(--brand); outline-offset: 0; border-color: transparent; }
+.competitors-form button { justify-self: start; }
+.competitors-form-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 8px; }
+.competitors-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line-1); }
+.competitors-tabs button { padding: 8px 14px; color: var(--text-2); background: none; border: 0; border-bottom: 2px solid transparent; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.competitors-tabs button[aria-selected="true"] { color: var(--text-1); border-bottom-color: var(--brand); }
+.competitors-feed { display: grid; gap: 10px; }
+.competitors-feed.is-empty { display: flex; min-height: 160px; }
+.competitor-ad { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line-1); border-radius: 12px; }
+.competitor-ad header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 14px; color: var(--text-2); }
+.competitor-ad header strong { color: var(--text-1); font-size: 15px; }
+.competitor-ad p { margin: 0; color: #344054; font-size: 15px; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.competitor-ad footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 14px; }
+.competitor-ad footer a { color: var(--brand); font-weight: 600; text-decoration: none; }
+.competitor-ad footer button { margin-left: auto; padding: 2px 8px; color: #b42318; background: none; border: 1px solid var(--line-1); border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
+.competitor-ad .is-long { color: var(--brand); background: #e8f4ed; }
+.competitors-idea-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+
 @media (max-width: 720px) {
+  .competitors-body { padding: 12px 16px 16px; }
+  .competitors-form-row { grid-template-columns: minmax(0, 1fr); }
   .campaigns-head { align-items: flex-start; flex-direction: column; }
   .campaigns-head-actions { justify-content: flex-start; width: 100%; }
   .campaigns-body { padding: 12px 16px 16px; }
@@ -3066,7 +3123,7 @@ tr:hover .customer-tel button { opacity: .75; }
 /* Nút ghi của Kênh/POS ẩn ngay bằng CSS (không đợi JS gắn .staff-hidden sau mỗi lần vẽ lại danh sách). */
 body.role-staff .is-staff-readonly :is([data-channel-action], [data-pos-action], .channel-remove-button, [data-follow-up-remove], #follow-up-bridge-send, [data-delete], [data-remove]) { display: none !important; }
 /* Chỉ Quản trị: xuất danh sách khách / tệp remarketing, đồng bộ quảng cáo, nhờ AI phân tích (máy chủ 403 với nhân viên). */
-body.role-staff :is(.customers-export, #campaigns-sync, #campaigns-ai-run) { display: none !important; }
+body.role-staff :is(.customers-export, #campaigns-sync, #campaigns-ai-run, #competitors-sync, #competitors-ai-run, .campaigns-ai-decide button, [data-competitor-remove], [data-competitor-ad-remove]) { display: none !important; }
 .staff-readonly-note { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 12px; color: #6a3d00; background: #fff6e0; border: 1px solid #f0d08a; border-radius: 9px; font-size: 13px; font-weight: 600; }
 .staff-readonly-note::before { content: '🔒'; font-size: 13px; }
 .is-staff-readonly :is(input, select, textarea):disabled { cursor: not-allowed; }

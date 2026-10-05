@@ -217,11 +217,12 @@ export const campaignAiSystemPrompt = [
   'Bạn nhận số liệu tổng hợp theo chiến dịch trong một khoảng ngày: chi tiêu, hiển thị, click, tin nhắn, đơn, doanh thu, CPA (chi/đơn), ROAS (doanh thu/chi), số theo ngày, và CỜ do hệ thống tính sẵn bằng luật.',
   'Nhiệm vụ: đưa ra ít lời khuyên cụ thể, thận trọng, có căn cứ số liệu. Các loại hành động: "scale" (tăng ngân sách từ từ, 15–20%), "reduce" (giảm ngân sách), "pause" (tạm dừng), "creative" (đổi nội dung/ảnh/video, tệp khách), "watch" (chưa làm gì, theo dõi thêm).',
   'Quy tắc: chiến dịch có cờ "it-du-lieu" hoặc "khong-co-chi-tieu" thì KHÔNG được kết luận — chỉ được "watch" hoặc bỏ qua. Không đề xuất "scale" cho chiến dịch chưa có đơn. Chiến dịch có trangThai khác ACTIVE (đã dừng, đã lưu trữ) hoặc có cờ "da-dung" / "khong-phai-chien-dich-meta" thì KHÔNG đề xuất "pause", "scale", "reduce". Chỉ dùng campaignId có trong dữ liệu. Không bịa số. Đơn có thể về chậm vài ngày nên đừng vội. Nhiều tin nhắn mà ít đơn gợi ý vấn đề chốt đơn/giá/ưu đãi hơn là quảng cáo. Tối đa 10 hành động, ưu tiên thứ tốn tiền nhất.',
+  'Nếu có "thiTruong" (ưu đãi đối thủ hay dùng, quảng cáo đối thủ chạy lâu, bài hợp tác KOL): chỉ dùng nó để gợi ý "creative" cụ thể hơn (góc nội dung, ưu đãi nên thử); KHÔNG dùng nó làm căn cứ tăng/giảm/tạm dừng ngân sách, không chép nguyên văn quảng cáo đối thủ.',
   'Trả về DUY NHẤT một JSON, không markdown:',
   '{"summary":"2–4 câu tiếng Việt tóm tắt tình hình và việc nên làm trước","actions":[{"campaignId":"id đúng như dữ liệu","kind":"scale|reduce|pause|creative|watch","reason":"một–hai câu, có số liệu","confidence":"cao|vừa|thấp"}]}'
 ].join('\n');
 
-export function buildCampaignPrompt(report = {}, { days, thresholds = campaignAiThresholds } = {}) {
+export function buildCampaignPrompt(report = {}, { days, thresholds = campaignAiThresholds, market = null } = {}) {
   const baseline = accountBaseline(report);
   const campaigns = selectCampaigns(report, thresholds.maxCampaigns);
   const range = report.range || {};
@@ -253,7 +254,9 @@ export function buildCampaignPrompt(report = {}, { days, thresholds = campaignAi
         // [ngày, chi, đơn, doanh thu] — chỉ các ngày gần nhất
         theoNgay: stats.rows.slice(-thresholds.maxDailyInPrompt).map(row => [row.date, round(row.spend), row.orders, round(row.revenue)])
       };
-    })
+    }),
+    // Tóm tắt đối thủ (ad-library.mjs → marketBrief): chỉ để gợi ý "creative".
+    ...(market ? { thiTruong: market } : {})
   };
   return `Số liệu chiến dịch (JSON):\n${JSON.stringify(payload)}`;
 }
@@ -471,6 +474,98 @@ export async function readCampaignInsights(options = {}) {
   return runs[0] || null;
 }
 
+// ===== Theo dõi đề xuất: đã làm / bỏ qua, so trước–sau =====
+//
+// CRM không tự sửa quảng cáo (quyết định chủ shop 05/10/2026: "giữ chỉ khuyên"). Quản trị làm trong Trình quản lý
+// quảng cáo rồi bấm "Đã làm" — CRM ghi lại lúc đó và so số liệu chiến dịch 7 ngày trước với các ngày sau đó.
+
+export const DECISION_STATUSES = Object.freeze(['done', 'skipped']);
+export const FOLLOW_UP_DAYS = Object.freeze({ before: 7, minAfter: 3, maxAfter: 14 });
+const DAY = 24 * 60 * 60 * 1000;
+const vnDay = ms => new Date(Number(ms) + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+/**
+ * Ghi quyết định cho một đề xuất của lượt phân tích `generatedAt`. status '' = bỏ đánh dấu.
+ * Trả về lượt đã cập nhật, hoặc null nếu không tìm thấy lượt / đề xuất.
+ */
+export function recordCampaignDecision({ generatedAt, campaignId, kind, status = '', by = '', now = Date.now() } = {}, options = {}) {
+  const filePath = insightsPath(options);
+  if (status && !DECISION_STATUSES.includes(status)) {
+    const error = new Error('Trạng thái phải là "done" (đã làm) hoặc "skipped" (bỏ qua).');
+    error.statusCode = 400;
+    return Promise.reject(error);
+  }
+  const operation = writeQueue.then(async () => {
+    const runs = await readRuns(filePath);
+    const run = runs.find(item => item?.generatedAt === generatedAt);
+    const action = run && (Array.isArray(run.actions) ? run.actions : []).find(item => String(item.campaignId) === String(campaignId) && item.kind === kind);
+    if (!action) return null;
+    if (status) action.decision = { status, at: now, by: String(by || '').slice(0, 80) };
+    else delete action.decision;
+    await writeJsonAtomic(filePath, { runs });
+    return run;
+  });
+  writeQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+/** Hai khoảng ngày để so: 7 ngày trước ngày làm, và từ ngày làm tới hôm nay (tối đa 14 ngày). null = chưa làm. */
+export function followUpWindows(decidedAt, now = Date.now()) {
+  const at = Number(decidedAt);
+  if (!at) return null;
+  const decidedDay = vnDay(at);
+  const today = vnDay(now);
+  const afterDays = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${decidedDay}T00:00:00Z`)) / DAY) + 1;
+  const afterUntil = afterDays > FOLLOW_UP_DAYS.maxAfter ? vnDay(at + (FOLLOW_UP_DAYS.maxAfter - 1) * DAY) : today;
+  return {
+    before: { from: vnDay(at - FOLLOW_UP_DAYS.before * DAY), to: vnDay(at - DAY), days: FOLLOW_UP_DAYS.before },
+    after: { from: decidedDay, to: afterUntil, days: Math.min(afterDays, FOLLOW_UP_DAYS.maxAfter) },
+    ready: afterDays >= FOLLOW_UP_DAYS.minAfter
+  };
+}
+
+function periodFigures(row, days) {
+  const spend = number(row?.spend);
+  const orders = number(row?.orders);
+  const revenue = number(row?.revenue);
+  return {
+    days,
+    spend: round(spend),
+    spendPerDay: round(ratio(spend, days)),
+    orders,
+    ordersPerDay: round(ratio(orders, days), 2),
+    revenue: round(revenue),
+    cpa: orders ? round(spend / orders) : null,
+    roas: spend ? round(revenue / spend, 2) : null
+  };
+}
+
+/**
+ * Kết quả sau khi làm: số của chiến dịch trước / sau (theo ngày, vì hai khoảng dài khác nhau) và một câu nhận xét.
+ * `reports` = { before, after } là báo cáo chiến dịch của hai khoảng trong followUpWindows.
+ */
+export function decisionFollowUp(action = {}, windows = null, reports = {}) {
+  if (!windows) return null;
+  if (!windows.ready) return { ready: false, daysLeft: FOLLOW_UP_DAYS.minAfter - windows.after.days, windows };
+  const find = report => (Array.isArray(report?.campaigns) ? report.campaigns : []).find(item => String(item.id) === String(action.campaignId));
+  const before = periodFigures(find(reports.before), windows.before.days);
+  const after = periodFigures(find(reports.after), windows.after.days);
+  let verdict = 'Chưa đủ đơn để kết luận.';
+  if (action.kind === 'pause' || action.kind === 'reduce') {
+    verdict = after.spendPerDay < before.spendPerDay
+      ? `Chi/ngày giảm từ ${formatVnd(before.spendPerDay)} còn ${formatVnd(after.spendPerDay)}.`
+      : `Chi/ngày chưa giảm (${formatVnd(before.spendPerDay)} → ${formatVnd(after.spendPerDay)}) — kiểm tra lại trong Trình quản lý quảng cáo.`;
+  } else if (before.orders + after.orders >= 3 && before.cpa !== null && after.cpa !== null) {
+    const change = (after.cpa - before.cpa) / before.cpa;
+    verdict = change <= -0.1 ? `CPA tốt lên ${Math.round(-change * 100)}% (${formatVnd(before.cpa)} → ${formatVnd(after.cpa)}).`
+      : change >= 0.1 ? `CPA xấu đi ${Math.round(change * 100)}% (${formatVnd(before.cpa)} → ${formatVnd(after.cpa)}).`
+        : `CPA gần như giữ nguyên (${formatVnd(before.cpa)} → ${formatVnd(after.cpa)}).`;
+  } else if (after.orders && !before.orders) {
+    verdict = `Có ${after.orders} đơn sau khi làm (trước đó 0 đơn).`;
+  }
+  return { ready: true, windows, before, after, verdict };
+}
+
 // ===== Điểm vào =====
 
 /**
@@ -493,7 +588,7 @@ export async function generateCampaignInsights(report = {}, options = {}) {
     try {
       settings = options.settings || await (options.readSettings || dependencies.readSettings)();
       const system = campaignAiSystemPrompt;
-      const prompt = buildCampaignPrompt(safeReport, { days });
+      const prompt = buildCampaignPrompt(safeReport, { days, market: options.market || null });
       const call = options.callModel || (input => requestModelText({
         ...input,
         fetchImpl: options.fetchImpl,

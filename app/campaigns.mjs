@@ -113,6 +113,7 @@ export function buildCampaignReport({
         id,
         name: name || id,
         status: campaign?.status || '',
+        accountId: campaign?.accountId || '',
         source,
         dailyBudget: campaign?.dailyBudget ?? null,
         spend: 0, impressions: 0, clicks: 0, messages: 0, orders: 0, revenue: 0,
@@ -212,6 +213,7 @@ export function buildCampaignReport({
     id: row.id,
     name: row.name,
     status: row.status,
+    accountId: row.accountId,
     source: row.source,
     dailyBudget: row.dailyBudget,
     spend: round(row.spend, 2),
@@ -284,4 +286,13 @@ export async function loadCampaignReport({ days = 7, from, to, now = Date.now() 
   const [store, landingOrders, adStore] = await Promise.all([readMessagingStore(), listLandingOrders(), readAdStore()]);
   const ads = await adsConnectionStatus({ store: adStore });
   return buildCampaignReport({ conversations: store.conversations || [], landingOrders, adStore, days, from, to, now, ads });
+}
+
+/** Nhiều báo cáo (mỗi phần tử {from, to} hoặc {days}) trên cùng một lượt đọc dữ liệu — dùng cho so trước/sau của đề xuất. */
+export async function loadCampaignReports(ranges = [], { now = Date.now() } = {}) {
+  if (!ranges.length) return [];
+  const [store, landingOrders, adStore] = await Promise.all([readMessagingStore(), listLandingOrders(), readAdStore()]);
+  const conversations = store.conversations || [];
+  const facts = collectOrderFacts({ conversations, landingOrders });
+  return ranges.map(range => buildCampaignReport({ conversations, landingOrders, adStore, facts, now, ...range }));
 }

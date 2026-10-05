@@ -97,6 +97,24 @@ test('mẫu dán tay: kiểm liên kết, ngày, trùng ID', () => {
   assert.equal(store.ads.length, 0);
 });
 
+test('nhận ưu đãi trên mẫu thật 05/10: "100K+ lượt bán" là số đã bán, không phải giá', () => {
+  assert.deepEqual(detectOffers('Mua 3 gói Granola Premium nhận ngay 1 bát dừa xinh xắn. Hơn 100K+ lượt bán').sort(), ['combo', 'gift', 'social']);
+  assert.deepEqual(detectOffers('Chỉ 139k 500G. FREESHIP khi mua từ 1 kg. Khách cũ mua đi mua lại cả chục lần').sort(), ['combo', 'freeship', 'price', 'social']);
+  assert.deepEqual(detectOffers('KOC Milo nói gì về Mix hạt, đã bán 100k+').sort(), ['creator', 'social']);
+  assert.ok(detectOffers('Tặng voucher 50k, chốt vội kẻo cháy hàng').includes('urgency'));
+});
+
+test('gợi ý ưu đãi chung chỉ tính trên đối thủ đã có mẫu quảng cáo', () => {
+  const store = { competitors: [], ads: [], branded: [], insights: [] };
+  const a = addCompetitor(store, { name: 'A', keywords: 'a' });
+  const b = addCompetitor(store, { name: 'B', keywords: 'b' });
+  for (const name of ['C', 'D', 'E', 'F']) addCompetitor(store, { name, keywords: name });
+  addManualAd(store, { competitorId: a.id, text: 'Freeship toàn quốc cho đơn 2 túi' }, { now });
+  addManualAd(store, { competitorId: b.id, text: 'Miễn phí vận chuyển mọi đơn' }, { now });
+  const offer = ruleMarketIdeas(marketSignals(store, now)).find(idea => idea.kind === 'offer');
+  assert.match(offer.title, /^2\/2 đối thủ dùng "Miễn phí vận chuyển"/);
+});
+
 test('đọc ArchivedAd: không giữ ad_snapshot_url (chứa token), tính còn chạy', () => {
   const ad = parseArchivedAd({
     id: '555', page_id: '42', page_name: 'ABC', ad_delivery_start_time: '2026-09-01T00:00:00+0000',

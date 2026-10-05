@@ -545,13 +545,15 @@ export function foldVietnamese(value) {
 
 export const OFFER_PATTERNS = Object.freeze([
   { key: 'freeship', label: 'Miễn phí vận chuyển', pattern: /free ?ship|mien phi (van chuyen|ship|giao)|bao ship/ },
-  { key: 'gift', label: 'Tặng quà', pattern: /\btang\b|qua tang|mua \d+ tang/ },
-  { key: 'discount', label: 'Giảm giá / % sale', pattern: /giam( gia)? ?\d|\d+ ?%|\bsale\b|khuyen mai|\bkm\b|dong gia/ },
-  { key: 'combo', label: 'Combo / set', pattern: /combo|\bset\b|\bbo \d|mua \d+/ },
-  { key: 'price', label: 'Nêu giá cụ thể', pattern: /\d[\d.,]*\s?(k|d|vnd|nghin|ngan)\b|\d{2,3}\.000/ },
-  { key: 'urgency', label: 'Khan hiếm / gấp', pattern: /chi con|so luong (co han|gioi han)|hom nay|duy nhat|sap het|cuoi cung|flash|\bdeal\b|chot ngay/ },
+  { key: 'gift', label: 'Tặng quà', pattern: /\btang\b|qua tang|mua \d+ tang|nhan ngay \d/ },
+  { key: 'discount', label: 'Giảm giá / % sale', pattern: /giam( gia)? ?\d|\d+ ?%|\bsale\b|khuyen mai|\bkm\b|dong gia|voucher/ },
+  { key: 'combo', label: 'Combo / set', pattern: /combo|\bset\b|\bbo \d|mua \d+|mua tu \d/ },
+  // "100k+ lượt bán" là số đã bán, không phải giá: bỏ con số có dấu + ngay sau.
+  { key: 'price', label: 'Nêu giá cụ thể', pattern: /\d[\d.,]*\s?(k|d|vnd|nghin|ngan)\b(?!\s?\+)|\d{2,3}\.000/ },
+  { key: 'urgency', label: 'Khan hiếm / gấp', pattern: /chi con|so luong (co han|gioi han)|hom nay|duy nhat|sap het|het hang|chay hang|cuoi cung|flash|\bdeal\b|chot ngay|chot voi|keo lo/ },
   { key: 'guarantee', label: 'Cam kết / đổi trả', pattern: /hoan tien|doi tra|cam ket|bao hanh|khong ngon/ },
-  { key: 'social', label: 'Cảm nhận khách / feedback', pattern: /feedback|review|danh gia|khach (hang )?(noi|chia se|khen)/ },
+  { key: 'social', label: 'Số đã bán / khách mua lại', pattern: /feedback|danh gia|khach (hang )?(noi|chia se|khen)|khach cu|mua (di mua )?lai|luot ban|da ban|\d+k\+|best ?seller|ban chay/ },
+  { key: 'creator', label: 'KOL / KOC review', pattern: /\bkoc\b|\bkol\b|review|reviewer|influencer/ },
   { key: 'health', label: 'Sức khoẻ / giảm cân / ít đường', pattern: /giam can|eat ?clean|an kieng|healthy|giu dang|tieu duong|it duong|khong duong|chat xo|protein|calo/ },
   { key: 'live', label: 'Livestream', pattern: /\blive\b|livestream|phat truc tiep/ }
 ]);
@@ -656,7 +658,8 @@ export function marketSignals(store = {}, now = Date.now()) {
 /** Gợi ý theo luật (không cần AI): ưu đãi nhiều đối thủ cùng dùng, quảng cáo chạy lâu, KOL hợp tác. */
 export function ruleMarketIdeas(signals = {}) {
   const ideas = [];
-  const total = Number(signals.competitors) || 0;
+  // Mẫu số là đối thủ ĐÃ có quảng cáo trong kho — đối thủ chưa dán mẫu không nói được là "không dùng" ưu đãi.
+  const total = list(signals.perCompetitor).filter(row => row.ads > 0).length;
   if (!Number(signals.ads) && !Number(signals.brandedPosts)) {
     return [{ kind: 'research', title: 'Chưa có dữ liệu đối thủ để phân tích', detail: 'Bấm "Lấy dữ liệu" để kéo bài hợp tác KOL, rồi "Mở Thư viện" ở từng đối thủ, chép 3–5 quảng cáo đang chạy lâu nhất vào ô "Dán mẫu quảng cáo".', competitors: [] }];
   }

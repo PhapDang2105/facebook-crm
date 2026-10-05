@@ -44,10 +44,28 @@ const MAXIMUM_PAGES = 200;
 const INSIGHT_FIELDS = 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,reach,clicks,inline_link_clicks,actions';
 const ACCOUNT_DAY_FIELDS = 'spend,impressions,clicks,inline_link_clicks,actions';
 const CAMPAIGN_FIELDS = 'id,name,status,effective_status,daily_budget,lifetime_budget,objective';
-const CAMPAIGN_STATUSES = '["ACTIVE","PAUSED","ARCHIVED","DELETED","IN_PROCESS","WITH_ISSUES"]';
+// Không có DELETED: Meta từ chối lọc đối tượng đã xoá ở /campaigns (100/1815001, chạy thật 05/10/2026). Chi tiêu của
+// chiến dịch đã xoá vẫn vào kho qua insights (tên lấy từ campaign_name của dòng) và dòng chênh level=account.
+const CAMPAIGN_STATUSES = '["ACTIVE","PAUSED","ARCHIVED","IN_PROCESS","WITH_ISSUES"]';
 const ADSET_FIELDS = 'id,campaign_id,daily_budget,lifetime_budget,effective_status';
 const ACCOUNT_FIELDS = 'name,currency,timezone_name,account_status';
-const VIETNAM_TIMEZONES = new Set(['Asia/Ho_Chi_Minh', 'Asia/Saigon']);
+/**
+ * Múi giờ của tài khoản có cùng giờ Việt Nam không: UTC+7 QUANH NĂM (không đổi giờ mùa hè). Tài khoản thật của shop đặt
+ * Asia/Bangkok (05/10/2026) — cùng giờ với Asia/Ho_Chi_Minh nên số theo ngày khớp đơn hàng. Múi giờ lạ → coi là không khớp.
+ */
+export function isVietnamClockTimezone(timezone) {
+  const offsetMinutes = at => {
+    try {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: timezone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        .formatToParts(at).map(part => [part.type, part.value]));
+      return Math.round((Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute) - Math.floor(at.getTime() / 60000) * 60000) / 60000);
+    } catch {
+      return null;
+    }
+  };
+  const year = new Date().getUTCFullYear();
+  return [new Date(Date.UTC(year, 0, 15)), new Date(Date.UTC(year, 6, 15))].every(at => offsetMinutes(at) === 7 * 60);
+}
 // account_status của Meta: 1 = đang hoạt động.
 const ACCOUNT_STATUS_TEXT = { 2: 'bị vô hiệu hoá', 3: 'chưa thanh toán', 7: 'đang chờ xét rủi ro', 8: 'đang chờ thanh toán', 9: 'trong thời gian gia hạn', 100: 'chờ đóng', 101: 'đã đóng' };
 
@@ -361,7 +379,7 @@ export function checkAccountInfo(info = {}, accountId = '') {
     error.permanent = true;
     throw error;
   }
-  if (timezone && !VIETNAM_TIMEZONES.has(timezone)) {
+  if (timezone && !isVietnamClockTimezone(timezone)) {
     const error = new Error(`Tài khoản quảng cáo ${accountId} đặt múi giờ ${timezone}; số theo ngày sẽ lệch với đơn hàng (giờ Việt Nam). Bỏ tài khoản này khỏi META_AD_ACCOUNT_IDS hoặc đổi múi giờ tài khoản.`);
     error.permanent = true;
     throw error;

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { tempDir } from './helpers/temp-dir.mjs';
 import {
-  accountGapRows, adsGraphError, applyAdsetBudgets, checkAccountInfo, planBackgroundSync, readAdStore, runBackgroundAdSync,
+  accountGapRows, adsGraphError, applyAdsetBudgets, checkAccountInfo, isVietnamClockTimezone, planBackgroundSync, readAdStore, runBackgroundAdSync,
   syncAdInsights, syncWindows, usagePercent
 } from '../app/meta-ads.mjs';
 import { buildCampaignReport } from '../app/campaigns.mjs';
@@ -63,6 +63,9 @@ test('kho trống: kéo bù 90 ngày theo cửa sổ, ghi mốc phủ; lượt s
   assert.deepEqual({ since: store.coverage.act_1.since, until: store.coverage.act_1.until }, { since: '2026-07-08', until: '2026-10-05' });
   assert.equal(store.daily.length, 90);
   assert.equal(store.accountInfo.act_1.currency, 'VND');
+  const campaignsCall = meta.calls.find(url => url.pathname.endsWith('/campaigns'));
+  assert.doesNotMatch(campaignsCall.searchParams.get('effective_status'), /DELETED/, 'Meta từ chối lọc DELETED (100/1815001)');
+  assert.match(campaignsCall.searchParams.get('effective_status'), /ARCHIVED/);
 
   const later = fakeMeta();
   const second = await runBackgroundAdSync({ now: now + 3600000, config: settings, fetchImpl: later.fetchImpl });
@@ -167,6 +170,12 @@ test('tài khoản không phải VND / giờ Việt Nam: không kéo (số sai);
   assert.throws(() => checkAccountInfo({ currency: 'USD', timezone_name: 'Asia/Ho_Chi_Minh' }, 'act_9'), /dùng tiền USD/);
   assert.throws(() => checkAccountInfo({ currency: 'VND', timezone_name: 'America/Los_Angeles' }, 'act_9'), /múi giờ America\/Los_Angeles/);
   assert.match(checkAccountInfo({ currency: 'VND', timezone_name: 'Asia/Saigon', account_status: 3, name: 'GN' }, 'act_9').warning, /chưa thanh toán/);
+  // Tài khoản thật của shop: Asia/Bangkok = UTC+7 quanh năm như giờ Việt Nam → nhận (05/10/2026 từng bị chặn nhầm).
+  assert.equal(checkAccountInfo({ currency: 'VND', timezone_name: 'Asia/Bangkok', account_status: 1 }, 'act_542455181085610').warning, undefined);
+  assert.equal(isVietnamClockTimezone('Asia/Jakarta'), true);
+  assert.equal(isVietnamClockTimezone('Asia/Singapore'), false, 'UTC+8');
+  assert.equal(isVietnamClockTimezone('Europe/Berlin'), false);
+  assert.equal(isVietnamClockTimezone('Khong/Co'), false, 'múi giờ lạ: không coi là khớp');
   await assert.rejects(syncAdInsights({ days: 7, now, config: config(), fetchImpl: fakeMeta({ currency: 'USD' }).fetchImpl }), /dùng tiền USD/);
   assert.match(friendlyAdsError('Tài khoản quảng cáo act_9 dùng tiền USD; CRM chỉ tính được tài khoản VND. Bỏ tài khoản này khỏi META_AD_ACCOUNT_IDS.'), /^Tài khoản quảng cáo act_9 dùng tiền USD — CRM chỉ tính/);
   assert.doesNotMatch(friendlyAdsError('Tài khoản quảng cáo act_9 dùng tiền USD; Bỏ khỏi META_AD_ACCOUNT_IDS.'), /META_/);

@@ -639,3 +639,70 @@ export async function resolvePreviousAddress(phone, {
   }
   return { own: null, foreign };
 }
+
+// ===== 06/10 (chủ shop: form Tạo đơn "chưa cho chọn địa chỉ" khi khách đã nhắn địa chỉ) =====
+// Gợi ý cho ô "Chọn địa chỉ" + SĐT của khách, theo thứ tự: giỏ bot đang giữ → tin khách tự nhắn (mới trước) → đơn
+// CRM của hội thoại → đơn Pancake POS cùng SĐT. Nhân viên tự chọn (không tự đè ô đã gõ); trùng chữ (bỏ dấu) chỉ giữ một.
+
+/** SĐT của khách trong hội thoại: giỏ, đơn, tin khách gửi (mới trước, không trùng). */
+export function conversationPhones(conversation = {}, messages = []) {
+  const found = [];
+  const add = value => { const phone = toLocalPhone(value) || ''; if (/^0\d{9}$/.test(phone) && !found.includes(phone)) found.push(phone); };
+  add(conversation.pendingOrder?.phone);
+  const list = (Array.isArray(messages) ? messages : []).filter(item => item?.direction === 'incoming');
+  for (let index = list.length - 1; index >= 0; index -= 1) for (const phone of phonesInText(list[index].text)) add(phone);
+  for (const order of [...(Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [])].reverse()) add(order?.phone);
+  return found;
+}
+
+/**
+ * Danh sách gợi ý địa chỉ: [{ address, source: 'basket'|'message'|'order'|'pos', at, complete, phone?, orderId? }]
+ * (tối đa `limit`). `posOrders`: đơn POS đã tra theo SĐT (có thể rỗng). Tin khách: chỉ tin chữ 12–300 ký tự, không phải
+ * câu hỏi/nhắc "địa chỉ cũ", đọc ra được ít nhất tỉnh/thành và quận/huyện hay phường/xã.
+ */
+export function addressSuggestions({ conversation = {}, messages = [], posOrders = [], now = Date.now(), limit = 10, describe = describeDeliveryAddress } = {}) {
+  const items = [];
+  const seen = new Set();
+  const check = text => { try { return describe(text) || null; } catch { return null; } };
+  const push = (address, extra) => {
+    const text = String(address || '').replace(/\s+/g, ' ').trim();
+    const key = normalizeIntentText(text);
+    if (!text || /^chưa có địa chỉ$/i.test(text) || seen.has(key) || items.length >= limit) return;
+    seen.add(key);
+    items.push({ address: text, ...extra, complete: extra.complete ?? Boolean(check(text)?.complete) });
+  };
+  const pending = conversation.pendingOrder;
+  if (pending?.address) push(pending.address, { source: 'basket', at: Number(pending.at) || 0 });
+  const list = (Array.isArray(messages) ? messages : []).filter(Boolean);
+  let fromMessages = 0;
+  for (let index = list.length - 1; index >= 0 && fromMessages < 5; index -= 1) {
+    const item = list[index];
+    if (item.direction !== 'incoming' || (item.type && item.type !== 'text')) continue;
+    const at = Number(item.createdAt) || 0;
+    if (at && now - at > 180 * DAY_MS) break;
+    const raw = String(item.text || '').trim();
+    if (raw.length < 12 || raw.length > 300 || /\?\s*$/.test(raw) || mentionsOldAddress(raw)) continue;
+    const address = cleanAddressText(raw).trim();
+    if (address.length < 8) continue;
+    const described = check(address);
+    const resolved = described?.resolved || {};
+    if (!resolved.province || !(resolved.district || resolved.ward)) continue;
+    const before = items.length;
+    push(address, { source: 'message', at, complete: Boolean(described.complete) });
+    if (items.length > before) fromMessages += 1;
+  }
+  const orders = [...(Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [])]
+    .filter(order => order && String(order.processingStatus || '') !== 'cancelled')
+    .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+  for (const order of orders) {
+    const address = String(order.rawAddress || order.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+    push(address, { source: 'order', at: Number(order.createdAt) || 0, orderId: String(order.id || ''), phone: toLocalPhone(order.phone) || '' });
+  }
+  const pos = (Array.isArray(posOrders) ? posOrders : []).filter(order => order && ![6, 7].includes(Number(order.status)));
+  for (const order of pos) {
+    const inserted = String(order.inserted_at || '').trim();
+    const at = Date.parse(inserted.endsWith('Z') || /[+-]\d\d:\d\d$/.test(inserted) ? inserted : `${inserted.replace(' ', 'T')}Z`) || 0;
+    push(posOrderAddress(order), { source: 'pos', at, orderId: String(order.system_id || order.id || ''), phone: phoneDigits(order.bill_phone_number || order.shipping_address?.phone_number) });
+  }
+  return items;
+}

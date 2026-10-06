@@ -61,6 +61,7 @@ import { createBridgeClickMatcher, createLinkRoutedQrFlow, createQrGreeter, crea
 import { attachReferral as attachQrReferral } from './meta-webhook.mjs';
 import { flushMessagingStore as flushMessagingStoreForQr } from './messaging-store.mjs';
 import { searchConversations } from './message-search.mjs';
+import { addressSuggestions, conversationPhones } from './processing/order-flow.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
 import {
@@ -3112,6 +3113,26 @@ const server = http.createServer(async (request, response) => {
         unsubscribe();
       });
       return undefined;
+    }
+    // 06/10: gợi ý cho form Tạo đơn — SĐT khách + địa chỉ (giỏ bot, tin khách nhắn, đơn CRM, đơn POS cùng SĐT chờ ≤ 4 giây).
+    const addressSuggestMatch = url.pathname.match(/^\/api\/messaging\/conversations\/([^/]+)\/address-suggestions$/);
+    if (addressSuggestMatch && request.method === 'GET') {
+      const id = decodeURIComponent(addressSuggestMatch[1]);
+      const conversation = await getConversation(id);
+      if (!conversation) return sendJson(response, 404, { error: 'Không tìm thấy hội thoại này.' });
+      const messages = await listMessages(id, 300);
+      const phones = conversationPhones(conversation, messages);
+      let posOrders = [];
+      if (phones.length && posConfigured(posConfig())) {
+        const lookups = phones.slice(0, 2).map(phone => Promise.race([
+          posRequest('/orders', { search: phone, page_size: 10 }, posConfig(), fetch).then(data => (Array.isArray(data?.data) ? data.data : [])),
+          new Promise(resolve => setTimeout(() => resolve([]), 4000))
+        ]).catch(() => []));
+        // Tìm POS theo chữ có thể khớp trường khác: chỉ giữ đơn đúng SĐT của khách.
+        posOrders = (await Promise.all(lookups)).flat()
+          .filter(order => [order?.bill_phone_number, order?.shipping_address?.phone_number].some(value => phones.includes(toLocalPhoneLoose(value))));
+      }
+      return sendJson(response, 200, { phones, items: addressSuggestions({ conversation, messages, posOrders }) });
     }
     const conversationMessagesMatch = url.pathname.match(/^\/api\/messaging\/conversations\/([^/]+)\/messages$/);
     if (conversationMessagesMatch) {

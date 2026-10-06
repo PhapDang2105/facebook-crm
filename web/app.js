@@ -5918,6 +5918,9 @@ function cacheRemoteMessage(conversationId, message) {
 }
 
 function handleMessagingEvent(event) {
+  // Hội thoại có tin/đơn mới: gợi ý địa chỉ của nó tải lại ở lần vẽ form kế tiếp (khách vừa nhắn địa chỉ).
+  const changedId = event.conversationId || event.conversation?.id;
+  if (changedId && typeof customerAddressSuggestions !== 'undefined') customerAddressSuggestions.delete(changedId);
   if (event.type === 'customer-panel') {
     const active = getActiveConversation();
     if (active?.dataset.conversationId === event.conversationId) loadCustomerPanelFromServer(active);
@@ -8906,15 +8909,70 @@ function renderCustomerOrderChip(conversation = getActiveConversation()) {
   }
 }
 
+// 06/10 (chủ shop: khách đã nhắn địa chỉ mà form Tạo đơn "chưa cho chọn địa chỉ"): máy chủ gợi ý SĐT + địa chỉ từ giỏ
+// bot đang giữ, tin khách tự nhắn, đơn CRM cũ và đơn Pancake POS cùng SĐT. Đệm theo hội thoại 30 giây.
+const customerAddressSuggestions = new Map();
+const CUSTOMER_ADDRESS_SOURCES = { basket: 'Giỏ bot', message: 'Khách nhắn', order: 'Đơn cũ', pos: 'Đơn POS' };
+function customerSuggestionLabel(item) {
+  const when = Number(item.at) ? new Date(Number(item.at)).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' }) : '';
+  return `${CUSTOMER_ADDRESS_SOURCES[item.source] || 'Gợi ý'}${when ? ` ${when}` : ''} · ${item.address}${item.complete === false ? ' (thiếu cấp)' : ''}`;
+}
+async function loadCustomerAddressSuggestions(conversation = getActiveConversation()) {
+  const id = conversation?.dataset?.conversationId;
+  if (!id) return;
+  const cached = customerAddressSuggestions.get(id);
+  if (cached && (cached.loading || Date.now() - cached.at < 30000)) return;
+  const empty = { phones: [], items: [] };
+  customerAddressSuggestions.set(id, { ...(cached || empty), at: cached?.at || 0, loading: true });
+  try {
+    const result = await readApiResponse(await fetch(`/api/messaging/conversations/${encodeURIComponent(id)}/address-suggestions`));
+    customerAddressSuggestions.set(id, { at: Date.now(), phones: Array.isArray(result?.phones) ? result.phones : [], items: Array.isArray(result?.items) ? result.items : [] });
+  } catch {
+    customerAddressSuggestions.set(id, { ...(cached || empty), at: Date.now() });
+    return;
+  }
+  const active = getActiveConversation();
+  if (active?.dataset?.conversationId !== id) return;
+  fillCustomerOrderFromSuggestions(active);
+  renderCustomerSavedAddresses(active);
+}
+/** Form chưa ai đụng mà ô SĐT / địa chỉ còn trống: điền gợi ý mới nhất (giỏ bot / khách nhắn / đơn cũ — không lấy đơn POS). */
+function fillCustomerOrderFromSuggestions(conversation) {
+  const id = conversation?.dataset?.conversationId;
+  const data = id ? customerAddressSuggestions.get(id) : null;
+  if (!data || customerOrderFormDirty() || getCustomerPanelKey(conversation) !== customerPanelLoadedProfile.key) return;
+  const phone = !customerOrderPhone?.value.trim() ? data.phones[0] || '' : '';
+  const best = data.items.find(item => item.source !== 'pos');
+  const address = !customerOrderAddress?.value.trim() && best ? best.address : '';
+  if (phone && customerOrderPhone) customerOrderPhone.value = phone;
+  if (address && customerOrderAddress) customerOrderAddress.value = address;
+  if (!phone && !address) return;
+  customerPanelLoadedProfile = { ...customerPanelLoadedProfile, phone: customerOrderPhone?.value ?? '', address: customerOrderAddress?.value ?? '' };
+  if (phone) { renderCustomerPhoneWarning(); refreshPhoneWarnings([phone]); }
+  renderCustomerOrderChip(conversation);
+}
+
 function renderCustomerSavedAddresses(conversation = getActiveConversation()) {
   if (!customerOrderSavedAddress) return;
   const profile = getCustomerPanelProfile(conversation);
-  const addresses = [...new Set([profile.address, ...getCustomerOrders(conversation).map(order => order.address)].filter(Boolean))];
+  const options = [];
+  const seen = new Set();
+  const add = (address, label) => {
+    const text = String(address || '').trim();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    options.push({ address: text, label: label || text });
+  };
+  const suggested = customerAddressSuggestions.get(conversation?.dataset?.conversationId || '')?.items || [];
+  suggested.filter(item => item.source === 'basket' || item.source === 'message').forEach(item => add(item.address, customerSuggestionLabel(item)));
+  [profile.address, ...getCustomerOrders(conversation).map(order => order.address)].forEach(address => add(address));
+  suggested.filter(item => item.source === 'order' || item.source === 'pos').forEach(item => add(item.address, customerSuggestionLabel(item)));
   const current = customerOrderSavedAddress.value;
-  customerOrderSavedAddress.innerHTML = ['<option value="">Chọn địa chỉ</option>']
-    .concat(addresses.map(address => `<option value="${escapeHtml(address)}">${escapeHtml(address)}</option>`))
+  customerOrderSavedAddress.innerHTML = [`<option value="">${options.length ? `Chọn địa chỉ (${options.length} gợi ý)` : 'Chọn địa chỉ — chưa thấy địa chỉ nào của khách'}</option>`]
+    .concat(options.map(option => `<option value="${escapeHtml(option.address)}">${escapeHtml(option.label)}</option>`))
     .join('');
-  if (addresses.includes(current)) customerOrderSavedAddress.value = current;
+  if (seen.has(current)) customerOrderSavedAddress.value = current;
+  loadCustomerAddressSuggestions(conversation);
 }
 
 function resetCustomerOrderForm(conversation = getActiveConversation()) {

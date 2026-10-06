@@ -25,8 +25,11 @@ export function posGiftLines(order = {}) {
   const text = String(order.gift || '');
   const padded = ` + ${normalizeText(text)} + `;
   const parts = new Set(text.split(' + ').map(part => part.trim().toUpperCase()).filter(Boolean));
+  // 06/10: quà live "Bát gáo dừa + Muỗng dừa" dùng lại SKU BGD/MUONG của quà thường → mỗi SKU chỉ một dòng.
+  const seen = new Set();
   return (getGifts() || [])
     .filter(gift => gift.sku && (padded.includes(` + ${normalizeText(gift.name)} + `) || parts.has(gift.sku)))
+    .filter(gift => !seen.has(gift.sku) && seen.add(gift.sku))
     .map(gift => ({ sku: gift.sku, quantity: 1, weight: gift.weight }));
 }
 

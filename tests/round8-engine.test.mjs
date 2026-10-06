@@ -258,7 +258,7 @@ test('11. Bình luận: chê → xin lỗi công khai + thẻ; khen → cảm ơ
   const live = await comment('mua 2 túi được quà gì', renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates, {}), { post: { message: 'Săn deal hời cùng Giọt Nắng' } });
   // Vòng 12: khách live hỏi quà → câu quà live (2 túi 298k miễn ship tặng Quạt + Bát gáo dừa), không phải bảng quà chung.
   assert.equal(live.results[0].templateId, 'GIFT_POLICY_LIVE');
-  assert.match(live.sent.find(text => text.startsWith('riêng')), /Quạt \+ Bát gáo dừa/);
+  assert.match(live.sent.find(text => text.startsWith('riêng')), /Bát gáo dừa \+ Muỗng dừa/);
   // Giỏ ghi trong bình luận.
   assert.deepEqual(commentBasket('cho mình 2 túi socola'), [{ product: 'Granola Túi Nâu vị cacao 350g', quantity: 2 }]);
   assert.deepEqual(commentBasket('lấy 2 hộp xanh'), [{ product: 'Combo 10 gói Xanh', quantity: 2 }]);

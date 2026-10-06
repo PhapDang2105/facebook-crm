@@ -272,7 +272,7 @@ test('5. khách live: hỏi quà → Quạt + Bát gáo dừa (bỏ điều ki�
   const live = () => new Sim({ labels: ['livestream'], botLastTemplateId: 'WELCOME', botLastReplyAt: Date.now() - 3600000 });
   const gift = await live().send('Nhớ tặng kèm quà nhe', { llm: { template_id: 'GIFT_POLICY' } });
   assert.equal(gift.result.templateId, 'GIFT_POLICY_LIVE');
-  assert.match(gift.sent.join('\n'), /Quạt \+ Bát gáo dừa/);
+  assert.match(gift.sent.join('\n'), /Bát gáo dừa \+ Muỗng dừa/);
   assert.doesNotMatch(gift.sent.join('\n'), /combo 3|từ 3 sản phẩm/);
   const price = await live().send('túi xanh giá sao', { llm: { template_id: 'PRICE_QUOTE', Product_N1: 'Granola Túi Xanh 450g' } });
   assert.equal(price.result.templateId, 'LIVESTREAM_COMMENT');

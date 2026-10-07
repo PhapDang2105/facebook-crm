@@ -901,6 +901,7 @@ const unreadConversationsKey = 'crm-unread-conversations';
 const mutedConversationsKey = 'crm-muted-conversations';
 let currentConversationFilter = 'all';
 let currentMessageLabel = 'all';
+const selectedMessageLabels = new Set();
 let currentMessageChannelId = 'local-facebook';
 let currentChatHeadView = 'chat';
 let messageChannels = [];
@@ -6307,6 +6308,30 @@ async function openMessageSearchHit(item) {
   await revealMessageSearchHit(item);
 }
 
+function conversationMatchesSelectedLabels(conversation, labels, source) {
+  if (selectedMessageLabels.size === 0 || selectedMessageLabels.has('all')) {
+    if (currentMessageLabel && currentMessageLabel !== 'all' && selectedMessageLabels.size === 0) {
+      if (currentMessageLabel === 'unread') return conversation.classList.contains('unread');
+      if (currentMessageLabel === 'inbox' || currentMessageLabel === 'comment') return source === currentMessageLabel;
+      if (currentMessageLabel === 'ad') return Boolean(conversation.dataset.adTitle);
+      return labels.includes(currentMessageLabel);
+    }
+    return true;
+  }
+  for (const labelId of selectedMessageLabels) {
+    if (labelId === 'unread') {
+      if (conversation.classList.contains('unread')) return true;
+    } else if (labelId === 'inbox' || labelId === 'comment') {
+      if (source === labelId) return true;
+    } else if (labelId === 'ad') {
+      if (Boolean(conversation.dataset.adTitle)) return true;
+    } else if (labels.includes(labelId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function filterConversations() {
   sortConversationsByRecentActivity();
   const query = normalizeColumnName(messageSearchInput?.value || '');
@@ -6317,11 +6342,7 @@ function filterConversations() {
     const matchesChannel = conversation.dataset.channelId === currentMessageChannelId;
     const labels = (conversation.dataset.labels || '').split(/\s+/).filter(Boolean);
     const source = conversation.dataset.source || 'inbox';
-    const matchesLabel = currentMessageLabel === 'all'
-      || (currentMessageLabel === 'unread' ? conversation.classList.contains('unread')
-        : currentMessageLabel === 'inbox' || currentMessageLabel === 'comment' ? source === currentMessageLabel
-        : currentMessageLabel === 'ad' ? Boolean(conversation.dataset.adTitle)
-        : labels.includes(currentMessageLabel));
+    const matchesLabel = conversationMatchesSelectedLabels(conversation, labels, source);
     const matches = matchesSearch && matchesFilter && matchesChannel && matchesLabel;
     conversation.classList.toggle('hidden', !matches);
     if (matches) visibleCount += 1;
@@ -12006,15 +12027,49 @@ messageLabelFilter?.addEventListener('click', event => {
   messageLabelFilter.setAttribute('aria-expanded', String(willOpen));
   messageChannelTrigger?.setAttribute('aria-expanded', 'false');
 });
+function updateMessageLabelFilterUI() {
+  if (!messageLabelFilter) return;
+  const count = selectedMessageLabels.size;
+  if (count === 0 || selectedMessageLabels.has('all')) {
+    messageLabelFilter.innerHTML = `Nhãn <span aria-hidden="true">▾</span>`;
+    messageLabelFilter.classList.remove('active');
+    messageLabelMenu?.querySelectorAll('[data-message-label]').forEach(item => {
+      item.classList.toggle('active', item.dataset.messageLabel === 'all');
+    });
+  } else {
+    messageLabelFilter.innerHTML = `Nhãn (${count}) <span aria-hidden="true">▾</span>`;
+    messageLabelFilter.classList.add('active');
+    messageLabelMenu?.querySelectorAll('[data-message-label]').forEach(item => {
+      item.classList.toggle('active', selectedMessageLabels.has(item.dataset.messageLabel));
+    });
+  }
+}
+
 messageLabelMenu?.addEventListener('click', event => {
   const option = event.target.closest('[data-message-label]');
   if (!option) return;
-  currentMessageLabel = option.dataset.messageLabel || 'all';
-  messageLabelMenu.querySelectorAll('[data-message-label]').forEach(item => item.classList.toggle('active', item === option));
-  messageLabelFilter.innerHTML = `${currentMessageLabel === 'all' ? 'Nhãn' : 'Nhãn (1)'} <span aria-hidden="true">▾</span>`;
-  messageLabelFilter.classList.toggle('active', currentMessageLabel !== 'all');
-  messageLabelMenu.classList.add('hidden');
-  messageLabelFilter.setAttribute('aria-expanded', 'false');
+  const labelId = option.dataset.messageLabel || 'all';
+  if (labelId === 'all') {
+    selectedMessageLabels.clear();
+    currentMessageLabel = 'all';
+    messageLabelMenu.classList.add('hidden');
+    messageLabelFilter?.setAttribute('aria-expanded', 'false');
+  } else {
+    if (selectedMessageLabels.has(labelId)) {
+      selectedMessageLabels.delete(labelId);
+    } else {
+      selectedMessageLabels.add(labelId);
+    }
+    selectedMessageLabels.delete('all');
+    if (selectedMessageLabels.size === 0) {
+      currentMessageLabel = 'all';
+    } else if (selectedMessageLabels.size === 1) {
+      currentMessageLabel = [...selectedMessageLabels][0];
+    } else {
+      currentMessageLabel = [...selectedMessageLabels].join(',');
+    }
+  }
+  updateMessageLabelFilterUI();
   activateCurrentMessageChannel();
 });
 document.addEventListener('click', event => {
@@ -13053,7 +13108,10 @@ function renderMessageLabelMenu() {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.messageLabel = label.id;
-    button.classList.toggle('active', currentMessageLabel === label.id);
+    const isSelected = selectedMessageLabels.size > 0
+      ? selectedMessageLabels.has(label.id)
+      : currentMessageLabel === label.id;
+    button.classList.toggle('active', isSelected);
     const icon = labelIconElement(label);
     icon.classList.add('message-label-icon');
     if (!label.icon) icon.style.background = label.color;

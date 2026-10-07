@@ -1550,7 +1550,7 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .message-channel-menu,
 .message-label-menu { position: absolute; z-index: 12; top: calc(100% + 7.875px); padding: 6.75px; background: #fff; border: 1.125px solid #dfe2e7; border-radius: 11.25px; box-shadow: 0 11.25px 33.75px rgba(0, 0, 0, .16); }
 .message-channel-menu { left: 0; width: 292.5px; }
-.message-label-menu { right: 0; width: 168.75px; }
+.message-label-menu { right: 0; width: 190px; max-height: calc(100vh - 120px); overflow-y: auto; }
 .message-channel-menu.hidden,
 .message-label-menu.hidden { display: none; }
 .message-channel-option { display: grid; grid-template-columns: 38.25px minmax(0, 1fr) auto; align-items: center; gap: 10.125px; width: 100%; padding: 9px; color: #1c1e21; background: transparent; border: 0; border-radius: 7.875px; text-align: left; cursor: pointer; }
@@ -1566,9 +1566,10 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .message-label-filter { display: flex; align-items: center; justify-content: center; gap: 4.5px; min-width: 0; height: 36px; padding: 0 11.25px; color: #3a4356; background: #fff; border: 1.125px solid #dcdfe4; border-radius: 9px; font: inherit; font-size: 14.625px; line-height: 1; white-space: nowrap; cursor: pointer; }
 .message-label-filter:hover { color: #1c2434; background: #f2f4f7; border-color: #c8cdd4; }
 .message-label-filter.active { color: #2856b6; background: #edf4ff; border-color: #b9d4ff; }
-.message-label-menu button { display: block; width: 100%; padding: 9px 11.25px; color: #1c1e21; background: transparent; border: 0; border-radius: 7.875px; font-size: 14.625px; text-align: left; cursor: pointer; }
+.message-label-menu button { display: flex; align-items: center; width: 100%; padding: 8px 10px; color: #1c1e21; background: transparent; border: 0; border-radius: 7.875px; font-size: 14.625px; text-align: left; cursor: pointer; user-select: none; }
 .message-label-menu button:hover,
 .message-label-menu button.active { color: var(--messenger-blue); background: #edf4ff; font-weight: 700; }
+.message-label-menu button.active::after { content: '✓'; margin-left: auto; padding-left: 8px; font-weight: 700; color: var(--messenger-blue); font-size: 14px; }
 .message-search.message-search--toolbar { height: 40.5px; margin: 0; padding: 0 11.25px; border-radius: 9px; }
 .message-search--toolbar input { order: 1; font-size: 14.625px; }
 .message-search--toolbar .search-icon { order: 2; }

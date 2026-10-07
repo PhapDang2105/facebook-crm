@@ -451,6 +451,11 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
       if (!override && promo && catalogQuantity === 2 && !hasLiveGift && !has('BGD')) {
         const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === 'BGD');
         if (!swap?.removes(bowl || { name: '', sku: 'BGD' })) items.push({ sku: 'BGD', quantity: 1, price: 0, weight: bowl?.weight || SKU_WEIGHTS.BGD });
+        const promoText = String(value(row, 'Quà ưu đãi') || value(row, 'Ghi chú') || (typeof promo === 'string' ? promo : '') || facts?.promoGift || '');
+        if (/mu[oỗ]ng/i.test(promoText) && !has('MUONG')) {
+          const spoon = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === 'MUONG');
+          if (!swap?.removes(spoon || { name: '', sku: 'MUONG' })) items.push({ sku: 'MUONG', quantity: 1, price: 0, weight: spoon?.weight || SKU_WEIGHTS.MUONG });
+        }
       }
     }
     items.forEach(item => { if (item.sku) emitted.add(item.sku); });

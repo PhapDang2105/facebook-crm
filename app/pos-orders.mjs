@@ -418,10 +418,19 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   if (!override && order.promoGift && bagCount === 2 && !combo?.includesGifts && !hasLivestreamGift(basketGifts)) {
     const sku = 'BGD';
     const bowl = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === sku);
+    const hasSpoon = /mu[oỗ]ng/i.test(String(order.promoGift));
     // R13: khách đã đổi bát lấy gói nhỏ thì bát ưu đãi bám đuổi cũng không đẩy.
     const swapped = Boolean(giftSwap) && (giftSwap.removes({ name: order.promoGift, sku }) || (bowl && giftSwap.removes(bowl)));
     if (!swapped && !items.some(item => item.variation_id === sku) && (!posSkus || posSkus.has(sku))) {
-      items.push({ variation_id: sku, quantity: 1, discount_each_product: 0, is_bonus_product: true, is_discount_percent: false, is_wholesale: false, variation_info: { name: String(order.promoGift), retail_price: 0, weight: money(bowl?.weight || 10) } });
+      items.push({ variation_id: sku, quantity: 1, discount_each_product: 0, is_bonus_product: true, is_discount_percent: false, is_wholesale: false, variation_info: { name: hasSpoon ? 'Bát gáo dừa' : String(order.promoGift), retail_price: 0, weight: money(bowl?.weight || 10) } });
+    }
+    if (hasSpoon) {
+      const spoonSku = 'MUONG';
+      const spoon = (getGifts() || []).find(gift => String(gift.sku || '').trim().toUpperCase() === spoonSku);
+      const spoonSwapped = Boolean(giftSwap) && (giftSwap.removes({ name: 'Muỗng dừa', sku: spoonSku }) || (spoon && giftSwap.removes(spoon)));
+      if (!spoonSwapped && !items.some(item => item.variation_id === spoonSku) && (!posSkus || posSkus.has(spoonSku))) {
+        items.push({ variation_id: spoonSku, quantity: 1, discount_each_product: 0, is_bonus_product: true, is_discount_percent: false, is_wholesale: false, variation_info: { name: 'Muỗng dừa', retail_price: 0, weight: money(spoon?.weight || 10) } });
+      }
     }
   }
   // R13: quà thay thế khách chọn (gói granola nhỏ) → dòng tặng riêng giá 0. Mã POS chưa có / chưa chọn vị thì KHÔNG

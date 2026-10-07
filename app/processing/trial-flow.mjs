@@ -20,9 +20,9 @@ import { looksLikeAddressMessage, maskPlaceGia } from './order-flow.mjs';
 import { isBasketStep } from './pending-order.mjs';
 
 const HOUR = 60 * 60 * 1000;
-// Chính sách bám đuổi 36 giờ (chủ shop 26/09): ngoài 1 túi miễn ship, khách lấy combo 2 túi lớn được tặng
-// thêm 1 bát gáo dừa (bảng quà chung chỉ tặng bộ bát + muỗng từ 3 túi). Quà này chỉ áp trong cửa sổ ưu đãi.
-export const PROMO_BOWL_GIFT = { name: 'Bát gáo dừa', sku: 'BGD', minQuantity: 2, active: true, weight: 10 };
+// Chính sách bám đuổi (chủ shop): ngoài 1 túi miễn ship, khách lấy combo 2 túi lớn được tặng
+// Bát gáo dừa + muỗng dừa. Quà này chỉ áp trong cửa sổ ưu đãi.
+export const PROMO_BOWL_GIFT = { name: 'Bát gáo dừa + muỗng dừa', sku: 'BGD', minQuantity: 2, active: true, weight: 10 };
 
 // Từ chối: "không", "ko cần", "thôi để sau"… — "thôi" chỉ là từ chối khi câu không nêu túi/số lượng ("lấy 1 túi thôi" là chọn).
 const DECLINE = /^(khong|ko|k|kh|hong|hok|khong can|ko can|khong lay|ko lay|khong mua|ko mua|khong dau|ko dau|khong nhe|ko nhe)$|\b(khong|ko|k|kh|chua) (can|lay|mua|thich|quan tam|co nhu cau)\b|\b(de sau|khi khac|lan sau|het tien|dung nhan|dung gui|khoi)\b/;
@@ -224,5 +224,5 @@ export function filterTrialReply(reply = {}, trial = {}, isProductQuoteId = () =
 
 /** Gợi ý cho mô hình khi phải nhờ mô hình (tin có địa chỉ, ảnh…). */
 export function trialModelHint(trial = {}) {
-  return `KHÁCH ĐANG GIỮ ƯU ĐÃI BÁM ĐUỔI${trial.bag ? ` (đã chọn ${trial.bag})` : trial.combo2 ? ' (đã chọn combo 2 túi, đang xin vị/SĐT/địa chỉ)' : ''}: 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN (giá túi, không cộng ship), hoặc combo 2 túi lớn được tặng thêm bát gáo dừa. Không báo giá combo 3, không mời thêm sản phẩm khác.`;
+  return `KHÁCH ĐANG GIỮ ƯU ĐÃI BÁM ĐUỔI${trial.bag ? ` (đã chọn ${trial.bag})` : trial.combo2 ? ' (đã chọn combo 2 túi, đang xin vị/SĐT/địa chỉ)' : ''}: 1 túi dùng thử MIỄN PHÍ VẬN CHUYỂN (giá túi, không cộng ship), hoặc combo 2 túi lớn được tặng thêm Bát gáo dừa + muỗng dừa. Không báo giá combo 3, không mời thêm sản phẩm khác.`;
 }

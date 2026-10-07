@@ -287,3 +287,72 @@ test('Quà Tặng LIVE chỉ khách livestream (livestreamOnly): đơn khách th
     reloadCatalog();
   }
 });
+
+test('đơn lẻ 1 túi có phí ship (15k): POS gộp ship vào đơn giá túi (174k + 15k = 189k) và gửi ship 0đ; đơn freeship hoặc nhiều túi thì không gộp', () => {
+  // 1. Đơn 1 Túi Xanh: CRM tính 174k + 15k ship = 189k → POS nhận đơn giá 189k, ship 0đ, is_free_shipping true
+  const singleGreen = {
+    ...order,
+    id: 'single1',
+    products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1, price: 174000, weight: 450 }],
+    shippingFee: 15000,
+    freeShipping: false,
+    discount: 0,
+    total: 189000
+  };
+  const payloadGreen = buildPosOrderPayload(singleGreen);
+  assert.equal(payloadGreen.items.length, 1);
+  assert.equal(payloadGreen.items[0].variation_info.retail_price, 189000);
+  assert.equal(payloadGreen.shipping_fee, 0);
+  assert.equal(payloadGreen.is_free_shipping, true);
+  const subtotalGreen = payloadGreen.items.reduce((sum, item) => sum + item.quantity * item.variation_info.retail_price, 0);
+  assert.equal(subtotalGreen - payloadGreen.discount + payloadGreen.shipping_fee, singleGreen.total);
+
+  // 2. Đơn 1 sản phẩm khác (Túi Nâu 164k + 15k ship = 179k): tương tự gộp vào đơn giá
+  const singleBrown = {
+    ...order,
+    id: 'single2',
+    products: [{ name: 'Granola Túi Nâu vị cacao 350g', sku: 'GRA-NAU-Z350', quantity: 1, price: 164000, weight: 350 }],
+    shippingFee: 15000,
+    freeShipping: false,
+    discount: 0,
+    total: 179000
+  };
+  const payloadBrown = buildPosOrderPayload(singleBrown);
+  assert.equal(payloadBrown.items.length, 1);
+  assert.equal(payloadBrown.items[0].variation_info.retail_price, 179000);
+  assert.equal(payloadBrown.shipping_fee, 0);
+  assert.equal(payloadBrown.is_free_shipping, true);
+  const subtotalBrown = payloadBrown.items.reduce((sum, item) => sum + item.quantity * item.variation_info.retail_price, 0);
+  assert.equal(subtotalBrown - payloadBrown.discount + payloadBrown.shipping_fee, singleBrown.total);
+
+  // 3. Đơn 1 túi nhưng được miễn phí ship (freeShipping: true / shippingFee: 0): giữ nguyên đơn giá 174k
+  const singleFree = {
+    ...order,
+    id: 'single3',
+    products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1, price: 174000, weight: 450 }],
+    shippingFee: 0,
+    freeShipping: true,
+    discount: 0,
+    total: 174000
+  };
+  const payloadFree = buildPosOrderPayload(singleFree);
+  assert.equal(payloadFree.items.length, 1);
+  assert.equal(payloadFree.items[0].variation_info.retail_price, 174000);
+  assert.equal(payloadFree.shipping_fee, 0);
+  assert.equal(payloadFree.is_free_shipping, true);
+  assert.equal(payloadFree.items[0].variation_info.retail_price, singleFree.total);
+
+  // 4. Đơn 2 túi không gộp vào đơn giá
+  const twoBags = {
+    ...order,
+    id: 'multi1',
+    products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 2, price: 174000, weight: 450 }],
+    shippingFee: 0,
+    freeShipping: true,
+    discount: 50000,
+    total: 298000
+  };
+  const payloadTwo = buildPosOrderPayload(twoBags, { posSkus: new Set(['GRA-XANH-Z450']) });
+  assert.equal(payloadTwo.items[0].variation_info.retail_price, 174000);
+});
+

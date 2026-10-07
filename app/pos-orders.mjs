@@ -353,6 +353,10 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   // 05/10: quà nhân viên chọn tay (giftOverride) thay TOÀN BỘ quà tự tính: bảng quà, quà ưu đãi bám đuổi, đổi quà của bot.
   const override = giftOverridePlan(order, posSkus);
   const giftSwap = override ? null : posGiftSwapPlan(order, posSkus);
+  const bagCount = products.reduce((sum, item) => sum + Math.max(0, Math.round(Number(item.quantity) || 0)), 0);
+  const rawShippingFee = order.freeShipping ? 0 : money(order.shippingFee);
+  // Đơn lẻ đúng 1 túi có phí ship: POS bắn phí ship 0đ, gộp phí ship vào đơn giá túi lẻ đó (ví dụ: Túi Xanh 174k + 15k ship → 189k).
+  const foldShipping = !combo && bagCount === 1 && rawShippingFee > 0;
   const comboItems = combo ? [{
     variation_id: combo.sku,
     quantity: 1,
@@ -366,19 +370,25 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
       weight: money(products.reduce((sum, item) => sum + money(item.weight) * (Number(item.quantity) || 1), 0))
     }
   }] : null;
-  const items = comboItems || products.filter(item => item.sku).map(item => ({
-    variation_id: String(item.sku).trim().toUpperCase(),
-    quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
-    discount_each_product: 0,
-    is_bonus_product: false,
-    is_discount_percent: false,
-    is_wholesale: false,
-    variation_info: {
-      name: String(item.name || ''),
-      retail_price: money(item.price),
-      weight: money(item.weight)
-    }
-  }));
+  let shippingFolded = false;
+  const items = comboItems || products.filter(item => item.sku).map(item => {
+    const qty = Math.max(1, Math.round(Number(item.quantity) || 1));
+    const addShip = foldShipping && !shippingFolded;
+    if (addShip) shippingFolded = true;
+    return {
+      variation_id: String(item.sku).trim().toUpperCase(),
+      quantity: qty,
+      discount_each_product: 0,
+      is_bonus_product: false,
+      is_discount_percent: false,
+      is_wholesale: false,
+      variation_info: {
+        name: String(item.name || ''),
+        retail_price: money(item.price) + (addShip ? rawShippingFee : 0),
+        weight: money(item.weight)
+      }
+    };
+  });
   // Quà theo tổ hợp giỏ (bảng quà trong Cài đặt), như file xuất kho. Quà chỉ khách
   // livestream (Quà Tặng LIVE) chỉ vào đơn khách live (order.livestream / "(Live) ").
   const basketKey = comboKey(products.map(item => ({ sku: item.sku, quantity: item.quantity })));
@@ -404,7 +414,6 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   }
   // Quà ưu đãi bám đuổi (bộ bát gáo dừa cho combo 2): không nằm trong bảng quà theo giỏ, đẩy thêm một dòng quà.
   // Chỉ khi giỏ đúng 2 túi (đơn sửa sang 1/3 túi mà cờ còn sót thì bỏ) và combo POS chưa gồm bát trong mã.
-  const bagCount = products.reduce((sum, item) => sum + Math.max(0, Math.round(Number(item.quantity) || 0)), 0);
   // Đơn live đúng 2 túi đã có "Quạt + Bát gáo dừa": không thêm bát ưu đãi bám đuổi (tặng hai bát).
   if (!override && order.promoGift && bagCount === 2 && !combo?.includesGifts && !hasLivestreamGift(basketGifts)) {
     const sku = 'BGD';
@@ -458,8 +467,8 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
       ...(order.ward ? { commnue_name: String(order.ward) } : {})
     },
     items,
-    shipping_fee: money(order.shippingFee),
-    is_free_shipping: Boolean(order.freeShipping) || money(order.shippingFee) === 0,
+    shipping_fee: foldShipping ? 0 : money(order.shippingFee),
+    is_free_shipping: foldShipping || Boolean(order.freeShipping) || money(order.shippingFee) === 0,
     // POS tính lại total_discount từ `discount`; chỉ gửi total_discount khiến
     // đơn tạo qua API giữ giảm giá 0 dù CRM đã tính đúng giá combo.
     discount: combo ? Math.max(0, comboRetail - goods) : money(order.discount),

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { projectRoot } from './config.mjs';
 import { decryptToken, encryptToken } from './channel-store.mjs';
 import { createWriteQueue, readJsonFile, writeJsonAtomic } from './json-store.mjs';
-import { LEGACY_SHIPMENT_TEMPLATES } from './shipment-stage.mjs';
+import { LEGACY_SHIPMENT_TEMPLATES, LEGACY_SHIPMENT_DELIVERED } from './shipment-stage.mjs';
 import { defaultMessageTemplates, isProductQuoteId } from './chatbot-templates.mjs';
 import { isInternalHost } from './network-guard.mjs';
 import { defaultComplaintKeywords } from './processing/auto-label.mjs';
@@ -247,7 +247,11 @@ export function normalizeChatbotSettings(input = {}, current = null) {
   const seedTemplates = defaultMessageTemplates();
   const submitted = { ...seedTemplates, ...stored };
   // 03/10: mẫu vận đơn còn đúng lời mặc định cũ (chưa ai sửa) theo lời mới của seed.
-  for (const [key, text] of Object.entries(LEGACY_SHIPMENT_TEMPLATES)) if (submitted[key] === text) submitted[key] = seedTemplates[key];
+  for (const [key, text] of Object.entries(LEGACY_SHIPMENT_TEMPLATES)) {
+    if (submitted[key] === text || (key === 'SHIPMENT_DELIVERED' && LEGACY_SHIPMENT_DELIVERED.includes(submitted[key]))) {
+      submitted[key] = seedTemplates[key];
+    }
+  }
   // Texts saved before {title} existed still spell out "anh/ chị"; they are
   // rewritten to the placeholder so the bot addresses the customer properly.
   const placeholderHonorific = text => String(text ?? '')

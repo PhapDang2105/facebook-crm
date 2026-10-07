@@ -3,7 +3,7 @@
 import { shipmentStatusLabel } from './sapo.mjs';
 
 // Như honorific() của chatbot-templates (không import để khỏi vòng).
-const honorific = gender => gender === 'male' ? 'anh' : gender === 'female' ? 'chị' : 'mình';
+const honorific = gender => gender === 'male' ? 'anh' : gender === 'female' ? 'chị' : 'Anh/Chị';
 
 export const SHIPMENT_STAGES = ['created', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered'];
 const STAGE_LABELS = { created: 'Chờ bên vận chuyển lấy hàng', picked_up: 'Đã lấy hàng', in_transit: 'Đang vận chuyển', out_for_delivery: 'Đang giao hàng', delivered: 'Giao thành công' };

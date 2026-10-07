@@ -221,7 +221,7 @@ test('mẫu vận đơn còn đúng lời mặc định cũ thì tự đổi san
   assert.equal(renderShipmentNotice(shipment, 'female', 'SHIPMENT_DELIVERED'),
     'Dạ em kiểm tra hệ thống đã ghi nhận chị nhận hàng thành công rồi ạ. Trong quá trình chị trải nghiệm, nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm chị nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn chị đã tin tưởng ủng hộ Giọt Nắng, chúc chị ăn ngon miệng ạ.');
   assert.equal(renderShipmentNotice(shipment, '', 'SHIPMENT_DELIVERED'),
-    'Dạ em kiểm tra hệ thống đã ghi nhận mình nhận hàng thành công rồi ạ. Trong quá trình mình trải nghiệm, nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm mình nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn mình đã tin tưởng ủng hộ Giọt Nắng, chúc mình ăn ngon miệng ạ.');
+    'Dạ em kiểm tra hệ thống đã ghi nhận Anh/Chị nhận hàng thành công rồi ạ. Trong quá trình Anh/Chị trải nghiệm, nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm Anh/Chị nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn Anh/Chị đã tin tưởng ủng hộ Giọt Nắng, chúc Anh/Chị ăn ngon miệng ạ.');
 });
 
 test('bảng Đơn hàng hiện hãng + mã + giai đoạn giao', () => {

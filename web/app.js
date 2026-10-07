@@ -5342,7 +5342,7 @@ function channelAvatar(channel) {
     : ((!channel.platform || channel.platform === 'facebook') && channel.id
       ? `/api/channels/facebook/${channel.id}/picture`
       : '/assets/giot-nang-logo.webp');
-  return `<span class="channel-item-avatar"><img src="${escapeHtml(logo)}" onerror="this.onerror=null;this.src='/assets/giot-nang-logo.webp'" alt=""></span>`;
+  return `<span class="channel-item-avatar"><img src="${escapeHtml(logo)}" data-fallback="/assets/giot-nang-logo.webp" alt=""></span>`;
 }
 
 /**
@@ -5585,7 +5585,7 @@ function getMessageChannelLogo(channel) {
 function renderMessageChannelMenu() {
   if (!messageChannelMenu) return;
   messageChannelMenu.innerHTML = messageChannels.map(channel => `<button class="message-channel-option${channel.id === currentMessageChannelId ? ' active' : ''}" type="button" role="menuitem" data-message-channel="${escapeHtml(channel.id)}">
-    <img src="${escapeHtml(getMessageChannelLogo(channel))}" onerror="this.onerror=null;this.src='/assets/giot-nang-logo.webp'" alt="">
+    <img src="${escapeHtml(getMessageChannelLogo(channel))}" data-fallback="/assets/giot-nang-logo.webp" alt="">
     <span><strong>${escapeHtml(channel.name)}</strong><small>${channel.platform === 'zalo' ? 'Zalo OA' : 'Facebook Page'}</small></span>
     ${channel.id === currentMessageChannelId ? '<b aria-hidden="true">✓</b>' : ''}
   </button>`).join('');
@@ -5605,6 +5605,13 @@ function updateMessageChannelTrigger() {
   }
   renderMessageChannelMenu();
 }
+
+window.addEventListener('error', event => {
+  const target = event.target;
+  if (target && target.tagName === 'IMG' && target.dataset?.fallback && target.src !== target.dataset.fallback) {
+    target.src = target.dataset.fallback;
+  }
+}, true);
 
 function showEmptyChannelConversation() {
   const channel = messageChannels.find(item => item.id === currentMessageChannelId);

@@ -16,7 +16,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { projectRoot } from './config.mjs';
-import { readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
+import { publicConversation, readMessagingStore, updateMessagingStore } from './messaging-store.mjs';
 import { publishMessagingEvent } from './message-events.mjs';
 import { applyHonorific, renderChatbotReply } from './chatbot-templates.mjs';
 import { labelsForEvents, readInboxSettings } from './inbox-settings.mjs';
@@ -788,6 +788,8 @@ let lastSkipLogLine = '';
 async function markConversationFollowedUp(conversationId, scenario, via, now, { remindedBasket = false } = {}) {
   const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
   const followUpLabels = labelsForEvents(labelDefs, ['followup']);
+  const wonLabels = labelsForEvents(labelDefs, ['followup-won']);
+  const wonSet = new Set(wonLabels.length ? wonLabels : ['followup-won']);
   let labelChange = null;
   await updateMessagingStore(current => {
     const target = current.conversations.find(item => item.id === conversationId);
@@ -796,7 +798,9 @@ async function markConversationFollowedUp(conversationId, scenario, via, now, { 
     // 2 giờ tính từ `at`; touchPendingOrder ghi remindedAt → giỏ đã nhắc dùng được thêm 24 giờ (pending-order.mjs).
     if (remindedBasket) touchPendingOrder(target, now);
     const before = Array.isArray(target.labels) ? [...target.labels] : [];
-    if (followUpLabels.length && target.source !== 'comment') target.labels = [...new Set([...before, ...followUpLabels])];
+    // Nếu hội thoại đã có thẻ "Bám đuổi thành công", không gắn thẻ "Bám đuổi" (chủ shop 07/10).
+    const alreadyWon = before.some(id => wonSet.has(id));
+    if (followUpLabels.length && target.source !== 'comment' && !alreadyWon) target.labels = [...new Set([...before, ...followUpLabels])];
     if ((target.labels || []).length !== before.length) labelChange = { conversation: { id: target.id, name: target.name || '' }, before, after: [...target.labels] };
     target.followUps = [...(Array.isArray(target.followUps) ? target.followUps : []), { scenarioId: scenario.id, at: now, via }].slice(-20);
     // Ưu đãi dùng thử mở luồng riêng (processing/trial-flow.mjs) từ bước 'offered'; giỏ cũ
@@ -858,27 +862,66 @@ const wonOrderOf = conversation => {
 };
 
 export async function markFollowUpWins(now = Date.now()) {
-  // Đọc trước, chỉ ghi kho khi có khách vừa chốt (chạy mỗi 15 phút, không ghi thừa).
+  // Đọc trước, chỉ ghi kho khi có khách vừa chốt hoặc có hội thoại cần gỡ thẻ bám đuổi (không ghi thừa).
   const snapshot = await readMessagingStore();
-  if (!(snapshot.conversations || []).some(wonOrderOf)) return 0;
   const labelDefs = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
   const wonLabels = labelsForEvents(labelDefs, ['followup-won']);
+  const followUpLabels = labelsForEvents(labelDefs, ['followup']);
+  const wonSet = new Set(wonLabels.length ? wonLabels : ['followup-won']);
+  const followUpSet = new Set(followUpLabels.length ? followUpLabels : ['followup']);
+
+  const hasNewWins = (snapshot.conversations || []).some(wonOrderOf);
+  const hasExistingConflicts = (snapshot.conversations || []).some(c => {
+    const cur = Array.isArray(c.labels) ? c.labels : [];
+    return cur.some(id => wonSet.has(id)) && cur.some(id => followUpSet.has(id));
+  });
+
+  if (!hasNewWins && !hasExistingConflicts) return 0;
+
   const labelChanges = [];
   const won = await updateMessagingStore(store => {
     const changed = [];
     for (const conversation of store.conversations || []) {
       const order = wonOrderOf(conversation);
-      if (!order) continue;
-      conversation.followUpWon = { orderId: String(order.id), at: Number(order.createdAt), total: Number(order.total) || 0, markedAt: now };
+      let modified = false;
       const before = Array.isArray(conversation.labels) ? [...conversation.labels] : [];
-      if (wonLabels.length && conversation.source !== 'comment') conversation.labels = [...new Set([...before, ...wonLabels])];
-      if ((conversation.labels || []).length !== before.length) labelChanges.push({ conversation: { id: conversation.id, name: conversation.name || '' }, before, after: [...conversation.labels] });
-      changed.push(conversation.id);
+
+      if (order) {
+        conversation.followUpWon = { orderId: String(order.id), at: Number(order.createdAt), total: Number(order.total) || 0, markedAt: now };
+        if (wonLabels.length && conversation.source !== 'comment') {
+          // Khi gắn thẻ "Bám đuổi thành công", xóa thẻ "Bám đuổi" (chủ shop 07/10).
+          const withoutFollowUp = before.filter(id => !followUpSet.has(id));
+          conversation.labels = [...new Set([...withoutFollowUp, ...wonLabels])];
+          modified = true;
+        }
+        changed.push(conversation.id);
+      }
+
+      // Khi đã có thẻ "Bám đuổi thành công", xóa thẻ "Bám đuổi" (chủ shop 07/10).
+      const current = Array.isArray(conversation.labels) ? conversation.labels : [];
+      if (current.some(id => wonSet.has(id)) && current.some(id => followUpSet.has(id))) {
+        conversation.labels = current.filter(id => !followUpSet.has(id));
+        modified = true;
+        changed.push(conversation.id);
+      }
+
+      if (modified && (conversation.labels.length !== before.length || conversation.labels.some((l, i) => l !== before[i]))) {
+        labelChanges.push({
+          conversation: { id: conversation.id, name: conversation.name || '' },
+          publicConv: publicConversation(conversation),
+          before,
+          after: [...conversation.labels],
+          reason: order ? 'bám đuổi thành công' : 'bám đuổi thành công: xóa thẻ bám đuổi'
+        });
+      }
     }
     return changed;
   });
-  for (const change of labelChanges) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason: 'bám đuổi thành công' });
+  for (const change of labelChanges) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason: change.reason || 'bám đuổi thành công' });
   for (const conversationId of won || []) publishMessagingEvent({ type: 'customer-panel', conversationId });
+  for (const change of labelChanges) {
+    if (change.publicConv) publishMessagingEvent({ type: 'conversation-labels', conversation: change.publicConv });
+  }
   return (won || []).length;
 }
 

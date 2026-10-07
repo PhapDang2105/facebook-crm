@@ -4238,6 +4238,8 @@ server.listen(serverConfig.port, serverConfig.host, () => {
     }
   };
   setTimeout(shipmentLabelPass, 20 * 1000).unref?.();
+  // Thẻ bám đuổi thành công ("Bám đuổi thành công" gỡ thẻ "Bám đuổi"): quét 15 giây sau khởi động.
+  setTimeout(() => markFollowUpWins().catch(error => console.warn(`Đồng bộ thẻ bám đuổi thành công lỗi: ${error.message}`)), 15 * 1000).unref?.();
   if (!auth.enabled && authConfig.requireLogin) console.error('CHƯA CẤU HÌNH ĐĂNG NHẬP: máy chủ bắt buộc đăng nhập (PUBLIC_BASE_URL https hoặc CRM_REQUIRE_LOGIN=1) mà chưa có tài khoản — giao diện/API trả 503 cho tới khi khai CRM_LOGIN_USERS hoặc Nhân sự có mật khẩu.');
   else if (!auth.enabled) console.warn('CRM_LOGIN_USERS trống: giao diện không hỏi đăng nhập. Chỉ để vậy khi chạy trên máy mình.');
   else if (!authConfig.sessionSecret) console.warn('CRM_SESSION_SECRET trống: khoá phiên sinh ngẫu nhiên, khởi động lại là mọi người phải đăng nhập lại.');

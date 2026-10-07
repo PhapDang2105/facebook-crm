@@ -310,6 +310,31 @@ test('khách được bám đuổi chốt đơn trong 14 ngày: thẻ "Bám đu�
   assert.equal(status.wonAmount, 174000);
 });
 
+test('khi gắn thẻ "Bám đuổi thành công" thì xóa thẻ "Bám đuổi"; quét gỡ thẻ "Bám đuổi" cho hội thoại đã có thẻ "Bám đuổi thành công"', async () => {
+  const fresh = await import(`../app/follow-up.mjs?sweep=${Date.now()}`);
+  const { updateMessagingStore } = await import('../app/messaging-store.mjs');
+  await updateMessagingStore(current => {
+    const c1 = current.conversations.find(entry => entry.id === `${page}:f`);
+    if (c1) {
+      c1.labels = ['followup', 'phone'];
+      c1.followUps = [{ scenarioId: 'trial', at: now, via: 'pancake' }];
+      c1.customerOrders = [{ id: 'order_won', createdAt: now + HOUR, total: 174000 }];
+      delete c1.followUpWon;
+    }
+    const c2 = current.conversations.find(entry => entry.id === `${page}:c`);
+    if (c2) {
+      c2.labels = ['followup', 'followup-won', 'livestream'];
+    }
+    return null;
+  });
+  await fresh.markFollowUpWins(now + 2 * HOUR);
+  const store = await readMessagingStore();
+  const c1 = store.conversations.find(entry => entry.id === `${page}:f`);
+  const c2 = store.conversations.find(entry => entry.id === `${page}:c`);
+  assert.deepEqual(c1.labels, ['phone', 'followup-won']);
+  assert.deepEqual(c2.labels, ['followup-won', 'livestream']);
+});
+
 test('kết quả trạm gửi: ưu đãi miễn ship lấy theo kịch bản trong cài đặt (tin xếp hàng từ bản cũ không ghi số ngày)', async () => {
   const write = (await import('node:fs')).writeFileSync;
   write(process.env.FOLLOW_UPS_PATH, JSON.stringify({ activatedAt: now - 48 * HOUR, sent: { 'inbox-trial-freeship:110:c': { scenarioId: 'inbox-trial-freeship', conversationId: `${page}:c`, name: 'Cẩm Loan', at: now, repliedAt: now - 30 * HOUR, queued: true, text: 'Dạ chị ơi ưu đãi', pageId: page, psid: 'c' } } }));

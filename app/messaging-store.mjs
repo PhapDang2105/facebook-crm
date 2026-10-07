@@ -682,7 +682,16 @@ export function setConversationFlags(store, id, changes, { allowedLabelIds = nul
   if (conversation.source === 'comment') {
     conversation.labels = [];
   } else if (Array.isArray(changes.labels)) {
-    conversation.labels = sanitizeConversationLabels(changes.labels, { current: conversation.labels, allowedIds: allowedLabelIds });
+    let sanitized = sanitizeConversationLabels(changes.labels, { current: conversation.labels, allowedIds: allowedLabelIds });
+    // Nếu có "Bám đuổi thành công", xóa "Bám đuổi" (chủ shop 07/10).
+    if (sanitized.includes('followup-won')) {
+      sanitized = sanitized.filter(label => label !== 'followup');
+    }
+    // Nếu có "Giao hàng thành công", xóa "Đã gửi mã vận đơn" và "Đã mua hàng" (chủ shop 07/10).
+    if (sanitized.includes('delivered')) {
+      sanitized = sanitized.filter(label => label !== 'shipment-sent' && label !== 'customer');
+    }
+    conversation.labels = sanitized;
   }
   return conversation;
 }

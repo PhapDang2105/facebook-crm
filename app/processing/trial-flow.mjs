@@ -22,7 +22,7 @@ import { isBasketStep } from './pending-order.mjs';
 const HOUR = 60 * 60 * 1000;
 // Chính sách bám đuổi 36 giờ (chủ shop 26/09): ngoài 1 túi miễn ship, khách lấy combo 2 túi lớn được tặng
 // thêm 1 bát gáo dừa (bảng quà chung chỉ tặng bộ bát + muỗng từ 3 túi). Quà này chỉ áp trong cửa sổ ưu đãi.
-export const PROMO_BOWL_GIFT = { name: 'Bát gáo dừa – ưu đãi bám đuổi', sku: 'BGD', minQuantity: 2, active: true, weight: 10 };
+export const PROMO_BOWL_GIFT = { name: 'Bát gáo dừa', sku: 'BGD', minQuantity: 2, active: true, weight: 10 };
 
 // Từ chối: "không", "ko cần", "thôi để sau"… — "thôi" chỉ là từ chối khi câu không nêu túi/số lượng ("lấy 1 túi thôi" là chọn).
 const DECLINE = /^(khong|ko|k|kh|hong|hok|khong can|ko can|khong lay|ko lay|khong mua|ko mua|khong dau|ko dau|khong nhe|ko nhe)$|\b(khong|ko|k|kh|chua) (can|lay|mua|thich|quan tam|co nhu cau)\b|\b(de sau|khi khac|lan sau|het tien|dung nhan|dung gui|khoi)\b/;

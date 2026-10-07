@@ -40,12 +40,13 @@ export const DEFAULT_SHIPMENT_TEMPLATES = {
   SHIPMENT_PICKED_UP: "Dạ, đơn hàng của {title} đã được {carrier} lấy hàng thành công rồi ạ\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\nTrạng thái: {status}\n\nEm sẽ báo {title} ngay khi đơn bắt đầu giao nha 🌾",
   SHIPMENT_IN_TRANSIT: "Dạ, đơn hàng của {title} đang trên đường vận chuyển tới khu vực của mình rồi ạ\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n🔎 Theo dõi hành trình: {tracking_url}\n\n{Title} chờ em thêm chút nha, có gì em báo ngay ạ 🌾",
   SHIPMENT_OUT_FOR_DELIVERY: "Dạ, shipper đang giao đơn hàng tới {title} rồi ạ 🛵\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n\n{Title} để ý điện thoại giúp em nha, em cảm ơn {title} nhiều ạ 💛",
-  SHIPMENT_DELIVERED: "Dạ, {title} nhận hàng và trải nghiệm nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm {title} nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ."
+  SHIPMENT_DELIVERED: "Dạ em kiểm tra hệ thống đã ghi nhận {title} nhận hàng thành công rồi ạ. Trong quá trình {title} trải nghiệm, nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm {title} nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ."
 };
 
 export const LEGACY_SHIPMENT_DELIVERED = [
   "Dạ đơn hàng (mã vận đơn {tracking_number}) đã giao thành công tới {title} rồi ạ 🎉 Giọt Nắng cảm ơn {title} đã tin tưởng ủng hộ. {Title} dùng thấy thế nào nhắn em biết với nha, cần hỗ trợ gì em luôn ở đây ạ 💛",
-  "Dạ, đơn hàng đã giao thành công tới {title} rồi ạ 🎉\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n\nEm cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ. {Title} dùng thấy thế nào nhắn em biết với nha, cần hỗ trợ gì em luôn ở đây ạ 💛"
+  "Dạ, đơn hàng đã giao thành công tới {title} rồi ạ 🎉\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n\nEm cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ. {Title} dùng thấy thế nào nhắn em biết với nha, cần hỗ trợ gì em luôn ở đây ạ 💛",
+  "Dạ, {title} nhận hàng và trải nghiệm nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm {title} nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ."
 ];
 
 // Lời mặc định cũ (1931224): mẫu còn đúng y lời cũ (chưa ai sửa) được đổi sang lời mới khi đọc cài đặt.

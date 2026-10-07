@@ -6320,16 +6320,16 @@ function conversationMatchesSelectedLabels(conversation, labels, source) {
   }
   for (const labelId of selectedMessageLabels) {
     if (labelId === 'unread') {
-      if (conversation.classList.contains('unread')) return true;
+      if (!conversation.classList.contains('unread')) return false;
     } else if (labelId === 'inbox' || labelId === 'comment') {
-      if (source === labelId) return true;
+      if (source !== labelId) return false;
     } else if (labelId === 'ad') {
-      if (Boolean(conversation.dataset.adTitle)) return true;
-    } else if (labels.includes(labelId)) {
-      return true;
+      if (!Boolean(conversation.dataset.adTitle)) return false;
+    } else if (!labels.includes(labelId)) {
+      return false;
     }
   }
-  return false;
+  return true;
 }
 
 function filterConversations() {

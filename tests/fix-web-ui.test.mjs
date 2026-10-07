@@ -281,7 +281,7 @@ test('[nối tiếp 4] /api/channels: syncError + syncErrorAt (ms) + syncedAt (I
   assert.equal(syncError({ syncedAt: new Date(errorAt + 600000).toISOString(), syncError: 'fetch failed', syncErrorAt: errorAt }), '');
 });
 
-test('bộ lọc nhãn tin nhắn: chọn nhiều nhãn theo cơ chế OR và hiển thị số nhãn', () => {
+test('bộ lọc nhãn tin nhắn: chọn nhiều nhãn theo cơ chế AND và hiển thị số nhãn', () => {
   const context = {
     selectedMessageLabels: new Set(),
     currentMessageLabel: 'all'
@@ -290,36 +290,31 @@ test('bộ lọc nhãn tin nhắn: chọn nhiều nhãn theo cơ chế OR và hi
   const { conversationMatchesSelectedLabels: match } = context;
 
   const convA = { classList: { contains: c => c === 'unread' }, dataset: { source: 'inbox', labels: 'livestream consulting' } };
-  const convB = { classList: { contains: () => false }, dataset: { source: 'comment', labels: 'wholesale' } };
+  const convB = { classList: { contains: () => false }, dataset: { source: 'comment', labels: 'wholesale livestream' } };
   const convC = { classList: { contains: () => false }, dataset: { source: 'inbox', labels: '' } };
 
   // Chưa chọn nhãn nào -> Tất cả -> match mọi hội thoại
   assert.equal(match(convA, ['livestream', 'consulting'], 'inbox'), true);
-  assert.equal(match(convB, ['wholesale'], 'comment'), true);
+  assert.equal(match(convB, ['wholesale', 'livestream'], 'comment'), true);
   assert.equal(match(convC, [], 'inbox'), true);
 
   // Chọn 1 nhãn 'wholesale'
   context.selectedMessageLabels.add('wholesale');
   assert.equal(match(convA, ['livestream', 'consulting'], 'inbox'), false);
-  assert.equal(match(convB, ['wholesale'], 'comment'), true);
+  assert.equal(match(convB, ['wholesale', 'livestream'], 'comment'), true);
 
-  // Chọn thêm nhãn 'livestream' -> Cơ chế OR: convA có livestream HOẶC convB có wholesale đều khớp
+  // Chọn thêm nhãn 'livestream' -> Cơ chế AND: chỉ hội thoại có CẢ livestream VÀ wholesale mới khớp
   context.selectedMessageLabels.add('livestream');
-  assert.equal(match(convA, ['livestream', 'consulting'], 'inbox'), true);
-  assert.equal(match(convB, ['wholesale'], 'comment'), true);
+  assert.equal(match(convA, ['livestream', 'consulting'], 'inbox'), false, 'convA thiếu wholesale nên không khớp');
+  assert.equal(match(convB, ['wholesale', 'livestream'], 'comment'), true, 'convB có cả wholesale và livestream nên khớp');
   assert.equal(match(convC, [], 'inbox'), false);
 
-  // Kiểm tra nhãn đặc biệt: unread
+  // Kiểm tra nhãn đặc biệt: unread AND livestream
   context.selectedMessageLabels.clear();
   context.selectedMessageLabels.add('unread');
-  assert.equal(match(convA, ['livestream', 'consulting'], 'inbox'), true);
-  assert.equal(match(convB, ['wholesale'], 'comment'), false);
-
-  // Kiểm tra nhãn nguồn: comment
-  context.selectedMessageLabels.clear();
-  context.selectedMessageLabels.add('comment');
-  assert.equal(match(convA, ['livestream', 'consulting'], 'inbox'), false);
-  assert.equal(match(convB, ['wholesale'], 'comment'), true);
+  context.selectedMessageLabels.add('livestream');
+  assert.equal(match(convA, ['livestream', 'consulting'], 'inbox'), true, 'convA vừa unread vừa có livestream');
+  assert.equal(match(convB, ['wholesale', 'livestream'], 'comment'), false, 'convB có livestream nhưng không unread');
 
   // Kiểm tra toggle và nút hiển thị trên mã nguồn
   assert.match(fn('updateMessageLabelFilterUI'), /Nhãn \(\$\{count\}\)/);

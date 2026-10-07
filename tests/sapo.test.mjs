@@ -348,6 +348,21 @@ test('thẻ tự động: ghi dấu baseline không tính là đã gửi mã; g�
   assert.deepEqual(store.conversations[0].labels, ['shipment-sent']);
 });
 
+test('thẻ tự động: khi gắn thẻ "Giao hàng thành công" thì xóa cả thẻ "Đã gửi mã vận đơn" và "Đã mua hàng"', () => {
+  const store = {
+    conversations: [
+      { id: 'c1', name: 'Khách 1', labels: ['shipment-sent', 'customer', 'phone'], customerOrders: [{ id: 'o1', shipment: { trackingNumber: 'SPX123', status: 'delivered' } }] },
+      { id: 'c2', name: 'Khách 2', labels: ['shipment-sent', 'customer', 'delivered', 'Livestream'] }
+    ]
+  };
+  const changes = applyShipmentLabels(store, { sentLabels: ['shipment-sent'], deliveredLabels: ['delivered'], orderLabels: ['customer'] });
+  assert.deepEqual(store.conversations[0].labels, ['phone', 'delivered']);
+  assert.deepEqual(store.conversations[1].labels, ['delivered', 'Livestream']);
+  assert.equal(changes.length, 2);
+  assert.match(changes[0].reason, /giao thành công/);
+  assert.match(changes[1].reason, /xóa thẻ đã gửi mã vận đơn và đã mua hàng/);
+});
+
 test('thẻ mặc định mới có trong bộ thẻ và sự kiện tự động', () => {
   const ids = defaultConversationLabels.map(label => `${label.id}:${label.auto}`);
   assert.ok(ids.includes('shipment-sent:shipment-sent'));

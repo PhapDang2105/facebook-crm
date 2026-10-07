@@ -553,7 +553,7 @@ async function shipmentNoticeQueue(now = Date.now()) {
 /** Thẻ CRM cho sự kiện vận đơn: "Đã gửi mã vận đơn" (shipment-sent), "Giao hàng thành công" (delivered). */
 async function shipmentLabelIds() {
   const labelDefs = await inboxLabelDefs();
-  return { sent: labelsForEvents(labelDefs, ['shipment-sent']), delivered: labelsForEvents(labelDefs, ['delivered']), labelDefs };
+  return { sent: labelsForEvents(labelDefs, ['shipment-sent']), delivered: labelsForEvents(labelDefs, ['delivered']), order: labelsForEvents(labelDefs, ['order']), labelDefs };
 }
 
 /** Ghi nhật ký + báo hộp thư cho các thay đổi thẻ do vận đơn. */
@@ -580,7 +580,7 @@ async function saveShipmentNoticeResults(results, now = Date.now()) {
       }
     }
     // Nhân viên vừa gửi mã qua Pancake / gửi tay: gắn thẻ "Đã gửi mã vận đơn" ngay.
-    if (saved) labelChanges = applyShipmentLabels(store, { sentLabels: labels.sent, deliveredLabels: labels.delivered });
+    if (saved) labelChanges = applyShipmentLabels(store, { sentLabels: labels.sent, deliveredLabels: labels.delivered, orderLabels: labels.order });
     return null;
   }, { unchanged: () => saved === 0 });
   for (const conversationId of touched) publishMessagingEvent({ type: 'customer-panel', conversationId });
@@ -745,6 +745,7 @@ async function importPosConversationOrders(posOrders) {
 async function runPurchaseLabelBackfill() {
   const labelDefs = await inboxLabelDefs();
   const orderLabels = labelsForEvents(labelDefs, ['order']);
+  const deliveredLabels = labelsForEvents(labelDefs, ['delivered']);
   if (!orderLabels.length) return 0;
   const landingOrders = await listLandingOrders().catch(() => []);
   let changes = [];
@@ -754,7 +755,7 @@ async function runPurchaseLabelBackfill() {
   let dirty = false;
   await updateMessagingStore(store => {
     const fingerprintBefore = purchaseLabelFingerprint(store.conversations);
-    changes = backfillPurchaseLabels(store, { orderLabels, landingOrders });
+    changes = backfillPurchaseLabels(store, { orderLabels, deliveredLabels, landingOrders });
     for (const change of changes) {
       const conversation = store.conversations.find(item => item.id === change.conversation.id);
       if (conversation) relabeled.push(publicConversation(conversation));
@@ -4222,6 +4223,21 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   const phoneLabelPass = () => runPhoneLabelPass().catch(error => console.warn(`Gắn bù thẻ Số điện thoại lỗi: ${error.message}`));
   setTimeout(phoneLabelPass, 40 * 1000).unref?.();
   setInterval(phoneLabelPass, 5 * 60 * 1000).unref?.();
+  // Thẻ vận đơn ("Đã gửi mã vận đơn" / "Giao hàng thành công"): quét bù 20 giây sau khởi động.
+  const shipmentLabelPass = async () => {
+    try {
+      const labels = await shipmentLabelIds();
+      let labelChanges = [];
+      await updateMessagingStore(store => {
+        labelChanges = applyShipmentLabels(store, { sentLabels: labels.sent, deliveredLabels: labels.delivered, orderLabels: labels.order });
+        return null;
+      }, { unchanged: () => !labelChanges.length });
+      if (labelChanges.length) await publishShipmentLabelChanges(labelChanges, labels.labelDefs);
+    } catch (error) {
+      console.warn(`Đồng bộ thẻ vận đơn lỗi: ${error.message}`);
+    }
+  };
+  setTimeout(shipmentLabelPass, 20 * 1000).unref?.();
   if (!auth.enabled && authConfig.requireLogin) console.error('CHƯA CẤU HÌNH ĐĂNG NHẬP: máy chủ bắt buộc đăng nhập (PUBLIC_BASE_URL https hoặc CRM_REQUIRE_LOGIN=1) mà chưa có tài khoản — giao diện/API trả 503 cho tới khi khai CRM_LOGIN_USERS hoặc Nhân sự có mật khẩu.');
   else if (!auth.enabled) console.warn('CRM_LOGIN_USERS trống: giao diện không hỏi đăng nhập. Chỉ để vậy khi chạy trên máy mình.');
   else if (!authConfig.sessionSecret) console.warn('CRM_SESSION_SECRET trống: khoá phiên sinh ngẫu nhiên, khởi động lại là mọi người phải đăng nhập lại.');

@@ -529,8 +529,8 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
   // Trần mỗi lượt theo cài đặt; giờ đầu ngày (8h–9h VN) rải bớt — followUpRunCap.
   const maxPerRun = followUpRunCap(settings.followUps.maxPerRun, now, quietHours);
   const inboxLabels = (await readInboxSettings().catch(() => ({ labels: [] }))).labels;
-  // Thẻ Đã mua / Hủy đơn / Khách xấu / Bám đuổi thành công: không phải ứng viên.
-  const boughtLabelIds = labelsForEvents(inboxLabels, ['order', 'cancel', 'bad', 'followup-won']);
+  // Thẻ Đã mua / Hủy đơn / Khách xấu / Bám đuổi thành công / Giao hàng thành công: không phải ứng viên.
+  const boughtLabelIds = labelsForEvents(inboxLabels, ['order', 'cancel', 'bad', 'followup-won', 'delivered']);
   // Thẻ Khiếu nại / Bảo hành / Cần người xử lý (theo cài đặt thẻ, cộng mã mặc định): bỏ qua, có đếm lý do.
   const skipReasonLabelIds = [...new Set([...labelsForEvents(inboxLabels, ['handoff', 'complaint', 'warranty', 'wholesale']), ...defaultSkipLabelIds])];
   // Khiếu nại / Bảo hành / Khách sỉ: chặn cả lời nhắc giỏ.
@@ -896,8 +896,8 @@ const maxRelayAttempts = 2;
 export const followUpLookupRetryMs = 24 * 60 * 60 * 1000;
 const lookupBlocked = (entry, now) => Number(entry?.lookupFailedAt) > 0 && now - Number(entry.lookupFailedAt) < followUpLookupRetryMs;
 
-// Thẻ mặc định không bám: Đã mua hàng, Cần người xử lý, Khiếu nại, Bảo hành, Hủy đơn, Khách xấu, Bám đuổi thành công.
-const skipLabelIds = new Set(['customer', 'consulting', 'complaint', 'warranty', 'cancelled', 'bad', 'followup-won']);
+// Thẻ mặc định không bám: Đã mua hàng, Cần người xử lý, Khiếu nại, Bảo hành, Hủy đơn, Khách xấu, Bám đuổi thành công, Giao hàng thành công.
+const skipLabelIds = new Set(['customer', 'consulting', 'complaint', 'warranty', 'cancelled', 'bad', 'followup-won', 'delivered']);
 // Đã mua theo lịch sử chat: tin xác nhận đơn / phiếu đơn của Page, hay chính khách nói đã mua / đã nhận hàng.
 const closesOrder = message => (message?.direction === 'outgoing' && (message.type === 'order-receipt' || closedOrderText.test(String(message.text || '')))) || (message?.direction === 'incoming' && customerBoughtText(message.text));
 const boughtInChat = messages => (Array.isArray(messages) ? messages : []).some(closesOrder);

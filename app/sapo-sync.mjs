@@ -51,14 +51,17 @@ const SENT_VIAS = new Set(['bot', 'pancake-bridge', 'manual', 'conversation']);
  * (cờ trên vận đơn), nhân viên gỡ thẻ thì lượt sau không gắn lại. Sửa `store` tại chỗ; trả về các thay
  * đổi thẻ `{ conversation, before, after, reason }` để ghi nhật ký.
  */
-export function applyShipmentLabels(store, { sentLabels = [], deliveredLabels = [] } = {}) {
+export function applyShipmentLabels(store, { sentLabels = [], deliveredLabels = [], orderLabels = [] } = {}) {
   const changes = [];
-  if (!sentLabels.length && !deliveredLabels.length) return changes;
-  const label = (conversations, ids, reason) => {
+  if (!sentLabels.length && !deliveredLabels.length && !orderLabels.length) return changes;
+  const updateLabels = (conversations, { add = [], remove = [] }, reason) => {
+    const addSet = new Set(add);
+    const removeSet = new Set(remove);
     for (const conversation of conversations) {
       const before = Array.isArray(conversation.labels) ? conversation.labels : [];
-      const after = [...new Set([...before, ...ids])];
-      if (after.length === before.length) continue;
+      const filtered = before.filter(id => !removeSet.has(id));
+      const after = [...new Set([...filtered, ...addSet])];
+      if (after.length === before.length && after.every((id, idx) => id === before[idx])) continue;
       conversation.labels = after;
       changes.push({ conversation: { id: conversation.id, name: conversation.name || '' }, before: [...before], after: [...after], reason });
     }
@@ -69,11 +72,22 @@ export function applyShipmentLabels(store, { sentLabels = [], deliveredLabels = 
     const targets = [...new Set([sameCustomerInbox(store, conversation), conversation].filter(c => c && c.source !== 'comment'))];
     if (sentLabels.length && !shipment.sentLabeled && (shipment.notices || []).some(notice => SENT_VIAS.has(notice.via))) {
       shipment.sentLabeled = true;
-      label(targets, sentLabels, `đã gửi mã vận đơn ${shipment.trackingNumber}`);
+      updateLabels(targets, { add: sentLabels }, `đã gửi mã vận đơn ${shipment.trackingNumber}`);
     }
     if (deliveredLabels.length && !shipment.deliveredLabeled && shipmentStage(shipment) === 'delivered') {
       shipment.deliveredLabeled = true;
-      label(targets, deliveredLabels, `vận đơn ${shipment.trackingNumber} giao thành công`);
+      updateLabels(targets, { add: deliveredLabels, remove: [...sentLabels, ...orderLabels] }, `vận đơn ${shipment.trackingNumber} giao thành công`);
+    }
+  }
+  // Khi đã có thẻ "Giao hàng thành công", xóa thẻ "Đã gửi mã vận đơn" và "Đã mua hàng" (chủ shop 07/10).
+  if (deliveredLabels.length && (sentLabels.length || orderLabels.length)) {
+    const deliveredSet = new Set(deliveredLabels);
+    const removeSet = new Set([...sentLabels, ...orderLabels]);
+    for (const conversation of store.conversations || []) {
+      const current = Array.isArray(conversation.labels) ? conversation.labels : [];
+      if (current.some(id => deliveredSet.has(id)) && current.some(id => removeSet.has(id))) {
+        updateLabels([conversation], { remove: [...removeSet] }, 'giao hàng thành công: xóa thẻ đã gửi mã vận đơn và đã mua hàng');
+      }
     }
   }
   return changes;
@@ -134,7 +148,7 @@ export async function runSapoSync(deps) {
     const ids = await deps.labelIds();
     let labelChanges = [];
     await deps.updateMessagingStore(store => {
-      labelChanges = applyShipmentLabels(store, { sentLabels: ids?.sent || [], deliveredLabels: ids?.delivered || [] });
+      labelChanges = applyShipmentLabels(store, { sentLabels: ids?.sent || [], deliveredLabels: ids?.delivered || [], orderLabels: ids?.order || [] });
       return null;
     }, { unchanged: () => !labelChanges.length });
     summary.labeled = labelChanges.length;

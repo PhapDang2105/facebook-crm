@@ -43,9 +43,10 @@ function addLabels(conversation, labelIds) {
  * Chạy trong updateMessagingStore (sửa `store` tại chỗ). Trả về danh sách thay đổi thẻ
  * `{ conversation, before, after, reason }` để ghi nhật ký và phát sự kiện.
  */
-export function backfillPurchaseLabels(store, { orderLabels = [], landingOrders = [], now = Date.now() } = {}) {
+export function backfillPurchaseLabels(store, { orderLabels = [], deliveredLabels = [], landingOrders = [], now = Date.now() } = {}) {
   const labels = (Array.isArray(orderLabels) ? orderLabels : []).filter(Boolean);
   if (!labels.length || !Array.isArray(store?.conversations)) return [];
+  const deliveredSet = new Set(Array.isArray(deliveredLabels) ? deliveredLabels : []);
   const changes = [];
   const record = (change, reason) => { if (change) changes.push({ ...change, reason }); };
   const recent = order => {
@@ -59,12 +60,13 @@ export function backfillPurchaseLabels(store, { orderLabels = [], landingOrders 
   for (const conversation of inbox) {
     const orders = Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [];
     let bought = false;
+    const hasDelivered = deliveredSet.size > 0 && (Array.isArray(conversation.labels) ? conversation.labels : []).some(id => deliveredSet.has(id));
     for (const order of orders) {
       if (!activeOrder(order) || !recent(order)) continue;
       bought = true;
       if (order.purchaseLabeled) continue;
       order.purchaseLabeled = true;
-      record(addLabels(conversation, labels), 'gắn bù cho đơn đã có trong hội thoại');
+      if (!hasDelivered) record(addLabels(conversation, labels), 'gắn bù cho đơn đã có trong hội thoại');
     }
     if (bought) buyers.add(conversation);
   }
@@ -92,7 +94,8 @@ export function backfillPurchaseLabels(store, { orderLabels = [], landingOrders 
           const done = Array.isArray(conversation.landingLabeled) ? conversation.landingLabeled : [];
           if (done.includes(String(order.id))) continue;
           conversation.landingLabeled = [...done, String(order.id)].slice(-50);
-          record(addLabels(conversation, labels), 'gắn cho khách đặt qua landing (khớp SĐT)');
+          const hasDelivered = deliveredSet.size > 0 && (Array.isArray(conversation.labels) ? conversation.labels : []).some(id => deliveredSet.has(id));
+          if (!hasDelivered) record(addLabels(conversation, labels), 'gắn cho khách đặt qua landing (khớp SĐT)');
           buyers.add(conversation);
         }
       }

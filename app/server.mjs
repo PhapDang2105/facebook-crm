@@ -1482,7 +1482,7 @@ const chatbotDependencies = {
       panelChanged = botPanelStateChanged(conversation, botState);
       Object.assign(conversation, botState);
       if (botWasOn && botState.botEnabled === false) botOff = { id: conversation.id, name: conversation.name || '' };
-      if (addLabels.length) {
+      if (addLabels.length && conversation.source !== 'comment') {
         const before = Array.isArray(conversation.labels) ? conversation.labels : [];
         const merged = [...new Set([...before, ...addLabels])];
         if (merged.length !== before.length) {

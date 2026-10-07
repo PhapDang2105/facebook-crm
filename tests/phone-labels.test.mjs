@@ -30,8 +30,9 @@ test('gắn thẻ Số điện thoại một lần, nhân viên gỡ thì không
     }
   };
   const first = applyPhoneLabels(store, { phoneLabels: ['phone'], now });
-  assert.deepEqual(first.changes.map(change => change.conversation.id), ['a', 'c']);
+  assert.deepEqual(first.changes.map(change => change.conversation.id), ['a']);
   assert.deepEqual(store.conversations[0].labels, ['livestream', 'phone']);
+  assert.deepEqual(store.conversations[2].labels, [], 'bình luận không gắn thẻ');
   assert.deepEqual(store.conversations[3].labels, []);
   store.conversations[0].labels = ['livestream'];
   const second = applyPhoneLabels(store, { phoneLabels: ['phone'], now });

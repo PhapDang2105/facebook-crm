@@ -45,19 +45,18 @@ test('đơn landing: hội thoại có tin khách ghi đúng SĐT (kể cả vi�
   assert.deepEqual(backfillPurchaseLabels(store, { orderLabels: labels, landingOrders, now }), [], 'mỗi đơn landing một lần');
 });
 
-test('luồng bình luận của khách đã mua (cùng Page, cùng khách) được gắn một lần; khách Page khác hay chưa mua thì không', () => {
+test('luồng bình luận không được gắn thẻ (bình luận không cần gắn tag) và thẻ cũ bị xoá', () => {
   const store = { conversations: [
     { id: 'p:1', pageId: 'p', psid: '1', labels: ['customer'], customerOrders: [order('a', 3, { purchaseLabeled: true })] },
-    { id: 'p:comment:1:post', source: 'comment', pageId: 'p', psid: '1', labels: [] },
+    { id: 'p:comment:1:post', source: 'comment', pageId: 'p', psid: '1', labels: ['customer'] },
     { id: 'q:comment:1:post', source: 'comment', pageId: 'q', psid: '1', labels: [] },
     { id: 'p:comment:9:post', source: 'comment', pageId: 'p', psid: '9', labels: [] }
   ], messages: {} };
   const changes = backfillPurchaseLabels(store, { orderLabels: labels, now });
-  assert.deepEqual(changes.map(change => change.conversation.id), ['p:comment:1:post']);
+  assert.deepEqual(changes, []);
+  assert.deepEqual(store.conversations[1].labels, [], 'bình luận không gắn thẻ');
   assert.deepEqual(store.conversations[2].labels, []);
   assert.deepEqual(store.conversations[3].labels, []);
-  store.conversations[1].labels = [];
-  assert.deepEqual(backfillPurchaseLabels(store, { orderLabels: labels, now }), [], 'gỡ thẻ bình luận thì không gắn lại');
 });
 
 test('không có thẻ nào nhận sự kiện "order" thì không làm gì', () => {

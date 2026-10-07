@@ -66,7 +66,7 @@ export function applyShipmentLabels(store, { sentLabels = [], deliveredLabels = 
   for (const { conversation, order } of conversationOrders(store)) {
     const shipment = order.shipment;
     if (!shipment?.trackingNumber) continue;
-    const targets = [...new Set([sameCustomerInbox(store, conversation), conversation].filter(Boolean))];
+    const targets = [...new Set([sameCustomerInbox(store, conversation), conversation].filter(c => c && c.source !== 'comment'))];
     if (sentLabels.length && !shipment.sentLabeled && (shipment.notices || []).some(notice => SENT_VIAS.has(notice.via))) {
       shipment.sentLabeled = true;
       label(targets, sentLabels, `đã gửi mã vận đơn ${shipment.trackingNumber}`);

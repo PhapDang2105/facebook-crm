@@ -26,7 +26,7 @@ export function applyPhoneLabels(store, { phoneLabels = [], conversationIds = nu
   if (!labels.length || !Array.isArray(store?.conversations)) return result;
   const only = conversationIds ? new Set(conversationIds) : null;
   for (const conversation of store.conversations) {
-    if (!conversation || conversation.phoneLabeled) continue;
+    if (!conversation || conversation.phoneLabeled || conversation.source === 'comment') continue;
     if (only && !only.has(conversation.id)) continue;
     const messages = Array.isArray(store.messages?.[conversation.id]) ? store.messages[conversation.id] : [];
     const found = messages.some(message => messageHasPhone(message) && (Number(message.createdAt) || 0) > now - phoneLabelWindowMs);

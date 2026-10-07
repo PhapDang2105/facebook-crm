@@ -796,7 +796,7 @@ async function markConversationFollowedUp(conversationId, scenario, via, now, { 
     // 2 giờ tính từ `at`; touchPendingOrder ghi remindedAt → giỏ đã nhắc dùng được thêm 24 giờ (pending-order.mjs).
     if (remindedBasket) touchPendingOrder(target, now);
     const before = Array.isArray(target.labels) ? [...target.labels] : [];
-    if (followUpLabels.length) target.labels = [...new Set([...before, ...followUpLabels])];
+    if (followUpLabels.length && target.source !== 'comment') target.labels = [...new Set([...before, ...followUpLabels])];
     if ((target.labels || []).length !== before.length) labelChange = { conversation: { id: target.id, name: target.name || '' }, before, after: [...target.labels] };
     target.followUps = [...(Array.isArray(target.followUps) ? target.followUps : []), { scenarioId: scenario.id, at: now, via }].slice(-20);
     // Ưu đãi dùng thử mở luồng riêng (processing/trial-flow.mjs) từ bước 'offered'; giỏ cũ
@@ -871,7 +871,7 @@ export async function markFollowUpWins(now = Date.now()) {
       if (!order) continue;
       conversation.followUpWon = { orderId: String(order.id), at: Number(order.createdAt), total: Number(order.total) || 0, markedAt: now };
       const before = Array.isArray(conversation.labels) ? [...conversation.labels] : [];
-      if (wonLabels.length) conversation.labels = [...new Set([...before, ...wonLabels])];
+      if (wonLabels.length && conversation.source !== 'comment') conversation.labels = [...new Set([...before, ...wonLabels])];
       if ((conversation.labels || []).length !== before.length) labelChanges.push({ conversation: { id: conversation.id, name: conversation.name || '' }, before, after: [...conversation.labels] });
       changed.push(conversation.id);
     }

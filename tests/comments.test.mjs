@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import './helpers/seed-catalog.mjs';
 import { applyWebhookEvents, collectWebhookEvents, normalizeCommentEvent } from '../app/meta-webhook.mjs';
-import { commentConversationId, publicConversation } from '../app/messaging-store.mjs';
+import { commentConversationId, publicConversation, setConversationFlags } from '../app/messaging-store.mjs';
 import { processChatbotChanges } from '../app/chatbot-engine.mjs';
 import { defaultMessageTemplates } from '../app/chatbot-templates.mjs';
 
@@ -44,6 +44,10 @@ test('bình luận của khách mở hội thoại riêng theo bài viết, gắ
   assert.equal(conversation.unread, true);
   const view = publicConversation(conversation);
   assert.equal(view.source, 'comment');
+  assert.deepEqual(view.labels, [], 'bình luận không gắn tag');
+  setConversationFlags(store, conversation.id, { labels: ['livestream', 'order'] });
+  assert.deepEqual(conversation.labels, [], 'không thể gắn nhãn cho bình luận');
+  assert.deepEqual(publicConversation(conversation).labels, []);
   assert.equal(view.canReply, true, 'comments have no 24h window');
   assert.deepEqual(view.post, { id: postId });
 

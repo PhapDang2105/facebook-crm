@@ -99,13 +99,11 @@ export function backfillPurchaseLabels(store, { orderLabels = [], landingOrders 
     }
   }
 
-  // 3. Luồng bình luận của khách đã mua (cùng Page, cùng khách): gắn một lần.
-  const buyerKeys = new Set([...buyers].filter(item => item.pageId && item.psid).map(item => `${item.pageId}:${item.psid}`));
+  // Bình luận không gắn thẻ: đảm bảo mọi luồng bình luận không mang thẻ
   for (const conversation of store.conversations) {
-    if (conversation.source !== 'comment' || conversation.purchaseLabeled) continue;
-    if (!buyerKeys.has(`${conversation.pageId}:${conversation.psid}`)) continue;
-    conversation.purchaseLabeled = true;
-    record(addLabels(conversation, labels), 'gắn cho bình luận của khách đã mua');
+    if (conversation?.source === 'comment' && Array.isArray(conversation.labels) && conversation.labels.length) {
+      conversation.labels = [];
+    }
   }
   return changes;
 }

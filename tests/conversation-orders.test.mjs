@@ -152,6 +152,10 @@ test('thẻ "Đã mua hàng" cho đơn POS/CRM tay (28/09): đơn chưa hủy g�
   assert.equal(o4.purchaseLabeled, true);
   // Chưa cấu hình thẻ nào nhận sự kiện đơn: không lỗi.
   assert.equal(applyPurchaseLabels({ id: 'c4' }, { id: 'pos5' }, []), false);
+  // Bình luận không gắn thẻ.
+  const comment = { id: 'c5', source: 'comment', labels: [] };
+  assert.equal(applyPurchaseLabels(comment, { id: 'pos6', status: 'Mới' }, ['customer']), false);
+  assert.deepEqual(comment.labels, []);
 });
 
 test('V7: đơn nhân viên tạo giữ cờ livestream nếu form gửi (POS/kho kèm quà chỉ khách live); không gửi thì không có cờ', () => {

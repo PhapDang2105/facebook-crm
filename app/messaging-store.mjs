@@ -59,6 +59,9 @@ function normalizeStore(value) {
   // "Thị/Văn"), rồi dồn giới tính tốt nhất của cùng một khách cho mọi luồng.
   for (const conversation of store.conversations) {
     if (conversation && !conversation.gender) applyGenderGuess(conversation, genderFromName(conversation.name), 'name');
+    if (conversation && conversation.source === 'comment' && Array.isArray(conversation.labels) && conversation.labels.length) {
+      conversation.labels = [];
+    }
   }
   reconcileAllCustomerGenders(store);
   return store;
@@ -576,7 +579,7 @@ export function publicConversation(conversation) {
     ...(conversation.referral?.adTitle || conversation.referral?.adId ? { ad: { id: conversation.referral.adId || '', title: conversation.referral.adTitle || '' } } : {}),
     unread: Boolean(conversation.unread),
     muted: Boolean(conversation.muted),
-    labels: Array.isArray(conversation.labels) ? conversation.labels : [],
+    labels: conversation.source === 'comment' ? [] : (Array.isArray(conversation.labels) ? conversation.labels : []),
     lastMessageAt: conversation.lastMessageAt || 0,
     lastMessagePreview: conversation.lastMessagePreview || '',
     lastMessageDirection: conversation.lastMessageDirection || '',
@@ -676,6 +679,10 @@ export function setConversationFlags(store, id, changes, { allowedLabelIds = nul
   if (!conversation) return null;
   if (typeof changes.unread === 'boolean') conversation.unread = changes.unread;
   if (typeof changes.muted === 'boolean') conversation.muted = changes.muted;
-  if (Array.isArray(changes.labels)) conversation.labels = sanitizeConversationLabels(changes.labels, { current: conversation.labels, allowedIds: allowedLabelIds });
+  if (conversation.source === 'comment') {
+    conversation.labels = [];
+  } else if (Array.isArray(changes.labels)) {
+    conversation.labels = sanitizeConversationLabels(changes.labels, { current: conversation.labels, allowedIds: allowedLabelIds });
+  }
   return conversation;
 }

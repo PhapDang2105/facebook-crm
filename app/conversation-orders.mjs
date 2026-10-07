@@ -91,7 +91,7 @@ export function lateInfoNeedsBot(messages, message, { now = Date.now(), answered
  * nhân viên gỡ thẻ thì đồng bộ POS 5 phút/lần không gắn lại. Trả về true nếu danh sách thẻ đổi.
  */
 export function applyPurchaseLabels(conversation, order, labelIds = []) {
-  if (!conversation || !order || order.purchaseLabeled) return false;
+  if (!conversation || !order || order.purchaseLabeled || conversation.source === 'comment') return false;
   if (order.processingStatus === 'cancelled' || order.status === 'Hủy') return false;
   order.purchaseLabeled = true;
   const wanted = (Array.isArray(labelIds) ? labelIds : []).filter(Boolean);

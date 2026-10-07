@@ -5702,7 +5702,8 @@ function updateConversationElement(element, conversation) {
   element.dataset.postUrl = conversation.post?.permalink || '';
   element.dataset.postPicture = conversation.post?.picture || '';
   element.dataset.avatar = conversation.picture || '';
-  element.dataset.labels = (conversation.labels || []).join(' ');
+  const isComment = conversation.source === 'comment';
+  element.dataset.labels = isComment ? '' : (conversation.labels || []).join(' ');
   element.classList.toggle('unread', Boolean(conversation.unread));
   element.classList.toggle('muted', Boolean(conversation.muted));
   const avatar = element.querySelector('.avatar');
@@ -13060,6 +13061,10 @@ function conversationLabelIds(conversation) {
 function renderConversationLabelBadges(conversation) {
   const copy = conversation?.querySelector('.conversation-copy');
   if (!copy) return;
+  if (conversation?.dataset.source === 'comment') {
+    copy.querySelector('.conversation-labels')?.remove();
+    return;
+  }
   const labels = conversationLabelIds(conversation).map(labelById).filter(Boolean);
   let holder = copy.querySelector('.conversation-labels');
   if (!labels.length) {
@@ -13083,8 +13088,12 @@ function renderConversationLabelBadges(conversation) {
 /** The bar above the composer: every label, lit when the open thread carries it. */
 function renderConversationLabelBar(conversation = getActiveConversation()) {
   if (!conversationLabelBar) return;
+  if (!conversation || conversation.dataset.source === 'comment') {
+    conversationLabelBar.classList.add('hidden');
+    return;
+  }
   const active = new Set(conversationLabelIds(conversation));
-  conversationLabelBar.classList.toggle('hidden', !inboxLabels.length || !conversation);
+  conversationLabelBar.classList.toggle('hidden', !inboxLabels.length);
   const title = document.createElement('span');
   title.className = 'conversation-label-bar-title';
   title.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>';
@@ -13151,7 +13160,7 @@ async function saveInboxSettings(changes) {
 
 function toggleConversationLabel(labelId) {
   const conversation = getActiveConversation();
-  if (!conversation || !labelById(labelId)) return;
+  if (!conversation || conversation.dataset.source === 'comment' || !labelById(labelId)) return;
   const labels = conversationLabelIds(conversation);
   const next = labels.includes(labelId) ? labels.filter(item => item !== labelId) : [...labels, labelId];
   conversation.dataset.labels = next.join(' ');

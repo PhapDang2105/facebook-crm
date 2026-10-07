@@ -2290,10 +2290,64 @@ const server = http.createServer(async (request, response) => {
       }
       return sendJson(response, 200, { raw: reply.raw, parsed: reply.parsed });
     }
+    const channelPictureMatch = url.pathname.match(/^\/api\/channels\/facebook\/([0-9]+)\/picture$/);
+    if (request.method === 'GET' && channelPictureMatch) {
+      const pageId = channelPictureMatch[1];
+      const channelAvatarsDir = path.join(root, 'data', 'processed', 'avatars');
+      const cacheFile = path.join(channelAvatarsDir, `${pageId}.jpg`);
+      let hasFreshCache = false;
+      try {
+        const info = await stat(cacheFile);
+        if (Date.now() - info.mtimeMs < 24 * 60 * 60 * 1000 && info.size > 0) {
+          hasFreshCache = true;
+        }
+      } catch {}
+
+      if (hasFreshCache) {
+        try {
+          const body = await readFile(cacheFile);
+          response.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' });
+          return response.end(body);
+        } catch {}
+      }
+
+      try {
+        const fetchRes = await fetch(`https://graph.facebook.com/${pageId}/picture?type=normal`, {
+          redirect: 'follow',
+          signal: AbortSignal.timeout(5000)
+        });
+        if (fetchRes.ok) {
+          const buffer = Buffer.from(await fetchRes.arrayBuffer());
+          if (buffer.length > 0) {
+            await mkdir(channelAvatarsDir, { recursive: true }).catch(() => {});
+            await writeFile(cacheFile, buffer).catch(() => {});
+            response.writeHead(200, {
+              'Content-Type': fetchRes.headers.get('content-type') || 'image/jpeg',
+              'Cache-Control': 'public, max-age=86400'
+            });
+            return response.end(buffer);
+          }
+        }
+      } catch {}
+
+      try {
+        const oldData = await readFile(cacheFile);
+        if (oldData.length > 0) {
+          response.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=3600' });
+          return response.end(oldData);
+        }
+      } catch {}
+
+      try {
+        const defaultLogo = await readFile(path.join(root, 'assets', 'branding', 'logos', 'giot-nang-logo.webp'));
+        response.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=3600' });
+        return response.end(defaultLogo);
+      } catch {
+        return sendJson(response, 404, { error: 'Not found' });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/channels') {
       const store = await readChannelStore();
-      const nongSanPage = store.items.find(item => item.name?.includes('Giọt Nắng') && item.picture);
-      const defaultPicture = nongSanPage?.picture || '/assets/giot-nang-logo.webp';
       return sendJson(response, 200, {
         metaConfigured: isMetaConfigured(),
         missingConfiguration: missingMetaConfiguration(),
@@ -2306,7 +2360,23 @@ const server = http.createServer(async (request, response) => {
           // hộp thư xem được hội thoại bot đang trả lời qua Pancake.
           // Kết quả đồng bộ gần nhất (pancake.mjs): syncedAt (ISO), syncError ('' khi ổn), syncErrorAt (ms) — token
           // hết hạn / Pancake chặn thì Cài đặt → Kênh báo lỗi thay vì chấm xanh mãi.
-          ...(isPancakeConfigured() ? pancakePages().map(p => ({ id: p.pageId, name: p.pageName, picture: p.picture || defaultPicture, platform: 'facebook', via: 'pancake', status: 'connected', subscribed: true, subscribedFields: [], subscriptionError: '', connectedAt: 0, checkedAt: 0, syncedAt: '', syncError: '', syncErrorAt: 0, ...(pancakeSyncStatusFor(p.pageId) || {}) })) : [])
+          ...(isPancakeConfigured() ? pancakePages().map(p => ({
+            id: p.pageId,
+            name: p.pageName,
+            picture: `/api/channels/facebook/${p.pageId}/picture`,
+            platform: 'facebook',
+            via: 'pancake',
+            status: 'connected',
+            subscribed: true,
+            subscribedFields: [],
+            subscriptionError: '',
+            connectedAt: 0,
+            checkedAt: 0,
+            syncedAt: '',
+            syncError: '',
+            syncErrorAt: 0,
+            ...(pancakeSyncStatusFor(p.pageId) || {})
+          })) : [])
         ],
         pancake: { configured: isPancakeConfigured(), webhookUrl: pancakeConfig.webhookUrl, pageId: pancakeConfig.pageId }
       });

@@ -65,11 +65,16 @@ export async function getPageAccessToken(pageId) {
 }
 
 export function publicChannel(channel) {
+  const isFb = !channel.platform || channel.platform === 'facebook';
+  const hasExternalExpiredFbcdn = typeof channel.picture === 'string' && channel.picture.includes('fbcdn.net');
+  const picture = isFb && channel.id
+    ? `/api/channels/facebook/${channel.id}/picture`
+    : (hasExternalExpiredFbcdn ? '/assets/giot-nang-logo.webp' : (channel.picture || ''));
   return {
     id: channel.id,
     name: channel.name,
-    picture: channel.picture || '',
-    platform: 'facebook',
+    picture,
+    platform: channel.platform || 'facebook',
     status: channel.status || 'connected',
     subscribed: Boolean(channel.subscribed),
     subscribedFields: Array.isArray(channel.subscribedFields) ? channel.subscribedFields : [],

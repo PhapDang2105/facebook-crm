@@ -64,7 +64,7 @@ test('auth: sai 10 lần trong 15 phút thì khoá theo địa chỉ', async () 
 });
 
 test('auth: chỉ trang đăng nhập, QR, ảnh sản phẩm, chính sách và health đi thẳng', () => {
-  for (const pathname of ['/login', '/login.css', '/login.js', '/api/auth/login', '/api/health', '/privacy', '/q/abc', '/product-images/a.png', '/assets/fonts/Roboto-Bold.ttf', '/assets/login/hero.webp'])
+  for (const pathname of ['/login', '/login.css', '/login.js', '/api/auth/login', '/api/health', '/privacy', '/q/abc', '/product-images/a.png', '/assets/fonts/Roboto-Bold.ttf', '/assets/login/hero.webp', '/api/channels/facebook/110068281327307/picture'])
     assert.equal(isPublicPath(pathname), true, pathname);
   for (const pathname of ['/', '/index.html', '/app.js', '/api/customers', '/api/messaging/stream', '/assets/icons/settings.png', '/qx', '/login/../app.js'])
     assert.equal(isPublicPath(pathname), false, pathname);

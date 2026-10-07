@@ -5337,9 +5337,12 @@ async function readApiResponse(response) {
 }
 
 function channelAvatar(channel) {
-  return channel.picture
-    ? `<span class="channel-item-avatar"><img src="${escapeHtml(channel.picture)}" alt=""></span>`
-    : `<span class="channel-item-avatar">${escapeHtml(channel.name.trim().charAt(0).toUpperCase() || 'f')}</span>`;
+  const logo = (channel.picture && !channel.picture.includes('fbcdn.net'))
+    ? channel.picture
+    : ((!channel.platform || channel.platform === 'facebook') && channel.id
+      ? `/api/channels/facebook/${channel.id}/picture`
+      : '/assets/giot-nang-logo.webp');
+  return `<span class="channel-item-avatar"><img src="${escapeHtml(logo)}" onerror="this.onerror=null;this.src='/assets/giot-nang-logo.webp'" alt=""></span>`;
 }
 
 /**
@@ -5571,7 +5574,10 @@ function normalizeColumnName(value) {
 }
 
 function getMessageChannelLogo(channel) {
-  if (channel.picture) return channel.picture;
+  if (channel.picture && !channel.picture.includes('fbcdn.net')) return channel.picture;
+  if ((!channel.platform || channel.platform === 'facebook') && channel.id) {
+    return `/api/channels/facebook/${channel.id}/picture`;
+  }
   if (channel.platform === 'zalo') return '/assets/icons/zalo.png?v=1';
   return '/assets/giot-nang-logo.webp';
 }
@@ -5579,7 +5585,7 @@ function getMessageChannelLogo(channel) {
 function renderMessageChannelMenu() {
   if (!messageChannelMenu) return;
   messageChannelMenu.innerHTML = messageChannels.map(channel => `<button class="message-channel-option${channel.id === currentMessageChannelId ? ' active' : ''}" type="button" role="menuitem" data-message-channel="${escapeHtml(channel.id)}">
-    <img src="${escapeHtml(getMessageChannelLogo(channel))}" alt="">
+    <img src="${escapeHtml(getMessageChannelLogo(channel))}" onerror="this.onerror=null;this.src='/assets/giot-nang-logo.webp'" alt="">
     <span><strong>${escapeHtml(channel.name)}</strong><small>${channel.platform === 'zalo' ? 'Zalo OA' : 'Facebook Page'}</small></span>
     ${channel.id === currentMessageChannelId ? '<b aria-hidden="true">✓</b>' : ''}
   </button>`).join('');
@@ -5588,7 +5594,10 @@ function renderMessageChannelMenu() {
 function updateMessageChannelTrigger() {
   const channel = messageChannels.find(item => item.id === currentMessageChannelId) || messageChannels[0];
   if (!channel) return;
-  if (messageChannelLogo) messageChannelLogo.src = getMessageChannelLogo(channel);
+  if (messageChannelLogo) {
+    messageChannelLogo.onerror = function() { this.src = '/assets/giot-nang-logo.webp'; };
+    messageChannelLogo.src = getMessageChannelLogo(channel);
+  }
   if (messageChannelName) messageChannelName.textContent = channel.name;
   if (messageChannelTrigger) {
     messageChannelTrigger.title = `${channel.name} · Bấm để chuyển kênh`;

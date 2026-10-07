@@ -201,7 +201,8 @@ export function isPublicPath(pathname, { webhookPaths = [] } = {}) {
   if (['/api/health', '/api/auth/login', '/api/auth/logout', '/api/auth/session',
     '/privacy', '/privacy.html', '/login', '/login.html', '/login.css', '/login.js',
     '/assets/giot-nang-logo.webp'].includes(pathname)) return true;
-  return /^\/(?:q|product-images|assets\/fonts|assets\/login)\//.test(pathname);
+  return /^\/(?:q|product-images|assets\/fonts|assets\/login)\//.test(pathname)
+    || /^\/api\/channels\/facebook\/[0-9]+\/picture$/.test(pathname);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && process.argv[2] === 'hash-password') {

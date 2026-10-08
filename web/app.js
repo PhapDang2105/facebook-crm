@@ -1615,7 +1615,7 @@ function customersHeadHtml() {
   const slice = customersShown.slice((customersPage - 1) * customersPageSize, customersPage * customersPageSize);
   const allPicked = slice.length > 0 && slice.every(customer => customersPicked.has(customer.id));
   const cells = customersColumns.map(column => {
-    const classes = [column.mid ? 'customer-mid' : '', column.sortable ? 'is-sortable' : '', customersSortKey === column.key ? 'is-sorted' : ''].filter(Boolean).join(' ');
+    const classes = [`customer-col-${column.key}`, column.mid ? 'customer-mid' : '', column.sortable ? 'is-sortable' : '', customersSortKey === column.key ? 'is-sorted' : ''].filter(Boolean).join(' ');
     const icon = column.sortable ? `<img class="customers-sort-icon" src="${customersSortIcon(column)}" alt="">` : '';
     return `<th class="${classes}"${column.sortable ? ` data-sort="${column.key}" title="Bấm để sắp xếp"` : ''}><span class="customers-th">${column.label}${icon}</span></th>`;
   }).join('');
@@ -1645,7 +1645,7 @@ function customerRowHtml(customer, index) {
       <strong>${escapeHtml(name)}</strong>
       <small>${escapeHtml(source || 'Không rõ nguồn')}</small>
     </td>
-    <td><span class="customer-tel">${escapeHtml(customer.phone)}${customer.phone
+    <td class="customer-tel-cell"><span class="customer-tel">${escapeHtml(customer.phone)}${customer.phone
       ? `<button type="button" data-copy="${escapeHtml(customer.phone)}" title="Chép số điện thoại" aria-label="Chép số điện thoại"><img src="/assets/icons/customers/copy.svg" alt=""></button>`
       : ''}</span></td>
     <td class="customer-place"><b>${escapeHtml(province || '—')}</b><small title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</small></td>

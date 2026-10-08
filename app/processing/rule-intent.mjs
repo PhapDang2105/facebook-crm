@@ -267,7 +267,7 @@ const SAFE_LAST = new Set(['', 'WELCOME', 'GENERAL_INFO', 'LIVESTREAM_COMMENT', 
 const ORDER_STEPS = new Set(['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'ASK_FLAVOR']);
 
 // R15 (inbox3 A10, ca …179261): "Ibox" (gõ nhầm "inbox") như "ib".
-const TERSE_A = /^(ib|inb|inbox|ibox|in box|in|tv|tu van|xin gia|xin gua|xg|gia|bao gia|bn|bnt|gia bn|gia bao nhieu|gia bao nhieu tien|gia sao|gia the nao|gia ntn|gia nhieu|gia nhieu tien|bao nhieu|bao nhieu tien|nhieu z|nhiu z|cho xin gia|cho gia|xin bao gia|bao gia luon|gia ca|bn vay|gia bao tien|bao tien|xin gia (sp|san pham|granola|gran|ngu coc)|cho xin thong tin ve gia|tu van (cho minh|giup|dum|di)|xin (shop )?tu van( dum| giup)?|ib minh|inbox minh|ibox minh|granola|grannola|gannola|nola)$/;
+const TERSE_A = /^(ib|inb|inbox|ibox|in box|in|tv|tu van|xin gia|xin gua|xg|gia|bao gia|bn|bnt|gia bn|gia bao nhieu|gia bao nhieu tien|gia sao|gia the nao|gia ntn|gia nhieu|gia nhieu tien|gia ban sao|gia ban bao nhieu|gia ban the nao|gia ban ntn|bao nhieu|bao nhieu tien|nhieu z|nhiu z|cho xin gia|cho gia|xin bao gia|bao gia luon|gia ca|bn vay|gia bao tien|bao tien|xin gia (sp|san pham|granola|gran|ngu coc)|cho xin thong tin ve gia|tu van (cho minh|giup|dum|di)|xin (shop )?tu van( dum| giup)?|ib minh|inbox minh|ibox minh|granola|grannola|gannola|nola)$/;
 const TERSE_B = /^(?:(?:xin |cho (?:hoi |xin )?)?gia |ban )?(?:bao nhieu|bn|bnhiu|nhieu|nhiu|bao tien|gia bao nhieu|gia bn|gia sao|gia nhieu|gia may)(?: tien)?(?: (?:1|mot))? ?(?:tui|tuy|goi|bich|bit|bicp|bao)?(?: vay)?$/;
 const TERSE_C = /^(?:1|mot) ?(?:tui|tuy|goi|bich|bit) (?:gia )?(?:bao nhieu|bn|nhieu|may|sao)(?: tien)?$/;
 // Vòng 12 (B5 #4): hỏi giá có tiền tố ("Chị cho em xin giá", "Alo giá thế nào ạ", "Granola giá sao 1 túi") — 22 lượt LLM
@@ -313,6 +313,21 @@ const BOUGHT_ELSEWHERE_NOT = /\b(?:duoc|dc) (?:khong|ko|k|kg|hong)\b|\b(?:chua|s
 // R15 sửa (phản biện luật #2): chỉ câu NGẮN báo đã mua — "rồi/r" đứng cuối, sau đó chỉ còn từ đệm ("ạ/nha/nhé/shop").
 // ("mua trên shopee rồi mà bị mốc", "… rồi. Mà shop có bán hạt điều không" là khiếu nại / câu hỏi khác → luật khác, mô hình.)
 const BOUGHT_ELSEWHERE_TAIL = /\b(?:roi|r)(?: (?:a|ah|ak|nha|nhe|nhen|nghe|nhak|shop|sop|em|e|ad|ban|b|chi|c|anh|ne|do|day|oi|luon|nhe shop|nha shop))*$/;
+// 08/10 (nhật ký 01–07/10: 22 lượt im lặng "mô hình cảm ơn tin không phải lời cảm ơn"): khách báo ĐÃ nhận hàng ("Chị nhận rùi e",
+// "Đã nhận nhé", "Mình nhận được hàng rồi nhé bạn") — luật cũ chỉ bắt "vừa/mới nhận hàng", mô hình chọn THANK_YOU rồi bị chặn.
+// Neo cả câu vào danh sách từ đóng: "chưa nhận được", "nhận được tin nhắn rồi", "bao giờ nhận" không khớp. Phải có dấu hiệu
+// đã xong: "đã/vừa/mới" trước hay "rồi/r/rùi" sau, hoặc "được hàng".
+const RECEIVED_WHO = '(?:(?:nay|hom nay|toi|ben|nha|da|vua|moi|c|chi|e|em|minh|m|mk|a|anh|co|ban|b) )*';
+const RECEIVED_TAIL = '(?: (?:roi|r|rui|nhe|nha|nhen|a|ah|ak|em|e|shop|sop|ban|b|c|chi|anh|oi|nhe ban|nha shop|nhe shop|ok|oke|cam on|thanks))*$';
+const RECEIVED_NOTICE = new RegExp(`^${RECEIVED_WHO}(?:(?:da|vua|moi) (?:nhan|nhn)(?: (?:duoc|dc))?(?: (?:hang|hag|don|don hang))?|(?:nhan|nhn)(?: (?:duoc|dc))?(?: (?:hang|hag|don|don hang))? (?:roi|r|rui)|(?:nhan|nhn) (?:duoc|dc) (?:hang|hag|don|don hang))${RECEIVED_TAIL}`);
+// Mã mẫu bot vừa báo giao hàng: khách đáp "nhận rồi" ngay sau đó là báo đã nhận (dù đơn không nằm trong hội thoại).
+const SHIPMENT_TEMPLATES = new Set(['SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED', 'ORDER_STATUS', 'DELIVERY_DELAY']);
+/** Tin ngắn khách báo đã nhận hàng (chữ thô, chưa bỏ dấu). Dùng chung cho luật và chốt chặn THANK_YOU của engine. */
+export function isReceivedNotice(text) {
+  const raw = String(text || '').trim();
+  if (!raw || raw.includes('?') || raw.length > 80 || extractVietnamesePhone(raw)) return false;
+  return RECEIVED_NOTICE.test(core(prep(raw)));
+}
 // R15 (inbox1 A5, quyết định chủ shop 03/10 #1): mặc cả / khách quen xin giảm. "bớt" bỏ dấu trùng "bột" (bột ngũ cốc) → chữ
 // "bot" chỉ nhận trong cụm rõ ("bớt chút/đi/cho", "không bớt", "giảm bớt") hay chữ CÒN DẤU "bớt"; "giảm giá" trơn trong câu hỏi
 // chương trình ("có giảm giá không") không tính.
@@ -452,7 +467,8 @@ const INFO_RULES = [
   ['HEALTH_CAUTION', HEALTH_CAUTION_RE, 'HEALTH_CAUTION'],
   ['PATIENT', /\b(?:benh nhan|nguoi benh|nguoi om|dang om|nguoi gia|ong ba (?:gia|lon tuoi)|sau mo|dang dieu tri)\b/, 'HEALTH_CONDITION'],
   // Mẹ sau sinh / cho con bú / ở cữ: cùng mẫu HEALTH_CONDITION (đặt trước KIDS vì "cho con bú" có "cho con").
-  ['HEALTH', /\b(me bau|bau bi|dang bau|mang thai|thai ky|sau sinh|cho con bu|dang cho bu|o cu)\b/, 'HEALTH_CONDITION'],
+  // 08/10: thêm "có bầu", "bà bầu", "bầu ăn/dùng được không" (trước đây chỉ "mẹ bầu/đang bầu/bầu bí" → rơi xuống mô hình).
+  ['HEALTH', /\b(me bau|ba bau|bau bi|dang bau|co bau|nguoi bau|bau (?:an|dung|uong|xai|thi an|co an)|mang thai|thai ky|sau sinh|cho con bu|dang cho bu|o cu)\b/, 'HEALTH_CONDITION'],
   ['KIDS', /\b(cho be|be an|be \d+ tuoi|tre em|tre nho|con nho|cho con|nguoi lon tuoi)\b/, 'KIDS_FAMILY'],
   // Vòng 12 (B2 #14): tăng cân tách khỏi CALORIES (khách muốn tăng cân từng nhận mẫu giảm cân 2 lần).
   ['WEIGHT_GAIN', /\b(?:tang can|len can|beo len|map len|tang ky)\b/, 'WEIGHT_GAIN'],
@@ -475,8 +491,12 @@ const INFO_RULES = [
   // "Hàng mới không em", "date mới không": hỏi độ mới, không phải trọng lượng/hạn dùng.
   // "Đúng hàng mới nhận" là điều kiện nhận hàng (đồng kiểm), không hỏi độ mới.
   ['FRESH', /\b(hang moi|date moi|han (dai|moi|xa)|moi san xuat|con han)\b|\bmoi (khong|ko|k|o|hong)\b/, 'FRESHNESS', s => /\bdung hang\b/.test(s)],
+  // 08/10: mẫu STORAGE có sẵn nhưng chưa luật nào dẫn tới. "Bảo quản thế nào", "mở túi để được bao lâu" → STORAGE (đặt trước
+  // WEIGHT_EXPIRY). Câu than (mốc, hôi, ỉu, kiến…) để luồng khiếu nại / mô hình.
+  ['STORAGE', /\b(?:cach )?bao quan\b|\bmo (?:tui|goi|bao bi|ra)(?: roi)? (?:de |dung |an )?(?:duoc |dc )?(?:bao lau|may ngay|may tuan|may thang)\b/, 'STORAGE', s => /\b(?:moc|hoi|iu|kien|sau|mot|hong|bi am|chay dau)\b/.test(s) || PRICE.test(s)],
   // R14 (ca …070230): "2 túi trọng luong bn và bn tiền ạ" hỏi cả GIÁ → không chỉ trả trọng lượng (để mô hình trả cả hai).
-  ['WEIGHT_EXPIRY', /((bao nhieu|bn|may|nhieu) ?(gam|gram|gr|g)\b|han (su dung|dung|sd)|hsd|an (duoc|dc) (bao )?lau|an (duoc|dc) may bua|dung (duoc|dc) may bua|trong luong)/, 'WEIGHT_EXPIRY', s => /\bgia\b|date moi|hang moi|\b(?:bn|bao nhieu|bnhiu|nhieu|nhiu|bao|may) ?tien\b/.test(s)],
+  // 08/10: thêm "date bao lâu / đến khi nào", "để được bao lâu" (hạn dùng).
+  ['WEIGHT_EXPIRY', /((bao nhieu|bn|may|nhieu) ?(gam|gram|gr|g)\b|han (su dung|dung|sd)|hsd|an (duoc|dc) (bao )?lau|an (duoc|dc) may bua|dung (duoc|dc) may bua|trong luong|\bdate (?:bao lau|den (?:khi )?nao|toi (?:khi )?nao|may thang|duoc bao lau)\b|\bde (?:duoc|dc) (?:bao lau|may thang)\b)/, 'WEIGHT_EXPIRY', s => /\bgia\b|date moi|hang moi|\b(?:bn|bao nhieu|bnhiu|nhieu|nhiu|bao|may) ?tien\b/.test(s)],
   // Khách mới, xin gợi ý ("túi nào dễ ăn", "mới tập ăn", "tư vấn c 1 túi"): gợi ý Túi Xanh — đặt TRƯỚC
   // COMPARE vì "nào ngon" cũng nằm trong COMPARE.
   ['RECOMMEND', /\b(tui|loai|vi) nao (ok|ngon|hop|de an|nen (lay|mua|chon))\b|\bmoi (tap|bat dau) an\b|\bchua (duoc )?trai nghiem\b|\btu van (?:(?:giup|cho|dum|ho) )?(?:(?:c|e|minh|chi|anh|em|m|mk) )?(?:(?:1|mot) )?(?:tui|loai)\b/, 'RECOMMEND_BEGINNER', s => PRICE.test(s) || RECOMMEND_NAMED.test(s)],
@@ -771,6 +791,9 @@ export function ruleIntent(text, ctx = {}) {
       && (/\b(?:neu|thi|nhu quang cao|nhu qc|giong quang cao|dung (?:hang|loai|nhu|mau)|phai|kiem tra|xem hang|dong kiem)\b.{0,40}\bmoi nhan\b/.test(s)
         || (!ctx.hasRecentOrder && /\bmoi nhan (?:hang|hag|duoc hang|dc hang)$/.test(s) && /\b(?:nhe|nha|nhen|nghe|nhak|nhe shop|nha shop)$/.test(sFull)));
     if (/\b(?:vua|moi) nhan (?:hang|hag|duoc hang|dc hang)\b/.test(s) && !phone && !receivedConditional) return { rule: 'RECEIVED_CHECK', value: { template_id: 'RECEIVED_CHECK' }, attention: true };
+    // 08/10: tin ngắn báo đã nhận ("Chị nhận rùi e", "Đã nhận nhé") khi hội thoại có đơn hay bot vừa báo giao → hỏi nhận đúng/đủ
+    // quà chưa (không gắn thẻ: không có gì cần xử lý, khách báo lỗi thì luồng khiếu nại bắt ở tin sau).
+    if (!receivedConditional && (ctx.hasRecentOrder || SHIPMENT_TEMPLATES.has(last)) && isReceivedNotice(raw)) return { rule: 'RECEIVED_NOTICE', value: { template_id: 'RECEIVED_CHECK' } };
     // Hủy đơn / khoan giao khi có đơn còn mở: ≤ 60 phút bot hủy (ORDER_CANCEL tự kiểm còn hủy được không); lâu hơn,
     // hay kèm giỏ mới ("đặt loại 3 gói… hủy đơn 2 bịch"), hay khoan giao → ghi nhận + nhân viên (ghi chú vào đơn, thẻ).
     if (orderOpen && (CANCEL_ORDER.test(s) || HOLD_DELIVERY.test(s)) && !/\?|\b(?:duoc|dc) (?:khong|ko|k)\b/.test(s)) {
@@ -790,7 +813,9 @@ export function ruleIntent(text, ctx = {}) {
     }
     if (!phone) {
       // Câu hỏi đồng kiểm ("mua 3 gói có cho kiểm tra hàng trước khi thanh toán ko").
-      if (/\b(?:kiem tra|kiem|dong kiem|xem) hang\b/.test(s) && !/\bdon\b/.test(s)) return infoReply('INSPECTION', 'INSPECTION_RETURN_POLICY');
+      // 08/10: thêm "đồng kiểm" đứng riêng, "kiểm tra/xem/mở trước khi nhận/thanh toán"; loại câu than "(shipper) không cho kiểm/xem".
+      const inspectAsk = /\b(?:kiem tra|kiem|dong kiem|xem) hang\b|\bdong kiem\b|\b(?:kiem tra|xem|mo|khui) (?:hang |sp |san pham )?truoc khi (?:nhan|thanh toan|tra tien|lay)\b/.test(s);
+      if (inspectAsk && !/\bdon\b/.test(s) && !/\b(?:khong|ko|k|kg|hong) (?:cho|duoc|dc) (?:kiem|xem|dong kiem|mo|khui)\b/.test(s)) return infoReply('INSPECTION', 'INSPECTION_RETURN_POLICY');
       // "Liệu bóc ra có mùi hôi ko": câu HỎI (chưa nhận hàng) → trấn an + chính sách đổi; than có đơn thì để luồng khiếu nại.
       const smellAsk = /\b(?:mui hoi|hoi dau|bi hoi|co mui|mui la)\b/.test(s) && (POLICY_QUESTION.test(s) || QUESTION_TAIL.test(sFull) || /\b(lieu|co bi|co khi nao|co hay)\b/.test(s));
       // Hai câu hỏi một tin ("Bn gram 1túi và có bị hôi ko") để mô hình trả lời cả hai.
@@ -861,7 +886,8 @@ export function ruleIntent(text, ctx = {}) {
   // như cũ), có SĐT, kể lần trước rồi muốn mua thêm ở đây ("lần trước mua shopee rồi, giờ lấy thêm…").
   // R15 sửa (phản biện luật #2): khiếu nại ("mua trên shopee rồi mà bị mốc") không thuộc luật này (ORDER_ASK + thẻ như cũ).
   if (!isComment && !phone && !raw.includes('?') && !complaint && !ctx.complaint && !strongComplaint) {
-    const sBought = orderAskCore(raw);
+    // 08/10: "rùi/ròi/roài" (gõ tắt "rồi") như "rồi" — "chốt bên tiktok rùi" trước đây trượt luật.
+    const sBought = orderAskCore(raw).replace(/\b(?:rui|roai|roy)\b/g, 'roi');
     // ("Chị đặt ấp 3 rồi": "ấp" CÒN DẤU / "ap + số" là ấp — địa chỉ, không phải app.)
     const hamlet = /(?<![\p{L}])ấp(?![\p{L}])/iu.test(raw.normalize('NFC')) || /\bap \d/.test(sBought);
     if (!hamlet && BOUGHT_ELSEWHERE.test(sBought) && BOUGHT_ELSEWHERE_TAIL.test(sBought) && !ORDER_PLACED.test(sBought) && !BOUGHT_ELSEWHERE_NOT.test(sBought)) {

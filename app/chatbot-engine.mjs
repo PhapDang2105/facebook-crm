@@ -10,7 +10,7 @@ import { findProductBySku, getCatalogProducts, getGifts, hasLivestreamGift, isFr
 import { hasGiftOverride } from './gift-override.mjs';
 import { isLivestreamConversation, isLivestreamCustomer, isPageSystemNotice, lateInfoNeedsBot } from './conversation-orders.mjs';
 // R13: LIVE_ONLY (danh sách hàng chỉ bán trên live) và FLAVOR_LIST (câu hỏi danh sách vị) dùng chung một bản của rule-intent.
-import { asksSpoonIncluded, CANCEL_ORDER, COMMENT_DISLIKE, core as ruleCore, DELIVERY_NOTE, FLAVOR_LIST, HOLD_DELIVERY, isFanToSpoonRequest, LIVE_FEEDBACK, LIVE_ONLY, ruleIntent, TROPICAL_MENTION } from './processing/rule-intent.mjs';
+import { asksSpoonIncluded, CANCEL_ORDER, COMMENT_DISLIKE, core as ruleCore, DELIVERY_NOTE, FLAVOR_LIST, HOLD_DELIVERY, isFanToSpoonRequest, isReceivedNotice, LIVE_FEEDBACK, LIVE_ONLY, ruleIntent, TROPICAL_MENTION } from './processing/rule-intent.mjs';
 import { cleanAddressText, collectAddressBurst, isPaymentMessage, lookupPreviousAddress, maskMarketWord, maskPlaceGia, resolvePreviousAddress, stripPhone } from './processing/order-flow.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { stickerInfo } from './stickers.mjs';
@@ -3417,8 +3417,11 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       return;
     }
     if (reply.templateId === 'THANK_YOU' && conversation.source !== 'comment' && !nonText && !genuineThanks && !message.likeSticker) {
-      const again = await askModel({ replyHint: 'LƯU Ý: khách KHÔNG chỉ cảm ơn/đáp lời — chọn mẫu trả lời đúng ý khách (không chọn THANK_YOU).' });
-      if (again && again.templateId !== 'THANK_YOU') reply = again;
+      // 08/10: khách báo đã nhận hàng ("Chị nhận rùi e") mà mô hình vẫn chọn THANK_YOU → hỏi nhận đúng/đủ quà chưa, không im lặng.
+      const received = templates?.RECEIVED_CHECK && isReceivedNotice(message.text);
+      const again = received ? null : await askModel({ replyHint: 'LƯU Ý: khách KHÔNG chỉ cảm ơn/đáp lời — chọn mẫu trả lời đúng ý khách (không chọn THANK_YOU).' });
+      if (received) reply = renderChatbotReply({ template_id: 'RECEIVED_CHECK' }, templates, replyContext);
+      else if (again && again.templateId !== 'THANK_YOU') reply = again;
       else {
         await saveBotState(conversation.id, { addLabelEvents: ['handoff'] }).catch(() => {});
         results.push({ conversationId: conversation.id, skipped: 'mô hình cảm ơn tin không phải lời cảm ơn' });

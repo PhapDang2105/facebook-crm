@@ -257,8 +257,10 @@ export function giftsForKey(key, { livestream = false } = {}) {
 export function applyLiveGiftPolicy(gifts, totalQuantity) {
   const list = Array.isArray(gifts) ? gifts : [];
   if (!list.some(gift => gift?.livestreamOnly)) return list;
-  if (Number(totalQuantity) >= 3) return list.filter(gift => !gift.livestreamOnly);
-  // Quà hiện vật (có SKU) khác quà live bị bỏ; quà không hiện vật (miễn ship) giữ.
+  // 08/10 (chủ shop): chỉ áp dụng livestream — combo 2 live tặng Quạt, combo 3 live tặng Quạt + Bát gáo dừa và muỗng.
+  // Quà live gộp cũ 'qua-tang-live' (Quạt + Bát gáo dừa) bỏ khi >= 3 túi để tránh lặp bát.
+  if (Number(totalQuantity) >= 3) return list.filter(gift => gift.id !== 'qua-tang-live');
+  // Đơn 2 túi: giữ quà live và quà không có SKU (miễn ship); bỏ quà hiện vật thường nếu có.
   return list.filter(gift => gift.livestreamOnly || !gift.sku);
 }
 

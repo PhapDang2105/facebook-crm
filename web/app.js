@@ -1793,8 +1793,7 @@ const campaignsColumns = [
   { key: 'orders', label: 'Đơn', num: true },
   { key: 'revenue', label: 'Doanh thu', num: true },
   { key: 'cpa', label: 'CPA', num: true },
-  { key: 'roas', label: 'ROAS', num: true, title: 'ROAS = doanh thu đơn quy về quảng cáo Meta ÷ chi phí quảng cáo Meta. Dòng UTM không có chi phí nên không có ROAS. Bấm để sắp xếp.' },
-  { key: 'daily', label: 'Chi phí / doanh thu', sortable: false }
+  { key: 'roas', label: 'ROAS', num: true, title: 'ROAS = doanh thu đơn quy về quảng cáo Meta ÷ chi phí quảng cáo Meta. Dòng UTM không có chi phí nên không có ROAS. Bấm để sắp xếp.' }
 ];
 
 const campaignInsightKinds = [
@@ -1852,26 +1851,6 @@ function campaignRoasTone(roas, average) {
   if (Number(roas) >= Number(average) * 1.2) return 'is-good';
   if (Number(roas) <= Number(average) * 0.7) return 'is-bad';
   return '';
-}
-
-/** Đường nhỏ chi phí (xám) và doanh thu (màu nhấn) theo ngày, chung một thang. */
-function campaignSparkline(daily) {
-  const points = Array.isArray(daily) ? daily : [];
-  if (points.length < 2) return '<span class="customer-never">—</span>';
-  const width = 110;
-  const height = 30;
-  const max = Math.max(1, ...points.map(point => Math.max(Number(point.spend) || 0, Number(point.revenue) || 0)));
-  const line = key => points.map((point, index) => {
-    const x = (index / (points.length - 1)) * (width - 2) + 1;
-    const y = height - 1 - ((Number(point[key]) || 0) / max) * (height - 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  const spend = points.reduce((sum, point) => sum + (Number(point.spend) || 0), 0);
-  const revenue = points.reduce((sum, point) => sum + (Number(point.revenue) || 0), 0);
-  const title = `Chi phí ${formatCustomerMoney(spend)} · Doanh thu ${formatCustomerMoney(revenue)}`;
-  return `<svg class="campaign-spark" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${escapeHtml(title)}"><title>${escapeHtml(title)}</title>`
-    + `<polyline class="campaign-spark-spend" points="${line('spend')}"></polyline>`
-    + `<polyline class="campaign-spark-revenue" points="${line('revenue')}"></polyline></svg>`;
 }
 
 function renderCampaignsSummary(report) {
@@ -1947,7 +1926,6 @@ function campaignRowHtml(campaign, averageRoas) {
     <td class="is-num">${escapeHtml(formatCustomerMoney(campaign.revenue))}</td>
     <td class="is-num">${escapeHtml(campaignMoneyOrDash(campaign.cpa))}</td>
     <td class="is-num campaign-roas ${tone}">${escapeHtml(campaignRoasText(campaign.roas))}</td>
-    <td class="campaign-trend">${campaignSparkline(campaign.daily)}</td>
   </tr>`;
 }
 

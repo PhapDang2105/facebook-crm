@@ -8,7 +8,7 @@ import { autoLabelEvents } from '../app/processing/auto-label.mjs';
 
 import { defaultMessageTemplates, renderChatbotReply } from '../app/chatbot-templates.mjs';
 import { normalizeChatbotSettings } from '../app/chatbot-settings.mjs';
-import { LEGACY_SHIPMENT_TEMPLATES } from '../app/shipment-stage.mjs';
+import { LEGACY_SHIPMENT_TEMPLATES, LEGACY_SHIPMENT_OUT_FOR_DELIVERY } from '../app/shipment-stage.mjs';
 import { processingNotes } from '../app/order-notes.mjs';
 
 const HOUR = 60 * 60 * 1000;
@@ -211,8 +211,9 @@ test('mẫu vận đơn còn đúng lời mặc định cũ thì tự đổi san
   const legacy = renderShipmentNotice(shipment, 'female', 'SHIPMENT_PICKED_UP', { SHIPMENT_PICKED_UP: LEGACY_SHIPMENT_TEMPLATES.SHIPMENT_PICKED_UP });
   assert.match(legacy, /^Dạ, đơn hàng của chị đã được SPX Express lấy hàng thành công rồi ạ\n/);
   assert.equal(renderShipmentNotice(shipment, 'female', 'SHIPMENT_PICKED_UP', { SHIPMENT_PICKED_UP: 'Lời riêng {tracking_number}' }), 'Lời riêng SPXVN1');
-  const settings = normalizeChatbotSettings({ messageTemplates: { SHIPMENT_DELIVERED: LEGACY_SHIPMENT_TEMPLATES.SHIPMENT_DELIVERED, ORDER_STATUS_SHIPPED: LEGACY_SHIPMENT_TEMPLATES.ORDER_STATUS_SHIPPED } });
+  const settings = normalizeChatbotSettings({ messageTemplates: { SHIPMENT_DELIVERED: LEGACY_SHIPMENT_TEMPLATES.SHIPMENT_DELIVERED, SHIPMENT_OUT_FOR_DELIVERY: LEGACY_SHIPMENT_OUT_FOR_DELIVERY[0], ORDER_STATUS_SHIPPED: LEGACY_SHIPMENT_TEMPLATES.ORDER_STATUS_SHIPPED } });
   assert.equal(settings.messageTemplates.SHIPMENT_DELIVERED, defaultMessageTemplates().SHIPMENT_DELIVERED);
+  assert.equal(settings.messageTemplates.SHIPMENT_OUT_FOR_DELIVERY, defaultMessageTemplates().SHIPMENT_OUT_FOR_DELIVERY);
   assert.equal(settings.messageTemplates.ORDER_STATUS_SHIPPED, defaultMessageTemplates().ORDER_STATUS_SHIPPED);
 
   // Giao thành công (SHIPMENT_DELIVERED): tự động hóa xưng hô theo giới tính Anh/Chị/Mình
@@ -222,6 +223,14 @@ test('mẫu vận đơn còn đúng lời mặc định cũ thì tự đổi san
     'Dạ em kiểm tra hệ thống đã ghi nhận chị nhận hàng thành công rồi ạ. Trong quá trình chị trải nghiệm, nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm chị nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn chị đã tin tưởng ủng hộ Giọt Nắng, chúc chị ăn ngon miệng ạ.');
   assert.equal(renderShipmentNotice(shipment, '', 'SHIPMENT_DELIVERED'),
     'Dạ em kiểm tra hệ thống đã ghi nhận Anh/Chị nhận hàng thành công rồi ạ. Trong quá trình Anh/Chị trải nghiệm, nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm Anh/Chị nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn Anh/Chị đã tin tưởng ủng hộ Giọt Nắng, chúc Anh/Chị ăn ngon miệng ạ.');
+
+  // Đang giao hàng (SHIPMENT_OUT_FOR_DELIVERY): tự động hóa xưng hô theo giới tính Anh/Chị/Mình
+  assert.equal(renderShipmentNotice(shipment, 'male', 'SHIPMENT_OUT_FOR_DELIVERY'),
+    'Dạ shipper đã nhận hàng và đang giao hàng tới anh rồi ạ, anh chú ý điện thoại để nhận hàng trong vòng 12 giờ tiếp theo nhé. Cần em hỗ trợ để nhắn shipper liên hệ giờ nhận thì nhắn em nhé, em hỗ trợ mình ngay ạ. Em cảm ơn anh nhiều ạ.');
+  assert.equal(renderShipmentNotice(shipment, 'female', 'SHIPMENT_OUT_FOR_DELIVERY'),
+    'Dạ shipper đã nhận hàng và đang giao hàng tới chị rồi ạ, chị chú ý điện thoại để nhận hàng trong vòng 12 giờ tiếp theo nhé. Cần em hỗ trợ để nhắn shipper liên hệ giờ nhận thì nhắn em nhé, em hỗ trợ mình ngay ạ. Em cảm ơn chị nhiều ạ.');
+  assert.equal(renderShipmentNotice(shipment, '', 'SHIPMENT_OUT_FOR_DELIVERY'),
+    'Dạ shipper đã nhận hàng và đang giao hàng tới Anh/Chị rồi ạ, Anh/Chị chú ý điện thoại để nhận hàng trong vòng 12 giờ tiếp theo nhé. Cần em hỗ trợ để nhắn shipper liên hệ giờ nhận thì nhắn em nhé, em hỗ trợ mình ngay ạ. Em cảm ơn Anh/Chị nhiều ạ.');
 });
 
 test('bảng Đơn hàng hiện hãng + mã + giai đoạn giao', () => {

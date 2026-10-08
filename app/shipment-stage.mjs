@@ -39,7 +39,7 @@ export const DEFAULT_SHIPMENT_TEMPLATES = {
   SHIPMENT_CREATED: "Dạ, Giọt Nắng báo {title} đơn hàng đã được đóng gói và giao cho {carrier} rồi ạ 📦\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\nTrạng thái: {status}\n━━━━━━━━━━━━\n🔎 Theo dõi hành trình: {tracking_url}{tracking_hint}\n\nEm cảm ơn {title} đã ủng hộ Giọt Nắng, có gì cần hỗ trợ {title} nhắn em nhé ạ 💛",
   SHIPMENT_PICKED_UP: "Dạ, đơn hàng của {title} đã được {carrier} lấy hàng thành công rồi ạ\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\nTrạng thái: {status}\n\nEm sẽ báo {title} ngay khi đơn bắt đầu giao nha 🌾",
   SHIPMENT_IN_TRANSIT: "Dạ, đơn hàng của {title} đang trên đường vận chuyển tới khu vực của mình rồi ạ\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n🔎 Theo dõi hành trình: {tracking_url}\n\n{Title} chờ em thêm chút nha, có gì em báo ngay ạ 🌾",
-  SHIPMENT_OUT_FOR_DELIVERY: "Dạ, shipper đang giao đơn hàng tới {title} rồi ạ 🛵\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n\n{Title} để ý điện thoại giúp em nha, em cảm ơn {title} nhiều ạ 💛",
+  SHIPMENT_OUT_FOR_DELIVERY: "Dạ shipper đã nhận hàng và đang giao hàng tới {title} rồi ạ, {title} chú ý điện thoại để nhận hàng trong vòng 12 giờ tiếp theo nhé. Cần em hỗ trợ để nhắn shipper liên hệ giờ nhận thì nhắn em nhé, em hỗ trợ mình ngay ạ. Em cảm ơn {title} nhiều ạ.",
   SHIPMENT_DELIVERED: "Dạ em kiểm tra hệ thống đã ghi nhận {title} nhận hàng thành công rồi ạ. Trong quá trình {title} trải nghiệm, nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm {title} nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ."
 };
 
@@ -47,6 +47,12 @@ export const LEGACY_SHIPMENT_DELIVERED = [
   "Dạ đơn hàng (mã vận đơn {tracking_number}) đã giao thành công tới {title} rồi ạ 🎉 Giọt Nắng cảm ơn {title} đã tin tưởng ủng hộ. {Title} dùng thấy thế nào nhắn em biết với nha, cần hỗ trợ gì em luôn ở đây ạ 💛",
   "Dạ, đơn hàng đã giao thành công tới {title} rồi ạ 🎉\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n\nEm cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ. {Title} dùng thấy thế nào nhắn em biết với nha, cần hỗ trợ gì em luôn ở đây ạ 💛",
   "Dạ, {title} nhận hàng và trải nghiệm nếu gặp vấn đề gì về sản phẩm hay không hài lòng về sản phẩm {title} nhắn em nhé, em hỗ trợ cho mình ngay ạ. Em cảm ơn {title} đã tin tưởng ủng hộ Giọt Nắng, chúc {title} ăn ngon miệng ạ."
+];
+
+export const LEGACY_SHIPMENT_OUT_FOR_DELIVERY = [
+  "Dạ đơn hàng của {title} (mã vận đơn {tracking_number}) đang được shipper giao tới {title} ạ 🛵 {Title} để ý điện thoại giúp em nha, cảm ơn {title} nhiều ạ!",
+  "Dạ, shipper đang giao đơn hàng tới {title} rồi ạ 🛵\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n━━━━━━━━━━━━\n📞 {Title} để ý điện thoại giúp em nha\n\nEm cảm ơn {title} nhiều ạ 💛",
+  "Dạ, shipper đang giao đơn hàng tới {title} rồi ạ 🛵\n━━━━━━━━━━━━\n🏷️ Mã vận đơn: {tracking_number}\n\n{Title} để ý điện thoại giúp em nha, em cảm ơn {title} nhiều ạ 💛"
 ];
 
 // Lời mặc định cũ (1931224): mẫu còn đúng y lời cũ (chưa ai sửa) được đổi sang lời mới khi đọc cài đặt.
@@ -82,9 +88,11 @@ export function fillShipmentTemplate(template, values) {
 /** Lời báo khách theo mẫu (`templates` = mẫu trong Cài đặt; chưa có mẫu đó thì dùng mặc định). */
 export function renderShipmentNotice(shipment, gender = '', templateId = STAGE_TEMPLATES.created, templates = {}) {
   const stored = templates && Object.hasOwn(templates, templateId) ? templates[templateId] : undefined;
-  const isLegacy = stored !== undefined && (templateId === 'SHIPMENT_DELIVERED'
-    ? LEGACY_SHIPMENT_DELIVERED.includes(stored)
-    : stored === LEGACY_SHIPMENT_TEMPLATES[templateId]);
+  const isLegacy = stored !== undefined && (
+    (templateId === 'SHIPMENT_DELIVERED' && LEGACY_SHIPMENT_DELIVERED.includes(stored)) ||
+    (templateId === 'SHIPMENT_OUT_FOR_DELIVERY' && LEGACY_SHIPMENT_OUT_FOR_DELIVERY.includes(stored)) ||
+    stored === LEGACY_SHIPMENT_TEMPLATES[templateId]
+  );
   const template = stored === undefined || isLegacy ? DEFAULT_SHIPMENT_TEMPLATES[templateId] : stored;
   if (!String(template || '').trim()) return '';
   return fillShipmentTemplate(template, shipmentTemplateValues(shipment, gender));

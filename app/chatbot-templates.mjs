@@ -66,7 +66,11 @@ function fill(text, values = {}, lists = {}) {
     const [itemBody, separator = ''] = body.split('[[|]]');
     return (lists[name] || []).map(item => fill(itemBody.replace(/^\n|\n$/g, ''), { ...values, ...item })).join(`\n${separator.replace(/^\n|\n$/g, '')}\n`.replace(/^\n\n$/, '\n'));
   });
-  out = out.replace(/\[\?([a-z_0-9]+)\]([\s\S]*?)\[\/\?\]/gi, (_, key, body) => (values[key] ? body : ''));
+  const condPattern = /\[\?([a-z_0-9]+)\]((?:(?!\[\?[a-z_0-9]+\])[\s\S])*?)\[\/\?\]/gi;
+  let condPasses = 10;
+  while (condPasses-- > 0 && condPattern.test(out)) {
+    out = out.replace(condPattern, (_, key, body) => (values[key] ? body : ''));
+  }
   // A message break sits on its own line while lines are judged, so an empty
   // {image} at the end of a line never takes the text before it down too.
   const lines = out.replace(/###/g, '\n###\n').split('\n').map(line => {

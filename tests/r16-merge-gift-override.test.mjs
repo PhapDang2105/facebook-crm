@@ -92,20 +92,19 @@ test('bản gộp: khách live 1 Xanh + 1 Vàng "C ko lấy quạt .bỏ ra hộ
   });
 });
 
-test('bản gộp: giỏ live đã hứa tặng yến mạch (R15 oatsGift) + đổi quạt → muỗng: giỏ giữ cả hai, tin xác nhận có muỗng dừa và yến mạch', async () => {
+test('bản gộp: giỏ live đổi quạt → muỗng: tin xác nhận có muỗng dừa, không có yến mạch và không có quạt', async () => {
   await withLiveGift(async () => {
     const sim = new Sim();
     const inbox = sim.inbox({ labels: ['livestream'], post: LIVE_POST, botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 2 * MIN, pendingOrder: basket([XANH(1), VANG(1)], 2 * MIN, { livestream: true, oatsGift: true }) });
     const turn = await sim.send(inbox, 'bỏ quạt giúp chị nhé', { llm: noModel });
     assert.match(turn.sent.map(item => item.text).join('\n'), /đổi quạt sang muỗng dừa/, JSON.stringify(turn.result));
     assert.deepEqual(skus(inbox.pendingOrder.giftOverride), ['BGD', 'MUONG']);
-    assert.equal(inbox.pendingOrder.oatsGift, true, 'lời hứa yến mạch vẫn đi theo giỏ');
     const closed = await sim.send(inbox, `${PHONE} ${ADDRESS}`, { llm: { template_id: 'ORDER_CONFIRMATION', Phone_Number: PHONE, Customer_Address: ADDRESS } });
     assert.equal(closed.created.length, 1, JSON.stringify(closed.result));
     assert.deepEqual(skus(closed.created[0].giftOverride), ['BGD', 'MUONG']);
     const confirmText = closed.sent.map(item => item.text).join('\n');
     assert.match(confirmText, /Muỗng dừa/);
-    assert.ok(confirmText.includes(OATS_GIFT_NAME), confirmText);
+    assert.doesNotMatch(confirmText, /Yến mạch/i);
     assert.doesNotMatch(confirmText, /Quạt/);
   });
 });

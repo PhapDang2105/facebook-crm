@@ -87,19 +87,19 @@ test('DISCOUNT_OATS_GIFT: không giảm giá; giỏ từ 2 túi → báo miễn 
   assert.doesNotMatch(one, /yến mạch/i);
 });
 
-test('pendingOrder.oatsGift: dòng quà giỏ / xác nhận đơn / order.gift thêm yến mạch, tiền không đổi; giỏ 1 túi thì không', () => {
+test('pendingOrder.oatsGift: không tặng yến mạch, không có dòng quà yến mạch trên giỏ hay đơn', () => {
   const address = '12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh';
   const context = oats => ({ ...female, now: Date.now(), pendingOrder: { ...basket([XANH(1), VANG(1)]), phone: PHONE, address, ...(oats ? { oatsGift: true } : {}) }, messageText: 'ok chốt' });
   const plain = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION' }, templates, context(false));
   const gifted = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION' }, templates, context(true));
   assert.equal(gifted.templateId, 'ORDER_CONFIRMATION', JSON.stringify(gifted));
   assert.equal(gifted.order.total, plain.order.total);
-  assert.match(gifted.order.gift, new RegExp(OATS_GIFT_NAME.replace(/[()]/g, '\\$&')));
-  assert.match(text(gifted), /Yến mạch \(quà khách quen\)/);
+  assert.doesNotMatch(String(gifted.order?.gift || ''), /Yến mạch/i);
+  assert.doesNotMatch(text(gifted), /Yến mạch/i);
   const cart = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, { ...female, now: Date.now(), pendingOrder: { ...basket([XANH(2)]), oatsGift: true }, messageText: 'lấy 2 túi xanh' });
-  assert.equal(cart.pendingOrder.oatsGift, true);
+  assert.doesNotMatch(text(cart), /Yến mạch/i);
   const single = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION' }, templates, { ...female, now: Date.now(), pendingOrder: { ...basket([XANH(1)]), phone: PHONE, address, oatsGift: true }, messageText: 'ok' });
-  assert.doesNotMatch(String(single.order?.gift || ''), /Yến mạch/);
+  assert.doesNotMatch(String(single.order?.gift || ''), /Yến mạch/i);
 });
 
 test('ORDER_EXISTING_CONFIRM (seed + dự phòng): hỏi gộp vào đơn đang có hay tách đơn mới', () => {

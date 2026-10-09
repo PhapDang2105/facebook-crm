@@ -164,11 +164,11 @@ test('T4: giữ 2 Xanh, "đổi 1 túi sang vàng được ko" (mô hình trả 
   assert.deepEqual(codes(inbox.pendingOrder.items), ['1 GRA-VANG-H350', '1 GRA-XANH-Z450']);
 });
 
-test('T6: mặc cả (hứa yến mạch) rồi giảm còn 1 túi → đơn 1 túi KHÔNG ghi chú "Tặng yến mạch"', async () => {
+test('T6: mặc cả không tặng yến mạch → đơn KHÔNG ghi chú "Tặng yến mạch"', async () => {
   const sim = new Sim({ psid: 'fx3t6' });
   const inbox = sim.inbox({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - MIN, pendingOrder: basket([XANH(2)], MIN) });
   await sim.send(inbox, 'giảm giá cho chị đi', { llm: { template_id: 'GENERAL_INFO' } });
-  assert.equal(inbox.pendingOrder.oatsGift, true);
+  assert.notEqual(inbox.pendingOrder.oatsGift, true);
   await sim.send(inbox, 'thôi lấy 1 túi xanh thôi', { llm: { template_id: 'ORDER_ADDRESS', Product_N1: P.X, No_A: '1' } });
   assert.notEqual(inbox.pendingOrder.oatsGift, true);
   const turn = await sim.send(inbox, `${PHONE} ${ADDR}`, { llm: { template_id: 'ORDER_CONFIRMATION', Product_N1: P.X, No_A: '1', Phone_Number: PHONE, Customer_Address: ADDR } });

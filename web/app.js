@@ -1931,10 +1931,11 @@ function campaignRowHtml(campaign, averageRoas) {
 
 function renderCampaignsTable() {
   if (!campaignsTable) return;
-  const list = Array.isArray(campaignsReport?.campaigns) ? campaignsReport.campaigns : [];
+  const rawList = Array.isArray(campaignsReport?.campaigns) ? campaignsReport.campaigns : [];
+  const list = rawList.filter(campaign => String(campaign.status || '').toUpperCase() === 'ACTIVE');
   if (!list.length) {
     renderEmptyState(campaignsTable, campaignsReport?.ads?.connected
-      ? 'Chưa có chiến dịch nào trong khoảng này.'
+      ? 'Chưa có chiến dịch nào đang chạy trong khoảng này.'
       : 'Chưa có chiến dịch nào. Kết nối Marketing API hoặc gắn utm cho landing page.');
     return;
   }
@@ -3204,11 +3205,13 @@ function renderReportStaff(data) {
 }
 
 function renderReportCampaigns(data) {
-  const rows = Array.isArray(data.campaigns) ? data.campaigns : [];
+  const allRows = Array.isArray(data.campaigns) ? data.campaigns : [];
+  if (!allRows.length) return '';
+  const rows = allRows.filter(row => String(row.status || '').toUpperCase() === 'ACTIVE');
   if (!rows.length) return '';
   // Tổng lấy từ máy chủ (cùng định nghĩa ROAS với màn Chiến dịch): chỉ dòng Meta có chi phí;
   // dòng UTM không có chi phí hiện trong bảng nhưng không cộng vào ROAS tổng.
-  const metaRows = rows.filter(row => row.source === 'meta');
+  const metaRows = allRows.filter(row => row.source === 'meta');
   const campaignTotals = data.campaignTotals || {
     spend: sumOf(metaRows, 'spend'), orders: sumOf(metaRows, 'orders'), revenue: sumOf(metaRows, 'revenue'),
     cpa: null, roas: divideOrNull(sumOf(metaRows, 'revenue'), sumOf(metaRows, 'spend'))

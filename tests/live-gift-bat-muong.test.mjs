@@ -32,12 +32,12 @@ const giftLines = payload => payload.items.filter(item => item.is_bonus_product)
 test('bảng quà: live 2 túi → miễn ship + Quạt; live 3 túi → miễn ship + Quạt + Bát + Muỗng; khách thường 2 túi → miễn ship; khách thường 3 túi → bát + muỗng', async () => {
   await withLiveGifts(() => {
     assert.deepEqual(names(giftsForKey('GRA-XANH-Z450=2', { livestream: true })), ['Miễn phí vận chuyển', 'Quạt']);
-    assert.deepEqual(names(giftsForKey('GRA-XANH-Z450=3', { livestream: true })), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa', 'Quạt']);
+    assert.deepEqual(names(giftsForKey('GRA-XANH-Z450=3', { livestream: true })), ['Miễn phí vận chuyển', 'Quạt', 'Bộ bát gáo dừa', 'Muỗng dừa']);
     assert.deepEqual(names(giftsForKey('GRA-XANH-Z450=3')), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa']);
     assert.deepEqual(names(giftsForKey('GRA-XANH-Z450=2')), ['Miễn phí vận chuyển']);
     // Đơn POS chỉ có chữ quà: mỗi SKU một dòng.
     assert.deepEqual(posGiftLines({ gift: 'Miễn phí vận chuyển + Quạt' }).map(line => line.sku).sort(), ['QUA-TANG-LIVE']);
-    assert.deepEqual(posGiftLines({ gift: 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa + Quạt' }).map(line => line.sku).sort(), ['BGD', 'MUONG', 'QUA-TANG-LIVE']);
+    assert.deepEqual(posGiftLines({ gift: 'Miễn phí vận chuyển + Quạt + Bộ bát gáo dừa + Muỗng dừa' }).map(line => line.sku).sort(), ['BGD', 'MUONG', 'QUA-TANG-LIVE']);
   });
 });
 
@@ -65,7 +65,7 @@ test('khách live chốt 3 Túi Xanh → xác nhận "Quạt + Bộ bát gáo d�
     const closed = await sim.send(inbox, `${PHONE} ${ADDRESS}`, { llm: { template_id: 'ORDER_CONFIRMATION', Phone_Number: PHONE, Customer_Address: ADDRESS } });
     assert.equal(closed.created.length, 1, JSON.stringify(closed.result));
     const order = normalizeChatbotOrder(closed.created[0], inbox, { id: 'live-bm3' });
-    assert.equal(order.gift, 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa + Quạt');
+    assert.equal(order.gift, 'Miễn phí vận chuyển + Quạt + Bộ bát gáo dừa + Muỗng dừa');
     const posPayload = buildPosOrderPayload(order, {});
     assert.ok(posPayload.items.some(item => item.variation_id === 'QUA-TANG-LIVE' && item.is_bonus_product));
   });

@@ -3214,9 +3214,7 @@ function renderReportCampaigns(data) {
     cpa: null, roas: divideOrNull(sumOf(metaRows, 'revenue'), sumOf(metaRows, 'spend'))
   };
   const averageRoas = campaignTotals.roas;
-  const utm = data.campaignUtm || {};
-  const utmNote = Number(utm.orders) ? `<p class="report-note">Đơn UTM không có chi phí tương ứng: ${escapeHtml(statCount(utm.orders))} đơn · ${escapeHtml(statMoney(utm.revenue))} — không tính vào tổng và ROAS.</p>` : '';
-  return reportAdsNoticeHtml(data) + utmNote + reportTableHtml([
+  return reportAdsNoticeHtml(data) + reportTableHtml([
     { key: 'name', label: 'Chiến dịch', cls: 'campaign-name', cell: row => `<strong title="${escapeHtml(row.name || '')}">${escapeHtml(row.name || 'Không tên')}</strong><span class="campaign-chips">${campaignStatusChip(row.status)}<span class="campaign-chip is-source">${row.source === 'meta' ? 'Meta' : 'UTM'}</span></span>` },
     { key: 'spend', label: 'Chi phí', num: true, cell: reportCell.money('spend'), total: t => escapeHtml(statMoney(t.spend)) },
     { key: 'orders', label: 'Đơn', num: true, cell: reportCell.count('orders'), total: t => escapeHtml(statCount(t.orders)) },

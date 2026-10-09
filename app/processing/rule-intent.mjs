@@ -146,8 +146,9 @@ const prep = raw => normalizeColourTypos(raw)
   .replace(/(\d)(?=(?:v[ịi]|lo[ạa]i|m[àa]u)(?![\p{L}]))/giu, '$1 ')
   .replace(/(?<![\p{L}])(?:tuis|tuj|tuii|túii)(?![\p{L}])/giu, 'túi')
   .replace(/n[âa]u\s+(v[ịi]\s+)?ca\s*cao/giu, 'nâu').replace(/ca\s+cao/giu, 'cacao')
-  .replace(/s[ôo]\s*-?\s*c[ôo]\s*-?\s*la|socola|chocolate|choco\b/giu, 'nâu')
   .replace(/(\d)(t[úu]i|g[óo]i|b[ịi]ch|b[ịi]t)\b/giu, '$1 $2')
+  .replace(/(?<!\d)([1-9]\d?)\s*b\b/giu, '$1 bịch')
+  .replace(/(?<!\d)([1-9]\d?)\s*t\b/giu, '$1 túi')
   // \b không biết chữ có dấu ("vị", "hộp") → biên Unicode ở cuối.
   .replace(/\b(m[ộo]t|hai|ba)\s+(?=(?:t[úu]i|g[óo]i|b[ịi]ch|b[ịi]t|xanh|v[àa]ng|n[âa]u|cacao|combo|h[ộo]p|v[ịi]|lo[ạa]i)(?![\p{L}\p{N}]))/giu, (match, word) => `${NUMBER_WORDS[foldVietnamese(word).toLowerCase()] || word} `)
   .replace(/\b(xanh)\s+450\s*(?:g|gr|gam|gram)?\b/giu, '$1').replace(/\b(v[àa]ng|n[âa]u|cacao)\s+350\s*(?:g|gr|gam|gram)?\b/giu, '$1')
@@ -318,8 +319,8 @@ const BOUGHT_ELSEWHERE_TAIL = /\b(?:roi|r)(?: (?:a|ah|ak|nha|nhe|nhen|nghe|nhak|
 // Neo cả câu vào danh sách từ đóng: "chưa nhận được", "nhận được tin nhắn rồi", "bao giờ nhận" không khớp. Phải có dấu hiệu
 // đã xong: "đã/vừa/mới" trước hay "rồi/r/rùi" sau, hoặc "được hàng".
 const RECEIVED_WHO = '(?:(?:nay|hom nay|toi|ben|nha|da|vua|moi|c|chi|e|em|minh|m|mk|a|anh|co|ban|b) )*';
-const RECEIVED_TAIL = '(?: (?:roi|r|rui|nhe|nha|nhen|a|ah|ak|em|e|shop|sop|ban|b|c|chi|anh|oi|nhe ban|nha shop|nhe shop|ok|oke|cam on|thanks))*$';
-const RECEIVED_NOTICE = new RegExp(`^${RECEIVED_WHO}(?:(?:da|vua|moi) (?:nhan|nhn)(?: (?:duoc|dc))?(?: (?:hang|hag|don|don hang))?|(?:nhan|nhn)(?: (?:duoc|dc))?(?: (?:hang|hag|don|don hang))? (?:roi|r|rui)|(?:nhan|nhn) (?:duoc|dc) (?:hang|hag|don|don hang))${RECEIVED_TAIL}`);
+const RECEIVED_TAIL = '(?: (?:roi|r|rui|roai|roy|nhe|nha|nhen|a|ah|ak|em|e|shop|sop|ban|b|c|chi|anh|oi|nhe ban|nha shop|nhe shop|ok|oke|cam on|thanks))*$';
+const RECEIVED_NOTICE = new RegExp(`^${RECEIVED_WHO}(?:(?:da|vua|moi|xuong) (?:nhan|nhn)(?: (?:duoc|dc))?(?: (?:hang|hag|don|don hang|do|combo|set|tui|goi|bich))?|(?:nhan|nhn)(?: (?:duoc|dc))?(?: (?:hang|hag|don|don hang|do|combo|set|tui|goi|bich))? (?:roi|r|rui|roai|roy)|(?:nhan|nhn) (?:duoc|dc) (?:hang|hag|don|don hang|do|combo|set|tui|goi|bich))${RECEIVED_TAIL}`);
 // Mã mẫu bot vừa báo giao hàng: khách đáp "nhận rồi" ngay sau đó là báo đã nhận (dù đơn không nằm trong hội thoại).
 const SHIPMENT_TEMPLATES = new Set(['SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED', 'ORDER_STATUS', 'DELIVERY_DELAY']);
 /** Tin ngắn khách báo đã nhận hàng (chữ thô, chưa bỏ dấu). Dùng chung cho luật và chốt chặn THANK_YOU của engine. */
@@ -493,7 +494,7 @@ const INFO_RULES = [
   ['FRESH', /\b(hang moi|date moi|han (dai|moi|xa)|moi san xuat|con han)\b|\bmoi (khong|ko|k|o|hong)\b/, 'FRESHNESS', s => /\bdung hang\b/.test(s)],
   // 08/10: mẫu STORAGE có sẵn nhưng chưa luật nào dẫn tới. "Bảo quản thế nào", "mở túi để được bao lâu" → STORAGE (đặt trước
   // WEIGHT_EXPIRY). Câu than (mốc, hôi, ỉu, kiến…) để luồng khiếu nại / mô hình.
-  ['STORAGE', /\b(?:cach )?bao quan\b|\bmo (?:tui|goi|bao bi|ra)(?: roi)? (?:de |dung |an )?(?:duoc |dc )?(?:bao lau|may ngay|may tuan|may thang)\b/, 'STORAGE', s => /\b(?:moc|hoi|iu|kien|sau|mot|hong|bi am|chay dau)\b/.test(s) || PRICE.test(s)],
+  ['STORAGE', /\b(?:cach )?bao quan\b|\bmo (?:tui|goi|bao bi|ra)(?: roi)? (?:de |dung |an )?(?:duoc |dc )?(?:bao lau|may ngay|may tuan|may thang)\b|\b(?:de|bo|cat|cho vao) (?:trong |trg )?(?:tu lanh|ngan mat|ngan da)\b|\bngan mat tu lanh\b|\bnhiet do phong\b|\b(?:de ngoai|de tu lanh)\b|\b(?:bi iu|bi yeu)\b/, 'STORAGE', s => /\b(?:moc|hoi|kien|sau|mot|hong|bi am|chay dau)\b/.test(s) || PRICE.test(s)],
   // R14 (ca …070230): "2 túi trọng luong bn và bn tiền ạ" hỏi cả GIÁ → không chỉ trả trọng lượng (để mô hình trả cả hai).
   // 08/10: thêm "date bao lâu / đến khi nào", "để được bao lâu" (hạn dùng).
   ['WEIGHT_EXPIRY', /((bao nhieu|bn|may|nhieu) ?(gam|gram|gr|g)\b|han (su dung|dung|sd)|hsd|an (duoc|dc) (bao )?lau|an (duoc|dc) may bua|dung (duoc|dc) may bua|trong luong|\bdate (?:bao lau|den (?:khi )?nao|toi (?:khi )?nao|may thang|duoc bao lau)\b|\bde (?:duoc|dc) (?:bao lau|may thang)\b)/, 'WEIGHT_EXPIRY', s => /\bgia\b|date moi|hang moi|\b(?:bn|bao nhieu|bnhiu|nhieu|nhiu|bao|may) ?tien\b/.test(s)],

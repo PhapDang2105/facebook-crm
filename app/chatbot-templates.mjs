@@ -421,11 +421,9 @@ function withPromoBowl(price) {
   return { ...price, gifts, gift: gifts.map(gift => gift.name).join(' + ') };
 }
 
-/** R15: thêm quà yến mạch khách quen vào dòng quà (giỏ từ 2 túi), không đổi tiền. */
+/** Combo 2 không tặng yến mạch, chỉ tặng quà live. */
 function withOatsGift(price, on) {
-  if (!on || !price || !(Number(price.totalQuantity) >= 2) || price.gifts.some(gift => gift.name === OATS_GIFT_NAME)) return price;
-  const gifts = [...price.gifts, { name: OATS_GIFT_NAME, sku: '', minQuantity: 2, active: true }];
-  return { ...price, gifts, gift: gifts.map(gift => gift.name).join(' + ') };
+  return price;
 }
 
 function withPromoFreeShipping(price) {
@@ -1591,14 +1589,14 @@ const seedTemplate = id => String(orderGiftFallbackTemplates[id] || '').trim();
 // normalizeChatbotSettings). Mẫu trống trong Cài đặt ('' = tắt) vẫn là tắt. ORDER_EXISTING_CONFIRM: lời mới (hỏi gộp/tách,
 // chủ shop 03/10) chỉ dùng khi bộ mẫu thiếu mã — lời đang chạy trên máy chủ phải áp qua Cài đặt.
 // Quà yến mạch khách quen (chủ shop 03/10): chưa có quy cách/mã POS → chữ chung, sửa một chỗ ở đây khi có mã.
-export const OATS_GIFT_LABEL = '1 phần yến mạch';
-export const OATS_GIFT_NAME = 'Yến mạch (quà khách quen)';
+export const OATS_GIFT_LABEL = '';
+export const OATS_GIFT_NAME = '';
 export const r15FallbackTemplates = Object.freeze({
   BOUGHT_ON_MARKETPLACE: 'Dạ em cảm ơn {title} đã ủng hộ nhà Nắng trên sàn ạ 💛 Đơn trên sàn mình cần hỗ trợ gì thì {title} nhắn em mã đơn để em kiểm tra giúp nha ạ.',
   BAG_SIZE_INFO: 'Dạ túi lớn nhất bên em là {product} (vị nguyên bản) ạ. {Title} cần dùng nhiều thì lấy combo 3 túi[?weight_3] ({weight_3})[/?] chỉ {price_3}[?free_ship_3] ({free_ship_3})[/?][?gift_3], tặng kèm {gift_3}[/?] nha ạ 🌾',
   PHONE_LOOKS_SHORT: 'Dạ số điện thoại [?phone]{phone} [/?]hình như còn thiếu 1 số, {title} kiểm tra lại giúp em nha ạ.',
   FRUIT_PAIRING: 'Dạ granola bên em ăn kèm trái cây nào cũng hợp ạ: thanh long, chuối, táo, dâu… Trộn thêm sữa chua hoặc sữa hạt thì càng ngon và no lâu nha {title} 🌾',
-  DISCOUNT_OATS_GIFT: 'Dạ giá combo bên em đã là giá tốt nhất rồi nên em không giảm thêm được ạ 💛[?enough] Em xin tặng thêm {title} {oats_gift} làm quà ạ 🎁[/?][?invite] {Title} lấy từ combo 2 túi ({two_price}, miễn phí vận chuyển) là em tặng thêm {oats_gift} làm quà nha ạ 🌾[/?]\nGiỏ của mình: {cart} – {total} ạ.',
+  DISCOUNT_OATS_GIFT: 'Dạ giá combo bên em đã là giá tốt nhất rồi nên em không giảm thêm được ạ 💛[?enough] Combo bên em đã được hỗ trợ miễn phí vận chuyển rồi nha {title} 🌾[?gift]\n🎁 Quà tặng kèm: {gift} ạ.[/?][/?][?invite] {Title} lấy từ combo 2 túi ({two_price}, miễn phí vận chuyển)[?two_gift] và được tặng kèm {two_gift}[/?] là tiết kiệm nhất nha ạ 🌾[/?]\nGiỏ của mình: {cart} – {total} ạ.',
   ORDER_ADDRESS_OLD_NOT_FOUND: 'Dạ em chưa tìm thấy địa chỉ cũ theo số này ạ, {title} gửi giúp em địa chỉ nhận hàng (số nhà, đường, phường/xã, tỉnh) để em lên đơn liền nha ạ.',
   SMALL_PACK_FLAVOURS: 'Dạ combo 10 gói nhỏ hiện bên em chỉ còn vị Xanh nguyên bản ạ (dễ ăn, cân bằng). {Title} cần em gửi bảng giá combo 10 gói không ạ?',
   // R15 (inbox1 A5): khách đã nêu màu ({named}) thì không hỏi lại "vị nào". Mã đã có trong seed → bảng này chỉ khi bộ mẫu thiếu mã.
@@ -1910,9 +1908,8 @@ function renderBagSizeInfo(templates) {
 }
 
 /**
- * R15 DISCOUNT_OATS_GIFT (chủ shop 03/10: khách mặc cả / khách quen xin giảm): không giảm giá. Giỏ/đơn từ 2 túi
- * (context.bagCount do engine đưa, không có thì đếm giỏ chờ) → tặng thêm yến mạch + nhắc giỏ; dưới 2 túi → mời lên combo 2
- * túi để được tặng. Engine đặt pendingOrder.oatsGift = true khi đã hứa tặng (dòng quà của giỏ/đơn thêm OATS_GIFT_NAME).
+ * DISCOUNT_OATS_GIFT: khách mặc cả / xin giảm giá: không giảm thêm vì giá combo đã là giá tốt nhất.
+ * Giỏ >= 2 túi: báo đã miễn ship (kèm quà nếu có); dưới 2 túi: mời lên combo 2 để được miễn ship (+ quà live nếu live).
  */
 function renderDiscountOatsGift(templates, context = {}) {
   const now = Number(context.now) || Date.now();
@@ -1924,12 +1921,15 @@ function renderDiscountOatsGift(templates, context = {}) {
   const firstSku = priced?.lines?.[0]?.sku || getCatalogProducts().find(product => product.active && product.mixable && !product.staffOnly)?.sku || '';
   const two = firstSku ? priceBasket([{ sku: firstSku, quantity: 2 }], giftContext()) : null;
   const enough = bagCount >= 2;
+  const giftText = (priced?.gifts || []).filter(g => !isFreeShippingGift(g)).map(g => g.name).join(' + ');
+  const twoGiftText = (two?.gifts || []).filter(g => !isFreeShippingGift(g)).map(g => g.name).join(' + ');
   return fill(templates.DISCOUNT_OATS_GIFT, {
     ...commonValues(),
-    oats_gift: OATS_GIFT_LABEL,
     enough: enough ? '1' : '',
     invite: enough ? '' : '1',
-    two_price: two?.priceable ? formatMoney(two.total) : 'giá combo',
+    gift: giftText,
+    two_gift: twoGiftText,
+    two_price: two?.priceable ? formatMoney(two.total) : '298.000đ',
     cart: priced?.priceable ? priced.lines.map(line => `${line.quantity} ${line.name}`).join(' + ') : '',
     total: priced?.priceable ? formatMoney(priced.total) : ''
   });

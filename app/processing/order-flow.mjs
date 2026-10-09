@@ -22,7 +22,7 @@ const FILLER = new Set(['sdt', 'so', 'dien', 'thoai', 'dt', 'cua', 'minh', 'em',
 // P. Thảo Điền") khi bot đang xin địa chỉ: vẫn đưa vào bộ soạn đơn — nó tự hỏi đúng cấp còn thiếu
 // (ORDER_ADDRESS_CLARIFY), như mô hình vẫn làm. Không nhận câu hỏi/chính sách ("giao Hà Nội mấy ngày", "ship về
 // Cà Mau được không", "có giao tận nơi không") hay chữ không giống địa chỉ ("để mình xem lại").
-const NOT_ADDRESS = /\b(bao lau|may ngay|bn ngay|bao nhieu|bnhiu|bn|khi nao|chung nao|gia|phi|mien|free|tan noi|tan nha|co (giao|ship|toi|den|ve)|(giao|ship|toi|den|gui|van chuyen) (duoc|dc|ko|khong|k|toi|den|ve)|(duoc|dc) (khong|ko|k|kg|hong)|(xa|gan) (khong|ko|k|qua|lam)|the nao|ntn|ra sao|lam sao|o dau|noi khong|noi ko)\b/;
+const NOT_ADDRESS = /\b(bao lau|may ngay|bn ngay|bao nhieu|bnhiu|bn|khi nao|chung nao|gia|phi|mien|free|tan noi|tan nha|han|hsd|date|con han|het han|dell|deal|co (giao|ship|toi|den|ve)|(giao|ship|toi|den|gui|van chuyen) (duoc|dc|ko|khong|k|toi|den|ve)|(duoc|dc) (khong|ko|k|kg|hong)|(xa|gan) (khong|ko|k|qua|lam)|the nao|ntn|ra sao|lam sao|o dau|noi khong|noi ko)\b/;
 /**
  * Bỏ SĐT khỏi tin, giữ số đứng trước/sau nó: "quận 1 0912345678" (mẫu SĐT chung nuốt cả "1 "), "0912345678 12 Lê
  * Lợi…" (mẫu chung nuốt cả số nhà "12"). SĐT 10 số (0… / +84…, có thể cách bằng dấu cách/chấm/gạch) bỏ chính xác;
@@ -106,7 +106,7 @@ export function maskPlaceGia(text) {
 // Từ cấp hành chính / số nhà đủ rõ để coi tin là ĐỊA CHỈ (đã bỏ dấu). "xã" phải kèm tên ("ship xa không" thì không).
 const ADDRESS_MESSAGE_WORDS = /\b(phuong|huyen|thi tran|thi xa|thon|xom|khu pho|to dan pho|tdp|ngo|hem|ngach|so nha|chung cu|tinh)\b|\bxa (?!(?:xa|lam|qua|khong|ko|k|dung|dum|giup|de|nhe|nha|ha|hon|roi|vay|the|ma|va|nhat|lac|thi|co|duoc|dc|xoi)\b)[a-z]{2,}|\b(?:to|ap|doi|khu|kp|q|p|quan) ?\d{1,2}\b|\bap (?!dung\b|luc\b|suat\b|vao\b|ma\b|gia\b)[a-z]{2,}/;
 // Khách đang HỎI (giá/ship/thời gian) chứ không gửi địa chỉ — "giá" chỉ tính khi còn dấu (xem maskPlaceGia).
-const ADDRESS_MESSAGE_ASK = /\b(bn|bao nhieu|bnhiu|bao tien|nhieu tien|bao lau|may ngay|khi nao|duoc khong|dc khong|dc ko|duoc ko|co (?:giao|ship)|ship (?:khong|ko|k))\b/;
+const ADDRESS_MESSAGE_ASK = /\b(bn|bao nhieu|bnhiu|bao tien|nhieu tien|bao lau|may ngay|khi nao|han|hsd|date|con han|duoc khong|dc khong|dc ko|duoc ko|co (?:giao|ship)|ship (?:khong|ko|k))\b/;
 /**
  * Tin của khách có phải là (mang) ĐỊA CHỈ giao hàng không: có từ cấp hành chính rõ, hay đọc ra được tỉnh + quận/huyện
  * hoặc phường/xã; đang ở bước đơn (`orderStep`) thì chỉ cần đọc ra tỉnh. Câu hỏi ("?", "bao nhiêu", "giá" còn dấu,

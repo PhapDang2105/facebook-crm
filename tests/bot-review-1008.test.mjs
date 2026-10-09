@@ -41,9 +41,15 @@ test('"Giá bán sao" vào luật ổn định (trước chỉ khớp luật ứ
 test('bầu / bảo quản / date / đồng kiểm', () => {
   for (const text of ['bầu ăn được không', 'có bầu dùng được ko', 'Chị đang có bầu ăn dc ko', 'bà bầu ăn được ko']) assert.equal(tpl(ruleIntent(text, inbox())), 'HEALTH_CONDITION', text);
   assert.equal(ruleIntent('Bầu Trời', inbox()), null);
-  for (const text of ['bảo quản thế nào', 'mở túi để được bao lâu', 'cách bảo quản granola']) assert.equal(tpl(ruleIntent(text, inbox())), 'STORAGE', text);
+  for (const text of ['bảo quản thế nào', 'mở túi để được bao lâu', 'cách bảo quản granola', 'Sản phẩm có thể để trg ngăn mát tủ lạnh đc kô', 'bỏ tủ lạnh được không', 'để ngăn mát', 'để tủ lạnh được không']) assert.equal(tpl(ruleIntent(text, inbox())), 'STORAGE', text);
   assert.notEqual(tpl(ruleIntent('bảo quản kỹ mà vẫn bị mốc', inbox())), 'STORAGE');
   for (const text of ['date bao lâu em', 'để được bao lâu shop']) assert.equal(tpl(ruleIntent(text, inbox())), 'WEIGHT_EXPIRY', text);
   for (const text of ['có được đồng kiểm không', 'được kiểm tra trước khi nhận không', 'cho xem hàng trước khi thanh toán ko']) assert.equal(tpl(ruleIntent(text, inbox())), 'INSPECTION_RETURN_POLICY', text);
   for (const text of ['shipper không cho kiểm tra hàng', 'ship ko cho đồng kiểm']) assert.notEqual(tpl(ruleIntent(text, inbox())), 'INSPECTION_RETURN_POLICY', text);
+});
+
+test('chuẩn hóa gõ tắt số lượng 2b / 2t', () => {
+  const result = ruleIntent('2b xanh', inbox());
+  assert.equal(result?.value?.template_id, 'ORDER_ADDRESS');
+  assert.equal(result?.value?.No_A, '2');
 });

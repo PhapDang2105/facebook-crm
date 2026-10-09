@@ -3522,37 +3522,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         reply = { ...short, ...(reply.pendingOrder !== undefined ? { pendingOrder: reply.pendingOrder } : {}) };
       }
     }
-    const oatsNote = '⚠ Tặng yến mạch khách mặc cả — thêm dòng quà trên POS';
-    if ((reply.templateId === 'DISCOUNT_OATS_GIFT' || reply.alsoTemplateId === 'DISCOUNT_OATS_GIFT') && !nonText && conversation.source !== 'comment' && Number(replyContext.bagCount) >= 2 && !reply.order) {
-      if (heldForOats.length) {
-        const base = reply.pendingOrder && typeof reply.pendingOrder === 'object' ? reply.pendingOrder : usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' }) || conversation.pendingOrder;
-        reply = { ...reply, pendingOrder: { ...base, oatsGift: true } };
-        console.log(`Khách mặc cả, giỏ ${replyContext.bagCount} túi: hứa tặng yến mạch (giỏ mang oatsGift) (${conversation.id})`);
-      } else if (oatsOrder) {
-        const lines = (oatsOrder.products || []).map(item => ({ product: findProductBySku(item.sku || item.code)?.name || item.name || item.product, quantity: Number(item.quantity) || 1 })).filter(item => item.product).slice(0, 3);
-        const slots = ['Product_N1', 'No_A', 'Product_N2', 'No_B', 'Product_N3', 'No_C'];
-        const value = { template_id: 'ORDER_UPDATE' };
-        lines.forEach((item, index) => { value[slots[index * 2]] = item.product; value[slots[index * 2 + 1]] = String(item.quantity); });
-        const updated = lines.length ? renderChatbotReply(value, templates, { ...replyContext, messageText: '', pendingOrder: { items: [], key: '', at: Date.now(), phone: '', address: '', addressAsks: 0, oatsGift: true } }) : null;
-        // Bộ soạn coi "cùng món, cùng SĐT/địa chỉ" là ORDER_UNCHANGED (không so dòng quà) → soạn lại đơn như đơn mới (giỏ chờ mang
-        // oatsGift + SĐT/địa chỉ của đơn) rồi gắn updateOrderId của đơn đó.
-        const rebuilt = () => {
-          const fresh = renderChatbotReply({ ...value, template_id: 'ORDER_CONFIRMATION' }, templates, { ...replyContext, messageText: '', recentOrder: null, latestOrder: null, hasOrder: false,
-            pendingOrder: { items: [], key: '', at: Date.now(), phone: String(oatsOrder.phone || ''), address: String(oatsOrder.rawAddress || oatsOrder.address || '').replace(/^\((?:live|freeship)\)\s*/i, ''), addressAsks: maxAddressAsks, oatsGift: true } });
-          return fresh.order && !fresh.order.updateOrderId ? { ...fresh.order, updateOrderId: String(oatsOrder.id), ...(oatsOrder.livestream === true ? { livestream: true } : {}) } : null;
-        };
-        const order = updated?.order?.updateOrderId ? updated.order : lines.length ? rebuilt() : null;
-        reply = order
-          ? { ...reply, attention: true, order: { ...order, addressCheck: [String(order.addressCheck || ''), oatsNote].filter(Boolean).join('; ') } }
-          : { ...reply, attention: true, order: { noteOrderId: String(oatsOrder.id), note: oatsNote } };
-        console.log(`Khách mặc cả, đơn ${oatsOrder.id} ${replyContext.bagCount} túi: thêm quà yến mạch (${order ? 'sửa đơn' : 'ghi chú'}) (${conversation.id})`);
-      }
-    }
-    // Giỏ mang lời hứa tặng yến mạch lên đơn: ghi chú xử lý cho nhân viên (chưa có mã POS).
-    // R15-fix3 (phản biện T6): chỉ khi đơn cuối còn ≥ 2 túi lớn — khách giảm còn 1 túi thì bỏ lời hứa (quà từ combo 2 túi).
-    if (reply.order && !reply.order.noteOrderId && !reply.order.cancelOrderId && conversation.pendingOrder?.oatsGift === true && bigBags(reply.order.items) >= 2 && !String(reply.order.addressCheck || '').includes(oatsNote)) {
-      reply = { ...reply, attention: true, order: { ...reply.order, addressCheck: [String(reply.order.addressCheck || ''), oatsNote].filter(Boolean).join('; ') } };
-    }
+    // Khách mặc cả / xin giảm: không giảm thêm, không tặng yến mạch (combo 2 chỉ tặng quà live).
     // R15 (bình luận A2, inbox1 A8, ca …9603540695): ORDER_NOTE ("đã ghi chú yêu cầu vào đơn và báo kho") chỉ dành cho LỜI DẶN
     // GIAO HÀNG. Mô hình chọn ORDER_NOTE cho câu nói/hỏi về quà ("Lúc c mới hỏi … tặng quạt và bát dừa", "… nên c hỏi lại") → khách
     // hiểu là shop đã đồng ý tặng. Nay: nói về quà → GIFT_SWAP (ghi chú + xin bộ phận phụ trách duyệt, thẻ); câu hỏi / "hỏi lại"

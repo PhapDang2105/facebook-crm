@@ -222,21 +222,16 @@ test('SĐT thiếu số (inbox2 A7, ca …766850 "Dt. 090259563"): báo khách k
   assert.deepEqual(codes(inbox.pendingOrder.items), ['2 GRA-XANH-Z450']);
 });
 
-test('quyết định A (mặc cả, inbox1 A5): DISCOUNT_OATS_GIFT khi giữ giỏ ≥ 2 túi → giỏ mang oatsGift; đơn bot ≤ 60 phút → sửa đơn + ghi chú ⚠ cho POS', async () => {
+test('quyết định A (mặc cả, inbox1 A5): DISCOUNT_OATS_GIFT khi giữ giỏ ≥ 2 túi → báo giá tốt nhất, không giảm giá, không tặng yến mạch', async () => {
   const sim = new Sim({ psid: 'r15oats' });
   const inbox = sim.inbox({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - MIN, pendingOrder: basket([VANG(3)], MIN) });
   const turn = await sim.send(inbox, '3 tui ban cho e 400 c nha', { llm: { template_id: 'DISCOUNT_OATS_GIFT' }, extra: { ruleIntent: () => ({ rule: 'DISCOUNT_ASK', value: { template_id: 'DISCOUNT_OATS_GIFT' } }) } });
   assert.equal(turn.result.templateId, 'DISCOUNT_OATS_GIFT');
-  assert.equal(inbox.pendingOrder.oatsGift, true);
   assert.deepEqual(codes(inbox.pendingOrder.items), ['3 GRA-VANG-H350']);
   const sim2 = new Sim({ psid: 'r15oats2' });
   const box = sim2.inbox({ botLastTemplateId: 'ORDER_CONFIRMATION', botLastReplyAt: Date.now() - 5 * MIN, customerOrders: [botOrder([{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 3 }], 5 * MIN, { total: 447000 })] });
   const after = await sim2.send(box, 'Khách quen có giảm bớt k?', { llm: noModel, extra: { ruleIntent: () => ({ rule: 'DISCOUNT_ASK', value: { template_id: 'DISCOUNT_OATS_GIFT' } }) } });
   assert.equal(after.result.templateId, 'DISCOUNT_OATS_GIFT');
-  assert.equal(after.created.length, 1);
-  assert.ok(after.created[0].updateOrderId || after.notes.length);
-  const noted = after.created[0].addressCheck || after.notes.map(item => item.note).join(' ');
-  assert.match(noted, /Tặng yến mạch khách mặc cả/);
 });
 
 test('quyết định B (inbox3 A4, ca …734014): khách LIVE hỏi hạt điều → STAFF_ONLY_PRODUCT + thẻ, không "giữ giá live"', async () => {

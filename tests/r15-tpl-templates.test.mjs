@@ -73,21 +73,18 @@ test('PHONE_LOOKS_SHORT: {phone} từ engine (values.phone) hay đọc từ tin;
   assert.equal(sanitizeModelAnswer({ template_id: 'PHONE_LOOKS_SHORT' }).template_id, 'GENERAL_INFO');
 });
 
-test('DISCOUNT_OATS_GIFT: không giảm giá; giỏ từ 2 túi → tặng yến mạch + nhắc giỏ; dưới 2 túi → mời combo 2 túi 298k', () => {
+test('DISCOUNT_OATS_GIFT: không giảm giá; giỏ từ 2 túi → báo miễn ship + nhắc giỏ; dưới 2 túi → mời combo 2 túi 298k miễn ship (không tặng yến mạch)', () => {
   const two = renderChatbotReply({ template_id: 'DISCOUNT_OATS_GIFT' }, templates, { ...female, now: Date.now(), pendingOrder: basket([XANH(1), VANG(1)]) });
   const twoText = text(two);
   assert.equal(two.templateId, 'DISCOUNT_OATS_GIFT');
   assert.match(twoText, /giá tốt nhất/);
-  assert.match(twoText, /tặng thêm chị 1 phần yến mạch làm quà/);
+  assert.match(twoText, /miễn phí vận chuyển/);
+  assert.doesNotMatch(twoText, /yến mạch/i);
   assert.match(twoText, /Giỏ của mình: 1 Granola Túi Xanh 450g \+ 1 Granola Túi Vàng 350g – 298\.000đ/);
   assert.doesNotMatch(twoText, /500g/);
   const one = text(renderChatbotReply({ template_id: 'DISCOUNT_OATS_GIFT' }, templates, { ...female, now: Date.now(), pendingOrder: basket([VANG(1)]) }));
-  assert.match(one, /lấy từ combo 2 túi \(298\.000đ, miễn phí vận chuyển\) là em tặng thêm 1 phần yến mạch/);
-  assert.doesNotMatch(one, /Em xin tặng thêm/);
-  // Engine đưa bagCount (đơn đã có 2 túi) mà không có giỏ chờ → câu tặng, không dòng giỏ.
-  const counted = text(renderChatbotReply({ template_id: 'DISCOUNT_OATS_GIFT' }, templates, { ...female, bagCount: 2 }));
-  assert.match(counted, /Em xin tặng thêm chị 1 phần yến mạch/);
-  assert.doesNotMatch(counted, /Giỏ của mình/);
+  assert.match(one, /lấy từ combo 2 túi \(298\.000đ, miễn phí vận chuyển\)/);
+  assert.doesNotMatch(one, /yến mạch/i);
 });
 
 test('pendingOrder.oatsGift: dòng quà giỏ / xác nhận đơn / order.gift thêm yến mạch, tiền không đổi; giỏ 1 túi thì không', () => {

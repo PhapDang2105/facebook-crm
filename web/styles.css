@@ -2221,24 +2221,274 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
   .chat-back-button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 }
 
-/* Điện thoại: tên shop ẩn, ô tìm kiếm thu thành icon, thanh bên hẹp hơn. */
+/* Điện thoại (≤768px): chuyển thanh bên thành thanh điều hướng đáy (Bottom Bar),
+   nội dung chính mở rộng 100% màn hình, bảng cuộn ngang mượt mà ghim cột đầu. */
 .search-trigger-icon { display: none; }
-@media (max-width: 600px) {
-  .topbar { gap: 8px; padding-right: 8px; }
+@media (max-width: 768px) {
+  /* Thanh đỉnh đầu trang thu gọn */
+  .topbar { gap: 8px; padding: 0 10px; }
   .topbar-brand strong { display: none; }
-  .topbar-brand img { width: 52px; }
+  .topbar-brand img { width: 44px; }
   .search-trigger { flex: 0 0 36px; justify-content: center; width: 36px; min-width: 36px; padding: 0; }
   .search-trigger-label, .search-trigger kbd { display: none; }
   .search-trigger-icon { display: block; width: 18px; height: 18px; fill: none; stroke: #d7d7d9; stroke-width: 2; stroke-linecap: round; }
-  .topbar-actions { gap: 10px; min-width: 0; }
+  .topbar-actions { gap: 8px; min-width: 0; }
   .notification-panel { position: fixed; top: 57.6px; right: 8px; left: 8px; width: auto; }
-  .sidebar { width: 56px; padding: 12px 4px; }
-  .nav { padding: 10px 4px; }
-  main { width: calc(100% - 56px); margin-left: 56px; padding-right: 12px; padding-left: 12px; }
+
+  /* Thanh điều hướng dưới đáy (Bottom Navigation Bar) */
+  .sidebar,
+  .sidebar-collapsed .sidebar {
+    position: fixed !important;
+    z-index: 100 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: 56px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex-direction: row !important;
+    background: #ffffff !important;
+    border-right: 0 !important;
+    border-top: 1px solid #e4e7ec !important;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.06) !important;
+    overflow: hidden !important;
+  }
+  .sidebar-toggle {
+    display: none !important;
+  }
+  .sidebar nav {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    padding: 0 4px !important;
+    gap: 2px !important;
+  }
+  .sidebar nav::-webkit-scrollbar {
+    display: none !important;
+  }
+  .sidebar .nav,
+  .sidebar-collapsed .nav {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 60px !important;
+    min-width: 60px !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 3px 2px !important;
+    border-left: 0 !important;
+    border-bottom: 2.5px solid transparent !important;
+    border-radius: 4px !important;
+    gap: 2px !important;
+    font-size: 9.5px !important;
+    font-weight: 500 !important;
+    text-transform: none !important;
+    white-space: nowrap !important;
+    color: #4b5563 !important;
+    background: transparent !important;
+  }
+  .sidebar .nav span {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    flex: 0 0 24px !important;
+    width: 24px !important;
+    height: 24px !important;
+  }
+  .sidebar .nav span img {
+    width: 22px !important;
+    height: 22px !important;
+  }
+  .sidebar .nav.active {
+    color: var(--brand, #16a34a) !important;
+    background: #f0fdf4 !important;
+    border-bottom-color: var(--brand, #16a34a) !important;
+    border-left-color: transparent !important;
+    font-weight: 700 !important;
+  }
+  .sidebar .nav[data-view="messages"].active {
+    color: #0866ff !important;
+    background: #eff6ff !important;
+    border-bottom-color: #0866ff !important;
+  }
+  .sidebar .nav[data-view="shipping"].active {
+    color: #ea580c !important;
+    background: #fff7ed !important;
+    border-bottom-color: #ea580c !important;
+  }
+
+  /* Khung nội dung chính chiếm 100% bề ngang */
+  main,
+  .sidebar-collapsed main {
+    width: 100% !important;
+    margin-left: 0 !important;
+    padding: 66px 10px 68px 10px !important;
+  }
+  body:has(.nav[data-view="orders"].active) main,
+  body:has(.nav[data-view="settings"].active) main {
+    padding-top: calc(57.6px + 44px + 10px) !important;
+  }
   .nav[data-view="orders"].active + .order-subnav,
-  .nav[data-view="settings"].active + .settings-subnav { left: 56px; padding: 0 8px; }
-  main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
-  .messenger-shell, .hide-contact-panel .messenger-shell { padding: 6px; }
+  .nav[data-view="settings"].active + .settings-subnav {
+    position: fixed !important;
+    z-index: 90 !important;
+    top: 57.6px !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    height: 44px !important;
+    margin: 0 !important;
+    padding: 0 10px !important;
+    overflow-x: auto !important;
+    background: #fff !important;
+    border-left: 0 !important;
+    border-bottom: 1px solid #e4e7ec !important;
+    scrollbar-width: none !important;
+  }
+  .order-subnav-item,
+  .settings-subnav-item {
+    flex: 0 0 auto !important;
+    padding: 6px 12px !important;
+    font-size: 13px !important;
+    white-space: nowrap !important;
+  }
+  main:has(#messages-view:not(.hidden)) {
+    padding: 57.6px 0 56px 0 !important;
+  }
+  .messenger-shell,
+  .hide-contact-panel .messenger-shell {
+    height: calc(100dvh - 57.6px - 56px) !important;
+    padding: 4px !important;
+  }
+
+  /* Bảng dữ liệu: cuộn ngang cảm ứng, không bị ép bẹp cột */
+  :is(.campaigns-table, .data-table, .customers-table) {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    border-radius: 10px !important;
+    border: 1px solid #e4e7ec !important;
+  }
+  .campaigns-table table {
+    min-width: 780px !important;
+    table-layout: auto !important;
+  }
+  .customers-table table {
+    min-width: 840px !important;
+  }
+  :is(.data-table) table {
+    min-width: 750px !important;
+  }
+
+  /* Ghim cố định cột đầu tiên (Tên chiến dịch, Tên khách hàng) khi vuốt ngang */
+  :is(.campaigns-table, .data-table) th:first-child,
+  :is(.campaigns-table, .data-table) td:first-child {
+    position: sticky !important;
+    left: 0 !important;
+    background: #fff !important;
+    z-index: 2 !important;
+    box-shadow: 2px 0 6px rgba(0, 0, 0, 0.05) !important;
+  }
+  :is(.campaigns-table, .data-table) th:first-child {
+    z-index: 3 !important;
+    background: #fafbfc !important;
+  }
+  :is(.campaigns-table, .data-table) tbody tr:hover td:first-child {
+    background: #f8fafb !important;
+  }
+  :is(.campaigns-table, .data-table) tbody tr.is-highlight td:first-child {
+    background: #eef7f1 !important;
+  }
+
+  /* Thẻ tóm tắt KPIs và đầu trang Chiến dịch */
+  .campaigns-summary, .customers-summary {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    margin: 6px 0 12px 0 !important;
+    border-radius: 10px !important;
+    border: 1px solid #e4e7ec !important;
+  }
+  .campaigns-summary table, .customers-summary table {
+    min-width: 660px !important;
+  }
+  .campaigns-head {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 10px 0 6px !important;
+  }
+  .campaigns-head h1 {
+    font-size: 20px !important;
+  }
+  .campaigns-head-actions {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .campaigns-range {
+    flex: 1 1 110px !important;
+    height: 38px !important;
+    font-size: 14px !important;
+    border-radius: 8px !important;
+  }
+  .campaigns-button {
+    height: 38px !important;
+    padding: 0 12px !important;
+    font-size: 13px !important;
+    border-radius: 8px !important;
+  }
+  .campaigns-body {
+    padding: 6px 0 16px !important;
+    gap: 12px !important;
+  }
+
+  /* KPIs Tổng quan dạng 2 cột trên điện thoại */
+  .dash-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  /* Toolbar Khách hàng */
+  .customers-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    padding: 0 !important;
+  }
+  .customers-toolbar > .order-filter-control {
+    width: 100% !important;
+    max-width: none !important;
+  }
+  .customers-search {
+    width: 100% !important;
+  }
+
+  /* Form controls: tránh zoom tự động của iOS */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
 }
 
 /* ---- Thẻ hội thoại (Cài đặt → Tin nhắn → Thẻ hội thoại) ---- */

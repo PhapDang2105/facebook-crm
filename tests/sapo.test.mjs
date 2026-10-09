@@ -149,6 +149,12 @@ test('báo khách: tin đầu là mã vận đơn; giai đoạn sau mỗi giai �
   assert.equal(shipmentNoticePlan(store, inbox, order, { now }).action, 'skip');
   order.shipment.status = 'delivering';
   order.shipment.stageAt = now;
+  // Đơn tới khu vực (in_transit / delivering): không báo cho khách, chỉ ghi dấu (action: 'mark')
+  plan = shipmentNoticePlan(store, inbox, order, { now });
+  assert.equal(plan.action, 'mark');
+  assert.equal(plan.stage, 'in_transit');
+  assert.equal(plan.reason, 'không báo giai đoạn tới khu vực');
+  order.shipment.notifiedStage = 'in_transit';
   applyCarrierStage(order, 'out_for_delivery', now);
   plan = shipmentNoticePlan(store, inbox, order, { now });
   assert.equal(plan.templateId, 'SHIPMENT_OUT_FOR_DELIVERY');

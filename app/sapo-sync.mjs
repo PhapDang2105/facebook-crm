@@ -228,7 +228,7 @@ async function notifyCustomers(deps, { now, summary, log }) {
     // Lần tự gửi trước của đúng giai đoạn này đã lỗi: không thử lại mỗi 10 phút, để hàng chờ cho nhân viên.
     if (plan.action === 'send' && order.shipment.noticeErrorStage === plan.stage) summary.queued += 1;
     else if (plan.action === 'send') due.push({ conversation, order, plan });
-    else if (plan.action === 'mark') marks.push({ conversationId: conversation.id, orderId: order.id, trackingNumber: order.shipment.trackingNumber, stage: plan.stage, via: plan.reason === 'đã gửi mã trong hội thoại' ? 'conversation' : 'stale' });
+    else if (plan.action === 'mark') marks.push({ conversationId: conversation.id, orderId: order.id, trackingNumber: order.shipment.trackingNumber, stage: plan.stage, via: plan.reason === 'đã gửi mã trong hội thoại' ? 'conversation' : plan.reason === 'không báo giai đoạn tới khu vực' ? 'skipped_transit' : 'stale' });
     else if (plan.action === 'queue') summary.queued += 1;
     else if (plan.action === 'wait') summary.waiting += 1;
   }

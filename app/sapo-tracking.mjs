@@ -207,6 +207,8 @@ export function shipmentNoticePlan(store, conversation, order, { now = Date.now(
   if (!inbox) return { action: 'wait', reason: 'khách chưa có hộp thư (chỉ bình luận)' };
   // Tin đầu: nhân viên/bot đã gửi mã trong hội thoại rồi thì coi như đã báo giai đoạn hiện tại.
   if (!done && stage !== 'delivered' && trackingSentInConversation(store, inbox, shipment)) return { action: 'mark', stage, reason: 'đã gửi mã trong hội thoại' };
+  // Giai đoạn tới khu vực (in_transit): không báo cho khách, chỉ ghi dấu đã qua mốc này.
+  if (done && stage === 'in_transit') return { action: 'mark', stage, reason: 'không báo giai đoạn tới khu vực' };
   // Tin đầu (chưa báo gì) luôn là tin mã vận đơn, trừ khi đơn đã giao xong (chỉ còn lời cảm ơn).
   const templateId = !done && stage !== 'delivered' ? STAGE_TEMPLATES.created : STAGE_TEMPLATES[stage];
   if (quietHour) return { action: 'wait', reason: 'giờ nghỉ (22h–7h)' };

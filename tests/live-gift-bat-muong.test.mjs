@@ -10,7 +10,7 @@ import { buildPosOrderPayload } from '../app/pos-orders.mjs';
 import { posGiftLines } from '../app/order-export.mjs';
 
 const LIVE_ROWS = [
-  { id: 'live-quat', name: 'Quạt', active: true, minQuantity: 2, maxQuantity: 0, livestreamOnly: true, excludedSkus: [], sku: 'QUAT', weight: 20 },
+  { id: 'live-quat', name: 'Quạt', active: true, minQuantity: 2, maxQuantity: 0, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 20 },
   { id: 'qua-tang-live', name: 'Quạt + Bát gáo dừa', active: false, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 },
   { id: 'live-bat-gao-dua', name: 'Bát gáo dừa', active: false, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'BGD', weight: 10 },
   { id: 'live-muong-dua', name: 'Muỗng dừa', active: false, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'MUONG', weight: 10 }
@@ -36,12 +36,12 @@ test('bảng quà: live 2 túi → miễn ship + Quạt; live 3 túi → miễn 
     assert.deepEqual(names(giftsForKey('GRA-XANH-Z450=3')), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa']);
     assert.deepEqual(names(giftsForKey('GRA-XANH-Z450=2')), ['Miễn phí vận chuyển']);
     // Đơn POS chỉ có chữ quà: mỗi SKU một dòng.
-    assert.deepEqual(posGiftLines({ gift: 'Miễn phí vận chuyển + Quạt' }).map(line => line.sku).sort(), ['QUAT']);
-    assert.deepEqual(posGiftLines({ gift: 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa + Quạt' }).map(line => line.sku).sort(), ['BGD', 'MUONG', 'QUAT']);
+    assert.deepEqual(posGiftLines({ gift: 'Miễn phí vận chuyển + Quạt' }).map(line => line.sku).sort(), ['QUA-TANG-LIVE']);
+    assert.deepEqual(posGiftLines({ gift: 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa + Quạt' }).map(line => line.sku).sort(), ['BGD', 'MUONG', 'QUA-TANG-LIVE']);
   });
 });
 
-test('khách live chốt 2 Túi Xanh → xác nhận "Quạt", không bát muỗng; POS lên QUAT', async () => {
+test('khách live chốt 2 Túi Xanh → xác nhận "Quạt", không bát muỗng; POS lên QUA-TANG-LIVE', async () => {
   await withLiveGifts(async () => {
     const sim = new Sim();
     const inbox = sim.inbox({ labels: ['livestream'], post: LIVE_POST, botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 2 * MIN, pendingOrder: basket([XANH(2)], 2 * MIN, { livestream: true }) });
@@ -53,11 +53,11 @@ test('khách live chốt 2 Túi Xanh → xác nhận "Quạt", không bát muỗ
     assert.doesNotMatch(said, /Bát gáo dừa/);
     const order = normalizeChatbotOrder(closed.created[0], inbox, { id: 'live-bm' });
     assert.equal(order.gift, 'Miễn phí vận chuyển + Quạt');
-    assert.deepEqual(giftLines(buildPosOrderPayload(order, {})), ['QUATx1']);
+    assert.deepEqual(giftLines(buildPosOrderPayload(order, {})), ['QUA-TANG-LIVEx1']);
   });
 });
 
-test('khách live chốt 3 Túi Xanh → xác nhận "Quạt + Bộ bát gáo dừa + Muỗng dừa"; POS có dòng tặng QUAT', async () => {
+test('khách live chốt 3 Túi Xanh → xác nhận "Quạt + Bộ bát gáo dừa + Muỗng dừa"; POS có dòng tặng QUA-TANG-LIVE', async () => {
   await withLiveGifts(async () => {
     const sim = new Sim();
     const inbox = sim.inbox({ labels: ['livestream'], post: LIVE_POST, botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 2 * MIN, pendingOrder: basket([XANH(3)], 2 * MIN, { livestream: true }) });
@@ -67,6 +67,6 @@ test('khách live chốt 3 Túi Xanh → xác nhận "Quạt + Bộ bát gáo d�
     const order = normalizeChatbotOrder(closed.created[0], inbox, { id: 'live-bm3' });
     assert.equal(order.gift, 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa + Quạt');
     const posPayload = buildPosOrderPayload(order, {});
-    assert.ok(posPayload.items.some(item => item.variation_id === 'QUAT' && item.is_bonus_product));
+    assert.ok(posPayload.items.some(item => item.variation_id === 'QUA-TANG-LIVE' && item.is_bonus_product));
   });
 });

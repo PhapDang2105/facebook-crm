@@ -394,7 +394,8 @@ export function buildPosOrderPayload(order, { conversation = {}, warehouseId = '
   const basketKey = comboKey(products.map(item => ({ sku: item.sku, quantity: item.quantity })));
   const basketGifts = basketKey && !override ? giftsForKey(basketKey, { livestream: isLivestreamOrder(order) }) : [];
   for (const gift of basketGifts) {
-    const sku = String(gift.sku || '').trim().toUpperCase();
+    let sku = String(gift.sku || '').trim().toUpperCase();
+    if (sku === 'QUAT') sku = 'QUA-TANG-LIVE';
     // R13: khách đã đổi quà này (bát/muỗng/quạt → gói nhỏ): không đẩy; quà thay thế thêm ở dưới.
     if (giftSwap?.removes(gift)) continue;
     // Chỉ bỏ khi đã có DÒNG QUÀ cùng mã: túi tặng (đơn 5 Túi Vàng tặng thêm 1 Túi Vàng) trùng SKU dòng hàng vẫn phải đẩy.

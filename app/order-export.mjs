@@ -18,7 +18,11 @@ export function systemOrderRowId(order = {}) {
  */
 export function posGiftLines(order = {}) {
   if (Array.isArray(order.giftItems) && order.giftItems.length) {
-    return order.giftItems.map(item => ({ sku: String(item?.sku || '').trim().toUpperCase(), quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)), weight: Number(item?.weight) || 0 })).filter(item => item.sku);
+    return order.giftItems.map(item => {
+      const raw = String(item?.sku || '').trim().toUpperCase();
+      const sku = raw === 'QUAT' ? 'QUA-TANG-LIVE' : raw;
+      return { sku, quantity: Math.max(1, Math.round(Number(item?.quantity) || 1)), weight: Number(item?.weight) || 0 };
+    }).filter(item => item.sku);
   }
   // Tên quà có thể chứa " + " ("Quạt + Bát gáo dừa"): so cả cụm giữa các dấu " + ",
   // không tách từng mảnh. Chữ là SKU (POS ghi display_id khi thiếu tên) cũng nhận.

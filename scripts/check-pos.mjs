@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { posConfig } from '../app/phone-warnings.mjs';
 
-const cfg = JSON.parse(readFileSync('./data/processed/pos-config.json', 'utf8'));
+const cfg = posConfig();
 const url = `${cfg.baseUrl.replace(/\/+$/, '')}/shops/${cfg.shopId}/variations?api_key=${cfg.apiKey}&page_size=100`;
 
 console.log('Fetching POS variations from:', cfg.baseUrl, 'shopId:', cfg.shopId);

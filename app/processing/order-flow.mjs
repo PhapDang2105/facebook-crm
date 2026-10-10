@@ -219,6 +219,10 @@ export function orderFlowStep(text, ctx = {}) {
 const PHONE_LABEL = /(?<![\p{L}\p{N}])(?:s[đd₫]t|số\s*điện\s*thoại|so\s*dien\s*thoai|số\s*đt|so\s*dt|zalo|phone|tel)(?![\p{L}\p{N}])\s*[:：.]?|(?<![\p{L}\p{N}])(?:đt|dt)(?![\p{L}\p{N}])(?!\s*\d)\s*[:：.]?/giu;
 // Nhãn/câu dẫn ở đầu: "đc", "địa chỉ:", "shop.", "Gửi về ĐC", "Mình ở", "Tên:", "Fb:".
 const LEADING_LABELS = [
+  // 10/10 (đơn 52e6390a: "Dạ sđt <số>\nĐịa chỉ Địa chỉ số 9A, Đường Tô Ký…" → địa chỉ "Dạ Địa chỉ Địa chỉ số 9A…"): lời đệm đứng
+  // đầu ("Dạ", "Vâng", "Dạ vâng", "Ok") — LEADING_REPLY cần chữ đứng trước tiểu từ nên bỏ sót "Dạ" một mình. Chỉ "dạ" CÓ DẤU:
+  // "Da Nang" (Đà Nẵng gõ không dấu) không bị cắt.
+  /^\s*(?:dạ|vâng|ok|oke|okie)(?:\s+(?:vâng|ạ|dạ))?(?![\p{L}\p{N}])(?!\s+l[ạa]t(?![\p{L}]))\s*[,.:;!\-–]*\s*/iu,
   /^\s*(?:shop|sop)\s*[.,:;!]+\s*/iu,
   // R16 (inbox1 A4, ca …6498183759 "Giao chị combo 2, Địa chỉ, 540 Đường 30/4…"): câu đặt combo đứng đầu khối địa chỉ.
   /^\s*(?:giao|gửi|gởi|gui|ship|lấy|lay|đặt|dat)\s+(?:cho\s+)?(?:chị|chi|c|em|e|anh|a|mình|minh)\s+combo\s*\d{1,2}(?:\s*(?:túi|tui|gói|goi|bịch|bich))?(?![\p{L}\p{N}])\s*[,.:;\-]?\s*/iu,

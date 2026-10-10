@@ -1401,13 +1401,19 @@ const customersFilters = {
   channelId: document.querySelector('#customers-channel'),
   gender: document.querySelector('#customers-gender'),
   product: document.querySelector('#customers-product'),
-  orderedWithin: document.querySelector('#customers-ordered-within'),
   activeWithin: document.querySelector('#customers-active-within'),
   combo: document.querySelector('#customers-combo'),
-  minOrders: document.querySelector('#customers-min-orders')
+  // Thanh chính (chủ shop 10/10): số đơn và thời gian mua. Bốn ô này không gửi thẳng lên API mà đổi
+  // ra minOrders/maxOrders và orderedFrom/orderedTo trong customersQueryString.
+  orders: document.querySelector('#customers-orders'),
+  bought: document.querySelector('#customers-bought'),
+  boughtFrom: document.querySelector('#customers-bought-from'),
+  boughtTo: document.querySelector('#customers-bought-to')
 };
+const customersDerivedKeys = new Set(['orders', 'bought', 'boughtFrom', 'boughtTo']);
+const customersBoughtRange = document.querySelector('#customers-bought-range');
 // Các ô nằm sau nút "Lọc thêm", dùng để đếm số lọc phụ đang bật.
-const customersMoreKeys = ['channelId', 'gender', 'product', 'orderedWithin', 'activeWithin', 'combo', 'minOrders'];
+const customersMoreKeys = ['channelId', 'gender', 'product', 'activeWithin', 'combo'];
 
 let customersRequestId = 0;
 let customersItems = [];
@@ -1421,17 +1427,52 @@ let customersSortKey = 'lastOrderAt';
 let customersSortDir = -1;
 let customersPage = 1;
 let customersPageSize = 25;
-const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất' };
+const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất', landing: 'Landing page' };
+
+/** Ngày theo lịch Việt Nam ("YYYY-MM-DD") lùi `daysBack` ngày — cùng cách đếm ngày của bảng tóm tắt, không phụ thuộc giờ máy. */
+function vietnamDateBack(daysBack = 0, now = Date.now()) {
+  return new Date(now + 7 * 3600000 - daysBack * 86400000).toISOString().slice(0, 10);
+}
+
+/* Ô "Thời gian mua" → khoảng ngày mua LẦN CUỐI gửi lên API. Đổi lúc gửi chứ không lúc chọn, để trang mở
+   qua nửa đêm thì "hôm nay" vẫn là hôm nay. "N ngày qua" gồm cả hôm nay (7 ngày = hôm nay và 6 ngày trước);
+   "hơn 30 ngày chưa mua lại" = cột Mua lần cuối từ "31 ngày trước" trở về trước. */
+const customersBoughtPresets = {
+  today: () => ({ orderedFrom: vietnamDateBack(0) }),
+  7: () => ({ orderedFrom: vietnamDateBack(6) }),
+  30: () => ({ orderedFrom: vietnamDateBack(29) }),
+  90: () => ({ orderedFrom: vietnamDateBack(89) }),
+  over30: () => ({ orderedTo: vietnamDateBack(31) }),
+  over60: () => ({ orderedTo: vietnamDateBack(61) }),
+  over90: () => ({ orderedTo: vietnamDateBack(91) }),
+  range: () => ({ orderedFrom: customersFilters.boughtFrom?.value || '', orderedTo: customersFilters.boughtTo?.value || '' })
+};
 
 function customersQueryString() {
   const params = new URLSearchParams();
   for (const [key, input] of Object.entries(customersFilters)) {
-    if (!input) continue;
+    if (!input || customersDerivedKeys.has(key)) continue;
     const value = input.value.trim();
     if (!value) continue;
     params.set(key, value);
   }
+  // Số đơn: giá trị ô chọn là "từ-đến" ("1-1" là đúng 1 đơn, "3-" là từ 3 đơn trở lên).
+  const [minOrders, maxOrders] = String(customersFilters.orders?.value || '').split('-');
+  if (minOrders) params.set('minOrders', minOrders);
+  if (maxOrders) params.set('maxOrders', maxOrders);
+  const bought = customersBoughtPresets[customersFilters.bought?.value || '']?.() || {};
+  for (const [key, value] of Object.entries(bought)) if (value) params.set(key, value);
   return params.toString();
+}
+
+/** Hai ô ngày chỉ hiện khi chọn "Chọn khoảng ngày…"; mở ra thì đưa con trỏ vào ô "Từ" để chọn ngay. */
+function syncCustomersBoughtRange({ focus = false } = {}) {
+  const open = customersFilters.bought?.value === 'range';
+  customersBoughtRange?.classList.toggle('hidden', !open);
+  if (!open || !focus) return;
+  const from = customersFilters.boughtFrom;
+  from?.focus();
+  try { from?.showPicker?.(); } catch { /* trình duyệt cũ hoặc chặn: con trỏ đã ở ô ngày */ }
 }
 
 function fillCustomersChannelOptions() {
@@ -1441,6 +1482,7 @@ function fillCustomersChannelOptions() {
   select.innerHTML = '<option value="">Mọi trang</option>'
     + messageChannels.filter(channel => channel.id !== 'local-facebook')
       .map(channel => `<option value="${escapeHtml(channel.id)}">${escapeHtml(channel.name)}</option>`).join('')
+    + '<option value="landing">Landing page</option>'
     + '<option value="export">Đơn đã xuất</option>';
   select.value = current;
 }
@@ -1590,7 +1632,7 @@ const customersColumns = [
   { key: 'phone', label: 'Số điện thoại', sortable: false },
   { key: 'province', label: 'Khu vực', sortable: true },
   { key: 'state', label: 'Trạng thái', sortable: true, mid: true },
-  { key: 'labels', label: 'Thẻ', sortable: false, mid: true },
+  // Cột Thẻ đã bỏ (chủ shop 10/10); lọc theo thẻ vẫn ở ô "Mọi thẻ", thẻ xem/gắn trong hộp chi tiết khách.
   { key: 'orderCount', label: 'Số đơn', sortable: true, mid: true },
   { key: 'orderTotal', label: 'Đã chi', sortable: true, mid: true },
   { key: 'lastOrderProducts', label: 'Sản phẩm', sortable: false, mid: true },
@@ -1735,11 +1777,6 @@ function customerRowHtml(customer, index) {
         products.slice(0, 2).map(item => `<span class="customer-product">${escapeHtml(item.name)} ×${item.quantity}</span>`).join('')
       }${products.length > 2 ? `<span class="customer-product-meta">+${products.length - 2} mặt hàng khác</span>` : ''}</div>`
     : '<span class="customer-never">—</span>';
-  const labels = (customer.labels || []).map(labelById).filter(Boolean);
-  const tags = labels.length
-    ? `<div class="customer-tag-wrap">${labels.slice(0, 2).map(customerLabelChip).join('')}${
-        labels.length > 2 ? `<span class="customer-product-meta">+${labels.length - 2}</span>` : ''}</div>`
-    : '<span class="customer-never">—</span>';
   const province = customerProvince(customer);
   const name = customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng');
 
@@ -1754,7 +1791,6 @@ function customerRowHtml(customer, index) {
       : ''}</span></td>
     <td class="customer-place"><b>${escapeHtml(province || '—')}</b><small title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</small></td>
     <td class="customer-mid"><span class="customer-state customer-state--${state.key}">${state.label}</span></td>
-    <td class="customer-tags customer-mid">${tags}</td>
     <td class="customer-mid customer-order-count">${Number(customer.orderCount) || 0}</td>
     <td class="customer-mid customer-money">${escapeHtml(formatCustomerMoney(customer.orderTotal))}</td>
     <td class="customer-bought customer-mid">${productCell}</td>
@@ -3802,6 +3838,7 @@ for (const [key, input] of Object.entries(customersFilters)) {
   if (key === 'q') continue;
   input?.addEventListener('change', resetCustomersView);
 }
+customersFilters.bought?.addEventListener('change', () => syncCustomersBoughtRange({ focus: true }));
 
 customersTabsBar?.addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]');
@@ -3820,6 +3857,7 @@ customersMoreToggle?.addEventListener('click', () => {
 
 document.querySelector('#customers-clear-filters')?.addEventListener('click', () => {
   for (const input of Object.values(customersFilters)) if (input) input.value = '';
+  syncCustomersBoughtRange();
   resetCustomersView();
 });
 

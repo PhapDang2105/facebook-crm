@@ -7,10 +7,69 @@ import { readChannelStore } from './channel-store.mjs';
 import { pancakeConfig } from './config.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
 import { applyCustomerEdits, CONTACT_STATUSES, readCustomerEdits } from './customer-edits.mjs';
-import { collectOrderFacts, isCancelledOrder, isIncompleteOrder, isValidFact } from './order-facts.mjs';
+import { collectOrderFacts, isCancelledOrder, isDayString, isIncompleteOrder, isValidFact, shiftDay, vietnamDayStartMs } from './order-facts.mjs';
+import { listLandingOrders } from './landing-orders.mjs';
+import { labelsForEvents, readInboxSettings } from './inbox-settings.mjs';
+import { shipmentStage } from './shipment-stage.mjs';
 
 function customerKey(conversation) {
   return `${conversation.pageId}:${conversation.psid}`;
+}
+
+// Pancake POS: 3 "Đã nhận", 16 "Đã thu tiền" (POS_STATUS.received / collected của phone-warnings.mjs).
+const POS_RECEIVED_CODES = new Set([3, 16]);
+
+/**
+ * Đơn khách ĐÃ NHẬN HÀNG: vận đơn Sapo / hành trình hãng báo giao thành công, hay Pancake POS báo
+ * "Đã nhận" / "Đã thu tiền". Vận đơn đang hoàn / đã hoàn thì shipmentStage trả null, không tính.
+ */
+export function isReceivedOrder(order) {
+  if (!order) return false;
+  return shipmentStage(order.shipment) === 'delivered' || POS_RECEIVED_CODES.has(Number(order.posStatus?.code));
+}
+
+/** Bản ghi khách rỗng — một khuôn cho khách hội thoại, khách landing và khách tệp xuất kho. */
+function emptyCustomer(fields) {
+  return {
+    id: '',
+    channelId: '',
+    channelName: '',
+    psid: '',
+    name: '',
+    picture: '',
+    gender: '',
+    genderSource: '',
+    sources: [],
+    adTitle: '',
+    firstContactAt: 0,
+    lastCustomerMessageAt: 0,
+    lastMessageAt: 0,
+    lastMessagePreview: '',
+    phone: '',
+    address: '',
+    orderCount: 0,
+    orderTotal: 0,
+    // Remarketing: ai đã mua gì, mua bao nhiêu túi một lần, mua lần cuối khi nào.
+    firstOrderAt: 0,
+    lastOrderAt: 0,
+    lastOrderSeenAt: -1,
+    lastOrderProducts: [],
+    lastOrderCombo: 0,
+    lastOrderTotal: 0,
+    products: [],
+    comboMax: 0,
+    noteCount: 0,
+    labels: [],
+    botEnabled: false,
+    unread: false,
+    // Có ít nhất một đơn đã nhận hàng (isReceivedOrder, hay hội thoại mang thẻ "Giao hàng thành công"):
+    // màn Khách hàng chỉ hiện những khách này (chủ shop 10/10).
+    received: false,
+    conversations: [],
+    // Mã các đơn đã đếm từ hội thoại, để đơn xuất kho cùng mã không bị cộng lần hai.
+    orderIds: [],
+    ...fields
+  };
 }
 
 function firstMessageAt(store, conversation) {
@@ -66,14 +125,20 @@ function collectPurchases(customer, orders) {
   customer.products.sort((first, second) => (second.lastAt || 0) - (first.lastAt || 0));
 }
 
-/** Merges every thread of one person into a single customer record. */
-export function buildCustomers(store, channels = [], exported = []) {
+/**
+ * Merges every thread of one person into a single customer record, then adds landing-page orders
+ * and the warehouse export file. `landingOrders`: đơn kho landing (khách đặt qua form, nhiều người
+ * không nhắn Page); `deliveredLabels`: mã thẻ hội thoại nhận sự kiện "delivered" (Giao hàng thành công).
+ */
+export function buildCustomers(store, channels = [], exported = [], { landingOrders = [], deliveredLabels = [] } = {}) {
+  const landing = Array.isArray(landingOrders) ? landingOrders : [];
   // Đơn không thành doanh thu — hủy/hoàn/bom (trạng thái mới nhất), form bỏ dở, đơn trùng
   // đã xóa khỏi bảng — cùng luật với Báo cáo (order-facts.mjs): không vào "Tổng đã chi",
   // số đơn hay "đã mua sản phẩm"; mã đơn vẫn được ghi để tệp xuất không cộng lại.
-  const notCounted = new Set(collectOrderFacts({ conversations: store.conversations || [] })
+  const notCounted = new Set(collectOrderFacts({ conversations: store.conversations || [], landingOrders: landing })
     .filter(fact => fact.id && !isValidFact(fact)).map(fact => fact.id));
   const countedOrders = orders => orders.filter(order => order && !notCounted.has(String(order.id || '')));
+  const deliveredLabelSet = new Set(deliveredLabels);
   const channelNames = new Map(channels.map(channel => [String(channel.id), channel.name]));
   const customers = new Map();
   for (const conversation of store.conversations) {
@@ -82,42 +147,12 @@ export function buildCustomers(store, channels = [], exported = []) {
     const orders = Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [];
     const notes = Array.isArray(conversation.customerNotes) ? conversation.customerNotes : [];
     const source = conversation.referral?.adId ? 'ads' : (conversation.source === 'comment' ? 'comment' : 'inbox');
-    const existing = customers.get(key) || {
+    const existing = customers.get(key) || emptyCustomer({
       id: key,
       channelId: conversation.pageId,
       channelName: channelNames.get(String(conversation.pageId)) || '',
-      psid: conversation.psid,
-      name: '',
-      picture: '',
-      gender: '',
-      genderSource: '',
-      sources: [],
-      adTitle: '',
-      firstContactAt: 0,
-      lastCustomerMessageAt: 0,
-      lastMessageAt: 0,
-      lastMessagePreview: '',
-      phone: '',
-      address: '',
-      orderCount: 0,
-      orderTotal: 0,
-      // Remarketing: ai đã mua gì, mua bao nhiêu túi một lần, mua lần cuối khi nào.
-      firstOrderAt: 0,
-      lastOrderAt: 0,
-      lastOrderSeenAt: -1,
-      lastOrderProducts: [],
-      lastOrderCombo: 0,
-      lastOrderTotal: 0,
-      products: [],
-      comboMax: 0,
-      noteCount: 0,
-      labels: [],
-      botEnabled: false,
-      unread: false,
-      conversations: [],
-      // Mã các đơn đã đếm từ hội thoại, để đơn xuất kho cùng mã không bị cộng lần hai.
-      orderIds: []
-    };
+      psid: conversation.psid
+    });
     // Prefer the inbox thread's name and picture: Messenger's profile lookup
     // gives the real name; a comment only carries what the webhook sent.
     if (!existing.name || conversation.source !== 'comment') {
@@ -161,68 +196,84 @@ export function buildCustomers(store, channels = [], exported = []) {
     for (const label of Array.isArray(conversation.labels) ? conversation.labels : []) {
       if (!existing.labels.includes(label)) existing.labels.push(label);
     }
+    // Đã nhận hàng: một đơn của hội thoại giao thành công, hay hội thoại mang thẻ "Giao hàng thành công"
+    // (Sapo tự gắn khi vận đơn giao xong; nhân viên tự gắn được cho đơn giao trước khi có Sapo).
+    if (orders.some(isReceivedOrder) || existing.labels.some(label => deliveredLabelSet.has(label))) existing.received = true;
     existing.botEnabled = existing.botEnabled || conversation.botEnabled !== false;
     existing.unread = existing.unread || Boolean(conversation.unread);
     existing.conversations.push({ id: conversation.id, source: conversation.source || 'inbox' });
     customers.set(key, existing);
   }
-  mergeExportedCustomers(customers, exported);
+  const knownOrderIds = new Set([...customers.values()].flatMap(customer => customer.orderIds));
+  mergeLandingCustomers(customers, landing, notCounted, knownOrderIds);
+  mergeExportedCustomers(customers, exported, notCounted, knownOrderIds);
+  // Đã nhận hàng tính theo NGƯỜI (số điện thoại): đơn giao thành công ở Page này, ở landing hay ở Page khác.
+  const receivedPhones = new Set([...(store.conversations || []).flatMap(conversation => conversation.customerOrders || []), ...landing]
+    .filter(isReceivedOrder).map(order => customerPhoneKey(order.phone)).filter(Boolean));
+  for (const customer of customers.values()) {
+    if (!customer.received && receivedPhones.has(customerPhoneKey(customer.phone))) customer.received = true;
+  }
   // Mới tương tác hoặc mới mua đều lên đầu: khách landing không có tin nhắn vẫn xếp theo ngày mua.
   const recency = customer => Math.max(customer.lastMessageAt || 0, customer.lastOrderAt || 0);
   return [...customers.values()].sort((first, second) => recency(second) - recency(first));
 }
 
-/**
- * Tệp khách hàng từ Xuất dữ liệu: khớp theo số điện thoại với khách Facebook đã
- * có thì cộng đơn (bỏ đơn chatbot đã đếm từ hội thoại, nhận ra qua mã), còn không
- * thì là một khách riêng (landing, import) để chăm sóc lại.
- */
-function mergeExportedCustomers(customers, exported) {
-  if (!Array.isArray(exported) || !exported.length) return;
+/** Khách theo số điện thoại (khách đầu tiên mang số đó), để đơn landing / tệp xuất kho cộng vào đúng người. */
+function customersByPhone(customers) {
   const byPhone = new Map();
   for (const customer of customers.values()) {
     const key = customerPhoneKey(customer.phone);
     if (key && !byPhone.has(key)) byPhone.set(key, customer);
   }
+  return byPhone;
+}
+
+/**
+ * Đơn landing page: khớp theo số điện thoại với khách đã có thì cộng đơn, không thì là một khách riêng
+ * (nguồn "Landing page"). Đơn đã đếm từ hội thoại (cùng mã), form bỏ dở, đơn hủy/hoàn/bom, đơn trùng đã
+ * xóa không cộng — cùng luật Báo cáo. Đơn mới trước để tên, địa chỉ lấy theo đơn gần nhất.
+ */
+function mergeLandingCustomers(customers, landingOrders, notCounted, knownOrderIds) {
+  if (!landingOrders.length) return;
+  const byPhone = customersByPhone(customers);
+  const newestFirst = [...landingOrders].sort((first, second) => (Number(second?.createdAt) || 0) - (Number(first?.createdAt) || 0));
+  for (const order of newestFirst) {
+    const id = String(order?.id || '');
+    const key = customerPhoneKey(order?.phone);
+    if (!id || !key || knownOrderIds.has(id) || notCounted.has(id) || isIncompleteOrder(order) || isCancelledOrder(order)) continue;
+    let customer = byPhone.get(key);
+    if (!customer) {
+      customer = emptyCustomer({ id: `landing:${key}`, channelId: 'landing', channelName: 'Landing page', phone: key });
+      customers.set(customer.id, customer);
+      byPhone.set(key, customer);
+    }
+    if (!customer.sources.includes('landing')) customer.sources.push('landing');
+    if (!customer.name) customer.name = String(order.name || '').trim();
+    if (!customer.address) customer.address = String(order.address || '').trim();
+    customer.orderCount += 1;
+    customer.orderTotal += Number(order.total) || 0;
+    collectPurchases(customer, [order]);
+    customer.orderIds.push(id);
+    knownOrderIds.add(id);
+    if (isReceivedOrder(order)) customer.received = true;
+  }
+}
+
+/**
+ * Tệp khách hàng từ Xuất dữ liệu: khớp theo số điện thoại với khách đã có thì
+ * cộng đơn (bỏ đơn đã đếm từ hội thoại hay kho landing, nhận ra qua mã đã bỏ tiền tố
+ * "LP-"/"CB-"; bỏ cả đơn kho đơn báo hủy/bỏ dở/trùng), còn không thì là một khách riêng.
+ */
+function mergeExportedCustomers(customers, exported, notCounted, knownOrderIds) {
+  if (!Array.isArray(exported) || !exported.length) return;
+  const byPhone = customersByPhone(customers);
+  const bareId = order => String(order?.id || '').replace(/^(?:LP|CB)-/, '');
   for (const person of exported) {
     const key = customerPhoneKey(person.phone);
     if (!key) continue;
     let customer = byPhone.get(key);
     if (!customer) {
-      customer = {
-        id: `export:${key}`,
-        channelId: 'export',
-        channelName: 'Đơn đã xuất',
-        psid: '',
-        name: '',
-        picture: '',
-        gender: '',
-        genderSource: '',
-        sources: [],
-        adTitle: '',
-        firstContactAt: 0,
-        lastCustomerMessageAt: 0,
-        lastMessageAt: 0,
-        lastMessagePreview: '',
-        phone: key,
-        address: '',
-        orderCount: 0,
-        orderTotal: 0,
-        firstOrderAt: 0,
-        lastOrderAt: 0,
-        lastOrderSeenAt: -1,
-        lastOrderProducts: [],
-        lastOrderCombo: 0,
-        lastOrderTotal: 0,
-        products: [],
-        comboMax: 0,
-        noteCount: 0,
-        labels: [],
-        botEnabled: false,
-        unread: false,
-        conversations: [],
-        orderIds: []
-      };
+      customer = emptyCustomer({ id: `export:${key}`, channelId: 'export', channelName: 'Đơn đã xuất', phone: key });
       customers.set(customer.id, customer);
       byPhone.set(key, customer);
     }
@@ -230,13 +281,15 @@ function mergeExportedCustomers(customers, exported) {
     if (!customer.name) customer.name = person.name || '';
     if (!customer.address) customer.address = person.address || '';
     customer.lastExportedAt = Math.max(customer.lastExportedAt || 0, Number(person.lastExportedAt) || 0);
-    const known = new Set(customer.orderIds);
-    const fresh = (Array.isArray(person.orders) ? person.orders : []).filter(order => !known.has(String(order.id || '').replace(/^(?:LP|CB)-/, '')));
+    const fresh = (Array.isArray(person.orders) ? person.orders : []).filter(order => !knownOrderIds.has(bareId(order)) && !notCounted.has(bareId(order)));
     if (!fresh.length) continue;
     customer.orderCount += fresh.length;
     customer.orderTotal += fresh.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
     collectPurchases(customer, fresh.map(order => ({ createdAt: Number(order.orderedAt) || Number(order.exportedAt) || 0, total: order.total, products: order.products })));
-    customer.orderIds.push(...fresh.map(order => String(order.id || '').replace(/^(?:LP|CB)-/, '')));
+    for (const order of fresh) {
+      customer.orderIds.push(bareId(order));
+      knownOrderIds.add(bareId(order));
+    }
   }
 }
 
@@ -245,10 +298,21 @@ function foldText(value) {
 }
 
 /**
+ * "2026-09-01" → mốc 00:00 giờ Việt Nam của ngày đó, cộng thêm `plusDays` ngày (máy chủ chạy UTC nên
+ * không dùng giờ máy). Chuỗi sai hay ngày không có thật (31/02) trả 0, tức là không lọc theo mốc này.
+ */
+function vietnamDayStart(value, plusDays = 0) {
+  const day = String(value || '').trim();
+  return isDayString(day) ? vietnamDayStartMs(shiftDay(day, plusDays)) : 0;
+}
+
+/**
  * Bộ lọc cho cả hai việc: quản lý data (tìm kiếm, kênh, nguồn, giới tính, thẻ,
- * tương tác trong N ngày) và remarketing (đã mua trong N ngày, đã mua sản phẩm
- * nào, mua combo mấy túi, mua bao nhiêu lần).
- * Mọi mốc thời gian đều đếm bằng số ngày, không nhập ngày tháng thủ công.
+ * tương tác trong N ngày) và remarketing (đã mua trong N ngày hay trong một khoảng
+ * ngày, đã mua sản phẩm nào, mua combo mấy túi, mua bao nhiêu đơn).
+ * Khoảng ngày mua (`orderedFrom`/`orderedTo`, "YYYY-MM-DD" theo lịch Việt Nam, gồm cả
+ * hai đầu) xét ngày MUA LẦN CUỐI — đúng cột "Mua lần cuối" trên bảng, nên khách hiện ra
+ * luôn có ngày nằm trong khoảng đã chọn; chỉ có `orderedTo` là "lâu rồi chưa mua lại".
  */
 export function filterCustomers(customers, filters = {}, now = Date.now()) {
   const query = foldText(filters.q).trim();
@@ -256,9 +320,15 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
   const activeSince = activeWithin ? now - activeWithin * 86400000 : 0;
   const orderedWithin = Math.max(0, Number(filters.orderedWithin) || 0);
   const orderedSince = orderedWithin ? now - orderedWithin * 86400000 : 0;
+  // Hai ô ngày chọn ngược (từ 30/09 đến 01/09) thì hiểu là cùng khoảng đó, không trả bảng rỗng.
+  const [fromDay, toDay] = [String(filters.orderedFrom || ''), String(filters.orderedTo || '')]
+    .sort((first, second) => (first && second ? first.localeCompare(second) : 0));
+  const orderedFrom = vietnamDayStart(fromDay);
+  const orderedBefore = vietnamDayStart(toDay, 1);
   const product = foldText(filters.product).trim();
   const combo = Math.max(0, Number(filters.combo) || 0);
   const minOrders = Math.max(0, Number(filters.minOrders) || 0);
+  const maxOrders = Math.max(0, Number(filters.maxOrders) || 0);
   return customers.filter(customer => {
     if (filters.channelId && customer.channelId !== String(filters.channelId)) return false;
     if (filters.source && !customer.sources.includes(filters.source)) return false;
@@ -267,7 +337,11 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
     if (activeSince && customer.lastMessageAt < activeSince) return false;
     // "Đã chốt đơn trong 7 ngày qua" tính theo ngày lên đơn, không phải ngày nhắn tin.
     if (orderedSince && (!customer.lastOrderAt || customer.lastOrderAt < orderedSince)) return false;
+    if ((orderedFrom || orderedBefore) && !customer.lastOrderAt) return false;
+    if (orderedFrom && customer.lastOrderAt < orderedFrom) return false;
+    if (orderedBefore && customer.lastOrderAt >= orderedBefore) return false;
     if (minOrders && customer.orderCount < minOrders) return false;
+    if (maxOrders && customer.orderCount > maxOrders) return false;
     // Combo: có ít nhất một đơn từ N túi trở lên.
     if (combo && customer.comboMax < combo) return false;
     if (product && !customer.products.some(item => foldText(`${item.sku} ${item.name}`).includes(product))) return false;
@@ -312,25 +386,37 @@ export async function listBuyers({ fresh = false } = {}) {
 }
 
 async function buildBuyerList() {
-  const [store, channels, exported, edits] = await Promise.all([
-    readMessagingStore(), readChannelStore(), listExportedCustomers(), readCustomerEdits()
+  const [store, channels, exported, edits, landingOrders, inbox] = await Promise.all([
+    readMessagingStore(), readChannelStore(), listExportedCustomers(), readCustomerEdits(),
+    // Kho landing hỏng thì danh sách vẫn dựng được từ hội thoại và tệp xuất kho, chỉ thiếu khách landing.
+    listLandingOrders({ includeArchived: true }).catch(error => {
+      console.error(`Khách hàng: không đọc được kho đơn landing (${error?.message || error}).`);
+      return [];
+    }),
+    readInboxSettings().catch(() => ({ labels: [] }))
   ]);
-  // Màn Khách hàng là kho dữ liệu người ĐÃ MUA: người mới hỏi giá vẫn nằm trong
-  // Tin nhắn, đưa vào đây chỉ làm loãng danh sách remarketing. Khách của đơn đã
-  // xuất kho (tệp khách hàng) luôn có mặt, kể cả chưa từng nhắn tin.
+  const deliveredLabels = labelsForEvents(inbox?.labels || [], ['delivered']);
+  // Người ĐÃ MUA (có đơn tính được): người mới hỏi giá vẫn nằm trong Tin nhắn. Khách đặt qua landing page và
+  // khách của đơn đã xuất kho (tệp khách hàng) có mặt kể cả chưa từng nhắn tin. Hộp chi tiết, ghi chú, sửa
+  // thông tin tra trên toàn bộ danh sách này; màn Khách hàng chỉ hiện người đã nhận hàng (listCustomers).
   // Page vận hành qua Pancake không có trong kho kênh Meta: thêm tên từ cấu hình Pancake để cột "Trang" hiện
   // tên Page thay vì mã số (kênh Meta cùng mã đứng sau nên thắng).
   const pancakePages = (pancakeConfig.pages?.length ? pancakeConfig.pages : (pancakeConfig.pageId ? [pancakeConfig] : []))
     .map(page => ({ id: String(page.pageId), name: page.pageName || '' }));
-  const buyers = buildCustomers(store, [...pancakePages, ...(channels.items || [])], exported).filter(customer => customer.orderCount > 0);
+  const buyers = buildCustomers(store, [...pancakePages, ...(channels.items || [])], exported, { landingOrders, deliveredLabels })
+    .filter(customer => customer.orderCount > 0);
   // Phủ trước khi lọc: nhân viên sửa số điện thoại hay tên xong thì tìm kiếm và
   // bộ lọc phải thấy bản mới, không phải bản suy ra cũ.
   return applyCustomerEdits(buyers, edits);
 }
 
+/**
+ * Màn Khách hàng (và tệp CSV / remarketing tải từ đó): chỉ khách ĐÃ NHẬN HÀNG — có ít nhất một đơn giao
+ * thành công (chủ shop 10/10). Đơn mới đặt, đang giao, bom/hoàn chưa làm ai thành khách hàng.
+ */
 export async function listCustomers(filters = {}) {
-  const buyers = await listBuyers();
-  return { total: buyers.length, items: filterCustomers(buyers, filters) };
+  const customers = (await listBuyers()).filter(customer => customer.received);
+  return { total: customers.length, items: filterCustomers(customers, filters) };
 }
 
 /** Một khách theo mã, hoặc null nếu mã không còn ứng với ai. */
@@ -340,7 +426,7 @@ export async function findCustomerById(id) {
   return (await listBuyers()).find(customer => customer.id === key) || null;
 }
 
-const sourceLabels = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất' };
+const sourceLabels = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất', landing: 'Landing page' };
 const labelNames = { new: 'Khách mới', consulting: 'Cần tư vấn', customer: 'Đã mua' };
 const genderNames = { male: 'Nam', female: 'Nữ' };
 

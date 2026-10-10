@@ -2959,8 +2959,9 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {
       const filters = Object.fromEntries([
         'q', 'channelId', 'source', 'gender', 'label', 'activeWithin',
-        // Remarketing: mua trong N ngày, mua sản phẩm nào, combo mấy túi, mua mấy lần.
-        'orderedWithin', 'product', 'combo', 'minOrders'
+        // Remarketing: mua trong N ngày hay trong khoảng ngày (theo lần mua cuối), mua sản phẩm nào, combo mấy túi,
+        // mua bao nhiêu đơn (từ–đến).
+        'orderedWithin', 'orderedFrom', 'orderedTo', 'product', 'combo', 'minOrders', 'maxOrders'
       ].map(key => [key, url.searchParams.get(key) || '']));
       const result = await listCustomers(filters);
       // Tải danh sách khách (dữ liệu cá nhân) ra tệp: ghi nhật ký ai tải, bao nhiêu khách, lọc gì.

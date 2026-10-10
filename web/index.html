@@ -441,6 +441,30 @@
 
         <div class="customers-toolbar">
           <label class="order-search-control"><input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tên, số điện thoại, địa chỉ, sản phẩm..."></label>
+          <label class="order-filter-control"><select id="customers-orders" aria-label="Số đơn hàng">
+            <option value="">Mọi số đơn hàng</option>
+            <option value="1-1">Mua 1 đơn</option>
+            <option value="2-2">Mua 2 đơn</option>
+            <option value="2-">Từ 2 đơn trở lên</option>
+            <option value="3-">Từ 3 đơn trở lên</option>
+            <option value="5-">Từ 5 đơn trở lên</option>
+            <option value="10-">Từ 10 đơn trở lên</option>
+          </select></label>
+          <label class="order-filter-control"><select id="customers-bought" aria-label="Thời gian mua hàng, tính theo lần mua cuối" title="Tính theo ngày mua lần cuối">
+            <option value="">Mọi thời gian mua</option>
+            <option value="today">Mua hôm nay</option>
+            <option value="7">Mua trong 7 ngày qua</option>
+            <option value="30">Mua trong 30 ngày qua</option>
+            <option value="90">Mua trong 3 tháng qua</option>
+            <option value="over30">Hơn 30 ngày chưa mua lại</option>
+            <option value="over60">Hơn 60 ngày chưa mua lại</option>
+            <option value="over90">Hơn 90 ngày chưa mua lại</option>
+            <option value="range">Chọn khoảng ngày…</option>
+          </select></label>
+          <span class="customers-date-range hidden" id="customers-bought-range">
+            <label class="customers-date-control"><span>Từ</span><input id="customers-bought-from" type="date" aria-label="Mua lần cuối từ ngày"></label>
+            <label class="customers-date-control"><span>Đến</span><input id="customers-bought-to" type="date" aria-label="Mua lần cuối đến ngày"></label>
+          </span>
           <label class="order-filter-control"><select id="customers-source" aria-label="Nguồn khách">
             <option value="">Tất cả nguồn khách</option>
             <option value="inbox">Tin nhắn</option>
@@ -463,13 +487,6 @@
             <option value="male">Nam</option>
           </select></label>
           <label class="order-filter-control"><select id="customers-product" aria-label="Sản phẩm đã mua"><option value="">Mọi sản phẩm</option></select></label>
-          <label class="order-filter-control"><select id="customers-ordered-within" aria-label="Thời điểm mua">
-            <option value="">Mọi thời điểm mua</option>
-            <option value="7">Mua trong 7 ngày</option>
-            <option value="14">Mua trong 14 ngày</option>
-            <option value="30">Mua trong 1 tháng</option>
-            <option value="90">Mua trong 3 tháng</option>
-          </select></label>
           <label class="order-filter-control"><select id="customers-active-within" aria-label="Tương tác gần đây">
             <option value="">Mọi mức tương tác</option>
             <option value="7">Có nhắn trong 7 ngày</option>
@@ -481,13 +498,6 @@
             <option value="2">Từ 2 túi/đơn</option>
             <option value="3">Từ 3 túi/đơn</option>
             <option value="5">Từ 5 túi/đơn</option>
-          </select></label>
-          <label class="order-filter-control"><select id="customers-min-orders" aria-label="Số đơn tối thiểu">
-            <option value="">Mọi số đơn</option>
-            <option value="2">Từ 2 đơn</option>
-            <option value="3">Từ 3 đơn</option>
-            <option value="5">Từ 5 đơn</option>
-            <option value="10">Từ 10 đơn</option>
           </select></label>
           <button class="customers-clear-filters" id="customers-clear-filters" type="button"><img src="/assets/icons/customers/filter-dismiss.svg" alt="">Xóa lọc</button>
         </div>

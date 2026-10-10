@@ -430,7 +430,8 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .customers-export-menu button:hover { background: #f0f2f5; }
 .customers-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 12px; }
 /* Các ô lọc giãn đều nhau nên khi xuống hàng vẫn kín chiều ngang, không lệch. */
-.customers-toolbar > .order-search-control { flex: 1 1 230px; min-width: 200px; }
+/* Ô tìm kiếm khởi điểm 180px (giãn ra khi còn chỗ) để tìm kiếm + bốn ô lọc + "Lọc thêm" vừa một hàng ở màn 1280px. */
+.customers-toolbar > .order-search-control { flex: 1 1 180px; min-width: 160px; }
 .customers-toolbar > .order-filter-control { flex: 1 1 150px; min-width: 140px; max-width: 230px; }
 /* Hàng lọc remarketing: tách khỏi bộ lọc dữ liệu để nhân viên không lẫn hai việc. */
 .customers-table td.customer-order-count { color: #344054; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -2724,6 +2725,32 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .customers-tab b { margin-left: 4px; color: #98a2b3; font-weight: 400; }
 .customers-tab.active b { color: var(--brand); }
 
+/* --- Dùng trọn màn hình như màn Đơn hàng (chủ shop 10/10: lề xám quanh thẻ là "padding lãng phí"):
+       bỏ lề của main, thẻ trắng phủ từ mép thanh bên tới mép phải và xuống tới đáy màn hình.
+       Điện thoại (≤768px) giữ lề 10px riêng của nó. --- */
+@media (min-width: 769px) {
+  main:has(#customers-view:not(.hidden)) { padding: 57.6px 0 0; }
+  #customers-view .customer-settings-card { min-height: calc(100vh - 57.6px); border: 0; border-radius: 0; box-shadow: none; }
+}
+
+/* --- Khoảng ngày mua: hai ô ngày cùng khuôn ô lọc, chỉ hiện khi chọn "Chọn khoảng ngày…" --- */
+.customers-date-range { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; gap: 9px; }
+.customers-date-control {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 40px; padding: 0 6px 0 12px;
+  color: var(--text-2); background: #fff;
+  border: 1px solid #dbe0e6; border-radius: 10px;
+  font-size: 13.2px; white-space: nowrap;
+}
+.customers-date-control:hover { border-color: #c3cad3; }
+.customers-date-control:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(31, 122, 69, .12); }
+.customers-date-control input { height: 38px; padding: 0 4px; color: var(--text-1); background: transparent; border: 0; outline: 0; font: inherit; }
+@media (max-width: 768px) {
+  .customers-date-range { display: flex; }
+  .customers-date-control { flex: 1 1 150px; }
+  .customers-date-control input { flex: 1; min-width: 0; }
+}
+
 /* --- Hàng lọc phụ: cùng khuôn .customers-toolbar, chỉ thụt lề trên --- */
 .customers-toolbar--more { margin-top: 9px; padding-bottom: 2px; }
 .customers-more-toggle,
@@ -2787,11 +2814,6 @@ tr:hover .customer-tel button { opacity: .75; }
 /* --- Trạng thái --- */
 .customers-table th.customer-col-state { width: 96px; text-align: center; }
 .customers-table td:has(.customer-state) { width: 96px; text-align: center; }
-
-/* --- Cột Thẻ: dùng đúng .conversation-label của màn Tin nhắn --- */
-.customers-table th.customer-col-labels { width: 120px; text-align: center; }
-.customers-table td.customer-tags { width: 120px; }
-.customer-tag-wrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
 
 /* --- Số đơn --- */
 .customers-table th.customer-col-orderCount { width: 62px; text-align: center; }
@@ -3433,6 +3455,12 @@ tr:hover .customer-tel button { opacity: .75; }
 .customers-toolbar > .order-filter-control { flex: 1 1 172px; min-width: 172px; }
 .customers-toolbar > .customers-more-toggle,
 .customers-toolbar > .customers-clear-filters { flex: 0 0 auto; }
+/* ≤768px hàng lọc xếp dọc (flex-direction: column): flex-basis khi đó là CHIỀU CAO, ô tìm kiếm và ô chọn
+   cao vống thành khoảng trắng lớn giữa các ô. Cao theo nội dung. */
+@media (max-width: 768px) {
+  .customers-toolbar > .order-search-control,
+  .customers-toolbar > .order-filter-control { flex: 0 0 auto; }
+}
 @media (max-width: 600px) {
   .customers-toolbar { padding: 0 12px; }
   .customers-toolbar > .order-filter-control { flex-basis: 100%; max-width: none; }

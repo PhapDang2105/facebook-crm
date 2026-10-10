@@ -2034,9 +2034,9 @@ function renderDiscountOatsGift(templates, context = {}) {
   const enough = bagCount >= 2;
   const giftText = (priced?.gifts || []).filter(g => !isFreeShippingGift(g)).map(g => g.name).join(' + ');
   const twoGiftText = (two?.gifts || []).filter(g => !isFreeShippingGift(g)).map(g => g.name).join(' + ');
-  // R17 (inbox1 A2, inbox5 A1): lời cũ trong Cài đặt còn {oats_gift} (quà yến mạch đã bỏ 09/10, OATS_GIFT_LABEL = '') →
+  // R17 (inbox1 A2, inbox5 A1): lời cũ trong Cài đặt còn {oats_gift} (quà yến mạch đã bỏ 09/10, bộ soạn không điền nữa) →
   // fill() bỏ cả dòng đầu: khách mặc cả chỉ nhận "Giỏ của mình…" hay không nhận gì. Lời cũ → dùng lời mặc định.
-  const text = /\{oats_gift\}/.test(String(templates.DISCOUNT_OATS_GIFT || '')) && !OATS_GIFT_LABEL
+  const text = /\{oats_gift\}/.test(String(templates.DISCOUNT_OATS_GIFT || ''))
     ? r15FallbackTemplates.DISCOUNT_OATS_GIFT
     : templates.DISCOUNT_OATS_GIFT;
   return fill(text, {

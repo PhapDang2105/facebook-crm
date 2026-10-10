@@ -38,7 +38,6 @@ import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { flushDecisionLog } from './processing/decision-log.mjs';
 import { clearStaffIdleRechecks } from './processing/staff-idle.mjs';
 import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingOrders, listRecentLandingPayloads, parseLandingBody, readLandingStore, recordLandingOrder, updateLandingStore } from './landing-orders.mjs';
-import { completeShopeeAuthorization, consumeShopeeState, disconnectShopee, saveShopeeApp, shopeeAuthUrl, shopeeStatus, startShopeeTokenRefresh, testShopeeConnection } from './shopee.mjs';
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { configurePosSync, posSyncStatus, recordPosSyncStatus, runPosSync, startPosSync } from './pos-sync.mjs';
 import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
@@ -2648,52 +2647,6 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 400, { error: error.message });
       }
     }
-    // Shopee Open Platform (Cài đặt → Kênh): dán Partner ID/Key, ủy quyền shop, kiểm tra. Không bao giờ trả khoá/token.
-    if (request.method === 'GET' && url.pathname === '/api/shopee') return sendJson(response, 200, shopeeStatus());
-    if (request.method === 'POST' && url.pathname === '/api/shopee/app') {
-      if (!(await requireManager(request, response))) return;
-      const payload = await readBody(request);
-      try {
-        await saveShopeeApp({ partnerId: payload.partnerId, partnerKey: payload.partnerKey });
-        audit(request, 'settings.shopee', { target: { type: 'shopee', id: String(payload.partnerId || '').slice(0, 20), name: 'Shopee' }, summary: 'Lưu khoá app Shopee.' });
-        return sendJson(response, 200, shopeeStatus());
-      } catch (error) {
-        return sendJson(response, 400, { error: error.message });
-      }
-    }
-    if (request.method === 'POST' && url.pathname === '/api/shopee/connect') {
-      if (!(await requireManager(request, response))) return;
-      try {
-        return sendJson(response, 200, { url: shopeeAuthUrl(metaConfig.publicBaseUrl).url });
-      } catch (error) {
-        return sendJson(response, 400, { error: error.message });
-      }
-    }
-    if (request.method === 'GET' && url.pathname === '/api/shopee/callback') {
-      const back = message => redirect(response, `/?${message}#settings`);
-      if (!consumeShopeeState(url.searchParams.get('state'))) return back(`shopee_error=${encodeURIComponent('Phiên kết nối Shopee không hợp lệ hoặc đã hết hạn, bấm Kết nối lại.')}`);
-      try {
-        const status = await completeShopeeAuthorization({ code: url.searchParams.get('code'), shopId: url.searchParams.get('shop_id') });
-        audit(request, 'settings.shopee', { target: { type: 'shopee', id: status.shopId, name: status.shopName || 'Shopee' }, summary: `Kết nối shop Shopee ${status.shopName || status.shopId}.` });
-        return back('shopee=connected');
-      } catch (error) {
-        return back(`shopee_error=${encodeURIComponent(String(error.message || error).slice(0, 200))}`);
-      }
-    }
-    if (request.method === 'POST' && url.pathname === '/api/shopee/test') {
-      if (!(await requireManager(request, response))) return;
-      try {
-        return sendJson(response, 200, await testShopeeConnection());
-      } catch (error) {
-        return sendJson(response, 400, { error: error.message });
-      }
-    }
-    if (request.method === 'DELETE' && url.pathname === '/api/shopee') {
-      if (!(await requireManager(request, response))) return;
-      await disconnectShopee();
-      audit(request, 'settings.shopee', { target: { type: 'shopee', id: '', name: 'Shopee' }, summary: 'Ngắt kết nối Shopee.' });
-      return sendJson(response, 200, shopeeStatus());
-    }
     if (request.method === 'DELETE' && url.pathname === '/api/phone-warnings/pos') {
       if (!(await requireManager(request, response))) return;
       const disconnected = await disconnectPos();
@@ -4270,8 +4223,6 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   startFollowUpLoop({ readSettings: readChatbotSettings, sendMessage: sendConversationMessage, conversationInfo: followUpConversationInfo });
   // Sapo: mã vận đơn J&T/SPX (đơn Facebook nhân viên import từ Pancake) ghép vào đơn CRM mỗi 10 phút;
   // báo khách theo giai đoạn (bật/tắt ở trang Vận chuyển): trong 24 giờ máy chủ tự gửi, ngoài 24 giờ vào hàng chờ.
-  // Shopee: giữ token của shop đã kết nối luôn còn hạn (token 4 giờ, refresh_token 30 ngày đổi mới mỗi lần làm mới).
-  startShopeeTokenRefresh();
   startSapoSync({
     readMessagingStore,
     updateMessagingStore,

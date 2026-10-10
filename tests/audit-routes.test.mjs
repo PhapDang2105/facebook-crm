@@ -17,8 +17,6 @@ const EXEMPT = [
   { marker: "'/api/chatbot/test'", reason: 'thử câu trả lời của bot (xem trước), không lưu gì' },
   { marker: "'/api/orders/price'", reason: 'tính giá giỏ cho form tạo đơn, không lưu gì' },
   { marker: "'/api/orders/export/preview'", reason: 'xem trước file xuất kho, không lưu gì (xuất thật ghi order.export)' },
-  { marker: "'/api/shopee/connect'", reason: 'chỉ tạo link ủy quyền Shopee; kết nối thật ghi settings.shopee ở trang chuyển về' },
-  { marker: "'/api/shopee/test'", reason: 'kiểm tra kết nối Shopee (đọc tên shop, đếm đơn), không lưu dữ liệu khách' },
   { marker: "'/api/chatbot/follow-ups/release'", reason: 'nhả giữ chỗ lô bám đuổi khi Dừng/đóng trang, không đổi dữ liệu khách' }
 ];
 

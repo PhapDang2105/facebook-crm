@@ -35,7 +35,6 @@ const sandboxFiles = {
   CHATBOT_SETTINGS_PATH: 'chatbot-settings.json',
   CUSTOMER_FILE_PATH: 'customer-file.json',
   CUSTOMER_EDITS_PATH: 'customer-edits.json',
-  SHOPEE_CONFIG_PATH: 'shopee-config.json',
   FOLLOW_UPS_PATH: 'follow-ups.json',
   QR_SCANS_PATH: 'qr-scans.json',
   QR_SETTINGS_PATH: 'qr-settings.json',

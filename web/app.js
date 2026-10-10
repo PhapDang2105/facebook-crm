@@ -1166,7 +1166,7 @@ function showView(name) {
   if (name === 'reports') loadReports();
   // Kênh Pancake POS chỉ nằm ở mục Kênh: mục khác đang mở thì không hỏi (showSettingsSection
   // tự gọi khi chọn Kênh).
-  if (name === 'settings' && !settingsPanels.get('channels')?.classList.contains('hidden')) { loadPosChannel(); loadShopeeChannel(); }
+  if (name === 'settings' && !settingsPanels.get('channels')?.classList.contains('hidden')) loadPosChannel();
 }
 
 // ---------------------------------------------------------------------------
@@ -1361,96 +1361,6 @@ document.querySelector('#pos-connect-form')?.addEventListener('submit', async ev
     showToast(`Đã kết nối Pancake POS: ${result.shopName || result.shopId}.`, 'success');
   } catch (error) {
     showToast(error.message || 'Chưa kết nối được Pancake POS.', 'error');
-  } finally {
-    if (button) button.disabled = false;
-  }
-});
-
-// ---- Cài đặt → Kênh → Shopee
-// Chủ shop dán Partner ID / Partner Key của app trên open.shopee.com (Lưu khoá), rồi bấm "Kết nối shop Shopee" để
-// sang Shopee ủy quyền; Shopee chuyển về /api/shopee/callback và máy chủ giữ token. Khoá không bao giờ quay lại trình duyệt.
-const shopeeChannelList = document.querySelector('#shopee-channel-list');
-
-function renderShopeeChannel(status) {
-  if (!shopeeChannelList) return;
-  const idInput = document.querySelector('#shopee-partner-id');
-  if (idInput && !idInput.value && status?.partnerId) idInput.value = status.partnerId;
-  const keyInput = document.querySelector('#shopee-partner-key');
-  if (keyInput) keyInput.placeholder = status?.appConfigured ? `Đã lưu khoá ${status.keyHint} — dán khoá mới nếu muốn đổi` : 'Dán Live API Partner Key';
-  const date = value => (Number(value) ? new Date(Number(value)).toLocaleDateString('vi-VN') : '');
-  if (status?.connected) {
-    shopeeChannelList.innerHTML = `<article class="channel-item"><span class="channel-item-avatar shopee-avatar">S</span>
-      <div class="channel-item-copy"><strong>${escapeHtml(status.shopName || 'Shop Shopee')}</strong><small><span class="channel-connected-dot"></span>Shop ID ${escapeHtml(status.shopId)} · app ${escapeHtml(status.partnerId)}${status.authExpireAt ? ` · ủy quyền tới ${escapeHtml(date(status.authExpireAt))}` : ''}</small></div>
-      <div class="channel-item-actions"><button class="channel-connect-button" type="button" data-shopee-action="test">Kiểm tra</button><button class="channel-remove-button" type="button" data-shopee-action="disconnect">Ngắt kết nối</button></div></article>
-      ${status.lastError ? `<p class="field-warning" role="status">${escapeHtml(status.lastError)}</p>` : ''}`;
-    return;
-  }
-  shopeeChannelList.innerHTML = status?.appConfigured
-    ? `<article class="channel-item"><span class="channel-item-avatar shopee-avatar">S</span>
-        <div class="channel-item-copy"><strong>Đã lưu khoá app ${escapeHtml(status.partnerId)}</strong><small>${status.expired ? 'Ủy quyền đã hết hạn, kết nối lại để tiếp tục.' : 'Bước cuối: bấm Kết nối shop Shopee, đăng nhập tài khoản shop trên trang Shopee và bấm Xác nhận ủy quyền.'}</small></div>
-        <div class="channel-item-actions"><button class="channel-connect-button" type="button" data-shopee-action="connect">Kết nối shop Shopee</button></div></article>`
-    : '<p class="channel-empty">Chưa kết nối. Trên open.shopee.com → Console → App List → app của shop: chép "Live Partner_id" và "Live API Partner Key" (bấm hình con mắt để hiện), dán vào hai ô bên trên rồi bấm Lưu khoá.</p>';
-}
-
-let shopeeChannelRequest = null;
-function loadShopeeChannel() {
-  if (!shopeeChannelList) return Promise.resolve();
-  shopeeChannelRequest ||= (async () => {
-    try {
-      renderShopeeChannel(await readApiResponse(await fetch('/api/shopee')));
-    } catch (error) {
-      shopeeChannelList.innerHTML = `<p class="channel-empty">${escapeHtml(error.message || 'Chưa kiểm tra được kết nối Shopee.')}</p>`;
-    } finally {
-      shopeeChannelRequest = null;
-    }
-  })();
-  return shopeeChannelRequest;
-}
-
-document.querySelector('#shopee-app-form')?.addEventListener('submit', async event => {
-  event.preventDefault();
-  const partnerId = document.querySelector('#shopee-partner-id')?.value.trim() || '';
-  const keyInput = document.querySelector('#shopee-partner-key');
-  const partnerKey = keyInput?.value.trim() || '';
-  if (!partnerId || !partnerKey) { showToast('Điền Partner ID và dán Partner Key trước đã.', 'warning'); return; }
-  const button = event.currentTarget.querySelector('button');
-  if (button) button.disabled = true;
-  try {
-    const status = await readApiResponse(await fetch('/api/shopee/app', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ partnerId, partnerKey }) }));
-    keyInput.value = '';
-    renderShopeeChannel(status);
-    showToast('Đã lưu khoá app Shopee. Bấm "Kết nối shop Shopee" để ủy quyền.', 'success');
-  } catch (error) {
-    showToast(error.message || 'Chưa lưu được khoá Shopee.', 'error');
-  } finally {
-    if (button) button.disabled = false;
-  }
-});
-
-shopeeChannelList?.addEventListener('click', async event => {
-  const action = event.target.closest('[data-shopee-action]')?.dataset.shopeeAction;
-  if (!action) return;
-  const button = event.target.closest('button');
-  try {
-    if (action === 'connect') {
-      button.disabled = true;
-      const { url } = await readApiResponse(await fetch('/api/shopee/connect', { method: 'POST' }));
-      window.location.href = url;
-      return;
-    }
-    if (action === 'test') {
-      button.disabled = true;
-      const result = await readApiResponse(await fetch('/api/shopee/test', { method: 'POST' }));
-      showToast(`Kết nối Shopee tốt: ${result.shopName || 'shop'} có ${result.ordersLast7Days} đơn trong 7 ngày qua.`, 'success');
-      loadShopeeChannel();
-      return;
-    }
-    if (action === 'disconnect') {
-      if (!window.confirm('Ngắt kết nối Shopee? Khoá app và token đã lưu sẽ bị xóa khỏi máy chủ.')) return;
-      renderShopeeChannel(await readApiResponse(await fetch('/api/shopee', { method: 'DELETE' })));
-    }
-  } catch (error) {
-    showToast(error.message || 'Thao tác Shopee chưa thành công.', 'error');
   } finally {
     if (button) button.disabled = false;
   }
@@ -8297,7 +8207,7 @@ function showSettingsSection(name = 'channels') {
   settingsPanels.forEach((panel, panelName) => panel.classList.toggle('hidden', panelName !== section));
   settingsSectionButtons.forEach(button => button.classList.toggle('active', button.dataset.settingsSection === section));
   if (section === 'chatbot') loadChatbotSettings();
-  if (section === 'channels') { loadPosChannel(); loadShopeeChannel(); }
+  if (section === 'channels') loadPosChannel();
   if (section === 'products') loadProducts().catch(error => {
     renderProductLoadError();
     showToast(error.message || 'Chưa tải được danh mục sản phẩm.', 'error');
@@ -14075,12 +13985,6 @@ loadMessageChannels().catch(() => {});
 loadProducts().catch(renderProductLoadError);
 if (metaConnectionParams.has('meta_error')) {
   showToast(metaConnectionParams.get('meta_error'), 'error');
-  history.replaceState(null, '', `${window.location.pathname}#settings`);
-}
-// Shopee chuyển về sau ủy quyền (/api/shopee/callback → /?shopee=connected hoặc ?shopee_error=…#settings).
-if (metaConnectionParams.has('shopee') || metaConnectionParams.has('shopee_error')) {
-  if (metaConnectionParams.has('shopee_error')) showToast(metaConnectionParams.get('shopee_error'), 'error');
-  else showToast('Đã kết nối shop Shopee.', 'success');
   history.replaceState(null, '', `${window.location.pathname}#settings`);
 }
 if (metaConnectionParams.has('meta_ticket')) {

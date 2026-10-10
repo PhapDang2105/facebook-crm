@@ -2623,10 +2623,6 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .pos-badge { display: inline-grid; place-items: center; width: 31.5px; height: 31.5px; border-radius: 9px; background: #1a56db; color: #fff; font-size: 11px; font-weight: 700; }
 .pos-avatar { background: #1a56db; }
 .pos-connect-form { display: flex; gap: 8px; align-items: center; }
-.shopee-badge { display: inline-grid; place-items: center; width: 31.5px; height: 31.5px; border-radius: 9px; background: #ee4d2d; color: #fff; font-size: 14px; font-weight: 800; }
-.shopee-avatar { background: #ee4d2d; }
-.shopee-app-form input#shopee-partner-id { width: 150px; }
-.shopee-app-form input#shopee-partner-key { width: 300px; }
 .pos-connect-form input { width: 320px; max-width: 45vw; height: 36px; padding: 0 12px; border: 1.125px solid #dcdfe4; border-radius: 9px; font: inherit; font-size: 13.5px; }
 
 /* ======================================================================

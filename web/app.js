@@ -993,7 +993,8 @@ const labelAutoChoices = [
   { value: 'followup-won', label: 'Khi khách được bám đuổi chốt đơn' },
   { value: 'phone', label: 'Khi khách để lại số điện thoại' },
   { value: 'shipment-sent', label: 'Khi đã gửi mã/hành trình vận đơn cho khách' },
-  { value: 'delivered', label: 'Khi vận đơn giao thành công' }
+  { value: 'delivered', label: 'Khi vận đơn giao thành công' },
+  { value: 'remarketing', label: 'Khi khách nhắn tới từ link ref (m.me?ref=…, mã QR thẻ cảm ơn)' }
 ];
 let quickReplyDraft = null;
 let quickReplyPickerMatches = [];

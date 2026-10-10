@@ -20,7 +20,7 @@ export function foldVietnamese(value) {
 // livestream: khách đến từ phiên live · wholesale: hỏi sỉ/CTV · bad: số hay bom hàng ·
 // phone: khách ghi số điện thoại trong tin/bình luận (app/phone-labels.mjs) ·
 // shipment-sent / delivered: đã gửi hành trình vận đơn cho khách / vận đơn giao thành công (app/sapo-sync.mjs).
-export const autoLabelEvents = Object.freeze(['order', 'handoff', 'complaint', 'update', 'cancel', 'warranty', 'livestream', 'wholesale', 'bad', 'followup', 'followup-won', 'phone', 'shipment-sent', 'delivered']);
+export const autoLabelEvents = Object.freeze(['order', 'handoff', 'complaint', 'update', 'cancel', 'warranty', 'livestream', 'wholesale', 'bad', 'followup', 'followup-won', 'phone', 'shipment-sent', 'delivered', 'remarketing']);
 
 // Mẫu tin bot chọn khi khách hỏi bảo hành/đổi trả hay muốn mua sỉ.
 export const warrantyTemplateIds = Object.freeze(['OIL_SMELL_WARRANTY', 'INSPECTION_RETURN_POLICY']);

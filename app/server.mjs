@@ -18,6 +18,7 @@ import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, 
 import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
+import { applyRemarketingLabels } from './remarketing-labels.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { aiKeyReentryError, assertUsableAiEndpoint, chatbotSettingsStore, mergeChatbotSettingsPatch, mergeMessageTemplatesPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
@@ -792,6 +793,42 @@ async function runPhoneLabelPass(conversationIds = null) {
   for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
   if (result.changes.length && !conversationIds) console.log(`Thẻ Số điện thoại: gắn bù cho ${result.changes.length} hội thoại.`);
   return result.changes.length;
+}
+
+/** Thẻ "Re-marketing" (sự kiện 'remarketing'): khách vào từ link ref. `conversationIds` = chỉ các hội thoại vừa có tin. */
+async function runRemarketingLabelPass(conversationIds = null) {
+  const labelDefs = await inboxLabelDefs();
+  const labels = labelsForEvents(labelDefs, ['remarketing']);
+  if (!labels.length) return 0;
+  let result = { changes: [], flagged: 0 };
+  const relabeled = [];
+  await updateMessagingStore(store => {
+    result = applyRemarketingLabels(store, { labels, conversationIds });
+    for (const change of result.changes) {
+      const conversation = store.conversations.find(item => item.id === change.conversation.id);
+      if (conversation) relabeled.push(publicConversation(conversation));
+    }
+    return null;
+  }, { defer: Boolean(conversationIds), unchanged: () => !result.flagged });
+  for (const change of result.changes) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason: 'khách vào từ link ref' });
+  for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
+  if (result.changes.length && !conversationIds) console.log(`Thẻ Re-marketing: gắn bù cho ${result.changes.length} hội thoại.`);
+  return result.changes.length;
+}
+
+// Mọi tin vừa về: gom 3 giây rồi xét link ref của các hội thoại đó (rẻ — hội thoại không có link ref bỏ qua ngay).
+const pendingRemarketingIds = new Set();
+let remarketingTimer = null;
+function queueRemarketingLabel(event) {
+  if (event?.type !== 'message' || event.updated || !event.conversation?.id) return;
+  pendingRemarketingIds.add(event.conversation.id);
+  remarketingTimer ||= setTimeout(() => {
+    remarketingTimer = null;
+    const ids = [...pendingRemarketingIds];
+    pendingRemarketingIds.clear();
+    runRemarketingLabelPass(ids).catch(error => console.warn(`Gắn thẻ Re-marketing lỗi: ${error.message}`));
+  }, 3000);
+  remarketingTimer.unref?.();
 }
 
 // Tin khách vừa về (webhook Meta/Pancake, đồng bộ Pancake) có ghi SĐT: gom 2 giây rồi gắn một lượt.
@@ -4256,6 +4293,11 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   setInterval(purchaseLabelPass, 5 * 60 * 1000).unref?.();
   // Thẻ "Số điện thoại": gắn ngay khi tin khách có SĐT về, quét bù 40 giây sau khởi động rồi mỗi 5 phút.
   subscribeToMessagingEvents(queuePhoneLabel);
+  // Thẻ "Re-marketing": khách vào từ link ref — gắn khi tin về, quét bù 50 giây sau khởi động rồi mỗi 5 phút.
+  subscribeToMessagingEvents(queueRemarketingLabel);
+  const remarketingLabelPass = () => runRemarketingLabelPass().catch(error => console.warn(`Gắn bù thẻ Re-marketing lỗi: ${error.message}`));
+  setTimeout(remarketingLabelPass, 50 * 1000).unref?.();
+  setInterval(remarketingLabelPass, 5 * 60 * 1000).unref?.();
   const phoneLabelPass = () => runPhoneLabelPass().catch(error => console.warn(`Gắn bù thẻ Số điện thoại lỗi: ${error.message}`));
   setTimeout(phoneLabelPass, 40 * 1000).unref?.();
   setInterval(phoneLabelPass, 5 * 60 * 1000).unref?.();

@@ -34,7 +34,9 @@ export const defaultConversationLabels = Object.freeze([
   // Vận đơn Sapo (03/10): đã gửi mã/hành trình vận đơn cho khách; vận đơn giao thành công.
   { id: 'shipment-sent', name: 'Đã gửi mã vận đơn', color: '#f97316', icon: 'pickup-truck', auto: 'shipment-sent' },
   { id: 'delivered', name: 'Giao hàng thành công', color: '#22c55e', icon: 'check-mark-button', auto: 'delivered' },
-  { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck', auto: '' }
+  { id: 'jt', name: 'Giao J&T', color: '#b0714b', icon: 'delivery-truck', auto: '' },
+  // Khách nhắn tới từ link ref (m.me?ref=…, QR thẻ cảm ơn) — tự gắn (10/10, app/remarketing-labels.mjs); lọc ở Tin nhắn, Khách hàng.
+  { id: 'remarketing', name: 'Re-marketing', color: '#7c3aed', icon: 'megaphone', auto: 'remarketing' }
 ]);
 
 /**

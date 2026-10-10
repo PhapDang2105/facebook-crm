@@ -54,12 +54,15 @@ test('#2 BOUGHT_ELSEWHERE: khiếu nại / câu nhiều ý không bị nuốt; c
 });
 
 test('#3 NO_EAT: "dị ứng …" / thành phần không có trong granola → INGREDIENTS_ALLERGY (không "cả 3 túi đều có đậu phộng")', () => {
-  for (const text of ['bé dị ứng đậu phộng có ăn được không', 'bé dị ứng đậu phộng', 'mình bị dị ứng hạt điều']) {
+  // R17 (gói C, inbox1 A7 / inbox4 H3 — FIX-R17 "Dị ứng"): dị ứng thứ KHÔNG có trong thành phần → INGREDIENT_NOT_INCLUDED (xác nhận
+  // không có + bảng thành phần), dị ứng thứ CÓ trong cả 3 túi → ALLERGY_HAS_INGREDIENT ("không nên dùng"), thay bảng INGREDIENTS_ALLERGY.
+  for (const [text, template] of [['bé dị ứng đậu phộng có ăn được không', 'INGREDIENT_NOT_INCLUDED'], ['bé dị ứng đậu phộng', 'INGREDIENT_NOT_INCLUDED'], ['mình bị dị ứng hạt điều', 'ALLERGY_HAS_INGREDIENT']]) {
     const result = ruleIntent(text, inbox());
     assert.notEqual(result?.rule, 'NO_VARIANT', text);
-    assert.equal(tpl(result), 'INGREDIENTS_ALLERGY', text);
+    assert.equal(tpl(result), template, text);
   }
-  assert.notEqual(ruleIntent('đậu phộng không ăn được', inbox())?.value?.values?.ingredient, 'đậu phộng');
+  // R17: không còn NO_VARIANT ("cả 3 túi đều có đậu phộng") — nay INGREDIENT_NOT_INCLUDED ("không có đậu phộng").
+  assert.equal(tpl(ruleIntent('đậu phộng không ăn được', inbox())), 'INGREDIENT_NOT_INCLUDED');
   // Thành phần có thật vẫn NO_VARIANT (ca thật …350724).
   assert.equal(ruleIntent('vậy chị cảm ơn có trái cây sấy không ăn đc', inbox({ botLastTemplateId: 'NO_ADDED_SUGAR', botLastAgeMin: 2 }))?.rule, 'NO_VARIANT');
   assert.equal(ruleIntent('mình đang kiêng ăn hạt', inbox())?.value?.values?.ingredient, 'hạt');

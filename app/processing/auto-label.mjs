@@ -47,9 +47,13 @@ export const defaultComplaintKeywords = [
   'đổi trả', 'trả hàng', 'hoàn tiền', 'bồi thường'
 ].join(', ');
 
+// R17 (bình luận A2, ca …229538 "Hũ hạnh nhân sấy mộc có ko e" → xin lỗi công khai + thẻ Khiếu nại/Bảo hành): bỏ dấu thì "mộc"
+// (sấy mộc, vị mộc, "mộc mạc") và "mọc" trùng từ khoá "mốc". Chữ CÒN DẤU "mộc"/"mọc" đổi sang một từ khác trước khi bỏ dấu, nên
+// chỉ "mốc" (hay "moc" gõ không dấu, như cũ) mới khớp.
+const ACCENT_COLLISIONS = /(?<![\p{L}\p{N}])m(?:ộ|ọ)c(?![\p{L}\p{N}])/giu;
 /** Cắt câu thành danh sách từ đã bỏ dấu. */
 function toWords(value) {
-  return foldVietnamese(value).split(/[^a-z0-9]+/).filter(Boolean);
+  return foldVietnamese(String(value ?? '').normalize('NFC').replace(ACCENT_COLLISIONS, 'mocx')).split(/[^a-z0-9]+/).filter(Boolean);
 }
 
 /** Dãy từ `needle` có nằm liền nhau trong `haystack` không. */

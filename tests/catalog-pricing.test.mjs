@@ -54,8 +54,9 @@ test('giỏ cùng nhóm ghép (túi lớn, Tropical, combo 10 gói) tự tính m
   // 3 túi lẻ ×1..3 + mọi bộ ghép ≤3 của 3 túi trộn được + 6 sản phẩm còn lại ×1..3.
   // R16: Combo 10 gói Cam (CB10-CAM-G30) tắt trong seed (chủ shop 03/10: combo 10 gói chỉ còn Xanh) → 7 thành 6 (sửa test cũ
   // vì nó khẳng định Cam còn bán). Chủ shop 05/10: tắt thêm Combo 10 gói Nâu và Mix → 6 thành 4.
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại → 4 thành 5.
   const combos = catalog.listCombos();
-  assert.equal(combos.length, 4 * 3 + 19);
+  assert.equal(combos.length, 5 * 3 + 19);
   assert.equal(new Set(combos.map(combo => combo.key)).size, combos.length);
   // Quy tắc quà: từ 2 sản phẩm miễn ship; từ 3 thêm bát + muỗng, trừ Nghệ Lành và Hạt An Lành.
   assert.deepEqual(catalog.giftsForKey('MIX5-H420=3').map(gift => gift.name), ['Miễn phí vận chuyển']);
@@ -104,9 +105,10 @@ test('quà "chỉ khách livestream" (livestreamOnly): khách thường không c
   assert.equal(catalog.normalizeGift({ name: 'Chuỗi', minQuantity: 2, livestreamOnly: 'true' }).livestreamOnly, false);
   const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
   const gifts = JSON.parse(original);
-  // Đúng bản quà sống 28/09: Quà Tặng LIVE đúng 2 túi, chỉ khách livestream. Bài này thử CƠ CHẾ livestreamOnly nên bỏ
-  // quà live đang có trong bảng quà mẫu (Quạt, 08/10) để không lẫn; chính sách hiện hành: tests/live-gift-bat-muong.test.mjs.
-  gifts.items = gifts.items.filter(gift => !gift.livestreamOnly);
+  // Đúng bản quà sống 28/09: Quà Tặng LIVE đúng 2 túi, chỉ khách livestream.
+  // R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, chỉ khách live, cả 3 túi; xem live-gift-bat-muong.test.mjs);
+  // test này kiểm cơ chế livestreamOnly bằng quà sống 28/09 nên bỏ live-quat trước khi thêm.
+  gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat');
   gifts.items.push({ id: 'qua-tang-live', name: 'Quà Tặng LIVE', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 });
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   catalog.reloadCatalog();
@@ -223,8 +225,10 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   // Chủ shop 05/10: Combo 10 gói Nâu tắt (chỉ còn Xanh) — test cũ dùng PRICE_TUI_NAU_NHO, nay PRICE_TUI_XANH_NHO.
   assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_XANH_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Xanh.*\n🌿 Combo Dùng Thử \(350g\):\n🏷️ Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ\n━+\n🔥 2 Combo Tiện Lợi \(700g\):/);
   const policy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates).messages[0];
-  // Mỗi quy tắc một dòng; quà cùng quy tắc gộp chung; quà chỉ khách live (Quạt, 08/10) ghi rõ đối tượng.
-  assert.match(policy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Quạt: từ 2 sản phẩm \(chỉ khách livestream\)\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm \(trừ Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)/);
+  // Mỗi quy tắc một dòng; quà cùng quy tắc gộp chung.
+  // R17: quà live 08/10 — bảng quà có thêm dòng Quạt (chỉ khách livestream, chỉ túi lớn: không Tropical / combo 10 gói — quyết
+  // định chủ shop 10/10 mục 3) giữa miễn ship và bát + muỗng.
+  assert.match(policy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Quạt: từ 2 sản phẩm \(trừ Granola Tropical vị Cacao 300g, Combo 10 gói Xanh, Combo 10 gói Cam, Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\) \(chỉ khách livestream\)\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm \(trừ Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)/);
   const strike = text => [...text].map(char => `${char}\u0336`).join('');
   const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
   assert.equal(quote.messages[0], [
@@ -312,13 +316,12 @@ test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu 
   products.items[0].salePrice = 199000;
   writeFileSync(process.env.PRODUCTS_PATH, JSON.stringify(products));
   const gifts = JSON.parse(readFileSync(process.env.GIFTS_PATH, 'utf8'));
-  // Chọn quà theo mã, không theo vị trí: bảng quà mẫu thêm dòng mới (Quạt live 08/10) là lệch hết chỉ số.
-  const gift = id => gifts.items.find(item => item.id === id);
-  gift('muong-dua').active = false;
+  // R17: quà live 08/10 — seed thêm Quạt (live-quat) ở vị trí 1 nên tắt Muỗng theo mã, không theo vị trí.
+  gifts.items.find(gift => gift.id === 'muong-dua').active = false;
   gifts.shippingFee = 20000;
   // Miễn ship giờ chỉ từ 3 sản phẩm và không áp dụng cho Túi Xanh.
-  gift('freeship').minQuantity = 3;
-  gift('freeship').excludedSkus = ['GRA-XANH-Z450'];
+  gifts.items[0].minQuantity = 3;
+  gifts.items[0].excludedSkus = ['GRA-XANH-Z450'];
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   catalog.reloadCatalog();
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 1 }).total, 219000);

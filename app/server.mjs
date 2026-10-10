@@ -21,7 +21,7 @@ import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { aiKeyReentryError, assertUsableAiEndpoint, chatbotSettingsStore, mergeChatbotSettingsPatch, mergeMessageTemplatesPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
-import { processChatbotChanges, requestDirectModelReply, warmUpChatbotModels } from './chatbot-engine.mjs';
+import { processChatbotChanges, recordSkippedChange, requestDirectModelReply, warmUpChatbotModels } from './chatbot-engine.mjs';
 import { configureAddressAi } from './processing/address-ai.mjs';
 import { loadCampaignReport, loadCampaignReports, normalizeRangeDays } from './campaigns.mjs';
 import { loadDashboard, normalizeDashboardCustomRange, normalizeDashboardDays } from './dashboard.mjs';
@@ -1400,6 +1400,8 @@ await initializeStore();
 const chatbotDependencies = {
   readSettings: readChatbotSettings,
   listMessages,
+  // R17 (inbox4 T4): tin không đưa bot (hội thoại nhân viên đã nhận trên Pancake) vẫn có một dòng trong nhật ký quyết định.
+  recordBotSkip: (change, reason) => recordSkippedChange(change, reason),
   // Bot đọc lại hội thoại trước khi trả lời: tin trước trong hàng đợi có thể
   // vừa lưu giỏ hàng, hay nhân viên vừa tắt bot.
   getConversation,

@@ -1,6 +1,7 @@
-// 05/10 (chủ shop): "khách không muốn lấy quạt → đổi quạt sang muỗng dừa: combo 2 được tặng Bát gáo dừa + Muỗng dừa".
-// Bot TỰ đổi cho khách live đang được "Quạt + Bát gáo dừa" (giỏ chờ, hay đơn bot tạo < 60 phút): quà = giftOverride
-// [BGD, MUONG]. Bỏ cả bát / xin quà khác / đơn quá 60 phút → luồng GIFT_SWAP như cũ (ghi chú + xin duyệt).
+// 05/10 (chủ shop): khách live không lấy quạt → bot TỰ đổi quà (giỏ chờ, hay đơn bot tạo < 60 phút): giftOverride.
+// R17 (chủ shop 10/10, quyết định 12 — thay 05/10 "đổi sang muỗng dừa"): combo 2 live (quà Quạt, bảng quà 08/10) bỏ quạt →
+// 1 Bát gáo dừa (BGD, không muỗng); live 3 túi (Quạt + bát + muỗng) bỏ quạt → còn bát + muỗng. Bỏ cả bát / xin quà khác /
+// đơn quá 60 phút → luồng GIFT_SWAP như cũ (ghi chú + xin duyệt).
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -15,7 +16,8 @@ const LIVE_GIFT = { id: 'qua-tang-live', name: 'Quạt + Bát gáo dừa', activ
 async function withLiveGift(run) {
   const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
   const gifts = JSON.parse(original);
-  gifts.items.push(LIVE_GIFT);
+  // R17: bảng quà seed đã có Quạt chỉ khách live (live-quat, 08/10) — dùng đúng bảng đó, không thêm quà live gộp cũ.
+  gifts.items = gifts.items.filter(gift => gift.id !== LIVE_GIFT.id);
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   reloadCatalog();
   try { return await run(); } finally { writeFileSync(process.env.GIFTS_PATH, original); reloadCatalog(); }
@@ -24,6 +26,7 @@ const MIN = 60 * 1000;
 const LIVE_POST = { id: 'live-1', message: 'Săn deal cùng Giọt Nắng ạ' };
 const ADDRESS = '12 Nguyễn Trãi, phường Bến Thành, Quận 1, TP HCM';
 const SPOON = [{ name: 'Bộ bát gáo dừa', sku: 'BGD', quantity: 1, weight: 10, giftId: 'bo-bat-gao-dua' }, { name: 'Muỗng dừa', sku: 'MUONG', quantity: 1, weight: 10, giftId: 'muong-dua' }];
+const BOWL = [SPOON[0]];
 const skus = list => (list || []).map(item => item.sku);
 const giftLines = payload => payload.items.filter(item => item.is_bonus_product).map(item => `${item.variation_id}x${item.quantity}`);
 
@@ -37,10 +40,11 @@ test('nhận câu "chỉ bỏ quạt" (câu khách thật) và loại câu bỏ 
   assert.equal(asksSpoonIncluded('có thìa dừa không'), true);
   assert.equal(asksSpoonIncluded('Có muỗng ko e'), true);
   assert.equal(asksSpoonIncluded('ko lấy muỗng'), false);
-  assert.deepEqual(fanToSpoonGifts(), SPOON, 'tên / SKU / khối lượng theo bảng quà');
+  assert.deepEqual(fanToSpoonGifts(), BOWL, 'combo 2: 1 bát gáo dừa — tên / SKU / khối lượng theo bảng quà');
+  assert.deepEqual(fanToSpoonGifts(undefined, { bags: 3 }), SPOON, 'live 3 túi bỏ quạt: còn bát + muỗng');
 });
 
-test('giỏ live 1 Xanh + 1 Vàng: "C ko lấy quạt .bỏ ra hộ c về ko dùng phí" → bot tự đổi, giỏ mang bát + muỗng; chốt đơn → POS có BGD + MUONG, không QUA-TANG-LIVE', async () => {
+test('giỏ live 1 Xanh + 1 Vàng: "C ko lấy quạt .bỏ ra hộ c về ko dùng phí" → bot tự đổi sang 1 Bát gáo dừa; chốt đơn → POS có BGD, không QUA-TANG-LIVE', async () => {
   await withLiveGift(async () => {
     const sim = new Sim();
     const inbox = sim.inbox({ labels: ['livestream'], post: LIVE_POST, botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 2 * MIN, pendingOrder: basket([XANH(1), VANG(1)], 2 * MIN, { livestream: true }) });
@@ -48,24 +52,22 @@ test('giỏ live 1 Xanh + 1 Vàng: "C ko lấy quạt .bỏ ra hộ c về ko d�
     const turn = await sim.send(inbox, 'C ko lấy quạt .bỏ ra hộ c về ko dùng phí', { llm: () => { throw new Error('không hỏi mô hình'); } });
     assert.equal(turn.result.templateId, 'ORDER_ADDRESS_REMIND', JSON.stringify(turn.result));
     const said = turn.sent.map(item => item.text).join('\n');
-    assert.match(said, /đổi quạt sang muỗng dừa/);
-    assert.match(said, /Bát gáo dừa \+ Muỗng dừa/);
+    assert.match(said, /đổi quạt/);
+    assert.match(said, /Quà của mình bây giờ là Bộ bát gáo dừa ạ/);
+    assert.doesNotMatch(said, /Muỗng/);
     assert.match(said, /vẫn đang giữ đơn/, 'kèm câu nhắc giỏ');
     assert.doesNotMatch(said, /bộ phận phụ trách cho phép/, 'không xin duyệt');
-    assert.deepEqual(skus(inbox.pendingOrder.giftOverride), ['BGD', 'MUONG']);
+    assert.deepEqual(skus(inbox.pendingOrder.giftOverride), ['BGD']);
     assert.deepEqual(inbox.pendingOrder.items.map(item => `${item.quantity} ${item.code}`), ['1 GRA-XANH-Z450', '1 GRA-VANG-H350'], 'giỏ giữ nguyên');
-    // Hỏi "có thìa dừa không" sau khi đã đổi: quà đã có muỗng.
-    const spoon = await sim.send(inbox, 'có thìa dừa không e', { llm: () => { throw new Error('không hỏi mô hình'); } });
-    assert.match(spoon.sent.map(item => item.text).join('\n'), /đã gồm Bộ bát gáo dừa \+ Muỗng dừa/);
-    // Chốt đơn: đơn mang giftOverride; quà chữ + POS theo bát + muỗng.
+    // Chốt đơn: đơn mang giftOverride; quà chữ + POS theo 1 bát gáo dừa.
     const closed = await sim.send(inbox, `${PHONE} ${ADDRESS}`, { llm: { template_id: 'ORDER_CONFIRMATION', Phone_Number: PHONE, Customer_Address: ADDRESS } });
     assert.equal(closed.created.length, 1, JSON.stringify(closed.result));
-    assert.deepEqual(skus(closed.created[0].giftOverride), ['BGD', 'MUONG']);
-    assert.match(closed.sent.map(item => item.text).join('\n'), /Muỗng dừa/);
-    assert.doesNotMatch(closed.sent.map(item => item.text).join('\n'), /Quạt/);
+    assert.deepEqual(skus(closed.created[0].giftOverride), ['BGD']);
+    assert.match(closed.sent.map(item => item.text).join('\n'), /Bộ bát gáo dừa/);
+    assert.doesNotMatch(closed.sent.map(item => item.text).join('\n'), /Quạt|Muỗng/);
     const order = normalizeChatbotOrder(closed.created[0], inbox, { id: 'live1' });
-    assert.equal(order.gift, 'Miễn phí vận chuyển + Bộ bát gáo dừa + Muỗng dừa');
-    assert.deepEqual(giftLines(buildPosOrderPayload(order, {})), ['BGDx1', 'MUONGx1']);
+    assert.equal(order.gift, 'Miễn phí vận chuyển + Bộ bát gáo dừa');
+    assert.deepEqual(giftLines(buildPosOrderPayload(order, {})), ['BGDx1']);
   });
 });
 
@@ -82,15 +84,15 @@ test('"Ok, mình ko lấy bát và quạt" (giỏ live) → GIFT_SWAP như cũ: 
 
 test('đơn bot tạo < 60 phút đang có quạt: bot sửa quà của đơn (setOrderGiftOverride); quá 60 phút → ghi chú như GIFT_SWAP', async () => {
   await withLiveGift(async () => {
-    const order = minutes => ({ id: 'o1', createdAt: Date.now() - minutes * MIN, phone: PHONE, address: ADDRESS, livestream: true, gift: 'Miễn phí vận chuyển + Quạt + Bát gáo dừa', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }, { name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 1 }], status: 'Mới', total: 298000 });
+    const order = minutes => ({ id: 'o1', createdAt: Date.now() - minutes * MIN, phone: PHONE, address: ADDRESS, livestream: true, gift: 'Miễn phí vận chuyển + Quạt', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 1 }, { name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 1 }], status: 'Mới', total: 298000 });
     const sim = new Sim();
     const inbox = sim.inbox({ labels: ['livestream'], post: LIVE_POST, customerOrders: [order(10)], botLastTemplateId: 'ORDER_CONFIRMATION', botLastReplyAt: Date.now() - 10 * MIN });
     const calls = [];
     const turn = await sim.send(inbox, 'bỏ quạt giúp chị nhé', { extra: { setOrderGiftOverride: async (_conversation, id, list) => { calls.push({ id, list }); return { noted: true, order: { id } }; } }, llm: () => { throw new Error('không hỏi mô hình'); } });
     assert.equal(turn.result.templateId, 'GIFT_FAN_TO_SPOON', JSON.stringify(turn.result));
-    assert.deepEqual(calls.map(call => [call.id, skus(call.list)]), [['o1', ['BGD', 'MUONG']]]);
+    assert.deepEqual(calls.map(call => [call.id, skus(call.list)]), [['o1', ['BGD']]]);
     assert.equal(turn.created.length, 0, 'không tạo đơn mới');
-    assert.match(turn.sent.map(item => item.text).join('\n'), /đổi quạt sang muỗng dừa/);
+    assert.match(turn.sent.map(item => item.text).join('\n'), /đổi quạt .*Quà của mình bây giờ là Bộ bát gáo dừa ạ/);
     // Sửa không được (đơn nhân viên lên trên POS…) → ghi chú + xin duyệt.
     const failing = new Sim();
     const failInbox = failing.inbox({ labels: ['livestream'], post: LIVE_POST, customerOrders: [order(10)], botLastTemplateId: 'ORDER_CONFIRMATION', botLastReplyAt: Date.now() - 10 * MIN });
@@ -128,6 +130,6 @@ test('máy chủ: bot đổi quà đơn qua setChatbotOrderGiftOverride (lịch 
   assert.match(body, /applyGiftOverrideFlag\(target, missing\)/);
   assert.match(server, /setOrderGiftOverride: setChatbotOrderGiftOverride,/);
   const seed = JSON.parse(readFileSync(new URL('../app/chatbot-templates.seed.json', import.meta.url), 'utf8'));
-  assert.equal(seed.GIFT_FAN_TO_SPOON, 'Dạ em đổi quạt sang muỗng dừa cho {title} nha ạ 💛 Combo 2 túi của mình được tặng Bát gáo dừa + Muỗng dừa ạ.');
+  assert.equal(seed.GIFT_FAN_TO_SPOON, 'Dạ em đổi quạt cho {title} nha ạ 💛 Quà của mình bây giờ là {gift} ạ.');
   assert.ok(seed.GIFT_SPOON_INCLUDED);
 });

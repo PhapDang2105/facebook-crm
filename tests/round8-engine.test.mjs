@@ -73,8 +73,9 @@ test('3a/3d. "Có" sau PACKAGING_INFO → bảng giá Combo 10 gói (màu ngữ 
   assert.doesNotMatch(brown.sent.join('\n'), /Combo 10 gói Nâu/);
   const paidText = await run({ botLastTemplateId: 'BANK_TRANSFER', botLastReplyAt: now() - 10 * 60000 }, 'Mình ck rồi nhé', { reply: { templateId: 'WELCOME', messages: ['x'], handoff: false } });
   assert.equal(paidText.asked.length, 0);
-  assert.equal(paidText.results[0].templateId, 'PAYMENT_RECEIVED_CHECK');
-  assert.match(paidText.sent[0], /chuyển khoản/);
+  // R17 (chủ shop 10/10, quyết định 6): khách báo / đề nghị chuyển khoản bằng chữ → chuyển CSKH (tắt bot + thẻ); ảnh bill giữ như cũ.
+  assert.equal(paidText.results[0].templateId, 'CSKH_HANDOFF');
+  assert.doesNotMatch(paidText.sent[0], /ACB|số tài khoản/);
   assert.ok(paidText.saved.at(-1).addLabelEvents.includes('handoff'));
   const paidImage = await run({ botLastTemplateId: 'BANK_TRANSFER', botLastReplyAt: now() - 10 * 60000 }, '', { type: 'image', reply: { templateId: 'WELCOME', messages: ['x'], handoff: false } });
   assert.equal(paidImage.results[0].templateId, 'PAYMENT_RECEIVED_CHECK');
@@ -258,7 +259,9 @@ test('11. Bình luận: chê → xin lỗi công khai + thẻ; khen → cảm ơ
   const live = await comment('mua 2 túi được quà gì', renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates, {}), { post: { message: 'Săn deal hời cùng Giọt Nắng' } });
   // Vòng 12: khách live hỏi quà → câu quà live (2 túi 298k miễn ship, quà live hiện hành 08/10: Quạt), không phải bảng quà chung.
   assert.equal(live.results[0].templateId, 'GIFT_POLICY_LIVE');
-  assert.match(live.sent.find(text => text.startsWith('riêng')), /tặng Quạt/);
+  // R17: quà live 08/10 — 2 túi lớn tặng Quạt; từ 3 túi Quạt + Bộ bát gáo dừa + Muỗng dừa (bình luận A7: hỏi quà 3 túi).
+  assert.match(live.sent.find(text => text.startsWith('riêng')), /2 túi lớn bất kỳ .*tặng Quạt/);
+  assert.match(live.sent.find(text => text.startsWith('riêng')), /Từ 3 túi tặng Quạt \+ Bộ bát gáo dừa \+ Muỗng dừa/);
   // Giỏ ghi trong bình luận.
   assert.deepEqual(commentBasket('cho mình 2 túi socola'), [{ product: 'Granola Túi Nâu vị cacao 350g', quantity: 2 }]);
   assert.deepEqual(commentBasket('lấy 2 hộp xanh'), [{ product: 'Combo 10 gói Xanh', quantity: 2 }]);

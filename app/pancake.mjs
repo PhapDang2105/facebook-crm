@@ -20,6 +20,8 @@ import { matchStaffByPancakeName, readStaffStore } from './staff.mjs';
 import { backoffPancake, withPancakeSlot } from './pancake-rate-limit.mjs';
 import { stickerFields } from './stickers.mjs';
 import { isPageSystemNotice, isPageSystemNoticeText, lateInfoNeedsBot } from './conversation-orders.mjs';
+import { isOrderishText } from './processing/staff-idle.mjs';
+import { foldVietnamese } from './processing/auto-label.mjs';
 export { stickerInfo } from './stickers.mjs';
 
 // Đủ cấu hình khi có ít nhất một Page (mã + token API) và một token webhook: token chung
@@ -1817,9 +1819,26 @@ export async function handlePancakeWebhook(payload, { processChatbotChanges, cha
   // nhận MỌI thay đổi, kể cả hội thoại đã có nhân viên nhận, trả về phần bot xử lý.
   const candidates = typeof beforeBot === 'function' ? (await beforeBot(changes)) || [] : changes;
   const assigned = new Set(events.filter(event => event.pancake.assigned).map(event => `${event.pageId}:${event.psid}`));
+  // R17 — chủ shop 10/10 (quyết định 10; inbox4 T4, ca …3578931563 "Ship đi nha" 20:02 không ai trả lời tới 08:13): hội thoại
+  // nhân viên đã nhận trên Pancake — NGOÀI giờ 8–17h (giờ VN) tin hộp thư có ý ĐẶT HÀNG (SĐT, địa chỉ, số túi — như luồng
+  // staff-idle) vẫn đưa bot; còn lại bot đứng ngoài như cũ nhưng ghi một dòng bỏ qua vào nhật ký quyết định (chatbotDependencies
+  // .recordBotSkip — server nối recordSkippedChange của engine).
+  const vnHour = new Date(Number(now) + 7 * 60 * 60 * 1000).getUTCHours();
+  const offHours = vnHour < 8 || vnHour >= 17;
+  const assignedOf = change => Boolean(change.conversation) && assigned.has(`${change.conversation.pageId}:${change.conversation.psid}`);
+  const offHoursOrder = change => offHours && change.type === 'message' && change.message?.direction === 'incoming' && !change.updated
+    && change.conversation?.source !== 'comment' && (change.message.type || 'text') === 'text'
+    && (isOrderishText(change.message.text) || /\b(?:ship|giao|gui|chot|len don|dat|lay)(?: hang| don)? (?:di|luon|nha|nhe|cho (?:chi|em|minh|c|e|anh|a))\b/.test(foldVietnamese(String(change.message.text || ''))));
   const forBot = config.botWhenAssigned
     ? candidates
-    : candidates.filter(change => !change.conversation || !assigned.has(`${change.conversation.pageId}:${change.conversation.psid}`));
+    : candidates.filter(change => !assignedOf(change) || offHoursOrder(change));
+  if (!config.botWhenAssigned && typeof chatbotDependencies?.recordBotSkip === 'function') {
+    for (const change of candidates) {
+      if (assignedOf(change) && !forBot.includes(change)) {
+        try { chatbotDependencies.recordBotSkip(change, 'nhân viên Pancake đã nhận hội thoại'); } catch { /* chỉ ghi nhật ký */ }
+      }
+    }
+  }
   if (forBot.length && processChatbotChanges) await processChatbotChanges(forBot, chatbotDependencies);
   // Đếm tin đã ghi; thay đổi hội thoại (giới tính, tên) không tính là tin.
   const messagesOnly = list => list.filter(change => change.type === 'message').length;

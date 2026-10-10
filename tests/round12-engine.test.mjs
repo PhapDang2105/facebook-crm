@@ -283,9 +283,14 @@ test('5. khách live: hỏi quà → Quạt (bỏ điều kiện từ khóa); h�
 test('5b. ưu đãi dùng thử: trong cửa sổ 36 giờ "lấy 1 túi xanh nếu miễn ship thì chốt" → chốt túi đó (miễn ship); ngoài cửa sổ → phí ship + mời combo 2', () => {
   const inside = trialStep({ text: 'lấy 1 túi xanh nếu miễn ship thì chốt', trial: { freeShipping: true, stage: 'offered', until: Date.now() + 86400000 } });
   assert.deepEqual([inside.value?.template_id, inside.value?.Product_N1, inside.value?.also], ['ORDER_ADDRESS', 'Granola Túi Xanh 450g', 'TRIAL_FREESHIP_INFO']);
+  // R17 (gói C, inbox5 A9 / inbox3 A9): ngoài cửa sổ → PRICE_ONE_BAG (1 túi = giá + phí ship 15k, 2 túi 298k miễn ship) và GIỮ giỏ
+  // 1 túi (trước: FREESHIP_POLICY "lấy 2 túi vị nào", khách xin 1 túi phải nói lại).
   const outside = pick('lấy 1 túi thử nếu miễn ship mình chốt');
-  assert.equal(outside?.value?.template_id, 'FREESHIP_POLICY');
-  assert.match(renderChatbotReply(outside.value, templates, {}).messages[0], /1 túi phí ship là 15\.000đ/);
+  assert.equal(outside?.value?.template_id, 'PRICE_ONE_BAG');
+  assert.deepEqual(outside.holdBasket, { product: 'Granola Túi Xanh 450g', quantity: 1 });
+  const said = renderChatbotReply(outside.value, templates, {}).messages.join(' ');
+  assert.match(said, /phí ship 15\.000đ = 189\.000đ/);
+  assert.match(said, /298\.000đ, miễn phí vận chuyển/);
 });
 
 // ===== Sticker =====
@@ -363,7 +368,8 @@ test('B3 #7 / #22: "Mình lấy 1 đơn thôi" khi đang hỏi đặt thêm = KH
   const out = await sim.send('Mình lấy 1 đơn thôi');
   assert.equal(out.created.length, 0);
   // R15-fix4 (thiết kế gộp/tách mới, chủ shop 03/10): câu không rõ gộp hay tách → bạn phụ trách (trước: ORDER_STATUS kể đơn cũ).
-  assert.match(out.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/);
+  // R17 (gói B, inbox5 A3): "1 đơn thôi" là câu RÕ "không đặt thêm"; giỏ chờ trùng đúng món đơn đang có → kể đơn, bỏ giỏ.
+  assert.equal(out.result.templateId, 'ORDER_STATUS');
   const busy = new Sim();
   busy.extraDeps.requestReply = async () => {
     busy.recent.push({ id: 'staff-1', direction: 'outgoing', type: 'text', text: 'Dạ chị ơi em báo giá ạ', staff: true, createdAt: Date.now() + 5 });

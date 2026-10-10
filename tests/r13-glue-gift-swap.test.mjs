@@ -25,6 +25,10 @@ const ADDRESS = '12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP Hồ Ch�
 const SMALL_XANH = { name: 'Gói granola nhỏ Xanh 35g', sku: 'GRA-XANH-G35', weight: 35 };
 const SMALL_CAM = { name: 'Gói granola nhỏ Cam 30g', sku: 'GRA-CAM-G30', weight: 30 };
 const LIVE_GIFT = { id: 'qua-tang-live', name: 'Quạt + Bát gáo dừa', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 };
+// R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, cùng SKU QUA-TANG-LIVE, cả đơn 3 túi; chính sách hiện hành
+// kiểm ở live-gift-bat-muong.test.mjs). Test dưới giữ kịch bản quà live gộp cũ "Quạt + Bát gáo dừa" (đúng 2 túi) nên bỏ
+// live-quat trước khi thêm, không thì đơn có hai quà live.
+const pushLegacyLiveGift = (gifts, extra = {}) => { gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat'); gifts.items.push({ ...LIVE_GIFT, ...extra }); };
 const headers = ['Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
 const row = (id, sku, quantity, price, { note = '' } = {}) => [id, 'A', '0385805790', ADDRESS, sku, sku, String(quantity), String(price), note];
 const lines = rows => rows.map(item => `${item[19]}x${item[21]}@${item[22]}`);
@@ -76,12 +80,7 @@ test('xuất kho: gói thay thế chưa chọn vị (không SKU) không lên dò
 });
 
 test('xuất kho: khách live 2 túi đổi quạt + bát → gói nhỏ, không quà live, không thêm bát ưu đãi bám đuổi; đơn 2 túi bám đuổi đổi bát → không lên BGD', async () => {
-  // Quà live hiện hành (08/10) là Quạt của bảng quà mẫu: khách live 2 túi đổi Quạt lấy gói nhỏ → không lên QUA-TANG-LIVE.
-  const quat = { id: 'g10', source: 'Facebook', livestream: true, giftSwap: [SMALL_XANH, SMALL_CAM], giftSwapRemoved: ['Quạt'] };
-  assert.deepEqual(exported([row('CB-g10', XANH, 2, 149000)], [quat]), ['GRA-XANH-Z450x2@149000', 'GRA-XANH-G35x1@0', 'GRA-CAM-G30x1@0']);
-  assert.deepEqual(exported([row('CB-g11', XANH, 2, 149000)], [{ id: 'g11', source: 'Facebook', livestream: true }]), ['GRA-XANH-Z450x2@149000', 'QUA-TANG-LIVEx1@0']);
-  // Quà live gộp kiểu cũ (Quạt + Bát gáo dừa, trước 08/10): bỏ quà live hiện hành để chỉ còn quà của ca này.
-  await withGifts(gifts => { gifts.items = gifts.items.filter(gift => !gift.livestreamOnly); gifts.items.push(LIVE_GIFT); }, () => {
+  await withGifts(gifts => pushLegacyLiveGift(gifts), () => {
     const live = { id: 'g6', source: 'Facebook', livestream: true, promoGift: 'Bộ bát gáo dừa', giftSwap: [SMALL_XANH, SMALL_CAM], giftSwapRemoved: ['Quạt + Bát gáo dừa'] };
     assert.deepEqual(exported([row('CB-g6', XANH, 2, 149000)], [live]), ['GRA-XANH-Z450x2@149000', 'GRA-XANH-G35x1@0', 'GRA-CAM-G30x1@0']);
     // Đơn live không đổi quà: như cũ.

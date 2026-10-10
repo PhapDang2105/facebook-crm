@@ -161,7 +161,10 @@ test('lý do không bám (01/10): tin cuối chỉ dấu câu/emoji, khách bả
   // Đang giữ giỏ: bot gắn "cần người xử lý" khi nhắc giỏ / attention → vẫn nhắc; khiếu nại thì không.
   const quiet = [message('incoming', now - 5 * HOUR, { text: 'lấy 2 túi vàng' }), message('outgoing', now - 4 * HOUR)];
   assert.equal(reason(quiet, { labels: ['consulting'], attention: true, botLastTemplateId: 'CSKH_HANDOFF' }), 'label', 'không giữ giỏ: như cũ');
-  assert.equal(reason(quiet, { labels: ['consulting'], attention: true, botLastTemplateId: 'CSKH_HANDOFF' }, { basketHeld: true }), '');
+  // R17 (bình luận B4a, inbox4 T1; chủ shop 10/10 mục 7): tin bot cuối là CSKH_HANDOFF / đang tra đơn → không bám kể cả khi giữ
+  // giỏ ('waitingStaff'); thẻ "cần người xử lý" / attention thì vẫn không chặn lời nhắc giỏ như 01/10.
+  assert.equal(reason(quiet, { labels: ['consulting'], attention: true, botLastTemplateId: 'ORDER_ADDRESS' }, { basketHeld: true }), '');
+  assert.equal(reason(quiet, { labels: ['consulting'], attention: true, botLastTemplateId: 'CSKH_HANDOFF' }, { basketHeld: true }), 'waitingStaff');
   assert.equal(reason(quiet, { labels: ['complaint'] }, { basketHeld: true }), 'label');
   assert.equal(reason([...quiet, message('outgoing', now - 3 * HOUR, { staff: true })], {}, { basketHeld: true }), 'staffReplied', 'nhân viên đã trả lời thì thôi');
 });

@@ -168,7 +168,8 @@ test('#11 NO_VARIANT: "có trái cây sấy không ăn đc" (…350724), kiêng 
   // nên "kiêng đậu phộng" (granola không có đậu phộng) không được ra NO_VARIANT; câu "dị ứng …" giữ INGREDIENTS_ALLERGY như
   // bản cũ (gửi bảng thành phần) — xem tests/r15-fix2-rules.test.mjs.
   assert.notEqual(ruleIntent('mình kiêng đậu phộng', inbox())?.rule, 'NO_VARIANT');
-  assert.equal(tpl(ruleIntent('con dị ứng hạt điều', inbox())), 'INGREDIENTS_ALLERGY');
+  // R17 (gói C): dị ứng thành phần có trong cả 3 túi → ALLERGY_HAS_INGREDIENT (trước: bảng INGREDIENTS_ALLERGY).
+  assert.equal(tpl(ruleIntent('con dị ứng hạt điều', inbox())), 'ALLERGY_HAS_INGREDIENT');
   assert.notEqual(ruleIntent('ăn không được, dở quá', inbox())?.rule, 'NO_VARIANT');
 });
 

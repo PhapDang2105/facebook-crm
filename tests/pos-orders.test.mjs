@@ -254,9 +254,8 @@ test('Quà Tặng LIVE chỉ khách livestream (livestreamOnly): đơn khách th
   const { reloadCatalog } = await import('../app/processing/catalog.mjs');
   const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
   const gifts = JSON.parse(original);
-  // Thử cơ chế livestreamOnly với quà "Quà Tặng LIVE" (28/09): bỏ quà live hiện hành của bảng quà mẫu (Quạt, cùng mã
-  // QUA-TANG-LIVE) để dòng POS lấy đúng quà của bài này.
-  gifts.items = gifts.items.filter(gift => !gift.livestreamOnly);
+  // R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, cùng SKU QUA-TANG-LIVE); test giữ quà sống 28/09 nên bỏ live-quat.
+  gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat');
   gifts.items.push({ id: 'qua-tang-live', name: 'Quà Tặng LIVE', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 });
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   reloadCatalog();

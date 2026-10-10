@@ -22,7 +22,19 @@ const FILLER = new Set(['sdt', 'so', 'dien', 'thoai', 'dt', 'cua', 'minh', 'em',
 // P. Thảo Điền") khi bot đang xin địa chỉ: vẫn đưa vào bộ soạn đơn — nó tự hỏi đúng cấp còn thiếu
 // (ORDER_ADDRESS_CLARIFY), như mô hình vẫn làm. Không nhận câu hỏi/chính sách ("giao Hà Nội mấy ngày", "ship về
 // Cà Mau được không", "có giao tận nơi không") hay chữ không giống địa chỉ ("để mình xem lại").
-const NOT_ADDRESS = /\b(bao lau|may ngay|bn ngay|bao nhieu|bnhiu|bn|khi nao|chung nao|gia|phi|mien|free|tan noi|tan nha|han|hsd|date|con han|het han|dell|deal|co (giao|ship|toi|den|ve)|(giao|ship|toi|den|gui|van chuyen) (duoc|dc|ko|khong|k|toi|den|ve)|(duoc|dc) (khong|ko|k|kg|hong)|(xa|gan) (khong|ko|k|qua|lam)|the nao|ntn|ra sao|lam sao|o dau|noi khong|noi ko)\b/;
+// R17 (inbox3 A6 "Có tặng cốc thủy tinh không em", inbox1 A5 "Tặng quạt gì vậy chị"): hỏi quà không phải địa chỉ.
+const NOT_ADDRESS = /\b(bao lau|may ngay|bn ngay|bao nhieu|bnhiu|bn|khi nao|chung nao|gia|phi|mien|free|tan noi|tan nha|han|hsd|date|con han|het han|dell|deal|co (giao|ship|toi|den|ve)|(giao|ship|toi|den|gui|van chuyen) (duoc|dc|ko|khong|k|toi|den|ve)|(duoc|dc) (khong|ko|k|kg|hong)|(xa|gan) (khong|ko|k|qua|lam)|the nao|ntn|ra sao|lam sao|o dau|noi khong|noi ko|co tang|tang (gi|quat|qua|kem|them)|qua (gi|tang))\b/;
+/**
+ * R17 (inbox3 A6, inbox5 A2 "2tui xanh 450g + bình thủy tinh" → Quận Bình Thủy): "tinh" trong "thủy tinh / tinh bột / tinh dầu"
+ * không phải "tỉnh". Che trên chữ ĐÃ bỏ dấu trước khi dò từ cấp hành chính.
+ */
+export function maskNonPlaceWords(folded) {
+  return String(folded || '').replace(/\b(?:thuy tinh|tinh (?:bot|dau|chat|khiet|te|than))\b/g, ' ');
+}
+/** Như maskNonPlaceWords nhưng trên chữ CÒN DẤU (trước khi đưa bộ đọc địa chỉ: "bình thủy tinh" ≠ Quận Bình Thủy). */
+export function maskNonPlaceRaw(text) {
+  return String(text || '').normalize('NFC').replace(/(?<![\p{L}])(?:th(?:ủy|uỷ|uy)\s+tinh|tinh\s+(?:bột|bot|dầu|dau))(?![\p{L}])/giu, ' ');
+}
 /**
  * Bỏ SĐT khỏi tin, giữ số đứng trước/sau nó: "quận 1 0912345678" (mẫu SĐT chung nuốt cả "1 "), "0912345678 12 Lê
  * Lợi…" (mẫu chung nuốt cả số nhà "12"). SĐT 10 số (0… / +84…, có thể cách bằng dấu cách/chấm/gạch) bỏ chính xác;
@@ -51,7 +63,12 @@ export function normalizeColourTypos(text) {
     .replace(/(?<![\p{L}\p{N}])(?:dạ\s+)?v[âấầẩẫậ]ng(?![\p{L}\p{N}])/giu, 'dạ')
     .replace(/(?<![\p{L}\p{N}])nấu(?![\p{L}\p{N}])/giu, 'pha')
     .replace(/(\d)\s*(?=c[aáà]\s*[ck]ao(?![\p{L}]))/giu, '$1 ')
-    .replace(/(?<![\p{L}])(?:c[aáà]\s+[ck]ao|c[áà][ck]ao|cakao|cacoa|c[aâ]co|ca\s*cao)(?![\p{L}])/giu, 'cacao')
+    // R17 (inbox1 A3, ca …4902763200 "Lấy 1 caccao 1 tự nhiên", "1 granola caccao"): "caccao/cacaao/cocao" cũng là cacao.
+    .replace(/(?<![\p{L}])(?:c[aáà]\s+[ck]ao|c[áà][ck]ao|cakao|cacoa|c[aâ]co|ca\s*cao|cac{2,}ao|caca{2,}o|c[oô]cao)(?![\p{L}])/giu, 'cacao')
+    // R17 (inbox3 A11, ca …2079207858 "3mau"): số dính "màu/vị/loại/túi" tách ra ("3 màu" thì vẫn đúng như trước).
+    .replace(/(\d)(?=(?:màu|mau|vị|vi|loại|loai|túi|tui)(?![\p{L}]))/giu, '$1 ')
+    // R17 (inbox3 A6/A12, ca …8824801048 "1 bọc 704/37a…", …5426967696 "Lấy hai bị"): "bị"/"bọc" ngay sau số (hay "một/hai") là bịch.
+    .replace(/((?:\d|(?<![\p{L}])(?:m[ộo]t|hai))\s*)(?:bị|bọc|boc)(?![\p{L}\p{N}])/giu, '$1bịch')
     // "ca cao 300g" là Granola Tropical vị Cacao 300g (GRA-MINT-Z300), không phải Túi Nâu cacao 350g.
     .replace(/(?<![\p{L}])cacao\s*300\s*(?:g|gr|gam|gram)?(?![\p{L}\p{N}])/giu, 'tropical')
     .replace(/(?<![\p{L}])(?:vag|vàg|vangf|vàngf|vangg|vàngg|vnag|vagf|vangd|vàngd)(?![\p{L}\p{N}])/giu, 'vàng')
@@ -84,9 +101,9 @@ const NOT_ADDRESS_PHRASE =/\b(la gi|gi vay|gi the|gi a|khong phai|ko phai|k phai
 // trơ trọi ("Ba túi ba vị" → Ba Vì, "La Gi") không đủ là địa chỉ.
 const looksLikeAddress = (raw, normalizedText) => {
   // R13: "Gia Lai/Gia Lộc/xã Gia Ninh" bỏ dấu trùng "giá" (NOT_ADDRESS) — che địa danh trước khi dò từ hỏi giá.
-  const normalized = maskPlaceGia(normalizedText);
+  const normalized = maskNonPlaceWords(maskPlaceGia(normalizedText));
   if (!raw || raw.length > 200 || NOT_ADDRESS.test(normalized) || NOT_ADDRESS_PHRASE.test(normalized)) return false;
-  const resolved = describeDeliveryAddress(raw).resolved;
+  const resolved = describeDeliveryAddress(maskNonPlaceRaw(raw)).resolved;
   // Từ địa chỉ kèm chữ số hay một cấp đọc ra được; "đường" (đường ăn), "xa" (date xa), "quán" một mình thì không.
   if (ADDRESS_WORDS.test(normalized)) return /\d/.test(raw) || Boolean(resolved?.province) || STRONG_ADDRESS_WORDS.test(normalized);
   if (!resolved?.province) return false;
@@ -116,10 +133,10 @@ export function looksLikeAddressMessage(raw, { orderStep = false } = {}) {
   const text = stripPhone(String(raw || '')).replace(/\s+/g, ' ').trim();
   if (text.length < 6 || text.length > 300 || text.includes('?')) return false;
   if (/(?<![\p{L}])(?:giá|gía)(?![\p{L}])/iu.test(text.normalize('NFC'))) return false;
-  const s = normalizeIntentText(maskPlaceGia(text));
+  const s = maskNonPlaceWords(normalizeIntentText(maskPlaceGia(text)));
   if (ADDRESS_MESSAGE_ASK.test(s) || NOT_ADDRESS_PHRASE.test(s)) return false;
   if (ADDRESS_MESSAGE_WORDS.test(s)) return true;
-  const resolved = describeDeliveryAddress(text).resolved;
+  const resolved = describeDeliveryAddress(maskNonPlaceRaw(text)).resolved;
   if (!resolved?.province) return false;
   return Boolean(resolved.district || resolved.ward || resolved.postMerger) || (orderStep && provinceNamedOnly(text, resolved));
 }
@@ -138,6 +155,8 @@ function provinceNamed(raw, resolved) {
   return Boolean(province) && text.includes(province) && province !== districtBare;
 }
 
+const OLD_CONFIRM_YES = /^(?:(?:da|vang|u|uh|um|ok|oke|okie|okay|dung|chuan|phai|duoc|dc|roi|r|nhe|nha|nhen|e|em|a|c|chi|anh|shop|gui|di|luon|len|don|lam|the|vay|do|day|ak|ah|ha)\s*)+$/;
+const OLD_CONFIRM_CORE = /\b(?:da|vang|u|uh|ok|oke|okie|okay|dung|chuan|phai|duoc|dc|len don|gui di)\b/;
 /**
  * @param {string} text tin khách
  * @param {{ hasBasket?: boolean, lastWasOrderStep?: boolean, source?: string, complaint?: boolean, addressComplete?: boolean, addressText?: string, trialOffer?: boolean, hasPreviousDelivery?: boolean }} ctx
@@ -150,6 +169,9 @@ export function orderFlowStep(text, ctx = {}) {
   const raw = String(text || '').trim();
   if (!raw || raw.includes('?')) return null;
   const s = normalizeIntentText(raw);
+  // Chủ shop 10/10 (quyết định 8): bot vừa hỏi "gửi về địa chỉ cũ … đúng không" (giỏ chờ mang cờ oldAddressConfirm) — khách đồng
+  // ý trơn ("ok", "đúng rồi", "vâng ạ", "lên đơn đi em") → bước đơn với SĐT + địa chỉ cũ đang giữ trong giỏ (bộ soạn đơn chốt).
+  if (ctx.oldAddressConfirm && OLD_CONFIRM_YES.test(s) && OLD_CONFIRM_CORE.test(s)) return { rule: 'OLD_ADDRESS_YES', value: { template_id: 'ORDER_ADDRESS' } };
   // "gọi địa chỉ cũ": "gọi" bỏ dấu thành "gói" (từ đổi giỏ) — bỏ cụm này trước khi dò CHANGE.
   // Chỉ dò CHANGE SAU khi chuẩn hoá lỗi gõ (dưới): dò trên chữ thô thì "Dạ vâng 0912…" (vâng → "vang" = Vàng) đã trả null
   // trước khi phép chuẩn hoá vâng → dạ kịp chạy. "cacao 300g" thành "tropical" sau chuẩn hoá — vẫn là đổi giỏ như trước.
@@ -210,6 +232,10 @@ const LEADING_LABELS = [
   /^\s*(?:gửi|gởi|gui|goi|ship|giao)\s+(?:(?:về|ve)\s+)?(?:địa\s*chỉ|dia\s*chi|đ\/c|d\/c|đc|dc)(?![\p{L}\p{N}])\s*[:：.\-]?\s*/iu,
   // R14 (…027555): "chỉ tổ dân phố…" — đuôi của chữ "Địa chỉ" (khách chép từ ảnh) đứng đầu, ngay trước cấp/số nhà.
   /^\s*chỉ\s*[:：.\-]?\s+(?=(?:tổ|to|thôn|thon|ấp|ap|xóm|xom|số|so|sn|khu|kp|tdp|đường|duong|ngõ|ngo|hẻm|hem|phường|phuong|xã|xa|\d))/iu,
+  // R17 (inbox1 A5, ca …9937137033 "Giao giúp c 207/2A…"): lời nhờ giao đứng đầu, không có "về/đến".
+  /^\s*(?:giao|gửi|gởi|gui|ship)\s+(?:giúp|giup|giùm|giùm|dùm|dum|hộ|ho)(?:\s+(?:chị|chi|c|em|e|anh|a|mình|minh|tôi|toi))?\s+(?=\S)/iu,
+  // R17 (inbox3 A6, ca …8824801048 "1 bọc 704/37a…"): số túi + đơn vị đứng ngay trước số nhà.
+  /^\s*\d{1,2}\s*(?:túi|tui|bịch|bich|bọc|boc|bị)\s+(?=\d)/iu,
   /^\s*(?:nhà\s+)?(?:mình|minh|em|e|chị|chi|c|anh|a|tôi|toi|t|cô|chú|bác)\s+ở\s+/iu,
   /^\s*ở\s+(?=\S)/iu
 ];
@@ -316,9 +342,12 @@ const SEGMENT_FILLER_CORE = /\b(?:roi|r|do|day|vay|du|ok|oke|okie|het|thoi)\b/;
 // "Trên cho rồi", "ở trên", "như trên", "gửi ở trên rồi", "đã gửi rồi": khách nói đã gửi địa chỉ ở trên.
 const SEGMENT_ABOVE = /^(?:(?:em|e|minh|chi|c|da|toi|anh|a)\s)*(?:(?:o|nhu|gui|ghi|cho|de|nhan|noi)\s)*tren(?:\s(?:cho|gui|ghi|co|roi|r|do|day|nhe|nha|a|ak|em|e|c|chi|shop|ban|b|het))*$|^(?:(?:em|e|minh|chi|c|toi|anh|a)\s)?(?:da\s)?(?:gui|ghi|cho)\s(?:o\s)?(?:tren\s)?roi(?:\s(?:ma|do|day|nhe|nha|a|ak|em|e|c|chi|shop))*$/;
 // Câu hỏi không có "?" chen giữa địa chỉ ("Đảm bảo k hôi k chiên qua dầu chứ e").
-const SEGMENT_QUESTION = /\b(?:dam bao|dung (?:hoi|chien|de hoi)|chu (?:e|em|a|anh|c|chi|shop|ban|b)$|(?:khong|ko|k|kg) (?:hoi|chien|ngot|dau|bi|moc|co mui)|co (?:bi|phai|hoi|chien)|phai (?:khong|ko|k)$|(?:duoc|dc) (?:khong|ko|k|kg)$)\b/;
+// R17 (inbox1 A5, ca …7338407078 "Tặng quạt gì vậy chị"): câu hỏi quà chen giữa địa chỉ.
+const SEGMENT_QUESTION = /\b(?:dam bao|dung (?:hoi|chien|de hoi)|chu (?:e|em|a|anh|c|chi|shop|ban|b)$|(?:khong|ko|k|kg) (?:hoi|chien|ngot|dau|bi|moc|co mui)|co (?:bi|phai|hoi|chien)|phai (?:khong|ko|k)$|(?:duoc|dc) (?:khong|ko|k|kg)$|gi (?:vay|the|a|ha|z|v)|tang (?:gi|quat|qua))\b/;
 // Câu đặt hàng / giá chen giữa ("Lấy 1 túi xanh và 1 túi vàng gía 293.000đ", "Giao chị combo 2").
 const SEGMENT_BASKET = /^(?:(?:lay|dat|mua|ship|chot|giao|gui)\s)(?:(?:cho\s)?(?:chi|c|em|e|minh|anh|a|toi)\s)?(?:combo\s?\d|\d{1,2}\s?(?:tui|goi|bich|bit|hop|combo|xanh|vang|nau|cacao)\b)|\b\d{1,2}\s?(?:tui|goi|bich)\s(?:xanh|vang|nau|cacao)\b.*\b(?:gia|\d{3}\s?000|\d{3}\s?k|\d{3}k)\b/;
+// R17 (inbox1 A5, inbox3 A1): cả đoạn chỉ là câu đặt ("Thế thì cho mình 1tui thôi", "Lấy túi xanh", "2 túi vàng nha").
+const SEGMENT_BAGS = /^(?:(?:the thi|vay thi|thoi|vay|the|thi)\s)?(?:(?:cho|lay|dat|mua|chot|gui|ship)\s)?(?:(?:chi|c|em|e|minh|anh|a|toi|mk)\s)?(?:(?:lay|dat|mua)\s)?(?:\d{1,2}\s(?:tui|goi|bich|bit|hop)|(?:tui|goi|bich)\s(?:mau\s)?(?:xanh|vang|nau|cacao))(?:\s(?:mau\s)?(?:xanh|vang|nau|cacao))?(?:\s(?:thoi|thui|nhe|nha|a|ak|nhen|la|nguyen ban|e|em|nua))*$/;
 // Nhãn đứng riêng một đoạn ("Giao chị combo 2,\nĐịa chỉ\n540 …" → ", Địa chỉ,").
 const SEGMENT_LABEL = /^(?:dia chi(?: nhan(?: hang)?)?|dc|d c|dchi|sdt|so dien thoai|so dt|dt|ten|ho ten|nguoi nhan)$/;
 const SEGMENT_PLACE_WORDS = /\b(?:phuong|huyen|thi tran|thi xa|thon|xom|khu pho|to dan pho|ngo|hem|ngach|so nha|chung cu|tinh|xa [a-z]{2,}|quan [a-z0-9]+|ap [a-z0-9]{2,}|duong [a-z0-9]+|pho [a-z0-9]+|tp [a-z]+|tphcm|hcm|ha noi|da nang)\b/;
@@ -333,6 +362,14 @@ export function isNonAddressSegment(segment) {
   if (fillerWords && SEGMENT_FILLER_CORE.test(folded)) return true;
   // "Chợ Trên / Đê Trên / Nội Trên" (địa danh) — chỉ là "đã gửi ở trên" khi có "rồi/r" ("Trên cho rồi").
   if (SEGMENT_ABOVE.test(folded) && !(/^(?:cho|de|noi|nhan) tren$/.test(folded))) return true;
+  // R17 (inbox1 A5, ca …0283294082 "Minh ck trước, Thế thì cho mình 1tui thôi, Bản nà ngò…"; ca …5209732559 "26 tân hải, t, …";
+  // inbox3 A1 "Lấy túi xanh"): lời thanh toán, câu đặt số túi, chữ cái lẻ (t/p/q/h), "lấy túi xanh" — không có từ nơi chốn.
+  const unglued = folded.replace(/(\d)(tui|goi|bich|bit|hop)\b/g, '$1 $2');
+  if (!SEGMENT_PLACE_WORDS.test(unglued)) {
+    if (/^[tpqh]$/.test(unglued)) return true;
+    if (/\b(?:ck|chuyen khoan|stk|so tai khoan)\b/.test(unglued) && words.length <= 6) return true;
+    if (SEGMENT_BAGS.test(unglued)) return true;
+  }
   if (/\d/.test(folded) && !SEGMENT_BASKET.test(folded)) return false;
   if (SEGMENT_PLACE_WORDS.test(folded)) return false;
   // Câu hỏi chen giữa cần ≥ 3 chữ hay một hư từ hỏi ("Cổ Bi", "Cổ Chiên", "Có Phải" 2 chữ là địa danh).
@@ -364,6 +401,8 @@ export function extractDeliveryNote(text) {
   return notes.map(note => note.replace(/\s+/g, ' ').trim()).filter(Boolean).join('; ');
 }
 
+// R17 (inbox3 A1): "<tên> đã trả lời về một bài viết. Xem bài viết(https://…)" / "… đã trả lời một quảng cáo." / "… replied to a post".
+const SYSTEM_NOTICE_LINE = /[^\n,]{0,80}?(?:đã trả lời (?:một quảng cáo|về một bài viết)|replied to (?:a post|an ad))(?![\p{L}\p{N}])\.?\s*(?:(?:Xem bài viết|View post)\s*\(\s*https?:[^\s)]*\)?)?|(?:Xem bài viết|View post)\s*\(\s*https?:[^\s)]*\)?/giu;
 /**
  * Chữ khách ghi → phần địa chỉ lên phiếu: bỏ SĐT và nhãn SĐT ở mọi chỗ, bỏ nhãn/câu dẫn ở đầu
  * ("đc", "shop.", "Linh:", "Tên:", "Gửi về ĐC", "Mình ở", "1 trước ạ."), bỏ người nhận chen giữa,
@@ -371,9 +410,14 @@ export function extractDeliveryNote(text) {
  */
 export function cleanAddressText(raw) {
   // R14 (…195669): "Hèm 120 ₫uông…" — ký hiệu tiền "₫" gõ thay chữ "đ", "Hèm" trước số nhà là "Hẻm".
-  let text = stripPhone(String(raw || '').normalize('NFC').replace(/₫/g, 'đ')).replace(/\r/g, '');
+  // R17 (inbox3 A1, ca …1715345827): dòng hệ thống Facebook "<tên> đã trả lời về một bài viết. Xem bài viết(link)" mô hình chép
+  // vào Customer_Address — bỏ cả dòng (tên + link), trước khi tách SĐT (link chứa dãy số dài).
+  let text = stripPhone(String(raw || '').normalize('NFC').replace(SYSTEM_NOTICE_LINE, ' ').replace(/₫/g, 'đ')).replace(/\r/g, '');
   text = text.replace(/(?<![\p{L}\p{N}])H(?:è|e)m(?=\s+\d)/gu, 'Hẻm').replace(/(?<![\p{L}\p{N}])h(?:è|e)m(?=\s+\d)/gu, 'hẻm');
   text = text.replace(PHONE_LABEL, ' ');
+  // R17 (inbox3 A6, ca …5426967696 "Điện thoại <sđt>" → địa chỉ "thôn Cửu lợi, Điện thoại, Xã Cam Hòa…"): nhãn "điện thoại"
+  // đứng trơ (SĐT sau nó đã bỏ) — chỉ khi hết đoạn ngay sau nhãn, không đụng chữ "điện thoại" giữa câu.
+  text = text.replace(/(?<![\p{L}\p{N}])(?:điện|dien)\s*(?:thoại|thoai)\s*[:：.]?\s*(?=$|[\n,;])/giu, ' ');
   text = text.replace(NAME_INTRO, ' ');
   text = text.replace(RECEIVER_PHRASE, ' ');
   text = text.replace(DELIVERY_NOTE, ' ');

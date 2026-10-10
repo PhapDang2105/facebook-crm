@@ -286,6 +286,8 @@
       <nav class="customers-tabs campaigns-page-tabs" id="campaigns-page-tabs" role="tablist" aria-label="Quản lý chiến dịch">
         <button class="customers-tab active" type="button" role="tab" aria-selected="true" data-campaigns-page="campaigns">Chiến dịch</button>
         <button class="customers-tab" type="button" role="tab" aria-selected="false" data-campaigns-page="competitors">Đối thủ</button>
+        <button class="customers-tab" type="button" role="tab" aria-selected="false" data-campaigns-page="ads">Quảng cáo</button>
+        <button class="customers-tab" type="button" role="tab" aria-selected="false" data-campaigns-page="branded">KOL hợp tác</button>
       </nav>
       <section class="settings-card campaigns-card" data-campaigns-panel="campaigns">
         <header class="settings-card-head campaigns-head">
@@ -312,7 +314,7 @@
           </aside>
         </div>
       </section>
-      <section class="settings-card campaigns-card competitors-card hidden" data-campaigns-panel="competitors" aria-labelledby="competitors-title">
+      <section class="settings-card campaigns-card competitors-card hidden" data-campaigns-panel="competitors" data-competitors-mode="manage" aria-labelledby="competitors-title">
         <header class="settings-card-head campaigns-head">
           <div><h1 id="competitors-title">Đối thủ</h1><p>Thư viện quảng cáo và nội dung hợp tác KOL của Meta, cùng mẫu quảng cáo dán tay.</p></div>
           <div class="campaigns-head-actions">
@@ -344,10 +346,6 @@
                 </div>
                 <button class="order-history-button campaigns-button" type="submit">Lưu mẫu</button>
               </form>
-            </div>
-            <div class="competitors-tabs" role="tablist" aria-label="Dữ liệu đối thủ">
-              <button type="button" role="tab" data-competitors-tab="ads" aria-selected="true">Quảng cáo</button>
-              <button type="button" role="tab" data-competitors-tab="branded" aria-selected="false">KOL hợp tác</button>
             </div>
             <div class="competitors-feed" id="competitors-feed"></div>
           </div>

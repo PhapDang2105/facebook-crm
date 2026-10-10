@@ -3173,9 +3173,10 @@ tr:hover .customer-tel button { opacity: .75; }
 .competitors-form :is(input, select, textarea):focus { outline: 2px solid var(--brand); outline-offset: 0; border-color: transparent; }
 .competitors-form button { justify-self: start; }
 .competitors-form-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 8px; }
-.competitors-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line-1); }
-.competitors-tabs button { padding: 8px 14px; color: var(--text-2); background: none; border: 0; border-bottom: 2px solid transparent; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
-.competitors-tabs button[aria-selected="true"] { color: var(--text-1); border-bottom-color: var(--brand); }
+/* Tab "Đối thủ": danh sách + biểu mẫu; tab "Quảng cáo" / "KOL hợp tác": chỉ luồng tin. */
+.competitors-card[data-competitors-mode="manage"] .competitors-feed,
+.competitors-card:not([data-competitors-mode="manage"]) .competitors-list,
+.competitors-card:not([data-competitors-mode="manage"]) .competitors-forms { display: none; }
 .competitors-feed { display: grid; gap: 10px; }
 .competitors-feed.is-empty { display: flex; min-height: 160px; }
 .competitor-ad { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line-1); border-radius: 12px; }

@@ -2148,18 +2148,30 @@ function setCampaignsBusy(button, busy, busyLabel, idleLabel) {
   button.textContent = busy ? busyLabel : idleLabel;
 }
 
-// Quản lý chiến dịch chia tab "Chiến dịch | Đối thủ" (10/10): mỗi lúc một thẻ thay vì cuộn qua cả hai. Nhớ tab đang
-// mở trong trình duyệt này (chỉ là tiện lợi, đọc/ghi hỏng thì về tab Chiến dịch).
+// Quản lý chiến dịch chia tab "Chiến dịch | Đối thủ | Quảng cáo | KOL hợp tác" (10/10): mỗi lúc một thẻ thay vì cuộn.
+// Ba tab sau dùng chung thẻ Đối thủ: "Đối thủ" là danh sách + biểu mẫu, "Quảng cáo" / "KOL hợp tác" là luồng tin tương ứng.
+// Nhớ tab đang mở trong trình duyệt này (chỉ là tiện lợi, đọc/ghi hỏng thì về tab Chiến dịch).
 const campaignsPageTabs = document.querySelector('#campaigns-page-tabs');
 const campaignsPageKey = 'crm-campaigns-page';
+const competitorFeedPages = { ads: 'Quảng cáo đối thủ', branded: 'KOL hợp tác' };
+let campaignsPageReady = false;
 function showCampaignsPage(page) {
-  const target = page === 'competitors' ? 'competitors' : 'campaigns';
+  const target = page === 'competitors' || competitorFeedPages[page] ? page : 'campaigns';
+  const panelName = target === 'campaigns' ? 'campaigns' : 'competitors';
   for (const button of campaignsPageTabs?.querySelectorAll('[data-campaigns-page]') || []) {
     const active = button.dataset.campaignsPage === target;
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   }
-  for (const panel of document.querySelectorAll('[data-campaigns-panel]')) panel.classList.toggle('hidden', panel.dataset.campaignsPanel !== target);
+  for (const panel of document.querySelectorAll('[data-campaigns-panel]')) panel.classList.toggle('hidden', panel.dataset.campaignsPanel !== panelName);
+  const card = document.querySelector('.competitors-card');
+  if (card) {
+    card.dataset.competitorsMode = competitorFeedPages[target] ? target : 'manage';
+    const title = card.querySelector('#competitors-title');
+    if (title) title.textContent = competitorFeedPages[target] || 'Đối thủ';
+  }
+  // Lần mở trang đầu chạy trước khi phần Đối thủ khai báo xong; loadCompetitors() sẽ vẽ luồng tin sau.
+  if (competitorFeedPages[target] && campaignsPageReady) renderCompetitorsFeed();
   try { localStorage.setItem(campaignsPageKey, target); } catch { /* không lưu được thì thôi */ }
 }
 campaignsPageTabs?.addEventListener('click', event => {
@@ -2167,6 +2179,7 @@ campaignsPageTabs?.addEventListener('click', event => {
   if (button) showCampaignsPage(button.dataset.campaignsPage);
 });
 try { showCampaignsPage(localStorage.getItem(campaignsPageKey)); } catch { showCampaignsPage('campaigns'); }
+campaignsPageReady = true;
 
 async function loadCampaigns() {
   if (!campaignsTable) return;
@@ -2371,10 +2384,8 @@ const competitorsAiBody = document.querySelector('#competitors-ai-body');
 const competitorsAiMeta = document.querySelector('#competitors-ai-meta');
 const competitorForm = document.querySelector('#competitor-form');
 const competitorAdForm = document.querySelector('#competitor-ad-form');
-const competitorTabs = document.querySelector('.competitors-tabs');
 
 let competitorsData = null;
-let competitorsTab = 'ads';
 let competitorsRequestId = 0;
 let competitorsBusy = false;
 
@@ -2467,7 +2478,7 @@ function competitorNameOf(id) {
 
 function renderCompetitorsFeed() {
   if (!competitorsFeed) return;
-  competitorTabs?.querySelectorAll('[data-competitors-tab]').forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.competitorsTab === competitorsTab)));
+  const competitorsTab = document.querySelector('.competitors-card')?.dataset.competitorsMode === 'branded' ? 'branded' : 'ads';
   if (competitorsTab === 'branded') {
     const posts = competitorsData?.branded || [];
     if (!posts.length) {
@@ -2579,12 +2590,6 @@ competitorAdForm?.addEventListener('submit', event => {
 });
 competitorsSyncButton?.addEventListener('click', () => runCompetitorsAction(competitorsSyncButton, '/api/competitors/sync', 'Đang lấy…', 'Lấy dữ liệu'));
 competitorsAiButton?.addEventListener('click', () => runCompetitorsAction(competitorsAiButton, '/api/competitors/insights', 'Đang phân tích…', 'AI gợi ý', { days: campaignsDays() }));
-competitorTabs?.addEventListener('click', event => {
-  const tab = event.target.closest('[data-competitors-tab]');
-  if (!tab) return;
-  competitorsTab = tab.dataset.competitorsTab;
-  renderCompetitorsFeed();
-});
 competitorsAiBody?.addEventListener('click', event => {
   const target = event.target.closest('[data-campaign-target]');
   if (target?.dataset.campaignTarget) highlightCampaignRow(target.dataset.campaignTarget);

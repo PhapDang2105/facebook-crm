@@ -25,3 +25,21 @@ test('form landing: bỏ nhãn "Đc / Địa chỉ" đứng đầu ô địa ch�
   assert.equal(address('Đồng Xoài, Bình Phước'), 'Đồng Xoài, Bình Phước');
   assert.equal(address('Dcầu Mới, Thủ Đức'), 'Dcầu Mới, Thủ Đức');
 });
+
+test('sửa địa chỉ đơn: thêm "(Live)" bật cờ đơn Live, gỡ "(Live)" tắt cờ, gửi lại đúng địa chỉ cũ thì đồng bộ cờ đã lệch', async () => {
+  const { applyCustomerOrderEdits } = await import('../app/order-edits.mjs');
+  const order = { id: 'o1', address: 'Trường mầm non Tam Hưng 1, Xã Tam Hưng, Huyện Thanh Oai, Hà Nội', livestream: false, products: [] };
+  applyCustomerOrderEdits(order, { address: `(Live) ${order.address}` });
+  assert.equal(order.livestream, true);
+  applyCustomerOrderEdits(order, { address: 'Trường mầm non Tam Hưng 1, Xã Tam Hưng, Huyện Thanh Oai, Hà Nội' });
+  assert.equal(order.livestream, false, 'gỡ "(Live)" thì bỏ cờ');
+  // Đơn Van Do 10/10: địa chỉ đã có "(Live)" mà cờ vẫn false — gửi lại đúng địa chỉ thì bật cờ, ghi là có sửa.
+  const stale = { id: 'o2', address: '(Live) Trường mầm non Tam Hưng 1, Hà Nội', livestream: false, products: [] };
+  const result = applyCustomerOrderEdits(stale, { address: stale.address });
+  assert.equal(stale.livestream, true);
+  assert.ok(JSON.stringify(result).includes('address'), 'có thay đổi để lưu và cập nhật POS');
+  // Đơn khách thường không bị đụng cờ khi sửa địa chỉ.
+  const plain = { id: 'o3', address: '12 Lê Lợi, Quận 1, TP Hồ Chí Minh', products: [] };
+  applyCustomerOrderEdits(plain, { address: '14 Lê Lợi, Quận 1, TP Hồ Chí Minh' });
+  assert.equal(plain.livestream, undefined);
+});

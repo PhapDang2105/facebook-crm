@@ -12,6 +12,7 @@ import { processingNotes } from './order-notes.mjs';
 import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
 
 const text = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+const LIVE_ADDRESS = /^\s*\(live\)/i;
 
 function money(value) {
   // Giá VND là số nguyên; dấu chấm là phân cách hàng nghìn ("149.000"), không phải thập phân.
@@ -153,6 +154,7 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
     if (phone !== order.phone) { order.phone = phone; changed.push('phone'); }
   }
 
+  const addressBefore = String(order.address || '');
   if (patch.address !== undefined) {
     const address = text(patch.address, 500);
     if (!address) throw new Error('Địa chỉ không được để trống.');
@@ -165,6 +167,16 @@ export function applyCustomerOrderEdits(order, patch = {}, now = Date.now()) {
         if (order.landing.autoFilled && !Object.keys(order.landing.autoFilled).length) delete order.landing.autoFilled;
       }
       changed.push('address');
+    }
+    // 10/10 (đơn Van Do): nhân viên thêm "(Live) " trước địa chỉ mà cờ đơn Live vẫn false → mẫu trạng thái đơn của bot
+    // (đọc thẳng order.livestream) kể đơn như khách thường. Địa chỉ mở đầu "(Live)" là đơn Live; gỡ "(Live)" thì bỏ cờ.
+    // Gửi lại đúng địa chỉ cũ cũng đồng bộ cờ (sửa đơn đã lệch).
+    const liveAddress = LIVE_ADDRESS.test(order.address || '');
+    if (liveAddress && order.livestream !== true) {
+      order.livestream = true;
+      if (!changed.includes('address')) changed.push('address');
+    } else if (!liveAddress && order.livestream === true && changed.includes('address') && LIVE_ADDRESS.test(addressBefore)) {
+      order.livestream = false;
     }
   }
 

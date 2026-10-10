@@ -17,10 +17,6 @@ const XANH = quantity => ({ product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z
 const VANG = quantity => ({ product: 'Granola Túi Vàng 350g', code: 'GRA-VANG-H350', quantity });
 const basket = (items, agoMs = 30000, extra = {}) => ({ items, key: items.map(item => `${item.code}=${item.quantity}`).sort().join('|'), at: Date.now() - agoMs, phone: '', address: '', addressAsks: 0, ...extra });
 const render = (id, extra = {}, context = {}) => renderChatbotReply({ template_id: id, ...extra }, templates, context);
-// R17 (chủ shop 10/10, quyết định 4): giữ giỏ 2 túi mà khách xin bát / muỗng → mời thêm 1 túi (GIFT_POLICY_UPSELL3, 3 túi 447.000đ)
-// thay bảng quà chung (trước R17: chỉ khi khách nói cả bát lẫn muỗng).
-const UPSELL3 = () => render('GIFT_POLICY_UPSELL3', { values: { total3: '447.000đ' } });
-const upsellAnswer = text => [withoutInviteTail(UPSELL3().messages[0]), UPSELL3().messages[0]].includes(text);
 
 let counter = 0;
 /** Hội thoại nhiều lượt: giữ trạng thái (saveBotState), lịch sử tin, đơn đã tạo; LLM giả trả mẫu chỉ định. */

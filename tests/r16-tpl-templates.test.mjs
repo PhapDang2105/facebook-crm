@@ -58,10 +58,10 @@ test('PRICE_COUNT 2 túi (giá trị luật đưa vào): "2 túi … 298.000đ, 
   assert.match(live, /^Dạ 2 túi \(Granola Túi Xanh 450g\) giá 298\.000đ, miễn phí vận chuyển ạ 🌾/);
 });
 
-test('products.seed.json: Combo 10 gói Cam (CB10-CAM-G30) tắt, Combo 10 gói Xanh còn bán', () => {
+test('products.seed.json: Combo 10 gói Cam (CB10-CAM-G30) bán lại (R17, chủ shop 10/10), Combo 10 gói Xanh còn bán', () => {
   const products = JSON.parse(readFileSync(new URL('../app/products.seed.json', import.meta.url), 'utf8'));
   const list = Array.isArray(products) ? products : products.items || products.products;
-  assert.equal(list.find(item => item.sku === 'CB10-CAM-G30').active, false);
+  assert.equal(list.find(item => item.sku === 'CB10-CAM-G30').active, true);
   assert.equal(list.find(item => item.sku === 'CB10-XANH-G35').active, true);
 });
 

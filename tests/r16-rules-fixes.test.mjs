@@ -238,8 +238,8 @@ test('#13 (điều phối) sau ASK_FLAVOR_NGUYENBAN, "Túi xanh" = số túi ph�
   assert.equal(ruleIntent('Túi xanh', inbox({ botLastTemplateId: 'ASK_FLAVOR', botLastAgeMin: 1, askedBagCount: 3, nguyenBanAsk: 2 })).value.No_A, '3');
 });
 
-test('#14 (điều phối) "Gói cam bơ hạt điều. Bn e" (Gói Cam đã tắt) → SMALL_PACK_FLAVOURS, không LIVE_ONLY', () => {
-  assert.equal(tpl(ruleIntent('Gói cam bơ hạt điều. Bn e', inbox({ botLastTemplateId: 'DISCOUNT_POLICY', botLastAgeMin: 3 }))), 'SMALL_PACK_FLAVOURS');
+test('#14 (điều phối) "Gói cam bơ hạt điều. Bn e" → không LIVE_ONLY; R17 (chủ shop 10/10: Cam bán lại) → báo giá Combo 10 gói Cam', () => {
+  assert.equal(tpl(ruleIntent('Gói cam bơ hạt điều. Bn e', inbox({ botLastTemplateId: 'DISCOUNT_POLICY', botLastAgeMin: 3 }))), 'PRICE_QUOTE');
 });
 
 test('#11 "N loại/vị/màu" không phải số túi trong luật giỏ; "1 màu xanh 1 màu vàng" vẫn là giỏ', () => {

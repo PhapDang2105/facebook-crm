@@ -38,8 +38,9 @@ test('r13 #3: NO_VARIANT xét chữ còn dấu — "bơ hạt điều" là Gói 
   // Ca …330895 02/10 10:46 (sau deploy): trả "cả 3 túi đều có hạt điều" + thẻ, nhân viên vào sau 38 phút.
   // R16: Combo 10 gói Cam đã tắt (chủ shop 03/10: combo 10 gói chỉ còn Xanh) — test cũ khẳng định bot báo giá Cam; nay không
   // được báo giá món đã ngừng bán (lời trả cụ thể do luật quyết, xem báo cáo r16: nên là SMALL_PACK_FLAVOURS).
-  assert.doesNotMatch(String(brief(ruleIntent('Gói cam bơ hạt điều. Bn e', inbox({ botLastTemplateId: 'DISCOUNT_POLICY' }))) ?? ''), /Combo 10 gói Cam/);
-  assert.doesNotMatch(String(brief(ruleIntent('Hỏi Giá Túi Cam Nhỏ', inbox())) ?? ''), /Combo 10 gói Cam/);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại → báo giá Cam như bản r13.
+  assert.match(String(brief(ruleIntent('Gói cam bơ hạt điều. Bn e', inbox({ botLastTemplateId: 'DISCOUNT_POLICY' }))) ?? ''), /Combo 10 gói Cam/);
+  assert.match(String(brief(ruleIntent('Hỏi Giá Túi Cam Nhỏ', inbox())) ?? ''), /Combo 10 gói Cam/);
   assert.notEqual(ruleIntent('Chị hỏi giá túi cam lớn granola điều lành có không em?', inbox())?.rule, 'SMALL_PACK_PRICE', '"túi cam lớn" không có: để mô hình/nhân viên');
   assert.notEqual(ruleIntent('cảm ơn shop, giá bn', inbox())?.rule, 'SMALL_PACK_PRICE', '"cảm ơn" không phải "cam"');
   // Ca …506783 01/10 20:27: "không lấy quà" (quà tặng) từng ra "cả 3 túi đều có quả sấy".

@@ -142,8 +142,8 @@ test('r13 #2: mã giỏ Shop thật — combo màu, đuôi quà, hộp 10 gói, 
   // khẳng định CB10-MIX còn bán.
   assert.deepEqual([skus(cart('CB10-MIX')), cart('CB10-MIX').unknown], [[], true]);
   assert.deepEqual([skus(cart('CB10-NAU-G35')), cart('CB10-NAU-G35').unknown], [[], true]);
-  // R16: Combo 10 gói Cam đã tắt (chủ shop 03/10) → mã lạ, nhân viên xử lý.
-  assert.deepEqual([skus(cart('CB10-CAM-G30')), cart('CB10-CAM-G30').unknown], [[], true]);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại → mã danh mục như Combo Xanh (R16 từng là mã lạ).
+  assert.deepEqual([skus(cart('CB10-CAM-G30')), cart('CB10-CAM-G30').unknown], [[['CB10-CAM-G30', 1]], false]);
   assert.deepEqual(skus(cart('CB10-XANH-G35', 2)), [['CB10-XANH-G35', 2]]);
   assert.deepEqual(skus(cart('CB10-XANH-G35+BGD')), [['CB10-XANH-G35', 1]], 'mã danh mục kèm đuôi quà');
   // Yến mạch: nhân viên lên đơn, có nhãn đúng món.
@@ -410,8 +410,8 @@ test('r13 #7: priceBasket khớp giá Shop cho các mã giỏ thật; giỏ 4/5/
   // Chủ shop 05/10: Combo 10 gói Mix tắt → không tự tính giá; combo Xanh cùng giá.
   assert.deepEqual(totalOf('CB10-MIX'), [false, 0, 0]);
   assert.deepEqual(totalOf('CB10-XANH-G35'), [true, 204000, 15000]);
-  // R16: Combo 10 gói Cam đã tắt (chủ shop 03/10) → không tự tính giá.
-  assert.deepEqual(totalOf('CB10-CAM-G30'), [false, 0, 0]);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại → cùng giá Combo Xanh.
+  assert.deepEqual(totalOf('CB10-CAM-G30'), [true, 204000, 15000]);
   assert.deepEqual(totalOf('GRA-XANH-Z450'), [true, 189000, 15000]);
   assert.match(priceBasket(catalog.parseShopCart([{ sku: 'CB3-VANGG+BGD+M' }]).items).gift, /Bộ bát gáo dừa \+ Muỗng dừa/, 'quà theo bảng quà khớp đuôi +BGD+M của mã');
   for (const [quantity, total] of [[4, 596000], [5, 745000], [6, 894000], [9, 1341000], [10, 1490000]]) {

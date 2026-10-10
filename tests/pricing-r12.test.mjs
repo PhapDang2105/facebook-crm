@@ -57,7 +57,8 @@ test('giỏ lớn: từ 2 túi mỗi túi giá combo (Xanh/Vàng 149k, Nâu 144k
 test('combo 10 gói ×n 179k/combo; ghép với túi lớn: 2 Vàng + 1 combo Xanh = 477k miễn ship + bát + muỗng; Cam đã tắt', () => {
   assert.equal(basket(['CB10-XANH-G35', 2]).total, 358000);
   assert.equal(basket(['CB10-XANH-G35', 4]).total, 4 * 179000);
-  assert.equal(basket(['CB10-CAM-G30', 1]).priceable, false);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam vẫn bán — tính giá như Combo 10 gói Xanh.
+  assert.equal(basket(['CB10-CAM-G30', 2]).total, 358000);
   const mixed = basket([VANG, 2], ['CB10-XANH-G35', 1]);
   assert.equal(mixed.total, 477000);
   assert.equal(mixed.shippingFee, 0);
@@ -216,8 +217,8 @@ test('giỏ Facebook Shop: bỏ đuôi quà "+BGD+M", combo màu → túi, yến
   assert.deepEqual(catalog.parseCartSku('CB3-VANGG+BGD+M').items.map(item => [item.sku, item.quantity]), [[VANG, 3]]);
   assert.deepEqual(catalog.parseCartSku('CB-VANGG+XANH').items.map(item => [item.sku, item.quantity]), [[VANG, 1], [XANH, 1]]);
   assert.deepEqual(catalog.parseCartSku('CB2-MINT-Z300', 2).items.map(item => [item.sku, item.quantity]), [[TROPICAL, 4]]);
-  // R16: Combo 10 gói Cam đã tắt → mã giỏ Shop của nó là mã lạ, nhân viên xử lý (không tự lên đơn món đã ngừng bán).
-  assert.deepEqual([catalog.parseCartSku('cb10-cam-g30').items.length, catalog.parseCartSku('cb10-cam-g30').needsStaff], [0, true]);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại → mã giỏ Shop của nó đọc được như Combo Xanh.
+  assert.deepEqual([catalog.parseCartSku('cb10-cam-g30').items.map(item => item.sku), catalog.parseCartSku('cb10-cam-g30').needsStaff], [['CB10-CAM-G30'], false]);
   assert.deepEqual(catalog.parseCartSku('GRA-NAU-Z350+BGD').items.map(item => [item.sku, item.quantity]), [[NAU, 1]]);
   const oat = catalog.parseCartSku('CB2-HT-YM-T500');
   assert.deepEqual([oat.needsStaff, oat.reason, oat.label, oat.items.length], [true, 'oat', 'Yến Mạch Úc Nguyên Cám cán dẹt 1kg', 0]);

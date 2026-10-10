@@ -139,16 +139,16 @@ test('L3 ca …3440168818: "Uh ở xa quá nên hơi lâu e nhỉ" ngay sau SHIP
 });
 
 // ---- Giỏ Facebook Shop mã đã tắt (CB10-CAM-G30) → ghi nhận + thẻ nhân viên, không hỏi vị granola (ca …9873460116).
-test('ca …9873460116: giữ giỏ Combo 10 gói Cam (đã tắt) + SĐT → SHOP_CART_STAFF + thẻ, giữ SĐT, không ASK_FLAVOR', async () => {
+test('ca …9873460116: giữ giỏ Combo 10 gói đã tắt (R17: Cam bán lại 10/10 → thử bằng Nâu) + SĐT → SHOP_CART_STAFF + thẻ, giữ SĐT, không ASK_FLAVOR', async () => {
   const sim = new Sim({ psid: 'fix2-cam' });
   const ib = sim.inbox({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - MIN,
-    pendingOrder: { items: [{ product: 'Combo 10 gói Cam', code: 'CB10-CAM-G30', quantity: 1 }], key: 'CB10-CAM-G30=1', at: Date.now() - 2 * MIN, phone: '', address: 'Kim van ấp 6 phú thịnh tân phú đồng nai', addressAsks: 0 } });
+    pendingOrder: { items: [{ product: 'Combo 10 gói Nâu', code: 'CB10-NAU-G35', quantity: 1 }], key: 'CB10-NAU-G35=1', at: Date.now() - 2 * MIN, phone: '', address: 'Kim van ấp 6 phú thịnh tân phú đồng nai', addressAsks: 0 } });
   sim.history(ib, 'incoming', 'Mình lấy 1 combo ăn thử nha shop', 3 * MIN);
   sim.history(ib, 'incoming', 'Kim van ấp 6 phú thịnh tân phú đồng nai', 1.2 * MIN);
   sim.history(ib, 'outgoing', 'Dạ em đã nhận được địa chỉ của mình rồi ạ. Chị cho em xin số điện thoại để em lên đơn gửi mình nha', MIN, { sender: 'bot' });
   const turn = await sim.send(ib, PHONE, { llm: { template_id: 'ORDER_CONFIRMATION' } });
   assert.equal(turn.result.templateId, 'SHOP_CART_STAFF', JSON.stringify(turn.result));
-  assert.match(texts(turn), /Combo 10 gói Cam/);
+  assert.match(texts(turn), /Combo 10 gói Nâu/);
   assert.ok(ib.labels.includes('handoff'));
   assert.equal(ib.pendingOrder.phone, PHONE);
 });

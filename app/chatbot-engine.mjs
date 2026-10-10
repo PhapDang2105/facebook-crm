@@ -8,7 +8,7 @@ import { buildCatalogPrompt } from './processing/pricing.mjs';
 import { isBasketStep, isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { findProductBySku, getCatalogProducts, getGifts, hasLivestreamGift, isFreeShippingGift, isSwappableGift, matchProduct, parseGiftSwapChoice, parseShopCart } from './processing/catalog.mjs';
 import { hasGiftOverride } from './gift-override.mjs';
-import { isLivestreamConversation, isLivestreamCustomer, isPageSystemNotice, lateInfoNeedsBot } from './conversation-orders.mjs';
+import { isLivestreamConversation, isLivestreamCustomer, isPageSystemNotice, isPageSystemNoticeText, lateInfoNeedsBot } from './conversation-orders.mjs';
 // R13: LIVE_ONLY (danh sách hàng chỉ bán trên live) và FLAVOR_LIST (câu hỏi danh sách vị) dùng chung một bản của rule-intent.
 import { asksSpoonIncluded, CANCEL_ORDER, COMMENT_DISLIKE, core as ruleCore, DELIVERY_NOTE, FLAVOR_LIST, HOLD_DELIVERY, isFanToSpoonRequest, isReceivedNotice, LIVE_FEEDBACK, LIVE_ONLY, ruleIntent, TROPICAL_MENTION } from './processing/rule-intent.mjs';
 import { cleanAddressText, collectAddressBurst, isPaymentMessage, lookupPreviousAddress, maskMarketWord, maskPlaceGia, resolvePreviousAddress, stripPhone } from './processing/order-flow.mjs';
@@ -273,10 +273,27 @@ export function commentBasket(text, detail = null) {
   if (!buyVerb && (/^(?:sao|tai sao|vi sao|the sao|khac)\b/.test(folded.trim()) || /\bkhac (?:gi|nhau|sao|cho nao|the nao|nhu the nao|(?:tui|loai|vi|mau|voi)\b)|\bso voi\b|\bso sanh\b/.test(folded))) return [];
   // "2 hộp xanh", "hộp 10 gói nâu", "1 hộp": Combo 10 gói (màu ghi kèm; không ghi thì Mix).
   // R14: "combo 10 gói xanh" / "10 gói nhỏ" là hộp 10 gói (trước đây đọc thành 10 Túi Xanh 450g).
-  const boxFolded = folded.replace(/\b(?:combo|hop|set) (?:10|muoi) goi(?: nho)?\b|\b(?:10|muoi) goi(?: nho)?\b/g, 'hop');
-  // R14: hộp 10 gói đi KÈM túi lớn ("Hộp 10 gói và 1 túi xanh") — không tự dựng giỏ (trước đây hộp bị bỏ, còn 1 Túi Xanh);
-  // engine ghi nhận nguyên văn (commentBasketUnknown → ORDER_CUSTOM_BASKET) / để luật hộp thư xử lý.
-  if (/\bhop\b/.test(boxFolded) && /\b(tui|bich)\b/.test(boxFolded)) return [];
+  // R17 (inbox3 A5): "sét/set/hộp/combo 10 bịch" cũng là hộp 10 gói. Quyết định chủ shop 10/10 (1): combo 10 gói CAM vẫn bán —
+  // "túi cam / gói cam / combo cam / hộp cam / 10 gói cam" là hộp Cam (CB10-CAM-G30).
+  const boxFolded = folded.replace(/\b(?:combo|hop|set) (?:10|muoi) (?:goi|bich)(?: nho)?\b|\b(?:10|muoi) goi(?: nho)?\b/g, 'hop')
+    .replace(/\b(?:hop|tui|goi|combo|set|vi) cam\b(?! on\b)/g, 'hop cam');
+  // R14: hộp 10 gói đi KÈM túi lớn ("Hộp 10 gói và 1 túi xanh") — trước đây không tự dựng giỏ (hộp bị bỏ, còn 1 Túi Xanh).
+  // R17 (inbox3 A5, ca …1372054966 "1 hộp và 1 túi vàng", …0457215476 "1 nâu và sét 10 bịch"; inbox4 T5 "1 túi vàng 1 túi cam"):
+  // MỘT cụm hộp (± số, ± vị Xanh/Cam ngay sau) + phần túi lớn đọc được → giỏ túi lớn + hộp (không ghi vị = Xanh). Hộp Nâu/Mix
+  // (đã tắt), hai cụm hộp, Nghệ Lành (hộp 14 gói) → không tự dựng giỏ như cũ.
+  if (/\bhop\b/.test(boxFolded)) {
+    const boxPhrase = /(?:(?<!\d)(\d{1,2}) ?)?\bhop\b(?: (xanh|cam|nau|mix|vang|cacao)\b)?/;
+    const boxMatch = boxFolded.match(boxPhrase);
+    const rest = boxFolded.replace(boxPhrase, ' ').replace(/\s+/g, ' ').trim();
+    if (/\b(tui|bich)\b/.test(boxFolded) || /\b(xanh|vang|nau|cacao|mint)\b/.test(rest)) {
+      if (/\b(?:hop|nghe|bot|14 goi)\b/.test(rest) || /\bhopp\b/.test(folded)) return [];
+      const boxColour = boxMatch?.[2] || 'xanh';
+      if (!['xanh', 'cam'].includes(boxColour)) return [];
+      const bags = commentBasket(rest);
+      const box = getCatalogProducts().find(item => item.active !== false && /^cb10-/i.test(item.sku || '') && String(item.sku || '').toLowerCase().includes(`-${boxColour}`));
+      return bags.length && box ? [...bags, { product: box.name, quantity: Number(boxMatch?.[1]) || 1 }] : [];
+    }
+  }
   const boxed = /\bhop\b/.test(boxFolded) && !/\b(tui|bich)\b/.test(boxFolded);
   // R16: "N loại / N vị / N màu" (không kèm màu ngay sau) là số LOẠI, không phải số túi ("2loai tui xanh va tui vang").
   const cleaned = boxFolded.replace(/\bdau xanh\b/g, ' ').replace(/\bhop (?:10|muoi) goi(?: nho)?\b/g, 'hop')
@@ -302,7 +319,7 @@ export function commentBasket(text, detail = null) {
   // → sản phẩm đã tắt, không tự dựng giỏ (để mô hình / nhân viên).
   if (boxed) {
     const boxCount = Number(cleaned.match(/(?<!\d)(\d{1,2})\s*hop\b/)?.[1] || cleaned.match(/\bhop\b[^\d]{0,12}(?<!\d)(\d{1,2})(?!\d|\s*(?:goi|g|gr|gram|k)\b)/)?.[1]) || 0;
-    const colourOfBox = counts.size === 1 ? [...counts.keys()][0] : (/\bmix\b/.test(cleaned) ? 'mix' : (!counts.size ? 'xanh' : ''));
+    const colourOfBox = /\bhop cam\b/.test(cleaned) && !counts.size ? 'cam' : counts.size === 1 ? [...counts.keys()][0] : (/\bmix\b/.test(cleaned) ? 'mix' : (!counts.size ? 'xanh' : ''));
     if (!colourOfBox) return [];
     // Hộp KHÔNG ghi màu (mặc định Xanh): chỉ nhận tin đặt gọn "lấy 1 hộp", "cho em 2 hộp 10 gói nha" — chạy lại trên tin thật
     // r13/r15/r16: "Cho chi giá combo 10 gói nhỏ", "Cho mình xem combo 10 gói nhỏ", "1 hộp k miễn ship à", "phù hợp" (bỏ dấu =
@@ -355,8 +372,12 @@ export function commentBasketUnknown(text) {
   const colour = '(?:xanh|vang|nau|cacao|mint)';
   const count = '(?:\\d{1,2}|mot|hai|ba|bon|nam)';
   const unit = '(?:tui|goi|bich|hop)';
+  // R17 (inbox3 A5, inbox4 T5; chủ shop 10/10 — Cam vẫn bán): bộ đọc giỏ đã đọc ra hộp 10 gói (Xanh/Cam) kèm túi lớn → không còn
+  // là giỏ lạ; "túi/gói/hộp/combo cam" là hộp Cam, không phải món lạ.
+  const readsBox = commentBasket(text).some(item => getCatalogProducts().some(product => product.name === item.product && /^cb10-/i.test(product.sku || '')));
+  const camBox = readsBox && /\b(?:tui|goi|hop|combo|set|vi|10 ?goi) cam\b/.test(folded);
   // Món lạ: yến mạch, màu "cam", bột/nghệ, siêu hạt.
-  const odd = '(?:yen mach|cam|nghe|bot ngu coc|sieu hat)';
+  const odd = camBox ? '(?:yen mach|nghe|bot ngu coc|sieu hat)' : '(?:yen mach|cam|nghe|bot ngu coc|sieu hat)';
   const oddCounted = new RegExp(`\\b${count} ?(?:${unit} )?${odd}\\b`).test(folded) && !/\bcam on\b/.test(folded);
   const oddUnit = new RegExp(`\\b${unit} ${odd}\\b`).test(folded) && !/\bcam on\b/.test(folded);
   // Hộp/combo 10 gói đi KÈM túi lớn trong cùng bình luận ("Tui xanh va 10goi").
@@ -365,7 +386,7 @@ export function commentBasketUnknown(text) {
   const named = new RegExp(`\\b${colour}\\b|\\b${unit}\\b`).test(folded);
   const ordering = new RegExp(`\\b${count} ?(?:${unit} )?(?:${colour}|${odd})\\b|\\b(?:lay|mua|dat|chot|gui|ship|cho (?:em|minh|chi|c|e|toi|tui|anh|a))\\b`).test(folded);
   // Túi lớn + hộp 10 gói trong cùng bình luận là giỏ ghép bot không tự tính (trừ câu hỏi so sánh "… khác gì nhau").
-  if (tenPack && bigBag && !/\b(khac|so voi|hay la|hoac)\b/.test(folded)) return true;
+  if (tenPack && bigBag && !readsBox && !/\b(khac|so voi|hay la|hoac)\b/.test(folded)) return true;
   if (!ordering || !named) return false;
   return oddCounted || oddUnit;
 }
@@ -1219,8 +1240,10 @@ const callSystemMessage = /bỏ lỡ cuộc gọi|có thể gọi cho .* trong 7
 function isSilentCustomerMessage(item) {
   if (stickerInfo(item)) return true;
   const text = String(item?.text || '');
-  return (item?.type || 'text') === 'text' && (callSystemMessage.test(text) || /^\s*notes?\s*:/i.test(text));
+  return (item?.type || 'text') === 'text' && (callSystemMessage.test(text) || /^\s*notes?\s*:/i.test(text) || isPageSystemNoticeText(text));
 }
+// R17 (inbox3 A1): dòng hệ thống Facebook ("… đã trả lời về một bài viết. Xem bài viết(link)") đến dưới dạng tin KHÁCH.
+const isIncomingSystemNotice = item => item?.direction === 'incoming' && (item.type || 'text') === 'text' && isPageSystemNoticeText(item.text);
 
 /**
  * R13: tin Page do NGƯỜI gõ (nhân viên) — cờ `staff`, hay tin Page không mang dấu máy gửi nào (Page nối thẳng Meta, dữ
@@ -1750,7 +1773,13 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // R13 (bình luận F10): dòng hệ thống Facebook lưu như tin Page ("Bạn đang phản hồi bình luận…", "… đã trả lời một quảng
     // cáo.", "… replied to a post") không phải lời Page — bỏ khỏi mọi phép kiểm "Page đã trả lời" và khỏi lịch sử đưa mô hình.
     const recentStored = await listMessages(conversation.id);
-    const recent = Array.isArray(recentStored) ? recentStored.filter(item => !isPageSystemNotice(item)) : recentStored;
+    // R17 (inbox3 A1, ca …1715345827): dòng "<tên> đã trả lời về một bài viết. Xem bài viết(link)" Pancake đẩy về như tin KHÁCH
+    // → bị gộp vào khối địa chỉ đơn. Bỏ khỏi lịch sử như dòng hệ thống của Page; lượt của chính dòng đó thì im.
+    const recent = Array.isArray(recentStored) ? recentStored.filter(item => !isPageSystemNotice(item) && !isIncomingSystemNotice(item)) : recentStored;
+    if (isIncomingSystemNotice(change.message)) {
+      results.push({ conversationId: conversation.id, skipped: 'dòng hệ thống Facebook (tin khách)' });
+      return;
+    }
     // Nhật ký: chữ tin bot gần nhất (không phải tin nhân viên), để công cụ dựng dataset không phải đoán từ mã mẫu.
     trace.prevBotText = String([...(Array.isArray(recent) ? recent : [])].reverse().find(item => item?.direction === 'outgoing' && !item.staff && item.text)?.text || '').slice(0, 300);
     // Vòng 12 (chủ shop 01/10): sticker không bao giờ đi nhánh "đã nhận hình" và không gọi mô hình đọc ảnh.
@@ -2838,6 +2867,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           botLastAgeMin: conversation.botLastReplyAt ? (Date.now() - Number(conversation.botLastReplyAt)) / 60000 : Infinity,
           // Giỏ đang giữ chỉ tính khi còn hạn (2 giờ) — giỏ cũ quá hạn làm luật ADDRESS_COMPLETE dựng ASK_PRODUCT.
           hasBasket: Boolean(usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items?.length),
+          // R17 (chủ shop 10/10, quyết định 8): bot vừa hỏi xác nhận địa chỉ cũ — "ok/đúng rồi" là đồng ý lên đơn (order-flow).
+          oldAddressConfirm: Boolean(conversation.pendingOrder?.oldAddressConfirm),
           // R13 sửa (C1): giỏ/đơn đang xét có quà hiện vật đổi được không (false → luật GIFT_SWAP trả GIFT_POLICY).
           giftSwappable: giftSwapApplies,
           // Vòng 12 (BOT-A): bước giỏ dùng chung isBasketStep (thêm ORDER_ADDRESS_OLD_ASK_PHONE); PRICE_ONE_BAG ("em lên 1 túi

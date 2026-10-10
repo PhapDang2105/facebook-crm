@@ -26,7 +26,8 @@ test('commentBasket: "combo 10 gói xanh" là hộp 10 gói (không phải 10 T�
   assert.equal(box.length, 1);
   assert.match(box[0].product, /Combo 10|10 gói/i);
   assert.equal(box[0].quantity, 1);
-  assert.deepEqual(commentBasket('Hộp 10 gói và 1 túi xanh'), []);
+  // R17 (inbox3 A5): giỏ đọc ĐỦ cả túi lớn lẫn hộp 10 gói (không còn mất hộp), không bỏ trống.
+  assert.deepEqual(commentBasket('Hộp 10 gói và 1 túi xanh').map(item => [item.product, item.quantity]).sort(), [['Combo 10 gói Xanh', 1], ['Granola Túi Xanh 450g', 1]]);
 });
 
 test('N1: bình luận "3 túi vàng, xanh" (số túi khác số vị) → hỏi vị, giữ 3 túi sang hộp thư', async () => {

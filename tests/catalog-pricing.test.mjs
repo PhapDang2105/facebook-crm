@@ -54,8 +54,9 @@ test('giỏ cùng nhóm ghép (túi lớn, Tropical, combo 10 gói) tự tính m
   // 3 túi lẻ ×1..3 + mọi bộ ghép ≤3 của 3 túi trộn được + 6 sản phẩm còn lại ×1..3.
   // R16: Combo 10 gói Cam (CB10-CAM-G30) tắt trong seed (chủ shop 03/10: combo 10 gói chỉ còn Xanh) → 7 thành 6 (sửa test cũ
   // vì nó khẳng định Cam còn bán). Chủ shop 05/10: tắt thêm Combo 10 gói Nâu và Mix → 6 thành 4.
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại → thêm 3 tổ hợp (Cam ×1..3).
   const combos = catalog.listCombos();
-  assert.equal(combos.length, 4 * 3 + 19);
+  assert.equal(combos.length, 5 * 3 + 19);
   assert.equal(new Set(combos.map(combo => combo.key)).size, combos.length);
   // Quy tắc quà: từ 2 sản phẩm miễn ship; từ 3 thêm bát + muỗng, trừ Nghệ Lành và Hạt An Lành.
   assert.deepEqual(catalog.giftsForKey('MIX5-H420=3').map(gift => gift.name), ['Miễn phí vận chuyển']);

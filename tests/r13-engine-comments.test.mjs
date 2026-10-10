@@ -24,7 +24,9 @@ test('commentBasket đọc số bằng chữ và chữ đệm: "2 túi hạt và
 });
 
 test('commentBasketUnknown: giỏ có món bộ đọc không biết ("1 tui nau 1 yen mach", "1 xanh, 1 cam", "Tui xanh va 10goi")', () => {
-  for (const text of ['1 tui nau 1 yen mach', '1 xanh, 1 cam', 'Tui xanh va 10goi', 'lấy 1 túi xanh với 2 gói cam nha']) assert.equal(commentBasketUnknown(text), true, text);
+  for (const text of ['1 tui nau 1 yen mach', '1 xanh, 1 cam', 'Tui xanh va 10goi']) assert.equal(commentBasketUnknown(text), true, text);
+  // R17 (chủ shop 10/10: Combo 10 gói Cam vẫn bán): bộ đọc giỏ đã đọc ra túi lớn + Combo 10 gói Cam → không còn lạ.
+  assert.equal(commentBasketUnknown('lấy 1 túi xanh với 2 gói cam nha'), false);
   for (const text of ['1 xanh 1 vàng', '2 túi xanh', 'cảm ơn shop', 'túi cam giá bao nhiêu', 'yến mạch có không shop', 'Xin giá', '.', 'túi xanh với hộp 10 gói khác gì nhau']) assert.equal(commentBasketUnknown(text), false, text);
 });
 

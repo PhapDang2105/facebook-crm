@@ -150,5 +150,7 @@
   "ORDER_ADDRESS_OLD_NOT_FOUND": "Dạ em chưa tìm thấy địa chỉ cũ theo số này ạ, {title} gửi giúp em địa chỉ nhận hàng (số nhà, đường, phường/xã, tỉnh) để em lên đơn liền nha ạ.",
   "SMALL_PACK_FLAVOURS": "Dạ combo 10 gói nhỏ hiện bên em chỉ còn vị Xanh nguyên bản ạ (dễ ăn, cân bằng). {Title} cần em gửi bảng giá combo 10 gói không ạ?",
   "DEFAULT_FLAVOUR_NOTE": "Dạ {title} chưa chọn vị nên em lên {count} Túi Xanh nguyên bản 450g (vị dễ ăn, bán chạy nhất) cho mình ạ 💚 {Title} muốn đổi sang Túi Vàng nhiều hạt hay Túi Nâu cacao thì nhắn em đổi liền nha.",
-  "VOICE_RECEIVED": "Dạ em chưa nghe được tin nhắn thoại ạ, {title} nhắn chữ giúp em nha ạ 💛"
+  "VOICE_RECEIVED": "Dạ em chưa nghe được tin nhắn thoại ạ, {title} nhắn chữ giúp em nha ạ 💛",
+  "ALLERGY_HAS_INGREDIENT": "Dạ cả Túi Xanh, Túi Vàng và Túi Nâu nhà em đều có {ingredient} trong thành phần ạ, nên nếu {title} dị ứng hay không dùng được {ingredient} thì mình không nên dùng sản phẩm này để đảm bảo sức khỏe nha ạ 💛 Em cảm ơn {title} đã hỏi kỹ ạ.",
+  "INGREDIENT_NOT_INCLUDED": "Dạ trong thành phần granola nhà em không có {ingredient} ạ 💚 Granola gồm: gạo lứt, yến mạch, hạt bí, hạnh nhân, hạt điều, nho khô, xoài sấy, nam việt quất sấy, dừa sấy, mật thốt nốt, đường mạch nha và muối hồng Himalaya. Nếu {title} dị ứng nặng thì mình hỏi thêm ý kiến bác sĩ cho chắc nha ạ."
 }

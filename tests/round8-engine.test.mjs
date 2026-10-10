@@ -73,8 +73,9 @@ test('3a/3d. "Có" sau PACKAGING_INFO → bảng giá Combo 10 gói (màu ngữ 
   assert.doesNotMatch(brown.sent.join('\n'), /Combo 10 gói Nâu/);
   const paidText = await run({ botLastTemplateId: 'BANK_TRANSFER', botLastReplyAt: now() - 10 * 60000 }, 'Mình ck rồi nhé', { reply: { templateId: 'WELCOME', messages: ['x'], handoff: false } });
   assert.equal(paidText.asked.length, 0);
-  assert.equal(paidText.results[0].templateId, 'PAYMENT_RECEIVED_CHECK');
-  assert.match(paidText.sent[0], /chuyển khoản/);
+  // R17 (chủ shop 10/10, quyết định 6): khách báo / đề nghị chuyển khoản bằng chữ → chuyển CSKH (tắt bot + thẻ); ảnh bill giữ như cũ.
+  assert.equal(paidText.results[0].templateId, 'CSKH_HANDOFF');
+  assert.doesNotMatch(paidText.sent[0], /ACB|số tài khoản/);
   assert.ok(paidText.saved.at(-1).addLabelEvents.includes('handoff'));
   const paidImage = await run({ botLastTemplateId: 'BANK_TRANSFER', botLastReplyAt: now() - 10 * 60000 }, '', { type: 'image', reply: { templateId: 'WELCOME', messages: ['x'], handoff: false } });
   assert.equal(paidImage.results[0].templateId, 'PAYMENT_RECEIVED_CHECK');

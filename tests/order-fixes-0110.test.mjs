@@ -29,6 +29,10 @@ const { appendOrderToArchive } = await import('../app/order-archive.mjs');
 const XANH = 'GRA-XANH-Z450';
 const ADDRESS = '12 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh';
 const LIVE_GIFT = { id: 'qua-tang-live', name: 'Quạt + Bát gáo dừa', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 };
+// R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, cùng SKU QUA-TANG-LIVE, cả đơn 3 túi; chính sách hiện hành
+// kiểm ở live-gift-bat-muong.test.mjs). Test dưới giữ kịch bản quà live gộp cũ "Quạt + Bát gáo dừa" (đúng 2 túi) nên bỏ
+// live-quat trước khi thêm, không thì đơn có hai quà live.
+const pushLegacyLiveGift = (gifts, extra = {}) => { gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat'); gifts.items.push({ ...LIVE_GIFT, ...extra }); };
 
 /** Chạy `run` với bảng quà đã sửa bởi `edit`, rồi trả bảng quà gốc. */
 async function withGifts(edit, run) {
@@ -110,7 +114,7 @@ const row = (id, sku, quantity, price, { address = ADDRESS, note = '', name = sk
 const lines = rows => rows.map(item => `${item[19]}x${item[21]}@${item[22]}`);
 
 test('xuất kho: đơn nhân viên tạo cho khách live (cờ livestream, địa chỉ không "(Live)") có dòng quà live; live + ưu đãi bám đuổi không thêm bát thứ hai', async () => {
-  await withGifts(gifts => gifts.items.push(LIVE_GIFT), () => {
+  await withGifts(gifts => pushLegacyLiveGift(gifts), () => {
     const manual = { id: '51234', source: 'Facebook', livestream: true, products: [{ sku: XANH, quantity: 2 }] };
     const data = { headers, rows: [row('CB-51234', XANH, 2, 149000)] };
     // Trước đây: dòng bảng không mang cờ live → mất quà live.
@@ -144,7 +148,7 @@ test('xuất kho đơn nguồn POS: ghi đúng các dòng tặng trên POS (quà
 
 test('quà live không cộng dồn quà khuyến mãi: bảng quà thiếu "tối đa 2 túi" vẫn không tặng quà live cho 3 túi; 2 túi live chỉ quà live (giữ miễn ship)', async () => {
   await withGifts(gifts => {
-    gifts.items.push({ ...LIVE_GIFT, maxQuantity: 0 });
+    pushLegacyLiveGift(gifts, { maxQuantity: 0 });
     // Bộ bát cấu hình từ 2 túi: khách live 2 túi vẫn chỉ nhận quà live.
     gifts.items.find(gift => gift.sku === 'BGD').minQuantity = 2;
   }, () => {
@@ -152,7 +156,7 @@ test('quà live không cộng dồn quà khuyến mãi: bảng quà thiếu "t�
     assert.deepEqual(giftsForKey(`${XANH}=2`, { livestream: true }).map(gift => gift.sku || gift.id), ['freeship', 'QUA-TANG-LIVE']);
     assert.deepEqual(giftsForKey(`${XANH}=2`).map(gift => gift.sku || gift.id), ['freeship', 'BGD'], 'khách thường không đổi');
   });
-  await withGifts(gifts => gifts.items.push(LIVE_GIFT), () => {
+  await withGifts(gifts => pushLegacyLiveGift(gifts), () => {
     // POS: đơn live 2 túi có cờ ưu đãi bám đuổi → chỉ dòng quà live.
     const posSkus = new Set([XANH, 'BGD', 'MUONG', 'QUA-TANG-LIVE']);
     const twoBags = { id: 'lv2', name: 'A', phone: '0385805790', address: ADDRESS, products: [{ name: 'Granola Túi Xanh 450g', sku: XANH, quantity: 2, price: 174000 }], freeShipping: true, shippingFee: 0, discount: 50000, total: 298000 };

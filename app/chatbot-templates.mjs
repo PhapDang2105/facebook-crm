@@ -1602,7 +1602,8 @@ export const r15FallbackTemplates = Object.freeze({
   FRUIT_PAIRING: 'Dạ granola bên em ăn kèm trái cây nào cũng hợp ạ: thanh long, chuối, táo, dâu… Trộn thêm sữa chua hoặc sữa hạt thì càng ngon và no lâu nha {title} 🌾',
   DISCOUNT_OATS_GIFT: 'Dạ giá combo bên em đã là giá tốt nhất rồi nên em không giảm thêm được ạ 💛[?enough] Combo bên em đã được hỗ trợ miễn phí vận chuyển rồi nha {title} 🌾[?gift]\n🎁 Quà tặng kèm: {gift} ạ.[/?][/?][?invite] {Title} lấy từ combo 2 túi ({two_price}, miễn phí vận chuyển)[?two_gift] và được tặng kèm {two_gift}[/?] là tiết kiệm nhất nha ạ 🌾[/?]\nGiỏ của mình: {cart} – {total} ạ.',
   ORDER_ADDRESS_OLD_NOT_FOUND: 'Dạ em chưa tìm thấy địa chỉ cũ theo số này ạ, {title} gửi giúp em địa chỉ nhận hàng (số nhà, đường, phường/xã, tỉnh) để em lên đơn liền nha ạ.',
-  SMALL_PACK_FLAVOURS: 'Dạ combo 10 gói nhỏ hiện bên em chỉ còn vị Xanh nguyên bản ạ (dễ ăn, cân bằng). {Title} cần em gửi bảng giá combo 10 gói không ạ?',
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại — combo 10 gói có Xanh và Cam (Nâu/Mix vẫn tắt).
+  SMALL_PACK_FLAVOURS: 'Dạ combo 10 gói nhỏ hiện bên em có 2 vị: Xanh nguyên bản (dễ ăn, cân bằng) và Cam (vị bơ hạt điều) ạ. {Title} cần em gửi bảng giá combo 10 gói không ạ?',
   // R15 (inbox1 A5): khách đã nêu màu ({named}) thì không hỏi lại "vị nào". Mã đã có trong seed → bảng này chỉ khi bộ mẫu thiếu mã.
   PRICE_COUNT: 'Dạ {count} túi ({kind}) giá {total}[?ship] + phí ship {ship}[/?][?free], miễn phí vận chuyển[/?][?gift], tặng {gift}[/?] ạ 🌾[?named] {Title} lấy luôn {count} {kind} để em lên đơn liền cho mình nha?[/?][?pick] {Title} lấy {count} túi vị nào để em lên đơn liền cho mình nha?[/?]',
   ORDER_EXISTING_CONFIRM: 'Dạ {title} ơi, em thấy mình đang có đơn {existing_items} đặt lúc {existing_at}, hiện {existing_state} ạ 🌾 {Title} muốn em gộp {cart} vào đơn đang có, hay tách thành đơn mới (em gửi cùng địa chỉ cũ) ạ?'
@@ -1713,7 +1714,8 @@ function renderMixPricing(templates) {
   const full = fullKey && combos.has(fullKey)
     ? { full_count: mixable.length, full_names: mixable.map(product => product.name).join(' + '), full_price: priceOf(mixable), ...Object.fromEntries(Object.entries(basketValues(fullKey)).map(([k, v]) => [`full_${k}`, v])) }
     : {};
-  return fill(templates.PRICE_MIX_TUI_LON, { ...commonValues(), ...full }, { pairs });
+  // R17 (inbox5 B1, inbox1 chủ shop 3): {pair_gift} = quà của cặp mix 2 túi (khách live: Quạt) cho mẫu viết tay không lặp [[pairs]].
+  return fill(templates.PRICE_MIX_TUI_LON, { ...commonValues(), ...full, pair_gift: pairs[0]?.gift || '' }, { pairs });
 }
 
 /** Combining long-stroke overlay: the only way Messenger shows a struck-out price. */
@@ -1945,6 +1947,29 @@ function renderDiscountOatsGift(templates, context = {}) {
 }
 
 /**
+ * R17 (bình luận "chủ shop" 4, quyết định chủ shop 10/10 mục 4): quà theo bậc cho mẫu tự do (PRICE_SHIP_EXPLAIN,
+ * GIFT_POLICY_UPSELL3) — trước đây viết cứng "2 túi tặng Bát gáo dừa + Muỗng dừa", trái bảng quà 08/10 (khách thường 2 túi
+ * không quà, khách live 2 túi Quạt). {two_gift} / {three_gift}: quà hiện vật bậc 2 / 3 túi theo bảng quà và ngữ cảnh live;
+ * giỏ đang giữ đúng 2 túi thì tính trên chính giỏ đó (+1 túi cho bậc 3). {two_nogift} = '1' khi bậc 2 không có quà hiện vật.
+ * Mẫu không có các ô này thì không tính gì.
+ */
+function giftTierValues(text, context = {}) {
+  if (!/(?:\{|\[\?)(?:two_gift|three_gift|two_nogift)[}\]]/.test(String(text || ''))) return {};
+  const held = usablePendingOrder(context.pendingOrder, { now: Number(context.now) || Date.now(), templateId: 'ORDER_ADDRESS' })?.items || [];
+  const heldCount = held.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+  const first = getCatalogProducts().find(product => product.active && product.mixable && !product.staffOnly)?.sku || '';
+  const two = heldCount === 2 ? held : first ? [{ sku: first, quantity: 2 }] : [];
+  const three = heldCount === 2 ? [...held, { ...held[0], quantity: 1 }] : first ? [{ sku: first, quantity: 3 }] : [];
+  const giftOf = items => {
+    if (!items.length) return '';
+    const priced = priceBasket(items, giftContext());
+    return priced?.priceable ? (priced.gifts || []).filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + ') : '';
+  };
+  const twoGift = giftOf(two);
+  return { two_gift: twoGift, two_nogift: twoGift ? '' : '1', three_gift: giftOf(three) };
+}
+
+/**
  * A PRICE_<sản phẩm> id from the old prompt vocabulary. It is answered
  * by PRICE_QUOTE for that product; a text stored under it (the old
  * "Dạ Túi Xanh 450g: 1 túi 174.000đ…") is stale by definition and dropped.
@@ -2118,7 +2143,13 @@ function heldOneBagReply(templates, context = {}) {
   });
   const askTemplate = hasPhone && hasAddress ? '' : (known ? templates.ORDER_ADDRESS_PARTIAL : templates.ORDER_ADDRESS) || '';
   const askText = askTemplate ? fill(askTemplate, { ...commonValues(), missing, known }) : '';
-  const text = askText ? `${cartLine}\n${askText.replace(/^Dạ,?\s+(\p{L})/u, (_, first) => first.toUpperCase())}` : cartLine;
+  // R17 (gói C chuyển, crm-gift-rules-0110 mục 5): khách XIN miễn ship cho giỏ 1 túi ("Miễn ship cho chị nhé") → trước đây lặp
+  // lại tin đơn 189k. Nay nói rõ qua lời mời 2 túi (UPSELL_TWO_BAGS: "2 túi … 298.000đ, miễn phí vận chuyển … thay vì 189.000đ (đã
+  // gồm ship) cho 1 túi"), thay cho dòng giỏ (lời mời đã có số tiền). Chỉ hỏi phí ship ("ship bao nhiêu") thì như cũ.
+  const asksFreeShip = /\b(?:mien|free|fee|fre) ?(?:phi )?(?:ship|sip|van chuyen)\b|\bfreeship\b/.test(normalizeText(String(context.messageText || '')));
+  const upsell = asksFreeShip && price.shippingFee > 0 && templates.UPSELL_TWO_BAGS ? upsellTwoBags(price, templates) : '';
+  const head = upsell || cartLine;
+  const text = askText ? `${head}\n${askText.replace(/^Dạ,?\s+(\p{L})/u, (_, first) => first.toUpperCase())}` : head;
   return { templateId: 'FREESHIP_POLICY', ...splitMessages(text), handoff: false };
 }
 
@@ -2328,7 +2359,7 @@ function renderSingleReply(value = {}, templates = {}, context = {}) {
   return {
     templateId: resolvedId,
     // `values`: số liệu engine đã có sẵn (giỏ Shop, tổng đơn POS…) cho mẫu tự do.
-    ...splitMessages(fill(raw, { ...commonValues(), ...(value.values && typeof value.values === 'object' ? value.values : {}) })),
+    ...splitMessages(fill(raw, { ...commonValues(), ...giftTierValues(raw, context), ...(value.values && typeof value.values === 'object' ? value.values : {}) })),
     // Khách xin gọi điện: nhân viên phải gọi thật, nên vẫn chuyển người (kèm lời hẹn rõ).
     handoff: resolvedId === 'CSKH_HANDOFF' || resolvedId === 'CALLBACK_REQUEST'
   };

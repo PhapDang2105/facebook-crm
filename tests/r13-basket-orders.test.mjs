@@ -143,7 +143,8 @@ test('r13 #2: mã giỏ Shop thật — combo màu, đuôi quà, hộp 10 gói, 
   assert.deepEqual([skus(cart('CB10-MIX')), cart('CB10-MIX').unknown], [[], true]);
   assert.deepEqual([skus(cart('CB10-NAU-G35')), cart('CB10-NAU-G35').unknown], [[], true]);
   // R16: Combo 10 gói Cam đã tắt (chủ shop 03/10) → mã lạ, nhân viên xử lý.
-  assert.deepEqual([skus(cart('CB10-CAM-G30')), cart('CB10-CAM-G30').unknown], [[], true]);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại (Nâu / Mix vẫn tắt).
+  assert.deepEqual([skus(cart('CB10-CAM-G30')), cart('CB10-CAM-G30').unknown], [[['CB10-CAM-G30', 1]], false]);
   assert.deepEqual(skus(cart('CB10-XANH-G35', 2)), [['CB10-XANH-G35', 2]]);
   assert.deepEqual(skus(cart('CB10-XANH-G35+BGD')), [['CB10-XANH-G35', 1]], 'mã danh mục kèm đuôi quà');
   // Yến mạch: nhân viên lên đơn, có nhãn đúng món.
@@ -365,7 +366,8 @@ test('r13 #6: khách đã có đơn hỏi quà — GIFT_POLICY_LIVE không mời
   const reply = renderChatbotReply({ template_id: 'GIFT_POLICY_LIVE' }, templates, context);
   assert.equal(reply.templateId, 'GIFT_POLICY_LIVE', 'giữ mã engine đã gọi');
   assert.equal(reply.variant, 'GIFT_POLICY_ORDER');
-  assert.equal(reply.messages[0], 'Dạ đơn 1 Granola Túi Xanh 450g + 1 Granola Túi Vàng 350g + 1 Granola Túi Nâu vị cacao 350g của chị đã có quà tặng kèm Bộ bát gáo dừa + Muỗng dừa rồi ạ 🎁 Bên em gửi quà cùng đơn cho mình nha 💛');
+  // R17: quà live 08/10 — khách live 3 túi được Quạt + Bộ bát gáo dừa + Muỗng dừa (bảng quà hiện hành).
+  assert.equal(reply.messages[0], 'Dạ đơn 1 Granola Túi Xanh 450g + 1 Granola Túi Vàng 350g + 1 Granola Túi Nâu vị cacao 350g của chị đã có quà tặng kèm Quạt + Bộ bát gáo dừa + Muỗng dừa rồi ạ 🎁 Bên em gửi quà cùng đơn cho mình nha 💛');
   assert.doesNotMatch(reply.messages.join('\n'), /để em lên đơn|lấy 2 túi vị nào/);
   // Quà đã ghi trên đơn (quà live, kể cả quà đã đổi) được dùng nguyên văn; miễn ship không tính là quà hiện vật.
   const liveOrder = orderOf({ products: [{ name: 'Granola Túi Vàng 350g', sku: VANG_SKU, quantity: 2 }], gift: 'Miễn phí vận chuyển + Quạt + Bát gáo dừa', livestream: true });
@@ -382,12 +384,13 @@ test('r13 #6: khách đã có đơn hỏi quà — GIFT_POLICY_LIVE không mời
   assert.equal(renderChatbotReply({ template_id: 'GIFT_POLICY_PROMO' }, templates, context).variant, 'GIFT_POLICY_ORDER');
   assert.equal(renderChatbotReply({ template_id: 'GIFT_POLICY_UPSELL3', values: { total3: '447.000đ' } }, templates, context).variant, 'GIFT_POLICY_ORDER');
   const explicit = renderChatbotReply({ template_id: 'GIFT_POLICY_LIVE' }, templates, { ...context, hasOrder: false });
-  assert.match(explicit.messages[0], /lấy 2 túi vị nào để em lên đơn liền nha/);
+  // R17 (bình luận A7): lời mời live nói cả quà 3 túi nên hỏi "lấy mấy túi, vị nào".
+  assert.match(explicit.messages[0], /lấy mấy túi, vị nào để em lên đơn liền nha/);
   // Chưa có đơn / đơn đã hủy / đơn quá 24 giờ: mẫu mời như cũ.
   for (const recentOrder of [null, orderOf({ processingStatus: 'cancelled' }), orderOf({ createdAt: Date.now() - 25 * 60 * 60 * 1000 })]) {
     const invite = renderChatbotReply({ template_id: 'GIFT_POLICY_LIVE' }, templates, { ...context, recentOrder });
     assert.equal(invite.variant, undefined);
-    assert.match(invite.messages[0], /lấy 2 túi vị nào để em lên đơn liền nha/);
+    assert.match(invite.messages[0], /lấy mấy túi, vị nào để em lên đơn liền nha/);
   }
   // Engine gọi thẳng: mã riêng GIFT_POLICY_ORDER; không có đơn → null. Mẫu trong Cài đặt (nếu có) được dùng.
   assert.equal(renderOrderGiftReply(templates, { recentOrder: order }).templateId, 'GIFT_POLICY_ORDER');
@@ -411,7 +414,8 @@ test('r13 #7: priceBasket khớp giá Shop cho các mã giỏ thật; giỏ 4/5/
   assert.deepEqual(totalOf('CB10-MIX'), [false, 0, 0]);
   assert.deepEqual(totalOf('CB10-XANH-G35'), [true, 204000, 15000]);
   // R16: Combo 10 gói Cam đã tắt (chủ shop 03/10) → không tự tính giá.
-  assert.deepEqual(totalOf('CB10-CAM-G30'), [false, 0, 0]);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại (Nâu / Mix vẫn tắt). 1 hộp 189k + ship 15k.
+  assert.deepEqual(totalOf('CB10-CAM-G30'), [true, 204000, 15000]);
   assert.deepEqual(totalOf('GRA-XANH-Z450'), [true, 189000, 15000]);
   assert.match(priceBasket(catalog.parseShopCart([{ sku: 'CB3-VANGG+BGD+M' }]).items).gift, /Bộ bát gáo dừa \+ Muỗng dừa/, 'quà theo bảng quà khớp đuôi +BGD+M của mã');
   for (const [quantity, total] of [[4, 596000], [5, 745000], [6, 894000], [9, 1341000], [10, 1490000]]) {

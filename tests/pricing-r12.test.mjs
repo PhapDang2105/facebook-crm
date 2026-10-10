@@ -16,6 +16,10 @@ const VANG = 'GRA-VANG-H350';
 const NAU = 'GRA-NAU-Z350';
 const TROPICAL = 'GRA-MINT-Z300';
 const LIVE_GIFT = { id: 'qua-tang-live', name: 'Quạt + Bát gáo dừa', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 };
+// R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, cùng SKU QUA-TANG-LIVE, cả đơn 3 túi; chính sách hiện hành
+// kiểm ở live-gift-bat-muong.test.mjs). Test dưới giữ kịch bản quà live gộp cũ "Quạt + Bát gáo dừa" (đúng 2 túi) nên bỏ
+// live-quat trước khi thêm, không thì đơn có hai quà live.
+const pushLegacyLiveGift = (gifts, extra = {}) => { gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat'); gifts.items.push({ ...LIVE_GIFT, ...extra }); };
 
 function withGifts(edit, run) {
   const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
@@ -57,7 +61,8 @@ test('giỏ lớn: từ 2 túi mỗi túi giá combo (Xanh/Vàng 149k, Nâu 144k
 test('combo 10 gói ×n 179k/combo; ghép với túi lớn: 2 Vàng + 1 combo Xanh = 477k miễn ship + bát + muỗng; Cam đã tắt', () => {
   assert.equal(basket(['CB10-XANH-G35', 2]).total, 358000);
   assert.equal(basket(['CB10-XANH-G35', 4]).total, 4 * 179000);
-  assert.equal(basket(['CB10-CAM-G30', 1]).priceable, false);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại (Nâu / Mix vẫn tắt).
+  assert.equal(basket(['CB10-CAM-G30', 1]).total, 204000);
   const mixed = basket([VANG, 2], ['CB10-XANH-G35', 1]);
   assert.equal(mixed.total, 477000);
   assert.equal(mixed.shippingFee, 0);
@@ -120,7 +125,7 @@ test('quà theo số túi: 3–4 bát + muỗng; 5 túi thêm 1 Túi Vàng; 10 t
 });
 
 test('quà live: khách live đúng 2 túi chỉ "Quạt + Bát gáo dừa"; từ 3 túi không thêm quà live; khách thường không bao giờ thấy quà live (bảng giá cũng vậy)', () => {
-  withGifts(gifts => gifts.items.push(LIVE_GIFT), () => {
+  withGifts(gifts => pushLegacyLiveGift(gifts), () => {
     const live = { livestream: true };
     assert.deepEqual(giftNames(pricing.priceBasket([{ sku: XANH, quantity: 2 }], live)), ['Miễn phí vận chuyển', 'Quạt + Bát gáo dừa']);
     assert.deepEqual(giftNames(pricing.priceBasket([{ sku: XANH, quantity: 3 }], live)), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa']);
@@ -217,7 +222,8 @@ test('giỏ Facebook Shop: bỏ đuôi quà "+BGD+M", combo màu → túi, yến
   assert.deepEqual(catalog.parseCartSku('CB-VANGG+XANH').items.map(item => [item.sku, item.quantity]), [[VANG, 1], [XANH, 1]]);
   assert.deepEqual(catalog.parseCartSku('CB2-MINT-Z300', 2).items.map(item => [item.sku, item.quantity]), [[TROPICAL, 4]]);
   // R16: Combo 10 gói Cam đã tắt → mã giỏ Shop của nó là mã lạ, nhân viên xử lý (không tự lên đơn món đã ngừng bán).
-  assert.deepEqual([catalog.parseCartSku('cb10-cam-g30').items.length, catalog.parseCartSku('cb10-cam-g30').needsStaff], [0, true]);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại (Nâu / Mix vẫn tắt). Mã giỏ Shop của nó đọc như hộp Xanh.
+  assert.deepEqual([catalog.parseCartSku('cb10-cam-g30').items.map(item => [item.sku, item.quantity]), catalog.parseCartSku('cb10-cam-g30').needsStaff], [[['CB10-CAM-G30', 1]], false]);
   assert.deepEqual(catalog.parseCartSku('GRA-NAU-Z350+BGD').items.map(item => [item.sku, item.quantity]), [[NAU, 1]]);
   const oat = catalog.parseCartSku('CB2-HT-YM-T500');
   assert.deepEqual([oat.needsStaff, oat.reason, oat.label, oat.items.length], [true, 'oat', 'Yến Mạch Úc Nguyên Cám cán dẹt 1kg', 0]);

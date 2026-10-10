@@ -233,7 +233,9 @@ test('A5. "Nhai ròn thật" là lời khen; "Thời giờ ăn gáo dừa còn b
 
 test('B1. "Màu xanh min ạ" ngay sau bảng giá Tropical → chọn Tropical (bước đơn 1 túi); "Hix" là tin cảm thán', async () => {
   const sim = new Sim({ psid: 'r16m-b1' });
-  const table = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'Granola Tropical vị Cacao 300g' }, templates, {});
+  // R17: quà live 08/10 — bảng quà seed có Quạt chỉ khách live (44efd27) nên bảng giá gửi khách live khác bảng khách thường;
+  // tin bot trong lịch sử phải là bảng giá LIVE (khách có thẻ livestream) thì mới là "trùng bảng giá vừa báo".
+  const table = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'Granola Tropical vị Cacao 300g' }, templates, { livestream: true });
   const inbox = sim.inbox({ labels: ['livestream'], botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - MIN });
   for (const text of table.messages) sim.history(inbox, 'outgoing', text, MIN, { sender: 'bot' });
   const turn = await sim.send(inbox, 'Màu xanh min ạ', { llm: { template_id: 'PRICE_QUOTE', Product_N1: 'Granola Tropical vị Cacao 300g' } });

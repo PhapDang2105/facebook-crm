@@ -2144,6 +2144,26 @@ function setCampaignsBusy(button, busy, busyLabel, idleLabel) {
   button.textContent = busy ? busyLabel : idleLabel;
 }
 
+// Quản lý chiến dịch chia tab "Chiến dịch | Đối thủ" (10/10): mỗi lúc một thẻ thay vì cuộn qua cả hai. Nhớ tab đang
+// mở trong trình duyệt này (chỉ là tiện lợi, đọc/ghi hỏng thì về tab Chiến dịch).
+const campaignsPageTabs = document.querySelector('#campaigns-page-tabs');
+const campaignsPageKey = 'crm-campaigns-page';
+function showCampaignsPage(page) {
+  const target = page === 'competitors' ? 'competitors' : 'campaigns';
+  for (const button of campaignsPageTabs?.querySelectorAll('[data-campaigns-page]') || []) {
+    const active = button.dataset.campaignsPage === target;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  }
+  for (const panel of document.querySelectorAll('[data-campaigns-panel]')) panel.classList.toggle('hidden', panel.dataset.campaignsPanel !== target);
+  try { localStorage.setItem(campaignsPageKey, target); } catch { /* không lưu được thì thôi */ }
+}
+campaignsPageTabs?.addEventListener('click', event => {
+  const button = event.target.closest('[data-campaigns-page]');
+  if (button) showCampaignsPage(button.dataset.campaignsPage);
+});
+try { showCampaignsPage(localStorage.getItem(campaignsPageKey)); } catch { showCampaignsPage('campaigns'); }
+
 async function loadCampaigns() {
   if (!campaignsTable) return;
   const requestId = ++campaignsRequestId;

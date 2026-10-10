@@ -3552,3 +3552,14 @@ body.role-staff :is(.customers-export, #campaigns-sync, #campaigns-ai-run, #comp
 .shipping-match-main small { color: #667085; font-size: 12.5px; overflow-wrap: anywhere; }
 .shipping-match-action button, .shipping-match-action a { display: inline-block; padding: 8px 12px; color: #fff; background: #1f7a45; border: 0; border-radius: 8px; font: inherit; font-size: 13px; text-decoration: none; white-space: nowrap; cursor: pointer; }
 .shipping-match-none { color: #98a2b3; font-size: 12.5px; white-space: nowrap; }
+
+/* Quản lý chiến dịch chia tab "Chiến dịch | Đối thủ" (chủ shop 10/10: kéo xuống quá dài). Mượn kiểu tab gạch chân
+   của màn Khách hàng, đặt trong một dải trắng; mỗi lúc chỉ một thẻ, nên thẻ Đối thủ không cần lề trên nữa. */
+.campaigns-page-tabs { margin-bottom: 14px; padding: 0 12px; background: #fff; border: 1px solid var(--line-1); border-radius: 12px; box-shadow: none; }
+.campaigns-page-tabs .customers-tab { padding: 13px 14px; font-size: 14.5px; }
+.competitors-card { margin-top: 0; }
+/* Màn rộng: cột Đề xuất đứng cạnh bảng và cuộn riêng, đề xuất dài không kéo dài cả trang. */
+@media (min-width: 1400px) {
+  .campaigns-body > .campaigns-ai { position: sticky; top: 72px; display: flex; flex-direction: column; max-height: calc(100vh - 96px); }
+  .campaigns-body > .campaigns-ai .campaigns-ai-body { overflow-y: auto; min-height: 0; }
+}

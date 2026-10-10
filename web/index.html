@@ -286,7 +286,11 @@
       </div>
     </section>
     <section id="campaigns-view" class="view hidden">
-      <section class="settings-card campaigns-card">
+      <nav class="customers-tabs campaigns-page-tabs" id="campaigns-page-tabs" role="tablist" aria-label="Quản lý chiến dịch">
+        <button class="customers-tab active" type="button" role="tab" aria-selected="true" data-campaigns-page="campaigns">Chiến dịch</button>
+        <button class="customers-tab" type="button" role="tab" aria-selected="false" data-campaigns-page="competitors">Đối thủ</button>
+      </nav>
+      <section class="settings-card campaigns-card" data-campaigns-panel="campaigns">
         <header class="settings-card-head campaigns-head">
           <div><h1>Chiến dịch</h1></div>
           <div class="campaigns-head-actions">
@@ -311,7 +315,7 @@
           </aside>
         </div>
       </section>
-      <section class="settings-card campaigns-card competitors-card" aria-labelledby="competitors-title">
+      <section class="settings-card campaigns-card competitors-card hidden" data-campaigns-panel="competitors" aria-labelledby="competitors-title">
         <header class="settings-card-head campaigns-head">
           <div><h1 id="competitors-title">Đối thủ</h1><p>Thư viện quảng cáo và nội dung hợp tác KOL của Meta, cùng mẫu quảng cáo dán tay.</p></div>
           <div class="campaigns-head-actions">

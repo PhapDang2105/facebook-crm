@@ -218,10 +218,10 @@ test('giỏ đang giữ: khách quen (thẻ Đã mua, đơn cũ) + thẻ cần n
   assert.match(sent[0], /cho chị/);
   assert.equal(lookups, 0, 'nhắc giỏ là chăm sóc đơn: không lọc khách quen');
   const stored = (await readMessagingStore()).conversations.find(item => item.id === `${page}:${psid}`);
-  // touchPendingOrder: remindedAt = lúc nhắc → giỏ đã nhắc dùng được 24 giờ (giỏ thường chỉ 2 giờ từ `at`).
+  // touchPendingOrder: remindedAt = lúc nhắc → giỏ đã nhắc dùng được 7 ngày (giỏ chưa nhắc chỉ 24 giờ từ `at`).
   assert.equal(stored.pendingOrder.remindedAt, now, 'giỏ giữ thêm từ lúc nhắc');
   const { pendingOrderExpiresAt } = await import('../app/processing/pending-order.mjs');
-  assert.equal(pendingOrderExpiresAt(stored.pendingOrder), now + DAY);
+  assert.equal(pendingOrderExpiresAt(stored.pendingOrder), now + 7 * DAY);
   assert.equal(stored.pendingOrder.items[0].quantity, 2);
   // Giỏ cũ hơn đơn cuối (đơn vừa chốt sau khi chọn giỏ): không nhắc.
   assert.equal(followUp.basketAfterOrders({ pendingOrder: pending, customerOrders: [{ id: 'n', createdAt: now - HOUR }] }, [], now), false);

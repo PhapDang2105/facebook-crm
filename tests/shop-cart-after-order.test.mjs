@@ -27,3 +27,14 @@ test('giỏ Shop "×1" về sau khi đã chốt đơn 2 combo bằng tin nhắn:
   assert.doesNotMatch(said, /sửa lại đơn/);
   assert.match(said, /2 Combo 10 gói Xanh|Combo 10 gói Xanh.*2/, `kể lại đơn đang có: ${said}`);
 });
+
+test('giỏ đã nhắc giữ đơn: khách gửi địa chỉ + SĐT sau 70 giờ vẫn dùng giỏ (ca Nguyễn Mai 10/10); giỏ chưa nhắc vẫn hết hạn sau 24 giờ', async () => {
+  const { usablePendingOrder } = await import('../app/processing/pending-order.mjs');
+  const HOUR = 60 * 60 * 1000;
+  const now = Date.parse('2026-10-10T06:56:00Z');
+  const items = [{ product: 'Granola Túi Vàng 350g', code: 'GRA-VANG-H350', quantity: 1 }, { product: 'Granola Túi Xanh 450g', code: 'GRA-XANH-Z450', quantity: 1 }];
+  const reminded = { items, at: now - 72 * HOUR, remindedAt: now - 70 * HOUR };
+  assert.equal(usablePendingOrder(reminded, { now, templateId: 'ORDER_ADDRESS_REMIND' })?.items.length, 2);
+  assert.equal(usablePendingOrder({ ...reminded, remindedAt: now - 8 * 24 * HOUR }, { now, templateId: 'ORDER_ADDRESS_REMIND' }), null, 'quá 7 ngày sau lần nhắc thì thôi');
+  assert.equal(usablePendingOrder({ items, at: now - 30 * HOUR }, { now, templateId: 'ORDER_ADDRESS' }), null, 'giỏ chưa nhắc: 24 giờ');
+});

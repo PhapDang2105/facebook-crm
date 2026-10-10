@@ -286,7 +286,7 @@ test('vòng 12 #8: khách tự xưng thắng tên/hồ sơ; "Thi" không dấu =
 
 // ===== 9. Giỏ còn hạn theo tin nhắc giữ đơn =====
 
-test('vòng 12 #9: giỏ đã có tin nhắc giữ đơn còn dùng được 24 giờ sau lần nhắc; ORDER_ADDRESS_REMIND là bước giỏ', () => {
+test('vòng 12 #9: giỏ đã có tin nhắc giữ đơn còn dùng được 7 ngày sau lần nhắc (10/10, trước là 24 giờ); ORDER_ADDRESS_REMIND là bước giỏ', () => {
   const now = Date.now();
   // 03/10 (ca Trang Nhi Vân): hạn giỏ chưa nhắc 2 → 24 giờ; khách gửi SĐT/địa chỉ sau 3 giờ vẫn chốt được.
   assert.ok(usablePendingOrder(basket([XANH(2)], { at: now - 3 * 60 * 60 * 1000 }), { now, templateId: 'ORDER_ADDRESS' }), '3 giờ, chưa nhắc: còn dùng');
@@ -296,7 +296,8 @@ test('vòng 12 #9: giỏ đã có tin nhắc giữ đơn còn dùng được 24 
   assert.equal(touchPendingOrder(conversation, now - 60 * 60 * 1000), true);
   assert.ok(usablePendingOrder(conversation.pendingOrder, { now, templateId: 'ORDER_ADDRESS' }), 'nhắc 1 giờ trước: còn giữ');
   assert.ok(usablePendingOrder(conversation.pendingOrder, { now, templateId: 'ORDER_ADDRESS_REMIND' }));
-  assert.equal(usablePendingOrder(conversation.pendingOrder, { now: now + 24 * 60 * 60 * 1000, templateId: 'ORDER_ADDRESS' }), null, 'quá 24 giờ sau lần nhắc');
+  assert.ok(usablePendingOrder(conversation.pendingOrder, { now: now + 24 * 60 * 60 * 1000, templateId: 'ORDER_ADDRESS' }), '24 giờ sau lần nhắc: vẫn giữ');
+  assert.equal(usablePendingOrder(conversation.pendingOrder, { now: now + 7 * 24 * 60 * 60 * 1000, templateId: 'ORDER_ADDRESS' }), null, 'quá 7 ngày sau lần nhắc');
   assert.equal(isBasketStep('ORDER_ADDRESS_REMIND'), true);
   assert.equal(isBasketStep('ORDER_ADDRESS_OLD_ASK_PHONE'), true);
   assert.equal(isOrderStep('ORDER_ADDRESS_REMIND'), false, 'không đổi bộ chọn mẫu soạn đơn');

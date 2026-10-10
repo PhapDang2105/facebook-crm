@@ -8,9 +8,12 @@ import { normalizeGiftOverride } from '../gift-override.mjs';
 // đủ → giỏ đã hết hạn nên bot hỏi lại vị. Giỏ vẫn chỉ dùng khi tin cuối của bot là bước đơn (usablePendingOrder/isBasketStep),
 // và 24 giờ là khung Messenger cho phép nhắn khách.
 export const pendingOrderTtlMs = 24 * 60 * 60 * 1000;
-// Vòng 12: giỏ đã có tin nhắc giữ đơn (bám đuổi ORDER_ADDRESS_REMIND, tới 24 giờ) còn dùng được tới
-// 24 giờ sau lần nhắc — khách trả lời tin nhắc bằng SĐT/địa chỉ không bị hỏi lại vị.
-export const remindedPendingOrderTtlMs = 24 * 60 * 60 * 1000;
+// Vòng 12: giỏ đã có tin nhắc giữ đơn (bám đuổi ORDER_ADDRESS_REMIND, tới 24 giờ) còn dùng được sau lần nhắc — khách trả
+// lời tin nhắc bằng SĐT/địa chỉ không bị hỏi lại vị. 10/10 (ca Nguyễn Mai): bot nhắc "em vẫn đang giữ đơn 1 Túi Vàng + 1 Túi
+// Xanh" lúc 15:34 07/10, khách gửi địa chỉ + SĐT 70 giờ sau → giỏ đã hết hạn (24 giờ), bot hỏi lại "chị lấy túi nào". 24 giờ
+// → 7 ngày (cùng mốc bám đuổi bỏ giỏ "quá 7 ngày"): bot đã hứa giữ đơn thì khách trả lời lúc nào trong tuần cũng nhớ giỏ.
+// Giá và quà tính lại lúc lên đơn; phiếu xác nhận kể lại giỏ để khách sửa nếu đổi ý.
+export const remindedPendingOrderTtlMs = 7 * 24 * 60 * 60 * 1000;
 export const orderStepTemplateIds = ['ORDER_ADDRESS', 'ORDER_PHONE', 'ORDER_CONFIRMATION', 'ORDER_UPDATE'];
 // Bước mà giỏ đang giữ vẫn dùng được (vòng 12: thêm tin nhắc giữ đơn, xin SĐT tra địa chỉ cũ,
 // hỏi vị, giỏ chờ tính giá). Không đổi isOrderStep: renderChatbotReply dùng nó để chọn bộ soạn đơn.

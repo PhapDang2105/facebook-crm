@@ -18,7 +18,11 @@ import { looksLikeAddressMessage, maskMarketWord, maskNonPlaceRaw, maskNonPlaceW
 // là Túi Xanh lá) → hỏi lại kèm ảnh (TROPICAL_UNSURE), không tự lên giỏ.
 // R14 (ca thật 02–03/10): "Màu trắng dâu nhieu" (bình luận live), "Túi xanh Premium ạ", "granola premium 300g" cũng là
 // Tropical. "trắng dâu" bỏ dấu trùng "trang đầu" → chỉ nhận khi có "màu/túi/bịch/gói/loại" đứng trước hay hỏi giá ngay sau.
-export const TROPICAL_MENTION = /\b(?:tropical|nhiet doi|xanh (?:mint|min|bac ha|bien|ngoc|da troi|duong|premium)|(?:tui|goi|loai|granola|vi) (?:co )?dau(?: tay)?|dau tay|xoai dau|premium (?:cacao|300(?:g|gr|gram)?|tropical)|cacao 300(?:g|gr|gram)?|(?:mau|tui|bich|goi|loai) trang dau|trang dau (?:nhieu|nhiu|bn|bao nhieu|gia))\b/;
+export const TROPICAL_MENTION = /\b(?:tropical|nhiet doi|xanh (?:mint|min|bac ha|bien|ngoc|da troi|duong|premium)|(?:tui|goi|loai|granola|vi) (?:co )?dau(?: tay)?|dau tay|xoai dau|premium (?:cacao|300(?:g|gr|gram)?|tropical)|cacao 300(?:g|gr|gram)?|(?:mau|tui|bich|goi|loai) trang dau|trang dau (?:nhieu|nhiu|bn|bao nhieu|gia)|(?:hoa qua|trai cay|qua) (?:say )?thang hoa)\b/;
+// R17 (inbox2 M3, ca …5663996276 "Túi có hoa quả sấy thăng hoa?" — nhân viên gửi bảng giá Tropical; dữ liệu 02–10/10: "dâu thăng hoa",
+// "dau sấy thăng hoa"): "hoa quả / trái cây sấy THĂNG HOA" là túi Tropical (vế cuối ở trên). "dau (sấy) thăng hoa" bỏ dấu trùng
+// "đậu sấy" (hàng live, LIVE_ONLY) → không thêm. "premium" trơn KHÔNG thêm: catalog.mjs coi "granola
+// premium" là Siêu Hạt Premium 420g (chỉ CSKH bán) — mơ hồ, để mô hình.
 const TROPICAL_MENTION_ALL = new RegExp(TROPICAL_MENTION.source, 'g');
 export const TROPICAL_UNSURE = /\bxanh nhat\b/;
 // Hủy đơn / khoan giao (B5 #5, B2 #18): "cho c xin huỷ đơn shop nhé", "c xin huỷ e ui", "Đơn này khoan giao nha shop".
@@ -153,6 +157,12 @@ const prep = raw => normalizeColourTypos(raw)
   // "2 bát" → "2 bịchát", luật giỏ/giá hụt mọi câu có "túi" có dấu (09/10 09:51 → 10/10).
   .replace(/(?<!\d)([1-9]\d?)\s*b(?![\p{L}\p{N}])/giu, '$1 bịch')
   .replace(/(?<!\d)([1-9]\d?)\s*t(?![\p{L}\p{N}])/giu, '$1 túi')
+  // R17 (inbox5 A10, ca …501569 "350 thì bao t", "450 bao t"): "bao t" (chữ "t" đứng riêng sau "bao") là "bao tiền".
+  .replace(/(?<![\p{L}\p{N}])bao\s+t(?![\p{L}\p{N}])/giu, 'bao tiền')
+  // R17 (inbox1 B3, ca …1529162681 "Hộp 10g nhỏ giá sao", "10g nhỏ giá sao"): "10g" trước "nhỏ" hay sau "hộp/combo/set" là
+  // 10 gói (không có hàng 10 gam).
+  .replace(/(?<![\p{L}\p{N}])10\s*g(?=\s+nh[ỏo](?![\p{L}]))/giu, '10 gói')
+  .replace(/(?<![\p{L}])(h[ộo]p|combo|set)\s+10\s*g(?![\p{L}\p{N}])/giu, '$1 10 gói')
   // \b không biết chữ có dấu ("vị", "hộp") → biên Unicode ở cuối.
   .replace(/\b(m[ộo]t|hai|ba)\s+(?=(?:t[úu]i|g[óo]i|b[ịi]ch|b[ịi]t|xanh|v[àa]ng|n[âa]u|cacao|combo|h[ộo]p|v[ịi]|lo[ạa]i)(?![\p{L}\p{N}]))/giu, (match, word) => `${NUMBER_WORDS[foldVietnamese(word).toLowerCase()] || word} `)
   .replace(/\b(xanh)\s+450\s*(?:g|gr|gam|gram)?\b/giu, '$1').replace(/\b(v[àa]ng|n[âa]u|cacao)\s+350\s*(?:g|gr|gam|gram)?\b/giu, '$1')
@@ -342,7 +352,9 @@ export function isReceivedNotice(text) {
 // "không bớt" bỏ dấu chỉ khi cả câu chỉ là "không bớt" ("Granola không bột hả" là hỏi bột); "bán cho … 400" chỉ khi số
 // đứng cuối câu ("ban cho c 2 tui 123 le loi" là số nhà).
 // R16 (inbox4 T5, ca …012423 "giảm 10%", "Giám 10phan tram"): xin giảm N% cũng là mặc cả.
-const BARGAIN = /\bgiam ?\d{1,2} ?(?:%|phan tram\b|pt\b)|\btri an\b|\bbot (?:chut|ti|xiu|tien)\b|^(?:(?:vay|the|z|v|shop|ad|em|e) )?(?:khong|ko|k|kg|hong) bot$|\bgiam (?:them|bot|chut|ti|xiu|it|di|cho|duoc|dc)\b|\bgiam gia (?:cho|di|them|chut|ti|xiu|duoc|dc)\b|\bban cho\b.{0,12}\b\d{3}(?: ?k| ?nghin| ?ngan)?(?: (?:thoi|nha|nhe|duoc|dc|khong|ko|k|kg|hong|di|c|e|chi|em|a|anh|shop|ban|b|luon|duoc khong|dc khong))*$|\b\d{3} ?k? (?:duoc|dc) (?:khong|ko|k|kg|hong)\b/;
+// R17 (inbox2 M7 ca …6442900767 "Tron bộ Ko giảm nữa hả", inbox5 A6 ca …486347 "Cô lấy ba túi có giảm nửa kô"): "giảm nữa/nửa" (bỏ dấu
+// "giam nua") cũng là xin giảm — trừ "giảm nửa cân/ký/mỡ…" (giảm cân).
+const BARGAIN = /\bgiam nua\b(?! (?:can|ky|ki|kg|mo|beo|bung|eo|duong|ngot|calo)\b)|\bgiam ?\d{1,2} ?(?:%|phan tram\b|pt\b)|\btri an\b|\bbot (?:chut|ti|xiu|tien)\b|^(?:(?:vay|the|z|v|shop|ad|em|e) )?(?:khong|ko|k|kg|hong) bot$|\bgiam (?:them|bot|chut|ti|xiu|it|di|cho|duoc|dc)\b|\bgiam gia (?:cho|di|them|chut|ti|xiu|duoc|dc)\b|\bban cho\b.{0,12}\b\d{3}(?: ?k| ?nghin| ?ngan)?(?: (?:thoi|nha|nhe|duoc|dc|khong|ko|k|kg|hong|di|c|e|chi|em|a|anh|shop|ban|b|luon|duoc khong|dc khong))*$|\b\d{3} ?k? (?:duoc|dc) (?:khong|ko|k|kg|hong)\b/;
 const BARGAIN_LOYAL = /\bkhach (?:quen|cu|ruot)\b/;
 const BARGAIN_DISCOUNT_WORD = /\b(?:giam|uu dai|re|khuyen mai|km|bot gia|bot chut|bot ti|bot xiu|bot tien|chiet khau|sale)\b/;
 const BARGAIN_HAGGLE = /(?<!hạt\s)(?<![\p{L}])mặc\s+cả(?![\p{L}])/iu;
@@ -520,7 +532,10 @@ const INFO_RULES = [
   // Vòng 12 (B1 #12, B3 #26): "Gửi hình e xem", "gửi 3 mẫu" (không phải ảnh chuyển khoản).
   ['PHOTOS', /(xem (hinh|anh|mau|san pham)|chup (xem|hinh|anh|cho|minh|chi|em)|gui (hinh|anh|mau) xem|(anh|hinh) that|cho (xem|coi)|xem them anh|\b(?:gui|xin) (?:(?:e|em|c|chi|minh|m|a|anh|toi|tui) )?(?:xem )?(?:hinh|anh)\b(?! (?:ck|chuyen|bill|thanh toan))|\bgui (?:3|ba|cac) mau\b)/, 'PRODUCT_PHOTOS', s => /\b(ck|chuyen khoan|bill)\b/.test(s)],
   ['SMALL_PACK', /\b(co|ban) (tui|goi) nho|hop 10 goi|chia (goi|nho)|goi le\b|\b(set|combo|hop|bich|tui) .{0,10}goi nho|nhieu goi nho|goi nho .{0,10}(nhieu vi|mix|may vi)|chia (?:thanh )?(?:phan|goi)|phan nho|dung (?:1|mot) lan/, 'PACKAGING_INFO', (s, ctx) => PRICE.test(s) || ctx.hasBasket || SMALL_PACK_ORDER(s)],
-  ['SHIP_TIME', /((bao lau|may ngay|bao nhieu ngay|bn ngay|khi nao|chung nao) (thi )?(nhan|giao|toi|den|co)|(giao|ship|nhan)( hang)? (mat )?(bao lau|may ngay|bn ngay)|may ngay giao|khoang chung nao)/, 'SHIPPING_POLICY'],
+  ['SHIP_TIME', /((bao lau|may ngay|bao nhieu ngay|bn ngay|khi nao|chung nao) (thi )?(nhan|giao|toi|den|co)|(giao|ship|nhan)( hang)? (mat )?(bao lau|may ngay|bn ngay)|may ngay giao|khoang chung nao)/, 'SHIPPING_POLICY',
+    // R17 (inbox1 B3, ca …8647564838 "Khi nào có chương trình km shop ới tớ nhá"): "khi nào CÓ chương trình / khuyến mãi / ưu đãi"
+    // hỏi đợt khuyến mãi, không hỏi thời gian giao.
+    s => /\b(?:chuong trinh|ctrinh|khuyen mai|km|uu dai|sale|giam gia|deal|voucher|live|livestream)\b/.test(s)],
   ['LINKS', /((xin|gui|cho) .*(link|linh gian hang|gian hang)|(co|vo|ban) (tren|o) (shopee|tiktok|lazada))/, 'ECOMMERCE_LINKS'],
   ['WHOLESALE', /(\bsi\b|\bctv\b|cong tac vien|dai ly|lay buon)/, 'WHOLESALE_CTV_CONTACT', s => /(bac|tien|y|ca|nghe|thac) si/.test(s)],
   // R16 (inbox2 S1, inbox1 B2: "Túi nào dùng ăn vặt ạ", "Hạt này ăn vặt luôn ạ"): bỏ dấu thì "ăn vặt" thành "an vat", "dị vật" thành
@@ -575,6 +590,96 @@ function defaultXanh(count, ctx = {}, extra = {}, raw = '', { address = false } 
   if (!product) return null;
   const quantity = Math.max(1, Math.min(10, Math.round(Number(count) || 1)));
   return { value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: String(quantity), ...extra }, defaultFlavour: { product: product.name, quantity } };
+}
+
+// ===== R17 (10/10, gói C) — hàm phụ cho luật mới =====
+/** Tin khách (≤ 15 phút, cũ → mới, chuỗi hay { text, at|createdAt }) bỏ các mục trùng tin hiện tại; mới nhất trước. */
+function recentTextsNewestFirst(list, current, now = Date.now(), windowMs = 15 * 60 * 1000) {
+  const squash = text => foldVietnamese(String(text || '')).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return (Array.isArray(list) ? list : []).map(item => (typeof item === 'string' ? { text: item } : item || {}))
+    .filter(item => String(item.text || '').trim() && squash(item.text) !== squash(current))
+    .filter(item => { const at = Number(item.at ?? item.createdAt); return !(Number.isFinite(at) && at > 0 && now - at > windowMs); })
+    .reverse();
+}
+/** Màu túi lớn (xanh/vang/nau) khách nêu trong một tin; "vàng" bỏ dấu trùng "vâng" → chỉ tính khi CÒN DẤU hay đứng sau túi/màu/số. */
+function namedColoursIn(raw) {
+  const s = core(prep(dropLiveColours(raw)));
+  const found = [];
+  for (const match of s.matchAll(/\b(xanh|vang|nau|cacao)\b/g)) {
+    const colour = match[1] === 'cacao' ? 'nau' : match[1];
+    if (colour === 'vang' && !/vàng/iu.test(String(raw || '').normalize('NFC')) && !/\b(?:tui|goi|bich|mau|vi|1|va|voi)$/.test(s.slice(0, match.index).trim())) continue;
+    if (!found.includes(colour)) found.push(colour);
+  }
+  return { s, colours: found };
+}
+/**
+ * R17 (inbox5 A6): tin khách gần nhất (≤ 15 phút) nêu ĐÚNG `count` màu túi lớn khác nhau, không Tropical/gói nhỏ, không số lượng
+ * khác 1 / `count` → danh sách màu ['xanh','vang','nau'…]; không thì null.
+ */
+function recentNamedColours(list, current, count) {
+  const previous = recentTextsNewestFirst(list, current).find(item => namedColoursIn(item.text).colours.length);
+  if (!previous) return null;
+  const { s, colours } = namedColoursIn(previous.text);
+  if (colours.length !== count || /\b(?:mint|tropical|combo 10|hop|goi nho|10 goi)\b/.test(s)) return null;
+  const numbers = (s.match(/\b\d{1,2}\b/g) || []).map(Number);
+  return numbers.every(number => number === 1 || number === count) ? colours : null;
+}
+/** Khoá màu trong mã túi lớn ("GRA-XANH-Z450" → "xanh") cho bagCountQuote. */
+const colourKey = product => (String(product?.sku || '').toLowerCase().match(/^gra-([a-z]+)-/) || [])[1] || 'xanh';
+/** Giỏ 1 túi mỗi màu (bước đơn ORDER_ADDRESS). */
+function colourBasketValue(colours) {
+  const slots = [['Product_N1', 'No_A'], ['Product_N2', 'No_B'], ['Product_N3', 'No_C']];
+  const value = { template_id: 'ORDER_ADDRESS' };
+  colours.slice(0, 3).forEach((colour, index) => { const product = colourSku(colour); if (product) { value[slots[index][0]] = product.name; value[slots[index][1]] = '1'; } });
+  return value;
+}
+// R17 (inbox5 A7): tin ngắn chỉ chê giá. Có "giá" thì "cao/đắt/mắc/chát" (cả bỏ dấu); không có "giá" thì phải "đắt/mắc/chát" CÒN DẤU kèm
+// chữ mức độ ("đắt quá", "hơi mắc", "mắc ghê"). Không số, ≤ 40 ký tự; so sánh với nơi khác ("cao hơn shopee") không khớp (chữ lạ).
+const OBJECTION_TAIL = '(?: (?:quá|qua|qá|wa|lam|ghe|vay|ha|hả|vậy|v|z|thế|nhỉ|nhể|xíu|lắm|ghê|hơn|à|á|ạ|thật|thiệt|so|shop|sốp|em|e|ad|chị|c|bạn|ơi|oi|nha|nhé|nhỉ|ta))*';
+const OBJECTION_LEAD = '(?:(?:mà|ma|nhưng|nhung|sao|thấy|thay|ui|ôi|oi|trời|troi|chà|cha) )*';
+const PRICE_OBJECTION_GIA = new RegExp(`^${OBJECTION_LEAD}(?:giá|gía|gia)(?: (?:bên em|ben em|shop|này|nay|vậy|vay|thế|the|bên mình|ben minh))? (?:(?:hơi|hoi|quá|qua|cũng|cung|khá|kha|rất|rat|có vẻ|co ve|hơi bị|hoi bi) )*(?:cao|đắt|mắc|chát|dat|mac|chat)${OBJECTION_TAIL}$`, 'u');
+const PRICE_OBJECTION_BARE = new RegExp(`^${OBJECTION_LEAD}(?:(hơi|quá|khá|rất|cũng) )?(?:đắt|mắc|chát)(${OBJECTION_TAIL})$`, 'u');
+// R17 (inbox1 A7 ca …2628387486 "Cái này dừa khô nhiều kg chi bi dị ứng dừa" / "Chị dị ứng dừa" — bot gửi bảng thành phần 3 lần rồi vẫn
+// chốt đơn, khách hủy; inbox4 H3 ca …8577967248 "E ko ăn đc đậu nành" → STAFF_WAIT). Thành phần THẬT (mẫu INGREDIENTS_ALLERGY): gạo lứt,
+// yến mạch, hạt bí, hạnh nhân, hạt điều, nho khô, xoài sấy, nam việt quất sấy, dừa sấy, mật thốt nốt, đường mạch nha, muối hồng.
+// - dị ứng một thành phần CÓ trong cả 3 túi → ALLERGY_HAS_INGREDIENT ("đều có …, không nên dùng"). (yến mạch / hạnh nhân / hạt điều /
+//   nho khô "không ăn được" vẫn là NO_VARIANT như cũ — chỉ thêm các thành phần NO_EAT chưa có: dừa, xoài, nam việt quất, hạt bí, gạo lứt.)
+// - dị ứng / không ăn được một thứ KHÔNG có trong thành phần (đậu nành, sữa, trứng, đậu phộng/lạc, mè/vừng, tôm/hải sản) →
+//   INGREDIENT_NOT_INCLUDED (xác nhận không có + kể thành phần + dị ứng nặng hỏi bác sĩ). Gluten / lúa mì / cacao không thuộc luật (yến
+//   mạch có thể lẫn gluten; Túi Nâu, Tropical có cacao) — để mô hình / mẫu thành phần.
+const ALLERGY_LEAD = '(?:di ung|bi di ung|kieng|(?:khong|ko|k|kg|hong) (?:an|dung|uong|xai) (?:duoc|dc))(?: (?:voi|vs|mon|do|cac|loai|thu|con|be|nha|minh|em|e|chi|c|toi))*';
+const ALLERGY_HAS = { dua: 'dừa sấy', 'dua say': 'dừa sấy', 'dua kho': 'dừa sấy', xoai: 'xoài sấy', 'nam viet quat': 'nam việt quất sấy', 'hat bi': 'hạt bí', 'gao lut': 'gạo lứt' };
+const ALLERGY_HAS_DIUNG = { ...ALLERGY_HAS, 'yen mach': 'yến mạch', 'hanh nhan': 'hạnh nhân', 'hat dieu': 'hạt điều', 'nho kho': 'nho khô', nho: 'nho khô' };
+const ALLERGY_ABSENT = { 'dau nanh': 'đậu nành', 'sua bo': 'sữa bò', sua: 'sữa', trung: 'trứng', 'dau phong': 'đậu phộng', 'hai san': 'hải sản', tom: 'tôm' };
+const allergyKeys = map => Object.keys(map).sort((a, b) => b.length - a.length).join('|');
+const ALLERGY_DIUNG_RE = new RegExp(`\\b(?:di ung|bi di ung)(?: (?:voi|vs|mon|do|cac|loai|thu))* (${allergyKeys(ALLERGY_HAS_DIUNG)})\\b`);
+const ALLERGY_NOEAT_RE = new RegExp(`\\b${ALLERGY_LEAD} (${allergyKeys(ALLERGY_HAS)})\\b|\\b(${allergyKeys(ALLERGY_HAS)})(?: (?:say|kho))?(?: (?:thi|minh|em|e|chi|c|toi|con|be))* (?:khong|ko|k|kg|hong) an (?:duoc|dc)\\b`);
+const ALLERGY_ABSENT_RE = new RegExp(`\\b${ALLERGY_LEAD} (${allergyKeys(ALLERGY_ABSENT)})\\b|\\b(${allergyKeys(ALLERGY_ABSENT)})(?: (?:thi|minh|em|e|chi|c|toi|con|be))* (?:khong|ko|k|kg|hong) an (?:duoc|dc)\\b`);
+// "mè / vừng / lạc" bỏ dấu trùng "mẹ / vững / lắc" → chỉ nhận chữ CÒN DẤU.
+const ALLERGY_ABSENT_RAW = /(?<![\p{L}])(?:dị ứng|kiêng|(?:không|ko|k|kg|hông) (?:ăn|dùng|uống) (?:được|đc|dc))(?:\s+(?:với|vs|món|đồ|các|loại|con|bé|nhà|mình|em|chị|tôi))*\s+(mè|vừng|lạc)(?![\p{L}])/iu;
+/** Luật dị ứng / không ăn được: { template, ingredient } hay null. */
+function allergyIntent(raw, s) {
+  // Lời XIN BỎ thành phần ("không ăn được đậu phộng, bỏ hạt được không") vẫn là NO_VARIANT (công thức cố định + thẻ).
+  // Muốn MUA mà bỏ thành phần ("Mình ko ăn đc hạt bí mình muốn mua mà ko có hạt bí trong đó có đc ko") cũng là xin bỏ → NO_VARIANT.
+  if (s.length > 120 || NO_VARIANT_REQUEST.test(s) || /\b(?:khong|ko|k) co\b.{0,30}\b(?:duoc|dc)\b|\b(?:muon|can|dinh) (?:mua|lay|dat)\b/.test(s)) return null;
+  // Câu hỏi có/không thành phần ("có dừa không", "không có đậu nành phải không") vẫn là mẫu thành phần — luật này cần lời dị ứng/kiêng.
+  const has = s.match(ALLERGY_DIUNG_RE) || s.match(ALLERGY_NOEAT_RE);
+  if (has) { const key = has.slice(1).find(Boolean); return { template: 'ALLERGY_HAS_INGREDIENT', ingredient: ALLERGY_HAS_DIUNG[key] || ALLERGY_HAS[key] }; }
+  const absent = s.match(ALLERGY_ABSENT_RE);
+  // "sữa" đi với sữa chua / sữa hạt / sữa tươi (món ăn kèm) không phải dị ứng sữa.
+  if (absent && !/\bsua (?:chua|hat|tuoi|dau|yen mach)\b/.test(s)) { const key = absent.slice(1).find(Boolean); return { template: 'INGREDIENT_NOT_INCLUDED', ingredient: ALLERGY_ABSENT[key] }; }
+  const rawAbsent = String(raw || '').normalize('NFC').match(ALLERGY_ABSENT_RAW);
+  if (rawAbsent) return { template: 'INGREDIENT_NOT_INCLUDED', ingredient: { mè: 'mè (vừng)', vừng: 'mè (vừng)', lạc: 'đậu phộng (lạc)' }[rawAbsent[1].toLowerCase()] || rawAbsent[1] };
+  return null;
+}
+// R17 (quyết định chủ shop 10/10 mục 6): khách muốn chuyển khoản trước / xin số tài khoản.
+const TRANSFER_FIRST = /\b(?:ck|chuyen khoan|chuyen tien|thanh toan|tra tien) truoc\b|\b(?:muon|de|se|xin) (?:(?:minh|em|e|chi|c|toi|a|anh) )?(?:ck|chuyen khoan)\b|\b(?:ck|chuyen khoan) (?:duoc|dc) (?:khong|ko|k|kg|hong)\b|\b(?:xin|cho|gui) (?:(?:minh|em|e|chi|c|toi|a|anh) )?(?:xin )?(?:so tai khoan|stk|so tk)\b/;
+function priceObjection(raw) {
+  const nfc = String(raw || '').normalize('NFC').toLowerCase().replace(/[.!?…~,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!nfc || nfc.length > 40 || /\d/.test(nfc)) return false;
+  if (PRICE_OBJECTION_GIA.test(nfc)) return true;
+  const bare = nfc.match(PRICE_OBJECTION_BARE);
+  return Boolean(bare && (bare[1] || /(?:^| )(?:quá|qá|wa|ghê|lắm|thật|thiệt|xíu|thế|vậy|ha|hả|nhỉ)(?= |$)/u.test(bare[2] || '')));
 }
 
 /**
@@ -847,7 +952,21 @@ export function ruleIntent(text, ctx = {}) {
         return ctx.giftSwappable === false ? infoReply('GIFT_SWAP_NO_GIFT', 'GIFT_POLICY') : infoReply('GIFT_SWAP', 'GIFT_SWAP', { attention: true });
       }
       // Hỏi quà ("Bộ bát gì", "Tặng quạt jì", "quạt xem hình"): GIFT_POLICY theo ngữ cảnh (live/giỏ/ưu đãi) + ảnh quà (engine).
-      if ((GIFT_QUESTION.test(s) || GIFT_PHOTO_RAW.test(raw.normalize('NFC'))) && !PRICE.test(s.replace(/\bbao nhieu (?:cai|bo|mon)\b/, ' '))) return infoReply('GIFT_QUESTION', 'GIFT_POLICY', { giftPhotos: true });
+      if ((GIFT_QUESTION.test(s) || GIFT_PHOTO_RAW.test(raw.normalize('NFC'))) && !PRICE.test(s.replace(/\bbao nhieu (?:cai|bo|mon)\b/, ' '))) {
+        // R17 (inbox5 A5, tái diễn vòng 16 A2; ca …559416 "2 túi ạ" + "Có tặng gì kg ạ", khách live): khách đã nói SỐ TÚI (1–3, dòng
+        // khác trong cùng tin hay tin chữ ≤ 10 phút trước, cả tin chỉ là "N túi") mà không nêu vị, chưa giữ giỏ / chưa có đơn → mặc định
+        // N Túi Xanh (chủ shop 05/10) và lên giỏ: tin bước đơn có dòng quà theo giỏ (live: Quạt…), không hỏi lại "lấy 2 túi vị nào".
+        const giftBags = !ctx.hasBasket && !ctx.hasRecentOrder && orderAgeMin >= 60 && !ctx.staffRepliedAfterBot && !ctx.smallPackContext
+          && !/\b(?:xanh|vang|nau|cacao|mint|tropical|combo|hop|goi nho|10 goi|yen mach|nghe)\b/.test(s)
+          ? [...raw.split(/\n+/).filter(line => !GIFT_QUESTION.test(core(prep(line))) && !GIFT_PHOTO_RAW.test(line.normalize('NFC'))),
+            ...recentTextsNewestFirst(ctx.recentCustomerTexts, raw, Date.now(), 10 * 60 * 1000).slice(0, 1).map(item => String(item.text))]
+            .map(line => line.trim()).find(line => line && BAGS_NO_FLAVOR.test(core(prep(line))))
+          : '';
+        const bagCount = giftBags ? Number((core(prep(giftBags)).match(/\b([1-3]) ?(?:tui|goi|bich|bit|bi|bao)\b/) || [])[1]) || 0 : 0;
+        const fallback = bagCount ? defaultXanh(bagCount, ctx, {}, giftBags) : null;
+        if (fallback) return { rule: 'GIFT_BAGS_DEFAULT_XANH', ...fallback };
+        return infoReply('GIFT_QUESTION', 'GIFT_POLICY', { giftPhotos: true });
+      }
     }
   }
 
@@ -894,7 +1013,10 @@ export function ruleIntent(text, ctx = {}) {
   }
   // R13 (inbox2 B2): "nhầm" / "bấm nhầm" / "mình ấn nhầm thôi" khi đang giữ giỏ (giỏ Facebook Shop bấm nhầm — engine có thể
   // truyền ctx.shopCart khi giỏ Shop chưa thành pendingOrder): xóa giỏ + lời mềm (mẫu ORDER_POSTPONED), không mời lên đơn.
-  if (!isComment && !ctx.hasRecentOrder && !phone && (ctx.hasBasket || ctx.shopCart) && s.length <= 60 && MISCLICK.test(s) && !BASKET_MENTION.test(s)
+  // R17 (inbox3 A7, ca …5764731359 "Không\nChị bị nhầm"): chữ "không/ko/k" đứng đầu rồi mới tới đại từ / "bấm|ấn|lỡ" ("Không chị
+  // bị nhầm") — bỏ chữ đó trước khi so (MISCLICK neo ^). "Không nhầm (đâu)" (không có đại từ / động từ bấm) giữ nguyên, không khớp.
+  const sMisclick = s.replace(/^(?:khong|ko|k|kg|hong) (?=(?:minh|em|e|chi|c|toi|a|anh|m|mk|co|chau|tui|t|lo|bam|an|click|cham) )/, '');
+  if (!isComment && !ctx.hasRecentOrder && !phone && (ctx.hasBasket || ctx.shopCart) && s.length <= 60 && MISCLICK.test(sMisclick) && !BASKET_MENTION.test(s)
     && !/ăn\s+nhầm|nhận\s+nhầm|giao\s+nhầm|gửi\s+nhầm/iu.test(raw.normalize('NFC')) && !raw.includes('?')) {
     return { rule: 'CANCEL_BASKET_MISCLICK', value: { template_id: 'ORDER_POSTPONED' }, clearBasket: true };
   }
@@ -941,7 +1063,13 @@ export function ruleIntent(text, ctx = {}) {
     const marketplaceAsk = /\b(?:dat|mua) (?:tren|qua|o|bang) (?:app|ap|web|website|trang web|tiktok|tik tok|shopee|lazada|san)\b/.test(sOrder)
       && /\b(?:duoc|dc) (?:khong|ko|k|kg|hong)$|\b(?:duoc|dc) (?:khong|ko|k|kg|hong) (?:a|ah|shop|em|e|ban|b)$/.test(sOrder)
       && !/\b(?:da|roi|r|chua)\b/.test(sOrder);
-    if (!isComment && !phone && !ctx.trialOffer && !marketplaceAsk && (orderPlaced || (s.length <= 70 && (ORDER_ASK.test(sOrder) || FORGOT_ORDER.test(s)) &&!/\b(lay|chot|cho (minh|em|e|chi|c) \d)\b/.test(s) && !/\b(xanh|vang|nau|cacao|combo|tui|goi|bich|bit|hop)\b/.test(s)))) {
+    // R17 (inbox2 C5, ca …7735077228 "Đặt trên shoppe có chuẩn hàng bên mình không ạ", "Mua trên shopee có phải hàng chính hãng
+    // không"): câu HỎI hàng trên sàn có chuẩn / chính hãng / giống bên này không — chưa đặt, không phải tra đơn (để mô hình).
+    const marketplaceQuality = /\b(?:dat|mua) (?:tren|qua|o|bang) (?:tiktok|shopee|lazada|san)\b/.test(sOrder)
+      && /\b(?:chuan|chinh hang|hang that|hang gia|that khong|that ko|giong|khac|cung loai|cung hang|y chang)\b/.test(sOrder)
+      && (raw.includes('?') || /\bco (?:phai|chuan|giong|khac|dung)\b/.test(sOrder) || /\b(?:khong|ko|k|kg|hong)$/.test(sOrder))
+      && !/\b(?:da|roi|r|chua)\b/.test(sOrder);
+    if (!isComment && !phone && !ctx.trialOffer && !marketplaceAsk && !marketplaceQuality && (orderPlaced || (s.length <= 70 && (ORDER_ASK.test(sOrder) || FORGOT_ORDER.test(s)) &&!/\b(lay|chot|cho (minh|em|e|chi|c) \d)\b/.test(s) && !/\b(xanh|vang|nau|cacao|combo|tui|goi|bich|bit|hop)\b/.test(s)))) {
       return { rule: 'ORDER_ASK', experimental: true, value: { template_id: 'ORDER_STATUS' }, ...(complaint || ctx.complaint ? { attention: true } : {}) };
     }
     // R16 (inbox5 A7, ca …2544865038 "Em ơi chưa rao cho chị à", đơn 30/09): "chưa giao/rao/gửi (hàng) cho chị (à/hả)" khi khách CÓ
@@ -1032,7 +1160,39 @@ export function ruleIntent(text, ctx = {}) {
   if (!isComment && !phone && !complaint && !ctx.complaint && s.length <= 120 && isBargain(raw, s) && !/(?<![\p{L}])quà(?![\p{L}])/iu.test(raw.normalize('NFC')) && !CANCEL_GIFT.test(s)
     && !(basket.length && !BARGAIN_PRICE_OFFER.test(s))) {
     const bags = Number((s.match(/\b(\d{1,2}) (?:tui|bich|goi)\b/) || [])[1]) || 0;
+    // R17 (inbox5 A6, ca …486347 "Nếu cô mua 3 túi vàng, xanh, nâu thì giá là bn…" → "Cô lấy ba túi có giảm nửa kô"): khách nói lấy N
+    // túi (2–3) khi chưa giữ giỏ, và tin khách ≤ 15 phút trước đã nêu ĐÚNG N màu khác nhau (không số khác 1) → lên giỏ các màu đó
+    // (1 túi mỗi màu: 3 màu = 442k) + ý phụ "không giảm thêm", không hỏi lại vị.
+    const named = bags >= 2 && bags <= 3 && !ctx.hasBasket && !ctx.hasRecentOrder && /\b(?:lay|mua|dat|chot)\b/.test(s) && !/\b(?:xanh|vang|nau|cacao|mint|tropical|combo|hop|goi nho)\b/.test(s)
+      ? recentNamedColours(ctx.recentCustomerTexts, raw, bags) : null;
+    if (named) return { rule: 'DISCOUNT_ASK_NAMED', value: { ...colourBasketValue(named), also: 'DISCOUNT_OATS_GIFT' } };
     return { rule: 'DISCOUNT_ASK', value: { template_id: 'DISCOUNT_OATS_GIFT' }, ...(bags >= 4 ? { attention: true } : {}) };
+  }
+  // R17 (inbox5 A7, ca …547980 "Giá cao ha" — khách live; inbox5 A1 "Giá hơi đắt"): tin NGẮN chỉ chê giá ("giá cao", "giá hơi đắt",
+  // "đắt quá", "mắc quá") → như mặc cả: DISCOUNT_OATS_GIFT (giá combo đã là giá tốt nhất, miễn ship, quà). Cả câu phải là lời chê giá;
+  // "đắt/mắc" không có chữ "giá" phải CÒN DẤU ("dat" bỏ dấu trùng "đặt") và có chữ mức độ; "cao" chỉ khi có chữ "giá".
+  if (!isComment && !phone && !complaint && !ctx.complaint && priceObjection(raw)) {
+    return { rule: 'PRICE_OBJECTION', value: { template_id: 'DISCOUNT_OATS_GIFT' } };
+  }
+  // R17 (inbox1 B3, ca …0283294082 "Minh ck trước" — bot gửi câu COD, khách hạ từ 3 túi xuống 1; quyết định chủ shop 10/10 mục 6): khách
+  // muốn CHUYỂN KHOẢN TRƯỚC / xin số tài khoản → chuyển CSKH (CSKH_HANDOFF + thẻ), không tự gửi số tài khoản, không câu COD. Báo ĐÃ
+  // chuyển ("ck rồi", bill) là luồng nhận bill của engine — không thuộc luật này.
+  if (!isComment && !complaint && !ctx.complaint && s.length <= 80 && TRANSFER_FIRST.test(s) && !/\b(?:roi|r|xong|bill|anh ck|hinh ck|da ck|da chuyen)\b/.test(s)) {
+    return { rule: 'TRANSFER_FIRST', value: { template_id: 'CSKH_HANDOFF', warming: '1' }, attention: true };
+  }
+  // R17 (inbox1 A7, inbox4 H3): dị ứng / không ăn được — câu trả lời thẳng (không ghép câu nhắc giỏ, không mời lên đơn); xem allergyIntent.
+  // Mẫu vừa gửi (≤ 30 phút) cùng loại mà khách nhắc lại ("Chị dị ứng dừa" 2 phút sau) → không gửi lại y câu, không gửi bảng thành
+  // phần (mẫu cũ lặp 3 lần): một câu cảm ơn ngắn (THANK_YOU).
+  if (!isComment && !phone && !complaint) {
+    const allergy = allergyIntent(raw, s);
+    if (allergy && last === allergy.template && Number(ctx.botLastAgeMin) <= 30) return { rule: 'ALLERGY_REPEAT', value: { template_id: 'THANK_YOU' } };
+    if (allergy) {
+      // Thành phần CÓ trong cả 3 túi ("không nên dùng"): bỏ giỏ đang giữ (clearBasket) — không nhắc giỏ / bám đuổi lên đơn khách không
+      // dùng được (ca …2628387486: bot vẫn chốt 1 Xanh, khách hủy). Khách vẫn muốn mua thì nhắn lại giỏ như thường.
+      return allergy.template === 'ALLERGY_HAS_INGREDIENT'
+        ? { rule: 'ALLERGY_HAS', value: { template_id: allergy.template, values: { ingredient: allergy.ingredient } }, ...(ctx.hasBasket ? { clearBasket: true } : {}) }
+        : { rule: 'ALLERGY_ABSENT', value: { template_id: allergy.template, values: { ingredient: allergy.ingredient } } };
+    }
   }
   // R15 (inbox4 A1, ca …068500 "Số lượng là 2" 2 phút sau đơn 1 Nâu — mô hình chọn ORDER_UNCHANGED "đơn đã lên rồi"): luật
   // K3b (ổn định, sửa lỗi — không qua cờ ứng viên). Đơn BOT tạo ≤ 60 phút, đơn MỘT mã, không giữ giỏ mới, khách chỉ nêu SỐ
@@ -1060,7 +1220,10 @@ export function ruleIntent(text, ctx = {}) {
   // như cũ). Có số, nhiều vị, câu hỏi → luật/mô hình như cũ.
   const swap = ctx.defaultFlavourSwap;
   if (!isComment && !phone && !complaint && swap && Number(swap.quantity) > 0 && !raw.includes('?') && !/\d/.test(s) && s.length <= 50) {
-    const chosen = [...new Set((s.match(/\b(xanh|vang|nau|cacao)\b/g) || []).map(colour => (colour === 'cacao' ? 'nau' : colour)))];
+    const named = [...new Set((s.match(/\b(xanh|vang|nau|cacao)\b/g) || []).map(colour => (colour === 'cacao' ? 'nau' : colour)))];
+    // R17 (inbox1 B3, ca …5717482748 "Túi nhiều hạt" khi đang giữ 2 Xanh mặc định): "(túi/loại) nhiều hạt" không kèm màu là Túi Vàng
+    // (70% hạt — mẫu INGREDIENTS_ALLERGY / BAG_COMPARISON).
+    const chosen = named.length ? named : /^(?:(?:tui|loai|bich|goi|lay|doi|sang|cho|minh|em|chi|c) )*nhieu hat$/.test(s) ? ['vang'] : [];
     const rest = s.replace(FLAVOR_ANSWER_WORDS, ' ').replace(/\b(?:doi|sang|thanh|chuyen|qua|hay|thoi|nhe|nha|a|ah|ak|ha|nhieu hat|vi|loai|hat|nguyen|ban|di|giup|dum|nho|e|em|oi|shop|sop|ad|nhi|vay|v|lai)\b/g, ' ').trim();
     const product = chosen.length === 1 && chosen[0] !== 'xanh' ? colourSku(chosen[0]) : null;
     if (product && !rest && !flavourQuestionTail(raw, s)) {
@@ -1069,6 +1232,33 @@ export function ruleIntent(text, ctx = {}) {
         ? { rule: 'DEFAULT_FLAVOUR_SWAP', value: { template_id: 'ORDER_UPDATE', Product_N1: product.name, No_A: quantity } }
         : { rule: 'DEFAULT_FLAVOUR_SWAP', value: { template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: quantity } };
     }
+  }
+  // R17 (inbox5 A10, ca …501569 "350 thì bao t", "450 bao t" — bản 32a083c hỏi lại "quan tâm sản phẩm nào"): hỏi giá theo KHỐI LƯỢNG túi
+  // ("bao t" = bao tiền, prep) — 450g chỉ có Túi Xanh → bảng giá Túi Xanh; 350g là Túi Vàng hoặc Túi Nâu → bảng các vị (listAll).
+  {
+    const byWeight = !isComment && !phone && s.match(/^(?:(?:tui|goi|bich|loai|con|the|vay|con tui) )?(450|350) ?(?:g|gr|gram)?(?: (?:thi|la))? (?:gia )?(?:bao tien|bn|bao nhieu|nhieu|nhieu tien)(?: tien)?$/);
+    if (byWeight) {
+      const xanh = byWeight[1] === '450' ? colourSku('xanh') : null;
+      return xanh ? { rule: 'PRICE_BY_WEIGHT', value: { template_id: 'PRICE_QUOTE', Product_N1: xanh.name } } : { rule: 'PRICE_BY_WEIGHT', value: { template_id: 'GENERAL_INFO', listAll: '1' } };
+    }
+  }
+  // R17 (inbox5 A12, ca …221709 "chị đặt trên mua hàng rồi" → "trên fb" — mô hình trả BOUGHT_ON_MARKETPLACE "ủng hộ trên sàn… nhắn mã
+  // đơn"): đặt qua Facebook / mục Mua hàng / fanpage là đơn Facebook Shop của chính Page, không phải sàn → tra đơn (ORDER_STATUS) + thẻ
+  // cho nhân viên tra đơn Shop. Cả câu chỉ là lời đó.
+  if (!isComment && !phone && !complaint && /^(?:(?:minh|em|e|chi|c|toi|a|anh|co|tui) )?(?:(?:da )?(?:dat|mua|chot|order)(?: hang| don)? )?(?:tren|qua|o|ben) (?:fb|facebook|face|fanpage|page|trang|mua hang|muc mua hang|facebook shop|fb shop)(?: (?:roi|r|rui|ma|do|ay|cua shop|cua em|ben em))*$/.test(s)
+    && (/\b(?:dat|mua|chot|order)\b/.test(s) || /^ORDER_STATUS/.test(last) || last === 'BOUGHT_ON_MARKETPLACE')) {
+    // Bot vừa xin SĐT tra đơn (ORDER_STATUS…) mà khách chỉ nói "trên fb": không xin lại y câu — báo bạn phụ trách đang kiểm tra
+    // (WAITING_STAFF) + thẻ để nhân viên tra đơn Facebook Shop.
+    return { rule: 'ORDER_ASK_FACEBOOK', value: { template_id: /^ORDER_STATUS/.test(last) && Number(ctx.botLastAgeMin) <= 30 ? 'WAITING_STAFF' : 'ORDER_STATUS' }, attention: true };
+  }
+  // R17 (inbox2 C3, ca …5448591700 "Uh em" sau TROPICAL_CONFIRM "có phải hỏi Tropical … hay Túi Xanh nguyên bản 450g?" — mô hình nói
+  // "đơn đã lên rồi" rồi chuyển người): bot vừa hỏi (≤ 60 phút, nhân viên chưa chen) mà khách đáp CÓ ngắn → bảng giá Tropical; đáp
+  // "xanh lá / nguyên bản / 450" → bảng giá Túi Xanh. "vâng" bỏ dấu trùng "vàng" → chữ "vàng" CÒN DẤU thì không nhận.
+  if (!isComment && !phone && last === 'TROPICAL_CONFIRM' && !ctx.staffRepliedAfterBot && Number(ctx.botLastAgeMin) <= 60 && !raw.includes('?') && !/vàng/iu.test(raw.normalize('NFC'))) {
+    const yes = /^(?:(?:u|uh|um|uhm|uk|uki|ok|oke|okie|okay|vang|da|dung|dung roi|phai|phai roi|chuan|chuan roi|ung|yes|co) )*(?:u|uh|um|uhm|uk|uki|ok|oke|okie|okay|vang|da|dung|dung roi|phai|phai roi|chuan|chuan roi|ung|yes|co|cai do|loai do|tui do|cai nay|loai nay|tropical|xanh nhat|tui xanh nhat)(?: (?:a|ah|ak|em|e|nha|nhe|roi|do|shop|chi|c|luon))*$/;
+    const xanhLa = /^(?:(?:khong|ko|k|da|u|uh) )?(?:(?:tui|loai|bich) )?(?:xanh la(?: cay)?|nguyen ban(?: 450(?: ?g)?)?|xanh 450|450 ?g?|xanh nguyen ban)(?: (?:a|ah|em|e|nha|nhe|thoi|chu|shop|c|chi))*$/;
+    const target = xanhLa.test(sFull) ? colourSku('xanh') : yes.test(sFull) ? colourSku('mint') : null;
+    if (target) return { rule: 'TROPICAL_CONFIRM_ANSWER', value: { template_id: 'PRICE_QUOTE', Product_N1: target.name } };
   }
   // SĐT (± địa chỉ) khi CHƯA có giỏ và không nêu sản phẩm: khách bắt đầu đặt → ghi nhận, hỏi vị
   // (ORDER_INFO_ASK_FLAVOR). Ví dụ thật: "131/10B đường 6 linh Xuân thủ Đức tphcm <sdt>" sau ASK_FLAVOR
@@ -1130,7 +1320,9 @@ export function ruleIntent(text, ctx = {}) {
   const smallPackFollowUp = last === 'PACKAGING_INFO' && !ctx.staffRepliedAfterBot && Number(ctx.botLastAgeMin) <= 720
     && !/\b(khong|ko|k|kg|hong|chua)\b/.test(s)
     && (PRICE.test(s) || /\b(combo 10|hop 10|10 goi|goi nho)\b/.test(s) || /^(co|ok|oke|okie|da|vang|u|uh|um|duoc|dc|gui|xem|can|co can)( (a|ah|em|e|shop|chi|c|nha|nhe|di|luon|xem|thu|minh|cho minh|giup|dum))*$/.test(s));
-  if (!isComment && !phone && !ctx.hasBasket && (smallPackFollowUp || (/\b(combo|hop|set) 10( goi)?\b/.test(s) && PRICE.test(s)))) {
+  // R17 (inbox1 B3, ca …1529162681 "10g nhỏ giá sao" — prep: "10 gói nhỏ"): "10 gói nhỏ" + hỏi giá (không số khác) cũng là hỏi giá combo.
+  const tenSmallPrice = /^(?:(?:cho|xin|minh|em|chi|c) )*10 goi nho (?:gia|bn|bao nhieu)(?: (?:sao|bao nhieu|bn|ntn|the nao|tien))*$/.test(s);
+  if (!isComment && !phone && !ctx.hasBasket && (smallPackFollowUp || tenSmallPrice || (/\b(combo|hop|set) 10( goi)?\b/.test(s) && PRICE.test(s)))) {
     const colour = /\b(nau|cacao)\b/.test(s) ? 'Nâu' : /\bcam\b/.test(s) ? 'Cam' : /\bmix\b/.test(s) ? 'Mix' : /\bxanh\b/.test(s) ? 'Xanh'
       : /nâu|cacao/i.test(String(ctx.contextProduct || '')) ? 'Nâu' : 'Xanh';
     // Vòng 11 (P3): PRICE_QUOTE + Product_N1 (như comboQuote của engine) — bộ soạn bảng giá tự chọn mẫu
@@ -1157,6 +1349,21 @@ export function ruleIntent(text, ctx = {}) {
     && ((PRICE.test(s) && /\b(?:tung|moi|cac|tat ca(?: cac)?|may|nhung|bao nhieu) (?:loai|vi|mau|tui|sp|san pham|mat hang)\b/.test(s))
       || /\bdong gia\b|\bgia (?:co )?(?:bang nhau|nhu nhau|giong nhau|khac nhau)\b|\b(?:loai|vi|mau|tui) .{0,15}\bgia (?:co )?khac\b|\b(?:gia|tien) .{0,10}\bbang nhau\b/.test(s))) {
     return { rule: 'PRICE_EACH', value: { template_id: 'GENERAL_INFO', listAll: '1' } };
+  }
+  // R17 (inbox5 A8, ca …634783 "Xin thông tin từng túi", …094699 "Xin gia cua ca 4 loaii" — bot gửi bảng giá MỘT túi Xanh): xin thông tin
+  // / giá của TỪNG / CÁC / CẢ (3, 4) loại → bảng các vị (GENERAL_INFO listAll). Cả câu phải đúng dạng xin (không màu, không câu khác).
+  {
+    const sEach = s.replace(/\bloa+i+\b/g, 'loai');
+    if (!isComment && !phone && !complaint && !ctx.hasBasket && sEach.length <= 50
+      && /^(?:(?:xin|cho|cho xin|gui|minh xin|em xin|chi xin|cho minh xin|cho em xin|cho chi xin|gui minh|gui em|gui chi) )?(?:thong tin|gia|bang gia|gia ca)(?: (?:va|\+) (?:thong tin|gia))? (?:cua |ve )?(?:tung|cac|tat ca(?: cac)?|ca (?:3|4)|ca) (?:loai|tui|vi|mau|san pham|sp)(?: (?:ben (?:em|minh|shop)|cua shop|nha minh|granola))?$/.test(sEach)) {
+      return { rule: 'PRICE_EACH', value: { template_id: 'GENERAL_INFO', listAll: '1' } };
+    }
+  }
+  // R17 (inbox2 M1, ca …5612586397 "Tc 3 vị thi gia ntn" — bot gửi bảng giá Túi Xanh): hỏi giá TRỌN BỘ / tất cả 3 vị → bảng giá mix
+  // túi lớn (có dòng trọn bộ 3 vị 442k). Cả câu chỉ là câu hỏi đó; đang giữ giỏ ở bước đơn thì để mô hình (dòng giỏ + tổng).
+  if (!isComment && !phone && !complaint && !ctx.complaint && orderAgeMin >= 60 && !(ctx.hasBasket && ctx.lastWasOrderStep) && !ctx.smallPackContext
+    && /^(?:(?:mua|lay|neu|minh|em|e|chi|c|co|a|anh) )*(?:(?:tc|tat ca|ca|du) (?:3 )?(?:vi|loai|mau)|tron bo(?: 3 (?:vi|loai|mau|tui))?|combo 3 (?:vi|loai|mau))(?: (?:thi|la))? (?:gia|bn|bao nhieu)(?: (?:ntn|the nao|nhu nao|sao|bao nhieu|bn|tien|nhieu))*$/.test(s)) {
+    return { rule: 'PRICE_FULL_SET', value: { template_id: 'PRICE_MIX_TUI_LON' } };
   }
   // R16 (inbox4 T1 "Lay 2 tui mà 2vị dc k ah", "2 túi 2 vị được ko e"): hỏi 2 túi 2 vị (chưa nêu màu) → hỏi vị (mix được), không
   // dựng giỏ 2 túi một vị. Có màu thì để luật giỏ / mô hình.
@@ -1194,6 +1401,27 @@ export function ruleIntent(text, ctx = {}) {
   if (!isComment && HOW_TO_BUY.test(s) && !MARKETPLACE.test(s) && !phone) return { rule: 'HOW_TO_BUY', value: { template_id: 'ORDER_HELP' } };
   // Vòng 12 (B3 #5, chủ shop 01/10): "lấy 1 túi thử nếu miễn ship mình chốt" NGOÀI cửa sổ ưu đãi 36 giờ (trialOffer lo phần
   // trong cửa sổ): 1 túi vẫn tính phí ship, mời combo 2 túi miễn ship (FREESHIP_POLICY) — không tự cho miễn ship.
+  // R17 (inbox5 A9 ca …343771 "Cho thử 1 túi xanh miễn ship nhé"; inbox3 A9 ca …1875140699 "dc miễn ship C ko C đặt 1 dùng thử", tái diễn
+  // vòng 16 A12; crm-gift-rules-0110 mục 5): khách xin MIỄN SHIP cho 1 túi / túi dùng thử, ngoài cửa sổ ưu đãi, chưa giữ giỏ → báo rõ
+  // 1 túi = giá + ship (189k) và mời combo 2 túi miễn ship (PRICE_ONE_BAG), GIỮ giỏ 1 túi (màu khách nêu, không nêu thì Túi Xanh) để
+  // "ok" lượt sau là chốt. Không áp: đang nói gói nhỏ / ảnh / bảng giá sản phẩm khác, nêu ≥ 2 màu hay số túi khác 1.
+  if (!isComment && !phone && !ctx.trialOffer && !ctx.hasBasket && !complaint && !ctx.complaint && orderAgeMin >= 60 && s.length <= 90 && FREESHIP_ANY.test(s)
+    && (/\b(?:1|mot) (?:tui|goi|bich|bit)\b|\b(?:dat|lay|mua) 1\b/.test(s) || /\b(?:dung|an) thu\b/.test(s))
+    // Phải là lời XIN (có động từ đặt / "thử"); câu HỎI chính sách ("1 túi có miễn ship không", "Một túi miễn sip à") giữ FREESHIP_POLICY
+    // — trừ khi câu hỏi kèm ý dùng thử ("dc miễn ship C ko C đặt 1 dùng thử").
+    && /\b(?:cho|lay|dat|mua|ship cho|gui|chot|thu)\b/.test(s)
+    && (!(contentQuestion || /(?:^|\s)(?:à|hả|ha|hở)\s*$/u.test(raw.normalize('NFC').toLowerCase().replace(/[.!…]+$/, '').replace(/(?:\s+(?:em|e|shop|ạ|chị|c|bạn|ad|ơi))+$/u, ''))) || /\b(?:dung|an) thu\b/.test(s))
+    && !/\b(?:[2-9]|\d{2,}) ?(?:tui|goi|bich|bit|hop|combo)\b|\b(?:combo|hop|set|goi nho|10 goi|mint|tropical|yen mach|nghe)\b/.test(s) && !ctx.smallPackContext && !ctx.customerImageRecently) {
+    const { colours } = namedColoursIn(raw);
+    const context = foldVietnamese(String(ctx.quotedProduct || ctx.contextProduct || ctx.lastQuoteName || '')).toLowerCase();
+    const otherContext = Boolean(context) && (!/\bxanh\b/.test(context) || /\b(?:mint|tropical|combo|hop|goi nho)\b|xanh (?:duong|nhat|min|bac ha)/.test(context));
+    const product = colours.length === 1 ? colourSku(colours[0]) : !colours.length && !otherContext ? colourSku('xanh') : null;
+    const one = product ? bagCountQuote(1, colourKey(product), Boolean(ctx.livestream)) : null;
+    const two = product ? bagCountQuote(2, colourKey(product), Boolean(ctx.livestream)) : null;
+    if (one && two) {
+      return { rule: 'ONE_BAG_FREESHIP_ASK', holdBasket: { product: one.product.name, quantity: 1 }, value: { template_id: 'PRICE_ONE_BAG', values: { product: one.product.name, price: money(one.priced.subtotal), ship: one.priced.shippingFee ? money(one.priced.shippingFee) : '', total: money(one.priced.total), two_total: money(two.priced.total) } } };
+    }
+  }
   if (!isComment && !phone && !ctx.trialOffer && FREESHIP_ANY.test(s) && /\b(?:1|mot) (?:tui|goi|bich)\b|\b(?:dung|an|lay|mua) thu\b/.test(s) && /\b(?:chot|lay|dat|mua|neu|thi|duoc|dc)\b/.test(s)) {
     return infoReply('TRIAL_CONDITION', 'FREESHIP_POLICY');
   }
@@ -1561,7 +1789,8 @@ export function ruleIntent(text, ctx = {}) {
   // Chỉ nêu một túi, không số, không động từ đặt ("Túi xanh", "túi vàng giá sao"): báo giá túi đó.
   const colours = [...new Set(s.match(/\b(xanh|vang|nau|cacao)\b/g) || [])].map(colour => (colour === 'cacao' ? 'nau' : colour));
   if (fresh && orderAgeMin >= 60 && !ORDER_VERB.test(s) && !phone && !/\d/.test(s) && new Set(colours).size === 1 && !LIVE_ONLY.test(s)
-    && !s.replace(/\b(xanh|vang|nau|cacao|la|cay|tui|goi|bich|granola|vi|gia|bao nhieu|bn|sao|the nao|ntn|nhieu|tien|cho|xin|hoi|loai)\b/g, '').trim()) {
+    // R17 (inbox2 M2, ca …3881994812 "Màu xanh gói bao nhiêu" — mô hình trả cân nặng): chữ "màu" đứng trước màu khi câu HỎI GIÁ.
+    && !s.replace(/\b(xanh|vang|nau|cacao|la|cay|tui|goi|bich|granola|vi|gia|bao nhieu|bn|sao|the nao|ntn|nhieu|tien|cho|xin|hoi|loai)\b/g, '').replace(PRICE.test(s) ? /\bmau\b/g : /$^/, '').trim()) {
     const product = colourSku(colours[0]);
     if (product) return { rule: 'PRICE_ONE', value: { template_id: 'PRICE_QUOTE', Product_N1: product.name } };
   }
@@ -1580,6 +1809,9 @@ export function ruleIntent(text, ctx = {}) {
     let target = template;
     if (rule === 'COMPARE' && (/nhieu hat/.test(s) || (/\bxanh\b/.test(s) && /\bvang\b/.test(s) && !/\b(nau|cacao)\b/.test(s)))) target = 'BAG_COMPARISON_XANH_VANG';
     const value = { template_id: target, ...(target === 'PRODUCT_PHOTOS' && ctx.contextProduct ? { Product_N1: ctx.contextProduct } : {}) };
+    // R17 (inbox5 A10, ca …486347 "Cho biết cách bảo quản và thời hạn sử dụng"): hỏi cả bảo quản LẪN hạn dùng → STORAGE kèm ý phụ
+    // WEIGHT_EXPIRY (trước đây chỉ trả một nửa).
+    if (rule === 'STORAGE' && /\b(?:thoi han|han (?:su dung|dung|sd)|hsd|date)\b/.test(s)) value.also = 'WEIGHT_EXPIRY';
     // Đang ở bước lên đơn: giữ bước đơn, trả lời câu hỏi bằng ý phụ. Xin gợi ý ("tư vấn c 1 túi nữa")
     // thì trả lời thẳng: mẫu đã mời chọn 1 túi / combo 2, không tự cộng túi vào giỏ.
     // Vòng 11 (P1): sau CONFIRM_YES ("Dạ đúng rồi ạ, gửi em SĐT + địa chỉ") giỏ vẫn đang giữ → cùng cách

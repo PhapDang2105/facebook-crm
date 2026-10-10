@@ -1699,9 +1699,13 @@ export const r16FallbackTemplates = Object.freeze({
 // R17 (gói A): mẫu MỚI — chưa có trong seed/Cài đặt (cần thêm khi áp mẫu lên máy chủ); dùng lời này khi bộ mẫu thiếu mã.
 // - ORDER_ADDRESS_OLD_CONFIRM: quyết định chủ shop 10/10 (8) — khách cũ chỉ nêu giỏ: hỏi xác nhận địa chỉ cũ một câu.
 // - SMALL_PACK_SOLD_OUT: inbox4 T5 / inbox1 B4 — khách nêu combo 10 gói đã tắt (Nâu/Mix): nói rõ, không bỏ món âm thầm.
+// R17 (10/10, gói C — luật dị ứng, rule-intent allergyIntent): mẫu MỚI, cùng lời với seed. Thành phần lấy nguyên văn từ mẫu
+// INGREDIENTS_ALLERGY (không thêm/bớt). {ingredient} luật điền sẵn (có dấu). Không câu mời lên đơn.
 export const r17FallbackTemplates = Object.freeze({
   ORDER_ADDRESS_OLD_CONFIRM: 'Dạ em lên đơn {cart} – {total} gửi về địa chỉ cũ của mình: {address}, SĐT {phone} đúng không ạ? Đúng rồi thì {title} nhắn em "ok" là em lên đơn liền nha 🌾',
-  SMALL_PACK_SOLD_OUT: 'Dạ {product} hiện bên em đã hết hàng ạ; combo 10 gói nhỏ hiện còn vị Xanh và Cam nha {title} 🌾'
+  SMALL_PACK_SOLD_OUT: 'Dạ {product} hiện bên em đã hết hàng ạ; combo 10 gói nhỏ hiện còn vị Xanh và Cam nha {title} 🌾',
+  ALLERGY_HAS_INGREDIENT: 'Dạ cả Túi Xanh, Túi Vàng và Túi Nâu nhà em đều có {ingredient} trong thành phần ạ, nên nếu {title} dị ứng hay không dùng được {ingredient} thì mình không nên dùng sản phẩm này để đảm bảo sức khỏe nha ạ 💛 Em cảm ơn {title} đã hỏi kỹ ạ.',
+  INGREDIENT_NOT_INCLUDED: 'Dạ trong thành phần granola nhà em không có {ingredient} ạ 💚 Granola gồm: gạo lứt, yến mạch, hạt bí, hạnh nhân, hạt điều, nho khô, xoài sấy, nam việt quất sấy, dừa sấy, mật thốt nốt, đường mạch nha và muối hồng Himalaya. Nếu {title} dị ứng nặng thì mình hỏi thêm ý kiến bác sĩ cho chắc nha ạ.'
 });
 const fallbackTemplateIds = [...Object.keys(r15FallbackTemplates), ...Object.keys(r16FallbackTemplates), ...Object.keys(r17FallbackTemplates)];
 /** Bộ mẫu + lời dự phòng R15/R16/R17 cho mã còn thiếu (mẫu trong Cài đặt luôn thắng, kể cả mẫu trống = tắt). */
@@ -2030,7 +2034,7 @@ function renderDiscountOatsGift(templates, context = {}) {
     gift: giftText,
     two_gift: twoGiftText,
     two_price: two?.priceable ? formatMoney(two.total) : '298.000đ',
-    cart: priced?.priceable ? priced.lines.map(line => `${line.quantity} ${line.name}`).join(' + ') : '',
+    cart: priced?.priceable && !context.discountNoCart ? priced.lines.map(line => `${line.quantity} ${line.name}`).join(' + ') : '',
     total: priced?.priceable ? formatMoney(priced.total) : ''
   });
 }
@@ -2067,7 +2071,9 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
   // 03/10: báo hành trình vận đơn Sapo theo giai đoạn (app/sapo-sync.mjs) + trả lời "đơn tới đâu" khi đã có vận đơn.
   'ORDER_STATUS_SHIPPED', 'SHIPMENT_CREATED', 'SHIPMENT_PICKED_UP', 'SHIPMENT_IN_TRANSIT', 'SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED',
   // R15: engine tự chọn — SĐT thiếu số (cần {phone}), không tra được địa chỉ cũ theo SĐT.
-  'PHONE_LOOKS_SHORT', 'ORDER_ADDRESS_OLD_NOT_FOUND']);
+  'PHONE_LOOKS_SHORT', 'ORDER_ADDRESS_OLD_NOT_FOUND',
+  // R17: luật dị ứng tự chọn (cần {ingredient} điền sẵn).
+  'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED']);
 
 // fix-bot T1 (01/10): mẫu "báo sự việc đã xảy ra" (đã nhận đơn Shop, đã hủy/sửa/ghi chú đơn, đã nhận deal live, đơn
 // đang có…) — chỉ engine được chọn khi việc đó thật sự xảy ra; mô hình trả các mã này thì luôn đổi về GENERAL_INFO.
@@ -2252,7 +2258,11 @@ export function renderChatbotReply(value = {}, givenTemplates = {}, context = {}
   // R14 (H3): bước đơn đã có món → không mời chọn lại.
   const mainBasket = (isOrderStep(main.templateId) || main.templateId === 'ORDER_CUSTOM_BASKET') && (Boolean(main.pendingOrder?.items?.length) || Boolean(main.order));
   if (mainBasket && alsoInviteWhenBasket.has(also)) return main;
-  const rendered = renderSingleReply({ template_id: also, Product_N1: value.Product_N1 }, templates, { ...context, alsoRender: true });
+  // R17 (inbox5 A6, luật DISCOUNT_ASK_NAMED "Cô lấy ba túi có giảm nửa kô"): câu "không giảm thêm" đi kèm giỏ VỪA dựng ở bước đơn →
+  // tính theo giỏ đó (3 túi: đã miễn ship + quà), không theo giỏ cũ (trống → mời "lấy từ combo 2 túi").
+  // (Dòng "Giỏ của mình …" bỏ — tin bước đơn ngay sau đã kể giỏ + tổng.)
+  const alsoContext = also === 'DISCOUNT_OATS_GIFT' && mainBasket && main.pendingOrder?.items?.length ? { pendingOrder: main.pendingOrder, bagCount: 0, discountNoCart: true } : {};
+  const rendered = renderSingleReply({ template_id: also, Product_N1: value.Product_N1 }, templates, { ...context, ...alsoContext, alsoRender: true });
   if (rendered.handoff || rendered.templateId !== also && !isProductQuoteId(also)) return main;
   const extraParts = mainBasket ? trimInviteTail(rendered.parts || rendered.messages.map(text => ({ type: 'text', text }))) : null;
   const extra = extraParts ? { ...rendered, parts: extraParts, messages: extraParts.filter(part => part.type === 'text').map(part => part.text) } : rendered;

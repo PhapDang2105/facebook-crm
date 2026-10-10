@@ -3440,7 +3440,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // xem", "Lần này mà ko ok là chị nghỉ chơi" từng nhận lời cảm ơn: hỏi lại mô hình một lần (không THANK_YOU); vẫn cảm ơn →
     // im + thẻ cần người.
     const ackWordsOnly = message.type === 'text' && (() => { const words = folded.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean); return words.length > 0 && words.length <= 6 && words.every(word => thanksAckWords.has(word)); })();
-    const genuineThanks = shortAck || confirmAck || emojiOnly || ackWordsOnly || ruled?.rule === 'THANKS' || /\b(cam on|camon|thank|thanks|tks)\b/.test(folded) && folded.length <= 60 && !/\?/.test(folded);
+    // R17 (gói C): luật ALLERGY_REPEAT ("Chị dị ứng dừa" nhắc lại ngay sau câu "đều có dừa, không nên dùng") cố ý đáp THANK_YOU.
+    const genuineThanks = shortAck || confirmAck || emojiOnly || ackWordsOnly || ruled?.rule === 'THANKS' || ruled?.rule === 'ALLERGY_REPEAT' || /\b(cam on|camon|thank|thanks|tks)\b/.test(folded) && folded.length <= 60 && !/\?/.test(folded);
     // R16 (bình luận/hộp thư B1 "Hix"): tin cảm thán ngắn không hỏi gì → im, không thẻ (không hỏi lại mô hình).
     if (reply.templateId === 'THANK_YOU' && conversation.source !== 'comment' && !nonText && !genuineThanks && isExclamationOnly(message.text)) {
       if (change.message?.id || change.message?.mid) await saveBotState(conversation.id, { botHandledMessageId: String(change.message.id || change.message.mid) }).catch(() => {});
@@ -3806,9 +3807,11 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const routed = [
         [/\b(me bau|bau bi|dang bau|tieu duong|benh)\b/, 'HEALTH_CONDITION'],
         [/\b(cho be|be an|tre em|tre nho|con nho)\b/, 'KIDS_FAMILY'],
-        [/\byen mach\b/, 'PRICE_YEN_MACH_UC_NGUYEN_CAM'],
+        // R17 (bình luận A8, ca …561388 "Lấy 1 hộp ko yến mạch nha" — tái diễn vòng 16 E1): "không (có) yến mạch" là xin granola KHÔNG
+        // yến mạch, không hỏi giá Yến Mạch Úc → không gửi bảng giá yến mạch (lời chào live như các câu hỏi giá khác).
+        [/\byen mach\b/, 'PRICE_YEN_MACH_UC_NGUYEN_CAM', /\b(?:khong|ko|k|kg|hong|bo|tru)(?: co)? yen mach\b/],
         [/\b(hat dieu|hat bi|sua hat|xoai|dau say)\b/, 'LIVE_ONLY_PRODUCT']
-      ].find(([pattern, id]) => pattern.test(folded) && templates?.[id]);
+      ].find(([pattern, id, unless]) => pattern.test(folded) && !(unless && unless.test(folded)) && templates?.[id]);
       reply = renderChatbotReply({ template_id: routed ? routed[1] : 'LIVESTREAM_COMMENT' }, templates, replyContext);
     }
     // Khách đến từ live (bài live hay thẻ Livestream) hỏi giá / số túi / quà: lời chào live (nêu vị, ưu đãi

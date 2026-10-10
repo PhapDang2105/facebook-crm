@@ -266,14 +266,15 @@ test('cột Ghi chú lấy ghi chú hội thoại mới nhất; CSV có thêm Tr
       customerNotes: [
         { id: 'b', text: 'ghi chú cũ', createdAt: 100 },
         { id: 'a', text: 'Hẹn gọi chiều', createdAt: 200, author: { username: 'ha', name: 'Hà' } },
-        { id: 'c', text: '   ', createdAt: 300 }
+        { id: 'c', text: '   ', createdAt: 300 },
+        { id: 'd', text: 'Khách lên đơn mới với SĐT trùng đơn khác', createdAt: 400, author: { username: 'bot', name: 'Chatbot AI' } }
       ],
       customerOrders: [{ createdAt: 150, phone: '0909000111', address: 'Quận 1', total: 298000, products: [{ name: 'Túi Xanh', sku: 'GRA-XANH-Z450', quantity: 2 }] }]
     }],
     messages: {}
   });
   const customer = customers.find(item => item.psid === '9');
-  assert.deepEqual(customer.lastNote, { text: 'Hẹn gọi chiều', at: 200, by: 'Hà' }, 'ghi chú trống bị bỏ qua');
+  assert.deepEqual(customer.lastNote, { text: 'Hẹn gọi chiều', at: 200, by: 'Hà' }, 'ghi chú trống và ghi chú bot bị bỏ qua');
   const [header, row] = customersToCsv([{ ...customer, contactStatus: 'unreachable' }]).replace(/^﻿/, '').trim().split('\r\n');
   assert.ok(header.endsWith(',Trạng thái liên hệ,Ghi chú gần nhất'), header);
   assert.ok(row.endsWith(',Không gọi được,Hẹn gọi chiều'), row);

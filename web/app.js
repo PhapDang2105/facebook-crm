@@ -1669,7 +1669,7 @@ function customerContactHtml(customer) {
     customerContactStatuses.map(item => `<option value="${item.key}"${item.key === status ? ' selected' : ''}>${item.label}</option>`).join('')}</select>`;
 }
 
-/** Cột "Ghi chú": ghi chú mới nhất của khách (hộp chi tiết, khung khách bên Tin nhắn hay ghi chú bot); bấm để viết thêm. */
+/** Cột "Ghi chú": ghi chú mới nhất NHÂN VIÊN viết (hộp chi tiết hay khung khách bên Tin nhắn; ghi chú bot không hiện); bấm để viết thêm. */
 function customerNoteCellHtml(customer) {
   const note = customer.lastNote;
   if (!note?.text) return `<button type="button" class="customer-note-add" data-note-edit="${escapeHtml(customer.id)}">+ Thêm ghi chú</button>`;

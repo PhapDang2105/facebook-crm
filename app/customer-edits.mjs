@@ -191,6 +191,11 @@ function mergeNotes(entries) {
   return notes;
 }
 
+/** Ghi chú bot tự ghi cho nhân viên (server-helpers BOT_NOTE_AUTHOR, username 'bot'). */
+export function isBotNote(note) {
+  return String(note?.author?.username || '').toLowerCase() === 'bot';
+}
+
 // noteCount là tổng cả ghi chú bên hội thoại; staffNoteCount chỉ đếm phần thêm từ hộp chi
 // tiết (và ghi chú bot), tức đúng phần listCustomerNotes trả về.
 function applyNoteCounts(customer, notes) {
@@ -198,8 +203,9 @@ function applyNoteCounts(customer, notes) {
   if (notes.length) {
     customer.noteCount = (Number(customer.noteCount) || 0) + notes.length;
     customer.lastStaffNoteAt = notes.reduce((latest, note) => Math.max(latest, Number(note?.at) || 0), 0);
-    // Cột "Ghi chú" màn Khách hàng hiện ghi chú MỚI NHẤT: so với ghi chú hội thoại (customers.mjs đã đặt lastNote).
-    const latest = notes.reduce((best, note) => ((Number(note?.at) || 0) >= (Number(best?.at) || 0) ? note : best), null);
+    // Cột "Ghi chú" màn Khách hàng hiện ghi chú MỚI NHẤT của NHÂN VIÊN: so với ghi chú hội thoại (customers.mjs đã đặt
+    // lastNote). Chủ shop 10/10: cột để nhân viên ghi — ghi chú bot tự ghi ("Chatbot AI") chỉ xem trong hộp chi tiết.
+    const latest = notes.filter(note => !isBotNote(note)).reduce((best, note) => ((Number(note?.at) || 0) >= (Number(best?.at) || 0) ? note : best), null);
     const at = Number(latest?.at) || 0;
     if (latest?.text && (!customer.lastNote || at >= (Number(customer.lastNote.at) || 0))) {
       customer.lastNote = { text: String(latest.text).slice(0, 200), at, by: text(latest.author?.name || latest.by, 80) };

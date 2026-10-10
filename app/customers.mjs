@@ -7,7 +7,7 @@ import { genderFromName } from './processing/customer-info.mjs';
 import { readChannelStore } from './channel-store.mjs';
 import { pancakeConfig } from './config.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
-import { applyCustomerEdits, CONTACT_STATUSES, readCustomerEdits } from './customer-edits.mjs';
+import { applyCustomerEdits, CONTACT_STATUSES, isBotNote, readCustomerEdits } from './customer-edits.mjs';
 import { collectOrderFacts, isCancelledOrder, isDayString, isIncompleteOrder, isValidFact, shiftDay, vietnamDayStartMs } from './order-facts.mjs';
 import { listLandingOrders } from './landing-orders.mjs';
 import { labelsForEvents, readInboxSettings } from './inbox-settings.mjs';
@@ -188,6 +188,7 @@ export function buildCustomers(store, channels = [], exported = [], { landingOrd
     // Ghi chú mới nhất viết ở khung khách bên Tin nhắn: cột "Ghi chú" màn Khách hàng so tiếp với ghi chú hộp chi
     // tiết (customer-edits.mjs) rồi hiện cái mới hơn.
     for (const note of notes) {
+      if (isBotNote(note)) continue;
       const body = String(note?.text || '').trim();
       const at = Number(note?.createdAt) || Number(note?.at) || 0;
       if (body && (!existing.lastNote || at >= existing.lastNote.at)) {

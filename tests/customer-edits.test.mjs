@@ -172,4 +172,7 @@ test('ghi chú gần nhất (cột Ghi chú): lấy cái mới hơn giữa ghi c
   // Không có ghi chú hội thoại: ghi chú hộp chi tiết; gõ tay `by` khi chưa bật đăng nhập.
   await addCustomerNote(key, { text: 'Gửi mã giảm giá qua Zalo', by: 'Minh' }, 1_700_000_700_000);
   assert.deepEqual((await overlay([person()])).lastNote, { text: 'Gửi mã giảm giá qua Zalo', at: 1_700_000_700_000, by: 'Minh' });
+  // Chủ shop 10/10: cột Ghi chú là chỗ nhân viên ghi — ghi chú bot mới hơn vẫn lưu (xem trong hộp chi tiết) nhưng không lên cột.
+  await addCustomerNote(key, { text: 'Khách lên đơn mới với SĐT trùng đơn Landing page', author: { username: 'bot', name: 'Chatbot AI' } }, 1_700_000_800_000);
+  assert.equal((await overlay([person()])).lastNote.text, 'Gửi mã giảm giá qua Zalo');
 });

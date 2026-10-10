@@ -894,10 +894,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .chatbot-processing-code { min-width: 0; padding: 0; border: 0; border-radius: 0; }
 .chatbot-general-config { display: grid; grid-template-columns: minmax(620px, 1.3fr) minmax(340px, .7fr); align-items: stretch; gap: 8px; max-width: none; height: max(540px, calc(100vh - 242px)); min-height: 540px; margin: 0; padding: 8px; background: #f5f7fb; border-radius: 14px; }
 .chatbot-general-settings-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr); align-content: stretch; gap: 12px; min-width: 0; height: 100%; max-height: none; overflow: auto; padding: 0 16px 18px; background: #fff; border: 1px solid #e0e5ed; border-radius: 14px; box-shadow: 0 6px 18px rgba(41, 57, 85, .05); }
-.chatbot-llm-pane-tabs { display: flex; gap: 18px; margin: 0 -16px; padding: 0 16px; border-bottom: 1px solid #e5e9ef; }
-.chatbot-llm-pane-tabs button { position: relative; padding: 12px 0 11px; color: #68748a; background: transparent; border: 0; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
-.chatbot-llm-pane-tabs button.active { color: #202a3d; }
-.chatbot-llm-pane-tabs button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: #5658ed; content: ''; }
 .chatbot-general-config > .chatbot-ai-overview { grid-column: 1 / -1; }
 .chatbot-ai-overview { display: flex; align-items: center; gap: 13px; padding: 16px; background: linear-gradient(135deg, #f4f7ff, #f8fbff); border: 1px solid #dce5f5; border-radius: 12px; }
 .chatbot-ai-overview-icon { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; background: #fff; border: 1px solid #dce5f1; border-radius: 11px; }
@@ -982,10 +978,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 /* Nhãn mục 12px/600 uppercase #354052; khối nhập nền rgba(200,206,218,.25) bo 8px;
    thân panel padding 16px, cách nhau 16px. */
 .chatbot-general-settings-pane.llm-pane { display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; background: #fff; border: 1px solid #e9ebf0; border-radius: 12px; box-shadow: 0 1px 2px rgba(16, 24, 40, .05); }
-.llm-pane > .chatbot-llm-pane-tabs { flex: 0 0 auto; margin: 0; padding: 0 16px; border-bottom: 1px solid #f2f4f7; }
-.llm-pane > .chatbot-llm-pane-tabs button { padding: 11px 0 10px; color: #98a2b2; font-size: 13px; font-weight: 600; }
-.llm-pane > .chatbot-llm-pane-tabs button.active { color: #101828; }
-.llm-pane > .chatbot-llm-pane-tabs button.active::after { background: #155eef; }
 .llm-pane-body { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 16px; padding: 16px; overflow-y: auto; }
 .llm-pane-body > * { flex: 0 0 auto; }
 
@@ -994,11 +986,9 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .llm-label { display: inline-flex; align-items: center; gap: 4px; color: #354052; font-size: 12px; font-weight: 600; line-height: 16px; text-transform: uppercase; }
 .llm-required { color: #d92d20; font-style: normal; }
 .llm-info { width: 14px; height: 14px; flex: 0 0 14px; color: #98a2b2; fill: none; stroke: currentColor; stroke-width: 1.6; }
-.llm-head-actions { display: flex; margin-left: auto; gap: 2px; }
 .llm-icon-btn { display: grid; width: 24px; height: 24px; place-items: center; padding: 0; color: #676f83; background: transparent; border: 0; border-radius: 6px; cursor: pointer; }
 .llm-icon-btn:hover { color: #354052; background: #f2f4f7; }
 .llm-icon-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.llm-var-glyph { color: #155eef; font-size: 12px; font-weight: 600; font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
 
 /* Dòng model */
 .llm-model-row { display: flex; height: 32px; align-items: center; gap: 6px; padding: 0 4px 0 8px; background: rgba(200, 206, 218, .25); border: 1px solid transparent; border-radius: 8px; }
@@ -1023,7 +1013,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .llm-role { display: inline-flex; align-items: center; gap: 4px; color: #354052; font-size: 12px; font-weight: 600; line-height: 16px; text-transform: uppercase; }
 .llm-token { color: #676f83; font-size: 12px; font-weight: 500; }
 .llm-spark { width: 14px; height: 14px; color: #155eef; fill: currentColor; stroke: none; }
-.llm-jinja { display: inline-flex; align-items: center; gap: 5px; color: #c2c8d4; font-size: 12px; }
 .llm-prompt-tools { display: flex; margin-left: auto; gap: 1px; }
 .llm-prompt textarea { min-height: 0; flex: 1 1 auto; padding: 4px 12px 10px; resize: none; color: #101828; background: transparent; border: 0; outline: none; font: inherit; font-size: 13px; line-height: 20px; }
 .llm-prompt textarea::placeholder { color: #98a2b2; }
@@ -1045,9 +1034,6 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .llm-switch--sm { width: 26px; height: 15px; flex-basis: 26px; margin-left: 0; }
 .llm-switch--sm > span::after { width: 11px; height: 11px; }
 .llm-switch--sm input:checked + span::after { transform: translateX(11px); }
-.llm-switch--xs { width: 22px; height: 13px; flex-basis: 22px; margin-left: 0; }
-.llm-switch--xs > span { background: #e0e3ea; border-radius: 7px; }
-.llm-switch--xs > span::after { top: 2px; left: 2px; width: 9px; height: 9px; box-shadow: 0 1px 1px rgba(16, 24, 40, .16); }
 
 /* Cửa sổ bộ nhớ */
 .llm-window-row { display: flex; align-items: center; gap: 8px; }
@@ -1441,8 +1427,6 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .customer-form-section { margin-bottom: 8px; background: #fff; }
 .customer-form-section > h3 { display: flex; min-height: 38px; align-items: center; gap: 8px; margin: 0; padding: 8px 10px; color: rgba(0, 0, 0, .85); font-size: 14px; font-weight: 500; line-height: 21px; }
 .customer-form-section > h3 > .customer-section-icon { width: 21px; height: 21px; flex: 0 0 21px; color: #595959; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
-.customer-section-link { display: inline-flex; margin-left: auto; align-items: center; gap: 4px; color: #2d65c3; background: transparent; border: 0; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
-.customer-section-link svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .customer-section-icons { display: flex; margin-left: auto; gap: 8px; }
 .customer-section-icons button { display: grid; width: 26px; height: 24px; place-items: center; padding: 0; background: #1677ff; border: 0; border-radius: 4px; cursor: pointer; }
 .customer-section-icons svg { width: 15px; height: 15px; fill: none; stroke: #fff; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }

@@ -56,7 +56,7 @@ test('gọi Gemini trực tiếp trên Vertex AI', async () => {
       assert.equal(url, 'https://aiplatform.googleapis.com/v1/projects/demo/locations/global/publishers/google/models/gemini-2.5-flash:generateContent');
       assert.equal(options.headers.Authorization, 'Bearer google-token');
       const body = JSON.parse(options.body);
-      assert.match(body.systemInstruction.parts[0].text, /^Chỉ trả JSON\n\nSẢN PHẨM \(tên chuẩn → cách khách gọi\):\n- Granola Túi Xanh 450g: túi xanh/);
+      assert.match(body.systemInstruction.parts[0].text, /^Chỉ trả JSON\n\nJSON GỌN: [^\n]+\n\nSẢN PHẨM \(tên chuẩn → cách khách gọi\):\n- Granola Túi Xanh 450g: túi xanh/);
       // Danh sách mẫu tin đọc từ Thiết lập tin nhắn, nối vào sau danh mục.
       assert.match(body.systemInstruction.parts[0].text, /MẪU TIN \(template_id → ý nghĩa\):[\s\S]*- BAG_COMPARISON: các túi bên em đều dùng chung[\s\S]*PRICE_QUOTE dùng cho mọi sản phẩm/);
       assert.equal(body.contents[0].role, 'user');
@@ -103,7 +103,7 @@ test('gọi Claude bằng giao thức Anthropic Messages', async () => {
       assert.equal(options.headers['anthropic-version'], '2023-06-01');
       const body = JSON.parse(options.body);
       assert.equal(body.model, 'claude-sonnet-4-6');
-      assert.match(body.system, /^Chỉ trả JSON\n\nSẢN PHẨM \(tên chuẩn → cách khách gọi\):\n- Granola Túi Xanh 450g: túi xanh/);
+      assert.match(body.system, /^Chỉ trả JSON\n\nJSON GỌN: [^\n]+\n\nSẢN PHẨM \(tên chuẩn → cách khách gọi\):\n- Granola Túi Xanh 450g: túi xanh/);
       return { ok: true, json: async () => ({ content: [{ type: 'text', text: '{"template_id":"WELCOME"}' }] }) };
     }
   });

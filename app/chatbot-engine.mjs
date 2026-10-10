@@ -701,10 +701,16 @@ export function composeSystemPrompt(basePrompt, templates = {}, contextTrim = {}
   const prompt = String(basePrompt || '').split('\n').filter(line => !nudgeTemplateIds.some(id => line.includes(id))).join('\n').trim();
   return [
     prompt,
+    // 10/10 (chủ shop: "prompt tốn chi phí"): token ra là phần đắt nhất mỗi lượt (~150 token, phần lớn là 10 trường "0" của
+    // JSON mẫu). Bộ soạn trả lời coi trường vắng như "0" (giá trị của luật cũng chỉ có vài trường) → cho mô hình bỏ hẳn trường
+    // trống. Tắt: contextTrim.output = false.
+    contextTrim?.output === false ? '' : compactOutputRule,
     buildCatalogPrompt({ compact: contextTrim?.catalog === true }),
     buildTemplatePrompt(templates, prompt, { compact: contextTrim?.templates === true })
   ].filter(Boolean).join('\n\n');
 }
+
+const compactOutputRule = 'JSON GỌN: chỉ ghi template_id và các trường có giá trị; trường bằng "0" hay rỗng thì BỎ HẲN, không ghi. Ví dụ hỏi giá chung: {"template_id":"GENERAL_INFO"}; lên đơn: {"template_id":"ORDER_ADDRESS","Product_N1":"Granola Túi Xanh 450g","No_A":"2"}.';
 
 // Hai mẫu "đã gửi ở trên": engine tự chọn theo luật, mô hình không được chọn.
 const nudgeTemplateIds = ['REPLY_ALREADY_SENT_INFO', 'REPLY_ALREADY_SENT'];

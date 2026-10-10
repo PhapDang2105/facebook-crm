@@ -295,7 +295,20 @@ const TERSE_D = /^(?:(?:xin|sin|x|cho xin|inbox|ibox|ib) ?gia|gia (?:tn|the nao|
 const SHORT_PRICE_OTHER = /\b(xanh|vang|nau|cacao|combo|mix|yen mach|hat|goi nho|10 goi|hop|ship|sip|qua|tang|giam|uu dai|voucher|km|kg|gram|gam|gr|don|size|loai nao|mau nao|vi nao|them|nua|tong)\b/;
 const SHORT_PRICE = /^(?:(?:alo|hi|hello|chao|shop|ad|da) )?(?:(?:cho|xin|gui|bao|tu van va|cho (?:minh|em|e|chi|c|a|anh) (?:xin|hoi)?|(?:minh|em|e|chi|c|a|anh|ban|b) (?:xin|hoi|cho|bao)|cho hoi|cho xin|la) ?)?(?:bang )?(?:bao )?(?:gia|bn|bnh|bao nhieu|bao nhiu|bnhiu|nhieu|nhiu)(?: (?:ca|ban|sp|san pham|tien|bao nhieu|bao nhiu|bn|nhieu|nhiu|sao|the nao|ntn|tn|may))*(?: (?:1|mot) ?(?:tui|goi|bich|bit|bi|b|kg))?(?: (?:granola|grannola|gannola|ngu coc|goi ngu coc|sp|san pham|do|nay|day))?(?: (?:giup|cho|voi|nhe|nao|di|a|dc khong|duoc khong)(?: (?:minh|em|e|chi|c|a|anh|toi))?)*(?: nao)?$|^(?:1 ?)?(?:granola|grannola|gannola|ngu coc|goi ngu coc|tui|goi|bich) (?:gia )?(?:bao nhieu|bao nhiu|bn|bnh|nhieu|nhiu|sao|the nao)(?: (?:1|mot) ?(?:tui|goi|bich))?$/;
 const WANT_BUY_PLUS = /^(?:(?:hi|alo|hello|chao) )?(?:(?:minh|em|e|chi|c|toi|m|mk|to|tui) )?(?:(?:muon|can|dinh) )?(?:mua|mua hang|dat hang|dat mua|mua sp)(?: (?:ngu coc|granola))?$/;
-const GREETING = /^(hi|hello|helo|alo|a lo|chao|xin chao|chao (shop|em|ban|chi|anh)|shop|shop oei|oi)$/;
+// 10/10 (chủ shop: "gì code xử lý được thì ưu tiên code"): lời gọi trơn ("Em ơi", "Bạn ơi", "Alo alo", "Giọt Nắng ơi" — core()
+// đã cắt "ơi") mô hình đều chọn WELCOME; trước chỉ nhận hi/alo/chào.
+const GREETING = /^(hi|hello|helo|alo+|a lo|allo+|alo alo|chao|xin chao|chao (shop|em|ban|chi|anh)|shop|shop oei|oi|em|ban|sop|ad|admin|giot nang|page)$/;
+// 10/10: cảm ơn các kiểu ("Xin cảm ơn", "c cảm ơn e", "ok cảm ơn shop rất nhiều", "Cám ơn bạn nhiều nhé") → THANK_YOU ở mọi ngữ
+// cảnh (luật THANKS cũ chỉ nhận đúng "cảm ơn"/"thanks").
+const THANKS_FULL = /^(?:(?:xin|da|vang|ok|oke|okie|okay|uh|um|the|vay|c|chi|minh|a|anh|e|em|toi|tui|con)\s+)*(?:cam on|camon|cmon|thanks|thank you|thank|thankyou|tks|thks)(?:\s+(?:ban|em|e|shop|sop|nhieu|nhiu|rat nhieu|nhe|nha|a|ah|chi|c|anh|ca nha|b|lam|qua))*$/;
+// 10/10: "ok / vâng / dạ / được rồi" trơn ngay sau tin đơn đã lên / trạng thái đơn (bot không hỏi gì) → cảm ơn khách. Chỉ sau các
+// mẫu KHÔNG đặt câu hỏi: sau câu hỏi ("đặt thêm?", "em lên 1 túi nha?", "địa chỉ cũ đúng không?") "ok" là đồng ý — luật khác lo.
+const ACK_ONLY = /^(?:ok|oke|okie|okay|okk|oki|okela|ok ok|uh|uk|um|vang|da|da vang|vang a|da a|dc|duoc|duoc roi|ok roi|roi)$/;
+// (Không gồm ORDER_STATUS_CHECKING: bot vừa nói "em đang kiểm tra" — "Dạ" là chờ nhân viên, không phải cảm ơn.)
+const ACK_AFTER = new Set(['ORDER_CONFIRMATION', 'ORDER_STATUS', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'THANK_YOU', 'DELIVERY_DELAY', 'SHIPPING_POLICY']);
+// 10/10: hỏi có gói nhỏ / chia gói không ("Mình có từng gói nhỏ ko shop", "Có loại túi nhỏ ko bạn") — cách viết luật SMALL_PACK
+// chưa nhận. Chỉ khi KHÔNG giữ giỏ (đang giữ giỏ thì để mô hình), không nêu màu (màu + gói nhỏ = hỏi vị gói nhỏ), không đặt.
+const SMALL_PACK_MORE = /(?:tung|cac) (?:goi|tui) nho|loai (?:tui|goi) nho|chia (?:ra )?(?:tung|thanh)/;
 const WANT_BUY = /^(?:(?:minh|em|e|chi|c|toi|m|mk|to|tui) (?:muon |can |dinh )?|(?:muon|can) )(?:mua|dat hang|mua hang|dat mua|order|mua sp|mua san pham|tham khao)$/;
 // Vòng 12 (B4 #7): bỏ "mã gì" ("Hộp nhựa là mã gì" là hỏi sản phẩm); "đã săn/mua/chốt" vẫn đủ.
 const LIVE_DEAL = /\b(da (san|mua|chot|dat)|san (duoc|deal|the nao|tn|sao|ntn)|len ma|cach (san|chot|tham gia|dat|mua))\b/;
@@ -526,7 +539,8 @@ const INFO_RULES = [
   // Đang giữ giỏ mà khách đổi số túi / xin "1 túi ăn thử miễn ship": không giữ giỏ cũ, để mô hình đọc.
   // "2 túi 298k miễn ship": khách nhắc lại giá vừa báo để đặt, không hỏi chính sách → để mô hình lên đơn.
   ['FREESHIP', /(mien|free) ?(phi )?(ship|sip|van chuyen)|freeship/, 'FREESHIP_POLICY', (s, ctx) => PRICE.test(s) || (ctx.hasBasket && /\b(\d{1,2} ?(tui|goi|bich)|mot tui|an thu|dung thu|thu)\b/.test(s)) || (/\b\d{1,2} ?(tui|goi|bich)\b/.test(s) && /\b\d{2,3} ?(k|nghin|ngan)\b|\d{3}\.000/.test(s))],
-  ['DISCOUNT', /(giam gia|khuyen mai|\bkm\b|uu dai|chuong trinh|\bct\b|\bsale\b)/, 'DISCOUNT_POLICY', (s, ctx) => ctx.livestream || /(voucher|qua|tang|gau|live)/.test(s)],
+  // 10/10: "Có giảm ko?", "giảm thêm không" (không nhầm "giảm cân").
+  ['DISCOUNT', /(giam gia|khuyen mai|\bkm\b|uu dai|chuong trinh|\bct\b|\bsale\b|\bco giam\b(?! can)|\bgiam (?:ko|khong|k|them)\b)/, 'DISCOUNT_POLICY', (s, ctx) => ctx.livestream || /(voucher|qua|tang|gau|live)/.test(s)],
   ['VOUCHER', /(voucher|vocher|vochur|ma giam)/, 'LIVESTREAM_VOUCHER', s => PRICE.test(s)],
   ['GIFT', /((qua|tang) (gi|j)\b|co (duoc )?(qua|tang)|duoc tang|qua tang)/, 'GIFT_POLICY', s => PRICE.test(s) || /\b(xanh|vang|nau|cacao)\b|gau|dau tay|doi qua|thay qua|khac/.test(s)],
   // Vòng 12 (B1 #12, B3 #26): "Gửi hình e xem", "gửi 3 mẫu" (không phải ảnh chuyển khoản).
@@ -1568,7 +1582,7 @@ export function ruleIntent(text, ctx = {}) {
     const general = priceGeneral('TERSE_PRICE_D');
     return /\bcac (?:mat hang|sp|san pham|loai)\b/.test(sp) && general.value ? { ...general, value: { template_id: 'GENERAL_INFO', listAll: '1' } } : general;
   }
-  if (!isComment && fresh && GREETING.test(s)) return { rule: 'GREETING', value: { template_id: 'WELCOME' } };
+  if (!isComment && (fresh || (!ctx.hasBasket && !ctx.lastWasOrderStep && orderAgeMin >= 60)) && GREETING.test(s)) return { rule: 'GREETING', value: { template_id: 'WELCOME' } };
   if (fresh && WANT_BUY.test(s)) return priceGeneral('WANT_BUY');
   // SĐT trơn khi đang chờ đơn: bộ soạn đơn tự đọc SĐT, gộp giỏ, đủ thì tự xác nhận.
   if (ctx.hasBasket && ctx.lastWasOrderStep && phone && PHONE_ONLY.test(foldVietnamese(raw).toLowerCase())) {
@@ -1584,6 +1598,8 @@ export function ruleIntent(text, ctx = {}) {
   // bộ soạn đơn cộng dồn một lần), không thay giỏ. "đổi/thay/chỉ lấy/bớt" thì vẫn là giỏ mới.
   // Vòng 12 (B3 #6): hỏi loại chia phần nhỏ / dùng 1 lần → PACKAGING_INFO trước luật giỏ.
   if (!isComment && !phone && smallPackAsk && !PRICE.test(s) && !ctx.smallPackContext) return infoReply('SMALL_PACK', 'PACKAGING_INFO');
+  if (!isComment && !phone && !ctx.hasBasket && !ctx.smallPackContext && SMALL_PACK_MORE.test(s) && !PRICE.test(s) && !ORDER_VERB.test(s)
+    && !/\b(xanh|vang|nau|cacao|cam)\b/.test(s) && !SMALL_PACK_ORDER(s)) return infoReply('SMALL_PACK', 'PACKAGING_INFO');
   if (basket.length) {
     const adds = ctx.hasBasket && /\b(them|cong them)\b/.test(s) && !/\b(doi|thay|chi lay|chi can|bot)\b/.test(s);
     return { rule: 'BASKET', value: { ...basketValue(basket), ...(adds ? { add_to_basket: '1' } : {}) } };
@@ -1799,7 +1815,8 @@ export function ruleIntent(text, ctx = {}) {
     && !s.replace(/\b(xanh|vang|nau|cacao|la|cay|tui|goi|bich|granola|vi|gia|bao nhieu|bn|sao|the nao|ntn|nhieu|tien|cho|xin|hoi|loai|va|voi|hay|vs|mau|moi|1|cua)\b/g, '').trim()) {
     return { rule: 'PRICE_TWO', value: { template_id: 'PRICE_MIX_TUI_LON' } };
   }
-  if (/^(cam on|camon|thanks|thank you|tks|thank|cam on nhieu|da cam on)$/.test(s)) return { rule: 'THANKS', value: { template_id: 'THANK_YOU' } };
+  if (THANKS_FULL.test(s)) return { rule: 'THANKS', value: { template_id: 'THANK_YOU' } };
+  if (!isComment && !phone && !ctx.hasBasket && ACK_AFTER.has(last) && ACK_ONLY.test(s)) return { rule: 'ACK_THANKS', value: { template_id: 'THANK_YOU' } };
   // Câu hỏi thông tin: tin ngắn, một tin, không đặt hàng/SĐT/hàng live/khiếu nại, không ngay sau khi chốt.
   const info = s.length <= 70 && (ctx.bundleSize || 1) === 1 && !ORDER_VERB.test(s) && !phone && (!LIVE_ONLY.test(s) || ingredientAsk) && orderAgeMin >= 60 && !complaint && !ctx.complaint;
   if (!info) return null;

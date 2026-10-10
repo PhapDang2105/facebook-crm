@@ -6,7 +6,7 @@ import { genderRank, readMessagingStore } from './messaging-store.mjs';
 import { readChannelStore } from './channel-store.mjs';
 import { pancakeConfig } from './config.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
-import { applyCustomerEdits, readCustomerEdits } from './customer-edits.mjs';
+import { applyCustomerEdits, CONTACT_STATUSES, readCustomerEdits } from './customer-edits.mjs';
 import { collectOrderFacts, isCancelledOrder, isIncompleteOrder, isValidFact } from './order-facts.mjs';
 
 function customerKey(conversation) {
@@ -149,6 +149,15 @@ export function buildCustomers(store, channels = [], exported = []) {
     existing.orderTotal += counted.reduce((sum, order) => sum + (Number(order.total) || 0), 0);
     collectPurchases(existing, counted);
     existing.noteCount += notes.length;
+    // Ghi chú mới nhất viết ở khung khách bên Tin nhắn: cột "Ghi chú" màn Khách hàng so tiếp với ghi chú hộp chi
+    // tiết (customer-edits.mjs) rồi hiện cái mới hơn.
+    for (const note of notes) {
+      const body = String(note?.text || '').trim();
+      const at = Number(note?.createdAt) || Number(note?.at) || 0;
+      if (body && (!existing.lastNote || at >= existing.lastNote.at)) {
+        existing.lastNote = { text: body.slice(0, 200), at, by: String(note?.author?.name || note?.author?.username || '').slice(0, 80) };
+      }
+    }
     for (const label of Array.isArray(conversation.labels) ? conversation.labels : []) {
       if (!existing.labels.includes(label)) existing.labels.push(label);
     }
@@ -348,7 +357,7 @@ function formatTime(value) {
 /** CSV for Excel: UTF-8 with BOM, semicolon-free, quotes escaped. */
 export function customersToCsv(customers, labels = []) {
   const labelNamesById = new Map(labels.map(label => [label.id, label.name]));
-  const headers = ['Tên', 'ID Facebook', 'Giới tính', 'Kênh', 'Nguồn', 'Liên hệ lần đầu', 'Khách nhắn cuối', 'Tương tác cuối', 'Số điện thoại', 'Địa chỉ', 'Số đơn', 'Tổng tiền', 'Mua lần cuối', 'Đơn gần nhất gồm', 'Đã mua từ trước tới nay', 'Combo lớn nhất', 'Thẻ', 'Quảng cáo'];
+  const headers = ['Tên', 'ID Facebook', 'Giới tính', 'Kênh', 'Nguồn', 'Liên hệ lần đầu', 'Khách nhắn cuối', 'Tương tác cuối', 'Số điện thoại', 'Địa chỉ', 'Số đơn', 'Tổng tiền', 'Mua lần cuối', 'Đơn gần nhất gồm', 'Đã mua từ trước tới nay', 'Combo lớn nhất', 'Thẻ', 'Quảng cáo', 'Trạng thái liên hệ', 'Ghi chú gần nhất'];
   const rows = customers.map(customer => [
     customer.name,
     customer.psid,
@@ -368,7 +377,10 @@ export function customersToCsv(customers, labels = []) {
     customer.comboMax || '',
     // Thẻ nhân viên đã xóa trong Cài đặt thì không xuất ra dưới dạng mã.
     customer.labels.map(label => labelNamesById.get(label) || labelNames[label]).filter(Boolean).join(', '),
-    customer.adTitle
+    customer.adTitle,
+    // Hai cột nhân viên điền trên màn Khách hàng: trạng thái liên hệ (chưa chọn = "Chưa liên hệ") và ghi chú mới nhất.
+    CONTACT_STATUSES[customer.contactStatus] || CONTACT_STATUSES.none,
+    customer.lastNote?.text || ''
   ]);
   return `\uFEFF${[headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
 }

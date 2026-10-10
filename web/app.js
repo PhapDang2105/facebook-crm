@@ -1594,8 +1594,112 @@ const customersColumns = [
   { key: 'orderCount', label: 'Số đơn', sortable: true, mid: true },
   { key: 'orderTotal', label: 'Đã chi', sortable: true, mid: true },
   { key: 'lastOrderProducts', label: 'Sản phẩm', sortable: false, mid: true },
-  { key: 'lastOrderAt', label: 'Mua lần cuối', sortable: true }
+  { key: 'lastOrderAt', label: 'Mua lần cuối', sortable: true },
+  // Hai cột nhân viên điền khi gọi chăm sóc: trạng thái liên hệ và ghi chú (khác cột Trạng thái = nhóm khách theo số đơn).
+  { key: 'contactStatus', label: 'Liên hệ', sortable: true, mid: true },
+  { key: 'lastNote', label: 'Ghi chú', sortable: false }
 ];
+
+// Cột "Liên hệ": nhân viên chọn ngay trên dòng khách, lưu ở máy chủ (PUT /api/customers/:id/contact) nên mọi máy
+// cùng thấy. Khách chưa ai chọn là "Chưa liên hệ".
+const customerContactStatuses = [
+  { key: 'none', label: 'Chưa liên hệ' },
+  { key: 'called', label: 'Đã gọi điện' },
+  { key: 'unreachable', label: 'Không gọi được' },
+  { key: 'offer', label: 'Đã gửi ưu đãi' }
+];
+const customerContactRank = new Map(customerContactStatuses.map((status, index) => [status.key, index]));
+const customerContactOf = customer => (customerContactRank.has(customer?.contactStatus) ? customer.contactStatus : 'none');
+
+/** Rê chuột lên ô: ai chọn, lúc nào (nhật ký hoạt động giữ đủ từng lần đổi). */
+function customerContactTitle(customer) {
+  const status = customerContactOf(customer);
+  if (status === 'none' || !customer.contactStatusAt) return 'Trạng thái liên hệ';
+  const label = customerContactStatuses[customerContactRank.get(status)].label;
+  return [label, customer.contactStatusBy, formatCustomerPanelTime(customer.contactStatusAt, true)].filter(Boolean).join(' · ');
+}
+
+function customerContactHtml(customer) {
+  const status = customerContactOf(customer);
+  return `<select class="customer-contact-select" data-contact="${escapeHtml(customer.id)}" data-tone="${status}" title="${escapeHtml(customerContactTitle(customer))}" aria-label="Trạng thái liên hệ">${
+    customerContactStatuses.map(item => `<option value="${item.key}"${item.key === status ? ' selected' : ''}>${item.label}</option>`).join('')}</select>`;
+}
+
+/** Cột "Ghi chú": ghi chú mới nhất của khách (hộp chi tiết, khung khách bên Tin nhắn hay ghi chú bot); bấm để viết thêm. */
+function customerNoteCellHtml(customer) {
+  const note = customer.lastNote;
+  if (!note?.text) return `<button type="button" class="customer-note-add" data-note-edit="${escapeHtml(customer.id)}">+ Thêm ghi chú</button>`;
+  const meta = [note.by, note.at ? formatCustomerPanelTime(note.at, true) : ''].filter(Boolean).join(' · ');
+  return `<button type="button" class="customer-note-text" data-note-edit="${escapeHtml(customer.id)}" title="${escapeHtml([note.text, meta, 'Bấm để thêm ghi chú mới'].filter(Boolean).join('\n'))}">${escapeHtml(note.text)}</button>`;
+}
+
+async function saveCustomerContact(select) {
+  const customer = customersAll.find(item => item.id === select.dataset.contact);
+  if (!customer) return;
+  const previous = customerContactOf(customer);
+  const status = select.value;
+  if (status === previous) return;
+  select.dataset.tone = status;
+  select.disabled = true;
+  try {
+    const fresh = await readApiResponse(await fetch(`/api/customers/${encodeURIComponent(customer.id)}/contact`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    }));
+    customer.contactStatus = status === 'none' ? undefined : status;
+    customer.contactStatusAt = status === 'none' ? 0 : Number(fresh?.contactStatusAt) || Date.now();
+    customer.contactStatusBy = status === 'none' ? '' : fresh?.contactStatusBy || '';
+  } catch (error) {
+    select.value = previous;
+    select.dataset.tone = previous;
+    showToast(error.message || 'Chưa lưu được trạng thái liên hệ.', 'error');
+  } finally {
+    select.disabled = false;
+    select.title = customerContactTitle(customer);
+  }
+}
+
+/** Ô ghi chú thành ô nhập ngay trên dòng: Enter (hay bấm ra ngoài) lưu thêm một ghi chú, Esc bỏ. */
+function openCustomerNoteEditor(cell, customer) {
+  if (!cell || cell.querySelector('input')) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'customer-note-input';
+  input.maxLength = 1000;
+  input.placeholder = 'Ghi chú mới, Enter để lưu';
+  input.setAttribute('aria-label', 'Ghi chú mới cho khách');
+  cell.replaceChildren(input);
+  input.focus();
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    const value = input.value.trim();
+    if (save && value) {
+      input.disabled = true;
+      try {
+        const result = await readApiResponse(await fetch(`/api/customers/${encodeURIComponent(customer.id)}/notes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: value })
+        }));
+        const note = result?.note || {};
+        customer.lastNote = { text: String(note.text || value).slice(0, 200), at: Number(note.at) || Date.now(), by: note.author?.name || note.by || '' };
+        customer.noteCount = Number(result?.noteCount) || (Number(customer.noteCount) || 0) + 1;
+        customer.staffNoteCount = (Number(customer.staffNoteCount) || 0) + 1;
+      } catch (error) {
+        showToast(error.message || 'Chưa lưu được ghi chú.', 'error');
+      }
+    }
+    cell.innerHTML = customerNoteCellHtml(customer);
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
 
 /** Chip thẻ khách. Màu và tên icon là dữ liệu nhân viên tự đặt trong Cài đặt,
  *  nên phải lọc trước khi ghép vào thuộc tính HTML: màu chỉ nhận mã hex, tên
@@ -1657,6 +1761,8 @@ function customerRowHtml(customer, index) {
     <td class="customer-bought-when">${customer.lastOrderAt
       ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}</small>`
       : '<span class="customer-never">Chưa mua</span>'}</td>
+    <td class="customer-contact-cell customer-mid">${customerContactHtml(customer)}</td>
+    <td class="customer-note-cell">${customerNoteCellHtml(customer)}</td>
   </tr>`;
 }
 
@@ -1677,6 +1783,7 @@ function renderCustomers(items, total) {
     if (customersSortKey === 'name') return customersSortDir * String(first.name || '').localeCompare(String(second.name || ''), 'vi');
     if (customersSortKey === 'province') return customersSortDir * customerProvince(first).localeCompare(customerProvince(second), 'vi');
     if (customersSortKey === 'state') return customersSortDir * ((first.orderCount || 0) - (second.orderCount || 0));
+    if (customersSortKey === 'contactStatus') return customersSortDir * (customerContactRank.get(customerContactOf(first)) - customerContactRank.get(customerContactOf(second)));
     return customersSortDir * ((Number(first[customersSortKey]) || 0) - (Number(second[customersSortKey]) || 0));
   });
   customersItems = customersShown;
@@ -3731,6 +3838,11 @@ customersRefreshButton?.addEventListener('click', () => {
 });
 
 customersTable?.addEventListener('change', event => {
+  const contact = event.target.closest('[data-contact]');
+  if (contact) {
+    saveCustomerContact(contact);
+    return;
+  }
   const all = event.target.closest('#customers-pick-all');
   const slice = customersShown.slice((customersPage - 1) * customersPageSize, customersPage * customersPageSize);
   if (all) {
@@ -3756,9 +3868,15 @@ customersTable?.addEventListener('click', event => {
     if (customersSortKey === key) customersSortDir = -customersSortDir;
     else {
       customersSortKey = key;
-      customersSortDir = key === 'name' || key === 'province' ? 1 : -1;
+      customersSortDir = key === 'name' || key === 'province' || key === 'contactStatus' ? 1 : -1;
     }
     renderCustomers(customersAll, customersAll.length);
+    return;
+  }
+  const noteButton = event.target.closest('[data-note-edit]');
+  if (noteButton) {
+    const customer = customersAll.find(item => item.id === noteButton.dataset.noteEdit);
+    if (customer) openCustomerNoteEditor(noteButton.closest('td'), customer);
     return;
   }
   const copy = event.target.closest('[data-copy]');
@@ -3821,8 +3939,9 @@ document.addEventListener('keydown', event => {
   }
 });
 customersTable?.addEventListener('click', event => {
-  // Bấm vào ô tích chọn, nút chép số hay tiêu đề cột thì không mở hồ sơ khách.
-  if (event.target.closest('.customer-pick') || event.target.closest('[data-copy]') || event.target.closest('th')) return;
+  // Bấm vào ô tích chọn, nút chép số, tiêu đề cột, ô Liên hệ hay ô Ghi chú thì không mở hồ sơ khách.
+  if (event.target.closest('.customer-pick') || event.target.closest('[data-copy]') || event.target.closest('th')
+    || event.target.closest('.customer-contact-cell') || event.target.closest('.customer-note-cell')) return;
   const row = event.target.closest('tr[data-customer-index]');
   if (!row) return;
   const customer = customersItems[Number(row.dataset.customerIndex)];

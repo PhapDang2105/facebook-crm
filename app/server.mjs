@@ -79,7 +79,7 @@ import { encryptToken, getPageAccessToken, publicChannel, readChannelStore, writ
 import { fetchPageSubscription, metaRequest, releaseThreadControl, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { archiveStatusLabel, customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listCustomers, orderHistoryKey } from './customers.mjs';
-import { addCustomerNote, listCustomerNotes, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
+import { addCustomerNote, CONTACT_STATUSES, listCustomerNotes, setCustomerContactStatus, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
 import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
@@ -3029,6 +3029,25 @@ const server = http.createServer(async (request, response) => {
             details: { added: change.added, removed: change.removed }
           }, actor);
           return sendJson(response, 200, fresh);
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message });
+        }
+      }
+
+      // Cột "Liên hệ" màn Khách hàng: nhân viên chọn Chưa liên hệ / Đã gọi điện / Không gọi được / Đã gửi ưu đãi.
+      if (customerRoute[1] === 'contact' && request.method === 'PUT') {
+        try {
+          const actor = await requestActor(request);
+          const payload = await readBody(request);
+          const saved = await setCustomerContactStatus(customer.editKey, payload.status, Date.now(), { by: actorStamp(actor) });
+          invalidateBuyersCache();
+          if (saved.previous !== saved.status) {
+            audit(request, 'customer.contact', {
+              target: { type: 'customer', id: customer.id, name: customer.name || '' },
+              summary: `Liên hệ khách: ${CONTACT_STATUSES[saved.previous]} → ${CONTACT_STATUSES[saved.status]}.`
+            }, actor);
+          }
+          return sendJson(response, 200, await findCustomerById(customer.id));
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }

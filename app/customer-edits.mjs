@@ -71,6 +71,34 @@ function entryFor(store, key) {
 }
 
 /**
+ * Trạng thái liên hệ (cột "Liên hệ" màn Khách hàng): nhân viên gọi chăm sóc / mời mua lại rồi chọn ngay trên
+ * dòng khách. Khách chưa ai chọn là "Chưa liên hệ" (không lưu gì).
+ */
+export const CONTACT_STATUSES = Object.freeze({
+  none: 'Chưa liên hệ',
+  called: 'Đã gọi điện',
+  unreachable: 'Không gọi được',
+  offer: 'Đã gửi ưu đãi'
+});
+const isContactStatus = value => Object.prototype.hasOwnProperty.call(CONTACT_STATUSES, value);
+
+/**
+ * Đặt trạng thái liên hệ của một khách. "Chưa liên hệ" là gỡ (về mặc định); ba trạng thái kia ghi kèm lúc chọn và
+ * người chọn. Trả { previous, status, at } để route ghi nhật ký "trước → sau".
+ */
+export async function setCustomerContactStatus(key, status, now = Date.now(), { by = null } = {}) {
+  const value = text(status, 20);
+  if (!isContactStatus(value)) throw new Error('Trạng thái liên hệ không hợp lệ.');
+  return updateStore(store => {
+    const entry = entryFor(store, key);
+    const previous = isContactStatus(entry.contact?.status) ? entry.contact.status : 'none';
+    if (value === 'none') delete entry.contact;
+    else entry.contact = { status: value, at: now, ...(by ? { by: { username: text(by.username, 32), name: text(by.name, 80) } } : {}) };
+    return { previous, status: value, at: now };
+  });
+}
+
+/**
  * Toàn bộ phần nhân viên đã nhập, để customers.mjs phủ lên bản suy ra.
  * Trả bản sao nông: người gọi lỡ sửa vào đó thì chỉ hỏng bản sao, không lặng
  * lẽ đổi kho mà bỏ qua hàng đợi ghi.
@@ -119,6 +147,16 @@ export function applyCustomerEdits(customers, edits = {}) {
     applyNoteCounts(customer, notes);
     if (!entry) continue;
 
+    // Trạng thái liên hệ: lấy lần chọn mới nhất giữa khoá chính và khoá cũ (khách chưa có SĐT lúc nhân viên chọn).
+    const contact = [store[key]?.contact, store[customer.id]?.contact]
+      .filter(item => item && isContactStatus(item.status))
+      .sort((first, second) => (Number(second.at) || 0) - (Number(first.at) || 0))[0];
+    if (contact) {
+      customer.contactStatus = contact.status;
+      customer.contactStatusAt = Number(contact.at) || 0;
+      customer.contactStatusBy = text(contact.by?.name || contact.by?.username, 80);
+    }
+
     if (entry.name) customer.name = entry.name;
     if (entry.phone) customer.phone = entry.phone;
     if (entry.address) customer.address = entry.address;
@@ -160,6 +198,12 @@ function applyNoteCounts(customer, notes) {
   if (notes.length) {
     customer.noteCount = (Number(customer.noteCount) || 0) + notes.length;
     customer.lastStaffNoteAt = notes.reduce((latest, note) => Math.max(latest, Number(note?.at) || 0), 0);
+    // Cột "Ghi chú" màn Khách hàng hiện ghi chú MỚI NHẤT: so với ghi chú hội thoại (customers.mjs đã đặt lastNote).
+    const latest = notes.reduce((best, note) => ((Number(note?.at) || 0) >= (Number(best?.at) || 0) ? note : best), null);
+    const at = Number(latest?.at) || 0;
+    if (latest?.text && (!customer.lastNote || at >= (Number(customer.lastNote.at) || 0))) {
+      customer.lastNote = { text: String(latest.text).slice(0, 200), at, by: text(latest.author?.name || latest.by, 80) };
+    }
   }
 }
 

@@ -145,3 +145,25 @@ test('màn Khách hàng chỉ gồm người đã mua, khách mới hỏi giá k
   assert.ok(buildCustomers(remarketingStore, []).some(customer => customer.orderCount === 0),
     'buildCustomers vẫn giữ cả người chưa mua cho các nơi khác dùng');
 });
+
+test('cột Ghi chú lấy ghi chú hội thoại mới nhất; CSV có thêm Trạng thái liên hệ và Ghi chú gần nhất', () => {
+  const shop = '100000000000009';
+  const customers = buildCustomers({
+    conversations: [{
+      id: `${shop}:9`, pageId: shop, psid: '9', name: 'Chị Ngọc', source: 'inbox', labels: [], createdAt: 1, lastMessageAt: 5,
+      customerNotes: [
+        { id: 'b', text: 'ghi chú cũ', createdAt: 100 },
+        { id: 'a', text: 'Hẹn gọi chiều', createdAt: 200, author: { username: 'ha', name: 'Hà' } },
+        { id: 'c', text: '   ', createdAt: 300 }
+      ],
+      customerOrders: [{ createdAt: 150, phone: '0909000111', address: 'Quận 1', total: 298000, products: [{ name: 'Túi Xanh', sku: 'GRA-XANH-Z450', quantity: 2 }] }]
+    }],
+    messages: {}
+  });
+  const customer = customers.find(item => item.psid === '9');
+  assert.deepEqual(customer.lastNote, { text: 'Hẹn gọi chiều', at: 200, by: 'Hà' }, 'ghi chú trống bị bỏ qua');
+  const [header, row] = customersToCsv([{ ...customer, contactStatus: 'unreachable' }]).replace(/^﻿/, '').trim().split('\r\n');
+  assert.ok(header.endsWith(',Trạng thái liên hệ,Ghi chú gần nhất'), header);
+  assert.ok(row.endsWith(',Không gọi được,Hẹn gọi chiều'), row);
+  assert.ok(customersToCsv([{ ...customer, lastNote: undefined }]).trim().endsWith(',Chưa liên hệ,'), 'chưa chọn: Chưa liên hệ, ghi chú trống');
+});

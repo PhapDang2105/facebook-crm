@@ -2390,7 +2390,7 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
     table-layout: auto !important;
   }
   .customers-table table {
-    min-width: 840px !important;
+    min-width: 1100px !important;
   }
   :is(.data-table) table {
     min-width: 750px !important;
@@ -2764,8 +2764,8 @@ i.message-label-icon { width: 10px; height: 10px; margin-right: 8px; }
 .customers-table tbody tr.is-unread td.customer-who strong { font-weight: 800; }
 
 /* --- Ô khách hàng: tên + nguồn khách --- */
-.customers-table th.customer-col-name { width: 14%; }
-.customers-table td.customer-who { width: 14%; overflow: hidden; }
+.customers-table th.customer-col-name { width: 13%; }
+.customers-table td.customer-who { width: 13%; overflow: hidden; }
 .customers-table td.customer-who strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customers-table td.customer-who small { display: block; margin-top: 1px; color: var(--text-2); font-size: 11.8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -2779,8 +2779,8 @@ tr:hover .customer-tel button { opacity: .75; }
 .customer-tel button:hover { background: #eef1f4; opacity: 1; }
 
 /* --- Khu vực: tỉnh đứng riêng dòng trên, địa chỉ chi tiết cắt ngắn có tooltip xem đầy đủ --- */
-.customers-table th.customer-col-province { width: 14%; }
-.customers-table td.customer-place { width: 14%; overflow: hidden; }
+.customers-table th.customer-col-province { width: 12%; }
+.customers-table td.customer-place { width: 12%; overflow: hidden; }
 .customer-place b { display: block; color: var(--text-1); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customer-place small { display: block; margin-top: 1px; color: #98a2b3; font-size: 11.8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -2802,12 +2802,31 @@ tr:hover .customer-tel button { opacity: .75; }
 .customers-table td.customer-money { width: 92px; text-align: right; }
 
 /* --- Sản phẩm --- */
-.customers-table th.customer-col-lastOrderProducts { width: 17%; }
-.customers-table td.customer-bought { width: 17%; overflow: hidden; }
+.customers-table th.customer-col-lastOrderProducts { width: 15%; }
+.customers-table td.customer-bought { width: 15%; overflow: hidden; }
 
 /* --- Mua lần cuối --- */
 .customers-table th.customer-col-lastOrderAt { width: 105px; }
 .customers-table td.customer-bought-when { width: 105px; white-space: nowrap; overflow: hidden; }
+
+/* --- Liên hệ: chọn trạng thái ngay trên dòng, màu theo trạng thái (cùng bảng màu ô trạng thái đơn) --- */
+.customers-table th.customer-col-contactStatus { width: 128px; text-align: center; }
+.customers-table td.customer-contact-cell { width: 128px; text-align: center; cursor: default; }
+.customer-contact-select { width: 100%; max-width: 124px; padding: 4px 8px; border: 1px solid transparent; border-radius: 999px; font: inherit; font-size: 12px; font-weight: 700; text-align: center; cursor: pointer; appearance: none; }
+.customer-contact-select:focus-visible { outline: 2.5px solid rgba(0, 0, 0, .18); outline-offset: 1.5px; }
+.customer-contact-select:disabled { opacity: .6; cursor: progress; }
+.customer-contact-select[data-tone="none"] { color: #475467; background: #f2f4f7; border-color: #e0e3e9; }
+.customer-contact-select[data-tone="called"] { color: #15803d; background: #e9fbef; border-color: #b7e3c5; }
+.customer-contact-select[data-tone="unreachable"] { color: #b42318; background: #fff1f0; border-color: #f7c9c4; }
+.customer-contact-select[data-tone="offer"] { color: #6d28d9; background: #f4ecff; border-color: #ddc9ff; }
+
+/* --- Ghi chú: ghi chú mới nhất một dòng, bấm để viết thêm --- */
+.customers-table th.customer-col-lastNote { width: 15%; }
+.customers-table td.customer-note-cell { width: 15%; overflow: hidden; cursor: default; }
+.customer-note-text, .customer-note-add { display: block; width: 100%; padding: 0; color: var(--text-1); background: none; border: 0; font: inherit; font-size: 12.8px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.customer-note-add { color: #98a2b3; }
+.customer-note-text:hover, .customer-note-add:hover { color: var(--brand); }
+.customer-note-input { width: 100%; min-width: 0; padding: 4px 7px; border: 1px solid #91caff; border-radius: 6px; font: inherit; font-size: 12.8px; }
 
 /* --- Chân bảng: dòng tổng bên trái, phân trang bên phải --- */
 .customers-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 0 20px 18px; }

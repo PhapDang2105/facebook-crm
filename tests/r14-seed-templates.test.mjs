@@ -40,7 +40,7 @@ test('GIFT_POLICY: đủ bậc quà (2 / 3 / 5 / 10 túi) theo Cài đặt → Q
 });
 
 test('LIVESTREAM_COMMENT: ghi rõ giá 1 túi/hộp chưa gồm ship 15.000đ (chữ như main 9d6f38b)', () => {
-  assert.match(seed.LIVESTREAM_COMMENT, /\(Giá 1 túi\/hộp chưa gồm phí vận chuyển 15\.000đ\)\nLấy 2 túi bất kỳ chỉ 298\.000đ/);
+  assert.match(seed.LIVESTREAM_COMMENT, /\(Giá 1 túi\/hộp chưa gồm phí vận chuyển 15\.000đ\)\nLấy 2 túi lớn bất kỳ chỉ 298\.000đ/); // R17: quà live chỉ cho túi lớn (chủ shop 10/10 mục 3)
 });
 
 test('mẫu đã chốt trước (GIFT_SWAP, PRICE_ADJUSTMENT, STAFF_WAIT_*) giữ nguyên chữ bd484c5', () => {

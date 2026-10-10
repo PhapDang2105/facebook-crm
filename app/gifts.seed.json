@@ -15,7 +15,15 @@
       "active": true,
       "minQuantity": 2,
       "maxQuantity": 0,
-      "excludedSkus": [],
+      "excludedSkus": [
+        "GRA-MINT-Z300",
+        "CB10-XANH-G35",
+        "CB10-CAM-G30",
+        "CB10-NAU-G35",
+        "CB10-MIX",
+        "NGHE-H350",
+        "MIX5-H420"
+      ],
       "livestreamOnly": true,
       "sku": "QUA-TANG-LIVE",
       "weight": 20

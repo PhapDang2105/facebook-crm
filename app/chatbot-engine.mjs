@@ -105,9 +105,11 @@ export const fallbackTemplates = Object.freeze({
   VEGAN_INFO: 'Dạ người ăn chay dùng được ạ: granola bên em 100% từ thực vật (yến mạch, gạo lứt, các loại hạt, trái cây sấy), vị ngọt từ mật thốt nốt và đường mạch nha ạ.',
   BENEFITS: 'Dạ granola là bữa sáng/bữa phụ tiện lợi: yến mạch, gạo lứt, hạt và trái cây sấy cho nhiều chất xơ, năng lượng và no lâu; không chiên dầu, vị ngọt nhẹ từ mật thốt nốt và đường mạch nha ạ. Đây là thực phẩm thông thường, không phải thực phẩm chức năng nên không có công dụng chữa bệnh ạ.',
   PRODUCTION_PLACE: 'Dạ sản phẩm được sản xuất tại xưởng của Giọt Nắng: 52 Đường An Phú Đông 21, P. An Phú Đông, TP.HCM ạ. Hàng sản xuất trong nước, có hồ sơ công bố, ngày sản xuất và hạn dùng in trên bao bì ạ.',
-  GIFT_POLICY_LIVE: 'Dạ khách xem live lấy 2 túi bất kỳ chỉ 298.000đ, miễn phí vận chuyển và được tặng Bát gáo dừa + Muỗng dừa ạ 🎁 {Title} lấy 2 túi vị nào để em lên đơn liền nha?',
+  // R17 (bình luận A7, inbox4 H3; quà live 08/10): live 2 túi lớn → Quạt; từ 3 túi → Quạt + Bộ bát gáo dừa + Muỗng dừa.
+  GIFT_POLICY_LIVE: 'Dạ khách xem live lấy 2 túi lớn bất kỳ (Xanh / Vàng / Nâu) chỉ 298.000đ, miễn phí vận chuyển và được tặng Quạt ạ 🎁 Từ 3 túi tặng Quạt + Bộ bát gáo dừa + Muỗng dừa ạ. {Title} lấy mấy túi, vị nào để em lên đơn liền nha?',
   GIFT_POLICY_PROMO: 'Dạ trong thời gian ưu đãi của {title}, combo 2 túi được miễn phí vận chuyển và tặng Bát gáo dừa + muỗng dừa ạ 🎁 {Title} lấy combo 2 túi vị nào để em lên đơn nha?',
-  GIFT_POLICY_UPSELL3: 'Dạ bộ bát + muỗng dừa bên em tặng cho đơn từ 3 túi ạ (3 túi {total3}, miễn phí vận chuyển) 🎁 Đơn 2 túi hiện chưa kèm quà ạ. {Title} lấy thêm 1 túi nữa để nhận bộ bát + muỗng không ạ?',
+  // R17 (chủ shop 10/10, quyết định 4): nói quà của giỏ 2 túi theo bảng quà ({two_gift}: khách live → Quạt) rồi mời thêm 1 túi.
+  GIFT_POLICY_UPSELL3: 'Dạ combo 2 túi của {title}[?two_gift] được tặng {two_gift}[/?][?two_nogift] được miễn phí vận chuyển[/?] ạ 🎁 Bộ bát gáo dừa + Muỗng dừa bên em tặng cho đơn từ 3 túi (3 túi {total3}, miễn phí vận chuyển) ạ. {Title} lấy thêm 1 túi nữa để nhận bộ bát + muỗng không ạ?',
   ASK_TWO_BAGS: 'Dạ bảng giá em gửi ngay ở trên ạ 🌾 {Title} lấy 2 túi vị nào (Xanh / Vàng / Nâu) để em lên đơn miễn phí vận chuyển cho mình nha?',
   IMAGE_WITH_PHONE: 'Dạ em đã nhận hình và SĐT của {title} rồi ạ 💛 {Title} lấy loại trong hình mấy túi ạ? Em lên đơn liền cho mình nha 🌾',
   COMMENT_PUBLIC_STAFF: 'Dạ em đã ghi nhận rồi ạ, bạn phụ trách sẽ nhắn tin cho mình ngay nha 💛###Dạ {name} ơi, em đã ghi nhận, bạn phụ trách sẽ nhắn tin cho mình ngay ạ 💛',
@@ -129,7 +131,9 @@ export const fallbackTemplates = Object.freeze({
   GIFT_SWAP_NOTED: 'Dạ em đã ghi nhận thay quà của {title} bằng {gift} (không trừ tiền) ạ 💛',
   // 05/10 (chủ shop): khách live 2 túi không lấy quạt → bot tự đổi quạt sang muỗng dừa (quà: Bát gáo dừa + Muỗng dừa);
   // khách hỏi "có thìa dừa không" sau khi đã đổi → quà đã gồm muỗng.
-  GIFT_FAN_TO_SPOON: 'Dạ em đổi quạt sang muỗng dừa cho {title} nha ạ 💛 Combo 2 túi của mình được tặng Bát gáo dừa + Muỗng dừa ạ.',
+  // R17 (chủ shop 10/10, quyết định 12): combo 2 live không lấy quạt → 1 Bát gáo dừa (không muỗng); live 3 túi bỏ quạt → bát + muỗng.
+  // {gift} = quà sau khi đổi (engine điền).
+  GIFT_FAN_TO_SPOON: 'Dạ em đổi quạt cho {title} nha ạ 💛 Quà của mình bây giờ là {gift} ạ.',
   GIFT_SPOON_INCLUDED: 'Dạ có ạ 💛 Quà của {title} đã gồm {gift} rồi nha ạ.',
   // R14 (chủ shop 03/10): bot định im vì câu trả lời trùng tin vừa gửi mà khách hỏi ý mới → báo bạn phụ trách trả lời
   // (giờ hành chính 8h–17h giờ VN; ngoài giờ hẹn 8h sáng) + thẻ cần người, tối đa 1 lần mỗi 2 giờ mỗi hội thoại.
@@ -2742,10 +2746,13 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         return { ...reply, templateId: 'ORDER_ADDRESS_REMIND', alsoTemplateId: 'GIFT_SPOON_INCLUDED', messages: [...reply.messages, ...(remind ? [remind] : [])], parts: [...reply.messages.map(text => ({ type: 'text', text })), ...(remind ? [{ type: 'text', text: remind, remind: true }] : [])] };
       }
       if (!isFanToSpoonRequest(message.text)) return null;
-      const override = fanToSpoonGifts();
+      // R17 (chủ shop 10/10, quyết định 12): combo 2 live bỏ quạt → 1 Bát gáo dừa; live từ 3 túi bỏ quạt → còn bát + muỗng.
+      const bagsOf = items => (Array.isArray(items) ? items : []).reduce((sum, item) => sum + (Number(item?.quantity) || 1), 0);
+      const override = fanToSpoonGifts(undefined, { bags: held ? bagsOf(heldItems) : bagsOf(recentOrder?.products || recentOrder?.items) });
+      const swapped = { gift: override.map(item => item.name).join(' + ') };
       if (held && !heldOverride && heldItems.length && liveOf(heldItems)) {
         const pending = { ...conversation.pendingOrder, giftOverride: override };
-        const done = renderChatbotReply({ template_id: 'GIFT_FAN_TO_SPOON' }, templates, replyContext);
+        const done = renderChatbotReply({ template_id: 'GIFT_FAN_TO_SPOON', values: swapped }, templates, replyContext);
         if (done.templateId !== 'GIFT_FAN_TO_SPOON') return null;
         const remind = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, { ...replyContext, pendingOrder: pending }).remind || '';
         return {
@@ -2757,7 +2764,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       if (!orderHasFan) return null;
       // Đơn bot/CRM tạo dưới 60 phút (chưa hủy, không phải đơn nhân viên lên trên POS): sửa quà của đơn.
       if (orderAgeMs <= 60 * 60 * 1000 && recentOrder.source !== 'POS' && !recentOrder.pos?.importedAt && typeof dependencies.setOrderGiftOverride === 'function') {
-        const done = renderChatbotReply({ template_id: 'GIFT_FAN_TO_SPOON' }, templates, replyContext);
+        const done = renderChatbotReply({ template_id: 'GIFT_FAN_TO_SPOON', values: swapped }, templates, replyContext);
         if (done.templateId !== 'GIFT_FAN_TO_SPOON') return null;
         return { ...done, fanToSpoon: 'order', order: { giftOverrideOrderId: String(recentOrder.id), giftOverride: override } };
       }
@@ -3189,11 +3196,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         // R13 (inbox2 B3): khách ĐÃ có đơn (24 giờ, chưa hủy; không đang giữ giỏ mới) hỏi lại quà → bộ soạn tự đổi mẫu mời đặt
         // (GIFT_POLICY_LIVE / PROMO / UPSELL3: "lấy 2 túi vị nào để em lên đơn liền") sang câu nói quà của CHÍNH ĐƠN ĐÓ
         // (GIFT_POLICY_ORDER) nhờ replyContext.hasOrder — mã mẫu giữ nguyên, thêm `variant`.
-        const giftId =replyContext.livestream && templates.GIFT_POLICY_LIVE ? 'GIFT_POLICY_LIVE'
-          : replyContext.promoBowl && templates.GIFT_POLICY_PROMO ? 'GIFT_POLICY_PROMO'
-            // Đòi cả bát lẫn thìa/muỗng ("tặng kèm cái bát cà cái thìa") với giỏ 2 túi → mời lên 3 túi (quà bát + muỗng).
-            // R17 (quyết định 4): xin bát HOẶC gáo dừa HOẶC muỗng (không cần đủ cả hai chữ) cũng mời lên 3 túi.
-            : heldQuantity === 2 && asksBowlSpoon && templates.GIFT_POLICY_UPSELL3 && total3 ? 'GIFT_POLICY_UPSELL3' : '';
+        // R17 (chủ shop 10/10, quyết định 4): giỏ 2 túi mà khách xin bát / muỗng / gáo dừa (trước đây phải đòi CẢ bát lẫn muỗng, và
+        // khách live thì luôn ra GIFT_POLICY_LIVE) → nói quà của giỏ 2 túi + mời thêm 1 túi (3 túi: bát + muỗng). Trừ ưu đãi bám đuổi.
+        const upsell3 = heldQuantity === 2 && /\b(bat|chen|gao dua|muong|thia)\b/.test(folded) && !/\b(hinh|anh|xem|coi)\b/.test(folded) && templates.GIFT_POLICY_UPSELL3 && total3 && !replyContext.promoBowl;
+        const giftId = upsell3 ? 'GIFT_POLICY_UPSELL3'
+          : replyContext.livestream && templates.GIFT_POLICY_LIVE ? 'GIFT_POLICY_LIVE'
+            : replyContext.promoBowl && templates.GIFT_POLICY_PROMO ? 'GIFT_POLICY_PROMO' : '';
         // R16 (inbox5 A2, ca …5122488996 "combo này có tặng quạt ko" khi giữ giỏ live 3 túi): khách live ĐANG GIỮ GIỎ (chưa có đơn
         // 24 giờ — có đơn thì bộ soạn đã nói quà của đơn) hỏi quà → nói quà của CHÍNH giỏ (bảng quà tính trên giỏ, quà live theo
         // giá live), bỏ đuôi mời "lấy 2 túi vị nào", ghép câu nhắc giỏ + phần còn thiếu.
@@ -5449,12 +5457,14 @@ export function addressWordsInText(message) {
  * 05/10 (chủ shop): quà khi khách live đổi quạt → muỗng dừa: Bát gáo dừa (BGD) + Muỗng dừa (MUONG), tên/SKU/khối lượng theo
  * bảng quà (Cài đặt → Quà tặng); bảng quà thiếu dòng nào thì dùng tên/mã mặc định.
  */
-export function fanToSpoonGifts(gifts = getGifts()) {
+// R17 (chủ shop 10/10, quyết định 12 — thay 05/10): combo 2 live không lấy quạt → 1 Bát gáo dừa (BGD, KHÔNG kèm muỗng); đơn live
+// từ 3 túi (quà Quạt + Bộ bát gáo dừa + Muỗng dừa, cấu hình 08/10) bỏ quạt → còn bát + muỗng. `bags`: tổng túi của giỏ / đơn.
+export function fanToSpoonGifts(gifts = getGifts(), { bags = 2 } = {}) {
   const pick = (sku, name) => {
     const gift = (Array.isArray(gifts) ? gifts : []).find(item => String(item?.sku || '').trim().toUpperCase() === sku);
     return { name: String(gift?.name || name), sku, quantity: 1, weight: Math.max(0, Math.round(Number(gift?.weight) || 10)), ...(gift?.id ? { giftId: String(gift.id) } : {}) };
   };
-  return [pick('BGD', 'Bộ bát gáo dừa'), pick('MUONG', 'Muỗng dừa')];
+  return Number(bags) >= 3 ? [pick('BGD', 'Bộ bát gáo dừa'), pick('MUONG', 'Muỗng dừa')] : [pick('BGD', 'Bộ bát gáo dừa')];
 }
 
 export function decisionContext({ conversation, message, recentOrder = null, staffRepliedAfterBot = false, labels = [], gender = '', livestream = undefined }) {

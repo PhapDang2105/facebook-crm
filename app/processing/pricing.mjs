@@ -188,7 +188,8 @@ export function quoteTiers(productText, { livestream = false } = {}) {
 export function describeGiftTable() {
   const groups = new Map();
   for (const gift of getGifts().filter(gift => gift.active)) {
-    const excluded = gift.excludedSkus.map(sku => findProductBySku(sku)?.name || sku);
+    // R17: sản phẩm đã tắt (Combo 10 gói Nâu / Mix) không kể trong "trừ …" — khách không mua được, chỉ làm dài bảng quà.
+    const excluded = gift.excludedSkus.filter(sku => findProductBySku(sku)?.active !== false).map(sku => findProductBySku(sku)?.name || sku);
     // Quà có trần số lượng (Quà Tặng LIVE chỉ cho đúng 2 túi): ghi "đúng N" / "từ N đến M" cho mô hình khỏi hiểu là "từ N trở lên".
     const range = gift.maxQuantity && gift.maxQuantity === gift.minQuantity ? `đúng ${gift.minQuantity} sản phẩm`
       : gift.maxQuantity && gift.maxQuantity > gift.minQuantity ? `từ ${gift.minQuantity} đến ${gift.maxQuantity} sản phẩm`

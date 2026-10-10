@@ -194,6 +194,8 @@ const messagesIn = (store, conversation) => (conversation && Array.isArray(store
 const defaultSkipLabelIds = ['complaint', 'warranty', 'consulting', 'handoff', 'wholesale'];
 // Bot vừa chuyển người / đang tra đơn / nhân viên sẽ liên hệ: khách đang chờ người thật, không nhắc mua.
 const handoffTemplateIds = new Set(['CSKH_HANDOFF', 'ORDER_STATUS_CHECKING', 'COMMENT_STAFF_FOLLOWUP']);
+// R17: tin bot cuối là một trong các mẫu này thì không bám kể cả khi đang giữ giỏ (followUpSkipReason → 'waitingStaff').
+const waitingStaffTemplateIds = new Set(['COMMENT_STAFF_FOLLOWUP', 'ORDER_STATUS_CHECKING', 'WAITING_STAFF', 'CSKH_HANDOFF']);
 // Giỏ khách đã chọn còn nhắc được (giỏ bot dùng chỉ 2 giờ; nhắc lại tới 24 giờ, sau đó khách đã quên).
 const pendingOrderRemindMs = 24 * 60 * 60 * 1000;
 // Đơn vừa chốt (ở hội thoại khác của cùng khách, hay đơn trùng tên) trong 14 ngày: không bám.
@@ -283,6 +285,19 @@ export function isAckText(text) {
 const thanksText = /c(ả|á)m\s+ơn/iu;
 
 /**
+ * R17: câu nhắc giỏ `remind` đã có nguyên văn trong một tin Page (bot / bám đuổi, không phải nhân viên) gửi vào hộp thư trong
+ * `windowMs` (mặc định 24 giờ) — kể cả khi câu nằm trong tin ghép ("Dạ em thấy … bình luận …\n\nDạ em vẫn đang giữ đơn…").
+ * So sau khi gộp khoảng trắng, không phân biệt hoa thường.
+ */
+export function remindAlreadySent(messages, remind, now = Date.now(), windowMs = 24 * 60 * 60 * 1000) {
+  const squash = text => String(text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const wanted = squash(remind);
+  if (wanted.length < 20) return false;
+  return (Array.isArray(messages) ? messages : []).some(message => message?.direction === 'outgoing' && message.staff !== true
+    && now - (Number(message.createdAt) || 0) <= windowMs && squash(message.text).includes(wanted));
+}
+
+/**
  * Lý do KHÔNG bám một ứng viên (rỗng = bám được): nhân viên tắt bot, thẻ khiếu nại /
  * bảo hành / cần người xử lý, đang chờ người thật (attention mở, hay bot vừa chuyển
  * người), nhân viên đã nhắn sau tin khách. Xét cả hộp thư lẫn luồng bình luận.
@@ -309,7 +324,10 @@ export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSki
   // R16 (bình luận B6a, ca …949494: nhắc "em vẫn đang giữ đơn" ngay sau "chuyển bạn phụ trách trả lời" mà chưa ai trả lời → khách
   // trách "Sao e kg trả lời"): tin bot cuối là báo chờ bạn phụ trách (STAFF_WAIT_*, COMMENT_STAFF_FOLLOWUP) — kể cả khi đang giữ
   // giỏ — thì không bám (nhân viên đã trả lời sau đó thì 'staffReplied' bên dưới cũng chặn).
-  if (records.some(item => /^STAFF_WAIT_/.test(String(item.botLastTemplateId || '')) || String(item.botLastTemplateId || '') === 'COMMENT_STAFF_FOLLOWUP')) return 'waitingStaff';
+  // R17 (bình luận B4a, inbox4 T1, ca …490970 / …450523: "em chuyển bạn phụ trách đơn hàng tra ngay" rồi 3 giờ sau "em vẫn đang giữ
+  // đơn…", khách đáp "Mình ko đặt / Chỉ khiếu nại đơn"): bot vừa báo đang tra đơn / chờ bạn phụ trách / chuyển CSKH — kể cả khi đang
+  // giữ giỏ — cũng là khách đang chờ người thật (quyết định chủ shop 10/10 mục 7: đã chuyển CSKH thì dừng bám đuổi).
+  if (records.some(item => /^STAFF_WAIT_/.test(String(item.botLastTemplateId || '')) || waitingStaffTemplateIds.has(String(item.botLastTemplateId || '')))) return 'waitingStaff';
   for (const record of records) {
     const messages = messagesIn(store, record);
     const customerAt = lastAt(incomingOf(messages), () => true);
@@ -601,6 +619,10 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       // Đang giữ giỏ: thẻ "cần người xử lý" / attention không chặn lời nhắc giỏ (nhân viên chưa trả lời).
       const skipReason = followUpSkipReason(candidate, store, { skipLabelIds: skipReasonLabelIds, hardLabelIds: hardReasonLabelIds, basketHeld: Boolean(remind), now });
       if (skipReason) { skip(skipReason, candidate.conversation); continue; }
+      // R17 (inbox1 B7, bình luận B4b, ca …242125 / …650376 / …349146): câu nhắc giỏ trùng nguyên văn tin Page đã gửi vào hộp thư
+      // trong 24 giờ (bot vừa nhắc giỏ khi khách bấm giỏ Shop / bình luận, hay kịch bản hộp thư 3 giờ đã nhắc rồi kịch bản bình luận
+      // 12 giờ nhắc lại) → không gửi lại y hệt.
+      if (remind && remindAlreadySent(inboxMessages, remind, now)) { skip('duplicateRemind', candidate.conversation); continue; }
       // Lời theo ngữ cảnh: chọn biến thể nói đúng dòng sản phẩm khách hỏi; lời kịch bản nói dòng khác
       // (khách hỏi yến mạch, kịch bản mời granola) thì không bám bằng câu lạc đề.
       const families = customerProductFamilies(store, candidate);

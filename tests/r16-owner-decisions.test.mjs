@@ -83,7 +83,7 @@ test('2. danh mục seed: Combo 10 gói Nâu / Mix / Cam tắt, chỉ Combo 10 g
   assert.deepEqual(commentBasket('cho em 1 hộp 10 gói'), [{ product: 'Combo 10 gói Xanh', quantity: 1 }]);
   assert.deepEqual(commentBasket('lấy 1 hộp mix'), []);
   assert.deepEqual(commentBasket('lấy 1 hộp nâu'), []);
-  assert.match(prompt, /Combo 10 gói Xanh \(combo 10 gói chỉ còn vị Xanh\)/);
+  assert.match(prompt, /Combo 10 gói Xanh \(combo 10 gói có vị Xanh và Cam; khách nói Cam thì Product_N1 = Combo 10 gói Cam\)/);
 });
 
 test('2. giỏ Facebook Shop mang mã combo 10 gói đã tắt (CB10-MIX / CB10-NAU-G35) → ghi nhận + thẻ nhân viên, không báo giá / không đoán món', () => {

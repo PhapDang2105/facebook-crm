@@ -238,7 +238,8 @@ test('#13 (điều phối) sau ASK_FLAVOR_NGUYENBAN, "Túi xanh" = số túi ph�
   assert.equal(ruleIntent('Túi xanh', inbox({ botLastTemplateId: 'ASK_FLAVOR', botLastAgeMin: 1, askedBagCount: 3, nguyenBanAsk: 2 })).value.No_A, '3');
 });
 
-test('#14 (điều phối) "Gói cam bơ hạt điều. Bn e" → không LIVE_ONLY; R17 (chủ shop 10/10: Cam bán lại) → báo giá Combo 10 gói Cam', () => {
+// R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại (Nâu / Mix vẫn tắt). Gói Cam bật lại → báo giá Combo 10 gói Cam (nhánh SMALL_PACK_PRICE), vẫn không LIVE_ONLY.
+test('#14 (điều phối) "Gói cam bơ hạt điều. Bn e" → bảng giá Combo 10 gói Cam (R17: Cam bán lại), không LIVE_ONLY', () => {
   assert.equal(tpl(ruleIntent('Gói cam bơ hạt điều. Bn e', inbox({ botLastTemplateId: 'DISCOUNT_POLICY', botLastAgeMin: 3 }))), 'PRICE_QUOTE');
 });
 

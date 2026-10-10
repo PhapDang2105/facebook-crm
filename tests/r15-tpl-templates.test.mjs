@@ -48,8 +48,9 @@ test('BAG_SIZE_INFO: túi lớn nhất Túi Xanh 450g; combo 3 túi 1,35kg 447.0
 test('FRUIT_PAIRING / SMALL_PACK_FLAVOURS / ORDER_ADDRESS_OLD_NOT_FOUND: lời ngắn, combo 10 gói chỉ nói vị Xanh', () => {
   assert.match(text(renderChatbotReply({ template_id: 'FRUIT_PAIRING' }, templates, female)), /thanh long, chuối, táo.*sữa chua hoặc sữa hạt/s);
   const pack = text(renderChatbotReply({ template_id: 'SMALL_PACK_FLAVOURS' }, templates, female));
-  assert.match(pack, /chỉ còn vị Xanh/);
-  assert.doesNotMatch(pack, /\bCam\b|Nâu/);
+  // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại (Nâu / Mix vẫn tắt).
+  assert.match(pack, /có 2 vị: Xanh nguyên bản .* và Cam/);
+  assert.doesNotMatch(pack, /Nâu|chỉ còn/);
   // Mẫu engine tự chọn: renderChatbotReply vẫn soạn được khi engine gọi tên.
   assert.match(text(renderChatbotReply({ template_id: 'ORDER_ADDRESS_OLD_NOT_FOUND' }, templates, female)), /chưa tìm thấy địa chỉ cũ.*địa chỉ nhận hàng/s);
 });

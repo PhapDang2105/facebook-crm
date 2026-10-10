@@ -138,8 +138,9 @@ test('L3 ca …3440168818: "Uh ở xa quá nên hơi lâu e nhỉ" ngay sau SHIP
   assert.ok(!ib.labels.includes('handoff'));
 });
 
-// ---- Giỏ Facebook Shop mã đã tắt (CB10-CAM-G30) → ghi nhận + thẻ nhân viên, không hỏi vị granola (ca …9873460116).
-test('ca …9873460116: giữ giỏ Combo 10 gói đã tắt (R17: Cam bán lại 10/10 → thử bằng Nâu) + SĐT → SHOP_CART_STAFF + thẻ, giữ SĐT, không ASK_FLAVOR', async () => {
+// ---- Giỏ Facebook Shop mã đã tắt → ghi nhận + thẻ nhân viên, không hỏi vị granola (ca …9873460116).
+// R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại (Nâu / Mix vẫn tắt). Ca thật là Cam; test giữ cơ chế "món đã tắt" bằng Combo 10 gói Nâu (vẫn tắt).
+test('ca …9873460116: giữ giỏ Combo 10 gói đã tắt (Nâu; ca thật Cam — R17 bán lại) + SĐT → SHOP_CART_STAFF + thẻ, giữ SĐT, không ASK_FLAVOR', async () => {
   const sim = new Sim({ psid: 'fix2-cam' });
   const ib = sim.inbox({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - MIN,
     pendingOrder: { items: [{ product: 'Combo 10 gói Nâu', code: 'CB10-NAU-G35', quantity: 1 }], key: 'CB10-NAU-G35=1', at: Date.now() - 2 * MIN, phone: '', address: 'Kim van ấp 6 phú thịnh tân phú đồng nai', addressAsks: 0 } });

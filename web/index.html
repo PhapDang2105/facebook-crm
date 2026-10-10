@@ -316,7 +316,7 @@
       </section>
       <section class="settings-card campaigns-card competitors-card hidden" data-campaigns-panel="competitors" data-competitors-mode="manage" aria-labelledby="competitors-title">
         <header class="settings-card-head campaigns-head">
-          <div><h1 id="competitors-title">Đối thủ</h1><p>Thư viện quảng cáo và nội dung hợp tác KOL của Meta, cùng mẫu quảng cáo dán tay.</p></div>
+          <div><h1 id="competitors-title">Đối thủ</h1><p>Thư viện quảng cáo và nội dung hợp tác KOL của Meta.</p></div>
           <div class="campaigns-head-actions">
             <small class="campaigns-synced" id="competitors-synced"></small>
             <button class="order-history-button campaigns-button" id="competitors-sync" type="button">Lấy dữ liệu</button>
@@ -327,26 +327,6 @@
         <div class="competitors-body">
           <div class="competitors-main">
             <div class="competitors-list" id="competitors-list"></div>
-            <div class="competitors-forms">
-              <form class="competitors-form" id="competitor-form" autocomplete="off">
-                <h2>Thêm đối thủ</h2>
-                <label>Tên<input name="name" maxlength="80" required placeholder="VD: Granola ABC"></label>
-                <label>Page Facebook<input name="page" maxlength="300" placeholder="facebook.com/ten-trang hoặc ID"></label>
-                <label>Instagram<input name="ig" maxlength="200" placeholder="@tenshop"></label>
-                <label>Từ khoá (cách nhau dấu phẩy)<input name="keywords" maxlength="300" placeholder="granola, ngũ cốc"></label>
-                <button class="order-history-button campaigns-button" type="submit">Thêm</button>
-              </form>
-              <form class="competitors-form" id="competitor-ad-form" autocomplete="off">
-                <h2>Dán mẫu quảng cáo</h2>
-                <label>Đối thủ<select name="competitorId" required></select></label>
-                <label>Nội dung quảng cáo<textarea name="text" rows="4" maxlength="3000" required placeholder="Chép phần chữ của quảng cáo trong Thư viện quảng cáo"></textarea></label>
-                <div class="competitors-form-row">
-                  <label>Liên kết quảng cáo<input name="link" maxlength="500" placeholder="facebook.com/ads/library/?id=…"></label>
-                  <label>Bắt đầu chạy<input name="startDate" type="date"></label>
-                </div>
-                <button class="order-history-button campaigns-button" type="submit">Lưu mẫu</button>
-              </form>
-            </div>
             <div class="competitors-feed" id="competitors-feed"></div>
           </div>
           <aside class="campaigns-ai" aria-label="Gợi ý từ đối thủ">

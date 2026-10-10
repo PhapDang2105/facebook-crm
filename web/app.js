@@ -2382,8 +2382,6 @@ const competitorsSyncButton = document.querySelector('#competitors-sync');
 const competitorsAiButton = document.querySelector('#competitors-ai-run');
 const competitorsAiBody = document.querySelector('#competitors-ai-body');
 const competitorsAiMeta = document.querySelector('#competitors-ai-meta');
-const competitorForm = document.querySelector('#competitor-form');
-const competitorAdForm = document.querySelector('#competitor-ad-form');
 
 let competitorsData = null;
 let competitorsRequestId = 0;
@@ -2414,12 +2412,6 @@ function renderCompetitors(data) {
   renderCompetitorsList();
   renderCompetitorsFeed();
   renderCompetitorsIdeas();
-  const select = competitorAdForm?.elements.competitorId;
-  if (select) {
-    const current = select.value;
-    select.innerHTML = (competitorsData.competitors || []).map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
-    if (current) select.value = current;
-  }
   if (competitorsSynced) {
     const ago = campaignsAgo(competitorsData.lastSync?.at);
     competitorsSynced.textContent = ago ? `Lấy ${ago}` : '';
@@ -2437,7 +2429,7 @@ function renderCompetitorsNotice() {
   if (branded?.error) lines.push(`<strong>KOL hợp tác</strong><span>${escapeHtml(branded.error)}</span>`);
   for (const warning of branded?.warnings || []) lines.push(`<span>${escapeHtml(warning)}</span>`);
   if (ads && !ads.error && !ads.found && (data.competitors || []).length) {
-    lines.push('<span>Meta không trả quảng cáo nào: API chỉ có quảng cáo bán hàng hiển thị ở EU/Anh. Bấm "Mở Thư viện" ở từng đối thủ để xem quảng cáo đang chạy ở Việt Nam, rồi dán mẫu.</span>');
+    lines.push('<span>Meta không trả quảng cáo nào: API chỉ có quảng cáo bán hàng hiển thị ở EU/Anh. Bấm "Mở Thư viện" ở từng đối thủ để xem quảng cáo đang chạy ở Việt Nam.</span>');
   }
   competitorsNotice.classList.toggle('hidden', !lines.length);
   competitorsNotice.innerHTML = lines.join('');
@@ -2482,7 +2474,7 @@ function renderCompetitorsFeed() {
   if (competitorsTab === 'branded') {
     const posts = competitorsData?.branded || [];
     if (!posts.length) {
-      renderEmptyState(competitorsFeed, 'Chưa có bài hợp tác KOL. Thêm Page/Instagram của đối thủ rồi bấm Lấy dữ liệu.');
+      renderEmptyState(competitorsFeed, 'Chưa có bài hợp tác KOL. Bấm Lấy dữ liệu để lấy từ Meta.');
       return;
     }
     competitorsFeed.classList.remove('is-empty');
@@ -2501,7 +2493,7 @@ function renderCompetitorsFeed() {
   }
   const ads = competitorsData?.ads || [];
   if (!ads.length) {
-    renderEmptyState(competitorsFeed, 'Chưa có quảng cáo đối thủ. Bấm "Mở Thư viện", chép quảng cáo chạy lâu nhất vào ô Dán mẫu quảng cáo.');
+    renderEmptyState(competitorsFeed, 'Chưa có quảng cáo đối thủ. Bấm Lấy dữ liệu, hoặc "Mở Thư viện" ở tab Đối thủ để xem quảng cáo đang chạy.');
     return;
   }
   competitorsFeed.classList.remove('is-empty');
@@ -2546,24 +2538,6 @@ async function competitorsRequest(url, options = {}) {
   }));
 }
 
-async function submitCompetitorForm(form, url, successMessage) {
-  if (!form || competitorsBusy) return;
-  const values = Object.fromEntries(new FormData(form).entries());
-  const button = form.querySelector('button[type="submit"]');
-  if (button) button.disabled = true;
-  try {
-    renderCompetitors(await competitorsRequest(url, { method: 'POST', body: JSON.stringify(values) }));
-    const keep = form.elements.competitorId?.value;
-    form.reset();
-    if (keep && form.elements.competitorId) form.elements.competitorId.value = keep;
-    showToast(successMessage, 'success');
-  } catch (error) {
-    showToast(error.message || 'Chưa lưu được.', 'error', 6000);
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
 async function runCompetitorsAction(button, url, busyLabel, idleLabel, body = null) {
   if (competitorsBusy || isStaffReadOnly()) return;
   competitorsBusy = true;
@@ -2580,14 +2554,6 @@ async function runCompetitorsAction(button, url, busyLabel, idleLabel, body = nu
   }
 }
 
-competitorForm?.addEventListener('submit', event => {
-  event.preventDefault();
-  submitCompetitorForm(competitorForm, '/api/competitors', 'Đã thêm đối thủ.');
-});
-competitorAdForm?.addEventListener('submit', event => {
-  event.preventDefault();
-  submitCompetitorForm(competitorAdForm, '/api/competitors/ads', 'Đã lưu mẫu quảng cáo.');
-});
 competitorsSyncButton?.addEventListener('click', () => runCompetitorsAction(competitorsSyncButton, '/api/competitors/sync', 'Đang lấy…', 'Lấy dữ liệu'));
 competitorsAiButton?.addEventListener('click', () => runCompetitorsAction(competitorsAiButton, '/api/competitors/insights', 'Đang phân tích…', 'AI gợi ý', { days: campaignsDays() }));
 competitorsAiBody?.addEventListener('click', event => {

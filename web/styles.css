@@ -3163,20 +3163,9 @@ tr:hover .customer-tel button { opacity: .75; }
 .competitors-actions a, .competitors-actions button { padding: 4px 10px; color: #344054; background: #fff; border: 1px solid var(--line-1); border-radius: 8px; font: inherit; font-size: 14px; text-decoration: none; cursor: pointer; }
 .competitors-actions a:hover, .competitors-actions button:hover { border-color: #c3cad3; }
 .competitors-actions button { color: #b42318; }
-.competitors-forms { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
-@media (min-width: 900px) { .competitors-forms { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); } }
-.competitors-form { display: grid; align-content: start; gap: 8px; padding: 14px; border: 1px solid var(--line-1); border-radius: 12px; }
-.competitors-form h2 { margin: 0 0 2px; color: var(--text-1); font-size: 16px; font-weight: 700; }
-.competitors-form label { display: grid; gap: 4px; color: var(--text-2); font-size: 13px; font-weight: 600; }
-.competitors-form :is(input, select, textarea) { width: 100%; min-width: 0; padding: 8px 10px; color: var(--text-1); background: #fff; border: 1px solid var(--line-1); border-radius: 8px; font: inherit; font-size: 15px; font-weight: 400; box-sizing: border-box; }
-.competitors-form textarea { resize: vertical; line-height: 1.45; }
-.competitors-form :is(input, select, textarea):focus { outline: 2px solid var(--brand); outline-offset: 0; border-color: transparent; }
-.competitors-form button { justify-self: start; }
-.competitors-form-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 8px; }
-/* Tab "Đối thủ": danh sách + biểu mẫu; tab "Quảng cáo" / "KOL hợp tác": chỉ luồng tin. */
-.competitors-card[data-competitors-mode="manage"] .competitors-feed,
-.competitors-card:not([data-competitors-mode="manage"]) .competitors-list,
-.competitors-card:not([data-competitors-mode="manage"]) .competitors-forms { display: none; }
+/* Tab "Đối thủ": danh sách đối thủ; tab "Quảng cáo" / "KOL hợp tác": chỉ luồng tin. */
+.competitors-card[data-competitors-mode="manage"] .competitors-feed { display: none; }
+.competitors-card:not([data-competitors-mode="manage"]) .competitors-list { display: none; }
 .competitors-feed { display: grid; gap: 10px; }
 .competitors-feed.is-empty { display: flex; min-height: 160px; }
 .competitor-ad { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line-1); border-radius: 12px; }
@@ -3190,7 +3179,6 @@ tr:hover .customer-tel button { opacity: .75; }
 
 @media (max-width: 720px) {
   .competitors-body { padding: 12px 16px 16px; }
-  .competitors-form-row { grid-template-columns: minmax(0, 1fr); }
   .campaigns-head { align-items: flex-start; flex-direction: column; }
   .campaigns-head-actions { justify-content: flex-start; width: 100%; }
   .campaigns-body { padding: 12px 16px 16px; }

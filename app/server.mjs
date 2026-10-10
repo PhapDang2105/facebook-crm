@@ -19,6 +19,7 @@ import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverr
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
 import { applyRemarketingLabels } from './remarketing-labels.mjs';
+import { refreshLiveAds } from './live-ads.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { aiKeyReentryError, assertUsableAiEndpoint, chatbotSettingsStore, mergeChatbotSettingsPatch, mergeMessageTemplatesPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
@@ -4285,6 +4286,10 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   });
   // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).
   startAdInsightsSync();
+  // Quảng cáo phiên Live (chiến dịch "video trực tiếp"): khách bấm vào là khách Live, được quà Live (10/10). Nạp ngay rồi mỗi 10 phút.
+  const liveAdsPass = () => refreshLiveAds().catch(() => 0);
+  liveAdsPass();
+  setInterval(liveAdsPass, 10 * 60 * 1000).unref?.();
   // Báo cáo Lark: mặc định 08:00 gửi số liệu ngày hôm trước; trạng thái chống gửi trùng nằm trong data/processed.
   startLarkReportScheduler({ loadReport });
   // Thẻ "Đã mua hàng" trong CRM: gắn bù 30 giây sau khởi động rồi mỗi 5 phút.

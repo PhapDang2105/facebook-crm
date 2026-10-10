@@ -4762,6 +4762,19 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // did not exist, and a retried webhook sent the whole reply a second time.
     // "Tự động lên đơn" tắt (settings.autoOrder === false): bot vẫn xác nhận với
     // khách nhưng không tạo đơn; giỏ được giữ ở pendingOrder cho nhân viên.
+    // 10/10 (ca Van Do): khách chốt 2 Combo 10 gói bằng tin nhắn, rồi Facebook gửi lại tin giỏ Shop cũ "×1" → bot SỬA đơn
+    // về 1 combo. Tin giỏ Shop không phải lời khách đổi ý cho đơn đã chốt: giữ nguyên đơn, kể lại đơn đang có, gắn thẻ
+    // cần người và ghi chú để bạn phụ trách hỏi khách (khách muốn đổi thật thì nhắn chữ, bot sửa như thường).
+    if (cartReply && reply.order?.updateOrderId && recentOrder?.id && String(reply.order.updateOrderId) === String(recentOrder.id)) {
+      const cartText = (reply.order.items || []).map(item => `${Number(item.quantity) || 1} ${item.product || item.name}`).join(' + ');
+      const keptText = (recentOrder.products || []).map(item => `${Number(item.quantity) || 1} ${item.name || item.sku}`).join(' + ');
+      const told = templates?.ORDER_STATUS ? renderChatbotReply({ template_id: 'ORDER_STATUS' }, templates, { ...replyContext, recentOrder }) : null;
+      console.log(`Giỏ Shop sau khi đã chốt đơn ${recentOrder.id}: giữ nguyên đơn (${keptText}), không sửa theo giỏ (${cartText}) (${conversation.id})`);
+      await noteForStaff(dependencies, conversation, `Khách bấm giỏ Facebook Shop (${cartText}) sau khi đã chốt đơn ${recentOrder.id} (${keptText}). Bot GIỮ NGUYÊN đơn — hỏi khách có muốn đổi đơn không.`, `giỏ Shop sau đơn ${recentOrder.id}`);
+      reply = told?.templateId === 'ORDER_STATUS' && told.messages?.length
+        ? { ...told, order: undefined, pendingOrder: null, attention: true }
+        : { ...reply, order: undefined, pendingOrder: null, messages: [], parts: [], attention: true };
+    }
     // Khách sửa đơn vừa chốt: cập nhật đúng đơn đó (updateOrder), không tạo đơn mới.
     const wantsUpdate = Boolean(reply.order?.updateOrderId) && typeof updateOrder === 'function';
     // Khách hủy đơn vừa đặt: đánh dấu hủy đúng đơn đó (không tạo, không sửa).

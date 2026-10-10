@@ -5,6 +5,7 @@ import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { resolveAddress, resolvedAddressFields } from './processing/locations.mjs';
 import { normalizeText } from './processing/catalog.mjs';
 import { giftOverrideText, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
+import { isLiveAdId } from './live-ads.mjs';
 
 /** Hội thoại đến từ phiên livestream: bài viết hay tên quảng cáo có "live", "săn deal". */
 // Có bài viết thì chỉ xét BÀI VIẾT đó: tên quảng cáo là quảng cáo khách bấm lần
@@ -15,7 +16,10 @@ import { giftOverrideText, normalizeGiftOverride, syncGiftOverrideFlag } from '.
 export function isLivestreamConversation(conversation = {}) {
   const postText = String(conversation?.post?.message || '').trim();
   const source = postText || String(conversation?.referral?.adTitle || '');
-  return /\b(live|livestream|phien live|san deal|phat truc tiep|video truc tiep)\b/i.test(normalizeText(source));
+  if (/\b(live|livestream|phien live|san deal|phat truc tiep|video truc tiep)\b/i.test(normalizeText(source))) return true;
+  // 10/10: tên quảng cáo hiển thị không có chữ "live" ("Săn Sale 10/10 cùng Giọt Nắng") nhưng quảng cáo thuộc chiến dịch
+  // video trực tiếp — tra mã quảng cáo trong kho số liệu quảng cáo (app/live-ads.mjs).
+  return isLiveAdId(conversation?.referral?.adId);
 }
 
 /**

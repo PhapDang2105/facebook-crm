@@ -279,3 +279,19 @@ test('cột Ghi chú lấy ghi chú hội thoại mới nhất; CSV có thêm Tr
   assert.ok(row.endsWith(',Không gọi được,Hẹn gọi chiều'), row);
   assert.ok(customersToCsv([{ ...customer, lastNote: undefined }]).trim().endsWith(',Chưa liên hệ,'), 'chưa chọn: Chưa liên hệ, ghi chú trống');
 });
+
+test('giới tính (10/10): khách landing đoán theo tên; lọc Nữ / Nam / Chưa rõ', () => {
+  const item = { name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH', quantity: 1 };
+  const landingOrders = [
+    { id: 'g1', createdAt: now - day, phone: '0913000001', name: 'Nguyễn Thị Hải Yến', total: 174000, products: [item] },
+    { id: 'g2', createdAt: now - day, phone: '0913000002', name: 'Ms Xuan', total: 174000, products: [item] }
+  ];
+  const all = buildCustomers({ conversations: [], messages: {} }, [], [], { landingOrders });
+  const yen = all.find(customer => customer.name === 'Nguyễn Thị Hải Yến');
+  assert.equal(yen.gender, 'female');
+  assert.equal(yen.genderSource, 'name');
+  const names = gender => filterCustomers(all, { gender }, now).map(customer => customer.name);
+  assert.deepEqual(names('female'), ['Nguyễn Thị Hải Yến']);
+  assert.deepEqual(names('male'), []);
+  assert.deepEqual(names('unknown'), ['Ms Xuan']);
+});

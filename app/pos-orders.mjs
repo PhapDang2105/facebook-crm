@@ -723,6 +723,39 @@ export function syncOrderToPos(conversationId, orderId, options = {}) {
   return pending;
 }
 
+// Tự đẩy lại đơn lỗi (10/10: POS chậm vài phút làm đơn bot chốt đứng "Chưa đẩy được" tới khi có người bấm).
+export const POS_RETRY_MAX = 6;
+const POS_RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const POS_RETRY_GAP_MS = 5 * 60 * 1000;
+
+/** Đơn đáng tự đẩy lại: lần đẩy trước lỗi, chưa có mã POS, đơn trong 24 giờ, chưa hủy, chưa quá số lần, cách lần trước ≥ 5 phút. */
+export function posRetryDue(order, now = Date.now()) {
+  const pos = order?.pos;
+  if (!pos?.error || pos.id) return false;
+  if (order.status === 'Hủy' || order.processingStatus === 'cancelled') return false;
+  if (now - (Number(order.createdAt) || 0) > POS_RETRY_WINDOW_MS) return false;
+  if ((Number(pos.retries) || 0) >= POS_RETRY_MAX) return false;
+  return now - (Number(pos.at) || 0) >= POS_RETRY_GAP_MS;
+}
+
+/**
+ * Đẩy lại tối đa `limit` đơn lỗi (mỗi lượt đồng bộ). Đẩy lại luôn kiểm POS trước (syncOrderToPosOnce) nên đơn đã lên
+ * POS ở lần trước chỉ được nhận mã, không tạo đơn thứ hai. Trả về số đơn đã có mã sau lượt này.
+ */
+export async function retryFailedPosPushes({ now = Date.now(), limit = 5, config = posConfig(), fetchImpl = fetch, log = console.log } = {}) {
+  if (!posOrderPushEnabled(config)) return 0;
+  const store = await readMessagingStore();
+  const due = store.conversations.flatMap(conversation => (Array.isArray(conversation.customerOrders) ? conversation.customerOrders : [])
+    .filter(order => posRetryDue(order, now)).map(order => ({ conversationId: conversation.id, orderId: order.id })))
+    .slice(0, limit);
+  let pushed = 0;
+  for (const { conversationId, orderId } of due) {
+    const outcome = await syncOrderToPos(conversationId, orderId, { config, fetchImpl, log }).catch(() => null);
+    if (outcome?.id) pushed += 1;
+  }
+  return pushed;
+}
+
 /** Lỗi đẩy POS mà không biết POS đã tạo đơn hay chưa (hết giờ, đứt mạng, 5xx). */
 function uncertainPosError(message) {
   const error = new Error(message);
@@ -746,7 +779,7 @@ export async function findExistingPosOrder(order, config = posConfig(), fetchImp
   const customId = `${POS_ORDER_CUSTOM_PREFIX}${orderId}`;
   const marker = new RegExp(`Đơn CRM #${escapeRegExp(orderId)}(?![\\w-])`);
   const phone = String(order?.phone || '').replace(/\D/g, '');
-  const data = await posRequest('/orders', { search: phone || `Đơn CRM #${orderId}`, page_size: 50 }, config, fetchImpl);
+  const data = await posRequest('/orders', { search: phone || `Đơn CRM #${orderId}`, page_size: 50 }, config, fetchImpl, { timeoutMs: 15000 });
   const list = Array.isArray(data?.data) ? data.data : [];
   const found = list.find(item => item && Number(item.status) !== 7 && (
     String(item.custom_id || '') === customId
@@ -800,6 +833,8 @@ async function syncOrderToPosOnce(conversationId, orderId, { config = posConfig(
   // Lần trước "chưa chắc" mà lần này vẫn chưa có mã: giữ cờ — lỗi rõ ràng của lần này (ví dụ POS
   // từ chối vì trùng mã CRM-…) không chứng minh được POS chưa có đơn của lần trước.
   if (previouslyUncertain && !outcome.id) outcome.uncertain = true;
+  // Đếm số lần đẩy lại đã lỗi (tự đẩy lại dừng ở POS_RETRY_MAX); lần đẩy đầu lỗi là 0.
+  if (!outcome.id) outcome.retries = order.pos?.error ? (Number(order.pos.retries) || 0) + 1 : 0;
   await updateMessagingStore(current => {
     const item = current.conversations.find(entry => entry.id === conversationId);
     const target = (Array.isArray(item?.customerOrders) ? item.customerOrders : []).find(entry => entry.id === orderId);

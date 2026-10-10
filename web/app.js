@@ -1413,7 +1413,7 @@ const customersFilters = {
 const customersDerivedKeys = new Set(['orders', 'bought', 'boughtFrom', 'boughtTo']);
 const customersBoughtRange = document.querySelector('#customers-bought-range');
 // Các ô nằm sau nút "Lọc thêm", dùng để đếm số lọc phụ đang bật.
-const customersMoreKeys = ['channelId', 'gender', 'product', 'activeWithin', 'combo'];
+const customersMoreKeys = ['channelId', 'product', 'activeWithin', 'combo'];
 
 let customersRequestId = 0;
 let customersItems = [];
@@ -1629,6 +1629,7 @@ function renderCustomersSummary(list) {
 
 const customersColumns = [
   { key: 'name', label: 'Khách hàng', sortable: true },
+  { key: 'gender', label: 'Giới tính', sortable: true, mid: true },
   { key: 'phone', label: 'Số điện thoại', sortable: false },
   { key: 'province', label: 'Khu vực', sortable: true },
   { key: 'state', label: 'Trạng thái', sortable: true, mid: true },
@@ -1786,6 +1787,7 @@ function customerRowHtml(customer, index) {
       <strong>${escapeHtml(name)}</strong>
       <small>${escapeHtml(source || 'Không rõ nguồn')}</small>
     </td>
+    <td class="customer-gender customer-mid">${customer.gender === 'female' ? 'Nữ' : customer.gender === 'male' ? 'Nam' : '<span class="customer-never">—</span>'}</td>
     <td class="customer-tel-cell"><span class="customer-tel">${escapeHtml(customer.phone)}${customer.phone
       ? `<button type="button" data-copy="${escapeHtml(customer.phone)}" title="Chép số điện thoại" aria-label="Chép số điện thoại"><img src="/assets/icons/customers/copy.svg" alt=""></button>`
       : ''}</span></td>
@@ -1816,6 +1818,7 @@ function renderCustomers(items, total) {
   renderCustomersTabs(customersAll);
 
   customersShown = customersAll.filter(customer => customerMatchesTab(customer, customersTab)).sort((first, second) => {
+    if (customersSortKey === 'gender') return customersSortDir * String(first.gender || 'z').localeCompare(String(second.gender || 'z'));
     if (customersSortKey === 'name') return customersSortDir * String(first.name || '').localeCompare(String(second.name || ''), 'vi');
     if (customersSortKey === 'province') return customersSortDir * customerProvince(first).localeCompare(customerProvince(second), 'vi');
     if (customersSortKey === 'state') return customersSortDir * ((first.orderCount || 0) - (second.orderCount || 0));

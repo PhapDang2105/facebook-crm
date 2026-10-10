@@ -3539,3 +3539,7 @@ body.role-staff :is(.customers-export, #campaigns-sync, #campaigns-ai-run, #comp
   .campaigns-body > .campaigns-ai { position: sticky; top: 72px; display: flex; flex-direction: column; max-height: calc(100vh - 96px); }
   .campaigns-body > .campaigns-ai .campaigns-ai-body { overflow-y: auto; min-height: 0; }
 }
+
+/* Cột Giới tính màn Khách hàng (10/10). */
+.customers-table th.customer-col-gender { width: 78px; text-align: center; }
+.customers-table td.customer-gender { width: 78px; text-align: center; white-space: nowrap; }

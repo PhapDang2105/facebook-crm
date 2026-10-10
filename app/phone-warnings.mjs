@@ -179,7 +179,9 @@ export async function disconnectPos() {
   return posStatus();
 }
 
-export async function posRequest(pathname, params, config, fetchImpl) {
+// `timeoutMs`: tra cứu nhanh cho giao diện giữ 6 giây; lệnh kéo danh sách đơn nặng (đồng bộ 7 ngày sau khởi động, kiểm
+// đơn trước khi đẩy lại) truyền thời gian dài hơn — 10/10 các lệnh đó hết 6 giây giữa chừng lúc POS chậm.
+export async function posRequest(pathname, params, config, fetchImpl, { timeoutMs = requestTimeoutMs } = {}) {
   const url = new URL(`${config.baseUrl.replace(/\/+$/, '')}/shops/${encodeURIComponent(config.shopId)}${pathname}`);
   url.searchParams.set('api_key', config.apiKey);
   for (const [key, value] of Object.entries(params)) {
@@ -187,7 +189,7 @@ export async function posRequest(pathname, params, config, fetchImpl) {
     else url.searchParams.set(key, String(value));
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, { signal: controller.signal, headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`Pancake POS trả về HTTP ${response.status}`);

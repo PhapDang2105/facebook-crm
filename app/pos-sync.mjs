@@ -128,7 +128,7 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
     for (let page = 1; page <= maxPages; page += 1) {
       let data;
       try {
-        data = await posRequest('/orders', { page_size: 100, page_number: page, updateStatus, startDateTime: start, endDateTime: end, option_sort: 'inserted_at_desc' }, config, fetchImpl);
+        data = await posRequest('/orders', { page_size: 100, page_number: page, updateStatus, startDateTime: start, endDateTime: end, option_sort: 'inserted_at_desc' }, config, fetchImpl, { timeoutMs: 25000 });
       } catch (error) {
         summary.errors.push(error.message);
         break;

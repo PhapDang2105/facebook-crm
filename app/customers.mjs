@@ -3,6 +3,7 @@
 // stored separately: the customer list is a view over the conversation store,
 // so it can never drift from what the inbox shows.
 import { genderRank, readMessagingStore } from './messaging-store.mjs';
+import { genderFromName } from './processing/customer-info.mjs';
 import { readChannelStore } from './channel-store.mjs';
 import { pancakeConfig } from './config.mjs';
 import { customerPhoneKey, listExportedCustomers } from './customer-file.mjs';
@@ -212,6 +213,12 @@ export function buildCustomers(store, channels = [], exported = [], { landingOrd
     .filter(isReceivedOrder).map(order => customerPhoneKey(order.phone)).filter(Boolean));
   for (const customer of customers.values()) {
     if (!customer.received && receivedPhones.has(customerPhoneKey(customer.phone))) customer.received = true;
+    // Khách landing / tệp xuất kho không có hội thoại nên chưa có giới tính: đoán theo tên như hội thoại (cột Giới tính,
+    // 10/10). Nhân viên chọn tay trong hộp chi tiết vẫn thắng (applyCustomerEdits phủ sau).
+    if (!customer.gender) {
+      const guess = genderFromName(customer.name);
+      if (guess) Object.assign(customer, { gender: guess, genderSource: 'name' });
+    }
   }
   // Mới tương tác hoặc mới mua đều lên đầu: khách landing không có tin nhắn vẫn xếp theo ngày mua.
   const recency = customer => Math.max(customer.lastMessageAt || 0, customer.lastOrderAt || 0);
@@ -332,7 +339,8 @@ export function filterCustomers(customers, filters = {}, now = Date.now()) {
   return customers.filter(customer => {
     if (filters.channelId && customer.channelId !== String(filters.channelId)) return false;
     if (filters.source && !customer.sources.includes(filters.source)) return false;
-    if (filters.gender && customer.gender !== filters.gender) return false;
+    // "unknown": chưa rõ giới tính (không đoán được từ tên, chưa ai chọn).
+    if (filters.gender && (filters.gender === 'unknown' ? Boolean(customer.gender) : customer.gender !== filters.gender)) return false;
     if (filters.label && !customer.labels.includes(filters.label)) return false;
     if (activeSince && customer.lastMessageAt < activeSince) return false;
     // "Đã chốt đơn trong 7 ngày qua" tính theo ngày lên đơn, không phải ngày nhắn tin.

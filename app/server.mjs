@@ -41,7 +41,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { configurePosSync, posSyncStatus, recordPosSyncStatus, runPosSync, startPosSync } from './pos-sync.mjs';
 import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
-import { applyGiftSwapFlag, applyGiftOverrideFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
+import { applyGiftSwapFlag, applyGiftOverrideFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, retryFailedPosPushes, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { applyShipmentLabels, isQuietHourVN, listShipmentNoticeQueue, readSapoSettings, readSapoState, recordShipmentNoticeResult, startSapoSync, writeSapoSettings } from './sapo-sync.mjs';
 import { isSapoConfigured } from './sapo.mjs';
@@ -4215,6 +4215,14 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   const posSyncHooks = { onCrmOrdersCancelled: cancelCrmOrdersCancelledOnPos, onPosConversationOrders: importPosConversationOrders, onPosContent };
   configurePosSync(posSyncHooks);
   if (!process.env.POS_SYNC_DISABLED) startPosSync(posSyncHooks);
+  // Tự đẩy lại đơn CRM đẩy sang Pancake POS bị lỗi (POS chậm/đứt mạng; 10/10): mỗi 5 phút, tối đa 5 đơn/lượt, 6 lần/đơn.
+  if (!process.env.POS_SYNC_DISABLED) {
+    const posRetryPass = () => retryFailedPosPushes()
+      .then(pushed => { if (pushed) console.log(`POS: tự đẩy lại được ${pushed} đơn lỗi.`); })
+      .catch(error => console.warn(`Tự đẩy lại đơn POS lỗi: ${error.message}`));
+    setTimeout(posRetryPass, 2 * 60 * 1000).unref?.();
+    setInterval(posRetryPass, 5 * 60 * 1000).unref?.();
+  }
   // Kênh Pancake: kéo lịch sử lúc khởi động và định kỳ, phòng lọt tin khi webhook gián đoạn.
   // Đồng bộ định kỳ cũng đưa bot tin khách mới chưa ai trả lời (webhook Pancake bỏ sót / tạm ngưng).
   // Cùng móc như webhook: chào khách quét QR và bỏ tin quét thẻ khỏi bot.

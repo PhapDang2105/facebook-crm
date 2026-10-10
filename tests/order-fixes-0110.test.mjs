@@ -122,8 +122,8 @@ test('xuất kho: đơn nhân viên tạo cho khách live (cờ livestream, đ�
     assert.deepEqual(lines(promoLive), ['GRA-XANH-Z450x2@149000', 'QUA-TANG-LIVEx1@0']);
     // Khách thường 2 túi + bám đuổi vẫn nhận BGD như cũ.
     assert.deepEqual(lines(buildExportRows({ headers, rows: [row('CB-r10', XANH, 2, 149000)] }, { orderFacts: exportFactsForOrders([{ id: 'r10', source: 'Facebook', promoGift: 'Bộ bát gáo dừa' }]) })), ['GRA-XANH-Z450x2@149000', 'BGDx1@0']);
-    // Khách live 3 túi: chỉ bát + muỗng.
-    assert.deepEqual(lines(buildExportRows({ headers, rows: [row('CB-r11', XANH, 3, 149000)] }, { orderFacts: exportFactsForOrders([{ id: 'r11', source: 'Facebook', livestream: true }]) })), ['GRA-XANH-Z450x3@149000', 'BGDx1@0', 'MUONGx1@0']);
+    // Khách live 3 túi (chủ shop 08/10): Quạt + bát + muỗng — một bát (quà live gộp cũ có bát thì bỏ từ 3 túi).
+    assert.deepEqual(lines(buildExportRows({ headers, rows: [row('CB-r11', XANH, 3, 149000)] }, { orderFacts: exportFactsForOrders([{ id: 'r11', source: 'Facebook', livestream: true }]) })), ['GRA-XANH-Z450x3@149000', 'QUA-TANG-LIVEx1@0', 'BGDx1@0', 'MUONGx1@0']);
   });
 });
 
@@ -142,15 +142,22 @@ test('xuất kho đơn nguồn POS: ghi đúng các dòng tặng trên POS (quà
   });
 });
 
-test('quà live không cộng dồn quà khuyến mãi: bảng quà thiếu "tối đa 2 túi" vẫn không tặng quà live cho 3 túi; 2 túi live chỉ quà live (giữ miễn ship)', async () => {
+test('quà live không cộng dồn thành hai bát: 3 túi live = Quạt + bát + muỗng (08/10), quà live gộp cũ có bát bị bỏ dù bảng quà thiếu "tối đa 2 túi"; 2 túi live chỉ quà live (giữ miễn ship)', async () => {
   await withGifts(gifts => {
-    gifts.items.push({ ...LIVE_GIFT, maxQuantity: 0 });
-    // Bộ bát cấu hình từ 2 túi: khách live 2 túi vẫn chỉ nhận quà live.
+    // Bộ bát cấu hình từ 2 túi: khách live 2 túi vẫn chỉ nhận quà live (Quạt của bảng quà mẫu, không giới hạn số túi).
     gifts.items.find(gift => gift.sku === 'BGD').minQuantity = 2;
+  }, () => {
+    assert.deepEqual(giftsForKey(`${XANH}=3`, { livestream: true }).map(gift => gift.id), ['freeship', 'live-quat', 'bo-bat-gao-dua', 'muong-dua']);
+    assert.deepEqual(giftsForKey(`${XANH}=2`, { livestream: true }).map(gift => gift.sku || gift.id), ['freeship', 'QUA-TANG-LIVE']);
+    assert.deepEqual(giftsForKey(`${XANH}=2`).map(gift => gift.sku || gift.id), ['freeship', 'BGD'], 'khách thường không đổi');
+  });
+  // Quà live gộp kiểu cũ (Quạt + Bát gáo dừa) đặt không giới hạn số túi: từ 3 túi vẫn bỏ, không thành hai bát.
+  await withGifts(gifts => {
+    gifts.items = gifts.items.filter(gift => !gift.livestreamOnly);
+    gifts.items.push({ ...LIVE_GIFT, maxQuantity: 0 });
   }, () => {
     assert.deepEqual(giftsForKey(`${XANH}=3`, { livestream: true }).map(gift => gift.sku || gift.id), ['freeship', 'BGD', 'MUONG']);
     assert.deepEqual(giftsForKey(`${XANH}=2`, { livestream: true }).map(gift => gift.sku || gift.id), ['freeship', 'QUA-TANG-LIVE']);
-    assert.deepEqual(giftsForKey(`${XANH}=2`).map(gift => gift.sku || gift.id), ['freeship', 'BGD'], 'khách thường không đổi');
   });
   await withGifts(gifts => gifts.items.push(LIVE_GIFT), () => {
     // POS: đơn live 2 túi có cờ ưu đãi bám đuổi → chỉ dòng quà live.

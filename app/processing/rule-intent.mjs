@@ -146,9 +146,12 @@ const prep = raw => normalizeColourTypos(raw)
   .replace(/(\d)(?=(?:v[ịi]|lo[ạa]i|m[àa]u)(?![\p{L}]))/giu, '$1 ')
   .replace(/(?<![\p{L}])(?:tuis|tuj|tuii|túii)(?![\p{L}])/giu, 'túi')
   .replace(/n[âa]u\s+(v[ịi]\s+)?ca\s*cao/giu, 'nâu').replace(/ca\s+cao/giu, 'cacao')
+  .replace(/s[ôo]\s*-?\s*c[ôo]\s*-?\s*la|socola|chocolate|choco\b/giu, 'nâu')
   .replace(/(\d)(t[úu]i|g[óo]i|b[ịi]ch|b[ịi]t)\b/giu, '$1 $2')
-  .replace(/(?<!\d)([1-9]\d?)\s*b\b/giu, '$1 bịch')
-  .replace(/(?<!\d)([1-9]\d?)\s*t\b/giu, '$1 túi')
+  // "2b"/"2t" viết tắt là 2 bịch / 2 túi. Biên phải là biên Unicode: \b coi "ú", "ộ" là không phải chữ nên
+  // "2 túi" từng thành "2 túiúi" và "1 bộ" thành "1 bịchộ" (luật đọc giỏ hỏng hết, 09/10).
+  .replace(/(?<!\d)([1-9]\d?)\s*b(?![\p{L}\p{N}])/giu, '$1 bịch')
+  .replace(/(?<!\d)([1-9]\d?)\s*t(?![\p{L}\p{N}])/giu, '$1 túi')
   // \b không biết chữ có dấu ("vị", "hộp") → biên Unicode ở cuối.
   .replace(/\b(m[ộo]t|hai|ba)\s+(?=(?:t[úu]i|g[óo]i|b[ịi]ch|b[ịi]t|xanh|v[àa]ng|n[âa]u|cacao|combo|h[ộo]p|v[ịi]|lo[ạa]i)(?![\p{L}\p{N}]))/giu, (match, word) => `${NUMBER_WORDS[foldVietnamese(word).toLowerCase()] || word} `)
   .replace(/\b(xanh)\s+450\s*(?:g|gr|gam|gram)?\b/giu, '$1').replace(/\b(v[àa]ng|n[âa]u|cacao)\s+350\s*(?:g|gr|gam|gram)?\b/giu, '$1')

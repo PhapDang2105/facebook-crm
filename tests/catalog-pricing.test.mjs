@@ -104,7 +104,9 @@ test('quà "chỉ khách livestream" (livestreamOnly): khách thường không c
   assert.equal(catalog.normalizeGift({ name: 'Chuỗi', minQuantity: 2, livestreamOnly: 'true' }).livestreamOnly, false);
   const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
   const gifts = JSON.parse(original);
-  // Đúng bản quà sống 28/09: Quà Tặng LIVE đúng 2 túi, chỉ khách livestream.
+  // Đúng bản quà sống 28/09: Quà Tặng LIVE đúng 2 túi, chỉ khách livestream. Bài này thử CƠ CHẾ livestreamOnly nên bỏ
+  // quà live đang có trong bảng quà mẫu (Quạt, 08/10) để không lẫn; chính sách hiện hành: tests/live-gift-bat-muong.test.mjs.
+  gifts.items = gifts.items.filter(gift => !gift.livestreamOnly);
   gifts.items.push({ id: 'qua-tang-live', name: 'Quà Tặng LIVE', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 });
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   catalog.reloadCatalog();
@@ -221,8 +223,8 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   // Chủ shop 05/10: Combo 10 gói Nâu tắt (chỉ còn Xanh) — test cũ dùng PRICE_TUI_NAU_NHO, nay PRICE_TUI_XANH_NHO.
   assert.match(renderChatbotReply({ template_id: 'PRICE_TUI_XANH_NHO' }, templates).messages[0], /Bảng giá Combo 10 gói Xanh.*\n🌿 Combo Dùng Thử \(350g\):\n🏷️ Giá niêm yết: 189\.000đ \+ Phí vận chuyển 15\.000đ\n━+\n🔥 2 Combo Tiện Lợi \(700g\):/);
   const policy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates).messages[0];
-  // Mỗi quy tắc một dòng; quà cùng quy tắc gộp chung.
-  assert.match(policy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm \(trừ Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)/);
+  // Mỗi quy tắc một dòng; quà cùng quy tắc gộp chung; quà chỉ khách live (Quạt, 08/10) ghi rõ đối tượng.
+  assert.match(policy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Quạt: từ 2 sản phẩm \(chỉ khách livestream\)\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm \(trừ Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)/);
   const strike = text => [...text].map(char => `${char}\u0336`).join('');
   const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
   assert.equal(quote.messages[0], [
@@ -310,11 +312,13 @@ test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu 
   products.items[0].salePrice = 199000;
   writeFileSync(process.env.PRODUCTS_PATH, JSON.stringify(products));
   const gifts = JSON.parse(readFileSync(process.env.GIFTS_PATH, 'utf8'));
-  gifts.items[2].active = false;
+  // Chọn quà theo mã, không theo vị trí: bảng quà mẫu thêm dòng mới (Quạt live 08/10) là lệch hết chỉ số.
+  const gift = id => gifts.items.find(item => item.id === id);
+  gift('muong-dua').active = false;
   gifts.shippingFee = 20000;
   // Miễn ship giờ chỉ từ 3 sản phẩm và không áp dụng cho Túi Xanh.
-  gifts.items[0].minQuantity = 3;
-  gifts.items[0].excludedSkus = ['GRA-XANH-Z450'];
+  gift('freeship').minQuantity = 3;
+  gift('freeship').excludedSkus = ['GRA-XANH-Z450'];
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   catalog.reloadCatalog();
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 1 }).total, 219000);

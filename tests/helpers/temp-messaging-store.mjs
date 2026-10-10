@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -17,6 +17,13 @@ process.env.CUSTOMER_EDITS_PATH = path.join(directory, 'customer-edits.json');
 writeFileSync(storePath, JSON.stringify({ conversations: [], messages: {} }));
 process.on('exit', () => rmSync(directory, { recursive: true, force: true }));
 
+// Kho nhận ra "tiến trình khác vừa ghi tệp" bằng mốc sửa. Trên Windows mốc sửa có thể TRÙNG với lần kho tự ghi
+// ngay trước đó (ghi liền nhau trong cùng một nhịp đồng hồ), kho tưởng tệp chưa đổi và giữ bản cũ trong bộ nhớ:
+// bài kiểm thử chập chờn ~1/5 lần. Mỗi lần gieo đặt một mốc sửa riêng (quá khứ, không trùng) để kho luôn đọc lại.
+let seedCount = 0;
 export function seed(store) {
   writeFileSync(storePath, JSON.stringify({ messages: {}, ...store }));
+  seedCount += 1;
+  const stamp = new Date(Date.UTC(2020, 0, 1) + seedCount * 1000);
+  utimesSync(storePath, stamp, stamp);
 }

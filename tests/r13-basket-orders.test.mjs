@@ -365,7 +365,8 @@ test('r13 #6: khách đã có đơn hỏi quà — GIFT_POLICY_LIVE không mời
   const reply = renderChatbotReply({ template_id: 'GIFT_POLICY_LIVE' }, templates, context);
   assert.equal(reply.templateId, 'GIFT_POLICY_LIVE', 'giữ mã engine đã gọi');
   assert.equal(reply.variant, 'GIFT_POLICY_ORDER');
-  assert.equal(reply.messages[0], 'Dạ đơn 1 Granola Túi Xanh 450g + 1 Granola Túi Vàng 350g + 1 Granola Túi Nâu vị cacao 350g của chị đã có quà tặng kèm Bộ bát gáo dừa + Muỗng dừa rồi ạ 🎁 Bên em gửi quà cùng đơn cho mình nha 💛');
+  // Khách live, đơn 3 túi (chủ shop 08/10): Quạt + bát + muỗng.
+  assert.equal(reply.messages[0], 'Dạ đơn 1 Granola Túi Xanh 450g + 1 Granola Túi Vàng 350g + 1 Granola Túi Nâu vị cacao 350g của chị đã có quà tặng kèm Quạt + Bộ bát gáo dừa + Muỗng dừa rồi ạ 🎁 Bên em gửi quà cùng đơn cho mình nha 💛');
   assert.doesNotMatch(reply.messages.join('\n'), /để em lên đơn|lấy 2 túi vị nào/);
   // Quà đã ghi trên đơn (quà live, kể cả quà đã đổi) được dùng nguyên văn; miễn ship không tính là quà hiện vật.
   const liveOrder = orderOf({ products: [{ name: 'Granola Túi Vàng 350g', sku: VANG_SKU, quantity: 2 }], gift: 'Miễn phí vận chuyển + Quạt + Bát gáo dừa', livestream: true });

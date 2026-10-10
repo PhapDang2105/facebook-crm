@@ -63,7 +63,8 @@ test('mục 9b (bình luận A4, ca …024372): hộp thư giữ giỏ 2 Vàng, 
   const turn = await sim.send(thread, 'Combo 2 túi vàng giá bao nhiêu được tặng gì e', { llm: { template_id: 'PRICE_QUOTE', Product_N1: 'Granola Túi Vàng 350g', also: 'GIFT_POLICY_LIVE' } });
   assert.equal(turn.result.templateId, 'ORDER_ADDRESS_REMIND', JSON.stringify(turn.result));
   assert.match(priv(turn), /vẫn đang giữ đơn 2 Granola Túi Vàng 350g/);
-  assert.match(priv(turn), /Bát gáo dừa \+ Muỗng dừa/);
+  // Quà live 2 túi (chủ shop 08/10): Quạt.
+  assert.match(priv(turn), /tặng Quạt/);
   assert.doesNotMatch(priv(turn), /phiên live nhà em có/);
 });
 

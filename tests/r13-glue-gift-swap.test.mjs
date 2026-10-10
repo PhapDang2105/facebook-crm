@@ -76,7 +76,12 @@ test('xuất kho: gói thay thế chưa chọn vị (không SKU) không lên dò
 });
 
 test('xuất kho: khách live 2 túi đổi quạt + bát → gói nhỏ, không quà live, không thêm bát ưu đãi bám đuổi; đơn 2 túi bám đuổi đổi bát → không lên BGD', async () => {
-  await withGifts(gifts => gifts.items.push(LIVE_GIFT), () => {
+  // Quà live hiện hành (08/10) là Quạt của bảng quà mẫu: khách live 2 túi đổi Quạt lấy gói nhỏ → không lên QUA-TANG-LIVE.
+  const quat = { id: 'g10', source: 'Facebook', livestream: true, giftSwap: [SMALL_XANH, SMALL_CAM], giftSwapRemoved: ['Quạt'] };
+  assert.deepEqual(exported([row('CB-g10', XANH, 2, 149000)], [quat]), ['GRA-XANH-Z450x2@149000', 'GRA-XANH-G35x1@0', 'GRA-CAM-G30x1@0']);
+  assert.deepEqual(exported([row('CB-g11', XANH, 2, 149000)], [{ id: 'g11', source: 'Facebook', livestream: true }]), ['GRA-XANH-Z450x2@149000', 'QUA-TANG-LIVEx1@0']);
+  // Quà live gộp kiểu cũ (Quạt + Bát gáo dừa, trước 08/10): bỏ quà live hiện hành để chỉ còn quà của ca này.
+  await withGifts(gifts => { gifts.items = gifts.items.filter(gift => !gift.livestreamOnly); gifts.items.push(LIVE_GIFT); }, () => {
     const live = { id: 'g6', source: 'Facebook', livestream: true, promoGift: 'Bộ bát gáo dừa', giftSwap: [SMALL_XANH, SMALL_CAM], giftSwapRemoved: ['Quạt + Bát gáo dừa'] };
     assert.deepEqual(exported([row('CB-g6', XANH, 2, 149000)], [live]), ['GRA-XANH-Z450x2@149000', 'GRA-XANH-G35x1@0', 'GRA-CAM-G30x1@0']);
     // Đơn live không đổi quà: như cũ.

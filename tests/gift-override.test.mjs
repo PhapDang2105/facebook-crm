@@ -34,6 +34,8 @@ const MUONG = { name: 'Muỗng dừa', sku: 'MUONG', quantity: 1, weight: 10, gi
 async function withLiveGift(run) {
   const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
   const gifts = JSON.parse(original);
+  // Ca thật 05/10 dùng quà live gộp "Quạt + Bát gáo dừa": bỏ quà live hiện hành của bảng quà mẫu (Quạt, 08/10) để không cộng hai lần.
+  gifts.items = gifts.items.filter(gift => !gift.livestreamOnly);
   gifts.items.push(LIVE_GIFT);
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   reloadCatalog();

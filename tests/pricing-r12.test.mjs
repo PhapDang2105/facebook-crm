@@ -119,19 +119,24 @@ test('quà theo số túi: 3–4 bát + muỗng; 5 túi thêm 1 Túi Vàng; 10 t
   assert.ok(table.some(line => line.startsWith('- 1 Túi Vàng 350g + 1 Túi Nâu 350g: từ 10 sản phẩm')), table.join('\n'));
 });
 
-test('quà live: khách live đúng 2 túi chỉ "Quạt + Bát gáo dừa"; từ 3 túi không thêm quà live; khách thường không bao giờ thấy quà live (bảng giá cũng vậy)', () => {
-  withGifts(gifts => gifts.items.push(LIVE_GIFT), () => {
-    const live = { livestream: true };
+test('quà live (chủ shop 08/10): khách live 2 túi "Quạt"; từ 3 túi "Quạt + bát + muỗng"; khách thường không bao giờ thấy quà live (bảng giá cũng vậy)', () => {
+  // Bảng quà mẫu đúng như máy chủ: Quạt (QUA-TANG-LIVE) chỉ khách live, từ 2 túi, không giới hạn số túi.
+  const live = { livestream: true };
+  assert.deepEqual(giftNames(pricing.priceBasket([{ sku: XANH, quantity: 2 }], live)), ['Miễn phí vận chuyển', 'Quạt']);
+  assert.deepEqual(giftNames(pricing.priceBasket([{ sku: XANH, quantity: 3 }], live)), ['Miễn phí vận chuyển', 'Quạt', 'Bộ bát gáo dừa', 'Muỗng dừa']);
+  assert.deepEqual(giftNames(pricing.priceBasket([{ sku: XANH, quantity: 5 }], live)), ['Miễn phí vận chuyển', 'Quạt', 'Bộ bát gáo dừa', 'Muỗng dừa', '1 Túi Vàng 350g']);
+  // Mint (Tropical) + Xanh khách live: 323k, quà live.
+  const mint = pricing.priceBasket([{ product: 'Xanh Mint 300g', quantity: 1 }, { sku: XANH, quantity: 1 }], live);
+  assert.deepEqual([mint.total, mint.gift], [323000, 'Miễn phí vận chuyển + Quạt']);
+  // Khách thường: không quà live ở đơn lẫn bảng giá.
+  assert.deepEqual(giftNames(basket([XANH, 2])), ['Miễn phí vận chuyển']);
+  assert.deepEqual(giftNames(basket([XANH, 3])), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa']);
+  for (const tier of pricing.quoteTiers('túi xanh').tiers) assert.ok(!tier.gifts.includes('Quạt'), `bậc ${tier.quantity}`);
+  assert.ok(catalog.getGifts().find(gift => gift.id === 'live-quat').livestreamOnly);
+  // Quà live gộp kiểu cũ có bát (Quạt + Bát gáo dừa) nếu bật lại: chỉ đơn 2 túi, từ 3 túi bỏ để không thành hai bát.
+  withGifts(gifts => { gifts.items = gifts.items.filter(gift => !gift.livestreamOnly); gifts.items.push(LIVE_GIFT); }, () => {
     assert.deepEqual(giftNames(pricing.priceBasket([{ sku: XANH, quantity: 2 }], live)), ['Miễn phí vận chuyển', 'Quạt + Bát gáo dừa']);
     assert.deepEqual(giftNames(pricing.priceBasket([{ sku: XANH, quantity: 3 }], live)), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa']);
-    assert.deepEqual(giftNames(pricing.priceBasket([{ sku: XANH, quantity: 5 }], live)), ['Miễn phí vận chuyển', 'Bộ bát gáo dừa', 'Muỗng dừa', '1 Túi Vàng 350g']);
-    // Mint (Tropical) + Xanh khách live: 323k, quà live.
-    const mint = pricing.priceBasket([{ product: 'Xanh Mint 300g', quantity: 1 }, { sku: XANH, quantity: 1 }], live);
-    assert.deepEqual([mint.total, mint.gift], [323000, 'Miễn phí vận chuyển + Quạt + Bát gáo dừa']);
-    // Khách thường: không quà live ở đơn lẫn bảng giá.
-    assert.deepEqual(giftNames(basket([XANH, 2])), ['Miễn phí vận chuyển']);
-    for (const tier of pricing.quoteTiers('túi xanh').tiers) assert.ok(!tier.gifts.includes('Quạt + Bát gáo dừa'), `bậc ${tier.quantity}`);
-    assert.ok(catalog.getGifts().find(gift => gift.id === 'qua-tang-live').livestreamOnly);
   });
 });
 

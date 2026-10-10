@@ -1330,8 +1330,29 @@ function renderOrder(value, templates, context = {}) {
   const orderStreetOf = text => { const resolved = describeDeliveryAddress(text).resolved || {}; return String(resolved.streetWithoutWard ?? resolved.street ?? ''); };
   const fragmentOfOrder = Boolean(orderAddressTyped) && !repeatsOrderAddress && !pending?.address
     && !describeDeliveryAddress(typedGiven).complete && !(/\d/.test(typedGiven) && /\d/.test(orderStreetOf(orderAddressTyped)));
-  const freshAddress = (repeatsOrderAddress ? '' : typedGiven) || (previous?.address ? String(previous.address) : '');
-  const phone = freshPhone || pending?.phone || (previous?.phone ? toLocalPhone(previous.phone) || String(previous.phone) : '');
+  // Chủ shop 10/10 ("khách đã mua thì không hỏi lại SĐT hay địa chỉ"): khách cũ chỉ nêu giỏ (gõ, hay bấm giỏ Facebook Shop), chưa
+  // đưa SĐT/địa chỉ nào → lấy SĐT + địa chỉ ĐÃ LƯU của đơn trước (đơn của chính khách trong hội thoại, hay phiếu xác nhận cũ trong
+  // lịch sử) rồi hỏi xác nhận một câu (ORDER_ADDRESS_OLD_CONFIRM, nhánh confirmOld bên dưới) thay vì xin lại từ đầu. Trước đây
+  // nhánh xác nhận chỉ chạy khi mô hình tự chép SĐT/địa chỉ cũ vào phiếu — luật (BASKET → ORDER_ADDRESS) không chép nên khách cũ
+  // vẫn bị hỏi lại. Đơn chưa hủy ≤ 7 ngày (hay đơn bất kỳ ≤ 24 giờ) thì luồng "đặt thêm / gộp hay tách?" của engine lo; đơn
+  // ngoài hội thoại (C2, `foreign`) không bao giờ điền; địa chỉ cũ chưa đủ cấp thì hỏi như thường.
+  const savedContact = (() => {
+    if (!templates.ORDER_ADDRESS_OLD_CONFIRM || !isOrderStep(templateId) || !price || updating || wantsPrevious || paymentMessage || trial) return null;
+    if (!customerText.trim() && !fromCart) return null;
+    if (freshPhone || typedGiven || pending?.phone || pending?.address || pending?.oldAddressConfirm) return null;
+    const typedTexts = [customerText, ...(Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts : [])].map(text => String(text || '')).filter(text => text.trim() && !isShopCartText(text));
+    if (typedTexts.some(text => extractVietnamesePhone(text) || looksLikeAddressMessage(text, { orderStep: true }))) return null;
+    const lastOrder = context.latestOrder || recentOrder;
+    const lastAge = lastOrder?.createdAt ? now - (Number(lastOrder.createdAt) || 0) : Infinity;
+    const lastActive = String(lastOrder?.processingStatus || '') !== 'cancelled' && lastOrder?.status !== 'Hủy';
+    if (lastAge < 24 * 60 * 60 * 1000 || (lastActive && lastAge < 7 * 24 * 60 * 60 * 1000)) return null;
+    const savedAddress = source => String(source?.rawAddress || source?.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+    const source = [recentOrder, context.latestOrder, context.previousDelivery]
+      .find(item => item && !item.foreign && toLocalPhone(item.phone) && savedAddress(item) && describeDeliveryAddress(savedAddress(item)).complete);
+    return source ? { phone: toLocalPhone(source.phone), address: savedAddress(source) } : null;
+  })();
+  const freshAddress = (repeatsOrderAddress ? '' : typedGiven) || (previous?.address ? String(previous.address) : '') || savedContact?.address || '';
+  const phone = freshPhone || pending?.phone || (previous?.phone ? toLocalPhone(previous.phone) || String(previous.phone) : '') || savedContact?.phone || '';
   // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
   // Lợi") is merged into the saved address; a whole new address replaces it.
   const mergedAddress = mergeAddressFragment(freshAddress !== '0' ? freshAddress : '', pending?.address || (fragmentOfOrder ? orderAddressTyped : ''));
@@ -1551,9 +1572,10 @@ function renderOrder(value, templates, context = {}) {
   // Đơn (kể cả vừa hủy) trong 24 giờ: khách vừa đưa địa chỉ trong chính phiên này — không phải "địa chỉ cũ".
   const recentAge = recentOrder?.id ? now - (Number(recentOrder.createdAt) || 0) : Infinity;
   const recentActive = recentAge < 24 * 60 * 60 * 1000 || (String(recentOrder?.processingStatus || '') !== 'cancelled' && recentOrder?.status !== 'Hủy' && recentAge < 7 * 24 * 60 * 60 * 1000);
-  const confirmOld = templates.ORDER_ADDRESS_OLD_CONFIRM && !updating && !fromCart && !paymentMessage && !trial && isOrderStep(templateId)
-    && customerText.trim() && copiesOld && !recentActive
-    && !wantsPrevious && !pending?.phone && !pending?.address && !pending?.oldAddressConfirm && !phoneTyped && !addressTyped;
+  // SĐT/địa chỉ lấy từ đơn đã lưu (savedContact, kể cả khi khách bấm giỏ Shop) luôn hỏi xác nhận — không bao giờ tự lên đơn.
+  const confirmOld = templates.ORDER_ADDRESS_OLD_CONFIRM && !updating && !paymentMessage && !trial && isOrderStep(templateId) && Boolean(price)
+    && (Boolean(savedContact) || (!fromCart && customerText.trim() && copiesOld && !recentActive
+      && !wantsPrevious && !pending?.phone && !pending?.address && !pending?.oldAddressConfirm && !phoneTyped && !addressTyped));
   if (confirmOld) {
     const cart = price.lines.map(line => `${line.quantity} ${line.name}`).join(' + ');
     const text = fill(templates.ORDER_ADDRESS_OLD_CONFIRM, { ...commonValues(), cart, total: formatMoney(price.total), address: delivery?.canonical || address, phone });

@@ -1101,12 +1101,23 @@ function renderOrder(value, templates, context = {}) {
     && modelBlank(value.Customer_Address) && !extractVietnamesePhone(customerText) && !/\d{9,}/.test(customerText.replace(/[\s.()+-]/g, ''))
     && !addsToOrder && !mentionsOldAddress(customerText) && !plainBasketAddressWords.test(messageWords)
     && !shipped && recentOrder?.source !== 'POS' && now - (Number(recentOrder?.createdAt) || 0) < plainBasketWindowMs;
+  // R17 (inbox3 A4, ca …5625762756: đơn 2 Xanh 70 phút trước, "cho chị 1 túi xanh và 1 túi vàng nhé" → bot hỏi gộp "1 Túi Vàng"
+  // vào đơn): giỏ trơn CÙNG TỔNG số túi với đơn, có chung ít nhất một món với đơn nhưng khác cơ cấu vị (2X → 1X + 1V) = xin ĐỔI
+  // đơn, không phải đặt thêm. Cùng điều kiện giỏ trơn như trên (không SĐT/địa chỉ, không thêm/nữa, đơn bot < 3 giờ chưa gửi).
+  const namedCodes = namedItems.map(item => ({ code: String(matchProduct(item.product)?.sku || item.code || '').toUpperCase(), quantity: Number(item.quantity) || 1 }));
+  const bagTotal = list => list.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+  const sameCountSwap = !plainBasketTurn && namedCodes.length >= 2 && orderLines.length >= 1 && namedCodes.every(item => item.code)
+    && bagTotal(namedCodes) === bagTotal(orderLines) && namedCodes.some(item => orderLines.some(line => line.code.toUpperCase() === item.code))
+    && basketSignature(namedCodes) !== basketSignature(orderLines) && ['ORDER_ADDRESS', 'ORDER_CONFIRMATION'].includes(templateId)
+    && modelBlank(value.Phone_Number) && modelBlank(value.Customer_Address) && !extractVietnamesePhone(customerText)
+    && !/\d{9,}/.test(customerText.replace(/[\s.()+-]/g, '')) && !addsToOrder && !mentionsOldAddress(customerText) && !plainBasketAddressWords.test(messageWords)
+    && !shipped && recentOrder?.source !== 'POS' && recentOrder?.automatic !== false && now - (Number(recentOrder?.createdAt) || 0) < plainBasketWindowMs;
   // Giỏ giữ mới hơn đơn = khách đang đặt đơn khác; riêng ca đổi số lượng cùng món, giỏ trơn (chưa có SĐT/địa chỉ riêng) không chặn.
   const heldNewer = Number(context.pendingOrder?.at) > (Number(recentOrder?.createdAt) || 0) && (context.pendingOrder?.items || []).length > 0
-    && !(plainBasketTurn && !context.pendingOrder?.phone && !context.pendingOrder?.address);
+    && !((plainBasketTurn || sameCountSwap) && !context.pendingOrder?.phone && !context.pendingOrder?.address);
   if (!updating && !separateOrder && namedItems.length && recentOrder?.id && templates.ORDER_CHANGE_STAFF
     // R17 (inbox3 A3): giỏ khách gửi ngay sau câu ORDER_WRONG ("nhắn em loại túi và số lượng đúng") là giỏ SỬA của đơn đó.
-    && (mergeRequest || orderChangePattern.test(messageWords) || plainBasketTurn || context.lastTemplateId === 'ORDER_WRONG') && !isGiftSwapRequest(customerText) && !heldNewer
+    && (mergeRequest || orderChangePattern.test(messageWords) || plainBasketTurn || sameCountSwap || context.lastTemplateId === 'ORDER_WRONG') && !isGiftSwapRequest(customerText) && !heldNewer
     && String(recentOrder.processingStatus || '') !== 'cancelled' && recentOrder.status !== 'Hủy'
     && !/đã giao|giao thành công|hoàn thành/i.test(String(recentOrder.status || ''))
     && now - (Number(recentOrder.createdAt) || 0) < orderChangeStaffWindowMs) {

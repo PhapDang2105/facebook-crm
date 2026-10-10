@@ -368,7 +368,8 @@ test('B3 #7 / #22: "Mình lấy 1 đơn thôi" khi đang hỏi đặt thêm = KH
   const out = await sim.send('Mình lấy 1 đơn thôi');
   assert.equal(out.created.length, 0);
   // R15-fix4 (thiết kế gộp/tách mới, chủ shop 03/10): câu không rõ gộp hay tách → bạn phụ trách (trước: ORDER_STATUS kể đơn cũ).
-  assert.match(out.result.templateId, /^STAFF_WAIT_(OPEN|CLOSED)$/);
+  // R17 (gói B, inbox5 A3): "1 đơn thôi" là câu RÕ "không đặt thêm"; giỏ chờ trùng đúng món đơn đang có → kể đơn, bỏ giỏ.
+  assert.equal(out.result.templateId, 'ORDER_STATUS');
   const busy = new Sim();
   busy.extraDeps.requestReply = async () => {
     busy.recent.push({ id: 'staff-1', direction: 'outgoing', type: 'text', text: 'Dạ chị ơi em báo giá ạ', staff: true, createdAt: Date.now() + 5 });

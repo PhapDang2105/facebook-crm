@@ -60,14 +60,6 @@ export function scheduleStaffIdleRecheck(key, delayMs, run) {
   return true;
 }
 
-export function cancelStaffIdleRecheck(key) {
-  const entry = pending.get(String(key || ''));
-  if (!entry) return false;
-  clearTimeout(entry.timer);
-  pending.delete(String(key || ''));
-  return true;
-}
-
 /** Tắt máy: bỏ mọi lượt kiểm lại đang chờ. */
 export function clearStaffIdleRechecks() {
   for (const entry of pending.values()) clearTimeout(entry.timer);

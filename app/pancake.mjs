@@ -22,7 +22,7 @@ import { stickerFields } from './stickers.mjs';
 import { isPageSystemNotice, isPageSystemNoticeText, lateInfoNeedsBot } from './conversation-orders.mjs';
 import { isOrderishText } from './processing/staff-idle.mjs';
 import { foldVietnamese } from './processing/auto-label.mjs';
-export { stickerInfo, LIKE_STICKER_IDS } from './stickers.mjs';
+export { stickerInfo } from './stickers.mjs';
 
 // Đủ cấu hình khi có ít nhất một Page (mã + token API) và một token webhook: token chung
 // PANCAKE_WEBHOOK_TOKEN HAY token riêng của từng Page trong PANCAKE_PAGES (webhookToken).

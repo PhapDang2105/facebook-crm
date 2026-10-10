@@ -1401,13 +1401,19 @@ const customersFilters = {
   channelId: document.querySelector('#customers-channel'),
   gender: document.querySelector('#customers-gender'),
   product: document.querySelector('#customers-product'),
-  orderedWithin: document.querySelector('#customers-ordered-within'),
   activeWithin: document.querySelector('#customers-active-within'),
   combo: document.querySelector('#customers-combo'),
-  minOrders: document.querySelector('#customers-min-orders')
+  // Thanh chính (chủ shop 10/10): số đơn và thời gian mua. Bốn ô này không gửi thẳng lên API mà đổi
+  // ra minOrders/maxOrders và orderedFrom/orderedTo trong customersQueryString.
+  orders: document.querySelector('#customers-orders'),
+  bought: document.querySelector('#customers-bought'),
+  boughtFrom: document.querySelector('#customers-bought-from'),
+  boughtTo: document.querySelector('#customers-bought-to')
 };
+const customersDerivedKeys = new Set(['orders', 'bought', 'boughtFrom', 'boughtTo']);
+const customersBoughtRange = document.querySelector('#customers-bought-range');
 // Các ô nằm sau nút "Lọc thêm", dùng để đếm số lọc phụ đang bật.
-const customersMoreKeys = ['channelId', 'gender', 'product', 'orderedWithin', 'activeWithin', 'combo', 'minOrders'];
+const customersMoreKeys = ['channelId', 'gender', 'product', 'activeWithin', 'combo'];
 
 let customersRequestId = 0;
 let customersItems = [];
@@ -1421,17 +1427,52 @@ let customersSortKey = 'lastOrderAt';
 let customersSortDir = -1;
 let customersPage = 1;
 let customersPageSize = 25;
-const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất' };
+const customerSourceNames = { inbox: 'Tin nhắn', comment: 'Bình luận', ads: 'Quảng cáo', export: 'Đơn đã xuất', landing: 'Landing page' };
+
+/** Ngày theo lịch Việt Nam ("YYYY-MM-DD") lùi `daysBack` ngày — cùng cách đếm ngày của bảng tóm tắt, không phụ thuộc giờ máy. */
+function vietnamDateBack(daysBack = 0, now = Date.now()) {
+  return new Date(now + 7 * 3600000 - daysBack * 86400000).toISOString().slice(0, 10);
+}
+
+/* Ô "Thời gian mua" → khoảng ngày mua LẦN CUỐI gửi lên API. Đổi lúc gửi chứ không lúc chọn, để trang mở
+   qua nửa đêm thì "hôm nay" vẫn là hôm nay. "N ngày qua" gồm cả hôm nay (7 ngày = hôm nay và 6 ngày trước);
+   "hơn 30 ngày chưa mua lại" = cột Mua lần cuối từ "31 ngày trước" trở về trước. */
+const customersBoughtPresets = {
+  today: () => ({ orderedFrom: vietnamDateBack(0) }),
+  7: () => ({ orderedFrom: vietnamDateBack(6) }),
+  30: () => ({ orderedFrom: vietnamDateBack(29) }),
+  90: () => ({ orderedFrom: vietnamDateBack(89) }),
+  over30: () => ({ orderedTo: vietnamDateBack(31) }),
+  over60: () => ({ orderedTo: vietnamDateBack(61) }),
+  over90: () => ({ orderedTo: vietnamDateBack(91) }),
+  range: () => ({ orderedFrom: customersFilters.boughtFrom?.value || '', orderedTo: customersFilters.boughtTo?.value || '' })
+};
 
 function customersQueryString() {
   const params = new URLSearchParams();
   for (const [key, input] of Object.entries(customersFilters)) {
-    if (!input) continue;
+    if (!input || customersDerivedKeys.has(key)) continue;
     const value = input.value.trim();
     if (!value) continue;
     params.set(key, value);
   }
+  // Số đơn: giá trị ô chọn là "từ-đến" ("1-1" là đúng 1 đơn, "3-" là từ 3 đơn trở lên).
+  const [minOrders, maxOrders] = String(customersFilters.orders?.value || '').split('-');
+  if (minOrders) params.set('minOrders', minOrders);
+  if (maxOrders) params.set('maxOrders', maxOrders);
+  const bought = customersBoughtPresets[customersFilters.bought?.value || '']?.() || {};
+  for (const [key, value] of Object.entries(bought)) if (value) params.set(key, value);
   return params.toString();
+}
+
+/** Hai ô ngày chỉ hiện khi chọn "Chọn khoảng ngày…"; mở ra thì đưa con trỏ vào ô "Từ" để chọn ngay. */
+function syncCustomersBoughtRange({ focus = false } = {}) {
+  const open = customersFilters.bought?.value === 'range';
+  customersBoughtRange?.classList.toggle('hidden', !open);
+  if (!open || !focus) return;
+  const from = customersFilters.boughtFrom;
+  from?.focus();
+  try { from?.showPicker?.(); } catch { /* trình duyệt cũ hoặc chặn: con trỏ đã ở ô ngày */ }
 }
 
 function fillCustomersChannelOptions() {
@@ -1441,6 +1482,7 @@ function fillCustomersChannelOptions() {
   select.innerHTML = '<option value="">Mọi trang</option>'
     + messageChannels.filter(channel => channel.id !== 'local-facebook')
       .map(channel => `<option value="${escapeHtml(channel.id)}">${escapeHtml(channel.name)}</option>`).join('')
+    + '<option value="landing">Landing page</option>'
     + '<option value="export">Đơn đã xuất</option>';
   select.value = current;
 }
@@ -1590,12 +1632,116 @@ const customersColumns = [
   { key: 'phone', label: 'Số điện thoại', sortable: false },
   { key: 'province', label: 'Khu vực', sortable: true },
   { key: 'state', label: 'Trạng thái', sortable: true, mid: true },
-  { key: 'labels', label: 'Thẻ', sortable: false, mid: true },
+  // Cột Thẻ đã bỏ (chủ shop 10/10); lọc theo thẻ vẫn ở ô "Mọi thẻ", thẻ xem/gắn trong hộp chi tiết khách.
   { key: 'orderCount', label: 'Số đơn', sortable: true, mid: true },
   { key: 'orderTotal', label: 'Đã chi', sortable: true, mid: true },
   { key: 'lastOrderProducts', label: 'Sản phẩm', sortable: false, mid: true },
-  { key: 'lastOrderAt', label: 'Mua lần cuối', sortable: true }
+  { key: 'lastOrderAt', label: 'Mua lần cuối', sortable: true },
+  // Hai cột nhân viên điền khi gọi chăm sóc: trạng thái liên hệ và ghi chú (khác cột Trạng thái = nhóm khách theo số đơn).
+  { key: 'contactStatus', label: 'Liên hệ', sortable: true, mid: true },
+  { key: 'lastNote', label: 'Ghi chú', sortable: false }
 ];
+
+// Cột "Liên hệ": nhân viên chọn ngay trên dòng khách, lưu ở máy chủ (PUT /api/customers/:id/contact) nên mọi máy
+// cùng thấy. Khách chưa ai chọn là "Chưa liên hệ".
+const customerContactStatuses = [
+  { key: 'none', label: 'Chưa liên hệ' },
+  { key: 'called', label: 'Đã gọi điện' },
+  { key: 'unreachable', label: 'Không gọi được' },
+  { key: 'offer', label: 'Đã gửi ưu đãi' }
+];
+const customerContactRank = new Map(customerContactStatuses.map((status, index) => [status.key, index]));
+const customerContactOf = customer => (customerContactRank.has(customer?.contactStatus) ? customer.contactStatus : 'none');
+
+/** Rê chuột lên ô: ai chọn, lúc nào (nhật ký hoạt động giữ đủ từng lần đổi). */
+function customerContactTitle(customer) {
+  const status = customerContactOf(customer);
+  if (status === 'none' || !customer.contactStatusAt) return 'Trạng thái liên hệ';
+  const label = customerContactStatuses[customerContactRank.get(status)].label;
+  return [label, customer.contactStatusBy, formatCustomerPanelTime(customer.contactStatusAt, true)].filter(Boolean).join(' · ');
+}
+
+function customerContactHtml(customer) {
+  const status = customerContactOf(customer);
+  return `<select class="customer-contact-select" data-contact="${escapeHtml(customer.id)}" data-tone="${status}" title="${escapeHtml(customerContactTitle(customer))}" aria-label="Trạng thái liên hệ">${
+    customerContactStatuses.map(item => `<option value="${item.key}"${item.key === status ? ' selected' : ''}>${item.label}</option>`).join('')}</select>`;
+}
+
+/** Cột "Ghi chú": ghi chú mới nhất của khách (hộp chi tiết, khung khách bên Tin nhắn hay ghi chú bot); bấm để viết thêm. */
+function customerNoteCellHtml(customer) {
+  const note = customer.lastNote;
+  if (!note?.text) return `<button type="button" class="customer-note-add" data-note-edit="${escapeHtml(customer.id)}">+ Thêm ghi chú</button>`;
+  const meta = [note.by, note.at ? formatCustomerPanelTime(note.at, true) : ''].filter(Boolean).join(' · ');
+  return `<button type="button" class="customer-note-text" data-note-edit="${escapeHtml(customer.id)}" title="${escapeHtml([note.text, meta, 'Bấm để thêm ghi chú mới'].filter(Boolean).join('\n'))}">${escapeHtml(note.text)}</button>`;
+}
+
+async function saveCustomerContact(select) {
+  const customer = customersAll.find(item => item.id === select.dataset.contact);
+  if (!customer) return;
+  const previous = customerContactOf(customer);
+  const status = select.value;
+  if (status === previous) return;
+  select.dataset.tone = status;
+  select.disabled = true;
+  try {
+    const fresh = await readApiResponse(await fetch(`/api/customers/${encodeURIComponent(customer.id)}/contact`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    }));
+    customer.contactStatus = status === 'none' ? undefined : status;
+    customer.contactStatusAt = status === 'none' ? 0 : Number(fresh?.contactStatusAt) || Date.now();
+    customer.contactStatusBy = status === 'none' ? '' : fresh?.contactStatusBy || '';
+  } catch (error) {
+    select.value = previous;
+    select.dataset.tone = previous;
+    showToast(error.message || 'Chưa lưu được trạng thái liên hệ.', 'error');
+  } finally {
+    select.disabled = false;
+    select.title = customerContactTitle(customer);
+  }
+}
+
+/** Ô ghi chú thành ô nhập ngay trên dòng: Enter (hay bấm ra ngoài) lưu thêm một ghi chú, Esc bỏ. */
+function openCustomerNoteEditor(cell, customer) {
+  if (!cell || cell.querySelector('input')) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'customer-note-input';
+  input.maxLength = 1000;
+  input.placeholder = 'Ghi chú mới, Enter để lưu';
+  input.setAttribute('aria-label', 'Ghi chú mới cho khách');
+  cell.replaceChildren(input);
+  input.focus();
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    const value = input.value.trim();
+    if (save && value) {
+      input.disabled = true;
+      try {
+        const result = await readApiResponse(await fetch(`/api/customers/${encodeURIComponent(customer.id)}/notes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: value })
+        }));
+        const note = result?.note || {};
+        customer.lastNote = { text: String(note.text || value).slice(0, 200), at: Number(note.at) || Date.now(), by: note.author?.name || note.by || '' };
+        customer.noteCount = Number(result?.noteCount) || (Number(customer.noteCount) || 0) + 1;
+        customer.staffNoteCount = (Number(customer.staffNoteCount) || 0) + 1;
+      } catch (error) {
+        showToast(error.message || 'Chưa lưu được ghi chú.', 'error');
+      }
+    }
+    cell.innerHTML = customerNoteCellHtml(customer);
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
 
 /** Chip thẻ khách. Màu và tên icon là dữ liệu nhân viên tự đặt trong Cài đặt,
  *  nên phải lọc trước khi ghép vào thuộc tính HTML: màu chỉ nhận mã hex, tên
@@ -1631,11 +1777,6 @@ function customerRowHtml(customer, index) {
         products.slice(0, 2).map(item => `<span class="customer-product">${escapeHtml(item.name)} ×${item.quantity}</span>`).join('')
       }${products.length > 2 ? `<span class="customer-product-meta">+${products.length - 2} mặt hàng khác</span>` : ''}</div>`
     : '<span class="customer-never">—</span>';
-  const labels = (customer.labels || []).map(labelById).filter(Boolean);
-  const tags = labels.length
-    ? `<div class="customer-tag-wrap">${labels.slice(0, 2).map(customerLabelChip).join('')}${
-        labels.length > 2 ? `<span class="customer-product-meta">+${labels.length - 2}</span>` : ''}</div>`
-    : '<span class="customer-never">—</span>';
   const province = customerProvince(customer);
   const name = customer.name || (customer.psid ? 'Khách Facebook' : 'Khách hàng');
 
@@ -1650,13 +1791,14 @@ function customerRowHtml(customer, index) {
       : ''}</span></td>
     <td class="customer-place"><b>${escapeHtml(province || '—')}</b><small title="${escapeHtml(customer.address || '')}">${escapeHtml(customer.address || '')}</small></td>
     <td class="customer-mid"><span class="customer-state customer-state--${state.key}">${state.label}</span></td>
-    <td class="customer-tags customer-mid">${tags}</td>
     <td class="customer-mid customer-order-count">${Number(customer.orderCount) || 0}</td>
     <td class="customer-mid customer-money">${escapeHtml(formatCustomerMoney(customer.orderTotal))}</td>
     <td class="customer-bought customer-mid">${productCell}</td>
     <td class="customer-bought-when">${customer.lastOrderAt
       ? `<b>${escapeHtml(formatCustomerDate(customer.lastOrderAt))}</b><small>${escapeHtml(timeSince(customer.lastOrderAt))}</small>`
       : '<span class="customer-never">Chưa mua</span>'}</td>
+    <td class="customer-contact-cell customer-mid">${customerContactHtml(customer)}</td>
+    <td class="customer-note-cell">${customerNoteCellHtml(customer)}</td>
   </tr>`;
 }
 
@@ -1677,6 +1819,7 @@ function renderCustomers(items, total) {
     if (customersSortKey === 'name') return customersSortDir * String(first.name || '').localeCompare(String(second.name || ''), 'vi');
     if (customersSortKey === 'province') return customersSortDir * customerProvince(first).localeCompare(customerProvince(second), 'vi');
     if (customersSortKey === 'state') return customersSortDir * ((first.orderCount || 0) - (second.orderCount || 0));
+    if (customersSortKey === 'contactStatus') return customersSortDir * (customerContactRank.get(customerContactOf(first)) - customerContactRank.get(customerContactOf(second)));
     return customersSortDir * ((Number(first[customersSortKey]) || 0) - (Number(second[customersSortKey]) || 0));
   });
   customersItems = customersShown;
@@ -2000,6 +2143,26 @@ function setCampaignsBusy(button, busy, busyLabel, idleLabel) {
   button.classList.toggle('is-busy', busy);
   button.textContent = busy ? busyLabel : idleLabel;
 }
+
+// Quản lý chiến dịch chia tab "Chiến dịch | Đối thủ" (10/10): mỗi lúc một thẻ thay vì cuộn qua cả hai. Nhớ tab đang
+// mở trong trình duyệt này (chỉ là tiện lợi, đọc/ghi hỏng thì về tab Chiến dịch).
+const campaignsPageTabs = document.querySelector('#campaigns-page-tabs');
+const campaignsPageKey = 'crm-campaigns-page';
+function showCampaignsPage(page) {
+  const target = page === 'competitors' ? 'competitors' : 'campaigns';
+  for (const button of campaignsPageTabs?.querySelectorAll('[data-campaigns-page]') || []) {
+    const active = button.dataset.campaignsPage === target;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  }
+  for (const panel of document.querySelectorAll('[data-campaigns-panel]')) panel.classList.toggle('hidden', panel.dataset.campaignsPanel !== target);
+  try { localStorage.setItem(campaignsPageKey, target); } catch { /* không lưu được thì thôi */ }
+}
+campaignsPageTabs?.addEventListener('click', event => {
+  const button = event.target.closest('[data-campaigns-page]');
+  if (button) showCampaignsPage(button.dataset.campaignsPage);
+});
+try { showCampaignsPage(localStorage.getItem(campaignsPageKey)); } catch { showCampaignsPage('campaigns'); }
 
 async function loadCampaigns() {
   if (!campaignsTable) return;
@@ -3695,6 +3858,7 @@ for (const [key, input] of Object.entries(customersFilters)) {
   if (key === 'q') continue;
   input?.addEventListener('change', resetCustomersView);
 }
+customersFilters.bought?.addEventListener('change', () => syncCustomersBoughtRange({ focus: true }));
 
 customersTabsBar?.addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]');
@@ -3713,6 +3877,7 @@ customersMoreToggle?.addEventListener('click', () => {
 
 document.querySelector('#customers-clear-filters')?.addEventListener('click', () => {
   for (const input of Object.values(customersFilters)) if (input) input.value = '';
+  syncCustomersBoughtRange();
   resetCustomersView();
 });
 
@@ -3731,6 +3896,11 @@ customersRefreshButton?.addEventListener('click', () => {
 });
 
 customersTable?.addEventListener('change', event => {
+  const contact = event.target.closest('[data-contact]');
+  if (contact) {
+    saveCustomerContact(contact);
+    return;
+  }
   const all = event.target.closest('#customers-pick-all');
   const slice = customersShown.slice((customersPage - 1) * customersPageSize, customersPage * customersPageSize);
   if (all) {
@@ -3756,9 +3926,15 @@ customersTable?.addEventListener('click', event => {
     if (customersSortKey === key) customersSortDir = -customersSortDir;
     else {
       customersSortKey = key;
-      customersSortDir = key === 'name' || key === 'province' ? 1 : -1;
+      customersSortDir = key === 'name' || key === 'province' || key === 'contactStatus' ? 1 : -1;
     }
     renderCustomers(customersAll, customersAll.length);
+    return;
+  }
+  const noteButton = event.target.closest('[data-note-edit]');
+  if (noteButton) {
+    const customer = customersAll.find(item => item.id === noteButton.dataset.noteEdit);
+    if (customer) openCustomerNoteEditor(noteButton.closest('td'), customer);
     return;
   }
   const copy = event.target.closest('[data-copy]');
@@ -3821,8 +3997,9 @@ document.addEventListener('keydown', event => {
   }
 });
 customersTable?.addEventListener('click', event => {
-  // Bấm vào ô tích chọn, nút chép số hay tiêu đề cột thì không mở hồ sơ khách.
-  if (event.target.closest('.customer-pick') || event.target.closest('[data-copy]') || event.target.closest('th')) return;
+  // Bấm vào ô tích chọn, nút chép số, tiêu đề cột, ô Liên hệ hay ô Ghi chú thì không mở hồ sơ khách.
+  if (event.target.closest('.customer-pick') || event.target.closest('[data-copy]') || event.target.closest('th')
+    || event.target.closest('.customer-contact-cell') || event.target.closest('.customer-note-cell')) return;
   const row = event.target.closest('tr[data-customer-index]');
   if (!row) return;
   const customer = customersItems[Number(row.dataset.customerIndex)];
@@ -5046,11 +5223,63 @@ function renderShippingTracking(tracking) {
   shippingResult.innerHTML = `
     <header class="shipping-order-summary">
       <div class="shipping-order-title">Mã Vận Đơn: <strong>${escapeHtml(tracking.trackingNumber)}</strong><span class="shipping-status-tag">${escapeHtml(vietnameseStatus)}</span></div>
+      ${tracking.driverPhone ? `<div class="shipping-driver">Tài xế SPX: <a href="tel:${escapeHtml(tracking.driverPhone)}">${escapeHtml(tracking.driverPhone)}</a></div>` : ''}
       ${tracking.customerTrackingNumber ? `<div class="shipping-customer-code">Mã khách hàng: ${escapeHtml(tracking.customerTrackingNumber)}</div>` : ''}
       ${tracking.expectedDeliveryAt ? `<div class="shipping-edd"><i class="shipping-edd-calendar" aria-hidden="true"></i><span>Ngày dự kiến giao hàng: ${escapeHtml(formatShippingDate(tracking.expectedDeliveryAt))}</span><i class="shipping-edd-info" aria-hidden="true"></i></div>` : ''}
     </header>
     ${renderShippingMilestones(tracking)}
     <ol class="shipping-timeline">${timeline}</ol>`;
+}
+
+/* Tra đơn ngoài sàn (10/10): nhân viên thường chỉ có SĐT hay tên khách. Mã bắt đầu bằng SPX thì tra thẳng hành trình;
+   còn lại hỏi máy chủ các đơn CRM khớp (hội thoại + landing), mỗi đơn kèm vận đơn đã ghép từ Sapo để bấm xem. */
+function renderShippingMatches(items, query) {
+  if (!items.length) {
+    renderShippingError(`Không tìm thấy đơn nào khớp "${query}". Thử số điện thoại đầy đủ hoặc mã vận đơn.`);
+    return;
+  }
+  shippingResult.innerHTML = `<div class="shipping-matches">
+    <h2>${items.length} đơn khớp "${escapeHtml(query)}"</h2>
+    ${items.map(item => {
+      const shipment = item.shipment;
+      const action = !shipment
+        ? '<span class="shipping-match-none">Chưa có mã vận đơn</span>'
+        : shipment.isSpx
+          ? `<button type="button" data-tracking-number="${escapeHtml(shipment.trackingNumber)}">Xem hành trình SPX</button>`
+          : shipment.trackingUrl ? `<a href="${escapeHtml(shipment.trackingUrl)}" target="_blank" rel="noopener">Tra trên ${escapeHtml(shipment.carrier || 'hãng')}</a>` : '';
+      return `<article class="shipping-match">
+        <div class="shipping-match-main">
+          <strong>${escapeHtml(item.name || 'Khách')}</strong> <span>${escapeHtml(item.phone)}</span> <small>${escapeHtml(item.source)} · ${escapeHtml(formatShippingTime(item.createdAt))}${item.cancelled ? ' · đơn đã hủy' : ''}</small>
+          <small>${escapeHtml(item.products.join(', '))}${item.total ? ` · ${escapeHtml(formatVnMoney(item.total))}` : ''}</small>
+          ${shipment ? `<small>${escapeHtml(shipment.carrier)} ${escapeHtml(shipment.trackingNumber)} · <b>${escapeHtml(shipment.stageLabel)}</b>${shipment.driverPhone ? ` · tài xế <a href="tel:${escapeHtml(shipment.driverPhone)}">${escapeHtml(shipment.driverPhone)}</a>` : ''}</small>` : ''}
+        </div>
+        <div class="shipping-match-action">${action}</div>
+      </article>`;
+    }).join('')}
+  </div>`;
+}
+
+async function lookupShipping(value) {
+  const query = String(value || '').trim();
+  if (/^SPX/i.test(query)) return lookupSpxTracking(query);
+  if (query.replace(/\s/g, '').length < 3) {
+    showToast('Nhập số điện thoại, tên khách, mã đơn hoặc mã vận đơn.', 'warning');
+    shippingTrackingInput?.focus();
+    return;
+  }
+  shippingTrackingSubmit.disabled = true;
+  renderShippingLoading(query);
+  try {
+    const result = await readApiResponse(await fetch(`/api/shipping/lookup?q=${encodeURIComponent(query)}`));
+    const items = Array.isArray(result.items) ? result.items : [];
+    // Đúng một đơn có vận đơn SPX: mở luôn hành trình, khỏi bấm thêm.
+    if (items.length === 1 && items[0].shipment?.isSpx) return lookupSpxTracking(items[0].shipment.trackingNumber);
+    renderShippingMatches(items, query);
+  } catch (error) {
+    renderShippingError(error.message || 'Chưa tra được đơn.');
+  } finally {
+    shippingTrackingSubmit.disabled = false;
+  }
 }
 
 async function lookupSpxTracking(value) {
@@ -11483,7 +11712,12 @@ navItems.forEach(item => {
 
 shippingTrackingForm?.addEventListener('submit', event => {
   event.preventDefault();
-  lookupSpxTracking(shippingTrackingInput?.value);
+  lookupShipping(shippingTrackingInput?.value);
+});
+// Danh sách đơn khớp: nút "Xem hành trình SPX" mang mã vận đơn.
+shippingResult?.addEventListener('click', event => {
+  const button = event.target.closest('.shipping-match [data-tracking-number]');
+  if (button) lookupSpxTracking(button.dataset.trackingNumber);
 });
 shippingRecentList?.addEventListener('click', event => {
   const item = event.target.closest('[data-tracking-number]');

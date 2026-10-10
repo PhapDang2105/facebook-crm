@@ -54,12 +54,6 @@ export function loadIntentModel() {
   return cached || null;
 }
 
-/** Nạp lại (sau khi huấn luyện lại) mà không cần khởi động lại. */
-export function reloadIntentModel() {
-  cached = null;
-  return loadIntentModel();
-}
-
 /**
  * Dự đoán bằng một mô hình đã nạp (loadIntentModelFrom): dùng cho replay/so sánh nhiều mô hình.
  * @returns {{ templateId: string, confidence: number, margin: number, second?: string, topK: { templateId: string, p: number }[] } | null}

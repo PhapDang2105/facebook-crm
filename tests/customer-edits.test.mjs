@@ -13,9 +13,11 @@ process.on('exit', () => rmSync(directory, { recursive: true, force: true }));
 const {
   addCustomerNote,
   applyCustomerEdits,
+  CONTACT_STATUSES,
   customerEditKey,
   listCustomerNotes,
   readCustomerEdits,
+  setCustomerContactStatus,
   setCustomerLabels,
   updateCustomerProfile
 } = await import('../app/customer-edits.mjs');
@@ -125,4 +127,49 @@ test('khách không có gì trong kho thì đi qua nguyên vẹn', async () => {
   assert.equal(untouched.name, 'Khách Gốc');
   assert.equal(untouched.staffNoteCount, undefined);
   assert.equal(untouched.editKey, 'phone:0988000111');
+});
+
+test('trạng thái liên hệ (cột Liên hệ): chọn rồi phủ lên khách kèm người chọn, lúc chọn; theo SĐT khi khách đổi mã; "Chưa liên hệ" là gỡ; mã lạ bị từ chối', async () => {
+  const person = (extra = {}) => buyer({ id: 'export:0911222333', phone: '0911222333', ...extra });
+  const key = customerEditKey(person());
+  assert.deepEqual(Object.keys(CONTACT_STATUSES), ['none', 'called', 'unreachable', 'offer']);
+  assert.deepEqual(Object.values(CONTACT_STATUSES), ['Chưa liên hệ', 'Đã gọi điện', 'Không gọi được', 'Đã gửi ưu đãi']);
+
+  assert.equal((await overlay([person()])).contactStatus, undefined, 'chưa ai chọn: không có trạng thái (giao diện hiện Chưa liên hệ)');
+  const first = await setCustomerContactStatus(key, 'called', 1_700_000_100_000, { by: { username: 'ha', name: 'Hà' } });
+  assert.deepEqual(first, { previous: 'none', status: 'called', at: 1_700_000_100_000 });
+  let shown = await overlay([person()]);
+  assert.equal(shown.contactStatus, 'called');
+  assert.equal(shown.contactStatusAt, 1_700_000_100_000);
+  assert.equal(shown.contactStatusBy, 'Hà');
+  // Cùng người, nay nhắn tin cho Page nên mã khách đổi: trạng thái đi theo số điện thoại.
+  assert.equal((await overlay([person({ id: '110068281327307:psid-77', phone: '0911 222 333' })])).contactStatus, 'called');
+
+  assert.equal((await setCustomerContactStatus(key, 'unreachable', 1_700_000_200_000)).previous, 'called');
+  assert.equal((await setCustomerContactStatus(key, 'offer', 1_700_000_250_000)).previous, 'unreachable');
+  shown = await overlay([person()]);
+  assert.equal(shown.contactStatus, 'offer');
+  assert.equal(shown.contactStatusBy, '', 'không ghi người chọn thì để trống');
+
+  assert.equal((await setCustomerContactStatus(key, 'none', 1_700_000_300_000)).previous, 'offer');
+  assert.equal((await overlay([person()])).contactStatus, undefined, 'về Chưa liên hệ: gỡ trạng thái đã lưu');
+
+  await assert.rejects(() => setCustomerContactStatus(key, 'blocked'), /không hợp lệ/);
+  await assert.rejects(() => setCustomerContactStatus(key, '__proto__'), /không hợp lệ/);
+  await assert.rejects(() => setCustomerContactStatus('__proto__', 'called'), /không hợp lệ/);
+});
+
+test('ghi chú gần nhất (cột Ghi chú): lấy cái mới hơn giữa ghi chú hộp chi tiết và ghi chú hội thoại', async () => {
+  const person = (extra = {}) => buyer({ id: 'export:0933444555', phone: '0933444555', ...extra });
+  const key = customerEditKey(person());
+  await addCustomerNote(key, { text: 'Khách hẹn gọi lại thứ 2', author: { username: 'ha', name: 'Hà' } }, 1_700_000_500_000);
+  // Ghi chú hội thoại (customers.mjs đặt lastNote) cũ hơn: cột hiện ghi chú hộp chi tiết, kèm người viết.
+  let shown = await overlay([person({ lastNote: { text: 'ghi chú hội thoại cũ', at: 1_700_000_400_000, by: 'Lan' } })]);
+  assert.deepEqual(shown.lastNote, { text: 'Khách hẹn gọi lại thứ 2', at: 1_700_000_500_000, by: 'Hà' });
+  // Ghi chú hội thoại mới hơn: giữ nguyên.
+  shown = await overlay([person({ lastNote: { text: 'đã chốt lại đơn', at: 1_700_000_600_000, by: 'Lan' } })]);
+  assert.equal(shown.lastNote.text, 'đã chốt lại đơn');
+  // Không có ghi chú hội thoại: ghi chú hộp chi tiết; gõ tay `by` khi chưa bật đăng nhập.
+  await addCustomerNote(key, { text: 'Gửi mã giảm giá qua Zalo', by: 'Minh' }, 1_700_000_700_000);
+  assert.deepEqual((await overlay([person()])).lastNote, { text: 'Gửi mã giảm giá qua Zalo', at: 1_700_000_700_000, by: 'Minh' });
 });

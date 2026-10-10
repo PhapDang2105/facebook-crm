@@ -102,8 +102,6 @@ export function groupOf(templateId) {
   return GROUP_OF_TEMPLATE[String(templateId || '')] || 'OTHER';
 }
 
-/** Nhóm con → nhóm tầng 1. */
-export const groupOfSubgroup = subgroup => (ANSWER_SUBGROUPS.includes(subgroup) ? 'ANSWER' : CASCADE_GROUPS.includes(subgroup) ? subgroup : 'OTHER');
 
 /** Nhóm tầng 1 mà mô hình tầng được phép tự trả lời khi bật (ORDER do máy trạng thái slot quyết; SUPPORT chuyển người/tra đơn). */
 export const CASCADE_SAFE_GROUPS = new Set(['ANSWER']);
@@ -199,13 +197,13 @@ export function loadCascadeModel() {
   return cached || null;
 }
 
-/** Nạp lại sau khi thay tệp trọng số, không cần khởi động lại (như reloadIntentModel). */
+/** Nạp lại sau khi thay tệp trọng số, không cần khởi động lại. */
 export function reloadCascadeModel() {
   cached = null;
   return loadCascadeModel();
 }
 
-export { loadCascadeModel as loadCascade, reloadCascadeModel as reloadCascade };
+export { reloadCascadeModel as reloadCascade };
 
 /** Ứng viên tầng 2 của một nhóm: [{ templateId, p (tích), pWithin, marginWithin, group, subGroup }]. Không có mô hình con → ứng viên null. */
 function candidatesOf(model, group, pGroup, row, answerMode) {

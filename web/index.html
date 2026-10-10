@@ -239,7 +239,6 @@
               </section>
               <section class="customer-form-section customer-products-section">
                 <h3><svg class="customer-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.2 4.6h2.1l2.3 10h9.4l1.9-7.1H6.6"></path><circle cx="9.6" cy="18.8" r="1.4"></circle><circle cx="16.4" cy="18.8" r="1.4"></circle></svg> Sản phẩm
-                  <button class="customer-section-link" id="customer-open-warehouse" type="button">Kho Giọt Nắng <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
                 </h3>
                 <div class="customer-form-body">
                   <div class="customer-product-table">
@@ -260,7 +259,6 @@
               </section>
               <section class="customer-form-section">
                 <h3><svg class="customer-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.2" y="5.8" width="17.6" height="12.6" rx="2.2"></rect><path d="M3.2 10.2h17.6"></path></svg> Thanh toán
-                  <button class="customer-section-link" id="customer-add-payment" type="button">Thêm hình thức <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
                 </h3>
                 <div class="customer-form-body">
                   <div class="customer-payment-options"><label><input id="customer-free-shipping" type="checkbox"> Miễn phí giao hàng</label><label><input id="customer-bank-transfer" type="checkbox"> Chuyển khoản</label></div>
@@ -271,7 +269,6 @@
               </section>
               <section class="customer-form-section">
                 <h3><svg class="customer-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.2 7h1.6M4.2 12h1.6M4.2 17h1.6M9 7h10.8M9 12h10.8M9 17h10.8"></path></svg> Thông tin khác
-                  <button class="customer-section-link" id="customer-assign-staff" type="button">Phân công <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><path d="M4 19c.8-3.2 2.7-5 5-5s4.2 1.8 5 5M16 11h5M18.5 8.5v5"></path></svg></button>
                 </h3>
                 <div class="customer-form-body">
                   <label class="customer-form-line"><span>Nguồn đơn</span><select id="customer-order-source"><option>Facebook</option><option>Zalo</option><option>Khác</option></select></label>
@@ -286,7 +283,11 @@
       </div>
     </section>
     <section id="campaigns-view" class="view hidden">
-      <section class="settings-card campaigns-card">
+      <nav class="customers-tabs campaigns-page-tabs" id="campaigns-page-tabs" role="tablist" aria-label="Quản lý chiến dịch">
+        <button class="customers-tab active" type="button" role="tab" aria-selected="true" data-campaigns-page="campaigns">Chiến dịch</button>
+        <button class="customers-tab" type="button" role="tab" aria-selected="false" data-campaigns-page="competitors">Đối thủ</button>
+      </nav>
+      <section class="settings-card campaigns-card" data-campaigns-panel="campaigns">
         <header class="settings-card-head campaigns-head">
           <div><h1>Chiến dịch</h1></div>
           <div class="campaigns-head-actions">
@@ -311,7 +312,7 @@
           </aside>
         </div>
       </section>
-      <section class="settings-card campaigns-card competitors-card" aria-labelledby="competitors-title">
+      <section class="settings-card campaigns-card competitors-card hidden" data-campaigns-panel="competitors" aria-labelledby="competitors-title">
         <header class="settings-card-head campaigns-head">
           <div><h1 id="competitors-title">Đối thủ</h1><p>Thư viện quảng cáo và nội dung hợp tác KOL của Meta, cùng mẫu quảng cáo dán tay.</p></div>
           <div class="campaigns-head-actions">
@@ -441,6 +442,30 @@
 
         <div class="customers-toolbar">
           <label class="order-search-control"><input id="customers-search" type="search" aria-label="Tìm khách hàng" placeholder="Tên, số điện thoại, địa chỉ, sản phẩm..."></label>
+          <label class="order-filter-control"><select id="customers-orders" aria-label="Số đơn hàng">
+            <option value="">Mọi số đơn hàng</option>
+            <option value="1-1">Mua 1 đơn</option>
+            <option value="2-2">Mua 2 đơn</option>
+            <option value="2-">Từ 2 đơn trở lên</option>
+            <option value="3-">Từ 3 đơn trở lên</option>
+            <option value="5-">Từ 5 đơn trở lên</option>
+            <option value="10-">Từ 10 đơn trở lên</option>
+          </select></label>
+          <label class="order-filter-control"><select id="customers-bought" aria-label="Thời gian mua hàng, tính theo lần mua cuối" title="Tính theo ngày mua lần cuối">
+            <option value="">Mọi thời gian mua</option>
+            <option value="today">Mua hôm nay</option>
+            <option value="7">Mua trong 7 ngày qua</option>
+            <option value="30">Mua trong 30 ngày qua</option>
+            <option value="90">Mua trong 3 tháng qua</option>
+            <option value="over30">Hơn 30 ngày chưa mua lại</option>
+            <option value="over60">Hơn 60 ngày chưa mua lại</option>
+            <option value="over90">Hơn 90 ngày chưa mua lại</option>
+            <option value="range">Chọn khoảng ngày…</option>
+          </select></label>
+          <span class="customers-date-range hidden" id="customers-bought-range">
+            <label class="customers-date-control"><span>Từ</span><input id="customers-bought-from" type="date" aria-label="Mua lần cuối từ ngày"></label>
+            <label class="customers-date-control"><span>Đến</span><input id="customers-bought-to" type="date" aria-label="Mua lần cuối đến ngày"></label>
+          </span>
           <label class="order-filter-control"><select id="customers-source" aria-label="Nguồn khách">
             <option value="">Tất cả nguồn khách</option>
             <option value="inbox">Tin nhắn</option>
@@ -463,13 +488,6 @@
             <option value="male">Nam</option>
           </select></label>
           <label class="order-filter-control"><select id="customers-product" aria-label="Sản phẩm đã mua"><option value="">Mọi sản phẩm</option></select></label>
-          <label class="order-filter-control"><select id="customers-ordered-within" aria-label="Thời điểm mua">
-            <option value="">Mọi thời điểm mua</option>
-            <option value="7">Mua trong 7 ngày</option>
-            <option value="14">Mua trong 14 ngày</option>
-            <option value="30">Mua trong 1 tháng</option>
-            <option value="90">Mua trong 3 tháng</option>
-          </select></label>
           <label class="order-filter-control"><select id="customers-active-within" aria-label="Tương tác gần đây">
             <option value="">Mọi mức tương tác</option>
             <option value="7">Có nhắn trong 7 ngày</option>
@@ -481,13 +499,6 @@
             <option value="2">Từ 2 túi/đơn</option>
             <option value="3">Từ 3 túi/đơn</option>
             <option value="5">Từ 5 túi/đơn</option>
-          </select></label>
-          <label class="order-filter-control"><select id="customers-min-orders" aria-label="Số đơn tối thiểu">
-            <option value="">Mọi số đơn</option>
-            <option value="2">Từ 2 đơn</option>
-            <option value="3">Từ 3 đơn</option>
-            <option value="5">Từ 5 đơn</option>
-            <option value="10">Từ 10 đơn</option>
           </select></label>
           <button class="customers-clear-filters" id="customers-clear-filters" type="button"><img src="/assets/icons/customers/filter-dismiss.svg" alt="">Xóa lọc</button>
         </div>
@@ -515,7 +526,7 @@
           <div class="shipping-primary-column">
             <form class="shipping-search-card" id="shipping-tracking-form">
               <div class="shipping-search-row">
-                <input id="shipping-tracking-input" type="search" inputmode="text" autocomplete="off" spellcheck="false" aria-label="Mã vận đơn SPX" placeholder="Nhập mã đơn hàng bạn cần tra cứu">
+                <input id="shipping-tracking-input" type="search" inputmode="text" autocomplete="off" spellcheck="false" aria-label="Số điện thoại, tên khách, mã đơn hoặc mã vận đơn" placeholder="Số điện thoại, tên khách, mã đơn hoặc mã vận đơn SPX">
                 <button id="shipping-tracking-submit" type="submit">Theo dõi</button>
               </div>
             </form>
@@ -657,16 +668,11 @@
                     <div><strong>Mô hình AI</strong></div>
                   </div>
                   <div class="chatbot-general-settings-pane llm-pane">
-                    <div class="chatbot-llm-pane-tabs"><button class="active" type="button">CÀI ĐẶT</button><button type="button">CHẠY LẦN CUỐI</button></div>
                     <div class="llm-pane-body">
 
                       <section class="llm-block">
                         <div class="llm-block-head">
                           <span class="llm-label">MÔ HÌNH<em class="llm-required">*</em></span>
-                          <span class="llm-head-actions">
-                            <button class="llm-icon-btn" type="button" title="Chèn biến" aria-label="Chèn biến"><span class="llm-var-glyph">{x}</span></button>
-                            <button class="llm-icon-btn" type="button" title="Sửa" aria-label="Sửa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16Z"></path><path d="m14 6 4 4"></path></svg></button>
-                          </span>
                         </div>
                         <div class="llm-model-row">
                           <span class="llm-model-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5 14 10l6.5 2-6.5 2-2 6.5-2-6.5L3.5 12 10 10Z"></path></svg></span>
@@ -687,9 +693,7 @@
                           <span class="llm-role">SYSTEM<svg class="llm-info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11.2v5"></path><circle cx="12" cy="7.9" r="1" fill="currentColor" stroke="none"></circle></svg></span>
                           <span class="llm-token" id="chatbot-settings-system-prompt-counter">0</span>
                           <svg class="llm-spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 13.7 9.3 19.5 11l-5.8 1.7L12 18.5l-1.7-5.8L4.5 11l5.8-1.7Z"></path></svg>
-                          <span class="llm-jinja">Jinja<span class="llm-switch llm-switch--xs" aria-hidden="true"><span></span></span></span>
                           <span class="llm-prompt-tools">
-                            <button class="llm-icon-btn" type="button" title="Chèn biến" aria-label="Chèn biến"><span class="llm-var-glyph">{x}</span></button>
                             <button class="llm-icon-btn" id="chatbot-prompt-copy" type="button" title="Sao chép" aria-label="Sao chép"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"></rect><path d="M15.5 5.5h-8a2 2 0 0 0-2 2v8"></path></svg></button>
                             <button class="llm-icon-btn" id="chatbot-prompt-expand" type="button" title="Mở rộng" aria-label="Mở rộng"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"></path></svg></button>
                           </span>

@@ -248,11 +248,10 @@ export function giftsForKey(key, { livestream = false } = {}) {
 }
 
 /**
- * 01/10 (chủ shop): quà live và quà khuyến mãi KHÔNG cộng dồn (đơn từng bị tặng
- * hai bát: "Quạt + Bát gáo dừa" của live và bộ bát + muỗng). Đơn khách live đúng
- * 2 túi chỉ nhận quà live (bỏ quà hiện vật khác, giữ miễn ship); từ 3 túi chỉ nhận
- * quà khuyến mãi thường (bát + muỗng), không thêm quà live — kể cả khi bảng quà
- * trên máy chủ thiếu "Tối đa 2 túi" cho quà live.
+ * Quà khách live (chủ shop 08/10): 2 túi → miễn ship + Quạt; từ 3 túi → miễn ship + Quạt + bát + muỗng.
+ * Đơn khách live đúng 2 túi chỉ nhận quà live (bỏ quà hiện vật thường, giữ miễn ship). Từ 3 túi giữ quà live
+ * NHƯNG bỏ quà live gộp kiểu cũ 'qua-tang-live' ("Quạt + Bát gáo dừa", 01/10) — nó có sẵn một bát, cộng bộ bát
+ * + muỗng là thành hai bát (lỗi từng gặp), kể cả khi bảng quà trên máy chủ thiếu "Tối đa 2 túi" cho quà đó.
  */
 export function applyLiveGiftPolicy(gifts, totalQuantity) {
   const list = Array.isArray(gifts) ? gifts : [];

@@ -15,7 +15,7 @@
 // gửi qua cầu nối Pancake (tiện ích Pancake gửi được ngoài 24 giờ).
 import { isCancelledOrder, isIncompleteOrder } from './order-facts.mjs';
 import { SHIPMENT_STAGES, STAGE_TEMPLATES, shipmentStage, shipmentStageLabel } from './shipment-stage.mjs';
-import { MESSENGER_WINDOW_MARGIN_MS, MESSENGER_WINDOW_MS, messengerWindowOpen } from './messenger-window.mjs';
+import { messengerWindowOpen } from './messenger-window.mjs';
 export * from './shipment-stage.mjs';
 
 const HOUR = 60 * 60 * 1000;
@@ -24,8 +24,6 @@ export const shipmentMatchBeforeMs = 10 * DAY;
 const shipmentMatchAfterMs = 2 * HOUR;
 // Giai đoạn đã qua quá lâu thì không báo nữa (tin "đang giao" sau 2 ngày là sai sự thật).
 export const shipmentStageNoticeMaxAgeMs = 2 * DAY;
-// Messenger: tin tự động chỉ gửi được khi khách nhắn hộp thư trong 24 giờ (chừa 1 giờ như bám đuổi).
-export const shipmentNoticeWindowMs = MESSENGER_WINDOW_MS - MESSENGER_WINDOW_MARGIN_MS;
 
 
 const phoneKey = value => String(value || '').replace(/\D/g, '').slice(-9);

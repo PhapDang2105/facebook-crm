@@ -173,7 +173,7 @@ Giao diện nói rõ điều này mỗi khi thực hiện. Đừng bỏ dòng th
 ## Kiểm thử
 
 ```powershell
-.\tools\node\node.exe .\tests\meta-webhook.test.mjs
+.\tools\node\node.exe --test .\tests\assertions.test.mjs
 .\tools\node\node.exe .\tests\integration\meta-webhook.integration.mjs
 ```
 

@@ -71,8 +71,13 @@ export function normalizeSpxPayload(payload, requestedTrackingNumber) {
     'Đã tiếp nhận thông tin vận đơn'
   );
 
+  // Số tài xế (10/10): spx.vn trả "84xxxxxxxxx" khi đơn đã giao cho tài xế → dạng 0xxxxxxxxx; không có hay lạ thì ''.
+  const driverDigits = String(trackingInfo.driver_phone_number || data.driver_phone_number || '').replace(/\D/g, '');
+  const driverPhone = /^84\d{9}$/.test(driverDigits) ? `0${driverDigits.slice(2)}` : (/^0\d{9}$/.test(driverDigits) ? driverDigits : '');
+
   return {
     provider: 'SPX Express',
+    driverPhone,
     trackingNumber,
     customerTrackingNumber: firstText(data.parcel_info?.customer_tracking_no),
     expectedDeliveryAt: toIsoTime(data.edd_info?.edd_max ?? data.edd_info?.edd_min),

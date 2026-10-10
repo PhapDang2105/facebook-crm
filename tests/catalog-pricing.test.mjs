@@ -320,8 +320,8 @@ test('sửa giá, tắt quà, bỏ tick tổ hợp, đổi phí ship có hiệu 
   gifts.items.find(gift => gift.id === 'muong-dua').active = false;
   gifts.shippingFee = 20000;
   // Miễn ship giờ chỉ từ 3 sản phẩm và không áp dụng cho Túi Xanh.
-  gifts.items[0].minQuantity = 3;
-  gifts.items[0].excludedSkus = ['GRA-XANH-Z450'];
+  gift('freeship').minQuantity = 3;
+  gift('freeship').excludedSkus = ['GRA-XANH-Z450'];
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   catalog.reloadCatalog();
   assert.equal(basket({ sku: 'GRA-XANH-Z450', quantity: 1 }).total, 219000);

@@ -12,6 +12,7 @@ import { createWriteQueue, drainAllWrites, readJsonFile, writeJsonAtomic } from 
 import { auditFiltersFrom, canReadAudit, contentEtag, conversationOrdersFingerprint, etagMatches, createLeaseBook, createSeenOnce, fileVersionStamp, friendlyAdsError, friendlyAdsStatus, friendlyAiTestError, friendlyCampaignInsights, createStaffNoteWriter, hasStaffSession, pancakeWebhookDecision, publicNoticePage, purchaseLabelFingerprint, qrVisitorKey, staticCacheControl } from './server-helpers.mjs';
 import { botPanelStateChanged } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
+import { lookupShippingOrders } from './shipping-lookup.mjs';
 import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
@@ -79,7 +80,7 @@ import { encryptToken, getPageAccessToken, publicChannel, readChannelStore, writ
 import { fetchPageSubscription, metaRequest, releaseThreadControl, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
 import { archiveStatusLabel, customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listCustomers, orderHistoryKey } from './customers.mjs';
-import { addCustomerNote, listCustomerNotes, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
+import { addCustomerNote, CONTACT_STATUSES, listCustomerNotes, setCustomerContactStatus, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
 import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
@@ -2961,8 +2962,9 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && (url.pathname === '/api/customers' || url.pathname === '/api/customers/export.csv' || url.pathname === '/api/customers/audience.csv')) {
       const filters = Object.fromEntries([
         'q', 'channelId', 'source', 'gender', 'label', 'activeWithin',
-        // Remarketing: mua trong N ngày, mua sản phẩm nào, combo mấy túi, mua mấy lần.
-        'orderedWithin', 'product', 'combo', 'minOrders'
+        // Remarketing: mua trong N ngày hay trong khoảng ngày (theo lần mua cuối), mua sản phẩm nào, combo mấy túi,
+        // mua bao nhiêu đơn (từ–đến).
+        'orderedWithin', 'orderedFrom', 'orderedTo', 'product', 'combo', 'minOrders', 'maxOrders'
       ].map(key => [key, url.searchParams.get(key) || '']));
       const result = await listCustomers(filters);
       // Tải danh sách khách (dữ liệu cá nhân) ra tệp: ghi nhật ký ai tải, bao nhiêu khách, lọc gì.
@@ -3031,6 +3033,25 @@ const server = http.createServer(async (request, response) => {
             details: { added: change.added, removed: change.removed }
           }, actor);
           return sendJson(response, 200, fresh);
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message });
+        }
+      }
+
+      // Cột "Liên hệ" màn Khách hàng: nhân viên chọn Chưa liên hệ / Đã gọi điện / Không gọi được / Đã gửi ưu đãi.
+      if (customerRoute[1] === 'contact' && request.method === 'PUT') {
+        try {
+          const actor = await requestActor(request);
+          const payload = await readBody(request);
+          const saved = await setCustomerContactStatus(customer.editKey, payload.status, Date.now(), { by: actorStamp(actor) });
+          invalidateBuyersCache();
+          if (saved.previous !== saved.status) {
+            audit(request, 'customer.contact', {
+              target: { type: 'customer', id: customer.id, name: customer.name || '' },
+              summary: `Liên hệ khách: ${CONTACT_STATUSES[saved.previous]} → ${CONTACT_STATUSES[saved.status]}.`
+            }, actor);
+          }
+          return sendJson(response, 200, await findCustomerById(customer.id));
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }
@@ -4001,6 +4022,11 @@ const server = http.createServer(async (request, response) => {
       } catch (error) {
         return sendJson(response, 502, { error: `Không gửi được qua API (khách ngoài 24 giờ thì gửi qua Pancake): ${error.message}` });
       }
+    }
+    // Tra đơn ngoài sàn theo SĐT / tên / mã đơn / mã vận đơn (trang Vận chuyển): đơn hội thoại + đơn landing, kèm vận đơn.
+    if (request.method === 'GET' && url.pathname === '/api/shipping/lookup') {
+      const [store, landingOrders] = await Promise.all([readMessagingStore(), listLandingOrders().catch(() => [])]);
+      return sendJson(response, 200, { items: lookupShippingOrders(url.searchParams.get('q'), { conversations: store.conversations || [], landingOrders }) });
     }
     if (request.method === 'GET' && url.pathname === '/api/shipping/spx/track') {
       try {

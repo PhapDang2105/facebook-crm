@@ -84,7 +84,8 @@ export const AUDIT_ACTIONS = Object.freeze({
   'settings.staff': 'Sửa nhân sự',
   'settings.qr': 'Sửa mã QR',
   'settings.channels': 'Sửa kênh kết nối',
-  'settings.pos': 'Sửa kết nối POS'
+  'settings.pos': 'Sửa kết nối POS',
+  'settings.shopee': 'Sửa kết nối Shopee'
 });
 
 export function auditActionLabel(action) {

@@ -239,17 +239,24 @@ test('A5: mọi tin Page mang cờ system là dấu nguồn; "đã trả lời m
   assert.equal(late.greeted.length, 1);
 });
 
-test('A6: lịch sử Pancake có tin cũ hơn lượt bấm → bỏ khớp (khách cũ, kho CRM chưa có); lỗi / quá 5 s → vẫn khớp; không có history → như cũ', async () => {
+test('A6: lịch sử Pancake có tin cũ hơn lượt bấm → 10/10 vẫn khớp (khách cũ nhận thẻ cảm ơn), tắt acceptReturningCustomers thì bỏ khớp như cũ; lỗi / quá 5 s → vẫn khớp', async () => {
   const calls = [];
-  const old = world({ history: async conversation => { calls.push(conversation.pancakeConversationId); return [{ createdAt: Date.now() - 3 * 86_400_000 }, { createdAt: Date.now() }]; } });
+  const olderHistory = async conversation => { calls.push(conversation.pancakeConversationId); return [{ createdAt: Date.now() - 3 * 86_400_000 }, { createdAt: Date.now() }]; };
+  const old = world({ history: olderHistory });
   old.matcher.noteClick({ code: 'tmdt-01', visitor: 'may-8' });
-  const heldOld = await old.matcher.consider([old.incoming('CU', 'Shop ơi đơn của mình tới đâu rồi')]);
+  const heldOld = await old.matcher.consider([old.incoming('CU', 'Bắt đầu')]);
   old.matcher.botDone(heldOld);
-  await until(() => old.matcher.stateOf('CU') === 'dropped', 'bỏ khớp vì Pancake có tin cũ');
+  await until(() => old.greeted.length === 1, 'khách cũ duy nhất trong cửa sổ vẫn được chào');
   assert.deepEqual(calls, [`${PAGE}_CU`]);
-  assert.ok(old.logs.some(line => /bỏ khớp lượt bấm tmdt-01 với CU .*: Pancake có tin từ .*trước lượt bấm/.test(line)), old.logs.join('\n'));
-  assert.equal(old.matcher.pendingClicks(), 1, 'lượt bấm trả lại hàng chờ');
-  assert.equal(old.greeted.length, 0);
+  assert.ok(old.logs.some(line => /CU .*là khách cũ .Pancake có tin từ .*vẫn khớp lượt bấm tmdt-01/.test(line)), old.logs.join('\n'));
+  // Tắt tuỳ chọn: như trước 10/10 — bỏ khớp, trả lượt bấm.
+  const strict = world({ history: olderHistory, acceptReturningCustomers: false });
+  strict.matcher.noteClick({ code: 'tmdt-01', visitor: 'may-8b' });
+  strict.matcher.botDone(await strict.matcher.consider([strict.incoming('CU2', 'Shop ơi đơn của mình tới đâu rồi')]));
+  await until(() => strict.matcher.stateOf('CU2') === 'dropped', 'bỏ khớp vì Pancake có tin cũ');
+  assert.ok(strict.logs.some(line => /bỏ khớp lượt bấm tmdt-01 với CU2 .*: Pancake có tin từ .*trước lượt bấm/.test(line)), strict.logs.join('\n'));
+  assert.equal(strict.matcher.pendingClicks(), 1, 'lượt bấm trả lại hàng chờ');
+  assert.equal(strict.greeted.length, 0);
   // Pancake chỉ có chính tin vừa về → chào.
   const fresh = world({ history: async () => [{ createdAt: Date.now() }] });
   fresh.matcher.noteClick({ code: 'tmdt-01', visitor: 'may-9' });

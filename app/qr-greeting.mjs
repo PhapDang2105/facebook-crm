@@ -568,6 +568,9 @@ export function createBridgeClickMatcher({
   // Tin Pancake chỉ bị coi là "cũ hơn lượt bấm" khi sớm hơn quá `historyGraceMs` (đồng hồ Pancake có thể chậm hơn máy chủ vài giây;
   // khách cũ thật thì tin trước đó cách hàng giờ/ngày).
   historyGraceMs = 60_000,
+  // 10/10 (chủ shop): thẻ cảm ơn đến tay khách ĐÃ mua (thường đã từng nhắn Page) — khách cũ vẫn khớp khi trong cửa sổ chỉ
+  // có đúng hội thoại này (ambiguityMs đã loại trường hợp nhiều hội thoại mới cùng lúc). `false` = loại khách cũ như trước.
+  acceptReturningCustomers = true,
   // R13 fix2 (A4): mỗi máy (dấu vết) / mỗi IP (băm) ghi tối đa `max` lượt bấm trong `windowMs`.
   clickRateLimit = { max: 3, windowMs: 60_000 },
   // R13 fix2 (A5): Pancake vừa đẩy một dòng hệ thống (nguồn vào) trong `lateMarkerWindowMs` → dấu nguồn của hội thoại đang giữ
@@ -766,12 +769,13 @@ export function createBridgeClickMatcher({
       }
       const olderAt = await historyOlderThan(candidate, facts);
       if (candidate.state !== 'resolving') return;
-      if (olderAt) {
+      if (olderAt && !acceptReturningCustomers) {
         click.reservedBy = '';
         candidate.state = 'dropped';
         log(`QR: bỏ khớp lượt bấm ${click.code} với ${candidate.label}: Pancake có tin từ ${new Date(olderAt).toISOString()}, trước lượt bấm — khách cũ mà kho CRM chưa có lịch sử`);
         return;
       }
+      if (olderAt) log(`QR: ${candidate.label} là khách cũ (Pancake có tin từ ${new Date(olderAt).toISOString()}) — vẫn khớp lượt bấm ${click.code} vì chỉ có hội thoại này trong cửa sổ`);
       click.reservedBy = '';
       click.consumed = true;
       candidate.state = 'greeted';

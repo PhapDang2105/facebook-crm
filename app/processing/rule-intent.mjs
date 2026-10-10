@@ -146,13 +146,18 @@ const prep = raw => normalizeColourTypos(raw)
   .replace(/(\d)(?=(?:v[ịi]|lo[ạa]i|m[àa]u)(?![\p{L}]))/giu, '$1 ')
   .replace(/(?<![\p{L}])(?:tuis|tuj|tuii|túii)(?![\p{L}])/giu, 'túi')
   .replace(/n[âa]u\s+(v[ịi]\s+)?ca\s*cao/giu, 'nâu').replace(/ca\s+cao/giu, 'cacao')
-  .replace(/(\d)(t[úu]i|g[óo]i|b[ịi]ch|b[ịi]t)\b/giu, '$1 $2')
-  .replace(/(?<!\d)([1-9]\d?)\s*b\b/giu, '$1 bịch')
-  .replace(/(?<!\d)([1-9]\d?)\s*t\b/giu, '$1 túi')
+  // R17: dòng này bị xoá nhầm ở 3dfc9d5 (09/10) → "2 túi socola", "1 bịt sôcôla" không còn là Túi Nâu.
+  .replace(/s[ôo]\s*-?\s*c[ôo]\s*-?\s*la|socola|chocolate|choco\b/giu, 'nâu')
+  .replace(/(\d)(t[úu]i|g[óo]i|b[ịi]ch|b[ịi]t)(?![\p{L}\p{N}])/giu, '$1 $2')
+  // R17 (inbox1 A1): "2t"/"3b" viết tắt — biên Unicode, không dùng \b: \b coi "ú"/"ị"/"á" là biên nên "3 túi" → "3 túiúi",
+  // "2 bát" → "2 bịchát", luật giỏ/giá hụt mọi câu có "túi" có dấu (09/10 09:51 → 10/10).
+  .replace(/(?<!\d)([1-9]\d?)\s*b(?![\p{L}\p{N}])/giu, '$1 bịch')
+  .replace(/(?<!\d)([1-9]\d?)\s*t(?![\p{L}\p{N}])/giu, '$1 túi')
   // \b không biết chữ có dấu ("vị", "hộp") → biên Unicode ở cuối.
   .replace(/\b(m[ộo]t|hai|ba)\s+(?=(?:t[úu]i|g[óo]i|b[ịi]ch|b[ịi]t|xanh|v[àa]ng|n[âa]u|cacao|combo|h[ộo]p|v[ịi]|lo[ạa]i)(?![\p{L}\p{N}]))/giu, (match, word) => `${NUMBER_WORDS[foldVietnamese(word).toLowerCase()] || word} `)
   .replace(/\b(xanh)\s+450\s*(?:g|gr|gam|gram)?\b/giu, '$1').replace(/\b(v[àa]ng|n[âa]u|cacao)\s+350\s*(?:g|gr|gam|gram)?\b/giu, '$1')
   .replace(/\b(t[úu]i|b[ịi]ch|g[óo]i)\s+450\s*(?:g|gr|gam|gram)?\b/giu, '$1 xanh').replace(/\b450\s*(?:g|gr|gam|gram)\b/giu, 'xanh').replace(/\b450\s+(?=granola|gran\b)/giu, 'xanh ');
+export { prep as prepRuleText };
 // "xanh mint"/"xanh bạc hà" là túi Tropical (hàng live), không phải Túi Xanh: bỏ trước khi đếm màu
 // (như đã bỏ "xanh dương"). Chỉ dùng cho phần đếm giỏ; chuỗi so luật vẫn giữ để bắt LIVE_ONLY.
 // Vòng 12: mọi tên gọi Tropical (xanh mint/min/bạc hà/biển/ngọc/da trời/dương) → token "mint" (GRA-MINT-Z300, bộ đếm

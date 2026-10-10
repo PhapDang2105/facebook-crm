@@ -1593,7 +1593,6 @@ const seedTemplate = id => String(orderGiftFallbackTemplates[id] || '').trim();
 // normalizeChatbotSettings). Mẫu trống trong Cài đặt ('' = tắt) vẫn là tắt. ORDER_EXISTING_CONFIRM: lời mới (hỏi gộp/tách,
 // chủ shop 03/10) chỉ dùng khi bộ mẫu thiếu mã — lời đang chạy trên máy chủ phải áp qua Cài đặt.
 // Quà yến mạch khách quen (chủ shop 03/10): chưa có quy cách/mã POS → chữ chung, sửa một chỗ ở đây khi có mã.
-export const OATS_GIFT_LABEL = '';
 export const OATS_GIFT_NAME = '';
 export const r15FallbackTemplates = Object.freeze({
   BOUGHT_ON_MARKETPLACE: 'Dạ em cảm ơn {title} đã ủng hộ nhà Nắng trên sàn ạ 💛 Đơn trên sàn mình cần hỗ trợ gì thì {title} nhắn em mã đơn để em kiểm tra giúp nha ạ.',

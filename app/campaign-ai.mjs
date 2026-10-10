@@ -16,7 +16,6 @@ import { readChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost } from './network-guard.mjs';
 import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
 
-export const actionKinds = Object.freeze(['scale', 'reduce', 'pause', 'creative', 'watch']);
 export const confidenceLevels = Object.freeze(['cao', 'vừa', 'thấp']);
 
 // Ngưỡng luật (VND). Shop nhỏ bán đồ ăn (granola…), đơn trung bình vài trăm nghìn.

@@ -3544,3 +3544,15 @@ body.role-staff :is(.customers-export, #campaigns-sync, #campaigns-ai-run, #comp
 .llm-prompt.is-expanded { position: fixed; inset: 24px; z-index: 900; background: #fff; border-color: #c7dbff; box-shadow: 0 20px 50px rgba(16, 24, 40, .28); }
 .llm-prompt.is-expanded textarea { font-size: 14px; line-height: 22px; }
 .llm-icon-btn[aria-pressed="true"] { color: #1677ff; }
+
+/* Trang Vận chuyển — tra đơn ngoài sàn theo SĐT/tên (10/10): danh sách đơn khớp và số tài xế SPX. */
+.shipping-driver { margin-top: 6px; color: #344054; font-size: 14px; }
+.shipping-driver a, .shipping-match a[href^="tel:"] { color: #ee4d2d; font-weight: 700; text-decoration: none; }
+.shipping-matches { padding: 18px 20px; }
+.shipping-matches h2 { margin: 0 0 12px; font-size: 16px; }
+.shipping-match { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid #edf1ee; }
+.shipping-match-main { display: grid; gap: 3px; min-width: 0; }
+.shipping-match-main span { color: #344054; font-variant-numeric: tabular-nums; }
+.shipping-match-main small { color: #667085; font-size: 12.5px; overflow-wrap: anywhere; }
+.shipping-match-action button, .shipping-match-action a { display: inline-block; padding: 8px 12px; color: #fff; background: #1f7a45; border: 0; border-radius: 8px; font: inherit; font-size: 13px; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.shipping-match-none { color: #98a2b3; font-size: 12.5px; white-space: nowrap; }

@@ -12,6 +12,7 @@ import { createWriteQueue, drainAllWrites, readJsonFile, writeJsonAtomic } from 
 import { auditFiltersFrom, canReadAudit, contentEtag, conversationOrdersFingerprint, etagMatches, createLeaseBook, createSeenOnce, fileVersionStamp, friendlyAdsError, friendlyAdsStatus, friendlyAiTestError, friendlyCampaignInsights, createStaffNoteWriter, hasStaffSession, pancakeWebhookDecision, publicNoticePage, purchaseLabelFingerprint, qrVisitorKey, staticCacheControl } from './server-helpers.mjs';
 import { botPanelStateChanged } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
+import { lookupShippingOrders } from './shipping-lookup.mjs';
 import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
 import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
@@ -4066,6 +4067,11 @@ const server = http.createServer(async (request, response) => {
       } catch (error) {
         return sendJson(response, 502, { error: `Không gửi được qua API (khách ngoài 24 giờ thì gửi qua Pancake): ${error.message}` });
       }
+    }
+    // Tra đơn ngoài sàn theo SĐT / tên / mã đơn / mã vận đơn (trang Vận chuyển): đơn hội thoại + đơn landing, kèm vận đơn.
+    if (request.method === 'GET' && url.pathname === '/api/shipping/lookup') {
+      const [store, landingOrders] = await Promise.all([readMessagingStore(), listLandingOrders().catch(() => [])]);
+      return sendJson(response, 200, { items: lookupShippingOrders(url.searchParams.get('q'), { conversations: store.conversations || [], landingOrders }) });
     }
     if (request.method === 'GET' && url.pathname === '/api/shipping/spx/track') {
       try {

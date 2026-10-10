@@ -5293,11 +5293,63 @@ function renderShippingTracking(tracking) {
   shippingResult.innerHTML = `
     <header class="shipping-order-summary">
       <div class="shipping-order-title">Mã Vận Đơn: <strong>${escapeHtml(tracking.trackingNumber)}</strong><span class="shipping-status-tag">${escapeHtml(vietnameseStatus)}</span></div>
+      ${tracking.driverPhone ? `<div class="shipping-driver">Tài xế SPX: <a href="tel:${escapeHtml(tracking.driverPhone)}">${escapeHtml(tracking.driverPhone)}</a></div>` : ''}
       ${tracking.customerTrackingNumber ? `<div class="shipping-customer-code">Mã khách hàng: ${escapeHtml(tracking.customerTrackingNumber)}</div>` : ''}
       ${tracking.expectedDeliveryAt ? `<div class="shipping-edd"><i class="shipping-edd-calendar" aria-hidden="true"></i><span>Ngày dự kiến giao hàng: ${escapeHtml(formatShippingDate(tracking.expectedDeliveryAt))}</span><i class="shipping-edd-info" aria-hidden="true"></i></div>` : ''}
     </header>
     ${renderShippingMilestones(tracking)}
     <ol class="shipping-timeline">${timeline}</ol>`;
+}
+
+/* Tra đơn ngoài sàn (10/10): nhân viên thường chỉ có SĐT hay tên khách. Mã bắt đầu bằng SPX thì tra thẳng hành trình;
+   còn lại hỏi máy chủ các đơn CRM khớp (hội thoại + landing), mỗi đơn kèm vận đơn đã ghép từ Sapo để bấm xem. */
+function renderShippingMatches(items, query) {
+  if (!items.length) {
+    renderShippingError(`Không tìm thấy đơn nào khớp "${query}". Thử số điện thoại đầy đủ hoặc mã vận đơn.`);
+    return;
+  }
+  shippingResult.innerHTML = `<div class="shipping-matches">
+    <h2>${items.length} đơn khớp "${escapeHtml(query)}"</h2>
+    ${items.map(item => {
+      const shipment = item.shipment;
+      const action = !shipment
+        ? '<span class="shipping-match-none">Chưa có mã vận đơn</span>'
+        : shipment.isSpx
+          ? `<button type="button" data-tracking-number="${escapeHtml(shipment.trackingNumber)}">Xem hành trình SPX</button>`
+          : shipment.trackingUrl ? `<a href="${escapeHtml(shipment.trackingUrl)}" target="_blank" rel="noopener">Tra trên ${escapeHtml(shipment.carrier || 'hãng')}</a>` : '';
+      return `<article class="shipping-match">
+        <div class="shipping-match-main">
+          <strong>${escapeHtml(item.name || 'Khách')}</strong> <span>${escapeHtml(item.phone)}</span> <small>${escapeHtml(item.source)} · ${escapeHtml(formatShippingTime(item.createdAt))}${item.cancelled ? ' · đơn đã hủy' : ''}</small>
+          <small>${escapeHtml(item.products.join(', '))}${item.total ? ` · ${escapeHtml(formatVnMoney(item.total))}` : ''}</small>
+          ${shipment ? `<small>${escapeHtml(shipment.carrier)} ${escapeHtml(shipment.trackingNumber)} · <b>${escapeHtml(shipment.stageLabel)}</b>${shipment.driverPhone ? ` · tài xế <a href="tel:${escapeHtml(shipment.driverPhone)}">${escapeHtml(shipment.driverPhone)}</a>` : ''}</small>` : ''}
+        </div>
+        <div class="shipping-match-action">${action}</div>
+      </article>`;
+    }).join('')}
+  </div>`;
+}
+
+async function lookupShipping(value) {
+  const query = String(value || '').trim();
+  if (/^SPX/i.test(query)) return lookupSpxTracking(query);
+  if (query.replace(/\s/g, '').length < 3) {
+    showToast('Nhập số điện thoại, tên khách, mã đơn hoặc mã vận đơn.', 'warning');
+    shippingTrackingInput?.focus();
+    return;
+  }
+  shippingTrackingSubmit.disabled = true;
+  renderShippingLoading(query);
+  try {
+    const result = await readApiResponse(await fetch(`/api/shipping/lookup?q=${encodeURIComponent(query)}`));
+    const items = Array.isArray(result.items) ? result.items : [];
+    // Đúng một đơn có vận đơn SPX: mở luôn hành trình, khỏi bấm thêm.
+    if (items.length === 1 && items[0].shipment?.isSpx) return lookupSpxTracking(items[0].shipment.trackingNumber);
+    renderShippingMatches(items, query);
+  } catch (error) {
+    renderShippingError(error.message || 'Chưa tra được đơn.');
+  } finally {
+    shippingTrackingSubmit.disabled = false;
+  }
 }
 
 async function lookupSpxTracking(value) {
@@ -11730,7 +11782,12 @@ navItems.forEach(item => {
 
 shippingTrackingForm?.addEventListener('submit', event => {
   event.preventDefault();
-  lookupSpxTracking(shippingTrackingInput?.value);
+  lookupShipping(shippingTrackingInput?.value);
+});
+// Danh sách đơn khớp: nút "Xem hành trình SPX" mang mã vận đơn.
+shippingResult?.addEventListener('click', event => {
+  const button = event.target.closest('.shipping-match [data-tracking-number]');
+  if (button) lookupSpxTracking(button.dataset.trackingNumber);
 });
 shippingRecentList?.addEventListener('click', event => {
   const item = event.target.closest('[data-tracking-number]');

@@ -76,7 +76,9 @@ export function shipmentTemplateValues(shipment, gender = '') {
     tracking_url: shipment.trackingUrl || '',
     status: shipmentStageLabel(shipmentStage(shipment) || 'created'),
     // J&T hỏi 4 số cuối SĐT khi tra trên web: nhắc khách trước.
-    tracking_hint: /J&T/i.test(shipment.carrier || '') ? `\n━━━━━━━━━━━━\nTrang J&T hỏi số điện thoại thì ${title} nhập 4 số cuối SĐT nhận hàng nhé` : ''
+    tracking_hint: /J&T/i.test(shipment.carrier || '') ? `\n━━━━━━━━━━━━\nTrang J&T hỏi số điện thoại thì ${title} nhập 4 số cuối SĐT nhận hàng nhé` : '',
+    // Số tài xế SPX (spx.vn trả khi đơn đã giao cho tài xế; 10/10): '' khi chưa biết.
+    driver_phone: shipment.driverPhone || ''
   };
 }
 
@@ -95,7 +97,15 @@ export function renderShipmentNotice(shipment, gender = '', templateId = STAGE_T
   );
   const template = stored === undefined || isLegacy ? DEFAULT_SHIPMENT_TEMPLATES[templateId] : stored;
   if (!String(template || '').trim()) return '';
-  return fillShipmentTemplate(template, shipmentTemplateValues(shipment, gender));
+  const values = shipmentTemplateValues(shipment, gender);
+  // Tin "đang giao hàng": biết số tài xế mà mẫu chưa có chỗ {driver_phone} thì thêm một dòng cuối (chủ shop 10/10: gửi
+  // số tài xế cho khách). Mẫu đã đặt {driver_phone} thì theo đúng chỗ chủ shop đặt.
+  // Cả tin đầu (mẫu mã vận đơn) khi vận đơn đã ở bước đang giao.
+  const outForDelivery = templateId === STAGE_TEMPLATES.out_for_delivery || shipmentStage(shipment) === 'out_for_delivery';
+  const withDriver = outForDelivery && values.driver_phone && !String(template).includes('{driver_phone}')
+    ? `${template}\n\nSố điện thoại shipper giao hàng cho {title}: {driver_phone}`
+    : template;
+  return fillShipmentTemplate(withDriver, values);
 }
 
 /** Ghi chú cho bảng Đơn hàng: "ℹ J&T Express 8028… · Đang vận chuyển". */

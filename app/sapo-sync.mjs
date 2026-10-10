@@ -25,7 +25,7 @@ const BASELINE_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_NOTICES_PER_RUN = 30;
 // Tra hành trình SPX: mỗi vận đơn tối đa 30 phút/lần, tối đa 40 vận đơn mỗi lượt.
 const CARRIER_RECHECK_MS = 30 * 60 * 1000;
-const MAX_CARRIER_CHECKS = 40;
+const MAX_CARRIER_CHECKS = 60;
 export const sapoStatePath = path.join(projectRoot, 'data', 'processed', 'sapo-sync.json');
 export const sapoSettingsPath = path.join(projectRoot, 'data', 'processed', 'sapo-settings.json');
 
@@ -160,36 +160,59 @@ export async function runSapoSync(deps) {
   return summary;
 }
 
-/** Vận đơn SPX đang đi: tra hành trình trên spx.vn để biết "đang giao cho khách" / "đã giao". */
+/**
+ * Vận đơn SPX đang đi: tra hành trình trên spx.vn để biết "đang giao cho khách" / "đã giao". Cả đơn trong hội thoại lẫn
+ * đơn landing (10/10: đơn landing trước đây chỉ có trạng thái Sapo, hay đứng ở "đã lấy hàng"; đơn landing không có hội
+ * thoại nên không nhắn khách). Mỗi lượt tra trước những vận đơn lâu chưa tra nhất, để không vận đơn nào bị bỏ đói.
+ */
 async function refreshCarrierStages(deps, { now, changedConversations }) {
   if (!deps.trackSpx) return 0;
+  const isDue = shipment => shipment && /SPX/i.test(shipment.carrier || '') && ['picked_up', 'in_transit', 'out_for_delivery'].includes(shipmentStage(shipment))
+    && now - (Number(shipment.carrierCheckedAt) || 0) >= CARRIER_RECHECK_MS;
   const store = await deps.readMessagingStore();
-  const due = conversationOrders(store).filter(({ order }) => {
-    const shipment = order.shipment;
-    const stage = shipmentStage(shipment);
-    return shipment && /SPX/i.test(shipment.carrier || '') && ['picked_up', 'in_transit', 'out_for_delivery'].includes(stage)
-      && now - (Number(shipment.carrierCheckedAt) || 0) >= CARRIER_RECHECK_MS;
-  }).slice(0, MAX_CARRIER_CHECKS);
+  const landing = deps.readLandingStore && deps.updateLandingStore ? await deps.readLandingStore() : { orders: [] };
+  const due = [
+    ...conversationOrders(store).filter(({ order }) => isDue(order.shipment)).map(({ conversation, order }) => ({ conversationId: conversation.id, order })),
+    ...(landing.orders || []).filter(order => isDue(order?.shipment)).map(order => ({ conversationId: '', order }))
+  ].sort((first, second) => (Number(first.order.shipment.carrierCheckedAt) || 0) - (Number(second.order.shipment.carrierCheckedAt) || 0))
+    .slice(0, MAX_CARRIER_CHECKS);
   const results = [];
-  for (const { conversation, order } of due) {
+  for (const { conversationId, order } of due) {
+    let stage = '';
+    let driverPhone = '';
     try {
       const tracking = await deps.trackSpx(order.shipment.trackingNumber);
-      results.push({ conversationId: conversation.id, orderId: order.id, trackingNumber: order.shipment.trackingNumber, stage: stageFromSpxRecords(tracking?.records) });
-    } catch {
-      results.push({ conversationId: conversation.id, orderId: order.id, trackingNumber: order.shipment.trackingNumber, stage: '' });
-    }
+      stage = stageFromSpxRecords(tracking?.records);
+      driverPhone = tracking?.driverPhone || '';
+    } catch { /* tra lỗi: ghi mốc đã tra, lượt sau thử lại */ }
+    results.push({ conversationId, orderId: order.id, trackingNumber: order.shipment.trackingNumber, stage, driverPhone });
   }
   if (!results.length) return 0;
   let updated = 0;
-  await deps.updateMessagingStore(current => {
-    for (const result of results) {
-      const found = findOrder(current, result.conversationId, result.orderId);
-      if (found?.order.shipment?.trackingNumber !== result.trackingNumber) continue;
-      if (!result.stage) { found.order.shipment.carrierCheckedAt = now; continue; }
-      if (applyCarrierStage(found.order, result.stage, now)) { updated += 1; changedConversations.add(result.conversationId); }
-    }
-    return null;
-  });
+  const apply = (order, result) => {
+    if (order?.shipment?.trackingNumber !== result.trackingNumber) return false;
+    // Số tài xế (10/10): giữ số mới nhất SPX trả, để tin "đang giao" và trang Vận chuyển gửi/hiện được.
+    if (result.driverPhone && order.shipment.driverPhone !== result.driverPhone) Object.assign(order.shipment, { driverPhone: result.driverPhone, driverPhoneAt: now });
+    if (!result.stage) { order.shipment.carrierCheckedAt = now; return false; }
+    return applyCarrierStage(order, result.stage, now);
+  };
+  const conversationResults = results.filter(result => result.conversationId);
+  if (conversationResults.length) {
+    await deps.updateMessagingStore(current => {
+      for (const result of conversationResults) {
+        if (apply(findOrder(current, result.conversationId, result.orderId)?.order, result)) { updated += 1; changedConversations.add(result.conversationId); }
+      }
+      return null;
+    });
+  }
+  const landingResults = results.filter(result => !result.conversationId);
+  if (landingResults.length) {
+    await deps.updateLandingStore(current => {
+      const byId = new Map((current.orders || []).map(order => [String(order.id), order]));
+      for (const result of landingResults) if (apply(byId.get(String(result.orderId)), result)) updated += 1;
+      return null;
+    });
+  }
   return updated;
 }
 
@@ -245,7 +268,12 @@ async function notifyCustomers(deps, { now, summary, log }) {
   // Mỗi vận đơn một tin mỗi lượt, tối đa MAX_NOTICES_PER_RUN tin.
   for (const { conversation, order, plan } of due.slice(0, MAX_NOTICES_PER_RUN)) {
     const messages = Array.isArray(store.messages?.[plan.inbox.id]) ? store.messages[plan.inbox.id] : [];
-    const text = renderShipmentNotice(order.shipment, deps.genderOf ? deps.genderOf(plan.inbox, messages) : plan.inbox.gender, plan.templateId, templates);
+    // Tin "đang giao hàng" của vận đơn SPX chưa biết số tài xế: tra spx.vn một lần ngay trước khi gửi (10/10).
+    let driverPhone = order.shipment.driverPhone || '';
+    if (!driverPhone && plan.stage === 'out_for_delivery' && deps.trackSpx && /SPX/i.test(order.shipment.carrier || '')) {
+      driverPhone = await Promise.resolve(deps.trackSpx(order.shipment.trackingNumber)).then(tracking => tracking?.driverPhone || '', () => '');
+    }
+    const text = renderShipmentNotice({ ...order.shipment, driverPhone }, deps.genderOf ? deps.genderOf(plan.inbox, messages) : plan.inbox.gender, plan.templateId, templates);
     let mark;
     if (!text) {
       // Chủ shop để trống mẫu giai đoạn này = tắt: ghi dấu đã qua, không gửi.
@@ -276,7 +304,10 @@ async function notifyCustomers(deps, { now, summary, log }) {
     const delivered = mark.via === 'bot' && !mark.error;
     await deps.updateMessagingStore(current => {
       const found = findOrder(current, conversation.id, order.id);
-      if (found?.order.shipment?.trackingNumber === order.shipment.trackingNumber) markShipmentNotified(found.order.shipment, mark);
+      if (found?.order.shipment?.trackingNumber === order.shipment.trackingNumber) {
+        markShipmentNotified(found.order.shipment, mark);
+        if (driverPhone && found.order.shipment.driverPhone !== driverPhone) Object.assign(found.order.shipment, { driverPhone, driverPhoneAt: now });
+      }
       return null;
     }, { defer: !delivered });
   }

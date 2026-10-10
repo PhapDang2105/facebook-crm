@@ -443,7 +443,9 @@ export function normalizeLandingPayload(payload = {}) {
   // "location" của Webcake là URL trang (kèm utm); nơi khác có thể là địa chỉ ghép sẵn.
   const location = pick(fields, 'location');
   const locationIsUrl = /^https?:\/\//i.test(location);
-  const parts = [pick(fields, 'address') || (locationIsUrl ? '' : location), pick(fields, 'ward'), pick(fields, 'district'), province].filter(Boolean);
+  // 10/10: khách gõ nhãn vào ô địa chỉ ("Đc: ấp 3…", "đc 31/47 lê lai…") — nhãn đi nguyên lên phiếu kho. Bỏ nhãn đứng đầu.
+  const addressField = String(pick(fields, 'address') || '').replace(/^\s*(?:(?:địa|dia)\s*(?:chỉ|chi)(?:\s*(?:nhận|nhan)(?:\s*(?:hàng|hang))?)?|đ\/c|d\/c|đc|dc|đchi|dchi)(?![\p{L}\p{N}])\s*[:：.\-]?\s*/iu, '');
+  const parts = [addressField || (locationIsUrl ? '' : location), pick(fields, 'ward'), pick(fields, 'district'), province].filter(Boolean);
   const address = parts.join(', ');
   let lines = extractLineItems(fields);
   // Không có ô sản phẩm nhưng có ô lựa chọn (singlechoice "Combo 2 túi"...):

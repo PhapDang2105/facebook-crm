@@ -13,3 +13,15 @@ test('bỏ lời đệm đầu câu và nhãn "Địa chỉ" lặp; không cắt
   assert.equal(cleanAddressText('Dạ Lạt, Lâm Đồng'), 'Dạ Lạt, Lâm Đồng', 'Đà Lạt gõ nhầm dấu');
   assert.equal(cleanAddressText('Okinawa 12'), 'Okinawa 12');
 });
+
+test('form landing: bỏ nhãn "Đc / Địa chỉ" đứng đầu ô địa chỉ, không đụng địa danh bắt đầu bằng "Đ"', async () => {
+  const { normalizeLandingPayload } = await import('../app/landing-orders.mjs');
+  const address = value => normalizeLandingPayload({ name: 'A', phone: '0901234567', address: value }).address;
+  assert.equal(address('Đc: ấp 3'), 'ấp 3');
+  assert.equal(address('đc 31/47 lê lai p3 gò vấp'), '31/47 lê lai p3 gò vấp');
+  assert.equal(address('Địa chỉ nhận hàng: 12 Lê Lợi'), '12 Lê Lợi');
+  assert.equal(address('dc 5 Nguyễn Huệ'), '5 Nguyễn Huệ');
+  assert.equal(address('dia chi: 7 Hai Bà Trưng'), '7 Hai Bà Trưng');
+  assert.equal(address('Đồng Xoài, Bình Phước'), 'Đồng Xoài, Bình Phước');
+  assert.equal(address('Dcầu Mới, Thủ Đức'), 'Dcầu Mới, Thủ Đức');
+});

@@ -19,7 +19,7 @@ import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverr
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
 import { applyRemarketingLabels } from './remarketing-labels.mjs';
-import { refreshLiveAds } from './live-ads.mjs';
+import { applyLiveAdLabels, refreshLiveAds } from './live-ads.mjs';
 import { renderOrderReceiptImage } from './order-receipt-image.mjs';
 import { aiKeyReentryError, assertUsableAiEndpoint, chatbotSettingsStore, mergeChatbotSettingsPatch, mergeMessageTemplatesPatch, normalizeChatbotSettings, publicChatbotSettings } from './chatbot-settings.mjs';
 import { assertPublicHost, isSafeRequestTarget } from './network-guard.mjs';
@@ -817,7 +817,29 @@ async function runRemarketingLabelPass(conversationIds = null) {
   return result.changes.length;
 }
 
-// Mọi tin vừa về: gom 3 giây rồi xét link ref của các hội thoại đó (rẻ — hội thoại không có link ref bỏ qua ngay).
+/** Thẻ "Livestream" (sự kiện 'livestream'): khách vào từ quảng cáo Live (live-ads.mjs). `conversationIds` = chỉ các hội thoại vừa có tin. */
+async function runLiveAdLabelPass(conversationIds = null) {
+  const labelDefs = await inboxLabelDefs();
+  const labels = labelsForEvents(labelDefs, ['livestream']);
+  if (!labels.length) return 0;
+  let result = { changes: [], flagged: 0 };
+  const relabeled = [];
+  await updateMessagingStore(store => {
+    result = applyLiveAdLabels(store, { labels, conversationIds });
+    for (const change of result.changes) {
+      const conversation = store.conversations.find(item => item.id === change.conversation.id);
+      if (conversation) relabeled.push(publicConversation(conversation));
+    }
+    return null;
+  }, { defer: Boolean(conversationIds), unchanged: () => !result.flagged });
+  for (const change of result.changes) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason: 'khách vào từ quảng cáo Live' });
+  for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
+  if (result.changes.length && !conversationIds) console.log(`Thẻ Livestream: gắn bù cho ${result.changes.length} hội thoại vào từ quảng cáo Live.`);
+  return result.changes.length;
+}
+
+// Mọi tin vừa về: gom 3 giây rồi xét link ref (thẻ Re-marketing) và quảng cáo Live (thẻ Livestream) của các hội thoại đó
+// (rẻ — hội thoại không có link ref / quảng cáo Live bỏ qua ngay).
 const pendingRemarketingIds = new Set();
 let remarketingTimer = null;
 function queueRemarketingLabel(event) {
@@ -828,6 +850,7 @@ function queueRemarketingLabel(event) {
     const ids = [...pendingRemarketingIds];
     pendingRemarketingIds.clear();
     runRemarketingLabelPass(ids).catch(error => console.warn(`Gắn thẻ Re-marketing lỗi: ${error.message}`));
+    runLiveAdLabelPass(ids).catch(error => console.warn(`Gắn thẻ Livestream lỗi: ${error.message}`));
   }, 3000);
   remarketingTimer.unref?.();
 }
@@ -4287,7 +4310,10 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   // Quản lý chiến dịch: kéo số liệu quảng cáo mỗi 60 phút (tắt khi chưa cấu hình META_ADS_* hay đặt META_ADS_SYNC_DISABLED).
   startAdInsightsSync();
   // Quảng cáo phiên Live (chiến dịch "video trực tiếp"): khách bấm vào là khách Live, được quà Live (10/10). Nạp ngay rồi mỗi 10 phút.
-  const liveAdsPass = () => refreshLiveAds().catch(() => 0);
+  // Nạp xong thì gắn bù thẻ Livestream cho hội thoại vào từ quảng cáo Live (quảng cáo mới vừa có trong kho).
+  const liveAdsPass = () => refreshLiveAds().catch(() => 0)
+    .then(() => runLiveAdLabelPass())
+    .catch(error => console.warn(`Gắn bù thẻ Livestream lỗi: ${error.message}`));
   liveAdsPass();
   setInterval(liveAdsPass, 10 * 60 * 1000).unref?.();
   // Báo cáo Lark: mặc định 08:00 gửi số liệu ngày hôm trước; trạng thái chống gửi trùng nằm trong data/processed.

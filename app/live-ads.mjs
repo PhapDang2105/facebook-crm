@@ -47,3 +47,37 @@ export function setLiveAdIdsForTest(ids = []) {
 }
 
 export const liveAdsLoadedAt = () => loadedAt;
+
+// Thẻ "Livestream" (sự kiện 'livestream') cho khách vào từ quảng cáo Live — 10/10, chủ shop: khách bấm "Săn Sale 10/10
+// cùng Giọt Nắng" (quảng cáo video trực tiếp) mà hội thoại không mang thẻ Livestream, nhân viên không biết là khách Live.
+// Trước đây thẻ chỉ gắn trong lượt trả lời của bot: bot tắt (nhân viên đang xử lý) hay khách nhắn trước khi nhận ra quảng
+// cáo Live thì không có thẻ. Gắn ngay khi tin về và quét bù sau mỗi lần nạp danh sách quảng cáo Live. Mỗi hội thoại chỉ gắn
+// MỘT lần (cờ liveAdLabeled): nhân viên gỡ thẻ thì không gắn lại. Chỉ xét hội thoại có tin khách trong `liveAdLabelWindowMs`
+// (không gắn hàng loạt cho khách live cũ).
+export const liveAdLabelWindowMs = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * Chạy trong updateMessagingStore (sửa `store` tại chỗ). `conversationIds`: chỉ xét các hội thoại này; bỏ trống = quét mọi
+ * hội thoại. Trả về `{ changes: [{ conversation, before, after }], flagged }`.
+ */
+export function applyLiveAdLabels(store, { labels = [], conversationIds = null, now = Date.now() } = {}) {
+  const ids = (Array.isArray(labels) ? labels : []).filter(Boolean);
+  const result = { changes: [], flagged: 0 };
+  if (!ids.length || !liveAdIds.size || !Array.isArray(store?.conversations)) return result;
+  const only = conversationIds ? new Set(conversationIds) : null;
+  for (const conversation of store.conversations) {
+    if (!conversation || conversation.liveAdLabeled) continue;
+    if (only && !only.has(conversation.id)) continue;
+    if (!isLiveAdId(conversation.referral?.adId)) continue;
+    const at = Math.max(Number(conversation.lastCustomerMessageAt) || 0, Number(conversation.referral?.at) || 0);
+    if (!at || at <= now - liveAdLabelWindowMs) continue;
+    conversation.liveAdLabeled = true;
+    result.flagged += 1;
+    const before = Array.isArray(conversation.labels) ? conversation.labels : [];
+    const merged = [...new Set([...before, ...ids])];
+    if (merged.length === before.length) continue;
+    conversation.labels = merged;
+    result.changes.push({ conversation: { id: conversation.id, name: conversation.name || '' }, before: [...before], after: [...merged] });
+  }
+  return result;
+}

@@ -67,6 +67,7 @@ import { searchConversations } from './message-search.mjs';
 import { addressSuggestions, conversationPhones } from './processing/order-flow.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
+import { QR_LEAD_STATUSES, addQrLead, createQrLeadLimiter, deleteQrLead, parseQrLeadInput, qrLeadsView, readQrLeads, updateQrLead } from './qr-leads.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -81,7 +82,7 @@ import { listStaff, saveStaffMember, staffByUsername, staffLoginAccounts, STAFF_
 import { encryptToken, getPageAccessToken, publicChannel, readChannelStore, writeChannelStore } from './channel-store.mjs';
 import { fetchPageSubscription, metaRequest, releaseThreadControl, sendSenderAction, subscribePageToApp, unsubscribePageFromApp } from './meta-graph.mjs';
 import { processWebhookPayload, refreshCustomerProfiles, verifyWebhookSignature, verifyWebhookSubscription } from './meta-webhook.mjs';
-import { archiveStatusLabel, customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listCustomers, orderHistoryKey } from './customers.mjs';
+import { archiveStatusLabel, customersToCsv, customersToAudienceCsv, findCustomerById, invalidateBuyersCache, listBuyers, listCustomers, orderHistoryKey } from './customers.mjs';
 import { addCustomerNote, CONTACT_STATUSES, listCustomerNotes, setCustomerContactStatus, setCustomerLabels, updateCustomerProfile } from './customer-edits.mjs';
 import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
@@ -1152,6 +1153,56 @@ const qrBridgeMatcher = createBridgeClickMatcher({
   }
 });
 /** Móc trước bot: xét tin khách mới với lượt bấm đang chờ; không bao giờ ném (webhook vẫn phải đưa bot). */
+// Form "để lại số điện thoại" trên trang đệm QR (POST /q/<mã>/lead, công khai). Tối đa 5 lượt / giờ / IP (băm, chỉ RAM).
+const qrLeadLimiter = createQrLeadLimiter({ max: Number(process.env.QR_LEAD_MAX_PER_HOUR) || 5, windowMs: 60 * 60 * 1000 });
+const maskPhone = phone => String(phone || '').replace(/^(\d{4})\d+(\d{3})$/, '$1***$2');
+
+async function handleQrLead(request, response, { code, staffScan }) {
+  if (request.method !== 'POST') return sendJson(response, 405, { error: 'Chỉ nhận POST.' });
+  const contentType = String(request.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  const wantsJson = contentType === 'application/json';
+  const reply = (status, payload, noticeTitle) => {
+    if (wantsJson) return sendJson(response, status, payload);
+    response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' });
+    return response.end(publicNoticePage({ title: noticeTitle, message: payload.error || payload.message }));
+  };
+  let fields = {};
+  try {
+    const raw = (await readLimited(request, 4 * 1024, 'Nội dung quá dài.')).toString('utf8');
+    if (wantsJson) {
+      const parsed = raw ? JSON.parse(raw) : {};
+      fields = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } else {
+      fields = Object.fromEntries(new URLSearchParams(raw));
+    }
+  } catch {
+    return reply(400, { error: 'Em chưa đọc được thông tin, Anh/Chị thử lại giúp em nhé.' }, 'Chưa lưu được');
+  }
+  // Ô bẫy `website` (ẩn với người thật) có chữ → máy tự điền: trả như đã lưu để nó không thử cách khác, nhưng không lưu.
+  if (String(fields.website || '').trim()) {
+    console.log(`QR: bỏ lượt để lại SĐT mã ${code}: ô bẫy có chữ (máy tự điền)`);
+    return reply(200, { saved: true, message: 'Em đã giữ ưu đãi cho Anh/Chị rồi ạ.' }, 'Cảm ơn Anh/Chị');
+  }
+  const parsed = parseQrLeadInput(fields);
+  if (parsed.error) return reply(400, { error: parsed.error }, 'Chưa lưu được');
+  if (!qrLeadLimiter.allow(qrVisitorKey(clientIp(request), ''))) {
+    console.warn(`QR: chặn lượt để lại SĐT mã ${code}: một máy gửi quá nhiều lần trong 1 giờ`);
+    return reply(429, { error: 'Anh/Chị gửi nhiều lần quá, em đã nhận rồi ạ. Anh/Chị chờ Nhà Nắng liên hệ nhé.' }, 'Em đã nhận rồi ạ');
+  }
+  const device = classifyUserAgent(request.headers['user-agent']);
+  try {
+    const { lead, created } = await addQrLead({ code, phone: parsed.phone, name: parsed.name, platform: device.platform, browser: device.browser, test: staffScan });
+    console.log(`QR: khách ${created ? 'để lại' : 'để lại lần nữa'} SĐT ${maskPhone(lead.phone)} qua mã ${code}${staffScan ? ' (máy nhân viên, ghi là thử)' : ''}`);
+    // Báo các màn CRM đang mở (luồng SSE của hộp thư): thông báo + bảng Mã QR tự tải lại.
+    publishMessagingEvent({ type: 'qr-lead', lead: { id: lead.id, name: lead.name, phone: lead.phone, test: lead.test, created } });
+    const display = lead.phone.replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3');
+    return reply(200, { saved: true, phone: display, message: `Nhà Nắng sẽ gọi hoặc nhắn Zalo số ${display} sớm nhất ạ.` }, 'Em đã giữ ưu đãi cho Anh/Chị');
+  } catch (error) {
+    console.error(`QR: không lưu được SĐT khách để lại (mã ${code}): ${error.message}`);
+    return reply(500, { error: 'Em chưa lưu được, Anh/Chị thử lại giúp em hoặc gọi Heartline 0899 677 899 nhé.' }, 'Chưa lưu được');
+  }
+}
+
 const considerQrBridgeClicks = changes => qrBridgeMatcher.consider(changes).catch(error => {
   console.error(`QR: lỗi khi xét lượt bấm chờ khớp: ${error.message}`);
   return [];
@@ -1891,7 +1942,8 @@ const server = http.createServer(async (request, response) => {
     // Beacon "bấm nút mở Messenger" của trang đệm QR (POST /q/<mã>/open): trang đệm đặt Referrer-Policy
     // no-referrer nên trình duyệt gửi `Origin: null` — luật Origin trả 403 và số "Mở Messenger" luôn bằng 0.
     // Route này công khai, không cần đăng nhập và chỉ đếm một lượt bấm nên không cần chống CSRF.
-    const isQrBeacon = request.method === 'POST' && /^\/q\/[^/]+\/open$/.test(url.pathname);
+    // Form "để lại số điện thoại" (POST /q/<mã>/lead) cũng từ trang đệm đó, cùng lý do; chặn gửi dồn bằng qrLeadLimiter.
+    const isQrBeacon = request.method === 'POST' && /^\/q\/[^/]+\/(?:open|lead)$/.test(url.pathname);
     if (!isWebhook && !isQrBeacon && isCrossSiteWrite(request)) {
       return sendJson(response, 403, { error: 'Yêu cầu đến từ trang khác nên bị từ chối.' });
     }
@@ -1921,9 +1973,10 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 404, { error: 'Resource not found.' });
       }
     }
-    const qrMatch = url.pathname.match(/^\/q\/([^/]+)(\/open)?\/?$/);
+    const qrMatch = url.pathname.match(/^\/q\/([^/]+)(\/open|\/lead)?\/?$/);
     if (qrMatch && (request.method === 'GET' || request.method === 'POST')) {
-      const isOpenBeacon = Boolean(qrMatch[2]);
+      const isOpenBeacon = qrMatch[2] === '/open';
+      const isLeadForm = qrMatch[2] === '/lead';
       // Khách quét thấy trang HTML ngắn, không phải JSON thô; beacon (POST) vẫn trả JSON.
       const sendQrNotice = (status, title, message) => {
         if (request.method !== 'GET') return sendJson(response, status, { error: message });
@@ -1936,6 +1989,9 @@ const server = http.createServer(async (request, response) => {
       if (!isValidQrCode(code)) return sendQrNotice(404, 'Mã QR không đúng', 'Mã QR này không đúng. Bạn vui lòng quét lại mã in trên thẻ, hoặc nhắn tin trực tiếp cho Giọt Nắng trên Facebook nhé.');
       // Máy nhân viên (có phiên đăng nhập CRM) quét thử / bấm thử: không vào số liệu quét thật.
       const staffScan = hasStaffSession(auth, request);
+      // Khách để lại số điện thoại trên trang đệm (app/qr-leads.mjs). fetch gửi JSON và nhận JSON; máy tắt JavaScript
+      // gửi form thường (urlencoded) và nhận trang cảm ơn. Máy nhân viên vẫn lưu được (để thử) nhưng đánh dấu "thử".
+      if (isLeadForm) return handleQrLead(request, response, { code, staffScan });
       // Mã chưa tạo ở Cài đặt → Mã QR: vẫn phục vụ (thẻ in rồi là không sửa được),
       // nhưng recordQrScan/recordQrOpen bỏ qua — kho chỉ đếm mã nhân viên đã tạo.
       if (isOpenBeacon) {
@@ -2004,7 +2060,7 @@ const server = http.createServer(async (request, response) => {
         console.error('QR: chưa có Page nào kết nối nên không biết đưa khách đi đâu.');
         return sendQrNotice(503, 'Giọt Nắng', 'Trang nhắn tin đang được cập nhật. Bạn vui lòng thử lại sau ít phút, hoặc tìm "Giọt Nắng" trên Facebook để nhắn cho shop nhé.');
       }
-      const { zaloUrl, prefillText } = await readQrSettings();
+      const { zaloUrl, prefillText, leadForm } = await readQrSettings();
       // ref kiểu Pancake + tin soạn sẵn mang #mã: Pancake ghi nguồn truy cập, và
       // tin khách gửi về CRM qua webhook Pancake mang theo mã lô. Chưa đặt tin soạn sẵn thì dùng mẫu mặc
       // định — link không có `text=` là mất đường duy nhất không phụ thuộc Meta để nhận ra khách quét thẻ.
@@ -2019,7 +2075,8 @@ const server = http.createServer(async (request, response) => {
         classification,
         // iPhone trong app: địa chỉ https của chính trang này cho nút "Mở bằng Safari" / "Sao chép liên kết".
         pageUrl: metaConfig.publicBaseUrl.startsWith('https://') ? `${metaConfig.publicBaseUrl}/q/${encodeURIComponent(code)}?from=inapp` : '',
-        iosVersion: iosMajorVersion(userAgent)
+        iosVersion: iosMajorVersion(userAgent),
+        leadForm: leadForm !== false
       });
       response.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
@@ -2062,14 +2119,50 @@ const server = http.createServer(async (request, response) => {
           const payload = await readBody(request);
           const saved = await writeQrSettings({
             ...(payload?.zaloUrl !== undefined ? { zaloUrl: payload.zaloUrl } : {}),
-            ...(payload?.prefillText !== undefined ? { prefillText: payload.prefillText } : {})
+            ...(payload?.prefillText !== undefined ? { prefillText: payload.prefillText } : {}),
+            ...(payload?.leadForm !== undefined ? { leadForm: payload.leadForm === true } : {})
           });
-          const changed = [payload?.zaloUrl !== undefined ? 'liên kết Zalo' : '', payload?.prefillText !== undefined ? 'tin soạn sẵn' : ''].filter(Boolean);
+          const changed = [
+            payload?.zaloUrl !== undefined ? 'liên kết Zalo' : '',
+            payload?.prefillText !== undefined ? 'tin soạn sẵn' : '',
+            payload?.leadForm !== undefined ? `${payload.leadForm === true ? 'bật' : 'tắt'} ô để lại SĐT` : ''
+          ].filter(Boolean);
           audit(request, 'settings.qr', { target: { type: 'qr-settings', id: 'qr', name: 'Trang đệm QR' }, summary: `Sửa trang đệm QR: ${changed.join(', ') || 'không đổi'}.` });
           return sendJson(response, 200, saved);
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }
+      }
+    }
+    // Khách để lại SĐT trên trang đệm (Cài đặt → Mã QR → "Khách để lại SĐT"). Nhân viên nào cũng xem và đổi trạng thái
+    // được (việc gọi khách là việc của nhân viên); xoá dòng chỉ Quản trị. "Đã mua" suy ra từ đơn cùng SĐT đặt sau lúc để lại.
+    if (request.method === 'GET' && url.pathname === '/api/qr/leads') {
+      const [{ leads }, buyers] = await Promise.all([readQrLeads(), listBuyers().catch(() => [])]);
+      const purchases = new Map();
+      for (const buyer of buyers) {
+        const phone = customerPhoneKey(buyer.phone);
+        if (phone && (buyer.lastOrderAt || 0) > (purchases.get(phone) || 0)) purchases.set(phone, buyer.lastOrderAt);
+      }
+      return sendJson(response, 200, { statuses: QR_LEAD_STATUSES, items: qrLeadsView(leads, { purchases }) });
+    }
+    const qrLeadMatch = url.pathname.match(/^\/api\/qr\/leads\/([^/]+)$/);
+    if (qrLeadMatch && (request.method === 'PATCH' || request.method === 'DELETE')) {
+      const id = decodeURIComponent(qrLeadMatch[1]);
+      if (request.method === 'DELETE') {
+        if (!(await requireManager(request, response, 'Chỉ chủ shop hoặc Quản trị mới xoá được số khách để lại.'))) return;
+        const deleted = await deleteQrLead(id);
+        if (deleted) audit(request, 'qr.lead', { target: { type: 'qr-lead', id, name: id }, summary: 'Xoá một số điện thoại khách để lại từ thẻ QR.' });
+        return sendJson(response, deleted ? 200 : 404, deleted ? { deleted: id } : { error: 'Không còn dòng này.' });
+      }
+      try {
+        const actor = await requestActor(request);
+        const payload = await readBody(request, 8 * 1024);
+        const saved = await updateQrLead(id, { status: payload?.status, note: payload?.note }, { by: actor?.name || actor?.username || '' });
+        if (!saved) return sendJson(response, 404, { error: 'Không còn dòng này.' });
+        audit(request, 'qr.lead', { target: { type: 'qr-lead', id, name: saved.name || saved.phone }, summary: `Khách để lại SĐT từ thẻ QR: ${payload?.status !== undefined ? `trạng thái "${QR_LEAD_STATUSES[saved.status]}"` : 'sửa ghi chú'}.` }, actor);
+        return sendJson(response, 200, saved);
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message });
       }
     }
     // Ảnh mã QR để in lên thẻ: mã hoá /q/<mã>. Sau mật khẩu (Caddy chỉ mở /q/*),

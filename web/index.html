@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Nông Sản Giọt Nắng | Facebook</title>
   <link rel="icon" type="image/webp" href="/assets/giot-nang-logo.webp">
-  <link rel="stylesheet" href="styles.css?v=20261009-mobile">
+  <link rel="stylesheet" href="styles.css?v=20261012-qr-lead">
   <link rel="stylesheet" href="staff.css?v=20261002-fixweb3">
   <link rel="stylesheet" href="audit.css?v=20261001-audit">
   <link rel="stylesheet" href="quick-search.css?v=20261002-r13">
@@ -833,6 +833,14 @@
             </header>
             <div class="qr-settings-body">
               <div class="qr-metrics" id="qr-metrics"><p class="channel-empty">Đang tải thống kê...</p></div>
+              <section class="qr-leads" id="qr-leads" aria-labelledby="qr-leads-title">
+                <div class="qr-leads-head">
+                  <h2 class="qr-card-title" id="qr-leads-title">Khách để lại SĐT<small id="qr-leads-count"></small></h2>
+                  <label class="qr-leads-toggle" title="Hiện ô để lại số điện thoại trên trang khách thấy sau khi quét thẻ"><input type="checkbox" id="qr-lead-form-toggle"> Hiện ô SĐT trên trang quét</label>
+                </div>
+                <p class="qr-leads-note">Khách quét thẻ, để lại số trên trang đệm để giữ ưu đãi. Gọi hoặc nhắn Zalo rồi chọn trạng thái; khách có đơn sau lúc để lại số sẽ tự hiện "Đã mua".</p>
+                <div class="qr-leads-list" id="qr-leads-list" data-staff-allow><p class="channel-empty">Đang tải...</p></div>
+              </section>
               <div class="qr-lower">
                 <section class="qr-detail hidden" id="qr-detail" aria-label="Mã QR in lên thẻ"></section>
                 <section class="qr-recent" id="qr-recent" aria-label="Lượt gần đây"></section>
@@ -1030,7 +1038,7 @@
     <video class="video-lightbox-content" id="video-lightbox-content" controls playsinline></video>
   </div>
   <div class="conversation-menu hidden" id="conversation-menu" role="menu" aria-label="Tùy chọn hội thoại"></div>
-  <script src="app.js?v=20261005-search"></script>
+  <script src="app.js?v=20261012-qr-lead"></script>
   <script src="staff.js?v=20261001-fixweb2"></script>
   <script src="audit.js?v=20261001-fixweb2"></script>
   <script src="quick-search.js?v=20261005-search"></script>

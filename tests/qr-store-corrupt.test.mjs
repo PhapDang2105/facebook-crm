@@ -31,7 +31,7 @@ test('kho lượt quét hỏng: cách ly nguyên văn sang .corrupt-*, kho mới
 });
 
 test('cài đặt QR không phải object JSON: cách ly, dùng mặc định, lưu lại được', async () => {
-  assert.deepEqual(await readQrSettings(), { zaloUrl: '', prefillText: '', updatedAt: 0 });
+  assert.deepEqual(await readQrSettings(), { zaloUrl: '', prefillText: '', leadForm: true, updatedAt: 0 });
   assert.equal(readdirSync(directory).filter(name => name.startsWith('qr-settings.json.corrupt-')).length, 1);
   assert.ok(errors.some(line => /Cài đặt mã QR hỏng/.test(line)));
   assert.equal((await writeQrSettings({ zaloUrl: 'https://zalo.me/g/abc' })).zaloUrl, 'https://zalo.me/g/abc');

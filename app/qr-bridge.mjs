@@ -361,7 +361,7 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày, mong cả nhà mình luôn khoẻ, ăn ngon và thật bình an. Em gửi chút yêu thương cho những đơn hàng sau, mong được đồng hành <span class="keep">với Anh/Chị thật lâu<svg class="heart" viewBox="0 0 24 24" aria-hidden="true"><path fill="#e2574c" d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.1 0 3.6 1.2 4.3 2.4.8-1.2 2.3-2.4 4.4-2.4 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21z"/></svg></span></p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b class="free-ship">MIỄN PHÍ VẬN CHUYỂN</b></span></li>
-      <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Quà Combo 3 mini" width="48" height="36"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>
+      <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Granola Xanh mini, Granola Cam mini và gói Tâm Lành" width="48" height="36"></span><span>Mua Combo&nbsp;1 tặng <b>1 Granola Xanh mini, 1 Granola Cam mini</b> và <b>1 túi ngũ cốc Tâm&nbsp;Lành</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-yen-mach.webp" alt="Hai túi Yến mạch 500g" width="48" height="43"></span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-tam-lanh.webp" alt="Hộp Bột Ngũ Cốc Tâm Lành" width="37" height="48"></span><span>Đặc biệt mua Combo&nbsp;3 tặng <b>1&nbsp;hộp Bột Ngũ Cốc Tâm&nbsp;Lành</b></span></li>
     </ul>

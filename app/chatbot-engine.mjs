@@ -1,6 +1,6 @@
 import { ambiguousCerealBags, asksToAdd, buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, phoneLooksShort, renderChatbotReply, renderOrderGiftReply, sanitizeModelAnswer, withoutInviteTail } from './chatbot-templates.mjs';
 import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
-import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, loadLocationIndex, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
+import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, loadLocationIndex, lostHouseNumbers, mergeAddressFragment, resolveAddress, splitOrderTag } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { AD_MISMATCH_COMPLAINT, autoLabelEventsFor, foldVietnamese, isComplaint, mentionsOtherSeller, shortBadTaste } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
@@ -11,7 +11,7 @@ import { hasGiftOverride } from './gift-override.mjs';
 import { isLivestreamConversation, isLivestreamCustomer, isPageSystemNotice, isPageSystemNoticeText, lateInfoNeedsBot } from './conversation-orders.mjs';
 // R13: LIVE_ONLY (danh sách hàng chỉ bán trên live) và FLAVOR_LIST (câu hỏi danh sách vị) dùng chung một bản của rule-intent.
 import { asksSpoonIncluded, CANCEL_ORDER, COMMENT_DISLIKE, core as ruleCore, DELIVERY_NOTE, FLAVOR_LIST, HOLD_DELIVERY, isFanToSpoonRequest, isReceivedNotice, LIVE_FEEDBACK, LIVE_ONLY, ruleIntent, TROPICAL_MENTION } from './processing/rule-intent.mjs';
-import { cleanAddressText, collectAddressBurst, isPaymentMessage, lookupPreviousAddress, maskMarketWord, maskPlaceGia, resolvePreviousAddress, stripPhone } from './processing/order-flow.mjs';
+import { addressFromCustomerMessages, cleanAddressText, collectAddressBurst, isPaymentMessage, lastPhoneInText, lookupPreviousAddress, maskMarketWord, maskPlaceGia, phonesInText, resolvePreviousAddress, stripPhone } from './processing/order-flow.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { stickerInfo } from './stickers.mjs';
 import { shipmentStage } from './shipment-stage.mjs';
@@ -478,12 +478,30 @@ function posTimeMs(value) {
  * Trả { orders (mới nhất trước, dạng customerOrder), error } — lỗi mạng/hết giờ POS ghi ở `error`,
  * không chặn lên đơn (bên gọi gắn thẻ để nhân viên soát trùng).
  */
-export async function findExternalOrders(phone, { now = Date.now(), fetchImpl = fetch, config = null, landingStore = readLandingStore, excludeIds = [], timeoutMs = externalOrderTimeoutMs } = {}) {
+export async function findExternalOrders(phone, { now = Date.now(), fetchImpl = fetch, config = null, landingStore = readLandingStore, excludeIds = [], timeoutMs = externalOrderTimeoutMs, findCrmOrders = null } = {}) {
   const key = normalizeWarningPhone(phone);
   if (!key) return { orders: [], error: '' };
-  const cached = externalOrderCache.get(key);
-  if (cached && now - cached.at < externalOrderCacheTtlMs) return cached.result;
   const excluded = new Set((excludeIds || []).map(String));
+  // R18-B (inbox2 N4, Trần Thị Chung: Page 1 chốt 09:11, Page 2 lên đơn thứ hai 10:20 cùng SĐT): đơn CRM của MỌI hội thoại (hai Page,
+  // bình luận) theo SĐT — tra mới mỗi lượt (kho cục bộ, không nhớ đệm: đơn vừa tạo ở Page kia phải thấy ngay), trừ đơn của hội thoại này.
+  const crmOrders = [];
+  if (typeof findCrmOrders === 'function') {
+    const found = await Promise.resolve(findCrmOrders(key)).catch(() => []);
+    for (const order of Array.isArray(found) ? found : []) {
+      if (!order || excluded.has(String(order.id)) || normalizeWarningPhone(order.phone) !== key) continue;
+      if (now - (Number(order.createdAt) || 0) > externalOrderWindowMs) continue;
+      if (String(order.processingStatus || '') === 'cancelled' || order.status === 'Hủy') continue;
+      crmOrders.push({ id: String(order.id), posId: String(order.pos?.id || order.posId || ''), createdAt: Number(order.createdAt) || 0, total: Number(order.total) || 0, status: String(order.status || ''), source: 'CRM', phone: order.phone, address: order.address || '', products: (order.products || []).map(item => ({ name: item.name, sku: item.sku || '', quantity: Number(item.quantity) || 1 })) });
+    }
+  }
+  const withCrm = result => {
+    if (!crmOrders.length) return result;
+    const posIds = new Set(crmOrders.map(order => order.posId).filter(Boolean));
+    const rest = result.orders.filter(order => !(order.posId && posIds.has(order.posId)));
+    return { ...result, orders: [...crmOrders, ...rest].sort((a, b) => b.createdAt - a.createdAt) };
+  };
+  const cached = externalOrderCache.get(key);
+  if (cached && now - cached.at < externalOrderCacheTtlMs) return withCrm(cached.result);
   const orders = [];
   let error = '';
   // (a) Kho landing (webhook Webcake + đồng bộ POS 5 phút): đơn đã có trong CRM.
@@ -538,7 +556,7 @@ export async function findExternalOrders(phone, { now = Date.now(), fetchImpl = 
     externalOrderCache.set(key, { at: now, result });
     pruneMap(externalOrderCache, entry => now - entry.at >= externalOrderCacheTtlMs, externalOrderCacheMax);
   }
-  return result;
+  return withCrm(result);
 }
 
 const endpointHostChecks = new Map();
@@ -1968,7 +1986,10 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     }
     // Vài tin chữ gần nhất của khách: SĐT/địa chỉ khách gửi ở tin riêng trước đó
     // được đọc lại thay vì hỏi lần nữa.
-    const recentCustomerTexts = recent.filter(item => item?.direction === 'incoming' && item.type === 'text' && item.text).slice(-5).map(item => String(item.text));
+    // R18-B (inbox2 V5, ca …138672): chỉ tin ≤ 24 giờ — SĐT/địa chỉ khách gửi từ đơn tháng trước là "địa chỉ cũ" (xác nhận một câu qua
+    // previousDelivery), không phải thông tin vừa gửi (trước đây bot nhặt SĐT cũ rồi xin "địa chỉ nhận hàng đầy đủ").
+    const recentCustomerTexts = recent.filter(item => item?.direction === 'incoming' && item.type === 'text' && item.text
+      && Date.now() - (Number(item.createdAt) || Date.now()) <= 24 * 60 * 60 * 1000).slice(-5).map(item => String(item.text));
     // Khách đi từ bình luận sang Messenger: bình luận gần nhất của khách dưới
     // bài ("1 xanh 1 vàng", "cho mình 2 túi") là ngữ cảnh model cần thấy — hộp
     // thư không chứa bình luận.
@@ -1983,16 +2004,38 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // "Gửi về địa chỉ cũ" mà đơn không gắn vào hội thoại (nhân viên lên tay, đơn cũ): đọc SĐT +
     // địa chỉ từ tin xác nhận đơn gần nhất trong lịch sử thay vì hỏi lại khách.
     let previousDelivery = (() => {
-      const confirmation = [...recent].reverse().find(item => item?.direction === 'outgoing' && /Số điện thoại:\s*\S+/u.test(String(item.text || '')) && /Địa chỉ nhận hàng:/u.test(String(item.text || '')));
-      if (!confirmation) return null;
-      const phone = String(confirmation.text).match(/Số điện thoại:\s*([\d .+-]{9,16})/u)?.[1]?.replace(/[^\d+]/g, '') || '';
-      const address = String(confirmation.text).match(/Địa chỉ nhận hàng:\s*([^\n]+)/u)?.[1]?.trim() || '';
-      return phone && address ? { phone, address, at: Number(confirmation.createdAt) || 0 } : null;
+      // R18-B (inbox2 V5, ca …138672 "Giao mình 3 túi vàng nữa nhé" bị xin lại SĐT + địa chỉ): phiếu nhân viên gõ có chữ đậm
+      // ("📞 Số điện thoại: *0903…*", "🏡 Địa chỉ nhận hàng: *601f…*") hay nhãn ngắn ("– Địa chỉ: …", "– SĐT: 0985 833 499", ca …76253109).
+      const PHONE_LINE = /(?:Số điện thoại|SĐT|Sđt|SDT)\s*[:：]\s*\**\s*([\d .+-]{9,16})/u;
+      const ADDRESS_LINE = /Địa chỉ(?: nhận hàng)?\s*[:：]\s*([^\n]+)/u;
+      const confirmation = [...recent].reverse().find(item => item?.direction === 'outgoing' && PHONE_LINE.test(String(item.text || '')) && ADDRESS_LINE.test(String(item.text || '')));
+      if (confirmation) {
+        const phone = String(confirmation.text).match(PHONE_LINE)?.[1]?.replace(/[^\d+]/g, '') || '';
+        const address = String(confirmation.text).match(ADDRESS_LINE)?.[1]?.replace(/\*/g, '').replace(/^[\s–-]+|[\s–-]+$/g, '').trim() || '';
+        // Chủ shop/điều phối 12/10: đơn MỚI lấy lại địa chỉ cũ — bỏ ngoặc ghi chú kho của đơn cũ ("(Tặng BGD)", "(Live)"); quà theo từng đơn.
+        if (phone && address) return { phone, address: splitOrderTag(address).body || address, at: Number(confirmation.createdAt) || 0 };
+      }
+      // R18-B (inbox2 V5, ca …423891 "Gửi c 1b nữa nha e"): đơn cũ nhân viên lên bằng phiếu Pancake POS (tin "Đã gửi xác nhận đơn hàng",
+      // không có chữ) — địa chỉ + SĐT là chữ KHÁCH tự nhắn trong chính hội thoại (cạnh nhau, hay ngay trước phiếu). Chỉ tin cũ ≥ 24 giờ
+      // (đang nhắn trong phiên này thì không phải "địa chỉ cũ").
+      const typedPhones = [...new Set(recent.filter(item => item?.direction === 'incoming' && Date.now() - (Number(item.createdAt) || 0) >= 24 * 60 * 60 * 1000)
+        .flatMap(item => [...phonesInText(item.text)]).reverse())];
+      for (const phone of typedPhones.slice(0, 3)) {
+        const own = addressFromCustomerMessages(phone, recent.filter(item => Date.now() - (Number(item?.createdAt) || 0) >= 24 * 60 * 60 * 1000));
+        if (own?.address) return { phone: own.phone, address: own.address, at: Number(own.at) || 0, source: 'messages' };
+      }
+      return null;
     })();
     // Vòng 12 (B2 #2, BOT-A): bot vừa xin "SĐT đã đặt lần trước" (ORDER_ADDRESS_OLD_ASK_PHONE) hay giỏ ghi khách muốn
     // gửi địa chỉ cũ, mà tin có SĐT: tra đơn cũ cùng SĐT (đơn hội thoại + kho landing/POS đã đồng bộ, không gọi mạng).
-    const oldAddressPhone = message.type === 'text' && (conversation.botLastTemplateId === 'ORDER_ADDRESS_OLD_ASK_PHONE' || conversation.pendingOrder?.wantsPrevious)
-      ? extractVietnamesePhone(String(message.text || '')) : '';
+    // R18-B (inbox3 N4 #11, ca …3949494 "Giao DC củ nhe e" + "<sđt> Trang" → bot đòi tỉnh/huyện/xã, rồi "DC củ e" → xin lại SĐT vừa gửi):
+    // tin nói "địa chỉ cũ" cũng tra; SĐT lấy ở tin này, không có thì SĐT giỏ đang giữ / khách gửi ≤ 2 giờ. Lô có 2 SĐT → số CUỐI (inbox4 N6).
+    const saysOldNow = message.type === 'text' && conversation.source !== 'comment' && saysOldAddress(message.text);
+    const knownOldPhone = lastPhoneInText(String(message.text || '')) || (saysOldNow || conversation.botLastTemplateId === 'ORDER_ADDRESS_OLD_ASK_PHONE' || conversation.pendingOrder?.wantsPrevious
+      ? String(conversation.pendingOrder?.phone || '') || lastPhoneInText(recent.filter(item => item?.direction === 'incoming' && Date.now() - (Number(item.createdAt) || 0) <= 2 * 60 * 60 * 1000).map(item => String(item.text || '')).join('\n'))
+      : '');
+    const oldAddressPhone = message.type === 'text' && (conversation.botLastTemplateId === 'ORDER_ADDRESS_OLD_ASK_PHONE' || conversation.pendingOrder?.wantsPrevious || saysOldNow)
+      ? knownOldPhone : '';
     if (oldAddressPhone) {
       // Trong tiến trình test chỉ đọc kho landing khi test đưa readLandingStore (không đụng dữ liệu thật).
       const landingStore = dependencies.readLandingStore || (process.env.NODE_TEST_CONTEXT ? null : readLandingStore);
@@ -2616,7 +2659,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const splitReply = awaitingSplit ? (() => {
       const phone = awaitingPending.phone || awaitingOrderRef?.phone || '';
       const address = awaitingPending.address || awaitingOrderRef?.rawAddress || awaitingOrderRef?.address || '';
-      const created = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', ...pendingValue(awaitingPending), Phone_Number: phone || '0', Customer_Address: String(address).replace(/^\((?:live|freeship)\)\s*/i, '') || '0' }, templates, { ...replyContext, messageText: 'tách đơn mới' });
+      const created = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', ...pendingValue(awaitingPending), Phone_Number: phone || '0', Customer_Address: splitOrderTag(address).body || '0' }, templates, { ...replyContext, messageText: 'tách đơn mới' });
       console.log(`Khách chọn TÁCH đơn mới (dùng lại SĐT/địa chỉ đơn cũ): ${created.templateId} (${conversation.id})`);
       return created;
     })() : null;
@@ -2964,7 +3007,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           // Vòng 12 (B2 #4, BOT-A): địa chỉ gửi thành nhiều tin liền ("Tổ 6" / "Thôn ba dùi" / … / SĐT) khi đang giữ giỏ ở bước
           // đơn → gom thành một khối để bộ soạn đơn đọc đủ cấp.
           addressComplete: Boolean(message.type === 'text' && conversation.pendingOrder?.items?.length && describeDeliveryAddress(addressBurst?.text || stripPhone(message.text).trim()).complete),
-          addressText: addressBurst?.text || stripPhone(message.text).replace(/\s+/g, ' ').trim(),
+          // R18-B: giữ nguyên dòng + SĐT (cleanAddressText tự bỏ SĐT) để bỏ được dòng tên người nhận cạnh SĐT ("<sđt>\nDũng").
+          addressText: addressBurst?.text || String(message.text || '').trim(),
           // Vòng 12 (B5 #3): chỉ khi CHÍNH KHÁCH (tin này / giỏ) nói tới gói nhỏ, hay bot vừa gửi PACKAGING_INFO. Trước đây quét
           // tin bot 30 phút ("gói nhỏ"/"combo 10 gói" có trong lời chào live, bảng giá chung) → tắt luật giỏ với khách live.
           smallPackContext: conversation.botLastTemplateId === 'PACKAGING_INFO'
@@ -3650,7 +3694,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     if (oldAddressAsk) {
       const askedBefore = Date.now() - (Number(conversation.oldAddressAskedAt) || 0) < 24 * 60 * 60 * 1000 || conversation.botLastTemplateId === 'ORDER_ADDRESS_OLD_ASK_PHONE';
       const keepPending = reply.pendingOrder !== undefined ? { pendingOrder: reply.pendingOrder && typeof reply.pendingOrder === 'object' ? { ...reply.pendingOrder, wantsPrevious: true } : reply.pendingOrder } : {};
-      if (!askedBefore && !phoneInText && !reply.oldAddressMissing && templates?.ORDER_ADDRESS_OLD_ASK_PHONE) {
+      if (!askedBefore && !knownOldPhone && !reply.oldAddressMissing && templates?.ORDER_ADDRESS_OLD_ASK_PHONE) {
         const ask = renderChatbotReply({ template_id: 'ORDER_ADDRESS_OLD_ASK_PHONE' }, templates, replyContext);
         if (ask.templateId === 'ORDER_ADDRESS_OLD_ASK_PHONE') { reply = { ...ask, ...keepPending }; oldAddressAskedNow = true; }
       } else if (templates?.ORDER_ADDRESS_OLD_NOT_FOUND) {
@@ -3661,7 +3705,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           console.log(`Địa chỉ cũ không tra được: hỏi thẳng địa chỉ (${conversation.id})`);
           const pendingNow = keepPending.pendingOrder !== undefined ? keepPending.pendingOrder : conversation.pendingOrder;
           const askPending = pendingNow && typeof pendingNow === 'object'
-            ? { ...pendingNow, ...(phoneInText && !pendingNow.phone ? { phone: phoneInText } : {}), wantsPrevious: false }
+            ? { ...pendingNow, ...(knownOldPhone && !pendingNow.phone ? { phone: knownOldPhone } : {}), wantsPrevious: false }
             : pendingNow;
           reply = { ...notFound, attention: false, ...(askPending !== undefined ? { pendingOrder: askPending } : {}) };
           await noteForStaff(dependencies, conversation, `Khách muốn gửi về địa chỉ cũ nhưng bot không tra được${phoneInText ? ` (SĐT khách đưa: ${phoneInText})` : ''} — bot đã hỏi lại địa chỉ.`, 'địa chỉ cũ không tra được');
@@ -4648,13 +4692,15 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // như đơn trong hội thoại (10 ca trùng đơn 21–28/09). POS lỗi/hết giờ → vẫn lên đơn nhưng gắn thẻ soát trùng.
     let outsideOrder = null;
     // Chỉ tra khi môi trường có POS/kho landing (server đưa findShopOrder) hay test đưa rõ fetchImpl/posConfig/readLandingStore.
-    const canLookupOutside = typeof dependencies.findShopOrder === 'function' || dependencies.fetchImpl || dependencies.posConfig || dependencies.readLandingStore;
+    // R18-B (inbox2 N4): cả khi chỉ có findOrdersByPhone (đơn CRM của hội thoại / Page khác cùng SĐT).
+    const canLookupOutside = typeof dependencies.findShopOrder === 'function' || dependencies.fetchImpl || dependencies.posConfig || dependencies.readLandingStore || typeof dependencies.findOrdersByPhone === 'function';
     if (newOrderReply && !existingRecent && !explicitYes && !awaitingRecent && canLookupOutside && templates?.ORDER_EXISTING_CONFIRM && reply.order.phone) {
       const found = await findExternalOrders(reply.order.phone, {
         fetchImpl: dependencies.fetchImpl || fetch,
         config: dependencies.posConfig || null,
         landingStore: dependencies.readLandingStore || readLandingStore,
-        excludeIds: allOrders.map(order => String(order?.id || ''))
+        excludeIds: allOrders.map(order => String(order?.id || '')),
+        findCrmOrders: typeof dependencies.findOrdersByPhone === 'function' ? dependencies.findOrdersByPhone : null
       }).catch(caught => ({ orders: [], error: caught.message }));
       outsideOrder = found.orders[0] || null;
       if (found.error) {

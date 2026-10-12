@@ -71,6 +71,8 @@ export function normalizePendingOrder(value) {
     ...(value?.wantsPrevious ? { wantsPrevious: true } : {}),
     // 01/10 (fix-bot C2/T7): ghi chú soát cho nhân viên đi theo giỏ tới khi lên đơn (thành addressCheck của đơn).
     ...(value?.staffCheck ? { staffCheck: String(value.staffCheck).slice(0, 300) } : {}),
+    // R18-B (inbox3 N5, ca …7118377): ghi chú giao khách dặn lúc gửi địa chỉ ("ship ngày mai…, hàng mới") — thành deliveryNote của đơn.
+    ...(value?.deliveryNote ? { deliveryNote: String(value.deliveryNote).slice(0, 200) } : {}),
     // Vòng 12: lúc gửi tin nhắc giữ đơn gần nhất (follow-up gọi touchPendingOrder).
     ...(remindedAt ? { remindedAt } : {}),
     // Đã gợi ý lên 2 túi cho giỏ này rồi thì không gợi ý lại.

@@ -5,7 +5,7 @@
 // Khách nhắc sản phẩm/số lượng/đổi/hủy hay đặt câu hỏi thì để LLM đọc.
 import { extractVietnamesePhone, toLocalPhone } from './customer-info.mjs';
 import { ADDRESS_WORDS, normalizeIntentText } from './intent-features.mjs';
-import { dedupeAddressSegments, describeDeliveryAddress } from './locations.mjs';
+import { dedupeAddressSegments, describeDeliveryAddress, splitOrderTag } from './locations.mjs';
 
 const CHANGE = /\b(tui|goi|bich|xanh|vang|nau|cacao|combo|huy|doi|them|bot|nua|khong lay|ko lay|k lay|lay \d|\d (tui|goi|bich))\b/;
 const ADMIN = /\b(xa|huyen|quan|phuong|thi tran|thi xa|tinh|tp|thanh pho|ap|thon|khu pho|kp)\b/g;
@@ -182,7 +182,10 @@ export function orderFlowStep(text, ctx = {}) {
   if (CHANGE.test(typoFolded.replace(ADMIN, ' ').replace(/\bgoi dia chi cu\b/g, ' ')) || /\bcacao\b/.test(s)) return null;
   if (LEADING_BASKET_SHORT.test(stripPhone(raw).replace(PHONE_LABEL, ' ').replace(/^[\s,.;:!\-–]+/u, ''))) return null;
   // Vòng 12 (inbox-3 #2): "địa chỉ cũ" khi đang giữ giỏ là đủ rõ, không cần bot vừa hỏi SĐT/địa chỉ.
-  if (mentionsOldAddress(raw)) {
+  // R18-B (inbox2 V6, ca …610843 "Đc 03 n.h p n.a.n tpvt ( đc củ) <sđt>" → bot xin "SĐT đã đặt lần trước", khách: "Đặt lần đầu em"):
+  // tin có SĐT + địa chỉ đủ thì "cũ" là tên trước sáp nhập (như prompt) — đi nhánh SĐT + địa chỉ bên dưới, không hỏi địa chỉ cũ.
+  const typedFullAddress = Boolean(extractVietnamesePhone(raw)) && (ctx.addressComplete || describeDeliveryAddress(cleanAddressText(raw)).complete);
+  if (mentionsOldAddress(raw) && !typedFullAddress) {
     // "Địa chỉ cũ" mà hệ thống không có đơn/địa chỉ giao trước của khách này: xin SĐT đã đặt lần trước
     // để tra (ORDER_ADDRESS_OLD_ASK_PHONE) + thẻ cần người xem.
     if (ctx.hasPreviousDelivery === false) return { rule: 'OLD_ADDRESS_ASK', value: { template_id: 'ORDER_ADDRESS_OLD_ASK_PHONE' }, attention: true };
@@ -190,7 +193,8 @@ export function orderFlowStep(text, ctx = {}) {
   }
   // R13 (inbox2 A3): khách vừa hẹn dịp khác (ORDER_POSTPONED, giỏ còn giữ) rồi gửi SĐT/địa chỉ → vẫn là bước đơn, chốt được.
   if (!ctx.lastWasOrderStep && ctx.botLastTemplateId !== 'ORDER_POSTPONED') return null;
-  const phone = extractVietnamesePhone(raw);
+  // R18-B (inbox4 N6, ca …76253109 gửi 2 số rồi "Số sau đây e nha"): lô tin có nhiều SĐT → số CUỐI (khách sửa số gõ nhầm).
+  const phone = lastPhoneInText(raw);
   // Vòng 12: mọi nhánh (cả nhánh địa chỉ đủ) đều lọc nhãn "sđt/đc/Tên:/shop."… và chữ đệm cuối câu.
   const address = cleanAddressText(ctx.addressText || raw);
   // R13 sửa (phản biện L2): cleanAddressText cắt đuôi câu hỏi quà/ship ("… Sơn Động Bắc Giang có tặng quà phải k bạn") → câu hỏi
@@ -253,7 +257,16 @@ const RECEIVER_PHRASE = /(?:^|[\s,.;])(?:chuyển|chuyen|gửi|gởi|gui|giao)\s
 const NAME_INTRO_PLACE = '(?:thôn|thon|ấp|ap|xóm|xom|số|so|sn|tổ|to|khu|kp|đường|duong|phố|pho|ngõ|ngo|hẻm|hem|phường|phuong|xã|xa|quận|quan|huyện|huyen|tỉnh|tinh|tp|thành|thanh|thị|thi|trường|truong|chợ|cho|nhà|nha)(?![\\p{L}])';
 const NAME_INTRO = new RegExp(`(?<![\\p{L}\\p{N}])(?:e|em|chị|chi|c|anh|a|mình|minh|tôi|toi|t|mk|cháu|chau)\\s+tên\\s+(?:là\\s+|la\\s+)?(?!${NAME_INTRO_PLACE})\\p{L}+(?:\\s+(?!${NAME_INTRO_PLACE})\\p{L}+){0,3}(?=\\s*(?:[,.;\\n]|$)|\\s+(?:${NAME_INTRO_PLACE}|\\d))`, 'giu');
 // Ghi chú giao hàng nằm lẫn trong địa chỉ.
-const DELIVERY_NOTE = /(?:giao|ship|gọi|goi)?\s*(?:trong\s+)?giờ\s+hành\s+chính|gio\s+hanh\s+chinh|gọi\s+trước\s+khi\s+giao|goi\s+truoc\s+khi\s+giao|tránh\s+(?:ngày\s+)?(?:chủ\s+nhật|cn|t7|thứ\s+7)|giao\s+(?:buổi\s+)?(?:sáng|chiều|tối)(?:\s+(?:thứ\s+\d|cn|chủ\s+nhật))?/giu;
+// R18-B (inbox3 N5, ca …7118377 "…, ship ngày mai hoặc sáng thứ 2 nhận nhé, hàng mới ,đt…"): hẹn ngày giao ("ship/giao ngày mai",
+// "giao thứ 7", "… hoặc sáng thứ 2 nhận nhé") và dặn hàng mới ("hàng mới", "date mới", "hạn mới") — ra khỏi địa chỉ, vào ghi chú đơn.
+// Chữ "mai" trơ (Hoàng Mai, Mai Dịch) không tính; đuôi chỉ nhận chữ hẹn giờ, không nuốt tên phường đứng sau.
+const DELIVERY_DAY = '(?:ngày\\s+mai|sáng\\s+mai|chiều\\s+mai|tối\\s+mai|hôm\\s+nay|sáng\\s+nay|chiều\\s+nay|tối\\s+nay|cuối\\s+tuần|(?:sáng|chiều|tối)?\\s*thứ\\s*\\d|t\\d|chủ\\s+nhật|cn)';
+const DELIVERY_NOTE = new RegExp([
+  '(?:giao|ship|gọi|goi)?\\s*(?:trong\\s+)?giờ\\s+hành\\s+chính|gio\\s+hanh\\s+chinh|gọi\\s+trước\\s+khi\\s+giao|goi\\s+truoc\\s+khi\\s+giao|tránh\\s+(?:ngày\\s+)?(?:chủ\\s+nhật|cn|t7|thứ\\s+7)|giao\\s+(?:buổi\\s+)?(?:sáng|chiều|tối)(?:\\s+(?:thứ\\s+\\d|cn|chủ\\s+nhật))?',
+  `(?<![\\p{L}])(?:ship|giao|gửi|gởi)\\s+(?:hàng\\s+)?(?:vào\\s+|trong\\s+)?${DELIVERY_DAY}(?![\\p{L}\\p{N}])(?:\\s+(?:hoặc|hay|và)\\s+${DELIVERY_DAY}(?![\\p{L}\\p{N}]))?(?:\\s+(?:mới\\s+)?nhận)?(?:\\s+(?:nhé|nha|nhá|ạ|giúp|giùm|với))*`,
+  // ("Chợ Hàng Mới" — tên chợ ở Hải Phòng — giữ nguyên.)
+  '(?<![\\p{L}])(?<!chợ\\s)(?:lấy\\s+|gửi\\s+|giao\\s+)?(?:hàng|date|hạn|hsd)\\s+mới(?:\\s+nhất)?(?:\\s+(?:nhé|nha|ạ))*(?![\\p{L}])'
+].join('|'), 'giu');
 // Chữ đệm cuối câu.
 // fix-addr (01/10): chữ đệm phải là một từ riêng — "ạ" cuối "Láng Hạ" không phải chữ đệm ("phố Láng Hạ" từng thành "Láng H").
 // R13 (basket): "… Quận 1 nhé b", "… Hà Nội nhé bạn", "… khu phố 3 nha c" — lời gọi một chữ chỉ cắt khi đứng ngay sau
@@ -355,6 +368,8 @@ const SEGMENT_BAGS = /^(?:(?:the thi|vay thi|thoi|vay|the|thi)\s)?(?:(?:cho|lay|
 // Nhãn đứng riêng một đoạn ("Giao chị combo 2,\nĐịa chỉ\n540 …" → ", Địa chỉ,").
 const SEGMENT_LABEL = /^(?:dia chi(?: nhan(?: hang)?)?|dc|d c|dchi|sdt|so dien thoai|so dt|dt|ten|ho ten|nguoi nhan)$/;
 const SEGMENT_PLACE_WORDS = /\b(?:phuong|huyen|thi tran|thi xa|thon|xom|khu pho|to dan pho|ngo|hem|ngach|so nha|chung cu|tinh|xa [a-z]{2,}|quan [a-z0-9]+|ap [a-z0-9]{2,}|duong [a-z0-9]+|pho [a-z0-9]+|tp [a-z]+|tphcm|hcm|ha noi|da nang)\b/;
+const SEGMENT_SEND_VERBS = new Set(['gui', 'goi', 'ship', 'giao', 'lay', 'dat', 'chot', 'mua']);
+const SEGMENT_SEND_OTHER = new Set(['m', 'minh', 'mk', 'c', 'chi', 'e', 'em', 'a', 'anh', 't', 'toi', 'b', 'ban', 'nhe', 'nha', 'nhen', 'nhak', 'ak', 'ah', 'luon', 'di', 'voi', 'giup', 'dum', 'gium', 'ho', 'shop', 'sop', 'ok', 'oke', 'roi', 'r', 'thu', 'nhanh']);
 /** Một đoạn chữ khách ghi có phải rác (chữ đệm / "trên cho rồi" / câu hỏi / câu đặt hàng / nhãn trơ) chứ không phải mảnh địa chỉ. */
 export function isNonAddressSegment(segment) {
   const folded = normalizeIntentText(String(segment || '')).replace(/\bdd(?=[a-z])/g, 'd').replace(/<sdt>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -371,6 +386,10 @@ export function isNonAddressSegment(segment) {
   const unglued = folded.replace(/(\d)(tui|goi|bich|bit|hop)\b/g, '$1 $2');
   if (!SEGMENT_PLACE_WORDS.test(unglued)) {
     if (/^[tpqh]$/.test(unglued)) return true;
+    // R18-B (inbox2 N3, ca …686900 "…Hải phòng\nM gửi nhé" → địa chỉ "…, M gửi, Phường Nghĩa Xá…"): lời nhắn gửi/lấy trơ ("M gửi",
+    // "mình lấy nhé", "gửi giúp em") — mọi chữ là xưng hô / động từ gửi-lấy / chữ đệm, có ít nhất một động từ.
+    if (words.length <= 5 && !/\d/.test(folded) && words.some(word => SEGMENT_SEND_VERBS.has(word))
+      && words.every(word => SEGMENT_SEND_VERBS.has(word) || SEGMENT_SEND_OTHER.has(word))) return true;
     if (/\b(?:ck|chuyen khoan|stk|so tai khoan)\b/.test(unglued) && words.length <= 6) return true;
     if (SEGMENT_BAGS.test(unglued)) return true;
   }
@@ -407,6 +426,77 @@ export function extractDeliveryNote(text) {
 
 // R17 (inbox3 A1): "<tên> đã trả lời về một bài viết. Xem bài viết(https://…)" / "… đã trả lời một quảng cáo." / "… replied to a post".
 const SYSTEM_NOTICE_LINE = /[^\n,]{0,80}?(?:đã trả lời (?:một quảng cáo|về một bài viết)|replied to (?:a post|an ad))(?![\p{L}\p{N}])\.?\s*(?:(?:Xem bài viết|View post)\s*\(\s*https?:[^\s)]*\)?)?|(?:Xem bài viết|View post)\s*\(\s*https?:[^\s)]*\)?/giu;
+
+// ===== R18-B: tên người nhận / lời nhắn / "(đc cũ)" lẫn trong khối địa chỉ (inbox2 N3, inbox3 N5, inbox4 L2, inbox2 V6) =====
+// "(đc cũ)", "( đc củ)", "(địa chỉ cũ)" khách ghi SAU một địa chỉ đủ: nhãn, không phải địa chỉ ("(phường Thanh Bình cũ)" giữ nguyên).
+const OLD_ADDRESS_MARK = /\(\s*(?:đc|dc|đ\/c|d\/c|địa\s*chỉ|dia\s*chi)\s*(?:cũ|củ|cu)\s*\)/giu;
+// Tên dính ngay sau SĐT bằng gạch / gạch dưới: "0908 816 752_vân", "0916631284- Huệ" (tối đa 3 chữ, rồi hết dòng / dấu phẩy).
+const PHONE_GLUED_NAME = /((?:\+?84[ .-]?|0)\d(?:[ .-]?\d){8})[ \t]*[_\-–—\/]+[ \t]*(\p{L}+(?:[ \t]+\p{L}+){0,2})[ \t]*(?=$|\n|,)/gmu;
+function keepPhoneDropName(match, phone, name) {
+  return isPersonNameLike(name) ? phone : match;
+}
+// Dòng "Người nhận: …", "Tên: …", "Họ tên: …" trong khối địa chỉ nhiều dòng.
+const RECEIVER_LINE = /^\s*(?:người\s*nhận|nguoi\s*nhan|tên\s*người\s*nhận|họ\s*(?:và\s*)?tên|ho\s*(?:va\s*)?ten|tên|ten|name)\s*[:：]/iu;
+const bareAdminName = name => normalizeIntentText(String(name || '').replace(/^(?:tỉnh|thành phố|tp|quận|huyện|thị xã|thị trấn|phường|xã)\s+/iu, ''));
+/** Chữ khách ghi có NÊU tên tỉnh/thành hay quận/huyện (tên đọc ra nằm nguyên trong chữ — bộ đọc dò gần đúng nên không tin riêng kết quả). */
+function namesProvinceOrDistrict(text) {
+  let resolved = null;
+  try { resolved = describeDeliveryAddress(text)?.resolved || null; } catch { resolved = null; }
+  // Chữ có dấu thì so CÒN DẤU ("Huệ" là tên người, không phải "Huế"); khách gõ không dấu thì so đã bỏ dấu.
+  const marked = /[^\u0000-\u007f]/.test(String(text || ''));
+  const plain = value => String(value || '').normalize('NFC').toLowerCase().replace(/uỷ/g, 'ủy').replace(/oà/g, 'òa').replace(/\s+/g, ' ').trim();
+  const typed = marked ? plain(text) : normalizeIntentText(text);
+  const bare = name => (marked ? plain(String(name || '').replace(/^(?:tỉnh|thành phố|tp|quận|huyện|thị xã|thị trấn|phường|xã)\s+/iu, '')) : bareAdminName(name));
+  return [resolved?.province?.name, resolved?.district?.name].filter(Boolean).map(bare).some(name => name.length >= 3 && typed.includes(name));
+}
+/** 1–3 chữ cái (không số), không chữ nào là từ địa chỉ/vị trí, không nêu tên tỉnh/quận: giống tên người ("Dũng", "Kim Thuỷ", "vân"). */
+function isPersonNameLike(text) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  return words.length >= 1 && words.length <= 3 && words.every(word => /^\p{L}+$/u.test(word) && !NOT_NAME_WORD.test(word)) && !namesProvinceOrDistrict(words.join(' '));
+}
+const lineRest = line => stripPhone(line).replace(PHONE_LABEL, ' ').replace(/(?<![\p{L}\p{N}])(?:điện|điên|dien)\s*(?:thoại|thoai)(?![\p{L}\p{N}])/giu, ' ')
+  .replace(/[_\-–—:：,.;!~]+/g, ' ').replace(/\s+/g, ' ').trim();
+const lineHasPhone = line => Boolean(extractVietnamesePhone(line)) || phonesInText(line).size > 0;
+const carriesAddress = text => /\d/.test(text) || ADDRESS_WORDS.test(normalizeIntentText(text)) || Boolean(describeDeliveryAddress(text)?.resolved?.province);
+/**
+ * Khối địa chỉ nhiều dòng (một tin hay cụm tin gộp): bỏ dòng "Người nhận: …" và dòng TÊN người đứng ngay trên/dưới (hay cùng dòng
+ * với) SĐT ("<sđt>\nDũng", "<sđt>\nKim Thuỷ\n31, chu văn an…") khi các dòng còn lại vẫn mang địa chỉ và bỏ dòng đó không làm mất
+ * phường/xã, quận/huyện hay tỉnh nào đọc được (dòng "Phú Thạnh" là phường thì giữ).
+ */
+function dropReceiverLines(raw) {
+  const lines = String(raw || '').split('\n');
+  if (lines.length < 2) return String(raw || '');
+  const phones = lines.map(lineHasPhone);
+  const rests = lines.map(lineRest);
+  const drop = new Set();
+  lines.forEach((line, index) => {
+    const others = rests.filter((rest, other) => other !== index && !drop.has(other) && rest).join(', ');
+    if (!others || !carriesAddress(others)) return;
+    if (RECEIVER_LINE.test(line)) { drop.add(index); return; }
+    const nearPhone = phones[index] || Boolean(phones[index - 1]) || Boolean(phones[index + 1]);
+    if (!nearPhone || !rests[index] || !isPersonNameLike(rests[index])) return;
+    // Phần còn lại phải tự đọc ra tỉnh/thành (địa chỉ đã định vị được) — không thì một tên phường trơ ("Phú Thạnh") khó phân biệt tên người.
+    const without = adminLevels(others);
+    if (!without[0]) return;
+    const all = adminLevels(rests.filter((rest, other) => !drop.has(other) && rest).join(', '));
+    if (all.some((name, level) => name && without[level] !== name)) return;
+    drop.add(index);
+  });
+  return drop.size ? lines.map((line, index) => (drop.has(index) ? (phones[index] ? stripToPhones(line) : '') : line)).join('\n') : String(raw || '');
+}
+// Dòng bị bỏ mà có SĐT: giữ lại SĐT (bên gọi còn đọc SĐT từ chữ này), bỏ phần tên.
+const stripToPhones = line => [...phonesInText(line)].join(' ');
+// Câu đệm / tên người nhận đứng đầu, kết thúc bằng dấu chấm: "Chị quên.Phường Gia Viên…", "C hương. Phố hạnh phúc…". Mở bằng xưng hô
+// CÓ DẤU (không "chi"/"cô": "Chi Lăng", "Cô Giang" là tên đường), 1–2 chữ sau đó không phải từ địa chỉ, phần sau còn mang địa chỉ.
+const LEADING_CHAT_CLAUSE = /^\s*(?:chị|c|em|e|anh|a|mình|m|tôi)\s+(\p{L}+(?:\s+\p{L}+)?)\s*[.!]+\s*(?=\S)/iu;
+function stripLeadingChatClause(text) {
+  const match = String(text || '').match(LEADING_CHAT_CLAUSE);
+  if (!match) return text;
+  const words = match[1].split(/\s+/);
+  if (words.some(word => NOT_NAME_WORD.test(word) || ADMIN_OR_STREET.test(word))) return text;
+  const rest = text.slice(match[0].length);
+  return carriesAddress(rest) ? rest : text;
+}
 /**
  * Chữ khách ghi → phần địa chỉ lên phiếu: bỏ SĐT và nhãn SĐT ở mọi chỗ, bỏ nhãn/câu dẫn ở đầu
  * ("đc", "shop.", "Linh:", "Tên:", "Gửi về ĐC", "Mình ở", "1 trước ạ."), bỏ người nhận chen giữa,
@@ -416,12 +506,17 @@ export function cleanAddressText(raw) {
   // R14 (…195669): "Hèm 120 ₫uông…" — ký hiệu tiền "₫" gõ thay chữ "đ", "Hèm" trước số nhà là "Hẻm".
   // R17 (inbox3 A1, ca …1715345827): dòng hệ thống Facebook "<tên> đã trả lời về một bài viết. Xem bài viết(link)" mô hình chép
   // vào Customer_Address — bỏ cả dòng (tên + link), trước khi tách SĐT (link chứa dãy số dài).
-  let text = stripPhone(String(raw || '').normalize('NFC').replace(SYSTEM_NOTICE_LINE, ' ').replace(/₫/g, 'đ')).replace(/\r/g, '');
+  // R18-B: trước khi bỏ SĐT — tên dính sau SĐT ("…752_vân", "…5678- Huệ") và dòng tên / "Người nhận: …" cạnh dòng SĐT (cần biết
+  // dòng nào mang SĐT) — xem dropReceiverLines; "(đc cũ)" khách ghi kèm địa chỉ đủ không phải một phần địa chỉ.
+  const prepared = dropReceiverLines(String(raw || '').normalize('NFC').replace(SYSTEM_NOTICE_LINE, ' ').replace(/\r/g, '').replace(PHONE_GLUED_NAME, keepPhoneDropName))
+    .replace(OLD_ADDRESS_MARK, ' ');
+  let text = stripPhone(prepared.replace(/₫/g, 'đ'));
   text = text.replace(/(?<![\p{L}\p{N}])H(?:è|e)m(?=\s+\d)/gu, 'Hẻm').replace(/(?<![\p{L}\p{N}])h(?:è|e)m(?=\s+\d)/gu, 'hẻm');
   text = text.replace(PHONE_LABEL, ' ');
   // R17 (inbox3 A6, ca …5426967696 "Điện thoại <sđt>" → địa chỉ "thôn Cửu lợi, Điện thoại, Xã Cam Hòa…"): nhãn "điện thoại"
   // đứng trơ (SĐT sau nó đã bỏ) — chỉ khi hết đoạn ngay sau nhãn, không đụng chữ "điện thoại" giữa câu.
-  text = text.replace(/(?<![\p{L}\p{N}])(?:điện|dien)\s*(?:thoại|thoai)\s*[:：.]?\s*(?=$|[\n,;])/giu, ' ');
+  // R18-B (Lục Bình Hoa "Điên thoại <sđt>"): cả chữ gõ sai "điên thoại".
+  text = text.replace(/(?<![\p{L}\p{N}])(?:điện|điên|dien)\s*(?:thoại|thoai)\s*[:：.]?\s*(?=$|[\n,;])/giu, ' ');
   text = text.replace(NAME_INTRO, ' ');
   text = text.replace(RECEIVER_PHRASE, ' ');
   text = text.replace(DELIVERY_NOTE, ' ');
@@ -437,6 +532,7 @@ export function cleanAddressText(raw) {
     // R13 (inbox1 C4): cụm giỏ đứng đầu địa chỉ ("2ca cao, 79xom hạ…", "2 t ap 4, …", "2 túi xanh 12 Lê Lợi").
     text = text.replace(LEADING_BASKET_COLOUR, '').replace(LEADING_BASKET_UNIT, '').replace(LEADING_BASKET_SHORT, '');
     text = stripLeadingLandmarkName(text);
+    text = stripLeadingChatClause(text);
     text = text.replace(/^[\s,.;:!\-–]+/u, '');
     if (text === before) break;
   }
@@ -462,6 +558,73 @@ export function cleanAddressText(raw) {
   text = text.replace(/\s*,(?:\s*,)+/g, ',').replace(/\s+,/g, ',').replace(/,(?=\S)/g, ', ').replace(/\s{2,}/g, ' ');
   text = text.replace(/^[\s,.;:!\-–]+|[\s,;:\-–]+$/gu, '').trim();
   return dedupeAddressSegments(text);
+}
+
+// ===== R18-B: soát Customer_Address (mô hình / luật) trước khi lên giỏ, phiếu (inbox2 N2/N3, inbox4 N6) =====
+const OLD_ONLY_WORDS = new Set(['dia', 'chi', 'diachi', 'dc', 'd', 'c', 'cu', 'nhu', 'lan', 'truoc', 'hom', 'gui', 'goi', 've', 'theo', 'giao', 'ship', 'nha', 'nhe', 'a', 'ak', 'em', 'e', 'cho', 'minh', 'tren', 'do', 'day', 'roi', 'r', 'don', 'ok', 'van', 'the', 'giong', 'o', 'nhan', 'hang']);
+/** Chữ chỉ là "cũ" / "như cũ" / "địa chỉ cũ" / "đc trên hôm trước" — không phải địa chỉ (inbox4 N6: phiếu in "Địa chỉ nhận hàng: cũ"). */
+export function isOldAddressOnly(text) {
+  const words = normalizeIntentText(String(text || '')).split(' ').filter(Boolean);
+  return words.length > 0 && words.length <= 8 && words.every(word => OLD_ONLY_WORDS.has(word)) && words.some(word => ['cu', 'truoc', 'tren'].includes(word));
+}
+const PLACE_STOP = new Set(['so', 'nha', 'duong', 'pho', 'phuong', 'xa', 'quan', 'huyen', 'tinh', 'thanh', 'tp', 'thi', 'tran', 'ap', 'thon', 'xom', 'to', 'khu', 'ngo', 'hem', 'kp', 'p', 'q', 'tt', 'tx', 'h', 'viet', 'nam']);
+// (Chữ 1 ký tự — "1" của "Quận 1" — trùng "1 túi" của khách: không tính.)
+const foldedTokens = text => normalizeIntentText(String(text || '')).split(' ').filter(word => word.length >= 2 && !PLACE_STOP.has(word));
+/** Chữ khách ghi có giống một địa chỉ / mảnh địa chỉ không: có chữ số, từ địa chỉ, hay NÊU nguyên tên tỉnh/quận/phường đọc ra. */
+export function looksLikeAddressText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  const folded = normalizeIntentText(raw);
+  if (/\d/.test(raw) || ADDRESS_WORDS.test(folded) || STRONG_ADDRESS_WORDS.test(folded)) return true;
+  let resolved = null;
+  try { resolved = describeDeliveryAddress(raw)?.resolved || null; } catch { resolved = null; }
+  return [resolved?.province?.name, resolved?.district?.name, resolved?.ward?.name].filter(Boolean).map(bareAdminName).some(name => name.length >= 3 && folded.includes(name));
+}
+/**
+ * Soát địa chỉ trong JSON (mô hình hay luật) trước khi bộ soạn đơn dùng. Trả { address, note, previous }:
+ * - chỉ là "cũ / như cũ…" → address '' + previous (khách muốn địa chỉ cũ; không bao giờ in "cũ" lên phiếu);
+ * - không giống địa chỉ ("Mình ăn nhiều rồi shop êy", "Trang") → '' (giữ địa chỉ đang giữ);
+ * - đang SỬA ĐƠN mà tin khách lượt này không mang chữ nào của địa chỉ đó ("6b") → '' (giữ địa chỉ đơn);
+ * - phường/xã đọc ra từ địa chỉ mô hình KHÔNG có trong chữ khách (tin này, tin gần đây, địa chỉ đã giữ/đơn cũ) — mô hình tự "sửa"
+ *   ("phường Hắc Dịch, BRVT" → "Phường Tân Định, Quận 1") → dùng chữ khách gõ gần nhất (không có thì ''), kèm ghi chú đối chiếu.
+ * Còn lại: giữ nguyên.
+ */
+export function screenTypedAddress(value, { customerText = '', recentTexts = [], known = [], updating = false, wantsPrevious = false } = {}) {
+  const typed = String(value ?? '').trim();
+  if (!typed || typed === '0') return { address: typed, note: '', previous: false };
+  if (isOldAddressOnly(typed)) return { address: '', note: '', previous: true };
+  const cleaned = cleanAddressText(typed);
+  // Mảnh ngắn (≤ 2 chữ: "Hoằng Đồng" trả lời câu chọn xã) khi giỏ/đơn đã có địa chỉ để ghép thì vẫn nhận.
+  const hasKnown = (Array.isArray(known) ? known : []).some(text => String(text || '').trim() && String(text).trim() !== '0');
+  // Khách đang xin "địa chỉ cũ" thì mảnh ngắn không phải địa chỉ ("<sđt> Trang" — tên người nhận).
+  if (!looksLikeAddressText(cleaned) && (normalizeIntentText(cleaned).split(' ').filter(Boolean).length >= 3 || !hasKnown || wantsPrevious)) return { address: '', note: '', previous: false };
+  // Tin mới nhất trước (recentTexts cũ → mới).
+  const customerSources = [customerText, ...[...(Array.isArray(recentTexts) ? recentTexts : [])].reverse()].map(text => String(text || '')).filter(Boolean);
+  if (updating) {
+    // Không chữ nào của địa chỉ có trong tin khách lượt này ("6b", "thêm 1 túi") → khách không đổi địa chỉ. Một chữ trùng (số nhà sửa
+    // "số 45 chứ không phải 12") là đủ để nhận.
+    const said = ` ${normalizeIntentText(customerText)} `;
+    if (!foldedTokens(cleaned).some(token => said.includes(` ${token} `))) return { address: '', note: '', previous: false };
+  }
+  let resolved = null;
+  try { resolved = describeDeliveryAddress(cleaned)?.resolved || null; } catch { resolved = null; }
+  const ward = bareAdminName(resolved?.ward?.name);
+  // Chỉ chặn khi có chữ khách TRÁI lại: tin khách gần đây / địa chỉ giỏ-đơn đã giữ đọc ra một phường/xã KHÁC, và tên phường mô hình
+  // viết không có trong chữ khách. Khách chưa ghi phường nào (chỉ "176/1A KP1") thì tin mô hình như cũ.
+  const own = customerSources.find(text => looksLikeAddressMessage(text, { orderStep: true }));
+  const knownList = (Array.isArray(known) ? known : []).map(text => String(text || '')).filter(text => text.trim() && text.trim() !== '0');
+  const typedWards = ward && !/^\d+$/.test(ward)
+    ? [...customerSources.filter(text => looksLikeAddressMessage(text, { orderStep: true })).map(text => cleanAddressText(text)), ...knownList].map(text => {
+      try { return bareAdminName(describeDeliveryAddress(text)?.resolved?.ward?.name); } catch { return ''; }
+    }).filter(Boolean) : [];
+  if (typedWards.length && !typedWards.includes(ward)) {
+    const pool = ` ${[...customerSources, ...knownList].map(text => normalizeIntentText(text)).join(' | ')} `;
+    if (!pool.includes(` ${ward} `)) {
+      const fallback = own ? cleanAddressText(own) : '';
+      return { address: fallback, note: `Địa chỉ mô hình viết "${cleaned.slice(0, 100)}" có phường/xã không có trong tin khách — giữ chữ khách gõ, cần đối chiếu`, previous: false };
+    }
+  }
+  return { address: typed, note: '', previous: false };
 }
 
 /** Tin thanh toán ("gửi stk", "ck", "chuyển khoản", "lên đơn 0đ", "đã chuyển"): không bao giờ là sửa đơn. */
@@ -496,12 +659,15 @@ export function collectAddressBurst(messages, { windowMs = 90 * 1000 } = {}) {
     const phoneOnly = Boolean(extractVietnamesePhone(raw)) && !stripPhone(raw).replace(/[\s,.;:]+/g, '').replace(/s[đd]t|đt|dt/giu, '');
     // R15 (inbox2 A3, ca …660136): tin "Gửi địa chỉ cũ cho c" không phải mảnh địa chỉ — dừng gom (trước đây "cũ cho c" lên phiếu).
     if (!phoneOnly && (raw.includes('?') || raw.length > 160 || BURST_PRODUCT.test(s.replace(ADMIN, ' ')) || NOT_ADDRESS.test(s) || mentionsOldAddress(raw))) break;
+    // R18-B (inbox2 N3, ca …138672): câu chat ≥ 4 chữ không mang gì của địa chỉ ("Mình ăn nhiều rồi shop êy") — dừng gom.
+    if (!phoneOnly && s.split(' ').filter(Boolean).length >= 4 && !looksLikeAddressText(raw)) break;
     picked.unshift(raw);
     newer = item;
   }
   if (picked.length < 2) return null;
   const phone = picked.map(text => extractVietnamesePhone(text)).find(Boolean) || '';
-  const text = cleanAddressText(picked.map(part => stripPhone(part).trim()).filter(Boolean).join(', '));
+  // R18-B: ghép nguyên từng tin theo dòng (cleanAddressText tự bỏ SĐT) — để nhận ra tin tên người nhận đứng ngay sau tin SĐT.
+  const text = cleanAddressText(picked.map(part => part.trim()).filter(Boolean).join('\n'));
   return text || phone ? { text, phone, count: picked.length } : null;
 }
 
@@ -521,7 +687,8 @@ export function pickPreviousAddress(phone, ...orderLists) {
       if (!order) continue;
       const orderPhone = toLocalPhone(order.phone) || String(order.phone || '').replace(/\D/g, '');
       if (orderPhone !== key) continue;
-      const address = String(order.rawAddress || order.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+      // Điều phối 12/10: địa chỉ cũ cho đơn MỚI — bỏ mọi ngoặc ghi chú kho của đơn cũ ("(Tặng BGD)", "(Live)").
+      const address = splitOrderTag(String(order.rawAddress || order.address || '')).body;
       if (!address || /^chưa có địa chỉ$/i.test(address)) continue;
       if (order.landing?.incomplete && !order.landing?.posId) continue;
       const at = Number(order.createdAt) || 0;
@@ -550,6 +717,14 @@ export async function lookupPreviousAddress(phone, { customerOrders = [], landin
 //  4) kho landing (đơn ngoài, như cũ).
 const DAY_MS = 24 * 60 * 60 * 1000;
 const phoneDigits = value => toLocalPhone(value) || String(value || '').replace(/\D/g, '');
+/**
+ * R18-B (inbox4 N6): SĐT CUỐI trong chữ (lô tin gộp "<số gõ nhầm>\n<số đúng>", "số sau đây nha") — khách sửa số thì số sau là số đúng.
+ * Không có dạng 10 số rõ thì như extractVietnamesePhone. Trả '' khi không có.
+ */
+export function lastPhoneInText(text) {
+  const all = [...phonesInText(text)];
+  return all.length > 1 ? all[all.length - 1] : extractVietnamesePhone(String(text || '')) || '';
+}
 /** Mọi SĐT trong một tin (kể cả "0912 345 678", "0912.345.678", "+84 912…") → dạng 0xxxxxxxxx. */
 export function phonesInText(text) {
   const found = new Set();
@@ -633,7 +808,7 @@ export function pickPosOrderAddress(phone, posOrders, pancakeConversationId, { d
     if (!order || [6, 7].includes(Number(order.status))) continue;
     const phones = [order.bill_phone_number, order.shipping_address?.phone_number].map(phoneDigits).filter(Boolean);
     if (!phones.includes(key)) continue;
-    const address = posOrderAddress(order);
+    const address = splitOrderTag(posOrderAddress(order)).body;
     if (!address) continue;
     // inserted_at của POS là giờ UTC không ghi múi (như pos-sync.mjs posTimeToWebcake).
     const inserted = String(order.inserted_at || '').trim();
@@ -743,7 +918,7 @@ export function addressSuggestions({ conversation = {}, messages = [], posOrders
     .filter(order => order && String(order.processingStatus || '') !== 'cancelled')
     .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
   for (const order of orders) {
-    const address = String(order.rawAddress || order.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+    const address = splitOrderTag(String(order.rawAddress || order.address || '')).body;
     push(address, { source: 'order', at: Number(order.createdAt) || 0, orderId: String(order.id || ''), phone: toLocalPhone(order.phone) || '' });
   }
   const pos = (Array.isArray(posOrders) ? posOrders : []).filter(order => order && ![6, 7].includes(Number(order.status)));

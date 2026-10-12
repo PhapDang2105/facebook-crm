@@ -6,8 +6,8 @@ import { metaConfig } from './config.mjs';
 import { orderKey as buildOrderKey, toPricedItems } from './processing/order-key.mjs';
 import { isOrderStep, usablePendingOrder } from './processing/pending-order.mjs';
 import { extractVietnamesePhone, toLocalPhone } from './processing/customer-info.mjs';
-import { dedupeAddressSegments, describeDeliveryAddress, mergeAddressFragment } from './processing/locations.mjs';
-import { cleanAddressText, extractDeliveryNote, isPaymentMessage, looksLikeAddressMessage, mentionsOldAddress } from './processing/order-flow.mjs';
+import { dedupeAddressSegments, describeDeliveryAddress, mergeAddressFragment, splitOrderTag } from './processing/locations.mjs';
+import { cleanAddressText, extractDeliveryNote, isPaymentMessage, looksLikeAddressMessage, mentionsOldAddress, screenTypedAddress } from './processing/order-flow.mjs';
 import { countBags, normalizeIntentText } from './processing/intent-features.mjs';
 // Vòng 13: một nơi sửa lỗi gõ màu / nhận tin chỉ nêu số lượng — dùng chung với bộ luật.
 import { normalizeColourTypos, quantityOnlyRequest } from './processing/rule-intent.mjs';
@@ -1309,8 +1309,14 @@ function renderOrder(value, templates, context = {}) {
   // Mô hình ghi "0" khi khách không đưa địa chỉ: coi như trống để lấy địa chỉ đơn trước.
   // Tên người nhận khách ghi đầu địa chỉ ("Nguyễn thị Hằng Thôn 4, …") không lên phiếu giao.
   // Vòng 12: lọc nhãn/chữ thừa ("shop.đc", "Linh:", "1 trước ạ.", "sdt", "nhé") trước khi lên phiếu.
-  const typedAddress = String(value.Customer_Address || '').trim();
-  const deliveryNote = typedAddress && typedAddress !== '0' ? extractDeliveryNote(typedAddress) : '';
+  // R18-B (inbox2 N2/N3, inbox4 N6): soát địa chỉ trong JSON — "cũ" trơ, câu chat, sửa đơn mà khách không gửi địa chỉ, phường mô hình
+  // tự "sửa" không có trong chữ khách — xem screenTypedAddress.
+  const knownAddresses = [pending?.address, previous?.rawAddress, previous?.address, context.recentOrder?.rawAddress, context.recentOrder?.address, context.latestOrder?.address, context.previousDelivery?.address].filter(Boolean).map(String);
+  const screened = screenTypedAddress(value.Customer_Address, { customerText, recentTexts: Array.isArray(context.recentCustomerTexts) ? context.recentCustomerTexts : [], known: knownAddresses, updating, wantsPrevious });
+  const typedAddress = String(screened.address || '').trim();
+  // Ghi chú giao hàng: từ địa chỉ và cả chữ khách lượt này (luật địa chỉ đã cắt ghi chú khỏi Customer_Address), cộng ghi chú giỏ đang giữ.
+  const deliveryNote = [...new Set([String(pending?.deliveryNote || ''), typedAddress && typedAddress !== '0' ? extractDeliveryNote(typedAddress) : '', extractDeliveryNote(customerText)]
+    .flatMap(note => note.split('; ')).map(note => note.trim()).filter(Boolean))].join('; ').slice(0, 200);
   // Vòng 13: đuôi lời dặn dính sau địa chỉ ("…An Hưng- Thanh Hoá nhé b", "… nha shop ạ") làm máy không đọc ra tỉnh → cắt.
   // Chỉ cắt khi mở bằng nhé/nha/nhen/ạ (chữ "b"/"e" trơ trọi cuối địa chỉ có thể là "khu B").
   const stripCourtesyTail = text => String(text || '').replace(/(?:[\s,.;-]+(?:nhé|nhe|nha|nhá|nhen|nghen|ạ))(?:[\s,.;-]+(?:b|bạn|ban|shop|sốp|em|e|ơi|oi|ạ|nhé|nha))*[\s,.;-]*$/iu, '').trim();
@@ -1346,12 +1352,17 @@ function renderOrder(value, templates, context = {}) {
     const lastAge = lastOrder?.createdAt ? now - (Number(lastOrder.createdAt) || 0) : Infinity;
     const lastActive = String(lastOrder?.processingStatus || '') !== 'cancelled' && lastOrder?.status !== 'Hủy';
     if (lastAge < 24 * 60 * 60 * 1000 || (lastActive && lastAge < 7 * 24 * 60 * 60 * 1000)) return null;
-    const savedAddress = source => String(source?.rawAddress || source?.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+    // Điều phối 12/10: đơn MỚI lấy lại địa chỉ đơn cũ → bỏ mọi ngoặc ghi chú kho đầu địa chỉ ("(Tặng BGD)", "(Live)"); "(Live)" của đơn mới do luồng live tự thêm.
+    const savedAddress = source => splitOrderTag(String(source?.rawAddress || source?.address || '')).body;
     const source = [recentOrder, context.latestOrder, context.previousDelivery]
       .find(item => item && !item.foreign && toLocalPhone(item.phone) && savedAddress(item) && describeDeliveryAddress(savedAddress(item)).complete);
     return source ? { phone: toLocalPhone(source.phone), address: savedAddress(source) } : null;
   })();
-  const freshAddress = (repeatsOrderAddress ? '' : typedGiven) || (previous?.address ? String(previous.address) : '') || savedContact?.address || '';
+  // R18-B (inbox3 V12, ca …3814895): địa chỉ đơn cũ mang đầu "(Live) "/"(Freeship) " của kho — bỏ trước khi in lại cho khách.
+  // Chủ shop 12/10: ghi chú kho trong ngoặc đầu địa chỉ đơn ("(Tặng BGD) …", "(Live) …") — sửa đơn thì GIỮ trên đơn lưu (orderTag,
+  // gắn lại ở order.address bên dưới), chỉ ẩn trong tin gửi khách.
+  const orderTag = updating && previous?.address ? splitOrderTag(previous.address).tag : '';
+  const freshAddress = (repeatsOrderAddress ? '' : typedGiven) || (previous?.address ? splitOrderTag(previous.address).body : '') || savedContact?.address || '';
   const phone = freshPhone || pending?.phone || (previous?.phone ? toLocalPhone(previous.phone) || String(previous.phone) : '') || savedContact?.phone || '';
   // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
   // Lợi") is merged into the saved address; a whole new address replaces it.
@@ -1386,7 +1397,7 @@ function renderOrder(value, templates, context = {}) {
   // Ghi chú soát đi theo giỏ tới khi lên đơn: địa chỉ AI suy ra độ tin thấp (T7, engine đặt value.addressAiCheck)
   // và SĐT trùng đơn landing/POS không thuộc hội thoại (C2, previousDelivery.foreign).
   const foreignCheck = previous?.foreign ? `SĐT trùng đơn ${previous.foreign.source || 'ngoài'} ${previous.foreign.orderId || ''} không thuộc hội thoại, đối chiếu người nhận`.replace(/\s+/g, ' ') : '';
-  const staffCheck = [...new Set([String(value.addressAiCheck || '').trim(), foreignCheck, ...String(pending?.staffCheck || '').split('; ')].filter(Boolean))].join('; ').slice(0, 300);
+  const staffCheck = [...new Set([String(value.addressAiCheck || '').trim(), screened.note, foreignCheck, ...String(pending?.staffCheck || '').split('; ')].filter(Boolean))].join('; ').slice(0, 300);
 
   // Remember a priceable basket, plus whatever contact detail has arrived so
   // far, so the customer never has to repeat something already given.
@@ -1404,6 +1415,8 @@ function renderOrder(value, templates, context = {}) {
         // Vòng 12: khách muốn gửi về địa chỉ cũ mà chưa tra ra (chưa có SĐT/đơn cũ): nhớ cho lượt sau.
         ...(wantsPrevious && !previous?.address && !address ? { wantsPrevious: true } : {}),
         ...(staffCheck ? { staffCheck } : {}),
+        // R18-B (inbox3 N5, ca …7118377): ghi chú giao ("ship ngày mai…, hàng mới") đi theo giỏ tới khi lên đơn.
+        ...(deliveryNote ? { deliveryNote } : {}),
         // Vòng 13: lựa chọn đổi quà (engine đặt sau GIFT_SWAP) đi theo giỏ tới khi lên đơn, kể cả khi khách đổi món/số túi.
         ...(giftSwap && pending ? { giftSwap } : {}),
         // R15: lời hứa tặng yến mạch khách quen đi theo giỏ tới khi lên đơn.
@@ -1565,7 +1578,7 @@ function renderOrder(value, templates, context = {}) {
   const addressTyped = customerTexts.some(text => looksLikeAddressMessage(text, { orderStep: true }) || /\b(?:dia chi|dchi|d\/c)\b/.test(normalizeIntentText(text)));
   // Chỉ khi địa chỉ / SĐT trên phiếu là CỦA ĐƠN CŨ (tin xác nhận đơn trong lịch sử — previousDelivery, hay đơn gần nhất), không
   // phải khách gõ; đơn chưa hủy ≤ 7 ngày thì luồng "đặt thêm?" của engine đã hỏi lại (không hỏi hai lần).
-  const oldOf = source => String(source?.rawAddress || source?.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+  const oldOf = source => splitOrderTag(String(source?.rawAddress || source?.address || '')).body;
   const oldSources = [context.previousDelivery, context.latestOrder, recentOrder].filter(source => source && !source.foreign && oldOf(source));
   const copiesOld = Boolean(address) && oldSources.some(source => sameAddressText(oldOf(source), address)
     || (toLocalPhone(source.phone) && toLocalPhone(source.phone) === toLocalPhone(phone)));
@@ -1578,7 +1591,7 @@ function renderOrder(value, templates, context = {}) {
       && !wantsPrevious && !pending?.phone && !pending?.address && !pending?.oldAddressConfirm && !phoneTyped && !addressTyped));
   if (confirmOld) {
     const cart = price.lines.map(line => `${line.quantity} ${line.name}`).join(' + ');
-    const text = fill(templates.ORDER_ADDRESS_OLD_CONFIRM, { ...commonValues(), cart, total: formatMoney(price.total), address: delivery?.canonical || address, phone });
+    const text = fill(templates.ORDER_ADDRESS_OLD_CONFIRM, { ...commonValues(), cart, total: formatMoney(price.total), address: splitOrderTag(delivery?.canonical || address).body, phone });
     return { templateId: 'ORDER_ADDRESS', variant: 'oldAddressConfirm', ...splitMessages(text), handoff: false,
       pendingOrder: { ...(nextPending || {}), items: price.lines.map(line => ({ product: line.name, code: line.sku, quantity: line.quantity })), key, at: now, phone, address, addressAsks, oldAddressConfirm: now } };
   }
@@ -1594,10 +1607,13 @@ function renderOrder(value, templates, context = {}) {
   // (ward, district, province spelled out) so the customer checks exactly what
   // will be shipped to; the order keeps what they typed as rawAddress.
   const deliveryAddress = delivery?.canonical || address;
+  // Tin gửi khách: không lộ ghi chú kho trong ngoặc đầu địa chỉ ("(Live)", "(Tặng BGD)"). Đơn lưu giữ nguyên (storedAddress).
+  const customerAddress = splitOrderTag(deliveryAddress).body || deliveryAddress;
+  const withOrderTag = text => (orderTag && !splitOrderTag(text).tag ? `${orderTag} ${text}` : text);
   const confirmation = fill(templates.ORDER_CONFIRMATION, {
     ...commonValues(),
     phone,
-    address: deliveryAddress,
+    address: customerAddress,
     shipping: price.shippingFee ? formatMoney(price.shippingFee) : '',
     subtotal: formatMoney(price.subtotal),
     total: formatMoney(total),
@@ -1610,7 +1626,7 @@ function renderOrder(value, templates, context = {}) {
     const unchanged = fill(templates.ORDER_UNCHANGED, {
       ...commonValues(),
       phone,
-      address: deliveryAddress,
+      address: customerAddress,
       total: formatMoney(total),
       free_ship: price.gifts.find(isFreeShippingGift)?.name || '',
       gift: price.gifts.filter(gift => !isFreeShippingGift(gift)).map(gift => gift.name).join(' + ')
@@ -1630,7 +1646,7 @@ function renderOrder(value, templates, context = {}) {
     const updated = fill(updatedTemplate, {
       ...commonValues(),
       phone,
-      address: deliveryAddress,
+      address: customerAddress,
       shipping: price.shippingFee ? formatMoney(price.shippingFee) : '',
       subtotal: formatMoney(price.subtotal),
       total: formatMoney(total),
@@ -1643,7 +1659,7 @@ function renderOrder(value, templates, context = {}) {
       images: [],
       handoff: false,
       pendingOrder: null,
-      order: { items: orderItems, phone, address: deliveryAddress, rawAddress: address, total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, ...giftSwapOrderFields(price), updateOrderId: String(recentOrder.id), ...(trialPriced ? { trial: true } : {}), ...(promoBowl ? { promoGift: PROMO_BOWL_GIFT.name } : {}), ...orderNoteFields }
+      order: { items: orderItems, phone, address: withOrderTag(deliveryAddress), rawAddress: withOrderTag(address), total, subtotal: price.subtotal, shippingFee: price.shippingFee, orderKey: key, gift: price.gift, ...giftSwapOrderFields(price), updateOrderId: String(recentOrder.id), ...(trialPriced ? { trial: true } : {}), ...(promoBowl ? { promoGift: PROMO_BOWL_GIFT.name } : {}), ...orderNoteFields }
     };
   }
   return {

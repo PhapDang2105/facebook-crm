@@ -153,5 +153,8 @@
   "DEFAULT_FLAVOUR_NOTE": "Dạ {title} chưa chọn vị nên em lên {count} Túi Xanh nguyên bản 450g (vị dễ ăn, bán chạy nhất) cho mình ạ 💚 {Title} muốn đổi sang Túi Vàng nhiều hạt hay Túi Nâu cacao thì nhắn em đổi liền nha.",
   "VOICE_RECEIVED": "Dạ em chưa nghe được tin nhắn thoại ạ, {title} nhắn chữ giúp em nha ạ 💛",
   "ALLERGY_HAS_INGREDIENT": "Dạ cả Túi Xanh, Túi Vàng và Túi Nâu nhà em đều có {ingredient} trong thành phần ạ, nên nếu {title} dị ứng hay không dùng được {ingredient} thì mình không nên dùng sản phẩm này để đảm bảo sức khỏe nha ạ 💛 Em cảm ơn {title} đã hỏi kỹ ạ.",
-  "INGREDIENT_NOT_INCLUDED": "Dạ trong thành phần granola nhà em không có {ingredient} ạ 💚 Granola gồm: gạo lứt, yến mạch, hạt bí, hạnh nhân, hạt điều, nho khô, xoài sấy, nam việt quất sấy, dừa sấy, mật thốt nốt, đường mạch nha và muối hồng Himalaya. Nếu {title} dị ứng nặng thì mình hỏi thêm ý kiến bác sĩ cho chắc nha ạ."
+  "INGREDIENT_NOT_INCLUDED": "Dạ trong thành phần granola nhà em không có {ingredient} ạ 💚 Granola gồm: gạo lứt, yến mạch, hạt bí, hạnh nhân, hạt điều, nho khô, xoài sấy, nam việt quất sấy, dừa sấy, mật thốt nốt, đường mạch nha và muối hồng Himalaya. Nếu {title} dị ứng nặng thì mình hỏi thêm ý kiến bác sĩ cho chắc nha ạ.",
+  "SHIPPING_CARRIER": "Dạ đơn bên em gửi qua đơn vị vận chuyển SPX Express ạ, khi có mã vận đơn em gửi {title} theo dõi nha 💛",
+  "STAFF_WAIT_COMPLAINT": "Dạ em xin lỗi {title} vì để mình chờ lâu ạ 🙏 Em đã báo gấp bạn phụ trách kiểm tra và nhắn lại {title}[?soon] sớm nhất có thể[/?][?when] từ 8h {when}[/?] nha ạ 💛",
+  "GREETING_SHORT": "Dạ em đây ạ 💛 {Title} cần em hỗ trợ gì cứ nhắn em nha."
 }

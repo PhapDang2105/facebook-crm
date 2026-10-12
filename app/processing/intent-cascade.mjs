@@ -57,7 +57,9 @@ const TEMPLATES_BY_SUBGROUP = {
     // R15 (03/10): khách đã mua trên sàn (hỏi mã đơn sàn để kiểm tra)
     'BOUGHT_ON_MARKETPLACE',
     // R16 (05/10): tin nhắn thoại — bot không nghe được, xin khách nhắn chữ (như IMAGE_RECEIVED; không vào ANSWER)
-    'VOICE_RECEIVED'],
+    'VOICE_RECEIVED',
+    // R18 (12/10): xin lỗi + báo gấp bạn phụ trách khi khách khiếu nại / chờ lâu lúc nhân viên đang xử lý (engine tự chọn)
+    'STAFF_WAIT_COMPLAINT'],
   ORDER: ['ASK_FLAVOR', 'ASK_PRODUCT', 'ORDER_ADDRESS', 'ORDER_ADDRESS_PARTIAL', 'ORDER_ADDRESS_CLARIFY', 'ORDER_CONFIRMATION', 'ORDER_CANCELLED', 'ORDER_HELP', 'ORDER_EXISTING_CONFIRM', 'CONFIRM_YES', 'ORDER_POSTPONED', 'ORDER_INFO_ASK_FLAVOR', 'ASK_FLAVOR_NGUYENBAN',
     'ORDER_UPDATED', 'ORDER_ADDRESS_REMIND', 'ORDER_CART_LINE', 'UPSELL_TWO_BAGS', 'SHOP_ORDER_RECEIVED', 'ORDER_ADDRESS_CHOOSE', 'ORDER_ADDRESS_OLD_ASK_PHONE', 'ORDER_PHONE_ASK_FLAVOR', 'ORDER_UNCHANGED', 'ORDER_WRONG', 'ORDER_CHANGE_STAFF', 'ORDER_CUSTOM_BASKET', 'ORDER_NOTE_ADDED', 'ASK_REORDER',
     // mã engine trả (renderChatbotReply) cho ORDER_UPDATED / ORDER_CANCELLED / ORDER_NOTE_ADDED — nhãn từ nhật ký quyết định
@@ -78,7 +80,8 @@ const TEMPLATES_BY_SUBGROUP = {
 // R15 (03/10): BAG_SIZE_INFO / FRUIT_PAIRING / SMALL_PACK_FLAVOURS là mẫu thông tin MỚI chưa có nhãn trong dữ liệu huấn luyện —
 // OTHER có chủ ý (không vào ANSWER để mô hình tầng không tự trả lời bằng mẫu nó chưa học); chuyển sang INFO sau khi huấn luyện lại.
 // R17 (10/10): ALLERGY_HAS_INGREDIENT / INGREDIENT_NOT_INCLUDED (luật dị ứng) cùng cách.
-export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED', 'BAG_SIZE_INFO', 'FRUIT_PAIRING', 'SMALL_PACK_FLAVOURS', 'DEFAULT_FLAVOUR_NOTE', 'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED'].includes(String(templateId || ''));
+// R18 (12/10): SHIPPING_CARRIER (luật hỏi đơn vị vận chuyển) và GREETING_SHORT (lời gọi giữa luồng đơn) cùng cách.
+export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED', 'BAG_SIZE_INFO', 'FRUIT_PAIRING', 'SMALL_PACK_FLAVOURS', 'DEFAULT_FLAVOUR_NOTE', 'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED', 'SHIPPING_CARRIER', 'GREETING_SHORT'].includes(String(templateId || ''));
 
 /** Mã mẫu → nhóm 6 lớp (bảng đã chốt, PRICE/INFO/SOCIAL tách). Mã không có trong bảng và COMMENT_* không có mục. */
 export const SUBGROUP_OF_TEMPLATE = Object.freeze(Object.fromEntries(Object.entries(TEMPLATES_BY_SUBGROUP).flatMap(([subgroup, templates]) => templates.map(templateId => [templateId, subgroup]))));

@@ -139,6 +139,13 @@ export const fallbackTemplates = Object.freeze({
   // (giờ hành chính 8h–17h giờ VN; ngoài giờ hẹn 8h sáng) + thẻ cần người, tối đa 1 lần mỗi 2 giờ mỗi hội thoại.
   STAFF_WAIT_OPEN: 'Dạ em đã ghi nhận câu hỏi của {title} rồi ạ 💛 Em chuyển bạn phụ trách trả lời {title} ngay trong ít phút, {title} chờ em chút nha ạ.',
   STAFF_WAIT_CLOSED: 'Dạ em đã ghi nhận câu hỏi của {title} rồi ạ 💛 Bạn phụ trách làm việc giờ hành chính từ 8h đến 17h, sẽ trả lời {title} từ 8h {when} nha ạ.',
+  // R18 (cross 1.1): khách khiếu nại / dọa hủy / chờ lâu khi nhân viên đang xử lý → một câu xin lỗi + báo gấp bạn phụ trách.
+  // {soon}: trong giờ hành chính; {when}: ngoài giờ ("sáng mai" / "sáng nay").
+  STAFF_WAIT_COMPLAINT: 'Dạ em xin lỗi {title} vì để mình chờ lâu ạ 🙏 Em đã báo gấp bạn phụ trách kiểm tra và nhắn lại {title}[?soon] sớm nhất có thể[/?][?when] từ 8h {when}[/?] nha ạ 💛',
+  // R18 (inbox3 N4, cross 1.2; chủ shop 12/10: chỉ SPX Express): hỏi đơn vị vận chuyển.
+  SHIPPING_CARRIER: 'Dạ đơn bên em gửi qua đơn vị vận chuyển SPX Express ạ, khi có mã vận đơn em gửi {title} theo dõi nha 💛',
+  // R18 (cross R9, inbox1 V1): lời gọi ("Shop ơi", "Alo") giữa luồng đơn / khi khách có đơn gần đây — không chào lại bằng WELCOME.
+  GREETING_SHORT: 'Dạ em đây ạ 💛 {Title} cần em hỗ trợ gì cứ nhắn em nha.',
   // R14 (chủ shop 03/10, quyết định 11): câu hỏi bệnh lý (cao huyết áp, tim mạch…) — câu thận trọng ngắn + thẻ; agent luật
   // chọn mã này, agent seed thêm cùng chữ vào seed.
   HEALTH_CAUTION: 'Dạ granola bên em là thực phẩm thông thường, không phải thuốc hay thực phẩm chức năng ạ; sản phẩm có dùng mật thốt nốt và đường mạch nha để tạo vị ngọt nhẹ. Người đang điều trị bệnh (huyết áp, tim mạch, tiểu đường…) {title} nên hỏi ý kiến bác sĩ về khẩu phần phù hợp; nếu dùng thì ăn lượng vừa phải (2–3 muỗng), kèm sữa chua không đường nha ạ.',
@@ -3594,7 +3601,13 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const again = received ? null : await askModel({ replyHint: 'LƯU Ý: khách KHÔNG chỉ cảm ơn/đáp lời — chọn mẫu trả lời đúng ý khách (không chọn THANK_YOU).' });
       if (received) reply = renderChatbotReply({ template_id: 'RECEIVED_CHECK' }, templates, replyContext);
       else if (again && again.templateId !== 'THANK_YOU') reply = again;
-      else {
+      else if (String(message.text || '').trim().length >= 40 && Date.now() - (Number(conversation.staffWaitAt) || 0) >= STAFF_WAIT_COOLDOWN_MS
+        && (() => { const wait = staffWaitTemplate(); const rendered = renderChatbotReply({ template_id: wait.templateId, values: { when: wait.when } }, templates, replyContext); return rendered.templateId === wait.templateId && rendered.messages?.length; })()) {
+        // R18 (cross 1.4, ca …926962142: khách viết dài xin bù tiền ship vì ghi nhầm địa chỉ → bot im 15,6 giờ): tin có nội dung (≥ 40
+        // ký tự) mà hai lượt mô hình vẫn chỉ "cảm ơn" → báo bạn phụ trách trả lời (STAFF_WAIT_*, 1 lần / 2 giờ) + thẻ, không im.
+        const wait = staffWaitTemplate();
+        reply = { ...renderChatbotReply({ template_id: wait.templateId, values: { when: wait.when } }, templates, replyContext), attention: true, staffWait: true };
+      } else {
         await saveBotState(conversation.id, { addLabelEvents: ['handoff'] }).catch(() => {});
         results.push({ conversationId: conversation.id, skipped: 'mô hình cảm ơn tin không phải lời cảm ơn' });
         return;

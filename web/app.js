@@ -3662,6 +3662,7 @@ async function openCustomerDialog(customer) {
 }
 
 function closeCustomerSheetForm() {
+  customerSheetOrder = null;
   const form = customerDialog?.querySelector('#customer-sheet-form');
   if (!form) return;
   form.innerHTML = '';
@@ -3766,6 +3767,320 @@ function openCustomerNoteForm() {
     </div>`);
 }
 
+/* ---- Tạo đơn ngay trong hộp khách (nhân viên gọi điện xong lên đơn luôn) ---- */
+
+// Giỏ đang soạn: dòng { sku, quantity } + kết quả /api/orders/price gần nhất (giá combo, phí ship, quà như bot)
+// + quà nhân viên chọn: `callGifts` (Map chỉ số → SL) và `autoOff` (quà bảng quà nhân viên bỏ tích).
+let customerSheetOrder = null;
+
+// 12/10 (chủ shop): đơn gọi điện có quà, nhân viên chọn cho khách — 1 trong 3 túi Granola Xanh / Vàng / Nâu, hoặc
+// Tâm Lành, Cacao, Yến Mạch, Hạt Chia, Táo đỏ. Mã = mẫu mã Pancake POS (khối lượng theo POS); món chưa có mẫu mã trên
+// POS để trống mã: đơn vẫn ghi quà, CRM gắn ghi chú "Quà đổi tay chưa có mã POS … nhân viên thêm trên POS".
+const CALL_ORDER_GIFTS = [
+  { name: 'Túi Granola Xanh', sku: 'GRA-XANH-Z450', weight: 500 },
+  { name: 'Túi Granola Vàng', sku: 'GRA-VANG-H350', weight: 500 },
+  { name: 'Túi Granola Nâu', sku: 'GRA-NAU-Z350', weight: 400 },
+  { name: 'Tâm Lành', sku: '', weight: 0 },
+  { name: 'Cacao', sku: '', weight: 0 },
+  { name: 'Yến Mạch', sku: '', weight: 0 },
+  { name: 'Hạt Chia', sku: '', weight: 0 },
+  { name: 'Táo đỏ', sku: '', weight: 0 }
+];
+
+/** Quà hiện vật bảng quà tự tính cho giỏ hiện tại (bỏ "Miễn phí vận chuyển" — đã tính ở phí ship). */
+function customerSheetAutoGifts() {
+  const priced = customerSheetOrder?.priced;
+  const gifts = priced?.priceable && Array.isArray(priced.gifts) ? priced.gifts : [];
+  return gifts.filter(gift => gift?.sku || !customerFreeShippingGiftPattern.test(String(gift?.name || '')))
+    .map(gift => ({ key: `a:${String(gift.sku || '').toUpperCase()}|${String(gift.name || '').trim().toLowerCase()}`, name: String(gift.name || ''), sku: String(gift.sku || ''), weight: Number(gift.weight) || 0, ...(gift.id ? { giftId: String(gift.id) } : {}) }));
+}
+
+/** Quà chọn tay của đơn (null = theo bảng quà, không đổi gì): quà bảng quà còn tích + quà gọi điện đã chọn. */
+function customerSheetGiftOverride() {
+  if (!customerSheetOrder) return null;
+  const { callGifts, autoOff } = customerSheetOrder;
+  if (!callGifts.size && !autoOff.size) return null;
+  const auto = customerSheetAutoGifts().filter(gift => !autoOff.has(gift.key)).map(({ key, ...gift }) => ({ ...gift, quantity: 1 }));
+  const picked = [...callGifts].map(([index, quantity]) => ({ ...CALL_ORDER_GIFTS[index], quantity }));
+  return [...auto, ...picked];
+}
+
+function customerSheetGiftsHtml() {
+  const { callGifts, autoOff } = customerSheetOrder;
+  const auto = customerSheetAutoGifts();
+  const row = ({ key, name, sku, checked, quantity, note }) => `<label class="customer-sheet-gift${checked ? ' is-on' : ''}">
+      <input type="checkbox" data-gift-key="${escapeHtml(key)}"${checked ? ' checked' : ''}>
+      <span>${escapeHtml(name)}${note ? ` <small>${escapeHtml(note)}</small>` : ''}${sku ? '' : ' <small class="is-missing" title="Chưa có mẫu mã trên Pancake POS: CRM ghi chú để nhân viên thêm tay trên POS">chưa có mã POS</small>'}</span>
+      ${quantity ? `<input type="number" min="1" max="10" step="1" value="${quantity}" data-gift-qty="${escapeHtml(key)}" aria-label="Số lượng ${escapeHtml(name)}">` : ''}
+    </label>`;
+  return `${auto.map(gift => row({ key: gift.key, name: gift.name, sku: gift.sku || 'auto', checked: !autoOff.has(gift.key), note: '(bảng quà)' })).join('')}
+    ${CALL_ORDER_GIFTS.map((gift, index) => row({ key: `c:${index}`, name: gift.name, sku: gift.sku, checked: callGifts.has(index), quantity: callGifts.has(index) ? callGifts.get(index) : 0 })).join('')}`;
+}
+
+/** Hội thoại để gắn đơn: ưu tiên hộp thư (bình luận cũng tạo được nhưng phiếu đi qua trả lời bình luận). */
+function customerOrderConversation(customer) {
+  const list = Array.isArray(customer?.conversations) ? customer.conversations : [];
+  return list.find(item => item?.source !== 'comment') || list[0] || null;
+}
+
+function customerSheetOrderProducts() {
+  return sharedProducts.filter(product => product.active !== false && product.sku);
+}
+
+function customerSheetOrderLinesHtml() {
+  const products = customerSheetOrderProducts();
+  const priced = customerSheetOrder?.priced;
+  const pricedBySku = new Map((priced?.priceable && Array.isArray(priced.lines) ? priced.lines : []).map(line => [line.sku, line]));
+  return customerSheetOrder.lines.map((line, index) => {
+    const product = products.find(item => item.sku === line.sku);
+    const unit = Number(pricedBySku.get(line.sku)?.basketUnitPrice) || Number(product?.salePrice) || 0;
+    return `<div class="customer-sheet-order-line" data-line="${index}">
+      <select data-line-sku aria-label="Sản phẩm">${products.map(item => `<option value="${escapeHtml(item.sku)}"${item.sku === line.sku ? ' selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}</select>
+      <input type="number" data-line-qty min="1" max="99" step="1" value="${Number(line.quantity) || 1}" aria-label="Số lượng">
+      <span class="customer-sheet-order-price">${escapeHtml(formatOrderMoney(unit * (Number(line.quantity) || 0)))}</span>
+      <button type="button" data-line-remove aria-label="Bỏ dòng này"${customerSheetOrder.lines.length > 1 ? '' : ' disabled'}>&times;</button>
+    </div>`;
+  }).join('');
+}
+
+/** Tiền hàng, phí ship, tổng: theo máy chủ khi giỏ tính được, không thì theo giá niêm yết. */
+function customerSheetOrderTotals() {
+  const products = customerSheetOrderProducts();
+  const priced = customerSheetOrder?.priced;
+  const fallback = customerSheetOrder.lines.reduce((sum, line) => sum + (Number(products.find(item => item.sku === line.sku)?.salePrice) || 0) * (Number(line.quantity) || 0), 0);
+  const subtotal = priced?.priceable ? Math.max(0, Number(priced.subtotal) || 0) : fallback;
+  const shippingFee = Math.max(0, Number(priced?.shippingFee) || 0);
+  // Quà chọn tay: chữ dựng như máy chủ (giftOverrideText) — "Miễn phí vận chuyển" khi miễn ship + từng món.
+  const override = customerSheetGiftOverride();
+  const gift = override
+    ? [shippingFee === 0 ? 'Miễn phí vận chuyển' : '', ...override.map(customerGiftItemText)].filter(Boolean).join(' + ')
+    : (priced?.priceable ? String(priced.gift || '') : '');
+  return { subtotal, shippingFee, total: subtotal + shippingFee, gift };
+}
+
+function renderCustomerSheetOrder() {
+  const form = customerDialog?.querySelector('#customer-sheet-form');
+  if (!form || !customerSheetOrder) return;
+  const lines = form.querySelector('[data-order-lines]');
+  if (lines) lines.innerHTML = customerSheetOrderLinesHtml();
+  const gifts = form.querySelector('[data-order-gifts]');
+  if (gifts) gifts.innerHTML = customerSheetGiftsHtml();
+  renderCustomerSheetOrderSummary();
+}
+
+function renderCustomerSheetOrderSummary() {
+  const form = customerDialog?.querySelector('#customer-sheet-form');
+  if (!form || !customerSheetOrder) return;
+  const totals = customerSheetOrderTotals();
+  const summary = form.querySelector('[data-order-summary]');
+  if (summary) {
+    summary.innerHTML = `
+      <span>Tiền hàng <b>${escapeHtml(formatOrderMoney(totals.subtotal))}</b></span>
+      <span>Phí ship <b>${totals.shippingFee ? escapeHtml(formatOrderMoney(totals.shippingFee)) : 'Miễn phí'}</b></span>
+      ${totals.gift ? `<span class="customer-sheet-order-gift">Quà: ${escapeHtml(totals.gift)}</span>` : ''}
+      <strong>Tổng ${escapeHtml(formatOrderMoney(totals.total))}</strong>`;
+  }
+}
+
+let customerSheetOrderTimer = 0;
+let customerSheetOrderRequest = 0;
+async function priceCustomerSheetOrder() {
+  if (!customerSheetOrder) return;
+  const request = ++customerSheetOrderRequest;
+  const items = customerSheetOrder.lines.map(line => {
+    const product = sharedProducts.find(item => item.sku === line.sku);
+    return { sku: line.sku, name: product?.name || line.sku, quantity: Number(line.quantity) || 0 };
+  });
+  const conversation = customerOrderConversation(customerSheet?.customer);
+  let priced = null;
+  try {
+    priced = await readApiResponse(await fetch('/api/orders/price', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, ...(conversation ? { conversationId: conversation.id } : {}) })
+    }));
+  } catch {
+    priced = null;
+  }
+  if (!customerSheetOrder || request !== customerSheetOrderRequest) return;
+  customerSheetOrder.priced = priced;
+  renderCustomerSheetOrder();
+}
+function scheduleCustomerSheetOrderPricing() {
+  window.clearTimeout(customerSheetOrderTimer);
+  customerSheetOrderTimer = window.setTimeout(priceCustomerSheetOrder, 150);
+}
+
+async function openCustomerOrderForm(customer) {
+  if (!sharedProducts.length) {
+    try { await loadProducts(); } catch { /* báo bên dưới */ }
+  }
+  const products = customerSheetOrderProducts();
+  if (!products.length) return showToast('Chưa tải được danh mục sản phẩm. Tải lại trang rồi thử lại.', 'warning');
+  // Gợi ý sản phẩm khách mua gần nhất (có trong danh mục), không có thì sản phẩm đầu danh mục.
+  const lastSku = (customerSheet?.orders || []).flatMap(order => order.products || []).map(item => String(item?.sku || '')).find(sku => products.some(product => product.sku === sku));
+  customerSheetOrder = { lines: [{ sku: lastSku || products[0].sku, quantity: 1 }], priced: null, callGifts: new Map(), autoOff: new Set() };
+  const conversation = customerOrderConversation(customer);
+  customerSheetForm(`
+    <h4>Tạo đơn</h4>
+    <p class="customer-sheet-hint">${conversation
+      ? 'Đơn lưu vào hội thoại của khách và gửi phiếu xác nhận cho khách, giống tạo đơn ở Tin nhắn.'
+      : 'Khách chưa có hội thoại: đơn vào bảng Đơn hàng và đẩy sang Pancake POS, không gửi tin cho khách.'}</p>
+    <div class="customer-sheet-fields">
+      <label>Tên người nhận<input type="text" data-order-field="name" value="${escapeHtml(customer.name || '')}" maxlength="120"></label>
+      <label>Số điện thoại<input type="text" data-order-field="phone" value="${escapeHtml(customer.phone || '')}" maxlength="20" inputmode="tel"></label>
+      <label class="customer-sheet-field--wide">Địa chỉ giao hàng<input type="text" data-order-field="address" value="${escapeHtml(customer.address || '')}" maxlength="500"></label>
+    </div>
+    <div class="customer-sheet-order-head"><span>Sản phẩm</span><span>SL</span><span>Thành tiền</span></div>
+    <div class="customer-sheet-order-lines" data-order-lines></div>
+    <button type="button" class="customer-sheet-order-add" data-order-add>+ Thêm sản phẩm</button>
+    <div class="customer-sheet-order-gift-head">Quà tặng <small>tích quà khách chọn</small></div>
+    <div class="customer-sheet-gifts" data-order-gifts></div>
+    <div class="customer-sheet-fields">
+      <label>Nguồn đơn<select data-order-field="source"><option>Gọi điện</option><option>Facebook</option><option>Zalo</option><option>Khác</option></select></label>
+      <label>Thanh toán<select data-order-field="payment"><option value="COD">COD (thu tiền khi giao)</option><option value="Chuyển khoản">Chuyển khoản</option></select></label>
+      <label class="customer-sheet-field--wide">Ghi chú<input type="text" data-order-field="note" maxlength="500" placeholder="Giao giờ hành chính, gọi trước khi giao..."></label>
+    </div>
+    <div class="customer-sheet-order-summary" data-order-summary></div>
+    <div class="customer-sheet-form-actions">
+      <button type="button" class="customer-sheet-save" data-customer-order-submit>Tạo đơn</button>
+      <button type="button" data-customer-cancel>Hủy</button>
+    </div>`);
+  renderCustomerSheetOrder();
+  priceCustomerSheetOrder();
+}
+
+let creatingCustomerSheetOrder = false;
+async function submitCustomerSheetOrder() {
+  const form = customerDialog?.querySelector('#customer-sheet-form');
+  const customer = customerSheet?.customer;
+  if (!form || !customer || !customerSheetOrder || creatingCustomerSheetOrder) return;
+  const field = key => String(form.querySelector(`[data-order-field="${key}"]`)?.value || '').trim();
+  const name = field('name');
+  const phone = field('phone');
+  const address = field('address');
+  if (!name || !phone || !address) return showToast('Điền đủ tên, số điện thoại và địa chỉ giao hàng.', 'warning');
+  const lines = customerSheetOrder.lines.filter(line => line.sku && Number(line.quantity) > 0);
+  if (!lines.length) return showToast('Thêm ít nhất một sản phẩm.', 'warning');
+  // Giỏ vừa đổi mà chưa tính lại: tính xong mới gửi, để giá/quà trên đơn đúng như đang hiện.
+  window.clearTimeout(customerSheetOrderTimer);
+  await priceCustomerSheetOrder();
+  const totals = customerSheetOrderTotals();
+  const pricedBySku = new Map((customerSheetOrder.priced?.priceable && Array.isArray(customerSheetOrder.priced.lines) ? customerSheetOrder.priced.lines : []).map(line => [line.sku, line]));
+  const now = Date.now();
+  const order = {
+    id: String(now).slice(-5),
+    name,
+    phone,
+    address,
+    products: lines.map(line => {
+      const product = sharedProducts.find(item => item.sku === line.sku) || {};
+      const listPrice = Number(product.salePrice) || 0;
+      return { name: product.name || line.sku, sku: line.sku, quantity: Number(line.quantity), price: Number(pricedBySku.get(line.sku)?.basketUnitPrice) || listPrice, listPrice, weight: Number(product.weight) || 0, ...(product.image ? { image: product.image } : {}) };
+    }),
+    gift: totals.gift,
+    ...(customerSheetGiftOverride()?.length ? { giftOverride: customerSheetGiftOverride() } : {}),
+    status: 'Mới',
+    source: field('source') || 'Gọi điện',
+    payment: field('payment') || 'COD',
+    freeShipping: totals.shippingFee === 0,
+    shippingFee: totals.shippingFee,
+    discount: 0,
+    total: totals.total,
+    note: field('note'),
+    ...(customerSheetOrder.priced?.livestream === true ? { livestream: true } : {}),
+    createdAt: now,
+    updatedAt: now,
+    employee: sessionDisplayName || appSettings.displayName || topbarUserName?.textContent || 'Bạn'
+  };
+  const conversation = customerOrderConversation(customer);
+  const url = conversation
+    ? `/api/messaging/conversations/${encodeURIComponent(conversation.id)}/customer-panel`
+    : `/api/customers/${encodeURIComponent(customer.id)}/orders`;
+  const send = force => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...(conversation ? { type: 'order' } : {}), order, ...(force ? { force: true } : {}) })
+  });
+  const button = form.querySelector('[data-customer-order-submit]');
+  try {
+    creatingCustomerSheetOrder = true;
+    if (button) { button.disabled = true; button.textContent = 'Đang tạo...'; }
+    let response = await send(false);
+    // Đơn giống hệt vừa tạo trong 2 phút (bấm đúp): hỏi lại như form Tạo đơn ở Tin nhắn.
+    if (response.status === 409) {
+      const conflict = await response.clone().json().catch(() => ({}));
+      if (conflict?.duplicate) {
+        if (!window.confirm(conflict.error || 'Đơn giống hệt vừa tạo — vẫn tạo?')) return showToast(`Không tạo thêm: đơn ${conflict.duplicateOrderId || ''} đã có.`, 'warning');
+        response = await send(true);
+      }
+    }
+    const result = await readApiResponse(response);
+    const createdId = result.createdOrderId || order.id;
+    customerSheetOrder = null;
+    closeCustomerSheetForm();
+    if (conversation) {
+      const delivery = customerOrderDeliveryOutcome(result, createdId);
+      if (delivery.failed) showToast(`Đã tạo đơn ${createdId} nhưng CHƯA gửi được phiếu xác nhận cho khách${delivery.reason ? ` (${delivery.reason})` : ''}. Mở hội thoại để gửi lại.`, 'critical');
+      else showToast(result.receiptVia === 'pos' ? `Đã tạo đơn ${createdId}; Pancake POS đã gửi xác nhận cho khách.` : `Đã tạo đơn ${createdId} và gửi xác nhận cho khách.`, 'success', 3500, { notify: true });
+    } else if (result.pos?.error) {
+      showToast(`Đã tạo đơn ${createdId} nhưng chưa đẩy được sang Pancake POS (${result.pos.error}). Bấm "Đẩy sang POS" ở bảng Đơn hàng.`, 'critical');
+    } else {
+      showToast(result.pos?.id ? `Đã tạo đơn ${createdId} và đẩy sang Pancake POS.` : `Đã tạo đơn ${createdId}.`, 'success', 3500, { notify: true });
+    }
+    openCustomerDialog(customer);
+    loadCustomers();
+  } catch (error) {
+    showToast(error.message || 'Chưa tạo được đơn.', 'critical');
+  } finally {
+    creatingCustomerSheetOrder = false;
+    if (button?.isConnected) { button.disabled = false; button.textContent = 'Tạo đơn'; }
+  }
+}
+
+customerDialog?.addEventListener('input', event => {
+  if (!customerSheetOrder) return;
+  const giftQty = event.target.closest('[data-gift-qty]');
+  if (giftQty) {
+    const index = Number(String(giftQty.dataset.giftQty).slice(2));
+    if (customerSheetOrder.callGifts.has(index)) customerSheetOrder.callGifts.set(index, Math.max(1, Math.min(10, Math.round(Number(giftQty.value) || 1))));
+    return renderCustomerSheetOrderSummary();
+  }
+  const row = event.target.closest('[data-line]');
+  if (!row || !event.target.matches('[data-line-qty]')) return;
+  const line = customerSheetOrder.lines[Number(row.dataset.line)];
+  if (!line) return;
+  line.quantity = Math.max(0, Math.min(99, Math.round(Number(event.target.value) || 0)));
+  scheduleCustomerSheetOrderPricing();
+});
+customerDialog?.addEventListener('change', event => {
+  if (!customerSheetOrder) return;
+  const giftBox = event.target.closest('[data-gift-key]');
+  if (giftBox) {
+    const key = giftBox.dataset.giftKey;
+    if (key.startsWith('c:')) {
+      const index = Number(key.slice(2));
+      if (giftBox.checked) customerSheetOrder.callGifts.set(index, customerSheetOrder.callGifts.get(index) || 1);
+      else customerSheetOrder.callGifts.delete(index);
+    } else if (giftBox.checked) customerSheetOrder.autoOff.delete(key);
+    else customerSheetOrder.autoOff.add(key);
+    const gifts = customerDialog.querySelector('#customer-sheet-form [data-order-gifts]');
+    if (gifts) gifts.innerHTML = customerSheetGiftsHtml();
+    return renderCustomerSheetOrderSummary();
+  }
+  if (event.target.closest('[data-gift-qty]')) return;
+  const row = event.target.closest('[data-line]');
+  if (!row) return;
+  const line = customerSheetOrder.lines[Number(row.dataset.line)];
+  if (!line) return;
+  if (event.target.matches('[data-line-sku]')) line.sku = event.target.value;
+  if (event.target.matches('[data-line-qty]')) {
+    line.quantity = Math.max(1, Math.min(99, Math.round(Number(event.target.value) || 1)));
+    event.target.value = String(line.quantity);
+  }
+  scheduleCustomerSheetOrderPricing();
+});
+
 /** Lưu xong thì lấy lại bản khách từ server: bảng và hộp cùng nhìn một bản. */
 async function saveCustomerSheet(kind) {
   const form = customerDialog?.querySelector('#customer-sheet-form');
@@ -3813,6 +4128,20 @@ customerDialog?.addEventListener('click', event => {
 
   const save = event.target.closest('[data-customer-save]');
   if (save) return void saveCustomerSheet(save.dataset.customerSave);
+  if (event.target.closest('[data-customer-order-submit]')) return void submitCustomerSheetOrder();
+  if (customerSheetOrder && event.target.closest('[data-order-add]')) {
+    const used = new Set(customerSheetOrder.lines.map(line => line.sku));
+    const products = customerSheetOrderProducts();
+    customerSheetOrder.lines.push({ sku: (products.find(product => !used.has(product.sku)) || products[0])?.sku || '', quantity: 1 });
+    renderCustomerSheetOrder();
+    return scheduleCustomerSheetOrderPricing();
+  }
+  const removeLine = customerSheetOrder ? event.target.closest('[data-line-remove]') : null;
+  if (removeLine && customerSheetOrder.lines.length > 1) {
+    customerSheetOrder.lines.splice(Number(removeLine.closest('[data-line]')?.dataset.line), 1);
+    renderCustomerSheetOrder();
+    return scheduleCustomerSheetOrderPricing();
+  }
 
   const action = event.target.closest('[data-customer-action]')?.dataset.customerAction;
   const customer = customerSheet?.customer;
@@ -3822,6 +4151,7 @@ customerDialog?.addEventListener('click', event => {
   if (action === 'edit') return openCustomerEditForm(customer);
   if (action === 'tag') return openCustomerTagForm(customer);
   if (action === 'note') return openCustomerNoteForm();
+  if (action === 'order') return void openCustomerOrderForm(customer);
 });
 
 let customersSearchTimer = 0;

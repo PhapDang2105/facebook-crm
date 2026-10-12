@@ -43,7 +43,7 @@ import { deleteLandingOrder, isLandingTokenValid, landingTokenFrom, listLandingO
 import { attachPhoneWarning, cachedPhoneWarning, connectPos, disconnectPos, fetchPosPhoneReport, lookupPhones, normalizeWarningPhone, posConfig, posConfigured, posRequest, posStatus, toLocalPhoneLoose } from './phone-warnings.mjs';
 import { configurePosSync, posSyncStatus, recordPosSyncStatus, runPosSync, startPosSync } from './pos-sync.mjs';
 import { applyPosContentToConversations, finalizePosImportedOrder, isDeletedPosOrder, posGoodsItems, rememberDeletedPosOrder, repairPosImportedTotal } from './pos-content-sync.mjs';
-import { applyGiftSwapFlag, applyGiftOverrideFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, pushOrderToPos, retryFailedPosPushes, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
+import { applyGiftSwapFlag, applyGiftOverrideFlag, cancelPosOrder, findExistingPosOrder, isCrmOwnedPosOrder, isCrmPushedPosOrder, posOrderPushEnabled, pushOrderToPos, retryFailedPosPushes, syncOrderToPos, updatePosOrder, updatePosOrderNote } from './pos-orders.mjs';
 import { goldenSetOverview, importGoldenItems, labelGoldenItem } from './golden-set.mjs';
 import { applyShipmentLabels, isQuietHourVN, listShipmentNoticeQueue, readSapoSettings, readSapoState, recordShipmentNoticeResult, startSapoSync, writeSapoSettings } from './sapo-sync.mjs';
 import { isSapoConfigured } from './sapo.mjs';
@@ -1755,6 +1755,42 @@ async function setOrderPosOutcome(orderId, outcome, { conversationId = '', extra
   }, { unchanged: found => !found });
 }
 
+/**
+ * Đẩy sang Pancake POS một đơn KHÔNG nằm trong hội thoại (đơn nhân viên tạo từ hồ sơ khách sau khi gọi điện,
+ * lưu ở kho đơn landing). Giống syncOrderToPos nhưng không gắn Page/hội thoại Pancake: lần đẩy lại (đã có lỗi
+ * trước) kiểm POS trước để không tạo hai đơn. Trả kết quả `pos` đã ghi lên đơn, null khi không đẩy.
+ */
+async function pushStandaloneOrderToPos(orderId) {
+  if (!posOrderPushEnabled()) return null;
+  const wanted = String(orderId);
+  const order = (await readLandingStore()).orders.find(item => String(item.id) === wanted);
+  if (!order || order.landing) return null;
+  if (order.pos?.id) return order.pos;
+  let outcome = null;
+  try {
+    if (order.pos?.error || order.pos?.uncertain) {
+      const existing = await findExistingPosOrder(order).catch(error => {
+        if (order.pos?.uncertain) throw new Error(`Chưa kiểm được đơn trên Pancake POS (${error.message}) — chưa đẩy lại để tránh tạo hai đơn, thử lại sau.`);
+        return null;
+      });
+      if (existing) outcome = { ...existing, at: Date.now(), recovered: true };
+    }
+    if (!outcome) outcome = { ...await pushOrderToPos(order), at: Date.now() };
+  } catch (error) {
+    outcome = { error: error.message, at: Date.now(), ...(error.uncertain || order.pos?.uncertain ? { uncertain: true } : {}) };
+    if (error.uncertain) {
+      const existing = await findExistingPosOrder(order).catch(() => null);
+      if (existing) outcome = { ...existing, at: Date.now(), recovered: true };
+    }
+  }
+  if (!outcome.id) outcome.retries = order.pos?.error ? (Number(order.pos.retries) || 0) + 1 : 0;
+  console.log(outcome.id ? `Đơn ${wanted} (tạo từ hồ sơ khách) đã lên Pancake POS #${outcome.id}` : `Đơn ${wanted} (tạo từ hồ sơ khách) chưa đẩy được sang Pancake POS: ${outcome.error}`);
+  // Quà chọn tay chưa lên được POS (không SKU / POS chưa có mẫu mã) → ghi chú xử lý; đủ mã thì gỡ ghi chú cũ.
+  const extra = Array.isArray(outcome.giftOverrideMissing) ? target => applyGiftOverrideFlag(target, outcome.giftOverrideMissing) : null;
+  await setOrderPosOutcome(wanted, outcome, { publish: false, extra });
+  return outcome;
+}
+
 /** /api/auth/*, chặn khi chưa đăng nhập. Trả true khi đã tự trả lời request. */
 async function handleAuth(request, response, url, isWebhook) {
   // Nhân sự cho nghỉ / đổi mật khẩu (kể cả sửa staff.json ngoài giao diện): phiên cũ hết hiệu lực trong ≤15 giây.
@@ -3141,6 +3177,50 @@ const server = http.createServer(async (request, response) => {
       // khách đến từ file xuất kho không có mặt trong kho lưu trữ và ngược lại.
       // Khớp ĐÚNG số điện thoại: tìm kiếm chung của kho còn dò cả tên và địa chỉ
       // nên dễ kéo nhầm đơn người khác.
+      // Tạo đơn từ hồ sơ khách (nhân viên gọi điện xong lên đơn luôn) cho khách KHÔNG có hội thoại — khách có hội
+      // thoại thì giao diện tạo qua hội thoại (/customer-panel) để còn gửi phiếu xác nhận. Đơn lưu ở kho đơn landing
+      // (kho đơn không gắn hội thoại: bảng Đơn hàng, sửa đơn, trạng thái/hủy theo POS đã có sẵn), không gửi tin cho
+      // khách; đẩy sang Pancake POS như đơn tạo tay.
+      if (customerRoute[1] === 'orders' && request.method === 'POST') {
+        const payload = await readBody(request);
+        let order;
+        try {
+          order = normalizeCustomerOrder(payload.order && typeof payload.order === 'object' && !Array.isArray(payload.order) ? payload.order : {});
+          assertManualOrderMoney(order);
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message });
+        }
+        if (!order.products.length) return sendJson(response, 400, { error: 'Đơn cần ít nhất một sản phẩm.' });
+        order.id = uniqueOrderId(order.id, await takenOrderIds());
+        order.status = 'Mới';
+        order.source = String(payload.order?.source || '').trim().slice(0, 40) || 'Gọi điện';
+        order.customerId = customer.id;
+        const guardKey = `customer:${customer.id}`;
+        const samePhone = customerPhoneKey(order.phone);
+        const recent = samePhone ? (await readLandingStore()).orders.filter(item => customerPhoneKey(item.phone) === samePhone) : [];
+        const duplicate = payload.force === true ? null : manualOrderGuard.find(guardKey, recent, order);
+        if (duplicate) return sendJson(response, 409, { error: duplicateManualOrderMessage(duplicate), duplicate: true, duplicateOrderId: duplicate.id, duplicateCreatedAt: duplicate.createdAt });
+        manualOrderGuard.reserve(guardKey, order);
+        const actor = await requestActor(request);
+        const creator = actorStamp(actor);
+        if (actor.username && (!order.employee || order.employee === 'Bạn')) order.employee = creator.name;
+        stampOrderCreated(order, creator, { summary: `Tạo đơn từ hồ sơ khách: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 120)}, tổng ${moneyText(order.total)}.` });
+        try {
+          await updateLandingStore(store => { store.orders.unshift(order); });
+        } finally {
+          manualOrderGuard.release(guardKey, order);
+        }
+        invalidateBuyersCache();
+        audit(request, 'order.create', {
+          target: orderTarget(order),
+          orderId: order.id,
+          summary: `Tạo đơn #${order.id} cho ${order.name} từ hồ sơ khách: ${order.products.map(item => `${item.quantity} ${item.name}`).join(' + ').slice(0, 100)}, tổng ${moneyText(order.total)}.`,
+          details: { total: order.total, quantity: order.products.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) }
+        }, actor);
+        await appendOrderToArchive(order).catch(() => {});
+        const pos = await pushStandaloneOrderToPos(order.id).catch(error => ({ error: error.message, at: Date.now() }));
+        return sendJson(response, 201, { createdOrderId: order.id, order: { ...order, ...(pos ? { pos } : {}) }, pos });
+      }
       if (customerRoute[1] === 'orders' && request.method === 'GET') {
         const key = customerPhoneKey(customer.phone);
         // Đơn đang nằm trong chính các hội thoại của khách (đơn bot/nhân viên chưa xuất kho, chưa vào kho lưu
@@ -3794,8 +3874,20 @@ const server = http.createServer(async (request, response) => {
       const orderId = decodeURIComponent(customerOrderPosMatch[1]);
       const store = await readMessagingStore();
       const owner = store.conversations.find(item => (Array.isArray(item.customerOrders) ? item.customerOrders : []).some(order => order.id === orderId));
-      if (!owner) return sendJson(response, 404, { error: 'Không tìm thấy đơn này trong hội thoại nào.' });
+      // Đơn tạo từ hồ sơ khách (kho đơn landing, không gắn hội thoại, không phải đơn landing kéo từ POS).
+      const standalone = owner ? null : (await readLandingStore()).orders.find(order => order.id === orderId && !order.landing);
+      if (!owner && !standalone) return sendJson(response, 404, { error: 'Không tìm thấy đơn này trong hội thoại nào.' });
       if (!posConfigured()) return sendJson(response, 400, { error: 'Chưa kết nối Pancake POS (Cài đặt → Kênh).' });
+      if (standalone) {
+        const outcome = await pushStandaloneOrderToPos(orderId);
+        const actor = await requestActor(request);
+        const pushSummary = outcome?.error ? `Đẩy đơn sang POS lỗi: ${String(outcome.error).slice(0, 120)}` : `Đẩy đơn sang POS${outcome?.systemId || outcome?.id ? ` (mã POS ${outcome.systemId || outcome.id})` : ''}.`;
+        if (outcome?.error || (String(outcome?.id || '') !== String(standalone.pos?.id || '') && shouldLogPosPush(`${orderId}|${outcome?.id}`))) {
+          await addOrderHistory(orderId, { by: actorStamp(actor), action: 'order.push_pos', summary: pushSummary });
+          audit(request, 'order.push_pos', { target: orderTarget(standalone), orderId, summary: `#${orderId}: ${pushSummary}` }, actor);
+        }
+        return sendJson(response, outcome?.error ? 502 : 200, { pos: outcome, error: outcome?.error || '' });
+      }
       // R13 (M7): đơn mở lại sau khi POS đã hủy → lên lại thành ĐƠN POS MỚI (đơn cũ bên POS giữ nguyên trạng thái hủy).
       const reopened = owner.customerOrders.find(order => order.id === orderId);
       const posIdBefore = String(reopened?.pos?.id || '');

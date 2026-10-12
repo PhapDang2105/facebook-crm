@@ -176,3 +176,28 @@ test('hiệu năng: kho giả 2.000 hội thoại × 100 tin — mỗi lần tì
   if (process.env.CRM_TEST_VERBOSE) console.info(`dựng chỉ mục 200.000 tin: ${Math.round(buildMs)} ms; mỗi lần tìm: ${JSON.stringify(timings)}`);
   assert.ok(buildMs < 3000, `dựng chỉ mục lần đầu ${Math.round(buildMs)} ms`);
 });
+
+test('12/10: dòng hệ thống Facebook ("… đã trả lời về một bài viết. Xem bài viết(link)") không hiện ở kết quả tin nhắn', () => {
+  const store = {
+    conversations: [
+      { id: 'p:t', pageId: 'p', psid: 't', name: 'Nguyễn Thị Vân Trang', lastMessageAt: now },
+      { id: 'p:u', pageId: 'p', psid: 'u', name: 'Lê Hoà', lastMessageAt: now - 9000, lastMessagePreview: 'Lê Hoà đã trả lời về một bài viết. Xem bài viết(https://fb.com/p/2)' }
+    ],
+    messages: {
+      'p:t': [
+        // Pancake đẩy về như tin KHÁCH, chưa có cờ system: nhận theo chữ.
+        { id: 't-0', direction: 'incoming', type: 'text', text: 'Nguyễn Thị Vân Trang đã trả lời về một bài viết. Xem bài viết(https://www.facebook.com/giotnang.healthy/posts/1)', createdAt: now - 3000 },
+        // Tin Page mang cờ system.
+        { id: 't-1', direction: 'outgoing', type: 'text', system: true, text: 'Bạn đang phản hồi bình luận của Vân Trang. Xem bình luận.(https://fb.com/x)', createdAt: now - 2000 },
+        { id: 't-2', direction: 'incoming', type: 'text', text: 'đặt 2 túi xanh nha', createdAt: now - 1000 }
+      ],
+      'p:u': [{ id: 'u-0', direction: 'incoming', type: 'text', text: 'Lê Hoà đã trả lời về một bài viết. Xem bài viết(https://fb.com/p/2)', createdAt: now - 9000 }]
+    }
+  };
+  const [trang] = search(store, 'Vân Trang');
+  assert.deepEqual([trang.reason, trang.messageId], ['name', ''], 'chỉ khớp tên, không khớp dòng hệ thống');
+  assert.equal(search(store, 'Xem bài viết').length, 0);
+  assert.equal(search(store, 'túi xanh')[0].messageId, 't-2', 'tin khách thật vẫn tìm được');
+  const [hoa] = search(store, 'Lê Hoà');
+  assert.deepEqual([hoa.reason, hoa.snippet], ['name', ''], 'tin cuối là dòng hệ thống: không lấy làm đoạn trích');
+});

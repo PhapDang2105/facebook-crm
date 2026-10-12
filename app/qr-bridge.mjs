@@ -301,7 +301,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .thumb-bare img { max-width: 44px; max-height: 44px; }
   .sign { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: -2px 0 0; color: #6b5d4b; font-size: 14px; line-height: 1.35; text-align: right; }
   .sign b { color: #3a2e22; font-weight: 700; font-size: 15px; }
-  .stamp { display: grid; place-items: center; width: 38px; height: 38px; border: 2px solid #c8372d; border-radius: 6px; color: #c8372d; font-weight: 800; font-size: 10.5px; line-height: 1.1; text-align: center; transform: rotate(-8deg); opacity: .9; }
   .ticket { position: relative; margin: 0 0 14px; padding: 0 12px 12px; background: #fff6e6; border: 1.5px solid #f3d6a4; border-radius: 16px; }
   .ticket-head { position: relative; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 9px 0 9px; margin: 0 0 12px; }
   .ticket-head::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 0; border-bottom: 2px dashed #e8b765; }
@@ -341,7 +340,6 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     .offers { gap: 6px; margin-bottom: 6px; }
     .thumb { flex-basis: 48px; width: 48px; height: 48px; }
     .thumb img { max-width: 44px; max-height: 42px; }
-    .stamp { width: 38px; height: 38px; }
     .ticket-head { padding: 8px 0 7px; margin-bottom: 10px; }
     .btn { min-height: 54px; }
     .channels { gap: 8px; }
@@ -363,11 +361,11 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     <p class="letter-body">Em tin sức khoẻ đến từ những bữa ăn nhỏ, sạch và đều đặn mỗi ngày, mong cả nhà mình luôn khoẻ, ăn ngon và thật bình an. Em gửi chút yêu thương cho những đơn hàng sau, mong được đồng hành <span class="keep">với Anh/Chị thật lâu<svg class="heart" viewBox="0 0 24 24" aria-hidden="true"><path fill="#e2574c" d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.1 0 3.6 1.2 4.3 2.4.8-1.2 2.3-2.4 4.4-2.4 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21z"/></svg></span></p>
     <ul class="offers">
       <li><span class="thumb thumb-bare"><img src="/q/brand/offer-free-ship.webp" alt="Xe giao hàng" width="52" height="52"></span><span><b class="free-ship">MIỄN PHÍ VẬN CHUYỂN</b></span></li>
-      <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Ba túi granola Xanh, Vàng, Nâu" width="66" height="48"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>
-      <li><span class="thumb"><img src="/q/brand/offer-yen-mach.webp" alt="Hai túi Yến mạch 500g" width="54" height="48"></span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
+      <li><span class="thumb"><img src="/q/brand/offer-combo3-mini.webp" alt="Quà Combo 3 mini" width="48" height="36"></span><span>Mua Combo&nbsp;1 tặng <b>Combo&nbsp;3&nbsp;mini</b> Xanh + Vàng + Nâu</span></li>
+      <li><span class="thumb"><img src="/q/brand/offer-yen-mach.webp" alt="Hai túi Yến mạch 500g" width="48" height="43"></span><span>Mua Combo&nbsp;2 tặng <b>2&nbsp;túi Yến&nbsp;mạch</b></span></li>
       <li><span class="thumb"><img src="/q/brand/offer-tam-lanh.webp" alt="Hộp Bột Ngũ Cốc Tâm Lành" width="37" height="48"></span><span>Đặc biệt mua Combo&nbsp;3 tặng <b>1&nbsp;hộp Bột Ngũ Cốc Tâm&nbsp;Lành</b></span></li>
     </ul>
-    <p class="sign"><span>Thương mến,<br><b>Nhà Nắng</b></span><span class="stamp" aria-hidden="true">Nhà<br>Nắng</span></p>
+    <p class="sign"><span>Thương mến,<br><b>Nhà Nắng</b></span></p>
   </div>
   <section class="ticket" aria-label="Phiếu ưu đãi">
     <div class="ticket-head"><span class="ticket-note">Anh/Chị lưu ưu đãi cho đơn hàng tiếp theo nhé</span></div>

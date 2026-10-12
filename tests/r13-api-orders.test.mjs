@@ -183,8 +183,9 @@ test('ghi chú xử lý gắn trên đơn (processingFlags): không trùng, có 
 test('nhật ký: "tổng 189000đ" → "tổng 189.000đ" (tạo đơn tay, nhật ký tạo, xoá đơn)', () => {
   assert.equal(moneyText(189000), '189.000đ');
   assert.equal(moneyText(''), '0đ');
-  // Hai chỗ: mục lịch sử "Tạo đơn tay: …" trên đơn và dòng nhật ký "Tạo đơn #… cho …".
-  assert.equal(server.split(', tổng ${moneyText(order.total)}.`').length - 1, 2);
+  // Mục lịch sử "Tạo đơn tay: …" trên đơn và dòng nhật ký "Tạo đơn #… cho …" — ở đơn tạo trong hội thoại và đơn tạo
+  // từ hồ sơ khách (12/10), mỗi đường hai chỗ.
+  assert.equal(server.split(', tổng ${moneyText(order.total)}.`').length - 1, 4);
   assert.match(server, /stampOrderCreated\(order, creator, \{ summary: `Tạo đơn tay: /);
   assert.match(server, /\(tổng \$\{moneyText\(removed\.total\)\}\) khỏi hệ thống\.`/);
   assert.doesNotMatch(server, /tổng \$\{order\.total\}đ/);

@@ -119,7 +119,9 @@ export async function syncPosLandingOrders({ sinceHours = 48, config = posConfig
   // Đơn CRM đang giữ mỗi mã POS (mã chính và các mã đã gộp).
   const knownByPosId = new Map();
   for (const order of store.orders) {
-    for (const posId of [order.landing?.posId, ...(order.landing?.posIds || [])].filter(Boolean)) knownByPosId.set(String(posId), order);
+    // Đơn tạo từ hồ sơ khách (không phải đơn landing): mã POS nằm ở pos.id như đơn hội thoại — có ở đây thì trạng thái
+    // và nội dung nhân viên sửa trên POS mới được chép về.
+    for (const posId of [order.landing?.posId, ...(order.landing?.posIds || []), ...(order.landing ? [] : [order.pos?.id])].filter(Boolean)) knownByPosId.set(String(posId), order);
   }
   const start = Math.floor((Date.now() - sinceHours * 60 * 60 * 1000) / 1000);
   const end = Math.floor(Date.now() / 1000) + 60;

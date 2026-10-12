@@ -5,7 +5,7 @@ import { priceBasket, unitPriceInBasket } from './processing/pricing.mjs';
 import { resolveAddress, resolvedAddressFields } from './processing/locations.mjs';
 import { normalizeText } from './processing/catalog.mjs';
 import { giftOverrideText, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
-import { isLiveAdId } from './live-ads.mjs';
+import { isLiveAdId, isLivePostId, learnLiveAdPosts, referralsOf, rememberLivePost } from './live-ads.mjs';
 
 /** Hội thoại đến từ phiên livestream: bài viết hay tên quảng cáo có "live", "săn deal". */
 // Có bài viết thì chỉ xét BÀI VIẾT đó: tên quảng cáo là quảng cáo khách bấm lần
@@ -13,13 +13,42 @@ import { isLiveAdId } from './live-ads.mjs';
 // ghép cả hai khiến khách từng bấm quảng cáo "Săn deal hời" rồi bình luận dưới
 // bài thường vẫn nhận lời chào live kèm "quà live" (quà chỉ áp dụng cho live).
 // Không có bài viết (khách vào thẳng từ quảng cáo) thì mới dùng tên quảng cáo.
+const LIVE_TEXT = /\b(live|livestream|phien live|san deal|phat truc tiep|video truc tiep)\b/i;
+const isLiveText = text => LIVE_TEXT.test(normalizeText(String(text || '')));
+// R18 (bình luận B2): bài là video trực tiếp theo nguồn (pancakePostContext giữ `type` / `live`).
+const isLivePostObject = post => Boolean(post) && (post.live === true || post.isLive === true || /^live(?:_?video|stream)?$/i.test(String(post.type || post.kind || '')));
+
 export function isLivestreamConversation(conversation = {}) {
-  const postText = String(conversation?.post?.message || '').trim();
+  const post = conversation?.post && typeof conversation.post === 'object' ? conversation.post : null;
+  const postText = String(post?.message || '').trim();
   const source = postText || String(conversation?.referral?.adTitle || '');
-  if (/\b(live|livestream|phien live|san deal|phat truc tiep|video truc tiep)\b/i.test(normalizeText(source))) return true;
+  if (isLiveText(source)) {
+    // R18: nhớ bài live (bài có chữ live / bài của quảng cáo có tên live) để hội thoại khác dưới cùng bài nhận ra ngay.
+    rememberLivePost(postText ? post?.id : conversation?.referral?.postId);
+    return true;
+  }
+  if (isLivePostObject(post)) return true;
+  // R18 (bình luận B2, inbox3 V11): bài của quảng cáo Live / bài đã biết là live — "Săn Sale 10/10 cùng Giọt Nắng" không có chữ
+  // live; khách bấm quảng cáo mà tên quảng cáo chưa về (lượt đầu) thì xét bài của quảng cáo (referral.postId). Luồng bình luận
+  // có bài thì chỉ xét bài đó (như trên).
+  if (post?.id && isLivePostId(post.id)) return true;
+  if ((!postText || conversation?.source !== 'comment') && isLivePostId(conversation?.referral?.postId)) return true;
   // 10/10: tên quảng cáo hiển thị không có chữ "live" ("Săn Sale 10/10 cùng Giọt Nắng") nhưng quảng cáo thuộc chiến dịch
   // video trực tiếp — tra mã quảng cáo trong kho số liệu quảng cáo (app/live-ads.mjs).
   return isLiveAdId(conversation?.referral?.adId);
+}
+
+/**
+ * R18: học "bài live" từ kho hội thoại (máy chủ gọi trong lượt quét thẻ Livestream mỗi 10 phút): bài của quảng cáo Live, bài có
+ * chữ live, bài của quảng cáo có tên live. Sau khởi động máy chủ, luồng bình luận dưới bài của quảng cáo Live nhận ra ngay.
+ */
+export function learnLivePosts(conversations = []) {
+  learnLiveAdPosts(conversations);
+  for (const conversation of Array.isArray(conversations) ? conversations : []) {
+    const post = conversation?.post;
+    if (post?.id && (isLiveText(post.message) || isLivePostObject(post))) rememberLivePost(post.id);
+    for (const referral of referralsOf(conversation)) if (referral.postId && isLiveText(referral.adTitle)) rememberLivePost(referral.postId);
+  }
 }
 
 /**

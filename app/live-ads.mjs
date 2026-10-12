@@ -48,6 +48,45 @@ export function setLiveAdIdsForTest(ids = []) {
 
 export const liveAdsLoadedAt = () => loadedAt;
 
+// R18 (bình luận B2, inbox3 V11): bài của quảng cáo Live là bài live. Bài "Săn Sale 10/10 cùng Giọt Nắng" (…573757) không có chữ
+// "live/săn deal" → 24 luồng bình luận dưới bài nhận bảng giá thường, đơn mất Quạt. Pancake ghi mã bài của quảng cáo khách bấm
+// (referral.postId) → học "bài live" từ đó (và từ bài có chữ live — conversation-orders learnLivePosts), so theo phần mã sau dấu "_"
+// (Pancake lúc ghi "{page}_{post}", lúc chỉ "{post}"). Chỉ giữ trong bộ nhớ, học lại sau mỗi lần quét thẻ Livestream (10 phút).
+const LIVE_POST_LIMIT = 2000;
+let livePostIds = new Set();
+const livePostKey = postId => String(postId || '').trim().split('_').pop();
+
+/** Ghi một bài là bài live (bài của quảng cáo Live, bài có chữ live). */
+export function rememberLivePost(postId) {
+  const key = livePostKey(postId);
+  if (!key || livePostIds.has(key)) return;
+  if (livePostIds.size >= LIVE_POST_LIMIT) livePostIds = new Set([...livePostIds].slice(-Math.floor(LIVE_POST_LIMIT / 2)));
+  livePostIds.add(key);
+}
+
+export function isLivePostId(postId) {
+  const key = livePostKey(postId);
+  return Boolean(key) && livePostIds.has(key);
+}
+
+/** Các lần bấm quảng cáo của một hội thoại (referral hiện tại + lịch sử referrals). */
+export function referralsOf(conversation) {
+  return [conversation?.referral, ...(Array.isArray(conversation?.referrals) ? conversation.referrals : [])].filter(item => item && typeof item === 'object');
+}
+
+/** Học bài của quảng cáo Live từ các lần bấm quảng cáo trong kho hội thoại. */
+export function learnLiveAdPosts(conversations = []) {
+  if (!liveAdIds.size) return;
+  for (const conversation of Array.isArray(conversations) ? conversations : []) {
+    for (const referral of referralsOf(conversation)) if (referral.postId && isLiveAdId(referral.adId)) rememberLivePost(referral.postId);
+  }
+}
+
+/** Chỉ cho test: đặt thẳng danh sách bài live. */
+export function setLivePostIdsForTest(ids = []) {
+  livePostIds = new Set(ids.map(livePostKey).filter(Boolean));
+}
+
 // Thẻ "Livestream" (sự kiện 'livestream') cho khách vào từ quảng cáo Live — 10/10, chủ shop: khách bấm "Săn Sale 10/10
 // cùng Giọt Nắng" (quảng cáo video trực tiếp) mà hội thoại không mang thẻ Livestream, nhân viên không biết là khách Live.
 // Trước đây thẻ chỉ gắn trong lượt trả lời của bot: bot tắt (nhân viên đang xử lý) hay khách nhắn trước khi nhận ra quảng
@@ -63,6 +102,8 @@ export const liveAdLabelWindowMs = 3 * 24 * 60 * 60 * 1000;
 export function applyLiveAdLabels(store, { labels = [], conversationIds = null, now = Date.now() } = {}) {
   const ids = (Array.isArray(labels) ? labels : []).filter(Boolean);
   const result = { changes: [], flagged: 0 };
+  // R18: học bài của quảng cáo Live trên MỌI hội thoại (kể cả đã gắn thẻ / chưa có thẻ Livestream trong cài đặt).
+  learnLiveAdPosts(store?.conversations);
   if (!ids.length || !liveAdIds.size || !Array.isArray(store?.conversations)) return result;
   const only = conversationIds ? new Set(conversationIds) : null;
   for (const conversation of store.conversations) {

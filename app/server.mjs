@@ -14,7 +14,7 @@ import { botPanelStateChanged } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { lookupShippingOrders } from './shipping-lookup.mjs';
 import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
-import { buildOrderReceiptPayload, isLivestreamCustomer, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
+import { buildOrderReceiptPayload, isLivestreamCustomer, learnLivePosts, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
@@ -821,10 +821,11 @@ async function runRemarketingLabelPass(conversationIds = null) {
 async function runLiveAdLabelPass(conversationIds = null) {
   const labelDefs = await inboxLabelDefs();
   const labels = labelsForEvents(labelDefs, ['livestream']);
-  if (!labels.length) return 0;
   let result = { changes: [], flagged: 0 };
   const relabeled = [];
   await updateMessagingStore(store => {
+    // R18 (bình luận B2): học bài live (bài của quảng cáo Live, bài có chữ live) — kể cả khi cài đặt chưa có thẻ Livestream.
+    if (!conversationIds) learnLivePosts(store.conversations);
     result = applyLiveAdLabels(store, { labels, conversationIds });
     for (const change of result.changes) {
       const conversation = store.conversations.find(item => item.id === change.conversation.id);

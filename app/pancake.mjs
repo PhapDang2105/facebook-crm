@@ -185,12 +185,17 @@ export function pancakePostContext(post) {
   const attachments = Array.isArray(post.attachments?.data) ? post.attachments.data : Array.isArray(post.attachments) ? post.attachments : [];
   const first = attachments[0] || {};
   const picture = String(first.target?.thumbnail || first.media?.image?.src || first.thumbnail || first.url || '');
+  // R18 (bình luận B2): giữ loại bài — trước đây bỏ nên nhánh "bài video trực tiếp" (isLivestreamConversation) không bao giờ chạy.
+  const type = String(post.type || post.status_type || '').trim().slice(0, 40);
+  const live = /live/i.test(type) || attachments.some(item => /live/i.test(String(item?.type || item?.media_type || '')));
   return {
     id,
     message: String(post.message || '').trim().slice(0, 600),
     // Pancake không trả permalink; id bài dạng {page}_{post} mở được trên Facebook.
     permalink: `https://www.facebook.com/${id}`,
-    picture
+    picture,
+    ...(type ? { type } : {}),
+    ...(live ? { live: true } : {})
   };
 }
 

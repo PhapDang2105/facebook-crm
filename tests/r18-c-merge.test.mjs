@@ -22,7 +22,7 @@ test('inbox1 V1 (…45486082): "C lấy 1 túi dùng thử nhé" rồi "Màu và
   // Lượt khởi động (nạp danh mục / địa giới lần đầu mất ~1–2 giây) để lượt đo không vượt khoảng lặng.
   const warm = new Sim({ psid: 'r18c-warm' });
   await warm.send(warm.inbox(), `C lấy 1 túi xanh\nTổ 2, phường Long Bình, Biên Hoà, Đồng Nai\n${PHONE}`);
-  const sim = new Sim({ psid: 'r18c-45486082', settings: { orderQuietMs: 1500 } });
+  const sim = new Sim({ psid: 'r18c-45486082', settings: { orderQuietMs: 4000 } });
   const box = sim.inbox({ botLastTemplateId: 'GENERAL_INFO', botLastReplyAt: Date.now() - 2 * MIN });
   sim.history(box, 'outgoing', 'Dạ bảng giá Granola Giọt Nắng ạ', 2 * MIN, bot);
   const late = arriveLater(sim, box, 'Màu vàng', 30);
@@ -35,7 +35,7 @@ test('inbox1 V1 (…45486082): "C lấy 1 túi dùng thử nhé" rồi "Màu và
 });
 
 test('inbox3 V8 (…57333455): "Lấy 3 túi 3 vị để dùng thử" rồi địa chỉ + SĐT tới chậm → không xin "SĐT và địa chỉ" khách vừa gửi', async () => {
-  const sim = new Sim({ psid: 'r18c-57333455', settings: { orderQuietMs: 1500 } });
+  const sim = new Sim({ psid: 'r18c-57333455', settings: { orderQuietMs: 4000 } });
   const box = sim.inbox({ botLastTemplateId: 'GENERAL_INFO', botLastReplyAt: Date.now() - 2 * MIN });
   const late = arriveLater(sim, box, `Tổ 2, khu phố 2a, phường Long Bình, Biên Hoà, Đồng Nai\n${PHONE}`, 30);
   const first = await sim.send(box, 'Lấy 3 túi 3 vị để dùng thử');

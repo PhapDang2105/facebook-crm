@@ -38,3 +38,13 @@ test('inbox4 N1 (…15103300): "Đơn kia lấy rồi", "Mua thêm" sau câu h�
   for (const text of ['Ăn rồi', 'không mua thêm', 'gộp vào đơn kia', 'đơn kia nhận rồi hay sao', 'đơn kia chưa nhận']) assert.notEqual(readMergeSplitReply(text), 'split', text);
   assert.equal(readMergeSplitReply('gộp vào đơn kia'), 'merge');
 });
+
+test('inbox1 N1 (…28300147, khách live): "Chị xem live chương trình 10/10 voucher thế nào em?" trùng câu voucher vừa gửi → bảng ưu đãi live, không STAFF_WAIT', async () => {
+  const sim = new Sim({ psid: 'r18c-28300147', settings: { ruleIntent: 'off' } });
+  const box = sim.inbox({ labels: ['livestream'], gender: 'female', botGender: 'female' });
+  const first = await sim.send(box, 'Bên mik có voucher j ko chị', { llm: { template_id: 'LIVESTREAM_VOUCHER' } });
+  assert.equal(first.result.templateId, 'LIVESTREAM_VOUCHER', JSON.stringify(first.result));
+  const again = await sim.send(box, 'Chị xem live chương trình 10/10 voucher thế nào em?', { llm: { template_id: 'LIVESTREAM_VOUCHER' } });
+  assert.equal(again.result.templateId, 'GIFT_POLICY_LIVE', JSON.stringify(again.result));
+  assert.match(said(again), /Quạt/);
+});

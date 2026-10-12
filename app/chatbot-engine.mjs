@@ -4509,6 +4509,11 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           const total3 = priced3?.priceable ? `${Number(priced3.total).toLocaleString('vi-VN')}đ` : '';
           const upsell = total3 ? renderChatbotReply({ template_id: 'GIFT_POLICY_UPSELL3', values: { total3 } }, templates, replyContext) : null;
           if (upsell?.templateId === 'GIFT_POLICY_UPSELL3' && !upsell.handoff && upsell.messages?.length) alternative = upsell;
+        } else if (['DISCOUNT_POLICY', 'LIVESTREAM_VOUCHER'].includes(reply.templateId) && replyContext.livestream === true && !hasOrder && templates?.GIFT_POLICY_LIVE) {
+          // R18 (inbox1 N1, ca …28300147 "Chị xem live chương trình 10/10 voucher thế nào em?", …27839177 "Sao hôm nay giảm gì e?"):
+          // khách live hỏi lại ưu đãi/voucher ngay sau câu ưu đãi → bảng ưu đãi live (2 túi 298k + Quạt, 3 túi + bát/muỗng), không STAFF_WAIT.
+          const live = renderChatbotReply({ template_id: 'GIFT_POLICY_LIVE' }, templates, replyContext);
+          if (live.templateId === 'GIFT_POLICY_LIVE' && !live.handoff && live.messages?.length) alternative = live;
         } else if (priceFamily.has(reply.templateId) && basketHeld && heldItems.length) {
           const held = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, { ...replyContext, lastTemplateId: 'ORDER_ADDRESS' });
           if (held.remind) alternative = { templateId: 'ORDER_ADDRESS_REMIND', messages: [held.remind], images: [], parts: undefined, handoff: false };

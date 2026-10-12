@@ -1386,8 +1386,10 @@ export function ruleIntent(text, ctx = {}) {
   // (combo 10 gói có Xanh + Cam, hỏi mấy hộp mỗi vị). Trước đây luật COMBO3 / mô hình lên 3 túi lớn 442k (khách đã đặt hộp gói nhỏ).
   const tenPackQuoted = (['PRICE_QUOTE', 'PRICE_QUOTE_COMBO', 'COMBO10_FAMILY', 'GENERAL_INFO'].includes(last) || ctx.smallPackContext) && Number(ctx.botLastAgeMin) <= 180
     && /combo 10|10 g[oó]i/iu.test(`${ctx.lastQuoteName || ''} ${ctx.quotedProduct || ''}`);
-  if (!isComment && !phone && !ctx.hasBasket && !ctx.hasRecentOrder && tenPackQuoted && /\b(?:combo |com bo )?gia dinh\b/.test(s) && !/\b\d{1,2} ?(?:hop|combo|set)\b/.test(s)
-    && !/\b(?:xanh|cam)\b/.test(s)) {
+  // (out-inbox1 V3, ca …38924248513889885 "Combo 3 tíu 1,05kg nha em" ngay sau bảng "3 Combo Gia Đình (1.05kg)" — mô hình lên 3 túi lớn
+  // 442k): "combo 3" / "3 combo" / "1,05kg" cũng là 3 hộp.)
+  if (!isComment && !phone && !ctx.hasBasket && !ctx.hasRecentOrder && tenPackQuoted && /\b(?:combo |com bo )?gia dinh\b|\bcombo ?3\b|\b3 ?combo\b|\b1 ?05 ?kg\b/.test(s)
+    && !/\b(?:[124-9]|\d{2}) ?(?:hop|combo|set)\b/.test(s) && !/\b(?:xanh|cam)\b/.test(s)) {
     return { rule: 'COMBO10_FAMILY', value: { template_id: 'COMBO10_FAMILY' } };
   }
   // R18 (inbox4 N2, ca …86775734 "Có" sau SMALL_PACK_FLAVOURS — mẫu cũng kết bằng "cần em gửi bảng giá combo 10 gói không") → bảng giá,

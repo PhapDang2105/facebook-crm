@@ -35,7 +35,8 @@ test('R18 A inbox4 N2 (…86775734): "Có" sau SMALL_PACK_FLAVOURS ("cần em g�
 });
 
 test('R18 A inbox4 N2 (…83821320): sau bảng giá Combo 10 gói ("3 Combo Gia Đình"), "Combo gia đình là đủ 3 vị ạ" / "E lấy combo gia đình mix đủ 3 vị ạ" → COMBO10_FAMILY, không 3 túi lớn', async () => {
-  for (const text of ['Combo gia đình là đủ 3 vị ạ', 'E lấy combo gia đình mix đủ 3 vị ạ']) {
+  // (out-inbox1 V3, ca …38924248513889885 "Combo 3 tíu 1,05kg nha em" cùng ngữ cảnh.)
+  for (const text of ['Combo gia đình là đủ 3 vị ạ', 'E lấy combo gia đình mix đủ 3 vị ạ', 'Combo 3 tíu 1,05kg nha em']) {
     const sim = new Sim({ psid: `r18a-cgd-${text.length}` });
     const inbox = sim.inbox({ botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - MIN });
     sim.history(inbox, 'outgoing', 'Dạ, em gửi chị Bảng giá Combo 10 gói Xanh để mình dễ tham khảo ạ: … 👨‍👩‍👧‍👦 3 Combo Gia Đình (1.05kg) …', 1.1 * MIN, { sender: 'bot' });

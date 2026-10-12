@@ -13641,30 +13641,64 @@ function renderConversationLabelBadges(conversation) {
   }));
 }
 
-/** The bar above the composer: every label, lit when the open thread carries it. */
+// 12/10 (chủ shop: thanh thẻ "cồng kềnh quá" — 15 thẻ, 3 dòng trên ô soạn tin): thanh chỉ hiện thẻ hội thoại ĐANG có
+// (bấm × để bỏ) + nút "+ Gắn thẻ" mở bảng nổi đủ mọi thẻ để tích/bỏ. Bảng mở cho hội thoại nào thì nhớ mã hội thoại đó:
+// đổi hội thoại là bảng tự đóng.
+let conversationLabelPickerFor = '';
+
+function labelBarButton(label, active, { chip = false } = {}) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.labelId = label.id;
+  button.append(labelIconElement(label), document.createTextNode(label.name));
+  button.title = active ? `Bỏ thẻ ${label.name}` : `Gắn thẻ ${label.name}`;
+  applyLabelColors(button, label.color);
+  button.classList.toggle('active', active);
+  if (chip) button.classList.add('is-chip');
+  button.setAttribute('aria-pressed', String(active));
+  return button;
+}
+
+/** The bar above the composer: the labels the open thread carries, plus "+ Gắn thẻ" for the full list. */
 function renderConversationLabelBar(conversation = getActiveConversation()) {
   if (!conversationLabelBar) return;
   if (!conversation || conversation.dataset.source === 'comment') {
+    conversationLabelPickerFor = '';
     conversationLabelBar.classList.add('hidden');
     return;
   }
+  const conversationId = conversation.dataset.conversationId || '';
+  if (conversationLabelPickerFor && conversationLabelPickerFor !== conversationId) conversationLabelPickerFor = '';
+  const pickerOpen = Boolean(conversationLabelPickerFor);
   const active = new Set(conversationLabelIds(conversation));
   conversationLabelBar.classList.toggle('hidden', !inboxLabels.length);
   const title = document.createElement('span');
   title.className = 'conversation-label-bar-title';
   title.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>';
   title.title = 'Thẻ hội thoại';
-  conversationLabelBar.replaceChildren(title, ...inboxLabels.map(label => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.labelId = label.id;
-    button.append(labelIconElement(label), document.createTextNode(label.name));
-    button.title = active.has(label.id) ? `Bỏ thẻ ${label.name}` : `Gắn thẻ ${label.name}`;
-    applyLabelColors(button, label.color);
-    button.classList.toggle('active', active.has(label.id));
-    button.setAttribute('aria-pressed', String(active.has(label.id)));
-    return button;
-  }));
+  const chips = inboxLabels.filter(label => active.has(label.id)).map(label => labelBarButton(label, true, { chip: true }));
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'conversation-label-add';
+  add.dataset.labelPicker = 'toggle';
+  add.setAttribute('aria-expanded', String(pickerOpen));
+  add.textContent = chips.length ? '+ Gắn thẻ' : '+ Gắn thẻ cho hội thoại';
+  const nodes = [title, ...chips, add];
+  if (pickerOpen) {
+    const picker = document.createElement('div');
+    picker.className = 'conversation-label-picker';
+    picker.setAttribute('role', 'group');
+    picker.setAttribute('aria-label', 'Chọn thẻ hội thoại');
+    picker.append(...inboxLabels.map(label => labelBarButton(label, active.has(label.id))));
+    nodes.push(picker);
+  }
+  conversationLabelBar.replaceChildren(...nodes);
+}
+
+function closeConversationLabelPicker() {
+  if (!conversationLabelPickerFor) return;
+  conversationLabelPickerFor = '';
+  renderConversationLabelBar();
 }
 
 function renderMessageLabelMenu() {
@@ -14176,8 +14210,21 @@ async function saveMessageDefaults(event) {
 // ---- Sự kiện ----
 
 conversationLabelBar?.addEventListener('click', event => {
+  if (event.target.closest('[data-label-picker="toggle"]')) {
+    conversationLabelPickerFor = conversationLabelPickerFor ? '' : (getActiveConversation()?.dataset.conversationId || '');
+    renderConversationLabelBar();
+    return;
+  }
   const button = event.target.closest('[data-label-id]');
   if (button) toggleConversationLabel(button.dataset.labelId);
+});
+// Bảng chọn thẻ: bấm ra ngoài thanh thẻ hay Esc là đóng (tích nhiều thẻ liền thì bảng vẫn mở).
+document.addEventListener('click', event => {
+  // composedPath (chụp lúc bấm): nút thẻ vừa bấm đã bị vẽ lại (tách khỏi trang) vẫn tính là trong thanh.
+  if (conversationLabelPickerFor && !event.composedPath().includes(conversationLabelBar)) closeConversationLabelPicker();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && conversationLabelPickerFor) closeConversationLabelPicker();
 });
 
 quickReplyButton?.addEventListener('click', event => {

@@ -3469,6 +3469,15 @@ body.role-staff .qr-leads-manager { display: none !important; }
 .conversation-label-bar button .label-icon { width: 14px; height: 14px; }
 .conversation-label-bar-title { flex: 0 0 auto; }
 
+/* 12/10: thanh chỉ hiện thẻ đang gắn (bấm × để bỏ) + "+ Gắn thẻ" mở bảng nổi đủ mọi thẻ, phía trên thanh. */
+.conversation-label-bar { position: relative; }
+.conversation-label-bar button.is-chip.active::after { content: '×'; margin-left: 2px; font-size: 14px; font-weight: 700; line-height: 1; opacity: .85; }
+.conversation-label-bar .conversation-label-add { color: #667085; background: #fff; border: 1px dashed #c4cad3; font-weight: 600; }
+.conversation-label-bar .conversation-label-add:hover,
+.conversation-label-bar .conversation-label-add[aria-expanded="true"] { color: var(--brand, #1f7a45); background: #f3faf6; border-color: var(--brand, #1f7a45); }
+.conversation-label-picker { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 4px); z-index: 40; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; max-height: min(320px, 50vh); padding: 10px; overflow-y: auto; background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; box-shadow: 0 12px 32px rgba(16, 24, 40, .16); }
+.conversation-label-picker button { justify-content: flex-start; width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Form Tạo đơn: ô Đơn giá đủ rộng cho 6 chữ số; giá theo combo có chú thích. */
 .customer-product-table-head,
 .customer-product-row { grid-template-columns: minmax(0, 1fr) 46px 98px 80px; column-gap: 6px; }

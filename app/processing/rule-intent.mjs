@@ -44,18 +44,22 @@ const GIFT_PHOTO_RAW = /(?<![\p{L}])(?:xem|coi|gửi|gởi|gui|chụp|xin)(?![\p
 // R13 (inbox1 B1): "Mình mua 2b mà không lấy quà có được không" — "quà" CÒN DẤU là quà tặng (GIFT_SWAP), không phải "quả".
 const GIFT_DECLINE_RAW = /(?<![\p{L}])(?:không|ko|k|kg|kgg|hông|hong|khỏi|khoi)\s+(?:lấy|cần|nhận|muốn)\s+quà(?![\p{L}])/iu;
 // R14 (ca thật 02/10): "C ko lấy set muỗng dừa nha e", "Sao k tặng đồ khác" từng rơi về GIFT_POLICY cụt.
-export const GIFT_SWAP_ASK = /\b(?:khong|ko|k|kg|kgg|hong) (?:lay|can|thich|muon) (?:bo |cai |set )?(?:quat|bat|muong|qua tang)\b|\b(?:doi|thay) (?:qua|quat|bat|muong)(?! (?:tui|goi|hop|bich|xanh|vang|nau|loai|vi|cacao|\d))\b|\btang (?:cai|mon|thu|do) khac\b|\bqua thay\b|\b(?:quat|bat|muong|qua)\b.{0,20}\btru tien\b/;
+export const GIFT_SWAP_ASK = /\b(?:khong|ko|k|kh|kg|kgg|hong) (?:lay|can|thich|muon) (?:bo |cai |set )?(?:quat|bat|muong|qua tang)\b|\b(?:doi|thay) (?:qua|quat|bat|muong)(?! (?:tui|goi|hop|bich|xanh|vang|nau|loai|vi|cacao|\d))\b|\btang (?:cai|mon|thu|do) khac\b|\bqua thay\b|\b(?:quat|bat|muong|qua)\b.{0,20}\btru tien\b/;
 // 05/10 (chủ shop): khách live 2 túi (quà "Quạt + Bát gáo dừa") KHÔNG lấy quạt → bot tự đổi quạt sang muỗng dừa (quà thành
 // Bát gáo dừa + Muỗng dừa). Chỉ khi khách bỏ RIÊNG quạt: bỏ cả bát ("ko lấy bát và quạt"), xin quà khác / gói nhỏ / trừ tiền,
 // đổi quạt sang món khác muỗng → giữ luồng GIFT_SWAP (ghi chú + xin duyệt). "bộ bát" đổi thành "set bat" trước khi bỏ dấu
 // để không lẫn với "bỏ bát". Engine quyết định có áp không (giỏ/đơn < 60 phút đang được quà live).
 const FAN = '(?:quat|qat|quac)';
-const FAN_DECLINE = new RegExp(`\\b(?:khong|ko|k|kg|kgg|hong|hok|khoi|chang|cha|hem) (?:(?:can|lay|nhan|muon|thich|dung|xai|su dung|lay cai) )?(?:(?:cai|cay|chiec) )?${FAN}\\b|\\b(?:bo|doi|thay|bot|tru) (?:(?:cai|cay|chiec|phan) )?${FAN}\\b|\\b${FAN}\\b(?: [a-z0-9]+){0,4} (?:bo ra|bo di|khoi|khong can|ko can|k can|khong lay|ko lay|k lay|khong dung|ko dung)\\b`);
+// R18 (inbox4 N4, ca …31905717 "Chị kh lấy quạt đổi cho c bát gáo dừa đc ko"): thêm phủ định "kh".
+const FAN_DECLINE = new RegExp(`\\b(?:khong|ko|k|kh|kg|kgg|hong|hok|khoi|chang|cha|hem) (?:(?:can|lay|nhan|muon|thich|dung|xai|su dung|lay cai) )?(?:(?:cai|cay|chiec) )?${FAN}\\b|\\b(?:bo|doi|thay|bot|tru) (?:(?:cai|cay|chiec|phan) )?${FAN}\\b|\\b${FAN}\\b(?: [a-z0-9]+){0,4} (?:bo ra|bo di|khoi|khong can|ko can|k can|khong lay|ko lay|k lay|khong dung|ko dung)\\b`);
 const OTHER_GIFT_DECLINE = /\b(?:khong|ko|k|kg|kgg|hong|hok|khoi|bo|tru|bot) (?:(?!quat\b)[a-z0-9]+ ){0,2}(?:bat|chen|gao dua|muong|thia)\b|\bquat (?:va|voi|lan|ca|hay|vs|\+) (?:(?:cai|set|bo) )?(?:bat|chen|gao dua|muong|thia)\b|\b(?:bat|chen|gao dua|muong|thia) (?:va|voi|lan|ca|vs|\+) (?:(?:cai|set) )?quat\b/;
-const OTHER_GIFT_WANT = /\b(?:qua|do|mon|thu|cai) khac\b|\bgoi nho\b|\bgranola nho\b|\b(?:tru|giam|bot) (?:tien|gia)\b|\b(?:doi|thay) (?:cai )?quat (?:sang|lay|thanh|bang|qua) (?!(?:cai |set |1 |mot )?(?:muong|thia)\b)/;
+// R18 (inbox3 N2 / comment B9, ca …0645476 "Chị k lấy quạt. Đổi quà khác đc k"; quyết định chủ shop 10/10: combo 2 live không lấy Quạt →
+// 1 Bát gáo dừa): xin "quà khác" CHUNG CHUNG không còn chặn việc tự đổi quạt; chỉ món thay CỤ THỂ khác bát/muỗng (gói nhỏ, trừ tiền,
+// "đổi quạt sang <món khác>") mới giữ luồng GIFT_SWAP. "đổi quạt lấy bát (gáo dừa)" cũng là tự đổi.
+const OTHER_GIFT_WANT = /\bgoi nho\b|\bgranola nho\b|\b(?:tru|giam|bot) (?:tien|gia)\b|\b(?:doi|thay) (?:cai )?quat (?:sang|lay|thanh|bang|qua) (?!(?:cai |set |1 |mot )?(?:muong|thia|bat|chen|gao dua|qua khac|do khac|mon khac|thu khac|cai khac)\b)/;
 const spoonFold = text => core(String(text || '').normalize('NFC').replace(/bộ/giu, 'set'));
 
-/** Tin khách chỉ bỏ QUẠT (giữ bát): "C ko lấy quạt .bỏ ra hộ c", "bỏ quạt", "khỏi quạt", "đổi quạt lấy muỗng". */
+/** Tin khách chỉ bỏ QUẠT (giữ bát): "C ko lấy quạt .bỏ ra hộ c", "bỏ quạt", "khỏi quạt", "đổi quạt lấy muỗng", "k lấy quạt, đổi quà khác". */
 export function isFanToSpoonRequest(text) {
   const s = spoonFold(text);
   if (!s || s.length > 160 || !FAN_DECLINE.test(s)) return false;

@@ -2672,7 +2672,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const namesProducts = /\b(tui|\d+ ?goi|goi nho|bich|hop|combo|xanh|vang|nau|cacao|lay them)\b/.test(folded);
     const phoneInText = nonText ? '' : extractVietnamesePhone(message.text || '');
     let lookupReply = null;
-    if (phoneInText && !recentOrder?.id && !namesProducts && (asksAboutOrder || conversation.botLastTemplateId === 'ORDER_STATUS') && dependencies.findOrdersByPhone) {
+    // R18 (inbox4 N4): đang giữ giỏ thì SĐT là SĐT giao hàng của giỏ (trừ khi khách hỏi đơn đã đặt), không tra đơn cũ.
+    if (phoneInText && !recentOrder?.id && !namesProducts && (asksAboutOrder || (conversation.botLastTemplateId === 'ORDER_STATUS' && !basketHeld)) && dependencies.findOrdersByPhone) {
       const found = (await dependencies.findOrdersByPhone(phoneInText).catch(() => [])) || [];
       // C2 (01/10): hội thoại này không có đơn nào, nên đơn tìm theo SĐT là của hội thoại KHÁC — không kể món/giờ/tổng
       // tiền cho người đang nhắn (gõ SĐT người khác là đọc được đơn của họ). Báo nhân viên tra + thẻ + ghi chú.
@@ -2767,6 +2768,18 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         const remind = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, { ...replyContext, pendingOrder: pending }).remind || '';
         return {
           ...done, templateId: 'ORDER_ADDRESS_REMIND', alsoTemplateId: 'GIFT_FAN_TO_SPOON', pendingOrder: pending, fanToSpoon: 'basket',
+          messages: [...done.messages, ...(remind ? [remind] : [])],
+          parts: [...done.messages.map(text => ({ type: 'text', text })), ...(remind ? [{ type: 'text', text: remind, remind: true }] : [])]
+        };
+      }
+      // R18 (inbox4 N4): đã đổi quạt cho giỏ này mà khách nhắc lại "không lấy quạt" → nói lại quà hiện tại + nhắc giỏ (không để mô hình
+      // tra đơn "em chưa thấy đơn nào").
+      if (held && heldOverride && heldItems.length && heldOverride.every(item => !/\bquat\b/.test(foldVietnamese(String(item?.name || ''))))) {
+        const done = renderChatbotReply({ template_id: 'GIFT_FAN_TO_SPOON', values: { gift: heldOverride.map(item => String(item?.name || '')).join(' + ') } }, templates, replyContext);
+        if (done.templateId !== 'GIFT_FAN_TO_SPOON') return null;
+        const remind = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, replyContext).remind || '';
+        return {
+          ...done, templateId: 'ORDER_ADDRESS_REMIND', alsoTemplateId: 'GIFT_FAN_TO_SPOON',
           messages: [...done.messages, ...(remind ? [remind] : [])],
           parts: [...done.messages.map(text => ({ type: 'text', text })), ...(remind ? [{ type: 'text', text: remind, remind: true }] : [])]
         };
@@ -3733,6 +3746,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const held = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, replyContext);
       if (held.remind) reply = { templateId: 'ORDER_ADDRESS_REMIND', messages: [held.remind], images: [], parts: undefined, handoff: false };
     }
+    // R18 (inbox4 N4, ca …31905717 "Thêm cho c một bát gáo dừa nữa. C kh lấy quạt đc kh" khi giữ giỏ live): đang giữ giỏ, chưa có đơn,
+    // khách không hỏi đơn đã đặt → mô hình chọn ORDER_STATUS ("em chưa thấy đơn nào") là sai: nhắc giỏ đang giữ.
+    if (basketHeld && !recentOrder?.id && !lookupReply && !asksAboutOrder && conversation.source !== 'comment' && ['ORDER_STATUS', 'ORDER_STATUS_NONE'].includes(reply.templateId) && !reply.order) {
+      const held = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, replyContext);
+      if (held.remind) reply = { templateId: 'ORDER_ADDRESS_REMIND', messages: [held.remind], images: [], parts: undefined, handoff: false };
+    }
     // "Chưa nhận được hàng" mà hội thoại không có đơn (đơn ở trang kia, nhân viên
     // lên tay…): bot chỉ xin SĐT được — gắn thẻ để nhân viên tra ngay.
     if (reply.templateId === 'ORDER_STATUS' && !recentOrder?.id && !lookupReply && !reply.attention) reply = { ...reply, attention: true };
@@ -4277,6 +4296,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           || ['ORDER_UNCHANGED', 'ORDER_UPDATE', 'ORDER_WRONG', 'ORDER_CHANGE_STAFF', 'ORDER_NOTE_ADDED', 'ORDER_CANCELLED'].includes(again.templateId)
           || String(again.templateId || '').startsWith('ORDER_EXISTING_CONFIRM')
           || (again.templateId === 'GENERAL_INFO' && !priceLikeText)
+          // R18 (inbox4 N4): đang giữ giỏ, chưa có đơn → không "em chưa thấy đơn nào" (tra đơn) thay câu nhắc giỏ.
+          || (basketHeld && !hasOrder && ['ORDER_STATUS', 'ORDER_STATUS_NONE', 'ORDER_STATUS_CHECKING'].includes(again.templateId))
           || (isOrderStep(again.templateId) && !(again.pendingOrder?.key && again.pendingOrder.key !== conversation.pendingOrder?.key))
           || (createsBasket(again) && (tropicalNamed || liveOnlyMention || photoOnly))
           || (againLine.length > 20 && recent.some(item => item?.direction === 'outgoing' && (Number(item.createdAt) || 0) > tenMinutesAgo && normalizeSent(item.text).includes(againLine)));
@@ -5483,12 +5504,18 @@ export function addressWordsInText(message) {
  */
 // R17 (chủ shop 10/10, quyết định 12 — thay 05/10): combo 2 live không lấy quạt → 1 Bát gáo dừa (BGD, KHÔNG kèm muỗng); đơn live
 // từ 3 túi (quà Quạt + Bộ bát gáo dừa + Muỗng dừa, cấu hình 08/10) bỏ quạt → còn bát + muỗng. `bags`: tổng túi của giỏ / đơn.
+// R18 (FIX gói A — MẶC ĐỊNH, chờ chủ shop): quà còn lại sau khi khách live bỏ quạt, theo mã quà (SKU bảng quà). Live 3 túi bỏ quạt:
+// chỉ còn Bộ bát + Muỗng (không thêm bát). Chủ shop chốt khác (vd thêm 1 bát: ['BGD', 'BGD', 'MUONG']) thì sửa ở đây.
+export const FAN_DECLINE_GIFTS = Object.freeze({ two: Object.freeze(['BGD']), threePlus: Object.freeze(['BGD', 'MUONG']) });
+const FAN_DECLINE_GIFT_NAMES = { BGD: 'Bộ bát gáo dừa', MUONG: 'Muỗng dừa' };
 export function fanToSpoonGifts(gifts = getGifts(), { bags = 2 } = {}) {
-  const pick = (sku, name) => {
+  const pick = (sku, quantity) => {
     const gift = (Array.isArray(gifts) ? gifts : []).find(item => String(item?.sku || '').trim().toUpperCase() === sku);
-    return { name: String(gift?.name || name), sku, quantity: 1, weight: Math.max(0, Math.round(Number(gift?.weight) || 10)), ...(gift?.id ? { giftId: String(gift.id) } : {}) };
+    return { name: String(gift?.name || FAN_DECLINE_GIFT_NAMES[sku] || sku), sku, quantity, weight: Math.max(0, Math.round(Number(gift?.weight) || 10)), ...(gift?.id ? { giftId: String(gift.id) } : {}) };
   };
-  return Number(bags) >= 3 ? [pick('BGD', 'Bộ bát gáo dừa'), pick('MUONG', 'Muỗng dừa')] : [pick('BGD', 'Bộ bát gáo dừa')];
+  const counts = new Map();
+  for (const sku of Number(bags) >= 3 ? FAN_DECLINE_GIFTS.threePlus : FAN_DECLINE_GIFTS.two) counts.set(sku, (counts.get(sku) || 0) + 1);
+  return [...counts].map(([sku, quantity]) => pick(sku, quantity));
 }
 
 export function decisionContext({ conversation, message, recentOrder = null, staffRepliedAfterBot = false, labels = [], gender = '', livestream = undefined }) {

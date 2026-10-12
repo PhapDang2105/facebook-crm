@@ -5,7 +5,7 @@
 // Khách nhắc sản phẩm/số lượng/đổi/hủy hay đặt câu hỏi thì để LLM đọc.
 import { extractVietnamesePhone, toLocalPhone } from './customer-info.mjs';
 import { ADDRESS_WORDS, normalizeIntentText } from './intent-features.mjs';
-import { dedupeAddressSegments, describeDeliveryAddress } from './locations.mjs';
+import { dedupeAddressSegments, describeDeliveryAddress, splitOrderTag } from './locations.mjs';
 
 const CHANGE = /\b(tui|goi|bich|xanh|vang|nau|cacao|combo|huy|doi|them|bot|nua|khong lay|ko lay|k lay|lay \d|\d (tui|goi|bich))\b/;
 const ADMIN = /\b(xa|huyen|quan|phuong|thi tran|thi xa|tinh|tp|thanh pho|ap|thon|khu pho|kp)\b/g;
@@ -687,7 +687,8 @@ export function pickPreviousAddress(phone, ...orderLists) {
       if (!order) continue;
       const orderPhone = toLocalPhone(order.phone) || String(order.phone || '').replace(/\D/g, '');
       if (orderPhone !== key) continue;
-      const address = String(order.rawAddress || order.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+      // Điều phối 12/10: địa chỉ cũ cho đơn MỚI — bỏ mọi ngoặc ghi chú kho của đơn cũ ("(Tặng BGD)", "(Live)").
+      const address = splitOrderTag(String(order.rawAddress || order.address || '')).body;
       if (!address || /^chưa có địa chỉ$/i.test(address)) continue;
       if (order.landing?.incomplete && !order.landing?.posId) continue;
       const at = Number(order.createdAt) || 0;
@@ -807,7 +808,7 @@ export function pickPosOrderAddress(phone, posOrders, pancakeConversationId, { d
     if (!order || [6, 7].includes(Number(order.status))) continue;
     const phones = [order.bill_phone_number, order.shipping_address?.phone_number].map(phoneDigits).filter(Boolean);
     if (!phones.includes(key)) continue;
-    const address = posOrderAddress(order);
+    const address = splitOrderTag(posOrderAddress(order)).body;
     if (!address) continue;
     // inserted_at của POS là giờ UTC không ghi múi (như pos-sync.mjs posTimeToWebcake).
     const inserted = String(order.inserted_at || '').trim();
@@ -917,7 +918,7 @@ export function addressSuggestions({ conversation = {}, messages = [], posOrders
     .filter(order => order && String(order.processingStatus || '') !== 'cancelled')
     .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
   for (const order of orders) {
-    const address = String(order.rawAddress || order.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+    const address = splitOrderTag(String(order.rawAddress || order.address || '')).body;
     push(address, { source: 'order', at: Number(order.createdAt) || 0, orderId: String(order.id || ''), phone: toLocalPhone(order.phone) || '' });
   }
   const pos = (Array.isArray(posOrders) ? posOrders : []).filter(order => order && ![6, 7].includes(Number(order.status)));

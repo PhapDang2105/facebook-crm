@@ -1,6 +1,6 @@
 import { ambiguousCerealBags, asksToAdd, buildTemplatePrompt, isProductQuoteId, isShopCartText, maxAddressAsks, pickVariant, publicImageUrl, phoneLooksShort, renderChatbotReply, renderOrderGiftReply, sanitizeModelAnswer, withoutInviteTail } from './chatbot-templates.mjs';
 import { addressHint, chatTimeoutMs, inferAddress } from './processing/address-ai.mjs';
-import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, loadLocationIndex, lostHouseNumbers, mergeAddressFragment, resolveAddress } from './processing/locations.mjs';
+import { describeDeliveryAddress, houseNumbersOf, isUsableStreet, loadLocationIndex, lostHouseNumbers, mergeAddressFragment, resolveAddress, splitOrderTag } from './processing/locations.mjs';
 import { extractVietnamesePhone } from './processing/customer-info.mjs';
 import { AD_MISMATCH_COMPLAINT, autoLabelEventsFor, foldVietnamese, isComplaint, mentionsOtherSeller, shortBadTaste } from './processing/auto-label.mjs';
 import { productHint, resolveConversationProduct } from './processing/product-detect.mjs';
@@ -2011,7 +2011,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       if (confirmation) {
         const phone = String(confirmation.text).match(PHONE_LINE)?.[1]?.replace(/[^\d+]/g, '') || '';
         const address = String(confirmation.text).match(ADDRESS_LINE)?.[1]?.replace(/\*/g, '').replace(/^[\s–-]+|[\s–-]+$/g, '').trim() || '';
-        if (phone && address) return { phone, address, at: Number(confirmation.createdAt) || 0 };
+        // Chủ shop/điều phối 12/10: đơn MỚI lấy lại địa chỉ cũ — bỏ ngoặc ghi chú kho của đơn cũ ("(Tặng BGD)", "(Live)"); quà theo từng đơn.
+        if (phone && address) return { phone, address: splitOrderTag(address).body || address, at: Number(confirmation.createdAt) || 0 };
       }
       // R18-B (inbox2 V5, ca …423891 "Gửi c 1b nữa nha e"): đơn cũ nhân viên lên bằng phiếu Pancake POS (tin "Đã gửi xác nhận đơn hàng",
       // không có chữ) — địa chỉ + SĐT là chữ KHÁCH tự nhắn trong chính hội thoại (cạnh nhau, hay ngay trước phiếu). Chỉ tin cũ ≥ 24 giờ
@@ -2657,7 +2658,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const splitReply = awaitingSplit ? (() => {
       const phone = awaitingPending.phone || awaitingOrderRef?.phone || '';
       const address = awaitingPending.address || awaitingOrderRef?.rawAddress || awaitingOrderRef?.address || '';
-      const created = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', ...pendingValue(awaitingPending), Phone_Number: phone || '0', Customer_Address: String(address).replace(/^\((?:live|freeship)\)\s*/i, '') || '0' }, templates, { ...replyContext, messageText: 'tách đơn mới' });
+      const created = renderChatbotReply({ template_id: 'ORDER_CONFIRMATION', ...pendingValue(awaitingPending), Phone_Number: phone || '0', Customer_Address: splitOrderTag(address).body || '0' }, templates, { ...replyContext, messageText: 'tách đơn mới' });
       console.log(`Khách chọn TÁCH đơn mới (dùng lại SĐT/địa chỉ đơn cũ): ${created.templateId} (${conversation.id})`);
       return created;
     })() : null;

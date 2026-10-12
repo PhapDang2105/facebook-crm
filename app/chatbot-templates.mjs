@@ -1352,7 +1352,8 @@ function renderOrder(value, templates, context = {}) {
     const lastAge = lastOrder?.createdAt ? now - (Number(lastOrder.createdAt) || 0) : Infinity;
     const lastActive = String(lastOrder?.processingStatus || '') !== 'cancelled' && lastOrder?.status !== 'Hủy';
     if (lastAge < 24 * 60 * 60 * 1000 || (lastActive && lastAge < 7 * 24 * 60 * 60 * 1000)) return null;
-    const savedAddress = source => String(source?.rawAddress || source?.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+    // Điều phối 12/10: đơn MỚI lấy lại địa chỉ đơn cũ → bỏ mọi ngoặc ghi chú kho đầu địa chỉ ("(Tặng BGD)", "(Live)"); "(Live)" của đơn mới do luồng live tự thêm.
+    const savedAddress = source => splitOrderTag(String(source?.rawAddress || source?.address || '')).body;
     const source = [recentOrder, context.latestOrder, context.previousDelivery]
       .find(item => item && !item.foreign && toLocalPhone(item.phone) && savedAddress(item) && describeDeliveryAddress(savedAddress(item)).complete);
     return source ? { phone: toLocalPhone(source.phone), address: savedAddress(source) } : null;
@@ -1361,7 +1362,7 @@ function renderOrder(value, templates, context = {}) {
   // Chủ shop 12/10: ghi chú kho trong ngoặc đầu địa chỉ đơn ("(Tặng BGD) …", "(Live) …") — sửa đơn thì GIỮ trên đơn lưu (orderTag,
   // gắn lại ở order.address bên dưới), chỉ ẩn trong tin gửi khách.
   const orderTag = updating && previous?.address ? splitOrderTag(previous.address).tag : '';
-  const freshAddress = (repeatsOrderAddress ? '' : typedGiven) || (previous?.address ? (updating ? splitOrderTag(previous.address).body : String(previous.address).replace(/^\((?:live|freeship)\)\s*/i, '')) : '') || savedContact?.address || '';
+  const freshAddress = (repeatsOrderAddress ? '' : typedGiven) || (previous?.address ? splitOrderTag(previous.address).body : '') || savedContact?.address || '';
   const phone = freshPhone || pending?.phone || (previous?.phone ? toLocalPhone(previous.phone) || String(previous.phone) : '') || savedContact?.phone || '';
   // A fragment the customer sends after being asked ("phường 5", "số 12 Lê
   // Lợi") is merged into the saved address; a whole new address replaces it.
@@ -1577,7 +1578,7 @@ function renderOrder(value, templates, context = {}) {
   const addressTyped = customerTexts.some(text => looksLikeAddressMessage(text, { orderStep: true }) || /\b(?:dia chi|dchi|d\/c)\b/.test(normalizeIntentText(text)));
   // Chỉ khi địa chỉ / SĐT trên phiếu là CỦA ĐƠN CŨ (tin xác nhận đơn trong lịch sử — previousDelivery, hay đơn gần nhất), không
   // phải khách gõ; đơn chưa hủy ≤ 7 ngày thì luồng "đặt thêm?" của engine đã hỏi lại (không hỏi hai lần).
-  const oldOf = source => String(source?.rawAddress || source?.address || '').replace(/^\((?:live|freeship)\)\s*/i, '').trim();
+  const oldOf = source => splitOrderTag(String(source?.rawAddress || source?.address || '')).body;
   const oldSources = [context.previousDelivery, context.latestOrder, recentOrder].filter(source => source && !source.foreign && oldOf(source));
   const copiesOld = Boolean(address) && oldSources.some(source => sameAddressText(oldOf(source), address)
     || (toLocalPhone(source.phone) && toLocalPhone(source.phone) === toLocalPhone(phone)));

@@ -98,3 +98,24 @@ test('R18-B N4: đơn CRM cùng SĐT nhưng là của chính hội thoại / đ�
   });
   assert.equal(turn.created.length, 1, said(turn));
 });
+
+test('R18-B (điều phối 12/10): ĐƠN MỚI lấy lại địa chỉ đơn cũ → bỏ ngoặc ghi chú kho "(Tặng BGD)" / "(Live)" của đơn cũ', async () => {
+  for (const [psid, tag] of [['r18b-newtag1', '(Tặng BGD)'], ['r18b-newtag2', '(Live)']]) {
+    const sim = new Sim({ psid });
+    const old = { id: `old-${psid}`, automatic: true, createdAt: Date.now() - 20 * DAY, phone: PHONE, address: `${tag} 12 Lê Lợi, Phường Bến Nghé, Quận 1, TP Hồ Chí Minh`, total: 447000, status: 'Đã giao', products: [{ name: 'Granola Túi Xanh 450g', sku: 'GRA-XANH-Z450', quantity: 3 }] };
+    const inbox = sim.inbox({ customerOrders: [old], botLastTemplateId: 'PRICE_QUOTE', botLastReplyAt: Date.now() - 5 * MIN });
+    const ask = await sim.send(inbox, 'Cho chị 2 túi xanh nhé', { llm: noModel });
+    assert.match(said(ask), /Lê Lợi/u, said(ask));
+    assert.ok(!said(ask).includes(tag), said(ask));
+    const yes = await sim.send(inbox, 'ok em', { llm: noModel });
+    assert.equal(yes.created.length, 1, said(yes));
+    assert.ok(!String(yes.created[0].address).includes(tag), yes.created[0].address);
+    assert.match(yes.created[0].address, /Lê Lợi/u);
+  }
+});
+
+test('R18-B (điều phối 12/10): pickPreviousAddress (địa chỉ cũ cho đơn mới) bỏ mọi ngoặc ghi chú kho đầu địa chỉ', async () => {
+  const { pickPreviousAddress } = await import('../app/processing/order-flow.mjs');
+  const found = pickPreviousAddress(PHONE, [{ id: 'a', phone: PHONE, createdAt: Date.now() - DAY, address: '(Tặng BGD) (Live) Tổ 9, Phường Quang Trung, TP Thái Nguyên' }]);
+  assert.equal(found.address, 'Tổ 9, Phường Quang Trung, TP Thái Nguyên');
+});

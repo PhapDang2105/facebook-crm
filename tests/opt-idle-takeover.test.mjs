@@ -15,7 +15,9 @@ const { Sim, PHONE } = await import('./helpers/r13-engine-sim.mjs');
 const idle = await import('../app/processing/staff-idle.mjs');
 
 const MIN = 60 * 1000;
-const IDLE_MS = 40;
+// R18: 40 ms quá sát — cả bộ test chạy song song thì gửi tin thứ hai đã quá 40 ms, hẹn kiểm lại chạy trước khi test kịp
+// kiểm "bot vẫn im". 400 ms vẫn làm tròn lên 1 phút trong lý do.
+const IDLE_MS = 400;
 const ADDRESS_LINES = `Trang\n${PHONE}\nTdp bó bun\nPhường vân sơn\nTỉnh sơn la`;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const waitIdle = async () => { await sleep(IDLE_MS * 3); await idle.settleStaffIdleRechecks(); };
@@ -66,7 +68,7 @@ test('(1) ca thật: "E 2 túi" + tên/SĐT/địa chỉ, nhân viên im → bot
   assert.ok(sent.length > 0 || created.length > 0, 'bot đã trả lời sau khi nhân viên im');
   const takeover = sim.records.find(record => record.staffIdle?.takeover);
   assert.ok(takeover, JSON.stringify(sim.records.map(record => [record.skipped, record.final, record.staffIdle])));
-  assert.equal(takeover.staffIdle.reason, 'nhân viên im 1 phút — bot nhận đơn', 'ngưỡng test 40 ms làm tròn lên 1 phút');
+  assert.equal(takeover.staffIdle.reason, 'nhân viên im 1 phút — bot nhận đơn', 'ngưỡng test 400 ms làm tròn lên 1 phút');
   assert.equal(takeover.skipped, null);
   // Gộp các tin từ sau tin Page cuối như luồng thường: mô hình (hay luật) thấy cả "E 2 túi" lẫn SĐT + địa chỉ.
   assert.match(takeover.text, /E 2 túi/);

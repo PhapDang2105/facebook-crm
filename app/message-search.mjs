@@ -8,6 +8,7 @@
 // tin (cách nhau bằng \u0001) cùng vị trí bắt đầu từng tin → tìm chữ là một lần lastIndexOf (tin mới nhất khớp trước).
 import { messagingStoreVersion, readMessagingStore } from './messaging-store.mjs';
 import { readCustomerEdits } from './customer-edits.mjs';
+import { isPageSystemNoticeText } from './conversation-orders.mjs';
 
 export const MAX_SEARCH_RESULTS = 50;
 const SNIPPET_LENGTH = 120;
@@ -80,7 +81,12 @@ function phonesIn(text) {
 
 const messageText = message => {
   if (!message || typeof message !== 'object') return '';
+  // 12/10 (chủ shop): dòng hệ thống Facebook ("<tên> đã trả lời về một bài viết. Xem bài viết(link)", "… đã trả lời một
+  // quảng cáo", "Bạn đang phản hồi bình luận…") không phải lời khách hay Page — không đưa vào tìm tin nhắn. Pancake đẩy
+  // về khi là tin Page (cờ `system`), khi là tin KHÁCH; dữ liệu cũ chưa có cờ thì nhận theo chữ.
+  if (message.system === true) return '';
   const text = typeof message.text === 'string' ? message.text : '';
+  if (text && isPageSystemNoticeText(text)) return '';
   if (text) return text;
   return message.type === 'document' && typeof message.name === 'string' ? message.name : '';
 };
@@ -302,7 +308,8 @@ export function searchIndex(index, rawQuery, { limit = MAX_SEARCH_RESULTS, edits
       picture: conversation.picture || '',
       lastMessageAt: Number(conversation.lastMessageAt) || 0,
       matchedAt: message ? Number(message.createdAt) || 0 : Number(hit?.at) || Number(conversation.lastMessageAt) || 0,
-      snippet: hit ? hit.snippet : String(conversation.lastMessagePreview || '').slice(0, SNIPPET_LENGTH),
+      // Chỉ khớp tên: đoạn trích là tin cuối — trừ khi tin cuối là dòng hệ thống Facebook ("… đã trả lời về một bài viết").
+      snippet: hit ? hit.snippet : (isPageSystemNoticeText(conversation.lastMessagePreview) ? '' : String(conversation.lastMessagePreview || '').slice(0, SNIPPET_LENGTH)),
       highlight: hit ? hit.highlight : null,
       messageId: message ? String(message.id || message.mid || '') : '',
       direction: message ? String(message.direction || '') : '',

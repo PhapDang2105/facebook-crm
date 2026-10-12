@@ -15,13 +15,15 @@ test('R18 A-N4: LIVE_ONLY không bắt "hạt bị hôi", "dâu sấy", "xoài";
   for (const text of ['bên em có hạt bí không', 'hat bi rang bao nhieu', 'sữa hạt giá sao', 'hũ hạt điều', 'đậu sấy bao nhiêu']) assert.equal(live(text), true, text);
 });
 
-test('R18 A-N4 (…3326342952406): giữ giỏ Vàng + Nâu, "sợ hat bi hôi bua mua cung bi hôi" → trấn an mùi (OIL_SMELL_WARRANTY), không "bạn phụ trách tư vấn riêng"', async () => {
+// Gộp vòng 18: "lần trước mua cũng bị hôi" là khiếu nại chất lượng đơn cũ → gói C chuyển CSKH (khiếu nại nặng). Trấn an mùi
+// (OIL_SMELL_WARRANTY) vẫn được; điều phải chặn là câu lạc đề "bạn phụ trách tư vấn riêng" của LIVE_ONLY.
+test('R18 A-N4 (…3326342952406): giữ giỏ Vàng + Nâu, "sợ hat bi hôi bua mua cung bi hôi" → trấn an mùi hay chuyển CSKH, không "bạn phụ trách tư vấn riêng"', async () => {
   const sim = new Sim({ psid: 'r18a-hoi' });
   const inbox = sim.inbox({ labels: ['livestream'], botLastTemplateId: 'ORDER_ADDRESS_REMIND', botLastReplyAt: Date.now() - 0.5 * MIN, pendingOrder: basket([VANG(1), NAU(1)], MIN) });
   const turn = await sim.send(inbox, 'sợ hat bi hôi bua mua cung bi hôi');
   assert.notEqual(turn.record?.rule?.name, 'LIVE_ONLY');
   assert.notEqual(turn.result.templateId, 'STAFF_ONLY_PRODUCT', said(turn));
-  assert.match(said(turn), /mùi lạ|đổi mới/u, said(turn));
+  assert.match(said(turn), /mùi lạ|đổi mới|chăm sóc khách hàng/u, said(turn));
   assert.deepEqual(itemsOf(inbox.pendingOrder?.items), ['1 GRA-NAU-Z350', '1 GRA-VANG-H350']);
 });
 

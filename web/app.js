@@ -14579,12 +14579,9 @@ function qrLeadPhoneText(phone) {
 
 function renderQrLeads() {
   const list = document.querySelector('#qr-leads-list');
-  const count = document.querySelector('#qr-leads-count');
   const toggle = document.querySelector('#qr-lead-form-toggle');
   if (toggle) toggle.checked = qrLeadState.leadForm !== false;
-  const real = qrLeadState.items.filter(lead => !lead.test);
-  const waiting = real.filter(qrLeadWaiting).length;
-  if (count) count.textContent = real.length ? `${real.length} khách${waiting ? ` · ${waiting} chưa liên hệ` : ''}` : '';
+  const waiting = qrLeadState.items.filter(qrLeadWaiting).length;
   const badge = document.querySelector('#qr-leads-nav-count');
   if (badge) {
     badge.textContent = waiting > 99 ? '99+' : String(waiting);

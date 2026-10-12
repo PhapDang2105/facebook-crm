@@ -1720,6 +1720,8 @@ export const r15FallbackTemplates = Object.freeze({
   ORDER_ADDRESS_OLD_NOT_FOUND: 'Dạ em chưa tìm thấy địa chỉ cũ theo số này ạ, {title} gửi giúp em địa chỉ nhận hàng (số nhà, đường, phường/xã, tỉnh) để em lên đơn liền nha ạ.',
   // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại — combo 10 gói có Xanh và Cam (Nâu/Mix vẫn tắt).
   SMALL_PACK_FLAVOURS: 'Dạ combo 10 gói nhỏ hiện bên em có 2 vị: Xanh nguyên bản (dễ ăn, cân bằng) và Cam (vị bơ hạt điều) ạ. {Title} cần em gửi bảng giá combo 10 gói không ạ?',
+  // R18 (inbox4 N2): bot vừa gửi bảng giá Combo 10 gói, khách nói "combo gia đình" (= 3 hộp 10 gói, không phải 3 túi lớn).
+  COMBO10_FAMILY: 'Dạ "Combo Gia Đình" ở bảng gói nhỏ là 3 hộp Combo 10 gói ạ (mỗi hộp 10 gói nhỏ ăn một bữa), giá và quà như bảng em vừa gửi 🎁 Combo 10 gói hiện có 2 vị: Xanh nguyên bản (gói 35g) và Cam bơ hạt điều (gói 30g), mình mix Xanh + Cam được ạ. {Title} lấy mấy hộp Xanh, mấy hộp Cam để em lên đơn nha 🌾',
   // R15 (inbox1 A5): khách đã nêu màu ({named}) thì không hỏi lại "vị nào". Mã đã có trong seed → bảng này chỉ khi bộ mẫu thiếu mã.
   PRICE_COUNT: 'Dạ {count} túi ({kind}) giá {total}[?ship] + phí ship {ship}[/?][?free], miễn phí vận chuyển[/?][?gift], tặng {gift}[/?] ạ 🌾[?named] {Title} lấy luôn {count} {kind} để em lên đơn liền cho mình nha?[/?][?pick] {Title} lấy {count} túi vị nào để em lên đơn liền cho mình nha?[/?]',
   ORDER_EXISTING_CONFIRM: 'Dạ {title} ơi, em thấy mình đang có đơn {existing_items} đặt lúc {existing_at}, hiện {existing_state} ạ 🌾 {Title} muốn em gộp {cart} vào đơn đang có, hay tách thành đơn mới (em gửi cùng địa chỉ cũ) ạ?'
@@ -2130,7 +2132,9 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
   // R15: engine tự chọn — SĐT thiếu số (cần {phone}), không tra được địa chỉ cũ theo SĐT.
   'PHONE_LOOKS_SHORT', 'ORDER_ADDRESS_OLD_NOT_FOUND',
   // R17: luật dị ứng tự chọn (cần {ingredient} điền sẵn).
-  'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED']);
+  'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED',
+  // R18: luật tự chọn khi khách nói "combo gia đình" ngay sau bảng giá Combo 10 gói.
+  'COMBO10_FAMILY']);
 
 // fix-bot T1 (01/10): mẫu "báo sự việc đã xảy ra" (đã nhận đơn Shop, đã hủy/sửa/ghi chú đơn, đã nhận deal live, đơn
 // đang có…) — chỉ engine được chọn khi việc đó thật sự xảy ra; mô hình trả các mã này thì luôn đổi về GENERAL_INFO.

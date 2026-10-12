@@ -10,7 +10,7 @@ import { findProductBySku, getCatalogProducts, getGifts, hasLivestreamGift, isFr
 import { hasGiftOverride } from './gift-override.mjs';
 import { isLivestreamConversation, isLivestreamCustomer, isPageSystemNotice, isPageSystemNoticeText, lateInfoNeedsBot } from './conversation-orders.mjs';
 // R13: LIVE_ONLY (danh sách hàng chỉ bán trên live) và FLAVOR_LIST (câu hỏi danh sách vị) dùng chung một bản của rule-intent.
-import { asksSpoonIncluded, CANCEL_ORDER, COMMENT_DISLIKE, core as ruleCore, DELIVERY_NOTE, FLAVOR_LIST, HOLD_DELIVERY, isFanToSpoonRequest, isReceivedNotice, LIVE_FEEDBACK, LIVE_ONLY, ruleIntent, TROPICAL_MENTION } from './processing/rule-intent.mjs';
+import { asksSpoonIncluded, CANCEL_ORDER, COMMENT_DISLIKE, core as ruleCore, DELIVERY_NOTE, FLAVOR_LIST, HOLD_DELIVERY, isFanToSpoonRequest, isReceivedNotice, LIVE_FEEDBACK, LIVE_ONLY, NUTS_ONLY, prepRuleText, ruleIntent, TROPICAL_MENTION } from './processing/rule-intent.mjs';
 import { cleanAddressText, collectAddressBurst, isPaymentMessage, lookupPreviousAddress, maskMarketWord, maskPlaceGia, resolvePreviousAddress, stripPhone } from './processing/order-flow.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { stickerInfo } from './stickers.mjs';
@@ -263,8 +263,9 @@ export function commentBasket(text, detail = null) {
   // một túi vốn đã là số lượng mặc định.
   const numberWords = { hai: '2', ba: '3', bon: '4', nam: '5' };
   // Chủ shop 05/10: "hợp" (phù hợp) bỏ dấu trùng "hộp" (hộp 10 gói) → giữ khác trước khi bỏ dấu.
-  const folded = foldVietnamese(String(text || '').replace(/nấu/giu, 'nauu').replace(/hợp/giu, 'hopp')).replace(/\bs[oô] ?c[oô] ?la\b|\bsocola\b|\bchocolate\b/g, 'cacao')
-    .replace(/\bxanh (?:mint|min|bac ha|bien|ngoc|da troi|duong)\b|\btropical\b|\b(?:tui|goi|loai|vi) (?:co )?dau(?: tay)?\b|\bdau tay\b|\bxoai dau\b/g, 'mint').replace(/\s+/g, ' ')
+  const folded = foldVietnamese(String(text || '').replace(/nấu/giu, 'nauu').replace(/hợp/giu, 'hopp').replace(/(?<![\p{L}])dâu\s+s[ấâa]y(?![\p{L}])/giu, 'dâu tây')).replace(/\bs[oô] ?c[oô] ?la\b|\bsocola\b|\bchocolate\b/g, 'cacao')
+    // R18 (inbox1 N4): "dâu sấy" (đổi thành "dâu tây" ở trên; "đậu sấy" giữ nguyên), "1tui sấy" / "gói sấy" cũng là Tropical.
+    .replace(/\bxanh (?:mint|min|bac ha|bien|ngoc|da troi|duong)\b|\btropical\b|\b(?:tui|goi|loai|vi) (?:co )?dau(?: tay)?\b|\bdau tay\b|\bxoai dau\b|(?<![a-z])(?:tui|goi|bich) say\b/g, 'mint').replace(/\s+/g, ' ')
     .replace(/\b(hai|ba|bon|nam) (?=(?:tui|goi|bich|bit|bi|hop|xanh|vang|nau|cacao|mint)\b)/g, (_match, word) => `${numberWords[word]} `)
     // R15 (bình luận A5, ca …020466 "Một bị màu vàng"): "một" ĐẦU câu (± lấy/cho/mua … em/chị) ngay trước đơn vị là 1.
     .replace(/^((?:(?:cho|lay|mua|chot|dat|gui)\s+)?(?:(?:em|e|minh|chi|c|a|anh|toi|tui)\s+)?)mot (?=(?:tui|goi|bich|bit|bi)\b)/, '$11 ')
@@ -1502,7 +1503,8 @@ export function claimsLiveDeal(text) {
  * đổi "đâu" còn dấu thành chữ khác trước khi so TROPICAL_MENTION (cùng cách rule-intent).
  */
 export function mentionsTropical(text) {
-  const raw = String(text || '').normalize('NFC').replace(/(?<![\p{L}])(túi|tui|gói|goi|bịch|bich|loại|loai|vị|vi|granola)(\s+có|\s+co)?\s+đâu(?![\p{L}])/giu, '$1 where');
+  const raw = String(text || '').normalize('NFC').replace(/(?<![\p{L}])(túi|tui|gói|goi|bịch|bich|loại|loai|vị|vi|granola)(\s+có|\s+co)?\s+đâu(?![\p{L}])/giu, '$1 where')
+    .replace(/(?<![\p{L}])dâu\s+s[ấâa]y(?![\p{L}])/giu, 'dâu tây');
   return TROPICAL_MENTION.test(foldVietnamese(raw).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' '));
 }
 // ===== R14 (chủ shop 03/10, quyết định 4): lời chê/khiếu nại sản phẩm =====
@@ -2168,6 +2170,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // Khách chỉ để ".", "ib", "bn", "xin giá"… dưới bài/quảng cáo có sản phẩm cụ
     // thể: gửi thẳng bảng giá sản phẩm đó, không đưa danh sách chung để khách phải chọn.
     const folded = foldVietnamese(String(message.text || '').trim()).replace(/\s+/g, ' ');
+    // R18: bản qua prep() của luật ("dâu sấy" → "dâu tây", Tropical) để so danh sách hàng live.
+    const foldedPrep = foldVietnamese(prepRuleText(String(message.text || '').trim())).replace(/\s+/g, ' ');
     // Tin mảnh (chỉ SĐT, "đó a", tên người…) khi đang lấy thông tin đơn, hoặc bot
     // vừa hỏi ở bước lên đơn, hoặc tin chỉ toàn số: đợi vài giây cho tin kế tiếp
     // của khách tới để gộp, tránh xin lại thứ khách vừa gửi. Bình luận liên tiếp
@@ -3953,8 +3957,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         // R17 (bình luận A8, ca …561388 "Lấy 1 hộp ko yến mạch nha" — tái diễn vòng 16 E1): "không (có) yến mạch" là xin granola KHÔNG
         // yến mạch, không hỏi giá Yến Mạch Úc → không gửi bảng giá yến mạch (lời chào live như các câu hỏi giá khác).
         [/\byen mach\b/, 'PRICE_YEN_MACH_UC_NGUYEN_CAM', /\b(?:khong|ko|k|kg|hong|bo|tru)(?: co)? yen mach\b/],
-        [/\b(hat dieu|hat bi|sua hat|xoai|dau say)\b/, 'LIVE_ONLY_PRODUCT']
-      ].find(([pattern, id, unless]) => pattern.test(folded) && !(unless && unless.test(folded)) && templates?.[id]);
+        [new RegExp(`${LIVE_ONLY.source}|\\bxoai\\b`), 'LIVE_ONLY_PRODUCT']
+      ].find(([pattern, id, unless]) => pattern.test(id === 'LIVE_ONLY_PRODUCT' ? foldedPrep : folded) && !(unless && unless.test(folded)) && templates?.[id]);
       reply = renderChatbotReply({ template_id: routed ? routed[1] : 'LIVESTREAM_COMMENT' }, templates, replyContext);
     }
     // Khách đến từ live (bài live hay thẻ Livestream) hỏi giá / số túi / quà: lời chào live (nêu vị, ưu đãi
@@ -4020,7 +4024,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     if (reply.templateId === 'LIVE_ONLY_PRODUCT') {
       // R15 (chủ shop 03/10, quyết định 4; inbox3 A4 ca …734014): hạt điều / hạt bí / sữa hạt / hũ hạt — khách live hỏi cũng chuyển
       // nhân viên (STAFF_ONLY_PRODUCT + thẻ) như khách thường, không "giữ giá live, lên đơn".
-      const nutsAsked = !nonText && /\b(?:hat dieu|hat bi|sua hat|hu hat)\b/.test(folded);
+      const nutsAsked = !nonText && NUTS_ONLY.test(folded);
       const liveListed = !nonText && !nutsAsked && liveOnlyProductPattern.test(folded) && !/\bxoai dau\b/.test(folded);
       const tropicalProduct = !nonText && mentionsTropical(message.text) ? findProductBySku('GRA-MINT-Z300') : null;
       if (tropicalProduct && tropicalProduct.active !== false && templates?.PRICE_QUOTE) {
@@ -4098,7 +4102,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     const namedProductBefore = earlierTexts.some(text => /\b(tui|goi|bich|hop|combo|xanh|vang|nau|cacao|granola|lay|dat|mua|chot)\b/.test(foldVietnamese(text)));
     const photoOnly = !nonText && /^(?:(?:cho|shop|em|e|minh|m|c|chi|a|anh|toi)\s+)*(?:(?:xem|coi|gui|cho xem|cho coi|xin)\s+)?(?:hinh|anh|hinh anh)(?:\s+(?:\d+|that|san pham|tui|goi|mau|san pham that))*(?:\s+(?:xem|coi|di|nha|nhe|a|voi|duoc khong|dc ko|dc k|ntn|sao|nao|cai|shop|em|e))*$/.test(folded);
     // Vòng 12: Tropical (xanh mint/dương/biển, dâu) là sản phẩm danh mục → giỏ hợp lệ; "xanh nhạt" mơ hồ thì không dựng giỏ.
-    const liveOnlyMention = /\b(hat dieu|hat bi|sua hat|dau say|hu hat|xanh nhat)\b/.test(folded) || (/\bxoai\b/.test(folded) && !/\bxoai dau\b/.test(folded));
+    // R18: "hạt bị hôi" ≠ hạt bí, "dâu sấy" là Tropical (LIVE_ONLY của rule-intent).
+    const liveOnlyMention = LIVE_ONLY.test(foldedPrep) || /\bxanh nhat\b/.test(folded) || (/\bxoai\b/.test(folded) && !/\bxoai dau\b/.test(folded));
     const mintBasket = (reply.order?.items || reply.pendingOrder?.items || []).some(item => /mint|tropical/i.test(String(item.code || item.sku || item.product || item.name || '')));
     // Vòng 12: khách nêu Tropical mà giỏ (mô hình) không có Tropical → báo giá Tropical, không dựng giỏ sai món.
     const tropicalNamed = !nonText && mentionsTropical(message.text);
@@ -4110,7 +4115,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     else if (photoOnly && createsBasket(reply)) reply = { ...renderChatbotReply({ template_id: 'PRODUCT_PHOTOS', ...(productHint(ruleProduct) ? { Product_N1: ruleProduct } : {}) }, templates, replyContext), pendingOrder: undefined, order: undefined };
     else if (!nonText && liveOnlyMention && createsBasket(reply) && !mintBasket) {
       // R15 (quyết định 4): hạt (điều/bí/sữa hạt/hũ hạt) → bạn phụ trách (STAFF_ONLY_PRODUCT), kể cả khách live.
-      const nutsId = /\b(?:hat dieu|hat bi|sua hat|hu hat)\b/.test(folded) && templates?.STAFF_ONLY_PRODUCT ? 'STAFF_ONLY_PRODUCT' : 'LIVE_ONLY_PRODUCT';
+      const nutsId = NUTS_ONLY.test(folded) && templates?.STAFF_ONLY_PRODUCT ? 'STAFF_ONLY_PRODUCT' : 'LIVE_ONLY_PRODUCT';
       const liveOnly = renderChatbotReply({ template_id: nutsId, values: { product: 'sản phẩm mình hỏi' } }, templates, replyContext);
       reply = { ...(liveOnly.templateId === nutsId ? liveOnly : renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, templates, replyContext)), attention: true, pendingOrder: undefined, order: undefined };
     }

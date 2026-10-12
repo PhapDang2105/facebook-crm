@@ -201,6 +201,20 @@ const pendingOrderRemindMs = 24 * 60 * 60 * 1000;
 // Đơn vừa chốt (ở hội thoại khác của cùng khách, hay đơn trùng tên) trong 14 ngày: không bám.
 const recentOrderMs = 14 * 24 * 60 * 60 * 1000;
 
+// R18 (chủ shop 12/10): câu bám đuổi cho khách thẻ Re-marketing (mẫu FOLLOW_UP_REMARKETING; chưa có trong cài đặt thì dùng câu này).
+const remarketingFallback = 'Dạ {title} lưu lần sau mua hàng là em áp dụng ưu đãi này cho {title} luôn ạ. Em cảm ơn {title} đã mua hàng nhà Nắng ạ';
+// Đã gửi câu Re-marketing trong 30 ngày: không gửi lại (các kịch bản 3 giờ / 12 giờ / 36 giờ cùng nhắm một khách).
+const remarketingRepeatMs = 30 * 24 * 60 * 60 * 1000;
+export function remarketingFollowUpTemplate(messageTemplates = {}) {
+  const stored = messageTemplates?.FOLLOW_UP_REMARKETING;
+  return stored === undefined ? remarketingFallback : String(stored || '').trim();
+}
+/** Ứng viên bám đuổi mang thẻ Re-marketing (ở hộp thư hay hội thoại được xét). */
+export function isRemarketingCandidate(candidate, labelIds = ['remarketing']) {
+  const ids = new Set(labelIds);
+  return [candidate?.inbox, candidate?.conversation].filter(Boolean).some(record => (Array.isArray(record.labels) ? record.labels : []).some(label => ids.has(label)));
+}
+
 // Thẻ khiếu nại / bảo hành / khách sỉ: không bám trong MỌI trường hợp (kể cả đang giữ giỏ).
 const hardSkipLabelIds = ['complaint', 'warranty', 'wholesale'];
 
@@ -553,6 +567,8 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
   const skipReasonLabelIds = [...new Set([...labelsForEvents(inboxLabels, ['handoff', 'complaint', 'warranty', 'wholesale']), ...defaultSkipLabelIds])];
   // Khiếu nại / Bảo hành / Khách sỉ: chặn cả lời nhắc giỏ.
   const hardReasonLabelIds = [...new Set([...labelsForEvents(inboxLabels, ['complaint', 'warranty', 'wholesale']), ...hardSkipLabelIds])];
+  // R18: thẻ Re-marketing (sự kiện 'remarketing') → câu bám đuổi riêng.
+  const remarketingLabelIds = [...new Set([...labelsForEvents(inboxLabels, ['remarketing']), 'remarketing'])];
   // R14 (…039804): hai kịch bản (bình luận 12h + hộp thư 3h) cùng nhắm MỘT hộp thư → 2 tin y hệt cùng phút (khóa sent
   // theo `kịch bản:page:psid`). Mỗi khách (page + psid) chỉ một tin trong một lượt và trong `followUpSpacingMs`.
   const touchedThisRun = new Set();
@@ -623,11 +639,23 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       // trong 24 giờ (bot vừa nhắc giỏ khi khách bấm giỏ Shop / bình luận, hay kịch bản hộp thư 3 giờ đã nhắc rồi kịch bản bình luận
       // 12 giờ nhắc lại) → không gửi lại y hệt.
       if (remind && remindAlreadySent(inboxMessages, remind, now)) { skip('duplicateRemind', candidate.conversation); continue; }
+      // R18 (chủ shop 12/10): khách thẻ Re-marketing (vào từ link ref / QR thẻ cảm ơn — khách đã mua, vừa nhận tin ưu đãi đơn
+      // sau) không nhận lời mời "còn phân vân loại nào" hay ưu đãi dùng thử: một câu FOLLOW_UP_REMARKETING (lưu ưu đãi cho lần
+      // sau + cảm ơn), một lần. Đang giữ giỏ thì vẫn nhắc giỏ. Mẫu tắt (rỗng) = không bám khách Re-marketing.
+      const remarketing = !remind && isRemarketingCandidate(candidate, remarketingLabelIds);
+      if (remarketing) {
+        const remarketingTemplate = remarketingFollowUpTemplate(settings.messageTemplates);
+        if (!remarketingTemplate || scenario.freeShipDays) { skip('remarketing', candidate.conversation); continue; }
+        const sentBefore = renderFollowUpMessage(remarketingTemplate, candidate.conversation, () => 0, { messages: inboxMessages });
+        if (remindAlreadySent(inboxMessages, sentBefore, now, remarketingRepeatMs)) { skip('remarketingSent', candidate.conversation); continue; }
+      }
       // Lời theo ngữ cảnh: chọn biến thể nói đúng dòng sản phẩm khách hỏi; lời kịch bản nói dòng khác
       // (khách hỏi yến mạch, kịch bản mời granola) thì không bám bằng câu lạc đề.
       const families = customerProductFamilies(store, candidate);
-      const text = renderFollowUpMessage(template, candidate.conversation, Math.random, { messages: candidate.inbox ? inboxMessages : messagesIn(store, candidate.conversation), families });
-      if (!remind && families.size) {
+      const text = remarketing
+        ? renderFollowUpMessage(remarketingFollowUpTemplate(settings.messageTemplates), candidate.conversation, Math.random, { messages: inboxMessages })
+        : renderFollowUpMessage(template, candidate.conversation, Math.random, { messages: candidate.inbox ? inboxMessages : messagesIn(store, candidate.conversation), families });
+      if (!remind && !remarketing && families.size) {
         const spoken = productFamiliesIn(text);
         if (spoken.size && ![...spoken].some(family => families.has(family))) { skip('productMismatch', candidate.conversation); continue; }
       }
@@ -695,7 +723,8 @@ async function runFollowUpsOnce({ readSettings, sendMessage, conversationInfo = 
       // Chỉ bám khách mới: tra Pancake/POS xem khách đã từng mua chưa (khách chỉ bình luận,
       // chưa có hộp thư thì không tra được). Tra lỗi thì để lượt sau, không gửi mù.
       // Nhắc giỏ đang giữ là chăm sóc đơn, không phải mời mua: khách quen cũng được nhắc, không tra.
-      if (conversationInfo && candidate.inbox && !remind) {
+      // Khách Re-marketing là khách đã mua: lời cảm ơn dành cho họ, không tra "khách quen" để bỏ qua.
+      if (conversationInfo && candidate.inbox && !remind && !remarketing) {
         let info;
         try {
           info = await conversationInfo(candidate.inbox.pageId, `${candidate.inbox.pageId}_${candidate.inbox.psid}`);

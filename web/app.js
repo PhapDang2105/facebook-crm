@@ -7839,7 +7839,7 @@ function chatbotTemplateLabel(id) {
     WAITING_STAFF: 'Xin lỗi khách đang chờ nhân viên', WEIGHT_EXPIRY: 'Trọng lượng và hạn dùng', WEIGHT_GAIN: 'Tăng cân', WHOLESALE_CTV_CONTACT: 'Khách sỉ / CTV xin Zalo', WHOLESALE_RECEIVED: 'Đã nhận Zalo khách sỉ',
     COMMENT_PUBLIC_FEEDBACK: 'Cảm ơn góp ý dưới bình luận', COMMENT_PUBLIC_REPEAT: 'Nhắc khách xem tin nhắn (bình luận lặp lại)', COMMENT_PUBLIC_SORRY: 'Xin lỗi dưới bình luận', COMMENT_PUBLIC_STAFF: 'Báo nhân viên sẽ nhắn (bình luận)',
     COMMENT_PUBLIC_THANKS: 'Cảm ơn dưới bình luận', COMMENT_STAFF_FOLLOWUP: 'Chuyển nhân viên đơn hàng (bình luận)',
-    FOLLOW_UP_COMMENT_REMIND: 'Bám đuổi: nhắc xem tin nhắn sau bình luận', FOLLOW_UP_INBOX_REMIND: 'Bám đuổi: nhắc khách hộp thư', FOLLOW_UP_TRIAL_FREESHIP: 'Bám đuổi: ưu đãi dùng thử miễn ship'
+    FOLLOW_UP_COMMENT_REMIND: 'Bám đuổi: nhắc xem tin nhắn sau bình luận', FOLLOW_UP_INBOX_REMIND: 'Bám đuổi: nhắc khách hộp thư', FOLLOW_UP_REMARKETING: 'Bám đuổi: khách Re-marketing (đã mua, vào từ link ref)',FOLLOW_UP_TRIAL_FREESHIP: 'Bám đuổi: ưu đãi dùng thử miễn ship'
   };
   return labels[id] || id.replace(/^PRICE_/, 'Bảng giá · ').replace(/^FOLLOW_UP_/, 'Bám đuổi · ').replaceAll('_', ' ').toLowerCase().replace(/^./, value => value.toUpperCase());
 }

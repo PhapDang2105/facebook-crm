@@ -79,6 +79,7 @@ function phonesIn(text) {
   return found;
 }
 
+const SYSTEM_NOTICE_HINT = /trả lời|phản hồi|replied|responding|replying/;
 const messageText = message => {
   if (!message || typeof message !== 'object') return '';
   // 12/10 (chủ shop): dòng hệ thống Facebook ("<tên> đã trả lời về một bài viết. Xem bài viết(link)", "… đã trả lời một
@@ -86,7 +87,8 @@ const messageText = message => {
   // về khi là tin Page (cờ `system`), khi là tin KHÁCH; dữ liệu cũ chưa có cờ thì nhận theo chữ.
   if (message.system === true) return '';
   const text = typeof message.text === 'string' ? message.text : '';
-  if (text && isPageSystemNoticeText(text)) return '';
+  // Lọc nhanh bằng includes trước (200.000 tin): chỉ tin có "trả lời" / "phản hồi" / "replied" / "responding" mới chạy biểu thức.
+  if (text && text.length <= 400 && SYSTEM_NOTICE_HINT.test(text) && isPageSystemNoticeText(text)) return '';
   if (text) return text;
   return message.type === 'document' && typeof message.name === 'string' ? message.name : '';
 };

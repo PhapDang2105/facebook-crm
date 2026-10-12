@@ -1983,9 +1983,11 @@ function campaignsAgo(value) {
   return timeSince(at).toLowerCase();
 }
 
+// 12/10 (chủ shop): danh sách chỉ hiện chiến dịch đang chạy của Meta nên bỏ nhãn "Đang chạy" và "Meta" — chỉ còn nhãn
+// cho trường hợp khác thường (Tạm dừng / Đã tắt, chiến dịch UTM không có chi phí).
 function campaignStatusChip(status) {
   const key = String(status || '').toUpperCase();
-  if (!key) return '';
+  if (!key || key === 'ACTIVE') return '';
   const label = key === 'ACTIVE' ? 'Đang chạy' : key.includes('PAUSED') ? 'Tạm dừng' : key === 'ARCHIVED' || key === 'DELETED' ? 'Đã tắt' : key;
   const tone = key === 'ACTIVE' ? 'is-on' : 'is-off';
   return `<span class="campaign-chip ${tone}">${escapeHtml(label)}</span>`;
@@ -2059,11 +2061,21 @@ function campaignsHeadHtml() {
   return sortableHeadHtml(campaignsColumns, campaignsSortKey, campaignsSortDir);
 }
 
+/** Nhãn nguồn dưới tên chiến dịch: chỉ chiến dịch UTM (không phải Meta) mới có. */
+function campaignSourceChip(source) {
+  return source === 'meta' ? '' : '<span class="campaign-chip is-source">UTM</span>';
+}
+
+/** Hàng nhãn dưới tên chiến dịch; không còn nhãn nào thì không dựng (khỏi chừa dòng trống). */
+function campaignChipsHtml(status, source) {
+  const chips = `${campaignStatusChip(status)}${campaignSourceChip(source)}`;
+  return chips ? `<span class="campaign-chips">${chips}</span>` : '';
+}
+
 function campaignRowHtml(campaign, averageRoas) {
-  const source = campaign.source === 'meta' ? 'Meta' : 'UTM';
   const tone = campaignRoasTone(campaign.roas, averageRoas);
   return `<tr data-campaign-id="${escapeHtml(campaign.id)}">
-    <td class="campaign-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong><span class="campaign-chips">${campaignStatusChip(campaign.status)}<span class="campaign-chip is-source">${source}</span></span></td>
+    <td class="campaign-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong>${campaignChipsHtml(campaign.status, campaign.source)}</td>
     <td class="is-num">${escapeHtml(campaignMoneyOrDash(campaign.dailyBudget))}</td>
     <td class="is-num">${escapeHtml(formatCustomerMoney(campaign.spend))}</td>
     <td class="is-num">${escapeHtml(campaignNumber(campaign.impressions))}</td>
@@ -2971,7 +2983,7 @@ function renderDashboardCampaigns(campaigns, active) {
   dashboardTopCampaigns.innerHTML = list.length ? `<div class="data-table"><table>
     <thead><tr><th>Chiến dịch</th><th class="is-num">Chi phí</th><th class="is-num">Đơn</th><th class="is-num">Doanh thu</th><th class="is-num">ROAS</th></tr></thead>
     <tbody>${list.map(campaign => `<tr data-dashboard-campaign="${escapeHtml(campaign.id || '')}" tabindex="0" title="Mở trong Quản lý chiến dịch">
-      <td class="data-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong><span class="campaign-chips"><span class="campaign-chip is-source">${campaign.source === 'meta' ? 'Meta' : 'UTM'}</span></span></td>
+      <td class="data-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong>${campaignChipsHtml('', campaign.source)}</td>
       <td class="is-num">${escapeHtml(statMoney(campaign.spend))}</td>
       <td class="is-num">${escapeHtml(statCount(campaign.orders))}</td>
       <td class="is-num">${escapeHtml(statMoney(campaign.revenue))}</td>
@@ -3356,7 +3368,7 @@ function renderReportCampaigns(data) {
   };
   const averageRoas = campaignTotals.roas;
   return reportAdsNoticeHtml(data) + reportTableHtml([
-    { key: 'name', label: 'Chiến dịch', cls: 'campaign-name', cell: row => `<strong title="${escapeHtml(row.name || '')}">${escapeHtml(row.name || 'Không tên')}</strong><span class="campaign-chips">${campaignStatusChip(row.status)}<span class="campaign-chip is-source">${row.source === 'meta' ? 'Meta' : 'UTM'}</span></span>` },
+    { key: 'name', label: 'Chiến dịch', cls: 'campaign-name', cell: row => `<strong title="${escapeHtml(row.name || '')}">${escapeHtml(row.name || 'Không tên')}</strong>${campaignChipsHtml(row.status, row.source)}` },
     { key: 'spend', label: 'Chi phí', num: true, cell: reportCell.money('spend'), total: t => escapeHtml(statMoney(t.spend)) },
     { key: 'orders', label: 'Đơn', num: true, cell: reportCell.count('orders'), total: t => escapeHtml(statCount(t.orders)) },
     { key: 'revenue', label: 'Doanh thu', num: true, cell: reportCell.money('revenue'), total: t => escapeHtml(statMoney(t.revenue)) },

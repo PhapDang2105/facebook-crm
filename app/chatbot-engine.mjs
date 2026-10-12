@@ -3928,10 +3928,39 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const custom = renderChatbotReply({ template_id: 'ORDER_CUSTOM_BASKET', values: { cart: `"${said}"`, missing: 'số điện thoại và địa chỉ nhận hàng' } }, templates, replyContext);
       if (custom.templateId === 'ORDER_CUSTOM_BASKET') reply = { ...custom, attention: true, pendingOrder: undefined, order: undefined };
     }
+    // R18 (inbox1 N6, cross 4.2, comment B6 — ca …2152070455858: giỏ Shop Xanh + Nâu trong hộp thư, bình luận "Cho chị 2 túi" → tin riêng
+    // "đơn gồm 2 Túi Xanh" và giỏ hộp thư bị thay; ca …9102204765853 "2xanh lá bao nhiêu ạ" chỉ hỏi giá mà giỏ hộp thư thành 2 Xanh):
+    // hộp thư ĐANG GIỮ giỏ có món (giỏ Shop / khách gõ) mà bình luận
+    // - chỉ nêu số túi (không nêu vị/món): không dựng giỏ mới — số túi bằng giỏ hộp thư (hay không số) → nhắc giỏ hộp thư; khác số mà
+    //   giỏ hộp thư một mã → đổi số lượng mã đó; nhiều mã → hỏi vị (giữ số túi);
+    // - là câu hỏi giá: trả lời câu hỏi, KHÔNG mang giỏ sang hộp thư.
+    const inboxHeldItems = conversation.source === 'comment' && inboxThread ? usablePendingOrder(inboxThread.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items || [] : [];
+    let inboxHeldHandled = false;
+    if (inboxHeldItems.length && !unknownBasketComment && !commentNeedsStaff && !commentOrderOp && (reply.pendingOrder?.items?.length || reply.order?.items?.length)) {
+      const namesItem = /\b(xanh|vang|nau|cacao|mint|tropical|hop|goi nho|yen mach|nghe|cam|combo 10)\b|\b10 ?goi\b/.test(folded) || Boolean(matchProduct(String(message.text || '')));
+      inboxHeldHandled = true;
+      const asksPrice = /\?/.test(String(message.text || '')) || /\b(gia|bn|bnh|bnhieu|bnhiu|bao nhieu|bao nhiu|nhieu tien|nhiu tien|bao tien|tong)\b/.test(foldVietnamese(maskPlaceGia(String(message.text || ''))));
+      if (asksPrice) reply = { ...reply, pendingOrder: undefined, order: undefined };
+      else if (!namesItem) {
+        const heldTotal = inboxHeldItems.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+        const count = bagCountInText(message.text);
+        const heldContext = { ...replyContext, pendingOrder: inboxThread.pendingOrder, messageText: '', recentCustomerTexts: [] };
+        if (!count || count === heldTotal) {
+          const held = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, heldContext);
+          if (held.templateId === 'ORDER_ADDRESS' && held.messages?.length) reply = { ...held, ...(reply.attention ? { attention: true } : {}), pendingOrder: undefined, order: undefined };
+        } else if (new Set(inboxHeldItems.map(item => String(item.code || ''))).size === 1) {
+          const changed = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: inboxHeldItems[0].product, No_A: String(count) }, templates, { ...heldContext, pendingOrder: { ...inboxThread.pendingOrder, items: [], key: '' } });
+          if (changed.templateId === 'ORDER_ADDRESS' && changed.pendingOrder?.items?.length) reply = { ...changed, ...(reply.attention ? { attention: true } : {}), order: undefined };
+        } else if (templates?.ASK_FLAVOR) {
+          const ask = renderChatbotReply({ template_id: 'ASK_FLAVOR' }, templates, replyContext);
+          if (ask.templateId === 'ASK_FLAVOR') reply = { ...ask, ...(reply.attention ? { attention: true } : {}), order: undefined, pendingOrder: undefined };
+        }
+      }
+    }
     // R13 (bình luận F5): dưới bài LIVE (nhiều sản phẩm) khách nêu số túi mà không nêu vị ("Lấy 2 túi", "chốt 2 túi nha") —
     // mô hình hay tự chọn một vị rồi dựng giỏ. Giỏ rỗng mà câu trả lời là bước đơn → hỏi vị (ASK_FLAVOR), giữ số túi khách
     // nêu (askedBagCount đi theo sang hộp thư) — không đoán vị.
-    const guessedFlavour = conversation.source === 'comment' && (isLivestreamPost(conversation) || replyContext.livestream) && !basket.length && !unknownBasketComment
+    const guessedFlavour = conversation.source === 'comment' && (isLivestreamPost(conversation) || replyContext.livestream) && !basket.length && !unknownBasketComment && !inboxHeldHandled
       && !commentNeedsStaff && (Boolean(reply.pendingOrder?.items?.length) || isOrderStep(reply.templateId)) && Boolean(templates?.ASK_FLAVOR)
       && !/\b(xanh|vang|nau|cacao|mint|tropical|hop|goi nho|yen mach|nghe)\b|\b10 ?goi\b/.test(folded) && !matchProduct(String(message.text || ''));
     // R14 (bình luận N1): "3 túi vàng, xanh" — số túi không khớp số vị (commentBasket không tự chia) → hỏi vị, giữ 3 túi.

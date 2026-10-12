@@ -159,6 +159,35 @@ export const fallbackTemplates = Object.freeze({
 // R14: giờ hành chính của bạn phụ trách (giờ Việt Nam): 8h–17h. Ngoài giờ: trước 8h → "sáng nay", sau 17h → "sáng mai".
 export const STAFF_HOURS = Object.freeze({ open: 8, close: 17 });
 export const STAFF_WAIT_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+// R18 (chủ shop 12/10, giữ mặc định FIX-R18): bot đã hứa "bạn phụ trách trả lời ngay trong ít phút" (STAFF_WAIT_OPEN) mà 15 phút
+// không có tin nhân viên → tin khách kế tiếp bot trả lời như thường (settings.staffWaitGraceMs ghi đè).
+export const STAFF_WAIT_GRACE_MS = 15 * 60 * 1000;
+// R18: Pancake tự tắt bot khi nhân viên nhắn; nhân viên im từng này giờ thì bot tự bật lại khi khách nhắn (settings.staffIdleResumeHours,
+// 0 = không tự bật).
+export const STAFF_IDLE_RESUME_HOURS = 2;
+// R18 (cross 1.1): khách khiếu nại / sốt ruột khi nhân viên đang xử lý mà chờ từng này (không tin nhân viên) → STAFF_WAIT_COMPLAINT
+// (settings.staffComplaintWaitMs ghi đè). Dọa hủy / mua chỗ khác → gửi ngay. Mỗi hội thoại tối đa 1 lần / STAFF_COMPLAINT_COOLDOWN_MS.
+export const STAFF_COMPLAINT_WAIT_MS = 2 * 60 * 60 * 1000;
+export const STAFF_COMPLAINT_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+export const staffIdleResumeHoursOf = (settings = {}) => {
+  const value = Number(settings?.staffIdleResumeHours);
+  return Number.isFinite(value) && value >= 0 ? value : STAFF_IDLE_RESUME_HOURS;
+};
+/**
+ * R18: bot do Pancake tạm dừng (nhân viên nhắn trong Pancake — pancake.mjs ghi botPausedAt) và nhân viên đã im ≥ `hours` giờ kể từ
+ * tin nhân viên cuối (hay mốc tạm dừng). Bật/tắt tay trong CRM sau mốc tạm dừng (botChangedBy.at) hay bot tắt vì chuyển CSKH
+ * (không có botPausedAt) → false.
+ */
+export function staffPauseExpired(conversation, messages = [], { hours, now = Date.now() } = {}) {
+  if (!conversation || conversation.botEnabled !== false) return false;
+  const pausedAt = Number(conversation.botPausedAt) || 0;
+  if (!pausedAt) return false;
+  if ((Number(conversation.botChangedBy?.at) || 0) >= pausedAt) return false;
+  const limitHours = staffIdleResumeHoursOf({ staffIdleResumeHours: hours });
+  if (!(limitHours > 0)) return false;
+  const lastStaffAt = (Array.isArray(messages) ? messages : []).reduce((latest, item) => (isHumanPageMessage(item) ? Math.max(latest, Number(item.createdAt) || 0) : latest), 0);
+  return now - Math.max(pausedAt, lastStaffAt) >= limitHours * 60 * 60 * 1000;
+}
 // R14 (quyết định 8): giỏ Facebook Shop chờ đơn POS 20 giây trước khi xin SĐT/địa chỉ (settings.shopOrderWaitMs ghi đè).
 export const SHOP_ORDER_WAIT_MS = 20000;
 export function staffWaitTemplate(now = Date.now()) {
@@ -1248,6 +1277,91 @@ async function staffIdleRecheck(conversationId, dependencies, idleMs) {
   return result;
 }
 
+// R18 (cross 1.1): lời than chờ lâu / giục ("Chị đang sốt ruột chờ", "Chả thấy giao", "đợi điện thoại từ sáng, không ai gọi") và
+// dọa hủy / mua chỗ khác ("Sáng mai không nhận được hàng là chị hủy đơn nhé", "Ko để mình đặt hàng bên khác") — chữ đã bỏ dấu.
+const COMPLAINT_WAIT_WORDS = /\b(?:sot ruot|(?:cho|doi) (?:hoai|mai|lau|tu sang|tu hom qua|ca ngay|dai co|dien thoai)|(?:cha|chua|chang|khong|ko|k|kg) thay (?:den |toi )?(?:giao|hang|ai|ship|shipper|don|goi)|(?:ship|shipper|buu ta) (?:khong|ko|k|kg|cha|chua) (?:giao|goi|den|toi)|(?:khong|ko|k|kg|cha) (?:co )?ai (?:goi|lien he|lh|tra loi|giao|nhan)|lau (?:qua|the|vay|z)|sao (?:lau|chua|im|van chua)|giao (?:cham|lau|khong thanh cong|ko thanh cong|that bai)|chua (?:nhan duoc|nhan dc|giao|toi|den)|that vong|buc minh|ghi nham|nham dia chi)\b/;
+const COMPLAINT_CANCEL_THREAT = /\b(?:huy don|huy nhe|huy nha|huy luon|huy di|huy giup|khong lay nua|ko lay nua|k lay nua|khong nhan nua|ko nhan nua|(?:mua|dat)(?: hang)? (?:noi|cho|ben|shop|o) khac|bom hang)\b/;
+/** R18: tin khách là khiếu nại / than chờ lâu ('wait') hay dọa hủy / mua chỗ khác ('threat'); không thì ''. */
+export function staffComplaintKind(text, keywords) {
+  const folded = foldVietnamese(String(text || '')).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!folded) return '';
+  // "mua/đặt chỗ khác" kể chuyện CŨ ("bữa mua ở chỗ khác ko ngon") không phải dọa bỏ shop.
+  if (COMPLAINT_CANCEL_THREAT.test(folded) && !/\b(?:bua|lan truoc|hom truoc|truoc day|da mua|tung mua|hoi truoc)\b/.test(folded)) return 'threat';
+  if (COMPLAINT_WAIT_WORDS.test(folded) || isComplaint({ text, keywords })) return 'wait';
+  return '';
+}
+
+/** R18: soạn STAFF_WAIT_COMPLAINT theo giờ (trong giờ: "sớm nhất có thể"; ngoài giờ: "từ 8h sáng mai/nay"). */
+function renderStaffComplaint(templates, context, now = Date.now()) {
+  const wait = staffWaitTemplate(now);
+  const values = wait.templateId === 'STAFF_WAIT_OPEN' ? { soon: '1' } : { when: wait.when };
+  const rendered = renderChatbotReply({ template_id: 'STAFF_WAIT_COMPLAINT', values }, withFallbackTemplates(templates), context);
+  return rendered.templateId === 'STAFF_WAIT_COMPLAINT' && rendered.messages?.length ? rendered : null;
+}
+
+/**
+ * R18 (cross 1.1): gửi MỘT câu xin lỗi + báo gấp (STAFF_WAIT_COMPLAINT) cho khách đang khiếu nại khi nhân viên đã nhận hội thoại
+ * (bot im vì "nhân viên đang xử lý" / Pancake tạm dừng bot). Không đổi botLastTemplateId / botLastReplyAt (nhân viên vẫn đang xử lý,
+ * các lượt sau bot vẫn im), chỉ ghi mốc staffComplaintAt (STAFF_COMPLAINT_COOLDOWN_MS), thẻ Cần người xử lý + ghi chú nhân viên.
+ */
+async function sendStaffComplaint({ conversation, settings, dependencies, said = '', reason = '' }) {
+  const { sendMessage, saveBotState } = dependencies;
+  const context = { customer: { gender: conversation.botGender || conversation.gender || '', name: conversation.name || '' } };
+  const reply = renderStaffComplaint(settings.messageTemplates, context);
+  if (!reply) return null;
+  if (settings.responseMode === 'automatic') for (const text of reply.messages) await sendMessage(conversation, { text });
+  await saveBotState(conversation.id, { staffComplaintAt: Date.now(), addLabelEvents: ['handoff'], ...(settings.responseMode === 'draft' ? { botDraft: reply.messages.join('\n\n') } : {}) }).catch(() => {});
+  await noteForStaff(dependencies, conversation, `Khách đang khiếu nại / chờ lâu (${reason}) mà chưa có nhân viên trả lời — bot đã xin lỗi và báo gấp. Tin khách: "${String(said).replace(/\s+/g, ' ').trim().slice(0, 200)}". Nhân viên nhắn khách ngay.`, reason);
+  console.log(`Khách khiếu nại khi nhân viên đang xử lý (${reason}): gửi STAFF_WAIT_COMPLAINT (${conversation.id})`);
+  return reply;
+}
+
+/**
+ * R18: lượt kiểm lại sau STAFF_COMPLAINT_WAIT_MS — khách than/khiếu nại khi nhân viên đang xử lý mà chưa tới hạn chờ. Từ sau tin khách
+ * đó có tin Page nào (nhân viên hay bot) → thôi; bot đã tắt tay / chuyển CSKH (không phải Pancake tạm dừng) → thôi.
+ */
+async function staffComplaintRecheck(conversationId, dependencies, since) {
+  const { getConversation, listMessages, readSettings } = dependencies;
+  const settings = await readSettings();
+  if (!settings?.enabled) return null;
+  const conversation = getConversation ? await getConversation(conversationId).catch(() => null) : null;
+  if (!conversation || conversation.source === 'comment') return null;
+  if (conversation.botEnabled === false && !(Number(conversation.botPausedAt) > 0 && (Number(conversation.botChangedBy?.at) || 0) < Number(conversation.botPausedAt))) return null;
+  if (Date.now() - (Number(conversation.staffComplaintAt) || 0) < STAFF_COMPLAINT_COOLDOWN_MS) return null;
+  const stored = await Promise.resolve(listMessages(conversationId)).catch(() => []);
+  const list = (Array.isArray(stored) ? stored : []).filter(item => !isPageSystemNotice(item));
+  if (list.some(item => item?.direction === 'outgoing' && (Number(item.createdAt) || 0) >= since)) return null;
+  const waiting = list.filter(item => item?.direction === 'incoming' && (Number(item.createdAt) || 0) >= since && (item.type || 'text') === 'text');
+  const said = waiting.map(item => String(item.text || '')).join('\n');
+  if (!staffComplaintKind(said, settings.complaintKeywords)) return null;
+  return sendStaffComplaint({ conversation, settings, dependencies, said, reason: 'khách chờ quá 2 giờ' });
+}
+
+/**
+ * R18 (cross 1.1): nhân viên đang xử lý (hay Pancake tạm dừng bot) mà khách khiếu nại / than chờ / dọa hủy. Đọc chuỗi tin khách từ
+ * sau tin Page cuối: dọa hủy (và tin Page cuối đã ≥ 15 phút) hay khách đã chờ ≥ staffComplaintWaitMs (2 giờ) → STAFF_WAIT_COMPLAINT
+ * ngay; chưa tới hạn → hẹn kiểm lại đúng lúc tới hạn (hẹn giờ trong bộ nhớ, như staff-idle). Trả câu đã gửi, hay null.
+ */
+async function maybeStaffComplaint({ conversation, messages, current, settings, dependencies }) {
+  if (conversation.source === 'comment' || (current?.type || 'text') !== 'text') return null;
+  if (Date.now() - (Number(conversation.staffComplaintAt) || 0) < STAFF_COMPLAINT_COOLDOWN_MS) return null;
+  const list = (Array.isArray(messages) ? messages : []).filter(item => !isPageSystemNotice(item));
+  const lastPage = list.findLastIndex(item => item?.direction === 'outgoing');
+  const lastPageAt = lastPage >= 0 ? Number(list[lastPage].createdAt) || 0 : 0;
+  const waiting = list.slice(lastPage + 1).filter(item => item?.direction === 'incoming' && (item.type || 'text') === 'text' && String(item.text || '').trim());
+  if (current && !waiting.some(item => (item.id && item.id === current.id) || item === current)) waiting.push(current);
+  const said = waiting.map(item => String(item.text || '')).join('\n');
+  const kind = staffComplaintKind(said, settings.complaintKeywords);
+  if (!kind) return null;
+  const since = Math.min(...waiting.map(item => Number(item.createdAt) || Date.now()));
+  const left = Number(settings.staffComplaintWaitMs ?? STAFF_COMPLAINT_WAIT_MS) - (Date.now() - since);
+  if ((kind === 'threat' && Date.now() - lastPageAt >= 15 * 60 * 1000) || left <= 0) {
+    return sendStaffComplaint({ conversation, settings, dependencies, said, reason: left <= 0 ? 'khách chờ quá 2 giờ' : 'dọa hủy / mua chỗ khác' });
+  }
+  scheduleStaffIdleRecheck(`${conversation.id}:complaint`, left, () => staffComplaintRecheck(conversation.id, dependencies, since));
+  return null;
+}
+
 // Tin hệ thống của Messenger về cuộc gọi ("Bạn đã bỏ lỡ cuộc gọi…") không phải lời khách.
 const callSystemMessage = /bỏ lỡ cuộc gọi|có thể gọi cho .* trong 7 ngày|đã gọi cho bạn|cuộc gọi (thoại|video) đã kết thúc|missed (a )?call/i;
 
@@ -1793,11 +1907,31 @@ async function answerChange(incomingChange, settings, results, dependencies) {
   // hàng, hay nhân viên vừa tắt bot. Every thread is answered unless staff
   // switched the bot off for it.
   const conversation = (getConversation ? await getConversation(change.conversation.id).catch(() => null) : null) || change.conversation;
+  // R18 (inbox2 N5, ca …731647 / …854299: nhân viên nhắn trong Pancake lúc 16:29 → bot tắt, khách nhắn 22:25 không ai trả lời tới
+  // trưa hôm sau): bot do PANCAKE tự tắt (botPausedAt, chưa ai bật/tắt tay sau đó) mà nhân viên im ≥ staffIdleResumeHours (mặc định
+  // 2 giờ) kể từ tin nhân viên cuối → khách nhắn tiếp thì bot tự bật lại và xử lý như thường (các chốt "nhân viên đang xử lý" phía
+  // dưới vẫn chạy). Bot tắt tay trong CRM hay do chuyển CSKH (không có botPausedAt) thì không tự bật.
+  if (conversation.botEnabled === false && change.message?.direction === 'incoming') {
+    const stored = await Promise.resolve(listMessages(conversation.id)).catch(() => []);
+    if (staffPauseExpired(conversation, stored, { hours: settings.staffIdleResumeHours })) {
+      console.log(`Bot tự bật lại: nhân viên im ≥ ${staffIdleResumeHoursOf(settings)} giờ sau khi Pancake tạm dừng bot (${conversation.id})`);
+      await saveBotState(conversation.id, { botEnabled: true, botPausedBy: '', botPausedAt: 0, botResumedAt: Date.now() }).catch(() => {});
+      conversation.botEnabled = true;
+    }
+  }
   if (conversation.botEnabled === false) {
     // Vòng 12 (B4 #15): bình luận có SĐT không được nằm hiện trên bài kể cả khi bot tắt cho luồng này (trước đây thoát
     // trước bước ẩn). Chỉ ẩn, không like/không trả lời.
     if (conversation.source === 'comment' && moderateComment && ['phone', 'all'].includes(settings.commentHide) && extractVietnamesePhone(String(change.message?.text || ''))) {
       await moderateComment(conversation, change.message, { like: false, hide: true }).catch(() => {});
+    }
+    // R18 (cross 1.1, ca …29195518906707502: Pancake tạm dừng bot, khách "Sáng mai không nhận được hàng là chị hủy đơn nhé" → nhân viên
+    // trả lời sau 22 giờ): bot do Pancake tạm dừng (chưa tới hạn tự bật) vẫn xin lỗi + báo gấp MỘT lần khi khách khiếu nại / dọa hủy.
+    const autoPaused = Number(conversation.botPausedAt) > 0 && (Number(conversation.botChangedBy?.at) || 0) < Number(conversation.botPausedAt);
+    if (autoPaused && conversation.source !== 'comment' && change.message?.direction === 'incoming' && !change.updated && !change.late) {
+      const stored = await Promise.resolve(listMessages(conversation.id)).catch(() => []);
+      const sent = await maybeStaffComplaint({ conversation, messages: stored, current: change.message, settings, dependencies }).catch(error => { console.warn(`Xin lỗi khách khiếu nại lỗi (${conversation.id}): ${error.message}`); return null; });
+      if (sent) results.push({ conversationId: conversation.id, mode: settings.responseMode, templateId: 'STAFF_WAIT_COMPLAINT', staffComplaint: true });
     }
     return;
   }
@@ -2119,6 +2253,16 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         results.push({ conversationId: conversation.id, skipped: 'nhân viên đang xử lý', ...(staffPublic ? { publicNotice: true } : {}) });
         return;
       }
+      // R18 (cross 1.1): khách khiếu nại / than chờ / dọa hủy mà nhân viên chưa trả lời → STAFF_WAIT_COMPLAINT (ngay hay sau 2 giờ chờ).
+      if (conversation.source !== 'comment' && message.type === 'text') {
+        const complained = await maybeStaffComplaint({ conversation, messages: recent, current: change.message, settings, dependencies }).catch(error => { console.warn(`Xin lỗi khách khiếu nại lỗi (${conversation.id}): ${error.message}`); return null; });
+        if (complained) {
+          trace.final = 'STAFF_WAIT_COMPLAINT';
+          trace.attention = true;
+          results.push({ conversationId: conversation.id, mode: settings.responseMode, templateId: 'STAFF_WAIT_COMPLAINT', staffComplaint: true });
+          return;
+        }
+      }
       // Hộp thư, không phải khiếu nại/bảo hành, khách vừa gửi tin đặt hàng: hẹn kiểm lại — nhân viên im 5 phút thì bot nhận đơn.
       if (conversation.source !== 'comment' && !(staffLabelled && staffRecently) && !staffIdleTakeover && message.type === 'text'
         && bundle.some(item => isOrderishText(item?.text) || commentBasket(String(item?.text || '')).length > 0)) {
@@ -2131,6 +2275,14 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // Bot vừa báo "nhân viên sẽ kiểm tra / nhắn lại" (ORDER_STATUS_CHECKING, CSKH_HANDOFF) dưới 24
     // giờ mà nhân viên chưa nhắn: khách nhắn tiếp → WAITING_STAFF đúng một lần, các tin sau im —
     // không bao giờ "chưa thấy đơn nào" / "em vừa gửi ở trên" (ca Hải Yến Trân → "Buôn bán kiểu gì vậy").
+    // R18 (inbox1 N1, inbox3 N4/V9, cross 1.2 — chủ shop 12/10 giữ mặc định): bot đã hứa "bạn phụ trách trả lời ngay trong ít phút"
+    // (STAFF_WAIT_OPEN, gửi trong giờ hành chính) mà staffWaitGraceMs (15 phút) không có tin nhân viên → lời hứa đã lỡ: tin khách kế
+    // tiếp bot trả lời như thường (+ thẻ Cần người xử lý), và chống lặp không ra câu khác thì báo lại STAFF_WAIT thay vì im 2 giờ.
+    const staffWaitAtMs = Number(conversation.staffWaitAt) || 0;
+    const staffWaitLapsed = conversation.source !== 'comment' && staffWaitAtMs > 0 && staffWaitTemplate(staffWaitAtMs).templateId === 'STAFF_WAIT_OPEN'
+      && Date.now() - staffWaitAtMs >= Number(settings.staffWaitGraceMs ?? STAFF_WAIT_GRACE_MS)
+      && !staffMessages.some(item => (Number(item.createdAt) || 0) >= staffWaitAtMs);
+    if (staffWaitLapsed) trace.staffWaitLapsed = true;
     const staffSinceBot = staffMessages.some(item => (Number(item.createdAt) || 0) >= (Number(conversation.botLastReplyAt) || 0));
     const waitingAge = Date.now() - (Number(conversation.botLastReplyAt) || 0);
     if (conversation.source !== 'comment' && !staffSinceBot && waitingAge < 24 * 60 * 60 * 1000 && !['sticker', 'ad'].includes(message.type)) {
@@ -2161,7 +2313,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       if (String(conversation.botLastTemplateId || '').startsWith('STAFF_WAIT_') && waitingAge < 30 * 60 * 1000 && change.message?.type === 'text'
         && !extractVietnamesePhone(String(change.message?.text || '')) && !change.message?.cart?.length
         && !/\d|\b(?:tui|bich|bit|hop|combo|xanh|vang|nau|cacao|gia|bao nhieu|bn|huy|dia chi|phuong|xa|quan|huyen|tinh|duong|thon|xom)\b/.test(staffWaitText)
-        && !newBusiness) {
+        && !newBusiness && !staffWaitLapsed) {
         await saveBotState(conversation.id, { addLabelEvents: ['handoff'], ...(change.message?.id || change.message?.mid ? { botHandledMessageId: String(change.message.id || change.message.mid) } : {}) }).catch(() => {});
         results.push({ conversationId: conversation.id, skipped: 'đang chờ bạn phụ trách trả lời' });
         return;
@@ -4368,7 +4520,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       }
       const staffWaitDue = !rescued && !canNudge && !answerAgain && !remindOrder && repeatsLast && !repeatsHandoff && substantive
         && !isComment && !nonText && !message.likeSticker && !cartReply && !courtesyRepeat
-        && Date.now() - (Number(conversation.staffWaitAt) || 0) >= STAFF_WAIT_COOLDOWN_MS;
+        && (Date.now() - (Number(conversation.staffWaitAt) || 0) >= STAFF_WAIT_COOLDOWN_MS || staffWaitLapsed);
       if (staffWaitDue) {
         const wait = staffWaitTemplate();
         const waitReply = renderChatbotReply({ template_id: wait.templateId, values: { when: wait.when } }, templates, replyContext);
@@ -5219,6 +5371,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // R14 (quyết định 4): lời chê/khiếu nại engine tự nhận ra (bình luận "không như quảng cáo", hộp thư "Dỡ") → thẻ Khiếu nại
     // dù từ khóa khiếu nại trong Cài đặt không có cụm đó.
     if (reply.complaint && !labelEvents.includes('complaint')) labelEvents.push('complaint');
+    // R18: lời hứa STAFF_WAIT_OPEN đã lỡ (15 phút không có nhân viên) — bot trả lời tiếp nhưng giữ thẻ Cần người xử lý.
+    if (staffWaitLapsed && !labelEvents.includes('handoff')) labelEvents.push('handoff');
     // Ưu đãi dùng thử: lưu bước (đã chọn túi, đã mời, từ chối, chuyển đơn thường) và
     // đóng ưu đãi khi đơn dùng thử đã tạo (không dùng lại được).
     // Vòng 11 (P5): bot hỏi vị mà khách đã nêu số túi ("gửi mình 2 túi nhé, <địa chỉ>"): giữ số túi trong giỏ chờ để
@@ -5343,6 +5497,20 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       // Thẻ được cộng thêm, không bao giờ xoá thẻ nhân viên đã gắn.
       ...(labelEvents.length ? { addLabelEvents: labelEvents } : {})
     });
+    // R18 (bình luận B1, inbox2 N6: 6/6 bình luận chê nhận "bạn phụ trách nhắn lại ngay" mà không ai nhắn, 2 khách còn bị bám đuổi
+    // chào hàng): luồng bình luận không mang thẻ (máy chủ bỏ thẻ của luồng bình luận) → chép thẻ Khiếu nại / Cần người xử lý / Bảo hành
+    // sang HỘP THƯ cùng khách (nhân viên thấy "Cần người xử lý", bám đuổi dừng theo thẻ) + ghi chú nội dung bình luận cho nhân viên.
+    if (isComment && conversation.pageId && conversation.psid) {
+      const inboxEvents = labelEvents.filter(event => ['handoff', 'complaint', 'warranty'].includes(event));
+      if (inboxEvents.length && (reply.complaint || reply.attention || reply.handoff)) {
+        const inboxId = `${conversation.pageId}:${conversation.psid}`;
+        await Promise.resolve(saveBotState(inboxId, { addLabelEvents: inboxEvents })).catch(() => {});
+        if (reply.complaint || reply.templateId === 'COMMENT_STAFF_FOLLOWUP') {
+          const commentSaid = String(message.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+          await noteForStaff(dependencies, inboxThread || { id: inboxId, pageId: conversation.pageId, psid: conversation.psid }, `Khách ${reply.complaint ? 'chê / khiếu nại' : 'cần người hỗ trợ'} dưới bình luận (bot đã hứa "bạn phụ trách nhắn lại"): "${commentSaid}". Nhân viên nhắn khách trong hộp thư này.`, reply.complaint ? 'khiếu nại dưới bình luận' : 'bình luận cần người');
+        }
+      }
+    }
     // Giỏ Shop chưa thấy đơn POS lúc trả lời: tra lại ở nền vài lần; thấy thì báo
     // khách đã nhận đơn (khỏi gửi lại SĐT/địa chỉ) và bỏ giỏ đang chờ.
     // So theo mẫu + mã giỏ, không so tham chiếu: khách giữ ưu đãi dùng thử nhận bản sao của cartReply (kèm thẻ).

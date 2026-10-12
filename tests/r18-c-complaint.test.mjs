@@ -86,3 +86,19 @@ test('bình luận B3 (…914120): "Nhìn thấy ngon o biết có đúng như t
   assert.notEqual(turn.result.templateId, 'COMMENT_PUBLIC_THANKS', JSON.stringify(turn.result));
   assert.ok(turn.sent.some(item => item.privateReply), JSON.stringify(turn.sent));
 });
+
+test('bình luận B1 (…791815): "Ăn ngon nhưng ít hạt hơn quảng cáo" → thẻ Khiếu nại + Cần người xử lý chép sang HỘP THƯ cùng khách + ghi chú nhân viên', async () => {
+  const sim = new Sim({ psid: 'r18c-791815' });
+  const box = sim.inbox();
+  const thread = sim.comment();
+  const notes = [];
+  const turn = await sim.send(thread, 'Ăn ngon nhưng ít hạt hơn quảng cáo', { llm: { template_id: 'CSKH_HANDOFF' }, extra: { addStaffNote: (conversation, note) => { notes.push({ id: conversation.id, note }); } } });
+  assert.ok(box.labels.includes('complaint'), JSON.stringify({ labels: box.labels, result: turn.result }));
+  assert.ok(box.labels.includes('handoff'));
+  assert.ok(notes.some(item => item.id === box.id && /ít hạt hơn quảng cáo/.test(item.note)), JSON.stringify(notes));
+  // Bình luận hỏi giá thường: không chép thẻ.
+  const sim2 = new Sim({ psid: 'r18c-791815b' });
+  const box2 = sim2.inbox();
+  await sim2.send(sim2.comment(), 'Giá sao shop', { llm: { template_id: 'GENERAL_INFO' } });
+  assert.deepEqual(box2.labels, []);
+});

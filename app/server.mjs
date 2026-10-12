@@ -1192,8 +1192,9 @@ async function handleQrLead(request, response, { code, staffScan }) {
   }
   const device = classifyUserAgent(request.headers['user-agent']);
   try {
-    const { lead, created } = await addQrLead({ code, phone: parsed.phone, name: parsed.name, platform: device.platform, browser: device.browser, test: staffScan });
-    console.log(`QR: khách ${created ? 'để lại' : 'để lại lần nữa'} SĐT ${maskPhone(lead.phone)} qua mã ${code}${staffScan ? ' (máy nhân viên, ghi là thử)' : ''}`);
+    const channel = ['messenger', 'zalo'].includes(fields.via) ? fields.via : (wantsJson ? '' : 'form');
+    const { lead, created } = await addQrLead({ code, phone: parsed.phone, name: parsed.name, platform: device.platform, browser: device.browser, channel, test: staffScan });
+    console.log(`QR: khách ${created ? 'để lại' : 'để lại lần nữa'} SĐT ${maskPhone(lead.phone)} qua mã ${code}${channel ? ` rồi mở ${channel}` : ''}${staffScan ? ' (máy nhân viên, ghi là thử)' : ''}`);
     // Báo các màn CRM đang mở (luồng SSE của hộp thư): thông báo + bảng Mã QR tự tải lại.
     publishMessagingEvent({ type: 'qr-lead', lead: { id: lead.id, name: lead.name, phone: lead.phone, test: lead.test, created } });
     const display = lead.phone.replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3');

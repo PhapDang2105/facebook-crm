@@ -19,7 +19,7 @@ window.fetch = async (...args) => {
 };
 
 const sidebarToggle = document.querySelector('#sidebar-toggle');
-const viewNames = ['dashboard', 'messages', 'campaigns', 'orders', 'customers', 'shipping', 'reports', 'settings'];
+const viewNames = ['dashboard', 'messages', 'campaigns', 'orders', 'customers', 'qr-leads', 'shipping', 'reports', 'settings'];
 const views = new Map(viewNames.map(name => [name, document.querySelector(`#${name}-view`)]));
 const navItems = [...document.querySelectorAll('.nav[data-view]')];
 const messageSearchInput = document.querySelector('#message-search-input');
@@ -1160,6 +1160,7 @@ function showView(name) {
     if (!sharedProducts.length) loadProducts().then(() => renderOrderData()).catch(() => {});
   }
   if (name === 'customers') loadCustomers();
+  if (name === 'qr-leads') loadQrLeads();
   if (name === 'campaigns') {
     loadCampaigns();
     loadCompetitors();
@@ -6478,8 +6479,8 @@ function handleMessagingEvent(event) {
   if (event.type === 'qr-lead') {
     const lead = event.lead || {};
     const who = [lead.name, String(lead.phone || '').replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3')].filter(Boolean).join(' · ');
-    showToast(`${lead.test ? '(Thử) ' : ''}Khách quét thẻ QR ${lead.created === false ? 'để lại số lần nữa' : 'để lại SĐT'}: ${who}. Xem ở Cài đặt → Mã QR.`, 'info', 8000, { notify: true });
-    if (typeof qrLeadState !== 'undefined' && !document.querySelector('[data-settings-panel="qr"]')?.classList.contains('hidden')) loadQrLeads();
+    showToast(`${lead.test ? '(Thử) ' : ''}Khách quét thẻ QR ${lead.created === false ? 'để lại số lần nữa' : 'để lại SĐT'}: ${who}. Xem ở mục Khách quét QR.`, 'info', 8000, { notify: true });
+    if (typeof qrLeadState !== 'undefined') loadQrLeads();
     return;
   }
   const conversation = event.conversation;
@@ -14496,7 +14497,24 @@ function renderQrMetrics(main, keys) {
 // ===== Khách để lại SĐT trên trang đệm (/api/qr/leads, app/qr-leads.mjs) =====
 // Khách mới với Page vào Messenger mà không nhắn thì Page không nhắn trước được: số điện thoại khách tự để lại
 // trên trang đệm là đường liên hệ. Dòng "thử" (máy nhân viên đã đăng nhập) không tính vào số liệu.
-const qrLeadState = { items: [], statuses: {}, leadForm: true };
+const qrLeadState = { items: [], statuses: {}, leadForm: true, filter: 'all', query: '' };
+const qrLeadChannelNames = { messenger: 'Messenger', zalo: 'Zalo', form: 'Chỉ để số' };
+
+/** Khách thật chưa ai liên hệ, chưa mua: số trên menu "Khách quét QR". */
+function qrLeadWaiting(lead) {
+  return !lead.test && lead.status === 'new' && !lead.purchasedAt;
+}
+
+function qrLeadVisible(lead) {
+  const filter = qrLeadState.filter;
+  if (filter === 'test' ? !lead.test : (lead.test && filter !== 'all')) return false;
+  if (filter === 'new' && !qrLeadWaiting(lead)) return false;
+  if (filter === 'bought' && !lead.purchasedAt) return false;
+  const query = qrLeadState.query.trim().toLowerCase();
+  if (!query) return true;
+  const digits = query.replace(/\D/g, '').replace(/^84/, '0');
+  return String(lead.name || '').toLowerCase().includes(query) || (digits.length >= 3 && String(lead.phone || '').includes(digits));
+}
 
 function qrLeadDayKey(at) {
   return new Date((Number(at) || 0) + 7 * 3_600_000).toISOString().slice(0, 10);
@@ -14517,12 +14535,19 @@ function renderQrLeads() {
   const count = document.querySelector('#qr-leads-count');
   const toggle = document.querySelector('#qr-lead-form-toggle');
   if (toggle) toggle.checked = qrLeadState.leadForm !== false;
+  const real = qrLeadState.items.filter(lead => !lead.test);
+  const waiting = real.filter(qrLeadWaiting).length;
+  if (count) count.textContent = real.length ? `${real.length} khách${waiting ? ` · ${waiting} chưa liên hệ` : ''}` : '';
+  const badge = document.querySelector('#qr-leads-nav-count');
+  if (badge) {
+    badge.textContent = waiting > 99 ? '99+' : String(waiting);
+    badge.hidden = !waiting;
+  }
+  document.querySelectorAll('#qr-leads-filter [data-qr-leads-filter]').forEach(button => button.classList.toggle('is-active', button.dataset.qrLeadsFilter === qrLeadState.filter));
   if (!list) return;
-  const items = qrLeadState.items;
-  const waiting = items.filter(lead => !lead.test && lead.status === 'new' && !lead.purchasedAt).length;
-  if (count) count.textContent = items.length ? `${items.length}${waiting ? ` · ${waiting} chưa liên hệ` : ''}` : '';
+  const items = qrLeadState.items.filter(qrLeadVisible);
   if (!items.length) {
-    list.innerHTML = `<p class="qr-leads-empty">${qrLeadState.leadForm === false ? 'Ô để lại SĐT đang tắt trên trang quét.' : 'Chưa có khách nào để lại số. Khách quét thẻ và để lại số sẽ hiện ở đây.'}</p>`;
+    list.innerHTML = `<p class="qr-leads-empty">${qrLeadState.items.length ? 'Không có khách nào khớp bộ lọc.' : qrLeadState.leadForm === false ? 'Ô số điện thoại đang tắt trên trang quét.' : 'Chưa có khách nào để lại số. Khách quét thẻ và nhập số sẽ hiện ở đây.'}</p>`;
     return;
   }
   const options = Object.entries(qrLeadState.statuses);
@@ -14537,12 +14562,12 @@ function renderQrLeads() {
       lead.test ? '<span class="qr-lead-tag is-test" title="Máy nhân viên đã đăng nhập CRM, không tính vào số liệu">Thử</span>' : ''
     ].join('');
     return `<tr data-qr-lead="${escapeHtml(lead.id)}"${lead.status === 'new' && !lead.purchasedAt && !lead.test ? ' class="is-new"' : ''}>
-      <td class="is-time">${formatQrShortTime(lead.lastAt || lead.createdAt)}<small>${escapeHtml(qrDeviceText(lead))}</small></td>
+      <td class="is-time">${formatQrShortTime(lead.lastAt || lead.createdAt)}<small>${escapeHtml([qrDeviceText(lead), qrLeadChannelNames[lead.channel] ? `→ ${qrLeadChannelNames[lead.channel]}` : ''].filter(Boolean).join(' '))}</small></td>
       <td class="is-who"><b>${escapeHtml(lead.name || 'Chưa để tên')}</b><span>${escapeHtml(qrLeadPhoneText(lead.phone))}</span>${tags ? `<span class="qr-lead-tags">${tags}</span>` : ''}</td>
       <td class="is-contact"><a class="qr-mini" href="tel:${phone}">Gọi</a><a class="qr-mini" href="https://zalo.me/${phone}" target="_blank" rel="noopener">Zalo</a><button type="button" class="qr-mini" data-qr-lead-copy="${phone}" title="Sao chép số">Chép số</button></td>
       <td><select class="qr-lead-status" data-qr-lead-status aria-label="Trạng thái">${options.map(([value, label]) => `<option value="${escapeHtml(value)}"${value === lead.status ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select>${lead.updatedBy ? `<small class="qr-lead-by">${escapeHtml(lead.updatedBy)} · ${formatQrShortTime(lead.updatedAt)}</small>` : ''}</td>
       <td><input class="qr-lead-note" data-qr-lead-note type="text" maxlength="500" value="${escapeHtml(lead.note || '')}" placeholder="Ghi chú cuộc gọi" aria-label="Ghi chú"></td>
-      <td class="is-actions"><button type="button" class="qr-mini is-danger" data-qr-lead-delete title="Xoá số này">Xoá</button></td>
+      <td class="is-actions"><button type="button" class="qr-mini is-danger qr-leads-manager" data-qr-lead-delete title="Xoá số này">Xoá</button></td>
     </tr>`;
   }).join('')}</tbody></table>`;
 }
@@ -14611,6 +14636,40 @@ document.querySelector('#qr-leads-list')?.addEventListener('click', async event 
     showToast(error.message || 'Chưa xoá được.', 'error');
   }
 });
+loadQrLeads();
+document.querySelector('#qr-leads-filter')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-qr-leads-filter]');
+  if (!button) return;
+  qrLeadState.filter = button.dataset.qrLeadsFilter;
+  renderQrLeads();
+});
+document.querySelector('#qr-leads-search')?.addEventListener('input', event => {
+  qrLeadState.query = event.target.value;
+  renderQrLeads();
+});
+document.querySelector('#qr-leads-refresh')?.addEventListener('click', () => loadQrLeads());
+// Tải CSV (Excel mở được, có BOM cho tiếng Việt): đúng các dòng đang lọc. Nút chỉ hiện với Quản trị (như tải khách hàng).
+document.querySelector('#qr-leads-export')?.addEventListener('click', () => {
+  const rows = qrLeadState.items.filter(qrLeadVisible);
+  if (!rows.length) return showToast('Không có dòng nào để tải.', 'warning');
+  const cell = value => {
+    const text = String(value ?? '');
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const head = ['Lúc để lại', 'Tên', 'Số điện thoại', 'Kênh', 'Máy', 'Trạng thái', 'Ghi chú', 'Đã mua', 'Số lần', 'Thử'];
+  const lines = rows.map(lead => [
+    formatQrTime(lead.createdAt), lead.name, lead.phone, qrLeadChannelNames[lead.channel] || '', qrDeviceText(lead),
+    qrLeadState.statuses[lead.status] || lead.status, lead.note, lead.purchasedAt ? formatQrTime(lead.purchasedAt) : '', lead.visits, lead.test ? 'Có' : ''
+  ].map(cell).join(','));
+  const blob = new Blob(['\ufeff' + [head.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `khach-quet-qr-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+});
 document.querySelector('#qr-lead-form-toggle')?.addEventListener('change', async event => {
   const leadForm = event.target.checked;
   try {
@@ -14619,7 +14678,7 @@ document.querySelector('#qr-lead-form-toggle')?.addEventListener('change', async
     }));
     qrLeadState.leadForm = saved.leadForm !== false;
     renderQrLeads();
-    showToast(qrLeadState.leadForm ? 'Đã bật ô để lại SĐT trên trang quét.' : 'Đã tắt ô để lại SĐT trên trang quét.', 'success');
+    showToast(qrLeadState.leadForm ? 'Đã bật: khách phải nhập SĐT trên trang quét.' : 'Đã tắt: trang quét không còn ô SĐT, khách vào thẳng Messenger.', 'success');
   } catch (error) {
     event.target.checked = !leadForm;
     showToast(error.message || 'Chưa lưu được.', 'error');

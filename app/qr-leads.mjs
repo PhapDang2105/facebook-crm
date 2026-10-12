@@ -47,6 +47,8 @@ function normalizeLead(value) {
     visits: Math.max(1, Math.round(Number(value.visits) || 1)),
     platform: text(value.platform, 20),
     browser: text(value.browser, 20),
+    // Kênh khách bấm sau khi nhập số (trang đệm 12/10: nút Messenger hay đường Zalo; 'form' = máy tắt JavaScript).
+    channel: ['messenger', 'zalo', 'form'].includes(value.channel) ? value.channel : '',
     test: value.test === true,
     status: Object.hasOwn(QR_LEAD_STATUSES, value.status) ? value.status : 'new',
     note: text(value.note, 500),
@@ -96,20 +98,22 @@ export function parseQrLeadInput({ phone, name } = {}) {
  * Lưu một lượt để lại SĐT. Cùng số trong 30 ngày (cùng loại thật/thử) → cập nhật dòng cũ: đếm lần, tên mới nếu có,
  * dòng đã đánh dấu "Sai số" quay về "Chưa liên hệ" (khách tự để lại lần nữa). Trả `{ lead, created }`.
  */
-export async function addQrLead({ code, phone, name = '', platform = '', browser = '', test = false, now = Date.now() }) {
+export async function addQrLead({ code, phone, name = '', platform = '', browser = '', channel = '', test = false, now = Date.now() }) {
   const parsed = parseQrLeadInput({ phone, name });
   if (parsed.error) throw new Error(parsed.error);
   return queueWrite(store => {
     const existing = [...store.leads].reverse().find(lead => lead.phone === parsed.phone && lead.test === Boolean(test) && now - lead.lastAt <= qrLeadMergeWindowMs);
     if (existing) {
+      // Bấm lại trong 2 phút (bấm hai lần, quay lại trang bấm tiếp) là cùng một lượt, không đếm thêm.
+      if (now - existing.lastAt > 2 * 60 * 1000) existing.visits += 1;
       existing.lastAt = now;
-      existing.visits += 1;
+      if (['messenger', 'zalo', 'form'].includes(channel)) existing.channel = channel;
       if (parsed.name) existing.name = parsed.name;
       if (code) existing.code = text(code, 40);
       if (existing.status === 'invalid') existing.status = 'new';
       return { lead: { ...existing }, created: false };
     }
-    const lead = normalizeLead({ id: randomUUID(), code, phone: parsed.phone, name: parsed.name, createdAt: now, lastAt: now, platform, browser, test: Boolean(test) });
+    const lead = normalizeLead({ id: randomUUID(), code, phone: parsed.phone, name: parsed.name, createdAt: now, lastAt: now, platform, browser, channel, test: Boolean(test) });
     store.leads.push(lead);
     return { lead: { ...lead }, created: true };
   });

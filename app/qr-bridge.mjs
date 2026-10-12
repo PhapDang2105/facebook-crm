@@ -220,22 +220,22 @@ const icons = {
 /**
  * Ô "để lại số điện thoại" trong phiếu ưu đãi (12/10): khách MỚI với Page vào Messenger mà không nhắn thì Page không
  * được nhắn trước, CRM cũng không biết khách là ai — số điện thoại là đường duy nhất để nhân viên gọi / nhắn Zalo.
- * Gửi bằng fetch (JSON) tới /q/<mã>/lead; máy tắt JavaScript thì form POST thường, máy chủ trả trang cảm ơn.
- * Ô `website` là bẫy máy tự điền (ẩn với người thật). Câu đồng ý ngay dưới nút: bấm gửi là đồng ý được liên hệ.
+ * 12/10 chủ shop: không có nút riêng — chỉ một nút "Lưu ưu đãi qua Messenger" (và đường Zalo), SĐT BẮT BUỘC: chưa có số
+ * đúng thì nút không mở Messenger, trang báo nhập số. Số đúng → gửi số bằng sendBeacon (form urlencoded tới /q/<mã>/lead,
+ * không chờ trả lời) rồi để thẻ <a> mở Messenger như cũ — lượt bấm thật của khách vẫn kích hoạt Universal Link / App Link.
+ * Ô `website` là bẫy máy tự điền (ẩn với người thật). Câu đồng ý ngay trên nút: bấm lưu là đồng ý được liên hệ.
  */
 function leadFormHtml(safeCode) {
   return `<form class="lead" id="lead" method="post" action="/q/${safeCode}/lead" novalidate>
-      <label class="lead-field" for="lead-phone">Số điện thoại</label>
+      <label class="lead-field" for="lead-phone">Số điện thoại <small>(để lưu ưu đãi)</small></label>
       <input class="lead-input" id="lead-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="09xx xxx xxx" required>
       <label class="lead-field" for="lead-name">Anh/Chị tên gì ạ? <small>(không bắt buộc)</small></label>
       <input class="lead-input" id="lead-name" name="name" type="text" autocomplete="name" maxlength="60" placeholder="Tên của Anh/Chị">
       <input class="lead-trap" name="website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
       <p class="lead-error" id="lead-error" role="alert" hidden></p>
-      <button class="btn lead-btn" id="lead-send" type="submit"><span class="label">Giữ ưu đãi<small>bằng số điện thoại</small></span>${icons.chevron}</button>
-      <p class="lead-consent">Bấm “Giữ ưu đãi” là Anh/Chị đồng ý để Nhà Nắng gọi hoặc nhắn Zalo số này về ưu đãi. Anh/Chị muốn ngừng, chỉ cần nói với em là em xoá số ngay.</p>
+      <p class="lead-consent">Bấm “Lưu ưu đãi” là Anh/Chị đồng ý để Nhà Nắng gọi hoặc nhắn Zalo số này về ưu đãi. Anh/Chị muốn ngừng, chỉ cần nói với em là em xoá số ngay.</p>
     </form>
-    <div class="lead-done" id="lead-done" role="status" hidden><b>Em đã giữ ưu đãi cho Anh/Chị rồi ạ 💛</b><span id="lead-done-text">Nhà Nắng sẽ gọi hoặc nhắn Zalo cho Anh/Chị sớm nhất.</span></div>
-    <div class="lead-or" aria-hidden="true"><span>hoặc</span></div>`;
+    <div class="lead-done" id="lead-done" role="status" hidden><b>Em đã lưu ưu đãi cho Anh/Chị rồi ạ 💛</b><span id="lead-done-text">Nhà Nắng sẽ gọi hoặc nhắn Zalo cho Anh/Chị sớm nhất.</span></div>`;
 }
 
 export function renderBridgePage({ code, destination, pageName, fallbackUrl = '', zaloUrl = '', classification = {}, pageUrl = '', iosVersion = 0, leadForm = false }) {
@@ -286,11 +286,9 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   // Messenger là kênh chính (CRM đo được lượt vào qua ref); Zalo là đường phụ cho khách không dùng Messenger.
   const zalo = `<a class="alt" id="zalo" href="${zaloHref}" rel="noopener" aria-label="Lưu ưu đãi qua Zalo">${icons.zalo}<span>Không dùng Messenger?</span><b>Lưu qua Zalo</b></a>`;
   const facebook = fallbackUrl ? ` hoặc nhắn qua trang Facebook <a href="${escapeHtml(fallbackUrl)}">${name}</a>` : '';
-  // Có ô SĐT: thanh bám đáy đưa khách tới ô SĐT (nút chính) thay vì Messenger, và chỉ hiện khi phiếu còn khuất hẳn.
+  // Có ô SĐT: thanh bám đáy (chỉ hiện khi phiếu còn khuất hẳn) chưa có số thì đưa khách tới ô SĐT, có số rồi mới mở Messenger.
   const lead = leadForm ? leadFormHtml(safeCode) : '';
-  const stickyButton = leadForm
-    ? `<a class="btn sticky-btn lead-btn" id="open-sticky" href="#lead"><span class="label">Giữ ưu đãi<small>cho đơn hàng sau</small></span>${icons.chevron}</a>`
-    : `<a class="btn sticky-btn" id="open-sticky" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi<small>qua Messenger</small></span>${icons.chevron}</a>`;
+  const stickyButton = `<a class="btn sticky-btn" id="open-sticky" href="${href}" rel="noopener" aria-label="Lưu ưu đãi qua Messenger"><span class="badge">${icons.messenger}</span><span class="label">Lưu ưu đãi<small>qua Messenger</small></span>${icons.chevron}</a>`;
   const leadStyle = leadForm ? `
   .lead { display: grid; gap: 6px; margin: 0; text-align: left; }
   .lead-field { color: #5b4a36; font-size: 14px; font-weight: 700; }
@@ -299,59 +297,73 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   .lead-input:focus { outline: none; border-color: #2e8b4a; box-shadow: 0 0 0 3px rgba(46,139,74,.18); }
   .lead-input[aria-invalid="true"] { border-color: #d0312d; }
   .lead-trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
-  .lead-btn { justify-content: center; padding-left: 16px; background: linear-gradient(110deg, #3f9d4f 0%, #2e7d3f 100%); box-shadow: 0 6px 16px -4px rgba(46,125,63,.5); border: 0; font: inherit; cursor: pointer; }
-  .lead-btn .label { text-align: center; }
-  .lead-btn[disabled] { opacity: .7; cursor: progress; }
   .lead-error { margin: 0; color: #c0392b; font-size: 14px; font-weight: 600; }
   .lead-error[hidden], .lead-done[hidden], .lead[hidden] { display: none; }
-  .lead-consent { margin: 2px 0 0; color: #9a8b74; font-size: 12px; line-height: 1.4; text-align: center; }
-  .lead-done { display: grid; gap: 4px; padding: 12px; background: #eef8ec; border: 1.5px solid #b9dfb0; border-radius: 12px; color: #2e5b33; font-size: 15px; line-height: 1.45; text-align: center; }
-  .lead-done b { font-size: 16px; }
-  .lead-or { display: flex; align-items: center; gap: 10px; margin: 12px 0 10px; color: #a0937d; font-size: 13px; }
-  .lead-or::before, .lead-or::after { content: ""; flex: 1; border-top: 1px dashed #e8b765; }` : '';
+  .lead-consent { margin: 0 0 10px; color: #9a8b74; font-size: 12px; line-height: 1.4; text-align: center; }
+  .lead-done { display: grid; gap: 4px; margin: 0 0 12px; padding: 12px; background: #eef8ec; border: 1.5px solid #b9dfb0; border-radius: 12px; color: #2e5b33; font-size: 15px; line-height: 1.45; text-align: center; }
+  .lead-done b { font-size: 16px; }` : '';
+  // Số hợp lệ = cùng luật máy chủ (toLocalPhoneLoose → isVietnamesePhone: đầu số di động VN), để không có ca trang
+  // cho qua mà máy chủ bỏ (khách tưởng đã lưu). Bấm Messenger/Zalo/thanh bám đáy: chưa có số đúng thì chặn, báo, đưa tới ô.
   const leadScript = leadForm ? `
   var form = document.getElementById('lead');
   var phoneInput = document.getElementById('lead-phone');
   var nameInput = document.getElementById('lead-name');
   var errorBox = document.getElementById('lead-error');
-  var sendButton = document.getElementById('lead-send');
   var done = document.getElementById('lead-done');
+  var leadUrl = form ? form.getAttribute('action') : '';
+  var savedPhone = '';
+  function localPhone(value) {
+    var raw = String(value || '').replace(/[\\s.\\-()]/g, '');
+    if (raw.indexOf('+84') === 0) raw = '0' + raw.slice(3);
+    else if (raw.indexOf('0084') === 0 && raw.length === 13) raw = '0' + raw.slice(4);
+    else if (raw.indexOf('84') === 0 && raw.length === 11) raw = '0' + raw.slice(2);
+    else if (/^[35789]\\d{8}$/.test(raw)) raw = '0' + raw;
+    return /^0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-46-9])\\d{7}$/.test(raw) ? raw : '';
+  }
   function fail(message) {
     errorBox.textContent = message;
     errorBox.hidden = false;
     phoneInput.setAttribute('aria-invalid', 'true');
-    sendButton.disabled = false;
+    try { phoneInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+    setTimeout(function () { try { phoneInput.focus({ preventScroll: true }); } catch (e) { phoneInput.focus(); } }, 300);
   }
-  function digits(value) { return String(value || '').replace(/[^0-9+]/g, ''); }
-  if (form) form.addEventListener('submit', function (event) {
-    if (!window.fetch || !window.JSON) return;
-    event.preventDefault();
+  function postLead(phone, via) {
+    var body = 'phone=' + encodeURIComponent(phone) + '&name=' + encodeURIComponent(nameInput.value) + '&website=' + encodeURIComponent(form.website.value) + '&via=' + via;
+    var blob = new Blob([body], { type: 'application/x-www-form-urlencoded' });
+    try { if (navigator.sendBeacon && navigator.sendBeacon(leadUrl, blob)) return; } catch (e) {}
+    try { fetch(leadUrl, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body }); } catch (e) {}
+  }
+  // true = cho thẻ <a> đi tiếp (đã có số); false = đã chặn và báo khách nhập số.
+  function requirePhone(event, via) {
+    if (savedPhone) return true;
+    var raw = phoneInput.value.trim();
+    var phone = localPhone(raw);
+    if (!phone) {
+      event.preventDefault();
+      fail(raw ? 'Số điện thoại chưa đúng, Anh/Chị kiểm tra lại giúp em (10 số, ví dụ 0912 345 678).' : 'Anh/Chị nhập số điện thoại để lưu ưu đãi giúp em nhé.');
+      return false;
+    }
+    savedPhone = phone;
+    postLead(phone, via);
     errorBox.hidden = true;
     phoneInput.removeAttribute('aria-invalid');
-    var phone = digits(phoneInput.value);
-    if (phone.length < 9) return fail('Anh/Chị nhập số điện thoại giúp em nhé (10 số, ví dụ 0912 345 678).');
-    sendButton.disabled = true;
-    fetch(form.getAttribute('action'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: phoneInput.value, name: nameInput.value, website: form.website.value })
-    }).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (data) {
-        if (!response.ok) return fail(data.error || 'Em chưa lưu được, Anh/Chị thử lại giúp em nhé.');
-        form.hidden = true;
-        if (data.phone) document.getElementById('lead-done-text').textContent = 'Nhà Nắng sẽ gọi hoặc nhắn Zalo số ' + data.phone + ' sớm nhất ạ.';
-        done.hidden = false;
-        if (sticky) sticky.hidden = true;
-        stickyOff = true;
-      });
-    }, function () { fail('Mạng đang chập chờn, Anh/Chị bấm lại giúp em nhé.'); });
-  });
-  var stickyLead = document.getElementById('open-sticky');
-  if (stickyLead) stickyLead.addEventListener('click', function (event) {
-    if (!form || form.hidden) return;
+    form.hidden = true;
+    document.getElementById('lead-done-text').textContent = 'Nhà Nắng sẽ gọi hoặc nhắn Zalo số ' + phone.replace(/^(\\d{4})(\\d{3})(\\d{3})$/, '$1 $2 $3') + ' sớm nhất ạ.';
+    done.hidden = false;
+    return true;
+  }
+  function guard(element, via) {
+    if (!element) return;
+    element.addEventListener('click', function (event) { if (requirePhone(event, via)) send(via); });
+  }
+  guard(open, 'messenger');
+  guard(document.getElementById('zalo'), 'zalo');
+  guard(document.getElementById('open-sticky'), 'messenger');
+  phoneInput.addEventListener('input', function () { if (!errorBox.hidden && localPhone(phoneInput.value)) { errorBox.hidden = true; phoneInput.removeAttribute('aria-invalid'); } });
+  // Enter trong ô: như bấm nút Messenger (có số thì lưu rồi mở Messenger).
+  if (form) form.addEventListener('submit', function (event) {
     event.preventDefault();
-    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(function () { try { phoneInput.focus({ preventScroll: true }); } catch (e) { phoneInput.focus(); } }, 350);
+    if (requirePhone(event, 'messenger')) { send('messenger'); location.href = open.getAttribute('href'); }
   });` : '';
   return `<!doctype html>
 <html lang="vi">
@@ -487,9 +499,9 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     element.addEventListener('touchstart', fire, { passive: true });
     element.addEventListener('click', fire);
   }
-  arm(open, 'messenger');
+${leadForm ? '' : `  arm(open, 'messenger');
   arm(document.getElementById('zalo'), 'zalo');
-${leadForm ? '' : `  arm(document.getElementById('open-sticky'), 'messenger');`}${iosHintScript}
+  arm(document.getElementById('open-sticky'), 'messenger');`}${iosHintScript}
   var sticky = document.getElementById('sticky');
   var stickyOff = false;${leadScript}
   ${leadForm ? `var stickyTarget = document.querySelector('.ticket');

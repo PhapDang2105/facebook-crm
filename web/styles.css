@@ -366,6 +366,15 @@ main {
 
 main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow: hidden; }
 
+/* Mục "Khách quét QR" (12/10): số khách chưa liên hệ ở cuối dòng menu. */
+.nav[data-view="qr-leads"] span { flex-basis: 32.634px; width: 32.634px; }
+.nav span img.nav-icon--qr-leads { width: 28.8px; height: 28.8px; }
+.nav[data-view="qr-leads"]:hover,
+.nav[data-view="qr-leads"].active { color: #2e7d3f; background: #eef8ec; border-left-color: #2e7d3f; }
+.nav-badge { min-width: 20px; margin-left: auto; padding: 1px 6px; color: #fff; background: #d0312d; border-radius: 999px; font-size: 11.5px; font-weight: 700; line-height: 17px; text-align: center; }
+.nav-badge[hidden] { display: none; }
+.sidebar-collapsed .nav { position: relative; }
+.sidebar-collapsed .nav-badge { position: absolute; top: 4px; right: 6px; min-width: 16px; padding: 0 4px; font-size: 10px; line-height: 15px; }
 .sidebar-collapsed .sidebar { width: 68.4px; }
 .sidebar-collapsed main { width: calc(100% - 68.4px); margin-left: 68.4px; }
 
@@ -3086,11 +3095,14 @@ tr:hover .customer-tel button { opacity: .75; }
 /* Khách để lại SĐT trên trang đệm (12/10) */
 .qr-metric.is-lead .qr-metric-icon { color: #2e7d3f; background: #eef8ec; border-radius: 14px; }
 .qr-metric.is-lead .qr-metric-icon .qr-icon { width: 30px; height: 30px; }
-.qr-leads { padding: 14px 0 6px; border: 1px solid #cfe6d4; border-radius: 14px; background: #fff; }
-.qr-leads-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 0 16px; }
-.qr-leads-head .qr-card-title small { margin-left: 8px; padding: 1px 8px; background: #eef8ec; color: #2e7d3f; border-radius: 999px; font-size: 12px; font-weight: 700; }
+#qr-leads-title small { margin-left: 10px; padding: 2px 10px; background: #eef8ec; color: #2e7d3f; border-radius: 999px; font-size: 13px; font-weight: 700; vertical-align: middle; }
+.qr-leads-card .customers-head-actions { flex-wrap: wrap; justify-content: flex-end; }
+.qr-leads-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; }
+.qr-leads-search { flex: 1 1 220px; max-width: 340px; min-height: 36px; padding: 6px 12px; border: 1px solid #d9dde3; border-radius: 9px; font: inherit; font-size: 14px; }
+.qr-leads-card .qr-leads-list { max-height: none; border: 1px solid var(--line-1); border-radius: 12px; }
+body.role-staff .qr-leads-manager { display: none !important; }
 .qr-leads-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 14px; font-weight: 600; cursor: pointer; }
-.qr-leads-note { margin: 4px 16px 10px; color: var(--text-2); font-size: 13.5px; }
+.qr-leads-note { margin: 0 0 12px; color: var(--text-2); font-size: 13.5px; }
 .qr-leads-list { max-height: 420px; overflow: auto; }
 .qr-leads-empty { margin: 0; padding: 14px 16px 10px; color: var(--text-2); font-size: 14px; }
 .qr-leads-table { width: 100%; border-collapse: collapse; font-size: 14.5px; }

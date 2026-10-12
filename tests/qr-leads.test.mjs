@@ -31,12 +31,15 @@ test('lưu khách để lại SĐT: cùng số trong 30 ngày gộp một dòng,
   const first = await addQrLead({ code: 'tmdt-01', phone: '0912345678', platform: 'ios', browser: 'safari', now });
   assert.equal(first.created, true);
   assert.equal(first.lead.status, 'new');
-  const again = await addQrLead({ code: 'tmdt-01', phone: '+84912345678', name: 'Chị Lan', now: now + 60_000 });
+  const doubleTap = await addQrLead({ code: 'tmdt-01', phone: '0912345678', channel: 'messenger', now: now + 30_000 });
+  assert.equal(doubleTap.lead.visits, 1, 'bấm lại trong 2 phút không đếm thêm lượt');
+  assert.equal(doubleTap.lead.channel, 'messenger');
+  const again = await addQrLead({ code: 'tmdt-01', phone: '+84912345678', name: 'Chị Lan', now: now + 180_000 });
   assert.equal(again.created, false, 'cùng số → cập nhật dòng cũ');
   assert.equal(again.lead.id, first.lead.id);
   assert.equal(again.lead.visits, 2);
   assert.equal(again.lead.name, 'Chị Lan');
-  const staff = await addQrLead({ code: 'tmdt-01', phone: '0912345678', test: true, now: now + 120_000 });
+  const staff = await addQrLead({ code: 'tmdt-01', phone: '0912345678', test: true, now: now + 190_000 });
   assert.equal(staff.created, true, 'máy nhân viên thử: dòng riêng, không gộp vào khách thật');
   assert.equal(staff.lead.test, true);
 
@@ -78,16 +81,21 @@ test('chặn gửi dồn: tối đa N lượt mỗi máy trong một giờ', () 
   assert.equal(limiter.allow('ip', 1100), true, 'hết cửa sổ thì gửi lại được');
 });
 
-test('trang đệm: có ô SĐT khi bật (form POST /q/<mã>/lead, bẫy máy, câu đồng ý), Messenger vẫn còn; tắt thì như cũ', () => {
+test('trang đệm: ô SĐT bắt buộc, chỉ một nút "Lưu ưu đãi qua Messenger" (không nút riêng), tắt thì như cũ', () => {
   const base = { code: 'tmdt-01', destination: 'https://m.me/1?ref=tmdt-01', pageName: 'Giọt Nắng', classification: { platform: 'ios', browser: 'safari', inApp: false } };
   const on = renderBridgePage({ ...base, leadForm: true });
   assert.match(on, /<form class="lead" id="lead" method="post" action="\/q\/tmdt-01\/lead"/);
   assert.match(on, /name="phone" type="tel"/);
   assert.match(on, /class="lead-trap" name="website"/);
-  assert.match(on, /đồng ý để Nhà Nắng gọi hoặc nhắn Zalo/);
-  assert.match(on, /id="open" href="https:\/\/m\.me\/1\?ref=tmdt-01"/, 'nút Messenger vẫn còn');
-  assert.match(on, /id="open-sticky" href="#lead"/, 'thanh bám đáy đưa tới ô SĐT');
-  assert.doesNotMatch(on, /arm\(document\.getElementById\('open-sticky'\), 'messenger'\)/, 'bấm thanh bám đáy không phải lượt mở Messenger');
+  assert.match(on, /Bấm “Lưu ưu đãi” là Anh\/Chị đồng ý để Nhà Nắng gọi hoặc nhắn Zalo/);
+  assert.doesNotMatch(on, /Giữ ưu đãi|lead-send|lead-or/, 'không còn nút xanh "Giữ ưu đãi" và chữ "hoặc"');
+  assert.equal((on.match(/Lưu ưu đãi<small>qua Messenger/g) || []).length, 2, 'nút trong phiếu + thanh bám đáy');
+  assert.match(on, /id="open" href="https:\/\/m\.me\/1\?ref=tmdt-01"/);
+  assert.match(on, /id="open-sticky" href="https:\/\/m\.me\/1\?ref=tmdt-01"/);
+  // Lượt mở Messenger chỉ đếm khi đã có số (guard), không đếm ngay lúc chạm như trang cũ.
+  assert.doesNotMatch(on, /arm\(open, 'messenger'\)/);
+  assert.match(on, /guard\(open, 'messenger'\)/);
+  assert.match(on, /guard\(document\.getElementById\('zalo'\), 'zalo'\)/);
   new Function(on.match(/<script>([\s\S]*)<\/script>/)[1]);
 
   const off = renderBridgePage(base);
@@ -184,7 +192,8 @@ test('HTTP: trang quét có ô SĐT, khách gửi số → bảng nhân viên th
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { saved: true, phone: '0908 527 342', message: 'Nhà Nắng sẽ gọi hoặc nhắn Zalo số 0908 527 342 sớm nhất ạ.' });
 
-  const form = await postLead({ phone: '+84 912 000 333', name: 'Bác Ba' }, { json: false });
+  // Trang đệm gửi số bằng sendBeacon dạng form (urlencoded) kèm kênh khách bấm.
+  const form = await postLead({ phone: '+84 912 000 333', name: 'Bác Ba', via: 'zalo' }, { json: false });
   assert.equal(form.status, 200);
   assert.match(form.headers.get('content-type'), /text\/html/);
   assert.match(await form.text(), /Em đã giữ ưu đãi cho Anh\/Chị/);
@@ -194,6 +203,7 @@ test('HTTP: trang quét có ô SĐT, khách gửi số → bảng nhân viên th
   const lead = list.items.find(item => item.phone === '0908527342');
   assert.deepEqual([lead.name, lead.platform, lead.browser, lead.code, lead.test], ['Chị Thử', 'ios', 'safari', 'tmdt-01', false]);
   assert.ok(lead.purchasedAt > 0, 'có đơn cùng số đặt sau → Đã mua');
+  assert.equal(list.items.find(item => item.phone === '0912000333').channel, 'zalo');
   assert.equal(list.statuses.called, 'Đã gọi');
 
   const patched = await fetch(`${baseUrl}/api/qr/leads/${lead.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'called', note: 'Hẹn 17h' }) });

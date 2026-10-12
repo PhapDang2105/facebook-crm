@@ -76,7 +76,9 @@ const COMMENT_DISLIKE_CORE = /\b(?:khong|ko|k|kg|hok|hong|hem|hk|cha|chang|chua)
 // R14 (quyết định 4): thêm lời chê quảng cáo ("Không như quảng cáo", "không đúng với quoảng cáo", "mở ra toàn yến mạch",
 // "khác hình" — AD_MISMATCH_COMPLAINT dùng chung với isComplaint); bỏ câu chê hàng CHỖ KHÁC ("mua ở chỗ khác ko ngon").
 // ("Dở"/"Dỡ" đứng riêng chỉ nhận được trên chữ còn dấu → isComplaint / shortBadTaste, engine đã gọi cho bình luận.)
-export const COMMENT_DISLIKE = new RegExp(`^(?!.*(?:${OTHER_SELLER.source})).*?(?:${COMMENT_DISLIKE_CORE.source}|${AD_MISMATCH_COMPLAINT.source})`);
+// R18 (bình luận B3, ca …459478 "Có ngọt quá k b" — câu hỏi trước khi mua): dạng hỏi "có … không (bạn/shop)" không phải lời chê.
+const COMMENT_DISLIKE_QUESTION = /(?:.*\s)?co\b.*\b(?:k|ko|khong|kg|hong|hok|khum|kh)(?: (?:b|ban|shop|sop|a|e|em|ad|ha|vay|nhi|c|chi))*$/;
+export const COMMENT_DISLIKE = new RegExp(`^(?!.*(?:${OTHER_SELLER.source}))(?!${COMMENT_DISLIKE_QUESTION.source}).*?(?:${COMMENT_DISLIKE_CORE.source}|${AD_MISMATCH_COMPLAINT.source})`);
 // R15 (comments A3, ca …076080 "Bán mà nói nhỏ xíu sao nghe"): thêm "nói nhỏ/bé xíu/quá/vậy/thế", "nhỏ xíu … nghe",
 // "sao/không nghe được/rõ/gì".
 export const LIVE_FEEDBACK = /\b(?:noi (?:nho|be) (?:xiu|qua|vay|the|lam)|nho xiu .{0,20}\bnghe|(?:sao|khong|ko|k) nghe (?:duoc|dc|ro|gi)|noi (?:cha|khong|ko|k) nghe|(?:cha|khong|ko|k) nghe (?:gi|ro|duoc|dc|thay)|nghe (?:khong|ko|k|cha) (?:ro|duoc|dc|thay)|tieng (?:nho|be|re|vang|on)|(?:nho|be) tieng|noi nhanh|doc rap|nhu (?:doc )?rap|lag|giat|mat tieng|re re)\b|\b(?:cha|khong|ko|k|kg|hong) thay (?:gi|gj|j|ji|hinh|tieng)(?: (?:het|ca|luon|het a|het tron))?$/;

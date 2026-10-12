@@ -1388,6 +1388,10 @@ export function readMergeSplitReply(text) {
     .replace(/(?: (?:a|ah|ak|nha|nhe|nhen|em|e|shop|sh|c|chi|nhe em|em a|nha em|nhe shop|nha shop))+$/, '');
   if (/^(?:da )?(?:(?:the|vay|vay thi|the thi) )?(?:thoi|thoi khoi|khong can|ko can|k can|kh can|thoi khong can(?: nua)?|thoi khong lay(?: nua)?|khong lay nua|thoi de sau)$/.test(whole)) return 'decline';
   if (/^(?:(?:chi|c|em|e|minh|mk|a|anh) )?(?:chi )?(?:(?:mua|dat|lay|len|lam) )?(?:chi )?(?:1|mot) don(?: (?:thoi|duy nhat|a|nha|nhe|thoi a|thoi nha|thoi nhe))*$/.test(whole)) return 'one';
+  // R18 (inbox4 N1, ca …15103300 "Đơn kia lấy rồi / Ăn rồi / Mua thêm" — đơn cũ đã giao): đơn cũ đã nhận/lấy/ăn rồi, hay "mua/đặt/
+  // lấy thêm" trong câu dài hơn → đơn MỚI (tách). Có chữ gộp/ghép/chung/"vào đơn", phủ định hay câu hỏi thì không.
+  if (!/\b(?:gop|ghep|chung|vao don|vo don|khong|ko|kg|k|chua|dung|khoi|hay|sao)\b/.test(whole)
+    && /\bdon (?:kia|cu|truoc|do|hom truoc|lan truoc)(?: (?:da|minh|chi|c|em|e|nha))? (?:lay|nhan|an|giao|xong|het)(?: (?:roi|r|rui|xong|het))?\b|\b(?:mua|dat|lay) them\b/.test(whole)) return 'split';
   const tokens = raw.replace(/[,;:.!…~"'()\-–]+/g, ' ').split(/\s+/).filter(Boolean);
   if (!tokens.length || tokens.length > 10) return '';
   let yesSeen = false;
@@ -3452,7 +3456,8 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // R16 (inbox4 H4, ca …473537 "Cho mình giá của từng loại", "Đồng giá bằng nhau hả bạn?"): mô hình chọn GENERAL_INFO cho câu hỏi
     // về CÁC loại / từng loại / đồng giá → giữ bảng 3 vị (như cờ listAll của luật), không thay bằng bảng Túi Xanh.
     // ("Hồ Tùng Mậu" trong địa chỉ không tính; tin có SĐT không tính.)
-    const listAllText = !nonText && !phoneInText && /(?<!\bho )\b(?:tung|moi|cac|tat ca(?: cac)?|may|nhung) (?:loai|vi|mau)\b|\bdong gia\b|\bbang nhau\b|\bgia (?:co )?khac\b/.test(folded);
+    // R18 (inbox4 N1, ca …86621283 "Có một loại hay nhiều loại ạ"): "một / nhiều loại" cũng là hỏi danh sách vị.
+    const listAllText = !nonText && !phoneInText && /(?<!\bho )\b(?:tung|moi|cac|tat ca(?: cac)?|may|nhung|nhieu|mot) (?:loai|vi|mau)\b|\bdong gia\b|\bbang nhau\b|\bgia (?:co )?khac\b/.test(folded);
     const listAll = (reply === ruleReply && Boolean(ruled?.value?.listAll)) || (reply.templateId === 'GENERAL_INFO' && listAllText);
     // R13: tin có phải HỎI GIÁ không (chữ hỏi giá, tin cụt ".", "ib", hay luật báo giá đã khớp) — điều kiện của ASK_TWO_BAGS.
     const priceLikeText = !nonText && (terse || asksPriceText(message.text) || /^(?:\.+|…|\?+|ib|inbox|bn)$/.test(folded) || /PRICE|DOTS|TERSE/.test(String(ruled?.rule || '')));
@@ -3511,12 +3516,30 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const missingGift = /\b(?:qua|qua tang|tang|quat|bat|muong|gao dua|chen)\b.{0,40}\b(?:khong thay|chua thay|k thay|ko thay|kg thay|kh thay|khong co gi|thieu|dau roi|co thay gi dau|chang thay)\b/.test(plainText)
         || /\b(?:quat|qua|bat|muong)\b(?: \S+){0,2} dau\b(?! (?:la|nua))/.test(plainText);
       const wrongDelivery = /\bgiao (?:sai|nham|lon)\b|\bgui (?:sai|nham|lon)\b|\bgiao (?:den|toi|ve) tan (?!nha|noi|tay|cua)\S/.test(plainText)
-        || /\bdat\b.{0,25}\bgiao\b.{0,20}\b(?:lon|khac|sai|nham)\b/.test(plainText);
+        || /\bdat\b.{0,25}\bgiao\b.{0,20}\b(?:lon|khac|sai|nham)\b/.test(plainText)
+        // R18 (inbox4 N3, ca …65000235 "mình đặt 1 vàng 1 nâu mà giao 1 vàng 1 xanh"): "đặt/mua X mà giao/gửi/nhận Y".
+        || /\b(?:dat|mua|order|chot)\b.{1,30}\bma (?:giao|gui|ship|nhan(?: duoc| dc)?|ve)\b.{0,30}\b(?:xanh|vang|nau|cacao|tropical|tui|goi|bich|hop|\d)\b/.test(plainText);
+      // R18 (inbox2 N8, ca …978260 "Chị không nhận đx hàng em nhé!" — có đơn, thẻ khiếu nại): khách báo không nhận / không lấy
+      // hàng nữa / trả hàng → CSKH (tắt bot, thẻ Khiếu nại, dừng bám đuổi), không "đang thúc vận chuyển".
+      const refusesDelivery = !/\?/.test(String(message.text || '')) && !/\b(?:neu|lieu|co duoc|duoc khong)\b/.test(plainText)
+        && /\b(?:khong|ko|k|kg|hong|kh) (?:nhan|lay)(?: (?:duoc|dc|dx))? (?:hang|don)(?: (?:nua|dau|nay|do))?\b|\b(?:muon|xin|cho|se|minh|chi|em|e|c|toi|a|anh) (?:tra|hoan) (?:lai )?hang\b|\b(?:tra lai|hoan lai) hang\b/.test(plainText)
+        && !/\b(?:doi tra|chinh sach|duoc (?:doi|tra))\b/.test(plainText);
+      // R18 (inbox3 N4, ca …7076876 "xoài sấy có những hạt trắng… là do mốc à shop"; R2 ca …42952406 "sợ hạt bị hôi bữa mua cũng bị
+      // hôi"): khách báo hàng mốc / hôi / có mùi lạ / hư / có sâu mọt mà mình ĐANG thấy hay đã gặp (không phải hỏi trước khi mua
+      // "để lâu có bị mốc không") → CSKH, không trả lời kiến thức sản phẩm.
+      const defectWord = /\b(?:moc|bi hoi|hoi dau|hoi qua|co mui (?:hoi|la|kho chiu|oi|chua)|mui (?:la|hoi|oi)|bi oi|oi thiu|bi hu|bi am|am moc|bi chua|con (?:trung|sau|mot|kien)|bi (?:sau|mot|kien)|di vat)\b/.test(plainText);
+      const defectSeen = /\b(?:dang thay|thay co|nhan|mo ra|mo tui|bua mua|lan truoc|hom truoc|da mua|mua ve|an thay|cung bi|la do|co phai|bi roi)\b/.test(plainText);
+      const defectHypothetical = /\b(?:co bi|co de bi|de lau|bao lau|se bi|lieu|neu|tranh bi|khoi bi|khong bi|ko bi|k bi)\b/.test(plainText);
+      const defect = defectWord && !mentionsOtherSeller(message.text) && (defectSeen || (boughtBefore && !defectHypothetical)) && !(defectHypothetical && !defectSeen);
       const recentShipped = /giao thành công|đã giao|da giao|đang giao|đã gửi|hoàn thành|delivered|completed/i.test(String(recentOrder?.pos?.status || recentOrder?.status || ''))
         || Boolean(recentOrder?.shipment && shipmentStage(recentOrder.shipment))
         || (Array.isArray(conversation.labels) && conversation.labels.some(label => ['delivered', 'shipment-sent'].includes(label)));
-      const severe = boughtBefore && !asksForHuman && (wrongMoney || wrongDelivery || (missingGift && (receiptWords || recentShipped)))
-        ? (wrongMoney ? 'shipper thu sai tiền' : wrongDelivery ? 'giao nhầm' : 'thiếu quà') : '';
+      // R18 (inbox4 N3): mô hình chọn ORDER_WRONG ("nhắn loại đúng để em sửa đơn") cho đơn đã quá 60 phút / đã gửi đi → khiếu nại
+      // giao nhầm, CSKH (sửa đơn chỉ khi đơn ≤ 60 phút, chưa có vận đơn).
+      const wrongOrderLate = reply.templateId === 'ORDER_WRONG' && Boolean(recentOrder) && (recentShipped || Date.now() - (Number(recentOrder.createdAt) || 0) > 60 * 60 * 1000);
+      const severe = (boughtBefore && !asksForHuman && (wrongMoney || wrongDelivery || refusesDelivery || wrongOrderLate || (missingGift && (receiptWords || recentShipped))))
+        || (defect && !asksForHuman)
+        ? (wrongMoney ? 'shipper thu sai tiền' : wrongDelivery || wrongOrderLate ? 'giao nhầm' : refusesDelivery ? 'khách không nhận hàng' : defect ? 'hàng lỗi (mốc/hôi/hư)' : 'thiếu quà') : '';
       // (6) Khách báo / đề nghị chuyển khoản ("Chị ck rồi nhé", "Minh ck trước", "cho xin stk") hay bot sắp gửi số tài khoản →
       // CSKH (tắt bot + thẻ), không tự gửi số tài khoản. Ảnh bill vẫn theo nhánh PAYMENT_RECEIVED_CHECK (thẻ cần người).
       const transfer = paidText || reply.templateId === 'BANK_TRANSFER'
@@ -4282,7 +4305,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       }
       // R16 (bình luận B1, ca …486243 "Bên em có mấy loại" khi bảng 3 vị vừa gửi): câu hỏi chung "mấy/những loại" trùng bảng vị
       // vừa gửi mà hỏi lại mô hình không ra câu khác → nhắc "em đã gửi ở tin ngay trên" (REPLY_ALREADY_SENT), không chuyển người.
-      if (!rescued && repeatsLast && !repeatsHandoff && !isComment && reply.templateId === 'GENERAL_INFO' && /\b(?:may|nhung|cac|bao nhieu) (?:loai|vi|mau)\b/.test(folded)
+      if (!rescued && repeatsLast && !repeatsHandoff && !isComment && reply.templateId === 'GENERAL_INFO' && /\b(?:may|nhung|cac|bao nhieu|nhieu|mot) (?:loai|vi|mau)\b/.test(folded)
         && !['REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO'].includes(conversation.botLastTemplateId) && templates?.REPLY_ALREADY_SENT) {
         const nudged = renderChatbotReply({ template_id: 'REPLY_ALREADY_SENT' }, templates, replyContext);
         if (nudged.templateId === 'REPLY_ALREADY_SENT' && !nudged.handoff) rescued = { ...nudged, pendingOrder: reply.pendingOrder };
@@ -4309,6 +4332,14 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           const upsell = upsellThreeLine();
           if (upsell && !lines.some(text => text.includes('lấy thêm 1 túi'))) lines.push(upsell);
           if (lines.length) alternative = { templateId: 'GIFT_POLICY', variant: 'basket-repeat', messages: lines, images: [], parts: undefined, handoff: false };
+        } else if (String(reply.templateId || '').startsWith('GIFT_POLICY') && reply.templateId !== 'GIFT_POLICY_UPSELL3' && !hasOrder && !replyContext.promoBowl && templates?.GIFT_POLICY_UPSELL3) {
+          // R18 (inbox4 N1, ca …56145677 "C mua 2 túi dc tặng bộ bát ko??" ngay sau bảng quà live): không giữ giỏ → quà của combo 2
+          // (khách live: Quạt) + bộ bát + muỗng từ 3 túi (GIFT_POLICY_UPSELL3, giá 3 Túi Xanh), không hẹn "8h sáng mai".
+          const xanh = findProductBySku('GRA-XANH-Z450');
+          const priced3 = xanh ? priceBasket([{ sku: xanh.sku, product: xanh.name, quantity: 3 }], { livestream: replyContext.livestream === true }) : null;
+          const total3 = priced3?.priceable ? `${Number(priced3.total).toLocaleString('vi-VN')}đ` : '';
+          const upsell = total3 ? renderChatbotReply({ template_id: 'GIFT_POLICY_UPSELL3', values: { total3 } }, templates, replyContext) : null;
+          if (upsell?.templateId === 'GIFT_POLICY_UPSELL3' && !upsell.handoff && upsell.messages?.length) alternative = upsell;
         } else if (priceFamily.has(reply.templateId) && basketHeld && heldItems.length) {
           const held = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, { ...replyContext, lastTemplateId: 'ORDER_ADDRESS' });
           if (held.remind) alternative = { templateId: 'ORDER_ADDRESS_REMIND', messages: [held.remind], images: [], parts: undefined, handoff: false };
@@ -4867,7 +4898,9 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const praiseWords = /\b(ngon|tuyet|tuyet voi|thich|thik|dinh|hop ly|ok lam|qua ngon|ung|dung y|cam on|thanks|dep|xinh|gion|ron|gion tan)\b/.test(folded);
       const commentPraise = !commentComplaint && !liveInterest && !liveFeedback && !basket.length && !extractVietnamesePhone(message.text || '') && !reply.order && templates?.COMMENT_PUBLIC_THANKS
         && ((reply.templateId === 'THANK_YOU' && (praiseWords || emojiOnly)) || praiseAfterBuy || (praiseWords
-          && !/\?|\b(nao|sao|khong|ko|k|gia|bn|bao nhieu|hon|the nao|ntn|khac|lay|dat|mua|cho|xin|ib|inbox|giam|ship|tui|goi|combo|bao)\b/.test(folded)));
+          && !/\?|\b(nao|sao|khong|ko|k|gia|bn|bao nhieu|hon|the nao|ntn|khac|lay|dat|mua|cho|xin|ib|inbox|giam|ship|tui|goi|combo|bao)\b/.test(folded)
+          // R18 (bình luận B3, ca …914120 "Nhìn thấy ngon o biết có đúng như trong quảng cáo"): lời nghi ngờ không phải lời khen.
+          && !/\b(?:o|khong|ko|k|chua|hong|hok|ch|chang) biet\b|\blieu\b|\bco dung\b|\bco that\b|\bthat khong\b/.test(folded)));
       if (commentPraise || liveFeedback) privateSkipped = true;
       // R14 (chủ shop 03/10, quyết định 9; bình luận T1): bình luận đùa / không liên quan ("Mặc quần k đẹp", "Xong ăn thêm bát
       // phở nữa") mà mô hình chỉ chào/cảm ơn (WELCOME/THANK_YOU): CHỈ like — không nhắn riêng bảng giá/lời chúc, không đăng

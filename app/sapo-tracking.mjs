@@ -184,6 +184,27 @@ function trackingSentInConversation(store, inbox, shipment) {
   return messages.some(message => message?.direction === 'outgoing' && String(message.text || '').includes(shipment.trackingNumber));
 }
 
+const foldVi = value => String(value || '').normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase()
+  .replace(/[^a-z0-9?\s]+/g, ' ').replace(/\s+/g, ' ').trim();
+// R18 (cross 4.5, inbox3 V10, ca …024636): khách nhắn "Nay mới nhận đc đồ của shop" 12:59 → 13:01 Sapo vẫn gửi "shipper đang giao
+// hàng tới chị…". Tin khách báo ĐÃ nhận (không phải hỏi "khi nào nhận được hàng").
+const CUSTOMER_RECEIVED = /\b(?:da|vua|moi|nay moi|roi) nhan (?:duoc |dc )?(?:hang|do|don|roi)\b|\bnhan (?:duoc |dc )?(?:hang|do|don) roi\b/;
+const CUSTOMER_NOT_RECEIVED = /\?|\b(?:chua|khi nao|bao gio|may ngay|bao lau|lau)\b.{0,20}\bnhan\b|\b(?:khong|ko|k|kg) nhan\b/;
+export function customerSaysReceived(text) {
+  const folded = foldVi(text);
+  return CUSTOMER_RECEIVED.test(folded) && !CUSTOMER_NOT_RECEIVED.test(folded);
+}
+const customerReceivedRecently = (messages, now) => messages.some(message => message?.direction === 'incoming'
+  && now - (Number(message.createdAt) || 0) <= DAY && customerSaysReceived(message.text));
+// R18 (inbox4 L1, ca …508323353 / …883577624944): "nhận hàng thành công" gửi 2 lần cách ~1 giờ (lần đầu qua cầu nối báo lỗi nhưng
+// tin đã đi). Lời báo của giai đoạn đã nằm trong hội thoại (sau mốc giai đoạn) → coi như đã báo, không gửi / xếp hàng chờ lại.
+const STAGE_SENT_TEXT = {
+  out_for_delivery: /shipper (?:đã nhận hàng và )?đang giao|đang được shipper giao/iu,
+  delivered: /nhận hàng thành công|đã giao thành công tới/iu
+};
+const stageNoticeInConversation = (messages, stage, since) => Boolean(STAGE_SENT_TEXT[stage]) && messages.some(message => message?.direction === 'outgoing'
+  && (Number(message.createdAt) || 0) >= since && STAGE_SENT_TEXT[stage].test(String(message.text || '')));
+
 /**
  * Báo khách giai đoạn nào của vận đơn này, qua đường nào:
  *  { action: 'send', inbox, stage, templateId }          trong 24 giờ Messenger → máy chủ tự gửi;
@@ -209,6 +230,11 @@ export function shipmentNoticePlan(store, conversation, order, { now = Date.now(
   if (done === 'created' && stage === 'picked_up') return { action: 'mark', stage, reason: 'đã báo bàn giao ĐVVC ở mốc created' };
   // Giai đoạn tới khu vực (in_transit): không báo cho khách, chỉ ghi dấu đã qua mốc này.
   if (done && stage === 'in_transit') return { action: 'mark', stage, reason: 'không báo giai đoạn tới khu vực' };
+  const inboxMessages = Array.isArray(store.messages?.[inbox.id]) ? store.messages[inbox.id] : [];
+  // R18: khách vừa báo đã nhận hàng (24 giờ) → không báo các giai đoạn trước "giao thành công" (tin "đang giao" là sai sự thật).
+  if (stage !== 'delivered' && customerReceivedRecently(inboxMessages, now)) return { action: 'mark', stage, reason: 'khách đã báo nhận hàng' };
+  // R18: lời báo giai đoạn này đã có trong hội thoại (gửi qua cầu nối lỗi mà tin vẫn đi, nhân viên gửi tay) → chỉ ghi dấu.
+  if (stageNoticeInConversation(inboxMessages, stage, (Number(shipment.stageAt) || now) - HOUR)) return { action: 'mark', stage, reason: 'đã báo giai đoạn trong hội thoại', via: 'conversation' };
   // Tin đầu (chưa báo gì) luôn là tin mã vận đơn, trừ khi đơn đã giao xong (chỉ còn lời cảm ơn).
   const templateId = !done && stage !== 'delivered' ? STAGE_TEMPLATES.created : STAGE_TEMPLATES[stage];
   if (quietHour) return { action: 'wait', reason: 'giờ nghỉ (22h–7h)' };

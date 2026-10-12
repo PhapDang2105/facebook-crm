@@ -26,7 +26,7 @@ import { isCancelledOrder } from './order-facts.mjs';
 import { describeDeliveryAddress } from './processing/locations.mjs';
 import { touchPendingOrder } from './processing/pending-order.mjs';
 import { randomUUID } from 'node:crypto';
-import { isPageSystemNotice } from './conversation-orders.mjs';
+import { isLivestreamCustomer, isPageSystemNotice } from './conversation-orders.mjs';
 import { MESSENGER_WINDOW_MARGIN_MS, MESSENGER_WINDOW_MS, messengerWindowOpen } from './messenger-window.mjs';
 
 // Đơn còn hiệu lực (chưa hủy / hoàn / bom — isCancelledOrder của order-facts, cùng luật với báo cáo):
@@ -279,6 +279,10 @@ const declinePattern = /(?<![\p{L}\p{N}])(khoan|đừng)\s+(đã\s+)?(giao|gửi
 /** Khách nói dừng / hủy trong tin này? */
 // R16 (bình luận B6b, ca …0716122894 "da nhan hang roi nen kg mua nua"): khách gõ KHÔNG dấu — so thêm trên chữ đã bỏ dấu
 // ("kg/ko/k/khong/hong/khum mua|lay|dat nua", "đã nhận hàng rồi", "đã mua rồi"). "huy" không dấu không tính (tên người).
+// R18 (cross 4.3, ca …881444 "Giá hơi c nên c ko mua nhé"): từ chối cuối câu không có chữ "nữa" — "ko mua nhé", "k mua nha",
+// "không lấy đâu", "kg đặt nhé shop". Chỉ khi "không mua/lấy/đặt" đứng CUỐI câu (chỉ còn tiểu từ / lời gọi): "k lấy quạt nhé"
+// (từ chối quà), "ko mua nhiều được không", "không mua được trên sàn" không tính.
+const declineEndPattern = /\b(?:k|ko|kg|khg|khong|hong|khum|hok) (?:mua|lay|dat)(?: (?:nhe|nha|nhen|dau|a|ha|roi|nua|luon))*(?: (?:shop|sop|em|e|ban|b|chi|c|ad|a))?$/;
 const declineFoldedPattern = /\b(?:k|ko|kg|khg|khong|hong|khum|hok) (?:can )?(?:lay|mua|dat) (?:them )?nua\b|\bda nhan (?:duoc )?hang roi\b|\b(?:da|vua) mua roi\b/;
 // R16-fix2 (phản biện C1): đang giữ giỏ mà khách "không lấy THÊM nữa" = từ chối lời mời thêm, vẫn giữ giỏ → vẫn nhắc giỏ.
 export function customerDeclined(text, { basketHeld = false } = {}) {
@@ -286,7 +290,7 @@ export function customerDeclined(text, { basketHeld = false } = {}) {
   const folded = foldText(value).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ');
   if (basketHeld && /\bthem\b/.test(folded) && !/\b(?:huy|khoan|dung)\b/.test(folded)) return false;
   if (declinePattern.test(value)) return true;
-  return !/\?/.test(value) && declineFoldedPattern.test(folded);
+  return !/\?/.test(value) && (declineFoldedPattern.test(folded) || declineEndPattern.test(folded.trim()));
 }
 
 // Khách chỉ đáp lời cho xong: "OK bạn", "dạ vâng ạ", "cảm ơn shop"… (tối đa vài từ, chỉ từ đáp lời).
@@ -369,6 +373,22 @@ export function followUpSkipReason(candidate, store, { skipLabelIds = defaultSki
  * {cart}/{total}/{missing}) thay vì lời "còn phân vân loại nào". Rỗng = không có giỏ
  * nhắc được (không giỏ, quá 24 giờ, mẫu tắt, giỏ đủ SĐT+địa chỉ hay không tính được giá).
  */
+// R18 (cross 4.1, inbox1 V7, ca …669432): giỏ 1 Tropical lập lúc 20:06, rồi khách hỏi "thông tin mỗi túi/màu", "mỗi màu 1 bịch giá
+// sao" — bot trả bảng giá mix túi lớn (PRICE_MIX_TUI_LON). 12 giờ sau bám đuổi vẫn nhắc "đang giữ đơn 1 Tropical 219k". Lời bot
+// cuối (sau giỏ) là bảng giá / thông tin chung của dòng khác mà không kèm câu nhắc giỏ → khách đã rời giỏ: dùng lời mời thường.
+const OTHER_LINE_TEMPLATE = /^(?:PRICE_(?!COUNT$|ONE_BAG$|SHIP_EXPLAIN$)|GENERAL_INFO$|LIVESTREAM_COMMENT$|BAG_COMPARISON|SMALL_PACK_FLAVOURS$|BAG_SIZE_INFO$)/;
+const BASKET_REMIND_TEXT = /đang giữ đơn|đơn của (?:anh|chị|mình|bạn|anh\/chị|em)\b.{0,80}\bgồm/iu;
+export function basketLeftBehind(conversation, basketAt, messages = null) {
+  const lastId = String(conversation?.botLastTemplateId || '').trim().toUpperCase();
+  const lastAt = Number(conversation?.botLastReplyAt) || 0;
+  if (!OTHER_LINE_TEMPLATE.test(lastId) || lastAt <= basketAt + 60 * 1000) return false;
+  // Lượt bot cuối có câu nhắc giỏ đi kèm (trả lời + "em vẫn đang giữ đơn…") → giỏ vẫn là trọng tâm.
+  const list = Array.isArray(messages) ? messages : [];
+  const lastIncoming = list.filter(message => message?.direction === 'incoming').reduce((max, message) => Math.max(max, Number(message.createdAt) || 0), 0);
+  const lastTurn = list.filter(message => message?.direction === 'outgoing' && (Number(message.createdAt) || 0) >= Math.min(lastIncoming || lastAt, lastAt - 2 * 60 * 1000));
+  return !lastTurn.some(message => BASKET_REMIND_TEXT.test(String(message.text || '')));
+}
+
 export function orderRemindText(conversation, templates = {}, { now = Date.now(), messages = null } = {}) {
   const pending = conversation?.pendingOrder;
   // R15: khách đã mua trên sàn → không nhắc giỏ (giỏ còn sót cũng không nhắc).
@@ -379,7 +399,10 @@ export function orderRemindText(conversation, templates = {}, { now = Date.now()
   if (pending.postponed) return '';
   const at = Number(pending.at) || 0;
   if (!at || now - at > pendingOrderRemindMs) return '';
+  if (basketLeftBehind(conversation, at, messages)) return '';
   const gender = followUpGender(conversation, messages);
+  // R18 (cross 4.1, ca …069730): giỏ khách live — câu nhắc tính quà live (Quạt) như lúc bot báo giỏ.
+  const livestream = isLivestreamCustomer(conversation);
   try {
     // `at: now` để giỏ qua hạn 2 giờ của bot vẫn dựng được; không có recentOrder/trial nên chỉ ra bước xin thông tin.
     const remindFor = basket => {
@@ -387,6 +410,7 @@ export function orderRemindText(conversation, templates = {}, { now = Date.now()
         pendingOrder: basket,
         now,
         lastTemplateId: 'ORDER_ADDRESS',
+        livestream,
         customer: { gender, name: conversation.name || '' }
       });
       return reply.templateId === 'ORDER_ADDRESS' && reply.remind ? String(reply.remind) : '';

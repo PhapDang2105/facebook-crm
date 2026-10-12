@@ -27,7 +27,9 @@ const TROPICAL_MENTION_ALL = new RegExp(TROPICAL_MENTION.source, 'g');
 export const TROPICAL_UNSURE = /\bxanh nhat\b/;
 // Hủy đơn / khoan giao (B5 #5, B2 #18): "cho c xin huỷ đơn shop nhé", "c xin huỷ e ui", "Đơn này khoan giao nha shop".
 export const CANCEL_ORDER = /\b(?:xin |cho (?:minh|em|e|chi|c) )?(?:huy|hy) (?:don|giup|gium|dum|di|nhe|nha|e|em|ui)\b|(?:^|\s)(?:xin )?huy$/;
-export const HOLD_DELIVERY = /\b(?:khoan|dung|tam dung|ngung|hoan) giao\b|\bgiu don\b|\bchua (?:can )?giao voi\b/;
+// R18 (cross 4.5, ca …653689 "Hôm nay c nghỉ phép. Nói họ giữ đó thứ 2 giao"): "giữ đó / giữ lại / giữ hàng", "hẹn giao", "để hôm
+// khác giao" cũng là xin hoãn giao (trước đây mô hình trả thẻ trạng thái đơn, không ghi chú, không ai biết).
+export const HOLD_DELIVERY = /\b(?:khoan|dung|tam dung|ngung|hoan) giao\b|\bgiu don\b|\bchua (?:can )?giao voi\b|\bgiu (?:do|hang)\b(?! (?:gion|ngon|am|tuoi|lau|duoc|dc|chat|vi|mui))|\bgiu lai (?:hang|don|do)\b|\bhen (?:lai )?(?:ngay )?giao\b|\b(?:de|doi) (?:hom|ngay|bua) (?:khac|sau|mai) (?:hay |roi |moi )?(?:giao|ship)\b/;
 // Ghi chú giao hàng cho đơn vừa đặt (B5 #7): "Giao trong giờ hành chính em nhé", "tránh chủ nhật", "gọi trước khi giao".
 export const DELIVERY_NOTE = /\bgiao (?:trong )?gio hanh chinh\b|\btranh (?:ngay )?(?:cn|chu nhat|t7|thu 7)\b|\bgoi (?:dien )?truoc khi giao\b|\b(?:ngoai )?gio hanh chinh\b/;
 // Lo ngại nguồn gốc / hàng giả / hạn gần (B2 #16): chuyển người, tắt bám đuổi.

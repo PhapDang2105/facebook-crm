@@ -86,7 +86,7 @@
   "THANK_YOU": "Dạ em cảm ơn {title} rất nhiều ạ. Chúc mình một ngày mới thật nhiều năng lượng, luôn rạng rỡ và tươi tắn ạ.",
   "FOLLOW_UP_COMMENT_FREESHIP": "Dạ {title} ơi, Giọt Nắng gửi tặng {title} ưu đãi MIỄN PHÍ VẬN CHUYỂN để dùng thử granola ạ 🎁 {Title} chỉ cần nhắn em loại túi muốn dùng và địa chỉ nhận, em lên đơn ngay nhé.",
   "ORDER_CART_LINE": "Dạ đơn của {title} gồm {cart}, tổng {total}[?free_ship] ({free_ship})[/?][?ship_fee] (đã gồm {ship_fee} phí ship)[/?][?gift], tặng {gift}[/?] ạ 🌾",
-  "ORDER_ADDRESS_REMIND": "Dạ em vẫn đang giữ đơn {cart} – tổng {total} cho {title} ạ 🌾 {Title} gửi giúp em {missing} là em lên đơn liền nha.",
+  "ORDER_ADDRESS_REMIND": "Dạ em vẫn đang giữ đơn {cart} – tổng {total}[?gift], tặng {gift}[/?] cho {title} ạ 🌾 {Title} gửi giúp em {missing} là em lên đơn liền nha.",
   "ORDER_CUSTOM_BASKET": "Dạ em ghi nhận đơn {cart} của {title} rồi ạ 🌾 Đơn này bạn phụ trách sẽ tính ưu đãi tốt nhất và báo lại mình ngay[?missing]; {title} gửi giúp em {missing} để em lên đơn luôn[/?] nha ạ.",
   "REPLY_ALREADY_SENT_INFO": "Dạ em vừa gửi ở tin ngay trên ạ 💛 Chỗ nào chưa rõ {title} nói em biết, em nhờ bạn phụ trách giải thích kỹ hơn cho mình nha ạ.",
   "ORDER_STATUS_CHECKING": "Dạ em đã nhận số điện thoại của {title} ạ. Em chuyển bạn phụ trách đơn hàng tra ngay và nhắn lại {title} trong tin này nha, {title} chờ em ít phút ạ 💛",

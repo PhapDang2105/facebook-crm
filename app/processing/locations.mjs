@@ -949,6 +949,9 @@ function remainingStreet(expanded, norm, consumed) {
     .map(part => part.replace(/^[\s\-–.:?!]+|[\s\-–.:?!]+$/g, ''))
     // R13: ngoặc mồ côi còn lại sau khi bỏ tên cấp trong ngoặc ("Thành phố Hồ Chí Minh (" của "(brvt cũ)").
     .map(part => (part.includes('(') === part.includes(')') ? part : part.replace(/^[\s()]+|[\s()]+$/g, '')))
+    // R18-B (inbox2 Nhẹ, ca …107101 "thôn gò mái xã hợp tiến cũ số nhà35" → "thôn gò mái, cũ số nhà35, Xã Hợp Tiến…"): chữ "cũ" chú
+    // thích cho tên cấp vừa bỏ, dính đầu mảnh còn lại ("Củ Chi" giữ nguyên).
+    .map(part => part.normalize('NFC').replace(/^c[ũủ]\s+(?!chi(?![\p{L}]))(?=\S)/iu, ''))
     // Bỏ mảnh rỗng và mảnh chỉ còn mỗi tiền tố loại hình ("Phường" của "Phường Ninh Bình?").
     // R13 (K6): mảnh chỉ còn chữ "cũ"/"( củ )" (chú thích sau tên cấp đã nhận ra) cũng bỏ.
     .filter(part => /[\p{L}\p{N}]/u.test(part) && !ALL_PREFIXES.includes(normalizeLocationKey(part)) && !/^\(?\s*c[ũủ]\s*\)?$/iu.test(part.normalize('NFC')))
@@ -2103,7 +2106,22 @@ function typedAddress(text, resolved, locationIndex) {
  * vào địa chỉ đã lưu. Khách nhắn hẳn một địa chỉ mới có tỉnh thì lấy địa chỉ
  * mới; còn lại thử vài cách ghép và giữ cách cho ra nhiều cấp nhất.
  */
+// R18-B (chủ shop 12/10): ghi chú kho trong ngoặc ở ĐẦU địa chỉ ("(Tặng BGD) Tổ 9 …", "(Live) …", "(Freeship) …") — kho đọc ở đó;
+// ghép mảnh địa chỉ mới phải giữ nguyên ghi chú này ở đầu, không đẩy vào giữa.
+export const ORDER_TAG_PREFIX = /^(?:\s*\([^()\n]{1,40}\)\s*)+/u;
+export function splitOrderTag(text) {
+  const value = String(text ?? '');
+  const tag = (value.match(ORDER_TAG_PREFIX)?.[0] || '').trim();
+  return { tag, body: tag ? value.slice(value.match(ORDER_TAG_PREFIX)[0].length).trim() : value.trim() };
+}
 export function mergeAddressFragment(fresh, saved, locationIndex = loadLocationIndex()) {
+  const savedParts = splitOrderTag(saved);
+  if (savedParts.tag) {
+    const freshParts = splitOrderTag(fresh);
+    const merged = mergeAddressFragment(freshParts.body, savedParts.body, locationIndex);
+    const tag = freshParts.tag && freshParts.tag !== savedParts.tag ? freshParts.tag : savedParts.tag;
+    return merged ? `${tag} ${merged}` : tag;
+  }
   const next = String(fresh ?? '').trim();
   const previous = String(saved ?? '').trim();
   if (!next) return previous;

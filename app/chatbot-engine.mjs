@@ -313,7 +313,9 @@ export function commentBasket(text, detail = null) {
   const numberFirst = firstNumber >= 0 && firstNumber < firstColour;
   const pattern = numberFirst
     // R13: chữ đệm giữa số/đơn vị và màu ("2 túi hạt vàng", "2 túi loại xanh", "1 túi vị nâu") không làm mất số lượng.
-    ? /(?:(?<!\d)(\d{1,2})\s*(?:tui|goi|bich)?\s*)?(?:(?:tui|mau|hat|loai|vi|granola)\s+){0,2}(?<![a-z])(xanh|vang|nau|cacao|mint)(?![a-z])/g
+    // R18 (inbox2 N1, ca …770718 "Lấy 2 túi lớn vàng 298k" → từng thành 1 Vàng): "lớn/to" cũng là chữ đệm ("nhỏ" thì không — "túi nhỏ" là
+    // gói nhỏ / combo 10 gói).
+    ? /(?:(?<!\d)(\d{1,2})\s*(?:tui|goi|bich)?\s*)?(?:(?:tui|mau|hat|loai|vi|granola|lon|to)\s+){0,2}(?<![a-z])(xanh|vang|nau|cacao|mint)(?![a-z])/g
     : /(?<![a-z])(xanh|vang|nau|cacao|mint)(?![a-z])(?:\s*la(?:\s*cay)?)?(?:\s*x?\s*(\d{1,2})(?!\d|\s*(?:g|gr|gram|k)\b))?/g;
   for (const match of cleaned.matchAll(pattern)) {
     const [colourText, quantityText] = numberFirst ? [match[2], match[1]] : [match[1], match[2]];
@@ -2511,6 +2513,17 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const held = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, replyContext);
       return held.remind ? { templateId: 'ORDER_ADDRESS_REMIND', messages: [held.remind], images: [], handoff: false } : null;
     })();
+    // R18 (inbox2 N7, ca …989673): bot vừa báo giá N túi ĐÃ NÊU VỊ (PRICE_COUNT "… lấy luôn 2 Granola Túi Xanh 450g để em lên đơn…?") mà
+    // khách "Ok em" → giỏ thành đúng N túi vừa báo (thay giỏ đang giữ), không nhắc giỏ cũ 1 túi.
+    const priceCountAccept = (() => {
+      if (!yesAck || conversation.botLastTemplateId !== 'PRICE_COUNT' || conversation.source === 'comment' || hasOrder) return null;
+      const lastBot = [...recent].reverse().find(item => item?.direction === 'outgoing' && /lấy luôn/u.test(String(item.text || '')));
+      const offer = String(lastBot?.text || '').match(/lấy luôn (\d{1,2}) (.+?) để em lên đơn/u);
+      const product = offer ? matchProduct(offer[2]) : null;
+      if (!product || Date.now() - (Number(lastBot.createdAt) || 0) > 2 * 60 * 60 * 1000) return null;
+      const accepted = renderChatbotReply({ template_id: 'ORDER_ADDRESS', Product_N1: product.name, No_A: offer[1] }, templates, { ...replyContext, pendingOrder: { ...(conversation.pendingOrder || {}), items: [], key: '' }, messageText: '', recentCustomerTexts: [] });
+      return accepted.templateId === 'ORDER_ADDRESS' && !accepted.handoff && (accepted.pendingOrder?.items?.length || accepted.order?.items?.length) ? accepted : null;
+    })();
     // Sau khi bot gửi thông tin chuyển khoản (BANK_TRANSFER): khách gửi ảnh hay "ck rồi / chuyển xong"
     // là bill → báo đã nhận, nhân viên kiểm tra và lên đơn (gắn thẻ); không "đã nhận hình, cần hỗ trợ gì".
     const paidText = message.type === 'text' && (/\b(?:ck|chuyen khoan|chuyen tien|chuyen|thanh toan|tt)(?: tien)?(?: cho (?:em|shop|minh|ben em))? (?:roi|xong|r|thanh cong)\b/.test(folded) || /\b(?:da|vua|moi) (?:ck|chuyen khoan|chuyen tien|thanh toan|chuyen)\b/.test(folded));
@@ -3294,7 +3307,7 @@ async function answerChange(incomingChange, settings, results, dependencies) {
                 : await askModel({ trialHint: trialModelHint(trialState) }))
             : nonText
               ? (recentBuyerImage ? buyerImageReply() : seesImage ? await askModel() : imageFallback())
-              : flavourSplitReply || ackReply || comboQuote || remindAck || noteReply || lookupReply || fanSpoonReply || giftChoiceReply || choiceReply || colourQuote || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (cascadeReply?.templateId === cascade?.templateId ? cascadeReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || (preGuardMode === 'on' && preGuard ? preGuard.reply : null) || await askModel());
+              : flavourSplitReply || ackReply || comboQuote || priceCountAccept || remindAck || noteReply || lookupReply || fanSpoonReply || giftChoiceReply || choiceReply || colourQuote || quickQuote || (ruleMode === 'on' && ruleUsable ? ruleReply : null) || (cascadeReply?.templateId === cascade?.templateId ? cascadeReply : null) || (intentReply?.templateId === intent?.templateId ? intentReply : null) || (preGuardMode === 'on' && preGuard ? preGuard.reply : null) || await askModel());
     // Mẫu mô hình/luật CHỌN, trước mọi hậu xử lý (để log so mô hình nhỏ không bị ✗ giả).
     const chosenTemplateId = reply.templateId;
     trace.chosen = chosenTemplateId;
@@ -4492,7 +4505,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       const xanh = getCatalogProducts().find(item => item.active !== false && !item.staffOnly && /^GRA-XANH-/i.test(String(item.sku || '')));
       if (!xanh) return null;
       const held = conversation.pendingOrder && typeof conversation.pendingOrder === 'object' ? conversation.pendingOrder : {};
-      const quantity = Math.max(1, Math.min(10, Math.round(Number(held.askedBagCount) || Number(askedBag?.count) || 1)));
+      // R18 (inbox2 N1, ca …423891 "Gửi c 5b nha e" → từng lên 1 Túi Xanh): số túi khách nêu NGAY trong tin này đứng trước (qua prep: "5b" =
+      // 5 bịch), rồi số túi mô hình đọc (khi tin có số), rồi số túi nêu trước câu hỏi vị.
+      const nowCount = nonText ? 0 : bagCountInText(message.text);
+      const modelCount = modelItems.reduce((sum, item) => sum + (Number(item?.quantity) || 0), 0);
+      const textHasNumber = !nonText && /\d|\b(?:hai|ba|bon|nam|sau)\b/.test(foldVietnamese(stripPhone(String(message.text || ''))));
+      const quantity = Math.max(1, Math.min(20, Math.round(nowCount || (textHasNumber && modelCount > 1 ? modelCount : 0) || Number(held.askedBagCount) || Number(askedBag?.count) || 1)));
       const address = String(reply.order.rawAddress || reply.order.address || held.address || '').replace(/^\((?:live|freeship)\)\s*/i, '');
       // Giỏ chờ do mô hình đoán (cờ inferred) không được ghép vào: soạn với giỏ chờ rỗng (giữ SĐT/địa chỉ/cờ khác).
       const context = { ...replyContext, pendingOrder: { ...held, items: [], key: '', inferred: false } };
@@ -5485,7 +5503,8 @@ export function prevBotAsks(templateId, pending = null) {
 
 /** Số túi khách nêu trong tin ("2 túi xanh", "combo 3", "hai bịch"); không rõ thì 0. */
 export function bagCountInText(text) {
-  const folded = foldVietnamese(String(text || '')).replace(/\s+/g, ' ');
+  // R18 (inbox2 N1): qua prep() của luật — "5b"/"6t" viết tắt → "5 bịch"/"6 túi", số chữ ("hai túi") → chữ số.
+  const folded = foldVietnamese(prepRuleText(String(text || ''))).replace(/\s+/g, ' ');
   const words = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5 };
   let total = 0;
   for (const match of folded.matchAll(/\b(\d{1,2}|mot|hai|ba|bon|nam)\s*(?:tui|goi|bich|hop)\b/g)) total += Number(match[1]) || words[match[1]] || 0;

@@ -685,7 +685,9 @@ export function distinctKindsCount(text) {
   if (!match) return 0;
   // Phải có ý lấy ("lấy/mua/đặt/chốt/cho/gửi…") hay cả tin chỉ là "3 màu (nhé/nha…)".
   // R17 (inbox2 C1, ca …7347802265 "2 túi 2 vị e nhé!"): "N túi N vị" trơn (số túi = số vị, không động từ) cũng là chọn N vị.
-  const short = /^(?:(?:thi|vay|la|chi|c|minh|em|e|anh|a)\s+)?(?:(2|3|hai|ba) (?:tui|goi|bich|bit) )?(2|3|hai|ba) (?:mau|vi|loai)(?: (?:nhe|nha|nhen|luon|thoi|di|a|ha|shop|e|em|c|chi|nhe shop|nha shop))*$/.test(s)
+  // R18 (inbox2 N7 / cross R4, ca …8007768513336 "Ko chị 3 túi 3 vị", "Chị 3 túi 3 vị khác nhau" khi đang giữ 3 Xanh mặc định): lời đính
+  // chính "không/ko (phải)" đứng đầu và đuôi "khác nhau" vẫn là chọn N vị.
+  const short = /^(?:(?:khong|ko|k|kg|hong|khong phai|ko phai|k phai)\s+)?(?:(?:thi|vay|la|chi|c|minh|em|e|anh|a)\s+)?(?:(2|3|hai|ba) (?:tui|goi|bich|bit) )?(2|3|hai|ba) (?:mau|vi|loai)(?: (?:khac nhau|nhe|nha|nhen|luon|thoi|di|a|ha|shop|e|em|c|chi|nhe shop|nha shop))*$/.test(s)
     && (() => { const m = s.match(/(2|3|hai|ba) (?:tui|goi|bich|bit) (2|3|hai|ba) (?:mau|vi|loai)/); return !m || numberOf(m[1]) === numberOf(m[2]); })();
   if (!short && !/\b(?:lay|mua|dat|chot|cho|gui|ship|order|an|thu)\b/.test(s)) return 0;
   const kinds = numberOf(match[1]);

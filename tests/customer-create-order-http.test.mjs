@@ -103,6 +103,18 @@ test('tạo đơn từ hồ sơ khách không có hội thoại: lưu kho đơn,
   assert.equal(forced.status, 201);
   assert.notEqual((await forced.json()).createdOrderId, '77777', 'mã trùng được thêm hậu tố');
 
+  // Quà đơn gọi điện nhân viên chọn (giftOverride): món có mã POS + món chưa có mã → chữ quà dựng từ danh sách,
+  // bảng Đơn hàng có ghi chú "chưa có mã POS … nhân viên thêm trên POS".
+  const withGift = await create(draft({
+    id: '77790', products: [{ name: 'Granola Túi Vàng 350g', sku: 'GRA-VANG-H350', quantity: 2, price: 149000 }],
+    giftOverride: [{ name: 'Túi Granola Nâu', sku: 'GRA-NAU-Z350', quantity: 1, weight: 400 }, { name: 'Tâm Lành', sku: '', quantity: 2, weight: 0 }]
+  }));
+  assert.equal(withGift.status, 201);
+  const giftOrder = (await (await fetch(`${baseUrl}/api/customer-orders`)).json()).items.find(order => order.id === '77790');
+  assert.equal(giftOrder.gift, 'Miễn phí vận chuyển + Túi Granola Nâu + 2 Tâm Lành');
+  assert.deepEqual(giftOrder.giftOverride.map(item => [item.sku, item.quantity]), [['GRA-NAU-Z350', 1], ['', 2]]);
+  assert.ok(giftOrder.processingNotes.some(note => /chưa có mã POS: 2 Tâm Lành/.test(note)));
+
   assert.equal((await create(draft({ products: [] }))).status, 400, 'đơn không sản phẩm bị từ chối');
   assert.equal((await fetch(`${baseUrl}/api/customers/landing%3A0999999999/orders`, json('POST', { order: draft() }))).status, 404);
 
@@ -115,6 +127,6 @@ test('tạo đơn từ hồ sơ khách không có hội thoại: lưu kho đơn,
 
   await settle();
   const lines = auditLines().filter(line => line.action === 'order.create');
-  assert.equal(lines.length, 2);
+  assert.equal(lines.length, 3);
   assert.match(lines[0].summary, /^Tạo đơn #77777 cho Nghĩa Thành từ hồ sơ khách: 2 Granola Túi Xanh 450g, tổng 298\.000đ\.$/);
 });

@@ -1784,7 +1784,9 @@ async function pushStandaloneOrderToPos(orderId) {
   }
   if (!outcome.id) outcome.retries = order.pos?.error ? (Number(order.pos.retries) || 0) + 1 : 0;
   console.log(outcome.id ? `Đơn ${wanted} (tạo từ hồ sơ khách) đã lên Pancake POS #${outcome.id}` : `Đơn ${wanted} (tạo từ hồ sơ khách) chưa đẩy được sang Pancake POS: ${outcome.error}`);
-  await setOrderPosOutcome(wanted, outcome, { publish: false });
+  // Quà chọn tay chưa lên được POS (không SKU / POS chưa có mẫu mã) → ghi chú xử lý; đủ mã thì gỡ ghi chú cũ.
+  const extra = Array.isArray(outcome.giftOverrideMissing) ? target => applyGiftOverrideFlag(target, outcome.giftOverrideMissing) : null;
+  await setOrderPosOutcome(wanted, outcome, { publish: false, extra });
   return outcome;
 }
 

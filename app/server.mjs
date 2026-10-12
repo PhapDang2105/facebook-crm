@@ -1539,6 +1539,7 @@ const chatbotDependencies = {
     // Thẻ bot gắn và bot tự tắt (chuyển CSKH) vào lịch sử hội thoại (nhật ký, người làm 'bot').
     let labelChange = null;
     let botOff = null;
+    let botOn = null;
     let panelChanged = false;
     const saved = await updateMessagingStore(store => {
       const conversation = store.conversations.find(item => item.id === id);
@@ -1548,6 +1549,8 @@ const chatbotDependencies = {
       panelChanged = botPanelStateChanged(conversation, botState);
       Object.assign(conversation, botState);
       if (botWasOn && botState.botEnabled === false) botOff = { id: conversation.id, name: conversation.name || '' };
+      // R18: bot tự bật lại (Pancake tạm dừng, nhân viên im ≥ 2 giờ) → ghi lịch sử bật/tắt bot như khi nhân viên bật tay.
+      if (!botWasOn && botState.botEnabled === true) botOn = { id: conversation.id, name: conversation.name || '' };
       if (addLabels.length && conversation.source !== 'comment') {
         const before = Array.isArray(conversation.labels) ? conversation.labels : [];
         const merged = [...new Set([...before, ...addLabels])];
@@ -1562,6 +1565,7 @@ const chatbotDependencies = {
     const eventNames = { order: 'chốt đơn', handoff: 'chuyển nhân viên', complaint: 'khiếu nại', warranty: 'bảo hành', update: 'khách đổi đơn', cancel: 'khách hủy đơn', livestream: 'khách livestream', wholesale: 'khách sỉ', bad: 'khách xấu' };
     if (labelChange) appendLabelAudit({ actor: AUTOMATED_ACTORS.bot, ...labelChange, labelDefs, reason: `bot: ${addLabelEvents.map(event => eventNames[event] || event).join(', ')}` });
     if (botOff) appendBotToggleAudit({ actor: AUTOMATED_ACTORS.bot, conversation: botOff, enabled: false, reason: 'bot chuyển nhân viên' });
+    if (botOn) appendBotToggleAudit({ actor: AUTOMATED_ACTORS.bot, conversation: botOn, enabled: true, reason: 'bot tự bật lại: nhân viên im ≥ 2 giờ sau khi Pancake tạm dừng' });
     if (saved && panelChanged) publishMessagingEvent({ type: 'customer-panel', conversationId: saved.id });
     return saved;
   }

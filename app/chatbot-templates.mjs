@@ -2148,6 +2148,8 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
   'ORDER_STATUS_SHIPPED', 'SHIPMENT_CREATED', 'SHIPMENT_PICKED_UP', 'SHIPMENT_IN_TRANSIT', 'SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED',
   // R15: engine tự chọn — SĐT thiếu số (cần {phone}), không tra được địa chỉ cũ theo SĐT.
   'PHONE_LOOKS_SHORT', 'ORDER_ADDRESS_OLD_NOT_FOUND',
+  // R18: engine/luật tự chọn — xin lỗi khi nhân viên đang xử lý mà khách khiếu nại/chờ lâu; lời gọi giữa luồng đơn.
+  'STAFF_WAIT_COMPLAINT', 'GREETING_SHORT',
   // R17: luật dị ứng tự chọn (cần {ingredient} điền sẵn).
   'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED']);
 
@@ -2155,7 +2157,7 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
 // đang có…) — chỉ engine được chọn khi việc đó thật sự xảy ra; mô hình trả các mã này thì luôn đổi về GENERAL_INFO.
 const engineFactTemplateIds = new Set(['SHOP_ORDER_RECEIVED', 'ORDER_CANCELLED', 'ORDER_UPDATED', 'ORDER_UNCHANGED', 'ORDER_NOTE_ADDED', 'LIVE_DEAL_CLAIMED', 'ORDER_EXISTING_CONFIRM', 'ORDER_EXISTING_CONFIRM_PHONE',
   // R13 (gộp): "đã nhận giỏ Shop", "đã ghi nhận thay quà" — chỉ engine chọn khi việc đó thật sự xảy ra.
-  'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF', 'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED', 'GIFT_FAN_TO_SPOON', 'GIFT_SPOON_INCLUDED']);
+  'SHOP_CART_UNKNOWN', 'SHOP_CART_STAFF', 'SHOP_CART_ACK', 'GIFT_SWAP_NOTED', 'STAFF_WAIT_OPEN', 'STAFF_WAIT_CLOSED', 'GIFT_FAN_TO_SPOON', 'GIFT_SPOON_INCLUDED', 'STAFF_WAIT_COMPLAINT']);
 // Mẫu nội bộ mà mô hình vẫn được gọi tên (bước đơn ảo + chuyển người).
 const modelAllowedInternalIds = new Set(['ORDER_ADDRESS', 'ORDER_CONFIRMATION', 'ORDER_UPDATE', 'ORDER_CANCEL', 'ORDER_NOTE', 'CSKH_HANDOFF']);
 // Trường JSON mô hình được trả (đúng những trường renderChatbotReply đọc từ mô hình — xem responseSchemaFor).

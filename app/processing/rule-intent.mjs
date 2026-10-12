@@ -31,7 +31,11 @@ export const CANCEL_ORDER = /\b(?:xin |cho (?:minh|em|e|chi|c) )?(?:huy|hy) (?:d
 // khác giao" cũng là xin hoãn giao (trước đây mô hình trả thẻ trạng thái đơn, không ghi chú, không ai biết).
 export const HOLD_DELIVERY = /\b(?:khoan|dung|tam dung|ngung|hoan) giao\b|\bgiu don\b|\bchua (?:can )?giao voi\b|\bgiu (?:do|hang)\b(?! (?:gion|ngon|am|tuoi|lau|duoc|dc|chat|vi|mui))|\bgiu lai (?:hang|don|do)\b|\bhen (?:lai )?(?:ngay )?giao\b|\b(?:de|doi) (?:hom|ngay|bua) (?:khac|sau|mai) (?:hay |roi |moi )?(?:giao|ship)\b/;
 // Ghi chú giao hàng cho đơn vừa đặt (B5 #7): "Giao trong giờ hành chính em nhé", "tránh chủ nhật", "gọi trước khi giao".
-export const DELIVERY_NOTE = /\bgiao (?:trong )?gio hanh chinh\b|\btranh (?:ngay )?(?:cn|chu nhat|t7|thu 7)\b|\bgoi (?:dien )?truoc khi giao\b|\b(?:ngoai )?gio hanh chinh\b/;
+// R18: hỏi đơn vị vận chuyển ("gửi qua bên nào", "ship hãng nào", "đơn vị vận chuyển gì", "có gửi GHN không") / dặn tránh hãng.
+const CARRIER_NAMES = '(?:spx|shopee express|ghn|giao hang nhanh|ghtk|giao hang tiet kiem|j ?t|jnt|j and t|viettel post|viettelpost|vnpost|vn post|buu dien|ninja van|best express|ahamove|grab)';
+const CARRIER_AVOID = new RegExp(`\\b(?:ngai|so|khong thich|ko thich|tranh|dung gui|dung ship|khong gui|ko gui|khong ship|ko ship)\\b.{0,15}\\b${CARRIER_NAMES}\\b`);
+const SHIPPING_CARRIER_ASK = new RegExp(`\\b(?:gui|ship|giao|chuyen|van chuyen|di)\\b(?: (?:hang|don|qua|bang|cho|cua))*\\b (?:ben|hang|don vi|dv|dvvc|nha xe|cty|cong ty|xe) (?:nao|gi|j)\\b|\\b(?:don vi|dv|dvvc|hang) (?:van chuyen|giao hang|ship|giao) (?:nao|gi|j|la gi|ben nao)\\b|\\b(?:gui|ship|giao|di)(?: (?:hang|don|qua|bang))* ${CARRIER_NAMES}\\b.{0,12}\\b(?:khong|ko|k|kg|hong|ha|a|phai khong|dung khong)$|${CARRIER_AVOID.source}`);
+export const DELIVERY_NOTE =/\bgiao (?:trong )?gio hanh chinh\b|\btranh (?:ngay )?(?:cn|chu nhat|t7|thu 7)\b|\bgoi (?:dien )?truoc khi giao\b|\b(?:ngoai )?gio hanh chinh\b/;
 // Lo ngại nguồn gốc / hàng giả / hạn gần (B2 #16): chuyển người, tắt bám đuổi.
 export const TRUST_CONCERN = /\b(?:hsd gan|han (?:su dung |dung |sd )?(?:gan|sap het)|gan date|can date|sat date|nguon goc|xuat xu|china|trung quoc|hang gia|hang nhai|hang fake|fake|(?:2|hai) shop|(?:2|hai) giot nang|(?:2|hai) trang giot nang|shop gia)\b/;
 // Câu hỏi về quà (B1 #8): "Bộ bát gì", "bô bát ntn vay", "Tặng quạt jì", "quạt xem hình".
@@ -78,7 +82,9 @@ const COMMENT_DISLIKE_CORE = /\b(?:khong|ko|k|kg|hok|hong|hem|hk|cha|chang|chua)
 // R14 (quyết định 4): thêm lời chê quảng cáo ("Không như quảng cáo", "không đúng với quoảng cáo", "mở ra toàn yến mạch",
 // "khác hình" — AD_MISMATCH_COMPLAINT dùng chung với isComplaint); bỏ câu chê hàng CHỖ KHÁC ("mua ở chỗ khác ko ngon").
 // ("Dở"/"Dỡ" đứng riêng chỉ nhận được trên chữ còn dấu → isComplaint / shortBadTaste, engine đã gọi cho bình luận.)
-export const COMMENT_DISLIKE = new RegExp(`^(?!.*(?:${OTHER_SELLER.source})).*?(?:${COMMENT_DISLIKE_CORE.source}|${AD_MISMATCH_COMPLAINT.source})`);
+// R18 (bình luận B3, ca …459478 "Có ngọt quá k b" — câu hỏi trước khi mua): dạng hỏi "có … không (bạn/shop)" không phải lời chê.
+const COMMENT_DISLIKE_QUESTION = /(?:.*\s)?co\b.*\b(?:k|ko|khong|kg|hong|hok|khum|kh)(?: (?:b|ban|shop|sop|a|e|em|ad|ha|vay|nhi|c|chi))*$/;
+export const COMMENT_DISLIKE = new RegExp(`^(?!.*(?:${OTHER_SELLER.source}))(?!${COMMENT_DISLIKE_QUESTION.source}).*?(?:${COMMENT_DISLIKE_CORE.source}|${AD_MISMATCH_COMPLAINT.source})`);
 // R15 (comments A3, ca …076080 "Bán mà nói nhỏ xíu sao nghe"): thêm "nói nhỏ/bé xíu/quá/vậy/thế", "nhỏ xíu … nghe",
 // "sao/không nghe được/rõ/gì".
 export const LIVE_FEEDBACK = /\b(?:noi (?:nho|be) (?:xiu|qua|vay|the|lam)|nho xiu .{0,20}\bnghe|(?:sao|khong|ko|k) nghe (?:duoc|dc|ro|gi)|noi (?:cha|khong|ko|k) nghe|(?:cha|khong|ko|k) nghe (?:gi|ro|duoc|dc|thay)|nghe (?:khong|ko|k|cha) (?:ro|duoc|dc|thay)|tieng (?:nho|be|re|vang|on)|(?:nho|be) tieng|noi nhanh|doc rap|nhu (?:doc )?rap|lag|giat|mat tieng|re re)\b|\b(?:cha|khong|ko|k|kg|hong) thay (?:gi|gj|j|ji|hinh|tieng)(?: (?:het|ca|luon|het a|het tron))?$/;
@@ -349,7 +355,8 @@ const BOUGHT_ELSEWHERE_TAIL = /\b(?:roi|r)(?: (?:a|ah|ak|nha|nhe|nhen|nghe|nhak|
 // Neo cả câu vào danh sách từ đóng: "chưa nhận được", "nhận được tin nhắn rồi", "bao giờ nhận" không khớp. Phải có dấu hiệu
 // đã xong: "đã/vừa/mới" trước hay "rồi/r/rùi" sau, hoặc "được hàng".
 const RECEIVED_WHO = '(?:(?:nay|hom nay|toi|ben|nha|da|vua|moi|c|chi|e|em|minh|m|mk|a|anh|co|ban|b) )*';
-const RECEIVED_TAIL = '(?: (?:roi|r|rui|roai|roy|nhe|nha|nhen|a|ah|ak|em|e|shop|sop|ban|b|c|chi|anh|oi|nhe ban|nha shop|nhe shop|ok|oke|cam on|thanks))*$';
+// R18: "… của shop / của bên em" ở cuối câu báo nhận ("Nay mới nhận đc đồ của shop").
+const RECEIVED_TAIL = '(?: (?:roi|r|rui|roai|roy|nhe|nha|nhen|a|ah|ak|em|e|shop|sop|ban|b|c|chi|anh|oi|nhe ban|nha shop|nhe shop|ok|oke|cam on|thanks|cua shop|cua sop|cua ben em|cua em|cua e))*$';
 const RECEIVED_NOTICE = new RegExp(`^${RECEIVED_WHO}(?:(?:da|vua|moi|xuong) (?:nhan|nhn)(?: (?:duoc|dc))?(?: (?:hang|hag|don|don hang|do|combo|set|tui|goi|bich))?|(?:nhan|nhn)(?: (?:duoc|dc))?(?: (?:hang|hag|don|don hang|do|combo|set|tui|goi|bich))? (?:roi|r|rui|roai|roy)|(?:nhan|nhn) (?:duoc|dc) (?:hang|hag|don|don hang|do|combo|set|tui|goi|bich))${RECEIVED_TAIL}`);
 // Mã mẫu bot vừa báo giao hàng: khách đáp "nhận rồi" ngay sau đó là báo đã nhận (dù đơn không nằm trong hội thoại).
 const SHIPMENT_TEMPLATES = new Set(['SHIPMENT_OUT_FOR_DELIVERY', 'SHIPMENT_DELIVERED', 'ORDER_STATUS', 'DELIVERY_DELAY']);
@@ -929,7 +936,11 @@ export function ruleIntent(text, ctx = {}) {
     const receivedConditional = /\bmoi nhan (?:hang|hag|duoc hang|dc hang)\b/.test(s) && !/\bvua nhan\b/.test(s)
       && (/\b(?:neu|thi|nhu quang cao|nhu qc|giong quang cao|dung (?:hang|loai|nhu|mau)|phai|kiem tra|xem hang|dong kiem)\b.{0,40}\bmoi nhan\b/.test(s)
         || (!ctx.hasRecentOrder && /\bmoi nhan (?:hang|hag|duoc hang|dc hang)$/.test(s) && /\b(?:nhe|nha|nhen|nghe|nhak|nhe shop|nha shop)$/.test(sFull)));
-    if (/\b(?:vua|moi) nhan (?:hang|hag|duoc hang|dc hang)\b/.test(s) && !phone && !receivedConditional) return { rule: 'RECEIVED_CHECK', value: { template_id: 'RECEIVED_CHECK' }, attention: true };
+    // R18 (cross 1.4, ca …87024636 "Nay mới nhận đc đồ của shop" → mô hình cảm ơn, bot im): "nhận (được/đc) đồ/đơn" như "nhận hàng".
+    // R18 (cross R1, ca …57714699 "ở thủ đức mấy ngày mới nhận được hàng vậy shop"): hỏi THỜI GIAN nhận ("mấy ngày / bao lâu /
+    // khi nào … mới nhận") hay câu hỏi không phải báo đã nhận.
+    const receivedWhenAsk = /\b(?:may ngay|bao lau|bao gio|bao nhieu ngay|bn ngay|khi nao|chung nao|chua)\b.{0,20}\bmoi nhan\b/.test(s) || raw.includes('?');
+    if (/\b(?:vua|moi) nhan (?:duoc |dc )?(?:hang|hag|do|don)\b/.test(s) && !phone && !receivedConditional && !receivedWhenAsk) return { rule: 'RECEIVED_CHECK', value: { template_id: 'RECEIVED_CHECK' }, attention: true };
     // 08/10: tin ngắn báo đã nhận ("Chị nhận rùi e", "Đã nhận nhé") khi hội thoại có đơn hay bot vừa báo giao → hỏi nhận đúng/đủ
     // quà chưa (không gắn thẻ: không có gì cần xử lý, khách báo lỗi thì luồng khiếu nại bắt ở tin sau).
     if (!receivedConditional && (ctx.hasRecentOrder || SHIPMENT_TEMPLATES.has(last)) && isReceivedNotice(raw)) return { rule: 'RECEIVED_NOTICE', value: { template_id: 'RECEIVED_CHECK' } };
@@ -955,6 +966,11 @@ export function ruleIntent(text, ctx = {}) {
       // 08/10: thêm "đồng kiểm" đứng riêng, "kiểm tra/xem/mở trước khi nhận/thanh toán"; loại câu than "(shipper) không cho kiểm/xem".
       const inspectAsk = /\b(?:kiem tra|kiem|dong kiem|xem) hang\b|\bdong kiem\b|\b(?:kiem tra|xem|mo|khui) (?:hang |sp |san pham )?truoc khi (?:nhan|thanh toan|tra tien|lay)\b/.test(s);
       if (inspectAsk && !/\bdon\b/.test(s) && !/\b(?:khong|ko|k|kg|hong) (?:cho|duoc|dc) (?:kiem|xem|dong kiem|mo|khui)\b/.test(s)) return infoReply('INSPECTION', 'INSPECTION_RETURN_POLICY');
+      // R18 (inbox3 N4, cross 1.2, ca …4104505 "E gửi qua bên nào nhỉ"; …4893343 "chị ngại bưu điện và GHN"): hỏi ĐƠN VỊ vận chuyển
+      // → SHIPPING_CARRIER (chủ shop 12/10: chỉ SPX Express). Hỏi thời gian / phí ship để luật SHIP_TIME / FREESHIP.
+      if (SHIPPING_CARRIER_ASK.test(s) && !/\b(?:bao lau|may ngay|bn ngay|bao nhieu ngay|khi nao|phi|tien ship|bao nhieu tien)\b/.test(s)) {
+        return infoReply('SHIPPING_CARRIER', 'SHIPPING_CARRIER', CARRIER_AVOID.test(s) ? { attention: true } : {});
+      }
       // "Liệu bóc ra có mùi hôi ko": câu HỎI (chưa nhận hàng) → trấn an + chính sách đổi; than có đơn thì để luồng khiếu nại.
       const smellAsk = /\b(?:mui hoi|hoi dau|bi hoi|co mui|mui la)\b/.test(s) && (POLICY_QUESTION.test(s) || QUESTION_TAIL.test(sFull) || /\b(lieu|co bi|co khi nao|co hay)\b/.test(s));
       // Hai câu hỏi một tin ("Bn gram 1túi và có bị hôi ko") để mô hình trả lời cả hai.

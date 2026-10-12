@@ -35,7 +35,8 @@ export const prefillTextMaxLength = 140;
 function normalizeSettings(value) {
   const zaloUrl = String(value?.zaloUrl || '').trim();
   const prefillText = String(value?.prefillText || '').replace(/\s+/g, ' ').trim().slice(0, prefillTextMaxLength);
-  return { zaloUrl: isAllowedZaloUrl(zaloUrl) ? zaloUrl : '', prefillText, updatedAt: Number(value?.updatedAt) || 0 };
+  // leadForm: ô "để lại số điện thoại" trên trang đệm (12/10). Mặc định BẬT; chỉ tắt khi kho ghi rõ false.
+  return { zaloUrl: isAllowedZaloUrl(zaloUrl) ? zaloUrl : '', prefillText, leadForm: value?.leadForm !== false, updatedAt: Number(value?.updatedAt) || 0 };
 }
 
 /** Tệp chưa có → mặc định. Tệp hỏng → cất sang `.corrupt-<mốc>` thay vì để lượt lưu sau đè mất. Lỗi đọc khác thì ném ra. */
@@ -50,7 +51,7 @@ export async function readQrSettings() {
  * (undefined) giữ giá trị đang lưu; giá trị đang lưu đọc TRONG hàng ghi để hai lần lưu
  * từng phần gần nhau (một bên chỉ Zalo, một bên chỉ tin soạn sẵn) không đè mất nhau.
  */
-export async function writeQrSettings({ zaloUrl, prefillText } = {}) {
+export async function writeQrSettings({ zaloUrl, prefillText, leadForm } = {}) {
   const link = zaloUrl === undefined ? undefined : String(zaloUrl || '').trim();
   if (link && !isAllowedZaloUrl(link)) {
     throw new Error('Liên kết Zalo phải là địa chỉ https trên zalo.me (ví dụ https://zalo.me/0901234567 hoặc https://zalo.me/g/abcdef).');
@@ -59,7 +60,7 @@ export async function writeQrSettings({ zaloUrl, prefillText } = {}) {
   if (text !== undefined && text.length > prefillTextMaxLength) throw new Error(`Tin soạn sẵn tối đa ${prefillTextMaxLength} ký tự (đang ${text.length}).`);
   const operation = writeQueue.then(async () => {
     const current = await readQrSettings();
-    const settings = { zaloUrl: link ?? current.zaloUrl, prefillText: text ?? current.prefillText, updatedAt: Date.now() };
+    const settings = { zaloUrl: link ?? current.zaloUrl, prefillText: text ?? current.prefillText, leadForm: leadForm === undefined ? current.leadForm !== false : Boolean(leadForm), updatedAt: Date.now() };
     await writeJsonAtomic(settingsPath, settings);
     cachedSettings = settings;
     return settings;

@@ -197,8 +197,9 @@ function applyStaffReadOnlyToPanel(panel) {
     panel.prepend(note);
   }
   panel.querySelectorAll('input, select, textarea').forEach(field => {
-    // Ô tìm kiếm/lọc để xem vẫn dùng được.
+    // Ô tìm kiếm/lọc để xem vẫn dùng được; vùng [data-staff-allow] là việc của nhân viên (trạng thái khách để lại SĐT).
     if (field.type === 'search' || /search|filter|range/i.test(`${field.id} ${field.className}`)) return;
+    if (field.closest('[data-staff-allow]')) return;
     field.disabled = true;
   });
   panel.querySelectorAll('button, label.file-button').forEach(control => {
@@ -1983,9 +1984,11 @@ function campaignsAgo(value) {
   return timeSince(at).toLowerCase();
 }
 
+// 12/10 (chủ shop): danh sách chỉ hiện chiến dịch đang chạy của Meta nên bỏ nhãn "Đang chạy" và "Meta" — chỉ còn nhãn
+// cho trường hợp khác thường (Tạm dừng / Đã tắt, chiến dịch UTM không có chi phí).
 function campaignStatusChip(status) {
   const key = String(status || '').toUpperCase();
-  if (!key) return '';
+  if (!key || key === 'ACTIVE') return '';
   const label = key === 'ACTIVE' ? 'Đang chạy' : key.includes('PAUSED') ? 'Tạm dừng' : key === 'ARCHIVED' || key === 'DELETED' ? 'Đã tắt' : key;
   const tone = key === 'ACTIVE' ? 'is-on' : 'is-off';
   return `<span class="campaign-chip ${tone}">${escapeHtml(label)}</span>`;
@@ -2059,11 +2062,21 @@ function campaignsHeadHtml() {
   return sortableHeadHtml(campaignsColumns, campaignsSortKey, campaignsSortDir);
 }
 
+/** Nhãn nguồn dưới tên chiến dịch: chỉ chiến dịch UTM (không phải Meta) mới có. */
+function campaignSourceChip(source) {
+  return source === 'meta' ? '' : '<span class="campaign-chip is-source">UTM</span>';
+}
+
+/** Hàng nhãn dưới tên chiến dịch; không còn nhãn nào thì không dựng (khỏi chừa dòng trống). */
+function campaignChipsHtml(status, source) {
+  const chips = `${campaignStatusChip(status)}${campaignSourceChip(source)}`;
+  return chips ? `<span class="campaign-chips">${chips}</span>` : '';
+}
+
 function campaignRowHtml(campaign, averageRoas) {
-  const source = campaign.source === 'meta' ? 'Meta' : 'UTM';
   const tone = campaignRoasTone(campaign.roas, averageRoas);
   return `<tr data-campaign-id="${escapeHtml(campaign.id)}">
-    <td class="campaign-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong><span class="campaign-chips">${campaignStatusChip(campaign.status)}<span class="campaign-chip is-source">${source}</span></span></td>
+    <td class="campaign-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong>${campaignChipsHtml(campaign.status, campaign.source)}</td>
     <td class="is-num">${escapeHtml(campaignMoneyOrDash(campaign.dailyBudget))}</td>
     <td class="is-num">${escapeHtml(formatCustomerMoney(campaign.spend))}</td>
     <td class="is-num">${escapeHtml(campaignNumber(campaign.impressions))}</td>
@@ -2971,7 +2984,7 @@ function renderDashboardCampaigns(campaigns, active) {
   dashboardTopCampaigns.innerHTML = list.length ? `<div class="data-table"><table>
     <thead><tr><th>Chiến dịch</th><th class="is-num">Chi phí</th><th class="is-num">Đơn</th><th class="is-num">Doanh thu</th><th class="is-num">ROAS</th></tr></thead>
     <tbody>${list.map(campaign => `<tr data-dashboard-campaign="${escapeHtml(campaign.id || '')}" tabindex="0" title="Mở trong Quản lý chiến dịch">
-      <td class="data-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong><span class="campaign-chips"><span class="campaign-chip is-source">${campaign.source === 'meta' ? 'Meta' : 'UTM'}</span></span></td>
+      <td class="data-name"><strong title="${escapeHtml(campaign.name || '')}">${escapeHtml(campaign.name || 'Không tên')}</strong>${campaignChipsHtml('', campaign.source)}</td>
       <td class="is-num">${escapeHtml(statMoney(campaign.spend))}</td>
       <td class="is-num">${escapeHtml(statCount(campaign.orders))}</td>
       <td class="is-num">${escapeHtml(statMoney(campaign.revenue))}</td>
@@ -3356,7 +3369,7 @@ function renderReportCampaigns(data) {
   };
   const averageRoas = campaignTotals.roas;
   return reportAdsNoticeHtml(data) + reportTableHtml([
-    { key: 'name', label: 'Chiến dịch', cls: 'campaign-name', cell: row => `<strong title="${escapeHtml(row.name || '')}">${escapeHtml(row.name || 'Không tên')}</strong><span class="campaign-chips">${campaignStatusChip(row.status)}<span class="campaign-chip is-source">${row.source === 'meta' ? 'Meta' : 'UTM'}</span></span>` },
+    { key: 'name', label: 'Chiến dịch', cls: 'campaign-name', cell: row => `<strong title="${escapeHtml(row.name || '')}">${escapeHtml(row.name || 'Không tên')}</strong>${campaignChipsHtml(row.status, row.source)}` },
     { key: 'spend', label: 'Chi phí', num: true, cell: reportCell.money('spend'), total: t => escapeHtml(statMoney(t.spend)) },
     { key: 'orders', label: 'Đơn', num: true, cell: reportCell.count('orders'), total: t => escapeHtml(statCount(t.orders)) },
     { key: 'revenue', label: 'Doanh thu', num: true, cell: reportCell.money('revenue'), total: t => escapeHtml(statMoney(t.revenue)) },
@@ -6459,6 +6472,14 @@ function handleMessagingEvent(event) {
   }
   if (event.type === 'sync') {
     if (event.pageId === currentMessageChannelId) renderRemoteConversations(event.conversations || []);
+    return;
+  }
+  // Khách quét thẻ để lại SĐT trên trang đệm: báo nhân viên, bảng Cài đặt → Mã QR đang mở thì tải lại.
+  if (event.type === 'qr-lead') {
+    const lead = event.lead || {};
+    const who = [lead.name, String(lead.phone || '').replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3')].filter(Boolean).join(' · ');
+    showToast(`${lead.test ? '(Thử) ' : ''}Khách quét thẻ QR ${lead.created === false ? 'để lại số lần nữa' : 'để lại SĐT'}: ${who}. Xem ở Cài đặt → Mã QR.`, 'info', 8000, { notify: true });
+    if (typeof qrLeadState !== 'undefined' && !document.querySelector('[data-settings-panel="qr"]')?.classList.contains('hidden')) loadQrLeads();
     return;
   }
   const conversation = event.conversation;
@@ -14465,10 +14486,145 @@ function renderQrMetrics(main, keys) {
   // Theo thứ tự của phễu: quét → trang đệm → mở Messenger. Mở Messenger = bấm nút trên
   // trang đệm + lượt Android chuyển thẳng (không qua trang đệm), nên so với tổng lượt quét.
   const opened = qrOpenedCount(sum);
+  const leads = qrLeadCount(keys);
   container.innerHTML = tile('scan', 'scan', 'Lượt quét', sum.scans, `hôm nay ${todayScans}`)
     + tile('page', 'landing-page', 'Trang đệm', sum.pages, qrPercent(sum.pages, sum.scans))
-    + tile('arrival', 'messenger', 'Mở Messenger', opened, qrPercent(opened, sum.scans));
+    + tile('arrival', 'messenger', 'Mở Messenger', opened, qrPercent(opened, sum.scans))
+    + tile('lead', 'phone', 'Để lại SĐT', leads, qrPercent(leads, sum.scans));
 }
+
+// ===== Khách để lại SĐT trên trang đệm (/api/qr/leads, app/qr-leads.mjs) =====
+// Khách mới với Page vào Messenger mà không nhắn thì Page không nhắn trước được: số điện thoại khách tự để lại
+// trên trang đệm là đường liên hệ. Dòng "thử" (máy nhân viên đã đăng nhập) không tính vào số liệu.
+const qrLeadState = { items: [], statuses: {}, leadForm: true };
+
+function qrLeadDayKey(at) {
+  return new Date((Number(at) || 0) + 7 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/** Số khách thật để lại SĐT trong kỳ đang chọn (`keys` null = tất cả). */
+function qrLeadCount(keys) {
+  const days = keys ? new Set(keys) : null;
+  return qrLeadState.items.filter(lead => !lead.test && (!days || days.has(qrLeadDayKey(lead.createdAt)))).length;
+}
+
+function qrLeadPhoneText(phone) {
+  return String(phone || '').replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3');
+}
+
+function renderQrLeads() {
+  const list = document.querySelector('#qr-leads-list');
+  const count = document.querySelector('#qr-leads-count');
+  const toggle = document.querySelector('#qr-lead-form-toggle');
+  if (toggle) toggle.checked = qrLeadState.leadForm !== false;
+  if (!list) return;
+  const items = qrLeadState.items;
+  const waiting = items.filter(lead => !lead.test && lead.status === 'new' && !lead.purchasedAt).length;
+  if (count) count.textContent = items.length ? `${items.length}${waiting ? ` · ${waiting} chưa liên hệ` : ''}` : '';
+  if (!items.length) {
+    list.innerHTML = `<p class="qr-leads-empty">${qrLeadState.leadForm === false ? 'Ô để lại SĐT đang tắt trên trang quét.' : 'Chưa có khách nào để lại số. Khách quét thẻ và để lại số sẽ hiện ở đây.'}</p>`;
+    return;
+  }
+  const options = Object.entries(qrLeadState.statuses);
+  list.innerHTML = `<table class="qr-leads-table"><thead><tr>
+      <th>Lúc để lại</th><th>Khách</th><th>Liên hệ</th><th>Trạng thái</th><th>Ghi chú</th><th></th>
+    </tr></thead><tbody>${items.map(lead => {
+    const phone = escapeHtml(lead.phone);
+    const tags = [
+      lead.purchasedAt ? `<span class="qr-lead-tag is-ok" title="Đơn ${formatQrShortTime(lead.purchasedAt)}">Đã mua</span>` : '',
+      lead.boughtBefore ? '<span class="qr-lead-tag" title="Số này đã có đơn trước lúc để lại">Khách cũ</span>' : '',
+      lead.visits > 1 ? `<span class="qr-lead-tag">${lead.visits} lần</span>` : '',
+      lead.test ? '<span class="qr-lead-tag is-test" title="Máy nhân viên đã đăng nhập CRM, không tính vào số liệu">Thử</span>' : ''
+    ].join('');
+    return `<tr data-qr-lead="${escapeHtml(lead.id)}"${lead.status === 'new' && !lead.purchasedAt && !lead.test ? ' class="is-new"' : ''}>
+      <td class="is-time">${formatQrShortTime(lead.lastAt || lead.createdAt)}<small>${escapeHtml(qrDeviceText(lead))}</small></td>
+      <td class="is-who"><b>${escapeHtml(lead.name || 'Chưa để tên')}</b><span>${escapeHtml(qrLeadPhoneText(lead.phone))}</span>${tags ? `<span class="qr-lead-tags">${tags}</span>` : ''}</td>
+      <td class="is-contact"><a class="qr-mini" href="tel:${phone}">Gọi</a><a class="qr-mini" href="https://zalo.me/${phone}" target="_blank" rel="noopener">Zalo</a><button type="button" class="qr-mini" data-qr-lead-copy="${phone}" title="Sao chép số">Chép số</button></td>
+      <td><select class="qr-lead-status" data-qr-lead-status aria-label="Trạng thái">${options.map(([value, label]) => `<option value="${escapeHtml(value)}"${value === lead.status ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select>${lead.updatedBy ? `<small class="qr-lead-by">${escapeHtml(lead.updatedBy)} · ${formatQrShortTime(lead.updatedAt)}</small>` : ''}</td>
+      <td><input class="qr-lead-note" data-qr-lead-note type="text" maxlength="500" value="${escapeHtml(lead.note || '')}" placeholder="Ghi chú cuộc gọi" aria-label="Ghi chú"></td>
+      <td class="is-actions"><button type="button" class="qr-mini is-danger" data-qr-lead-delete title="Xoá số này">Xoá</button></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+async function loadQrLeads() {
+  try {
+    const [leads, settings] = await Promise.all([
+      readApiResponse(await fetch('/api/qr/leads')),
+      readApiResponse(await fetch('/api/qr/settings'))
+    ]);
+    qrLeadState.items = Array.isArray(leads.items) ? leads.items : [];
+    qrLeadState.statuses = leads.statuses || {};
+    qrLeadState.leadForm = settings.leadForm !== false;
+    renderQrLeads();
+    if (qrState.stats) renderQrMetrics((qrState.stats.codes || []).find(entry => entry.code === qrState.stats.mainCode), qrCurrentKeys());
+  } catch (error) {
+    const list = document.querySelector('#qr-leads-list');
+    if (list) list.innerHTML = '<p class="qr-leads-empty">Chưa tải được danh sách khách để lại SĐT.</p>';
+  }
+}
+
+async function saveQrLead(row, patch) {
+  const id = row?.dataset.qrLead;
+  if (!id) return;
+  try {
+    const saved = await readApiResponse(await fetch(`/api/qr/leads/${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch)
+    }));
+    const index = qrLeadState.items.findIndex(item => item.id === id);
+    if (index >= 0) qrLeadState.items[index] = { ...qrLeadState.items[index], ...saved };
+    renderQrLeads();
+    showToast(patch.status !== undefined ? `Đã đổi trạng thái: ${qrLeadState.statuses[saved.status] || saved.status}.` : 'Đã lưu ghi chú.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa lưu được.', 'error');
+    renderQrLeads();
+  }
+}
+
+document.querySelector('#qr-leads-list')?.addEventListener('change', event => {
+  const row = event.target.closest('[data-qr-lead]');
+  if (event.target.matches('[data-qr-lead-status]')) saveQrLead(row, { status: event.target.value });
+  else if (event.target.matches('[data-qr-lead-note]')) saveQrLead(row, { note: event.target.value });
+});
+document.querySelector('#qr-leads-list')?.addEventListener('click', async event => {
+  const copy = event.target.closest('[data-qr-lead-copy]');
+  if (copy) {
+    try {
+      await navigator.clipboard.writeText(copy.dataset.qrLeadCopy);
+      showToast('Đã sao chép số điện thoại.', 'success');
+    } catch {
+      showToast('Trình duyệt không cho sao chép, hãy chọn và chép tay.', 'warning');
+    }
+    return;
+  }
+  const remove = event.target.closest('[data-qr-lead-delete]');
+  if (!remove) return;
+  const row = remove.closest('[data-qr-lead]');
+  const lead = qrLeadState.items.find(item => item.id === row?.dataset.qrLead);
+  if (!lead || !window.confirm(`Xoá số ${qrLeadPhoneText(lead.phone)}${lead.name ? ` (${lead.name})` : ''} khỏi danh sách?`)) return;
+  try {
+    await readApiResponse(await fetch(`/api/qr/leads/${encodeURIComponent(lead.id)}`, { method: 'DELETE' }));
+    qrLeadState.items = qrLeadState.items.filter(item => item.id !== lead.id);
+    renderQrLeads();
+    showToast('Đã xoá số khỏi danh sách.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Chưa xoá được.', 'error');
+  }
+});
+document.querySelector('#qr-lead-form-toggle')?.addEventListener('change', async event => {
+  const leadForm = event.target.checked;
+  try {
+    const saved = await readApiResponse(await fetch('/api/qr/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadForm })
+    }));
+    qrLeadState.leadForm = saved.leadForm !== false;
+    renderQrLeads();
+    showToast(qrLeadState.leadForm ? 'Đã bật ô để lại SĐT trên trang quét.' : 'Đã tắt ô để lại SĐT trên trang quét.', 'success');
+  } catch (error) {
+    event.target.checked = !leadForm;
+    showToast(error.message || 'Chưa lưu được.', 'error');
+  }
+});
 
 function renderQrChart(main) {
   const container = document.querySelector('#qr-chart');
@@ -14619,6 +14775,7 @@ function renderQrDashboard() {
 async function loadQrSettings() {
   const container = document.querySelector('#qr-metrics');
   if (!container) return;
+  loadQrLeads();
   try {
     qrState.stats = await readApiResponse(await fetch('/api/qr/stats'));
     renderQrDashboard();

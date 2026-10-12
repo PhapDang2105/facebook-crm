@@ -38,6 +38,7 @@ const sandboxFiles = {
   FOLLOW_UPS_PATH: 'follow-ups.json',
   QR_SCANS_PATH: 'qr-scans.json',
   QR_SETTINGS_PATH: 'qr-settings.json',
+  QR_LEADS_PATH: 'qr-leads.json',
   LANDING_ORDERS_PATH: 'landing-orders.json',
   POS_CONFIG_PATH: 'pos-config.json',
   POS_COMBOS_PATH: 'pos-combos.json',

@@ -282,6 +282,31 @@ const INGREDIENT_NAMES = { 'yen mach': 'yến mạch', 'hanh nhan': 'hạnh nhâ
 // engine tự kèm dòng giỏ. So trên chữ bỏ dấu nhưng CHƯA cắt từ đệm cuối (core() cắt mất "ha"/"nhi").
 const CONFIRM_TAIL = /\b(dung (khong|ko|k|kg|chu|ha|nhi|hong)|phai (khong|ko|k))(?: (?:a|ah|ak|shop|em|e|chi|c|ban|nha|nhe|v|vay|z|ta|he))*$/;
 const BASKET_CHANGE = /\b(doi|them|bot|huy|thay|khong lay|ko lay|k lay|nua)\b/;
+/**
+ * R18 (inbox1 N2): câu khách tóm tắt giỏ ("… đúng không") có KHỚP giỏ đang giữ không. `ctx.heldItems` [{ sku, quantity }] và
+ * `ctx.heldGiftOverride` (quà đã đổi) do engine truyền; thiếu → '' (không kiểm, như cũ).
+ * @returns {''|'gift'|'total'|'count'|'colour'|'ship'}
+ */
+function confirmMismatch(body, ctx = {}) {
+  const items = (Array.isArray(ctx.heldItems) ? ctx.heldItems : []).filter(item => item?.sku);
+  if (!items.length) return '';
+  const priced = priceBasket(items.map(item => ({ sku: item.sku, quantity: Number(item.quantity) || 1 })), { livestream: Boolean(ctx.livestream) });
+  if (!priced?.priceable) return '';
+  const override = Array.isArray(ctx.heldGiftOverride) && ctx.heldGiftOverride.length ? ctx.heldGiftOverride : null;
+  const giftText = foldVietnamese([...(override || priced.gifts)].map(gift => String(gift?.name || '')).join(' ')).toLowerCase();
+  for (const words of ['bat|gao dua|chen', 'quat', 'muong|thia']) {
+    const said = new RegExp(`\\b(?:${words})\\b`);
+    if (said.test(body) && !said.test(giftText)) return 'gift';
+  }
+  const amounts = [...body.matchAll(/\b([1-9]\d{2})(?: ?(?:k|000|nghin|ngan))?\b/g)].map(match => Number(match[1]) * 1000);
+  if (amounts.length && !amounts.includes(Math.round(Number(priced.total) || 0))) return 'total';
+  const count = body.match(/\b(\d{1,2}) ?(?:tui|goi|bich)\b/);
+  if (count && Number(count[1]) !== items.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0)) return 'count';
+  const colours = [...new Set(body.match(/\b(?:xanh|vang|nau|cacao)\b/g) || [])].map(colour => (colour === 'cacao' ? 'nau' : colour));
+  if (colours.some(colour => !items.some(item => String(item.sku).toLowerCase().includes(`-${colour}-`)))) return 'colour';
+  if (/\b(?:mien|free|freeship)\b/.test(body) && !(Number(priced.shippingFee) === 0 || priced.gifts.some(gift => isFreeShippingGift(gift)))) return 'ship';
+  return '';
+}
 // "mua ở đâu / mua thế nào / mua sản phẩm này kiểu gì": hướng dẫn đặt ngay tại đây (ORDER_HELP), chỉ
 // khi khách không nhắc sàn/link (ECOMMERCE_LINKS).
 const HOW_TO_BUY = /\bmua (?:(?:sp|san pham|hang) )?(?:nay )?(?:o dau|cho nao|ntn|the nao|kieu gi)\b/;
@@ -1793,6 +1818,12 @@ export function ruleIntent(text, ctx = {}) {
   if (!isComment && ctx.hasBasket && !phone && !BASKET_CHANGE.test(s) && CONFIRM_TAIL.test(sFull)
     && (/\d|\b(?:xanh|vang|nau|cacao|mint|tropical|tui|goi|bich|hop|combo|gia|tong|ship|sip|mien|free|freeship|qua|tang|bat|muong|quat|nghin|ngan)\b/.test(confirmBody)
       || !confirmBody.replace(/\b(?:vay|v|the|la|nhu vay|nhu the|the la|vay la|ok|oke|da|dạ|u|uh|a|ah|ak|shop|em|e|chi|c)\b/g, ' ').trim())) {
+    // R18 (inbox1 N2, ca …28434895759505949 Hoà Lê: giỏ 1 Xanh + 1 Nâu, "Có tặng bát dừa đúng ko ạ" → "Dạ đúng rồi ạ" dù giỏ 2 túi không
+    // có bát — NV phải tặng bù): chỉ "đúng rồi" khi điều khách nói KHỚP giỏ (quà, tổng tiền, số túi, màu, miễn ship). Sai quà → nói quà
+    // của giỏ (GIFT_POLICY: giỏ 2 túi đòi bát → mời 3 túi); sai tiền/số túi/màu → nhắc đúng giỏ.
+    const mismatch = confirmMismatch(confirmBody, ctx);
+    if (mismatch === 'gift') return infoReply('CONFIRM_GIFT_MISMATCH', 'GIFT_POLICY');
+    if (mismatch) return { rule: 'CONFIRM_MISMATCH', value: { template_id: 'ORDER_ADDRESS' } };
     return { rule: 'CONFIRM_SUMMARY', value: { template_id: 'CONFIRM_YES' } };
   }
   // Vòng 10: bot vừa hỏi vị, khách trả lời một màu ("Túi xanh", "Vàng nhiều hạt", "Nâu cacao ạ", "xanh") → 1 túi màu đó.

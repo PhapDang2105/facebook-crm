@@ -2972,6 +2972,9 @@ async function answerChange(incomingChange, settings, results, dependencies) {
             : ['on', 'shadow', 'off'].includes(settings.candidateRules) ? settings.candidateRules : 'shadow',
           // Số mã hàng khác nhau trong giỏ đang giữ (K3: "Lấy 2 túi" chỉ đổi số lượng khi giỏ có MỘT mã).
           basketCodeCount: new Set((usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items || []).map(item => String(item.code || item.product || ''))).size,
+          // R18 (luật CONFIRM_SUMMARY đối chiếu câu khách với giỏ): món + quà đã đổi của giỏ đang giữ.
+          heldItems: (usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items || []).map(item => ({ sku: String(item.code || ''), quantity: Number(item.quantity) || 1 })),
+          heldGiftOverride: Array.isArray(conversation.pendingOrder?.giftOverride) ? conversation.pendingOrder.giftOverride : null,
           // Khách vừa bấm giỏ Facebook Shop (30 phút) mà giỏ chưa thành giỏ chờ (đang kiểm đơn / giỏ nhân viên lên đơn): để luật
           // "bấm nhầm" (CANCEL_BASKET_MISCLICK) chạy được.
           shopCart: !basketHeld && recent.some(item => item?.direction === 'incoming' && item.id !== change.message.id && ((Array.isArray(item.cart) && item.cart.length > 0) || isShopCartText(item.text)) && Date.now() - (Number(item.createdAt) || 0) < 30 * 60 * 1000),
@@ -3310,6 +3313,20 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     // — không bảo khách "xem ở trên" lần nữa.
     if (nudgeTemplateIds.includes(reply.templateId) && !customerRepeats && !nudgeLike && !nonText) {
       reply = { ...renderChatbotReply({ template_id: 'CSKH_HANDOFF', warming: '1' }, templates, replyContext), attention: true };
+    }
+    // R18 (inbox1 N2, ca …29061089686837574 "Cũng như nhau chứ" sau PRICE_COMPARE): mô hình chọn CONFIRM_YES ("Dạ đúng rồi ạ… gửi em SĐT +
+    // địa chỉ") khi KHÔNG giữ giỏ, không có đơn → không có gì để "đúng rồi": gọi lại mô hình MỘT lần (không CONFIRM_YES); vẫn vậy → báo
+    // bạn phụ trách (STAFF_WAIT_* + thẻ).
+    if (trace.llm && chosenTemplateId === 'CONFIRM_YES' && reply.templateId === 'CONFIRM_YES' && !basketHeld && !hasOrder && conversation.source !== 'comment' && !nonText && !trialActive) {
+      const again = await askModel({ replyHint: 'LƯU Ý: khách KHÔNG có giỏ hàng nào đang giữ — KHÔNG chọn CONFIRM_YES. Chọn mẫu trả lời đúng ý câu khách vừa nói (thường là nói tiếp ý bot vừa trả lời).', hintLabel: 'no-confirm' })
+        .then(answer => (answer ? contextualAlso(contextualReply(answer)) : null))
+        .catch(error => { if (error instanceof NewerMessageSkip) throw error; return null; });
+      if (again && again.templateId !== 'CONFIRM_YES' && !again.handoff && !again.order && !isOrderStep(again.templateId)) reply = again;
+      else {
+        const wait = staffWaitTemplate();
+        const soft = renderChatbotReply({ template_id: wait.templateId, values: { when: wait.when } }, templates, replyContext);
+        if (soft.templateId === wait.templateId && soft.messages?.length) reply = { ...soft, handoff: false, attention: true, staffWait: true };
+      }
     }
     // R14 (inbox3 H4, ca …017802): mô hình chọn CSKH_HANDOFF (tắt bot) cho tin hộp thư rất ngắn ("Dỡ") rồi không ai trả lời.
     // Prompt đã dặn "không chuyển người vì tin ngắn": tin ≤ 3 chữ, khách không đòi gặp người → KHÔNG tắt bot:

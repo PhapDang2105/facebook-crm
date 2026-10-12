@@ -82,7 +82,8 @@ const TEMPLATES_BY_SUBGROUP = {
 // R17 (10/10): ALLERGY_HAS_INGREDIENT / INGREDIENT_NOT_INCLUDED (luật dị ứng) cùng cách.
 // R18 (12/10): GIFT_FAN_PHOTO (khách xin xem ảnh Quạt, engine tự chọn — app/gift-photos.mjs) cùng cách.
 // R18 (12/10): SHIPPING_CARRIER (luật hỏi đơn vị vận chuyển) và GREETING_SHORT (lời gọi giữa luồng đơn) cùng cách.
-export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED', 'BAG_SIZE_INFO', 'FRUIT_PAIRING', 'SMALL_PACK_FLAVOURS', 'DEFAULT_FLAVOUR_NOTE', 'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED', 'SHIPPING_CARRIER', 'GREETING_SHORT', 'GIFT_FAN_PHOTO'].includes(String(templateId || ''));
+// R18 (12/10): COMBO10_FAMILY ("combo gia đình" sau bảng Combo 10 gói) cùng cách.
+export const isIntentionalOther = templateId => /^(COMMENT_|FOLLOW_UP_|TRIAL_|SHIPMENT_)/.test(String(templateId || '')) || ['QR_OFFER', 'LIVESTREAM_COMMENT', 'LIVE_DEAL_CLAIMED', 'REPLY_ALREADY_SENT', 'REPLY_ALREADY_SENT_INFO', 'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE', 'ORDER_STATUS_SHIPPED', 'BAG_SIZE_INFO', 'FRUIT_PAIRING', 'SMALL_PACK_FLAVOURS', 'DEFAULT_FLAVOUR_NOTE', 'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED', 'SHIPPING_CARRIER', 'GREETING_SHORT', 'GIFT_FAN_PHOTO', 'COMBO10_FAMILY'].includes(String(templateId || ''));
 
 /** Mã mẫu → nhóm 6 lớp (bảng đã chốt, PRICE/INFO/SOCIAL tách). Mã không có trong bảng và COMMENT_* không có mục. */
 export const SUBGROUP_OF_TEMPLATE = Object.freeze(Object.fromEntries(Object.entries(TEMPLATES_BY_SUBGROUP).flatMap(([subgroup, templates]) => templates.map(templateId => [templateId, subgroup]))));

@@ -685,7 +685,9 @@ export function distinctKindsCount(text) {
   if (!match) return 0;
   // Phải có ý lấy ("lấy/mua/đặt/chốt/cho/gửi…") hay cả tin chỉ là "3 màu (nhé/nha…)".
   // R17 (inbox2 C1, ca …7347802265 "2 túi 2 vị e nhé!"): "N túi N vị" trơn (số túi = số vị, không động từ) cũng là chọn N vị.
-  const short = /^(?:(?:thi|vay|la|chi|c|minh|em|e|anh|a)\s+)?(?:(2|3|hai|ba) (?:tui|goi|bich|bit) )?(2|3|hai|ba) (?:mau|vi|loai)(?: (?:nhe|nha|nhen|luon|thoi|di|a|ha|shop|e|em|c|chi|nhe shop|nha shop))*$/.test(s)
+  // R18 (inbox2 N7 / cross R4, ca …8007768513336 "Ko chị 3 túi 3 vị", "Chị 3 túi 3 vị khác nhau" khi đang giữ 3 Xanh mặc định): lời đính
+  // chính "không/ko (phải)" đứng đầu và đuôi "khác nhau" vẫn là chọn N vị.
+  const short = /^(?:(?:khong|ko|k|kg|hong|khong phai|ko phai|k phai)\s+)?(?:(?:thi|vay|la|chi|c|minh|em|e|anh|a)\s+)?(?:(2|3|hai|ba) (?:tui|goi|bich|bit) )?(2|3|hai|ba) (?:mau|vi|loai)(?: (?:khac nhau|nhe|nha|nhen|luon|thoi|di|a|ha|shop|e|em|c|chi|nhe shop|nha shop))*$/.test(s)
     && (() => { const m = s.match(/(2|3|hai|ba) (?:tui|goi|bich|bit) (2|3|hai|ba) (?:mau|vi|loai)/); return !m || numberOf(m[1]) === numberOf(m[2]); })();
   if (!short && !/\b(?:lay|mua|dat|chot|cho|gui|ship|order|an|thu)\b/.test(s)) return 0;
   const kinds = numberOf(match[1]);
@@ -1737,6 +1739,8 @@ export const r15FallbackTemplates = Object.freeze({
   ORDER_ADDRESS_OLD_NOT_FOUND: 'Dạ em chưa tìm thấy địa chỉ cũ theo số này ạ, {title} gửi giúp em địa chỉ nhận hàng (số nhà, đường, phường/xã, tỉnh) để em lên đơn liền nha ạ.',
   // R17 (chủ shop 10/10, quyết định 1): Combo 10 gói Cam bán lại — combo 10 gói có Xanh và Cam (Nâu/Mix vẫn tắt).
   SMALL_PACK_FLAVOURS: 'Dạ combo 10 gói nhỏ hiện bên em có 2 vị: Xanh nguyên bản (dễ ăn, cân bằng) và Cam (vị bơ hạt điều) ạ. {Title} cần em gửi bảng giá combo 10 gói không ạ?',
+  // R18 (inbox4 N2): bot vừa gửi bảng giá Combo 10 gói, khách nói "combo gia đình" (= 3 hộp 10 gói, không phải 3 túi lớn).
+  COMBO10_FAMILY: 'Dạ "Combo Gia Đình" ở bảng gói nhỏ là 3 hộp Combo 10 gói ạ (mỗi hộp 10 gói nhỏ ăn một bữa), giá và quà như bảng em vừa gửi 🎁 Combo 10 gói hiện có 2 vị: Xanh nguyên bản (gói 35g) và Cam bơ hạt điều (gói 30g), mình mix Xanh + Cam được ạ. {Title} lấy mấy hộp Xanh, mấy hộp Cam để em lên đơn nha 🌾',
   // R15 (inbox1 A5): khách đã nêu màu ({named}) thì không hỏi lại "vị nào". Mã đã có trong seed → bảng này chỉ khi bộ mẫu thiếu mã.
   PRICE_COUNT: 'Dạ {count} túi ({kind}) giá {total}[?ship] + phí ship {ship}[/?][?free], miễn phí vận chuyển[/?][?gift], tặng {gift}[/?] ạ 🌾[?named] {Title} lấy luôn {count} {kind} để em lên đơn liền cho mình nha?[/?][?pick] {Title} lấy {count} túi vị nào để em lên đơn liền cho mình nha?[/?]',
   ORDER_EXISTING_CONFIRM: 'Dạ {title} ơi, em thấy mình đang có đơn {existing_items} đặt lúc {existing_at}, hiện {existing_state} ạ 🌾 {Title} muốn em gộp {cart} vào đơn đang có, hay tách thành đơn mới (em gửi cùng địa chỉ cũ) ạ?'
@@ -2151,7 +2155,9 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
   // R18: engine/luật tự chọn — xin lỗi khi nhân viên đang xử lý mà khách khiếu nại/chờ lâu; lời gọi giữa luồng đơn.
   'STAFF_WAIT_COMPLAINT', 'GREETING_SHORT',
   // R17: luật dị ứng tự chọn (cần {ingredient} điền sẵn).
-  'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED']);
+  'ALLERGY_HAS_INGREDIENT', 'INGREDIENT_NOT_INCLUDED',
+  // R18: luật tự chọn khi khách nói "combo gia đình" ngay sau bảng giá Combo 10 gói.
+  'COMBO10_FAMILY']);
 
 // fix-bot T1 (01/10): mẫu "báo sự việc đã xảy ra" (đã nhận đơn Shop, đã hủy/sửa/ghi chú đơn, đã nhận deal live, đơn
 // đang có…) — chỉ engine được chọn khi việc đó thật sự xảy ra; mô hình trả các mã này thì luôn đổi về GENERAL_INFO.

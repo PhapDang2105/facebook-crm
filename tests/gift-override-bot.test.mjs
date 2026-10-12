@@ -31,10 +31,13 @@ const skus = list => (list || []).map(item => item.sku);
 const giftLines = payload => payload.items.filter(item => item.is_bonus_product).map(item => `${item.variation_id}x${item.quantity}`);
 
 test('nhận câu "chỉ bỏ quạt" (câu khách thật) và loại câu bỏ cả bát / xin quà khác', () => {
-  for (const text of ['C ko lấy quạt .bỏ ra hộ c về ko dùng phí', 'bỏ quạt', 'không cần quạt', 'đổi quạt', 'khỏi quạt', 'ko lấy quat .bỏ ra', 'Em kgg lấy quạt tặng em cái muỗng', 'Không lấy quạt, lấy bộ bát với muỗng thôi']) {
+  for (const text of ['C ko lấy quạt .bỏ ra hộ c về ko dùng phí', 'bỏ quạt', 'không cần quạt', 'đổi quạt', 'khỏi quạt', 'ko lấy quat .bỏ ra', 'Em kgg lấy quạt tặng em cái muỗng', 'Không lấy quạt, lấy bộ bát với muỗng thôi',
+    // R18 (quyết định chủ shop 10/10: combo 2 live không lấy quạt → 1 Bát gáo dừa; inbox3 N2 "k lấy quạt. Đổi quà khác đc k"): xin quà khác
+    // CHUNG CHUNG cũng tự đổi (trước đây giữ GIFT_SWAP nên đơn vẫn ghi Quạt).
+    'đổi quạt sang cái khác được ko']) {
     assert.equal(isFanToSpoonRequest(text), true, text);
   }
-  for (const text of ['Ok, mình ko lấy bát và quạt', 'ko lấy bát', 'đổi quạt sang cái khác được ko', 'quạt đẹp không', 'ko lấy quạt với muỗng', 'không lấy quạt, có trừ tiền không', 'Tặng quạt jì vậy', 'ko lấy quạt đổi gói nhỏ nhé', 'bỏ bát với quạt']) {
+  for (const text of ['Ok, mình ko lấy bát và quạt', 'ko lấy bát', 'quạt đẹp không', 'ko lấy quạt với muỗng', 'không lấy quạt, có trừ tiền không', 'Tặng quạt jì vậy', 'ko lấy quạt đổi gói nhỏ nhé', 'bỏ bát với quạt']) {
     assert.equal(isFanToSpoonRequest(text), false, text);
   }
   assert.equal(asksSpoonIncluded('có thìa dừa không'), true);

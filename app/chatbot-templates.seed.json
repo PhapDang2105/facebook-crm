@@ -79,7 +79,7 @@
   "CRUNCHY_CEREAL_INFO": "Dạ hạt tròn là viên ngũ cốc giòn, làm từ yến mạch, gạo lứt, mật thốt nốt, bột chuối xanh và muối hồng Himalaya ạ. Quy trình kết hợp sấy và nướng, hoàn toàn không chiên qua dầu.",
   "NO_ADDED_SUGAR": "Dạ granola nhà em có dùng mật thốt nốt và đường mạch nha để tạo vị ngọt nhẹ, ngoài ra có trái cây sấy (nho khô, xoài, nam việt quất) ạ. Người tiểu đường, đang kiêng đường hay mẹ bầu thì {title} nên hỏi ý kiến bác sĩ trước và dùng lượng vừa phải (2–3 muỗng mỗi bữa) nha ạ.",
   "OIL_SMELL_WARRANTY": "Dạ bên em sản xuất lô mới liên tục, granola được nướng (không chiên dầu) và đóng túi zip nên giữ được độ giòn, thơm ạ 🌿 Nếu khi mở ra mình thấy có mùi lạ, {title} quay video giúp em, bên em đổi mới ngay cho mình nha ạ 💛",
-  "WEIGHT_EXPIRY": "Dạ Túi Xanh nặng 450g, Túi Vàng và Túi Nâu cacao nặng 350g ạ. Hạn sử dụng 6 tháng kể từ ngày sản xuất và được in đầy đủ trên bao bì ạ.",
+  "WEIGHT_EXPIRY": "Dạ Túi Xanh nặng 450g, Túi Vàng và Túi Nâu cacao nặng 350g, Granola Tropical 300g; Combo 10 gói Xanh gồm 10 gói nhỏ 35g (350g), Combo 10 gói Cam gồm 10 gói nhỏ 30g (300g) ạ. Hạn sử dụng 6 tháng kể từ ngày sản xuất và được in đầy đủ trên bao bì ạ.",
   "DELIVERY_DELAY": "Dạ em xin lỗi mình vì đơn giao chậm ạ. Đợt này đơn vị vận chuyển quá tải nên thời gian giao có thể chậm hơn dự kiến; bên em đang theo dõi và thúc đẩy giao sớm nhất cho mình ạ.",
   "INSPECTION_RETURN_POLICY": "Dạ khi nhận hàng mình hỗ trợ đồng kiểm cùng shipper về mẫu mã sản phẩm. Bên em chưa hỗ trợ dùng thử hoặc khui hàng khi nhận. Sau khi trải nghiệm, nếu chưa hài lòng bên em hỗ trợ đổi/trả hoặc hoàn tiền theo chính sách bảo hành ạ.",
   "REFUSED_DELIVERY": "Dạ em kiểm tra hệ thống ghi nhận đơn bị khách hàng từ chối nhận nên đang hoàn về ạ. {Title} cho em xin phép hỏi mình có nhận được cuộc gọi từ shipper không để bên em có cơ sở làm việc và khiếu nại với đơn vị vận chuyển, đảm bảo quyền lợi cho mình ạ.",
@@ -153,5 +153,6 @@
   "DEFAULT_FLAVOUR_NOTE": "Dạ {title} chưa chọn vị nên em lên {count} Túi Xanh nguyên bản 450g (vị dễ ăn, bán chạy nhất) cho mình ạ 💚 {Title} muốn đổi sang Túi Vàng nhiều hạt hay Túi Nâu cacao thì nhắn em đổi liền nha.",
   "VOICE_RECEIVED": "Dạ em chưa nghe được tin nhắn thoại ạ, {title} nhắn chữ giúp em nha ạ 💛",
   "ALLERGY_HAS_INGREDIENT": "Dạ cả Túi Xanh, Túi Vàng và Túi Nâu nhà em đều có {ingredient} trong thành phần ạ, nên nếu {title} dị ứng hay không dùng được {ingredient} thì mình không nên dùng sản phẩm này để đảm bảo sức khỏe nha ạ 💛 Em cảm ơn {title} đã hỏi kỹ ạ.",
-  "INGREDIENT_NOT_INCLUDED": "Dạ trong thành phần granola nhà em không có {ingredient} ạ 💚 Granola gồm: gạo lứt, yến mạch, hạt bí, hạnh nhân, hạt điều, nho khô, xoài sấy, nam việt quất sấy, dừa sấy, mật thốt nốt, đường mạch nha và muối hồng Himalaya. Nếu {title} dị ứng nặng thì mình hỏi thêm ý kiến bác sĩ cho chắc nha ạ."
+  "INGREDIENT_NOT_INCLUDED": "Dạ trong thành phần granola nhà em không có {ingredient} ạ 💚 Granola gồm: gạo lứt, yến mạch, hạt bí, hạnh nhân, hạt điều, nho khô, xoài sấy, nam việt quất sấy, dừa sấy, mật thốt nốt, đường mạch nha và muối hồng Himalaya. Nếu {title} dị ứng nặng thì mình hỏi thêm ý kiến bác sĩ cho chắc nha ạ.",
+  "GIFT_FAN_PHOTO": "Dạ quà Quạt bên em hiện chưa có ảnh sẵn để gửi {title} ạ, em nhờ bạn phụ trách gửi ảnh Quạt thật cho {title} ngay nha 💛"
 }

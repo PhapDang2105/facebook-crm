@@ -96,8 +96,9 @@ test('4. Đang giữ giỏ mà khách HỎI: trả lời câu hỏi + nhắc gi�
   assert.match(question.sent.at(-1), /vẫn đang giữ đơn 2 Granola Túi Xanh 450g/);
   assert.equal(question.saved.at(-1).pendingOrder, undefined, 'giỏ giữ nguyên');
   const gift = await run({ botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: now() - 60000, pendingOrder: pending }, 'cho xem hình bát gáo dừa', { recent, reply: askText });
-  assert.equal(gift.results[0].templateId, 'GIFT_POLICY');
-  assert.match(gift.sent[0], /quà tặng/);
+  // R18 (chủ shop gửi ảnh quà 12/10): đã có ảnh bát gáo dừa thật → gửi ảnh (trước đây chưa có ảnh nên trả chính sách quà).
+  assert.equal(gift.results[0].templateId, 'PRODUCT_PHOTOS');
+  assert.match(gift.sent[0], /Bát gáo dừa/);
   assert.match(gift.sent.at(-1), /vẫn đang giữ đơn/);
 });
 

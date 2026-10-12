@@ -438,6 +438,7 @@ import { getVertexAccessToken, vertexProjectId } from './vertex-auth.mjs';
 import { assertPublicHost } from './network-guard.mjs';
 import { normalizeWarningPhone, posConfig, posConfigured, posRequest } from './phone-warnings.mjs';
 import { INCOMPLETE_LABEL, readLandingStore } from './landing-orders.mjs';
+import { GIFT_PHOTO_NAMES, GIFT_PHOTO_ROUTES, giftPhotoImages, giftPhotoKinds } from './gift-photos.mjs';
 
 // ===== Đơn ngoài hội thoại (landing / nhân viên lên trên POS) cùng SĐT =====
 // Chủ shop 28/09: 10 ca trong 7 ngày bot lên đơn trùng với đơn khách đã đặt qua landing hay
@@ -3325,7 +3326,21 @@ async function answerChange(incomingChange, settings, results, dependencies) {
     let infoWhileHeld = false;
     let answeredWhileHeld = false;
     // Xin xem ảnh quà (bát gáo dừa): để nhánh basketQuestion bên dưới gửi ảnh quà.
-    const asksGiftPhoto = /\b(hinh|anh|xem|coi)\b/.test(folded) && /\b(bat|gao dua|qua|muong|dua)\b/.test(folded);
+    // R18 (inbox3 V2; ảnh quà chủ shop gửi 12/10): quà khách muốn xem ảnh (bát / muỗng / bộ / Quạt) — gửi ảnh thật, không ảnh túi.
+    const giftKinds = conversation.source !== 'comment' && !nonText ? giftPhotoKinds(message.text, { livestream: replyContext.livestream }) : [];
+    const giftPhotoReply = () => {
+      const all = withFallbackTemplates(templates);
+      const shown = giftKinds.filter(kind => GIFT_PHOTO_ROUTES[kind]);
+      const photos = shown.length ? renderChatbotReply({ template_id: 'PRODUCT_PHOTOS', values: { products: shown.map(kind => GIFT_PHOTO_NAMES[kind]).join(', '), images: giftPhotoImages(shown, publicImageUrl).join(' ') } }, all, replyContext) : null;
+      // Quạt chưa có ảnh: nói chữ + thẻ để bạn phụ trách gửi ảnh thật.
+      const fan = giftKinds.includes('quat') ? renderChatbotReply({ template_id: 'GIFT_FAN_PHOTO' }, all, replyContext) : null;
+      const pieces = [photos?.templateId === 'PRODUCT_PHOTOS' ? photos : null, fan?.templateId === 'GIFT_FAN_PHOTO' ? fan : null].filter(item => item && !item.handoff && item.messages?.length);
+      if (!pieces.length) return null;
+      const partsOf = item => item.parts || [...(item.messages || []).map(text => ({ type: 'text', text })), ...(item.images || []).map(url => ({ type: 'image', url }))];
+      return { templateId: pieces[0].templateId, messages: pieces.flatMap(item => item.messages), images: pieces.flatMap(item => item.images || []), parts: pieces.flatMap(partsOf), handoff: false,
+        ...(pieces.length > 1 ? { alsoTemplateId: pieces[1].templateId } : {}), ...(fan ? { attention: true } : {}) };
+    };
+    const asksGiftPhoto = giftKinds.length > 0 || (/\b(hinh|anh|xem|coi)\b/.test(folded) && /\b(bat|gao dua|qua|muong|dua)\b/.test(folded));
     if (heldPending && !asksGiftPhoto && !nonText && !phoneInText && !awaitingAsked && !cartReply && !asksForHuman && !trialActive && !nudgeLike && !shortAck
       && (orderStepLast || conversation.botLastTemplateId === 'CONFIRM_YES')
       && reply.templateId === 'ORDER_ADDRESS' && !reply.order && !reply.handoff && (reply.alsoTemplateId || ruleAskedAlso)
@@ -3407,12 +3422,14 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       && (/\?/.test(String(message.text || '')) || /\b(cho xem|xem|coi|nao|sao|khac gi|duoc (khong|ko|k)|co (khong|ko|k)|bao nhieu|bn)\b/.test(folded))
       // R13 fix2 (B4): tin dài hơn 500 ký tự không phải địa chỉ (địa chỉ thật dài nhất ≈ 190) — không đưa vào bộ đọc địa chỉ.
       && !(String(message.text || '').length <= 500 && describeDeliveryAddress(String(message.text || '')).complete);
-    const giftPhotoAsk = basketQuestion && /\b(hinh|anh|xem|coi)\b/.test(folded) && /\b(bat|gao dua|qua|muong|dua)\b/.test(folded);
+    const giftPhotoAsk = basketQuestion && (giftKinds.length > 0 || (/\b(hinh|anh|xem|coi)\b/.test(folded) && /\b(bat|gao dua|qua|muong|dua)\b/.test(folded)));
     if (basketQuestion && !reply.order && !reply.handoff) {
       const remind = renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, replyContext).remind || '';
       const orderish = item => isOrderStep(item.templateId) || ['ORDER_ADDRESS_REMIND', 'ORDER_CUSTOM_BASKET', 'ASK_FLAVOR', 'ASK_PRODUCT', 'THANK_YOU', 'WELCOME'].includes(item.templateId);
       let answer = null;
-      if (giftPhotoAsk) {
+      if (giftPhotoAsk && giftKinds.length) {
+        answer = giftPhotoReply();
+      } else if (giftPhotoAsk) {
         const giftImages = getGifts().filter(gift => gift.active !== false && (gift.image || (Array.isArray(gift.images) && gift.images.length)));
         answer = giftImages.length && templates?.PRODUCT_PHOTOS
           ? renderChatbotReply({ template_id: 'PRODUCT_PHOTOS', values: { products: giftImages.map(gift => gift.name).join(', '), images: giftImages.flatMap(gift => [gift.image, ...(Array.isArray(gift.images) ? gift.images : [])].filter(Boolean).slice(0, 2).map(url => `![${gift.name}](${url})`)).join(' ') } }, templates, replyContext)
@@ -3441,6 +3458,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
         // (vừa nhắc lượt trước rồi thì để cơ chế chống lặp im + gắn thẻ).
         reply = { templateId: 'ORDER_ADDRESS_REMIND', messages: [remind], images: [], parts: undefined, handoff: false, attention: true };
       }
+    }
+    // R18 (inbox3 V2): xin xem ảnh quà ngoài bước giỏ (không giữ giỏ / bot không vừa xin SĐT) — mô hình chọn PRODUCT_PHOTOS (ảnh túi) hay
+    // bảng quà → gửi ảnh quà thật (Quạt: chữ + thẻ). Không áp khi đang lên/sửa đơn hay chuyển người.
+    if (giftKinds.length && !basketQuestion && !infoWhileHeld && !reply.order && !reply.handoff && !reply.staffWait) {
+      const gift = giftPhotoReply();
+      if (gift) reply = { ...gift, pendingOrder: undefined, order: undefined };
     }
     // Bảng giá chung (3 vị, giá lẻ chưa ship) một mình làm khách rối và thấy đắt: trong
     // hộp thư gửi kèm luôn bảng giá chi tiết Túi Xanh (1 túi / combo 2 / combo 3 + quà,

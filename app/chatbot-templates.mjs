@@ -2119,6 +2119,8 @@ const internalTemplateIds = new Set(['ASK_PRODUCT', 'ORDER_EXISTING_CONFIRM', 'O
   'COMMENT_PUBLIC_STAFF', 'COMMENT_PUBLIC_FEEDBACK', 'ORDER_CANCEL_STAFF', 'ORDER_HOLD_STAFF', 'STAFF_ONLY_PRODUCT', 'RECEIVED_CHECK',
   // fix-bot 01/10: câu "đặt thêm?" khi đơn ngoài hội thoại (engine tự chọn, không kể chi tiết đơn).
   'ORDER_EXISTING_CONFIRM_PHONE',
+  // R18: khách xin xem ảnh Quạt (chưa có ảnh) — engine tự chọn (app/gift-photos.mjs).
+  'GIFT_FAN_PHOTO',
   // Vòng 13: quà của đơn đã có (bộ soạn tự chọn khi khách có đơn hỏi quà).
   'GIFT_POLICY_ORDER', 'GIFT_POLICY_ORDER_NONE',
   // Vòng 13 (gộp): mẫu engine tự chọn vừa đưa vào seed — giỏ Facebook Shop (mã lạ / món nhân viên lên đơn / đã nhận giỏ),

@@ -1317,6 +1317,10 @@ const maxUploadBytes = 5 * 1024 * 1024;
 // (assets/branding/…). R13 (gộp): đây là bảng DUY NHẤT — route GET /q/brand/* của server.mjs (`qrBrandFiles`) dùng
 // chính bảng này; thêm ảnh công khai mới thì chỉ thêm một dòng ở đây.
 export const brandImageFiles = Object.freeze({
+  // R18 (chủ shop gửi ảnh quà 12/10): ảnh quà gửi khách hỏi xem quà (app/gift-photos.mjs).
+  '/q/brand/gift-bat-gao-dua.jpg': 'gifts/bat-gao-dua.jpg',
+  '/q/brand/gift-muong-dua.jpg': 'gifts/muong-dua.jpg',
+  '/q/brand/gift-bo-bat-muong-dua.jpg': 'gifts/bo-bat-muong-dua.jpg',
   '/q/brand/logo.webp': 'logos/giot-nang-logo.webp',
   '/q/brand/zalo.webp': 'logos/zalo-icon.webp',
   '/q/brand/messenger.webp': 'logos/messenger-icon.webp',

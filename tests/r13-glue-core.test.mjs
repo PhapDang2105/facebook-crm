@@ -142,7 +142,8 @@ test('7. bảng ảnh /q/brand/* một nguồn: server dùng brandImageFiles c�
   assert.equal((server.match(/'\/q\/brand\/[a-z0-9-]+\.(?:webp|png)': '/g) || []).length, 0, 'server.mjs không còn bảng chép');
   const table = pancake.match(/export const brandImageFiles = Object\.freeze\(\{([\s\S]*?)\}\);/)[1];
   const entries = [...table.matchAll(/'(\/q\/brand\/[^']+)': '([^']+)'/g)].map(match => [match[1], match[2]]);
-  assert.equal(entries.length, 8);
+  // R18 (chủ shop gửi ảnh quà 12/10): thêm 3 ảnh quà (gift-bat-gao-dua / gift-muong-dua / gift-bo-bat-muong-dua).
+  assert.equal(entries.length, 11);
   assert.deepEqual(entries.find(([route]) => route === '/q/brand/offer-card.png'), ['/q/brand/offer-card.png', 'offers/the-uu-dai.png']);
   // Mọi tệp trong bảng có thật trên đĩa (route công khai không trả 404).
   for (const [, file] of entries) assert.ok(readFileSync(new URL(`../assets/branding/${file}`, import.meta.url)).length > 0, file);

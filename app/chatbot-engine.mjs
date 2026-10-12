@@ -2366,8 +2366,12 @@ async function answerChange(incomingChange, settings, results, dependencies) {
       // R15 (inbox1 A1): bot vừa hỏi vị khi khách đã nói "N túi" (N ≥ 2), tin trả lời chỉ một vị → vị thứ hai hay tới ngay sau.
       const flavourAfterCount = ['ASK_FLAVOR', 'ORDER_INFO_ASK_FLAVOR'].includes(conversation.botLastTemplateId) && Number(conversation.pendingOrder?.askedBagCount) >= 2
         && singleFlavourOf(shortText) !== '';
+      // R18 (inbox1 V1, cross R9, ca …310420343 "Shop ơi" rồi 10 giây sau "Ship cho c 4 túi hạt nhé"): Pancake đẩy tin về chậm 4–8 giây,
+      // lời gọi trơn ("Shop ơi", "Alo", ".") chờ lâu hơn (settings.greetingWaitMs, mặc định 2,5 × mức chờ thường ≈ 10 giây) để câu hỏi
+      // thật kịp vào kho và được trả lời gộp, không chào WELCOME trước.
+      const greetingWaitMs = Number(settings.greetingWaitMs ?? Math.round(baseWaitMs * 2.5));
       const waitMs = (phoneFragment || addressOnly) && heldBasketNow ? Math.round(fragmentWaitMs * 1.5)
-        : phoneFragment || addressOnly || flavourAfterCount ? fragmentWaitMs : baseWaitMs;
+        : phoneFragment || addressOnly || flavourAfterCount ? fragmentWaitMs : greetingOnly && conversation.source !== 'comment' ? greetingWaitMs : baseWaitMs;
       await new Promise(resolve => setTimeout(resolve, waitMs));
       if (hasNewerCustomerMessage(await listMessages(conversation.id), change.message)) {
         results.push({ conversationId: conversation.id, skipped: 'gộp với tin sau' });
@@ -4706,6 +4710,34 @@ async function answerChange(incomingChange, settings, results, dependencies) {
           reply = { ...reply, messages: [text, ...reply.messages], ...(Array.isArray(reply.parts) ? { parts: [{ type: 'text', text }, ...reply.parts] } : {}) };
         }
       }
+    }
+    // R18 (cross R9, inbox1 V1: "Shop ơi" / "Alo" / "Vậy shop" giữa luồng đơn, khách đang lỗi giao hàng → "Giọt Nắng xin chào… cần thông
+    // tin nào về sản phẩm"): không chào lại bằng WELCOME khi đang giữ giỏ (→ nhắc giỏ), khách có đơn ≤ 14 ngày / thẻ khiếu nại, bảo hành,
+    // hay bot vừa trả lời chuyện khác trong 60 phút (→ GREETING_SHORT "Dạ em đây ạ…").
+    if (!isComment && !nonText && reply.templateId === 'WELCOME') {
+      const heldNow = usablePendingOrder(conversation.pendingOrder, { templateId: 'ORDER_ADDRESS' })?.items?.length > 0;
+      const orderRecent = Boolean(recentOrder) && isActiveOrder(recentOrder) && Date.now() - (Number(recentOrder.createdAt) || 0) < 14 * 24 * 60 * 60 * 1000;
+      const caseLabelled = conversationLabels.some(label => ['complaint', 'warranty'].includes(label));
+      const midFlow = Boolean(conversation.botLastTemplateId) && conversation.botLastTemplateId !== 'WELCOME' && Date.now() - (Number(conversation.botLastReplyAt) || 0) < 60 * 60 * 1000;
+      const held = heldNow ? renderChatbotReply({ template_id: 'ORDER_ADDRESS' }, templates, { ...replyContext, lastTemplateId: 'ORDER_ADDRESS' }) : null;
+      if (held?.remind) reply = { templateId: 'ORDER_ADDRESS_REMIND', messages: [held.remind], images: [], parts: undefined, handoff: false };
+      else if (orderRecent || caseLabelled || midFlow) {
+        const short = renderChatbotReply({ template_id: 'GREETING_SHORT' }, templates, replyContext);
+        if (short.templateId === 'GREETING_SHORT' && short.messages?.length) reply = { ...short, ...(reply.attention ? { attention: true } : {}) };
+      }
+    }
+    // R18 (inbox1 V1, inbox3 V8 — gộp tin): Pancake đẩy webhook chậm 4–8 giây sau lúc khách gõ, nên tin thứ hai của khách ("C lấy 1 túi
+    // dùng thử nhé" → 7 giây sau "Màu vàng"; "Mình 2 tui nhe" → "Xanh và vàng"; "3 túi 3 vị ạ" → SĐT) chưa vào kho khi đường luật đã
+    // trả lời xong → hai câu chồng / mâu thuẫn. Hộp thư, lượt đang ở chuyện ĐƠN (giỏ đang giữ, bot vừa ở bước đơn, hay tin có số túi /
+    // SĐT / địa chỉ / giỏ): giữ tối thiểu settings.orderQuietMs (mặc định 8 giây) kể từ lúc bắt đầu lượt trước khi gửi, rồi kiểm lại tin
+    // mới hơn — có thì nhường cho lượt sau (lượt đó gộp cả cụm). Hàng đợi theo khách (queueForConversation) bảo đảm hai lượt không chạy
+    // chồng nhau.
+    if (!isComment && message.type === 'text' && !cartReply) {
+      const orderTurn = Boolean(conversation.pendingOrder) || isOrderStep(conversation.botLastTemplateId) || isOrderStep(String(reply.templateId || ''))
+        || bundle.some(item => isOrderishText(item?.text) || commentBasket(String(item?.text || '')).length > 0);
+      const quietMs = Number(settings.orderQuietMs ?? (process.env.NODE_TEST_CONTEXT ? 0 : 8000));
+      const left = quietMs - (Date.now() - startedAt);
+      if (orderTurn && left > 0) await new Promise(resolve => setTimeout(resolve, left));
     }
     // Trong lúc chờ mô hình khách nhắn thêm (chữ hay ảnh): bỏ câu này, tin sau trả lời gộp.
     const latestMessages = await listMessages(conversation.id);

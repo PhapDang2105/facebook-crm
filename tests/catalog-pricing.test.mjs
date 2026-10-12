@@ -228,7 +228,12 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   // Mỗi quy tắc một dòng; quà cùng quy tắc gộp chung.
   // R17: quà live 08/10 — bảng quà có thêm dòng Quạt (chỉ khách livestream, chỉ túi lớn: không Tropical / combo 10 gói — quyết
   // định chủ shop 10/10 mục 3) giữa miễn ship và bát + muỗng.
-  assert.match(policy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Quạt: từ 2 sản phẩm \(trừ Granola Tropical vị Cacao 300g, Combo 10 gói Xanh, Combo 10 gói Cam, Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\) \(chỉ khách livestream\)\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm \(trừ Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)/);
+  // R18 (inbox1 V5, inbox2 V2, inbox3 V3, inbox4 V2): bảng gửi khách thường không còn dòng Quạt "(chỉ khách livestream)";
+  // khách live thấy dòng Quạt, không kèm chữ "(chỉ khách livestream)".
+  assert.match(policy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm \(trừ Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)/);
+  assert.doesNotMatch(policy, /Quạt|livestream/);
+  const livePolicy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates, { livestream: true }).messages[0];
+  assert.match(livePolicy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Quạt: từ 2 sản phẩm \(trừ Granola Tropical vị Cacao 300g, Combo 10 gói Xanh, Combo 10 gói Cam, Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm/);
   const strike = text => [...text].map(char => `${char}\u0336`).join('');
   const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
   assert.equal(quote.messages[0], [

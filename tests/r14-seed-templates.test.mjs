@@ -33,7 +33,8 @@ test('GIFT_POLICY: đủ bậc quà (2 / 3 / 5 / 10 túi) theo Cài đặt → Q
   const text = render('GIFT_POLICY').messages.join('\n');
   assert.match(text, /Miễn phí vận chuyển: từ 2/);
   assert.match(text, /Bộ bát gáo dừa \+ Muỗng dừa: từ 3/);
-  assert.match(text, /1 Túi Vàng 350g: đúng 5/);
+  // R18 (inbox2 V2): bảng gửi khách ghi "đơn đúng 5 sản phẩm" thay lời viết cho mô hình.
+  assert.match(text, /1 Túi Vàng 350g: đơn đúng 5/);
   assert.match(text, /1 Túi Vàng 350g \+ 1 Túi Nâu 350g: từ 10/);
   assert.match(text, /Chị lấy mấy túi để em lên đơn kèm quà/);
   assert.doesNotMatch(seed.GIFT_POLICY, /\d{3}\.\d{3}đ/, 'không giá cứng');

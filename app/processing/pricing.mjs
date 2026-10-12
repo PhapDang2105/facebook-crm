@@ -185,17 +185,20 @@ export function quoteTiers(productText, { livestream = false } = {}) {
  * chuyển: từ 2 sản phẩm" / "- Bộ bát gáo dừa + Muỗng dừa: từ 3 sản phẩm (trừ
  * Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ)".
  */
-export function describeGiftTable() {
+export function describeGiftTable({ customer = false, livestream = false } = {}) {
   const groups = new Map();
-  for (const gift of getGifts().filter(gift => gift.active)) {
+  // R18 (inbox1 V5, inbox2 V2, inbox3 V3, inbox4 V2): bảng gửi KHÁCH (customer) — khách thường không thấy quà chỉ khách live,
+  // không ghi "(chỉ khách livestream)" / "đúng N sản phẩm" (lời viết cho mô hình). Bảng mặc định (mô hình đọc) giữ nguyên.
+  for (const gift of getGifts().filter(gift => gift.active && !(customer && gift.livestreamOnly && !livestream))) {
     // R17: sản phẩm đã tắt (Combo 10 gói Nâu / Mix) không kể trong "trừ …" — khách không mua được, chỉ làm dài bảng quà.
-    const excluded = gift.excludedSkus.filter(sku => findProductBySku(sku)?.active !== false).map(sku => findProductBySku(sku)?.name || sku);
+    // R18: SKU đã XOÁ khỏi danh mục (findProductBySku → undefined) cũng bỏ — trước đây lọt và in nguyên mã "CB10-NAU-G35, CB10-MIX".
+    const excluded = gift.excludedSkus.map(sku => findProductBySku(sku)).filter(product => product && product.active !== false).map(product => product.name);
     // Quà có trần số lượng (Quà Tặng LIVE chỉ cho đúng 2 túi): ghi "đúng N" / "từ N đến M" cho mô hình khỏi hiểu là "từ N trở lên".
-    const range = gift.maxQuantity && gift.maxQuantity === gift.minQuantity ? `đúng ${gift.minQuantity} sản phẩm`
-      : gift.maxQuantity && gift.maxQuantity > gift.minQuantity ? `từ ${gift.minQuantity} đến ${gift.maxQuantity} sản phẩm`
+    const range = gift.maxQuantity && gift.maxQuantity === gift.minQuantity ? `${customer ? 'đơn đúng' : 'đúng'} ${gift.minQuantity} sản phẩm`
+      : gift.maxQuantity && gift.maxQuantity > gift.minQuantity ? `${customer ? 'đơn ' : ''}từ ${gift.minQuantity} đến ${gift.maxQuantity} sản phẩm`
       : `từ ${gift.minQuantity} sản phẩm`;
-    // Quà chỉ khách livestream: ghi rõ cho mô hình/GIFT_POLICY, khỏi hứa quà live với khách thường.
-    const rule = `${range}${excluded.length ? ` (trừ ${excluded.join(', ')})` : ''}${gift.livestreamOnly ? ' (chỉ khách livestream)' : ''}`;
+    // Quà chỉ khách livestream: ghi rõ cho mô hình, khỏi hứa quà live với khách thường.
+    const rule = `${range}${excluded.length ? ` (trừ ${excluded.join(', ')})` : ''}${gift.livestreamOnly && !customer ? ' (chỉ khách livestream)' : ''}`;
     groups.set(rule, [...(groups.get(rule) || []), gift.name]);
   }
   if (!groups.size) return ['- Hiện chưa có quà tặng.'];

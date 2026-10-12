@@ -1677,7 +1677,8 @@ function renderGeneralInfo(templates) {
 /** One line per distinct gift set: which combinations earn it (same wording the model reads). */
 function renderGiftPolicy(templates) {
   if (!getGifts().some(gift => gift.active)) return fill(templates.GIFT_POLICY_EMPTY, commonValues());
-  const gifts = describeGiftTable()
+  // R18: bảng quà cho KHÁCH (không mã SKU, không '(chỉ khách livestream)', khách thường không thấy quà live).
+  const gifts = describeGiftTable({ customer: true, livestream: activeLivestream })
     .map(line => line.replace(/^- /, ''))
     .map(line => {
       const at = line.indexOf(': ');
@@ -1811,7 +1812,7 @@ export function renderOrderGiftReply(templates = {}, context = {}) {
   const id = gift ? 'GIFT_POLICY_ORDER' : 'GIFT_POLICY_ORDER_NONE';
   const template = String(templates[id] || '').trim() || seedTemplate(id);
   if (!template) return null;
-  const policy = describeGiftTable().map(line => line.replace(/^- /, '')).map(line => {
+  const policy = describeGiftTable({ customer: true, livestream: context.livestream === true }).map(line => line.replace(/^- /, '')).map(line => {
     const at = line.indexOf(': ');
     return at > 0 ? { gifts: line.slice(0, at), rule: line.slice(at + 2) } : null;
   }).filter(Boolean);

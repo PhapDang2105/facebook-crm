@@ -401,6 +401,7 @@
             <option value="Import">Import</option>
             <option value="Pancake">Pancake</option>
             <option value="Re-marketing">Re-marketing</option>
+            <option value="Zalo">Zalo</option>
           </select></label>
           <button class="export-button" id="order-export" type="button" disabled hidden>Xuất XLSX</button>
           <button class="export-button export-button--skip hidden" id="order-export-skip" type="button">Xuất bỏ qua đơn chưa chuẩn</button>
@@ -414,7 +415,10 @@
       <section class="order-stage hidden" data-order-panel="zalo">
         <div class="order-import-controls">
           <label class="order-search-control"><input id="zalo-order-search" type="search" aria-label="Tìm đơn Zalo" placeholder="Mã đơn, tên, số điện thoại, địa chỉ, SKU..."></label>
+          <!-- Mức giảm giá mặc định: đơn Zalo giảm thấp hơn thì tính lại theo mức này, cao hơn giữ giá Zalo. -->
+          <label class="zalo-discount-control" title="Đơn Zalo có mức giảm (Tổng khuyến mãi / Thành tiền) thấp hơn mức này thì tính lại theo mức này; cao hơn thì giữ giá Zalo.">Mức giảm giá<input id="zalo-discount" type="number" min="0" max="100" step="0.5" value="21" inputmode="decimal" aria-label="Mức giảm giá (%)">%</label>
           <label class="file-button">Import<input id="zalo-order-import" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+          <button class="order-history-button" id="zalo-order-export" type="button" title="Mở Xuất dữ liệu ở nguồn Zalo">Xuất dữ liệu</button>
           <button class="order-history-button order-clear-button" id="zalo-order-clear" type="button">Xóa bảng</button>
           <div class="order-import-summary" id="zalo-order-summary" aria-live="polite"></div>
         </div>

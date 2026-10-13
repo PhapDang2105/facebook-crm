@@ -477,6 +477,11 @@ main:has([data-settings-panel="chatbot"]:not(.hidden)) { height: 100vh; overflow
 .order-import-summary .order-import-summary-valid strong { color: #1f7a3a; }
 .order-import-controls .order-filter-control { flex: 0 0 auto; min-width: 130px; }
 .order-import-controls .order-filter-control.hidden { display: none; }
+/* Đơn Zalo: ô Mức giảm giá cùng kiểu ô lọc; hai cột tính (mức giảm áp dụng, tiền thu) nền xanh nhạt. */
+.zalo-discount-control { display: flex; align-items: center; gap: 7px; box-sizing: border-box; height: 37.8px; padding: 0 11.7px; color: #17251c; background: #f6fbf7; border: 0.9px solid #b9d6c0; border-radius: 8.1px; font-size: 12.6px; font-weight: 600; white-space: nowrap; }
+.zalo-discount-control input { box-sizing: border-box; width: 58px; height: 26px; padding: 0 6px; color: #111; background: #fff; border: 0.9px solid #b9d6c0; border-radius: 6px; font: inherit; font-weight: 700; text-align: right; }
+.data-preview th.zalo-computed,
+.data-preview td.zalo-computed { background: #f0f8f2; font-weight: 600; }
 .order-search-control,
 .order-filter-control { display: block; }
 .order-search-control input,

@@ -11825,7 +11825,7 @@ function renderOrderData() {
   labelOrderDayTabs();
   const dateKeys = orderDateKeys(orderData);
   fillOrderDayOptions(orderDayFilter, dateKeys, { allOption: true });
-  fillOrderDayOptions(orderExportDay, dateKeys);
+  fillOrderDayOptions(orderExportDay, withZaloDateKeys(dateKeys));
   // Ngày đơn: mặc định chỉ hôm nay. Dòng không có ngày (import cũ) tính là hôm nay.
   const importDay = selectedImportDate();
   // Bộ lọc "Landing page trùng Chatbot" bỏ qua ngày: đơn landing hôm qua và đơn
@@ -11981,9 +11981,9 @@ function renderExportLocationCheck(check, totalRows) {
 }
 
 async function fetchExportRows() {
-  if (!orderData.rows.length) return { rows: [], streets: [] };
-  // Chỉ đơn sạch hoặc đã bấm "Đã xử lý" mới sang Xuất dữ liệu.
-  const exportable = exportableOrderData();
+  // Chỉ đơn sạch hoặc đã bấm "Đã xử lý" mới sang Xuất dữ liệu; đơn Zalo (trang Đơn Zalo) đi kèm.
+  const exportable = exportOrderDataWithZalo();
+  if (!exportable.rows.length) return { rows: [], streets: [] };
   const key = JSON.stringify(exportable);
   if (exportRowsCache.key === key) return exportRowsCache;
   const result = await readApiResponse(await fetch('/api/orders/export/preview', {
@@ -12022,7 +12022,7 @@ async function renderExportPreview() {
   renderExportLocationCheck(locationCheck, rows.length);
   if (!rows.length) {
     const source = selectedExportSource();
-    renderEmptyState(preview, source && orderData.rows.length ? `Ngày này không có đơn nguồn ${source} đủ điều kiện xuất` : 'Chưa có dữ liệu xuất');
+    renderEmptyState(preview, source && (orderData.rows.length || zaloOrders.rows.length) ? `Ngày này không có đơn nguồn ${source} đủ điều kiện xuất` : 'Chưa có dữ liệu xuất');
     return;
   }
   // Dòng đầu của đơn chưa chuẩn được tô đỏ trong bảng xem trước.
@@ -12537,6 +12537,7 @@ chatbotPreviewDialogSend?.addEventListener('click', async () => {
 // landing, không vào file kho. Chỉ giữ các cột dưới đây, đúng tên và dữ liệu trong tệp.
 // Logic xử lý đơn Zalo (giá, quà, xuất kho) làm sau.
 const zaloOrdersKey = 'crm-zalo-orders';
+const zaloSourceLabel = 'Zalo';
 const zaloKeptColumns = ['Số thứ tự', 'Mã đơn hàng', 'Ngày tạo đơn hàng', 'Tên khách hàng', 'Số điện thoại', 'Thành phố', 'Quận', 'Phường', 'Địa chỉ', 'Tổng khuyến mãi', 'Tổng giá', 'Ghi chú', 'Mã SKU', 'Số lượng', 'Thành tiền'];
 const zaloOrderImport = document.querySelector('#zalo-order-import');
 const zaloOrderSearch = document.querySelector('#zalo-order-search');
@@ -12579,16 +12580,221 @@ function keepZaloColumns(sourceHeaders, records) {
   };
 }
 
+// ----- Tính tiền đơn Zalo -----
+// Nhân viên nhập "Mức giảm giá" (mặc định 21%). Mức giảm của đơn = Tổng khuyến mãi / tổng
+// Thành tiền của đơn: từ mức nhân viên nhập trở lên thì giữ giá Zalo (Tổng giá); thấp hơn thì
+// tính lại theo mức nhân viên nhập. Các trường khác xử lý như đơn thường (cột chuẩn, ba cấp
+// địa chỉ, SKU danh mục, quà theo giỏ) và đơn tự vào Xuất dữ liệu (nguồn "Zalo").
+const zaloDiscountKey = 'crm-zalo-discount';
+const zaloDefaultDiscount = 21;
+const zaloDiscountInput = document.querySelector('#zalo-discount');
+let zaloDiscount = readZaloDiscount();
+if (zaloDiscountInput) zaloDiscountInput.value = String(zaloDiscount);
+
+function readZaloDiscount() {
+  try {
+    const saved = localStorage.getItem(zaloDiscountKey);
+    const value = Number(saved);
+    if (saved !== null && saved !== '' && Number.isFinite(value) && value >= 0 && value <= 100) return value;
+  } catch {}
+  return zaloDefaultDiscount;
+}
+
+/** Số tiền trong tệp Zalo ("174000", "174.000", "174,000đ") → số đồng. */
+function zaloMoney(value) {
+  return Number(String(value ?? '').replace(/[^\d-]/g, '')) || 0;
+}
+
+/** Cột của bảng Zalo theo tên đã chuẩn hoá: col(row, 'tong gia'). */
+function zaloColumnReader(headers) {
+  const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
+  return (row, name) => String(row[index.get(name)] ?? '').trim();
+}
+
+/** Các đơn của bảng Zalo theo thứ tự trong tệp: [{ id, rows }]; dòng không mã đơn đi theo đơn phía trên. */
+function zaloOrderGroups(data = zaloOrders) {
+  const col = zaloColumnReader(data.headers);
+  const groups = [];
+  const byId = new Map();
+  for (const row of data.rows) {
+    const id = col(row, 'ma don hang') || groups.at(-1)?.id || '';
+    if (!id) continue;
+    if (!byId.has(id)) { const group = { id, rows: [] }; byId.set(id, group); groups.push(group); }
+    byId.get(id).rows.push(row);
+  }
+  return groups;
+}
+
+/**
+ * Tiền một đơn Zalo: subtotal = Σ Thành tiền, promo = Tổng khuyến mãi (dòng đầu của đơn),
+ * orderRate = promo / subtotal. orderRate ≥ mức nhân viên nhập → giữ Tổng giá của Zalo;
+ * thấp hơn → total = subtotal × (1 − mức nhân viên nhập).
+ */
+function zaloOrderPricing(group, headers, discountPercent = zaloDiscount) {
+  const col = zaloColumnReader(headers);
+  const subtotal = group.rows.reduce((sum, row) => sum + zaloMoney(col(row, 'thanh tien')), 0);
+  const first = group.rows[0];
+  const promo = zaloMoney(col(first, 'tong khuyen mai'));
+  const zaloTotal = zaloMoney(col(first, 'tong gia')) || Math.max(0, subtotal - promo);
+  const orderRate = subtotal ? promo / subtotal : 0;
+  const staffRate = Math.min(100, Math.max(0, Number(discountPercent) || 0)) / 100;
+  // Sai số làm tròn của Zalo (36.540 / 174.000 = 21%) không được tính là "thấp hơn".
+  const keepZalo = orderRate + 1e-6 >= staffRate;
+  return {
+    subtotal,
+    promo,
+    orderRate,
+    appliedRate: keepZalo ? orderRate : staffRate,
+    keepZalo,
+    total: keepZalo ? zaloTotal : Math.round(subtotal * (1 - staffRate))
+  };
+}
+
+/** Phần trăm gọn: 0.21 → "21%", 0.2077 → "20,8%". */
+function zaloPercent(rate) {
+  return `${(Math.round(rate * 1000) / 10).toLocaleString('vi-VN')}%`;
+}
+
+/** "13/10/2026, 14:08" → "13/10/2026 14:08" (cột Ngày; bộ lọc ngày đọc được cả năm và giờ). */
+function zaloOrderDate(value) {
+  const match = String(value || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})/);
+  if (!match) return String(value || '').trim();
+  const pad = number => String(number).padStart(2, '0');
+  return `${pad(match[1])}/${pad(match[2])}/${match[3]} ${pad(match[4])}:${match[5]}`;
+}
+
+/** Địa chỉ đầy đủ như đơn thường: số nhà/đường rồi phường, quận, tỉnh — cấp nào khách đã gõ thì không ghi lại. */
+function zaloFullAddress(street, ward, district, province) {
+  const text = String(street || '').trim().replace(/[\s,.]+$/, '');
+  const typed = normalizeColumnName(text);
+  const bare = part => normalizeColumnName(part).replace(/^(tinh|thanh pho|tp|quan|huyen|thi xa|phuong|xa|thi tran)\s+/, '');
+  const extra = [ward, district, province].map(part => String(part || '').trim()).filter(part => part && !typed.includes(bare(part)));
+  return [text, ...extra].filter(Boolean).join(', ');
+}
+
+/**
+ * SKU Zalo → SKU danh mục như đơn thường: mã có trong danh mục giữ nguyên; combo Zalo
+ * "CB2-XANH-Z450" = 2 túi GRA-XANH-Z450 (mã danh mục duy nhất bằng hoặc kết thúc bằng
+ * "-XANH-Z450"); mã khác (CHIA-Z500…) giữ nguyên để kho tự nhận. Không quy đổi thì file
+ * kho đọc "CB2-…" theo bảng giá cũ (149.000đ/túi), mất giá Zalo.
+ */
+function zaloCatalogLine(sku, quantity, products = sharedProducts) {
+  const catalog = new Map((Array.isArray(products) ? products : []).map(product => [String(product.sku || '').trim().toUpperCase(), product]));
+  const code = String(sku || '').trim().toUpperCase();
+  const units = Math.max(1, Math.round(Number(quantity) || 1));
+  if (catalog.has(code)) return { sku: catalog.get(code).sku, name: catalog.get(code).name || '', quantity: units };
+  const combo = code.match(/^CB(\d+)-(.+)$/);
+  const matches = combo ? [...catalog.keys()].filter(key => key === combo[2] || key.endsWith(`-${combo[2]}`)) : [];
+  if (matches.length === 1) {
+    const product = catalog.get(matches[0]);
+    return { sku: product.sku, name: product.name || '', quantity: units * Number(combo[1]) };
+  }
+  return { sku: String(sku || '').trim(), name: '', quantity: units };
+}
+
+/**
+ * Đơn Zalo thành dòng theo cột chatbotOrderHeaders (nguồn "Zalo") để Xuất dữ liệu dựng file
+ * kho y như đơn thường. Ô Đơn giá là giá khách trả một đơn vị: tiền đơn (theo mức giảm áp
+ * dụng) chia theo tỷ lệ Thành tiền từng dòng; dòng đầu nhận phần làm tròn để Σ = tiền đơn.
+ */
+function zaloExportRows(data = zaloOrders, discountPercent = zaloDiscount, products = sharedProducts) {
+  if (!data.rows.length) return [];
+  const col = zaloColumnReader(data.headers);
+  const output = [];
+  for (const group of zaloOrderGroups(data)) {
+    const pricing = zaloOrderPricing(group, data.headers, discountPercent);
+    const first = group.rows[0];
+    const lines = group.rows.map(row => ({ amount: zaloMoney(col(row, 'thanh tien')), ...zaloCatalogLine(col(row, 'ma sku'), col(row, 'so luong'), products) }));
+    const prices = lines.map(line => Math.round((pricing.subtotal ? (pricing.total * line.amount) / pricing.subtotal : 0) / line.quantity));
+    const rest = prices.reduce((sum, price, index) => (index ? sum + price * lines[index].quantity : sum), 0);
+    prices[0] = Math.max(0, Math.round((pricing.total - rest) / lines[0].quantity));
+    const phone = col(first, 'so dien thoai').replace(/^(?:\+?84)(?=\d{9}$)/, '0');
+    const province = col(first, 'thanh pho');
+    const district = col(first, 'quan');
+    const ward = col(first, 'phuong');
+    const note = [
+      pricing.keepZalo ? `Zalo giảm ${zaloPercent(pricing.orderRate)}: giữ giá Zalo` : `Zalo giảm ${zaloPercent(pricing.orderRate)} → áp ${zaloPercent(pricing.appliedRate)}`,
+      col(first, 'ghi chu') ? `Khách ghi: ${col(first, 'ghi chu')}` : ''
+    ].filter(Boolean).join(' · ');
+    lines.forEach((line, index) => output.push([
+      zaloSourceLabel, zaloOrderDate(col(first, 'ngay tao don hang')), group.id, col(first, 'ten khach hang'), phone, carrierLabelFor(phone),
+      zaloFullAddress(col(first, 'dia chi'), ward, district, province), province, district, ward,
+      line.name || line.sku, line.sku, String(line.quantity), String(prices[index]),
+      index ? '' : note, ''
+    ]));
+  }
+  return output;
+}
+
+/** Các ngày có đơn Zalo (YYYY-MM-DD), mới nhất trước. */
+function zaloOrderDateKeys() {
+  const headers = chatbotOrderHeaders;
+  const now = new Date();
+  const keys = new Set(zaloExportRows().map(row => parseOrderRowDate(row, { headers }, now)).filter(Boolean).map(dateKeyOf));
+  return [...keys].sort((first, second) => second.localeCompare(first));
+}
+
+/** Ngày của ô chọn Xuất dữ liệu: ngày của bảng đơn chung cộng ngày có đơn Zalo. */
+function withZaloDateKeys(dateKeys) {
+  return [...new Set([...dateKeys, ...zaloOrderDateKeys()])].sort((first, second) => second.localeCompare(first));
+}
+
+/**
+ * Dữ liệu Xuất dữ liệu (bảng xem trước lẫn file kho): đơn của bảng chung đã lọc như cũ
+ * (exportableOrderData) cộng đơn Zalo đúng ngày và nguồn đang chọn, xếp vào cùng cột.
+ */
+function exportOrderDataWithZalo() {
+  const base = exportableOrderData();
+  const day = selectedExportDate();
+  const source = normalizeColumnName(selectedExportSource());
+  const zaloHeaders = chatbotOrderHeaders;
+  const now = new Date();
+  const zaloRows = (!source || source === normalizeColumnName(zaloSourceLabel)) && day
+    ? zaloExportRows().filter(row => {
+      const ordered = parseOrderRowDate(row, { headers: zaloHeaders }, now);
+      return ordered && ordered.getFullYear() === day.getFullYear() && ordered.getMonth() === day.getMonth() && ordered.getDate() === day.getDate();
+    })
+    : [];
+  if (!zaloRows.length) return base;
+  let headers = base.headers.length ? [...base.headers] : [...zaloHeaders];
+  const missing = zaloHeaders.filter(header => !headers.some(existing => normalizeColumnName(existing) === normalizeColumnName(header)));
+  headers = [...headers, ...missing];
+  const position = new Map(headers.map((header, at) => [normalizeColumnName(header), at]));
+  const pad = row => [...row, ...Array(Math.max(0, headers.length - row.length)).fill('')];
+  return {
+    headers,
+    rows: [
+      ...base.rows.map(pad),
+      ...zaloRows.map(source => {
+        const row = Array(headers.length).fill('');
+        zaloHeaders.forEach((header, at) => { row[position.get(normalizeColumnName(header))] = source[at]; });
+        return row;
+      })
+    ]
+  };
+}
+
 /** Thay bảng Zalo bằng tệp vừa nhập (result: { headers, rows } của /api/orders/import/xlsx). */
 function applyZaloImport(fileName, result) {
   const missing = missingZaloColumns(result.headers || []);
   if (missing.length) throw new Error(`Tệp không phải đơn Zalo, thiếu cột: ${missing.join(', ')}.`);
   zaloOrders = { ...keepZaloColumns(result.headers, result.rows || []), fileName, importedAt: new Date().toISOString() };
   saveZaloOrders();
-  showOrderStage('zalo');
-  const idIndex = zaloOrders.headers.findIndex(header => normalizeColumnName(header) === 'ma don hang');
-  const orders = new Set(zaloOrders.rows.map(row => row[idIndex]).filter(Boolean)).size;
-  showToast(`Đã nhập ${orders} đơn Zalo (${zaloOrders.rows.length} dòng) vào trang Đơn Zalo.`, 'success');
+  const orders = zaloOrderGroups().length;
+  showToast(`Đã nhập ${orders} đơn Zalo (${zaloOrders.rows.length} dòng), giảm giá ${zaloPercent(zaloDiscount / 100)}: kết quả ở Xuất dữ liệu.`, 'success');
+  showZaloExport();
+}
+
+/** Mở Xuất dữ liệu ở nguồn Zalo, ngày mới nhất có đơn Zalo (ngày khác chọn ở ô ngày). */
+function showZaloExport() {
+  orderPanelsDirty.add('export');
+  if (orderExportSource) orderExportSource.value = zaloSourceLabel;
+  showOrderStage('export');
+  const latest = zaloOrderDateKeys()[0];
+  if (latest && orderExportDay && orderExportDay.value !== latest && [...orderExportDay.options].some(option => option.value === latest)) {
+    orderExportDay.value = latest;
+    orderExportDay.dispatchEvent(new Event('change'));
+  }
 }
 
 function renderZaloOrders() {
@@ -12598,18 +12804,32 @@ function renderZaloOrders() {
   const orders = new Set(rows.map(row => row[idIndex]).filter(Boolean)).size;
   const query = normalizeColumnName(zaloOrderSearch?.value || '');
   const shown = query ? rows.filter(row => normalizeColumnName(row.join(' ')).includes(query)) : rows;
+  // Mức giảm áp dụng và tiền thu của từng đơn (dòng đầu của đơn), theo ô Mức giảm giá.
+  const pricingByRow = new Map();
+  let collected = 0;
+  for (const group of zaloOrderGroups()) {
+    const pricing = zaloOrderPricing(group, headers);
+    pricingByRow.set(group.rows[0], pricing);
+    collected += pricing.total;
+  }
   if (zaloOrderSummary) {
     const imported = zaloOrders.importedAt ? new Date(zaloOrders.importedAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
     zaloOrderSummary.innerHTML = rows.length
-      ? `Đơn Zalo: <strong>${orders}</strong> · Dòng: <strong>${query ? `${shown.length}/` : ''}${rows.length}</strong>${zaloOrders.fileName ? ` · ${escapeHtml(zaloOrders.fileName)}${imported ? ` (${escapeHtml(imported)})` : ''}` : ''}`
+      ? `Đơn Zalo: <strong>${orders}</strong> · Dòng: <strong>${query ? `${shown.length}/` : ''}${rows.length}</strong> · Tiền thu: <strong>${collected.toLocaleString('vi-VN')}đ</strong>${zaloOrders.fileName ? ` · ${escapeHtml(zaloOrders.fileName)}${imported ? ` (${escapeHtml(imported)})` : ''}` : ''}`
       : '';
   }
   if (!rows.length) { renderEmptyState(zaloOrderPreview, 'Chưa có đơn Zalo. Bấm Import để nhập tệp "Danh sách đơn hàng" xuất từ Zalo.'); return; }
   if (!shown.length) { renderEmptyState(zaloOrderPreview, 'Không có đơn Zalo nào khớp tìm kiếm.'); return; }
   zaloOrderPreview.classList.remove('is-empty');
-  const head = headers.map(header => `<th>${escapeHtml(header)}</th>`).join('');
-  const body = shown.map(row => `<tr>${headers.map((_, index) => `<td>${escapeHtml(row[index] ?? '')}</td>`).join('')}</tr>`).join('');
-  zaloOrderPreview.innerHTML = `<table style="--preview-template: repeat(${headers.length}, max-content)"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  const head = headers.map(header => `<th>${escapeHtml(header)}</th>`).join('') + '<th class="zalo-computed">Mức giảm áp dụng</th><th class="zalo-computed">Tiền thu</th>';
+  const computed = row => {
+    const pricing = pricingByRow.get(row);
+    if (!pricing) return '<td class="zalo-computed"></td><td class="zalo-computed"></td>';
+    const rate = pricing.keepZalo ? `${zaloPercent(pricing.appliedRate)} (giá Zalo)` : `${zaloPercent(pricing.appliedRate)} (Zalo ${zaloPercent(pricing.orderRate)})`;
+    return `<td class="zalo-computed">${escapeHtml(rate)}</td><td class="zalo-computed">${escapeHtml(`${pricing.total.toLocaleString('vi-VN')}đ`)}</td>`;
+  };
+  const body = shown.map(row => `<tr>${headers.map((_, index) => `<td>${escapeHtml(row[index] ?? '')}</td>`).join('')}${computed(row)}</tr>`).join('');
+  zaloOrderPreview.innerHTML = `<table style="--preview-template: repeat(${headers.length + 2}, max-content)"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 /**
@@ -12648,11 +12868,26 @@ zaloOrderImport?.addEventListener('change', async () => {
   }
 });
 zaloOrderSearch?.addEventListener('input', renderZaloOrders);
+zaloDiscountInput?.addEventListener('change', () => {
+  const value = Number(String(zaloDiscountInput.value).replace(',', '.'));
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    zaloDiscountInput.value = String(zaloDiscount);
+    showToast('Mức giảm giá phải từ 0 đến 100%.', 'error');
+    return;
+  }
+  zaloDiscount = value;
+  try { localStorage.setItem(zaloDiscountKey, String(value)); } catch {}
+  orderPanelsDirty.add('export');
+  renderZaloOrders();
+  showToast(`Đơn Zalo áp mức giảm ${zaloPercent(value / 100)} (đơn Zalo giảm cao hơn giữ giá Zalo).`, 'success');
+});
+document.querySelector('#zalo-order-export')?.addEventListener('click', showZaloExport);
 document.querySelector('#zalo-order-clear')?.addEventListener('click', () => {
   if (!zaloOrders.rows.length) return;
   if (!window.confirm(`Xóa toàn bộ ${zaloOrders.rows.length} dòng đơn Zalo? Bảng đơn ở Nhập dữ liệu không bị ảnh hưởng.`)) return;
   zaloOrders = { headers: [], rows: [] };
   saveZaloOrders();
+  orderPanelsDirty.add('export');
   renderZaloOrders();
   showToast('Đã xóa bảng đơn Zalo.', 'success');
 });
@@ -13690,7 +13925,9 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
   button.textContent = 'Đang xuất...';
   try {
     const filename = createExportFilename();
-    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportableOrderData(), skipInvalidLocations, exportDay: exportDayLabels().key, exportSource: selectedExportSource(), fileName: filename }) });
+    // Đơn Zalo quy đổi SKU theo danh mục (CB2-XANH-Z450 → 2 túi GRA-XANH-Z450): danh mục phải có trước khi dựng file.
+    if (zaloOrders.rows.length && !sharedProducts.length) await loadProducts().catch(() => {});
+    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportOrderDataWithZalo(), skipInvalidLocations, exportDay: exportDayLabels().key, exportSource: selectedExportSource(), fileName: filename }) });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       if (detail.locationCheck) renderExportLocationCheck(detail.locationCheck, exportRowsCache.rows.length || 1);

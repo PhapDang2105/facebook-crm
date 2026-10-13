@@ -12726,12 +12726,18 @@ function zaloExportRows(data = zaloOrders, discountPercent = zaloDiscount, produ
   return output;
 }
 
-/** Các ngày có đơn Zalo (YYYY-MM-DD), mới nhất trước. */
+/**
+ * Ngày xuất của đơn Zalo (YYYY-MM-DD): ngày Import tệp, không phải ngày tạo từng đơn — tệp
+ * Zalo là một lô xử lý cùng lúc (tệp 13/10 có đơn 09/10, 12/10: trước đây chỉ xuất 6/9 đơn).
+ */
+function zaloExportDayKey() {
+  const imported = new Date(zaloOrders.importedAt || '');
+  return Number.isNaN(imported.getTime()) ? todayDateKey() : dateKeyOf(imported);
+}
+
+/** Ngày có đơn Zalo ở ô chọn Xuất dữ liệu: đúng một ngày — ngày Import tệp. */
 function zaloOrderDateKeys() {
-  const headers = chatbotOrderHeaders;
-  const now = new Date();
-  const keys = new Set(zaloExportRows().map(row => parseOrderRowDate(row, { headers }, now)).filter(Boolean).map(dateKeyOf));
-  return [...keys].sort((first, second) => second.localeCompare(first));
+  return zaloOrders.rows.length ? [zaloExportDayKey()] : [];
 }
 
 /** Ngày của ô chọn Xuất dữ liệu: ngày của bảng đơn chung cộng ngày có đơn Zalo. */
@@ -12741,19 +12747,16 @@ function withZaloDateKeys(dateKeys) {
 
 /**
  * Dữ liệu Xuất dữ liệu (bảng xem trước lẫn file kho): đơn của bảng chung đã lọc như cũ
- * (exportableOrderData) cộng đơn Zalo đúng ngày và nguồn đang chọn, xếp vào cùng cột.
+ * (exportableOrderData) cộng TOÀN BỘ đơn Zalo khi ngày đang chọn là ngày Import tệp Zalo
+ * và nguồn đang chọn là mọi nguồn / Zalo, xếp vào cùng cột.
  */
 function exportOrderDataWithZalo() {
   const base = exportableOrderData();
   const day = selectedExportDate();
   const source = normalizeColumnName(selectedExportSource());
   const zaloHeaders = chatbotOrderHeaders;
-  const now = new Date();
-  const zaloRows = (!source || source === normalizeColumnName(zaloSourceLabel)) && day
-    ? zaloExportRows().filter(row => {
-      const ordered = parseOrderRowDate(row, { headers: zaloHeaders }, now);
-      return ordered && ordered.getFullYear() === day.getFullYear() && ordered.getMonth() === day.getMonth() && ordered.getDate() === day.getDate();
-    })
+  const zaloRows = (!source || source === normalizeColumnName(zaloSourceLabel)) && day && dateKeyOf(day) === zaloExportDayKey()
+    ? zaloExportRows()
     : [];
   if (!zaloRows.length) return base;
   let headers = base.headers.length ? [...base.headers] : [...zaloHeaders];

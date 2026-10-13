@@ -71,7 +71,8 @@ function zaloContext(stored = null, { discount = 21, exportDay = null, exportSou
     "const zaloOrderSearch = { value: '' }; const zaloOrderSummary = document.querySelector('#zalo-order-summary'); const zaloOrderPreview = document.querySelector('#zalo-order-preview');",
     "const orderExportSource = null; const orderExportDay = null;",
     ...['normalizeColumnName', 'readZaloOrders', 'saveZaloOrders', 'missingZaloColumns', 'isZaloOrderSheet', 'keepZaloColumns', 'applyZaloImport', 'showZaloExport', 'renderZaloOrders', 'moveZaloRowsOutOfOrderTable',
-      'zaloMoney', 'zaloColumnReader', 'zaloOrderGroups', 'zaloOrderPricing', 'zaloPercent', 'zaloOrderDate', 'zaloFullAddress', 'zaloCatalogLine', 'zaloExportRows', 'zaloOrderDateKeys', 'exportOrderDataWithZalo', 'parseOrderRowDate'].map(fn),
+      'zaloMoney', 'zaloColumnReader', 'zaloOrderGroups', 'zaloOrderPricing', 'zaloPercent', 'zaloOrderDate', 'zaloFullAddress', 'zaloCatalogLine', 'zaloExportRows', 'zaloExportDayKey', 'zaloOrderDateKeys', 'exportOrderDataWithZalo', 'parseOrderRowDate'].map(fn),
+    "const todayDateKey = () => '2026-10-13';",
     "const dateKeyOf = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;",
     'let zaloOrders = readZaloOrders();',
     `let zaloDiscount = ${discount};`,
@@ -133,24 +134,32 @@ test('đơn Zalo thành dòng cột chuẩn: nguồn Zalo, CB2 = 2 túi danh m�
   assert.deepEqual(totals, { '#Z1': 137460, '#Z2': 274920, '#Z3': 86110, '#Z4': 274920, '#Z5': 324100 });
 });
 
-test('Xuất dữ liệu: đơn Zalo đúng ngày + nguồn đang chọn nối sau đơn của bảng chung, cùng cột', () => {
+test('Xuất dữ liệu: cả tệp Zalo (mọi ngày tạo đơn) xuất ở ngày Import, nối sau đơn của bảng chung, cùng cột', () => {
+  // Tệp nhập lúc 15:30 ngày 13/10 có đơn 13/10, 12/10, 09/10: chọn ngày 13/10 phải ra đủ 5/5 đơn (trước đây 2/5).
+  const stored = { ...keptData(), importedAt: new Date(2026, 9, 13, 15, 30).toISOString() };
   const day = new Date(2026, 9, 13);
   const base = { headers: ['Nguồn đơn', 'Ngày', 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Cột lạ'], rows: [['Chatbot', '13/10 08:11', 'CB-1', 'An', '0901', 'x']] };
-  const all = zaloContext(keptData(), { exportDay: day });
+  const all = zaloContext(stored, { exportDay: day });
   all.baseExport = base;
   const merged = plain(all.api.exportOrderDataWithZalo());
-  assert.equal(merged.rows.length, 3);
+  assert.equal(merged.rows.length, 1 + 6);
   assert.deepEqual(merged.rows[0].slice(0, 6), ['Chatbot', '13/10 08:11', 'CB-1', 'An', '0901', 'x']);
   const at = name => merged.headers.indexOf(name);
   assert.ok(at('Mã mẫu mã') > 0 && at('Đơn giá') > 0 && at('Tỉnh/Thành phố') > 0);
-  assert.deepEqual(merged.rows.slice(1).map(row => [row[at('Nguồn đơn')], row[at('Mã đơn hàng')], row[at('Đơn giá')]]), [['Zalo', '#Z1', '137460'], ['Zalo', '#Z2', '137460']]);
+  assert.deepEqual([...new Set(merged.rows.slice(1).map(row => row[at('Mã đơn hàng')]))], ['#Z1', '#Z2', '#Z3', '#Z4', '#Z5']);
+  assert.deepEqual(merged.rows.slice(1, 3).map(row => [row[at('Nguồn đơn')], row[at('Mã đơn hàng')], row[at('Đơn giá')]]), [['Zalo', '#Z1', '137460'], ['Zalo', '#Z2', '137460']]);
+  // Ngày khác ngày Import: không có đơn Zalo (không xuất lặp ở ngày 12/10, 09/10).
+  const otherDay = zaloContext(stored, { exportDay: new Date(2026, 9, 12) });
+  otherDay.baseExport = base;
+  assert.equal(otherDay.api.exportOrderDataWithZalo(), base);
   // Lọc nguồn khác → không có đơn Zalo; bảng chung trống + nguồn Zalo → chỉ đơn Zalo với cột chuẩn.
-  const chatbotOnly = zaloContext(keptData(), { exportDay: day, exportSource: 'Chatbot' });
+  const chatbotOnly = zaloContext(stored, { exportDay: day, exportSource: 'Chatbot' });
   chatbotOnly.baseExport = base;
   assert.equal(chatbotOnly.api.exportOrderDataWithZalo(), base);
-  const zaloOnly = plain(zaloContext(keptData(), { exportDay: new Date(2026, 9, 9), exportSource: 'Zalo' }).api.exportOrderDataWithZalo());
-  assert.deepEqual(zaloOnly.rows.map(row => row[2]), ['#Z5', '#Z5']);
-  assert.deepEqual(plain(zaloContext(keptData()).api.zaloOrderDateKeys()), ['2026-10-13', '2026-10-12', '2026-10-09']);
+  const zaloOnly = plain(zaloContext(stored, { exportDay: day, exportSource: 'Zalo' }).api.exportOrderDataWithZalo());
+  assert.equal(zaloOnly.rows.length, 6);
+  assert.deepEqual(plain(zaloContext(stored).api.zaloOrderDateKeys()), ['2026-10-13']);
+  assert.deepEqual(plain(zaloContext().api.zaloOrderDateKeys()), []);
 });
 
 test('file kho (buildExportRows của máy chủ) từ đơn Zalo: giá khách trả giữ nguyên, CB2 → 2 túi, ba cấp địa chỉ hợp lệ', () => {

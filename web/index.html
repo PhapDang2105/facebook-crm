@@ -978,8 +978,12 @@
         <button type="button" data-customer-action="tag"><img src="/assets/icons/customers/tag.svg" alt="">Gắn thẻ</button>
         <button type="button" data-customer-action="note"><img src="/assets/icons/customers/note.svg" alt="">Thêm ghi chú</button>
       </div>
-      <div class="customer-sheet-form hidden" id="customer-sheet-form"></div>
-      <div class="customer-sheet-body" id="customer-sheet-body"></div>
+      <!-- Mở form (tạo đơn, sửa, gắn thẻ, ghi chú): màn rộng chia hai cột, mỗi cột cuộn riêng;
+           màn hẹp cả hai cuộn chung một thanh. -->
+      <div class="customer-sheet-main">
+        <div class="customer-sheet-form hidden" id="customer-sheet-form"></div>
+        <div class="customer-sheet-body" id="customer-sheet-body"></div>
+      </div>
     </section>
   </div>
   <div class="channel-dialog hidden" id="facebook-page-dialog" role="dialog" aria-modal="true" aria-labelledby="facebook-page-dialog-title">

@@ -2876,7 +2876,18 @@ tr:hover .customer-tel button { opacity: .75; }
 .customer-sheet-actions button { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; color: var(--text-1); background: #fff; border: 1px solid #dbe0e6; border-radius: 8px; font: inherit; font-size: 12.8px; cursor: pointer; }
 .customer-sheet-actions button:hover { border-color: var(--brand); color: var(--brand); }
 .customer-sheet-actions img { width: 16px; height: 16px; }
-.customer-sheet-body { overflow: auto; padding: 4px 22px 22px; }
+/* Form + thông tin khách cuộn chung một thanh (màn hẹp). Trước đây chỉ phần thông tin
+   cuộn, form không cuộn: form Tạo đơn dài ăn hết chiều cao, phần thông tin còn vài dòng. */
+.customer-sheet-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.customer-sheet-body { padding: 4px 22px 22px; }
+/* Màn rộng, đang mở form: hộp rộng ra, form bên trái và thông tin khách bên phải, mỗi cột cuộn riêng. */
+.customer-dialog-panel.has-form { width: min(1240px, 100%); }
+@media (min-width: 980px) {
+  .customer-dialog-panel.has-form { height: 92vh; }
+  .has-form .customer-sheet-main { flex-direction: row; overflow: hidden; }
+  .has-form .customer-sheet-form { flex: 0 0 58%; min-width: 0; overflow: auto; border-bottom: 0; border-right: 1px solid var(--line-2); }
+  .has-form .customer-sheet-body { flex: 1 1 0; min-width: 0; overflow: auto; }
+}
 .customer-sheet-block { margin-top: 18px; }
 .customer-sheet-block > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; color: var(--text-2); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .customer-sheet-block > h3 img { width: 17px; height: 17px; }
@@ -2899,6 +2910,13 @@ tr:hover .customer-tel button { opacity: .75; }
 .customer-sheet-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 16px; }
 .customer-sheet-fields label { display: block; color: var(--text-2); font-size: 11.8px; }
 .customer-sheet-field--wide { grid-column: 1 / -1; }
+/* Tạo đơn: tên + SĐT một hàng (địa chỉ cả hàng dưới); thanh toán hẹp + ghi chú rộng một hàng. */
+.customer-sheet-fields--contact { grid-template-columns: minmax(0, 1fr) minmax(150px, 210px); }
+.customer-sheet-fields--payment { grid-template-columns: minmax(170px, 230px) minmax(0, 1fr); }
+@media (max-width: 560px) {
+  .customer-sheet-fields--contact,
+  .customer-sheet-fields--payment { grid-template-columns: minmax(0, 1fr); }
+}
 .customer-sheet-fields input,
 .customer-sheet-fields select,
 .customer-sheet-form textarea { width: 100%; margin-top: 4px; padding: 8px 11px; color: var(--text-1); background: #fff; border: 1px solid #dbe0e6; border-radius: 8px; font: inherit; font-size: 13.2px; }
@@ -2938,6 +2956,10 @@ tr:hover .customer-tel button { opacity: .75; }
 .customer-sheet-gift small { color: #8c96a3; font-size: 10.8px; white-space: nowrap; }
 .customer-sheet-gift small.is-missing { color: #b26a00; }
 .customer-sheet-gift input[type="number"] { flex: none; width: 48px; height: 28px; padding: 0 6px; border: 1px solid #dbe0e6; border-radius: 6px; font: inherit; font-size: 12.8px; }
+/* Tổng tiền + nút Tạo đơn luôn nằm ở đáy khung form, không phải cuộn xuống tìm. */
+.customer-sheet-order-footer { position: sticky; bottom: 0; z-index: 1; margin: 14px -22px -14px; padding: 10px 22px 14px; background: #fafbfc; border-top: 1px solid var(--line-2); box-shadow: 0 -6px 12px -10px rgba(16, 24, 40, .25); }
+.customer-sheet-order-footer .customer-sheet-order-summary { margin-top: 0; }
+.customer-sheet-order-footer .customer-sheet-form-actions { margin-top: 10px; }
 .customer-sheet-order-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-top: 14px; padding: 10px 12px; color: var(--text-2); background: #fff; border: 1px solid var(--line-2); border-radius: 8px; font-size: 12.8px; }
 .customer-sheet-order-summary b { color: var(--text-1); }
 .customer-sheet-order-summary strong { margin-left: auto; color: var(--brand); font-size: 15px; }

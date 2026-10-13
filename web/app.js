@@ -3681,6 +3681,7 @@ function closeCustomerSheetForm() {
   if (!form) return;
   form.innerHTML = '';
   form.classList.add('hidden');
+  customerDialog.querySelector('.customer-dialog-panel')?.classList.remove('has-form');
 }
 
 function closeCustomerDialog() {
@@ -3733,6 +3734,8 @@ function customerSheetForm(html) {
   if (!form) return null;
   form.innerHTML = html;
   form.classList.remove('hidden');
+  form.scrollTop = 0;
+  customerDialog.querySelector('.customer-dialog-panel')?.classList.add('has-form');
   form.querySelector('input, select, textarea')?.focus();
   return form;
 }
@@ -3940,7 +3943,7 @@ async function openCustomerOrderForm(customer) {
     <p class="customer-sheet-hint">${conversation
       ? 'Đơn lưu vào hội thoại của khách và gửi phiếu xác nhận cho khách, giống tạo đơn ở Tin nhắn.'
       : 'Khách chưa có hội thoại: đơn vào bảng Đơn hàng và đẩy sang Pancake POS, không gửi tin cho khách.'}</p>
-    <div class="customer-sheet-fields">
+    <div class="customer-sheet-fields customer-sheet-fields--contact">
       <label>Tên người nhận<input type="text" data-order-field="name" value="${escapeHtml(customer.name || '')}" maxlength="120"></label>
       <label>Số điện thoại<input type="text" data-order-field="phone" value="${escapeHtml(customer.phone || '')}" maxlength="20" inputmode="tel"></label>
       <label class="customer-sheet-field--wide">Địa chỉ giao hàng<input type="text" data-order-field="address" value="${escapeHtml(customer.address || '')}" maxlength="500"></label>
@@ -3950,14 +3953,16 @@ async function openCustomerOrderForm(customer) {
     <button type="button" class="customer-sheet-order-add" data-order-add>+ Thêm sản phẩm</button>
     <div class="customer-sheet-order-gift-head">Quà tặng <small>tích quà khách chọn</small></div>
     <div class="customer-sheet-gifts" data-order-gifts></div>
-    <div class="customer-sheet-fields">
+    <div class="customer-sheet-fields customer-sheet-fields--payment">
       <label>Thanh toán<select data-order-field="payment"><option value="COD">COD (thu tiền khi giao)</option><option value="Chuyển khoản">Chuyển khoản</option></select></label>
-      <label class="customer-sheet-field--wide">Ghi chú<input type="text" data-order-field="note" maxlength="500" placeholder="Giao giờ hành chính, gọi trước khi giao..."></label>
+      <label>Ghi chú<input type="text" data-order-field="note" maxlength="500" placeholder="Giao giờ hành chính, gọi trước khi giao..."></label>
     </div>
-    <div class="customer-sheet-order-summary" data-order-summary></div>
-    <div class="customer-sheet-form-actions">
-      <button type="button" class="customer-sheet-save" data-customer-order-submit>Tạo đơn</button>
-      <button type="button" data-customer-cancel>Hủy</button>
+    <div class="customer-sheet-order-footer">
+      <div class="customer-sheet-order-summary" data-order-summary></div>
+      <div class="customer-sheet-form-actions">
+        <button type="button" class="customer-sheet-save" data-customer-order-submit>Tạo đơn</button>
+        <button type="button" data-customer-cancel>Hủy</button>
+      </div>
     </div>`);
   renderCustomerSheetOrder();
   priceCustomerSheetOrder();

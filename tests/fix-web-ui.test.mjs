@@ -119,7 +119,7 @@ test('[5] bảng đơn lưu ở trình duyệt không bị xoá lúc tải trang
   const load = section(web, 'let savedOrderData = null;', 500);
   assert.doesNotMatch(load, /ensureOrderStaffNoteColumn/, 'không gọi hàm dùng hằng khai báo phía dưới (ReferenceError → catch xoá bảng)');
   assert.match(load, /catch \{\s*try \{ localStorage\.removeItem\('crm-orders'\); \} catch \{\}\s*\}/, 'chỉ xoá khi JSON hỏng');
-  assert.match(section(web, '// Bảng đọc từ trình duyệt lúc tải', 300), /orderData = ensureOrderStaffNoteColumn\(orderData\);\n[^\n]*\nrenderOrderData\(\);/);
+  assert.match(section(web, '// Bảng đọc từ trình duyệt lúc tải', 300), /orderData = ensureOrderStaffNoteColumn\(moveZaloRowsOutOfOrderTable\(orderData\)\);\n[^\n]*\nrenderOrderData\(\);/);
   assert.match(fn('showOrderStage'), /else if \(stage === 'export'\) renderExportPreview\(\);/);
 });
 

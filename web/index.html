@@ -54,6 +54,7 @@
         <button class="order-subnav-item active" type="button" data-order-stage="import">Nhập dữ liệu</button>
         <button class="order-subnav-item" type="button" data-order-stage="process">Xử lý dữ liệu</button>
         <button class="order-subnav-item" type="button" data-order-stage="export">Xuất dữ liệu</button>
+        <button class="order-subnav-item" type="button" data-order-stage="zalo">Đơn Zalo</button>
       </div>
       <button class="nav" type="button" data-view="customers"><span><img class="nav-icon--customers" src="/assets/icons/customers.png?v=1" alt=""></span>Khách hàng</button>
       <button class="nav" type="button" data-view="qr-leads"><span><img class="nav-icon--qr-leads" src="/assets/icons/qr/scan.svg" alt=""></span>Khách quét QR<b class="nav-badge" id="qr-leads-nav-count" hidden></b></button>
@@ -349,7 +350,6 @@
             <option value="Landing page">Landing page</option>
             <option value="Import">Import</option>
             <option value="Pancake">Pancake</option>
-            <option value="Zalo">Zalo</option>
             <option value="Re-marketing">Re-marketing</option>
             <option value="landing-chatbot">Landing page trùng Chatbot</option>
           </select></label>
@@ -400,7 +400,6 @@
             <option value="Landing page">Landing page</option>
             <option value="Import">Import</option>
             <option value="Pancake">Pancake</option>
-            <option value="Zalo">Zalo</option>
             <option value="Re-marketing">Re-marketing</option>
           </select></label>
           <button class="export-button" id="order-export" type="button" disabled hidden>Xuất XLSX</button>
@@ -410,6 +409,16 @@
         <div class="order-history-panel order-archive-panel hidden" id="order-export-history-panel"></div>
         <div class="export-check hidden" id="order-export-check" role="status" aria-live="polite"></div>
         <div class="export-preview" id="order-export-preview"></div>
+      </section>
+      <!-- Đơn Zalo: trang riêng, tách hẳn bảng đơn ở Nhập/Xử lý/Xuất dữ liệu (kho riêng trong trình duyệt). -->
+      <section class="order-stage hidden" data-order-panel="zalo">
+        <div class="order-import-controls">
+          <label class="order-search-control"><input id="zalo-order-search" type="search" aria-label="Tìm đơn Zalo" placeholder="Mã đơn, tên, số điện thoại, địa chỉ, SKU..."></label>
+          <label class="file-button">Import<input id="zalo-order-import" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+          <button class="order-history-button order-clear-button" id="zalo-order-clear" type="button">Xóa bảng</button>
+          <div class="order-import-summary" id="zalo-order-summary" aria-live="polite"></div>
+        </div>
+        <div class="data-preview" id="zalo-order-preview"></div>
       </section>
     </section>
     <section id="customers-view" class="view hidden">

@@ -52,6 +52,7 @@ const publicEntry = item => ({
   id: item.id,
   at: item.at,
   day: item.day || '',
+  source: item.source || '',
   orders: Number(item.orders) || 0,
   rows: Number(item.rows) || 0,
   skippedInvalid: Number(item.skippedInvalid) || 0,
@@ -60,7 +61,8 @@ const publicEntry = item => ({
 });
 
 /** Ghi một lần xuất; `buffer` là tệp XLSX đã gửi cho nhân viên. */
-export async function recordExport({ day = '', orders = 0, rows = 0, skippedInvalid = 0, fileName = '', buffer = null }, now = Date.now()) {
+/** `source`: nguồn đơn đã lọc khi xuất ('' = mọi nguồn). */
+export async function recordExport({ day = '', source = '', orders = 0, rows = 0, skippedInvalid = 0, fileName = '', buffer = null }, now = Date.now()) {
   const id = randomUUID();
   let file = '';
   if (buffer?.length) {
@@ -70,7 +72,7 @@ export async function recordExport({ day = '', orders = 0, rows = 0, skippedInva
   }
   return update(async store => {
     await prune(store, now);
-    const entry = { id, at: now, day: String(day || ''), orders: Number(orders) || 0, rows: Number(rows) || 0, skippedInvalid: Number(skippedInvalid) || 0, fileName: String(fileName || ''), file };
+    const entry = { id, at: now, day: String(day || ''), source: String(source || '').slice(0, 40), orders: Number(orders) || 0, rows: Number(rows) || 0, skippedInvalid: Number(skippedInvalid) || 0, fileName: String(fileName || ''), file };
     store.items.unshift(entry);
     return publicEntry(entry);
   });

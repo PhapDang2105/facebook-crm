@@ -12,10 +12,10 @@ const { exportHistoryTtlMs, listExports, readExportFile, recordExport } = await 
 test('ghi lần xuất kèm tệp, liệt kê mới nhất trước, tải lại được tệp', async () => {
   const now = Date.UTC(2026, 8, 19, 5, 0);
   const first = await recordExport({ day: '2026-09-19', orders: 27, rows: 60, fileName: 'don-hang-2026-09-19.xlsx', buffer: Buffer.from('PK-first') }, now);
-  const second = await recordExport({ day: '2026-09-18', orders: 12, rows: 20, skippedInvalid: 1, fileName: 'don-hang-2026-09-18.xlsx', buffer: Buffer.from('PK-second') }, now + 60000);
+  const second = await recordExport({ day: '2026-09-18', source: 'Landing page', orders: 12, rows: 20, skippedInvalid: 1, fileName: 'don-hang-2026-09-18.xlsx', buffer: Buffer.from('PK-second') }, now + 60000);
   assert.deepEqual([first.orders, first.rows, first.hasFile], [27, 60, true]);
   const items = await listExports(now + 120000);
-  assert.deepEqual(items.map(item => [item.day, item.orders, item.skippedInvalid]), [['2026-09-18', 12, 1], ['2026-09-19', 27, 0]]);
+  assert.deepEqual(items.map(item => [item.day, item.source, item.orders, item.skippedInvalid]), [['2026-09-18', 'Landing page', 12, 1], ['2026-09-19', '', 27, 0]]);
   assert.ok(!('file' in items[0]), 'đường dẫn tệp không lộ ra ngoài');
   const file = await readExportFile(second.id, now + 120000);
   assert.deepEqual([file.fileName, file.buffer.toString()], ['don-hang-2026-09-18.xlsx', 'PK-second']);

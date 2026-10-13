@@ -390,6 +390,15 @@
       <section class="order-stage hidden" data-order-panel="export">
         <div class="export-toolbar">
           <label class="order-filter-control"><select id="order-export-day" aria-label="Ngày đơn cần xuất" autocomplete="off"></select></label>
+          <!-- Nguồn đơn cần xuất: cùng giá trị cột "Nguồn đơn" như bộ lọc ở Nhập dữ liệu. -->
+          <label class="order-filter-control"><select id="order-export-source" aria-label="Nguồn đơn cần xuất" autocomplete="off">
+            <option value="all">Mọi nguồn đơn</option>
+            <option value="Chatbot">Chatbot</option>
+            <option value="Nhập tay">Nhập tay (nhân viên lên trong CRM)</option>
+            <option value="Landing page">Landing page</option>
+            <option value="Import">Import</option>
+            <option value="Pancake">Pancake (Shop / nhân viên lên trên POS)</option>
+          </select></label>
           <button class="export-button" id="order-export" type="button" disabled hidden>Xuất XLSX</button>
           <button class="export-button export-button--skip hidden" id="order-export-skip" type="button">Xuất bỏ qua đơn chưa chuẩn</button>
           <button class="order-history-button" id="order-export-history-button" type="button" aria-expanded="false" aria-controls="order-export-history-panel">Lịch sử xuất</button>

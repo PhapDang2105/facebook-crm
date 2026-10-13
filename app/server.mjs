@@ -4354,6 +4354,7 @@ const server = http.createServer(async (request, response) => {
       // Lịch sử xuất (14 ngày): ngày đơn đã chọn, số đơn (dòng có STT), số dòng, tệp để tải lại.
       await recordExport({
         day: String(payload.exportDay || ''),
+        source: String(payload.exportSource || ''),
         orders: new Set(rows.map(row => String(row[0] || '')).filter(Boolean)).size,
         rows: rows.length,
         skippedInvalid: skipInvalidLocations ? rows.locationCheck.invalid.length : 0,
@@ -4363,7 +4364,7 @@ const server = http.createServer(async (request, response) => {
       const exportedOrders = new Set(rows.map(row => String(row[0] || '')).filter(Boolean)).size;
       audit(request, 'order.export', {
         target: { type: 'file', id: fileName, name: fileName },
-        summary: `Xuất file kho ${fileName}: ${exportedOrders} đơn, ${rows.length} dòng${payload.exportDay ? `, ngày ${String(payload.exportDay).slice(0, 20)}` : ''}${skipInvalidLocations && rows.locationCheck.invalid.length ? `, bỏ ${rows.locationCheck.invalid.length} đơn sai địa chỉ` : ''}.`,
+        summary: `Xuất file kho ${fileName}: ${exportedOrders} đơn, ${rows.length} dòng${payload.exportDay ? `, ngày ${String(payload.exportDay).slice(0, 20)}` : ''}${payload.exportSource ? `, nguồn ${String(payload.exportSource).slice(0, 40)}` : ''}${skipInvalidLocations && rows.locationCheck.invalid.length ? `, bỏ ${rows.locationCheck.invalid.length} đơn sai địa chỉ` : ''}.`,
         details: { kind: 'warehouse', orders: exportedOrders, rows: rows.length }
       });
       return sendBinary(response, 200, output, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName);

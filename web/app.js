@@ -11438,9 +11438,20 @@ function exportDayLabels() {
   return { key: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`, label: formatVnDate(date) };
 }
 
+// Nguồn đơn cần xuất (cột "Nguồn đơn"); "all" = mọi nguồn. Mỗi lần mở trang về "Mọi nguồn đơn".
+const orderExportSource = document.querySelector('#order-export-source');
+if (orderExportSource) orderExportSource.value = 'all';
+
+/** Nguồn đang chọn để xuất: '' khi xuất mọi nguồn, không thì nhãn cột Nguồn đơn. */
+function selectedExportSource() {
+  const value = orderExportSource?.value || 'all';
+  return value === 'all' ? '' : value;
+}
+
 /**
- * Bảng chỉ gồm dòng sạch hoặc đã xác nhận, trừ đơn khách hủy, và chỉ đơn đặt
- * đúng ngày đang chọn: đây là phần được xuất kho, cả bảng xem trước lẫn XLSX.
+ * Bảng chỉ gồm dòng sạch hoặc đã xác nhận, trừ đơn khách hủy, chỉ đơn đặt
+ * đúng ngày và đúng nguồn đang chọn: đây là phần được xuất kho, cả bảng xem
+ * trước lẫn XLSX.
  */
 function exportableOrderData(data = orderData) {
   if (!data.rows.length) return data;
@@ -11453,11 +11464,17 @@ function exportableOrderData(data = orderData) {
     const ordered = parseOrderRowDate(row, data, now);
     return ordered && ordered.getFullYear() === day.getFullYear() && ordered.getMonth() === day.getMonth() && ordered.getDate() === day.getDate();
   };
+  const source = selectedExportSource();
+  const sourceColumn = source ? data.headers.findIndex(header => normalizeColumnName(header) === normalizeColumnName(orderSourceHeader)) : -1;
+  const wantedSource = normalizeColumnName(source);
+  // Bảng không có cột Nguồn đơn (file cũ) mà chọn một nguồn: không dòng nào khớp.
+  const sameSource = row => !source || (sourceColumn >= 0 && normalizeColumnName(row[sourceColumn] || '') === wantedSource);
   return {
     headers: data.headers,
     rows: data.rows.filter((row, index) => !pending.has(index)
       && orderStatusOf(row, data, statuses) !== 'cancelled'
-      && sameDay(row))
+      && sameDay(row)
+      && sameSource(row))
   };
 }
 
@@ -11488,7 +11505,7 @@ async function renderExportHistory() {
   orderExportHistoryPanel.innerHTML = [
     '<p class="order-archive-count">Lịch sử xuất kho 14 ngày gần nhất</p>',
     ...items.map(entry => `<div class="order-archive-item">
-      <div class="order-archive-head"><strong>Đơn ngày ${escapeHtml(dayLabel(entry.day))}</strong><b>${Number(entry.orders) || 0} đơn · ${Number(entry.rows) || 0} dòng</b></div>
+      <div class="order-archive-head"><strong>Đơn ngày ${escapeHtml(dayLabel(entry.day))}${entry.source ? ` · ${escapeHtml(entry.source)}` : ''}</strong><b>${Number(entry.orders) || 0} đơn · ${Number(entry.rows) || 0} dòng</b></div>
       <small class="order-archive-meta">Xuất lúc ${escapeHtml(new Date(entry.at).toLocaleString('vi-VN'))}${entry.skippedInvalid ? ` · đã bỏ ${entry.skippedInvalid} đơn chưa chuẩn địa chỉ` : ''}</small>
       ${entry.hasFile ? `<a class="export-history-download" href="/api/orders/export/history/${encodeURIComponent(entry.id)}/file" download="${escapeHtml(entry.fileName || 'don-hang.xlsx')}">Tải lại ${escapeHtml(entry.fileName || 'tệp')}</a>` : ''}
     </div>`)
@@ -11996,7 +12013,8 @@ async function renderExportPreview() {
   }
   renderExportLocationCheck(locationCheck, rows.length);
   if (!rows.length) {
-    renderEmptyState(preview, 'Chưa có dữ liệu xuất');
+    const source = selectedExportSource();
+    renderEmptyState(preview, source && orderData.rows.length ? `Ngày này không có đơn nguồn ${source} đủ điều kiện xuất` : 'Chưa có dữ liệu xuất');
     return;
   }
   // Dòng đầu của đơn chưa chuẩn được tô đỏ trong bảng xem trước.
@@ -12557,6 +12575,7 @@ orderDayFilter?.addEventListener('change', renderOrderData);
 loadExportedCustomerPhones();
 // Đổi ngày xuất: bảng xuất dựng lại (khoá cache theo dữ liệu nên tự làm mới).
 orderExportDay?.addEventListener('change', () => { orderPanelsDirty.add('export'); renderOrderData(); });
+orderExportSource?.addEventListener('change', () => { orderPanelsDirty.add('export'); renderOrderData(); });
 orderExportHistoryButton?.addEventListener('click', () => {
   const willOpen = orderExportHistoryPanel.classList.contains('hidden');
   orderExportHistoryPanel.classList.toggle('hidden', !willOpen);
@@ -13522,7 +13541,7 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
   button.textContent = 'Đang xuất...';
   try {
     const filename = createExportFilename();
-    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportableOrderData(), skipInvalidLocations, exportDay: exportDayLabels().key, fileName: filename }) });
+    const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportableOrderData(), skipInvalidLocations, exportDay: exportDayLabels().key, exportSource: selectedExportSource(), fileName: filename }) });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       if (detail.locationCheck) renderExportLocationCheck(detail.locationCheck, exportRowsCache.rows.length || 1);

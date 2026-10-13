@@ -107,7 +107,12 @@ test('[3] nguồn đơn tạo tay là "Nhập tay" ở Đơn hàng, cùng luật
   assert.equal(label({ source: 'Facebook', landing: {} }), 'Landing page');
   assert.equal(label({ source: 'POS' }), 'Pancake');
   assert.equal(label({ source: 'Zalo' }), 'Zalo');
+  // Đơn tạo ở màn Khách hàng: Re-marketing (đơn cũ ghi "Gọi điện" hoặc chỉ có customerId cũng vậy).
+  assert.equal(label({ source: 'Re-marketing' }), 'Re-marketing');
+  assert.equal(label({ source: 'Gọi điện', customerId: 'c1' }), 'Re-marketing');
+  assert.equal(label({ source: 'Zalo', customerId: 'c1' }), 'Re-marketing');
   assert.match(html, /<option value="Nhập tay">/, 'bộ lọc nguồn đơn có "Nhập tay"');
+  assert.match(html, /<option value="Re-marketing">/, 'bộ lọc nguồn đơn có "Re-marketing"');
 });
 
 test('[5] bảng đơn lưu ở trình duyệt không bị xoá lúc tải trang; vào thẳng Xuất dữ liệu là dựng bảng xuất', () => {

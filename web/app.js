@@ -3951,7 +3951,6 @@ async function openCustomerOrderForm(customer) {
     <div class="customer-sheet-order-gift-head">Quà tặng <small>tích quà khách chọn</small></div>
     <div class="customer-sheet-gifts" data-order-gifts></div>
     <div class="customer-sheet-fields">
-      <label>Nguồn đơn<select data-order-field="source"><option>Gọi điện</option><option>Facebook</option><option>Zalo</option><option>Khác</option></select></label>
       <label>Thanh toán<select data-order-field="payment"><option value="COD">COD (thu tiền khi giao)</option><option value="Chuyển khoản">Chuyển khoản</option></select></label>
       <label class="customer-sheet-field--wide">Ghi chú<input type="text" data-order-field="note" maxlength="500" placeholder="Giao giờ hành chính, gọi trước khi giao..."></label>
     </div>
@@ -3995,7 +3994,8 @@ async function submitCustomerSheetOrder() {
     gift: totals.gift,
     ...(customerSheetGiftOverride()?.length ? { giftOverride: customerSheetGiftOverride() } : {}),
     status: 'Mới',
-    source: field('source') || 'Gọi điện',
+    // Đơn lên từ màn Khách hàng (khách cũ mua lại) luôn là nguồn Re-marketing.
+    source: 'Re-marketing',
     payment: field('payment') || 'COD',
     freeShipping: totals.shippingFee === 0,
     shippingFee: totals.shippingFee,
@@ -4402,11 +4402,13 @@ function paidUnitPrices(order, products) {
 
 // Nguồn đơn hệ thống trên bảng, cùng luật với Báo cáo (app/order-facts.mjs orderSourceKey):
 // landing → "Landing page"; đơn tạo trên POS kéo về → "Pancake"; bot chốt → "Chatbot";
-// nhân viên lên tay trong khung khách hàng (nguồn trống/"Facebook") → "Nhập tay".
+// nhân viên lên tay trong khung khách hàng (nguồn trống/"Facebook") → "Nhập tay";
+// tạo ở màn Khách hàng (nguồn "Re-marketing", đơn cũ "Gọi điện"/có customerId) → "Re-marketing".
 function systemOrderSourceLabel(order) {
   const source = String(order?.source || '').trim();
   if (source === 'Landing page' || order?.landing) return 'Landing page';
   if (source === 'POS') return 'Pancake';
+  if (source === 'Re-marketing' || source === 'Gọi điện' || order?.customerId) return 'Re-marketing';
   if (order?.automatic === true || order?.employee === 'Chatbot AI') return 'Chatbot';
   if (!source || source === 'Facebook') return 'Nhập tay';
   return source;
@@ -11956,20 +11958,14 @@ let exportRowsCache = { key: '', rows: [], streets: [], locationCheck: { checked
 const orderExportSkip = document.querySelector('#order-export-skip');
 const orderExportCheck = document.querySelector('#order-export-check');
 
-// Khung kiểm tra ba cấp chỉ hiện khi có đơn tỉnh/quận/phường chưa đúng danh mục
-// kho: liệt kê để sửa ở Xử lý dữ liệu, khoá nút xuất chính, chỉ còn nút xuất bỏ
-// qua. Mọi đơn đều đạt thì không hiện gì — bảng xem trước là đủ.
+// Đơn tỉnh/quận/phường chưa đúng danh mục kho: chỉ tô đỏ dòng trong bảng xem
+// trước (rê chuột xem lý do), khoá nút xuất chính, chỉ còn nút xuất bỏ qua.
+// Chủ shop 13/10 bỏ khung cảnh báo liệt kê đơn phía trên bảng.
 function renderExportLocationCheck(check, totalRows) {
-  if (!orderExportCheck) return;
   const invalid = Array.isArray(check?.invalid) ? check.invalid : [];
-  const checked = Number(check?.checked) || 0;
-  orderExportCheck.classList.toggle('hidden', !totalRows || invalid.length === 0);
-  orderExportCheck.classList.toggle('is-invalid', invalid.length > 0);
+  if (orderExportCheck) { orderExportCheck.classList.add('hidden'); orderExportCheck.innerHTML = ''; }
   if (orderExportSkip) orderExportSkip.classList.toggle('hidden', invalid.length === 0);
   if (orderExport) orderExport.disabled = totalRows === 0 || invalid.length > 0;
-  if (!totalRows || !invalid.length) { orderExportCheck.innerHTML = ''; return; }
-  const items = invalid.slice(0, 30).map(item => `<li><b>${escapeHtml(item.customer || 'Khách')}</b> · ${escapeHtml(item.phone || '')} — ${escapeHtml([item.ward, item.district, item.province].filter(Boolean).join(', ') || item.address || '')}<br><small>${escapeHtml(item.issues.join('; '))}</small></li>`).join('');
-  orderExportCheck.innerHTML = `<strong>⚠ ${invalid.length}/${checked} đơn có địa chỉ chưa đúng ba cấp của danh mục kho. Sửa ở Xử lý dữ liệu rồi quay lại, hoặc xuất bỏ qua các đơn này.</strong><ul>${items}</ul>${invalid.length > 30 ? `<small>… và ${invalid.length - 30} đơn nữa</small>` : ''}`;
 }
 
 async function fetchExportRows() {
@@ -12018,7 +12014,7 @@ async function renderExportPreview() {
     return;
   }
   // Dòng đầu của đơn chưa chuẩn được tô đỏ trong bảng xem trước.
-  const invalidOrderNumbers = new Set((locationCheck.invalid || []).map(item => String(item.orderNumber)));
+  const invalidIssues = new Map((locationCheck.invalid || []).map(item => [String(item.orderNumber), (item.issues || []).join('; ')]));
   // Vạch ngăn giữa các nhóm cột (STT | đơn hàng | mua hàng | giao hàng) tô màu
   // TikTok để dò dòng dễ hơn: ô cuối của mỗi nhóm (trừ nhóm cuối) mang lớp riêng.
   const groupEndPositions = new Set();
@@ -12033,7 +12029,15 @@ async function renderExportPreview() {
   const columns = exportPreviewWidths.map(width => `<col style="width:${width}px">`).join('');
   // Cột Địa chỉ chỉ hiện số nhà/đường (ba cấp có cột riêng); file xuất vẫn đầy đủ.
   const cell = (row, rowIndex, index) => index === 35 ? (streets[rowIndex] ?? row[index]) : row[index];
-  const body = rows.map((row, rowIndex) => `<tr${invalidOrderNumbers.has(String(row[0])) ? ' class="export-row-invalid"' : ''}>${exportPreviewIndexes.map((index, position) => `<td class="${groupEndClass(position).trim()}">${escapeHtml(cell(row, rowIndex, index))}</td>`).join('')}</tr>`).join('');
+  // Dòng quà/sản phẩm thêm của một đơn để trống STT: thuộc đơn có STT gần nhất phía trên.
+  let orderNumber = '';
+  const body = rows.map((row, rowIndex) => {
+    if (String(row[0] || '')) orderNumber = String(row[0]);
+    const rowOpen = invalidIssues.has(orderNumber)
+      ? `<tr class="export-row-invalid" title="${escapeHtml(`Địa chỉ chưa đúng ba cấp danh mục kho: ${invalidIssues.get(orderNumber)}`)}">`
+      : '<tr>';
+    return `${rowOpen}${exportPreviewIndexes.map((index, position) => `<td class="${groupEndClass(position).trim()}">${escapeHtml(cell(row, rowIndex, index))}</td>`).join('')}</tr>`;
+  }).join('');
   preview.innerHTML = `<table class="export-template-table" style="width:${tableWidth}px"><colgroup>${columns}</colgroup><thead><tr class="export-group-row">${groupHead}</tr><tr>${columnHead}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
@@ -13048,7 +13052,11 @@ async function beginCustomerOrderEdit(order) {
   if (customerOrderAddress) customerOrderAddress.value = order.address || '';
   if (customerOrderNote) customerOrderNote.value = order.note || '';
   if (customerBankTransfer) customerBankTransfer.checked = order.payment === 'Chuyển khoản';
-  if (customerOrderSource && order.source) customerOrderSource.value = order.source;
+  if (customerOrderSource && order.source) {
+    // Nguồn ô chọn không có (đơn "Re-marketing" tạo ở màn Khách hàng): thêm vào để sửa đơn không đổi mất nguồn.
+    if (![...customerOrderSource.options].some(option => option.value === order.source)) customerOrderSource.add(new Option(order.source, order.source));
+    customerOrderSource.value = order.source;
+  }
   const products = (Array.isArray(order.products) ? order.products : []).map(item => {
     const matched = findSharedProduct(item.sku || item.name);
     return {

@@ -722,7 +722,7 @@ main:has(#shipping-view:not(.hidden)) { min-height: 100vh; padding: clamp(122px,
 .export-check li { margin: 2px 0; }
 .export-check li b { font-weight: 700; }
 .export-check li small { color: #9a3d3d; }
-.export-preview tbody tr.export-row-invalid td { background: #fff1f1; }
+.export-preview tbody tr.export-row-invalid td { background: #ffe0e0; color: #8a1c1c; }
 .export-preview tbody tr.export-row-invalid td:first-child { box-shadow: inset 3px 0 0 #d92d20; }
 
 .file-button input { position: absolute; width: 0.9px; height: 0.9px; overflow: hidden; opacity: 0; }

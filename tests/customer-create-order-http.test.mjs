@@ -79,7 +79,7 @@ test('tạo đơn từ hồ sơ khách không có hội thoại: lưu kho đơn,
   const created = await first.json();
   assert.equal(created.createdOrderId, '77777');
   assert.equal(created.pos, null, 'chưa kết nối POS: không đẩy, không lỗi');
-  assert.equal(created.order.source, 'Gọi điện');
+  assert.equal(created.order.source, 'Re-marketing');
 
   const stored = JSON.parse(readFileSync(landingPath, 'utf8')).orders.find(order => order.id === '77777');
   assert.ok(stored, 'đơn nằm ở kho đơn không gắn hội thoại');

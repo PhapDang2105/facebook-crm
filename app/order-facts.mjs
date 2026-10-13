@@ -8,6 +8,7 @@
 //  - 'pos':     đơn nhân viên/Shop tạo trên Pancake POS, kéo về hội thoại.
 //  - 'chatbot': bot chốt trong hội thoại (automatic / employee "Chatbot AI").
 //  - 'import':  nhân viên lên đơn tay ở khung khách hàng ("Nhập tay").
+//  - 'remarketing': tạo ở màn Khách hàng (nguồn "Re-marketing"; đơn cũ "Gọi điện" / có customerId).
 //  - còn lại:   chữ thường của trường `source` gốc (hoặc 'other').
 import { INCOMPLETE_LABEL, LANDING_SOURCE, campaignKey } from './landing-orders.mjs';
 import { vietnamDay } from './meta-ads.mjs';
@@ -18,8 +19,12 @@ export const SOURCE_LABELS = Object.freeze({
   landing: 'Landing page',
   pos: 'POS',
   import: 'Nhập tay',
+  remarketing: 'Re-marketing',
   other: 'Khác'
 });
+
+/** Nguồn đơn lên từ màn Khách hàng (khách cũ mua lại). */
+export const REMARKETING_SOURCE = 'Re-marketing';
 
 export function sourceLabel(key) {
   return SOURCE_LABELS[key] || String(key || SOURCE_LABELS.other);
@@ -62,6 +67,7 @@ export function orderSourceKey(order) {
   const source = String(order?.source || '').trim();
   if (source === LANDING_SOURCE || order?.landing) return 'landing';
   if (source === 'POS') return 'pos';
+  if (source === REMARKETING_SOURCE || source === 'Gọi điện' || order?.customerId) return 'remarketing';
   if (order?.automatic === true || order?.employee === 'Chatbot AI') return 'chatbot';
   if (!source || source === 'Facebook') return 'import';
   return source.toLowerCase();

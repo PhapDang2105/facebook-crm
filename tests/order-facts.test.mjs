@@ -17,7 +17,11 @@ test('nguồn đơn: landing, POS, chatbot, nhập tay; nhãn tiếng Việt', (
   assert.equal(orderSourceKey({ source: 'Facebook', employee: 'Chatbot AI' }), 'chatbot');
   assert.equal(orderSourceKey({ source: 'Facebook', employee: 'Lan' }), 'import');
   assert.equal(orderSourceKey({ source: 'Shopee' }), 'shopee');
-  assert.deepEqual(['chatbot', 'landing', 'pos', 'import'].map(sourceLabel), ['Chatbot', 'Landing page', 'POS', 'Nhập tay']);
+  // Tạo ở màn Khách hàng: Re-marketing; đơn trước 13/10 ghi "Gọi điện"/"Zalo" kèm customerId cũng vậy.
+  assert.equal(orderSourceKey({ source: 'Re-marketing', customerId: 'c1' }), 'remarketing');
+  assert.equal(orderSourceKey({ source: 'Gọi điện', customerId: 'c1' }), 'remarketing');
+  assert.equal(orderSourceKey({ source: 'Zalo', customerId: 'c1' }), 'remarketing');
+  assert.deepEqual(['chatbot', 'landing', 'pos', 'import', 'remarketing'].map(sourceLabel), ['Chatbot', 'Landing page', 'POS', 'Nhập tay', 'Re-marketing']);
   assert.equal(sourceLabel('shopee'), 'shopee');
 });
 

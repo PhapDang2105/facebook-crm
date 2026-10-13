@@ -87,6 +87,7 @@ import { addCustomerNote, CONTACT_STATUSES, listCustomerNotes, setCustomerContac
 import { defaultConversationLabels, labelsForEvents, listLabelIcons, readInboxSettings, writeInboxSettings } from './inbox-settings.mjs';
 import { moderateComment, sendConversationMessage, syncPageConversations } from './meta-sync.mjs';
 import { publishMessagingEvent, subscribeToMessagingEvents } from './message-events.mjs';
+import { REMARKETING_SOURCE } from './order-facts.mjs';
 import {
   getConversation,
   installMessagingStoreShutdownFlush,
@@ -3291,7 +3292,8 @@ const server = http.createServer(async (request, response) => {
         if (!order.products.length) return sendJson(response, 400, { error: 'Đơn cần ít nhất một sản phẩm.' });
         order.id = uniqueOrderId(order.id, await takenOrderIds());
         order.status = 'Mới';
-        order.source = String(payload.order?.source || '').trim().slice(0, 40) || 'Gọi điện';
+        // Đơn lên từ hồ sơ khách (khách cũ mua lại) luôn là nguồn Re-marketing.
+        order.source = REMARKETING_SOURCE;
         order.customerId = customer.id;
         const guardKey = `customer:${customer.id}`;
         const samePhone = customerPhoneKey(order.phone);

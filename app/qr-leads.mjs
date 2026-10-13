@@ -20,6 +20,8 @@ const leadKeepLimit = 5000;
 // Trạng thái nhân viên chọn sau khi liên hệ. "Đã mua" không nằm ở đây: máy chủ tự suy ra từ đơn có cùng SĐT.
 export const QR_LEAD_STATUSES = {
   new: 'Chưa liên hệ',
+  // 13/10 chủ shop: tin ưu đãi QR đã gửi tới hội thoại Messenger của khách + hội thoại mang thẻ Re-marketing → tự chuyển.
+  messaged: 'Đã gửi mess',
   called: 'Đã gọi',
   'no-answer': 'Không nghe máy',
   zalo: 'Đã nhắn Zalo',
@@ -53,7 +55,10 @@ function normalizeLead(value) {
     status: Object.hasOwn(QR_LEAD_STATUSES, value.status) ? value.status : 'new',
     note: text(value.note, 500),
     updatedAt: Number(value.updatedAt) || 0,
-    updatedBy: text(value.updatedBy, 80)
+    updatedBy: text(value.updatedBy, 80),
+    // Hội thoại Messenger của khách (nối tự động, linkQrLeads) và lúc tin ưu đãi QR được gửi tới đó.
+    conversationId: text(value.conversationId, 120),
+    messagedAt: Number(value.messagedAt) || 0
   };
 }
 
@@ -130,6 +135,92 @@ export async function updateQrLead(id, { status, note } = {}, { by = '', now = D
     lead.updatedAt = now;
     lead.updatedBy = text(by, 80);
     return { ...lead };
+  });
+}
+
+// Khách nhập số trên trang đệm rồi bấm Messenger: Meta báo lượt quét (qrReferrals) vài giây sau. Cửa sổ nối theo giờ.
+const linkBeforeMs = 2 * 60 * 1000;
+const linkAfterMs = 15 * 60 * 1000;
+const phoneKey9 = value => String(value || '').replace(/\D/g, '').slice(-9);
+const phoneKeysIn = text => {
+  const keys = new Set();
+  for (const match of String(text || '').matchAll(/(?<!\d)(?:\+?84|0)(?:[ .-]?\d){9}(?!\d)/g)) keys.add(phoneKey9(match[0]));
+  return keys;
+};
+
+/**
+ * 13/10 chủ shop: khách để lại SĐT trên trang quét, rồi hội thoại Messenger của khách đã nhận tin ưu đãi QR (Botcake hay
+ * CRM chào — `qrGreetedAt`) và mang thẻ Re-marketing → dòng của khách chuyển "Đã gửi mess". Hàm thuần, trả danh sách cập nhật
+ * `[{ id, conversationId, messagedAt }]`; chỉ xét dòng "Chưa liên hệ" chưa nối (không đè trạng thái nhân viên chọn).
+ *
+ * Nối dòng ↔ hội thoại theo một trong hai cách:
+ *  - SĐT: số khách để lại có trong tin khách gửi / đơn / giỏ của hội thoại (chắc chắn nhất);
+ *  - Giờ: lượt quét thẻ của hội thoại (qrReferrals) đến trong khoảng −2 … +15 phút quanh lúc khách để lại số qua nút
+ *    Messenger. Hai dòng cùng tranh một hội thoại, hay một dòng khớp hai hội thoại → bỏ (không đoán), trừ khi có khớp SĐT.
+ */
+export function linkQrLeads(leads, { conversations = [], messages = {}, remarketingLabels = [], now = Date.now() } = {}) {
+  const tags = new Set((Array.isArray(remarketingLabels) ? remarketingLabels : []).map(String));
+  if (!tags.size) return [];
+  const candidates = (Array.isArray(conversations) ? conversations : []).filter(conversation => conversation
+    && conversation.source !== 'comment'
+    && Number(conversation.qrGreetedAt) > 0
+    && (Array.isArray(conversation.labels) ? conversation.labels : []).some(label => tags.has(String(label))));
+  if (!candidates.length) return [];
+  const phonesOf = conversation => {
+    const keys = new Set();
+    for (const message of Array.isArray(messages?.[conversation.id]) ? messages[conversation.id] : []) {
+      if (message?.direction === 'incoming') for (const key of phoneKeysIn(message.text)) keys.add(key);
+    }
+    for (const order of Array.isArray(conversation.customerOrders) ? conversation.customerOrders : []) if (order?.phone) keys.add(phoneKey9(order.phone));
+    if (conversation.pendingOrder?.phone) keys.add(phoneKey9(conversation.pendingOrder.phone));
+    return keys;
+  };
+  const phoneIndex = new Map(candidates.map(conversation => [conversation.id, phonesOf(conversation)]));
+  const open = (Array.isArray(leads) ? leads : []).filter(lead => lead && !lead.test && lead.status === 'new' && !lead.conversationId && now - (Number(lead.lastAt) || 0) < 30 * 24 * 60 * 60 * 1000);
+  const taken = new Set((Array.isArray(leads) ? leads : []).map(lead => lead?.conversationId).filter(Boolean));
+  const result = [];
+  const timeMatches = new Map();
+  for (const lead of open) {
+    const key = phoneKey9(lead.phone);
+    const byPhone = candidates.find(conversation => !taken.has(conversation.id) && phoneIndex.get(conversation.id).has(key));
+    if (byPhone) {
+      taken.add(byPhone.id);
+      result.push({ id: lead.id, conversationId: byPhone.id, messagedAt: Number(byPhone.qrGreetedAt) });
+      continue;
+    }
+    if (lead.channel && lead.channel !== 'messenger') continue;
+    const times = [Number(lead.createdAt) || 0, Number(lead.lastAt) || 0].filter(Boolean);
+    const near = candidates.filter(conversation => (Array.isArray(conversation.qrReferrals) ? conversation.qrReferrals : [])
+      .some(referral => times.some(at => (Number(referral?.at) || 0) >= at - linkBeforeMs && (Number(referral?.at) || 0) <= at + linkAfterMs)));
+    timeMatches.set(lead.id, near);
+  }
+  const claims = new Map();
+  for (const [leadId, near] of timeMatches) if (near.length === 1) claims.set(near[0].id, [...(claims.get(near[0].id) || []), leadId]);
+  for (const [conversationId, leadIds] of claims) {
+    if (leadIds.length !== 1 || taken.has(conversationId)) continue;
+    const conversation = candidates.find(item => item.id === conversationId);
+    taken.add(conversationId);
+    result.push({ id: leadIds[0], conversationId, messagedAt: Number(conversation.qrGreetedAt) });
+  }
+  return result;
+}
+
+/** Ghi kết quả linkQrLeads: chỉ dòng vẫn còn "Chưa liên hệ" và chưa nối (nhân viên vừa đổi thì thôi). Trả số dòng đổi. */
+export async function applyQrLeadLinks(links, { now = Date.now() } = {}) {
+  if (!Array.isArray(links) || !links.length) return 0;
+  return queueWrite(store => {
+    let changed = 0;
+    for (const link of links) {
+      const lead = store.leads.find(item => item.id === link.id);
+      if (!lead || lead.status !== 'new' || lead.conversationId) continue;
+      lead.status = 'messaged';
+      lead.conversationId = text(link.conversationId, 120);
+      lead.messagedAt = Number(link.messagedAt) || now;
+      lead.updatedAt = now;
+      lead.updatedBy = 'Tự động';
+      changed += 1;
+    }
+    return changed;
   });
 }
 

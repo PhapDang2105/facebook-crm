@@ -6483,6 +6483,11 @@ function handleMessagingEvent(event) {
     return;
   }
   // Khách quét thẻ để lại SĐT trên trang đệm: báo nhân viên, bảng Cài đặt → Mã QR đang mở thì tải lại.
+  // Dòng khách quét QR tự chuyển "Đã gửi mess" (máy chủ nối với hội thoại đã nhận ưu đãi): tải lại bảng + số trên menu.
+  if (event.type === 'qr-leads-changed') {
+    if (typeof qrLeadState !== 'undefined') loadQrLeads();
+    return;
+  }
   if (event.type === 'qr-lead') {
     const lead = event.lead || {};
     const who = [lead.name, String(lead.phone || '').replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3')].filter(Boolean).join(' · ');
@@ -14643,7 +14648,7 @@ function renderQrLeads() {
     return `<tr data-qr-lead="${escapeHtml(lead.id)}"${lead.status === 'new' && !lead.purchasedAt && !lead.test ? ' class="is-new"' : ''}>
       <td class="is-time">${formatQrShortTime(lead.lastAt || lead.createdAt)}<small>${escapeHtml([qrDeviceText(lead), qrLeadChannelNames[lead.channel] ? `→ ${qrLeadChannelNames[lead.channel]}` : ''].filter(Boolean).join(' '))}</small></td>
       <td class="is-who"><b>${escapeHtml(lead.name || 'Chưa để tên')}</b><span>${escapeHtml(qrLeadPhoneText(lead.phone))}</span>${tags ? `<span class="qr-lead-tags">${tags}</span>` : ''}</td>
-      <td class="is-contact"><a class="qr-mini" href="tel:${phone}">Gọi</a><a class="qr-mini" href="https://zalo.me/${phone}" target="_blank" rel="noopener">Zalo</a><button type="button" class="qr-mini" data-qr-lead-copy="${phone}" title="Sao chép số">Chép số</button></td>
+      <td class="is-contact"><a class="qr-mini" href="tel:${phone}">Gọi</a><a class="qr-mini" href="https://zalo.me/${phone}" target="_blank" rel="noopener">Zalo</a><button type="button" class="qr-mini" data-qr-lead-copy="${phone}" title="Sao chép số">Chép số</button>${lead.conversationId ? `<button type="button" class="qr-mini" data-qr-lead-chat="${escapeHtml(lead.conversationId)}" title="Mở hội thoại Messenger của khách${lead.messagedAt ? ` (ưu đãi gửi ${formatQrShortTime(lead.messagedAt)})` : ''}">Chat</button>` : ''}</td>
       <td><select class="qr-lead-status" data-qr-lead-status aria-label="Trạng thái">${options.map(([value, label]) => `<option value="${escapeHtml(value)}"${value === lead.status ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select>${lead.updatedBy ? `<small class="qr-lead-by">${escapeHtml(lead.updatedBy)} · ${formatQrShortTime(lead.updatedAt)}</small>` : ''}</td>
       <td><input class="qr-lead-note" data-qr-lead-note type="text" maxlength="500" value="${escapeHtml(lead.note || '')}" placeholder="Ghi chú cuộc gọi" aria-label="Ghi chú"></td>
       <td class="is-actions"><button type="button" class="qr-mini is-danger qr-leads-manager" data-qr-lead-delete title="Xoá số này">Xoá</button></td>
@@ -14691,6 +14696,12 @@ document.querySelector('#qr-leads-list')?.addEventListener('change', event => {
   else if (event.target.matches('[data-qr-lead-note]')) saveQrLead(row, { note: event.target.value });
 });
 document.querySelector('#qr-leads-list')?.addEventListener('click', async event => {
+  const chat = event.target.closest('[data-qr-lead-chat]');
+  if (chat) {
+    showView('messages');
+    openConversationById(chat.dataset.qrLeadChat);
+    return;
+  }
   const copy = event.target.closest('[data-qr-lead-copy]');
   if (copy) {
     try {

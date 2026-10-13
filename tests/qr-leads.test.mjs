@@ -13,7 +13,7 @@ const directory = tempDir('qr-leads-');
 process.env.QR_LEADS_PATH = path.join(directory, 'qr-leads.json');
 process.env.QR_SETTINGS_PATH = path.join(directory, 'qr-settings.json');
 
-const { addQrLead, createQrLeadLimiter, deleteQrLead, parseQrLeadInput, qrLeadMergeWindowMs, qrLeadsView, readQrLeads, updateQrLead } = await import('../app/qr-leads.mjs');
+const { addQrLead, applyQrLeadLinks, createQrLeadLimiter, deleteQrLead, linkQrLeads, parseQrLeadInput, qrLeadMergeWindowMs, qrLeadsView, readQrLeads, updateQrLead } = await import('../app/qr-leads.mjs');
 const { renderBridgePage } = await import('../app/qr-bridge.mjs');
 const { readQrSettings, writeQrSettings } = await import('../app/qr-settings.mjs');
 
@@ -113,6 +113,56 @@ test('công tắc ô SĐT ở Cài đặt → Mã QR: mặc định bật, lưu 
   assert.deepEqual([saved.leadForm, saved.zaloUrl], [false, 'https://zalo.me/g/abc']);
   assert.equal((await writeQrSettings({ prefillText: '' })).leadForm, false, 'lưu ô khác giữ nguyên công tắc');
   assert.equal((await writeQrSettings({ leadForm: true })).leadForm, true);
+});
+
+test('13/10: khách để lại số + hội thoại đã nhận ưu đãi QR + thẻ Re-marketing → "Đã gửi mess" (nối theo SĐT hoặc giờ quét)', async () => {
+  const at = Date.UTC(2026, 9, 13, 2, 25);
+  const minute = 60_000;
+  const greeted = { qrGreetedAt: at + minute, labels: ['remarketing-tag'], source: 'inbox' };
+  const leads = [
+    { id: 'theo-gio', phone: '0824718150', status: 'new', channel: 'messenger', createdAt: at, lastAt: at },
+    { id: 'theo-so', phone: '0933891226', status: 'new', channel: 'zalo', createdAt: at - 600 * minute, lastAt: at - 600 * minute },
+    { id: 'da-goi', phone: '0943869323', status: 'called', channel: 'messenger', createdAt: at, lastAt: at },
+    { id: 'thu', phone: '0913402007', status: 'new', test: true, createdAt: at, lastAt: at }
+  ];
+  const conversations = [
+    // Lượt quét Meta 20 giây sau lúc khách để lại số qua nút Messenger.
+    { id: 'p:1', ...greeted, qrReferrals: [{ ref: 'tmdt-01', at: at + 20_000 }] },
+    // Khách nhắn số trong hội thoại (Zalo trước, Messenger sau): nối theo SĐT dù giờ không khớp.
+    { id: 'p:2', ...greeted, qrReferrals: [{ ref: 'tmdt-01', at: at - 300 * minute }] },
+    // Có lượt quét đúng giờ nhưng CHƯA gửi ưu đãi / chưa có thẻ: không tính.
+    { id: 'p:3', labels: ['remarketing-tag'], qrReferrals: [{ at: at + 30_000 }] },
+    { id: 'p:4', qrGreetedAt: at + minute, labels: [], qrReferrals: [{ at: at + 30_000 }] }
+  ];
+  const messages = { 'p:2': [{ direction: 'incoming', text: 'số em 0933 891 226 nha' }] };
+  const links = linkQrLeads(leads, { conversations, messages, remarketingLabels: ['remarketing-tag'], now: at + 10 * minute });
+  assert.deepEqual(links.map(link => [link.id, link.conversationId]).sort(), [['theo-gio', 'p:1'], ['theo-so', 'p:2']]);
+  assert.equal(links.find(link => link.id === 'theo-gio').messagedAt, at + minute);
+  assert.deepEqual(linkQrLeads(leads, { conversations, messages, remarketingLabels: [] }), [], 'chưa có thẻ Re-marketing trong cài đặt → không nối');
+
+  // Hai khách để lại số cùng lúc, chỉ một hội thoại khớp giờ → không đoán.
+  const twin = [
+    { id: 'a', phone: '0911111111', status: 'new', channel: 'messenger', createdAt: at, lastAt: at },
+    { id: 'b', phone: '0922222222', status: 'new', channel: 'messenger', createdAt: at + 30_000, lastAt: at + 30_000 }
+  ];
+  assert.deepEqual(linkQrLeads(twin, { conversations: [conversations[0]], remarketingLabels: ['remarketing-tag'], now: at }), []);
+  // Khách chọn Zalo: không nối theo giờ (hội thoại Messenger cùng giờ là của người khác).
+  assert.deepEqual(linkQrLeads([{ ...twin[0], channel: 'zalo' }], { conversations: [conversations[0]], remarketingLabels: ['remarketing-tag'], now: at }), []);
+
+  // Ghi: chỉ đổi dòng còn "Chưa liên hệ"; nhân viên vừa chọn trạng thái khác thì giữ.
+  const saved = await addQrLead({ code: 'tmdt-01', phone: '0824718150', channel: 'messenger', now: at });
+  const other = await addQrLead({ code: 'tmdt-01', phone: '0988777666', channel: 'messenger', now: at });
+  await updateQrLead(other.lead.id, { status: 'called' }, { by: 'NV', now: at + 1 });
+  const changed = await applyQrLeadLinks([
+    { id: saved.lead.id, conversationId: 'p:1', messagedAt: at + minute },
+    { id: other.lead.id, conversationId: 'p:9', messagedAt: at + minute }
+  ], { now: at + 2 * minute });
+  assert.equal(changed, 1);
+  const rows = (await readQrLeads()).leads;
+  const done = rows.find(lead => lead.id === saved.lead.id);
+  assert.deepEqual([done.status, done.conversationId, done.messagedAt, done.updatedBy], ['messaged', 'p:1', at + minute, 'Tự động']);
+  assert.equal(rows.find(lead => lead.id === other.lead.id).status, 'called');
+  assert.equal(await applyQrLeadLinks([{ id: saved.lead.id, conversationId: 'p:5' }]), 0, 'đã nối thì không nối lại');
 });
 
 // ===== Đường HTTP thật: máy chủ trên kho tạm (quiet-console) =====

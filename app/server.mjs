@@ -67,7 +67,7 @@ import { searchConversations } from './message-search.mjs';
 import { addressSuggestions, conversationPhones } from './processing/order-flow.mjs';
 import { qrTargetUrl, renderQrPng, renderQrSvg } from './qr-image.mjs';
 import { readQrSettings, writeQrSettings } from './qr-settings.mjs';
-import { QR_LEAD_STATUSES, addQrLead, createQrLeadLimiter, deleteQrLead, parseQrLeadInput, qrLeadsView, readQrLeads, updateQrLead } from './qr-leads.mjs';
+import { QR_LEAD_STATUSES, addQrLead, applyQrLeadLinks, createQrLeadLimiter, deleteQrLead, linkQrLeads, parseQrLeadInput, qrLeadsView, readQrLeads, updateQrLead } from './qr-leads.mjs';
 import {
   isMetaConfigured,
   isWebhookConfigured,
@@ -798,6 +798,22 @@ async function runPhoneLabelPass(conversationIds = null) {
   return result.changes.length;
 }
 
+/**
+ * Khách quét QR (13/10): dòng "Chưa liên hệ" có hội thoại Messenger đã nhận tin ưu đãi QR + thẻ Re-marketing → "Đã gửi mess"
+ * (app/qr-leads.mjs linkQrLeads). Chạy khi mở mục Khách quét QR, sau mỗi lần gắn thẻ Re-marketing và quét bù mỗi 5 phút.
+ */
+async function runQrLeadLinkPass() {
+  const [{ leads }, labelDefs, store] = await Promise.all([readQrLeads(), inboxLabelDefs(), readMessagingStore()]);
+  if (!leads.some(lead => lead.status === 'new' && !lead.conversationId && !lead.test)) return 0;
+  const links = linkQrLeads(leads, { conversations: store.conversations || [], messages: store.messages || {}, remarketingLabels: labelsForEvents(labelDefs, ['remarketing']) });
+  const changed = await applyQrLeadLinks(links);
+  if (changed) {
+    console.log(`Khách quét QR: ${changed} khách chuyển "Đã gửi mess" (hội thoại đã nhận ưu đãi QR + thẻ Re-marketing).`);
+    publishMessagingEvent({ type: 'qr-leads-changed' });
+  }
+  return changed;
+}
+
 /** Thẻ "Re-marketing" (sự kiện 'remarketing'): khách vào từ link ref. `conversationIds` = chỉ các hội thoại vừa có tin. */
 async function runRemarketingLabelPass(conversationIds = null) {
   const labelDefs = await inboxLabelDefs();
@@ -816,6 +832,7 @@ async function runRemarketingLabelPass(conversationIds = null) {
   for (const change of result.changes) appendLabelAudit({ actor: AUTOMATED_ACTORS.system, ...change, labelDefs, reason: 'khách vào từ link ref' });
   for (const conversation of relabeled) publishMessagingEvent({ type: 'conversation', conversation });
   if (result.changes.length && !conversationIds) console.log(`Thẻ Re-marketing: gắn bù cho ${result.changes.length} hội thoại.`);
+  if (result.changes.length) runQrLeadLinkPass().catch(error => console.warn(`Khách quét QR: nối hội thoại lỗi: ${error.message}`));
   return result.changes.length;
 }
 
@@ -2144,6 +2161,7 @@ const server = http.createServer(async (request, response) => {
     // Khách để lại SĐT trên trang đệm (Cài đặt → Mã QR → "Khách để lại SĐT"). Nhân viên nào cũng xem và đổi trạng thái
     // được (việc gọi khách là việc của nhân viên); xoá dòng chỉ Quản trị. "Đã mua" suy ra từ đơn cùng SĐT đặt sau lúc để lại.
     if (request.method === 'GET' && url.pathname === '/api/qr/leads') {
+      await runQrLeadLinkPass().catch(error => console.warn(`Khách quét QR: nối hội thoại lỗi: ${error.message}`));
       const [{ leads }, buyers] = await Promise.all([readQrLeads(), listBuyers().catch(() => [])]);
       const purchases = new Map();
       for (const buyer of buyers) {
@@ -4525,6 +4543,10 @@ server.listen(serverConfig.port, serverConfig.host, () => {
   const remarketingLabelPass = () => runRemarketingLabelPass().catch(error => console.warn(`Gắn bù thẻ Re-marketing lỗi: ${error.message}`));
   setTimeout(remarketingLabelPass, 50 * 1000).unref?.();
   setInterval(remarketingLabelPass, 5 * 60 * 1000).unref?.();
+  // Khách quét QR: nối dòng để lại SĐT với hội thoại đã nhận ưu đãi (+ thẻ Re-marketing) — 70 giây sau khởi động rồi mỗi 5 phút.
+  const qrLeadLinkPass = () => runQrLeadLinkPass().catch(error => console.warn(`Khách quét QR: nối hội thoại lỗi: ${error.message}`));
+  setTimeout(qrLeadLinkPass, 70 * 1000).unref?.();
+  setInterval(qrLeadLinkPass, 5 * 60 * 1000).unref?.();
   const phoneLabelPass = () => runPhoneLabelPass().catch(error => console.warn(`Gắn bù thẻ Số điện thoại lỗi: ${error.message}`));
   setTimeout(phoneLabelPass, 40 * 1000).unref?.();
   setInterval(phoneLabelPass, 5 * 60 * 1000).unref?.();

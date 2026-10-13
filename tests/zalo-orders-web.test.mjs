@@ -173,6 +173,11 @@ test('file kho (buildExportRows của máy chủ) từ đơn Zalo: giá khách t
   // Tiền file kho (dòng có giá) = tổng tiền thu của 5 đơn.
   assert.equal(output.reduce((sum, line) => sum + Number(line[21] || 0) * Number(line[22] || 0), 0), 137460 + 274920 + 86110 + 274920 + 324100);
   assert.deepEqual(output.filter(line => line[0]).map(line => line[33]), ['Khách Một', 'Khách Hai', 'Khách Ba', 'Khách Bốn', 'Khách Năm']);
+  // Cột "Nguồn đơn hàng" của file kho: đơn Zalo ghi Zalo (trước đây mọi đơn đều Facebook).
+  assert.deepEqual(output.filter(line => line[0]).map(line => line[2]), ['Zalo', 'Zalo', 'Zalo', 'Zalo', 'Zalo']);
+  // Đơn thường (nguồn Chatbot/Landing…) trong cùng file vẫn Facebook.
+  const mixed = buildExportRows({ headers, rows: [...rows, ['Chatbot', ...rows[0].slice(1, 2), 'CB-x1', ...rows[0].slice(3)]] });
+  assert.deepEqual(mixed.filter(line => line[0]).map(line => line[2]), ['Zalo', 'Zalo', 'Zalo', 'Zalo', 'Zalo', 'Facebook']);
 });
 
 test('Import Zalo lưu kho riêng crm-zalo-orders rồi mở Xuất dữ liệu; không đụng bảng đơn crm-orders', () => {

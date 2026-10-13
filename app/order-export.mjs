@@ -124,6 +124,11 @@ export function normalizeColumnName(value) {
     .replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+/** Ô "Nguồn đơn" của dòng là Zalo (đơn trang Đơn Zalo): file kho ghi nguồn Zalo thay vì Facebook. */
+export function isZaloSource(value) {
+  return normalizeColumnName(value) === 'zalo';
+}
+
 export function isInvalidOrderAddress(value) {
   return String(value ?? '').trim().toUpperCase().startsWith('GXN');
 }
@@ -467,7 +472,8 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
     items.forEach((item, itemIndex) => {
       const output = Array(EXPORT_COLUMNS.length).fill('');
       if (isFirstOrderLine && itemIndex === 0) {
-        output[0] = orderNumber; output[2] = 'Facebook'; output[4] = 'Có'; output[6] = 'Có';
+        // Đơn Zalo (cột "Nguồn đơn" = Zalo, trang Đơn Zalo) ghi nguồn Zalo; còn lại như cũ là Facebook.
+        output[0] = orderNumber; output[2] = isZaloSource(value(row, 'Nguồn đơn')) ? 'Zalo' : 'Facebook'; output[4] = 'Có'; output[6] = 'Có';
         output[8] = 'Thanh toán COD'; output[30] = phone;
         output[33] = value(row, 'Khách hàng'); output[34] = phone; output[35] = value(row, 'Địa chỉ');
         // Tên tỉnh/quận/phường đúng danh mục kho (đã đọc và kiểm tra ở trên).
@@ -477,7 +483,8 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
       }
       output[19] = item.sku; output[21] = item.quantity; output[22] = item.price; output[24] = item.weight || skuWeight(item.sku);
       // Thuế là thuộc tính của từng dòng sản phẩm (kể cả quà), không chỉ dòng đầu đơn.
-      output[28] = '8%';
+      // 13/10 (kho): cột Thuế phải là KIỂU SỐ — ghi 0.08, ô mẫu định dạng 0% nên Excel hiện "8%" (chữ "8%" kho không nhận).
+      output[28] = 0.08;
       outputRows.push(output);
     });
   });

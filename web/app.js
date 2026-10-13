@@ -12040,7 +12040,9 @@ async function renderExportPreview() {
   const tableWidth = exportPreviewWidths.reduce((total, width) => total + width, 0);
   const columns = exportPreviewWidths.map(width => `<col style="width:${width}px">`).join('');
   // Cột Địa chỉ chỉ hiện số nhà/đường (ba cấp có cột riêng); file xuất vẫn đầy đủ.
-  const cell = (row, rowIndex, index) => index === 35 ? (streets[rowIndex] ?? row[index]) : row[index];
+  // Cột Thuế là số tỷ lệ (0.08, file kho định dạng 0%): bảng xem trước hiện "8%" như Excel.
+  const cell = (row, rowIndex, index) => index === 35 ? (streets[rowIndex] ?? row[index])
+    : index === 28 && typeof row[index] === 'number' ? `${Math.round(row[index] * 100)}%` : row[index];
   // Dòng quà/sản phẩm thêm của một đơn để trống STT: thuộc đơn có STT gần nhất phía trên.
   let orderNumber = '';
   const body = rows.map((row, rowIndex) => {

@@ -39,6 +39,20 @@ export function isLivestreamConversation(conversation = {}) {
 }
 
 /**
+ * 13/10 (chủ shop: "đây là quảng cáo livestream"): dòng "Khách bấm vào quảng cáo: «…»" có phải quảng cáo Live không — mã quảng cáo
+ * của tin (tin mới ghi `adId`) thuộc chiến dịch video trực tiếp; tin cũ chưa có mã thì khớp tên với các lần bấm quảng cáo của hội
+ * thoại (referral có mã Live); hoặc tên quảng cáo có chữ live / săn deal; hoặc bài của quảng cáo là bài live.
+ */
+export function isLiveAdMessage(message, conversation = {}) {
+  if (message?.type !== 'ad') return false;
+  const title = String(message.text || '').match(/«(.+)»\s*$/)?.[1] || '';
+  if (title && isLiveText(title)) return true;
+  if (message.adId) return isLiveAdId(message.adId) || isLivePostId(message.adPostId);
+  return referralsOf(conversation).some(referral => isLiveAdId(referral.adId)
+    && (!title || String(referral.adTitle || '').trim() === title.trim()));
+}
+
+/**
  * R18: học "bài live" từ kho hội thoại (máy chủ gọi trong lượt quét thẻ Livestream mỗi 10 phút): bài của quảng cáo Live, bài có
  * chữ live, bài của quảng cáo có tên live. Sau khởi động máy chủ, luồng bình luận dưới bài của quảng cáo Live nhận ra ngay.
  */

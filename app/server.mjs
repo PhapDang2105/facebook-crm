@@ -14,7 +14,7 @@ import { botPanelStateChanged } from './server-helpers.mjs';
 import { getSpxTracking } from './spx-tracking.mjs';
 import { lookupShippingOrders } from './shipping-lookup.mjs';
 import { friendlyClientError, vnDateStamp } from './request-errors.mjs';
-import { buildOrderReceiptPayload, isLivestreamCustomer, learnLivePosts, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
+import { buildOrderReceiptPayload, isLiveAdMessage, isLivestreamCustomer, learnLivePosts, normalizeChatbotOrder, normalizeCustomerOrder, applyPurchaseLabels } from './conversation-orders.mjs';
 import { giftOverrideText, hasGiftOverride, normalizeGiftOverride, syncGiftOverrideFlag } from './gift-override.mjs';
 import { backfillPurchaseLabels } from './purchase-labels.mjs';
 import { applyPhoneLabels, messageHasPhone } from './phone-labels.mjs';
@@ -3487,7 +3487,9 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 200, {
           conversation: publicConversation(viewed || conversation),
           // A comment thread shows comments only; private replies live in Messenger.
-          items: conversation.source === 'comment' ? items.filter(item => !item.privateReply) : items
+          // 13/10: tin "khách bấm quảng cáo" của quảng cáo Live mang `live: true` (giao diện ghi "quảng cáo livestream").
+          items: (conversation.source === 'comment' ? items.filter(item => !item.privateReply) : items)
+            .map(item => (item?.type === 'ad' && isLiveAdMessage(item, conversation) ? { ...item, live: true } : item))
         });
       }
       if (request.method === 'POST') {

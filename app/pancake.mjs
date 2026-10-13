@@ -364,6 +364,8 @@ export function pancakeMessageEvent(pageId, conversation, message, now = Date.no
       ...(media ? { dataUrl: media.dataUrl, name: '', ...(media.images ? { images: media.images } : {}) } : {}),
       ...sticker,
       ...(cart.length ? { cart } : {}),
+      // 13/10: tin "khách bấm quảng cáo" giữ mã quảng cáo + mã bài để giao diện ghi rõ quảng cáo livestream (isLiveAdMessage).
+      ...(adInfo?.adId ? { adId: adInfo.adId, ...(adInfo.postId ? { adPostId: adInfo.postId } : {}) } : {}),
       ...(replyTo ? { replyTo } : {}),
       // R13: dòng hệ thống của Facebook ("Bạn đang phản hồi bình luận… Xem bình luận", "… đã trả lời một quảng cáo.", "… replied
       // to a post") về như tin của Page: giữ type 'text' (giao diện cũ vẫn vẽ được) nhưng mang cờ `system` để bot, bám đuổi và

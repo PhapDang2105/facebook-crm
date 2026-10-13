@@ -1868,6 +1868,8 @@ main:has(#messages-view:not(.hidden)) { padding: 57.6px 0 0; }
 .chat-time-separator { align-self: center; margin: 7.875px 0 3.375px; color: #8a8d91; font-size: 13.5px; font-weight: 600; line-height: 1; }
 .chat-system-notice { display: flex; align-self: center; align-items: center; gap: 5.625px; max-width: 80%; margin: 7.875px 0 3.375px; padding: 4.5px 11.25px; color: #8a8d91; background: #f5f6f7; border-radius: 13.5px; font-size: 12.375px; line-height: 1.3; text-align: center; }
 .chat-system-notice img { display: block; flex: 0 0 13.5px; width: 13.5px; height: 13.5px; }
+/* 13/10: khách bấm quảng cáo Live — dòng hệ thống tô màu thẻ Livestream để nhân viên thấy ngay khách được quà live. */
+.chat-system-notice.is-live { color: #9d2a6c; background: #fbeaf3; font-weight: 600; }
 .chat-comment-notice { color: #65676b; background: transparent; border: 1px dashed #d0d3d8; font-size: 12.375px; }
 .chat-comment-notice img { opacity: .7; }
 .chat-comment-notice a { color: #1677ff; font-weight: 600; text-decoration: none; white-space: nowrap; }

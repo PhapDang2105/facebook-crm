@@ -5166,8 +5166,11 @@ function orderDayEmptyMessage(day) {
 
 /** Đọc cột Ngày "16/09 07:52" (có thể kèm năm) thành Date; không đọc được thì null. */
 function parseOrderRowDate(row, data = orderData, today = new Date()) {
+  // Dòng Zalo để trống cột "Ngày": đọc "Ngày tạo đơn hàng" ("13/10/2026, 14:08").
   const dateIndex = data.headers.findIndex(header => normalizeColumnName(header) === normalizeColumnName(orderDateHeader));
-  const match = dateIndex >= 0 ? String(row[dateIndex] || '').match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?(?:\s+(\d{1,2}):(\d{2}))?/) : null;
+  const zaloDateIndex = data.headers.findIndex(header => normalizeColumnName(header) === 'ngay tao don hang');
+  const text = String((dateIndex >= 0 ? row[dateIndex] : '') || (zaloDateIndex >= 0 ? row[zaloDateIndex] : '') || '');
+  const match = text ? text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?(?:,?\s+(\d{1,2}):(\d{2}))?/) : null;
   if (!match) return null;
   const [, day, month, year, hour, minute] = match;
   const build = fullYear => new Date(fullYear, Number(month) - 1, Number(day), Number(hour) || 0, Number(minute) || 0);
@@ -5346,11 +5349,11 @@ function ensureOrderStaffNoteColumn(data) {
   return { headers: [...data.headers, orderStaffNoteHeader], rows: data.rows.map(row => [...row, '']) };
 }
 
-/** Adds the Nguồn đơn column to a table that lacks it, tagging existing rows as imported. */
-function ensureOrderSourceColumn(data) {
+/** Adds the Nguồn đơn column to a table that lacks it, tagging existing rows as imported ("Zalo" for a Zalo file). */
+function ensureOrderSourceColumn(data, sourceLabel = 'Import') {
   if (!data.headers.length) return data;
   if (data.headers.some(header => normalizeColumnName(header) === normalizeColumnName(orderSourceHeader))) return data;
-  return { headers: [orderSourceHeader, ...data.headers], rows: data.rows.map(row => ['Import', ...row]) };
+  return { headers: [orderSourceHeader, ...data.headers], rows: data.rows.map(row => [sourceLabel, ...row]) };
 }
 
 // Người tạo / sửa cuối của đơn hệ thống (createdBy, updatedBy từ máy chủ), theo mã dòng
@@ -12528,7 +12531,30 @@ chatbotPreviewDialogSend?.addEventListener('click', async () => {
   finally { chatbotPreviewDialogSend.disabled = false; }
 });
 
-function applyImportedRecords(sourceHeaders, records) {
+// ===== Đơn Zalo: tệp "Danh sách đơn hàng" xuất từ Zalo =====
+//
+// Import tệp Zalo: chỉ giữ các cột dưới đây (đúng tên, đúng dữ liệu trong tệp),
+// bỏ các cột còn lại; cột Nguồn đơn ghi "Zalo". Logic xử lý đơn Zalo làm sau.
+const zaloSourceLabel = 'Zalo';
+const zaloKeptColumns = ['Số thứ tự', 'Mã đơn hàng', 'Ngày tạo đơn hàng', 'Tên khách hàng', 'Số điện thoại', 'Thành phố', 'Quận', 'Phường', 'Địa chỉ', 'Tổng khuyến mãi', 'Tổng giá', 'Ghi chú', 'Mã SKU', 'Số lượng', 'Thành tiền'];
+
+/** Tệp có đủ các cột của file đơn Zalo. */
+function isZaloOrderSheet(headers = []) {
+  const present = new Set(headers.map(header => normalizeColumnName(header)));
+  return zaloKeptColumns.every(header => present.has(normalizeColumnName(header)));
+}
+
+/** Chỉ giữ các cột trong zaloKeptColumns, theo thứ tự cột của tệp. */
+function keepZaloColumns(sourceHeaders, records) {
+  const kept = new Set(zaloKeptColumns.map(header => normalizeColumnName(header)));
+  const indexes = sourceHeaders.map((header, index) => (kept.has(normalizeColumnName(header)) ? index : -1)).filter(index => index >= 0);
+  return {
+    headers: indexes.map(index => String(sourceHeaders[index]).trim()),
+    rows: records.map(row => indexes.map(index => row[index] ?? ''))
+  };
+}
+
+function applyImportedRecords(sourceHeaders, records, sourceLabel = 'Import', stage = '') {
   sourceHeaders = sourceHeaders.map((header, index) => String(header).trim() || `Cột ${index + 1}`);
   const retainedIndexes = sourceHeaders.map((_, index) => index);
   const headers = retainedIndexes.map(index => sourceHeaders[index]);
@@ -12536,11 +12562,11 @@ function applyImportedRecords(sourceHeaders, records) {
   orderData = ensureOrderSourceColumn({
     headers,
     rows: nonEmptyRows.map(row => retainedIndexes.map(index => normalizeImportedValue(row[index] || '', sourceHeaders[index])))
-  });
+  }, sourceLabel);
   commitOrderData();
   // Một lần vẽ: đánh dấu cả ba màn cần vẽ lại, showOrderStage vẽ màn được mở (trước đây vẽ hai lần).
   ['import', 'process', 'export'].forEach(name => orderPanelsDirty.add(name));
-  showOrderStage(getRecommendedOrderStage());
+  showOrderStage(stage || getRecommendedOrderStage());
 }
 
 orderImport.onchange = async () => {
@@ -12555,7 +12581,13 @@ orderImport.onchange = async () => {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Không thể đọc tệp XLSX.');
-      applyImportedRecords(result.headers || [], result.rows || []);
+      // Tệp đơn Zalo: chỉ giữ các cột Zalo đã chọn, nguồn đơn "Zalo".
+      if (isZaloOrderSheet(result.headers || [])) {
+        const zalo = keepZaloColumns(result.headers, result.rows || []);
+        applyImportedRecords(zalo.headers, zalo.rows, zaloSourceLabel, 'import');
+      } else {
+        applyImportedRecords(result.headers || [], result.rows || []);
+      }
     } else {
       const records = parseCsv((await file.text()).replace(/^\uFEFF/, ''));
       applyImportedRecords(records.shift() || [], records);

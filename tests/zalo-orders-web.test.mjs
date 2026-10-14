@@ -184,6 +184,9 @@ test('quà Zalo: SKU nhân viên nhập kèm MỌI đơn, đơn giá 0, thay qu�
     ['GRA-XANH-Z450x2@137460', 'BGDx1@0', 'MUONGx2@0'],
     ['MIX5-H420x1@202300', 'GRA-XANH-Z450x1@121800', 'BGDx1@0', 'MUONGx2@0']
   ]);
+  // Khối lượng mã Zalo ngoài danh mục (chủ shop đưa 14/10): 100-NB-PRE-H420 = 500g, quà TAM-LANH-G25 = 25g.
+  const weighted = buildExportRows({ headers, rows: [['Zalo', '', '#W1', 'A', '0901000009', '', '11 đường 3', 'TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường Trường Thọ', '', '100-NB-PRE-H420', '2', '159600', '', '', 'TAM-LANH-G25']] });
+  assert.deepEqual(weighted.map(line => `${line[19]}x${line[21]}@${line[22]}/${line[24]}g`), ['100-NB-PRE-H420x2@159600/500g', 'TAM-LANH-G25x1@0/25g']);
   // Ô quà trống: đơn Zalo không kèm quà nào (kể cả combo 2 túi Xanh).
   const noGifts = buildExportRows({ headers, rows: plain(zaloContext(keptData()).api.zaloExportRows()) });
   assert.equal(noGifts.filter(line => !(Number(line[22]) > 0)).length, 0);
@@ -206,11 +209,11 @@ test('file kho (buildExportRows của máy chủ) từ đơn Zalo: giá khách t
   // Tiền file kho (dòng có giá) = tổng tiền thu của 5 đơn.
   assert.equal(output.reduce((sum, line) => sum + Number(line[21] || 0) * Number(line[22] || 0), 0), 137460 + 274920 + 86110 + 274920 + 324100);
   assert.deepEqual(output.filter(line => line[0]).map(line => line[33]), ['Khách Một', 'Khách Hai', 'Khách Ba', 'Khách Bốn', 'Khách Năm']);
-  // Cột "Nguồn đơn hàng" của file kho: đơn Zalo ghi Zalo (trước đây mọi đơn đều Facebook).
-  assert.deepEqual(output.filter(line => line[0]).map(line => line[2]), ['Zalo', 'Zalo', 'Zalo', 'Zalo', 'Zalo']);
+  // Cột "Nguồn đơn hàng" của file kho: đơn Zalo ghi "zalo" chữ thường (trước đây mọi đơn đều Facebook).
+  assert.deepEqual(output.filter(line => line[0]).map(line => line[2]), ['zalo', 'zalo', 'zalo', 'zalo', 'zalo']);
   // Đơn thường (nguồn Chatbot/Landing…) trong cùng file vẫn Facebook.
   const mixed = buildExportRows({ headers, rows: [...rows, ['Chatbot', ...rows[0].slice(1, 2), 'CB-x1', ...rows[0].slice(3)]] });
-  assert.deepEqual(mixed.filter(line => line[0]).map(line => line[2]), ['Zalo', 'Zalo', 'Zalo', 'Zalo', 'Zalo', 'Facebook']);
+  assert.deepEqual(mixed.filter(line => line[0]).map(line => line[2]), ['zalo', 'zalo', 'zalo', 'zalo', 'zalo', 'Facebook']);
 });
 
 test('Import Zalo lưu kho riêng crm-zalo-orders rồi mở Xuất dữ liệu; không đụng bảng đơn crm-orders', () => {

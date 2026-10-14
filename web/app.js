@@ -13062,7 +13062,7 @@ const myTienFlavors = { mint: 'GRA-MINT-Z300', xanh: 'GRA-XANH-Z450', x: 'GRA-XA
 const myTienDefaultPrices = { 'GRA-XANH-Z450': [174000, 149000], 'GRA-VANG-H350': [174000, 149000], 'GRA-NAU-Z350': [164000, 144000], 'GRA-MINT-Z300': [204000, 174000] };
 // Quà / hàng mua thêm theo chữ → SKU chuẩn kho.
 const myTienGiftRules = [
-  [/yen mach/, 'HT-YM-T500'], [/tao do/, 'TD-Z150'], [/hat chia/, 'CHIA-Z500'], [/bat|gao dua/, 'BGD'], [/muong/, 'MUONG'],
+  [/yen mach/, 'HT-YM-T500'], [/tao do/, 'TD-Z440'], [/hat chia/, 'CHIA-Z500'], [/bat|gao dua/, 'BGD'], [/muong/, 'MUONG'],
   [/quat/, 'QUA-TANG-LIVE'], [/tam lanh/, 'TAM-LANH-H350'], [/nghe/, 'NGHE-H350']
 ];
 

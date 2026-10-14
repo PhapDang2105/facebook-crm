@@ -44,10 +44,10 @@ test('nhận tệp Mỹ Tiền theo cột', () => {
 test('đọc chữ tự do: túi mua, quà, hàng mua thêm; mua hay tặng theo GIÁ TIỀN', () => {
   assert.deepEqual(order('Combo 2X  + tặng 2 túi Yến Mạch', '', '298000'), ['GRA-XANH-Z450x2@149000', 'quà HT-YM-T500x2']);
   assert.deepEqual(order('Combo 1 Xanh MInt và 1 Vàng + tặng 2 túi yến mạch', '', '323000'), ['GRA-MINT-Z300x1@174000', 'GRA-VANG-H350x1@149000', 'quà HT-YM-T500x2']);
-  assert.deepEqual(order('Combo 2 túi xanh Mint+ túi táo đỏ', '', '348000'), ['GRA-MINT-Z300x2@174000', 'quà TD-Z150x1']);
+  assert.deepEqual(order('Combo 2 túi xanh Mint+ túi táo đỏ', '', '348000'), ['GRA-MINT-Z300x2@174000', 'quà TD-Z440x1']);
   assert.deepEqual(order('Combo 2 X+ 1 túi yến mạch và 1 bát gáo dừa', '', '298000'), ['GRA-XANH-Z450x2@149000', 'quà HT-YM-T500x1', 'quà BGDx1']);
   assert.deepEqual(order('Combo 3 X+ 1 túi xanh +1 bát muỗng dừa', '', '447000'), ['GRA-XANH-Z450x3@149000', 'quà BGDx1', 'quà MUONGx1', 'quà GRA-XANH-Z450x1']);
-  assert.deepEqual(order('Combo 2 X và mua thêm bột tâm lành', '1 táo đỏ', '472000'), ['GRA-XANH-Z450x2@149000', 'TAM-LANH-H350x1@174000', 'quà TD-Z150x1']);
+  assert.deepEqual(order('Combo 2 X và mua thêm bột tâm lành', '1 táo đỏ', '472000'), ['GRA-XANH-Z450x2@149000', 'TAM-LANH-H350x1@174000', 'quà TD-Z440x1']);
   assert.deepEqual(order('Combo 1V+ 1X+ yến mạch', '', '298000'), ['GRA-VANG-H350x1@149000', 'GRA-XANH-Z450x1@149000', 'quà HT-YM-T500x1']);
   assert.deepEqual(order('Combo 3 ( 2 xanh+ 1 vàng) + yến mạch mua riêng 1kg( 116K)', 'tặng 1 Vàng', '563000'), ['GRA-XANH-Z450x2@149000', 'GRA-VANG-H350x1@149000', 'CB2-HT-YM-T500x1@116000', 'quà GRA-VANG-H350x1']);
   assert.deepEqual(order('Combo 3( X+V+N)', 'Tặng 1 vàng', '447000'), ['GRA-XANH-Z450x1@149000', 'GRA-VANG-H350x1@149000', 'GRA-NAU-Z350x1@149000', 'quà GRA-VANG-H350x1']);

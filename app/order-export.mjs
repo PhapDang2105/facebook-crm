@@ -79,11 +79,27 @@ export const SKU_WEIGHTS = Object.freeze({
   'YM-VO-T500': 500,
   'HU-300ML': 10,
   BGD: 10,
-  MUONG: 10,
-  // Mã bán trên Zalo chưa có trong danh mục sản phẩm (chủ shop đưa khối lượng 14/10).
-  '100-NB-PRE-H420': 500,
-  'TAM-LANH-G25': 25
+  MUONG: 10
 });
+
+/**
+ * Khối lượng (g) chỉ để ghi cột Khối lượng của file kho — KHÔNG thêm vào SKU_WEIGHTS, vì bảng đó còn
+ * quyết định cách đọc ký hiệu combo Pancake cũ ("CB3-XANH+QUAT"…). Bảng quà chủ shop đưa 14/10
+ * (TAM-LANH-G25 = 10g theo bảng, thay số 25g nhắn trước đó) và mã bán trên Zalo ngoài danh mục.
+ */
+export const EXTRA_SKU_WEIGHTS = Object.freeze({
+  QUAT: 10,
+  'MHD-G15': 10,
+  'CHIA-G10': 10,
+  'NGHE-G25': 25,
+  XMRC: 10,
+  'QUA-4TRA-G3': 10,
+  'TAM-LANH-G25': 10,
+  '100-NB-PRE-H420': 500
+});
+
+/** Khối lượng mặc định (g) một đơn vị hàng (không phải quà) của đơn Zalo khi mã chưa có khối lượng ở đâu cả. */
+export const ZALO_DEFAULT_WEIGHT = 500;
 
 const SKU_PRICES = Object.freeze({
   'GRA-NAU-Z350': { single: 179000, combo: 144000 },
@@ -225,11 +241,11 @@ function expandRelation(relation, orderQuantity) {
   }));
 }
 
-/** Weight of any SKU: the catalogue first, then the legacy table. */
+/** Weight of any SKU: the catalogue first, then the legacy table, then the gift / Zalo table. */
 export function skuWeight(sku) {
   const product = findProductBySku(sku);
   if (product?.weight) return product.weight;
-  return SKU_WEIGHTS[sku] ?? '';
+  return SKU_WEIGHTS[sku] ?? EXTRA_SKU_WEIGHTS[sku] ?? '';
 }
 
 /**
@@ -455,7 +471,7 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
         // Quà là túi sản phẩm (01/10: đơn 5 túi tặng 1 Túi Vàng, 10 túi thêm Túi Nâu): dòng tặng giá 0
         // riêng, kể cả khi khách cũng mua túi cùng mã — chỉ bỏ khi đã có dòng tặng (giá 0) cùng mã.
         const duplicate = findProductBySku(code) ? items.some(item => item.sku === code && !(Number(item.price) > 0)) : has(code);
-        if (code && !duplicate) items.push({ sku: code, quantity: Math.max(1, Math.round(Number(quantity) || 1)), price: 0, weight: weight || skuWeight(code) });
+        if (code && !duplicate) items.push({ sku: code, quantity: Math.max(1, Math.round(Number(quantity) || 1)), price: 0, weight: weight || skuWeight(code), gift: true });
       };
       // Đơn nguồn POS (nhân viên/Facebook Shop lên trên Pancake): quà là đúng các
       // dòng tặng trên POS (Quà Tặng LIVE nhân viên thêm tay…), không đoán lại.
@@ -511,7 +527,10 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
         output[37] = location.district;
         output[38] = location.ward;
       }
-      output[19] = item.sku; output[21] = item.quantity; output[22] = item.price; output[24] = item.weight || skuWeight(item.sku);
+      // Đơn Zalo: mã hàng (không phải quà) chưa có khối lượng ở danh mục / bảng mã → mặc định 500g (chủ shop 14/10).
+      const knownWeight = item.weight || skuWeight(item.sku);
+      output[19] = item.sku; output[21] = item.quantity; output[22] = item.price;
+      output[24] = knownWeight || (!item.gift && isZaloSource(value(row, 'Nguồn đơn')) ? ZALO_DEFAULT_WEIGHT : '');
       // Thuế là thuộc tính của từng dòng sản phẩm (kể cả quà), không chỉ dòng đầu đơn.
       // 13/10 (kho): cột Thuế phải là KIỂU SỐ — ghi 0.08, ô mẫu định dạng 0% nên Excel hiện "8%" (chữ "8%" kho không nhận).
       output[28] = 0.08;

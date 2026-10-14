@@ -184,9 +184,23 @@ test('quà Zalo: SKU nhân viên nhập kèm MỌI đơn, đơn giá 0, thay qu�
     ['GRA-XANH-Z450x2@137460', 'BGDx1@0', 'MUONGx2@0'],
     ['MIX5-H420x1@202300', 'GRA-XANH-Z450x1@121800', 'BGDx1@0', 'MUONGx2@0']
   ]);
-  // Khối lượng mã Zalo ngoài danh mục (chủ shop đưa 14/10): 100-NB-PRE-H420 = 500g, quà TAM-LANH-G25 = 25g.
-  const weighted = buildExportRows({ headers, rows: [['Zalo', '', '#W1', 'A', '0901000009', '', '11 đường 3', 'TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường Trường Thọ', '', '100-NB-PRE-H420', '2', '159600', '', '', 'TAM-LANH-G25']] });
-  assert.deepEqual(weighted.map(line => `${line[19]}x${line[21]}@${line[22]}/${line[24]}g`), ['100-NB-PRE-H420x2@159600/500g', 'TAM-LANH-G25x1@0/25g']);
+  // Khối lượng (chủ shop 14/10): bảng quà (TAM-LANH-G25 10g, NGHE-G25 25g, QUAT/MHD-G15/CHIA-G10/XMRC/QUA-4TRA-G3 10g…);
+  // mã hàng Zalo chưa có khối lượng → mặc định 500g; quà lạ không tự gán 500g.
+  const place = ['11 đường 3', 'TP Hồ Chí Minh', 'Thành phố Thủ Đức', 'Phường Trường Thọ'];
+  const zaloLine = (id, sku, quantity, price, gifts) => ['Zalo', '', id, 'A', '0901000009', '', ...place, '', sku, quantity, price, '', '', gifts];
+  const weighted = buildExportRows({ headers, rows: [
+    zaloLine('#W1', '100-NB-PRE-H420', '2', '159600', 'TAM-LANH-G25, NGHE-G25, QUAT, MHD-G15, CHIA-G10, XMRC, QUA-4TRA-G3, HU-300ML, GRA-CAM-G30, GRA-NAU-G35, GRA-XANH-G35, QUA-LA'),
+    zaloLine('#W2', 'SH-NB-PRE-H420', '1', '161160', ''),
+    zaloLine('#W3', 'CHIA-Z500', '1', '86110', '')
+  ] });
+  assert.deepEqual(weighted.map(line => `${line[19]}/${line[24]}`), [
+    '100-NB-PRE-H420/500', 'TAM-LANH-G25/10', 'NGHE-G25/25', 'QUAT/10', 'MHD-G15/10', 'CHIA-G10/10', 'XMRC/10', 'QUA-4TRA-G3/10',
+    'HU-300ML/10', 'GRA-CAM-G30/30', 'GRA-NAU-G35/35', 'GRA-XANH-G35/35', 'QUA-LA/',
+    'SH-NB-PRE-H420/500', 'CHIA-Z500/500'
+  ]);
+  // Đơn thường (không phải Zalo) với mã lạ: không tự gán 500g như trước.
+  const plainOrder = buildExportRows({ headers, rows: [['Chatbot', '', 'CB-w', 'A', '0901000009', '', ...place, '', 'SH-NB-PRE-H420', '1', '161160', '', '', '']] });
+  assert.equal(plainOrder[0][24], '');
   // Ô quà trống: đơn Zalo không kèm quà nào (kể cả combo 2 túi Xanh).
   const noGifts = buildExportRows({ headers, rows: plain(zaloContext(keptData()).api.zaloExportRows()) });
   assert.equal(noGifts.filter(line => !(Number(line[22]) > 0)).length, 0);

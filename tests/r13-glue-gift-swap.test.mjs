@@ -28,7 +28,7 @@ const LIVE_GIFT = { id: 'qua-tang-live', name: 'Quạt + Bát gáo dừa', activ
 // R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, cùng SKU QUA-TANG-LIVE, cả đơn 3 túi; chính sách hiện hành
 // kiểm ở live-gift-bat-muong.test.mjs). Test dưới giữ kịch bản quà live gộp cũ "Quạt + Bát gáo dừa" (đúng 2 túi) nên bỏ
 // live-quat trước khi thêm, không thì đơn có hai quà live.
-const pushLegacyLiveGift = (gifts, extra = {}) => { gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat'); gifts.items.push({ ...LIVE_GIFT, ...extra }); };
+const pushLegacyLiveGift = (gifts, extra = {}) => { gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat' && gift.id !== 'live-bat-gao-dua'); gifts.items.push({ ...LIVE_GIFT, ...extra }); };
 const headers = ['Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Địa chỉ', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú'];
 const row = (id, sku, quantity, price, { note = '' } = {}) => [id, 'A', '0385805790', ADDRESS, sku, sku, String(quantity), String(price), note];
 const lines = rows => rows.map(item => `${item[19]}x${item[21]}@${item[22]}`);

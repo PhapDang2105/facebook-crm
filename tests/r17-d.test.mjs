@@ -16,8 +16,8 @@ const giftNames = (items, options) => priceBasket(items, options).gifts.map(gift
 // Lời PRICE_MIX_TUI_LON áp lên máy chủ (giữ kiểu viết tay của chủ shop, quà nối theo bảng quà).
 const SERVER_MIX = 'Dạ bảng giá mix túi lớn ạ:\n• Xanh + Vàng: 298.000đ\n• Xanh + Nâu: 293.000đ\n• Vàng + Nâu: 293.000đ\n(Mix 2 túi miễn phí vận chuyển[?pair_gift], tặng {pair_gift}[/?])\n• Trọn bộ Xanh + Vàng + Nâu: 442.000đ, miễn phí vận chuyển[?full_gift] và tặng {full_gift}[/?] ạ.';
 
-test('R17 quà live (08/10 + chủ shop 10/10 mục 3): live 2 túi lớn → Quạt; 3 túi → Quạt + bát + muỗng; Tropical / combo 10 gói → không quà live; khách thường không Quạt', () => {
-  assert.deepEqual(giftNames([{ sku: 'GRA-XANH-Z450', quantity: 2 }], LIVE), ['Miễn phí vận chuyển', 'Quạt']);
+test('R17 quà live (08/10 + chủ shop 10/10 mục 3): live 2 túi lớn → Quạt + Bát gáo dừa (14/10); 3 túi → Quạt + bát + muỗng; Tropical / combo 10 gói → không quà live; khách thường không Quạt', () => {
+  assert.deepEqual(giftNames([{ sku: 'GRA-XANH-Z450', quantity: 2 }], LIVE), ['Miễn phí vận chuyển', 'Quạt', 'Bát gáo dừa']);
   assert.deepEqual(giftNames([{ sku: 'GRA-XANH-Z450', quantity: 1 }, { sku: 'GRA-VANG-H350', quantity: 1 }, { sku: 'GRA-NAU-Z350', quantity: 1 }], LIVE), ['Miễn phí vận chuyển', 'Quạt', 'Bộ bát gáo dừa', 'Muỗng dừa']);
   assert.deepEqual(giftNames([{ sku: 'GRA-MINT-Z300', quantity: 2 }], LIVE), ['Miễn phí vận chuyển'], '2 Tropical (inbox1 chủ shop 1)');
   assert.deepEqual(giftNames([{ sku: 'CB10-XANH-G35', quantity: 2 }], LIVE), ['Miễn phí vận chuyển'], '2 hộp 10 gói');
@@ -29,14 +29,14 @@ test('R17 bình luận A7 (…556819 "3 TÚI TẶNG GÌ EM") / inbox4 H3 (…519
   const inbox = sim.inbox({ labels: ['livestream'] });
   const turn = await sim.send(inbox, '3 TÚI TẶNG GÌ EM', { llm: { template_id: 'GIFT_POLICY' } });
   assert.equal(turn.result.templateId, 'GIFT_POLICY_LIVE', JSON.stringify(turn.result));
-  assert.match(said(turn), /2 túi lớn bất kỳ \(Xanh \/ Vàng \/ Nâu\) chỉ 298\.000đ, miễn phí vận chuyển và được tặng Quạt/);
+  assert.match(said(turn), /2 túi lớn bất kỳ \(Xanh \/ Vàng \/ Nâu\) chỉ 298\.000đ, miễn phí vận chuyển và được tặng Quạt \+ Bát gáo dừa ạ/);
   assert.match(said(turn), /Từ 3 túi tặng Quạt \+ Bộ bát gáo dừa \+ Muỗng dừa/);
   assert.doesNotMatch(said(turn), /lấy 2 túi vị nào/, 'không ép khách hỏi 3 túi về 2 túi');
 });
 
 test('R17 inbox5 B1 / A6 (…486347 "Nếu cô mua 3 túi vàng, xanh, nâu thì giá là bn và có tặng phẩm là gì"): bảng mix theo bảng quà — khách live trọn bộ có Quạt', () => {
   const live = renderChatbotReply({ template_id: 'PRICE_MIX_TUI_LON' }, { ...templates, PRICE_MIX_TUI_LON: SERVER_MIX }, LIVE).messages.join('\n');
-  assert.match(live, /\(Mix 2 túi miễn phí vận chuyển, tặng Quạt\)/);
+  assert.match(live, /\(Mix 2 túi miễn phí vận chuyển, tặng Quạt \+ Bát gáo dừa\)/);
   assert.match(live, /442\.000đ, miễn phí vận chuyển và tặng Quạt \+ Bộ bát gáo dừa \+ Muỗng dừa ạ\./);
   const plain = renderChatbotReply({ template_id: 'PRICE_MIX_TUI_LON' }, { ...templates, PRICE_MIX_TUI_LON: SERVER_MIX }, {}).messages.join('\n');
   assert.match(plain, /\(Mix 2 túi miễn phí vận chuyển\)/);
@@ -51,11 +51,11 @@ test('R17 bình luận chủ shop 4: PRICE_SHIP_EXPLAIN ("174k mà sao giờ 189
   const plain = renderChatbotReply({ template_id: 'PRICE_SHIP_EXPLAIN' }, templates, {}).messages.join('\n');
   assert.match(plain, /2 túi bất kỳ thì chỉ 298\.000đ, miễn phí vận chuyển ạ 🌾 Từ 3 túi tặng Bộ bát gáo dừa \+ Muỗng dừa/);
   const live = renderChatbotReply({ template_id: 'PRICE_SHIP_EXPLAIN' }, templates, LIVE).messages.join('\n');
-  assert.match(live, /miễn phí vận chuyển và tặng Quạt ạ 🌾 Từ 3 túi tặng Quạt \+ Bộ bát gáo dừa \+ Muỗng dừa/);
+  assert.match(live, /miễn phí vận chuyển và tặng Quạt \+ Bát gáo dừa ạ 🌾 Từ 3 túi tặng Quạt \+ Bộ bát gáo dừa \+ Muỗng dừa/);
 });
 
 test('R17 chủ shop 10/10 mục 4 (inbox4 H3 …766508696 "Có được tặng gáo dừa k ạ?" khi giữ 2 túi): nói quà 2 túi + mời thêm 1 túi 447k', async () => {
-  for (const [live, gift] of [[true, /combo 2 túi của anh\/chị được tặng Quạt ạ/], [false, /combo 2 túi của anh\/chị được miễn phí vận chuyển ạ/]]) {
+  for (const [live, gift] of [[true, /combo 2 túi của anh\/chị được tặng Quạt \+ Bát gáo dừa ạ/], [false, /combo 2 túi của anh\/chị được miễn phí vận chuyển ạ/]]) {
     const sim = new Sim({ psid: `r17d-up-${live}` });
     const inbox = sim.inbox({ labels: live ? ['livestream'] : [], botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - 2 * MIN, pendingOrder: basket([VANG(2)], 2 * MIN, live ? { livestream: true } : {}) });
     const turn = await sim.send(inbox, 'Có được tặng gáo dừa k ạ?', { llm: { template_id: 'GIFT_POLICY' } });

@@ -39,7 +39,7 @@ test('R18 D cross 4.1 / inbox1 V7 (…669432): giỏ 1 Tropical, sau đó khách
 test('R18 D cross 4.1 (…069730 Kimrobot "1 vàng 1 xanh", khách live): nhắc giỏ kèm quà Quạt', () => {
   const conversation = { gender: 'male', labels: ['livestream'], pendingOrder: { items: [VANG, XANH], key: 'GRA-VANG-H350=1|GRA-XANH-Z450=1', at: now - 12 * HOUR, phone: '', address: 'Số 1 đường A, phường Bến Thành, Quận 1, TP HCM', livestream: true }, botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: now - 12 * HOUR };
   const text = orderRemindText(conversation, templates, { now });
-  assert.match(text, /tổng 298\.000đ, tặng Quạt cho anh/, text);
+  assert.match(text, /tổng 298\.000đ, tặng Quạt \+ Bát gáo dừa cho anh/, text);
   assert.match(text, /số điện thoại/);
   // Khách thường 2 túi: không có quà hiện vật → không thêm "tặng".
   const plain = orderRemindText({ ...conversation, labels: [], pendingOrder: { ...conversation.pendingOrder, livestream: false } }, templates, { now });

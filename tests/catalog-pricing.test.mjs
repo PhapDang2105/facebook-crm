@@ -108,7 +108,7 @@ test('quà "chỉ khách livestream" (livestreamOnly): khách thường không c
   // Đúng bản quà sống 28/09: Quà Tặng LIVE đúng 2 túi, chỉ khách livestream.
   // R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, chỉ khách live, cả 3 túi; xem live-gift-bat-muong.test.mjs);
   // test này kiểm cơ chế livestreamOnly bằng quà sống 28/09 nên bỏ live-quat trước khi thêm.
-  gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat');
+  gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat' && gift.id !== 'live-bat-gao-dua');
   gifts.items.push({ id: 'qua-tang-live', name: 'Quà Tặng LIVE', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 });
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   catalog.reloadCatalog();
@@ -233,7 +233,7 @@ test('mẫu giá và quà là một mẫu sửa được, số liệu điền t�
   assert.match(policy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm \(trừ Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)/);
   assert.doesNotMatch(policy, /Quạt|livestream/);
   const livePolicy = renderChatbotReply({ template_id: 'GIFT_POLICY' }, templates, { livestream: true }).messages[0];
-  assert.match(livePolicy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Quạt: từ 2 sản phẩm \(trừ Granola Tropical vị Cacao 300g, Combo 10 gói Xanh, Combo 10 gói Cam, Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm/);
+  assert.match(livePolicy, /• Miễn phí vận chuyển: từ 2 sản phẩm\n• Quạt: từ 2 sản phẩm \(trừ Granola Tropical vị Cacao 300g, Combo 10 gói Xanh, Combo 10 gói Cam, Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)\n• Bát gáo dừa: đơn đúng 2 sản phẩm \(trừ Granola Tropical vị Cacao 300g, Combo 10 gói Xanh, Combo 10 gói Cam, Bột ngũ cốc Nghệ Lành hộp 14 gói, Hạt An Lành dạng hũ\)\n• Bộ bát gáo dừa \+ Muỗng dừa: từ 3 sản phẩm/);
   const strike = text => [...text].map(char => `${char}\u0336`).join('');
   const quote = renderChatbotReply({ template_id: 'PRICE_QUOTE', Product_N1: 'túi xanh' }, templates);
   assert.equal(quote.messages[0], [

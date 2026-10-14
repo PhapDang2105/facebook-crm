@@ -31,7 +31,7 @@ test('R18 A inbox3 N2 / comment B9 (…0645476): live combo 2 Vàng + Nâu, "Ch�
   const inbox = sim.inbox({ labels: ['livestream'], botLastTemplateId: 'ORDER_ADDRESS', botLastReplyAt: Date.now() - MIN, pendingOrder: basket([VANG(1), NAU(1)], MIN, { livestream: true }) });
   const turn = await sim.send(inbox, 'Chị k lấy quạt. Đổi quà khác đc k', { llm: { template_id: 'GIFT_SWAP' } });
   assert.equal(turn.result.templateId, 'ORDER_ADDRESS_REMIND', said(turn));
-  assert.match(said(turn), /Bộ bát gáo dừa/u);
+  assert.match(said(turn), /Quà của mình bây giờ là Bát gáo dừa ạ/u);
   assert.deepEqual(skus(inbox.pendingOrder?.giftOverride), ['1 BGD']);
   const order = await sim.send(inbox, `${PHONE} 12 Lê Lợi, phường Bến Nghé, quận 1, TP Hồ Chí Minh`, { llm: { template_id: 'ORDER_CONFIRMATION', Phone_Number: PHONE, Customer_Address: '12 Lê Lợi, phường Bến Nghé, quận 1, TP Hồ Chí Minh' } });
   assert.equal(order.created.length, 1, said(order));

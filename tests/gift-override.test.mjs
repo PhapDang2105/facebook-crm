@@ -36,7 +36,7 @@ async function withLiveGift(run) {
   const gifts = JSON.parse(original);
   // R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, cùng SKU QUA-TANG-LIVE); ca thật của test là quà live gộp cũ
   // "Quạt + Bát gáo dừa" nên bỏ live-quat trước khi thêm (không thì đơn có hai quà live).
-  gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat');
+  gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat' && gift.id !== 'live-bat-gao-dua');
   gifts.items.push(LIVE_GIFT);
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   reloadCatalog();

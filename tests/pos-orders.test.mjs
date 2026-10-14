@@ -255,7 +255,7 @@ test('Quà Tặng LIVE chỉ khách livestream (livestreamOnly): đơn khách th
   const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
   const gifts = JSON.parse(original);
   // R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, cùng SKU QUA-TANG-LIVE); test giữ quà sống 28/09 nên bỏ live-quat.
-  gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat');
+  gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat' && gift.id !== 'live-bat-gao-dua');
   gifts.items.push({ id: 'qua-tang-live', name: 'Quà Tặng LIVE', active: true, minQuantity: 2, maxQuantity: 2, livestreamOnly: true, excludedSkus: [], sku: 'QUA-TANG-LIVE', weight: 50 });
   writeFileSync(process.env.GIFTS_PATH, JSON.stringify(gifts));
   reloadCatalog();

@@ -26,7 +26,7 @@ test('đọc ghi chú quà ở ngoặc đầu địa chỉ', () => {
   assert.deepEqual(plain(addressGiftNotes('Lô 16a đường số 9 (giao giờ hành chánh)')), { lines: [], unknown: [], liveOnly: false });
 });
 
-test('file kho: "(Live)" 1 túi không quà, combo 2 chưa có quà → thêm QUAT; đã có quà giữ nguyên; ghi chú tặng thêm dòng 0đ; quà Live 50.000đ thành 0đ', () => {
+test('file kho: "(Live)" 1 túi không quà, combo 2 chưa có quà → thêm QUAT + BGD (quà Live 14/10); đã có quà giữ nguyên; ghi chú tặng thêm dòng 0đ; quà Live 50.000đ thành 0đ', () => {
   const rows = buildExportRows({ headers, rows: [
     row('A1', '(Live)', 'GRA-XANH-Z450', 1, 189000),
     row('A2', '(Live)', 'CB2-XANH-Z450', 1, 298000), row('A2', '(Live)', 'QUA-TANG-LIVE', 1, 50000),
@@ -39,7 +39,7 @@ test('file kho: "(Live)" 1 túi không quà, combo 2 chưa có quà → thêm QU
   rows.forEach(item => { if (item[0] !== '') byOrder.push([]); byOrder.at(-1).push(item); });
   assert.deepEqual(byOrder.map(lines), [
     ['GRA-XANH-Z450x1@189000'],
-    ['GRA-XANH-Z450x2@149000', 'QUATx1@0'],
+    ['GRA-XANH-Z450x2@149000', 'QUATx1@0', 'BGDx1@0'],
     ['GRA-VANG-H350x2@149000', 'BGDx1@0', 'MUONGx1@0'],
     ['GRA-XANH-Z450x2@149000', 'HT-YM-T500x2@0'],
     ['GRA-XANH-Z450x3@149000', 'BGDx1@0', 'MUONGx1@0'],

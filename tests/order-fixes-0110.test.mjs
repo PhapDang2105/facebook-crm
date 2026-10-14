@@ -115,11 +115,11 @@ test('xuất kho: đơn nhân viên tạo cho khách live (cờ livestream, đ�
     const data = { headers, rows: [row('CB-51234', XANH, 2, 149000)] };
     // Trước đây: dòng bảng không mang cờ live → mất quà live.
     assert.deepEqual(lines(buildExportRows(data)), ['GRA-XANH-Z450x2@149000']);
-    assert.deepEqual(lines(buildExportRows(data, { orderFacts: exportFactsForOrders([manual]) })), ['GRA-XANH-Z450x2@149000', 'QUATx1@0']);
-    // Live 2 túi + quà bám đuổi (cờ promoGift / ghi chú): chỉ quà live, không BGD.
+    assert.deepEqual(lines(buildExportRows(data, { orderFacts: exportFactsForOrders([manual]) })), ['GRA-XANH-Z450x2@149000', 'QUATx1@0', 'BGDx1@0']);
+    // Live 2 túi + quà bám đuổi (cờ promoGift / ghi chú): chỉ quà live (14/10: Quạt + Bát gáo dừa), không thêm bát thứ hai.
     const note = 'Khách ghi: Ưu đãi bám đuổi combo 2 túi: tặng Bộ bát gáo dừa – ưu đãi bám đuổi.';
     const promoLive = buildExportRows({ headers, rows: [row('CB-r9', XANH, 2, 149000, { address: `(Live) ${ADDRESS}`, note })] }, { orderFacts: exportFactsForOrders([{ id: 'r9', source: 'Facebook', livestream: true, promoGift: 'Bộ bát gáo dừa' }]) });
-    assert.deepEqual(lines(promoLive), ['GRA-XANH-Z450x2@149000', 'QUATx1@0']);
+    assert.deepEqual(lines(promoLive), ['GRA-XANH-Z450x2@149000', 'QUATx1@0', 'BGDx1@0']);
     // Khách thường 2 túi + bám đuổi vẫn nhận BGD như cũ.
     assert.deepEqual(lines(buildExportRows({ headers, rows: [row('CB-r10', XANH, 2, 149000)] }, { orderFacts: exportFactsForOrders([{ id: 'r10', source: 'Facebook', promoGift: 'Bộ bát gáo dừa' }]) })), ['GRA-XANH-Z450x2@149000', 'BGDx1@0']);
     // Khách live 3 túi (chủ shop 08/10): Quạt + bát + muỗng — một bát (quà live gộp cũ có bát thì bỏ từ 3 túi).
@@ -136,19 +136,19 @@ test('xuất kho đơn nguồn POS: ghi đúng các dòng tặng trên POS (quà
     const combo3 = { id: 'pos778', source: 'POS', giftItems: [{ sku: 'BGD', quantity: 1 }, { sku: 'MUONG', quantity: 1 }] };
     const three = buildExportRows({ headers, rows: [row('CB-pos778', 'CB3-XANH-Z450+BGD+M', 1, 447000, { name: 'Combo 3 túi xanh' })] }, { orderFacts: exportFactsForOrders([combo3]) });
     assert.deepEqual(lines(three).filter(line => /^(BGD|MUONG)x/.test(line)), ['BGDx1@0', 'MUONGx1@0'], 'mỗi quà một dòng, không trùng');
-    // Đơn POS kéo về trước 01/10: chỉ có chữ quà.
+    // Đơn POS kéo về trước 01/10: chỉ có chữ quà. 14/10: bảng quà có dòng Quạt và dòng Bát live riêng → chữ "Quạt + Bát gáo dừa" lên cả hai.
     const legacy = { id: 'pos779', source: 'POS', gift: 'Quạt + Bát gáo dừa' };
-    assert.deepEqual(lines(buildExportRows({ headers, rows: [row('CB-pos779', 'CB2-XANH-Z450', 1, 298000)] }, { orderFacts: exportFactsForOrders([legacy]) })), ['GRA-XANH-Z450x2@149000', 'QUATx1@0']);
+    assert.deepEqual(lines(buildExportRows({ headers, rows: [row('CB-pos779', 'CB2-XANH-Z450', 1, 298000)] }, { orderFacts: exportFactsForOrders([legacy]) })), ['GRA-XANH-Z450x2@149000', 'QUATx1@0', 'BGDx1@0']);
   });
 });
 
 test('quà live không cộng dồn thành hai bát: 3 túi live = Quạt + bát + muỗng (08/10), quà live gộp cũ có bát bị bỏ dù bảng quà thiếu "tối đa 2 túi"; 2 túi live chỉ quà live (giữ miễn ship)', async () => {
   await withGifts(gifts => {
     // Bộ bát cấu hình từ 2 túi: khách live 2 túi vẫn chỉ nhận quà live (Quạt của bảng quà mẫu, không giới hạn số túi).
-    gifts.items.find(gift => gift.sku === 'BGD').minQuantity = 2;
+    gifts.items.find(gift => gift.id === 'bo-bat-gao-dua').minQuantity = 2;
   }, () => {
     assert.deepEqual(giftsForKey(`${XANH}=3`, { livestream: true }).map(gift => gift.id), ['freeship', 'live-quat', 'bo-bat-gao-dua', 'muong-dua']);
-    assert.deepEqual(giftsForKey(`${XANH}=2`, { livestream: true }).map(gift => gift.sku || gift.id), ['freeship', 'QUA-TANG-LIVE']);
+    assert.deepEqual(giftsForKey(`${XANH}=2`, { livestream: true }).map(gift => gift.sku || gift.id), ['freeship', 'QUA-TANG-LIVE', 'BGD']);
     assert.deepEqual(giftsForKey(`${XANH}=2`).map(gift => gift.sku || gift.id), ['freeship', 'BGD'], 'khách thường không đổi');
   });
   // Quà live gộp kiểu cũ (Quạt + Bát gáo dừa) đặt không giới hạn số túi: từ 3 túi vẫn bỏ, không thành hai bát.
@@ -160,11 +160,11 @@ test('quà live không cộng dồn thành hai bát: 3 túi live = Quạt + bát
     assert.deepEqual(giftsForKey(`${XANH}=2`, { livestream: true }).map(gift => gift.sku || gift.id), ['freeship', 'QUA-TANG-LIVE']);
   });
   await withGifts(gifts => gifts.items.push(LIVE_GIFT), () => {
-    // POS: đơn live 2 túi có cờ ưu đãi bám đuổi → chỉ dòng quà live.
+    // POS: đơn live 2 túi có cờ ưu đãi bám đuổi → chỉ dòng quà live (14/10: Quạt + Bát gáo dừa live), không thêm bát thứ hai.
     const posSkus = new Set([XANH, 'BGD', 'MUONG', 'QUA-TANG-LIVE']);
     const twoBags = { id: 'lv2', name: 'A', phone: '0385805790', address: ADDRESS, products: [{ name: 'Granola Túi Xanh 450g', sku: XANH, quantity: 2, price: 174000 }], freeShipping: true, shippingFee: 0, discount: 50000, total: 298000 };
     const bonus = payload => payload.items.filter(item => item.is_bonus_product).map(item => item.variation_id);
-    assert.deepEqual(bonus(buildPosOrderPayload({ ...twoBags, livestream: true, promoGift: 'Bộ bát gáo dừa' }, { posSkus })), ['QUA-TANG-LIVE']);
+    assert.deepEqual(bonus(buildPosOrderPayload({ ...twoBags, livestream: true, promoGift: 'Bộ bát gáo dừa' }, { posSkus })), ['QUA-TANG-LIVE', 'BGD']);
     assert.deepEqual(bonus(buildPosOrderPayload({ ...twoBags, promoGift: 'Bộ bát gáo dừa' }, { posSkus })), ['BGD'], 'khách thường vẫn nhận bát bám đuổi');
     // Bot chốt đơn live 2 túi trong cửa sổ bám đuổi: không ghi promoGift, chữ quà bỏ phần bát ưu đãi.
     const promo = 'Bộ bát gáo dừa – ưu đãi bám đuổi';

@@ -19,7 +19,7 @@ const LIVE_GIFT = { id: 'qua-tang-live', name: 'Quạt + Bát gáo dừa', activ
 // R17: quà live 08/10 — bảng quà seed đã có Quạt (live-quat, cùng SKU QUA-TANG-LIVE, cả đơn 3 túi; chính sách hiện hành
 // kiểm ở live-gift-bat-muong.test.mjs). Test dưới giữ kịch bản quà live gộp cũ "Quạt + Bát gáo dừa" (đúng 2 túi) nên bỏ
 // live-quat trước khi thêm, không thì đơn có hai quà live.
-const pushLegacyLiveGift = (gifts, extra = {}) => { gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat'); gifts.items.push({ ...LIVE_GIFT, ...extra }); };
+const pushLegacyLiveGift = (gifts, extra = {}) => { gifts.items = gifts.items.filter(gift => gift.id !== 'live-quat' && gift.id !== 'live-bat-gao-dua'); gifts.items.push({ ...LIVE_GIFT, ...extra }); };
 
 function withGifts(edit, run) {
   const original = readFileSync(process.env.GIFTS_PATH, 'utf8');

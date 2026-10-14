@@ -106,7 +106,7 @@ export const fallbackTemplates = Object.freeze({
   BENEFITS: 'Dạ granola là bữa sáng/bữa phụ tiện lợi: yến mạch, gạo lứt, hạt và trái cây sấy cho nhiều chất xơ, năng lượng và no lâu; không chiên dầu, vị ngọt nhẹ từ mật thốt nốt và đường mạch nha ạ. Đây là thực phẩm thông thường, không phải thực phẩm chức năng nên không có công dụng chữa bệnh ạ.',
   PRODUCTION_PLACE: 'Dạ sản phẩm được sản xuất tại xưởng của Giọt Nắng: 52 Đường An Phú Đông 21, P. An Phú Đông, TP.HCM ạ. Hàng sản xuất trong nước, có hồ sơ công bố, ngày sản xuất và hạn dùng in trên bao bì ạ.',
   // R17 (bình luận A7, inbox4 H3; quà live 08/10): live 2 túi lớn → Quạt; từ 3 túi → Quạt + Bộ bát gáo dừa + Muỗng dừa.
-  GIFT_POLICY_LIVE: 'Dạ khách xem live lấy 2 túi lớn bất kỳ (Xanh / Vàng / Nâu) chỉ 298.000đ, miễn phí vận chuyển và được tặng Quạt ạ 🎁 Từ 3 túi tặng Quạt + Bộ bát gáo dừa + Muỗng dừa ạ. {Title} lấy mấy túi, vị nào để em lên đơn liền nha?',
+  GIFT_POLICY_LIVE: 'Dạ khách xem live lấy 2 túi lớn bất kỳ (Xanh / Vàng / Nâu) chỉ 298.000đ, miễn phí vận chuyển và được tặng Quạt + Bát gáo dừa ạ 🎁 Từ 3 túi tặng Quạt + Bộ bát gáo dừa + Muỗng dừa ạ. {Title} lấy mấy túi, vị nào để em lên đơn liền nha?',
   GIFT_POLICY_PROMO: 'Dạ trong thời gian ưu đãi của {title}, combo 2 túi được miễn phí vận chuyển và tặng Bát gáo dừa + muỗng dừa ạ 🎁 {Title} lấy combo 2 túi vị nào để em lên đơn nha?',
   // R17 (chủ shop 10/10, quyết định 4): nói quà của giỏ 2 túi theo bảng quà ({two_gift}: khách live → Quạt) rồi mời thêm 1 túi.
   GIFT_POLICY_UPSELL3: 'Dạ combo 2 túi của {title}[?two_gift] được tặng {two_gift}[/?][?two_nogift] được miễn phí vận chuyển[/?] ạ 🎁 Bộ bát gáo dừa + Muỗng dừa bên em tặng cho đơn từ 3 túi (3 túi {total3}, miễn phí vận chuyển) ạ. {Title} lấy thêm 1 túi nữa để nhận bộ bát + muỗng không ạ?',
@@ -5955,9 +5955,13 @@ export function addressWordsInText(message) {
 // chỉ còn Bộ bát + Muỗng (không thêm bát). Chủ shop chốt khác (vd thêm 1 bát: ['BGD', 'BGD', 'MUONG']) thì sửa ở đây.
 export const FAN_DECLINE_GIFTS = Object.freeze({ two: Object.freeze(['BGD']), threePlus: Object.freeze(['BGD', 'MUONG']) });
 const FAN_DECLINE_GIFT_NAMES = { BGD: 'Bộ bát gáo dừa', MUONG: 'Muỗng dừa' };
+// 14/10 (chủ shop: quà live = 1 Quạt + 1 Bát gáo dừa): bảng quà có thêm dòng bát chỉ live (live-bat-gao-dua, đúng 2 túi) —
+// combo 2 lấy tên/mã dòng đó ("Bát gáo dừa", không nói "bộ"), từ 3 túi lấy dòng bát thường ("Bộ bát gáo dừa").
 export function fanToSpoonGifts(gifts = getGifts(), { bags = 2 } = {}) {
+  const live = Number(bags) < 3;
   const pick = (sku, quantity) => {
-    const gift = (Array.isArray(gifts) ? gifts : []).find(item => String(item?.sku || '').trim().toUpperCase() === sku);
+    const same = (Array.isArray(gifts) ? gifts : []).filter(item => String(item?.sku || '').trim().toUpperCase() === sku);
+    const gift = same.find(item => Boolean(item?.livestreamOnly) === live) || same[0];
     return { name: String(gift?.name || FAN_DECLINE_GIFT_NAMES[sku] || sku), sku, quantity, weight: Math.max(0, Math.round(Number(gift?.weight) || 10)), ...(gift?.id ? { giftId: String(gift.id) } : {}) };
   };
   const counts = new Map();

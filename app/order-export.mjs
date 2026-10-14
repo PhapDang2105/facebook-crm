@@ -618,7 +618,14 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
       // Chỉ ghi "(Live)" (không ghi quà khác) = đơn có quà Live (hiện là Quạt, chủ shop 14/10). Chỉ thêm khi đơn
       // chưa có dòng quà nào: đơn đã có quà (đổi quạt lấy bát + muỗng, quà chọn tay…) giữ nguyên.
       const hasGiftLine = giftLineOrders.has(orderKey) || items.some(item => item.gift || !(Number(item.price) > 0));
-      if (noted.liveOnly && !hasGiftLine && !override && !swap) addGift(LIVE_GIFT_POS_SKU, 1);
+      // 14/10 chiều (chủ shop): quà Live = 1 Quạt + 1 Bát gáo dừa — lấy các dòng quà chỉ live đang bật của bảng quà
+      // hợp số túi (combo 2: Quạt + Bát); bảng quà không có dòng nào hợp thì như cũ chỉ Quạt.
+      if (noted.liveOnly && !hasGiftLine && !override && !swap) {
+        const liveGifts = (getGifts() || []).filter(gift => gift.active && gift.livestreamOnly && gift.sku
+          && (!catalogQuantity || (catalogQuantity >= gift.minQuantity && (!gift.maxQuantity || catalogQuantity <= gift.maxQuantity))));
+        if (liveGifts.length) liveGifts.forEach(gift => addGift(gift.sku, 1, gift.weight));
+        else addGift(LIVE_GIFT_POS_SKU, 1);
+      }
     }
     items.forEach(item => { if (item.sku) emitted.add(item.sku); });
     if (items.some(item => item.sku && (item.gift || !(Number(item.price) > 0)))) giftLineOrders.add(orderKey);

@@ -40,7 +40,8 @@ test('V4: quà bát gáo dừa bám đuổi (ghi chú đơn) → dòng BGD cho g
 
 test('nhẹ (b): SKU cũ CB10-XANH (đã đổi thành CB10-XANH-G35) không bị bung thành 20 túi; ký hiệu Pancake CB2-XANH vẫn là 2 túi', () => {
   const legacy = buildExportRows({ headers, rows: [row('CB-l1', 'CB10-XANH', 2, 179000, { name: 'Combo 10 gói Xanh' })] });
-  assert.deepEqual(lines(legacy), ['CB10-XANH-G35x2@179000']);
+  // 14/10 bảng SKU chuẩn kho: combo 10 gói ghi thành gói lẻ mã chuẩn (2 combo = 20 gói GRA-XANH-G35), tổng giữ nguyên.
+  assert.deepEqual(lines(legacy), ['GRA-XANH-G35x20@17900']);
   assert.equal(total(legacy), 358000);
   assert.deepEqual(splitSkuForExport('CB2-XANH', 1, 298000, true, 'Granola Túi Xanh 450g').map(item => `${item.sku}x${item.quantity}`), ['GRA-XANH-Z450x2']);
 });

@@ -214,7 +214,7 @@ test('xuất kho: dòng quà theo quà chọn tay (bỏ quà live / bảng quà 
     const manual = { ...liveTwoBags(), id: 'e1', source: 'Facebook' };
     assert.deepEqual(lines([row('CB-e1', XANH, 1, 149000), row('CB-e1', VANG, 1, 149000)], [manual]), ['GRA-XANH-Z450x1@149000', 'GRA-VANG-H350x1@149000', 'BGDx1@0', 'MUONGx1@0']);
     const plain = { ...liveTwoBags({ giftOverride: [] }), id: 'e2', source: 'Facebook' };
-    assert.deepEqual(lines([row('CB-e2', XANH, 1, 149000), row('CB-e2', VANG, 1, 149000)], [plain]), ['GRA-XANH-Z450x1@149000', 'GRA-VANG-H350x1@149000', 'QUA-TANG-LIVEx1@0']);
+    assert.deepEqual(lines([row('CB-e2', XANH, 1, 149000), row('CB-e2', VANG, 1, 149000)], [plain]), ['GRA-XANH-Z450x1@149000', 'GRA-VANG-H350x1@149000', 'QUATx1@0']);
   });
   const promo = { ...liveTwoBags({ livestream: false, address: ADDRESS, giftOverride: [{ ...MUONG, quantity: 2 }, { name: 'Quạt cầm tay', sku: '' }] }), id: 'e3', source: 'Facebook', promoGift: 'Bộ bát gáo dừa' };
   assert.deepEqual(lines([row('CB-e3', XANH, 2, 149000)], [promo]), ['GRA-XANH-Z450x2@149000', 'MUONGx2@0']);

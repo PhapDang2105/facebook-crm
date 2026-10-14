@@ -137,8 +137,18 @@ export function normalizeGiftStore(value) {
     // quotes "174.000đ + ship 15.000đ" for one bag; 189.000đ is what the
     // customer pays and what the warehouse file must show.
     shippingFee: Math.max(0, Math.round(Number(value?.shippingFee ?? defaultShippingFee) || 0)),
+    liveWarehouseSku: normalizeLiveWarehouseSku(value?.liveWarehouseSku),
     updatedAt: Number(value?.updatedAt) || 0
   };
+}
+
+// Quà Live lên POS luôn là mã chung QUA-TANG-LIVE; quà thật đổi theo đợt nên file kho ghi mã của quà
+// đang tặng (chủ shop 14/10: hiện là QUAT), đặt ở Cài đặt → Quà tặng. Ô trống = giữ QUA-TANG-LIVE.
+export const LIVE_GIFT_POS_SKU = 'QUA-TANG-LIVE';
+export const DEFAULT_LIVE_WAREHOUSE_SKU = 'QUAT';
+export function normalizeLiveWarehouseSku(value) {
+  if (value === undefined || value === null) return DEFAULT_LIVE_WAREHOUSE_SKU;
+  return String(value).trim().toUpperCase();
 }
 
 /** Canonical basket key: "SKU=qty|SKU=qty" sorted by SKU, quantities merged. */
@@ -462,7 +472,7 @@ function readGiftStoreSync() {
     try {
       giftCache = normalizeGiftStore(JSON.parse(readFileSync(giftsPath, 'utf8')));
     } catch {
-      giftCache = { items: [], swap: null, shippingFee: defaultShippingFee, updatedAt: 0 };
+      giftCache = { items: [], swap: null, shippingFee: defaultShippingFee, liveWarehouseSku: DEFAULT_LIVE_WAREHOUSE_SKU, updatedAt: 0 };
     }
   }
   return giftCache;
@@ -474,6 +484,10 @@ export function getGifts() {
 
 export function getShippingFee() {
   return readGiftStoreSync().shippingFee;
+}
+
+export function getLiveWarehouseSku() {
+  return readGiftStoreSync().liveWarehouseSku;
 }
 
 const freeShippingPattern = /mien phi van chuyen|mien phi ship|mien ship|free ?ship/;

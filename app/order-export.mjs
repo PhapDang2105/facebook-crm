@@ -1,7 +1,8 @@
-import { comboKey, findProductBySku, getGifts, giftsForKey, giftSwapPlan, livestreamGiftSkus, matchProduct, normalizeText } from './processing/catalog.mjs';
+import { comboKey, findProductBySku, getGifts, getLiveWarehouseSku, giftsForKey, giftSwapPlan, LIVE_GIFT_POS_SKU, livestreamGiftSkus, matchProduct, normalizeText } from './processing/catalog.mjs';
 import { shippingFeeForKey, unitPriceInBasket } from './processing/pricing.mjs';
 import { canonicalLocationColumns, checkLocationColumns, normalizeExportLocation, streetForDisplay } from './processing/locations.mjs';
 import { isLivestreamOrder } from './conversation-orders.mjs';
+import { isStandardWarehouseSku, standardComboParts } from './warehouse-skus.mjs';
 import { giftOverridePlan } from './gift-override.mjs';
 
 export { normalizeExportLocation };
@@ -75,6 +76,7 @@ export const SKU_WEIGHTS = Object.freeze({
   'GRA-NAU-G35': 35,
   'GRA-XANH-G35': 35,
   'GRA-CAM-G30': 30,
+  'GRA-MINT-Z300': 300,
   'HT-YM-T500': 500,
   'YM-VO-T500': 500,
   'HU-300ML': 10,
@@ -104,8 +106,19 @@ export const ZALO_DEFAULT_WEIGHT = 500;
 const SKU_PRICES = Object.freeze({
   'GRA-NAU-Z350': { single: 179000, combo: 144000 },
   'GRA-VANG-H350': { single: 189000, combo: 149000 },
-  'GRA-XANH-Z450': { single: 189000, combo: 149000 }
+  'GRA-XANH-Z450': { single: 189000, combo: 149000 },
+  // 14/10 chủ shop: Mint (Tropical) 300g bán lẻ 219.000đ, combo 174.000đ/túi.
+  'GRA-MINT-Z300': { single: 219000, combo: 174000 }
 });
+
+/**
+ * SKU ghi vào file kho: quà Live lên POS là mã chung QUA-TANG-LIVE, còn kho ghi mã quà đang tặng
+ * (Cài đặt → Quà tặng → "SKU kho quà Live", chủ shop 14/10: hiện là QUAT).
+ */
+export function warehouseSku(sku) {
+  if (String(sku || '').trim().toUpperCase() !== LIVE_GIFT_POS_SKU) return sku;
+  return getLiveWarehouseSku() || LIVE_GIFT_POS_SKU;
+}
 
 function components(mainSku, mainQuantity, unitPrice, jarQuantity) {
   return Object.freeze([
@@ -196,6 +209,7 @@ function mapSingleSku(symbol) {
   if (upper.endsWith('G35') && upper.includes('NAU')) return 'GRA-NAU-G35';
   if (upper.endsWith('G35') && upper.includes('XANH')) return 'GRA-XANH-G35';
   if (upper.endsWith('G30') && upper.includes('CAM')) return 'GRA-CAM-G30';
+  if (upper.includes('MINT')) return 'GRA-MINT-Z300';
   if (upper.includes('VANGG') || upper.includes('VANG')) return 'GRA-VANG-H350';
   if (upper.includes('XANH')) return 'GRA-XANH-Z450';
   if (upper.includes('NAU')) return 'GRA-NAU-Z350';
@@ -265,6 +279,77 @@ function splitCatalogSku(product, quantity, useComboPricing, shippingFee = 0, pa
   return [{ sku: product.sku, quantity, price: unit + shipPerUnit, catalog: true }];
 }
 
+// Quà nhân viên hay ghi trong ngoặc đầu địa chỉ → SKU kho (chữ đã bỏ dấu, viết thường). Quạt là quà Live
+// (mã chung QUA-TANG-LIVE, file kho đổi sang SKU kho quà Live). Yến mạch tặng = Yến mạch cán dẹt 500g.
+const GIFT_NOTE_RULES = [
+  { pattern: /\b(bat|bgd|gao dua)\b/, sku: 'BGD' },
+  { pattern: /\b(muong|thia)\b/, sku: 'MUONG' },
+  { pattern: /\bquat\b/, sku: LIVE_GIFT_POS_SKU },
+  { pattern: /\byen mach\b/, sku: 'HT-YM-T500' },
+  { pattern: /\bgoi\b.*\bxanh\b|\bxanh\b.*\bgoi\b/, sku: 'GRA-XANH-G35' },
+  { pattern: /\bgoi\b.*\bnau\b|\bnau\b.*\bgoi\b/, sku: 'GRA-NAU-G35' },
+  { pattern: /\bgoi\b.*\bcam\b|\bcam\b.*\bgoi\b/, sku: 'GRA-CAM-G30' },
+  { pattern: /\bhu\b/, sku: 'HU-300ML' }
+];
+
+/**
+ * Mã chỉ dùng làm quà (không bán): quà Live, bát, muỗng và các quà trong Cài đặt → Quà tặng không phải sản
+ * phẩm danh mục (quà "1 Túi Vàng" là sản phẩm thì không tính — dòng bán của nó vẫn giữ giá).
+ */
+function isGiftOnlySku(sku) {
+  const code = String(sku || '').trim().toUpperCase();
+  if (!code) return false;
+  if (code === LIVE_GIFT_POS_SKU || code === String(getLiveWarehouseSku() || '').toUpperCase() || code === 'BGD' || code === 'MUONG' || code === 'QUAT') return true;
+  return !findProductBySku(code) && (getGifts() || []).some(gift => String(gift.sku || '').trim().toUpperCase() === code);
+}
+
+/**
+ * Ghi chú quà ở ngoặc đầu địa chỉ (quy ước kho, chủ shop 12/10 + 14/10):
+ * "(Tặng BGD) …", "( tặng bát muỗng dừa) …", "(Live Tặng yến mạch 2 túi) …" → lines [{ sku, quantity }];
+ * phần sau "tặng" không nhận ra → unknown. liveOnly: chỉ ghi "(Live)" không kèm quà nào (đơn nhận quà Live).
+ */
+export function addressGiftNotes(address) {
+  const head = String(address || '').match(/^\s*(?:\([^()\n]{1,80}\)\s*)+/)?.[0] || '';
+  const notes = [...head.matchAll(/\(([^()]*)\)/g)].map(match => match[1].trim()).filter(Boolean);
+  const lines = [];
+  const unknown = [];
+  let live = false;
+  let gifted = false;
+  for (const note of notes) {
+    const text = normalizeText(note);
+    if (/\blive\b/.test(text)) live = true;
+    // "đổi quạt lấy/sang bát muỗng", "đổi bát muỗng" (chủ shop 14/10: đổi thì thêm quà đổi sang) — lấy phần quà mới.
+    const swapText = text.match(/\bdoi\b(?:.*?\b(?:lay|sang|thanh|bang)\b)?\s*(.*)$/)?.[1]?.trim();
+    const giftText = swapText ?? text.match(/\b(?:tang|qua tang|qua)\b[:\s]*(.*)$/)?.[1]?.trim();
+    if (giftText === undefined) continue;
+    gifted = true;
+    for (const part of giftText.split(/\s*(?:,|\+|;|&|\bva\b|\bkem\b)\s*/).map(item => item.trim()).filter(Boolean)) {
+      const quantity = Math.max(1, Number(part.match(/\b(\d{1,2})\b/)?.[1]) || Number(part.match(/x\s*(\d{1,2})\b/)?.[1]) || 1);
+      // Mã kho ghi thẳng ("TKQ-G20", "HU-300ML") nhận luôn; còn lại theo bảng từ khoá.
+      const typed = part.toUpperCase().split(/\s+/).filter(isStandardWarehouseSku);
+      const skus = [...new Set([...GIFT_NOTE_RULES.filter(rule => rule.pattern.test(part)).map(rule => rule.sku), ...typed])];
+      if (!skus.length) { unknown.push(part); continue; }
+      for (const sku of skus) {
+        const rule = { sku };
+        const existing = lines.find(line => line.sku === rule.sku);
+        if (existing) existing.quantity = Math.max(existing.quantity, quantity);
+        else lines.push({ sku: rule.sku, quantity });
+      }
+    }
+  }
+  return { lines, unknown, liveOnly: live && !gifted };
+}
+
+/**
+ * Combo danh mục không có trong bảng SKU chuẩn của kho (14/10: "CB10-XANH-G35" Combo 10 gói Xanh) → đúng số
+ * gói lẻ mã chuẩn (10 × GRA-XANH-G35), giá một gói = giá combo chia số gói. Dòng khác giữ nguyên.
+ */
+function expandStandardCombo(line) {
+  const parts = standardComboParts(line.sku);
+  if (!parts) return line;
+  return { ...line, sku: parts.sku, quantity: line.quantity * parts.units, price: Math.round((Number(line.price) || 0) / parts.units) };
+}
+
 /**
  * Sản phẩm danh mục của một dòng: theo SKU, hoặc SKU cũ đã đổi trong danh mục
  * (CB10-XANH → CB10-XANH-G35, như posSkuFor của POS) tra theo tên — chỉ nhận khi
@@ -289,7 +374,7 @@ export function splitSkuForExport(symbol, orderQuantity, orderPrice, useComboPri
   if (!raw) return [{ sku: '', quantity, price }];
 
   const catalogProduct = catalogProductFor(symbol, productLabel);
-  if (catalogProduct) return splitCatalogSku(catalogProduct, quantity, useComboPricing, shippingFee, paidPrice ? price : 0);
+  if (catalogProduct) return splitCatalogSku(catalogProduct, quantity, useComboPricing, shippingFee, paidPrice ? price : 0).map(expandStandardCombo);
 
   const relation = resolveProductRelation(symbol, productLabel);
   if (relation) return expandRelation(relation, quantity);
@@ -382,6 +467,8 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
   const seenOrders = new Set();
   const skippedOrders = new Set();
   const invalidLocations = [];
+  const giftNoteIssues = [];
+  const giftLineOrders = new Set();
   const exportedSourceRowIndexes = [];
   const bagQuantityByOrder = new Map();
   const emittedSkusByOrder = new Map();
@@ -512,8 +599,18 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
           if (!swap?.removes(spoon || { name: '', sku: 'MUONG' })) items.push({ sku: 'MUONG', quantity: 1, price: 0, weight: spoon?.weight || SKU_WEIGHTS.MUONG });
         }
       }
+      // Ghi chú quà nhân viên ghi trong ngoặc đầu địa chỉ ("(Tặng BGD) …", "(Live Tặng yến mạch 2 túi) …",
+      // quy ước kho 12/10): quà đơn chưa có thì thêm dòng giá 0; phần không đọc ra được thì báo ở màn Xuất.
+      const noted = addressGiftNotes(value(row, 'Địa chỉ'));
+      noted.lines.forEach(line => addGift(line.sku, line.quantity));
+      if (noted.unknown.length) giftNoteIssues.push({ orderNumber, sourceOrderId, customer: value(row, 'Khách hàng'), text: noted.unknown.join(', ') });
+      // Chỉ ghi "(Live)" (không ghi quà khác) = đơn có quà Live (hiện là Quạt, chủ shop 14/10). Chỉ thêm khi đơn
+      // chưa có dòng quà nào: đơn đã có quà (đổi quạt lấy bát + muỗng, quà chọn tay…) giữ nguyên.
+      const hasGiftLine = giftLineOrders.has(orderKey) || items.some(item => item.gift || !(Number(item.price) > 0));
+      if (noted.liveOnly && !hasGiftLine && !override && !swap) addGift(LIVE_GIFT_POS_SKU, 1);
     }
     items.forEach(item => { if (item.sku) emitted.add(item.sku); });
+    if (items.some(item => item.sku && (item.gift || !(Number(item.price) > 0)))) giftLineOrders.add(orderKey);
     emittedSkusByOrder.set(orderKey, emitted);
     items.forEach((item, itemIndex) => {
       const output = Array(EXPORT_COLUMNS.length).fill('');
@@ -528,8 +625,10 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
         output[38] = location.ward;
       }
       // Đơn Zalo: mã hàng (không phải quà) chưa có khối lượng ở danh mục / bảng mã → mặc định 500g (chủ shop 14/10).
-      const knownWeight = item.weight || skuWeight(item.sku);
-      output[19] = item.sku; output[21] = item.quantity; output[22] = item.price;
+      const sku = warehouseSku(item.sku);
+      const knownWeight = item.weight || skuWeight(item.sku) || skuWeight(sku);
+      // Quà tặng luôn 0đ trong file kho (chủ shop 14/10: tệp POS có dòng "Quà Tặng LIVE" 50.000đ).
+      output[19] = sku; output[21] = item.quantity; output[22] = item.gift || isGiftOnlySku(item.sku) ? 0 : item.price;
       output[24] = knownWeight || (!item.gift && isZaloSource(value(row, 'Nguồn đơn')) ? ZALO_DEFAULT_WEIGHT : '');
       // Thuế là thuộc tính của từng dòng sản phẩm (kể cả quà), không chỉ dòng đầu đơn.
       // 13/10 (kho): cột Thuế phải là KIỂU SỐ — ghi 0.08, ô mẫu định dạng 0% nên Excel hiện "8%" (chữ "8%" kho không nhận).
@@ -538,6 +637,8 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
     });
   });
   outputRows.locationCheck = { checked: seenOrders.size + (skipInvalidLocations ? skippedOrders.size : 0), invalid: invalidLocations };
+  // Mã SKU ngoài bảng chuẩn của kho (app/warehouse-skus.mjs): màn Xuất dữ liệu cảnh báo, không chặn xuất.
+  outputRows.skuCheck = { unknown: [...new Set(outputRows.map(row => String(row[19] || '').trim()).filter(sku => sku && !isStandardWarehouseSku(sku)))], giftNotes: giftNoteIssues };
   outputRows.sourceRowIndexes = exportedSourceRowIndexes;
   return outputRows;
 }

@@ -39,7 +39,7 @@ test('V7/W1: /api/orders/price nhận cờ livestream (ưu tiên) hoặc convers
 });
 
 test('G1: PUT /api/gifts — thiếu items giữ quà cũ; phí ship null/"" → 400; tên quà trùng → 400; tên không phải chữ → 400', () => {
-  const route = section(server, "if (url.pathname === '/api/gifts')", 4500);
+  const route = section(server, "if (url.pathname === '/api/gifts')", 6000);
   assert.match(route, /const hasItems = payload\.items !== undefined;/);
   assert.match(route, /items: items \|\| current\.items/);
   assert.match(route, /typeof item\?\.name !== 'string'/);

@@ -8317,6 +8317,7 @@ const giftRowsElement = document.querySelector('#gift-rows');
 const giftAddButton = document.querySelector('#gift-add');
 const giftSaveButton = document.querySelector('#gift-save');
 const giftShippingFee = document.querySelector('#gift-shipping-fee');
+const giftLiveSku = document.querySelector('#gift-live-sku');
 let giftItems = [];
 let giftProducts = [];
 let giftsLoaded = false;
@@ -8353,6 +8354,7 @@ async function loadGifts() {
     giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift, excludedSkus: [...(gift.excludedSkus || [])] })) : [];
     giftProducts = Array.isArray(result.products) ? result.products : [];
     if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
+    if (giftLiveSku) giftLiveSku.value = String(result.liveWarehouseSku ?? '');
     giftsLoaded = true;
     renderGifts();
   } catch (error) {
@@ -8424,11 +8426,12 @@ giftSaveButton?.addEventListener('click', async () => {
     const result = await readApiResponse(await fetch('/api/gifts', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: giftItems, shippingFee: Number(giftShippingFee?.value) || 0, ...(clearingAll ? { confirmClear: true } : {}) })
+      body: JSON.stringify({ items: giftItems, shippingFee: Number(giftShippingFee?.value) || 0, ...(giftLiveSku ? { liveWarehouseSku: giftLiveSku.value.trim().toUpperCase() } : {}), ...(clearingAll ? { confirmClear: true } : {}) })
     }));
     giftItems = Array.isArray(result.items) ? result.items.map(gift => ({ ...gift, excludedSkus: [...(gift.excludedSkus || [])] })) : giftItems;
     giftProducts = Array.isArray(result.products) ? result.products : giftProducts;
     if (giftShippingFee) giftShippingFee.value = String(Number(result.shippingFee) || 0);
+    if (giftLiveSku) giftLiveSku.value = String(result.liveWarehouseSku ?? '');
     renderGifts();
     showToast('Đã lưu quà tặng.', 'success');
   } catch (error) {
@@ -11973,9 +11976,21 @@ const orderExportCheck = document.querySelector('#order-export-check');
 // Đơn tỉnh/quận/phường chưa đúng danh mục kho: chỉ tô đỏ dòng trong bảng xem
 // trước (rê chuột xem lý do), khoá nút xuất chính, chỉ còn nút xuất bỏ qua.
 // Chủ shop 13/10 bỏ khung cảnh báo liệt kê đơn phía trên bảng.
-function renderExportLocationCheck(check, totalRows) {
+function renderExportLocationCheck(check, totalRows, skuCheck = null) {
   const invalid = Array.isArray(check?.invalid) ? check.invalid : [];
-  if (orderExportCheck) { orderExportCheck.classList.add('hidden'); orderExportCheck.innerHTML = ''; }
+  // Mã SKU ngoài bảng chuẩn của kho (app/warehouse-skus.mjs): chỉ cảnh báo, không chặn xuất.
+  const unknownSkus = totalRows && Array.isArray(skuCheck?.unknown) ? skuCheck.unknown : [];
+  // Ghi chú quà ở ngoặc đầu địa chỉ mà máy chưa đọc ra quà (vd. "(Tặng túi vải)"): nhân viên thêm quà tay.
+  const giftNotes = totalRows && Array.isArray(skuCheck?.giftNotes) ? skuCheck.giftNotes : [];
+  if (orderExportCheck) {
+    const parts = [
+      unknownSkus.length ? `<strong>Mã SKU chưa có trong bảng SKU chuẩn của kho</strong>${unknownSkus.map(escapeHtml).join(', ')} — kiểm tra lại trước khi gửi kho.` : '',
+      giftNotes.length ? `<strong>Ghi chú quà ở địa chỉ chưa đọc được</strong><ul>${giftNotes.map(item => `<li>Đơn ${escapeHtml(String(item.orderNumber || ''))} ${escapeHtml(item.customer || '')}: "${escapeHtml(item.text || '')}"</li>`).join('')}</ul>` : ''
+    ].filter(Boolean);
+    orderExportCheck.classList.toggle('hidden', !parts.length);
+    orderExportCheck.classList.toggle('is-invalid', parts.length > 0);
+    orderExportCheck.innerHTML = parts.join('');
+  }
   if (orderExportSkip) orderExportSkip.classList.toggle('hidden', invalid.length === 0);
   if (orderExport) orderExport.disabled = totalRows === 0 || invalid.length > 0;
 }
@@ -11991,7 +12006,7 @@ async function fetchExportRows() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orderData: exportable })
   }));
-  exportRowsCache = { key, rows: Array.isArray(result.rows) ? result.rows : [], streets: Array.isArray(result.streets) ? result.streets : [], locationCheck: result.locationCheck || { checked: 0, invalid: [] } };
+  exportRowsCache = { key, rows: Array.isArray(result.rows) ? result.rows : [], streets: Array.isArray(result.streets) ? result.streets : [], locationCheck: result.locationCheck || { checked: 0, invalid: [] }, skuCheck: result.skuCheck || { unknown: [] } };
   return exportRowsCache;
 }
 
@@ -12002,11 +12017,12 @@ async function renderExportPreview() {
   let rows = [];
   let streets = [];
   let locationCheck = { checked: 0, invalid: [] };
+  let skuCheck = { unknown: [] };
   preview.classList.remove('is-empty');
   // Đổi ngày xuất liên tiếp: chỉ lượt gọi mới nhất được vẽ, lượt cũ về muộn bị bỏ.
   const request = ++exportPreviewRequest;
   try {
-    ({ rows, streets, locationCheck } = await fetchExportRows());
+    ({ rows, streets, locationCheck, skuCheck = { unknown: [] } } = await fetchExportRows());
     if (request !== exportPreviewRequest) return;
   } catch (error) {
     if (request !== exportPreviewRequest) return;
@@ -12019,7 +12035,7 @@ async function renderExportPreview() {
     orderExport.disabled = rows.length === 0;
     orderExport.hidden = rows.length === 0;
   }
-  renderExportLocationCheck(locationCheck, rows.length);
+  renderExportLocationCheck(locationCheck, rows.length, skuCheck);
   if (!rows.length) {
     const source = selectedExportSource();
     renderEmptyState(preview, source && (orderData.rows.length || zaloOrders.rows.length) ? `Ngày này không có đơn nguồn ${source} đủ điều kiện xuất` : 'Chưa có dữ liệu xuất');
@@ -14078,7 +14094,7 @@ async function exportOrdersToXlsx(button, { skipInvalidLocations = false } = {})
     const response = await fetch('/api/orders/export', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ orderData: exportOrderDataWithZalo(), skipInvalidLocations, exportDay: exportDayLabels().key, exportSource: selectedExportSource(), fileName: filename }) });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
-      if (detail.locationCheck) renderExportLocationCheck(detail.locationCheck, exportRowsCache.rows.length || 1);
+      if (detail.locationCheck) renderExportLocationCheck(detail.locationCheck, exportRowsCache.rows.length || 1, exportRowsCache.skuCheck);
       throw new Error(detail.error || 'Không thể tạo file Excel.');
     }
     const blob = await response.blob();

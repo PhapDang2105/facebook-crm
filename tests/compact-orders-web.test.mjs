@@ -132,3 +132,59 @@ test('bảng đã lưu từ lần Import bằng bản cũ (cột ID/SKU, đơn h
   const normal = { headers: [...api.chatbotOrderHeaders], rows: [] };
   assert.equal(api.repairCompactOrderTable(normal, history), normal);
 });
+
+test('file kho: quà Live ghi mã QUAT; combo Mint CB2-MINT-Z300 tách 2 túi GRA-MINT-Z300 174.000đ, 300g', () => {
+  const table = plain(api.compactOrderSheetToTable(headers, [
+    ['57600', '', 'Khách Mint', '934000009', '8 đường số 8, Phường 11, Quận 6, Hồ Chí Minh', 'Phường 11', 'Quận 6', 'Hồ Chí Minh', 'Granola / Phân Loại: Combo 2 Mint', 'CB2-MINT-Z300', '1', '348000'],
+    line('Quà Tặng LIVE', 'QUA-TANG-LIVE', '1', '0'),
+    ['57601', '', 'Khách Lẻ', '934000010', '37 Hồ Tùng Mậu, Phường Bình An, Thành phố Dĩ An, Bình Dương', 'Phường Bình An', 'Thành phố Dĩ An', 'Bình Dương', 'Granola / Phân Loại: 1 Túi Mint', 'GRA-MINT-Z300', '1', '219000']
+  ], new Date(2026, 9, 14, 16, 0)));
+  const rows = buildExportRows(table);
+  assert.deepEqual(rows.map(row => [row[19], row[21], row[22], row[24]]), [
+    ['GRA-MINT-Z300', 2, 174000, 300],
+    ['QUAT', 1, 0, 10],
+    ['GRA-MINT-Z300', 1, 219000, 300]
+  ]);
+  assert.ok(!rows.some(row => row[19] === 'QUA-TANG-LIVE'));
+});
+
+test('SKU kho quà Live đổi theo Cài đặt → Quà tặng (QUA-TANG-LIVE vẫn là mã POS); trống = giữ QUA-TANG-LIVE', async () => {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { reloadCatalog, getLiveWarehouseSku, normalizeGiftStore } = await import('../app/processing/catalog.mjs');
+  const { warehouseSku } = await import('../app/order-export.mjs');
+  assert.equal(normalizeGiftStore({ items: [] }).liveWarehouseSku, 'QUAT');
+  const original = readFileSync(process.env.GIFTS_PATH, 'utf8');
+  try {
+    writeFileSync(process.env.GIFTS_PATH, JSON.stringify({ ...JSON.parse(original), liveWarehouseSku: 'bat-live' }));
+    reloadCatalog();
+    assert.equal(getLiveWarehouseSku(), 'BAT-LIVE');
+    assert.equal(warehouseSku('QUA-TANG-LIVE'), 'BAT-LIVE');
+    assert.equal(warehouseSku('BGD'), 'BGD');
+    writeFileSync(process.env.GIFTS_PATH, JSON.stringify({ ...JSON.parse(original), liveWarehouseSku: '' }));
+    reloadCatalog();
+    assert.equal(warehouseSku('QUA-TANG-LIVE'), 'QUA-TANG-LIVE');
+  } finally {
+    writeFileSync(process.env.GIFTS_PATH, original);
+    reloadCatalog();
+  }
+});
+
+test('bảng SKU chuẩn kho: combo 10 gói tách 10 gói lẻ mã chuẩn; mã ngoài bảng được báo ở skuCheck', async () => {
+  const { standardComboParts, isStandardWarehouseSku } = await import('../app/warehouse-skus.mjs');
+  assert.deepEqual(plain(standardComboParts('CB10-XANH-G35')), { sku: 'GRA-XANH-G35', units: 10 });
+  assert.deepEqual(plain(standardComboParts('CB10-CAM-G30')), { sku: 'GRA-CAM-G30', units: 10 });
+  assert.equal(standardComboParts('CB2-HT-YM-T500'), null, 'mã chuẩn của kho thì giữ');
+  assert.ok(isStandardWarehouseSku('quat') && !isStandardWarehouseSku('QUA-TANG-LIVE'));
+  const table = plain(api.compactOrderSheetToTable(headers, [
+    ['57700', '', 'Khách Gói', '934000011', '8 đường số 8, Phường 11, Quận 6, Hồ Chí Minh', 'Phường 11', 'Quận 6', 'Hồ Chí Minh', 'Combo 10 gói Xanh', 'CB10-XANH-G35', '1', '204000'],
+    ['57701', '', 'Khách Cam', '934000012', '37 Hồ Tùng Mậu, Phường Bình An, Thành phố Dĩ An, Bình Dương', 'Phường Bình An', 'Thành phố Dĩ An', 'Bình Dương', 'Combo 10 gói Cam', 'CB10-CAM-G30', '1', '189000'],
+    line('Mã lạ', 'ABC-XYZ', '1', '0')
+  ], new Date(2026, 9, 14, 16, 0)));
+  const rows = buildExportRows(table);
+  assert.deepEqual(rows.map(row => [row[19], row[21], row[22], row[24]]), [
+    ['GRA-XANH-G35', 10, 20400, 35],
+    ['GRA-CAM-G30', 10, 18900, 30],
+    ['ABC-XYZ', 1, 0, '']
+  ]);
+  assert.deepEqual(plain(rows.skuCheck), { unknown: ['ABC-XYZ'], giftNotes: [] });
+});

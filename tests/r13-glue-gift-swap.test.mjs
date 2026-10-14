@@ -84,7 +84,7 @@ test('xuất kho: khách live 2 túi đổi quạt + bát → gói nhỏ, không
     const live = { id: 'g6', source: 'Facebook', livestream: true, promoGift: 'Bộ bát gáo dừa', giftSwap: [SMALL_XANH, SMALL_CAM], giftSwapRemoved: ['Quạt + Bát gáo dừa'] };
     assert.deepEqual(exported([row('CB-g6', XANH, 2, 149000)], [live]), ['GRA-XANH-Z450x2@149000', 'GRA-XANH-G35x1@0', 'GRA-CAM-G30x1@0']);
     // Đơn live không đổi quà: như cũ.
-    assert.deepEqual(exported([row('CB-g7', XANH, 2, 149000)], [{ id: 'g7', source: 'Facebook', livestream: true }]), ['GRA-XANH-Z450x2@149000', 'QUA-TANG-LIVEx1@0']);
+    assert.deepEqual(exported([row('CB-g7', XANH, 2, 149000)], [{ id: 'g7', source: 'Facebook', livestream: true }]), ['GRA-XANH-Z450x2@149000', 'QUATx1@0']);
   });
   const promo = { id: 'g8', source: 'Facebook', promoGift: 'Bộ bát gáo dừa', giftSwap: [SMALL_XANH, SMALL_XANH], giftSwapRemoved: ['Bộ bát gáo dừa'] };
   assert.deepEqual(exported([row('CB-g8', XANH, 2, 149000)], [promo]), ['GRA-XANH-Z450x2@149000', 'GRA-XANH-G35x2@0']);

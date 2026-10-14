@@ -34,7 +34,7 @@ import { configureCampaignAi, decisionFollowUp, followUpWindows, generateCampaig
 import { addCompetitor, addManualAd, adLibraryView, generateMarketInsights, marketBrief, readAdLibrary, removeAd, removeCompetitor, syncCompetitors, updateAdLibrary } from './ad-library.mjs';
 import { applyHonorific, defaultMessageTemplates, honorific, publicImageUrl, spin, splitMessages } from './chatbot-templates.mjs';
 import { assertUniqueSku, maximumGalleryImages, normalizeGallery, normalizeProduct, normalizeProductStore } from './products.mjs';
-import { comboKey, getCatalogProducts, getGifts, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
+import { comboKey, getCatalogProducts, getGifts, getLiveWarehouseSku, getShippingFee, normalizeGift, normalizeGiftStore, reloadCatalog } from './processing/catalog.mjs';
 import { priceBasket } from './processing/pricing.mjs';
 import { listPipelineSteps, readPipelineStep } from './processing/pipeline.mjs';
 import { flushDecisionLog } from './processing/decision-log.mjs';
@@ -3748,6 +3748,7 @@ const server = http.createServer(async (request, response) => {
       const giftResponse = () => ({
         items: getGifts(),
         shippingFee: getShippingFee(),
+        liveWarehouseSku: getLiveWarehouseSku(),
         products: getCatalogProducts().filter(product => product.active).map(product => ({ sku: product.sku, name: product.name }))
       });
       if (request.method === 'GET') return sendJson(response, 200, giftResponse());
@@ -3781,11 +3782,16 @@ const server = http.createServer(async (request, response) => {
         // null / "" không phải 0: Number(null) = 0 từng lặng lẽ đặt phí ship về 0.
         const shippingFeeInvalid = payload.shippingFee === null || (typeof payload.shippingFee === 'string' && !payload.shippingFee.trim()) || typeof payload.shippingFee === 'boolean';
         if (payload.shippingFee !== undefined && (shippingFeeInvalid || !Number.isInteger(shippingFee) || shippingFee < 0 || shippingFee > 500000)) return sendJson(response, 400, { error: 'Phí vận chuyển phải là số nguyên từ 0 đến 500.000.' });
+        // SKU kho của quà Live (thay mã chung QUA-TANG-LIVE trong file kho); trống = giữ QUA-TANG-LIVE.
+        const liveWarehouseSku = payload.liveWarehouseSku === undefined ? undefined : String(payload.liveWarehouseSku ?? '').trim().toUpperCase();
+        if (liveWarehouseSku && !/^[A-Z0-9][A-Z0-9._-]{0,39}$/.test(liveWarehouseSku)) return sendJson(response, 400, { error: 'SKU kho quà Live chỉ gồm chữ, số, dấu "-", "_" hoặc "." (tối đa 40 ký tự).' });
         const beforeGifts = getGifts();
         const beforeFee = getShippingFee();
+        const beforeLiveSku = getLiveWarehouseSku();
         await updateGiftStore(current => ({
           items: items || current.items,
-          shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee
+          shippingFee: payload.shippingFee !== undefined ? shippingFee : current.shippingFee,
+          liveWarehouseSku: liveWarehouseSku !== undefined ? liveWarehouseSku : current.liveWarehouseSku
         }));
         const afterGifts = getGifts();
         const giftNames = list => new Set((list || []).map(gift => String(gift.name || '')));
@@ -3793,7 +3799,8 @@ const server = http.createServer(async (request, response) => {
         const removed = [...giftNames(beforeGifts)].filter(name => !giftNames(afterGifts).has(name));
         const giftParts = [
           items ? `${afterGifts.length} quà${added.length ? `, thêm ${added.slice(0, 3).join(', ')}` : ''}${removed.length ? `, bỏ ${removed.slice(0, 3).join(', ')}` : ''}` : '',
-          payload.shippingFee !== undefined && beforeFee !== getShippingFee() ? `phí ship ${beforeFee} → ${getShippingFee()}` : ''
+          payload.shippingFee !== undefined && beforeFee !== getShippingFee() ? `phí ship ${beforeFee} → ${getShippingFee()}` : '',
+          beforeLiveSku !== getLiveWarehouseSku() ? `SKU kho quà Live ${beforeLiveSku || 'QUA-TANG-LIVE'} → ${getLiveWarehouseSku() || 'QUA-TANG-LIVE'}` : ''
         ].filter(Boolean);
         audit(request, 'settings.gifts', { target: { type: 'settings', id: 'gifts', name: 'Quà tặng' }, summary: `Sửa quà tặng / phí ship: ${giftParts.join('; ') || 'không đổi'}.` });
         return sendJson(response, 200, giftResponse());
@@ -4327,7 +4334,7 @@ const server = http.createServer(async (request, response) => {
       const rows = buildExportRows(payload.orderData, { orderFacts: exportFactsForOrders(await listAllSystemOrders()) });
       // `streets`: phần đường phố cho cột Địa chỉ của bảng xem trước; file vẫn đủ.
       // `locationCheck`: đơn nào ba cấp chưa đúng danh mục kho, để chặn xuất.
-      return sendJson(response, 200, { rows, streets: exportPreviewStreets(rows), locationCheck: rows.locationCheck });
+      return sendJson(response, 200, { rows, streets: exportPreviewStreets(rows), locationCheck: rows.locationCheck, skuCheck: rows.skuCheck });
     }
     // Nút Export ở Nhập dữ liệu: tải đúng các cột/dòng đang hiển thị thành XLSX
     // thuần — không qua mẫu kho, không kiểm địa chỉ, không ghi lịch sử xuất kho.

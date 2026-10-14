@@ -385,7 +385,35 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   // Enter trong ô: như bấm nút Messenger (có số thì lưu rồi mở Messenger).
   if (form) form.addEventListener('submit', function (event) {
     event.preventDefault();
-    if (requirePhone(event, 'messenger')) { send('messenger'); location.href = open.getAttribute('href'); }
+    if (requirePhone(event, 'messenger')) { send('messenger'); location.href = open.getAttribute('href'); if (typeof watchApp === 'function') watchApp(); }
+  });` : '';
+  // iPhone mở thẳng app (appLink): máy chưa cài Messenger thì Safari báo "địa chỉ không hợp lệ" và khách đứng lại
+  // trang này. Bấm nút xong mà sau 3 giây trang vẫn hiện, còn giữ focus (không sang app, không đang mở hộp hỏi
+  // "Mở trong Messenger?") → chuyển sang Zalo. Trang bị ẩn (đã sang Messenger) thì huỷ. Hộp hỏi/báo lỗi của Safari
+  // làm trang mất focus: khi khách đóng hộp (focus quay lại) mà trang vẫn ở đây thì cũng chuyển Zalo.
+  const appFallbackScript = appLink ? `
+  var zaloLink = document.getElementById('zalo');
+  var appAt = 0;
+  function appGone() { appAt = 0; }
+  function appCheck() {
+    if (!appAt || document.hidden || Date.now() - appAt < 2500) return;
+    if (document.hasFocus && !document.hasFocus()) return;
+    appAt = 0;
+    send('zalo');
+    var doneText = document.getElementById('lead-done-text');
+    if (doneText) doneText.textContent = 'Máy Anh/Chị chưa có Messenger, em chuyển sang Zalo để lưu ưu đãi nhé.';
+    location.href = zaloLink.getAttribute('href');
+  }
+  function watchApp() {
+    if (!zaloLink) return;
+    appAt = Date.now();
+    setTimeout(appCheck, 3000);
+  }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) appGone(); });
+  addEventListener('pagehide', appGone);
+  addEventListener('focus', function () { setTimeout(appCheck, 400); });
+  [open, document.getElementById('open-sticky')].forEach(function (element) {
+    if (element) element.addEventListener('click', function (event) { if (!event.defaultPrevented) watchApp(); });
   });` : '';
   return `<!doctype html>
 <html lang="vi">
@@ -525,7 +553,7 @@ ${leadForm ? '' : `  arm(open, 'messenger');
   arm(document.getElementById('zalo'), 'zalo');
   arm(document.getElementById('open-sticky'), 'messenger');`}${iosHintScript}
   var sticky = document.getElementById('sticky');
-  var stickyOff = false;${leadScript}
+  var stickyOff = false;${leadScript}${appFallbackScript}
   ${leadForm ? `var stickyTarget = document.querySelector('.ticket');
   if (sticky && stickyTarget && 'IntersectionObserver' in window) {
     new IntersectionObserver(function (entries) {

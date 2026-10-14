@@ -69,9 +69,10 @@ test('trang đệm: nút Mở Messenger là thẻ <a> (iPhone mở thẳng app, 
   assert.doesNotMatch(html, /src="(?!\/q\/brand\/)|<link(?! rel="icon" [^>]*href="\/q\/brand\/)|@import|url\(/, 'không được tải tài nguyên ngoài: /assets nằm sau mật khẩu; chỉ logo/icon dưới /q/brand/ là công khai');
   assert.match(html, /<title>Nông Sản Giọt Nắng \| Cảm ơn quý khách<\/title>/);
   assert.match(html, /<img class="logo" src="\/q\/brand\/logo\.webp"/, 'logo thương hiệu thật, phục vụ qua đường công khai /q/*');
-  assert.doesNotMatch(html, /http-equiv="refresh"|location\.(href|replace|assign)/, 'không tự chuyển hướng: iOS chỉ mở app khi khách tự bấm');
+  // Ngoại lệ duy nhất: chuyển Zalo SAU KHI khách đã bấm nút Messenger mà máy không có app (test riêng bên dưới).
+  assert.doesNotMatch(html.replace("location.href = zaloLink.getAttribute('href')", ''), /http-equiv="refresh"|location\.(href|replace|assign)/, 'không tự chuyển hướng: iOS chỉ mở app khi khách tự bấm');
   assert.doesNotMatch(html, /fb-messenger:|intent:/, 'không dùng scheme không có tài liệu');
-  assert.ok(Buffer.byteLength(html, 'utf8') < 15_000, 'trang phải nhẹ');
+  assert.ok(Buffer.byteLength(html, 'utf8') < 16_000, 'trang phải nhẹ (thêm ~1 KB chuyển Zalo khi iPhone không có Messenger)');
   // Safari hệ thống thì không cần hướng dẫn mở bằng trình duyệt.
   assert.doesNotMatch(html, /class="hint"/);
 });
@@ -109,6 +110,21 @@ test('trang đệm: nút Zalo luôn có (liên kết OA đã đặt, không thì
   assert.match(withZalo, /pointerdown/, 'đếm từ lúc chạm, không đợi click (iPhone nhảy app trước click)');
   assert.match(withZalo, /arm\(open, 'messenger'\)/);
   assert.match(withZalo, /'\?to=' \+ to/);
+});
+
+test('trang đệm: iPhone chưa cài Messenger (bấm nút mà trang vẫn đứng, còn focus) thì tự chuyển sang Zalo; máy khác không có', () => {
+  for (const extra of [{}, { leadForm: true }]) {
+    const html = render(agents.iosSafari, extra);
+    assert.match(html, /function watchApp\(\)/);
+    assert.match(html, /setTimeout\(appCheck, 3000\)/);
+    assert.match(html, /document\.hidden\) appGone\(\)/, 'trang ẩn (đã sang Messenger) thì huỷ');
+    assert.match(html, /document\.hasFocus && !document\.hasFocus\(\)/, 'đang mở hộp hỏi của Safari thì chưa chuyển');
+    assert.match(html, /location\.href = zaloLink\.getAttribute\('href'\)/);
+    new Function(html.match(/<script>([\s\S]*)<\/script>/)[1]);
+  }
+  assert.doesNotMatch(render(agents.androidChrome), /watchApp/);
+  assert.doesNotMatch(render(agents.desktopChrome), /watchApp/);
+  assert.doesNotMatch(render(agents.iosSafari, { destination: 'https://m.me/123456?ref=tmdt-01&text=hi' }), /watchApp/, 'link m.me (tin soạn sẵn) không cần');
 });
 
 test('trang đệm: tên Page và mã được escape', () => {

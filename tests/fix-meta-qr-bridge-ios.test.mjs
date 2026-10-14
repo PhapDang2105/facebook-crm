@@ -61,10 +61,10 @@ test('iPhone trong Zalo (iOS 17+): hướng dẫn nằm ngay dưới nút Messen
   assert.match(html, /navigator\.clipboard\.writeText/);
   // Không dùng scheme Messenger không có tài liệu (không mang được ref), không tự chuyển hướng.
   assert.doesNotMatch(html, /fb-messenger:|intent:/);
-  assert.doesNotMatch(html, /http-equiv="refresh"|location\.(href|replace|assign)/);
+  assert.doesNotMatch(html.replace("location.href = zaloLink.getAttribute('href')", ''), /http-equiv="refresh"|location\.(href|replace|assign)/);
   assert.doesNotMatch(html, /src="(?!\/q\/brand\/)|@import|url\(/, 'không tải tài nguyên ngoài');
   assert.doesNotMatch(html, /anh chị|anh\/chị|Anh\/chị|Bạn đang/, 'xưng hô Anh/Chị');
-  assert.ok(Buffer.byteLength(html, 'utf8') < 17_000, 'trang vẫn nhẹ');
+  assert.ok(Buffer.byteLength(html, 'utf8') < 18_000, 'trang vẫn nhẹ (thêm ~1 KB chuyển Zalo khi iPhone không có Messenger)');
 });
 
 test('iOS dưới 17 không hiểu x-safari-https: chỉ có hướng dẫn và nút sao chép, không có nút bấm vào là đứng im', () => {

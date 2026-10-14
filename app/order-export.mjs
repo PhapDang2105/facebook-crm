@@ -716,7 +716,7 @@ export function noteProductSwap(note) {
 /**
  * Đơn Import (cột "Nguồn đơn" = Import): (1) NOTE (cột Ghi chú xử lý) nhắc sản phẩm khác → thay các dòng sản phẩm
  * của đơn bằng sản phẩm theo note, cùng tổng số túi khi note không ghi số, giá lẻ/combo theo số túi; (2) đơn có combo
- * 10 gói (CB10-…) đi kèm sản phẩm khác → giá combo cho cả đơn (10 gói theo giá combo danh mục, túi lớn theo giá combo).
+ * 10 gói (CB10-…) đi kèm sản phẩm khác hay mua từ 2 combo 10 gói → giá combo cho cả đơn (10 gói theo giá combo danh mục, túi lớn theo giá combo).
  * Trả dòng mới và `originOf` (dòng mới → dòng gốc) để tệp khách hàng vẫn trỏ đúng dòng nguồn.
  */
 function applyImportOrderRules(headers, rows) {
@@ -760,9 +760,9 @@ function applyImportOrderRules(headers, rows) {
         continue;
       }
     }
-    // (2) Combo 10 gói đi kèm sản phẩm khác → giá combo.
+    // (2) Combo 10 gói đi kèm sản phẩm khác, hay mua từ 2 combo 10 gói (20 gói) → giá combo.
     const packRows = productRows.filter(row => /^CB10-/i.test(String(row[symbol] || '')));
-    if (packRows.length && productRows.length > packRows.length) {
+    if (packRows.length && (productRows.length > packRows.length || bagUnits >= 2)) {
       for (const row of productRows) {
         const code = String(row[symbol] || '').trim().toUpperCase();
         const product = findProductBySku(code);

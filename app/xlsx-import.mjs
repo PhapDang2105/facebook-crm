@@ -104,7 +104,18 @@ function parseCell(attributes, body, sharedStrings, dateStyles) {
   if (type === 'b') return raw === '1' ? 'TRUE' : 'FALSE';
   const style = Number(getAttribute(attributes, 's'));
   if (raw !== '' && dateStyles.has(style)) return excelDate(raw);
-  return decodeXml(raw);
+  return plainNumber(decodeXml(raw));
+}
+
+/**
+ * Ô số do công cụ ngoài Excel ghi (14/10, tệp User_input.xlsx): "9.38377311E8", "57477.0",
+ * "189000.0" → "938377311", "57477", "189000" như Excel hiện. Chỉ đổi dạng có mũ hoặc đuôi
+ * ".0"; số khác giữ nguyên chữ (không làm tròn).
+ */
+function plainNumber(text) {
+  if (!/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+|\.0+)$/.test(text)) return text;
+  const number = Number(text);
+  return Number.isFinite(number) && Math.abs(number) <= Number.MAX_SAFE_INTEGER ? String(number) : text;
 }
 
 function firstWorksheetPath(zip) {

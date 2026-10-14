@@ -12961,8 +12961,69 @@ document.querySelector('#zalo-order-clear')?.addEventListener('click', () => {
   showToast('Đã xóa bảng đơn Zalo.', 'success');
 });
 
+// ----- Tệp đơn dạng ID/SKU (14/10, "User_input.xlsx") -----
+// Cột: ID, NOTE, Khách hàng, Số điện thoại, Địa chỉ, Phường/Xã, Quận/Huyện, Tỉnh, Sản phẩm, SKU, Số lượng,
+// Đơn giá; dòng sản phẩm thứ 2+ của đơn để trống ID và thông tin khách. Đổi sang cột chuẩn của bảng đơn
+// (chatbotOrderHeaders) rồi xử lý y như đơn thường (Xử lý dữ liệu → Xuất dữ liệu). Tệp không có ngày →
+// Ngày = lúc Import (như tệp Zalo: cả tệp xuất ở ngày Import). NOTE là ghi chú gọi khách của nhân viên
+// ("GTC 2, ok") → Ghi chú xử lý, không vào file kho.
+const compactOrderColumns = new Map([
+  ['khach hang', 'Khách hàng'], ['so dien thoai', 'Số điện thoại'], ['dia chi', 'Địa chỉ'],
+  ['tinh', 'Tỉnh/Thành phố'], ['quan huyen', 'Quận/Huyện'], ['phuong xa', 'Phường/Xã']
+]);
+
+function isCompactOrderSheet(headers = []) {
+  const names = new Set(headers.map(header => normalizeColumnName(header)));
+  return ['id', 'sku', 'khach hang', 'so dien thoai', 'dia chi', 'so luong', 'don gia'].every(name => names.has(name))
+    && !names.has('ma don hang') && !names.has('ma mau ma');
+}
+
+/** SĐT trong tệp số (ô kiểu số mất số 0): "938377311" → "0938377311", "84938377311" → "0938377311". */
+function compactOrderPhone(value) {
+  const text = String(value || '').trim();
+  const digits = text.replace(/\D/g, '');
+  if (/^\d{9}$/.test(digits)) return `0${digits}`;
+  if (/^84\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+  return text;
+}
+
+/** Tệp ID/SKU → { headers: chatbotOrderHeaders, rows, orders } (nguồn "Import"). */
+function compactOrderSheetToTable(sourceHeaders, records, importedAt = new Date()) {
+  const index = new Map(sourceHeaders.map((header, position) => [normalizeColumnName(header), position]));
+  const cell = (row, name) => (index.has(name) ? String(row[index.get(name)] ?? '').trim() : '');
+  const pad = number => String(number).padStart(2, '0');
+  const date = `${pad(importedAt.getDate())}/${pad(importedAt.getMonth() + 1)}/${importedAt.getFullYear()} ${pad(importedAt.getHours())}:${pad(importedAt.getMinutes())}`;
+  const rows = [];
+  let current = null;
+  let orders = 0;
+  for (const record of records) {
+    if (!record.some(value => String(value ?? '').trim())) continue;
+    const id = cell(record, 'id');
+    const startsOrder = Boolean(id) || !current;
+    // Dòng không ID đi theo đơn phía trên: ô khách để trống lấy của dòng đầu đơn.
+    const customer = new Map([...compactOrderColumns.keys()].map(name => [name, cell(record, name) || (startsOrder ? '' : current.customer.get(name))]));
+    if (startsOrder) { current = { id, customer }; orders += 1; }
+    const phone = compactOrderPhone(customer.get('so dien thoai'));
+    const byHeader = {
+      [orderSourceHeader]: 'Import', [orderDateHeader]: date, 'Mã đơn hàng': current.id, [orderCarrierHeader]: carrierLabelFor(phone),
+      ...Object.fromEntries([...compactOrderColumns].map(([name, header]) => [header, customer.get(name)])),
+      'Số điện thoại': phone,
+      'Sản phẩm': cell(record, 'san pham'), 'Mã mẫu mã': cell(record, 'sku'), 'Số lượng': cell(record, 'so luong'), 'Đơn giá': cell(record, 'don gia'),
+      'Ghi chú': '', [orderStaffNoteHeader]: cell(record, 'note')
+    };
+    rows.push(chatbotOrderHeaders.map(header => byHeader[header] ?? ''));
+  }
+  return { headers: [...chatbotOrderHeaders], rows, orders };
+}
+
 function applyImportedRecords(sourceHeaders, records) {
   sourceHeaders = sourceHeaders.map((header, index) => String(header).trim() || `Cột ${index + 1}`);
+  if (isCompactOrderSheet(sourceHeaders)) {
+    const converted = compactOrderSheetToTable(sourceHeaders, records);
+    sourceHeaders = converted.headers;
+    records = converted.rows;
+    showToast(`Đã nhập ${converted.orders} đơn (${converted.rows.length} dòng) từ tệp ID/SKU, Ngày = lúc Import: xử lý như đơn thường.`, 'success');
+  }
   const retainedIndexes = sourceHeaders.map((_, index) => index);
   const headers = retainedIndexes.map(index => sourceHeaders[index]);
   const nonEmptyRows = records.filter(row => row.some(value => String(value ?? '').trim()));

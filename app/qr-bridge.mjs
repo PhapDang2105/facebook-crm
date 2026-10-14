@@ -388,16 +388,16 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
     if (requirePhone(event, 'messenger')) { send('messenger'); location.href = open.getAttribute('href'); if (typeof watchApp === 'function') watchApp(); }
   });` : '';
   // iPhone mở thẳng app (appLink): máy chưa cài Messenger thì Safari báo "địa chỉ không hợp lệ" và khách đứng lại
-  // trang này. Bấm nút xong mà sau 3 giây trang vẫn hiện, còn giữ focus (không sang app, không đang mở hộp hỏi
-  // "Mở trong Messenger?") → chuyển sang Zalo. Trang bị ẩn (đã sang Messenger) thì huỷ. Hộp hỏi/báo lỗi của Safari
-  // làm trang mất focus: khi khách đóng hộp (focus quay lại) mà trang vẫn ở đây thì cũng chuyển Zalo.
+  // trang này. Trang không đọc được lỗi đó, nên: hộp báo lỗi/hộp hỏi của Safari làm trang mất focus → khách đóng hộp
+  // (focus quay lại) mà trang vẫn ở đây thì chuyển Zalo NGAY (14/10 chủ shop: lỗi là sang Zalo liền). Safari không
+  // làm mất focus thì sau 2 giây trang vẫn hiện, còn focus → chuyển Zalo. Trang bị ẩn (đã sang Messenger) thì huỷ.
   const appFallbackScript = appLink ? `
   var zaloLink = document.getElementById('zalo');
   var appAt = 0;
   function appGone() { appAt = 0; }
-  function appCheck() {
-    if (!appAt || document.hidden || Date.now() - appAt < 2500) return;
-    if (document.hasFocus && !document.hasFocus()) return;
+  function appCheck(back) {
+    if (!appAt || document.hidden || Date.now() - appAt < (back ? 200 : 1800)) return;
+    if (!back && document.hasFocus && !document.hasFocus()) return;
     appAt = 0;
     send('zalo');
     var doneText = document.getElementById('lead-done-text');
@@ -407,11 +407,11 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   function watchApp() {
     if (!zaloLink) return;
     appAt = Date.now();
-    setTimeout(appCheck, 3000);
+    setTimeout(function () { appCheck(false); }, 2000);
   }
   document.addEventListener('visibilitychange', function () { if (document.hidden) appGone(); });
   addEventListener('pagehide', appGone);
-  addEventListener('focus', function () { setTimeout(appCheck, 400); });
+  addEventListener('focus', function () { setTimeout(function () { appCheck(true); }, 50); });
   [open, document.getElementById('open-sticky')].forEach(function (element) {
     if (element) element.addEventListener('click', function (event) { if (!event.defaultPrevented) watchApp(); });
   });` : '';

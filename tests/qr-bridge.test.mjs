@@ -116,7 +116,8 @@ test('trang đệm: iPhone chưa cài Messenger (bấm nút mà trang vẫn đ�
   for (const extra of [{}, { leadForm: true }]) {
     const html = render(agents.iosSafari, extra);
     assert.match(html, /function watchApp\(\)/);
-    assert.match(html, /setTimeout\(appCheck, 3000\)/);
+    assert.match(html, /setTimeout\(function \(\) \{ appCheck\(false\); \}, 2000\)/, 'không có tín hiệu gì: 2 giây');
+    assert.match(html, /addEventListener\('focus', function \(\) \{ setTimeout\(function \(\) \{ appCheck\(true\); \}, 50\)/, 'đóng hộp báo lỗi (focus quay lại): chuyển ngay');
     assert.match(html, /document\.hidden\) appGone\(\)/, 'trang ẩn (đã sang Messenger) thì huỷ');
     assert.match(html, /document\.hasFocus && !document\.hasFocus\(\)/, 'đang mở hộp hỏi của Safari thì chưa chuyển');
     assert.match(html, /location\.href = zaloLink\.getAttribute\('href'\)/);

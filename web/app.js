@@ -13050,8 +13050,209 @@ function repairCompactOrderTable(data, history = orderImportHistory) {
   return result;
 }
 
+// ----- Tệp đơn Mỹ Tiền (14/10, "USER-2.xlsx") -----
+// Cột: NGÀY (chỉ dòng đầu mỗi ngày), MÃ ĐƠN (trống), TÊN, SDT, ĐỊA CHỈ, SỐ LƯỢNG TÚI (chữ tự do: "Combo 2X + tặng
+// 2 túi Yến Mạch", "Combo 3 ( 2 xanh+ 1 vàng) + yến mạch mua riêng 1kg( 116K)"), QUÀ TẶNG, GIÁ TIỀN (tổng đơn), NOTE.
+// Mỗi dòng một đơn: đọc túi mua / hàng mua thêm / quà, chia GIÁ TIỀN về từng dòng rồi vào bảng đơn như đơn thường
+// (nguồn "Mỹ Tiền", Ngày = lúc Import như các tệp khác). Quà ghi rõ → cột "Quà tặng (SKU)" (file kho dòng 0đ).
+const myTienSourceLabel = 'Mỹ Tiền';
+const myTienGiftColumn = 'Quà tặng (SKU)';
+const myTienFlavors = { mint: 'GRA-MINT-Z300', xanh: 'GRA-XANH-Z450', x: 'GRA-XANH-Z450', vang: 'GRA-VANG-H350', v: 'GRA-VANG-H350', nau: 'GRA-NAU-Z350', n: 'GRA-NAU-Z350' };
+// Giá một túi khi mua 1 túi (chưa ship) / từ 2 túi — đọc từ danh mục, thiếu thì theo bảng giá 14/10.
+const myTienDefaultPrices = { 'GRA-XANH-Z450': [174000, 149000], 'GRA-VANG-H350': [174000, 149000], 'GRA-NAU-Z350': [164000, 144000], 'GRA-MINT-Z300': [204000, 174000] };
+// Quà / hàng mua thêm theo chữ → SKU chuẩn kho.
+const myTienGiftRules = [
+  [/yen mach/, 'HT-YM-T500'], [/tao do/, 'TD-Z150'], [/hat chia/, 'CHIA-Z500'], [/bat|gao dua/, 'BGD'], [/muong/, 'MUONG'],
+  [/quat/, 'QUA-TANG-LIVE'], [/tam lanh/, 'TAM-LANH-H350'], [/nghe/, 'NGHE-H350']
+];
+
+function isMyTienOrderSheet(headers = []) {
+  const names = new Set(headers.map(header => normalizeColumnName(header)));
+  return ['ten', 'sdt', 'dia chi', 'so luong tui', 'gia tien'].every(name => names.has(name));
+}
+
+/** Chữ thường, bỏ dấu, giữ + ( ) , để tách: "Combo 3( X+V+N)" → "combo 3( x+v+n)". */
+function myTienText(value) {
+  return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/đ/g, 'd').replace(/\s+/g, ' ').trim();
+}
+
+function myTienBagPrices(sku, products = sharedProducts) {
+  const product = (Array.isArray(products) ? products : []).find(item => String(item.sku || '').toUpperCase() === sku);
+  const [single, combo] = myTienDefaultPrices[sku] || [0, 0];
+  return { single: Number(product?.salePrice) || single, combo: Number(product?.comboPrice) || combo };
+}
+
+/** Túi trong một đoạn chữ: "2 xanh", "1 tui vang", "x", "xanh mint" → [{ sku, quantity|null }]. */
+function myTienBagsIn(segment) {
+  const text = segment.replace(/xanh\s*mint|mint\s*xanh/g, 'mint');
+  // "2x", "1v" viết liền số: không dùng \b (giữa số và chữ không có ranh giới từ).
+  return [...text.matchAll(/(?:(\d{1,2})\s*(?:tui\s*|goi\s*)?)?(?<![a-z])(mint|tropical|xanh|vang|nau|x|v|n)(?![a-z])/g)]
+    .map(match => ({ sku: myTienFlavors[match[2] === 'tropical' ? 'mint' : match[2]], quantity: match[1] ? Number(match[1]) : null }));
+}
+
+/** Quà trong một đoạn chữ: "2 tui yen mach", "1 bat muong dua", "1 tui xanh", "hu hat chia 500g" → [{ sku, quantity }]. */
+function myTienGiftsIn(segment) {
+  const quantity = Number(segment.match(/(?:^|\s)(\d{1,2})(?=\s|$|\s*tui|\s*goi)/)?.[1]) || 1;
+  const found = myTienGiftRules.filter(([pattern]) => pattern.test(segment)).map(([, sku]) => ({ sku, quantity }));
+  if (found.length) return found;
+  return myTienBagsIn(segment).map(bag => ({ sku: bag.sku, quantity: bag.quantity || quantity }));
+}
+
+/**
+ * Đọc một đơn Mỹ Tiền: túi mua, hàng mua thêm, quà, phí ship, phần không đọc được; chia tổng tiền về từng dòng.
+ * Túi nào là mua hay tặng (đơn "Combo 3 X + 1 túi xanh" không ghi "tặng") quyết theo GIÁ TIỀN: túi được tính mua
+ * khi tiền các túi đã mua cộng thêm vẫn không vượt tổng.
+ */
+function parseMyTienOrder(productText, giftText, totalValue, products = sharedProducts) {
+  const total = Number(String(totalValue ?? '').replace(/[^\d]/g, '')) || 0;
+  let text = myTienText(productText);
+  const unknown = [];
+  const bags = [];
+  const extras = [];
+  const gifts = [];
+  // "combo 3 ( 2 xanh+ 1 vang)", "combo 3( x+v+n)": trong ngoặc là túi mua, không ghi số = 1 túi.
+  const paren = text.match(/combo\s*\d*\s*\(([^)]*)\)/);
+  const purchase = [];
+  if (paren) {
+    myTienBagsIn(paren[1]).forEach(bag => purchase.push({ ...bag, quantity: bag.quantity || 1 }));
+    text = text.replace(paren[0], ' ');
+  }
+  let gifting = false;
+  const comboCount = Number(text.match(/combo\s*(\d+)\s*(?:tui\s*)?(?:mint|xanh|vang|nau|x|v|n)\b/)?.[1]) || 0;
+  for (const raw of text.split(/\s*(?:\+|,|\bva\b)\s*/).map(item => item.trim()).filter(Boolean)) {
+    const segment = raw.replace(/^combo\s*/, '');
+    if (/\b(mua them|mua rieng)\b/.test(segment)) {
+      const price = Number(segment.match(/(\d{2,4})\s*k\b/)?.[1]) * 1000 || null;
+      const isOat1kg = /yen mach/.test(segment) && /1\s*kg/.test(segment);
+      const rule = myTienGiftRules.find(([pattern]) => pattern.test(segment));
+      if (isOat1kg) extras.push({ sku: 'CB2-HT-YM-T500', name: 'Yến mạch cán dẹt 1kg ship', quantity: 1, price });
+      else if (rule) extras.push({ sku: rule[1], name: raw, quantity: Number(segment.match(/\b(\d{1,2})\b/)?.[1]) || 1, price });
+      else unknown.push(raw);
+      continue;
+    }
+    if (/\btang\b/.test(segment)) gifting = true;
+    const found = myTienBagsIn(segment.replace(/\btang\b/, ''));
+    if (!gifting && found.length && !myTienGiftRules.some(([pattern]) => pattern.test(segment))) {
+      found.forEach(bag => purchase.push({ ...bag, quantity: bag.quantity || (found.length === 1 && comboCount && !purchase.length ? comboCount : 1), fromText: raw }));
+      continue;
+    }
+    const segmentGifts = myTienGiftsIn(segment.replace(/\btang\b/, '').trim());
+    if (segmentGifts.length) gifts.push(...segmentGifts);
+    else if (segment && !/^\d+$/.test(segment)) unknown.push(raw);
+  }
+  // Cột QUÀ TẶNG: quà thêm; "Miễn phí vận chuyển" = đơn không cộng ship.
+  const giftColumn = myTienText(giftText);
+  const freeShip = /mien phi (van chuyen|ship)|freeship/.test(giftColumn);
+  for (const raw of giftColumn.split(/\s*(?:\+|,|\bva\b)\s*/).map(item => item.trim()).filter(Boolean)) {
+    if (/mien phi (van chuyen|ship)|freeship/.test(raw)) continue;
+    const found = myTienGiftsIn(raw.replace(/\btang\b/, '').trim());
+    if (found.length) gifts.push(...found); else unknown.push(raw);
+  }
+  // Túi mua hay tặng theo tổng tiền (trừ hàng mua thêm có giá).
+  const extrasKnown = extras.reduce((sum, item) => sum + (item.price || 0) * item.quantity, 0);
+  const target = total - extrasKnown;
+  const priceOf = list => {
+    const count = list.reduce((sum, bag) => sum + bag.quantity, 0);
+    return list.reduce((sum, bag) => sum + myTienBagPrices(bag.sku, products)[count >= 2 ? 'combo' : 'single'] * bag.quantity, 0);
+  };
+  for (const bag of purchase) {
+    if (!bags.length || priceOf([...bags, bag]) <= target + 15000) bags.push(bag);
+    else gifts.push({ sku: bag.sku, quantity: bag.quantity });
+  }
+  // Gộp túi cùng mã, chia tiền: túi theo giá danh mục (lẻ / combo), hàng mua thêm chưa có giá nhận phần còn lại,
+  // chênh lệch (vd. Nâu 144.000đ trong combo 447.000đ) dồn vào túi giá thấp nhất.
+  const merged = [];
+  bags.forEach(bag => { const same = merged.find(item => item.sku === bag.sku); if (same) same.quantity += bag.quantity; else merged.push({ sku: bag.sku, quantity: bag.quantity }); });
+  const count = merged.reduce((sum, bag) => sum + bag.quantity, 0);
+  const lines = merged.map(bag => ({ sku: bag.sku, quantity: bag.quantity, price: myTienBagPrices(bag.sku, products)[count >= 2 ? 'combo' : 'single'] }));
+  const bagTotal = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
+  const unpriced = extras.filter(item => !item.price);
+  const rest = total - bagTotal - extrasKnown;
+  unpriced.forEach(item => { item.price = unpriced.length === 1 ? Math.max(0, Math.round(rest / item.quantity)) : 0; });
+  const extrasTotal = extras.reduce((sum, item) => sum + (item.price || 0) * item.quantity, 0);
+  let diff = total - bagTotal - extrasTotal;
+  if (diff && lines.length) {
+    const cheapest = [...lines].sort((first, second) => first.price - second.price)[0];
+    if (diff % cheapest.quantity === 0) { cheapest.price += diff / cheapest.quantity; diff = 0; }
+  }
+  const giftLines = [];
+  gifts.forEach(gift => { const same = giftLines.find(item => item.sku === gift.sku); if (same) same.quantity += gift.quantity; else giftLines.push({ ...gift }); });
+  return { lines: [...lines, ...extras.map(item => ({ sku: item.sku, name: item.name, quantity: item.quantity, price: item.price || 0 }))], gifts: giftLines, freeShip, unknown, total, diff };
+}
+
+/** Tệp Mỹ Tiền → { headers: chatbotOrderHeaders + "Quà tặng (SKU)", rows, orders } (nguồn "Mỹ Tiền"). */
+function myTienOrderSheetToTable(sourceHeaders, records, importedAt = new Date(), products = sharedProducts) {
+  const index = new Map(sourceHeaders.map((header, position) => [normalizeColumnName(header), position]));
+  const cell = (row, name) => (index.has(name) ? String(row[index.get(name)] ?? '').trim() : '');
+  const pad = number => String(number).padStart(2, '0');
+  const date = `${pad(importedAt.getDate())}/${pad(importedAt.getMonth() + 1)}/${importedAt.getFullYear()} ${pad(importedAt.getHours())}:${pad(importedAt.getMinutes())}`;
+  const headers = [...chatbotOrderHeaders, myTienGiftColumn];
+  const rows = [];
+  let day = '';
+  let sequence = 0;
+  let orders = 0;
+  for (const record of records) {
+    if (!cell(record, 'ten') && !cell(record, 'sdt') && !cell(record, 'so luong tui')) continue;
+    const dayCell = cell(record, 'ngay').match(/^(\d{4})-(\d{2})-(\d{2})|^(\d{1,2})\/(\d{1,2})/);
+    if (dayCell) { const next = dayCell[1] ? `${dayCell[3]}${dayCell[2]}` : `${pad(dayCell[4])}${pad(dayCell[5])}`; if (next !== day) { day = next; sequence = 0; } }
+    sequence += 1;
+    orders += 1;
+    const id = cell(record, 'ma don') || `MT-${day || 'xx'}-${pad(sequence)}`;
+    const phone = compactOrderPhone(cell(record, 'sdt'));
+    const order = parseMyTienOrder(cell(record, 'so luong tui'), cell(record, 'qua tang'), cell(record, 'gia tien'), products);
+    const giftText = order.gifts.map(gift => (gift.quantity > 1 ? `${gift.sku} x${gift.quantity}` : gift.sku)).join(', ');
+    const note = [
+      `Mỹ Tiền: "${[cell(record, 'so luong tui'), cell(record, 'qua tang')].filter(Boolean).join(' | ')}"`,
+      cell(record, 'note'),
+      order.unknown.length ? `Chưa đọc được: ${order.unknown.join(', ')}` : '',
+      order.diff ? `Lệch tiền ${order.diff.toLocaleString('vi-VN')}đ so với ${order.total.toLocaleString('vi-VN')}đ` : ''
+    ].filter(Boolean).join(' · ');
+    const address = `${order.freeShip ? '(Freeship) ' : ''}${cell(record, 'dia chi').replace(/,\s*vietnam\s*$/i, '').replace(/[\s,]+$/, '')}`;
+    const lines = order.lines.length ? order.lines : [{ sku: '', quantity: 1, price: order.total }];
+    lines.forEach((line, position) => {
+      const product = (Array.isArray(products) ? products : []).find(item => String(item.sku || '').toUpperCase() === line.sku);
+      const byHeader = {
+        [orderSourceHeader]: myTienSourceLabel, [orderDateHeader]: date, 'Mã đơn hàng': id, 'Khách hàng': cell(record, 'ten'),
+        'Số điện thoại': phone, [orderCarrierHeader]: carrierLabelFor(phone), 'Địa chỉ': address,
+        'Sản phẩm': product?.name || line.name || line.sku, 'Mã mẫu mã': line.sku, 'Số lượng': String(line.quantity), 'Đơn giá': String(line.price),
+        'Ghi chú': '', [orderStaffNoteHeader]: position ? '' : note, [myTienGiftColumn]: giftText
+      };
+      rows.push(headers.map(header => byHeader[header] ?? ''));
+    });
+  }
+  return { headers, rows, orders };
+}
+
+/** Thêm đơn tệp Mỹ Tiền vào bảng: thay các dòng Mỹ Tiền cũ, giữ nguyên mọi đơn khác (đơn Import chưa xuất…). */
+function mergeMyTienRows(data, converted) {
+  const headers = [...(data.headers.length ? data.headers : chatbotOrderHeaders)];
+  converted.headers.forEach(header => { if (!headers.some(existing => normalizeColumnName(existing) === normalizeColumnName(header))) headers.push(header); });
+  const position = new Map(headers.map((header, at) => [normalizeColumnName(header), at]));
+  const sourceAt = position.get(normalizeColumnName(orderSourceHeader));
+  const kept = data.rows
+    .map(row => [...row, ...Array(Math.max(0, headers.length - row.length)).fill('')])
+    .filter(row => String(row[sourceAt] || '').trim() !== myTienSourceLabel);
+  const added = converted.rows.map(source => {
+    const row = Array(headers.length).fill('');
+    converted.headers.forEach((header, at) => { row[position.get(normalizeColumnName(header))] = source[at]; });
+    return row;
+  });
+  return { headers, rows: [...kept, ...added] };
+}
+
 function applyImportedRecords(sourceHeaders, records) {
   sourceHeaders = sourceHeaders.map((header, index) => String(header).trim() || `Cột ${index + 1}`);
+  // Tệp Mỹ Tiền: THÊM vào bảng (thay đơn Mỹ Tiền cũ), không xoá đơn khác như Import thường.
+  if (isMyTienOrderSheet(sourceHeaders)) {
+    const converted = myTienOrderSheetToTable(sourceHeaders, records);
+    orderData = mergeMyTienRows(ensureOrderSourceColumn(orderData), converted);
+    commitOrderData();
+    const unread = converted.rows.filter(row => /Chưa đọc được|Lệch tiền/.test(row[chatbotOrderHeaders.indexOf(orderStaffNoteHeader)] || '')).length;
+    showToast(`Đã nhập ${converted.orders} đơn Mỹ Tiền (${converted.rows.length} dòng), Ngày = lúc Import${unread ? `; ${unread} đơn cần xem lại (cột Ghi chú xử lý)` : ''}.`, unread ? 'warning' : 'success');
+    ['import', 'process', 'export'].forEach(name => orderPanelsDirty.add(name));
+    showOrderStage(getRecommendedOrderStage());
+    return;
+  }
   if (isCompactOrderSheet(sourceHeaders)) {
     const converted = compactOrderSheetToTable(sourceHeaders, records);
     sourceHeaders = converted.headers;

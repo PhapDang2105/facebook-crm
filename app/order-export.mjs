@@ -97,6 +97,11 @@ export const EXTRA_SKU_WEIGHTS = Object.freeze({
   XMRC: 10,
   'QUA-4TRA-G3': 10,
   'TAM-LANH-G25': 10,
+  // Mã tệp Mỹ Tiền 14/10 (khối lượng theo số gram trong mã chuẩn kho).
+  'TAM-LANH-H350': 350,
+  'TD-Z150': 150,
+  'TD-Z440': 440,
+  'CHIA-Z500': 500,
   '100-NB-PRE-H420': 500
 });
 
@@ -573,8 +578,9 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
       // chọn vị (không SKU) không lên dòng (kho không nhận dòng không mã) — nhân viên đã có ghi chú xử lý trên đơn.
       // Đơn không đổi quà (swap = null) chạy y như cũ.
       // Đơn Zalo (14/10): quà là đúng các SKU nhân viên nhập ở trang Đơn Zalo (cột "Quà tặng (SKU)"), giá 0,
-      // thay quà theo giỏ; ô trống thì đơn không kèm quà.
-      const zaloGifts = !posGifts && !facts?.giftOverride && isZaloSource(value(row, 'Nguồn đơn'))
+      // thay quà theo giỏ; ô trống thì đơn không kèm quà. Nguồn khác (tệp Mỹ Tiền 14/10) ghi quà rõ ở cùng cột thì cũng dùng đúng quà đó.
+      const columnGiftText = String(value(row, ZALO_GIFT_COLUMN) || '').trim();
+      const zaloGifts = !posGifts && !facts?.giftOverride && (isZaloSource(value(row, 'Nguồn đơn')) || columnGiftText)
         ? { lines: parseGiftSkus(value(row, ZALO_GIFT_COLUMN)).map(line => ({ sku: line.sku, quantity: line.quantity, weight: 0 })) }
         : null;
       const override = !posGifts && facts?.giftOverride ? facts.giftOverride : zaloGifts;
@@ -643,7 +649,8 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
       outputMeta.set(output, {
         orderKey,
         // Đơn Zalo: quà là đúng SKU nhân viên nhập, kèm MỌI đơn (chủ shop 14/10) — không theo luật số túi.
-        zalo: isZaloSource(value(row, 'Nguồn đơn')),
+        // Quà ghi rõ ở cột "Quà tặng (SKU)" (Mỹ Tiền) cũng giữ đúng như tệp.
+        zalo: isZaloSource(value(row, 'Nguồn đơn')) || Boolean(String(value(row, ZALO_GIFT_COLUMN) || '').trim()),
         gift,
         decorGift: gift && DECOR_GIFT_SKUS.has(String(item.sku || '').toUpperCase()),
         units: gift || !(Number(item.price) > 0) ? 0 : (/-G\d+$/i.test(item.sku) ? (Number(item.quantity) || 0) / 10 : Number(item.quantity) || 0)

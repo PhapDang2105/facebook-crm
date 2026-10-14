@@ -760,14 +760,15 @@ function applyImportOrderRules(headers, rows) {
         continue;
       }
     }
-    // (2) Combo 10 gói đi kèm sản phẩm khác, hay mua từ 2 combo 10 gói (20 gói) → giá combo.
+    // (2) Đơn từ 2 túi (combo 10 gói tính 1; 10 gói đi kèm sản phẩm khác cũng là combo) → giá combo: túi lớn
+    // (tệp POS có đơn 2 Xanh + 1 Vàng để 174.000đ/túi) và combo 10 gói theo giá combo danh mục. Chỉ hạ, không nâng giá.
     const packRows = productRows.filter(row => /^CB10-/i.test(String(row[symbol] || '')));
-    if (packRows.length && (productRows.length > packRows.length || bagUnits >= 2)) {
+    if (bagUnits >= 2 || (packRows.length && productRows.length > packRows.length)) {
       for (const row of productRows) {
         const code = String(row[symbol] || '').trim().toUpperCase();
         const product = findProductBySku(code);
         const comboPrice = /^CB10-/.test(code) ? Number(product?.comboPrice) || 0 : (SKU_PRICES[code]?.combo || 0);
-        if (!comboPrice || Number(row[price]) === comboPrice) continue;
+        if (!comboPrice || !(Number(row[price]) > comboPrice)) continue;
         const updated = [...row];
         updated[price] = String(comboPrice);
         originOf.set(updated, row);

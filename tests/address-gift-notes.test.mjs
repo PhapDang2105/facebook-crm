@@ -76,7 +76,9 @@ test('NOTE nhắc sản phẩm khác → đổi sản phẩm theo note; 10 gói 
     noted('C2', 'GTC 2', 'CB2-VANGG', 1, 298000),
     noted('C3', '', 'GRA-XANH-Z450', 1, 149000), noted('C3', '', 'CB10-CAM-G30', 1, 189000), noted('C3', '', 'QUA-TANG-LIVE', 1, 0),
     noted('C4', '', 'CB10-CAM-G30', 2, 189000),
-    noted('C5', '', 'CB10-CAM-G30', 1, 189000)
+    noted('C5', '', 'CB10-CAM-G30', 1, 189000),
+    noted('C6', '', 'GRA-XANH-Z450', 2, 174000), noted('C6', '', 'GRA-VANG-H350', 1, 174000),
+    noted('C7', '', 'GRA-XANH-Z450', 1, 174000)
   ] });
   const byOrder = [];
   rows.forEach(item => { if (item[0] !== '') byOrder.push([]); byOrder.at(-1).push(item); });
@@ -85,6 +87,8 @@ test('NOTE nhắc sản phẩm khác → đổi sản phẩm theo note; 10 gói 
     ['GRA-VANG-H350x2@149000'],
     ['GRA-XANH-Z450x1@149000', 'GRA-CAM-G30x10@17900', 'QUATx1@0'],
     ['GRA-CAM-G30x20@17900'],
-    ['GRA-CAM-G30x10@18900']
+    ['GRA-CAM-G30x10@18900'],
+    ['GRA-XANH-Z450x2@149000', 'GRA-VANG-H350x1@149000', 'BGDx1@0', 'MUONGx1@0'],
+    ['GRA-XANH-Z450x1@174000']
   ]);
 });

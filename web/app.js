@@ -13016,6 +13016,24 @@ function compactOrderSheetToTable(sourceHeaders, records, importedAt = new Date(
   return { headers: [...chatbotOrderHeaders], rows, orders };
 }
 
+/**
+ * Bảng đã lưu từ lần Import tệp ID/SKU bằng bản cũ (14/10, trước 1fe8646): cột tệp thay cột chuẩn
+ * (đơn landing/chatbot mất mã đơn, đơn Import không có Ngày nên không ra Xuất dữ liệu). Đổi các dòng
+ * Import sang cột chuẩn (Ngày = lúc Import ghi ở lịch sử nhập) và bỏ dòng đơn hệ thống — chúng tự gộp
+ * lại từ máy chủ với cột chuẩn.
+ */
+function repairCompactOrderTable(data, history = orderImportHistory) {
+  if (!isCompactOrderSheet(data.headers)) return data;
+  const sourceIndex = data.headers.findIndex(header => normalizeColumnName(header) === normalizeColumnName(orderSourceHeader));
+  const importRows = data.rows.filter(row => sourceIndex < 0 || String(row[sourceIndex] || '').trim() === 'Import');
+  const entry = (Array.isArray(history) ? history : []).find(item => isCompactOrderSheet(item?.headers || []));
+  const importedAt = new Date(entry?.importedAt || '');
+  const repaired = compactOrderSheetToTable(data.headers, importRows, Number.isNaN(importedAt.getTime()) ? new Date() : importedAt);
+  const result = { headers: repaired.headers, rows: repaired.rows };
+  try { localStorage.setItem('crm-orders', JSON.stringify(result)); } catch {}
+  return result;
+}
+
 function applyImportedRecords(sourceHeaders, records) {
   sourceHeaders = sourceHeaders.map((header, index) => String(header).trim() || `Cột ${index + 1}`);
   if (isCompactOrderSheet(sourceHeaders)) {
@@ -14897,7 +14915,7 @@ window.setInterval(updateConversationTimeLabels, 30000);
 // Tab ẩn thì bộ đếm bỏ qua: quay lại tab là cập nhật ngay, không chờ tới nhịp 30 giây sau.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) updateConversationTimeLabels(); });
 // Bảng đọc từ trình duyệt lúc tải (xem savedOrderData): giờ các hằng cột đã có, thêm cột còn thiếu.
-orderData = ensureOrderStaffNoteColumn(moveZaloRowsOutOfOrderTable(orderData));
+orderData = ensureOrderStaffNoteColumn(repairCompactOrderTable(moveZaloRowsOutOfOrderTable(orderData)));
 // Drawn even with no rows so each order panel shows its empty state.
 renderOrderData();
 if (initialView === 'orders') showOrderStage(getRecommendedOrderStage());

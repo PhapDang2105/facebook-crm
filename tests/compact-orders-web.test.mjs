@@ -26,13 +26,18 @@ const block = (from, to) => {
 };
 const plain = value => JSON.parse(JSON.stringify(value));
 
-const context = vm.createContext({ carrierLabelFor: phone => (String(phone).startsWith('09') ? 'Viettel' : '') });
+const storage = new Map();
+const context = vm.createContext({
+  carrierLabelFor: phone => (String(phone).startsWith('09') ? 'Viettel' : ''),
+  orderImportHistory: [],
+  localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }
+});
 vm.runInContext([
   block('const orderSourceHeader = ', '\n/** Nhà mạng theo đầu số'),
   fn('normalizeColumnName'),
   block('const compactOrderColumns = ', '\nfunction isCompactOrderSheet('),
-  fn('isCompactOrderSheet'), fn('compactOrderPhone'), fn('compactOrderSheetToTable'),
-  'this.api = { chatbotOrderHeaders, isCompactOrderSheet, compactOrderPhone, compactOrderSheetToTable };'
+  fn('isCompactOrderSheet'), fn('compactOrderPhone'), fn('compactOrderSheetToTable'), fn('repairCompactOrderTable'),
+  'this.api = { chatbotOrderHeaders, isCompactOrderSheet, compactOrderPhone, compactOrderSheetToTable, repairCompactOrderTable };'
 ].join('\n'), context);
 const { api } = context;
 
@@ -100,4 +105,30 @@ test('file kho dựng từ bảng đã đổi như đơn thường: một đơn 
   // Đơn 2: bát gáo dừa có sẵn trong tệp, không thêm dòng thứ hai.
   const second = rows.slice(rows.indexOf(orderStarts[1]), rows.indexOf(orderStarts[2]));
   assert.equal(second.filter(row => row[19] === 'BGD').length, 1);
+});
+
+test('bảng đã lưu từ lần Import bằng bản cũ (cột ID/SKU, đơn hệ thống mất mã) được sửa lúc tải trang', () => {
+  // Như bảng trên trình duyệt chủ shop 14/10: cột tệp + Nguồn đơn/Ngày/Nhà mạng/Ghi chú xử lý, đơn landing gộp vào không mã.
+  const broken = {
+    headers: ['Nguồn đơn', 'Ngày', 'ID', 'NOTE', 'Khách hàng', 'Số điện thoại', 'Nhà mạng', 'Địa chỉ', 'Phường/Xã', 'Quận/Huyện', 'Tỉnh', 'Sản phẩm', 'SKU', 'Số lượng', 'Đơn giá', 'Ghi chú xử lý'],
+    rows: [
+      ['Import', '', '57489', 'GTC 2', 'Khách Hai', '934000002', '', '38 Lê Hồng Phong', 'Phường Đông Hải 1', 'Quận Hải An', 'Hải Phòng', 'Combo 2 Xanh', 'CB2-XANH-Z450', '1', '298000', ''],
+      ['Import', '', '', '', '', '', '', '', '', '', '', 'Quà Tặng LIVE', 'QUA-TANG-LIVE', '1', '0', ''],
+      ['Landing page', '14/10 15:03', '', '', 'Khách landing', '0965000000', 'Viettel', '12 Lê Lợi', '', '', '', 'Túi Xanh', '', '1', '149000', '']
+    ]
+  };
+  const history = [{ importedAt: '2026-10-14T08:20:00.000Z', headers: broken.headers }];
+  const fixed = plain(api.repairCompactOrderTable(broken, history));
+  assert.deepEqual(fixed.headers, plain(api.chatbotOrderHeaders));
+  const at = name => fixed.headers.indexOf(name);
+  assert.equal(fixed.rows.length, 2);
+  assert.deepEqual(fixed.rows.map(row => [row[at('Nguồn đơn')], row[at('Mã đơn hàng')], row[at('Khách hàng')], row[at('Số điện thoại')], row[at('Mã mẫu mã')], row[at('Ghi chú xử lý')]]), [
+    ['Import', '57489', 'Khách Hai', '0934000002', 'CB2-XANH-Z450', 'GTC 2'],
+    ['Import', '57489', 'Khách Hai', '0934000002', 'QUA-TANG-LIVE', '']
+  ]);
+  assert.match(fixed.rows[0][at('Ngày')], /^14\/10\/2026 \d\d:20$/);
+  assert.deepEqual(JSON.parse(storage.get('crm-orders')), fixed);
+  // Bảng chuẩn thì giữ nguyên.
+  const normal = { headers: [...api.chatbotOrderHeaders], rows: [] };
+  assert.equal(api.repairCompactOrderTable(normal, history), normal);
 });

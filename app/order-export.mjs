@@ -615,8 +615,8 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
     items.forEach((item, itemIndex) => {
       const output = Array(EXPORT_COLUMNS.length).fill('');
       if (isFirstOrderLine && itemIndex === 0) {
-        // Đơn Zalo (cột "Nguồn đơn" = Zalo, trang Đơn Zalo) ghi nguồn "zalo" (chữ thường, kho yêu cầu 14/10); còn lại như cũ là Facebook.
-        output[0] = orderNumber; output[2] = isZaloSource(value(row, 'Nguồn đơn')) ? 'zalo' : 'Facebook'; output[4] = 'Có'; output[6] = 'Có';
+        // Đơn Zalo (cột "Nguồn đơn" = Zalo, trang Đơn Zalo) ghi nguồn "zalo" (chữ thường, kho yêu cầu 14/10); còn lại "facebook" (cũng chữ thường, chủ shop 14/10).
+        output[0] = orderNumber; output[2] = isZaloSource(value(row, 'Nguồn đơn')) ? 'zalo' : 'facebook'; output[4] = 'Có'; output[6] = 'Có';
         output[8] = 'Thanh toán COD'; output[30] = phone;
         output[33] = value(row, 'Khách hàng'); output[34] = phone; output[35] = value(row, 'Địa chỉ');
         // Tên tỉnh/quận/phường đúng danh mục kho (đã đọc và kiểm tra ở trên).

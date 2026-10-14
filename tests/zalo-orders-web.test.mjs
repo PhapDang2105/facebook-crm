@@ -209,7 +209,7 @@ test('quà Zalo: SKU nhân viên nhập kèm MỌI đơn, đơn giá 0, thay qu�
   const normalGifts = buildExportRows({ headers, rows: normal }).filter(line => !(Number(line[22]) > 0)).map(line => line[19]);
   const zaloComboGifts = byOrder[1].slice(1).map(line => line.split('x')[0]);
   assert.notDeepEqual(normalGifts, zaloComboGifts);
-  assert.equal(buildExportRows({ headers, rows: normal })[0][2], 'Facebook');
+  assert.equal(buildExportRows({ headers, rows: normal })[0][2], 'facebook');
 });
 
 test('file kho (buildExportRows của máy chủ) từ đơn Zalo: giá khách trả giữ nguyên, CB2 → 2 túi, ba cấp địa chỉ hợp lệ', () => {
@@ -227,7 +227,7 @@ test('file kho (buildExportRows của máy chủ) từ đơn Zalo: giá khách t
   assert.deepEqual(output.filter(line => line[0]).map(line => line[2]), ['zalo', 'zalo', 'zalo', 'zalo', 'zalo']);
   // Đơn thường (nguồn Chatbot/Landing…) trong cùng file vẫn Facebook.
   const mixed = buildExportRows({ headers, rows: [...rows, ['Chatbot', ...rows[0].slice(1, 2), 'CB-x1', ...rows[0].slice(3)]] });
-  assert.deepEqual(mixed.filter(line => line[0]).map(line => line[2]), ['zalo', 'zalo', 'zalo', 'zalo', 'zalo', 'Facebook']);
+  assert.deepEqual(mixed.filter(line => line[0]).map(line => line[2]), ['zalo', 'zalo', 'zalo', 'zalo', 'zalo', 'facebook']);
 });
 
 test('Import Zalo lưu kho riêng crm-zalo-orders rồi mở Xuất dữ liệu; không đụng bảng đơn crm-orders', () => {

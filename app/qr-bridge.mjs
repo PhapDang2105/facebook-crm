@@ -139,6 +139,23 @@ export function messengerDestination({ pageId, code, pageName = '', prefillText 
   return `https://m.me/${encodeURIComponent(pageId)}?ref=${encodeURIComponent(code)}${text ? `&text=${encodeURIComponent(text)}` : ''}`;
 }
 
+/**
+ * iPhone (14/10, chủ shop chốt): nút Messenger mở thẳng app bằng `fb-messenger-public://user-thread/<page>?…&ref=<mã>` —
+ * đúng liên kết nút "Mở bằng Messenger" trên trang m.me của Facebook, vẫn mang `ref` (Botcake/CRM nhận ra khách quét thẻ).
+ * Lý do: Universal Link m.me hay bị iOS "nhớ" mở bằng Safari → khách dừng ở trang facebook.com "Tải ứng dụng Messenger".
+ * Đổi lại Safari hỏi "Mở trong Messenger?" (khách bấm Mở); máy chưa cài Messenger thì Safari báo lỗi — khách bấm nút
+ * Messenger là đã có app (chủ shop), còn đường Zalo/Heartline bên dưới. Link có tin soạn sẵn (`text=`) thì giữ m.me:
+ * scheme này không có tài liệu cho `text`. Không phải m.me?ref → rỗng.
+ */
+export function messengerAppLink(destination) {
+  let url;
+  try { url = new URL(String(destination || '')); } catch { return ''; }
+  const pageId = url.pathname.replace(/^\/+|\/+$/g, '');
+  const ref = url.searchParams.get('ref') || '';
+  if (url.hostname !== 'm.me' || !/^\d+$/.test(pageId) || !ref || url.searchParams.has('text')) return '';
+  return `fb-messenger-public://user-thread/${pageId}?intent_trigger=mme&ref=${encodeURIComponent(ref)}&source_id=1441792&nav=discover`;
+}
+
 // R13 fix2 (A2): không máy nào được 302 thẳng sang m.me — mọi máy qua trang đệm (hàm shouldRedirectDirectly luôn false đã bỏ, INT-24).
 const inAppHints = {
   zalo: 'Anh/Chị đang mở trong Zalo. Nếu nút trên không mở được Messenger, bấm biểu tượng ⋯ ở góc trên, chọn <b>Mở bằng trình duyệt</b>, rồi bấm lại nút.',
@@ -240,7 +257,9 @@ function leadFormHtml(safeCode) {
 
 export function renderBridgePage({ code, destination, pageName, fallbackUrl = '', zaloUrl = '', classification = {}, pageUrl = '', iosVersion = 0, leadForm = false }) {
   const name = escapeHtml(pageName || 'Giọt Nắng');
-  const href = escapeHtml(destination);
+  // iPhone: nút Messenger mở thẳng app (xem messengerAppLink); máy khác giữ m.me?ref.
+  const appLink = classification.platform === 'ios' ? messengerAppLink(destination) : '';
+  const href = escapeHtml(appLink || destination);
   const safeCode = escapeHtml(code);
   // iPhone trong app khác (trừ chính Messenger): khối hướng dẫn nổi bật ngay dưới nút, kèm nút "Mở bằng Safari"
   // (khi máy hỗ trợ) và "Sao chép liên kết". `pageUrl` là địa chỉ https của chính trang này (máy chủ đưa vào).
@@ -275,9 +294,12 @@ export function renderBridgePage({ code, destination, pageName, fallbackUrl = ''
   });
   arm(copy, 'copy');
   arm(document.getElementById('safari'), 'safari');` : '';
-  // iPhone trình duyệt thường: iOS có thể "nhớ" mở m.me bằng Safari (Universal Link bị tắt cho m.me) và dừng ở trang Facebook có nút "Mở bằng Messenger".
+  // iPhone trình duyệt thường: nút mở thẳng app nên Safari hỏi "Mở trong Messenger?"; còn m.me (link có tin soạn sẵn)
+  // thì iOS có thể "nhớ" mở bằng Safari và dừng ở trang Facebook có nút "Mở bằng Messenger".
   const iosTip = classification.platform === 'ios' && !classification.inApp
-    ? `<p class="ios-tip">Nếu máy mở trang Facebook, Anh/Chị bấm <b>“Mở bằng Messenger”</b> là vào ngay.</p>`
+    ? (appLink
+      ? `<p class="ios-tip">Nếu máy hỏi <b>“Mở trong Messenger?”</b>, Anh/Chị bấm <b>Mở</b> là vào ngay.</p>`
+      : `<p class="ios-tip">Nếu máy mở trang Facebook, Anh/Chị bấm <b>“Mở bằng Messenger”</b> là vào ngay.</p>`)
     : '';
   // Zalo là kênh ngang hàng với Messenger (khách không có Messenger, hoặc quét
   // bằng Zalo thì không phải rời app). Chưa đặt liên kết OA ở Cài đặt thì dùng

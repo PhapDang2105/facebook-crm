@@ -51,9 +51,13 @@ const render = (userAgent, extra = {}) => renderBridgePage({
   ...extra
 });
 
-test('trang đệm: nút Mở Messenger là thẻ <a> trỏ thẳng m.me?ref, không tài nguyên ngoài, không tự chuyển hướng', () => {
+test('trang đệm: nút Mở Messenger là thẻ <a> (iPhone mở thẳng app, máy khác m.me?ref), không tài nguyên ngoài, không tự chuyển hướng', () => {
   const html = render(agents.iosSafari);
-  assert.match(html, /<a class="btn" id="open" href="https:\/\/m\.me\/123456\?ref=tmdt-01"/);
+  assert.match(html, /<a class="btn" id="open" href="fb-messenger-public:\/\/user-thread\/123456\?intent_trigger=mme&amp;ref=tmdt-01&amp;source_id=1441792&amp;nav=discover"/);
+  assert.match(render(agents.androidChrome), /<a class="btn" id="open" href="https:\/\/m\.me\/123456\?ref=tmdt-01"/);
+  assert.match(render(agents.desktopChrome), /<a class="btn" id="open" href="https:\/\/m\.me\/123456\?ref=tmdt-01"/);
+  // Link có tin soạn sẵn: scheme không có tài liệu cho text= nên iPhone giữ m.me.
+  assert.match(render(agents.iosSafari, { destination: 'https://m.me/123456?ref=tmdt-01&text=hi' }), /id="open" href="https:\/\/m\.me\/123456\?ref=tmdt-01&amp;text=hi"/);
   assert.match(html, /Nông Sản Giọt Nắng/);
   assert.match(html, /href="https:\/\/www\.facebook\.com\/123456"/);
   assert.match(html, /href="tel:0899677899"/, 'đường lùi Heartline như thẻ bảo hành');
@@ -74,8 +78,8 @@ test('trang đệm: nút Mở Messenger là thẻ <a> trỏ thẳng m.me?ref, kh
 
 test('trang đệm: trong app thì có hướng dẫn đúng app', () => {
   assert.match(render(agents.zaloAndroid), /Anh\/Chị đang mở trong Zalo/);
-  // iPhone trình duyệt thường: nhắc bấm "Mở bằng Messenger" nếu iOS dừng ở trang Facebook; trong app và Android thì không.
-  assert.match(render(agents.iosSafari), /class="ios-tip"[^>]*>Nếu máy mở trang Facebook/);
+  // iPhone trình duyệt thường: nhắc bấm "Mở" khi Safari hỏi mở Messenger; trong app và Android thì không.
+  assert.match(render(agents.iosSafari), /class="ios-tip"[^>]*>Nếu máy hỏi <b>“Mở trong Messenger\?”<\/b>/);
   assert.match(render(agents.iosChrome), /class="ios-tip"/);
   assert.doesNotMatch(render(agents.zaloIos), /class="ios-tip"/);
   assert.doesNotMatch(render(agents.androidWebview), /class="ios-tip"/);
@@ -97,7 +101,7 @@ test('trang đệm: nút Zalo luôn có (liên kết OA đã đặt, không thì
   assert.match(without, /<a class="alt" id="zalo" href="https:\/\/zalo\.me\/0899677899"/);
   assert.match(without, /Không dùng Messenger\?/);
   // Thanh Messenger bám đáy: ẩn sẵn, chỉ hiện khi nút trong phiếu khuất; lượt bấm vẫn đếm là Messenger.
-  assert.match(without, /<div class="sticky" id="sticky" hidden>\s*<a class="btn sticky-btn" id="open-sticky" href="https:\/\/m\.me\//);
+  assert.match(without, /<div class="sticky" id="sticky" hidden>\s*<a class="btn sticky-btn" id="open-sticky" href="fb-messenger-public:\/\/user-thread\/123456\?/);
   assert.match(without, /arm\(document\.getElementById\('open-sticky'\), 'messenger'\)/);
   assert.match(without, /IntersectionObserver/);
   const withZalo = render(agents.zaloIos, { zaloUrl: 'https://zalo.me/g/abcdef' });

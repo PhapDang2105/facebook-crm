@@ -90,8 +90,8 @@ test('trang đệm: ô SĐT bắt buộc, chỉ một nút "Lưu ưu đãi qua M
   assert.match(on, /Bấm “Lưu ưu đãi” là Anh\/Chị đồng ý để Nhà Nắng gọi hoặc nhắn Zalo/);
   assert.doesNotMatch(on, /Giữ ưu đãi|lead-send|lead-or/, 'không còn nút xanh "Giữ ưu đãi" và chữ "hoặc"');
   assert.equal((on.match(/Lưu ưu đãi<small>qua Messenger/g) || []).length, 2, 'nút trong phiếu + thanh bám đáy');
-  assert.match(on, /id="open" href="https:\/\/m\.me\/1\?ref=tmdt-01"/);
-  assert.match(on, /id="open-sticky" href="https:\/\/m\.me\/1\?ref=tmdt-01"/);
+  assert.match(on, /id="open" href="fb-messenger-public:\/\/user-thread\/1\?intent_trigger=mme&amp;ref=tmdt-01&amp;source_id=1441792&amp;nav=discover"/);
+  assert.match(on, /id="open-sticky" href="fb-messenger-public:\/\/user-thread\/1\?intent_trigger=mme&amp;ref=tmdt-01/);
   // Lượt mở Messenger chỉ đếm khi đã có số (guard), không đếm ngay lúc chạm như trang cũ.
   assert.doesNotMatch(on, /arm\(open, 'messenger'\)/);
   assert.match(on, /guard\(open, 'messenger'\)/);
@@ -100,7 +100,7 @@ test('trang đệm: ô SĐT bắt buộc, chỉ một nút "Lưu ưu đãi qua M
 
   const off = renderBridgePage(base);
   assert.doesNotMatch(off, /id="lead"/);
-  assert.match(off, /id="open-sticky" href="https:\/\/m\.me/);
+  assert.match(off, /id="open-sticky" href="fb-messenger-public:/);
   assert.match(off, /arm\(document\.getElementById\('open-sticky'\), 'messenger'\)/);
   new Function(off.match(/<script>([\s\S]*)<\/script>/)[1]);
 });

@@ -42,8 +42,8 @@ test('iosMajorVersion: đọc phiên bản iOS từ User-Agent của iPhone/iPad
 
 test('iPhone trong Zalo (iOS 17+): hướng dẫn nằm ngay dưới nút Messenger, có "Mở bằng Safari" (x-safari-https) và "Sao chép liên kết"', () => {
   const html = render(agents.zaloIos18);
-  // Nút chính vẫn là thẻ <a> trỏ m.me?ref — nhánh nào mở được thì vẫn mang ref về CRM.
-  assert.match(html, /<a class="btn" id="open" href="https:\/\/m\.me\/103549382215599\?ref=tmdt-01"/);
+  // Nút chính là thẻ <a> mở thẳng app Messenger (iPhone, 14/10), vẫn mang ref về Botcake/CRM.
+  assert.match(html, /<a class="btn" id="open" href="fb-messenger-public:\/\/user-thread\/103549382215599\?intent_trigger=mme&amp;ref=tmdt-01&amp;source_id=1441792&amp;nav=discover"/);
   assert.match(html, /<div class="hint hint-ios">Anh\/Chị đang mở trong Zalo/);
   assert.match(html, /Mở bằng trình duyệt/);
   assert.match(html, /<a class="hint-btn" id="safari" href="x-safari-https:\/\/crm\.example\.com\/q\/tmdt-01\?from=inapp">Mở bằng Safari<\/a>/);

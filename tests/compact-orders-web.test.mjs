@@ -178,13 +178,13 @@ test('bảng SKU chuẩn kho: combo 10 gói tách 10 gói lẻ mã chuẩn; mã 
   const table = plain(api.compactOrderSheetToTable(headers, [
     ['57700', '', 'Khách Gói', '934000011', '8 đường số 8, Phường 11, Quận 6, Hồ Chí Minh', 'Phường 11', 'Quận 6', 'Hồ Chí Minh', 'Combo 10 gói Xanh', 'CB10-XANH-G35', '1', '204000'],
     ['57701', '', 'Khách Cam', '934000012', '37 Hồ Tùng Mậu, Phường Bình An, Thành phố Dĩ An, Bình Dương', 'Phường Bình An', 'Thành phố Dĩ An', 'Bình Dương', 'Combo 10 gói Cam', 'CB10-CAM-G30', '1', '189000'],
-    line('Mã lạ', 'ABC-XYZ', '1', '0')
+    line('Mã lạ', 'ABC-XYZ', '1', '10000')
   ], new Date(2026, 9, 14, 16, 0)));
   const rows = buildExportRows(table);
   assert.deepEqual(rows.map(row => [row[19], row[21], row[22], row[24]]), [
     ['GRA-XANH-G35', 10, 20400, 35],
-    ['GRA-CAM-G30', 10, 18900, 30],
-    ['ABC-XYZ', 1, 0, '']
+    ['GRA-CAM-G30', 10, 17900, 30], // 10 gói đi kèm sản phẩm khác (dòng dưới) → giá combo
+    ['ABC-XYZ', 1, 10000, '']
   ]);
   assert.deepEqual(plain(rows.skuCheck), { unknown: ['ABC-XYZ'], giftNotes: [] });
 });

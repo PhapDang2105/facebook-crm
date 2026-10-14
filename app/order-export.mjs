@@ -448,8 +448,10 @@ export function exportPreviewStreets(rows) {
  */
 export function buildExportRows(orderData = {}, { skipInvalidLocations = false, orderFacts = null } = {}) {
   const headers = Array.isArray(orderData.headers) ? orderData.headers : [];
-  const rows = Array.isArray(orderData.rows) ? orderData.rows : [];
+  const sourceRows = Array.isArray(orderData.rows) ? orderData.rows : [];
   const sourceIndex = new Map(headers.map((header, index) => [normalizeColumnName(header), index]));
+  // Đơn Import (tệp ID/SKU): đổi sản phẩm theo cột NOTE, giá combo khi 10 gói đi kèm sản phẩm khác (14/10).
+  const { rows, originOf } = applyImportOrderRules(headers, sourceRows);
   // Tên cột hỏi tới là hằng ('Địa chỉ', 'Số lượng'...): chuẩn hoá một lần mỗi tên,
   // không lặp lại NFD + regex cho từng ô của hàng trăm dòng.
   const columnByLabel = new Map();
@@ -461,9 +463,12 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
     }
     return index < 0 ? '' : row[index] || '';
   };
-  const rowIndexes = new Map(rows.map((row, index) => [row, index]));
+  const sourceRowIndex = new Map(sourceRows.map((row, index) => [row, index]));
+  const rowIndexes = new Map(rows.map(row => [row, sourceRowIndex.get(originOf.get(row) || row)]));
   const exportableRows = rows.filter(row => !isInvalidOrderAddress(value(row, 'Địa chỉ')));
   const outputRows = [];
+  // Mỗi dòng file: đơn nào, có phải dòng quà, quà là sản phẩm (yến mạch, gói nhỏ…) hay không, mấy "túi" (luật quà cuối hàm).
+  const outputMeta = new Map();
   const seenOrders = new Set();
   const skippedOrders = new Set();
   const invalidLocations = [];
@@ -634,13 +639,144 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
       // 13/10 (kho): cột Thuế phải là KIỂU SỐ — ghi 0.08, ô mẫu định dạng 0% nên Excel hiện "8%" (chữ "8%" kho không nhận).
       output[28] = 0.08;
       outputRows.push(output);
+      const gift = isGiftLine(item);
+      outputMeta.set(output, {
+        orderKey,
+        // Đơn Zalo: quà là đúng SKU nhân viên nhập, kèm MỌI đơn (chủ shop 14/10) — không theo luật số túi.
+        zalo: isZaloSource(value(row, 'Nguồn đơn')),
+        gift,
+        decorGift: gift && DECOR_GIFT_SKUS.has(String(item.sku || '').toUpperCase()),
+        units: gift || !(Number(item.price) > 0) ? 0 : (/-G\d+$/i.test(item.sku) ? (Number(item.quantity) || 0) / 10 : Number(item.quantity) || 0)
+      });
     });
   });
-  outputRows.locationCheck = { checked: seenOrders.size + (skipInvalidLocations ? skippedOrders.size : 0), invalid: invalidLocations };
+  const finalRows = applyGiftRules(outputRows, outputMeta);
+  finalRows.locationCheck = { checked: seenOrders.size + (skipInvalidLocations ? skippedOrders.size : 0), invalid: invalidLocations };
   // Mã SKU ngoài bảng chuẩn của kho (app/warehouse-skus.mjs): màn Xuất dữ liệu cảnh báo, không chặn xuất.
-  outputRows.skuCheck = { unknown: [...new Set(outputRows.map(row => String(row[19] || '').trim()).filter(sku => sku && !isStandardWarehouseSku(sku)))], giftNotes: giftNoteIssues };
-  outputRows.sourceRowIndexes = exportedSourceRowIndexes;
-  return outputRows;
+  finalRows.skuCheck = { unknown: [...new Set(finalRows.map(row => String(row[19] || '').trim()).filter(sku => sku && !isStandardWarehouseSku(sku)))], giftNotes: giftNoteIssues };
+  finalRows.sourceRowIndexes = exportedSourceRowIndexes;
+  return finalRows;
+}
+
+// Quà "trang trí" (không phải sản phẩm bán): bát, muỗng, quà Live. Combo 2 đã tặng sản phẩm thì bỏ các quà này.
+const DECOR_GIFT_SKUS = new Set(['BGD', 'MUONG', 'QUAT', LIVE_GIFT_POS_SKU]);
+
+/** Dòng quà của file kho: dòng quà dựng ra (gift), mã chỉ làm quà, hoặc dòng 0đ không phải hũ đi kèm yến mạch. */
+function isGiftLine(item) {
+  const sku = String(item?.sku || '').trim().toUpperCase();
+  if (!sku) return false;
+  return Boolean(item.gift) || isGiftOnlySku(sku) || (!(Number(item.price) > 0) && sku !== 'HU-300ML');
+}
+
+/**
+ * Luật quà theo số túi của đơn (chủ shop 14/10), sau khi mọi dòng đã dựng:
+ * - đơn dưới 2 túi (1 túi, 1 combo 10 gói) không có quà → bỏ mọi dòng quà;
+ * - đúng 2 túi mà đã tặng sản phẩm (yến mạch, gói nhỏ…) → bỏ bát / muỗng / quà Live; từ 3 túi giữ cả hai.
+ * "Túi" = túi lớn bán ra; 10 gói nhỏ tính là 1.
+ */
+function applyGiftRules(outputRows, outputMeta) {
+  const byOrder = new Map();
+  for (const row of outputRows) {
+    const meta = outputMeta.get(row);
+    if (!meta) continue;
+    const order = byOrder.get(meta.orderKey) || { units: 0, productGift: false };
+    order.units += meta.units;
+    if (meta.gift && !meta.decorGift) order.productGift = true;
+    byOrder.set(meta.orderKey, order);
+  }
+  return outputRows.filter(row => {
+    const meta = outputMeta.get(row);
+    if (!meta?.gift || meta.zalo) return true;
+    const order = byOrder.get(meta.orderKey);
+    if (order.units < 2) return false;
+    if (order.units < 3 && order.productGift && meta.decorGift) return false;
+    return true;
+  });
+}
+
+// Cột NOTE của tệp Import nhắc sản phẩm ("2 XANH") → đổi sản phẩm của đơn theo note (chủ shop 14/10).
+const NOTE_PRODUCT_RULES = [
+  { pattern: /\bxanh\b/, sku: 'GRA-XANH-Z450' },
+  { pattern: /\bvang\b/, sku: 'GRA-VANG-H350' },
+  { pattern: /\bnau\b/, sku: 'GRA-NAU-Z350' },
+  { pattern: /\b(mint|tropical|bac ha)\b/, sku: 'GRA-MINT-Z300' }
+];
+
+/** "2 XANH", "1 xanh 1 vàng", "đổi sang nâu" → [{ sku, quantity|null }]; không nhắc sản phẩm → []. */
+export function noteProductSwap(note) {
+  const text = normalizeText(note);
+  const found = [];
+  for (const rule of NOTE_PRODUCT_RULES) {
+    const match = text.match(new RegExp(`(?:\\b(\\d{1,2})\\s*(?:tui|goi|hop|combo|x)?\\s*)?${rule.pattern.source}`));
+    if (match) found.push({ sku: rule.sku, quantity: match[1] ? Number(match[1]) : null, at: match.index });
+  }
+  return found.sort((first, second) => first.at - second.at).map(({ sku, quantity }) => ({ sku, quantity }));
+}
+
+/**
+ * Đơn Import (cột "Nguồn đơn" = Import): (1) NOTE (cột Ghi chú xử lý) nhắc sản phẩm khác → thay các dòng sản phẩm
+ * của đơn bằng sản phẩm theo note, cùng tổng số túi khi note không ghi số, giá lẻ/combo theo số túi; (2) đơn có combo
+ * 10 gói (CB10-…) đi kèm sản phẩm khác → giá combo cho cả đơn (10 gói theo giá combo danh mục, túi lớn theo giá combo).
+ * Trả dòng mới và `originOf` (dòng mới → dòng gốc) để tệp khách hàng vẫn trỏ đúng dòng nguồn.
+ */
+function applyImportOrderRules(headers, rows) {
+  const index = new Map(headers.map((header, position) => [normalizeColumnName(header), position]));
+  const at = name => index.get(name) ?? -1;
+  const [source, id, symbol, quantity, price, note] = ['nguon don', 'ma don hang', 'ma mau ma', 'so luong', 'don gia', 'ghi chu xu ly'].map(at);
+  const originOf = new Map();
+  if (source < 0 || id < 0 || symbol < 0 || quantity < 0 || price < 0) return { rows, originOf };
+  const groups = new Map();
+  rows.forEach(row => {
+    if (String(row[source] || '').trim() !== 'Import' || !row[id]) return;
+    if (!groups.has(row[id])) groups.set(row[id], []);
+    groups.get(row[id]).push(row);
+  });
+  const replaced = new Map();
+  for (const [, orderRows] of groups) {
+    const productRows = orderRows.filter(row => !isGiftLine({ sku: row[symbol], price: row[price] }));
+    if (!productRows.length) continue;
+    const unitsOf = row => splitSkuForExport(row[symbol], row[quantity], row[price], false, '')
+      .filter(item => !isGiftLine(item))
+      .reduce((sum, item) => sum + (/-G\d+$/i.test(item.sku) ? (Number(item.quantity) || 0) / 10 : Number(item.quantity) || 0), 0);
+    const bagUnits = productRows.reduce((sum, row) => sum + unitsOf(row), 0);
+    // (1) Đổi sản phẩm theo NOTE.
+    const swap = note >= 0 ? noteProductSwap(orderRows[0][note]) : [];
+    if (swap.length) {
+      const total = swap.some(line => line.quantity) ? swap.reduce((sum, line) => sum + (line.quantity || 1), 0) : Math.max(1, Math.round(bagUnits));
+      const lines = swap.length === 1 && !swap[0].quantity ? [{ sku: swap[0].sku, quantity: total }] : swap.map(line => ({ sku: line.sku, quantity: line.quantity || 1 }));
+      const current = productRows.flatMap(row => splitSkuForExport(row[symbol], row[quantity], row[price], false, '').filter(item => !isGiftLine(item)).map(item => `${item.sku}x${item.quantity}`)).sort().join('|');
+      const wanted = lines.map(line => `${line.sku}x${line.quantity}`).sort().join('|');
+      if (current !== wanted) {
+        const fresh = lines.map(line => {
+          const row = [...productRows[0]];
+          row[symbol] = line.sku;
+          row[quantity] = String(line.quantity);
+          row[price] = String(getSkuPrice(line.sku, total >= 2, 0));
+          originOf.set(row, productRows[0]);
+          return row;
+        });
+        replaced.set(productRows[0], fresh);
+        productRows.slice(1).forEach(row => replaced.set(row, []));
+        continue;
+      }
+    }
+    // (2) Combo 10 gói đi kèm sản phẩm khác → giá combo.
+    const packRows = productRows.filter(row => /^CB10-/i.test(String(row[symbol] || '')));
+    if (packRows.length && productRows.length > packRows.length) {
+      for (const row of productRows) {
+        const code = String(row[symbol] || '').trim().toUpperCase();
+        const product = findProductBySku(code);
+        const comboPrice = /^CB10-/.test(code) ? Number(product?.comboPrice) || 0 : (SKU_PRICES[code]?.combo || 0);
+        if (!comboPrice || Number(row[price]) === comboPrice) continue;
+        const updated = [...row];
+        updated[price] = String(comboPrice);
+        originOf.set(updated, row);
+        replaced.set(row, [updated]);
+      }
+    }
+  }
+  if (!replaced.size) return { rows, originOf };
+  return { rows: rows.flatMap(row => (replaced.has(row) ? replaced.get(row) : [row])), originOf };
 }
 
 /** Dữ liệu nguồn chỉ còn những dòng đã vào file, để tệp khách hàng không ghi đơn bị bỏ. */

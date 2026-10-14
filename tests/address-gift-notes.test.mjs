@@ -26,7 +26,7 @@ test('đọc ghi chú quà ở ngoặc đầu địa chỉ', () => {
   assert.deepEqual(plain(addressGiftNotes('Lô 16a đường số 9 (giao giờ hành chánh)')), { lines: [], unknown: [], liveOnly: false });
 });
 
-test('file kho: "(Live)" chưa có quà → thêm QUAT; đã có quà giữ nguyên; ghi chú tặng thêm dòng 0đ; quà Live 50.000đ thành 0đ', () => {
+test('file kho: "(Live)" 1 túi không quà, combo 2 chưa có quà → thêm QUAT; đã có quà giữ nguyên; ghi chú tặng thêm dòng 0đ; quà Live 50.000đ thành 0đ', () => {
   const rows = buildExportRows({ headers, rows: [
     row('A1', '(Live)', 'GRA-XANH-Z450', 1, 189000),
     row('A2', '(Live)', 'CB2-XANH-Z450', 1, 298000), row('A2', '(Live)', 'QUA-TANG-LIVE', 1, 50000),
@@ -38,7 +38,7 @@ test('file kho: "(Live)" chưa có quà → thêm QUAT; đã có quà giữ nguy
   const byOrder = [];
   rows.forEach(item => { if (item[0] !== '') byOrder.push([]); byOrder.at(-1).push(item); });
   assert.deepEqual(byOrder.map(lines), [
-    ['GRA-XANH-Z450x1@189000', 'QUATx1@0'],
+    ['GRA-XANH-Z450x1@189000'],
     ['GRA-XANH-Z450x2@149000', 'QUATx1@0'],
     ['GRA-VANG-H350x2@149000', 'BGDx1@0', 'MUONGx1@0'],
     ['GRA-XANH-Z450x2@149000', 'HT-YM-T500x2@0'],
@@ -46,4 +46,41 @@ test('file kho: "(Live)" chưa có quà → thêm QUAT; đã có quà giữ nguy
     ['GRA-XANH-Z450x1@189000']
   ]);
   assert.deepEqual(plain(rows.skuCheck), { unknown: [], giftNotes: [] });
+});
+
+test('luật quà theo số túi: 1 túi bỏ quà (kể cả dòng quà tệp POS); combo 2 đã tặng sản phẩm bỏ bát/muỗng/quạt; combo 3 giữ cả hai', () => {
+  const rows = buildExportRows({ headers, rows: [
+    row('B1', '', 'GRA-XANH-Z450', 1, 189000), row('B1', '', 'BGD', 1, 0),
+    row('B2', '(Tặng yến mạch)', 'CB2-XANH-Z450', 1, 298000), row('B2', '(Tặng yến mạch)', 'QUA-TANG-LIVE', 1, 0), row('B2', '(Tặng yến mạch)', 'BGD', 1, 0),
+    row('B3', '(Tặng yến mạch)', 'CB3-XANH-Z450+BGD+M', 1, 447000),
+    row('B4', '(Live)', 'CB10-XANH-G35', 1, 204000)
+  ] });
+  const byOrder = [];
+  rows.forEach(item => { if (item[0] !== '') byOrder.push([]); byOrder.at(-1).push(item); });
+  assert.deepEqual(byOrder.map(lines), [
+    ['GRA-XANH-Z450x1@189000'],
+    ['GRA-XANH-Z450x2@149000', 'HT-YM-T500x1@0'],
+    ['GRA-XANH-Z450x3@149000', 'BGDx1@0', 'MUONGx1@0', 'HT-YM-T500x1@0'],
+    ['GRA-XANH-G35x10@20400']
+  ]);
+});
+
+test('NOTE nhắc sản phẩm khác → đổi sản phẩm theo note; 10 gói đi kèm sản phẩm khác → giá combo', async () => {
+  const { noteProductSwap } = await import('../app/order-export.mjs');
+  assert.deepEqual(plain(noteProductSwap('2 XANH')), [{ sku: 'GRA-XANH-Z450', quantity: 2 }]);
+  assert.deepEqual(plain(noteProductSwap('1 xanh 1 vàng')), [{ sku: 'GRA-XANH-Z450', quantity: 1 }, { sku: 'GRA-VANG-H350', quantity: 1 }]);
+  assert.deepEqual(plain(noteProductSwap('GTC 2, ok')), []);
+  const noted = (id, note, sku, quantity, price) => { const item = row(id, '', sku, quantity, price); return [...item, note]; };
+  const rows = buildExportRows({ headers: [...headers, 'Ghi chú xử lý'], rows: [
+    noted('C1', '2 XANH', 'CB2-VANGG', 1, 298000),
+    noted('C2', 'GTC 2', 'CB2-VANGG', 1, 298000),
+    noted('C3', '', 'GRA-XANH-Z450', 1, 149000), noted('C3', '', 'CB10-CAM-G30', 1, 189000), noted('C3', '', 'QUA-TANG-LIVE', 1, 0)
+  ] });
+  const byOrder = [];
+  rows.forEach(item => { if (item[0] !== '') byOrder.push([]); byOrder.at(-1).push(item); });
+  assert.deepEqual(byOrder.map(lines), [
+    ['GRA-XANH-Z450x2@149000'],
+    ['GRA-VANG-H350x2@149000'],
+    ['GRA-XANH-Z450x1@149000', 'GRA-CAM-G30x10@17900', 'QUATx1@0']
+  ]);
 });

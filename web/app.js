@@ -12586,12 +12586,50 @@ function keepZaloColumns(sourceHeaders, records) {
 // Nhân viên nhập "Mức giảm giá" (mặc định 21%). Mức giảm của đơn = Tổng khuyến mãi / tổng
 // Thành tiền của đơn: từ mức nhân viên nhập trở lên thì giữ giá Zalo (Tổng giá); thấp hơn thì
 // tính lại theo mức nhân viên nhập. Các trường khác xử lý như đơn thường (cột chuẩn, ba cấp
-// địa chỉ, SKU danh mục, quà theo giỏ) và đơn tự vào Xuất dữ liệu (nguồn "Zalo").
+// địa chỉ, SKU danh mục) và đơn tự vào Xuất dữ liệu (nguồn "Zalo"). Quà (14/10): mọi đơn Zalo kèm
+// đúng các SKU quà nhân viên nhập ở ô "Quà tặng (SKU)", đơn giá 0 — thay quà theo giỏ của đơn thường.
 const zaloDiscountKey = 'crm-zalo-discount';
 const zaloDefaultDiscount = 21;
 const zaloDiscountInput = document.querySelector('#zalo-discount');
 let zaloDiscount = readZaloDiscount();
 if (zaloDiscountInput) zaloDiscountInput.value = String(zaloDiscount);
+// Cột quà của dòng Zalo (cùng tên với ZALO_GIFT_COLUMN ở app/order-export.mjs, nơi dựng dòng quà giá 0).
+const zaloGiftColumn = 'Quà tặng (SKU)';
+const zaloGiftsKey = 'crm-zalo-gifts';
+const zaloGiftsInput = document.querySelector('#zalo-gifts');
+let zaloGifts = readZaloGifts();
+if (zaloGiftsInput) zaloGiftsInput.value = zaloGifts;
+// Cột của dòng Zalo gửi sang Xuất dữ liệu: cột chuẩn của đơn + cột quà.
+const zaloExportHeaders = [...chatbotOrderHeaders, zaloGiftColumn];
+
+function readZaloGifts() {
+  try { return String(localStorage.getItem(zaloGiftsKey) || '').trim(); } catch { return ''; }
+}
+
+/**
+ * "BGD, MUONG x2" → [{ sku: 'BGD', quantity: 1 }, { sku: 'MUONG', quantity: 2 }] (cùng luật parseGiftSkus
+ * ở app/order-export.mjs). Ngăn bằng , ; + hay xuống dòng; số lượng "x2", "×2", "*2". Phần sai ở `invalid`.
+ */
+function parseZaloGifts(value) {
+  const lines = [];
+  const invalid = [];
+  for (const part of String(value || '').split(/[,;+\n]+/).map(item => item.trim()).filter(Boolean)) {
+    const match = part.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[x×*]\s*(\d{1,3}))?$/i);
+    if (!match) { invalid.push(part); continue; }
+    const sku = match[1].toUpperCase();
+    const quantity = Math.max(1, Number(match[2]) || 1);
+    const existing = lines.find(line => line.sku === sku);
+    if (existing) existing.quantity += quantity;
+    else lines.push({ sku, quantity });
+  }
+  return Object.assign(lines, { invalid });
+}
+
+/** Quà mỗi đơn Zalo để hiện: "BGD ×1, MUONG ×2"; trống thì "Không có quà". */
+function zaloGiftsLabel(value = zaloGifts) {
+  const lines = parseZaloGifts(value);
+  return lines.length ? lines.map(line => `${line.sku} ×${line.quantity}`).join(', ') : 'Không có quà';
+}
 
 function readZaloDiscount() {
   try {
@@ -12699,9 +12737,10 @@ function zaloCatalogLine(sku, quantity, products = sharedProducts) {
  * kho y như đơn thường. Ô Đơn giá là giá khách trả một đơn vị: tiền đơn (theo mức giảm áp
  * dụng) chia theo tỷ lệ Thành tiền từng dòng; dòng đầu nhận phần làm tròn để Σ = tiền đơn.
  */
-function zaloExportRows(data = zaloOrders, discountPercent = zaloDiscount, products = sharedProducts) {
+function zaloExportRows(data = zaloOrders, discountPercent = zaloDiscount, products = sharedProducts, gifts = zaloGifts) {
   if (!data.rows.length) return [];
   const col = zaloColumnReader(data.headers);
+  const giftText = parseZaloGifts(gifts).map(line => `${line.sku} x${line.quantity}`).join(', ');
   const output = [];
   for (const group of zaloOrderGroups(data)) {
     const pricing = zaloOrderPricing(group, data.headers, discountPercent);
@@ -12722,7 +12761,7 @@ function zaloExportRows(data = zaloOrders, discountPercent = zaloDiscount, produ
       zaloSourceLabel, zaloOrderDate(col(first, 'ngay tao don hang')), group.id, col(first, 'ten khach hang'), phone, carrierLabelFor(phone),
       zaloFullAddress(col(first, 'dia chi'), ward, district, province), province, district, ward,
       line.name || line.sku, line.sku, String(line.quantity), String(prices[index]),
-      index ? '' : note, ''
+      index ? '' : note, '', giftText
     ]));
   }
   return output;
@@ -12756,7 +12795,7 @@ function exportOrderDataWithZalo() {
   const base = exportableOrderData();
   const day = selectedExportDate();
   const source = normalizeColumnName(selectedExportSource());
-  const zaloHeaders = chatbotOrderHeaders;
+  const zaloHeaders = zaloExportHeaders;
   const zaloRows = (!source || source === normalizeColumnName(zaloSourceLabel)) && day && dateKeyOf(day) === zaloExportDayKey()
     ? zaloExportRows()
     : [];
@@ -12820,7 +12859,7 @@ function renderZaloOrders() {
   if (zaloOrderSummary) {
     const imported = zaloOrders.importedAt ? new Date(zaloOrders.importedAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
     zaloOrderSummary.innerHTML = rows.length
-      ? `Đơn Zalo: <strong>${orders}</strong> · Dòng: <strong>${query ? `${shown.length}/` : ''}${rows.length}</strong> · Tiền thu: <strong>${collected.toLocaleString('vi-VN')}đ</strong>${zaloOrders.fileName ? ` · ${escapeHtml(zaloOrders.fileName)}${imported ? ` (${escapeHtml(imported)})` : ''}` : ''}`
+      ? `Đơn Zalo: <strong>${orders}</strong> · Dòng: <strong>${query ? `${shown.length}/` : ''}${rows.length}</strong> · Tiền thu: <strong>${collected.toLocaleString('vi-VN')}đ</strong> · Quà mỗi đơn: <strong>${escapeHtml(zaloGiftsLabel())}</strong>${zaloOrders.fileName ? ` · ${escapeHtml(zaloOrders.fileName)}${imported ? ` (${escapeHtml(imported)})` : ''}` : ''}`
       : '';
   }
   if (!rows.length) { renderEmptyState(zaloOrderPreview, 'Chưa có đơn Zalo. Bấm Import để nhập tệp "Danh sách đơn hàng" xuất từ Zalo.'); return; }
@@ -12885,6 +12924,31 @@ zaloDiscountInput?.addEventListener('change', () => {
   orderPanelsDirty.add('export');
   renderZaloOrders();
   showToast(`Đơn Zalo áp mức giảm ${zaloPercent(value / 100)} (đơn Zalo giảm cao hơn giữ giá Zalo).`, 'success');
+});
+// Ô Quà tặng (SKU): lưu, vẽ lại trang Zalo, Xuất dữ liệu dựng lại. SKU lạ (không có trong Sản phẩm / Quà tặng)
+// vẫn nhận (kho có thể có mã) nhưng báo để nhân viên soát chính tả.
+zaloGiftsInput?.addEventListener('change', async () => {
+  const value = String(zaloGiftsInput.value || '').trim();
+  const parsed = parseZaloGifts(value);
+  if (parsed.invalid.length) {
+    showToast(`Không đọc được: ${parsed.invalid.join(', ')}. Ghi SKU cách nhau dấu phẩy, số lượng dạng x2 (VD: BGD, MUONG x2).`, 'error');
+    zaloGiftsInput.value = zaloGifts;
+    return;
+  }
+  zaloGifts = parsed.map(line => (line.quantity > 1 ? `${line.sku} x${line.quantity}` : line.sku)).join(', ');
+  zaloGiftsInput.value = zaloGifts;
+  try { localStorage.setItem(zaloGiftsKey, zaloGifts); } catch {}
+  orderPanelsDirty.add('export');
+  renderZaloOrders();
+  let unknown = [];
+  try {
+    const result = await readApiResponse(await fetch('/api/gifts'));
+    const known = new Set([...(Array.isArray(result.items) ? result.items : []), ...(Array.isArray(sharedProducts) ? sharedProducts : [])].map(item => String(item?.sku || '').trim().toUpperCase()).filter(Boolean));
+    unknown = parsed.filter(line => !known.has(line.sku)).map(line => line.sku);
+  } catch {}
+  showToast(unknown.length
+    ? `Quà mỗi đơn Zalo: ${zaloGiftsLabel()}. Lưu ý: ${unknown.join(', ')} chưa có trong Sản phẩm / Quà tặng của CRM, soát lại mã.`
+    : `Quà mỗi đơn Zalo: ${zaloGiftsLabel()} (đơn giá 0đ).`, unknown.length ? 'warning' : 'success');
 });
 document.querySelector('#zalo-order-export')?.addEventListener('click', showZaloExport);
 document.querySelector('#zalo-order-clear')?.addEventListener('click', () => {

@@ -129,6 +129,28 @@ export function isZaloSource(value) {
   return normalizeColumnName(value) === 'zalo';
 }
 
+/** Cột quà của đơn Zalo: SKU quà nhân viên nhập ở trang Đơn Zalo, áp cho mọi đơn của tệp. */
+export const ZALO_GIFT_COLUMN = 'Quà tặng (SKU)';
+
+/**
+ * "BGD, MUONG x2" → [{ sku: 'BGD', quantity: 1 }, { sku: 'MUONG', quantity: 2 }]. Ngăn bằng dấu phẩy,
+ * chấm phẩy, dấu + hay xuống dòng; số lượng viết "x2", "×2" hoặc "*2". Phần không đọc được nằm ở `invalid`.
+ */
+export function parseGiftSkus(value) {
+  const lines = [];
+  const invalid = [];
+  for (const part of String(value || '').split(/[,;+\n]+/).map(item => item.trim()).filter(Boolean)) {
+    const match = part.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[x×*]\s*(\d{1,3}))?$/i);
+    if (!match) { invalid.push(part); continue; }
+    const sku = match[1].toUpperCase();
+    const quantity = Math.max(1, Number(match[2]) || 1);
+    const existing = lines.find(line => line.sku === sku);
+    if (existing) existing.quantity += quantity;
+    else lines.push({ sku, quantity });
+  }
+  return Object.assign(lines, { invalid });
+}
+
 export function isInvalidOrderAddress(value) {
   return String(value ?? '').trim().toUpperCase().startsWith('GXN');
 }
@@ -439,7 +461,12 @@ export function buildExportRows(orderData = {}, { skipInvalidLocations = false, 
       // đổi (bát/muỗng/quạt), thêm dòng gói nhỏ thay thế giá 0 — cùng kế hoạch với đơn đẩy POS (giftSwapPlan). Gói chưa
       // chọn vị (không SKU) không lên dòng (kho không nhận dòng không mã) — nhân viên đã có ghi chú xử lý trên đơn.
       // Đơn không đổi quà (swap = null) chạy y như cũ.
-      const override = !posGifts && facts?.giftOverride ? facts.giftOverride : null;
+      // Đơn Zalo (14/10): quà là đúng các SKU nhân viên nhập ở trang Đơn Zalo (cột "Quà tặng (SKU)"), giá 0,
+      // thay quà theo giỏ; ô trống thì đơn không kèm quà.
+      const zaloGifts = !posGifts && !facts?.giftOverride && isZaloSource(value(row, 'Nguồn đơn'))
+        ? { lines: parseGiftSkus(value(row, ZALO_GIFT_COLUMN)).map(line => ({ sku: line.sku, quantity: line.quantity, weight: 0 })) }
+        : null;
+      const override = !posGifts && facts?.giftOverride ? facts.giftOverride : zaloGifts;
       const swap = !posGifts && !override && facts?.giftSwap ? giftSwapPlan(facts.giftSwap) : null;
       const basketGifts = !posGifts && !override && basketKey ? giftsForKey(basketKey, { livestream }) : [];
       if (posGifts) posGifts.forEach(gift => addGift(gift.sku, gift.quantity, gift.weight));

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 // Danh mục thử nạp TRƯỚC mọi thứ dưới app/ (file kho đọc danh mục, quà).
 import './helpers/seed-catalog.mjs';
-import { buildExportRows } from '../app/order-export.mjs';
+import { buildExportRows, parseGiftSkus } from '../app/order-export.mjs';
 
 // Đơn Zalo (13/10): trang riêng Đơn hàng → Đơn Zalo, tách hẳn bảng đơn của Nhập/Xử lý dữ liệu.
 // Import tệp "Danh sách đơn hàng" của Zalo chỉ giữ 15 cột chủ shop chọn. Tiền: mức giảm của đơn
@@ -43,7 +43,7 @@ const products = [
   { sku: 'CB10-XANH-G35', name: 'Combo 10 gói Xanh' }
 ];
 
-function zaloContext(stored = null, { discount = 21, exportDay = null, exportSource = '' } = {}) {
+function zaloContext(stored = null, { discount = 21, exportDay = null, exportSource = '', gifts = '' } = {}) {
   const storage = new Map(stored ? [['crm-zalo-orders', JSON.stringify(stored)]] : []);
   const preview = { innerHTML: '', classList: { remove() {}, add() {} } };
   const summary = { innerHTML: '' };
@@ -67,16 +67,17 @@ function zaloContext(stored = null, { discount = 21, exportDay = null, exportSou
   vm.createContext(context);
   vm.runInContext([
     "const orderSourceHeader = 'Nguồn đơn'; const orderDateHeader = 'Ngày'; const orderCarrierHeader = 'Nhà mạng'; const orderStaffNoteHeader = 'Ghi chú xử lý';",
-    constant('zaloOrdersKey'), constant('zaloKeptColumns'), constant('zaloSourceLabel'), constant('chatbotOrderHeaders'),
+    constant('zaloOrdersKey'), constant('zaloKeptColumns'), constant('zaloSourceLabel'), constant('chatbotOrderHeaders'), constant('zaloGiftColumn'), constant('zaloExportHeaders'),
     "const zaloOrderSearch = { value: '' }; const zaloOrderSummary = document.querySelector('#zalo-order-summary'); const zaloOrderPreview = document.querySelector('#zalo-order-preview');",
     "const orderExportSource = null; const orderExportDay = null;",
     ...['normalizeColumnName', 'readZaloOrders', 'saveZaloOrders', 'missingZaloColumns', 'isZaloOrderSheet', 'keepZaloColumns', 'applyZaloImport', 'showZaloExport', 'renderZaloOrders', 'moveZaloRowsOutOfOrderTable',
-      'zaloMoney', 'zaloColumnReader', 'zaloOrderGroups', 'zaloOrderPricing', 'zaloPercent', 'zaloOrderDate', 'zaloFullAddress', 'zaloCatalogLine', 'zaloExportRows', 'zaloExportDayKey', 'zaloOrderDateKeys', 'exportOrderDataWithZalo', 'parseOrderRowDate'].map(fn),
+      'zaloMoney', 'zaloColumnReader', 'zaloOrderGroups', 'zaloOrderPricing', 'zaloPercent', 'zaloOrderDate', 'zaloFullAddress', 'zaloCatalogLine', 'zaloExportRows', 'zaloExportDayKey', 'zaloOrderDateKeys', 'exportOrderDataWithZalo', 'parseOrderRowDate', 'parseZaloGifts', 'zaloGiftsLabel'].map(fn),
     "const todayDateKey = () => '2026-10-13';",
     "const dateKeyOf = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;",
     'let zaloOrders = readZaloOrders();',
     `let zaloDiscount = ${discount};`,
-    'globalThis.api = { isZaloOrderSheet, keepZaloColumns, applyZaloImport, renderZaloOrders, moveZaloRowsOutOfOrderTable, zaloOrderGroups, zaloOrderPricing, zaloExportRows, zaloOrderDateKeys, exportOrderDataWithZalo, search: zaloOrderSearch, get zaloOrders() { return zaloOrders; } };'
+    `let zaloGifts = ${JSON.stringify(gifts)};`,
+    'globalThis.api = { isZaloOrderSheet, keepZaloColumns, applyZaloImport, renderZaloOrders, moveZaloRowsOutOfOrderTable, zaloOrderGroups, zaloOrderPricing, zaloExportRows, zaloOrderDateKeys, exportOrderDataWithZalo, parseZaloGifts, search: zaloOrderSearch, get zaloOrders() { return zaloOrders; } };'
   ].join('\n'), context);
   return context;
 }
@@ -122,7 +123,7 @@ test('đơn Zalo thành dòng cột chuẩn: nguồn Zalo, CB2 = 2 túi danh m�
   assert.equal(rows.length, 6);
   assert.deepEqual(rows[1], ['Zalo', '13/10/2026 13:58', '#Z2', 'Khách Hai', '0901000002', 'Viettel',
     '48 Nguyễn Bỉnh Khiêm, Phường Xương Huân, Thành phố Nha Trang, Tỉnh Khánh Hòa', 'Tỉnh Khánh Hòa', 'Thành phố Nha Trang', 'Phường Xương Huân',
-    'Granola Túi Xanh 450g', 'GRA-XANH-Z450', '2', '137460', 'Zalo giảm 15% → áp 21% · Khách ghi: Giao giờ hành chính', '']);
+    'Granola Túi Xanh 450g', 'GRA-XANH-Z450', '2', '137460', 'Zalo giảm 15% → áp 21% · Khách ghi: Giao giờ hành chính', '', '']);
   assert.match(rows[0][14], /^Zalo giảm 21%: giữ giá Zalo$/);
   // Mã chưa có trong danh mục giữ nguyên.
   assert.deepEqual(rows[2].slice(10, 14), ['CHIA-Z500', 'CHIA-Z500', '1', '86110']);
@@ -160,6 +161,38 @@ test('Xuất dữ liệu: cả tệp Zalo (mọi ngày tạo đơn) xuất ở n
   assert.equal(zaloOnly.rows.length, 6);
   assert.deepEqual(plain(zaloContext(stored).api.zaloOrderDateKeys()), ['2026-10-13']);
   assert.deepEqual(plain(zaloContext().api.zaloOrderDateKeys()), []);
+});
+
+test('quà Zalo: SKU nhân viên nhập kèm MỌI đơn, đơn giá 0, thay quà theo combo; ô trống thì không quà; đơn thường giữ quà theo giỏ', () => {
+  // Đọc ô quà: dấu phẩy / chấm phẩy / +, số lượng x2 ×2 *2, SKU viết thường, gộp trùng; phần sai báo riêng.
+  const parsed = parseGiftSkus('bgd, MUONG x2; BGD *1 + QUA-TANG-LIVE ×3, ??');
+  assert.deepEqual(plain(parsed), [{ sku: 'BGD', quantity: 2 }, { sku: 'MUONG', quantity: 2 }, { sku: 'QUA-TANG-LIVE', quantity: 3 }]);
+  assert.deepEqual(parsed.invalid, ['??']);
+  assert.deepEqual(plain(zaloContext().api.parseZaloGifts('bgd, MUONG x2; BGD *1')), [{ sku: 'BGD', quantity: 2 }, { sku: 'MUONG', quantity: 2 }]);
+
+  const headers = [...['Nguồn đơn', 'Ngày', 'Mã đơn hàng', 'Khách hàng', 'Số điện thoại', 'Nhà mạng', 'Địa chỉ', 'Tỉnh/Thành phố', 'Quận/Huyện', 'Phường/Xã', 'Sản phẩm', 'Mã mẫu mã', 'Số lượng', 'Đơn giá', 'Ghi chú', 'Ghi chú xử lý'], 'Quà tặng (SKU)'];
+  const withGifts = plain(zaloContext(keptData(), { gifts: 'BGD, MUONG x2' }).api.zaloExportRows());
+  assert.ok(withGifts.every(row => row[16] === 'BGD x1, MUONG x2'));
+  const output = buildExportRows({ headers, rows: withGifts });
+  // Mỗi đơn: dòng sản phẩm như cũ rồi đúng 2 dòng quà giá 0 (không quà theo combo 2 túi Xanh của bảng quà).
+  const byOrder = [];
+  output.forEach(line => { if (line[0]) byOrder.push([]); byOrder.at(-1).push(`${line[19]}x${line[21]}@${line[22]}`); });
+  assert.deepEqual(byOrder, [
+    ['GRA-VANG-H350x1@137460', 'BGDx1@0', 'MUONGx2@0'],
+    ['GRA-XANH-Z450x2@137460', 'BGDx1@0', 'MUONGx2@0'],
+    ['CHIA-Z500x1@86110', 'BGDx1@0', 'MUONGx2@0'],
+    ['GRA-XANH-Z450x2@137460', 'BGDx1@0', 'MUONGx2@0'],
+    ['MIX5-H420x1@202300', 'GRA-XANH-Z450x1@121800', 'BGDx1@0', 'MUONGx2@0']
+  ]);
+  // Ô quà trống: đơn Zalo không kèm quà nào (kể cả combo 2 túi Xanh).
+  const noGifts = buildExportRows({ headers, rows: plain(zaloContext(keptData()).api.zaloExportRows()) });
+  assert.equal(noGifts.filter(line => !(Number(line[22]) > 0)).length, 0);
+  // Đơn thường cùng giỏ 2 túi Xanh (nguồn Chatbot): quà theo bảng quà như cũ, không lấy quà Zalo.
+  const normal = withGifts.filter(row => row[2] === '#Z2').map(row => ['Chatbot', ...row.slice(1, 2), 'CB-n1', ...row.slice(3, 16), '']);
+  const normalGifts = buildExportRows({ headers, rows: normal }).filter(line => !(Number(line[22]) > 0)).map(line => line[19]);
+  const zaloComboGifts = byOrder[1].slice(1).map(line => line.split('x')[0]);
+  assert.notDeepEqual(normalGifts, zaloComboGifts);
+  assert.equal(buildExportRows({ headers, rows: normal })[0][2], 'Facebook');
 });
 
 test('file kho (buildExportRows của máy chủ) từ đơn Zalo: giá khách trả giữ nguyên, CB2 → 2 túi, ba cấp địa chỉ hợp lệ', () => {
@@ -207,7 +240,7 @@ test('trang Đơn Zalo: 15 cột + mức giảm áp dụng, tiền thu; tìm ki�
   assert.match(context.preview.innerHTML, /--preview-template: repeat\(17, max-content\)/);
   assert.match(context.preview.innerHTML, /21% \(Zalo 15%\)<\/td><td class="zalo-computed">274\.920đ/);
   assert.match(context.preview.innerHTML, /30% \(giá Zalo\)<\/td><td class="zalo-computed">324\.100đ/);
-  assert.match(context.summary.innerHTML, /Đơn Zalo: <strong>5<\/strong> · Dòng: <strong>6<\/strong> · Tiền thu: <strong>1\.097\.510đ<\/strong> · f\.xlsx/);
+  assert.match(context.summary.innerHTML, /Đơn Zalo: <strong>5<\/strong> · Dòng: <strong>6<\/strong> · Tiền thu: <strong>1\.097\.510đ<\/strong> · Quà mỗi đơn: <strong>Không có quà<\/strong> · f\.xlsx/);
   context.api.search.value = 'khach nam';
   context.api.renderZaloOrders();
   assert.equal((context.preview.innerHTML.match(/<tr>/g) || []).length, 3);
